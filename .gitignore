@@ -1,0 +1,13 @@
+node_modules/
+dist/
+release/
+.studio/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+validation/local/
+worker/*.egg-info/
+.env
+.env.*
+!.env.example

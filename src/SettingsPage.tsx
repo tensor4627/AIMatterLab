@@ -1,0 +1,26 @@
+import {useState} from 'react';
+import {PanelsTopLeft,Palette,Languages,Brain,Server,BookOpen,Save} from 'lucide-react';
+import {invoke,type Settings} from './types';
+import {t,setLanguage} from './i18n';
+const categories=[['appearance','外观',Palette],['layout','工作区布局',PanelsTopLeft],['language','语言',Languages],['agent','Agent',Brain],['connections','计算连接',Server],['skills','技能目录',BookOpen]] as const;
+export default function SettingsPage({settings,onChange,onClose,onError}:{settings:Settings;onChange:(s:Settings)=>void;onClose:()=>void;onError:(e:unknown)=>void}){
+ const [category,setCategory]=useState('appearance'),[saving,setSaving]=useState(false),[saved,setSaved]=useState('');
+ function patch(changes:Partial<Settings>){if(changes.language)setLanguage(changes.language);onChange({...settings,...changes});setSaved('');}
+ async function save(){setSaving(true);try{onChange(await invoke('settings',settings));setSaved(t('设置已保存'));}catch(e){onError(e);}finally{setSaving(false);}}
+ return <div className="settings-layout"><nav className="settings-nav">{categories.map(([id,label,Icon])=><button key={id} className={category===id?'active':''} onClick={()=>setCategory(id)}><Icon size={17}/>{t(label)}</button>)}</nav><div className="settings-content">
+  <div className="settings-heading"><h2>{t(categories.find(c=>c[0]===category)?.[1]||'设置')}</h2><p>{t('按工作习惯配置你的工作台。')}</p></div>
+  {category==='appearance'&&<>
+   <label>{t('主题')}<select value={settings.theme} onChange={e=>patch({theme:e.target.value})}><option value="dark">{t('深色石墨')}</option><option value="light">{t('浅色')}</option></select></label>
+   <label>{t('界面字体')}<select value={settings.fontFamily||'system'} onChange={e=>patch({fontFamily:e.target.value})}><option value="system">{t('系统默认')}</option><option value="sans">Segoe UI / Microsoft YaHei</option><option value="serif">Georgia / SimSun</option></select></label>
+   <label>{t('界面字号')}<input type="number" min={11} max={20} value={settings.fontSize??13} onChange={e=>patch({fontSize:Number(e.target.value)})}/><small>11–20 px</small></label>
+   <div className="form-row"><label>{t('代码字号')}<input type="number" min={10} max={28} value={settings.editorFontSize??13} onChange={e=>patch({editorFontSize:Number(e.target.value)})}/></label><label>{t('终端字号')}<input type="number" min={10} max={24} value={settings.terminalFontSize??12} onChange={e=>patch({terminalFontSize:Number(e.target.value)})}/></label></div>
+   <div className="font-preview">{t('字体预览')} · GPU Sampling Studio<br/>α · CV · Å · 300 K</div><p className="muted">{t('外观修改立即预览，保存后下次启动继续使用。')}</p>
+  </>}
+  {category==='layout'&&<><label>{t('Agent 与任务面板')}<select data-testid="agent-layout" value={settings.agentLayout||'right'} onChange={e=>patch({agentLayout:e.target.value as 'right'|'center'})}><option value="right">{t('任务在中间 · Agent 在右侧')}</option><option value="center">{t('Agent 在中间大窗 · 任务在右侧')}</option></select></label><div className={'layout-preview '+(settings.agentLayout==='center'?'center':'')}><span>{t('工具')}</span><span>{t(settings.agentLayout==='center'?'Agent 对话':'任务选项卡')}</span><span>{t(settings.agentLayout==='center'?'任务选项卡':'Agent 对话')}</span></div><p>{t('布局切换保留当前对话和任务选项卡，保存后下次启动继续使用。')}</p></>}
+  {category==='language'&&<><label>{t('界面语言')}<select value={settings.language||'zh-CN'} onChange={e=>patch({language:e.target.value as Settings['language']})}><option value="zh-CN">简体中文</option><option value="en">English</option></select></label><p className="muted">{t('界面语言立即切换。用户内容、科学文件与引擎日志保留原文。')}</p></>}
+  {category==='agent'&&<><p>{t('模型和 reasoning effort 在右侧对话面板选择。上下文预算与压缩阈值在那里应用，保留当前会话。')}</p><label>{t('Codex 可执行路径')}<input value={settings.codexPath} onChange={e=>patch({codexPath:e.target.value})}/></label><label>{t('Kimi 可执行路径')}<input value={settings.kimiPath||'kimi'} onChange={e=>patch({kimiPath:e.target.value})}/></label><label>{t('Qwen 可执行路径')}<input value={settings.qwenPath||'qwen'} onChange={e=>patch({qwenPath:e.target.value})}/></label><p className="muted">{t('Kimi 和 Qwen 使用本应用私有配置与官方 ACP 协议。登录在右侧服务商面板完成。')}</p><label>Codex cwd<input value={settings.cwd} onChange={e=>patch({cwd:e.target.value})}/></label><div className="notice">{t('任务由 Agent 填写，你审阅后点击执行。此执行规则不可由 Agent 更改。')}</div></>}
+  {category==='connections'&&<><label>WSL distribution<input value={settings.distribution} onChange={e=>patch({distribution:e.target.value})}/></label><label>{t('作业服务目录')}<input value={settings.workerRoot} onChange={e=>patch({workerRoot:e.target.value})}/></label><label>{t('作业服务端口')}<input type="number" min={1024} max={65535} value={settings.workerPort} onChange={e=>patch({workerPort:Number(e.target.value)})}/></label><p className="muted">{t('保存后重新连接 WSL 以应用连接设置。引擎路径在计算环境中单独登记，SSH 使用已有 Host alias。')}</p></>}
+  {category==='skills'&&<><label>{t('额外技能根目录 · 每行一个')}<textarea rows={8} value={settings.skillRoots.join('\n')} onChange={e=>patch({skillRoots:e.target.value.split('\n').filter(Boolean)})}/></label><p className="muted">{t('从原位置读取 SKILL.md，保留来源。保存后刷新技能库。')}</p></>}
+  <div className="settings-footer"><span>{saved}</span><button className="button" onClick={onClose}>{t('关闭')}</button><button className="button primary" disabled={saving} onClick={()=>void save()}><Save size={15}/>{saving?t('保存中…'):t('保存设置')}</button></div>
+ </div></div>;
+}

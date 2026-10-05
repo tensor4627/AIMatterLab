@@ -1,0 +1,79 @@
+# GPU Sampling Studio
+
+面向 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 的中文 Agent 科学计算桌面工作台。Electron + React + TypeScript 自定义前端，Codex app server 与 Kimi / Qwen 官方 ACP CLI 负责 Agent，独立 Python/WSL 服务负责 GPU 作业。
+
+## 启动
+
+Windows 安装包位于 `release/GPU Sampling Studio 0.3.0.exe`。首次启动：
+
+1. 点击「连接 WSL」。设置中选择已安装的发行版，默认 Ubuntu。
+2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
+3. 新建项目，设置输入根目录、环境 ID、GPU、并发和时间上限。这些授权仅由桌面用户修改。
+4. Agent 顶部选择 Codex / Kimi / Qwen，点击「登录 / 账户」；登录后连接并检查模型目录，再描述目标。Qwen 使用百炼或 Coding Plan 密钥。
+5. Agent 创建草稿后会自动打开对应模块审阅页。检查参数和输入文件，点击「确认并执行」后才验证与提交。日志、结果文件、曲线和轨迹在任务记录中打开。
+
+作业输入复制到 WSL Linux 文件系统。桌面退出只停止聊天与交互终端，已提交的作业继续运行。作业服务源代码部署到持久化 Linux runtime，便携包退出不会删除运行依赖。系统/WSL 停止后只能按引擎 checkpoint 能力续算；未知进程不会自动重提。
+
+开发运行（Node 22.19+，pnpm 11）：
+
+```powershell
+pnpm install
+pnpm dev
+pnpm build
+pnpm start
+pnpm run pack
+```
+
+此机器的 bundled pnpm 位于：
+`C:/Users/Lenovo/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/fallback/pnpm.cmd`。
+
+## 已实现
+
+- 石墨/紫色工作区，深浅主题，多工作区标签，布局记忆，可调整 Agent/底部面板，命令搜索。
+- 本地 Monaco 编辑器，xterm WSL PTY/OpenSSH 终端，ECharts 原始列图，Three.js 分帧结构预览。
+- Codex stdio JSONL 桥接：初始化、账户、模型、流式消息、工具结果卡片、审批、补充问题、恢复、中断及技能发现。
+- WSL SQLite 持久化权威队列，单一调度进程锁，同 GPU 串行，项目并发/时限授权，幂等提交，取消、退出收据、日志续读。
+- GPUMD/PyDyn MD；pyGAS 四种距离 CV 模板（MetaD、WTMetaD、umbrella、固定墙）；两条采样路线。
+- 保存后 bias ABI 验证、实际邻居、CUDA 有限差分及可选 CV 参考值；动态 bias 可传验证历史。
+- NEP/HotPP 训练、测试、导出；NEP 回归统计和原有 `nep-regression-rmse` 绘图 skill。
+- WTMetaD / OPES 重加权工具接口；输出图片、表格与原始日志预览。
+- 输入哈希、版本与本地修改标记、执行命令、环境探测、checkpoint、可复现输入 ZIP。超过 32 MiB 的输入在 ZIP 中列明来源和哈希。
+- SSH 通过已有 OpenSSH 别名使用系统凭据；文件浏览与终端。远程作业托管属于后续阶段。
+
+## 科学约定
+
+`succeeded` 表示真实计算进程退出码为 0；科学验证结果另行记录，不能据此宣称收敛或模型准确。具体输入和续算方法见 [任务契约](docs/contracts.md)，实际证据见 [验收记录](docs/acceptance.md)。
+
+普通 PyDyn 与 sampling PyDyn 使用独立环境，应用不会切换、同步或修改上游源码分支。PyDyn 使用匹配原子编号语义的 HotPP `ase-*` 导出。
+
+默认 TorchScript `.pt`。AOTI `.pt2` 的显式构建请求当前阻止在未经验证的工具链上执行；现有 `.pt2` 的部署必须通过 pyGAS manifest/目标容量检查，失败保留原错误，绝不替换后端。AOTI 完整双产物构建和 OPES 动态 checkpoint 验收仍需匹配环境。
+
+本地 skill 从原目录读取，不复制到工作台。设置 `skillRoots` 可添加 `pygas/agents/skills` 等非标准目录；通过 Codex 标准 skill 输入引用原路径。
+
+## 验证与源码
+
+```powershell
+pnpm test
+pnpm test:worker
+pnpm protocol
+```
+
+真实科学验收脚本：`scripts/science-smoke.py`。它使用单独 WSL 环境和合成 EMT Cu 数据；不得把它的短训练或 FES 当作物理结果。验收环境安装清单与命令见 [验收记录](docs/acceptance.md)。
+
+协议固定为 Codex CLI **0.160.0**，生成类型在 `desktop/generated`。升级 CLI 时先重新生成类型并完成协议验收，再调整桥接版本。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
+
+## v0.2：对话设置与审阅工作流
+
+右侧对话面板可以选择模型和该模型实际支持的 reasoning effort。「上下文」支持 token 预算及自动压缩阈值，留空继承默认配置；应用设置会重连本应用的 app server 并恢复当前会话，不修改全局 Codex 配置或停止计算。实际有效窗口与用量来自服务器回报，预算不会扩大模型容量。
+
+Agent 的 prepare_run/resume_run 会打开 MD、Bias、增强采样或 NEP/HotPP 的独立任务标签。参数与文本输入可以修改；点击「确认并执行」生成新快照，重新验证后提交。MCP 无法验证或提交计算，后续依赖任务也必须审阅。
+
+「设置」按外观、语言、Agent、计算连接、技能目录分类。界面字体/字号、代码/终端字号即时预览；中文和 English 即时切换。保存后下次启动保留；用户内容与科学日志保留原文。
+
+本轮新增验收见 [v0.2 改进记录](docs/v0.2.md)。
+
+## v0.3：任务与工具生态
+
+首页按任务开始，左侧按七类工具浏览能力；任务计划支持核心 / 可选步骤和用户已有输入。设置 → 工作区布局可将 Agent 改为中间大窗、任务标签放右侧。
+
+关系图与任务分析见 [工具生态](docs/architecture-workflows.md)，功能及验证边界见 [v0.3](docs/v0.3.md)，每代记录见 [CHANGELOG](CHANGELOG.md)。本地 Git 从 v0.3 开始跟踪，不自动推送；运行目录、科学输入、原始证据与便携包不入库。

@@ -1,0 +1,7 @@
+allowBuilds:
+  electron: true
+  esbuild: true
+  electron-winstaller: false
+  '@moonshot-ai/kimi-code': false
+  '@qwen-code/audio-capture': false
+  node-pty: false

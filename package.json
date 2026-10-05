@@ -1,0 +1,78 @@
+{
+  "name": "gpu-sampling-studio",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.mjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "electron .",
+    "test": "node --test tests/*.test.mjs",
+    "test:worker": "node scripts/test-worker.mjs",
+    "protocol": "node scripts/protocol.mjs",
+    "pack": "pnpm run build && pnpm run stage:agents && electron-builder --win portable",
+    "stage:agents": "node scripts/stage-agents.mjs"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "4.7.0",
+    "@xterm/xterm": "5.5.0",
+    "@xterm/addon-fit": "0.10.0",
+    "echarts": "5.6.0",
+    "lucide-react": "0.468.0",
+    "monaco-editor": "0.52.2",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "three": "0.172.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.3",
+    "@types/react-dom": "19.0.2",
+    "@types/three": "0.172.0",
+    "@vitejs/plugin-react": "4.3.4",
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3",
+    "typescript": "5.7.3",
+    "vite": "6.4.1",
+    "@moonshot-ai/kimi-code": "2.1.1",
+    "@qwen-code/qwen-code": "0.24.7"
+  },
+  "build": {
+    "appId": "science.gpusampling.studio",
+    "productName": "GPU Sampling Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "desktop/**",
+      "worker/**",
+      "package.json",
+      "!node_modules/**/*",
+      "!worker/tests/**",
+      "!worker/**/__pycache__/**",
+      "shared/**"
+    ],
+    "asarUnpack": [
+      "worker/**"
+    ],
+    "win": {
+      "target": "portable"
+    },
+    "extraResources": [
+      {
+        "from": ".studio/agent-runtimes/node_modules",
+        "to": "agent-runtimes/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".studio/agent-runtimes/manifest.json",
+        "to": "agent-runtimes/manifest.json"
+      }
+    ]
+  },
+  "description": "Agent scientific workspace for PyDyn, GPUMD, pyGAS, NEP and HotPP",
+  "author": "GPU Sampling Studio"
+}
