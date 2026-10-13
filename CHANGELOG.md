@@ -4,6 +4,7 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
+| 0.4.0 | 全局小字下限与对话字号；修复当前 Codex 协议与登录回调；项目服务商绑定；中央流程参数；SSH/LSF/Slurm 设置、版本化 Skill、草稿审阅、文件与监控 | Node 22、worker 36、实际代理 Codex 工具调用、两条实际 SSH 只读路线、桌面与便携包 passed | 真实集群科学作业 not_run；新 Kimi/Qwen 账户验证 not_run；多节点、数组与远程重启待适配；详见 [v0.4](docs/v0.4.md) |
 | 0.3.0 | Codex / Kimi / Qwen 登录；官方 ACP CLI；七类任务与工具关系；可选计划和已有输入；Agent 居中布局；初始化 Git | Node 19、WSL worker 22、构建、CLI 本地服务集成、Electron 登录 / 布局 / 加密检查 passed | Kimi / Qwen 真实模型调用 not_run；本轮新科学验收 not_run；新工具适配器及 DFT 自动流转待接入 |
 | 0.2.0 | Codex effort / 上下文；模块审阅后执行；分类设置、字体字号、中英文 | 历史记录：Node 6、worker 22、真实 Codex 设置和草稿、便携包审阅执行 passed | 未新增科学验收，详见 [v0.2](docs/v0.2.md) |
 | 0.1.0 | Electron 工作台、Codex app server、独立 WSL 服务、四大模块与现有适配器 | 历史记录：Node 5、worker 20、Codex、桌面、23 项科学短任务 passed | 合成 EMT Cu 短任务只证明接口；远程调度等边界见 [验收](docs/acceptance.md) |

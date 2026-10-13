@@ -42,7 +42,7 @@ export default function RunReview({run,environments,onRefresh,onError,onReplace,
  if(!['draft','ready'].includes(run.status))return <RunDetail run={run} onRefresh={onRefresh} onError={onError} onOpenRun={id=>{void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError);}}/>;
  return <div className="task-review page" data-testid="task-review">
   <div className="page-heading"><div><span className="eyebrow">{t(taskModule(run.engine))} · {run.engine}</span><h1>{t('审阅计算参数')}</h1><p>{t('Agent 已准备任务草稿。检查输入后，点击执行才会开始验证与计算。')}</p></div><span className="tag">{t('待你审阅')}</span></div>
-  <section className="card"><h3>{t('任务与资源')}</h3>
+  <ol className="run-flow">{['输入与科学条件','审阅参数','实际环境验证','提交与监控'].map(v=><li key={v}>{t(v)}</li>)}</ol>\n  <section className="card"><h3>{t('任务与资源')}</h3>
    <div className="form-row"><label>{t('计算名称')}<input disabled={working} value={name} onChange={e=>setName(e.target.value)}/></label><label>{t('计算环境')}<select disabled={working} value={environment} onChange={e=>setEnvironment(e.target.value)}>{environments.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label></div>
    <div className="form-row"><label>GPU<input disabled={working} type="number" min={0} value={gpu} onChange={e=>setGpu(Number(e.target.value))}/></label><label>{t('时长上限 · s')}<input disabled={working} type="number" min={1} value={seconds} onChange={e=>setSeconds(Number(e.target.value))}/></label></div>
    <label>{t('科学参数 · JSON')}<textarea disabled={working} className="parameter-json" value={parameters} onChange={e=>setParameters(e.target.value)}/></label>

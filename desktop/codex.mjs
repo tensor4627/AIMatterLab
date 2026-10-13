@@ -2,7 +2,7 @@ import { spawn, execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
-export const PROTOCOL_VERSION = '0.160.0';
+export const PROTOCOL_VERSION = '0.162.0-alpha.17.2';
 const exec = promisify(execFile);
 
 export class CodexBridge extends EventEmitter {
@@ -19,7 +19,7 @@ export class CodexBridge extends EventEmitter {
     if (worker) {
       args.push('-c', 'mcp_servers.gpusampling.url=' + JSON.stringify(worker.url + '/mcp'),
         '-c', 'mcp_servers.gpusampling.bearer_token_env_var="GSS_MCP_TOKEN"');
-      for(const tool of ['prepare_run','resume_run','write_project_input','generate_bias','create_workflow'])
+      for(const tool of ['present_task','draft_cluster_setup','prepare_cluster_run','prepare_run','resume_run','write_project_input','generate_bias','create_workflow'])
         args.push('-c','mcp_servers.gpusampling.tools.'+tool+'.approval_mode="approve"');
       env.GSS_MCP_TOKEN = worker.tokens.mcp;
     }
@@ -44,7 +44,7 @@ export class CodexBridge extends EventEmitter {
     });
     try {
       this.info = await this.request('initialize', {
-        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.3.0' }
+        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.4.0' }
       });
       this.send({ method: 'initialized', params: {} });
       return this.info;

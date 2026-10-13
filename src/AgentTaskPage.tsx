@@ -1,0 +1,16 @@
+import {useEffect,useState} from 'react';
+import {GitBranch,Sparkles,ArrowUpRight,ShieldCheck} from 'lucide-react';
+import {invoke,api,type Environment,type Run} from './types';
+import RunReview from './RunReview';
+import {t} from './i18n';
+export default function AgentTaskPage({worker,task,environments,theme,onError,onRun,onCluster,onSetup,onAgent,onReplace,onRefresh}:{worker:boolean;task:any;environments:Environment[];theme:string;onError:(e:unknown)=>void;onRun:(id:string)=>void;onCluster:(id:string)=>void;onSetup:(id:string)=>void;onAgent:(text:string)=>void;onReplace:(run:Run)=>void;onRefresh:()=>void}){
+ const [run,setRun]=useState<Run|null>(null),[parameters,setParameters]=useState('{}');
+ useEffect(()=>{setParameters(JSON.stringify(task.parameters||Object.fromEntries(task.artifacts?.filter((a:any)=>a.engine).map((a:any)=>[a.engine,a.parameters])||[]),null,2));setRun(null);let active=true;const selected=task.artifacts?.filter((a:any)=>a.kind==='run').at(-1);if(worker&&selected)void api<Run>('POST','/api/run/status',{run_id:selected.id}).then(value=>{if(active)setRun(value);}).catch(error=>{if(active)onError(error);});return()=>{active=false;};},[task.id,task.updatedAt,worker]);
+ return <div className="page agent-task-page" data-testid="agent-task-page"><div className="page-heading"><div><span className="eyebrow">AGENT TASK · {task.provider}</span><h1>{task.name}</h1><p>{t('计算流程和运行参数集中展示；草稿阶段不会运行计算。')}</p></div><GitBranch size={24}/></div>
+ <section className="card"><h3>{t('计算流程')}</h3>{task.plan?.length?<ol className="task-plan">{task.plan.map((s:any,i:number)=><li key={i}><span>{i+1}</span><div><strong>{s.step}</strong><small>{t('Agent 计划状态')} · {s.assistantStatus}</small></div></li>)}</ol>:<div className="notice">{t('等待 Agent 填写流程；缺少信息时请先补充项目、环境和科学条件。')}</div>}<p>{task.explanation}</p></section>
+ <section className="card"><h3>{t('运行参数')}</h3><textarea rows={10} className="parameter-json" value={parameters} onChange={e=>setParameters(e.target.value)}/>{task.missingFields?.length>0&&<div className="notice">{t('待补充')} · {task.missingFields.join(' · ')}</div>}<button className="button" onClick={()=>onAgent('请更新中央任务页 '+task.id+'。调用 present_task 保存完整计算流程和以下用户审阅参数，继续准备真实模块草稿。不要执行计算。\n'+parameters)}><Sparkles size={15}/>{t('把审阅参数交给 Agent')}</button></section>
+ {task.artifacts?.length>0&&<section className="card"><h3>{t('模块草稿')}</h3>{task.artifacts.map((a:any)=><button className="tool-card" key={a.id} onClick={()=>a.kind==='cluster-run'?onCluster(a.id):a.kind==='cluster-setup'?onSetup(a.id):a.kind==='run'?onRun(a.id):onAgent('继续检查 workflow '+a.id)}>{a.name||a.engine||a.kind}<ArrowUpRight size={15}/></button>)}</section>}
+ <div className="notice"><ShieldCheck size={16}/>{t('计划状态不代表作业运行状态；执行必须使用下面真实模块草稿的审阅按钮。')}</div>
+ {run&&<RunReview run={run} environments={environments} theme={theme} onError={onError} onRefresh={onRefresh} onReplace={onReplace}/>}
+ </div>;
+}

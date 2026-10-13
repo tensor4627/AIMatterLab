@@ -14,6 +14,15 @@ from .templates import build_bias
 from .util import leaf, atomic_json, digest, contained
 
 TOOL_ROUTES = {
+ "present_task":("POST","/api/tasks/present",{"task_id":"string","name":"string","steps":"array","parameters":"object","missing_fields":"array"}),
+ "read_cluster_skill":("POST","/api/cluster/skill",{"project_id":"string","cluster_id":"string"}),
+ "cluster_browse":("POST","/api/cluster/browse",{"project_id":"string","cluster_id":"string","relative":"string"}),
+ "list_clusters":("GET","/api/clusters",{}),
+ "probe_cluster":("POST","/api/cluster/probe",{"cluster_id":"string"}),
+ "draft_cluster_setup":("POST","/api/cluster/draft",{"project_id":"string","cluster_id":"string","proposal":"object"}),
+ "prepare_cluster_run":("POST","/api/cluster/prepare",{"spec":"object"}),
+ "cluster_run_status":("POST","/api/cluster/status",{"run_id":"string"}),
+ "cluster_read_log":("POST","/api/cluster/log",{"run_id":"string"}),
  "list_workflows":("GET","/api/workflows",{}), "create_workflow":("POST","/api/workflows",{"project_id":"string","name":"string","steps":"array"}),
  "list_projects": ("GET", "/api/projects", {}), "list_environments": ("GET", "/api/environments", {}),
  "list_runs": ("GET", "/api/runs", {}), "probe_environment": ("POST", "/api/probe", {"environment_id": "string"}),
@@ -32,6 +41,9 @@ TOOL_ROUTES = {
  "read_artifact": ("POST", "/api/run/file", {"run_id": "string", "name": "string"})
 }
 DESCRIPTIONS = {
+ "present_task":"Fill the central Studio task page using the task_id supplied in context. Record actual proposed steps, scientific parameters and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
+ "prepare_cluster_run":"Prepare a local immutable SSH/LSF/Slurm run draft and its batch script. No upload or submission. Stop for desktop review.",
+ "draft_cluster_setup":"Propose queue, modules, engine paths and submission skill changes for user review. Cannot change SSH details or authorization.",
  "prepare_run": "Create an immutable run from explicit assets and scientific parameters. Returns a draft for desktop user review. Stop and wait for the user to click Execute; never validate or submit it. Never infer scientific choices.",
  "validate_run": "Validate the copied inputs and serialized bias in the registered target environment.",
  "submit_run": "Submit a validated run within the project's existing resource authorization. Idempotent; never resubmit unknown runs.",
@@ -50,6 +62,11 @@ def tools():
         if name == "prepare_run":
             schema["properties"]["spec"] = {"type":"object", "required":["project_id","environment_id","engine","gpu","max_seconds","inputs","idempotency_key"],
                 "properties":{"project_id":{"type":"string"},"environment_id":{"type":"string"},"engine":{"type":"string","enum":list(ENGINES)},"gpu":{"type":"integer","minimum":0},"max_seconds":{"type":"integer","minimum":1},"inputs":{"type":"object","additionalProperties":{"type":"string"}},"idempotency_key":{"type":"string"},"parameters":{"type":"object"},"name":{"type":"string"}}}
+        if name=="prepare_cluster_run":
+            schema["properties"]["spec"]={"type":"object","required":["project_id","cluster_id","engine","max_seconds","inputs","resources","idempotency_key"],
+                "properties":{"project_id":{"type":"string"},"cluster_id":{"type":"string"},"engine":{"type":"string","enum":list(ENGINES)},"max_seconds":{"type":"integer","minimum":1},
+                "inputs":{"type":"object","additionalProperties":{"type":"string"}},"parameters":{"type":"object"},"name":{"type":"string"},"idempotency_key":{"type":"string"},
+                "resources":{"type":"object","required":["queue","cpus","gpus","memory_mb"],"properties":{"queue":{"type":"string"},"cpus":{"type":"integer","minimum":1},"gpus":{"type":"integer","minimum":0},"memory_mb":{"type":"integer","minimum":1},"account":{"type":"string"}}}}}
         for key in ("offset", "frame"):
             schema["properties"][key] = {"type": "integer", "minimum": 0}
         result.append({"name": name, "description": DESCRIPTIONS.get(name, name.replace("_", " ")),
@@ -64,7 +81,7 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.2.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.4.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/projects":
             return store.list("project")
         if path == "/api/environments":
@@ -78,6 +95,15 @@ def dispatch(service, method, path, data, admin=False):
             if result.returncode:
                 raise ValueError(result.stderr)
             return [{"id":int(v[0]),"name":v[1],"memory_used":int(v[2]),"memory_total":int(v[3]),"utilization":int(v[4])} for v in [line.split(", ") for line in result.stdout.strip().splitlines()]]
+        if path == "/api/task-parameters":
+            return store.list("task-parameters")
+        if path == "/api/clusters":
+            from .cluster import public
+            return [public(p) for p in store.list("cluster")]
+        if path == "/api/cluster-runs":
+            return [service.clusters.run(r["id"]) for r in store.list("cluster-run")]
+        if path == "/api/cluster-drafts":
+            return store.list("cluster-draft")
         if path == "/api/runs":
             return store.runs()
         if path == "/api/events":
@@ -90,6 +116,37 @@ def dispatch(service, method, path, data, admin=False):
         return service.register_project(data) if path.endswith("projects") else service.register_environment(data)
     if method != "POST":
         raise ValueError("Unknown route")
+    if path=="/api/tasks/present":
+        leaf(data["task_id"])
+        if not isinstance(data.get("parameters"),dict) or not isinstance(data.get("steps"),list) or not isinstance(data.get("missing_fields"),list):
+            raise ValueError("Structured parameters and workflow steps required")
+        return store.put("task-parameters",{"id":data["task_id"],"kind":"task-parameters","name":data["name"],"parameters":data["parameters"],"steps":data["steps"],"missing_fields":data["missing_fields"],"status":"draft"})
+    if path=="/api/clusters":
+        if not admin:raise PermissionError("Only the desktop user can register cluster connections")
+        return service.clusters.register(data)
+    if path=="/api/cluster/profile":
+        if not admin:raise PermissionError("Connection details are private")
+        return store.get("cluster",data["cluster_id"])
+    if path=="/api/cluster/probe":
+        return service.clusters.probe(data["cluster_id"])
+    if path=="/api/cluster/draft":
+        return service.clusters.draft(data)
+    if path=="/api/cluster/prepare":
+        return service.clusters.prepare(data["spec"])
+    if path=="/api/cluster/skill":
+        return service.clusters.skill(data["project_id"],data["cluster_id"])
+    if path=="/api/cluster/browse":
+        return service.clusters.browse(data["project_id"],data["cluster_id"],data.get("relative",""),data.get("root_index",0),data.get("offset",0))
+    if path=="/api/cluster/revise":
+        if not admin:raise PermissionError("Desktop revision required")
+        return service.clusters.revise(data["run_id"],data["changes"])
+    if path in ("/api/cluster/validate","/api/cluster/submit","/api/cluster/cancel"):
+        if not admin:raise PermissionError("Desktop cluster review required")
+        return getattr(service.clusters,path.rsplit("/",1)[-1])(data["run_id"])
+    if path=="/api/cluster/status":
+        return service.clusters.poll(data["run_id"])
+    if path=="/api/cluster/log":
+        return service.clusters.read(data["run_id"],data.get("name","console.log"),data.get("offset",0))
     if path == "/api/workflows":
         store.get("project",data["project_id"])
         if not isinstance(data.get("steps"),list) or not data.get("name"):
@@ -223,7 +280,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.2.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.4.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "ping":
                         value = {}

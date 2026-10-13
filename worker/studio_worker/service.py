@@ -31,6 +31,8 @@ class Service:
                 self.authority_lock.close()
                 self.store.db.close()
                 raise
+        from .cluster import Clusters
+        self.clusters = Clusters(self)
         self.stop_event = threading.Event()
         self.processes = {}
         self.provenance = {}
@@ -40,6 +42,8 @@ class Service:
         if schedule:
             self.scheduler = threading.Thread(target=self.loop, daemon=True)
             self.scheduler.start()
+            self.cluster_monitor=threading.Thread(target=self.cluster_loop,daemon=True)
+            self.cluster_monitor.start()
 
     def register_project(self, value):
         value = dict(value)
@@ -306,7 +310,7 @@ class Service:
                     project, _ = self.authorize(run)
                     if any(r["gpu"] == run["gpu"] for r in busy):
                         continue
-                    if sum(r["project_id"] == run["project_id"] for r in busy) >= project["policy"]["max_concurrent"]:
+                    if sum(r["project_id"] == run["project_id"] for r in busy)+sum(r["project_id"]==run["project_id"] and r["status"] in ("queued","running","unknown") for r in self.store.list("cluster-run")) >= project["policy"]["max_concurrent"]:
                         continue
                     self.verify_snapshot(run)
                     directory = Path(run["directory"])
@@ -323,6 +327,13 @@ class Service:
                     busy.append(run)
                 except Exception as exc:
                     self.store.update(run, status="failed", error=str(exc))
+
+    def cluster_loop(self):
+        while not self.stop_event.wait(15):
+            try:
+                self.clusters.tick()
+            except Exception:
+                self.store.event(None,{"kind":"cluster","error":"Remote monitor unavailable; state remains unknown"})
 
     def loop(self):
         while not self.stop_event.wait(0.3):

@@ -4,7 +4,7 @@
 
 ## 启动
 
-Windows 安装包位于 `release/GPU Sampling Studio 0.3.0.exe`。首次启动：
+Windows 安装包位于 `release/GPU Sampling Studio 0.4.0.exe`。首次启动：
 
 1. 点击「连接 WSL」。设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
@@ -60,7 +60,7 @@ pnpm protocol
 
 真实科学验收脚本：`scripts/science-smoke.py`。它使用单独 WSL 环境和合成 EMT Cu 数据；不得把它的短训练或 FES 当作物理结果。验收环境安装清单与命令见 [验收记录](docs/acceptance.md)。
 
-协议固定为 Codex CLI **0.160.0**，生成类型在 `desktop/generated`。升级 CLI 时先重新生成类型并完成协议验收，再调整桥接版本。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
+协议固定为 Codex CLI **0.162.0-alpha.17.2**，生成类型在 `desktop/generated`。升级 CLI 时先重新生成类型并完成协议验收，再调整桥接版本。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
 
 ## v0.2：对话设置与审阅工作流
 
@@ -77,3 +77,4 @@ Agent 的 prepare_run/resume_run 会打开 MD、Bias、增强采样或 NEP/HotPP
 首页按任务开始，左侧按七类工具浏览能力；任务计划支持核心 / 可选步骤和用户已有输入。设置 → 工作区布局可将 Agent 改为中间大窗、任务标签放右侧。
 
 关系图与任务分析见 [工具生态](docs/architecture-workflows.md)，功能及验证边界见 [v0.3](docs/v0.3.md)，每代记录见 [CHANGELOG](CHANGELOG.md)。本地 Git 从 v0.3 开始跟踪，不自动推送；运行目录、科学输入、原始证据与便携包不入库。
+\n## v0.4：可读界面与 SSH 集群\n\n外观设置现在可以调整所有小字下限和 Agent 对话字号。登录窗口支持真实账户状态与自动完成刷新；每个对话请求会打开中央计算流程和参数页。\n\nSSH 集群页可以导入已有连接，选择 LSF / Slurm，协作探测环境、审阅版本化 SKILL.md、准备和预览批脚本、查看队列与日志以及回收文件。集群无需部署 Agent CLI；正式作业仍需点击审阅提交。实际科学短任务验收尚未执行。\n\n见 [v0.4 功能与验证](docs/v0.4.md) 和 [SSH 可行性与管理链路](docs/ssh-cluster-management.md)。连接信息保持私有，不进入仓库或报告。\n

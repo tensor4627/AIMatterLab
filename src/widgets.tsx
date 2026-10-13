@@ -20,6 +20,8 @@ export function CodeEditor({value,onChange,language='python',theme='dark',height
   onChange={v=>onChange(v??'')} options={{fontSize,fontFamily:'Cascadia Code, Consolas, monospace',minimap:{enabled:false},padding:{top:16},scrollBeyondLastLine:false,automaticLayout:true,tabSize:4}}/>;
 }
 export function Chart({text,name}:{text:string;name:string}){
+ const [font,setFont]=useState(13);
+ useEffect(()=>{const update=()=>setFont(Math.max(12,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12)*(parseFloat(document.documentElement.style.getPropertyValue('--ui-scale'))||1));update();window.addEventListener('studio:appearance',update);return()=>window.removeEventListener('studio:appearance',update);},[]);
  const ref=useRef<HTMLDivElement>(null);
  useEffect(()=>{
   if(!ref.current)return;
@@ -27,14 +29,14 @@ export function Chart({text,name}:{text:string;name:string}){
   const rows=lines.map(x=>x.trim().split(/[,\s]+/).map(Number)).filter(r=>r.length>1&&r.every(Number.isFinite));
   const chart=echarts.init(ref.current);
   chart.setOption({backgroundColor:'transparent',color:['#a79aff','#5ccebe','#ecbe77','#7eafff'],
-   textStyle:{color:'#aaaab9'},tooltip:{trigger:'axis'},legend:{top:8,textStyle:{color:'#aaaab9'},type:'scroll'},
+   textStyle:{color:'#aaaab9',fontSize:font},tooltip:{trigger:'axis'},legend:{top:8,textStyle:{color:'#aaaab9',fontSize:font},type:'scroll'},
    grid:{left:60,right:24,top:54,bottom:55},dataZoom:[{type:'inside'},{type:'slider',height:15,bottom:10}],
-   xAxis:{type:'value',name:'column 0',splitLine:{lineStyle:{color:'#ffffff08'}}},
-   yAxis:{type:'value',scale:true,splitLine:{lineStyle:{color:'#ffffff08'}}},
+   xAxis:{axisLabel:{fontSize:font},nameTextStyle:{fontSize:font},type:'value',name:'column 0',splitLine:{lineStyle:{color:'#ffffff08'}}},
+   yAxis:{axisLabel:{fontSize:font},type:'value',scale:true,splitLine:{lineStyle:{color:'#ffffff08'}}},
    series:rows[0]?.slice(1,7).map((_,i)=>({name:'column '+(i+1),type:'line',showSymbol:false,data:rows.map(r=>[r[0],r[i+1]])}))||[]});
   const observer=new ResizeObserver(()=>chart.resize());observer.observe(ref.current);
   return()=>{observer.disconnect();chart.dispose();};
- },[text,name]);
+ },[text,name,font]);
  return <div className="chart-wrap"><div className="chart-note">{name}{tr("· 原始列预览，单位以引擎输出定义为准")}</div><div ref={ref} className="chart"/></div>;
 }
 const elementColors:Record<string,number>={H:0xe2e2ed,C:0x8b8caa,N:0x7f9efa,O:0xea7b91,Li:0xb296f6,Si:0xd8b58c,P:0xe2af70,S:0xe8d276,Cl:0x79c8a2,Ga:0xaa9edc};

@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -12,7 +12,8 @@
     "test:worker": "node scripts/test-worker.mjs",
     "protocol": "node scripts/protocol.mjs",
     "pack": "pnpm run build && pnpm run stage:agents && electron-builder --win portable",
-    "stage:agents": "node scripts/stage-agents.mjs"
+    "stage:agents": "node scripts/stage-agents.mjs",
+    "test:task": "node scripts/task-integration-smoke.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "4.7.0",

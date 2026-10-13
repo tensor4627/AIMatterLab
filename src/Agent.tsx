@@ -5,18 +5,21 @@ import {t} from './i18n';
 import ProviderLogin from './ProviderLogin';
 import {invoke,type RpcEvent,type AgentProvider} from './types';
 type Message={id:string;role:string;text:string;runId?:string;diff?:string};
-export default function Agent({context,onError,skill,width,onOpenRun,intent}:{intent?:{id:string;text:string};onOpenRun?:(id:string)=>void;width?:number;context:string;onError:(e:unknown)=>void;skill?:{name:string;path:string}}){
+export default function Agent({context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask}:{projectId?:string;onOpenTask?:(id:string)=>void;intent?:{id:string;text:string};onOpenRun?:(id:string)=>void;width?:number;context:string;onError:(e:unknown)=>void;skill?:{name:string;path:string}}){
  const [provider,setProvider]=useState<AgentProvider>('codex'),[login,setLogin]=useState(false);
  useEffect(()=>{if(intent)setPrompt(intent.text);},[intent?.id]);
+ const loginRef=useRef(login);loginRef.current=login;
  const providerRef=useRef<AgentProvider>('codex');providerRef.current=provider;
  const [connected,setConnected]=useState(false),[connecting,setConnecting]=useState(false),[models,setModels]=useState<any[]>([]),[model,setModel]=useState('');
  const [thread,setThread]=useState<string|null>(null),[threads,setThreads]=useState<any[]>([]),[messages,setMessages]=useState<Message[]>([]);
  const [prompt,setPrompt]=useState(''),[busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null);
  const [requests,setRequests]=useState<RpcEvent[]>([]),[answers,setAnswers]=useState<Record<string,string>>({});
  const [effort,setEffort]=useState(localStorage.getItem('studio.effort')||''),[contextWindow,setContextWindow]=useState(''),[compactLimit,setCompactLimit]=useState(''),[options,setOptions]=useState(false),[usage,setUsage]=useState<any>(null),[applying,setApplying]=useState(false),[applied,setApplied]=useState('');
+ const openTaskRef=useRef(onOpenTask);openTaskRef.current=onOpenTask;
  const openRunRef=useRef(onOpenRun);openRunRef.current=onOpenRun;
  const currentModel=models.find(m=>m.model===model),efforts=currentModel?.supportedReasoningEfforts||[];
  useEffect(()=>{if(currentModel&&!efforts.some((e:any)=>e.reasoningEffort===effort))setEffort(currentModel.defaultReasoningEffort||'');},[model,models]);
+ useEffect(()=>{if(projectId)void invoke('state').then(s=>{const preferred=s.settings.projectAgents?.[projectId];if(preferred&&preferred!==providerRef.current&&!busy)void selectProvider(preferred);}).catch(onError);},[projectId,busy]);
  useEffect(()=>{if(model)localStorage.setItem('studio.model.'+provider,model);if(effort)localStorage.setItem('studio.effort.'+provider,effort);},[model,effort,provider]);
  const scroll=useRef<HTMLDivElement>(null),threadRef=useRef<string|null>(null);threadRef.current=thread;
  const rpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:providerRef.current,method,params});
@@ -24,6 +27,7 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent}:{in
   void invoke('state').then(state=>{const selected=state.settings?.agentProvider||'codex';setProvider(selected);providerRef.current=selected;setThreads(selected==='codex'?state.threads||[]:[]);const a=selected==='codex'?state.settings?.agent||{}:state.settings?.agentProviders?.[selected]||{};setContextWindow(a.contextWindow?.toString()||'');setCompactLimit(a.compactLimit?.toString()||'');setEffort(localStorage.getItem('studio.effort.'+selected)||a.effort||'');}).catch(()=>{});
   return window.studio?.onEvent(event=>{
    if((event.provider||'codex')!==providerRef.current)return;
+   if(event.method==='studio/login'&&event.params?.phase==='completed'&&!loginRef.current)void connect();
    if(event.method==='studio/accountUpdated')void invoke('agent.account',{provider:providerRef.current}).then(setAccount).catch(onError);
    if(event.method==='studio/configUpdated')void rpc('model/list').then(m=>{setModels(m.data||[]);}).catch(onError);
    if(event.id!==undefined){setRequests(prev=>[...prev.filter(r=>r.id!==event.id),event]);return;}
@@ -39,7 +43,7 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent}:{in
    if(event.method==='item/completed' && p.item?.type==='mcpToolCall'){
     let result:any;try{result=JSON.parse(p.item.result?.content?.find((c:any)=>c.type==='text')?.text||'null');}catch{}
     const runId=result?.engine?result.id:result?.run;
-    if(result?.engine&&['prepare_run','resume_run'].includes(p.item.tool)&&['draft','ready'].includes(result.status))openRunRef.current?.(result.id);
+    if(!result?.kind&&result?.engine&&['prepare_run','resume_run'].includes(p.item.tool)&&['draft','ready'].includes(result.status))openRunRef.current?.(result.id);
     setMessages(prev=>prev.map(m=>m.id===p.item.id?{...m,runId:typeof runId==='string'?runId:undefined,text:m.text+'\n'+JSON.stringify(p.item.result??p.item.error??p.item.status,null,2)}:m));
    }
    if(event.method==='item/completed' && p.item?.type==='fileChange')setMessages(prev=>prev.map(m=>m.id===p.item.id?{...m,diff:p.item.changes?.map((c:any)=>c.path+'\n'+c.diff).join('\n')}:m));
@@ -47,7 +51,7 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent}:{in
    if(event.method==='turn/started'){setBusy(true);setTurn(p.turn?.id);}
    if(event.method==='turn/completed'){setBusy(false);setTurn(null);if(p.turn?.error)onError(p.turn.error.message||p.turn.error);}
    if(event.method==='error')onError(p.error?.message||JSON.stringify(p));
-   if(event.method==='account/updated')void rpc('account/read').then(setAccount).catch(onError);
+   if(event.method==='account/updated')void invoke('agent.account',{provider:providerRef.current}).then(setAccount).catch(onError);
    if(event.method==='studio/codexDisconnected'){setConnected(false);setBusy(false);}
   });
  },[]);
@@ -56,7 +60,7 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent}:{in
   setConnecting(true);try{
    await invoke('agent.connect',{provider:providerRef.current});
    const [a,m,t]=await Promise.all([rpc('account/read',{refreshToken:false}),rpc('model/list'),rpc('thread/list',{limit:20})]);
-   setAccount({...a,requiresAuthentication:!!m.authRequired});const list=m.data||[];setModels(list);setModel(list.find((v:any)=>v.model===localStorage.getItem('studio.model.'+providerRef.current))?.model||list.find((v:any)=>v.isDefault)?.model||list[0]?.model||'');
+   setAccount({...a,requiresAuthentication:!!m.authRequired||!!a.requiresOpenaiAuth&&!a.account});const list=m.data||[];setModels(list);setModel(list.find((v:any)=>v.model===localStorage.getItem('studio.model.'+providerRef.current))?.model||list.find((v:any)=>v.isDefault)?.model||list[0]?.model||'');
    setThreads(t.data||[]);setConnected(true);
   }catch(e){onError(e);}finally{setConnecting(false);}
  }
@@ -85,12 +89,13 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent}:{in
   if(!prompt.trim()||busy||!connected||!models.length||account?.requiresAuthentication)return;
   const text=prompt;setPrompt('');setBusy(true);
   try{
+   const task=await invoke('task.create',{provider:providerRef.current,request:text,projectId:projectId||null});openTaskRef.current?.(task.id);
    let id=thread;
    if(!id){const r=await rpc('thread/start',{model:model||undefined});id=r.thread.id;setThread(id);threadRef.current=id;}
    setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text}]);
-   const input:any[]=[{type:'text',text:text+'\n\n[Studio workspace context]\n'+context}];
+   const input:any[]=[{type:'text',text:text+'\n\n[Studio workspace context]\nstudioTaskId: '+task.id+'\n'+context}];
    if(skill)input.push({type:'skill',name:skill.name,path:skill.path});
-   const r=await rpc('turn/start',{threadId:id,input,model:model||undefined,effort:effort||undefined});setTurn(r.turn.id);
+   const r=await rpc('turn/start',{studioTaskId:task.id,threadId:id,input,model:model||undefined,effort:effort||undefined});setTurn(r.turn.id);
   }catch(e){setBusy(false);onError(e);}
  }
  async function applyOptions(){
@@ -107,7 +112,7 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent}:{in
  return <aside className="agent-panel" style={{width}}>
   <div className="panel-heading"><span><Sparkles size={16}/>{tr("科研助手")}</span><button className="icon-button" title={tr("新会话")} onClick={()=>{setThread(null);threadRef.current=null;setMessages([]);setUsage(null);}} disabled={busy}><Plus size={17}/></button></div>
   <div className="agent-provider"><label>{t("服务商")}<select data-testid="agent-provider" value={provider} disabled={busy||connecting||applying} onChange={e=>void selectProvider(e.target.value as AgentProvider)}><option value="codex">Codex</option><option value="kimi">Kimi</option><option value="qwen">Qwen</option></select></label><button className="button" disabled={busy||connecting||applying} onClick={()=>setLogin(true)}>{t("登录 / 账户")}</button></div>
-  <div className="agent-config">{connected?<><select value={model} disabled={busy||applying} onChange={e=>void selectModel(e.target.value)}>{!models.length&&<option value="">{t("登录后加载模型目录")}</option>}{models.map(m=><option key={m.id} value={m.model}>{m.displayName||m.model}</option>)}</select><span className="connection"><i/>{tr("已连接")}</span></>:<button className="button wide" onClick={()=>void connect()} disabled={connecting}>{connecting?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>}{t("连接")} {provider==='codex'?'Codex':provider==='kimi'?'Kimi':'Qwen'}</button>}</div>
+  <div className="agent-config">{connected?<><select value={model} disabled={busy||applying} onChange={e=>void selectModel(e.target.value)}>{!models.length&&<option value="">{t("登录后加载模型目录")}</option>}{models.map(m=><option key={m.id} value={m.model}>{m.displayName||m.model}</option>)}</select><span className="connection"><i/>{t(account?.requiresAuthentication?'待登录':'已连接')}</span></>:<button className="button wide" onClick={()=>void connect()} disabled={connecting}>{connecting?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>}{t("连接")} {provider==='codex'?'Codex':provider==='kimi'?'Kimi':'Qwen'}</button>}</div>
   <div className="agent-controls"><label>{provider==='codex'?'Effort':t('思考设置')}<select value={effort} disabled={!connected||busy||applying} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((e:any)=><option key={e.reasoningEffort} value={e.reasoningEffort}>{e.reasoningEffort}</option>)}</select></label><button className="button" disabled={provider!=='codex'} title={provider==='codex'?t('上下文设置'):t('此提供方通过协议回报上下文，暂不支持修改预算')} onClick={()=>setOptions(!options)}><Settings2 size={14}/>{t('上下文')}</button></div>
   {options&&<div className="context-options"><label>{t('上下文预算 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={contextWindow} disabled={busy||applying} onChange={e=>{setContextWindow(e.target.value);setApplied('');}}/></label><label>{t('自动压缩阈值 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={compactLimit} disabled={busy||applying} onChange={e=>{setCompactLimit(e.target.value);setApplied('');}}/></label><p>{t('预算不会扩大模型本身的最大容量。应用后恢复当前会话，计算作业继续运行。')}</p><button className="button" disabled={busy||applying} onClick={()=>void applyOptions()}>{tr(applying?t('应用中…'):t('应用上下文设置'))}</button><small>{applied}</small></div>}
   <div className="context-usage">{usage?t("上下文")+" "+(usage.last?.totalTokens?.toLocaleString()||t("未知"))+" / "+(usage.modelContextWindow?.toLocaleString()||t("未知"))+" tokens":t("上下文用量：等待服务回报")}</div>
@@ -129,6 +134,6 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent}:{in
   </div>
   <div className="composer">{skill&&<span className="skill-chip">$ {skill.name}</span>}<textarea value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{tr(thread?thread.slice(0,12):'项目上下文已附加')}</span>{busy?<button className="send" title={tr("中断 Agent，计算作业继续")} onClick={()=>void rpc('turn/interrupt',{threadId:thread,turnId:turn}).catch(onError)}><Square size={13}/></button>:<button className="send" onClick={()=>void send()} disabled={!connected||!models.length||account?.requiresAuthentication||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
   <div className="agent-footer">{tr("Agent 会话与科学计算队列独立运行")}</div>
-  {login&&<ProviderLogin provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{if(provider!=='codex'){setLogin(false);void connect();}}} onError={onError}/>}
+  {login&&<ProviderLogin projectId={projectId} provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{setLogin(false);void connect();}} onError={onError}/>}
  </aside>;
 }
