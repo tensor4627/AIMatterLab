@@ -3,6 +3,8 @@ import {Play,FileCode2,ShieldCheck} from 'lucide-react';
 import {api,type Run,type Environment} from './types';
 import {CodeEditor} from './widgets';
 import RunDetail from './RunDetail';
+import {flattenParameters,setParameter} from '../shared/task-fields.mjs';
+import {ParameterFields} from './ParameterFields';
 import {t} from './i18n';
 
 export function taskModule(engine:string){
@@ -60,7 +62,7 @@ export default function RunReview({run,environments,onRefresh,onError,onReplace,
   <section className="card"><h3>{t('任务与资源')}</h3>
    <div className="form-row"><label>{t('计算名称')}<input disabled={working} value={name} onChange={e=>setName(e.target.value)}/></label><label>{t('计算环境')}<select disabled={working} value={environment} onChange={e=>setEnvironment(e.target.value)}>{environments.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label></div>
    <div className="form-row"><label>GPU<input disabled={working} type="number" min={0} value={gpu} onChange={e=>setGpu(Number(e.target.value))}/></label><label>{t('时长上限 · s')}<input disabled={working} type="number" min={1} value={seconds} onChange={e=>setSeconds(Number(e.target.value))}/></label></div>
-   <label>{t('科学参数 · JSON')}<textarea disabled={working} className="parameter-json" value={parameters} onChange={e=>setParameters(e.target.value)}/></label>
+   <h4>{t('科学参数')}</h4><ParameterFields fields={flattenParameters(JSON.parse(parameters))} parameters={JSON.parse(parameters)} disabled={working} onError={onError} onChange={(key,value)=>setParameters(JSON.stringify(setParameter(JSON.parse(parameters),key,value)))}/>
   </section>
   <section className="card"><h3><FileCode2 size={15}/> {t('实际输入文件')}</h3><p>{t('默认使用草稿的不可变快照。可替换来源路径，或打开文本文件直接修改。')}</p>
    {Object.entries(inputs).map(([file,path])=><div className="review-input" key={file}><button className="button" disabled={working||path!==run.directory+'/simulation/'+file} onClick={()=>void open(file)}>{file}{file in edits?' *':''}</button><input disabled={working} value={path} aria-label={file} onChange={e=>{if(file in edits&&!window.confirm(t('修改来源路径将丢弃该文件已编辑的内容，是否继续？')))return;setInputs({...inputs,[file]:e.target.value});const next={...edits};delete next[file];setEdits(next);if(selected===file){openSeq.current++;setSelected('');setSource('');}}}/></div>)}

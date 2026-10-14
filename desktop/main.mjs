@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { localSkills } from './skills.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
+import {executeTask} from './task-execution.mjs';
 import {TaskRecords} from './task-records.mjs';
 import {existingConnections,existingProfile} from './existing-ssh.mjs';
 import {sshEndpoint} from './ssh-endpoint.mjs';
@@ -83,7 +84,13 @@ taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>taskRecords.create(value));
 handle('task.list',()=>catalog.list('agent-task'));
-handle('task.read',({id})=>catalog.get('agent-task',id));
+handle('task.read',({id})=>taskRecords.read(id));
+handle('task.edit',value=>taskRecords.edit(value));
+handle('task.execute',value=>executeTask(taskRecords,worker,value));
+handle('task.linkRun',async({taskId,runId,kind})=>{if(!['run','cluster-run'].includes(kind)||typeof runId!=='string')throw Error('Invalid run reference');const run=await worker.request('POST',kind==='run'?'/api/run/status':'/api/cluster/status',{run_id:runId});return taskRecords.linkRun(taskId,run);});
+handle('conversation.list',()=>taskRecords.conversations());
+handle('conversation.remember',value=>taskRecords.remember(value));
+handle('conversation.select',({id})=>{if(typeof id!=='string')throw Error('Invalid conversation');const conversation=catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');return {...conversation,task:conversation.taskId?taskRecords.read(conversation.taskId):null};});
 handle('ssh.existing',()=>existingConnections(app.getPath('home')));
 handle('ssh.import',({ref})=>existingProfile(app.getPath('home'),ref));
 handle('cluster.download',async value=>{
@@ -166,7 +173,7 @@ handle('agent.rpc',async({provider,method,params={}})=>{
     }
     params={...params,input};
   }
-  const result=await agents.rpc(provider,method,params);
+  let result;try{result=await agents.rpc(provider,method,params);}catch(error){if(method==='turn/start')taskRecords.failedTurn(provider,params.threadId,error);throw error;}
   if(provider==='codex'&&method==='account/login/start'&&result.authUrl)await openUrl(result.authUrl);
   return result;
 });

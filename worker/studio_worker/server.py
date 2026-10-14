@@ -11,6 +11,7 @@ from urllib.parse import urlparse, parse_qs
 from .adapters import Adapter, ENGINES
 from .service import Service
 from .templates import build_bias
+from .task_schema import STEP_SCHEMA, validate_task
 from .util import leaf, atomic_json, digest, contained
 
 TOOL_ROUTES = {
@@ -41,7 +42,7 @@ TOOL_ROUTES = {
  "read_artifact": ("POST", "/api/run/file", {"run_id": "string", "name": "string"})
 }
 DESCRIPTIONS = {
- "present_task":"Fill the central Studio task page using the task_id supplied in context. Record actual proposed steps, scientific parameters and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
+ "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
  "prepare_cluster_run":"Prepare a local immutable SSH/LSF/Slurm run draft and its batch script. No upload or submission. Stop for desktop review.",
  "draft_cluster_setup":"Propose queue, modules, engine paths and submission skill changes for user review. Cannot change SSH details or authorization.",
  "prepare_run": "Create an immutable run from explicit assets and scientific parameters. Returns a draft for desktop user review. Stop and wait for the user to click Execute; never validate or submit it. Never infer scientific choices.",
@@ -60,7 +61,7 @@ def tools():
         schema = {"type": "object", "properties": {k: {"type": v} for k, v in properties.items()},
                   "required": list(properties)}
         if name == "present_task":
-            schema["properties"]["steps"]={"type":"array","items":{"type":"string"}}
+            schema["properties"]["steps"]={"type":"array","items":STEP_SCHEMA}
             schema["properties"]["missing_fields"]={"type":"array","items":{"type":"string"}}
             schema["additionalProperties"]=False
         if name == "prepare_run":
@@ -71,8 +72,9 @@ def tools():
                 "properties":{"project_id":{"type":"string"},"cluster_id":{"type":"string"},"engine":{"type":"string","enum":list(ENGINES)},"max_seconds":{"type":"integer","minimum":1},
                 "inputs":{"type":"object","additionalProperties":{"type":"string"}},"parameters":{"type":"object"},"name":{"type":"string"},"idempotency_key":{"type":"string"},
                 "resources":{"type":"object","required":["queue","cpus","gpus","memory_mb"],"properties":{"queue":{"type":"string"},"cpus":{"type":"integer","minimum":1},"gpus":{"type":"integer","minimum":0},"memory_mb":{"type":"integer","minimum":1},"account":{"type":"string"}}}}}
-        for key in ("offset", "frame"):
-            schema["properties"][key] = {"type": "integer", "minimum": 0}
+        if name != "present_task":
+            for key in ("offset", "frame"):
+                schema["properties"][key] = {"type": "integer", "minimum": 0}
         result.append({"name": name, "description": DESCRIPTIONS.get(name, name.replace("_", " ")),
                        "inputSchema": schema,
                        "annotations": {"readOnlyHint": method == "GET" or name in (
@@ -85,7 +87,7 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.5.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.6.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/projects":
             return store.list("project")
         if path == "/api/environments":
@@ -122,10 +124,7 @@ def dispatch(service, method, path, data, admin=False):
         raise ValueError("Unknown route")
     if path=="/api/tasks/present":
         leaf(data["task_id"])
-        if set(data)!={"task_id","name","steps","parameters","missing_fields"}:
-            raise ValueError("present_task requires top-level task_id, name, steps, parameters, missing_fields; no workflow nesting")
-        if not isinstance(data.get("name"),str) or not data["name"].strip() or not isinstance(data.get("parameters"),dict) or not isinstance(data.get("steps"),list) or not all(isinstance(v,str) for v in data["steps"]) or not isinstance(data.get("missing_fields"),list) or not all(isinstance(v,str) for v in data["missing_fields"]):
-            raise ValueError("name must be text, parameters an object, steps and missing_fields arrays of strings")
+        validate_task(data)
         return store.put("task-parameters",{"id":data["task_id"],"kind":"task-parameters","name":data["name"],"parameters":data["parameters"],"steps":data["steps"],"missing_fields":data["missing_fields"],"status":"draft"})
     if path=="/api/clusters":
         if not admin:raise PermissionError("Only the desktop user can register cluster connections")
@@ -289,7 +288,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.5.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.6.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "ping":
                         value = {}

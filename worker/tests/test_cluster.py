@@ -127,7 +127,7 @@ class ClusterLifecycle(unittest.TestCase):
 
     def test_present_task_contract_requires_top_level_fields(self):
         schema=next(t['inputSchema'] for t in tools() if t['name']=='present_task')
-        self.assertEqual(schema['properties']['steps']['items'],{'type':'string'})
+        self.assertEqual(schema['properties']['steps']['items']['anyOf'][0],{'type':'string'})
         with self.assertRaises(ValueError):dispatch(self.service,'POST','/api/tasks/present',{'task_id':'draft','workflow':{'steps':['prepare']},'parameters':{},'missing_fields':[]},False)
         draft=dispatch(self.service,'POST','/api/tasks/present',{'task_id':'draft','name':'MD','steps':['prepare'],'parameters':{'temperature':345},'missing_fields':['structure']},False)
         self.assertEqual(draft['parameters']['temperature'],345);self.assertEqual(draft['status'],'draft')

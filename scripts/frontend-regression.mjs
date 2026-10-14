@@ -10,7 +10,7 @@ catch(error){const module=process.env.STUDIO_PLAYWRIGHT_MODULE||path.resolve(pat
 const {chromium}=playwright;
 const out=path.resolve('validation/local/frontend-regression');await fs.mkdir(out,{recursive:true});
 await fs.writeFile(path.join(out,'harness.html'),`<html><body><div id="root"></div><script type="module">
-import React from 'react';import {createRoot} from 'react-dom/client';import '/src/style.css';
+import React from 'react';import {createRoot} from 'react-dom/client';import '/src/style.css';import '/src/task-flow.css';
 window.React=React;window.testRoot=createRoot(document.getElementById('root'));
 window.renderTest=async(name,props={})=>{const m=await import(/* @vite-ignore */ '/src/'+name+'.tsx');window.testRoot.render(React.createElement(m.default||m[name],props));};
 </script></body></html>`);
@@ -29,7 +29,13 @@ async function fixture(){
   window.studio={onEvent:fn=>{test.events.push(fn);return()=>{test.events=test.events.filter(x=>x!==fn);};},onTerminal:()=>()=>{},invoke:async(method,data)=>{
    test.calls.push({method,data});
    if(method==='state')return {settings:test.settings,threads:[],ssh:[]};
-   if(['task.list','workflow.list','ssh.existing'].includes(method))return [];
+   if(['task.list','workflow.list','ssh.existing','conversation.list'].includes(method))return [];
+   if(method==='conversation.remember'){test.conversation={...(test.conversation||{}),id:data.provider+':'+data.threadId,provider:data.provider,threadId:data.threadId,name:data.name,projectId:data.projectId,taskId:test.task?.id||null};return test.conversation;}
+   if(method==='conversation.select')return test.conversation;
+   if(method==='task.create'){if(!test.task||data.newWorkflow)test.task={id:'task-'+test.calls.length,provider:data.provider,threadId:data.threadId,parameters:{},artifacts:[],updatedAt:1};test.conversation.taskId=test.task.id;return test.task;}
+   if(method==='task.read')return test.task;
+   if(method==='task.edit'){const current=structuredClone(test.task||{id:data.id,parameters:{},updatedAt:1});for(const [key,value] of Object.entries(data.changes)){const parts=key.split('.');let node=current.parameters;for(const part of parts.slice(0,-1))node=node[part]||(node[part]={});node[parts.at(-1)]=value;}current.updatedAt++;test.task=current;return current;}
+   if(method==='task.execute')return {...test.run,status:'queued'};
    if(method==='settings'){test.settings={...test.settings,...data};return test.settings;}
    if(method==='worker.connect'){test.events.forEach(fn=>fn({method:'studio/workerConnected'}));return {};}
    if(['agent.connect','agent.disconnect','agent.login.cancel'].includes(method))return {};
@@ -58,8 +64,19 @@ try{
   const text=p.locator('.cluster-review textarea');await text.waitFor();await p.locator('.cluster-review input[type=checkbox]').check();await text.fill('{"temperature":345}');await p.clock.runFor(10050);assert.equal(await text.inputValue(),'{"temperature":345}');
  });
  await check('task-edits-survive-update',async p=>{
-  await p.evaluate(async()=>{window.props={worker:true,task:{id:'task',name:'Fixture task',updatedAt:1,parameters:{temperature:300},artifacts:[]},environments:[],theme:'dark',onError:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReplace:()=>{},onRefresh:()=>{}};await window.renderTest('AgentTaskPage',window.props);});
-  const text=p.locator('.agent-task-page textarea').first();await text.fill('{"temperature":345}');await p.evaluate(()=>window.renderTest('AgentTaskPage',{...window.props,task:{...window.props.task,updatedAt:2,parameters:{temperature:310}}}));await p.waitForTimeout(100);assert.equal(await text.inputValue(),'{"temperature":345}');
+  await p.evaluate(async()=>{window.props={worker:true,task:{id:'task',name:'Fixture task',updatedAt:1,parameters:{temperature:300},artifacts:[]},environments:[],theme:'dark',onError:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReview:()=>{},onReplace:()=>{},onRefresh:()=>{}};window.__test.task=window.props.task;await window.renderTest('AgentTaskPage',window.props);});
+  await p.locator('.visual-step-heading').click();const input=p.locator('[data-field="temperature"] input');await input.fill('345');await p.waitForFunction(()=>window.__test.task.parameters.temperature===345);await p.evaluate(()=>window.renderTest('AgentTaskPage',{...window.props,task:{...window.__test.task,updatedAt:3,artifacts:[{kind:'workflow',id:'fixture'}]}}));assert.equal(await input.inputValue(),'345');
+ });
+ await check('visual-fields-completeness-and-review',async p=>{
+  await p.evaluate(async()=>{window.__test.task={id:'task',provider:'codex',threadId:'fixture-thread',name:'Visual MD',updatedAt:1,steps:[{id:'md',title:'动力学参数',fields:[{key:'temperature',label:'温度',type:'number',required:true,unit:'K'},{key:'structure_file',label:'初始结构',type:'file',required:true}]}],parameters:{temperature:null,structure_file:'/fixture/model.xyz'},artifacts:[],missingFields:['temperature']};await window.renderTest('AgentTaskPage',{worker:true,task:window.__test.task,environments:[],theme:'dark',onError:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReview:task=>window.reviewed=task,onReplace:()=>{},onRefresh:()=>{}});});
+  await p.locator('.visual-step-heading .flow-dot.missing').waitFor();assert.equal(await p.locator('.parameter-json').count(),0);assert.match(await p.locator('.parameter-file').innerText(),/model.xyz/);await p.locator('[data-field="temperature"] input').fill('345');await p.locator('.visual-step-heading .flow-dot.ready').waitFor();assert.equal(await p.locator('[data-field=temperature] input').isVisible(),true);await p.getByTestId('review-workflow').click();await p.waitForFunction(()=>window.reviewed);assert.equal(await p.evaluate(()=>window.reviewed.parameters.temperature),345);assert.equal(await p.getByTestId('execute-workflow').isDisabled(),true);await p.screenshot({path:path.join(out,'visual-workflow.png')});
+ });
+ await check('hidden-agent-preserves-conversation',async p=>{
+  await p.evaluate(async()=>{const {default:Agent}=await import('/src/Agent.tsx');window.agentProps={planningMode:false,onPlanningModeChange:()=>{},context:'{}',onError:()=>{},projectId:'project'};await window.renderTest('Agent',window.agentProps);});await p.locator('.agent-config button').first().click();await p.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='model/list'));await p.locator('.composer textarea').fill('Keep this draft');await p.evaluate(()=>window.renderTest('Agent',{...window.agentProps,hidden:true}));assert.equal(await p.locator('.agent-panel').isVisible(),false);await p.evaluate(()=>window.renderTest('Agent',{...window.agentProps,hidden:false}));assert.equal(await p.locator('.composer textarea').inputValue(),'Keep this draft');assert.equal(await p.locator('.agent-config select').count(),1);
+ });
+ await check('conversation-reuses-flow-for-natural-updates',async p=>{
+  await p.evaluate(async()=>{const {default:Agent}=await import('/src/Agent.tsx');function Host(){const [planningMode,setPlanning]=window.React.useState(true);return window.React.createElement(Agent,{planningMode,onPlanningModeChange:setPlanning,context:'{}',onError:()=>{},projectId:'project'});}window.testRoot.render(window.React.createElement(Host));});await p.locator('.agent-config button').first().click();await p.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='model/list'));
+  const prompt=p.locator('.composer textarea');await prompt.fill('准备 MD');await p.locator('.composer .send').click();await p.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='turn/start'));const first=await p.evaluate(()=>window.__test.task.id);await p.evaluate(()=>window.__test.events.forEach(fn=>fn({provider:'codex',method:'turn/completed',params:{threadId:'fixture-thread',turn:{status:'completed'}}})));await p.getByTestId('agent-planning-mode').uncheck();await prompt.fill('温度改成345 K');await p.locator('.composer .send').click();await p.waitForFunction(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').length===2);assert.equal(await p.evaluate(()=>window.__test.task.id),first);assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='task.create').length),1);assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').at(-1).data.params.studioTaskId),first);
  });
  await check('failure-details-visible',async p=>{
   await p.evaluate(()=>window.renderTest('RunDetail',{run:{...window.__test.run,status:'failed',error:'ENGINE_FAILURE',exit:{exit_code:-9,reason:'fixture termination'}},onRefresh:async()=>{},onError:()=>{}}));await p.locator('.subtabs button').filter({hasText:'验证'}).click();assert.match(await p.locator('.validation-report').innerText(),/ENGINE_FAILURE/);assert.match(await p.locator('.validation-report').innerText(),/-9/);

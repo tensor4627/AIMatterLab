@@ -1,0 +1,41 @@
+.visual-flow{display:flex;flex-direction:column;gap:0;margin:24px 0}
+.visual-flow-step{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-bottom:18px}
+.visual-flow-step:not(:last-child):after{content:"";position:absolute;left:29px;bottom:-19px;height:18px;border-left:2px solid var(--line)}
+.visual-step-heading{display:flex;align-items:center;gap:12px;width:100%;padding:17px;text-align:left;border:0;background:transparent;color:var(--text)}
+.visual-step-title{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.visual-step-title strong{font-size:calc(15px * var(--ui-scale,1))}
+.visual-step-title small{color:var(--muted);overflow-wrap:anywhere}
+.visual-step-body{border-top:1px solid var(--line);padding:18px 22px 22px 58px}
+.visual-step-body>p{color:var(--muted);margin-top:0;line-height:1.6}
+.flow-dot{display:inline-block;width:9px;height:9px;flex-shrink:0;border-radius:50%}
+.flow-dot.missing{background:#e6757e;box-shadow:0 0 0 4px #e6757e17}
+.flow-dot.ready{background:#53b996;box-shadow:0 0 0 4px #53b99617}
+.flow-legend{display:flex;flex-wrap:wrap;align-items:center;gap:22px;color:var(--muted)}
+.flow-legend>span{display:flex;align-items:center;gap:9px}.flow-legend small{flex:1;min-width:220px}
+.expanded-chevron{transform:rotate(180deg)}
+.parameter-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr));gap:20px}
+.parameter-field{min-width:0}.parameter-field>label{display:flex;flex-direction:column;gap:8px}
+.parameter-field label>span{color:var(--text)}.required-mark{color:#e6757e}
+.parameter-control{display:flex;align-items:center;border:1px solid var(--line);border-radius:7px;background:var(--bg)}
+.parameter-control input{width:100%;min-width:0;border:0;background:transparent}
+.parameter-control:focus-within{outline:1px solid var(--accent)}
+.parameter-unit{padding:0 12px;color:var(--muted);white-space:nowrap}
+.missing-field .parameter-control{border-color:#e6757e77}
+.parameter-file{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:8px;color:var(--muted)}
+.parameter-file strong{color:var(--text);font-weight:500}.parameter-file span{width:100%;overflow-wrap:anywhere;font-family:monospace}
+.parameter-list{display:flex;flex-direction:column;gap:8px}.parameter-list-row{display:flex;gap:6px;align-items:start}.parameter-list-row>input,.parameter-list-row>.parameter-fields{flex:1;min-width:0}
+.advanced-parameters textarea{min-height:100px;font-family:monospace}
+.workflow-review-note{display:flex;gap:12px;border:1px solid var(--line);padding:16px;border-radius:10px;color:var(--accent)}
+.workflow-review-note>div{display:flex;flex-direction:column;gap:6px}.workflow-review-note span{color:var(--muted);line-height:1.5}
+.flow-actions{display:flex;align-items:center;gap:12px;padding:18px 0;position:sticky;bottom:-1px;background:var(--bg);z-index:2}
+.flow-actions>span{flex:1;color:var(--muted)}.flow-actions>.primary{min-width:100px}
+.flow-artifacts{border-top:1px solid var(--line);padding:16px 0}.flow-artifacts>summary{cursor:pointer;color:var(--muted);margin-bottom:12px}
+.flow-run-status{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}
+.agent-workflow-tools{display:flex;gap:14px;margin:10px 0 2px}.agent-workflow-tools button{background:none;border:none;color:var(--accent);padding:0;font-size:inherit}
+.conversation-list{overflow-y:auto;min-height:40px;max-height:25vh;flex:1}.conversation-project{margin-bottom:7px}
+.conversation-list .conversation-item{padding-left:20px;gap:8px;color:var(--muted);min-width:0}
+.conversation-item>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conversation-dot{height:5px;width:5px;border-radius:50%;background:var(--muted);flex-shrink:0}
+.conversation-list .selected-conversation{background:var(--accent-bg);color:var(--accent)}
+.selected-conversation .conversation-dot{background:var(--accent)}.sidebar{overflow-y:auto}
+@media(max-width:1150px){.visual-step-body{padding-left:20px}.flow-legend small{width:100%}.visual-step-heading>.tag{display:none}}

@@ -28,16 +28,14 @@ test('Codex login completion comes from the real protocol event and account quer
  codex.emit('event',{method:'account/login/completed',params:{success:true}});const account=await hub.account('codex');assert.equal(account.phase,'completed');assert.equal(account.account.type,'chatgpt');assert.equal(account.modelAccess,'not_run');
 });
 
-test('Chat never creates a task and detaches the previous planning turn',()=>{
+test('Unbound chat creates no task; a bound conversation can refine its persistent workflow without planning',()=>{
  const records=new Map(),events=[],catalog={get:(k,id)=>records.get(k+id),put:(k,id,v)=>records.set(k+id,v)},store=new TaskRecords(catalog,e=>events.push(e));
  assert.throws(()=>store.create({provider:'codex',request:'chat'}),/Enable task planning/);assert.equal(events.length,0);
- const task=store.create({planningMode:true,provider:'codex',request:'plan'});
- const planning=store.prepareTurn('codex',{planningMode:true,studioTaskId:task.id,threadId:'thread',input:[{type:'text',text:'plan'}]});
- assert(!('planningMode' in planning));assert(!('studioTaskId' in planning));assert.match(planning.input.at(-1).text,/mode: planning/);
- const chat=store.prepareTurn('codex',{planningMode:false,threadId:'thread',input:[{type:'text',text:'chat'}]});
- const count=events.length;store.event({provider:'codex',method:'turn/plan/updated',params:{threadId:'thread',plan:[{step:'old task must stay closed',status:'completed'}]}});
- assert.equal(events.length,count);assert.match(chat.input.at(-1).text,/mode: chat/);assert(!chat.input.at(-1).text.includes(task.id));
- assert.throws(()=>store.prepareTurn('codex',{planningMode:false,studioTaskId:task.id,threadId:'thread'}));assert.throws(()=>store.prepareTurn('codex',{planningMode:'true',threadId:'thread'}));
+ const chat=store.prepareTurn('codex',{planningMode:false,threadId:'unbound',input:[]});assert.match(chat.input.at(-1).text,/mode: chat/);
+ const task=store.create({planningMode:true,provider:'codex',request:'plan',threadId:'thread'});
+ const planning=store.prepareTurn('codex',{planningMode:true,studioTaskId:task.id,threadId:'thread',input:[]});assert(!('planningMode' in planning));assert(!('studioTaskId' in planning));assert.match(planning.input.at(-1).text,/mode: planning/);
+ const continued=store.prepareTurn('codex',{planningMode:false,studioTaskId:task.id,threadId:'thread',input:[]});assert.match(continued.input.at(-1).text,/mode: workflow/);assert(continued.input.at(-1).text.includes(task.id));
+ assert.throws(()=>store.prepareTurn('codex',{planningMode:'true',threadId:'thread'}));
 });
 
 test('Consecutive parameter saves always advance the renderer revision',()=>{

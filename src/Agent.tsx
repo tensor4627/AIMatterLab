@@ -3,11 +3,14 @@ import {useEffect,useRef,useState} from 'react';
 import {ArrowUp,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2} from 'lucide-react';
 import {t} from './i18n';
 import ProviderLogin from './ProviderLogin';
-import {invoke,type RpcEvent,type AgentProvider} from './types';
+import {explicitNewWorkflow} from '../shared/task-fields.mjs';
+import {invoke,type RpcEvent,type AgentProvider,type Conversation,type AgentIntent} from './types';
 type Message={id:string;role:string;text:string;runId?:string;diff?:string};
-export default function Agent({planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask}:{planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:{id:string;text:string};onOpenRun?:(id:string)=>void;width?:number;context:string;onError:(e:unknown)=>void;skill?:{name:string;path:string}}){
+export default function Agent({planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,hidden}:{planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:{name:string;path:string};onOpenRun?:(id:string)=>void;sessionSelection?:{nonce:string;conversation?:Conversation;new?:boolean};onConversation?:(value:Conversation|null)=>void;onBusyChange?:(busy:boolean)=>void;hidden?:boolean}){
  const [provider,setProvider]=useState<AgentProvider>('codex'),[login,setLogin]=useState(false);
- useEffect(()=>{if(intent)setPrompt(intent.text);},[intent?.id]);
+ const [workflowId,setWorkflowId]=useState<string|null>(null),[newWorkflow,setNewWorkflow]=useState(false);
+ const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0);
+ useEffect(()=>{if(intent&&!intent.autoSend)setPrompt(intent.text);},[intent?.id]);
  const loginRef=useRef(login);loginRef.current=login;
  const providerRef=useRef<AgentProvider>('codex');providerRef.current=provider;
  const projectSeen=useRef('');
@@ -21,7 +24,8 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
  const openRunRef=useRef(onOpenRun);openRunRef.current=onOpenRun;
  const currentModel=models.find(m=>m.model===model),efforts=currentModel?.supportedReasoningEfforts||[];
  useEffect(()=>{if(currentModel&&!efforts.some((e:any)=>e.reasoningEffort===effort))setEffort(currentModel.defaultReasoningEffort||'');},[model,models]);
- useEffect(()=>{if(!projectId||busy||projectSeen.current===projectId)return;projectSeen.current=projectId;void invoke('state').then(s=>{const preferred=s.settings.projectAgents?.[projectId];if(preferred&&preferred!==providerRef.current)void selectProvider(preferred);}).catch(onError);},[projectId,busy]);
+ useEffect(()=>{onBusyChange?.(busy||connecting||applying);},[busy,connecting,applying]);
+ useEffect(()=>{if(!projectId||sessionSelection?.conversation||busy||projectSeen.current===projectId)return;projectSeen.current=projectId;void invoke('state').then(s=>{const preferred=s.settings.projectAgents?.[projectId];if(preferred&&preferred!==providerRef.current)void selectProvider(preferred);}).catch(onError);},[projectId,busy]);
  useEffect(()=>{if(model)localStorage.setItem('studio.model.'+provider,model);if(effort)localStorage.setItem('studio.effort.'+provider,effort);},[model,effort,provider]);
  const scroll=useRef<HTMLDivElement>(null),threadRef=useRef<string|null>(null);threadRef.current=thread;
  const rpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:providerRef.current,method,params});
@@ -32,6 +36,8 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    if(event.method==='studio/login'&&event.params?.phase==='completed'&&!loginRef.current)void connect();
    if(event.method==='studio/accountUpdated')void invoke('agent.account',{provider:providerRef.current}).then(setAccount).catch(onError);
    if(event.method==='studio/configUpdated')void rpc('model/list').then(m=>{setModels(m.data||[]);}).catch(onError);
+   if(event.method==='studio/taskUpdated'&&event.params?.task?.threadId===threadRef.current)setWorkflowId(event.params.task.id);
+   if(event.params?.threadId&&event.params.threadId!==threadRef.current)return;
    if(event.id!==undefined){setRequests(prev=>[...prev.filter(r=>r.id!==event.id),event]);return;}
    const p=event.params||{};
    if(event.method==='serverRequest/resolved')setRequests(prev=>prev.filter(r=>String(r.id)!==String(p.requestId)));
@@ -45,7 +51,6 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    if(event.method==='item/completed' && p.item?.type==='mcpToolCall'){
     let result:any;try{result=JSON.parse(p.item.result?.content?.find((c:any)=>c.type==='text')?.text||'null');}catch{}
     const runId=result?.engine?result.id:result?.run;
-    if(planningRef.current&&!result?.kind&&result?.engine&&['prepare_run','resume_run'].includes(p.item.tool)&&['draft','ready'].includes(result.status))openRunRef.current?.(result.id);
     setMessages(prev=>prev.map(m=>m.id===p.item.id?{...m,runId:typeof runId==='string'?runId:undefined,text:m.text+'\n'+JSON.stringify(p.item.result??p.item.error??p.item.status,null,2)}:m));
    }
    if(event.method==='item/completed' && p.item?.type==='fileChange')setMessages(prev=>prev.map(m=>m.id===p.item.id?{...m,diff:p.item.changes?.map((c:any)=>c.path+'\n'+c.diff).join('\n')}:m));
@@ -64,41 +69,56 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    const [a,m,t]=await Promise.all([rpc('account/read',{refreshToken:false}),rpc('model/list'),rpc('thread/list',{limit:20})]);
    setAccount({...a,requiresAuthentication:!!m.authRequired||!!a.requiresOpenaiAuth&&!a.account});const list=m.data||[];setModels(list);setModel(list.find((v:any)=>v.model===localStorage.getItem('studio.model.'+providerRef.current))?.model||list.find((v:any)=>v.isDefault)?.model||list[0]?.model||'');
    setThreads(t.data||[]);setConnected(true);
-  }catch(e){onError(e);}finally{setConnecting(false);}
+   return true;
+  }catch(e){onError(e);return false;}finally{setConnecting(false);}
  }
  async function selectProvider(value:AgentProvider){
-  if(busy||connecting||applying)return;
+  if(busy||connecting)return false;
   const old=providerRef.current;
-  try{await invoke('agent.login.cancel');await invoke('agent.disconnect',{provider:old});await invoke('settings',{agentProvider:value});}catch(e){onError(e);return;}
-  providerRef.current=value;setProvider(value);setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);setRequests([]);setUsage(null);setAccount(null);setOptions(false);setLogin(false);setEffort(localStorage.getItem('studio.effort.'+value)||'');
+  try{await invoke('agent.login.cancel');await invoke('agent.disconnect',{provider:old});await invoke('settings',{agentProvider:value});}catch(e){onError(e);return false;}
+  providerRef.current=value;setProvider(value);setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);setRequests([]);setUsage(null);setAccount(null);setOptions(false);setLogin(false);setEffort(localStorage.getItem('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);return true;
  }
  async function selectModel(value:string){
   if(provider==='codex'){setModel(value);return;}
   setApplying(true);try{const result=await rpc('model/select',{model:value});setModel(value);setModels(result.data||[]);}catch(e){onError(e);}finally{setApplying(false);}
  }
  async function resume(id:string){
-  try{
+  if(busy)return;setApplying(true);try{
    const r=await rpc('thread/resume',{threadId:id});setThread(r.thread.id);threadRef.current=r.thread.id;setModel(r.model||model);setEffort(r.reasoningEffort||'');setUsage(null);
    const read=await rpc('thread/read',{threadId:id,includeTurns:true}),list:Message[]=[];
    for(const turn of read.thread?.turns||[])for(const item of turn.items||[]){
     if(item.type==='agentMessage')list.push({id:item.id,role:'agent',text:item.text||''});
     if(item.type==='userMessage')list.push({id:item.id,role:'user',text:(item.content||[]).filter((c:any)=>c.type==='text').map((c:any)=>c.text).join('\n')});
    }
-   setMessages(list);
-  }catch(e){onError(e);}
+   setMessages(list);const conversation=await invoke<Conversation>('conversation.remember',{provider:providerRef.current,threadId:id,projectId:projectId||null,name:r.thread.name||r.thread.preview||'对话'});setWorkflowId(conversation.taskId);conversationRef.current?.(conversation);
+  }catch(e){onError(e);}finally{setApplying(false);}
  }
- async function send(){
-  if(!prompt.trim()||busy||!connected||!models.length||account?.requiresAuthentication)return;
-  const text=prompt;setPrompt('');setBusy(true);
+ useEffect(()=>{
+  if(!sessionSelection)return;const seq=++selectionSeq.current;
+  const activate=async()=>{if(busy)return;setApplying(true);try{
+   if(sessionSelection.new){setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);return;}
+   const selected=sessionSelection.conversation;if(!selected)return;
+   const different=selected.provider!==providerRef.current;if(different&&!await selectProvider(selected.provider))return;
+   if((!connected||different)&&!await connect())return;
+   if(seq!==selectionSeq.current)return;await resume(selected.threadId);
+  }finally{setApplying(false);}};void activate();
+ },[sessionSelection?.nonce]);
+ useEffect(()=>{if(!intent?.autoSend||consumedIntent.current===intent.id||busy||applying||connecting||!connected||!models.length||account?.requiresAuthentication||(intent.threadId&&thread!==intent.threadId)||(intent.provider&&providerRef.current!==intent.provider))return;consumedIntent.current=intent.id;void send(intent.text,{reviewMode:intent.reviewMode,taskId:intent.taskId});},[intent?.id,connected,busy,applying,connecting,thread,models.length,account?.requiresAuthentication]);
+ async function send(textOverride?:string,action:{reviewMode?:boolean;taskId?:string}={}){
+  const text=textOverride??prompt;if(!text.trim()||busy||!connected||!models.length||account?.requiresAuthentication)return;
+  if(!textOverride)setPrompt('');setBusy(true);
   try{
-   const task=planningMode?await invoke('task.create',{planningMode:true,provider:providerRef.current,request:text,projectId:projectId||null}):null;if(task)openTaskRef.current?.(task.id);
    let id=thread;
    if(!id){const r=await rpc('thread/start',{model:model||undefined});id=r.thread.id;setThread(id);threadRef.current=id;}
+   const conversation=await invoke<Conversation>('conversation.remember',{provider:providerRef.current,threadId:id,projectId:projectId||null,name:text});conversationRef.current?.(conversation);
+   let taskId=action.taskId||conversation.taskId;
+   const fresh=newWorkflow||explicitNewWorkflow(text);
+   if((planningMode||fresh)&&!action.reviewMode){const task=await invoke('task.create',{planningMode:true,newWorkflow:fresh,threadId:id,provider:providerRef.current,request:text,projectId:conversation.projectId||projectId||null});taskId=task.id;openTaskRef.current?.(task.id);}
+   setWorkflowId(taskId||null);setNewWorkflow(false);
    setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text}]);
-   const input:any[]=[{type:'text',text:text+'\n\n[Studio workspace context]\n'+context}];
-   if(skill)input.push({type:'skill',name:skill.name,path:skill.path});
-   const r=await rpc('turn/start',{planningMode,...task?{studioTaskId:task.id}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});setTurn(r.turn.id);
-  }catch(e){setBusy(false);setPrompt(old=>old||text);onError(e);}
+   const input:any[]=[{type:'text',text:text+'\n\n[Studio workspace context]\n'+context}];if(skill)input.push({type:'skill',name:skill.name,path:skill.path});
+   const r=await rpc('turn/start',{planningMode,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});setTurn(r.turn.id);
+  }catch(e){setBusy(false);if(!textOverride)setPrompt(old=>old||text);onError(e);}
  }
  async function applyOptions(){
   setApplying(true);try{
@@ -111,17 +131,17 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
  async function respond(request:RpcEvent,result:any){
   try{await invoke('agent.respond',{provider:providerRef.current,id:request.id,result});setRequests(prev=>prev.filter(r=>r.id!==request.id));}catch(e){onError(e);}
  }
- return <aside className="agent-panel" style={{width}}>
-  <div className="panel-heading"><span><Sparkles size={16}/>{tr("科研助手")}</span><button className="icon-button" title={tr("新会话")} aria-label={tr("新会话")} onClick={()=>{setThread(null);threadRef.current=null;setMessages([]);setUsage(null);}} disabled={busy}><Plus size={17}/></button></div>
+ return <aside className="agent-panel" style={{width,display:hidden?'none':undefined}}>
+  <div className="panel-heading"><span><Sparkles size={16}/>{tr("科研助手")}</span><button className="icon-button" title={tr("新会话")} aria-label={tr("新会话")} onClick={()=>{setThread(null);threadRef.current=null;setMessages([]);setUsage(null);setWorkflowId(null);conversationRef.current?.(null);}} disabled={busy||applying}><Plus size={17}/></button></div>
   <div className="agent-provider"><label>{t("服务商")}<select data-testid="agent-provider" value={provider} disabled={busy||connecting||applying} onChange={e=>void selectProvider(e.target.value as AgentProvider)}><option value="codex">Codex</option><option value="kimi">Kimi</option><option value="qwen">Qwen</option></select></label><button className="button" disabled={busy||connecting||applying} onClick={()=>setLogin(true)}>{t("登录 / 账户")}</button></div>
   <div className="agent-config">{connected?<><select value={model} disabled={busy||applying} onChange={e=>void selectModel(e.target.value)}>{!models.length&&<option value="">{t("登录后加载模型目录")}</option>}{models.map(m=><option key={m.id} value={m.model}>{m.displayName||m.model}</option>)}</select><span className="connection"><i/>{t(account?.requiresAuthentication?'待登录':'已连接')}</span></>:<button className="button wide" onClick={()=>void connect()} disabled={connecting}>{connecting?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>}{t("连接")} {provider==='codex'?'Codex':provider==='kimi'?'Kimi':'Qwen'}</button>}</div>
-  <div className="agent-planning"><label><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label><small>{t(planningMode?'生成计算流程和参数，等待审阅执行':'普通对话，不自动打开任务页')}</small></div>
+  <div className="agent-planning"><label><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label><small>{t(workflowId?'此对话已绑定流程，可直接用自然语言调整':planningMode?'生成计算流程和参数，等待审阅执行':'普通对话，不自动打开任务页')}</small>{workflowId&&<div className="agent-workflow-tools"><button disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button><button disabled={busy||applying} onClick={()=>setNewWorkflow(v=>!v)}>{t(newWorkflow?'取消新建流程':'新建流程')}</button></div>}{newWorkflow&&<small>{t('下条消息将新建流程；原流程保留。')}</small>}</div>
   <div className="agent-controls"><label>{provider==='codex'?'Effort':t('思考设置')}<select value={effort} disabled={!connected||busy||applying} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((e:any)=><option key={e.reasoningEffort} value={e.reasoningEffort}>{e.reasoningEffort}</option>)}</select></label><button className="button" disabled={provider!=='codex'} title={provider==='codex'?t('上下文设置'):t('此提供方通过协议回报上下文，暂不支持修改预算')} onClick={()=>setOptions(!options)}><Settings2 size={14}/>{t('上下文')}</button></div>
   {options&&<div className="context-options"><label>{t('上下文预算 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={contextWindow} disabled={busy||applying} onChange={e=>{setContextWindow(e.target.value);setApplied('');}}/></label><label>{t('自动压缩阈值 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={compactLimit} disabled={busy||applying} onChange={e=>{setCompactLimit(e.target.value);setApplied('');}}/></label><p>{t('预算不会扩大模型本身的最大容量。应用后恢复当前会话，计算作业继续运行。')}</p><button className="button" disabled={busy||applying} onClick={()=>void applyOptions()}>{tr(applying?t('应用中…'):t('应用上下文设置'))}</button><small>{applied}</small></div>}
   <div className="context-usage">{usage?t("上下文")+" "+(usage.last?.totalTokens?.toLocaleString()||t("未知"))+" / "+(usage.modelContextWindow?.toLocaleString()||t("未知"))+" tokens":t("上下文用量：等待服务回报")}</div>
   {connected&&account?.requiresAuthentication&&<button className="button" onClick={()=>setLogin(true)}>{t('请先登录所选服务商')}</button>}
   {connected&&provider!=='codex'&&<div className="provider-account">{account?.modelAccess==='passed'?t('模型调用已验证'):t('模型调用尚未验证')}{account?.credentialStored?' · '+t('已保存凭据'):''}</div>}
-  {connected&&threads.length>0&&<select className="thread-select" aria-label={tr("新会话")} value={thread||''} onChange={e=>{if(e.target.value)void resume(e.target.value);}}><option value="">{tr("新会话")}</option>{threads.map(t=><option key={t.id} value={t.id}>{t.name||t.preview?.slice(0,35)||t.id.slice(0,12)}</option>)}</select>}
+  {connected&&threads.length>0&&<select className="thread-select" disabled={busy||applying} aria-label={tr("新会话")} value={thread||''} onChange={e=>{if(e.target.value)void resume(e.target.value);}}><option value="">{tr("新会话")}</option>{threads.map(t=><option key={t.id} value={t.id}>{t.name||t.preview?.slice(0,35)||t.id.slice(0,12)}</option>)}</select>}
   {connected&&account?.requiresOpenaiAuth&&!account.account&&<button className="button" onClick={()=>void Promise.resolve(setLogin(true))}>{tr("登录 ChatGPT 账户")}</button>}
   <div className="chat-scroll" ref={scroll} role="log">
    {!messages.length&&<div className="agent-welcome"><div className="agent-orb"><Sparkles size={24}/></div><h3>{tr("让想法进入计算")}</h3><p>{tr("定义实验、准备输入、运行计算，")}<br/>{tr("然后一起检查结果。")}</p><div className="prompt-hints">{['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(t=><button key={t} onClick={()=>setPrompt(t)}>{tr(t)}<ArrowUp size={13}/></button>)}</div><small>{tr("科学参数会显式记录；作业状态来自真实进程。")}</small></div>}
