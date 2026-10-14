@@ -4,7 +4,7 @@
 
 ## 启动
 
-Windows 安装包位于 `release/GPU Sampling Studio 0.5.0.exe`。首次启动：
+Windows 安装包位于 `release/GPU Sampling Studio 0.5.1.exe`。首次启动：
 
 1. 点击「连接 WSL」。设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
@@ -90,3 +90,7 @@ SSH 集群页可以导入已有连接，选择 LSF / Slurm，协作探测环境�
 Agent 默认普通对话，开启「任务规划模式」才自动生成中央流程页。SSH 提供主机、用户名、端口独立设置，以及保存前连接测试。
 
 将 [INSTALL_AGENT.md](INSTALL_AGENT.md) 交给通用本地 Agent，从完整 checkout 开始自动配置与短例验收；公开 GitHub URL 尚待登记。详见 [安装说明](docs/one-prompt-install.md) 和 [本代验证](docs/v0.5.md)。
+
+## v0.5.1：前端修复与独立复核
+
+保留参数编辑、失联状态和未确认请求身份，修复输入法、设置取消、弹窗焦点与产物展示；复核额外修补了切换运行草稿后的状态隔离。便携包与验证范围见 [v0.5.1](docs/v0.5.1.md)。

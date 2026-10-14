@@ -19,7 +19,7 @@ export default function RunReview({run,environments,onRefresh,onError,onReplace,
  const [step,setStep]=useState(''),[pendingRun,setPendingRun]=useState<Run|null>(null);
  const keyRef=useRef({sig:'',key:''}),openSeq=useRef(0);
  useEffect(()=>{
-  openSeq.current++;
+  openSeq.current++;setPendingRun(null);setStep('');keyRef.current={sig:'',key:''};
   setName(run.name);setEnvironment(run.environment_id);setGpu(run.gpu);setSeconds(run.max_seconds);
   setInputs(Object.fromEntries(Object.keys(run.inputs).map(key=>[key,run.directory+'/simulation/'+key])));
   setParameters(JSON.stringify(run.parameters||{},null,2));setSelected('');setSource('');setEdits({});setInputInfo(null);

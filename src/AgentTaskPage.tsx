@@ -12,6 +12,6 @@ export default function AgentTaskPage({worker,task,environments,theme,onError,on
  <section className="card"><h3>{t('运行参数')}</h3><textarea rows={10} className="parameter-json" aria-label={t('运行参数')} value={parameters} onChange={e=>{dirty.current=true;setParameters(e.target.value);}}/>{task.missingFields?.length>0&&<div className="notice">{t('待补充')} · {task.missingFields.join(' · ')}</div>}<button className="button" onClick={()=>{try{JSON.parse(parameters);}catch(e){onError(e);return;}dirty.current=false;onAgent('请更新中央任务页 '+task.id+'。调用 present_task 保存完整计算流程和以下用户审阅参数，继续准备真实模块草稿。不要执行计算。\n'+parameters);}}><Sparkles size={15}/>{t('把审阅参数交给 Agent')}</button></section>
  {task.artifacts?.length>0&&<section className="card"><h3>{t('模块草稿')}</h3>{task.artifacts.map((a:any)=><button className="tool-card" key={a.id} onClick={()=>a.kind==='cluster-run'?onCluster(a.id):a.kind==='cluster-setup'?onSetup(a.id):a.kind==='run'?onRun(a.id):onAgent('继续检查 workflow '+a.id)}>{a.name||a.engine||a.kind}<ArrowUpRight size={15}/></button>)}</section>}
  <div className="notice"><ShieldCheck size={16}/>{t('计划状态不代表作业运行状态；执行必须使用下面真实模块草稿的审阅按钮。')}</div>
- {run&&<RunReview run={run} environments={environments} theme={theme} onError={onError} onRefresh={onRefresh} onReplace={onReplace}/>}
+ {run&&<RunReview key={run.id} run={run} environments={environments} theme={theme} onError={onError} onRefresh={onRefresh} onReplace={onReplace}/>}
  </div>;
 }
