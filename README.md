@@ -4,13 +4,13 @@
 
 ## 启动
 
-Windows 安装包位于 `release/GPU Sampling Studio 0.4.0.exe`。首次启动：
+Windows 安装包位于 `release/GPU Sampling Studio 0.5.0.exe`。首次启动：
 
 1. 点击「连接 WSL」。设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
 3. 新建项目，设置输入根目录、环境 ID、GPU、并发和时间上限。这些授权仅由桌面用户修改。
 4. Agent 顶部选择 Codex / Kimi / Qwen，点击「登录 / 账户」；登录后连接并检查模型目录，再描述目标。Qwen 使用百炼或 Coding Plan 密钥。
-5. Agent 创建草稿后会自动打开对应模块审阅页。检查参数和输入文件，点击「确认并执行」后才验证与提交。日志、结果文件、曲线和轨迹在任务记录中打开。
+5. 开启 Agent 的「任务规划模式」后，创建草稿才会打开中央流程及对应模块审阅页。检查参数和输入文件，点击「确认并执行」后才验证与提交。日志、结果文件、曲线和轨迹在任务记录中打开。
 
 作业输入复制到 WSL Linux 文件系统。桌面退出只停止聊天与交互终端，已提交的作业继续运行。作业服务源代码部署到持久化 Linux runtime，便携包退出不会删除运行依赖。系统/WSL 停止后只能按引擎 checkpoint 能力续算；未知进程不会自动重提。
 
@@ -24,8 +24,7 @@ pnpm start
 pnpm run pack
 ```
 
-此机器的 bundled pnpm 位于：
-`C:/Users/Lenovo/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/fallback/pnpm.cmd`。
+使用 PATH 中的 pnpm；安装器也支持在 desktop.pnpm 中登记可执行文件路径。
 
 ## 已实现
 
@@ -38,7 +37,7 @@ pnpm run pack
 - NEP/HotPP 训练、测试、导出；NEP 回归统计和原有 `nep-regression-rmse` 绘图 skill。
 - WTMetaD / OPES 重加权工具接口；输出图片、表格与原始日志预览。
 - 输入哈希、版本与本地修改标记、执行命令、环境探测、checkpoint、可复现输入 ZIP。超过 32 MiB 的输入在 ZIP 中列明来源和哈希。
-- SSH 通过已有 OpenSSH 别名使用系统凭据；文件浏览与终端。远程作业托管属于后续阶段。
+- SSH 使用显式远程用户名及凭据引用；支持 LSF/Slurm 草稿、审阅提交、监控、文件与终端。真实集群科学短任务需要独立验收。
 
 ## 科学约定
 
@@ -77,4 +76,17 @@ Agent 的 prepare_run/resume_run 会打开 MD、Bias、增强采样或 NEP/HotPP
 首页按任务开始，左侧按七类工具浏览能力；任务计划支持核心 / 可选步骤和用户已有输入。设置 → 工作区布局可将 Agent 改为中间大窗、任务标签放右侧。
 
 关系图与任务分析见 [工具生态](docs/architecture-workflows.md)，功能及验证边界见 [v0.3](docs/v0.3.md)，每代记录见 [CHANGELOG](CHANGELOG.md)。本地 Git 从 v0.3 开始跟踪，不自动推送；运行目录、科学输入、原始证据与便携包不入库。
-\n## v0.4：可读界面与 SSH 集群\n\n外观设置现在可以调整所有小字下限和 Agent 对话字号。登录窗口支持真实账户状态与自动完成刷新；每个对话请求会打开中央计算流程和参数页。\n\nSSH 集群页可以导入已有连接，选择 LSF / Slurm，协作探测环境、审阅版本化 SKILL.md、准备和预览批脚本、查看队列与日志以及回收文件。集群无需部署 Agent CLI；正式作业仍需点击审阅提交。实际科学短任务验收尚未执行。\n\n见 [v0.4 功能与验证](docs/v0.4.md) 和 [SSH 可行性与管理链路](docs/ssh-cluster-management.md)。连接信息保持私有，不进入仓库或报告。\n
+
+## v0.4：可读界面与 SSH 集群
+
+外观设置现在可以调整所有小字下限和 Agent 对话字号。登录窗口支持真实账户状态与自动完成刷新；开启任务规划模式后，对话请求才会打开中央计算流程和参数页。
+
+SSH 集群页可以导入已有连接，选择 LSF / Slurm，协作探测环境、审阅版本化 SKILL.md、准备和预览批脚本、查看队列与日志以及回收文件。集群无需部署 Agent CLI；正式作业仍需点击审阅提交。实际科学短任务验收尚未执行。
+
+见 [v0.4 功能与验证](docs/v0.4.md) 和 [SSH 可行性与管理链路](docs/ssh-cluster-management.md)。连接信息保持私有，不进入仓库或报告。
+
+## v0.5：规划、SSH 修复和安装入口
+
+Agent 默认普通对话，开启「任务规划模式」才自动生成中央流程页。SSH 提供主机、用户名、端口独立设置，以及保存前连接测试。
+
+将 [INSTALL_AGENT.md](INSTALL_AGENT.md) 交给通用本地 Agent，从完整 checkout 开始自动配置与短例验收；公开 GitHub URL 尚待登记。详见 [安装说明](docs/one-prompt-install.md) 和 [本代验证](docs/v0.5.md)。

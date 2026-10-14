@@ -5,7 +5,7 @@ import {t} from './i18n';
 import ProviderLogin from './ProviderLogin';
 import {invoke,type RpcEvent,type AgentProvider} from './types';
 type Message={id:string;role:string;text:string;runId?:string;diff?:string};
-export default function Agent({context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask}:{projectId?:string;onOpenTask?:(id:string)=>void;intent?:{id:string;text:string};onOpenRun?:(id:string)=>void;width?:number;context:string;onError:(e:unknown)=>void;skill?:{name:string;path:string}}){
+export default function Agent({planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask}:{planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:{id:string;text:string};onOpenRun?:(id:string)=>void;width?:number;context:string;onError:(e:unknown)=>void;skill?:{name:string;path:string}}){
  const [provider,setProvider]=useState<AgentProvider>('codex'),[login,setLogin]=useState(false);
  useEffect(()=>{if(intent)setPrompt(intent.text);},[intent?.id]);
  const loginRef=useRef(login);loginRef.current=login;
@@ -15,6 +15,7 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent,proj
  const [prompt,setPrompt]=useState(''),[busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null);
  const [requests,setRequests]=useState<RpcEvent[]>([]),[answers,setAnswers]=useState<Record<string,string>>({});
  const [effort,setEffort]=useState(localStorage.getItem('studio.effort')||''),[contextWindow,setContextWindow]=useState(''),[compactLimit,setCompactLimit]=useState(''),[options,setOptions]=useState(false),[usage,setUsage]=useState<any>(null),[applying,setApplying]=useState(false),[applied,setApplied]=useState('');
+ const planningRef=useRef(planningMode);planningRef.current=planningMode;
  const openTaskRef=useRef(onOpenTask);openTaskRef.current=onOpenTask;
  const openRunRef=useRef(onOpenRun);openRunRef.current=onOpenRun;
  const currentModel=models.find(m=>m.model===model),efforts=currentModel?.supportedReasoningEfforts||[];
@@ -43,7 +44,7 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent,proj
    if(event.method==='item/completed' && p.item?.type==='mcpToolCall'){
     let result:any;try{result=JSON.parse(p.item.result?.content?.find((c:any)=>c.type==='text')?.text||'null');}catch{}
     const runId=result?.engine?result.id:result?.run;
-    if(!result?.kind&&result?.engine&&['prepare_run','resume_run'].includes(p.item.tool)&&['draft','ready'].includes(result.status))openRunRef.current?.(result.id);
+    if(planningRef.current&&!result?.kind&&result?.engine&&['prepare_run','resume_run'].includes(p.item.tool)&&['draft','ready'].includes(result.status))openRunRef.current?.(result.id);
     setMessages(prev=>prev.map(m=>m.id===p.item.id?{...m,runId:typeof runId==='string'?runId:undefined,text:m.text+'\n'+JSON.stringify(p.item.result??p.item.error??p.item.status,null,2)}:m));
    }
    if(event.method==='item/completed' && p.item?.type==='fileChange')setMessages(prev=>prev.map(m=>m.id===p.item.id?{...m,diff:p.item.changes?.map((c:any)=>c.path+'\n'+c.diff).join('\n')}:m));
@@ -89,13 +90,13 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent,proj
   if(!prompt.trim()||busy||!connected||!models.length||account?.requiresAuthentication)return;
   const text=prompt;setPrompt('');setBusy(true);
   try{
-   const task=await invoke('task.create',{provider:providerRef.current,request:text,projectId:projectId||null});openTaskRef.current?.(task.id);
+   const task=planningMode?await invoke('task.create',{planningMode:true,provider:providerRef.current,request:text,projectId:projectId||null}):null;if(task)openTaskRef.current?.(task.id);
    let id=thread;
    if(!id){const r=await rpc('thread/start',{model:model||undefined});id=r.thread.id;setThread(id);threadRef.current=id;}
    setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text}]);
-   const input:any[]=[{type:'text',text:text+'\n\n[Studio workspace context]\nstudioTaskId: '+task.id+'\n'+context}];
+   const input:any[]=[{type:'text',text:text+'\n\n[Studio workspace context]\n'+context}];
    if(skill)input.push({type:'skill',name:skill.name,path:skill.path});
-   const r=await rpc('turn/start',{studioTaskId:task.id,threadId:id,input,model:model||undefined,effort:effort||undefined});setTurn(r.turn.id);
+   const r=await rpc('turn/start',{planningMode,...task?{studioTaskId:task.id}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});setTurn(r.turn.id);
   }catch(e){setBusy(false);onError(e);}
  }
  async function applyOptions(){
@@ -113,6 +114,7 @@ export default function Agent({context,onError,skill,width,onOpenRun,intent,proj
   <div className="panel-heading"><span><Sparkles size={16}/>{tr("科研助手")}</span><button className="icon-button" title={tr("新会话")} onClick={()=>{setThread(null);threadRef.current=null;setMessages([]);setUsage(null);}} disabled={busy}><Plus size={17}/></button></div>
   <div className="agent-provider"><label>{t("服务商")}<select data-testid="agent-provider" value={provider} disabled={busy||connecting||applying} onChange={e=>void selectProvider(e.target.value as AgentProvider)}><option value="codex">Codex</option><option value="kimi">Kimi</option><option value="qwen">Qwen</option></select></label><button className="button" disabled={busy||connecting||applying} onClick={()=>setLogin(true)}>{t("登录 / 账户")}</button></div>
   <div className="agent-config">{connected?<><select value={model} disabled={busy||applying} onChange={e=>void selectModel(e.target.value)}>{!models.length&&<option value="">{t("登录后加载模型目录")}</option>}{models.map(m=><option key={m.id} value={m.model}>{m.displayName||m.model}</option>)}</select><span className="connection"><i/>{t(account?.requiresAuthentication?'待登录':'已连接')}</span></>:<button className="button wide" onClick={()=>void connect()} disabled={connecting}>{connecting?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>}{t("连接")} {provider==='codex'?'Codex':provider==='kimi'?'Kimi':'Qwen'}</button>}</div>
+  <div className="agent-planning"><label><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label><small>{t(planningMode?'生成计算流程和参数，等待审阅执行':'普通对话，不自动打开任务页')}</small></div>
   <div className="agent-controls"><label>{provider==='codex'?'Effort':t('思考设置')}<select value={effort} disabled={!connected||busy||applying} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((e:any)=><option key={e.reasoningEffort} value={e.reasoningEffort}>{e.reasoningEffort}</option>)}</select></label><button className="button" disabled={provider!=='codex'} title={provider==='codex'?t('上下文设置'):t('此提供方通过协议回报上下文，暂不支持修改预算')} onClick={()=>setOptions(!options)}><Settings2 size={14}/>{t('上下文')}</button></div>
   {options&&<div className="context-options"><label>{t('上下文预算 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={contextWindow} disabled={busy||applying} onChange={e=>{setContextWindow(e.target.value);setApplied('');}}/></label><label>{t('自动压缩阈值 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={compactLimit} disabled={busy||applying} onChange={e=>{setCompactLimit(e.target.value);setApplied('');}}/></label><p>{t('预算不会扩大模型本身的最大容量。应用后恢复当前会话，计算作业继续运行。')}</p><button className="button" disabled={busy||applying} onClick={()=>void applyOptions()}>{tr(applying?t('应用中…'):t('应用上下文设置'))}</button><small>{applied}</small></div>}
   <div className="context-usage">{usage?t("上下文")+" "+(usage.last?.totalTokens?.toLocaleString()||t("未知"))+" / "+(usage.modelContextWindow?.toLocaleString()||t("未知"))+" tokens":t("上下文用量：等待服务回报")}</div>

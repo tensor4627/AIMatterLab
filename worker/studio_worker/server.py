@@ -59,6 +59,10 @@ def tools():
             continue
         schema = {"type": "object", "properties": {k: {"type": v} for k, v in properties.items()},
                   "required": list(properties)}
+        if name == "present_task":
+            schema["properties"]["steps"]={"type":"array","items":{"type":"string"}}
+            schema["properties"]["missing_fields"]={"type":"array","items":{"type":"string"}}
+            schema["additionalProperties"]=False
         if name == "prepare_run":
             schema["properties"]["spec"] = {"type":"object", "required":["project_id","environment_id","engine","gpu","max_seconds","inputs","idempotency_key"],
                 "properties":{"project_id":{"type":"string"},"environment_id":{"type":"string"},"engine":{"type":"string","enum":list(ENGINES)},"gpu":{"type":"integer","minimum":0},"max_seconds":{"type":"integer","minimum":1},"inputs":{"type":"object","additionalProperties":{"type":"string"}},"idempotency_key":{"type":"string"},"parameters":{"type":"object"},"name":{"type":"string"}}}
@@ -81,7 +85,7 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.4.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.5.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/projects":
             return store.list("project")
         if path == "/api/environments":
@@ -118,12 +122,17 @@ def dispatch(service, method, path, data, admin=False):
         raise ValueError("Unknown route")
     if path=="/api/tasks/present":
         leaf(data["task_id"])
-        if not isinstance(data.get("parameters"),dict) or not isinstance(data.get("steps"),list) or not isinstance(data.get("missing_fields"),list):
-            raise ValueError("Structured parameters and workflow steps required")
+        if set(data)!={"task_id","name","steps","parameters","missing_fields"}:
+            raise ValueError("present_task requires top-level task_id, name, steps, parameters, missing_fields; no workflow nesting")
+        if not isinstance(data.get("name"),str) or not data["name"].strip() or not isinstance(data.get("parameters"),dict) or not isinstance(data.get("steps"),list) or not all(isinstance(v,str) for v in data["steps"]) or not isinstance(data.get("missing_fields"),list) or not all(isinstance(v,str) for v in data["missing_fields"]):
+            raise ValueError("name must be text, parameters an object, steps and missing_fields arrays of strings")
         return store.put("task-parameters",{"id":data["task_id"],"kind":"task-parameters","name":data["name"],"parameters":data["parameters"],"steps":data["steps"],"missing_fields":data["missing_fields"],"status":"draft"})
     if path=="/api/clusters":
         if not admin:raise PermissionError("Only the desktop user can register cluster connections")
         return service.clusters.register(data)
+    if path=="/api/cluster/test":
+        if not admin:raise PermissionError("Connection testing is private to the desktop user")
+        return service.clusters.test_connection(data["connection"])
     if path=="/api/cluster/profile":
         if not admin:raise PermissionError("Connection details are private")
         return store.get("cluster",data["cluster_id"])
@@ -280,7 +289,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.4.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.5.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "ping":
                         value = {}

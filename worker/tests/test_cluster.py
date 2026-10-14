@@ -91,3 +91,43 @@ class ClusterLifecycle(unittest.TestCase):
         r["cluster_snapshot"]["scheduler"]="slurm";s=batch_script(r);self.assertIn("#SBATCH --partition=fixture",s);self.assertIn("#SBATCH --export=NONE",s)
         with self.assertRaises(ValueError):profile({**r["cluster_snapshot"],"target":"-oProxyCommand=bad"})
         with self.assertRaises(ValueError):profile({**r["cluster_snapshot"],"remote_root":"/"})
+
+    def test_explicit_username_legacy_and_missing_user(self):
+        from studio_worker.cluster import ssh_endpoint
+        self.assertEqual(ssh_endpoint({"target":"remote@example.test"}),("example.test","remote"))
+        self.assertEqual(ssh_endpoint({"target":"old@example.test","host":"example.test","username":"edited"}),("example.test","edited"))
+        with self.assertRaises(ValueError):ssh_endpoint({"host":"example.test"})
+        with self.assertRaises(ValueError):ssh_endpoint({"host":"example.test","username":"-oProxyCommand=bad"})
+        public=self.cluster.register({**self.cluster.store.get("cluster",self.profile["id"]),"username":"edited"})
+        self.assertNotIn("username",public);self.assertNotIn("host",public)
+
+    def test_ssh_argv_forces_user_even_with_a_local_config(self):
+        from studio_worker.cluster import SSH
+        from unittest.mock import patch
+        import subprocess
+        p=self.cluster.store.get("cluster",self.profile["id"])
+        with patch("studio_worker.cluster.subprocess.run",return_value=subprocess.CompletedProcess([],0,b"fixture",b"")) as call:
+            SSH(p).run("id -un")
+        argv=call.call_args.args[0]
+        self.assertEqual(argv[argv.index("-l")+1],"fixture")
+        self.assertIn("example.test",argv);self.assertNotIn("fixture@example.test",argv)
+
+    def test_connection_check_does_not_save_or_disclose_user(self):
+        class IdentityWire:
+            def __init__(self,p):self.p=p
+            def run(self,script,**kwargs):
+                self.assert_script=script
+                return self.p["username"]+"\n"
+        self.cluster.transport=IdentityWire
+        p=self.cluster.store.get("cluster",self.profile["id"]);count=len(self.cluster.store.list("cluster"))
+        result=self.cluster.test_connection(p)
+        self.assertEqual(result["status"],"passed");self.assertNotIn("fixture",str(result))
+        self.assertEqual(len(self.cluster.store.list("cluster")),count)
+        with self.assertRaises(PermissionError):dispatch(self.service,"POST","/api/cluster/test",{"connection":p},False)
+
+    def test_present_task_contract_requires_top_level_fields(self):
+        schema=next(t['inputSchema'] for t in tools() if t['name']=='present_task')
+        self.assertEqual(schema['properties']['steps']['items'],{'type':'string'})
+        with self.assertRaises(ValueError):dispatch(self.service,'POST','/api/tasks/present',{'task_id':'draft','workflow':{'steps':['prepare']},'parameters':{},'missing_fields':[]},False)
+        draft=dispatch(self.service,'POST','/api/tasks/present',{'task_id':'draft','name':'MD','steps':['prepare'],'parameters':{'temperature':345},'missing_fields':['structure']},False)
+        self.assertEqual(draft['parameters']['temperature'],345);self.assertEqual(draft['status'],'draft')

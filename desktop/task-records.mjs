@@ -14,15 +14,24 @@ export function structuredResult(value){
 export class TaskRecords{
  constructor(catalog,publish){this.catalog=catalog;this.publish=publish;this.active=new Map();}
  create(value){
+  if(value.planningMode!==true)throw Error('Enable task planning before creating a task');
   if(!['codex','kimi','qwen'].includes(value.provider)||typeof value.request!=='string'||!value.request.trim()||value.request.length>100000)throw Error('Invalid task intent');
-  const task={id:randomUUID(),kind:'agent-task',name:value.request.trim().slice(0,100),request:value.request,provider:value.provider,projectId:value.projectId||null,plan:[],artifacts:[],phase:'collecting',updatedAt:Date.now()};
+  const task={id:randomUUID(),kind:'agent-task',planningMode:true,name:value.request.trim().slice(0,100),request:value.request,provider:value.provider,projectId:value.projectId||null,plan:[],artifacts:[],phase:'collecting',updatedAt:Date.now()};
   this.catalog.put('agent-task',task.id,task);this.publish({method:'studio/taskUpdated',provider:task.provider,params:{task}});return task;
  }
  attach(id,provider,threadId){
   const task=this.catalog.get('agent-task',id);if(!task||task.provider!==provider)throw Error('Invalid task provider');
   this.active.set(provider+':'+threadId,id);return this.save({...task,threadId});
  }
- save(task){task.updatedAt=Date.now();this.catalog.put('agent-task',task.id,task);this.publish({method:'studio/taskUpdated',provider:task.provider,params:{task}});return task;}
+ prepareTurn(provider,value){
+  const {planningMode=false,studioTaskId,...params}=value;
+  if(typeof planningMode!=='boolean'||typeof params.threadId!=='string'||!params.threadId)throw Error('Invalid interaction mode');
+  if(planningMode){if(!studioTaskId)throw Error('Planning requires a task record');this.attach(studioTaskId,provider,params.threadId);}
+  else {if(studioTaskId)throw Error('Chat cannot create a task');this.active.delete(provider+':'+params.threadId);}
+  const mode=planningMode?'[Studio interaction mode: planning]\nstudioTaskId: '+studioTaskId+'\nCall gpusampling present_task with exactly the top-level keys task_id, name, steps (array of strings), parameters (object), and missing_fields (array of strings). Use task_id='+studioTaskId+'. Do not nest steps inside workflow. Confirm a successful task-parameters result before claiming the page was filled; correct tool errors. Then stop for human review.':'[Studio interaction mode: chat]\nAnswer in conversation. Read-only inspection is allowed. Do not present_task, create workflow or calculation drafts, write inputs, or open task pages. Ask the user to enable task planning when they want a prepared computation.';
+  return {...params,input:[...(params.input||[]),{type:'text',text:mode}]};
+ }
+ save(task){const previous=this.catalog.get('agent-task',task.id);task.updatedAt=Math.max(Date.now(),(previous?.updatedAt||0)+1);this.catalog.put('agent-task',task.id,task);this.publish({method:'studio/taskUpdated',provider:task.provider,params:{task}});return task;}
  event(event){
   const p=event.params||{},provider=event.provider||'codex',id=this.active.get(provider+':'+p.threadId);if(!id)return;
   const task=this.catalog.get('agent-task',id);if(!task)return;

@@ -22,7 +22,7 @@ try{
  const model=models.data.find(m=>m.isDefault)?.model||models.data[0]?.model;
  report.checks.account={status:account.account?'passed':'blocked',type:account.account?.type||null};
  report.checks.catalog={count:models.data.length,selected:model};if(!model||!account.account)throw Error('Authenticated model access unavailable');
- const task=tasks.create({provider:'codex',request:'Display a scientific parameter draft for review'});
+ const task=tasks.create({planningMode:true,provider:'codex',request:'Display a scientific parameter draft for review'});
  const started=await bridge.request('thread/start',{model,cwd:root,sandbox:'read-only',approvalPolicy:'on-request',developerInstructions:STUDIO_INSTRUCTIONS});
  tasks.attach(task.id,'codex',started.thread.id);
  await bridge.request('turn/start',{threadId:started.thread.id,model,input:[{type:'text',text:'Use gpusampling present_task exactly once with task_id='+task.id+', name="Readonly parameter integration", steps=["Check inputs","Review parameters"], parameters={"temperature":300,"units":"K"}, missing_fields=["structure","potential"]. Do not call other tools, validate, submit or execute anything. Then reply STUDIO_TASK_PAGE_OK.'}]});

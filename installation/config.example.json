@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "desktop": {
+    "agent_provider": "codex",
+    "install_dependencies": true
+  },
+  "worker": {
+    "distribution": "Ubuntu",
+    "root": "~/.local/state/gpu-sampling-studio/installation",
+    "port": 8772
+  },
+  "compute": {
+    "kind": "wsl",
+    "environment": {
+      "executables": {
+        "python": "/ABSOLUTE/PYTHON/bin/python"
+      },
+      "repositories": {},
+      "variables": {}
+    }
+  },
+  "bootstrap": {
+    "enabled": false
+  },
+  "gpu": 0,
+  "cases": [
+    "worker",
+    "reference-md",
+    "pydyn-md"
+  ]
+}

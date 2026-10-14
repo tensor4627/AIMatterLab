@@ -10,6 +10,7 @@ import { localSkills } from './skills.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
 import {TaskRecords} from './task-records.mjs';
 import {existingConnections,existingProfile} from './existing-ssh.mjs';
+import {sshEndpoint} from './ssh-endpoint.mjs';
 import { Catalog } from './catalog.mjs';
 import { CodexBridge } from './codex.mjs';
 import {validatePlan} from '../shared/workflows.mjs';
@@ -22,11 +23,13 @@ const exec = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here,'..');
 const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'worker');
+const installationVerifying=process.argv.includes('--studio-install-verify');
 const improvementsVerifying=process.argv.includes('--studio-improvements-verify');
 const providerVerifying=process.argv.includes('--studio-providers-verify');
-const verifying=improvementsVerifying||providerVerifying||process.argv.includes('--studio-verify');
+const verifying=installationVerifying||improvementsVerifying||providerVerifying||process.argv.includes('--studio-verify');
 const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
-if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v0.4':providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
+if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
+else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v0.5':providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
 let window, catalog, settings, agents,taskRecords;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
@@ -70,7 +73,11 @@ catalog = new Catalog(path.join(app.getPath('userData'),'studio'));
 settings = { ...defaults, codexPath:findCodex(),kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'), ...catalog.get('settings','main') };
 for(const provider of ['kimi','qwen']){const stored=settings[provider+'Path'];if(typeof stored==='string'&&/[\\\\/]/.test(stored)&&!fs.existsSync(stored))settings[provider+'Path']=findAgent(provider);}
 if(typeof settings.codexPath==='string'&&/[\\\\/]/.test(settings.codexPath)&&!fs.existsSync(settings.codexPath))settings.codexPath=findCodex();
-if(verifying)settings={...settings,agentProvider:'codex',agentLayout:'right',kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'),language:'zh-CN',fontSize:13,editorFontSize:13,terminalFontSize:12,fontFamily:'system',workerRoot:JSON.parse(fs.readFileSync(path.join(verificationRoot,'.studio/validation/science.json'),'utf8')).desktop_worker_root,workerPort:8770};
+if(verifying&&!installationVerifying)settings={...settings,agentProvider:'codex',agentLayout:'right',kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'),language:'zh-CN',fontSize:13,editorFontSize:13,terminalFontSize:12,fontFamily:'system',workerRoot:JSON.parse(fs.readFileSync(path.join(verificationRoot,'.studio/validation/science.json'),'utf8')).desktop_worker_root,workerPort:8770};
+if(installationVerifying){
+ const config=JSON.parse(fs.readFileSync(process.env.STUDIO_INSTALL_CONFIG,'utf8'));
+ settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,agentProvider:config.desktop.agent_provider||'codex'});
+}
 agents=new AgentHub({codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:()=>worker.connection});
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
@@ -145,8 +152,7 @@ handle('agent.connect',async({provider})=>{providerId(provider);if(!worker.conne
 handle('agent.disconnect',({provider})=>{providerId(provider);agents.bridge(provider)?.close();return {};});
 handle('agent.account',({provider})=>agents.account(provider));
 handle('agent.rpc',async({provider,method,params={}})=>{
-  const taskId=params.studioTaskId;delete params.studioTaskId;
-  if(taskId&&method==='turn/start')taskRecords.attach(taskId,provider,params.threadId);
+  if(method==='turn/start')params=taskRecords.prepareTurn(provider,params);
   if(provider!=='codex'&&method==='turn/start'){
     const registered=localSkills([path.join(process.env.USERPROFILE||'','.codex','skills'),path.join(root,'.agents','skills'),...settings.skillRoots]);
     const input=[];
@@ -221,9 +227,10 @@ handle('terminal.start',async({kind,alias,clusterId}) => {
   let child, protocol=false;
   if(kind==='cluster'){
     const p=await worker.request('POST','/api/cluster/profile',{cluster_id:clusterId});
-    const args=['-tt','-p',String(p.port),'-o','StrictHostKeyChecking=yes'];
+    const endpoint=sshEndpoint(p);
+    const args=['-tt','-l',endpoint.username,'-p',String(p.port),'-o','StrictHostKeyChecking=yes'];
     if(p.identity_file)args.push('-i',p.identity_file);
-    args.push(p.target);
+    args.push(endpoint.host);
     if(p.via?.length){const inner=p.via.reduceRight((cmd,hop)=>'ssh -tt -o StrictHostKeyChecking=yes '+quoteShell(hop)+(cmd?' '+quoteShell(cmd):''),'');args.push(inner);}
     const native=p.ssh_client.startsWith('/mnt/c/')?'C:/'+p.ssh_client.slice(7):p.ssh_client;
     child=/^[A-Za-z]:/.test(native)?spawn(native,args,{stdio:['pipe','pipe','pipe'],windowsHide:true}):spawn('wsl.exe',['-d',settings.distribution,'--',native,...args],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -272,7 +279,7 @@ window.webContents.on('will-navigate',(event,url)=>{if(url!==window.webContents.
 const development=process.env.STUDIO_DEV_URL;
 if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw new Error('Invalid development origin');
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
-if(verifying){const errors=[];window.webContents.on('console-message',(_event,level,message)=>{if(level===3)errors.push(message);});const {verifyDesktop}=await import(improvementsVerifying?'./improvements-verification.mjs':providerVerifying?'./provider-verification.mjs':'./verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
+if(verifying){const errors=[];window.webContents.on('console-message',(_event,level,message)=>{if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./install-verification.mjs':improvementsVerifying?'./improvements-verification.mjs':providerVerifying?'./provider-verification.mjs':'./verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',()=>{agents.close();worker.close();for(const t of terminals.values())t.child.kill();});
 

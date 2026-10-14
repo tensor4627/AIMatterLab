@@ -11,7 +11,8 @@ export function existingProfile(home,ref){
  const data=JSON.parse(fs.readFileSync(path.join(home,'.codex','.codex-global-state.json'),'utf8'));
  const c=(data['codex-managed-remote-connections']||[]).find((v,i)=>(v.hostId||'existing-'+i)===ref);
  if(!c)throw Error('Existing connection no longer available');
- return {name:'已有集群',scheduler:'lsf',target:c.hostname,port:c.sshPort||22,identity_file:c.identity||path.join(home,'.ssh','id_rsa'),
+ const parts=c.hostname.split('@'),host=parts.at(-1),username=c.username||c.user||(parts.length===2?parts[0]:'');
+ return {name:'已有集群',scheduler:'lsf',host,username,target:c.hostname,port:c.sshPort||22,identity_file:c.identity||path.join(home,'.ssh','id_rsa'),
   ssh_client:'/mnt/c/Windows/System32/OpenSSH/ssh.exe',via:[],remote_root:'~/.gpu-sampling-studio/runs',
   environment:{executables:{python:'/usr/bin/python3'},repositories:{},variables:{}},activation:'',
   queue:'',limits:{cpus:64,gpus:8,memory_mb:262144}};

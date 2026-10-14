@@ -1,4 +1,5 @@
 const english:Record<string,string> = {
+"任务规划模式":"Task Planning Mode","生成计算流程和参数，等待审阅执行":"Prepare workflow and parameters for review","普通对话，不自动打开任务页":"Chat without opening task pages","SSH 主机":"SSH Host","SSH 用户名":"SSH Username","必须显式填写远程用户名，不使用本机 Windows 用户名。旧连接会拆分 user@host，修改后保存新版本。":"An explicit remote username is required. Legacy user@host entries are split; save a new version after editing.","测试 SSH 连接":"Test SSH Connection","SSH 连接验证通过，远程用户匹配":"SSH connection passed; remote user matches","SSH 连接验证未通过":"SSH connection failed",
 "最小文字字号":"Minimum Text Size",
 "说明文字、状态栏和标签也遵守此下限":"Captions, status bars and labels also follow this minimum",
 "Agent 对话字号":"Agent Chat Text Size",

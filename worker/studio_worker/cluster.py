@@ -27,11 +27,28 @@ def word(value, name="value"):
     return value
 
 
+def ssh_endpoint(value):
+    legacy = value.get("target", "")
+    if not isinstance(legacy, str):
+        raise ValueError("Invalid SSH target")
+    if legacy:word(legacy,"legacy SSH target")
+    parts = legacy.strip().split("@")
+    if len(parts)>2:raise ValueError("Invalid SSH target")
+    host = value.get("host") or parts[-1]
+    username = value.get("username", parts[0] if len(parts) == 2 else "")
+    if not isinstance(host, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,255}", host):
+        raise ValueError("Explicit SSH hostname required")
+    if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,63}", username):
+        raise ValueError("Set an explicit SSH username; the local Windows user is never assumed")
+    return host, username
+
+
 def profile(value):
     p = dict(value)
     if p.get("scheduler") not in ("lsf", "slurm"):
         raise ValueError("Select LSF or Slurm")
-    word(p["target"], "SSH target")
+    host, username = ssh_endpoint(p)
+    p.update(host=host, username=username, target=username+"@"+host)
     port = p.get("port", 22)
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("Invalid SSH port")
@@ -77,15 +94,16 @@ class SSH:
 
     def run(self, script, data=None, timeout=40):
         p = self.p
+        host, username = ssh_endpoint(p)
         args = [p["ssh_client"], "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                 "-o", "ConnectTimeout=12", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2"]
         if p.get("identity_file"):
             args += ["-i", p["identity_file"]]
-        args += ["-p", str(p["port"])]
+        args += ["-l", username, "-p", str(p["port"])]
         remote = "bash -lc " + shlex.quote(script)
         for hop in reversed(p.get("via", [])):
             remote = "ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes " + shlex.quote(hop) + " " + shlex.quote(remote)
-        args += [p["target"], remote]
+        args += [host, remote]
         try:
             result = subprocess.run(args, input=data, capture_output=True, timeout=timeout)
         except (subprocess.TimeoutExpired, OSError):
@@ -206,6 +224,13 @@ class Clusters:
         if cluster_id not in project["policy"].get("clusters", []):
             raise PermissionError("Cluster is not authorized for this project")
         return project, self.store.get("cluster", cluster_id)
+
+    def test_connection(self, value):
+        p = profile(value)
+        observed = self.transport(p).run("id -un", timeout=25).strip().splitlines()
+        if not observed or observed[-1] != p["username"]:
+            raise ConnectionError("Remote username differs; check the explicit SSH username")
+        return {"status":"passed","username_matches":True,"scope":"SSH authentication only; no files changed or jobs submitted"}
 
     def probe(self, cluster_id):
         p = self.store.get("cluster", cluster_id)
