@@ -29,3 +29,13 @@ body,input,select,textarea,button{font-family:var(--ui-font,"Segoe UI","Microsof
 .agent-planning {padding: 8px 14px; border-bottom:1px solid var(--border);}
 .agent-planning label {display:flex;align-items:center;gap:8px;color:var(--text);}
 .agent-planning small {display:block;margin-top:5px;color:var(--muted);font-size:calc(max(11px,var(--ui-min-font,12px))*var(--ui-scale,1));}
+
+/* Frontend review: keyboard focus, light-theme contrast and small controls. */
+.agent-planning{border-bottom-color:var(--line)}
+.composer textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.workspace-tab .tab-close{min-width:24px;min-height:24px;opacity:.8}
+:root[data-theme=light]{--muted:#5b5868}
+:root[data-theme=light] .nav-item{color:#595566}
+:root[data-theme=light] .badge.unknown,:root[data-theme=light] .badge.queued,:root[data-theme=light] .approval>div:first-child,:root[data-theme=light] .task-card small{color:#775119}
+.chart-empty{padding:24px}
+.badge.ready{color:var(--accent)}

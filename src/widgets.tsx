@@ -1,5 +1,5 @@
 import {tr} from './i18n';
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import * as echarts from 'echarts';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
@@ -13,31 +13,36 @@ import {invoke} from './types';
 
 (self as any).MonacoEnvironment={getWorker:()=>new EditorWorker()};
 loader.config({monaco});
-export function CodeEditor({value,onChange,language='python',theme='dark',height='100%'}:{value:string;onChange:(v:string)=>void;language?:string;theme?:string;height?:string}){
+export function CodeEditor({value,onChange,language='python',theme='dark',height='100%',readOnly=false}:{value:string;onChange:(v:string)=>void;language?:string;theme?:string;height?:string;readOnly?:boolean}){
  const [fontSize,setFontSize]=useState(Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13);
  useEffect(()=>{const update=()=>setFontSize(Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13);window.addEventListener('studio:appearance',update);return()=>window.removeEventListener('studio:appearance',update);},[]);
  return <Editor height={height} language={language} value={value} theme={theme==='dark'?'vs-dark':'light'}
-  onChange={v=>onChange(v??'')} options={{fontSize,fontFamily:'Cascadia Code, Consolas, monospace',minimap:{enabled:false},padding:{top:16},scrollBeyondLastLine:false,automaticLayout:true,tabSize:4}}/>;
+  onChange={v=>onChange(v??'')} options={{fontSize,fontFamily:'Cascadia Code, Consolas, monospace',minimap:{enabled:false},padding:{top:16},scrollBeyondLastLine:false,automaticLayout:true,tabSize:4,readOnly}}/>;
 }
 export function Chart({text,name}:{text:string;name:string}){
- const [font,setFont]=useState(13);
- useEffect(()=>{const update=()=>setFont(Math.max(12,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12)*(parseFloat(document.documentElement.style.getPropertyValue('--ui-scale'))||1));update();window.addEventListener('studio:appearance',update);return()=>window.removeEventListener('studio:appearance',update);},[]);
+ const [font,setFont]=useState(13),[light,setLight]=useState(document.documentElement.dataset.theme==='light');
+ useEffect(()=>{const update=()=>{setFont(Math.max(12,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12)*(parseFloat(document.documentElement.style.getPropertyValue('--ui-scale'))||1));setLight(document.documentElement.dataset.theme==='light');};update();window.addEventListener('studio:appearance',update);return()=>window.removeEventListener('studio:appearance',update);},[]);
  const ref=useRef<HTMLDivElement>(null);
+ const data=useMemo(()=>{
+  const all=text.split('\n').filter(x=>x.trim()&&!x.startsWith('#'));
+  const rows=all.slice(0,4000).map(x=>x.trim().split(/[,\s]+/).map(Number)).filter(r=>r.length>1&&r.every(Number.isFinite));
+  return {rows,cutLines:all.length>4000,cutColumns:(rows[0]?.length||0)>7};
+ },[text]);
  useEffect(()=>{
-  if(!ref.current)return;
-  const lines=text.split('\n').filter(x=>x.trim()&&!x.startsWith('#')).slice(0,4000);
-  const rows=lines.map(x=>x.trim().split(/[,\s]+/).map(Number)).filter(r=>r.length>1&&r.every(Number.isFinite));
+  if(!ref.current||!data.rows.length)return;
+  const rows=data.rows,ink=light?'#4a4958':'#aaaab9',grid=light?'#00000014':'#ffffff08';
   const chart=echarts.init(ref.current);
-  chart.setOption({backgroundColor:'transparent',color:['#a79aff','#5ccebe','#ecbe77','#7eafff'],
-   textStyle:{color:'#aaaab9',fontSize:font},tooltip:{trigger:'axis'},legend:{top:8,textStyle:{color:'#aaaab9',fontSize:font},type:'scroll'},
-   grid:{left:60,right:24,top:54,bottom:55},dataZoom:[{type:'inside'},{type:'slider',height:15,bottom:10}],
-   xAxis:{axisLabel:{fontSize:font},nameTextStyle:{fontSize:font},type:'value',name:'column 0',splitLine:{lineStyle:{color:'#ffffff08'}}},
-   yAxis:{axisLabel:{fontSize:font},type:'value',scale:true,splitLine:{lineStyle:{color:'#ffffff08'}}},
+  chart.setOption({backgroundColor:'transparent',color:light?['#6753bb','#147e70','#94620a','#335fa8']:['#a79aff','#5ccebe','#ecbe77','#7eafff'],
+   textStyle:{color:ink,fontSize:font},tooltip:{trigger:'axis'},legend:{top:8,textStyle:{color:ink,fontSize:font},type:'scroll'},
+   grid:{left:60,right:48,top:54,bottom:85},dataZoom:[{type:'inside'},{type:'slider',height:15,bottom:10}],
+   xAxis:{axisLabel:{fontSize:font},nameTextStyle:{fontSize:font},type:'value',name:'column 0',nameLocation:'middle',nameGap:30,splitLine:{lineStyle:{color:grid}}},
+   yAxis:{axisLabel:{fontSize:font},type:'value',scale:true,splitLine:{lineStyle:{color:grid}}},
    series:rows[0]?.slice(1,7).map((_,i)=>({name:'column '+(i+1),type:'line',showSymbol:false,data:rows.map(r=>[r[0],r[i+1]])}))||[]});
   const observer=new ResizeObserver(()=>chart.resize());observer.observe(ref.current);
   return()=>{observer.disconnect();chart.dispose();};
- },[text,name,font]);
- return <div className="chart-wrap"><div className="chart-note">{name}{tr("· 原始列预览，单位以引擎输出定义为准")}</div><div ref={ref} className="chart"/></div>;
+ },[data,name,font,light]);
+ const notes=[data.cutLines&&'仅前 4000 行',data.cutColumns&&'仅前 6 列'].filter(Boolean);
+ return <div className="chart-wrap"><div className="chart-note">{name}{tr("· 原始列预览，单位以引擎输出定义为准")}</div>{notes.length>0&&<div className="chart-note">{tr('已截断：')}{notes.join('，')}</div>}{data.rows.length?<div ref={ref} className="chart" role="img" aria-label={name}/>:<div className="chart-empty muted">{tr('没有可绘制的数值列')}</div>}</div>;
 }
 const elementColors:Record<string,number>={H:0xe2e2ed,C:0x8b8caa,N:0x7f9efa,O:0xea7b91,Li:0xb296f6,Si:0xd8b58c,P:0xe2af70,S:0xe8d276,Cl:0x79c8a2,Ga:0xaa9edc};
 export function Structure({data}:{data:{positions:number[][];symbols:string[];cell:number[][];n_atoms:number}}){
