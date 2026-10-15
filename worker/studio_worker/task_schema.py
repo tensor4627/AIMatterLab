@@ -26,8 +26,10 @@ def validate_task(data):
     steps, missing = data["steps"], data["missing_fields"]
     if not isinstance(steps, list) or len(steps) > 80 or not isinstance(missing, list):
         raise ValueError("Invalid workflow steps")
+    # Legacy drafts include prose blockers; only typed field keys are paths.
     for key in missing:
-        field_key(key)
+        if not isinstance(key, str) or not key.strip() or len(key) > 2000:
+            raise ValueError("Invalid missing requirement")
     identifiers, fields = set(), set()
     for step in steps:
         if isinstance(step, str):

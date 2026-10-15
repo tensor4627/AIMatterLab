@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {TaskRecords} from '../desktop/task-records.mjs';
 import {executeTask} from '../desktop/task-execution.mjs';
-import {normalizeSteps,workflowMissing,setParameter,explicitNewWorkflow} from '../shared/task-fields.mjs';
+import {normalizeSteps,workflowMissing,missingRequirements,setParameter,explicitNewWorkflow} from '../shared/task-fields.mjs';
 function fixture(){
  const data=new Map(),events=[],catalog={get:(kind,id)=>structuredClone(data.get(kind+':'+id)),put:(kind,id,value)=>{data.set(kind+':'+id,structuredClone(value));return value;},list:kind=>[...data].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>structuredClone(value))};
  return {data,catalog,events,records:new TaskRecords(catalog,event=>events.push(event))};
@@ -74,4 +74,19 @@ test('Typed completeness rejects string booleans, invalid options and optional m
 test('Legacy sessions migrate to their newest workflow while retaining older records',()=>{
  const {records,catalog}=fixture();for(const [id,time] of [['older',1],['newer',2]])catalog.put('agent-task',id,{id,kind:'agent-task',provider:'codex',threadId:'legacy',name:id,updatedAt:time,parameters:{},steps:[],artifacts:[]});
  assert.equal(records.conversations()[0].taskId,'newer');assert.equal(records.read('older').id,'older');
+});
+
+
+test('Legacy natural-language blockers survive restoration and manual edits without becoming field paths',()=>{
+ const prose='确认 CV 原子编号与单位，并提供实际结构文件。';
+ const missing=['md.structure_file',prose,'__proto__.polluted'];
+ const normalized=normalizeSteps(['审阅输入'],{md:{temperature:300}},missing);
+ assert.deepEqual(missingRequirements(missing),[prose,'__proto__.polluted']);
+ assert(normalized.flatMap(s=>s.fields).every(f=>!missingRequirements(missing).includes(f.key)));
+ assert.deepEqual(workflowMissing(normalized,{md:{temperature:300}},missing),missing);
+ const {records,catalog}=fixture(),task=create(records);
+ catalog.put('agent-task',task.id,{...task,steps:['审阅输入'],parameters:{md:{temperature:300}},missingFields:missing});
+ const updated=records.edit({id:task.id,changes:{'md.temperature':345}});
+ assert.equal(updated.parameters.md.temperature,345);assert.deepEqual(updated.missingFields,missing);
+ assert.equal(updated.review.status,'not_run');assert.equal({}.polluted,undefined);
 });

@@ -54,11 +54,20 @@ async function fixture(){
    throw Error('Unexpected fixture route: '+target);
   }};
  });
- await page.goto(base+'/validation/local/frontend-regression/harness.html');await page.waitForFunction(()=>window.renderTest);
+ await page.goto(base+'/validation/local/frontend-regression/harness.html',{timeout:30000});await page.waitForFunction(()=>window.renderTest);
  return {page,context};
 }
 async function check(name,fn){const {page,context}=await fixture();try{await fn(page);results.push({name,status:'passed'});}catch(e){results.push({name,status:'failed',error:String(e)});await page.screenshot({path:path.join(out,name+'.png'),fullPage:true});}finally{await context.close();}}
 try{
+ await check('legacy-prose-draft-restores-with-blockers',async p=>{
+  await p.evaluate(async()=>{window.__test.task={id:'legacy',provider:'codex',threadId:'fixture-thread',name:'Legacy draft',parameters:{md:{temperature:300}},plan:[{step:'审阅输入'}],missingFields:['确认实际结构与 CV 原子编号。','md.structure_file'],artifacts:[],updatedAt:1};await window.renderTest('AgentTaskPage',{worker:false,task:window.__test.task,environments:[],theme:'dark',onError:e=>{throw e;},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReview:()=>{},onReplace:()=>{},onRefresh:()=>{}});});
+  await p.getByTestId('workflow-requirements').waitFor();assert.match(await p.getByTestId('workflow-requirements').innerText(),/确认实际结构/);assert.equal(await p.getByTestId('execute-workflow').isDisabled(),true);
+  if(await p.locator('.visual-step-heading').last().getAttribute('aria-expanded')==='false')await p.locator('.visual-step-heading').last().click();await p.locator('[data-field="md.temperature"] input').fill('345');await p.waitForFunction(()=>window.__test.task.parameters.md.temperature===345);assert.equal(await p.getByTestId('workflow-requirements').isVisible(),true);
+ });
+ await check('broken-workflow-keeps-sidebar-and-agent',async p=>{
+  await p.evaluate(async()=>{window.studio.originalInvoke=window.studio.invoke;window.studio.invoke=async(method,data)=>method==='task.list'?[{id:'broken',provider:'codex',name:'Invalid persisted draft',steps:[{id:'invalid',title:'Invalid',fields:[{key:'__proto__.polluted',type:'text',label:'Invalid',required:true}]}],parameters:{},artifacts:[]}]:window.studio.originalInvoke(method,data);localStorage.setItem('studio.section','agent-task:broken');await window.renderTest('App');});
+  await p.getByTestId('view-error').waitFor();assert.equal(await p.locator('.sidebar').isVisible(),true);assert.equal(await p.locator('.agent-panel').isVisible(),true);await p.getByTestId('view-error').getByRole('button',{name:'返回工作台',exact:true}).click();await p.locator('.home-page').waitFor();assert.equal(await p.getByTestId('view-error').count(),0);
+ });
  await check('cluster-edits-survive-poll',async p=>{
   await p.clock.install();await p.evaluate(async()=>{const {ClusterRunPage}=await import('/src/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:'run',onError:()=>{},onAgent:()=>{}}));});
   const text=p.locator('.cluster-review textarea');await text.waitFor();await p.locator('.cluster-review input[type=checkbox]').check();await text.fill('{"temperature":345}');await p.clock.runFor(10050);assert.equal(await text.inputValue(),'{"temperature":345}');

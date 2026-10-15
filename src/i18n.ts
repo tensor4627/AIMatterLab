@@ -285,6 +285,12 @@ const english:Record<string,string> = {
 "保存凭据并连接":"Save credentials and connect",
 "密钥由主进程使用系统加密保存。模型是否可用以实际调用为准。":"The main process saves your key with system encryption. A real model call verifies access.",
 "已有加密凭据，可关闭此窗口直接连接。":"Encrypted credentials are stored. Close this window to connect.",
+"待确认事项":"Requirements to confirm",
+"以下事项需要在当前对话中补充并由 Agent 复核。":"Resolve these requirements in the current conversation and ask the Agent to review them.",
+"当前页面暂时无法显示":"This page could not be displayed",
+"项目和会话记录仍保留。可以返回工作台，或重新加载界面后重试。":"Your projects and conversations are preserved. Return to the workspace or reload to try again.",
+"重试当前页面":"Retry this page",
+"重新加载界面":"Reload the interface",
 "Kimi 可执行路径":"Kimi executable path",
 "Qwen 可执行路径":"Qwen executable path",
 "Kimi 和 Qwen 使用本应用私有配置与官方 ACP 协议。登录在右侧服务商面板完成。":"Kimi and Qwen use private profiles and official ACP. Sign in from the provider panel."

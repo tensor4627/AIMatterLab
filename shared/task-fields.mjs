@@ -3,6 +3,10 @@ export function fieldPath(key){
  if(typeof key!=='string'||key.length>200)throw Error('Invalid field key');
  const parts=key.split('.');if(parts.length>12||parts.some(p=>!p||forbidden.has(p)||!/^[\w-]+$/.test(p)))throw Error('Invalid field key');return parts;
 }
+// Older drafts also store natural-language blockers in missingFields. They are
+// review requirements, never parameter paths and never silently resolved.
+export function isFieldKey(key){try{fieldPath(key);return true;}catch{return false;}}
+export function missingRequirements(missing=[]){return missing.filter(key=>!isFieldKey(key));}
 export function parameterValue(parameters,key){let value=parameters;for(const part of fieldPath(key))value=value?.[part];return value;}
 export function setParameter(parameters,key,value){
  const result=structuredClone(parameters||{}),parts=fieldPath(key);let node=result;
@@ -32,7 +36,7 @@ export function normalizeSteps(steps,parameters={},missing=[]){
   return {...step,description:step.description||'',fields:step.fields.map(f=>{validField(f);if(used.has(f.key))throw Error('Duplicate field');used.add(f.key);return f;})};
  });
  const leftovers=flattenParameters(parameters).filter(f=>!used.has(f.key));
- for(const key of missing){fieldPath(key);if(!used.has(key)&&!leftovers.some(f=>f.key===key))leftovers.push(inferField(key,parameterValue(parameters,key),true));}
+ for(const key of missing){if(!isFieldKey(key))continue;if(!used.has(key)&&!leftovers.some(f=>f.key===key))leftovers.push(inferField(key,parameterValue(parameters,key),true));}
  if(leftovers.length)result.push({id:'parameters',title:'运行参数与文件',description:'未分组参数可直接编辑；Agent 可在后续更新中归入对应步骤。',fields:leftovers.map(f=>({...f,required:f.required||missing.includes(f.key)}))});
  return result;
 }
@@ -49,6 +53,6 @@ export function fieldMissing(field,parameters){
 }
 export function workflowMissing(steps,parameters={},missing=[]){
  const groups=normalizeSteps(steps,parameters,missing),keys=new Set();for(const group of groups)for(const f of group.fields)if(fieldMissing(f,parameters))keys.add(f.key);
- for(const key of missing)if(parameterValue(parameters,key)==null||parameterValue(parameters,key)==='')keys.add(key);return [...keys];
+ for(const key of missing)if(!isFieldKey(key)||parameterValue(parameters,key)==null||parameterValue(parameters,key)==='')keys.add(key);return [...keys];
 }
 export function explicitNewWorkflow(text){return typeof text==='string'&&!/不要|别|不需|无需|do not|don't/i.test(text)&&/(?:新建|另建|创建)(?:一个|一份|新的)?(?:新的)?(?:计算)?(?:流程|工作流)|(?:create|start) (?:a |another |new )*(?:new |another )workflow/i.test(text);}

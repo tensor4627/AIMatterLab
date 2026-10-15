@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {GitBranch,Sparkles,ArrowUpRight,ShieldCheck,Play,ChevronDown,RefreshCw} from 'lucide-react';
-import {normalizeSteps,setParameter,fieldMissing,parameterValue,workflowMissing} from '../shared/task-fields.mjs';
+import {normalizeSteps,missingRequirements,setParameter,fieldMissing,parameterValue,workflowMissing} from '../shared/task-fields.mjs';
 import {invoke,api,type Environment,type Run,type ClusterRun} from './types';
 import {ParameterFields} from './ParameterFields';
 import RunDetail from './RunDetail';
@@ -10,6 +10,7 @@ export default function AgentTaskPage({worker,task,onError,onRun,onCluster,onSet
  const queue=useRef<Promise<any>>(Promise.resolve()),pending=useRef<Record<string,any>>({}),identity=useRef(task.id);identity.current=task.id;
  const steps=normalizeSteps(task.steps?.length?task.steps:task.plan?.map((s:any)=>s.step)||[],parameters,task.missingFields||[]);
  const missing=workflowMissing(steps,parameters,task.missingFields||[]);
+ const requirements=missingRequirements(task.missingFields||[]);
  const artifact=task.artifacts?.filter((a:any)=>['run','cluster-run'].includes(a.kind)).at(-1);
  useEffect(()=>{setOpen(old=>{let changed=false;const next={...old};for(const step of normalizeSteps(task.steps?.length?task.steps:task.plan?.map((s:any)=>s.step)||[],task.parameters||{},task.missingFields||[])){if(!(step.id in next)){next[step.id]=step.fields.some(field=>fieldMissing(field,task.parameters||{}));changed=true;}}return changed?next:old;});},[task.id,task.updatedAt]);
  useEffect(()=>{let next=task.parameters||{};for(const [key,value] of Object.entries(pending.current))next=setParameter(next,key,value);setParameters(next);},[task.id,task.updatedAt]);
@@ -29,6 +30,7 @@ export default function AgentTaskPage({worker,task,onError,onRun,onCluster,onSet
   const absent=step.fields.filter(field=>fieldMissing(field,parameters)),expanded=open[step.id]??absent.length>0;
   return <section key={step.id} className={'visual-flow-step '+(absent.length?'needs-parameters':'parameters-ready')}><button className="visual-step-heading" aria-expanded={expanded} onClick={()=>setOpen(old=>({...old,[step.id]:!expanded}))}><span className="step-number">{index+1}</span><i className={'flow-dot '+(absent.length?'missing':'ready')}/><span className="visual-step-title"><strong>{t(step.title)}</strong><small>{absent.length?t('需要参数')+' · '+absent.map(f=>t(f.label)).join('、'):step.fields.slice(0,3).map(f=>t(f.label)+': '+(Array.isArray(parameterValue(parameters,f.key))?parameterValue(parameters,f.key).join(', '):String(parameterValue(parameters,f.key)??'—'))+(f.unit?' '+f.unit:'')).join(' · ')||t('流程步骤')}</small></span>{step.tool&&<span className="tag">{step.tool}</span>}<ChevronDown size={17} className={expanded?'expanded-chevron':''}/></button>{expanded&&<div className="visual-step-body">{step.description&&<p>{t(step.description)}</p>}<ParameterFields fields={step.fields} parameters={parameters} onChange={patch} onError={onError} disabled={busy}/>{!step.fields.length&&<p className="muted">{t('此步骤暂无参数；可在对话中补充。')}</p>}</div>}</section>;
  })}</div>
+ {requirements.length>0&&<section className="workflow-requirements" data-testid="workflow-requirements"><h3><i className="flow-dot missing"/>{t('待确认事项')}</h3><p>{t('以下事项需要在当前对话中补充并由 Agent 复核。')}</p><ul>{requirements.map((requirement,index)=><li key={index}>{requirement}</li>)}</ul></section>}
  {!steps.length&&<div className="notice">{t('等待 Agent 填写计算流程。')}</div>}
  {saveError&&<div className="notice" role="alert">{t('参数尚未保存，不能复核或执行。')}<button className="button" onClick={()=>void retrySave()}>{t('重试保存')}</button></div>}
  <div className="workflow-review-note" role="status"><ShieldCheck size={17}/><div><strong>{t(task.review?.status==='reviewing'?'AI 正在复核':task.review?.status==='ready'?'复核完成':'等待复核')}</strong><span>{t(task.review?.summary||'手动修改后点击复核，Agent 会检查缺项并更新当前流程。')}</span></div></div>

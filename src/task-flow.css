@@ -39,3 +39,7 @@
 .conversation-list .selected-conversation{background:var(--accent-bg);color:var(--accent)}
 .selected-conversation .conversation-dot{background:var(--accent)}.sidebar{overflow-y:auto}
 @media(max-width:1150px){.visual-step-body{padding-left:20px}.flow-legend small{width:100%}.visual-step-heading>.tag{display:none}}
+
+.workflow-requirements{margin:18px 0;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.workflow-requirements h3{display:flex;align-items:center;gap:10px}
+.workflow-requirements li{margin:10px 0;line-height:1.7;overflow-wrap:anywhere}

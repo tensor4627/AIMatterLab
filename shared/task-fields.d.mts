@@ -9,3 +9,6 @@ export function normalizeSteps(steps:any[],parameters?:Record<string,any>,missin
 export function fieldMissing(field:TaskField,parameters:Record<string,any>):boolean;
 export function workflowMissing(steps:any[],parameters?:Record<string,any>,missing?:string[]):string[];
 export function explicitNewWorkflow(text:string):boolean;
+
+export function isFieldKey(key:unknown):boolean;
+export function missingRequirements(missing?:string[]):string[];

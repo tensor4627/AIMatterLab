@@ -42,3 +42,12 @@ class TaskSchema(unittest.TestCase):
         payload["offset"] = 0
         with self.assertRaises(ValueError):
             validate_task(payload)
+
+    def test_legacy_prose_requirements_remain_data_not_paths(self):
+        payload = self.payload()
+        payload["missing_fields"] = ["md.structure_file", "确认 CV 原子编号与单位。", "__proto__.polluted"]
+        validate_task(payload)
+        for value in (None, 3, {}, "", "x" * 2001):
+            payload["missing_fields"] = [value]
+            with self.assertRaises(ValueError):
+                validate_task(payload)
