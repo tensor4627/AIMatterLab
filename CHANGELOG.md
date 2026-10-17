@@ -4,6 +4,7 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
+| 0.13.0 | 第三轮：可迁移公共skill/ignored私有overlay；API/ACP受限附件；有界同作业核对脚本随包；首turn拒绝恢复 | Node109、worker74、界面38、实际桌面附件3项、正常profile/SFX、895文件与连接保留 passed | LSF原作业仍queued，科学运行/回收、真实DeepSeek推理/TPS及全新安装 not_run；[v0.13](docs/v0.13.md) |
 | 0.12.0 | 第二轮：输入复核receipt、原生PyDyn采样验证、终态回收/预览、空会话恢复、中英文部署 | Node核心70、worker74、界面38、构建/正常profile、真实AI复核/SSH提交/关窗恢复 passed | GPUMD queued、PyDyn待串行提交，科学执行与回收 not_run；[v0.12](docs/v0.12.md) |
 | 0.11.0 | 第一轮：科学流程/部署分离；双版本执行门槛、单walker默认、实际输入审阅与一致性保护、受限SSH传输基础 | 核心Node68、worker72、浏览器35、生产构建 passed | 真实新作业/便携包 not_run；[v0.11](docs/v0.11.md) |
 | 0.10.0 | DeepSeek API 直连、加密 Key 登录、动态模型目录、快速/思考模式、流式原生科学工具、会话恢复；中断复核不会放行执行 | Node 61、worker 52、浏览器 32、实际 Electron 3 项、正常 profile/便携包、867 文件及配置保留 passed | DeepSeek 真实账户/推理/TPS、新科学与SSH提交 not_run；[v0.10](docs/v0.10.md) |

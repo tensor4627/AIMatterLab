@@ -13,10 +13,10 @@ export function loginUrl(provider,url){
 }
 export class AgentHub extends EventEmitter{
  constructor({codex,root,catalog,vault,settings,worker,fetchApi}){
-  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.fetchApi=fetchApi;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();
+  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.fetchApi=fetchApi;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
   this.codex.on?.('event',event=>{
    const thread=event.params?.threadId;
-   if(event.method==='turn/started'){this.codexOutput.delete(thread);this.blankThreads.delete(thread);}
+   if(event.method==='turn/started'){this.codexOutput.delete(thread);this.blankThreads.delete(thread);this.pendingBlankTurns.delete(thread);}
    if(event.method==='item/agentMessage/delta'&&event.params?.delta?.trim())this.codexOutput.add(thread);
    if(event.method==='turn/completed'&&event.params?.turn?.status==='completed'&&this.codexOutput.has(thread)){this.loginStatus.codex={...this.loginStatus.codex,modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider:'codex',params:{}});}
 
@@ -80,21 +80,25 @@ export class AgentHub extends EventEmitter{
    params={...params,input};
   }
   if(provider==='codex'){
-   if(this.threadProcess!==bridge.process){this.threadProcess=bridge.process;this.readyThreads=new Set();this.blankThreads.clear();}
+   if(this.threadProcess!==bridge.process){this.threadProcess=bridge.process;this.readyThreads=new Set();this.blankThreads.clear();this.pendingBlankTurns.clear();}
    // A newly started zero-turn thread has no rollout yet. Its native start response
    // is authoritative only while this exact app-server process remains alive.
    const blank=this.blankThreads.get(params.threadId);
+   if(blank&&this.pendingBlankTurns.has(params.threadId)&&['thread/resume','thread/read'].includes(method))throw Error('首条回复尚未确认，请等待服务回报后再恢复会话');
    if(blank&&method==='thread/resume')return structuredClone(blank);
    if(blank&&method==='thread/read')return {thread:structuredClone(blank.thread)};
    if(method==='turn/start'&&!this.readyThreads.has(params.threadId)){
     await this.rpc(provider,'thread/resume',{threadId:params.threadId,model:params.model});
    }
   }
-  if(provider==='codex'&&method==='turn/start')this.blankThreads.delete(params.threadId);
+  const blankStart=provider==='codex'&&method==='turn/start'&&this.blankThreads.has(params.threadId);
+  if(blankStart){if(this.pendingBlankTurns.has(params.threadId))throw Error('首条回复尚未确认，请等待服务回报');this.pendingBlankTurns.add(params.threadId);}
   let result;try{result=await bridge.request(method,params);}catch(error){
+   if(blankStart){this.pendingBlankTurns.delete(params.threadId);if(error.rpcResponse!==true)this.blankThreads.delete(params.threadId);}
    if(provider==='codex'&&method==='thread/resume'&&/no rollout found for thread/i.test(error.message))throw Error('此空会话尚未保存，当前进程无法恢复。请新建会话；已有计算记录保留。',{cause:error});
    throw error;
   }
+  if(provider==='codex'&&method==='turn/start'){this.pendingBlankTurns.delete(params.threadId);this.blankThreads.delete(params.threadId);}
   if(provider==='codex'&&method==='thread/start'&&result.thread&&!result.thread.turns?.length)this.blankThreads.set(result.thread.id,structuredClone(result));
   if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)this.readyThreads.add(result.thread.id);
   if(['thread/start','thread/resume'].includes(method)&&result.thread)this.remember(provider,result.thread);

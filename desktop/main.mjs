@@ -4,9 +4,10 @@ import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import { localSkills } from './skills.mjs';
+import { selectedSkillContext } from './skill-context.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
 import {saveDeployment,prepareDeployment} from './task-deployment.mjs';
 import {executeTask} from './task-execution.mjs';
@@ -25,6 +26,9 @@ const exec = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here,'..');
 const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'worker');
+// Physical resources keep skill references usable by an external agent process.
+const bundledSkillRoot = app.isPackaged ? path.join(process.resourcesPath,'studio-skills') : path.join(root,'agents','skills');
+function studioSkillRoots(){return [...new Set([bundledSkillRoot,...(settings.skillRoots||[])])];}
 const installationVerifying=process.argv.includes('--studio-install-verify');
 const improvementsVerifying=process.argv.includes('--studio-improvements-verify');
 const providerVerifying=process.argv.includes('--studio-providers-verify');
@@ -189,14 +193,18 @@ handle('agent.rpc',async({provider,method,params={}})=>{
    if(provider==='deepseek'){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
   }
   if(provider!=='codex'&&method==='turn/start'){
-    const registered=localSkills([path.join(process.env.USERPROFILE||'','.codex','skills'),path.join(root,'.agents','skills'),...settings.skillRoots]);
+    const registeredRoots=[path.join(process.env.USERPROFILE||'','.codex','skills'),path.join(root,'.agents','skills'),...studioSkillRoots()];
+    const registered=localSkills(registeredRoots);
     const input=[];
     for(const item of params.input||[]){
       if(item.type==='text')input.push(item);
       else if(item.type==='skill'){
-        if(!registered.some(s=>s.path===item.path&&s.name===item.name))throw Error('Select a registered skill');
-        const stat=fs.statSync(item.path);if(stat.size>262144)throw Error('Skill exceeds text limit');
-        input.push({type:'text',text:'[Selected skill: '+item.name+']\n'+fs.readFileSync(item.path,'utf8')});
+        const context=await selectedSkillContext({selection:item,registered,registeredRoots,bundledRoot:bundledSkillRoot,
+          validatePrivateProfile:async value=>{
+            const validator=app.isPackaged?path.join(process.resourcesPath,'studio-tools','localize-skill.mjs'):path.join(root,'scripts','localize-skill.mjs');
+            return (await import(pathToFileURL(validator).href)).validateProfile(value);
+          }});
+        input.push({type:'text',text:context.text});
       }else throw Error('Unsupported input content');
     }
     params={...params,input};
@@ -220,7 +228,7 @@ handle('agent.login.cancel',()=>{agents.cancelLogin();return {};});
 handle('agent.login.open',async({provider})=>{
   const state=await agents.account(provider);if(!state.url)throw Error('Start provider login first');return shell.openExternal(loginUrl(provider,state.url));
 });
-handle('skills.catalog',()=>localSkills(settings.skillRoots));
+handle('skills.catalog',()=>localSkills(studioSkillRoots()));
 handle('codex.respond',({id,result})=>codex.respond(id,result));
 handle('file.open',async() => {
   const response=await dialog.showOpenDialog(window,{properties:['openFile']});

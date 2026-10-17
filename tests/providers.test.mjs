@@ -107,3 +107,13 @@ test('Codex zero-turn conversations reuse only their current server process',asy
  codex.process={};await assert.rejects(hub.rpc('codex','thread/resume',{threadId:'blank'}),/空会话尚未保存/);
  assert.equal(calls.filter(c=>c==='thread/resume').length,1);
 });
+
+
+test('Explicit first-turn rejection preserves a loaded empty thread, uncertain transport does not',async()=>{
+ const codex=new EventEmitter();codex.process={};let mode='rejected',resumes=0;
+ codex.request=async method=>{if(method==='thread/start')return {thread:{id:'fresh',turns:[]},model:'real-model'};if(method==='turn/start'){const error=Error('first turn unavailable');if(mode==='rejected')error.rpcResponse=true;throw error;}if(method==='thread/resume'){resumes++;throw Error('no rollout found for thread');}};
+ const hub=new AgentHub({codex,root:'.',catalog:{list:()=>[],put:()=>{}},vault:{get:()=>null},settings:()=>({}),worker:()=>null});
+ await hub.rpc('codex','thread/start');await assert.rejects(hub.rpc('codex','turn/start',{threadId:'fresh'}),/first turn unavailable/);
+ assert.equal((await hub.rpc('codex','thread/resume',{threadId:'fresh'})).thread.id,'fresh');assert.deepEqual((await hub.rpc('codex','thread/read',{threadId:'fresh',includeTurns:true})).thread.turns,[]);assert.equal(resumes,0);
+ mode='unknown';await assert.rejects(hub.rpc('codex','turn/start',{threadId:'fresh'}),/first turn unavailable/);await assert.rejects(hub.rpc('codex','thread/resume',{threadId:'fresh'}),/空会话尚未保存/);assert.equal(resumes,1);
+});

@@ -54,7 +54,7 @@ export class CodexBridge extends EventEmitter {
     });
     try {
       this.info = await this.request('initialize', {
-        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.12.0' }
+        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.13.0' }
       });
       this.send({ method: 'initialized', params: {} });
       return this.info;
@@ -84,7 +84,7 @@ export class CodexBridge extends EventEmitter {
     const pending = this.pending.get(message.id);
     if (!pending) return;
     clearTimeout(pending.timer); this.pending.delete(message.id);
-    if (message.error) pending.reject(new Error(message.error.message || 'Codex request failed'));
+    if (message.error) { const error=new Error(message.error.message || 'Codex request failed');error.rpcResponse=true;error.rpcCode=message.error.code;pending.reject(error); }
     else pending.resolve(message.result);
   }
   respond(id, result) {

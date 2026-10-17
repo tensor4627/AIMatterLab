@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -43,7 +43,7 @@
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "directories": {
-      "output": "release/v0.12.0"
+      "output": "release/v0.13.0"
     },
     "files": [
       "dist/**",
@@ -72,6 +72,21 @@
       {
         "from": ".studio/agent-runtimes/manifest.json",
         "to": "agent-runtimes/manifest.json"
+      },
+      {
+        "from": "agents/skills",
+        "to": "studio-skills",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "scripts/localize-skill.mjs",
+        "to": "studio-tools/localize-skill.mjs"
+      },
+      {
+        "from": "scripts/cluster-reconcile.mjs",
+        "to": "studio-tools/cluster-reconcile.mjs"
       }
     ]
   },
