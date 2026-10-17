@@ -62,3 +62,16 @@ test('Agent context settings are scoped and validated',async()=>{
  assertWorkerRoute('POST','/api/run/revise');
  assertWorkerRoute('POST','/api/run/input');
 });
+
+
+test('Account-first connections rebind tools and coalesce concurrent starts without restarting live turns',async()=>{
+ const bridge=new CodexBridge();let launches=0,kills=0,release;
+ bridge.launch=async()=>{launches++;await new Promise(r=>release=r);bridge.process={stdin:{},kill:()=>kills++};return bridge.info={ready:true};};
+ const account=bridge.start('fixture',null);release();await account;
+ const worker={url:'http://127.0.0.1:1',tokens:{mcp:'private-test-token'}};
+ const first=bridge.start('fixture',worker),second=bridge.start('fixture',worker);release();await Promise.all([first,second]);
+ assert.equal(launches,2);assert.equal(kills,1);
+ bridge.receive({method:'turn/started',params:{threadId:'t'}});
+ await assert.rejects(bridge.start('fixture',{...worker,url:'http://127.0.0.1:2'}),/Stop/);assert.equal(kills,1);
+ bridge.receive({method:'turn/completed',params:{threadId:'t'}});const changed=bridge.start('fixture',{...worker,url:'http://127.0.0.1:2'});release();await changed;assert.equal(launches,3);bridge.close();
+});

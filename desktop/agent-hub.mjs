@@ -73,7 +73,14 @@ export class AgentHub extends EventEmitter{
    }
    params={...params,input};
   }
+  if(provider==='codex'){
+   if(this.threadProcess!==bridge.process){this.threadProcess=bridge.process;this.readyThreads=new Set();}
+   if(method==='turn/start'&&!this.readyThreads.has(params.threadId)){
+    await this.rpc(provider,'thread/resume',{threadId:params.threadId,model:params.model});
+   }
+  }
   const result=await bridge.request(method,params);
+  if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)this.readyThreads.add(result.thread.id);
   if(['thread/start','thread/resume'].includes(method)&&result.thread)this.remember(provider,result.thread);
   return result;
  }

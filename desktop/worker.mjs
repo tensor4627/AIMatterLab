@@ -7,7 +7,11 @@ import { linuxPath, assertWorkerRoute } from './security.mjs';
 const exec = promisify(execFile);
 export class WorkerClient {
  constructor(){this.pending=new Map();this.next=1;}
- async connect(settings, source) {
+ async connect(settings,source){
+  if(this.connecting)return this.connecting;
+  this.connecting=this.open(settings,source).finally(()=>{this.connecting=null;});return this.connecting;
+ }
+ async open(settings, source) {
   this.close();
   const installed=await exec('wsl.exe',['-d',settings.distribution,'--','python3',linuxPath(path.join(source,'install.py')),'--source',linuxPath(source),'--root',settings.workerRoot],{windowsHide:true,timeout:20000,maxBuffer:1024*1024});
   const runtime=JSON.parse(installed.stdout.trim().split('\n').at(-1)).path;
@@ -23,12 +27,12 @@ export class WorkerClient {
    const health=await response.json();if(health.root!==this.connection.health.root)throw Error('Worker identity mismatch');
    this.connection.transport='localhost';return {...health,transport:'localhost'};
   }catch{
-   this.relay=spawn('wsl.exe',['-d',settings.distribution,'--','python3',runtime+'/relay.py','--root',settings.workerRoot,'--port',String(settings.workerPort)],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+   const relay=this.relay=spawn('wsl.exe',['-d',settings.distribution,'--','python3',runtime+'/relay.py','--root',settings.workerRoot,'--port',String(settings.workerPort)],{stdio:['pipe','pipe','pipe'],windowsHide:true});
    createInterface({input:this.relay.stdout}).on('line',line=>{
     try{const value=JSON.parse(line),item=this.pending.get(value.id);if(item){clearTimeout(item.timer);this.pending.delete(value.id);item.resolve(value);}}catch{}
    });
-   this.relay.on('error',e=>this.reject(e));
-   this.relay.on('exit',()=>this.reject(Error('WSL relay disconnected; job status is unknown')));
+   relay.on('error',e=>{if(this.relay===relay)this.reject(e);});
+   relay.on('exit',()=>{if(this.relay===relay){this.reject(Error('WSL relay disconnected; job status is unknown'));this.connection=null;}});
    this.relay.stderr.on('data',()=>{});
    const health=await this.forward('GET','/api/health');
    if(health.status!==200||health.data.root!==this.connection.health.root)throw Error('WSL relay identity mismatch');
@@ -48,6 +52,14 @@ export class WorkerClient {
    this.connection.transport='wsl-stdio';
    return {...health.data,transport:'wsl-stdio'};
   }
+ }
+ async probeTools(){
+  if(!this.connection)return {status:'blocked',message:'请先连接 WSL 作业服务',count:0};
+  const response=await fetch(this.connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+this.connection.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}}),signal:AbortSignal.timeout(10000)});
+  if(!response.ok)throw Error('科学工具服务未通过连接检查');
+  const result=await response.json(),names=(result.result?.tools||[]).map(t=>t.name);
+  if(result.error||!names.includes('present_task'))throw Error('科学工具缺少草稿保存接口，请重新连接');
+  return {status:'ready',count:names.length,transport:this.connection.transport,checkedAt:Date.now()};
  }
  forward(method,target,data,mcp=false){
   return new Promise((resolve,reject)=>{

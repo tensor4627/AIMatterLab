@@ -155,7 +155,26 @@ handle('workflow.save',value=>{
  if(id!==undefined&&(typeof id!=='string'||!catalog.get('workflow-plan',id)))throw Error('Unknown workflow plan');
  const key=id||randomUUID();return catalog.put('workflow-plan',key,{...plan,id:key,status:'draft',updatedAt:Date.now()});
 });
-handle('agent.connect',async({provider})=>{providerId(provider);if(!worker.connection){try{await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}catch{emit('studio:event',{method:'studio/toolsUnavailable',provider,params:{message:'WSL scientific tools unavailable; task remains a plan until connected'}});}}settings=catalog.put('settings','main',{...settings,agentProvider:provider});return agents.connect(provider);});
+async function scientificTools(provider){
+ if(!worker.connection)return {status:'blocked',count:0,message:'作业服务未连接；可以聊天，计算流程暂不能生成'};
+ try{
+  const status=await worker.probeTools();
+  if(provider==='codex'){
+   const inventory=await codex.request('mcpServerStatus/list',{serverName:'gpusampling'},15000),server=inventory.data?.find(v=>v.name==='gpusampling');
+   if(!server?.tools?.present_task)throw Error('Agent 尚未挂载科学工具，请重新连接');
+  }
+  return status;
+ }catch(error){return {status:'blocked',count:0,message:error.message,checkedAt:Date.now()};}
+}
+handle('agent.connect',async({provider})=>{
+ providerId(provider);
+ if(!worker.connection){try{await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}catch{}}
+ settings=catalog.put('settings','main',{...settings,agentProvider:provider});
+ const info=await agents.connect(provider),tools=await scientificTools(provider);
+ emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
+ return {...info,tools};
+});
+handle('agent.tools',async({provider})=>{providerId(provider);return scientificTools(provider);});
 handle('agent.disconnect',({provider})=>{providerId(provider);agents.bridge(provider)?.close();return {};});
 handle('agent.account',({provider})=>agents.account(provider));
 handle('agent.rpc',async({provider,method,params={}})=>{

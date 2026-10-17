@@ -43,3 +43,5 @@
 .workflow-requirements{margin:18px 0;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 .workflow-requirements h3{display:flex;align-items:center;gap:10px}
 .workflow-requirements li{margin:10px 0;line-height:1.7;overflow-wrap:anywhere}
+
+.agent-tools-status{margin:8px 14px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:calc(12px * var(--ui-scale,1));display:flex;flex-direction:column;gap:7px}.agent-tools-status>span{display:flex;align-items:center;gap:8px}.agent-tools-status small{color:var(--muted);line-height:1.6}

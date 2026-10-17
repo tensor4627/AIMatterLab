@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
@@ -6,9 +7,17 @@ export const PROTOCOL_VERSION = '0.162.0-alpha.17.2';
 const exec = promisify(execFile);
 
 export class CodexBridge extends EventEmitter {
-  constructor() { super(); this.pending = new Map(); this.requests = new Map(); this.next = 1; }
-  async start(executable, worker, config = {}) {
-    if (this.process) return this.info;
+  constructor() { super(); this.pending = new Map(); this.requests = new Map(); this.next = 1; this.activeTurns=new Set(); }
+  async start(executable,worker,config={}) {
+    const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config])).digest('hex');
+    if(this.starting){await this.starting;return this.start(executable,worker,config);}
+    if(this.process&&this.contextKey===key)return this.info;
+    if(this.activeTurns.size)throw Error('Stop the current reply before reconnecting scientific tools');
+    if(this.process)this.close();this.contextKey=key;
+    this.starting=this.launch(executable,worker,config).finally(()=>{this.starting=null;});
+    return this.starting;
+  }
+  async launch(executable, worker, config = {}) {
     const { stdout } = await exec(executable, ['--version'], { windowsHide: true, timeout: 15000 });
     const version = stdout.trim().split(' ').at(-1);
     if (version !== PROTOCOL_VERSION)
@@ -17,6 +26,7 @@ export class CodexBridge extends EventEmitter {
     for(const [key,value] of Object.entries(config))args.push('-c',key+'='+JSON.stringify(value));
     const env = { ...process.env };
     if (worker) {
+      args.push('-c','mcp_servers.gpusampling.enabled=true');
       args.push('-c', 'mcp_servers.gpusampling.url=' + JSON.stringify(worker.url + '/mcp'),
         '-c', 'mcp_servers.gpusampling.bearer_token_env_var="GSS_MCP_TOKEN"');
       for(const tool of ['present_task','draft_cluster_setup','prepare_cluster_run','prepare_run','resume_run','write_project_input','generate_bias','create_workflow'])
@@ -63,6 +73,8 @@ export class CodexBridge extends EventEmitter {
     });
   }
   receive(message) {
+    if(message.method==='turn/started')this.activeTurns.add(message.params?.threadId);
+    if(message.method==='turn/completed')this.activeTurns.delete(message.params?.threadId);
     if (message.method) {
       if (message.id !== undefined) this.requests.set(String(message.id), message);
       if (message.method === 'serverRequest/resolved') this.requests.delete(String(message.params?.requestId));
@@ -83,7 +95,7 @@ export class CodexBridge extends EventEmitter {
   }
   fail(error) {
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
-    this.pending.clear(); this.requests.clear();
+    this.pending.clear(); this.requests.clear(); this.activeTurns.clear();
   }
   close() { const active=!!this.process;this.fail(new Error('Codex bridge closed'));this.process?.kill();this.process=null;if(active)this.emit('event',{method:'studio/codexDisconnected',params:{reason:'closed'}}); }
 }

@@ -14,7 +14,7 @@ import React from 'react';import {createRoot} from 'react-dom/client';import '/s
 window.React=React;window.testRoot=createRoot(document.getElementById('root'));
 window.renderTest=async(name,props={})=>{const m=await import(/* @vite-ignore */ '/src/'+name+'.tsx');window.testRoot.render(React.createElement(m.default||m[name],props));};
 </script></body></html>`);
-const server=await createServer({server:{port:0,strictPort:false,host:'127.0.0.1'}});await server.listen();
+const server=await createServer({cacheDir:'.studio/vite-regression-cache',server:{port:0,strictPort:false,host:'127.0.0.1',watch:{ignored:['**/.studio/**','**/validation/**','**/release/**']}}});await server.listen();
 const base=`http://127.0.0.1:${server.httpServer.address().port}`;
 let browser;try{browser=await chromium.launch({channel:process.env.STUDIO_BROWSER_CHANNEL||'msedge',headless:true});}catch(error){await server.close();throw error;}
 const results=[];
