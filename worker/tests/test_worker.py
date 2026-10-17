@@ -86,6 +86,13 @@ class Lifecycle(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.submit(run["id"])
 
+    def test_input_validation_is_not_scientific_run_validation(self):
+        run = self.service.prepare(self.spec())
+        result = self.service.validate(run["id"])
+        self.assertEqual(result["validation"]["status"], "passed")
+        self.assertEqual(result["validation"]["scientific_status"], "not_run")
+        self.assertIn("contract", result["validation"]["scope"])
+
     def test_validation_required(self):
         run = self.service.prepare(self.spec())
         with self.assertRaisesRegex(ValueError, "validation"):

@@ -25,7 +25,7 @@ def health():
     request = urllib.request.Request(f"http://127.0.0.1:{args.port}/api/health",
                                      headers={"Authorization": "Bearer " + tokens["admin"]})
     try:
-        report = json.loads(urllib.request.urlopen(request, timeout=1).read())
+        report = json.loads(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=1).read())
         if report["name"] != "gpu-sampling-studio" or report["root"] != str(root):
             raise RuntimeError("Port belongs to another service/root")
         return {"url": f"http://127.0.0.1:{args.port}", "tokens": tokens, "health": report}

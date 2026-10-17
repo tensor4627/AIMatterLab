@@ -44,6 +44,7 @@ export default function App(){
  const [agentWidth,setAgentWidth]=useState(stored('studio.agentWidth',340)),[tabs,setTabs]=useState<string[]>(['home']),[gpuStatus,setGpuStatus]=useState<any[]>([]),[disconnected,setDisconnected]=useState(false);
  const [fullPbc,setFullPbc]=useState(false),[probe,setProbe]=useState<any>(null);
  const [editorDirty,setEditorDirty]=useState(false),[paletteSearch,setPaletteSearch]=useState('');
+ const refreshing=useRef(false),gpuLoading=useRef(false);
  const refreshSeq=useRef(0),latestRefresh=useRef<Promise<void>>(Promise.resolve()),openSeq=useRef(0),settingsBackup=useRef<Settings|null>(null),editorSource=useRef(editor.source);editorSource.current=editor.source;
  const onError=(e:unknown)=>setError(errorText(e));
  useEffect(()=>window.studio?.onEvent(event=>{
@@ -78,10 +79,10 @@ export default function App(){
  useEffect(()=>{localStorage.setItem('studio.agent',String(agentVisible));},[agentVisible]);
  useEffect(()=>{localStorage.setItem('studio.agentWidth',String(agentWidth));},[agentWidth]);
  useEffect(()=>{localStorage.setItem('studio.section',section);setTabs(prev=>prev.includes(section)?prev:[...prev,section]);},[section]);
- useEffect(()=>{if(!worker)return;const refreshGpu=()=>void api<any[]>('GET','/api/gpu').then(setGpuStatus).catch(()=>{});refreshGpu();const timer=setInterval(refreshGpu,5000);return()=>clearInterval(timer);},[worker]);
+ useEffect(()=>{if(!worker)return;const refreshGpu=()=>{if(gpuLoading.current)return;gpuLoading.current=true;void api<any[]>('GET','/api/gpu').then(setGpuStatus).catch(()=>{}).finally(()=>{gpuLoading.current=false;});};refreshGpu();const timer=setInterval(refreshGpu,5000);return()=>clearInterval(timer);},[worker]);
  useEffect(()=>{localStorage.setItem('studio.bottom',String(bottomHeight));},[bottomHeight]);
- function invalidateRefresh(){refreshSeq.current++;latestRefresh.current=Promise.resolve();}
- function refresh():Promise<void>{const seq=++refreshSeq.current;const job=loadAll(seq);latestRefresh.current=job;return job;}
+ function invalidateRefresh(){refreshSeq.current++;refreshing.current=false;latestRefresh.current=Promise.resolve();}
+ function refresh(force=true):Promise<void>{if(!force&&refreshing.current)return latestRefresh.current;const seq=++refreshSeq.current;refreshing.current=true;const job=loadAll(seq).finally(()=>{if(seq===refreshSeq.current)refreshing.current=false;});latestRefresh.current=job;return job;}
  async function loadAll(seq:number):Promise<void>{
   try{
    const [p,e,r,a]=await Promise.all([api<Project[]>('GET','/api/projects'),api<Environment[]>('GET','/api/environments'),api<Run[]>('GET','/api/runs'),api<Artifact[]>('GET','/api/assets')]);
@@ -89,7 +90,7 @@ export default function App(){
    setDisconnected(false);setProjects(p);setEnvironments(e);setRuns(r);setAssets(a);if(p.length)setProjectId(current=>current||p[0].id);
   }catch(e){if(seq!==refreshSeq.current)return latestRefresh.current;setDisconnected(true);setRuns(prev=>prev.map(r=>['running','queued'].includes(r.status)?{...r,status:'unknown'}:r));}
  }
- useEffect(()=>{if(!worker)return;void refresh();const timer=setInterval(()=>void refresh(),2500);return()=>clearInterval(timer);},[worker,projectId]);
+ useEffect(()=>{if(!worker)return;void refresh(false);const timer=setInterval(()=>void refresh(false),2500);return()=>clearInterval(timer);},[worker,projectId]);
  async function connectWorker(){
   setConnecting(true);try{await invoke('worker.connect');setWorker(true);await refresh();}catch(e){onError(e);}finally{setConnecting(false);}
  }
@@ -170,7 +171,7 @@ export default function App(){
  function tabName(id:string){if(id.startsWith('agent-task:'))return agentTasks.find(t=>t.id===id.slice(11))?.name;if(id.startsWith('cluster-run:'))return t('集群任务');return id.startsWith('tool:')?tools.find(t=>t.id===id.slice(5))?.name:id.startsWith('workflow:')?tasks.find(t=>t.id===id.slice(9))?.title:id.startsWith('plan:')?plans.find(p=>p.id===id.slice(5))?.name:undefined;}
  const entityMissing=section.startsWith('agent-task:')?!agentTasks.some(k=>k.id===section.slice(11)):section.startsWith('plan:')?!plans.some(p=>p.id===section.slice(5)&&tasks.some(k=>k.id===p.taskId)):section.startsWith('workflow:')?!tasks.some(k=>k.id===section.slice(9)):section.startsWith('tool:')?!tools.some(k=>k.id===section.slice(5)):section.startsWith('task:')?!runs.some(r=>r.id===section.slice(5)):section.startsWith('cluster-run:')?false:!(sections.some(s=>s[0]===section)||section==='editor');
  return <div className="application">
-  <header className="titlebar"><div className="brand"><span className="brand-mark"><Atom size={19}/></span><strong>GPU Sampling</strong><span>Studio</span><span className="version">0.8.0</span></div><div className="title-path"><Folder size={12}/>{tr(project?.name||'科学计算工作台')}</div><div className="window-buttons"><button aria-label={tr('最小化')} onClick={()=>void invoke('window',{action:'minimize'}).catch(()=>{})}><Minus size={13}/></button><button aria-label={tr('最大化')} onClick={()=>void invoke('window',{action:'maximize'}).catch(()=>{})}><Square size={11}/></button><button className="close" aria-label={tr('关闭')} onClick={()=>void invoke('window',{action:'close'}).catch(()=>{})}><X size={14}/></button></div></header>
+  <header className="titlebar"><div className="brand"><span className="brand-mark"><Atom size={19}/></span><strong>GPU Sampling</strong><span>Studio</span><span className="version">0.9.0</span></div><div className="title-path"><Folder size={12}/>{tr(project?.name||'科学计算工作台')}</div><div className="window-buttons"><button aria-label={tr('最小化')} onClick={()=>void invoke('window',{action:'minimize'}).catch(()=>{})}><Minus size={13}/></button><button aria-label={tr('最大化')} onClick={()=>void invoke('window',{action:'maximize'}).catch(()=>{})}><Square size={11}/></button><button className="close" aria-label={tr('关闭')} onClick={()=>void invoke('window',{action:'close'}).catch(()=>{})}><X size={14}/></button></div></header>
   <div className={"shell "+(settings.agentLayout==='center'?'agent-center':'')}>
    <nav className="sidebar">
     <button className="workspace-switch" onClick={()=>setModal('projects')}><span className="workspace-avatar">{project?.name.slice(0,1)||'G'}</span><span><strong>{tr(project?.name||'选择计算项目')}</strong><small>{tr(worker?'WSL 工作区':'尚未连接环境')}</small></span><ChevronRight size={13}/></button>

@@ -53,7 +53,11 @@ export class AgentHub extends EventEmitter{
  async account(provider){
   providerId(provider);
   if(provider==='codex'){
-   await this.codex.start(this.path('codex'),this.getWorker(),agentConfig(this.preferences('codex')));const result=await this.codex.request('account/read',{refreshToken:true});
+   // Account observers must never reconfigure a connection captured before tools attached.
+   if(this.codex.starting)await this.codex.starting;
+   else if(!this.codex.process)await this.codex.start(this.path('codex'),this.getWorker(),agentConfig(this.preferences('codex')));
+   let result;try{result=await this.codex.request('account/read',{refreshToken:true});}
+   catch(error){if(error.message!=='Codex bridge closed'||!this.codex.starting)throw error;await this.codex.starting;result=await this.codex.request('account/read',{refreshToken:true});}
    return {...result,provider,...this.loginStatus.codex,login:'chatgpt',modelAccess:this.loginStatus.codex?.modelAccess||'not_run'};
   }
   const status=this.loginStatus[provider]||{},credential=provider==='qwen'?this.vault.get('qwen'):null;
@@ -126,6 +130,7 @@ export class AgentHub extends EventEmitter{
   const child=this.loginChild;if(!child)return;this.loginChild=null;child.kill();this.loginStatus.kimi={phase:'cancelled',modelAccess:'not_run'};this.emit('event',{method:'studio/login',provider:'kimi',params:{provider:'kimi',phase:'cancelled'}});
  }
  async configure(provider,preferences,threadId,model){
+  if(this.codex.activeTurns?.size)throw Error('Stop the current reply before changing context settings');
   if(provider!=='codex')throw Error('This ACP provider does not expose editable context budgets; use its server-reported context and model settings');
   const config=agentConfig(preferences);this.codex.close();await this.codex.start(this.path('codex'),this.getWorker(),config);
   if(!threadId)return {configured:true};return this.rpc('codex','thread/resume',{threadId,model});

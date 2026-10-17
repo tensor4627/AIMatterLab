@@ -1,0 +1,32 @@
+// Real account -> native MCP -> saved draft -> manual edit -> AI review -> restart.
+// Uses an isolated desktop/worker profile; never validates or submits a compute job.
+import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';import {DatabaseSync} from 'node:sqlite';import assert from 'node:assert/strict';
+import {Catalog} from '../desktop/catalog.mjs';
+let playwright;try{playwright=await import('playwright');}catch{playwright=await import(pathToFileURL(process.env.STUDIO_PLAYWRIGHT_MODULE||path.resolve(path.dirname(process.execPath),'../node_modules/playwright/index.mjs')).href);}
+const version=JSON.parse(fs.readFileSync('package.json','utf8')).version,out=path.resolve('.studio/audit-20261017'),profile=path.join(out,'acceptance-'+version+'-'+Date.now());fs.mkdirSync(out,{recursive:true});
+const original=new DatabaseSync(path.join(process.env.APPDATA,'gpu-sampling-studio/studio/catalog.sqlite'),{readOnly:true});const settings=JSON.parse(original.prepare("select data from records where kind='settings' and id='main'").get().data);original.close();
+const catalog=new Catalog(path.join(profile,'studio'));catalog.put('settings','main',{...settings,workerRoot:'~/.local/state/gpu-sampling-studio-audit-20261017',workerPort:18767,agentProvider:'codex',language:'zh-CN'});catalog.db.close();
+const executable=process.env.STUDIO_ACCEPTANCE_EXECUTABLE,launch=()=>playwright._electron.launch({executablePath:executable||path.resolve('node_modules/electron/dist/electron.exe'),args:executable?[]:['.'],env:{...process.env,STUDIO_PROFILE_DIR:profile},timeout:30000});
+async function waitUntil(check,arg,timeout=90000){const end=Date.now()+timeout;while(Date.now()<end){if(await page.evaluate(check,arg))return;await page.waitForTimeout(250);}throw Error('Timed out waiting for a real application state');}
+const report={version,scope:'Real native MCP and model calls; isolated review draft, no scientific execution',packaged:!!executable,status:'failed',checks:[]};let app,page,taskId;const errors=[];
+try{
+ app=await launch();page=await app.firstWindow();page.on('pageerror',e=>errors.push(String(e)));page.setDefaultTimeout(15000);await page.locator('.application').waitFor();
+ await page.evaluate(()=>window.studio.invoke('agent.account',{provider:'codex'}));
+ await page.getByRole('button',{name:'连接 Codex',exact:true}).click();await page.locator('[data-testid="agent-tools-status"][data-status="ready"]').waitFor({timeout:45000});report.checks.push({name:'account-before-tools',status:'passed'});
+ await page.getByTestId('agent-planning-mode').check();
+ await page.locator('.composer textarea').fill('Use gpusampling present_task exactly once to save a review draft named Studio acceptance. Use the current studioTaskId. steps=[{id:"md",title:"MD parameters",fields:[{key:"temperature",label:"Temperature",type:"number",required:true,unit:"K"},{key:"structure_file",label:"Structure",type:"file",required:true}]}], parameters={temperature:300,structure_file:null}, missing_fields=["structure_file"]. Do not call other tools, prepare inputs, validate or execute. Then reply DRAFT_SAVED.');await page.locator('.composer .send').click();
+ await waitUntil(async()=>{const tasks=await window.studio.invoke('task.list');return tasks.some(t=>t.parameters?.temperature===300);});
+ const task=await page.evaluate(async()=>{const tasks=await window.studio.invoke('task.list');return tasks.find(t=>t.parameters?.temperature===300);});taskId=task.id;report.checks.push({name:'native-present-task-persisted',status:'passed'});
+ await page.locator('.visual-step-heading').first().click();const field=page.locator('[data-field=temperature] input');if(!await field.isVisible())await page.locator('.visual-step-heading').first().click();await field.fill('315');
+ await waitUntil(async id=>(await window.studio.invoke('task.read',{id})).parameters.temperature===315,taskId);
+ assert.equal(await page.getByTestId('execute-workflow').isDisabled(),true);report.checks.push({name:'manual-parameter-saved-execution-gated',status:'passed'});
+ await page.getByRole('button',{name:'发送',exact:true}).waitFor();await page.evaluate(()=>window.studio.invoke('agent.disconnect',{provider:'codex'}));await page.getByRole('button',{name:'修复工具连接',exact:true}).click();await page.locator('[data-testid="agent-tools-status"][data-status="ready"]').waitFor({timeout:45000});report.checks.push({name:'repair-tools-and-resume-existing-workflow',status:'passed'});
+ await page.waitForFunction(()=>!document.querySelector('.composer textarea')?.disabled);await page.getByTestId('review-workflow').click();
+ await waitUntil(async id=>{const task=await window.studio.invoke('task.read',{id});return task.review?.status==='needs-information';},taskId);
+ const reviewed=await page.evaluate(id=>window.studio.invoke('task.read',{id}),taskId);assert.equal(reviewed.parameters.temperature,315);assert.equal(reviewed.id,taskId);report.checks.push({name:'same-workflow-ai-review-preserves-manual-value',status:'passed'});
+ await page.screenshot({path:path.join(out,'acceptance-'+version+'.png')});await app.close();app=await launch();page=await app.firstWindow();page.on('pageerror',e=>errors.push(String(e)));page.setDefaultTimeout(20000);
+ await page.getByTestId('agent-task-page').waitFor({timeout:45000});await page.waitForFunction(()=>document.querySelectorAll('.message.agent').length>0,null,{timeout:45000});
+ const restored=await page.evaluate(id=>window.studio.invoke('task.read',{id}),taskId);assert.equal(restored.parameters.temperature,315);assert.equal(await page.getByTestId('view-error').count(),0);assert.equal((await page.locator('.message.user').allTextContents()).some(text=>text.includes('[Studio workspace context]')||text.includes('[Studio interaction mode:')),false);
+ report.checks.push({name:'restart-restores-conversation-and-draft',status:'passed'});assert.equal(errors.length,0);assert.equal((await page.locator('body').innerText()).includes('Codex bridge closed'),false);report.status='passed';
+}catch(error){report.error=String(error.stack||error);report.rendererErrors=errors;process.exitCode=1;if(page)await page.screenshot({path:path.join(out,'acceptance-failed-'+version+'.png')}).catch(()=>{});}
+finally{if(app)await app.close();fs.writeFileSync(path.join(out,'acceptance-'+version+'.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));}

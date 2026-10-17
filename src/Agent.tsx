@@ -2,10 +2,12 @@ import {tr} from './i18n';
 import {useEffect,useRef,useState} from 'react';
 import {ArrowUp,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2} from 'lucide-react';
 import {t} from './i18n';
+import ToolActivity from './ToolActivity';
+import {toolActivity,visibleUserText} from '../shared/tool-activity.mjs';
 import ProviderLogin from './ProviderLogin';
 import {explicitNewWorkflow} from '../shared/task-fields.mjs';
 import {invoke,type RpcEvent,type AgentProvider,type Conversation,type AgentIntent} from './types';
-type Message={id:string;role:string;text:string;runId?:string;diff?:string};
+type Message={id:string;role:string;text:string;runId?:string;diff?:string;toolName?:string;activity?:any};
 export default function Agent({planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,hidden}:{planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:{name:string;path:string};onOpenRun?:(id:string)=>void;sessionSelection?:{nonce:string;conversation?:Conversation;new?:boolean};onConversation?:(value:Conversation|null)=>void;onBusyChange?:(busy:boolean)=>void;hidden?:boolean}){
  const [tools,setTools]=useState<any>({status:'not_run',count:0});
  const [provider,setProvider]=useState<AgentProvider>('codex'),[login,setLogin]=useState(false);
@@ -51,9 +53,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    if(event.method==='item/started' && p.item && ['mcpToolCall','commandExecution','fileChange'].includes(p.item.type))
     setMessages(prev=>[...prev,{id:p.item.id,role:'tool',text:p.item.tool||p.item.command||'文件变更'}]);
    if(event.method==='item/completed' && p.item?.type==='mcpToolCall'){
-    let result:any;try{result=JSON.parse(p.item.result?.content?.find((c:any)=>c.type==='text')?.text||'null');}catch{}
-    const runId=result?.engine?result.id:result?.run;
-    setMessages(prev=>prev.map(m=>m.id===p.item.id?{...m,runId:typeof runId==='string'?runId:undefined,text:m.text+'\n'+JSON.stringify(p.item.result??p.item.error??p.item.status,null,2)}:m));
+    const activity=toolActivity(p.item);setMessages(prev=>{const message={id:p.item.id,role:'tool',toolName:p.item.tool,text:p.item.tool||'工具',activity};return prev.some(m=>m.id===p.item.id)?prev.map(m=>m.id===p.item.id?message:m):[...prev,message];});
    }
    if(event.method==='item/completed' && p.item?.type==='fileChange')setMessages(prev=>prev.map(m=>m.id===p.item.id?{...m,diff:p.item.changes?.map((c:any)=>c.path+'\n'+c.diff).join('\n')}:m));
    if(event.method==='thread/tokenUsage/updated')setUsage(p.tokenUsage);
@@ -61,19 +61,20 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    if(event.method==='turn/completed'){setBusy(false);setTurn(null);if(p.turn?.error)onError(p.turn.error.message||p.turn.error);}
    if(event.method==='error')onError(p.error?.message||JSON.stringify(p));
    if(event.method==='account/updated')void invoke('agent.account',{provider:providerRef.current}).then(setAccount).catch(onError);
-   if(event.method==='studio/codexDisconnected'){setConnected(false);setBusy(false);}
+   if(event.method==='studio/codexDisconnected'){setConnected(false);setBusy(false);setTools({status:'blocked',count:0,message:'Agent 连接已断开，请重新连接'});}
   });
  },[]);
  useEffect(()=>{scroll.current?.scrollTo({top:scroll.current.scrollHeight,behavior:'smooth'});},[messages,requests]);
- async function connect(){
+ async function connect(repairTools=false){
   setConnecting(true);try{
-   const connection=await invoke('agent.connect',{provider:providerRef.current});setTools(connection.tools||{status:'not_run',count:0});
+   const connection=await invoke('agent.connect',{provider:providerRef.current,repairTools});setTools(connection.tools||{status:'not_run',count:0});
    const [a,m,t]=await Promise.all([rpc('account/read',{refreshToken:false}),rpc('model/list'),rpc('thread/list',{limit:20})]);
    setAccount({...a,requiresAuthentication:!!m.authRequired||!!a.requiresOpenaiAuth&&!a.account});const list=m.data||[];setModels(list);setModel(list.find((v:any)=>v.model===localStorage.getItem('studio.model.'+providerRef.current))?.model||list.find((v:any)=>v.isDefault)?.model||list[0]?.model||'');
    setThreads(t.data||[]);setConnected(true);
    return true;
   }catch(e){onError(e);return false;}finally{setConnecting(false);}
  }
+ useEffect(()=>{if(!connected)return;let active=true,checking=false;const check=async()=>{if(checking)return;checking=true;try{const result=await invoke('agent.tools',{provider:providerRef.current});if(active)setTools(result);}catch{if(active)setTools({status:'blocked',message:'科学工具连接中断，请重新连接',count:0});}finally{checking=false;}};const timer=setInterval(()=>void check(),15000);return()=>{active=false;clearInterval(timer);};},[connected,provider]);
  async function selectProvider(value:AgentProvider){
   if(busy||connecting)return false;
   const old=providerRef.current;
@@ -90,7 +91,8 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    const read=await rpc('thread/read',{threadId:id,includeTurns:true}),list:Message[]=[];
    for(const turn of read.thread?.turns||[])for(const item of turn.items||[]){
     if(item.type==='agentMessage')list.push({id:item.id,role:'agent',text:item.text||''});
-    if(item.type==='userMessage')list.push({id:item.id,role:'user',text:(item.content||[]).filter((c:any)=>c.type==='text').map((c:any)=>c.text).join('\n')});
+    if(item.type==='mcpToolCall')list.push({id:item.id,role:'tool',text:item.tool||'工具',toolName:item.tool,activity:toolActivity(item)});
+    if(item.type==='userMessage')list.push({id:item.id,role:'user',text:visibleUserText(item.content||[])});
    }
    setMessages(list);const conversation=await invoke<Conversation>('conversation.remember',{provider:providerRef.current,threadId:id,projectId:projectId||null,name:r.thread.name||r.thread.preview||'对话'});setWorkflowId(conversation.taskId);conversationRef.current?.(conversation);
   }catch(e){onError(e);}finally{setApplying(false);}
@@ -119,7 +121,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    if((planningMode||fresh)&&!action.reviewMode){const task=await invoke('task.create',{planningMode:true,newWorkflow:fresh,threadId:id,provider:providerRef.current,request:text,projectId:conversation.projectId||projectId||null});taskId=task.id;openTaskRef.current?.(task.id);}
    setWorkflowId(taskId||null);setNewWorkflow(false);
    setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text}]);
-   const input:any[]=[{type:'text',text:text+'\n\n[Studio workspace context]\n'+context}];if(skill)input.push({type:'skill',name:skill.name,path:skill.path});
+   const input:any[]=[{type:'text',text},{type:'text',text:'[Studio workspace context]\n'+context}];if(skill)input.push({type:'skill',name:skill.name,path:skill.path});
    const r=await rpc('turn/start',{planningMode,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});setTurn(r.turn.id);
   }catch(e){setBusy(false);if(!textOverride)setPrompt(old=>old||text);onError(e);}
  }
@@ -137,7 +139,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
  return <aside className="agent-panel" style={{width,display:hidden?'none':undefined}}>
   <div className="panel-heading"><span><Sparkles size={16}/>{tr("科研助手")}</span><button className="icon-button" title={tr("新会话")} aria-label={tr("新会话")} onClick={()=>{setThread(null);threadRef.current=null;setMessages([]);setUsage(null);setWorkflowId(null);conversationRef.current?.(null);}} disabled={busy||applying}><Plus size={17}/></button></div>
   <div className="agent-provider"><label>{t("服务商")}<select data-testid="agent-provider" value={provider} disabled={busy||connecting||applying} onChange={e=>void selectProvider(e.target.value as AgentProvider)}><option value="codex">Codex</option><option value="kimi">Kimi</option><option value="qwen">Qwen</option></select></label><button className="button" disabled={busy||connecting||applying} onClick={()=>setLogin(true)}>{t("登录 / 账户")}</button></div>
-  <div className="agent-tools-status" data-testid="agent-tools-status" data-status={tools.status}><span><i className={'flow-dot '+(tools.status==='ready'?'ready':'missing')}/>{t(tools.status==='ready'?'科学工具已就绪':tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}{tools.status==='ready'&&' · '+tools.count}</span>{tools.status==='blocked'&&<small>{tools.message}</small>}{tools.status==='blocked'&&<button className="button" disabled={busy||connecting} onClick={()=>void connect()}>{t('修复工具连接')}</button>}</div><div className="agent-config">{connected?<><select value={model} disabled={busy||applying} onChange={e=>void selectModel(e.target.value)}>{!models.length&&<option value="">{t("登录后加载模型目录")}</option>}{models.map(m=><option key={m.id} value={m.model}>{m.displayName||m.model}</option>)}</select><span className="connection"><i/>{t(account?.requiresAuthentication?'待登录':'已连接')}</span></>:<button className="button wide" onClick={()=>void connect()} disabled={connecting}>{connecting?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>}{t("连接")} {provider==='codex'?'Codex':provider==='kimi'?'Kimi':'Qwen'}</button>}</div>
+  <div className="agent-tools-status" data-testid="agent-tools-status" data-status={tools.status}><span><i className={'flow-dot '+(tools.status==='ready'?'ready':'missing')}/>{t(tools.status==='ready'?'科学工具已就绪':tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}{tools.status==='ready'&&' · '+tools.count}</span>{tools.status==='blocked'&&<small>{tools.message}</small>}{tools.status==='blocked'&&<button className="button" disabled={busy||connecting} onClick={()=>void connect(true)}>{t('修复工具连接')}</button>}</div><div className="agent-config">{connected?<><select value={model} disabled={busy||applying} onChange={e=>void selectModel(e.target.value)}>{!models.length&&<option value="">{t("登录后加载模型目录")}</option>}{models.map(m=><option key={m.id} value={m.model}>{m.displayName||m.model}</option>)}</select><span className="connection"><i/>{t(account?.requiresAuthentication?'待登录':'已连接')}</span></>:<button className="button wide" onClick={()=>void connect()} disabled={connecting}>{connecting?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>}{t("连接")} {provider==='codex'?'Codex':provider==='kimi'?'Kimi':'Qwen'}</button>}</div>
   <div className="agent-planning"><label><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label><small>{t(workflowId?'此对话已绑定流程，可直接用自然语言调整':planningMode?'生成计算流程和参数，等待审阅执行':'普通对话，不自动打开任务页')}</small>{workflowId&&<div className="agent-workflow-tools"><button disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button><button disabled={busy||applying} onClick={()=>setNewWorkflow(v=>!v)}>{t(newWorkflow?'取消新建流程':'新建流程')}</button></div>}{newWorkflow&&<small>{t('下条消息将新建流程；原流程保留。')}</small>}</div>
   <div className="agent-controls"><label>{provider==='codex'?'Effort':t('思考设置')}<select value={effort} disabled={!connected||busy||applying} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((e:any)=><option key={e.reasoningEffort} value={e.reasoningEffort}>{e.reasoningEffort}</option>)}</select></label><button className="button" disabled={provider!=='codex'} title={provider==='codex'?t('上下文设置'):t('此提供方通过协议回报上下文，暂不支持修改预算')} onClick={()=>setOptions(!options)}><Settings2 size={14}/>{t('上下文')}</button></div>
   {options&&<div className="context-options"><label>{t('上下文预算 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={contextWindow} disabled={busy||applying} onChange={e=>{setContextWindow(e.target.value);setApplied('');}}/></label><label>{t('自动压缩阈值 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={compactLimit} disabled={busy||applying} onChange={e=>{setCompactLimit(e.target.value);setApplied('');}}/></label><p>{t('预算不会扩大模型本身的最大容量。应用后恢复当前会话，计算作业继续运行。')}</p><button className="button" disabled={busy||applying} onClick={()=>void applyOptions()}>{tr(applying?t('应用中…'):t('应用上下文设置'))}</button><small>{applied}</small></div>}
@@ -148,7 +150,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
   {connected&&account?.requiresOpenaiAuth&&!account.account&&<button className="button" onClick={()=>void Promise.resolve(setLogin(true))}>{tr("登录 ChatGPT 账户")}</button>}
   <div className="chat-scroll" ref={scroll} role="log">
    {!messages.length&&<div className="agent-welcome"><div className="agent-orb"><Sparkles size={24}/></div><h3>{tr("让想法进入计算")}</h3><p>{tr("定义实验、准备输入、运行计算，")}<br/>{tr("然后一起检查结果。")}</p><div className="prompt-hints">{['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(t=><button key={t} onClick={()=>setPrompt(t)}>{tr(t)}<ArrowUp size={13}/></button>)}</div><small>{tr("科学参数会显式记录；作业状态来自真实进程。")}</small></div>}
-   {messages.map(m=><div key={m.id} className={'message '+m.role}>{m.role==='tool'?<details><summary><Check size={13}/>{m.text.split('\n')[0]}</summary><pre>{m.text}</pre></details>:<><div className="message-role">{tr(m.role==='user'?'你':'GPU Sampling Studio')}</div><div className="message-text">{m.text}</div></>}{m.runId&&<button className="tool-card" onClick={()=>onOpenRun?.(m.runId!)}>{tr("打开计算记录 ·")}{m.runId.slice(0,12)}</button>}{m.diff&&<pre className="diff-text">{m.diff}</pre>}</div>)}
+   {messages.map(m=><div key={m.id} className={'message '+m.role}>{m.role==='tool'?<ToolActivity message={m} onWorkflow={onOpenTask} onRun={onOpenRun}/>:<><div className="message-role">{tr(m.role==='user'?'你':'GPU Sampling Studio')}</div><div className="message-text">{m.text}</div></>}{m.runId&&<button className="tool-card" onClick={()=>onOpenRun?.(m.runId!)}>{tr("打开计算记录 ·")}{m.runId.slice(0,12)}</button>}{m.diff&&<pre className="diff-text">{m.diff}</pre>}</div>)}
    {requests.map(r=><div key={String(r.id)} className="approval" role="alert"><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
     {r.params?.questions?.map((q:any)=><label key={q.id}>{q.question||q.header}<input placeholder={tr("填写回答，或输入选项名称")} value={answers[q.id]||''} onChange={e=>setAnswers({...answers,[q.id]:e.target.value})}/><small>{q.options?.map((o:any)=>o.label).join(' / ')}</small></label>)}
     {r.method==='studio/question'?<div className="button-row">{r.params.questionOptions?.map((o:any)=><button className="button" key={o.optionId} onClick={()=>void respond(r,{optionId:o.optionId})}>{o.name}</button>)}<button className="button" onClick={()=>void respond(r,{})}>{t('取消')}</button></div>:r.method==='item/tool/requestUserInput'&&r.params?.questions?<button className="button primary" onClick={()=>void respond(r,{answers:Object.fromEntries(r.params.questions.map((q:any)=>[q.id,{answers:[answers[q.id]||'']}]))})}>{tr("提交回答")}</button>:

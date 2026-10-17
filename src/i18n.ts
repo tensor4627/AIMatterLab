@@ -309,9 +309,29 @@ const english:Record<string,string> = {
 "科学工具未就绪":"Scientific tools unavailable",
 "科学工具待连接":"Scientific tools not connected",
 "修复工具连接":"Reconnect tools",
-"修改已保留在本机，切换会话或重开后可重试保存。":"Changes are kept locally. Retry saving after switching conversations or reopening."
+"修改已保留在本机，切换会话或重开后可重试保存。":"Changes are kept locally. Retry saving after switching conversations or reopening.",
+"工具调用失败":"Tool call failed",
+"计算流程草稿已保存":"Workflow draft saved",
+"已准备模块草稿":"Module draft prepared",
+"工具调用完成":"Tool call completed",
+"工具正在执行":"Tool call in progress",
+"查看工具详情":"View tool details",
+"打开模块草稿":"Open module draft",
+"科学工具连接中断，请重新连接":"Scientific tools disconnected. Reconnect to continue.",
+"Agent 连接已断开，请重新连接":"Agent disconnected. Reconnect to continue.",
+"计算节点预检":"Compute node preflight",
+"输入契约检查":"Input contract check",
+"提交结果未确认，请先核对原作业":"Submission unconfirmed. Reconcile the original run first.",
+"正在验证或提交，请等待结果":"Validation or submission is in progress.",
+"参数正在保存":"Saving parameters.",
+"仍有本地修改未保存，请重试保存":"Local changes are unsaved. Retry saving.",
+"请连接作业服务；当前参数仍可编辑并保存":"Connect the job service. You can still edit and save parameters.",
+"请点击复核，核对当前参数并准备对应输入草稿":"Request a review of the current parameters and matching inputs.",
+"尚未准备实际模块输入":"Actual module inputs have not been prepared.",
+"正在核对实际模块状态":"Checking actual module status.",
+"输入和复核版本一致，执行后仍需通过实际环境验证":"Input and review revisions match. Execution still requires target environment validation."
 };
 let language:'zh-CN'|'en' = (localStorage.getItem('studio.language')==='en'?'en':'zh-CN');
 export function setLanguage(value:'zh-CN'|'en'){language=value;localStorage.setItem('studio.language',value);}
-export function t<T>(value:T):T {return (language==='en'&&typeof value==='string'?(english[value.trim()]??value):value) as T;}
+export function t<T>(value:T):T {return (language==='en'&&typeof value==='string'?(english[value.trim()]??(value.match(/^请先补齐 (\d+) 项参数或待确认事项$/)?.[1]?('Complete '+value.match(/^请先补齐 (\d+) 项参数或待确认事项$/)![1]+' missing inputs or requirements.'):value)):value) as T;}
 export const tr=t;

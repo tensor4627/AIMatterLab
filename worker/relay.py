@@ -14,7 +14,7 @@ def request(value):
   req=urllib.request.Request("http://127.0.0.1:"+str(args.port)+target,data=body,method=value["method"],
     headers={"Authorization":"Bearer "+tokens["mcp" if value.get("mcp") else "admin"],"Content-Type":"application/json"})
   try:
-   with urllib.request.urlopen(req,timeout=240) as response:
+   with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=240) as response:
     content=response.read();result={"status":response.status,"data":json.loads(content) if content else None}
   except urllib.error.HTTPError as exc:
    content=exc.read();result={"status":exc.code,"data":json.loads(content) if content else None}

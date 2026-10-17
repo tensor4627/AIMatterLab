@@ -38,7 +38,8 @@ async function fixture(){
    if(method==='task.execute')return {...test.run,status:'queued'};
    if(method==='settings'){test.settings={...test.settings,...data};return test.settings;}
    if(method==='worker.connect'){test.events.forEach(fn=>fn({method:'studio/workerConnected'}));return {};}
-   if(['agent.connect','agent.disconnect','agent.login.cancel'].includes(method))return {};
+   if(['agent.connect','agent.tools'].includes(method))return method==='agent.tools'?{status:'ready',count:26}:{tools:{status:'ready',count:26}};
+   if(['agent.disconnect','agent.login.cancel'].includes(method))return {};
    if(method==='agent.rpc'){
     if(data.method==='model/list')return {data:[{model:'fixture-model',isDefault:true,supportedReasoningEfforts:[]}]};
     if(data.method==='thread/list')return {data:[]};if(data.method==='thread/start')return {thread:{id:'fixture-thread'}};
@@ -75,6 +76,17 @@ try{
  await check('workflow-stage-filter-and-missing-focus',async p=>{
   await p.evaluate(async()=>{window.__test.task={id:'filter',provider:'codex',threadId:'fixture-thread',parameters:{temperature:300,structure_file:null},steps:[{id:'thermal',title:'温度设置',fields:[{key:'temperature',label:'温度',type:'number',required:true}]},{id:'input',title:'结构输入',fields:[{key:'structure_file',label:'初始结构',type:'file',required:true}]}],artifacts:[],updatedAt:1};await window.renderTest('AgentTaskPage',{worker:true,task:window.__test.task,environments:[],theme:'dark',onError:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReview:()=>{},onReplace:()=>{},onRefresh:()=>{}});});
   await p.getByTestId('workflow-overview').waitFor();assert.match(await p.getByTestId('execution-reason').innerText(),/1/);await p.getByLabel('只看缺项').check();assert.equal(await p.locator('.visual-flow-step').count(),1);await p.getByLabel('搜索流程参数').fill('temperature');assert.equal(await p.locator('.visual-flow-step').count(),0);await p.getByRole('button',{name:'定位缺项 · 1'}).click();assert.equal(await p.locator('[data-field=structure_file] input').evaluate(e=>e===document.activeElement),true);await p.screenshot({path:path.join(out,'workflow-round2.png')});
+ });
+ await check('tool-failure-is-readable-and-not-a-success',async p=>{
+  await p.evaluate(async()=>{await window.renderTest('ToolActivity',{message:{text:'present_task',toolName:'present_task',activity:{state:'failed',summary:'工具调用失败',details:'Fixture tool failure'}},onWorkflow:()=>{},onRun:()=>{}});});
+  await p.getByTestId('tool-activity').waitFor();assert.match(await p.getByTestId('tool-activity').innerText(),/失败/);assert.equal(await p.getByRole('button',{name:'打开计算流程'}).count(),0);assert.equal(await p.locator('.agent-activity pre').isVisible(),false);await p.getByText('查看工具详情').click();assert.equal(await p.locator('.agent-activity pre').innerText(),'Fixture tool failure');
+ });
+ await check('unknown-execution-locks-parameters-and-offers-reconcile',async p=>{
+  await p.evaluate(async()=>{window.__test.task={id:'unknown',provider:'codex',threadId:'fixture-thread',parameters:{temperature:null},missingFields:['temperature'],steps:[],artifacts:[{kind:'run',id:'run'}],execution:{phase:'unknown'},updatedAt:1};await window.renderTest('AgentTaskPage',{worker:false,task:window.__test.task,environments:[],theme:'dark',onError:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReview:()=>{},onReplace:()=>{},onRefresh:()=>{}});});
+  await p.locator('[data-field=temperature] input').waitFor();assert.equal(await p.locator('[data-field=temperature] input').isDisabled(),true);assert.equal(await p.getByTestId('execute-workflow').isDisabled(),true);await p.getByRole('button',{name:'核对运行状态'}).waitFor();
+ });
+ await check('slow-worker-polling-does-not-flood-or-starve-refresh',async p=>{
+  await p.clock.install();await p.evaluate(async()=>{window.pendingRuns=[];window.__test.responses={'/api/runs':()=>new Promise(resolve=>window.pendingRuns.push(resolve))};await window.renderTest('App');});await p.locator('.connect-banner button').click();await p.waitForFunction(()=>window.pendingRuns.length>0);const before=await p.evaluate(()=>window.pendingRuns.length);await p.clock.runFor(15000);assert.equal(await p.evaluate(()=>window.pendingRuns.length),before);await p.evaluate(()=>window.pendingRuns.forEach(resolve=>resolve([window.__test.run])));await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent?.includes('已连接'));
  });
  await check('cluster-edits-survive-poll',async p=>{
   await p.clock.install();await p.evaluate(async()=>{const {ClusterRunPage}=await import('/src/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:'run',onError:()=>{},onAgent:()=>{}}));});

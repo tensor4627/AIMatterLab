@@ -1,3 +1,4 @@
+import {EventEmitter} from 'node:events';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {AcpBridge,toolResult,toolName} from '../desktop/acp.mjs';
 import {CredentialVault,prepareProfile,qwenCredentials,providerId,cliCommand,redact} from '../desktop/providers.mjs';
@@ -84,4 +85,11 @@ test('Qwen MCP readiness uses official state and never starts with disconnected 
  await b.waitMcp({id:'s'});assert.equal(i,2);
  b.raw=async()=>({mcp:{discoveryState:'completed',servers:[{name:'gpusampling',mcpStatus:'disconnected'}]}});
  await assert.rejects(b.waitMcp({id:'s'}),/no turn was started/);b.close();
+});
+
+
+test('Account observers wait for initialization and cannot downgrade the current tool context',async()=>{
+ const codex=new EventEmitter();let starts=0;codex.process={};codex.starting=Promise.resolve();codex.start=async()=>starts++;codex.request=async()=>({account:{type:'chatgpt'}});
+ const hub=new AgentHub({codex,root:'/fixture',catalog:{list:()=>[]},vault:{get:()=>null},settings:()=>({}),worker:()=>null});
+ await hub.account('codex');assert.equal(starts,0);
 });

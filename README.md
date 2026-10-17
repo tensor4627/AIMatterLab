@@ -4,13 +4,14 @@
 
 ## 启动
 
-Windows 安装包位于 `release/v0.6.0/GPU Sampling Studio 0.6.0.exe`。首次启动：
+Windows 安装包位于 `release/v0.9.0/GPU Sampling Studio 0.9.0.exe`。首次启动：
 
 1. 点击「连接 WSL」。设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
 3. 新建项目，设置输入根目录、环境 ID、GPU、并发和时间上限。这些授权仅由桌面用户修改。
 4. Agent 顶部选择 Codex / Kimi / Qwen，点击「登录 / 账户」；登录后连接并检查模型目录，再描述目标。Qwen 使用百炼或 Coding Plan 密钥。
-5. 开启 Agent 的「任务规划模式」后，创建草稿才会打开中央流程及对应模块审阅页。检查参数和输入文件，点击「确认并执行」后才验证与提交。日志、结果文件、曲线和轨迹在任务记录中打开。
+5. 确认 Agent 显示「科学工具已就绪 · 26」。账户连接与科学工具连接分别检查；未就绪时点击「修复工具连接」。
+6. 开启 Agent 的「任务规划模式」后，创建草稿才会打开中央流程及对应模块审阅页。在同一会话流程中直接改参数，使用缺项定位并点击「复核」。参数和输入完整后点击「执行」，由 worker 验证与提交。日志、结果文件、曲线和轨迹在任务记录中打开。
 
 作业输入复制到 WSL Linux 文件系统。桌面退出只停止聊天与交互终端，已提交的作业继续运行。作业服务源代码部署到持久化 Linux runtime，便携包退出不会删除运行依赖。系统/WSL 停止后只能按引擎 checkpoint 能力续算；未知进程不会自动重提。
 
@@ -25,6 +26,8 @@ pnpm run pack
 ```
 
 使用 PATH 中的 pnpm；安装器也支持在 desktop.pnpm 中登记可执行文件路径。
+
+最新三轮改进与范围：[完整审查](docs/audit-20261017.md)、[0.7](docs/v0.7.md)、[0.8](docs/v0.8.md)、[0.9](docs/v0.9.md)。本机未保存修改可恢复并重试；SSH、凭据与真实作业记录保留。
 
 ## 已实现
 
@@ -54,6 +57,10 @@ pnpm run pack
 ```powershell
 pnpm test
 pnpm test:worker
+pnpm test:frontend
+node scripts/startup-smoke.mjs
+# 以下检查会使用真实账户与模型，创建隔离的待审阅草稿，不执行科学计算
+node scripts/studio-acceptance.mjs
 pnpm protocol
 ```
 

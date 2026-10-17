@@ -34,7 +34,7 @@ export class WorkerClient {
    relay.on('error',e=>{if(this.relay===relay)this.reject(e);});
    relay.on('exit',()=>{if(this.relay===relay){this.reject(Error('WSL relay disconnected; job status is unknown'));this.connection=null;}});
    this.relay.stderr.on('data',()=>{});
-   const health=await this.forward('GET','/api/health');
+   const health=await this.forward('GET','/api/health',undefined,false,10000);
    if(health.status!==200||health.data.root!==this.connection.health.root)throw Error('WSL relay identity mismatch');
    this.proxy=http.createServer(async(req,res)=>{
     if(req.url!=='/mcp'||req.headers.origin||req.headers.authorization!=='Bearer '+this.connection.tokens.mcp){res.writeHead(403);res.end();return;}
@@ -61,9 +61,9 @@ export class WorkerClient {
   if(result.error||!names.includes('present_task'))throw Error('科学工具缺少草稿保存接口，请重新连接');
   return {status:'ready',count:names.length,transport:this.connection.transport,checkedAt:Date.now()};
  }
- forward(method,target,data,mcp=false){
+ forward(method,target,data,mcp=false,timeout=245000){
   return new Promise((resolve,reject)=>{
-   const id=this.next++,timer=setTimeout(()=>{this.pending.delete(id);reject(Error('Worker request timed out'));},245000);
+   const id=this.next++,timer=setTimeout(()=>{this.pending.delete(id);reject(Error('Worker request timed out'));},timeout);
    this.pending.set(id,{resolve,reject,timer});
    try{this.relay.stdin.write(JSON.stringify({id,method,target,data,mcp})+'\n');}catch(e){clearTimeout(timer);this.pending.delete(id);reject(e);}
   });
@@ -72,13 +72,13 @@ export class WorkerClient {
   assertWorkerRoute(method, target);
   if (!this.connection) throw new Error('Connect the WSL worker first');
   if(this.relay){
-   const result=await this.forward(method,target,data);
+   const result=await this.forward(method,target,data,false,method==='GET'?12000:245000);
    if(result.status!==200)throw Error(result.data?.error||'Worker request failed');
    return result.data;
   }
   const response = await fetch(this.connection.url + target, {
     method, headers: { Authorization: 'Bearer ' + this.connection.tokens.admin,'Content-Type':'application/json' },
-    body: method === 'POST' ? JSON.stringify(data ?? {}) : undefined,signal: AbortSignal.timeout(240000)
+    body: method === 'POST' ? JSON.stringify(data ?? {}) : undefined,signal: AbortSignal.timeout(method==='GET'?12000:240000)
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Worker request failed');

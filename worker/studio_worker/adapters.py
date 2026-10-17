@@ -178,11 +178,11 @@ class Adapter:
                 if p.get("validation_history"):
                     payload["validation_history"] = str(directory / p["validation_history"])
                 derivatives = run_json(self.executable(environment,"python"),SCIENTIFIC,"derivatives",payload,process_env(environment,spec["gpu"]),timeout=120)
-            return {"status": "passed", "output": result.stdout[-12000:], "derivatives":derivatives,
+            return {"status": "passed", "artifact_status":"passed", "scientific_status":"not_run", "output": result.stdout[-12000:], "derivatives":derivatives,
                     "scope": "serialized bias ABI and sampled finite differences; target-engine and restart parity require run evidence"}
         if self.engine == "pygas.build" and p.get("output_file", "").endswith(".pt2"):
             raise ValueError("AOTI needs explicit dual export and target-toolchain preflight")
-        return {"status": "passed", "scope": "input/executable contract; scientific run pending"}
+        return {"status": "passed", "scientific_status":"not_run", "scope": "input/executable contract; scientific run pending"}
 
     def launch(self, command, **kwargs):
         return subprocess.Popen(command, **kwargs)

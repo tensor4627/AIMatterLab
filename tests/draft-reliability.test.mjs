@@ -20,3 +20,15 @@ test('Review instructions identify the actual gate, and unknown submission locks
  const base={worker:true,saving:false,saveError:false,missing:[],task:{parameters:{temperature:300},parameterRevision:1,review:{status:'ready',parameterRevision:1,artifactIds:['r']}},artifact:{id:'r'},run:{status:'draft'}};
  assert.equal(reviewState(base).canExecute,true);assert.match(reviewState({...base,missing:['structure']}).reason,/1/);assert.equal(reviewState({...base,saveError:true}).canExecute,false);assert.equal(reviewState({...base,task:{...base.task,execution:{phase:'unknown'}}}).locked,true);assert.equal(reviewState({...base,task:{...base.task,review:{...base.task.review,parameterRevision:0}}}).canExecute,false);
 });
+
+test('Tool cards use actual failure flags and link only successfully persisted artifacts',async()=>{
+ const {toolActivity}=await import('../shared/tool-activity.mjs');const result={content:[{type:'text',text:JSON.stringify({id:'t',kind:'task-parameters',name:'Draft'})}]};
+ assert.equal(toolActivity({status:'completed',result}).artifact.id,'t');assert.equal(toolActivity({status:'completed',result:{...result,isError:true}}).state,'failed');assert.equal(toolActivity({status:'completed',result:{...result,isError:true}}).artifact,undefined);assert.equal(toolActivity({status:'inProgress'}).state,'running');
+});
+
+test('Restored user history hides Studio context while preserving the actual user message',async()=>{
+ const {visibleUserText}=await import('../shared/tool-activity.mjs');const context=JSON.stringify({environments:[],workflow:null,project:null});
+ assert.equal(visibleUserText([{type:'text',text:'Run MD'},{type:'text',text:'[Studio workspace context]\n'+context},{type:'text',text:'[Studio interaction mode: planning]\nprivate instructions'}]),'Run MD');
+ assert.equal(visibleUserText([{type:'text',text:'Run MD\n\n[Studio workspace context]\n'+context}]),'Run MD');
+ assert.equal(visibleUserText([{type:'text',text:'Explain [Studio workspace context] in my code'}]),'Explain [Studio workspace context] in my code');
+});

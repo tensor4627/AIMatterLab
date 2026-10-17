@@ -87,7 +87,7 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.8.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.9.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/projects":
             return store.list("project")
         if path == "/api/environments":
@@ -288,8 +288,12 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.8.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.9.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
+                    elif operation == "resources/list":
+                        value = {"resources": []}
+                    elif operation == "resources/templates/list":
+                        value = {"resourceTemplates": []}
                     elif operation == "ping":
                         value = {}
                     elif operation == "tools/list":

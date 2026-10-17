@@ -121,7 +121,8 @@ handle('settings',data => {
   if(!Array.isArray(next.skillRoots)) throw new Error('Skill roots must be an array');
   settings=catalog.put('settings','main',next); return settings;
 });
-handle('worker.connect',async()=>{agents.close();const result=await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
+function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activeTurns?.size))throw Error('请先停止当前回复，再调整连接或上下文设置');}
+handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.request',async({method,target,data}) => {
   const result=await worker.request(method,target,data);
   if(method==='GET' && ['/api/projects','/api/environments'].includes(target))
@@ -130,6 +131,7 @@ handle('worker.request',async({method,target,data}) => {
 });
 handle('codex.connect',async() => codex.start(settings.codexPath,worker.connection,agentConfig(settings.agent)));
 handle('codex.configure',async({preferences={},threadId,model}) => {
+  assertIdleAgent();
   const config=agentConfig(preferences);
   settings=catalog.put('settings','main',{...settings,agent:preferences});
   codex.close();
@@ -166,8 +168,9 @@ async function scientificTools(provider){
   return status;
  }catch(error){return {status:'blocked',count:0,message:error.message,checkedAt:Date.now()};}
 }
-handle('agent.connect',async({provider})=>{
- providerId(provider);
+handle('agent.connect',async({provider,repairTools=false})=>{
+ providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');
+ if(repairTools){assertIdleAgent();agents.bridge(provider)?.close();await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}
  if(!worker.connection){try{await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}catch{}}
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
  const info=await agents.connect(provider),tools=await scientificTools(provider);
@@ -198,6 +201,7 @@ handle('agent.rpc',async({provider,method,params={}})=>{
 });
 handle('agent.respond',({provider,id,result})=>agents.respond(provider,id,result));
 handle('agent.configure',async({provider,preferences={},threadId,model})=>{
+  assertIdleAgent();
   providerId(provider);if(provider!=='codex')throw Error('Context budget changes are not supported by this ACP provider');
   agentConfig(preferences);settings=catalog.put('settings','main',{...settings,agent:preferences});return agents.configure(provider,preferences,threadId,model);
 });
@@ -310,4 +314,4 @@ app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',()=>{agents.close();worker.close();for(const t of terminals.values())t.child.kill();});
 
 }
-app.whenReady().then(initialize).catch(error=>{console.error(error);app.exit(1);});
+app.whenReady().then(initialize).catch(error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}app.exit(1);});
