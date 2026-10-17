@@ -4,7 +4,7 @@
 
 ## 启动
 
-Windows 安装包位于 `release/v0.9.0/GPU Sampling Studio 0.9.0.exe`。首次启动：
+Windows 安装包位于 `release/v0.10.0/GPU Sampling Studio 0.10.0.exe`。首次启动：
 
 1. 点击「连接 WSL」。设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
@@ -105,3 +105,6 @@ Agent 默认普通对话，开启「任务规划模式」才自动生成中央�
 ## v0.6：会话流程与可视化审阅
 
 左侧项目与对话同时恢复聊天和流程。同一会话可持续用自然语言或步骤菜单调整参数；红绿点提示缺项，手工修改后点击“复核”，准备当前版本草稿后点击“执行”。详见 [本代功能与验证](docs/v0.6.md)。
+
+
+DeepSeek API：在 Agent 面板选择 **DeepSeek API → 登录 / 账户**，输入 DeepSeek 开放平台 API Key。主进程通过系统加密保存密钥，连接后从官方 `/models` 读取目录；已知当前模型默认关闭思考，也可选择 low / high / max。无需安装 DeepSeek CLI；支持流式回复、科学工具、当前会话流程更新与复核，计算仍由你审阅后执行。真实账户推理需自行配置 Key 后验证；尚未进行 TPS 对比。[接入与验证说明](docs/v0.10.md)。

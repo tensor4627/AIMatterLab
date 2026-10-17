@@ -8,7 +8,7 @@ export class TaskRecords{
  constructor(catalog,publish){this.catalog=catalog;this.publish=publish;this.active=new Map();this.turns=new Map();this.cache=new Map();}
  tasks(){return this.catalog.list?.('agent-task')||[...this.cache.values()];}
  read(id){if(typeof id!=='string'||!id||id.length>200)throw Error('Invalid task ID');const value=this.catalog.get('agent-task',id);if(!value)throw Error('Unknown task');return structuredClone(value);}
- conversation(provider,threadId){if(!['codex','kimi','qwen'].includes(provider)||typeof threadId!=='string'||!threadId||threadId.length>200)throw Error('Invalid conversation');return this.catalog.get('conversation',provider+':'+threadId);}
+ conversation(provider,threadId){if(!['codex','kimi','qwen','deepseek'].includes(provider)||typeof threadId!=='string'||!threadId||threadId.length>200)throw Error('Invalid conversation');return this.catalog.get('conversation',provider+':'+threadId);}
  conversations(){
   const values=this.catalog.list?.('conversation')||[];
   for(const task of this.tasks().sort((a,b)=>b.updatedAt-a.updatedAt))if(task.threadId&&!values.some(c=>c.provider===task.provider&&c.threadId===task.threadId))values.push(this.remember({provider:task.provider,threadId:task.threadId,projectId:task.projectId,name:task.name,taskId:task.id}));
@@ -22,7 +22,7 @@ export class TaskRecords{
  bound(provider,threadId){const conversation=this.conversation(provider,threadId);const id=conversation?.taskId||this.tasks().filter(t=>t.provider===provider&&t.threadId===threadId).sort((a,b)=>b.updatedAt-a.updatedAt)[0]?.id;return id?this.read(id):null;}
  create(value){
   if(value.planningMode!==true)throw Error('Enable task planning before creating a task');
-  if(!['codex','kimi','qwen'].includes(value.provider)||typeof value.request!=='string'||!value.request.trim()||value.request.length>100000||value.newWorkflow!==undefined&&typeof value.newWorkflow!=='boolean')throw Error('Invalid task intent');
+  if(!['codex','kimi','qwen','deepseek'].includes(value.provider)||typeof value.request!=='string'||!value.request.trim()||value.request.length>100000||value.newWorkflow!==undefined&&typeof value.newWorkflow!=='boolean')throw Error('Invalid task intent');
   if(value.threadId&&!value.newWorkflow){const old=this.bound(value.provider,value.threadId);if(old)return old;}
   const task={id:randomUUID(),kind:'agent-task',planningMode:true,name:value.request.trim().slice(0,100),request:value.request,provider:value.provider,projectId:value.projectId||null,plan:[],steps:[],parameters:{},parameterRevision:0,manualEdits:{},review:{status:'not_run'},artifacts:[],phase:'collecting',updatedAt:Date.now()};
   this.save(task,true);return value.threadId?this.attach(task.id,value.provider,value.threadId):task;
@@ -77,7 +77,7 @@ export class TaskRecords{
   if(event.method==='turn/completed'&&turn.reviewMode){
    const stale=Object.values(task.manualEdits||{}).some(revision=>revision>turn.revision),missing=workflowMissing(task.steps||[],task.parameters||{},task.missingFields||[]);
    const prepared=task.artifacts.some(a=>['run','cluster-run'].includes(a.kind)&&a.preparedRevision===task.parameterRevision);
-   const ready=turn.presented&&!stale&&!missing.length&&prepared&&!p.turn?.error&&p.turn?.status!=='failed';
+   const ready=turn.presented&&!stale&&!missing.length&&prepared&&!p.turn?.error&&p.turn?.status==='completed';
    task.review={status:ready?'ready':stale?'stale':'needs-information',parameterRevision:task.parameterRevision,artifactIds:ready?task.artifacts.filter(a=>a.preparedRevision===task.parameterRevision&&['run','cluster-run'].includes(a.kind)).map(a=>a.id):[],summary:stale?'复核期间参数发生变化，请重新复核':missing.length?'仍需补充：'+missing.join('、'):!prepared?'需要按当前参数准备实际模块草稿':ready?'AI 参数复核完成；执行时仍需实际环境验证':'AI 复核未完成'};this.save(task);
   }
  }

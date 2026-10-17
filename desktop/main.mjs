@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -79,7 +79,7 @@ if(installationVerifying){
  const config=JSON.parse(fs.readFileSync(process.env.STUDIO_INSTALL_CONFIG,'utf8'));
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,agentProvider:config.desktop.agent_provider||'codex'});
 }
-agents=new AgentHub({codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:()=>worker.connection});
+agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:()=>worker.connection});
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>taskRecords.create(value));
@@ -181,7 +181,10 @@ handle('agent.tools',async({provider})=>{providerId(provider);return scientificT
 handle('agent.disconnect',({provider})=>{providerId(provider);agents.bridge(provider)?.close();return {};});
 handle('agent.account',({provider})=>agents.account(provider));
 handle('agent.rpc',async({provider,method,params={}})=>{
-  if(method==='turn/start')params=taskRecords.prepareTurn(provider,params);
+  if(method==='turn/start'){
+   params=taskRecords.prepareTurn(provider,params);
+   if(provider==='deepseek'){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
+  }
   if(provider!=='codex'&&method==='turn/start'){
     const registered=localSkills([path.join(process.env.USERPROFILE||'','.codex','skills'),path.join(root,'.agents','skills'),...settings.skillRoots]);
     const input=[];

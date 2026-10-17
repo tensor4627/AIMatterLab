@@ -90,3 +90,7 @@ test('Legacy natural-language blockers survive restoration and manual edits with
  assert.equal(updated.parameters.md.temperature,345);assert.deepEqual(updated.missingFields,missing);
  assert.equal(updated.review.status,'not_run');assert.equal({}.polluted,undefined);
 });
+
+test('A cancelled or interrupted review can never enable execution',()=>{
+ for(const status of ['cancelled','interrupted','failed']){const {records}=fixture(),task=reviewed(records);records.prepareTurn('codex',{threadId:'thread',reviewMode:true,studioTaskId:task.id});present(records,task);records.event({provider:'codex',method:'turn/completed',params:{threadId:'thread',turn:{status}}});assert.notEqual(records.read(task.id).review.status,'ready');}
+});

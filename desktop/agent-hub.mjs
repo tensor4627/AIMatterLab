@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
+import {DeepSeekBridge,deepseekCredentials} from './deepseek.mjs';
 import {AcpBridge} from './acp.mjs';
 import {providerId,prepareProfile,qwenCredentials,spawnCli,redact,CLI_VERSIONS} from './providers.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
@@ -11,8 +12,8 @@ export function loginUrl(provider,url){
  return target.href;
 }
 export class AgentHub extends EventEmitter{
- constructor({codex,root,catalog,vault,settings,worker}){
-  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();
+ constructor({codex,root,catalog,vault,settings,worker,fetchApi}){
+  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.fetchApi=fetchApi;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();
   this.codex.on?.('event',event=>{
    const thread=event.params?.threadId;
    if(event.method==='turn/started')this.codexOutput.delete(thread);
@@ -38,7 +39,7 @@ export class AgentHub extends EventEmitter{
   if(provider==='codex')return this.codex.start(this.path(provider),this.getWorker(),agentConfig(this.preferences(provider)));
   let bridge=this.bridges.get(provider);
   if(!bridge){
-   bridge=new AcpBridge(provider);
+   bridge=provider==='deepseek'?new DeepSeekBridge({catalog:this.catalog,credential:()=>this.vault.get('deepseek'),worker:()=>this.getWorker(),...this.fetchApi?{fetchApi:this.fetchApi}:{}}):new AcpBridge(provider);
    bridge.on('event',event=>{
     if(event.method==='thread/started'||event.method==='studio/sessionInfo')this.remember(provider,event.params.thread);
     if(event.method==='turn/completed'&&event.params.turn?.status==='completed'&&event.params.turn?.stopReason==='end_turn'&&event.params.turn?.modelOutputReceived){this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{provider}});}
@@ -46,7 +47,8 @@ export class AgentHub extends EventEmitter{
    });
    bridge.on('diagnostic',text=>this.emit('event',{method:'studio/diagnostic',provider,params:{provider,text}}));this.bridges.set(provider,bridge);
   }
-  const credential=provider==='qwen'?this.vault.get('qwen'):null;
+  if(provider==='deepseek')return bridge.start();
+  const credential=['qwen','deepseek'].includes(provider)?this.vault.get(provider):null;
   const profile=prepareProfile(this.root,provider,credential);
   return bridge.start(this.path(provider),profile,this.getWorker());
  }
@@ -60,7 +62,7 @@ export class AgentHub extends EventEmitter{
    catch(error){if(error.message!=='Codex bridge closed'||!this.codex.starting)throw error;await this.codex.starting;result=await this.codex.request('account/read',{refreshToken:true});}
    return {...result,provider,...this.loginStatus.codex,login:'chatgpt',modelAccess:this.loginStatus.codex?.modelAccess||'not_run'};
   }
-  const status=this.loginStatus[provider]||{},credential=provider==='qwen'?this.vault.get('qwen'):null;
+  const status=this.loginStatus[provider]||{},credential=['qwen','deepseek'].includes(provider)?this.vault.get(provider):null;
   return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan}:{},modelAccess:status.modelAccess||'not_run'};
  }
  async rpc(provider,method,params={}){
@@ -98,8 +100,9 @@ export class AgentHub extends EventEmitter{
    this.loginStatus.codex={phase:result.type==='apiKey'?'completed':'authorizing',loginId:result.loginId,url:result.authUrl||result.verificationUrl,userCode:result.userCode,modelAccess:'not_run'};
    return {provider,...this.loginStatus.codex};
   }
-  if(provider==='qwen'){
-   const credential=qwenCredentials(value);this.vault.put('qwen',credential);this.bridges.get(provider)?.close();
+  if(provider==='qwen'||provider==='deepseek'){
+   if(this.bridge(provider)?.activeTurns?.size)throw Error('Stop the current reply before replacing API credentials');
+   const credential=provider==='deepseek'?deepseekCredentials(value):qwenCredentials(value);this.vault.put(provider,credential);this.bridges.get(provider)?.close();
    this.loginStatus[provider]={phase:'configured',modelAccess:'not_run'};return this.account(provider);
   }
   if(this.loginChild)throw Error('A provider login is already in progress');

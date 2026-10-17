@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-export const PROVIDERS=['codex','kimi','qwen'];
+export const PROVIDERS=['codex','kimi','qwen','deepseek'];
 export const CLI_VERSIONS={kimi:'2.1.1',qwen:'0.24.7'};
 export function providerId(id){if(!PROVIDERS.includes(id))throw Error('Unsupported Agent provider');return id;}
 export function cliCommand(executable,args=[]){
@@ -40,7 +40,7 @@ export class CredentialVault{
  remove(id){if(fs.existsSync(this.file(id)))fs.unlinkSync(this.file(id));}
 }
 export function prepareProfile(root,id,credential){
- providerId(id);const home=path.join(root,id),cwd=path.join(home,'workspace');fs.mkdirSync(cwd,{recursive:true});
+ providerId(id);if(!['kimi','qwen'].includes(id))throw Error('This provider does not use a CLI profile');const home=path.join(root,id),cwd=path.join(home,'workspace');fs.mkdirSync(cwd,{recursive:true});
  if(id==='kimi'){
   const file=path.join(home,'config.toml');let config=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'';
   // Owned profile only. Keep providers created by official login; replace our policy section.
