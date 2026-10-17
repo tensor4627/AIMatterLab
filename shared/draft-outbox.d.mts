@@ -1,0 +1,1 @@
+export class DraftOutbox {constructor(id:string,storage:Storage);pendingCount:number;stage(key:string,value:any):void;apply(parameters:Record<string,any>):Record<string,any>;flush(save:(changes:Record<string,any>)=>Promise<any>):Promise<any>;}

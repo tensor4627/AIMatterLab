@@ -293,7 +293,23 @@ const english:Record<string,string> = {
 "重新加载界面":"Reload the interface",
 "Kimi 可执行路径":"Kimi executable path",
 "Qwen 可执行路径":"Qwen executable path",
-"Kimi 和 Qwen 使用本应用私有配置与官方 ACP 协议。登录在右侧服务商面板完成。":"Kimi and Qwen use private profiles and official ACP. Sign in from the provider panel."
+"Kimi 和 Qwen 使用本应用私有配置与官方 ACP 协议。登录在右侧服务商面板完成。":"Kimi and Qwen use private profiles and official ACP. Sign in from the provider panel.",
+"当前阶段":"Current stage",
+"定义目标":"Define goal",
+"补齐输入":"Complete inputs",
+"AI 复核":"AI review",
+"执行验证":"Validate and execute",
+"运行与结果":"Runs and results",
+"草稿版本":"Draft revision",
+"搜索流程参数":"Search workflow parameters",
+"搜索步骤、参数或文件…":"Search steps, parameters or files\u2026",
+"只看缺项":"Missing inputs only",
+"定位缺项":"Find missing input",
+"科学工具已就绪":"Scientific tools ready",
+"科学工具未就绪":"Scientific tools unavailable",
+"科学工具待连接":"Scientific tools not connected",
+"修复工具连接":"Reconnect tools",
+"修改已保留在本机，切换会话或重开后可重试保存。":"Changes are kept locally. Retry saving after switching conversations or reopening."
 };
 let language:'zh-CN'|'en' = (localStorage.getItem('studio.language')==='en'?'en':'zh-CN');
 export function setLanguage(value:'zh-CN'|'en'){language=value;localStorage.setItem('studio.language',value);}
