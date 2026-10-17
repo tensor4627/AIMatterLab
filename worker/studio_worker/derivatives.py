@@ -5,7 +5,10 @@ def check(payload):
  from ase.io import read
  from ase.neighborlist import neighbor_list
  from pathlib import Path
- from base.artifact import ArtifactRunner
+ if payload.get("engine")=="pydyn.sampling":
+  from pydyn.sampling.base.artifact import ArtifactRunner
+ else:
+  from base.artifact import ArtifactRunner
  if str(payload["bias_file"]).endswith(".pt2"):
   raise ValueError("AOTI finite differences require an explicit fixed-capacity target preflight")
  atoms=read(payload["structure_file"])

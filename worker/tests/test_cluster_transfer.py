@@ -225,6 +225,22 @@ class ClusterTransfer(unittest.TestCase):
         self.assertEqual(len(ReceiptWire.calls),3)
         self.assertTrue(all(p['directory']=='pilot-'+run['id'] for p in ReceiptWire.calls))
 
+    def test_result_preview_is_collected_hash_bound_and_has_no_transport(self):
+        run, directory = self.terminal()
+        with self.assertRaises(ValueError):
+            self.clusters.result_file(run['id'], 'console.log')
+        collection = self.clusters.collect(run['id'])
+        calls = len(LocalTransferWire.calls)
+        preview = self.clusters.result_file(run['id'], 'console.log')
+        self.assertEqual(preview['text'], 'fixture complete\n')
+        self.assertEqual(len(LocalTransferWire.calls),calls)
+        for name in ('../exit.json','/console.log','simulation/not-collected.txt'):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.clusters.result_file(run['id'], name)
+        Path(next(a['path'] for a in collection['files'] if a['name']=='console.log')).write_text('changed after collection')
+        with self.assertRaises(ValueError):
+            self.clusters.result_file(run['id'], 'console.log')
+
     def test_terminal_collection_hashes_default_whitelist_and_stable_asset_ids(self):
         run, directory = self.terminal(directory_name='pilot')
         (directory/'simulation'/'not-a-default.secret').write_text('fixture unselected')

@@ -24,3 +24,5 @@ export function validDeployment(value){
  return {target:value.target,projectId:value.projectId,targetId:value.targetId,inputSource:value.inputSource||'local',maxSeconds:value.maxSeconds,directoryName:value.directoryName,resources:{cpus:resources.cpus,gpus:resources.gpus,memory_mb:resources.memory_mb,queue:resources.queue||'',account:resources.account||''},gpu:Number.isSafeInteger(value.gpu)&&value.gpu>=0?value.gpu:0};
 }
 export function deploymentCurrent(task){return task.review?.status==='ready'&&task.review.parameterRevision===task.parameterRevision&&task.deployment?.prepared?.parameterRevision===task.parameterRevision&&task.deployment?.prepared?.deploymentRevision===task.deployment.revision;}
+
+export function snapshotIdentity(task,run){return JSON.stringify({runId:run.id,parameterRevision:task.parameterRevision,deploymentRevision:task.deployment?.revision,files:(run.snapshots||[]).map(s=>({name:s.name,sha256:s.sha256,size:s.size})).sort((a,b)=>a.name.localeCompare(b.name))});}

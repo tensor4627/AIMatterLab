@@ -15,6 +15,9 @@ from .task_schema import STEP_SCHEMA, validate_task
 from .util import leaf, atomic_json, digest, contained
 
 TOOL_ROUTES = {
+ "collect_cluster_artifacts":("POST","/api/cluster/collect",{"run_id":"string"}),
+ "read_cluster_input":("POST","/api/cluster/input",{"run_id":"string","name":"string"}),
+ "read_cluster_result":("POST","/api/cluster/result",{"run_id":"string","name":"string"}),
  "present_task":("POST","/api/tasks/present",{"task_id":"string","name":"string","steps":"array","parameters":"object","missing_fields":"array"}),
  "read_cluster_skill":("POST","/api/cluster/skill",{"project_id":"string","cluster_id":"string"}),
  "cluster_browse":("POST","/api/cluster/browse",{"project_id":"string","cluster_id":"string","relative":"string"}),
@@ -87,7 +90,7 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.11.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.12.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/projects":
             return store.list("project")
         if path == "/api/environments":
@@ -139,6 +142,12 @@ def dispatch(service, method, path, data, admin=False):
         return service.clusters.probe(data["cluster_id"])
     if path=="/api/cluster/draft":
         return service.clusters.draft(data)
+    if path=="/api/cluster/input":
+        return service.clusters.input_file(data["run_id"],data["name"])
+    if path=="/api/cluster/collect":
+        return service.clusters.collect(data["run_id"],data.get("names"))
+    if path=="/api/cluster/result":
+        return service.clusters.result_file(data["run_id"],data["name"])
     if path=="/api/cluster/prepare":
         return service.clusters.prepare(data["spec"])
     if path=="/api/cluster/skill":
@@ -288,7 +297,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.11.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.12.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}

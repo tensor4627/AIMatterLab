@@ -290,3 +290,16 @@ class ScientificInputControls(unittest.TestCase):
             self.assertEqual(a.input_contract({"parameters":{"steps":100,"temperature":300,"time_step_fs":0.5}},root)["status"],"passed")
             with self.assertRaisesRegex(ValueError,"differs"):
                 a.input_contract({"parameters":{"steps":200}},root)
+
+class RuntimeSelection(unittest.TestCase):
+    def test_pydyn_validator_is_native_and_gpumd_validator_is_independent(self):
+        from studio_worker.adapters import Adapter
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for name in ("pygas","pydyn"):
+                script=root/name/"agents/skills/pygas-check-gpumd-contract/scripts/validate_model.py"
+                script.parent.mkdir(parents=True);script.write_text("# fixture only")
+            env={"executables":{"python":sys.executable},"repositories":{name:str(root/name) for name in ("pygas","pydyn")}}
+            spec={"inputs":{"bias.pt":"fixture","model.xyz":"fixture"},"parameters":{"bias_file":"bias.pt","structure_file":"model.xyz","mode":"wtmetad","cv_size":1,"cutoff":3.0}}
+            self.assertIn(str(root/"pydyn"),Adapter("pydyn.sampling").bias_command(spec,env)[1])
+            self.assertIn(str(root/"pygas"),Adapter("gpumd.sampling").bias_command(spec,env)[1])

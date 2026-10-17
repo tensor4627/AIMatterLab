@@ -54,7 +54,7 @@ export class CodexBridge extends EventEmitter {
     });
     try {
       this.info = await this.request('initialize', {
-        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.11.0' }
+        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.12.0' }
       });
       this.send({ method: 'initialized', params: {} });
       return this.info;

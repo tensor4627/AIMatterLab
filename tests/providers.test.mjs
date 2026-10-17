@@ -93,3 +93,17 @@ test('Account observers wait for initialization and cannot downgrade the current
  const hub=new AgentHub({codex,root:'/fixture',catalog:{list:()=>[]},vault:{get:()=>null},settings:()=>({}),worker:()=>null});
  await hub.account('codex');assert.equal(starts,0);
 });
+
+
+test('Codex zero-turn conversations reuse only their current server process',async()=>{
+ const codex=new EventEmitter(),calls=[];codex.process={};
+ codex.request=async(method,params)=>{calls.push(method);if(method==='thread/start')return {thread:{id:'blank',turns:[]},model:'actual-model',reasoningEffort:'low'};if(method==='thread/resume')throw Error('no rollout found for thread id blank');if(method==='turn/start')return {turn:{id:'turn'}};return {thread:{id:'blank',turns:[{id:'turn'}]}};};
+ const hub=new AgentHub({codex,root:'.',catalog:{list:()=>[],put:()=>{}},vault:{get:()=>null},settings:()=>({}),worker:()=>null});
+ const started=await hub.rpc('codex','thread/start',{});
+ const restored=await hub.rpc('codex','thread/resume',{threadId:'blank'});assert.deepEqual(restored,started);restored.thread.id='mutated';
+ assert.equal((await hub.rpc('codex','thread/read',{threadId:'blank',includeTurns:true})).thread.id,'blank');assert.deepEqual(calls,['thread/start']);
+ await hub.rpc('codex','turn/start',{threadId:'blank',input:[]});
+ assert.equal((await hub.rpc('codex','thread/read',{threadId:'blank',includeTurns:true})).thread.turns.length,1);
+ codex.process={};await assert.rejects(hub.rpc('codex','thread/resume',{threadId:'blank'}),/空会话尚未保存/);
+ assert.equal(calls.filter(c=>c==='thread/resume').length,1);
+});

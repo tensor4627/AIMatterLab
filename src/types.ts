@@ -31,5 +31,5 @@ export interface Conversation {id:string;provider:AgentProvider;threadId:string;
 export interface AgentIntent {id:string;text:string;autoSend?:boolean;taskId?:string;reviewMode?:boolean;threadId?:string;provider?:AgentProvider}
 
 export interface TaskEditRequest {id:string;changes:Record<string,unknown>}
-export interface TaskExecuteRequest {taskId:string;artifactId:string}
+export interface TaskExecuteRequest {taskId:string;artifactId:string;inputReceipt?:string}
 export interface TaskLinkRunRequest {taskId:string;runId:string;kind:'run'|'cluster-run'}

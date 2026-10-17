@@ -1,3 +1,4 @@
+import ClusterResults from './ClusterResults';
 import {useEffect,useRef,useState} from 'react';
 import {Server,ShieldCheck,Save,Sparkles,RefreshCw,Plus,Eye,EyeOff,Play,Terminal} from 'lucide-react';
 import {api,invoke,type Project,type Settings,type ClusterRun} from './types';
@@ -41,11 +42,12 @@ export default function ClusterPage({worker,project,settings,onError,onRefresh,o
 }
 export function ClusterRunPage({id,onError,onAgent}:{id:string;onError:(e:unknown)=>void;onAgent:(text:string)=>void}){
  const [activeId,setActiveId]=useState(id),[run,setRun]=useState<ClusterRun|null>(null),[busy,setBusy]=useState(false),[log,setLog]=useState(''),[revised,setRevised]=useState(''),[edit,setEdit]=useState(false);
- const revisedRef=useRef(''),activeRef=useRef(id);activeRef.current=activeId;
+ const loadingRef=useRef(false),revisedRef=useRef(''),activeRef=useRef(id);activeRef.current=activeId;
  function putRevised(next:string){revisedRef.current=next;setRevised(next);}
  async function load(){
+  if(loadingRef.current)return;loadingRef.current=true;
   const wanted=activeId;
-  try{const r=await api<ClusterRun>('POST','/api/cluster/status',{run_id:wanted});if(wanted!==activeRef.current)return;setRun(r);if(!revisedRef.current)putRevised(JSON.stringify({name:r.name,engine:r.engine,project_id:r.project_id,cluster_id:r.cluster_id,max_seconds:r.max_seconds,resources:r.resources,parameters:r.parameters||{},inputs:Object.fromEntries(r.snapshots.map(s=>[s.name,r.directory+'/simulation/'+s.name]))},null,2));if(r.job_id){const data=await api('POST','/api/cluster/log',{run_id:wanted});if(wanted!==activeRef.current)return;setLog(data.text);}}catch(e){if(wanted===activeRef.current)onError(e);}
+  try{const r=await api<ClusterRun>('POST','/api/cluster/status',{run_id:wanted});if(wanted!==activeRef.current)return;setRun(r);if(!revisedRef.current)putRevised(JSON.stringify({name:r.name,engine:r.engine,project_id:r.project_id,cluster_id:r.cluster_id,max_seconds:r.max_seconds,resources:r.resources,parameters:r.parameters||{},inputs:Object.fromEntries(r.snapshots.map(s=>[s.name,r.directory+'/simulation/'+s.name]))},null,2));if(r.job_id){const data=await api('POST','/api/cluster/log',{run_id:wanted});if(wanted!==activeRef.current)return;setLog(data.text);}}catch(e){if(wanted===activeRef.current)onError(e);}finally{loadingRef.current=false;}
  }
  useEffect(()=>{setRun(null);putRevised('');setLog('');void load();const timer=setInterval(()=>void load(),10000);return()=>clearInterval(timer);},[activeId]);
  async function submit(){
@@ -61,5 +63,5 @@ export function ClusterRunPage({id,onError,onAgent}:{id:string;onError:(e:unknow
  <section className="card"><h3>{t('将执行的提交脚本')}</h3><pre className="batch-script">{run.script}</pre></section>
  <section className="card"><h3>{t('验证与监控')}</h3><p>{t('输入验证')} · {run.validation.status} · {run.validation.scope}</p><p>{t('科学验证')} · {run.scientific_validation.status}</p><p>Job ID · {run.job_id||t('未提交')}</p><pre className="console">{log||t('暂无运行日志')}</pre></section>
  {edit&&<button className="button primary" disabled={busy} onClick={async()=>{if(busy)return;setBusy(true);try{const value=JSON.parse(revised);const changes=Object.fromEntries(['name','engine','max_seconds','resources','inputs','parameters'].map(k=>[k,value[k]]));const draft=await api<ClusterRun>('POST','/api/cluster/revise',{run_id:activeId,changes});setRun(draft);setActiveId(draft.id);putRevised('');setEdit(false);}catch(e){onError(e);}finally{setBusy(false);}}}>{t('保存修订并预览脚本')}</button>}
- <div className="review-execute"><button className="button" onClick={()=>onAgent('检查集群任务 '+run.id+' 的已记录参数和日志。只读监控，不重提 unknown 任务。')}><Sparkles size={15}/>{t('让 Agent 分析')}</button>{['draft','ready'].includes(run.status)?<button className="button primary" disabled={busy||edit} onClick={()=>void submit()}><Play size={15}/>{t('审阅完成，提交到集群')}</button>:['queued','running','unknown'].includes(run.status)?<button className="button" disabled={busy} onClick={async()=>{if(busy)return;setBusy(true);try{setRun(await api<ClusterRun>('POST','/api/cluster/cancel',{run_id:run.id}));}catch(e){onError(e);void load();}finally{setBusy(false);}}}>{t('取消已核实作业')}</button>:null}</div></div>;
+ <ClusterResults key={run.id} run={run} onError={onError}/><div className="review-execute"><button className="button" onClick={()=>onAgent('检查集群任务 '+run.id+' 的已记录参数和日志。只读监控，不重提 unknown 任务。')}><Sparkles size={15}/>{t('让 Agent 分析')}</button>{['draft','ready'].includes(run.status)?<button className="button primary" disabled={busy||edit} onClick={()=>void submit()}><Play size={15}/>{t('审阅完成，提交到集群')}</button>:['queued','running','unknown'].includes(run.status)?<button className="button" disabled={busy} onClick={async()=>{if(busy)return;setBusy(true);try{setRun(await api<ClusterRun>('POST','/api/cluster/cancel',{run_id:run.id}));}catch(e){onError(e);void load();}finally{setBusy(false);}}}>{t('取消已核实作业')}</button>:null}</div></div>;
 }

@@ -31,6 +31,7 @@ DEFAULT_COLLECT = (
     "queue.out", "queue.err", "validation.stdout", "validation.stderr",
     "simulation/thermo.out", "simulation/dump.xyz", "simulation/restart.xyz",
     "simulation/GASCVlog.txt", "simulation/GASGaussian.txt",
+    "simulation/metrics.csv", "simulation/trajectory.extxyz", "simulation/checkpoint.json", "simulation/completion.json",
     "simulation/OPES_COLVAR", "simulation/OPES_KERNELS", "simulation/OPES_STATE.pt",
 )
 
@@ -304,7 +305,8 @@ class PlanningAdapter(Adapter):
 
     def bias_command(self, spec, environment):
         p = spec["parameters"]
-        repo = environment.get("repositories", {}).get("pygas")
+        runtime = "pydyn" if self.engine=="pydyn.sampling" else "pygas"
+        repo = environment.get("repositories", {}).get(runtime)
         if not repo:
             raise ValueError("Register target pyGAS repository")
         return [self.executable(environment, "python"), repo + "/agents/skills/pygas-check-gpumd-contract/scripts/validate_model.py",
@@ -894,6 +896,22 @@ print('__STUDIO_JSON__'+json.dumps({'text':text,'offset':offset}))
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
+
+    def result_file(self, identifier, name):
+        run=self.raw(identifier);self.allowed(run["project_id"],run["cluster_id"])
+        assets=[a for a in self.store.list("artifact") if a.get("run_id")==identifier and a.get("kind")=="cluster-result" and a["name"]==name]
+        if not assets:raise ValueError("Collect the selected recorded result first")
+        asset=assets[0];root=Path(run["directory"])/"results";target=contained(asset["path"],[root])
+        if not target.is_file() or target.is_symlink() or digest(target)!=asset["sha256"]:raise ValueError("Collected result changed")
+        result={"name":name,"size":asset["size"],"sha256":asset["sha256"],"artifact_id":asset["id"]}
+        if asset["size"]>2*1024*1024:return {**result,"preview_available":False,"reason":"Result exceeds text preview bound"}
+        data=target.read_bytes()
+        if hashlib.sha256(data).hexdigest()!=asset["sha256"]:raise ValueError("Collected result changed while reading")
+        try:
+            if b"\0" in data:raise UnicodeError()
+            text=data.decode("utf8")
+        except UnicodeError:return {**result,"preview_available":False,"binary":True}
+        return {**result,"preview_available":True,"text":text}
 
     def browse(self,project_id,cluster_id,relative="",root_index=0,offset=0):
         _,p=self.allowed(project_id,cluster_id)

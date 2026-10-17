@@ -2,7 +2,7 @@
 import os
 import subprocess
 from pathlib import Path
-from .util import run_json
+from .util import run_json, digest
 ENGINES = ("gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
            "pydyn.sampling", "nep.train", "nep.eval", "nep.analyze", "hotpp.train", "hotpp.eval",
            "hotpp.export", "pygas.reweight", "pygas.opes-reweight")
@@ -53,7 +53,8 @@ class Adapter:
 
     def bias_command(self, spec, environment):
         p = spec["parameters"]
-        repo = environment.get("repositories", {}).get("pygas")
+        runtime = "pydyn" if self.engine=="pydyn.sampling" else "pygas"
+        repo = environment.get("repositories", {}).get(runtime)
         if not repo:
             raise ValueError("Register the pyGAS repository for artifact validation")
         script = Path(repo) / "agents/skills/pygas-check-gpumd-contract/scripts/validate_model.py"
@@ -165,6 +166,18 @@ class Adapter:
     def validate(self, spec, environment, directory):
         p, directory = spec.get("parameters", {}), Path(directory)
         self.input_contract(spec,directory)
+        if p.get("manifest_file"):
+            import json
+            self.require(spec["inputs"],(p["manifest_file"],p["bias_file"]))
+            manifest=json.loads((directory/p["manifest_file"]).read_text())
+            backend="aoti" if p["bias_file"].endswith(".pt2") else "torchscript"
+            artifact=manifest.get("artifacts",{}).get(backend,{})
+            if self.engine=="pydyn.sampling" and manifest.get("deployment_backend")!=backend:
+                raise ValueError("PyDyn manifest backend differs from the explicitly selected bias")
+            actual=(directory/p["bias_file"]).resolve()
+            selected=(directory/artifact.get("path","")).resolve()
+            if selected!=actual or directory.resolve() not in actual.parents or artifact.get("sha256")!=digest(actual):
+                raise ValueError("Selected serialized bias does not match its manifest path and SHA256")
         if p.get("model_file", "").startswith("lammps-") and self.engine.startswith("pydyn"):
             raise ValueError("PyDyn requires atomic-number semantics: use an ase-* HotPP export")
         if self.engine in ("nep.train","nep.eval"):
@@ -201,7 +214,7 @@ class Adapter:
                 raise ValueError("Selected environment has no pydyn.sampling integration")
             derivatives = None
             if p["mode"] != "opes" and not p["bias_file"].endswith(".pt2"):
-                payload = {**p, "bias_file":str(directory / p["bias_file"]), "structure_file":str(directory / p["structure_file"])}
+                payload = {**p, "engine":self.engine, "bias_file":str(directory / p["bias_file"]), "structure_file":str(directory / p["structure_file"])}
                 if p.get("validation_history"):
                     payload["validation_history"] = str(directory / p["validation_history"])
                 derivatives = run_json(self.executable(environment,"python"),SCIENTIFIC,"derivatives",payload,process_env(environment,spec["gpu"]),timeout=120)
