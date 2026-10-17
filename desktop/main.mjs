@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { localSkills } from './skills.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
+import {saveDeployment,prepareDeployment} from './task-deployment.mjs';
 import {executeTask} from './task-execution.mjs';
 import {TaskRecords} from './task-records.mjs';
 import {existingConnections,existingProfile} from './existing-ssh.mjs';
@@ -83,6 +84,8 @@ agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>taskRecords.create(value));
+handle('task.deployment.save',value=>saveDeployment(taskRecords,value));
+handle('task.deployment.prepare',value=>prepareDeployment(taskRecords,worker,value));
 handle('task.list',()=>catalog.list('agent-task'));
 handle('task.read',({id})=>taskRecords.read(id));
 handle('task.edit',value=>taskRecords.edit(value));

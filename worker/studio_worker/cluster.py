@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import tarfile
+import threading
 import time
 from pathlib import Path
 from .adapters import Adapter, ENGINES
@@ -19,6 +20,114 @@ from .util import atomic_json, contained, digest, leaf
 TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+-]+$")
 MARKER = "__STUDIO_JSON__"
 TERMINAL = ("succeeded", "failed", "cancelled")
+
+TRANSFER_CHUNK = 512 * 1024
+TRANSFER_TOTAL = 128 * 1024 * 1024
+TRANSFER_FILES = 128
+# Names verified against the GPUMD/GPU-Sampling output contracts; other outputs
+# remain explicitly selectable relative to this run, rather than globbed.
+DEFAULT_COLLECT = (
+    "console.log", "environment.json", "validation.json", "exit.json",
+    "queue.out", "queue.err", "validation.stdout", "validation.stderr",
+    "simulation/thermo.out", "simulation/dump.xyz", "simulation/restart.xyz",
+    "simulation/GASCVlog.txt", "simulation/GASGaussian.txt",
+    "simulation/OPES_COLVAR", "simulation/OPES_KERNELS", "simulation/OPES_STATE.pt",
+)
+
+
+def remote_source(value, allow_home=False):
+    if (not isinstance(value, str) or not value or len(value) > 2048 or
+            any(ord(c) < 32 or ord(c) == 127 for c in value) or "\\" in value or
+            not (value.startswith("/") or (allow_home and value.startswith("~/"))) or
+            any(part in (".", "..") for part in value.split("/"))):
+        raise ValueError("Scoped absolute remote source path required")
+    return value
+
+
+def directory_prefix(value):
+    if value is None:
+        return ""
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value):
+        raise ValueError("Directory name must be a safe relative prefix")
+    return value
+
+
+# This small program is sent over the existing SSH control channel. No target
+# installation is needed. Every open walks directory descriptors with NOFOLLOW,
+# so both ordinary symlinks and parent replacement races fail closed.
+TRANSFER_PROGRAM = r"""
+import os,stat,pathlib,hashlib,base64
+CHUNK=524288;TOTAL=134217728
+
+def identity(st):
+ return {k:int(getattr(st,k)) for k in ('st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns')}
+
+def absolute(value):
+ if not isinstance(value,str) or not value or len(value)>2048 or '\\' in value or any(ord(c)<32 or ord(c)==127 for c in value) or any(x in ('.','..') for x in value.split('/')):raise ValueError('Invalid transfer path')
+ value=os.path.expanduser(value)
+ if not value.startswith('/'):raise ValueError('Absolute transfer path required')
+ return pathlib.PurePosixPath(value)
+
+def open_source(value):
+ candidate=absolute(value);roots=[absolute(x) for x in p['roots']]
+ root=next((r for r in roots if r in candidate.parents),None)
+ if root is None:raise ValueError('Outside registered transfer roots')
+ flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW
+ directory=os.open('/',flags)
+ try:
+  for component in root.parts[1:]:
+   child=os.open(component,flags,dir_fd=directory);os.close(directory);directory=child
+  parts=candidate.relative_to(root).parts
+  for component in parts[:-1]:
+   child=os.open(component,flags,dir_fd=directory);os.close(directory);directory=child
+  fd=os.open(parts[-1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+ finally:os.close(directory)
+ try:
+  if not stat.S_ISREG(os.fstat(fd).st_mode):raise ValueError('Regular transfer file required')
+  return os.fdopen(fd,'rb')
+ except Exception:
+  os.close(fd);raise
+
+def metadata(value):
+ with open_source(value) as stream:
+  before=identity(os.fstat(stream.fileno()));size=before['st_size']
+  if size<0 or size>min(TOTAL,p.get('max_size',TOTAL)):raise ValueError('Transfer size exceeds bound')
+  h=hashlib.sha256()
+  count=0
+  for block in iter(lambda:stream.read(CHUNK),b''):
+   count+=len(block)
+   if count>size:raise ValueError('Transfer source grew while hashing')
+   h.update(block)
+  after=identity(os.fstat(stream.fileno()))
+  if before!=after:raise ValueError('Transfer source changed while hashing')
+  return {'size':size,'sha256':h.hexdigest(),'identity':before}
+
+op=p['op']
+if op=='stat':out=metadata(p['path'])
+elif op=='chunk':
+ offset=p['offset'];length=p['length']
+ if type(offset) is not int or offset<0 or type(length) is not int or not 1<=length<=CHUNK:raise ValueError('Invalid transfer chunk')
+ with open_source(p['path']) as stream:
+  before=identity(os.fstat(stream.fileno()))
+  if before!=p['identity'] or offset+length>before['st_size']:raise ValueError('Transfer source identity changed')
+  stream.seek(offset);block=stream.read(length);after=identity(os.fstat(stream.fileno()))
+  if before!=after or len(block)!=length:raise ValueError('Interrupted or changed source')
+ out={'offset':offset+len(block),'base64':base64.b64encode(block).decode(),'sha256':hashlib.sha256(block).hexdigest(),'identity':after}
+elif op=='list':
+ root=absolute(p['root']);names=p['names'];out={'files':[],'missing':[]};total=0
+ if not isinstance(names,list) or len(names)>128 or len(set(names))!=len(names):raise ValueError('Bounded unique result names required')
+ for name in names:
+  if not isinstance(name,str) or not name or len(name)>240 or '\\' in name or ':' in name or name.startswith('/') or any(x in ('','.','..') for x in name.split('/')):raise ValueError('Invalid result name')
+  try:meta=metadata(str(root/name))
+  except FileNotFoundError:
+   if not p.get('optional'):raise
+   out['missing'].append(name);continue
+  total+=meta['size']
+  if total>TOTAL:raise ValueError('Result transfer total exceeds bound')
+  out['files'].append({'name':name,**meta})
+else:raise ValueError('Unsupported transfer operation')
+print('__STUDIO_JSON__'+json.dumps(out))
+"""
 
 
 def word(value, name="value"):
@@ -61,8 +170,10 @@ def profile(value):
     root = p["remote_root"]
     if root in ("/", "~", "~/") or ".." in root.split("/"):
         raise ValueError("Dedicated remote run root required")
-    for root in p.get("read_roots",[]):
-        if not isinstance(root,str) or not root.startswith(("/", "~/")) or "\\n" in root:raise ValueError("Explicit remote read roots required")
+    if not isinstance(p.get("read_roots", []), list) or len(p.get("read_roots", [])) > 64:
+        raise ValueError("Bounded explicit remote read roots required")
+    for root in p.get("read_roots", []):
+        remote_source(root, allow_home=True)
     if len(p.get("activation", "")) > 8192:
         raise ValueError("Activation script exceeds limit")
     e = p.setdefault("environment", {"executables": {"python": "/usr/bin/python3"}})
@@ -204,6 +315,7 @@ class Clusters:
     def __init__(self, service, transport=SSH):
         self.service, self.store, self.transport = service, service.store, transport
         self.last_poll = 0
+        self.prepare_lock = threading.RLock()
 
     def register(self, value):
         p = profile(value)
@@ -267,66 +379,199 @@ print('__STUDIO_JSON__'+json.dumps(out))
             raise ValueError("Only reviewable environment/skill fields can be proposed")
         return self.store.put("cluster-draft", {"id":secrets.token_hex(10), "kind":"cluster-setup", **data, "status":"draft"})
 
+    def _transfer(self, p, payload):
+        output = self.transport(p).run(python_script(p, TRANSFER_PROGRAM, payload), timeout=60)
+        if not isinstance(output, str) or len(output.encode("utf8")) >= 4 * 1024 * 1024:
+            raise ValueError("Transfer response exceeds bound")
+        result = parse_output(output)
+        if not isinstance(result, dict):
+            raise ValueError("Invalid transfer receipt")
+        return result
+
+    @staticmethod
+    def _metadata(value, budget=TRANSFER_TOTAL):
+        if (not isinstance(value, dict) or type(value.get("size")) is not int or
+                not 0 <= value["size"] <= budget or not isinstance(value.get("sha256"), str) or
+                not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])):
+            raise ValueError("Invalid or oversized transfer metadata")
+        identity = value.get("identity")
+        if (not isinstance(identity, dict) or set(identity) != {"st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"} or
+                any(type(v) is not int for v in identity.values()) or identity["st_size"] != value["size"]):
+            raise ValueError("Invalid transfer source identity")
+        return {k: value[k] for k in ("size", "sha256", "identity")}
+
+    def _download(self, p, source, roots, target, budget, expected=None):
+        payload = {"path":source, "roots":roots, "max_size":budget}
+        metadata = self._metadata(self._transfer(p, {**payload, "op":"stat"}), budget)
+        if expected is not None and metadata != self._metadata(expected, budget):
+            raise ValueError("Remote transfer source changed")
+        target = Path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        created = False
+        try:
+            h, offset = hashlib.sha256(), 0
+            with open(target, "xb") as stream:
+                created = True
+                while offset < metadata["size"]:
+                    length = min(TRANSFER_CHUNK, metadata["size"] - offset)
+                    chunk = self._transfer(p, {**payload, "op":"chunk", "offset":offset,
+                                              "length":length, "identity":metadata["identity"]})
+                    try:
+                        content = base64.b64decode(chunk.get("base64", ""), validate=True)
+                    except Exception:
+                        raise ValueError("Invalid transfer chunk encoding") from None
+                    if (len(content) != length or chunk.get("offset") != offset + length or
+                            chunk.get("identity") != metadata["identity"] or
+                            chunk.get("sha256") != hashlib.sha256(content).hexdigest()):
+                        raise ValueError("Interrupted or corrupt transfer chunk")
+                    stream.write(content); h.update(content); offset += len(content)
+            if h.hexdigest() != metadata["sha256"] or target.stat().st_size != metadata["size"] or digest(target) != metadata["sha256"]:
+                raise ValueError("Local transfer hash differs from remote source")
+            final = self._metadata(self._transfer(p, {**payload, "op":"stat"}), budget)
+            if final != metadata:
+                raise ValueError("Remote transfer source changed during download")
+            return metadata
+        except Exception:
+            if created:
+                target.unlink(missing_ok=True)
+            raise
+
+    @staticmethod
+    def remote_name(run):
+        root = run["cluster_snapshot"]["remote_root"].rstrip("/")
+        name = run["remote_directory"][len(root) + 1:] if run["remote_directory"].startswith(root + "/") else ""
+        if not name or "/" in name or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
+            raise ValueError("Recorded remote run directory is outside its registered root")
+        expected = (directory_prefix(run.get("directory_name")) + "-" if run.get("directory_name") else "") + run["id"]
+        if name != expected:
+            raise ValueError("Recorded remote run identity does not match its directory")
+        return name
+
     def prepare(self, spec):
+        # A retry arriving during a transfer must reuse the completed draft,
+        # rather than allocate a second immutable snapshot for the same key.
+        with self.prepare_lock:
+            return self._prepare(spec)
+
+    def _prepare(self, spec):
         spec = dict(spec)
+        local_inputs = spec.get("inputs", {})
+        remote_inputs = spec.get("remote_inputs", {})
+        if not isinstance(local_inputs, dict) or not isinstance(remote_inputs, dict):
+            raise ValueError("Input mappings are required")
+        local_inputs, remote_inputs = dict(local_inputs), dict(remote_inputs)
+        if len(local_inputs) + len(remote_inputs) > TRANSFER_FILES:
+            raise ValueError("Input file count exceeds bound")
+        if set(local_inputs) & set(remote_inputs):
+            raise ValueError("Local and remote inputs cannot use the same run filename")
+        for name in (*local_inputs, *remote_inputs):
+            self.service.input_name(name)
+        for source in remote_inputs.values():
+            remote_source(source)
+        prefix = directory_prefix(spec.get("directory_name"))
+        spec["inputs"], spec["remote_inputs"] = local_inputs, remote_inputs
         project, p = self.allowed(spec["project_id"], spec["cluster_id"])
+        if remote_inputs and not p.get("read_roots"):
+            raise PermissionError("Register explicit remote read roots before importing inputs")
         if spec["engine"] not in project["policy"]["engines"] or spec["engine"] not in ENGINES:
             raise PermissionError("Engine is not authorized")
-        if type(spec.get("max_seconds")) is not int:raise ValueError("Integer wall-clock limit required")
-        if not 0 < int(spec["max_seconds"]) <= project["policy"]["max_seconds"]:
+        if type(spec.get("max_seconds")) is not int:
+            raise ValueError("Integer wall-clock limit required")
+        if not 0 < spec["max_seconds"] <= project["policy"]["max_seconds"]:
             raise PermissionError("Duration exceeds project authorization")
         key = spec["idempotency_key"]
         if not isinstance(key, str) or not 1 <= len(key) <= 128:
             raise ValueError("Bounded idempotency key required")
         fingerprint = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()
-        previous = next((r for r in self.store.list("cluster-run") if r["project_id"]==spec["project_id"] and r["idempotency_key"]==key), None)
+        previous = next((r for r in self.store.list("cluster-run") if r["project_id"] == spec["project_id"] and r["idempotency_key"] == key), None)
         if previous:
             if previous["request_hash"] != fingerprint:
                 raise ValueError("Idempotency conflict")
             return self.run(previous["id"])
         r = resources(spec.get("resources", {}), p, spec["max_seconds"])
-        if (spec["engine"].endswith("sampling") or spec["engine"]=="bias.validate") and r["gpus"]<1:
+        if (spec["engine"].endswith("sampling") or spec["engine"] == "bias.validate") and r["gpus"] < 1:
             raise ValueError("Bias target validation requires a GPU allocation")
+        # Adapter and compute-node gates must see the complete run filename map.
+        spec["inputs"] = {**local_inputs, **remote_inputs}
         command = PlanningAdapter(spec["engine"]).prepare(spec, p["environment"])
+        roots = project["policy"]["input_roots"] + [str(self.service.root/"projects"/project["id"]/"inputs")]
+        parent = None
+        if spec.get("revision_of"):
+            parent = self.raw(spec["revision_of"])
+            if parent["project_id"] != project["id"] or parent["status"] not in ("draft", "ready"):
+                raise PermissionError("Only an unsubmitted run in the same project may be revised")
+            roots.append(parent["directory"])
         identifier = secrets.token_hex(12)
         directory = self.service.root / "cluster-runs" / identifier
         (directory/"simulation").mkdir(parents=True)
-        snapshots = []
-        roots = project["policy"]["input_roots"] + [str(self.service.root/"projects"/project["id"]/"inputs")]
-        parent=None
-        if spec.get("revision_of"):
-            parent=self.raw(spec["revision_of"])
-            if parent["project_id"]!=project["id"] or parent["status"] not in ("draft","ready"):
-                raise PermissionError("Only an unsubmitted run in the same project may be revised")
-            roots.append(parent["directory"])
+        snapshots, total = [], 0
         try:
-            for name, src in spec["inputs"].items():
-                self.service.input_name(name)
+            for name, src in local_inputs.items():
                 source = contained(src, roots)
                 if not source.is_file():
                     raise ValueError("Input unavailable")
+                size = source.stat().st_size
+                if size > TRANSFER_TOTAL - total:
+                    raise ValueError("Input total exceeds transfer bound")
+                before = digest(source)
                 dst = directory/"simulation"/name
-                dst.parent.mkdir(parents=True,exist_ok=True)
-                shutil.copyfile(source,dst)
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, dst)
+                if dst.stat().st_size != size or digest(dst) != before or source.stat().st_size != size or digest(source) != before:
+                    raise ValueError("Local input changed while creating snapshot")
                 dst.chmod(0o444)
-                snapshots.append({"name":name,"source":str(source),"sha256":digest(dst),"size":dst.stat().st_size})
-            run = {**spec,"id":identifier,"kind":"cluster-run","name":spec.get("name",spec["engine"]),
-                   "request_hash":fingerprint,"directory":str(directory),"snapshots":snapshots,"command":command,
-                   "resources":r,"cluster_snapshot":p,"status":"draft","validation":{"status":"not_run"},
-                   "scientific_validation":{"status":"not_run"},"nonce":secrets.token_hex(16),
-                   "remote_directory":p["remote_root"].rstrip("/")+"/"+identifier,
-                   "job_name":"gss-"+identifier,"job_id":None,"created_at":time.time(),"updated_at":time.time()}
-            if run["remote_directory"].startswith("~/"):
-                # Bash can expand $HOME while retaining a quoted relative suffix.
-                run["remote_directory"]=run["remote_directory"]
+                total += size
+                snapshots.append({"name":name, "source":str(source), "source_kind":"local", "sha256":before, "size":size})
+            for name, source in remote_inputs.items():
+                dst = directory/"simulation"/name
+                meta = self._download(p, source, p["read_roots"], dst, TRANSFER_TOTAL-total)
+                dst.chmod(0o444); total += meta["size"]
+                snapshots.append({"name":name, "source":source, "source_kind":"remote", "cluster_id":p["id"],
+                                  "sha256":meta["sha256"], "size":meta["size"], "remote_identity":meta["identity"]})
+            run = {**spec, "id":identifier, "kind":"cluster-run", "name":spec.get("name",spec["engine"]),
+                   "request_hash":fingerprint, "directory":str(directory), "snapshots":snapshots, "command":command,
+                   "local_inputs":local_inputs, "resources":r, "cluster_snapshot":p, "status":"draft", "validation":{"status":"not_run"},
+                   "scientific_validation":{"status":"not_run"}, "nonce":secrets.token_hex(16),
+                   "remote_directory":p["remote_root"].rstrip("/")+"/"+(prefix+"-" if prefix else "")+identifier,
+                   "job_name":"gss-"+identifier, "job_id":None, "created_at":time.time(), "updated_at":time.time()}
+            self.remote_name(run)
             run["script"] = batch_script(run)
-            atomic_json(directory/"run.json",run)
-            self.store.put("cluster-run",run)
-            if parent:self.save(parent,superseded_by=identifier)
+            atomic_json(directory/"run.json", run)
+            self.store.put("cluster-run", run)
+            if parent:
+                self.save(parent, superseded_by=identifier)
             return self.run(identifier)
         except Exception:
             shutil.rmtree(directory)
             raise
+
+    def input_file(self, identifier, name):
+        run = self.raw(identifier)
+        self.allowed(run["project_id"], run["cluster_id"])
+        self.service.input_name(name)
+        asset = next((a for a in run["snapshots"] if a["name"] == name), None)
+        if asset is None:
+            raise ValueError("Select an input recorded in this run snapshot")
+        root = Path(run["directory"])/"simulation"
+        file = contained(root/name, [root])
+        if (root/name).is_symlink() or not file.is_file() or digest(file) != asset["sha256"] or file.stat().st_size != asset["size"]:
+            raise ValueError("Immutable input snapshot changed")
+        result = {"name":name, "editable":False, "sha256":asset["sha256"], "size":asset["size"], "source_kind":asset.get("source_kind", "local")}
+        if asset["size"] > 2*1024*1024:
+            return {**result, "preview_available":False, "reason":"Input exceeds the 2 MiB text preview bound"}
+        with open(file, "rb") as stream:
+            data = stream.read(2*1024*1024+1)
+        if len(data) != asset["size"] or hashlib.sha256(data).hexdigest() != asset["sha256"]:
+            raise ValueError("Immutable input snapshot changed during preview")
+        try:
+            if file.suffix.lower() in (".pt", ".pt2", ".pth", ".npy", ".npz", ".so", ".bin"):
+                raise UnicodeError("binary artifact")
+            text = data.decode("utf8")
+            if b"\0" in data:
+                raise UnicodeError("binary")
+        except UnicodeError:
+            return {**result, "preview_available":False, "binary":True, "reason":"Binary input has no text preview"}
+        return {**result, "preview_available":True, "binary":False, "text":text}
 
     def raw(self, identifier):
         return self.store.get("cluster-run", identifier)
@@ -363,9 +608,10 @@ print('__STUDIO_JSON__'+json.dumps(out))
 
     def revise(self,identifier,changes):
         parent=self.raw(identifier)
-        allowed=("name","engine","max_seconds","resources","inputs","parameters")
+        allowed=("name","engine","max_seconds","resources","inputs","remote_inputs","directory_name","parameters")
         if any(k not in allowed for k in changes):raise ValueError("Unsupported revision field")
         spec={k:parent[k] for k in ("project_id","cluster_id",*allowed) if k in parent}
+        spec["inputs"] = dict(parent.get("local_inputs", {k:v for k,v in parent["inputs"].items() if k not in parent.get("remote_inputs", {})}))
         spec.update(changes)
         spec.update(revision_of=identifier,idempotency_key=secrets.token_hex(16))
         return self.prepare(spec)
@@ -430,7 +676,7 @@ except Exception as e:
         source="""
 import pathlib,tarfile,sys,io,subprocess,os
 root=pathlib.Path(p['root']).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
-d=root/p['id']
+d=root/p.get('directory',p['id'])
 if d.exists():raise ValueError('Run directory already exists; reconcile only')
 d.mkdir()
 with tarfile.open(fileobj=io.BytesIO(sys.stdin.buffer.read()),mode='r:gz') as t:
@@ -451,7 +697,7 @@ record={'id':p['id'],'nonce':p['nonce'],'job_id':match.group(1)}
 print('__STUDIO_JSON__'+json.dumps(record))
 """
         try:
-            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=self.archive(r),timeout=90))
+            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=self.archive(r),timeout=90))
             if result.get("nonce")!=r["nonce"] or not re.fullmatch(r"[0-9]+",result.get("job_id","")):
                 raise ValueError("Invalid scheduler receipt")
             self.save(r,status="queued",job_id=result["job_id"])
@@ -466,7 +712,7 @@ print('__STUDIO_JSON__'+json.dumps(record))
         p=r["cluster_snapshot"]
         source="""
 import pathlib,subprocess
-d=pathlib.Path(p['root']).expanduser().resolve()/p['id'];out={'job_id':p.get('job_id'),'state':'unknown'}
+d=pathlib.Path(p['root']).expanduser().resolve()/p.get('directory',p['id']);out={'job_id':p.get('job_id'),'state':'unknown'}
 receipt=d/'.submission-receipt.json'
 if receipt.exists():
  v=json.load(open(receipt))
@@ -503,7 +749,7 @@ if out['job_id']:
 print('__STUDIO_JSON__'+json.dumps(out))
 """
         try:
-            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"nonce":r["nonce"],"job_id":r["job_id"],"scheduler":p["scheduler"],"name":r["job_name"]})))
+            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"job_id":r["job_id"],"scheduler":p["scheduler"],"name":r["job_name"]})))
             state=result.get("scheduler_state","unknown").upper()
             mapped={"PEND":"queued","PENDING":"queued","RUN":"running","RUNNING":"running","PSUSP":"queued","USUSP":"queued","SSUSP":"queued","CONFIGURING":"queued","COMPLETING":"running","EXIT":"failed","FAILED":"failed","TIMEOUT":"failed","OUT_OF_MEMORY":"failed","CANCELLED":"cancelled"}
             status=mapped.get(state,"unknown")
@@ -536,7 +782,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
         p=r["cluster_snapshot"]
         source="""
 import pathlib
-d=pathlib.Path(p['root']).expanduser().resolve()/p['id'];f=(d/p['name']).resolve()
+d=pathlib.Path(p['root']).expanduser().resolve()/p.get('directory',p['id']);f=(d/p['name']).resolve()
 if d.resolve() not in f.parents:raise ValueError('Invalid log path')
 text='';offset=0
 if f.is_file():
@@ -544,8 +790,110 @@ if f.is_file():
   stream.seek(max(0,int(p['offset'])));text=stream.read(262144).decode('utf8','replace');offset=stream.tell()
 print('__STUDIO_JSON__'+json.dumps({'text':text,'offset':offset}))
 """
-        return parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"name":name,"offset":offset})))
+        return parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"name":name,"offset":offset})))
 
+
+    @staticmethod
+    def _local_directory(path, root):
+        path, root = Path(path), Path(root).resolve()
+        if path.is_symlink() or path.resolve() != path or root not in path.parents:
+            raise ValueError("Local collection path is outside this run")
+        return path
+
+    def collect(self, identifier, names=None):
+        """Recover bounded terminal-run files; this never submits or runs a job."""
+        run = self.raw(identifier)
+        self.allowed(run["project_id"], run["cluster_id"])
+        if run["status"] not in TERMINAL:
+            raise ValueError("Only terminal cluster runs may be collected")
+        self.remote_name(run)
+        optional = names is None
+        names = list(DEFAULT_COLLECT) if names is None else names
+        if not isinstance(names, list) or not names or len(names) > TRANSFER_FILES or any(not isinstance(name, str) for name in names) or len(set(names)) != len(names):
+            raise ValueError("Select bounded unique result filenames")
+        for name in names:
+            self.service.input_name(name)
+            if name.split("/")[0] in (".studio", "collection.json") or name.startswith(".submission-") or name == ".submit-attempt":
+                raise ValueError("Internal control files are not result artifacts")
+        names = sorted(names)
+        p, remote = run["cluster_snapshot"], run["remote_directory"]
+        manifest = self._transfer(p, {"op":"list", "root":remote, "roots":[remote], "names":names, "optional":optional, "max_size":TRANSFER_TOTAL})
+        if not isinstance(manifest.get("files"), list) or not isinstance(manifest.get("missing"), list):
+            raise ValueError("Invalid result manifest")
+        observed, total = {}, 0
+        for item in manifest["files"]:
+            name = item.get("name") if isinstance(item, dict) else None
+            if name not in names or name in observed:
+                raise ValueError("Unexpected or duplicate result filename")
+            meta = self._metadata(item, TRANSFER_TOTAL-total)
+            observed[name] = meta; total += meta["size"]
+        missing = manifest["missing"]
+        if len(set(missing)) != len(missing) or set(observed) & set(missing) or set(observed) | set(missing) != set(names) or (missing and not optional):
+            raise ValueError("Incomplete result manifest")
+        if not observed:
+            raise ValueError("No requested result artifacts exist")
+        directory = self._local_directory(run["directory"], self.service.root/"cluster-runs")
+        if directory != self.service.root/"cluster-runs"/run["id"]:
+            raise ValueError("Local run directory identity differs")
+        staging = directory/(".collect-"+secrets.token_hex(12))
+        staging.mkdir()
+        try:
+            for name, meta in observed.items():
+                self._download(p, remote.rstrip("/")+"/"+name, [remote], staging/name, TRANSFER_TOTAL, expected=meta)
+            fingerprint = hashlib.sha256(json.dumps({"run_id":run["id"], "requested":names, "missing":missing, "files":[{"name":name, "size":meta["size"], "sha256":meta["sha256"]} for name, meta in sorted(observed.items())]}, sort_keys=True).encode()).hexdigest()
+            collection_id = fingerprint[:24]
+            with self.store.lock:
+                latest = self.raw(identifier)
+                self.allowed(latest["project_id"], latest["cluster_id"])
+                if latest["status"] not in TERMINAL:
+                    raise ValueError("Run is no longer terminal")
+                results = directory/"results"
+                self._local_directory(results, directory)
+                results.mkdir(exist_ok=True)
+                destination = results/collection_id
+                self._local_directory(destination, results)
+                existing = {a["id"]:a for a in self.store.list("artifact")}
+                artifacts, files = [], []
+                for name, meta in sorted(observed.items()):
+                    asset_id = hashlib.sha256(("cluster-result:"+run["id"]+":"+name).encode()).hexdigest()[:24]
+                    old = existing.get(asset_id)
+                    if old:
+                        if old.get("run_id") != run["id"] or old.get("sha256") != meta["sha256"] or old.get("size") != meta["size"]:
+                            raise ValueError("Collected artifact content conflicts with its recorded identity")
+                        file = self._local_directory(old["path"], results)
+                        if not file.is_file() or file.stat().st_size != meta["size"] or digest(file) != meta["sha256"]:
+                            raise ValueError("Existing local result changed; refusing to overwrite")
+                        artifact = old
+                    else:
+                        artifact = {"id":asset_id, "project_id":run["project_id"], "run_id":run["id"], "name":name,
+                                    "path":str(destination/name), "kind":"cluster-result", "sha256":meta["sha256"], "size":meta["size"],
+                                    "metadata":{"source":{"kind":"cluster-run", "run_id":run["id"], "cluster_id":run["cluster_id"],
+                                                          "remote_name":name, "remote_sha256":meta["sha256"]},
+                                                "scientific_validation":run.get("scientific_validation", {"status":"not_run"})}}
+                    artifacts.append(artifact)
+                    files.append({"name":name, "size":meta["size"], "sha256":meta["sha256"], "artifact_id":asset_id})
+                previous = next((m for m in self.store.list("cluster-collection") if m["id"] == collection_id), None)
+                record = previous or {"id":collection_id, "run_id":run["id"], "project_id":run["project_id"], "cluster_id":run["cluster_id"],
+                                      "files":files, "missing":missing, "created_at":time.time(), "transfer_status":"passed", "scope":"hash-verified file retrieval only"}
+                atomic_json(staging/"collection.json", record)
+                if destination.exists():
+                    for name, meta in observed.items():
+                        file = self._local_directory(destination/name, destination)
+                        if not file.is_file() or file.stat().st_size != meta["size"] or digest(file) != meta["sha256"]:
+                            raise ValueError("Existing collection differs; refusing to overwrite")
+                    if not (destination/"collection.json").is_file() or json.loads((destination/"collection.json").read_text("utf8")) != record:
+                        raise ValueError("Existing collection manifest differs")
+                    shutil.rmtree(staging)
+                else:
+                    os.rename(staging, destination)
+                for artifact in artifacts:
+                    self.store.put("artifact", artifact)
+                self.store.put("cluster-collection", record)
+                self.save(latest, collection_ids=sorted(set(latest.get("collection_ids", [])) | {collection_id}))
+                return {"run":identifier, "manifest":record, "files":artifacts, "artifacts":artifacts}
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
 
     def browse(self,project_id,cluster_id,relative="",root_index=0,offset=0):
         _,p=self.allowed(project_id,cluster_id)

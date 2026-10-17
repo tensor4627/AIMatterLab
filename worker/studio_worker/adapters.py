@@ -71,6 +71,10 @@ class Adapter:
 
     def prepare(self, spec, environment):
         assets, p, engine = spec["inputs"], spec.get("parameters", {}), self.engine
+        if engine.endswith(".sampling"):
+            walkers = p.get("sampling", {}).get("walkers", p.get("walkers", 1))
+            if type(walkers) is not int or walkers != 1:
+                raise ValueError("Single-job single-walker sampling only; multiple walkers are not implemented")
         if engine.startswith("gpumd."):
             self.require(assets, ("run.in", "model.xyz"))
             if engine.endswith("sampling"):
@@ -136,8 +140,31 @@ class Adapter:
         self.require(assets, ("OPES_COLVAR", "fes.yaml"))
         return [self.executable(environment, "pygas"), "opes-reweight", "OPES_COLVAR", "fes.yaml"]
 
+    def input_contract(self, spec, directory):
+        """Compare declared simple GPUMD controls with the actual immutable input.
+
+        Arbitrary Python drivers and undeclared controls are not semantically proven.
+        """
+        if not self.engine.startswith("gpumd."):
+            return {"status":"not_run", "scope":"arbitrary driver semantics require actual input review"}
+        p=spec.get("parameters", {}); p={**p, **p.get("md", {})}
+        rows=[line.split("#")[0].split() for line in (Path(directory)/"run.in").read_text().splitlines()]
+        checked=[]
+        for key, command in (("steps","run"),("n_steps","run"),("time_step_fs","time_step")):
+            if key not in p:continue
+            values=[float(r[1]) for r in rows if len(r)>1 and r[0]==command]
+            actual=sum(values) if command=="run" else values[-1] if values else None
+            if not values or actual!=float(p[key]):raise ValueError("Declared scientific parameter differs from run.in: "+key)
+            checked.append(key)
+        if "temperature" in p:
+            values=[float(v) for r in rows if len(r)>3 and r[0]=="ensemble" and r[1].startswith(("nvt","npt")) for v in r[2:4]]
+            if not values or any(v!=float(p["temperature"]) for v in values):raise ValueError("Declared temperature differs from run.in")
+            checked.append("temperature")
+        return {"status":"passed" if checked else "not_run", "checked_fields":checked, "scope":"declared simple GPUMD input controls only"}
+
     def validate(self, spec, environment, directory):
         p, directory = spec.get("parameters", {}), Path(directory)
+        self.input_contract(spec,directory)
         if p.get("model_file", "").startswith("lammps-") and self.engine.startswith("pydyn"):
             raise ValueError("PyDyn requires atomic-number semantics: use an ase-* HotPP export")
         if self.engine in ("nep.train","nep.eval"):

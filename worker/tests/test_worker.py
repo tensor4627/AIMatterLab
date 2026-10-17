@@ -273,3 +273,20 @@ class ScientificMetadata(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SamplingMultiplicity(unittest.TestCase):
+    def test_multiple_walkers_rejected_for_both_routes(self):
+        from studio_worker.adapters import Adapter
+        for engine in ("gpumd.sampling", "pydyn.sampling"):
+            with self.assertRaisesRegex(ValueError, "single-walker"):
+                Adapter(engine).prepare({"inputs":{}, "parameters":{"sampling":{"walkers":2}}}, {})
+
+class ScientificInputControls(unittest.TestCase):
+    def test_declared_gpumd_controls_must_match_actual_inputs(self):
+        from studio_worker.adapters import Adapter
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); (root/"run.in").write_text("time_step 0.5\nensemble nvt_bdp 300 300 100\nrun 100\n")
+            a=Adapter("gpumd.sampling")
+            self.assertEqual(a.input_contract({"parameters":{"steps":100,"temperature":300,"time_step_fs":0.5}},root)["status"],"passed")
+            with self.assertRaisesRegex(ValueError,"differs"):
+                a.input_contract({"parameters":{"steps":200}},root)

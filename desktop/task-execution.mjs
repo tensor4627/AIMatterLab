@@ -1,5 +1,6 @@
+import {deploymentCurrent} from '../shared/deployment.mjs';
 export async function executeTask(records,worker,{taskId,artifactId}){
- const approved=()=>{const task=records.read(taskId),artifact=task.artifacts.find(a=>a.id===artifactId);if(task.review?.status!=='ready'||task.review.parameterRevision!==task.parameterRevision||!task.review.artifactIds?.includes(artifactId)||!artifact||!['run','cluster-run'].includes(artifact.kind))throw Error('Review the current parameters and module draft before execution');return {task,artifact};};
+ const approved=()=>{const task=records.read(taskId),artifact=task.artifacts.find(a=>a.id===artifactId);const ready=task.workflowVersion===2?deploymentCurrent(task)&&task.deployment.prepared.artifactId===artifactId:task.review?.status==='ready'&&task.review.parameterRevision===task.parameterRevision&&task.review.artifactIds?.includes(artifactId);if(!ready||!artifact||!['run','cluster-run'].includes(artifact.kind))throw Error('Review the current parameters and module draft before execution');return {task,artifact};};
  const {task,artifact}=approved(),prefix=artifact.kind==='cluster-run'?'/api/cluster/':'/api/run/';
  const current=await worker.request('POST',prefix+'status',{run_id:artifact.id});
  if(current.project_id!==task.projectId)throw Error('Run project does not match workflow');

@@ -4,6 +4,7 @@ import zipfile
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -126,7 +127,10 @@ class Service:
                 return previous
             command = Adapter(spec["engine"]).prepare(spec, environment)
             identifier = secrets.token_hex(12)
-            directory = self.root / "runs" / identifier
+            prefix = spec.get("directory_name", "")
+            if prefix and (not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", prefix)):
+                raise ValueError("Invalid scoped working directory name")
+            directory = self.root / "runs" / ((prefix+"-" if prefix else "")+identifier)
             (directory / "simulation").mkdir(parents=True)
             (directory / "results").mkdir()
             snapshots = []

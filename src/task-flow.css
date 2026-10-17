@@ -51,3 +51,5 @@
 .agent-activity{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel);min-width:0}.agent-activity>div{display:flex;align-items:center;gap:8px}.agent-activity strong{flex:1;overflow-wrap:anywhere}.agent-activity p{color:var(--muted);line-height:1.6}.agent-activity summary{cursor:pointer;color:var(--muted);margin-top:10px}.agent-activity pre{max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.agent-activity.failed{border-color:#9f4858}.agent-activity .button{margin-top:4px}
 
 .agent-activity.running .flow-dot{background:var(--accent)}
+
+.deployment-settings{margin-top:22px;min-width:0}.deployment-settings legend{padding:0 10px}.deployment-settings label{display:flex;flex:1;min-width:170px;flex-direction:column;gap:9px}.deployment-settings .form-row{flex-wrap:wrap;margin:16px 0}.deployment-settings .button-row{margin-top:20px}.deployment-page .batch-script{max-height:330px;overflow:auto}

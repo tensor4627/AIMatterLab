@@ -118,7 +118,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    const conversation=await invoke<Conversation>('conversation.remember',{provider:providerRef.current,threadId:id,projectId:projectId||null,name:text});conversationRef.current?.(conversation);
    let taskId=action.taskId||conversation.taskId;
    const fresh=newWorkflow||explicitNewWorkflow(text);
-   if((planningMode||fresh)&&!action.reviewMode){const task=await invoke('task.create',{planningMode:true,newWorkflow:fresh,threadId:id,provider:providerRef.current,request:text,projectId:conversation.projectId||projectId||null});taskId=task.id;openTaskRef.current?.(task.id);}
+   if((planningMode||fresh)&&!action.reviewMode){const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:providerRef.current,request:text,projectId:conversation.projectId||projectId||null});taskId=task.id;openTaskRef.current?.(task.id);}
    setWorkflowId(taskId||null);setNewWorkflow(false);
    setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text}]);
    const input:any[]=[{type:'text',text},{type:'text',text:'[Studio workspace context]\n'+context}];if(skill)input.push({type:'skill',name:skill.name,path:skill.path});
