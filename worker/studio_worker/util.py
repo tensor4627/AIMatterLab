@@ -54,10 +54,17 @@ def alive(expected):
 
 
 def run_json(python, module_file, command, payload, env=None, timeout=90):
-    result = subprocess.run([python, str(module_file), command], input=json.dumps(payload),
-                            text=True, capture_output=True, env=env, timeout=timeout)
+    try:
+        result = subprocess.run([python, str(module_file), command], input=json.dumps(payload),
+                                text=True, capture_output=True, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        detail = exc.stderr or b""
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", errors="replace")
+        raise ValueError(f"Scientific {command} timed out after {timeout}s; last diagnostics: {detail[-4000:]}") from exc
     if result.returncode:
-        raise ValueError(result.stderr[-6000:] or result.stdout[-6000:] or "Scientific check failed")
+        stderr = result.stderr if len(result.stderr) <= 6000 else result.stderr[:2000] + "\n... diagnostic tail ...\n" + result.stderr[-4000:]
+        raise ValueError(f"Scientific {command} exited with code {result.returncode}; stderr: {stderr}\nstdout: {result.stdout[-2000:]}")
     lines = result.stdout.strip().splitlines()
     if not lines:
         raise ValueError("Scientific check returned no result")

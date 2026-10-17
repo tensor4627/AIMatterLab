@@ -1,6 +1,8 @@
 """Engine contracts: argv-only launch and explicit environment registrations."""
 import os
 import subprocess
+import shutil
+import sys
 from pathlib import Path
 from .util import run_json, digest
 ENGINES = ("gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
@@ -16,7 +18,7 @@ def process_env(environment, gpu=None):
     paths = [str(Path(v).resolve()) for v in environment.get("repositories", {}).values() if v]
     env["PYTHONPATH"] = os.pathsep.join(paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     for key, value in environment.get("variables", {}).items():
-        if key not in ("LD_LIBRARY_PATH", "LIBRARY_PATH", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        if key not in ("LD_LIBRARY_PATH", "LIBRARY_PATH", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
             raise ValueError("Unsupported loader variable: " + key)
         env[key] = str(value)
     return env
@@ -34,10 +36,33 @@ class Adapter:
             raise ValueError("Register an available absolute executable: " + name)
         return str(path)
 
+    def runtime_check(self, environment):
+        executable = {"gpumd.md":"gpumd", "gpumd.sampling":"gpu-sampling", "nep.train":"nep", "nep.eval":"nep"}.get(self.engine)
+        if executable is None:
+            return {"status":"not_run", "scope":"No native ELF loader check for this route"}
+        target = self.executable(environment, executable)
+        with open(target,"rb") as stream:
+            if stream.read(4) != b"\x7fELF":
+                return {"status":"not_run", "scope":"Registered wrapper; actual engine launch still required"}
+        loader = shutil.which("ldd") or next((str(p) for p in (Path("/usr/bin/ldd"),Path("/bin/ldd")) if p.is_file()),None)
+        if not loader:
+            return {"status":"not_run", "scope":"Loader inspection unavailable; actual engine launch still required"}
+        print("Studio validation: native ELF loader check started", file=sys.stderr, flush=True)
+        result = subprocess.run([loader,target],env=process_env(environment),capture_output=True,text=True,timeout=60)
+        output = result.stdout + result.stderr
+        if "not a dynamic executable" in output or "statically linked" in output:
+            return {"status":"not_run", "scope":"Static executable; actual engine launch still required"}
+        if result.returncode or "not found" in output or "undefined symbol:" in output:
+            raise ValueError("Native ELF loader incompatible in the actual target environment; code=" + str(result.returncode) + "; " + output[:6000])
+        return {"status":"passed", "executable":target, "sha256":digest(target), "scope":"Target ELF library/version resolution only; dynamic symbols, CUDA/artifact/engine checks still required"}
+
     def probe(self, environment):
-        return run_json(self.executable(environment, "python"), SCIENTIFIC, "probe",
-                        {"repositories": environment.get("repositories", {})},
-                        process_env(environment), timeout=60)
+        runtime = self.runtime_check(environment)
+        report = run_json(self.executable(environment, "python"), SCIENTIFIC, "probe",
+                          {"engine": self.engine, "repositories": environment.get("repositories", {})},
+                          process_env(environment), timeout=120)
+        report["native_runtime"] = runtime
+        return report
 
     @staticmethod
     def require(assets, names):
@@ -163,7 +188,10 @@ class Adapter:
             checked.append("temperature")
         return {"status":"passed" if checked else "not_run", "checked_fields":checked, "scope":"declared simple GPUMD input controls only"}
 
-    def validate(self, spec, environment, directory):
+    def validate(self, spec, environment, directory, *, probe_report=None):
+        # A provenance-only failure may be cached by local Service; the execution
+        # gate must inspect the native loader again for every new validation.
+        runtime = self.runtime_check(environment)
         p, directory = spec.get("parameters", {}), Path(directory)
         self.input_contract(spec,directory)
         if p.get("manifest_file"):
@@ -202,27 +230,38 @@ class Adapter:
                     raise ValueError("Prediction species order does not match the model")
 
         if self.engine.endswith("sampling") or self.engine == "bias.validate":
+            print("Studio validation: serialized artifact ABI started", file=sys.stderr, flush=True)
             result = subprocess.run(self.bias_command(spec, environment), cwd=directory,
                                     env=process_env(environment, spec["gpu"]), text=True,
                                     capture_output=True, timeout=180)
             if result.returncode:
                 raise ValueError(result.stderr[-6000:] or result.stdout[-6000:])
+            print("Studio validation: serialized artifact ABI passed", file=sys.stderr, flush=True)
             if self.engine == "gpumd.sampling":
                 from .science_checks import check_gascfg
                 check_gascfg(directory, p)
-            elif self.engine == "pydyn.sampling" and not self.probe(environment).get("pydyn_sampling"):
-                raise ValueError("Selected environment has no pydyn.sampling integration")
+            elif self.engine == "pydyn.sampling":
+                # Only the trusted caller's fresh, same-invocation report may be reused.
+                # This argument is never populated from run parameters or cached provenance.
+                observed = self.probe(environment) if probe_report is None else probe_report
+                if (observed.get("scope", {}).get("engine") != self.engine or
+                        observed.get("executable") != self.executable(environment, "python")):
+                    raise ValueError("Native sampling probe belongs to a different engine/interpreter")
+                if observed.get("pydyn_sampling") is not True:
+                    raise ValueError("Selected environment has no pydyn.sampling integration")
             derivatives = None
             if p["mode"] != "opes" and not p["bias_file"].endswith(".pt2"):
                 payload = {**p, "engine":self.engine, "bias_file":str(directory / p["bias_file"]), "structure_file":str(directory / p["structure_file"])}
                 if p.get("validation_history"):
                     payload["validation_history"] = str(directory / p["validation_history"])
+                print("Studio validation: sampled force/virial check started", file=sys.stderr, flush=True)
                 derivatives = run_json(self.executable(environment,"python"),SCIENTIFIC,"derivatives",payload,process_env(environment,spec["gpu"]),timeout=120)
-            return {"status": "passed", "artifact_status":"passed", "scientific_status":"not_run", "output": result.stdout[-12000:], "derivatives":derivatives,
+                print("Studio validation: sampled force/virial check passed", file=sys.stderr, flush=True)
+            return {"status": "passed", "native_runtime":runtime, "artifact_status":"passed", "scientific_status":"not_run", "output": result.stdout[-12000:], "derivatives":derivatives,
                     "scope": "serialized bias ABI and sampled finite differences; target-engine and restart parity require run evidence"}
         if self.engine == "pygas.build" and p.get("output_file", "").endswith(".pt2"):
             raise ValueError("AOTI needs explicit dual export and target-toolchain preflight")
-        return {"status": "passed", "scientific_status":"not_run", "scope": "input/executable contract; scientific run pending"}
+        return {"status": "passed", "native_runtime":runtime, "scientific_status":"not_run", "scope": "input/executable contract; scientific run pending"}
 
     def launch(self, command, **kwargs):
         return subprocess.Popen(command, **kwargs)

@@ -67,6 +67,21 @@ class Lifecycle(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different request"):
             self.service.prepare(self.spec(name="different"))
 
+    def test_native_runtime_failure_cannot_be_hidden_as_cached_provenance(self):
+        from unittest.mock import patch
+        from studio_worker.adapters import Adapter
+        for name, text in (("model.xyz","1\nfixture\nSi 0 0 0\n"),("run.in","run 1\n")):
+            (self.inputs/name).write_text(text)
+        env=self.service.register_environment({"name":"native fixture","executables":{"python":sys.executable,"gpumd":sys.executable}})
+        project=self.service.register_project({"name":"runtime gate fixture","policy":{"input_roots":[str(self.inputs)],"environments":[env['id']]}})
+        run=self.service.prepare(self.spec(project_id=project['id'],environment_id=env['id'],engine="gpumd.md",inputs={name:str(self.inputs/name) for name in ("model.xyz","run.in")}))
+        with patch.object(Adapter,"runtime_check",side_effect=ValueError("Native ELF loader incompatible: GLIBC_2.34 not found")):
+            checked=self.service.validate(run['id'])
+        self.assertEqual(checked['status'],'draft')
+        self.assertEqual(checked['validation']['status'],'failed')
+        self.assertEqual(checked['provenance']['status'],'blocked')
+        with self.assertRaises(ValueError):self.service.submit(run['id'])
+
     def test_resource_authorization(self):
         for changes in ({"gpu": 9}, {"max_seconds": 999999}, {"environment_id": "unknown"}):
             with self.assertRaises(PermissionError):

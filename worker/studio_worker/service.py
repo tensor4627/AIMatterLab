@@ -246,7 +246,7 @@ class Service:
             self.store.update(run, status="validating")
         try:
             self.verify_snapshot(run)
-            key = json.dumps(run["environment_snapshot"], sort_keys=True)
+            key = json.dumps({"engine":run["engine"], "environment":run["environment_snapshot"]}, sort_keys=True)
             if key not in self.provenance:
                 try:
                     self.provenance[key] = Adapter(run["engine"]).probe(run["environment_snapshot"])

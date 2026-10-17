@@ -304,6 +304,16 @@ class ClusterTransfer(unittest.TestCase):
         self.assertEqual(len(self.service.store.list('artifact')),2)
         self.assertEqual(len(self.service.store.list('cluster-collection')),2)
 
+    def test_default_collection_recovers_native_sampling_history_as_assets(self):
+        run, directory = self.terminal()
+        history=directory/"simulation/sampling-logs/GASGaussian.txt"
+        history.parent.mkdir(parents=True,exist_ok=True)
+        history.write_text("0.5 0.1 0.001\n1.0 0.1 0.0009\n")
+        recovered=self.clusters.collect(run['id'])
+        asset=next(a for a in recovered['files'] if a['name']=='simulation/sampling-logs/GASGaussian.txt')
+        self.assertEqual(Path(asset['path']).read_bytes(),history.read_bytes())
+        self.assertEqual(asset['sha256'],hashlib.sha256(history.read_bytes()).hexdigest())
+
     def test_explicit_missing_result_is_an_error_and_default_missing_is_recorded(self):
         run, _ = self.terminal()
         with self.assertRaises(ValueError):self.clusters.collect(run['id'],['absent.out'])

@@ -32,6 +32,7 @@ DEFAULT_COLLECT = (
     "simulation/thermo.out", "simulation/dump.xyz", "simulation/restart.xyz",
     "simulation/GASCVlog.txt", "simulation/GASGaussian.txt",
     "simulation/metrics.csv", "simulation/trajectory.extxyz", "simulation/checkpoint.json", "simulation/completion.json",
+    "simulation/sampling-logs/GASCVlog.txt", "simulation/sampling-logs/GASCVsteps.txt", "simulation/sampling-logs/GASGaussian.txt",
     "simulation/OPES_COLVAR", "simulation/OPES_KERNELS", "simulation/OPES_STATE.pt",
 )
 
@@ -184,7 +185,7 @@ def profile(value):
     if not e.get("executables", {}).get("python"):
         raise ValueError("Register target Python")
     for key,value in e.get("variables",{}).items():
-        if key not in ("LD_LIBRARY_PATH","LIBRARY_PATH","OMP_NUM_THREADS","MKL_NUM_THREADS") or not isinstance(value,(str,int)) or "\\n" in str(value) or "\\x00" in str(value):
+        if key not in ("LD_LIBRARY_PATH","LIBRARY_PATH","OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS","NUMEXPR_NUM_THREADS") or not isinstance(value,(str,int)) or "\\n" in str(value) or "\\x00" in str(value):
             raise ValueError("Unsupported target loader variable")
     p.setdefault("lsf_memory_scope","per_slot")
     if p["lsf_memory_scope"] not in ("per_slot","per_job"):raise ValueError("Confirm LSF memory reservation semantics")
@@ -635,9 +636,12 @@ for a in r['snapshots']:
  f=contained(Path('simulation')/a['name'],[Path('simulation')])
  if digest(f)!=a['sha256']:raise ValueError('Remote immutable input changed')
 try:
- atomic_json('environment.json',Adapter(r['engine']).probe(environment))
+ print('Studio validation: environment probe started',file=sys.stderr,flush=True)
+ observed=Adapter(r['engine']).probe(environment)
+ print('Studio validation: environment probe finished',file=sys.stderr,flush=True)
+ atomic_json('environment.json',observed)
  Adapter(r['engine']).prepare(r,environment)
- report=Adapter(r['engine']).validate(r,environment,Path('simulation').resolve())
+ report=Adapter(r['engine']).validate(r,environment,Path('simulation').resolve(),probe_report=observed)
  atomic_json('validation.json',report)
 except Exception as e:
  atomic_json('validation.json',{'status':'failed','message':str(e)})
