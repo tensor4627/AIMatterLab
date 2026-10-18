@@ -15,6 +15,8 @@ from .task_schema import STEP_SCHEMA, validate_task
 from .util import leaf, atomic_json, digest, contained
 
 TOOL_ROUTES = {
+ "diagnose_tools":("GET","/api/tools/status",{}),
+ "suggest_parameters":("POST","/api/structures/suggest",{"project_id":"string","environment_id":"string","path":"string","intent":"object"}),
  "list_source_projects":("GET","/api/source-projects",{}),
  "inspect_source_project":("POST","/api/source-project/inspect",{"source_id":"string"}),
  "create_structure":("POST","/api/structures/create",{"project_id":"string","environment_id":"string","recipe":"object"}),
@@ -49,9 +51,12 @@ TOOL_ROUTES = {
  "read_artifact": ("POST", "/api/run/file", {"run_id": "string", "name": "string"})
 }
 DESCRIPTIONS = {
+ "diagnose_tools":"Inspect registered environments, actual executable/source availability and adapter coverage. Filesystem presence is not runtime/scientific validation. Use probe_environment with the exact engine for real imports/loader checks.",
+ "suggest_parameters":"Use ASE structure facts and labeled conservative pilot defaults to propose parameters with source/confidence, preserving supplied intent. Does not invent a CV, phase or production settings. Returns only unresolved high-uncertainty scientific choices for discussion.",
+ "probe_environment":"Probe the explicitly selected engine in its registered Python/native runtime. Optional engine defaults to legacy pydyn.md; pass the actual route (gpumd.sampling, pygas.build, hotpp.train, etc). No branch or environment switching.",
  "inspect_source_project":"Read the actual registered scientific source catalog, CV constructor/forward signatures, hashes and capabilities. Inspect pyGAS before defining a CV; prose alone is not an executable CV.",
  "create_structure":"Create and register an ASE structure asset from a bounded declarative recipe. kind bulk (name, optional crystalstructure/a/cubic); molecule (name, optional vacuum); surface (bulk kwargs, indices, layers, vacuum); explicit (symbols, positions, cell, pbc); import (authorized path). Optional repeat [nx,ny,nz]. Returns validated reloaded extxyz, preview, provenance and inferred facts. Authoring only; never runs MD/relaxation.",
- "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Return source and implementation hashes; does not execute or build the artifact. Use write_project_input to save source, then present a pygas.build task for human execution.",
+ "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Save the canonical graph and executable build_bias.py directly as project inputs; return their paths, hashes and a bounded preview to avoid copying long code through chat. Does not execute or build the artifact. Include returned files and the source structure in a pygas.build task for human execution.",
  "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
  "prepare_cluster_run":"Prepare a local immutable SSH/LSF/Slurm run draft and its batch script. No upload or submission. Stop for desktop review.",
  "draft_cluster_setup":"Propose queue, modules, engine paths and submission skill changes for user review. Cannot change SSH details or authorization.",
@@ -70,6 +75,7 @@ def tools():
             continue
         schema = {"type": "object", "properties": {k: {"type": v} for k, v in properties.items()},
                   "required": list(properties)}
+        if name=="probe_environment":schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name == "present_task":
             schema["properties"]["steps"]={"type":"array","items":STEP_SCHEMA}
             schema["properties"]["missing_fields"]={"type":"array","items":{"type":"string"}}
@@ -88,7 +94,7 @@ def tools():
         result.append({"name": name, "description": DESCRIPTIONS.get(name, name.replace("_", " ")),
                        "inputSchema": schema,
                        "annotations": {"readOnlyHint": method == "GET" or name in (
-                           "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
+                           "inspect_source_project", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
                                        "destructiveHint": name == "cancel_run"}})
     return result
 
@@ -97,7 +103,9 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.14.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.15.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+        if path == "/api/tools/status":
+            return service.diagnose_tools()
         if path == "/api/source-projects":
             return store.list("source-project")
         if path == "/api/projects":
@@ -143,6 +151,9 @@ def dispatch(service, method, path, data, admin=False):
     if path=="/api/source-project/inspect":
         from .source_projects import inspect_source
         return inspect_source(store.get("source-project",data["source_id"]))
+    if path=="/api/structures/import-material":
+        if not admin:raise PermissionError("External database provenance must come from desktop")
+        return service.authoring(data,"create_structure")
     if path in ("/api/structures/create","/api/pygas/render"):
         return service.authoring(data,"create_structure" if path.endswith("create") else "render_pygas")
     if path=="/api/tasks/present":
@@ -198,7 +209,7 @@ def dispatch(service, method, path, data, admin=False):
         return store.put("artifact", {"id":secrets.token_hex(10), "project_id":project["id"], "name":target.name, "path":str(target), "kind":data["kind"], "sha256":digest(target), "size":target.stat().st_size, "metadata":metadata})
     if path == "/api/probe":
         environment = store.get("environment", data["environment_id"])
-        return Adapter("pydyn.md").probe(environment)
+        return Adapter(data.get("engine","pydyn.md")).probe(environment)
     if path == "/api/runs/prepare":
         spec = dict(data["spec"])
         spec["origin"] = "desktop" if admin else "agent"
@@ -225,6 +236,8 @@ def dispatch(service, method, path, data, admin=False):
             return service.resume(identifier, data["parameters"])
         if action in ("validate", "submit", "cancel", "collect"):
             return getattr(service, action)(identifier)
+    if path == "/api/structures/suggest":
+        return service.inspect(data["project_id"],data["environment_id"],data["path"],"suggest",intent=data.get("intent",{}))
     if path == "/api/inspect":
         return service.inspect(data["project_id"], data["environment_id"], data["path"],
                                data.get("kind", "dataset"), data.get("frame", 0))
@@ -317,7 +330,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.14.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.15.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}

@@ -4,6 +4,7 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
+| 0.15.0 | 第二轮：MP密钥/结构检索导入、参数建议、逐项工具诊断、真实引擎探测、源码哈希门槛、CV代码直接保存 | Node118、worker108、界面40、实际Agent七工具链路、CV CPU/CUDA、便携/解包版、900文件与配置保留 passed | MP真实访问 blocked（无key）、新训练/主动学习 not_run；[v0.15](docs/v0.15.md) |
 | 0.14.0 | 第一轮：本地源码绑定、真实 pyGAS CV 图生成、ASE 结构资产与预览、原生 GPU-Sampling NEB、编辑器生命周期修复 | Node111、worker105、构建、真实 CV CPU/CUDA、真实 NEB 短例与76步示例 passed | 本代独立包/MP真实查询/新训练 not_run；[v0.14](docs/v0.14.md) |
 | 0.13.1 | 真实集群预检修复：按引擎导入/同次探测、Git元数据隔离、实时阶段与崩溃诊断、目标ELF门槛、native日志回收 | Node109、worker89、界面38、打包版/正常profile/895文件、loader拒绝负例 passed；发布后补验：PyDyn10步/5hill/11帧与GPUMD原作业100步/2hill/5帧完整闭环均passed | 备用Ada系统库不兼容；真实DeepSeek/TPS、续算及生产收敛 not_run；[v0.13.1](docs/v0.13.1.md) |
 | 0.13.0 | 第三轮：可迁移公共skill/ignored私有overlay；API/ACP受限附件；有界同作业核对脚本随包；首turn拒绝恢复 | Node109、worker74、界面38、实际桌面附件3项、正常profile/SFX、895文件与连接保留 passed | LSF原作业仍queued，科学运行/回收、真实DeepSeek推理/TPS及全新安装 not_run；[v0.13](docs/v0.13.md) |

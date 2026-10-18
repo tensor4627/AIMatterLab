@@ -41,6 +41,13 @@ def probe(payload):
             module = importlib.import_module("base" if name == "pygas" else name)
             report["modules"][name] = {"version": str(getattr(module, "__version__", "unknown")),
                                       "file": getattr(module, "__file__", None), "status": "passed"}
+            if name == "pygas":
+                selected=payload.get("repositories",{}).get("pygas")
+                actual=Path(module.__file__).resolve() if getattr(module,"__file__",None) else None
+                report["modules"][name]["registration_match"]=actual.is_relative_to(Path(selected).resolve()) if selected and actual else None
+                report["pygas_capabilities"]={k:hasattr(module,k) for k in ("CVOnlyProcedure","MetaDProcedure","WTMetaDProcedure","OPESProcedure","export_model_bundle")}
+                if selected and report["modules"][name]["registration_match"] is False:
+                    report["modules"][name].update(status="blocked",error="Imported pyGAS differs from explicit registered source")
             if name == "torch":
                 print("Studio environment probe: checking CUDA availability", file=sys.stderr, flush=True)
                 report["cuda"] = module.version.cuda
@@ -149,8 +156,8 @@ def regression(payload):
 if __name__ == "__main__":
     from derivatives import check
     from neb_checks import validate as neb_validate
-    from structure_tools import create, render
-    operations = {"create_structure":create,"render_pygas":render,"neb":neb_validate,"derivatives":check, "probe": probe, "structure": structure, "dataset": dataset, "regression": regression}
+    from structure_tools import create, render, suggest
+    operations = {"suggest":suggest,"create_structure":create,"render_pygas":render,"neb":neb_validate,"derivatives":check, "probe": probe, "structure": structure, "dataset": dataset, "regression": regression}
     import faulthandler
     if sys.argv[1] == "probe":
         faulthandler.enable()

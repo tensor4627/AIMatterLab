@@ -202,6 +202,17 @@ class Adapter:
         runtime = self.runtime_check(environment)
         p, directory = spec.get("parameters", {}), Path(directory)
         self.input_contract(spec,directory)
+        if self.engine == "pygas.build":
+            first=(directory/"build_bias.py").read_text(encoding="utf-8").splitlines()[0]
+            if first.startswith("# studio-pygas-source: "):
+                import json
+                source=json.loads(first.split(": ",1)[1]);registered=environment.get("repositories",{}).get("pygas")
+                if not registered or Path(registered).resolve()!=Path(source["root"]).resolve():raise ValueError("Generated CV source differs from registered pyGAS environment; register the intended source explicitly")
+                if digest(Path(registered)/"base/colvar.py")!=source["colvar_sha256"]:raise ValueError("pyGAS source changed after graph rendering; regenerate and review")
+                for relative,expected in source.get("files",{}).items():
+                    import re
+                    if not re.fullmatch(r"(?:base/[A-Za-z0-9_]+|tools/(?:graph_workflow|cv_bias_gui_server))\.py",relative):raise ValueError("Invalid generated source manifest")
+                    if digest(Path(registered)/relative)!=expected:raise ValueError("pyGAS source changed after graph rendering; regenerate and review")
         if self.engine == "gpumd.neb":
             report = run_json(self.executable(environment,"python"),SCIENTIFIC,"neb",
                 {"directory":str(directory),"inputs":list(spec["inputs"]),"declared":p.get("neb")},

@@ -3,7 +3,7 @@ import ast
 import hashlib
 from pathlib import Path
 
-ALLOWED={"pygas":("base/colvar.py","base/bias.py","base/switch.py","base/neighbor.py","base/utils.py","tools/graph_workflow.py","tools/compile_workflow.py","agents/skills/pygas-workflow/SKILL.md","agents/skills/pygas-build-cv-model/SKILL.md"),"pydyn":("pyproject.toml",),"gpumd":("src/main_gpumd/run.cu",),"hotpp":("pyproject.toml",),"torchnep":("pyproject.toml",)}
+ALLOWED={"pygas":("base/colvar.py","base/bias.py","base/switch.py","base/neighbor.py","base/utils.py","tools/graph_workflow.py","tools/compile_workflow.py","agents/skills/pygas-workflow/SKILL.md","agents/skills/pygas-build-cv-model/SKILL.md"),"pydyn":("pyproject.toml",),"gpumd":("src/main_gpumd/run.cu",),"hotpp":("setup.py",),"torchnep":("pyproject.toml",)}
 def inspect_source(source):
  root=Path(source["root"]).resolve();name=source["id"]
  if name not in ALLOWED:raise ValueError("Unsupported scientific source")

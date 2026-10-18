@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
-import {discoverSources,sourceContext} from './source-projects.mjs';
+import {MaterialsProject} from './materials-project.mjs';
+import {discoverSources,sourceContext,toolInventory} from './source-projects.mjs';
 import { localSkills } from './skills.mjs';
 import { selectedSkillContext } from './skill-context.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
@@ -37,7 +38,7 @@ const verifying=installationVerifying||improvementsVerifying||providerVerifying|
 const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
 if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
-let window, catalog, settings, agents,taskRecords;
+let window, catalog, settings, agents,taskRecords,materials;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
 const codex = new CodexBridge(), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
@@ -86,6 +87,12 @@ if(installationVerifying){
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,agentProvider:config.desktop.agent_provider||'codex'});
 }
 agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:()=>worker.connection});
+materials=new MaterialsProject({root:path.join(app.getPath('userData'),'credentials'),encryption:safeStorage,fetchApi:(...a)=>net.fetch(...a),worker});
+worker.setLocalTools(materials.tools(),(name,args)=>materials.call(name,args));
+handle('materials.status',()=>materials.status());
+handle('materials.key',({apiKey,remove=false})=>remove?materials.clear():materials.save(apiKey));
+handle('materials.search',({query})=>materials.search(query));
+handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>taskRecords.create(value));
@@ -130,9 +137,10 @@ handle('settings',data => {
   if(!Array.isArray(next.skillRoots)) throw new Error('Skill roots must be an array');
   settings=catalog.put('settings','main',next); return settings;
 });
-function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,roots:settings.sourceRoots||[]});}
-async function bindSources(){const sources=scientificSources();for(const source of sources)await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});return sources;}
+function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
+async function bindSources(){const sources=scientificSources();for(const source of sources){await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());
+handle('sources.diagnose',async()=>{const sources=scientificSources();return {sources,tools:toolInventory(sources),worker:worker.connection?await worker.request('GET','/api/tools/status'):null};});
 function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activeTurns?.size))throw Error('请先停止当前回复，再调整连接或上下文设置');}
 handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);await bindSources();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.request',async({method,target,data}) => {

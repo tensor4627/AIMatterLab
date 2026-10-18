@@ -385,6 +385,14 @@ class Service:
             return {"name": name, "text": data.decode("utf-8", "replace"),
                     "offset": stream.tell(), "size": path.stat().st_size}
 
+    def diagnose_tools(self):
+        result=[]
+        for environment in self.store.list("environment"):
+            executables={k:{"status":"passed" if Path(v).is_file() and os.access(v,os.X_OK) else "blocked","scope":"Executable file availability only"} for k,v in environment["executables"].items()}
+            repositories={k:{"status":"passed" if Path(v).is_dir() else "blocked","scope":"Source directory availability only"} for k,v in environment.get("repositories",{}).items()}
+            result.append({"id":environment["id"],"name":environment["name"],"executables":executables,"repositories":repositories,"runtime_validation":"not_run","scientific_validation":"not_run"})
+        return {"environments":result,"adapters":list(ENGINES),"pending_adapters":["torchnep.train","nepmaker","activemiao","external-dft"],"scope":"Read-only inventory. Probe exact routes separately; no calculation executed."}
+
     def authoring(self, data, operation):
         project=self.store.get("project",data["project_id"])
         if data["environment_id"] not in project["policy"]["environments"]:raise PermissionError("Environment is not authorized")
@@ -403,11 +411,20 @@ class Service:
             payload={"source_root":source["root"],"graph":data["graph"]}
         result=run_json(environment["executables"]["python"],SCIENTIFIC,operation,payload,process_env(environment),timeout=90)
         if operation=="create_structure":
+            if data.get("external_provenance"):result["provenance"]["external"]=data["external_provenance"]
             atomic_json(target.with_suffix(".provenance.json"),result["provenance"])
             result["artifact"]=self.store.put("artifact",{"id":secrets.token_hex(10),"project_id":project["id"],"name":target.name,"path":str(target),"kind":"structure","sha256":result["sha256"],"size":target.stat().st_size,"metadata":json.loads(json.dumps(result))})
+        else:
+            directory=self.root/"projects"/project["id"]/"inputs"/("cv-"+secrets.token_hex(8));directory.mkdir(parents=True)
+            source_file=directory/"build_bias.py";graph_file=directory/"workflow.json"
+            source_file.write_text(result["source"],encoding="utf-8");atomic_json(graph_file,result["graph"])
+            result["files"]=[str(source_file),str(graph_file)]
+            result["input_sha256"]={p.name:digest(p) for p in (source_file,graph_file)}
+            result["source_preview"]="\n".join(result["source"].splitlines()[1:])[:1200]
+            if not data.get("return_source",False):result.pop("source",None)
         return result
 
-    def inspect(self, project_id, environment_id, path, kind="dataset", frame=0):
+    def inspect(self, project_id, environment_id, path, kind="dataset", frame=0, intent=None):
         project = self.store.get("project", project_id)
         if environment_id not in project["policy"]["environments"]:
             raise PermissionError("Environment is not authorized")
@@ -415,7 +432,7 @@ class Service:
         roots = project["policy"]["input_roots"] + [str(self.root / "projects" / project_id / "inputs")] + [r["directory"] for r in self.store.runs() if r["project_id"] == project_id]
         path = contained(path, roots)
         return run_json(environment["executables"]["python"], SCIENTIFIC, kind,
-                        {"path": str(path), "frame": frame}, process_env(environment))
+                        {"path": str(path), "frame": frame,"intent":intent or {}}, process_env(environment))
 
     @staticmethod
     def input_name(name):

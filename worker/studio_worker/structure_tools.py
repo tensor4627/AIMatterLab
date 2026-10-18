@@ -52,4 +52,22 @@ def render(payload):
  from tools.cv_bias_gui_server import build_catalog
  from tools.graph_workflow import validate_graph,render_workflow_script
  catalog=build_catalog(root);graph=payload['graph'];plan=validate_graph(graph,catalog);source=render_workflow_script(graph,catalog,root)
+ files={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'base').glob('*.py'))}
+ files.update({p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in ('tools/graph_workflow.py','tools/cv_bias_gui_server.py')})
+ source='# studio-pygas-source: '+json.dumps({'root':str(root),'colvar_sha256':files['base/colvar.py'],'files':files})+'\n'+source
  return {'source':source,'graph':graph,'plan':{k:plan[k] for k in ('mode','order','collector_id','cv_size')},'source_root':str(root),'source_sha256':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in ('base/colvar.py','tools/graph_workflow.py','tools/cv_bias_gui_server.py')},'validation':'not_run','scope':'Actual pyGAS graph schema and source rendering; artifact build/reload and target gates still required'}
+
+
+def suggest(payload):
+ from ase.io import read
+ from ase.data import atomic_masses,atomic_numbers
+ atoms=read(payload['path'],index=0);facts=checked(atoms);intent=payload.get('intent',{})
+ supplied={k:{'value':v,'source':'supplied task intent','confidence':'user'} for k,v in intent.items()}
+ parameters={**supplied,'n_atoms':{'value':len(atoms),'source':'ASE loaded structure','confidence':'measured'},'pbc':{'value':atoms.pbc.tolist(),'source':'ASE loaded structure','confidence':'measured'},'structure_file':{'value':payload['path'],'source':'authorized asset','confidence':'measured'}}
+ defaults={'time_step_fs':{'value':0.25 if 'H' in facts['symbols'] else 1.0,'source':'conservative MD pilot heuristic from presence of hydrogen; verify potential/time-scale','confidence':'proposal'},'pilot_steps':{'value':100,'source':'bounded software trial, not equilibration or convergence','confidence':'technical default'},'walkers':{'value':1,'source':'Studio supported single-walker contract','confidence':'capability'}}
+ for k,v in defaults.items():parameters.setdefault(k,v)
+ unresolved=[]
+ if not intent.get('temperature_K') and intent.get('ambient') is True:parameters['temperature_K']={'value':300,'source':'ambient-temperature request mapped to a reviewable 300 K convention','confidence':'proposal'}
+ elif not intent.get('temperature_K'):unresolved.append({'field':'temperature_K','reason':'Thermodynamic target is not determined by structure geometry'})
+ if intent.get('enhanced_sampling') and not intent.get('cv_definition'):unresolved.append({'field':'cv_definition','reason':'Choose the physical event/observable and atom groups from the actual pyGAS catalog'})
+ return {'parameters':parameters,'unresolved':unresolved,'structure':facts,'scope':'Editable facts/proposals only; no force-field, timestep stability, equilibration or production validation'}
