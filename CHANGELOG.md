@@ -4,7 +4,7 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
-| 0.13.1 | 真实集群预检修复：按引擎导入/同次探测、Git元数据隔离、实时阶段与崩溃诊断、目标ELF门槛、native日志回收 | Node109、worker89、界面38、真实PyDyn10步/5hill/11帧与完整回收、打包版/正常profile/895文件、实际loader拒绝负例 passed | GPUMD artifact/FD过、C++系统库不兼容，兼容路线queued；真实DeepSeek/TPS及续算 not_run；[v0.13.1](docs/v0.13.1.md) |
+| 0.13.1 | 真实集群预检修复：按引擎导入/同次探测、Git元数据隔离、实时阶段与崩溃诊断、目标ELF门槛、native日志回收 | Node109、worker89、界面38、打包版/正常profile/895文件、loader拒绝负例 passed；发布后补验：PyDyn10步/5hill/11帧与GPUMD原作业100步/2hill/5帧完整闭环均passed | 备用Ada系统库不兼容；真实DeepSeek/TPS、续算及生产收敛 not_run；[v0.13.1](docs/v0.13.1.md) |
 | 0.13.0 | 第三轮：可迁移公共skill/ignored私有overlay；API/ACP受限附件；有界同作业核对脚本随包；首turn拒绝恢复 | Node109、worker74、界面38、实际桌面附件3项、正常profile/SFX、895文件与连接保留 passed | LSF原作业仍queued，科学运行/回收、真实DeepSeek推理/TPS及全新安装 not_run；[v0.13](docs/v0.13.md) |
 | 0.12.0 | 第二轮：输入复核receipt、原生PyDyn采样验证、终态回收/预览、空会话恢复、中英文部署 | Node核心70、worker74、界面38、构建/正常profile、真实AI复核/SSH提交/关窗恢复 passed | GPUMD queued、PyDyn待串行提交，科学执行与回收 not_run；[v0.12](docs/v0.12.md) |
 | 0.11.0 | 第一轮：科学流程/部署分离；双版本执行门槛、单walker默认、实际输入审阅与一致性保护、受限SSH传输基础 | 核心Node68、worker72、浏览器35、生产构建 passed | 真实新作业/便携包 not_run；[v0.11](docs/v0.11.md) |
