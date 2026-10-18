@@ -1,5 +1,5 @@
 export const tools=[
- {id:'md',name:'分子动力学引擎',description:'PyDyn 与 GPUMD / GPU-Sampling；传统 MD 和 pyGAS 增强采样。NEB 属于待接入能力。',engines:['pydyn.md','gpumd.md','pydyn.sampling','gpumd.sampling'],status:'partial',capabilities:['MD','增强采样','NEB（待接入）'],page:'runs'},
+ {id:'md',name:'分子动力学引擎',description:'PyDyn 与 GPUMD / GPU-Sampling；传统 MD 和 pyGAS 增强采样。GPU-Sampling 原生 NEB；PyDyn NEB 待接入。',engines:['gpumd.neb','pydyn.md','gpumd.md','pydyn.sampling','gpumd.sampling'],status:'partial',capabilities:['MD','增强采样','GPU-Sampling NEB'],page:'runs'},
  {id:'training',name:'力场训练器',description:'HotPP、TorchNEP、GPUMD 原生 NEP；数据审计、训练、独立评估和部署。',engines:['hotpp.train','hotpp.eval','hotpp.export','nep.train','nep.eval','nep.analyze'],status:'partial',capabilities:['HotPP','NEP','TorchNEP（待接入）'],page:'training'},
  {id:'activelearning',name:'主动学习',description:'NEPMaker → NEP；ActiveMiao → HotPP。探索、选帧、DFT 复核、复训形成闭环。',engines:[],status:'planned',capabilities:['NEPMaker（待接入）','ActiveMiao（待接入）'],page:'activelearning'},
  {id:'pygas',name:'pyGAS 插件',description:'独立 pyGAS 与 PyDyn 内置 pyGAS 分别注册版本。定义 CV、偏置、轨迹分析和自由能重建。',engines:['pygas.build','bias.validate','pygas.reweight','pygas.opes-reweight'],status:'partial',capabilities:['CV / Bias','WTMetaD / OPES 重加权','目标环境验证'],page:'bias'},
@@ -20,7 +20,7 @@ export const tasks=[
  {id:'training',title:'力场训练与测试',summary:'数据集 → 标签与划分审计 → 训练 → 独立评估 → 模型导出',tools:['training','assets','queue','md'],steps:[step('dataset','数据集导入与标签审计','assets'),step('train','训练器与训练参数','training'),step('evaluate','独立测试集评估','training'),step('export','模型导出与消费端验证','training'),submit,assets]},
  {id:'learning',title:'主动学习力场',summary:'已有势 → MD 探索 → 选帧 → DFT 请求 → 标签回收 → 复训',tools:['activelearning','md','training','assets','viewer','queue'],steps:[model,structure,step('explore','MD 主动探索','md'),step('select','不确定性评估与选帧','activelearning',true,'选择 NEPMaker 或 ActiveMiao。',true),step('dft','DFT 复核请求与标签回收','assets',true,'外部 DFT 托管模块尚待接入。',true),step('retrain','回收标签后复训','training'),submit,assets]},
  {id:'analysis',title:'轨迹与自由能分析',summary:'已有 MD / 采样结果 → CV 分析或重加权 → 图表、FES 与数据资产',tools:['pygas','assets','viewer','queue'],steps:[step('input','输入轨迹、CV 与历史资产','assets'),step('method','分析方法与适用条件','pygas'),step('preview','结构和轨迹预览','viewer',false),submit,assets]},
- {id:'neb',title:'NEB 路径模拟',summary:'初末态结构 → 势模型 → PyDyn / GPUMD → 路径与能垒分析（待接入）',tools:['md','training','assets','viewer','queue'],steps:[model,step('endpoints','初末态结构与原子映射','viewer'),step('neb','NEB 引擎与路径参数','md',true,'两条引擎路线的 NEB 适配器均尚待接入。',true),submit,assets]},
+ {id:'neb',title:'NEB 路径模拟',summary:'初末态结构 → 势模型 → GPU-Sampling 原生 NEB → 路径与能量分析',tools:['md','training','assets','viewer','queue'],steps:[model,step('endpoints','初末态结构与原子映射','viewer'),step('neb','NEB 引擎与路径参数','md',true,'选择 gpumd.neb；原生 neb_set / neb_run，FIRE；PyDyn NEB 待接入。'),assets]},
  {id:'request',title:'数据处理与复算请求',summary:'选择来源资产和目标模块，记录处理需求与期望产物；DFT 托管待接入。',tools:['assets','pygas','training','md','queue'],steps:[step('input','来源资产与构型集合','assets'),step('target','目标模块和处理契约','assets'),step('process','计算或分析参数','pygas'),submit,assets]}
 ];
 export function createPlan(taskId){

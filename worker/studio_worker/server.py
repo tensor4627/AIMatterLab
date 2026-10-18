@@ -15,6 +15,10 @@ from .task_schema import STEP_SCHEMA, validate_task
 from .util import leaf, atomic_json, digest, contained
 
 TOOL_ROUTES = {
+ "list_source_projects":("GET","/api/source-projects",{}),
+ "inspect_source_project":("POST","/api/source-project/inspect",{"source_id":"string"}),
+ "create_structure":("POST","/api/structures/create",{"project_id":"string","environment_id":"string","recipe":"object"}),
+ "render_pygas_workflow":("POST","/api/pygas/render",{"project_id":"string","environment_id":"string","source_id":"string","graph":"object"}),
  "collect_cluster_artifacts":("POST","/api/cluster/collect",{"run_id":"string"}),
  "read_cluster_input":("POST","/api/cluster/input",{"run_id":"string","name":"string"}),
  "read_cluster_result":("POST","/api/cluster/result",{"run_id":"string","name":"string"}),
@@ -45,6 +49,9 @@ TOOL_ROUTES = {
  "read_artifact": ("POST", "/api/run/file", {"run_id": "string", "name": "string"})
 }
 DESCRIPTIONS = {
+ "inspect_source_project":"Read the actual registered scientific source catalog, CV constructor/forward signatures, hashes and capabilities. Inspect pyGAS before defining a CV; prose alone is not an executable CV.",
+ "create_structure":"Create and register an ASE structure asset from a bounded declarative recipe. kind bulk (name, optional crystalstructure/a/cubic); molecule (name, optional vacuum); surface (bulk kwargs, indices, layers, vacuum); explicit (symbols, positions, cell, pbc); import (authorized path). Optional repeat [nx,ny,nz]. Returns validated reloaded extxyz, preview, provenance and inferred facts. Authoring only; never runs MD/relaxation.",
+ "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Return source and implementation hashes; does not execute or build the artifact. Use write_project_input to save source, then present a pygas.build task for human execution.",
  "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
  "prepare_cluster_run":"Prepare a local immutable SSH/LSF/Slurm run draft and its batch script. No upload or submission. Stop for desktop review.",
  "draft_cluster_setup":"Propose queue, modules, engine paths and submission skill changes for user review. Cannot change SSH details or authorization.",
@@ -90,7 +97,9 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.13.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.14.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+        if path == "/api/source-projects":
+            return store.list("source-project")
         if path == "/api/projects":
             return store.list("project")
         if path == "/api/environments":
@@ -125,6 +134,17 @@ def dispatch(service, method, path, data, admin=False):
         return service.register_project(data) if path.endswith("projects") else service.register_environment(data)
     if method != "POST":
         raise ValueError("Unknown route")
+    if path=="/api/source-projects":
+        if not admin:raise PermissionError("Only desktop can register authoring sources")
+        from .source_projects import inspect_source
+        value={"id":data["id"],"root":str(Path(data["root"]).resolve()),"commit":data.get("commit"),"dirty":data.get("dirty")}
+        inspect_source(value)
+        return store.put("source-project",value)
+    if path=="/api/source-project/inspect":
+        from .source_projects import inspect_source
+        return inspect_source(store.get("source-project",data["source_id"]))
+    if path in ("/api/structures/create","/api/pygas/render"):
+        return service.authoring(data,"create_structure" if path.endswith("create") else "render_pygas")
     if path=="/api/tasks/present":
         leaf(data["task_id"])
         validate_task(data)
@@ -297,7 +317,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.13.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.14.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}

@@ -64,7 +64,7 @@ export default function RunDetail({run,onRefresh,onError,onOpenRun}:{run:Run;onR
    {run.engine.startsWith('nep.')&&<button className="button" onClick={()=>void api('POST','/api/inspect',{project_id:run.project_id,environment_id:run.environment_id,path:run.directory+'/results',kind:'regression'}).then(r=>{setAnalysis(r);setTab('评估');}).catch(onError)}>{tr("评估指标")}</button>}
    <button className="button" disabled={working||!['queued','running','unknown'].includes(run.status)} onClick={()=>void action('cancel')}><Square size={13}/>{tr("取消")}</button>
    <button className="button" onClick={()=>void collect()}><Files size={14}/>{tr("收集产物")}</button>
-   <button className="button" disabled={working||resumeStorageError||!!run.superseded_by||!['succeeded','failed','cancelled'].includes(run.status)} onClick={()=>{if(!resumeAttempt.current)setResumeKey(crypto.randomUUID());setResume(true);}}><RotateCw size={14}/>{tr("续算")}</button>
+   <button className="button" title={run.engine==='gpumd.neb'?tr('NEB 路径不含优化器状态，请显式创建新的路径计算'):undefined} disabled={run.engine==='gpumd.neb'||working||resumeStorageError||!!run.superseded_by||!['succeeded','failed','cancelled'].includes(run.status)} onClick={()=>{if(!resumeAttempt.current)setResumeKey(crypto.randomUUID());setResume(true);}}><RotateCw size={14}/>{tr("续算")}</button>
    <button className="icon-button" title={tr("导出不可变输入与复现记录 ZIP")} aria-label={tr("导出不可变输入与复现记录 ZIP")} onClick={()=>void invoke('export',{run}).catch(onError)}><Download size={16}/></button>
   </div>
   <div className="detail-meta"><span>GPU {run.gpu}</span><span>{tr("上限")}{run.max_seconds}s</span><span>{tr("输入已快照")}</span><span>{new Date(run.created_at*1000).toLocaleString()}</span></div>

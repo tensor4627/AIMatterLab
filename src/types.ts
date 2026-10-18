@@ -7,7 +7,7 @@ export interface Artifact {id:string;name:string;path:string;kind:string;sha256:
 export type AgentProvider='codex'|'kimi'|'qwen'|'deepseek';
 export interface AgentConnectRequest {provider:AgentProvider;repairTools?:boolean}
 export interface AgentRpcRequest extends AgentConnectRequest {method:string;params?:Record<string,unknown>}
-export interface Settings {projectAgents?:Record<string,AgentProvider>;agentLayout?:'right'|'center';agentProvider?:AgentProvider;kimiPath?:string;qwenPath?:string;agentProviders?:Partial<Record<AgentProvider,{contextWindow?:number;compactLimit?:number;effort?:string}>>;distribution:string;workerRoot:string;workerPort:number;codexPath:string;cwd:string;skillRoots:string[];theme:string;language?:'zh-CN'|'en';fontFamily?:string;fontSize?:number;minimumFontSize?:number;chatFontSize?:number;editorFontSize?:number;terminalFontSize?:number;agent?:{contextWindow?:number;compactLimit?:number;effort?:string}}
+export interface Settings {projectAgents?:Record<string,AgentProvider>;agentLayout?:'right'|'center';agentProvider?:AgentProvider;kimiPath?:string;qwenPath?:string;agentProviders?:Partial<Record<AgentProvider,{contextWindow?:number;compactLimit?:number;effort?:string}>>;distribution:string;workerRoot:string;workerPort:number;codexPath:string;cwd:string;sourceRoots?:string[];skillRoots:string[];theme:string;language?:'zh-CN'|'en';fontFamily?:string;fontSize?:number;minimumFontSize?:number;chatFontSize?:number;editorFontSize?:number;terminalFontSize?:number;agent?:{contextWindow?:number;compactLimit?:number;effort?:string}}
 export interface RpcEvent {provider?:AgentProvider;method:string;id?:string|number;params:any}
 export interface Studio {invoke<T=any>(method:string,data?:unknown):Promise<T>;onEvent(callback:(event:RpcEvent)=>void):()=>void;onTerminal(callback:(event:{id:string;data?:string;closed?:boolean})=>void):()=>void}
 declare global {interface Window {studio?:Studio}}
@@ -18,7 +18,7 @@ export async function invoke<T=any>(method:string,data?:unknown):Promise<T>{
 export const api=<T=any>(method:string,target:string,data?:unknown)=>invoke<T>('worker.request',{method,target,data});
 export function wslPath(path:string){return /^[a-z]:[\\/]/i.test(path)?'/mnt/'+path[0].toLowerCase()+'/'+path.slice(3).replaceAll('\\','/'):path}
 export const engines=[
- ['gpumd.md','GPUMD · 传统 MD'],['pydyn.md','PyDyn · 传统 MD'],['pygas.build','pyGAS · Bias 构建'],
+ ['gpumd.neb','GPU-Sampling · NEB'],['gpumd.md','GPUMD · 传统 MD'],['pydyn.md','PyDyn · 传统 MD'],['pygas.build','pyGAS · Bias 构建'],
  ['bias.validate','pyGAS · 产物验证'],['gpumd.sampling','GPUMD · GPU-Sampling'],['pydyn.sampling','PyDyn · pyGAS'],
  ['nep.analyze','NEP · 回归图'],['nep.train','NEP · 训练'],['nep.eval','NEP · 测试'],['hotpp.train','HotPP · 训练'],
  ['hotpp.eval','HotPP · 测试'],['hotpp.export','HotPP · 模型导出'],['pygas.reweight','WTMetaD · 重加权'],

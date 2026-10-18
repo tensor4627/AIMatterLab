@@ -19,7 +19,7 @@ def probe_modules(engine):
         return ("torch", "ase", "hotpp")
     if engine in ("gpumd.sampling", "pygas.build", "bias.validate") or engine.startswith("pygas."):
         return ("torch", "ase", "pygas")
-    if engine == "gpumd.md" or engine.startswith("nep."):
+    if engine in ("gpumd.md", "gpumd.neb") or engine.startswith("nep."):
         return ("torch", "ase")
     raise ValueError("Unsupported probe engine")
 
@@ -148,7 +148,9 @@ def regression(payload):
 
 if __name__ == "__main__":
     from derivatives import check
-    operations = {"derivatives":check, "probe": probe, "structure": structure, "dataset": dataset, "regression": regression}
+    from neb_checks import validate as neb_validate
+    from structure_tools import create, render
+    operations = {"create_structure":create,"render_pygas":render,"neb":neb_validate,"derivatives":check, "probe": probe, "structure": structure, "dataset": dataset, "regression": regression}
     import faulthandler
     if sys.argv[1] == "probe":
         faulthandler.enable()

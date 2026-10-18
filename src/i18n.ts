@@ -1,4 +1,5 @@
 const english:Record<string,string> = {
+"科学工具":"Scientific tools","绑定本地科学源码，供 Agent 查询真实 CV 接口。计算环境仍独立登记。":"Bind scientific sources for actual CV APIs. Compute environments remain separate.","源码目录 · 每行一个":"Source directories \u00b7 one per line","检查工具链接":"Check tool links","版本未知":"Unknown revision","存在本地修改":"Local changes present","源码未修改":"Clean source","保存后重连作业服务以刷新源码绑定；不会修改引擎分支或环境。":"Save and reconnect the worker to refresh source bindings. Engine branches and environments are preserved.","ASE 结构工坊":"ASE structure workshop","生成后保存为真实 extxyz 资产，重新加载检查并预览。参考晶格值会标明来源。":"Save a real extxyz asset, reload, check and preview it. Reference lattice values include provenance.","结构类型":"Structure type","元素或分子名称":"Element or molecule name","晶体类型 · 可留空使用 ASE 参考值":"Crystal type \u00b7 blank uses ASE references","ASE 参考值":"ASE reference","生成中…":"Generating\u2026","生成结构并校验":"Generate and check structure","几何检查通过；尚未进行能量松弛或势模型验证。":"Geometry checks passed; energetic relaxation and potential validation have not run.",
 "使用 DeepSeek 开放平台 API Key，无需安装 CLI。":"Use a DeepSeek Platform API key. No CLI installation is required.",
 "官方 API 地址":"Official API endpoint",
 "连接后读取账户模型目录，默认关闭思考以减少等待；也可切换思考强度。":"Load the account model catalog on connection. Thinking is off by default to reduce waiting; thinking effort can be changed.",
@@ -374,7 +375,15 @@ const english:Record<string,string> = {
 "回收完成":"Retrieval complete",
 "个文件":"files",
 "配置部署":"Configure deployment",
-"科学参数复核完成，请前往独立部署模块设置计算目标。":"Scientific review is complete. Configure the compute target in the deployment module."
+"科学参数复核完成，请前往独立部署模块设置计算目标。":"Scientific review is complete. Configure the compute target in the deployment module.",
+"PyDyn 与 GPUMD / GPU-Sampling；传统 MD 和 pyGAS 增强采样。GPU-Sampling 原生 NEB；PyDyn NEB 待接入。":"PyDyn and GPUMD / GPU-Sampling: MD, pyGAS sampling and native GPU-Sampling NEB. PyDyn NEB integration is planned.",
+"GPU-Sampling NEB":"GPU-Sampling NEB",
+"初末态结构 → 势模型 → GPU-Sampling 原生 NEB → 路径与能量分析":"Endpoints → Potential → Native GPU-Sampling NEB → Path and energy analysis",
+"选择 gpumd.neb；原生 neb_set / neb_run，FIRE；PyDyn NEB 待接入。":"Choose gpumd.neb: native neb_set / neb_run with FIRE. PyDyn NEB integration is planned.",
+"输入快照准备完成不代表科学验证；执行时检查目标环境及引擎输入契约。":"Prepared input snapshots do not establish scientific validation. Execution checks the target environment and engine input contract.",
+"图像序号":"Image index",
+"相对目标值 (eV)":"Relative objective (eV)",
+"NEB 路径不含优化器状态，请显式创建新的路径计算":"A NEB path does not include optimizer state. Prepare a new explicit path calculation."
 };
 let language:'zh-CN'|'en' = (localStorage.getItem('studio.language')==='en'?'en':'zh-CN');
 export function setLanguage(value:'zh-CN'|'en'){language=value;localStorage.setItem('studio.language',value);}

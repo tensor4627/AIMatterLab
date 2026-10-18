@@ -8,8 +8,8 @@ export function assertRpc(method) {
 }
 export function assertWorkerRoute(method, path) {
   const routes = {
-    GET: ['/api/task-parameters','/api/clusters','/api/cluster-runs','/api/cluster-drafts','/api/health','/api/projects','/api/environments','/api/runs','/api/events','/api/engines','/api/assets','/api/gpu','/api/workflows'],
-    POST: ['/api/cluster/input','/api/cluster/collect','/api/cluster/result','/api/cluster/test','/api/cluster/skill','/api/cluster/browse','/api/cluster/revise','/api/tasks/present','/api/clusters','/api/cluster/profile','/api/cluster/probe','/api/cluster/draft','/api/cluster/prepare','/api/cluster/validate','/api/cluster/submit','/api/cluster/cancel','/api/cluster/status','/api/cluster/log','/api/projects','/api/environments','/api/probe','/api/runs/prepare','/api/inspect',
+    GET: ['/api/source-projects','/api/source-projects','/api/task-parameters','/api/clusters','/api/cluster-runs','/api/cluster-drafts','/api/health','/api/projects','/api/environments','/api/runs','/api/events','/api/engines','/api/assets','/api/gpu','/api/workflows'],
+    POST: ['/api/source-projects','/api/source-project/inspect','/api/structures/create','/api/pygas/render','/api/source-projects','/api/source-project/inspect','/api/structures/create','/api/pygas/render','/api/cluster/input','/api/cluster/collect','/api/cluster/result','/api/cluster/test','/api/cluster/skill','/api/cluster/browse','/api/cluster/revise','/api/tasks/present','/api/clusters','/api/cluster/profile','/api/cluster/probe','/api/cluster/draft','/api/cluster/prepare','/api/cluster/validate','/api/cluster/submit','/api/cluster/cancel','/api/cluster/status','/api/cluster/log','/api/projects','/api/environments','/api/probe','/api/runs/prepare','/api/inspect',
       '/api/templates/bias','/api/workflows','/api/assets','/api/workspace/write','/api/run/validate','/api/run/submit',
       '/api/run/cancel','/api/run/status','/api/run/log','/api/run/file','/api/run/collect','/api/run/resume','/api/run/export','/api/run/revise','/api/run/input']
   };

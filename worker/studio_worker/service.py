@@ -385,6 +385,28 @@ class Service:
             return {"name": name, "text": data.decode("utf-8", "replace"),
                     "offset": stream.tell(), "size": path.stat().st_size}
 
+    def authoring(self, data, operation):
+        project=self.store.get("project",data["project_id"])
+        if data["environment_id"] not in project["policy"]["environments"]:raise PermissionError("Environment is not authorized")
+        environment=self.store.get("environment",data["environment_id"])
+        payload={}
+        if operation=="create_structure":
+            recipe=dict(data["recipe"]);payload["recipe"]=recipe
+            if recipe.get("kind")=="import":
+                roots=project["policy"]["input_roots"]+[str(self.root/"projects"/project["id"]/"inputs")]
+                payload["input_path"]=str(contained(recipe.pop("path"),roots))
+            target=self.root/"projects"/project["id"]/"inputs"/("structure-"+secrets.token_hex(8)+".xyz")
+            target.parent.mkdir(parents=True,exist_ok=True);payload["output_path"]=str(target)
+        else:
+            source=self.store.get("source-project",data["source_id"])
+            if source["id"]!="pygas":raise ValueError("Select the pyGAS authoring source")
+            payload={"source_root":source["root"],"graph":data["graph"]}
+        result=run_json(environment["executables"]["python"],SCIENTIFIC,operation,payload,process_env(environment),timeout=90)
+        if operation=="create_structure":
+            atomic_json(target.with_suffix(".provenance.json"),result["provenance"])
+            result["artifact"]=self.store.put("artifact",{"id":secrets.token_hex(10),"project_id":project["id"],"name":target.name,"path":str(target),"kind":"structure","sha256":result["sha256"],"size":target.stat().st_size,"metadata":json.loads(json.dumps(result))})
+        return result
+
     def inspect(self, project_id, environment_id, path, kind="dataset", frame=0):
         project = self.store.get("project", project_id)
         if environment_id not in project["policy"]["environments"]:
@@ -487,5 +509,5 @@ class Service:
             raise ValueError("This engine does not declare a checkpoint continuation")
         spec = {key:run[key] for key in ("project_id","environment_id","engine","gpu","max_seconds")}
         spec.update(inputs=inputs,parameters={**run.get("parameters",{}),**parameters},
-            parent_run=run["id"],name=run["name"]+" · continuation",idempotency_key=parameters["idempotency_key"])
+            parent_run=run["id"],name=run["name"]+" 路 continuation",idempotency_key=parameters["idempotency_key"])
         return self.prepare(spec)

@@ -3,7 +3,6 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import * as echarts from 'echarts';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import Editor,{loader} from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import {Terminal} from '@xterm/xterm';
@@ -12,12 +11,21 @@ import '@xterm/xterm/css/xterm.css';
 import {invoke} from './types';
 
 (self as any).MonacoEnvironment={getWorker:()=>new EditorWorker()};
-loader.config({monaco});
+// Monaco cancels background tokenization when its model is disposed on tab changes.
+// Treat that exact cancellation as expected; all other async failures remain visible.
+window.addEventListener('unhandledrejection',event=>{const e=event.reason;if(e instanceof Error&&e.name==='Canceled'&&e.message==='Canceled')event.preventDefault();});
 export function CodeEditor({value,onChange,language='python',theme='dark',height='100%',readOnly=false}:{value:string;onChange:(v:string)=>void;language?:string;theme?:string;height?:string;readOnly?:boolean}){
- const [fontSize,setFontSize]=useState(Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13);
- useEffect(()=>{const update=()=>setFontSize(Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13);window.addEventListener('studio:appearance',update);return()=>window.removeEventListener('studio:appearance',update);},[]);
- return <Editor height={height} language={language} value={value} theme={theme==='dark'?'vs-dark':'light'}
-  onChange={v=>onChange(v??'')} options={{fontSize,fontFamily:'Cascadia Code, Consolas, monospace',minimap:{enabled:false},padding:{top:16},scrollBeyondLastLine:false,automaticLayout:true,tabSize:4,readOnly}}/>;
+ const host=useRef<HTMLDivElement>(null),editor=useRef<monaco.editor.IStandaloneCodeEditor|null>(null),changed=useRef(onChange);changed.current=onChange;
+ useEffect(()=>{
+  if(!host.current)return;
+  const instance=monaco.editor.create(host.current,{value,language,theme:theme==='dark'?'vs-dark':'vs',fontSize:Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13,fontFamily:'Cascadia Code, Consolas, monospace',minimap:{enabled:false},padding:{top:16},scrollBeyondLastLine:false,automaticLayout:true,tabSize:4,readOnly});editor.current=instance;
+  const subscription=instance.onDidChangeModelContent(()=>changed.current(instance.getValue()));
+  const appearance=()=>instance.updateOptions({fontSize:Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13});window.addEventListener('studio:appearance',appearance);
+  return()=>{window.removeEventListener('studio:appearance',appearance);subscription.dispose();const model=instance.getModel();instance.dispose();model?.dispose();editor.current=null;};
+ },[]);
+ useEffect(()=>{if(editor.current&&editor.current.getValue()!==value)editor.current.setValue(value);},[value]);
+ useEffect(()=>{const model=editor.current?.getModel();if(model)monaco.editor.setModelLanguage(model,language);editor.current?.updateOptions({readOnly});monaco.editor.setTheme(theme==='dark'?'vs-dark':'vs');},[language,readOnly,theme]);
+ return <div ref={host} style={{height,width:'100%',minHeight:0}}/>;
 }
 export function Chart({text,name}:{text:string;name:string}){
  const [font,setFont]=useState(13),[light,setLight]=useState(document.documentElement.dataset.theme==='light');
@@ -25,19 +33,21 @@ export function Chart({text,name}:{text:string;name:string}){
  const ref=useRef<HTMLDivElement>(null);
  const data=useMemo(()=>{
   const all=text.split('\n').filter(x=>x.trim()&&!x.startsWith('#'));
-  const rows=all.slice(0,4000).map(x=>x.trim().split(/[,\s]+/).map(Number)).filter(r=>r.length>1&&r.every(Number.isFinite));
+  const neb=name.split('/').at(-1)==='neb_energies.out';
+  const raw=all.slice(0,4000).map(x=>x.trim().split(/[,\s]+/).map(Number));
+  const rows=raw.filter(r=>(neb?r.length===1:r.length>1)&&r.every(Number.isFinite)).map((r,i)=>neb?[i,r[0]]:r);
   return {rows,cutLines:all.length>4000,cutColumns:(rows[0]?.length||0)>7};
- },[text]);
+ },[text,name]);
  useEffect(()=>{
   if(!ref.current||!data.rows.length)return;
-  const rows=data.rows,ink=light?'#4a4958':'#aaaab9',grid=light?'#00000014':'#ffffff08';
+  const neb=name.split('/').at(-1)==='neb_energies.out',rows=data.rows,ink=light?'#4a4958':'#aaaab9',grid=light?'#00000014':'#ffffff08';
   const chart=echarts.init(ref.current);
   chart.setOption({backgroundColor:'transparent',color:light?['#6753bb','#147e70','#94620a','#335fa8']:['#a79aff','#5ccebe','#ecbe77','#7eafff'],
    textStyle:{color:ink,fontSize:font},tooltip:{trigger:'axis'},legend:{top:8,textStyle:{color:ink,fontSize:font},type:'scroll'},
    grid:{left:60,right:48,top:54,bottom:85},dataZoom:[{type:'inside'},{type:'slider',height:15,bottom:10}],
-   xAxis:{axisLabel:{fontSize:font},nameTextStyle:{fontSize:font},type:'value',name:'column 0',nameLocation:'middle',nameGap:30,splitLine:{lineStyle:{color:grid}}},
-   yAxis:{axisLabel:{fontSize:font},type:'value',scale:true,splitLine:{lineStyle:{color:grid}}},
-   series:rows[0]?.slice(1,7).map((_,i)=>({name:'column '+(i+1),type:'line',showSymbol:false,data:rows.map(r=>[r[0],r[i+1]])}))||[]});
+   xAxis:{axisLabel:{fontSize:font},nameTextStyle:{fontSize:font},type:'value',name:neb?tr('图像序号'):'column 0',nameLocation:'middle',nameGap:30,splitLine:{lineStyle:{color:grid}}},
+   yAxis:{name:neb?tr('相对目标值 (eV)'):undefined,axisLabel:{fontSize:font},type:'value',scale:true,splitLine:{lineStyle:{color:grid}}},
+   series:rows[0]?.slice(1,7).map((_,i)=>({name:neb?tr('相对目标值 (eV)'):'column '+(i+1),type:'line',showSymbol:false,data:rows.map(r=>[r[0],r[i+1]])}))||[]});
   const observer=new ResizeObserver(()=>chart.resize());observer.observe(ref.current);
   return()=>{observer.disconnect();chart.dispose();};
  },[data,name,font,light]);

@@ -4,7 +4,7 @@
 
 ## 启动
 
-Windows 安装包位于 `release/v0.13.1/GPU Sampling Studio 0.13.1.exe`。首次启动：
+Windows 安装包位于 `release/v0.14.0/GPU Sampling Studio 0.14.0.exe`。首次启动：
 
 1. 点击「连接 WSL」。设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。

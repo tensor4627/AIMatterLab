@@ -5,7 +5,7 @@ import shutil
 import sys
 from pathlib import Path
 from .util import run_json, digest
-ENGINES = ("gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
+ENGINES = ("gpumd.neb", "gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
            "pydyn.sampling", "nep.train", "nep.eval", "nep.analyze", "hotpp.train", "hotpp.eval",
            "hotpp.export", "pygas.reweight", "pygas.opes-reweight")
 SCIENTIFIC = Path(__file__).with_name("scientific.py")
@@ -37,7 +37,7 @@ class Adapter:
         return str(path)
 
     def runtime_check(self, environment):
-        executable = {"gpumd.md":"gpumd", "gpumd.sampling":"gpu-sampling", "nep.train":"nep", "nep.eval":"nep"}.get(self.engine)
+        executable = {"gpumd.neb":"gpu-sampling", "gpumd.md":"gpumd", "gpumd.sampling":"gpu-sampling", "nep.train":"nep", "nep.eval":"nep"}.get(self.engine)
         if executable is None:
             return {"status":"not_run", "scope":"No native ELF loader check for this route"}
         target = self.executable(environment, executable)
@@ -101,6 +101,11 @@ class Adapter:
             walkers = p.get("sampling", {}).get("walkers", p.get("walkers", 1))
             if type(walkers) is not int or walkers != 1:
                 raise ValueError("Single-job single-walker sampling only; multiple walkers are not implemented")
+        if engine == "gpumd.neb":
+            self.require(assets, ("run.in",))
+            if p.get("bias_file") or p.get("manifest_file"):
+                raise ValueError("Native NEB uses structures and potentials, not a bias artifact")
+            return [self.executable(environment, "gpu-sampling")]
         if engine.startswith("gpumd."):
             self.require(assets, ("run.in", "model.xyz"))
             if engine.endswith("sampling"):
@@ -171,6 +176,9 @@ class Adapter:
 
         Arbitrary Python drivers and undeclared controls are not semantically proven.
         """
+        if self.engine == "gpumd.neb":
+            from .neb_checks import contract
+            return {"status":"passed", "neb":contract(directory,spec["inputs"],spec.get("parameters",{}).get("neb"))}
         if not self.engine.startswith("gpumd."):
             return {"status":"not_run", "scope":"arbitrary driver semantics require actual input review"}
         p=spec.get("parameters", {}); p={**p, **p.get("md", {})}
@@ -194,6 +202,11 @@ class Adapter:
         runtime = self.runtime_check(environment)
         p, directory = spec.get("parameters", {}), Path(directory)
         self.input_contract(spec,directory)
+        if self.engine == "gpumd.neb":
+            report = run_json(self.executable(environment,"python"),SCIENTIFIC,"neb",
+                {"directory":str(directory),"inputs":list(spec["inputs"]),"declared":p.get("neb")},
+                process_env(environment,spec["gpu"]),timeout=60)
+            return {**report,"native_runtime":runtime}
         if p.get("manifest_file"):
             import json
             self.require(spec["inputs"],(p["manifest_file"],p["bias_file"]))

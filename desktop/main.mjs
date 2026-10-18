@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
+import {discoverSources,sourceContext} from './source-projects.mjs';
 import { localSkills } from './skills.mjs';
 import { selectedSkillContext } from './skill-context.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
@@ -42,7 +43,7 @@ app.on("before-quit",()=>{shuttingDown=true;});
 const codex = new CodexBridge(), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
-  skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
+  sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
 function findCodex() {
   const directory = path.join(process.env.LOCALAPPDATA || '', 'OpenAI','Codex','bin');
   if (!fs.existsSync(directory)) return 'codex';
@@ -125,11 +126,15 @@ handle('settings',data => {
   for(const [key,min,max] of [['fontSize',12,24],['minimumFontSize',11,18],['chatFontSize',12,28],['editorFontSize',10,28],['terminalFontSize',10,24]])
     if(next[key]!==undefined&&(!Number.isInteger(next[key])||next[key]<min||next[key]>max))throw Error('Invalid font size');
   if(next.fontFamily && !['system','sans','serif'].includes(next.fontFamily))throw Error('Unsupported font');
+  if(!Array.isArray(next.sourceRoots||[])||(next.sourceRoots||[]).some(v=>typeof v!=='string'||!path.isAbsolute(v)))throw Error('Source roots must be absolute paths');
   if(!Array.isArray(next.skillRoots)) throw new Error('Skill roots must be an array');
   settings=catalog.put('settings','main',next); return settings;
 });
+function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,roots:settings.sourceRoots||[]});}
+async function bindSources(){const sources=scientificSources();for(const source of sources)await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});return sources;}
+handle('sources.list',()=>scientificSources());
 function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activeTurns?.size))throw Error('请先停止当前回复，再调整连接或上下文设置');}
-handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
+handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);await bindSources();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.request',async({method,target,data}) => {
   const result=await worker.request(method,target,data);
   if(method==='GET' && ['/api/projects','/api/environments'].includes(target))
@@ -180,6 +185,7 @@ handle('agent.connect',async({provider,repairTools=false})=>{
  if(repairTools){assertIdleAgent();agents.bridge(provider)?.close();await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}
  if(!worker.connection){try{await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}catch{}}
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
+ if(worker.connection)await bindSources();
  const info=await agents.connect(provider),tools=await scientificTools(provider);
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};
@@ -190,6 +196,7 @@ handle('agent.account',({provider})=>agents.account(provider));
 handle('agent.rpc',async({provider,method,params={}})=>{
   if(method==='turn/start'){
    params=taskRecords.prepareTurn(provider,params);
+   params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSources())}]};
    if(provider==='deepseek'){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
   }
   if(provider!=='codex'&&method==='turn/start'){

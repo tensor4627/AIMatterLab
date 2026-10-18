@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {tools,tasks,createPlan,validatePlan,planPrompt} from '../shared/workflows.mjs';
 test('Every task step resolves a declared tool and core unavailable capabilities remain explicit',()=>{
  for(const task of tasks){assert.equal(new Set(task.steps.map(s=>s.id)).size,task.steps.length);for(const step of task.steps)assert(tools.find(t=>t.id===step.tool));for(const tool of task.tools)assert(tools.find(t=>t.id===tool));}
- assert(tasks.find(t=>t.id==='neb').steps.some(s=>s.required&&s.planned));
+ assert(!tasks.find(t=>t.id==='neb').steps.some(s=>s.required&&s.planned));
+ assert(tools.find(t=>t.id==='md').engines.includes('gpumd.neb'));
+ assert.match(planPrompt(createPlan('neb')),/gpumd.neb/);
  assert(tasks.find(t=>t.id==='learning').steps.find(s=>s.id==='dft').planned);
  assert.equal(tools.find(t=>t.id==='activelearning').status,'planned');
 });

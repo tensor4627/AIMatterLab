@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 
 const MAX_BYTES=64*1024;
 const ID=/^[a-z0-9][a-z0-9-]{0,47}$/;
-const ENGINES=new Set(['gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','nep.analyze','hotpp.train','hotpp.eval','hotpp.export','pygas.reweight','pygas.opes-reweight']);
+const ENGINES=new Set(['gpumd.neb','gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','nep.analyze','hotpp.train','hotpp.eval','hotpp.export','pygas.reweight','pygas.opes-reweight']);
 const forbidden=/-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+\S+|\bsk-[A-Za-z0-9_-]{8,}/i;
 function fail(message){throw Error(message);}
 function object(value,allowed,required,label){

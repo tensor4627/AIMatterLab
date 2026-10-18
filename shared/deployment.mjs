@@ -5,7 +5,7 @@ export function scienceOnly(parameters,steps=[],missing=[]){
  const hints={};function strip(value,prefix=''){const result={};for(const [key,v] of Object.entries(value||{})){const path=prefix?prefix+'.'+key:key;if(deploymentField(path)){hints[path]=v;continue;}result[key]=v&&typeof v==='object'&&!Array.isArray(v)?strip(v,path):v;}return result;}
  const science=strip(parameters);return {parameters:science,steps:steps.map(s=>typeof s==='string'?s:{...s,fields:s.fields.filter(f=>!deploymentField(f.key))}).filter(s=>typeof s==='string'||s.fields.length||!/部署|队列|集群|提交|deployment|queue|submit/i.test(s.title)),missing:missing.filter(k=>{try{return !deploymentField(k);}catch{return true;}}),hints};
 }
-const engines=new Set(['gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']);
+const engines=new Set(['gpumd.neb','gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']);
 export function scientificSpec(task){
  const p=task.parameters||{};if(!engines.has(p.engine))throw Error('请在计算流程中选择已接入的计算引擎');
  if(!Array.isArray(p.files)||!p.files.length||p.files.length>100||p.files.some(f=>typeof f!=='string'||!f||/[\n\r\0]/.test(f)))throw Error('请在计算流程中提供实际输入文件列表');

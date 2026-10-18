@@ -84,6 +84,7 @@
             "uniqueItems": true,
             "items": {
               "enum": [
+                "gpumd.neb",
                 "gpumd.md",
                 "pydyn.md",
                 "gpumd.sampling",

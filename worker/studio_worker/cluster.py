@@ -29,6 +29,8 @@ TRANSFER_FILES = 128
 DEFAULT_COLLECT = (
     "console.log", "environment.json", "validation.json", "exit.json",
     "queue.out", "queue.err", "validation.stdout", "validation.stderr",
+    "simulation/neb_energies.out", "simulation/final_traj.xyz", "simulation/interpolate.xyz",
+    "simulation/peek_traj.xyz", "simulation/neb_fire_diagnostics.out", "simulation/neb_fire_imagewise.out",
     "simulation/thermo.out", "simulation/dump.xyz", "simulation/restart.xyz",
     "simulation/GASCVlog.txt", "simulation/GASGaussian.txt",
     "simulation/metrics.csv", "simulation/trajectory.extxyz", "simulation/checkpoint.json", "simulation/completion.json",
@@ -660,7 +662,7 @@ except Exception as e:
             payload.pop("cluster_snapshot",None);payload.pop("cluster",None)
             add(".studio/run.json",json.dumps(payload))
             add(".studio/validate.py",validate)
-            for name in ["__init__.py","adapters.py","util.py","scientific.py","science_checks.py","derivatives.py"]:
+            for name in ["__init__.py","adapters.py","util.py","scientific.py","science_checks.py","derivatives.py","neb_checks.py", "structure_tools.py"]:
                 add(".studio/studio_worker/"+name,Path(__file__).with_name(name).read_bytes())
         return buffer.getvalue()
 
