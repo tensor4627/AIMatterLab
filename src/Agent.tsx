@@ -9,6 +9,7 @@ import {explicitNewWorkflow} from '../shared/task-fields.mjs';
 import {invoke,type RpcEvent,type AgentProvider,type Conversation,type AgentIntent} from './types';
 type Message={id:string;role:string;text:string;runId?:string;diff?:string;toolName?:string;activity?:any};
 export default function Agent({planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,hidden}:{planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:{name:string;path:string};onOpenRun?:(id:string)=>void;sessionSelection?:{nonce:string;conversation?:Conversation;new?:boolean};onConversation?:(value:Conversation|null)=>void;onBusyChange?:(busy:boolean)=>void;hidden?:boolean}){
+ const [autoSkillStatus,setAutoSkillStatus]=useState<any>(null);
  const [tools,setTools]=useState<any>({status:'not_run',count:0});
  const [provider,setProvider]=useState<AgentProvider>('codex'),[login,setLogin]=useState(false);
  const [workflowId,setWorkflowId]=useState<string|null>(null),[newWorkflow,setNewWorkflow]=useState(false);
@@ -36,6 +37,8 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
   void invoke('state').then(state=>{const selected=state.settings?.agentProvider||'codex';setProvider(selected);providerRef.current=selected;setThreads(selected==='codex'?state.threads||[]:[]);const a=selected==='codex'?state.settings?.agent||{}:state.settings?.agentProviders?.[selected]||{};setContextWindow(a.contextWindow?.toString()||'');setCompactLimit(a.compactLimit?.toString()||'');setEffort(localStorage.getItem('studio.effort.'+selected)||a.effort||'');}).catch(()=>{});
   return window.studio?.onEvent(event=>{
    if((event.provider||'codex')!==providerRef.current)return;
+   if(event.method==='studio/skillsLoaded'){if(!event.params.threadId||event.params.threadId===threadRef.current)setAutoSkillStatus({...event.params,provider:event.provider||'codex'});return;}
+   if(event.method==='studio/conversationDeleted'){setThreads(old=>old.filter(t=>t.id!==event.params.threadId));return;}
    if(event.method==='studio/toolsStatus'){setTools(event.params);return;}
    if(event.method==='studio/login'&&event.params?.phase==='completed'&&!loginRef.current)void connect();
    if(event.method==='studio/accountUpdated')void invoke('agent.account',{provider:providerRef.current}).then(setAccount).catch(onError);
@@ -100,7 +103,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
  useEffect(()=>{
   if(!sessionSelection)return;const seq=++selectionSeq.current;
   const activate=async()=>{if(busy)return;setApplying(true);try{
-   if(sessionSelection.new){setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);return;}
+   if(sessionSelection.new){setAutoSkillStatus(null);setPrompt('');setTurn(null);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);return;}
    const selected=sessionSelection.conversation;if(!selected)return;
    const different=selected.provider!==providerRef.current;if(different&&!await selectProvider(selected.provider))return;
    if((!connected||different)&&!await connect())return;
@@ -161,6 +164,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    </div>)}
    {busy&&<div className="thinking"><LoaderCircle size={14} className="spin"/>{tr("Agent 正在工作")}</div>}
   </div>
+  {autoSkillStatus&&autoSkillStatus.threadId===thread&&autoSkillStatus.provider===provider&&<details className="agent-auto-skills"><summary>{t(autoSkillStatus.status==='passed'?'已自动载入 pyGAS 技能':autoSkillStatus.status==='permission_required'?'请设置 pyGAS 技能共享范围':'pyGAS 技能不可用')} · {autoSkillStatus.names.length}</summary>{autoSkillStatus.names.map((name:string)=><div key={name}>{name}</div>)}{autoSkillStatus.source&&<p>{autoSkillStatus.source}</p>}{autoSkillStatus.attachments?.length>0&&<small>{autoSkillStatus.attachments.length} {t('公开技能文件')}</small>}{autoSkillStatus.message&&<p>{autoSkillStatus.message}</p>}</details>}
   <div className="composer">{skill&&<span className="skill-chip">$ {skill.name}</span>}<textarea value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{tr(thread?thread.slice(0,12):'项目上下文已附加')}</span>{busy?<button className="send" title={tr("中断 Agent，计算作业继续")} aria-label={tr("中断 Agent，计算作业继续")} onClick={()=>void rpc('turn/interrupt',{threadId:thread,turnId:turn}).catch(onError)}><Square size={13}/></button>:<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={!connected||!models.length||account?.requiresAuthentication||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
   <div className="agent-footer">{tr("Agent 会话与科学计算队列独立运行")}</div>
   {login&&<ProviderLogin projectId={projectId} provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{setLogin(false);void connect();}} onError={onError}/>}

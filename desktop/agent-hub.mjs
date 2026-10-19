@@ -31,8 +31,10 @@ export class AgentHub extends EventEmitter{
  preferences(provider){const settings=this.getSettings();return provider==='codex'?settings.agent||{}:settings.agentProviders?.[provider]||{};}
  path(provider){const settings=this.getSettings();return provider==='codex'?settings.codexPath:settings[provider+'Path'];}
  bridge(provider){return provider==='codex'?this.codex:this.bridges.get(provider);}
- threads(provider){const saved=this.catalog.list('agent-thread').filter(t=>t.provider===provider);return provider==='codex'?[...saved,...this.catalog.list('thread').filter(t=>!saved.some(s=>s.id===t.id)).map(t=>({...t,provider:'codex'}))]:saved;}
- remember(provider,thread){const value={...thread,provider};delete value.turns;this.catalog.put('agent-thread',provider+':'+thread.id,value);}
+ deleted(provider,id){return !!this.catalog.get?.('deleted-conversation',provider+':'+id);}
+ forget(provider,id){const bridge=this.bridge(provider);bridge?.sessions?.delete(id);if(bridge?.current===id)bridge.current=null;if(provider==='codex'){this.blankThreads.delete(id);this.pendingBlankTurns.delete(id);this.readyThreads?.delete(id);this.codexOutput.delete(id);}}
+ threads(provider){const saved=this.catalog.list('agent-thread').filter(t=>t.provider===provider&&!this.deleted(provider,t.id));return provider==='codex'?[...saved,...this.catalog.list('thread').filter(t=>!this.deleted(provider,t.id)&&!saved.some(s=>s.id===t.id)).map(t=>({...t,provider:'codex'}))]:saved;}
+ remember(provider,thread){if(this.deleted(provider,thread.id))return;const value={...thread,provider};delete value.turns;this.catalog.put('agent-thread',provider+':'+thread.id,value);}
  async connect(provider){
   providerId(provider);
   if(this.active!==provider){this.cancelLogin();this.bridge(this.active)?.close();this.active=provider;}
@@ -66,7 +68,7 @@ export class AgentHub extends EventEmitter{
   return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan}:{},modelAccess:status.modelAccess||'not_run'};
  }
  async rpc(provider,method,params={}){
-  providerId(provider);assertRpc(method);if(provider!==this.active)throw Error('Connect the selected provider first');
+  providerId(provider);assertRpc(method);if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');
   const bridge=this.bridge(provider);if(!bridge?.process)throw Error('Connect '+provider+' first');
   if(provider==='codex'&&['thread/start','thread/resume'].includes(method))params={...params,cwd:this.getSettings().cwd,approvalPolicy:'on-request',sandbox:'read-only',config:{...params.config,...agentConfig(this.preferences('codex'))},developerInstructions:STUDIO_INSTRUCTIONS};
   if(provider!=='codex'&&method==='account/read')return {...await this.account(provider),transportConnected:true};
@@ -98,6 +100,8 @@ export class AgentHub extends EventEmitter{
    if(provider==='codex'&&method==='thread/resume'&&/no rollout found for thread/i.test(error.message))throw Error('此空会话尚未保存，当前进程无法恢复。请新建会话；已有计算记录保留。',{cause:error});
    throw error;
   }
+  if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');
+  if(method==='thread/list'&&result.data)result={...result,data:result.data.filter(t=>!this.deleted(provider,t.id))};
   if(provider==='codex'&&method==='turn/start'){this.pendingBlankTurns.delete(params.threadId);this.blankThreads.delete(params.threadId);}
   if(provider==='codex'&&method==='thread/start'&&result.thread&&!result.thread.turns?.length)this.blankThreads.set(result.thread.id,structuredClone(result));
   if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)this.readyThreads.add(result.thread.id);

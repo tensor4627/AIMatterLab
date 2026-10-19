@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {partitionFields,validField,fieldMissing,workflowMissing} from '../shared/task-fields.mjs';
+test('Required science precedes optional details, with typed traceable defaults',()=>{
+ const fields=[{key:'metad.seed',label:'Seed',type:'integer',required:false,advanced:true,default:0,default_source:'registered engine config'},{key:'metad.height',label:'Height',type:'number',required:true},{key:'metad.cv_definition',label:'CV',type:'text',required:true},{key:'metad.sigma',label:'Sigma',type:'number',required:true}];
+ fields.forEach(validField);const groups=partitionFields(fields);assert.deepEqual(groups.primary.map(f=>f.key),['metad.cv_definition','metad.sigma','metad.height']);assert.equal(groups.advanced[0].key,'metad.seed');assert.equal(fieldMissing({...fields[0],required:true},{}),true);assert.throws(()=>validField({...fields[0],default_source:''}));assert.throws(()=>validField({...fields[0],default:1.5}));assert.throws(()=>validField({...fields[0],advanced:'yes'}));assert.throws(()=>validField({...fields[0],default:Infinity}));
+ const p={metad:{cv_definition:'known',sigma:.1,height:.01}};assert.deepEqual(workflowMissing([{id:'m',title:'MetaD',fields}],p,[]),[]);assert.equal(p.metad.seed,undefined);
+});

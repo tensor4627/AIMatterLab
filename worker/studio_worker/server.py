@@ -57,7 +57,7 @@ DESCRIPTIONS = {
  "inspect_source_project":"Read the actual registered scientific source catalog, CV constructor/forward signatures, hashes and capabilities. Inspect pyGAS before defining a CV; prose alone is not an executable CV.",
  "create_structure":"Create and register an ASE structure asset from a bounded declarative recipe. kind bulk (name, optional crystalstructure/a/cubic); molecule (name, optional vacuum); surface (bulk kwargs, indices, layers, vacuum); explicit (symbols, positions, cell, pbc); import (authorized path). Optional repeat [nx,ny,nz]. Returns validated reloaded extxyz, preview, provenance and inferred facts. Authoring only; never runs MD/relaxation.",
  "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Save the canonical graph and executable build_bias.py directly as project inputs; return their paths, hashes and a bounded preview to avoid copying long code through chat. Does not execute or build the artifact. Include returned files and the source structure in a pygas.build task for human execution.",
- "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
+ "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Put critical CV/bias parameters first; secondary settings can use advanced:true and a scalar default plus traceable default_source. Defaults are display guidance, not actual input edits. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
  "prepare_cluster_run":"Prepare a local immutable SSH/LSF/Slurm run draft and its batch script. No upload or submission. Stop for desktop review.",
  "draft_cluster_setup":"Propose queue, modules, engine paths and submission skill changes for user review. Cannot change SSH details or authorization.",
  "prepare_run": "Create an immutable run from explicit assets and scientific parameters. Returns a draft for desktop user review. Stop and wait for the user to click Execute; never validate or submit it. Never infer scientific choices.",
@@ -103,7 +103,7 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.15.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.16.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/tools/status":
             return service.diagnose_tools()
         if path == "/api/source-projects":
@@ -330,7 +330,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.15.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.16.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}

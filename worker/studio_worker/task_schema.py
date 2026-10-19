@@ -1,8 +1,10 @@
 import re
+import math
 
 FIELD_TYPES = ["text", "number", "integer", "boolean", "file", "files", "list", "object", "select", "multiline"]
 FIELD_SCHEMA = {"type": "object", "required": ["key", "label", "type", "required"], "additionalProperties": False,
     "properties": {"key": {"type": "string"}, "label": {"type": "string"}, "type": {"type": "string", "enum": FIELD_TYPES},
+    "advanced":{"type":"boolean"},"default":{"type":["string","number","boolean","null"]},"default_source":{"type":"string"},
     "required": {"type": "boolean"}, "unit": {"type": "string"}, "description": {"type": "string"},
     "options": {"type": "array", "items": {"type": "string"}}}}
 STEP_SCHEMA = {"anyOf": [{"type": "string"}, {"type": "object", "required": ["id", "title", "fields"], "additionalProperties": False,
@@ -46,7 +48,17 @@ def validate_task(data):
             if field["key"] in fields or not isinstance(field["label"], str) or not field["label"] or field["type"] not in FIELD_TYPES or not isinstance(field["required"], bool):
                 raise ValueError("Invalid parameter field")
             fields.add(field["key"])
-            for key, limit in (("unit", 40), ("description", 2000)):
+            if "advanced" in field and type(field["advanced"]) is not bool:raise ValueError("Invalid advanced flag")
+            if "default" in field:
+                value=field["default"]
+                if value is not None and type(value) not in (str,int,float,bool):raise ValueError("Scalar default required")
+                if type(value) is str and len(value)>4000 or type(value) in (int,float) and not math.isfinite(value):raise ValueError("Invalid default")
+                if not isinstance(field.get("default_source"),str) or not field["default_source"].strip():raise ValueError("Traceable default source required")
+                if value is not None:
+                    kind=field["type"]
+                    if kind in ("number","integer") and (type(value) not in (int,float) or kind=="integer" and int(value)!=value) or kind=="boolean" and type(value)is not bool or kind in ("text","file","select","multiline") and type(value)is not str or kind in ("files","list","object"):raise ValueError("Default does not match field type")
+                    if kind=="select" and field.get("options") and value not in field["options"]:raise ValueError("Invalid default option")
+            for key, limit in (("unit", 40), ("description", 2000),("default_source",2000)):
                 if key in field and (not isinstance(field[key], str) or len(field[key]) > limit):
                     raise ValueError("Invalid field text")
             if "options" in field and (not isinstance(field["options"], list) or len(field["options"]) > 100 or not all(isinstance(v, str) for v in field["options"])):

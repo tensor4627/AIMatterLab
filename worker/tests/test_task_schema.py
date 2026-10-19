@@ -51,3 +51,12 @@ class TaskSchema(unittest.TestCase):
             payload["missing_fields"] = [value]
             with self.assertRaises(ValueError):
                 validate_task(payload)
+
+class FieldPresentation(unittest.TestCase):
+ def test_advanced_traceable_default_metadata(self):
+  import copy
+  value={"task_id":"t","name":"MetaD","parameters":{},"missing_fields":[],"steps":[{"id":"m","title":"MetaD","fields":[{"key":"metad.seed","label":"Seed","type":"integer","required":False,"advanced":True,"default":0,"default_source":"input config"}]}]}
+  validate_task(value)
+  for key,bad in (("advanced","yes"),("default_source",""),("default",1.5),("default",float('inf')),("default",False)):
+   other=copy.deepcopy(value);other['steps'][0]['fields'][0][key]=bad
+   with self.assertRaises(ValueError):validate_task(other)

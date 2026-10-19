@@ -1,13 +1,18 @@
 import {useState} from 'react';
 import {FolderOpen,FileText,Plus,X} from 'lucide-react';
-import {inferField,parameterValue,fieldMissing,type TaskField} from '../shared/task-fields.mjs';
+import {partitionFields,inferField,parameterValue,fieldMissing,type TaskField} from '../shared/task-fields.mjs';
 import {invoke,wslPath} from './types';
 import {t} from './i18n';
 export function ParameterFields({fields,parameters,onChange,onError,disabled=false}:{fields:TaskField[];parameters:Record<string,any>;onChange:(key:string,value:any)=>void;onError:(error:unknown)=>void;disabled?:boolean}){
  return <div className="parameter-fields">{fields.map(field=><ParameterInput key={field.key} field={field} value={parameterValue(parameters,field.key)} missing={fieldMissing(field,parameters)} onChange={value=>onChange(field.key,value)} onError={onError} disabled={disabled}/>)}</div>;
 }
+export function GroupedParameterFields(props:Parameters<typeof ParameterFields>[0]){
+ const {primary,advanced}=partitionFields(props.fields);
+ return <><ParameterFields {...props} fields={primary}/>{advanced.length>0&&<details className="advanced-field-group"><summary>{t('高级参数')} <span className="tag">{advanced.length}</span><small>{t('默认值与细节设置')}</small></summary><ParameterFields {...props} fields={advanced}/></details>}</>;
+}
 function ParameterInput({field,value,missing,onChange,onError,disabled}:{field:TaskField;value:any;missing:boolean;onChange:(value:any)=>void;onError:(error:unknown)=>void;disabled:boolean}){
  const [advanced,setAdvanced]=useState('');
+ const implicit=(value===undefined||value===null||value==='')&&!field.required&&Object.hasOwn(field,'default');if(implicit)value=field.default;
  async function choose(){try{const path=await invoke<string>('file.choose');if(path)onChange(wslPath(path));}catch(e){onError(e);}}
  let control;
  if(field.type==='boolean')control=<span className="check-label"><input type="checkbox" disabled={disabled} checked={!!value} onChange={e=>onChange(e.target.checked)}/>{t(value?'是':'否')}</span>;
@@ -19,5 +24,5 @@ function ParameterInput({field,value,missing,onChange,onError,disabled}:{field:T
   control=<details className="advanced-parameters"><summary>{t('高级对象编辑')}</summary><textarea disabled={disabled} value={advanced||JSON.stringify(value??{},null,2)} onChange={e=>setAdvanced(e.target.value)} onBlur={()=>{try{if(advanced){onChange(JSON.parse(advanced));setAdvanced('');}}catch(e){onError(e);}}}/></details>;
  }else if(field.type==='multiline')control=<textarea disabled={disabled} rows={3} value={value??''} onChange={e=>onChange(e.target.value)}/>;
  else control=<div className="parameter-control"><input disabled={disabled} type={['number','integer'].includes(field.type)?'number':'text'} step={field.type==='integer'?1:'any'} value={value??''} placeholder={missing?t('待补充'):t('未设置')} onChange={e=>onChange(['number','integer'].includes(field.type)?e.target.value===''?null:Number(e.target.value):e.target.value)}/>{field.unit&&<span className="parameter-unit">{field.unit}</span>}{field.type==='file'&&<button className="icon-button" disabled={disabled} aria-label={t('选择文件')} onClick={()=>void choose()}><FolderOpen size={16}/></button>}</div>;
- return <div className={'parameter-field '+(missing?'missing-field':'')} data-field={field.key}><label><span>{t(field.label)}{field.required&&<span className="required-mark"> *</span>}</span>{control}</label>{field.description&&<small>{field.description}</small>}{field.type==='file'&&value&&<div className="parameter-file"><FileText size={13}/><strong>{String(value).split(/[\\/]/).at(-1)}</strong><span title={String(value)}>{String(value)}</span></div>}</div>;
+ return <div className={'parameter-field '+(missing?'missing-field':'')} data-field={field.key}><label><span>{t(field.label)}{field.required&&<span className="required-mark"> *</span>}</span>{control}</label>{Object.hasOwn(field,'default')&&<small className="parameter-default">{t(implicit?'使用引擎默认值':'引擎默认值')} · {JSON.stringify(field.default)}{field.default_source&&<span title={field.default_source}> · {field.default_source}</span>}{missing&&<button className="button" disabled={disabled} onClick={()=>onChange(field.default)}>{t('使用默认值')}</button>}</small>}{field.description&&<small>{field.description}</small>}{field.type==='file'&&value&&<div className="parameter-file"><FileText size={13}/><strong>{String(value).split(/[\\/]/).at(-1)}</strong><span title={String(value)}>{String(value)}</span></div>}</div>;
 }

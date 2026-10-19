@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
+import {visibleUserText} from '../shared/tool-activity.mjs';
+import {PygasSkillContext} from './pygas-skills.mjs';
 import {MaterialsProject} from './materials-project.mjs';
 import {discoverSources,sourceContext,toolInventory} from './source-projects.mjs';
 import { localSkills } from './skills.mjs';
@@ -30,7 +32,7 @@ const root = path.resolve(here,'..');
 const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'worker');
 // Physical resources keep skill references usable by an external agent process.
 const bundledSkillRoot = app.isPackaged ? path.join(process.resourcesPath,'studio-skills') : path.join(root,'agents','skills');
-function studioSkillRoots(){return [...new Set([bundledSkillRoot,...(settings.skillRoots||[])])];}
+function studioSkillRoots(){const sourceRoots=[...(settings.sourceRoots||[]),...(catalog?.list('source-binding')||[]).map(s=>s.root)];return [...new Set([bundledSkillRoot,...(settings.skillRoots||[]),...sourceRoots.map(p=>path.join(p,'agents','skills')).filter(p=>fs.existsSync(p))])];}
 const installationVerifying=process.argv.includes('--studio-install-verify');
 const improvementsVerifying=process.argv.includes('--studio-improvements-verify');
 const providerVerifying=process.argv.includes('--studio-providers-verify');
@@ -41,6 +43,7 @@ else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',im
 let window, catalog, settings, agents,taskRecords,materials;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
+const autoSkills=new PygasSkillContext();
 const codex = new CodexBridge(), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
@@ -60,7 +63,7 @@ function findAgent(provider) {
 function emit(channel,data) { if (window && !window.isDestroyed()) window.webContents.send(channel,data); }
 codex.on('event', event => {
   const tagged={...event,provider:'codex'};taskRecords?.event(tagged);emit('studio:event',tagged);
-  if(event.method==='thread/started' && event.params?.thread)
+  if(event.method==='thread/started' && event.params?.thread&&!catalog.get('deleted-conversation','codex:'+event.params.thread.id))
     catalog.put('thread',event.params.thread.id,event.params.thread);
 });
 codex.on('diagnostic', data => emit('studio:event',{ method:'studio/diagnostic',params:{text:data} }));
@@ -103,6 +106,7 @@ handle('task.read',({id})=>taskRecords.read(id));
 handle('task.edit',value=>taskRecords.edit(value));
 handle('task.execute',value=>executeTask(taskRecords,worker,value));
 handle('task.linkRun',async({taskId,runId,kind})=>{if(!['run','cluster-run'].includes(kind)||typeof runId!=='string')throw Error('Invalid run reference');const run=await worker.request('POST',kind==='run'?'/api/run/status':'/api/cluster/status',{run_id:runId});return taskRecords.linkRun(taskId,run);});
+handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);agents.forget(result.provider,result.threadId);autoSkills.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));
 handle('conversation.select',({id})=>{if(typeof id!=='string')throw Error('Invalid conversation');const conversation=catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');return {...conversation,task:conversation.taskId?taskRecords.read(conversation.taskId):null};});
@@ -133,6 +137,7 @@ handle('settings',data => {
   for(const [key,min,max] of [['fontSize',12,24],['minimumFontSize',11,18],['chatFontSize',12,28],['editorFontSize',10,28],['terminalFontSize',10,24]])
     if(next[key]!==undefined&&(!Number.isInteger(next[key])||next[key]<min||next[key]>max))throw Error('Invalid font size');
   if(next.fontFamily && !['system','sans','serif'].includes(next.fontFamily))throw Error('Unsupported font');
+  if(!Array.isArray(next.pygasSkillProviders||[])||(next.pygasSkillProviders||[]).some(p=>!['codex','kimi','qwen','deepseek'].includes(p)))throw Error('Invalid skill sharing provider scope');
   if(!Array.isArray(next.sourceRoots||[])||(next.sourceRoots||[]).some(v=>typeof v!=='string'||!path.isAbsolute(v)))throw Error('Source roots must be absolute paths');
   if(!Array.isArray(next.skillRoots)) throw new Error('Skill roots must be an array');
   settings=catalog.put('settings','main',next); return settings;
@@ -162,11 +167,13 @@ handle('codex.configure',async({preferences={},threadId,model}) => {
   catalog.put('thread',result.thread.id,result.thread);return result;
 });
 handle('codex.rpc',async({method,params={}}) => {
-  assertRpc(method);
+  assertRpc(method);if(params.threadId&&taskRecords.deleted('codex',params.threadId))throw Error('Conversation was deleted');
   if(['thread/start','thread/resume'].includes(method)) params={...params,cwd:settings.cwd,
     approvalPolicy:'on-request',sandbox:'read-only',config:{...params.config,...agentConfig(settings.agent)},
     developerInstructions:STUDIO_INSTRUCTIONS};
   const result=await codex.request(method,params);
+  if(params.threadId&&taskRecords.deleted('codex',params.threadId))throw Error('Conversation was deleted');
+  if(method==='thread/list'&&result.data)result.data=result.data.filter(t=>!taskRecords.deleted('codex',t.id));
   if(['thread/start','thread/resume'].includes(method) && result.thread) catalog.put('thread',result.thread.id,result.thread);
   if(method==='account/login/start' && result.authUrl) await openUrl(result.authUrl);
   return result;
@@ -202,7 +209,14 @@ handle('agent.tools',async({provider})=>{providerId(provider);return scientificT
 handle('agent.disconnect',({provider})=>{providerId(provider);agents.bridge(provider)?.close();return {};});
 handle('agent.account',({provider})=>agents.account(provider));
 handle('agent.rpc',async({provider,method,params={}})=>{
+  let skillContext;const skillKey=provider+':'+params.threadId;
   if(method==='turn/start'){
+   const text=visibleUserText(params.input||[]);const bound=taskRecords.bound(provider,params.threadId);
+   // Default-deny: only an explicit desktop setting enables content sharing.
+   skillContext=autoSkills.prepare(skillKey,{sources:scientificSources(),text,parameters:bound?.parameters||{},consented:(settings.pygasSkillProviders||[]).includes(provider)});
+   if(skillContext.attach||skillContext.status==='blocked')params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
+   if(skillContext.routes.length)emit('studio:event',{method:'studio/skillsLoaded',provider,params:{threadId:params.threadId,status:skillContext.status,names:skillContext.routes,attachments:skillContext.attachments,source:skillContext.source,message:skillContext.status==='blocked'?skillContext.text:undefined}});
+
    params=taskRecords.prepareTurn(provider,params);
    params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSources())}]};
    if(provider==='deepseek'){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
@@ -225,6 +239,7 @@ handle('agent.rpc',async({provider,method,params={}})=>{
     params={...params,input};
   }
   let result;try{result=await agents.rpc(provider,method,params);}catch(error){if(method==='turn/start')taskRecords.failedTurn(provider,params.threadId,error);throw error;}
+  if(skillContext)autoSkills.accept(skillKey,skillContext);
   if(provider==='codex'&&method==='account/login/start'&&result.authUrl)await openUrl(result.authUrl);
   return result;
 });

@@ -15,6 +15,8 @@ export class Catalog {
     this.db.prepare('INSERT OR REPLACE INTO records VALUES(?,?,?)').run(kind,id,JSON.stringify(data));
     return data;
   }
+  remove(kind,id){this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind,id);}
+  transaction(work){this.db.exec('BEGIN IMMEDIATE');try{const value=work();this.db.exec('COMMIT');return value;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   list(kind) {
     return this.db.prepare('SELECT id,data FROM records WHERE kind=?').all(kind).map(r => ({ id:r.id, ...JSON.parse(r.data) }));
   }

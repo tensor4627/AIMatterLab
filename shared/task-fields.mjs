@@ -22,9 +22,18 @@ export function inferField(key,value,required=false){
 export function flattenParameters(parameters,prefix=''){
  const result=[];for(const [key,value] of Object.entries(parameters||{})){const path=prefix?prefix+'.'+key:key;fieldPath(path);if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length)result.push(...flattenParameters(value,path));else result.push(inferField(path,value));}return result;
 }
+const primaryOrder=['engine','files','family','mode','structure_file','structure','model_file','potential_file','bias_file','cv_definition','cv','cvs','atom_selection','atom_i','atom_j','pbc_convention','cutoff','cv_size','ensemble','temperature','temperature_K','sigma','sigmas','height','hill_height','pace','deposition_stride','interval','bias_factor','center','force_constant','time_step_fs','steps','n_steps'];
+export function partitionFields(fields){
+ const primary=[],advanced=[];
+ for(const field of fields){const leaf=field.key.split('.').at(-1),essential=primaryOrder.includes(leaf)||['file','files'].includes(field.type);const detail=field.advanced===true||field.advanced!==false&&!essential&&!field.required; (detail?advanced:primary).push(field);}
+ const rank=f=>{const index=primaryOrder.indexOf(f.key.split('.').at(-1));return index<0?100:index;};
+ primary.sort((a,b)=>rank(a)-rank(b));return {primary,advanced};
+}
 export function validField(field){
  fieldPath(field?.key);if(typeof field.label!=='string'||field.label.length>200||!['text','number','integer','boolean','file','files','list','object','select','multiline'].includes(field.type)||typeof field.required!=='boolean')throw Error('Invalid parameter field');
- for(const [key,limit] of [['unit',40],['description',2000]])if(field[key]!==undefined&&(typeof field[key]!=='string'||field[key].length>limit))throw Error('Invalid field text');
+ if(field.advanced!==undefined&&typeof field.advanced!=='boolean')throw Error('Invalid advanced field flag');
+ if(Object.hasOwn(field,'default')){const value=field.default;if(value!==null&&!['string','number','boolean'].includes(typeof value)||typeof value==='number'&&!Number.isFinite(value)||typeof value==='string'&&value.length>4000||typeof field.default_source!=='string'||!field.default_source.trim())throw Error('Default needs a scalar value and traceable source');if(value!==null&&fieldMissing({...field,required:true},setParameter({},field.key,value)))throw Error('Default does not match field type');}
+ for(const [key,limit] of [['unit',40],['description',2000],['default_source',2000]])if(field[key]!==undefined&&(typeof field[key]!=='string'||field[key].length>limit))throw Error('Invalid field text');
  if(field.options!==undefined&&(!Array.isArray(field.options)||field.options.length>100||field.options.some(v=>typeof v!=='string')))throw Error('Invalid field options');return field;
 }
 export function normalizeSteps(steps,parameters={},missing=[]){
@@ -33,7 +42,7 @@ export function normalizeSteps(steps,parameters={},missing=[]){
  const result=steps.map((step,i)=>{
   if(typeof step==='string')return {id:'step-'+i,title:step,description:'',fields:[],optional:false};
   if(!step||typeof step!=='object'||typeof step.id!=='string'||!step.id||ids.has(step.id)||typeof step.title!=='string'||!step.title||!step.title.trim()||!Array.isArray(step.fields))throw Error('Invalid workflow step');ids.add(step.id);
-  return {...step,description:step.description||'',fields:step.fields.map(f=>{validField(f);if(used.has(f.key))throw Error('Duplicate field');used.add(f.key);return f;})};
+  return {...step,description:step.description||'',fields:step.fields.map(f=>{validField(f);if(used.has(f.key))throw Error('Duplicate field');used.add(f.key);return {...f,required:f.required||missing.includes(f.key)};})};
  });
  const leftovers=flattenParameters(parameters).filter(f=>!used.has(f.key));
  for(const key of missing){if(!isFieldKey(key))continue;if(!used.has(key)&&!leftovers.some(f=>f.key===key))leftovers.push(inferField(key,parameterValue(parameters,key),true));}
