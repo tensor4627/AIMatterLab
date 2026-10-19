@@ -4,7 +4,7 @@ export async function executeTask(records,worker,{taskId,artifactId,inputReceipt
  const {task,artifact}=approved(),prefix=artifact.kind==='cluster-run'?'/api/cluster/':'/api/run/';
  const current=await worker.request('POST',prefix+'status',{run_id:artifact.id});
  if(task.workflowVersion===2&&inputReceipt!==snapshotIdentity(task,current))throw Error('Reviewed input snapshot identity changed');
- if(current.project_id!==task.projectId)throw Error('Run project does not match workflow');
+ if(current.project_id!==(task.workflowVersion===2?task.deployment.config.projectId:task.projectId))throw Error('Run project does not match workflow');
  if(!['draft','ready'].includes(current.status)){records.linkRun(taskId,current);return current;}
  const pending=records.read(taskId);if(pending.execution&&['validating','submitting','unknown'].includes(pending.execution.phase))throw Error('An execution request is pending; reconcile its recorded run, never resubmit unknown');
  pending.execution={artifactId,phase:'validating'};records.save(pending);

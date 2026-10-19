@@ -148,9 +148,11 @@ class Service:
                     snapshots.append({"name": name, "source": str(path), "sha256": digest(destination),
                                       "size": destination.stat().st_size})
                     destination.chmod(0o444)
+                input_contract = Adapter(spec["engine"]).input_contract(spec, directory / "simulation") if spec["engine"]=="gpumd.neb" else None
                 run = {**spec, "id": identifier, "name": spec.get("name", spec["engine"]),
                        "request_hash": request_hash, "status": "draft", "validation": {"status": "not_run"},
                        "directory": str(directory), "snapshots": snapshots, "command": command,
+                       **({"input_contract":input_contract} if input_contract is not None else {}),
                        "seed": spec.get("parameters",{}).get("seed"),
                        "seed_note": "See immutable engine inputs; unspecified RNG defaults are not inferred",
                        "created_at": time.time(), "updated_at": time.time(),
@@ -425,6 +427,7 @@ class Service:
         return result
 
     def inspect(self, project_id, environment_id, path, kind="dataset", frame=0, intent=None):
+        if kind not in ("dataset","structure","regression","suggest"):raise ValueError("inspect_asset supports structure/dataset/regression; use read_project_input for script/config/model metadata")
         project = self.store.get("project", project_id)
         if environment_id not in project["policy"]["environments"]:
             raise PermissionError("Environment is not authorized")

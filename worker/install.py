@@ -3,7 +3,7 @@ import argparse,hashlib,json,shutil,uuid
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument("--source",required=True);p.add_argument("--root",required=True);a=p.parse_args()
 source=Path(a.source).resolve();root=Path(a.root).expanduser().resolve()
-files=sorted(x for x in source.rglob("*") if x.is_file() and x.suffix in (".py",".toml") and not any(s in x.parts for s in ("__pycache__","tests")))
+files=sorted(x for x in source.rglob("*") if x.is_file() and (x.suffix in (".py",".toml") or x.relative_to(source).as_posix()=="studio_worker/engine_contracts.json") and not any(s in x.parts for s in ("__pycache__","tests")))
 if not (source/"bootstrap.py").is_file():raise ValueError("Worker source unavailable")
 h=hashlib.sha256()
 for file in files:h.update(str(file.relative_to(source)).encode());h.update(file.read_bytes())

@@ -60,8 +60,8 @@ export class AgentHub extends EventEmitter{
    // Account observers must never reconfigure a connection captured before tools attached.
    if(this.codex.starting)await this.codex.starting;
    else if(!this.codex.process)await this.codex.start(this.path('codex'),this.getWorker(),agentConfig(this.preferences('codex')));
-   let result;try{result=await this.codex.request('account/read',{refreshToken:true});}
-   catch(error){if(error.message!=='Codex bridge closed'||!this.codex.starting)throw error;await this.codex.starting;result=await this.codex.request('account/read',{refreshToken:true});}
+   let result;try{result=await this.codex.request('account/read',{refreshToken:false});}
+   catch(error){if(error.message!=='Codex bridge closed'||!this.codex.starting)throw error;await this.codex.starting;result=await this.codex.request('account/read',{refreshToken:false});}
    return {...result,provider,...this.loginStatus.codex,login:'chatgpt',modelAccess:this.loginStatus.codex?.modelAccess||'not_run'};
   }
   const status=this.loginStatus[provider]||{},credential=['qwen','deepseek'].includes(provider)?this.vault.get(provider):null;

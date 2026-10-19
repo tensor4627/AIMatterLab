@@ -1,4 +1,5 @@
 import {fieldPath} from './task-fields.mjs';
+import {adapterParameters} from './engine-contracts.mjs';
 const deploymentKeys=new Set(['project_id','environment_id','cluster_id','workdir','working_directory','remote_directory','remote_root','queue','partition','account','cpus','gpus','gpu','memory_mb','max_seconds','deployment','resources','environment']);
 export function deploymentField(key){return fieldPath(key).some(part=>deploymentKeys.has(part));}
 export function scienceOnly(parameters,steps=[],missing=[]){
@@ -11,7 +12,19 @@ export function scientificSpec(task){
  if(!Array.isArray(p.files)||!p.files.length||p.files.length>100||p.files.some(f=>typeof f!=='string'||!f||/[\n\r\0]/.test(f)))throw Error('请在计算流程中提供实际输入文件列表');
  const inputs={};for(const file of p.files){const name=file.replaceAll('\\','/').split('/').at(-1);if(!name||name==='.'||name==='..'||Object.hasOwn(inputs,name))throw Error('输入文件名重复或无效');inputs[name]=file;}
  const {engine,files,...parameters}=p;if(engine.endsWith('.sampling')){const walkers=parameters.sampling?.walkers??parameters.walkers??1;if(walkers!==1)throw Error('当前增强采样采用单任务、单 walker；多 walker 尚未接入');parameters.sampling={...parameters.sampling,walkers:1};}
- return {engine,inputs,parameters};
+ return {engine,inputs,parameters:adapterParameters(engine,parameters,inputs)};
+}
+// Protocol-reserved evidence is never an engine control. Unknown controls remain
+// in this projection so additions, removals and value changes still fail closed.
+const evidenceRoots=new Set(['review','provenance','evidence','derived_inputs']);
+const evidenceLeaves=new Set(['source','provenance','settings_source','model_origin','hashes','sha256']);
+export function inputControlParameters(parameters){
+ function controls(value,depth=0){
+  if(Array.isArray(value))return value.map(item=>controls(item,depth+1));
+  if(!value||typeof value!=='object')return value;
+  return Object.fromEntries(Object.entries(value).filter(([key])=>!(depth===0&&evidenceRoots.has(key))&&!evidenceLeaves.has(key)).map(([key,item])=>[key,controls(item,depth+1)]));
+ }
+ return controls(parameters||{});
 }
 export function validDeployment(value){
  if(!value||!['local','cluster'].includes(value.target)||typeof value.projectId!=='string'||!value.projectId||typeof value.targetId!=='string'||!value.targetId)throw Error('请选择项目和计算目标');

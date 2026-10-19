@@ -1,4 +1,4 @@
-import {scienceOnly,scientificSpec,deploymentField} from '../shared/deployment.mjs';
+import {scienceOnly,scientificSpec,deploymentField,inputControlParameters} from '../shared/deployment.mjs';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {normalizeSteps,workflowMissing,setParameter,parameterValue,fieldPath} from '../shared/task-fields.mjs';
@@ -32,6 +32,7 @@ export class TaskRecords{
   const next={...previous,id,provider:value.provider,threadId:value.threadId,projectId:previous?.projectId||value.projectId||null,name:previous?.name||value.name?.slice(0,100)||'新对话',taskId:value.taskId||previous?.taskId||null,updatedAt:Date.now()};
   this.catalog.put('conversation',id,next);this.publish({method:'studio/conversationUpdated',provider:next.provider,params:{conversation:next}});return next;
  }
+ bindProject(provider,threadId,projectId){const previous=this.conversation(provider,threadId);if(!previous||this.deleted(provider,threadId))throw Error('Unknown conversation');const next={...previous,projectId,updatedAt:Date.now()};this.catalog.put('conversation',next.id,next);this.publish({method:'studio/conversationUpdated',provider,params:{conversation:next}});return next;}
  bound(provider,threadId){const conversation=this.conversation(provider,threadId);const id=conversation?.taskId||this.tasks().filter(t=>t.provider===provider&&t.threadId===threadId).sort((a,b)=>b.updatedAt-a.updatedAt)[0]?.id;return id?this.read(id):null;}
  create(value){
   if(value.planningMode!==true)throw Error('Enable task planning before creating a task');
@@ -48,8 +49,15 @@ export class TaskRecords{
  }
  edit(value){
   const task=this.read(value.id);if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('Reconcile the execution request before editing its workflow');if(!value.changes||typeof value.changes!=='object'||Array.isArray(value.changes)||JSON.stringify(value.changes).length>200000||Object.keys(value.changes).length>100)throw Error('Invalid parameter edits');
-  let changed=false;
-  for(const [key,next] of Object.entries(value.changes)){fieldPath(key);if(task.workflowVersion===2&&deploymentField(key))throw Error('请在独立部署模块设置运行环境和队列');if(!isDeepStrictEqual(parameterValue(task.parameters||{},key),next)){task.parameters=setParameter(task.parameters||{},key,next);changed=true;}}
+  let changed=false;const fields=normalizeSteps(task.steps||[],task.parameters||{},[]).flatMap(step=>step.fields||[]);task.manualInputs={...task.manualInputs};
+  for(const [key,next] of Object.entries(value.changes)){fieldPath(key);if(task.workflowVersion===2&&deploymentField(key))throw Error('请在独立部署模块设置运行环境和队列');
+   const field=fields.find(field=>field.key===key),previous=parameterValue(task.parameters,key),receipt=task.manualInputs[key];
+   if(field?.type==='file'&&typeof next==='string'&&next)task.manualInputs[key]={type:'file',value:next,approvedValues:[next]};
+   else if(field?.type==='files'&&Array.isArray(next)){
+    const prior=Array.isArray(previous)?previous:[],approved=[...(receipt?.type==='files'?receipt.approvedValues||[]:[]),...next.filter(item=>typeof item==='string'&&item&&!prior.includes(item))];
+    task.manualInputs[key]={type:'files',value:structuredClone(next),approvedValues:[...new Set(approved)].filter(item=>next.includes(item))};
+   }else delete task.manualInputs[key];
+   if(!isDeepStrictEqual(parameterValue(task.parameters||{},key),next)){task.parameters=setParameter(task.parameters||{},key,next);changed=true;}}
   if(changed){task.parameterRevision=(task.parameterRevision||0)+1;task.manualEdits={...task.manualEdits,...Object.fromEntries(Object.keys(value.changes).map(k=>[k,task.parameterRevision]))};task.review={status:'not_run',summary:'参数已修改，需要重新复核'};task.missingFields=workflowMissing(task.steps||task.plan?.map(s=>s.step)||[],task.parameters,task.missingFields||[]);}
   return this.save(task);
  }
@@ -66,10 +74,18 @@ export class TaskRecords{
   const mode=task?'[Studio interaction mode: '+(reviewMode?'review':planningMode?'planning':'workflow')+']\nstudioTaskId: '+task.id+'\nThis conversation owns this existing workflow. Update it in place only when the user changes the calculation or requests review; normal questions need no present_task. Never create another workflow implicitly. Call present_task with task_id, name, steps, parameters, missing_fields. steps may be strings for legacy data; prefer objects {id,title,description,tool,fields:[{key,label,type,required,unit,options}]}. Each key is a dot path into parameters; file fields contain actual paths. Do not use dotted object keys. Types: text,number,integer,boolean,file,files,list,select,multiline. Keep stable step IDs. Declare all required scientific fields and missing fields honestly. Manual current parameters and revision: '+JSON.stringify({parameterRevision:task.parameterRevision,parameters:task.parameters,steps:task.steps,artifacts:task.artifacts})+'\n'+(reviewMode&&task.workflowVersion===2?'Review science only. If scientific values changed, use write_project_input to update actual run.in, GAScfg.yaml or driver/config inputs first, then call present_task with final file paths and actual missing fields. Parameter metadata alone never rewrites an input. Deployment is configured afterwards; never prepare or submit a run.':reviewMode?'Review these exact parameters. Call present_task first; prepare a fresh real module draft with the current inputs if needed, then present_task again with remaining missing fields. Do not validate or submit. Completeness review is not scientific validation.':'Prepare real module drafts when requested, then stop for human review. Never execute.'):
   '[Studio interaction mode: chat]\nAnswer in conversation; read-only inspection only. Do not create tasks or open pages. Enable task planning for a new computation.';
   const scienceMode=task?.workflowVersion===2?'\n[Scientific workflow v2] Only define science here: parameters.engine (registered engine ID) and parameters.files (list of actual input paths; preserve basenames such as run.in, model.xyz, bias.pt, run.py). Keep scientific settings in other nested parameters. MetaD/WTMetaD default is ONE job and ONE walker, even with multiple CVs; do not invent replicas. Multiple walkers are unsupported unless explicitly implemented. Do NOT put workdir, queue, project/environment/cluster IDs, GPUs, walltime or resources in scientific steps/parameters. A separate desktop Deployment module collects these AFTER scientific review. In review mode call present_task to check input completeness; do NOT call prepare_run or prepare_cluster_run for v2. Never execute or submit.':'';
-  return {...params,input:[...(params.input||[]),{type:'text',text:mode+scienceMode}]};
+  const bindingContext=task?.inputBinding?'\n[Existing input controls] '+JSON.stringify(inputControlParameters(task.inputBinding.parameters))+'\nKeep these existing scientific parameter keys and values stable when science is unchanged. Put new derived observations, provenance and review text in step descriptions or a separate review manifest, never create duplicate numeric aliases. Changed, added or removed non-evidence controls with identical executable inputs are blocked; update actual driver/config for scientific changes. Never modify an unrelated manifest or comment merely to change the snapshot hash.':'';
+  return {...params,input:[...(params.input||[]),{type:'text',text:mode+scienceMode+bindingContext}]};
  }
  save(task,showFlow=false){if(task.threadId&&this.deleted(task.provider,task.threadId))return task;const previous=this.catalog.get('agent-task',task.id);task.updatedAt=Math.max(Date.now(),(previous?.updatedAt||0)+1);this.catalog.put('agent-task',task.id,task);this.cache.set(task.id,task);this.publish({method:'studio/taskUpdated',provider:task.provider,params:{task,showFlow}});return task;}
- linkRun(id,run){const task=this.read(id),old=task.artifacts.find(a=>a.id===run.id);if(task.projectId&&task.projectId!==run.project_id)throw Error('Run project does not match workflow');task.artifacts=task.artifacts.filter(a=>a.id!==run.id);task.artifacts.push({kind:run.kind==='cluster-run'?'cluster-run':'run',id:run.id,name:run.name,engine:run.engine,parameters:run.parameters||{},preparedRevision:old?.preparedRevision??null});if(task.workflowVersion!==2)task.review={status:'not_run',summary:'运行状态从作业服务读取'};if(task.execution?.artifactId===run.id)task.execution={...task.execution,phase:run.status==='unknown'?'unknown':run.status==='validating'?'validating':'confirmed',status:run.status};return this.save(task);}
+ linkRun(id,run,expectedPrepared){const task=this.read(id);
+  if(expectedPrepared!==undefined){
+   const expected=expectedPrepared,keys=['artifactId','parameterRevision','deploymentRevision'];
+   if(!expected||typeof expected!=='object'||Array.isArray(expected)||Object.keys(expected).length!==3||keys.some(key=>!Object.hasOwn(expected,key))||typeof expected.artifactId!=='string'||!expected.artifactId||expected.artifactId.length>128||keys.slice(1).some(key=>!Number.isSafeInteger(expected[key])||expected[key]<0))throw Error('Invalid prepared reference');
+   const current=task.deployment?.prepared;
+   if(run.id!==expected.artifactId||task.deployment?.revision!==expected.deploymentRevision||!current||keys.some(key=>current[key]!==expected[key]))throw Error('Prepared run changed; refresh the current input snapshots');
+  }
+  const old=task.artifacts.find(a=>a.id===run.id);if(task.projectId&&task.projectId!==run.project_id&&task.deployment?.config?.projectId!==run.project_id)throw Error('Run project does not match workflow');task.artifacts=task.artifacts.filter(a=>a.id!==run.id);task.artifacts.push({kind:run.kind==='cluster-run'?'cluster-run':'run',id:run.id,name:run.name,engine:run.engine,parameters:run.parameters||{},preparedRevision:old?.preparedRevision??null});if(task.workflowVersion!==2)task.review={status:'not_run',summary:'运行状态从作业服务读取'};if(task.execution?.artifactId===run.id)task.execution={...task.execution,phase:run.status==='unknown'?'unknown':run.status==='validating'?'validating':'confirmed',status:run.status};return this.save(task);}
  failedTurn(provider,threadId,error){const turn=this.turns.get(provider+':'+threadId);if(!turn?.reviewMode)return;const task=this.read(turn.taskId);task.review={status:'needs-information',summary:'Agent 复核请求失败：'+error.message};this.save(task);}
  event(event){
   const p=event.params||{},provider=event.provider||'codex',key=provider+':'+p.threadId,id=this.active.get(key);if(!id)return;
@@ -83,7 +99,13 @@ export class TaskRecords{
      try{normalizeSteps(item.steps,item.parameters,item.missing_fields);}catch{continue;}
      let parameters=item.parameters||{};
      if(task.workflowVersion===2){const split=scienceOnly(parameters,item.steps,item.missing_fields||[]);parameters=split.parameters;item.steps=split.steps;item.missing_fields=split.missing;task.deploymentHints={...task.deploymentHints,...split.hints};}
-     for(const [field,revision] of Object.entries(task.manualEdits||{}))if(turn.reviewMode||revision>turn.revision)parameters=setParameter(parameters,field,parameterValue(task.parameters,field));
+     for(const [field,revision] of Object.entries(task.manualEdits||{}))if(turn.reviewMode||revision>turn.revision){
+      const manual=parameterValue(task.parameters,field),proposed=parameterValue(parameters,field),root=task.authoring?.inputRoot;
+      if(field==='files'&&Array.isArray(manual)&&Array.isArray(proposed)&&typeof root==='string'){
+       const owned=proposed.filter(value=>typeof value==='string'&&value.startsWith(root.replace(/\/$/,'')+'/')&&!/[\\\r\n\0]/.test(value)&&!value.split('/').some(part=>part==='..'||part==='.')&&!manual.includes(value));
+       parameters=setParameter(parameters,field,[...manual,...new Set(owned)]);
+      }else parameters=setParameter(parameters,field,manual);
+     }
      if(!isDeepStrictEqual(parameters,task.parameters)||!isDeepStrictEqual(item.steps,task.steps)){task.parameterRevision=(task.parameterRevision||0)+1;task.review={status:'not_run'};}
      task.name=item.name;task.parameters=parameters;task.steps=item.steps;task.plan=item.steps.map(v=>({step:typeof v==='string'?v:v.title,assistantStatus:'proposed'}));task.missingFields=workflowMissing(task.steps,parameters,item.missing_fields||[]);updated=presented=true;turn.presented=true;continue;
     }

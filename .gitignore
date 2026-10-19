@@ -11,3 +11,5 @@ worker/*.egg-info/
 .env
 .env.*
 !.env.example
+
+*.tsbuildinfo

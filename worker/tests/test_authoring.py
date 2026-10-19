@@ -66,3 +66,39 @@ class Suggestions(unittest.TestCase):
    try:
     with self.assertRaises(PermissionError):dispatch(service,'POST','/api/structures/import-material',{})
    finally:service.close();service.store.db.close()
+
+class TechnicalSuggestions(unittest.TestCase):
+ def test_temperature_alias_and_history_capacity_are_not_user_blockers(self):
+  with tempfile.TemporaryDirectory() as d:
+   path=str(Path(d)/'h2.xyz');create({'recipe':{'kind':'molecule','name':'H2'},'output_path':path})
+   r=suggest({'path':path,'intent':{'temperature':300,'enhanced_sampling':True,'cv_definition':'distance','steps':100,'pace':10}})
+   self.assertEqual(r['parameters']['temperature_K']['value'],300);self.assertEqual(r['parameters']['history_capacity']['value'],11);self.assertEqual(r['parameters']['dtype']['value'],'float64');self.assertEqual(r['unresolved'],[]);self.assertEqual(r['topology']['peptide_torsion_candidates'],[])
+
+class PortableWorkflow(unittest.TestCase):
+ def test_only_io_paths_are_relocated_and_backend_and_scientific_nodes_are_preserved(self):
+  from studio_worker.structure_tools import portable_graph
+  graph={'version':2,'settings':{'atoms_path':'/private/draft/model.xyz','pt_path':'/private/draft/bias.pt2','artifact_formats':['aoti'],'deployment_backend':'aoti','temperature':300},'nodes':[{'kind':'bias','params':{'height':0.001,'sigma':0.1}}],'edges':[]}
+  before=json.loads(json.dumps(graph));canonical,bindings=portable_graph(graph)
+  self.assertEqual(graph,before);self.assertEqual(canonical['nodes'],graph['nodes']);self.assertEqual(canonical['settings']['atoms_path'],'model.xyz');self.assertEqual(canonical['settings']['pt_path'],'bias.pt2');self.assertEqual(canonical['settings']['workflow_path'],'workflow.json');self.assertEqual(canonical['settings']['deployment_backend'],'aoti');self.assertEqual(bindings['atoms_path']['source'],'/private/draft/model.xyz')
+  with self.assertRaises(ValueError):portable_graph({'settings':{'atoms_path':'model.xyz','pt_path':'model.xyz'}})
+
+ def test_real_v1_v2_output_names_and_adapter_gate(self):
+  from studio_worker.structure_tools import portable_graph,graph_snapshot_io
+  from studio_worker.adapters import Adapter
+  import hashlib
+  cases=[(1,{},'bias.custom',['bias.custom'],[]),(2,{'artifact_formats':['aoti'],'deployment_backend':'aoti'},'bias.pt',['bias.pt2'],['bias.manifest.json']),(2,{'artifact_formats':['torchscript','aoti'],'deployment_backend':'aoti'},'bias.pt',['bias.pt','bias.pt2'],['bias.manifest.json'])]
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);repo=root/'repo';(repo/'base').mkdir(parents=True);f=repo/'base/colvar.py';f.write_text('# registered')
+   for version,extra,target,outputs,manifests in cases:
+    canonical,_=portable_graph({'version':version,'settings':{'atoms_path':'/draft/model.xyz','pt_path':'/draft/'+target,**extra}});io=graph_snapshot_io(canonical)
+    self.assertEqual(io['outputs'],outputs);self.assertEqual(io['manifests'],manifests)
+    source={'root':str(repo),'colvar_sha256':hashlib.sha256(f.read_bytes()).hexdigest(),'io':io}
+    (root/'build_bias.py').write_text('# studio-pygas-source: '+json.dumps(source)+'\npass')
+    spec={'inputs':dict.fromkeys(['build_bias.py','model.xyz','workflow.json'],'snapshot'),'parameters':{'output_file':outputs[0]},'gpu':0};env={'repositories':{'pygas':str(repo)}}
+    if any(name.endswith('.pt2') for name in outputs):
+     with self.assertRaisesRegex(ValueError,'AOTI needs explicit'):Adapter('pygas.build').validate(spec,env,root)
+    else:self.assertEqual(Adapter('pygas.build').validate(spec,env,root)['status'],'passed')
+    spec['parameters']['output_file']='undeclared.pt'
+    with self.assertRaisesRegex(ValueError,'Declared build output'):Adapter('pygas.build').validate(spec,env,root)
+    spec['parameters']['output_file']=outputs[0];del spec['inputs']['workflow.json']
+    with self.assertRaisesRegex(ValueError,'Missing inputs'):Adapter('pygas.build').validate(spec,env,root)

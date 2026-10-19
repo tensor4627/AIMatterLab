@@ -49,6 +49,9 @@ export function normalizeSteps(steps,parameters={},missing=[]){
  if(leftovers.length)result.push({id:'parameters',title:'运行参数与文件',description:'未分组参数可直接编辑；Agent 可在后续更新中归入对应步骤。',fields:leftovers.map(f=>({...f,required:f.required||missing.includes(f.key)}))});
  return result;
 }
+function missingListValue(items){
+ const pending=[...items];while(pending.length){const value=pending.pop();if(value===undefined||value===null||value===''||typeof value==='number'&&!Number.isFinite(value))return true;if(Array.isArray(value)){if(!value.length)return true;pending.push(...value);}}return false;
+}
 export function fieldMissing(field,parameters){
  const value=parameterValue(parameters,field.key);
  if(value===undefined||value===null||value===''||(Array.isArray(value)&&!value.length))return !!field.required;
@@ -56,7 +59,7 @@ export function fieldMissing(field,parameters){
  if(field.type==='boolean')return typeof value!=='boolean';
  if(['file','text','multiline','select'].includes(field.type)&&typeof value!=='string')return true;
  if(field.type==='select'&&field.options?.length)return !field.options.includes(value);
- if(['files','list'].includes(field.type))return !Array.isArray(value)||(field.type==='files'&&value.some(v=>typeof v!=='string'||!v));
+ if(['files','list'].includes(field.type))return !Array.isArray(value)||(field.type==='files'&&value.some(v=>typeof v!=='string'||!v))||(field.type==='list'&&field.required&&missingListValue(value));
  if(field.type==='object')return typeof value!=='object'||Array.isArray(value)||(field.required&&!Object.keys(value).length);
  return false;
 }
@@ -64,4 +67,18 @@ export function workflowMissing(steps,parameters={},missing=[]){
  const groups=normalizeSteps(steps,parameters,missing),keys=new Set();for(const group of groups)for(const f of group.fields)if(fieldMissing(f,parameters))keys.add(f.key);
  for(const key of missing)if(!isFieldKey(key)||parameterValue(parameters,key)==null||parameterValue(parameters,key)==='')keys.add(key);return [...keys];
 }
-export function explicitNewWorkflow(text){return typeof text==='string'&&!/不要|别|不需|无需|do not|don't/i.test(text)&&/(?:新建|另建|创建)(?:一个|一份|新的)?(?:新的)?(?:计算)?(?:流程|工作流)|(?:create|start) (?:a |another |new )*(?:new |another )workflow/i.test(text);}
+export function explicitNewWorkflow(text){
+ if(typeof text!=='string')return false;
+ // Quoted examples are content, not instructions. Contractions remain intact.
+ const plain=text.replace(/```[\s\S]*?```|`[^`\n]*`|"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|「[^」\n]*」|(?<![\p{L}\p{N}])'[^'\n]*'(?![\p{L}\p{N}])/gu,' ');
+ const actions=/(?:新建|另建|创建)(?:一个|一份|新的)?(?:新的)?(?:计算)?(?:工作流|流程)|(?:create|start)\s+(?:a\s+)?(?:(?:new|another)\s+){1,2}workflow/gi;
+ for(const match of plain.matchAll(actions)){
+  const prefix=plain.slice(0,match.index).split(/[，,。.;；!?！？\n]|但是|不过|然后|\b(?:but|however|then)\b/i).at(-1)||'';
+  if(/不|别|勿|无需|无须|禁止|没有|没必要|停止|避免|取消|撤销|暂停|\b(?:not|never|without|avoid|no|stop|cancel|don['’]?t|cannot|can['’]?t|isn['’]?t|wasn['’]?t|didn['’]?t|wouldn['’]?t)\b/i.test(prefix))continue;
+  if(/解释|举例|说明|含义|意思|如何|怎么|是否|讨论|提到|字符串|文本|命令|按钮|复述|引用|回复|翻译|之前|此前|原先|曾经|已经|上次|\b(?:explain|describe|example|quote|repeat|translate|meaning|phrase|button|command|text|how|whether|what)\b/i.test(prefix))continue;
+  const suffix=plain.slice(match.index+match[0].length).split(/[，,。.;；!?！？\n]|但是|不过|然后|\b(?:but|however|then)\b/i)[0];
+  if(/^\s*(?:(?:这个|按钮|功能|操作|选项)?(?:是(?:什么|啥|何)|指(?:的)?是)|的(?:含义|意思|作用)|意味着)/.test(suffix)||/^\s*(?:mean|means|meaning|definition)\b/i.test(suffix))continue;
+  return true;
+ }
+ return false;
+}

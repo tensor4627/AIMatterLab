@@ -1,0 +1,453 @@
+{
+  "schema_version": 1,
+  "scope": "Adapter input contract only. Alias mapping uses explicit existing facts, rejects conflicts, and never proves scientific or serialized-model correctness. File parameters must identify an actual files entry by its preserved basename.",
+  "engines": {
+    "gpumd.neb": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "run.in"
+      ],
+      "parameter_groups": {
+        "neb": {
+          "allowed_keys": [
+            "optimizer",
+            "force_tolerance",
+            "max_steps",
+            "interpolate",
+            "cell_mode",
+            "pressure_gpa",
+            "pressure_components_gpa",
+            "climb",
+            "ina",
+            "need_relax",
+            "match_cell_to_initial",
+            "potential_files",
+            "structure_files",
+            "trajectory_input",
+            "initial_file",
+            "final_file",
+            "potential_file"
+          ],
+          "choices": {
+            "optimizer": [
+              "fire"
+            ],
+            "cell_mode": [
+              "fixed",
+              "variable"
+            ]
+          },
+          "scope": "Exact declared controls accepted by neb_checks.contract; values must match the immutable run.in. Driver paths, review notes and provenance belong to files/step descriptions, never inside neb. No unit conversion or optimizer convergence claim."
+        }
+      }
+    },
+    "gpumd.md": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "run.in",
+        "model.xyz"
+      ]
+    },
+    "pydyn.md": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "run.py"
+      ]
+    },
+    "nep.train": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "nep.in",
+        "train.xyz",
+        "test.xyz"
+      ]
+    },
+    "nep.eval": {
+      "required_parameters": [
+        "dataset_role"
+      ],
+      "input_file_parameters": [],
+      "aliases": {
+        "dataset_role": [
+          "dataset.role"
+        ]
+      },
+      "required_inputs": [
+        "nep.in",
+        "evaluation.xyz",
+        "nep.txt"
+      ]
+    },
+    "nep.analyze": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "energy_test.out",
+        "force_test.out",
+        "evaluation.json"
+      ]
+    },
+    "hotpp.train": {
+      "required_parameters": [],
+      "input_file_parameters": [
+        "checkpoint"
+      ],
+      "aliases": {},
+      "required_inputs": [
+        "input.yaml"
+      ]
+    },
+    "hotpp.eval": {
+      "required_parameters": [
+        "model_file",
+        "dataset_file"
+      ],
+      "input_file_parameters": [
+        "model_file",
+        "dataset_file"
+      ],
+      "aliases": {
+        "model_file": [
+          "model.file",
+          "inputs.model_file"
+        ],
+        "dataset_file": [
+          "dataset.file",
+          "inputs.dataset_file"
+        ]
+      },
+      "required_inputs": []
+    },
+    "hotpp.export": {
+      "required_parameters": [
+        "model_file",
+        "symbols"
+      ],
+      "input_file_parameters": [
+        "model_file"
+      ],
+      "aliases": {
+        "model_file": [
+          "model.file",
+          "inputs.model_file"
+        ],
+        "symbols": [
+          "model.symbols"
+        ]
+      },
+      "required_inputs": []
+    },
+    "pygas.reweight": {
+      "required_parameters": [
+        "bias_file"
+      ],
+      "input_file_parameters": [
+        "bias_file"
+      ],
+      "aliases": {
+        "bias_file": [
+          "bias.file",
+          "bias.input"
+        ]
+      },
+      "required_inputs": [
+        "GASGaussian.txt",
+        "fes.yaml"
+      ]
+    },
+    "pygas.opes-reweight": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "OPES_COLVAR",
+        "fes.yaml"
+      ]
+    },
+    "pygas.build": {
+      "required_parameters": [
+        "family",
+        "cv_definition",
+        "cv_units",
+        "atom_selection",
+        "pbc_convention",
+        "cutoff",
+        "output_file"
+      ],
+      "input_file_parameters": [],
+      "aliases": {
+        "family": [
+          "bias.family"
+        ],
+        "cv_definition": [
+          "cv.definition",
+          "bias.cv.definition"
+        ],
+        "cv_units": [
+          "cv.units",
+          "cv.unit",
+          "bias.cv.unit"
+        ],
+        "atom_selection": [
+          "cv.atom_selection",
+          "cv.atoms_zero_based",
+          "bias.cv.atoms_zero_based"
+        ],
+        "pbc_convention": [
+          "cv.pbc_convention",
+          "structure.pbc_convention"
+        ],
+        "cutoff": [
+          "bias.cutoff_A",
+          "bias.cutoff",
+          "cv.cutoff_A",
+          "technical.cutoff"
+        ],
+        "output_file": [
+          "technical.output_file",
+          "build.output_file"
+        ]
+      },
+      "required_inputs": [
+        "build_bias.py"
+      ]
+    },
+    "bias.validate": {
+      "required_parameters": [
+        "bias_file",
+        "structure_file",
+        "cv_size",
+        "cutoff",
+        "mode"
+      ],
+      "input_file_parameters": [
+        "bias_file",
+        "structure_file",
+        "manifest_file",
+        "validation_history"
+      ],
+      "aliases": {
+        "bias_file": [
+          "bias.input",
+          "bias.file",
+          "bias.file_path",
+          "sampling.bias_file"
+        ],
+        "structure_file": [
+          "structure.file",
+          "structure.path",
+          "structure.input",
+          "inputs.structure",
+          "structure_file"
+        ],
+        "cv_size": [
+          "cv.size",
+          "bias.cv.size",
+          "sampling.cv_size"
+        ],
+        "cutoff": [
+          "bias.cutoff_A",
+          "bias.cutoff",
+          "cv.cutoff_A",
+          "cv.cutoff"
+        ],
+        "mode": [
+          "bias.mode",
+          "sampling.mode"
+        ],
+        "validation_history": [
+          "history.validation_file",
+          "sampling.validation_history",
+          "validation.history_file"
+        ],
+        "manifest_file": [
+          "bias.manifest_file"
+        ],
+        "kernel_capacity": [
+          "bias.kernel_capacity"
+        ],
+        "walkers": [
+          "sampling.walkers",
+          "dynamics.walkers"
+        ]
+      },
+      "required_inputs": [],
+      "choices": {
+        "mode": [
+          "static",
+          "metad",
+          "wtmetad",
+          "bias",
+          "cvonly",
+          "opes"
+        ]
+      },
+      "default_input_names": {
+        "structure_file": "model.xyz"
+      }
+    },
+    "gpumd.sampling": {
+      "required_parameters": [
+        "bias_file",
+        "structure_file",
+        "cv_size",
+        "cutoff",
+        "mode"
+      ],
+      "input_file_parameters": [
+        "bias_file",
+        "structure_file",
+        "manifest_file",
+        "validation_history"
+      ],
+      "aliases": {
+        "bias_file": [
+          "bias.input",
+          "bias.file",
+          "bias.file_path",
+          "sampling.bias_file"
+        ],
+        "structure_file": [
+          "structure.file",
+          "structure.path",
+          "structure.input",
+          "inputs.structure",
+          "structure_file"
+        ],
+        "cv_size": [
+          "cv.size",
+          "bias.cv.size",
+          "sampling.cv_size"
+        ],
+        "cutoff": [
+          "bias.cutoff_A",
+          "bias.cutoff",
+          "cv.cutoff_A",
+          "cv.cutoff"
+        ],
+        "mode": [
+          "bias.mode",
+          "sampling.mode"
+        ],
+        "validation_history": [
+          "history.validation_file",
+          "sampling.validation_history",
+          "validation.history_file"
+        ],
+        "manifest_file": [
+          "bias.manifest_file"
+        ],
+        "kernel_capacity": [
+          "bias.kernel_capacity"
+        ],
+        "walkers": [
+          "sampling.walkers",
+          "dynamics.walkers"
+        ]
+      },
+      "required_inputs": [
+        "run.in",
+        "model.xyz",
+        "GAScfg.yaml"
+      ],
+      "choices": {
+        "mode": [
+          "static",
+          "metad",
+          "wtmetad",
+          "bias",
+          "cvonly",
+          "opes"
+        ]
+      },
+      "default_input_names": {
+        "structure_file": "model.xyz"
+      }
+    },
+    "pydyn.sampling": {
+      "required_parameters": [
+        "bias_file",
+        "structure_file",
+        "cv_size",
+        "cutoff",
+        "mode"
+      ],
+      "input_file_parameters": [
+        "bias_file",
+        "structure_file",
+        "manifest_file",
+        "validation_history"
+      ],
+      "aliases": {
+        "bias_file": [
+          "bias.input",
+          "bias.file",
+          "bias.file_path",
+          "sampling.bias_file"
+        ],
+        "structure_file": [
+          "structure.file",
+          "structure.path",
+          "structure.input",
+          "inputs.structure",
+          "structure_file"
+        ],
+        "cv_size": [
+          "cv.size",
+          "bias.cv.size",
+          "sampling.cv_size"
+        ],
+        "cutoff": [
+          "bias.cutoff_A",
+          "bias.cutoff",
+          "cv.cutoff_A",
+          "cv.cutoff"
+        ],
+        "mode": [
+          "bias.mode",
+          "sampling.mode"
+        ],
+        "validation_history": [
+          "history.validation_file",
+          "sampling.validation_history",
+          "validation.history_file"
+        ],
+        "manifest_file": [
+          "bias.manifest_file"
+        ],
+        "kernel_capacity": [
+          "bias.kernel_capacity"
+        ],
+        "walkers": [
+          "sampling.walkers",
+          "dynamics.walkers"
+        ]
+      },
+      "required_inputs": [
+        "run.py"
+      ],
+      "choices": {
+        "mode": [
+          "static",
+          "metad",
+          "wtmetad",
+          "bias",
+          "cvonly",
+          "opes"
+        ]
+      },
+      "default_input_names": {
+        "structure_file": "model.xyz"
+      }
+    }
+  }
+}

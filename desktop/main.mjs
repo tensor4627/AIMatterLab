@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
+import {ensureTaskAuthoring} from './task-authoring.mjs';
+import {readTaskInput} from './task-input-preview.mjs';
 import {visibleUserText} from '../shared/tool-activity.mjs';
 import {PygasSkillContext} from './pygas-skills.mjs';
 import {MaterialsProject} from './materials-project.mjs';
@@ -87,7 +89,8 @@ if(typeof settings.codexPath==='string'&&/[\\\\/]/.test(settings.codexPath)&&!fs
 if(verifying&&!installationVerifying)settings={...settings,agentProvider:'codex',agentLayout:'right',kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'),language:'zh-CN',fontSize:13,editorFontSize:13,terminalFontSize:12,fontFamily:'system',workerRoot:JSON.parse(fs.readFileSync(path.join(verificationRoot,'.studio/validation/science.json'),'utf8')).desktop_worker_root,workerPort:8770};
 if(installationVerifying){
  const config=JSON.parse(fs.readFileSync(process.env.STUDIO_INSTALL_CONFIG,'utf8'));
- settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,agentProvider:config.desktop.agent_provider||'codex'});
+ const sourceIds=config.desktop.source_ids??[];if(!Array.isArray(sourceIds)||sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id)))throw Error('Invalid installation source summary scope');
+ settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
 agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:()=>worker.connection});
 materials=new MaterialsProject({root:path.join(app.getPath('userData'),'credentials'),encryption:safeStorage,fetchApi:(...a)=>net.fetch(...a),worker});
@@ -103,9 +106,10 @@ handle('task.deployment.save',value=>saveDeployment(taskRecords,value));
 handle('task.deployment.prepare',value=>prepareDeployment(taskRecords,worker,value));
 handle('task.list',()=>catalog.list('agent-task'));
 handle('task.read',({id})=>taskRecords.read(id));
+handle('task.input.read',value=>readTaskInput(taskRecords,worker,value));
 handle('task.edit',value=>taskRecords.edit(value));
 handle('task.execute',value=>executeTask(taskRecords,worker,value));
-handle('task.linkRun',async({taskId,runId,kind})=>{if(!['run','cluster-run'].includes(kind)||typeof runId!=='string')throw Error('Invalid run reference');const run=await worker.request('POST',kind==='run'?'/api/run/status':'/api/cluster/status',{run_id:runId});return taskRecords.linkRun(taskId,run);});
+handle('task.linkRun',async({taskId,runId,kind,expectedPrepared})=>{if(!['run','cluster-run'].includes(kind)||typeof runId!=='string')throw Error('Invalid run reference');const run=await worker.request('POST',kind==='run'?'/api/run/status':'/api/cluster/status',{run_id:runId});return taskRecords.linkRun(taskId,run,expectedPrepared);});
 handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);agents.forget(result.provider,result.threadId);autoSkills.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));
@@ -138,11 +142,12 @@ handle('settings',data => {
     if(next[key]!==undefined&&(!Number.isInteger(next[key])||next[key]<min||next[key]>max))throw Error('Invalid font size');
   if(next.fontFamily && !['system','sans','serif'].includes(next.fontFamily))throw Error('Unsupported font');
   if(!Array.isArray(next.pygasSkillProviders||[])||(next.pygasSkillProviders||[]).some(p=>!['codex','kimi','qwen','deepseek'].includes(p)))throw Error('Invalid skill sharing provider scope');
+  if(next.sourceIds!==undefined&&(!Array.isArray(next.sourceIds)||next.sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id))))throw Error('Invalid source allowlist');
   if(!Array.isArray(next.sourceRoots||[])||(next.sourceRoots||[]).some(v=>typeof v!=='string'||!path.isAbsolute(v)))throw Error('Source roots must be absolute paths');
   if(!Array.isArray(next.skillRoots)) throw new Error('Skill roots must be an array');
   settings=catalog.put('settings','main',next); return settings;
 });
-function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
+function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
 async function bindSources(){const sources=scientificSources();for(const source of sources){await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());
 handle('sources.diagnose',async()=>{const sources=scientificSources();return {sources,tools:toolInventory(sources),worker:worker.connection?await worker.request('GET','/api/tools/status'):null};});
@@ -211,7 +216,7 @@ handle('agent.account',({provider})=>agents.account(provider));
 handle('agent.rpc',async({provider,method,params={}})=>{
   let skillContext;const skillKey=provider+':'+params.threadId;
   if(method==='turn/start'){
-   const text=visibleUserText(params.input||[]);const bound=taskRecords.bound(provider,params.threadId);
+   const text=visibleUserText(params.input||[]);const authoring=await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,guidance:fs.readFileSync(path.join(bundledSkillRoot,'studio-workflow-authoring','SKILL.md'),'utf8')});if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};const bound=taskRecords.bound(provider,params.threadId);
    // Default-deny: only an explicit desktop setting enables content sharing.
    skillContext=autoSkills.prepare(skillKey,{sources:scientificSources(),text,parameters:bound?.parameters||{},consented:(settings.pygasSkillProviders||[]).includes(provider)});
    if(skillContext.attach||skillContext.status==='blocked')params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};

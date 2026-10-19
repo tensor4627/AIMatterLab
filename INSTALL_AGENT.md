@@ -29,7 +29,7 @@
 2. configure：仅在用户需要新环境时启用 bootstrap；只在带本安装标记的专用前缀创建 venv 和 pinned GitHub 源码。读取私有 configure.json，将返回的 environment 合并回用户配置，再重新 plan / target-probe。不要改系统 Python、已有 venv 或源码分支。
 3. target-probe：通过所选连接实际探测目标 Python 路径/import 来源、引擎可执行文件、版本及 dirty 标记、PyTorch/CUDA/LibTorch 和 pyGAS 来源；保留真实结果与未检查项。SSH 全部强制显式用户名，不回退 Windows 用户。对已有环境只探测与测试，不额外安装。登录节点 probe 只证明发现；GPU、偏置加载、邻居/容量、力与 virial 检查仍需在调度分配的计算节点完成。
 4. smoke：执行版本化短例。WSL 使用独立 worker；SSH 先生成任务草稿与批脚本。让用户在 Studio 审阅后提交，或在用户明确授权了这一份短例脚本及资源后使用 --approve-submit。不重提 unknown。等待真实退出收据，并检查短例实际产物。
-5. desktop：锁定依赖安装、构建、独立 profile 的实际 Electron 验收；实际读取所选 provider 账户和模型目录，并完成一条真实模型回复。存有 API Key、目录请求成功或窗口可见都不能替代真实模型回复。缺少登录时，以相同 STUDIO_PROFILE_DIR 启动正常 Studio 窗口，让用户在本次安装的独立 profile 登录后重跑 desktop；不要拷贝其他安装的凭据文件。本地测试服务不能替代真实调用。
+5. desktop：锁定依赖安装、构建、独立 profile 的实际 Electron 验收；实际读取所选 provider 账户和模型目录，并完成一条真实模型回复。存有 API Key、目录请求成功或窗口可见都不能替代真实模型回复。实际模型访问需要认证时，以相同 STUDIO_PROFILE_DIR 启动正常 Studio 窗口，让用户在本次安装的独立 profile 登录后重跑 desktop；不要拷贝其他安装的凭据文件。账户元数据与实际调用能力分列，字段缺失或认证提示不能替代真实模型回复。本地测试服务不能替代真实调用。
 6. finalize：只有当前源码和配置对应的 desktop、target-probe、全部选定 smoke 均 passed 才输出 installation_success=true。旧收据、缺失检查、排队/unknown、未运行模块都不能冒充成功。
 
 命令形式：
@@ -49,7 +49,7 @@ NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、�
 
 ## 可迁移 skill 与本机沉淀
 
-发行只携带 agents/skills/studio-compute-workflow 及其通用 references；便携包中的物理位置是 resources/studio-skills，默认显示于技能库。原有本机 skill 保持原位置，不能打包其内容。DeepSeek 等 API 服务商选择技能后，主进程仅注入用户选定的、已登记的技能内容；凭据仍留在本机。
+发行携带 agents/skills 下公开的计算、工作流编写及安装验收技能及其通用 references；便携包中的物理位置是 resources/studio-skills，默认显示于技能库。原有本机 skill 保持原位置，不能打包其内容。DeepSeek 等 API 服务商选择技能后，主进程仅注入用户选定的、已登记的技能内容；凭据仍留在本机。
 
 按 docs/portable-skills.md 与公开 profile schema，将明确选定的连接 ID、环境 ID、版本及必要路径写入忽略的私有 JSON，再运行 scripts/localize-skill.mjs --profile <private-profile.json> --repo <checkout-root>，生成 .studio/local-skills/<profile-id>。将该目录登记为额外技能根目录。本机 overlay 是未验证的指导配置，不能授予项目授权或替代实际探测；后续运行证据另存忽略目录。local_skill_refs 仅保存用户选中的路径引用，脚本不读取或复制用户级 skill 全文。
 
@@ -58,3 +58,10 @@ NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、�
 ## 交付给用户
 
 交付启动文件、私有证据目录，以及脱敏的安装结果：选定模块，passed / failed / blocked / not_run，真实模型调用与真实科学运行的范围。保护连接信息。未达到成功门槛时给出具体修复步骤，并继续可完成的部分；不要仅因为构建完成或窗口打开就称安装成功。
+
+
+## 用户要求沿用本机环境时
+
+使用公开 `studio-install-readiness` skill 和命名的 `reuse-existing` action。读取实际命令接口后，选择全新的控制端 state-dir 和 worker.root；把配置保存在审计目录外，设置 bootstrap.enabled=false 和明确的 desktop.source_ids（模型回声可为 []）。此模式强制跳过下载、科学环境配置和依赖安装，仍实际探测所选环境、运行选定短例、启动独立桌面 profile 并取得真实模型回复。不得把已有生产 worker 根目录当安装目录，不拷贝其注册、授权或凭据。
+
+第一次验收不得使用旧短例收据。重入只有同一审计所有权标记才可写；环境身份变化时换用新目录，不重提原有 unknown 作业。报告保持 installation_success=false，仅在真实选定检查通过时标 reuse_readiness_success=true，并注明历史收据、skipped/not_run 与科学验收边界。详见 docs/one-prompt-install.md。新机器完整安装仍采用原 configure/probe/smoke/desktop/finalize 链路。

@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "product": "GPU Sampling Studio",
-  "version": "0.13.0",
+  "version": "0.17.0",
   "repository_url": null,
-  "release_revision": "v0.13.0",
+  "release_revision": "v0.17.0",
   "desktop_platform": "Windows + WSL",
   "entry": "INSTALL_AGENT.md",
   "cli": "scripts/one_prompt.py",
@@ -17,7 +17,8 @@
     "pygas": "fixture_required",
     "nep": "fixture_required",
     "hotpp": "fixture_required",
-    "sampling": "fixture_required"
+    "sampling": "fixture_required",
+    "neb": "fixture_required"
   },
   "distribution_status": "not_run"
 }

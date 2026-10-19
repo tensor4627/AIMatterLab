@@ -94,3 +94,9 @@ test('Legacy natural-language blockers survive restoration and manual edits with
 test('A cancelled or interrupted review can never enable execution',()=>{
  for(const status of ['cancelled','interrupted','failed']){const {records}=fixture(),task=reviewed(records);records.prepareTurn('codex',{threadId:'thread',reviewMode:true,studioTaskId:task.id});present(records,task);records.event({provider:'codex',method:'turn/completed',params:{threadId:'thread',turn:{status}}});assert.notEqual(records.read(task.id).review.status,'ready');}
 });
+
+
+test('Only affirmative workflow creation requests create a new page; negations and quoted examples stay conversation',()=>{
+ for(const text of ['这是软件界面验收。请只精确回复 FINAL_UI_CHAT_OK，不调用工具、不读取文件、不新建流程。','不新建流程','新建流程是什么意思？','What does create a new workflow mean?','停止创建流程','取消新建流程','don’t create a new workflow','不用再新建流程','无需创建流程','请勿另建流程','不要新建流程，只更新温度','解释如何新建流程','“新建一个计算流程”这个按钮是什么意思？','请复述 `create a new workflow`','continue this workflow, do not create a new workflow',"don't start another workflow",'Explain how to create a new workflow',"The button says 'create a new workflow'."]){assert.equal(explicitNewWorkflow(text),false,text);}
+ for(const text of ['新建一个计算流程','请另建一个流程，但不要执行','新建一个流程但不要执行','请新建一个计算流程，不调用外部工具','create a new workflow; do not run it','Do not execute; please create a new workflow','Can you start another workflow?'])assert.equal(explicitNewWorkflow(text),true,text);
+});

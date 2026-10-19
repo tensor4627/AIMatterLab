@@ -64,3 +64,16 @@ class NativeNEB(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'matching cells'):validate({'directory':str(self.root),'inputs':list(self.inputs)})
   (self.root/'fs.xyz').write_text(XYZ);(self.root/'nep.txt').write_text('nep4 1 Si\n')
   with self.assertRaisesRegex(ValueError,'species'):validate({'directory':str(self.root),'inputs':list(self.inputs)})
+
+ def test_preparation_checks_declared_controls_before_a_draft_can_anchor_them(self):
+  from studio_worker.service import Service
+  service=Service(self.root/'worker',schedule=False)
+  try:
+   service.register_environment({'id':'e','name':'test','executables':{'python':sys.executable,'gpu-sampling':sys.executable}})
+   service.register_project({'id':'p','name':'test','policy':{'engines':['gpumd.neb'],'environments':['e'],'input_roots':[str(self.root)],'gpus':[0],'max_seconds':60,'max_concurrent':1}})
+   spec={'project_id':'p','environment_id':'e','engine':'gpumd.neb','gpu':0,'max_seconds':30,'idempotency_key':'bad','inputs':self.inputs,'parameters':{'neb':{'max_steps':3}}}
+   with self.assertRaisesRegex(ValueError,'differs from run.in'):service.prepare(spec)
+   self.assertEqual(service.store.runs(),[])
+   spec['parameters']={'neb':{'max_steps':1000}};spec['idempotency_key']='valid';run=service.prepare(spec)
+   self.assertEqual(run['input_contract']['status'],'passed');self.assertEqual(run['validation']['status'],'not_run');self.assertIsNone(run['identity'])
+  finally:service.close();service.store.db.close()

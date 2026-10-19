@@ -117,3 +117,12 @@ test('Explicit first-turn rejection preserves a loaded empty thread, uncertain t
  assert.equal((await hub.rpc('codex','thread/resume',{threadId:'fresh'})).thread.id,'fresh');assert.deepEqual((await hub.rpc('codex','thread/read',{threadId:'fresh',includeTurns:true})).thread.turns,[]);assert.equal(resumes,0);
  mode='unknown';await assert.rejects(hub.rpc('codex','turn/start',{threadId:'fresh'}),/first turn unavailable/);await assert.rejects(hub.rpc('codex','thread/resume',{threadId:'fresh'}),/空会话尚未保存/);assert.equal(resumes,1);
 });
+
+
+test('Passive account observers do not rotate a shared login token or infer access from missing metadata',async()=>{
+ const codex=new EventEmitter(),calls=[];codex.process={};codex.request=async(method,params)=>{calls.push({method,params});return {account:null,requiresOpenaiAuth:true};};
+ const hub=new AgentHub({codex,root:'/fixture',catalog:{list:()=>[]},vault:{get:()=>null},settings:()=>({}),worker:()=>null});
+ const before=await hub.account('codex');assert.equal(before.account,null);assert.equal(before.modelAccess,'not_run');assert.deepEqual(calls,[{method:'account/read',params:{refreshToken:false}}]);
+ codex.emit('event',{method:'item/agentMessage/delta',params:{threadId:'actual-turn',delta:'observed response'}});codex.emit('event',{method:'turn/completed',params:{threadId:'actual-turn',turn:{status:'completed'}}});
+ const after=await hub.account('codex');assert.equal(after.account,null);assert.equal(after.requiresOpenaiAuth,true);assert.equal(after.modelAccess,'passed');assert(calls.every(call=>call.params.refreshToken===false));
+});

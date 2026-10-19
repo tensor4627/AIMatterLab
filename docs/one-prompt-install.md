@@ -1,8 +1,8 @@
 # One-prompt 安装入口
 
-将根目录 INSTALL_AGENT.md 交给本机 Codex、Claude Code 等通用 Agent。它负责获取指定 GitHub 版本、收集配置、执行受控安装与真实验收；软件内聊天服务商仍是独立的 Codex / Kimi / Qwen 选择。集群端不安装 Agent CLI。
+将根目录 INSTALL_AGENT.md 交给本机 Codex、Claude Code 等通用 Agent。它负责获取指定 GitHub 版本、收集配置、执行受控安装与真实验收；软件内聊天服务商仍是独立的 Codex / Kimi / Qwen / DeepSeek 选择。集群端不安装 Agent CLI。
 
-本仓库尚未关联公开 GitHub remote，manifest 的 repository_url 为 null。当前入口可从本地完整 checkout 使用；发布后维护者需填写真实仓库和 release 地址、revision/hash。线上 clone / release 下载属于 not_run，不能虚构一个 URL。
+manifest 的 repository_url 仍为 null。当前入口可从本地完整 checkout 使用；发布后维护者需填写真实仓库和 release 地址、revision/hash。线上 clone / release 下载属于 not_run，不能虚构一个 URL。
 
 ## 安装状态机
 
@@ -52,8 +52,26 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 每例检查真实退出码及 smoke-result.json，MD 还检查原子数、步数、有限能量和位移。它们不证明生产收敛、模型精度或长时间稳定性。
 
-desktop 使用独立 profile、真实 renderer/worker 和 provider 请求；登录缺失则 blocked。生成的 Launch-Studio.ps1（或 Linux launcher）复用验收 profile，不覆盖用户原安装。finalize 绑定当前配置和源码指纹，要求三个阶段均通过、短例集合完整；不存在“跳过后也成功”的路径。
+desktop 使用独立 profile、真实 renderer/worker 和 provider 请求；真实调用被拒绝或需要认证时记 blocked，由用户登录后重验；账户字段不可用仍需用真实回复判定调用能力，不伪造登录。生成的 Launch-Studio.ps1（或 Linux launcher）复用验收 profile，不覆盖用户原安装。finalize 绑定当前配置和源码指纹，要求三个阶段均通过、短例集合完整；不存在“跳过后也成功”的路径。
 
-本地验证范围与最终发布记录见 v0.5.md；原始证据保留在忽略目录。
-\n同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 Studio 核对任务，或选择独立安装 root。\n
+本代验证与发布状态见 [v0.17](v0.17.md)；原始证据保留在忽略目录。
+同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 Studio 核对任务，或选择独立安装 root。
+
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。
+
+
+## 复用已有环境的 dry-run 验收
+
+将 `INSTALL_AGENT.md` 交给本机 Agent，并明确选择复用本机环境。先只读发现 WSL、实际解释器、已有引擎和登录能力，再将选中的已有环境登记到一份新的私有配置。该流程不下载源码、不运行包安装、也不配置科学环境；它会在隔离目录建立应用配置和 worker 输入快照，实际探测、执行选定短例、构建已有 checkout 并完成真实模型回复。
+
+~~~powershell
+python scripts/one_prompt.py reuse-existing --config .studio/installation/config.json --state-dir .studio/installation/audit-new
+~~~
+
+`bootstrap.enabled` 必须为 false。`state-dir` 和配置中的 `worker.root` 都须选新的空目录；控制端和 worker 分别以本次源码/配置指纹和审计身份标记所有权。未知非空目录在写入、启动服务和注册之前拒绝，不修改现有 worker、SSH 连接、凭据、项目授权或作业。同一次审计可恢复自己的目录；源码或配置变化则选择新目录。配置文件应放在审计目录外。
+
+`desktop.source_ids` 明确选择自动附加的源码摘要，可设 `[]`；安装模型回声测试默认不需要科学源码。独立安装 profile 不拷贝其他安装的凭据；Codex 可使用本机现有登录能力，其他服务商缺登录时在该独立 profile 中完成登录。该范围不改变已有 worker 源码注册授权。
+
+每次审计实际执行 target-probe 和 desktop/provider 检查。完成过的 smoke 不会被默认冒充新运行；需要本轮全新科学证据时换用新的两个目录。仅在显式 `--reuse-smoke-receipt`、已登记环境身份未变且源码无 dirty 标记时，才可恢复标有原始时间的历史 smoke；报告同时显示 `cached_evidence=true`，不能称本轮新科学运行。
+
+报告分别给出 `reuse_readiness_success`、`dry_run=true`、`installation_success=false` 与下载/安装/配置的 `not_run` 记录。复用环境的收据不能通过普通 finalize 变成新机器安装成功。GPUMD、两条采样、NEB 和训练等全路线矩阵另外记录，不能伪装成安装器已内置的三条短例。线上下载、新机器安装和缺少 fixture 的路线保留 not_run / blocked。

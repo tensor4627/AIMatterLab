@@ -32,3 +32,14 @@ test('Restored user history hides Studio context while preserving the actual use
  assert.equal(visibleUserText([{type:'text',text:'Run MD\n\n[Studio workspace context]\n'+context}]),'Run MD');
  assert.equal(visibleUserText([{type:'text',text:'Explain [Studio workspace context] in my code'}]),'Explain [Studio workspace context] in my code');
 });
+
+
+test('Current draft stage is independent of the previous completed run',()=>{
+ const base={worker:true,saving:false,saveError:false,missing:[],task:{workflowVersion:2,parameters:{temperature:315},parameterRevision:3,review:{status:'not_run',parameterRevision:2}},artifact:{id:'old',preparedRevision:2},run:{id:'old',status:'succeeded'}};
+ const changed=reviewState(base);assert.equal(changed.stage,2);assert.equal(changed.runRevision,2);assert.equal(changed.runCurrent,false);assert.equal(changed.canExecute,false);
+ assert.equal(reviewState({...base,missing:['temperature']}).stage,1);
+ const reviewed={...base,task:{...base.task,review:{status:'ready',parameterRevision:3}}};assert.equal(reviewState(reviewed).stage,3);
+ const current={...reviewed,artifact:{id:'new',preparedRevision:3},run:{id:'new',status:'running'}};assert.equal(reviewState(current).stage,4);assert.match(reviewState(current).reason,/running/);
+ assert.equal(reviewState({...current,artifact:{id:'historical'}}).runRevision,null);assert.equal(reviewState({...current,artifact:{id:'historical'}}).stage,3);
+ assert.equal(reviewState({...base,task:{...base.task,execution:{phase:'unknown'}}}).locked,true);
+});

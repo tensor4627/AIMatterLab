@@ -13,13 +13,15 @@ SCIENTIFIC = Path(__file__).with_name("scientific.py")
 
 def process_env(environment, gpu=None):
     env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     if gpu is not None:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
     paths = [str(Path(v).resolve()) for v in environment.get("repositories", {}).values() if v]
     env["PYTHONPATH"] = os.pathsep.join(paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     for key, value in environment.get("variables", {}).items():
-        if key not in ("LD_LIBRARY_PATH", "LIBRARY_PATH", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        if key not in ("LD_LIBRARY_PATH", "LIBRARY_PATH", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS", "PYTHONDONTWRITEBYTECODE"):
             raise ValueError("Unsupported loader variable: " + key)
+        if key=="PYTHONDONTWRITEBYTECODE" and str(value)!="1":raise ValueError("Scientific source bytecode writes are disabled")
         env[key] = str(value)
     return env
 
@@ -207,6 +209,11 @@ class Adapter:
             if first.startswith("# studio-pygas-source: "):
                 import json
                 source=json.loads(first.split(": ",1)[1]);registered=environment.get("repositories",{}).get("pygas")
+                io=source.get('io',{})
+                if io.get('portable'):
+                    self.require(spec['inputs'],tuple(io.get('inputs',[]))+(io['workflow'],))
+                    if p.get('output_file') not in io.get('outputs',[]):raise ValueError('Declared build output differs from the actual generated source')
+                    if any(name.endswith('.pt2') for name in io.get('outputs',[])):raise ValueError('AOTI needs explicit dual export and target-toolchain preflight')
                 if not registered or Path(registered).resolve()!=Path(source["root"]).resolve():raise ValueError("Generated CV source differs from registered pyGAS environment; register the intended source explicitly")
                 if digest(Path(registered)/"base/colvar.py")!=source["colvar_sha256"]:raise ValueError("pyGAS source changed after graph rendering; regenerate and review")
                 for relative,expected in source.get("files",{}).items():

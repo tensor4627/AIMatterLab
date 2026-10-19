@@ -13,16 +13,109 @@ def run(argv,cwd=None,env=None,timeout=900):
     return p.stdout
 def target_env(environment):
     env=os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"]="1"
     env["PYTHONPATH"]=os.pathsep.join(environment.get("repositories",{}).values())
     for key,value in environment.get("variables",{}).items():
-        if key not in ("LD_LIBRARY_PATH","LIBRARY_PATH","OMP_NUM_THREADS","MKL_NUM_THREADS"):raise ValueError("Unsupported loader variable")
+        if key not in ("LD_LIBRARY_PATH","LIBRARY_PATH","OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS","NUMEXPR_NUM_THREADS","PYTHONDONTWRITEBYTECODE"):raise ValueError("Unsupported loader variable")
+        if key=="PYTHONDONTWRITEBYTECODE" and str(value)!="1":raise ValueError("Scientific source bytecode writes are disabled")
         env[key]=str(value)
     return env
+def claim_audit_root(location,guard,role):
+    path=Path(location).expanduser()
+    if '..' in path.parts:raise ValueError('Audit directory aliases are not allowed')
+    absolute=path.absolute();canonical=path.resolve()
+    if absolute!=canonical or path.is_symlink():raise ValueError('Audit directory aliases are not allowed')
+    if canonical.exists() and not canonical.is_dir():raise ValueError('Audit directory must be a dedicated directory')
+    expected={'schema_version':1,'mode':'reuse-existing','role':role,'root':str(canonical),'audit_id':guard['audit_id'],'fingerprint':guard['fingerprint']}
+    marker=canonical/'.studio-reuse-audit.json'
+    if marker.is_symlink():raise ValueError('Linked audit ownership markers are not allowed')
+    if marker.exists():
+        if not marker.is_file() or marker.stat().st_size>4096 or json.loads(marker.read_text(encoding='utf-8'))!=expected:raise ValueError('Audit directory ownership differs; choose new dedicated roots')
+        return expected
+    if canonical.exists() and any(canonical.iterdir()):raise ValueError('Existing nonempty directory is not owned by this audit; choose new dedicated roots')
+    canonical.mkdir(parents=True,exist_ok=True,mode=0o700)
+    with marker.open('x',encoding='utf-8') as stream:json.dump(expected,stream,sort_keys=True)
+    marker.chmod(0o600)
+    return expected
+
 def probe(config):
+    """Read actual target interpreter/module/GPU/source facts; never launch native engines."""
     environment=config["compute"]["environment"];python=environment["executables"]["python"]
-    code="import importlib.util,importlib.metadata,json,sys;names=['ase','numpy','torch','cupy','pydyn','pygas','hotpp'];out={'python':sys.version.split()[0],'modules':{n:importlib.util.find_spec(n) is not None for n in names}};print(json.dumps(out))"
-    value=json.loads(run([python,"-c",code],env=target_env(environment),timeout=60).strip().splitlines()[-1])
-    return {"status":"passed","scope":"target import discovery only; scientific tests not_run","observation":value}
+    code=r"""
+import importlib,importlib.util,importlib.metadata,json,sys
+from pathlib import Path
+repos=__REGISTERED_REPOSITORIES__
+names=['ase','numpy','torch','cupy','pydyn','pydyn.sampling','pygas','hotpp']
+modules={};cuda={}
+for label in names:
+    candidates=['pygas','base'] if label=='pygas' and repos.get('pygas') else [label]
+    report={'status':'blocked','reason':'Module not found'}
+    for name in candidates:
+        try:
+            spec=importlib.util.find_spec(name)
+            if spec is None:continue
+            module=importlib.import_module(name);source=getattr(module,'__file__',None)
+            if label=='pygas' and name=='base' and repos.get('pygas') and (not source or not Path(source).resolve().is_relative_to(Path(repos['pygas']).resolve())):
+                report={'status':'blocked','reason':'Generic base module is outside the registered pyGAS source','module':name,'path':source};continue
+            version=getattr(module,'__version__',None)
+            if version is None:
+                try:version=importlib.metadata.version(label.split('.')[0])
+                except importlib.metadata.PackageNotFoundError:pass
+            report={'status':'passed','module':name,'path':source,'version':str(version) if version is not None else None}
+            if label=='torch':
+                available=bool(module.cuda.is_available());count=int(module.cuda.device_count()) if available else 0
+                cuda['torch']={'available':available,'toolkit':getattr(module.version,'cuda',None),'device_count':count,'devices':[{'index':i,'name':module.cuda.get_device_name(i)} for i in range(min(count,8))]}
+            if label=='cupy':
+                try:cuda['cupy']={'available':bool(module.cuda.runtime.getDeviceCount()),'runtime_version':module.cuda.runtime.runtimeGetVersion(),'driver_version':module.cuda.runtime.driverGetVersion()}
+                except Exception as error:cuda['cupy']={'available':False,'error_type':type(error).__name__}
+            break
+        except Exception as error:report={'status':'blocked','reason':'Import failed','module':name,'error_type':type(error).__name__}
+    modules[label]=report
+print(json.dumps({'python':sys.version.split()[0],'executable':sys.executable,'prefix':sys.prefix,'base_prefix':sys.base_prefix,'modules':modules,'cuda':cuda}))
+""".replace('__REGISTERED_REPOSITORIES__',repr(environment.get('repositories',{})))
+    executables={}
+    for name,location in environment['executables'].items():
+        path=Path(location);record={'path':str(path),'exists':path.is_file(),'executable':os.access(path,os.X_OK)}
+        if path.is_file():
+            size=path.stat().st_size;record['size']=size
+            if size>512*1024*1024:record.update(status='blocked',reason='Executable exceeds bounded audit size')
+            else:
+                sha=hashlib.sha256()
+                with path.open('rb') as stream:
+                    for chunk in iter(lambda:stream.read(1024*1024),b''):sha.update(chunk)
+                record.update(status='passed',sha256=sha.hexdigest(),resolved_path=str(path.resolve()))
+        else:record.update(status='blocked',reason='Registered executable file is missing')
+        if not record['executable']:record.update(status='blocked',reason='Registered file is not executable')
+        executables[name]=record
+    repositories={}
+    for name,location in environment.get('repositories',{}).items():
+        path=Path(location);record={'path':str(path),'exists':path.is_dir(),'commit':None,'dirty':None}
+        if path.is_dir():
+            try:
+                def git(args):
+                    result=subprocess.run(['git','--no-optional-locks','-C',str(path),*args],capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=5)
+                    if result.returncode:raise ValueError('Git metadata unavailable')
+                    return result.stdout.strip()
+                record.update(commit=git(['rev-parse','HEAD']),dirty=bool(git(['status','--porcelain'])),status='passed')
+            except (OSError,ValueError,subprocess.TimeoutExpired):record.update(status='blocked',reason='Git identity unavailable; repository was not changed')
+        else:record['status']='blocked'
+        repositories[name]=record
+    value={'status':'not_run','reason':'Registered Python is unavailable','modules':{},'cuda':{}}
+    python_check={'status':'blocked','reason':'Registered Python is unavailable'}
+    if executables.get('python',{}).get('status')=='passed':
+        try:
+            value=json.loads(run([python,"-c",code],env=target_env(environment),timeout=90).strip().splitlines()[-1])
+            if not isinstance(value,dict) or not isinstance(value.get('modules'),dict):raise ValueError('Malformed interpreter receipt')
+            version=tuple(int(part) for part in str(value.get('python','')).split('.')[:2])
+            if not value.get('executable') or version<(3,10):raise ValueError('Python 3.10 or newer is required')
+            python_check={'status':'passed','registered_path':python,'observed_path':value['executable'],'version':value['python']}
+        except Exception as error:
+            python_check={'status':'blocked','reason':'Registered interpreter could not produce a compatible import receipt','error_type':type(error).__name__}
+    requirements={'worker':(), 'reference-md':('ase','numpy'), 'pydyn-md':('ase','numpy','cupy','pydyn')}
+    required=sorted({name for case in config.get('cases',[]) for name in requirements.get(case,())})
+    required_modules={name:{'status':'passed' if value.get('modules',{}).get(name,{}).get('status')=='passed' else 'blocked','scope':'Import required by selected installation short cases'} for name in required}
+    checks=[python_check,*executables.values(),*repositories.values(),*required_modules.values()]
+    return {'status':'passed' if all(check.get('status')=='passed' for check in checks) else 'blocked','scope':'Explicit registered executable/source identities and selected-case imports only; optional module absence is reported without requesting all tools. No native engine launch, serialized artifact check or scientific run','observation':value,'python_check':python_check,'executables':executables,'repositories':repositories,'required_modules':required_modules,'mutation':'No installation, branch switch or native engine command; child bytecode writes disabled'}
 def bootstrap(config):
     global LOG_ROOT
     recipe=config.get("bootstrap",{})
@@ -66,6 +159,7 @@ def smoke(config,approved=False):
     from studio_worker.service import Service
     from studio_worker.util import atomic_json
     state=Path(config["worker"]["root"]).expanduser()
+    if config.get("_reuse_guard"):claim_audit_root(state,config["_reuse_guard"],"worker")
     service=Service(state,schedule=False)
     checks=[];environment=config["compute"]["environment"]
     inputs=state/"install-inputs"/config["_fingerprint"];inputs.mkdir(parents=True,exist_ok=True)
@@ -125,7 +219,8 @@ def smoke(config,approved=False):
 def main(value):
     action=value["action"];config=value["config"]
     try:
-        if action=="probe":result=probe(config)
+        if action=="audit-root":result={"status":"passed","ownership":claim_audit_root(config["worker"]["root"],config["_reuse_guard"],"worker")}
+        elif action=="probe":result=probe(config)
         elif action=="configure":result=bootstrap(config)
         elif action=="smoke":result=smoke(config,value.get("approved",False))
         else:raise ValueError("Unknown installer action")

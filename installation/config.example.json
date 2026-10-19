@@ -2,7 +2,8 @@
   "schema_version": 1,
   "desktop": {
     "agent_provider": "codex",
-    "install_dependencies": true
+    "install_dependencies": true,
+    "source_ids": []
   },
   "worker": {
     "distribution": "Ubuntu",

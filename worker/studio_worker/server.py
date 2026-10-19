@@ -15,6 +15,7 @@ from .task_schema import STEP_SCHEMA, validate_task
 from .util import leaf, atomic_json, digest, contained
 
 TOOL_ROUTES = {
+ "describe_engine":("POST","/api/engine/describe",{"engine":"string"}),
  "diagnose_tools":("GET","/api/tools/status",{}),
  "suggest_parameters":("POST","/api/structures/suggest",{"project_id":"string","environment_id":"string","path":"string","intent":"object"}),
  "list_source_projects":("GET","/api/source-projects",{}),
@@ -46,17 +47,22 @@ TOOL_ROUTES = {
  "resume_run": ("POST", "/api/run/resume", {"run_id": "string", "parameters": "object"}),
  "inspect_asset": ("POST", "/api/inspect", {"project_id": "string", "environment_id": "string", "path": "string", "kind": "string"}),
  "generate_bias": ("POST", "/api/templates/bias", {"parameters": "object"}),
+ "read_project_input": ("POST", "/api/workspace/read", {"project_id":"string","name":"string"}),
  "write_project_input": ("POST", "/api/workspace/write", {"project_id": "string", "name": "string", "content": "string"}),
  "read_run_input": ("POST", "/api/run/input", {"run_id":"string", "name":"string"}),
  "read_artifact": ("POST", "/api/run/file", {"run_id": "string", "name": "string"})
 }
 DESCRIPTIONS = {
+ "describe_engine":"Read the real Studio adapter parameter contract: required input basenames, canonical flat API keys, explicit nested aliases and valid modes. Use before publishing scientific workflows; technical wrapper fields are Agent responsibilities, not user questions. This is discovery only, never engine/artifact validation.",
+ "read_project_input":"Read bounded text or binary metadata/SHA256 from project-owned inputs or existing authorized project roots. name accepts an owned relative path (including cv-*/build_bias.py) or authorized absolute Linux input path. Use for Python/JSON/config/model inputs; binary models are never deserialized. No interpreter needed. Use the returned sha256 as expected_sha256 when updating an existing input.",
+ "write_project_input":"Save actual text in the project inputs root using safe relative names including nested cv-*/build_bias.py. Existing changed input requires expected_sha256 from read_project_input; on conflict re-read. Returns actual saved path/hash; never builds or executes.",
+ "inspect_asset":"Inspect an ASE structure/dataset or existing NEP regression output directory (kind=structure, dataset or regression). For script/config/JSON text or binary model metadata use read_project_input; model runtime validation is a separate reviewed stage.",
  "diagnose_tools":"Inspect registered environments, actual executable/source availability and adapter coverage. Filesystem presence is not runtime/scientific validation. Use probe_environment with the exact engine for real imports/loader checks.",
- "suggest_parameters":"Use ASE structure facts and labeled conservative pilot defaults to propose parameters with source/confidence, preserving supplied intent. Does not invent a CV, phase or production settings. Returns only unresolved high-uncertainty scientific choices for discussion.",
+ "suggest_parameters":"Use ASE structure facts and labeled conservative pilot defaults to propose parameters with source/confidence, preserving supplied intent. Does not invent a CV, phase or production settings. Returns geometry-derived peptide phi/psi atom candidates with zero/one-based order and ASE angle references, plus technical dtype/format/history-capacity defaults when supplied. Never guess indices from molecule names. Returns only unresolved high-uncertainty scientific choices for discussion.",
  "probe_environment":"Probe the explicitly selected engine in its registered Python/native runtime. Optional engine defaults to legacy pydyn.md; pass the actual route (gpumd.sampling, pygas.build, hotpp.train, etc). No branch or environment switching.",
- "inspect_source_project":"Read the actual registered scientific source catalog, CV constructor/forward signatures, hashes and capabilities. Inspect pyGAS before defining a CV; prose alone is not an executable CV.",
+ "inspect_source_project":"Read the registered public catalog and source-hashed graph/Studio I/O contract. Optional symbols (up to four exact public class names) returns bounded AST method bodies, e.g. PairwiseDistanceMean forward/MIC/output rank. No arbitrary file path, import or execution. read_project_input reads project assets, not source repositories. Inspect actual CV output shape and supported reduce semantics before collecting scalar CVs; prose alone is not executable.",
  "create_structure":"Create and register an ASE structure asset from a bounded declarative recipe. kind bulk (name, optional crystalstructure/a/cubic); molecule (name, optional vacuum); surface (bulk kwargs, indices, layers, vacuum); explicit (symbols, positions, cell, pbc); import (authorized path). Optional repeat [nx,ny,nz]. Returns validated reloaded extxyz, preview, provenance and inferred facts. Authoring only; never runs MD/relaxation.",
- "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Save the canonical graph and executable build_bias.py directly as project inputs; return their paths, hashes and a bounded preview to avoid copying long code through chat. Does not execute or build the artifact. Include returned files and the source structure in a pygas.build task for human execution.",
+ "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Save the canonical graph and executable build_bias.py directly as project inputs; return their paths, hashes and a bounded preview to avoid copying long code through chat. Does not execute or build the artifact. graph.settings must include atoms_path (actual structure) and pt_path (requested output artifact); Studio snapshots their basenames and sets workflow_path=workflow.json. Read inspect_source_project.graph_contract including studio_io and reduction/output-shape rules first. Include returned files and the source structure in a pygas.build task for human execution.",
  "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Put critical CV/bias parameters first; secondary settings can use advanced:true and a scalar default plus traceable default_source. Defaults are display guidance, not actual input edits. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
  "prepare_cluster_run":"Prepare a local immutable SSH/LSF/Slurm run draft and its batch script. No upload or submission. Stop for desktop review.",
  "draft_cluster_setup":"Propose queue, modules, engine paths and submission skill changes for user review. Cannot change SSH details or authorization.",
@@ -75,6 +81,8 @@ def tools():
             continue
         schema = {"type": "object", "properties": {k: {"type": v} for k, v in properties.items()},
                   "required": list(properties)}
+        if name=="inspect_source_project":schema["properties"]["symbols"]={"type":"array","items":{"type":"string","pattern":"^[A-Za-z_][A-Za-z0-9_]*$","maxLength":128},"maxItems":4,"uniqueItems":True}
+        if name=="describe_engine":schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name=="probe_environment":schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name == "present_task":
             schema["properties"]["steps"]={"type":"array","items":STEP_SCHEMA}
@@ -88,13 +96,15 @@ def tools():
                 "properties":{"project_id":{"type":"string"},"cluster_id":{"type":"string"},"engine":{"type":"string","enum":list(ENGINES)},"max_seconds":{"type":"integer","minimum":1},
                 "inputs":{"type":"object","additionalProperties":{"type":"string"}},"parameters":{"type":"object"},"name":{"type":"string"},"idempotency_key":{"type":"string"},
                 "resources":{"type":"object","required":["queue","cpus","gpus","memory_mb"],"properties":{"queue":{"type":"string"},"cpus":{"type":"integer","minimum":1},"gpus":{"type":"integer","minimum":0},"memory_mb":{"type":"integer","minimum":1},"account":{"type":"string"}}}}}
+        if name=="write_project_input":schema["properties"]["expected_sha256"]={"type":"string","pattern":"^[0-9a-f]{64}$"}
+        if name=="inspect_asset":schema["properties"]["kind"]={"type":"string","enum":["structure","dataset","regression"]}
         if name != "present_task":
             for key in ("offset", "frame"):
                 schema["properties"][key] = {"type": "integer", "minimum": 0}
         result.append({"name": name, "description": DESCRIPTIONS.get(name, name.replace("_", " ")),
                        "inputSchema": schema,
                        "annotations": {"readOnlyHint": method == "GET" or name in (
-                           "inspect_source_project", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
+                           "describe_engine", "read_project_input", "inspect_source_project", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
                                        "destructiveHint": name == "cancel_run"}})
     return result
 
@@ -103,7 +113,7 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.16.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.17.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/tools/status":
             return service.diagnose_tools()
         if path == "/api/source-projects":
@@ -142,6 +152,13 @@ def dispatch(service, method, path, data, admin=False):
         return service.register_project(data) if path.endswith("projects") else service.register_environment(data)
     if method != "POST":
         raise ValueError("Unknown route")
+    if path=="/api/engine/describe":
+        from .engine_contracts import describe
+        return describe(data["engine"])
+    if path in ("/api/authoring/context","/api/authoring/adopt"):
+        if not admin:raise PermissionError("Only desktop can bind draft workspaces or adopt inputs")
+        from .authoring_workspace import ensure,adopt
+        return (ensure if path.endswith("context") else adopt)(service,data)
     if path=="/api/source-projects":
         if not admin:raise PermissionError("Only desktop can register authoring sources")
         from .source_projects import inspect_source
@@ -150,7 +167,7 @@ def dispatch(service, method, path, data, admin=False):
         return store.put("source-project",value)
     if path=="/api/source-project/inspect":
         from .source_projects import inspect_source
-        return inspect_source(store.get("source-project",data["source_id"]))
+        return inspect_source(store.get("source-project",data["source_id"]),data.get("symbols"))
     if path=="/api/structures/import-material":
         if not admin:raise PermissionError("External database provenance must come from desktop")
         return service.authoring(data,"create_structure")
@@ -243,18 +260,9 @@ def dispatch(service, method, path, data, admin=False):
                                data.get("kind", "dataset"), data.get("frame", 0))
     if path == "/api/templates/bias":
         return {"source": build_bias(data["parameters"]), "validation": "not_run"}
-    if path == "/api/workspace/write":
-        project = store.get("project", data["project_id"])
-        name = leaf(data["name"])
-        if not isinstance(data["content"], str) or len(data["content"]) > 2 * 1024 * 1024:
-            raise ValueError("Input source exceeds 2 MiB")
-        root = service.root / "projects" / project["id"] / "inputs"
-        root.mkdir(parents=True, exist_ok=True)
-        target = root / name
-        if target.is_symlink():
-            raise ValueError("Symlink input targets are not allowed")
-        target.write_text(data["content"], encoding="utf-8")
-        return {"path": str(target), "name": name}
+    if path in ("/api/workspace/read","/api/workspace/write"):
+        from .workspace_io import read_input,write_input
+        return read_input(service,data) if path.endswith('read') else write_input(service,data,admin)
     raise ValueError("Unknown route")
 
 
@@ -330,7 +338,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.16.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.17.0"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}

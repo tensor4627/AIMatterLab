@@ -1,17 +1,17 @@
 # GPU Sampling Studio
 
-面向 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 的中文 Agent 科学计算桌面工作台。Electron + React + TypeScript 自定义前端，Codex app server 与 Kimi / Qwen 官方 ACP CLI 负责 Agent，独立 Python/WSL 服务负责 GPU 作业。
+面向 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 的中文 Agent 科学计算桌面工作台。Electron + React + TypeScript 自定义前端，Codex app server、Kimi / Qwen 官方 ACP CLI 与 DeepSeek API 负责 Agent，独立 Python/WSL 服务负责 GPU 作业。
 
 ## 启动
 
-Windows 安装包位于 `release/v0.16.0/GPU Sampling Studio 0.16.0.exe`。首次启动：
+Windows 安装包位于 `release/v0.17.0/GPU Sampling Studio 0.17.0.exe`。首次启动：
 
-1. 点击「连接 WSL」。设置中选择已安装的发行版，默认 Ubuntu。
+1. 普通对话可直接连接服务商；进行科学计算时先点击「连接 WSL」，在设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
-3. 新建项目，设置输入根目录、环境 ID、GPU、并发和时间上限。这些授权仅由桌面用户修改。
+3. 普通会话无需预先创建项目；任务规划自动创建仅供编写输入的会话草稿工作区。执行前在部署页选择已授权计算项目，设置输入根目录、环境、GPU、并发和时间上限；这些授权仅由桌面用户修改。
 4. Agent 顶部选择 Codex / Kimi / Qwen / DeepSeek，点击「登录 / 账户」；登录后连接并检查模型目录，再描述目标。Qwen 使用百炼或 Coding Plan 密钥。
 5. 确认 Agent 显示「科学工具已就绪」及当前实际工具数量。账户连接与科学工具连接分别检查；未就绪时点击「修复工具连接」。
-6. 开启 Agent 的「任务规划模式」后，创建草稿才会打开中央流程及对应模块审阅页。在同一会话流程中直接改参数，使用缺项定位并点击「复核」。参数和输入完整后点击「执行」，由 worker 验证与提交。日志、结果文件、曲线和轨迹在任务记录中打开。
+6. 开启 Agent 的「任务规划模式」后，创建草稿才会打开中央流程及对应模块审阅页。在同一会话流程中直接改参数，使用缺项定位并点击「复核」。参数与实际文件复核后点击「配置部署」，选择计算项目和环境、核对快照，再点击「执行」，由 worker 验证与提交。日志、结果文件、曲线和轨迹在任务记录中打开。
 
 作业输入复制到 WSL Linux 文件系统。桌面退出只停止聊天与交互终端，已提交的作业继续运行。作业服务源代码部署到持久化 Linux runtime，便携包退出不会删除运行依赖。系统/WSL 停止后只能按引擎 checkpoint 能力续算；未知进程不会自动重提。
 
@@ -27,7 +27,7 @@ pnpm run pack
 
 使用 PATH 中的 pnpm；安装器也支持在 desktop.pnpm 中登记可执行文件路径。
 
-最新三轮改进与范围：[完整审查](docs/audit-20261017.md)、[0.7](docs/v0.7.md)、[0.8](docs/v0.8.md)、[0.9](docs/v0.9.md)。本机未保存修改可恢复并重试；SSH、凭据与真实作业记录保留。
+本代三轮改进、联合审阅及发布状态见 [v0.17](docs/v0.17.md)。本机未保存修改可恢复并重试；SSH、凭据与真实作业记录保留。
 
 ## 本地源码与结构创建
 
@@ -122,3 +122,5 @@ Agent 默认普通对话，开启「任务规划模式」才自动生成中央�
 
 
 DeepSeek API：在 Agent 面板选择 **DeepSeek API → 登录 / 账户**，输入 DeepSeek 开放平台 API Key。主进程通过系统加密保存密钥，连接后从官方 `/models` 读取目录；已知当前模型默认关闭思考，也可选择 low / high / max。无需安装 DeepSeek CLI；支持流式回复、科学工具、当前会话流程更新与复核，计算仍由你审阅后执行。真实账户推理需自行配置 Key 后验证；尚未进行 TPS 对比。[接入与验证说明](docs/v0.10.md)。
+
+开发与验收：[A/B/C 开发闭环 skill](docs/development/skills/studio-development-loop/SKILL.md)（开发专用，不自动附加到科学对话）。
