@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "scope": "source-pinned planning rules, not current runtime capabilities or scientific proof",
+  "authority": "Actual registered version/parser overrides historical observations and latest public manuals. Defaults need current-source verification.",
+  "software": "native_nep",
+  "rules": {
+    "basic": [
+      {
+        "key": "train.xyz/test.xyz + separate heldout",
+        "rule": "Actual extxyz labels/species/order audited. Training-time test/monitor data is distinct from final independent evaluation asset."
+      },
+      {
+        "key": "type",
+        "rule": "Mandatory count and ordered chemical species derived from real data/model, not a guess."
+      },
+      {
+        "key": "version / consumer",
+        "rule": "Registered local parser accepts3/4, defaults4; current upstream web NEP4-only cannot silently rewrite local semantics."
+      },
+      {
+        "key": "cutoff",
+        "unit": "angstrom",
+        "source_default": [
+          8,
+          4
+        ],
+        "rule": "Propose system-appropriate values with basis; source admissibility bounds are not scientific recommended values."
+      },
+      {
+        "key": "generation",
+        "source_default": 100000,
+        "rule": "SNES iteration budget, not epoch; explicit bounded pilot proposal."
+      }
+    ],
+    "details_defaults": {
+      "n_max": [
+        6,
+        6
+      ],
+      "basis_size": [
+        6,
+        6
+      ],
+      "l_max": [
+        4,
+        2,
+        0
+      ],
+      "neuron": 30,
+      "lambda_e": 1,
+      "lambda_f": 1,
+      "lambda_v": 0.1,
+      "batch": 1000,
+      "population": 50,
+      "save_potential_interval": 100000
+    },
+    "units": {
+      "energy_input": "eV total cell",
+      "forces_input": "eV/angstrom",
+      "virial_input": "eV total cell",
+      "stress_input": "eV/angstrom^3, opposite sign from virial/volume",
+      "energy_RMSE": "eV/atom",
+      "virial_RMSE": "eV/atom"
+    },
+    "source_conflicts": [
+      "local cutoff docs max10A versus parser max100A; keep parser admissibility separate from proposal",
+      "local population docs max100 versus parser max200; source also rounds population by visibleGPU count",
+      "local parser requires type before cutoff, beyond docs blanket any-order exception",
+      "save_potential requires all3 arguments in current parser; do not emit1-argument tutorial shorthand",
+      "native nep.restart restores optimizer state with matching descriptor hyperparameters; nep.txt alone is a model, not identical resume"
+    ]
+  }
+}

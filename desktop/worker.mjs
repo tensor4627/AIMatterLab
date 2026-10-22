@@ -2,11 +2,12 @@ import { execFile,spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import {createInterface} from 'node:readline';
 import http from 'node:http';
+import {McpProviderScopes} from './mcp-provider-scope.mjs';
 import path from 'node:path';
 import { linuxPath, assertWorkerRoute } from './security.mjs';
 const exec = promisify(execFile);
 export class WorkerClient {
- constructor(){this.pending=new Map();this.next=1;}
+ constructor(){this.pending=new Map();this.next=1;this.providerScopes=new McpProviderScopes();}
  async connect(settings,source){
   if(this.connecting)return this.connecting;
   this.connecting=this.open(settings,source).finally(()=>{this.connecting=null;});return this.connecting;
@@ -32,7 +33,7 @@ export class WorkerClient {
     try{const value=JSON.parse(line),item=this.pending.get(value.id);if(item){clearTimeout(item.timer);this.pending.delete(value.id);item.resolve(value);}}catch{}
    });
    relay.on('error',e=>{if(this.relay===relay)this.reject(e);});
-   relay.on('exit',()=>{if(this.relay===relay){this.reject(Error('WSL relay disconnected; job status is unknown'));this.connection=null;}});
+   relay.on('exit',()=>{if(this.relay===relay){this.providerScopes.revokeAll();this.reject(Error('WSL relay disconnected; job status is unknown'));this.connection=null;}});
    this.relay.stderr.on('data',()=>{});
    const health=await this.forward('GET','/api/health',undefined,false,10000);
    if(health.status!==200||health.data.root!==this.connection.health.root)throw Error('WSL relay identity mismatch');
@@ -40,25 +41,37 @@ export class WorkerClient {
   }
  }
  setLocalTools(definitions,handler){this.localDefinitions=definitions;this.localHandler=handler;}
+ setScopedTools(definitions,handler){this.scopedDefinitions=definitions;this.scopedHandler=handler;}
+ providerConnection(provider){if(!this.connection)return undefined;return this.providerScopes.connection(provider,this.connection);}
+ revokeProvider(provider){this.providerScopes.revoke(provider);}
  async exposeTools(health){
   this.proxy=http.createServer(async(req,res)=>{
-   if(req.url!=='/mcp'||req.headers.origin||req.headers.authorization!=='Bearer '+this.connection?.tokens.mcp){res.writeHead(403);res.end();return;}
+   const scope=this.providerScopes.authenticate({pathname:req.url,authorization:req.headers.authorization,origin:req.headers.origin,host:req.headers.host});
+   if(!scope){res.writeHead(403);res.end();return;}
    if(!['GET','POST'].includes(req.method)){res.writeHead(405);res.end();return;}
    try{
     const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>4*1024*1024)throw Error('Request too large');chunks.push(chunk);}
     const body=bytes?JSON.parse(Buffer.concat(chunks).toString('utf8')):undefined;
     let response;
-    if(body?.method==='tools/call'&&(this.localDefinitions||[]).some(t=>t.name===body.params?.name)){
+    const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
+    if(body?.method==='tools/call'&&scopedTool){
+     if(!scope.localReaders){res.writeHead(403);res.end();return;}
+     let result;try{const value=await this.scopedHandler(body.params.name,body.params.arguments||{},{provider:scope.provider});result={content:[{type:'text',text:JSON.stringify(value)}],isError:['blocked','permission_required'].includes(value?.status)};}catch(e){result={content:[{type:'text',text:e.message}],isError:true};}
+     response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
+    }else if(body?.method==='tools/call'&&(this.localDefinitions||[]).some(t=>t.name===body.params?.name)){
      let result;try{result={content:[{type:'text',text:JSON.stringify(await this.localHandler(body.params.name,body.params.arguments||{}))}],isError:false};}catch(e){result={content:[{type:'text',text:e.message}],isError:true};}
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(this.relay)response=await this.forward(req.method,'/mcp',body,true);
     else{const upstream=await fetch(this.upstream+'/mcp',{method:req.method,headers:{Authorization:'Bearer '+this.connection.tokens.mcp,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(245000)});const text=await upstream.text();response={status:upstream.status,data:text?JSON.parse(text):null};}
-    if(body?.method==='tools/list'&&response.data?.result?.tools)response.data.result.tools.push(...(this.localDefinitions||[]));
+    if(body?.method==='tools/list'&&response.data?.result?.tools)response.data.result.tools.push(...(this.localDefinitions||[]),...(scope.localReaders?this.scopedDefinitions||[]:[]));
+    const current=this.providerScopes.authenticate({pathname:req.url,authorization:req.headers.authorization,origin:req.headers.origin,host:req.headers.host});
+    if(!current||current.provider!==scope.provider||current.generation!==scope.generation){res.writeHead(403);res.end();return;}
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
    }catch(e){res.writeHead(502);res.end(JSON.stringify({error:e.message}));}
   });
   await new Promise((resolve,reject)=>{this.proxy.once('error',reject);this.proxy.listen(0,'127.0.0.1',resolve);});
   this.connection.url='http://127.0.0.1:'+this.proxy.address().port;
+  this.providerScopes.bind(this.connection);
   return {...health,transport:this.connection.transport};
  }
 
@@ -94,5 +107,5 @@ export class WorkerClient {
   return result;
  }
  reject(error){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(error);}this.pending.clear();}
- close(){this.reject(Error('Worker bridge closed'));this.relay?.kill();this.relay=null;this.proxy?.close();this.proxy=null;this.connection=null;}
+ close(){this.providerScopes.revokeAll();this.reject(Error('Worker bridge closed'));this.relay?.kill();this.relay=null;this.proxy?.close();this.proxy=null;this.connection=null;}
 }

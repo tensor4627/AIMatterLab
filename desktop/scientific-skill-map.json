@@ -1,0 +1,627 @@
+{
+  "schema_version": 1,
+  "scope": "Function-to-guidance map, not engine availability, install evidence, authorization or scientific validation. Only listed public entries may be read.",
+  "skills": [
+    {
+      "id": "pygas-analyze-trajectory",
+      "source": "pygas",
+      "folder": "pygas-analyze-trajectory",
+      "files": [
+        "SKILL.md",
+        "references/trajectory-contract.md"
+      ]
+    },
+    {
+      "id": "pygas-build-bias-model",
+      "source": "pygas",
+      "folder": "pygas-build-bias-model",
+      "files": [
+        "SKILL.md",
+        "references/bias-model-contract.md"
+      ]
+    },
+    {
+      "id": "pygas-build-cv-model",
+      "source": "pygas",
+      "folder": "pygas-build-cv-model",
+      "files": [
+        "SKILL.md",
+        "references/cvonly-contract.md"
+      ]
+    },
+    {
+      "id": "pygas-build-monitor-model",
+      "source": "pygas",
+      "folder": "pygas-build-monitor-model",
+      "files": [
+        "SKILL.md",
+        "references/monitor-contract.md"
+      ]
+    },
+    {
+      "id": "pygas-check-gpumd-contract",
+      "source": "pygas",
+      "folder": "pygas-check-gpumd-contract",
+      "files": [
+        "SKILL.md",
+        "references/gpumd-contract.md"
+      ]
+    },
+    {
+      "id": "pygas-compile-workflow",
+      "source": "pygas",
+      "folder": "pygas-compile-workflow",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "pygas-manage-workspace",
+      "source": "pygas",
+      "folder": "pygas-manage-workspace",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "pygas-opes",
+      "source": "pygas",
+      "folder": "pygas-opes",
+      "files": [
+        "SKILL.md",
+        "references/opes-contract.md"
+      ]
+    },
+    {
+      "id": "pygas-reweight-metad",
+      "source": "pygas",
+      "folder": "pygas-reweight-metad",
+      "files": [
+        "SKILL.md",
+        "references/reweighting-contract.md"
+      ]
+    },
+    {
+      "id": "pygas-workflow",
+      "source": "pygas",
+      "folder": "pygas-workflow",
+      "files": [
+        "SKILL.md",
+        "references/workflow-map.md"
+      ]
+    },
+    {
+      "id": "gpumd-gpu-sampling-wsl",
+      "source": "gpumd",
+      "folder": "gpumd-gpu-sampling-wsl",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "studio-main-agent",
+      "source": "studio",
+      "folder": "studio-main-agent",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "studio-md-workflow",
+      "source": "studio",
+      "folder": "studio-md-workflow",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "studio-neb-workflow",
+      "source": "studio",
+      "folder": "studio-neb-workflow",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "studio-training-workflow",
+      "source": "studio",
+      "folder": "studio-training-workflow",
+      "files": [
+        "SKILL.md"
+      ],
+      "reference_files": [
+        "references/hotpp.json",
+        "references/native_nep.json",
+        "references/torchnep.json",
+        "references/active_learning.json"
+      ]
+    },
+    {
+      "id": "studio-data-workflow",
+      "source": "studio",
+      "folder": "studio-data-workflow",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "studio-compute-workflow",
+      "source": "studio",
+      "folder": "studio-compute-workflow",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "studio-install-readiness",
+      "source": "studio",
+      "folder": "studio-install-readiness",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "studio-workflow-authoring",
+      "source": "studio",
+      "folder": "studio-workflow-authoring",
+      "files": [
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "studio-cv-bias-planning",
+      "source": "studio",
+      "folder": "studio-cv-bias-planning",
+      "files": [
+        "SKILL.md"
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "id": "md.pydyn",
+      "engines": [
+        "pydyn.md"
+      ],
+      "skills": [
+        "studio-md-workflow"
+      ],
+      "status": "implemented_adapter_missing_project_skill",
+      "phase": "authoring"
+    },
+    {
+      "id": "md.gpumd",
+      "engines": [
+        "gpumd.md"
+      ],
+      "skills": [
+        "studio-md-workflow"
+      ],
+      "status": "implemented_adapter_missing_MD_skill",
+      "phase": "authoring"
+    },
+    {
+      "id": "sampling.pydyn",
+      "engines": [
+        "pydyn.sampling"
+      ],
+      "skills": [
+        "studio-cv-bias-planning",
+        "studio-md-workflow",
+        "pygas-workflow",
+        "pygas-build-cv-model",
+        "pygas-build-bias-model"
+      ],
+      "status": "implemented",
+      "phase": "authoring"
+    },
+    {
+      "id": "sampling.gpumd",
+      "engines": [
+        "gpumd.sampling"
+      ],
+      "skills": [
+        "studio-cv-bias-planning",
+        "studio-md-workflow",
+        "pygas-workflow",
+        "pygas-build-cv-model",
+        "pygas-build-bias-model",
+        "pygas-check-gpumd-contract"
+      ],
+      "status": "implemented",
+      "phase": "authoring"
+    },
+    {
+      "id": "neb.gpumd",
+      "engines": [
+        "gpumd.neb"
+      ],
+      "skills": [
+        "studio-neb-workflow"
+      ],
+      "status": "implemented_adapter_missing_specific_skill",
+      "phase": "authoring"
+    },
+    {
+      "id": "pygas.cv",
+      "engines": [
+        "pygas.build"
+      ],
+      "skills": [
+        "studio-cv-bias-planning",
+        "pygas-build-cv-model"
+      ],
+      "status": "implemented",
+      "phase": "authoring"
+    },
+    {
+      "id": "pygas.bias",
+      "engines": [
+        "pygas.build",
+        "bias.validate"
+      ],
+      "skills": [
+        "studio-cv-bias-planning",
+        "pygas-build-cv-model",
+        "pygas-build-bias-model"
+      ],
+      "status": "implemented",
+      "phase": "authoring"
+    },
+    {
+      "id": "pygas.compile",
+      "engines": [
+        "pygas.build"
+      ],
+      "skills": [
+        "pygas-compile-workflow"
+      ],
+      "status": "source_tool_requires_capability_probe",
+      "phase": "authoring"
+    },
+    {
+      "id": "pygas.monitor",
+      "engines": [],
+      "skills": [
+        "pygas-build-monitor-model"
+      ],
+      "status": "source_guidance_only_no_dedicated_adapter",
+      "phase": "authoring"
+    },
+    {
+      "id": "pygas.opes",
+      "engines": [
+        "pygas.build",
+        "gpumd.sampling"
+      ],
+      "skills": [
+        "studio-cv-bias-planning",
+        "pygas-opes"
+      ],
+      "status": "implemented_selected_route_gate_required",
+      "phase": "authoring"
+    },
+    {
+      "id": "pygas.contract",
+      "engines": [
+        "bias.validate"
+      ],
+      "skills": [
+        "pygas-check-gpumd-contract"
+      ],
+      "status": "implemented",
+      "phase": "authoring"
+    },
+    {
+      "id": "analysis.trajectory",
+      "engines": [],
+      "skills": [
+        "pygas-analyze-trajectory"
+      ],
+      "status": "source_guidance_only_no_dedicated_adapter",
+      "phase": "analysis"
+    },
+    {
+      "id": "analysis.wtmetad",
+      "engines": [
+        "pygas.reweight"
+      ],
+      "skills": [
+        "pygas-reweight-metad"
+      ],
+      "status": "implemented",
+      "phase": "analysis"
+    },
+    {
+      "id": "analysis.opes",
+      "engines": [
+        "pygas.opes-reweight"
+      ],
+      "skills": [
+        "pygas-opes"
+      ],
+      "status": "implemented",
+      "phase": "analysis"
+    },
+    {
+      "id": "training.nep",
+      "engines": [
+        "nep.train",
+        "nep.eval",
+        "nep.analyze"
+      ],
+      "skills": [
+        "studio-training-workflow"
+      ],
+      "status": "implemented_adapter_missing_project_skill",
+      "reference_files": {
+        "studio-training-workflow": [
+          "references/native_nep.json"
+        ]
+      },
+      "phase": "authoring"
+    },
+    {
+      "id": "training.hotpp",
+      "engines": [
+        "hotpp.train",
+        "hotpp.eval",
+        "hotpp.export"
+      ],
+      "skills": [
+        "studio-training-workflow"
+      ],
+      "status": "implemented_adapter_missing_project_skill",
+      "reference_files": {
+        "studio-training-workflow": [
+          "references/hotpp.json"
+        ]
+      },
+      "phase": "authoring"
+    },
+    {
+      "id": "training.torchnep",
+      "engines": [],
+      "skills": [
+        "studio-training-workflow"
+      ],
+      "status": "planned_missing_adapter_and_project_skill; Studio_source_guidance_only",
+      "reference_files": {
+        "studio-training-workflow": [
+          "references/torchnep.json"
+        ]
+      },
+      "phase": "planning_reference"
+    },
+    {
+      "id": "learning.nepmaker",
+      "engines": [],
+      "skills": [
+        "studio-training-workflow"
+      ],
+      "status": "planned_missing_adapter_and_discovered_skill; Studio_source_guidance_only",
+      "reference_files": {
+        "studio-training-workflow": [
+          "references/active_learning.json"
+        ]
+      },
+      "phase": "planning_reference"
+    },
+    {
+      "id": "learning.activemiao",
+      "engines": [],
+      "skills": [
+        "studio-training-workflow"
+      ],
+      "status": "planned_missing_adapter_and_discovered_skill; Studio_source_guidance_only",
+      "reference_files": {
+        "studio-training-workflow": [
+          "references/active_learning.json"
+        ]
+      },
+      "phase": "planning_reference"
+    },
+    {
+      "id": "external.dft",
+      "engines": [],
+      "skills": [
+        "studio-data-workflow"
+      ],
+      "status": "planned_missing_executor",
+      "phase": "planning_reference"
+    },
+    {
+      "id": "neb.pydyn",
+      "engines": [],
+      "skills": [
+        "studio-neb-workflow"
+      ],
+      "status": "planned_missing_adapter",
+      "phase": "planning_reference"
+    },
+    {
+      "id": "structure.ase",
+      "engines": [],
+      "skills": [
+        "studio-data-workflow"
+      ],
+      "tools": [
+        "create_structure",
+        "inspect_asset",
+        "suggest_parameters"
+      ],
+      "status": "implemented_tool",
+      "phase": "authoring"
+    },
+    {
+      "id": "structure.materials-project",
+      "engines": [],
+      "skills": [
+        "studio-data-workflow"
+      ],
+      "status": "implemented_UI_query_requires_explicit_configured_key",
+      "phase": "import"
+    },
+    {
+      "id": "assets.inspect-register",
+      "engines": [],
+      "skills": [
+        "studio-data-workflow"
+      ],
+      "tools": [
+        "inspect_asset",
+        "read_project_input"
+      ],
+      "status": "implemented_tool_and_UI_registration",
+      "phase": "asset_metadata"
+    },
+    {
+      "id": "assets.collect-transfer",
+      "engines": [],
+      "skills": [
+        "studio-data-workflow",
+        "studio-compute-workflow"
+      ],
+      "tools": [
+        "collect_artifacts",
+        "collect_cluster_artifacts"
+      ],
+      "status": "implemented_collection_transfer_requires_authorized_target",
+      "phase": "results"
+    },
+    {
+      "id": "assets.processing-request",
+      "engines": [],
+      "skills": [
+        "studio-data-workflow"
+      ],
+      "status": "reviewable_request_only_no_external_DFT_executor",
+      "phase": "request_draft"
+    },
+    {
+      "id": "viewer.structure-trajectory",
+      "engines": [],
+      "skills": [
+        "studio-data-workflow"
+      ],
+      "status": "implemented_lightweight_preview_no_OVITO",
+      "phase": "preview"
+    },
+    {
+      "id": "environment.probe",
+      "engines": [],
+      "skills": [
+        "studio-compute-workflow"
+      ],
+      "tools": [
+        "list_environments",
+        "diagnose_tools",
+        "probe_environment"
+      ],
+      "status": "implemented_tool_runtime_evidence_separate",
+      "phase": "discovery"
+    },
+    {
+      "id": "cluster.connection-setup",
+      "engines": [],
+      "skills": [
+        "studio-compute-workflow"
+      ],
+      "tools": [
+        "list_clusters",
+        "probe_cluster",
+        "read_cluster_skill",
+        "draft_cluster_setup"
+      ],
+      "status": "implemented_draft_human_settings_required",
+      "phase": "setup"
+    },
+    {
+      "id": "compute.queue",
+      "engines": [],
+      "skills": [
+        "studio-compute-workflow"
+      ],
+      "tools": [
+        "list_runs",
+        "run_status",
+        "read_log",
+        "cluster_run_status",
+        "cluster_read_log"
+      ],
+      "status": "implemented_no_autoresubmit_unknown",
+      "phase": "monitor"
+    },
+    {
+      "id": "cluster.lsf-slurm-deployment",
+      "engines": [],
+      "skills": [
+        "studio-compute-workflow"
+      ],
+      "tools": [
+        "prepare_cluster_run"
+      ],
+      "status": "implemented_human_review_execute_live_compatibility_separate",
+      "phase": "deployment"
+    },
+    {
+      "id": "installation.readiness",
+      "engines": [],
+      "skills": [
+        "studio-install-readiness"
+      ],
+      "status": "implemented_reuse_readiness_distinct_fresh_install",
+      "phase": "installation"
+    },
+    {
+      "id": "workspace.bundle-handoff",
+      "engines": [],
+      "skills": [
+        "pygas-manage-workspace",
+        "studio-data-workflow"
+      ],
+      "tools": [
+        "read_project_input",
+        "read_run_input",
+        "collect_artifacts"
+      ],
+      "status": "source_guidance_adapted_to_Studio_owned_layout",
+      "phase": "bundle_handoff",
+      "adaptation": "Keep Studio worker-owned runtime roots and explicitly selected formats; upstream workspace/task.yaml and new-v2 dual defaults do not override Studio defaults or authorize upstream workspace initialization."
+    },
+    {
+      "id": "environment.gpu-sampling-compatibility",
+      "engines": [],
+      "skills": [
+        "gpumd-gpu-sampling-wsl",
+        "studio-compute-workflow"
+      ],
+      "tools": [
+        "probe_environment",
+        "diagnose_tools"
+      ],
+      "status": "read_only_compatibility_guidance_builds_are_separate_reviewed_stage",
+      "phase": "toolchain",
+      "adaptation": "Do not auto-attach to ordinary MD or require benchmarks for routine use; never invoke an unrequested build or fallback from selected AOTI."
+    },
+    {
+      "id": "workflow.orchestrate",
+      "engines": [],
+      "skills": [
+        "studio-main-agent"
+      ],
+      "status": "product_guide_candidate_not_yet_loaded",
+      "phase": "orchestration"
+    },
+    {
+      "id": "pygas.custom-cv",
+      "engines": [],
+      "skills": [
+        "studio-cv-bias-planning"
+      ],
+      "tools": [],
+      "status": "planned_formula_discussion_only_registry_and_numeric_gate_not_implemented",
+      "phase": "formula_discussion"
+    }
+  ]
+}

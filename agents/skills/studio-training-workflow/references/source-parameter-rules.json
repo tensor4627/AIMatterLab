@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "status": "source-pinned planning rules, not current runtime capabilities or scientific proof",
+  "authority": "Actual registered version/parser overrides historical observations and latest public manuals. Defaults need current-source verification.",
+  "software": {
+    "hotpp": {
+      "basic": [
+        {
+          "key": "Data.trainSet / Data.testSet",
+          "rule": "Bind and inspect actual labeled assets. testSet is used as validation during training/checkpoint selection, not an independent final test."
+        },
+        {
+          "key": "Train.targetProp / Train.weight",
+          "rule": "Match available labels and target; ordinary energy/forces and optional virial are distinct from dipole/polar targets."
+        },
+        {
+          "key": "cutoff",
+          "unit": "angstrom",
+          "rule": "Choose a justified proposal from supplied config/model/system; required top-level source field, not in DefaultPara."
+        },
+        {
+          "key": "Train.maxEpoch / Train.maxStep",
+          "rule": "Propose bounded pilot or requested budget; do not silently use long source defaults10000epochs/1e6steps as a short example."
+        },
+        {
+          "key": "export consumer / symbols",
+          "rule": "Choose ASE atomic-number export for PyDyn; preserve species meaning/order and separate LAMMPS type-index consumer."
+        }
+      ],
+      "details_defaults": {
+        "Data.trainBatch": 32,
+        "Data.testBatch": 32,
+        "Model.nLayer": 5,
+        "Model.nEmbedding": 64,
+        "Model.maxRWay": 2,
+        "Model.maxOutWay": 2,
+        "Train.targetProp": [
+          "energy",
+          "forces"
+        ],
+        "Train.weight": [
+          0.1,
+          1.0
+        ],
+        "Train.Optimizer.type": "Adam",
+        "Train.Optimizer.learningRate": 0.01,
+        "Train.allowMissing": false,
+        "Train.acceleration.mode": "none"
+      },
+      "automatic_technical": [
+        "actual registration/executable/device and source version",
+        "explicit saved seed, owned working/output directories and immutable inputs",
+        "data counts/species/cell/PBC/label masks and split hashes",
+        "source-derived architecture defaults as annotated proposals, not user blanks"
+      ],
+      "readiness": [
+        "actual dataset/config paths imported without parent-root grants",
+        "no validation/test leakage; report independent test separately",
+        "missing virial stays missing, never zero-filled RMSE",
+        "stress/virial sign conversion checked; source maps virial=-volume*stress",
+        "checkpoint versus eager model versus ase/lammps scripted artifact explicit",
+        "freeze selected output saved/reloaded on actual consumer before MD readiness"
+      ],
+      "consumer_hazards": [
+        "HotPP package name miaonet differs from import/CLI hotpp",
+        "freeze mutates embedding representation for LAMMPS only after saving ASE artifact; outputs are not interchangeable",
+        "Studio hotpp.eval currently passes no properties override, so default energy/forces eval must not be called a dipole/virial evaluation",
+        "Studio export fixes CUDA+double; tutorial CPU/default freeze is not current adapter behavior",
+        "branch acceleration report numbers are historical, not this campaign speed or generic support"
+      ]
+    },
+    "native_nep": {
+      "basic": [
+        {
+          "key": "train.xyz/test.xyz + separate heldout",
+          "rule": "Actual extxyz labels/species/order audited. Training-time test/monitor data is distinct from final independent evaluation asset."
+        },
+        {
+          "key": "type",
+          "rule": "Mandatory count and ordered chemical species derived from real data/model, not a guess."
+        },
+        {
+          "key": "version / consumer",
+          "rule": "Registered local parser accepts3/4, defaults4; current upstream web NEP4-only cannot silently rewrite local semantics."
+        },
+        {
+          "key": "cutoff",
+          "unit": "angstrom",
+          "source_default": [
+            8,
+            4
+          ],
+          "rule": "Propose system-appropriate values with basis; source admissibility bounds are not scientific recommended values."
+        },
+        {
+          "key": "generation",
+          "source_default": 100000,
+          "rule": "SNES iteration budget, not epoch; explicit bounded pilot proposal."
+        }
+      ],
+      "details_defaults": {
+        "n_max": [
+          6,
+          6
+        ],
+        "basis_size": [
+          6,
+          6
+        ],
+        "l_max": [
+          4,
+          2,
+          0
+        ],
+        "neuron": 30,
+        "lambda_e": 1,
+        "lambda_f": 1,
+        "lambda_v": 0.1,
+        "batch": 1000,
+        "population": 50,
+        "save_potential_interval": 100000
+      },
+      "units": {
+        "energy_input": "eV total cell",
+        "forces_input": "eV/angstrom",
+        "virial_input": "eV total cell",
+        "stress_input": "eV/angstrom^3, opposite sign from virial/volume",
+        "energy_RMSE": "eV/atom",
+        "virial_RMSE": "eV/atom"
+      },
+      "source_conflicts": [
+        "local cutoff docs max10A versus parser max100A; keep parser admissibility separate from proposal",
+        "local population docs max100 versus parser max200; source also rounds population by visibleGPU count",
+        "local parser requires type before cutoff, beyond docs blanket any-order exception",
+        "save_potential requires all3 arguments in current parser; do not emit1-argument tutorial shorthand",
+        "native nep.restart restores optimizer state with matching descriptor hyperparameters; nep.txt alone is a model, not identical resume"
+      ]
+    },
+    "torchnep": {
+      "execution_status": "NO_STUDIO_ADAPTER; authoring/reference guidance cannot become ready-to-submit route",
+      "basic": [
+        "actual train and explicit validation/heldout assets",
+        "NEP4 regular energy model only for reliable baseline",
+        "scratch versus model-weight restart",
+        "explicit source-compatible architecture/cutoffs and target consumer",
+        "bounded epoch budget"
+      ],
+      "details_defaults": {
+        "batch": 4,
+        "device": "cpu",
+        "dtype": "float64",
+        "seed": 0,
+        "lambda_e": 1,
+        "lambda_f": 1,
+        "lambda_v": 0.1,
+        "lambda_1": 0,
+        "lambda_2": 0,
+        "freeze_q_scaler": true,
+        "freeze_c": false,
+        "neighbor_cache": "auto",
+        "fallback_epochs": 100,
+        "fallback_lr": 0.001,
+        "fallback_optimizer": "adamw",
+        "fallback_weight_decay": 1e-05,
+        "fallback_save_every": 10,
+        "fallback_energy_shift": "initial",
+        "fallback_lr_scheduler": "off"
+      },
+      "readiness_hazards": [
+        "--val-fraction is reserved/unused; missing test.xyz disables validation, no promised automatic10% split",
+        "--restart loads weights, not full Adam state",
+        "generation maps default epoch count; population does not control Adam; unsupported native keys may be parsed but unused",
+        "ordinary NEP4 only; qNEP virial known failed, charge/BEC/dipole/polar training not implemented",
+        "explicit MD targets reject second hidden layer; GPU-Sampling target rejects extra invariant layouts",
+        "default target=torchnep only persistence, not native consumer validation",
+        "native and TorchNEP ZBL syntax/defaults differ; do not transfer entire nep.in unchanged",
+        "same-name PyPI/latest or older branch docs are not this pinned0.1.0 lineage"
+      ]
+    },
+    "active_learning": {
+      "execution_status": "PLANNED_NO_REGISTERED_ROOT_OR_STUDIO_ADAPTER",
+      "guidance": "Keep label request, train, criterion preparation, explore, select and feedback assets explicit; expose current unavailable components rather than fictional complete automation.",
+      "basic_scientific_choices": [
+        "labeling method and data semantics",
+        "exploration conditions and intended domain",
+        "selection criterion/budget and stop conditions",
+        "chosen trainer and model consumer"
+      ],
+      "automatic_technical_after_verified_registration": [
+        "resource mapping/templates from local runtime guide",
+        "owned per-stage directories and hash/provenance",
+        "known schema defaults and output artifact handoffs"
+      ],
+      "hazards": [
+        "paper canonical code link is ActiveMiao; older similarly named repository cannot auto-register",
+        "public current README lists NEP/TorchNEP trainers, not HotPP; private/user-specific extension unverified",
+        "ASEMDExplorer is documented as fixed EMT plumbing, not exploring with the trained model",
+        "DFT credential/compute/scheduler authorization cannot be inferred from a tutorial",
+        "normal calculation must not reread/install dependency instructions; install/reconfigure is a distinct justified phase"
+      ]
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "scope": "source-pinned planning rules, not current runtime capabilities or scientific proof",
+  "authority": "Actual registered version/parser overrides historical observations and latest public manuals. Defaults need current-source verification.",
+  "software": "torchnep",
+  "rules": {
+    "execution_status": "NO_STUDIO_ADAPTER; authoring/reference guidance cannot become ready-to-submit route",
+    "basic": [
+      "actual train and explicit validation/heldout assets",
+      "NEP4 regular energy model only for reliable baseline",
+      "scratch versus model-weight restart",
+      "explicit source-compatible architecture/cutoffs and target consumer",
+      "bounded epoch budget"
+    ],
+    "details_defaults": {
+      "batch": 4,
+      "device": "cpu",
+      "dtype": "float64",
+      "seed": 0,
+      "lambda_e": 1,
+      "lambda_f": 1,
+      "lambda_v": 0.1,
+      "lambda_1": 0,
+      "lambda_2": 0,
+      "freeze_q_scaler": true,
+      "freeze_c": false,
+      "neighbor_cache": "auto",
+      "fallback_epochs": 100,
+      "fallback_lr": 0.001,
+      "fallback_optimizer": "adamw",
+      "fallback_weight_decay": 1e-05,
+      "fallback_save_every": 10,
+      "fallback_energy_shift": "initial",
+      "fallback_lr_scheduler": "off"
+    },
+    "readiness_hazards": [
+      "--val-fraction is reserved/unused; missing test.xyz disables validation, no promised automatic10% split",
+      "--restart loads weights, not full Adam state",
+      "generation maps default epoch count; population does not control Adam; unsupported native keys may be parsed but unused",
+      "ordinary NEP4 only; qNEP virial known failed, charge/BEC/dipole/polar training not implemented",
+      "explicit MD targets reject second hidden layer; GPU-Sampling target rejects extra invariant layouts",
+      "default target=torchnep only persistence, not native consumer validation",
+      "native and TorchNEP ZBL syntax/defaults differ; do not transfer entire nep.in unchanged",
+      "same-name PyPI/latest or older branch docs are not this pinned0.1.0 lineage"
+    ]
+  }
+}

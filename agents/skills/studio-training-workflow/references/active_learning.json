@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "scope": "source-pinned planning rules, not current runtime capabilities or scientific proof",
+  "authority": "Actual registered version/parser overrides historical observations and latest public manuals. Defaults need current-source verification.",
+  "software": "active_learning",
+  "rules": {
+    "execution_status": "PLANNED_NO_REGISTERED_ROOT_OR_STUDIO_ADAPTER",
+    "guidance": "Keep label request, train, criterion preparation, explore, select and feedback assets explicit; expose current unavailable components rather than fictional complete automation.",
+    "basic_scientific_choices": [
+      "labeling method and data semantics",
+      "exploration conditions and intended domain",
+      "selection criterion/budget and stop conditions",
+      "chosen trainer and model consumer"
+    ],
+    "automatic_technical_after_verified_registration": [
+      "resource mapping/templates from local runtime guide",
+      "owned per-stage directories and hash/provenance",
+      "known schema defaults and output artifact handoffs"
+    ],
+    "hazards": [
+      "paper canonical code link is ActiveMiao; older similarly named repository cannot auto-register",
+      "public current README lists NEP/TorchNEP trainers, not HotPP; private/user-specific extension unverified",
+      "ASEMDExplorer is documented as fixed EMT plumbing, not exploring with the trained model",
+      "DFT credential/compute/scheduler authorization cannot be inferred from a tutorial",
+      "normal calculation must not reread/install dependency instructions; install/reconfigure is a distinct justified phase"
+    ]
+  }
+}

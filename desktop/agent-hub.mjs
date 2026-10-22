@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import {DeepSeekBridge,deepseekCredentials} from './deepseek.mjs';
@@ -12,9 +13,10 @@ export function loginUrl(provider,url){
  return target.href;
 }
 export class AgentHub extends EventEmitter{
- constructor({codex,root,catalog,vault,settings,worker,fetchApi}){
-  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.fetchApi=fetchApi;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
+ constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},fetchApi}){
+  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
   this.codex.on?.('event',event=>{
+   if(event.method==='studio/codexDisconnected')this.release('codex');
    const thread=event.params?.threadId;
    if(event.method==='turn/started'){this.codexOutput.delete(thread);this.blankThreads.delete(thread);this.pendingBlankTurns.delete(thread);}
    if(event.method==='item/agentMessage/delta'&&event.params?.delta?.trim())this.codexOutput.add(thread);
@@ -28,6 +30,15 @@ export class AgentHub extends EventEmitter{
    if(event.method==='account/updated')this.emit('event',{method:'studio/accountUpdated',provider:'codex',params:{}});
   });
  }
+ release(provider){this.bridgeWorkers.delete(provider);this.releaseWorker(provider);}
+ disconnect(provider){this.bridge(provider)?.close();this.release(provider);}
+ workerFor(provider){const worker=this.getWorker(provider);if(worker)this.bridgeWorkers.set(provider,worker);else this.bridgeWorkers.delete(provider);return worker;}
+ async startCodex(config=agentConfig(this.preferences('codex'))){
+  const executable=this.path('codex');let worker=this.workerFor('codex');
+  const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config])).digest('hex');
+  if(this.codex.process&&this.codex.contextKey&&this.codex.contextKey!==key){this.disconnect('codex');worker=this.workerFor('codex');}
+  try{return await this.codex.start(executable,worker,config);}catch(error){this.release('codex');throw error;}
+ }
  preferences(provider){const settings=this.getSettings();return provider==='codex'?settings.agent||{}:settings.agentProviders?.[provider]||{};}
  path(provider){const settings=this.getSettings();return provider==='codex'?settings.codexPath:settings[provider+'Path'];}
  bridge(provider){return provider==='codex'?this.codex:this.bridges.get(provider);}
@@ -37,29 +48,32 @@ export class AgentHub extends EventEmitter{
  remember(provider,thread){if(this.deleted(provider,thread.id))return;const value={...thread,provider};delete value.turns;this.catalog.put('agent-thread',provider+':'+thread.id,value);}
  async connect(provider){
   providerId(provider);
-  if(this.active!==provider){this.cancelLogin();this.bridge(this.active)?.close();this.active=provider;}
-  if(provider==='codex')return this.codex.start(this.path(provider),this.getWorker(),agentConfig(this.preferences(provider)));
+  if(this.active!==provider){this.cancelLogin();this.disconnect(this.active);this.active=provider;}
+  if(provider==='codex')return this.startCodex();
   let bridge=this.bridges.get(provider);
   if(!bridge){
-   bridge=provider==='deepseek'?new DeepSeekBridge({catalog:this.catalog,credential:()=>this.vault.get('deepseek'),worker:()=>this.getWorker(),...this.fetchApi?{fetchApi:this.fetchApi}:{}}):new AcpBridge(provider);
+   bridge=provider==='deepseek'?new DeepSeekBridge({catalog:this.catalog,credential:()=>this.vault.get('deepseek'),worker:()=>this.bridgeWorkers.get(provider),...this.fetchApi?{fetchApi:this.fetchApi}:{}}):new AcpBridge(provider);
    bridge.on('event',event=>{
+    if(event.method==='studio/codexDisconnected')this.release(provider);
     if(event.method==='thread/started'||event.method==='studio/sessionInfo')this.remember(provider,event.params.thread);
     if(event.method==='turn/completed'&&event.params.turn?.status==='completed'&&event.params.turn?.stopReason==='end_turn'&&event.params.turn?.modelOutputReceived){this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{provider}});}
     this.emit('event',event);
    });
    bridge.on('diagnostic',text=>this.emit('event',{method:'studio/diagnostic',provider,params:{provider,text}}));this.bridges.set(provider,bridge);
   }
-  if(provider==='deepseek')return bridge.start();
+  if(provider==='deepseek'){this.workerFor(provider);try{return await bridge.start();}catch(error){this.release(provider);throw error;}}
   const credential=['qwen','deepseek'].includes(provider)?this.vault.get(provider):null;
   const profile=prepareProfile(this.root,provider,credential);
-  return bridge.start(this.path(provider),profile,this.getWorker());
+  const previous=this.bridgeWorkers.get(provider);let scoped=this.workerFor(provider);
+  if(bridge.process&&(bridge.executable!==this.path(provider)||previous?.url!==scoped?.url||previous?.tokens?.mcp!==scoped?.tokens?.mcp)){this.disconnect(provider);scoped=this.workerFor(provider);}
+  try{return await bridge.start(this.path(provider),profile,scoped);}catch(error){this.release(provider);throw error;}
  }
  async account(provider){
   providerId(provider);
   if(provider==='codex'){
    // Account observers must never reconfigure a connection captured before tools attached.
    if(this.codex.starting)await this.codex.starting;
-   else if(!this.codex.process)await this.codex.start(this.path('codex'),this.getWorker(),agentConfig(this.preferences('codex')));
+   else if(!this.codex.process)await this.startCodex();
    let result;try{result=await this.codex.request('account/read',{refreshToken:false});}
    catch(error){if(error.message!=='Codex bridge closed'||!this.codex.starting)throw error;await this.codex.starting;result=await this.codex.request('account/read',{refreshToken:false});}
    return {...result,provider,...this.loginStatus.codex,login:'chatgpt',modelAccess:this.loginStatus.codex?.modelAccess||'not_run'};
@@ -120,7 +134,7 @@ export class AgentHub extends EventEmitter{
   }
   if(provider==='qwen'||provider==='deepseek'){
    if(this.bridge(provider)?.activeTurns?.size)throw Error('Stop the current reply before replacing API credentials');
-   const credential=provider==='deepseek'?deepseekCredentials(value):qwenCredentials(value);this.vault.put(provider,credential);this.bridges.get(provider)?.close();
+   const credential=provider==='deepseek'?deepseekCredentials(value):qwenCredentials(value);this.vault.put(provider,credential);this.disconnect(provider);
    this.loginStatus[provider]={phase:'configured',modelAccess:'not_run'};return this.account(provider);
   }
   if(this.loginChild)throw Error('A provider login is already in progress');
@@ -142,7 +156,7 @@ export class AgentHub extends EventEmitter{
   const timer=setTimeout(()=>this.cancelLogin(),10*60*1000);
   const settle=(error,code)=>{
    clearTimeout(timer);if(this.loginChild!==child)return;this.loginChild=null;
-   this.loginStatus.kimi={phase:error||code!==0?'failed':'completed',message:error?.message||(code!==0?'Login exited with '+code:'Login completed'),modelAccess:'not_run'};this.bridges.get('kimi')?.close();publish();
+   this.loginStatus.kimi={phase:error||code!==0?'failed':'completed',message:error?.message||(code!==0?'Login exited with '+code:'Login completed'),modelAccess:'not_run'};this.disconnect('kimi');publish();
   };
   child.on('error',error=>settle(error));child.on('exit',code=>settle(null,code));publish();return {provider:'kimi',phase:'starting'};
  }
@@ -153,8 +167,8 @@ export class AgentHub extends EventEmitter{
  async configure(provider,preferences,threadId,model){
   if(this.codex.activeTurns?.size)throw Error('Stop the current reply before changing context settings');
   if(provider!=='codex')throw Error('This ACP provider does not expose editable context budgets; use its server-reported context and model settings');
-  const config=agentConfig(preferences);this.codex.close();await this.codex.start(this.path('codex'),this.getWorker(),config);
+  const config=agentConfig(preferences);this.disconnect('codex');await this.startCodex(config);
   if(!threadId)return {configured:true};return this.rpc('codex','thread/resume',{threadId,model});
  }
- close(){this.cancelLogin();this.codex.close();for(const bridge of this.bridges.values())bridge.close();}
+ close(){this.cancelLogin();this.disconnect('codex');for(const provider of this.bridges.keys())this.disconnect(provider);}
 }

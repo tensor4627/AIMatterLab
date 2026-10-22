@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {manifestDefinitionCorrection} from './manifest-binding.mjs';
 import {legacyNebCorrection} from './neb-binding.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {validDeployment,scientificSpec,deploymentCurrent,snapshotIdentity,inputControlParameters} from '../shared/deployment.mjs';
@@ -27,9 +28,13 @@ export async function prepareDeployment(records,worker,{taskId}){
   if(config.target==='local'&&task.parameters.engine==='gpumd.neb'&&bindingArtifact){
    const prior=await worker.request('POST','/api/run/status',{run_id:bindingArtifact});if(prior.id===bindingArtifact&&prior.project_id===config.projectId&&run.input_contract?.status==='passed'&&legacyNebCorrection(task,prior,science.parameters))correctedLegacy={kind:'invalid-unstarted-neb-schema',previousArtifactId:prior.id,sameSnapshots:true,scope:'Equivalent aliases and recorded input facts only; full target validation still required'};
   }
+  if(!correctedLegacy&&config.target==='local'&&task.parameters.engine==='gpumd.sampling'&&binding.contractVersion===2&&binding.artifactId){
+   const prior=await worker.request('POST','/api/run/status',{run_id:binding.artifactId});correctedLegacy=await manifestDefinitionCorrection(task,prior,run,science.parameters,(run_id,name)=>worker.request('POST','/api/run/input',{run_id,name}),inputControlParameters);
+  }
   if(!correctedLegacy){const blocked=records.read(taskId);blocked.deployment.request=null;records.save(blocked);throw Error('科学参数已修改，但实际输入文件未更新；请让 Agent 更新输入文件后重新复核，不能执行旧输入');}
  }
  const fresh=records.read(taskId);if(fresh.parameterRevision!==task.parameterRevision||fresh.deployment?.revision!==revision)throw Error('准备期间流程或部署已修改；已有草稿保留，请重新检查');
+ if(correctedLegacy?.kind==='unstarted-optional-manifest-definition'&&!isDeepStrictEqual(fresh.inputBinding,task.inputBinding))throw Error('准备期间原输入绑定已变化，请重新检查');
  const artifact={kind:config.target==='cluster'?'cluster-run':'run',id:run.id,name:run.name,engine:run.engine,preparedRevision:task.parameterRevision};
  fresh.inputBinding={contractVersion:2,artifactId:run.id,parameters:science.parameters,hashes,parameterRevision:task.parameterRevision,semanticStatus:'not_run',...correctedLegacy?{correction:correctedLegacy}:{}};if(!fresh.authoring)fresh.projectId=config.projectId;fresh.artifacts=[...fresh.artifacts.filter(a=>a.id!==run.id),artifact];fresh.deployment.prepared={artifactId:run.id,parameterRevision:task.parameterRevision,deploymentRevision:revision,inputIdentity:snapshotIdentity(fresh,run)};records.save(fresh);return run;
 }

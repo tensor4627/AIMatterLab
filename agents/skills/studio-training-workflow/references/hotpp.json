@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "scope": "source-pinned planning rules, not current runtime capabilities or scientific proof",
+  "authority": "Actual registered version/parser overrides historical observations and latest public manuals. Defaults need current-source verification.",
+  "software": "hotpp",
+  "rules": {
+    "basic": [
+      {
+        "key": "Data.trainSet / Data.testSet",
+        "rule": "Bind and inspect actual labeled assets. testSet is used as validation during training/checkpoint selection, not an independent final test."
+      },
+      {
+        "key": "Train.targetProp / Train.weight",
+        "rule": "Match available labels and target; ordinary energy/forces and optional virial are distinct from dipole/polar targets."
+      },
+      {
+        "key": "cutoff",
+        "unit": "angstrom",
+        "rule": "Choose a justified proposal from supplied config/model/system; required top-level source field, not in DefaultPara."
+      },
+      {
+        "key": "Train.maxEpoch / Train.maxStep",
+        "rule": "Propose bounded pilot or requested budget; do not silently use long source defaults10000epochs/1e6steps as a short example."
+      },
+      {
+        "key": "export consumer / symbols",
+        "rule": "Choose ASE atomic-number export for PyDyn; preserve species meaning/order and separate LAMMPS type-index consumer."
+      }
+    ],
+    "details_defaults": {
+      "Data.trainBatch": 32,
+      "Data.testBatch": 32,
+      "Model.nLayer": 5,
+      "Model.nEmbedding": 64,
+      "Model.maxRWay": 2,
+      "Model.maxOutWay": 2,
+      "Train.targetProp": [
+        "energy",
+        "forces"
+      ],
+      "Train.weight": [
+        0.1,
+        1.0
+      ],
+      "Train.Optimizer.type": "Adam",
+      "Train.Optimizer.learningRate": 0.01,
+      "Train.allowMissing": false,
+      "Train.acceleration.mode": "none"
+    },
+    "automatic_technical": [
+      "actual registration/executable/device and source version",
+      "explicit saved seed, owned working/output directories and immutable inputs",
+      "data counts/species/cell/PBC/label masks and split hashes",
+      "source-derived architecture defaults as annotated proposals, not user blanks"
+    ],
+    "readiness": [
+      "actual dataset/config paths imported without parent-root grants",
+      "no validation/test leakage; report independent test separately",
+      "missing virial stays missing, never zero-filled RMSE",
+      "stress/virial sign conversion checked; source maps virial=-volume*stress",
+      "checkpoint versus eager model versus ase/lammps scripted artifact explicit",
+      "freeze selected output saved/reloaded on actual consumer before MD readiness"
+    ],
+    "consumer_hazards": [
+      "HotPP package name miaonet differs from import/CLI hotpp",
+      "freeze mutates embedding representation for LAMMPS only after saving ASE artifact; outputs are not interchangeable",
+      "Studio hotpp.eval currently passes no properties override, so default energy/forces eval must not be called a dipole/virial evaluation",
+      "Studio export fixes CUDA+double; tutorial CPU/default freeze is not current adapter behavior",
+      "branch acceleration report numbers are historical, not this campaign speed or generic support"
+    ]
+  }
+}
