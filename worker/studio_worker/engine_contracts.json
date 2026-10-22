@@ -39,7 +39,16 @@
               "variable"
             ]
           },
-          "scope": "Exact declared controls accepted by neb_checks.contract; values must match the immutable run.in. Driver paths, review notes and provenance belong to files/step descriptions, never inside neb. No unit conversion or optimizer convergence claim."
+          "scope": "Exact declared controls accepted by neb_checks.contract; values must match the immutable run.in. Declared file fields are normalized only when they exactly identify a files entry; the worker still compares snapshotted names, ordering and all controls. Driver paths, review notes and provenance belong to files/step descriptions, never inside neb. No unit conversion or optimizer convergence claim.",
+          "input_file_parameters": [
+            "initial_file",
+            "final_file",
+            "potential_file"
+          ],
+          "input_file_list_parameters": [
+            "structure_files",
+            "potential_files"
+          ]
         }
       }
     },

@@ -28,6 +28,11 @@ export function adapterParameters(engine,parameters,inputs){
   if(!values||typeof values!=='object'||Array.isArray(values))throw Error('Adapter parameter group must be an object: '+group);
   for(const key of Object.keys(values))if(!schema.allowed_keys.includes(key))throw Error('Unsupported declared engine control: '+group+'.'+key+'; use describe_engine and keep driver/provenance in files or descriptions');
   for(const [key,choices] of Object.entries(schema.choices||{}))if(values[key]!==undefined&&!choices.includes(values[key]))throw Error('Unsupported declared engine control: '+group+'.'+key);
+  for(const key of schema.input_file_parameters||[])if(values[key]!==undefined&&values[key]!==null)values[key]=fileValue(values[key],group+'.'+key);
+  for(const key of schema.input_file_list_parameters||[])if(values[key]!==undefined){
+   if(!Array.isArray(values[key]))throw Error('Adapter input '+group+'.'+key+' must be a list of actual scientific files entries');
+   values[key]=values[key].map(value=>fileValue(value,group+'.'+key));
+  }
  }
  const missing=(rule.required_parameters||[]).filter(key=>result[key]===undefined||result[key]===null||result[key]===''||Array.isArray(result[key])&&!result[key].length);
  if(missing.length)throw Error('引擎技术输入尚未补齐（'+engine+'）：'+missing.join(', ')+'；请让 Agent 依据真实输入和 describe_engine 完成映射');

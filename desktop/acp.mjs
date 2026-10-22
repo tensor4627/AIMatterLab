@@ -42,7 +42,7 @@ export class AcpBridge extends EventEmitter{
   this.reader=createInterface({input:child.stdout});
   this.reader.on('line',line=>{if(this.process!==child)return;try{this.receive(JSON.parse(line));}catch(error){this.disconnect(Error('Malformed '+this.provider+' ACP JSONL'));}});
   try{
-   this.info=await this.raw('initialize',{protocolVersion:1,clientInfo:{name:'gpu-sampling-studio',version:'0.17.0'},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false,elicitation:{form:{}},session:{configOptions:{boolean:{}}}}},30000);
+   this.info=await this.raw('initialize',{protocolVersion:1,clientInfo:{name:'gpu-sampling-studio',version:'0.18.0'},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false,elicitation:{form:{}},session:{configOptions:{boolean:{}}}}},30000);
    if(this.info.protocolVersion!==1)throw Error('Unsupported ACP protocol version');
    const version=this.info.agentInfo?.version;
    // Kimi advertises product version; Qwen may advertise a separate kernel version.

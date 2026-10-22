@@ -31,3 +31,21 @@ test('Representative history maps as validation input, while nested multiple wal
  const p=scientificSpec(task).parameters;assert.equal(p.validation_history,'history.txt');assert.equal(p.walkers,1);assert.equal(p.history.restart,false);
  task.parameters.dynamics.walkers=2;assert.throws(()=>scientificSpec(task),/Conflicting|多 walker/);
 });
+
+
+test('NEB owned file fields map exactly to immutable names and leave reviewed parameters unchanged',()=>{
+ const task={parameters:{engine:'gpumd.neb',files:['/owned/run.in','/owned/is.xyz','/owned/fs.xyz','/owned/nep.txt'],neb:{initial_file:'/owned/is.xyz',final_file:'/owned/fs.xyz',potential_file:'/owned/nep.txt',structure_files:['/owned/is.xyz','fs.xyz'],potential_files:['nep.txt'],max_steps:31}}};
+ const before=structuredClone(task),result=scientificSpec(task);
+ assert.deepEqual(result.parameters.neb,{initial_file:'is.xyz',final_file:'fs.xyz',potential_file:'nep.txt',structure_files:['is.xyz','fs.xyz'],potential_files:['nep.txt'],max_steps:31});assert.deepEqual(task,before);
+ task.parameters.files=['D:\\owned\\run.in','D:\\owned\\is.xyz','D:\\owned\\fs.xyz','D:\\owned\\nep.txt'];
+ task.parameters.neb={initial_file:'/mnt/d/owned/is.xyz',final_file:'D:\\owned\\fs.xyz',potential_file:'nep.txt'};
+ assert.deepEqual(scientificSpec(task).parameters.neb,{initial_file:'is.xyz',final_file:'fs.xyz',potential_file:'nep.txt'});
+});
+test('NEB nested file mapping rejects foreign sources, traversal, mixed invalid lists and wrong types',()=>{
+ const task={parameters:{engine:'gpumd.neb',files:['/owned/run.in','/owned/is.xyz','/owned/fs.xyz','/owned/nep.txt'],neb:{}}};
+ for(const patch of [{initial_file:'/foreign/is.xyz'},{final_file:'missing.xyz'},{potential_file:'../nep.txt'},{initial_file:{path:'is.xyz'}},{initial_file:''},{structure_files:['is.xyz','/foreign/fs.xyz']},{potential_files:'nep.txt'},{structure_files:[null]}]){
+  task.parameters.neb=patch;assert.throws(()=>scientificSpec(task),/actual scientific files/);
+ }
+ task.parameters.neb={final_file:null,trajectory_input:true,initial_file:'is.xyz'};
+ assert.equal(scientificSpec(task).parameters.neb.final_file,null);
+});
