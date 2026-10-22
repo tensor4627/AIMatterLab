@@ -1,0 +1,391 @@
+{
+  "scope": "Synthetic normalized data and source-linked port fixture from actual inspected graph_workflow.py. UI interaction only, no numerical validation, no actual graph rendering.",
+  "graph": {
+    "version": 2,
+    "mode": "metad",
+    "settings": {
+      "atoms_path": "synthetic.xyz",
+      "pt_path": "bias.pt",
+      "artifact_formats": [
+        "torchscript"
+      ],
+      "deployment_backend": "torchscript"
+    },
+    "nodes": [
+      {
+        "id": "inputs",
+        "kind": "input"
+      },
+      {
+        "id": "neighbor",
+        "kind": "neighbor",
+        "class_name": "PCVectorLB",
+        "params": {}
+      },
+      {
+        "id": "torsion",
+        "kind": "cv",
+        "class_name": "PeriodicTorsion",
+        "params": {
+          "atom_idx": [
+            0,
+            1,
+            null,
+            3
+          ]
+        }
+      },
+      {
+        "id": "torsion-identity",
+        "kind": "reduce",
+        "params": {
+          "operation": "identity"
+        }
+      },
+      {
+        "id": "coord",
+        "kind": "cv",
+        "class_name": "CoordNum",
+        "params": {}
+      },
+      {
+        "id": "switch",
+        "kind": "switch",
+        "class_name": "LessThanCubic",
+        "params": {
+          "d0": 2,
+          "dmax": 3
+        }
+      },
+      {
+        "id": "reduce",
+        "kind": "reduce",
+        "params": {
+          "operation": "mean"
+        }
+      },
+      {
+        "id": "collect",
+        "kind": "collect"
+      },
+      {
+        "id": "wtmetad",
+        "kind": "bias",
+        "class_name": "WTMetaDGaussianBias",
+        "params": {
+          "sigma": [
+            0.1,
+            0.2
+          ],
+          "weight": [
+            0.003
+          ],
+          "scale": [
+            1,
+            1
+          ],
+          "temp": 300
+        }
+      },
+      {
+        "id": "outputs",
+        "kind": "output"
+      }
+    ],
+    "edges": [
+      {
+        "source": {
+          "node": "inputs",
+          "port": "pos"
+        },
+        "target": {
+          "node": "neighbor",
+          "port": "pos"
+        }
+      },
+      {
+        "source": {
+          "node": "inputs",
+          "port": "cell"
+        },
+        "target": {
+          "node": "neighbor",
+          "port": "cell"
+        }
+      },
+      {
+        "source": {
+          "node": "inputs",
+          "port": "side_array"
+        },
+        "target": {
+          "node": "neighbor",
+          "port": "side_array"
+        }
+      },
+      {
+        "source": {
+          "node": "inputs",
+          "port": "pos"
+        },
+        "target": {
+          "node": "torsion",
+          "port": "pos"
+        }
+      },
+      {
+        "source": {
+          "node": "inputs",
+          "port": "cell"
+        },
+        "target": {
+          "node": "torsion",
+          "port": "cell"
+        }
+      },
+      {
+        "source": {
+          "node": "neighbor",
+          "port": "pcvector"
+        },
+        "target": {
+          "node": "coord",
+          "port": "pcvector"
+        }
+      },
+      {
+        "source": {
+          "node": "neighbor",
+          "port": "side_array"
+        },
+        "target": {
+          "node": "coord",
+          "port": "side_array"
+        }
+      },
+      {
+        "source": {
+          "node": "coord",
+          "port": "value"
+        },
+        "target": {
+          "node": "reduce",
+          "port": "value"
+        }
+      },
+      {
+        "source": {
+          "node": "torsion-identity",
+          "port": "value"
+        },
+        "target": {
+          "node": "collect",
+          "port": "value"
+        }
+      },
+      {
+        "source": {
+          "node": "reduce",
+          "port": "value"
+        },
+        "target": {
+          "node": "collect",
+          "port": "value"
+        }
+      },
+      {
+        "source": {
+          "node": "collect",
+          "port": "cv"
+        },
+        "target": {
+          "node": "wtmetad",
+          "port": "cv"
+        }
+      },
+      {
+        "source": {
+          "node": "inputs",
+          "port": "cv_traj"
+        },
+        "target": {
+          "node": "wtmetad",
+          "port": "cv_traj"
+        }
+      },
+      {
+        "source": {
+          "node": "collect",
+          "port": "cv"
+        },
+        "target": {
+          "node": "outputs",
+          "port": "cv"
+        }
+      },
+      {
+        "source": {
+          "node": "wtmetad",
+          "port": "bias"
+        },
+        "target": {
+          "node": "outputs",
+          "port": "bias"
+        }
+      },
+      {
+        "source": {
+          "node": "torsion",
+          "port": "value"
+        },
+        "target": {
+          "node": "torsion-identity",
+          "port": "value"
+        }
+      }
+    ],
+    "parameter_format": "structured-v1"
+  },
+  "graphContract": {
+    "source": {
+      "name": "tools/graph_workflow.py",
+      "line": 55,
+      "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996"
+    },
+    "catalog_files": {
+      "tools/cv_bias_gui_server.py": "911391f929532185c5b36c6ba2249df407eedcb7b116a9c4d8e38be8e398e5a8",
+      "base/colvar.py": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+      "base/bias.py": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
+      "base/switch.py": "1f34e5b272c9e28402193d13796bef3c2f39b71ee3feeb9e3fd157e50ba58fb6",
+      "base/neighbor.py": "58e2a18477af49c8fe52333e4a7f59b7dbdcf15e9ea75b7339e68a2c06630ec3"
+    },
+    "ports": {
+      "input": {
+        "inputs": {},
+        "outputs": {
+          "pos": "pos",
+          "cell": "cell",
+          "side_array": "side_array",
+          "cv_traj": "cv_traj",
+          "bias_traj": "bias_traj"
+        }
+      },
+      "neighbor:PCVectorLB": {
+        "inputs": {
+          "pos": "pos",
+          "cell": "cell",
+          "side_array": "side_array"
+        },
+        "outputs": {
+          "pcvector": "pcvector",
+          "side_array": "side_array"
+        }
+      },
+      "cv:PeriodicTorsion": {
+        "inputs": {
+          "pos": "pos",
+          "cell": "cell"
+        },
+        "outputs": {
+          "value": "value"
+        }
+      },
+      "cv:CoordNum": {
+        "inputs": {
+          "pcvector": "pcvector",
+          "side_array": "side_array",
+          "switch_func": "switch"
+        },
+        "configurationInputs": [
+          "switch_func"
+        ],
+        "outputs": {
+          "value": "value"
+        }
+      },
+      "switch:LessThanCubic": {
+        "inputs": {},
+        "outputs": {
+          "switch": "switch"
+        }
+      },
+      "reduce": {
+        "inputs": {
+          "value": "value"
+        },
+        "outputs": {
+          "value": "value"
+        }
+      },
+      "collect": {
+        "inputs": {
+          "value": "value"
+        },
+        "multipleInputs": [
+          "value"
+        ],
+        "outputs": {
+          "cv": "cv"
+        }
+      },
+      "bias:WTMetaDGaussianBias": {
+        "inputs": {
+          "cv": "cv",
+          "cv_traj": "cv_traj"
+        },
+        "outputs": {
+          "bias": "bias"
+        }
+      },
+      "output": {
+        "inputs": {
+          "cv": "cv",
+          "bias": "bias"
+        },
+        "outputs": {}
+      }
+    },
+    "reductions": [
+      {
+        "id": "mean",
+        "description": "Source implementation: reshape(-1).mean().unsqueeze(0)"
+      },
+      {
+        "id": "sum",
+        "description": "Source implementation: reshape(-1).sum().unsqueeze(0)"
+      },
+      {
+        "id": "first",
+        "description": "Source implementation: reshape(-1)[:1]; selecting vector first element changes meaning"
+      },
+      {
+        "id": "identity",
+        "description": "Source fallback: reshape(-1)"
+      }
+    ],
+    "compatible_pairs": [
+      [
+        "value",
+        "cv"
+      ],
+      [
+        "cv",
+        "value"
+      ]
+    ]
+  },
+  "currentSHA": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "derived": {
+    "values": {
+      "n_atoms": 4,
+      "numbers": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "provenance": "Synthetic test structure observation; not a real structure validation",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

@@ -68,5 +68,8 @@ def inspect_source(source,symbols=None):
  if symbols is not None:
   missing=sorted(requested-set(selected))
   report['symbol_excerpts']={'status':'blocked','validation':'not_run','reason':'Unknown public catalog class: '+', '.join(missing)} if missing else {'status':'blocked','validation':'not_run','reason':'Requested method excerpts exceed 16 KiB; request fewer classes'} if excerpt_bytes>16384 else {'status':'passed','validation':'not_run','scope':'Read-only AST method bodies from the registered public catalog only; no import, execution or runtime shape validation','bytes':excerpt_bytes,'symbols':list(selected.values())}
+ if name in ('pydyn','hotpp'):
+  from .software_contracts import inspect_contract
+  report['public_api_contract']=inspect_contract(source)
  report['capabilities']={k:(root/p).is_file() for k,p in {'graph_renderer':'tools/graph_workflow.py','graph_compiler':'tools/compile_workflow.py','cv_only':'base/utils.py','contract_validator':'agents/skills/pygas-check-gpumd-contract/scripts/validate_model.py'}.items()} if name=='pygas' else {}
  return report

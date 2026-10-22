@@ -1,3 +1,4 @@
+import re
 import argparse
 import hmac
 import json
@@ -21,6 +22,8 @@ TOOL_ROUTES = {
  "list_source_projects":("GET","/api/source-projects",{}),
  "inspect_source_project":("POST","/api/source-project/inspect",{"source_id":"string"}),
  "create_structure":("POST","/api/structures/create",{"project_id":"string","environment_id":"string","recipe":"object"}),
+ "read_runtime_guide":("POST","/api/runtime-guide",{"environment_id":"string"}),
+ "inspect_pygas_catalog":("POST","/api/pygas/catalog",{"source_id":"string"}),
  "render_pygas_workflow":("POST","/api/pygas/render",{"project_id":"string","environment_id":"string","source_id":"string","graph":"object"}),
  "collect_cluster_artifacts":("POST","/api/cluster/collect",{"run_id":"string"}),
  "read_cluster_input":("POST","/api/cluster/input",{"run_id":"string","name":"string"}),
@@ -46,14 +49,15 @@ TOOL_ROUTES = {
  "collect_artifacts": ("POST", "/api/run/collect", {"run_id": "string"}),
  "resume_run": ("POST", "/api/run/resume", {"run_id": "string", "parameters": "object"}),
  "inspect_asset": ("POST", "/api/inspect", {"project_id": "string", "environment_id": "string", "path": "string", "kind": "string"}),
- "generate_bias": ("POST", "/api/templates/bias", {"parameters": "object"}),
  "read_project_input": ("POST", "/api/workspace/read", {"project_id":"string","name":"string"}),
  "write_project_input": ("POST", "/api/workspace/write", {"project_id": "string", "name": "string", "content": "string"}),
  "read_run_input": ("POST", "/api/run/input", {"run_id":"string", "name":"string"}),
  "read_artifact": ("POST", "/api/run/file", {"run_id": "string", "name": "string"})
 }
 DESCRIPTIONS = {
- "describe_engine":"Read the real Studio adapter parameter contract: required input basenames, canonical flat API keys, explicit nested aliases and valid modes. Use before publishing scientific workflows; technical wrapper fields are Agent responsibilities, not user questions. This is discovery only, never engine/artifact validation.",
+ "read_runtime_guide":"Read the selected registered environment and engine runtime receipt recorded by an actual probe. Returns observed execution paths, versions and source/capability identities, or explicit stale/blocked/not_run. Does not install, import, execute, switch versions or modify job state. Ordinary calculations reuse this instead of rereading installation instructions.",
+ "inspect_pygas_catalog":"Read actual registered pyGAS GUI CV/bias/switch/neighbor constructor names, exact required/default parameters and source-bound editor/shape semantics. Without classes returns a compact class index; request up to four exact names for their typed parameter lists. Use these real library definitions before composing a graph; this is source inspection, never artifact/runtime/numerical proof.",
+ "describe_engine":"Read the real Studio adapter parameter contract: required input basenames, canonical flat API keys, explicit nested aliases and valid modes. Use before publishing scientific workflows; technical wrapper fields are Agent responsibilities, not user questions. This is discovery only, never engine/artifact validation. parameters.validation is reserved for declared numerical FD controls; put runtime/scope/review diagnostics in step descriptions or a separate saved review manifest, not editable controls.",
  "read_project_input":"Read bounded text or binary metadata/SHA256 from project-owned inputs or existing authorized project roots. name accepts an owned relative path (including cv-*/build_bias.py) or authorized absolute Linux input path. Use for Python/JSON/config/model inputs; binary models are never deserialized. No interpreter needed. Use the returned sha256 as expected_sha256 when updating an existing input.",
  "write_project_input":"Save actual text in the project inputs root using safe relative names including nested cv-*/build_bias.py. Existing changed input requires expected_sha256 from read_project_input; on conflict re-read. Returns actual saved path/hash; never builds or executes.",
  "inspect_asset":"Inspect an ASE structure/dataset or existing NEP regression output directory (kind=structure, dataset or regression). For script/config/JSON text or binary model metadata use read_project_input; model runtime validation is a separate reviewed stage.",
@@ -63,7 +67,7 @@ DESCRIPTIONS = {
  "inspect_source_project":"Read the registered public catalog and source-hashed graph/Studio I/O contract. Optional symbols (up to four exact public class names) returns bounded AST method bodies, e.g. PairwiseDistanceMean forward/MIC/output rank. No arbitrary file path, import or execution. read_project_input reads project assets, not source repositories. Inspect actual CV output shape and supported reduce semantics before collecting scalar CVs; prose alone is not executable.",
  "create_structure":"Create and register an ASE structure asset from a bounded declarative recipe. kind bulk (name, optional crystalstructure/a/cubic); molecule (name, optional vacuum); surface (bulk kwargs, indices, layers, vacuum); explicit (symbols, positions, cell, pbc); import (authorized path). Optional repeat [nx,ny,nz]. Returns validated reloaded extxyz, preview, provenance and inferred facts. Authoring only; never runs MD/relaxation.",
  "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Save the canonical graph and executable build_bias.py directly as project inputs; return their paths, hashes and a bounded preview to avoid copying long code through chat. Does not execute or build the artifact. graph.settings must include atoms_path (actual structure) and pt_path (requested output artifact); Studio snapshots their basenames and sets workflow_path=workflow.json. Read inspect_source_project.graph_contract including studio_io and reduction/output-shape rules first. Include returned files and the source structure in a pygas.build task for human execution.",
- "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Put critical CV/bias parameters first; secondary settings can use advanced:true and a scalar default plus traceable default_source. Defaults are display guidance, not actual input edits. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters.",
+ "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Put critical CV/bias parameters first; secondary settings can use advanced:true and a scalar default plus traceable default_source. Defaults are display guidance, not actual input edits. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters. Do not create required editable fields for runtime/scope/status notes or empty missing-information lists. Reserved parameters.validation accepts only describe_engine numerical controls; review explanations belong in step descriptions or a saved review manifest.",
  "prepare_cluster_run":"Prepare a local immutable SSH/LSF/Slurm run draft and its batch script. No upload or submission. Stop for desktop review.",
  "draft_cluster_setup":"Propose queue, modules, engine paths and submission skill changes for user review. Cannot change SSH details or authorization.",
  "prepare_run": "Create an immutable run from explicit assets and scientific parameters. Returns a draft for desktop user review. Stop and wait for the user to click Execute; never validate or submit it. Never infer scientific choices.",
@@ -81,9 +85,14 @@ def tools():
             continue
         schema = {"type": "object", "properties": {k: {"type": v} for k, v in properties.items()},
                   "required": list(properties)}
+        if name=="inspect_pygas_catalog":
+            schema["properties"]["classes"]={"type":"array","items":{"type":"string","pattern":"^[A-Za-z_][A-Za-z0-9_]*$","maxLength":128},"maxItems":4,"uniqueItems":True}
+            schema["additionalProperties"]=False
+        if name=="render_pygas_workflow":
+            schema["properties"].update({"workspace_id":{"type":"string","maxLength":128},"path":{"type":"string","maxLength":4096},"expected":{"type":"object"},"catalog_files":{"type":"object"}})
         if name=="inspect_source_project":schema["properties"]["symbols"]={"type":"array","items":{"type":"string","pattern":"^[A-Za-z_][A-Za-z0-9_]*$","maxLength":128},"maxItems":4,"uniqueItems":True}
         if name=="describe_engine":schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
-        if name=="probe_environment":schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
+        if name in ("probe_environment","read_runtime_guide"):schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name == "present_task":
             schema["properties"]["steps"]={"type":"array","items":STEP_SCHEMA}
             schema["properties"]["missing_fields"]={"type":"array","items":{"type":"string"}}
@@ -104,7 +113,7 @@ def tools():
         result.append({"name": name, "description": DESCRIPTIONS.get(name, name.replace("_", " ")),
                        "inputSchema": schema,
                        "annotations": {"readOnlyHint": method == "GET" or name in (
-                           "describe_engine", "read_project_input", "inspect_source_project", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
+                           "describe_engine", "read_project_input", "inspect_source_project", "inspect_pygas_catalog", "read_runtime_guide", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
                                        "destructiveHint": name == "cancel_run"}})
     return result
 
@@ -165,6 +174,25 @@ def dispatch(service, method, path, data, admin=False):
         value={"id":data["id"],"root":str(Path(data["root"]).resolve()),"commit":data.get("commit"),"dirty":data.get("dirty")}
         inspect_source(value)
         return store.put("source-project",value)
+    if path=='/api/pygas/catalog':
+        from .pygas_catalog import catalog
+        source=store.get('source-project',data['source_id'])
+        if source['id']!='pygas':raise ValueError('Select the registered pyGAS source')
+        result=catalog(source)
+        if data.get('all'):
+            if not admin:raise PermissionError('Full editor catalog is desktop-owned; request selected classes')
+            return result
+        names=data.get('classes',[])
+        if not isinstance(names,list) or len(names)>4 or any(not isinstance(n,str) or len(n)>128 or re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',n) is None for n in names):raise ValueError('Choose up to four exact catalog classes')
+        index={kind:[{'name':item['name'],'output_size':item.get('output_size'),'graph_support':item.get('semantics',{}).get('graph_support'),'source':item['source']} for item in entries] for kind,entries in result['catalog'].items()}
+        if not names:return {**result,'catalog':index,'detail':'Class index only; request exact classes to obtain required/default parameter definitions'}
+        selected={kind:[item for item in entries if item['name'] in names] for kind,entries in result['catalog'].items()}
+        if set(names)!={item['name'] for entries in selected.values() for item in entries}:raise ValueError('Unknown registered class')
+        return {**result,'catalog':selected}
+    if path in ('/api/pygas/composition/read','/api/pygas/composition/save','/api/pygas/composition/normalize'):
+        if not admin:raise PermissionError('Desktop conversation binding required; Agent uses render_pygas_workflow with its workspace_id and current hashes')
+        from .pygas_composition import response,save
+        return response(service,data) if path.endswith('read') else save(service,data,normalize=path.endswith('normalize'))
     if path=="/api/source-project/inspect":
         from .source_projects import inspect_source
         return inspect_source(store.get("source-project",data["source_id"]),data.get("symbols"))
@@ -172,6 +200,7 @@ def dispatch(service, method, path, data, admin=False):
         if not admin:raise PermissionError("External database provenance must come from desktop")
         return service.authoring(data,"create_structure")
     if path in ("/api/structures/create","/api/pygas/render"):
+        if data.get("repair") and not admin:raise PermissionError("Partial graph/source repair requires the explicit desktop action")
         return service.authoring(data,"create_structure" if path.endswith("create") else "render_pygas")
     if path=="/api/tasks/present":
         leaf(data["task_id"])
@@ -224,9 +253,10 @@ def dispatch(service, method, path, data, admin=False):
         target = contained(data["path"], project["policy"]["input_roots"] + [str(service.root / "projects" / project["id"] / "inputs")] + [r["directory"] for r in store.runs() if r["project_id"] == project["id"]])
         metadata = service.inspect(data["project_id"], data["environment_id"], str(target), data["kind"]) if data["kind"] in ("dataset", "structure") else {}
         return store.put("artifact", {"id":secrets.token_hex(10), "project_id":project["id"], "name":target.name, "path":str(target), "kind":data["kind"], "sha256":digest(target), "size":target.stat().st_size, "metadata":metadata})
+    if path == "/api/runtime-guide":
+        return service.read_runtime_guide(data)
     if path == "/api/probe":
-        environment = store.get("environment", data["environment_id"])
-        return Adapter(data.get("engine","pydyn.md")).probe(environment)
+        return service.probe(data)
     if path == "/api/runs/prepare":
         spec = dict(data["spec"])
         spec["origin"] = "desktop" if admin else "agent"
@@ -259,7 +289,7 @@ def dispatch(service, method, path, data, admin=False):
         return service.inspect(data["project_id"], data["environment_id"], data["path"],
                                data.get("kind", "dataset"), data.get("frame", 0))
     if path == "/api/templates/bias":
-        return {"source": build_bias(data["parameters"]), "validation": "not_run"}
+        raise ValueError("Legacy native-code bias template retired; compose the actual registered pyGAS library graph with render_pygas_workflow")
     if path in ("/api/workspace/read","/api/workspace/write"):
         from .workspace_io import read_input,write_input
         return read_input(service,data) if path.endswith('read') else write_input(service,data,admin)

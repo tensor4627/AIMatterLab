@@ -39,3 +39,9 @@ export interface TaskLinkRunRequest {taskId:string;runId:string;kind:'run'|'clus
 
 export interface TaskInputReadRequest {taskId:string;path:string}
 export interface TaskInputReadResult {path:string;sha256:string;size:number;text?:string;binary?:boolean;truncated?:boolean;reason?:string}
+export interface PygasExpectedInputs {journal_sha256:string|null;files:Record<string,string|null>}
+export interface PygasComposition {id:string;graphPath:string;sourcePath:string;status:'rendered'|'draft'|'blocked';expected:PygasExpectedInputs;graph_sha256:string|null;source_sha256:string|null;missing_fields?:string[];render_blocked?:boolean;reasons?:string[]}
+export interface PygasTaskReadRequest {taskId:string;path?:string}
+export interface PygasTaskResult {taskId:string;composition:PygasComposition|null;catalog:import('./pygas-composer-types').CatalogResponse;graph:import('./pygas-composer-types').CanonicalGraph|null;derived?:import('./pygas-composer-types').DerivedStructure;assets:import('./pygas-composer-types').AssetOption[];missing_fields?:string[];render_blocked?:boolean;reasons?:string[]}
+export interface PygasTaskSaveRequest {taskId:string;path:string;expected:PygasExpectedInputs;catalog_files:Record<string,string>;graph:import('./pygas-composer-types').CanonicalGraph}
+export interface PygasTaskNormalizeRequest {taskId:string;path:string;expected:PygasExpectedInputs;catalog_files:Record<string,string>}

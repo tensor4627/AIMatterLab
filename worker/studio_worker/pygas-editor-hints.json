@@ -1,0 +1,1525 @@
+{
+  "scope": "Studio-authored editor hints reviewed against exact public source hashes; absent/mismatching hints must not guess a contract. Constructor defaults remain actual source defaults.",
+  "source_files": {
+    "base/colvar.py": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+    "base/bias.py": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
+    "base/neighbor.py": "58e2a18477af49c8fe52333e4a7f59b7dbdcf15e9ea75b7339e68a2c06630ec3",
+    "base/switch.py": "1f34e5b272c9e28402193d13796bef3c2f39b71ee3feeb9e3fd157e50ba58fb6",
+    "tools/graph_workflow.py": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996"
+  },
+  "hints": {
+    "cv": {
+      "PeriodicTorsion": {
+        "atom_idx": {
+          "editor": "integer_vector",
+          "shape": [
+            4
+          ],
+          "basic": true,
+          "units": "zero-based atom indices",
+          "serializer": "literal"
+        }
+      },
+      "GeoCenter": {
+        "idx": {
+          "editor": "integer_vector",
+          "basic": true,
+          "serializer": "tensor",
+          "tensor_dtype": "torch.long"
+        }
+      },
+      "GroupVector": {
+        "idxA": {
+          "editor": "integer_vector",
+          "basic": true,
+          "serializer": "tensor",
+          "tensor_dtype": "torch.long"
+        },
+        "idxB": {
+          "editor": "integer_vector",
+          "basic": true,
+          "serializer": "tensor",
+          "tensor_dtype": "torch.long"
+        }
+      },
+      "NEPDescriptor3b": {
+        "dtype": {
+          "editor": "enum",
+          "options": [
+            "float64",
+            "float32"
+          ],
+          "serializer": "dtype_symbol"
+        },
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      },
+      "NEPDescriptor3bOptimized": {
+        "dtype": {
+          "editor": "enum",
+          "options": [
+            "float64",
+            "float32"
+          ],
+          "serializer": "dtype_symbol"
+        },
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      },
+      "EnvSim": {
+        "ref_path": {
+          "editor": "project_file",
+          "basic": true,
+          "serializer": "file_reference"
+        },
+        "atoms_path": {
+          "editor": "project_file",
+          "basic": true,
+          "serializer": "file_reference"
+        }
+      },
+      "Torsion": {
+        "idx": {
+          "editor": "integer_vector",
+          "shape": [
+            4
+          ],
+          "serializer": "tensor",
+          "tensor_dtype": "torch.long",
+          "basic": true,
+          "description": "Four ordered zero-based atom indexes. Constructor builds three adjacent pairs internally; callers supply four atom indexes, not a pair matrix."
+        }
+      },
+      "SwitchBaseCV": {
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      },
+      "CoordNum": {
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      },
+      "Q4": {
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      },
+      "Q6": {
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      },
+      "Tetrahedral": {
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      },
+      "PairEntropy": {
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        },
+        "sigma": {
+          "editor": "number",
+          "serializer": "literal",
+          "basic": true,
+          "units": "Angstrom",
+          "description": "Actual PairEntropy constructor scalar; use the source radial-distribution convention."
+        },
+        "r_ic": {
+          "editor": "number",
+          "serializer": "literal",
+          "basic": true,
+          "units": "Angstrom",
+          "description": "Actual PairEntropy constructor scalar; use the source radial-distribution convention."
+        },
+        "r_oc": {
+          "editor": "number",
+          "serializer": "literal",
+          "basic": true,
+          "units": "Angstrom",
+          "description": "Actual PairEntropy constructor scalar; use the source radial-distribution convention."
+        },
+        "dx": {
+          "editor": "number",
+          "serializer": "literal",
+          "basic": true,
+          "units": "Angstrom",
+          "description": "Actual PairEntropy constructor scalar; use the source radial-distribution convention."
+        }
+      }
+    },
+    "neighbor": {
+      "PCVectorTypesFilter": {
+        "bonds": {
+          "editor": "integer_matrix",
+          "shape": [
+            null,
+            2
+          ],
+          "basic": true,
+          "units": "atomic-number pairs",
+          "serializer": "tensor",
+          "tensor_dtype": "torch.long"
+        },
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      },
+      "PCVectorLB": {
+        "internal_dtype": {
+          "editor": "enum",
+          "options": [
+            null,
+            "float64",
+            "float32"
+          ],
+          "serializer": "literal",
+          "basic": false
+        }
+      }
+    },
+    "switch": {
+      "LessThanCubic": {
+        "d0": {
+          "editor": "number",
+          "basic": true,
+          "serializer": "literal"
+        },
+        "dmax": {
+          "editor": "number",
+          "basic": true,
+          "serializer": "literal"
+        }
+      },
+      "MoreThanCubic": {
+        "d0": {
+          "editor": "number",
+          "basic": true,
+          "serializer": "literal"
+        },
+        "dmax": {
+          "editor": "number",
+          "basic": true,
+          "serializer": "literal"
+        }
+      },
+      "LessThanRational": {
+        "d0": {
+          "editor": "number",
+          "basic": true,
+          "serializer": "literal"
+        },
+        "r0": {
+          "editor": "number",
+          "basic": true,
+          "serializer": "literal"
+        }
+      },
+      "LessThanRationalProtect": {
+        "d0": {
+          "editor": "number",
+          "basic": true,
+          "serializer": "literal"
+        },
+        "r0": {
+          "editor": "number",
+          "basic": true,
+          "serializer": "literal"
+        }
+      },
+      "Mininum1D": {
+        "beta": {
+          "editor": "number",
+          "serializer": "literal",
+          "basic": true,
+          "description": "Actual Mininum1D beta; formula beta/log(sum(exp(beta/cv))). This is not the SoftMin lam parameter."
+        }
+      }
+    },
+    "bias": {
+      "FFWTPDMetaDGaussianBias": {
+        "temp": {
+          "editor": "number",
+          "basic": true,
+          "units": "K",
+          "serializer": "literal"
+        },
+        "pdl": {
+          "editor": "number_matrix",
+          "shape": [
+            null,
+            2
+          ],
+          "basic": true,
+          "serializer": "tensor",
+          "units": "per-CV lower/upper bounds in the CV unit"
+        }
+      },
+      "WTMetaDGaussianBias": {
+        "temp": {
+          "editor": "number",
+          "basic": true,
+          "units": "K",
+          "serializer": "literal"
+        }
+      },
+      "OPESGaussianBias": {
+        "temp": {
+          "editor": "number",
+          "basic": true,
+          "units": "K",
+          "serializer": "literal"
+        }
+      }
+    }
+  },
+  "class_semantics": {
+    "bias": {
+      "MetaDGaussianBias": {
+        "source": "base/bias.py",
+        "sha256": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
+        "formula": "V(s)=sum_k w_k exp(-sum_{i:scale_i!=0} delta_i^2/(2 sigma_i^2))",
+        "scale_rule": "In this registered implementation scale.nonzero selects active dimensions; it does not multiply or normalize CV values. Do not apply PLUMED width conversions based on a guessed scaling role.",
+        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; Studio must check it against plan.cv_size.",
+        "delta_definition": "delta=cv_traj[k]-cv",
+        "reorder_policy": "permutation",
+        "ordered_cv_parameters": {
+          "sigma": {
+            "axis": 0
+          },
+          "scale": {
+            "axis": 0
+          }
+        }
+      },
+      "WTMetaDGaussianBias": {
+        "source": "base/bias.py",
+        "sha256": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
+        "formula": "V(s)=sum_k w_k exp(-sum_{i:scale_i!=0} delta_i^2/(2 sigma_i^2))",
+        "scale_rule": "In this registered implementation scale.nonzero selects active dimensions; it does not multiply or normalize CV values. Do not apply PLUMED width conversions based on a guessed scaling role.",
+        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; Studio must check it against plan.cv_size.",
+        "well_tempering": "w_k=weight*exp(-bias_traj[k]/(8.617343e-5*temp*(bias_factor-1))); the encoded Boltzmann constant uses eV/K.",
+        "delta_definition": "delta=cv_traj[k]-cv",
+        "reorder_policy": "permutation",
+        "ordered_cv_parameters": {
+          "sigma": {
+            "axis": 0
+          },
+          "scale": {
+            "axis": 0
+          }
+        }
+      },
+      "FFWTPDMetaDGaussianBias": {
+        "source": "base/bias.py",
+        "sha256": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
+        "formula": "V(s)=sum_k w_k exp(-sum_{i:scale_i!=0} delta_i^2/(2 sigma_i^2))",
+        "scale_rule": "In this registered implementation scale.nonzero selects active dimensions; it does not multiply or normalize CV values. Do not apply PLUMED width conversions based on a guessed scaling role.",
+        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; Studio must check it against plan.cv_size.",
+        "well_tempering": "w_k=weight*exp(-bias_traj[k]/(8.617343e-5*temp*(bias_factor-1))); the encoded Boltzmann constant uses eV/K.",
+        "periodic_rule": "pdl reshapes to (cv_count,2); L=upper-lower, s0=mean(bounds), delta_wrap=delta-L*round((delta-s0)/L). Symmetric torsion bounds [-pi,pi] match the usual difference wrapping; an asymmetric interval must not be assumed equivalent without a numerical reference test.",
+        "delta_definition": "delta=cv_traj[k]-cv",
+        "reorder_policy": "permutation",
+        "ordered_cv_parameters": {
+          "sigma": {
+            "axis": 0
+          },
+          "scale": {
+            "axis": 0
+          },
+          "pdl": {
+            "axis": 0
+          }
+        }
+      }
+    },
+    "cv": {
+      "Volume": {
+        "source": "base/colvar.py",
+        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+        "formula": "s(H)=det(H)/scale",
+        "units": "Angstrom^3 / scale when input cell is in Angstrom",
+        "output_rank": 0,
+        "notes": "Signed determinant, not absolute volume. scale must be nonzero. Constant-cell MD cannot explore this volume CV.",
+        "collector_adapter": "reduce.identity",
+        "rank_scope": "Source returns a zero-dimensional scalar. The registered renderer concatenates raw tensors; use an explicit identity reshape to preserve this scalar before Collect. output_size=1 alone does not prove rank one."
+      },
+      "PairwiseDistanceMean": {
+        "source": "base/colvar.py",
+        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+        "formula": "s=(1/N) sum_i min_{j!=i} ||MIC(r_i-r_j; H)||",
+        "units": "Angstrom when positions/cell are in Angstrom",
+        "output_rank": 0,
+        "notes": "forward calls mean_nearest_neighbor_distance over all atoms; the separate static all-pair helper is not its forward. Not general PLUMED DISTANCE ATOMS=i,j.",
+        "collector_adapter": "reduce.identity",
+        "rank_scope": "Source returns a zero-dimensional scalar. The registered renderer concatenates raw tensors; use an explicit identity reshape to preserve this scalar before Collect. output_size=1 alone does not prove rank one."
+      },
+      "PeriodicTorsion": {
+        "source": "base/colvar.py",
+        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+        "formula": "b1=MIC(rB-rA), b2=MIC(rC-rB), b3=MIC(rD-rC); n1=unit(b1 cross b2), n2=unit(b2 cross b3); phi=-atan2((n1 cross unit(b2)) dot n2, n1 dot n2)",
+        "units": "radian",
+        "output_rank": 0,
+        "notes": "Four ordered zero-based atom indices; row-vector cell; normalizations include1e-12. Verify sign/domain against actual reference geometry before claiming PLUMED/ASE equivalence.",
+        "collector_adapter": "reduce.identity",
+        "rank_scope": "Source returns a zero-dimensional scalar. The registered renderer concatenates raw tensors; use an explicit identity reshape to preserve this scalar before Collect. output_size=1 alone does not prove rank one."
+      },
+      "Torsion": {
+        "source": "base/colvar.py",
+        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+        "formula": "atan2((n1 x n2) dot unit(BC), n1 dot n2), n1=unit(AB x BC), n2=unit(BC x CD)",
+        "units": "rad",
+        "index_rule": "idx contains four ordered zero-based atom indexes; never truncate floating-point indexes to integers.",
+        "pbc_rule": "forward wraps individual selected positions into the primary cell using inv(cell).T before calculating bond vectors; this differs from PeriodicTorsion bond-wise row-cell MIC. simple_forward uses supplied coordinates without wrapping.",
+        "singularities": "Unclamped normalizations at collinear/zero bond geometries can be nonfinite. Require numerical reference tests before assuming sign, wrapping or PLUMED equivalence.",
+        "output_rank": 0,
+        "collector_adapter": "reduce.identity",
+        "rank_scope": "Source returns a zero-dimensional scalar. The registered renderer concatenates raw tensors; use an explicit identity reshape to preserve this scalar before Collect. output_size=1 alone does not prove rank one."
+      },
+      "ZoneSelect": {
+        "source": "base/colvar.py",
+        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+        "graph_support": "blocked",
+        "reason": "forward returns (match_pos, matching_indices), a dynamic tuple. The current graph value/collector/reducer contract expects a fixed-size Tensor; no automatic component selection or scalar reduction is valid. Library presence is not graph executability."
+      },
+      "GroupVector": {
+        "source": "base/colvar.py",
+        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+        "graph_support": "blocked",
+        "reason": "forward returns (selected_pair_vectors, selected_edge_indices), a dynamic tuple, not a center-of-mass distance or scalar norm. The current graph value/collector/reducer contract expects a fixed-size Tensor; no automatic tuple selection or norm is implemented."
+      },
+      "PairEntropy": {
+        "source": "base/colvar.py",
+        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+        "output_rank": 0,
+        "collector_adapter": "reduce.identity",
+        "formula": "s2=-2*pi*rho*kb*integral[r^2*(g(r)*(log(g(r))-1)+1),r_ic..r_oc]; g(r)=Gaussian-smeared directed-neighbor radial distribution; rho=n_atoms/det(cell)",
+        "units": "eV/K with the source default kb and Angstrom inputs",
+        "rank_scope": "Source _s2 uses torch.trapezoid over one radial dimension and returns a zero-dimensional scalar. Add an explicit identity reshape before Collect; output_size=1 does not establish tensor rank.",
+        "notes": "The source uses int((r_oc-r_ic)/dx) linspace points, not an exact dx spacing. Require positive sigma, 0<r_ic<r_oc, at least two radial points, a positive-volume cell and numerically checked neighbor multiplicity before using this definition. This is the registered implementation, not an assumed PLUMED equivalent."
+      }
+    }
+  },
+  "settings_schema": {
+    "source_files": {
+      "tools/cv_bias_gui/graph.html": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+      "tools/graph_workflow.py": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+      "base/opes.py": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+      "tools/cv_bias_gui/index.html": "64f989b4f14d576b306cd0def76e6411b0f161ab2b56c6b23b45a8542a38cc46"
+    },
+    "fields": [
+      {
+        "key": "mode",
+        "group": "basic",
+        "type": "enum",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            144,
+            144
+          ]
+        },
+        "location": "graph.mode",
+        "options": [
+          "metad",
+          "cvonly",
+          "opes"
+        ],
+        "proposal": "Derive from actual requested method; never convert stateful OPES to MetaD silently.",
+        "read_only": true,
+        "editor_hint": {
+          "editor": "enum",
+          "options": [
+            "metad",
+            "cvonly",
+            "opes"
+          ]
+        }
+      },
+      {
+        "key": "atoms_path",
+        "group": "basic",
+        "type": "authorized_project_asset",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            432,
+            435
+          ]
+        },
+        "required": true,
+        "proposal": "Preselect actual workflow structure with saved ASE/hash/PBC/order provenance. Snapshot allowed selected file; no parent-root grants or free arbitrary paths.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "project_file"
+        }
+      },
+      {
+        "key": "cutoff",
+        "group": "basic",
+        "type": "positive_finite_number",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            444,
+            444
+          ]
+        },
+        "units": "angstrom",
+        "renderer_fallback": 6.0,
+        "gui_initial": 6.0,
+        "proposal": "Justified CV/neighbor requirement and actual structure; 6A is a source fallback, not a universal scientific recommendation.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number",
+          "exclusive_minimum": 0
+        }
+      },
+      {
+        "key": "max_neighbors",
+        "group": "details.capacity",
+        "type": "positive_integer",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            161,
+            162
+          ]
+        },
+        "renderer_fallback": 512,
+        "gui_initial": 512,
+        "proposal": "Observed real-neighbor maximum plus explicit margin; preserve capacity/target preflight status.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "integer",
+          "minimum": 1
+        }
+      },
+      {
+        "key": "dtype_expr",
+        "group": "details.precision",
+        "type": "enum_symbol",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            436,
+            436
+          ]
+        },
+        "options": [
+          "torch.float32",
+          "torch.float64"
+        ],
+        "renderer_fallback": "torch.double",
+        "gui_initial": "torch.double",
+        "serializer": "Fixed alias mapping; never evaluate a Python string.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "enum",
+          "options": [
+            "torch.double",
+            "torch.float64",
+            "torch.float32",
+            "torch.float"
+          ]
+        }
+      },
+      {
+        "key": "device_expr",
+        "group": "details.runtime",
+        "type": "selected_registered_device",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            437,
+            437
+          ]
+        },
+        "renderer_fallback": "torch.device('cpu')",
+        "gui_initial": "torch.device('cuda')",
+        "proposal": "Source UI and renderer differ. Derive from selected actual runtime, not source GUI default. AOTI requires CUDA.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "cv_internal_dtype_expr",
+        "group": "details.precision",
+        "type": "enum_symbol_or_null",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            438,
+            438
+          ]
+        },
+        "options": [
+          "None",
+          "torch.float32",
+          "torch.float64"
+        ],
+        "renderer_fallback": "None",
+        "gui_initial": "None",
+        "proposal": "Show explicit None/off versus unset. This controls inner arithmetic, separate from ABI dtype.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "enum",
+          "options": [
+            "None",
+            "torch.double",
+            "torch.float64",
+            "torch.float32",
+            "torch.float"
+          ]
+        }
+      },
+      {
+        "key": "cast_history_internal_dtype",
+        "group": "details.precision",
+        "type": "optional_boolean",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            578,
+            584
+          ]
+        },
+        "unset": "Preserve source procedure default when absent; do not fill false or coerce strings.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "boolean"
+        }
+      },
+      {
+        "key": "max_cv_nums",
+        "group": "details.capacity",
+        "type": "integer",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            446,
+            446
+          ]
+        },
+        "renderer_fallback": "max(2, max_cv_nums or legacy history_size or 2)",
+        "gui_initial": 10000,
+        "proposal": "AOTI bias/CVOnly shape capacity requires >=2. Do not confuse with sampling hill pace/output interval, saved history length, or adaptive OPES kernel count.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "integer",
+          "minimum": 2
+        }
+      },
+      {
+        "key": "history_size",
+        "group": "legacy.readonly",
+        "type": "integer",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            446,
+            446
+          ]
+        },
+        "proposal": "Legacy fallback only. Display explicit precedence if both exist; new edits emit max_cv_nums, never silently erase a conflicting legacy value.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {
+          "editor": "integer",
+          "minimum": 1
+        }
+      },
+      {
+        "key": "opes_kernel_capacity",
+        "group": "details.capacity",
+        "type": "positive_integer",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            169,
+            170
+          ]
+        },
+        "renderer_fallback": 4096,
+        "gui_initial": null,
+        "applicable": "mode=opes",
+        "proposal": "Only OPES state capacity; must match actual initialize_state/export/restart contract.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "integer",
+          "minimum": 1
+        }
+      },
+      {
+        "key": "artifact_formats",
+        "group": "details.artifacts",
+        "type": "unique_enum_list",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            150,
+            160
+          ]
+        },
+        "options": [
+          "torchscript",
+          "aoti"
+        ],
+        "renderer_fallback": [
+          "torchscript",
+          "aoti"
+        ],
+        "gui_initial": [
+          "torchscript",
+          "aoti"
+        ],
+        "studio_policy": "Default TorchScript .pt per product/user policy. Preserve explicit AOTI/dual selection; unavailable preflight blocks it, never fallback silently.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "enum_list",
+          "options": [
+            "torchscript",
+            "aoti"
+          ]
+        }
+      },
+      {
+        "key": "deployment_backend",
+        "group": "details.artifacts",
+        "type": "enum",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            156,
+            160
+          ]
+        },
+        "options": [
+          "torchscript",
+          "aoti"
+        ],
+        "renderer_fallback": "aoti",
+        "gui_initial": "aoti",
+        "constraints": "Must belong to artifact_formats; v1 single .pt is a separate explicit version contract.",
+        "location": "settings",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "enum",
+          "options": [
+            "torchscript",
+            "aoti"
+          ]
+        }
+      },
+      {
+        "key": "class_name",
+        "group": "details.identity",
+        "type": "safe_identifier",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            431,
+            431
+          ]
+        },
+        "renderer_fallback": "GraphWorkflow",
+        "gui_initial": "mode-derived GraphMetaD/GraphCVOnly/GraphOPES",
+        "proposal": "Safe generated class identifier, not a Python code editor.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "pt_path",
+        "group": "managed.outputs",
+        "type": "owned_output_basename",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            433,
+            435
+          ]
+        },
+        "required": true,
+        "proposal": "Main/worker allocates within owned composition. Source v2 strips suffix before .pt/.pt2/manifest names; verify actual artifact naming, do not guess an existing file.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "workflow_path",
+        "group": "managed.outputs",
+        "type": "owned_graph_reference",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            621,
+            621
+          ]
+        },
+        "proposal": "Journaled workflow.json is canonical Studio data; source GUI YAML path and Studio JSON pair are different layouts. Bind actual saved graph hash/path; never borrow sibling YAML.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "scientific_metadata",
+        "group": "details.provenance",
+        "type": "bounded_data_object",
+        "origin": {
+          "path": "tools/graph_workflow.py",
+          "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+          "lines": [
+            619,
+            619
+          ]
+        },
+        "proposal": "Informational provenance, not an active engine control; typed subfields where known, advanced data only, no code or raw expression evaluation.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "task_name",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "repo_dir",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "work_root",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "workspace",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "script_path",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "pt2_path",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "manifest_path",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "gascfg_path",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "run_in_path",
+        "group": "managed.readonly",
+        "type": "source_GUI_layout_metadata",
+        "origin": {
+          "path": "tools/cv_bias_gui/graph.html",
+          "sha256": "aa3d047735dd46c510ef4b307890ffa8d87be0df977661bfd79f01d5b3abdb08",
+          "lines": [
+            136,
+            136,
+            351,
+            351
+          ]
+        },
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "location": "settings",
+        "read_only": true,
+        "editor_hint": {}
+      },
+      {
+        "key": "opes.mode",
+        "type": "enum",
+        "unit": null,
+        "source_default": "METAD",
+        "gui_initial": "METAD",
+        "condition": "METAD or EXPLORE, not graph.mode",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "basic",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "basic",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "enum",
+          "options": [
+            "METAD",
+            "EXPLORE"
+          ]
+        },
+        "required": true
+      },
+      {
+        "key": "opes.temperature",
+        "type": "positive_finite_number",
+        "unit": "K",
+        "source_default": 300.0,
+        "gui_initial": 300.0,
+        "condition": "explicit for graph",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "basic",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "basic",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number",
+          "exclusive_minimum": 0
+        },
+        "required": true
+      },
+      {
+        "key": "opes.barrier",
+        "type": "positive_finite_number",
+        "unit": "eV",
+        "source_default": 0.5,
+        "gui_initial": 0.5,
+        "condition": "scientific proposal with basis",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "basic",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "basic",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number",
+          "exclusive_minimum": 0
+        },
+        "required": true
+      },
+      {
+        "key": "opes.bias_factor",
+        "type": "finite_number_or_inf",
+        "unit": null,
+        "source_default": "barrier/(kb*temperature)",
+        "gui_initial": 20.0,
+        "condition": ">1; inf only METAD and incompatible with adaptive sigma",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "basic",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "basic",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number_or_enum",
+          "options": [
+            "inf"
+          ],
+          "exclusive_minimum": 1
+        },
+        "required": true
+      },
+      {
+        "key": "opes.pace",
+        "type": "positive_integer",
+        "unit": "engine_steps",
+        "source_default": 500,
+        "gui_initial": 500,
+        "condition": "actual procedure schedule; not GUI refresh interval",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "basic",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "basic",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "integer",
+          "minimum": 1
+        },
+        "required": true
+      },
+      {
+        "key": "opes.sigma",
+        "type": "positive_vector_or_ADAPTIVE",
+        "unit": "ordered CV native units",
+        "source_default": "ADAPTIVE",
+        "gui_initial": [
+          0.15
+        ],
+        "condition": "full actual ordered CV dimension; no vector-to-scalar shortcut",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "basic",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "basic",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "vector_or_enum",
+          "options": [
+            "ADAPTIVE"
+          ],
+          "exclusive_minimum": 0
+        },
+        "required": true
+      },
+      {
+        "key": "opes.sigma_min",
+        "type": "nonnegative_vector",
+        "unit": "ordered CV native units",
+        "source_default": null,
+        "gui_initial": [
+          0.01
+        ],
+        "condition": "actual dimension; source checks fixed sigma lower bound",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number_vector",
+          "shape": [
+            null
+          ],
+          "minimum": 0
+        }
+      },
+      {
+        "key": "opes.periodic_min",
+        "type": "finite_vector",
+        "unit": "ordered CV native units",
+        "source_default": null,
+        "gui_initial": [
+          0.0
+        ],
+        "condition": "paired with periodic_max; equal bounds nonperiodic",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "basic",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "basic",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number_vector",
+          "shape": [
+            null
+          ]
+        },
+        "required": true
+      },
+      {
+        "key": "opes.periodic_max",
+        "type": "finite_vector",
+        "unit": "ordered CV native units",
+        "source_default": null,
+        "gui_initial": [
+          0.0
+        ],
+        "condition": ">= corresponding minimum; no FFWTPD pdl aliases",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "basic",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "basic",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number_vector",
+          "shape": [
+            null
+          ]
+        },
+        "required": true
+      },
+      {
+        "key": "opes.fixed_sigma",
+        "type": "boolean",
+        "unit": null,
+        "source_default": false,
+        "gui_initial": false,
+        "condition": "literal bool only",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "boolean"
+        }
+      },
+      {
+        "key": "opes.compression_threshold",
+        "type": "nonnegative_finite_number",
+        "unit": null,
+        "source_default": 1.0,
+        "gui_initial": 1.0,
+        "condition": "strictly below actual kernel_cutoff",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number",
+          "minimum": 0
+        }
+      },
+      {
+        "key": "opes.recursive_merge",
+        "type": "boolean",
+        "unit": null,
+        "source_default": true,
+        "gui_initial": true,
+        "condition": "literal bool only",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "boolean"
+        }
+      },
+      {
+        "key": "opes.calc_work",
+        "type": "boolean",
+        "unit": null,
+        "source_default": false,
+        "gui_initial": false,
+        "condition": "opt-in diagnostic, not convergence proof",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "boolean"
+        }
+      },
+      {
+        "key": "opes.adaptive_sigma_stride",
+        "type": "positive_integer",
+        "unit": "engine_steps",
+        "source_default": "10*pace",
+        "gui_initial": null,
+        "condition": "only ADAPTIVE, >=pace",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "integer",
+          "minimum": 1
+        }
+      },
+      {
+        "key": "opes.epsilon",
+        "type": "positive_finite_number",
+        "unit": null,
+        "source_default": "exp(-barrier/(bias_prefactor*kBT))",
+        "gui_initial": null,
+        "condition": "derived unless expert justified override",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number",
+          "exclusive_minimum": 0
+        }
+      },
+      {
+        "key": "opes.kernel_cutoff",
+        "type": "positive_finite_number",
+        "unit": null,
+        "source_default": "source formula depends on mode and biasfactor",
+        "gui_initial": null,
+        "condition": "linked compression bound",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "number",
+          "exclusive_minimum": 0
+        }
+      },
+      {
+        "key": "opes.no_zed",
+        "type": "boolean",
+        "unit": null,
+        "source_default": false,
+        "gui_initial": null,
+        "condition": "expert-only exact source option",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": false,
+        "editor_hint": {
+          "editor": "boolean"
+        }
+      },
+      {
+        "key": "opes.kb",
+        "type": "positive_finite_number",
+        "unit": "eV/K",
+        "source_default": 8.617333262145e-05,
+        "gui_initial": null,
+        "condition": "source physical constant; readonly unless deliberate units discussion",
+        "origin": {
+          "path": "base/opes.py",
+          "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+          "lines": [
+            49,
+            157
+          ]
+        },
+        "classification": "details",
+        "applicable": "graph.mode=opes",
+        "location": "settings",
+        "group": "details.opes",
+        "read_only": true,
+        "editor_hint": {
+          "editor": "number",
+          "exclusive_minimum": 0
+        }
+      }
+    ],
+    "scope": "Source-bound graph/global settings; constructor parameters are separate. Defaults, GUI examples, renderer fallbacks and current values are distinct; no automatic filling or scientific recommendation."
+  }
+}

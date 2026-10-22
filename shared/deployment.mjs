@@ -8,6 +8,7 @@ export function scienceOnly(parameters,steps=[],missing=[]){
 }
 const engines=new Set(['gpumd.neb','gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']);
 export function scientificSpec(task){
+ if(task.composition&&(task.composition.status!=='rendered'||task.composition.render_blocked))throw Error('CV/bias组合图尚不能生成；先在原会话补齐、保存并复核当前输入');
  const p=task.parameters||{};if(!engines.has(p.engine))throw Error('请在计算流程中选择已接入的计算引擎');
  if(!Array.isArray(p.files)||!p.files.length||p.files.length>100||p.files.some(f=>typeof f!=='string'||!f||/[\n\r\0]/.test(f)))throw Error('请在计算流程中提供实际输入文件列表');
  const inputs={};for(const file of p.files){const name=file.replaceAll('\\','/').split('/').at(-1);if(!name||name==='.'||name==='..'||Object.hasOwn(inputs,name))throw Error('输入文件名重复或无效');inputs[name]=file;}
@@ -16,7 +17,7 @@ export function scientificSpec(task){
 }
 // Protocol-reserved evidence is never an engine control. Unknown controls remain
 // in this projection so additions, removals and value changes still fail closed.
-const evidenceRoots=new Set(['review','provenance','evidence','derived_inputs']);
+const evidenceRoots=new Set(['review','provenance','evidence','derived_inputs','validation']);
 const evidenceLeaves=new Set(['source','provenance','settings_source','model_origin','hashes','sha256']);
 export function inputControlParameters(parameters){
  function controls(value,depth=0){
@@ -24,7 +25,19 @@ export function inputControlParameters(parameters){
   if(!value||typeof value!=='object')return value;
   return Object.fromEntries(Object.entries(value).filter(([key])=>!(depth===0&&evidenceRoots.has(key))&&!evidenceLeaves.has(key)).map(([key,item])=>[key,controls(item,depth+1)]));
  }
- return controls(parameters||{});
+ const canonical=structuredClone(parameters||{}),cv=canonical.cv;
+ // The pair journal is a transaction identity, not a scientific control. Graph,
+ // source/input hashes and every unknown property remain strictly compared.
+ if(canonical.composition?.expected&&typeof canonical.composition.expected==='object'&&!Array.isArray(canonical.composition.expected))delete canonical.composition.expected.journal_sha256;
+ if(cv&&typeof cv==='object'&&!Array.isArray(cv)){
+  const groups=[canonical.atom_selection,cv.atom_selection,cv.atoms_zero_based].filter(value=>value!==undefined&&value!==null&&value!=='');
+  if(groups.length){
+   if(groups.some(value=>JSON.stringify(value)!==JSON.stringify(groups[0])))throw Error('Conflicting declared CV atom_selection aliases');
+   canonical.atom_selection=groups[0];delete cv.atom_selection;delete cv.atoms_zero_based;
+   if(!Object.keys(cv).length)delete canonical.cv;
+  }
+ }
+ return controls(canonical);
 }
 export function validDeployment(value){
  if(!value||!['local','cluster'].includes(value.target)||typeof value.projectId!=='string'||!value.projectId||typeof value.targetId!=='string'||!value.targetId)throw Error('请选择项目和计算目标');

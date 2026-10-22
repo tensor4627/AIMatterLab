@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "software": "studio-viewer",
+  "status": "source_backed_planning_reference_not_runtime_validation",
+  "retrieved_at": "2026-10-22",
+  "interface_authority": "Actual registered source/runtime and describe_engine take precedence over latest public documentation. Parameters must map to emitted config/API/CLI; no invented effective controls.",
+  "tutorials": {
+    "zh-CN": [
+      {
+        "source": "Studio-authored summary",
+        "status": "source_fallback; official OVITO Chinese tutorial not confirmed"
+      }
+    ],
+    "en": [
+      {
+        "url": "https://www.ovito.org/docs/current/usage/import.html",
+        "status": "fetched_2026-10-22; planned_reference_only; manual3.16.1"
+      }
+    ]
+  },
+  "source_fallback": [
+    {
+      "path": "src/widgets.tsx",
+      "sha256": "79a9b90a983aa64111d28c3631eb99e7a1cbfa31c621d51120335f7f92a1f633"
+    },
+    {
+      "path": "src/RunDetail.tsx",
+      "sha256": "0d7f620bbba3aa4d3725a74d0d34599cecee12c6618be23b1fc396888e042469"
+    },
+    {
+      "path": "worker/studio_worker/scientific.py",
+      "sha256": "c229dc47d0090fd4dcd68abf6cd4cf7cbd1ebe36b5fa07c2fff323b0cee6820f"
+    }
+  ],
+  "rules": {
+    "zh-CN": [
+      "当前为Three.js预览，尚未接入OVITO；不能把OVITO教程功能标为已支持。",
+      "结构和轨迹帧由ASE有界读取；以实际入口的格式/帧限制为准。",
+      "展示真实已读帧的原子顺序、颜色、旋转与缩放；预览不代表完整分析或科学验证。"
+    ],
+    "en": [
+      "Actual Three.js Structure displays element-colored atom positions, retains order, drag rotation and wheel zoom. Cell is accepted in data but no unit-cell/bond/OVITO modifier implementation is claimed.",
+      "Worker ASE structure inspection accepts an explicit zero-based frame and bounds preview to 20000 atoms; actual registered ASE parser determines format support. RunDetail currently exposes preview only for xyz/traj file names; do not claim all ASE formats have a frontend entry.",
+      "No whole-trajectory animation, streaming index, OVITO pipeline or automatic scientific analysis is inferred from a visual preview.",
+      "OVITO official import and pipeline manuals are design references for a future integration; Studio does not ship those API capabilities."
+    ]
+  },
+  "display_policy": {
+    "basic": "System/task-dependent scientific choices and consequential unresolved decisions first. Preserve upstream parameter names.",
+    "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
+    "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Human current-revision execution gate remains required."
+  },
+  "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T11:27:22.264583+00:00",
+    "rule_input_sha256": "b4c0c23cb376ee3be4bdab619525cb224008c2f6a623151ce88ccfa4372d9e83",
+    "local_files": [
+      {
+        "source_id": "studio",
+        "path": "src/widgets.tsx",
+        "sha256": "79a9b90a983aa64111d28c3631eb99e7a1cbfa31c621d51120335f7f92a1f633",
+        "bytes": 9321,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "actual_Threejs_preview",
+        "line_ranges": [
+          [
+            1,
+            104
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "studio",
+        "path": "src/RunDetail.tsx",
+        "sha256": "0d7f620bbba3aa4d3725a74d0d34599cecee12c6618be23b1fc396888e042469",
+        "bytes": 10718,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "actual_frontend_entry_filters",
+        "line_ranges": [
+          [
+            1,
+            83
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/scientific.py",
+        "sha256": "d9796ca6ae20bbac7bf9b02cda2804c068bba310777088b7b12a254e975ccff5",
+        "bytes": 9419,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "frame_and_atom_preview_bounds",
+        "line_ranges": [
+          [
+            1,
+            169
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      }
+    ],
+    "primary_references": [],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals."
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
+  }
+}

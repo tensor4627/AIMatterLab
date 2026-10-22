@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {TaskRecords} from '../desktop/task-records.mjs';import {saveDeployment,prepareDeployment} from '../desktop/task-deployment.mjs';import {scienceOnly,scientificSpec,deploymentCurrent} from '../shared/deployment.mjs';import {executeTask} from '../desktop/task-execution.mjs';
+import {TaskRecords} from '../desktop/task-records.mjs';import {saveDeployment,prepareDeployment} from '../desktop/task-deployment.mjs';import {scienceOnly,scientificSpec,deploymentCurrent,inputControlParameters} from '../shared/deployment.mjs';import {executeTask} from '../desktop/task-execution.mjs';
 function fixture(){const data=new Map(),catalog={get:(k,id)=>structuredClone(data.get(k+id)),put:(k,id,v)=>{data.set(k+id,structuredClone(v));return v;},list:k=>[...data.entries()].filter(([key])=>key.startsWith(k)).map(([,v])=>structuredClone(v))},records=new TaskRecords(catalog,()=>{});const task=records.create({workflowVersion:2,planningMode:true,provider:'codex',threadId:'thread',request:'MetaD',projectId:'project'});const current=records.read(task.id);current.parameters={engine:'gpumd.sampling',files:['/fixture/run.in','/fixture/model.xyz','/fixture/bias.pt','/fixture/GAScfg.yaml'],bias_file:'bias.pt',structure_file:'model.xyz',mode:'static',cutoff:3,cv_size:2,sampling:{walkers:1}};current.steps=[];current.review={status:'ready',parameterRevision:current.parameterRevision};records.save(current);return {records,task:current};}
 const config={target:'cluster',targetId:'cluster',projectId:'project',inputSource:'local',directoryName:'short-metad',maxSeconds:300,resources:{cpus:1,gpus:1,memory_mb:4096,queue:'short',account:''}};
 test('Scientific workflow strips deployment fields without discarding scientific settings',()=>{const value=scienceOnly({engine:'gpumd.sampling',md:{temperature:300,environment_id:'private'},resources:{queue:'private'},files:['/a/model.xyz']},[{id:'md',title:'MD',fields:[{key:'md.temperature'},{key:'resources.queue'}]},{id:'deploy',title:'队列部署',fields:[{key:'resources.queue'}]}],['resources.queue','md.temperature']);assert.equal(value.parameters.md.temperature,300);assert(!('resources' in value.parameters));assert.equal(value.steps.length,1);assert.deepEqual(value.missing,['md.temperature']);});
@@ -20,7 +20,7 @@ test('Review evidence may change with identical inputs, execution controls may n
  const {records,task}=fixture();task.parameters.md={temperature:300,steps:10};task.parameters.structure={provenance:'first read'};task.parameters.review={scope:'first'};records.save(task);saveDeployment(records,{taskId:task.id,value:config});
  const worker={request:async()=>({id:'run',kind:'cluster-run',engine:'gpumd.sampling',status:'draft',snapshots:[{name:'run.in',sha256:'unchanged'}]})};await prepareDeployment(records,worker,{taskId:task.id});
  function reviewed(parameters){const next=records.read(task.id);next.parameters=parameters;next.parameterRevision++;next.review={status:'ready',parameterRevision:next.parameterRevision};records.save(next);return next;}
- const evidence=structuredClone(task.parameters);evidence.review={scope:'fresh read',derived_inputs:{atomic_number:29,driver_dt:0.0001}};evidence.structure.provenance='read back with the same hash';evidence.md.settings_source='current driver';reviewed(evidence);await prepareDeployment(records,worker,{taskId:task.id});
+ const evidence=structuredClone(task.parameters);evidence.review={scope:'fresh read',derived_inputs:{atomic_number:29,driver_dt:0.0001}};evidence.structure.provenance='read back with the same hash';evidence.md.settings_source='current driver';evidence.validation={atom_selection:[0,3],fd_step:1e-5};reviewed(evidence);await prepareDeployment(records,worker,{taskId:task.id});
  for(const change of [p=>p.md.temperature=310,p=>p.md.time_step_fs=0.1,p=>delete p.md.steps,p=>p.unregistered_control=1,p=>p.bias_file='bias.pt2',p=>p.md.driver_dt=0.0001,p=>p.structure.atomic_number=29,p=>p.sampling.walkers=2]){
   const changed=structuredClone(evidence);change(changed);reviewed(changed);await assert.rejects(prepareDeployment(records,worker,{taskId:task.id}),/实际输入文件未更新|多 walker|actual scientific files/);
  }
@@ -34,4 +34,21 @@ test('A reviewed authoring workspace executes only in the explicitly selected co
   if(runProject==='foreign')await assert.rejects(executeTask(records,worker,{taskId:task.id,artifactId:'target',inputReceipt:receipt}),/project does not match/);else{await executeTask(records,worker,{taskId:task.id,artifactId:'target',inputReceipt:receipt});assert.equal(records.read(task.id).projectId,'draft-authoring');}
   assert.equal(submitted,runProject==='project'?1:0);
  }
+});
+
+test('Authoritative scientific preparation rejects a blocked composition despite a stale ready flag',()=>{
+ const task={parameters:{engine:'gpumd.md',files:['/owned/run.in','/owned/model.xyz','/owned/nep.txt']},composition:{status:'blocked',render_blocked:true},review:{status:'ready'}};
+ assert.throws(()=>scientificSpec(task),/CV\/bias/);
+});
+
+
+test('Input bindings canonicalize only equal declared CV group aliases, preserving all science controls',()=>{
+ const full=Array.from({length:108},(_,i)=>i),base={cv:{atom_selection:full,unit:'dimensionless'},sigma:[.1]};
+ const root={atom_selection:full,cv:{unit:'dimensionless'},sigma:[.1]};
+ assert.deepEqual(inputControlParameters(base),inputControlParameters({...base,atom_selection:full}));
+ assert.deepEqual(inputControlParameters(base),inputControlParameters(root));
+ assert.notDeepEqual(inputControlParameters(base),inputControlParameters({...root,atom_selection:full.slice(0,8)}));
+ assert.notDeepEqual(inputControlParameters(base),inputControlParameters({...root,sigma:[.2]}));
+ assert.throws(()=>inputControlParameters({...base,atom_selection:[0,1]}),/Conflicting/);
+ assert.deepEqual(base.cv.atom_selection,full);assert.equal(base.atom_selection,undefined);
 });

@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "software": "materials-project",
+  "status": "source_backed_planning_reference_not_runtime_validation",
+  "retrieved_at": "2026-10-22",
+  "interface_authority": "Actual registered source/runtime and describe_engine take precedence over latest public documentation. Parameters must map to emitted config/API/CLI; no invented effective controls.",
+  "tutorials": {
+    "en": [
+      {
+        "url": "https://docs.materialsproject.org/downloading-data/using-the-api/getting-started.md",
+        "status": "fetched"
+      }
+    ],
+    "zh-CN": [
+      {
+        "status": "official_tutorial_not_verified",
+        "fallback": "Source-backed bilingual client/settings guidance"
+      }
+    ]
+  },
+  "source_fallback": [],
+  "rules": {
+    "zh-CN": [
+      "API key仅由设置入口保存；未配置就明确不能查询，不伪造MP结果。",
+      "记录数据库标识、来源和实际导入哈希；数据库结构仍需势模型匹配与科学条件确认。"
+    ],
+    "en": [
+      "Use official API/client and bounded explicit search fields exposed by current Studio tool.",
+      "No account key means blocked query, not fabricated search results; preserve key-setting entry.",
+      "Store returned material identifier/source/provenance, then inspect with ASE before simulation."
+    ]
+  },
+  "display_policy": {
+    "basic": "System/task-dependent scientific choices and consequential unresolved decisions first. Preserve upstream parameter names.",
+    "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
+    "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Human current-revision execution gate remains required."
+  },
+  "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T12:13:27.312726+00:00",
+    "rule_input_sha256": "27ec27fef52c5c300bd3e22f26ccef345c0a0fff7dd6daf977d6168adfbe5321",
+    "local_files": [
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/structure_tools.py",
+        "sha256": "dc039b996cb2b7efe3bcf529d72b40c6cd35f72a902295af74b30abbfa6eb130",
+        "bytes": 14188,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "actual_bounded_query_schema",
+        "line_ranges": [
+          [
+            1,
+            167
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      },
+      {
+        "source_id": "studio",
+        "path": "desktop/main.mjs",
+        "sha256": "f80e96a554d63c30f715145a419c29721b2d52cda55a06ccc0d3efabb44d12c3",
+        "bytes": 31521,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "settings_credential_boundary",
+        "line_ranges": [
+          [
+            1,
+            378
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      }
+    ],
+    "primary_references": [
+      {
+        "id": "materials-project-en",
+        "url": "https://docs.materialsproject.org/downloading-data/using-the-api/getting-started.md",
+        "http_status": 200,
+        "status": "fetched_untrusted_source",
+        "sha256": "3efba1c5ec0dda110723eb01d506032788ce0f6a4de8f857b9dca166b8794628",
+        "role": "captured_primary_reference_not_registered_runtime_or_local_default",
+        "observed_at": "2026-10-22T08:06:53.444838+00:00",
+        "capture_bytes_verified": true,
+        "bytes": 13252
+      }
+    ],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals."
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
+  }
+}

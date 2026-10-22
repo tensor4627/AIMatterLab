@@ -40,6 +40,7 @@ export class WorkerClient {
    return this.exposeTools({...health.data,transport:'wsl-stdio'});
   }
  }
+ setAuthoringGuard(guard){this.authoringGuard=guard;}
  setLocalTools(definitions,handler){this.localDefinitions=definitions;this.localHandler=handler;}
  setScopedTools(definitions,handler){this.scopedDefinitions=definitions;this.scopedHandler=handler;}
  providerConnection(provider){if(!this.connection)return undefined;return this.providerScopes.connection(provider,this.connection);}
@@ -49,9 +50,11 @@ export class WorkerClient {
    const scope=this.providerScopes.authenticate({pathname:req.url,authorization:req.headers.authorization,origin:req.headers.origin,host:req.headers.host});
    if(!scope){res.writeHead(403);res.end();return;}
    if(!['GET','POST'].includes(req.method)){res.writeHead(405);res.end();return;}
+   let authoringToken;
    try{
     const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>4*1024*1024)throw Error('Request too large');chunks.push(chunk);}
     const body=bytes?JSON.parse(Buffer.concat(chunks).toString('utf8')):undefined;
+    authoringToken=body?.method==='tools/call'?await this.authoringGuard?.before(body.params?.name,body.params?.arguments||{},scope.provider):null;
     let response;
     const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
     if(body?.method==='tools/call'&&scopedTool){
@@ -63,11 +66,12 @@ export class WorkerClient {
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(this.relay)response=await this.forward(req.method,'/mcp',body,true);
     else{const upstream=await fetch(this.upstream+'/mcp',{method:req.method,headers:{Authorization:'Bearer '+this.connection.tokens.mcp,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(245000)});const text=await upstream.text();response={status:upstream.status,data:text?JSON.parse(text):null};}
+    if(body?.method==='tools/call')await this.authoringGuard?.after(authoringToken,response.data?.result);
     if(body?.method==='tools/list'&&response.data?.result?.tools)response.data.result.tools.push(...(this.localDefinitions||[]),...(scope.localReaders?this.scopedDefinitions||[]:[]));
     const current=this.providerScopes.authenticate({pathname:req.url,authorization:req.headers.authorization,origin:req.headers.origin,host:req.headers.host});
     if(!current||current.provider!==scope.provider||current.generation!==scope.generation){res.writeHead(403);res.end();return;}
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
-   }catch(e){res.writeHead(502);res.end(JSON.stringify({error:e.message}));}
+   }catch(e){this.authoringGuard?.cancel?.(authoringToken);res.writeHead(502);res.end(JSON.stringify({error:e.message}));}
   });
   await new Promise((resolve,reject)=>{this.proxy.once('error',reject);this.proxy.listen(0,'127.0.0.1',resolve);});
   this.connection.url='http://127.0.0.1:'+this.proxy.address().port;

@@ -29,7 +29,7 @@ export class CodexBridge extends EventEmitter {
       args.push('-c','mcp_servers.gpusampling.enabled=true');
       args.push('-c', 'mcp_servers.gpusampling.url=' + JSON.stringify(worker.url + '/mcp'),
         '-c', 'mcp_servers.gpusampling.bearer_token_env_var="GSS_MCP_TOKEN"');
-      for(const tool of ['scientific_skill_catalog','read_scientific_skill','import_materials_project','create_structure','render_pygas_workflow','present_task','draft_cluster_setup','prepare_cluster_run','prepare_run','resume_run','write_project_input','generate_bias','create_workflow'])
+      for(const tool of ['scientific_skill_catalog','read_scientific_skill','inspect_pygas_catalog','read_runtime_guide','import_materials_project','create_structure','render_pygas_workflow','present_task','draft_cluster_setup','prepare_cluster_run','prepare_run','resume_run','write_project_input','create_workflow'])
         args.push('-c','mcp_servers.gpusampling.tools.'+tool+'.approval_mode="approve"');
       env.GSS_MCP_TOKEN = worker.tokens.mcp;
     }

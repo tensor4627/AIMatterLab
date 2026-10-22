@@ -42,5 +42,14 @@ export class ScientificSkillContext{
   const digest=createHash('sha256').update(receipts.map(r=>r.function_id+':'+r.digest).join('\n')).digest('hex');
   return {status:attach?'passed':'already_loaded',routes:functions,digest,attach,provider,loaded:changed.map(r=>({id:r.function_id,digest:r.digest})),attachments:receipts.flatMap(r=>r.attachments),text:attach?'[Studio selected scientific guidance]\n'+changed.map(r=>r.text).join('\n'):''};
  }
+ mergeRuntime(key,provider,result,guide,selection){
+  if(!guide||!selection)return result;
+  const fields=['environment_id','engine','configuration_sha256','observed_at','probe_attempted_at','state','probe_status','failure_type','reason','python','executables','modules','repositories','native_runtime','capabilities','cuda','source_build_relation','scientific_status','scope'];
+  const compact={status:guide.status,environment_id:selection.environment_id,engine:selection.engine,...guide.reason?{reason:guide.reason}:{},...guide.receipt?{receipt:guide.receipt}: {}};
+  if(guide.facts)compact.facts=Object.fromEntries(fields.filter(field=>Object.hasOwn(guide.facts,field)).map(field=>[field,guide.facts[field]]));
+  const digest=createHash('sha256').update(JSON.stringify(compact)).digest('hex'),id='@runtime:'+selection.environment_id+':'+selection.engine;
+  if(this.accepted.get(provider+'\0'+key)?.get(id)===digest)return result;
+  return {...result,provider,status:['not_run','already_loaded'].includes(result.status)?'passed':result.status,attach:true,loaded:[...(result.loaded||[]),{id,digest}],attachments:[...(result.attachments||[]),{source:'runtime',skill:'selected-runtime',name:id,sha256:digest,scope:'Compact actual probe receipt; no installer body or file-watch list'}],text:(result.attach?result.text+'\n':'')+'[Studio runtime guide]\n'+JSON.stringify(compact)+'\nReuse only these observed selected-runtime facts with current functional guidance. stale/not_run/blocked needs a targeted selected-engine probe or explicit repair decision, never an automatic reinstall. Artifact/runtime/scientific validation and execution authorization remain separate.'};
+ }
  accept(key,result){if(result.attach&&result.status==='passed'){const cacheKey=result.provider+'\0'+key,accepted=this.accepted.get(cacheKey)||new Map();for(const item of result.loaded)accepted.set(item.id,item.digest);this.accepted.set(cacheKey,accepted);}}
 }

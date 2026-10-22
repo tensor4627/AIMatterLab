@@ -1,4 +1,5 @@
 import path from 'node:path';
+import {PublicRuleEvidence} from './public-rule-evidence.mjs';
 import {ScientificSkillRouter} from './scientific-skill-router.mjs';
 import {ScientificSkillContext} from './scientific-context.mjs';
 const SOURCES=new Set(['gpumd','pydyn','hotpp','torchnep']);
@@ -8,9 +9,10 @@ export function validateScientificConsent(value){
  for(const providers of Object.values(value))if(!Array.isArray(providers)||providers.some(p=>!['codex','kimi','qwen','deepseek'].includes(p))||new Set(providers).size!==providers.length)throw Error('Invalid scientific skill provider scope');
 }
 export class ScientificSkills{
- constructor({map,bundledRoot,sources,settings,setupAllowed}){
+ constructor({map,bundledRoot,sources,settings,setupAllowed,studioRoot}){
   this.map=structuredClone(map);this.sources=sources;this.settings=settings;
-  this.router=new ScientificSkillRouter({map,sourceRoot:source=>source==='studio'?bundledRoot:(()=>{const item=sources().find(item=>item.id===source);return item?path.join(item.root,'agents','skills'):undefined;})(),consent:(provider,source)=>source==='pygas'?(settings().pygasSkillProviders||[]).includes(provider):(settings().scientificSkillProviders?.[source]||[]).includes(provider),setupAllowed});
+  this.ruleEvidence=new PublicRuleEvidence(source=>source==='studio'?studioRoot:sources().find(item=>item.id===source)?.root);
+  this.router=new ScientificSkillRouter({ruleEvidence:document=>this.ruleEvidence.inspect(document),map,sourceRoot:source=>source==='studio'?bundledRoot:(()=>{const item=sources().find(item=>item.id===source);return item?path.join(item.root,'agents','skills'):undefined;})(),consent:(provider,source)=>source==='pygas'?(settings().pygasSkillProviders||[]).includes(provider):(settings().scientificSkillProviders?.[source]||[]).includes(provider),setupAllowed});
   this.context=new ScientificSkillContext(this.router);
  }
  async catalog(provider){

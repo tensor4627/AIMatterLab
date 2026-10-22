@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "software": "slurm",
+  "status": "source_backed_planning_reference_not_runtime_validation",
+  "retrieved_at": "2026-10-22",
+  "interface_authority": "Actual registered source/runtime and describe_engine take precedence over latest public documentation. Parameters must map to emitted config/API/CLI; no invented effective controls.",
+  "tutorials": {
+    "en": [
+      {
+        "url": "https://slurm.schedmd.com/quickstart.html",
+        "status": "fetched"
+      },
+      {
+        "url": "https://slurm.schedmd.com/sbatch.html",
+        "status": "fetched"
+      }
+    ],
+    "zh-CN": [
+      {
+        "status": "official_tutorial_not_verified",
+        "fallback": "Registered scheduler help/version and Studio source-backed bilingual rules"
+      }
+    ]
+  },
+  "source_fallback": [],
+  "rules": {
+    "zh-CN": [
+      "以已保存SSH连接、实际Slurm分区和资源探测为准，不把官网示例当本集群配置。",
+      "科学参数与资源部署分离；保留真实job id、提交脚本和退出证据；连接中断为未知，不重提。"
+    ],
+    "en": [
+      "Use actual selected profile queue/partition/account/resources and sbatch syntax.",
+      "Submission receipt/job ID is queued/submitted evidence, not running or scientific success.",
+      "Verify compute-node runtime/artifact and input transfer separately from login-node probe.",
+      "Keep original run/job identity on disconnect; reconcile unknown and never auto-resubmit."
+    ]
+  },
+  "display_policy": {
+    "basic": "System/task-dependent scientific choices and consequential unresolved decisions first. Preserve upstream parameter names.",
+    "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
+    "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Human current-revision execution gate remains required."
+  },
+  "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T12:13:27.311726+00:00",
+    "rule_input_sha256": "f4a626c87674599fad92a772350005342355812eaeda682c4bf8bb24efd81979",
+    "local_files": [
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/cluster.py",
+        "sha256": "e1513e165856857e6aa5696f7b0f8c507391afcac5c6a6ab452726fdb6ded2cc",
+        "bytes": 57249,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "adapter_not_actual_site_probe",
+        "line_ranges": [
+          [
+            1,
+            952
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      }
+    ],
+    "primary_references": [
+      {
+        "id": "slurm-sbatch-en",
+        "url": "https://slurm.schedmd.com/sbatch.html",
+        "http_status": 200,
+        "status": "fetched_untrusted_source",
+        "sha256": "054f386ca875446729050fa73d05ab5d324929701bfc545770213b8a6b9627ac",
+        "role": "captured_primary_reference_not_registered_runtime_or_local_default",
+        "observed_at": "2026-10-22T08:06:53.544593+00:00",
+        "capture_bytes_verified": true,
+        "bytes": 171008
+      },
+      {
+        "id": "slurm-quickstart-en",
+        "url": "https://slurm.schedmd.com/quickstart.html",
+        "http_status": 200,
+        "status": "fetched_untrusted_source",
+        "sha256": "a304bcbd47da2c3b755e66351f7c326d2f3061083131def889f4dd9596be919e",
+        "role": "captured_primary_reference_not_registered_runtime_or_local_default",
+        "observed_at": "2026-10-22T08:06:53.941334+00:00",
+        "capture_bytes_verified": true,
+        "bytes": 20834
+      }
+    ],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals."
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
+  }
+}

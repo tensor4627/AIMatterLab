@@ -4,6 +4,11 @@ export const engineContracts=contract;
 function normalizedPath(value){return value.replaceAll('\\','/').replace(/^([A-Za-z]):\//,(_,drive)=>'/mnt/'+drive.toLowerCase()+'/');}
 export function adapterParameters(engine,parameters,inputs){
  const rule=contract.engines[engine];if(!rule)throw Error('Unsupported engine contract');const result=structuredClone(parameters);
+ if(result.validation!==undefined){
+  const value=result.validation;if(!value||typeof value!=='object'||Array.isArray(value)||!rule.validation_controls||Object.keys(value).some(key=>!Object.hasOwn(rule.validation_controls,key)))throw Error('Unsupported numerical validation controls; scientific values cannot be hidden in validation');
+  const indices=value.atom_selection;if(indices!==undefined&&(!Array.isArray(indices)||!indices.length||indices.length>32||indices.some(index=>!Number.isSafeInteger(index)||index<0)||new Set(indices).size!==indices.length))throw Error('validation.atom_selection requires 1..32 distinct indices and does not redefine the CV');
+  for(const [key,maximum] of [['fd_step',.01],['fd_atol',.1]])if(value[key]!==undefined&&(typeof value[key]!=='number'||!Number.isFinite(value[key])||value[key]<=0||value[key]>=maximum||result[key]!==undefined&&result[key]!==value[key]))throw Error('Invalid or conflicting numerical validation '+key);
+ }
  const fileKeys=new Set(rule.input_file_parameters||[]);
  function fileValue(value,key){
   if(typeof value!=='string'||!value)throw Error('Adapter input '+key+' must identify an actual scientific files entry');

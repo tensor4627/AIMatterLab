@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "software": "gpumd",
+  "status": "source_backed_planning_reference_not_runtime_validation",
+  "retrieved_at": "2026-10-22",
+  "interface_authority": "Actual registered source/runtime and describe_engine take precedence over latest public documentation. Parameters must map to emitted config/API/CLI; no invented effective controls.",
+  "tutorials": {
+    "en": [
+      {
+        "source": "registered_repository",
+        "path": "doc/gpumd/input_files/run_in.rst",
+        "status": "available"
+      },
+      {
+        "url": "https://gpumd.org/gpumd/input_parameters/index.html",
+        "status": "fetched_latest_reference_not_local_version"
+      },
+      {
+        "url": "https://github.com/brucefan1983/GPUMD-Tutorials",
+        "status": "fetched_repository_index"
+      }
+    ],
+    "zh-CN": [
+      {
+        "status": "official_full_tutorial_not_verified",
+        "fallback": "Studio-authored bilingual rules anchored to registered source"
+      }
+    ]
+  },
+  "source_fallback": [
+    "src/main_gpumd/run.cu",
+    "native NEB source in registered custom fork"
+  ],
+  "rules": {
+    "zh-CN": [
+      "按实际run.in关键词、参数顺序与注册fork支持范围生成输入。",
+      "time_step使用fs，温度使用K；ensemble压力与耦合参数须看具体子类型，不能照抄PyDyn时间量。",
+      "先展示势模型、结构、系综、温度、步数和时间步；输出频率等按来源默认值分组折叠。",
+      "GPU-Sampling与原生NEB是独立能力；新版官网教程不能替代当前二进制/源码契约。"
+    ],
+    "en": [
+      "Use actual run.in keyword names and order; select compatible model.xyz/potential files.",
+      "time_step is fs; do not infer equality with PyDyn dt.",
+      "Read actual ensemble subtype arguments and units; source defaults are not production recommendations.",
+      "Use exactly audited NEB neb_set and neb_run fire controls when choosing gpumd.neb; preserve endpoint atom ordering and fixed/variable cell semantics.",
+      "The latest public manual is reference only; registered fork/source and worker-supported contract decide availability."
+    ]
+  },
+  "display_policy": {
+    "basic": "System/task-dependent scientific choices and consequential unresolved decisions first. Preserve upstream parameter names.",
+    "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
+    "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Human current-revision execution gate remains required."
+  },
+  "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T13:15:12.469159+00:00",
+    "rule_input_sha256": "e4c3ea87853901520b989950bbcc492d3fd684f12a2ddade13f944789fd5780c",
+    "local_files": [
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_files/run_in.rst",
+        "sha256": "35eb881dac356dd93a7d131d5ef7cb843e86490475f124c6114efcc606704458",
+        "bytes": 6808,
+        "observed_commit": "ecde6b56aca6363635131fd9c226de17e9a5df55",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            205
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/main_gpumd/run.cu",
+        "sha256": "c1cd3a0c9cad78c412e246de6e77dc554de106f7769788cf94434ab31c6b09a4",
+        "bytes": 33911,
+        "observed_commit": "ecde6b56aca6363635131fd9c226de17e9a5df55",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            936
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/neb_checks.py",
+        "sha256": "9c8afb033863b861e42ce91cd883283c7caef3e54a97a2c27c549d92c8572652",
+        "bytes": 8015,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            118
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/engine_contracts.json",
+        "sha256": "cac46aa8214d43425d1d7f4e81c9b718695ebfd42ae7e77a6a6d7eb0fc7806fc",
+        "bytes": 14041,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            525
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      }
+    ],
+    "primary_references": [
+      {
+        "id": "gpumd-keywords-en",
+        "url": "https://gpumd.org/gpumd/input_parameters/index.html",
+        "http_status": 200,
+        "status": "fetched_untrusted_source",
+        "sha256": "001827797339c9eee927147ce9424ed43ffcfca4cb4b8b0dc5e220e753347b1e",
+        "role": "captured_primary_reference_not_registered_runtime_or_local_default",
+        "observed_at": "2026-10-22T08:06:52.511470+00:00",
+        "capture_bytes_verified": true,
+        "bytes": 34842
+      },
+      {
+        "id": "gpumd-tutorials-en",
+        "url": "https://github.com/brucefan1983/GPUMD-Tutorials",
+        "http_status": 200,
+        "status": "fetched_untrusted_source",
+        "sha256": "11eb131a0532eeacda4bb843314c4d82a80dc959b3366f1638a90e7595c1d27d",
+        "role": "captured_primary_reference_not_registered_runtime_or_local_default",
+        "observed_at": "2026-10-22T08:06:52.511982+00:00",
+        "capture_bytes_verified": true,
+        "bytes": 268137
+      }
+    ],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals.",
+    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation"
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
+  }
+}

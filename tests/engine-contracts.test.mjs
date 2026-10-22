@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {scientificSpec} from '../shared/deployment.mjs';import {engineContracts} from '../shared/engine-contracts.mjs';
+import {scientificSpec} from '../shared/deployment.mjs';import {engineContracts,adapterParameters} from '../shared/engine-contracts.mjs';
 test('Nested human sampling parameters map to actual adapter keys without changing the task',()=>{
  const task={parameters:{engine:'pydyn.sampling',files:['/fixture/model.xyz','/fixture/ase-infer.pt','/fixture/bias.pt','/fixture/run.py'],bias:{input:'/fixture/bias.pt',mode:'static',cv:{size:1},cutoff_A:3}}};const before=structuredClone(task);
  const p=scientificSpec(task).parameters;assert.equal(p.bias_file,'bias.pt');assert.equal(p.structure_file,'model.xyz');assert.equal(p.cv_size,1);assert.equal(p.cutoff,3);assert.equal(p.mode,'static');assert.deepEqual(task,before);
@@ -48,4 +48,23 @@ test('NEB nested file mapping rejects foreign sources, traversal, mixed invalid 
  }
  task.parameters.neb={final_file:null,trajectory_input:true,initial_file:'is.xyz'};
  assert.equal(scientificSpec(task).parameters.neb.final_file,null);
+});
+
+
+test('Numerical force-check subset preserves complete CV provenance and rejects hidden science',()=>{
+ const task={parameters:{engine:'pydyn.sampling',files:['/f/run.py','/f/model.xyz','/f/bias.pt'],bias_file:'bias.pt',structure_file:'model.xyz',mode:'static',cutoff:4,cv_size:1,atom_selection:Array.from({length:108},(_,i)=>i),validation:{atom_selection:[0,15,31,46,61,76,92,107],fd_step:1e-5,fd_atol:1e-4}}};const before=structuredClone(task);
+ const spec=scientificSpec(task);assert.deepEqual(task,before);assert.equal(spec.parameters.atom_selection.length,108);assert.equal(spec.parameters.validation.atom_selection.length,8);
+ for(const value of [null,[],{temperature:300},{atom_selection:[]},{atom_selection:[0,0]},{atom_selection:[true]},{atom_selection:[-1]},{atom_selection:Array.from({length:33},(_,i)=>i)},{fd_step:0},{fd_step:.01},{fd_atol:NaN}]){task.parameters.validation=value;assert.throws(()=>scientificSpec(task),/validation|numerical/);}
+ task.parameters.validation={fd_step:1e-5};task.parameters.fd_step=1e-4;assert.throws(()=>scientificSpec(task),/conflicting/);
+ assert.throws(()=>scientificSpec({parameters:{engine:'gpumd.md',files:['/f/run.in','/f/model.xyz'],validation:{atom_selection:[0]}}}),/numerical/);
+});
+
+
+test('Nested CV atom-group aliases preserve complete provenance and conflict closed',()=>{
+ for(const engine of ['gpumd.sampling','pydyn.sampling','bias.validate']){
+  const full=Array.from({length:108},(_,i)=>i),p={bias_file:'bias.pt',structure_file:'model.xyz',mode:'static',cutoff:3,cv_size:1,cv:{atom_selection:full},validation:{atom_selection:[0,107]}};
+  const result=adapterParameters(engine,p,{'bias.pt':'/f/bias.pt','model.xyz':'/f/model.xyz','run.in':'/f/run.in','GAScfg.yaml':'/f/GAScfg.yaml','run.py':'/f/run.py'});
+  assert.deepEqual(result.atom_selection,full);assert.deepEqual(result.validation.atom_selection,[0,107]);assert.equal(p.atom_selection,undefined);
+  assert.throws(()=>adapterParameters(engine,{...p,atom_selection:[0,1]},{'bias.pt':'/f/bias.pt','model.xyz':'/f/model.xyz','run.in':'/f/run.in','GAScfg.yaml':'/f/GAScfg.yaml','run.py':'/f/run.py'}),/Conflicting/);
+ }
 });

@@ -68,5 +68,165 @@
       "Studio export fixes CUDA+double; tutorial CPU/default freeze is not current adapter behavior",
       "branch acceleration report numbers are historical, not this campaign speed or generic support"
     ]
+  },
+  "rules_zh-CN": [
+    "使用实际hotpp train/eval/freeze参数和配置层级，显示Data、Model、Train字段原名。",
+    "Data.testSet在训练中用于验证与checkpoint选择，不等于最终独立测试集。",
+    "先确定数据划分、目标性质、势模型消费端和训练预算；设备/文件路径由实际注册环境确定。",
+    "checkpoint、完整eager对象和部署产物分开管理；PyDyn须匹配ASE原子序数语义，不能混用LAMMPS类型编号。"
+  ],
+  "language_scope": "Studio-authored Chinese planning rules plus original source-backed fields; official bilingual availability is recorded separately, never invented.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T13:15:12.471160+00:00",
+    "rule_input_sha256": "d148aa2d93992d1d9fd4b67899b9bfa180817228ee83f62a496aeb582b4abbb1",
+    "local_files": [
+      {
+        "source_id": "hotpp",
+        "path": "hotpp/entrypoints/train.py",
+        "sha256": "cbfe358cb0c5236cb22fde6101fba45685b416df12824719554cde2963b0f8f4",
+        "bytes": 23682,
+        "observed_commit": "9a2b7957479eaa78cc0b28b902f14b79a3f1efc0",
+        "role": "defaults_and_resolution",
+        "line_ranges": [
+          [
+            41,
+            150
+          ],
+          [
+            551,
+            640
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "hotpp",
+        "path": "hotpp/entrypoints/main.py",
+        "sha256": "36f995029fa1820edf6772b50dc1f0e28e4aa0cf666c365c89ce15e40da74458",
+        "bytes": 7716,
+        "observed_commit": "9a2b7957479eaa78cc0b28b902f14b79a3f1efc0",
+        "role": "CLI",
+        "line_ranges": [
+          [
+            1,
+            177
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "hotpp",
+        "path": "hotpp/entrypoints/eval.py",
+        "sha256": "8c3df58f6c198cada6fad14441cbd7aab0ee953b613f5dd4242a4e7dcb8d71f6",
+        "bytes": 2033,
+        "observed_commit": "9a2b7957479eaa78cc0b28b902f14b79a3f1efc0",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            71
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "hotpp",
+        "path": "hotpp/entrypoints/freeze.py",
+        "sha256": "66396e2cc626b62d08341d101bf4b4e293898931b9c0b6d9d43ee8813970225c",
+        "bytes": 1338,
+        "observed_commit": "9a2b7957479eaa78cc0b28b902f14b79a3f1efc0",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            41
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "hotpp",
+        "path": "hotpp/data/utils.py",
+        "sha256": "58de8e89c6d44f262c7d29dd2a3a4b9851943302fd8c10858ada663a0dd3d82d",
+        "bytes": 9329,
+        "observed_commit": "9a2b7957479eaa78cc0b28b902f14b79a3f1efc0",
+        "role": "labels_and_virial_sign",
+        "line_ranges": [
+          [
+            29,
+            143
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "hotpp",
+        "path": "hotpp/data/parser.py",
+        "sha256": "d2834c6864748ffcfe3f86406554006da9cd08af4142f8dbfc058e899b46dc7d",
+        "bytes": 10477,
+        "observed_commit": "9a2b7957479eaa78cc0b28b902f14b79a3f1efc0",
+        "role": "data_roles",
+        "line_ranges": [
+          [
+            26,
+            87
+          ],
+          [
+            157,
+            180
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/adapters.py",
+        "sha256": "8afe7a7598784d5f645d5324f52431bea3a8ca23d81b5ae386f83547d63c1c12",
+        "bytes": 22811,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            329
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      },
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/engine_contracts.json",
+        "sha256": "cac46aa8214d43425d1d7f4e81c9b718695ebfd42ae7e77a6a6d7eb0fc7806fc",
+        "bytes": 14041,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            525
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      }
+    ],
+    "primary_references": [],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals.",
+    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation"
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
   }
 }

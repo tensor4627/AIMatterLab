@@ -103,7 +103,7 @@ def structure(payload):
     atoms = read(payload["path"], index=int(payload.get("frame", 0)))
     if len(atoms) > 20000:
         raise ValueError("Structure preview limited to 20,000 atoms; select a smaller region")
-    return {"positions": atoms.positions.tolist(), "symbols": atoms.get_chemical_symbols(),
+    return {"positions": atoms.positions.tolist(), "symbols": atoms.get_chemical_symbols(), "numbers": atoms.numbers.tolist(),
             "cell": atoms.cell.array.tolist(), "pbc": atoms.pbc.tolist(), "n_atoms": len(atoms),
             "frame": payload.get("frame", 0)}
 

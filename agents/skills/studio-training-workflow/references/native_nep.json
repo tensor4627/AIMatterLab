@@ -51,8 +51,7 @@
       "lambda_f": 1,
       "lambda_v": 0.1,
       "batch": 1000,
-      "population": 50,
-      "save_potential_interval": 100000
+      "population": 50
     },
     "units": {
       "energy_input": "eV total cell",
@@ -68,6 +67,135 @@
       "local parser requires type before cutoff, beyond docs blanket any-order exception",
       "save_potential requires all3 arguments in current parser; do not emit1-argument tutorial shorthand",
       "native nep.restart restores optimizer state with matching descriptor hyperparameters; nep.txt alone is a model, not identical resume"
-    ]
+    ],
+    "source_observations_not_config_keys": {
+      "save_potential_interval": {
+        "value": 100000,
+        "actual_keyword": "save_potential",
+        "emission": "Do not emit save_potential_interval. This is a descriptive internal interval. The actual save_potential keyword requires all three arguments in the matched parser."
+      }
+    }
+  },
+  "rules_zh-CN": [
+    "使用实际注册GPUMD的nep.in关键词与解析器范围，官网新版不能覆盖旧二进制限制。",
+    "原生NEP训练以generation/SNES为中心，不能把epoch当等价生效参数。",
+    "type元素顺序必须对应数据和模型，训练/验证/独立测试角色要明确。",
+    "缺少virial标签时不伪造该RMSE，输出与导出格式由真实消费端验证。"
+  ],
+  "language_scope": "Studio-authored Chinese planning rules plus original source-backed fields; official bilingual availability is recorded separately, never invented.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T13:15:12.472159+00:00",
+    "rule_input_sha256": "46939d0b53ac8446d3b165126572180786f2738b4e3d79cc4c6ee26e2099e64f",
+    "local_files": [
+      {
+        "source_id": "gpumd",
+        "path": "src/main_nep/parameters.cu",
+        "sha256": "a3da7ddd2109e197be81909242be9d20c618a7b39f2a3825918237a923c0cb1b",
+        "bytes": 45869,
+        "observed_commit": "ecde6b56aca6363635131fd9c226de17e9a5df55",
+        "role": "parser_and_internal_defaults",
+        "line_ranges": [
+          [
+            54,
+            137
+          ],
+          [
+            704,
+            728
+          ],
+          [
+            813,
+            897
+          ],
+          [
+            1188,
+            1265
+          ],
+          [
+            1381,
+            1407
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/nep/input_files/train_test_xyz.rst",
+        "sha256": "ac2f238524953c49f44bdfcf09edb63802297ad643b28223f9bb42d275d98a49",
+        "bytes": 4837,
+        "observed_commit": "ecde6b56aca6363635131fd9c226de17e9a5df55",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            82
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/nep/input_parameters/save_potential.rst",
+        "sha256": "2e02ad65f60034382876b1f9ea3b38b2ebe857cc3c31fe99c89d969e008861f4",
+        "bytes": 1054,
+        "observed_commit": "ecde6b56aca6363635131fd9c226de17e9a5df55",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            19
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/nep/output_files/nep_restart.rst",
+        "sha256": "c7e04e4a9a950b19e7c5b4e0014a463621426227c2c157f64be8577de4b5525e",
+        "bytes": 518,
+        "observed_commit": "ecde6b56aca6363635131fd9c226de17e9a5df55",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/engine_contracts.json",
+        "sha256": "cac46aa8214d43425d1d7f4e81c9b718695ebfd42ae7e77a6a6d7eb0fc7806fc",
+        "bytes": 14041,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            525
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      }
+    ],
+    "primary_references": [],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals.",
+    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation"
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
   }
 }

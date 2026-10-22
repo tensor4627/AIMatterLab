@@ -112,6 +112,10 @@
       "folder": "studio-md-workflow",
       "files": [
         "SKILL.md"
+      ],
+      "reference_files": [
+        "references/gpumd.json",
+        "references/pydyn.json"
       ]
     },
     {
@@ -130,10 +134,10 @@
         "SKILL.md"
       ],
       "reference_files": [
+        "references/active_learning.json",
         "references/hotpp.json",
         "references/native_nep.json",
-        "references/torchnep.json",
-        "references/active_learning.json"
+        "references/torchnep.json"
       ]
     },
     {
@@ -142,6 +146,11 @@
       "folder": "studio-data-workflow",
       "files": [
         "SKILL.md"
+      ],
+      "reference_files": [
+        "references/ase.json",
+        "references/materials-project.json",
+        "references/studio-viewer.json"
       ]
     },
     {
@@ -150,6 +159,10 @@
       "folder": "studio-compute-workflow",
       "files": [
         "SKILL.md"
+      ],
+      "reference_files": [
+        "references/lsf.json",
+        "references/slurm.json"
       ]
     },
     {
@@ -174,6 +187,10 @@
       "folder": "studio-cv-bias-planning",
       "files": [
         "SKILL.md"
+      ],
+      "reference_files": [
+        "references/plumed.json",
+        "references/pygas.json"
       ]
     }
   ],
@@ -186,8 +203,13 @@
       "skills": [
         "studio-md-workflow"
       ],
-      "status": "implemented_adapter_missing_project_skill",
-      "phase": "authoring"
+      "status": "implemented_adapter_source_backed_studio_rules",
+      "phase": "authoring",
+      "reference_files": {
+        "studio-md-workflow": [
+          "references/pydyn.json"
+        ]
+      }
     },
     {
       "id": "md.gpumd",
@@ -197,8 +219,13 @@
       "skills": [
         "studio-md-workflow"
       ],
-      "status": "implemented_adapter_missing_MD_skill",
-      "phase": "authoring"
+      "status": "implemented_adapter_source_backed_studio_rules",
+      "phase": "authoring",
+      "reference_files": {
+        "studio-md-workflow": [
+          "references/gpumd.json"
+        ]
+      }
     },
     {
       "id": "sampling.pydyn",
@@ -213,7 +240,16 @@
         "pygas-build-bias-model"
       ],
       "status": "implemented",
-      "phase": "authoring"
+      "phase": "authoring",
+      "reference_files": {
+        "studio-md-workflow": [
+          "references/pydyn.json"
+        ],
+        "studio-cv-bias-planning": [
+          "references/pygas.json",
+          "references/plumed.json"
+        ]
+      }
     },
     {
       "id": "sampling.gpumd",
@@ -229,7 +265,16 @@
         "pygas-check-gpumd-contract"
       ],
       "status": "implemented",
-      "phase": "authoring"
+      "phase": "authoring",
+      "reference_files": {
+        "studio-md-workflow": [
+          "references/gpumd.json"
+        ],
+        "studio-cv-bias-planning": [
+          "references/pygas.json",
+          "references/plumed.json"
+        ]
+      }
     },
     {
       "id": "neb.gpumd",
@@ -252,7 +297,13 @@
         "pygas-build-cv-model"
       ],
       "status": "implemented",
-      "phase": "authoring"
+      "phase": "authoring",
+      "reference_files": {
+        "studio-cv-bias-planning": [
+          "references/pygas.json",
+          "references/plumed.json"
+        ]
+      }
     },
     {
       "id": "pygas.bias",
@@ -266,7 +317,13 @@
         "pygas-build-bias-model"
       ],
       "status": "implemented",
-      "phase": "authoring"
+      "phase": "authoring",
+      "reference_files": {
+        "studio-cv-bias-planning": [
+          "references/pygas.json",
+          "references/plumed.json"
+        ]
+      }
     },
     {
       "id": "pygas.compile",
@@ -299,7 +356,12 @@
         "pygas-opes"
       ],
       "status": "implemented_selected_route_gate_required",
-      "phase": "authoring"
+      "phase": "authoring",
+      "reference_files": {
+        "studio-cv-bias-planning": [
+          "references/pygas.json"
+        ]
+      }
     },
     {
       "id": "pygas.contract",
@@ -353,7 +415,7 @@
       "skills": [
         "studio-training-workflow"
       ],
-      "status": "implemented_adapter_missing_project_skill",
+      "status": "implemented_adapter_source_backed_studio_rules",
       "reference_files": {
         "studio-training-workflow": [
           "references/native_nep.json"
@@ -371,7 +433,7 @@
       "skills": [
         "studio-training-workflow"
       ],
-      "status": "implemented_adapter_missing_project_skill",
+      "status": "implemented_adapter_source_backed_studio_rules",
       "reference_files": {
         "studio-training-workflow": [
           "references/hotpp.json"
@@ -451,7 +513,12 @@
         "suggest_parameters"
       ],
       "status": "implemented_tool",
-      "phase": "authoring"
+      "phase": "authoring",
+      "reference_files": {
+        "studio-data-workflow": [
+          "references/ase.json"
+        ]
+      }
     },
     {
       "id": "structure.materials-project",
@@ -460,7 +527,12 @@
         "studio-data-workflow"
       ],
       "status": "implemented_UI_query_requires_explicit_configured_key",
-      "phase": "import"
+      "phase": "import",
+      "reference_files": {
+        "studio-data-workflow": [
+          "references/materials-project.json"
+        ]
+      }
     },
     {
       "id": "assets.inspect-register",
@@ -505,7 +577,12 @@
         "studio-data-workflow"
       ],
       "status": "implemented_lightweight_preview_no_OVITO",
-      "phase": "preview"
+      "phase": "preview",
+      "reference_files": {
+        "studio-data-workflow": [
+          "references/studio-viewer.json"
+        ]
+      }
     },
     {
       "id": "environment.probe",
@@ -562,7 +639,13 @@
         "prepare_cluster_run"
       ],
       "status": "implemented_human_review_execute_live_compatibility_separate",
-      "phase": "deployment"
+      "phase": "deployment",
+      "reference_files": {
+        "studio-compute-workflow": [
+          "references/lsf.json",
+          "references/slurm.json"
+        ]
+      }
     },
     {
       "id": "installation.readiness",
@@ -610,7 +693,7 @@
       "skills": [
         "studio-main-agent"
       ],
-      "status": "product_guide_candidate_not_yet_loaded",
+      "status": "implemented_bundled_orchestrator_runtime_and_provider_capabilities_separate",
       "phase": "orchestration"
     },
     {
@@ -621,7 +704,13 @@
       ],
       "tools": [],
       "status": "planned_formula_discussion_only_registry_and_numeric_gate_not_implemented",
-      "phase": "formula_discussion"
+      "phase": "formula_discussion",
+      "reference_files": {
+        "studio-cv-bias-planning": [
+          "references/pygas.json",
+          "references/plumed.json"
+        ]
+      }
     }
   ]
 }

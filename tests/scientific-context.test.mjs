@@ -18,3 +18,11 @@ test('First MD and sampling intents select engine skills while potential familie
 test('Existing exported potential is an MD consumer asset, while a primary export instruction remains training',()=>{assert.deepEqual(selectScientificFunctions({text:'准备PyDyn传统MD短例，保持300K/10步/NVE。这是本轮HotPP的ase原子序数导出模型。'}),['md.pydyn']);assert.deepEqual(selectScientificFunctions({text:'请先导出HotPP模型，然后用PyDyn做MD'}),['training.hotpp']);});
 
 test('Existing trained-potential phrases stay consumers and a primary training stage stays explicit',()=>{assert.deepEqual(selectScientificFunctions({text:'使用已经训练好的NEP势通过GPUMD跑MD'}),['md.gpumd']);assert.deepEqual(selectScientificFunctions({text:'先训练NEP，然后用GPUMD做MD'}),['training.nep']);});
+
+test('Selected runtime facts are attached once after real acknowledgment; stale state replaces them without installer bodies',async()=>{
+ const manager=new ScientificSkillContext({read:async()=>({})}),key='codex:t',provider='codex',selection={environment_id:'selected',engine:'gpumd.md'};
+ const context={status:'already_loaded',routes:[],attach:false,attachments:[],text:''};const guide={status:'observed',receipt:'actualreceipt',facts:{engine:'gpumd.md',environment_id:'selected',python:{version:'3.12'},executables:{python:'/selected/python'},file_observations:[{path:'DO_NOT_ATTACH_LONG_WATCHES'}],source_build_relation:{status:'not_run'}}};
+ const first=manager.mergeRuntime(key,provider,context,guide,selection);assert.equal(first.attach,true);assert.equal(first.status,'passed');assert(!first.text.includes('DO_NOT_ATTACH_LONG_WATCHES'));assert.match(first.text,/source_build_relation/);
+ assert.equal(manager.mergeRuntime(key,provider,context,guide,selection).attach,true);manager.accept(key,first);assert.equal(manager.mergeRuntime(key,provider,context,guide,selection).attach,false);
+ const stale=manager.mergeRuntime(key,provider,context,{status:'stale',reason:'selected module changed'},selection);assert.equal(stale.attach,true);assert.match(stale.text,/targeted selected-engine probe/);assert(!stale.text.includes('/selected/python'));
+});

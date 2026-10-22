@@ -41,3 +41,12 @@ Formula approval is first: bind the actual mathematical spec, schema, domain and
 Prepare bounded tests after confirmation and run them only through the human execution gate. Check known/reference or analytic-limit values; output shape/finiteness; actual neighbor/PBC/translation/permutation cases where mathematically applicable; autograd versus finite differences away from singularities; strain/virial when used; serialization and real target reload. Store actual reports tied to code/parameter/structure/environment hashes. Missing or failed evidence remains `not_run`, `blocked` or `failed`, not a green scientific badge.
 
 Offer a separate representative stable-phase/reference comparison when useful. Explain the objective, expected discrimination, required structures and cost, and let the user decide whether to run it. Do not invent a phase or call a local finite-difference check physical validation, universal suitability or FES convergence.
+
+
+## Current Studio authoring tools
+
+Use `inspect_pygas_catalog(source_id="pygas")` for the bounded real class index and `classes` (up to four exact names) for constructor fields, defaults and source-bound semantics. Its AST catalog does not import or execute code. `GroupVector` and `ZoneSelect` return dynamic tuples in the inspected version; library presence does not make them directly graph-renderable scalar CVs. Never drop tuple members or invent a scalar output size.
+
+For `render_pygas_workflow`, use the authoritative `workspace_id=studioTaskId`. On updates pass the existing `composition.graphPath` as `path`, its complete `expected` graph/source pair receipt, and current `catalog_files`. A hash conflict requires rereading the same pair and reconciling manual changes. Do not create another graph or conversation. Structured parameter data uses `parameter_format: structured-v1`; source defaults are inspectable descriptions, not expressions to evaluate. Saved graph/source status is authoring only. A draft, including missing constructor or connection fields, cannot be treated as a built artifact.
+
+MetaD `sigma` and `scale` cover the full ordered collected CV vector, including inactive dimensions; periodic FFWTPD uses the actual `pdl` Nx2 domain list. Only a source-declared pure permutation may reorder corresponding rows together. Other class/group/reduction/dimension changes require a new complete dimension review and invalidate numerical/artifact/history/prepared evidence.

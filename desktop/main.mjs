@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import {ensureTaskAuthoring} from './task-authoring.mjs';
 import {readTaskInput} from './task-input-preview.mjs';
+import {readTaskPygas,saveTaskPygas,compositionToolGuard} from './task-pygas.mjs';
 import {visibleUserText} from '../shared/tool-activity.mjs';
 import {ScientificSkills,validateScientificConsent} from './scientific-skills.mjs';
 import {deliverScientificTurn} from './scientific-turn.mjs';
@@ -47,6 +48,7 @@ let window, catalog, settings, agents,taskRecords,materials;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
 let scientificSkills;
+const activeAuthoringTasks=new Map();
 const codex = new CodexBridge(), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
@@ -94,7 +96,7 @@ if(installationVerifying){
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
 agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider),releaseWorker:provider=>worker.revokeProvider(provider)});
-scientificSkills=new ScientificSkills({map:JSON.parse(fs.readFileSync(path.join(here,'scientific-skill-map.json'),'utf8')),bundledRoot:bundledSkillRoot,sources:scientificSources,settings:()=>settings});
+scientificSkills=new ScientificSkills({map:JSON.parse(fs.readFileSync(path.join(here,'scientific-skill-map.json'),'utf8')),bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,settings:()=>settings});
 worker.setScopedTools(scientificSkills.tools(),(name,args,scope)=>scientificSkills.call(name,args,scope));
 materials=new MaterialsProject({root:path.join(app.getPath('userData'),'credentials'),encryption:safeStorage,fetchApi:(...a)=>net.fetch(...a),worker});
 worker.setLocalTools(materials.tools(),(name,args)=>materials.call(name,args));
@@ -103,6 +105,7 @@ handle('materials.key',({apiKey,remove=false})=>remove?materials.clear():materia
 handle('materials.search',({query})=>materials.search(query));
 handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
+worker.setAuthoringGuard(compositionToolGuard(taskRecords,activeAuthoringTasks));
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>taskRecords.create(value));
 handle('task.deployment.save',value=>saveDeployment(taskRecords,value));
@@ -110,6 +113,9 @@ handle('task.deployment.prepare',value=>prepareDeployment(taskRecords,worker,val
 handle('task.list',()=>catalog.list('agent-task'));
 handle('task.read',({id})=>taskRecords.read(id));
 handle('task.input.read',value=>readTaskInput(taskRecords,worker,value));
+handle('task.pygas.read',value=>readTaskPygas(taskRecords,worker,value));
+handle('task.pygas.save',value=>saveTaskPygas(taskRecords,worker,value));
+handle('task.pygas.normalize',value=>saveTaskPygas(taskRecords,worker,value,true));
 handle('task.edit',value=>taskRecords.edit(value));
 handle('task.execute',value=>executeTask(taskRecords,worker,value));
 handle('task.linkRun',async({taskId,runId,kind,expectedPrepared})=>{if(!['run','cluster-run'].includes(kind)||typeof runId!=='string')throw Error('Invalid run reference');const run=await worker.request('POST',kind==='run'?'/api/run/status':'/api/cluster/status',{run_id:runId});return taskRecords.linkRun(taskId,run,expectedPrepared);});
@@ -219,13 +225,15 @@ handle('agent.rpc',async({provider,method,params={}})=>{
   if(studioSkillId!==undefined&&(typeof studioSkillId!=='string'||!scientificSkills.router.routes.has(studioSkillId)))throw Error('Choose a listed scientific function');
   let skillContext;const skillKey=provider+':'+params.threadId;
   if(method==='turn/start'){
-   const text=visibleUserText(params.input||[]);const authoring=await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text});if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};const bound=taskRecords.bound(provider,params.threadId);
+   const text=visibleUserText(params.input||[]);const authoring=await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true});if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};const bound=taskRecords.bound(provider,params.threadId);
    // Default-deny: only an explicit desktop setting enables content sharing.
    skillContext=await scientificSkills.context.prepare(skillKey,provider,{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId});
+   if(bound?.parameters?.engine&&worker.connection){const environment_id=bound.deployment?.config?.environmentId||bound.authoring?.environmentId,engine=bound.parameters.engine;if(environment_id){const selection={environment_id,engine};let guide;try{guide=await worker.request('POST','/api/runtime-guide',selection);}catch{guide={status:'blocked',reason:'Selected runtime guide unavailable; use an exact selected-engine probe, not an automatic reinstall'};}skillContext=scientificSkills.context.mergeRuntime(skillKey,provider,skillContext,guide,selection);}}
    if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
 
 
    params=taskRecords.prepareTurn(provider,params);
+   const authoringTask=taskRecords.bound(provider,params.threadId);if(authoringTask)activeAuthoringTasks.set(provider,authoringTask.id);else activeAuthoringTasks.delete(provider);
    params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSources())}]};
    if(provider==='deepseek'){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
   }

@@ -20,8 +20,8 @@ async function boundedText(target,maximum){
  }finally{await handle.close();}
 }
 export class ScientificSkillRouter {
- constructor({map,sourceRoot,consent,setupAllowed=()=>false,limits={}}){
-  this.map=structuredClone(map);this.sourceRoot=sourceRoot;this.consent=consent;this.setupAllowed=setupAllowed;this.limits={fileBytes:64*1024,totalBytes:192*1024,...limits};
+ constructor({map,sourceRoot,consent,setupAllowed=()=>false,ruleEvidence,limits={}}){
+  this.map=structuredClone(map);this.sourceRoot=sourceRoot;this.consent=consent;this.setupAllowed=setupAllowed;this.ruleEvidence=ruleEvidence;this.limits={fileBytes:64*1024,totalBytes:192*1024,...limits};
   this.definitions=new Map();this.routes=new Map();
   if(this.map.schema_version!==1)throw Error('Unsupported skill map');
   for(const skill of this.map.skills){
@@ -70,15 +70,15 @@ export class ScientificSkillRouter {
      const target=path.join(folder,...relative.split('/'));if(!inside(folder,target)||await fs.realpath(target)!==target)throw Error('Linked or out-of-root skill file refused');
      const stat=await fs.stat(target);if(!stat.isFile()||stat.size>this.limits.fileBytes||bytes+stat.size>this.limits.totalBytes)throw Error('Public skill context exceeds the bounded file budget');
      const data=await boundedText(target,Math.min(this.limits.fileBytes,this.limits.totalBytes-bytes));if(data.length!==stat.size||await fs.realpath(target)!==target||data.includes(0))throw Error('Public skill file changed or is not text');
-     bytes+=data.length;files.push({skill:id,source:skill.source,name:skill.folder+'/'+relative,sha256:sha(data),bytes:data.length,content:new TextDecoder('utf-8',{fatal:true}).decode(data)});
+     bytes+=data.length;const content=new TextDecoder('utf-8',{fatal:true}).decode(data);let source_evidence;if(skill.source==='studio'&&relative.endsWith('.json')&&this.ruleEvidence)source_evidence=await this.ruleEvidence(JSON.parse(content));files.push({skill:id,source:skill.source,name:skill.folder+'/'+relative,sha256:sha(data),bytes:data.length,content,...source_evidence?{source_evidence}:{}});
     }
    }
    // Authorization is never cached with text. Recheck revocation and source rebind before returning.
    if(!await check())return {status:'permission_required',function_id:functionId,attachments:[]};
    for(const [source,observed] of roots){const configured=await this.sourceRoot(source);if(configured!==observed.configured||await fs.realpath(configured)!==observed.root)throw Error('Public source changed while the route was being read');}
    if(!await check())return {status:'permission_required',function_id:functionId,attachments:[]};
-   const digest=sha(files.map(file=>file.name+':'+file.sha256).join('\n'));
-   return {status:'passed',function_id:functionId,phase:route.phase,capability_status:route.status,scope:'Actual bounded public instructions only; no artifact, installation, engine capability or scientific validation is implied.',digest,bytes,attachments:files.map(({content,...receipt})=>receipt),text:'[Studio scientific function: '+functionId+']\n'+(route.adaptation||'')+'\n'+files.map(file=>'['+file.name+'; SHA256 '+file.sha256+']\n'+file.content).join('\n')};
+   const digest=sha(files.map(file=>file.name+':'+file.sha256+':'+JSON.stringify(file.source_evidence||null)).join('\n'));
+   return {status:'passed',function_id:functionId,phase:route.phase,capability_status:route.status,scope:'Actual bounded public instructions only; no artifact, installation, engine capability or scientific validation is implied.',digest,bytes,attachments:files.map(({content,...receipt})=>receipt),text:'[Studio scientific function: '+functionId+']\n'+(route.adaptation||'')+'\n'+files.map(file=>'['+file.name+'; SHA256 '+file.sha256+']\n'+(file.source_evidence?'Current source applicability: '+JSON.stringify(file.source_evidence)+'\n':'')+file.content).join('\n')};
   }catch(error){return {status:'blocked',function_id:functionId,reason:error.message,attachments:[]};}
  }
 }

@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "software": "pygas",
+  "status": "source_backed_planning_reference_not_runtime_validation",
+  "retrieved_at": "2026-10-22",
+  "interface_authority": "Actual registered source/runtime and describe_engine take precedence over latest public documentation. Parameters must map to emitted config/API/CLI; no invented effective controls.",
+  "tutorials": {
+    "zh-CN": [
+      {
+        "source": "registered_repository",
+        "path": "manual/pyGAS_User_Guide_CN.md",
+        "status": "available"
+      }
+    ],
+    "en": [
+      {
+        "source": "registered_repository",
+        "path": "manual/pyGAS_User_Guide_EN.md",
+        "status": "available"
+      }
+    ]
+  },
+  "source_fallback": [
+    "base/colvar.py",
+    "base/bias.py",
+    "base/switch.py",
+    "base/neighbor.py",
+    "tools/cv_bias_gui_server.py",
+    "tools/graph_workflow.py"
+  ],
+  "rules": {
+    "zh-CN": [
+      "先检查真实CV/Bias/Switch/Neighbor库，再组合已支持的图；构造参数按原库名称和类型呈现。",
+      "区分源码默认值、GUI演示值、由结构推导的值、用户指定值与试运行提案。",
+      "MetaD scale为维度开关，sigma/scale按完整CV顺序保存；CV顺序改变须同步相关参数并废止旧产物证据。",
+      "首次库外CV须先确认公式/定义域/单位，再生成独立私有库代码；数值检验与物理适用性分开。"
+    ],
+    "en": [
+      "Use actual GUI catalog params and graph semantics, not prose or native CV/bias bypass.",
+      "Neighbor selection, atom groups, scalar/vector rank, reducer and ordered collector are scientific definitions.",
+      "Use actual bias constructor keys including sigma/weight/scale/temp/bias_factor and pdl for the actual periodic family; OPES uses its separate settings, never replace exact keys with invented aliases.",
+      "GAScfg cv_size/n_atoms/neighbor_rc/max_neighbors/cv_storage_interval/max_cv_nums must match saved model and planned history.",
+      "OPES has separate procedure/state/restart/reweight contracts.",
+      "Reload serialized artifact and verify real-neighbor forces/virial and selected target separately.",
+      "Runtime turns load functional guide and selected observed runtime; installation/AOTI-build manuals are not routine context."
+    ]
+  },
+  "display_policy": {
+    "basic": "System/task-dependent scientific choices and consequential unresolved decisions first. Preserve upstream parameter names.",
+    "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
+    "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Human current-revision execution gate remains required."
+  },
+  "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T11:27:22.264583+00:00",
+    "rule_input_sha256": "933b3e25b2b66af38d9e0d64bc00e033c96bbdb99e77255a29fc6a5006fe09a5",
+    "local_files": [
+      {
+        "source_id": "pygas",
+        "path": "base/colvar.py",
+        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
+        "bytes": 64233,
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            1587
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "pygas",
+        "path": "base/bias.py",
+        "sha256": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
+        "bytes": 41693,
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            942
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "pygas",
+        "path": "base/switch.py",
+        "sha256": "1f34e5b272c9e28402193d13796bef3c2f39b71ee3feeb9e3fd157e50ba58fb6",
+        "bytes": 4151,
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            137
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "pygas",
+        "path": "base/neighbor.py",
+        "sha256": "58e2a18477af49c8fe52333e4a7f59b7dbdcf15e9ea75b7339e68a2c06630ec3",
+        "bytes": 3651,
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            85
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "pygas",
+        "path": "tools/cv_bias_gui_server.py",
+        "sha256": "911391f929532185c5b36c6ba2249df407eedcb7b116a9c4d8e38be8e398e5a8",
+        "bytes": 70800,
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            1677
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "pygas",
+        "path": "tools/graph_workflow.py",
+        "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
+        "bytes": 34510,
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            752
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "pygas",
+        "path": "manual/pyGAS_User_Guide_CN.md",
+        "sha256": "e6106df3404b6111f9fd89de00bc52a7a37112f136286ee40e13224fc153e930",
+        "bytes": 41192,
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            392
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "pygas",
+        "path": "manual/pyGAS_User_Guide_EN.md",
+        "sha256": "a7686a35f2fbad8c0dc4bbd49ead4cd0440ffe02a50a82f3470b67dd525039d0",
+        "bytes": 44607,
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            393
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      }
+    ],
+    "primary_references": [],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals."
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
+  }
+}

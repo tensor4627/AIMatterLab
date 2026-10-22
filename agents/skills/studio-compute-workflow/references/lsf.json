@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "software": "lsf",
+  "status": "source_backed_planning_reference_not_runtime_validation",
+  "retrieved_at": "2026-10-22",
+  "interface_authority": "Actual registered source/runtime and describe_engine take precedence over latest public documentation. Parameters must map to emitted config/API/CLI; no invented effective controls.",
+  "tutorials": {
+    "en": [
+      {
+        "url": "https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=reference-bsub",
+        "status": "blocked_http_403"
+      },
+      {
+        "url": "https://www.ibm.com/support/pages/node/7286338",
+        "status": "fetched_official_support"
+      }
+    ],
+    "zh-CN": [
+      {
+        "url": "https://www.ibm.com/docs/zh/spectrum-lsf/10.1.0?topic=reference-bsub",
+        "status": "blocked_http_403",
+        "fallback": "Actual registered bsub/bjobs help/version and Studio adapter rules"
+      }
+    ]
+  },
+  "source_fallback": [],
+  "rules": {
+    "zh-CN": [
+      "以实际LSF bsub/bjobs/bqueues接口和核查过的提交模板为准。",
+      "IBM中英文bsub页面获取失败须保留状态，使用可核查官方支持文档与实际命令输出。",
+      "排队/断线不自动判失败，按真实job id恢复观测，未知不重提。"
+    ],
+    "en": [
+      "Use bsub/bjobs/bkill through the selected versioned profile; use actual site resource/GPU policy.",
+      "Preserve explicit SSH username and profile; never infer the local Windows username for a remote connection.",
+      "PEND/RUN/DONE/EXIT and exit/output evidence are distinct; preserve unknown on unreachable scheduler.",
+      "Never embed credentials/endpoints into published skills/tutorials."
+    ]
+  },
+  "display_policy": {
+    "basic": "System/task-dependent scientific choices and consequential unresolved decisions first. Preserve upstream parameter names.",
+    "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
+    "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Human current-revision execution gate remains required."
+  },
+  "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T12:13:27.310726+00:00",
+    "rule_input_sha256": "bfa362b686de33a9e47ae08915320705db88e725e1c64139bbd5c7a9d00c895f",
+    "local_files": [
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/cluster.py",
+        "sha256": "e1513e165856857e6aa5696f7b0f8c507391afcac5c6a6ab452726fdb6ded2cc",
+        "bytes": 57249,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "adapter_not_actual_site_probe",
+        "line_ranges": [
+          [
+            1,
+            952
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      }
+    ],
+    "primary_references": [
+      {
+        "id": "lsf-bsub-en",
+        "url": "https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=reference-bsub",
+        "status": "blocked",
+        "role": "captured_primary_reference_not_registered_runtime_or_local_default",
+        "observed_at": "2026-10-22T08:06:53.992790+00:00",
+        "capture_bytes_verified": false
+      },
+      {
+        "id": "lsf-bsub-zh",
+        "url": "https://www.ibm.com/docs/zh/spectrum-lsf/10.1.0?topic=reference-bsub",
+        "status": "blocked",
+        "role": "captured_primary_reference_not_registered_runtime_or_local_default",
+        "observed_at": "2026-10-22T08:06:54.288950+00:00",
+        "capture_bytes_verified": false
+      },
+      {
+        "id": "lsf-submit-en",
+        "url": "https://www.ibm.com/support/pages/node/7286338",
+        "http_status": 200,
+        "status": "fetched_untrusted_source",
+        "sha256": "537c9798b714f9b42cc63a577e4932f8676efd0f685c0bdeb015ede63316f02e",
+        "role": "captured_primary_reference_not_registered_runtime_or_local_default",
+        "observed_at": "2026-10-22T08:06:54.467110+00:00",
+        "capture_bytes_verified": true,
+        "bytes": 47084
+      }
+    ],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals."
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
+  }
+}

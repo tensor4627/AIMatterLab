@@ -99,6 +99,8 @@ class Adapter:
 
     def prepare(self, spec, environment):
         assets, p, engine = spec["inputs"], spec.get("parameters", {}), self.engine
+        from .derivative_selection import validate_controls
+        validate_controls(p,engine)
         if engine.endswith(".sampling"):
             walkers = p.get("sampling", {}).get("walkers", p.get("walkers", 1))
             if type(walkers) is not int or walkers != 1:
@@ -198,7 +200,7 @@ class Adapter:
             checked.append("temperature")
         return {"status":"passed" if checked else "not_run", "checked_fields":checked, "scope":"declared simple GPUMD input controls only"}
 
-    def validate(self, spec, environment, directory, *, probe_report=None):
+    def validate(self, spec, environment, directory, *, probe_report=None, cell_derivative_contract=None):
         # A provenance-only failure may be cached by local Service; the execution
         # gate must inspect the native loader again for every new validation.
         runtime = self.runtime_check(environment)
@@ -209,6 +211,19 @@ class Adapter:
             if first.startswith("# studio-pygas-source: "):
                 import json
                 source=json.loads(first.split(": ",1)[1]);registered=environment.get("repositories",{}).get("pygas")
+                binding=source.get('composition')
+                if binding:
+                    import hashlib
+                    from .composition_store import encoded
+                    graph_path=directory/'workflow.json'
+                    if binding.get('schema')!='studio.composition/1' or not graph_path.is_file():raise ValueError('Canonical graph/source binding unavailable')
+                    graph=json.loads(graph_path.read_text(encoding='utf8'))
+                    body=(directory/'build_bias.py').read_text(encoding='utf8').split('\n',1)[1]
+                    for name,expected in binding.get('inputs',{}).items():
+                        if not isinstance(name,str) or Path(name).name!=name:raise ValueError('Invalid canonical composition input binding')
+                        self.require(spec['inputs'],(name,))
+                        if digest(directory/name)!=expected:raise ValueError('Canonical composition selected input changed; rerender and review')
+                    if hashlib.sha256(encoded(graph)).hexdigest()!=binding.get('graph_sha256') or hashlib.sha256(body.encode('utf8')).hexdigest()!=binding.get('body_sha256'):raise ValueError('Canonical graph/source pair changed; rerender together and review')
                 io=source.get('io',{})
                 if io.get('portable'):
                     self.require(spec['inputs'],tuple(io.get('inputs',[]))+(io['workflow'],))
@@ -282,7 +297,7 @@ class Adapter:
                     raise ValueError("Selected environment has no pydyn.sampling integration")
             derivatives = None
             if p["mode"] != "opes" and not p["bias_file"].endswith(".pt2"):
-                payload = {**p, "engine":self.engine, "bias_file":str(directory / p["bias_file"]), "structure_file":str(directory / p["structure_file"])}
+                payload = {**p, "engine":self.engine, "bias_file":str(directory / p["bias_file"]), "structure_file":str(directory / p["structure_file"]), "_studio_cell_contract":cell_derivative_contract}
                 if p.get("validation_history"):
                     payload["validation_history"] = str(directory / p["validation_history"])
                 print("Studio validation: sampled force/virial check started", file=sys.stderr, flush=True)

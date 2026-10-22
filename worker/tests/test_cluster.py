@@ -83,7 +83,7 @@ class ClusterLifecycle(unittest.TestCase):
     def test_archive_contains_real_gate_no_connection(self):
         r=self.cluster.prepare(self.spec());raw=self.cluster.raw(r["id"])
         with tarfile.open(fileobj=io.BytesIO(self.cluster.archive(raw)),mode="r:gz") as t:
-            files=t.getnames();self.assertIn(".studio/validate.py",files);self.assertIn(".studio/studio_worker/derivatives.py",files);self.assertIn(".studio/studio_worker/neb_checks.py",files)
+            files=t.getnames();self.assertIn(".studio/validate.py",files);self.assertIn(".studio/studio_worker/derivatives.py",files);self.assertIn(".studio/studio_worker/derivative_selection.py",files);self.assertIn(".studio/studio_worker/composition_store.py",files);self.assertIn(".studio/studio_worker/neb_checks.py",files)
             gate=t.extractfile(".studio/validate.py").read().decode();self.assertIn("Adapter(r['engine']).validate",gate);self.assertIn("_original(environment,None)",gate)
             spec=json.load(t.extractfile(".studio/run.json"));self.assertNotIn("cluster_snapshot",spec)
     def test_lsf_slurm_script_and_scope_guards(self):

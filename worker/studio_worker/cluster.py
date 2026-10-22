@@ -662,7 +662,7 @@ except Exception as e:
             payload.pop("cluster_snapshot",None);payload.pop("cluster",None)
             add(".studio/run.json",json.dumps(payload))
             add(".studio/validate.py",validate)
-            for name in ["__init__.py","adapters.py","util.py","scientific.py","science_checks.py","derivatives.py","neb_checks.py", "structure_tools.py"]:
+            for name in ["__init__.py","adapters.py","util.py","scientific.py","science_checks.py","derivatives.py","derivative_selection.py","composition_store.py","neb_checks.py", "structure_tools.py"]:
                 add(".studio/studio_worker/"+name,Path(__file__).with_name(name).read_bytes())
         return buffer.getvalue()
 

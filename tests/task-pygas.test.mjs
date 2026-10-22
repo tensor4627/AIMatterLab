@@ -1,0 +1,45 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {TaskRecords} from '../desktop/task-records.mjs';
+import {readTaskPygas,saveTaskPygas,compositionToolGuard} from '../desktop/task-pygas.mjs';
+function fixture(){
+ const data=new Map(),catalog={get:(kind,id)=>structuredClone(data.get(kind+id)),put:(kind,id,value)=>data.set(kind+id,structuredClone(value)),list:kind=>[...data.entries()].filter(([key])=>key.startsWith(kind)).map(([,value])=>structuredClone(value))};
+ const records=new TaskRecords(catalog,()=>{}),task=records.create({provider:'codex',threadId:'thread',planningMode:true,workflowVersion:2,request:'WTMetaD'});task.authoring={projectId:'project',environmentId:'author',inputRoot:'/owned/inputs'};task.projectId='project';task.composition={graphPath:'/owned/inputs/cv/workflow.json',sourcePath:'/owned/inputs/cv/build_bias.py',status:'rendered',render_blocked:false,expected:{journal_sha256:'a',files:{}}};task.review={status:'ready'};task.deployment={prepared:{artifactId:'old'}};records.save(task);
+ const result={id:'cv',kind:'pygas-composition',project_id:'project',workspace_id:task.id,composition:{...task.composition,expected:{journal_sha256:'b',files:{}},graph_sha256:'c'},graph:{nodes:[],edges:[],settings:{}},catalog:{source:{files:{}}}};
+ return {records,task,result};
+}
+test('Composer reads and saves the same bound owned graph using pair CAS',async()=>{const {records,task,result}=fixture(),calls=[];const worker={request:async(method,route,args)=>{calls.push({route,args});return result;}};
+ const first=await readTaskPygas(records,worker,{taskId:task.id});assert.equal(first.taskId,task.id);assert.equal(calls[0].args.environment_id,'author');
+ await saveTaskPygas(records,worker,{taskId:task.id,path:result.composition.graphPath,expected:result.composition.expected,catalog_files:{},graph:result.graph});
+ assert.equal(calls[1].route,'/api/pygas/composition/save');const saved=records.read(task.id);assert.equal(saved.composition.graphPath,task.composition.graphPath);assert.equal(saved.review.status,'not_run');assert.equal(saved.deployment.prepared,undefined);assert.equal(saved.parameterRevision,2);
+});
+test('Foreign task paths, projects and workspace IDs cannot bind a composition',async()=>{const {records,task,result}=fixture();let count=0;const worker={request:async()=>{count++;return {...result,project_id:'other'};}};
+ await assert.rejects(readTaskPygas(records,worker,{taskId:task.id,path:'/owned/inputs/else/workflow.json'}),/owned input/);assert.equal(count,0);
+ await assert.rejects(readTaskPygas(records,worker,{taskId:task.id}),/does not belong/);
+ const guard=compositionToolGuard(records,new Map([['codex',task.id]]));assert.throws(()=>guard.before('render_pygas_workflow',{project_id:'other'},'codex'),/active conversation/);
+ assert.throws(()=>guard.before('render_pygas_workflow',{project_id:'project',workspace_id:'foreign'},'codex'),/another conversation/);
+});
+test('Failed saves invalidate review before mutation and keep the old run record',async()=>{const {records,task,result}=fixture();const worker={request:async()=>{const current=records.read(task.id);assert.equal(current.review.status,'not_run');assert.equal(current.deployment.prepared,undefined);throw Error('CAS conflict');}};
+ await assert.rejects(saveTaskPygas(records,worker,{taskId:task.id,path:task.composition.graphPath,expected:result.composition.expected,catalog_files:{},graph:result.graph}),/CAS conflict/);assert.equal(records.read(task.id).composition.status,'blocked');
+});
+test('Agent canonical writes require current path and pair hashes; plain input edits also invalidate',()=>{const {records,task}=fixture(),guard=compositionToolGuard(records,new Map([['codex',task.id]]));
+ assert.throws(()=>guard.before('render_pygas_workflow',{project_id:'project'},'codex'),/existing graph/);assert.equal(records.read(task.id).review.status,'ready');
+ guard.before('write_project_input',{project_id:'project',name:'cv/workflow.json'},'codex');assert.equal(records.read(task.id).review.status,'not_run');
+ assert.throws(()=>compositionToolGuard(records,new Map()).before('render_pygas_workflow',{},'codex'),/conversation-owned/);
+});
+test('Late reads cannot restore old readiness or overwrite a newer composition revision',async()=>{const {records,task,result}=fixture();let release;const worker={request:()=>new Promise(resolve=>{release=resolve;})};
+ const pending=readTaskPygas(records,worker,{taskId:task.id});const newer=records.read(task.id);newer.parameterRevision=2;newer.composition={...newer.composition,status:'blocked',render_blocked:true,graph_sha256:'NEW'};records.save(newer);release(result);
+ await assert.rejects(pending,/changed during/);assert.equal(records.read(task.id).composition.graph_sha256,'NEW');assert.equal(records.read(task.id).composition.render_blocked,true);
+});
+test('Refreshes during a pending save do not supersede its owner; completion is still exact',async()=>{const {records,task,result}=fixture();let release;const worker={request:()=>new Promise(resolve=>{release=resolve;})};
+ const pending=saveTaskPygas(records,worker,{taskId:task.id,path:task.composition.graphPath,expected:task.composition.expected,catalog_files:{},graph:result.graph});
+ await assert.rejects(readTaskPygas(records,worker,{taskId:task.id}),/save is in progress/);release(result);await pending;assert.equal(records.read(task.id).composition.status,'rendered');
+});
+test('A deleted or rebound conversation cannot receive a late saved response',async()=>{const {records,task,result}=fixture();let release;const worker={request:()=>new Promise(resolve=>{release=resolve;})};
+ const pending=readTaskPygas(records,worker,{taskId:task.id});const changed=records.read(task.id);changed.authoring={...changed.authoring,projectId:'new-project'};records.save(changed);release(result);await assert.rejects(pending,/changed during/);assert.equal(records.read(task.id).authoring.projectId,'new-project');
+});
+
+test('Reading an externally changed blocked pair clears stale ready/prepared state before deployment',async()=>{const {records,task,result}=fixture();result.composition={...result.composition,status:'blocked',render_blocked:true};await readTaskPygas(records,{request:async()=>result},{taskId:task.id});const current=records.read(task.id);assert.equal(current.review.status,'not_run');assert.equal(current.deployment.prepared,undefined);assert.equal(current.composition.render_blocked,true);});
+test('Read-back preserves both canonical build inputs and does not write unchanged metadata repeatedly',async()=>{const {records,task,result}=fixture();const source=task.composition.sourcePath,graph=task.composition.graphPath;const current=records.read(task.id);current.parameters={engine:'pygas.build',files:[source,graph,'/owned/inputs/model.xyz']};records.save(current);result.composition.expected.files={'build_bias.py':'b'.repeat(64),'workflow.json':'c'.repeat(64)};const worker={request:async()=>result};
+ await readTaskPygas(records,worker,{taskId:task.id});const first=records.read(task.id);assert.deepEqual(new Set(first.parameters.files),new Set([source,graph,'/owned/inputs/model.xyz']));
+ await readTaskPygas(records,worker,{taskId:task.id});const second=records.read(task.id);assert.equal(first.updatedAt,second.updatedAt);assert.equal(first.parameterRevision,second.parameterRevision);
+});

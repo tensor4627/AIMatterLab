@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Adapter input contract only. Alias mapping uses explicit existing facts, rejects conflicts, and never proves scientific or serialized-model correctness. File parameters must identify an actual files entry by its preserved basename.",
+  "scope": "Adapter input contract only. Alias mapping uses explicit existing facts, rejects conflicts, and never proves scientific or serialized-model correctness. File parameters must identify an actual files entry by its preserved basename. Reserved parameters.validation accepts only the declared numerical FD controls on supported sampling/validation routes. Runtime state, scope, missing-information lists and review commentary belong in step descriptions or a separate saved review manifest, never required editable scientific fields. An empty diagnostic list means no issue; it is not missing scientific input.",
   "engines": {
     "gpumd.neb": {
       "required_parameters": [],
@@ -287,6 +287,10 @@
         "walkers": [
           "sampling.walkers",
           "dynamics.walkers"
+        ],
+        "atom_selection": [
+          "cv.atom_selection",
+          "cv.atoms_zero_based"
         ]
       },
       "required_inputs": [],
@@ -302,6 +306,27 @@
       },
       "default_input_names": {
         "structure_file": "model.xyz"
+      },
+      "validation_controls": {
+        "atom_selection": {
+          "type": "array of distinct nonnegative integers",
+          "max_items": 32,
+          "scope": "Finite-difference sample only; never changes the full CV atom group. Omitted large-group sampling uses eight deterministic spread indices and records exact coverage."
+        },
+        "fd_step": {
+          "type": "number",
+          "exclusive_minimum": 0,
+          "exclusive_maximum": 0.01,
+          "default": 1e-05,
+          "scope": "Numerical difference step; not a dynamics control"
+        },
+        "fd_atol": {
+          "type": "number",
+          "exclusive_minimum": 0,
+          "exclusive_maximum": 0.1,
+          "default": 0.0001,
+          "scope": "Numerical check tolerance, never a predeclared validation result"
+        }
       }
     },
     "gpumd.sampling": {
@@ -361,6 +386,10 @@
         "walkers": [
           "sampling.walkers",
           "dynamics.walkers"
+        ],
+        "atom_selection": [
+          "cv.atom_selection",
+          "cv.atoms_zero_based"
         ]
       },
       "required_inputs": [
@@ -380,6 +409,27 @@
       },
       "default_input_names": {
         "structure_file": "model.xyz"
+      },
+      "validation_controls": {
+        "atom_selection": {
+          "type": "array of distinct nonnegative integers",
+          "max_items": 32,
+          "scope": "Finite-difference sample only; never changes the full CV atom group. Omitted large-group sampling uses eight deterministic spread indices and records exact coverage."
+        },
+        "fd_step": {
+          "type": "number",
+          "exclusive_minimum": 0,
+          "exclusive_maximum": 0.01,
+          "default": 1e-05,
+          "scope": "Numerical difference step; not a dynamics control"
+        },
+        "fd_atol": {
+          "type": "number",
+          "exclusive_minimum": 0,
+          "exclusive_maximum": 0.1,
+          "default": 0.0001,
+          "scope": "Numerical check tolerance, never a predeclared validation result"
+        }
       }
     },
     "pydyn.sampling": {
@@ -439,6 +489,10 @@
         "walkers": [
           "sampling.walkers",
           "dynamics.walkers"
+        ],
+        "atom_selection": [
+          "cv.atom_selection",
+          "cv.atoms_zero_based"
         ]
       },
       "required_inputs": [
@@ -456,6 +510,27 @@
       },
       "default_input_names": {
         "structure_file": "model.xyz"
+      },
+      "validation_controls": {
+        "atom_selection": {
+          "type": "array of distinct nonnegative integers",
+          "max_items": 32,
+          "scope": "Finite-difference sample only; never changes the full CV atom group. Omitted large-group sampling uses eight deterministic spread indices and records exact coverage."
+        },
+        "fd_step": {
+          "type": "number",
+          "exclusive_minimum": 0,
+          "exclusive_maximum": 0.01,
+          "default": 1e-05,
+          "scope": "Numerical difference step; not a dynamics control"
+        },
+        "fd_atol": {
+          "type": "number",
+          "exclusive_minimum": 0,
+          "exclusive_maximum": 0.1,
+          "default": 0.0001,
+          "scope": "Numerical check tolerance, never a predeclared validation result"
+        }
       }
     }
   }

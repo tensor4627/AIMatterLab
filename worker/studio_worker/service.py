@@ -14,12 +14,13 @@ import time
 from pathlib import Path
 from .adapters import Adapter, ENGINES, SCIENTIFIC, process_env
 from .store import Store
+from .runtime_service import RuntimeServiceMixin
 from .util import alive, atomic_json, contained, digest, identity, leaf, run_json
 
 TERMINAL = ("succeeded", "failed", "cancelled")
 
 
-class Service:
+class Service(RuntimeServiceMixin):
     def __init__(self, root, schedule=True):
         self.store = Store(root)
         self.root = self.store.root
@@ -255,8 +256,11 @@ class Service:
                 except Exception as exc:
                     self.provenance[key] = {"status":"blocked", "error":str(exc)}
             run["provenance"] = self.provenance[key]
+            from .cell_derivative_contract import derive as derive_cell_contract
+            contract=derive_cell_contract(self,run)
+            self.verify_snapshot(run)
             report = Adapter(run["engine"]).validate(run, run["environment_snapshot"],
-                                                     Path(run["directory"]) / "results")
+                                                     Path(run["directory"]) / "results",cell_derivative_contract=contract)
             self.store.update(run, status="ready", validation=report)
         except Exception as exc:
             self.store.update(run, status="draft", validation={"status": "failed", "message": str(exc)})
@@ -396,6 +400,9 @@ class Service:
         return {"environments":result,"adapters":list(ENGINES),"pending_adapters":["torchnep.train","nepmaker","activemiao","external-dft"],"scope":"Read-only inventory. Probe exact routes separately; no calculation executed."}
 
     def authoring(self, data, operation):
+        if operation=='render_pygas':
+            from .pygas_composition import save
+            result=save(self,data);result.pop('catalog',None);result.pop('assets',None);return result
         project=self.store.get("project",data["project_id"])
         if data["environment_id"] not in project["policy"]["environments"]:raise PermissionError("Environment is not authorized")
         environment=self.store.get("environment",data["environment_id"])

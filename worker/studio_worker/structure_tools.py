@@ -14,7 +14,7 @@ def checked(atoms):
  # A tiny cutoff detects overlapping distinct atoms without quadratic memory.
  i,j,d=neighbor_list('ijd',atoms,0.1,self_interaction=False)
  if any((i!=j)&(d<0.1)):raise ValueError('Overlapping atoms below 0.1 Angstrom')
- return {'positions':atoms.positions.tolist(),'symbols':atoms.get_chemical_symbols(),'cell':atoms.cell.array.tolist(),'pbc':atoms.pbc.tolist(),'n_atoms':len(atoms),'formula':atoms.get_chemical_formula(),'units':{'positions':'Angstrom','cell':'Angstrom'},'validation':{'status':'passed','scope':'ASE geometry, finite values, cell and overlap checks; no energetic relaxation'}}
+ return {'positions':atoms.positions.tolist(),'symbols':atoms.get_chemical_symbols(),'numbers':atoms.numbers.tolist(),'cell':atoms.cell.array.tolist(),'pbc':atoms.pbc.tolist(),'n_atoms':len(atoms),'formula':atoms.get_chemical_formula(),'units':{'positions':'Angstrom','cell':'Angstrom'},'validation':{'status':'passed','scope':'ASE geometry, finite values, cell and overlap checks; no energetic relaxation'}}
 
 def create(payload):
  from ase import Atoms
@@ -77,15 +77,43 @@ def graph_snapshot_io(graph):
 
 
 def render(payload):
+ """Render only the registered graph compiler with allowlisted data values."""
  import sys,hashlib
- root=Path(payload['source_root']).resolve();sys.path.insert(0,str(root))
+ if __package__:
+  from .pygas_catalog import catalog as source_catalog,_read
+  from .pygas_values import compiler_graph
+  from .pygas_dimensions import validate_dimensions
+  from .pygas_settings import validate_settings
+  from .composition_store import encoded
+ else:
+  from pygas_catalog import catalog as source_catalog,_read
+  from pygas_values import compiler_graph
+  from pygas_dimensions import validate_dimensions
+  from pygas_settings import validate_settings
+  from composition_store import encoded
+ root=Path(payload['source_root']).resolve()
+ if any(ord(c)<32 or c in '\\"' for c in str(root)):raise ValueError('Registered source path cannot be represented safely by the actual renderer')
+ receipt=source_catalog({'id':'pygas','root':str(root)})
+ if receipt.get('settings_schema',{}).get('status')!='passed':raise ValueError('Global settings source contract differs from the reviewed adapter; save a blocked draft and inspect the current source before rendering')
+ if payload.get('catalog_files') is not None and payload['catalog_files']!=receipt['source']['files']:raise ValueError('Catalog/source changed before rendering')
+ sys.path.insert(0,str(root))
  from tools.cv_bias_gui_server import build_catalog
  from tools.graph_workflow import validate_graph,render_workflow_script
- catalog=build_catalog(root);graph,bindings=portable_graph(payload['graph']);plan=validate_graph(graph,catalog);source=render_workflow_script(graph,catalog,root)
- files={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'base').glob('*.py'))}
- files.update({p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in ('tools/graph_workflow.py','tools/cv_bias_gui_server.py')})
- source='# studio-pygas-source: '+json.dumps({'root':str(root),'colvar_sha256':files['base/colvar.py'],'files':files,'io':graph_snapshot_io(graph)})+'\n'+source
- return {'source':source,'graph':graph,'io_bindings':bindings,'io_scope':'Scientific inputs and outputs use immutable run basenames; original source paths are authoring provenance only','plan':{k:plan[k] for k in ('mode','order','collector_id','cv_size')},'source_root':str(root),'source_sha256':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in ('base/colvar.py','tools/graph_workflow.py','tools/cv_bias_gui_server.py')},'validation':'not_run','scope':'Actual pyGAS graph schema and source rendering; artifact build/reload and target gates still required'}
+ catalog=build_catalog(root);graph,bindings=portable_graph(payload['graph'])
+ validate_settings(graph.get('settings',{}),receipt.get('settings_schema',{}))
+ compiled=compiler_graph(graph,receipt['catalog']);plan=validate_graph(compiled,catalog)
+ structure=None
+ if payload.get('structure_path'):
+  from ase.io import read
+  atoms=read(payload['structure_path'],index=0);structure={'n_atoms':len(atoms),'numbers':atoms.numbers.tolist()}
+ dimension_report=validate_dimensions(compiled,receipt,plan,structure)
+ body=render_workflow_script(compiled,catalog,root)
+ files={str(p.relative_to(root)):_read(root,str(p.relative_to(root)))[1] for p in sorted((root/'base').glob('*.py'))}
+ files.update({p:_read(root,p)[1] for p in ('tools/graph_workflow.py','tools/cv_bias_gui_server.py')})
+ if source_catalog({'id':'pygas','root':str(root)})['source']['files']!=receipt['source']['files']:raise ValueError('Source changed during rendering')
+ composition={'schema':'studio.composition/1','graph_sha256':hashlib.sha256(encoded(graph)).hexdigest(),'body_sha256':hashlib.sha256(body.encode('utf8')).hexdigest(),'inputs':payload.get('input_sha256',{})}
+ source='# studio-pygas-source: '+json.dumps({'root':str(root),'colvar_sha256':files['base/colvar.py'],'files':files,'catalog_files':receipt['source']['files'],'io':graph_snapshot_io(graph),'composition':composition})+'\n'+body
+ return {'source':source,'graph':graph,'io_bindings':bindings,'io_scope':'Scientific inputs and outputs use immutable run basenames; original source paths are authoring provenance only','plan':{k:plan[k] for k in ('mode','order','collector_id','cv_size')},'source_root':str(root),'source_sha256':receipt['source']['files'],'dimensions':dimension_report,'validation':'not_run','scope':'Actual pyGAS graph schema and source rendering; artifact build/reload and target gates still required'}
 
 
 def molecular_topology(atoms):
@@ -125,7 +153,7 @@ def suggest(payload):
  supplied={k:{'value':v,'source':'supplied task intent','confidence':'user'} for k,v in intent.items()}
  parameters={**supplied,'n_atoms':{'value':len(atoms),'source':'ASE loaded structure','confidence':'measured'},'pbc':{'value':atoms.pbc.tolist(),'source':'ASE loaded structure','confidence':'measured'},'structure_file':{'value':payload['path'],'source':'authorized asset','confidence':'measured'}}
  topology=molecular_topology(atoms)
- defaults={'time_step_fs':{'value':0.25 if 'H' in facts['symbols'] else 1.0,'source':'conservative MD pilot heuristic from presence of hydrogen; verify potential/time-scale','confidence':'proposal'},'pilot_steps':{'value':100,'source':'bounded software trial, not equilibration or convergence','confidence':'technical default'},'walkers':{'value':1,'source':'Studio supported single-walker contract','confidence':'capability'}}
+ defaults={'time_step_fs':{'value':0.25 if 'H' in facts['symbols'] else 1.0,'source':('conservative H-containing pilot heuristic' if 'H' in facts['symbols'] else 'conservative non-H pilot heuristic')+'; verify potential/time-scale','confidence':'proposal'},'pilot_steps':{'value':100,'source':'bounded software trial, not equilibration or convergence','confidence':'technical default'},'walkers':{'value':1,'source':'Studio supported single-walker contract','confidence':'capability'}}
  for k,v in defaults.items():parameters.setdefault(k,v)
  unresolved=[]
  if intent.get('temperature_K') is None and intent.get('temperature') is not None:parameters['temperature_K']={'value':intent['temperature'],'source':'supplied temperature alias','confidence':'user'}

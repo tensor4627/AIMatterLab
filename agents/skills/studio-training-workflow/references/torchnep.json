@@ -12,27 +12,6 @@
       "explicit source-compatible architecture/cutoffs and target consumer",
       "bounded epoch budget"
     ],
-    "details_defaults": {
-      "batch": 4,
-      "device": "cpu",
-      "dtype": "float64",
-      "seed": 0,
-      "lambda_e": 1,
-      "lambda_f": 1,
-      "lambda_v": 0.1,
-      "lambda_1": 0,
-      "lambda_2": 0,
-      "freeze_q_scaler": true,
-      "freeze_c": false,
-      "neighbor_cache": "auto",
-      "fallback_epochs": 100,
-      "fallback_lr": 0.001,
-      "fallback_optimizer": "adamw",
-      "fallback_weight_decay": 1e-05,
-      "fallback_save_every": 10,
-      "fallback_energy_shift": "initial",
-      "fallback_lr_scheduler": "off"
-    },
     "readiness_hazards": [
       "--val-fraction is reserved/unused; missing test.xyz disables validation, no promised automatic10% split",
       "--restart loads weights, not full Adam state",
@@ -42,6 +21,228 @@
       "default target=torchnep only persistence, not native consumer validation",
       "native and TorchNEP ZBL syntax/defaults differ; do not transfer entire nep.in unchanged",
       "same-name PyPI/latest or older branch docs are not this pinned0.1.0 lineage"
-    ]
+    ],
+    "source_default_observations": {
+      "batch": {
+        "value": 4,
+        "actual_cli": "--batch",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "device": {
+        "value": "cpu",
+        "actual_cli": "--device",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "dtype": {
+        "value": "float64",
+        "actual_cli": "--dtype",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "seed": {
+        "value": 0,
+        "actual_cli": "--seed",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "lambda_e": {
+        "value": 1,
+        "actual_cli": "--lambda-e",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "lambda_f": {
+        "value": 1,
+        "actual_cli": "--lambda-f",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "lambda_v": {
+        "value": 0.1,
+        "actual_cli": "--lambda-v",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "lambda_1": {
+        "value": 0,
+        "actual_cli": "--lambda-1",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "lambda_2": {
+        "value": 0,
+        "actual_cli": "--lambda-2",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "freeze_q_scaler": {
+        "value": true,
+        "actual_cli": null,
+        "kind": "source_default_not_execution",
+        "emission": "No Studio adapter; reference authoring only. freeze_q_scaler=true means absence of --train-q-scaler, not a --freeze-q-scaler flag."
+      },
+      "freeze_c": {
+        "value": false,
+        "actual_cli": "--freeze-c",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "neighbor_cache": {
+        "value": "auto",
+        "actual_cli": "--neighbor-cache",
+        "kind": "source_default_not_execution",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "fallback_epochs": {
+        "value": 100,
+        "actual_cli": "--epochs",
+        "kind": "resolution_fallback_not_literal_config_key",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "fallback_lr": {
+        "value": 0.001,
+        "actual_cli": "--lr",
+        "kind": "resolution_fallback_not_literal_config_key",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "fallback_optimizer": {
+        "value": "adamw",
+        "actual_cli": "--optimizer",
+        "kind": "resolution_fallback_not_literal_config_key",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "fallback_weight_decay": {
+        "value": 1e-05,
+        "actual_cli": "--weight-decay",
+        "kind": "resolution_fallback_not_literal_config_key",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "fallback_save_every": {
+        "value": 10,
+        "actual_cli": "--save-every",
+        "kind": "resolution_fallback_not_literal_config_key",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "fallback_energy_shift": {
+        "value": "initial",
+        "actual_cli": "--energy-shift",
+        "kind": "resolution_fallback_not_literal_config_key",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "fallback_lr_scheduler": {
+        "value": "off",
+        "actual_cli": "--lr-scheduler",
+        "kind": "resolution_fallback_not_literal_config_key",
+        "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      }
+    }
+  },
+  "rules_zh-CN": [
+    "明确使用tensor4627/torchnep这一源码谱系，同名PyPI包不能当作相同软件安装。",
+    "当前只有规划/源码参考，没有已接入执行适配器，不能显示可直接提交。",
+    "配置中被解析但未使用的选项不可显示为有效控制；源码没有完整恢复优化器就不能声称断点等价续训。"
+  ],
+  "language_scope": "Studio-authored Chinese planning rules plus original source-backed fields; official bilingual availability is recorded separately, never invented.",
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-10-22T13:15:12.473159+00:00",
+    "rule_input_sha256": "622ef73716c565d6d3dc8ae280fe5374252620acd683cc38bc19ca1eacf4c91c",
+    "local_files": [
+      {
+        "source_id": "torchnep",
+        "path": "train.py",
+        "sha256": "e230f10867682028c2d00c4b8697ca0760a21f40818c369c8c7c1e60b0f2a132",
+        "bytes": 44696,
+        "observed_commit": "fa057c8c31bdc8903e60ca55b62c40733c136e1b",
+        "role": "CLI_dataclass_resolution",
+        "line_ranges": [
+          [
+            68,
+            143
+          ],
+          [
+            620,
+            740
+          ],
+          [
+            930,
+            1055
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "torchnep",
+        "path": "nep_descriptor.py",
+        "sha256": "807567770aad72672aae8c72ee7ed4fd0179ac6ec5bfaf189a8dd81d96440911",
+        "bytes": 84247,
+        "observed_commit": "fa057c8c31bdc8903e60ca55b62c40733c136e1b",
+        "role": "consumer_constraints",
+        "line_ranges": [
+          [
+            110,
+            163
+          ],
+          [
+            1280,
+            1294
+          ],
+          [
+            1350,
+            1395
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "torchnep",
+        "path": "README.md",
+        "sha256": "d522ef0e677cd87d54aab1233c9bdbb1ff749e357947c58ef8dde79dd8d143c5",
+        "bytes": 9989,
+        "observed_commit": "fa057c8c31bdc8903e60ca55b62c40733c136e1b",
+        "role": "local_source",
+        "line_ranges": [
+          [
+            1,
+            234
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+      },
+      {
+        "source_id": "studio",
+        "path": "worker/studio_worker/engine_contracts.json",
+        "sha256": "cac46aa8214d43425d1d7f4e81c9b718695ebfd42ae7e77a6a6d7eb0fc7806fc",
+        "bytes": 14041,
+        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
+        "role": "absence_of_Studio_adapter",
+        "line_ranges": [
+          [
+            1,
+            525
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+      }
+    ],
+    "primary_references": [],
+    "applicability": {
+      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
+      "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
+      "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
+      "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
+      "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
+    },
+    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals.",
+    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation"
+  },
+  "parameter_emission_policy": {
+    "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",
+    "defaults": "Listed source defaults are annotated observations/proposals, not automatic scientific recommendations."
   }
 }
