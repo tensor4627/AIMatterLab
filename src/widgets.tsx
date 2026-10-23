@@ -1,3 +1,4 @@
+import {pixelFontSize} from '../shared/ui-font.mjs';
 import {tr} from './i18n';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import * as echarts from 'echarts';
@@ -18,9 +19,9 @@ export function CodeEditor({value,onChange,language='python',theme='dark',height
  const host=useRef<HTMLDivElement>(null),editor=useRef<monaco.editor.IStandaloneCodeEditor|null>(null),changed=useRef(onChange);changed.current=onChange;
  useEffect(()=>{
   if(!host.current)return;
-  const instance=monaco.editor.create(host.current,{value,language,theme:theme==='dark'?'vs-dark':'vs',fontSize:Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13,fontFamily:'Cascadia Code, Consolas, monospace',minimap:{enabled:false},padding:{top:16},scrollBeyondLastLine:false,automaticLayout:true,tabSize:4,readOnly});editor.current=instance;
+  const instance=monaco.editor.create(host.current,{value,language,theme:theme==='dark'?'vs-dark':'vs',fontSize:pixelFontSize(Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12),fontFamily:'Cascadia Code, Consolas, monospace',minimap:{enabled:false},padding:{top:16},scrollBeyondLastLine:false,automaticLayout:true,tabSize:4,readOnly});editor.current=instance;
   const subscription=instance.onDidChangeModelContent(()=>changed.current(instance.getValue()));
-  const appearance=()=>instance.updateOptions({fontSize:Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13});window.addEventListener('studio:appearance',appearance);
+  const appearance=()=>instance.updateOptions({fontSize:pixelFontSize(Number(document.documentElement.style.getPropertyValue('--editor-font-size'))||13,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12)});window.addEventListener('studio:appearance',appearance);
   return()=>{window.removeEventListener('studio:appearance',appearance);subscription.dispose();const model=instance.getModel();instance.dispose();model?.dispose();editor.current=null;};
  },[]);
  useEffect(()=>{if(editor.current&&editor.current.getValue()!==value)editor.current.setValue(value);},[value]);
@@ -29,8 +30,8 @@ export function CodeEditor({value,onChange,language='python',theme='dark',height
 }
 export function Chart({text,name}:{text:string;name:string}){
  const [font,setFont]=useState(13),[light,setLight]=useState(document.documentElement.dataset.theme==='light');
- useEffect(()=>{const update=()=>{setFont(Math.max(12,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12)*(parseFloat(document.documentElement.style.getPropertyValue('--ui-scale'))||1));setLight(document.documentElement.dataset.theme==='light');};update();window.addEventListener('studio:appearance',update);return()=>window.removeEventListener('studio:appearance',update);},[]);
- const ref=useRef<HTMLDivElement>(null);
+ useEffect(()=>{const update=()=>{setFont(pixelFontSize(12,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12,parseFloat(document.documentElement.style.getPropertyValue('--ui-scale'))||1));setLight(document.documentElement.dataset.theme==='light');};update();window.addEventListener('studio:appearance',update);return()=>window.removeEventListener('studio:appearance',update);},[]);
+ const ref=useRef<HTMLDivElement>(null),chartMinHeight=Math.ceil(Math.max(260,font*20));
  const data=useMemo(()=>{
   const all=text.split('\n').filter(x=>x.trim()&&!x.startsWith('#'));
   const neb=name.split('/').at(-1)==='neb_energies.out';
@@ -41,18 +42,20 @@ export function Chart({text,name}:{text:string;name:string}){
  useEffect(()=>{
   if(!ref.current||!data.rows.length)return;
   const neb=name.split('/').at(-1)==='neb_energies.out',rows=data.rows,ink=light?'#4a4958':'#aaaab9',grid=light?'#00000014':'#ffffff08';
-  const chart=echarts.init(ref.current);
+  const chart=echarts.init(ref.current),top=Math.ceil(Math.max(36,font*2.5)),bottom=Math.ceil(Math.max(66,font*4.5));
+  const tickCounts=()=>({x:Math.max(2,Math.min(5,Math.floor(chart.getWidth()/(font*8)))),y:Math.max(2,Math.min(5,Math.floor((chart.getHeight()-top-bottom-font*2)/(font*2.3))))});
+  const ticks=tickCounts();
   chart.setOption({backgroundColor:'transparent',color:light?['#6753bb','#147e70','#94620a','#335fa8']:['#a79aff','#5ccebe','#ecbe77','#7eafff'],
-   textStyle:{color:ink,fontSize:font},tooltip:{trigger:'axis'},legend:{top:8,textStyle:{color:ink,fontSize:font},type:'scroll'},
-   grid:{left:60,right:48,top:54,bottom:85},dataZoom:[{type:'inside'},{type:'slider',height:15,bottom:10}],
-   xAxis:{axisLabel:{fontSize:font},nameTextStyle:{fontSize:font},type:'value',name:neb?tr('图像序号'):'column 0',nameLocation:'middle',nameGap:30,splitLine:{lineStyle:{color:grid}}},
-   yAxis:{name:neb?tr('相对目标值 (eV)'):undefined,axisLabel:{fontSize:font},type:'value',scale:true,splitLine:{lineStyle:{color:grid}}},
+   textStyle:{color:ink,fontSize:font},tooltip:{trigger:'axis',confine:true,textStyle:{fontSize:font}},legend:{top:8,left:12,right:12,textStyle:{color:ink,fontSize:font},pageTextStyle:{color:ink,fontSize:font},pageIconColor:ink,pageIconInactiveColor:light?'#aaa':'#555',type:'scroll'},
+   grid:{left:neb?Math.ceil(font*3):12,right:Math.ceil(Math.max(36,font*2)),top,bottom,containLabel:true},dataZoom:[{type:'inside'},{type:'slider',height:Math.ceil(Math.max(15,font*.8)),bottom:10,textStyle:{color:ink,fontSize:font}}],
+   xAxis:{axisLabel:{fontSize:font,hideOverlap:true},nameTextStyle:{fontSize:font},splitNumber:ticks.x,type:'value',scale:true,name:neb?tr('图像序号'):'column 0',nameLocation:'middle',nameGap:Math.ceil(font*1.8),splitLine:{lineStyle:{color:grid}}},
+   yAxis:{name:neb?tr('相对目标值 (eV)'):undefined,nameLocation:'middle',nameGap:Math.ceil(font*2.8),nameTextStyle:{fontSize:font},axisLabel:{fontSize:font,hideOverlap:true},splitNumber:ticks.y,type:'value',scale:true,splitLine:{lineStyle:{color:grid}}},
    series:rows[0]?.slice(1,7).map((_,i)=>({name:neb?tr('相对目标值 (eV)'):'column '+(i+1),type:'line',showSymbol:false,data:rows.map(r=>[r[0],r[i+1]])}))||[]});
-  const observer=new ResizeObserver(()=>chart.resize());observer.observe(ref.current);
+  const observer=new ResizeObserver(()=>{chart.resize();const ticks=tickCounts();chart.setOption({xAxis:{splitNumber:ticks.x},yAxis:{splitNumber:ticks.y}});});observer.observe(ref.current);
   return()=>{observer.disconnect();chart.dispose();};
  },[data,name,font,light]);
  const notes=[data.cutLines&&'仅前 4000 行',data.cutColumns&&'仅前 6 列'].filter(Boolean);
- return <div className="chart-wrap"><div className="chart-note">{name}{tr("· 原始列预览，单位以引擎输出定义为准")}</div>{notes.length>0&&<div className="chart-note">{tr('已截断：')}{notes.join('，')}</div>}{data.rows.length?<div ref={ref} className="chart" role="img" aria-label={name}/>:<div className="chart-empty muted">{tr('没有可绘制的数值列')}</div>}</div>;
+ return <div className="chart-wrap"><div className="chart-note">{name}{tr("· 原始列预览，单位以引擎输出定义为准")}</div>{notes.length>0&&<div className="chart-note">{tr('已截断：')}{notes.join('，')}</div>}{data.rows.length?<div ref={ref} className="chart" style={{minHeight:chartMinHeight}} role="img" aria-label={name}/>:<div className="chart-empty muted">{tr('没有可绘制的数值列')}</div>}</div>;
 }
 const elementColors:Record<string,number>={H:0xe2e2ed,C:0x8b8caa,N:0x7f9efa,O:0xea7b91,Li:0xb296f6,Si:0xd8b58c,P:0xe2af70,S:0xe8d276,Cl:0x79c8a2,Ga:0xaa9edc};
 export function Structure({data}:{data:{positions:number[][];symbols:string[];cell:number[][];n_atoms:number}}){
@@ -89,9 +92,9 @@ export function TerminalPanel({id}:{id:string|null}){
  const ref=useRef<HTMLDivElement>(null);
  useEffect(()=>{
   if(!ref.current||!id)return;
-  const terminal=new Terminal({fontSize:Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||12,fontFamily:'Cascadia Code, Consolas, monospace',theme:{background:'#121218',foreground:'#c8c8d4',cursor:'#a69af5'},convertEol:false});
+  const terminal=new Terminal({fontSize:pixelFontSize(Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||12,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12),fontFamily:'Cascadia Code, Consolas, monospace',theme:{background:'#121218',foreground:'#c8c8d4',cursor:'#a69af5'},convertEol:false});
   const fit=new FitAddon();terminal.loadAddon(fit);
-  const appearance=()=>{terminal.options.fontSize=Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||12;fit.fit();};
+  const appearance=()=>{terminal.options.fontSize=pixelFontSize(Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||12,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12);fit.fit();};
   window.addEventListener('studio:appearance',appearance);
   terminal.open(ref.current);fit.fit();
   terminal.onData(data=>{void invoke('terminal.input',{id,data}).catch(()=>{});});

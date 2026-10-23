@@ -4,7 +4,7 @@ import { spawn, execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
-export const PROTOCOL_VERSION = '0.162.0-alpha.17.2';
+export const PROTOCOL_VERSION = '0.163.0-alpha.11.2';
 const exec = promisify(execFile);
 
 export class CodexBridge extends EventEmitter {

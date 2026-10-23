@@ -4,7 +4,7 @@
 
 ## 启动
 
-Windows 安装包位于 `release/v0.17.0/GPU Sampling Studio 0.17.0.exe`。首次启动：
+Windows 开发预览便携包位于 `release/v0.18.0/GPU Sampling Studio 0.18.0.exe`，验证范围见 [本代记录](docs/v0.18.md)。首次启动：
 
 1. 普通对话可直接连接服务商；进行科学计算时先点击「连接 WSL」，在设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
@@ -27,7 +27,7 @@ pnpm run pack
 
 使用 PATH 中的 pnpm；安装器也支持在 desktop.pnpm 中登记可执行文件路径。
 
-本代三轮改进、联合审阅及发布状态见 [v0.17](docs/v0.17.md)。本机未保存修改可恢复并重试；SSH、凭据与真实作业记录保留。
+本代五轮改进、独立审阅和验证范围见 [v0.18](docs/v0.18.md)。本机未保存修改可恢复并重试；SSH、凭据与真实作业记录保留。
 
 ## 本地源码与结构创建
 
@@ -39,7 +39,7 @@ pnpm run pack
 
 两轮改进与验证范围见 [v0.14](docs/v0.14.md)、[v0.15](docs/v0.15.md)。
 
-在「设置 → 科学工具 → pyGAS 自动技能」选择允许接收公开项目 skill 文本的服务商并保存。Agent 按需求自动载入本地工作流、CV/Bias 规则和示例，在聊天面板展示来源及载入状态；同一会话按内容哈希去重，源码更新后重新载入。范围限 pyGAS 的公开 agents/skills，不自动附加私有技能、凭据或 SSH 配置。新安装默认关闭，需用户选择服务商。
+在「技能库 → 管理资源与公开内容共享」统一登记来源、查看功能地图，并选择允许接收公开项目 skill 文本的服务商。Agent 按任务及阶段载入工作流、CV/Bias 规则和示例，显示来源与载入状态；同一会话按内容哈希去重，源码更新后重新载入。普通计算复用探测后的运行时信息，安装与修复指南仅在明确选择相应阶段时载入。公开 pyGAS 文本共享默认关闭；私有定义按精确版本另行授权，不包含凭据、SSH 或其他项目文件。
 
 流程页面按步骤展示必需参数，细节和有出处的默认值折叠在「高级参数」中；点击模块红点会展开并聚焦缺项。显示默认值不会改写输入或替代必填选择，手改后仍需「复核」。左侧会话旁的垃圾桶可删除会话和附带流程；真实作业与文件保留，删除不改变服务商自身的全局聊天记录。更新与验收见 [v0.16](docs/v0.16.md)。
 
@@ -49,7 +49,8 @@ pnpm run pack
 - 本地 Monaco 编辑器，xterm WSL PTY/OpenSSH 终端，ECharts 原始列图，Three.js 分帧结构预览。
 - Codex stdio JSONL 桥接：初始化、账户、模型、流式消息、工具结果卡片、审批、补充问题、恢复、中断及技能发现。
 - WSL SQLite 持久化权威队列，单一调度进程锁，同 GPU 串行，项目并发/时限授权，幂等提交，取消、退出收据、日志续读。
-- GPUMD/PyDyn MD；pyGAS 四种距离 CV 模板（MetaD、WTMetaD、umbrella、固定墙）；两条采样路线。
+- GPUMD/PyDyn MD；注册源码驱动的 pyGAS CV/Bias 参数、图及代码编辑；MetaD、WTMetaD、umbrella、固定墙与两条采样路线。
+- GPUMD 原生 NEB 参数、路径及有界运行；已实现路线与待接入适配器在功能地图中分开显示。
 - 保存后 bias ABI 验证、实际邻居、CUDA 有限差分及可选 CV 参考值；动态 bias 可传验证历史。
 - NEP/HotPP 训练、测试、导出；NEP 回归统计和原有 `nep-regression-rmse` 绘图 skill。
 - WTMetaD / OPES 重加权工具接口；输出图片、表格与原始日志预览。
@@ -64,7 +65,7 @@ pnpm run pack
 
 默认 TorchScript `.pt`。AOTI `.pt2` 的显式构建请求当前阻止在未经验证的工具链上执行；现有 `.pt2` 的部署必须通过 pyGAS manifest/目标容量检查，失败保留原错误，绝不替换后端。AOTI 完整双产物构建和 OPES 动态 checkpoint 验收仍需匹配环境。
 
-本地 skill 从原目录读取，不复制到工作台。设置 `skillRoots` 可添加 `pygas/agents/skills` 等非标准目录；通过 Codex 标准 skill 输入引用原路径。
+本地 skill 保留在原目录，工作台保存注册信息。设置 `skillRoots` 可添加 `pygas/agents/skills` 等目录；本项目公开科学技能随应用分发。隔离的 Agent 会话按功能地图接收有界规则文本，通过受限科学工具读取已选输入；不直接开放全盘原生技能或文件访问。
 
 ## 验证与源码
 
@@ -80,7 +81,7 @@ pnpm protocol
 
 真实科学验收脚本：`scripts/science-smoke.py`。它使用单独 WSL 环境和合成 EMT Cu 数据；不得把它的短训练或 FES 当作物理结果。验收环境安装清单与命令见 [验收记录](docs/acceptance.md)。
 
-协议固定为 Codex CLI **0.162.0-alpha.17.2**，生成类型在 `desktop/generated`。升级 CLI 时先重新生成类型并完成协议验收，再调整桥接版本。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
+协议固定为 Codex CLI **0.163.0-alpha.11.2**，生成类型在 `desktop/generated`。升级 CLI 时先重新生成类型并完成协议验收，再调整桥接版本。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
 
 ## v0.2：对话设置与审阅工作流
 

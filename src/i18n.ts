@@ -494,7 +494,14 @@ const english:Record<string,string> = {
 "授权字段无效，请检查表单。":"Invalid authorization fields. Check the form.",
 "保存中，请稍候。":"Saving; please wait.",
 "保存返回与原项目不一致，请重新读取实际项目状态。":"The save response differs from this project. Read its actual current state again.",
-"保存结果未能确认，可能已写入；请关闭后核对实际项目，不要假定已撤销。":"The save result is unconfirmed and may already be stored. Close and reconcile the actual project; do not assume cancellation."
+"保存结果未能确认，可能已写入；请关闭后核对实际项目，不要假定已撤销。":"The save result is unconfirmed and may already be stored. Close and reconcile the actual project; do not assume cancellation.",
+"直接准备引擎输入（高级）":"Prepare engine inputs directly (advanced)",
+"界面、代码、终端与图表文字均遵守此下限":"Interface, code, terminal and chart text follow this minimum.",
+"当前查看":"Viewing now",
+"打开查看":"Open preview",
+"大小未记录":"Size not recorded",
+"输入类型":"File type",
+"自定义 CV 定义与审阅":"Custom CV definition and review"
 };
 let language:'zh-CN'|'en' = (localStorage.getItem('studio.language')==='en'?'en':'zh-CN');
 export function setLanguage(value:'zh-CN'|'en'){language=value;localStorage.setItem('studio.language',value);}

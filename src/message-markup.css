@@ -1,0 +1,11 @@
+/* Display-only assistant text; inherit chat font and its configured minimum. */
+.message-markup{white-space:normal;min-width:0}
+.message-markup p{margin:0 0 .7em;white-space:pre-wrap}
+.message-markup>:last-child{margin-bottom:0}
+.message-markup strong{font-weight:650;color:var(--text)}
+.message-markup code{font-family:"Cascadia Code",Consolas,monospace;font-size:1em;background:var(--raised);border:1px solid var(--line);border-radius:4px;padding:.05em .25em;overflow-wrap:anywhere}
+.message-markup pre{font:inherit;font-family:"Cascadia Code",Consolas,monospace;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;padding:.65em .8em;margin:.6em 0;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:7px}
+.message-markup pre code{font:inherit;background:none;border:0;padding:0}
+.message-markup ul,.message-markup ol{margin:.3em 0 .8em;padding-inline-start:1.7em}
+.message-markup li{white-space:pre-wrap;padding-inline-start:.15em}
+.message-markup li+li{margin-top:.25em}

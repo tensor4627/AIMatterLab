@@ -180,7 +180,7 @@ try{
   await p.getByTestId('tool-activity').waitFor();assert.match(await p.getByTestId('tool-activity').innerText(),/失败/);assert.equal(await p.getByRole('button',{name:'打开计算流程'}).count(),0);assert.equal(await p.locator('.agent-activity pre').isVisible(),false);await p.getByText('查看工具详情').click();assert.equal(await p.locator('.agent-activity pre').innerText(),'Fixture tool failure');
  });
  await check('unknown-execution-locks-parameters-and-offers-reconcile',async p=>{
-  await p.evaluate(async()=>{window.__test.task={id:'unknown',provider:'codex',threadId:'fixture-thread',parameters:{temperature:null},missingFields:['temperature'],steps:[],artifacts:[{kind:'run',id:'run'}],execution:{phase:'unknown'},updatedAt:1};await window.renderTest('AgentTaskPage',{worker:false,task:window.__test.task,environments:[],theme:'dark',onError:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReview:()=>{},onReplace:()=>{},onRefresh:()=>{}});});
+  await p.evaluate(async()=>{window.__test.task={id:'unknown',provider:'codex',threadId:'fixture-thread',parameters:{temperature:null},missingFields:['temperature'],steps:[],artifacts:[{kind:'run',id:'run'}],execution:{phase:'unknown',status:'unknown',artifactId:'run'},updatedAt:1};await window.renderTest('AgentTaskPage',{worker:false,task:window.__test.task,environments:[],theme:'dark',onError:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReview:()=>{},onReplace:()=>{},onRefresh:()=>{}});});
   await p.locator('[data-field=temperature] input').waitFor();assert.equal(await p.locator('[data-field=temperature] input').isDisabled(),true);assert.equal(await p.getByTestId('execute-workflow').isDisabled(),true);await p.getByRole('button',{name:'核对运行状态'}).waitFor();
  });
  await check('slow-worker-polling-does-not-flood-or-starve-refresh',async p=>{
@@ -356,7 +356,7 @@ try{
    await p.waitForFunction(()=>!document.querySelector('[data-testid=review-input-snapshots]')?.disabled);
    await p.getByTestId('review-input-snapshots').check();assert.equal(await p.getByTestId('execute-deployment').isDisabled(),false);
    if(mode==='late-inspect')await p.evaluate(()=>window.__test.finishInspect());else if(['late-status','late-task','cross-target'].includes(mode))await p.evaluate(()=>window.__test.finishOld());
-   await p.waitForTimeout(100);assert.match(await p.locator('.input-snapshot-list').innerText(),/new-hash/);assert.doesNotMatch(await p.locator('.deployment-page').innerText(),/STALE_PREVIEW_TEXT|old-hash/);assert.equal(await p.getByTestId('review-input-snapshots').isChecked(),true);assert.equal(await p.getByTestId('execute-deployment').isDisabled(),false);
+   await p.waitForTimeout(100);await p.locator('.snapshot-input-identity summary').click();assert.match(await p.locator('.input-snapshot-list').innerText(),/new-hash/);assert.doesNotMatch(await p.locator('.deployment-page').innerText(),/STALE_PREVIEW_TEXT|old-hash/);assert.equal(await p.getByTestId('review-input-snapshots').isChecked(),true);assert.equal(await p.getByTestId('execute-deployment').isDisabled(),false);
    if(mode==='cross-target'){assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>c.data?.target==='/api/cluster/status'&&c.data.data?.run_id==='new')),true);assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>c.data?.target==='/api/run/status'&&c.data.data?.run_id==='new')),false);}
   }
   assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>c.method==='task.execute')),false);

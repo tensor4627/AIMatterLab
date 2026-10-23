@@ -43,7 +43,10 @@ test('Custom-CV intent reaches the implemented draft tools and current public gu
  assert.equal(route.status,'implemented_private_draft_registry_and_human_numeric_gate');
  assert.deepEqual(route.tools,['inspect_pygas_catalog','read_pygas_workflow','propose_custom_cv','read_custom_cv','present_task']);
  const result=await router.read('codex',route.id);assert.equal(result.status,'passed');
- assert.equal(result.capability_status,route.status);assert.equal(result.attachments.length,3);
+ assert.equal(result.capability_status,route.status);
+ assert.deepEqual(result.attachments.map(file=>file.name).sort(),['studio-cv-bias-planning/SKILL.md','studio-cv-bias-planning/references/pygas.json']);
+ assert(!result.attachments.some(file=>file.name.endsWith('/plumed.json')));
+ for(const id of ['pygas.cv','pygas.bias']){const composition=map.functions.find(item=>item.id===id);assert(composition.reference_files['studio-cv-bias-planning'].includes('references/plumed.json'),'Concrete '+id+' retains its explicit PLUMED equivalence reference');}
  assert.match(result.text,/current conversation/);assert.match(result.text,/Human|human/);
  assert.match(result.text,/requires explicit current-version sharing/);assert.match(result.text,/not a passed numerical report/);
  assert.match(result.text,/This tool never approves, generates implementation code, checks numerics or executes/);

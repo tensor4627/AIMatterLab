@@ -4,12 +4,14 @@ import {useEffect,useRef,useState} from 'react';
 import {ArrowUp,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2} from 'lucide-react';
 import {t} from './i18n';
 import ToolActivity from './ToolActivity';
+import MessageText from './MessageText';
+import {resumedEffort} from '../shared/resume-effort.mjs';
 import {toolActivity,visibleUserText} from '../shared/tool-activity.mjs';
 import ProviderLogin from './ProviderLogin';
 import {explicitNewWorkflow} from '../shared/task-fields.mjs';
 import {invoke,type RpcEvent,type AgentProvider,type Conversation,type AgentIntent,type SkillAttachment} from './types';
 type ModelCall={requestId:string;provider:AgentProvider;model:string;threadId:string;turnId:string|null;output:boolean;status:string};
-type Message={id:string;role:string;text:string;runId?:string;diff?:string;toolName?:string;activity?:any};
+type Message={id:string;role:string;text:string;diff?:string;toolName?:string;activity?:any};
 export default function Agent({planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,onNewConversation,hidden,onProviderChange,onAttachmentConsumed,onAttachmentClear}:{planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:{nonce:string;conversation?:Conversation;new?:boolean};onConversation?:(value:Conversation|null)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean}){
  const providerChangeRef=useRef(onProviderChange);providerChangeRef.current=onProviderChange;
  const attachmentClearRef=useRef(onAttachmentClear);attachmentClearRef.current=onAttachmentClear;
@@ -136,7 +138,8 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
     if(item.type==='userMessage')list.push({id:item.id,role:'user',text:visibleUserText(item.content||[])});
    }
    const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'});if(!current())return;
-   setThread(id);threadRef.current=id;setModel(r.model||model);setEffort(r.reasoningEffort||'');setMessages(list);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id)]);setImportOpen(false);conversationRef.current?.(conversation);
+   const resumedModel=r.model||model,catalog=await selectedRpc('model/list');if(!current())return;if(!Array.isArray(catalog.data))throw Error('Invalid resumed model catalog');setModels(catalog.data);
+   setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:localStorage.getItem('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(list);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id)]);setImportOpen(false);conversationRef.current?.(conversation);
   }catch(e){if(current())onError(e);}finally{if(current()){selectionPending.current=false;setApplying(false);}}
  }
  useEffect(()=>{
@@ -202,7 +205,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
   </div>
   <div className="chat-scroll" ref={scroll} role="log">
    {!messages.length&&<div className="agent-welcome"><div className="agent-orb"><Sparkles size={24}/></div><h3>{tr("让想法进入计算")}</h3><p>{tr("定义实验、准备输入、运行计算，")}<br/>{tr("然后一起检查结果。")}</p><div className="prompt-hints">{['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(t=><button key={t} onClick={()=>setPrompt(t)}>{tr(t)}<ArrowUp size={13}/></button>)}</div><small>{tr("科学参数会显式记录；作业状态来自真实进程。")}</small></div>}
-   {messages.map(m=><div key={m.id} className={'message '+m.role}>{m.role==='tool'?<ToolActivity message={m} onWorkflow={onOpenTask} onRun={onOpenRun}/>:<><div className="message-role">{tr(m.role==='user'?'你':'GPU Sampling Studio')}</div><div className="message-text">{m.text}</div></>}{m.runId&&<button className="tool-card" onClick={()=>onOpenRun?.(m.runId!)}>{tr("打开计算记录 ·")}{m.runId.slice(0,12)}</button>}{m.diff&&<pre className="diff-text">{m.diff}</pre>}</div>)}
+   {messages.map(m=><div key={m.id} className={'message '+m.role}>{m.role==='tool'?<ToolActivity message={m} onWorkflow={onOpenTask} onRun={onOpenRun}/>:<><div className="message-role">{tr(m.role==='user'?'你':'GPU Sampling Studio')}</div><div className="message-text">{m.role==='agent'?<MessageText text={m.text}/>:m.text}</div></>}{m.diff&&<pre className="diff-text">{m.diff}</pre>}</div>)}
    {requests.map(r=><div key={String(r.id)} className="approval" role="alert"><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
     {r.params?.questions?.map((q:any)=><label key={q.id}>{q.question||q.header}<input placeholder={tr("填写回答，或输入选项名称")} value={answers[q.id]||''} onChange={e=>setAnswers({...answers,[q.id]:e.target.value})}/><small>{q.options?.map((o:any)=>o.label).join(' / ')}</small></label>)}
     {r.method==='studio/question'?<div className="button-row">{r.params.questionOptions?.map((o:any)=><button className="button" key={o.optionId} onClick={()=>void respond(r,{optionId:o.optionId})}>{o.name}</button>)}<button className="button" onClick={()=>void respond(r,{})}>{t('取消')}</button></div>:r.method==='item/tool/requestUserInput'&&r.params?.questions?<button className="button primary" onClick={()=>void respond(r,{answers:Object.fromEntries(r.params.questions.map((q:any)=>[q.id,{answers:[answers[q.id]||'']}]))})}>{tr("提交回答")}</button>:

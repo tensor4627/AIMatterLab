@@ -13,3 +13,6 @@ worker/*.egg-info/
 !.env.example
 
 *.tsbuildinfo
+
+# User-authored private CV runtime repository; never ship with Studio sources.
+custom-cv-library/

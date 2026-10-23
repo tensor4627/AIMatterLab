@@ -1,3 +1,5 @@
+import {explicitSetupStage} from './explicit-setup-stage.mjs';
+import {customCvNumericDialog,referenceImportDialog} from './custom-cv-dialog.mjs';
 import {registerTaskStage} from './task-stage-ipc.mjs';
 import {localReviewDialog} from './local-review-dialog.mjs';
 import {registerCalculationReview} from './task-consumer-ipc.mjs';
@@ -110,7 +112,9 @@ if(installationVerifying){
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
 agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider),releaseWorker:provider=>worker.revokeProvider(provider),bindWorkerContext:(provider,context,options)=>worker.bindProviderContext(provider,context,options)});
-scientificSkills=new ScientificSkills({map:JSON.parse(fs.readFileSync(path.join(here,'scientific-skill-map.json'),'utf8')),bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,settings:()=>settings});
+const scientificMap=JSON.parse(fs.readFileSync(path.join(here,'scientific-skill-map.json'),'utf8'));
+const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
+scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route)});
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(here,'custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader],async(name,args,scope)=>{
@@ -151,12 +155,11 @@ worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(ta
 customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.active||settings.agentProvider||'codex',getActiveTaskId:provider=>activeAuthoringTasks.get(provider),assertProvider:context=>{workflowContext.assertScope(context);return providerId(context.provider);},assertHuman:event=>{trusted(event);return true;},access:()=>true,
  validateRuntimeReceipt:async(runtime,context)=>{const current=await worker.request('POST','/api/runtime-guide',{environment_id:context.args.environment_id,engine:'pygas.build'});return current.status==='observed'&&runtime.status==='observed'&&current.receipt===runtime.receipt_sha256;},
  confirmNumericScope:async({scope,task,structure},event)=>{
-  trusted(event);const reference=scope.reference||{};const detail=['流程：'+task.name,'流程 ID：'+task.id,'本次数值范围 SHA256：'+scope.sha256,'项目：'+scope.project_id,'环境：'+scope.environment_id,'解释器：'+scope.interpreter,'范围：CPU，最多60秒，每文件最多8MiB；仅保存后的CV primitive检查','有限差分原子：'+scope.fd_atom_indices.join(', '),'结构：'+(structure?.name||'')+' · '+scope.bindings.structure_sha256,'公式：'+scope.bindings.spec_sha256,'代码：'+scope.bindings.code_sha256,'参数：'+scope.bindings.parameters_sha256,'运行时收据：'+scope.bindings.runtime_receipt_sha256,'参考方法：'+scope.reference_kind,reference.cv?'本次明确采用的外部参考 CV：'+JSON.stringify(reference.cv):'',reference.provenance?'参考方法与来源声明：'+JSON.stringify(reference.provenance):'','外部参考方法声明本身未被自动审计；此处确认采用这些确切数值和方法。','这次不会运行MD、构建完整bias、安装软件或扩大项目授权。稳态相判别和实际消费引擎验证另行进行。'].filter(Boolean).join('\n');
-  const result=await dialog.showMessageBox(window,{type:'question',title:'运行这一次自定义 CV 数值检查？',message:'确认当前公式、代码、参数与结构的有界 CPU 检查',detail,buttons:['取消','运行这一次检查'],defaultId:0,cancelId:0,noLink:true});trusted(event);return result.response===1;
+  trusted(event);const result=await dialog.showMessageBox(window,customCvNumericDialog({language:settings.language,scope,task,structure}));trusted(event);return result.response===1;
  },bindComposition:(records,id,result)=>bindComposition(records,id,result,undefined,'human')
 });
 for(const action of ['read','saveSpec','approveFormula','approveCode','sharing','validate','status','attach','reuse'])handle('customCv.'+action,(value,event)=>customCv.dispatch(action,value,event));
-handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,{title:'选择当前流程的一个计算输入文件',properties:['openFile'],filters:[{name:'计算输入与结构',extensions:['xyz','extxyz','cif','pdb','vasp','json','py','txt','in','yaml','yml','toml','dat','pt','pt2','pth','ckpt']}]});return result.canceled?null:result.filePaths[0];}},value);});
+handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>taskRecords.create(value));
 handle('task.deployment.save',value=>saveDeployment(taskRecords,value,localReview));
@@ -289,7 +292,9 @@ async function agentRpc({provider,method,params={}}){
   await synchronize();
   if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview});
   // Public software guidance is selected only for the actual current intent.
-  skillContext=await scientificSkills.context.prepare(skillKey,provider,definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId});check();
+  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId});
+  const explicitSetup=!definitionOnly&&studioSkillId&&['installation','setup','toolchain'].includes(scientificSkills.router.routes.get(studioSkillId)?.phase);
+  skillContext=await(explicitSetup?setupInstructions.prepare(provider,studioSkillId,prepareGuidance):prepareGuidance());check();
   if(!definitionOnly&&bound?.parameters?.engine&&worker.connection){
    const environment_id=bound.deployment?.config?.environmentId||bound.authoring?.environmentId,engine=bound.parameters.engine;
    if(environment_id){const selection={environment_id,engine};let guide;try{guide=await worker.request('POST','/api/runtime-guide',selection);}catch{guide={status:'blocked',reason:'Selected runtime guide unavailable; use an exact selected-engine probe, not an automatic reinstall'};}check();skillContext=scientificSkills.context.mergeRuntime(skillKey,provider,skillContext,guide,selection);}

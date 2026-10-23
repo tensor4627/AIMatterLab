@@ -1,0 +1,1 @@
+export function resumedEffort(value:{provider:string;preferences?:Record<string,string|null|undefined>;model?:{supportedReasoningEfforts?:{reasoningEffort:string}[];defaultReasoningEffort?:string};serverEffort?:unknown}):string;

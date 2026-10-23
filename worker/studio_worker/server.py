@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from .adapters import Adapter, ENGINES
 from .service import Service
+from .runtime_projection import result_for_agent
 from .templates import build_bias
 from .task_schema import STEP_SCHEMA, validate_task
 from .util import leaf, atomic_json, digest, contained
@@ -408,6 +409,7 @@ def main():
                         method_, route, _ = TOOL_ROUTES[params["name"]]
                         try:
                             result = dispatch(service, method_, route, params.get("arguments", {}), admin=False)
+                            result = result_for_agent(params["name"], result)
                             value = {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
                                      "isError": False}
                         except Exception as exc:
