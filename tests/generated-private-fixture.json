@@ -1,0 +1,64 @@
+{
+  "spec": {
+    "name": "Selected MIC distance",
+    "formula": "s=||MIC(r_j-r_i; H)||",
+    "expression": "norm(mic(pos[atom_j]-pos[atom_i], cell))",
+    "symbols": [
+      {
+        "name": "r_i,r_j",
+        "meaning": "ordered selected atom coordinates",
+        "units": "Angstrom",
+        "domain": "actual structure coordinates"
+      }
+    ],
+    "units": "Angstrom",
+    "domain": "nonsingular row cell; away from MIC ties and zero distance",
+    "pbc": "row_mic",
+    "atom_selection": [
+      0,
+      1
+    ],
+    "output_size": 1,
+    "parameters": [
+      {
+        "name": "atom_i",
+        "type": "integer",
+        "units": "zero-based index",
+        "description": "First ordered atom",
+        "required": true,
+        "min": 0
+      },
+      {
+        "name": "atom_j",
+        "type": "integer",
+        "units": "zero-based index",
+        "description": "Second ordered atom",
+        "required": true,
+        "min": 0
+      }
+    ],
+    "invariances": [
+      "translation",
+      "periodic_translation"
+    ],
+    "singularities": [
+      "zero distance; minimum-image switching boundaries"
+    ]
+  },
+  "values": {
+    "atom_i": 0,
+    "atom_j": 1
+  },
+  "spec_sha256": "6e0d5dee4699f09260111c4ab30ca684adeb5dbf0ac22ca04231a7bf4e2d531c",
+  "parameters_sha256": "4eb2ccc9ccd966352ccd307c8ff5749cb7a9026a83a72978f605c95d86c95d96",
+  "class_name": "StudioCustom_6e0d5dee4699f092",
+  "source": "# Deterministically generated only after a human formula approval.\n# Generator: typed-formula-v1; PBC row_mic means component-wise fractional row wrap.\n# It is not a closest-image algorithm for an arbitrary strongly triclinic cell.\n# Formula/spec SHA256: 6e0d5dee4699f09260111c4ab30ca684adeb5dbf0ac22ca04231a7bf4e2d531c\nimport torch\n\ndef _studio_mic(vector: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:\n    fractional = torch.matmul(vector, torch.linalg.inv(cell))\n    return torch.matmul(fractional - torch.round(fractional), cell)\n\nclass StudioCustom_6e0d5dee4699f092(torch.nn.Module):\n    def __init__(self, *, atom_i, atom_j):\n        super().__init__()\n        self._cvp_atom_i = int(atom_i)\n        self._cvp_atom_j = int(atom_j)\n\n    def forward(self, pos: torch.Tensor, cell: torch.Tensor, side_array: torch.Tensor) -> torch.Tensor:\n        # Same nominal positions/coordinate gradient; cell AD holds fractional positions.\n        # This matches the pyGAS cell-gradient -> virial convention, not a partial\n        # derivative that silently fixes Cartesian coordinates during strain.\n        fractions = torch.matmul(pos, torch.linalg.inv(cell.detach()))\n        pos = torch.matmul(fractions, cell)\n        value = torch.linalg.vector_norm(_studio_mic((pos[self._cvp_atom_j]-pos[self._cvp_atom_i]), cell))\n        return value.reshape(-1)\n",
+  "code_sha256": "19254db5649064f68c33a5a89ae1fc980ebc746f4faa5bfbccfc6f7e650d0569",
+  "output_size": 1,
+  "forward_args": [
+    "pos",
+    "cell",
+    "side_array"
+  ],
+  "scope": "Generated primitive source only; numerical/serialization/target validation not_run"
+}

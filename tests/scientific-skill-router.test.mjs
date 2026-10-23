@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import {ScientificSkillRouter} from '../desktop/scientific-skill-router.mjs';
+import {fileURLToPath} from 'node:url';
 async function fixture(t){const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-route-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));await fs.mkdir(path.join(root,'public-cv'));await fs.writeFile(path.join(root,'public-cv','SKILL.md'),'actual public CV instructions');const map={schema_version:1,skills:[{id:'cv',source:'pygas',folder:'public-cv',files:['SKILL.md']}],functions:[{id:'cv.compose',phase:'authoring',skills:['cv'],engines:['pygas.build'],status:'source_guidance'},{id:'env.install',phase:'installation',skills:['cv'],status:'setup_only'}]};return {root,map};}
 test('All four authenticated providers load only their consented bounded route with hash receipts',async t=>{
  const {root,map}=await fixture(t),router=new ScientificSkillRouter({map,sourceRoot:()=>root,consent:(provider,source)=>provider==='codex'&&source==='pygas'});
@@ -30,3 +31,21 @@ test('Only explicit route reference files are read, invalid reference selections
 });
 
 test('Linked reference directory is refused on Windows junctions as well as POSIX symlinks',async t=>{const {root,map}=await fixture(t),outside=await fs.mkdtemp(path.join(os.tmpdir(),'studio-not-public-'));t.after(()=>fs.rm(outside,{recursive:true,force:true}));await fs.writeFile(path.join(outside,'secret.md'),'MUST NOT READ');map.skills[0].reference_files=['references/secret.md'];map.functions[0].reference_files={[map.skills[0].id]:['references/secret.md']};await fs.symlink(outside,path.join(root,map.skills[0].folder,'references'),process.platform==='win32'?'junction':'dir');const router=new ScientificSkillRouter({map,sourceRoot:()=>root,consent:()=>true});const result=await router.read('codex','cv.compose');assert.equal(result.status,'blocked');assert.deepEqual(result.attachments,[]);assert.equal(result.text,undefined);});
+
+
+test('Custom-CV intent reaches the implemented draft tools and current public guide without granting human actions',async()=>{
+ const map=JSON.parse(await fs.readFile(new URL('../desktop/scientific-skill-map.json',import.meta.url),'utf8'));
+ const {selectScientificFunctions}=await import('../desktop/scientific-context.mjs');
+ assert.deepEqual(selectScientificFunctions({text:'请讨论一个自定义 CV 的公式',parameters:{engine:'gpumd.sampling'}}),['pygas.custom-cv']);
+ const router=new ScientificSkillRouter({map,sourceRoot:source=>source==='studio'?fileURLToPath(new URL('../agents/skills/',import.meta.url)):undefined,consent:()=>false});
+ const route=(await router.catalog('codex')).functions.find(r=>r.id==='pygas.custom-cv');
+ assert.equal(route.phase,'authoring');assert.equal(route.permission,'allowed');
+ assert.equal(route.status,'implemented_private_draft_registry_and_human_numeric_gate');
+ assert.deepEqual(route.tools,['inspect_pygas_catalog','read_pygas_workflow','propose_custom_cv','read_custom_cv','present_task']);
+ const result=await router.read('codex',route.id);assert.equal(result.status,'passed');
+ assert.equal(result.capability_status,route.status);assert.equal(result.attachments.length,3);
+ assert.match(result.text,/current conversation/);assert.match(result.text,/Human|human/);
+ assert.match(result.text,/requires explicit current-version sharing/);assert.match(result.text,/not a passed numerical report/);
+ assert.match(result.text,/This tool never approves, generates implementation code, checks numerics or executes/);
+ for(const forbidden of ['approve_formula','approve_code','customCv.validate','customCv.sharing','submit_run'])assert(!route.tools.includes(forbidden));
+});

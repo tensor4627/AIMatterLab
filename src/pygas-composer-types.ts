@@ -1,5 +1,6 @@
 export type DataValue=number|boolean|string|null|DataValue[];
 export type LibraryKind='cv'|'bias'|'switch'|'neighbor';
+export type FrameworkNodeKind='input'|'collect'|'output'|'reduce';
 export interface EmbeddedEditorHint{editor:string;shape?:(number|null)[];options?:(string|null)[];serializer?:string;tensor_dtype?:string;basic?:boolean;units?:string;provenance:{kind:string;sha256:string;source:string}}
 export interface ParamDefinition{editor_hint?:EmbeddedEditorHint;name:string;default:string;required:boolean;annotation:string;is_module_param:boolean;type_hint:string;default_is_literal:boolean;default_value:unknown}
 export interface SourceLocation{name:string;line:number;sha256:string}

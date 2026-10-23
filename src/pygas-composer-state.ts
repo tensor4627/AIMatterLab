@@ -1,4 +1,4 @@
-import type {CanonicalGraph,CatalogEntry,CatalogResponse,DerivedStructure,EditorMetadata,GraphContract,GraphEdge,GraphNode,ParamDefinition,ParameterEditor,Ports,SourceReceipt} from './pygas-composer-types';
+import type {CanonicalGraph,CatalogEntry,CatalogResponse,DerivedStructure,EditorMetadata,FrameworkNodeKind,GraphContract,GraphEdge,GraphNode,ParamDefinition,ParameterEditor,Ports,SourceReceipt} from './pygas-composer-types';
 export const kinds=['cv','bias','switch','neighbor'] as const;
 export const keyOf=(entry:{kind:string;name?:string;class_name?:string})=>entry.kind+':'+(entry.name||entry.class_name||'');
 export function hasData(value:unknown,depth=0):boolean{return depth<=6&&(typeof value==='number'?Number.isFinite(value):typeof value==='boolean'?true:Array.isArray(value)?value.length>0&&value.length<=512&&value.every(item=>hasData(item,depth+1)):false);}
@@ -49,3 +49,42 @@ export function appendInput(graph:CanonicalGraph,nodeId:string,port:string,sourc
 export function removeInputEdge(graph:CanonicalGraph,edge:GraphEdge):CanonicalGraph{return {...graph,edges:graph.edges.filter(item=>item!==edge)};}
 export function compatibleSources(graph:CanonicalGraph,node:GraphNode,port:string,contract:GraphContract,catalog:CatalogResponse){const type=portsFor(node,contract,catalog)?.inputs[port];return graph.nodes.flatMap(source=>source.id===node.id?[]:Object.entries(portsFor(source,contract,catalog)?.outputs||{}).filter(([,value])=>value===type||contract.compatible_pairs.some(([a,b])=>a===value&&b===type)).map(([sourcePort])=>({node:source.id,port:sourcePort})));}
 export function moveCollectorEdge(graph:CanonicalGraph,edge:GraphEdge,delta:number):CanonicalGraph{const indices=graph.edges.map((item,index)=>item.target.node===edge.target.node&&item.target.port===edge.target.port?index:-1).filter(i=>i>=0),position=indices.findIndex(i=>graph.edges[i]===edge),other=position+delta;if(position<0||other<0||other>=indices.length)return graph;const edges=[...graph.edges];[edges[indices[position]],edges[indices[other]]]=[edges[indices[other]],edges[indices[position]]];return {...graph,edges};}
+
+/** Source-matched compiler choices only. These helpers never select scientific parameters or connect nodes. */
+export const frameworkNodeKinds=['input','collect','output','reduce'] as const;
+export function compilerGraphModes(catalog:CatalogResponse,receipt:SourceReceipt):string[]{
+ if(catalogProblem(catalog,receipt)||!catalog.ports?.templates||typeof catalog.ports.templates!=='object'||Array.isArray(catalog.ports.templates))return [];
+ const modes=Object.keys(catalog.ports.templates);if(modes.length>16||modes.some(mode=>!/^[a-z][a-z0-9_]{0,31}$/.test(mode)))return [];
+ return modes.filter(mode=>!!catalogGraphContract(catalog,mode));
+}
+export function appendFrameworkNode(graph:CanonicalGraph,catalog:CatalogResponse,receipt:SourceReceipt,kind:FrameworkNodeKind,id:string):CanonicalGraph{
+ const contract=compilerGraphModes(catalog,receipt).includes(graph.mode||'')?catalogGraphContract(catalog,graph.mode):undefined;
+ if(!frameworkNodeKinds.includes(kind)||!contract?.ports[kind])throw Error('The selected mode has no source-matched framework node contract');
+ if(!Array.isArray(graph.nodes)||graph.nodes.length>=128)throw Error('The current graph editor supports at most 128 nodes');
+ if(!/^[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(id)||graph.nodes.some(node=>node.id===id))throw Error('A framework node requires a unique declared graph ID');
+ if(kind!=='reduce'&&graph.nodes.some(node=>node.kind===kind))throw Error('This editor currently supports one '+kind+' node; the existing node is retained');
+ return {...graph,nodes:[...graph.nodes,{id,kind,params:{}}]};
+}
+export function changeCompilerGraphMode(graph:CanonicalGraph,catalog:CatalogResponse,receipt:SourceReceipt,mode:string):CanonicalGraph{
+ if(!compilerGraphModes(catalog,receipt).includes(mode))throw Error('Choose a source-matched compiler graph mode');
+ return graph.mode===mode?graph:{...graph,mode};
+}
+
+/** A literal, user-clicked managed basename is technical authoring data, never an artifact or format fallback. */
+export function managedOutputNameProposal(graph:CanonicalGraph,catalog:CatalogResponse,receipt:SourceReceipt){
+ const basename='pygas-model.pt',schema=catalog.settings_schema,field=Array.isArray(schema?.fields)?schema.fields.find(field=>!!field&&typeof field==='object'&&field.key==='pt_path'):undefined;
+ const sourceFiles=schema?.source_files,sourceMatched=!!sourceFiles&&Object.keys(sourceFiles).length>0&&Object.entries(sourceFiles).every(([name,sha])=>/^[a-f0-9]{64}$/.test(sha)&&catalog.source.files[name]===sha);
+ const actual=graph.settings.pt_path,missing=actual===undefined||actual===null||actual==='';
+ let reason='';if(!compilerGraphModes(catalog,receipt).includes(graph.mode||'')||graph.version!==2||schema?.status!=='passed'||!sourceMatched||!field||field.location!=='settings'||field.type!=='owned_output_basename'||field.read_only!==true||field.required!==true||!field.origin||typeof field.origin.path!=='string'||typeof field.origin.sha256!=='string'||catalog.source.files[field.origin.path]!==field.origin.sha256)reason='The current managed-output source contract is unavailable';
+ else if(!missing)reason='The existing output value is retained; this action never overwrites it';
+ const metadata=graph.settings.scientific_metadata,defaults=metadata&&typeof metadata==='object'&&!Array.isArray(metadata)?(metadata as Record<string,unknown>).studio_technical_defaults:undefined;
+ if(!reason&&(metadata!==undefined&&(!metadata||typeof metadata!=='object'||Array.isArray(metadata))||defaults!==undefined&&(!defaults||typeof defaults!=='object'||Array.isArray(defaults))))reason='Existing technical provenance needs explicit review before this value can be added';
+ const formats=Array.isArray(graph.settings.artifact_formats)?graph.settings.artifact_formats:typeof graph.settings.artifact_formats==='string'?[graph.settings.artifact_formats]:[];
+ const known=formats.length>0&&formats.length<=2&&new Set(formats).size===formats.length&&formats.every(format=>format==='torchscript'||format==='aoti');
+ return {available:!reason,missing,reason,basename,source:field?.origin,formats:known?formats:[],futureOutputs:known?formats.map(format=>format==='torchscript'?'pygas-model.pt':'pygas-model.pt2'):[]};
+}
+export function adoptManagedOutputName(graph:CanonicalGraph,catalog:CatalogResponse,receipt:SourceReceipt):CanonicalGraph{
+ const proposal=managedOutputNameProposal(graph,catalog,receipt);if(!proposal.available)throw Error(proposal.reason);
+ const metadata=(graph.settings.scientific_metadata||{}) as Record<string,unknown>,defaults=(metadata.studio_technical_defaults||{}) as Record<string,unknown>;
+ return {...graph,settings:{...graph.settings,pt_path:proposal.basename,scientific_metadata:{...metadata,studio_technical_defaults:{...defaults,pt_path:{value:proposal.basename,origin:'Studio technical default selected by an explicit human action',compiler_source:proposal.source!.path,compiler_sha256:proposal.source!.sha256}}}}};
+}

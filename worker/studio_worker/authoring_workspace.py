@@ -37,6 +37,8 @@ def ensure(service, data):
    imported.append({'source':str(path),'path':str(path),'sha256':sha,'status':'passed','scope':'Already owned project input'});continue
   folder=contained(root/('import-'+sha[:16]),[root]);folder.mkdir(parents=True,exist_ok=True)
   target=contained(folder/leaf(path.name),[root])
+  from .private_lineage import propagate
+  propagate(service,[str(path)],project['id'])
   if not target.exists():shutil.copyfile(path,target)
   if digest(target)!=sha:raise ValueError('Imported structure hash mismatch')
   imported.append({'source':str(path),'path':str(target),'sha256':sha,'status':'passed','scope':'Copied explicit user input; scientific validation not yet performed'})
@@ -62,7 +64,10 @@ def adopt(service,data):
   except (ValueError,PermissionError):mapping[value]=value;continue # Target authorization still applies during prepare.
   if not file.is_file() or file.is_symlink():raise ValueError('Regular draft input required')
   sha=digest(file);folder=contained(service.root/'projects'/target['id']/'inputs'/('adopt-'+sha[:24]),[service.root]);folder.mkdir(parents=True,exist_ok=True)
-  dest=contained(folder/leaf(file.name),[folder]);shutil.copyfile(file,dest)
+  dest=contained(folder/leaf(file.name),[folder])
+  from .private_lineage import propagate
+  propagate(service,[str(file)],target['id'])
+  shutil.copyfile(file,dest)
   if digest(dest)!=sha:raise ValueError('Adopted input changed')
   mapping[value]=str(dest)
  return {'paths':mapping,'scope':'Desktop input copy only; target authorization and submission gates unchanged'}

@@ -1,0 +1,254 @@
+{
+  "type": "object",
+  "properties": {
+    "spec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "formula": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Human-readable mathematical definition to discuss before approval."
+        },
+        "expression": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Formula DSL data, not Python code. Only pos, cell, declared parameters, pi, arithmetic/indexing and norm,sum,mean,sqrt,exp,log,sin,cos,abs,atan2,dot,cross,clamp,stack,mic,logsumexp. mic requires row_mic; no imports, attributes or arbitrary calls."
+        },
+        "symbols": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "meaning": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "units": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "domain": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            },
+            "required": [
+              "name",
+              "meaning",
+              "units",
+              "domain"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "units": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "pbc": {
+          "type": "string",
+          "enum": [
+            "none",
+            "row_mic"
+          ],
+          "description": "row_mic is full-periodic componentwise fractional row-cell wrapping, not arbitrary triclinic closest image."
+        },
+        "atom_selection": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Actual zero-based structure atoms allowed by the formula, not guessed chemistry labels."
+        },
+        "output_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "parameters": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,47}$",
+                "description": "Formula parameter symbol; no reserved function/Torch/Python keywords."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "number",
+                  "integer",
+                  "number_vector",
+                  "integer_vector",
+                  "number_matrix"
+                ]
+              },
+              "units": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "default": {
+                "description": "Required when required=false. Must match the declared parameter type; null remains an unresolved draft value.",
+                "type": [
+                  "number",
+                  "array",
+                  "null"
+                ]
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "type",
+              "units",
+              "description",
+              "required"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "invariances": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "translation",
+              "rotation",
+              "periodic_translation"
+            ]
+          }
+        },
+        "singularities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "references": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "pattern": "^https://",
+            "maxLength": 1024
+          }
+        }
+      },
+      "required": [
+        "name",
+        "formula",
+        "expression",
+        "symbols",
+        "units",
+        "domain",
+        "pbc",
+        "atom_selection",
+        "output_size",
+        "parameters",
+        "singularities"
+      ],
+      "additionalProperties": false
+    },
+    "values": {
+      "type": "object",
+      "description": "Only the declared formula parameter names, with matching finite numeric scalar/vector/matrix values. Omit genuinely unresolved values; do not invent approval or execution fields.",
+      "additionalProperties": {
+        "type": [
+          "number",
+          "array",
+          "null"
+        ]
+      }
+    },
+    "library_review": {
+      "type": "object",
+      "properties": {
+        "source_files": {
+          "type": "object",
+          "description": "Verbatim source.files from the current public inspect_pygas_catalog result, not the private extended graph catalog.",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 2000,
+          "description": "Precise scientific gap/non-equivalence after library inspection."
+        }
+      },
+      "required": [
+        "source_files",
+        "classes",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "spec",
+    "values",
+    "library_review"
+  ],
+  "additionalProperties": false
+}

@@ -38,3 +38,17 @@ def selection(parameters,n_atoms):
  else:indices=list(range(min(n_atoms,4)));source='legacy bounded first-four default; CV group not inferred'
  if not indices or any(i>=n_atoms for i in indices):raise ValueError('Numerical validation indices exceed the actual structure')
  return {'indices':indices,'source':source,'structure_atoms':n_atoms,'declared_cv_atoms':full,'scope':'Only the listed atomic force components are finite-differenced. CV input structure/group and full serialized forces/virial remain unchanged.'}
+
+
+def validate_cell_group(contract,parameters,n_atoms):
+ """Trusted worker proof only; Adapter overwrites caller-supplied contracts."""
+ declared=contract.get('declared_cv_atoms');private=contract.get('private_cv_bindings',[])
+ if private:
+  proof=contract.get('private_cv_atom_contract',{})
+  if len(private)!=1 or proof.get('kind')!='approved_private_formula_group'or proof.get('structure_atoms')!=n_atoms or proof.get('atom_selection')!=declared or cv_atoms(parameters)!=declared:raise ValueError('Worker private formula atom-group proof differs from actual validation inputs')
+  if not isinstance(declared,list)or not declared or len(set(declared))!=len(declared)or any(type(index)is not int or not 0<=index<n_atoms for index in declared):raise ValueError('Invalid exact private formula group')
+  referenced=proof.get('referenced_atoms')
+  if not isinstance(referenced,list)or not referenced or any(type(index)is not int or index not in declared for index in referenced)or len(set(referenced))!=len(referenced):raise ValueError('Private formula references differ from its approved group')
+  if any(proof.get(key)!=private[0].get(key)for key in('spec_sha256','code_sha256','parameters_sha256')):raise ValueError('Private atom-group proof refers to a different approved revision')
+ elif declared!=list(range(n_atoms)):raise ValueError('Native affine proof requires the full actual CV group')
+ return declared

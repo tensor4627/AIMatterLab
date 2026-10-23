@@ -1,0 +1,7 @@
+.consumer-artifact-picker{display:grid;gap:.65rem;min-width:0;max-width:100%}.consumer-artifact-picker p,.consumer-artifact-picker code,.consumer-artifact-picker li{overflow-wrap:anywhere}.consumer-artifact-picker button{white-space:normal;text-align:start}.consumer-artifact-picker select{min-width:0;max-width:100%}.consumer-artifact-picker [role=alert]{color:var(--danger,#f79797)}
+
+.consumer-stage-editor,.consumer-target-review,.consumer-stage-entry{min-width:0;max-width:100%;overflow-wrap:anywhere}
+.consumer-stage-editor,.consumer-target-review{display:grid;gap:.65rem}.consumer-stage-editor select,.consumer-stage-editor input{min-width:0;max-width:100%}
+.consumer-stage-editor pre,.consumer-target-review code{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;display:block}
+.consumer-stage-editor button,.consumer-target-review button{white-space:normal;text-align:start}.consumer-target-review dd{margin:0;overflow-wrap:anywhere}
+.consumer-stage-editor [role=alert],.consumer-target-review [role=alert]{color:var(--danger,#f79797)}

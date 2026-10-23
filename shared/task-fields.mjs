@@ -46,7 +46,12 @@ export function normalizeSteps(steps,parameters={},missing=[]){
  });
  const leftovers=flattenParameters(parameters).filter(f=>!used.has(f.key));
  for(const key of missing){if(!isFieldKey(key))continue;if(!used.has(key)&&!leftovers.some(f=>f.key===key))leftovers.push(inferField(key,parameterValue(parameters,key),true));}
- if(leftovers.length)result.push({id:'parameters',title:'运行参数与文件',description:'未分组参数可直接编辑；Agent 可在后续更新中归入对应步骤。',fields:leftovers.map(f=>({...f,required:f.required||missing.includes(f.key)}))});
+ if(leftovers.length){
+  // A saved/user-owned group may already use this name. Generated groups must
+  // remain valid when the result is normalized again (for example by missing checks).
+  let id='parameters',suffix=1;while(ids.has(id))id='parameters-'+suffix++;
+  result.push({id,title:'运行参数与文件',description:'未分组参数可直接编辑；Agent 可在后续更新中归入对应步骤。',fields:leftovers.map(f=>({...f,required:f.required||missing.includes(f.key)}))});
+ }
  return result;
 }
 function missingListValue(items){

@@ -42,3 +42,18 @@ class DeclaredCvAliasTypes(__import__('unittest').TestCase):
   from studio_worker.derivative_selection import cv_atoms
   for value in ({'atom_selection':[1],'cv':{'atom_selection':[True]}},{'atom_selection':[0],'cv':{'atom_selection':[0.0]}},{'cv':{'atom_selection':[1.0],'atoms_zero_based':[1]}},{'cv':{'atom_selection':[]}},{'cv':{'atom_selection':'0,1'}}):
    with self.subTest(value=value),self.assertRaisesRegex(ValueError,'nonnegative integers'):cv_atoms(value)
+
+
+class TrustedPrivateGroup(unittest.TestCase):
+ def test_subset_requires_exact_formula_proof_and_matching_revision(self):
+  from studio_worker.derivative_selection import validate_cell_group
+  binding={'spec_sha256':'a'*64,'code_sha256':'b'*64,'parameters_sha256':'c'*64};proof={'kind':'approved_private_formula_group','atom_selection':[0,1,3],'referenced_atoms':[0,1,3],'structure_atoms':32,**binding};contract={'declared_cv_atoms':[0,1,3],'private_cv_bindings':[binding],'private_cv_atom_contract':proof}
+  self.assertEqual(validate_cell_group(contract,{'atom_selection':[0,1,3]},32),[0,1,3])
+  for change in(lambda value:value['private_cv_atom_contract'].update(structure_atoms=3),lambda value:value['private_cv_atom_contract'].update(referenced_atoms=[999]),lambda value:value['private_cv_atom_contract'].update(code_sha256='0'*64),lambda value:value.update(declared_cv_atoms=list(range(32))),lambda value:value.pop('private_cv_atom_contract')):
+   modified=copy.deepcopy(contract);change(modified)
+   with self.assertRaises(ValueError):validate_cell_group(modified,{'atom_selection':[0,1,3]},32)
+  with self.assertRaises(ValueError):validate_cell_group(contract,{'atom_selection':list(range(32))},32)
+ def test_native_proof_still_requires_all_atoms(self):
+  from studio_worker.derivative_selection import validate_cell_group
+  with self.assertRaisesRegex(ValueError,'full actual'):validate_cell_group({'declared_cv_atoms':[0,1]}, {'atom_selection':[0,1]},32)
+  self.assertEqual(validate_cell_group({'declared_cv_atoms':list(range(32))},{'atom_selection':list(range(32))},32),list(range(32)))

@@ -2,7 +2,7 @@ import path from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
 import {sourceAuthority,synchronizeGraphMirrors,reviewGraph} from './composition-authority.mjs';
 const pairs=['workflow.json','build_bias.py'];
-const operations=new WeakMap();
+const operations=new WeakMap(),pendingReads=new WeakMap();
 const anchor=task=>JSON.stringify({id:task.id,provider:task.provider,threadId:task.threadId,projectId:task.projectId,authoring:task.authoring,parameterRevision:task.parameterRevision,composition:task.composition,files:task.parameters?.files});
 function beginOperation(records,task,expectedPath,write=false){let states=operations.get(records);if(!states){states=new Map();operations.set(records,states);}const previous=states.get(task.id);if(previous?.writePending)throw Error('A CV graph/source save is in progress; reload after it finishes');const token=(previous?.token||0)+1;states.set(task.id,{token,writePending:write});return {id:task.id,token,anchor:anchor(task),expectedPath,write};}
 function assertOperation(records,owner){const current=records.read(owner.id);if(operations.get(records)?.get(owner.id)?.token!==owner.token||anchor(current)!==owner.anchor||records.deleted(current.provider,current.threadId)||records.bound(current.provider,current.threadId)?.id!==current.id)throw Error('CV workflow changed during the request; reload the current saved pair');return current;}
@@ -31,7 +31,7 @@ export function invalidateComposition(records,id){
  if(task.composition)task.composition={...task.composition,status:'blocked',render_blocked:true,reasons:['A graph/source write is pending; reload the saved pair before review']};
  return records.save(task);
 }
-export function bindComposition(records,id,result,owner){
+export function bindComposition(records,id,result,owner,origin=owner?.origin||'read'){
  if(owner)assertOperation(records,owner);
  const task=records.read(id),original=structuredClone(records.read(id)),root=task.authoring?.inputRoot?.replace(/\/$/,'');
  const composition=result?.composition;
@@ -45,18 +45,20 @@ export function bindComposition(records,id,result,owner){
  task.composition={...composition};
  const savedFiles=result.files||[composition.sourcePath,composition.graphPath].filter(file=>Object.hasOwn(composition.expected?.files||{},path.posix.basename(file)));
  task.authoring={...task.authoring,compositionFiles:savedFiles,compositionRevision:composition.expected};
- if(owner?.origin==='human')task.authoring.lastHumanCompositionRevision=task.parameterRevision||0;
- const authority=sourceAuthority(task,result,owner?.origin||'read');
+ if(origin==='human')task.authoring.lastHumanCompositionRevision=task.parameterRevision||0;
+ const authority=sourceAuthority(task,result,origin);
  if(authority){task.authoring.compositionAuthority=authority;delete task.authoring.compositionIntent;synchronizeGraphMirrors(task);}
- else{delete task.authoring.compositionAuthority;task.authoring.compositionIntent={origin:owner?.origin||'read',status:composition.status,parameterRevision:task.parameterRevision||0,graph:structuredClone(result.graph),expected:structuredClone(composition.expected),graphSha:composition.graph_sha256||null};}
+ else{delete task.authoring.compositionAuthority;const intent={origin,status:composition.status,parameterRevision:task.parameterRevision||0,graph:structuredClone(result.graph),expected:structuredClone(composition.expected),graphSha:composition.graph_sha256||null},previous=task.authoring.compositionIntent;task.authoring.compositionIntent=origin==='read'&&previous&&isDeepStrictEqual({...previous,origin},intent)?previous:intent;}
  if(task.parameters?.engine==='pygas.build')task.parameters={...task.parameters,files:[...new Set([...(task.parameters.files||[]).filter(file=>!pairs.includes(path.posix.basename(file))),...savedFiles,...(result.io_bindings||[]).map(binding=>path.posix.dirname(composition.graphPath)+'/'+binding.name)])]};
  return isDeepStrictEqual(task,original)?task:records.save(task);
 }
 export async function readTaskPygas(records,worker,value){
- const {task,args}=taskContext(records,value),owner=beginOperation(records,task,args.path||task.authoring.inputRoot.replace(/\/$/,'')+'/cv-'+task.id+'/workflow.json');
- const result=await worker.request('POST','/api/pygas/composition/read',args);
- assertOperation(records,owner);if(result.graph)bindComposition(records,task.id,result,owner);
- return {taskId:task.id,...result};
+ const {task,args}=taskContext(records,value),key=JSON.stringify([task.id,anchor(task),args]);
+ let reads=pendingReads.get(records);if(!reads){reads=new Map();pendingReads.set(records,reads);}
+ const existing=reads.get(key);if(existing)return structuredClone(await existing);
+ const owner=beginOperation(records,task,args.path||task.authoring.inputRoot.replace(/\/$/,'')+'/cv-'+task.id+'/workflow.json');
+ const pending=Promise.resolve().then(async()=>{const result=await worker.request('POST','/api/pygas/composition/read',args);assertOperation(records,owner);if(result.graph)bindComposition(records,task.id,result,owner);return {taskId:task.id,...result};});reads.set(key,pending);
+ try{return structuredClone(await pending);}finally{if(reads.get(key)===pending)reads.delete(key);}
 }
 export async function saveTaskPygas(records,worker,value,normalize=false){
  const {task,args}=taskContext(records,value);
@@ -65,6 +67,23 @@ export async function saveTaskPygas(records,worker,value,normalize=false){
  const invalidated=invalidateComposition(records,task.id),owner={...beginOperation(records,invalidated,args.path,true),origin:normalize?'normalize':'human'};
  try{const result=await worker.request('POST',normalize?'/api/pygas/composition/normalize':'/api/pygas/composition/save',{...args,expected:value.expected,catalog_files:value.catalog_files,...normalize?{repair:task.composition?.status==='blocked'}:{graph:value.graph}});
  bindComposition(records,task.id,result,owner);return {taskId:task.id,...result};}finally{finishOperation(records,owner);}
+}
+/** Human-only creation of one empty owned graph; never accepts caller paths or graph data. */
+export async function initializeTaskPygas(records,worker,value,currentSelection){
+ if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!=='catalog_files,expected,taskId'||!isDeepStrictEqual(value.expected,{journal_sha256:null,files:{}})||!value.catalog_files||typeof value.catalog_files!=='object'||Array.isArray(value.catalog_files)||!Object.keys(value.catalog_files).length||Object.keys(value.catalog_files).length>128||Object.entries(value.catalog_files).some(([name,sha])=>name.length>256||!name||!/^[a-f0-9]{64}$/.test(sha)))throw Error('Current empty pair and source hashes are required; paths, graphs and execution parameters are not accepted');
+ const {task,args}=taskContext(records,value);
+ if(task.composition||args.path)throw Error('Reload the existing composition; it cannot be initialized again');
+ if(typeof currentSelection!=='function')throw Error('Main-owned current conversation selection required');
+ const selection=currentSelection(),selected=JSON.stringify(selection);
+ const assertSelected=()=>{const actual=currentSelection();if(!actual||JSON.stringify(actual)!==selected||actual.provider!==task.provider||actual.threadId!==task.threadId||actual.taskId!==task.id||actual.projectId!==args.project_id||actual.environmentId!==args.environment_id||actual.inputRoot!==task.authoring.inputRoot)throw Error('Select this workflow in its current conversation before creating a graph');};
+ assertSelected();
+ const invalidated=invalidateComposition(records,task.id),expectedPath=task.authoring.inputRoot.replace(/\/$/,'')+'/cv-'+task.id+'/workflow.json',owner={...beginOperation(records,invalidated,expectedPath,true),origin:'human'};
+ try{
+  const result=await worker.request('POST','/api/pygas/composition/initialize',{...args,expected:value.expected,catalog_files:value.catalog_files,files:task.parameters?.files||[]});
+  assertSelected();assertOperation(records,owner);
+  if(result?.composition?.status!=='draft'||result.composition.source_sha256!==null||result.composition.render_blocked!==true||result.graph?.mode!=='cvonly'||!Array.isArray(result.graph?.nodes)||result.graph.nodes.length||!Array.isArray(result.graph.edges)||result.graph.edges.length)throw Error('Initialization did not return an empty non-executable CV-only draft');
+  bindComposition(records,task.id,result,owner);return {taskId:task.id,...result};
+ }finally{finishOperation(records,owner);}
 }
 // Runs before a provider can mutate the canonical pair, and after the real worker response.
 export function compositionToolGuard(records,activeTasks){return {

@@ -27,3 +27,27 @@ test('Revocation during a pending privileged read suppresses its result instead 
 });
 
 test('Denied public guidance retains its structured status and cannot report successful loading',async t=>{const {w,call}=await setup(t);for(const status of ['blocked','permission_required']){w.setScopedTools([{name:'read_skill_route'}],async()=>({status,reason:'explicit unchanged permission boundary',attachments:[]}));const r=await(await call(w.providerConnection('deepseek'),{id:9,method:'tools/call',params:{name:'read_skill_route'}})).json();assert.equal(r.result.isError,true);assert.equal(JSON.parse(r.result.content[0].text).status,status);}});
+
+const scopedContext=(threadId,taskId=null)=>({threadId,taskId,projectId:taskId?'project-a':null,environmentId:taskId?'env-a':null,inputRoot:taskId?'/owned/a':null});
+const toolBody=name=>({jsonrpc:'2.0',id:42,method:'tools/call',params:{name,arguments:{threadId:'forged',taskId:'forged'}}});
+test('Scoped dispatch receives only trusted bound identity and a live boolean lease check',async t=>{
+ const {w,call,seen}=await setup(t);w.bindProviderContext('codex',scopedContext('real-thread','real-task'));const c=w.providerConnection('codex');await call(c,toolBody('read_skill_route'));assert.equal(seen[0].scope.threadId,'real-thread');assert.equal(seen[0].scope.taskId,'real-task');assert.equal(seen[0].scope.checkCurrent(),true);w.bindProviderContext('codex',scopedContext('next-thread','real-task'));assert.equal(seen[0].scope.checkCurrent(),false);assert.equal((await call(c,toolBody('read_skill_route'))).status,403);assert.equal(seen.length,1);
+});
+for(const route of ['scoped','local','upstream','relay'])test('A context switch during authoring.before dispatches zero '+route+' writes',async t=>{
+ const {w,call,calls}=await setup(t);w.bindProviderContext('codex',scopedContext('a'));const c=w.providerConnection('codex');let release,entered;const gate=new Promise(r=>release=r),arrived=new Promise(r=>entered=r);let writes=0,cancelled=0;
+ w.setAuthoringGuard({before:async(_name,_args,_provider,scope)=>{assert.equal(scope.threadId,'a');entered();await gate;return 'guard-token';},after:()=>{throw Error('must not complete');},cancel:token=>{assert.equal(token,'guard-token');cancelled++;}});
+ w.setScopedTools([{name:'scoped-write'}],async()=>{writes++;return {};});w.setLocalTools([{name:'local-write'}],async()=>{writes++;return {};});
+ if(route==='relay'){w.relay={stdin:{write(){writes++;}},kill(){}};w.forward=async()=>{writes++;return {status:200,data:{}};};}
+ const name=route==='scoped'?'scoped-write':route==='local'?'local-write':'upstream-write';const pending=call(c,toolBody(name));await arrived;w.bindProviderContext('codex',scopedContext('b'));release();const response=await pending;assert.equal(response.status,403);assert.equal(await response.text(),'');assert.equal(writes,0);assert.equal(calls.length,0);assert.equal(cancelled,1);
+});
+test('Authenticated slow-body request cannot dispatch after context selection changes',async t=>{
+ const {w,calls}=await setup(t);w.bindProviderContext('codex',scopedContext('a'));const c=w.providerConnection('codex');let guards=0,writes=0;w.setAuthoringGuard({before(){guards++;}});w.setScopedTools([{name:'scoped-write'}],async()=>{writes++;});
+ let authenticated;const arrived=new Promise(r=>authenticated=r),original=w.providerScopes.authenticate.bind(w.providerScopes);w.providerScopes.authenticate=(args)=>{const scope=original(args);if(scope)authenticated();return scope;};
+ const body=JSON.stringify(toolBody('scoped-write')),url=new URL(c.url+'/mcp');let request;const pending=new Promise((resolve,reject)=>{request=http.request(url,{method:'POST',headers:{Authorization:'Bearer '+c.tokens.mcp,'Content-Length':Buffer.byteLength(body)}},res=>{let text='';res.on('data',chunk=>text+=chunk);res.on('end',()=>resolve({status:res.statusCode,text}));});request.on('error',reject);request.write(body.slice(0,10));});await arrived;w.bindProviderContext('codex',scopedContext('b'));request.end(body.slice(10));assert.deepEqual(await pending,{status:403,text:''});assert.equal(guards,0);assert.equal(writes,0);assert.equal(calls.length,0);
+});
+test('Initial fill with the same token also invalidates requests waiting in guard.before',async t=>{
+ const {w,call}=await setup(t),c=w.providerConnection('kimi');let release,entered,writes=0;const gate=new Promise(r=>release=r),arrived=new Promise(r=>entered=r);w.setAuthoringGuard({before:async()=>{entered();await gate;},cancel(){}});w.setScopedTools([{name:'read_skill_route'}],async()=>{writes++;return {};});const pending=call(c,toolBody('read_skill_route'));await arrived;w.bindProviderContext('kimi',scopedContext('first'),{allowInitialFill:true});assert.equal(w.providerConnection('kimi').tokens.mcp,c.tokens.mcp);release();assert.equal((await pending).status,403);assert.equal(writes,0);
+});
+test('Context revoked during guard.after suppresses a completed body',async t=>{
+ const {w,call}=await setup(t);w.bindProviderContext('deepseek',scopedContext('a'));const c=w.providerConnection('deepseek');let release,entered;const gate=new Promise(r=>release=r),arrived=new Promise(r=>entered=r);w.setAuthoringGuard({before:()=>({}),after:async()=>{entered();await gate;},cancel(){}});const pending=call(c,toolBody('read_skill_route'));await arrived;w.bindProviderContext('deepseek',scopedContext('b'));release();const result=await pending;assert.equal(result.status,403);assert.equal(await result.text(),'');
+});

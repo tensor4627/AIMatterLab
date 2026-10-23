@@ -98,8 +98,13 @@ def compiler_graph(graph,catalog,*,require_complete=True):
    if node.get("params"):raise ValueError("This node has no constructor parameters")
    continue
   if kind=="reduce":
-   if set(node.get("params",{}))!={"operation"}:raise ValueError("Explicit reduction operation required")
-   if node.get("params",{}).get("operation","mean") not in ("mean","sum","first","identity"):raise ValueError("Unsupported explicit reduction")
+   values=node.get("params",{})
+   if not isinstance(values,dict)or set(values)-{"operation"}:raise ValueError("Explicit reduction operation required")
+   operation=values.get("operation")
+   if operation in(None,""):
+    if require_complete:raise ValueError("Explicit reduction operation required")
+    continue
+   if operation not in ("mean","sum","first","identity"):raise ValueError("Unsupported explicit reduction")
    continue
   entry=next((entry for entry in catalog.get(kind,[]) if entry["name"]==node.get("class_name")),None)
   if entry is None:raise ValueError("Class absent from registered GUI catalog")

@@ -702,9 +702,16 @@
       "skills": [
         "studio-cv-bias-planning"
       ],
-      "tools": [],
-      "status": "planned_formula_discussion_only_registry_and_numeric_gate_not_implemented",
-      "phase": "formula_discussion",
+      "tools": [
+        "inspect_pygas_catalog",
+        "read_pygas_workflow",
+        "propose_custom_cv",
+        "read_custom_cv",
+        "present_task"
+      ],
+      "status": "implemented_private_draft_registry_and_human_numeric_gate",
+      "phase": "authoring",
+      "adaptation": "Inspect the real pyGAS library first. If no equivalent composition exists, discuss the mathematical definition, then propose only typed formula/parameter DATA in the current conversation. The human separately confirms the formula, generated code and one exact bounded CPU check in the task workbench. read_custom_cv requires explicit current-version sharing with this provider; no old definitions, runs or other projects are authorized. Registry or numerical-gate implementation is not a passed numerical report, artifact, target-engine validation or physical suitability. Build, target reload and execution remain separate human-gated pyGAS routes. Private OPES, mixed, AOTI and remote paths require their own reviewed contract and are not enabled by this guidance route.",
       "reference_files": {
         "studio-cv-bias-planning": [
           "references/pygas.json",

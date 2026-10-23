@@ -78,7 +78,7 @@ def graph_snapshot_io(graph):
 
 def render(payload):
  """Render only the registered graph compiler with allowlisted data values."""
- import sys,hashlib
+ import sys,hashlib,copy
  if __package__:
   from .pygas_catalog import catalog as source_catalog,_read
   from .pygas_values import compiler_graph
@@ -94,12 +94,27 @@ def render(payload):
  root=Path(payload['source_root']).resolve()
  if any(ord(c)<32 or c in '\\"' for c in str(root)):raise ValueError('Registered source path cannot be represented safely by the actual renderer')
  receipt=source_catalog({'id':'pygas','root':str(root)})
+ selected=[];custom_items=payload.get('private_custom_cvs',[])
+ if custom_items:
+  if not isinstance(custom_items,list)or len(custom_items)>8:raise ValueError('At most eight approved private primitives')
+  if not __package__:sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+  from studio_worker.custom_cv_catalog import checked_entry,extend,check_graph_values,import_line
+  from studio_worker.custom_cv_numerics import bounded_bytes
+  selected=[{**checked_entry(item),'approved_item':item}for item in custom_items]
+  graph_bindings=payload.get('graph',{}).get('metadata',{}).get('studio_custom_cvs',[])
+  if graph_bindings!=[entry['binding']for entry in selected]:raise ValueError('Private graph binding differs from the worker-approved exact snapshot')
+  for entry in selected:
+   module_path=Path(payload['structure_path']).parent/entry['binding']['module_file']
+   if hashlib.sha256(bounded_bytes(module_path,65536)).hexdigest()!=entry['binding']['code_sha256']:raise ValueError('Approved private module snapshot changed')
+  check_graph_values(payload['graph'],selected);receipt=extend(receipt,selected)
  if receipt.get('settings_schema',{}).get('status')!='passed':raise ValueError('Global settings source contract differs from the reviewed adapter; save a blocked draft and inspect the current source before rendering')
  if payload.get('catalog_files') is not None and payload['catalog_files']!=receipt['source']['files']:raise ValueError('Catalog/source changed before rendering')
  sys.path.insert(0,str(root))
  from tools.cv_bias_gui_server import build_catalog
  from tools.graph_workflow import validate_graph,render_workflow_script
- catalog=build_catalog(root);graph,bindings=portable_graph(payload['graph'])
+ catalog=build_catalog(root)
+ if selected:catalog['cv'].extend(copy.deepcopy(entry['entry'])for entry in selected)
+ graph,bindings=portable_graph(payload['graph'])
  validate_settings(graph.get('settings',{}),receipt.get('settings_schema',{}))
  compiled=compiler_graph(graph,receipt['catalog']);plan=validate_graph(compiled,catalog)
  structure=None
@@ -108,9 +123,15 @@ def render(payload):
   atoms=read(payload['structure_path'],index=0);structure={'n_atoms':len(atoms),'numbers':atoms.numbers.tolist()}
  dimension_report=validate_dimensions(compiled,receipt,plan,structure)
  body=render_workflow_script(compiled,catalog,root)
+ if selected:
+  marker='from base import *\n'
+  if body.count(marker)!=1:raise ValueError('Actual pyGAS renderer import contract changed')
+  body=body.replace(marker,marker+import_line(selected),1)
  files={str(p.relative_to(root)):_read(root,str(p.relative_to(root)))[1] for p in sorted((root/'base').glob('*.py'))}
  files.update({p:_read(root,p)[1] for p in ('tools/graph_workflow.py','tools/cv_bias_gui_server.py')})
- if source_catalog({'id':'pygas','root':str(root)})['source']['files']!=receipt['source']['files']:raise ValueError('Source changed during rendering')
+ current=source_catalog({'id':'pygas','root':str(root)})
+ if selected:current=extend(current,selected)
+ if current['source']['files']!=receipt['source']['files']:raise ValueError('Source changed during rendering')
  composition={'schema':'studio.composition/1','graph_sha256':hashlib.sha256(encoded(graph)).hexdigest(),'body_sha256':hashlib.sha256(body.encode('utf8')).hexdigest(),'inputs':payload.get('input_sha256',{})}
  source='# studio-pygas-source: '+json.dumps({'root':str(root),'colvar_sha256':files['base/colvar.py'],'files':files,'catalog_files':receipt['source']['files'],'io':graph_snapshot_io(graph),'composition':composition})+'\n'+body
  return {'source':source,'graph':graph,'io_bindings':bindings,'io_scope':'Scientific inputs and outputs use immutable run basenames; original source paths are authoring provenance only','plan':{k:plan[k] for k in ('mode','order','collector_id','cv_size')},'source_root':str(root),'source_sha256':receipt['source']['files'],'dimensions':dimension_report,'validation':'not_run','scope':'Actual pyGAS graph schema and source rendering; artifact build/reload and target gates still required'}

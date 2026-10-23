@@ -506,6 +506,16 @@ print('__STUDIO_JSON__'+json.dumps(out))
             if parent["project_id"] != project["id"] or parent["status"] not in ("draft", "ready"):
                 raise PermissionError("Only an unsubmitted run in the same project may be revised")
             roots.append(parent["directory"])
+        # Private custom primitives are local-only in this generation. Reject
+        # before any archive, local snapshot or SSH upload; do not imply a remote
+        # private execution/access contract has been verified.
+        private_rows=self.store.list('private-cv-lineage')
+        private_projects={row['project_id']for row in private_rows}
+        if project['id']in private_projects:raise ValueError('Private custom CV remote deployment is not implemented; use a locally validated target or a public-library workflow')
+        local_paths=[contained(src,roots)for src in local_inputs.values()]
+        private_roots=[self.service.root/'projects'/row['project_id']/'inputs'for row in private_rows]
+        private_roots.extend(Path(run['directory'])for run in self.store.runs()if run['project_id']in private_projects)
+        if any(any(base==source or base in source.parents for base in private_roots)for source in local_paths):raise ValueError('Private custom CV source cannot be copied to a remote task before a remote access contract is implemented')
         identifier = secrets.token_hex(12)
         directory = self.service.root / "cluster-runs" / identifier
         (directory/"simulation").mkdir(parents=True)

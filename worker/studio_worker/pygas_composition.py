@@ -149,6 +149,7 @@ def draft_graph(graph,receipt):
   normalized=normalize_graph(graph,receipt['catalog'],require_complete=False)
   validate_settings(normalized.get('settings',{}),receipt.get('settings_schema',{}))
  for node in normalized['nodes']:
+  if node.get('kind')=='reduce'and node.get('params',{}).get('operation')in(None,''):missing.append(node['id']+'.operation')
   entry=next((e for e in receipt['catalog'].get(node['kind'],[]) if e['name']==node.get('class_name')),None)
   if entry:
    for p in entry['params']:
@@ -207,7 +208,11 @@ def readonly_render_checks(graph,state,receipt,derived,source,directory):
 def response(service,data,*,render_report=None):
  project,environment,source,root=context(service,data);directory=location(root,data)
  store=CompositionStore(root,service.store.lock);state=store.read(directory);receipt=catalog(source)
- graph=state.get('graph');available=assets(service,project,root);derived={'values':{},'provenance':None,'sha256':None}
+ graph=state.get('graph')
+ if graph and graph.get('metadata',{}).get('studio_custom_cvs'):
+  from .custom_cv_graph import receipt_for
+  receipt=receipt_for(service,receipt,graph,project['id'],data.get('workspace_id'),environment['id'])
+ available=assets(service,project,root);derived={'values':{},'provenance':None,'sha256':None}
  if graph and graph.get('settings',{}).get('atoms_path'):
   try:
    path=resolve_input(graph['settings']['atoms_path'],directory,available,root,project);sha=digest(path)
@@ -241,6 +246,12 @@ def save(service,data,*,normalize=False):
    expected=identity(old)
   if expected!=identity(old):raise ValueError('Composition hash conflict; read the current pair')
   receipt=catalog(source)
+  incoming=old.get('graph') if normalize else data['graph']
+  selected=[]
+  if incoming and incoming.get('metadata',{}).get('studio_custom_cvs'):
+   from .custom_cv_graph import approved
+   from .custom_cv_catalog import extend
+   selected=approved(service,incoming,project['id'],data.get('workspace_id'),environment['id']);receipt=extend(receipt,selected)
   if data.get('catalog_files') is not None and data['catalog_files']!=receipt['source']['files']:raise ValueError('Catalog changed; reload the actual source contract')
   incoming=old.get('graph') if normalize else data['graph'];graph,missing=draft_graph(incoming,receipt)
   from .pygas_order import validate_order_change
@@ -250,9 +261,16 @@ def save(service,data,*,normalize=False):
   if not missing and not reasons:
    try:
     graph,bindings=snapshot_assets(graph,receipt,directory,assets(service,project,root),root,project)
-    result=run_json(environment['executables']['python'],SCIENTIFIC,'render_pygas',{'source_root':source['root'],'graph':graph,'catalog_files':receipt['source']['files'],'structure_path':str(directory/graph['settings']['atoms_path']),'input_sha256':{binding['name']:binding['sha256'] for binding in bindings}},process_env(environment),timeout=90)
+    if selected:
+     from .custom_cv_graph import module_snapshots
+     bindings.extend(module_snapshots(directory,selected))
+    result=run_json(environment['executables']['python'],SCIENTIFIC,'render_pygas',{'source_root':source['root'],'graph':graph,'catalog_files':receipt['source']['files'],'structure_path':str(directory/graph['settings']['atoms_path']),'input_sha256':{binding['name']:binding['sha256'] for binding in bindings},'private_custom_cvs':[item['approved_item']for item in selected]},process_env(environment),timeout=90)
     source_text=result['source'];graph=result['graph']
-    if catalog(source)['source']['files']!=receipt['source']['files']:raise ValueError('Source changed during graph rendering')
+    current=catalog(source)
+    if selected:
+     from .custom_cv_catalog import extend
+     current=extend(current,selected)
+    if current['source']['files']!=receipt['source']['files']:raise ValueError('Source changed during graph rendering')
    except (ValueError,RuntimeError,KeyError) as error:reasons.append(str(error))
   saved=pair.save(directory,graph,source_text,expected,repair=data.get('repair') is True,details={'missing_fields':missing,'reasons':reasons})
   for binding in bindings:
@@ -261,3 +279,34 @@ def save(service,data,*,normalize=False):
   report.update(files=[str(directory/name) for name in ('build_bias.py','workflow.json') if name in saved['files']],input_sha256={name:item['sha256'] for name,item in saved['files'].items()},io_bindings=bindings,plan=result.get('plan'),scope='Source-backed graph/source authoring only; artifact build, numerical and target checks not_run')
   if source_text and data.get('return_source'):report['source']=source_text
   return report
+
+
+def initialize(service,data):
+ """Human create-only empty CV graph; no bias choices, source rendering or build."""
+ allowed={'project_id','environment_id','source_id','workspace_id','expected','catalog_files','files'}
+ if set(data)-allowed or data.get('source_id')!='pygas':raise ValueError('Initialize only this owned conversation with its empty pair receipt')
+ expected=data.get('expected')
+ if expected!={'journal_sha256':None,'files':{}}:raise ValueError('An explicit empty graph/source pair receipt is required')
+ selected=data.get('files',[])
+ if not isinstance(selected,list)or len(selected)>256 or any(not isinstance(v,str)or not v or len(v)>4096 or any(ord(c)<32 for c in v)for v in selected):raise ValueError('Bounded exact current workflow files required')
+ project,environment,source,root=context(service,data)
+ directory=location(root,{'workspace_id':data.get('workspace_id')})
+ with service.store.lock:
+  pair=CompositionStore(root,service.store.lock);state=pair.read(directory)
+  if state['status']!='new'or identity(state)!=expected or directory.exists():raise ValueError('Composition directory or saved inputs already exist; reload the current graph instead of initializing')
+  receipt=catalog(source)
+  if data.get('catalog_files')!=receipt['source']['files']:raise ValueError('Catalog changed; reload the actual source contract')
+  available=assets(service,project,root)
+  candidates={a['path']for a in available if a.get('kind')=='structure'and a['path']in selected}
+  if len(candidates)>1:raise ValueError('Select one explicit structure before initializing the graph')
+  settings={}
+  if candidates:
+   path=resolve_input(next(iter(candidates)),directory,available,root,project)
+   actual=digest(path);recorded=next(a for a in available if a['path']==str(path))
+   if recorded.get('sha256')!=actual:raise ValueError('Selected structure differs from its registered hash; reimport it')
+   settings['atoms_path']=path.as_posix()
+  graph={'version':2,'parameter_format':'structured-v1','mode':'cvonly','nodes':[],'edges':[],'settings':settings,'metadata':{'studio_initialization':{'origin':'human_empty_cv_graph','scope':'Empty CV-only draft; choose graph mode and actual library nodes explicitly. No bias family or scientific parameters inferred.'}}}
+  # Exclusive directory creation claims a previously absent pair. Failed or
+  # interrupted initialization remains visible and is never silently retried.
+  directory.mkdir(parents=True,exist_ok=False)
+  return save(service,{**data,'path':str(directory/'workflow.json'),'graph':graph})

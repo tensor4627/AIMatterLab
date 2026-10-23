@@ -161,6 +161,23 @@ def dispatch(service, method, path, data, admin=False):
         return service.register_project(data) if path.endswith("projects") else service.register_environment(data)
     if method != "POST":
         raise ValueError("Unknown route")
+    if path.startswith('/api/custom-cv/'):
+        if not admin:raise PermissionError('Custom CV approval, sharing and CPU checks require the desktop user')
+        from .custom_cv_graph import controller,attach
+        action=path.removeprefix('/api/custom-cv/')
+        if action=='access'and not service.store.list('private-cv-lineage'):return {'blocked_project_ids':[],'blocked_run_ids':[],'blocked_paths':[],'bindings':[]}
+        custom=controller(service)
+        if action=='read':return custom.read(data)
+        if action=='save':return custom.save(data)
+        if action in ('approve-formula','approve-code','sharing'):return custom.action(action,data)
+        if action=='validate':return custom.validate(data)
+        if action=='status':return custom.status(data)
+        if action=='reuse':return custom.reuse(data)
+        if action=='provider-read':return custom.provider_status(data,body=True)
+        if action=='provider-status':return custom.provider_status(data)
+        if action=='attach':return attach(service,data)
+        if action=='access':return custom.access(data.get('provider'))
+        raise ValueError('Unknown private CV action')
     if path=="/api/engine/describe":
         from .engine_contracts import describe
         return describe(data["engine"])
@@ -189,9 +206,10 @@ def dispatch(service, method, path, data, admin=False):
         selected={kind:[item for item in entries if item['name'] in names] for kind,entries in result['catalog'].items()}
         if set(names)!={item['name'] for entries in selected.values() for item in entries}:raise ValueError('Unknown registered class')
         return {**result,'catalog':selected}
-    if path in ('/api/pygas/composition/read','/api/pygas/composition/save','/api/pygas/composition/normalize'):
+    if path in ('/api/pygas/composition/read','/api/pygas/composition/save','/api/pygas/composition/normalize','/api/pygas/composition/initialize'):
         if not admin:raise PermissionError('Desktop conversation binding required; Agent uses render_pygas_workflow with its workspace_id and current hashes')
-        from .pygas_composition import response,save
+        from .pygas_composition import response,save,initialize
+        if path.endswith('initialize'):return initialize(service,data)
         return response(service,data) if path.endswith('read') else save(service,data,normalize=path.endswith('normalize'))
     if path=="/api/source-project/inspect":
         from .source_projects import inspect_source
@@ -265,6 +283,10 @@ def dispatch(service, method, path, data, admin=False):
         if not admin:
             raise PermissionError("Only the desktop user can revise reviewed inputs")
         return service.revise(data["run_id"], data["spec"], data.get("edits", {}))
+    if path == "/api/run/environment-identity":
+        if not admin:raise PermissionError("Only the desktop human review can read immutable run environment identity")
+        from .run_environment_identity import run_environment_identity
+        return run_environment_identity(store,data)
     if path == "/api/run/input":
         return service.input_file(data["run_id"], data["name"])
     if path in ("/api/run/submit", "/api/run/validate") and not admin:
@@ -290,6 +312,9 @@ def dispatch(service, method, path, data, admin=False):
                                data.get("kind", "dataset"), data.get("frame", 0))
     if path == "/api/templates/bias":
         raise ValueError("Legacy native-code bias template retired; compose the actual registered pyGAS library graph with render_pygas_workflow")
+    if path == "/api/workspace/materialize" and method == "POST":
+        from .workspace_materialize import materialize_input
+        return materialize_input(service,data,admin)
     if path in ("/api/workspace/read","/api/workspace/write"):
         from .workspace_io import read_input,write_input
         return read_input(service,data) if path.endswith('read') else write_input(service,data,admin)

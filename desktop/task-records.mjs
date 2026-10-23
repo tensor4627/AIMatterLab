@@ -11,7 +11,7 @@ export class TaskRecords{
  tasks(){return this.catalog.list?.('agent-task')||[...this.cache.values()];}
  read(id){if(typeof id!=='string'||!id||id.length>200)throw Error('Invalid task ID');const value=this.catalog.get('agent-task',id);if(!value)throw Error('Unknown task');return structuredClone(value);}
  conversation(provider,threadId){if(!['codex','kimi','qwen','deepseek'].includes(provider)||typeof threadId!=='string'||!threadId||threadId.length>200)throw Error('Invalid conversation');return this.catalog.get('conversation',provider+':'+threadId);}
- deleted(provider,threadId){return !!this.catalog.get('deleted-conversation',provider+':'+threadId);}
+ deleted(provider,threadId){return !!(this.catalog.get('deleted-conversation',provider+':'+threadId)||this.catalog.get('retired-conversation-context',provider+':'+threadId));}
  remove(id){
   if(typeof id!=='string'||!id||id.length>210)throw Error('Invalid conversation');
   const previous=this.catalog.get('deleted-conversation',id);if(previous)return {id,provider:previous.provider,threadId:previous.threadId,taskIds:previous.taskIds};

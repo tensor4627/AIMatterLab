@@ -5,3 +5,24 @@ test('All four agent connections have independent provider-bound credentials and
 test('Base endpoint never authorizes scoped local readers; no path/query/origin/host bypass',()=>{const s=new McpProviderScopes(),b=base(),c=s.connection('codex',b);assert.equal(s.authenticate({pathname:'/mcp',authorization:'Bearer '+b.tokens.mcp,host:'127.0.0.1:32123'}).localReaders,false);assert.equal(s.authenticate({pathname:'/mcp',authorization:'Bearer '+c.tokens.mcp,host:'127.0.0.1:32123'}),null);for(const pathname of ['/providers/codex/mcp?provider=qwen','/providers/codex/../qwen/mcp','/providers/%63odex/mcp','//providers/codex/mcp','http://127.0.0.1:32123/providers/codex/mcp'])assert.equal(auth(s,c,'codex',{pathname}),null);assert.equal(auth(s,c,'codex',{origin:'https://untrusted.invalid'}),null);assert.equal(auth(s,c,'codex',{host:'untrusted.invalid:32123'}),null);});
 test('Connection/provider lifecycle revocation invalidates old child credentials without touching another provider',()=>{const s=new McpProviderScopes(),b=base(),a=s.connection('codex',b),q=s.connection('qwen',b);s.revoke('codex');assert.equal(auth(s,a,'codex'),null);assert.equal(auth(s,q,'qwen').provider,'qwen');const again=s.connection('codex',b);assert.notEqual(again.tokens.mcp,a.tokens.mcp);assert.equal(auth(s,a,'codex'),null);s.bind({...b,tokens:{mcp:'new-upstream-worker-generation'}});assert.equal(auth(s,again,'codex'),null);assert.equal(auth(s,q,'qwen'),null);s.revokeAll();assert.equal(auth(s,again,'codex'),null);});
 test('No nonlocal or caller-selected provider can issue a scope',()=>{const s=new McpProviderScopes();for(const provider of ['claude','Codex','../codex',''])assert.throws(()=>s.connection(provider,base()));for(const url of ['https://127.0.0.1:32123','http://example.invalid:32123','http://127.0.0.1:32123/mcp','http://user:pass@127.0.0.1:32123','http://127.0.0.1:32123/?x=1'])assert.throws(()=>s.connection('codex',{...base(),url}));assert.throws(()=>s.connection('codex',null));});
+
+const context=(threadId='thread-a',extra={})=>({threadId,taskId:null,projectId:null,environmentId:null,inputRoot:null,...extra});
+test('Trusted initial fills retain only the token, invalidating authenticated in-flight snapshots',()=>{
+ const s=new McpProviderScopes(),b=base(),c=s.connection('codex',b),blank=auth(s,c,'codex');
+ const first=s.bindContext('codex',context(),{allowInitialFill:true});assert.equal(first.rotated,false);assert.equal(s.connection('codex',b).tokens.mcp,c.tokens.mcp);assert.equal(blank.checkCurrent(),false);
+ const started=auth(s,c,'codex');assert.equal(started.threadId,'thread-a');assert.equal(started.checkCurrent(),true);
+ s.bindContext('codex',context('thread-a',{taskId:'task-a',projectId:'project-a',environmentId:'env-a',inputRoot:'/owned/a'}),{allowInitialFill:true});assert.equal(started.checkCurrent(),false);assert.equal(s.connection('codex',b).tokens.mcp,c.tokens.mcp);assert.equal(auth(s,c,'codex').taskId,'task-a');
+});
+for(const key of ['threadId','taskId','projectId','environmentId','inputRoot'])test('Changing already-bound '+key+' revokes the exact lease despite an initial-fill flag',()=>{
+ const s=new McpProviderScopes(),b=base();s.connection('codex',b);const old=context('thread-a',{taskId:'task-a',projectId:'project-a',environmentId:'env-a',inputRoot:'/owned/a'});s.bindContext('codex',old);const c=s.connection('codex',b),snap=auth(s,c,'codex'),other=s.connection('kimi',b);
+ const result=s.bindContext('codex',{...old,[key]:key==='inputRoot'?'/owned/b':'changed'},{allowInitialFill:true});assert.equal(result.rotated,true);assert.equal(auth(s,c,'codex'),null);assert.equal(snap.checkCurrent(),false);assert.equal(auth(s,other,'kimi').checkCurrent(),true);assert.notEqual(s.connection('codex',b).tokens.mcp,c.tokens.mcp);
+});
+test('Nonpristine null fills and clearing a bound context require fresh leases',()=>{
+ const s=new McpProviderScopes(),b=base();const c=s.connection('deepseek',b);s.bindContext('deepseek',context());assert.equal(auth(s,c,'deepseek'),null);const d=s.connection('deepseek',b);s.bindContext('deepseek',{});assert.equal(auth(s,d,'deepseek'),null);
+});
+test('No stale authenticated scope revives after revoke, identical rebinding or worker restart',()=>{
+ const s=new McpProviderScopes(),b=base(),c=s.connection('qwen',b),a=auth(s,c,'qwen'),admin=s.authenticate({pathname:'/mcp',authorization:'Bearer '+b.tokens.mcp,host:'127.0.0.1:32123'});s.revoke('qwen');s.connection('qwen',b);assert.equal(a.checkCurrent(),false);s.revokeAll();s.bind(b);assert.equal(admin.checkCurrent(),false);
+});
+test('Context rejects malformed/unknown identity values instead of trusting model flags',()=>{
+ const s=new McpProviderScopes(),b=base();s.connection('codex',b);for(const value of [{threadId:42},{threadId:''},{threadId:'a\nb'},{pristine:true},[],null])assert.throws(()=>s.bindContext('codex',value));assert.throws(()=>s.bindContext('codex',{}, {allowInitialFill:'yes'}));
+});

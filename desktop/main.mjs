@@ -1,3 +1,16 @@
+import {registerTaskStage} from './task-stage-ipc.mjs';
+import {localReviewDialog} from './local-review-dialog.mjs';
+import {registerCalculationReview} from './task-consumer-ipc.mjs';
+import {consumerReviewDialog} from './consumer-review-dialog.mjs';
+import {ensureDefinitionContext} from './private-conversation-context.mjs';
+import {definitionReply} from './private-definition-scope.mjs';
+import {scientificToolReadiness} from './scientific-tool-readiness.mjs';
+import {createAgentWorkflowContext} from './agent-workflow-context.mjs';
+import {currentPrivateTurn} from './private-task-context.mjs';
+import {createPrivateCvAccess,composeToolGuards} from './private-cv-access.mjs';
+import {createTaskCustomCv} from './task-custom-cv.mjs';
+import {currentPairTool,readCurrentPair} from './current-pair-tool.mjs';
+import {importTaskAsset} from './task-asset-import.mjs';
 import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -8,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import {ensureTaskAuthoring} from './task-authoring.mjs';
 import {readTaskInput} from './task-input-preview.mjs';
-import {readTaskPygas,saveTaskPygas,compositionToolGuard} from './task-pygas.mjs';
+import {readTaskPygas,saveTaskPygas,initializeTaskPygas,bindComposition,compositionToolGuard} from './task-pygas.mjs';
 import {visibleUserText} from '../shared/tool-activity.mjs';
 import {ScientificSkills,validateScientificConsent} from './scientific-skills.mjs';
 import {deliverScientificTurn} from './scientific-turn.mjs';
@@ -28,7 +41,7 @@ import {validatePlan} from '../shared/workflows.mjs';
 import {AgentHub,loginUrl} from './agent-hub.mjs';
 import {CredentialVault,providerId} from './providers.mjs';
 import { WorkerClient } from './worker.mjs';
-import { assertRpc, linuxPath, sshAlias, quoteShell } from './security.mjs';
+import { assertRpc, assertRendererWorkerRoute, linuxPath, sshAlias, quoteShell } from './security.mjs';
 
 const exec = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -47,9 +60,9 @@ else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',im
 let window, catalog, settings, agents,taskRecords,materials;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
-let scientificSkills;
+let scientificSkills,privateAccess,customCv,workflowContext,localReview;
 const activeAuthoringTasks=new Map();
-const codex = new CodexBridge(), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
+const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
   sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
@@ -67,8 +80,9 @@ function findAgent(provider) {
 }
 function emit(channel,data) { if (window && !window.isDestroyed()) window.webContents.send(channel,data); }
 codex.on('event', event => {
+  if(event.method==='studio/codexDisconnected'&&agents?.isContextTransition?.('codex'))return;
   const tagged={...event,provider:'codex'};taskRecords?.event(tagged);emit('studio:event',tagged);
-  if(event.method==='thread/started' && event.params?.thread&&!catalog.get('deleted-conversation','codex:'+event.params.thread.id))
+  if(event.method==='thread/started' && event.params?.thread&&!taskRecords?.deleted('codex',event.params.thread.id))
     catalog.put('thread',event.params.thread.id,event.params.thread);
 });
 codex.on('diagnostic', data => emit('studio:event',{ method:'studio/diagnostic',params:{text:data} }));
@@ -76,7 +90,7 @@ function trusted(event) {
   if(!window || event.sender.id!==window.webContents.id || event.senderFrame?.parent ||
       event.senderFrame?.url!==window.webContents.getURL()) throw new Error('Untrusted IPC sender');
 }
-function handle(name, fn) { ipcMain.handle('studio:'+name,async(event,data) => { if(shuttingDown||!window||window.isDestroyed()||window.webContents.isDestroyed()||event.sender.isDestroyed())return null;trusted(event); try{return await fn(data||{});}catch(error){if(shuttingDown)return null;throw error;} }); }
+function handle(name, fn) { ipcMain.handle('studio:'+name,async(event,data) => { if(shuttingDown||!window||window.isDestroyed()||window.webContents.isDestroyed()||event.sender.isDestroyed())return null;trusted(event); try{return await fn(data||{},event);}catch(error){if(shuttingDown)return null;throw error;} }); }
 function openUrl(url) {
   const parsed = new URL(url);
   if(parsed.protocol !== 'https:' || !['chatgpt.com','auth.openai.com','login.openai.com'].includes(parsed.hostname))
@@ -95,9 +109,25 @@ if(installationVerifying){
  const sourceIds=config.desktop.source_ids??[];if(!Array.isArray(sourceIds)||sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id)))throw Error('Invalid installation source summary scope');
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
-agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider),releaseWorker:provider=>worker.revokeProvider(provider)});
+agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider),releaseWorker:provider=>worker.revokeProvider(provider),bindWorkerContext:(provider,context,options)=>worker.bindProviderContext(provider,context,options)});
 scientificSkills=new ScientificSkills({map:JSON.parse(fs.readFileSync(path.join(here,'scientific-skill-map.json'),'utf8')),bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,settings:()=>settings});
-worker.setScopedTools(scientificSkills.tools(),(name,args,scope)=>scientificSkills.call(name,args,scope));
+const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(here,'custom-cv-tool-schema.json'),'utf8'))};
+const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
+worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader],async(name,args,scope)=>{
+ if(['read_pygas_workflow','propose_custom_cv','read_custom_cv'].includes(name))workflowContext.assertScope(scope);
+ if(name==='read_pygas_workflow'){const result=await readCurrentPair({records:taskRecords,worker,activeTasks:activeAuthoringTasks,readTaskPygas,privateAccess:(task,provider)=>privateAccess.assertTask(task,provider)},args,scope);workflowContext.assertScope(scope);return result;}
+ if(name==='propose_custom_cv'){const task=workflowContext.assertScope(scope);await privateAccess.assertTask(task,scope.provider);workflowContext.assertScope(scope);const result=await customCv.proposeDraft(args,scope);workflowContext.assertScope(scope);return result;}
+ if(name==='read_custom_cv'){
+  const task=workflowContext.assertScope(scope),id=task.id;
+  if(args.workspace_id!==id||!task.customCv?.id)throw Error('Read only the selected private definition in this active conversation');
+  await privateAccess.assertTask(task,scope.provider);workflowContext.assertScope(scope);
+  const result=await worker.request('POST','/api/custom-cv/provider-read',{workspace_id:id,project_id:task.authoring.projectId,environment_id:task.authoring.environmentId,id:task.customCv.id,provider:scope.provider});
+  const latest=workflowContext.assertScope(scope);await privateAccess.assertTask(latest,scope.provider);workflowContext.assertScope(scope);
+  const permission=await worker.request('POST','/api/custom-cv/provider-status',{workspace_id:id,project_id:latest.authoring.projectId,environment_id:latest.authoring.environmentId,id:task.customCv.id,provider:scope.provider});
+  workflowContext.assertScope(scope);if(!permission.allowed||JSON.stringify(permission.expected)!==JSON.stringify(result.entry?.expected))throw Error('Private definition sharing or revision changed before the reply');return definitionReply(result,workflowContext.assertScope(scope));
+ }
+ return scientificSkills.call(name,args,scope);
+});
 materials=new MaterialsProject({root:path.join(app.getPath('userData'),'credentials'),encryption:safeStorage,fetchApi:(...a)=>net.fetch(...a),worker});
 worker.setLocalTools(materials.tools(),(name,args)=>materials.call(name,args));
 handle('materials.status',()=>materials.status());
@@ -105,24 +135,46 @@ handle('materials.key',({apiKey,remove=false})=>remove?materials.clear():materia
 handle('materials.search',({query})=>materials.search(query));
 handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
-worker.setAuthoringGuard(compositionToolGuard(taskRecords,activeAuthoringTasks));
+workflowContext=createAgentWorkflowContext({records:taskRecords,activeTasks:activeAuthoringTasks,selectedProvider:()=>agents.active});
+registerTaskStage({handle,records:taskRecords,worker,current:()=>workflowContext.current(),assertHuman:event=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;}});
+localReview=registerCalculationReview({handle,records:taskRecords,worker,current:()=>workflowContext.current(),
+ assertHuman:event=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},
+ receiptStore:{get:id=>catalog.get('local-input-review',id),put:(id,value)=>catalog.put('local-input-review',id,value)},
+ consumerReceiptStore:{get:id=>catalog.get('local-consumer-input-review',id),put:(id,value)=>catalog.put('local-consumer-input-review',id,value)},
+ targetReceiptStore:{get:id=>catalog.get('local-consumer-target-review',id),put:(id,value)=>catalog.put('local-consumer-target-review',id,value)},
+ confirmTarget:async(scope,event)=>{trusted(event);const result=await dialog.showMessageBox(window,consumerReviewDialog(scope,settings.language));trusted(event);return result.response===1;},
+ confirm:async(scope,event)=>{trusted(event);const result=await dialog.showMessageBox(window,(scope.kind==='consumer-science-native-scope-v1'?consumerReviewDialog(scope,settings.language):localReviewDialog(scope,settings.language)));trusted(event);return result.response===1;}
+});
+
+privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:activeAuthoringTasks});
+worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
+customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.active||settings.agentProvider||'codex',getActiveTaskId:provider=>activeAuthoringTasks.get(provider),assertProvider:context=>{workflowContext.assertScope(context);return providerId(context.provider);},assertHuman:event=>{trusted(event);return true;},access:()=>true,
+ validateRuntimeReceipt:async(runtime,context)=>{const current=await worker.request('POST','/api/runtime-guide',{environment_id:context.args.environment_id,engine:'pygas.build'});return current.status==='observed'&&runtime.status==='observed'&&current.receipt===runtime.receipt_sha256;},
+ confirmNumericScope:async({scope,task,structure},event)=>{
+  trusted(event);const reference=scope.reference||{};const detail=['流程：'+task.name,'流程 ID：'+task.id,'本次数值范围 SHA256：'+scope.sha256,'项目：'+scope.project_id,'环境：'+scope.environment_id,'解释器：'+scope.interpreter,'范围：CPU，最多60秒，每文件最多8MiB；仅保存后的CV primitive检查','有限差分原子：'+scope.fd_atom_indices.join(', '),'结构：'+(structure?.name||'')+' · '+scope.bindings.structure_sha256,'公式：'+scope.bindings.spec_sha256,'代码：'+scope.bindings.code_sha256,'参数：'+scope.bindings.parameters_sha256,'运行时收据：'+scope.bindings.runtime_receipt_sha256,'参考方法：'+scope.reference_kind,reference.cv?'本次明确采用的外部参考 CV：'+JSON.stringify(reference.cv):'',reference.provenance?'参考方法与来源声明：'+JSON.stringify(reference.provenance):'','外部参考方法声明本身未被自动审计；此处确认采用这些确切数值和方法。','这次不会运行MD、构建完整bias、安装软件或扩大项目授权。稳态相判别和实际消费引擎验证另行进行。'].filter(Boolean).join('\n');
+  const result=await dialog.showMessageBox(window,{type:'question',title:'运行这一次自定义 CV 数值检查？',message:'确认当前公式、代码、参数与结构的有界 CPU 检查',detail,buttons:['取消','运行这一次检查'],defaultId:0,cancelId:0,noLink:true});trusted(event);return result.response===1;
+ },bindComposition:(records,id,result)=>bindComposition(records,id,result,undefined,'human')
+});
+for(const action of ['read','saveSpec','approveFormula','approveCode','sharing','validate','status','attach','reuse'])handle('customCv.'+action,(value,event)=>customCv.dispatch(action,value,event));
+handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,{title:'选择当前流程的一个计算输入文件',properties:['openFile'],filters:[{name:'计算输入与结构',extensions:['xyz','extxyz','cif','pdb','vasp','json','py','txt','in','yaml','yml','toml','dat','pt','pt2','pth','ckpt']}]});return result.canceled?null:result.filePaths[0];}},value);});
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>taskRecords.create(value));
-handle('task.deployment.save',value=>saveDeployment(taskRecords,value));
-handle('task.deployment.prepare',value=>prepareDeployment(taskRecords,worker,value));
+handle('task.deployment.save',value=>saveDeployment(taskRecords,value,localReview));
+handle('task.deployment.prepare',value=>prepareDeployment(taskRecords,worker,value,localReview));
 handle('task.list',()=>catalog.list('agent-task'));
 handle('task.read',({id})=>taskRecords.read(id));
 handle('task.input.read',value=>readTaskInput(taskRecords,worker,value));
 handle('task.pygas.read',value=>readTaskPygas(taskRecords,worker,value));
+handle('task.pygas.initialize',value=>initializeTaskPygas(taskRecords,worker,value,()=>workflowContext.current()));
 handle('task.pygas.save',value=>saveTaskPygas(taskRecords,worker,value));
 handle('task.pygas.normalize',value=>saveTaskPygas(taskRecords,worker,value,true));
 handle('task.edit',value=>taskRecords.edit(value));
-handle('task.execute',value=>executeTask(taskRecords,worker,value));
+handle('task.execute',value=>executeTask(taskRecords,worker,value,localReview));
 handle('task.linkRun',async({taskId,runId,kind,expectedPrepared})=>{if(!['run','cluster-run'].includes(kind)||typeof runId!=='string')throw Error('Invalid run reference');const run=await worker.request('POST',kind==='run'?'/api/run/status':'/api/cluster/status',{run_id:runId});return taskRecords.linkRun(taskId,run,expectedPrepared);});
-handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
+handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);workflowContext.clear(result.provider);agents.disconnect(result.provider);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));
-handle('conversation.select',({id})=>{if(typeof id!=='string')throw Error('Invalid conversation');const conversation=catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');return {...conversation,task:conversation.taskId?taskRecords.read(conversation.taskId):null};});
+handle('conversation.select',async({id})=>{if(typeof id!=='string')throw Error('Invalid conversation');const conversation=catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');assertIdleAgent();if(agents.active!==conversation.provider){workflowContext.clear(agents.active);agents.disconnect(agents.active);}const ticket=workflowContext.begin(conversation.provider,conversation.threadId);await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));workflowContext.assert(ticket);return {...conversation,task:conversation.taskId?taskRecords.read(conversation.taskId):null};});
 handle('ssh.existing',()=>existingConnections(app.getPath('home')));
 handle('ssh.import',({ref})=>existingProfile(app.getPath('home'),ref));
 handle('cluster.download',async value=>{
@@ -164,6 +216,7 @@ handle('sources.diagnose',async()=>{const sources=scientificSources();return {so
 function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activeTurns?.size))throw Error('请先停止当前回复，再调整连接或上下文设置');}
 handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);await bindSources();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.request',async({method,target,data}) => {
+  assertRendererWorkerRoute(method,target);
   const result=await worker.request(method,target,data);
   if(method==='GET' && ['/api/projects','/api/environments'].includes(target))
     for(const item of result) catalog.put(target.split('/').at(-1),item.id,item);
@@ -176,18 +229,7 @@ handle('codex.configure',async({preferences={},threadId,model}) => {
   settings=catalog.put('settings','main',{...settings,agent:preferences});
   return agents.configure('codex',preferences,threadId,model);
 });
-handle('codex.rpc',async({method,params={}}) => {
-  assertRpc(method);if(params.threadId&&taskRecords.deleted('codex',params.threadId))throw Error('Conversation was deleted');
-  if(['thread/start','thread/resume'].includes(method)) params={...params,cwd:settings.cwd,
-    approvalPolicy:'on-request',sandbox:'read-only',config:{...params.config,...agentConfig(settings.agent)},
-    developerInstructions:STUDIO_INSTRUCTIONS};
-  const result=await codex.request(method,params);
-  if(params.threadId&&taskRecords.deleted('codex',params.threadId))throw Error('Conversation was deleted');
-  if(method==='thread/list'&&result.data)result.data=result.data.filter(t=>!taskRecords.deleted('codex',t.id));
-  if(['thread/start','thread/resume'].includes(method) && result.thread) catalog.put('thread',result.thread.id,result.thread);
-  if(method==='account/login/start' && result.authUrl) await openUrl(result.authUrl);
-  return result;
-});
+handle('codex.rpc',value=>agentRpc({...value,provider:'codex'}));
 handle('workflow.list',()=>catalog.list('workflow-plan'));
 handle('workflow.save',value=>{
  const plan=validatePlan(value),id=value.id;
@@ -195,15 +237,7 @@ handle('workflow.save',value=>{
  const key=id||randomUUID();return catalog.put('workflow-plan',key,{...plan,id:key,status:'draft',updatedAt:Date.now()});
 });
 async function scientificTools(provider){
- if(!worker.connection)return {status:'blocked',count:0,message:'作业服务未连接；可以聊天，计算流程暂不能生成'};
- try{
-  const status=await worker.probeTools();
-  if(provider==='codex'){
-   const inventory=await codex.request('mcpServerStatus/list',{serverName:'gpusampling'},15000),server=inventory.data?.find(v=>v.name==='gpusampling');
-   if(!server?.tools?.present_task)throw Error('Agent 尚未挂载科学工具，请重新连接');
-  }
-  return status;
- }catch(error){return {status:'blocked',count:0,message:error.message,checkedAt:Date.now()};}
+ return scientificToolReadiness({worker,codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:()=>agents.active},provider);
 }
 handle('agent.connect',async({provider,repairTools=false})=>{
  providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');
@@ -216,49 +250,72 @@ handle('agent.connect',async({provider,repairTools=false})=>{
  return {...info,tools};
 });
 handle('agent.tools',async({provider})=>{providerId(provider);return scientificTools(provider);});
-handle('agent.disconnect',({provider})=>{providerId(provider);agents.disconnect(provider);return {};});
+handle('agent.disconnect',({provider})=>{providerId(provider);workflowContext.clear(provider);agents.disconnect(provider);return {};});
 handle('agent.account',({provider})=>agents.account(provider));
-handle('agent.rpc',async({provider,method,params={}})=>{
-  providerId(provider);assertRpc(method);
-  const {studioSkillId,studioTurnRequestId,...protocolParams}=params;params=protocolParams;
-  if(studioTurnRequestId!==undefined&&(typeof studioTurnRequestId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(studioTurnRequestId)))throw Error('Invalid turn request identity');
-  if(studioSkillId!==undefined&&(typeof studioSkillId!=='string'||!scientificSkills.router.routes.has(studioSkillId)))throw Error('Choose a listed scientific function');
-  let skillContext;const skillKey=provider+':'+params.threadId;
-  if(method==='turn/start'){
-   const text=visibleUserText(params.input||[]);const authoring=await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true});if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};const bound=taskRecords.bound(provider,params.threadId);
-   // Default-deny: only an explicit desktop setting enables content sharing.
-   skillContext=await scientificSkills.context.prepare(skillKey,provider,{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId});
-   if(bound?.parameters?.engine&&worker.connection){const environment_id=bound.deployment?.config?.environmentId||bound.authoring?.environmentId,engine=bound.parameters.engine;if(environment_id){const selection={environment_id,engine};let guide;try{guide=await worker.request('POST','/api/runtime-guide',selection);}catch{guide={status:'blocked',reason:'Selected runtime guide unavailable; use an exact selected-engine probe, not an automatic reinstall'};}skillContext=scientificSkills.context.mergeRuntime(skillKey,provider,skillContext,guide,selection);}}
-   if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
-
-
-   params=taskRecords.prepareTurn(provider,params);
-   const authoringTask=taskRecords.bound(provider,params.threadId);if(authoringTask)activeAuthoringTasks.set(provider,authoringTask.id);else activeAuthoringTasks.delete(provider);
-   params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSources())}]};
-   if(provider==='deepseek'){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
+async function agentRpc({provider,method,params={}}){
+ providerId(provider);assertRpc(method);
+ const {studioSkillId,studioTurnRequestId,...protocolParams}=params;params=protocolParams;
+ if(studioTurnRequestId!==undefined&&(typeof studioTurnRequestId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(studioTurnRequestId)))throw Error('Invalid turn request identity');
+ if(studioSkillId!==undefined&&(typeof studioSkillId!=='string'||!scientificSkills.router.routes.has(studioSkillId)))throw Error('Choose a listed scientific function');
+ if(method==='turn/steer'){
+  const task=taskRecords.bound(provider,params.threadId);
+  if(task&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');
+ }
+ let ticket,skillContext,skillKey;
+ const check=()=>{if(ticket)workflowContext.assert(ticket);};
+ const synchronize=async()=>{check();await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));check();};
+ if(['thread/start','thread/resume','turn/start'].includes(method)){
+  assertIdleAgent();ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId);await synchronize();
+ }
+ if(method==='turn/start'){
+  let task=taskRecords.bound(provider,params.threadId);
+  if(task){const access=await privateAccess.assertTask(task,provider);check();if(access.definitionOnly){
+   if(params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
+   const {planningMode,studioTaskId,reviewMode,...privateParams}=params;currentPrivateTurn(privateParams,task);
+   if(provider!=='codex')throw Error('Definition-only sharing requires an isolated fresh Codex context; this provider is not yet supported for private definitions');
+   const clean=await ensureDefinitionContext({records:taskRecords,workflowContext,agents,task,ticket,model:params.model,publish:event=>emit('studio:event',event)});ticket=clean.ticket;check();params={...params,threadId:clean.task.threadId};
+  }}
+ }
+ skillKey=provider+':'+params.threadId;
+ if(method==='turn/start'){
+  const before=taskRecords.bound(provider,params.threadId);let definitionOnly=!!before?.customCv?.id;if(before&&worker.connection){definitionOnly=(await privateAccess.assertTask(before,provider)).definitionOnly;check();}
+  if(definitionOnly&&params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
+  const text=visibleUserText(params.input||[]);
+  const authoring=definitionOnly?null:await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true});check();
+  if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};
+  const bound=taskRecords.bound(provider,params.threadId);if(bound){definitionOnly=(await privateAccess.assertTask(bound,provider)).definitionOnly;check();}
+  const privateReview=params.reviewMode===true;
+  params=taskRecords.prepareTurn(provider,params);check();
+  await synchronize();
+  if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview});
+  // Public software guidance is selected only for the actual current intent.
+  skillContext=await scientificSkills.context.prepare(skillKey,provider,definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId});check();
+  if(!definitionOnly&&bound?.parameters?.engine&&worker.connection){
+   const environment_id=bound.deployment?.config?.environmentId||bound.authoring?.environmentId,engine=bound.parameters.engine;
+   if(environment_id){const selection={environment_id,engine};let guide;try{guide=await worker.request('POST','/api/runtime-guide',selection);}catch{guide={status:'blocked',reason:'Selected runtime guide unavailable; use an exact selected-engine probe, not an automatic reinstall'};}check();skillContext=scientificSkills.context.mergeRuntime(skillKey,provider,skillContext,guide,selection);}
   }
-  if(method==='turn/start'){
-    const registeredRoots=studioSkillRoots();
-    const registered=localSkills(registeredRoots);
-    const input=[];
-    for(const item of params.input||[]){
-      if(item.type==='text')input.push(item);
-      else if(item.type==='skill'){
-        const context=await selectedSkillContext({selection:item,registered,registeredRoots,bundledRoot:bundledSkillRoot,
-          validatePrivateProfile:async value=>{
-            const validator=app.isPackaged?path.join(process.resourcesPath,'studio-tools','localize-skill.mjs'):path.join(root,'scripts','localize-skill.mjs');
-            return (await import(pathToFileURL(validator).href)).validateProfile(value);
-          }});
-        input.push({type:'text',text:context.text});
-      }else if(provider==='codex')input.push(item);
-      else throw Error('Unsupported input content');
-    }
-    params={...params,input};
+  if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
+  if(!definitionOnly)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSources())}]};
+  if(provider==='deepseek'){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
+  const registeredRoots=definitionOnly?[]:studioSkillRoots(),registered=definitionOnly?[]:localSkills(registeredRoots),input=[];
+  for(const item of params.input||[]){
+   if(item.type==='text')input.push(item);
+   else if(item.type==='skill'){
+    const context=await selectedSkillContext({selection:item,registered,registeredRoots,bundledRoot:bundledSkillRoot,validatePrivateProfile:async value=>{const validator=app.isPackaged?path.join(process.resourcesPath,'studio-tools','localize-skill.mjs'):path.join(root,'scripts','localize-skill.mjs');return (await import(pathToFileURL(validator).href)).validateProfile(value);}});check();
+    input.push({type:'text',text:context.text});
+   }else if(provider==='codex')input.push(item);else throw Error('Unsupported input content');
   }
-  let result;try{result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>agents.rpc(provider,method,params),emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);}catch(error){if(method==='turn/start')taskRecords.failedTurn(provider,params.threadId,error);throw error;}
-  if(provider==='codex'&&method==='account/login/start'&&result.authUrl)await openUrl(result.authUrl);
-  return result;
-});
+  params={...params,input};
+ }
+ let result;
+ try{check();result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{check();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
+ catch(error){if(method==='turn/start'){try{check();taskRecords.failedTurn(provider,params.threadId,error);}catch{}}throw error;}
+ if(method==='thread/start'){if(!result.thread?.id)throw Error('The server did not return a real conversation');workflowContext.started(ticket,result.thread.id);await synchronize();}
+ if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)catalog.put('thread',result.thread.id,result.thread);
+ if(provider==='codex'&&method==='account/login/start'&&result.authUrl)await openUrl(result.authUrl);
+ return result;
+}
+handle('agent.rpc',agentRpc);
 handle('agent.respond',({provider,id,result})=>agents.respond(provider,id,result));
 handle('agent.configure',async({provider,preferences={},threadId,model})=>{
   assertIdleAgent();

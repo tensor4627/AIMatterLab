@@ -127,6 +127,15 @@ class Service(RuntimeServiceMixin):
                     raise ValueError("Idempotency key already used for a different request")
                 return previous
             command = Adapter(spec["engine"]).prepare(spec, environment)
+            from .private_lineage import propagate,check_producer,versions_for
+            selected_paths=[]
+            for input_name,input_source in spec['inputs'].items():
+                self.input_name(input_name);candidate=contained(input_source,roots)
+                if not candidate.is_file():raise ValueError('Input unavailable: '+input_name)
+                selected_paths.append(str(candidate))
+            check_producer(self,spec)
+            private_entries=propagate(self,selected_paths,project['id'])
+            private_versions=versions_for(self,selected_paths)
             identifier = secrets.token_hex(12)
             prefix = spec.get("directory_name", "")
             if prefix and (not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", prefix)):
@@ -153,7 +162,9 @@ class Service(RuntimeServiceMixin):
                 run = {**spec, "id": identifier, "name": spec.get("name", spec["engine"]),
                        "request_hash": request_hash, "status": "draft", "validation": {"status": "not_run"},
                        "directory": str(directory), "snapshots": snapshots, "command": command,
+                       **({"private_cv_entries":private_entries} if private_entries else {}),
                        **({"input_contract":input_contract} if input_contract is not None else {}),
+                       "private_cv_versions":private_versions,
                        "seed": spec.get("parameters",{}).get("seed"),
                        "seed_note": "See immutable engine inputs; unspecified RNG defaults are not inferred",
                        "created_at": time.time(), "updated_at": time.time(),

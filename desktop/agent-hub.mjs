@@ -7,14 +7,15 @@ import {AcpBridge} from './acp.mjs';
 import {providerId,prepareProfile,qwenCredentials,spawnCli,redact,CLI_VERSIONS} from './providers.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
 import {assertRpc} from './security.mjs';
+import {providerContext,MCP_CONTEXT_KEYS} from './mcp-provider-scope.mjs';
 export function loginUrl(provider,url){
  const target=new URL(url);const hosts=provider==='kimi'?['kimi.com','kimi.ai']:['chatgpt.com','auth.openai.com','login.openai.com'];
  if(target.protocol!=='https:'||target.username||target.password||!hosts.some(h=>target.hostname===h||provider==='kimi'&&target.hostname.endsWith('.'+h)))throw Error('Unsupported provider login URL');
  return target.href;
 }
 export class AgentHub extends EventEmitter{
- constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},fetchApi}){
-  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
+ constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,fetchApi}){
+  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bindWorkerContext=bindWorkerContext;this.contexts=new Map();this.contextGeneration=0;this.contextPending=0;this.contextQueue=Promise.resolve();this.pristineThreads=new Set();this.attemptedThreads=new Set();this.contextResume=new Map();this.pendingTurnDispatches=new Set();this.contextClosing=new Set();this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
   this.codex.on?.('event',event=>{
    if(event.method==='studio/codexDisconnected')this.release('codex');
    const thread=event.params?.threadId;
@@ -39,10 +40,52 @@ export class AgentHub extends EventEmitter{
   if(this.codex.process&&this.codex.contextKey&&this.codex.contextKey!==key){this.disconnect('codex');worker=this.workerFor('codex');}
   try{return await this.codex.start(executable,worker,config);}catch(error){this.release('codex');throw error;}
  }
+ isContextTransition(provider){return this.contextClosing.has(provider);}
+ closeForContext(provider){this.contextClosing.add(provider);try{this.disconnect(provider);}finally{this.contextClosing.delete(provider);}}
+ contextKey(provider,threadId){return provider+':'+threadId;}
+ assertContextIdle(){
+  if(this.pendingTurnDispatches.size||this.codex.activeTurns?.size||[...this.bridges.values()].some(b=>b.activeTurns?.size))throw Error('Stop the current reply before switching conversation context');
+ }
+ selectContext(provider,value={}){
+  providerId(provider);this.assertContextIdle();const context=providerContext(value);
+  if(typeof this.bindWorkerContext!=='function')throw Error('Trusted worker context binding is unavailable');
+  const previous=this.contexts.get(provider)||providerContext(),key=this.contextKey(provider,context.threadId);
+  const changed=MCP_CONTEXT_KEYS.some(k=>previous[k]!==context[k]);
+  const initialFill=changed&&context.threadId!==null&&this.pristineThreads.has(key)&&!this.attemptedThreads.has(key)&&MCP_CONTEXT_KEYS.every(k=>previous[k]===context[k]||previous[k]===null&&context[k]!==null);
+  const generation=++this.contextGeneration,wasConnected=!!(this.bridge(provider)?.process||this.bridge(provider)?.starting);
+  // Invalidate the old credential immediately, before waiting for any earlier connect.
+  const first=this.bindWorkerContext(provider,context,{allowInitialFill:initialFill});
+  this.contextPending=generation;
+  this.contexts.set(provider,context);
+  const current=()=>this.contextGeneration===generation&&this.contexts.get(provider)===context;
+  const work=this.contextQueue.catch(()=>{}).then(async()=>{
+   if(!current())throw Error('Conversation context selection was superseded');
+   let binding=first;
+   if(first.rotated&&wasConnected){
+    const bridge=this.bridge(provider),models=provider==='deepseek'?{models:[...(bridge.models||[])],model:bridge.model}:null;
+    this.closeForContext(provider); // close may revoke; only mint the new process lease after close.
+    binding=this.bindWorkerContext(provider,context,{allowInitialFill:false});
+    try{await this.connect(provider);}catch(error){if(current()){this.contextResume.delete(provider);this.emit('event',{provider,method:'studio/codexDisconnected',params:{reason:'Conversation context reconnection failed',message:error.message}});}throw error;}
+    if(!current()){this.closeForContext(provider);throw Error('Conversation context selection was superseded');}
+    if(models){bridge.models=models.models;bridge.model=models.model;}
+    if(context.threadId)this.contextResume.set(provider,context.threadId);else this.contextResume.delete(provider);
+   }else if(wasConnected&&!this.bridge(provider)?.process){
+    binding=this.bindWorkerContext(provider,context,{allowInitialFill:false});
+    try{await this.connect(provider);}catch(error){if(current()){this.contextResume.delete(provider);this.emit('event',{provider,method:'studio/codexDisconnected',params:{reason:'Conversation context reconnection failed',message:error.message}});}throw error;}
+    if(!current()){this.closeForContext(provider);throw Error('Conversation context selection was superseded');}
+    if(context.threadId)this.contextResume.set(provider,context.threadId);
+   }else if(changed&&!initialFill){
+    if(context.threadId)this.contextResume.set(provider,context.threadId);else this.contextResume.delete(provider);
+   }
+   if(!current())throw Error('Conversation context selection was superseded');
+   return {...binding,context,connected:!!this.bridge(provider)?.process};
+  });
+  const settled=work.finally(()=>{if(this.contextPending===generation)this.contextPending=0;});this.contextQueue=settled.catch(()=>{});return settled;
+ }
  preferences(provider){const settings=this.getSettings();return provider==='codex'?settings.agent||{}:settings.agentProviders?.[provider]||{};}
  path(provider){const settings=this.getSettings();return provider==='codex'?settings.codexPath:settings[provider+'Path'];}
  bridge(provider){return provider==='codex'?this.codex:this.bridges.get(provider);}
- deleted(provider,id){return !!this.catalog.get?.('deleted-conversation',provider+':'+id);}
+ deleted(provider,id){return !!(this.catalog.get?.('deleted-conversation',provider+':'+id)||this.catalog.get?.('retired-conversation-context',provider+':'+id));}
  forget(provider,id){const bridge=this.bridge(provider);bridge?.sessions?.delete(id);if(bridge?.current===id)bridge.current=null;if(provider==='codex'){this.blankThreads.delete(id);this.pendingBlankTurns.delete(id);this.readyThreads?.delete(id);this.codexOutput.delete(id);}}
  threads(provider){const saved=this.catalog.list('agent-thread').filter(t=>t.provider===provider&&!this.deleted(provider,t.id));return provider==='codex'?[...saved,...this.catalog.list('thread').filter(t=>!this.deleted(provider,t.id)&&!saved.some(s=>s.id===t.id)).map(t=>({...t,provider:'codex'}))]:saved;}
  remember(provider,thread){if(this.deleted(provider,thread.id))return;const value={...thread,provider};delete value.turns;this.catalog.put('agent-thread',provider+':'+thread.id,value);}
@@ -54,7 +97,7 @@ export class AgentHub extends EventEmitter{
   if(!bridge){
    bridge=provider==='deepseek'?new DeepSeekBridge({catalog:this.catalog,credential:()=>this.vault.get('deepseek'),worker:()=>this.bridgeWorkers.get(provider),...this.fetchApi?{fetchApi:this.fetchApi}:{}}):new AcpBridge(provider);
    bridge.on('event',event=>{
-    if(event.method==='studio/codexDisconnected')this.release(provider);
+    if(event.method==='studio/codexDisconnected'){this.release(provider);if(this.isContextTransition(provider))return;}
     if(event.method==='thread/started'||event.method==='studio/sessionInfo')this.remember(provider,event.params.thread);
     if(event.method==='turn/completed'&&event.params.turn?.status==='completed'&&event.params.turn?.stopReason==='end_turn'&&event.params.turn?.modelOutputReceived){this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{provider}});}
     this.emit('event',event);
@@ -82,8 +125,17 @@ export class AgentHub extends EventEmitter{
   return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan}:{},modelAccess:status.modelAccess||'not_run'};
  }
  async rpc(provider,method,params={}){
-  providerId(provider);assertRpc(method);if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');
+  providerId(provider);assertRpc(method);if(this.contextPending&&!['turn/interrupt','account/read'].includes(method))throw Error('Wait for conversation context selection to finish');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');
   const bridge=this.bridge(provider);if(!bridge?.process)throw Error('Connect '+provider+' first');
+  const generation=this.contextGeneration,selected=this.contexts.get(provider);
+  const assertSelected=()=>{if(generation!==this.contextGeneration||selected!==this.contexts.get(provider))throw Error('Conversation context selection was superseded');};
+  if(selected&&params.threadId&&selected.threadId!==params.threadId)throw Error('Select the trusted conversation context first');
+  if(selected?.threadId&&method==='thread/start')throw Error('Select an empty conversation context before starting a new thread');
+  const resume=this.contextResume.get(provider);
+  if(resume&&!['thread/start','thread/resume','thread/list','account/read','turn/interrupt'].includes(method)){
+   await this.rpc(provider,'thread/resume',{threadId:resume,model:params.model});assertSelected();
+  }
+
   if(provider==='codex'&&['thread/start','thread/resume'].includes(method))params={...params,cwd:this.getSettings().cwd,approvalPolicy:'on-request',sandbox:'read-only',config:{...params.config,...agentConfig(this.preferences('codex'))},developerInstructions:STUDIO_INSTRUCTIONS};
   if(provider!=='codex'&&method==='account/read')return {...await this.account(provider),transportConnected:true};
   if(provider!=='codex'&&method==='thread/list')return {data:this.threads(provider)};
@@ -104,16 +156,20 @@ export class AgentHub extends EventEmitter{
    if(blank&&method==='thread/resume')return structuredClone(blank);
    if(blank&&method==='thread/read')return {thread:structuredClone(blank.thread)};
    if(method==='turn/start'&&!this.readyThreads.has(params.threadId)){
-    await this.rpc(provider,'thread/resume',{threadId:params.threadId,model:params.model});
+    await this.rpc(provider,'thread/resume',{threadId:params.threadId,model:params.model});assertSelected();
    }
   }
   const blankStart=provider==='codex'&&method==='turn/start'&&this.blankThreads.has(params.threadId);
   if(blankStart){if(this.pendingBlankTurns.has(params.threadId))throw Error('首条回复尚未确认，请等待服务回报');this.pendingBlankTurns.add(params.threadId);}
-  let result;try{result=await bridge.request(method,params);}catch(error){
+  const attemptedKey=params.threadId?this.contextKey(provider,params.threadId):null;
+  if(method==='turn/start'){this.pristineThreads.delete(attemptedKey);this.attemptedThreads.add(attemptedKey);this.pendingTurnDispatches.add(attemptedKey);}
+  let result;try{assertSelected();result=await bridge.request(method,params);assertSelected();}catch(error){
    if(blankStart){this.pendingBlankTurns.delete(params.threadId);if(error.rpcResponse!==true)this.blankThreads.delete(params.threadId);}
    if(provider==='codex'&&method==='thread/resume'&&/no rollout found for thread/i.test(error.message))throw Error('此空会话尚未保存，当前进程无法恢复。请新建会话；已有计算记录保留。',{cause:error});
    throw error;
-  }
+  }finally{if(method==='turn/start')this.pendingTurnDispatches.delete(attemptedKey);}
+  if(method==='thread/start'&&result.thread){const key=this.contextKey(provider,result.thread.id);if(!result.thread.turns?.length&&!this.attemptedThreads.has(key))this.pristineThreads.add(key);}
+  if(method==='thread/resume'&&result.thread?.id===this.contextResume.get(provider))this.contextResume.delete(provider);
   if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');
   if(method==='thread/list'&&result.data)result={...result,data:result.data.filter(t=>!this.deleted(provider,t.id))};
   if(provider==='codex'&&method==='turn/start'){this.pendingBlankTurns.delete(params.threadId);this.blankThreads.delete(params.threadId);}
@@ -170,5 +226,5 @@ export class AgentHub extends EventEmitter{
   const config=agentConfig(preferences);this.disconnect('codex');await this.startCodex(config);
   if(!threadId)return {configured:true};return this.rpc('codex','thread/resume',{threadId,model});
  }
- close(){this.cancelLogin();this.disconnect('codex');for(const provider of this.bridges.keys())this.disconnect(provider);}
+ close(){++this.contextGeneration;this.contextPending=0;this.contexts.clear();this.contextResume.clear();this.cancelLogin();this.disconnect('codex');for(const provider of this.bridges.keys())this.disconnect(provider);}
 }

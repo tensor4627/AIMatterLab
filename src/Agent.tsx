@@ -46,6 +46,13 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
   return window.studio?.onEvent(event=>{
    if((event.provider||'codex')!==providerRef.current)return;
    if(event.method==='studio/skillsLoaded'){const call=modelCallRef.current,p=event.params||{};if(call&&p.requestId===call.requestId&&p.threadId===call.threadId&&p.threadId===threadRef.current&&(!p.turnId||!call.turnId||p.turnId===call.turnId))setAutoSkillStatus({...p,provider:event.provider||'codex'});return;}
+   if(event.method==='studio/conversationContextChanged'){
+    const p=event.params,c=p.conversation;if(threadRef.current!==p.oldThreadId)return;
+    threadRef.current=c.threadId;setThread(c.threadId);setWorkflowId(p.taskId);setTurn(null);setUsage(null);setRequests([]);setAutoSkillStatus(null);
+    setMessages(old=>old.filter(message=>message.role==='user').slice(-1));
+    const call=modelCallRef.current;if(call&&call.threadId===p.oldThreadId){call.threadId=c.threadId;call.turnId=null;call.output=false;setModelCall({...call});}
+    setThreads(old=>[{...c,id:c.threadId},...old.filter(row=>row.id!==p.oldThreadId&&row.id!==c.threadId)]);conversationRef.current?.(c);return;
+   }
    if(event.method==='studio/conversationDeleted'){setThreads(old=>old.filter(t=>t.id!==event.params.threadId));return;}
    if(event.method==='studio/toolsStatus'){setTools(event.params);return;}
    if(event.method==='studio/login'&&event.params?.phase==='completed'&&!loginRef.current)void connect();
