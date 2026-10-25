@@ -1,6 +1,17 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {DraftOutbox} from '../shared/draft-outbox.mjs';import {reviewState} from '../shared/review-state.mjs';
+import {DraftOutbox,workflowOutbox} from '../shared/draft-outbox.mjs';import {reviewState} from '../shared/review-state.mjs';
 function storage(){const values=new Map();return {getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};}
+test('A remounted workflow shares its in-flight acknowledgement without losing a newer edit',async()=>{
+ const local=storage(),oldView=workflowOutbox('same-task',local);let firstDone,secondDone;const saved=[];
+ oldView.stage('md.temperature',300);
+ const flight=oldView.flush(async changes=>{saved.push(changes['md.temperature']);await new Promise(resolve=>saved.length===1?firstDone=resolve:secondDone=resolve);return {id:'same-task',parameters:{md:{temperature:changes['md.temperature']}}};});
+ const reopened=workflowOutbox('same-task',local);assert.equal(reopened,oldView);reopened.stage('md.temperature',350);
+ assert.notEqual(workflowOutbox('other-task',local),reopened);assert.notEqual(workflowOutbox('same-task',storage()),reopened);
+ firstDone();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(reopened.pendingCount,1);assert.equal(workflowOutbox('same-task',local).apply({}).md.temperature,350);
+ assert.equal(new DraftOutbox('same-task',local).apply({}).md.temperature,350);assert.deepEqual(saved,[300,350]);
+ secondDone();await flight;assert.equal(reopened.pendingCount,0);assert.equal(local.getItem('studio.pending.same-task'),null);
+});
 test('Failed saves survive remount and only acknowledged fields leave the durable outbox',async()=>{
  const local=storage(),first=new DraftOutbox('t',local);first.stage('md.temperature',345);await assert.rejects(first.flush(async()=>{throw Error('offline');}));
  const next=new DraftOutbox('t',local);assert.equal(next.apply({md:{temperature:300}}).md.temperature,345);await next.flush(async changes=>({id:'t',parameters:{md:{temperature:changes['md.temperature']}}}));assert.equal(next.pendingCount,0);assert.equal(local.getItem('studio.pending.t'),null);

@@ -1,0 +1,10 @@
+import type {Conversation,Run,ClusterRun} from './types';
+export const toolGroups:{id:string;label:string;tools:string[];pages:string[]}[];
+export function initialBottomExpanded(read:(key:string)=>string|null):boolean;
+export function conversationMatches(conversation:Conversation,query:string,projectName?:string):boolean;
+export type ClusterJob=ClusterRun&{created_at?:number;updated_at?:number};
+export type Job={key:string;location:'local'|'cluster';run:Run|ClusterJob};
+export function jobKey(job:Run|ClusterJob):string;
+export function unifiedJobs(local:Run[],cluster:ClusterJob[]):Job[];
+export function filterJobs(jobs:Job[],options?:{location?:string;status?:string;since?:number;projectId?:string;query?:string}):Job[];
+export function boundJobConversation(job:Job,tasks:any[],conversations:Conversation[]):Conversation|null;
