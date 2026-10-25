@@ -40,3 +40,4 @@
 .agent-activity details code{display:block;margin-top:8px;color:var(--muted);overflow-wrap:anywhere}
 
 .settings-advanced{border-top:1px solid var(--line);padding-top:14px;margin-top:16px}.settings-advanced>summary{cursor:pointer;font-weight:600;line-height:1.6}.settings-advanced[open]>summary{margin-bottom:16px}
+.agent-recovery{margin:10px 12px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--accent-bg);flex-shrink:0;font-size:max(calc(11px * var(--ui-scale,1)),var(--ui-min-font,12px));overflow-wrap:anywhere}.agent-recovery p{line-height:1.6;margin:7px 0}.agent-recovery .button{white-space:normal}

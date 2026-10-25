@@ -13,6 +13,10 @@ export interface ScientificSkillCatalog {schema_version:1;functions:ScientificSk
 export interface Settings {scientificSkillProviders?:Record<string,AgentProvider[]>;pygasSkillProviders?:AgentProvider[];projectAgents?:Record<string,AgentProvider>;agentLayout?:'right'|'center';agentProvider?:AgentProvider;kimiPath?:string;qwenPath?:string;agentProviders?:Partial<Record<AgentProvider,{contextWindow?:number;compactLimit?:number;effort?:string}>>;distribution:string;workerRoot:string;workerPort:number;codexPath:string;cwd:string;sourceRoots?:string[];sourceIds?:string[];skillRoots:string[];theme:string;language?:'zh-CN'|'en';fontFamily?:string;fontSize?:number;minimumFontSize?:number;chatFontSize?:number;editorFontSize?:number;terminalFontSize?:number;agent?:{contextWindow?:number;compactLimit?:number;effort?:string}}
 export interface RpcEvent {provider?:AgentProvider;method:string;id?:string|number;params:any}
 export interface Studio {invoke<T=any>(method:string,data?:unknown):Promise<T>;onEvent(callback:(event:RpcEvent)=>void):()=>void;onTerminal(callback:(event:{id:string;data?:string;closed?:boolean})=>void):()=>void}
+export type ConversationRecovery={status:'required';oldThreadId:string}|{status:'recovered';oldThreadId:string;conversation:Conversation};
+export type ConversationRecoveryRequest={provider:'codex';threadId:string;model?:string};
+export interface ConversationResumeResult {thread?:{id:string;turns?:unknown[]};studioRecovery?:ConversationRecovery}
+export const recoverConversation=(request:ConversationRecoveryRequest)=>invoke<ConversationResumeResult>('agent.recover',request);
 declare global {interface Window {studio?:Studio}}
 export async function invoke<T=any>(method:string,data?:unknown):Promise<T>{
   if(!window.studio) throw new Error('此页面是浏览器预览。请从 Electron 桌面应用连接计算环境。');

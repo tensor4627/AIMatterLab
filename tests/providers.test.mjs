@@ -104,7 +104,7 @@ test('Codex zero-turn conversations reuse only their current server process',asy
  assert.equal((await hub.rpc('codex','thread/read',{threadId:'blank',includeTurns:true})).thread.id,'blank');assert.deepEqual(calls,['thread/start']);
  await hub.rpc('codex','turn/start',{threadId:'blank',input:[]});
  assert.equal((await hub.rpc('codex','thread/read',{threadId:'blank',includeTurns:true})).thread.turns.length,1);
- codex.process={};await assert.rejects(hub.rpc('codex','thread/resume',{threadId:'blank'}),/空会话尚未保存/);
+ codex.process={};await assert.rejects(hub.rpc('codex','thread/resume',{threadId:'blank'}),error=>error.code==='STUDIO_CODEX_ROLLOUT_MISSING'&&/no rollout found/.test(error.cause?.message));
  assert.equal(calls.filter(c=>c==='thread/resume').length,1);
 });
 
@@ -115,7 +115,7 @@ test('Explicit first-turn rejection preserves a loaded empty thread, uncertain t
  const hub=new AgentHub({codex,root:'.',catalog:{list:()=>[],put:()=>{}},vault:{get:()=>null},settings:()=>({}),worker:()=>null});
  await hub.rpc('codex','thread/start');await assert.rejects(hub.rpc('codex','turn/start',{threadId:'fresh'}),/first turn unavailable/);
  assert.equal((await hub.rpc('codex','thread/resume',{threadId:'fresh'})).thread.id,'fresh');assert.deepEqual((await hub.rpc('codex','thread/read',{threadId:'fresh',includeTurns:true})).thread.turns,[]);assert.equal(resumes,0);
- mode='unknown';await assert.rejects(hub.rpc('codex','turn/start',{threadId:'fresh'}),/first turn unavailable/);await assert.rejects(hub.rpc('codex','thread/resume',{threadId:'fresh'}),/空会话尚未保存/);assert.equal(resumes,1);
+ mode='unknown';await assert.rejects(hub.rpc('codex','turn/start',{threadId:'fresh'}),/first turn unavailable/);await assert.rejects(hub.rpc('codex','thread/resume',{threadId:'fresh'}),error=>error.code==='STUDIO_CODEX_ROLLOUT_MISSING'&&/no rollout found/.test(error.cause?.message));assert.equal(resumes,1);
 });
 
 

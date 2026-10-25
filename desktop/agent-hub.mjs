@@ -19,7 +19,7 @@ export class AgentHub extends EventEmitter{
   this.codex.on?.('event',event=>{
    if(event.method==='studio/codexDisconnected')this.release('codex');
    const thread=event.params?.threadId;
-   if(event.method==='turn/started'){this.codexOutput.delete(thread);this.blankThreads.delete(thread);this.pendingBlankTurns.delete(thread);}
+   if(event.method==='turn/started'){this.codexOutput.delete(thread);this.blankThreads.delete(thread);this.pendingBlankTurns.delete(thread);this.recordCodexThread(thread,'has_turns');}
    if(event.method==='item/agentMessage/delta'&&event.params?.delta?.trim())this.codexOutput.add(thread);
    if(event.method==='turn/completed'&&event.params?.turn?.status==='completed'&&this.codexOutput.has(thread)){this.loginStatus.codex={...this.loginStatus.codex,modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider:'codex',params:{}});}
 
@@ -89,6 +89,9 @@ export class AgentHub extends EventEmitter{
  forget(provider,id){const bridge=this.bridge(provider);bridge?.sessions?.delete(id);if(bridge?.current===id)bridge.current=null;if(provider==='codex'){this.blankThreads.delete(id);this.pendingBlankTurns.delete(id);this.readyThreads?.delete(id);this.codexOutput.delete(id);}}
  threads(provider){const saved=this.catalog.list('agent-thread').filter(t=>t.provider===provider&&!this.deleted(provider,t.id));return provider==='codex'?[...saved,...this.catalog.list('thread').filter(t=>!this.deleted(provider,t.id)&&!saved.some(s=>s.id===t.id)).map(t=>({...t,provider:'codex'}))]:saved;}
  remember(provider,thread){if(this.deleted(provider,thread.id))return;const value={...thread,provider};delete value.turns;this.catalog.put('agent-thread',provider+':'+thread.id,value);}
+ codexThreadState(id){return this.catalog.get?.('codex-thread-lifecycle',id)||this.codexThreadStates?.get(id)||null;}
+ recordCodexThread(id,state,metadata={}){if(typeof id!=='string'||!id)return;const previous=this.codexThreadState(id);if(previous?.state==='has_turns'&&state!=='has_turns')return;const value={...previous,...metadata,id,state,updatedAt:Date.now()};(this.codexThreadStates??=new Map()).set(id,value);this.catalog.put?.('codex-thread-lifecycle',id,value);}
+ threadReady(id){return this.threadProcess===this.codex.process&&this.readyThreads?.has(id)&&this.contextResume.get('codex')!==id;}
  async connect(provider){
   providerId(provider);
   if(this.active!==provider){this.cancelLogin();this.disconnect(this.active);this.active=provider;}
@@ -132,7 +135,7 @@ export class AgentHub extends EventEmitter{
   if(selected&&params.threadId&&selected.threadId!==params.threadId)throw Error('Select the trusted conversation context first');
   if(selected?.threadId&&method==='thread/start')throw Error('Select an empty conversation context before starting a new thread');
   const resume=this.contextResume.get(provider);
-  if(resume&&!['thread/start','thread/resume','thread/list','account/read','turn/interrupt'].includes(method)){
+  if(resume&&(provider==='codex'?['thread/read','turn/start','turn/steer'].includes(method):!['thread/start','thread/resume','thread/list','account/read','turn/interrupt'].includes(method))){
    await this.rpc(provider,'thread/resume',{threadId:resume,model:params.model});assertSelected();
   }
 
@@ -153,7 +156,7 @@ export class AgentHub extends EventEmitter{
    // is authoritative only while this exact app-server process remains alive.
    const blank=this.blankThreads.get(params.threadId);
    if(blank&&this.pendingBlankTurns.has(params.threadId)&&['thread/resume','thread/read'].includes(method))throw Error('首条回复尚未确认，请等待服务回报后再恢复会话');
-   if(blank&&method==='thread/resume')return structuredClone(blank);
+   if(blank&&method==='thread/resume'){if(this.contextResume.get(provider)===params.threadId)this.contextResume.delete(provider);return structuredClone(blank);}
    if(blank&&method==='thread/read')return {thread:structuredClone(blank.thread)};
    if(method==='turn/start'&&!this.readyThreads.has(params.threadId)){
     await this.rpc(provider,'thread/resume',{threadId:params.threadId,model:params.model});assertSelected();
@@ -163,9 +166,11 @@ export class AgentHub extends EventEmitter{
   if(blankStart){if(this.pendingBlankTurns.has(params.threadId))throw Error('首条回复尚未确认，请等待服务回报');this.pendingBlankTurns.add(params.threadId);}
   const attemptedKey=params.threadId?this.contextKey(provider,params.threadId):null;
   if(method==='turn/start'){this.pristineThreads.delete(attemptedKey);this.attemptedThreads.add(attemptedKey);this.pendingTurnDispatches.add(attemptedKey);}
-  let result;try{assertSelected();result=await bridge.request(method,params);assertSelected();}catch(error){
+  const emptyDispatch=provider==='codex'&&method==='turn/start'&&this.codexThreadState(params.threadId)?.state==='empty';
+  let result;try{if(emptyDispatch)this.recordCodexThread(params.threadId,'pending');assertSelected();result=await bridge.request(method,params);assertSelected();}catch(error){
    if(blankStart){this.pendingBlankTurns.delete(params.threadId);if(error.rpcResponse!==true)this.blankThreads.delete(params.threadId);}
-   if(provider==='codex'&&method==='thread/resume'&&/no rollout found for thread/i.test(error.message))throw Error('此空会话尚未保存，当前进程无法恢复。请新建会话；已有计算记录保留。',{cause:error});
+   if(emptyDispatch)this.recordCodexThread(params.threadId,error.rpcResponse===true?'empty':'unknown');
+   if(provider==='codex'&&method==='thread/resume'&&/no rollout found for thread/i.test(error.message)){const missing=Error('暂时无法读取此对话的聊天记录。计算流程和作业记录仍保留，可重新建立对话连接。',{cause:error});missing.code='STUDIO_CODEX_ROLLOUT_MISSING';throw missing;}
    throw error;
   }finally{if(method==='turn/start')this.pendingTurnDispatches.delete(attemptedKey);}
   if(method==='thread/start'&&result.thread){const key=this.contextKey(provider,result.thread.id);if(!result.thread.turns?.length&&!this.attemptedThreads.has(key))this.pristineThreads.add(key);}
@@ -173,6 +178,9 @@ export class AgentHub extends EventEmitter{
   if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');
   if(method==='thread/list'&&result.data)result={...result,data:result.data.filter(t=>!this.deleted(provider,t.id))};
   if(provider==='codex'&&method==='turn/start'){this.pendingBlankTurns.delete(params.threadId);this.blankThreads.delete(params.threadId);}
+  if(provider==='codex'&&method==='turn/start')this.recordCodexThread(params.threadId,'has_turns');
+  if(provider==='codex'&&method==='thread/start'&&result.thread&&Array.isArray(result.thread.turns)&&result.thread.turns.length===0)this.recordCodexThread(result.thread.id,'empty',{model:result.model||null});
+  if(provider==='codex'&&['thread/read','thread/resume'].includes(method)&&result.thread?.turns?.length)this.recordCodexThread(result.thread.id,'has_turns');
   if(provider==='codex'&&method==='thread/start'&&result.thread&&!result.thread.turns?.length)this.blankThreads.set(result.thread.id,structuredClone(result));
   if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)this.readyThreads.add(result.thread.id);
   if(['thread/start','thread/resume'].includes(method)&&result.thread)this.remember(provider,result.thread);

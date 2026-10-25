@@ -5,6 +5,7 @@ import {localReviewDialog} from './local-review-dialog.mjs';
 import {registerCalculationReview} from './task-consumer-ipc.mjs';
 import {consumerReviewDialog} from './consumer-review-dialog.mjs';
 import {ensureDefinitionContext} from './private-conversation-context.mjs';
+import {resumeConversationContext} from './conversation-recovery.mjs';
 import {definitionReply} from './private-definition-scope.mjs';
 import {scientificToolReadiness} from './scientific-tool-readiness.mjs';
 import {createAgentWorkflowContext} from './agent-workflow-context.mjs';
@@ -286,10 +287,15 @@ async function agentRpc({provider,method,params={}}){
   const text=visibleUserText(params.input||[]);
   const authoring=definitionOnly?null:await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true});check();
   if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};
-  const bound=taskRecords.bound(provider,params.threadId);if(bound){definitionOnly=(await privateAccess.assertTask(bound,provider)).definitionOnly;check();}
+  let bound=taskRecords.bound(provider,params.threadId);if(bound){definitionOnly=(await privateAccess.assertTask(bound,provider)).definitionOnly;check();}
   const privateReview=params.reviewMode===true;
-  params=taskRecords.prepareTurn(provider,params);check();
   await synchronize();
+  if(provider==='codex'&&!agents.threadReady(params.threadId)){
+   const resumed=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=resumed.ticket;check();
+   if(resumed.result.studioRecovery?.status==='required')return resumed.result;
+   params={...params,threadId:resumed.result.thread.id};skillKey=provider+':'+params.threadId;bound=taskRecords.bound(provider,params.threadId);
+  }
+  params=taskRecords.prepareTurn(provider,params);check();await synchronize();
   if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview});
   // Public software guidance is selected only for the actual current intent.
   const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId});
@@ -313,7 +319,7 @@ async function agentRpc({provider,method,params={}}){
   params={...params,input};
  }
  let result;
- try{check();result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{check();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
+ try{check();if(provider==='codex'&&method==='thread/resume'){const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;}else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{check();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
  catch(error){if(method==='turn/start'){try{check();taskRecords.failedTurn(provider,params.threadId,error);}catch{}}throw error;}
  if(method==='thread/start'){if(!result.thread?.id)throw Error('The server did not return a real conversation');workflowContext.started(ticket,result.thread.id);await synchronize();}
  if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)catalog.put('thread',result.thread.id,result.thread);
@@ -321,11 +327,17 @@ async function agentRpc({provider,method,params={}}){
  return result;
 }
 handle('agent.rpc',agentRpc);
+handle('agent.recover',async({provider,threadId,model})=>{
+ if(provider!=='codex'||typeof threadId!=='string'||!threadId||threadId.length>200||model!==undefined&&(typeof model!=='string'||!model||model.length>200))throw Error('Invalid conversation recovery request');
+ assertIdleAgent();const current=workflowContext.current();if(current?.provider!==provider||current.threadId!==threadId)throw Error('Select this conversation before rebuilding its connection');
+ const ticket=workflowContext.begin(provider,threadId);await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));
+ return (await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId,model,explicit:true,publish:event=>emit('studio:event',event)})).result;
+});
 handle('agent.respond',({provider,id,result})=>agents.respond(provider,id,result));
 handle('agent.configure',async({provider,preferences={},threadId,model})=>{
   assertIdleAgent();
   providerId(provider);if(provider!=='codex')throw Error('Context budget changes are not supported by this ACP provider');
-  agentConfig(preferences);settings=catalog.put('settings','main',{...settings,agent:preferences});return agents.configure(provider,preferences,threadId,model);
+  agentConfig(preferences);settings=catalog.put('settings','main',{...settings,agent:preferences});await agents.configure(provider,preferences);return threadId?agentRpc({provider,method:'thread/resume',params:{threadId,model}}):{configured:true};
 });
 handle('agent.login',async({provider,...value})=>{
   const result=await agents.login(provider,value);

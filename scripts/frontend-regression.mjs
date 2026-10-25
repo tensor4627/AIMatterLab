@@ -66,6 +66,39 @@ async function fixture(){
 async function openAgentOptions(p){const toggle=p.getByTestId('agent-options');if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();}
 async function check(name,fn){if(process.env.STUDIO_FRONTEND_FILTER&&!new RegExp(process.env.STUDIO_FRONTEND_FILTER).test(name))return;const {page,context}=await fixture();try{await fn(page);results.push({name,status:'passed'});}catch(e){results.push({name,status:'failed',error:String(e)});await page.screenshot({path:path.join(out,name+'.png'),fullPage:true});}finally{await context.close();}}
 try{
+ for(const mode of ['automatic','explicit'])await check('codex-empty-connection-recovery-'+mode+'-preserves-current-workflow-and-unsent-input',async p=>{
+  await p.evaluate(mode=>{
+   const original=window.studio.invoke;window.__recoveryErrors=[];window.__recoveryCallbacks=[];window.__recoveryCalls=[];window.__recovered=false;
+   window.__test.task={id:'same-workflow',parameters:{temperature:300},artifacts:[{id:'existing-run',kind:'run'}]};
+   window.__test.conversation={id:'codex:old',provider:'codex',threadId:'old',name:'Original workflow',taskId:'same-workflow',projectId:'project'};
+   window.studio.invoke=async(method,data)=>{
+    window.__recoveryCalls.push({method,data});
+    if(method==='agent.rpc'&&data.method==='thread/resume'){
+     await new Promise(resolve=>window.__finishResume=resolve);
+     if(mode==='explicit')return {studioRecovery:{status:'required',oldThreadId:'old'}};
+     window.__recovered=true;return {thread:{id:'fresh',turns:[]},studioRecovery:{status:'recovered',oldThreadId:'old',conversation:{...window.__test.conversation,id:'codex:fresh',threadId:'fresh'}}};
+    }
+    if(method==='agent.recover'){window.__recovered=true;return {thread:{id:'fresh',turns:[]},studioRecovery:{status:'recovered',oldThreadId:'old',conversation:{...window.__test.conversation,id:'codex:fresh',threadId:'fresh'}}};}
+    if(method==='agent.rpc'&&data.method==='thread/read'){if(data.params.threadId!=='fresh')throw Error('Read must use the actual replacement thread');return {thread:{id:'fresh',turns:[]}};}
+    return original(method,data);
+   };
+   return window.renderTest('Agent',{planningMode:false,onPlanningModeChange:()=>{},context:'{}',onError:e=>window.__recoveryErrors.push(String(e)),onConversation:c=>window.__recoveryCallbacks.push(c),sessionSelection:{nonce:'restore',conversation:window.__test.conversation}});
+  },mode);
+  await p.waitForFunction(()=>window.__finishResume);await p.locator('.composer textarea').fill('Keep my unsent parameter clarification');await p.evaluate(()=>window.__finishResume());
+  if(mode==='explicit'){await p.getByTestId('conversation-recovery').waitFor();assert.equal(await p.getByRole('button',{name:'发送',exact:true}).isDisabled(),true);await p.locator('.composer textarea').press('Enter');assert.equal(await p.evaluate(()=>window.__recoveryCalls.some(c=>c.method==='agent.recover')),false);await p.getByRole('button',{name:'重新建立对话连接',exact:true}).click();}
+  await p.waitForFunction(()=>window.__recoveryCallbacks.at(-1)?.threadId==='fresh');assert.equal(await p.locator('.composer textarea').inputValue(),'Keep my unsent parameter clarification');assert.equal(await p.getByTestId('conversation-recovery').count(),0);
+  assert.deepEqual(await p.evaluate(()=>window.__recoveryErrors),[]);assert.equal(await p.evaluate(()=>window.__recoveryCallbacks.at(-1).taskId),'same-workflow');assert.equal(await p.evaluate(()=>window.__recoveryCalls.some(c=>c.method==='task.create'||c.method==='task.execute'||c.method==='agent.rpc'&&['turn/start','thread/start'].includes(c.data.method))),false);
+  assert.deepEqual(await p.evaluate(()=>window.__test.task.parameters),{temperature:300});
+ });
+ for(const origin of ['manual','review-intent'])await check('codex-missing-history-on-send-'+origin+'-retains-request-and-blocks-automatic-retry',async p=>{
+  await p.evaluate(origin=>{
+   const original=window.studio.invoke;window.__recoveryErrors=[];window.__sends=0;
+   window.studio.invoke=async(method,data)=>{if(method==='agent.rpc'&&data.method==='turn/start'){window.__sends++;return {studioRecovery:{status:'required',oldThreadId:data.params.threadId}};}return original(method,data);};
+   return window.renderTest('Agent',{planningMode:false,onPlanningModeChange:()=>{},context:'{}',onError:e=>window.__recoveryErrors.push(String(e)),...origin==='review-intent'?{intent:{id:'review-request',autoSend:true,reviewMode:true,text:'My original request'}}:{}});
+  },origin);
+  await p.getByTestId('agent-connect').click();await p.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='model/list'));if(origin==='manual'){await p.locator('.composer textarea').fill('My original request');await p.getByRole('button',{name:'发送',exact:true}).click();}await p.getByTestId('conversation-recovery').waitFor();
+  assert.equal(await p.locator('.composer textarea').inputValue(),'My original request');assert.equal(await p.getByRole('button',{name:'发送',exact:true}).isDisabled(),true);await p.locator('.composer textarea').press('Enter');assert.equal(await p.evaluate(()=>window.__sends),1);assert.deepEqual(await p.evaluate(()=>window.__recoveryErrors),[]);
+ });
  await check('workflow-remount-joins-existing-save-and-keeps-newer-parameter',async p=>{
   await p.evaluate(()=>{window.__test.task={id:'shared-outbox-ui',name:'Same task',parameters:{temperature:300},steps:[],artifacts:[],updatedAt:1};const original=window.studio.invoke;window.__saveReleases=[];window.studio.invoke=async(method,data)=>{if(method==='task.edit'){await new Promise(resolve=>window.__saveReleases.push(resolve));}return original(method,data);};window.__props={worker:false,task:window.__test.task,onError:()=>{},onRefresh:()=>{}};return window.renderTest('AgentTaskPage',window.__props);});
   await p.getByTestId('workflow-key-parameters').getByRole('button').click();await p.locator('[data-field=temperature] input').fill('320');await p.waitForFunction(()=>window.__saveReleases.length===1);

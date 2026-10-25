@@ -1,4 +1,7 @@
 const english:Record<string,string> = {
+"对话连接需要恢复":"The conversation connection needs recovery",
+"旧聊天历史目前无法读取。可为同一流程建立新的空白对话连接，本地流程和作业记录保留。":"The previous chat history cannot be read. You can create a fresh chat connection for this same workflow. Local workflows and run records are preserved.",
+"重新建立对话连接":"Rebuild conversation connection",
 "日志连接暂不可用":"Log connection is unavailable",
 "日志连续读取失败，已暂停自动查询。":"Log reads failed repeatedly. Automatic queries are paused.",
 "日志读取失败；保留最近输出。":"Could not read the log. The latest output is preserved.",

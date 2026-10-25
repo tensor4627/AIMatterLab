@@ -58,7 +58,7 @@ export class CodexBridge extends EventEmitter {
     });
     try {
       this.info = await this.rawRequest('initialize', {
-        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.18.2' }
+        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.18.3' }
       });
       this.send({ method: 'initialized', params: {} });
       if(isolation){this.isolationSummary=await verifyIsolation((...args)=>this.rawRequest(...args),isolation);if(generation!==this.lifecycle||this.process!==child)throw Error('Codex context launch was cancelled');this.isolationReady=true;this.info={...this.info,studioIsolation:this.isolationSummary};}

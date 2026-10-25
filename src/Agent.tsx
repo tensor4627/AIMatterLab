@@ -9,7 +9,7 @@ import {resumedEffort} from '../shared/resume-effort.mjs';
 import {toolActivity,visibleUserText} from '../shared/tool-activity.mjs';
 import ProviderLogin from './ProviderLogin';
 import {explicitNewWorkflow} from '../shared/task-fields.mjs';
-import {invoke,type RpcEvent,type AgentProvider,type Conversation,type AgentIntent,type SkillAttachment} from './types';
+import {invoke,recoverConversation,type RpcEvent,type AgentProvider,type Conversation,type AgentIntent,type SkillAttachment} from './types';
 type ModelCall={requestId:string;provider:AgentProvider;model:string;threadId:string;turnId:string|null;output:boolean;status:string};
 type Message={id:string;role:string;text:string;diff?:string;toolName?:string;activity?:any};
 export default function Agent({planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,onNewConversation,hidden,onProviderChange,onAttachmentConsumed,onAttachmentClear}:{planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:{nonce:string;conversation?:Conversation;new?:boolean};onConversation?:(value:Conversation|null)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean}){
@@ -29,6 +29,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
  const [externalThreads,setExternalThreads]=useState<any[]>([]),[importOpen,setImportOpen]=useState(false),[importLoading,setImportLoading]=useState(false);
  const [connected,setConnected]=useState(false),[connecting,setConnecting]=useState(false),[models,setModels]=useState<any[]>([]),[model,setModel]=useState('');
  const [thread,setThread]=useState<string|null>(null),[threads,setThreads]=useState<any[]>([]),[messages,setMessages]=useState<Message[]>([]);
+ const [recovery,setRecovery]=useState<{threadId:string;error?:string}|null>(null),pendingResume=useRef<string|null>(null);
  const [modelCall,setModelCall]=useState<ModelCall|null>(null),modelCallRef=useRef<ModelCall|null>(null),modelRef=useRef(model);modelRef.current=model;
  const [prompt,setPrompt]=useState(''),[busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null);
  const [requests,setRequests]=useState<RpcEvent[]>([]),[answers,setAnswers]=useState<Record<string,string>>({});
@@ -49,7 +50,8 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    if((event.provider||'codex')!==providerRef.current)return;
    if(event.method==='studio/skillsLoaded'){const call=modelCallRef.current,p=event.params||{};if(call&&p.requestId===call.requestId&&p.threadId===call.threadId&&p.threadId===threadRef.current&&(!p.turnId||!call.turnId||p.turnId===call.turnId))setAutoSkillStatus({...p,provider:event.provider||'codex'});return;}
    if(event.method==='studio/conversationContextChanged'){
-    const p=event.params,c=p.conversation;if(threadRef.current!==p.oldThreadId)return;
+    const p=event.params,c=p.conversation;if(threadRef.current!==p.oldThreadId&&pendingResume.current!==p.oldThreadId)return;
+    if(pendingResume.current===p.oldThreadId)pendingResume.current=c.threadId;
     threadRef.current=c.threadId;setThread(c.threadId);setWorkflowId(p.taskId);setTurn(null);setUsage(null);setRequests([]);setAutoSkillStatus(null);
     setMessages(old=>old.filter(message=>message.role==='user').slice(-1));
     const call=modelCallRef.current;if(call&&call.threadId===p.oldThreadId){call.threadId=c.threadId;call.turnId=null;call.output=false;setModelCall({...call});}
@@ -109,10 +111,11 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
   }catch(e){if(current()){setConnected(false);setModels([]);onError(e);}return false;}finally{if(connectionOwner.current===owner){connectionOwner.current=null;setConnecting(false);}}
  }
  useEffect(()=>{if(!connected)return;let active=true,checking=false;const check=async()=>{if(checking)return;checking=true;try{const result=await invoke('agent.tools',{provider:providerRef.current});if(active)setTools(result);}catch{if(active)setTools({status:'blocked',message:'科学工具连接中断，请重新连接',count:0});}finally{checking=false;}};const timer=setInterval(()=>void check(),15000);return()=>{active=false;clearInterval(timer);};},[connected,provider]);
- function resetConversation(invalidate=true){attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);setPrompt('');setTurn(null);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);}
+ function resetConversation(invalidate=true){attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setRecovery(null);pendingResume.current=null;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);setPrompt('');setTurn(null);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);}
  async function selectProvider(value:AgentProvider,selectedSeq?:number){
   const managed=selectedSeq!==undefined,seq=selectedSeq??++selectionSeq.current;
   if(busy||!managed&&connecting)return false;providerTouched.current=true;
+  setRecovery(null);pendingResume.current=null;
   const old=providerRef.current,current=()=>seq===selectionSeq.current;
   try{await invoke('agent.login.cancel');if(!current())return false;await invoke('agent.disconnect',{provider:old});if(!current())return false;await invoke('settings',{agentProvider:value});if(!current())return false;}catch(e){if(current())onError(e);return false;}
   modelCallRef.current=null;setModelCall(null);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(localStorage.getItem('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);return true;
@@ -123,12 +126,18 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
   if(selectedProvider==='codex'){setModel(value);return;}
   setApplying(true);try{const result=await invoke('agent.rpc',{provider:selectedProvider,method:'model/select',params:{model:value}});if(current()){setModel(value);setModels(result.data||[]);}}catch(error){if(current())onError(error);}finally{if(current())setApplying(false);}
  }
- async function resume(id:string,seq=++selectionSeq.current,selectedProject=projectId){
+ async function resume(id:string,seq=++selectionSeq.current,selectedProject=projectId,rebuild=false){
   if(busy)return;attachmentClearRef.current?.();const selectedProvider=providerRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current;
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
-  modelCallRef.current=null;setModelCall(null);selectionPending.current=true;threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
+  modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
   try{
-   const r=await selectedRpc('thread/resume',{threadId:id});if(!current())return;
+   const originalId=id;
+   if(rebuild){if(selectedProvider!=='codex')throw Error('Unsupported conversation recovery provider');await invoke('conversation.select',{id:selectedProvider+':'+id});if(!current())return;}
+   const r=rebuild?await recoverConversation({provider:'codex',threadId:id,...model?{model}:{}}):await selectedRpc('thread/resume',{threadId:id});if(!current())return;
+   if(r.studioRecovery?.status==='required'){setRecovery({threadId:id});setMessages([]);return;}
+   if(r.studioRecovery?.status==='recovered'){
+    const c=r.studioRecovery.conversation;if(selectedProvider!=='codex'||r.studioRecovery.oldThreadId!==id||c?.provider!==selectedProvider||c?.threadId!==r.thread?.id||c?.id!==selectedProvider+':'+r.thread?.id)throw Error('恢复的会话与选中会话不匹配');id=c.threadId;
+   }
    if(r.thread?.id!==id)throw Error('恢复的会话与选中会话不匹配');
    const read=await selectedRpc('thread/read',{threadId:id,includeTurns:true});if(!current())return;const list:Message[]=[];
    if(read.thread?.id&&read.thread.id!==id)throw Error('读取的会话与选中会话不匹配');
@@ -139,8 +148,8 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    }
    const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'});if(!current())return;
    const resumedModel=r.model||model,catalog=await selectedRpc('model/list');if(!current())return;if(!Array.isArray(catalog.data))throw Error('Invalid resumed model catalog');setModels(catalog.data);
-   setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:localStorage.getItem('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(list);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id)]);setImportOpen(false);conversationRef.current?.(conversation);
-  }catch(e){if(current())onError(e);}finally{if(current()){selectionPending.current=false;setApplying(false);}}
+   setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:localStorage.getItem('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(list);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation);
+  }catch(e){if(current()){if(rebuild)setRecovery({threadId:pendingResume.current||id,error:e instanceof Error?e.message:String(e)});else onError(e);}}finally{if(current()){pendingResume.current=null;selectionPending.current=false;setApplying(false);}}
  }
  useEffect(()=>{
   if(!sessionSelection||busy)return;const seq=++selectionSeq.current;
@@ -157,7 +166,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
  },[sessionSelection?.nonce]);
  useEffect(()=>{if(!intent?.autoSend||consumedIntent.current===intent.id||busy||applying||connecting||!connected||!models.length||(intent.threadId&&thread!==intent.threadId)||(intent.provider&&providerRef.current!==intent.provider))return;consumedIntent.current=intent.id;void send(intent.text,{reviewMode:intent.reviewMode,taskId:intent.taskId});},[intent?.id,connected,busy,applying,connecting,thread,models.length]);
  async function send(textOverride?:string,action:{reviewMode?:boolean;taskId?:string}={}){
-  const text=textOverride??prompt;if(!text.trim()||busy||applying||connecting||selectionPending.current||!connected||!models.length)return;
+  const text=textOverride??prompt;if(!text.trim()||busy||applying||connecting||selectionPending.current||recovery||!connected||!models.length)return;
   if((planningMode||workflowId||action.reviewMode)&&tools.status==='blocked'){onError(t(tools.message||'请先修复科学工具连接'));return;}
   const attachment=skill;
   if(!textOverride)setPrompt('');setBusy(true);
@@ -172,14 +181,14 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text}]);
    const input:any[]=[{type:'text',text},{type:'text',text:'[Studio workspace context]\n'+context}];if(attachment&&'path' in attachment)input.push({type:'skill',name:attachment.name,path:attachment.path});
    const call:ModelCall={requestId:crypto.randomUUID(),provider:providerRef.current,model:modelRef.current,threadId:id!,turnId:null,output:false,status:'in_progress'};modelCallRef.current=call;setModelCall({...call});
-   const r=await rpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});if(modelCallRef.current===call){if(attachment&&typeof r.turn?.id==='string')attachmentConsumedRef.current?.(attachment.attachmentId);if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}
+   const r=await rpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});if(r.studioRecovery?.status==='required'){setRecovery({threadId:r.studioRecovery.oldThreadId});setBusy(false);setPrompt(old=>old||text);if(modelCallRef.current===call){call.status='failed';setModelCall({...call});}return;}if(modelCallRef.current===call){if(attachment&&typeof r.turn?.id==='string')attachmentConsumedRef.current?.(attachment.attachmentId);if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}
   }catch(e){const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===threadRef.current){call.status='failed';setModelCall({...call});}setBusy(false);if(!textOverride)setPrompt(old=>old||text);onError(e);}
  }
  async function applyOptions(){
   modelCallRef.current=null;setModelCall(null);
   setApplying(true);try{
    const preferences={contextWindow:contextWindow?Number(contextWindow):undefined,compactLimit:compactLimit?Number(compactLimit):undefined,effort};
-   if(connected){const result=await invoke('agent.configure',{provider:providerRef.current,preferences,threadId:thread,model:model||undefined});if(result.thread){setThread(result.thread.id);threadRef.current=result.thread.id;}setConnected(true);}
+   if(connected){const result=await invoke('agent.configure',{provider:providerRef.current,preferences,threadId:thread,model:model||undefined});if(result.studioRecovery?.status==='required'){setRecovery({threadId:result.studioRecovery.oldThreadId});return;}if(result.thread){setThread(result.thread.id);threadRef.current=result.thread.id;}setConnected(true);}
    else await invoke('settings',{agent:preferences});
    setUsage(null);setApplied(t('已应用；实际窗口以服务回报为准'));
   }catch(e){onError(e);}finally{setApplying(false);}
@@ -203,6 +212,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
     <section className="agent-option-section"><h4>{t('科学工具连接')}</h4><div className="agent-tools-status" data-testid="agent-tools-status" data-status={tools.status}><span><i className={'flow-dot '+(tools.status==='ready'?'ready':'missing')}/>{t(tools.status==='ready'?'科学工具已就绪':tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}</span>{tools.status==='blocked'&&<small>{t(tools.message||'')}</small>}</div></section>
    </div>}
   </div>
+  {recovery&&<div className="agent-recovery" data-testid="conversation-recovery" role="status"><strong>{t('对话连接需要恢复')}</strong><p>{t('旧聊天历史目前无法读取。可为同一流程建立新的空白对话连接，本地流程和作业记录保留。')}</p><button className="button" disabled={applying||connecting||!connected} onClick={()=>void resume(recovery.threadId,++selectionSeq.current,projectId,true)}>{t('重新建立对话连接')}</button>{recovery.error&&<p role="alert">{recovery.error}</p>}</div>}
   <div className="chat-scroll" ref={scroll} role="log">
    {!messages.length&&<div className="agent-welcome"><div className="agent-orb"><Sparkles size={24}/></div><h3>{tr("让想法进入计算")}</h3><p>{tr("定义实验、准备输入、运行计算，")}<br/>{tr("然后一起检查结果。")}</p><div className="prompt-hints">{['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(t=><button key={t} onClick={()=>setPrompt(t)}>{tr(t)}<ArrowUp size={13}/></button>)}</div><small>{tr("科学参数会显式记录；作业状态来自真实进程。")}</small></div>}
    {messages.map(m=><div key={m.id} className={'message '+m.role}>{m.role==='tool'?<ToolActivity message={m} onWorkflow={onOpenTask} onRun={onOpenRun}/>:<><div className="message-role">{tr(m.role==='user'?'你':'GPU Sampling Studio')}</div><div className="message-text">{m.role==='agent'?<MessageText text={m.text}/>:m.text}</div></>}{m.diff&&<pre className="diff-text">{m.diff}</pre>}</div>)}
@@ -217,7 +227,7 @@ export default function Agent({planningMode,onPlanningModeChange,context,onError
    {busy&&<div className="thinking"><LoaderCircle size={14} className="spin"/>{tr("Agent 正在工作")}</div>}
   </div>
   {autoSkillStatus&&autoSkillStatus.threadId===thread&&autoSkillStatus.provider===provider&&<details className="agent-auto-skills"><summary>{t(autoSkillStatus.status==='passed'?'本轮已载入任务指导':autoSkillStatus.status==='already_loaded'?'当前会话已有相同指导':autoSkillStatus.status==='permission_required'?'需要公开指导共享许可':autoSkillStatus.status==='prepared'?'指导已准备，等待服务接受':autoSkillStatus.status==='failed'?'指导发送未通过':autoSkillStatus.status==='unknown'?'指导接收状态未知':autoSkillStatus.status==='not_run'?'本轮未载入任务指导':'任务指导暂不可用')} · {(autoSkillStatus.names||[]).length}</summary>{(autoSkillStatus.names||[]).map((name:string)=><div key={name}>{name}</div>)}{autoSkillStatus.source&&<p>{autoSkillStatus.source}</p>}{autoSkillStatus.attachments?.map((a:any)=><p className="skill-loaded-file" key={a.name+a.sha256}>{a.name}<small>SHA256 · {a.sha256} · {a.bytes} bytes</small></p>)}{autoSkillStatus.message&&<p>{autoSkillStatus.message}</p>}</details>}
-  <div className="composer"><div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{workflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{(workflowId||planningMode||newWorkflow)&&<small className="agent-mode-help">{t(newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</small>}{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}<textarea aria-busy={applying||connecting} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{t('Enter 发送 · Shift+Enter 换行')}</span>{busy?<button className="send" title={tr("中断 Agent，计算作业继续")} aria-label={tr("中断 Agent，计算作业继续")} onClick={()=>void rpc('turn/interrupt',{threadId:thread,turnId:turn}).catch(onError)}><Square size={13}/></button>:<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={applying||connecting||!connected||!models.length||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
+  <div className="composer"><div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{workflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{(workflowId||planningMode||newWorkflow)&&<small className="agent-mode-help">{t(newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</small>}{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}<textarea aria-busy={applying||connecting} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{t('Enter 发送 · Shift+Enter 换行')}</span>{busy?<button className="send" title={tr("中断 Agent，计算作业继续")} aria-label={tr("中断 Agent，计算作业继续")} onClick={()=>void rpc('turn/interrupt',{threadId:thread,turnId:turn}).catch(onError)}><Square size={13}/></button>:<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={!!recovery||applying||connecting||!connected||!models.length||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
   <div className="agent-footer">{tr("Agent 会话与科学计算队列独立运行")}</div>
   {login&&<ProviderLogin projectId={projectId} provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{setLogin(false);void connect();}} onError={onError}/>}
  </aside>;
