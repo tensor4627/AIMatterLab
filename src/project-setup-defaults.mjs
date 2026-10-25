@@ -1,0 +1,5 @@
+const unique=values=>[...new Set(values.filter(value=>typeof value==='string'&&value.trim()))];
+export function suggestedProjectEnvironment(environmentIds,suggestedId){const ids=unique(environmentIds);return typeof suggestedId==='string'&&ids.includes(suggestedId)?suggestedId:ids.length===1?ids[0]:null;}
+export function scopedSuggestedInputRoot(value){return typeof value==='string'&&value.startsWith('/')&&value!=='/'&&!value.startsWith('//')&&!/[\\\r\n\0]/.test(value)&&!value.split('/').some(part=>part==='.'||part==='..')?value:null;}
+/** New-project suggestions only. Existing project specs never pass through this helper. */
+export function newProjectDefaults(engineIds,environmentIds,suggestedEnvironmentId,suggestedInputRoot){const environment=suggestedProjectEnvironment(environmentIds,suggestedEnvironmentId),root=scopedSuggestedInputRoot(suggestedInputRoot);return {name:'',policy:{engines:unique(engineIds),gpus:[0],max_seconds:3600,max_concurrent:1,input_roots:root?[root]:[],environments:environment?[environment]:[],clusters:[]}};}

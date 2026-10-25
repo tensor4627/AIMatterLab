@@ -26,7 +26,7 @@ export async function scientificToolReadiness({worker,codex,workflowContext,reco
   const fresh=()=>{
    if(worker.connection!==connection||!isDeepStrictEqual(worker.connection,connectionState)||provider==='codex'&&(codex?.process!==nativeProcess||codex?.lifecycle!==nativeLifecycle)||!isDeepStrictEqual(snapshot(),original))throw Error('Selected conversation, workflow revision or worker changed during the scientific tool check');
   };
-  if(!connection)return {status:'blocked',count:0,message:'作业服务未连接；可以聊天，计算流程暂不能生成'};
+  if(!connection)return {status:'blocked',count:0,...(worker.connectionFailure||{message:'作业服务未连接；可以聊天，计算流程暂不能生成'})};
   const access=async()=>{
    fresh();
    if(!original.task)return {definitionOnly:false};

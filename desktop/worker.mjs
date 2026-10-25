@@ -3,6 +3,8 @@ import { promisify } from 'node:util';
 import {createInterface} from 'node:readline';
 import http from 'node:http';
 import {McpProviderScopes,providerContext} from './mcp-provider-scope.mjs';
+import {toolFailure,toolValueResult,validToolCall,validRpcRequest,validToolResponse} from './tool-failure.mjs';
+import {workerConnectionFailure} from './worker-connection-failure.mjs';
 import path from 'node:path';
 import { linuxPath, assertWorkerRoute } from './security.mjs';
 const exec = promisify(execFile);
@@ -10,7 +12,8 @@ export class WorkerClient {
  constructor(){this.pending=new Map();this.next=1;this.providerScopes=new McpProviderScopes();this.providerContexts=new Map();}
  async connect(settings,source){
   if(this.connecting)return this.connecting;
-  this.connecting=this.open(settings,source).finally(()=>{this.connecting=null;});return this.connecting;
+  this.connectionFailure=null;
+  this.connecting=this.open(settings,source).then(value=>{this.connectionFailure=null;return value;},error=>{this.close();this.connectionFailure=workerConnectionFailure(error);throw error;}).finally(()=>{this.connecting=null;});return this.connecting;
  }
  async open(settings, source) {
   this.close();
@@ -62,31 +65,34 @@ export class WorkerClient {
    const scope=this.providerScopes.authenticate({pathname:req.url,authorization:req.headers.authorization,origin:req.headers.origin,host:req.headers.host});
    if(!scope){res.writeHead(403);res.end();return;}
    if(!['GET','POST'].includes(req.method)){res.writeHead(405);res.end();return;}
-   let authoringToken;
+   let authoringToken,body,dispatched=false;
    const fresh=()=>{if(scope.checkCurrent()!==true){const error=Error('Provider context lease expired');error.staleProviderScope=true;throw error;}};
    try{
     const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>4*1024*1024)throw Error('Request too large');chunks.push(chunk);}
     fresh();
-    const body=bytes?JSON.parse(Buffer.concat(chunks).toString('utf8')):undefined;
+    body=bytes?JSON.parse(Buffer.concat(chunks).toString('utf8')):undefined;
+    if(body?.method==='tools/call'&&!validRpcRequest(body)){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:typeof body.id==='string'||Number.isSafeInteger(body.id)?body.id:null,error:{code:-32600,message:'Tool calls require a JSON-RPC 2.0 request with a string or integer id'}}));return;}
+    if(body?.method==='tools/call'&&!validToolCall(body))throw Error('Invalid tool request: provide a tool name and an arguments object');
     authoringToken=body?.method==='tools/call'?await this.authoringGuard?.before(body.params?.name,body.params?.arguments||{},scope.provider,scope):null;
     fresh();
     let response;
     const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
     if(body?.method==='tools/call'&&scopedTool){
      if(!scope.localReaders){res.writeHead(403);res.end();return;}
-     let result;try{fresh();const value=await this.scopedHandler(body.params.name,body.params.arguments||{},scope);result={content:[{type:'text',text:JSON.stringify(value)}],isError:['blocked','permission_required'].includes(value?.status)};}catch(e){result={content:[{type:'text',text:e.message}],isError:true};}
+     let result;try{fresh();dispatched=true;const value=await this.scopedHandler(body.params.name,body.params.arguments||{},scope);result=toolValueResult(value);}catch(e){result=toolFailure(e,{dispatched});}
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(body?.method==='tools/call'&&(this.localDefinitions||[]).some(t=>t.name===body.params?.name)){
-     let result;try{fresh();result={content:[{type:'text',text:JSON.stringify(await this.localHandler(body.params.name,body.params.arguments||{},scope))}],isError:false};}catch(e){result={content:[{type:'text',text:e.message}],isError:true};}
+     let result;try{fresh();dispatched=true;result=toolValueResult(await this.localHandler(body.params.name,body.params.arguments||{},scope));}catch(e){result=toolFailure(e,{dispatched});}
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
-    }else if(this.relay){fresh();response=await this.forward(req.method,'/mcp',body,true);}
-    else{fresh();const upstream=await fetch(this.upstream+'/mcp',{method:req.method,headers:{Authorization:'Bearer '+this.connection.tokens.mcp,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(245000)});const text=await upstream.text();response={status:upstream.status,data:text?JSON.parse(text):null};}
+    }else if(this.relay){fresh();dispatched=true;response=await this.forward(req.method,'/mcp',body,true);}
+    else{fresh();dispatched=true;const upstream=await fetch(this.upstream+'/mcp',{method:req.method,headers:{Authorization:'Bearer '+this.connection.tokens.mcp,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(245000)});const text=await upstream.text();response={status:upstream.status,data:text?JSON.parse(text):null};}
     fresh();
+    if(body?.method==='tools/call'&&(response.status!==200||!validToolResponse(response.data,body.id)))throw Error('Tool service returned an unconfirmed response; inspect the existing workflow before continuing');
     if(body?.method==='tools/call')await this.authoringGuard?.after(authoringToken,response.data?.result);
     if(body?.method==='tools/list'&&response.data?.result?.tools){response.data.result.tools.push(...(this.localDefinitions||[]),...(scope.localReaders?this.scopedDefinitions||[]:[]));if(this.authoringGuard?.filterTools)response.data.result.tools=await this.authoringGuard.filterTools(response.data.result.tools,scope.provider,scope);}
     fresh();
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
-   }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){res.writeHead(403);res.end();}else{res.writeHead(502);res.end(JSON.stringify({error:e.message}));}}
+   }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){res.writeHead(403);res.end();}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:toolFailure(e,{dispatched})}));}else{res.writeHead(502);res.end(JSON.stringify({error:e.message}));}}
   });
   await new Promise((resolve,reject)=>{this.proxy.once('error',reject);this.proxy.listen(0,'127.0.0.1',resolve);});
   this.connection.url='http://127.0.0.1:'+this.proxy.address().port;

@@ -30,3 +30,13 @@
 .agent-mode-toggle input{margin:0;width:14px;height:14px;accent-color:var(--accent)}
 .agent-compose-context>.text-button{font-size:max(calc(11px * var(--ui-scale,1)),var(--ui-min-font,12px));text-align:left}
 .agent-mode-help{display:block;margin:0 0 7px;color:var(--muted);line-height:1.5}
+.agent-activity .activity-heading{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.agent-activity .activity-heading strong{flex:1;overflow-wrap:anywhere}
+.agent-activity .activity-heading>svg{flex-shrink:0}
+.agent-activity.blocked,.agent-activity.unknown{border-left:3px solid var(--warn)}
+.agent-activity.blocked .activity-heading>svg,.agent-activity.unknown .activity-heading>svg{color:var(--warn)}
+.agent-activity.running .activity-heading>svg{color:var(--accent)}
+.agent-activity .activity-guidance{color:var(--text);line-height:1.6}
+.agent-activity details code{display:block;margin-top:8px;color:var(--muted);overflow-wrap:anywhere}
+
+.settings-advanced{border-top:1px solid var(--line);padding-top:14px;margin-top:16px}.settings-advanced>summary{cursor:pointer;font-weight:600;line-height:1.6}.settings-advanced[open]>summary{margin-bottom:16px}

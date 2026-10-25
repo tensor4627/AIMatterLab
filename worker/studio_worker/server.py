@@ -119,11 +119,45 @@ def tools():
     return result
 
 
+def mcp_tool_call(service, params):
+    """Keep recoverable call errors on MCP; never retry or expand desktop grants."""
+    started = False
+    try:
+        if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+            raise ValueError("Provide a tool name and an arguments object")
+        name = params["name"]
+        definition = next((item for item in tools() if item["name"] == name), None)
+        if definition is None:
+            raise ValueError("Unknown tool. Read tools/list and use an exact available name")
+        arguments = params.get("arguments", {})
+        if not isinstance(arguments, dict):
+            raise ValueError("Tool arguments must be an object")
+        schema = definition["inputSchema"]
+        missing = [key for key in schema.get("required", []) if key not in arguments]
+        if missing:
+            raise ValueError("Missing required fields: " + ", ".join(missing))
+        types = {"string": str, "object": dict, "array": list, "integer": int}
+        for key, value in arguments.items():
+            expected = schema["properties"].get(key, {}).get("type")
+            if expected in types and (not isinstance(value, types[expected]) or expected == "integer" and isinstance(value, bool)):
+                raise ValueError("Invalid field " + key + ": expected " + expected)
+        method, route, _ = TOOL_ROUTES[name]
+        started = True
+        result = result_for_agent(name, dispatch(service, method, route, arguments, admin=False))
+        return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": False}
+    except Exception as exc:
+        failure = {"status": "unknown" if started else "blocked", "code": "tool_error" if started else "invalid_input",
+                   "message": str(exc)[:4000], "operation_state": "unconfirmed" if started else "not_started", "automatic_retry": False,
+                   "next_step": "Read the current workflow or run status before another write; do not replay an unconfirmed operation." if started else
+                   "Read the available tool schema and current workflow. Fill technical fields from registered context; ask only for unresolved scientific choices."}
+        return {"content": [{"type": "text", "text": json.dumps(failure, ensure_ascii=False)}], "isError": True}
+
+
 def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.18.0", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.18.1", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/tools/status":
             return service.diagnose_tools()
         if path == "/api/source-projects":
@@ -394,7 +428,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.18.0"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.18.1"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}
@@ -405,15 +439,7 @@ def main():
                     elif operation == "tools/list":
                         value = {"tools": tools()}
                     elif operation == "tools/call":
-                        params = data["params"]
-                        method_, route, _ = TOOL_ROUTES[params["name"]]
-                        try:
-                            result = dispatch(service, method_, route, params.get("arguments", {}), admin=False)
-                            result = result_for_agent(params["name"], result)
-                            value = {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
-                                     "isError": False}
-                        except Exception as exc:
-                            value = {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+                        value = mcp_tool_call(service, data.get("params"))
                     else:
                         return self.respond(200, {"jsonrpc": "2.0", "id": data["id"],
                                                   "error": {"code": -32601, "message": "Method not found"}})

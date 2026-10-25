@@ -3,7 +3,7 @@ async function setup(t){
  const calls=[];const upstream=http.createServer(async(req,res)=>{assert.equal(req.headers.authorization,'Bearer worker-mcp');assert.equal(req.url,'/mcp');const chunks=[];for await(const chunk of req)chunks.push(chunk);const body=JSON.parse(Buffer.concat(chunks));calls.push(body);res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.method==='tools/list'?{tools:[{name:'present_task'}]}:{content:[{type:'text',text:'upstream-science'}]}}));});await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));const w=new WorkerClient();w.upstream='http://127.0.0.1:'+upstream.address().port;w.connection={tokens:{mcp:'worker-mcp',admin:'worker-admin'},transport:'fixture-only'};
  const seen=[];w.setScopedTools([{name:'read_skill_route'}],async(name,args,scope)=>{seen.push({name,args,scope});return {provider:scope.provider};});await w.exposeTools({});
  t.after(async()=>{w.close();upstream.closeAllConnections();await new Promise(resolve=>upstream.close(resolve));});
- const call=(connection,body,extra={})=>fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,...extra},body:JSON.stringify(body)});
+ const call=(connection,body,extra={})=>fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,...extra},body:JSON.stringify({jsonrpc:'2.0',...body})});
  return {w,call,seen,calls};
 }
 test('Real loopback HTTP fixes provider identity for all four scopes, excludes reader from base and never sends admin upstream',async t=>{
@@ -30,6 +30,38 @@ test('Denied public guidance retains its structured status and cannot report suc
 
 const scopedContext=(threadId,taskId=null)=>({threadId,taskId,projectId:taskId?'project-a':null,environmentId:taskId?'env-a':null,inputRoot:taskId?'/owned/a':null});
 const toolBody=name=>({jsonrpc:'2.0',id:42,method:'tools/call',params:{name,arguments:{threadId:'forged',taskId:'forged'}}});
+test('A missing workflow returns actionable MCP content without dispatch or reconnect',async t=>{
+ const {w,call,calls}=await setup(t);let writes=0;w.setAuthoringGuard({before(){throw Error('Prepare a conversation-owned workflow before composing a bias');}});w.setScopedTools([{name:'read_skill_route'}],async()=>{writes++;return {};});
+ const response=await call(w.providerConnection('codex'),toolBody('read_skill_route'));assert.equal(response.status,200);const body=await response.json(),failure=JSON.parse(body.result.content[0].text);
+ assert.equal(body.id,42);assert.equal(body.result.isError,true);assert.equal(failure.code,'context_required');assert.equal(failure.status,'blocked');assert.equal(failure.automatic_retry,false);assert.equal(writes,0);assert.equal(calls.length,0);
+});
+test('Invalid argument shape never reaches guards or a local tool',async t=>{
+ const {w,call}=await setup(t);let entered=0;w.setAuthoringGuard({before(){entered++;}});
+ for(const args of [null,[],2,'bad']){const response=await call(w.providerConnection('codex'),{...toolBody('read_skill_route'),params:{name:'read_skill_route',arguments:args}});const result=(await response.json()).result;assert.equal(result.isError,true);assert.equal(JSON.parse(result.content[0].text).code,'invalid_input');}
+ assert.equal(entered,0);
+});
+test('Local tools reporting blocked do not become successful activity cards',async t=>{
+ const {w,call}=await setup(t);w.setLocalTools([{name:'search_materials_project'}],async()=>({status:'blocked',message:'No API key',candidates:[]}));
+ const result=(await(await call(w.providerConnection('codex'),toolBody('search_materials_project'))).json()).result;assert.equal(result.isError,true);assert.equal(JSON.parse(result.content[0].text).status,'blocked');
+});
+test('A failure after dispatch is unconfirmed and the completed operation is never replayed',async t=>{
+ const {w,call}=await setup(t);let writes=0;w.setScopedTools([{name:'read_skill_route'}],async()=>{writes++;return {saved:true};});w.setAuthoringGuard({before:()=>({}),after(){throw Error('Result identity changed before acknowledgement');},cancel(){}});
+ const result=(await(await call(w.providerConnection('codex'),toolBody('read_skill_route'))).json()).result,failure=JSON.parse(result.content[0].text);assert.equal(result.isError,true);assert.equal(failure.status,'unknown');assert.equal(failure.operation_state,'unconfirmed');assert.equal(failure.automatic_retry,false);assert.equal(writes,1);
+});
+test('An upstream failure remains MCP data with unknown effects and no replay',async t=>{
+ const {w,call}=await setup(t);let attempts=0;w.relay={kill(){}};w.forward=async()=>{attempts++;return {status:500,data:{error:'internal'}};};
+ const response=await call(w.providerConnection('codex'),toolBody('read_log'));assert.equal(response.status,200);const failure=JSON.parse((await response.json()).result.content[0].text);assert.equal(failure.status,'unknown');assert.equal(attempts,1);
+});
+test('Malformed tool request envelopes cannot enter the authoring guard',async t=>{
+ const {w,call}=await setup(t);let entered=0;w.setAuthoringGuard({before(){entered++;}});
+ for(const body of [{method:'tools/call',params:{name:'read_skill_route'}},{...toolBody('read_skill_route'),jsonrpc:'1.0'},{...toolBody('read_skill_route'),id:{bad:true}}]){const response=await call(w.providerConnection('codex'),body);const value=await response.json();assert.equal(value.error.code,-32600);assert.equal(value.result,undefined);}
+ assert.equal(entered,0);
+});
+for(const variant of ['wrong-id','wrong-version','empty-result','both-result-error'])test('Malformed upstream '+variant+' is unconfirmed without delivering an artifact',async t=>{
+ const {w,call}=await setup(t);let attempts=0;const reply={jsonrpc:'2.0',id:42,result:{content:[{type:'text',text:'{"id":"not-verified","engine":"pydyn.md"}'}]}};
+ if(variant==='wrong-id')reply.id=41;if(variant==='wrong-version')reply.jsonrpc='1.0';if(variant==='empty-result')reply.result={};if(variant==='both-result-error')reply.error={code:-1,message:'bad'};
+ w.relay={kill(){}};w.forward=async()=>{attempts++;return {status:200,data:reply};};const response=await call(w.providerConnection('codex'),toolBody('read_log')),body=await response.json();assert.equal(body.id,42);assert.equal(body.result.isError,true);assert.equal(JSON.parse(body.result.content[0].text).status,'unknown');assert.equal(JSON.stringify(body).includes('not-verified'),false);assert.equal(attempts,1);
+});
 test('Scoped dispatch receives only trusted bound identity and a live boolean lease check',async t=>{
  const {w,call,seen}=await setup(t);w.bindProviderContext('codex',scopedContext('real-thread','real-task'));const c=w.providerConnection('codex');await call(c,toolBody('read_skill_route'));assert.equal(seen[0].scope.threadId,'real-thread');assert.equal(seen[0].scope.taskId,'real-task');assert.equal(seen[0].scope.checkCurrent(),true);w.bindProviderContext('codex',scopedContext('next-thread','real-task'));assert.equal(seen[0].scope.checkCurrent(),false);assert.equal((await call(c,toolBody('read_skill_route'))).status,403);assert.equal(seen.length,1);
 });

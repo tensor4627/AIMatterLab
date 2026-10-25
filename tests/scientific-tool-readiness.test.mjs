@@ -32,6 +32,10 @@ async function fixture({selected='private'}={}){
  return {deps,worker,workflowContext,records,policy,tasks,conversations,deleted,hooks,state,requests,select,setProvider:value=>provider=value,counts:()=>({policyCalls,probeCalls,inventoryCalls}),run:provider=>scientificToolReadiness(deps,provider||'codex')};
 }
 const blocked=value=>{assert.equal(value.status,'blocked');assert.equal(value.count,0);};
+test('A failed WSL connection exposes the bounded local diagnosis without probing or granting tools',async()=>{
+ const f=await fixture({selected:null});f.worker.connection=null;f.worker.connectionFailure={code:'distribution_not_found',message:'未找到所选 WSL 发行版，请在设置的计算连接中更正名称。'};
+ const result=await f.run();blocked(result);assert.equal(result.code,'distribution_not_found');assert.equal(result.message,f.worker.connectionFailure.message);assert.deepEqual(f.counts(),{policyCalls:0,probeCalls:0,inventoryCalls:0});
+});
 
 test('A trusted private workflow requires the actual seven scoped names, not public present_task or the base count',async()=>{
  const f=await fixture(),before=f.workflowContext.current(),result=await f.run();
