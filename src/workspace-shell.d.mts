@@ -2,6 +2,7 @@ import type {Conversation,Run,ClusterRun} from './types';
 export const toolGroups:{id:string;label:string;tools:string[];pages:string[]}[];
 export function initialBottomExpanded(read:(key:string)=>string|null):boolean;
 export function conversationMatches(conversation:Conversation,query:string,projectName?:string):boolean;
+export function computeProjectForSelection(projectId:string,task?:any):string;
 export type ClusterJob=ClusterRun&{created_at?:number;updated_at?:number};
 export type Job={key:string;location:'local'|'cluster';run:Run|ClusterJob};
 export function jobKey(job:Run|ClusterJob):string;

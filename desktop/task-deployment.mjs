@@ -4,18 +4,28 @@ import {manifestDefinitionCorrection} from './manifest-binding.mjs';
 import {legacyNebCorrection} from './neb-binding.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {deploymentProjectIssue} from '../shared/deployment-authorization.mjs';
+import {assertDeploymentWorker,deploymentWorker,assertConfirmedDeployment} from './deployment-state.mjs';
+import {taskOperation} from './task-operations.mjs';
 import {validDeployment,scientificSpec,deploymentCurrent,snapshotIdentity,inputControlParameters} from '../shared/deployment.mjs';
-export function saveDeployment(records,{taskId,value},localReview){
+export function saveDeployment(records,{taskId,value,expectedDraftRevision},localReview,worker){
  const task=records.read(taskId);if(task.workflowVersion!==2)throw Error('This workflow uses the legacy execution page');
  if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('请先核对原作业状态');
  const config=validDeployment(value);if(localReview?!localReview.authority(task,config.target):task.review?.status!=='ready'||task.review.parameterRevision!==task.parameterRevision)throw Error('请先完成当前计算流程的科学参数复核');
+ if(expectedDraftRevision!==undefined&&expectedDraftRevision!==(task.deploymentDraft?.revision||0))throw Error('部署设置已变化，请先保存并核对最新草稿。');
+ if(worker)assertDeploymentWorker(task,worker);
  if(!isDeepStrictEqual(task.deployment?.config,config))task.deployment={config,revision:(task.deployment?.revision||0)+1};
+ if(worker)task.deployment.workerBinding=deploymentWorker(worker);
+ if(task.deploymentDraft&&!isDeepStrictEqual(task.deploymentDraft.config,config))task.deploymentDraft={...task.deploymentDraft,revision:task.deploymentDraft.revision+1,config,lastMutationId:null};
  return records.save(task);
 }
 export async function prepareDeployment(records,worker,{taskId},localReview){
+ const task=records.read(taskId);return taskOperation(records,taskId,'prepare',JSON.stringify([task.parameterRevision,task.deployment?.revision,task.deployment?.config]),()=>prepareOnce(records,worker,{taskId},localReview));
+}
+async function prepareOnce(records,worker,{taskId},localReview){
  const task=records.read(taskId),target=task.deployment?.config?.target,authority=localReview?.authority(task,target);if(localReview?!authority:task.review?.status!=='ready'||task.review.parameterRevision!==task.parameterRevision)throw Error('计算流程已变化，请重新复核');
+ assertDeploymentWorker(task,worker);assertConfirmedDeployment(task);const connection=worker.connection;
  if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('请核对原提交，不要创建重复作业');
- const config=validDeployment(task.deployment?.config),science=scientificSpec(task),revision=task.deployment.revision,localOperation=authority?.kind==='local-human'?localReview.beginOperation(taskId):null;const assertLocal=()=>{if(localOperation)localReview.assertOperation(localOperation);};
+ const config=validDeployment(task.deployment?.config),science=scientificSpec(task),revision=task.deployment.revision,localOperation=authority?.kind==='local-human'?localReview.beginOperation(taskId):null;const assertLocal=()=>{if(connection&&worker.connection!==connection)throw Error('作业服务连接已变化，请核对原准备结果。');assertDeploymentWorker(task,worker);assertConfirmedDeployment(records.read(taskId));if(localOperation)localReview.assertOperation(localOperation);};
  if(authority?.kind==='local-human'){const checked=await localReview.verify(taskId);assertLocal();if(!sameAuthority(checked.authority,authority))throw Error('Human scientific input receipt changed');if(localReview.verifyDeployment){await localReview.verifyDeployment(taskId,config);assertLocal();}else if(config.target!=='local'||config.inputSource!=='local'||config.targetId!==task.authoring?.environmentId)throw Error('Human receipt requires its exact local reviewed runtime');}
  const projects=await worker.request('GET','/api/projects');assertLocal();
  if(!Array.isArray(projects))throw Error('无法读取计算项目，请检查作业服务连接后重试。');

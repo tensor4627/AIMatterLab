@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {initialBottomExpanded,conversationMatches,toolGroups,unifiedJobs,filterJobs,boundJobConversation} from '../src/workspace-shell.mjs';
+import {initialBottomExpanded,conversationMatches,computeProjectForSelection,toolGroups,unifiedJobs,filterJobs,boundJobConversation} from '../src/workspace-shell.mjs';
+
+test('chat input workspace filters jobs by its explicit compute binding, preserving deliberate unrelated selections',()=>{
+ const task={projectId:'draft',authoring:{projectId:'draft'},deployment:{config:{projectId:'compute-old'}},deploymentDraft:{config:{projectId:'compute-new'}}};
+ assert.equal(computeProjectForSelection('draft',task),'compute-new');
+ assert.equal(computeProjectForSelection('other',task),'other');
+ assert.equal(computeProjectForSelection('',task),'');
+ assert.equal(computeProjectForSelection('draft',{...task,deploymentDraft:undefined}),'compute-old');
+ for(const value of [undefined,{}, {projectId:'draft'}, {...task,deployment:undefined,deploymentDraft:{config:{projectId:'draft'}}}])assert.equal(computeProjectForSelection('draft',value),'draft');
+ const jobs=unifiedJobs([{id:'run',project_id:'compute-new',status:'draft'}],[]);
+ assert.equal(filterJobs(jobs,{projectId:computeProjectForSelection('draft',task)}).length,1);
+});
 test('compact initial bottom is new-only and explicit or legacy preferences win',()=>{
  const from=values=>key=>values[key]??null;
  assert.equal(initialBottomExpanded(from({})),false);

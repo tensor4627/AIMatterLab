@@ -1,9 +1,15 @@
 import {sameAuthority} from './review-authority.mjs';
 import {deploymentCurrent,snapshotIdentity} from '../shared/deployment.mjs';
+import {assertDeploymentWorker,assertConfirmedDeployment} from './deployment-state.mjs';
+import {taskOperation} from './task-operations.mjs';
 export async function executeTask(records,worker,{taskId,artifactId,inputReceipt},localReview){
+ return taskOperation(records,taskId,'execute',JSON.stringify([artifactId,inputReceipt]),()=>executeOnce(records,worker,{taskId,artifactId,inputReceipt},localReview));
+}
+async function executeOnce(records,worker,{taskId,artifactId,inputReceipt},localReview){
+ assertDeploymentWorker(records.read(taskId),worker);assertConfirmedDeployment(records.read(taskId));const connection=worker.connection;
  const approved=()=>{const task=records.read(taskId),artifact=task.artifacts.find(a=>a.id===artifactId),authority=localReview?.authority(task,task.deployment?.config?.target);const ready=task.workflowVersion===2?deploymentCurrent(task,authority)&&task.deployment.prepared.artifactId===artifactId:task.review?.status==='ready'&&task.review.parameterRevision===task.parameterRevision&&task.review.artifactIds?.includes(artifactId);if(task.workflowVersion===2&&inputReceipt!==task.deployment?.prepared?.inputIdentity)throw Error('Review the actual input snapshots for this deployment before execution');if(!ready||!artifact||!['run','cluster-run'].includes(artifact.kind))throw Error('Review the current parameters and module draft before execution');return {task,artifact,authority};};
  const {task,artifact,authority}=approved(),prefix=artifact.kind==='cluster-run'?'/api/cluster/':'/api/run/';
- const localOperation=authority?.kind==='local-human'?localReview.beginOperation(taskId):null,assertLocal=()=>{if(localOperation)localReview.assertOperation(localOperation);};
+ const localOperation=authority?.kind==='local-human'?localReview.beginOperation(taskId):null,assertLocal=()=>{if(connection&&worker.connection!==connection)throw Error('作业服务连接已变化，请核对原作业状态。');assertDeploymentWorker(records.read(taskId),worker);assertConfirmedDeployment(records.read(taskId));if(localOperation)localReview.assertOperation(localOperation);};
  const current=await worker.request('POST',prefix+'status',{run_id:artifact.id});assertLocal();
  if(authority?.kind==='local-human'){const checked=await localReview.verify(taskId);assertLocal();if(!sameAuthority(checked.authority,authority)||!sameAuthority(approved().authority,authority))throw Error('Local human review changed before validation');}
  if(task.workflowVersion===2&&inputReceipt!==snapshotIdentity(task,current))throw Error('Reviewed input snapshot identity changed');

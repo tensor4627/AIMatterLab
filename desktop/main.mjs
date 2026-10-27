@@ -35,6 +35,8 @@ import { localSkills } from './skills.mjs';
 import { selectedSkillContext } from './skill-context.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
 import {saveDeployment,prepareDeployment} from './task-deployment.mjs';
+import {saveDeploymentDraft,deploymentContext,createDeploymentProject} from './deployment-state.mjs';
+import {openDeploymentSession} from './deployment-session.mjs';
 import {executeTask} from './task-execution.mjs';
 import {TaskRecords} from './task-records.mjs';
 import {existingConnections,existingProfile} from './existing-ssh.mjs';
@@ -164,7 +166,16 @@ for(const action of ['read','saveSpec','approveFormula','approveCode','sharing',
 handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>taskRecords.create(value));
-handle('task.deployment.save',value=>saveDeployment(taskRecords,value,localReview));
+handle('task.deployment.save',value=>saveDeployment(taskRecords,value,localReview,worker));
+handle('task.deployment.draft',value=>saveDeploymentDraft(taskRecords,worker,value));
+handle('task.deployment.context',value=>deploymentContext(taskRecords,worker,value));
+handle('task.deployment.open',value=>openDeploymentSession({records:taskRecords,workflowContext,agents,assertIdle:assertIdleAgent,connect:async task=>{
+ const bound=task.deployment?.workerBinding||task.deploymentDraft?.workerBinding;
+ if(worker.connection&&(!bound||bound.distribution===worker.identity?.distribution&&bound.root===worker.identity?.root)){try{const health=await worker.request('GET','/api/health');if(health.root===worker.identity?.root)return;}catch{}}
+ agents.close();const selected=bound?{...settings,distribution:bound.distribution,workerRoot:bound.root}:settings;
+ await worker.connect(selected,workerSource);await bindSources();if(selected.distribution===settings.distribution&&selected.workerRoot===settings.workerRoot)discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});
+}},value));
+handle('task.deployment.createProject',value=>{assertIdleAgent();return createDeploymentProject(taskRecords,worker,value);});
 handle('task.deployment.prepare',value=>prepareDeployment(taskRecords,worker,value,localReview));
 handle('task.list',()=>catalog.list('agent-task'));
 handle('task.read',({id})=>taskRecords.read(id));

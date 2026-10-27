@@ -14,6 +14,15 @@ export function conversationMatches(conversation,query,projectName=''){
  return [conversation.name,projectName].join('\n').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 }
 export function jobKey(job){return (job.kind==='cluster-run'?'cluster:':'local:')+job.id;}
+// A chat's authoring workspace holds inputs; its explicit compute binding owns jobs.
+// Keep an unrelated project filter that the user selected deliberately.
+export function computeProjectForSelection(projectId,task){
+ if(!projectId||!task)return projectId;
+ const authoring=new Set([task.authoring?.projectId,task.projectId].filter(Boolean));
+ if(!authoring.has(projectId))return projectId;
+ const bound=task.deploymentDraft?.config?.projectId||task.deployment?.config?.projectId;
+ return typeof bound==='string'&&bound&&!authoring.has(bound)?bound:projectId;
+}
 export function unifiedJobs(local,cluster){
  return [...local.map(run=>({key:jobKey(run),location:'local',run})),...cluster.map(run=>({key:'cluster:'+run.id,location:'cluster',run}))]
   .sort((a,b)=>(Number(b.run.created_at)||0)-(Number(a.run.created_at)||0)||a.key.localeCompare(b.key));

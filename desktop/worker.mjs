@@ -9,28 +9,33 @@ import path from 'node:path';
 import { linuxPath, assertWorkerRoute } from './security.mjs';
 const exec = promisify(execFile);
 export class WorkerClient {
- constructor(){this.pending=new Map();this.next=1;this.providerScopes=new McpProviderScopes();this.providerContexts=new Map();}
+ constructor(){this.pending=new Map();this.next=1;this.providerScopes=new McpProviderScopes();this.providerContexts=new Map();this.connectionEpoch=0;}
  async connect(settings,source){
-  if(this.connecting)return this.connecting;
+  const key=JSON.stringify([settings.distribution,settings.workerRoot,settings.workerPort,!!settings.forceRelay,source]);
+  if(this.connecting){if(this.connectingKey===key)return this.connecting;await this.connecting.catch(()=>{});return this.connect(settings,source);}
   this.connectionFailure=null;
-  this.connecting=this.open(settings,source).then(value=>{this.connectionFailure=null;return value;},error=>{this.close();this.connectionFailure=workerConnectionFailure(error);throw error;}).finally(()=>{this.connecting=null;});return this.connecting;
+  this.connectingKey=key;let pending;pending=this.open(settings,source).then(value=>{this.connectionFailure=null;return value;},error=>{this.close();this.connectionFailure=workerConnectionFailure(error);throw error;}).finally(()=>{if(this.connecting===pending){this.connecting=null;this.connectingKey=null;}});this.connecting=pending;return pending;
  }
  async open(settings, source) {
   this.close();
+  const epoch=this.connectionEpoch,check=()=>{if(epoch!==this.connectionEpoch)throw Error('Worker connection was superseded');};
   const installed=await exec('wsl.exe',['-d',settings.distribution,'--','python3',linuxPath(path.join(source,'install.py')),'--source',linuxPath(source),'--root',settings.workerRoot],{windowsHide:true,timeout:20000,maxBuffer:1024*1024});
+  check();
   const runtime=JSON.parse(installed.stdout.trim().split('\n').at(-1)).path;
   const { stdout } = await exec('wsl.exe', ['-d', settings.distribution, '--',
     'python3', runtime+'/bootstrap.py', '--root', settings.workerRoot,
     '--port', String(settings.workerPort)], { windowsHide: true, timeout: 20000, maxBuffer: 1024 * 1024 });
-  this.connection = JSON.parse(stdout.trim().split('\n').at(-1));
+  check();this.connection = JSON.parse(stdout.trim().split('\n').at(-1));
+  this.identity={distribution:settings.distribution,root:this.connection.health.root};
   this.upstream=this.connection.url;
   try{
    if(settings.forceRelay)throw Error("WSL stdio relay explicitly selected");
    const response=await fetch(this.upstream+'/api/health',{headers:{Authorization:'Bearer '+this.connection.tokens.admin},signal:AbortSignal.timeout(1500)});
    if(!response.ok)throw Error('Health check rejected');
    const health=await response.json();if(health.root!==this.connection.health.root)throw Error('Worker identity mismatch');
-   this.connection.transport='localhost';return this.exposeTools(health);
+   check();this.connection.transport='localhost';const exposed=await this.exposeTools(health);check();return exposed;
   }catch{
+   check();
    const relay=this.relay=spawn('wsl.exe',['-d',settings.distribution,'--','python3',runtime+'/relay.py','--root',settings.workerRoot,'--port',String(settings.workerPort)],{stdio:['pipe','pipe','pipe'],windowsHide:true});
    createInterface({input:this.relay.stdout}).on('line',line=>{
     try{const value=JSON.parse(line),item=this.pending.get(value.id);if(item){clearTimeout(item.timer);this.pending.delete(value.id);item.resolve(value);}}catch{}
@@ -40,7 +45,7 @@ export class WorkerClient {
    this.relay.stderr.on('data',()=>{});
    const health=await this.forward('GET','/api/health',undefined,false,10000);
    if(health.status!==200||health.data.root!==this.connection.health.root)throw Error('WSL relay identity mismatch');
-   return this.exposeTools({...health.data,transport:'wsl-stdio'});
+   check();const exposed=await this.exposeTools({...health.data,transport:'wsl-stdio'});check();return exposed;
   }
  }
  setAuthoringGuard(guard){this.authoringGuard=guard;}
@@ -132,5 +137,5 @@ export class WorkerClient {
   return result;
  }
  reject(error){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(error);}this.pending.clear();}
- close(){this.providerScopes.revokeAll();this.reject(Error('Worker bridge closed'));this.relay?.kill();this.relay=null;this.proxy?.close();this.proxy=null;this.connection=null;}
+ close(){this.connectionEpoch++;this.providerScopes.revokeAll();this.reject(Error('Worker bridge closed'));this.relay?.kill();this.relay=null;this.proxy?.close();this.proxy=null;this.connection=null;this.identity=null;}
 }
