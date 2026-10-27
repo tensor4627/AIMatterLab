@@ -591,6 +591,9 @@
         "studio-compute-workflow"
       ],
       "tools": [
+        "compute_readiness",
+        "discover_local_environments",
+        "draft_local_environment",
         "list_environments",
         "diagnose_tools",
         "probe_environment"

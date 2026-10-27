@@ -1,4 +1,5 @@
 import {explicitSetupStage} from './explicit-setup-stage.mjs';
+import {createComputeOnboarding} from './compute-onboarding.mjs';
 import {customCvNumericDialog,referenceImportDialog} from './custom-cv-dialog.mjs';
 import {registerTaskStage} from './task-stage-ipc.mjs';
 import {localReviewDialog} from './local-review-dialog.mjs';
@@ -195,6 +196,7 @@ handle('agent.bindProject',({projectId,provider})=>{providerId(provider);if(type
 handle('state',() => ({ settings, threads:catalog.list('thread'), ssh:catalog.list('ssh') }));
 handle('settings',data => {
   const next={...settings,...data};
+  if(next.autoDiscoverCompute!==undefined&&typeof next.autoDiscoverCompute!=='boolean')throw Error('Invalid compute discovery preference');
   if(!/^[\w .-]{1,80}$/.test(next.distribution) || !Number.isInteger(next.workerPort) ||
      next.workerPort<1024 || next.workerPort>65535 ||
      !/^~\/|^\//.test(next.workerRoot)) throw new Error('Invalid WSL settings');
@@ -218,7 +220,10 @@ async function bindSources(){const sources=scientificSources();for(const source 
 handle('sources.list',()=>scientificSources());
 handle('sources.diagnose',async()=>{const sources=scientificSources();return {sources,tools:toolInventory(sources),worker:worker.connection?await worker.request('GET','/api/tools/status'):null};});
 function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activeTurns?.size))throw Error('请先停止当前回复，再调整连接或上下文设置');}
-handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);await bindSources();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
+const configureCompute=createComputeOnboarding({worker,publish:event=>emit('studio:event',event)});
+function discoverCompute(){if(settings.autoDiscoverCompute!==false)return configureCompute().catch(()=>null);return Promise.resolve(null);}
+handle('compute.setup',async data=>configureCompute(data||{}));
+handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);await bindSources();discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
   const result=await worker.request(method,target,data);
@@ -248,7 +253,7 @@ handle('agent.connect',async({provider,repairTools=false})=>{
  if(repairTools){assertIdleAgent();agents.close();await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}
  if(!worker.connection){try{await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}catch{}}
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- if(worker.connection)await bindSources();
+ if(worker.connection){await bindSources();await discoverCompute();}
  const info=await agents.connect(provider),tools=await scientificTools(provider);
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};

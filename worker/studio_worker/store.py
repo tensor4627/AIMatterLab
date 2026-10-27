@@ -40,6 +40,17 @@ class Store:
             raise ValueError(f"Unknown {kind}: {identifier}")
         return json.loads(row[0])
 
+    def put_many(self, records):
+        """Commit related desktop setup records together."""
+        with self.lock:
+            try:
+                self.db.executemany('INSERT OR REPLACE INTO objects VALUES(?,?,?)',
+                                    [(kind,value['id'],json.dumps(value)) for kind,value in records])
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                raise
+
     def list(self, kind):
         with self.lock:
             rows = self.db.execute("SELECT data FROM objects WHERE kind=?", (kind,)).fetchall()

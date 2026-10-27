@@ -9,6 +9,12 @@ def guide_for_agent(value):
  return result
 
 def result_for_agent(name,result):
+ if name in ('compute_readiness','discover_local_environments'):
+  def compact(entry):
+   observed=entry.get('observation') or entry.get('discovery',{}).get('observation',{})
+   return {key:value for key,value in {'id':entry.get('id'),'name':entry.get('name') or entry.get('spec',{}).get('name'),'status':entry.get('status'),'python':entry.get('python') or entry.get('executables',{}).get('python'),'cuda':observed.get('cuda',{}),'modules':{key:item.get('available') for key,item in observed.get('modules',{}).items()},'scientific_status':'not_run','reason':entry.get('reason')}.items() if value is not None}
+  if name=='discover_local_environments':return {key:result[key] for key in ('identity','observed_at','cached','scope')}|{'entries':[compact(entry) for entry in result['entries']]}
+  return {'environments':[compact(entry) for entry in result['environments']],'clusters':[{key:entry.get(key) for key in ('id','name','scheduler','version','queue','connection_check')} for entry in result['clusters']],'scope':result['scope']}
  if name=='read_runtime_guide':return guide_for_agent(result)
  if name=='probe_environment':
   return {'runtime_guide':guide_for_agent(result['runtime_guide']),'scope':'Actual selected probe performed in its registered runtime; see its observed, stale or blocked receipt. This does not install or authorize a calculation.'}

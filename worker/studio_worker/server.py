@@ -40,6 +40,9 @@ TOOL_ROUTES = {
  "cluster_read_log":("POST","/api/cluster/log",{"run_id":"string"}),
  "list_workflows":("GET","/api/workflows",{}), "create_workflow":("POST","/api/workflows",{"project_id":"string","name":"string","steps":"array"}),
  "list_projects": ("GET", "/api/projects", {}), "list_environments": ("GET", "/api/environments", {}),
+ "compute_readiness": ("GET", "/api/compute/readiness", {}),
+ "discover_local_environments": ("POST", "/api/environments/discover", {}),
+ "draft_local_environment": ("POST", "/api/environments/draft", {"proposal":"object"}),
  "list_runs": ("GET", "/api/runs", {}), "probe_environment": ("POST", "/api/probe", {"environment_id": "string"}),
  "prepare_run": ("POST", "/api/runs/prepare", {"spec": "object"}),
  "validate_run": ("POST", "/api/run/validate", {"run_id": "string"}),
@@ -56,6 +59,9 @@ TOOL_ROUTES = {
  "read_artifact": ("POST", "/api/run/file", {"run_id": "string", "name": "string"})
 }
 DESCRIPTIONS = {
+ "compute_readiness":"Read local environment registrations, observed CUDA and saved cluster connection health without private SSH endpoints. Reuse installed software. Missing registration is a setup issue, never proof software is absent. No grant or job submission.",
+ "draft_local_environment":"Propose an existing local interpreter, native engine paths, selected source roots and loader variables for review in Compute environments. Use actual observed paths, preserve separate PyDyn/core/sampling environments. The user reviews structured fields and saves; this tool cannot register, install, grant or execute anything.",
+ "discover_local_environments":"Read-only bounded discovery of existing Python/GPU software in standard local locations and explicitly bound source roots. Returns candidate identities for the desktop setup page; cannot register environments, install packages or change project authorization.",
  "read_runtime_guide":"Read the selected registered environment and engine runtime receipt recorded by an actual probe. Returns observed execution paths, versions and source/capability identities, or explicit stale/blocked/not_run. Does not install, import, execute, switch versions or modify job state. Ordinary calculations reuse this instead of rereading installation instructions.",
  "inspect_pygas_catalog":"Read actual registered pyGAS GUI CV/bias/switch/neighbor constructor names, exact required/default parameters and source-bound editor/shape semantics. Without classes returns a compact class index; request up to four exact names for their typed parameter lists. Use these real library definitions before composing a graph; this is source inspection, never artifact/runtime/numerical proof.",
  "describe_engine":"Read the real Studio adapter parameter contract: required input basenames, canonical flat API keys, explicit nested aliases and valid modes. Use before publishing scientific workflows; technical wrapper fields are Agent responsibilities, not user questions. This is discovery only, never engine/artifact validation. parameters.validation is reserved for declared numerical FD controls; put runtime/scope/review diagnostics in step descriptions or a separate saved review manifest, not editable controls.",
@@ -114,7 +120,7 @@ def tools():
         result.append({"name": name, "description": DESCRIPTIONS.get(name, name.replace("_", " ")),
                        "inputSchema": schema,
                        "annotations": {"readOnlyHint": method == "GET" or name in (
-                           "describe_engine", "read_project_input", "inspect_source_project", "inspect_pygas_catalog", "read_runtime_guide", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
+                           "compute_readiness", "discover_local_environments", "describe_engine", "read_project_input", "inspect_source_project", "inspect_pygas_catalog", "read_runtime_guide", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
                                        "destructiveHint": name == "cancel_run"}})
     return result
 
@@ -157,9 +163,13 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.18.3", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.18.4", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/tools/status":
             return service.diagnose_tools()
+        if path == "/api/compute/readiness":
+            from .compute_setup import readiness
+            return readiness(service)
+        if path == '/api/environments/drafts':return store.list('environment-draft')
         if path == "/api/source-projects":
             return store.list("source-project")
         if path == "/api/projects":
@@ -196,6 +206,16 @@ def dispatch(service, method, path, data, admin=False):
         return service.register_project(data) if path.endswith("projects") else service.register_environment(data)
     if method != "POST":
         raise ValueError("Unknown route")
+    if path == '/api/environments/discover':
+        from .compute_setup import discover
+        return discover(service, data.get('force', False) if admin else False)
+    if path == '/api/environments/adopt':
+        if not admin:raise PermissionError('Only the desktop may register discovered environments')
+        from .compute_setup import adopt
+        return adopt(service,data)
+    if path == '/api/environments/draft':
+        from .compute_setup import draft
+        return draft(service,data.get('proposal'))
     if path.startswith('/api/custom-cv/'):
         if not admin:raise PermissionError('Custom CV approval, sharing and CPU checks require the desktop user')
         from .custom_cv_graph import controller,attach
@@ -428,7 +448,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.18.3"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.18.4"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}

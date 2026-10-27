@@ -200,7 +200,11 @@ def profile(value):
 
 
 def public(p):
-    return {k: p.get(k) for k in ("id", "name", "scheduler", "version", "queue", "environment", "limits", "activation", "probe", "lsf_memory_scope")}
+    value={k: p.get(k) for k in ("id", "name", "scheduler", "version", "queue", "environment", "limits", "activation", "probe", "lsf_memory_scope")}
+    health=dict(p.get('connection_check') or {'status':'not_run','scope':'Connection has not been checked in this version'})
+    if health.get('observed_at') and (health.get('version')!=p.get('version') or time.time()-health['observed_at']>900):health['status']='stale'
+    value['connection_check']=health
+    return value
 
 
 class SSH:
@@ -328,6 +332,7 @@ class Clusters:
         leaf(p["id"])
         previous = next((x for x in self.store.list("cluster") if x["id"] == p["id"]), None)
         p["version"] = (previous or {}).get("version", 0) + 1
+        p.pop('probe',None);p.pop('connection_check',None)
         skill_root=self.service.root/"cluster-skills"/p["id"]/("v"+str(p["version"]))
         skill_root.mkdir(parents=True,exist_ok=True)
         source="# Cluster submission skill\n\n"+json.dumps({k:p.get(k) for k in ("id","name","version","scheduler","queue","limits","lsf_memory_scope","environment")},indent=2)+"\n\nUse only registered cluster IDs; never put SSH addresses, ports, keys or model proxy credentials in prompts or scripts. Probe the login node, then confirm queue/resource semantics with the user. Use present_task to show workflow and parameters. Prepare immutable inputs with prepare_cluster_run and STOP for the user to review the batch script and click Submit. Scientific validation executes on allocated compute nodes before the engine; never treat login-node discovery as science validation. Do not change project authorization. Never resubmit an unknown run; reconcile receipts and scheduler job identity. Read bounded logs and assets through cluster tools.\n\n"+str(p.get("notes",""))
@@ -344,32 +349,62 @@ class Clusters:
 
     def test_connection(self, value):
         p = profile(value)
-        observed = self.transport(p).run("id -un", timeout=25).strip().splitlines()
-        if not observed or observed[-1] != p["username"]:
-            raise ConnectionError("Remote username differs; check the explicit SSH username")
-        return {"status":"passed","username_matches":True,"scope":"SSH authentication only; no files changed or jobs submitted"}
+        p['_check_started_at']=time.time()
+        try:
+            observed = self.transport(p).run("id -un", timeout=25).strip().splitlines()
+            if not observed or observed[-1] != p["username"]:raise ConnectionError("Remote username differs; check the explicit SSH username")
+            result={"status":"passed","username_matches":True,"scope":"SSH authentication only; scheduler, compute-node GPU and science not_run"}
+        except Exception as exc:
+            self._connection_result(p,{'status':'failed','reason':'SSH connection check failed; review username, authentication and network in private settings','error_type':type(exc).__name__})
+            raise
+        self._connection_result(p,result)
+        return result
+
+    def _connection_result(self, original, result, probe=None):
+        if not original.get('id'):return
+        with self.store.lock:
+            try:current=self.store.get('cluster',original['id'])
+            except ValueError:return  # An unsaved form has no authoritative health record.
+            keys=('host','username','target','port','ssh_client','identity_file','via','version')
+            if any(current.get(key)!=original.get(key) for key in keys):return
+            started=original.get('_check_started_at',time.time())
+            if current.get('connection_check',{}).get('attempted_at',0)>started:return
+            current['connection_check']={**result,'observed_at':time.time(),'attempted_at':started,'version':current['version'],'compute_node_status':'not_run'}
+            if probe is not None:current['probe']=probe
+            elif result['status']=='failed':current.pop('probe',None)
+            self.store.put('cluster',current)
 
     def probe(self, cluster_id):
         p = self.store.get("cluster", cluster_id)
+        p['_check_started_at']=time.time()
         source = """
-import os,pathlib,shutil,subprocess
+import os,pathlib,shutil,subprocess,pwd
 out={'scope':'login-node observation; compute-node GPU and scientific validation not_run','scheduler':p['scheduler'],'commands':{},'queues':[],'python':os.sys.version.split()[0]}
+out['username']=pwd.getpwuid(os.geteuid()).pw_name
 for name in ['bsub','bjobs','bqueues','bkill','sbatch','squeue','sacct','sinfo','scancel','nvidia-smi','module']:
  out['commands'][name]=bool(shutil.which(name))
 cmd=['bqueues','-noheader','-o','queue_name:80'] if p['scheduler']=='lsf' else ['sinfo','-h','-o','%P']
 try:
  result=subprocess.run(cmd,capture_output=True,text=True,timeout=12)
+ out['queue_status']='passed' if result.returncode==0 else 'blocked'
  if result.returncode==0:out['queues']=[x.strip().rstrip('*') for x in result.stdout.splitlines() if x.strip()][:100]
-except Exception:pass
+except Exception:out['queue_status']='blocked'
 out['executables']={k:{'exists':pathlib.Path(v).is_file(),'executable':os.access(v,os.X_OK)} for k,v in p['executables'].items()}
 print('__STUDIO_JSON__'+json.dumps(out))
 """
         payload={"scheduler":p["scheduler"],"executables":p["environment"]["executables"]}
         script=python_script({**p,"environment":{"executables":{"python":"python3"}}},source,payload)
-        result = parse_output(self.transport(p).run(script))
-        p["probe"] = {**result, "observed_at":time.time()}
-        self.store.put("cluster", p)
-        return result
+        try:
+            result = parse_output(self.transport(p).run(script))
+            if result.pop('username',None)!=p['username']:raise ConnectionError('Remote username differs; check the explicit SSH username')
+            commands=('bsub','bjobs') if p['scheduler']=='lsf' else ('sbatch','squeue')
+            scheduler='passed' if all(result.get('commands',{}).get(key) for key in commands) and result.get('queue_status')=='passed' else 'blocked'
+            result.update(observed_at=time.time(),status='passed' if scheduler=='passed' else 'blocked',scheduler_status=scheduler,ssh_status='passed')
+            self._connection_result(p,{'status':result['status'],'ssh_status':'passed','scheduler_status':scheduler,'scope':result['scope']},result)
+            return result
+        except Exception as exc:
+            self._connection_result(p,{'status':'failed','reason':'Cluster discovery failed; check the saved SSH connection and login-node Python','error_type':type(exc).__name__})
+            raise
 
     def skill(self,project_id,cluster_id):
         _,p=self.allowed(project_id,cluster_id)

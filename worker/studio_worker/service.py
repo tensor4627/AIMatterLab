@@ -36,6 +36,7 @@ class Service(RuntimeServiceMixin):
         from .cluster import Clusters
         self.clusters = Clusters(self)
         self.stop_event = threading.Event()
+        self.compute_setup_lock = threading.Lock()
         self.processes = {}
         self.provenance = {}
         for run in self.store.runs():
@@ -71,7 +72,17 @@ class Service(RuntimeServiceMixin):
         return self.store.put("project", value)
 
     def register_environment(self, value):
+        with self.store.lock:
+            return self._register_environment(value)
+
+    def _register_environment(self, value):
         value = dict(value)
+        draft_id=value.pop('setup_draft_id',None)
+        draft=None
+        if draft_id is not None:
+            leaf(draft_id)
+            draft=self.store.get('environment-draft',draft_id)
+            if draft.get('status')!='draft':raise ValueError('This setup proposal has already been saved; read the current registered environment')
         if not value.get("name") or not isinstance(value.get("executables"), dict):
             raise ValueError("Environment name and absolute executable paths required")
         for path in [*value["executables"].values(), *value.get("repositories", {}).values(), *value.get("skills", {}).values()]:
@@ -80,6 +91,9 @@ class Service(RuntimeServiceMixin):
         value.setdefault("id", secrets.token_hex(8))
         leaf(value["id"])
         value["provider"] = "wsl"
+        if draft is not None:
+            self.store.put_many([('environment',value),('environment-draft',{**draft,'status':'applied','environment_id':value['id'],'applied_at':time.time()})])
+            return value
         return self.store.put("environment", value)
 
     def authorize(self, spec):

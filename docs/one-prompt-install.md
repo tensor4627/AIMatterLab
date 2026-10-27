@@ -22,6 +22,12 @@ flowchart LR
 
 默认私有配置及收据在 .studio/installation。plan 无执行副作用。configure 创建独立 venv；源码使用完整 commit，不切换已有源码分支。现有环境可以显式复用。环境配置结果不会悄悄替换用户配置；Agent 审查 configure.json 后合并并重新探测。Node/pnpm/Python/WSL 的系统安装由通用 Agent 按本机权限处理；需要管理员操作或重启时保持 blocked。
 
+### 环境交接（0.18.4）
+
+安装验收与日常使用必须指向生成 launcher 的同一个 worker root 和 profile。安装结束前在该实例读取 `compute_readiness` / `list_environments`，核对选中的 Python、引擎、源码来源与 CUDA 观察结果，并为实际路线保存 `probe_environment` 运行时收据。另一隔离验收实例跑通，不代表正常实例已经登记。首启/连接时默认发现现有的标准 venv、conda 索引、PATH/已绑定源码中的程序，新增独立版本登记，保留旧环境和项目授权。该搜索有明确范围；自定义前缀和非标准原生构建可由 Agent 用 `draft_local_environment` 提议，在计算环境页用表单审阅保存。GPU 发现、依赖探测与真实科学短例分别记录。
+
+询问用户是否需要集群，优先导入已有 SSH 引用。先只读核验登录用户、调度器及队列，再讨论目标队列、资源与激活路径，使用 `draft_cluster_setup` 生成可审阅设置；连接检查不提交任务。连接页显示实际检查时间，失败清除旧成功，修改配置或结果过旧后显示待复查。计算节点 GPU/模型仍需用户审阅后的短例，不把登录节点探测当成安装成功。
+
 ## 配置与命令
 
 复制 installation/config.example.json 到忽略目录，填写目标 Linux Python 及 repositories。Windows Node 22.19+、pnpm 11、目标 Python 3.10+。Codex 需要兼容固定 app-server 协议的 CLI；Kimi / Qwen 使用已锁定官方 ACP runtime，认证由用户完成。版本信息见 desktop/generated/version.json 和 package.json。
