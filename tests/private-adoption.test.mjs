@@ -1,7 +1,8 @@
+import {withComputeProject} from './deployment-worker-fixture.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
 import {fixture,viewed,clone,directory,h} from './local-review-fixture.mjs';
 import {digest} from '../desktop/review-authority.mjs';
-import {saveDeployment,prepareDeployment} from '../desktop/task-deployment.mjs';
+import {saveDeployment,prepareDeployment as prepareActualDeployment} from '../desktop/task-deployment.mjs';
 const generated=JSON.parse(fs.readFileSync(new URL('./generated-private-fixture.json',import.meta.url)));
 function privateFixture(){const f=fixture(),module='studio_custom_'+generated.code_sha256+'.py',graph=f.pair.graph;
  const binding={id:'owned-private-entry',spec_sha256:generated.spec_sha256,code_sha256:generated.code_sha256,parameters_sha256:generated.parameters_sha256,revision:'c'.repeat(32),reference_structure_sha256:digest(f.files.get(directory+'/model.xyz')),numerical_receipt_sha256:h,module_name:module.slice(0,-3),module_file:module,class_name:generated.class_name,output_size:1};
@@ -29,3 +30,5 @@ test('Realistic content-addressed adoption preserves names/roles/current private
 for(const kind of ['sha','size','path','bytes','truncated'])test('Adopted '+kind+' mismatch cannot authorize the run',async()=>{const {f,prepare}=await adoptFixture(),original=f.worker.request.bind(f.worker);f.worker.request=async(method,target,args)=>{const v=await original(method,target,args);if(target==='/api/workspace/read'&&args.project_id==='compute'){if(kind==='sha')v.sha256='e'.repeat(64);if(kind==='size')v.size++;if(kind==='path')v.path='/other';if(kind==='bytes')v.text+='unexpected';if(kind==='truncated')v.truncated=true;}return v;};await assert.rejects(prepare(),/adopted copy differs/);assert.equal(f.task().deployment.prepared,undefined);});
 for(const kind of ['old-code','other-entry','extra-entry','unknown-version'])test('Run private lineage '+kind+' cannot inherit current local approval',async()=>{const {f,prepare}=await adoptFixture(),original=f.worker.request.bind(f.worker);f.worker.request=async(method,target,args)=>{const v=await original(method,target,args);if(target==='/api/runs/prepare'){if(kind==='old-code')v.private_cv_versions[0].code_sha256='0'.repeat(64);if(kind==='other-entry')v.private_cv_versions[0].entry_id='foreign';if(kind==='extra-entry')v.private_cv_versions.push({entry_id:'other'});if(kind==='unknown-version')v.private_cv_versions=[{entry_id:'owned-private-entry',version_status:'unknown'}];}return v;};await assert.rejects(prepare(),/private version lineage/);});
 test('Changed private module bytes cannot be approved merely because metadata matches',async()=>{const {f,module}=privateFixture();f.files.set(directory+'/'+module,generated.source+'\n# changed');await assert.rejects(f.service.inspect({taskId:'task'},{}),/structure\/reference\/module changed/);});
+
+function prepareDeployment(records,worker,args,localReview){return prepareActualDeployment(records,withComputeProject(worker,records.read(args.taskId)),args,localReview);}

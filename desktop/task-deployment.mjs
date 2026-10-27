@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {manifestDefinitionCorrection} from './manifest-binding.mjs';
 import {legacyNebCorrection} from './neb-binding.mjs';
 import {isDeepStrictEqual} from 'node:util';
+import {deploymentProjectIssue} from '../shared/deployment-authorization.mjs';
 import {validDeployment,scientificSpec,deploymentCurrent,snapshotIdentity,inputControlParameters} from '../shared/deployment.mjs';
 export function saveDeployment(records,{taskId,value},localReview){
  const task=records.read(taskId);if(task.workflowVersion!==2)throw Error('This workflow uses the legacy execution page');
@@ -16,6 +17,11 @@ export async function prepareDeployment(records,worker,{taskId},localReview){
  if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('请核对原提交，不要创建重复作业');
  const config=validDeployment(task.deployment?.config),science=scientificSpec(task),revision=task.deployment.revision,localOperation=authority?.kind==='local-human'?localReview.beginOperation(taskId):null;const assertLocal=()=>{if(localOperation)localReview.assertOperation(localOperation);};
  if(authority?.kind==='local-human'){const checked=await localReview.verify(taskId);assertLocal();if(!sameAuthority(checked.authority,authority))throw Error('Human scientific input receipt changed');if(localReview.verifyDeployment){await localReview.verifyDeployment(taskId,config);assertLocal();}else if(config.target!=='local'||config.inputSource!=='local'||config.targetId!==task.authoring?.environmentId)throw Error('Human receipt requires its exact local reviewed runtime');}
+ const projects=await worker.request('GET','/api/projects');assertLocal();
+ if(!Array.isArray(projects))throw Error('无法读取计算项目，请检查作业服务连接后重试。');
+ const issue=deploymentProjectIssue(projects.find(project=>project.id===config.projectId),config,science.engine);
+ if(issue)throw Error(issue.message);
+ const beforePrepare=records.read(taskId);if(beforePrepare.parameterRevision!==task.parameterRevision||beforePrepare.deployment?.revision!==revision||!isDeepStrictEqual(validDeployment(beforePrepare.deployment?.config),config)||(localReview?!sameAuthority(localReview.authority(beforePrepare,config.target),authority):beforePrepare.review?.status!=='ready'||beforePrepare.review.parameterRevision!==task.parameterRevision))throw Error('准备期间流程或部署已修改；请重新检查。');
  if(deploymentCurrent(task,authority)){const current=await worker.request('POST',task.deployment.config.target==='cluster'?'/api/cluster/status':'/api/run/status',{run_id:task.deployment.prepared.artifactId});assertLocal();return current;}
  const request=task.deployment.request,identity=request?.parameterRevision===task.parameterRevision&&request?.deploymentRevision===revision?request.id:randomUUID();task.deployment.request={id:identity,parameterRevision:task.parameterRevision,deploymentRevision:revision};records.save(task);
  const spec={...science,name:task.name,project_id:config.projectId,max_seconds:config.maxSeconds,idempotency_key:identity,directory_name:config.directoryName};
