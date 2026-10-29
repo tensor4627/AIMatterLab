@@ -29,7 +29,7 @@ import {ensureTaskAuthoring} from './task-authoring.mjs';
 import {readTaskInput} from './task-input-preview.mjs';
 import {readTaskPygas,saveTaskPygas,initializeTaskPygas,bindComposition,compositionToolGuard} from './task-pygas.mjs';
 import {visibleUserText} from '../shared/tool-activity.mjs';
-import {ScientificSkills,validateScientificConsent} from './scientific-skills.mjs';
+import {ScientificSkills,validateScientificConsent,normalizeScientificSharing} from './scientific-skills.mjs';
 import {deliverScientificTurn} from './scientific-turn.mjs';
 import {MaterialsProject} from './materials-project.mjs';
 import {discoverSources,sourceContext,toolInventory} from './source-projects.mjs';
@@ -109,6 +109,8 @@ function openUrl(url) {
 async function initialize() {
 catalog = new Catalog(path.join(app.getPath('userData'),'studio'));
 settings = { ...defaults, codexPath:findCodex(),kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'), ...catalog.get('settings','main') };
+const normalizedSharing=normalizeScientificSharing(settings);
+if(normalizedSharing!==settings)settings=catalog.put('settings','main',normalizedSharing);
 for(const provider of ['kimi','qwen']){const stored=settings[provider+'Path'];if(typeof stored==='string'&&/[\\\\/]/.test(stored)&&!fs.existsSync(stored))settings[provider+'Path']=findAgent(provider);}
 if(typeof settings.codexPath==='string'&&/[\\\\/]/.test(settings.codexPath)&&!fs.existsSync(settings.codexPath))settings.codexPath=findCodex();
 if(verifying&&!installationVerifying)settings={...settings,agentProvider:'codex',agentLayout:'right',kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'),language:'zh-CN',fontSize:13,editorFontSize:13,terminalFontSize:12,fontFamily:'system',workerRoot:JSON.parse(fs.readFileSync(path.join(verificationRoot,'.studio/validation/science.json'),'utf8')).desktop_worker_root,workerPort:8770};
@@ -194,6 +196,9 @@ handle('task.linkRun',async({taskId,runId,kind,expectedPrepared})=>{if(!['run','
 handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);workflowContext.clear(result.provider);agents.disconnect(result.provider);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));
+handle('conversation.groups',()=>taskRecords.groups());
+handle('conversation.createGroup',value=>taskRecords.createGroup(value));
+handle('conversation.organize',value=>taskRecords.organize(value));
 handle('conversation.rename',value=>{if(!value||Object.keys(value).sort().join(',')!=='id,name')throw Error('Invalid typed conversation name');return taskRecords.rename(value);});
 handle('conversation.select',async({id})=>{if(typeof id!=='string')throw Error('Invalid conversation');const conversation=catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');assertIdleAgent();if(agents.active!==conversation.provider){workflowContext.clear(agents.active);agents.disconnect(agents.active);}const ticket=workflowContext.begin(conversation.provider,conversation.threadId);await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));workflowContext.assert(ticket);return {...conversation,task:conversation.taskId?taskRecords.read(conversation.taskId):null};});
 handle('ssh.existing',()=>existingConnections(app.getPath('home')));
@@ -367,7 +372,7 @@ handle('agent.login',async({provider,...value})=>{
   const result=await agents.login(provider,value);
   if(provider==='compatible'&&(value.sharePublicGuides!==undefined||previousEndpoint!==result.baseUrl)){
    const shared=!!value.sharePublicGuides,scope=providers=>[...(providers||[]).filter(p=>p!=='compatible'),...shared?['compatible']:[]],sources={...settings.scientificSkillProviders};
-   for(const source of ['pygas','pydyn','gpumd','hotpp','torchnep'])sources[source]=scope(sources[source]);
+   for(const source of ['pydyn','gpumd','hotpp','torchnep'])sources[source]=scope(sources[source]);
    settings=catalog.put('settings','main',{...settings,pygasSkillProviders:scope(settings.pygasSkillProviders),scientificSkillProviders:sources});
   }
   if(result.phase==='configured'||result.phase==='completed'||result.credentialStored)emit('studio:event',{method:'studio/accountUpdated',provider,params:{credentialsChanged:true}});

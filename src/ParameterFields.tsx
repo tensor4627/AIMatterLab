@@ -6,9 +6,10 @@ import {t} from './i18n';
 export function ParameterFields({fields,parameters,onChange,onError,onPreview,disabled=false}:{fields:TaskField[];parameters:Record<string,any>;onChange:(key:string,value:any)=>void;onError:(error:unknown)=>void;onPreview?:(path:string)=>void;disabled?:boolean}){
  return <div className="parameter-fields">{fields.map(field=><ParameterInput key={field.key} field={field} value={parameterValue(parameters,field.key)} missing={fieldMissing(field,parameters)} onChange={value=>onChange(field.key,value)} onError={onError} onPreview={onPreview} disabled={disabled}/>)}</div>;
 }
-export function GroupedParameterFields(props:Parameters<typeof ParameterFields>[0]){
+export function GroupedParameterFields(props:Parameters<typeof ParameterFields>[0]&{compact?:boolean}){
  const {primary,advanced}=partitionFields(props.fields);
- return <><ParameterFields {...props} fields={primary}/>{advanced.length>0&&<details className="advanced-field-group"><summary>{t('高级参数')} <span className="tag">{advanced.length}</span><small>{t('默认值与细节设置')}</small></summary><ParameterFields {...props} fields={advanced}/></details>}</>;
+ const shown=props.compact?primary.slice(0,4):primary,rest=props.compact?primary.slice(4):[];
+ return <><ParameterFields {...props} fields={shown}/>{rest.length>0&&<details className="flow-parameter-details"><summary>{t('更多基础参数')} · {rest.length}</summary><ParameterFields {...props} fields={rest}/></details>}{advanced.length>0&&<details className="advanced-field-group"><summary>{t('高级参数')} <span className="tag">{advanced.length}</span><small>{t('默认值与细节设置')}</small></summary><ParameterFields {...props} fields={advanced}/></details>}</>;
 }
 function ParameterInput({field,value,missing,onChange,onError,onPreview,disabled}:{field:TaskField;value:any;missing:boolean;onChange:(value:any)=>void;onError:(error:unknown)=>void;onPreview?:(path:string)=>void;disabled:boolean}){
  const [advanced,setAdvanced]=useState(''),[emptyMatrix,setEmptyMatrix]=useState(false),[manualPath,setManualPath]=useState('');

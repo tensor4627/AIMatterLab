@@ -126,7 +126,7 @@ export class AgentHub extends EventEmitter{
    return {...result,provider,...this.loginStatus.codex,login:'chatgpt',modelAccess:this.loginStatus.codex?.modelAccess||'not_run'};
   }
   const status=this.loginStatus[provider]||{},credential=['qwen','deepseek','compatible'].includes(provider)?this.vault.get(provider):null;
-  return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan,...provider==='compatible'?{baseUrl:credential.baseUrl,label:credential.label,publicGuidesAllowed:['pygas','pydyn','gpumd','hotpp','torchnep'].every(source=>(source==='pygas'?this.getSettings().pygasSkillProviders||[]:this.getSettings().scientificSkillProviders?.[source]||[]).includes('compatible'))}:{}}:{},modelAccess:status.modelAccess||'not_run'};
+  return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan,...provider==='compatible'?{baseUrl:credential.baseUrl,label:credential.label,reasoningMode:credential.reasoningMode||'omit',reasoningEffort:credential.reasoningEffort||'',publicGuidesAllowed:['pygas','pydyn','gpumd','hotpp','torchnep'].every(source=>(source==='pygas'?this.getSettings().pygasSkillProviders||[]:this.getSettings().scientificSkillProviders?.[source]||[]).includes('compatible'))}:{}}:{},modelAccess:status.modelAccess||'not_run'};
  }
  async rpc(provider,method,params={}){
   providerId(provider);assertRpc(method);if(this.contextPending&&!['turn/interrupt','account/read'].includes(method))throw Error('Wait for conversation context selection to finish');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');
@@ -199,6 +199,7 @@ export class AgentHub extends EventEmitter{
   }
   if(['qwen','deepseek','compatible'].includes(provider)){
    if(this.bridge(provider)?.activeTurns?.size)throw Error('Stop the current reply before replacing API credentials');
+   if(provider==='compatible'&&value.apiKey===''){const old=this.vault.get(provider);let same=false;try{same=new URL(value.baseUrl).href.replace(/\/$/,'')===old?.baseUrl;}catch{}if(same&&old?.apiKey)value={...value,apiKey:old.apiKey};}
    const credential=provider==='deepseek'?deepseekCredentials(value):provider==='compatible'?compatibleCredentials(value):qwenCredentials(value);this.vault.put(provider,credential);this.disconnect(provider);
    this.loginStatus[provider]={phase:'configured',modelAccess:'not_run'};return this.account(provider);
   }

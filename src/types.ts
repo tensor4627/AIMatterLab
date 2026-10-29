@@ -34,7 +34,7 @@ export const engines=[
 
 export interface ClusterRun {id:string;kind:'cluster-run';name:string;engine:string;project_id:string;cluster_id:string;status:RunStatus;directory:string;parameters?:Record<string,unknown>;inputs:Record<string,string>;resources:any;max_seconds:number;cluster:any;script:string;job_id:string|null;validation:any;scientific_validation:any;snapshots:{name:string;source:string;sha256:string;size:number}[]}
 
-export interface Conversation {id:string;provider:AgentProvider;threadId:string;name:string;projectId:string|null;taskId:string|null;updatedAt:number}
+export interface Conversation {groupId?:string|null;pinned?:boolean;id:string;provider:AgentProvider;threadId:string;name:string;projectId:string|null;taskId:string|null;updatedAt:number}
 export interface AgentIntent {id:string;text:string;autoSend?:boolean;taskId?:string;reviewMode?:boolean;threadId?:string;provider?:AgentProvider}
 
 export interface TaskEditRequest {id:string;changes:Record<string,unknown>}

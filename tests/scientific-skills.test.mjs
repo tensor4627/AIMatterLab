@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {ScientificSkills,validateScientificConsent} from '../desktop/scientific-skills.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {ScientificSkills,validateScientificConsent,normalizeScientificSharing} from '../desktop/scientific-skills.mjs';
 test('Legacy pyGAS consent does not broaden other public sources or private skill roots',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-scientific-facade-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  for(const folder of ['builtin','pygas/agents/skills/cv','gpumd/agents/skills/runtime'])await fs.mkdir(path.join(root,folder),{recursive:true});
@@ -12,3 +12,7 @@ test('Legacy pyGAS consent does not broaden other public sources or private skil
  assert.equal(service.tools().length,2);assert(service.tools().every(t=>t.inputSchema.additionalProperties===false));assert(service.tools().every(t=>t.annotations.readOnlyHint===true&&t.annotations.destructiveHint===false&&t.annotations.idempotentHint===true&&t.annotations.openWorldHint===false));
 });
 test('Sharing settings reject unsupported sources, duplicate providers, malformed values and arbitrary private root keys',()=>{for(const value of [null,[],{pygas:['codex']},{private:['codex']},{gpumd:['other']},{gpumd:['codex','codex']},{gpumd:'codex'}])assert.throws(()=>validateScientificConsent(value));validateScientificConsent(undefined);validateScientificConsent({gpumd:['codex']});});
+
+test('Compatible legacy duplicate pyGAS scope is removed without changing authoritative grants',()=>{
+ const old={pygasSkillProviders:['codex'],scientificSkillProviders:{pygas:['compatible'],gpumd:['qwen']},ssh:[{id:'protected'}]};const fixed=normalizeScientificSharing(old);validateScientificConsent(fixed.scientificSkillProviders);assert.deepEqual(fixed.pygasSkillProviders,['codex']);assert.deepEqual(fixed.scientificSkillProviders,{gpumd:['qwen']});assert.equal(fixed.ssh,old.ssh);assert.equal(normalizeScientificSharing(fixed),fixed);assert(old.scientificSkillProviders.pygas);assert.equal(normalizeScientificSharing({scientificSkillProviders:{pygas:['compatible']}}).pygasSkillProviders,undefined);assert.throws(()=>validateScientificConsent(normalizeScientificSharing({scientificSkillProviders:{unknown:[]}}).scientificSkillProviders));
+});

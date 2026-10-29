@@ -3,6 +3,14 @@ import {PublicRuleEvidence} from './public-rule-evidence.mjs';
 import {ScientificSkillRouter} from './scientific-skill-router.mjs';
 import {ScientificSkillContext} from './scientific-context.mjs';
 const SOURCES=new Set(['gpumd','pydyn','hotpp','torchnep']);
+// v0.18.7 compatible-login wrote a redundant pyGAS entry into this map.
+// The separate pygasSkillProviders remains authoritative; never merge grants.
+export function normalizeScientificSharing(settings){
+ const scope=settings.scientificSkillProviders;
+ if(!scope||typeof scope!=='object'||Array.isArray(scope)||!Object.hasOwn(scope,'pygas'))return settings;
+ const {pygas:legacy,...scientificSkillProviders}=scope;
+ return {...settings,scientificSkillProviders};
+}
 export function validateScientificConsent(value){
  if(value===undefined)return;
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(source=>!SOURCES.has(source)))throw Error('Invalid public scientific skill source scope');
