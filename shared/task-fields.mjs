@@ -42,7 +42,7 @@ export function normalizeSteps(steps,parameters={},missing=[]){
  const result=steps.map((step,i)=>{
   if(typeof step==='string')return {id:'step-'+i,title:step,description:'',fields:[],optional:false};
   if(!step||typeof step!=='object'||typeof step.id!=='string'||!step.id||ids.has(step.id)||typeof step.title!=='string'||!step.title||!step.title.trim()||!Array.isArray(step.fields))throw Error('Invalid workflow step');ids.add(step.id);
-  return {...step,description:step.description||'',fields:step.fields.map(f=>{validField(f);if(used.has(f.key))throw Error('Duplicate field');used.add(f.key);return {...f,required:f.required||missing.includes(f.key)};})};
+  return {...step,description:step.description||'',fields:step.fields.map(f=>{validField(f);if(used.has(f.key))throw Error('Duplicate field');used.add(f.key);const value=parameterValue(parameters,f.key),files=f.type==='list'&&(f.key==='files'||Array.isArray(value)&&value.length>0&&value.every(v=>typeof v==='string'&&/^(?:[A-Za-z]:)?[\\/]/.test(v)));return {...f,...files?{type:'files'}:{},required:f.required||missing.includes(f.key)};})};
  });
  const leftovers=flattenParameters(parameters).filter(f=>!used.has(f.key));
  for(const key of missing){if(!isFieldKey(key))continue;if(!used.has(key)&&!leftovers.some(f=>f.key===key))leftovers.push(inferField(key,parameterValue(parameters,key),true));}

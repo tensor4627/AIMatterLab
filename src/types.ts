@@ -4,7 +4,7 @@ export interface Environment {id:string;name:string;executables:Record<string,st
 export interface Run {superseded_by?:string;revision_of?:string;id:string;name:string;engine:string;project_id:string;environment_id:string;status:RunStatus;gpu:number;max_seconds:number;directory:string;validation:{status:string;message?:string;output?:string;scope?:string;scientific_status?:string;artifact_status?:string};created_at:number;updated_at:number;command:string[];parameters?:Record<string,unknown>;inputs:Record<string,string>;error?:string;exit?:{exit_code:number;reason?:string}}
 export interface Workflow {id:string;project_id:string;name:string;steps:unknown[];run_ids:string[]}
 export interface Artifact {id:string;name:string;path:string;kind:string;sha256:string;size:number;metadata?:Record<string,unknown>}
-export type AgentProvider='codex'|'kimi'|'qwen'|'deepseek';
+export type AgentProvider='codex'|'kimi'|'qwen'|'deepseek'|'compatible';
 export interface AgentConnectRequest {provider:AgentProvider;repairTools?:boolean}
 export interface AgentRpcRequest extends AgentConnectRequest {method:string;params?:Record<string,unknown>}
 export type SkillAttachment={attachmentId:string;name:string}&({functionId:string;path?:never}|{path:string;functionId?:never});

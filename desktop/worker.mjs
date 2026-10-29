@@ -52,7 +52,7 @@ export class WorkerClient {
  setLocalTools(definitions,handler){this.localDefinitions=definitions;this.localHandler=handler;}
  setScopedTools(definitions,handler){this.scopedDefinitions=definitions;this.scopedHandler=handler;}
  bindProviderContext(provider,context,options={}){
-  if(!['codex','kimi','qwen','deepseek'].includes(provider))throw Error('Unsupported provider');
+  if(!['codex','kimi','qwen','deepseek','compatible'].includes(provider))throw Error('Unsupported provider');
   const normalized=providerContext(context);this.providerContexts.set(provider,normalized);
   if(!this.connection)return {context:normalized,epoch:null,changed:true,rotated:false};
   this.providerScopes.bind(this.connection);return this.providerScopes.bindContext(provider,normalized,options);

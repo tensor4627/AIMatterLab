@@ -163,7 +163,7 @@ def dispatch(service, method, path, data, admin=False):
     store = service.store
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.18.6", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.18.7", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
         if path == "/api/tools/status":
             return service.diagnose_tools()
         if path == "/api/compute/readiness":
@@ -240,6 +240,14 @@ def dispatch(service, method, path, data, admin=False):
         if not admin:raise PermissionError("Only desktop can bind draft workspaces or adopt inputs")
         from .authoring_workspace import ensure,adopt
         return (ensure if path.endswith("context") else adopt)(service,data)
+    if path in ('/api/studio-workspace/create','/api/studio-workspace/read','/api/studio-workspace/import','/api/studio-workspace/retain'):
+        if method!='POST':raise ValueError('Use typed workspace POST actions')
+        if not admin:raise PermissionError('Only the desktop can choose workspaces or import assets')
+        from .workspace_layout import create,describe,import_asset,retain_inputs
+        if path.endswith('/create'):return create(service,data)
+        if path.endswith('/import'):return import_asset(service,data)
+        if path.endswith('/retain'):return retain_inputs(service,data)
+        return describe(service,service.store.get('project',data['project_id'])) if data.get('project_id') else [describe(service,p) for p in service.store.list('project') if p.get('studio_workspace')]
     if path=="/api/source-projects":
         if not admin:raise PermissionError("Only desktop can register authoring sources")
         from .source_projects import inspect_source
@@ -448,7 +456,7 @@ def main():
                         return self.respond(202)
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                                 "serverInfo": {"name": "gpusampling", "version": "0.18.6"},
+                                 "serverInfo": {"name": "gpusampling", "version": "0.18.7"},
                                  "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}

@@ -200,7 +200,7 @@ class CustomCvService:
 
  def access(self,provider):
   """Metadata-only main guard. Not an MCP tool or an authorization mutation."""
-  if provider not in('codex','kimi','qwen','deepseek',None):raise ValueError('Unknown private provider scope')
+  if provider not in('codex','kimi','qwen','deepseek','compatible',None):raise ValueError('Unknown private provider scope')
   from .private_lineage import current_rows
   projects={};bindings=[];entries={};blocked_paths=[]
   def allowed(version):
@@ -234,7 +234,7 @@ class CustomCvService:
  def provider_status(self,data,body=False):
   with self.lock:
    ctx=self.context(data);item=self.owned(data,ctx);provider=data.get('provider')
-   if provider not in('codex','kimi','qwen','deepseek'):raise PermissionError('A current provider scope is required')
+   if provider not in('codex','kimi','qwen','deepseek','compatible'):raise PermissionError('A current provider scope is required')
    allowed=item.get('sharing',{}).get(provider)is True
    if not allowed:return {'status':'permission_required','allowed':False,'id':item['id'],'scope':'This exact private formula/source is not shared with the selected provider'}
    expected={key:item.get(key)for key in('spec_sha256','code_sha256','parameters_sha256','revision')}

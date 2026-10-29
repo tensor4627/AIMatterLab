@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import path from 'node:path';
-import {CodexBridge,PROTOCOL_VERSION} from '../desktop/codex.mjs';
+import {CodexBridge,PROTOCOL_VERSION,verifyProtocolVersion} from '../desktop/codex.mjs';
+import {STUDIO_VERSION} from '../desktop/studio-version.mjs';
 import {bootstrapSkills} from '../desktop/codex-isolation.mjs';
 
 test('the bridge and generated app-server protocol identify the same exact tested CLI',()=>{
@@ -14,12 +15,18 @@ test('the bridge and generated app-server protocol identify the same exact teste
  for(const method of ['initialize','account/read','model/list','thread/start','thread/resume','thread/read','turn/start','turn/steer','turn/interrupt','config/read','skills/list','mcpServerStatus/list'])assert(client.includes('"method": "'+method+'"'));
 });
 
+test('an unverified CLI stays blocked with actionable installed/expected version diagnostics',()=>{
+ assert.doesNotThrow(()=>verifyProtocolVersion(PROTOCOL_VERSION));
+ for(const installed of ['0.163.0-alpha.11.2',PROTOCOL_VERSION+'.unverified','future-version'])assert.throws(()=>verifyProtocolVersion(installed),error=>error.code==='STUDIO_CODEX_PROTOCOL_MISMATCH'&&error.expectedVersion===PROTOCOL_VERSION&&error.installedVersion===installed&&error.message.includes('会话和计算流程仍保留'));
+});
+
 test('legacy native skill path strings do not authorize relative or plugin paths in Studio isolation',async()=>{
  for(const skillPath of ['relative/SKILL.md','plugin://unscoped/skills/SKILL.md']){
-  const calls=[],child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{};
-  child.stdin={write:value=>{const m=JSON.parse(value);calls.push(m.method);if(m.id)queueMicrotask(()=>child.stdout.write(JSON.stringify({id:m.id,result:m.method==='skills/list'?{data:[{skills:[{path:skillPath,enabled:false}]}]}:{}})+'\n'));}};
+  const calls=[],initializers=[],child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{};
+  child.stdin={write:value=>{const m=JSON.parse(value);calls.push(m.method);if(m.method==='initialize')initializers.push(m.params);if(m.id)queueMicrotask(()=>child.stdout.write(JSON.stringify({id:m.id,result:m.method==='skills/list'?{data:[{skills:[{path:skillPath,enabled:false}]}]}:{}})+'\n'));}};
   await assert.rejects(bootstrapSkills('fixture',[],path.resolve('synthetic-empty'),{spawnProcess:()=>child}),/Ambiguous native skill path/);
   assert.deepEqual(calls,['initialize','initialized','skills/list']);
+  assert.equal(initializers[0].clientInfo.version,STUDIO_VERSION);assert.equal(initializers[0].capabilities,undefined);
  }
 });
 

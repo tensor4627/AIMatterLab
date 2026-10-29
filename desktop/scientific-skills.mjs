@@ -6,7 +6,7 @@ const SOURCES=new Set(['gpumd','pydyn','hotpp','torchnep']);
 export function validateScientificConsent(value){
  if(value===undefined)return;
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(source=>!SOURCES.has(source)))throw Error('Invalid public scientific skill source scope');
- for(const providers of Object.values(value))if(!Array.isArray(providers)||providers.some(p=>!['codex','kimi','qwen','deepseek'].includes(p))||new Set(providers).size!==providers.length)throw Error('Invalid scientific skill provider scope');
+ for(const providers of Object.values(value))if(!Array.isArray(providers)||providers.some(p=>!['codex','kimi','qwen','deepseek','compatible'].includes(p))||new Set(providers).size!==providers.length)throw Error('Invalid scientific skill provider scope');
 }
 export class ScientificSkills{
  constructor({map,bundledRoot,sources,settings,setupAllowed,studioRoot}){

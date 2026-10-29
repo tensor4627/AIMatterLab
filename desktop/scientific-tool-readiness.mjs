@@ -1,6 +1,6 @@
 import {isDeepStrictEqual} from 'node:util';
 import {DEFINITION_ONLY_TOOLS} from './private-definition-scope.mjs';
-const providers=new Set(['codex','kimi','qwen','deepseek']);
+const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 /** Readiness observes the main-owned selection; it never selects a conversation or grants access. */
 export async function scientificToolReadiness({worker,codex,workflowContext,records,privateAccess,selectedProvider},provider){

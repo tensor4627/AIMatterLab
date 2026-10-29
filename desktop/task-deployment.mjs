@@ -22,6 +22,7 @@ export async function prepareDeployment(records,worker,{taskId},localReview){
  const task=records.read(taskId);return taskOperation(records,taskId,'prepare',JSON.stringify([task.parameterRevision,task.deployment?.revision,task.deployment?.config]),()=>prepareOnce(records,worker,{taskId},localReview));
 }
 async function prepareOnce(records,worker,{taskId},localReview){
+ if(records.read(taskId).workspaceChoice==='pending')throw Error('请先在计算流程的“工作区与文件”选择新建、已有工作区或沿用草稿目录。');
  const task=records.read(taskId),target=task.deployment?.config?.target,authority=localReview?.authority(task,target);if(localReview?!authority:task.review?.status!=='ready'||task.review.parameterRevision!==task.parameterRevision)throw Error('计算流程已变化，请重新复核');
  assertDeploymentWorker(task,worker);assertConfirmedDeployment(task);const connection=worker.connection;
  if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('请核对原提交，不要创建重复作业');

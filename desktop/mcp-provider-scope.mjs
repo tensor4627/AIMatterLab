@@ -1,5 +1,5 @@
 import {randomBytes,createHash,timingSafeEqual} from 'node:crypto';
-const PROVIDERS=new Set(['codex','kimi','qwen','deepseek']);
+const PROVIDERS=new Set(['codex','kimi','qwen','deepseek','compatible']);
 export const MCP_CONTEXT_KEYS=Object.freeze(['threadId','taskId','projectId','environmentId','inputRoot']);
 export function providerContext(value={}){
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!MCP_CONTEXT_KEYS.includes(k)))throw Error('Invalid trusted provider context');

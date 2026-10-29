@@ -216,7 +216,7 @@ class Registry:
    receipt={'kind':'human_formula_confirmation','spec_sha256':item['spec_sha256'],'confirmed_at':now()};code=module_source(spec)
    item.update(formula_approval=receipt,code_sha256=code['code_sha256'],class_name=code['class_name'],code_approval=None,numerical={'status':'not_run'},numerical_receipt_sha256=None)
    if share:
-    if provider not in ('codex','kimi','qwen','deepseek'):raise ValueError('Choose an exact provider sharing scope')
+    if provider not in ('codex','kimi','qwen','deepseek','compatible'):raise ValueError('Choose an exact provider sharing scope')
     item['sharing']={provider:True}
    paths=[self._object('sources',code['code_sha256'],code['source'].encode('utf8'),'.py'),self._object('approvals',sha(receipt),stable(receipt))]
    return self._save(item,'Confirm formula and generate private primitive '+identifier,paths)
@@ -229,7 +229,7 @@ class Registry:
  def share(self,identifier,expected,provider,enabled):
   with self.lock:
    item=self._cas(identifier,expected)
-   if provider not in ('codex','kimi','qwen','deepseek') or type(enabled)is not bool:raise ValueError('Explicit private provider sharing scope required')
+   if provider not in ('codex','kimi','qwen','deepseek','compatible') or type(enabled)is not bool:raise ValueError('Explicit private provider sharing scope required')
    item.setdefault('sharing',{})[provider]=enabled
    return self._save(item,'Update private CV sharing '+identifier)
  def record_numerical(self,identifier,expected,report):

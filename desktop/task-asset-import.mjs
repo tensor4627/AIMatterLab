@@ -3,7 +3,7 @@ import path from 'node:path';
 import {constants} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {linuxPath} from './security.mjs';
-const MAX_BYTES=512*1024*1024,operations=new WeakMap(),providers=new Set(['codex','kimi','qwen','deepseek']);
+const MAX_BYTES=512*1024*1024,operations=new WeakMap(),providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const extensions=new Set(['.xyz','.extxyz','.cif','.pdb','.vasp','.txt','.pt','.pt2','.pth','.ckpt','.yaml','.yml','.json','.in','.py','.toml','.dat']);
 const credentials=new Set(['.ssh','.aws','.azure','.gnupg','.kube','.codex']);
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);

@@ -1,3 +1,5 @@
+import {taskOperation} from './task-operations.mjs';
+import {workspaceController} from './workspaces.mjs';
 import {explicitSetupStage} from './explicit-setup-stage.mjs';
 import {createComputeOnboarding} from './compute-onboarding.mjs';
 import {customCvNumericDialog,referenceImportDialog} from './custom-cv-dialog.mjs';
@@ -165,7 +167,9 @@ customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.a
 for(const action of ['read','saveSpec','approveFormula','approveCode','sharing','validate','status','attach','reuse'])handle('customCv.'+action,(value,event)=>customCv.dispatch(action,value,event));
 handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
-handle('task.create',value=>taskRecords.create(value));
+handle('task.create',value=>{const task=taskRecords.create(value);if(task.workflowVersion===2&&!task.authoring&&task.workspaceChoice===undefined){const workspace=catalog.list('workspace-index').find(w=>w.id===value.projectId&&JSON.stringify(w.workerBinding)===JSON.stringify(worker.identity));task.workspaceChoice=workspace?'workspace':'pending';if(workspace)task.workspace=workspace;return taskRecords.save(task);}return task;});
+const workspaces=()=>workspaceController({records:taskRecords,worker,assertIdle:assertIdleAgent,onBound:workspace=>catalog.put('workspace-index',workspace.workerBinding.distribution+':'+workspace.workerBinding.root+':'+workspace.id,{...workspace,assets:[]}),chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},refreshContext:async task=>{const current=workflowContext.current();if(current.taskId===task.id){const ticket=workflowContext.begin(task.provider,task.threadId);await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));}}});
+for(const [method,action]of [['workspace.list','list'],['workspace.create','create'],['workspace.select','select'],['workspace.keepDraft','keepDraft'],['workspace.import','importAsset'],['workspace.attach','attach']])handle(method,value=>action==='list'?workspaces()[action](value):taskOperation(taskRecords,value.taskId,'workspace-'+action,JSON.stringify(value),()=>workspaces()[action](value)));
 handle('task.deployment.save',value=>saveDeployment(taskRecords,value,localReview,worker));
 handle('task.deployment.draft',value=>saveDeploymentDraft(taskRecords,worker,value));
 handle('task.deployment.context',value=>deploymentContext(taskRecords,worker,value));
@@ -190,6 +194,7 @@ handle('task.linkRun',async({taskId,runId,kind,expectedPrepared})=>{if(!['run','
 handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);workflowContext.clear(result.provider);agents.disconnect(result.provider);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));
+handle('conversation.rename',value=>{if(!value||Object.keys(value).sort().join(',')!=='id,name')throw Error('Invalid typed conversation name');return taskRecords.rename(value);});
 handle('conversation.select',async({id})=>{if(typeof id!=='string')throw Error('Invalid conversation');const conversation=catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');assertIdleAgent();if(agents.active!==conversation.provider){workflowContext.clear(agents.active);agents.disconnect(agents.active);}const ticket=workflowContext.begin(conversation.provider,conversation.threadId);await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));workflowContext.assert(ticket);return {...conversation,task:conversation.taskId?taskRecords.read(conversation.taskId):null};});
 handle('ssh.existing',()=>existingConnections(app.getPath('home')));
 handle('ssh.import',({ref})=>existingProfile(app.getPath('home'),ref));
@@ -219,7 +224,7 @@ handle('settings',data => {
   for(const [key,min,max] of [['fontSize',12,24],['minimumFontSize',11,18],['chatFontSize',12,28],['editorFontSize',10,28],['terminalFontSize',10,24]])
     if(next[key]!==undefined&&(!Number.isInteger(next[key])||next[key]<min||next[key]>max))throw Error('Invalid font size');
   if(next.fontFamily && !['system','sans','serif'].includes(next.fontFamily))throw Error('Unsupported font');
-  if(!Array.isArray(next.pygasSkillProviders||[])||(next.pygasSkillProviders||[]).some(p=>!['codex','kimi','qwen','deepseek'].includes(p)))throw Error('Invalid skill sharing provider scope');
+  if(!Array.isArray(next.pygasSkillProviders||[])||(next.pygasSkillProviders||[]).some(p=>!['codex','kimi','qwen','deepseek','compatible'].includes(p)))throw Error('Invalid skill sharing provider scope');
   validateScientificConsent(next.scientificSkillProviders);
   if(next.sourceIds!==undefined&&(!Array.isArray(next.sourceIds)||next.sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id))))throw Error('Invalid source allowlist');
   if(!Array.isArray(next.sourceRoots||[])||(next.sourceRoots||[]).some(v=>typeof v!=='string'||!path.isAbsolute(v)))throw Error('Source roots must be absolute paths');
@@ -323,7 +328,7 @@ async function agentRpc({provider,method,params={}}){
   }
   if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
   if(!definitionOnly)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSources())}]};
-  if(provider==='deepseek'){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
+  if(['deepseek','compatible'].includes(provider)){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
   const registeredRoots=definitionOnly?[]:studioSkillRoots(),registered=definitionOnly?[]:localSkills(registeredRoots),input=[];
   for(const item of params.input||[]){
    if(item.type==='text')input.push(item);
@@ -356,11 +361,22 @@ handle('agent.configure',async({provider,preferences={},threadId,model})=>{
   agentConfig(preferences);settings=catalog.put('settings','main',{...settings,agent:preferences});await agents.configure(provider,preferences);return threadId?agentRpc({provider,method:'thread/resume',params:{threadId,model}}):{configured:true};
 });
 handle('agent.login',async({provider,...value})=>{
+  assertIdleAgent();
+  if(provider==='compatible'&&value.sharePublicGuides!==undefined&&typeof value.sharePublicGuides!=='boolean')throw Error('Invalid public guide sharing choice');
+  const previousEndpoint=provider==='compatible'?agents.vault.get('compatible')?.baseUrl:null;
   const result=await agents.login(provider,value);
+  if(provider==='compatible'&&(value.sharePublicGuides!==undefined||previousEndpoint!==result.baseUrl)){
+   const shared=!!value.sharePublicGuides,scope=providers=>[...(providers||[]).filter(p=>p!=='compatible'),...shared?['compatible']:[]],sources={...settings.scientificSkillProviders};
+   for(const source of ['pygas','pydyn','gpumd','hotpp','torchnep'])sources[source]=scope(sources[source]);
+   settings=catalog.put('settings','main',{...settings,pygasSkillProviders:scope(settings.pygasSkillProviders),scientificSkillProviders:sources});
+  }
+  if(result.phase==='configured'||result.phase==='completed'||result.credentialStored)emit('studio:event',{method:'studio/accountUpdated',provider,params:{credentialsChanged:true}});
   if(provider==='codex'&&result.url)await openUrl(result.url);
   return result;
 });
 handle('agent.login.cancel',()=>{agents.cancelLogin();return {};});
+handle('agent.logout',async value=>{if(!value||Object.keys(value).join(',')!=='provider')throw Error('Invalid typed account request');assertIdleAgent();const result=await agents.logout(value.provider);emit('studio:event',{method:'studio/accountUpdated',provider:value.provider,params:{credentialsChanged:true}});return result;});
+handle('agent.testConnection',async value=>{if(!value||Object.keys(value).join(',')!=='provider')throw Error('Invalid typed account request');assertIdleAgent();return agents.testConnection(value.provider);});
 handle('agent.login.open',async({provider})=>{
   const state=await agents.account(provider);if(!state.url)throw Error('Start provider login first');return shell.openExternal(loginUrl(provider,state.url));
 });

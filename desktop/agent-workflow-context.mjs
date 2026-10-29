@@ -1,5 +1,5 @@
 import {isDeepStrictEqual} from 'node:util';
-const providers=new Set(['codex','kimi','qwen','deepseek']);
+const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const keys=['threadId','taskId','projectId','environmentId','inputRoot'];
 function identity(value,label,nullable=false){if(value===null&&nullable)return null;if(typeof value!=='string'||!value||value.length>(label==='inputRoot'?4096:200)||value.includes('\0'))throw Error('Invalid '+label);return value;}
 /** Selection tickets are created only by the sender-validated main process. */

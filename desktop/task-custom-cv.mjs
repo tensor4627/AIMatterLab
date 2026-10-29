@@ -2,7 +2,7 @@
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
-const providers=new Set(['codex','kimi','qwen','deepseek']),writes=new Set(['saveSpec','approveFormula','approveCode','sharing','validate','attach','reuse']),semantic=new Set(['saveSpec','approveFormula','approveCode','attach','reuse']),operations=new WeakMap();
+const providers=new Set(['codex','kimi','qwen','deepseek','compatible']),writes=new Set(['saveSpec','approveFormula','approveCode','sharing','validate','attach','reuse']),semantic=new Set(['saveSpec','approveFormula','approveCode','attach','reuse']),operations=new WeakMap();
 const routes={read:'read',saveSpec:'save','approveFormula':'approve-formula',approveCode:'approve-code',sharing:'sharing',validate:'validate',status:'status',attach:'attach',reuse:'reuse'};
 const fields={read:['id','referenceAssetId'],status:['id'],saveSpec:['id','expected','spec','parameterValues'],approveFormula:['id','expected'],approveCode:['id','expected'],sharing:['id','expected','enabled'],validate:['id','expected','referenceAssetId'],attach:['id','expected'],reuse:['id','expected']};
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v),identifier=v=>typeof v==='string'&&/^[a-f0-9]{24}$/.test(v);

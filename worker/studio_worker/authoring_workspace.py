@@ -7,14 +7,14 @@ from .engine_contracts import CONTRACTS
 
 def ensure(service, data):
  key=leaf(data['workspace_id']);projects=service.store.list('project');project=next((p for p in projects if p['id']==data.get('project_id')),None)
- if project and project.get('authoring_only') and project.get('authoring_task_id')!=key:project=None
+ if project and project.get('authoring_only') and not project.get('studio_workspace') and project.get('authoring_task_id')!=key:project=None
  if project is None:
   identifier='draft-'+key;project=next((p for p in projects if p['id']==identifier),None)
   if project and project.get('authoring_task_id')!=key:raise PermissionError('Draft workspace identity mismatch')
   if project is None:
    root=service.root/'projects'/identifier/'inputs'
    project=service.register_project({'id':identifier,'name':'草稿 · '+str(data.get('name') or key).splitlines()[0][:28],'authoring_only':True,'authoring_task_id':key,'policy':{'engines':[],'gpus':[0],'max_seconds':3600,'max_concurrent':1,'input_roots':[str(root)],'environments':[e['id'] for e in service.store.list('environment') if e.get('executables',{}).get('python')],'clusters':[]}})
- if project.get('authoring_only') and project.get('authoring_task_id')==key:
+ if project.get('authoring_only') and (project.get('authoring_task_id')==key or project.get('studio_workspace')):
   # Authoring interpreter access is distinct from engines, queues or resource grants.
   available=[e['id'] for e in service.store.list('environment') if e.get('executables',{}).get('python')]
   if project['policy']['environments']!=available:

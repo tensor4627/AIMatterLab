@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-const PROVIDERS=new Set(['codex','kimi','qwen','deepseek']);
+const PROVIDERS=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const safeRelative=value=>typeof value==='string'&&value.length>0&&/^[A-Za-z0-9_./-]+$/.test(value)&&!value.includes('\\')&&!path.posix.isAbsolute(value)&&value.split('/').every(part=>part!==''&&part!=='.'&&part!=='..');
 const inside=(root,file)=>{const relative=path.relative(root,file);return relative!==''&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative);};

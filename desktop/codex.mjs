@@ -1,11 +1,17 @@
 import {prepareIsolation,overrideArgs,constrainedRequest,verifyIsolation,assertInstructionSources} from './codex-isolation.mjs';
+import {STUDIO_VERSION} from './studio-version.mjs';
 import {createHash} from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
-export const PROTOCOL_VERSION = '0.163.0-alpha.11.2';
+export const PROTOCOL_VERSION = '0.165.0-alpha.1.2';
 const exec = promisify(execFile);
+export function verifyProtocolVersion(version){
+  if(version===PROTOCOL_VERSION)return;
+  const error=new Error('Codex 版本不匹配：当前 '+version+'，Studio 已验证 '+PROTOCOL_VERSION+'。请更新 Studio 或在设置中选择匹配版本；会话和计算流程仍保留。');
+  error.code='STUDIO_CODEX_PROTOCOL_MISMATCH';error.expectedVersion=PROTOCOL_VERSION;error.installedVersion=version;throw error;
+}
 
 export class CodexBridge extends EventEmitter {
   constructor({strictIsolation=false,isolationRoot,isolationDependencies={}}={}) { super();Object.assign(this,{strictIsolation,isolationRoot,isolationDependencies});this.lifecycle=0;this.isolationReady=false; this.pending = new Map(); this.requests = new Map(); this.next = 1; this.activeTurns=new Set();this.threadModels=new Map(); }
@@ -22,8 +28,7 @@ export class CodexBridge extends EventEmitter {
     const generation=this.lifecycle;this.isolationReady=false;
     const { stdout } = await exec(executable, ['--version'], { windowsHide: true, timeout: 15000 });
     const version = stdout.trim().split(' ').at(-1);
-    if (version !== PROTOCOL_VERSION)
-      throw new Error('Codex protocol version mismatch: expected ' + PROTOCOL_VERSION + ', installed ' + version + '. Regenerate and verify protocol before upgrading.');
+    verifyProtocolVersion(version);
     const isolation=this.strictIsolation?await prepareIsolation(executable,this.isolationRoot,config,worker,this.isolationDependencies):null;
     if(generation!==this.lifecycle)throw Error('Codex context launch was cancelled');
     this.isolation=isolation;
@@ -58,7 +63,7 @@ export class CodexBridge extends EventEmitter {
     });
     try {
       this.info = await this.rawRequest('initialize', {
-        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: '0.18.3' }
+        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: STUDIO_VERSION }
       });
       this.send({ method: 'initialized', params: {} });
       if(isolation){this.isolationSummary=await verifyIsolation((...args)=>this.rawRequest(...args),isolation);if(generation!==this.lifecycle||this.process!==child)throw Error('Codex context launch was cancelled');this.isolationReady=true;this.info={...this.info,studioIsolation:this.isolationSummary};}

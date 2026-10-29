@@ -11,7 +11,7 @@ export const SCIENTIFIC_TOOL_ACCESS=Object.freeze({
  list_clusters:'ssh',probe_cluster:'ssh',read_cluster_skill:'ssh',cluster_browse:'ssh',draft_cluster_setup:'ssh',prepare_cluster_run:'ssh',cluster_run_status:'ssh',cluster_read_log:'ssh',read_cluster_input:'ssh',read_cluster_result:'ssh',collect_cluster_artifacts:'ssh',
  read_pygas_workflow:'current',propose_custom_cv:'current',read_custom_cv:'current',
 });
-const providers=new Set(['codex','kimi','qwen','deepseek']);
+const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const sources=new Set(['pygas','pydyn','gpumd','hotpp','torchnep']);
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const object=v=>v&&typeof v==='object'&&!Array.isArray(v);

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-export const PROVIDERS=['codex','kimi','qwen','deepseek'];
+export const PROVIDERS=['codex','kimi','qwen','deepseek','compatible'];
 export const CLI_VERSIONS={kimi:'2.1.1',qwen:'0.24.7'};
 export function providerId(id){if(!PROVIDERS.includes(id))throw Error('Unsupported Agent provider');return id;}
 export function cliCommand(executable,args=[]){

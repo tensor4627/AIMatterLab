@@ -1,6 +1,7 @@
 import {graphAuthorityContext,protectGraphMirrors} from './composition-authority.mjs';
 import {scienceOnly,scientificSpec,deploymentField,inputControlParameters} from '../shared/deployment.mjs';
 import {randomUUID} from 'node:crypto';
+import {conversationTitle,validConversationName} from '../shared/conversation-title.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {normalizeSteps,workflowMissing,setParameter,parameterValue,fieldPath} from '../shared/task-fields.mjs';
 export function structuredResult(value){
@@ -10,7 +11,7 @@ export class TaskRecords{
  constructor(catalog,publish){this.catalog=catalog;this.publish=publish;this.active=new Map();this.turns=new Map();this.cache=new Map();}
  tasks(){return this.catalog.list?.('agent-task')||[...this.cache.values()];}
  read(id){if(typeof id!=='string'||!id||id.length>200)throw Error('Invalid task ID');const value=this.catalog.get('agent-task',id);if(!value)throw Error('Unknown task');return structuredClone(value);}
- conversation(provider,threadId){if(!['codex','kimi','qwen','deepseek'].includes(provider)||typeof threadId!=='string'||!threadId||threadId.length>200)throw Error('Invalid conversation');return this.catalog.get('conversation',provider+':'+threadId);}
+ conversation(provider,threadId){if(!['codex','kimi','qwen','deepseek','compatible'].includes(provider)||typeof threadId!=='string'||!threadId||threadId.length>200)throw Error('Invalid conversation');return this.catalog.get('conversation',provider+':'+threadId);}
  deleted(provider,threadId){return !!(this.catalog.get('deleted-conversation',provider+':'+threadId)||this.catalog.get('retired-conversation-context',provider+':'+threadId));}
  remove(id){
   if(typeof id!=='string'||!id||id.length>210)throw Error('Invalid conversation');
@@ -18,26 +19,28 @@ export class TaskRecords{
   const conversation=this.catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');
   const {provider,threadId}=conversation;this.conversation(provider,threadId);if(id!==provider+':'+threadId)throw Error('Invalid conversation identity');
   const taskIds=this.tasks().filter(t=>t.provider===provider&&t.threadId===threadId).map(t=>t.id);
-  this.catalog.transaction(()=>{this.catalog.put('deleted-conversation',id,{id,provider,threadId,taskIds,deletedAt:Date.now()});this.catalog.remove('conversation',id);this.catalog.remove('agent-thread',id);if(provider==='codex')this.catalog.remove('thread',threadId);if(provider==='deepseek')this.catalog.remove('deepseek-history',threadId);for(const key of taskIds)this.catalog.remove('agent-task',key);});
+  this.catalog.transaction(()=>{this.catalog.put('deleted-conversation',id,{id,provider,threadId,taskIds,deletedAt:Date.now()});this.catalog.remove('conversation',id);this.catalog.remove('agent-thread',id);if(provider==='codex')this.catalog.remove('thread',threadId);if(['deepseek','compatible'].includes(provider))this.catalog.remove(provider+'-history',threadId);for(const key of taskIds)this.catalog.remove('agent-task',key);});
   this.active.delete(id);this.turns.delete(id);for(const key of taskIds)this.cache.delete(key);
   const result={id,provider,threadId,taskIds};this.publish({method:'studio/conversationDeleted',provider,params:result});return result;
  }
  conversations(){
   const values=(this.catalog.list?.('conversation')||[]).filter(c=>!this.deleted(c.provider,c.threadId));
+  for(const c of values)if(!c.titleVersion){c.name=conversationTitle(c.name,{name:c.name,existing:true});c.titleVersion=1;c.titleSource='automatic';this.catalog.put('conversation',c.id,c);}
   for(const task of this.tasks().sort((a,b)=>b.updatedAt-a.updatedAt))if(task.threadId&&!this.deleted(task.provider,task.threadId)&&!values.some(c=>c.provider===task.provider&&c.threadId===task.threadId))values.push(this.remember({provider:task.provider,threadId:task.threadId,projectId:task.projectId,name:task.name,taskId:task.id}));
   return values.sort((a,b)=>b.updatedAt-a.updatedAt);
  }
  remember(value){
   if(this.deleted(value.provider,value.threadId))return null;
   const previous=this.conversation(value.provider,value.threadId),id=value.provider+':'+value.threadId;
-  const next={...previous,id,provider:value.provider,threadId:value.threadId,projectId:previous?.projectId||value.projectId||null,name:previous?.name||value.name?.slice(0,100)||'新对话',taskId:value.taskId||previous?.taskId||null,updatedAt:Date.now()};
+  const next={...previous,id,provider:value.provider,threadId:value.threadId,projectId:previous?.projectId||value.projectId||null,name:previous?.name||conversationTitle(value.intent||value.name,{name:value.intent?undefined:value.name,existing:!value.intent}),titleVersion:1,titleSource:previous?.titleSource||'automatic',taskId:value.taskId||previous?.taskId||null,updatedAt:Date.now()};
   this.catalog.put('conversation',id,next);this.publish({method:'studio/conversationUpdated',provider:next.provider,params:{conversation:next}});return next;
  }
+ rename({id,name}){if(typeof id!=='string')throw Error('Invalid conversation');const previous=this.catalog.get('conversation',id);if(!previous||this.deleted(previous.provider,previous.threadId))throw Error('Unknown conversation');const next={...previous,name:validConversationName(name),titleVersion:1,titleSource:'manual'};this.catalog.put('conversation',id,next);this.publish({method:'studio/conversationUpdated',provider:next.provider,params:{conversation:next}});return next;}
  bindProject(provider,threadId,projectId){const previous=this.conversation(provider,threadId);if(!previous||this.deleted(provider,threadId))throw Error('Unknown conversation');const next={...previous,projectId,updatedAt:Date.now()};this.catalog.put('conversation',next.id,next);this.publish({method:'studio/conversationUpdated',provider,params:{conversation:next}});return next;}
  bound(provider,threadId){const conversation=this.conversation(provider,threadId);const id=conversation?.taskId||this.tasks().filter(t=>t.provider===provider&&t.threadId===threadId).sort((a,b)=>b.updatedAt-a.updatedAt)[0]?.id;return id?this.read(id):null;}
  create(value){
   if(value.planningMode!==true)throw Error('Enable task planning before creating a task');
-  if(!['codex','kimi','qwen','deepseek'].includes(value.provider)||typeof value.request!=='string'||!value.request.trim()||value.request.length>100000||value.newWorkflow!==undefined&&typeof value.newWorkflow!=='boolean')throw Error('Invalid task intent');
+  if(!['codex','kimi','qwen','deepseek','compatible'].includes(value.provider)||typeof value.request!=='string'||!value.request.trim()||value.request.length>100000||value.newWorkflow!==undefined&&typeof value.newWorkflow!=='boolean')throw Error('Invalid task intent');
   if(value.threadId&&this.deleted(value.provider,value.threadId))throw Error('Conversation was deleted');
   if(value.threadId&&!value.newWorkflow){const old=this.bound(value.provider,value.threadId);if(old)return old;}
   const task={id:randomUUID(),kind:'agent-task',planningMode:true,workflowVersion:value.workflowVersion===2?2:1,name:value.request.trim().slice(0,100),request:value.request,provider:value.provider,projectId:value.projectId||null,plan:[],steps:[],parameters:{},parameterRevision:0,manualEdits:{},review:{status:'not_run'},artifacts:[],phase:'collecting',updatedAt:Date.now()};
@@ -109,7 +112,7 @@ export class TaskRecords{
      }
      parameters=protectGraphMirrors(task,parameters);
      if(!isDeepStrictEqual(parameters,task.parameters)||!isDeepStrictEqual(item.steps,task.steps)){task.parameterRevision=(task.parameterRevision||0)+1;task.review={status:'not_run'};}
-     task.name=item.name;task.parameters=parameters;task.steps=item.steps;task.plan=item.steps.map(v=>({step:typeof v==='string'?v:v.title,assistantStatus:'proposed'}));task.missingFields=workflowMissing(task.steps,parameters,item.missing_fields||[]);updated=presented=true;turn.presented=true;continue;
+     task.name=item.name;task.parameters=parameters;task.steps=item.steps;task.plan=item.steps.map(v=>({step:typeof v==='string'?v:v.title,assistantStatus:'proposed'}));task.missingFields=workflowMissing(task.steps,parameters,item.missing_fields||[]);const c=this.conversation(provider,p.threadId);if(c&&c.titleSource!=='manual'){c.name=conversationTitle(task.request,{name:item.name,engine:parameters.engine});c.titleVersion=1;c.titleSource='workflow';this.catalog.put('conversation',c.id,c);this.publish({method:'studio/conversationUpdated',provider,params:{conversation:c}});}updated=presented=true;turn.presented=true;continue;
     }
     const kind=item.kind==='cluster-run'?'cluster-run':item.kind==='cluster-setup'?'cluster-setup':item.engine?'run':'workflow',old=task.artifacts.find(a=>a.id===item.id);
     task.artifacts=task.artifacts.filter(a=>a.id!==item.id);task.artifacts.push({kind,id:item.id,name:item.name,engine:item.engine,parameters:item.parameters||{},steps:item.steps,preparedRevision:old?old.preparedRevision:['prepare_run','prepare_cluster_run','resume_run'].includes(p.item?.tool)?task.parameterRevision:null});updated=true;

@@ -1,4 +1,4 @@
-export type Provider='codex'|'kimi'|'qwen'|'deepseek';
+export type Provider='codex'|'kimi'|'qwen'|'deepseek'|'compatible';
 export type ParameterType='number'|'integer'|'number_vector'|'integer_vector'|'number_matrix';
 export type ParamValue=number|null|ParamValue[];
 export interface ParameterSchema{name:string;type:ParameterType;units:string;description:string;required:boolean;default?:ParamValue;min?:number;max?:number}
