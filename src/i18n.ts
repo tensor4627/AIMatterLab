@@ -821,6 +821,8 @@ const english:Record<string,string> = {
 "大小未记录":"Size not recorded",
 "输入类型":"File type",
 "自定义 CV 定义与审阅":"Custom CV definition and review",
+"连接并关联此草稿":"Connect and associate this draft",
+"此旧草稿缺少服务来源。请确认当前连接设置指向原服务，再连接并关联；参数和文件保持原样。":"This older draft has no service origin. Confirm the connection settings identify its original service, then connect and associate it. Parameters and files are preserved.",
 "正在核对此流程的已有计算服务…":"Checking this workflow's existing compute service…",
 "尚未确认此流程的计算连接，已保存的项目绑定仍保留。":"This workflow's compute connection is unconfirmed. Its saved project binding is retained."
 };

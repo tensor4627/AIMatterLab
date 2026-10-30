@@ -3,10 +3,11 @@ import {validDeploymentDraft,sameDeploymentConfig} from '../shared/deployment-dr
 import {validateProjectSpec} from '../shared/project-policy-edit.mjs';
 import {engineContracts} from '../shared/engine-contracts.mjs';
 import {taskOperation} from './task-operations.mjs';
+import {assertTaskWorker} from '../shared/task-worker-binding.mjs';
 const locked=task=>['validating','submitting','unknown'].includes(task.execution?.phase);
 function request(value,keys){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==[...keys].sort().join(',')||typeof value.taskId!=='string'||!value.taskId||value.taskId.length>200)throw Error('Invalid typed deployment request');}
 export function deploymentWorker(worker){if(!worker?.connection||!worker.identity?.distribution||!worker.identity?.root)throw Error('请连接此流程的作业服务后继续。');return structuredClone(worker.identity);}
-export function assertDeploymentWorker(task,worker){const bound=task.deployment?.workerBinding||task.deploymentDraft?.workerBinding;if(bound&&!equal(bound,deploymentWorker(worker)))throw Error('当前作业服务与此流程绑定的计算环境不同；请恢复原连接，不能将同名项目用于其他服务。');}
+export function assertDeploymentWorker(task,worker){assertTaskWorker(task,worker);}
 export function assertConfirmedDeployment(task){if(task.deploymentDraft&&!sameDeploymentConfig(task.deploymentDraft.config,task.deployment?.config))throw Error('部署草稿与已确认版本不同，请先保存并核对最新部署设置。');}
 export function saveDeploymentDraft(records,worker,args){
  request(args,['taskId','value','expectedRevision','mutationId']);const {taskId,value,expectedRevision,mutationId}=args;

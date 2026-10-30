@@ -52,6 +52,8 @@ import { WorkerClient } from './worker.mjs';
 import {readWorkerStatus} from './worker-status.mjs';
 import {restoreTaskWorker} from './worker-restore.mjs';
 import {explicitWorkerReceipt,rememberExplicitWorker} from './explicit-worker-binding.mjs';
+import {taskWorkerSettings,sameWorkerBinding,taskWorkerSource} from '../shared/task-worker-binding.mjs';
+import {bindLegacyAuthoringWorker} from './task-authoring-binding.mjs';
 import { assertRpc, assertRendererWorkerRoute, linuxPath, sshAlias, quoteShell } from './security.mjs';
 
 const exec = promisify(execFile);
@@ -173,15 +175,15 @@ for(const action of ['read','saveSpec','approveFormula','approveCode','sharing',
 handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
 handle('task.create',value=>{const task=taskRecords.create(value);if(task.workflowVersion===2&&!task.authoring&&task.workspaceChoice===undefined){const workspace=catalog.list('workspace-index').find(w=>w.id===value.projectId&&JSON.stringify(w.workerBinding)===JSON.stringify(worker.identity));task.workspaceChoice=workspace?'workspace':'pending';if(workspace)task.workspace=workspace;return taskRecords.save(task);}return task;});
-const workspaces=()=>workspaceController({records:taskRecords,worker,assertIdle:assertIdleAgent,onBound:workspace=>catalog.put('workspace-index',workspace.workerBinding.distribution+':'+workspace.workerBinding.root+':'+workspace.id,{...workspace,assets:[]}),chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},refreshContext:async task=>{const current=workflowContext.current();if(current.taskId===task.id){const ticket=workflowContext.begin(task.provider,task.threadId);await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));}}});
+const workspaces=()=>workspaceController({records:taskRecords,worker,selection:()=>workflowContext.current(),assertIdle:assertIdleAgent,onBound:workspace=>catalog.put('workspace-index',workspace.workerBinding.distribution+':'+workspace.workerBinding.root+':'+workspace.id,{...workspace,assets:[]}),chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},refreshContext:async task=>{const current=workflowContext.current();if(current.taskId===task.id){const ticket=workflowContext.begin(task.provider,task.threadId);await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));}}});
 for(const [method,action]of [['workspace.list','list'],['workspace.create','create'],['workspace.select','select'],['workspace.keepDraft','keepDraft'],['workspace.import','importAsset'],['workspace.attach','attach']])handle(method,value=>action==='list'?workspaces()[action](value):taskOperation(taskRecords,value.taskId,'workspace-'+action,JSON.stringify(value),()=>workspaces()[action](value)));
 handle('task.deployment.save',value=>saveDeployment(taskRecords,value,localReview,worker));
 handle('task.deployment.draft',value=>saveDeploymentDraft(taskRecords,worker,value));
 handle('task.deployment.context',value=>deploymentContext(taskRecords,worker,value));
 handle('task.deployment.open',value=>openDeploymentSession({records:taskRecords,workflowContext,agents,assertIdle:assertIdleAgent,connect:async task=>{
- const bound=task.deployment?.workerBinding||task.deploymentDraft?.workerBinding;
- if(worker.connection&&!worker.restoring&&!worker.connecting&&(!bound||bound.distribution===worker.identity?.distribution&&bound.root===worker.identity?.root)){try{const health=await worker.request('GET','/api/health');if(health.root===worker.identity?.root)return;}catch{}}
- agents.close();const selected=bound?{...settings,distribution:bound.distribution,workerRoot:bound.root}:settings;
+ const source=taskWorkerSource(task);
+ if(worker.connection&&!worker.restoring&&!worker.connecting&&(!source||sameWorkerBinding(source.binding,worker))){try{const health=await worker.request('GET','/api/health');if(health.root===worker.identity?.root)return;}catch{}}
+ const selected=taskWorkerSettings(task,settings)||settings;agents.close();
  await worker.connect(selected,workerSource);await bindSources();if(selected.distribution===settings.distribution&&selected.workerRoot===settings.workerRoot)discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});
 }},value));
 handle('task.deployment.createProject',value=>{assertIdleAgent();return createDeploymentProject(taskRecords,worker,value);});
@@ -250,6 +252,7 @@ handle('compute.setup',async data=>configureCompute(data||{}));
 handle('worker.connect',async()=>{assertIdleAgent();agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
 handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current()},value));
+handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAuthoringWorker({records:taskRecords,worker,selection:()=>workflowContext.current(),settings:()=>settings},value);});
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
   const result=await worker.request(method,target,data);
@@ -316,7 +319,7 @@ async function agentRpc({provider,method,params={}}){
   const before=taskRecords.bound(provider,params.threadId);let definitionOnly=!!before?.customCv?.id;if(before&&worker.connection){definitionOnly=(await privateAccess.assertTask(before,provider)).definitionOnly;check();}
   if(definitionOnly&&params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
   const text=visibleUserText(params.input||[]);
-  const authoring=definitionOnly?null:await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true});check();
+  const authoring=definitionOnly?null:await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true,assertCurrent:check});check();
   if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};
   let bound=taskRecords.bound(provider,params.threadId);if(bound){definitionOnly=(await privateAccess.assertTask(bound,provider)).definitionOnly;check();}
   const privateReview=params.reviewMode===true;

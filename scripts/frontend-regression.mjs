@@ -100,6 +100,33 @@ async function renderGatedWorkerStartup(p){
  });
 }
 try{
+ await check('startup-legacy-authoring-draft-explicit-association-keeps-the-same-flow',async p=>{
+  await p.evaluate(()=>{
+   const test=window.__test,original=window.studio.invoke,conversation={id:'codex:legacy-b-flow',provider:'codex',threadId:'legacy-b-flow',name:'Saved legacy NEP draft',projectId:'project',taskId:'legacy-b-flow'};
+   test.legacyBound=false;test.legacyTrace=[];
+   test.task={id:conversation.taskId,provider:'codex',threadId:conversation.threadId,projectId:'project',name:conversation.name,workflowVersion:2,workspaceChoice:'draft',authoring:{projectId:'project',environmentId:'env',inputRoot:'/fixture/inputs'},parameters:{engine:'pydyn.md',temperature:310,files:[]},parameterRevision:1,steps:[{id:'science',title:'基础科学参数',fields:[{key:'temperature',label:'温度',type:'number',required:true}]}],artifacts:[],review:{status:'not_run'}};
+   test.originalLegacyScience=JSON.stringify(test.task.parameters);
+   localStorage.setItem('studio.conversation',conversation.id);localStorage.setItem('studio.section','agent-task:'+conversation.taskId);
+   localStorage.setItem('studio.composer.v1.'+JSON.stringify(['codex','thread',conversation.threadId]),JSON.stringify({version:1,text:'Keep the exact legacy-flow unsent draft'}));
+   window.studio.invoke=async(method,data)=>{
+    test.legacyTrace.push({method,target:data?.target,rpcMethod:data?.method,bound:test.legacyBound});
+    if(method==='conversation.list')return [conversation];if(method==='conversation.select'){test.conversation=conversation;return conversation;}if(method==='task.list')return [test.task];
+    if(method==='worker.restore')return {...data,status:test.legacyBound?'connected':'disconnected',reason:test.legacyBound?'restored':'binding_missing',checkedAt:1};
+    if(method==='task.authoring.bindWorker'){test.legacyBound=true;test.task.authoring.workerBinding={distribution:'Ubuntu',root:'/synthetic-worker',port:8767};return structuredClone(test.task);}
+    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return {thread:{id:data.params.threadId,turns:[]},model:'fixture-model'};
+    return original(method,data);
+   };return window.renderTest('App');
+  });
+  const bind=p.getByTestId('connect-bind-draft');await bind.waitFor();assert.match(await p.getByTestId('workflow-offline').innerText(),/此旧草稿缺少服务来源/);
+  await p.waitForFunction(()=>!document.querySelector('[data-testid=connect-bind-draft]').disabled);await bind.click();
+  await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('WSL 已连接'));await p.getByTestId('workflow-offline').waitFor({state:'detached'});
+  assert.match(await p.getByTestId('agent-task-page').innerText(),/Saved legacy NEP draft/);assert.equal(await p.locator('.composer textarea').inputValue(),'Keep the exact legacy-flow unsent draft');
+  const snapshot=await p.evaluate(()=>({calls:window.__test.legacyTrace,science:JSON.stringify(window.__test.task.parameters),original:window.__test.originalLegacyScience,id:window.__test.task.id,revision:window.__test.task.parameterRevision,projectId:window.__test.conversation.projectId}));
+  assert.equal(snapshot.id,'legacy-b-flow');assert.equal(snapshot.revision,1);assert.equal(snapshot.projectId,'project');assert.equal(snapshot.science,snapshot.original);
+  assert.equal(snapshot.calls.filter(call=>call.method==='worker.connect').length,1);assert.equal(snapshot.calls.filter(call=>call.method==='task.authoring.bindWorker').length,1);
+  assert(!snapshot.calls.some(call=>!call.bound&&['worker.request','workspace.list','task.deployment.context'].includes(call.method)));
+  assert(!snapshot.calls.some(call=>['task.create','task.deployment.prepare','task.execute'].includes(call.method)||call.method==='agent.rpc'&&call.rpcMethod==='turn/start'));
+ });
  for(const outcome of ['connected','disconnected','unknown'])await check('startup-saved-chat-restores-same-project-and-unsent-draft-'+outcome,async p=>{
   await p.evaluate(()=>{
    const test=window.__test,original=window.studio.invoke,conversation={id:'codex:saved-preview',provider:'codex',threadId:'saved-preview',name:'Saved NEP preview',projectId:'project',taskId:null};
