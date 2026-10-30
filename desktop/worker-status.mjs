@@ -1,6 +1,7 @@
 // Observe only the existing bridge. Never bootstrap, reconnect, or publish secrets.
 export async function readWorkerStatus(worker,currentSettings,{timeoutMs=3000,now=Date.now}={}){
  const result=status=>({status,checkedAt:now()});
+ if(worker.connecting||worker.restoring)return result('checking');
  const connection=worker.connection,identity=worker.identity,epoch=worker.connectionEpoch;
  if(!connection)return result('disconnected');
  const target=settings=>[settings.distribution,settings.workerRoot,settings.workerPort];

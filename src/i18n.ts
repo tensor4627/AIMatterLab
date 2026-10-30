@@ -820,7 +820,9 @@ const english:Record<string,string> = {
 "打开查看":"Open preview",
 "大小未记录":"Size not recorded",
 "输入类型":"File type",
-"自定义 CV 定义与审阅":"Custom CV definition and review"
+"自定义 CV 定义与审阅":"Custom CV definition and review",
+"正在核对此流程的已有计算服务…":"Checking this workflow's existing compute service…",
+"尚未确认此流程的计算连接，已保存的项目绑定仍保留。":"This workflow's compute connection is unconfirmed. Its saved project binding is retained."
 };
 let language:'zh-CN'|'en' = (localStorage.getItem('studio.language')==='en'?'en':'zh-CN');
 export function setLanguage(value:'zh-CN'|'en'){language=value;localStorage.setItem('studio.language',value);}

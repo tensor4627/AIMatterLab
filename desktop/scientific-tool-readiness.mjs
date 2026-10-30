@@ -5,6 +5,7 @@ const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)
 /** Readiness observes the main-owned selection; it never selects a conversation or grants access. */
 export async function scientificToolReadiness({worker,codex,workflowContext,records,privateAccess,selectedProvider},provider){
  try{
+  if(worker.connecting||worker.restoring)return {status:'blocked',count:0,message:'计算连接正在核对；可以继续聊天，请等待核对完成。',checkedAt:Date.now()};
   const snapshot=()=>{
    if(!providers.has(provider)||selectedProvider()!==provider)throw Error('Selected Agent provider changed during the scientific tool check');
    const context=structuredClone(workflowContext.current());

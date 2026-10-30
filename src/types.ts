@@ -23,8 +23,9 @@ export async function invoke<T=any>(method:string,data?:unknown):Promise<T>{
   return window.studio.invoke<T>(method,data);
 }
 export const api=<T=any>(method:string,target:string,data?:unknown)=>invoke<T>('worker.request',{method,target,data});
-export interface WorkerStatus {status:'connected'|'disconnected'|'unknown';checkedAt:number}
+export interface WorkerStatus {status:'connected'|'disconnected'|'unknown'|'checking';checkedAt:number;taskId?:string;reason?:string}
 export const readWorkerStatus=()=>invoke<WorkerStatus>('worker.status');
+export const restoreWorker=(taskId:string)=>invoke<WorkerStatus>('worker.restore',{taskId});
 export function wslPath(path:string){return /^[a-z]:[\\/]/i.test(path)?'/mnt/'+path[0].toLowerCase()+'/'+path.slice(3).replaceAll('\\','/'):path}
 export const engines=[
  ['gpumd.neb','GPU-Sampling · NEB'],['gpumd.md','GPUMD · 传统 MD'],['pydyn.md','PyDyn · 传统 MD'],['pygas.build','pyGAS · Bias 构建'],

@@ -50,8 +50,9 @@ async function fixture(){
    if(method==='task.edit'){const current=structuredClone(test.task||{id:data.id,parameters:{},updatedAt:1});for(const [key,value] of Object.entries(data.changes)){const parts=key.split('.');let node=current.parameters;for(const part of parts.slice(0,-1))node=node[part]||(node[part]={});node[parts.at(-1)]=value;}current.updatedAt++;test.task=current;return current;}
    if(method==='task.execute')return {...test.run,status:'queued'};
    if(method==='settings'){test.settings={...test.settings,...data};return test.settings;}
-   if(method==='worker.connect'){test.events.forEach(fn=>fn({method:'studio/workerConnected'}));return {};}
+   if(method==='worker.connect'){test.workerStatus={status:'connected',checkedAt:Date.now()};test.events.forEach(fn=>fn({method:'studio/workerConnected'}));return {};}
    if(method==='worker.status')return test.workerStatus||JSON.parse(localStorage.getItem('__fixture.workerStatus')||'null')||{status:'disconnected',checkedAt:1};
+   if(method==='worker.restore')return {status:'connected',taskId:data.taskId,checkedAt:1};
    if(['agent.connect','agent.tools'].includes(method))return method==='agent.tools'?{status:'ready',count:26}:{tools:{status:'ready',count:26}};
    if(['agent.disconnect','agent.login.cancel'].includes(method))return {};
    if(method==='agent.account')return {account:{type:'chatgpt'},credentialStored:true,requiresOpenaiAuth:true,modelAccess:'not_run'};
@@ -75,7 +76,42 @@ async function fixture(){
 }
 async function openAgentOptions(p){const toggle=p.getByTestId('agent-options');if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();}
 async function check(name,fn){if(process.env.STUDIO_FRONTEND_FILTER&&!new RegExp(process.env.STUDIO_FRONTEND_FILTER).test(name))return;const {page,context}=await fixture();try{await fn(page);results.push({name,status:'passed'});}catch(e){results.push({name,status:'failed',error:String(e)});await page.screenshot({path:path.join(out,name+'.png'),fullPage:true});}finally{await context.close();}}
+async function renderGatedWorkerStartup(p){
+ await p.evaluate(()=>{
+  const test=window.__test,original=window.studio.invoke,conversation={id:'codex:gated-startup',provider:'codex',threadId:'gated-startup',name:'Saved startup conversation',projectId:'project',taskId:'gated-startup-flow'};
+  test.task={id:conversation.taskId,provider:'codex',threadId:conversation.threadId,projectId:'project',name:'Saved 310 K startup flow',workflowVersion:2,parameters:{engine:'pydyn.md',temperature:310},parameterRevision:3,steps:[],artifacts:[],missingFields:[],review:{status:'not_run'},updatedAt:1,workspaceChoice:'draft',deploymentDraft:{revision:1,workerBinding:{distribution:'Ubuntu',root:'/synthetic-worker'},config:{target:'local',projectId:'project',targetId:'env',inputSource:'local',directoryName:'saved',gpu:0,maxSeconds:60,resources:{cpus:1,gpus:1,memory_mb:1024,queue:'',account:''}}}};
+  localStorage.setItem('studio.conversation',conversation.id);localStorage.setItem('studio.section','deployment:'+conversation.taskId);
+  test.startupStage='settings';test.prematureWorkerReads=[];test.startupTrace=[];test.restoreCount=0;
+  let stateOpen=false;const stateWaiters=[];
+  test.releaseStartupState=()=>{stateOpen=true;for(const resolve of stateWaiters.splice(0))resolve({settings:test.settings});};
+  window.studio.invoke=async(method,data)=>{
+   test.startupTrace.push({method,target:data?.target,rpcMethod:data?.method,stage:test.startupStage});
+   if(method==='state'){if(stateOpen)return {settings:test.settings};return new Promise(resolve=>stateWaiters.push(resolve));}
+   if(method==='conversation.list')return [conversation];
+   if(method==='conversation.select'){test.conversation=conversation;return conversation;}
+   if(method==='task.list')return [test.task];
+   if(method==='worker.restore'){test.restoreCount++;test.startupStage='restoring';return new Promise(resolve=>{test.releaseStartupRestore=status=>{test.startupStage=status==='connected'?'ready':'offline';resolve({status,taskId:data.taskId,checkedAt:2});};});}
+   if(method==='worker.status')return {status:test.startupStage==='ready'?'connected':'disconnected',checkedAt:2};
+   if(['worker.request','workspace.list','task.deployment.context'].includes(method)&&test.startupStage!=='ready'){test.prematureWorkerReads.push({method,target:data?.target,stage:test.startupStage});throw Error('Worker-dependent request arrived before verified restore');}
+   if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)){test.resumedStartupThread=data.params.threadId;return {thread:{id:data.params.threadId,turns:[]},model:'fixture-model'};}
+   return original(method,data);
+  };
+  return window.renderTest('App');
+ });
+}
 try{
+ for(const outcome of ['connected','disconnected','unknown'])await check('startup-saved-flow-gates-worker-reads-'+outcome,async p=>{
+  await renderGatedWorkerStartup(p);await p.waitForFunction(()=>typeof window.__test.releaseStartupState==='function');await p.waitForTimeout(80);
+  assert.deepEqual(await p.evaluate(()=>window.__test.prematureWorkerReads),[]);assert.equal(await p.evaluate(()=>window.__test.restoreCount),0);
+  await p.evaluate(()=>window.__test.releaseStartupState());await p.waitForFunction(()=>typeof window.__test.releaseStartupRestore==='function');await p.waitForTimeout(80);
+  assert.deepEqual(await p.evaluate(()=>window.__test.prematureWorkerReads),[]);assert.equal(await p.evaluate(()=>window.__test.restoreCount),1);
+  await p.evaluate(status=>window.__test.releaseStartupRestore(status),outcome);await p.waitForFunction(()=>window.__test.resumedStartupThread==='gated-startup');
+  await p.getByTestId('agent-task-page').waitFor();assert.match(await p.getByTestId('agent-task-page').innerText(),/Saved 310 K startup flow/);
+  assert.deepEqual(await p.evaluate(()=>window.__test.prematureWorkerReads),[]);
+  const calls=await p.evaluate(()=>window.__test.startupTrace);assert(!calls.some(call=>['worker.connect','compute.setup','task.execute','task.deployment.prepare'].includes(call.method)));assert(!calls.some(call=>call.method==='agent.rpc'&&call.rpcMethod==='turn/start'));
+  if(outcome==='connected'){await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('WSL 已连接'));assert(calls.some(call=>call.method==='worker.request'&&call.target==='/api/runs'));assert.equal(await p.locator('.toast').count(),0);}
+  else{assert(!calls.some(call=>call.method==='worker.request'));assert.equal(await p.locator('.composer textarea').isVisible(),true);assert.equal(await p.locator('.bottom-tabs button span').first().textContent(),'?');}
+ });
  await check('worker-reload-hydrates-existing-connection-without-bootstrap',async p=>{
   await p.evaluate(()=>{localStorage.setItem('__fixture.workerStatus',JSON.stringify({status:'connected',checkedAt:1}));return window.renderTest('App');});
   await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('WSL 已连接'));

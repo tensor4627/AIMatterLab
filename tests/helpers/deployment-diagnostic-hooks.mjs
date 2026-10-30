@@ -14,10 +14,11 @@ export function deploymentFixture(id='workflow-A'){
  const config={target:'local',projectId:'project',targetId:'env-A',inputSource:'local',directoryName:'run-'+id,maxSeconds:60,gpu:0,resources:{cpus:1,gpus:1,memory_mb:4096,queue:'',account:''}},run={id:'run-'+id,engine:'pydyn.md',status:'draft',snapshots:[{name:'run.py',sha256:'s'.repeat(64),size:42}]};
  const task={id,name:'Readable '+id,updatedAt:1,workflowVersion:2,parameterRevision:3,parameters:{engine:'pydyn.md'},review:{status:'ready',parameterRevision:3},artifacts:[{id:run.id,kind:'run'}],deployment:{revision:2,config,prepared:{artifactId:run.id,parameterRevision:3,deploymentRevision:2}}};task.deployment.prepared.inputIdentity=deployment.snapshotIdentity(task,run);return {task,run};
 }
-export function deploymentHarness({initial=deploymentFixture(),override,storage=memoryStorage(),journal=diagnostics.createDiagnosticJournal()}={}){
+export function deploymentHarness({initial=deploymentFixture(),override,properties={},storage=memoryStorage(),journal=diagnostics.createDiagnosticJournal()}={}){
  const hooks=[],effects=[],calls=[],externalErrors=[],servers=new Map([[initial.task.id,structuredClone(initial.task)]]),runs=new Map([[initial.run.id,structuredClone(initial.run)]]);let cursor=0,dirty=false,tree,disposed=false,refreshes=0;
  const environments=[{id:'env-A',name:'Research environment A',executables:{python:'/fixture/A'}},{id:'env-B',name:'Research environment B',executables:{python:'/fixture/B'}}],project={id:'project',name:'Compute project',policy:{engines:['pydyn.md'],environments:['env-A','env-B'],gpus:[0],max_seconds:3600}};
  const props={task:structuredClone(initial.task),worker:true,projects:[project],environments,onTask(){},onRun(){},onError:error=>externalErrors.push(error),onRefresh:async()=>{refreshes++;if(servers.has(props.task.id)){props.task=structuredClone(servers.get(props.task.id));dirty=true;}}};
+ Object.assign(props,properties);
  const useState=initial=>{const i=cursor++;if(!hooks[i])hooks[i]={value:typeof initial==='function'?initial():initial};return [hooks[i].value,next=>{const value=typeof next==='function'?next(hooks[i].value):next;if(!Object.is(value,hooks[i].value)){hooks[i].value=value;dirty=true;}}];};
  const useRef=initial=>{const i=cursor++;return hooks[i]??(hooks[i]={current:initial});};
  const useMemo=(fn,deps)=>{const i=cursor++;if(!hooks[i]||deps.some((v,j)=>!Object.is(v,hooks[i].deps[j])))hooks[i]={value:fn(),deps};return hooks[i].value;};
@@ -60,6 +61,7 @@ export function deploymentHarness({initial=deploymentFixture(),override,storage=
  function target(id){find(node=>node.type==='select'&&node.props['aria-label']==='部署环境').props.onChange({target:{value:id}});render();}
  function review(){const node=find(node=>node.props?.['data-testid']==='review-input-snapshots');if(node.props.disabled)throw Error('Cannot activate disabled fixture input review');node.props.onChange({target:{checked:true}});render();}
  function setTask(task,run){servers.set(task.id,structuredClone(task));if(run)runs.set(run.id,structuredClone(run));props.task=structuredClone(task);render();}
+ function update(value){Object.assign(props,value);render();}
  function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}
- render();return {flush,click,target,review,setTask,unmount,find,text,props,calls,journal,storage,servers,runs,externalErrors,refreshes:()=>refreshes,diagnosticProps:()=>find(node=>node.type==='DeploymentDiagnostics').props};
+ render();return {flush,click,target,review,setTask,update,unmount,find,text,props,calls,journal,storage,servers,runs,externalErrors,refreshes:()=>refreshes,diagnosticProps:()=>find(node=>node.type==='DeploymentDiagnostics').props};
 }

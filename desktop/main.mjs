@@ -50,6 +50,7 @@ import {AgentHub,loginUrl} from './agent-hub.mjs';
 import {CredentialVault,providerId} from './providers.mjs';
 import { WorkerClient } from './worker.mjs';
 import {readWorkerStatus} from './worker-status.mjs';
+import {restoreTaskWorker} from './worker-restore.mjs';
 import { assertRpc, assertRendererWorkerRoute, linuxPath, sshAlias, quoteShell } from './security.mjs';
 
 const exec = promisify(execFile);
@@ -178,7 +179,7 @@ handle('task.deployment.draft',value=>saveDeploymentDraft(taskRecords,worker,val
 handle('task.deployment.context',value=>deploymentContext(taskRecords,worker,value));
 handle('task.deployment.open',value=>openDeploymentSession({records:taskRecords,workflowContext,agents,assertIdle:assertIdleAgent,connect:async task=>{
  const bound=task.deployment?.workerBinding||task.deploymentDraft?.workerBinding;
- if(worker.connection&&(!bound||bound.distribution===worker.identity?.distribution&&bound.root===worker.identity?.root)){try{const health=await worker.request('GET','/api/health');if(health.root===worker.identity?.root)return;}catch{}}
+ if(worker.connection&&!worker.restoring&&!worker.connecting&&(!bound||bound.distribution===worker.identity?.distribution&&bound.root===worker.identity?.root)){try{const health=await worker.request('GET','/api/health');if(health.root===worker.identity?.root)return;}catch{}}
  agents.close();const selected=bound?{...settings,distribution:bound.distribution,workerRoot:bound.root}:settings;
  await worker.connect(selected,workerSource);await bindSources();if(selected.distribution===settings.distribution&&selected.workerRoot===settings.workerRoot)discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});
 }},value));
@@ -247,6 +248,7 @@ function discoverCompute(){if(settings.autoDiscoverCompute!==false)return config
 handle('compute.setup',async data=>configureCompute(data||{}));
 handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);await bindSources();discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
+handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,worker,settings:()=>settings,selection:()=>workflowContext.current()},value));
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
   const result=await worker.request(method,target,data);
@@ -274,9 +276,9 @@ async function scientificTools(provider){
 handle('agent.connect',async({provider,repairTools=false})=>{
  providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');
  if(repairTools){assertIdleAgent();agents.close();await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}
- if(!worker.connection){try{await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}catch{}}
+ // Account recovery does not install/start/switch compute. App restores its saved binding separately.
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- if(worker.connection){await bindSources();await discoverCompute();}
+ if(worker.connection&&!worker.connecting&&!worker.restoring){await bindSources();await discoverCompute();}
  const info=await agents.connect(provider),tools=await scientificTools(provider);
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};

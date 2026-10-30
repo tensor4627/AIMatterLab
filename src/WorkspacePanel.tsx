@@ -4,7 +4,7 @@ import {invoke} from './types';
 import {t} from './i18n';
 export default function WorkspacePanel({task,worker,busy,onRefresh,onError}:{task:any;worker:boolean;busy:boolean;onRefresh:()=>void|Promise<void>;onError:(e:unknown)=>void}){
  const [workspaces,setWorkspaces]=useState<any[]>([]),[creating,setCreating]=useState(false),[selected,setSelected]=useState(''),[name,setName]=useState('计算工作区'),[directory,setDirectory]=useState('project-'+task.id.slice(0,8)),[mode,setMode]=useState('copy'),[role,setRole]=useState('structure'),[source,setSource]=useState(''),[saving,setSaving]=useState(false);
- useEffect(()=>{if(!worker)return;let alive=true;void invoke<any>('workspace.list',{taskId:task.id}).then(value=>{if(alive)setWorkspaces(value.workspaces||[]);}).catch(onError);return()=>{alive=false;};},[worker,task.id,task.workspace?.id]);
+ useEffect(()=>{if(!worker)return;let alive=true;void invoke<any>('workspace.list',{taskId:task.id}).then(value=>{if(alive&&value.taskId===task.id)setWorkspaces(value.workspaces||[]);}).catch(error=>{if(alive)onError(error);});return()=>{alive=false;};},[worker,task.id,task.workspace?.id]);
  useEffect(()=>{setMode(task.workspace?.asset_mode||'copy');},[task.workspace?.id]);
  async function act(method:string,value:any={}){if(busy||saving)return;setSaving(true);try{await invoke(method,{taskId:task.id,...value});setCreating(false);setSource('');await onRefresh();}catch(error){onError(error);}finally{setSaving(false);}}
  const disabled=busy||saving||!worker,pending=task.workspaceChoice==='pending';
