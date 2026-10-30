@@ -1,3 +1,4 @@
+import {environmentApiFailure} from './environment-api-read.mjs';
 import { execFile,spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import {createInterface} from 'node:readline';
@@ -125,7 +126,7 @@ export class WorkerClient {
     const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
     if(body?.method==='tools/call'&&scopedTool){
      if(!scope.localReaders){res.writeHead(403);res.end();return;}
-     let result;try{fresh();dispatched=true;const value=await this.scopedHandler(body.params.name,body.params.arguments||{},scope);result=toolValueResult(value);}catch(e){result=toolFailure(e,{dispatched});}
+     let result;try{fresh();dispatched=true;const value=await this.scopedHandler(body.params.name,body.params.arguments||{},scope);result=toolValueResult(value);}catch(e){result=body.params.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched});}
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(body?.method==='tools/call'&&(this.localDefinitions||[]).some(t=>t.name===body.params?.name)){
      let result;try{fresh();dispatched=true;result=toolValueResult(await this.localHandler(body.params.name,body.params.arguments||{},scope));}catch(e){result=toolFailure(e,{dispatched});}
@@ -138,7 +139,7 @@ export class WorkerClient {
     if(body?.method==='tools/list'&&response.data?.result?.tools){response.data.result.tools.push(...(this.localDefinitions||[]),...(scope.localReaders?this.scopedDefinitions||[]:[]));if(this.authoringGuard?.filterTools)response.data.result.tools=await this.authoringGuard.filterTools(response.data.result.tools,scope.provider,scope);}
     fresh();
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
-   }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){res.writeHead(403);res.end();}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:toolFailure(e,{dispatched})}));}else{res.writeHead(502);res.end(JSON.stringify({error:e.message}));}}
+   }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){res.writeHead(403);res.end();}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched})}));}else{res.writeHead(502);res.end(JSON.stringify({error:e.message}));}}
   });
   await new Promise((resolve,reject)=>{this.proxy.once('error',reject);this.proxy.listen(0,'127.0.0.1',resolve);});
   this.connection.url='http://127.0.0.1:'+this.proxy.address().port;

@@ -5,7 +5,7 @@ import path from 'node:path';
 export const SCIENTIFIC_TOOL_ACCESS=Object.freeze({
  describe_engine:'public',list_source_projects:'public',inspect_source_project:'public',inspect_pygas_catalog:'public',scientific_skill_catalog:'public',read_scientific_skill:'public',search_materials_project:'public',
  compute_readiness:'discovery',discover_local_environments:'discovery',draft_local_environment:'discovery',diagnose_tools:'discovery',list_projects:'discovery',list_runs:'discovery',list_workflows:'discovery',list_environments:'discovery',
- read_runtime_guide:'environment',probe_environment:'environment',
+ inspect_environment_api:'environment',read_runtime_guide:'environment',probe_environment:'environment',
  read_project_input:'project',write_project_input:'project',inspect_asset:'project',suggest_parameters:'project',create_structure:'project',render_pygas_workflow:'project',present_task:'project',prepare_run:'project',create_workflow:'project',import_materials_project:'project',
  validate_run:'run',submit_run:'run',cancel_run:'run',run_status:'run',read_log:'run',read_run_input:'run',read_artifact:'run',collect_artifacts:'run',resume_run:'run',
  list_clusters:'ssh',probe_cluster:'ssh',read_cluster_skill:'ssh',cluster_browse:'ssh',draft_cluster_setup:'ssh',prepare_cluster_run:'ssh',cluster_run_status:'ssh',cluster_read_log:'ssh',read_cluster_input:'ssh',read_cluster_result:'ssh',collect_cluster_artifacts:'ssh',

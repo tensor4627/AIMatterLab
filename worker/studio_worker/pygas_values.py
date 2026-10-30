@@ -1,6 +1,33 @@
 """Data-only graph-value serializer candidate; no import or evaluation of user code."""
 import ast,copy,json,math,re
 DTYPES={"torch.double","torch.float64","torch.float32","torch.float","torch.long","torch.int64","torch.int32"}
+# Public input metadata and validation share these exact policy constants.
+GRAPH_KEYS=frozenset({'version','mode','nodes','edges','settings','parameter_format','metadata'})
+SETTINGS_KEYS=frozenset({'mode','class_name','atoms_path','pt_path','dtype_expr','device_expr','cv_internal_dtype_expr','artifact_formats','deployment_backend','cutoff','max_neighbors','max_cv_nums','history_size','opes_kernel_capacity','opes','cast_history_internal_dtype','scientific_metadata','workflow_path'})
+NODE_KEYS=frozenset({'id','kind','class_name','alias','title','params','output_size','x','y','position','metadata','parameter_dtypes'})
+EDGE_KEYS=frozenset({'id','source','target'})
+ENDPOINT_KEYS=frozenset({'node','port'})
+REDUCE_PARAMETER_KEYS=frozenset({'operation'})
+REDUCE_OPERATIONS=frozenset({'mean','sum','first','identity'})
+STRUCTURE_DERIVED_PARAMS=frozenset({'n_atoms','numbers','atomic_types'})
+
+def _safe_keys(keys):
+ names=sorted(key if isinstance(key,str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}',key) else '<nonstandard-key>' for key in keys)
+ return ', '.join(names[:8])+(' (additional keys omitted)' if len(names)>8 else '')
+
+def _node_location(index,node):
+ name=node.get('id') if isinstance(node,dict) else None
+ return 'nodes['+str(index)+']'+(' ('+name+')' if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,80}',name) else '')
+
+def studio_graph_parameter_policy(param):
+ if param.get('name') in STRUCTURE_DERIVED_PARAMS:return {'policy':'structure_derived','serialize':'omit','required_in_graph':False,'value_source':'authorized atoms input; do not supply this constructor field in graph params'}
+ return None
+
+def studio_graph_input_contract():
+ import hashlib
+ from pathlib import Path
+ return {'schema_version':1,'partial':True,'validation':'not_run','source':{'name':'studio_worker/pygas_values.py','sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest()},'validator':['compiler_graph','normalize_graph'],'scope':'Studio graph input serialization rules only; not a complete native/scientific/runtime schema. No values or intent are automatically repaired.','allowed_properties':{'graph':sorted(GRAPH_KEYS),'settings':sorted(SETTINGS_KEYS),'node':sorted(NODE_KEYS),'edge':sorted(EDGE_KEYS),'endpoint':sorted(ENDPOINT_KEYS)},'reduce':{'kind':'reduce','parameter_path':'params.operation','allowed_params':sorted(REDUCE_PARAMETER_KEYS),'operations':sorted(REDUCE_OPERATIONS),'required_when':'complete rendering','example':{'id':'reduce0','kind':'reduce','params':{'operation':'mean'}}},'structure_derived':{'parameter_names':sorted(STRUCTURE_DERIVED_PARAMS),'serialize':'omit','value_source':'authorized atoms input','constructor_required_is_separate':True},'module_parameters':{'when':'catalog parameter is_module_param is true','serialize':'graph connection; omit direct constructor value'},'endpoints':{'shape':{'node':'node id','port':'registered port name'},'exact_properties':sorted(ENDPOINT_KEYS)}}
+
 def literal(node,depth=0):
  if depth>12:raise ValueError("Parameter nesting exceeds 12")
  if isinstance(node,ast.Constant) and (node.value is None or type(node.value) in (int,float,bool,str)):
@@ -77,34 +104,38 @@ def value_expression(value,param,legacy=True):
 def compiler_graph(graph,catalog,*,require_complete=True):
  if not isinstance(graph,dict) or not isinstance(graph.get("nodes"),list) or len(graph["nodes"])>128:raise ValueError("Bounded actual graph required")
  if len(json.dumps(graph,allow_nan=False).encode())>1024*1024:raise ValueError("Graph exceeds 1 MiB")
- if set(graph)-{"version","mode","nodes","edges","settings","parameter_format","metadata"}:raise ValueError("Unknown graph fields")
+ if set(graph)-GRAPH_KEYS:raise ValueError("graph: Unknown graph fields: "+_safe_keys(set(graph)-GRAPH_KEYS))
  result=copy.deepcopy(graph);settings=result.get("settings",{})
- allowed_settings={"mode","class_name","atoms_path","pt_path","dtype_expr","device_expr","cv_internal_dtype_expr","artifact_formats","deployment_backend","cutoff","max_neighbors","max_cv_nums","history_size","opes_kernel_capacity","opes","cast_history_internal_dtype","scientific_metadata","workflow_path"}
- if not isinstance(settings,dict) or set(settings)-allowed_settings:raise ValueError("Unknown graph settings")
+ allowed_settings=SETTINGS_KEYS
+ if not isinstance(settings,dict):raise ValueError("settings: expected object")
+ if set(settings)-allowed_settings:raise ValueError("settings: Unknown graph settings: "+_safe_keys(set(settings)-allowed_settings))
  for key in ("atoms_path","pt_path","workflow_path"):
   if key in settings and (not isinstance(settings[key],str) or any(ord(c)<32 or c in '\\"' for c in settings[key])):raise ValueError("Unsafe generated I/O name")
  if len(result.get("edges",[]))>512:raise ValueError("Graph exceeds 512 edges")
- for edge in result.get("edges",[]):
-  if not isinstance(edge,dict) or set(edge)-{"id","source","target"}:raise ValueError("Unknown edge fields")
+ for edge_index,edge in enumerate(result.get("edges",[])):
+  if not isinstance(edge,dict):raise ValueError("edges["+str(edge_index)+"]: expected object")
+  if set(edge)-EDGE_KEYS:raise ValueError("edges["+str(edge_index)+"]: Unknown edge fields: "+_safe_keys(set(edge)-EDGE_KEYS))
   for side in ("source","target"):
-   if not isinstance(edge.get(side),dict) or set(edge[side])!={"node","port"} or any(not isinstance(v,str) for v in edge[side].values()):raise ValueError("Structured graph endpoints required")
+   if not isinstance(edge.get(side),dict) or set(edge[side])!=ENDPOINT_KEYS or any(not isinstance(v,str) for v in edge[side].values()):raise ValueError("Structured graph endpoints required")
  for key,allowed in (("dtype_expr",{"torch.double","torch.float64","torch.float32","torch.float"}),("cv_internal_dtype_expr",{"torch.double","torch.float64","torch.float32","torch.float","None"})):
   if key in settings and settings[key] not in allowed:raise ValueError("Unsupported "+key)
  if "device_expr" in settings and re.fullmatch(r"torch\.device\(['\"](?:cpu|cuda(?::[0-9]{1,2})?)['\"]\)",str(settings["device_expr"])) is None:raise ValueError("Unsupported device_expr")
- for node in result["nodes"]:
-  if not isinstance(node,dict) or set(node)-{"id","kind","class_name","alias","title","params","output_size","x","y","position","metadata","parameter_dtypes"}:raise ValueError("Unknown graph node fields")
+ for node_index,node in enumerate(result["nodes"]):
+  if not isinstance(node,dict):raise ValueError(_node_location(node_index,node)+': expected object')
+  unknown=set(node)-NODE_KEYS
+  if unknown:raise ValueError(_node_location(node_index,node)+': Unknown graph node fields: '+_safe_keys(unknown)+('; reduce operation belongs in params.operation' if node.get('kind')=='reduce' and 'operation' in unknown else ''))
   kind=node.get("kind")
   if kind in ("input","output","collect"):
    if node.get("params"):raise ValueError("This node has no constructor parameters")
    continue
   if kind=="reduce":
    values=node.get("params",{})
-   if not isinstance(values,dict)or set(values)-{"operation"}:raise ValueError("Explicit reduction operation required")
+   if not isinstance(values,dict)or set(values)-REDUCE_PARAMETER_KEYS:raise ValueError("Explicit reduction operation required")
    operation=values.get("operation")
    if operation in(None,""):
     if require_complete:raise ValueError("Explicit reduction operation required")
     continue
-   if operation not in ("mean","sum","first","identity"):raise ValueError("Unsupported explicit reduction")
+   if operation not in REDUCE_OPERATIONS:raise ValueError("Unsupported explicit reduction")
    continue
   entry=next((entry for entry in catalog.get(kind,[]) if entry["name"]==node.get("class_name")),None)
   if entry is None:raise ValueError("Class absent from registered GUI catalog")
@@ -118,8 +149,8 @@ def compiler_graph(graph,catalog,*,require_complete=True):
   serialized={}
   for param in entry["params"]:
    name=param["name"];value=values.get(name);present=name in values and value!=""
-   if name in ("n_atoms","numbers","atomic_types"):
-    if present:raise ValueError(name+" is structure-derived")
+   if name in STRUCTURE_DERIVED_PARAMS:
+    if present:raise ValueError(_node_location(node_index,node)+".params."+name+" is structure-derived; omit this graph parameter; supplied from the authorized atoms input")
     continue
    if param.get("is_module_param"):
     if present:raise ValueError(name+" requires a graph connection")

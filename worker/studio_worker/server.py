@@ -227,6 +227,12 @@ def dispatch(service, method, path, data, admin=False):
         return service.register_project(data) if path.endswith("projects") else service.register_environment(data)
     if method != "POST":
         raise ValueError("Unknown route")
+    if path == '/api/environment-api/read':
+        if not admin:raise PermissionError('Selected target API inspection requires the main-owned context channel')
+        from .environment_api import inspect,ApiReadError
+        try:return inspect(service,data)
+        except (ApiReadError,ValueError,OSError,KeyError,TypeError,SyntaxError,subprocess.SubprocessError) as error:
+            return {'status':'blocked','code':getattr(error,'code','source_read_failed'),'message':str(error)[:2000],'operation_state':'read_started','automatic_retry':False,'next_step':'Use the current observed exact target and advertised finite API IDs; obtain a normal explicit environment check if provenance is missing. No installation or grant is inferred.'}
     if path == '/api/environments/discover':
         from .compute_setup import discover
         return discover(service, data.get('force', False) if admin else False)

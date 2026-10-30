@@ -9,6 +9,8 @@ import * as setup from '../../src/project-setup-defaults.mjs';
 import * as diagnostics from '../../shared/ui-diagnostics.mjs';
 import {memoryStorage} from './agent-hooks.mjs';
 const source=fs.readFileSync(new URL('../../src/DeploymentPanel.tsx',import.meta.url),'utf8');
+const reviewSource=fs.readFileSync(new URL('../../src/useLocalReviewStatus.ts',import.meta.url),'utf8');
+const reviewCompiled=ts.transpileModule(reviewSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 export function deploymentFixture(id='workflow-A'){
  const config={target:'local',projectId:'project',targetId:'env-A',inputSource:'local',directoryName:'run-'+id,maxSeconds:60,gpu:0,resources:{cpus:1,gpus:1,memory_mb:4096,queue:'',account:''}},run={id:'run-'+id,engine:'pydyn.md',status:'draft',snapshots:[{name:'run.py',sha256:'s'.repeat(64),size:42}]};
@@ -45,7 +47,7 @@ export function deploymentHarness({initial=deploymentFixture(),override,properti
   if(name==='../shared/draft-outbox.mjs')return scienceDrafts;
   if(name==='../shared/deployment-authorization.mjs')return authorization;
   if(name==='./project-setup-defaults.mjs')return setup;
-  if(name==='./useLocalReviewStatus')return {useLocalReviewStatus:()=>null,currentLocalReview:()=>false};
+  if(name==='./useLocalReviewStatus'){const module={exports:{}};new Function('require','module','exports',reviewCompiled)(dependency=>{if(dependency==='react')return {useState,useRef,useEffect};if(dependency==='./local-review-client')return {readLocalReviewStatus:args=>invoke('task.localReview.status',args)};throw Error('Unexpected local review dependency '+dependency);},module,module.exports);return module.exports;}
   if(name==='./useConsumerTargetStatus')return {useConsumerTargetStatus:()=>false};
   if(name==='./pygas-local-draft')return {useTaskPygasDirty:()=>false,isTaskPygasDirty:()=>false};
   if(name==='./i18n')return {t:value=>value};

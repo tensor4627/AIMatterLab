@@ -16,6 +16,42 @@ def file_digest(path):
         for block in iter(lambda:stream.read(1024*1024),b''):h.update(block)
     return h.hexdigest()
 
+
+SAMPLING_PROVENANCE=("pydyn/sampling/upstream.json","pydyn/sampling/integration_origin.json")
+def sampling_provenance(environment):
+    """Fixed public JSON identity only; never import/evaluate or echo unknown fields."""
+    from urllib.parse import urlsplit
+    root=Path(environment.get('repositories',{}).get('pydyn','')).absolute()
+    if not root.is_dir() or root.resolve()!=root:raise ValueError('Sampling provenance root is unavailable or linked')
+    files=[]
+    for relative in SAMPLING_PROVENANCE:
+        path=root/relative;current=root
+        for part in Path(relative).parts:
+            current=current/part
+            if current.is_symlink():raise ValueError('Linked sampling provenance refused')
+        if not path.is_file() or path.stat().st_size>262144:raise ValueError('Sampling provenance file unavailable or oversized')
+        before=path.stat()
+        with path.open('rb')as stream:raw=stream.read(262145)
+        after=path.stat()
+        if len(raw)>262144 or (before.st_ino,before.st_size,before.st_mtime_ns)!=(after.st_ino,after.st_size,after.st_mtime_ns):raise ValueError('Sampling provenance changed during read')
+        data=json.loads(raw)
+        if not isinstance(data,dict):raise ValueError('Sampling provenance must be a JSON object')
+        public={}
+        for key in ('repository','ref','commit','version','relocation_version','source'):
+            value=data.get(key)
+            if key=='relocation_version' and type(value)is int and 0<=value<=100:public[key]=value;continue
+            if not isinstance(value,str) or not value or len(value)>512:continue
+            if key=='commit' and not re.fullmatch(r'[0-9a-fA-F]{40}|[0-9a-fA-F]{64}',value):continue
+            if key in ('ref','version') and not re.fullmatch(r'[A-Za-z0-9_./+-]{1,128}',value):continue
+            if key=='source' and re.search(r'credential|password|token|secret|key=',value,re.I):continue
+            if key=='repository' and '://'not in value:continue
+            if '://' in value:
+                url=urlsplit(value)
+                if url.scheme not in ('https','http') or not url.hostname or not re.fullmatch(r'[A-Za-z0-9.-]+',url.hostname) or url.username or url.password or url.query or url.fragment:continue
+            public[key]=value
+        files.append({'name':relative,'size':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),'public':public})
+    return {'schema':'studio.sampling-provenance/1','status':'observed','files':files}
+
 def source_listing(repositories):
     """Bounded selected-package membership identity, including future additions."""
     trees=[];total=0
@@ -112,6 +148,9 @@ def observed_guide(environment,engine,probe,observed_at=None):
     watch={**probe,"repositories":repositories,"_configured_executables":configured}
     facts["source_watch"]=source_listing(repositories)
     facts["file_observations"]=watched_files(watch)
+    if engine=="pydyn.sampling" and facts['state']=='observed':
+        try:facts["sampling_provenance"]=sampling_provenance(environment)
+        except (OSError,ValueError,UnicodeError,TypeError):facts["sampling_provenance"]={'schema':'studio.sampling-provenance/1','status':'not_recorded','scope':'Optional strict API provenance unavailable; ordinary observed module capability is unchanged.'}
     for observed in list(modules.values())+[native]:
         expected=observed.get("source_sha256",observed.get("sha256"));source=observed.get("file",observed.get("executable"))
         if isinstance(expected,str) and re.fullmatch(r"[0-9a-f]{64}",expected) and isinstance(source,str) and Path(source).is_file() and file_digest(source)!=expected:
@@ -184,6 +223,13 @@ class RuntimeGuides:
                 if not path.is_file():raise ValueError("Observed selected-runtime file is unavailable")
                 stat=path.stat()
                 if (stat.st_size,stat.st_mtime_ns,stat.st_ino)!=(observed["size"],observed["mtime_ns"],observed["inode"]) or file_digest(path)!=observed.get("sha256"):raise ValueError("Observed selected-runtime executable/module source changed")
-            return {"status":value["state"],"facts":value,"receipt":receipt,"skill_sha256":skill_hash,"scope":"Last observed selected runtime. Source/build correspondence, current connection, artifact and execution checks remain separate."}
+            api_provenance=None
+            if engine=='pydyn.sampling':
+                recorded=value.get('sampling_provenance')
+                api_provenance={'status':'not_recorded','scope':'Strict API provenance only; ordinary observed module scope unchanged.'}
+                if isinstance(recorded,dict) and recorded.get('status')=='observed':
+                    try:api_provenance={'status':'observed' if recorded==sampling_provenance(environment) else 'stale','scope':'Strict API JSON byte attestation only.'}
+                    except (OSError,ValueError,UnicodeError,TypeError):api_provenance={'status':'stale','scope':'Strict API JSON provenance unavailable; ordinary observed module scope unchanged.'}
+            return {"status":value["state"],"facts":value,"receipt":receipt,"skill_sha256":skill_hash,**({"api_provenance":api_provenance}if api_provenance is not None else{}),"scope":"Last observed selected runtime. Source/build correspondence, current connection, artifact and execution checks remain separate."}
         except (OSError,ValueError,KeyError,TypeError) as error:
             return {"status":"stale","environment_id":environment["id"],"engine":engine,"reason":str(error)+"; targeted probe required. Existing jobs remain untouched."}

@@ -4,7 +4,8 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
-| 0.18.9 开发中（内部包 dev.8，未正式发布） | 只读工具可恢复诊断、公开源码有界 API/默认字段、受授权 .out 导入、五字号编辑缓冲、二级工作台 PNG 诊断；不改权限或自动重发 | TypeScript passed；Node1752 passed/2skip，前端完整164及同步组件7 passed；worker381 passed；Vite/独立便携包及1016程序文件、9个公开skill（28文件）核对passed | 包交审时 dev.8 原生、图像视觉审阅、provider及科学15路 not_run；无最终菜单重排；[阶段记录](docs/v0.18.9.md) |
+| 0.18.9 开发中（内部包 dev.9，未正式发布） | 目标环境有界 API/来源 attestation、严格图契约、工作区迟到响应、复核刷新状态及面板逐像素键盘调整；公开主 skill 路由补充 | TypeScript passed；Node1771 passed/2skip，worker416；完整前端164，新增React17/恢复7，composer73/reorder60 passed；A独立源码15路27进程642文件 passed | Vite/便携包1018程序文件及9skill28文件核对passed；新包原生/provider/API实际调用 not_run，历史B路线不移用；无最终菜单重排；[阶段记录](docs/v0.18.9.md) |
+| 0.18.9 开发中（历史内部包 dev.8，未正式发布） | 只读工具可恢复诊断、公开源码有界 API/默认字段、受授权 .out 导入、五字号编辑缓冲、二级工作台 PNG 诊断；不改权限或自动重发 | TypeScript passed；Node1752 passed/2skip，前端完整164及同步组件7 passed；worker381 passed；Vite/独立便携包及1016程序文件、9个公开skill（28文件）核对passed | 包交审时 dev.8 原生、图像视觉审阅、provider及科学15路 not_run；无最终菜单重排；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（历史内部包 dev.7，未正式发布） | 启动读取门控、会话草稿及计算连接恢复；未部署草稿独立来源与旧草稿一次明确关联，拒绝服务替换或未知作业重绑 | Node1744 passed/2skip、前端164/164、定向256及A独立51 passed；包1015文件/28skill核对；原生明确关联及实际便携冷启自动恢复同流程/项目/WSL/Codex，参数/策略不变；A新15路27进程有界科学回归 passed | B原生科学路线、全部控件和最终视觉未完成；保留历史失败，无频次菜单重排；[开发记录](docs/v0.18.9.md) |
 | 0.18.8 | 四入口窄栏、会话项目/置顶/无项目对话；新计算默认规划；宽比例拖动与单页预览；全局任务纵览；模块摘要与分层参数；手填第三方模型/推理强度；修复兼容 API 登录后的共享字段导致布局保存失败 | Node 1502 passed / 2 skipped、worker 363、前端 150、构建及最终便携版实际退出恢复/同流程编辑/零模型发现本机 API passed；独立科学 15 路 27 个新进程 passed；1004 包文件核对 | 远端新模型调用、SSH 提交、AOTI、全新安装及未实现 adapter not_run；仅 OpenAI 兼容 Chat Completions 协议；[本代记录](docs/v0.18.8.md) |
 | 0.18.7 | 全局账号/API 中心与对话简称；Codex 0.165.0-alpha.1.2 协议；DeepSeek 结构化工具修正及冷恢复；OpenAI 兼容 API；配置部署与执行门槛分离；文件卡片、命名工作区与复制/软链接导入 | Node 1497 passed / 2 skipped、worker 363、前端完整 143 加工作区 2 项、构建及真实 Codex/DeepSeek 非空对话重启续改 passed；独立科学 15 路 27 个新进程 passed | 第三方原生协议不通用；新 SSH/AOTI/新机器安装及未实现 adapter not_run；发布包最终结果见[本代记录](docs/v0.18.7.md) |

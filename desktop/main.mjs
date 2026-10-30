@@ -1,3 +1,4 @@
+import {environmentApiTool,createEnvironmentApiReader} from './environment-api-read.mjs';
 import {createWorkbenchImageExporter} from './workbench-image.mjs';
 import {taskOperation} from './task-operations.mjs';
 import {workspaceController} from './workspaces.mjs';
@@ -131,7 +132,9 @@ const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functio
 scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route)});
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(here,'custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
-worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader],async(name,args,scope)=>{
+const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
+worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool],async(name,args,scope)=>{
+ if(name==='inspect_environment_api')return readEnvironmentApi(args,scope);
  if(['read_pygas_workflow','propose_custom_cv','read_custom_cv'].includes(name))workflowContext.assertScope(scope);
  if(name==='read_pygas_workflow'){const result=await readCurrentPair({records:taskRecords,worker,activeTasks:activeAuthoringTasks,readTaskPygas,privateAccess:(task,provider)=>privateAccess.assertTask(task,provider)},args,scope);workflowContext.assertScope(scope);return result;}
  if(name==='propose_custom_cv'){const task=workflowContext.assertScope(scope);await privateAccess.assertTask(task,scope.provider);workflowContext.assertScope(scope);const result=await customCv.proposeDraft(args,scope);workflowContext.assertScope(scope);return result;}

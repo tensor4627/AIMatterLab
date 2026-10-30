@@ -9,7 +9,9 @@ GRAPH_ENTRYPOINTS=("_mode","_node_ports","_edge_endpoint","validate_graph","_red
 
 def graph_authoring_contract(code, source_hash):
  """Expose actual public graph rules without importing target source or evaluating it."""
- result={"status":"blocked","validation":"not_run","source":{"name":"tools/graph_workflow.py","sha256":source_hash},"scope":"Read-only AST/source excerpts. Only render_pygas_workflow checks a concrete graph; no artifact or target validation."}
+ if __package__:from .pygas_values import studio_graph_input_contract
+ else:from pygas_values import studio_graph_input_contract
+ result={"studio_graph_input":studio_graph_input_contract(),"status":"blocked","validation":"not_run","source":{"name":"tools/graph_workflow.py","sha256":source_hash},"scope":"Read-only AST/source excerpts. Only render_pygas_workflow checks a concrete graph; no artifact or target validation."}
  try:
   tree=ast.parse(code)
   functions={n.name:n for n in tree.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))}

@@ -106,4 +106,11 @@ def catalog(source):
   hashes.update(observed)
   if observed==declaration.get("source_files"):settings_schema={**declaration,"status":"passed"}
   else:settings_schema={"status":"blocked","fields":declaration.get("fields",[]),"source_files":observed,"reason":"Registered settings source differs from its reviewed adapter; existing settings remain inspectable, edits require the current actual contract"}
- return {"settings_schema":settings_schema,"ports":ports,"schema_version":1,"status":"passed","scope":"Read-only AST contract matching the registered pyGAS GUI; catalog presence is not numerical/target validation. Raw expression defaults are source descriptions, not executable user input.","source":{"id":source.get("id"),"commit":source.get("commit"),"dirty":source.get("dirty"),"files":hashes},"catalog":result,"validation":"not_run"}
+ if __package__:from .pygas_values import studio_graph_input_contract,studio_graph_parameter_policy
+ else:from pygas_values import studio_graph_input_contract,studio_graph_parameter_policy
+ for entries in result.values():
+  for entry in entries:
+   for param in entry['params']:
+    policy=studio_graph_parameter_policy(param)
+    if policy:param['studio_graph_input']=policy
+ return {"studio_graph_input":studio_graph_input_contract(),"settings_schema":settings_schema,"ports":ports,"schema_version":1,"status":"passed","scope":"Read-only AST contract matching the registered pyGAS GUI; catalog presence is not numerical/target validation. Raw expression defaults are source descriptions, not executable user input.","source":{"id":source.get("id"),"commit":source.get("commit"),"dirty":source.get("dirty"),"files":hashes},"catalog":result,"validation":"not_run"}
