@@ -42,6 +42,8 @@ const sections=[['home','工作区',Layers3],['tools','工具',Layers3],['relati
 const initialSettings:Settings={distribution:'Ubuntu',workerRoot:'~/.local/state/gpu-sampling-studio',workerPort:8767,codexPath:'codex',cwd:'',skillRoots:[],theme:'dark'};
 function shortTime(value:number){return new Date(value*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function errorText(e:unknown){return e instanceof Error?e.message:String(e);}
+function storedConversation(){try{return localStorage.getItem('studio.conversation');}catch{return null;}}
+function storeConversation(id:string|null){try{if(id)localStorage.setItem('studio.conversation',id);else localStorage.removeItem('studio.conversation');}catch{/* Selection preferences must not block chat. */}}
 function stored(key:string,fallback:number){const value=Number(localStorage.getItem(key));return Number.isFinite(value)&&value>0?value:fallback;}
 function bounded(value:number|undefined,min:number,max:number,fallback:number){return typeof value==='number'&&Number.isFinite(value)&&value>0?Math.min(max,Math.max(min,value)):fallback;}
 function RunTable({items,selected,onOpen,canPrepare,onPrepare}:{items:Run[];selected:string|null;onOpen:(id:string)=>void;canPrepare:boolean;onPrepare:()=>void}){
@@ -54,7 +56,7 @@ export default function App(){
  const [planningMode,setPlanningMode]=useState(false);const planningModeRef=useRef(planningMode);planningModeRef.current=planningMode;
  const [agentTasks,setAgentTasks]=useState<any[]>([]),[clusterDraft,setClusterDraft]=useState<any>();
  const [plans,setPlans]=useState<Plan[]>([]),[agentIntent,setAgentIntent]=useState<AgentIntent>();
- const [conversations,setConversations]=useState<Conversation[]>([]),[selectedConversationId,setSelectedConversationId]=useState<string|null>(localStorage.getItem('studio.conversation')),[sessionSelection,setSessionSelection]=useState<{nonce:string;conversation?:Conversation;new?:boolean}>(),[agentBusy,setAgentBusy]=useState(false);const selectedConversationRef=useRef<Conversation|null>(null),conversationSelectionSeq=useRef(0);
+ const [conversations,setConversations]=useState<Conversation[]>([]),[selectedConversationId,setSelectedConversationId]=useState<string|null>(storedConversation()),[sessionSelection,setSessionSelection]=useState<{nonce:string;conversation?:Conversation;new?:boolean}>(),[agentBusy,setAgentBusy]=useState(false);const selectedConversationRef=useRef<Conversation|null>(null),conversationSelectionSeq=useRef(0);
  const [section,setSection]=useState(localStorage.getItem('studio.section')||'home'),[projects,setProjects]=useState<Project[]>([]),[environments,setEnvironments]=useState<Environment[]>([]),[runs,setRuns]=useState<Run[]>([]),[assets,setAssets]=useState<Artifact[]>([]);
  const [projectId,setProjectId]=useState(''),[settings,setSettings]=useState(initialSettings),[worker,setWorker]=useState(false),[connecting,setConnecting]=useState(false);
  const [selected,setSelected]=useState<string|null>(null),[agentVisible,setAgentVisible]=useState(localStorage.getItem('studio.agent')!=='false'),[bottomHeight,setBottomHeight]=useState(stored('studio.bottom',190));
@@ -80,7 +82,7 @@ export default function App(){
   if(event.method==='studio/workerConnected'){sourceFailures.current.clear();sourceGeneration.current++;projectPolicyWorkerEpoch.current++;setWorker(true);setError(old=>old.includes('Connect the WSL worker first')?'':old);void refresh();}
   if(event.method==='studio/conversationContextChanged'){
    const p=event.params,c=p.conversation;setConversations(old=>[c,...old.filter(row=>!(row.provider===c.provider&&[p.oldThreadId,c.threadId].includes(row.threadId)))]);
-   if(selectedConversationRef.current?.provider===c.provider&&selectedConversationRef.current?.threadId===p.oldThreadId){selectedConversationRef.current=c;setSelectedConversationId(c.id);localStorage.setItem('studio.conversation',c.id);}
+   if(selectedConversationRef.current?.provider===c.provider&&selectedConversationRef.current?.threadId===p.oldThreadId){selectedConversationRef.current=c;setSelectedConversationId(c.id);storeConversation(c.id);}
   }
   if(event.method==='studio/conversationDeleted')applyConversationDeletion(event.params);
   if(event.method==='studio/conversationUpdated'){const conversation=event.params.conversation;setConversations(old=>[conversation,...old.filter(c=>c.id!==conversation.id)]);if(conversation.id===selectedConversationRef.current?.id){selectedConversationRef.current=conversation;if(conversation.projectId)setProjectId(conversation.projectId);void refresh();}}
@@ -92,7 +94,7 @@ export default function App(){
  const runProject=projects.find(p=>p.id===runProjectId);
  const visibleRuns=runs.filter(r=>(!runProjectId||r.project_id===runProjectId)&&(!search||[r.name,r.engine,r.status,tr(statusNames[r.status]||r.status)].join('\n').toLowerCase().includes(search.toLowerCase())));
  useEffect(()=>{
-  const restoreSequence=conversationSelectionSeq.current;void invoke<Conversation[]>('conversation.list').then(values=>{setConversations(values);if(restoreSequence!==conversationSelectionSeq.current)return;const previous=values.find(c=>c.id===localStorage.getItem('studio.conversation'));if(previous)void chooseConversation(previous);}).catch(onError);
+  const restoreSequence=conversationSelectionSeq.current;void invoke<Conversation[]>('conversation.list').then(values=>{setConversations(values);if(restoreSequence!==conversationSelectionSeq.current)return;const previous=values.find(c=>c.id===storedConversation());if(previous)void chooseConversation(previous);}).catch(onError);
   void invoke<any[]>('conversation.groups').then(setChatGroups).catch(onError);
   void invoke<any[]>('task.list').then(setAgentTasks).catch(()=>{});
   void invoke<Plan[]>('workflow.list').then(setPlans).catch(()=>{});
@@ -208,7 +210,7 @@ export default function App(){
  function openAccounts(provider:AgentProvider=agentProvider){setAccountsProvider(provider);setModal('accounts');}
  async function renameConversation(){if(!renameTarget||renaming)return;setRenaming(true);try{const value=await invoke<Conversation>('conversation.rename',{id:renameTarget.id,name:conversationName});setConversations(old=>old.map(c=>c.id===value.id?value:c));setRenameTarget(null);}catch(error){onError(error);}finally{setRenaming(false);}}
  function closeSettings(){const backup=settingsBackup.current;settingsBackup.current=null;if(backup){setSettings(backup);setLanguage(backup.language||'zh-CN');}setModal('');}
- function conversationChanged(value:Conversation|null){if(value)localStorage.setItem('studio.conversation',value.id);else localStorage.removeItem('studio.conversation');selectedConversationRef.current=value;setSelectedConversationId(value?.id||null);if(value)setConversations(old=>[value,...old.filter(c=>c.id!==value.id)]);}
+ function conversationChanged(value:Conversation|null){storeConversation(value?.id||null);selectedConversationRef.current=value;setSelectedConversationId(value?.id||null);if(value)setConversations(old=>[value,...old.filter(c=>c.id!==value.id)]);}
  function openDeployment(taskId:string):Promise<void>{
   if(agentBusy)return Promise.resolve();if(deploymentOpening.current?.taskId===taskId)return deploymentOpening.current.promise;
   const sequence=++conversationSelectionSeq.current;openSeq.current++;setPrimaryPanel('workspace');setAgentIntent(undefined);setSection('deployment:'+taskId);
@@ -287,7 +289,7 @@ export default function App(){
 
      {section==='home'&&<div className="home-page"><div className="page-heading"><div><span className="eyebrow">YOUR COMPUTATIONAL WORKSPACE</span><h1>{tr("从想法，到可复现的实验。")}</h1><p>{tr("分子动力学、增强采样与势模型训练，在同一个工作空间里。")}</p></div><button className="button primary" disabled={!worker||!project} onClick={()=>newRun()}><Plus size={15}/>{tr("新建计算")}</button></div>
       {!worker&&<div className="connect-banner"><div className="banner-icon"><Server size={21}/></div><div><strong>{tr("连接你的本机算力")}</strong><p>{tr("独立 WSL 服务会持续托管计算，关闭工作台后作业仍可运行。")}</p></div><button className="button" onClick={()=>void connectWorker()} disabled={connecting}>{tr(connecting?'连接中…':'连接 WSL')}<ArrowUpRight size={13}/></button></div>}
-      <div className="stat-grid">{[[statusKnown?String(active.length):'?','正在计算','运行中的真实进程'],[statusKnown?String(queued.length):'?','等待资源','按 GPU 授权调度'],[String(runs.filter(r=>r.status==='succeeded').length),'已完成实验','保留输入与结果索引'],[String(environments.length),'计算环境','独立引擎与工具链']].map(([v,n,s])=><div className="stat" key={n}><div>{n}</div><strong>{v}</strong><small>{s}</small></div>)}</div>
+      <div className="stat-grid">{[[statusKnown?String(active.length):'?','正在计算','运行中的真实进程'],[statusKnown?String(queued.length):'?','等待资源','按 GPU 授权调度'],[String(runs.filter(r=>r.status==='succeeded').length),'已完成实验','保留输入与结果索引'],[String(environments.length),'计算环境','独立引擎与工具链']].map(([v,n,s])=><div className="stat" key={n}><div>{t(n)}</div><strong>{v}</strong><small>{t(s)}</small></div>)}</div>
       <div className="section-heading"><h3>{t('按任务开始')}</h3><button onClick={()=>setSection('relations')}>{t('查看工具关系')}<ArrowUpRight size={13}/></button></div><TaskCards onOpen={openWorkflow}/>
       {plans.length>0&&<><div className="section-heading"><h3>{t('已保存的任务计划')}</h3></div><div className="saved-plans">{plans.map(plan=><button key={plan.id} onClick={()=>setSection('plan:'+plan.id)}><GitBranch size={15}/>{plan.name}<small>{t('草稿 · 尚未执行')}</small></button>)}</div></>}
       <div className="section-heading"><h3>{tr("最近的实验")}</h3><button onClick={()=>go('runs')}>{tr("查看全部")}<ChevronRight size={13}/></button></div><RunTable items={visibleRuns.slice(0,5)} selected={selected} onOpen={id=>void openTask(id)} canPrepare={worker&&!!project} onPrepare={()=>newRun()}/>

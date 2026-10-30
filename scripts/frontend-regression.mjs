@@ -223,12 +223,61 @@ try{
   assert.equal(await p.getByRole('button',{name:'发送',exact:true}).isDisabled(),true);await p.locator('.composer textarea').press('Enter');
   assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').length),0);
   await p.evaluate(()=>window.renderTest('Agent',{...window.__agentProps,sessionSelection:{nonce:'new-selection',conversation:{provider:'codex',threadId:'new',projectId:'new-project'}}}));
-  await p.waitForFunction(()=>window.__selectionCallbacks.at(-1)?.threadId==='new');await p.evaluate(()=>window.__finishOld());
+  await p.waitForFunction(()=>window.__selectionCallbacks.at(-1)?.threadId==='new');
+  assert.equal(await p.locator('.composer textarea').inputValue(),'');assert.equal(await p.getByRole('button',{name:'发送',exact:true}).isDisabled(),true);
+  await p.locator('.composer textarea').fill('New conversation message');await p.evaluate(()=>window.__finishOld());
   await p.waitForFunction(()=>document.querySelector('.chat-scroll')?.textContent.includes('History new'));
   assert.match(await p.locator('.chat-scroll').innerText(),/History new/);assert.equal(await p.evaluate(()=>window.__selectionCallbacks.some(c=>c?.threadId==='old')),false);
   assert.deepEqual(await p.evaluate(()=>window.__selectionErrors),[]);await p.getByRole('button',{name:'发送',exact:true}).click();
   await p.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='turn/start'));
   assert.equal(await p.evaluate(()=>window.__test.calls.find(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').data.params.threadId),'new');
+  assert.equal(await p.evaluate(()=>window.__test.calls.find(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').data.params.input[0].text),'New conversation message');
+  await p.evaluate(()=>{window.__delayed='';window.__test.events.forEach(fn=>fn({provider:'codex',method:'turn/completed',params:{threadId:'new',turn:{id:'fixture-turn',status:'completed'}}}));});
+  await p.waitForFunction(()=>!document.querySelector('[data-testid=agent-provider]').disabled);
+  await p.evaluate(()=>window.renderTest('Agent',{...window.__agentProps,sessionSelection:{nonce:'return-old',conversation:{provider:'codex',threadId:'old',projectId:'old-project'}}}));
+  await p.waitForFunction(()=>window.__selectionCallbacks.at(-1)?.threadId==='old');
+  assert.equal(await p.locator('.composer textarea').inputValue(),'Must wait for selected conversation');
+ });
+ await check('agent-composer-reload-restores-exact-thread-without-resend',async p=>{
+  const mount=()=>p.evaluate(()=>{
+   const original=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)?{model:'fixture-model',thread:{id:data.params.threadId,turns:[]}}:original(method,data);
+   localStorage.setItem('studio.conversation','codex:draft-thread');
+   return window.renderTest('Agent',{planningMode:false,onPlanningModeChange:()=>{},context:'{}',onError:e=>{throw e;},onConversation:c=>{if(c){localStorage.setItem('studio.conversation',c.id);window.__test.selectedThread=c.threadId;}},sessionSelection:{nonce:'draft-selection',conversation:{provider:'codex',threadId:'draft-thread',name:'Draft'}}});
+  });
+  await mount();await p.waitForFunction(()=>window.__test.selectedThread==='draft-thread');await p.locator('.composer textarea').fill('未发送的界面恢复测试草稿');
+  await p.reload();await p.waitForFunction(()=>window.renderTest);await mount();await p.waitForFunction(()=>window.__test.selectedThread==='draft-thread');
+  assert.equal(await p.locator('.composer textarea').inputValue(),'未发送的界面恢复测试草稿');
+  assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').length),0);
+ });
+ await check('agent-composer-pending-ack-retains-newer-typing',async p=>{
+  await p.evaluate(()=>{
+   const original=window.studio.invoke;window.studio.invoke=async(method,data)=>{if(method==='agent.rpc'&&data.method==='turn/start'){window.__test.calls.push({method,data});return new Promise(resolve=>window.__test.ackMessage=()=>resolve({turn:{id:'fixture-turn'}}));}return original(method,data);};
+   return window.renderTest('Agent',{planningMode:false,onPlanningModeChange:()=>{},context:'{}',onError:e=>{throw e;},onConversation:c=>{if(c)localStorage.setItem('studio.conversation',c.id);}});
+  });
+  await p.getByTestId('agent-connect').click();await p.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='model/list'));
+  await p.locator('.composer textarea').fill('Submitted message');await p.getByRole('button',{name:'发送',exact:true}).click();await p.waitForFunction(()=>typeof window.__test.ackMessage==='function');
+  assert.equal(await p.locator('.composer textarea').inputValue(),'Submitted message');await p.locator('.composer textarea').fill('Newer unsent draft');await p.evaluate(()=>window.__test.ackMessage());
+  await p.evaluate(()=>window.__test.events.forEach(fn=>fn({provider:'codex',method:'turn/completed',params:{threadId:'fixture-thread',turn:{id:'fixture-turn',status:'completed'}}})));
+  await p.waitForFunction(()=>!document.querySelector('[data-testid=agent-provider]').disabled);
+  assert.equal(await p.locator('.composer textarea').inputValue(),'Newer unsent draft');
+  const sent=await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start'));assert.equal(sent.length,1);assert.equal(sent[0].data.params.input[0].text,'Submitted message');
+ });
+ await check('agent-composer-targeted-prefill-follows-selected-owner',async p=>{
+  await p.evaluate(()=>{
+   const original=window.studio.invoke;window.studio.invoke=async(method,data)=>method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)?{model:'fixture-model',thread:{id:data.params.threadId,turns:[]}}:original(method,data);
+   window.__draftProps={planningMode:false,onPlanningModeChange:()=>{},context:'{}',onError:e=>{throw e;},onConversation:c=>{if(c)window.__test.selectedThread=c.threadId;}};
+   return window.renderTest('Agent',{...window.__draftProps,sessionSelection:{nonce:'first',conversation:{provider:'codex',threadId:'first'}}});
+  });
+  await p.waitForFunction(()=>window.__test.selectedThread==='first');await p.locator('.composer textarea').fill('Keep my first conversation draft');
+  await p.evaluate(()=>{window.__draftIntent={id:'target-discussion',provider:'codex',threadId:'second',text:'Discuss the target CV before writing code'};return window.renderTest('Agent',{...window.__draftProps,sessionSelection:{nonce:'second',conversation:{provider:'codex',threadId:'second'}},intent:window.__draftIntent});});
+  await p.waitForFunction(()=>window.__test.selectedThread==='second');assert.equal(await p.locator('.composer textarea').inputValue(),'Discuss the target CV before writing code');
+  await p.locator('.composer textarea').fill('Newer second conversation draft');
+  await p.evaluate(()=>window.renderTest('Agent',{...window.__draftProps,sessionSelection:{nonce:'return-first',conversation:{provider:'codex',threadId:'first'}},intent:window.__draftIntent}));
+  await p.waitForFunction(()=>window.__test.selectedThread==='first');assert.equal(await p.locator('.composer textarea').inputValue(),'Keep my first conversation draft');
+  await p.evaluate(()=>window.renderTest('Agent',{...window.__draftProps,sessionSelection:{nonce:'return-second',conversation:{provider:'codex',threadId:'second'}},intent:window.__draftIntent}));
+  await p.waitForFunction(()=>window.__test.selectedThread==='second');assert.equal(await p.locator('.composer textarea').inputValue(),'Newer second conversation draft');
+  assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').length),0);
  });
  await check('conversation-selection-survives-late-initial-state-and-provider-connect',async p=>{
   await p.evaluate(()=>{
