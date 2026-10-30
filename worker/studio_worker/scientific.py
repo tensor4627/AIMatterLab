@@ -11,6 +11,8 @@ from pathlib import Path
 
 def probe_modules(engine):
     """Import only the selected route; unrelated SDKs can have expensive startup."""
+    if engine == "installation.check":
+        return ()
     if engine is None:
         return ("torch", "cupy", "ase", "pygas", "pydyn", "hotpp")
     if engine.startswith("pydyn."):

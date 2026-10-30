@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from studio_worker.service import Service
@@ -25,6 +26,19 @@ class Lifecycle(unittest.TestCase):
         self.env = self.service.register_environment({"name": "test", "executables": {"python": sys.executable}})
         self.project = self.service.register_project({"name": "test", "policy": {
             "input_roots": [str(self.inputs)], "environments": [self.env["id"]]}})
+        # These print/sleep subprocesses exercise supervisor lifecycle only.
+        # Real import failures and source registration are tested separately.
+        from studio_worker.adapters import Adapter
+        real_probe = Adapter.probe
+        def lifecycle_probe(adapter, environment):
+            if adapter.engine != "pydyn.md":
+                return real_probe(adapter, environment)
+            return {"scope": {"engine": "pydyn.md"}, "executable": adapter.executable(environment, "python"),
+                    "modules": {name: {"status": "passed", "version": "lifecycle-mock"}
+                                for name in ("torch", "cupy", "ase", "pydyn")}, "pydyn_sampling": False}
+        probe_fixture = patch.object(Adapter, "probe", lifecycle_probe)
+        probe_fixture.start()
+        self.addCleanup(probe_fixture.stop)
 
     def tearDown(self):
         for run in self.service.store.runs():

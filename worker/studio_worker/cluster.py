@@ -14,7 +14,7 @@ import tarfile
 import threading
 import time
 from pathlib import Path
-from .adapters import Adapter, ENGINES
+from .adapters import Adapter, ENGINES, SUPPORTED_ENGINES
 from .util import atomic_json, contained, digest, leaf
 
 TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+-]+$")
@@ -513,7 +513,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
         project, p = self.allowed(spec["project_id"], spec["cluster_id"])
         if remote_inputs and not p.get("read_roots"):
             raise PermissionError("Register explicit remote read roots before importing inputs")
-        if spec["engine"] not in project["policy"]["engines"] or spec["engine"] not in ENGINES:
+        if spec["engine"] not in project["policy"]["engines"] or spec["engine"] not in SUPPORTED_ENGINES:
             raise PermissionError("Engine is not authorized")
         if type(spec.get("max_seconds")) is not int:
             raise ValueError("Integer wall-clock limit required")

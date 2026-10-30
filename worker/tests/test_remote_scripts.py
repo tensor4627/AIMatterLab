@@ -32,26 +32,43 @@ class LocalWire:
         if r.returncode:raise RuntimeError(r.stderr.decode()[-2000:])
         return r.stdout.decode()
 class WireIntegration(unittest.TestCase):
-    def execute(self,scheduler):
+    def execute(self,scheduler,missing_pydyn=False):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);(root/"inputs").mkdir();(root/"bin").mkdir()
             for command in ("bsub","bjobs","sbatch","squeue","sacct"):
                 f=root/"bin"/command;f.write_text(SCHEDULER);f.chmod(0o755)
-            (root/"inputs/run.py").write_text("import time;time.sleep(.5);print('REAL_INFRASTRUCTURE_PROCESS_OK',flush=True)")
+            (root/"inputs/run.py").write_bytes((Path(__file__).resolve().parents[2]/"installation/examples/worker-smoke.py").read_bytes())
+            environment={"executables":{"python":sys.executable}}
+            engine="installation.check";parameters={"installation_case":"worker"}
+            if missing_pydyn:
+                # Controlled missing import on the simulated compute node.
+                package=root/"fixture-modules/pydyn";package.mkdir(parents=True)
+                (package/"__init__.py").write_text("raise ModuleNotFoundError('controlled remote missing pydyn')\n")
+                environment['repositories']={'pydyn':str(package.parent)}
+                engine="pydyn.md";parameters={}
             service=Service(root/"worker",schedule=False);cluster=Clusters(service,transport=LocalWire)
             try:
-                p=cluster.register({"name":"local scheduler fixture","scheduler":scheduler,"target":"fixture@example.test","port":22,"ssh_client":"/usr/bin/ssh","remote_root":str(root/"remote"),"queue":"fixture","activation":"export PATH="+shlex.quote(str(root/"bin"))+":$PATH\nexport FIXTURE_QUEUE_ROOT="+shlex.quote(str(root)),"environment":{"executables":{"python":sys.executable}}})
-                project=service.register_project({"name":"local fixture","policy":{"engines":["pydyn.md"],"clusters":[p["id"]],"input_roots":[str(root/"inputs")]}})
-                run=cluster.prepare({"project_id":project["id"],"cluster_id":p["id"],"engine":"pydyn.md","inputs":{"run.py":str(root/"inputs/run.py")},"parameters":{},"gpu":0,"max_seconds":20,"resources":{"queue":"fixture","cpus":1,"gpus":0,"memory_mb":1024},"idempotency_key":"key"})
+                p=cluster.register({"name":"local scheduler fixture","scheduler":scheduler,"target":"fixture@example.test","port":22,"ssh_client":"/usr/bin/ssh","remote_root":str(root/"remote"),"queue":"fixture","activation":"export PATH="+shlex.quote(str(root/"bin"))+":$PATH\nexport FIXTURE_QUEUE_ROOT="+shlex.quote(str(root)),"environment":environment})
+                project=service.register_project({"name":"local fixture","policy":{"engines":[engine],"clusters":[p["id"]],"input_roots":[str(root/"inputs")]}})
+                run=cluster.prepare({"project_id":project["id"],"cluster_id":p["id"],"engine":engine,"inputs":{"run.py":str(root/"inputs/run.py")},"parameters":parameters,"gpu":0,"max_seconds":20,"resources":{"queue":"fixture","cpus":1,"gpus":0,"memory_mb":1024},"idempotency_key":"key"})
                 cluster.validate(run["id"]);submitted=cluster.submit(run["id"]);self.assertEqual(submitted["status"],"queued",submitted.get("error"))
                 for _ in range(50):
                     result=cluster.poll(run["id"])
                     if result["status"] in ("succeeded","failed"):break
                     time.sleep(.1)
+                if missing_pydyn:
+                    self.assertEqual(result["status"],"failed")
+                    self.assertEqual(result["scientific_validation"]["status"],"failed")
+                    self.assertIn("pydyn",result["scientific_validation"]["message"])
+                    self.assertNotIn("STUDIO_WORKER_SMOKE_OK",cluster.read(run["id"])["text"])
+                    self.assertFalse((Path(run['remote_directory'])/'simulation/smoke-result.json').exists())
+                    return
                 self.assertEqual(result["status"],"succeeded")
                 self.assertEqual(result["scientific_validation"]["status"],"passed")
-                self.assertIn("scientific run pending",result["scientific_validation"]["scope"])
-                self.assertIn("REAL_INFRASTRUCTURE_PROCESS_OK",cluster.read(run["id"])["text"])
+                self.assertEqual(result["scientific_validation"]["scientific_status"],"not_run")
+                self.assertIn("not a PyDyn check",result["scientific_validation"]["scope"])
+                self.assertIn("STUDIO_WORKER_SMOKE_OK",cluster.read(run["id"])["text"])
             finally:service.close();service.store.db.close()
     def test_lsf_archive_gate_and_exit_receipt(self):self.execute("lsf")
     def test_slurm_archive_gate_and_exit_receipt(self):self.execute("slurm")
+    def test_remote_missing_pydyn_stops_before_user_script(self):self.execute("slurm",missing_pydyn=True)

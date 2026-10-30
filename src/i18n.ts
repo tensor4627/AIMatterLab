@@ -130,6 +130,7 @@ const english:Record<string,string> = {
 "尚未观察到可用的 CUDA 环境。可重新发现、补充已有解释器，或让 Agent 定位依赖问题。":"No available CUDA environment has been observed. Discover again, add an existing interpreter, or ask the agent to diagnose dependencies.",
 "正在检查解释器与 CUDA，请稍候。":"Checking interpreters and CUDA. Please wait.",
 "CUDA 已发现":"CUDA discovered",
+"未观察到 CUDA":"CUDA not observed",
 "CPU / CUDA 待检查":"CPU / CUDA not checked",
 "未绑定科学源码":"No scientific source binding",
 "检查详情":"Check details",

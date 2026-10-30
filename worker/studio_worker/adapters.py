@@ -8,6 +8,12 @@ from .util import run_json, digest
 ENGINES = ("gpumd.neb", "gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
            "pydyn.sampling", "nep.train", "nep.eval", "nep.analyze", "hotpp.train", "hotpp.eval",
            "hotpp.export", "pygas.reweight", "pygas.opes-reweight")
+# Installer-only fixed scripts are not scientific engine choices or defaults.
+SUPPORTED_ENGINES = ENGINES + ("installation.check",)
+INSTALLATION_CHECKS = {
+    "worker": "badf992b842e3a6dbcb29a009475f1f1e98e98f70efeb86c34e682305c7d0c13",
+    "reference-md": "ef19e44d075637647263bf5ffff804d8ce70a8b6f890510a21953920f027e751",
+}
 SCIENTIFIC = Path(__file__).with_name("scientific.py")
 
 
@@ -28,7 +34,7 @@ def process_env(environment, gpu=None):
 
 class Adapter:
     def __init__(self, engine):
-        if engine not in ENGINES:
+        if engine not in SUPPORTED_ENGINES:
             raise ValueError("Unsupported engine")
         self.engine = engine
 
@@ -66,6 +72,35 @@ class Adapter:
         report["native_runtime"] = runtime
         return report
 
+    def pydyn_import_contract(self, environment, observed=None):
+        """Current required imports only; this is not model or numerical validation."""
+        from .scientific import probe_modules
+        observed = self.probe(environment) if observed is None else observed
+        if not isinstance(observed, dict) or observed.get("status") == "blocked":
+            detail = observed.get("error", "No current probe result") if isinstance(observed, dict) else "Invalid probe result"
+            raise ValueError("PyDyn environment probe failed: " + str(detail)[:2000])
+        scope = observed.get("scope")
+        if (not isinstance(scope, dict) or scope.get("engine") != self.engine or
+                observed.get("executable") != self.executable(environment, "python")):
+            raise ValueError("PyDyn import probe belongs to a different engine/interpreter")
+        modules = observed.get("modules")
+        if not isinstance(modules, dict):
+            raise ValueError("PyDyn import probe has no module observations")
+        required = probe_modules(self.engine)
+        missing = [name for name in required if not isinstance(modules.get(name), dict) or modules[name].get("status") != "passed"]
+        if missing:
+            details = "; ".join(name + ": " + str(modules.get(name, {}).get("error", "not available"))[:500]
+                                for name in missing if isinstance(modules.get(name, {}), dict))
+            raise ValueError("Required PyDyn runtime imports failed (" + ", ".join(missing) + "). " + details +
+                             ". Configure the selected environment's dependencies or explicit source repositories before preparing a new run.")
+        registered = environment.get("repositories", {}).get("pydyn")
+        if registered:
+            origin = modules["pydyn"].get("file")
+            if not isinstance(origin, str) or not Path(origin).is_absolute() or not Path(origin).resolve().is_relative_to(Path(registered).resolve()):
+                raise ValueError("Imported PyDyn differs from the explicitly registered source; verify the selected environment")
+        return {"status": "passed", "modules": list(required),
+                "scope": "Current required imports and registered PyDyn source only; model, numerical and engine-run checks remain separate"}
+
     @staticmethod
     def require(assets, names):
         missing = [name for name in names if name not in assets]
@@ -99,6 +134,10 @@ class Adapter:
 
     def prepare(self, spec, environment):
         assets, p, engine = spec["inputs"], spec.get("parameters", {}), self.engine
+        if engine == "installation.check":
+            if set(assets) != {"run.py"} or set(p) != {"installation_case"} or p["installation_case"] not in INSTALLATION_CHECKS:
+                raise ValueError("Only shipped worker/reference installation cases are accepted")
+            return [self.executable(environment, "python"), "run.py"]
         from .derivative_selection import validate_controls
         validate_controls(p,engine)
         if engine.endswith(".sampling"):
@@ -180,6 +219,15 @@ class Adapter:
 
         Arbitrary Python drivers and undeclared controls are not semantically proven.
         """
+        if self.engine == "installation.check":
+            import hashlib
+            case = spec.get("parameters", {}).get("installation_case")
+            script = Path(directory) / "run.py"
+            # Normalize text newlines so Windows and Linux copies agree.
+            actual = hashlib.sha256(script.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+            if case not in INSTALLATION_CHECKS or actual != INSTALLATION_CHECKS[case]:
+                raise ValueError("Installation check input differs from the shipped fixed example")
+            return {"status": "passed", "case": case, "scope": "Exact shipped installation input only"}
         if self.engine == "gpumd.neb":
             from .neb_checks import contract
             return {"status":"passed", "neb":contract(directory,spec["inputs"],spec.get("parameters",{}).get("neb"))}
@@ -206,6 +254,9 @@ class Adapter:
         runtime = self.runtime_check(environment)
         p, directory = spec.get("parameters", {}), Path(directory)
         self.input_contract(spec,directory)
+        if self.engine == "installation.check":
+            self.prepare(spec, environment)
+            return {"status": "passed", "scientific_status": "not_run", "scope": "Fixed installation input contract; actual worker/reference run pending; not a PyDyn check"}
         if self.engine == "pygas.build":
             first=(directory/"build_bias.py").read_text(encoding="utf-8").splitlines()[0]
             if first.startswith("# studio-pygas-source: "):
@@ -307,6 +358,10 @@ class Adapter:
                     "scope": "serialized bias ABI and sampled finite differences; target-engine and restart parity require run evidence"}
         if self.engine == "pygas.build" and p.get("output_file", "").endswith(".pt2"):
             raise ValueError("AOTI needs explicit dual export and target-toolchain preflight")
+        if self.engine == "pydyn.md":
+            imports = self.pydyn_import_contract(environment, probe_report)
+            return {"status": "passed", "native_runtime": runtime, "runtime_imports": imports,
+                    "scientific_status": "not_run", "scope": "input/executable and required PyDyn import contracts; scientific run pending"}
         return {"status": "passed", "native_runtime":runtime, "scientific_status":"not_run", "scope": "input/executable contract; scientific run pending"}
 
     def launch(self, command, **kwargs):

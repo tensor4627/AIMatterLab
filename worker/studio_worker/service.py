@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from .adapters import Adapter, ENGINES, SCIENTIFIC, process_env
+from .adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env
 from .store import Store
 from .runtime_service import RuntimeServiceMixin
 from .util import alive, atomic_json, contained, digest, identity, leaf, run_json
@@ -67,7 +67,7 @@ class Service(RuntimeServiceMixin):
             raise ValueError("Resource limits must be positive")
         policy["max_seconds"] = int(policy["max_seconds"])
         policy["max_concurrent"] = int(policy["max_concurrent"])
-        if any(e not in ENGINES for e in policy["engines"]):
+        if any(e not in SUPPORTED_ENGINES for e in policy["engines"]):
             raise ValueError("Unsupported engine authorization")
         return self.store.put("project", value)
 
@@ -275,17 +275,23 @@ class Service(RuntimeServiceMixin):
         try:
             self.verify_snapshot(run)
             key = json.dumps({"engine":run["engine"], "environment":run["environment_snapshot"]}, sort_keys=True)
-            if key not in self.provenance:
+            current_probe = None
+            if run["engine"] == "pydyn.md" or key not in self.provenance:
                 try:
-                    self.provenance[key] = Adapter(run["engine"]).probe(run["environment_snapshot"])
+                    current_probe = Adapter(run["engine"]).probe(run["environment_snapshot"])
                 except Exception as exc:
-                    self.provenance[key] = {"status":"blocked", "error":str(exc)}
-            run["provenance"] = self.provenance[key]
+                    current_probe = {"status":"blocked", "error":str(exc)}
+                self.provenance[key] = current_probe
+            run["provenance"] = current_probe if run["engine"] == "pydyn.md" else self.provenance[key]
             from .cell_derivative_contract import derive as derive_cell_contract
             contract=derive_cell_contract(self,run)
             self.verify_snapshot(run)
+            options = {"cell_derivative_contract": contract}
+            if run["engine"] == "pydyn.md":
+                # Reuse only this invocation's fresh observation, never cached provenance.
+                options["probe_report"] = current_probe
             report = Adapter(run["engine"]).validate(run, run["environment_snapshot"],
-                                                     Path(run["directory"]) / "results",cell_derivative_contract=contract)
+                                                     Path(run["directory"]) / "results", **options)
             self.store.update(run, status="ready", validation=report)
         except Exception as exc:
             self.store.update(run, status="draft", validation={"status": "failed", "message": str(exc)})

@@ -179,15 +179,17 @@ def smoke(config,approved=False):
             if previous and all(previous.get(k)==v for k,v in p.items()):cluster=previous
             else:service.clusters.register(p);cluster=service.store.get("cluster","install-target")
         project=service.register_project({"id":project_id,"name":"Bounded installation short cases","policy":{
-            "engines":["pydyn.md"],"gpus":[config.get("gpu",0)],"max_seconds":120,"max_concurrent":1,
+            "engines":["pydyn.md","installation.check"],"gpus":[config.get("gpu",0)],"max_seconds":120,"max_concurrent":1,
             "input_roots":[str(inputs)],"environments":[env["id"]],"clusters":[cluster["id"]] if cluster else []}})
         for case in config["cases"]:
             if case not in CASES:
                 checks.append({"id":case,"status":"blocked","reason":"No shipped acceptance fixture; add and verify a versioned module case before selecting it"});continue
             folder=inputs/case;folder.mkdir(exist_ok=True);source=folder/"run.py"
             source.write_bytes((repo/"installation/examples"/CASES[case]).read_bytes())
-            spec={"project_id":project_id,"engine":"pydyn.md","gpu":config.get("gpu",0),"max_seconds":120,
-                  "idempotency_key":config["_fingerprint"]+":"+case,"name":"Install "+case,"inputs":{"run.py":str(source)},"parameters":{}}
+            engine = "pydyn.md" if case == "pydyn-md" else "installation.check"
+            spec={"project_id":project_id,"engine":engine,"gpu":config.get("gpu",0),"max_seconds":120,
+                  "idempotency_key":config["_fingerprint"]+":"+case,"name":"Install "+case,"inputs":{"run.py":str(source)},
+                  "parameters":{} if engine == "pydyn.md" else {"installation_case":case}}
             if cluster:
                 spec.update(cluster_id=cluster["id"],resources=config["compute"]["resources"])
                 result=service.clusters.prepare(spec)
