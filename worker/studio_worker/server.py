@@ -71,7 +71,7 @@ DESCRIPTIONS = {
  "diagnose_tools":"Inspect registered environments, actual executable/source availability and adapter coverage. Filesystem presence is not runtime/scientific validation. Use probe_environment with the exact engine for real imports/loader checks.",
  "suggest_parameters":"Use ASE structure facts and labeled conservative pilot defaults to propose parameters with source/confidence, preserving supplied intent. Does not invent a CV, phase or production settings. Returns geometry-derived peptide phi/psi atom candidates with zero/one-based order and ASE angle references, plus technical dtype/format/history-capacity defaults when supplied. Never guess indices from molecule names. Returns only unresolved high-uncertainty scientific choices for discussion.",
  "probe_environment":"Probe the explicitly selected engine in its registered Python/native runtime. Optional engine defaults to legacy pydyn.md; pass the actual route (gpumd.sampling, pygas.build, hotpp.train, etc). No branch or environment switching.",
- "inspect_source_project":"Read the registered public catalog and source-hashed graph/Studio I/O contract. Optional symbols (up to four exact public class names) returns bounded AST method bodies, e.g. PairwiseDistanceMean forward/MIC/output rank. No arbitrary file path, import or execution. read_project_input reads project assets, not source repositories. Inspect actual CV output shape and supported reduce semantics before collecting scalar CVs; prose alone is not executable.",
+ "inspect_source_project":"Read the registered public catalog and source-hashed graph/Studio I/O contract. For hotpp/pydyn omit symbols and read public_api_contract; request up to four advertised exact source-qualified IDs with api_symbols for bounded method source or explicitly advertised HotPP train.py DefaultPara tree/helpers, not arbitrary files or complete configuration semantics. Qualified output symbol_id values are identities, not symbols selectors. Optional symbols selects up to four exact pyGAS class names and returns bounded AST method bodies, e.g. PairwiseDistanceMean forward/MIC/output rank. No arbitrary file path, import or execution. read_project_input reads project assets, not source repositories. Inspect actual CV output shape and supported reduce semantics before collecting scalar CVs; prose alone is not executable.",
  "create_structure":"Create and register an ASE structure asset from a bounded declarative recipe. kind bulk (name, optional crystalstructure/a/cubic); molecule (name, optional vacuum); surface (bulk kwargs, indices, layers, vacuum); explicit (symbols, positions, cell, pbc); import (authorized path). Optional repeat [nx,ny,nz]. Returns validated reloaded extxyz, preview, provenance and inferred facts. Authoring only; never runs MD/relaxation.",
  "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Save the canonical graph and executable build_bias.py directly as project inputs; return their paths, hashes and a bounded preview to avoid copying long code through chat. Does not execute or build the artifact. graph.settings must include atoms_path (actual structure) and pt_path (requested output artifact); Studio snapshots their basenames and sets workflow_path=workflow.json. Read inspect_source_project.graph_contract including studio_io and reduction/output-shape rules first. Include returned files and the source structure in a pygas.build task for human execution.",
  "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Put critical CV/bias parameters first; secondary settings can use advanced:true and a scalar default plus traceable default_source. Defaults are display guidance, not actual input edits. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters. Do not create required editable fields for runtime/scope/status notes or empty missing-information lists. Reserved parameters.validation accepts only describe_engine numerical controls; review explanations belong in step descriptions or a saved review manifest.",
@@ -97,7 +97,8 @@ def tools():
             schema["additionalProperties"]=False
         if name=="render_pygas_workflow":
             schema["properties"].update({"workspace_id":{"type":"string","maxLength":128},"path":{"type":"string","maxLength":4096},"expected":{"type":"object"},"catalog_files":{"type":"object"}})
-        if name=="inspect_source_project":schema["properties"]["symbols"]={"type":"array","items":{"type":"string","pattern":"^[A-Za-z_][A-Za-z0-9_]*$","maxLength":128},"maxItems":4,"uniqueItems":True}
+        if name=="inspect_source_project":schema["properties"]["symbols"]={"description":"pyGAS class names only; for hotpp/pydyn omit symbols. Qualified public_api_contract symbol_id values are output identities, not input selectors.","type":"array","items":{"type":"string","pattern":"^[A-Za-z_][A-Za-z0-9_]*$","maxLength":128},"maxItems":4,"uniqueItems":True}
+        if name=="inspect_source_project":schema["properties"]["api_symbols"]={"type":"array","items":{"type":"string","maxLength":256},"maxItems":4,"uniqueItems":True,"description":"HotPP/PyDyn only: exact current public_api_contract symbol_id values, max4; total code/default description bytes at most16KiB. Never pass file paths or use project input readers for source."}
         if name=="describe_engine":schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name in ("probe_environment","read_runtime_guide"):schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name == "present_task":
@@ -142,16 +143,36 @@ def mcp_tool_call(service, params):
         missing = [key for key in schema.get("required", []) if key not in arguments]
         if missing:
             raise ValueError("Missing required fields: " + ", ".join(missing))
+        if name == "inspect_source_project" and "symbols" in arguments:
+            symbols = arguments["symbols"]
+            if not isinstance(symbols, list) or len(symbols)>4 or any(not isinstance(item,str) or len(item)>128 or re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',item) is None for item in symbols) or len(set(symbols))!=len(symbols):
+                source_id=arguments.get("source_id")
+                failure={"status":"blocked","code":"invalid_input","message":"symbols accepts up to four unique unqualified pyGAS class names. For hotpp/pydyn omit symbols and read public_api_contract; qualified symbol_id is an output identity, not a selector.","operation_state":"not_started","automatic_retry":False,"next_step":"Use the suggested Studio scientific tool call after reviewing these arguments. Do not discover other MCP resources or replay writes."}
+                if source_id in ("pygas","pydyn","hotpp","gpumd","torchnep"):failure["suggested_call"]={"name":"inspect_source_project","arguments":{"source_id":source_id}}
+                return {"content":[{"type":"text","text":json.dumps(failure,ensure_ascii=False)}],"isError":True}
         types = {"string": str, "object": dict, "array": list, "integer": int}
         for key, value in arguments.items():
             expected = schema["properties"].get(key, {}).get("type")
             if expected in types and (not isinstance(value, types[expected]) or expected == "integer" and isinstance(value, bool)):
                 raise ValueError("Invalid field " + key + ": expected " + expected)
+        if name == "inspect_source_project" and "api_symbols" in arguments:
+            from .software_contracts import inspect_contract
+            source=service.store.get("source-project",arguments["source_id"])
+            inspect_contract(source,api_symbols=arguments["api_symbols"]) # Read-only selector gate before dispatch; authoritative handler repeats it.
         method, route, _ = TOOL_ROUTES[name]
         started = True
         result = result_for_agent(name, dispatch(service, method, route, arguments, admin=False))
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": False}
     except Exception as exc:
+        if isinstance(params,dict) and params.get("name")=="inspect_source_project":
+            failure={"status":"blocked","code":"source_read_failed" if started else "invalid_input","message":str(exc)[:4000],"operation_state":"read_started" if started else "not_started","automatic_retry":False,"next_step":"This is read-only source inspection, not an unknown write. Request current advertised identities with the suggested Studio call; split api_symbols into smaller selections (max4 and16KiB code/default trees). Do not read source via project-input tools or discover other MCP resources."}
+            arguments=params.get("arguments",{})
+            source_id=arguments.get("source_id") if isinstance(arguments,dict) else None
+            if source_id in ("pygas","pydyn","hotpp","gpumd","torchnep"):failure["suggested_call"]={"name":"inspect_source_project","arguments":{"source_id":source_id}}
+            return {"content":[{"type":"text","text":json.dumps(failure,ensure_ascii=False)}],"isError":True}
+        if isinstance(params,dict) and params.get("name")=="read_project_input":
+            failure={"status":"blocked","code":"input_read_failed" if started else "invalid_input","message":str(exc)[:4000],"operation_state":"read_started" if started else "not_started","automatic_retry":False,"read_scope":"existing_authorized_project_inputs_only","next_step":"This input read was rejected or failed, not an unknown write. Check the current authorized input path and offset. Library software source uses list_source_projects then inspect_source_project with an existing source ID/API selector; do not read it through project-input tools or expand project roots/grants.","source_metadata_call":{"name":"list_source_projects","arguments":{}}}
+            return {"content":[{"type":"text","text":json.dumps(failure,ensure_ascii=False)}],"isError":True}
         failure = {"status": "unknown" if started else "blocked", "code": "tool_error" if started else "invalid_input",
                    "message": str(exc)[:4000], "operation_state": "unconfirmed" if started else "not_started", "automatic_retry": False,
                    "next_step": "Read the current workflow or run status before another write; do not replay an unconfirmed operation." if started else
@@ -276,7 +297,7 @@ def dispatch(service, method, path, data, admin=False):
         return response(service,data) if path.endswith('read') else save(service,data,normalize=path.endswith('normalize'))
     if path=="/api/source-project/inspect":
         from .source_projects import inspect_source
-        return inspect_source(store.get("source-project",data["source_id"]),data.get("symbols"))
+        return inspect_source(store.get("source-project",data["source_id"]),data.get("symbols"),data.get("api_symbols"))
     if path=="/api/structures/import-material":
         if not admin:raise PermissionError("External database provenance must come from desktop")
         return service.authoring(data,"create_structure")

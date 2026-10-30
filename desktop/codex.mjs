@@ -112,7 +112,8 @@ export class CodexBridge extends EventEmitter {
     if(this.strictIsolation&&message.method==='item/started'){
       const item=message.params?.item;
       if(['commandExecution','fileChange','webSearch','imageView','imageGeneration','collabAgentToolCall','subAgentActivity','dynamicToolCall'].includes(item?.type)||item?.type==='mcpToolCall'&&item.server!=='gpusampling'){
-        this.close();this.emit('event',{method:'studio/codexDisconnected',params:{reason:'Unexpected unscoped tool activity; connection closed'}});return;
+        const tool=typeof item.tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(item.tool)?item.tool:undefined;
+        this.close({reason:'isolation_violation',code:'STUDIO_CODEX_UNSCOPED_TOOL',activityType:item.type,...tool?{tool}:{},message:'Studio isolation blocked '+(tool||item.type)+'. The workflow and draft are preserved; reconnect explicitly and review results before sending another message.'});return;
       }
     }
     if(message.method==='turn/started')this.activeTurns.add(message.params?.threadId);
@@ -139,5 +140,5 @@ export class CodexBridge extends EventEmitter {
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
     this.pending.clear(); this.requests.clear(); this.activeTurns.clear();
   }
-  close() { this.lifecycle++;this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;const active=!!this.process;this.fail(new Error('Codex bridge closed'));this.process?.kill();this.process=null;if(active)this.emit('event',{method:'studio/codexDisconnected',params:{reason:'closed'}}); }
+  close(detail={reason:'closed'}) { this.lifecycle++;this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;const active=!!this.process;this.fail(new Error(detail.message||'Codex bridge closed'));this.process?.kill();this.process=null;if(active)this.emit('event',{method:'studio/codexDisconnected',params:detail}); }
 }

@@ -11,14 +11,14 @@ export function explicitStructures(text=''){
 // Only paths explicitly present in the human request; no directory grants or inferred filenames.
 export function explicitScientificInputs(text=''){
  const found=[];
- const quoted=/["`']((?:[A-Za-z]:[\\/](?![\\/])|\/(?!\/))[^"`'\r\n]+\.(?:extxyz|xyz|cif|pdb|vasp|txt|pt|pt2|pth|ckpt|yaml|yml|json|in|py|toml|dat))["`']/gi;
- const bare=/(?<![\w:/])(?:[A-Za-z]:[\\/](?![\\/])|\/(?:mnt|home|tmp|data)\/)[^\s"`'<>]+\.(?:extxyz|xyz|cif|pdb|vasp|txt|pt|pt2|pth|ckpt|yaml|yml|json|in|py|toml|dat)\b/gi;
+ const quoted=/["`']((?:[A-Za-z]:[\\/](?![\\/])|\/(?!\/))[^"`'\r\n]+\.(?:extxyz|xyz|cif|pdb|vasp|txt|pt|pt2|pth|ckpt|yaml|yml|json|in|py|toml|dat|out))["`']/gi;
+ const bare=/(?<![\w:/])(?:[A-Za-z]:[\\/](?![\\/])|\/(?:mnt|home|tmp|data)\/)[^\s"`'<>]+\.(?:extxyz|xyz|cif|pdb|vasp|txt|pt|pt2|pth|ckpt|yaml|yml|json|in|py|toml|dat|out)\b/gi;
  const poscarQuoted=/["`']((?:[A-Za-z]:[\\/](?![\\/])|\/(?!\/))[^"`'\r\n]+[\\/]POSCAR)["`']/gi;
  const poscarBare=/(?<![\w:/])(?:[A-Za-z]:[\\/](?![\\/])|\/(?:mnt|home|tmp|data)\/)[^\s"`'<>]*[\\/]POSCAR\b/gi;
  for(const regex of [quoted,bare,poscarQuoted,poscarBare])for(const match of text.matchAll(regex)){
   const previous=text.slice(Math.max(0,match.index-100),match.index).split(/[\n。；;，,]/).at(-1)||'';
   if(/(?:不要|别|禁止|勿|不(?:要)?(?:读取|导入|访问|使用)|do\s+not|don['’]t|never|without\s+(?:reading|importing|accessing))/i.test(previous))continue;
-  try{const value=linuxPath(match[1]||match[0]);if(!found.includes(value))found.push(value);}catch{}
+  try{const value=linuxPath(match[1]||match[0]);if(/\.out$/i.test(value)&&(value.split('/').some(part=>part.toLowerCase()==='skills')||/^\.[A-Za-z0-9_-]/.test(text.slice(match.index+match[0].length))))continue;if(!found.includes(value))found.push(value);}catch{}
  }
  return found.slice(0,32);
 }

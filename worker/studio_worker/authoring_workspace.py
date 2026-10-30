@@ -27,8 +27,14 @@ def ensure(service, data):
  for name in paths:
   path=Path(name)
   structure=path.suffix.lower() in ('.xyz','.extxyz','.cif','.pdb','.vasp') or path.name=='POSCAR'
-  scientific=path.suffix.lower() in ('.txt','.pt','.pt2','.pth','.ckpt','.yaml','.yml','.json','.in','.py','.toml','.dat')
+  scientific=path.suffix.lower() in ('.txt','.pt','.pt2','.pth','.ckpt','.yaml','.yml','.json','.in','.py','.toml','.dat','.out')
   if not path.is_absolute() or not structure and (name not in selected or not scientific):raise ValueError('Explicit scientific input file required')
+  if path.suffix.lower()=='.out':
+   if any(part.casefold()=='skills' for part in (*path.parts,*path.resolve().parts)):raise ValueError('Skill-directory paths are not automatic scientific output inputs')
+   # New output imports use project read roots; known foreign runs never become implicit inputs.
+   resolved=path.resolve();runs=service.store.runs()
+   if any(r['project_id']!=project['id'] and (resolved==Path(r['directory']).resolve() or Path(r['directory']).resolve() in resolved.parents) for r in runs):raise ValueError('Other-project run output is not an automatic input')
+   contained(path,project['policy']['input_roots']+[str(root)]+[r['directory'] for r in runs if r['project_id']==project['id']])
   if not path.is_file():imported.append({'source':str(path),'status':'blocked','reason':'File does not exist'});continue
   total+=path.stat().st_size
   if path.is_symlink() or path.stat().st_size>512*1024*1024 or total>1024*1024*1024:raise ValueError('Input must be a bounded regular file')

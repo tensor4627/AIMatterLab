@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "0.18.9-dev.7",
+  "version": "0.18.9-dev.8",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -11,6 +11,7 @@
     "test": "node --test tests/*.test.mjs",
     "test:worker": "node scripts/test-worker.mjs",
     "test:frontend": "node scripts/frontend-regression.mjs",
+    "test:frontend:recovery": "node scripts/frontend-source-recovery.mjs",
     "protocol": "node scripts/protocol.mjs",
     "pack": "pnpm run build && pnpm run stage:agents && electron-builder --win portable",
     "stage:agents": "node scripts/stage-agents.mjs",
@@ -45,7 +46,7 @@
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "directories": {
-      "output": "release/v0.18.9-dev.7"
+      "output": "release/v0.18.9-dev.8"
     },
     "files": [
       "dist/**",

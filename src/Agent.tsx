@@ -95,7 +95,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
    if(event.method==='turn/completed'){const call=modelCallRef.current;if(call&&(!call.turnId||call.turnId!==p.turn?.id))return;setBusy(false);setTurn(null);if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId&&call.turnId===p.turn?.id){call.status=p.turn.status==='completed'&&!p.turn.error&&call.output?'passed':'failed';setModelCall({...call});}if(p.turn?.error)onError(p.turn.error.message||p.turn.error);}
    if(event.method==='error'){const call=modelCallRef.current;if(call&&call.threadId===p.threadId&&call.turnId===p.turnId){call.status='failed';setModelCall({...call});}onError(p.error?.message||JSON.stringify(p));}
    if(event.method==='account/updated')void refreshAccount();
-   if(event.method==='studio/codexDisconnected'){modelCallRef.current=null;setModelCall(null);setConnected(false);setBusy(false);setTools({status:'blocked',count:0,message:'Agent 连接已断开，请重新连接'});}
+   if(event.method==='studio/codexDisconnected'){modelCallRef.current=null;setModelCall(null);setConnected(false);setBusy(false);const message=p.code==='STUDIO_CODEX_UNSCOPED_TOOL'?'Studio 隔离已阻止未授权工具'+(typeof p.tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(p.tool)?' · '+p.tool:'')+'；流程与草稿已保留，请显式重连并核对结果后再发送。':'Agent 连接已断开，请重新连接';setTools({status:'blocked',count:0,message});if(p.code==='STUDIO_CODEX_UNSCOPED_TOOL')onError(message);}
   });return()=>{selectionSeq.current++;unsubscribe?.();};
  },[]);
  useEffect(()=>{scroll.current?.scrollTo({top:scroll.current.scrollHeight,behavior:'smooth'});},[messages,requests]);

@@ -1,3 +1,4 @@
+import {createWorkbenchImageExporter} from './workbench-image.mjs';
 import {taskOperation} from './task-operations.mjs';
 import {workspaceController} from './workspaces.mjs';
 import {explicitSetupStage} from './explicit-setup-stage.mjs';
@@ -17,7 +18,7 @@ import {createPrivateCvAccess,composeToolGuards} from './private-cv-access.mjs';
 import {createTaskCustomCv} from './task-custom-cv.mjs';
 import {currentPairTool,readCurrentPair} from './current-pair-tool.mjs';
 import {importTaskAsset} from './task-asset-import.mjs';
-import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -474,6 +475,8 @@ handle('window',({action})=>{
   if(action==='maximize') window.isMaximized()?window.unmaximize():window.maximize();
   if(action==='close') window.close();
 });
+const saveWorkbenchImage=createWorkbenchImageExporter({ownerForEvent:event=>{if(!window||window.isDestroyed()||window.webContents.isDestroyed())return null;trusted(event);return BrowserWindow.fromWebContents(event.sender)===window?window:null;},displayScale:owner=>screen.getDisplayMatching(owner.getBounds()).scaleFactor,showSaveDialog:(owner,options)=>dialog.showSaveDialog(owner,options),decodePng:bytes=>nativeImage.createFromBuffer(bytes)});
+ipcMain.handle('studio:diagnostics.saveWorkbenchImage',async(event,data)=>{if(shuttingDown||!window||window.isDestroyed()||window.webContents.isDestroyed()||event.sender.isDestroyed())return null;trusted(event);try{return await saveWorkbenchImage(data,event);}catch(error){if(shuttingDown)return null;throw error;}});
 handle('export',async({run})=>{
   const bundle=await worker.request('POST','/api/run/export',{run_id:run.id});
   const response=await dialog.showSaveDialog(window,{defaultPath:'reproduction-'+run.id+'.zip'});
