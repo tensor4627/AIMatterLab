@@ -51,6 +51,7 @@ async function fixture(){
    if(method==='task.execute')return {...test.run,status:'queued'};
    if(method==='settings'){test.settings={...test.settings,...data};return test.settings;}
    if(method==='worker.connect'){test.events.forEach(fn=>fn({method:'studio/workerConnected'}));return {};}
+   if(method==='worker.status')return test.workerStatus||JSON.parse(localStorage.getItem('__fixture.workerStatus')||'null')||{status:'disconnected',checkedAt:1};
    if(['agent.connect','agent.tools'].includes(method))return method==='agent.tools'?{status:'ready',count:26}:{tools:{status:'ready',count:26}};
    if(['agent.disconnect','agent.login.cancel'].includes(method))return {};
    if(method==='agent.account')return {account:{type:'chatgpt'},credentialStored:true,requiresOpenaiAuth:true,modelAccess:'not_run'};
@@ -75,6 +76,42 @@ async function fixture(){
 async function openAgentOptions(p){const toggle=p.getByTestId('agent-options');if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();}
 async function check(name,fn){if(process.env.STUDIO_FRONTEND_FILTER&&!new RegExp(process.env.STUDIO_FRONTEND_FILTER).test(name))return;const {page,context}=await fixture();try{await fn(page);results.push({name,status:'passed'});}catch(e){results.push({name,status:'failed',error:String(e)});await page.screenshot({path:path.join(out,name+'.png'),fullPage:true});}finally{await context.close();}}
 try{
+ await check('worker-reload-hydrates-existing-connection-without-bootstrap',async p=>{
+  await p.evaluate(()=>{localStorage.setItem('__fixture.workerStatus',JSON.stringify({status:'connected',checkedAt:1}));return window.renderTest('App');});
+  await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('WSL 已连接'));
+  await p.waitForFunction(()=>document.querySelector('.bottom-tabs button span')?.textContent==='0');
+  await p.reload();await p.waitForFunction(()=>window.renderTest);await p.evaluate(()=>window.renderTest('App'));
+  await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('WSL 已连接'));
+  await p.waitForFunction(()=>document.querySelector('.bottom-tabs button span')?.textContent==='0');
+  const calls=await p.evaluate(()=>window.__test.calls);assert(calls.some(c=>c.method==='worker.status'));assert(calls.some(c=>c.method==='worker.request'&&c.data.target==='/api/runs'));assert(!calls.some(c=>['worker.connect','agent.connect','compute.setup','task.execute'].includes(c.method)));
+ });
+ await check('worker-hydration-does-not-invent-empty-queue-on-read-failure',async p=>{
+  await p.evaluate(()=>{window.__test.workerStatus={status:'connected',checkedAt:1};window.__test.offline=true;return window.renderTest('App');});
+  await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('连接中断 · 状态未知'));
+  assert.equal(await p.locator('.bottom-tabs button span').first().textContent(),'?');
+  assert(!await p.evaluate(()=>window.__test.calls.some(c=>c.method==='worker.connect'||c.method==='task.execute')));
+ });
+ await check('saved-plain-chat-opens-composer-after-workflow-and-preserves-both-drafts',async p=>{
+  await p.evaluate(()=>{
+   const original=window.studio.invoke,conversations=[{id:'codex:flow-chat',provider:'codex',threadId:'flow-chat',name:'Flow chat',taskId:'saved-flow',projectId:'project'},{id:'codex:plain-chat',provider:'codex',threadId:'plain-chat',name:'Plain chat',projectId:null,taskId:null}];
+   window.__test.task={id:'saved-flow',provider:'codex',threadId:'flow-chat',projectId:'project',name:'Workflow fixture',workflowVersion:2,parameters:{temperature:310},steps:[{id:'conditions',title:'Conditions',fields:[{key:'temperature',label:'Temperature',type:'number',required:true}]}],missingFields:[],parameterRevision:3,review:{status:'not_run'},artifacts:[],updatedAt:1};
+   localStorage.setItem('studio.conversation','codex:flow-chat');localStorage.setItem('studio.section','agent-task:saved-flow');
+   window.studio.invoke=async(method,data)=>{
+    if(method==='conversation.list')return conversations;
+    if(method==='conversation.select')return conversations.find(c=>c.id===data.id);
+    if(method==='conversation.remember')return conversations.find(c=>c.threadId===data.threadId);
+    if(method==='task.list')return [window.__test.task];
+    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)){window.__test.selectedThread=data.params.threadId;return {thread:{id:data.params.threadId,turns:[]}};}
+    return original(method,data);
+   };return window.renderTest('App');
+  });
+  await p.waitForFunction(()=>window.__test.selectedThread==='flow-chat');await p.locator('.composer textarea').fill('Keep workflow draft');
+  await p.locator('.conversation-item').filter({hasText:'Plain chat'}).click();await p.waitForFunction(()=>window.__test.selectedThread==='plain-chat');
+  await p.locator('.composer textarea').waitFor({state:'visible'});assert.equal(await p.locator('.composer textarea').inputValue(),'');await p.locator('.composer textarea').fill('Keep plain chat draft');
+  await p.locator('.conversation-item').filter({hasText:'Flow chat'}).click();await p.waitForFunction(()=>window.__test.selectedThread==='flow-chat');assert.equal(await p.locator('.composer textarea').inputValue(),'Keep workflow draft');assert.match(await p.getByTestId('agent-task-page').innerText(),/310/);
+  await p.locator('.conversation-item').filter({hasText:'Plain chat'}).click();await p.waitForFunction(()=>window.__test.selectedThread==='plain-chat');await p.locator('.composer textarea').waitFor({state:'visible'});assert.equal(await p.locator('.composer textarea').inputValue(),'Keep plain chat draft');
+  assert(!await p.evaluate(()=>window.__test.calls.some(c=>c.method==='task.execute'||c.method==='agent.rpc'&&c.data.method==='turn/start')));
+ });
  await check('navigation-rail-new-computation-and-single-preview',async p=>{
   await p.evaluate(()=>window.renderTest('App'));await p.getByTestId('new-computation').click();assert.equal(await p.getByTestId('agent-planning-mode').isChecked(),true);await p.getByTestId('new-conversation').click();assert.equal(await p.getByTestId('agent-planning-mode').isChecked(),false);await p.getByTestId('navigate-skills').click();await p.getByTestId('navigate-skills').click();await p.getByTestId('navigate-tools').click();await p.getByTestId('navigate-runs').click();await p.getByTestId('jobs-page').waitFor();assert.equal(await p.locator('.workspace-tab').count(),1);assert.equal(await p.locator('.navigation-rail>button').count(),4);await p.getByTestId('navigate-home').click();assert.equal(await p.getByTestId('new-conversation').isVisible(),true);
  });

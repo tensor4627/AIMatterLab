@@ -36,7 +36,7 @@ import {MaterialsProjectSearch} from './MaterialsProject';
 import StructureBuilder from './StructureBuilder';
 import {CodeEditor,TerminalPanel,Structure} from './widgets';
 import {Modal,Empty,Badge,statusNames} from './Dialogs';
-import {api,invoke,wslPath,engines,type Project,type Environment,type Run,type Settings,type Artifact,type Conversation,type AgentIntent,type AgentProvider,type SkillAttachment} from './types';
+import {api,invoke,readWorkerStatus,wslPath,engines,type Project,type Environment,type Run,type Settings,type Artifact,type Conversation,type AgentIntent,type AgentProvider,type SkillAttachment} from './types';
 
 const sections=[['home','工作区',Layers3],['tools','工具',Layers3],['relations','工具关系图',GitBranch],['runs','任务',Activity],['bias','Bias 实验室',FlaskConical],['training','模型与训练',GraduationCap],['assets','数据资产',Database],['environments','计算环境',Server],['deployment','部署与执行',Play],['ssh','SSH 集群',Terminal],['skills','技能库',BookOpen]] as const;
 const initialSettings:Settings={distribution:'Ubuntu',workerRoot:'~/.local/state/gpu-sampling-studio',workerPort:8767,codexPath:'codex',cwd:'',skillRoots:[],theme:'dark'};
@@ -50,6 +50,7 @@ function RunTable({items,selected,onOpen,canPrepare,onPrepare}:{items:Run[];sele
  return items.length?<div className="run-table"><div className="table-heading"><span>{tr("计算名称")}</span><span>{tr("状态")}</span><span>{tr("资源")}</span><span>{tr("创建时间")}</span></div>{items.map(r=><button key={r.id} className={'run-row '+(selected===r.id?'selected':'')} aria-current={selected===r.id?'true':undefined} onClick={()=>onOpen(r.id)}><span><span className="run-icon"><Atom size={17}/></span><span><strong>{r.name}</strong><small>{r.engine}</small></span></span><Badge status={r.status}/><span className="mono">GPU {r.gpu}</span><span className="muted">{shortTime(r.created_at)}</span></button>)}</div>:<Empty title={tr("这里将记录你的计算")} body={"准备输入、验证环境后提交任务。所有状态来自作业服务。"} action={<button className="button" onClick={onPrepare} disabled={!canPrepare}><Plus size={14}/>{tr("准备第一个计算")}</button>}/>;
 }
 export default function App(){
+ const workerHydrationEpoch=useRef(0),settingsRevision=useRef(0);
  const [sidebarVisible,setSidebarVisible]=useState(localStorage.getItem('studio.sidebarVisible')!=='false'),[sidebarWidth,setSidebarWidth]=useState(stored('studio.sidebarWidth',240)),[railMode,setRailMode]=useState('chats'),[chatGroups,setChatGroups]=useState<{id:string;name:string}[]>([]),[chatGroupId,setChatGroupId]=useState<string|null>(null),[groupName,setGroupName]=useState('');
  const [accountsProvider,setAccountsProvider]=useState<AgentProvider>('codex'),[renameTarget,setRenameTarget]=useState<Conversation|null>(null),[conversationName,setConversationName]=useState(''),[renaming,setRenaming]=useState(false);
  const [deleteTarget,setDeleteTarget]=useState<Conversation|null>(null),[deleting,setDeleting]=useState(false);
@@ -58,7 +59,8 @@ export default function App(){
  const [plans,setPlans]=useState<Plan[]>([]),[agentIntent,setAgentIntent]=useState<AgentIntent>();
  const [conversations,setConversations]=useState<Conversation[]>([]),[selectedConversationId,setSelectedConversationId]=useState<string|null>(storedConversation()),[sessionSelection,setSessionSelection]=useState<{nonce:string;conversation?:Conversation;new?:boolean}>(),[agentBusy,setAgentBusy]=useState(false);const selectedConversationRef=useRef<Conversation|null>(null),conversationSelectionSeq=useRef(0);
  const [section,setSection]=useState(localStorage.getItem('studio.section')||'home'),[projects,setProjects]=useState<Project[]>([]),[environments,setEnvironments]=useState<Environment[]>([]),[runs,setRuns]=useState<Run[]>([]),[assets,setAssets]=useState<Artifact[]>([]);
- const [projectId,setProjectId]=useState(''),[settings,setSettings]=useState(initialSettings),[worker,setWorker]=useState(false),[connecting,setConnecting]=useState(false);
+ const [projectId,setProjectId]=useState(''),[settings,applySettings]=useState(initialSettings),[worker,setWorker]=useState(false),[connecting,setConnecting]=useState(false);
+ function setSettings(value:Settings|((previous:Settings)=>Settings)){settingsRevision.current++;workerHydrationEpoch.current++;applySettings(value);}
  const [selected,setSelected]=useState<string|null>(null),[agentVisible,setAgentVisible]=useState(localStorage.getItem('studio.agent')!=='false'),[bottomHeight,setBottomHeight]=useState(stored('studio.bottom',190));
  const [bottomExpanded,setBottomExpanded]=useState(()=>initialBottomExpanded(key=>localStorage.getItem(key))),[primaryPanel,setPrimaryPanel]=useState<'agent'|'workspace'>('agent'),[windowWidth,setWindowWidth]=useState(window.innerWidth),[conversationSearch,setConversationSearch]=useState('');
  const [clusterRuns,setClusterRuns]=useState<ClusterJob[]>([]),[recordObservations,setRecordObservations]=useState<{local:RecordObservation;cluster:RecordObservation}>({local:{at:null,stale:false,loaded:false},cluster:{at:null,stale:false,loaded:false}});
@@ -79,7 +81,7 @@ export default function App(){
  const onError=(e:unknown)=>setError(errorText(e));
  useEffect(()=>window.studio?.onEvent(event=>{
   if(event.method==='studio/computeSetup'&&event.params.status!=='discovering')void refresh();
-  if(event.method==='studio/workerConnected'){sourceFailures.current.clear();sourceGeneration.current++;projectPolicyWorkerEpoch.current++;setWorker(true);setError(old=>old.includes('Connect the WSL worker first')?'':old);void refresh();}
+  if(event.method==='studio/workerConnected'){workerHydrationEpoch.current++;sourceFailures.current.clear();sourceGeneration.current++;projectPolicyWorkerEpoch.current++;setWorker(true);setError(old=>old.includes('Connect the WSL worker first')?'':old);void refresh();}
   if(event.method==='studio/conversationContextChanged'){
    const p=event.params,c=p.conversation;setConversations(old=>[c,...old.filter(row=>!(row.provider===c.provider&&[p.oldThreadId,c.threadId].includes(row.threadId)))]);
    if(selectedConversationRef.current?.provider===c.provider&&selectedConversationRef.current?.threadId===p.oldThreadId){selectedConversationRef.current=c;setSelectedConversationId(c.id);storeConversation(c.id);}
@@ -94,13 +96,14 @@ export default function App(){
  const runProject=projects.find(p=>p.id===runProjectId);
  const visibleRuns=runs.filter(r=>(!runProjectId||r.project_id===runProjectId)&&(!search||[r.name,r.engine,r.status,tr(statusNames[r.status]||r.status)].join('\n').toLowerCase().includes(search.toLowerCase())));
  useEffect(()=>{
+  let disposed=false;const epoch=workerHydrationEpoch.current,revision=settingsRevision.current;
   const restoreSequence=conversationSelectionSeq.current;void invoke<Conversation[]>('conversation.list').then(values=>{setConversations(values);if(restoreSequence!==conversationSelectionSeq.current)return;const previous=values.find(c=>c.id===storedConversation());if(previous)void chooseConversation(previous);}).catch(onError);
   void invoke<any[]>('conversation.groups').then(setChatGroups).catch(onError);
   void invoke<any[]>('task.list').then(setAgentTasks).catch(()=>{});
   void invoke<Plan[]>('workflow.list').then(setPlans).catch(()=>{});
-  void invoke('state').then(state=>{setLanguage(state.settings.language||'zh-CN');setSettings(state.settings);}).catch(()=>{});
+  void invoke('state').then(async state=>{if(disposed||revision!==settingsRevision.current)return;setLanguage(state.settings.language||'zh-CN');applySettings(state.settings);if(epoch!==workerHydrationEpoch.current)return;const observed=await readWorkerStatus();if(disposed||epoch!==workerHydrationEpoch.current||revision!==settingsRevision.current||observed?.status!=='connected')return;workerHydrationEpoch.current++;projectPolicyWorkerEpoch.current++;setWorker(true);void refresh();}).catch(()=>{});
   const handle=(e:KeyboardEvent)=>{if(projectPolicyOwner.current.modal==='project-edit'&&projectPolicyOwner.current.saving&&(e.key==='Escape'||(e.ctrlKey||e.metaKey)&&e.key==='k')){e.preventDefault();return;}if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();setCommand(v=>!v);}if(e.key==='Escape'){setModal(m=>m==='settings'?m:'');setCommand(false);setPaletteSearch('');}};
-  document.addEventListener('keydown',handle);return()=>document.removeEventListener('keydown',handle);
+  document.addEventListener('keydown',handle);return()=>{disposed=true;document.removeEventListener('keydown',handle);};
  },[]);
  useEffect(()=>{
   document.documentElement.dataset.theme=settings.theme;
@@ -146,6 +149,7 @@ export default function App(){
  }
  useEffect(()=>{if(!worker)return;void refresh(false);const timer=setInterval(()=>void refresh(false),2500);return()=>clearInterval(timer);},[worker,projectId]);
  async function connectWorker(){
+  workerHydrationEpoch.current++;
   setConnecting(true);try{await invoke('worker.connect');setWorker(true);await refresh();}catch(e){onError(e);}finally{setConnecting(false);}
  }
  function newProject(){setModal('project');}
@@ -217,7 +221,7 @@ export default function App(){
   const promise=(async()=>{try{const value=await deploymentApi.open(taskId);if(sequence!==conversationSelectionSeq.current)return;const conversation=value.conversation;if(conversation.taskId!==taskId)throw Error(t('此流程的会话绑定已变化，请重新打开该流程。'));if(selectedConversationRef.current?.id!==conversation.id){setSkill(undefined);conversationChanged(conversation);setSessionSelection({nonce:crypto.randomUUID(),conversation});}if(conversation.projectId)setProjectId(conversation.projectId);setAgentTasks(old=>[value.task,...old.filter(task=>task.id!==taskId)]);setSection('deployment:'+taskId);await refresh();}catch(error){if(sequence===conversationSelectionSeq.current)onError(error);}})().finally(()=>{if(deploymentOpening.current?.promise===promise)deploymentOpening.current=null;});
   deploymentOpening.current={taskId,promise};return promise;
  }
- async function chooseConversation(conversation:Conversation){if(agentBusy||editorDirty&&!confirmReplace())return;openSeq.current++;deploymentOpening.current=null;setSkill(undefined);const seq=++conversationSelectionSeq.current;setAgentIntent(undefined);try{const selected=await invoke<Conversation>('conversation.select',{id:conversation.id});if(seq!==conversationSelectionSeq.current)return;conversationChanged(selected);setChatGroupId(selected.groupId||null);if(selected.projectId)setProjectId(selected.projectId);setAgentVisible(true);setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});setSection(selected.taskId?'agent-task:'+selected.taskId:'home');}catch(e){onError(e);}}
+ async function chooseConversation(conversation:Conversation){if(agentBusy||editorDirty&&!confirmReplace())return;openSeq.current++;deploymentOpening.current=null;setSkill(undefined);const seq=++conversationSelectionSeq.current;setAgentIntent(undefined);try{const selected=await invoke<Conversation>('conversation.select',{id:conversation.id});if(seq!==conversationSelectionSeq.current)return;conversationChanged(selected);setChatGroupId(selected.groupId||null);if(selected.projectId)setProjectId(selected.projectId);setAgentVisible(true);if(!selected.taskId)setPrimaryPanel('agent');setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});setSection(selected.taskId?'agent-task:'+selected.taskId:'home');}catch(e){onError(e);}}
  function applyConversationDeletion(value:{id:string;taskIds:string[]}){
   const deleted=new Set(value.taskIds);setConversations(old=>old.filter(c=>c.id!==value.id));setAgentTasks(old=>old.filter(t=>!deleted.has(t.id)));
   for(const id of deleted){localStorage.removeItem('studio.pending.'+id);localStorage.removeItem('studio.deployment.pending.'+id);}

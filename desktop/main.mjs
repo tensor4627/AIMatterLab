@@ -49,6 +49,7 @@ import {validatePlan} from '../shared/workflows.mjs';
 import {AgentHub,loginUrl} from './agent-hub.mjs';
 import {CredentialVault,providerId} from './providers.mjs';
 import { WorkerClient } from './worker.mjs';
+import {readWorkerStatus} from './worker-status.mjs';
 import { assertRpc, assertRendererWorkerRoute, linuxPath, sshAlias, quoteShell } from './security.mjs';
 
 const exec = promisify(execFile);
@@ -245,6 +246,7 @@ const configureCompute=createComputeOnboarding({worker,publish:event=>emit('stud
 function discoverCompute(){if(settings.autoDiscoverCompute!==false)return configureCompute().catch(()=>null);return Promise.resolve(null);}
 handle('compute.setup',async data=>configureCompute(data||{}));
 handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);await bindSources();discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
+handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
   const result=await worker.request(method,target,data);
