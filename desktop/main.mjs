@@ -51,6 +51,7 @@ import {CredentialVault,providerId} from './providers.mjs';
 import { WorkerClient } from './worker.mjs';
 import {readWorkerStatus} from './worker-status.mjs';
 import {restoreTaskWorker} from './worker-restore.mjs';
+import {explicitWorkerReceipt,rememberExplicitWorker} from './explicit-worker-binding.mjs';
 import { assertRpc, assertRendererWorkerRoute, linuxPath, sshAlias, quoteShell } from './security.mjs';
 
 const exec = promisify(execFile);
@@ -246,9 +247,9 @@ function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activ
 const configureCompute=createComputeOnboarding({worker,publish:event=>emit('studio:event',event)});
 function discoverCompute(){if(settings.autoDiscoverCompute!==false)return configureCompute().catch(()=>null);return Promise.resolve(null);}
 handle('compute.setup',async data=>configureCompute(data||{}));
-handle('worker.connect',async()=>{assertIdleAgent();agents.close();const result=await worker.connect(settings,workerSource);await bindSources();discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
+handle('worker.connect',async()=>{assertIdleAgent();agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
-handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,worker,settings:()=>settings,selection:()=>workflowContext.current()},value));
+handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current()},value));
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
   const result=await worker.request(method,target,data);

@@ -18,7 +18,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   if(method==='state')return {settings};
   if(['conversation.list','conversation.groups','task.list','workflow.list'].includes(method))return [];
   if(method==='worker.status')return {status:'connected',checkedAt:1};
-  if(method==='worker.restore')return {status:'connected',taskId:data.taskId,checkedAt:1};
+  if(method==='worker.restore')return {status:'connected',...data,checkedAt:1};
   if(method==='worker.connect')return {};
   if(method==='settings')return {...settings,...data};
   if(method==='worker.request')return [];
@@ -34,7 +34,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   if(name==='../shared/workflows.mjs')return workflows;
   if(name==='../shared/ui-diagnostics.mjs')return diagnostics;
   if(name==='../package.json')return {version:'source-fixture'};
-  if(name==='./types')return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),readWorkerStatus:()=>invoke('worker.status'),restoreWorker:taskId=>invoke('worker.restore',{taskId}),engines:[],wslPath:value=>value};
+  if(name==='./types')return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),readWorkerStatus:()=>invoke('worker.status'),restoreWorker:owner=>invoke('worker.restore',typeof owner==='string'?{taskId:owner}:owner),engines:[],wslPath:value=>value};
   if(name==='./i18n')return {t:value=>value,tr:value=>value,setLanguage:()=>{}};
   return new Proxy({default:name},{get:(target,key)=>target[key]??String(key)});
  };

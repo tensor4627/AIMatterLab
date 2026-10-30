@@ -53,6 +53,7 @@ function RunTable({items,selected,onOpen,canPrepare,onPrepare}:{items:Run[];sele
 }
 export default function App(){
  const workerHydrationEpoch=useRef(0),settingsRevision=useRef(0);
+ const explicitConnection=useRef<number|null>(null);
  const workerReady=useRef(false),mounted=useRef(true),initialSelectionReady=useRef(false),settingsKnown=useRef(false),settingsReady=useRef<Promise<void>|null>(null),finishSettings=useRef<()=>void>(()=>{}),settingsRef=useRef(initialSettings);
  if(!settingsReady.current)settingsReady.current=new Promise<void>(resolve=>{finishSettings.current=resolve;});
  const [workerRestoring,setWorkerRestoring]=useState(true);
@@ -86,7 +87,7 @@ export default function App(){
  const onError=(e:unknown)=>setError(createDiagnostic(e));
  useEffect(()=>window.studio?.onEvent(event=>{
   if(event.method==='studio/computeSetup'&&event.params.status!=='discovering')void refresh();
-  if(event.method==='studio/workerConnected'){beginWorkerGate();if(initialSelectionReady.current)void observeWorker(selectedConversationRef.current?.taskId);}
+  if(event.method==='studio/workerConnected'&&explicitConnection.current===null){beginWorkerGate();if(initialSelectionReady.current)void observeWorker(selectedConversationRef.current?.taskId);}
   if(event.method==='studio/conversationContextChanged'){
    const p=event.params,c=p.conversation;setConversations(old=>[c,...old.filter(row=>!(row.provider===c.provider&&[p.oldThreadId,c.threadId].includes(row.threadId)))]);
    if(selectedConversationRef.current?.provider===c.provider&&selectedConversationRef.current?.threadId===p.oldThreadId){selectedConversationRef.current=c;setSelectedConversationId(c.id);storeConversation(c.id);}
@@ -137,10 +138,11 @@ export default function App(){
  useEffect(()=>{if(!sessionSelection?.new)return;const frame=requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.agent-panel .composer textarea')?.focus());return()=>cancelAnimationFrame(frame);},[sessionSelection?.nonce]);
  function invalidateRefresh(){refreshSeq.current++;refreshing.current=false;latestRefresh.current=Promise.resolve();}
  function beginWorkerGate(){workerHydrationEpoch.current++;workerReady.current=false;setWorker(false);setWorkerRestoring(true);sourceGeneration.current++;projectPolicyWorkerEpoch.current++;invalidateRefresh();return workerHydrationEpoch.current;}
- async function observeWorker(taskId?:string|null){
-  const epoch=beginWorkerGate(),current=()=>mounted.current&&epoch===workerHydrationEpoch.current;
+ async function observeWorker(taskId?:string|null,explicit=false){
+  const epoch=beginWorkerGate(),conversationId=!taskId&&!explicit?selectedConversationRef.current?.id:undefined,current=()=>mounted.current&&epoch===workerHydrationEpoch.current;
   await settingsReady.current;if(!current())return false;if(!settingsKnown.current){setWorkerRestoring(false);return true;}
-  try{let observed=taskId?await restoreWorker(taskId):await readWorkerStatus();for(let retry=0;observed.status==='checking'&&retry<8&&current();retry++){await new Promise(resolve=>setTimeout(resolve,250));if(!current())return false;observed=taskId?await restoreWorker(taskId):await readWorkerStatus();}if(!current())return false;workerReady.current=observed.status==='connected'&&(!taskId||observed.taskId===taskId);setWorker(workerReady.current);setWorkerRestoring(false);if(workerReady.current){sourceFailures.current.clear();await refresh();}}
+  const read=()=>taskId?restoreWorker(taskId):conversationId?restoreWorker({conversationId}):readWorkerStatus();
+  try{let observed=await read();for(let retry=0;observed.status==='checking'&&retry<8&&current();retry++){await new Promise(resolve=>setTimeout(resolve,250));if(!current())return false;observed=await read();}if(!current())return false;workerReady.current=observed.status==='connected'&&(!taskId||observed.taskId===taskId)&&(!conversationId||observed.conversationId===conversationId);setWorker(workerReady.current);setWorkerRestoring(false);if(workerReady.current){sourceFailures.current.clear();await refresh();}}
   catch(error){if(current()){setWorkerRestoring(false);onError(error);}}
   return current();
  }
@@ -152,7 +154,7 @@ export default function App(){
    if(seq!==refreshSeq.current)return latestRefresh.current;
    results.forEach((result,index)=>{if(requested[index]){if(result.status==='fulfilled')sourceFailures.current.delete(paths[index]);else sourceFailures.current.set(paths[index],(sourceFailures.current.get(paths[index])||0)+1);}});
    const [p,e,r,a,c]=results;
-   if(p.status==='fulfilled'){setProjects(p.value);if(p.value.length)setProjectId(current=>current||p.value[0].id);}
+   if(p.status==='fulfilled'){setProjects(p.value);if(p.value.length)setProjectId(current=>current||(!selectedConversationRef.current?p.value[0].id:''));}
    if(e.status==='fulfilled')setEnvironments(e.value);
    if(r.status==='fulfilled')setRuns(r.value);
    if(a.status==='fulfilled')setAssets(a.value);
@@ -163,8 +165,8 @@ export default function App(){
  }
  useEffect(()=>{if(!worker)return;void refresh(false);const timer=setInterval(()=>void refresh(false),2500);return()=>clearInterval(timer);},[worker,projectId]);
  async function connectWorker(){
-  const epoch=beginWorkerGate();
-  setConnecting(true);try{await invoke('worker.connect');settingsKnown.current=true;if(epoch===workerHydrationEpoch.current)await observeWorker(selectedConversationRef.current?.taskId);}catch(e){if(epoch===workerHydrationEpoch.current){setWorkerRestoring(false);onError(e);}}finally{setConnecting(false);}
+  const epoch=beginWorkerGate();explicitConnection.current=epoch;
+  setConnecting(true);try{await invoke('worker.connect');settingsKnown.current=true;if(epoch===workerHydrationEpoch.current)await observeWorker(selectedConversationRef.current?.taskId,true);}catch(e){if(epoch===workerHydrationEpoch.current){setWorkerRestoring(false);onError(e);}}finally{if(explicitConnection.current===epoch){explicitConnection.current=null;setConnecting(false);}}
  }
  function newProject(){setModal('project');}
  function policyError(value:unknown){const code=errorText(value),messages:Record<string,string>={project_edit_authoring_only:'草稿工作区不能通过此入口升级计算授权。',project_edit_unavailable:'项目、会话或计算连接已变化，请关闭后重新打开。',project_edit_record_invalid:'无法读取此计算项目的完整记录。',project_edit_conflict:'项目记录已变化，请关闭后重新打开并检查最新授权。',project_edit_invalid_fields:'授权字段无效，请检查表单。',project_edit_no_changes:'尚无变更',project_edit_busy:'保存中，请稍候。',project_edit_save_mismatch:'保存返回与原项目不一致，请重新读取实际项目状态。',project_edit_save_unconfirmed:'保存结果未能确认，可能已写入；请关闭后核对实际项目，不要假定已撤销。'};return t(messages[code]||code);}
@@ -235,7 +237,7 @@ export default function App(){
   const promise=(async()=>{try{const value=await deploymentApi.open(taskId);if(sequence!==conversationSelectionSeq.current)return;const conversation=value.conversation;if(conversation.taskId!==taskId)throw Error(t('此流程的会话绑定已变化，请重新打开该流程。'));const changed=selectedConversationRef.current?.id!==conversation.id;if(changed){setSkill(undefined);conversationChanged(conversation);}if(conversation.projectId)setProjectId(conversation.projectId);setAgentTasks(old=>[value.task,...old.filter(task=>task.id!==taskId)]);setSection('deployment:'+taskId);if(!await observeWorker(taskId)||sequence!==conversationSelectionSeq.current)return;if(changed)setSessionSelection({nonce:crypto.randomUUID(),conversation});}catch(error){if(sequence===conversationSelectionSeq.current){setWorkerRestoring(false);onError(error);}}})().finally(()=>{if(deploymentOpening.current?.promise===promise)deploymentOpening.current=null;});
   deploymentOpening.current={taskId,promise};return promise;
  }
- async function chooseConversation(conversation:Conversation){if(agentBusy||editorDirty&&!confirmReplace())return;openSeq.current++;deploymentOpening.current=null;setSkill(undefined);const seq=++conversationSelectionSeq.current;setAgentIntent(undefined);beginWorkerGate();try{await settingsReady.current;if(seq!==conversationSelectionSeq.current||!mounted.current)return;const selected=await invoke<Conversation>('conversation.select',{id:conversation.id});if(seq!==conversationSelectionSeq.current)return;conversationChanged(selected);setChatGroupId(selected.groupId||null);if(selected.projectId)setProjectId(selected.projectId);setAgentVisible(true);if(!selected.taskId)setPrimaryPanel('agent');setSection(selected.taskId?'agent-task:'+selected.taskId:'home');if(!await observeWorker(selected.taskId)||selectedConversationRef.current?.id!==selected.id||!mounted.current)return;setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});}catch(e){if(seq===conversationSelectionSeq.current&&mounted.current){setWorkerRestoring(false);onError(e);}}}
+ async function chooseConversation(conversation:Conversation){if(agentBusy||editorDirty&&!confirmReplace())return;openSeq.current++;deploymentOpening.current=null;setSkill(undefined);const seq=++conversationSelectionSeq.current;setAgentIntent(undefined);beginWorkerGate();try{await settingsReady.current;if(seq!==conversationSelectionSeq.current||!mounted.current)return;const selected=await invoke<Conversation>('conversation.select',{id:conversation.id});if(seq!==conversationSelectionSeq.current)return;conversationChanged(selected);setChatGroupId(selected.groupId||null);setProjectId(selected.projectId||'');setAgentVisible(true);if(!selected.taskId)setPrimaryPanel('agent');setSection(selected.taskId?'agent-task:'+selected.taskId:'home');if(!await observeWorker(selected.taskId)||selectedConversationRef.current?.id!==selected.id||!mounted.current)return;setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});}catch(e){if(seq===conversationSelectionSeq.current&&mounted.current){setWorkerRestoring(false);onError(e);}}}
  function applyConversationDeletion(value:{id:string;taskIds:string[]}){
   const deleted=new Set(value.taskIds);setConversations(old=>old.filter(c=>c.id!==value.id));setAgentTasks(old=>old.filter(t=>!deleted.has(t.id)));
   for(const id of deleted){localStorage.removeItem('studio.pending.'+id);localStorage.removeItem('studio.deployment.pending.'+id);}

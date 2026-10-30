@@ -52,7 +52,7 @@ async function fixture(){
    if(method==='settings'){test.settings={...test.settings,...data};return test.settings;}
    if(method==='worker.connect'){test.workerStatus={status:'connected',checkedAt:Date.now()};test.events.forEach(fn=>fn({method:'studio/workerConnected'}));return {};}
    if(method==='worker.status')return test.workerStatus||JSON.parse(localStorage.getItem('__fixture.workerStatus')||'null')||{status:'disconnected',checkedAt:1};
-   if(method==='worker.restore')return {status:'connected',taskId:data.taskId,checkedAt:1};
+   if(method==='worker.restore')return {...data,status:'connected',checkedAt:1};
    if(['agent.connect','agent.tools'].includes(method))return method==='agent.tools'?{status:'ready',count:26}:{tools:{status:'ready',count:26}};
    if(['agent.disconnect','agent.login.cancel'].includes(method))return {};
    if(method==='agent.account')return {account:{type:'chatgpt'},credentialStored:true,requiresOpenaiAuth:true,modelAccess:'not_run'};
@@ -100,6 +100,44 @@ async function renderGatedWorkerStartup(p){
  });
 }
 try{
+ for(const outcome of ['connected','disconnected','unknown'])await check('startup-saved-chat-restores-same-project-and-unsent-draft-'+outcome,async p=>{
+  await p.evaluate(()=>{
+   const test=window.__test,original=window.studio.invoke,conversation={id:'codex:saved-preview',provider:'codex',threadId:'saved-preview',name:'Saved NEP preview',projectId:'project',taskId:null};
+   test.startupChat=conversation;test.chatTrace=[];test.chatReady=false;test.task=undefined;
+   test.responses={'/api/projects':()=>[{...test.project,id:'unrelated-first',name:'Unrelated first project'},test.project]};
+   localStorage.setItem('studio.conversation',conversation.id);localStorage.setItem('studio.section','home');
+   localStorage.setItem('studio.composer.v1.'+JSON.stringify(['codex','thread',conversation.threadId]),JSON.stringify({version:1,text:'Keep the exact unsent NEP preview draft'}));
+   window.studio.invoke=async(method,data)=>{
+    test.chatTrace.push({method,target:data?.target,rpcMethod:data?.method,data,ready:test.chatReady});
+    if(method==='conversation.list')return [conversation];if(method==='conversation.select'){test.conversation=conversation;return conversation;}
+    if(method==='task.list')return [];
+    if(method==='worker.restore')return new Promise(resolve=>test.releaseChatRestore=status=>{test.chatReady=status==='connected';resolve({...data,status,checkedAt:2});});
+    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)){test.resumedChat=data.params.threadId;return {thread:{id:data.params.threadId,turns:[]},model:'fixture-model'};}
+    return original(method,data);
+   };return window.renderTest('App');
+  });
+  await p.waitForFunction(()=>typeof window.__test.releaseChatRestore==='function');await p.waitForTimeout(50);
+  assert.equal(await p.evaluate(()=>window.__test.chatTrace.some(call=>call.method==='worker.request')),false);
+  assert.deepEqual(await p.evaluate(()=>window.__test.chatTrace.find(call=>call.method==='worker.restore').data),{conversationId:'codex:saved-preview'});
+  await p.evaluate(status=>window.__test.releaseChatRestore(status),outcome);await p.waitForFunction(()=>window.__test.resumedChat==='saved-preview');
+  assert.equal(await p.locator('.composer textarea').inputValue(),'Keep the exact unsent NEP preview draft');
+  assert.equal(await p.getByTestId('agent-task-page').count(),0);assert.equal(await p.evaluate(()=>window.__test.conversation.projectId),'project');
+  const calls=await p.evaluate(()=>window.__test.chatTrace);assert(!calls.some(call=>['worker.connect','compute.setup','task.create','task.deployment.prepare','task.execute'].includes(call.method)||call.method==='agent.rpc'&&call.rpcMethod==='turn/start'));
+  if(outcome==='connected'){await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('WSL 已连接'));assert.match(await p.locator('.title-path').innerText(),/Fixture project/);assert.doesNotMatch(await p.locator('.title-path').innerText(),/Unrelated first/);}
+  else{assert(!calls.some(call=>call.method==='worker.request'));assert.equal(await p.locator('.composer textarea').isVisible(),true);}
+ });
+ await check('startup-unassigned-chat-explicit-connect-keeps-project-unassigned',async p=>{
+  await p.evaluate(()=>{
+   const test=window.__test,original=window.studio.invoke,conversation={id:'codex:unassigned',provider:'codex',threadId:'unassigned',name:'Unassigned chat',projectId:null,taskId:null};test.task=undefined;
+   localStorage.setItem('studio.conversation',conversation.id);localStorage.setItem('studio.section','home');
+   window.studio.invoke=async(method,data)=>{if(method==='conversation.list')return [conversation];if(method==='conversation.select'){test.conversation=conversation;return conversation;}if(method==='task.list')return [];if(method==='worker.restore')return {...data,status:'disconnected',reason:'project_missing',checkedAt:1};if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)){test.unassignedResumed=true;return {thread:{id:data.params.threadId,turns:[]},model:'fixture-model'};}return original(method,data);};return window.renderTest('App');
+  });
+  await p.waitForFunction(()=>window.__test.unassignedResumed);await p.getByRole('button',{name:'连接 WSL',exact:true}).first().click();
+  await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('WSL 已连接'));
+  assert.doesNotMatch(await p.locator('.title-path').innerText(),/Fixture project/);assert.equal(await p.evaluate(()=>window.__test.conversation.projectId),null);
+  await p.getByTestId('workspace-project-menu').click();assert.equal(await p.getByTestId('new-project').isEnabled(),true);
+  const calls=await p.evaluate(()=>window.__test.calls);assert.equal(calls.filter(call=>call.method==='worker.connect').length,1);assert(!calls.some(call=>['task.create','task.deployment.prepare','task.execute'].includes(call.method)||call.method==='agent.rpc'&&call.data?.method==='turn/start'));
+ });
  for(const outcome of ['connected','disconnected','unknown'])await check('startup-saved-flow-gates-worker-reads-'+outcome,async p=>{
   await renderGatedWorkerStartup(p);await p.waitForFunction(()=>typeof window.__test.releaseStartupState==='function');await p.waitForTimeout(80);
   assert.deepEqual(await p.evaluate(()=>window.__test.prematureWorkerReads),[]);assert.equal(await p.evaluate(()=>window.__test.restoreCount),0);
