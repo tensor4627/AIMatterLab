@@ -1,4 +1,6 @@
 import ComputeEnvironments from './ComputeEnvironments';
+import DiagnosticNotice from './DiagnosticNotice';
+import {createDiagnostic,type UiDiagnostic} from '../shared/ui-diagnostics.mjs';
 import {version as STUDIO_VERSION} from '../package.json';
 import './ux-finish.css';
 import './project-navigation.css';
@@ -66,7 +68,7 @@ export default function App(){
  const [clusterRuns,setClusterRuns]=useState<ClusterJob[]>([]),[recordObservations,setRecordObservations]=useState<{local:RecordObservation;cluster:RecordObservation}>({local:{at:null,stale:false,loaded:false},cluster:{at:null,stale:false,loaded:false}});
  const [projectPolicyEdit,setProjectPolicyEdit]=useState<ProjectPolicyEditor|null>(null),[projectPolicyInitial,setProjectPolicyInitial]=useState<ProjectAuthorizationSpec|null>(null),[projectPolicyId,setProjectPolicyId]=useState(''),[projectPolicyError,setProjectPolicyError]=useState('');
  const projectPolicySeq=useRef(0),projectPolicyWorkerEpoch=useRef(0),projectPolicyOwner=useRef<any>({});
- const [modal,setModal]=useState(''),[error,setError]=useState(''),[search,setSearch]=useState(''),[command,setCommand]=useState(false),[busy,setBusy]=useState(false);
+ const [modal,setModal]=useState(''),[error,setError]=useState<UiDiagnostic|null>(null),[search,setSearch]=useState(''),[command,setCommand]=useState(false),[busy,setBusy]=useState(false);
  const [editor,setEditor]=useState({name:'workflow.py',source:'# 打开输入文件，或在 Bias 实验室生成可检查的构建源码。\n',id:'',path:''});
  const [environmentDraft,setEnvironmentDraft]=useState(''),[runDraft,setRunDraft]=useState<any>({}),[runJson,setRunJson]=useState('{}');
  const [terminalId,setTerminalId]=useState<string|null>(null),[bottomTab,setBottomTab]=useState('queue'),[skill,setSkill]=useState<SkillAttachment>(),[agentProvider,setAgentProvider]=useState<AgentProvider>('codex');
@@ -78,10 +80,10 @@ export default function App(){
  const [editorDirty,setEditorDirty]=useState(false),[paletteSearch,setPaletteSearch]=useState('');
  const refreshing=useRef(false),gpuLoading=useRef(false),sourceFailures=useRef(new Map<string,number>()),sourceGeneration=useRef(0);const [gpuStale,setGpuStale]=useState(false);
  const refreshSeq=useRef(0),latestRefresh=useRef<Promise<void>>(Promise.resolve()),openSeq=useRef(0),settingsBackup=useRef<Settings|null>(null),editorSource=useRef(editor.source);editorSource.current=editor.source;
- const onError=(e:unknown)=>setError(errorText(e));
+ const onError=(e:unknown)=>setError(createDiagnostic(e));
  useEffect(()=>window.studio?.onEvent(event=>{
   if(event.method==='studio/computeSetup'&&event.params.status!=='discovering')void refresh();
-  if(event.method==='studio/workerConnected'){workerHydrationEpoch.current++;sourceFailures.current.clear();sourceGeneration.current++;projectPolicyWorkerEpoch.current++;setWorker(true);setError(old=>old.includes('Connect the WSL worker first')?'':old);void refresh();}
+  if(event.method==='studio/workerConnected'){workerHydrationEpoch.current++;sourceFailures.current.clear();sourceGeneration.current++;projectPolicyWorkerEpoch.current++;setWorker(true);void refresh();}
   if(event.method==='studio/conversationContextChanged'){
    const p=event.params,c=p.conversation;setConversations(old=>[c,...old.filter(row=>!(row.provider===c.provider&&[p.oldThreadId,c.threadId].includes(row.threadId)))]);
    if(selectedConversationRef.current?.provider===c.provider&&selectedConversationRef.current?.threadId===p.oldThreadId){selectedConversationRef.current=c;setSelectedConversationId(c.id);storeConversation(c.id);}
@@ -314,7 +316,7 @@ export default function App(){
    </main>
    {<>{agentVisible&&<PaneDivider className="agent-divider" label={t('调整对话与内容比例')} value={displayAgentWidth} min={260} max={paneMax} reverse={settings.agentLayout!=='center'} onChange={setAgentWidth}/>} <Agent conversationGroupId={chatGroupId} onOpenAccounts={openAccounts} onProviderChange={setAgentProvider} onAttachmentClear={()=>setSkill(undefined)} onAttachmentConsumed={id=>setSkill(current=>current?.attachmentId===id?undefined:current)} onNewConversation={()=>newConversation()} hidden={!agentVisible||singlePanel&&primaryPanel==='workspace'||chatOnly&&primaryPanel==='workspace'} sessionSelection={sessionSelection} onConversation={conversationChanged} onBusyChange={setAgentBusy} planningMode={planningMode} onPlanningModeChange={setPlanningMode} projectId={projectId} onOpenTask={id=>{setSection('agent-task:'+id);setAgentVisible(true);}} intent={agentIntent} context={context} onError={onError} skill={skill} width={agentWidth} onOpenRun={id=>{void openTask(id);}}/></>}
   </div></section></div>
-  {error&&<div className="toast" role="alert"><span>{error}</span><button className="icon-button" aria-label={tr('关闭')} onClick={()=>setError('')}><X size={16}/></button></div>}
+  {error&&<div className="toast" role="alert"><DiagnosticNotice record={error}/><button className="icon-button" aria-label={tr('关闭')} onClick={()=>setError(null)}><X size={16}/></button></div>}
   {deleteTarget&&<Modal title={t('删除对话')} onClose={()=>{if(!deleting)setDeleteTarget(null);}}><p>{deleteTarget.name}</p><p>{t('删除此会话及附带流程页面。已提交作业和计算文件保留。')}</p><div className="button-row"><button className="button" disabled={deleting} onClick={()=>setDeleteTarget(null)}>{t('取消')}</button><button className="button danger" disabled={deleting||agentBusy} onClick={()=>void deleteConversation()}>{t(deleting?'删除中…':'确认删除')}</button></div></Modal>}
   {modal==='chat-project'&&<Modal title={t('新建会话项目')} onClose={()=>setModal('')}><label>{t('项目名称')}<input autoFocus aria-label={t('会话项目名称')} value={groupName} onChange={e=>setGroupName(e.target.value)} maxLength={60}/></label><p className="muted">{t('项目用于整理会话，计算工作区和算力设置随各自流程保存。')}</p><button className="button primary" disabled={busy||!groupName.trim()} onClick={()=>void createChatGroup()}>{t('创建项目')}</button></Modal>}
   {command&&<Modal title={tr("搜索与命令")} onClose={()=>{setCommand(false);setPaletteSearch('');}}><input autoFocus aria-label={tr("搜索页面、引擎或任务…")} placeholder={tr("搜索页面、引擎或任务…")} value={paletteSearch} onChange={e=>setPaletteSearch(e.target.value)}/><div className="command-list">{sections.filter(s=>tr(s[1]).toLowerCase().includes(paletteSearch.toLowerCase())||s[0].includes(paletteSearch.toLowerCase())).map(([id,label,Icon])=><button key={id} onClick={()=>{go(id);setCommand(false);setPaletteSearch('');}}><Icon size={17}/>{tr(label)}<ChevronRight size={13}/></button>)}{runs.filter(r=>r.name.toLowerCase().includes(paletteSearch.toLowerCase())).slice(0,8).map(r=><button key={r.id} onClick={()=>{void openTask(r.id);setCommand(false);setPaletteSearch('');}}><Activity size={17}/>{r.name}<Badge status={r.status}/></button>)}{conversations.filter(conversation=>conversationMatches(conversation,paletteSearch)).slice(0,8).map(conversation=><button key={'conversation:'+conversation.id} disabled={agentBusy} onClick={()=>{void chooseConversation(conversation);setCommand(false);setPaletteSearch('');}}><MessageSquare size={17}/>{conversation.name}<ChevronRight size={13}/></button>)}{tools.filter(tool=>t(tool.name).toLocaleLowerCase().includes(paletteSearch.toLocaleLowerCase())).map(tool=><button key={'tool:'+tool.id} onClick={()=>{go('tool:'+tool.id);setCommand(false);setPaletteSearch('');}}><ModuleIcon module={tool.id}/>{t(tool.name)}<ChevronRight size={13}/></button>)}</div></Modal>}

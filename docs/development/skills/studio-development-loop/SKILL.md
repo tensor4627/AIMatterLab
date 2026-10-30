@@ -9,6 +9,8 @@ Use for Studio software development and regression coordination. Do not attach t
 
 Read the repository AGENTS instructions and [the development loop runbook](references/runbook.md). Follow the user's requested round count and existing authorization. Delegate only when directly authorized by the user or required by applicable repository instructions; preserve shared-file ownership.
 
+If the user explicitly assigns different A/B/C responsibilities or models, record and follow those assignments. The default roles below must not replace a requested completeness tester, independent workflow-use tester or implementation owner.
+
 A acts as a real user in the actual Electron frontend using ordinary language and UI clicks, while independently rerunning all currently implemented bounded scientific routes. Keep the real UI workflow separate from direct-worker scientific smokes. Inspect actual saved files, run identities, exit records and finite/structural output checks. No historical result, fake model reply, mock service or internal IPC recipe counts as a current real-user scientific run.
 
 B diagnoses observed failures, labels inferred causes, implements assigned changes, runs meaningful software tests and writes the round review. Preserve the first failures, recovered attempts, remaining blockers and exact evidence paths. Extract portable improvements into the narrow relevant skill without copying private sources, SSH details, credentials or machine recipes.

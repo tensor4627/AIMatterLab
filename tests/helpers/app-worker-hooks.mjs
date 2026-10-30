@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
 import * as shell from '../../src/workspace-shell.mjs';
 import * as navigation from '../../src/workspace-navigation.mjs';
 import * as workflows from '../../shared/workflows.mjs';
+import * as diagnostics from '../../shared/ui-diagnostics.mjs';
 import {memoryStorage} from './agent-hooks.mjs';
 const source=fs.readFileSync(new URL('../../src/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
@@ -30,6 +31,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   if(name==='./workspace-shell.mjs')return shell;
   if(name==='./workspace-navigation.mjs')return navigation;
   if(name==='../shared/workflows.mjs')return workflows;
+  if(name==='../shared/ui-diagnostics.mjs')return diagnostics;
   if(name==='../package.json')return {version:'source-fixture'};
   if(name==='./types')return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),readWorkerStatus:()=>invoke('worker.status'),engines:[],wslPath:value=>value};
   if(name==='./i18n')return {t:value=>value,tr:value=>value,setLanguage:()=>{}};

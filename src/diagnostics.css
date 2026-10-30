@@ -1,0 +1,5 @@
+.diagnostic-notice{border:1px solid var(--line);border-radius:8px;padding:12px;margin:8px 0;min-width:0;overflow-wrap:anywhere}
+.diagnostic-notice p{margin:6px 0}.diagnostic-context{color:var(--muted)}
+.diagnostic-notice details>summary,.deployment-diagnostics>details>summary{cursor:pointer}
+.diagnostic-raw{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto}
+.toast .diagnostic-notice{margin:0;border:0;padding:0;max-width:min(620px,75vw)}

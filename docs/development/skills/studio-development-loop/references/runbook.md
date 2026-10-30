@@ -12,9 +12,13 @@ Use this runbook for an explicitly requested multi-round Studio development revi
 
 The parent coordinates shared file ownership. A round needs a concrete user-visible improvement or a correctness/reliability repair; renaming a phase or repeating an unchanged test is not a new iteration. C must accept the current round before the next round's tracked changes begin. Rejected attempts remain in the evidence record and are repaired within the same round. Complete the number of rounds the user requested rather than silently shortening the loop.
 
+Explicit user role/model assignments take precedence over this default table. Record who owns completeness testing, independent workflow-use counts, implementation and final review before dispatching work; source review or another actor's UI actions cannot substitute for an independently assigned native workflow tester.
+
 ## Evidence collection
 
 Before each round, record the application's tested source identity and preserved sibling engine state. Allocate fresh ignored run/worker roots with nonconflicting ports. Use isolated profiles; a deliberate resume/recovery test may reuse a prior test-owned profile, recording its source/history identity and requiring fresh current executions. Preserve production profiles, SSH registrations, credentials, authorizations and real queued/running/unknown jobs. Never switch engine branches or automatically resubmit an unknown job. Read each repository's applicable AGENTS instructions.
+
+An isolated test project still has an explicit authorization scope. A tester must not change its policy when the parent forbids policy edits. For an authorized edit, capture the exact project identity and full pre-change policy, inspect the UI change list, and verify the saved result before executing. If that baseline is unavailable, stop the policy edit and report the missing evidence. After an accidental edit, preserve the incident, restore only values supported by evidence under a specific correction instruction, and read back the result; do not claim a complete historical rollback from a partial baseline. This is a development-test rule, not an extra product approval step.
 
 A inventories the currently implemented routes rather than copying a historical route count. The mandatory core set is PyDyn MD, GPUMD MD, PyDyn-pyGAS sampling, GPUMD GPU-Sampling and the implemented NEB route. Also run implemented training, independent evaluation, export, bias validation, reweighting and analysis routes with bounded current fixtures. Mark missing environments/adapters/fixtures blocked or not_run, with the exact reason. Keep backend route evidence separate from the actual human UI chain; neither substitutes for the other.
 
