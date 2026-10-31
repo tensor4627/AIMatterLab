@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "0.18.9-dev.10",
+  "version": "0.18.9-dev.11",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -17,7 +17,9 @@
     "stage:agents": "node scripts/stage-agents.mjs",
     "test:task": "node scripts/task-integration-smoke.mjs",
     "test:pygas-ui": "node scripts/pygas-composer-regression.mjs",
-    "test:pygas-order": "node scripts/pygas-reorder-regression.mjs"
+    "test:pygas-order": "node scripts/pygas-reorder-regression.mjs",
+    "test:frontend:compute": "node scripts/frontend-compute-receipts.mjs",
+    "test:frontend:commands": "node scripts/frontend-conversation-commands.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "4.7.0",
@@ -46,7 +48,7 @@
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "directories": {
-      "output": "release/v0.18.9-dev.10"
+      "output": "release/v0.18.9-dev.11"
     },
     "files": [
       "dist/**",

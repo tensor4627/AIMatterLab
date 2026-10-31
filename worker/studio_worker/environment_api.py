@@ -4,17 +4,25 @@ from pathlib import Path
 from .runtime_guides import RuntimeGuides,fingerprint,sampling_provenance
 from .source_git_identity import git_identity as source_git_identity,SourceGitError
 METHODS={
-'pydyn/dynamics/driver.py':{'Simulation':('__init__','run','prepare','attach','finalize')},
+'pydyn/dynamics/driver.py':{'Simulation':('__init__','run','prepare','attach','finalize','_initialize','_step')},
 'pydyn/dynamics/ensembles/nvt.py':{'NVTBerendsen':('__init__',),'NVTNoseHoover':('__init__',)},
 'pydyn/dynamics/ensembles/npt.py':{'MTTKNPT':('__init__',)},
 'pydyn/context.py':{'SimulationContext':('__init__',),'TargetStress':('__init__',)},
 'pydyn/state.py':{'State':('__init__','from_atoms')},
+'pydyn/forces/ml.py':{'TorchMLForceModel':('cupy_to_model_tensor',)},
 'pydyn/forces/base.py':{'ForceModel':('__init__',)},
 'pydyn/forces/hotpp_force.py':{'MiaoForceModel':('__init__','neighbor_request','build_input','map_properties','run_model','update_results')},
 'pydyn/sampling/integrations/pydyn.py':{'PyGASForceModel':('__init__','validate','neighbor_request','on_initialize','before_step','geometry_changed','after_step','on_finalize','compute'),'BiasedForceEvaluator':('__init__','validate_properties','invalidate','begin_batch','end_batch','compute')},
-'pydyn/sampling/runtime.py':{'SamplingConfig':('__post_init__','route'),'BiasRuntime':('__init__','evaluate','evaluate_masked','commit','state_dict','load_state_dict')},
+'pydyn/sampling/runtime.py':{'SamplingConfig':('__post_init__','route'),'BiasRuntime':('__init__','evaluate','evaluate_masked','commit','state_dict','load_state_dict','_deposits','_write_logs')},
 'pydyn/sampling/__init__.py':{},
 }
+# Source-only integration contracts, not advice to call internal lifecycle methods.
+STATIC_CLASS_ATTRIBUTES={'pydyn/forces/ml.py':{'TorchMLForceModel':('model_dtype','result_dtype')}}
+INTEGRATION_METHODS={'Simulation._initialize','Simulation._step','BiasRuntime._deposits','BiasRuntime._write_logs','TorchMLForceModel.cupy_to_model_tensor'}
+def selection_size(item):
+ description={key:item[key]for key in ('expression','value_present','evaluation')}if item.get('kind')=='static_class_expression'else item.get('fields',[])
+ return len(item['code'].encode())+len(json.dumps(description,ensure_ascii=False,separators=(',',':')).encode())
+
 class ApiReadError(ValueError):
  def __init__(self,code,message):self.code=code;super().__init__(message)
 def fail(code,message):raise ApiReadError(code,message)
@@ -43,6 +51,13 @@ def extract(name,code,file_sha):
  for cname,allowed in METHODS[name].items():
   cls=classes.get(cname)
   if cls is None:continue
+  for field in cls.body:
+   target=field.targets[0] if isinstance(field,ast.Assign) and len(field.targets)==1 else field.target if isinstance(field,ast.AnnAssign) else None
+   if not isinstance(target,ast.Name) or target.id not in STATIC_CLASS_ATTRIBUTES.get(name,{}).get(cname,()):continue
+   key=name+'::'+cname+'.'+target.id
+   if key in items:fail('ambiguous_symbol','Duplicate public API identity')
+   text=''.join(code.splitlines(keepends=True)[field.lineno-1:field.end_lineno]);value=field.value
+   items[key]={'symbol_id':key,'code':text,'expression':ast.get_source_segment(code,value) if value is not None else None,'value_present':value is not None,'evaluation':'not_evaluated','kind':'static_class_expression','source':{'name':name,'sha256':file_sha,'line':field.lineno,'end_line':field.end_lineno},'excerpt_sha256':digest(text.encode()),'partial':True}
   if cname=='SamplingConfig':
    fields=[];lines=[]
    for item in cls.body:
@@ -58,6 +73,10 @@ def extract(name,code,file_sha):
    if key in items:fail('ambiguous_symbol','Duplicate public API identity')
    start=min([method.lineno]+[d.lineno for d in method.decorator_list]);text=''.join(code.splitlines(keepends=True)[start-1:method.end_lineno])
    items[key]={'symbol_id':key,'code':text,'source':{'name':name,'sha256':file_sha,'line':start,'end_line':method.end_lineno},'excerpt_sha256':digest(text.encode()),'partial':True}
+ for item in items.values():
+  qualified=item['symbol_id'].split('::',1)[1]
+  if qualified in INTEGRATION_METHODS:item['kind']='integration_contract'
+  item['excerpt_utf8_bytes']=len(item['code'].encode());item['selection_utf8_bytes']=selection_size(item)
  return items
 
 def inspect(service,data):
@@ -90,11 +109,11 @@ def inspect(service,data):
   if items.keys()&new.keys():fail('ambiguous_symbol','Duplicate public API identity')
   items.update(new)
  if selected is not None and any(k not in items for k in selected):fail('unsupported_symbol','Unknown or stale ID; read this target index and request only advertised methods')
- index=[{k:v for k,v in item.items() if k not in ('code','fields')} for item in items.values()]
- result={'status':'passed','partial':True,'environment_id':env['id'],'engine':'pydyn.sampling','configuration_sha256':fingerprint(env),'observed_receipt_sha256':receipt['receipt'],'observed_at':facts.get('observed_at'),'root_identity_sha256':digest(str(root).encode()),'imported_origins_match':True,'repository':git,'provenance':provenance,'files':files,'api':index,'limits':{'max_symbols':4,'max_excerpt_utf8_bytes':16384,'partial':True},'scope':'This exact selected environment public API only; no global fallback, import, execution, job authorization or numerical validation.'}
+ index=[{k:v for k,v in item.items() if k not in ('code','fields','expression')} for item in items.values()]
+ result={'status':'passed','partial':True,'environment_id':env['id'],'engine':'pydyn.sampling','configuration_sha256':fingerprint(env),'observed_receipt_sha256':receipt['receipt'],'observed_at':facts.get('observed_at'),'root_identity_sha256':digest(str(root).encode()),'imported_origins_match':True,'repository':git,'provenance':provenance,'files':files,'api':index,'limits':{'max_symbols':4,'max_excerpt_utf8_bytes':16384,'partial':True},'scope':'Fixed integration-contract excerpts and static class expressions are source only, not runtime dtype evidence or instructions to call internal lifecycle methods. This exact selected environment public API only; no global fallback, import, execution, job authorization or numerical validation.'}
  if len(json.dumps(result,ensure_ascii=False).encode())>32768:fail('metadata_budget','API index metadata exceeds32KiB')
  if selected is not None:
-  excerpts=[items[k]for k in selected];size=sum(len(item['code'].encode())+len(json.dumps(item.get('fields',[]),ensure_ascii=False,separators=(',',':')).encode())for item in excerpts)
+  excerpts=[items[k]for k in selected];size=sum(selection_size(item)for item in excerpts)
   if size>16384:fail('excerpt_budget','Selected source/default descriptions exceed16KiB; request fewer IDs, nothing truncated')
   result['api_excerpts']={'symbols':excerpts,'bytes':size,'evaluation':'not_evaluated','partial':True}
  if service.store.get('project',project['id'])!=project or service.store.get('environment',env['id'])!=env or guide.read(env,'pydyn.sampling')!=receipt or git_identity(root)!=git:fail('source_changed','Selected context or source changed during read')

@@ -26,3 +26,12 @@ test('Selected runtime facts are attached once after real acknowledgment; stale 
  assert.equal(manager.mergeRuntime(key,provider,context,guide,selection).attach,true);manager.accept(key,first);assert.equal(manager.mergeRuntime(key,provider,context,guide,selection).attach,false);
  const stale=manager.mergeRuntime(key,provider,context,{status:'stale',reason:'selected module changed'},selection);assert.equal(stale.attach,true);assert.match(stale.text,/targeted selected-engine probe/);assert(!stale.text.includes('/selected/python'));
 });
+
+// Portable wording from the reproduced native authoring turn; no local paths/IDs/models.
+test('NVE empty-history sampling sentence mentioning only whole-system CV does not select CV-only',()=>{
+ const text='继续当前这个已有流程，进入 Ag32 六步 WTMetaD 的科学输入准备。仅做全新空历史的 NVE 积分短例：初速度300 K、随机种子1337、步长0.1 fs、总计六步、每三步沉积一次。保留既有 WT 的300 K、bias factor10、sigma0.05、hill0.0001 eV、全32原子平均CV。不要重新生成偏置，只准备输入。';
+ assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'pydyn.sampling'},hasWorkflow:true}),['workflow.orchestrate','sampling.pydyn']);
+});
+for(const text of ['仅做 NVE 空历史积分，计算全系统平均CV。','继续 PyDyn MetaD；仅记录CV，不改变温度。','Run NVE with fresh history and MetaD parameters; only CV logging is requested.','Continue PyDyn WTMetaD with CV-only logging, not a separate CV-only build.'])test('dynamics intent remains sampling despite CV wording: '+text,()=>assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'pydyn.sampling'}}),['sampling.pydyn']));
+for(const text of ['只计算CV，不运行MD。','仅生成CV模型，不进行分子动力学。','only compute CVs, no MD','CV-only without running MD','Only calculate collective variables; do not run molecular dynamics'])test('explicit CV-only without dynamics: '+text,()=>assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'pydyn.sampling'}}),['pygas.cv']));
+test('analysis and custom-CV stage intent keep their explicit routes',()=>{assert.deepEqual(selectScientificFunctions({text:'只分析轨迹CV，不运行MD',parameters:{engine:'pydyn.sampling'}}),['analysis.trajectory']);assert.deepEqual(selectScientificFunctions({text:'Discuss a custom CV for MetaD, do not execute MD',parameters:{engine:'pydyn.sampling'}}),['pygas.custom-cv']);});

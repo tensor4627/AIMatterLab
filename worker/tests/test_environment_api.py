@@ -5,15 +5,16 @@ from unittest.mock import patch
 from studio_worker import environment_api as api,runtime_guides as guides,server
 # Independent fixed fixture map: expanding product file scope requires reviewing fixtures too.
 FIXTURE_METHODS={
-'pydyn/dynamics/driver.py':{'Simulation':('__init__','run','prepare','attach','finalize')},
+'pydyn/dynamics/driver.py':{'Simulation':('__init__','run','prepare','attach','finalize','_initialize','_step')},
 'pydyn/dynamics/ensembles/nvt.py':{'NVTBerendsen':('__init__',),'NVTNoseHoover':('__init__',)},
 'pydyn/dynamics/ensembles/npt.py':{'MTTKNPT':('__init__',)},
 'pydyn/context.py':{'SimulationContext':('__init__',),'TargetStress':('__init__',)},
 'pydyn/state.py':{'State':('__init__','from_atoms')},
+'pydyn/forces/ml.py':{'TorchMLForceModel':('cupy_to_model_tensor',)},
 'pydyn/forces/base.py':{'ForceModel':('__init__',)},
 'pydyn/forces/hotpp_force.py':{'MiaoForceModel':('__init__','neighbor_request','build_input','map_properties','run_model','update_results')},
 'pydyn/sampling/integrations/pydyn.py':{'PyGASForceModel':('__init__','validate','neighbor_request','on_initialize','before_step','geometry_changed','after_step','on_finalize','compute'),'BiasedForceEvaluator':('__init__','validate_properties','invalidate','begin_batch','end_batch','compute')},
-'pydyn/sampling/runtime.py':{'SamplingConfig':('__post_init__','route'),'BiasRuntime':('__init__','evaluate','evaluate_masked','commit','state_dict','load_state_dict')},
+'pydyn/sampling/runtime.py':{'SamplingConfig':('__post_init__','route'),'BiasRuntime':('__init__','evaluate','evaluate_masked','commit','state_dict','load_state_dict','_deposits','_write_logs')},
 'pydyn/sampling/__init__.py':{},
 }
 class Store:
@@ -27,6 +28,7 @@ class Tests(unittest.TestCase):
    p=self.repo/name;p.parent.mkdir(parents=True,exist_ok=True);code=''
    for cls,methods in classes.items():
     code+='class '+cls+':\n'
+    if cls=='TorchMLForceModel':code+='    model_dtype = torch.float32\n    result_dtype = cp.float64\n    other_secret = never_execute_this()\n'
     if cls=='SamplingConfig':code+='    mode: str = "wtmetad"\n    limit: int = dangerous_default()\n'
     for method in methods:code+='    def '+method+'(self, value=None):\n        return value\n'
     if not methods and cls!='SamplingConfig':code+='    pass\n'
@@ -121,6 +123,36 @@ class Tests(unittest.TestCase):
   self.assertFalse(any(t['name']=='inspect_environment_api'for t in server.tools()))
  def test_real_admin_endpoint_passes_read_and_classifies_failure(self):
   self.assertEqual(server.dispatch(self.service,'POST','/api/environment-api/read',self.data,admin=True)['status'],'passed');v=server.dispatch(self.service,'POST','/api/environment-api/read',{**self.data,'api_symbols':['x.py::X']},admin=True);self.assertEqual(v['operation_state'],'read_started');self.assertEqual(v['status'],'blocked')
+ def test_exact_seven_contract_ids_and_static_only_fields(self):
+  result=self.read();index={i['symbol_id']:i for i in result['api']}
+  ids=['pydyn/forces/ml.py::TorchMLForceModel.model_dtype','pydyn/forces/ml.py::TorchMLForceModel.result_dtype','pydyn/forces/ml.py::TorchMLForceModel.cupy_to_model_tensor','pydyn/sampling/runtime.py::BiasRuntime._deposits','pydyn/sampling/runtime.py::BiasRuntime._write_logs','pydyn/dynamics/driver.py::Simulation._initialize','pydyn/dynamics/driver.py::Simulation._step']
+  self.assertTrue(set(ids)<=index.keys())
+  source=(self.repo/'pydyn/forces/ml.py').read_text()
+  for selected in [ids[:4],ids[4:]]:
+   with patch('builtins.__import__',side_effect=AssertionError('Target/any import forbidden during AST read')):
+    # Parsing/extraction has no target imports; service setup already completed.
+    items=api.extract('pydyn/forces/ml.py',source,'b'*64)
+   response=self.read(api_symbols=selected)['api_excerpts'];self.assertEqual(response['bytes'],sum(index[i]['selection_utf8_bytes']for i in selected))
+   for item in response['symbols']:self.assertEqual(item['excerpt_utf8_bytes'],len(item['code'].encode()));self.assertEqual(item['excerpt_sha256'],api.digest(item['code'].encode()))
+  a=self.read(api_symbols=ids[:2])['api_excerpts']['symbols'];self.assertEqual([i['expression']for i in a],['torch.float32','cp.float64']);self.assertTrue(all(i['evaluation']=='not_evaluated' and i['kind']=='static_class_expression'for i in a));self.assertNotIn('never_execute_this',json.dumps(result))
+ def test_arbitrary_attribute_and_method_not_advertised(self):
+  for symbol in ['pydyn/forces/ml.py::TorchMLForceModel.other_secret','pydyn/forces/ml.py::TorchMLForceModel.arbitrary','pydyn/sampling/runtime.py::BiasRuntime._arbitrary']:
+   self.error('unsupported_symbol',lambda:self.read(api_symbols=[symbol]))
+ def test_ml_same_receipt_observation_is_required(self):
+  guide=guides.RuntimeGuides(self.root/'runtime-guides');facts=guide.read(self.env,'pydyn.sampling')['facts'];facts['file_observations']=[v for v in facts['file_observations']if v['path']!=str(self.repo/'pydyn/forces/ml.py')];guide._commit(facts);self.assertEqual(guide.read(self.env,'pydyn.sampling')['status'],'observed');self.error('api_source_observation_missing',self.read)
+ def test_changed_ml_does_not_reprobe_or_accept_old_receipt(self):
+  (self.repo/'pydyn/forces/ml.py').write_text('class TorchMLForceModel: pass');self.error('observed_runtime_required',self.read)
+ def test_duplicate_static_attribute_rejected(self):
+  p=self.repo/'pydyn/forces/ml.py';p.write_text(p.read_text()+'    model_dtype = dangerous_again()\n');self.record();self.error('ambiguous_symbol',self.read)
+ def test_static_default_not_inherited_or_inferred(self):
+  p=self.repo/'pydyn/forces/ml.py';p.write_text('class Parent:\n    model_dtype = torch.float32\nclass TorchMLForceModel(Parent):\n    pass\n');self.record();index=[v['symbol_id']for v in self.read()['api']];self.assertNotIn('pydyn/forces/ml.py::TorchMLForceModel.model_dtype',index)
+ def test_published_charge_matches_exact_aggregate_and_cap(self):
+  p=self.repo/'pydyn/dynamics/driver.py';prefix='class Simulation:\n    def _step(self):\n        # ';suffix='\n        return None\n';size=16384-2-len((prefix.split('\n',1)[1]+suffix).encode());p.write_bytes((prefix+'x'*size+suffix).encode());self.record();symbol='pydyn/dynamics/driver.py::Simulation._step';r=self.read(api_symbols=[symbol]);self.assertEqual(r['api_excerpts']['bytes'],16384);p.write_bytes((prefix+'x'*(size+1)+suffix).encode());self.record();self.error('excerpt_budget',lambda:self.read(api_symbols=[symbol]))
+
+
+ def test_static_expression_is_selection_only_and_budgeted_without_evaluation(self):
+  p=self.repo/'pydyn/forces/ml.py';p.write_bytes(('class TorchMLForceModel:\n    model_dtype = never_execute('+repr('x'*9000)+')\n').encode());self.record();index=self.read()['api'];self.assertNotIn('x'*100,json.dumps(index));self.error('excerpt_budget',lambda:self.read(api_symbols=['pydyn/forces/ml.py::TorchMLForceModel.model_dtype']))
+
 class GraphContractTests(unittest.TestCase):
  def test_derived_constructor_value_is_rejected_without_mutation(self):
   from studio_worker import pygas_values as values

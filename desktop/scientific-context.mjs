@@ -3,6 +3,9 @@ const ENGINE_ROUTES={'pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling
 export function selectScientificFunctions({text='',parameters={},hasWorkflow=false,manualFunction}={}){
  const value=String(text),engine=parameters.engine;let id;
  const consumerIntent=/分子动力学|\bmd\b|metad|opes|增强采样/i.test(value);
+ const dynamicsIntent=/\b(?:md|nve|nvt|npt|metad|opes)\b|wtmetad|分子动力学|增强采样|偏置模拟|积分|沉积/i.test(value);
+ const excludesDynamics=/(?:不|无需|不要)(?:运行|进行|做|启动)?\s*(?:MD|分子动力学|积分)|\b(?:no|without|do not)\s+(?:run(?:ning)?\s+)?(?:MD|molecular dynamics)\b/i.test(value);
+ const cvOnlyIntent=/(?:仅|只)(?:计算|生成|定义|评估)?\s*(?:CV|集体变量)|\bcv[\s_-]*only\b|\bonly\s+(?:(?:compute|calculate|evaluate)\s+)?(?:the\s+)?(?:cvs?|collective\s+variables?)\b/i.test(value);
  const primaryTraining=/(?:^|[。！!？?;\n])\s*(?:(?:请|帮我|现在|接下来|先|首先|然后|随后|please\s+|next\s+|now\s+|first\s+|then\s+)\s*)*(?:训练|导出|评估|train\b|export\b|freeze\b|eval\b)/i.test(value);
  if(manualFunction!==undefined&&typeof manualFunction!=='string')throw Error('Invalid selected scientific function');
  // Present intent takes priority over the previous run: analysis never loads the build/install stack.
@@ -13,7 +16,7 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  else if(/(?:自定义|custom|missing|不存在).*?cv|cv.*?(?:自定义|custom|不存在)/i.test(value))id='pygas.custom-cv';
  else if(/\bneb\b|最小能量路径/i.test(value))id=/gpumd|gpu.?sampling/i.test(value)?'neb.gpumd':/pydyn/i.test(value)||String(engine).startsWith('pydyn.')?'neb.pydyn':'neb.gpumd';
  else if((/(?:训练|train|导出|export|freeze)/i.test(value)||/(?:测试|eval|评估)/i.test(value)&&!/(?:分子动力学|\bmd\b|metad|opes|增强采样)/i.test(value))&&(!consumerIntent||primaryTraining)&&/hotpp|torchnep|nepmaker|activemiao|\bnep\b/i.test(value))id=/torchnep/i.test(value)?'training.torchnep':/nepmaker/i.test(value)?'learning.nepmaker':/activemiao/i.test(value)?'learning.activemiao':/hotpp/i.test(value)?'training.hotpp':'training.nep';
- else if(/\bcv[\s_-]*only\b|仅.*?cv|只(?:计算|生成|定义).*?cv/i.test(value))id='pygas.cv';
+ else if(cvOnlyIntent&&(!dynamicsIntent||excludesDynamics))id='pygas.cv';
  else if(/metad|opes|umbrella|增强采样|偏置模拟/i.test(value))id=/pydyn/i.test(value)?'sampling.pydyn':/gpumd|gpu.?sampling/i.test(value)?'sampling.gpumd':String(engine).startsWith('pydyn.')?'sampling.pydyn':String(engine).startsWith('gpumd.')?'sampling.gpumd':'pygas.bias';
  else if(/分子动力学|\bmd\b/i.test(value)&&/gpumd|pydyn/i.test(value))id=/gpumd/i.test(value)?'md.gpumd':'md.pydyn';
  else if(ENGINE_ROUTES[engine])id=ENGINE_ROUTES[engine];
