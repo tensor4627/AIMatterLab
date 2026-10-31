@@ -4,6 +4,7 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
+| 0.18.9 开发中（内部包 dev.12，未正式发布） | 补齐 PyDyn 采样驱动所需17项固定公开构造/观察接口；保留全部来源与预算门；主skill区分可审阅输入编写与未来dtype/ABI执行验证 | Node1844 passed/2 skipped、worker477、TypeScript/Vite与内部包 passed；A 新15路/27进程/642文件 passed；实际原会话读取67项接口后在同流程保存6项输入，缺失参数为0；单次明确连接升级与隔离记录保护核对 passed | B 本代5条真实界面科学流程未完成；无会话归属的全局运行页冷启仍需明确连接，恢复修复仅为候选；前端与dev.11一致，未重跑；不改引擎或自动探测；无最终菜单/视觉批准；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.11，未正式发布） | 恢复保存的环境检查并防止旧绿覆盖；固定采样类型/时序契约及预算；修复 NVE/CV 指导误选和混合墙钟绘图；命令面板常用会话入口；全局任务页隐藏旧会话切换 | Node1844 passed/2 skipped、worker465、前端166、环境39、命令12、TypeScript/Vite及主 skill passed；A 新15路/27进程/642文件 passed；1021程序文件与公开skill/runtime包核对、实际便携启动、任务页切换栏隐藏 passed | 首失败与测试宿主修正均保留；原接口流程续填、服务升级后新调用、完整按钮及最终菜单/视觉验收未完成；短例不代表科学收敛；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.10，未正式发布） | 复核状态读取独立；同流程先绑定路线；环境摘要隐藏三类源码路径并保留身份；DeepSeek/兼容 API 暴露目标接口工具；Git 双流真实字节预算、WSL worktree 身份及远程依赖补全 | Node 1808 passed / 2 skipped；worker 457、TypeScript/Vite、主 skill passed；A 新源码 15 路/27 进程/642 文件 passed；1019 程序文件及 runtime/skill 资源与包逐字节核对 passed | 新包原生、模型续聊、目标接口实际调用、完整按钮与最终布局验收 not_run；原失败保留，短例不证明物理收敛；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.9，未正式发布） | 目标环境有界 API/来源 attestation、严格图契约、工作区迟到响应、复核刷新状态及面板逐像素键盘调整；公开主 skill 路由补充 | TypeScript passed；Node1771 passed/2skip，worker416；完整前端164，新增React17/恢复7，composer73/reorder60 passed；A独立源码15路27进程642文件 passed | Vite/便携包1018程序文件及9skill28文件核对passed；新包原生/provider/API实际调用 not_run，历史B路线不移用；无最终菜单重排；[阶段记录](docs/v0.18.9.md) |

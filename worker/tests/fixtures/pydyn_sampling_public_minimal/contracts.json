@@ -1,0 +1,524 @@
+{
+  "scope": "Public contract-only AST fixtures. Exact selected method/field bodies are preserved inside non-executable class shells; unresolved imports/bases are intentional. No driver, model, dataset, runtime record or machine path.",
+  "source_commit": "ce3a2ebd35ac475ee78cb4d21080b8920d86db3f",
+  "files": [
+    {
+      "name": "pydyn/dynamics/driver.py",
+      "sha256": "01413954b2b3619f834bea17e5fa109b55dcb394fca7da02b141b095a51106a6",
+      "original_source_sha256": "55df138ab970bf0f9ee33ded7451a24fbcf50dac1d94e6cc38298b6730a8ef83",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass Simulation:\r\n    def __init__(\r\n        self,\r\n        state: Any,\r\n        context: Any,\r\n        dt: float,\r\n        initializer: List[InitializerLike],\r\n        ensemble: EnsembleLike,\r\n        observers: Optional[List[ObserverCallable]] = None,\r\n        updaters: Optional[List[UpdaterLike]] = None,\r\n        hooks: Optional[List[Any]] = None,\r\n    ) -> None:\r\n        \"\"\"Initialize a molecular dynamics simulation.\r\n        初始化分子动力学模拟。\r\n\r\n        Args:\r\n            state: State object with atomic positions and momenta.\r\n                / 包含原子位置和动量的状态对象。\r\n            context: SimulationContext with target thermodynamic conditions.\r\n                / 带有目标热力学条件的 SimulationContext。\r\n            dt: Timestep in picoseconds. / 时间步长（皮秒）。\r\n            initializer: List of initializer objects. / 初始化程序对象列表。\r\n            ensemble: Ensemble object for propagating dynamics.\r\n                / 用于传播动力学的系综对象。\r\n            observers: Optional list of observer objects to track trajectory.\r\n                / 用于跟踪轨迹的观察者对象的可选列表。\r\n            updaters: Optional state updaters run after each completed MD step\r\n                and before observers. / 在完成的 MD 步后、observer 前运行的\r\n                可选状态 updater 列表。\r\n            hooks: Optional lifecycle/geometry hooks. Commit callbacks run\r\n                after integration and before observers.\r\n        \"\"\"\r\n        self.state = state\r\n        self.ensemble = ensemble\r\n        self.context = context\r\n        self.dt = dt\r\n        self.initializer = initializer\r\n\r\n        self.time: float = 0.0\r\n        self.step_count: int = 0\r\n        self.conditions: Any = None\r\n        self.observers: List[ObserverCallable] = observers or []\r\n        self.updaters: List[UpdaterLike] = list(updaters or [])\r\n        self.hooks = list(hooks or [])\r\n        if len({id(hook) for hook in self.hooks}) != len(self.hooks):\r\n            raise ValueError(\"The same simulation hook cannot be registered twice\")\r\n        self._failed = False\r\n\r\n        self._initialized: bool = False\r\n        self._execution_plan = None\r\n        self._prepared_run_depth = 0\r\n    def attach(self, callback: ObserverCallable, interval: int = 1) -> CallbackObserver:\r\n        \"\"\"Register ``callback(sim)`` after every N completed steps.\r\n\r\n        Callbacks run in registration order, after updaters and sampling commit.\r\n        They are not called at step zero. Intervals use the total step count,\r\n        including across multiple run() calls. Register before prepare(), or\r\n        prepare again after changing callbacks. Existing observers remain valid.\r\n\r\n        Returns the CallbackObserver registration, which can be removed from\r\n        ``sim.observers`` before preparing again.\r\n        \"\"\"\r\n        observer = CallbackObserver(callback, interval=interval)\r\n        if self._initialized:\r\n            observer.initialize()\r\n        self.observers.append(observer)\r\n        return observer\r\n    def _initialize(self) -> None:\r\n        \"\"\"Initialize the simulation.\r\n        初始化模拟。\r\n\r\n        Runs all initializers, extends state with ensemble-specific variables,\r\n        applies constraints, and initializes observers. Can be called multiple\r\n        times safely (subsequent calls are no-ops).\r\n        / 运行所有初始化程序，用系综特定变量扩展状态，应用约束并初始化观察者。\r\n        可以安全地多次调用（后续调用为无操作）。\r\n        \"\"\"\r\n        if self._initialized:\r\n            return\r\n\r\n        if self.hooks:\r\n            try:\r\n                inspect.signature(self.ensemble.step).bind(self.state, None, self.dt, hooks=self.hooks)\r\n            except TypeError as error:\r\n                raise TypeError(\"Ensemble does not support simulation hooks\") from error\r\n        self._call_hooks(\"validate\", self)\r\n\r\n        validate_context = getattr(self.ensemble, \"validate_context\", None)\r\n        if validate_context is not None:\r\n            validate_context(self.context)\r\n\r\n        conditions = self._resolve_conditions()\r\n\r\n        for init in self.initializer:\r\n            init.initialize(self.state, conditions)\r\n\r\n        for op, _ in self.ensemble.op_list:\r\n            if hasattr(op, \"extend_state\"):\r\n                op.extend_state(self.state, conditions)\r\n\r\n        if hasattr(self.ensemble, \"validate_state\"):\r\n            self.ensemble.validate_state(self.state)\r\n\r\n        if hasattr(self.ensemble, \"required_properties\") and hasattr(\r\n            self.ensemble, \"force_evaluator\"\r\n        ):\r\n            self.ensemble.force_evaluator.validate_properties(\r\n                self.ensemble.required_properties\r\n            )\r\n\r\n        for constraint in conditions.constraints:\r\n            constraint.apply(self.state, conditions)\r\n\r\n        self.invalidate_caches()\r\n        for updater in self.updaters:\r\n            try:\r\n                updater.initialize(self.state, conditions)\r\n            except BaseException:\r\n                try:\r\n                    self.invalidate_caches()\r\n                except Exception:\r\n                    pass\r\n                raise\r\n            self.invalidate_caches()\r\n\r\n        self._call_hooks(\"on_initialize\", self)\r\n        initialize_observers(self.observers)\r\n\r\n        self._initialized = True\r\n    def prepare(self, optimize=True, *, backend=\"auto\"):\r\n        \"\"\"Prepare dispatch without advancing dynamics beyond initialization.\r\n\r\n        ``auto`` prepares local dispatch/fusion; ``device`` also requests the\r\n        supported resident backend. The report describes actual coverage.\r\n        ``optimize=False`` clears the plan while retaining the current state.\r\n        Structural edits require another prepare(); numerical arrays stay live.\r\n        \"\"\"\r\n        if backend not in (\"auto\", \"device\"):\r\n            raise ValueError(\"backend must be auto or device\")\r\n        start = time.perf_counter()\r\n        self._clear_execution_plan()\r\n        if not optimize:\r\n            return {\r\n                \"optimized\": [],\r\n                \"fallbacks\": [],\r\n                \"backend\": \"generic\",\r\n                \"captured\": [],\r\n                \"operator_compilation\": [],\r\n                \"execution_type\": \"fallback\",\r\n                \"native_fragments\": [],\r\n                \"python_boundaries\": [],\r\n                \"readback_boundaries\": [],\r\n                \"buffer_bytes\": 0,\r\n                \"prepare_seconds\": time.perf_counter() - start,\r\n            }\r\n\r\n        self.initialize()\r\n        from ._execution import ExecutionPlan\r\n\r\n        plan = ExecutionPlan(self, backend=backend)\r\n        self._execution_plan = plan\r\n        has_native_loop = getattr(plan, \"resident_execution\", None) is not None\r\n        if has_native_loop:\r\n            native_fragments = [\r\n                \"op_list native integration\", \"shared neighbors\", \"NEP candidate CSR\",\r\n                plan.resident_execution.sampling_implementation, \"commit\",\r\n            ]\r\n            python_boundaries = [\"public run/step\", \"observers and output events\"]\r\n            readback_boundaries = [\r\n                \"neighbor validity/rebuild/allocation\", \"NEP allocation status\",\r\n            ]\r\n            if plan.resident_execution.binding.cv_size:\r\n                readback_boundaries.extend([\"dynamic sampling pair count\", \"sampling output and commit validation\"])\r\n        else:\r\n            native_fragments = list(plan.captured)\r\n            hybrid = getattr(plan, \"hybrid_execution\", None)\r\n            python_boundaries = ([\"step lifecycle\", *sorted({b.reason for b in hybrid.boundaries})]\r\n                                 if hybrid is not None else [\"per-step Python dispatch\"])\r\n            readback_boundaries = [\"existing provider checks\"]\r\n        return {\r\n            \"optimized\": list(plan.optimized),\r\n            \"fallbacks\": list(plan.fallbacks),\r\n            \"backend\": plan.backend,\r\n            \"execution_type\": getattr(plan, \"execution_type\", \"fallback\"),\r\n            \"native_fragments\": native_fragments,\r\n            \"python_boundaries\": python_boundaries,\r\n            \"readback_boundaries\": readback_boundaries,\r\n            \"captured\": list(plan.captured),\r\n            \"operator_compilation\": list(getattr(plan, \"operator_compilation\", ())),\r\n            \"buffer_bytes\": plan.buffer_bytes,\r\n            \"buffer_bytes_scope\": (\r\n                \"Resident CuPy storage and captured CuPy pools only; excludes Torch \"\r\n                \"graph pools, candidate buffers, NEP allocations and driver graph \"\r\n                \"metadata. Use allocation traces for peak memory.\"\r\n            ),\r\n            \"prepare_seconds\": time.perf_counter() - start,\r\n        }\r\n    def _step(self) -> None:\r\n        \"\"\"Advance the simulation by one timestep.\r\n        将模拟向前推进一个时间步。\r\n\r\n        Calls ensemble.step() to propagate dynamics, updates internal time\r\n        and step counter, and notifies all observers.\r\n        / 调用 ensemble.step() 传播动力学，更新内部时间和步数计数器，\r\n        并通知所有观察者。\r\n        \"\"\"\r\n        if not self._initialized:\r\n            self.initialize()\r\n\r\n        conditions = self._resolve_conditions()\r\n        if self._execution_plan is not None:\r\n            from ._execution import custom_conditions\r\n            if custom_conditions(self.context):\r\n                self._execution_plan.validate()\r\n        self._call_hooks(\"before_step\", self)\r\n        if self._execution_plan is not None:\r\n            self._execution_plan.execute(self.state, conditions, self.dt)\r\n        elif self.hooks:\r\n            self.ensemble.step(self.state, conditions, self.dt, hooks=self.hooks)\r\n        else:\r\n            self.ensemble.step(self.state, conditions, self.dt)\r\n\r\n        self.time += self.dt\r\n        self.step_count += 1\r\n\r\n        for updater in self.updaters:\r\n            try:\r\n                changed = updater.update(self.state, conditions, self.step_count)\r\n            except BaseException:\r\n                try:\r\n                    self.invalidate_caches()\r\n                except Exception:\r\n                    pass  # Preserve the original updater error.\r\n                raise\r\n            self.invalidate_caches(changed)\r\n            if self._execution_plan is not None:\r\n                self._execution_plan.validate()\r\n\r\n        self._call_hooks(\"after_step\", self)\r\n        if self._execution_plan is None:\r\n            notify_observers(self.observers, self)\r\n        else:\r\n            for observer in due_observers(self.observers, self.step_count):\r\n                observer(self)\r\n                self._execution_plan.validate()\r\n    def run(self, nsteps: int) -> None:\r\n        \"\"\"Run the simulation for a specified number of steps.\r\n        运行模拟指定的步数。\r\n\r\n        Args:\r\n            nsteps: Number of timesteps to simulate. / 要模拟的时间步数。\r\n        \"\"\"\r\n        if self._execution_plan is not None:\r\n            self._execution_plan.validate()\r\n        begin_run = getattr(self.ensemble, \"begin_run\", None)\r\n        end_run = getattr(self.ensemble, \"end_run\", None)\r\n        if begin_run is not None:\r\n            begin_run()\r\n            if self._execution_plan is not None:\r\n                self._execution_plan.validate()\r\n        self._prepared_run_depth += 1\r\n        try:\r\n            try:\r\n                native = getattr(self._execution_plan, \"resident_execution\", None)\r\n                if native is not None:\r\n                    if self._failed:\r\n                        raise RuntimeError(\"Failed trajectory requires a fresh checkpoint restore\")\r\n                    try:\r\n                        native.run(nsteps)\r\n                    except BaseException as error:\r\n                        self._hook_error(error)\r\n                        raise\r\n                else:\r\n                    for _ in range(nsteps):\r\n                        self.step()\r\n            except BaseException:\r\n                if end_run is not None:\r\n                    try:\r\n                        end_run()\r\n                    except Exception:\r\n                        pass  # Preserve the integration error after flushing checks.\r\n                raise\r\n            else:\r\n                if end_run is not None:\r\n                    end_run()\r\n        finally:\r\n            self._prepared_run_depth -= 1\r\n    def finalize(self) -> None:\r\n        \"\"\"Finalize the simulation.\r\n        最终确定模拟。\r\n\r\n        Calls finalize() on all observers to perform cleanup and final output.\r\n        / 调用所有观察者的 finalize()，以执行清理和最终输出。\r\n        \"\"\"\r\n        try:\r\n            for updater in self.updaters:\r\n                finalize = getattr(updater, \"finalize\", None)\r\n                if finalize is not None:\r\n                    finalize()\r\n            finalize_observers(self.observers)\r\n        finally:\r\n            self._call_hooks(\"on_finalize\", self)\r\n\n"
+    },
+    {
+      "name": "pydyn/dynamics/ensembles/nvt.py",
+      "sha256": "e6ef6eba1c95f53b882f1b7eac4a68a983b832a28168f2a42e9abcb0bc4494f0",
+      "original_source_sha256": "0c1e87f43d1e48eac584728eb769c121cf04b329db78c67d28181a9a02101571",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass NVTBerendsen(Ensemble):\r\n    def __init__(self, t_tau, force_evaluator):\r\n        self.force_evaluator = force_evaluator\r\n        self.op_list = [\r\n            (BerendsenTemperatureOp(t_tau), 1.0),\r\n            (MomentumOp(force_evaluator), 0.5),\r\n            (PositionOp(), 1.0),\r\n            (MomentumOp(force_evaluator), 0.5),\r\n        ]\r\n\nclass NVTNoseHoover(Ensemble):\r\n    def __init__(self, t_tau, force_evaluator):\r\n        self.t_tau = t_tau\r\n        self.force_evaluator = force_evaluator\r\n        self.op_list = [\r\n            (NoseHooverChainThermostatOp(t_tau), 0.5),\r\n            (MomentumOp(force_evaluator), 0.5),\r\n            (PositionOp(), 1.0),\r\n            (MomentumOp(force_evaluator), 0.5),\r\n            (NoseHooverChainThermostatOp(t_tau), 0.5),\r\n        ]\r\n\n"
+    },
+    {
+      "name": "pydyn/dynamics/ensembles/npt.py",
+      "sha256": "f512aa228f071ddd5560b6ad711a89f0ddc43b6b816795f8c4dcd0792d4af450",
+      "original_source_sha256": "474711cc7f4ebd1eea22ee1bc4d2a488563d3aedbf02520a5bfe63b891a36156",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass MTTKNPT(Ensemble):\r\n    def __init__(self, t_tau, barostat, force_evaluator):\r\n        self.force_evaluator = force_evaluator\r\n        self.t_tau = t_tau\r\n        self.barostat = barostat\r\n        self.op_list = [\r\n            (MTTKNPTBarostatOp(barostat), 0.5),\r\n            (NoseHooverChainThermostatOp(t_tau), 0.5),\r\n            (BoxMomentumOp(force_evaluator, barostat), 0.5),\r\n            (MomentumOp(force_evaluator, barostat), 0.5),\r\n            (PositionOp(barostat), 1.0),\r\n            (BoxOp(barostat), 1.0),\r\n            (MomentumOp(force_evaluator, barostat), 0.5),\r\n            (BoxMomentumOp(force_evaluator, barostat), 0.5),\r\n            (NoseHooverChainThermostatOp(t_tau), 0.5),\r\n            (MTTKNPTBarostatOp(barostat), 0.5),\r\n        ]\r\n\n"
+    },
+    {
+      "name": "pydyn/context.py",
+      "sha256": "9dbc35fc59f98b835a64f6e266fccc3bcf0625ac9b729de24f0424268d7653f6",
+      "original_source_sha256": "e12c4d79d3309cc99c38ae254c2a0419d3bbc27606829bfda9ba2909e9acb9a9",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass TargetStress:\r\n    def __init__(self, components: Mapping[str, object], unit: str = \"bar\") -> None:\r\n        factor = pressure_to_eVA3(1.0, unit)\r\n        schedules = {}\r\n        for component, value in components.items():\r\n            if component not in STRESS_COMPONENTS:\r\n                raise ValueError(f\"Unsupported stress component: {component}\")\r\n            schedules[component] = _ConvertedPressureSchedule(\r\n                as_schedule(value),\r\n                factor,\r\n            )\r\n        self._schedules = MappingProxyType(schedules)\r\n\n@dataclass(frozen=True)\r\nclass ResolvedSimulationContext:\r\n    def get_temperature(self, state: StateLike) -> float:\r\n        \"\"\"Compute instantaneous temperature using active particle DOF.\"\"\"\r\n        return _temperature(state, self.constraints)\r\n\nclass SimulationContext:\r\n    def __init__(\r\n        self,\r\n        target_temp: Optional[float] = None,\r\n        target_stress: Optional[TargetStress] = None,\r\n        constraints: Optional[List[ConstraintLike]] = None,\r\n    ) -> None:\r\n        \"\"\"Initialize simulation specifications.\"\"\"\r\n        if target_stress is not None and not isinstance(target_stress, TargetStress):\r\n            raise TypeError(\"target_stress must be a TargetStress or None\")\r\n        self.target_temp: Optional[float] = target_temp\r\n        self.target_stress = target_stress\r\n        self.constraints: List[ConstraintLike] = (\r\n            constraints if constraints is not None else []\r\n        )\r\n    def resolve(self, *, step: int, time: float) -> ResolvedSimulationContext:\r\n        \"\"\"Resolve scheduled targets into numeric values for one MD step.\"\"\"\r\n        if self.target_stress is None:\r\n            target_stress = MappingProxyType({})\r\n            target_stress_is_static = True\r\n        else:\r\n            target_stress = self.target_stress.resolve(step=step, time=time)\r\n            target_stress_is_static = self.target_stress.is_static\r\n        return ResolvedSimulationContext(\r\n            target_temp=(self.target_temp.value_at(step=step, time=time)\r\n                         if callable(getattr(self.target_temp, \"value_at\", None)) else self.target_temp),\r\n            target_stress=target_stress,\r\n            target_stress_is_static=target_stress_is_static,\r\n            constraints=tuple(self.constraints),\r\n            reference_target_temp=(self.target_temp.value_at(step=0, time=0.)\r\n                                   if callable(getattr(self.target_temp, \"value_at\", None)) else self.target_temp),\r\n        )\r\n    def get_temperature(self, state: StateLike) -> float:\r\n        \"\"\"Compute instantaneous temperature using active particle DOF.\"\"\"\r\n        return _temperature(state, self.constraints)\r\n\n"
+    },
+    {
+      "name": "pydyn/state.py",
+      "sha256": "70e84ce0123ccbdf3e82afed334908b87e8ac2dfc58c76413bfd689e6c1ccff0",
+      "original_source_sha256": "679426f35dacc8a9ac3aafde901d7b239749204c4b456f6de7cc510d744197d0",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass State:\r\n    def __init__(\r\n        self,\r\n        r: Optional[cp.ndarray] = None,\r\n        p: Optional[cp.ndarray] = None,\r\n        m: Optional[cp.ndarray] = None,\r\n        box: Optional[cp.ndarray] = None,\r\n        atomic_number: Optional[cp.ndarray] = None,\r\n        pbc: Optional[cp.ndarray] = None,\r\n        extensions: Optional[list] = None,\r\n    ) -> None:\r\n        \"\"\"Initialize a simulation state.\r\n        初始化模拟状态。\r\n\r\n        Args:\r\n            r: Atomic positions in Angstroms. / 原子位置（埃）。\r\n            p: Atomic momenta in amu*Ang/ps. / 原子动量（amu*Ang/ps）。\r\n            m: Atomic masses in amu. / 原子质量（amu）。\r\n            box: Simulation cell vectors (3x3 matrix). / 模拟盒矢量（3x3矩阵）。\r\n            atomic_number: Atomic numbers. / 原子序数。\r\n            pbc: Periodic boundary conditions. / 周期性边界条件。\r\n            extensions: Optional list of Extension objects.\r\n                / 扩展对象的可选列表。\r\n        \"\"\"\r\n        self.N: int = len(r) if r is not None else 0\r\n        self.r: Optional[cp.ndarray] = r\r\n        self.p: Optional[cp.ndarray] = p\r\n        self.m: Optional[cp.ndarray] = m\r\n        self.box: Optional[cp.ndarray] = box\r\n        self.atomic_number: Optional[cp.ndarray] = atomic_number\r\n        self.pbc: Optional[cp.ndarray] = pbc\r\n        self._extensions: Dict[str, Any] = {}\r\n        if extensions is not None:\r\n            for ext in extensions:\r\n                self.register_extension(ext)\r\n    def from_atoms(self, atoms: Atoms) -> \"State\":\r\n        \"\"\"Load state from an ASE Atoms object.\r\n        从 ASE Atoms 对象加载状态。\r\n\r\n        Args:\r\n            atoms: ASE Atoms object. / ASE Atoms 对象。\r\n\r\n        Returns:\r\n            Self for method chaining. / 自身以便方法链接。\r\n        \"\"\"\r\n        self.N = len(atoms)\r\n        self.r = cp.array(atoms.get_positions())\r\n        self.p = cp.array(atoms.get_momenta())\r\n        self.m = cp.array(atoms.get_masses())\r\n        self.box = cp.array(atoms.get_cell())\r\n        self.atomic_number = cp.array(atoms.get_atomic_numbers())\r\n        self.pbc = atoms.get_pbc()\r\n        for _, ext in self.iter_extensions():\r\n            ext.from_atoms(atoms)\r\n        return self\r\n\n"
+    },
+    {
+      "name": "pydyn/forces/ml.py",
+      "sha256": "9113a1330f1c71130c21a591962b4accfdb0235074d586291681b99223a09106",
+      "original_source_sha256": "31104a594e46a4d7652b764bda950383be837b861442d618296641a50aeea52c",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass TorchMLForceModel(ForceModel):\r\n    model_dtype = torch.float32\r\n    result_dtype = cp.float64\r\n    @classmethod\r\n    def cupy_to_model_tensor(cls, array: cp.ndarray) -> torch.Tensor:\r\n        \"\"\"Convert a CuPy GPU array to the model input dtype.\"\"\"\r\n        return cupy_to_torch(array, dtype=cls.model_dtype)\r\n    @staticmethod\r\n    def load_torchscript_model(model_file: str) -> torch.jit.ScriptModule:\r\n        \"\"\"Load a TorchScript model on CUDA in eval mode.\"\"\"\r\n        model = torch.jit.load(model_file).cuda()\r\n        model.eval()\r\n        return model\r\n\n"
+    },
+    {
+      "name": "pydyn/forces/base.py",
+      "sha256": "689999c6886611d59efe4a2480ceb4fe7935a6ec9c868e59efc53ba30fb0dda4",
+      "original_source_sha256": "28c879e7e73882402eb70be2be2a4fc41faf600a6b165c1a02d1fbcbc8c2c601",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass ForceModel:\r\n    def __init__(self):\r\n        \"\"\"Initialize force model.\r\n        初始化力模型。\r\n        \"\"\"\r\n        self.state = None\r\n        self.results: Dict[str, Any] = {}\r\n\n"
+    },
+    {
+      "name": "pydyn/forces/hotpp_force.py",
+      "sha256": "86ce4e88fa270a489bc584ad07a46ae83cc4ec403bb7654fa39c893da4b3919f",
+      "original_source_sha256": "c39178cf8f221e397226c39284808e6914b52dadbc54924373b9fd0186ec5243",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass MiaoForceModel(TorchMLForceModel):\r\n    def neighbor_request(self):\r\n        from pydyn.neighbors import NeighborRequest\r\n        return NeighborRequest(self.cutoff, \"full\")\r\n    def __init__(\r\n        self,\r\n        neighbor_list,\r\n        model_file: str = \"model.pt\",\r\n        spin: bool = False,\r\n        **kwargs,\r\n    ) -> None:\r\n        super().__init__()\r\n        if getattr(neighbor_list, \"list_type\", \"full\") != \"full\":\r\n            raise ValueError(\"HotPP requires a full directed neighbor list\")\r\n        self.model = self.load_torchscript_model(model_file)\r\n        self.cutoff = float(self.model.cutoff.detach().cpu().numpy())\r\n        self.spin = spin\r\n        self.neighbor_list = neighbor_list\r\n        self.implemented_properties = [POTENTIAL_ENERGY, FORCES, VIRIAL]\r\n        if self.spin:\r\n            self.implemented_properties.extend(\r\n                [SPIN_TORQUES, MAGNETIC_FORCES, MAGNETIC_ENERGY]\r\n            )\r\n    def map_properties(self, properties):\r\n        model_properties = super().map_properties(properties)\r\n        if any(\r\n            prop in properties\r\n            for prop in (FORCES, VIRIAL, SPIN_TORQUES, MAGNETIC_FORCES)\r\n        ):\r\n            if \"energy\" not in model_properties:\r\n                model_properties.insert(0, \"energy\")\r\n        return model_properties\r\n    def build_input(self, state, context, properties):\r\n        if getattr(self.neighbor_list, \"list_type\", \"full\") != \"full\":\r\n            raise ValueError(\"HotPP requires a full directed neighbor list\")\r\n        idx_i, idx_j, offset = self.neighbor_list.find_neighbor(state)\r\n        data = {\r\n            \"atomic_number\": self.cupy_to_torch(state.atomic_number),\r\n            \"idx_i\": self.cupy_to_torch(idx_i),\r\n            \"idx_j\": self.cupy_to_torch(idx_j),\r\n            \"coordinate\": self.cupy_to_model_tensor(state.r),\r\n            \"n_atoms\": torch.tensor([state.N], dtype=torch.long, device=\"cuda\"),\r\n            \"offset\": self.cupy_to_model_tensor(offset),\r\n            \"cell\": self.cupy_to_model_tensor(state.box).view(1, 3, 3),\r\n            \"scaling\": torch.eye(3, dtype=torch.float32, device=\"cuda\").view(1, 3, 3),\r\n            \"batch\": torch.zeros(state.N, dtype=torch.long, device=\"cuda\"),\r\n            \"volume\": torch.tensor(\r\n                [state.volume.item()], dtype=torch.float32, device=\"cuda\"\r\n            ),\r\n        }\r\n        if self.spin:\r\n            spin = state.get_extension(\"spin\", required=True)\r\n            data[\"spin\"] = self.cupy_to_model_tensor(spin.spins)\r\n        return data\r\n    def run_model(self, inputs, model_properties):\r\n        return self.model(inputs, model_properties, create_graph=False)\r\n    def update_results(self, outputs, properties, state, context):\r\n        if \"energy_p\" in outputs:\r\n            energy = self.torch_to_result_array(outputs[\"energy_p\"][0])\r\n            self.results[POTENTIAL_ENERGY] = energy\r\n            if self.spin:\r\n                self.results[MAGNETIC_ENERGY] = energy\r\n        if FORCES in properties:\r\n            self.results[FORCES] = self.torch_to_result_array(outputs[\"forces_p\"])\r\n        if VIRIAL in properties:\r\n            # stress = self.torch_to_result_array(outputs[\"stress_p\"][0])\r\n            # self.results[\"virial\"] = -state.volume * stress\r\n            self.results[VIRIAL] = self.torch_to_result_array(outputs[\"virial_p\"][0])\r\n        if SPIN_TORQUES in properties:\r\n            self.results[SPIN_TORQUES] = self.torch_to_result_array(\r\n                outputs[\"spin_torques_p\"]\r\n            )\r\n        if MAGNETIC_FORCES in properties:\r\n            self.results[MAGNETIC_FORCES] = self.torch_to_result_array(\r\n                outputs[\"magnetic_forces_p\"]\r\n            )\r\n\n"
+    },
+    {
+      "name": "pydyn/sampling/integrations/pydyn.py",
+      "sha256": "6c7edd2d1b555413b577652ab186146fc90b348d8de762c421bcd4cac3565c8d",
+      "original_source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass PyGASForceModel(ForcePlugin):\r\n    def __init__(self, artifact, config: SamplingConfig, neighbor_list, *, device=\"cuda\", log_dir=None,\r\n                 debug_neighbor_checks=False):\r\n        super().__init__()\r\n        if torch.device(device).type != \"cuda\" or not torch.cuda.is_available():\r\n            raise RuntimeError(\"The PyDyn bridge requires real CuPy/PyTorch CUDA\")\r\n        self.runtime = BiasRuntime(artifact, config, device=device, log_dir=log_dir)\r\n        self.neighbor_list = neighbor_list\r\n        if type(debug_neighbor_checks) is not bool:\r\n            raise TypeError('debug_neighbor_checks must be bool')\r\n        self.debug_neighbor_checks = debug_neighbor_checks\r\n        self._expected_numbers = None\r\n        self._checked_inputs = False\r\n        cutoff = getattr(neighbor_list, \"rc\", getattr(neighbor_list, \"cutoff\", None))\r\n        if cutoff is None or not math.isclose(float(cutoff), config.neighbor_rc, rel_tol=0, abs_tol=1e-12):\r\n            raise ValueError(\"Sampling neighbor cutoff must equal the declared neighbor_rc\")\r\n        self._sim = None\r\n        self._active = False\r\n        self._dirty = False\r\n        self._pending = None\r\n        self._geometry = None\r\n        self._restore_p = None\r\n        self._failed = False\r\n    def validate(self, sim=None):\r\n        if sim is None:\r\n            return True  # ForcePlugin factory validation precedes Simulation binding.\r\n        if type(sim.ensemble) not in (VelocityVerlet, NVTNoseHoover, NVTBerendsen, MTTKNPT):\r\n            raise TypeError(\"pyGAS v1 supports the built-in non-spin NVE/NVT/MTTK NPT ensembles\")\r\n        if not math.isfinite(sim.dt) or sim.dt <= 0:\r\n            raise ValueError(\"pyGAS requires a finite positive constant timestep\")\r\n        if sim.updaters:\r\n            raise ValueError(\"Biased dynamics does not yet support embedded state updaters\")\r\n        if any(type(item) is not RemoveCOMMomentum for item in sim.context.constraints):\r\n            raise TypeError(\"Only momentum-only RemoveCOMMomentum constraints are supported\")\r\n        evaluator = sim.ensemble.force_evaluator\r\n        if not isinstance(evaluator, BiasedForceEvaluator) or evaluator.bias is not self:\r\n            raise ValueError(\"ensemble must use BiasedForceEvaluator with this same bias instance\")\r\n        if self not in sim.hooks or sum(isinstance(hook, PyGASForceModel) for hook in sim.hooks) != 1:\r\n            raise ValueError(\"Exactly one pyGAS runtime per simulation is supported\")\r\n        for op, _ in sim.ensemble.op_list:\r\n            if hasattr(op, \"force_evaluator\") and op.force_evaluator is not evaluator:\r\n                raise ValueError(\"Every force-consuming operator must use the biased evaluator\")\r\n        if self._sim is not None and self._sim is not sim:\r\n            raise ValueError(\"A pyGAS runtime cannot be shared between simulations\")\r\n    def neighbor_request(self):\r\n        from pydyn.neighbors import NeighborRequest\r\n        return NeighborRequest(self.runtime.config.neighbor_rc, \"full\", image_mode=\"minimum\",\r\n                               max_neighbors=self.runtime.config.max_neighbors)\r\n    def on_initialize(self, sim):\r\n        self.validate(sim)\r\n        self._sim = sim\r\n        self._dt = sim.dt\r\n        if self._restore_p is not None:\r\n            # RemoveCOMMomentum during setup must not alter a saved full-step momentum.\r\n            sim.state.p = self._restore_p.copy()\r\n            self._restore_p = None\r\n        self._check_geometry(sim.state)\r\n        if self.runtime.last_step >= 0:\r\n            if sim.step_count != self.runtime.last_step:\r\n                raise ValueError(\"MD and sampling checkpoint steps differ\")\r\n            self._set_results(self.runtime.current)\r\n            self._remember_geometry(sim.state)\r\n        else:\r\n            if sim.step_count != 0:\r\n                raise ValueError(\"A nonzero start step needs a complete sampling checkpoint\")\r\n            evaluation = self._evaluate(sim.state, step=0)\r\n            self.runtime.commit(evaluation)\r\n    def before_step(self, sim):\r\n        if self._failed:\r\n            raise RuntimeError(\"Failed bias runtime cannot continue; restore a complete checkpoint\")\r\n        if sim.step_count != self.runtime.last_step:\r\n            raise ValueError(\"MD and sampling clocks diverged\")\r\n        if sim.dt != getattr(self, \"_dt\", sim.dt):\r\n            raise ValueError(\"Changing timestep during biased MD is unsupported\")\r\n        self._dt = sim.dt\r\n        self._assert_geometry(sim.state)\r\n        self._active, self._dirty, self._pending = True, False, None\r\n    def geometry_changed(self, state, context, fields):\r\n        if not self._active:\r\n            raise RuntimeError(\"Geometry notification outside an active integration step\")\r\n        if self._pending is not None:\r\n            raise RuntimeError(\"Multiple force/geometry stages in one MD step are unsupported\")\r\n        # Coalesce PositionOp + BoxOp. Do not evaluate an intermediate NPT box.\r\n        self._dirty = True\r\n    def after_step(self, sim):\r\n        if self._pending is None or self._dirty:\r\n            raise RuntimeError(\"No final-geometry bias evaluation was produced for this step\")\r\n        self._assert_geometry(sim.state)\r\n        if self._pending.step != sim.step_count:\r\n            raise ValueError(\"Candidate bias step differs from the completed MD step\")\r\n        self.runtime.commit(self._pending)\r\n        self._active, self._pending = False, None\r\n    def on_finalize(self, sim):\r\n        pass  # Log files are opened/closed at committed events, not held by the engine.\r\n    def compute(self, state, context, properties=None):\r\n        if self._sim is None or self._failed:\r\n            raise RuntimeError(\"Initialize a hooked Simulation before requesting bias properties\")\r\n        if state is not self._sim.state:\r\n            raise ValueError(\"Use BiasRuntime.evaluate for independent frozen-geometry probes\")\r\n        if self._dirty:\r\n            self._pending = self._evaluate(state, self._sim.step_count + 1)\r\n            self._dirty = False\r\n        else:\r\n            self._assert_geometry(state)\r\n        requested = self.implemented_properties if properties is None else properties\r\n        if set(requested).difference(self.implemented_properties):\r\n            raise ValueError(\"pyGAS provides only additive energy, forces and virial\")\r\n\nclass BiasedForceEvaluator:\r\n    def __init__(self, base_evaluator, bias: PyGASForceModel):\r\n        if not isinstance(base_evaluator, ForceEvaluator):\r\n            raise TypeError(\"Use a PyDyn ForceEvaluator; compose multiple biases inside one pyGAS model\")\r\n        self._providers = tuple(base_evaluator.registry.group_by_model(bias.implemented_properties))\r\n        if any(not isinstance(model, ForceModel) for model in self._providers):\r\n            raise TypeError(\"The bridge requires ForceModel physical providers with standard cache fields\")\r\n        self.base = base_evaluator\r\n        self.bias = bias\r\n        self.results = {}\r\n    def validate_properties(self, properties):\r\n        self.base.validate_properties(properties)\r\n    def invalidate(self, fields=None, *, state=None, context=None):\r\n        self.base.invalidate(fields, state=state, context=context)\r\n        self.results = {}\r\n    def begin_batch(self):\r\n        self.base.begin_batch()\r\n    def end_batch(self):\r\n        self.base.end_batch()\r\n    def compute(self, state, context, properties=None):\r\n        if self.bias._dirty:\r\n            # Use the current invalidation protocol, including provider metadata\r\n            # bindings. Neighbor safety remains owned by each physical provider.\r\n            self.base.invalidate({\"r\", \"box\"}, state=state, context=context)\r\n        physical = self.base.compute(state, context, properties=properties)\r\n        requested = list(physical) if properties is None else list(properties)\r\n        additions = [name for name in requested if name in self.bias.implemented_properties]\r\n        if additions:\r\n            self.bias.compute(state, context, properties=additions)\r\n        # Never += into an array owned by the physical model's cache.\r\n        self.results = {name: physical[name] + self.bias.results[name] if name in additions\r\n                        else physical[name] for name in requested}\r\n        return self.results\r\n\n"
+    },
+    {
+      "name": "pydyn/sampling/runtime.py",
+      "sha256": "43a1be53a90258c18b0be1212a153fa2c148bf2feab46f6d9d70d93b99ed95af",
+      "original_source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\n@dataclass(frozen=True)\nclass SamplingConfig:\n    mode: str\n    atomic_numbers: tuple[int, ...]\n    cv_size: int\n    neighbor_rc: float\n    max_neighbors: int\n    history_capacity: int = 2\n    deposit_interval: int | None = None\n    kernel_capacity: int = 2\n    log_interval: int = 1\n    def __post_init__(self):\n        object.__setattr__(self, \"atomic_numbers\", tuple(self.atomic_numbers))\n        if self.mode not in (\"cvonly\", \"static\", \"metad\", \"wtmetad\", \"opes\"):\n            raise ValueError(\"mode must be cvonly/static/metad/wtmetad/opes\")\n        if not self.atomic_numbers or any(type(z) is not int or z <= 0 for z in self.atomic_numbers):\n            raise ValueError(\"explicit ordered atomic_numbers are required\")\n        for key in (\"cv_size\", \"max_neighbors\", \"history_capacity\", \"kernel_capacity\", \"log_interval\"):\n            value = getattr(self, key)\n            if type(value) is not int or value <= 0:\n                raise ValueError(f\"{key} must be a positive integer\")\n        if not 0 < self.neighbor_rc < float(\"inf\"):\n            raise ValueError(\"neighbor_rc must be finite and positive\")\n        if self.mode in (\"metad\", \"wtmetad\"):\n            if type(self.deposit_interval) is not int or self.deposit_interval <= 0:\n                raise ValueError(\"MetaD requires an explicit positive deposit_interval\")\n        elif self.deposit_interval is not None:\n            raise ValueError(\"deposit_interval applies only to MetaD/WTMetaD; OPES owns its pace\")\n    @property\n    def route(self):\n        return self.mode if self.mode in (\"cvonly\", \"opes\") else \"bias\"\n\nclass BiasRuntime:\n    def __init__(self, artifact, config: SamplingConfig, *, device=\"cuda\", log_dir=None):\n        self.config = config\n        self.runner = (_InMemoryRunner(artifact, device) if isinstance(artifact, torch.nn.Module)\n                       else ArtifactRunner(artifact, device=device))\n        self.device = self.runner.device\n        self.neighbor_protocol = getattr(getattr(self.runner, 'model', None), 'neighbor_protocol', 'pairs_v1')\n        if self.neighbor_protocol not in ('pairs_v1', 'masked_pairs_v1'):\n            raise ValueError('Unknown sampling neighbor protocol')\n        if self.neighbor_protocol == 'masked_pairs_v1' and config.mode != 'static':\n            raise ValueError('masked_pairs_v1 currently requires static sampling')\n        self.last_step = -1\n        self.revision = 0\n        self._owner = object()\n        self.current: dict[str, torch.Tensor] = {}\n        self.model_calls = 0\n        self.log_dir = Path(log_dir) if log_dir is not None else None\n        if self.log_dir is not None:\n            for name in (\"GASCVlog.txt\", \"GASCVsteps.txt\", \"GASGaussian.txt\", \"OPES_COLVAR\", \"OPES_KERNELS\"):\n                if (self.log_dir / name).exists():\n                    raise FileExistsError(\"Use a fresh log directory for each run/restart segment\")\n        manifest = self.runner.manifest\n        if manifest:\n            scientific = manifest.get(\"scientific\", {})\n            if (\"atomic_numbers\" in scientific and\n                    tuple(scientific[\"atomic_numbers\"]) != config.atomic_numbers):\n                raise ValueError(\"manifest atom order/species mismatch\")\n            if scientific.get(\"sampling_mode\", config.mode) != config.mode:\n                raise ValueError(\"manifest sampling mode mismatch\")\n            expected = {\"route\": config.route, \"n_atoms\": len(config.atomic_numbers),\n                        \"cv_size\": config.cv_size, \"max_neighbors\": config.max_neighbors,\n                        \"neighbor_rc\": config.neighbor_rc}\n            if config.route != \"opes\":\n                expected[\"max_cv_nums\"] = config.history_capacity\n            else:\n                expected[\"opes_kernel_capacity\"] = config.kernel_capacity\n            for key, value in expected.items():\n                if manifest.get(key) != value:\n                    raise ValueError(f\"manifest {key}={manifest.get(key)!r}, runtime requests {value!r}\")\n            if self.runner.backend == \"torchscript\":\n                entry = manifest[\"artifacts\"][\"torchscript\"]\n                if hashlib.sha256(self.runner.path.read_bytes()).hexdigest() != entry[\"sha256\"]:\n                    raise ValueError(\"TorchScript artifact hash mismatch\")\n            # Shared identity across sibling .pt/.pt2, independent of deployment choice/path.\n            identity = {\"artifacts\": {key: item[\"sha256\"] for key, item in manifest[\"artifacts\"].items()},\n                        \"scientific\": manifest[\"scientific\"], \"abi_version\": manifest[\"abi_version\"]}\n        elif isinstance(self.runner, _InMemoryRunner):\n            identity = {\"native_model_sha256\": self.runner.digest}\n        else:\n            identity = {\"legacy_pt_sha256\": hashlib.sha256(self.runner.path.read_bytes()).hexdigest()}\n        identity[\"runtime_config\"] = asdict(config)\n        self.fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()\n        if config.mode == \"opes\":\n            if manifest:\n                self.state = initial_opes_state_from_manifest(\n                    manifest, config.kernel_capacity, device=self.device, dtype=torch.float64)\n            else:\n                self.state = _clone(self.runner.model.initialize_state(config.kernel_capacity), self.device)\n        else:\n            self.state = {\n                \"cv_traj\": torch.zeros((config.history_capacity, config.cv_size), dtype=torch.float64, device=self.device),\n                \"bias_traj\": torch.zeros(config.history_capacity, dtype=torch.float64, device=self.device),\n                \"saved_cv_nums\": torch.zeros((), dtype=torch.int32, device=self.device),\n            }\n        self._initial = _clone(self.state)\n    def _deposits(self, step):\n        return (self.config.mode in (\"metad\", \"wtmetad\") and step > 0\n                and step % self.config.deposit_interval == 0)\n    def evaluate(self, positions, cell, side_array, *, step=None):\n        \"\"\"Evaluate against committed state without advancing it (also for probes).\"\"\"\n        return self._evaluate(positions, cell, side_array, step=step, check_inputs=True)\n    def evaluate_masked(self, positions, cell, pairs, mask, count, *, step=None):\n        return self._evaluate(positions, cell, pairs, step=step, check_inputs=True,\n                              pair_mask=mask, pair_count=count)\n    def commit(self, evaluation: BiasEvaluation):\n        if evaluation.owner is not self._owner or evaluation.revision != self.revision:\n            raise ValueError(\"stale, duplicate, or foreign sampling evaluation\")\n        if evaluation.step != self.last_step + 1:\n            raise ValueError(\"sampling steps must be committed exactly once, consecutively\")\n        values = evaluation.values\n        self._validate_values(values)\n        if self.config.mode == \"opes\":\n            candidate = {key: values[key] for key in OPES_STATE_NAMES}\n            self._validate_state(candidate)\n            self.state = _clone(candidate)\n        elif self._deposits(evaluation.step):\n            count = int(self.state[\"saved_cv_nums\"].item())\n            if count >= self.config.history_capacity:\n                raise OverflowError(\"MetaD history capacity exhausted\")\n            self.state[\"cv_traj\"][count].copy_(values[\"cv_now\"])\n            self.state[\"bias_traj\"][count].copy_(values[\"bias\"])\n            self.state[\"saved_cv_nums\"].fill_(count + 1)\n        self.current = _clone({key: value for key, value in values.items() if key not in OPES_STATE_NAMES})\n        self.last_step = evaluation.step\n        self.revision += 1\n        self._write_logs(values)\n    def state_dict(self):\n        return {\"schema\": \"pygas-runtime-v1\", \"fingerprint\": self.fingerprint,\n                \"last_step\": self.last_step, \"revision\": self.revision,\n                \"neighbor_protocol\": self.neighbor_protocol,\n                \"state\": _clone(self.state, \"cpu\"), \"current\": _clone(self.current, \"cpu\")}\n    def load_state_dict(self, payload):\n        if payload.get(\"neighbor_protocol\", \"pairs_v1\") != self.neighbor_protocol:\n            raise ValueError(\"checkpoint neighbor protocol mismatch\")\n        if payload.get(\"schema\") != \"pygas-runtime-v1\" or payload.get(\"fingerprint\") != self.fingerprint:\n            raise ValueError(\"runtime checkpoint/model/configuration mismatch\")\n        state = _clone(payload[\"state\"], self.device)\n        self._validate_state(state)\n        last_step, revision = payload[\"last_step\"], payload[\"revision\"]\n        if type(last_step) is not int or last_step < -1 or type(revision) is not int or revision != last_step + 1:\n            raise ValueError(\"invalid checkpoint step/revision\")\n        current = _clone(payload[\"current\"], self.device)\n        if last_step >= 0:\n            self._validate_values(current)\n        elif current:\n            raise ValueError(\"uninitialized checkpoint cannot contain force results\")\n        self.state, self.current = state, current\n        self.last_step, self.revision = last_step, revision\n        self._owner = object()  # Invalidate outstanding evaluations, including pre-restore ones.\n    def _write_logs(self, values):\n        if self.log_dir is None:\n            return\n        step = self.last_step\n        cv = values[\"cv_now\"].cpu().tolist()\n        bias = values[\"bias\"].item()\n        mean_force = values[\"forces\"].norm(dim=1).mean().item()\n        cv_names = [f\"cv{i}\" for i in range(self.config.cv_size)]\n        if self.config.mode == \"opes\":\n            diagnostics = (\"extra_bias\", \"rct\", \"zed\", \"neff\", \"nker\", \"work\", \"excluded\",\n                           \"deposited\", \"merge_count\", \"logweight\", \"probability\")\n            if step % self.config.log_interval == 0:\n                self._append(\"OPES_COLVAR\", [step, bias, *cv, mean_force,\n                    *(values[\"opes_\" + key].item() for key in diagnostics), values[\"status\"].item()],\n                    [\"step\", \"bias\", *cv_names, \"mean_bias_force\", *diagnostics, \"status\"])\n            if values[\"opes_deposited\"].item():\n                self._append(\"OPES_KERNELS\", [step, *cv, *values[\"opes_last_sigma\"].cpu().tolist(),\n                    values[\"opes_last_height\"].item(), values[\"opes_logweight\"].item(),\n                    values[\"opes_merge_count\"].item(), values[\"opes_nker\"].item()],\n                    [\"step\", *cv_names, *(f\"sigma{i}\" for i in range(self.config.cv_size)),\n                     \"height\", \"logweight\", \"merge_count\", \"nker\"])\n        else:\n            if step % self.config.log_interval == 0:\n                # Preserve the legacy GASCVlog numeric columns for analysis tools.\n                # Explicit restart-aware steps belong in a companion file.\n                self._append(\"GASCVlog.txt\", [bias, *cv, mean_force],\n                             [\"bias\", *cv_names, \"mean_bias_force\"])\n                self._append(\"GASCVsteps.txt\", [step], [\"step\"])\n            if self._deposits(step):\n                self._append(\"GASGaussian.txt\", [bias, *cv])\n\n"
+    },
+    {
+      "name": "pydyn/sampling/__init__.py",
+      "sha256": "c2845f8d94bd329eda235d83aae73a40d89d97f42a533baad9b36d3abc624f24",
+      "original_source_sha256": "b1eed3e50926a1c69bab5654c4094b2fe6015e0883fbebeaff2277f7dfeddcac",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\n"
+    },
+    {
+      "name": "pydyn/dynamics/ensembles/verlet.py",
+      "sha256": "1cf708fffdbcbb7d95de052f4526523a3bce630859c2a3dd78a0becb7dc7cedb",
+      "original_source_sha256": "defe7d564bd0e9bc28c64be7a38c5adb3a7ccf6409527aadb05914c4f13ad87a",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass VelocityVerlet(Ensemble):\r\n    def __init__(self, force_evaluator):\r\n        self.force_evaluator = force_evaluator\r\n        self.op_list = [\r\n            (MomentumOp(force_evaluator), 0.5),\r\n            (PositionOp(), 1.0),\r\n            (MomentumOp(force_evaluator), 0.5),\r\n        ]\r\n\n"
+    },
+    {
+      "name": "pydyn/dynamics/ensembles/base.py",
+      "sha256": "bc3db7744ded20ece8f1797af2cb0b4c60d897a4ea7eeaafbabfe3f401d7a638",
+      "original_source_sha256": "795edce6468b5c8c3471128258e1df5ba1445f94b73eeafc505fa7581b776e3e",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass Ensemble:\r\n    def step(self, state, context, dt, *, hooks=()):\r\n        \"\"\"Execute one integration step using operator splitting.\r\n        使用算子分裂执行一个积分步。\r\n\r\n        Args:\r\n            state: Simulation state to update. / 要更新的模拟状态。\r\n            context: Simulation context. / 模拟环境。\r\n            dt: Timestep in picoseconds. / 时间步（皮秒）。\r\n        \"\"\"\r\n        signature = plan_signature(self.op_list)\r\n        if getattr(self, \"_force_plan_signature\", None) != signature:\r\n            self._force_plan = compile_force_plan(self.op_list)\r\n            self._force_plan_signature = signature\r\n        for (op, ts), planned in zip(self.op_list, self._force_plan):\r\n            with ExitStack() as scopes:\r\n                for evaluator, requests in planned.requests.items():\r\n                    scopes.enter_context(evaluator.planned_requests(state, requests))\r\n                op.apply(state, context, dt * ts)\r\n            if hooks:\r\n                changed = getattr(op, \"modifies\", None)\r\n                geometry = {\"r\", \"box\"} if changed is None else {\"r\", \"box\"}.intersection(changed)\r\n                if geometry:\r\n                    for hook in hooks:\r\n                        callback = getattr(hook, \"geometry_changed\", None)\r\n                        if callback is not None:\r\n                            callback(state, context, frozenset(geometry))\r\n        for constraint in context.constraints:\r\n            constraint.apply(state, context)\r\n\n"
+    },
+    {
+      "name": "pydyn/dynamics/initializer.py",
+      "sha256": "46f333c2ce50d4ec4d8c2b645939d40c06b8c7f1a9b1be87bf0656903dbd3b49",
+      "original_source_sha256": "ccdf5dba59865f26f8c88e8f13ba306aee09abd9dbbc07931823612dce1aac82",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass MaxwellBoltzmannDistribution(VelocityInitializer):\r\n    def __init__(self, target_temp: Optional[float] = None) -> None:\r\n        \"\"\"Initialize the Maxwell-Boltzmann velocity initializer.\r\n        初始化 Maxwell-Boltzmann 速度初始化程序。\r\n\r\n        Args:\r\n            target_temp: Target temperature in Kelvin; defaults to None\r\n                to use context.target_temp. / 目标温度（开尔文）；默认为 None\r\n                以使用 context.target_temp。\r\n        \"\"\"\r\n        self.target_temp: Optional[float] = target_temp\r\n    def initialize(self, state: Any, context: Any) -> None:\r\n        \"\"\"Initialize momenta from Maxwell-Boltzmann distribution.\r\n        从 Maxwell-Boltzmann 分布初始化动量。\r\n\r\n        Generates momenta p_i from independent Gaussian distributions with\r\n        variance sigma_p = sqrt(m_i * k_B * T * e_to_mv2), ensuring the\r\n        initial kinetic energy corresponds to the target temperature.\r\n        / 从方差为 sigma_p = sqrt(m_i * k_B * T * e_to_mv2) 的独立高斯分布\r\n        生成动量 p_i，确保初始动能对应于目标温度。\r\n\r\n        Args:\r\n            state: Simulation state to initialize.\r\n                / 要初始化的模拟状态。Momenta will be set.\r\n                / 动量将被设置。\r\n            context: Simulation context with target thermodynamic parameters.\r\n                / 具有目标热力学参数的模拟环境。\r\n        \"\"\"\r\n        target_temp = (\r\n            self.target_temp if self.target_temp is not None else context.target_temp\r\n        )\r\n        if target_temp is None:\r\n            raise ValueError(\"target_temp must be finite and strictly positive\")\r\n        target_temp = _validate_positive_real(target_temp, \"target_temp\")\r\n        sigma_p = cp.sqrt(\r\n            state.m[:, None] * Constants.kB * target_temp * Constants.e_to_mv2\r\n        )\r\n        state.p = cp.random.standard_normal((state.N, 3)) * sigma_p\r\n        # Sample/rescale all 3N components before the driver projects constraints.\r\n        target_ke = 1.5 * state.N * Constants.kB * target_temp\r\n        current_ke = state.kinetic_energy\r\n        if current_ke > 0:\r\n            state.p *= cp.sqrt(target_ke / current_ke)\r\n\n"
+    },
+    {
+      "name": "pydyn/neighbors/cuda_neighbor.py",
+      "sha256": "2d95802ca9776794c78bda540a346d26888b590c2bdf1fd2dabf580cbbb17f97",
+      "original_source_sha256": "93f0e6532cbcaa1308b91d277577d4cca10a513a65947c190a386553b87866ee",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass CudaNeighborList:\r\n    def __init__(self, N, MN, rc):\r\n        if not isinstance(N, numbers.Integral) or isinstance(N, bool) or N <= 0:\r\n            raise ValueError(\"N must be a positive integer\")\r\n        if not isinstance(MN, numbers.Integral) or isinstance(MN, bool) or MN <= 0:\r\n            raise ValueError(\"MN must be a positive integer\")\r\n        if not isinstance(rc, numbers.Real) or not math.isfinite(rc) or rc <= 0:\r\n            raise ValueError(\"rc must be a positive finite number\")\r\n\r\n        self.N = int(N)\r\n        self.rc = float(rc)\r\n        self._allocate(int(MN))\r\n    def _search_once(self, state, box):\r\n        \"\"\"Run one CUDA search with the currently allocated capacity.\"\"\"\r\n        h = box.transpose(1, 0).reshape(-1).tolist()\r\n        self.nb.update_box(h, state.pbc[0], state.pbc[1], state.pbc[2])\r\n        x = state.r[:, 0].astype(cp.float32)\r\n        y = state.r[:, 1].astype(cp.float32)\r\n        z = state.r[:, 2].astype(cp.float32)\r\n        # libneighbor launches on CUDA's legacy default stream. It must wait\r\n        # for coordinates produced on a nonblocking CuPy stream.\r\n        stream = cp.cuda.get_current_stream()\r\n        if stream.ptr != cp.cuda.Stream.null.ptr:\r\n            cp.cuda.Stream.null.wait_event(stream.record())\r\n        return self.nb.find_neighbor(\r\n            x.data.ptr,\r\n            y.data.ptr,\r\n            z.data.ptr,\r\n        )\r\n    def find_neighbor(self, state):\r\n        \"\"\"Return complete directed neighbor pairs and periodic offsets.\"\"\"\r\n        box = self._validate_state(state)\r\n        while True:\r\n            n_neigh = self._search_once(state, box)\r\n            required = int(self.nb.required_capacity)\r\n            if required <= self.capacity:\r\n                break\r\n            self._allocate(required)\r\n\r\n        self.nb.convert_ijS(\r\n            self.idx_i.data.ptr, self.idx_j.data.ptr, self.offset.data.ptr\r\n        )\r\n        # The conversion kernel also runs on the legacy default stream. Make\r\n        # its borrowed output buffers visible before the caller consumes them.\r\n        stream = cp.cuda.get_current_stream()\r\n        if stream.ptr != cp.cuda.Stream.null.ptr:\r\n            stream.wait_event(cp.cuda.Stream.null.record())\r\n        self.n_neigh = n_neigh\r\n        return (\r\n            self.idx_i[:n_neigh],\r\n            self.idx_j[:n_neigh],\r\n            self.offset[: 3 * n_neigh].reshape(-1, 3),\r\n        )\r\n\n"
+    },
+    {
+      "name": "pydyn/forces/evaluator.py",
+      "sha256": "9b292f64ddc467f4ad93e11cbfa92f00ae77c3e2f1218c7278009533d23cbfd2",
+      "original_source_sha256": "c4c087b8e931c3a5314fed0ad36f2c7fa647b6877af2e6833b5a6ca7a4630e78",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass ForceRegistry:\r\n    @classmethod\r\n    def from_model(cls, model: ForceProviderLike) -> \"ForceRegistry\":\r\n        \"\"\"Create a registry that routes all properties to one model.\"\"\"\r\n        return cls(default_model=model)\r\n\nclass ForceEvaluator:\r\n    @classmethod\r\n    def from_model(cls, model: ForceProviderLike) -> \"ForceEvaluator\":\r\n        \"\"\"Create an evaluator that routes all properties to one model.\"\"\"\r\n        return cls(ForceRegistry.from_model(model))\r\n\n"
+    },
+    {
+      "name": "pydyn/observers.py",
+      "sha256": "9886216d567ff79710e9a91a77dec9b9cf8c85807b86080758c2ee11f65279d1",
+      "original_source_sha256": "78f7f4814e6a9b4c50ec74a4df6e8b771878a5f5034892272ab9d56a6ba13c7e",
+      "source_utf8": "# AST-only public contract fixture; never import or execute.\nclass Observer:\r\n    def __init__(self, interval=1):\r\n        if isinstance(interval, bool) or not isinstance(interval, Integral):\r\n            raise TypeError(\"interval must be a positive integer\")\r\n        if interval <= 0:\r\n            raise ValueError(\"interval must be a positive integer\")\r\n        self.interval = int(interval)\r\n        self.initialized = False\r\n    def __call__(self, sim):\r\n        if sim.step_count % self.interval != 0:\r\n            return\r\n        self.observe(sim)\r\n\nclass TableLogger(Observer):\r\n    def __init__(self, filename, quantities, interval=1, include_time=True):\r\n        super().__init__(interval)\r\n        self.filename = filename\r\n        self.quantities = quantities\r\n        self.include_time = include_time\r\n        self.file = None\r\n    def initialize(self):\r\n        \"\"\"Open the log file and write the header.\"\"\"\r\n        super().initialize()\r\n        try:\r\n            _ensure_parent(self.filename)\r\n            self.file = open(self.filename, \"w\")\r\n            columns = [\"Step\", *self.quantities.keys()]\r\n            if self.include_time:\r\n                columns.insert(0, \"Time\")\r\n            self.file.write(\"\\t\".join(columns) + \"\\n\")\r\n        except IOError as e:\r\n            raise IOError(f\"Failed to open log file {self.filename}: {e}\")\r\n    def observe(self, sim):\r\n        \"\"\"Write current scalar values to the log file.\"\"\"\r\n        if self.file is None:\r\n            return\r\n        try:\r\n            row = _quantity_row(self.quantities, sim)\r\n            values = [str(sim.step_count), *(_format_scalar(v) for v in row.values())]\r\n            if self.include_time:\r\n                values.insert(0, datetime.now().strftime(\"%H:%M:%S\"))\r\n            self.file.write(\"\\t\".join(values) + \"\\n\")\r\n            self.file.flush()\r\n        except IOError as e:\r\n            raise IOError(f\"Failed to write to log file: {e}\")\r\n\nclass TrajectoryWriter(Observer):\r\n    def __init__(self, filename, interval=10, file_format=\"extxyz\", append=False):\r\n        super().__init__(interval)\r\n        self.filename = filename\r\n        self.file_format = file_format\r\n        self.append = append\r\n        self._has_written = False\r\n    def observe(self, sim):\r\n        atoms = sim.state.to_atoms()\r\n        _ensure_parent(self.filename)\r\n        append = self.append or self._has_written\r\n        write(self.filename, atoms, format=self.file_format, append=append)\r\n        self._has_written = True\r\n\n"
+    }
+  ],
+  "contracts": {
+    "pydyn/dynamics/driver.py::Simulation.__init__": {
+      "source_sha256": "55df138ab970bf0f9ee33ded7451a24fbcf50dac1d94e6cc38298b6730a8ef83",
+      "line": 52,
+      "end_line": 101,
+      "excerpt_sha256": "57720f3bb9398ad14cd2d51dc53acf3319163c4f448af9b273268c13f68ca81e"
+    },
+    "pydyn/dynamics/driver.py::Simulation.attach": {
+      "source_sha256": "55df138ab970bf0f9ee33ded7451a24fbcf50dac1d94e6cc38298b6730a8ef83",
+      "line": 103,
+      "end_line": 118,
+      "excerpt_sha256": "8aa015cf5d8867aa368e57fe84d910f945013cf1eec27ce123bfbad4c74f177d"
+    },
+    "pydyn/dynamics/driver.py::Simulation._initialize": {
+      "source_sha256": "55df138ab970bf0f9ee33ded7451a24fbcf50dac1d94e6cc38298b6730a8ef83",
+      "line": 167,
+      "end_line": 228,
+      "excerpt_sha256": "3bafeda0aaa59a94d004ee2648a5b12889f73dce67d3ec219df204b2c7eee7e9"
+    },
+    "pydyn/dynamics/driver.py::Simulation.prepare": {
+      "source_sha256": "55df138ab970bf0f9ee33ded7451a24fbcf50dac1d94e6cc38298b6730a8ef83",
+      "line": 250,
+      "end_line": 317,
+      "excerpt_sha256": "52d786d890ee3df27729155327a15ff52a5b84bf1b5e3ba31ffdb445df1791ef"
+    },
+    "pydyn/dynamics/driver.py::Simulation._step": {
+      "source_sha256": "55df138ab970bf0f9ee33ded7451a24fbcf50dac1d94e6cc38298b6730a8ef83",
+      "line": 335,
+      "end_line": 382,
+      "excerpt_sha256": "0b723620686205df8708310923a494e2b1cdc695b29909e041f29c17561cd330"
+    },
+    "pydyn/dynamics/driver.py::Simulation.run": {
+      "source_sha256": "55df138ab970bf0f9ee33ded7451a24fbcf50dac1d94e6cc38298b6730a8ef83",
+      "line": 407,
+      "end_line": 448,
+      "excerpt_sha256": "4c44726995ed5cb0deb8edfae5ea1e961bbcfb462b7fc55a55ba32d58eb393f7"
+    },
+    "pydyn/dynamics/driver.py::Simulation.finalize": {
+      "source_sha256": "55df138ab970bf0f9ee33ded7451a24fbcf50dac1d94e6cc38298b6730a8ef83",
+      "line": 450,
+      "end_line": 464,
+      "excerpt_sha256": "6a40fc68e7d8111481017c8aef05ad14653f6bf989bab3c983adb1370c79476e"
+    },
+    "pydyn/dynamics/ensembles/nvt.py::NVTBerendsen.__init__": {
+      "source_sha256": "0c1e87f43d1e48eac584728eb769c121cf04b329db78c67d28181a9a02101571",
+      "line": 42,
+      "end_line": 49,
+      "excerpt_sha256": "990b8fe0d0b3cf90b40d914fa052fc2c7294aa3166a1da5e27c2ad1316c81486"
+    },
+    "pydyn/dynamics/ensembles/nvt.py::NVTNoseHoover.__init__": {
+      "source_sha256": "0c1e87f43d1e48eac584728eb769c121cf04b329db78c67d28181a9a02101571",
+      "line": 56,
+      "end_line": 65,
+      "excerpt_sha256": "2c7473569a4bcc68b8e4d3fc5bc1e86eeaca7c48383f28a96469659337110199"
+    },
+    "pydyn/dynamics/ensembles/npt.py::MTTKNPT.__init__": {
+      "source_sha256": "474711cc7f4ebd1eea22ee1bc4d2a488563d3aedbf02520a5bfe63b891a36156",
+      "line": 237,
+      "end_line": 252,
+      "excerpt_sha256": "becdfa1a85201a39787c53fd5cc566b6fa00024e2b800c45a3a49cfe1736264c"
+    },
+    "pydyn/context.py::TargetStress.__init__": {
+      "source_sha256": "e12c4d79d3309cc99c38ae254c2a0419d3bbc27606829bfda9ba2909e9acb9a9",
+      "line": 77,
+      "end_line": 87,
+      "excerpt_sha256": "38d9e90b6b7f8815e8f07c4acc3f1cf735df7ee6bfba96e014d38521ec0f2279"
+    },
+    "pydyn/context.py::ResolvedSimulationContext.get_temperature": {
+      "source_sha256": "e12c4d79d3309cc99c38ae254c2a0419d3bbc27606829bfda9ba2909e9acb9a9",
+      "line": 159,
+      "end_line": 161,
+      "excerpt_sha256": "9447e86507a1ca055d9594f965f19ebafeafec72d3dd77a4518d9bc943d4de6a"
+    },
+    "pydyn/context.py::SimulationContext.__init__": {
+      "source_sha256": "e12c4d79d3309cc99c38ae254c2a0419d3bbc27606829bfda9ba2909e9acb9a9",
+      "line": 171,
+      "end_line": 184,
+      "excerpt_sha256": "b4febdd8852c256056806edcdf46408779f0634f7068d8056fabeee1af98ce57"
+    },
+    "pydyn/context.py::SimulationContext.resolve": {
+      "source_sha256": "e12c4d79d3309cc99c38ae254c2a0419d3bbc27606829bfda9ba2909e9acb9a9",
+      "line": 186,
+      "end_line": 202,
+      "excerpt_sha256": "afd206082bc75859f653582adf0a65d969a303b549df3a9d08ce2c580e5da043"
+    },
+    "pydyn/context.py::SimulationContext.get_temperature": {
+      "source_sha256": "e12c4d79d3309cc99c38ae254c2a0419d3bbc27606829bfda9ba2909e9acb9a9",
+      "line": 204,
+      "end_line": 206,
+      "excerpt_sha256": "9447e86507a1ca055d9594f965f19ebafeafec72d3dd77a4518d9bc943d4de6a"
+    },
+    "pydyn/state.py::State.__init__": {
+      "source_sha256": "679426f35dacc8a9ac3aafde901d7b239749204c4b456f6de7cc510d744197d0",
+      "line": 40,
+      "end_line": 73,
+      "excerpt_sha256": "c1f3dfdb7dfdd145419aefe9f6bb2849ae1ca6fa6addd9c21c8ef68642745fdb"
+    },
+    "pydyn/state.py::State.from_atoms": {
+      "source_sha256": "679426f35dacc8a9ac3aafde901d7b239749204c4b456f6de7cc510d744197d0",
+      "line": 209,
+      "end_line": 228,
+      "excerpt_sha256": "f04526ea444e9176e5b064376a38541db79dc1086e58146fb19f59dc99e5ee33"
+    },
+    "pydyn/forces/ml.py::TorchMLForceModel.model_dtype": {
+      "source_sha256": "31104a594e46a4d7652b764bda950383be837b861442d618296641a50aeea52c",
+      "line": 86,
+      "end_line": 86,
+      "excerpt_sha256": "808803653155c9a82ee58f4cf2c35d4c4ab622dce6764553837f37ac33f7d789"
+    },
+    "pydyn/forces/ml.py::TorchMLForceModel.result_dtype": {
+      "source_sha256": "31104a594e46a4d7652b764bda950383be837b861442d618296641a50aeea52c",
+      "line": 87,
+      "end_line": 87,
+      "excerpt_sha256": "8a52c450059d9ac76aa573be86919ae52620ae83e81fe237d89356d6cfdcd4ff"
+    },
+    "pydyn/forces/ml.py::TorchMLForceModel.cupy_to_model_tensor": {
+      "source_sha256": "31104a594e46a4d7652b764bda950383be837b861442d618296641a50aeea52c",
+      "line": 167,
+      "end_line": 170,
+      "excerpt_sha256": "e94f5a650b47550c1c700c3971b2ebbc4ad355f5a008a8f3847324476a0fc71d"
+    },
+    "pydyn/forces/ml.py::TorchMLForceModel.load_torchscript_model": {
+      "source_sha256": "31104a594e46a4d7652b764bda950383be837b861442d618296641a50aeea52c",
+      "line": 187,
+      "end_line": 192,
+      "excerpt_sha256": "fb5fdfeeeff105ebd7e3688e806c5caf90903f5c5f09ed7e8189086f8e601a58"
+    },
+    "pydyn/forces/base.py::ForceModel.__init__": {
+      "source_sha256": "28c879e7e73882402eb70be2be2a4fc41faf600a6b165c1a02d1fbcbc8c2c601",
+      "line": 39,
+      "end_line": 44,
+      "excerpt_sha256": "ab3f32ea7d17a9878c192b24cfdf88cc8531fbb0447bdb11576b7a461ef780c8"
+    },
+    "pydyn/forces/hotpp_force.py::MiaoForceModel.neighbor_request": {
+      "source_sha256": "c39178cf8f221e397226c39284808e6914b52dadbc54924373b9fd0186ec5243",
+      "line": 22,
+      "end_line": 24,
+      "excerpt_sha256": "83ad4d22f127a81eecca483d8550b934475a5ca8be6af04cf3a7954df24442c5"
+    },
+    "pydyn/forces/hotpp_force.py::MiaoForceModel.__init__": {
+      "source_sha256": "c39178cf8f221e397226c39284808e6914b52dadbc54924373b9fd0186ec5243",
+      "line": 35,
+      "end_line": 53,
+      "excerpt_sha256": "a97b77916069a8d922fa52eab44aeaa89abdf302a9efa9c7bd449d207225f830"
+    },
+    "pydyn/forces/hotpp_force.py::MiaoForceModel.map_properties": {
+      "source_sha256": "c39178cf8f221e397226c39284808e6914b52dadbc54924373b9fd0186ec5243",
+      "line": 55,
+      "end_line": 63,
+      "excerpt_sha256": "b18b81a7c590f5590388d10f60eeb33fa6ae4fea45d97a6c810fb845b9539089"
+    },
+    "pydyn/forces/hotpp_force.py::MiaoForceModel.build_input": {
+      "source_sha256": "c39178cf8f221e397226c39284808e6914b52dadbc54924373b9fd0186ec5243",
+      "line": 74,
+      "end_line": 95,
+      "excerpt_sha256": "4874ce677f8517d83f43c9790e5043c005ea6c2b65d058aed29af621fbc7ccba"
+    },
+    "pydyn/forces/hotpp_force.py::MiaoForceModel.run_model": {
+      "source_sha256": "c39178cf8f221e397226c39284808e6914b52dadbc54924373b9fd0186ec5243",
+      "line": 97,
+      "end_line": 98,
+      "excerpt_sha256": "8d935112c62763f13117e164ffb7682e8887090d551b1a4595276f4126e040eb"
+    },
+    "pydyn/forces/hotpp_force.py::MiaoForceModel.update_results": {
+      "source_sha256": "c39178cf8f221e397226c39284808e6914b52dadbc54924373b9fd0186ec5243",
+      "line": 100,
+      "end_line": 119,
+      "excerpt_sha256": "9018a54afa52b30c89b1491fc1a8de3ea0986e83b2312a186bd18ccd3032dcdc"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.__init__": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 34,
+      "end_line": 55,
+      "excerpt_sha256": "7e968f02cb1bd3ec6a67df00d07a98cb739386838a6f55911cd91f881c356d8e"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.validate": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 57,
+      "end_line": 77,
+      "excerpt_sha256": "f4ddc84e1a6a89b4d8dfb18094fc90fce9e0ffce0efe4812c5348fa89d845bd2"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.neighbor_request": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 79,
+      "end_line": 82,
+      "excerpt_sha256": "24a4ea249344d448f5a24ac46f6695f1e9e7437a0d992077257c9dde21bcd02b"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.on_initialize": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 84,
+      "end_line": 102,
+      "excerpt_sha256": "fcfab3fc8b1d70f4798648fd64c6b10629d22494db7543320034d3f0482513f6"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.before_step": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 104,
+      "end_line": 113,
+      "excerpt_sha256": "1bb4aa84dbdc8a45416328d92b90fdc7d00d36a167a49099b7da79b44d312f28"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.geometry_changed": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 115,
+      "end_line": 121,
+      "excerpt_sha256": "49958499aa1025b17f4857a5f76deb03a649f0a47dc13c772cf74a5b0e09c610"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.after_step": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 123,
+      "end_line": 130,
+      "excerpt_sha256": "dcbb19c1f3270f9a4ffbc09928c55e46f19a3a8e965efb99181a26af8227219f"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.on_finalize": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 137,
+      "end_line": 138,
+      "excerpt_sha256": "3cffaa1d2bf5d0e6521c43b62ea1311fdd13f06482925a7fb097e85fb053de98"
+    },
+    "pydyn/sampling/integrations/pydyn.py::PyGASForceModel.compute": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 240,
+      "end_line": 252,
+      "excerpt_sha256": "470abc20e02d7a13c1f9b0ee44c8c069707cafb230df4ecf3a2daa5911d683df"
+    },
+    "pydyn/sampling/integrations/pydyn.py::BiasedForceEvaluator.__init__": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 258,
+      "end_line": 266,
+      "excerpt_sha256": "d1cdecbf74273b050cb56d4ee6f6030557a769c47e58ba5e074fae804353b8cd"
+    },
+    "pydyn/sampling/integrations/pydyn.py::BiasedForceEvaluator.validate_properties": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 268,
+      "end_line": 269,
+      "excerpt_sha256": "1ba2f6dc49f16d19edcd4bc05338120a45eddd89700a74d1a006c198b184fe17"
+    },
+    "pydyn/sampling/integrations/pydyn.py::BiasedForceEvaluator.invalidate": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 271,
+      "end_line": 273,
+      "excerpt_sha256": "b9969945a1ab97831ba3fbf4f0f76d26f8903d16515a60ec75315af97d2cfbce"
+    },
+    "pydyn/sampling/integrations/pydyn.py::BiasedForceEvaluator.begin_batch": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 275,
+      "end_line": 276,
+      "excerpt_sha256": "1f97b9108a7064f7cbff1bb77bcf6e0d551924aa5692e3e75bd7c529fa708bb0"
+    },
+    "pydyn/sampling/integrations/pydyn.py::BiasedForceEvaluator.end_batch": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 278,
+      "end_line": 279,
+      "excerpt_sha256": "8c851b7f87b24631a8d9c12d49e2d73857bd0e3612cbdf9803d2ac8e23f2fc63"
+    },
+    "pydyn/sampling/integrations/pydyn.py::BiasedForceEvaluator.compute": {
+      "source_sha256": "3b3a82087a8a02501076070f4d6ffb9471dfe4bb98130bbad0e2537d1aabed73",
+      "line": 281,
+      "end_line": 294,
+      "excerpt_sha256": "b5c003c88149f20fca0c281356a48728110a9de32cb010d1c828b427748f671c"
+    },
+    "pydyn/sampling/runtime.py::SamplingConfig.__post_init__": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 49,
+      "end_line": 65,
+      "excerpt_sha256": "93c5bbbb6f8e0c048c5ab5be04b8f7b8147738c8ff04df236fc1c10945f8d78d"
+    },
+    "pydyn/sampling/runtime.py::SamplingConfig.route": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 67,
+      "end_line": 69,
+      "excerpt_sha256": "ef54ac6700a024c6942f08f92567af9e0585a60f46e58aa8c58f4164c82b7b4c"
+    },
+    "pydyn/sampling/runtime.py::BiasRuntime.__init__": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 124,
+      "end_line": 187,
+      "excerpt_sha256": "8a4a1706806187909f24953af2fea9adbcc97b29213c756281d4360ccadb19bf"
+    },
+    "pydyn/sampling/runtime.py::BiasRuntime._deposits": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 189,
+      "end_line": 191,
+      "excerpt_sha256": "72a58fa8c9a1611c5a47b5e6b293cf2282ad5d8d743da445ea340ecd4c9a96e8"
+    },
+    "pydyn/sampling/runtime.py::BiasRuntime.evaluate": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 225,
+      "end_line": 227,
+      "excerpt_sha256": "b9c2f7dd79597b1d0078980c5353e03a07faf4e6dee8e38689ab5241bfd17abc"
+    },
+    "pydyn/sampling/runtime.py::BiasRuntime.evaluate_masked": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 299,
+      "end_line": 301,
+      "excerpt_sha256": "290f0c6f5082cd4886e3ac8b330c3e02446b7dee84b401cdadb162e42336ac7a"
+    },
+    "pydyn/sampling/runtime.py::BiasRuntime.commit": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 307,
+      "end_line": 328,
+      "excerpt_sha256": "f09b6cc34295cc05f57056329b8c2a4b7f106e4747f9ae615c57664ab9e21a09"
+    },
+    "pydyn/sampling/runtime.py::BiasRuntime.state_dict": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 330,
+      "end_line": 334,
+      "excerpt_sha256": "cd8a9a7743f31eb8ee9416da44fc44289bc4870ae5bb341b87dd77698a0dc80f"
+    },
+    "pydyn/sampling/runtime.py::BiasRuntime.load_state_dict": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 336,
+      "end_line": 353,
+      "excerpt_sha256": "d8ad8b401f4943e4b8d1fb94bb899a8994297a91297f5497ad95e1ced11d0dfa"
+    },
+    "pydyn/sampling/runtime.py::BiasRuntime._write_logs": {
+      "source_sha256": "296ccd301de22e31a4b53598d37507918ba93d015658cb69b02410b5c58d5825",
+      "line": 366,
+      "end_line": 395,
+      "excerpt_sha256": "d05877ffe3112dc551fd88ccb359e357307c3e8d20d6704c1e0364706c3f5a6d"
+    },
+    "pydyn/dynamics/ensembles/verlet.py::VelocityVerlet.__init__": {
+      "source_sha256": "defe7d564bd0e9bc28c64be7a38c5adb3a7ccf6409527aadb05914c4f13ad87a",
+      "line": 11,
+      "end_line": 17,
+      "excerpt_sha256": "06577704c3b13d6b0a11e888ab0cdf0bc759f4015823f5d66f53e1859a7156d5"
+    },
+    "pydyn/dynamics/ensembles/base.py::Ensemble.step": {
+      "source_sha256": "795edce6468b5c8c3471128258e1df5ba1445f94b73eeafc505fa7581b776e3e",
+      "line": 59,
+      "end_line": 86,
+      "excerpt_sha256": "fc11cb76b182d00f9dd0f1bb77879829b25842fbfa59f0abcd7bec2c407c0982"
+    },
+    "pydyn/dynamics/initializer.py::MaxwellBoltzmannDistribution.__init__": {
+      "source_sha256": "ccdf5dba59865f26f8c88e8f13ba306aee09abd9dbbc07931823612dce1aac82",
+      "line": 57,
+      "end_line": 66,
+      "excerpt_sha256": "007b0df29cefa188fbb0b3eddb4ec4c01ee788a4d8737f5d2a81a223622964b5"
+    },
+    "pydyn/dynamics/initializer.py::MaxwellBoltzmannDistribution.initialize": {
+      "source_sha256": "ccdf5dba59865f26f8c88e8f13ba306aee09abd9dbbc07931823612dce1aac82",
+      "line": 68,
+      "end_line": 99,
+      "excerpt_sha256": "9f4eb5823e2f376112f1ce03f15bccc257f3fdc3bc08a6c93bcd31a9f59b49fa"
+    },
+    "pydyn/neighbors/cuda_neighbor.py::CudaNeighborList.__init__": {
+      "source_sha256": "93f0e6532cbcaa1308b91d277577d4cca10a513a65947c190a386553b87866ee",
+      "line": 86,
+      "end_line": 96,
+      "excerpt_sha256": "4d77c2972c8f11210c50627c627006253598962abcebab7cb51bd3284191d6e2"
+    },
+    "pydyn/neighbors/cuda_neighbor.py::CudaNeighborList._search_once": {
+      "source_sha256": "93f0e6532cbcaa1308b91d277577d4cca10a513a65947c190a386553b87866ee",
+      "line": 166,
+      "end_line": 182,
+      "excerpt_sha256": "b04493eb1f5db0ca4c4216a49308a7f6be7edc337afa8b471149a2211bf8b90b"
+    },
+    "pydyn/neighbors/cuda_neighbor.py::CudaNeighborList.find_neighbor": {
+      "source_sha256": "93f0e6532cbcaa1308b91d277577d4cca10a513a65947c190a386553b87866ee",
+      "line": 184,
+      "end_line": 207,
+      "excerpt_sha256": "255c78913827ea8a0b6dc2d1a954dde1914a1987b63704e18036ee7f70ec511a"
+    },
+    "pydyn/forces/evaluator.py::ForceRegistry.from_model": {
+      "source_sha256": "c4c087b8e931c3a5314fed0ad36f2c7fa647b6877af2e6833b5a6ca7a4630e78",
+      "line": 36,
+      "end_line": 39,
+      "excerpt_sha256": "7ceec9378f9280f2114baad01e2f9d912541ed2ae9235a52985ade6f7fdbf555"
+    },
+    "pydyn/forces/evaluator.py::ForceEvaluator.from_model": {
+      "source_sha256": "c4c087b8e931c3a5314fed0ad36f2c7fa647b6877af2e6833b5a6ca7a4630e78",
+      "line": 120,
+      "end_line": 123,
+      "excerpt_sha256": "43077a143fd616b4050b333a8f653b61394b829ec0293464221747fd7ab9c697"
+    },
+    "pydyn/observers.py::Observer.__init__": {
+      "source_sha256": "78f7f4814e6a9b4c50ec74a4df6e8b771878a5f5034892272ab9d56a6ba13c7e",
+      "line": 37,
+      "end_line": 43,
+      "excerpt_sha256": "949597b8f077c1408d85ef29be8a30e9a5dd42ba6e45121d4f971ed774b5d070"
+    },
+    "pydyn/observers.py::Observer.__call__": {
+      "source_sha256": "78f7f4814e6a9b4c50ec74a4df6e8b771878a5f5034892272ab9d56a6ba13c7e",
+      "line": 45,
+      "end_line": 48,
+      "excerpt_sha256": "d787b567512b2b006c042730b2b9e9d83fc325c953f234485e35b68327cfbe44"
+    },
+    "pydyn/observers.py::TableLogger.__init__": {
+      "source_sha256": "78f7f4814e6a9b4c50ec74a4df6e8b771878a5f5034892272ab9d56a6ba13c7e",
+      "line": 114,
+      "end_line": 119,
+      "excerpt_sha256": "dc8c4de3506bec1e15e96ddcc7b7b3ef26bc10b537ac9187607b41096d4c298b"
+    },
+    "pydyn/observers.py::TableLogger.initialize": {
+      "source_sha256": "78f7f4814e6a9b4c50ec74a4df6e8b771878a5f5034892272ab9d56a6ba13c7e",
+      "line": 121,
+      "end_line": 132,
+      "excerpt_sha256": "3e96ed7552c978e67c9475e4bcd7659d096bc9bfd206a5867bb9b6799bc1be17"
+    },
+    "pydyn/observers.py::TableLogger.observe": {
+      "source_sha256": "78f7f4814e6a9b4c50ec74a4df6e8b771878a5f5034892272ab9d56a6ba13c7e",
+      "line": 134,
+      "end_line": 146,
+      "excerpt_sha256": "1311e475c9aff857eb9caf2f1bc19dd64a1591ba8d8ec592e6ebf458921a923f"
+    },
+    "pydyn/observers.py::TrajectoryWriter.__init__": {
+      "source_sha256": "78f7f4814e6a9b4c50ec74a4df6e8b771878a5f5034892272ab9d56a6ba13c7e",
+      "line": 236,
+      "end_line": 241,
+      "excerpt_sha256": "499a7db4a72d5cf4c932879ced015d13c1bb554a004c3c954f371823e1b9a6d5"
+    },
+    "pydyn/observers.py::TrajectoryWriter.observe": {
+      "source_sha256": "78f7f4814e6a9b4c50ec74a4df6e8b771878a5f5034892272ab9d56a6ba13c7e",
+      "line": 243,
+      "end_line": 248,
+      "excerpt_sha256": "d290dc73072d2fdf6d0853b10e8693ecc51bc43ccce4fc3e5edc1a78eab2ab69"
+    }
+  }
+}

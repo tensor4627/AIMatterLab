@@ -43,6 +43,8 @@ Ask only about genuinely unresolved or conflicting scientific intent that change
 
 Start from one natural-language goal and produce a mostly complete proposal, not a questionnaire. Put the few system/task-dependent basic parameters and unresolved decisions first. Group secondary settings by purpose below them and fold large groups into secondary menus. Show a concise summary of consequential choices and their basis so a novice can confirm and adjust them; do not make the user audit every technical parameter individually. Technical details remain inspectable, with source/proposed/derived status, without occupying the primary review path.
 
+When public interface evidence is sufficient for the authorized authoring stage, save the reviewable driver and record unexecuted dtype/ABI and target-runtime checks as execution-stage `not_run`; do not treat a test that has not run as another missing constructor contract. A genuinely missing target API is a concrete software-tool gap to report, not permission to guess scientific conditions or bypass pyGAS.
+
 Save real scripts/graphs/configs and show readable current parameters and source files in the same workflow. Changes require actual file updates with read-back SHA protection, followed by review of that exact revision. A missing future output belongs to its build stage rather than a request that the user provide it manually. Keep optional existing model/structure/data inputs optional instead of rebuilding what the user supplied.
 
 ## Close the requested stage

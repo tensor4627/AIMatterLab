@@ -7,7 +7,7 @@ METHODS={
 'pydyn/dynamics/driver.py':{'Simulation':('__init__','run','prepare','attach','finalize','_initialize','_step')},
 'pydyn/dynamics/ensembles/nvt.py':{'NVTBerendsen':('__init__',),'NVTNoseHoover':('__init__',)},
 'pydyn/dynamics/ensembles/npt.py':{'MTTKNPT':('__init__',)},
-'pydyn/context.py':{'SimulationContext':('__init__',),'TargetStress':('__init__',)},
+'pydyn/context.py':{'SimulationContext':('__init__','resolve','get_temperature'),'ResolvedSimulationContext':('get_temperature',),'TargetStress':('__init__',)},
 'pydyn/state.py':{'State':('__init__','from_atoms')},
 'pydyn/forces/ml.py':{'TorchMLForceModel':('cupy_to_model_tensor',)},
 'pydyn/forces/base.py':{'ForceModel':('__init__',)},
@@ -15,10 +15,17 @@ METHODS={
 'pydyn/sampling/integrations/pydyn.py':{'PyGASForceModel':('__init__','validate','neighbor_request','on_initialize','before_step','geometry_changed','after_step','on_finalize','compute'),'BiasedForceEvaluator':('__init__','validate_properties','invalidate','begin_batch','end_batch','compute')},
 'pydyn/sampling/runtime.py':{'SamplingConfig':('__post_init__','route'),'BiasRuntime':('__init__','evaluate','evaluate_masked','commit','state_dict','load_state_dict','_deposits','_write_logs')},
 'pydyn/sampling/__init__.py':{},
+'pydyn/dynamics/ensembles/verlet.py':{'VelocityVerlet':('__init__',)},
+'pydyn/dynamics/ensembles/base.py':{'Ensemble':('step',)},
+'pydyn/dynamics/initializer.py':{'MaxwellBoltzmannDistribution':('__init__','initialize')},
+'pydyn/neighbors/cuda_neighbor.py':{'CudaNeighborList':('__init__','find_neighbor')},
+'pydyn/forces/evaluator.py':{'ForceEvaluator':('from_model',)},
+'pydyn/observers.py':{'Observer':('__init__','__call__'),'TableLogger':('__init__','initialize','observe'),'TrajectoryWriter':('__init__','observe')},
+
 }
 # Source-only integration contracts, not advice to call internal lifecycle methods.
 STATIC_CLASS_ATTRIBUTES={'pydyn/forces/ml.py':{'TorchMLForceModel':('model_dtype','result_dtype')}}
-INTEGRATION_METHODS={'Simulation._initialize','Simulation._step','BiasRuntime._deposits','BiasRuntime._write_logs','TorchMLForceModel.cupy_to_model_tensor'}
+INTEGRATION_METHODS={'Simulation._initialize','Simulation._step','BiasRuntime._deposits','BiasRuntime._write_logs','TorchMLForceModel.cupy_to_model_tensor','Ensemble.step','CudaNeighborList.find_neighbor'}
 def selection_size(item):
  description={key:item[key]for key in ('expression','value_present','evaluation')}if item.get('kind')=='static_class_expression'else item.get('fields',[])
  return len(item['code'].encode())+len(json.dumps(description,ensure_ascii=False,separators=(',',':')).encode())
