@@ -4,7 +4,7 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
-| 0.18.9 开发中（dev.10 源码修订，未打包） | 复核状态读取与执行门槛分离；同流程先绑定路线再查询接口；共享只读 Git 身份解析支持 Windows 管理的 WSL worktree；远程任务包携带对应依赖 | Node 1793 passed / 2 skipped；worker 432 passed；TypeScript/Vite 及公开主 skill 校验 passed；首轮 worker 与 pnpm 尝试失败保留 | 环境摘要路径投影仍待完成；新便携包、模型续聊、真实科学回归、完整按钮及最终布局验收 not_run；A 按用户选择等待指定模型额度；[阶段记录](docs/v0.18.9.md) |
+| 0.18.9 开发中（内部包 dev.10，未正式发布） | 复核状态读取独立；同流程先绑定路线；环境摘要隐藏三类源码路径并保留身份；DeepSeek/兼容 API 暴露目标接口工具；Git 双流真实字节预算、WSL worktree 身份及远程依赖补全 | Node 1808 passed / 2 skipped；worker 457、TypeScript/Vite、主 skill passed；A 新源码 15 路/27 进程/642 文件 passed；1019 程序文件及 runtime/skill 资源与包逐字节核对 passed | 新包原生、模型续聊、目标接口实际调用、完整按钮与最终布局验收 not_run；原失败保留，短例不证明物理收敛；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.9，未正式发布） | 目标环境有界 API/来源 attestation、严格图契约、工作区迟到响应、复核刷新状态及面板逐像素键盘调整；公开主 skill 路由补充 | TypeScript passed；Node1771 passed/2skip，worker416；完整前端164，新增React17/恢复7，composer73/reorder60 passed；A独立源码15路27进程642文件 passed | Vite/便携包1018程序文件及9skill28文件核对passed；新包原生/provider/API实际调用 not_run，历史B路线不移用；无最终菜单重排；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（历史内部包 dev.8，未正式发布） | 只读工具可恢复诊断、公开源码有界 API/默认字段、受授权 .out 导入、五字号编辑缓冲、二级工作台 PNG 诊断；不改权限或自动重发 | TypeScript passed；Node1752 passed/2skip，前端完整164及同步组件7 passed；worker381 passed；Vite/独立便携包及1016程序文件、9个公开skill（28文件）核对passed | 包交审时 dev.8 原生、图像视觉审阅、provider及科学15路 not_run；无最终菜单重排；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（历史内部包 dev.7，未正式发布） | 启动读取门控、会话草稿及计算连接恢复；未部署草稿独立来源与旧草稿一次明确关联，拒绝服务替换或未知作业重绑 | Node1744 passed/2skip、前端164/164、定向256及A独立51 passed；包1015文件/28skill核对；原生明确关联及实际便携冷启自动恢复同流程/项目/WSL/Codex，参数/策略不变；A新15路27进程有界科学回归 passed | B原生科学路线、全部控件和最终视觉未完成；保留历史失败，无频次菜单重排；[开发记录](docs/v0.18.9.md) |

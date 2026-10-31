@@ -94,7 +94,7 @@ class Tests(unittest.TestCase):
  def test_legacy_null_git_guide_remains_observed_but_new_api_refuses(self):
   fixture_module=load('synthetic_environment_api_tests',ROOT/'worker/tests/test_environment_api.py');f=fixture_module.Tests('test_authoring_only_empty_job_grant_read_passes_and_does_not_grant');f.setUp();self.addCleanup(f.doCleanups);f.probe['repositories']['pydyn'].update(commit=None,dirty=None,status='not_run');f.record();guide=runtime_guides.RuntimeGuides(f.service.root/'runtime-guides').read(f.env,'pydyn.sampling');self.assertEqual(guide['status'],'observed');f.error('source_git_observation_missing',f.read)
 
-if __name__=='__main__':unittest.main()
+
 
 class NativeIdentityTests(unittest.TestCase):
  def test_native_read_keeps_ordinary_configuration_semantics_and_no_git_writes(self):
