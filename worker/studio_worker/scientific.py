@@ -7,6 +7,10 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
+if __package__:
+    from .source_git_identity import git_identity, SourceGitError
+else:
+    from source_git_identity import git_identity, SourceGitError
 
 
 def probe_modules(engine):
@@ -78,17 +82,10 @@ def probe(payload):
         item = {"path": path, "commit": None, "dirty": None, "status": "not_run"}
         report["repositories"][name] = item
         try:
-            result = subprocess.run(["git", "--no-optional-locks", "-C", path, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=8)
-            if result.returncode:
-                item["reason"] = "Git metadata unavailable for registered SDK root"
-                continue
-            item["commit"] = result.stdout.strip()
-            status = subprocess.run(["git", "--no-optional-locks", "-C", path, "status", "--porcelain"], capture_output=True, text=True, timeout=8)
-            item.update(status="passed" if status.returncode == 0 else "unknown", dirty=bool(status.stdout.strip()) if status.returncode == 0 else None)
-        except FileNotFoundError:
-            item.update(status="blocked", reason="Git executable unavailable; SDK origins are recorded separately")
-        except subprocess.TimeoutExpired:
-            item.update(status="unknown", reason="Bounded Git metadata probe timed out")
+            identity = git_identity(path)
+            item.update(commit=identity['commit'],dirty=identity['dirty'],status='passed')
+        except (SourceGitError,OSError,ValueError) as error:
+            item.update(status=getattr(error,'status','not_run'),reason='Git source identity unavailable; explicit source metadata observation required')
     for item in report["modules"].values():
         source = item.get("file")
         if source and Path(source).is_file():

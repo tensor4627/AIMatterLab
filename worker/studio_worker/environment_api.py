@@ -2,6 +2,7 @@
 import ast,copy,hashlib,json,re,subprocess
 from pathlib import Path
 from .runtime_guides import RuntimeGuides,fingerprint,sampling_provenance
+from .source_git_identity import git_identity as source_git_identity,SourceGitError
 METHODS={
 'pydyn/dynamics/driver.py':{'Simulation':('__init__','run','prepare','attach','finalize')},
 'pydyn/dynamics/ensembles/nvt.py':{'NVTBerendsen':('__init__',),'NVTNoseHoover':('__init__',)},
@@ -30,13 +31,9 @@ def read_source(root,name):
  if len(raw)>262144 or (before.st_ino,before.st_size,before.st_mtime_ns)!=(after.st_ino,after.st_size,after.st_mtime_ns):fail('source_changed','Public API source changed during read')
  return path,raw
 def git_identity(root):
- values=[]
- for tail in (['rev-parse','HEAD'],['status','--porcelain']):
-  result=subprocess.run(['git','--no-optional-locks','-C',str(root),*tail],capture_output=True,text=True,timeout=8)
-  if result.returncode or len(result.stdout.encode())>262144:fail('git_identity_unavailable','Current registered repository Git identity unavailable')
-  values.append(result.stdout.strip())
- if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}',values[0]):fail('git_identity_unavailable','Invalid repository commit identity')
- return {'commit':values[0],'dirty':bool(values[1]),'status_sha256':digest(values[1].encode())}
+ try:return source_git_identity(root)
+ except (SourceGitError,OSError,ValueError) as error:fail('git_identity_unavailable','Current registered repository Git identity unavailable; no source or receipt repair is automatic')
+
 def extract(name,code,file_sha):
  tree=ast.parse(code);items={};classes={}
  for node in tree.body:
@@ -79,7 +76,9 @@ def inspect(service,data):
  if facts.get('sampling_provenance',{}).get('status')!='observed' or receipt.get('api_provenance',{}).get('status')!='observed':fail('api_provenance_observation_missing','Strict API JSON attestation is missing or stale; ordinary module capability is separate. Review public provenance and obtain a normal explicit check when appropriate, not installation')
  provenance=sampling_provenance(env)
  if facts['sampling_provenance']!=provenance:fail('source_changed','Observed sampling JSON provenance changed')
- git=git_identity(root);observed_git=facts.get('repositories',{}).get('pydyn',{})
+ observed_git=facts.get('repositories',{}).get('pydyn',{})
+ if observed_git.get('status')!='passed' or not isinstance(observed_git.get('dirty'),bool) or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}',str(observed_git.get('commit',''))):fail('source_git_observation_missing','Observed selected repository Git identity is missing; obtain a separately authorized normal environment check after source access is supported, never fabricate or repair a receipt')
+ git=git_identity(root)
  if git['commit']!=observed_git.get('commit') or git['dirty']!=observed_git.get('dirty'):fail('git_identity_changed','Observed selected repository Git identity changed')
  observations={x['path']:x for x in facts.get('file_observations',[])};files=[];items={};total=sum(x["size"]for x in provenance["files"])
  for name in METHODS:

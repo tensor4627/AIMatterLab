@@ -86,20 +86,23 @@ class Probe(unittest.TestCase):
 
     def test_missing_timed_out_or_non_git_provenance_is_explicit(self):
         import subprocess
+        from studio_worker.source_git_identity import git_identity
         module = types.SimpleNamespace(__version__="fixture", __file__=None,
             version=types.SimpleNamespace(cuda=None), cuda=types.SimpleNamespace(is_available=lambda:False))
         cases = [(FileNotFoundError("git"), "blocked"), (subprocess.TimeoutExpired("git", 8), "unknown"), (types.SimpleNamespace(returncode=128,stdout="",stderr="not a checkout"), "not_run")]
-        for result, expected in cases:
-            with self.subTest(expected=expected), patch("studio_worker.scientific.subprocess.run") as git, patch("studio_worker.scientific.importlib.import_module",return_value=module), contextlib.redirect_stderr(io.StringIO()):
-                if isinstance(result,Exception):git.side_effect=result
-                else:git.return_value=result
-                report=probe({"engine":"gpumd.sampling","repositories":{"pygas":"/registered-sdk"}})
-                self.assertEqual(git.call_args.kwargs["timeout"],8)
-                item=report["repositories"]["pygas"]
-                self.assertEqual(item["status"],expected)
-                self.assertIsNone(item["commit"])
-                self.assertIsNone(item["dirty"])
-                self.assertEqual(report["modules"]["pygas"]["status"],"passed")
+        with tempfile.TemporaryDirectory(prefix='studio-probe-git-') as folder:
+            root=Path(folder);(root/'.git').mkdir()
+            for result, expected in cases:
+                with self.subTest(expected=expected), patch('studio_worker.source_git_identity.subprocess.run') as git, patch('studio_worker.scientific.git_identity',side_effect=lambda selected:git_identity(selected,run=git)), patch("studio_worker.scientific.importlib.import_module",return_value=module), contextlib.redirect_stderr(io.StringIO()):
+                    if isinstance(result,Exception):git.side_effect=result
+                    else:git.return_value=result
+                    report=probe({"engine":"gpumd.sampling","repositories":{"pygas":str(root)}})
+                    self.assertEqual(git.call_args.kwargs["timeout"],8)
+                    item=report["repositories"]["pygas"]
+                    self.assertEqual(item["status"],expected)
+                    self.assertIsNone(item["commit"])
+                    self.assertIsNone(item["dirty"])
+                    self.assertEqual(report["modules"]["pygas"]["status"],"passed")
 
     def test_native_loader_fails_before_sdk_import_on_missing_glibc(self):
         with tempfile.TemporaryDirectory() as folder:

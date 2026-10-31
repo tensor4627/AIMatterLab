@@ -8,8 +8,9 @@ const clone=value=>structuredClone(value),hash=value=>typeof value==='string'&&/
 const basename=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.-]{0,191}$/.test(value)&&!['.','..'].includes(value);
 function inputPath(value){return typeof value==='string'&&value.startsWith('/')&&!/[\\\r\n\0]/.test(value)&&!value.split('/').some(part=>part==='..'||part==='.');}
 function request(value,keys){if(!object(value)||Object.keys(value).sort().join(',')!==[...keys].sort().join(',')||typeof value.taskId!=='string'||!value.taskId||value.taskId.length>200)throw Error('Invalid typed local human review request');}
-function safeTask(task,verification=false){
+function safeTask(task,verification=false,statusOnly=false){
  if(task.workflowVersion!==2||task.parameters?.engine!=='pygas.build')throw Error('Local review supports only canonical pygas.build; GPUMD sampling/other engines need a separate closed input contract');
+ if(statusOnly){if(!task.authoring?.projectId||!task.authoring.environmentId||!inputPath(task.authoring.inputRoot))throw Error('The owned registered authoring context is required');return;}
  if((verification?['unknown']:['validating','submitting','unknown']).includes(task.execution?.phase)||['queued','running','unknown'].includes(task.execution?.status))throw Error('Reconcile the original active or unknown run; local review never replaces or resubmits it');
  if(!task.composition||task.composition.status!=='rendered'||task.composition.render_blocked||task.composition.missing_fields?.length||task.composition.reasons?.length)throw Error('Complete and save the actual canonical graph/source before human review');
  const missing=workflowMissing(task.steps||[],task.parameters||{},task.missingFields||[]);if(missing.length)throw Error('Resolve missing science first: '+missing.join(', '));
@@ -18,12 +19,12 @@ function safeTask(task,verification=false){
 /** Ignored candidate. Main must inject sender validation, native confirm, and a dedicated receipt store. No MCP method exists. */
 export function createTaskLocalReview({records,worker,current,assertHuman,confirm,receiptStore,uuid=randomUUID,now=Date.now}){
  const inspections=new Map(),epochs=new Map();
- function owner(taskId,verification=false){
+ function owner(taskId,verification=false,statusOnly=false){
   const task=records.read(taskId),selection=clone(current());
   if(!selection||selection.provider!==task.provider||selection.threadId!==task.threadId||selection.taskId!==task.id||selection.projectId!==task.authoring?.projectId||selection.environmentId!==task.authoring?.environmentId||selection.inputRoot!==task.authoring?.inputRoot||!Number.isSafeInteger(selection.serial)||records.deleted(task.provider,task.threadId)||records.bound(task.provider,task.threadId)?.id!==task.id)throw Error('Select this current conversation-owned workflow for local review');
-  safeTask(task,verification);if(!worker.connection)throw Error('Connect the selected worker before local review');return {task,selection,verification,connection:worker.connection,workerState:clone(worker.connection)};
+  safeTask(task,verification,statusOnly);if(!worker.connection)throw Error('Connect the selected worker before local review');return {task,selection,verification,statusOnly,connection:worker.connection,workerState:clone(worker.connection)};
  }
- function guard(start){const next=owner(start.task.id,start.verification);if(!next.connection||next.connection!==start.connection||!equal(next.workerState,start.workerState)||!equal(next.selection,start.selection)||!equal(next.task,start.task))throw Error('Local review owner, task revision, environment or worker changed');}
+ function guard(start){const next=owner(start.task.id,start.verification,start.statusOnly);if(!next.connection||next.connection!==start.connection||!equal(next.workerState,start.workerState)||!equal(next.selection,start.selection)||!equal(next.task,start.task))throw Error('Local review owner, task revision, environment or worker changed');}
  function human(event){if(assertHuman(event)!==true)throw Error('Only the actual trusted human interface can review local inputs');}
  async function call(start,target,args){guard(start);const value=await worker.request('POST',target,args);guard(start);return value;}
  async function file(start,filePath){
@@ -97,6 +98,6 @@ export function createTaskLocalReview({records,worker,current,assertHuman,confir
  }
  function beginOperation(taskId){const start=owner(taskId,true);return {taskId,selection:start.selection,connection:start.connection,workerState:start.workerState,fingerprint:reviewFingerprint(start.task),receiptId:start.task.localInputReview?.receiptId,deployment:clone({config:start.task.deployment?.config,revision:start.task.deployment?.revision})};}
  function assertOperation(token){const start=owner(token.taskId,true);if(start.connection!==token.connection||!equal(start.workerState,token.workerState)||!equal(start.selection,token.selection)||reviewFingerprint(start.task)!==token.fingerprint||start.task.localInputReview?.receiptId!==token.receiptId||!equal({config:start.task.deployment?.config,revision:start.task.deployment?.revision},token.deployment))throw Error('Local review operation owner/selection/input/deployment changed');}
- function status(value,event){request(value,['taskId']);human(event);const start=owner(value.taskId),valueAuthority=authority(start.task);guard(start);human(event);return {taskId:start.task.id,parameterRevision:start.task.parameterRevision,provider:start.task.provider,threadId:start.task.threadId,status:valueAuthority?.kind==='local-human'?'current':start.task.localInputReview?'stale':'not_run',authority:valueAuthority?.kind==='local-human'?valueAuthority:null,scope:'local',fileCheck:'Re-read at prepare and execute; this is the saved human receipt identity only'};}
+ function status(value,event){request(value,['taskId']);human(event);const start=owner(value.taskId,false,true),valueAuthority=authority(start.task);guard(start);human(event);return {taskId:start.task.id,parameterRevision:start.task.parameterRevision,provider:start.task.provider,threadId:start.task.threadId,status:valueAuthority?.kind==='local-human'?'current':start.task.localInputReview?'stale':'not_run',authority:valueAuthority?.kind==='local-human'?valueAuthority:null,scope:'local',fileCheck:'Saved human receipt identity only; current files and ABI are not validated by status. Re-read at prepare and execute'};}
  return {inspect,read,confirm:confirmReview,status,authority,verify,verifyPrepared,beginOperation,assertOperation};
 }
