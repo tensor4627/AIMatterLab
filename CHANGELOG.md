@@ -5,6 +5,7 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
+| 0.18.9 开发中（内部解包 dev.19，专项验收通过） | OPES 复核按真实契约识别别名/冲突；公开 OPES 分析 CLI 指导；二步认证显式 WSL OpenSSH 选择与用户引导 | 最终Node2286 passed/2skip、TypeScript及独立包核对passed；worker603/1skip与WSL3/3来自未改worker的首阶段；最终A新15路27进程642文件passed；原会话/WSL恢复及实际Codex续填、复核、准备、执行、回收passed；B跨版本累计15/15，保留首失败 | 当前包仅新增1条原生路线，不冒充全15条重跑；真实SSH/MFA/正向隧道、完整A与最终视觉未验；[阶段记录](docs/v0.18.9.md)；无tag/push |
 | 0.18.9 开发中（内部解包 dev.18，专项验收通过） | WSL 原来源连接；部署保存实际端口、旧流程端口恢复和独立连接记录；私有二步认证、自有回环隧道与原集群作业认证恢复；启动前目录/端口检查和同 socket 身份核验 | 最终 Node2246 passed/2skip；worker603 passed/1skip（604总项）；TypeScript/Vite/解包核对passed；A新15路/27进程/642文件passed；真实桌面连接与重启后同流程自动恢复passed；保留全部首失败 | 真实集群SSH/MFA/正向隧道、完整A/B原生和最终视觉未验；本代无便携包/tag/push；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.17，测试中） | Codex 运行时按严格隔离能力核验兼容性，移除版本字符串变化即拒绝连接的限制；初始化响应与 RPC 信封检查、断线失效和脱敏诊断；开发验收按冻结版本和页面批次推进 | 定向149/149、Node1998 passed/2条件skip＋WSL补验3/3、worker481、TypeScript/Vite/包审passed；包内Bridge实际Codex0.166启动隔离握手passed；A新15路/27进程/642文件passed；实际包启动恢复同一草稿 | 真实握手无worker/thread/turn，不证明模型访问或科学工具；A/B完整原生、菜单与视觉未完成，原生截图/激活仍受阻；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.16，测试中） | 运行详情按需恢复产物列表、连接/身份失效与卸载保护；续算按现有服务契约展示并保留未确认请求 | Node1970 passed/2条件skip＋实际WSL补验3/3、React169/169、worker481、定向31、TypeScript/Vite/包审passed；A新15路/27进程/642文件passed；正常用户加载包SHA一致并恢复原草稿 | A原生16项geometry/激活受阻仍not_run；A57/301、B13/15保持版本范围；新RunDetail原生、companion真实交付/parser/输出、完整菜单/视觉未完成；[阶段记录](docs/v0.18.9.md) |

@@ -1,4 +1,10 @@
 const english:Record<string,string> = {
+"当前模式或消费契约存在相互冲突的别名值；请核对原输入，不会自动选取或改写。":"The mode or consumer contract has conflicting alias values. Review the original inputs; no value is selected or rewritten automatically.",
+"当前 OPES 输入尚不支持本地人工复核。原参数与资产保持不变；可使用下方 AI 复核。":"Local manual review does not yet support these OPES inputs. Parameters and assets are unchanged; use AI review below.",
+"当前选择的 manifest 或 kernel 契约尚不支持本地人工复核；所选输入保持不变，可使用下方 AI 复核。":"Local manual review does not yet support the selected manifest or kernel contract. Selected inputs are unchanged; use AI review below.",
+"本地人工复核需要同一流程已保存的 Metad 组合图和对应当前构建产物；请先核对来源。":"Local manual review needs this workflow’s saved Metad graph and matching current build artifact. Review their source first.",
+"请先核对当前消费模式；此模式尚不能进行本地人工输入复核。":"Review the current consumer mode first. This mode is not yet supported for local manual input review.",
+
 "请先明确连接保存此作业的原服务；不会改用当前聊天或默认来源。":"Explicitly connect the original service storing this run first. The current chat or default source will not replace it.",
 "恢复原作业服务":"Restore original worker service",
 "打开原作业":"Open original run",
@@ -19,6 +25,9 @@ const english:Record<string,string> = {
 "认证方式":"Authentication method",
 "已有密钥 / SSH agent":"Existing key / SSH agent",
 "WSL 私有交互认证（含二步验证）":"WSL private interactive authentication (including MFA)",
+"人工认证需要所选 WSL 内的原生 OpenSSH。当前客户端：":"Human authentication requires native OpenSSH in the selected WSL distribution. Current client:",
+"选择 WSL OpenSSH（/usr/bin/ssh）":"Choose WSL OpenSSH (/usr/bin/ssh)",
+"仅在你点击后修改表单，保存连接后生效；自定义客户端可在高级设置中填写。密钥引用必须属于所选 WSL，不会转换路径或复制 Windows 私钥。":"Only your click changes the form; save the connection to apply it. Custom clients can be entered in advanced settings. Key references must belong to the selected WSL distribution; paths are not translated and Windows private keys are not copied.",
 "高级连接设置：客户端、密钥、端口与路由":"Advanced connection settings: client, key, port and routing",
 "本地 ProxyJump · 每行一个跳板":"Local ProxyJump · one jump per line",
 "二步验证使用已核对的 WSL OpenSSH 和私有终端；不会复制 Windows 私钥，也不会替换已有转发入口。":"MFA uses verified WSL OpenSSH and a private terminal. Windows keys are not copied and existing forwarded entries are preserved.",

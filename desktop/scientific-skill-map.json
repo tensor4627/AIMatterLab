@@ -194,6 +194,17 @@
         "references/plumed.json",
         "references/pygas.json"
       ]
+    },
+    {
+      "id": "studio-opes-analysis",
+      "source": "studio",
+      "folder": "studio-opes-analysis",
+      "files": [
+        "SKILL.md"
+      ],
+      "reference_files": [
+        "references/cli-contract.json"
+      ]
     }
   ],
   "functions": [
@@ -404,10 +415,17 @@
         "pygas.opes-reweight"
       ],
       "skills": [
-        "pygas-opes"
+        "pygas-opes",
+        "studio-opes-analysis"
       ],
       "status": "implemented",
-      "phase": "analysis"
+      "phase": "analysis",
+      "reference_files": {
+        "studio-opes-analysis": [
+          "references/cli-contract.json"
+        ]
+      },
+      "adaptation": "For runnable OPES FES YAML and exact CLI semantics, read the focused studio-opes-analysis/references/cli-contract.json document. Preserve the existing pyGAS OPES consent and actual source/input identities; authoring does not execute analysis."
     },
     {
       "id": "training.nep",

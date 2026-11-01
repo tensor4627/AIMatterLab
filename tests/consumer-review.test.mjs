@@ -19,3 +19,48 @@ test('Foreign/deleted owner and nonhuman cannot read private local closure',asyn
 test('Prepare operation token invalidates on target receipt/config/review/input changes',async()=>{const f=await fixture(),i=await viewed(f);await f.service.confirm({taskId:'same-task',snapshotId:i.snapshotId},{});const t=f.service.beginOperation('same-task');f.mutate(t=>t.localTargetReview={receiptId:'different'});assert.throws(()=>f.service.assertOperation(t),/receipt changed/);});
 
 test('Source technical CUDA/FD defaults are reviewable while explicit numerical controls remain unchanged',async()=>{const f=await fixture();f.mutate(t=>t.parameters.validation={fd_step:2e-5,fd_atol:2e-4,atom_selection:[1]});const before=clone(f.task().parameters.validation),i=await viewed(f);assert.equal(i.validationPlan.device,'cuda');assert.equal(i.validationPlan.fdStep,2e-5);assert.equal(i.validationPlan.fdAtol,2e-4);assert.deepEqual(i.validationPlan.coverage.indices,[1]);assert.deepEqual(i.validationPlan.fullCvAtomSelection,[0,1]);assert.equal(Object.keys(i.validationPlan.sourceFiles).length,3);await f.service.confirm({taskId:'same-task',snapshotId:i.snapshotId},{});assert.deepEqual(f.task().parameters.validation,before);assert.deepEqual(f.native.at(-1).validationPlan.explicit,before);const g=await fixture(),j=await viewed(g);assert.equal(j.validationPlan.fdStep,1e-5);assert.equal(j.validationPlan.fdAtol,1e-4);assert.equal(g.task().parameters.validation,undefined);});
+
+for(const engine of ['bias.validate','gpumd.sampling'])for(const composition of ['absent','rendered'])test(engine+' unsupported OPES '+composition+' reports true contract before generic pair error and preserves original inputs',async()=>{
+ const f=await fixture(engine);f.mutate(t=>{t.parameters={...t.parameters,mode:'opes',manifest_file:'original-manifest.json',kernel_capacity:128};if(composition==='absent')delete t.composition;});
+ const before=clone(f.task()),files=clone([...f.materialized]),writes=f.writes();let producers=0;f.artifactAccess.deriveCurrentProducer=async()=>{producers++;throw Error('unsupported review must not read producer');};
+ await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/^Error: LOCAL_REVIEW_UNSUPPORTED_OPES$/);
+ assert.deepEqual(f.task(),before);assert.deepEqual([...f.materialized],files);assert.equal(f.writes(),writes);assert.equal(f.calls.length,0);assert.equal(producers,0);assert.equal(f.native.length,0);assert.equal(f.receipts.size,0);
+});
+for(const selection of [{manifest_file:'explicit.json'},{kernel_capacity:128}])test('consumer selected '+Object.keys(selection)[0]+' is rejected without removing selection or reading files',async()=>{
+ const f=await fixture();f.mutate(t=>Object.assign(t.parameters,selection));const before=clone(f.task()),writes=f.writes();
+ await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/^Error: LOCAL_REVIEW_UNSUPPORTED_CONSUMER_CONTRACT$/);
+ assert.deepEqual(f.task(),before);assert.equal(f.writes(),writes);assert.equal(f.calls.length,0);assert.equal(f.native.length,0);assert.equal(f.receipts.size,0);
+});
+for(const engine of ['bias.validate','gpumd.sampling'])for(const [mode,biasClass]of [['metad','MetaDGaussianBias'],['static','FlexibleWallBias']])test(engine+' supported '+mode+' still performs full current closure review and confirmation',async()=>{
+ const f=await fixture(engine);f.mutate(t=>t.parameters.mode=mode);f.pair.graph.nodes.find(node=>node.kind==='bias').class_name=biasClass;if(mode==='static')f.pair.graph.edges=f.pair.graph.edges.filter(edge=>edge.target.port!=='bias_traj');
+ const i=await viewed(f);assert.equal(i.parameters.mode,mode);assert.equal((await f.service.confirm({taskId:'same-task',snapshotId:i.snapshotId},{})).status,'confirmed');assert.equal(f.receipts.size,1);assert.equal(f.task().review.status,'not_run');assert.equal(f.calls.some(call=>/prepare|submit|runtime|sharing/.test(call.url)),false);
+});
+test('unsupported diagnostic does not bypass human/owner/unknown-run guards or change receipt-only status',async()=>{
+ const f=await fixture();f.mutate(t=>{t.parameters.mode='opes';delete t.composition;});const before=clone(f.task());
+ const status=f.service.status({taskId:'same-task'},{});assert.equal(status.status,'stale');assert.equal(status.authority,null);assert.deepEqual(f.task(),before);assert.equal(f.calls.length,0);
+ f.setHuman(false);await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/Trusted human/);f.setHuman(true);f.mutate(t=>t.execution={phase:'unknown',artifactId:'original-run'});
+ await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/Reconcile original active or unknown run; never resubmit/);assert.equal(f.task().execution.artifactId,'original-run');assert.equal(f.receipts.size,0);assert.equal(f.calls.length,0);
+ const g=await fixture();g.mutate(t=>t.parameters.mode='opes');g.remove();await assert.rejects(g.service.inspect({taskId:'same-task'},{}),/Select the current consumer workflow/);assert.equal(g.calls.length,0);assert.equal(g.receipts.size,0);
+});
+
+const aliasSelection=(path,value,mode='wtmetad')=>{const p={};if(mode!==null)p.mode=mode;const parts=path.split('.');let node=p;for(const part of parts.slice(0,-1))node=node[part]??(node[part]={});node[parts.at(-1)]=value;return p;};
+for(const engine of ['bias.validate','gpumd.sampling'])test(engine+' authoritative early diagnostics cover actual aliases/conflicts/empty/invalid selections without file or receipt activity',async()=>{
+ const cases=[
+  [{bias:{mode:'opes'}},'LOCAL_REVIEW_UNSUPPORTED_OPES'],[{sampling:{mode:'opes'}},'LOCAL_REVIEW_UNSUPPORTED_OPES'],
+  [{mode:'wtmetad',bias:{mode:'opes'}},'LOCAL_REVIEW_PARAMETER_CONFLICT'],[{bias:{mode:'metad'},sampling:{mode:'wtmetad'}},'LOCAL_REVIEW_PARAMETER_CONFLICT'],
+  [{mode:'wtmetad',manifest_file:'one.json',bias:{manifest_file:'two.json'}},'LOCAL_REVIEW_PARAMETER_CONFLICT'],
+  [{mode:'wtmetad',kernel_capacity:0,bias:{kernel_capacity:16}},'LOCAL_REVIEW_PARAMETER_CONFLICT']
+ ];
+ for(const path of ['bias.manifest_file','bias.kernel_capacity'])for(const value of ['original.json',0,false,[],{}])cases.push([aliasSelection(path,value),'LOCAL_REVIEW_UNSUPPORTED_CONSUMER_CONTRACT']);
+ for(const path of ['mode','bias.mode','sampling.mode'])for(const value of [undefined,null,'',0,false,'future','bias','cvonly'])cases.push([aliasSelection(path,value,null),'LOCAL_REVIEW_UNSUPPORTED_CONSUMER_MODE']);
+ for(const [selection,code]of cases)for(const missingPair of [false,true]){
+  const f=await fixture(engine);f.mutate(t=>{delete t.parameters.mode;t.parameters={...t.parameters,...selection};if(missingPair)delete t.composition;});const before=clone(f.task()),files=clone([...f.materialized]),writes=f.writes();let producers=0;f.artifactAccess.deriveCurrentProducer=async()=>{producers++;throw Error('must not read unsupported producer');};
+  const expected=missingPair&&code==='LOCAL_REVIEW_UNSUPPORTED_CONSUMER_MODE'?'Save and complete the actual current canonical pair':code;await assert.rejects(f.service.inspect({taskId:'same-task'},{}),error=>error.message===expected,JSON.stringify(selection));assert.deepEqual(f.task(),before);assert.deepEqual([...f.materialized],files);assert.equal(f.writes(),writes);assert.equal(f.calls.length,0);assert.equal(producers,0);assert.equal(f.receipts.size,0);assert.equal(f.native.length,0);
+ }
+});
+for(const engine of ['bias.validate','gpumd.sampling'])for(const path of ['bias.mode','sampling.mode'])test(engine+' actual scientificSpec resolves supported '+path+' without rewriting saved aliases',async()=>{
+ const f=await fixture(engine);f.mutate(t=>{delete t.parameters.mode;const parts=path.split('.');t.parameters[parts[0]]={...t.parameters[parts[0]],[parts[1]]:'wtmetad'};for(const step of t.steps)for(const field of step.fields)if(field.key==='mode')field.key=path;});const before=clone(f.task().parameters),i=await viewed(f);assert.equal(i.parameters.mode,undefined);assert.equal(i.parameters[path.split('.')[0]].mode,'wtmetad');assert.equal((await f.service.confirm({taskId:'same-task',snapshotId:i.snapshotId},{})).status,'confirmed');assert.deepEqual(f.task().parameters,before);assert.equal(f.receipts.size,1);assert.equal(f.calls.some(call=>/submit|prepare|runtime/.test(call.url)),false);
+});
+for(const engine of ['bias.validate','gpumd.sampling'])test(engine+' valid alias does not erase an authored required canonical field',async()=>{
+ const f=await fixture(engine);f.mutate(t=>{delete t.parameters.mode;t.parameters.bias={...t.parameters.bias,mode:'wtmetad'};});const before=clone(f.task()),writes=f.writes();await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/Resolve missing native science: mode/);assert.deepEqual(f.task(),before);assert.equal(f.writes(),writes);assert.equal(f.calls.length,0);assert.equal(f.receipts.size,0);
+});

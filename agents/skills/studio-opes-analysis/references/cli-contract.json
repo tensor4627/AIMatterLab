@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "contract": "studio-pygas-opes-analysis-cli-v1",
+  "scope": "Public source-specific authoring companion. It supplies runnable config grammar, not a scientific grid choice, execution authorization, runtime validation or FES convergence. Preserve the original workflow and pinned input; human Prepare/Execute remains separate.",
+  "source_receipt": {
+    "local_files": [
+      {
+        "source_id": "pygas",
+        "path": "entrypoints/cli.py",
+        "sha256": "b5abff73000312b315d09e43e387086f86904aee805da81a58bc0864675fa1fb"
+      },
+      {
+        "source_id": "pygas",
+        "path": "base/opes_analysis.py",
+        "sha256": "cc22082439007230fee6fe070fb3e78982bed7168c6676ad2c36e06920016351"
+      },
+      {
+        "source_id": "pygas",
+        "path": "base/opes.py",
+        "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6"
+      }
+    ],
+    "public_revision": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+    "canonical_lf_files": [
+      {
+        "path": "entrypoints/cli.py",
+        "sha256": "e4def19816e6c4ea767efadb9de5c7215da61891146d2da635e1ed49ee3b6426"
+      },
+      {
+        "path": "base/opes_analysis.py",
+        "sha256": "1daea0b9b5062dccb36e2150b26a503fe1c014be4d7101e036a80362a06bade3"
+      },
+      {
+        "path": "base/opes.py",
+        "sha256": "b0e9332ebdff20fcf2fda52ddca409d4da3c544bbd1190151859870219702ff1"
+      }
+    ],
+    "applicability": {
+      "source_match": "Exact registered raw hashes only; EOL-normalized equality to the declared committed public revision was separately checked. Source mismatch/unavailability means reference_only, not current effective defaults.",
+      "remote_freshness": "not independently established; no current remote HEAD claim",
+      "selected_executable_support": "not_run; source registration is not executable/source correspondence",
+      "runtime_and_scientific_validation": "not_run"
+    }
+  },
+  "studio_binding": {
+    "engine": "pygas.opes-reweight",
+    "required_input_names": [
+      "OPES_COLVAR",
+      "fes.yaml"
+    ],
+    "adapter_argv": [
+      "<registered pygas executable>",
+      "opes-reweight",
+      "OPES_COLVAR",
+      "fes.yaml"
+    ],
+    "source": [
+      "worker/studio_worker/engine_contracts.json:pygas.opes-reweight",
+      "worker/studio_worker/adapters.py:Adapter.prepare"
+    ],
+    "guidance": "Use describe_engine and existing authoring context. Bind the authorized same-producer OPES_COLVAR and save fes.yaml in the current owned input root. Save/readback and actual hashes are authoring evidence only; no shell, grant change, automatic submission or numerical data reconstructed from chat."
+  },
+  "log_input": {
+    "format": "UTF8 #! FIELDS name... before numeric rows; optional #! SET key value metadata; repeated field headers must agree; numeric rows must match field count; all values finite. Headerless GASCV rejected.",
+    "identity": "Read actual run.id plus collected results-relative artifact name. A run directory basename is not a run ID. read_artifact supports extensionless text; read_project_input may return metadata-only for OPES_COLVAR. Do not rename or fabricate data to bypass classification.",
+    "scope": "Sample rows and columns must come from the pinned real log. The example below is illustrative, never the answer for a real case."
+  },
+  "fes_yaml": {
+    "serialization": "YAML mapping; these are the only keys consumed by _run_opes_reweight. A field name in a planning note is not a saved config.",
+    "keys": {
+      "cv_columns": {
+        "required": true,
+        "type": "nonempty list of exact header names",
+        "unit": "each selected CV own unit",
+        "source": "cfg[cv_columns]",
+        "guidance": "Read actual #! FIELDS. Preserve the requested CVs; no atom groups or CV meaning are inferred from a column label."
+      },
+      "temperature": {
+        "required": true,
+        "type": "positive number (CLI float conversion)",
+        "unit": "K",
+        "source": "cfg[temperature]",
+        "guidance": "Reuse the actual sampling temperature and its provenance. No implicit scientific default."
+      },
+      "bins": {
+        "required": true,
+        "type": "integer list, each >1",
+        "unit": "count",
+        "source": "cfg[bins]",
+        "guidance": "One per selected CV; a one-element list broadcasts for multiple CVs. Preserve the user grid; no convergence claim from fine bins."
+      },
+      "lower": {
+        "required": true,
+        "type": "numeric list, one per CV",
+        "unit": "selected CV own units",
+        "source": "cfg[lower]",
+        "guidance": "Each lower < matching upper. Bounds are scientific choices, not software defaults."
+      },
+      "upper": {
+        "required": true,
+        "type": "numeric list, one per CV",
+        "unit": "selected CV own units",
+        "source": "cfg[upper]"
+      },
+      "periodic": {
+        "required": false,
+        "advanced": true,
+        "type": "boolean list matching CV dimension",
+        "default": null,
+        "effective_default": "all false",
+        "source": "cfg.get(periodic, None)",
+        "guidance": "True wraps each value into [lower,upper). Use established CV periodicity; omission is a code default, not evidence of nonperiodicity."
+      },
+      "bias_column": {
+        "required": false,
+        "advanced": true,
+        "type": "exact header name",
+        "default": "bias",
+        "unit": "eV",
+        "source": "cfg.get(bias_column, bias)"
+      },
+      "extra_bias_columns": {
+        "required": false,
+        "advanced": true,
+        "type": "list of exact header names",
+        "default": [],
+        "unit": "eV",
+        "source": "cfg.get(extra_bias_columns, [])",
+        "guidance": "Explicitly select the logged extra_bias when it is the separately applied contribution required for native total-bias weights. Merely having an extra_bias column does not activate it. Avoid double-counting a contribution already included in the selected bias column."
+      },
+      "blocks": {
+        "required": false,
+        "advanced": true,
+        "type": "integer (CLI int conversion)",
+        "default": 4,
+        "unit": "prefix comparison partition count",
+        "source": "int(cfg.get(blocks, 4))",
+        "guidance": "For blocks>1, produce blocks-1 prefix-to-full RMSE values. blocks<=1 produces no prefix comparisons. This is not independent block standard error."
+      }
+    },
+    "unsupported_override": "logweight_column is NOT read by this CLI. It recomputes weights from selected bias columns. Extra YAML keys are not validated by this function and may be silently ignored; do not invent controls.",
+    "example_purpose": "Syntactically valid one-CV illustration for a log with cv_0, bias and extra_bias. Temperature300, range[-1,1], bins32 and blocks2 are examples, not inferred defaults or production choices. Replace using established task inputs; ask only unresolved scientific choices.",
+    "example_values": {
+      "cv_columns": [
+        "cv_0"
+      ],
+      "temperature": 300,
+      "bins": [
+        32
+      ],
+      "lower": [
+        -1.0
+      ],
+      "upper": [
+        1.0
+      ],
+      "periodic": [
+        false
+      ],
+      "bias_column": "bias",
+      "extra_bias_columns": [
+        "extra_bias"
+      ],
+      "blocks": 2
+    },
+    "example_yaml": "cv_columns: [cv_0]\ntemperature: 300\nbins: [32]\nlower: [-1.0]\nupper: [1.0]\nperiodic: [false]\nbias_column: bias\nextra_bias_columns: [extra_bias]\nblocks: 2\n"
+  },
+  "weights": {
+    "formula": "V_total = selected bias_column + sum(selected extra_bias_columns); beta = 1/(8.617333262145e-5 eV/K * temperature); log_weights = beta*V_total - max(beta*V_total); w=exp(log_weights).",
+    "native_equivalence": "For native OPES logs with matching producer kBT and eV/K units, select bias and extra_bias to reproduce (bias + extra_bias)/kBT up to a constant shift, matching base/opes.py opes_logweight. That logweight column is a diagnostic cross-check, not a CLI override.",
+    "not_wtmetad": "Do NOT subtract rct/c(t) or zed. Those are OPES diagnostics, not WTMetaD offsets. Do not apply WT bias-factor scaling.",
+    "ess": "ESS=(sum(w)^2)/sum(w^2), over all input rows before range exclusion; it does not establish independent samples or physical convergence."
+  },
+  "grid_and_support": {
+    "dimension": "Complete CLI export supports one or two selected CVs because default PNG rendering rejects higher dimensions. Numerical histogram capability alone does not establish a complete higher-dimensional CLI route.",
+    "histogram": "Weighted histogram over supplied ranges, normalized to in-range mass. Nonperiodic out-of-range samples do not contribute; zero histogram mass raises. Periodic samples wrap before histogramming. Axes are bin centers.",
+    "empty_bins": "Probability0 stays F=+inf; occupied bins use -kBT*log(probability) and minimum occupied F shifted to0. Do not replace empty bins by finite values or infer unsampled barriers.",
+    "reported_support": "Report samples, finite_bins/total_bins, ESS and grid. Sparse short data is an engineering check, not converged FES or a barrier estimate.",
+    "units": "FES, selected bias/extra bias and block RMSE are eV; temperature K; CV axes retain declared CV units."
+  },
+  "blocks_semantics": {
+    "algorithm": "For b in range(1,blocks), stop=max(1,N*b//blocks). Recompute histogram from samples[:stop],weights[:stop], compare to full FES on finite-overlap bins after each surface own zero shift. RMSE=sqrt(mean((prefix-full)^2)).",
+    "blocks2": "One comparison: first floor(N/2) samples (at least1) versus full trajectory. It is not a split into independent halves and not standard error.",
+    "limits": "Overlapping prefixes are correlated; finite-overlap may omit unsupported bins; no overlap yields NaN. A zero RMSE does not prove convergence."
+  },
+  "outputs": {
+    "OPES_FES.txt": "Flattened meshgrid(indexing=ij) rows: selected CV center columns, probability, free_energy_eV. Last CV index changes fastest. Empty bins remain inf.",
+    "OPES_FES.npz": "axes, probability, free_energy, normalized log_weights, effective_sample_size, block_rmse. Serialized output is not a new input/source proof.",
+    "OPES_FES.png": "One-CV line or two-CV contour; no physical convergence claim.",
+    "OPES_FES_summary.json": "effective_sample_size, samples, finite_bins, total_bins, block_rmse_eV, weighting=exp(beta * total_instantaneous_bias), rct_used=false.",
+    "defaults": "These output basenames are CLI defaults and are used by the Studio adapter. Direct CLI flags --fes-out/--npz-out/--png-out/--summary-out may change them; no default device/GPU flag for opes-reweight."
+  }
+}

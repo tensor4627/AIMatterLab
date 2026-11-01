@@ -32,7 +32,7 @@ export default function AgentTaskPage({worker,task,onReconnect,onBindDraft,onErr
  const [composition,setComposition]=useState<CompositionState&{owner:string}>({owner:'',loading:true,dirty:false,saving:false,error:false,renderBlocked:true});
  const localCompositionDirty=useTaskPygasDirty(task.id);
  const compositionUnsaved=localCompositionDirty||hasComposition&&(composition.owner!==compositionOwner||composition.loading||composition.dirty||composition.saving||composition.error);
- const localBuildReview=localBuildReviewEligibility(task.parameters?.engine,composition.owner===compositionOwner?composition.savedGraphMode:undefined);
+ const localBuildReview=localBuildReviewEligibility(task.parameters?.engine,composition.owner===compositionOwner?composition.savedGraphMode:undefined,task.parameters);
  const compositionBlocked=compositionUnsaved||hasComposition&&composition.renderBlocked;
  const [outbox]=useState(()=>workflowOutbox(task.id,localStorage));
  const [query,setQuery]=useState(''),[onlyMissing,setOnlyMissing]=useState(false);
