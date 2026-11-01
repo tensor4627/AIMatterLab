@@ -3,6 +3,8 @@ import math
 KEYS={'atom_selection','fd_step','fd_atol'}
 
 def validate_controls(parameters,engine=None):
+ if engine in ('gpumd.sampling','pydyn.sampling','bias.validate') and parameters.get('mode')=='opes' and ('validation' in parameters or 'fd_step' in parameters or 'fd_atol' in parameters):
+  raise ValueError('OPES stateful finite-difference validation is not implemented; explicit validation, fd_step or fd_atol controls cannot be accepted. Remove numerical controls only if serialized ABI/state checks alone are intended; CV atom_selection is unchanged.')
  value=parameters.get('validation',{})
  if not isinstance(value,dict) or set(value)-KEYS:raise ValueError('Only explicit numerical validation controls are allowed in validation')
  if value and engine is not None and engine not in ('gpumd.sampling','pydyn.sampling','bias.validate'):raise ValueError('Numerical validation controls apply only to serialized sampling/bias validation')

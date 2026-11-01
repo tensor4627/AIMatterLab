@@ -52,6 +52,7 @@ import {AgentHub,loginUrl} from './agent-hub.mjs';
 import {CredentialVault,providerId} from './providers.mjs';
 import { WorkerClient } from './worker.mjs';
 import {readWorkerStatus} from './worker-status.mjs';
+import {bundledWorkerRuntimeId} from './worker-service-version.mjs';
 import {restoreTaskWorker} from './worker-restore.mjs';
 import {explicitWorkerReceipt,rememberExplicitWorker} from './explicit-worker-binding.mjs';
 import {taskWorkerSettings,sameWorkerBinding,taskWorkerSource} from '../shared/task-worker-binding.mjs';
@@ -78,6 +79,7 @@ app.on("before-quit",()=>{shuttingDown=true;});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview;
 const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
+Object.defineProperty(worker,'bundledRuntimeId',{value:bundledWorkerRuntimeId(workerSource)});
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
   sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
@@ -255,7 +257,7 @@ function discoverCompute(){if(settings.autoDiscoverCompute!==false)return config
 handle('compute.setup',async data=>configureCompute(data||{}));
 handle('worker.connect',async()=>{assertIdleAgent();agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
-handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current()},value));
+handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision()},value));
 handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAuthoringWorker({records:taskRecords,worker,selection:()=>workflowContext.current(),settings:()=>settings},value);});
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);

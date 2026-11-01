@@ -9,7 +9,7 @@ import type {CanonicalGraph,CatalogEntry,OrderingReview} from './pygas-composer-
 import {catalogGraphContract,catalogProblem,collectorScalarSources,keyOf} from './pygas-composer-state';
 import {t} from './i18n';
 import {baseIdentity,retainDraft,readDraft,clearDraft,clearTaskPygasDrafts} from './pygas-local-draft';
-export interface CompositionState{loading:boolean;dirty:boolean;saving:boolean;error:boolean;renderBlocked:boolean}
+export interface CompositionState{loading:boolean;dirty:boolean;saving:boolean;error:boolean;renderBlocked:boolean;savedGraphMode?:string}
 export function taskHasComposition(task:any){return !!task?.customCv?.id||!!task?.composition||Array.isArray(task?.parameters?.files)&&task.parameters.files.some((path:unknown)=>typeof path==='string'&&path.replaceAll('\\','/').split('/').at(-1)==='workflow.json');}
 function resultProblem(value:PygasTaskResult,taskId:string):string|null{
  if(!value||value.taskId!==taskId||!value.catalog||catalogProblem(value.catalog,value.catalog.source)||!Array.isArray(value.assets)||value.assets.length>256||value.assets.some(asset=>!asset||['id','name','path','kind'].some(key=>typeof (asset as any)[key]!=='string'))||value.reasons!==undefined&&(!Array.isArray(value.reasons)||value.reasons.length>128||value.reasons.some(reason=>typeof reason!=='string')))return 'Invalid composition response or source receipt';
@@ -23,7 +23,7 @@ export default function PygasTaskComposer({task,worker,disabled=false,language='
  const mounted=useRef(true),orderingRef=useRef<OrderingReview|null>(null);orderingRef.current=ordering;const mutation=useRef<number|null>(null),deferredRead=useRef(false),seq=useRef(0),owner=useRef(''),current=useRef({data,graph,dirty}),notify=useRef(onStateChange);current.current={data,graph,dirty};notify.current=onStateChange;const identity=task.id+'\0'+(task.composition?.graphPath||'');if(owner.current!==identity){owner.current=identity;seq.current++;}
  const sourceShapeBlocked=!!(data&&graph&&graph.nodes.some(node=>collectorScalarSources(node,graph,data.catalog).length));
  const renderBlocked=sourceShapeBlocked||!data||!graph||!!data.render_blocked||!!data.composition?.render_blocked||data.composition?.status!=='rendered'||!!ordering?.renderBlocked;
- useEffect(()=>{notify.current?.({loading:loading||customVisible&&customState.loading,dirty:dirty||customVisible&&customState.dirty,saving:saving||customVisible&&customState.busy,error:!!error||customVisible&&customState.error,renderBlocked:renderBlocked||customVisible});},[loading,dirty,saving,error,renderBlocked,customVisible,customState]);
+ useEffect(()=>{notify.current?.({loading:loading||customVisible&&customState.loading,dirty:dirty||customVisible&&customState.dirty,saving:saving||customVisible&&customState.busy,error:!!error||customVisible&&customState.error,renderBlocked:renderBlocked||customVisible,savedGraphMode:data&&data.taskId===task.id?data.graph?.mode:undefined});},[loading,dirty,saving,error,renderBlocked,customVisible,customState,data,task.id]);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;seq.current++;};},[]);
  async function load(discard=false){const token=++seq.current,scope=owner.current;setLoading(true);if(!worker){setLoading(false);return;}try{
   const value=await invoke<PygasTaskResult>('task.pygas.read',{taskId:task.id,...task.composition?.graphPath?{path:task.composition.graphPath}:{}});const problem=resultProblem(value,task.id);if(problem)throw Error(problem);if(token!==seq.current||scope!==owner.current)return;

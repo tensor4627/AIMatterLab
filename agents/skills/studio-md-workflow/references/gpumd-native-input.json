@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "contract": "gpumd-native-input-planning-v1",
+  "scope": "Studio-authored source-specific planning facts for native GPU-Sampling inputs; not an executable/source build attestation, artifact check or scientific validation. Read current source_evidence. If stale/unregistered/blocked, treat as conceptual reference; never claim current syntax/defaults.",
+  "source_receipt": {
+    "local_files": [
+      {
+        "source_id": "gpumd",
+        "path": "src/main_gpumd/run.cu",
+        "sha256": "c1cd3a0c9cad78c412e246de6e77dc554de106f7769788cf94434ab31c6b09a4"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/main_sampling/run.cu",
+        "sha256": "f0820d6ffd04d9dba255c7cad007231a3cc943cec65f68bf38d152aa46f4395e"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/main_sampling/gas-metad.cuh",
+        "sha256": "553e3d7f3776590e4c53f3b73134fa66e00a909689f99c50367d4930f9038c22"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/main_sampling/gas-opes.cu",
+        "sha256": "774d1ff70745f9ad267384b73002b50ee46d942c1a5e9d8d28a0b9bff26d806c"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/main_sampling/gas-opes.cuh",
+        "sha256": "2c00e98d32996e67269ddee52e67cbf717f7e23bb23c14b780bbc6d96957160c"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_parameters/velocity.rst",
+        "sha256": "beeb2774dfbe87e38856e57753a4ae290aa619103b22d97b81b7e124520dcaa4"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_parameters/time_step.rst",
+        "sha256": "161234cbfad2621079c1911ae1e077a5e42db312238f5b2bf9d2a530d3a5fdbb"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_parameters/ensemble_standard.rst",
+        "sha256": "037255faf3fb425668a56b1e215029fe567486bd49dc5aa508b18dbb40708764"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_parameters/run.rst",
+        "sha256": "b5b68a14490b259693adbadaf4c0b1662ce208566cf491216241006cdf34f877"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_parameters/potential.rst",
+        "sha256": "25a704a9e04beb897017a8dbbb7a3971cda568b31a020db1fc426a79028e5e69"
+      },
+      {
+        "source_id": "pygas",
+        "path": "base/opes.py",
+        "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6"
+      },
+      {
+        "source_id": "pygas",
+        "path": "agents/skills/pygas-check-gpumd-contract/scripts/write_gascfg.py",
+        "sha256": "7d1d69caf8498e6c9127ae82d27af8b5732699d4163a9e65c5093b104c54f924"
+      }
+    ],
+    "applicability": {
+      "source_match": "Only exact registered file hashes support source-specific authoring. Commit alone does not cover dirty files.",
+      "selected_executable_support": "not_run unless separately evidenced; no source/build equality inferred",
+      "runtime_and_scientific_validation": "not_run",
+      "execution_gates": "This reference adds no requirement to prove compiled source/build correspondence and no arbitrary compatibility precondition. Report unknown provenance as not_run; actual execution remains governed by existing target artifact/runtime, project authorization and human review/Execute gates. Unknown provenance never creates a user-internal required field or justifies leaving mechanically authorable inputs absent; no real target compatibility gate is weakened."
+    }
+  },
+  "run_in": {
+    "serialization": "Whitespace-delimited native commands; use actual authorized input basenames. Preserve potential/structure/bias/manifest identities and selected backend. Do not emit Python or nested YAML as run.in.",
+    "nve_ordered_grammar": [
+      "potential <potential_basename>",
+      "velocity <initial_temperature_K> [seed <integer>]",
+      "ensemble nve",
+      "time_step <dt_fs>",
+      "OPES <bias.pt|bias.pt2> GAScfg.yaml [<selected_OPES_STATE.pt>]",
+      "<requested native output commands, if supported by their own source contract>",
+      "run <number_of_integration_steps>"
+    ],
+    "scope": "This reference gives NVE and independent OPES grammar. Other ensembles/output commands need their own current native contract; do not infer PyDyn keyword equivalence. Use one run block for a requested single bounded run.",
+    "route_selection": {
+      "opes": "OPES; accepts model+config and optional checkpoint; duplicate OPES rejected",
+      "metad_or_cvonly": "GASMD (MetaD accepted alias); not an equivalent OPES state ABI",
+      "restart": "Fresh state: omit checkpoint operand, do not import ABI/FD history as MD state. Optional selected checkpoint overrides configured state output path and requires its matching atomic restart; do not claim restart parity from a fresh smoke."
+    },
+    "seed_policy": {
+      "registered_source_syntax": "velocity <T_K> seed <integer>",
+      "authoring": "Source-confirmed syntax permits a planned seed line for a where-supported request. Label selected executable support/build relation not_run; do not claim seed accepted, fixed or deterministic before execution evidence.",
+      "explicit_target_first_condition": "If the user expressly requires a successful target test before inserting seed, retain only that specific compatibility decision; author the other native input content. Do not silently call support absent or alter the scientific conditions.",
+      "structure_velocities": "Existing model.xyz velocities take precedence over velocity initialization temperature/seed. Preserve the supplied structure and report this case; do not silently replace its velocities."
+    }
+  },
+  "gascfg": {
+    "serialization": "One flat key: value per line. Emit simple unquoted safe basenames for shared path keys. This native subset is not nested/full YAML. Do not emit task parameter aliases as native keys.",
+    "value_priority": [
+      "explicit user choices",
+      "actual selected manifest/structure evidence when the field/schema exists",
+      "explicitly labelled matching source default or technical proposal; never mix C++ parser and writer CLI defaults"
+    ],
+    "common_parser_and_adapter_fields": {
+      "max_cv_nums": {
+        "type": "positive integer",
+        "meaning": "Common history capacity required by current adapter; NOT OPES kernel capacity"
+      },
+      "cv_size": {
+        "type": "positive integer",
+        "from": "actual ordered serialized CV dimension; must match task/manifest"
+      },
+      "cv_storage_interval": {
+        "type": "positive integer",
+        "meaning": "Common/legacy history setting; NOT OPES deposition PACE"
+      },
+      "cv_change_interval": {
+        "type": "positive integer",
+        "meaning": "Common parser/adapter compatibility field; NOT an OPES update stride"
+      },
+      "cv_log_interval": {
+        "type": "positive integer",
+        "meaning": "Native OPES evaluated_step log cadence; map a user log-stride intent here only when that is the intended native meaning"
+      },
+      "neighbor_rc": {
+        "type": "positive number",
+        "from": "actual selected CV cutoff coverage; do not lower the requested cutoff"
+      },
+      "max_neighbors": {
+        "type": "positive integer",
+        "from": "actual manifest/selected construction bound when present, else measured technical evidence or labelled capacity proposal; not atom-count folklore"
+      },
+      "n_atoms": {
+        "type": "positive integer",
+        "from": "actual unchanged structure atom count"
+      },
+      "debug_interval": {
+        "type": "nonnegative integer",
+        "meaning": "0 disables periodic debug output"
+      },
+      "cv_log_path": {
+        "type": "safe basename",
+        "meaning": "OPES column log output; set explicitly instead of inheriting common GASCVlog.txt"
+      }
+    },
+    "opes_consumed_fields": {
+      "opes_max_kernels": {
+        "type": "positive integer",
+        "from": "actual selected model/manifest capacity and user request; must agree; never use max_cv_nums instead"
+      },
+      "opes_state_interval": {
+        "type": "nonnegative integer",
+        "meaning": "0 disables periodic OPES state checkpoints; no exact continuation claim without positive paired state/atomic checkpoints and replay evidence"
+      },
+      "opes_state_path": {
+        "type": "safe basename",
+        "source_default": "OPES_STATE.pt"
+      },
+      "opes_kernels_path": {
+        "type": "safe basename",
+        "source_default": "OPES_KERNELS"
+      },
+      "opes_stop_on_status": {
+        "type": "boolean",
+        "source_default": false,
+        "meaning": "Do not enable scientific stop/basin behavior without the intended model status definition"
+      },
+      "opes_stop_status": {
+        "type": "integer",
+        "source_default": 0,
+        "meaning": "0 selects any nonzero model status when stop_on_status is enabled"
+      }
+    },
+    "source_defaults_not_automatic_choices": {
+      "common_Cpp": {
+        "max_cv_nums": 10000,
+        "cv_storage_interval": 100,
+        "cv_change_interval": 100,
+        "cv_log_interval": 100,
+        "max_neighbors": 256,
+        "debug_interval": 0
+      },
+      "public_writer_CLI": {
+        "max_cv_nums": 10000,
+        "cv_storage_interval": 500,
+        "cv_change_interval": 1,
+        "cv_log_interval": 10,
+        "debug_interval": 0
+      },
+      "policy": "Prefer real manifest evidence (including its actual max_neighbors) and supplied values. Defaults here are observations, not measured neighbor safety or production settings. Keep consequential proposals explicit."
+    },
+    "do_not_serialize": [
+      "pace: OPES model/artifact-owned parameter, not a GAScfg key",
+      "printstride: an intent label, not an inspected OPES native config or base.OPESProcedure key",
+      "nested dynamics/validation/review/units objects: not native parser keys"
+    ]
+  },
+  "fresh_state_and_logs": {
+    "initialization": "Native backend runner obtains exact initial OPES state through initialize_opes_state and sets the next evaluated step to0. This does not assume every selected backend calls the same raw model method; honor its explicit state/manifest/toolchain contract and never fall back. Fresh pyGAS first-update flag suppresses the first deposition. Never seed it from validation history.",
+    "integration_vs_evaluation": "N native integrations have an additional initial force evaluation before the loop in this source. Native OPES counter advances per non-restart-refresh evaluation, not per log row. Preserve user N, time step and physical duration; do not add integration steps to fit expected rows.",
+    "deposition": "After first update, deposition requires step % model.pace ==0 and passes adaptive-bandwidth waiting/exclusion conditions. Kernel logs require deposited>=0.5. Candidate counts are source expectations, not observations.",
+    "colvar_fields": [
+      "step",
+      "bias",
+      "cv_0..cv_(D-1)",
+      "mean_bias_force",
+      "extra_bias",
+      "rct",
+      "zed",
+      "neff",
+      "nker",
+      "work",
+      "excluded",
+      "status",
+      "deposited",
+      "merge_count",
+      "logweight",
+      "probability"
+    ],
+    "kernel_fields": [
+      "step",
+      "cv_0..cv_(D-1)",
+      "sigma_cv_0..sigma_cv_(D-1)",
+      "height",
+      "logweight",
+      "merge_count",
+      "nker"
+    ],
+    "interpretation": "Read actual FIELDS header and rows. State/termination/capacity errors can shorten a run. rct/zed are diagnostics, not reweighting offsets. No exact deposition count, stability, deterministic seed or physical convergence is established by this reference."
+  },
+  "authoring_completion": "Use existing authorized write_project_input with CAS for changed files, then read_project_input for actual bytes/SHA. Publish those native inputs in the same task with original artifact, CV atom selection and units. General target compatibility remains a review/runtime gate, not a reason to leave mechanically authorable files absent. Do not load artifacts, call helper commands, probe, Prepare or execute during draft-only authoring."
+}

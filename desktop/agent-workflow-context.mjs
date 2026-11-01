@@ -32,6 +32,7 @@ export function createAgentWorkflowContext({records,activeTasks,selectedProvider
    return records.read(context.taskId);
   },
   clear(provider){if(current&&(!provider||provider===current.provider)){current=null;serial++;}if(provider)activeTasks.delete(provider);else activeTasks.clear();},
+  revision(){return serial;},
   current(){return current?{...current,...ownedState(current)}:null;}
  };
 }

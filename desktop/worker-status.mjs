@@ -1,3 +1,4 @@
+import {workerServiceVersionEvidence} from './worker-service-version.mjs';
 // Observe only the existing bridge. Never bootstrap, reconnect, or publish secrets.
 export async function readWorkerStatus(worker,currentSettings,{timeoutMs=3000,now=Date.now}={}){
  const result=status=>({status,checkedAt:now()});
@@ -15,5 +16,5 @@ export async function readWorkerStatus(worker,currentSettings,{timeoutMs=3000,no
  if(!current()||health?.name!=='gpu-sampling-studio'||typeof identity.root!=='string'||health.root!==identity.root||health.root!==connection.health?.root)return result('unknown');
  // Match the identity accepted by bootstrap/connect, without adding science gates.
  for(const field of ['runtime','execution_policy'])if(typeof connection.health?.[field]==='string'&&health[field]!==connection.health[field])return result('unknown');
- return result('connected');
+ return {...result('connected'),...workerServiceVersionEvidence(worker)};
 }

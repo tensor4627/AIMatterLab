@@ -115,7 +115,8 @@
       ],
       "reference_files": [
         "references/gpumd.json",
-        "references/pydyn.json"
+        "references/pydyn.json",
+        "references/gpumd-native-input.json"
       ]
     },
     {
@@ -268,7 +269,8 @@
       "phase": "authoring",
       "reference_files": {
         "studio-md-workflow": [
-          "references/gpumd.json"
+          "references/gpumd.json",
+          "references/gpumd-native-input.json"
         ],
         "studio-cv-bias-planning": [
           "references/pygas.json",

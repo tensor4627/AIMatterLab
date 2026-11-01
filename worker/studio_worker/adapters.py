@@ -251,6 +251,8 @@ class Adapter:
     def validate(self, spec, environment, directory, *, probe_report=None, cell_derivative_contract=None):
         # A provenance-only failure may be cached by local Service; the execution
         # gate must inspect the native loader again for every new validation.
+        from .derivative_selection import validate_controls
+        validate_controls(spec.get("parameters", {}), self.engine)
         runtime = self.runtime_check(environment)
         p, directory = spec.get("parameters", {}), Path(directory)
         self.input_contract(spec,directory)
@@ -346,7 +348,7 @@ class Adapter:
                     raise ValueError("Native sampling probe belongs to a different engine/interpreter")
                 if observed.get("pydyn_sampling") is not True:
                     raise ValueError("Selected environment has no pydyn.sampling integration")
-            derivatives = None
+            derivatives = {"status":"not_run", "reason":"OPES stateful finite-difference validation is not implemented; only serialized ABI/state checks were performed"} if p["mode"] == "opes" else None
             if p["mode"] != "opes" and not p["bias_file"].endswith(".pt2"):
                 payload = {**p, "engine":self.engine, "bias_file":str(directory / p["bias_file"]), "structure_file":str(directory / p["structure_file"]), "_studio_cell_contract":cell_derivative_contract}
                 if p.get("validation_history"):
@@ -355,7 +357,7 @@ class Adapter:
                 derivatives = run_json(self.executable(environment,"python"),SCIENTIFIC,"derivatives",payload,process_env(environment,spec["gpu"]),timeout=120)
                 print("Studio validation: sampled force/virial check passed", file=sys.stderr, flush=True)
             return {"status": "passed", "native_runtime":runtime, "artifact_status":"passed", "scientific_status":"not_run", "output": result.stdout[-12000:], "derivatives":derivatives,
-                    "scope": "serialized bias ABI and sampled finite differences; target-engine and restart parity require run evidence"}
+                    "scope": ("serialized OPES ABI/state checks only; finite differences not_run; target-engine and restart parity require run evidence" if p["mode"] == "opes" else "serialized bias ABI and sampled finite differences; target-engine and restart parity require run evidence")}
         if self.engine == "pygas.build" and p.get("output_file", "").endswith(".pt2"):
             raise ValueError("AOTI needs explicit dual export and target-toolchain preflight")
         if self.engine == "pydyn.md":
