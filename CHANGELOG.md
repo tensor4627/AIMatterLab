@@ -5,6 +5,7 @@
 
 | 版本 | 本代更新 | 验证 | 未验证 / 尚待接入 |
 | --- | --- | --- | --- |
+| 0.18.9 开发中（内部包 dev.16，测试中） | 运行详情按需恢复产物列表、连接/身份失效与卸载保护；续算按现有服务契约展示并保留未确认请求 | Node1970 passed/2条件skip＋实际WSL补验3/3、React169/169、worker481、定向31、TypeScript/Vite/包审passed；A新15路/27进程/642文件passed；正常用户加载包SHA一致并恢复原草稿 | A原生16项geometry/激活受阻仍not_run；A57/301、B13/15保持版本范围；新RunDetail原生、companion真实交付/parser/输出、完整菜单/视觉未完成；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.15，尚未启动） | GPUMD sampling 独立输出 companion：原参、含bias势能/总力/运行晶胞、步对齐及状态边界；保留原checkpoint政策 | Node1953/1953、skill校验、TypeScript/Vite/构建及1028程序、9skill/30文件、2077runtime资源、2tools核对passed；A新15路/27进程/642文件有界后台passed | 新companion真实provider交付/目标parser/原生输出及其科学验证not_run；dev.15尚未启动，完整A/B原生、按钮/最终菜单/视觉未完成；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.14，测试中） | 同一指导工具按功能限定document_id，单正文/凭据与24KiB序列化上限 | Node1947/1947、TypeScript/Vite/包文件核对、A新15路27进程642文件passed；真实Codex收到完整12362B并在原流程保存/readback run.in与GAScfg，缺0 | 当前NVE原生输入尚缺动力学输出契约；未Prepare/Execute，新companion另在dev15；完整按钮/最终菜单/视觉未完成；[阶段记录](docs/v0.18.9.md) |
 | 0.18.9 开发中（内部包 dev.13，测试中） | 已有服务全局恢复与版本状态；当前步骤文件名搜索；授权文本交接指导；OPES 复核入口和未实现 FD 如实处理；工作区及待确认事项分层；来源绑定的 GPUMD 原生参数指导 | Node1939 passed/2条件skip（Ubuntu补验3/3）、worker481、前端166、TypeScript/Vite及包文件核对 passed；A新15路/27进程/642文件有界工程 passed | 便携首次启动0x80000003 failed，触发原因未明，正常用户会话启动并恢复原流程passed，首次异常触发原因未定；B剩2条真实界面路线及完整按钮、最终菜单/视觉未完成；OPES stateful FD unsupported/not_run；[阶段记录](docs/v0.18.9.md) |

@@ -1,4 +1,12 @@
 const english:Record<string,string> = {
+"当前续算入口仅支持 GPUMD static；历史依赖采样需独立工作流与恢复契约。":"This continuation entry supports GPUMD static only; history-dependent sampling needs a separate workflow and restart contract.",
+"此任务没有当前续算入口支持的 checkpoint 契约。":"This task has no checkpoint contract supported by this continuation entry.",
+"产物列表响应与当前作业不匹配":"Artifact response does not match the current run",
+"正在读取产物列表…":"Reading artifact list…",
+"产物列表读取失败；可点击收集产物重试。":"Artifact list read failed; use Collect artifacts to retry.",
+"连接已变化；产物列表需重新读取。":"Connection changed; read the artifact list again.",
+"当前结果目录为空。":"The current result directory is empty.",
+
 "已保存导入记录":"Saved import records",
 "已选择：草稿目录":"Selected: draft directory",
 "已选择：工作区":"Selected: workspace",
