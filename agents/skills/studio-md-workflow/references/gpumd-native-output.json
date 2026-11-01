@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "contract": "gpumd-native-output-planning-v1",
+  "scope": "Source-specific public output planning for independent NEP+OPES NVE. Read current source_evidence; stale/unavailable sources mean reference_only, not current effective grammar. Selected executable/source correspondence, parser acceptance and scientific validation remain not_run. Existing artifact/runtime/project/human gates still apply; this reference adds no provenance-proof prerequisite or authorization.",
+  "source_receipt": {
+    "local_files": [
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_parameters/dump_thermo.rst",
+        "sha256": "8afe95288c9e7224025c6ea371edb563c8c6af6171851e3a6d20493af9ac4c9a"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_parameters/dump_exyz.rst",
+        "sha256": "cf3a70f75e6f2e1a92c183d8abfc06d9345a13d4ce2fee108ccd28d1acd27c1a"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/output_files/thermo_out.rst",
+        "sha256": "6bdb2d4d8dd68e5fc5ca90d89c4464679a50b9697ecf778fa449b237ba9d0e4f"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "doc/gpumd/input_parameters/output_format.rst",
+        "sha256": "379320a2bbe6ab46208d358f8526434078def7280eb2633bffcccecf5e9dfac8"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/main_sampling/run.cu",
+        "sha256": "f0820d6ffd04d9dba255c7cad007231a3cc943cec65f68bf38d152aa46f4395e"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/main_gpumd/run.cu",
+        "sha256": "c1cd3a0c9cad78c412e246de6e77dc554de106f7769788cf94434ab31c6b09a4"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/main_sampling/gas-opes.cu",
+        "sha256": "774d1ff70745f9ad267384b73002b50ee46d942c1a5e9d8d28a0b9bff26d806c"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/force/force.cu",
+        "sha256": "e09681f669e88a66027c5ba0e93f0e929acfde226bfc28fc953033ce98841e5d"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/integrate/ensemble_nve.cu",
+        "sha256": "947eeda64b61a3f08a44b5fa2de93963e2a19db18ad72ff8c6a736e9356d7c99"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/integrate/ensemble.cu",
+        "sha256": "513895851049c731e9bc95e8a174a08dc2519475ea5d3b84f91a6113534c32c3"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/measure/dump_thermo.cu",
+        "sha256": "ffe80af47d0e6d402bbea18c476be20181ab93c43614b4b7eaeacd83060fecab"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/measure/dump_exyz.cu",
+        "sha256": "e3909bbdac5ef2f2c0f9170ac709d9f46f6a1793d64b17d12641789f459d2b86"
+      },
+      {
+        "source_id": "gpumd",
+        "path": "src/measure/dump_restart.cu",
+        "sha256": "22d01e2ee5b3dd149acc56336887ab40b8a3378307f89d17b08de0e78dc1e2cb"
+      }
+    ]
+  },
+  "authoring": {
+    "purpose": "Complete requested actual energy, total atomic force and runtime-cell output using native software parameters. Preserve user assets, atom selection, NVE, integration steps, time step, initial velocities/seed plan, OPES settings and existing opes_state_interval: 0. Do not replace native inputs with a gap report when source-matched grammar is available.",
+    "place_before_run": [
+      "dump_thermo 1",
+      "dump_exyz 1 1 1 1"
+    ],
+    "cadence": "These lines request every integrated step for a bounded short example. Retain user-requested output cadence if different. Reissue output commands before each run; their effects are not propagating. Do not assume default thermo/force/cell output.",
+    "preserve_format": "Existing default xyz is text. Do not silently select binary/compressed output or require its build feature. thermo.out and dump.xyz append; record run segment boundaries and preserve existing output."
+  },
+  "grammar": {
+    "dump_thermo": {
+      "syntax": "dump_thermo <interval>",
+      "interval": "positive integer integrated-step interval",
+      "file": "thermo.out"
+    },
+    "dump_exyz": {
+      "syntax": "dump_exyz <interval> [has_velocity [has_force [has_potential [separated]]]]",
+      "interval": "positive integer integrated-step interval",
+      "flags": "Use 0 or 1: include velocity, force, atomic potential energy, and separated files respectively. Omitted flags default0. Positions always included.",
+      "files": "separated0: append dump.xyz; separated1: dump.<integrated-step>.xyz",
+      "example_meaning": "dump_exyz 1 1 1 1 writes positions, velocities, total forces and atomic potential energies each integrated step; omitted separated remains0."
+    }
+  },
+  "energy": {
+    "buffer_contract": "GSRun OPES selects multiple_potentials sum mode. Force compute resets property buffers and sums potentials. TorchOPES adds output bias/N to potential_per_atom and output forces to the existing force_per_atom. NVE compute2 computes thermo from these arrays before measure.process.",
+    "thermo_columns": [
+      "T",
+      "K",
+      "U",
+      "Pxx",
+      "Pyy",
+      "Pzz",
+      "Pyz",
+      "Pxz",
+      "Pxy",
+      "ax",
+      "ay",
+      "az",
+      "bx",
+      "by",
+      "bz",
+      "cx",
+      "cy",
+      "cz"
+    ],
+    "units": "T kelvin; K and U system eV; pressures GPa; cell components Angstrom.",
+    "U": "For the independent NEP+OPES route without other modifiers, U=U_NEP+bias; thermo column3 and EXYZ energy metadata include bias. They are not NEP-only.",
+    "instantaneous_total": "K+U is instantaneous kinetic plus combined potential energy. Do not add bias a second time. Adaptive/time-dependent bias does not imply conservation of this sum.",
+    "NEP_decomposition": "Only for matched same-evaluation bias and no other potential contributions, U_NEP=U-bias. Never align by blindly zipping logs.",
+    "atomic_energy": "energy_atom sums NEP atomic energy plus uniform bias/N. This allocation is bookkeeping, not a unique physical atomic bias energy."
+  },
+  "atomic_and_cell": {
+    "properties": "species:S:1:pos:R:3, optional vel:R:3, forces:R:3, energy_atom:R:1. Keep actual atom order/selection.",
+    "forces": "EXYZ copies current atom.force_per_atom after sum-mode NEP+OPES evaluation: total per-atom Cartesian force in eV/Angstrom. mean_bias_force in OPES COLVAR is only mean norm of bias force, never a substitute.",
+    "units": "pos and Lattice Angstrom; vel Angstrom/fs; energy and energy_atom eV; Time fs.",
+    "Lattice": "Current runtime box.cpu_h serialized as ax ay az bx by bz cx cy cz in EXYZ and thermo. It is not an input-cell label or proof the cell remained unchanged.",
+    "energy_metadata": "EXYZ energy is U, not K+U."
+  },
+  "alignment": {
+    "fresh_run": "One force/OPES evaluation at step0 precedes the integration loop. For a fresh normal uninterrupted N-step run, integrated step j=1..N corresponds to OPES evaluated step j.",
+    "dump_gate": "Dump gate is (zero-based integration loop step+1)%interval==0, after NVE compute2. No initial step0 dump is produced by these commands.",
+    "expected_counts": "With dump intervals1 and cv_log_interval1, normal fresh completion gives N thermo rows and N EXYZ frames, versus N+1 OPES log evaluations0..N. Counts are expectations, not observed results.",
+    "join": "Text EXYZ emits Time (global_time in fs), not explicit Step; thermo has no step column. Join using documented cadence, Time, run segment and explicit OPES step; do not zip first COLVAR step0 with first integrated frame1. Initial global_time need not be0 across multiple runs.",
+    "limits": "Early stop, failure, restart, different intervals or multiple appended runs require actual segment/status verification. More output rows do not mean more integration steps."
+  },
+  "state": {
+    "current_policy": "Keep existing opes_state_interval: 0 for this output repair. Do not automatically enable checkpointing or add restart constraints.",
+    "zero_semantics": "0 disables periodic OPES checkpoints only. If initialized and dirty, the destructor attempts a final checkpoint; failure is caught and printed as OPES-Warn Final checkpoint failed. Existence/success is not guaranteed.",
+    "archive": "Checkpoint writes8 state tensors (opes_kernel_centers, opes_kernel_sigmas, opes_kernel_heights, opes_state_scalars, opes_sigma0, opes_av_cv, opes_av_m2, opes_state_metadata) and next_step through a temporary archive then rename to configured opes_state_path. Not a text trajectory of all states.",
+    "optional_user_request": "If separately requested, positive opes_state_interval enables periodic save when evaluated_step>0 and divisible by interval, after incrementing next_step. Native dump_restart <positive interval> separately writes restart.xyz with current cell, positions, mass, full-step velocities and groups; overwritten at its cadence. Matching cadences can support paired evidence but do not establish transactional pairing across crashes or exact restart parity. Inspect actual checkpoint/restart files, hashes, steps and status before any restart claim.",
+    "limits": "COLVAR state-related scalars/kernel log are diagnostics, not a full serialized state. No claim of checkpoint creation, numerical parity, target format compatibility or successful restart without actual evidence."
+  },
+  "acceptance": "Author with existing authorized write/readback and publish actual input hashes in the same task. Outputs, finite values, target parser acceptance, state file existence, correspondence and any physical conclusions require the existing actual target workflow and human gates. No probe, execution or permission changes are authorized by this document."
+}

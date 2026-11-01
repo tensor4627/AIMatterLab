@@ -116,7 +116,8 @@
       "reference_files": [
         "references/gpumd.json",
         "references/pydyn.json",
-        "references/gpumd-native-input.json"
+        "references/gpumd-native-input.json",
+        "references/gpumd-native-output.json"
       ]
     },
     {
@@ -270,7 +271,8 @@
       "reference_files": {
         "studio-md-workflow": [
           "references/gpumd.json",
-          "references/gpumd-native-input.json"
+          "references/gpumd-native-input.json",
+          "references/gpumd-native-output.json"
         ],
         "studio-cv-bias-planning": [
           "references/pygas.json",

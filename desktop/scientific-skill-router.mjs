@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
+import {toolValueResult} from './tool-failure.mjs';
 import {createHash} from 'node:crypto';
 const PROVIDERS=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const sha=value=>createHash('sha256').update(value).digest('hex');
@@ -49,9 +50,14 @@ export class ScientificSkillRouter {
   }
   return {schema_version:1,scope:'Guidance routing only; source registration is not an available or scientifically validated engine.',functions};
  }
- async read(provider,functionId){
+ documentIds(functionId){
+  const route=this.routes.get(functionId);return route?route.skills.flatMap(id=>{const skill=this.definitions.get(id);return [...skill.files,...route.reference_files?.[id]||[]].map(file=>skill.folder+'/'+file);}):[];
+ }
+ async read(provider,functionId,documentId){
   if(!PROVIDERS.has(provider))throw Error('Unsupported authenticated provider');
   const route=this.routes.get(functionId);if(!route)throw Error('Choose a listed function_id');
+  const documentIds=this.documentIds(functionId);
+  if(documentId!==undefined&&(typeof documentId!=='string'||!documentIds.includes(documentId)))throw Error('Choose an exact document_id advertised for this function_id');
   if(['installation','setup','toolchain'].includes(route.phase)&&await this.setupAllowed(provider,route)!==true)return {status:'blocked',function_id:functionId,reason:'Setup guidance is not loaded in an ordinary calculation. Select the environment setup or explicit repair stage first.',attachments:[]};
   const files=[];let bytes=0;const roots=new Map();
   const check=async()=>{
@@ -67,6 +73,7 @@ export class ScientificSkillRouter {
     if(!inside(root,folder)||await fs.realpath(folder)!==folder)throw Error('Linked or out-of-root skill folder refused');
     roots.set(skill.source,{configured,root});
     for(const relative of [...skill.files,...route.reference_files?.[id]||[]]){
+     if(documentId!==undefined&&skill.folder+'/'+relative!==documentId)continue;
      const target=path.join(folder,...relative.split('/'));if(!inside(folder,target)||await fs.realpath(target)!==target)throw Error('Linked or out-of-root skill file refused');
      const stat=await fs.stat(target);if(!stat.isFile()||stat.size>this.limits.fileBytes||bytes+stat.size>this.limits.totalBytes)throw Error('Public skill context exceeds the bounded file budget');
      const data=await boundedText(target,Math.min(this.limits.fileBytes,this.limits.totalBytes-bytes));if(data.length!==stat.size||await fs.realpath(target)!==target||data.includes(0))throw Error('Public skill file changed or is not text');
@@ -78,7 +85,14 @@ export class ScientificSkillRouter {
    for(const [source,observed] of roots){const configured=await this.sourceRoot(source);if(configured!==observed.configured||await fs.realpath(configured)!==observed.root)throw Error('Public source changed while the route was being read');}
    if(!await check())return {status:'permission_required',function_id:functionId,attachments:[]};
    const digest=sha(files.map(file=>file.name+':'+file.sha256+':'+JSON.stringify(file.source_evidence||null)).join('\n'));
-   return {status:'passed',function_id:functionId,phase:route.phase,capability_status:route.status,scope:'Actual bounded public instructions only; no artifact, installation, engine capability or scientific validation is implied.',digest,bytes,attachments:files.map(({content,...receipt})=>receipt),text:'[Studio scientific function: '+functionId+']\n'+(route.adaptation||'')+'\n'+files.map(file=>'['+file.name+'; SHA256 '+file.sha256+']\n'+(file.source_evidence?'Current source applicability: '+JSON.stringify(file.source_evidence)+'\n':'')+file.content).join('\n')};
+   if(documentId!==undefined){
+    const file=files[0];if(files.length!==1)throw Error('Focused document identity is ambiguous');
+    const {content,...receipt}=file;
+    const result={status:'passed',function_id:functionId,document_id:documentId,scope:'Bounded public guidance only; target runtime and scientific validation not_run.',bytes,attachments:[receipt],text:content};
+    if(Buffer.byteLength(JSON.stringify(toolValueResult(result)),'utf8')>24*1024)throw Error('Focused document exceeds the serialized MCP 24 KiB budget; document body was not delivered. Pagination is not available.');
+    return result;
+   }
+   return {status:'passed',function_id:functionId,document_ids:documentIds,focused_read:'For one complete document call read_scientific_skill with this function_id and an exact document_id from document_ids.',phase:route.phase,capability_status:route.status,scope:'Actual bounded public instructions only; no artifact, installation, engine capability or scientific validation is implied.',digest,bytes,attachments:files.map(({content,...receipt})=>receipt),text:'[Studio scientific function: '+functionId+']\n'+(route.adaptation||'')+'\n'+files.map(file=>'['+file.name+'; SHA256 '+file.sha256+']\n'+(file.source_evidence?'Current source applicability: '+JSON.stringify(file.source_evidence)+'\n':'')+file.content).join('\n')};
   }catch(error){return {status:'blocked',function_id:functionId,reason:error.message,attachments:[]};}
  }
 }
