@@ -16,14 +16,14 @@ export function writePngAtomically(destination,bytes,check,{filesystem=fs,uuid=r
  catch(error){failure=error;throw error;}
  finally{const cleanup=[];if(descriptor!==undefined)try{filesystem.closeSync(descriptor);}catch(error){cleanup.push(error);}if(created)try{filesystem.unlinkSync(temporary);}catch(error){cleanup.push(error);}if(cleanup.length)throw new AggregateError(failure?[failure,...cleanup]:cleanup,'工作台图像临时文件清理失败');}
 }
-export function createWorkbenchImageExporter({ownerForEvent,displayScale,showSaveDialog,decodePng,write=writePngAtomically,timeoutMs=10_000,timers={set:setTimeout,clear:clearTimeout}}){
+export function createWorkbenchImageExporter({ownerForEvent,displayScale,showSaveDialog,decodePng,privacy=()=>({active:false,revision:0}),write=writePngAtomically,timeoutMs=10_000,timers={set:setTimeout,clear:clearTimeout}}){
  const pending=new WeakSet();
  return async function save(data,event){
   if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).length)throw Error('工作台图像请求必须为空');
-  const owner=ownerForEvent(event);if(!owner)throw Error('工作台图像窗口身份不匹配');const contents=owner.webContents,frame=event.senderFrame,url=contents.getURL();
+  const owner=ownerForEvent(event);if(!owner)throw Error('工作台图像窗口身份不匹配');const contents=owner.webContents,frame=event.senderFrame,url=contents.getURL(),privacyEpoch=privacy().revision;
   if(pending.has(owner))throw Error('工作台图像正在导出');pending.add(owner);let invalid=false,timer;
   const invalidate=()=>{invalid=true;};
-  const check=()=>{if(invalid||ownerForEvent(event)!==owner||owner.isDestroyed()||contents!==owner.webContents||contents.isDestroyed()||event.sender!==contents||event.senderFrame!==frame||frame?.parent||frame!==contents.mainFrame||frame?.url!==url||contents.getURL()!==url||!owner.isVisible()||owner.isMinimized())throw Error('工作台窗口已关闭、隐藏或变化，图像未保存');};
+  const check=()=>{const state=privacy();if(state.active||state.revision!==privacyEpoch)throw Error('请先关闭私有认证界面；本次工作台图像未保存');if(invalid||ownerForEvent(event)!==owner||owner.isDestroyed()||contents!==owner.webContents||contents.isDestroyed()||event.sender!==contents||event.senderFrame!==frame||frame?.parent||frame!==contents.mainFrame||frame?.url!==url||contents.getURL()!==url||!owner.isVisible()||owner.isMinimized())throw Error('工作台窗口已关闭、隐藏或变化，图像未保存');};
   owner.on('closed',invalidate);contents.on('destroyed',invalidate);contents.on('did-start-navigation',invalidate);
   try{
    const geometry=()=>{const [width,height]=owner.getContentSize(),scale=displayScale(owner),zoomFactor=contents.getZoomFactor();dimensions(width,height);if(!Number.isFinite(scale)||scale<=0||!Number.isFinite(zoomFactor)||zoomFactor<=0||Math.ceil(width*scale)*Math.ceil(height*scale)>IMAGE_LIMITS.devicePixels)throw Error('工作台设备像素估算超过诊断导出上限');return {width,height,displayScale:scale,zoomFactor};};

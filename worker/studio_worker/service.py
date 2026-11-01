@@ -385,6 +385,7 @@ class Service(RuntimeServiceMixin):
 
     def close(self):
         self.stop_event.set()
+        self.clusters.close()
         if hasattr(self, "scheduler"):
             self.scheduler.join(3)
         if hasattr(self, "authority_lock"):

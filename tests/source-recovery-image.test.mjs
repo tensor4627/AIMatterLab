@@ -21,6 +21,14 @@ function imageFixture() {
  return{contents,owner,image,png,event,calls,options};
 }
 
+const imageWait=()=>{let resolve;return {promise:new Promise(done=>{resolve=done;}),resolve:value=>resolve(value)};};
+test('workbench capture refuses an active private authentication pane before capture or save dialog',async()=>{const f=imageFixture();f.options.privacy=()=>({active:true,revision:1});await assert.rejects(createWorkbenchImageExporter(f.options)({},f.event),/私有认证/);assert.deepEqual(f.calls,[]);});
+test('a pane opened and closed while capture is pending still invalidates the private image epoch',async()=>{const f=imageFixture(),wait=imageWait();let state={active:false,revision:0};f.options.privacy=()=>state;f.contents.capturePage=()=>{f.calls.push('capture');return wait.promise;};const pending=createWorkbenchImageExporter(f.options)({},f.event);await Promise.resolve();state={active:true,revision:1};state={active:false,revision:2};wait.resolve(f.image);await assert.rejects(pending,/私有认证/);assert.deepEqual(f.calls,['capture']);});
+test('a private pane appearing and disappearing during the save dialog prevents any image write',async()=>{const f=imageFixture(),wait=imageWait();let state={active:false,revision:0};f.options.privacy=()=>state;f.options.showSaveDialog=()=>{f.calls.push('dialog');return wait.promise;};const pending=createWorkbenchImageExporter(f.options)({},f.event);while(!f.calls.includes('dialog'))await new Promise(resolve=>setImmediate(resolve));state={active:true,revision:1};state={active:false,revision:2};wait.resolve({canceled:false,filePath:path.resolve(os.tmpdir(),'synthetic-workbench.png')});await assert.rejects(pending,/私有认证/);assert(!f.calls.includes('write'));});
+test('private epoch change after temporary PNG write prevents rename and cleans only its own temporary file',async()=>{
+ const f=imageFixture();let state={active:false,revision:0};const operations=[];f.options.privacy=()=>state;f.options.showSaveDialog=async()=>({canceled:false,filePath:path.resolve(os.tmpdir(),'synthetic-workbench.png')});const filesystem={openSync:()=>{operations.push('open');return 5;},writeFileSync:()=>{operations.push('write');state={active:true,revision:1};state={active:false,revision:2};},fsyncSync:()=>operations.push('fsync'),closeSync:()=>operations.push('close'),renameSync:()=>operations.push('rename'),unlinkSync:()=>operations.push('unlink')};f.options.write=(destination,bytes,check)=>writePngAtomically(destination,bytes,check,{filesystem,uuid:()=> 'owned-synthetic'});await assert.rejects(createWorkbenchImageExporter(f.options)({},f.event),/私有认证/);assert(!operations.includes('rename'));assert.equal(operations.filter(value=>value==='unlink').length,1);
+});
+
 test('unscoped Codex event fails closed once with safe tool diagnostic',()=>{
  const bridge=new CodexBridge({strictIsolation:true}),events=[];let kills=0;
  bridge.process={kill(){kills++;}};bridge.on('event',e=>events.push(e));

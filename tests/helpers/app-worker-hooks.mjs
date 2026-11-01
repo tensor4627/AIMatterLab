@@ -6,9 +6,12 @@ import * as shell from '../../src/workspace-shell.mjs';
 import * as navigation from '../../src/workspace-navigation.mjs';
 import * as workflows from '../../shared/workflows.mjs';
 import * as diagnostics from '../../shared/ui-diagnostics.mjs';
+import * as computeCommand from '../../shared/compute-connection-command.mjs';
 import {memoryStorage} from './agent-hooks.mjs';
 const source=fs.readFileSync(new URL('../../src/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+// App tests explicitly acknowledge the child guide result; no automatic completion.
+export async function completeComputeGuide(h,connected){const guide=h.find(node=>node.type==='./ComputeConnectionGuide');guide.props.onClose(connected);await h.flush();return guide.props;}
 export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={}){
  const hooks=[],pending=[],listeners=[],calls=[],settings={distribution:'Saved Ubuntu',workerRoot:'~/saved',workerPort:8767,theme:'dark',skillRoots:[]};let cursor=0,dirty=false,tree,disposed=false;
  const useState=initial=>{const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{const value=typeof next==='function'?next(hooks[index].value):next;if(!Object.is(value,hooks[index].value)){hooks[index].value=value;dirty=true;}}];};
@@ -33,6 +36,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   if(name==='./workspace-navigation.mjs')return navigation;
   if(name==='../shared/workflows.mjs')return workflows;
   if(name==='../shared/ui-diagnostics.mjs')return diagnostics;
+  if(name==='../shared/compute-connection-command.mjs')return computeCommand;
   if(name==='../package.json')return {version:'source-fixture'};
   if(name==='./types')return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),readWorkerStatus:()=>invoke('worker.status'),restoreWorker:owner=>invoke('worker.restore',typeof owner==='string'?{taskId:owner}:owner),engines:[],wslPath:value=>value};
   if(name==='./i18n')return {t:value=>value,tr:value=>value,setLanguage:()=>{}};

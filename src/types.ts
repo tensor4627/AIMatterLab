@@ -26,6 +26,7 @@ export const api=<T=any>(method:string,target:string,data?:unknown)=>invoke<T>('
 export interface WorkerStatus {status:'connected'|'disconnected'|'unknown'|'checking';checkedAt:number;taskId?:string;conversationId?:string;scope?:'global';serviceVersion?:'current'|'different'|'unconfirmed';reason?:string}
 export const readWorkerStatus=()=>invoke<WorkerStatus>('worker.status');
 export const restoreWorker=(owner:string|{conversationId:string}|{scope:'global'})=>invoke<WorkerStatus>('worker.restore',typeof owner==='string'?{taskId:owner}:owner);
+export interface ComputeConnectionView {planId:string|null;status:string;phase:string;scope?:'task'|'saved-global'|'global';taskId?:string|null;ownerName?:string|null;locked?:boolean;needsLegacyPort?:boolean;portSource?:'unknown'|'saved'|'verified'|'human-confirmed';canChooseSource?:boolean;canUpdate?:boolean;distributions?:string[];target?:{distribution:string;root:string;port:number|null}|null;connection:string;discovery:string;scientificValidation?:'not_run';serviceVersion?:string;resolvedRoot?:string;mode?:string;environments?:number;finished:boolean;error?:{code:string;message:string}}
 export function wslPath(path:string){return /^[a-z]:[\\/]/i.test(path)?'/mnt/'+path[0].toLowerCase()+'/'+path.slice(3).replaceAll('\\','/'):path}
 export const engines=[
  ['gpumd.neb','GPU-Sampling · NEB'],['gpumd.md','GPUMD · 传统 MD'],['pydyn.md','PyDyn · 传统 MD'],['pygas.build','pyGAS · Bias 构建'],

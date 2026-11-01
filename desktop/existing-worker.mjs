@@ -98,3 +98,59 @@ export async function readExistingWorker(settings,{execute=exec}={}){
  const result=JSON.parse(stdout.trim().split('\n').at(-1));
  return result;
 }
+
+// Snapshot preflight only, not an atomic cross-process root lock. Never sends a
+// token or stops a process. Bootstrap separately verifies its connected socket.
+export const LEGACY_WORKER_START_PROBE=String.raw`import json,os,sys,socket,time
+from pathlib import Path
+result={"status":"unknown"}
+try:
+ root=Path(sys.argv[1]).expanduser().resolve()
+ port=int(sys.argv[2]); deadline=time.monotonic()+2
+ if str(root)!=sys.argv[1] or root.exists() and root.stat().st_uid!=os.getuid(): raise ValueError()
+ def process_start(process):
+  with (process/'stat').open('rb') as stream: value=stream.read(8193)
+  if len(value)>8192: raise ValueError()
+  return value.decode().rsplit(')',1)[1].split()[19]
+ count=0; conflict=False
+ for process in Path('/proc').iterdir():
+  if not process.name.isdigit(): continue
+  count+=1
+  if count>8192 or time.monotonic()>deadline: raise ValueError()
+  root_candidate=False
+  try:
+   if process.stat().st_uid!=os.getuid(): continue
+   with (process/'cmdline').open('rb') as stream: raw=stream.read(65537)
+   if len(raw)>65536: raise ValueError()
+   argv=raw.decode().rstrip('\0').split('\0')
+   if 'studio_worker.server' not in argv: continue
+   roots=[]
+   for index,value in enumerate(argv):
+    if value=='--root': roots.append(argv[index+1])
+    elif value.startswith('--root='): roots.append(value.split('=',1)[1])
+   if not roots: raise ValueError()
+   resolved=[Path(value).expanduser().resolve() for value in roots]
+   root_candidate=root in resolved
+   if len(roots)!=1 or len(argv)!=7 or argv[1:4]!=['-m','studio_worker.server','--root'] or argv[5]!='--port' or not argv[6].isdigit(): raise ValueError()
+   candidate=resolved[0]
+   if candidate!=root: continue
+   root_candidate=True
+   start=process_start(process)
+   if argv!=[argv[0],'-m','studio_worker.server','--root',str(root),'--port',argv[-1]] or not argv[-1].isdigit(): raise ValueError()
+   with (process/'cmdline').open('rb') as stream: fresh=stream.read(65537)
+   if fresh!=raw or process_start(process)!=start: raise ValueError()
+   conflict=True
+  except FileNotFoundError:
+   if root_candidate: raise ValueError()
+   continue
+ if conflict: result={"status":"same_root_controller"}
+ else:
+  with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as probe:
+   try: probe.bind(('127.0.0.1',port)); result={"status":"available"}
+   except OSError: result={"status":"occupied"}
+except Exception: result={"status":"unknown"}
+print(json.dumps(result))`;
+export async function probeLegacyWorkerStart(settings,{execute=exec}={}){
+ if(!/^[\w .-]{1,80}$/.test(settings.distribution)||typeof settings.workerRoot!=='string'||!settings.workerRoot.startsWith('/')||/[\r\n\0]/.test(settings.workerRoot)||!Number.isInteger(settings.workerPort)||settings.workerPort<1024||settings.workerPort>65535)throw Error('Invalid legacy worker target');
+ try{const {stdout}=await execute('wsl.exe',['-d',settings.distribution,'--','python3','-B','-c',LEGACY_WORKER_START_PROBE,settings.workerRoot,String(settings.workerPort)],{windowsHide:true,timeout:6000,maxBuffer:8192});const value=JSON.parse(stdout.trim());return {status:['available','same_root_controller','occupied','unknown'].includes(value?.status)?value.status:'unknown'};}catch{return {status:'unknown'};}
+}

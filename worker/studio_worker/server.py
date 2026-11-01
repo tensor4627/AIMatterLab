@@ -164,6 +164,13 @@ def mcp_tool_call(service, params):
         result = result_for_agent(name, dispatch(service, method, route, arguments, admin=False),arguments)
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": False}
     except Exception as exc:
+        from .ssh_auth import AuthError
+        if isinstance(exc, AuthError):
+            failure = {'status': 'needs_human_auth', 'code': 'needs_human_auth',
+                       'message': 'Open private authentication in the desktop cluster connection page.',
+                       'automatic_retry': False, 'operation_state': 'unconfirmed' if started else 'not_started',
+                       'next_step': 'The human must authenticate the saved connection, then inspect existing run status. Never resend an unknown submission.'}
+            return {'content': [{'type': 'text', 'text': json.dumps(failure)}], 'isError': True}
         if isinstance(params,dict) and params.get("name")=="inspect_source_project":
             failure={"status":"blocked","code":"source_read_failed" if started else "invalid_input","message":str(exc)[:4000],"operation_state":"read_started" if started else "not_started","automatic_retry":False,"next_step":"This is read-only source inspection, not an unknown write. Request current advertised identities with the suggested Studio call; split api_symbols into smaller selections (max4 and16KiB code/default trees). Do not read source via project-input tools or discover other MCP resources."}
             arguments=params.get("arguments",{})
@@ -314,6 +321,25 @@ def dispatch(service, method, path, data, admin=False):
         leaf(data["task_id"])
         validate_task(data)
         return store.put("task-parameters",{"id":data["task_id"],"kind":"task-parameters","name":data["name"],"parameters":data["parameters"],"steps":data["steps"],"missing_fields":data["missing_fields"],"status":"draft"})
+    if path.startswith('/api/cluster/auth/') or path.startswith('/api/cluster/tunnel/'):
+        if not admin:
+            raise PermissionError('Private SSH authentication requires the desktop human pane')
+        from .ssh_auth import AuthError
+        group, operation = path.rsplit('/', 2)[-2:]
+        allowed = {'auth': ('plan', 'start', 'read', 'input', 'resize', 'finish'),
+                   'tunnel': ('plan', 'start', 'status', 'close')}
+        if operation not in allowed.get(group, ()):
+            raise ValueError('Unsupported private SSH operation')
+        try:
+            controller = service.clusters.auth if group == 'auth' else service.clusters.tunnels
+            result = getattr(controller, operation)(data)
+            if group == 'auth' and operation == 'plan' and service.clusters._tunnels is not None:
+                result['tunnels'] = service.clusters.tunnels.for_session(result['sessionId'])
+            return result
+        except AuthError as exc:
+            raise ValueError(str(exc)) from None
+        except Exception:
+            raise ValueError('private_ssh_operation_failed') from None
     if path=="/api/clusters":
         if not admin:raise PermissionError("Only the desktop user can register cluster connections")
         return service.clusters.register(data)

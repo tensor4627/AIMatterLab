@@ -166,6 +166,28 @@ def profile(value):
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("Invalid SSH port")
     p["port"] = port
+    p.setdefault('auth_mode', 'key')
+    if p['auth_mode'] not in ('key', 'interactive'):
+        raise ValueError('Select key/agent or private human authentication')
+    for field in ('via', 'proxy_jump'):
+        if not isinstance(p.get(field, []), list) or len(p.get(field, [])) > 8:
+            raise ValueError('Bounded explicit SSH route required')
+    if p['auth_mode'] == 'interactive' and p.get('via'):
+        raise ValueError('Private human authentication does not support legacy remote via; review migration explicitly')
+    if p['auth_mode'] == 'interactive':
+        from .ssh_auth import reviewed_jumps, AuthError
+        try:
+            reviewed_jumps(p)
+        except AuthError:
+            raise ValueError('Controlled ProxyJump requires explicit user@host:port for every hop') from None
+    else:
+        # Legacy key/config aliases retain their existing grammar. Controlled
+        # routes use reviewed_jumps directly, including complete bracketed IPv6.
+        for hop in p.get('proxy_jump', []):
+            if not isinstance(hop, str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.@:-]{0,255}', hop):
+                raise ValueError('Invalid local ProxyJump hop')
+    if p.get('identity_file') and (not isinstance(p['identity_file'], str) or any(c in p['identity_file'] for c in ('\n', '\r', '\0'))):
+        raise ValueError('Invalid identity reference')
     for hop in p.get("via", []):
         word(hop, "SSH hop")
     for key in ("ssh_client", "remote_root"):
@@ -200,7 +222,7 @@ def profile(value):
 
 
 def public(p):
-    value={k: p.get(k) for k in ("id", "name", "scheduler", "version", "queue", "environment", "limits", "activation", "probe", "lsf_memory_scope")}
+    value={k: p.get(k) for k in ("id", "name", "scheduler", "version", "queue", "environment", "limits", "activation", "probe", "lsf_memory_scope", "auth_mode")}
     health=dict(p.get('connection_check') or {'status':'not_run','scope':'Connection has not been checked in this version'})
     if health.get('observed_at') and (health.get('version')!=p.get('version') or time.time()-health['observed_at']>900):health['status']='stale'
     value['connection_check']=health
@@ -208,14 +230,17 @@ def public(p):
 
 
 class SSH:
-    def __init__(self, p):
-        self.p = p
+    def __init__(self, p, auth=None):
+        self.p, self.auth = p, auth
 
-    def run(self, script, data=None, timeout=40):
+    def _key_args(self, script):
+        """The same legacy key/agent/client route for both command paths."""
         p = self.p
         host, username = ssh_endpoint(p)
         args = [p["ssh_client"], "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                 "-o", "ConnectTimeout=12", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2"]
+        if p.get('proxy_jump'):
+            args += ['-J', ','.join(p['proxy_jump'])]
         if p.get("identity_file"):
             args += ["-i", p["identity_file"]]
         args += ["-l", username, "-p", str(p["port"])]
@@ -223,6 +248,27 @@ class SSH:
         for hop in reversed(p.get("via", [])):
             remote = "ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes " + shlex.quote(hop) + " " + shlex.quote(remote)
         args += [host, remote]
+        return args
+
+    def original_key_identity(self):
+        """Bound this new read-only check during collection, including stderr."""
+        from .source_git_identity import _bounded_process, SourceGitError
+        try:
+            result = _bounded_process(self._key_args('id -un'), env=None, timeout=25,
+                                      stdout_limit=8192, stderr_limit=8192)
+            if result.returncode:
+                raise ConnectionError('Original SSH user check failed')
+            return result.stdout
+        except (OSError, subprocess.TimeoutExpired, SourceGitError):
+            raise ConnectionError('Original SSH user check failed') from None
+
+    def run(self, script, data=None, timeout=40):
+        p = self.p
+        if p.get('auth_mode', 'key') == 'interactive':
+            if not self.auth:
+                raise ConnectionError('needs_human_auth')
+            return self.auth.execute(p, script, data=data, timeout=timeout)
+        args = self._key_args(script)
         try:
             result = subprocess.run(args, input=data, capture_output=True, timeout=timeout)
         except (subprocess.TimeoutExpired, OSError):
@@ -321,10 +367,40 @@ class PlanningAdapter(Adapter):
 
 
 class Clusters:
-    def __init__(self, service, transport=SSH):
-        self.service, self.store, self.transport = service, service.store, transport
+    def __init__(self, service, transport=None):
+        self.service, self.store = service, service.store
+        self._auth, self._tunnels = None, None
+        self.transport = transport or self._transport
         self.last_poll = 0
         self.prepare_lock = threading.RLock()
+        self._private_init_lock = threading.RLock()
+
+    @property
+    def auth(self):
+        with self._private_init_lock:
+            if self._auth is None:
+                from .ssh_auth import SSHAuth
+                self._auth = SSHAuth(self.service)
+        return self._auth
+
+    @property
+    def tunnels(self):
+        with self._private_init_lock:
+            if self._tunnels is None:
+                from .ssh_tunnel import SSHTunnels
+                self._tunnels = SSHTunnels(self.auth)
+        return self._tunnels
+
+    def _transport(self, p):
+        # The immutable run snapshot reaches this factory unchanged. Never look up
+        # a newer profile by id to resolve authentication for an old job.
+        return SSH(p, self.auth if p.get('auth_mode', 'key') == 'interactive' else None)
+
+    def close(self):
+        if self._tunnels is not None:
+            self._tunnels.close_all()
+        if self._auth is not None:
+            self._auth.close()
 
     def register(self, value):
         p = profile(value)
@@ -347,6 +423,42 @@ class Clusters:
             raise PermissionError("Cluster is not authorized for this project")
         return project, self.store.get("cluster", cluster_id)
 
+    def original_auth_source(self, identifier):
+        """Resolve local immutable provenance, without polling or a current lease."""
+        leaf(identifier)
+        with self.store.lock:
+            run = self.raw(identifier)
+            if (run.get('id') != identifier or run.get('kind') != 'cluster-run' or
+                    not isinstance(run.get('nonce'), str) or not 1 <= len(run['nonce']) <= 256 or
+                    not isinstance(run.get('project_id'), str) or not isinstance(run.get('cluster_id'), str)):
+                raise ValueError('Original cluster run identity unavailable')
+            # The current policy remains authoritative; the current profile is
+            # never substituted for the immutable routing snapshot below.
+            self.allowed(run['project_id'], run['cluster_id'])
+            snapshot = run.get('cluster_snapshot')
+            if (not isinstance(snapshot, dict) or snapshot.get('id') != run['cluster_id'] or
+                    type(snapshot.get('version')) is not int or snapshot['version'] < 1 or
+                    snapshot.get('auth_mode', 'key') not in ('interactive', 'key')):
+                raise ValueError('Original cluster snapshot unavailable')
+            encoded = json.dumps(snapshot, sort_keys=True, separators=(',', ':'), allow_nan=False)
+            receipt = {'runId': identifier, 'nonce': run['nonce'], 'projectId': run['project_id'],
+                       'clusterId': run['cluster_id'], 'version': snapshot['version'],
+                       'snapshotDigest': hashlib.sha256(encoded.encode()).hexdigest()}
+            origin = {'kind': 'original-run', 'runId': identifier,
+                      'runName': run.get('name', 'Original cluster run'), 'projectId': run['project_id'],
+                      'clusterId': run['cluster_id'], 'version': snapshot['version']}
+            return {'profile': json.loads(encoded), 'sourceReceipt': receipt, 'origin': origin}
+
+    def original_key_check(self, snapshot):
+        """Read-only legacy key/agent/via check; never register or update health."""
+        if snapshot.get('auth_mode', 'key') != 'key':
+            raise ValueError('Original key connection required')
+        _host, username = ssh_endpoint(snapshot)
+        output = self.transport(snapshot).original_key_identity()
+        if not isinstance(output, str) or len(output.encode()) > 8192 or output.strip().splitlines() != [username]:
+            raise ConnectionError('Original SSH user check failed')
+        return {'status': 'passed'}
+
     def test_connection(self, value):
         p = profile(value)
         p['_check_started_at']=time.time()
@@ -367,6 +479,7 @@ class Clusters:
             except ValueError:return  # An unsaved form has no authoritative health record.
             keys=('host','username','target','port','ssh_client','identity_file','via','version')
             if any(current.get(key)!=original.get(key) for key in keys):return
+            if current.get('auth_mode','key')!=original.get('auth_mode','key') or current.get('proxy_jump',[])!=original.get('proxy_jump',[]):return
             started=original.get('_check_started_at',time.time())
             if current.get('connection_check',{}).get('attempted_at',0)>started:return
             current['connection_check']={**result,'observed_at':time.time(),'attempted_at':started,'version':current['version'],'compute_node_status':'not_run'}
@@ -712,20 +825,40 @@ except Exception as e:
         return buffer.getvalue()
 
     def submit(self, identifier):
-        with self.store.lock:
+        def reviewed():
             r=self.raw(identifier)
             project,p=self.allowed(r["project_id"],r["cluster_id"])
             if r.get("superseded_by"):raise ValueError("Review and submit the revised snapshot")
             if r["status"] in ("queued","running","unknown",*TERMINAL):
-                return self.run(identifier)
+                return None,None
             if r["status"]!="ready" or r["validation"]["status"]!="passed":
                 raise ValueError("Review and validate before submitting")
             self.validate(identifier)
             busy=[x for x in self.store.list("cluster-run") if x["project_id"]==r["project_id"] and x["status"] in ("queued","running","unknown")]
             if len(busy)+sum(x["project_id"]==r["project_id"] and x["status"] in ("running","unknown") for x in self.store.runs())>=project["policy"]["max_concurrent"]:
                 raise PermissionError("Project concurrency limit reached")
-            # Persist uncertain state BEFORE any remote submission; never retry this operation automatically.
-            self.save(r,status="unknown",submit_attempted=True)
+            return r,p
+
+        with self.store.lock:
+            r,p=reviewed()
+            if r is None:return self.run(identifier)
+            interactive=self.transport==self._transport and r['cluster_snapshot'].get('auth_mode','key')=='interactive'
+            snapshot=dict(r['cluster_snapshot']) if interactive else None
+            if not interactive:
+                self.save(r,status="unknown",submit_attempted=True)
+        if interactive:
+            # Auth methods may acquire auth -> Store locks. Never invert that
+            # ordering by checking authentication while holding Store.lock.
+            self.auth.resolve(snapshot)
+            with self.store.lock:
+                r,p=reviewed()
+                if r is None:return self.run(identifier)
+                if r['cluster_snapshot']!=snapshot:
+                    raise ValueError('Reviewed cluster snapshot changed before submission')
+                p=r['cluster_snapshot']
+                # An expiry after this proof is a genuine dispatch race. Record
+                # uncertainty before attempting transport and never replay it.
+                self.save(r,status="unknown",submit_attempted=True)
         source="""
 import pathlib,tarfile,sys,io,subprocess,os
 root=pathlib.Path(p['root']).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
@@ -811,10 +944,15 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 if result.get("validation",{}).get("status")!="passed" and status=="succeeded":
                     status="unknown"
             if state in ("EXIT","CANCELLED") and r.get("cancel_requested") and result.get("exit",{}).get("exit_code")!=0:status="cancelled"
-            self.save(r,status=status,job_id=result.get("job_id") or r["job_id"],scheduler_state=state,
+            self.save(r,status=status,job_id=result.get("job_id") or r["job_id"],scheduler_state=state,connection_action=None,
                       scientific_validation=result.get("validation",r.get("scientific_validation")),exit=result.get("exit"),identity_verified=result.get("identity_verified",False))
-        except Exception:
-            self.save(r,status="unknown",error="SSH or scheduler state unavailable; no resubmission")
+        except Exception as error:
+            from .ssh_auth import AuthError
+            changes = {}
+            if isinstance(error, AuthError) and str(error) == 'needs_human_auth':
+                changes['connection_action'] = {'kind': 'authenticate_original_run',
+                                                'code': 'needs_human_auth', 'runId': r['id']}
+            self.save(r,status="unknown",error="SSH or scheduler state unavailable; no resubmission",**changes)
         return self.run(identifier)
 
     def cancel(self, identifier):

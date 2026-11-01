@@ -28,6 +28,8 @@ flowchart LR
 
 询问用户是否需要集群，优先导入已有 SSH 引用。先只读核验登录用户、调度器及队列，再讨论目标队列、资源与激活路径，使用 `draft_cluster_setup` 生成可审阅设置；连接检查不提交任务。连接页显示实际检查时间，失败清除旧成功，修改配置或结果过旧后显示待复查。计算节点 GPU/模型仍需用户审阅后的短例，不把登录节点探测当成安装成功。
 
+dev.18 的[连接引导实施契约](design/compute-connection-hil.md)进一步区分本地 WSL、已有密钥/转发入口与人工二步认证。安装 Agent 只收集所选来源、用户名和密钥引用等必要设置；密码、私钥和验证码由用户在对应认证界面处理，不写进安装 prompt 或交给模型。连接设置与项目使用范围分开，登录节点检查与执行节点短例分开。该改造目前处于源码阶段，安装器不能因文档存在就宣称支持真实 MFA，也不能用自动重试替代人工认证。日常运行继续使用登记环境与运行时收据，不重新载入安装说明或重新安装软件。
+
 ## 配置与命令
 
 复制 installation/config.example.json 到忽略目录，填写目标 Linux Python 及 repositories。Windows Node 22.19+、pnpm 11、目标 Python 3.10+。Codex 需要兼容固定 app-server 协议的 CLI；Kimi / Qwen 使用已锁定官方 ACP runtime，认证由用户完成。版本信息见 desktop/generated/version.json 和 package.json。

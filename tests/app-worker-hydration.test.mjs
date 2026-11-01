@@ -1,7 +1,8 @@
-import test from 'node:test';
+import nodeTest from 'node:test';
 import assert from 'node:assert/strict';
 import {deferred,memoryStorage} from './helpers/agent-hooks.mjs';
-import {appWorkerHarness} from './helpers/app-worker-hooks.mjs';
+import {appWorkerHarness,completeComputeGuide} from './helpers/app-worker-hooks.mjs';
+const test=(name,fn)=>nodeTest(name,{timeout:5000},fn);
 const footer=h=>h.text(h.find(node=>node.props?.className==='statusbar'));
 const queue=h=>h.text(h.find(node=>node.props?.className==='queue-empty'));
 const queueTab=h=>h.text(h.find(node=>node.props?.className==='bottom-tabs'));
@@ -21,12 +22,14 @@ for(const status of ['disconnected','unknown','rejected'])test('App '+status+' e
 test('App late failed observation cannot overwrite a newer successful connection event',async()=>{
  const pending=deferred();const h=appWorkerHarness({override:(method,data,standard)=>method==='worker.restore'&&data.scope==='global'?pending.promise:standard(method,data)});await h.flush();held(h,'worker.restore',{scope:'global'});assert.deepEqual(dependent(h),[]);h.emit({method:'studio/workerConnected',params:{}});await h.flush();assert.equal(h.calls.filter(call=>call.method==='worker.status').length,1);assert(footer(h).includes('WSL 已连接'));pending.resolve({status:'unknown',scope:'global',checkedAt:1});await h.flush();assert(footer(h).includes('WSL 已连接'));assert(queue(h).includes('队列空闲'));assert.deepEqual(writes(h),[]);h.unmount();
 });
-test('App explicit failed connection invalidates a late successful hydration and later explicit recovery still works',async()=>{
- const pending=deferred();let fail=true;const h=appWorkerHarness({override:(method,data,standard)=>{if(method==='worker.restore'&&data.scope==='global')return pending.promise;if(method==='worker.connect'&&fail)throw Error('explicit connection failed');return standard(method,data);}});
- await h.flush();held(h,'worker.restore',{scope:'global'});assert.deepEqual(dependent(h),[]);h.connect();await h.flush();assert.equal(h.calls.filter(call=>call.method==='worker.connect').length,1);assert.deepEqual(dependent(h),[]);
+test('App completed guide health failure invalidates late hydration and a later explicit recovery works',async()=>{
+ const pending=deferred();let fail=true;const h=appWorkerHarness({override:(method,data,standard)=>{if(method==='worker.restore'&&data.scope==='global')return pending.promise;if(method==='worker.status')return {status:fail?'disconnected':'connected',checkedAt:1};return standard(method,data);}});
+ await h.flush();held(h,'worker.restore',{scope:'global'});assert.deepEqual(dependent(h),[]);h.connect();await h.flush();assert(!h.calls.some(call=>call.method==='worker.status'));await completeComputeGuide(h,true);assert.equal(h.calls.filter(call=>call.method==='worker.status').length,1);assert.deepEqual(dependent(h),[]);
  pending.resolve({status:'connected',scope:'global',checkedAt:1});await h.flush();assert(footer(h).includes('WSL 未连接'));assert(queue(h).includes('状态未知'));assert.deepEqual(dependent(h),[]);
- fail=false;h.connect();await h.flush();held(h,'worker.status');assert(footer(h).includes('WSL 已连接'));assert(queue(h).includes('队列空闲'));assert.equal(h.calls.filter(call=>call.method==='worker.connect').length,2);assert(!h.calls.some(call=>['task.create','task.deployment.prepare','task.execute'].includes(call.method)||call.method==='agent.rpc'));h.unmount();
+ fail=false;h.connect();await h.flush();await completeComputeGuide(h,true);assert.equal(h.calls.filter(call=>call.method==='worker.status').length,2);assert(footer(h).includes('WSL 已连接'));assert(queue(h).includes('队列空闲'));assert.equal(h.calls.filter(call=>call.method==='worker.connect').length,0);assert(!h.calls.some(call=>['task.create','task.deployment.prepare','task.execute'].includes(call.method)||call.method==='agent.rpc'));h.unmount();
 });
+
+test('App cancelled guide leaves pending read-only restoration valid and performs no implicit connection',async()=>{const pending=deferred(),h=appWorkerHarness({override:(method,data,standard)=>method==='worker.restore'&&data.scope==='global'?pending.promise:standard(method,data)});await h.flush();h.connect();await h.flush();await completeComputeGuide(h,false);assert(!h.calls.some(call=>call.method==='worker.status'||call.method==='worker.connect'));pending.resolve({status:'connected',scope:'global',checkedAt:1});await h.flush();assert(footer(h).includes('WSL 已连接'));assert(queue(h).includes('队列空闲'));assert.deepEqual(writes(h),[]);h.unmount();});
 
 test('App target settings edit invalidates a late successful worker observation',async()=>{
  const pending=deferred(),h=appWorkerHarness({override:(method,data,standard)=>method==='worker.restore'&&data.scope==='global'?pending.promise:standard(method,data)});await h.flush();held(h,'worker.restore',{scope:'global'});assert.deepEqual(dependent(h),[]);const settings=h.openSettings();settings.onChange({...settings.settings,distribution:'New chosen Ubuntu'});await h.flush();pending.resolve({status:'connected',checkedAt:1});await h.flush();assert(footer(h).includes('WSL 未连接'));assert.equal(h.openSettings().settings.distribution,'New chosen Ubuntu');assert.deepEqual(dependent(h),[]);assert.deepEqual(writes(h),[]);h.unmount();

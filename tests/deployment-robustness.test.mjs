@@ -1,9 +1,12 @@
+import {taskWorkerTarget} from '../desktop/explicit-worker-binding.mjs';
+import {restoreTaskWorker} from '../desktop/worker-restore.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {DeploymentOutbox,deploymentOutbox,deploymentConfig,validDeploymentDraft} from '../shared/deployment-draft.mjs';
 import {saveDeploymentDraft,createDeploymentProject,deploymentContext,assertDeploymentWorker} from '../desktop/deployment-state.mjs';
 import {TaskRecords} from '../desktop/task-records.mjs';import {prepareDeployment,saveDeployment} from '../desktop/task-deployment.mjs';import {executeTask} from '../desktop/task-execution.mjs';
 import {createAgentWorkflowContext} from '../desktop/agent-workflow-context.mjs';import {openDeploymentSession} from '../desktop/deployment-session.mjs';
 import {WorkerClient} from '../desktop/worker.mjs';
+import {snapshotIdentity} from '../shared/deployment.mjs';
 const clone=value=>structuredClone(value),config={target:'local',projectId:'',targetId:'env',inputSource:'local',directoryName:'short',maxSeconds:300,gpu:0,resources:{cpus:1,gpus:1,memory_mb:1024,queue:'',account:''}},spec={name:'Compute fixture',policy:{engines:['pygas.build'],environments:['env'],clusters:[],input_roots:['/owned/inputs'],gpus:[0],max_seconds:3600,max_concurrent:1}};
 function storage(){const data=new Map();return {getItem:key=>data.get(key)||null,setItem:(key,value)=>data.set(key,value),removeItem:key=>data.delete(key)};}
 function fixture(){const data=new Map(),catalog={get:(kind,id)=>clone(data.get(kind+id)),put:(kind,id,v)=>{data.set(kind+id,clone(v));return v;},list:kind=>[...data.entries()].filter(([k])=>k.startsWith(kind)).map(([,v])=>clone(v))},records=new TaskRecords(catalog,()=>{}),task=records.create({workflowVersion:2,planningMode:true,provider:'codex',threadId:'thread',request:'Fixture'}),calls=[],projects=[];
@@ -27,3 +30,88 @@ test('A late deployment open cannot steal the selection from a newer conversatio
 test('A newer unconfirmed settings draft blocks old prepare and execution before worker access',async()=>{const f=fixture(),result=await createDeploymentProject(f.records,f.worker,{taskId:f.task.id,spec,config,expectedRevision:0,requestId:'new-draft-gate'});saveDeployment(f.records,{taskId:f.task.id,value:result.task.deploymentDraft.config},undefined,f.worker);saveDeploymentDraft(f.records,f.worker,{taskId:f.task.id,value:{...result.task.deploymentDraft.config,maxSeconds:8},expectedRevision:1,mutationId:'newer-settings'});const count=f.calls.length;await assert.rejects(prepareDeployment(f.records,f.worker,{taskId:f.task.id}),/草稿与已确认/);await assert.rejects(executeTask(f.records,f.worker,{taskId:f.task.id,artifactId:'old'}),/草稿与已确认/);assert.equal(f.calls.length,count);});
 test('Worker connects coalesce identical settings and serialize a different requested service',async()=>{const worker=new WorkerClient(),entered=[],gates=[];worker.open=async settings=>{entered.push(settings.workerRoot);await new Promise(resolve=>gates.push(resolve));return settings.workerRoot;};const settings={distribution:'Ubuntu',workerRoot:'/first',workerPort:1};const a=worker.connect(settings,'source'),same=worker.connect({...settings},'source'),other=worker.connect({...settings,workerRoot:'/second'},'source');assert.deepEqual(entered,['/first']);gates.shift()();assert.equal(await a,'/first');assert.equal(await same,'/first');await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(entered,['/first','/second']);gates.shift()();assert.equal(await other,'/second');worker.close();});
 test('Closed typed deployment requests reject extra authorization fields without accessing the worker',async()=>{const f=fixture();assert.throws(()=>saveDeploymentDraft(f.records,f.worker,{taskId:f.task.id,value:config,expectedRevision:0,mutationId:'settings-1',authorization:true}),/typed/);await assert.rejects(deploymentContext(f.records,f.worker,{taskId:f.task.id,project_id:'foreign'}),/typed/);await assert.rejects(createDeploymentProject(f.records,f.worker,{taskId:f.task.id,spec,config,expectedRevision:0,requestId:'test-create',authorization:true}),/typed/);assert.equal(f.calls.length,0);});
+
+// Actual TaskRecords + executeTask; every worker response below is an inert
+// contract fixture. No connection, scheduler operation or scientific engine runs.
+function executionAuthFixture({kind='cluster-run',errorCode='needs_human_auth',stage='submit',legacy=false,localHuman=false}={}){
+ const f=fixture(),hooks={},requests=[],authority={kind:'local-human',id:'fixture-review',sha256:'b'.repeat(64)};
+ f.worker.connectionEpoch=7;f.worker.connectionTarget={port:8888};
+ const run={id:'prepared-fixture',kind,name:'Prepared fixture',project_id:'compute-project',cluster_id:kind==='cluster-run'?'saved-cluster':undefined,nonce:'fixture-original-nonce',directory:'/worker/runs/prepared-fixture',engine:'pygas.build',status:'draft',validation:{status:'not_run'},submit_attempted:false,job_id:null,inputs:{'run.in':'/worker/projects/compute-project/inputs/run.in'},snapshots:[{name:'run.in',sha256:'a'.repeat(64),size:12,source:'/worker/projects/compute-project/inputs/run.in'}],parameters:{temperature:300},resources:{cpus:1,gpus:0,memory_mb:512,queue:'fixture'},max_seconds:60,cluster:kind==='cluster-run'?{id:'saved-cluster',version:3,scheduler:'slurm',environment:{executables:{python:'/registered/python'}}}:undefined};
+ const value=f.records.read(f.task.id);value.workflowVersion=legacy?1:2;value.projectId='compute-project';value.artifacts=[{id:run.id,kind,name:run.name,engine:run.engine,parameters:clone(run.parameters),preparedRevision:value.parameterRevision}];value.review={status:'ready',parameterRevision:value.parameterRevision,artifactIds:[run.id],summary:'Original reviewed fixture'};
+ value.deployment={revision:2,workerBinding:{...f.worker.identity,port:8888},config:{...config,target:kind==='cluster-run'?'cluster':'local',projectId:run.project_id,targetId:kind==='cluster-run'?run.cluster_id:'env',resources:clone(run.resources)},prepared:{artifactId:run.id,parameterRevision:value.parameterRevision,deploymentRevision:2}};
+ if(localHuman){value.deployment.prepared.reviewAuthority=clone(authority);value.localInputReview={status:'confirmed',receiptId:'fixture-review'};}
+ value.deployment.prepared.inputIdentity=snapshotIdentity(value,run);f.records.save(value);
+ let statuses=0;
+ f.worker.request=async(method,route,args)=>{
+  requests.push({method,route,args:clone(args)});assert.equal(method,'POST');assert.equal(args.run_id,run.id);
+  if(route.endsWith('/status')){statuses++;if(statuses>1)await hooks.proof?.(run);if(statuses>1&&hooks.proofError)throw Error('fixture proof unavailable');return clone(run);}
+  if(route.endsWith('/validate')){await hooks.validate?.(run);if(stage==='validate')throw Error(errorCode);run.status='ready';run.validation={status:'passed'};return clone(run);}
+  if(route.endsWith('/submit')){assert.equal(f.records.read(f.task.id).execution.phase,'submitting');await hooks.submit?.(run);throw Error(errorCode);}
+  throw Error('Unexpected fixture route '+route);
+ };
+ const localReview=localHuman?{authority:()=>clone(authority),beginOperation:()=>({id:'fixture-operation'}),assertOperation:()=>{},verify:async()=>({authority:clone(authority)}),verifyPrepared:async()=>({authority:clone(authority)})}:undefined;
+ return {...f,run,hooks,requests,localReview,read:()=>f.records.read(f.task.id),mutate:change=>{const value=f.records.read(f.task.id);change(value);f.records.save(value);},execute:()=>executeTask(f.records,f.worker,{taskId:f.task.id,artifactId:run.id,inputReceipt:f.records.read(f.task.id).deployment.prepared.inputIdentity},localReview)};
+}
+
+for(const errorCode of ['needs_human_auth','needs_worker_update'])test('Recognized cluster '+errorCode+' reads a fresh exact no-dispatch proof and preserves the prepared review',async()=>{
+ const f=executionAuthFixture({errorCode}),before=f.read();await assert.rejects(f.execute(),error=>error.message===errorCode);const after=f.read();
+ assert.equal(after.execution.phase,'blocked');assert.equal(after.execution.authenticationRequired,true);assert.equal(after.execution.notSubmitted,true);assert.equal(after.execution.artifactId,f.run.id);assert.deepEqual(after.deployment.prepared,before.deployment.prepared);assert.deepEqual(after.review,before.review);
+ assert.deepEqual(f.requests.map(x=>x.route),['/api/cluster/status','/api/cluster/validate','/api/cluster/submit','/api/cluster/status']);assert.equal(f.requests.filter(x=>x.route.endsWith('/submit')).length,1);
+});
+
+test('A fresh cluster health observation does not change its immutable prepared snapshot or claim submission',async()=>{
+ const f=executionAuthFixture(),before=f.read();f.run.cluster.connection_check={status:'passed',observed_at:1};f.run.cluster.probe={observed_at:1};f.hooks.proof=run=>{run.cluster.connection_check={status:'failed',observed_at:2};run.cluster.probe={observed_at:2};};await assert.rejects(f.execute(),/needs_human_auth/);const after=f.read();assert.equal(after.execution.phase,'blocked');assert.equal(after.execution.notSubmitted,true);assert.deepEqual(after.review,before.review);assert.deepEqual(after.deployment.prepared,before.deployment.prepared);
+});
+
+test('A changed worker source before proof recognition prevents even a fresh proof read and stays unknown',async()=>{
+ const f=executionAuthFixture();f.hooks.submit=()=>{f.worker.connectionEpoch++;};await assert.rejects(f.execute(),/needs_human_auth/);const after=f.read();assert.equal(after.execution.phase,'unknown');assert.notEqual(after.execution.notSubmitted,true);assert.deepEqual(f.requests.map(x=>x.route),['/api/cluster/status','/api/cluster/validate','/api/cluster/submit']);
+});
+
+test('Missing original nonce or worker epoch cannot manufacture a no-dispatch auth proof',async()=>{
+ for(const missing of ['nonce','epoch']){const f=executionAuthFixture();if(missing==='nonce')delete f.run.nonce;else delete f.worker.connectionEpoch;await assert.rejects(f.execute(),/needs_human_auth/);assert.equal(f.read().execution.phase,'unknown');assert.notEqual(f.read().execution.notSubmitted,true);assert.equal(f.requests.filter(x=>x.route.endsWith('/status')).length,1);}
+});
+
+for(const [label,change]of [
+ ['artifact id',run=>{run.id='foreign-artifact';}],['project',run=>{run.project_id='foreign-project';}],['cluster id',run=>{run.cluster_id='foreign-cluster';}],['nonce',run=>{run.nonce='different-original-nonce';}],
+ ['directory',run=>{run.directory='/other/immutable-run';}],['engine',run=>{run.engine='gpumd.md';}],['inputs',run=>{run.inputs['run.in']='/other/input/run.in';}],['snapshot hash',run=>{run.snapshots[0].sha256='c'.repeat(64);}],['snapshot size',run=>{run.snapshots[0].size++;}],['snapshot source',run=>{run.snapshots[0].source='/other/input/run.in';}],
+ ['parameters',run=>{run.parameters.temperature=301;}],['resources',run=>{run.resources.cpus++;}],['walltime',run=>{run.max_seconds++;}],['saved cluster version',run=>{run.cluster.version++;}],['saved cluster environment',run=>{run.cluster.environment.executables.python='/other/python';}],['new immutable cluster field',run=>{run.cluster.future_route_revision='changed';}],
+ ['submission attempted',run=>{run.submit_attempted=true;}],['job identity',run=>{run.job_id='observed-job';}],['worker status unknown',run=>{run.status='unknown';}],['worker status running',run=>{run.status='running';}],['validation unconfirmed',run=>{run.validation.status='not_run';}]
+])test('An auth rejection with changed '+label+' proof remains unknown and never retries submission',async()=>{
+ const f=executionAuthFixture();f.hooks.proof=change;await assert.rejects(f.execute(),/needs_human_auth/);const after=f.read();assert.equal(after.execution.phase,'unknown');assert.notEqual(after.execution.notSubmitted,true);assert.notEqual(after.execution.authenticationRequired,true);assert.equal(after.review.status,'not_run');assert.equal(f.requests.filter(x=>x.route.endsWith('/submit')).length,1);assert.equal(f.requests.filter(x=>x.route.endsWith('/status')).length,2);
+});
+
+for(const [label,change]of [
+ ['worker epoch',f=>{f.worker.connectionEpoch++;}],['worker connection',f=>{f.worker.connection={id:'replacement'};}],['original source binding',f=>f.mutate(task=>{task.deployment.workerBinding.root='/other-worker';})],
+ ['scientific review',f=>f.mutate(task=>{task.review.status='not_run';})],['prepared artifact',f=>f.mutate(task=>{task.deployment.prepared.artifactId='other-prepared';})],
+ ['artifact metadata',f=>f.mutate(task=>{task.artifacts[0].name='Changed while proving';})],['science revision',f=>f.mutate(task=>{task.parameterRevision++;})],
+ ['deployment revision',f=>f.mutate(task=>{task.deployment.revision++;})],['saved input receipt',f=>f.mutate(task=>{task.deployment.prepared.inputIdentity='other-receipt';})]
+])test('A late '+label+' change invalidates the auth no-dispatch proof without replacing unknown with ready',async()=>{
+ const f=executionAuthFixture();f.hooks.proof=()=>change(f);await assert.rejects(f.execute(),/needs_human_auth/);const after=f.read();assert.equal(after.execution.phase,'unknown');assert.notEqual(after.execution.notSubmitted,true);assert.equal(f.requests.filter(x=>x.route.endsWith('/submit')).length,1);
+});
+
+test('A failed fresh auth proof read stays unknown, keeps the original artifact and never polls or submits again automatically',async()=>{
+ const f=executionAuthFixture();f.hooks.proofError=true;await assert.rejects(f.execute(),/needs_human_auth/);const before=f.requests.length,after=f.read();assert.equal(after.execution.phase,'unknown');assert.equal(after.execution.artifactId,f.run.id);assert.notEqual(after.execution.notSubmitted,true);await assert.rejects(f.execute(),/Review/);assert.equal(f.requests.length,before);
+});
+
+for(const errorCode of ['remote_transport_unconfirmed','remote_operation_unconfirmed','response lost','needs_human_auth with extra text'])test('A genuine or ambiguous '+errorCode+' submit error never triggers the auth-proof reset',async()=>{
+ const f=executionAuthFixture({errorCode});await assert.rejects(f.execute(),error=>error.message===errorCode);const after=f.read();assert.equal(after.execution.phase,'unknown');assert.notEqual(after.execution.notSubmitted,true);assert.equal(after.review.status,'not_run');assert.equal(f.requests.filter(x=>x.route.endsWith('/status')).length,1);assert.equal(f.requests.filter(x=>x.route.endsWith('/submit')).length,1);
+});
+
+test('An already unknown cluster record is reconciled read-only without validation, submit or auth reset',async()=>{
+ const f=executionAuthFixture();f.run.status='unknown';f.run.submit_attempted=true;f.mutate(task=>{task.execution={artifactId:f.run.id,phase:'unknown',status:'unknown'};});const result=await f.execute();assert.equal(result.status,'unknown');const after=f.read();assert.equal(after.execution.phase,'unknown');assert.notEqual(after.execution.notSubmitted,true);assert.deepEqual(f.requests.map(x=>x.route),['/api/cluster/status']);
+});
+
+test('Desktop unknown delivery cannot be reset by a ready worker record or cause a second submit',async()=>{
+ const f=executionAuthFixture();f.run.status='ready';const execution={artifactId:f.run.id,phase:'unknown',status:'unknown',message:'Original delivery remains uncertain'};f.mutate(task=>{task.execution=clone(execution);});await assert.rejects(f.execute(),/pending|never resubmit unknown/);assert.deepEqual(f.read().execution,execution);assert.deepEqual(f.requests.map(x=>x.route),['/api/cluster/status']);
+});
+
+test('Legacy reviewed cluster artifacts receive the same exact no-dispatch auth classification',async()=>{
+ const f=executionAuthFixture({legacy:true}),before=f.read();await assert.rejects(f.execute(),/needs_human_auth/);const after=f.read();assert.equal(after.execution.phase,'blocked');assert.equal(after.execution.notSubmitted,true);assert.deepEqual(after.review,before.review);
+});
+
+for(const stage of ['validate','submit'])test('Local engine '+stage+' failures keep the existing policy and never use cluster auth recovery',async()=>{
+ const f=executionAuthFixture({kind:'run',stage,localHuman:true});await assert.rejects(f.execute(),/needs_human_auth/);const after=f.read();assert.equal(after.execution.phase,stage==='submit'?'unknown':'blocked');assert.notEqual(after.execution.notSubmitted,true);assert.notEqual(after.execution.authenticationRequired,true);assert.equal(after.review.status,'not_run');assert.equal(after.localInputReview.status,'invalidated');assert.equal(f.requests.filter(x=>x.route.endsWith('/submit')).length,stage==='submit'?1:0);assert(f.requests.every(x=>x.route.startsWith('/api/run/')));
+});
+
+test('actual deployment draft and confirmed save preserve real transport port for later restore after defaults change',async()=>{const f=fixture();f.worker.connectionTarget={port:9012};const draft=saveDeploymentDraft(f.records,f.worker,{taskId:f.task.id,value:config,expectedRevision:0,mutationId:'port-preserve-1'});assert.equal(draft.deploymentDraft.workerBinding.port,9012);saveDeployment(f.records,{taskId:f.task.id,value:{...config,projectId:'project'}},undefined,f.worker);const saved=f.records.read(f.task.id);assert.equal(saved.deployment.workerBinding.port,9012);assert.equal(taskWorkerTarget(saved,{distribution:'Other',workerRoot:'/other',workerPort:9999},{}).workerPort,9012);let target;const worker={restore:async value=>{target=value;return {status:'connected'};}};const result=await restoreTaskWorker({records:f.records,worker,settings:()=>({distribution:'Other',workerRoot:'/other',workerPort:9999}),selection:()=>({taskId:saved.id,provider:saved.provider,threadId:saved.threadId})},{taskId:saved.id});assert.equal(result.status,'connected');assert.equal(target.workerPort,9012);assert.equal(target.workerRoot,'/worker');assert.equal(f.calls.length,0);});
+test('deployment binding rejects invalid actual port instead of saving default or erasing source',()=>{for(const port of [0,'9012',null,65536]){const f=fixture();f.worker.connectionTarget={port};assert.throws(()=>saveDeploymentDraft(f.records,f.worker,{taskId:f.task.id,value:config,expectedRevision:0,mutationId:'invalid-port'}),/端口/);assert.equal(f.records.read(f.task.id).deploymentDraft,undefined);}});

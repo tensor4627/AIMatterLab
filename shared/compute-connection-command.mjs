@@ -1,0 +1,1 @@
+export function computeConnectionCommandMatches(query){if(typeof query!=='string')return false;const value=query.trim().toLocaleLowerCase().replace(/\s+/g,' ');return ['连接计算资源','连接wsl','connect compute','connect resource'].some(alias=>alias.includes(value));}

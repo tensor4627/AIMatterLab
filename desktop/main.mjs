@@ -1,9 +1,11 @@
 import {environmentApiTool,createEnvironmentApiReader} from './environment-api-read.mjs';
+import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from './ssh-connection.mjs';
 import {createWorkbenchImageExporter} from './workbench-image.mjs';
 import {taskOperation} from './task-operations.mjs';
 import {workspaceController} from './workspaces.mjs';
 import {explicitSetupStage} from './explicit-setup-stage.mjs';
 import {createComputeOnboarding} from './compute-onboarding.mjs';
+import {createComputeConnection} from './compute-connection.mjs';
 import {customCvNumericDialog,referenceImportDialog} from './custom-cv-dialog.mjs';
 import {registerTaskStage} from './task-stage-ipc.mjs';
 import {localReviewDialog} from './local-review-dialog.mjs';
@@ -54,8 +56,8 @@ import { WorkerClient } from './worker.mjs';
 import {readWorkerStatus} from './worker-status.mjs';
 import {bundledWorkerRuntimeId} from './worker-service-version.mjs';
 import {restoreTaskWorker} from './worker-restore.mjs';
-import {explicitWorkerReceipt,rememberExplicitWorker} from './explicit-worker-binding.mjs';
-import {taskWorkerSettings,sameWorkerBinding,taskWorkerSource} from '../shared/task-worker-binding.mjs';
+import {explicitWorkerReceipt,rememberExplicitWorker,workerSettingsSignature,validExplicitBinding,taskWorkerTarget,validTransportPort,taskTransportScope,taskTransportReceipt} from './explicit-worker-binding.mjs';
+import {taskWorkerSettings,sameWorkerBinding,taskWorkerSource,validTaskWorkerSource} from '../shared/task-worker-binding.mjs';
 import {bindLegacyAuthoringWorker} from './task-authoring-binding.mjs';
 import { assertRpc, assertRendererWorkerRoute, linuxPath, sshAlias, quoteShell } from './security.mjs';
 
@@ -188,9 +190,11 @@ handle('task.deployment.draft',value=>saveDeploymentDraft(taskRecords,worker,val
 handle('task.deployment.context',value=>deploymentContext(taskRecords,worker,value));
 handle('task.deployment.open',value=>openDeploymentSession({records:taskRecords,workflowContext,agents,assertIdle:assertIdleAgent,connect:async task=>{
  const source=taskWorkerSource(task);
- if(worker.connection&&!worker.restoring&&!worker.connecting&&(!source||sameWorkerBinding(source.binding,worker))){try{const health=await worker.request('GET','/api/health');if(health.root===worker.identity?.root)return;}catch{}}
- const selected=taskWorkerSettings(task,settings)||settings;agents.close();
- await worker.connect(selected,workerSource);await bindSources();if(selected.distribution===settings.distribution&&selected.workerRoot===settings.workerRoot)discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});
+ // Opening deployment is read-only. An unavailable original service stays
+ // offline until the human reviews the same source in the connection guide.
+ if(!source)return;
+ const observed=await restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision()},{taskId:task.id});
+ if(observed.status==='connected')emit('studio:event',{method:'studio/workerConnected',params:{}});
 }},value));
 handle('task.deployment.createProject',value=>{assertIdleAgent();return createDeploymentProject(taskRecords,worker,value);});
 handle('task.deployment.prepare',value=>prepareDeployment(taskRecords,worker,value,localReview));
@@ -248,19 +252,39 @@ handle('settings',data => {
   settings=catalog.put('settings','main',next); return settings;
 });
 function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
-async function bindSources(){const sources=scientificSources();for(const source of sources){await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});catalog.put('source-binding',source.id,source);}return sources;}
+async function bindSources(current=()=>{}){const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());
 handle('sources.diagnose',async()=>{const sources=scientificSources();return {sources,tools:toolInventory(sources),worker:worker.connection?await worker.request('GET','/api/tools/status'):null};});
 function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activeTurns?.size))throw Error('请先停止当前回复，再调整连接或上下文设置');}
 const configureCompute=createComputeOnboarding({worker,publish:event=>emit('studio:event',event)});
 function discoverCompute(){if(settings.autoDiscoverCompute!==false)return configureCompute().catch(()=>null);return Promise.resolve(null);}
 handle('compute.setup',async data=>configureCompute(data||{}));
+const computeConnection=createComputeConnection({worker,records:taskRecords,catalog,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),source:()=>({path:workerSource,id:worker.bundledRuntimeId}),beforeSwitch:()=>{assertIdleAgent();agents.close();},bindFreshSources:bindSources,saveSettings:target=>{settings=catalog.put('settings','main',{...settings,distribution:target.distribution,workerRoot:target.workerRoot,workerPort:target.workerPort});},remember:(target,evidence)=>{const value={version:1,distribution:worker.identity?.distribution,root:worker.identity?.root,port:target.workerPort,settingsSignature:workerSettingsSignature(settings),checkedAt:evidence.checkedAt,...evidence.serviceVersion==='current'?{sourceIdentity:{runtimeId:worker.bundledRuntimeId}}:{}};if(!validExplicitBinding(value,settings)||worker.connection?.health?.root!==value.root||worker.connectionTarget?.port!==value.port)throw Error('Verified connection receipt changed');catalog.put('worker-binding','last-explicit',value);},onConnected:()=>emit('studio:event',{method:'studio/workerConnected',params:{}})});
+handle('compute.connection.plan',value=>computeConnection.plan(value));
+handle('compute.connection.status',value=>computeConnection.status(value));
+handle('compute.connection.connect',value=>{assertIdleAgent();return computeConnection.connect(value);});
+handle('compute.connection.cancel',value=>computeConnection.cancel(value));
+const sshConnection=createSshConnection({worker,selection:()=>workflowContext.current(),revision:()=>workflowContext.revision(),sourceScope:request=>sshTaskSource(taskRecords,()=>workflowContext.current(),request),assertSource:request=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),request),worker),validateRunReceipt:(request,receipt)=>{const proof=sshTaskSource(taskRecords,()=>workflowContext.current(),request);assertSshSource(proof,worker);if(proof?.preparedProject&&proof.preparedProject!==receipt.projectId)throw Error('original_run_changed');},beforeStart:assertIdleAgent,observeWorker:()=>readWorkerStatus(worker,()=>settings)});
+handle('ssh.auth.plan',(value,event)=>sshConnection.plan(value,event));
+handle('ssh.auth.start',(value,event)=>sshConnection.start(value,event));
+handle('ssh.auth.read',(value,event)=>sshConnection.read(value,event));
+handle('ssh.auth.input',(value,event)=>sshConnection.input(value,event));
+handle('ssh.auth.resize',(value,event)=>sshConnection.resize(value,event));
+handle('ssh.auth.finish',(value,event)=>sshConnection.finish(value,event));
+handle('ssh.auth.closed',(value,event)=>sshConnection.closed(value,event));
+handle('ssh.tunnel.plan',(value,event)=>sshConnection.tunnelPlan(value,event));
+handle('ssh.tunnel.start',(value,event)=>sshConnection.tunnelStart(value,event));
+handle('ssh.tunnel.status',(value,event)=>sshConnection.tunnelStatus(value,event));
+handle('ssh.tunnel.close',(value,event)=>sshConnection.tunnelClose(value,event));
 handle('worker.connect',async()=>{assertIdleAgent();agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
 handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision()},value));
 handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAuthoringWorker({records:taskRecords,worker,selection:()=>workflowContext.current(),settings:()=>settings},value);});
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
+  const route=new URL(target,'http://127.0.0.1').pathname;
+  if(method==='POST'&&['/api/clusters','/api/cluster/test'].includes(route)&&requiresCurrentSshWorker(route==='/api/cluster/test'?data?.connection:data))await requireCurrentSshWorker(worker,()=>readWorkerStatus(worker,()=>settings));
+  if(method==='POST'&&['/api/cluster/probe','/api/cluster/browse'].includes(route)&&data?.cluster_id){const connection=worker.connection,epoch=worker.connectionEpoch,observed=await readWorkerStatus(worker,()=>settings);if(observed.status!=='connected'||observed.serviceVersion!=='current'){const profile=await worker.request('POST','/api/cluster/profile',{cluster_id:data.cluster_id});if(worker.connection!==connection||worker.connectionEpoch!==epoch||requiresCurrentSshWorker(profile))throw Error('needs_worker_update');}}
   const result=await worker.request(method,target,data);
   if(method==='GET' && ['/api/projects','/api/environments'].includes(target))
     for(const item of result) catalog.put(target.split('/').at(-1),item.id,item);
@@ -285,10 +309,19 @@ async function scientificTools(provider){
 }
 handle('agent.connect',async({provider,repairTools=false})=>{
  providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');
- if(repairTools){assertIdleAgent();agents.close();await worker.connect(settings,workerSource);emit('studio:event',{method:'studio/workerConnected',params:{}});}
+ if(repairTools){
+  assertIdleAgent();const revision=workflowContext.revision(),owner=workflowContext.current(),connection=worker.connection,epoch=worker.connectionEpoch;
+  const task=owner?.taskId?taskRecords.read(owner.taskId):null;let source,target;try{source=taskWorkerSource(task);target=task?taskWorkerTarget(task,settings,catalog):settings;}catch{throw Error('请先通过“连接计算资源”核对原服务来源和端口，再修复工具连接。');}
+  if(task&&(!source||!target||!validTransportPort(target.workerPort)))throw Error('请先通过“连接计算资源”核对原服务来源和端口，再修复工具连接。');
+  const transportScope=task?taskTransportScope(task):null,transportReceipt=task?taskTransportReceipt(task,catalog):null;
+  const observed=await readWorkerStatus(worker,()=>target||settings);
+  if(observed.status!=='connected'||workflowContext.revision()!==revision||worker.connection!==connection||worker.connectionEpoch!==epoch||task&&(JSON.stringify(transportScope)!==JSON.stringify(taskTransportScope(taskRecords.read(task.id)))||JSON.stringify(transportReceipt)!==JSON.stringify(taskTransportReceipt(taskRecords.read(task.id),catalog)))||source&&(!sameWorkerBinding(source.binding,worker)||worker.connectionTarget?.port!==target.workerPort))throw Error('请先通过“连接计算资源”恢复此流程的原作业服务，再修复工具连接。');
+  assertIdleAgent();
+  agents.close();
+ }
  // Account recovery does not install/start/switch compute. App restores its saved binding separately.
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- if(worker.connection&&!worker.connecting&&!worker.restoring){await bindSources();await discoverCompute();}
+ if(!repairTools&&worker.connection&&!worker.connecting&&!worker.restoring){await bindSources();await discoverCompute();}
  const info=await agents.connect(provider),tools=await scientificTools(provider);
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};
@@ -443,9 +476,11 @@ handle('terminal.start',async({kind,alias,clusterId}) => {
   let child, protocol=false;
   if(kind==='cluster'){
     const p=await worker.request('POST','/api/cluster/profile',{cluster_id:clusterId});
+    if(p.auth_mode==='interactive')throw Error('请在集群连接页打开私有认证；普通 SSH 终端不能代替受控认证会话。');
     const endpoint=sshEndpoint(p);
     const args=['-tt','-l',endpoint.username,'-p',String(p.port),'-o','StrictHostKeyChecking=yes'];
     if(p.identity_file)args.push('-i',p.identity_file);
+    if(p.proxy_jump?.length)args.push('-J',p.proxy_jump.join(','));
     args.push(endpoint.host);
     if(p.via?.length){const inner=p.via.reduceRight((cmd,hop)=>'ssh -tt -o StrictHostKeyChecking=yes '+quoteShell(hop)+(cmd?' '+quoteShell(cmd):''),'');args.push(inner);}
     const native=p.ssh_client.startsWith('/mnt/c/')?'C:/'+p.ssh_client.slice(7):p.ssh_client;
@@ -480,7 +515,7 @@ handle('window',({action})=>{
   if(action==='maximize') window.isMaximized()?window.unmaximize():window.maximize();
   if(action==='close') window.close();
 });
-const saveWorkbenchImage=createWorkbenchImageExporter({ownerForEvent:event=>{if(!window||window.isDestroyed()||window.webContents.isDestroyed())return null;trusted(event);return BrowserWindow.fromWebContents(event.sender)===window?window:null;},displayScale:owner=>screen.getDisplayMatching(owner.getBounds()).scaleFactor,showSaveDialog:(owner,options)=>dialog.showSaveDialog(owner,options),decodePng:bytes=>nativeImage.createFromBuffer(bytes)});
+const saveWorkbenchImage=createWorkbenchImageExporter({ownerForEvent:event=>{if(!window||window.isDestroyed()||window.webContents.isDestroyed())return null;trusted(event);return BrowserWindow.fromWebContents(event.sender)===window?window:null;},displayScale:owner=>screen.getDisplayMatching(owner.getBounds()).scaleFactor,showSaveDialog:(owner,options)=>dialog.showSaveDialog(owner,options),decodePng:bytes=>nativeImage.createFromBuffer(bytes),privacy:()=>sshConnection.privacy()});
 ipcMain.handle('studio:diagnostics.saveWorkbenchImage',async(event,data)=>{if(shuttingDown||!window||window.isDestroyed()||window.webContents.isDestroyed()||event.sender.isDestroyed())return null;trusted(event);try{return await saveWorkbenchImage(data,event);}catch(error){if(shuttingDown)return null;throw error;}});
 handle('export',async({run})=>{
   const bundle=await worker.request('POST','/api/run/export',{run_id:run.id});
@@ -492,6 +527,7 @@ handle('export',async({run})=>{
 window=new BrowserWindow({width:1540,height:980,minWidth:1100,minHeight:720,frame:false,
   backgroundColor:'#15151b',title:'GPU Sampling Studio',show:false,
   webPreferences:{backgroundThrottling:!verifying,offscreen:improvementsVerifying,preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+installSshPrivacyLifecycle(window.webContents,sshConnection);
 window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
 window.webContents.on('will-navigate',(event,url)=>{if(url!==window.webContents.getURL()) event.preventDefault();});
 const development=process.env.STUDIO_DEV_URL;
@@ -499,7 +535,7 @@ if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw ne
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
 if(verifying){const errors=[];window.webContents.on('console-message',(_event,level,message)=>{if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./install-verification.mjs':improvementsVerifying?'./improvements-verification.mjs':providerVerifying?'./provider-verification.mjs':'./verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{agents.close();worker.close();for(const t of terminals.values())t.child.kill();});
+app.on('before-quit',()=>{sshConnection.shutdown();agents.close();worker.close();for(const t of terminals.values())t.child.kill();});
 
 }
 app.whenReady().then(initialize).catch(error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}app.exit(1);});
