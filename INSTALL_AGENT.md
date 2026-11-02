@@ -47,7 +47,7 @@ Windows 桌面验证和启动均使用共用的 `scripts/start.mjs` 入口；可
 
 如果站点禁止登录节点安装/编译，不绕过政策：将安装 runtime 与 bootstrap recipe 放进用户审阅的调度脚本，使用已有基线 Python，在分配的计算节点创建环境，保存安装收据，再 probe 和 smoke。远端仅收到环境 recipe/单次任务 helper，不部署 Agent CLI，也不携带本机 SSH/模型凭据。
 
-NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、数据、偏置和短例验收。首版安装器未内置这些额外 fixture；选择未提供 fixture 的模块会 blocked。不要取消选定模块来制造成功，不运行 scripts/science-smoke.py 中本机历史路径，也不将 ASE 参考 MD 标成 PyDyn/GPUMD。
+NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、数据、偏置和短例验收。首版安装器未内置这些额外 fixture；选择未提供 fixture 的模块会 blocked。不要取消选定模块来制造成功，也不将 ASE 参考 MD 标成 PyDyn/GPUMD。`scripts/science-smoke.py` 是独立的科学验收入口，仅在明确授权后用 `--config` 指定用户自己的私有路径和新运行目录；安装器不自动调用它。
 
 ## 可迁移 skill 与本机沉淀
 

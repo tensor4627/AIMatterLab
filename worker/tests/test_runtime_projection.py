@@ -29,3 +29,29 @@ class RuntimeProjection(unittest.TestCase):
    self.assertEqual(stale["status"],"stale");self.assertNotIn("facts",stale)
 
 if __name__=='__main__':unittest.main()
+
+class ClusterMetadataProjection(unittest.TestCase):
+ def fixture(self):
+  secret='PRIVATE_CLUSTER_SENTINEL'
+  return {'id':'owned-cluster','name':secret,'scheduler':'lsf','version':3,'host':secret,'username':secret,'port':secret,'identity_file':secret,'queue':secret,'activation':secret,'environment':{'executables':{'python':secret}},'queue_targets':[{'queue':secret,'environment':secret}], 'probe':{'queue_status':'passed','queues':[secret,secret,'other-private-queue'],'nodes':[secret],'stdout':secret},'connection_check':{'status':'passed','ssh_status':'passed','scheduler_status':'passed','compute_node_status':'not_run','observed_at':123.5,'version':3,'hostname':secret,'queue':secret,'nodes':[secret],'reason':secret,'nested':{'secret':secret}}}
+ def test_both_cluster_tools_return_only_allowlisted_metadata_and_preserve_original(self):
+  cluster=self.fixture();before=copy.deepcopy(cluster)
+  projected=result_for_agent('list_clusters',[cluster])[0]
+  self.assertEqual(projected,{'id':'owned-cluster','scheduler':'lsf','version':3,'connection_check':{'status':'passed','ssh_status':'passed','scheduler_status':'passed','compute_node_status':'not_run','observed_at':123.5,'version':3},'visible_queue_count':2,'declared_target_count':1,'scope':'Cluster metadata and queue visibility only; no authorization or execution inferred.'})
+  ready={'environments':[],'clusters':[cluster],'scope':'existing readiness'}
+  self.assertEqual(result_for_agent('compute_readiness',ready),{'environments':[],'clusters':[projected],'scope':'existing readiness'})
+  self.assertNotIn('PRIVATE_CLUSTER_SENTINEL',json.dumps(projected));self.assertNotIn('other-private-queue',json.dumps(projected));self.assertEqual(cluster,before)
+ def test_missing_stale_invalid_health_never_claims_passed_or_invents_queue_observation(self):
+  for state in ('failed','stale','not_run','needs_human_auth'):
+   result=result_for_agent('list_clusters',[{'id':'fixture','connection_check':{'status':state,'observed_at':float('nan'),'reason':'PRIVATE'}}])[0]
+   self.assertEqual(result['connection_check'],{'status':state});self.assertNotIn('visible_queue_count',result)
+  for probe in ({'queue_status':'blocked','queues':[]},{'queues':[]}):
+   self.assertNotIn('visible_queue_count',result_for_agent('list_clusters',[{'id':'fixture','probe':probe}])[0])
+  self.assertEqual(result_for_agent('list_clusters',[{'id':'fixture','probe':{'queue_status':'passed','queues':[]}}])[0]['visible_queue_count'],0)
+  result=result_for_agent('list_clusters',[{'id':'fixture','version':True,'scheduler':'PRIVATE','connection_check':{'status':{'value':'passed'},'observed_at':'PRIVATE'}}])[0]
+  self.assertEqual(result['connection_check'],{});self.assertNotIn('scheduler',result);self.assertNotIn('version',result)
+ def test_environment_compact_and_unrelated_desktop_result_are_not_changed(self):
+  env={'id':'local','name':'Local','executables':{'python':'/approved/local/python'},'observation':{'cuda':{'available':False},'modules':{'ase':{'available':True}}}}
+  result=result_for_agent('compute_readiness',{'environments':[env],'clusters':[],'scope':'saved local registrations'})
+  self.assertEqual(result['environments'],[{'id':'local','name':'Local','python':'/approved/local/python','cuda':{'available':False},'modules':{'ase':True},'scientific_status':'not_run'}])
+  value={'private':'desktop data'};self.assertIs(result_for_agent('unrelated_tool',value),value)

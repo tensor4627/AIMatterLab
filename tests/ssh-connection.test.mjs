@@ -143,3 +143,24 @@ test('cluster primary path has three stages and secondary tools stay under More 
 test('late probe cannot revive an edited-and-restored connection or touch policy',async()=>{const wait=deferred();const h=clusterHarness({override:(_m,path)=>path==='/api/cluster/probe'?wait.promise:undefined});await h.flush();h.button('检查连接与调度器').props.onClick();await h.flush();const host=()=>h.find(n=>n.props?.['data-testid']==='ssh-host');host().props.onChange({target:{value:'other.invalid'}});await h.flush();host().props.onChange({target:{value:profile.host}});await h.flush();wait.resolve({status:'passed',ssh_status:'passed',scheduler_status:'passed',queue_status:'passed',queues:['stale-queue']});await h.flush();assert.doesNotMatch(h.text(h.find(n=>n.props?.['data-testid']==='cluster-current-observation')),/队列观察/);assert.equal(h.errors.length,0);assert(!h.button('检查连接与调度器').props.disabled);assert(!h.calls.some(c=>c.target==='/api/projects'||c.target==='/api/clusters'&&c.method==='POST'));h.unmount();});
 
 test('a late source import cannot replace a newer draft and default authentication is not given a guessed key',async()=>{const wait=deferred();let imports=0;const imported={name:'Newer',host:'synthetic.invalid',username:'synthetic-user',port:22,identity_file:'',ssh_client:'/fixture/ssh',auth_mode:'key',scheduler:'lsf',environment:{executables:{python:'/fixture/python'}},limits:{cpus:1,gpus:0,memory_mb:1024},import_review:{requires_review:false,credential_values_imported:false}};const h=clusterHarness({override:(method,path)=>method==='IPC'&&path==='ssh.import'?(++imports===1?wait.promise:imported):undefined});await h.flush();const importer=()=>h.find(n=>n.props?.['aria-label']==='导入本机已有连接');importer().props.onChange({target:{value:'old-reference'}});await h.flush();importer().props.onChange({target:{value:'new-reference'}});await h.flush();wait.resolve({...imported,host:'stale.invalid'});await h.flush();assert.equal(h.find(n=>n.props?.['data-testid']==='ssh-host').props.value,'synthetic.invalid');h.button('测试 SSH 连接').props.onClick();await h.flush();const call=h.calls.find(c=>c.target==='/api/cluster/test');assert.equal(call.data.connection.identity_file,'');assert.match(h.text(h.find(n=>n.props?.['data-testid']==='cluster-current-observation')),/检查通过/);assert(!h.calls.some(c=>c.target==='/api/projects'||c.target==='/api/clusters'&&c.method==='POST'));h.unmount();});
+
+test('saved ClusterPage health does not render stale draft-test contradiction; dirty/current tests remain explicit',async()=>{
+ const h=clusterHarness({override:(_m,target)=>target==='/api/cluster/probe'?{status:'passed',ssh_status:'passed',scheduler_status:'passed',observed_at:Date.now()/1000}:undefined});await h.flush();
+ const observation=()=>h.find(n=>n.props?.['data-testid']==='cluster-current-observation');
+ assert.doesNotMatch(h.text(observation()),/SSH 测试/);
+ h.button('检查连接与调度器').props.onClick();await h.flush();
+ assert.match(h.text(h.find(n=>n.props?.['data-testid']==='cluster-connection-health')),/检查通过/);
+ assert.doesNotMatch(h.text(observation()),/SSH 测试|需要重新检查/);
+ h.find(n=>n.props?.['data-testid']==='ssh-test').props.onClick();await h.flush();
+ assert.match(h.text(observation()),/SSH 测试.*检查通过/);
+ h.find(n=>n.props?.['data-testid']==='ssh-host').props.onChange({target:{value:'edited.invalid'}});await h.flush();
+ assert.match(h.text(observation()),/SSH 测试.*需要重新检查/);
+ assert(!h.calls.some(c=>c.target==='/api/clusters'&&c.method==='POST'));h.unmount();
+});
+test('key-mode ClusterPage uses compact default-auth label and reserves 2FA explanation for interactive mode',async()=>{
+ const h=clusterHarness({override:(_m,target)=>target==='/api/cluster/profile'?{...profile,auth_mode:'key',identity_file:'',environment:{executables:{python:'/usr/bin/python3'}},scheduler:'lsf',remote_root:'~/fixture-runs',read_roots:[],limits:{cpus:1,gpus:0,memory_mb:1024}}:undefined});
+ await h.flush();
+ assert.match(h.text(h.find(n=>n.props?.['data-testid']==='cluster-current-observation')),/使用默认认证/);
+ assert.throws(()=>h.find(n=>n.type==='p'&&h.text(n).includes('二步验证使用已核对')),/missing/);
+ assert(!h.calls.some(c=>c.target==='/api/cluster/test'||c.target==='/api/cluster/probe'));h.unmount();
+});

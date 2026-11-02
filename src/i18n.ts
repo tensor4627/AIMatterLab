@@ -1,4 +1,9 @@
 const english:Record<string,string> = {
+"假设与来源":"Assumptions and sources",
+"几何检查":"Geometry check",
+"最大化或还原":"Maximize or restore",
+"已刷新":"Refreshed",
+"使用默认认证":"Using default authentication",
 "导入来源包含尚未支持的路由或认证引用；请手动核对连接，暂不能测试或保存。":"The imported source contains an unsupported route or authentication reference. Review the connection manually; testing and saving are currently blocked.",
 "使用 SSH 客户端已有默认认证；未指定密钥不代表没有密钥。":"Using the SSH client’s existing default authentication. No explicit key does not mean no key is available.",
 "使用显式密钥引用":"Using an explicit key reference",

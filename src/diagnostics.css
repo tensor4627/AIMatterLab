@@ -3,3 +3,6 @@
 .diagnostic-notice details>summary,.deployment-diagnostics>details>summary{cursor:pointer}
 .diagnostic-raw{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto}
 .toast .diagnostic-notice{margin:0;border:0;padding:0;max-width:min(620px,75vw)}
+.toast{align-items:flex-start;width:min(800px,calc(100vw - 32px));max-height:min(60dvh,28rem)}
+.toast .diagnostic-notice{flex:1;min-width:0;max-height:calc(min(60dvh,28rem) - 28px);overflow:auto;overscroll-behavior:contain}
+.toast>.icon-button{flex-shrink:0;align-self:flex-start}

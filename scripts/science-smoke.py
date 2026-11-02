@@ -2,40 +2,41 @@
 import json, os, sys, time, uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT/"worker"))
-from studio_worker.service import Service
-from studio_worker.templates import build_bias
-from studio_worker.adapters import ENGINES
-from ase.build import bulk
-from ase.calculators.emt import EMT
-from ase.calculators.singlepoint import SinglePointCalculator
-from ase.io import write
-import numpy as np
-import yaml
+def configure(config):
+  # CLI/config validation runs before these optional scientific imports or writes.
+  global BASE,FIX,PY,service,REPORT,build_bias,bulk,EMT,SinglePointCalculator,write,np,yaml
+  sys.path.insert(0,str(ROOT/"worker"))
+  from studio_worker.service import Service
+  from studio_worker.templates import build_bias
+  from studio_worker.adapters import ENGINES
+  from ase.build import bulk
+  from ase.calculators.emt import EMT
+  from ase.calculators.singlepoint import SinglePointCalculator
+  from ase.io import write
+  import numpy as np
+  import yaml
+  BASE=Path(config["base_dir"])
+  BASE.mkdir(parents=True,exist_ok=True)
+  FIX=BASE/"inputs";FIX.mkdir(exist_ok=True)
+  PY=config["python"]
+  launcher=BASE/"hotpp"
+  launcher.write_text("#!"+PY+"\nfrom hotpp.entrypoints.main import main\nmain()\n");launcher.chmod(0o755)
+  repos=config["repositories"]
+  sampling=config["sampling_repository"]
+  pygas_cli=BASE/"pygas"
+  pygas_cli.write_text("#!"+PY+"\nfrom entrypoints.cli import main\nraise SystemExit(main())\n");pygas_cli.chmod(0o755)
+  service=Service(BASE/"sessions"/uuid.uuid4().hex)
+  environment=service.register_environment({"id":"acceptance-core","name":"Independent acceptance CUDA environment",
+   "skills":config["skills"],
+   "executables":{"python":PY,"hotpp":str(launcher),"pygas":str(pygas_cli),**config["executables"]},
+   "repositories":repos})
+  env2=service.register_environment({**environment,"id":"acceptance-sampling","name":"Pinned PyDyn sampling",
+   "repositories":{**repos,"pydyn":sampling}})
+  service.register_project({"id":"acceptance","name":"Synthetic Cu integration acceptance",
+   "policy":{"engines":list(ENGINES),"environments":[environment["id"],env2["id"]],"gpus":[0],
+   "input_roots":[str(BASE)],"max_seconds":180,"max_concurrent":1}})
+  REPORT={"worker_root":str(service.root),"scope":"Infrastructure and scientific engine integration only. Ten synthetic EMT Cu frames; separate six-frame training, two-frame validation and two-frame held-out test; no DFT and no model accuracy claim.","checks":{}}
 
-BASE=Path.home()/".local/state/gpu-sampling-studio/acceptance"
-BASE.mkdir(parents=True,exist_ok=True)
-FIX=BASE/"inputs";FIX.mkdir(exist_ok=True)
-PY=str(Path.home()/".local/state/gpu-sampling-studio/validation-venv/bin/python")
-launcher=BASE/"hotpp"
-launcher.write_text("#!"+PY+"\nfrom hotpp.entrypoints.main import main\nmain()\n");launcher.chmod(0o755)
-repos={"pydyn":"/mnt/d/data/software/pydyn","pygas":"/mnt/d/data/software/pygas","hotpp":"/mnt/d/data/software/hotpp"}
-sampling="/mnt/c/Users/Lenovo/.codex/worktrees/main-acceleration/pydyn"
-pygas_cli=BASE/"pygas"
-pygas_cli.write_text("#!"+PY+"\nfrom entrypoints.cli import main\nraise SystemExit(main())\n");pygas_cli.chmod(0o755)
-service=Service(BASE/"sessions"/uuid.uuid4().hex)
-environment=service.register_environment({"id":"acceptance-core","name":"Independent acceptance CUDA environment",
- "skills":{"nep-regression-rmse":"/mnt/c/Users/Lenovo/.codex/skills/nep-regression-rmse"},
- "executables":{"python":PY,"hotpp":str(launcher),"pygas":str(pygas_cli),"gpumd":"/home/tensor/workspace/gpumd-clean-256ae010-nep-build-20260806/gpumd",
- "nep":"/home/tensor/workspace/gpumd-clean-256ae010-nep-build-20260806/nep",
- "gpu-sampling":"/home/tensor/gpumd-pydyn-bias-validation-20260929-py213-cu126/gpu-sampling"},
- "repositories":repos})
-env2=service.register_environment({**environment,"id":"acceptance-sampling","name":"Pinned PyDyn sampling",
- "repositories":{**repos,"pydyn":sampling}})
-service.register_project({"id":"acceptance","name":"Synthetic Cu integration acceptance",
- "policy":{"engines":list(ENGINES),"environments":[environment["id"],env2["id"]],"gpus":[0],
- "input_roots":[str(BASE)],"max_seconds":180,"max_concurrent":1}})
-REPORT={"worker_root":str(service.root),"scope":"Infrastructure and scientific engine integration only. Ten synthetic EMT Cu frames; separate six-frame training, two-frame validation and two-frame held-out test; no DFT and no model accuracy claim.","checks":{}}
 def evidence():
  (ROOT/".studio/validation").mkdir(parents=True,exist_ok=True)
  (ROOT/".studio/validation/science.json").write_text(json.dumps(REPORT,indent=2))
@@ -169,5 +170,8 @@ evaluator=BiasedForceEvaluator(evaluator,bias)
  evidence()
 
 if __name__=="__main__":
+ from science_smoke_config import parse_config_args
+ config=parse_config_args()
+ configure(config)
  try:main()
  finally:service.close();evidence()

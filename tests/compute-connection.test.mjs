@@ -40,7 +40,7 @@ test('missing saved distro and absent workflow binding block without bootstrap',
  const missing=fixture();missing.setTask({id:'flow',provider:'codex',threadId:'thread'});assert.equal((await missing.api.plan()).error.code,'binding_missing');assert.equal(missing.calls.length,0);
 });
 test('verified current original worker is reused without bootstrap, provider reset or source rebinding',async()=>{
- const f=fixture({connected:true}),p=await f.api.plan(),result=await run(f,p);assert.equal(result.connection,'connected');assert.equal(result.mode,'reused');assert.equal(result.discovery,'observed');assert.equal(result.scientificValidation,'not_run');assert(!f.calls.some(call=>['start','detach','switch','bindSources','saveSettings','remember'].includes(call[0])));assert.deepEqual(f.calls.filter(call=>call[0]==='POST').map(call=>call[1]),['/api/environments/discover','/api/environments/adopt']);
+ const f=fixture({connected:true}),p=await f.api.plan(),result=await run(f,p);assert.equal(result.connection,'connected');assert.equal(result.mode,'reused');assert.equal(result.discovery,'not_run');assert.equal(result.scientificValidation,'not_run');assert(!f.calls.some(call=>['start','detach','switch','bindSources','saveSettings','remember'].includes(call[0])));assert.deepEqual(f.calls.filter(call=>call[0]==='POST'),[]);
 });
 test('disconnected but deployed original service restores read-only without bootstrap',async()=>{
  const f=fixture({existing:true}),result=await run(f,await f.api.plan());assert.equal(result.connection,'connected');assert(!f.calls.some(call=>call[0]==='start'));assert.equal(f.calls.find(call=>call[0]==='restore')[1].workerRoot,'/original/service');assert(!f.calls.some(call=>call[0]==='saveSettings'));
@@ -67,7 +67,7 @@ test('no-task guide prefers present last verified source and locks a missing sou
  const missing=fixture({bound:false,names:['One','Two']});missing.setLast(last);const absent=await missing.api.plan();assert.equal(absent.error.code,'distribution_missing');assert.equal(absent.scope,'saved-global');assert.equal(absent.locked,true);assert.equal(absent.canChooseSource,true);assert.equal(absent.target.distribution,'Saved Distro');const choice=await missing.api.plan({newSource:true});assert.equal(choice.error.code,'choose_distribution');assert.equal(choice.locked,false);
 });
 test('discovery failure is partial completion, never a scientific or engine-ready pass',async()=>{
- const f=fixture({connected:true,discoveryFailure:true}),result=await run(f,await f.api.plan());assert.equal(result.status,'connected');assert.equal(result.connection,'connected');assert.equal(result.discovery,'failed');assert.equal(result.error.code,'discovery_failed');assert.equal(result.scientificValidation,'not_run');assert.equal(inspect(result).includes('private-token'),false);
+ const f=fixture({bound:false,connected:true,discoveryFailure:true}),result=await run(f,await f.api.plan({distribution:'Default'}));assert.equal(result.status,'connected');assert.equal(result.connection,'connected');assert.equal(result.discovery,'failed');assert.equal(result.error.code,'discovery_failed');assert.equal(result.scientificValidation,'not_run');assert.equal(inspect(result).includes('private-token'),false);
 });
 for(const change of ['selection','task','source','settings','worker'])test('late readonly result cannot connect or adopt after '+change+' changed',async()=>{
  const f=fixture(),pending=defer();f.worker.readExisting=async()=>pending.promise;const p=await f.api.plan(),operation=run(f,p);await Promise.resolve();if(change==='selection')f.setSelection({taskId:'other',provider:'codex',threadId:'other'});if(change==='task')f.setTask({...f.task,authoring:{workerBinding:{distribution:'Default',root:'/changed',port:8767}}});if(change==='source')f.setRuntime({path:'/new/source',id:'changed'});if(change==='settings')f.setConfig({...f.config,workerPort:9001});if(change==='worker'){f.worker.bindingIntent++;f.worker.close();}pending.resolve({status:'disconnected'});assert.equal((await operation).status,'superseded');assert(!f.calls.some(call=>call[0]==='start'||call[1]==='/api/environments/adopt'));
@@ -82,10 +82,10 @@ test('a source switch during start detaches only its own late bridge, without pu
  const f=fixture(),pending=defer();let began;const entered=new Promise(resolve=>{began=resolve;});f.worker.connect=target=>{f.worker.bindingIntent++;f.worker.close();const epoch=f.worker.connectionEpoch;f.worker.connecting=pending.promise.then(()=>{if(epoch===f.worker.connectionEpoch)f.attach(target);}).finally(()=>{f.worker.connecting=null;});began();return f.worker.connecting;};const p=await f.api.plan(),operation=run(f,p);await entered;f.setSelection({taskId:'other',provider:'codex',threadId:'other'});pending.resolve();assert.equal((await operation).status,'superseded');assert.equal(f.worker.connection,null);assert(!f.calls.some(call=>call[0]==='connected'||call[1]==='/api/environments/adopt'));
 });
 test('cancel after verified connection retains the connection and stops late discovery adoption',async()=>{
- const f=fixture({connected:true}),pending=defer(),request=f.worker.request;let entered;const seen=new Promise(resolve=>{entered=resolve;});f.worker.request=async(...args)=>{if(args[1].endsWith('discover')){entered();return pending.promise;}return request(...args);};const p=await f.api.plan(),operation=run(f,p);await seen;assert.equal(f.api.cancel({planId:p.planId}).connection,'connected');pending.resolve({identity:'late',entries:[{id:'late-env',status:'discovered'}]});assert.equal((await operation).status,'cancelled');assert(f.worker.connection);assert(!f.calls.some(call=>call[0]==='detach'||call[1]==='/api/environments/adopt'));
+ const f=fixture({bound:false,connected:true}),pending=defer(),request=f.worker.request;let entered;const seen=new Promise(resolve=>{entered=resolve;});f.worker.request=async(...args)=>{if(args[1].endsWith('discover')){entered();return pending.promise;}return request(...args);};const p=await f.api.plan({distribution:'Default'}),operation=run(f,p);await seen;assert.equal(f.api.cancel({planId:p.planId}).connection,'connected');pending.resolve({identity:'late',entries:[{id:'late-env',status:'discovered'}]});assert.equal((await operation).status,'cancelled');assert(f.worker.connection);assert(!f.calls.some(call=>call[0]==='detach'||call[1]==='/api/environments/adopt'));
 });
 test('duplicate request identity shares one confirmed attempt',async()=>{
- const f=fixture({connected:true}),p=await f.api.plan(),first=run(f,p),second=run(f,p);const [a,b]=await Promise.all([first,second]);assert.deepEqual(a,b);assert.equal(f.calls.filter(call=>call[1]==='/api/environments/discover').length,1);await assert.rejects(f.api.connect({planId:p.planId,requestId:'other',workerRoot:'/arbitrary'}));
+ const f=fixture({connected:true}),p=await f.api.plan(),first=run(f,p),second=run(f,p);const [a,b]=await Promise.all([first,second]);assert.deepEqual(a,b);assert.equal(f.calls.filter(call=>call[0]==='connected').length,1);assert.equal(f.calls.filter(call=>call[1]==='/api/environments/discover').length,0);await assert.rejects(f.api.connect({planId:p.planId,requestId:'other',workerRoot:'/arbitrary'}));
 });
 test('source-scoped errors do not disclose raw process/config details',async()=>{
  const f=fixture();f.worker.readExisting=async()=>{throw Error('private-token private-host private-command');};const result=await run(f,await f.api.plan());assert.equal(result.error.code,'connection_failed');assert.equal(inspect(result).includes('private-'),false);assert.equal(JSON.stringify(result).includes('private-'),false);
@@ -165,4 +165,18 @@ test('explicit new standard global service retains source binding and environmen
  assert.equal(f.calls.filter(c=>c[0]==='start').length,1);assert.equal(f.calls.filter(c=>c[0]==='bindSources').length,1);
  assert.deepEqual(f.calls.filter(c=>c[0]==='POST').map(c=>c[1]),['/api/environments/discover','/api/environments/adopt']);
  assert(f.calls.findIndex(c=>c[0]==='bindSources')>f.calls.findIndex(c=>c[0]==='start'));
+});
+
+for(const mode of ['reused','restored','started'])test('original task '+mode+' connection preserves registrations without discovery/adoption',async()=>{
+ const f=fixture({connected:mode==='reused',existing:mode==='restored'}),before=structuredClone(f.task),p=await f.api.plan();
+ const result=await run(f,p);assert.equal(result.connection,'connected');assert.equal(result.finished,true);assert.equal(result.discovery,'not_run');
+ assert(!f.calls.some(c=>['/api/environments/discover','/api/environments/adopt'].includes(c[1])||c[0]==='bindSources'));
+ assert.deepEqual(f.task,before);assert.equal(f.config.workerRoot,'/default/service');
+});
+for(const bound of [true,false])test('explicit same-source update skips discovery/adoption for '+(bound?'task':'global'),async()=>{
+ const f=fixture({bound,connected:true,serviceVersion:'different'});if(!bound)f.setLast({version:1,distribution:'Default',root:'/default/service',port:8767,intent:'standard',checkedAt:123});const p=await f.api.plan();
+ const result=await f.api.connect({planId:p.planId,requestId:'explicit-update',update:true});
+ assert.equal(result.mode,'updated',JSON.stringify({result,calls:f.calls}));assert.equal(result.serviceVersion,'current');assert.equal(result.discovery,'not_run');assert.equal(result.finished,true);
+ assert.equal(f.calls.filter(c=>c[0]==='start').length,1);
+ assert(!f.calls.some(c=>['/api/environments/discover','/api/environments/adopt'].includes(c[1])||c[0]==='bindSources'));
 });

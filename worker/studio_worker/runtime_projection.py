@@ -137,13 +137,39 @@ def guide_for_agent(value,arguments=None):
     return result
 
 
+def cluster_metadata_for_agent(entry):
+    """Addressable metadata only; connection/probe/config bodies remain desktop-owned."""
+    result={}
+    if isinstance(entry.get('id'),str):result['id']=entry['id']
+    if entry.get('scheduler') in ('lsf','slurm'):result['scheduler']=entry['scheduler']
+    if type(entry.get('version')) is int:result['version']=entry['version']
+    health=entry.get('connection_check')
+    if isinstance(health,dict):
+        status={}
+        for key in ('status','ssh_status','scheduler_status','compute_node_status'):
+            value=health.get(key)
+            if isinstance(value,str) and value in ('passed','failed','not_run','blocked','stale','unknown','unavailable','needs_human_auth','mismatch'):
+                status[key]=value
+        for key in ('observed_at','attempted_at','version'):
+            value=health.get(key)
+            if type(value) in (int,float) and math.isfinite(value):status[key]=value
+        result['connection_check']=status
+    probe=entry.get('probe')
+    if isinstance(probe,dict) and probe.get('queue_status')=='passed' and isinstance(probe.get('queues'),list):
+        result['visible_queue_count']=len(set(q for q in probe['queues'] if isinstance(q,str)))
+    if isinstance(entry.get('queue_targets'),list):result['declared_target_count']=len(entry['queue_targets'])
+    result['scope']='Cluster metadata and queue visibility only; no authorization or execution inferred.'
+    return result
+
+
 def result_for_agent(name,result,arguments=None):
+ if name=='list_clusters':return [cluster_metadata_for_agent(entry) for entry in result]
  if name in ('compute_readiness','discover_local_environments'):
   def compact(entry):
    observed=entry.get('observation') or entry.get('discovery',{}).get('observation',{})
    return {key:value for key,value in {'id':entry.get('id'),'name':entry.get('name') or entry.get('spec',{}).get('name'),'status':entry.get('status'),'python':entry.get('python') or entry.get('executables',{}).get('python'),'cuda':observed.get('cuda',{}),'modules':{key:item.get('available') for key,item in observed.get('modules',{}).items()},'scientific_status':'not_run','reason':entry.get('reason')}.items() if value is not None}
   if name=='discover_local_environments':return {key:result[key] for key in ('identity','observed_at','cached','scope')}|{'entries':[compact(entry) for entry in result['entries']]}
-  return {'environments':[compact(entry) for entry in result['environments']],'clusters':[{key:entry.get(key) for key in ('id','name','scheduler','version','queue','connection_check')} for entry in result['clusters']],'scope':result['scope']}
+  return {'environments':[compact(entry) for entry in result['environments']],'clusters':[cluster_metadata_for_agent(entry) for entry in result['clusters']],'scope':result['scope']}
  if name=='read_runtime_guide':return guide_for_agent(result,arguments)
  if name=='probe_environment':
   return {'runtime_guide':guide_for_agent(result['runtime_guide'],arguments),'scope':'Actual selected probe performed in its registered runtime; see its observed, stale or blocked receipt. This does not install or authorize a calculation.'}

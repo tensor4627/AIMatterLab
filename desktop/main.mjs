@@ -1,4 +1,5 @@
 import {selectConversation} from './conversation-selection.mjs';
+import {createStructureWithAuthoringContext} from './structure-authoring.mjs';
 import {environmentApiTool,createEnvironmentApiReader} from './environment-api-read.mjs';
 import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from './ssh-connection.mjs';
 import {createWorkbenchImageExporter} from './workbench-image.mjs';
@@ -287,6 +288,7 @@ handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAu
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
   const route=new URL(target,'http://127.0.0.1').pathname;
+  if(method==='POST'&&route==='/api/structures/create')return createStructureWithAuthoringContext({records:taskRecords,worker,selection:()=>workflowContext.current()},data);
   if(method==='POST'&&['/api/clusters','/api/cluster/test'].includes(route)&&requiresCurrentSshWorker(route==='/api/cluster/test'?data?.connection:data))await requireCurrentSshWorker(worker,()=>readWorkerStatus(worker,()=>settings));
   if(method==='POST'&&['/api/cluster/probe','/api/cluster/browse'].includes(route)&&data?.cluster_id){const connection=worker.connection,epoch=worker.connectionEpoch,observed=await readWorkerStatus(worker,()=>settings);if(observed.status!=='connected'||observed.serviceVersion!=='current'){const profile=await worker.request('POST','/api/cluster/profile',{cluster_id:data.cluster_id});if(worker.connection!==connection||worker.connectionEpoch!==epoch||requiresCurrentSshWorker(profile))throw Error('needs_worker_update');}}
   const result=await worker.request(method,target,data);

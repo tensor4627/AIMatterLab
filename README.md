@@ -4,7 +4,7 @@
 
 ## 启动
 
-Windows 开发预览便携包位于 `release/v0.18.3/GPU Sampling Studio 0.18.3.exe`，验证范围见 [本代记录](docs/v0.18.3.md)。首次启动：
+当前开发版本以 `package.json` 为准；开发产物位于 Git 忽略的 `release/`，具体构建与验证范围见 [本代记录](docs/v0.18.9.md)。已开发能力、验收边界和后续计划统一记录在 [开发者文档](docs/development/README.md)。首次启动：
 
 1. 普通对话可直接连接服务商；进行科学计算时先点击「连接 WSL」，在设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「工具 → 算力与管理 → 计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
@@ -47,7 +47,7 @@ pnpm run pack
 
 ## 已实现
 
-- 石墨/紫色工作区，深浅主题，多工作区标签，布局记忆，可调整 Agent/底部面板，命令搜索。
+- 石墨/紫色工作区，深浅主题，随会话切换的单页工作区，布局记忆，可调整 Agent/底部面板，命令搜索。
 - 本地 Monaco 编辑器，xterm WSL PTY/OpenSSH 终端，ECharts 原始列图，Three.js 分帧结构预览。
 - Codex stdio JSONL 桥接：初始化、账户、模型、流式消息、工具结果卡片、审批、补充问题、恢复、中断及技能发现。
 - WSL SQLite 持久化权威队列，单一调度进程锁，同 GPU 串行，项目并发/时限授权，幂等提交，取消、退出收据、日志续读。
@@ -81,9 +81,9 @@ node scripts/studio-acceptance.mjs
 pnpm protocol
 ```
 
-真实科学验收脚本：`scripts/science-smoke.py`。它使用单独 WSL 环境和合成 EMT Cu 数据；不得把它的短训练或 FES 当作物理结果。验收环境安装清单与命令见 [验收记录](docs/acceptance.md)。
+真实科学验收脚本：`scripts/science-smoke.py`。仅在明确授权科学检查时运行，使用 `--config <IGNORED_PRIVATE_CONFIG.json>` 显式选择自己的环境和新运行目录；它没有开发者机器的默认路径。`--help` 不加载科学库或创建运行目录。合成 EMT Cu 短训练和 FES 不代表物理结果。配置字段见 [历史首版验收记录](docs/acceptance.md)。日常回归按改动层选择，不因界面改动或 dev 版本递增重跑科学短例。
 
-协议固定为 Codex CLI **0.163.0-alpha.11.2**，生成类型在 `desktop/generated`。升级 CLI 时先重新生成类型并完成协议验收，再调整桥接版本。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
+Codex 协议生成基线记录在 `desktop/codex.mjs`，类型位于 `desktop/generated`。实际连接核对协议响应和严格隔离能力；CLI 版本字符串变化不会单独导致拒绝，也不会跳过能力检查。协议变化时更新桥接与对应类型，并做受影响的协议验收。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
 
 ## v0.2：对话设置与审阅工作流
 

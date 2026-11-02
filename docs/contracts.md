@@ -10,18 +10,18 @@
 {
   "name": "PyDyn 核心环境",
   "executables": {
-    "python": "/home/user/venvs/md/bin/python",
-    "gpumd": "/home/user/bin/gpumd",
-    "nep": "/home/user/bin/nep",
-    "hotpp": "/home/user/venvs/md/bin/hotpp",
-    "pygas": "/home/user/venvs/md/bin/pygas"
+    "python": "/ABSOLUTE/REGISTERED_ENV/bin/python",
+    "gpumd": "/ABSOLUTE/REGISTERED_GPUMD/gpumd",
+    "nep": "/ABSOLUTE/REGISTERED_GPUMD/nep",
+    "hotpp": "/ABSOLUTE/REGISTERED_ENV/bin/hotpp",
+    "pygas": "/ABSOLUTE/REGISTERED_ENV/bin/pygas"
   },
   "repositories": {
-    "pydyn": "/mnt/d/data/software/pydyn",
-    "pygas": "/mnt/d/data/software/pygas",
-    "hotpp": "/mnt/d/data/software/hotpp"
+    "pydyn": "/ABSOLUTE/REGISTERED_SOURCE/pydyn",
+    "pygas": "/ABSOLUTE/REGISTERED_SOURCE/pygas",
+    "hotpp": "/ABSOLUTE/REGISTERED_SOURCE/hotpp"
   },
-  "skills": {"nep-regression-rmse": "/mnt/c/Users/Lenovo/.codex/skills/nep-regression-rmse"},
+  "skills": {"nep-regression-rmse": "/ABSOLUTE/REGISTERED_SKILLS/nep-regression-rmse"},
   "variables": {}
 }
 ```
@@ -47,7 +47,7 @@ Agent 仅准备草稿和输入文件。MCP 不暴露 validate_run/submit_run；�
   "gpu": 0,
   "max_seconds": 300,
   "idempotency_key": "每次新实验唯一，重试相同请求保留",
-  "inputs": {"run.in": "/home/user/input/run.in", "model.xyz": "/home/user/input/model.xyz", "nep.txt": "/home/user/input/nep.txt"},
+  "inputs": {"run.in": "/ABSOLUTE/OWNED_INPUTS/run.in", "model.xyz": "/ABSOLUTE/OWNED_INPUTS/model.xyz", "nep.txt": "/ABSOLUTE/OWNED_INPUTS/nep.txt"},
   "parameters": {"seed": 123}
 }
 ```

@@ -36,3 +36,9 @@ test('late original-port replan is cancelled after guide closure without connect
 test('healthy saved global stays open with other-source choice; existing intent persists across summary edits',async()=>{
  const saved={...review(),scope:'saved-global',taskId:null,canChooseSource:true,status:'connected',connection:'connected',mode:'already_connected',serviceVersion:'current'},fresh={...review(),scope:'global',taskId:null,locked:false,intent:'standard'},h=harness({props:{taskId:undefined},plan:data=>data.newSource?{...fresh,intent:data.intent||'standard'}:saved});await h.flush();assert.equal(h.closed.length,0);h.find(n=>n.type==='button'&&h.text(n)==='选择其他本地来源').props.onClick();await h.flush();h.find(n=>n.type==='input'&&n.props.type==='checkbox').props.onChange({target:{checked:true}});await h.flush();assert.equal(h.calls.filter(c=>c.method==='compute.connection.plan').at(-1).data.intent,'existing');h.find(n=>n.type==='select').props.onChange({target:{value:'Original'}});await h.flush();assert.equal(h.calls.filter(c=>c.method==='compute.connection.plan').at(-1).data.intent,'existing');assert(!h.calls.some(c=>c.method==='compute.connection.connect'));h.unmount();
 });
+
+for(const [scope,intent,label] of [['global','existing','Existing local connection'],['global','standard','New local connection'],['task','existing','Original workflow service']])test('connection summary identifies actual scope and intent '+scope+'/'+intent,async()=>{
+ const h=harness({plan:{...review(),scope,intent},props:{language:'en'}});await h.flush();
+ const summary=h.find(n=>n.props?.className==='connection-review');assert.match(h.text(summary),new RegExp(label));
+ assert(!h.calls.some(c=>c.method==='compute.connection.connect'));h.unmount();
+});

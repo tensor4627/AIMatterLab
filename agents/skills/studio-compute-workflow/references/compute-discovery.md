@@ -4,7 +4,26 @@ Use the registered Studio connection first. SSH is a transport from the local co
 
 For a new connection, collect a host alias or hostname, **explicit remote username**, port and existing credential reference through the private connection editor. Never infer the remote username from the local OS account. Preserve host-key verification. Do not print a connection string or secret in a public report. A connection failure calls for bounded diagnostics on that connection, not discovery of unrelated hosts.
 
-Start with bounded, read-only probes through Studio. Find installed executable paths and versions, the selected environment's Python imports, CUDA/LibTorch compatibility and the scheduler. Do not dump the full process environment or credentials. Reuse already configured environments; do not install packages or switch branches when the request is to test them. Importing an engine on a login node proves discovery only. Confirm scientific execution in an allocated compute slot.
+Choose the requested stage before acting. Connection-only setup ends at the WSL/SSH connection; it does not automatically advance to remote discovery or submission. Scheduler adaptation starts with user-selected templates and a reviewable plan. Only a later explicitly included probe phase runs bounded, read-only checks. Do not dump the process environment or credentials. Reuse configured environments and runtime receipts instead of rereading installation skills or reinstalling software for routine planning.
+
+## Portable WSL and SSH connection setup
+
+For local WSL, use an actually installed distribution and a user-selected dedicated Linux-filesystem worker directory. Check the selected local endpoint, keep worker identity with the project and do not replace another service because its version differs. Starting a Studio worker is separate from installing scientific engines. A window close does not stop submitted jobs.
+
+For SSH, import a user-selected existing connection or use the manual editor. Preserve explicit username, known-host checks and credential references. An existing client's default key or agent is valid when no key file is specified. Passwords, one-time codes and key material stay out of templates and chats. Two-factor authentication is a human handoff; a tunnel is proposed and reviewed as a connection recipe, not created by copying credentials or weakening host checks. Do not install an Agent CLI on a cluster to make SSH work.
+
+## Template-first scheduler adaptation plan
+
+This section describes a future adaptation workflow, not an implemented automatic parser or authorization to probe a live system.
+
+1. Request two or three examples that the user has successfully used, preferably a small task and a GPU task. Accept explicit local file selections or explicitly selected remote file references. Keep originals and source hashes privately; do not put site scripts or resolved values into Git.
+2. Identify the scheduler family and the actual submission entry point. Separate LSF/Slurm directives from modules, environment activation, working-directory setup and the scientific command. A site wrapper or unfamiliar directive remains a review item; do not silently substitute generic `bsub` or `sbatch` behavior.
+3. Form candidates for queue/partition, account/QOS, CPU/GPU request, wall time and memory, each with its source line and uncertainty. Preserve conflicts across templates. Resolve LSF per-slot versus per-job memory and site-specific units explicitly; a script example alone does not prove a universal rule.
+4. Ask only for unresolved permitted targets, their order, payment conditions and resource limits. Names and preferences belong to a private profile. Generic examples in shared instructions use placeholders, never a developer's actual queues or nodes.
+5. Present a configuration proposal and exact script preview. Nothing in a template body becomes activation code or a submission command automatically. The user selects which candidates to adopt; existing project scope and immutable run identity remain authoritative.
+6. Leave environment tests, scheduler probes and bounded job verification as separate later tasks. Without their explicit scope, record them as pending and stop at the plan. Do not label template analysis, successful SSH or saved settings as a working submission chain.
+
+The implementation backlog includes bounded template ingestion, candidate/conflict review and versioned site-wrapper adapters. Map adopted candidates to the existing per-target environment and activation references; their configuration and immutable snapshots already exist. Site-specific submission, monitoring and retrieval still need later bounded acceptance. Only advertise a part as implemented after its own code and relevant evidence exist.
 
 ## Scheduler-specific questions
 

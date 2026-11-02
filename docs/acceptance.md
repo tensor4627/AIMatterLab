@@ -1,6 +1,6 @@
 # v0.1.0 验收记录
 
-本记录对应 Windows + Ubuntu WSL + RTX 4090 的首版。Windows 桌面验收日期为 2026-10-04（北京时间）。当前 WSL 系统时钟比 Windows 提前约 8 小时，原始任务时间戳按服务时钟保留，因此界面中的部分任务日期为 10-05；本次未修改系统时钟。四大模块已经完成真实短任务；下面分别列出实现、验证范围与尚未完成的验收项。
+本记录保留 Windows + Ubuntu WSL 首版的历史验收范围。具体机器、环境指纹、个人路径和原始时间差异留在 ignored 本地证据中；它们不是可迁移安装要求。四大模块已经完成历史真实短任务；下面分别列出验证范围与尚未完成的验收项。
 
 ## 证据与结果
 
@@ -52,14 +52,14 @@ HotPP CLI 会搬移已有 model 输出目录；续算将输入 checkpoint 快照
 ## 环境与执行
 
 验收 Python：
-`/home/tensor/.local/state/gpu-sampling-studio/validation-venv/bin/python`
+`<PRIVATE_RUNTIME_ROOT>/validation-venv/bin/python`
 
-独立安装 NumPy 1.26.4、CuPy CUDA12 13.6.0、ASE 3.29.0、PyYAML、SciPy、Matplotlib、Pillow、PyTorch Lightning 2.5.0、torchmetrics、tensorboard/tensorboardX；通过独立 .pth 引用既有 Torch 2.11.0+cu128。未改动原虚拟环境。CuPy 分配与 torch.cuda.is_available 均实际检查。
+依赖在独立环境中安装并检查；具体安装版本、CUDA 构建及路径只保留在 ignored 本地验收记录。NumPy、CuPy、ASE、PyYAML、SciPy、Matplotlib、Pillow、PyTorch Lightning 和 torchmetrics 等依赖应按所选目标环境与引擎要求登记，不沿用历史机器的包组合。未改动原虚拟环境；历史 CuPy 分配和 Torch CUDA 可用性观察不代表其它机器已验证。
 
 GPUMD/NEP 使用既有 5.1 可执行文件。GPU-Sampling 使用原有编译环境的可执行文件及其 LibTorch 依赖；没有重新编译或更改用户现有源码。普通 PyDyn 与 sampling PyDyn 分别登记；采样版本保留固定来源的 vendored pyGAS。
 
 主科学运行根目录：
-`/home/tensor/.local/state/gpu-sampling-studio/acceptance/sessions/2fb23205c33140b9bcadca2006c9d226`
+`<PRIVATE_RUNTIME_ROOT>/acceptance/sessions/<SESSION_ID>`
 
 桌面验收使用另一份 SQLite 索引，通过真实 HTTP 作业服务访问这些运行产物。具体 root/runtime 见 desktop.json，防止验收脚本和服务同时调度同一数据库。作业目录位于 Linux 文件系统；长期服务部署到持久化 runtime。
 
@@ -74,7 +74,7 @@ node scripts/codex-smoke.mjs --relay
 node scripts/restart-smoke.mjs
 ```
 
-科学 smoke 脚本为 `scripts/science-smoke.py`，其中环境路径需要按目标机器登记修改。不要把本机特定路径或本次测试项目授权当作所有机器的默认配置。
+科学 smoke 脚本为 `scripts/science-smoke.py`。它没有默认本机环境；仅在明确授权科学检查后，使用 `--config <IGNORED_PRIVATE_CONFIG.json>` 或 `STUDIO_SCIENCE_SMOKE_CONFIG` 指向私有配置。配置须置于 ignored `.studio/` 或仓库外，包含 `schema_version: 1`、新的空 `base_dir`、`python`、`sampling_repository`、`repositories`（pydyn/pygas/hotpp）、`executables`（gpumd/nep/gpu-sampling）及 `skills`（nep-regression-rmse）的显式绝对路径。`--help`、缺少或无效配置会在科学库导入和运行目录创建前返回；配置加载不探测引擎，也不证明环境可运行。不要把历史测试授权当作新的执行授权。
 
 ## 明确的未完成验收
 
