@@ -22,6 +22,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   if(['conversation.list','conversation.groups','task.list','workflow.list'].includes(method))return [];
   if(method==='worker.status')return {status:'connected',checkedAt:1};
   if(method==='worker.restore')return {status:'connected',...data,checkedAt:1};
+  if(method==='conversation.select'&&data?.new===true)return {fresh:true};
   if(method==='worker.connect')return {};
   if(method==='settings')return {...settings,...data};
   if(method==='worker.request')return [];

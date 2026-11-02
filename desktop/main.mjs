@@ -1,3 +1,4 @@
+import {selectConversation} from './conversation-selection.mjs';
 import {environmentApiTool,createEnvironmentApiReader} from './environment-api-read.mjs';
 import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from './ssh-connection.mjs';
 import {createWorkbenchImageExporter} from './workbench-image.mjs';
@@ -215,7 +216,7 @@ handle('conversation.groups',()=>taskRecords.groups());
 handle('conversation.createGroup',value=>taskRecords.createGroup(value));
 handle('conversation.organize',value=>taskRecords.organize(value));
 handle('conversation.rename',value=>{if(!value||Object.keys(value).sort().join(',')!=='id,name')throw Error('Invalid typed conversation name');return taskRecords.rename(value);});
-handle('conversation.select',async({id})=>{if(typeof id!=='string')throw Error('Invalid conversation');const conversation=catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');assertIdleAgent();if(agents.active!==conversation.provider){workflowContext.clear(agents.active);agents.disconnect(agents.active);}const ticket=workflowContext.begin(conversation.provider,conversation.threadId);await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));workflowContext.assert(ticket);return {...conversation,task:conversation.taskId?taskRecords.read(conversation.taskId):null};});
+handle('conversation.select',value=>selectConversation({catalog,records:taskRecords,workflowContext,agents,assertIdle:assertIdleAgent},value));
 handle('ssh.existing',()=>existingConnections(app.getPath('home')));
 handle('ssh.import',({ref})=>existingProfile(app.getPath('home'),ref));
 handle('cluster.download',async value=>{

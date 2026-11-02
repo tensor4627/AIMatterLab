@@ -1,4 +1,5 @@
 const english:Record<string,string> = {
+"重试":"Retry",
 "当前模式或消费契约存在相互冲突的别名值；请核对原输入，不会自动选取或改写。":"The mode or consumer contract has conflicting alias values. Review the original inputs; no value is selected or rewritten automatically.",
 "当前 OPES 输入尚不支持本地人工复核。原参数与资产保持不变；可使用下方 AI 复核。":"Local manual review does not yet support these OPES inputs. Parameters and assets are unchanged; use AI review below.",
 "当前选择的 manifest 或 kernel 契约尚不支持本地人工复核；所选输入保持不变，可使用下方 AI 复核。":"Local manual review does not yet support the selected manifest or kernel contract. Selected inputs are unchanged; use AI review below.",

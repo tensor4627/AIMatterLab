@@ -18,7 +18,7 @@ function connectionAction(details:unknown):'cluster'|'compute'|null{if(typeof de
 function originalRunHint(details:unknown):string|null{if(typeof details!=='string'||details.length>16000)return null;function walk(value:any,depth=0):string|null{if(depth>8||value==null)return null;if(typeof value==='string'){try{return walk(JSON.parse(value),depth+1);}catch{return null;}}if(Array.isArray(value)){for(const item of value.slice(0,64)){const found=walk(item,depth+1);if(found)return found;}return null;}if(typeof value!=='object')return null;if(value.kind==='authenticate_original_run'&&value.code==='needs_human_auth'&&typeof value.runId==='string'&&/^[A-Za-z0-9_-]{1,200}$/.test(value.runId))return value.runId;for(const key of ['content','structuredContent','result','text','data','connection_action']){const found=walk(value[key],depth+1);if(found)return found;}return null;}return walk(details);}
 function storedPreference(key:string){try{return localStorage.getItem(key);}catch{return null;}}
 function storePreference(key:string,value:string){try{localStorage.setItem(key,value);}catch{/* Storage is optional for chat. */}}
-export default function Agent({conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,onNewConversation,hidden,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onOpenCluster,onOpenOriginalRun}:{onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:{nonce:string;conversation?:Conversation;new?:boolean};onConversation?:(value:Conversation|null)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean}){
+export default function Agent({conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,onNewConversation,hidden,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onOpenCluster,onOpenOriginalRun}:{onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:{nonce:string;conversation?:Conversation;new?:boolean;pending?:boolean;error?:string};onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean}){
  const draftsRef=useRef<ReturnType<typeof createComposerDrafts>|null>(null);if(!draftsRef.current){draftsRef.current=createComposerDrafts(()=>localStorage);const selected=sessionSelection?.conversation;if(selected)draftsRef.current.activate(selected.provider,selected.threadId);else if(sessionSelection?.new)draftsRef.current.activate(draftsRef.current.owner().provider,null,true);}const drafts=draftsRef.current;
  const [needsAuth,setNeedsAuth]=useState(false);
  function openAccounts(){if(onOpenAccounts)onOpenAccounts(providerRef.current);else setLogin(true);}
@@ -45,6 +45,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  function selectDraft(value:AgentProvider,id:string|null=null,fresh=false){setPrompt(drafts.activate(value,id,fresh));}
  const [requests,setRequests]=useState<RpcEvent[]>([]),[answers,setAnswers]=useState<Record<string,string>>({});
  const [effort,setEffort]=useState(storedPreference('studio.effort')||''),[contextWindow,setContextWindow]=useState(''),[compactLimit,setCompactLimit]=useState(''),[options,setOptions]=useState(false),[usage,setUsage]=useState<any>(null),[applying,setApplying]=useState(false),[applied,setApplied]=useState('');
+ const sessionNonceRef=useRef(sessionSelection?.nonce),sessionPendingRef=useRef(sessionSelection?.pending);sessionNonceRef.current=sessionSelection?.nonce;sessionPendingRef.current=sessionSelection?.pending;
  const planningRef=useRef(planningMode);planningRef.current=planningMode;
  const openTaskRef=useRef(onOpenTask);openTaskRef.current=onOpenTask;
  const openRunRef=useRef(onOpenRun);openRunRef.current=onOpenRun;
@@ -63,12 +64,12 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
    if((event.provider||'codex')!==providerRef.current)return;
    if(event.method==='studio/skillsLoaded'){const call=modelCallRef.current,p=event.params||{};if(call&&p.requestId===call.requestId&&p.threadId===call.threadId&&p.threadId===threadRef.current&&(!p.turnId||!call.turnId||p.turnId===call.turnId))setAutoSkillStatus({...p,provider:event.provider||'codex'});return;}
    if(event.method==='studio/conversationContextChanged'){
-    const p=event.params,c=p.conversation;if(threadRef.current!==p.oldThreadId&&pendingResume.current!==p.oldThreadId)return;
+    if(sessionPendingRef.current)return;const p=event.params,c=p.conversation;if(threadRef.current!==p.oldThreadId&&pendingResume.current!==p.oldThreadId)return;
     if(pendingResume.current===p.oldThreadId)pendingResume.current=c.threadId;
     threadRef.current=c.threadId;setThread(c.threadId);setWorkflowId(p.taskId);setTurn(null);setUsage(null);setRequests([]);setAutoSkillStatus(null);
     setMessages(old=>old.filter(message=>message.role==='user').slice(-1));
     const call=modelCallRef.current;if(call&&call.threadId===p.oldThreadId){call.threadId=c.threadId;call.turnId=null;call.output=false;setModelCall({...call});}
-    setThreads(old=>[{...c,id:c.threadId},...old.filter(row=>row.id!==p.oldThreadId&&row.id!==c.threadId)]);conversationRef.current?.(c);return;
+    setThreads(old=>[{...c,id:c.threadId},...old.filter(row=>row.id!==p.oldThreadId&&row.id!==c.threadId)]);conversationRef.current?.(c,sessionNonceRef.current);return;
    }
    if(event.method==='studio/conversationDeleted'){setThreads(old=>old.filter(t=>t.id!==event.params.threadId));return;}
    if(event.method==='studio/toolsStatus'){setTools(event.params);return;}
@@ -113,7 +114,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  }
  async function connect(repairTools=false,seq=selectionSeq.current){
   modelCallRef.current=null;setModelCall(null);
-  const selectedProvider=providerRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current;
+  const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
   const owner=Symbol();connectionOwner.current=owner;providerTouched.current=true;setConnecting(true);try{
    const connection=await invoke('agent.connect',{provider:selectedProvider,repairTools});if(!current())return false;setTools(connection.tools||{status:'not_run',count:0});
@@ -125,14 +126,14 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   }catch(e){if(current()){setConnected(false);setModels([]);if(authenticationError(e))setNeedsAuth(true);else onError(e);}return false;}finally{if(connectionOwner.current===owner){connectionOwner.current=null;setConnecting(false);}}
  }
  useEffect(()=>{if(!connected)return;let active=true,checking=false;const check=async()=>{if(checking)return;checking=true;try{const result=await invoke('agent.tools',{provider:providerRef.current});if(active)setTools(result);}catch{if(active)setTools({status:'blocked',message:'科学工具连接中断，请重新连接',count:0});}finally{checking=false;}};const timer=setInterval(()=>void check(),15000);return()=>{active=false;clearInterval(timer);};},[connected,provider]);
- function resetConversation(invalidate=true){attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setRecovery(null);pendingResume.current=null;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);selectDraft(providerRef.current,null,true);setTurn(null);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);}
+ function resetConversation(invalidate=true){attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setRecovery(null);pendingResume.current=null;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);selectDraft(providerRef.current,null,true);setTurn(null);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);}
  async function selectProvider(value:AgentProvider,selectedSeq?:number){
   const managed=selectedSeq!==undefined,seq=selectedSeq??++selectionSeq.current;
   if(busy||!managed&&connecting)return false;providerTouched.current=true;
   setRecovery(null);pendingResume.current=null;
   const old=providerRef.current,current=()=>seq===selectionSeq.current;
   try{setNeedsAuth(false);await invoke('agent.disconnect',{provider:old});if(!current())return false;await invoke('settings',{agentProvider:value});if(!current())return false;}catch(e){if(current())onError(e);return false;}
-  modelCallRef.current=null;setModelCall(null);if(!managed)selectDraft(value);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(storedPreference('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null);return true;
+  modelCallRef.current=null;setModelCall(null);if(!managed)selectDraft(value);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(storedPreference('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);return true;
  }
  async function selectModel(value:string){
   modelCallRef.current=null;setModelCall(null);
@@ -141,7 +142,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   setApplying(true);try{const result=await invoke('agent.rpc',{provider:selectedProvider,method:'model/select',params:{model:value}});if(current()){setModel(value);setModels(result.data||[]);}}catch(error){if(current())onError(error);}finally{if(current())setApplying(false);}
  }
  async function resume(id:string,seq=++selectionSeq.current,selectedProject=projectId,rebuild=false){
-  if(busy)return;attachmentClearRef.current?.();const selectedProvider=providerRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current;
+  if(busy)return;attachmentClearRef.current?.();const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   selectDraft(selectedProvider,id);
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
   modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
@@ -163,13 +164,14 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
    }
    const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'});if(!current())return;
    const resumedModel=r.model||model,catalog=await selectedRpc('model/list');if(!current())return;if(!Array.isArray(catalog.data))throw Error('Invalid resumed model catalog');setModels(catalog.data);
-   setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(list);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation);
+   setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(list);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation,nonce);
   }catch(e){if(current()){if(rebuild)setRecovery({threadId:pendingResume.current||id,error:e instanceof Error?e.message:String(e)});else onError(e);}}finally{if(current()){pendingResume.current=null;selectionPending.current=false;setApplying(false);}}
  }
  useEffect(()=>{
   if(!sessionSelection||busy)return;const seq=++selectionSeq.current;
   if(sessionSelection.conversation)selectDraft(sessionSelection.conversation.provider,sessionSelection.conversation.threadId);
   selectionPending.current=true;threadRef.current=null;setThread(null);setApplying(true);
+  if(sessionSelection.pending){pendingResume.current=null;return;}
   const activate=async()=>{try{
    if(busy)return;
    if(sessionSelection.new){resetConversation(false);return;}
@@ -191,15 +193,15 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  async function send(textOverride?:string,action:{reviewMode?:boolean;taskId?:string}={}){
   const text=textOverride??prompt;if(needsAuth){openAccounts();return;}if(!text.trim()||busy||applying||connecting||selectionPending.current||recovery||!connected||!models.length||drafts.owner().provider!==providerRef.current||drafts.owner().threadId!==threadRef.current)return;
   if((planningMode||workflowId||action.reviewMode)&&tools.status==='blocked'){onError(t(tools.message||'请先修复科学工具连接'));return;}
-  const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,draft=drafts.capture(),manual=textOverride===undefined;
-  const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current;
+  const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,draft=drafts.capture(),manual=textOverride===undefined;
+  const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
   setBusy(true);
   const retainRequest=()=>{if(!manual&&drafts.retain(draft,text))setPrompt(drafts.text());};
   try{
    let id=threadRef.current;
    if(!id){const r=await selectedRpc('thread/start',{model:model||undefined});if(!current())return;id=r.thread.id;}
-   const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:projectId||null,groupId:conversationGroupId||null,intent:text});if(!current())return;conversationRef.current?.(conversation);drafts.rebind(draft,id!);setPrompt(drafts.text());setThread(id);threadRef.current=id;setThreads(old=>[{id,name:conversation.name},...old.filter(value=>value.id!==id)]);
+   const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:projectId||null,groupId:conversationGroupId||null,intent:text});if(!current())return;conversationRef.current?.(conversation,nonce);drafts.rebind(draft,id!);setPrompt(drafts.text());setThread(id);threadRef.current=id;setThreads(old=>[{id,name:conversation.name},...old.filter(value=>value.id!==id)]);
    let taskId=action.taskId||conversation.taskId;
    const fresh=newWorkflow||explicitNewWorkflow(text);
    if((planningMode||fresh)&&!action.reviewMode){const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:selectedProvider,request:text,projectId:conversation.projectId||projectId||null});if(!current())return;taskId=task.id;openTaskRef.current?.(task.id);}
@@ -256,6 +258,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   </div>
   {autoSkillStatus&&autoSkillStatus.threadId===thread&&autoSkillStatus.provider===provider&&<details className="agent-auto-skills"><summary>{t(autoSkillStatus.status==='passed'?'本轮已载入任务指导':autoSkillStatus.status==='already_loaded'?'当前会话已有相同指导':autoSkillStatus.status==='permission_required'?'需要公开指导共享许可':autoSkillStatus.status==='prepared'?'指导已准备，等待服务接受':autoSkillStatus.status==='failed'?'指导发送未通过':autoSkillStatus.status==='unknown'?'指导接收状态未知':autoSkillStatus.status==='not_run'?'本轮未载入任务指导':'任务指导暂不可用')} · {(autoSkillStatus.names||[]).length}</summary>{(autoSkillStatus.names||[]).map((name:string)=><div key={name}>{name}</div>)}{autoSkillStatus.source&&<p>{autoSkillStatus.source}</p>}{autoSkillStatus.attachments?.map((a:any)=><p className="skill-loaded-file" key={a.name+a.sha256}>{a.name}<small>SHA256 · {a.sha256} · {a.bytes} bytes</small></p>)}{autoSkillStatus.message&&<p>{autoSkillStatus.message}</p>}</details>}
   {needsAuth&&<div className="account-login-guidance" role="status" data-testid="agent-login-required"><p>{t(ACCOUNT_GUIDANCE)}</p><button className="button" onClick={openAccounts}>{t('打开账号与 API')}</button></div>}
+  {sessionSelection?.pending&&sessionSelection.error&&<div className="notice" role="alert"><span>{sessionSelection.error}</span><button className="button" onClick={()=>onNewConversation?.()}>{t("重试")}</button></div>}
   <div className="composer"><div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{workflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{(workflowId||planningMode||newWorkflow)&&<small className="agent-mode-help">{t(newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</small>}{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}<textarea aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{t('Enter 发送 · Shift+Enter 换行')}</span>{busy?<button className="send" title={tr("中断 Agent，计算作业继续")} aria-label={tr("中断 Agent，计算作业继续")} onClick={()=>void rpc('turn/interrupt',{threadId:thread,turnId:turn}).catch(onError)}><Square size={13}/></button>:<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={!!recovery||applying||connecting||!connected||!models.length||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
   <div className="agent-footer">{tr("Agent 会话与科学计算队列独立运行")}</div>
   {login&&<ProviderLogin provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{setLogin(false);void connect();}} onError={onError}/>}
