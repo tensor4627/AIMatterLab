@@ -37,6 +37,8 @@ python scripts/one_prompt.py ACTION --config .studio/installation/config.json --
 
 该入口会生成独立 profile 启动文件，保留本机其他安装。桌面正常任务默认普通聊天；用户开启任务规划模式后，才生成中央流程与参数页。一个会话通常更新一个流程。先完整定义科学流程（输入结构/势、MD 引擎、热力学参数、CV/Bias、输出）；之后在独立部署模块选择已有计算连接、版本化环境、工作目录、队列和资源。辅助训练、主动学习、结构生成和分析仅按用户需要启用。MetaD / WTMetaD 默认一个任务、一个 walker；多 walker/replica 必须由用户明确要求且目标实现实际支持。正式科学任务由用户审阅实际输入及部署脚本后点击执行。
 
+Windows 桌面验证和启动均使用共用的 `scripts/start.mjs` 入口；可先执行 `node scripts/start.mjs --preflight-only`。受限令牌返回 blocked 时，申请正常桌面执行权限或让用户从普通桌面启动，不直接重试解包 EXE、禁用 Electron sandbox、放宽仓库 ACL 或修改执行策略。普通非管理员上下文可用。安装器生成的 `Launch-Studio.cmd` 是 Windows 优先启动文件，保留同一验收 profile；PS1 兼容文件不作为修改系统执行策略的理由。启动检查失败、进程非零退出或旧报告未更新时，不得宣称安装成功。
+
 ## 集群适配
 
 只读检查实际 LSF / Slurm、队列、资源约束、Python/CUDA/modules/引擎路径。复用用户已配置的环境，协作解决探测中真实缺失的信息。参照 docs/ssh-cluster-management.md，在私有 connection 配置登记 scheduler、queue、remote_root、activation、limits、lsf_memory_scope 和 read_roots。SSH 提交配置保存版本，任何修改只在审阅配置保存后生效。PyDyn-pyGAS 与 GPUMD GPU-Sampling 分别检查实际注册能力；不能用另一条路线的通过记录替代。工作目录是注册 remote_root 下的安全目录名前缀，由 worker 附加 Run ID，不能接受任意远端写路径。

@@ -24,6 +24,9 @@ def claim_audit_root(location,guard,role):
 
 def fingerprint(config):
     files=[ROOT/"INSTALL_AGENT.md",ROOT/"AGENTS.md",ROOT/"docs/one-prompt-install.md",ROOT/"installation/manifest.json",ROOT/"installation/runtime.py",ROOT/"scripts/one_prompt.py",ROOT/"package.json",ROOT/"pnpm-lock.yaml",ROOT/"index.html",ROOT/"vite.config.ts",ROOT/"tsconfig.json",ROOT/"worker/studio_worker/engine_contracts.json"]
+    for name in ("desktop-launch.mjs","start.mjs","dev.mjs","windows-launch-preflight.ps1"):
+        file=ROOT/"scripts"/name
+        if file.exists() or file.is_symlink():files.append(file)
     surfaces={"installation/examples":("**/*.py",),"agents/skills":("**/*.md","**/*.py","**/*.json","**/*.yaml","**/*.yml","**/*.toml"),"desktop":("**/*.mjs","**/*.cjs","**/*.ts","**/*.json"),"shared":("**/*.mjs","**/*.json"),"worker":("**/*.py",),"src":("**/*.tsx","**/*.ts","**/*.css")}
     for directory,patterns in surfaces.items():
         for pattern in patterns:
@@ -83,7 +86,50 @@ def invoke(config,action,approved=False,audit_guard=None):
     lines=[v[len("__STUDIO_INSTALL__"):] for v in text.splitlines() if v.startswith("__STUDIO_INSTALL__")]
     if not lines:raise RuntimeError("Target runtime did not return an install receipt")
     return json.loads(lines[-1])
+def _desktop_report_snapshot(report):
+    if report.is_symlink():raise ValueError("Desktop receipt must be a regular file")
+    if not report.exists():return None,None
+    if not report.is_file():raise ValueError("Desktop receipt must be a regular file")
+    before=report.stat()
+    if before.st_size>1024*1024:raise ValueError("Desktop receipt exceeds the bounded read limit")
+    data=report.read_bytes();after=report.stat()
+    identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+    if identity(before)!=identity(after):raise ValueError("Desktop receipt changed during read")
+    return {"stat":list(identity(after)),"sha256":hashlib.sha256(data).hexdigest()},data
+
+def _write_desktop_launcher(state,node,*,windows):
+    start=str(ROOT/"scripts/start.mjs")
+    if windows:
+        def batch(value):
+            value=str(value)
+            if any(c in value for c in '\"\r\n\0'):raise ValueError("Windows launcher paths cannot contain quotes or control characters")
+            return value.replace("%","%%")
+        node_cmd,start_cmd,profile_cmd,root_cmd=(batch(value) for value in (node,start,state/"desktop-profile",ROOT))
+        text='@echo off\nsetlocal DisableDelayedExpansion\nset "STUDIO_PROFILE_DIR='+profile_cmd+'"\ncd /d "'+root_cmd+'"\nif errorlevel 1 exit /b 1\n"'+node_cmd+'" "'+start_cmd+'"\nexit /b %errorlevel%\n'
+        (state/"Launch-Studio.cmd").write_text(text,encoding="utf-8")
+        def literal(value):return "'"+str(value).replace("'","''")+"'"
+        text="$env:STUDIO_PROFILE_DIR="+literal(state/"desktop-profile")+"\nSet-Location -LiteralPath "+literal(ROOT)+"\n& "+literal(node)+" "+literal(start)+"\nexit $LASTEXITCODE\n"
+        (state/"Launch-Studio.ps1").write_text(text,encoding="utf-8")
+    else:
+        import shlex
+        text="#!/bin/sh\ncd "+shlex.quote(str(ROOT))+" || exit 1\nexport STUDIO_PROFILE_DIR="+shlex.quote(str(state/"desktop-profile"))+"\nexec "+shlex.join([node,start])+"\n"
+        launcher=state/"launch-studio.sh";launcher.write_text(text,encoding="utf-8");launcher.chmod(0o700)
+
 def desktop(config,state,*,reuse_existing=False):
+    node=config["desktop"].get("node") or "node"
+    action="Launch from a normal desktop context; agents must request normal execution permission, then retry the guarded launcher."
+    if not isinstance(node,str) or any(c in node for c in "\0\r\n"):return {"status":"blocked","reason":"invalid_desktop_node","user_action":"Choose an existing Node executable path."}
+    env=os.environ.copy()
+    env.update(STUDIO_VERIFY_ROOT=str(state),STUDIO_INSTALL_CONFIG=str(Path(config["_config_path"]).resolve()),STUDIO_PROFILE_DIR=str(state/"desktop-profile"))
+    start=str(ROOT/"scripts/start.mjs")
+    try:
+        preflight=subprocess.run([node,start,"--preflight-only"],cwd=ROOT,env=env,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=30)
+        (state/"desktop-preflight.log").write_text(preflight.stdout+preflight.stderr,encoding="utf-8")
+        observed=json.loads(preflight.stdout)
+    except (OSError,subprocess.TimeoutExpired,ValueError):return {"status":"blocked","scope":"desktop launch preflight","reason":"desktop_preflight_unavailable","user_action":action}
+    if preflight.returncode or not isinstance(observed,dict) or observed.get("status")!="allowed":
+        reason=observed.get("reason") if isinstance(observed,dict) else None
+        return {"status":"blocked","scope":"desktop launch preflight","reason":reason if reason in ("restricted_token","token_probe_failed","invalid_preflight_arguments") else "desktop_preflight_blocked","user_action":action}
     pnpm=config["desktop"].get("pnpm") or ("pnpm.cmd" if os.name=="nt" else "pnpm")
     if not reuse_existing and config["desktop"].get("install_dependencies",True):
         commands=[[pnpm,"install","--frozen-lockfile"],[pnpm,"run","build"]]
@@ -92,23 +138,24 @@ def desktop(config,state,*,reuse_existing=False):
         result=subprocess.run(argv,cwd=ROOT,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=1200)
         (state/("desktop-command-"+str(index)+".log")).write_text(result.stdout+result.stderr,encoding="utf-8")
         if result.returncode:return {"status":"failed","scope":"desktop dependency or build command"}
-    electron=ROOT/"node_modules/.bin"/("electron.cmd" if os.name=="nt" else "electron")
-    env=os.environ.copy()
-    env.update(STUDIO_VERIFY_ROOT=str(state),STUDIO_INSTALL_CONFIG=str(Path(config["_config_path"]).resolve()),STUDIO_PROFILE_DIR=str(state/"desktop-profile"))
-    result=subprocess.run([str(electron),str(ROOT),"--studio-install-verify"],env=env,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=240)
-    (state/"desktop-verify.log").write_text(result.stdout+result.stderr,encoding="utf-8")
     report=state/"desktop-install.json"
-    if not report.exists():return {"status":"blocked","scope":"desktop verification did not produce a receipt"}
-    receipt=json.loads(report.read_text())
-    if result.returncode or receipt["status"]!="passed":return receipt
+    try:before,_=_desktop_report_snapshot(report)
+    except (OSError,ValueError):return {"status":"blocked","reason":"desktop_receipt_unavailable","user_action":"Inspect the existing desktop receipt; it was preserved."}
+    try:result=subprocess.run([node,start,"--studio-install-verify"],cwd=ROOT,env=env,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=240)
+    except (OSError,subprocess.TimeoutExpired):return {"status":"blocked","reason":"desktop_verification_unavailable","user_action":"Inspect desktop verification logs and retry through the guarded launcher."}
+    (state/"desktop-verify.log").write_text(result.stdout+result.stderr,encoding="utf-8")
+    try:after,data=_desktop_report_snapshot(report)
+    except (OSError,ValueError):after,data=None,None
+    evidence={"before":before,"after":after,"fresh":after is not None and after!=before}
+    if result.returncode:return {"status":"failed","scope":"desktop verification process exited unsuccessfully","reason":"desktop_verification_exit","exit_code":result.returncode,"receipt_evidence":evidence,"user_action":"Inspect desktop-verify.log; a previous receipt cannot override this process failure."}
+    if not evidence["fresh"]:return {"status":"blocked","scope":"desktop verification did not produce a fresh receipt","reason":"desktop_receipt_not_fresh","receipt_evidence":evidence,"user_action":"Retain the previous report and rerun desktop verification through the guarded launcher."}
+    try:receipt=json.loads(data.decode("utf-8-sig"))
+    except (UnicodeError,ValueError):receipt=None
+    if not isinstance(receipt,dict) or receipt.get("status") not in ("passed","failed","blocked"):return {"status":"blocked","reason":"invalid_desktop_receipt","receipt_evidence":evidence,"user_action":"Inspect the current desktop verification report."}
+    receipt={**receipt,"receipt_evidence":evidence}
+    if receipt["status"]!="passed":return receipt
     # A separate launcher preserves the verified profile without replacing existing installations.
-    if os.name=="nt":
-        def literal(value):return "'"+str(value).replace("'","''")+"'"
-        (state/"Launch-Studio.ps1").write_text("$env:STUDIO_PROFILE_DIR="+literal(state/"desktop-profile")+"\n& "+literal(electron)+" "+literal(ROOT)+"\n",encoding="utf-8")
-    else:
-        import shlex
-        (state/"launch-studio.sh").write_text("#!/bin/sh\nexport STUDIO_PROFILE_DIR="+shlex.quote(str(state/"desktop-profile"))+"\nexec "+shlex.join([str(electron),str(ROOT)])+"\n")
-        (state/"launch-studio.sh").chmod(0o700)
+    _write_desktop_launcher(state,node,windows=os.name=="nt")
     return receipt
 def finalize(records,signature,cases,*,readiness_only=False):
     missing=[name for name in REQUIRED if name not in records or records[name].get("fingerprint")!=signature]
@@ -203,7 +250,7 @@ def main(argv=None):
             record_path.write_text(json.dumps(records,indent=2),encoding="utf-8")
         # Configure returns a new environment for explicit review; never silently edits the user's configuration.
         if audit_owned:(state/(args.action+".json")).write_text(json.dumps(result,indent=2),encoding="utf-8")
-        public={k:result[k] for k in ("status","installation_success","reuse_readiness_success","selected_cases","missing","scope") if k in result}
+        public={k:result[k] for k in ("status","installation_success","reuse_readiness_success","selected_cases","missing","scope","reason","user_action") if k in result}
         print(json.dumps(public))
         return 0 if result["status"]=="passed" else 2
     except Exception:

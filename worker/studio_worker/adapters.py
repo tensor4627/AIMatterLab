@@ -235,6 +235,9 @@ class Adapter:
             return {"status":"not_run", "scope":"arbitrary driver semantics require actual input review"}
         p=spec.get("parameters", {}); p={**p, **p.get("md", {})}
         rows=[line.split("#")[0].split() for line in (Path(directory)/"run.in").read_text().splitlines()]
+        if self.engine in ("gpumd.md", "gpumd.sampling") and spec.get("parent_run"):
+            if any(row and row[0] == "velocity" for row in rows):
+                raise ValueError("GPUMD continuation input must not initialize velocity")
         checked=[]
         for key, command in (("steps","run"),("n_steps","run"),("time_step_fs","time_step")):
             if key not in p:continue

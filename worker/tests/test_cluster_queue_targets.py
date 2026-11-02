@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from studio_worker.cluster import Clusters, profile, public
+from studio_worker.cluster import Clusters, profile, public, batch_script, word, target_id, ssh_endpoint
 from studio_worker.server import dispatch
 from studio_worker.service import Service
 
@@ -87,6 +87,48 @@ class QueueTargetLifecycle(unittest.TestCase):
 
     def saved_profile(self):
         return self.service.store.get("cluster", self.profile["id"])
+
+    def test_lsf_literal_exclamation_queue_preserves_name_and_still_requires_policy(self):
+        target = self.target("owned")
+        target["queue"] = "!fixture_owned"
+        self.profile = self.cluster.register({**self.saved_profile(), "scheduler":"lsf", "queue_targets":[target]})
+        self.cluster._connection_result(self.saved_profile(), {"status":"passed"}, {"queues":[target["queue"]]})
+        with self.assertRaisesRegex(PermissionError, "queue policy is not authorized"):
+            self.cluster.prepare(self.spec(key="visible-literal-is-not-authority"))
+        self.authorize()
+        run = self.cluster.prepare(self.spec())
+        self.assertEqual(run["resources"]["queue"], "!fixture_owned")
+        self.assertEqual(run["queue_target_snapshot"]["queue"], "!fixture_owned")
+        self.assertIn("#BSUB -q !fixture_owned", batch_script(self.cluster.raw(run["id"])))
+        self.assertFalse(FixtureSSH.calls)
+
+    def test_literal_exclamation_is_lsf_queue_only_not_general_tokens(self):
+        saved = self.saved_profile();target = self.target("owned");target["queue"] = "fixture!"
+        with self.assertRaises(ValueError):profile({**saved, "scheduler":"slurm", "queue_targets":[target]})
+        for value in ("queue;bad", "queue\nother", "-q", "queue$(bad)"):
+            target["queue"] = value
+            with self.assertRaises(ValueError):profile({**saved, "scheduler":"lsf", "queue_targets":[target]})
+        target["queue"] = "fixture!";target["account"] = "account!"
+        with self.assertRaises(ValueError):profile({**saved, "scheduler":"lsf", "queue_targets":[target]})
+        for call in (lambda:word("host!"),lambda:target_id("id!"),lambda:ssh_endpoint({"host":"host!", "username":"fixture"})):
+            with self.assertRaises(ValueError):call()
+
+    def test_legacy_lsf_literal_queue_is_preserved_without_new_target_policy_claim(self):
+        saved = self.saved_profile();saved.pop("queue_targets")
+        self.profile = self.cluster.register({**saved, "scheduler":"lsf", "queue":"fixture!"})
+        run = self.cluster.prepare(self.spec(resources={"queue":"fixture!"}))
+        self.assertEqual(run["resources"]["queue"], "fixture!")
+        self.assertNotIn("queue_target_snapshot", run)
+        self.assertIn("#BSUB -q fixture!", self.cluster.raw(run["id"])["script"])
+        self.assertFalse(FixtureSSH.calls)
+
+    def test_pending_native_import_requires_human_review_without_saved_profile_or_transport_change(self):
+        before = self.saved_profile()
+        pending = {**before, "import_review":{"requires_review":True, "reasons":["xshell_proxy_requires_review"]}}
+        with self.assertRaisesRegex(ValueError, "human review"):self.cluster.register(pending)
+        with self.assertRaisesRegex(ValueError, "human review"):self.cluster.test_connection(pending)
+        self.assertEqual(self.saved_profile(), before)
+        self.assertFalse(FixtureSSH.calls)
 
     def test_visible_queues_and_cluster_grant_never_authorize_targets(self):
         saved = self.saved_profile()

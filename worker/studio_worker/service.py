@@ -1,4 +1,5 @@
 import base64
+from copy import deepcopy
 import io
 import zipfile
 import hashlib
@@ -112,6 +113,8 @@ class Service(RuntimeServiceMixin):
 
     def prepare(self, spec):
         spec = dict(spec)
+        if "continuation_metadata" in spec:
+            raise ValueError("Continuation metadata is worker-owned")
         for key in ("project_id", "environment_id", "engine", "inputs", "gpu", "max_seconds", "idempotency_key"):
             if key not in spec:
                 raise ValueError("Missing " + key)
@@ -223,6 +226,9 @@ class Service(RuntimeServiceMixin):
             if any(k not in allowed and k != "idempotency_key" for k in changes):
                 raise ValueError("Unsupported review field")
             spec.update({k:v for k,v in changes.items() if k in allowed})
+            # Continuation ancestry is worker-owned, never a renderer review field.
+            if parent.get("parent_run"):
+                spec["parent_run"] = parent["parent_run"]
             spec.update(revision_of=parent["id"], origin=parent.get("origin","desktop"),
                 idempotency_key=changes["idempotency_key"])
             if not isinstance(edits,dict):
@@ -251,6 +257,19 @@ class Service(RuntimeServiceMixin):
                 spec["inputs"] = inputs
                 run = self.prepare(spec)
                 retained = True
+                if parent.get("continuation_metadata"):
+                    metadata = deepcopy(parent["continuation_metadata"])
+                    snapshots = {item["name"]: item for item in run["snapshots"]}
+                    if snapshots.get("run.in", {}).get("sha256") != metadata["input"]["sha256"]:
+                        metadata["velocity_initialization"] = "not_checked"
+                    if snapshots.get("model.xyz", {}).get("sha256") != metadata["checkpoint"]["sha256"]:
+                        metadata["checkpoint"]["source_name"] = None
+                        metadata["velocity_initialization"] = "not_checked"
+                    if "model.xyz" in snapshots:
+                        metadata["checkpoint"]["sha256"] = snapshots["model.xyz"]["sha256"]
+                    if "run.in" in snapshots:
+                        metadata["input"]["sha256"] = snapshots["run.in"]["sha256"]
+                    self.store.update(run, continuation_metadata=metadata)
                 self.store.update(run, review_changes=changes, review_edit_hash=edit_hash)
                 atomic_json(Path(run["directory"])/"reproduction.json",run)
                 self.store.update(parent,status="cancelled",superseded_by=run["id"],cancel_reason="review_revision")
@@ -308,6 +327,8 @@ class Service(RuntimeServiceMixin):
             if run["status"] != "ready" or run["validation"]["status"] != "passed":
                 raise ValueError("Successful validation required before submission")
             self.verify_snapshot(run)
+            if run["engine"] in ("gpumd.md", "gpumd.sampling") and run.get("parent_run"):
+                Adapter(run["engine"]).input_contract(run, Path(run["directory"]) / "simulation")
             return self.store.update(run, status="queued")
 
     def cancel(self, identifier):
@@ -568,6 +589,31 @@ class Service(RuntimeServiceMixin):
         else:
             raise ValueError("This engine does not declare a checkpoint continuation")
         spec = {key:run[key] for key in ("project_id","environment_id","engine","gpu","max_seconds")}
-        spec.update(inputs=inputs,parameters={**run.get("parameters",{}),**parameters},
+        child_parameters = deepcopy({**run.get("parameters",{}),**parameters})
+        gpumd = run["engine"] in ("gpumd.md", "gpumd.sampling")
+        if gpumd:
+            for group, key in (("structure", "has_initial_velocities"),
+                               ("dynamics", "velocity_initialization_temperature_K")):
+                if isinstance(child_parameters.get(group), dict):
+                    child_parameters[group].pop(key, None)
+        spec.update(inputs=inputs,parameters=child_parameters,
             parent_run=run["id"],name=run["name"]+" 路 continuation",idempotency_key=parameters["idempotency_key"])
-        return self.prepare(spec)
+        with self.store.lock:
+            existing = self.store.by_key(spec["project_id"], spec["idempotency_key"])
+            prepared = self.prepare(spec)
+            # Only this new draft receives evidence; retries must not rewrite any run.
+            if gpumd and existing is None:
+                snapshots = {item["name"]: item for item in prepared["snapshots"]}
+                actual_input = (Path(prepared["directory"])/"simulation"/"run.in").read_text()
+                no_velocity_command = not any(line.split("#")[0].strip().startswith("velocity")
+                                              for line in actual_input.splitlines())
+                metadata = {"schema": "gpumd-continuation-v1", "parent_run": run["id"],
+                    "parameter_scope": "inherited_unverified",
+                    "checkpoint": {"input": "model.xyz", "source_name": "restart.xyz",
+                        "sha256": snapshots["model.xyz"]["sha256"], "has_velocities": None,
+                        "velocity_status": "not_checked"},
+                    "input": {"name": "run.in", "sha256": snapshots["run.in"]["sha256"]},
+                    "velocity_initialization": "no_velocity_command" if no_velocity_command else "not_checked"}
+                self.store.update(prepared, continuation_metadata=metadata)
+                atomic_json(Path(prepared["directory"])/"reproduction.json", prepared)
+            return prepared

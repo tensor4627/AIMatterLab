@@ -1,7 +1,8 @@
 export type RunStatus='draft'|'validating'|'ready'|'queued'|'running'|'succeeded'|'failed'|'cancelled'|'unknown';
 export interface Project {authoring_only?:boolean;authoring_task_id?:string;id:string;name:string;policy:{engines:string[];gpus:number[];max_seconds:number;max_concurrent:number;input_roots:string[];environments:string[];clusters?:string[];cluster_queue_policies?:Record<string,ClusterQueuePolicy>}}
 export interface Environment {id:string;name:string;executables:Record<string,string>;repositories?:Record<string,string>;variables?:Record<string,string>}
-export interface Run {superseded_by?:string;revision_of?:string;id:string;name:string;engine:string;project_id:string;environment_id:string;status:RunStatus;gpu:number;max_seconds:number;directory:string;validation:{status:string;message?:string;output?:string;scope?:string;scientific_status?:string;artifact_status?:string};created_at:number;updated_at:number;command:string[];parameters?:Record<string,unknown>;inputs:Record<string,string>;error?:string;exit?:{exit_code:number;reason?:string}}
+export interface ContinuationMetadata {schema:"gpumd-continuation-v1";parent_run:string;parameter_scope:"inherited_unverified";checkpoint:{input:string;source_name:string|null;sha256:string;has_velocities:null;velocity_status:"not_checked"};input:{name:string;sha256:string};velocity_initialization:"no_velocity_command"|"not_checked"}
+export interface Run {parent_run?:string;continuation_metadata?:ContinuationMetadata;superseded_by?:string;revision_of?:string;id:string;name:string;engine:string;project_id:string;environment_id:string;status:RunStatus;gpu:number;max_seconds:number;directory:string;validation:{status:string;message?:string;output?:string;scope?:string;scientific_status?:string;artifact_status?:string};created_at:number;updated_at:number;command:string[];parameters?:Record<string,unknown>;inputs:Record<string,string>;error?:string;exit?:{exit_code:number;reason?:string}}
 export interface Workflow {id:string;project_id:string;name:string;steps:unknown[];run_ids:string[]}
 export interface Artifact {id:string;name:string;path:string;kind:string;sha256:string;size:number;metadata?:Record<string,unknown>}
 export type AgentProvider='codex'|'kimi'|'qwen'|'deepseek'|'compatible';
@@ -71,3 +72,5 @@ export interface ClusterQueueTarget {id:string;queue:string;usage_class:'owned'|
 export interface ClusterQueuePolicy {profile_version:number;allowed_target_ids:string[];new_submission_order:string[];paid:{permitted:boolean;conditions_known:boolean;conditions:string;limits?:ClusterQueueLimits}}
 export interface ClusterQueueProfile {id?:string;version?:number;queue?:string;queue_targets?:ClusterQueueTarget[];environment:ClusterQueueEnvironment;activation:string;limits:Partial<ClusterQueueLimits>}
 export interface ClusterSchedulerObservation {queues?:string[];detected_schedulers?:string[];selected_scheduler?:string;selected_scheduler_match?:boolean;schedulers?:Record<string,{queues?:string[];commands?:unknown;queue_status?:string}>}
+
+export interface ExistingSshReference {ref:string;label:string;source?:'codex'|'xshell';action?:'select-session'}

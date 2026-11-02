@@ -217,8 +217,11 @@ handle('conversation.createGroup',value=>taskRecords.createGroup(value));
 handle('conversation.organize',value=>taskRecords.organize(value));
 handle('conversation.rename',value=>{if(!value||Object.keys(value).sort().join(',')!=='id,name')throw Error('Invalid typed conversation name');return taskRecords.rename(value);});
 handle('conversation.select',value=>selectConversation({catalog,records:taskRecords,workflowContext,agents,assertIdle:assertIdleAgent},value));
-handle('ssh.existing',()=>existingConnections(app.getPath('home')));
-handle('ssh.import',({ref})=>existingProfile(app.getPath('home'),ref));
+handle('ssh.existing',()=>existingConnections(app.getPath('home'),{documents:app.getPath('documents'),includeXshellPicker:true}));
+handle('ssh.import',({ref})=>existingProfile(app.getPath('home'),ref,{documents:app.getPath('documents'),selectXshellSession:async()=>{
+  const response=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'Xshell session',extensions:['xsh']}]});
+  return response.canceled?null:response.filePaths[0];
+}}));
 handle('cluster.download',async value=>{
  const first=await worker.request('POST','/api/cluster/browse',{...value,offset:0});
  if(typeof first.base64!=='string'||!first.sha256)throw Error('Select a regular file in an authorized read root');

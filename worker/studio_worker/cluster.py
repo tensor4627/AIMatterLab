@@ -19,6 +19,7 @@ from .adapters import Adapter, ENGINES, SUPPORTED_ENGINES
 from .util import atomic_json, contained, digest, leaf
 
 TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+-]+$")
+LSF_QUEUE_TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+!-]+$")
 MARKER = "__STUDIO_JSON__"
 TERMINAL = ("succeeded", "failed", "cancelled")
 
@@ -141,6 +142,16 @@ def word(value, name="value"):
     return value
 
 
+def queue_word(value, scheduler, name="queue"):
+    # Literal LSF queue identifiers can contain !. Do not widen account,
+    # host, job-name or general path tokens, or strip an observed identifier.
+    if scheduler != "lsf":
+        return word(value, name)
+    if not isinstance(value, str) or not value or len(value) > 256 or not LSF_QUEUE_TOKEN.fullmatch(value) or value.startswith("-"):
+        raise ValueError("Invalid " + name)
+    return value
+
+
 def ssh_endpoint(value):
     legacy = value.get("target", "")
     if not isinstance(legacy, str):
@@ -190,7 +201,7 @@ def environment(value):
     return e
 
 
-def queue_targets(value, cluster_limits):
+def queue_targets(value, cluster_limits, scheduler=None):
     if not isinstance(value, list) or len(value) > 64:
         raise ValueError("Bounded explicit queue targets required")
     result, seen = [], set()
@@ -203,7 +214,7 @@ def queue_targets(value, cluster_limits):
         if identifier in seen:
             raise ValueError("Duplicate queue target ID")
         seen.add(identifier)
-        word(target.get("queue"), "queue target queue")
+        queue_word(target.get("queue"), scheduler, "queue target queue")
         if target.get("usage_class") not in ("owned", "paid", "unknown") or type(target.get("enabled")) is not bool:
             raise ValueError("Explicit queue target usage class and enabled flag required")
         engines = target.get("engines")
@@ -255,6 +266,8 @@ def policy_digest(value):
 
 def profile(value):
     p = dict(value)
+    if isinstance(p.get("import_review"), dict) and p["import_review"].get("requires_review") is True:
+        raise ValueError("Imported connection requires human review of its native route or authentication references")
     if p.get("scheduler") not in ("lsf", "slurm"):
         raise ValueError("Select LSF or Slurm")
     host, username = ssh_endpoint(p)
@@ -308,7 +321,7 @@ def profile(value):
         if type(p["limits"].get(k)) is not int or p["limits"][k] < 0:
             raise ValueError("Explicit resource limits required")
     if "queue_targets" in p:
-        p["queue_targets"] = queue_targets(p["queue_targets"], p["limits"])
+        p["queue_targets"] = queue_targets(p["queue_targets"], p["limits"], p["scheduler"])
     return p
 
 
@@ -394,7 +407,7 @@ def resources(value, p, seconds):
     r.setdefault("queue", p.get("queue", ""))
     if not r["queue"]:
         raise ValueError("Explicit queue/partition required")
-    word(r["queue"], "queue")
+    queue_word(r["queue"], p["scheduler"])
     if r.get("account"):
         word(r["account"], "scheduler account")
     r["seconds"] = int(seconds)
@@ -733,7 +746,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
         if not isinstance(proposal, dict) or any(k not in ("queue","activation","environment","limits","notes","lsf_memory_scope","queue_targets") for k in proposal):
             raise ValueError("Only reviewable environment/skill fields can be proposed")
         if "queue_targets" in proposal:
-            queue_targets(proposal["queue_targets"], proposal.get("limits", current["limits"]))
+            queue_targets(proposal["queue_targets"], proposal.get("limits", current["limits"]), current["scheduler"])
         return self.store.put("cluster-draft", {"id":secrets.token_hex(10), "kind":"cluster-setup", **data, "status":"draft"})
 
     def _transfer(self, p, payload):
