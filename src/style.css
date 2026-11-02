@@ -64,3 +64,21 @@ body,input,select,textarea,button{font-family:var(--ui-font,"Segoe UI","Microsof
 .agent-mode-inline{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .compute-resource-entry{width:100%;text-align:left}.compute-resource-entry>span{min-width:0}.compute-resource-entry small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.compute-resource-entry>svg{flex-shrink:0}.compute-connection-choices{display:flex;gap:12px;flex-wrap:wrap}.compute-connection-choices>.button{flex:1;min-height:64px}
+
+.cluster-queue-settings{min-width:0}.queue-settings-heading{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}.queue-target-disclosure{border-top:1px solid var(--line);padding:12px 0}.queue-target-disclosure>summary{overflow-wrap:anywhere;cursor:pointer}.queue-target{min-width:0;border:0;margin:0;padding:12px 0}.cluster-queue-settings label{display:grid;min-width:0;gap:6px}.cluster-queue-settings .check-label{display:flex;align-items:center}.cluster-queue-settings .form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:10px}.cluster-queue-settings input,.cluster-queue-settings textarea,.cluster-queue-settings select{max-width:100%;width:100%;min-width:0}.cluster-queue-settings input[type=checkbox]{width:auto}.cluster-queue-settings .button-row{flex-wrap:wrap}.cluster-queue-settings .button{white-space:normal;text-align:left}.queue-project-policy li{overflow-wrap:anywhere;line-height:1.8}.queue-project-policy li button{padding:5px 8px}.resolved-queue-target{display:grid;gap:5px;overflow-wrap:anywhere;min-width:0}
+
+/* SSH remains usable in the user's saved narrow workspace pane. */
+.cluster-page{min-width:0;max-width:100%}
+.cluster-page .subtabs{min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;gap:16px}
+.cluster-page .subtabs>button{flex:0 0 auto;white-space:nowrap}
+.cluster-page .notice{min-width:0;max-width:100%;flex-wrap:wrap;align-items:flex-start;overflow-wrap:anywhere}
+.cluster-page .notice>p,.cluster-page .notice>span{flex:1 1 18rem;min-inline-size:min(100%,18rem);max-width:100%;margin:0}
+.cluster-page .notice>.button{flex:0 1 auto;max-width:100%;white-space:normal;text-align:left}
+.cluster-page p.notice{display:block}
+.cluster-page .cluster-footer{flex-wrap:wrap;gap:10px;padding:12px;min-width:0;max-width:100%}
+.cluster-page .cluster-footer>span{flex:1 1 18rem;min-inline-size:min(100%,18rem);overflow-wrap:anywhere}
+.cluster-page .cluster-footer>span:empty{display:none}
+.cluster-page .cluster-footer>.button{flex:1 1 10rem;min-width:0;max-width:100%;white-space:normal}
+.cluster-page .cluster-selection select{min-inline-size:min(100%,170px);max-width:100%}
+.cluster-page .form-row label{min-inline-size:min(100%,130px)}
+.cluster-page input,.cluster-page select,.cluster-page textarea,.cluster-page .input-with-button{max-width:100%;min-width:0}

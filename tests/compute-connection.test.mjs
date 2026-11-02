@@ -157,3 +157,12 @@ test('saved preserved source retains its policy on reconnect, while original tas
 for(const existing of [true,false])test('WAL-only persisted schema '+(existing?'does not block verified live attach':'fails before bootstrap'),async()=>{
  const f=fixture({bound:false,existing,dataRootSchemaStatus:'unavailable'}),p=await f.api.plan({intent:'existing',distribution:'Default'});const result=await run(f,p);assert.equal(result.status,existing?'connected':'failed');assert.equal(f.calls.filter(c=>c[0]==='dataRoot').length,existing?1:2);assert(!f.calls.some(c=>c[0]==='start'||c[0]==='bindSources'||c[0]==='POST'));if(!existing)assert.equal(result.error.code,'existing_root_unavailable');
 });
+
+
+test('explicit new standard global service retains source binding and environment discovery/adoption',async()=>{
+ const f=fixture({bound:false}),p=await f.api.plan({distribution:'Default'});assert.equal(p.scope,'global');assert.equal(p.intent,'standard');assert.equal(f.calls.length,0);
+ const result=await run(f,p);assert.equal(result.connection,'connected');assert.equal(result.mode,'started');
+ assert.equal(f.calls.filter(c=>c[0]==='start').length,1);assert.equal(f.calls.filter(c=>c[0]==='bindSources').length,1);
+ assert.deepEqual(f.calls.filter(c=>c[0]==='POST').map(c=>c[1]),['/api/environments/discover','/api/environments/adopt']);
+ assert(f.calls.findIndex(c=>c[0]==='bindSources')>f.calls.findIndex(c=>c[0]==='start'));
+});

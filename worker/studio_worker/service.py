@@ -69,6 +69,7 @@ class Service(RuntimeServiceMixin):
         policy["max_concurrent"] = int(policy["max_concurrent"])
         if any(e not in SUPPORTED_ENGINES for e in policy["engines"]):
             raise ValueError("Unsupported engine authorization")
+        self.clusters.validate_project_policies(value)
         return self.store.put("project", value)
 
     def register_environment(self, value):

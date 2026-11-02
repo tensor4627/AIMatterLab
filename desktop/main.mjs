@@ -320,9 +320,9 @@ handle('agent.connect',async({provider,repairTools=false})=>{
   assertIdleAgent();
   agents.close();
  }
- // Account recovery does not install/start/switch compute. App restores its saved binding separately.
+ // Model/account recovery never registers sources or environments.
+ // Compute setup owns discovery/registration; App restores its saved binding separately.
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- if(!repairTools&&worker.connection&&!worker.connecting&&!worker.restoring){await bindSources();await discoverCompute();}
  const info=await agents.connect(provider),tools=await scientificTools(provider);
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};

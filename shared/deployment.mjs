@@ -1,6 +1,6 @@
 import {fieldPath} from './task-fields.mjs';
 import {adapterParameters} from './engine-contracts.mjs';
-const deploymentKeys=new Set(['project_id','environment_id','cluster_id','workdir','working_directory','remote_directory','remote_root','queue','partition','account','cpus','gpus','gpu','memory_mb','max_seconds','deployment','resources','environment']);
+const deploymentKeys=new Set(['project_id','environment_id','cluster_id','workdir','working_directory','remote_directory','remote_root','queue','queue_target_id','queueSelection','partition','account','cpus','gpus','gpu','memory_mb','max_seconds','deployment','resources','environment']);
 export function deploymentField(key){return fieldPath(key).some(part=>deploymentKeys.has(part));}
 export function scienceOnly(parameters,steps=[],missing=[]){
  const hints={};function strip(value,prefix=''){const result={};for(const [key,v] of Object.entries(value||{})){const path=prefix?prefix+'.'+key:key;if(deploymentField(path)){hints[path]=v;continue;}result[key]=v&&typeof v==='object'&&!Array.isArray(v)?strip(v,path):v;}return result;}
@@ -45,9 +45,19 @@ export function validDeployment(value){
  if(!Number.isSafeInteger(value.maxSeconds)||value.maxSeconds<1||value.maxSeconds>604800)throw Error('请设置有效的墙钟时长上限');
  if(typeof value.directoryName!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.directoryName))throw Error('工作目录名仅允许字母、数字、下划线和连字符');
  const resources=value.resources||{};for(const [k,min] of [['cpus',1],['gpus',0],['memory_mb',1]])if(!Number.isSafeInteger(resources[k])||resources[k]<min)throw Error('无效的部署资源：'+k);
- if(value.target==='cluster'&&(typeof resources.queue!=='string'||!/^[A-Za-z0-9_.@:/+-]{1,128}$/.test(resources.queue)))throw Error('请选择队列或分区');
+ if(value.queueSelection!==undefined&&value.queueSelection!=='policy')throw Error('无效的队列选择方式');
+ const queuePolicy=value.target==='cluster'&&value.queueSelection==='policy';
+ if(value.queueSelection==='policy'&&value.target!=='cluster')throw Error('队列策略仅用于集群');
+ if(value.target==='cluster'&&(!queuePolicy||resources.queue!==undefined&&resources.queue!=='')&&(typeof resources.queue!=='string'||!/^[A-Za-z0-9_.@:/+-]{1,128}$/.test(resources.queue)))throw Error('请选择队列或分区');
+ if(resources.queue_target_id!==undefined&&resources.queue_target_id!==''&&(!queuePolicy||typeof resources.queue_target_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(resources.queue_target_id)))throw Error('无效的队列环境目标');
  if(resources.account&& !/^[A-Za-z0-9_.@:/+-]{1,128}$/.test(resources.account))throw Error('无效的调度账户');
- return {target:value.target,projectId:value.projectId,targetId:value.targetId,inputSource:value.inputSource||'local',maxSeconds:value.maxSeconds,directoryName:value.directoryName,resources:{cpus:resources.cpus,gpus:resources.gpus,memory_mb:resources.memory_mb,queue:resources.queue||'',account:resources.account||''},gpu:Number.isSafeInteger(value.gpu)&&value.gpu>=0?value.gpu:0};
+ return {target:value.target,projectId:value.projectId,targetId:value.targetId,inputSource:value.inputSource||'local',maxSeconds:value.maxSeconds,directoryName:value.directoryName,...queuePolicy?{queueSelection:'policy'}:{},resources:{cpus:resources.cpus,gpus:resources.gpus,memory_mb:resources.memory_mb,...queuePolicy?{...resources.queue?{queue:resources.queue}:{},...resources.account?{account:resources.account}:{},...resources.queue_target_id?{queue_target_id:resources.queue_target_id}:{}}:{queue:resources.queue||'',account:resources.account||''}},gpu:Number.isSafeInteger(value.gpu)&&value.gpu>=0?value.gpu:0};
+}
+// Called only after an explicit target/selection change. Saved drafts are never migrated on read.
+export function clusterDeploymentChoice(resources,profile,targetId=''){
+ const {queue_target_id,...previous}=resources||{};
+ if(profile&&Object.hasOwn(profile,'queue_targets'))return {queueSelection:'policy',resources:{...previous,queue:'',account:'',...targetId?{queue_target_id:targetId}:{}}};
+ return {queueSelection:undefined,resources:{...previous,queue:profile?.queue||previous.queue||''}};
 }
 export function deploymentCurrent(task,authority){return (authority?.kind==='local-human'?task.deployment?.prepared?.reviewAuthority?.kind==='local-human'&&JSON.stringify(task.deployment.prepared.reviewAuthority)===JSON.stringify(authority):task.review?.status==='ready'&&task.review.parameterRevision===task.parameterRevision)&&task.deployment?.prepared?.parameterRevision===task.parameterRevision&&task.deployment?.prepared?.deploymentRevision===task.deployment.revision;}
 

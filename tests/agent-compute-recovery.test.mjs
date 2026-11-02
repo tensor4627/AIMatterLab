@@ -25,3 +25,14 @@ test('tool repair uses stronger verified task locator over unique stale lower po
 test('selected task without original worker source cannot read global health or repair provider',{timeout:5000},async()=>{const f=verified();f.setTask({id:'flow',provider:'codex',threadId:'thread',parameters:{temperature:310}});await assert.rejects(f.run({provider:'codex',repairTools:true}),/连接计算资源/);assert.deepEqual(f.calls,['assertIdle']);assert.equal(f.target,undefined);});
 
 test('no selected task preserves explicitly global provider-repair behavior without bootstrap',{timeout:5000},async()=>{const f=verified();f.setOwner(null);await f.run({provider:'codex',repairTools:true});assert.equal(f.target.workerRoot,'/global-other');assert.equal(f.target.workerPort,9999);assert(f.calls.includes('agents.close'));assert(!f.calls.includes('worker.connect'));});
+
+
+for(const provider of ['codex','kimi','qwen','deepseek','compatible'])for(const bound of [false,true])test('healthy existing-service '+provider+' account recovery preserves registrations, task-bound='+bound,async()=>{
+ const f=verified();if(!bound)f.setOwner(null);
+ const original={connection:f.worker.connection,identity:structuredClone(f.worker.identity),task:structuredClone(f.task)};
+ f.worker.request=async(method,path)=>{f.calls.push(method+':'+path);throw Error('Account connection must not register sources or discover/adopt environments');};
+ const result=await f.run({provider});assert.equal(result.connected,true);
+ assert.deepEqual(f.calls,['agent.connect:'+provider,'emit']);
+ assert.equal(f.worker.connection,original.connection);assert.deepEqual(f.worker.identity,original.identity);assert.deepEqual(f.task,original.task);
+ assert(!f.calls.some(call=>/bindSources|discoverCompute|POST|adopt|worker.connect|agents.close/.test(call)));
+});

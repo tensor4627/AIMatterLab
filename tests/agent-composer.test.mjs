@@ -121,3 +121,9 @@ test('planning checkbox, bound explanation and current-flow action share one com
  const nodes=visit(row);assert(nodes.some(n=>n.props?.['data-testid']==='agent-planning-mode'));assert(nodes.some(n=>n.props?.className==='agent-mode-inline'));assert(nodes.some(n=>n.props?.['data-testid']==='agent-current-workflow'));
  assert.equal(starts(h).length,0);h.unmount();
 });
+
+
+for(const phase of ['resume','remember'])test('nonce-bound queue seed survives late old '+phase+' and later user edits',async()=>{
+ const storage=memoryStorage(),late=deferred(),original=conversation('codex','seed-old');seed(storage,'codex','seed-old','Old unsent');let held=false;
+ const h=agentHarness({storage,props:{sessionSelection:{nonce:'seed-old',conversation:original}},override:(m,d,standard)=>{if(!held&&(phase==='resume'&&m==='agent.rpc'&&d.method==='thread/resume'||phase==='remember'&&m==='conversation.remember')){held=true;return late.promise;}return standard(m,d);}});await h.flush();assert(held);h.render({sessionSelection:{nonce:'seed-pending',new:true,pending:true}});await h.flush();h.render({sessionSelection:{nonce:'seed-accepted',new:true,initialPrompt:'New queue test seed'},planningMode:true});await h.flush();assert.equal(h.textarea().props.value,'New queue test seed');h.type('User edits queue seed');late.resolve(phase==='resume'?{thread:{id:'seed-old'}}:original);await h.flush();assert.equal(h.textarea().props.value,'User edits queue seed');assert.equal(starts(h).length,0);const drafts=createComposerDrafts(()=>storage);drafts.activate('codex','seed-old');assert.equal(drafts.text(),'Old unsent');h.unmount();
+});

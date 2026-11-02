@@ -1,5 +1,6 @@
 """SSH scheduler control; local worker owns records, schedulers own remote processes."""
 import base64
+import copy
 import hashlib
 import io
 import json
@@ -156,6 +157,102 @@ def ssh_endpoint(value):
     return host, username
 
 
+def target_limits(value):
+    if not isinstance(value, dict) or set(value) != {"cpus", "gpus", "memory_mb", "max_seconds"}:
+        raise ValueError("Queue target limits require cpus, gpus, memory_mb and max_seconds")
+    for key in value:
+        if type(value[key]) is not int or value[key] < (0 if key == "gpus" else 1):
+            raise ValueError("Invalid queue target limit: " + key)
+    return dict(value)
+
+
+def target_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value):
+        raise ValueError("Invalid queue target ID")
+    return value
+
+
+def environment(value):
+    if not isinstance(value, dict) or not isinstance(value.get("executables"), dict):
+        raise ValueError("Register target environment executables")
+    e = copy.deepcopy(value)
+    for key in ("executables", "repositories", "variables"):
+        if not isinstance(e.get(key, {}), dict):
+            raise ValueError("Invalid target environment " + key)
+    for path in [*e["executables"].values(), *e.get("repositories", {}).values()]:
+        if not isinstance(path, str) or not path.startswith("/") or "\n" in path or "\0" in path:
+            raise ValueError("Remote environment paths must be absolute")
+    if not e["executables"].get("python"):
+        raise ValueError("Register target Python")
+    for key, value in e.get("variables", {}).items():
+        if key not in ("LD_LIBRARY_PATH", "LIBRARY_PATH", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS") or not isinstance(value, (str, int)) or any(c in str(value) for c in ("\n", "\0", "\\n", "\\x00")):
+            raise ValueError("Unsupported target loader variable")
+    return e
+
+
+def queue_targets(value, cluster_limits):
+    if not isinstance(value, list) or len(value) > 64:
+        raise ValueError("Bounded explicit queue targets required")
+    result, seen = [], set()
+    for item in value:
+        fields = {"id", "queue", "usage_class", "enabled", "engines", "environment", "activation", "limits", "account"}
+        if not isinstance(item, dict) or set(item) - fields:
+            raise ValueError("Unsupported queue target field")
+        target = copy.deepcopy(item)
+        identifier = target_id(target.get("id"))
+        if identifier in seen:
+            raise ValueError("Duplicate queue target ID")
+        seen.add(identifier)
+        word(target.get("queue"), "queue target queue")
+        if target.get("usage_class") not in ("owned", "paid", "unknown") or type(target.get("enabled")) is not bool:
+            raise ValueError("Explicit queue target usage class and enabled flag required")
+        engines = target.get("engines")
+        if not isinstance(engines, list) or not engines or any(not isinstance(engine, str) or engine not in SUPPORTED_ENGINES for engine in engines) or len(engines) != len(set(engines)):
+            raise ValueError("Explicit supported queue target engines required")
+        target["environment"] = environment(target.get("environment"))
+        if not isinstance(target.get("activation"), str) or len(target["activation"]) > 8192 or "\0" in target["activation"]:
+            raise ValueError("Explicit bounded queue target activation required")
+        target["limits"] = target_limits(target.get("limits"))
+        if any(target["limits"][key] > cluster_limits[key] for key in ("cpus", "gpus", "memory_mb")):
+            raise ValueError("Queue target limits exceed cluster limits")
+        if "account" in target:
+            word(target["account"], "queue target scheduler account")
+        result.append(target)
+    return result
+
+
+def queue_policy(value):
+    fields = {"profile_version", "allowed_target_ids", "new_submission_order", "paid"}
+    if not isinstance(value, dict) or set(value) - fields or type(value.get("profile_version")) is not int or value["profile_version"] < 1:
+        raise ValueError("Explicit queue policy profile version required")
+    policy = copy.deepcopy(value)
+    for key in ("allowed_target_ids", "new_submission_order"):
+        ids = policy.get(key)
+        if not isinstance(ids, list) or len(ids) > 64 or any(not isinstance(identifier, str) for identifier in ids) or len(ids) != len(set(ids)):
+            raise ValueError("Bounded unique queue policy target IDs required")
+        for identifier in ids:
+            target_id(identifier)
+    if set(policy["allowed_target_ids"]) != set(policy["new_submission_order"]):
+        raise ValueError("Queue policy order must contain exactly the allowed targets")
+    paid = policy.get("paid", {})
+    if not isinstance(paid, dict) or set(paid) - {"permitted", "conditions_known", "conditions", "limits"}:
+        raise ValueError("Invalid paid queue policy")
+    for flag in ("permitted", "conditions_known"):
+        if flag in paid and type(paid[flag]) is not bool:
+            raise ValueError("Explicit paid queue policy flags required")
+    if "conditions" in paid and (not isinstance(paid["conditions"], str) or len(paid["conditions"]) > 2048 or "\0" in paid["conditions"]):
+        raise ValueError("Bounded paid queue conditions required")
+    if "limits" in paid:
+        target_limits(paid["limits"])
+    if paid.get("permitted") and (paid.get("conditions_known") is not True or not paid.get("conditions", "").strip() or "limits" not in paid):
+        raise ValueError("Paid queues require known reviewed conditions and explicit limits")
+    return policy
+
+
+def policy_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
 def profile(value):
     p = dict(value)
     if p.get("scheduler") not in ("lsf", "slurm"):
@@ -200,17 +297,9 @@ def profile(value):
         raise ValueError("Bounded explicit remote read roots required")
     for root in p.get("read_roots", []):
         remote_source(root, allow_home=True)
-    if len(p.get("activation", "")) > 8192:
+    if not isinstance(p.get("activation", ""), str) or len(p.get("activation", "")) > 8192 or "\0" in p.get("activation", ""):
         raise ValueError("Activation script exceeds limit")
-    e = p.setdefault("environment", {"executables": {"python": "/usr/bin/python3"}})
-    for path in [*e.get("executables", {}).values(), *e.get("repositories", {}).values()]:
-        if not isinstance(path, str) or not path.startswith("/") or "\n" in path or "\0" in path:
-            raise ValueError("Remote environment paths must be absolute")
-    if not e.get("executables", {}).get("python"):
-        raise ValueError("Register target Python")
-    for key,value in e.get("variables",{}).items():
-        if key not in ("LD_LIBRARY_PATH","LIBRARY_PATH","OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS","NUMEXPR_NUM_THREADS") or not isinstance(value,(str,int)) or "\\n" in str(value) or "\\x00" in str(value):
-            raise ValueError("Unsupported target loader variable")
+    p["environment"] = environment(p.get("environment", {"executables": {"python": "/usr/bin/python3"}}))
     p.setdefault("lsf_memory_scope","per_slot")
     if p["lsf_memory_scope"] not in ("per_slot","per_job"):raise ValueError("Confirm LSF memory reservation semantics")
     p.setdefault("name", "SSH cluster")
@@ -218,11 +307,15 @@ def profile(value):
     for k in ("cpus", "gpus", "memory_mb"):
         if type(p["limits"].get(k)) is not int or p["limits"][k] < 0:
             raise ValueError("Explicit resource limits required")
+    if "queue_targets" in p:
+        p["queue_targets"] = queue_targets(p["queue_targets"], p["limits"])
     return p
 
 
 def public(p):
     value={k: p.get(k) for k in ("id", "name", "scheduler", "version", "queue", "environment", "limits", "activation", "probe", "lsf_memory_scope", "auth_mode")}
+    if "queue_targets" in p:
+        value["queue_targets"] = copy.deepcopy(p["queue_targets"])
     health=dict(p.get('connection_check') or {'status':'not_run','scope':'Connection has not been checked in this version'})
     if health.get('observed_at') and (health.get('version')!=p.get('version') or time.time()-health['observed_at']>900):health['status']='stale'
     value['connection_check']=health
@@ -403,15 +496,23 @@ class Clusters:
             self._auth.close()
 
     def register(self, value):
+        with self.store.lock:
+            return self._register(value)
+
+    def _register(self, value):
         p = profile(value)
         p.setdefault("id", secrets.token_hex(10))
         leaf(p["id"])
         previous = next((x for x in self.store.list("cluster") if x["id"] == p["id"]), None)
+        if previous is not None and "version" in value and (type(value["version"]) is not int or value["version"] != previous["version"]):
+            raise ValueError("Cluster profile changed; reload before saving")
         p["version"] = (previous or {}).get("version", 0) + 1
         p.pop('probe',None);p.pop('connection_check',None)
         skill_root=self.service.root/"cluster-skills"/p["id"]/("v"+str(p["version"]))
         skill_root.mkdir(parents=True,exist_ok=True)
-        source="# Cluster submission skill\n\n"+json.dumps({k:p.get(k) for k in ("id","name","version","scheduler","queue","limits","lsf_memory_scope","environment")},indent=2)+"\n\nUse only registered cluster IDs; never put SSH addresses, ports, keys or model proxy credentials in prompts or scripts. Probe the login node, then confirm queue/resource semantics with the user. Use present_task to show workflow and parameters. Prepare immutable inputs with prepare_cluster_run and STOP for the user to review the batch script and click Submit. Scientific validation executes on allocated compute nodes before the engine; never treat login-node discovery as science validation. Do not change project authorization. Never resubmit an unknown run; reconcile receipts and scheduler job identity. Read bounded logs and assets through cluster tools.\n\n"+str(p.get("notes",""))
+        skill_fields={k:p.get(k) for k in ("id","name","version","scheduler","queue","limits","lsf_memory_scope","environment")}
+        if "queue_targets" in p:skill_fields["queue_targets"]=p["queue_targets"]
+        source="# Cluster submission skill\n\n"+json.dumps(skill_fields,indent=2)+"\n\nUse only registered cluster IDs; never put SSH addresses, ports, keys or model proxy credentials in prompts or scripts. Probe the login node, then confirm queue/resource semantics with the user. Queue visibility never grants permission. For opt-in queue targets use the saved project cluster_queue_policies and exact profile version; order applies to new submissions only. Within explicitly approved paid conditions and limits, reuse project authorization without a repeated paid permission prompt. Unknown or changed conditions require review. Use present_task to show workflow and parameters. Prepare immutable inputs with prepare_cluster_run and STOP for the user to review the batch script and click Submit. Scientific validation executes on allocated compute nodes before the engine; never treat login-node discovery as science validation. Do not change project authorization. Never resubmit an unknown run; reconcile receipts and scheduler job identity. Read bounded logs and assets through cluster tools.\n\n"+str(p.get("notes",""))
         (skill_root/"SKILL.md").write_text(source,encoding="utf8")
         self.store.put("cluster-version",{**p,"id":p["id"]+"-v"+str(p["version"])})
         self.store.put("cluster", p)
@@ -422,6 +523,98 @@ class Clusters:
         if cluster_id not in project["policy"].get("clusters", []):
             raise PermissionError("Cluster is not authorized for this project")
         return project, self.store.get("cluster", cluster_id)
+
+    def validate_project_policies(self, project):
+        policies = project["policy"].get("cluster_queue_policies", {})
+        if not isinstance(policies, dict) or len(policies) > 64:
+            raise ValueError("Bounded cluster queue policies required")
+        try:previous = self.store.get("project", project["id"])["policy"].get("cluster_queue_policies", {})
+        except ValueError:previous = {}
+        for cluster_id, value in policies.items():
+            leaf(cluster_id)
+            policy = queue_policy(value)
+            # Preserve an unchanged stale policy on unrelated project edits. It
+            # stays unusable for new preparation until explicitly reapproved.
+            if previous.get(cluster_id) == value or not policy["allowed_target_ids"]:
+                continue
+            if cluster_id not in project["policy"].get("clusters", []):
+                raise PermissionError("Queue policy requires an authorized cluster")
+            current = self.store.get("cluster", cluster_id)
+            if policy["profile_version"] != current["version"]:
+                raise ValueError("Queue policy profile version changed; review the saved profile")
+            if "queue_targets" not in current:
+                raise ValueError("This profile has no opt-in queue targets")
+            available = {target["id"] for target in current["queue_targets"]}
+            if not set(policy["allowed_target_ids"]) <= available:
+                raise ValueError("Queue policy references an unknown target")
+
+    def select_queue_target(self, project, p, spec):
+        requested = spec.get("resources", {})
+        if not isinstance(requested, dict):
+            raise ValueError("Explicit resource object required")
+        if "queue_targets" not in p:
+            if p["id"] in project["policy"].get("cluster_queue_policies", {}):
+                raise PermissionError("Project queue policy still applies; explicitly review and remove it before using a legacy profile")
+            if "queue_target_id" in requested:
+                raise ValueError("This legacy profile has no opt-in queue targets")
+            return p, resources(requested, p, spec["max_seconds"]), None, None
+        value = project["policy"].get("cluster_queue_policies", {}).get(p["id"])
+        if value is None:
+            raise PermissionError("Project queue policy is not authorized; detected queues grant no permission")
+        policy = queue_policy(value)
+        if policy["profile_version"] != p["version"]:
+            raise ValueError("Queue policy profile version changed; review the saved profile")
+        targets = {target["id"]: target for target in p["queue_targets"]}
+        explicit = requested.get("queue_target_id")
+        if "queue_target_id" in requested:
+            target_id(explicit)
+            if explicit not in policy["allowed_target_ids"]:
+                raise PermissionError("Explicit queue target is not authorized")
+        order = [explicit] if explicit is not None else policy["new_submission_order"]
+        failure = "No authorized compatible queue target within the approved limits"
+        for identifier in order:
+            target = targets.get(identifier)
+            if target is None or not target["enabled"] or spec["engine"] not in target["engines"]:
+                continue
+            usage, paid = target["usage_class"], policy.get("paid", {})
+            if usage == "unknown" or usage == "paid" and not (paid.get("permitted") and paid.get("conditions_known") and paid.get("conditions", "").strip() and paid.get("limits")):
+                continue
+            resolved = {**p, "queue":target["queue"], "environment":copy.deepcopy(target["environment"]),
+                        "activation":target["activation"], "limits":dict(target["limits"])}
+            chosen = {**requested, "queue":target["queue"], "queue_target_id":identifier}
+            chosen.pop("account", None)
+            if target.get("account"):chosen["account"] = target["account"]
+            try:
+                actual = resources(chosen, resolved, spec["max_seconds"])
+                if spec["max_seconds"] > target["limits"]["max_seconds"]:
+                    raise PermissionError("Duration exceeds queue target limit")
+                if usage == "paid" and (any(actual[key] > paid["limits"][key] for key in ("cpus", "gpus", "memory_mb")) or spec["max_seconds"] > paid["limits"]["max_seconds"]):
+                    raise PermissionError("Resources exceed approved paid queue limits")
+            except PermissionError as error:
+                failure = str(error)
+                continue
+            # An ordinary queue/account string cannot steer ordered selection
+            # around a target grant. Explicit target rejection never substitutes.
+            for field in ("queue", "account"):
+                if field in requested and requested[field] != target.get(field, ""):
+                    raise PermissionError("Resource " + field + " override differs from the authorized queue target")
+            return resolved, actual, copy.deepcopy(target), copy.deepcopy(policy)
+        raise PermissionError(failure)
+
+    def validate_queue_snapshot(self, run, project, current):
+        if "queue_target_snapshot" not in run:
+            # Legacy snapshots are never migrated into a queue policy. Current
+            # policy must nevertheless constrain every new dispatch, including
+            # a legacy draft that predates an explicit queue-policy revocation.
+            if current["id"] in project["policy"].get("cluster_queue_policies", {}):
+                raise PermissionError("Project queue policy still applies; explicitly review and remove it before using a legacy draft")
+            return
+        spec = {**run, "resources":{**run["resources"], "queue_target_id":run["queue_target_snapshot"]["id"]}}
+        resolved, actual, target, policy = self.select_queue_target(project, current, spec)
+        if (target != run["queue_target_snapshot"] or policy_digest(policy) != run.get("queue_policy_digest") or
+                policy != run.get("queue_policy_snapshot") or actual != run["resources"] or
+                any(resolved[key] != run["cluster_snapshot"][key] for key in ("environment", "activation", "limits", "queue"))):
+            raise ValueError("Queue target or project queue policy changed; create a new reviewed draft")
 
     def original_auth_source(self, identifier):
         """Resolve local immutable provenance, without polling or a current lease."""
@@ -492,16 +685,25 @@ class Clusters:
         p['_check_started_at']=time.time()
         source = """
 import os,pathlib,shutil,subprocess,pwd
-out={'scope':'login-node observation; compute-node GPU and scientific validation not_run','scheduler':p['scheduler'],'commands':{},'queues':[],'python':os.sys.version.split()[0]}
+out={'scope':'login-node observation; compute-node GPU and scientific validation not_run','scheduler':p['scheduler'],'selected_scheduler':p['scheduler'],'commands':{},'queues':[],'schedulers':{},'detected_schedulers':[],'python':os.sys.version.split()[0]}
 out['username']=pwd.getpwuid(os.geteuid()).pw_name
 for name in ['bsub','bjobs','bqueues','bkill','sbatch','squeue','sacct','sinfo','scancel','nvidia-smi','module']:
  out['commands'][name]=bool(shutil.which(name))
-cmd=['bqueues','-noheader','-o','queue_name:80'] if p['scheduler']=='lsf' else ['sinfo','-h','-o','%P']
-try:
- result=subprocess.run(cmd,capture_output=True,text=True,timeout=12)
- out['queue_status']='passed' if result.returncode==0 else 'blocked'
- if result.returncode==0:out['queues']=[x.strip().rstrip('*') for x in result.stdout.splitlines() if x.strip()][:100]
-except Exception:out['queue_status']='blocked'
+families={'lsf':(('bsub','bjobs','bqueues','bkill'),['bqueues','-noheader','-o','queue_name:80']),
+          'slurm':(('sbatch','squeue','sacct','sinfo','scancel'),['sinfo','-h','-o','%P'])}
+for family,(names,cmd) in families.items():
+ entry={'commands':{name:out['commands'][name] for name in names},'queues':[],'queue_status':'blocked'}
+ if all(out['commands'][name] for name in names[:2]):out['detected_schedulers'].append(family)
+ if out['commands'].get(cmd[0]):
+  try:
+   result=subprocess.run(cmd,capture_output=True,text=True,timeout=12)
+   entry['queue_status']='passed' if result.returncode==0 else 'blocked'
+   if result.returncode==0:entry['queues']=list(dict.fromkeys(x.strip().rstrip('*') for x in result.stdout.splitlines() if x.strip()))[:100]
+  except Exception:pass
+ out['schedulers'][family]=entry
+out['selected_scheduler_match']=p['scheduler'] in out['detected_schedulers']
+selected=out['schedulers'][p['scheduler']]
+out['queues']=selected['queues'];out['queue_status']=selected['queue_status']
 out['executables']={k:{'exists':pathlib.Path(v).is_file(),'executable':os.access(v,os.X_OK)} for k,v in p['executables'].items()}
 print('__STUDIO_JSON__'+json.dumps(out))
 """
@@ -526,10 +728,12 @@ print('__STUDIO_JSON__'+json.dumps(out))
         return {"cluster_id":p["id"],"version":p["version"],"source":file.read_text("utf8")}
 
     def draft(self, data):
-        self.allowed(data["project_id"], data["cluster_id"])
+        _, current = self.allowed(data["project_id"], data["cluster_id"])
         proposal = data["proposal"]
-        if not isinstance(proposal, dict) or any(k not in ("queue","activation","environment","limits","notes","lsf_memory_scope") for k in proposal):
+        if not isinstance(proposal, dict) or any(k not in ("queue","activation","environment","limits","notes","lsf_memory_scope","queue_targets") for k in proposal):
             raise ValueError("Only reviewable environment/skill fields can be proposed")
+        if "queue_targets" in proposal:
+            queue_targets(proposal["queue_targets"], proposal.get("limits", current["limits"]))
         return self.store.put("cluster-draft", {"id":secrets.token_hex(10), "kind":"cluster-setup", **data, "status":"draft"})
 
     def _transfer(self, p, payload):
@@ -608,6 +812,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
 
     def _prepare(self, spec):
         spec = dict(spec)
+        if any(key in spec for key in ("queue_target_snapshot", "queue_policy_snapshot", "queue_policy_digest", "queue_profile_version")):
+            raise ValueError("Queue selection snapshots are worker-owned")
         local_inputs = spec.get("inputs", {})
         remote_inputs = spec.get("remote_inputs", {})
         if not isinstance(local_inputs, dict) or not isinstance(remote_inputs, dict):
@@ -640,8 +846,12 @@ print('__STUDIO_JSON__'+json.dumps(out))
         if previous:
             if previous["request_hash"] != fingerprint:
                 raise ValueError("Idempotency conflict")
+            if "queue_target_snapshot" in previous and previous["status"] in ("draft", "ready"):
+                if p["version"] != previous["cluster_snapshot"]["version"]:
+                    raise ValueError("Cluster profile changed; create a new reviewed draft")
+                self.validate_queue_snapshot(previous, project, p)
             return self.run(previous["id"])
-        r = resources(spec.get("resources", {}), p, spec["max_seconds"])
+        p, r, selected_target, selected_policy = self.select_queue_target(project, p, spec)
         if (spec["engine"].endswith("sampling") or spec["engine"] == "bias.validate") and r["gpus"] < 1:
             raise ValueError("Bias target validation requires a GPU allocation")
         # Adapter and compute-node gates must see the complete run filename map.
@@ -697,6 +907,9 @@ print('__STUDIO_JSON__'+json.dumps(out))
                    "scientific_validation":{"status":"not_run"}, "nonce":secrets.token_hex(16),
                    "remote_directory":p["remote_root"].rstrip("/")+"/"+(prefix+"-" if prefix else "")+identifier,
                    "job_name":"gss-"+identifier, "job_id":None, "created_at":time.time(), "updated_at":time.time()}
+            if selected_target is not None:
+                run.update(queue_target_snapshot=selected_target, queue_policy_snapshot=selected_policy,
+                           queue_policy_digest=policy_digest(selected_policy), queue_profile_version=p["version"])
             self.remote_name(run)
             run["script"] = batch_script(run)
             atomic_json(directory/"run.json", run)
@@ -758,6 +971,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
             raise PermissionError("Current project policy no longer permits this draft")
         if current["version"]!=r["cluster_snapshot"]["version"]:
             raise ValueError("Cluster profile changed; create a new reviewed draft")
+        self.validate_queue_snapshot(r, project, current)
         resources(r["resources"],current,r["max_seconds"])
         if r["status"] not in ("draft","ready"):
             raise ValueError("Submitted inputs are immutable")

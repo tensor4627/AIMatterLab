@@ -1,5 +1,5 @@
 export type RunStatus='draft'|'validating'|'ready'|'queued'|'running'|'succeeded'|'failed'|'cancelled'|'unknown';
-export interface Project {authoring_only?:boolean;authoring_task_id?:string;id:string;name:string;policy:{engines:string[];gpus:number[];max_seconds:number;max_concurrent:number;input_roots:string[];environments:string[];clusters?:string[]}}
+export interface Project {authoring_only?:boolean;authoring_task_id?:string;id:string;name:string;policy:{engines:string[];gpus:number[];max_seconds:number;max_concurrent:number;input_roots:string[];environments:string[];clusters?:string[];cluster_queue_policies?:Record<string,ClusterQueuePolicy>}}
 export interface Environment {id:string;name:string;executables:Record<string,string>;repositories?:Record<string,string>;variables?:Record<string,string>}
 export interface Run {superseded_by?:string;revision_of?:string;id:string;name:string;engine:string;project_id:string;environment_id:string;status:RunStatus;gpu:number;max_seconds:number;directory:string;validation:{status:string;message?:string;output?:string;scope?:string;scientific_status?:string;artifact_status?:string};created_at:number;updated_at:number;command:string[];parameters?:Record<string,unknown>;inputs:Record<string,string>;error?:string;exit?:{exit_code:number;reason?:string}}
 export interface Workflow {id:string;project_id:string;name:string;steps:unknown[];run_ids:string[]}
@@ -36,7 +36,7 @@ export const engines=[
  ['pygas.opes-reweight','OPES · 重加权']
 ];
 
-export interface ClusterRun {id:string;kind:'cluster-run';name:string;engine:string;project_id:string;cluster_id:string;status:RunStatus;directory:string;parameters?:Record<string,unknown>;inputs:Record<string,string>;resources:any;max_seconds:number;cluster:any;script:string;job_id:string|null;validation:any;scientific_validation:any;snapshots:{name:string;source:string;sha256:string;size:number}[]}
+export interface ClusterRun {queue_target_snapshot?:ClusterQueueTarget;queue_profile_version?:number;queue_policy_snapshot?:ClusterQueuePolicy;queue_policy_digest?:string;id:string;kind:'cluster-run';name:string;engine:string;project_id:string;cluster_id:string;status:RunStatus;directory:string;parameters?:Record<string,unknown>;inputs:Record<string,string>;resources:any;max_seconds:number;cluster:any;script:string;job_id:string|null;validation:any;scientific_validation:any;snapshots:{name:string;source:string;sha256:string;size:number}[]}
 
 export interface Conversation {groupId?:string|null;pinned?:boolean;id:string;provider:AgentProvider;threadId:string;name:string;projectId:string|null;taskId:string|null;updatedAt:number}
 export interface AgentIntent {id:string;text:string;autoSend?:boolean;taskId?:string;reviewMode?:boolean;threadId?:string;provider?:AgentProvider}
@@ -64,3 +64,10 @@ export type {LocalReviewApi,LocalReviewInspection,LocalReviewPreview,LocalReview
 export type WorkbenchImageRequest=Record<string,never>;
 export type WorkbenchImageResult={status:'saved';path:string;width:number;height:number;bytes:number;sha256:string;geometry:{before:{width:number;height:number;displayScale:number;zoomFactor:number};after:{width:number;height:number;displayScale:number;zoomFactor:number};nativeImage1xSize:{width:number;height:number};availableScaleFactors:number[];requestedPngScaleFactor:1}}|{status:'cancelled'}|null;
 export const saveWorkbenchImage=()=>invoke<WorkbenchImageResult>('diagnostics.saveWorkbenchImage',{} satisfies WorkbenchImageRequest);
+
+export interface ClusterQueueLimits {cpus:number;gpus:number;memory_mb:number;max_seconds:number}
+export interface ClusterQueueEnvironment {executables:Record<string,string>;repositories?:Record<string,string>;variables?:Record<string,string>}
+export interface ClusterQueueTarget {id:string;queue:string;usage_class:'owned'|'paid'|'unknown';enabled:boolean;engines:string[];environment:ClusterQueueEnvironment;activation:string;limits:ClusterQueueLimits;account?:string}
+export interface ClusterQueuePolicy {profile_version:number;allowed_target_ids:string[];new_submission_order:string[];paid:{permitted:boolean;conditions_known:boolean;conditions:string;limits?:ClusterQueueLimits}}
+export interface ClusterQueueProfile {id?:string;version?:number;queue?:string;queue_targets?:ClusterQueueTarget[];environment:ClusterQueueEnvironment;activation:string;limits:Partial<ClusterQueueLimits>}
+export interface ClusterSchedulerObservation {queues?:string[];detected_schedulers?:string[];selected_scheduler?:string;selected_scheduler_match?:boolean;schedulers?:Record<string,{queues?:string[];commands?:unknown;queue_status?:string}>}
