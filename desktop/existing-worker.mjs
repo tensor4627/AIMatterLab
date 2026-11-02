@@ -154,3 +154,32 @@ export async function probeLegacyWorkerStart(settings,{execute=exec}={}){
  if(!/^[\w .-]{1,80}$/.test(settings.distribution)||typeof settings.workerRoot!=='string'||!settings.workerRoot.startsWith('/')||/[\r\n\0]/.test(settings.workerRoot)||!Number.isInteger(settings.workerPort)||settings.workerPort<1024||settings.workerPort>65535)throw Error('Invalid legacy worker target');
  try{const {stdout}=await execute('wsl.exe',['-d',settings.distribution,'--','python3','-B','-c',LEGACY_WORKER_START_PROBE,settings.workerRoot,String(settings.workerPort)],{windowsHide:true,timeout:6000,maxBuffer:8192});const value=JSON.parse(stdout.trim());return {status:['available','same_root_controller','occupied','unknown'].includes(value?.status)?value.status:'unknown'};}catch{return {status:'unknown'};}
 }
+
+// Read the explicitly selected existing data root before any installer/bootstrap.
+// No Service import, metadata creation, registration or scheduler is involved.
+export const EXISTING_DATA_ROOT_READ=String.raw`import json,os,sys,sqlite3,stat
+from pathlib import Path
+try:
+ root=Path(sys.argv[1]).expanduser()
+ if not root.is_absolute() or root.resolve(strict=True)!=root: raise ValueError()
+ db=root/'worker.sqlite'
+ if root.is_symlink() or db.is_symlink() or not stat.S_ISREG(db.stat().st_mode): raise ValueError()
+ if root.stat().st_uid!=os.getuid() or db.stat().st_uid!=os.getuid(): raise ValueError()
+ with db.open('rb') as stream:
+  if stream.read(16)!=b'SQLite format 3\x00': raise ValueError()
+ if not (len(sys.argv)>2 and sys.argv[2]=='path'):
+  # Immutable inspection never creates WAL/SHM sidecars or checkpoints a live store.
+  # This proves persisted schema, not current run states or a complete live-WAL snapshot.
+  connection=sqlite3.connect(db.as_uri()+'?mode=ro&immutable=1',uri=True,timeout=1)
+  try:
+   connection.execute('SELECT kind,id,data FROM objects LIMIT 0')
+   connection.execute('SELECT id,project,key,request_hash,data FROM runs LIMIT 0')
+   if connection.execute('PRAGMA quick_check(1)').fetchone()!=('ok',): raise ValueError()
+  finally: connection.close()
+ print(json.dumps({'status':'available'}))
+except Exception:
+ print(json.dumps({'status':'unavailable'}))
+`;
+export async function inspectExistingDataRoot(settings,{execute=exec,schema=true}={}){
+ try{const {stdout}=await execute('wsl.exe',['-d',settings.distribution,'--','python3','-B','-c',EXISTING_DATA_ROOT_READ,settings.workerRoot,schema?'schema':'path'],{windowsHide:true,timeout:6000,maxBuffer:8192});const value=JSON.parse(stdout.trim());return {status:value?.status==='available'?'available':'unavailable'};}catch{return {status:'unavailable'};}
+}
