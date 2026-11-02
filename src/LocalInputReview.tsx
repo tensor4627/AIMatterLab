@@ -1,3 +1,4 @@
+import Tooltip from './Tooltip';
 import {useEffect,useRef,useState} from 'react';
 import {localReviewErrorMessage} from '../shared/local-build-review-eligibility.mjs';
 import type {LocalReviewApi,LocalReviewInspection,LocalReviewPreview} from './local-review-types';
@@ -11,8 +12,8 @@ export function LocalInputReview({taskId,workerReady,api,onConfirmed,onClose,onS
  function confirm(){if(!inspection)return;return action(()=>api.confirm({taskId,snapshotId:inspection.snapshotId}),async value=>{setCanConfirm(false);if(value.status==='confirmed'){setMessage(t('本地人工输入复核已记录。AI状态未改写；目标验证和人工执行仍分别进行。'));await onConfirmed(taskId);}else{setMessage(t('已取消；没有生成复核收据。请重新检查当前保存版本。'));setInspection(null);}});}
  const steps=inspection?normalizeSteps(inspection.steps||[],inspection.parameters,[]):[];
  return <section className="local-input-review card" data-testid="local-input-review" data-task-id={taskId} aria-label={t('本地人工输入复核')}>
-  <header><h3>{t('本地人工复核 · 不发送模型')}</h3><button type="button" className="button" disabled={busy} onClick={onClose}>{t('返回当前流程')}</button></header>
-  <p>{t('检查同一流程已保存的实际图、源码、参数和输入。此步骤不运行构建、验证或计算，不改变共享许可。')}</p>
+  <header><h3><Tooltip content={t('检查同一流程已保存的实际图、源码、参数和输入。此步骤不运行构建、验证或计算，不改变共享许可。')}>{t('本地人工复核 · 不发送模型')}</Tooltip></h3><button type="button" className="button" disabled={busy} onClick={onClose}>{t('返回当前流程')}</button></header>
+
   <p className="muted">{t('支持已闭合的规范构建和单私有标量 TorchScript 的验证、NEP4/NVE 采样输入；其他依赖保持锁定。')}</p>
   <button type="button" className="button" data-testid="local-review-inspect" disabled={busy||!workerReady} onClick={inspect}>{t('检查当前已保存输入')}</button>
   {!workerReady&&<p role="status">{t('请连接当前作业服务；已有作业不会重新提交。')}</p>}

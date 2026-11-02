@@ -52,7 +52,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
  function find(predicate){const node=all(tree).find(predicate);if(!node)throw Error('App fixture node not found');return node;}
  function text(node){if(Array.isArray(node))return node.map(text).join('');if(node===null||node===undefined||typeof node==='boolean')return '';if(typeof node!=='object')return String(node);return text(node.props?.children);}
  function emit(event){for(const listener of [...listeners])listener(event);}
- function connect(){find(node=>node.type==='button'&&node.props?.['aria-label']==='连接 WSL').props.onClick();}
+ function connect(){find(node=>node.props?.['data-testid']==='unified-compute-entry').props.onClick();render();find(node=>node.type==='./ComputeConnectionChooser').props.onLocal();}
  function openSettings(){find(node=>node.type==='button'&&node.props?.['aria-label']==='设置').props.onClick();render();return find(node=>node.type==='./SettingsPage').props;}
  function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}
  render();return {calls,settings,find,text,flush,emit,connect,openSettings,unmount,storage,render};

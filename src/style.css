@@ -39,3 +39,28 @@ body,input,select,textarea,button{font-family:var(--ui-font,"Segoe UI","Microsof
 :root[data-theme=light] .badge.unknown,:root[data-theme=light] .badge.queued,:root[data-theme=light] .approval>div:first-child,:root[data-theme=light] .task-card small{color:#775119}
 .chart-empty{padding:24px}
 .badge.ready{color:var(--accent)}
+
+/* Agent configuration surface: shared theme colors keep the transcript distinct. */
+.agent-top-surface{position:relative;flex-shrink:0;background:color-mix(in srgb,var(--panel) 86%,var(--accent) 14%);padding-bottom:0;max-height:55%;display:flex;flex-direction:column;min-height:0}
+.agent-top-surface::after{content:"";position:absolute;left:0;right:0;bottom:-14px;height:22px;background:linear-gradient(to bottom,color-mix(in srgb,var(--panel) 86%,var(--accent) 14%),transparent);pointer-events:none;z-index:1}
+.agent-heading{gap:8px;border-bottom:0;min-width:0}
+.agent-heading-title{min-width:0;max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.agent-heading-title svg{flex-shrink:0}
+.agent-collapsed-summary{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:max(calc(10px * var(--ui-scale,1)),var(--ui-min-font,11px))}
+.agent-heading .agent-header-actions{display:flex;flex-shrink:0;margin-left:auto}
+.agent-top-surface.is-expanded{padding-bottom:8px}
+.agent-top-surface .agent-configuration{flex:0 1 auto;overflow:auto;min-height:0;max-height:none}
+.agent-top-surface [hidden]{display:none}
+.agent-top-surface .agent-primary{padding:0 15px 8px}
+.agent-top-surface .agent-model-controls{min-width:0}
+.agent-top-surface .agent-model-controls label{min-width:0}
+.agent-top-surface select{max-width:100%;text-overflow:ellipsis}
+.agent-top-surface .agent-configuration>.button{width:calc(100% - 30px);margin:0 15px 4px}
+
+.explanation-tooltip{position:relative;display:inline-block;min-width:0;outline-offset:3px}
+.explanation-tooltip-content{position:fixed;z-index:1000;width:max-content;max-width:min(320px,75vw);padding:9px 11px;border:1px solid var(--line);border-radius:7px;background:var(--raised);color:var(--text);box-shadow:0 5px 18px #0003;white-space:normal;overflow-wrap:anywhere;font-size:max(calc(11px * var(--ui-scale,1)),var(--ui-min-font,11px));font-weight:400;line-height:1.6}
+.agent-panel .agent-compose-context{flex-wrap:nowrap;gap:8px;min-width:0}
+.agent-compose-context .agent-mode-toggle,.agent-compose-context>button{flex-shrink:0}
+.agent-mode-explanation{flex:1;min-width:0;color:var(--muted)}
+.agent-mode-inline{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.compute-resource-entry{width:100%;text-align:left}.compute-resource-entry>span{min-width:0}.compute-resource-entry small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.compute-resource-entry>svg{flex-shrink:0}.compute-connection-choices{display:flex;gap:12px;flex-wrap:wrap}.compute-connection-choices>.button{flex:1;min-height:64px}

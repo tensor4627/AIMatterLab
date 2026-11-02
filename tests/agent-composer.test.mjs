@@ -91,3 +91,33 @@ for(const phase of ['resume','remember'])test('fresh pending and acknowledged se
 test('unconfirmed fresh context keeps Send disabled and exposes an explicit retry without sending',async()=>{
  let retries=0;const h=agentHarness({props:{onNewConversation:()=>retries++}});await h.flush();h.click('agent-connect');await h.flush();h.render({sessionSelection:{nonce:'failed-fresh',new:true,pending:true,error:'The new chat is not ready. Try again.'}});await h.flush();assert.equal(h.find(n=>n.type==='button'&&n.props?.['aria-label']==='发送').props.disabled,true);h.find(n=>n.type==='button'&&n.props.children==='重试').props.onClick();assert.equal(retries,1);assert.equal(starts(h).length,0);h.unmount();
 });
+
+
+test('Agent options collapse into a summary while connection and repair remain outside the hidden region',async()=>{
+ const h=agentHarness({override:(method,data,standard)=>method==='agent.connect'?{tools:{status:'blocked',message:'fixture unavailable'}}:standard(method,data)});await h.flush();
+ const region=()=>h.find(n=>n.props?.id==='agent-options-region');
+ const contains=(node,id)=>Array.isArray(node)?node.some(n=>contains(n,id)):!!node&&typeof node==='object'&&(node.props?.['data-testid']===id||contains(node.props?.children,id));
+ assert.equal(region().props.hidden,true);
+ assert.equal(h.find(n=>n.props?.['data-testid']==='agent-options').props['aria-controls'],region().props.id);
+ assert.equal(contains(region(),'agent-provider'),true);
+ assert.equal(contains(region(),'agent-connect'),false);
+ h.find(n=>n.props?.['data-testid']==='agent-connect');
+ const calls=h.calls.length;h.click('agent-options');await h.flush();
+ assert.equal(region().props.hidden,false);assert.equal(h.find(n=>n.props?.['data-testid']==='agent-options').props['aria-expanded'],true);
+ h.click('agent-options');await h.flush();assert.equal(region().props.hidden,true);assert.equal(h.calls.length,calls);
+ h.click('agent-connect');await h.flush();
+ assert.match(h.find(n=>n.props?.['data-testid']==='agent-options-summary').props.title,/Codex/);
+ assert.equal(contains(region(),'agent-model'),true);assert.equal(contains(region(),'agent-effort'),true);
+ h.find(n=>n.props?.['data-testid']==='agent-tool-repair');
+ assert.equal(contains(region(),'agent-tool-repair'),false);
+ assert.equal(starts(h).length,0);h.unmount();
+});
+
+
+test('planning checkbox, bound explanation and current-flow action share one composer row',async()=>{
+ const h=agentHarness({props:{sessionSelection:{nonce:'bound-inline',conversation:{...conversation('codex','bound'),taskId:'owned-task'}}},override:(method,data,standard)=>method==='conversation.remember'?{...conversation(data.provider,data.threadId),taskId:'owned-task'}:standard(method,data)});await h.flush();
+ const row=h.find(n=>n.props?.className==='agent-compose-context');
+ const visit=n=>Array.isArray(n)?n.flatMap(visit):n&&typeof n==='object'?[n,...visit(n.props?.children)]:[];
+ const nodes=visit(row);assert(nodes.some(n=>n.props?.['data-testid']==='agent-planning-mode'));assert(nodes.some(n=>n.props?.className==='agent-mode-inline'));assert(nodes.some(n=>n.props?.['data-testid']==='agent-current-workflow'));
+ assert.equal(starts(h).length,0);h.unmount();
+});
