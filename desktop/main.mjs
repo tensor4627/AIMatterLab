@@ -1,4 +1,5 @@
 import {selectConversation} from './conversation-selection.mjs';
+import {createWindowsSaveAs} from './windows-save-as.mjs';
 import {createStructureWithAuthoringContext} from './structure-authoring.mjs';
 import {environmentApiTool,createEnvironmentApiReader} from './environment-api-read.mjs';
 import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from './ssh-connection.mjs';
@@ -449,16 +450,7 @@ handle('file.open',async() => {
   const id=randomUUID(); grants.set(id,file);
   return { id,path:file,name:path.basename(file),content:fs.readFileSync(file,'utf8') };
 });
-handle('file.save',async({id,content,name}) => {
-  if(typeof content!=='string' || content.length>2*1024*1024) throw new Error('Text source exceeds 2 MiB');
-  let file=grants.get(id);
-  if(!file) {
-    const response=await dialog.showSaveDialog(window,{defaultPath:name||'workflow.py'});
-    if(response.canceled) return null;
-    file=response.filePath; id=randomUUID(); grants.set(id,file);
-  }
-  fs.writeFileSync(file,content,'utf8'); return { id,path:file,name:path.basename(file) };
-});
+handle('file.save',createWindowsSaveAs({grants,choose:options=>dialog.showSaveDialog(window,options),write:(file,content)=>fs.writeFileSync(file,content,'utf8')}));
 handle('file.choose',async({directory=false}) => {
   const response=await dialog.showOpenDialog(window,{properties:[directory?'openDirectory':'openFile']});
   return response.canceled?null:response.filePaths[0];

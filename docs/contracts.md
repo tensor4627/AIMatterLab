@@ -101,3 +101,8 @@ NEP prediction 模式原生读取 train.xyz。工作台由 evaluation.xyz 明确
 渲染进程只访问白名单 IPC，contextIsolation=true、sandbox=true、nodeIntegration=false。主进程管理 Codex 与凭据引用。WSL 服务绑定 Linux 127.0.0.1、私有 token 0600，拒绝浏览器 Origin；MCP token 仅允许结构化科学工具。
 
 如果 Windows localhost 转发不可用，桥接通过长期 WSL stdio relay 访问 Linux 回环服务；Agent MCP 使用受 token 限制的 Windows 回环转发，不修改系统网络。OpenSSH 使用现有 config 别名和严格 host key 校验；文件浏览不会接受任意拼接 shell 参数。
+
+
+### Windows文本另存
+
+开发版的 `file.save` IPC 始终通过本次原生保存对话框选择目标；过去的打开文件 `id` 不再隐式指定写入路径。这是1.0前的行为修正，与界面的“另存”语义一致。取消不写入或发布新grant，写入成功后才返回新目标记录；用户明确选择已有文件仍受系统覆盖确认。渲染进程不能传入路径绕过选择器，项目输入保存仍使用独立工作区接口。

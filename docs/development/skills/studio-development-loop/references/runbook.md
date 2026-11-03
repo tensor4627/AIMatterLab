@@ -61,3 +61,13 @@ After the requested rounds pass, A, B and C review frontend clarity, flow, consi
 For navigation changes, verify the lifetime of the actual editor, Agent and terminal nodes as well as screenshots. A hidden child still remounts if a parent error boundary is keyed by route. Keep the current editor outside that boundary; test delayed save acknowledgements across conversation changes without replaying failed writes on mount. State shared within one renderer is not a cross-window transaction mechanism.
 
 For monitoring changes, distinguish reading saved job records from observing the scheduler or process. Keep local and cluster availability separate; retain original states and observation times on failure. Do not display a live zero before the first successful read. Bound each read source independently, including nested log viewers, and verify that disconnect/reconnect cannot append stale or duplicate log chunks. Recovery of a worker connection does not prove offline model access or a local copy of complete chat history. A desktop transport that is not currently attached does not establish that the original worker daemon is offline. Reuse its exact recorded source and a bounded read-only health check before classifying the prerequisite; never reinstall or update an existing source merely to test a UI entrance.
+
+
+## Human handoff and interrupted native control
+
+An automatic goal continuation is not explicit permission to resume computer control after a physical Escape stop. Continue already-authorized non-UI source, package and evidence work when appropriate; keep UI acceptance pending until the user explicitly resumes. Never treat a user acknowledgement as proof that a file was actually selected: verify the displayed target and scope before reading or changing it.
+
+Show paths intended for a human system file picker inside a literal code span/block. Preserve separators before dot-prefixed directories; a Markdown-escaped path and a missing file are different failures. Check the actual chosen/displayed path against the existing public test fixture, and do not attribute an instruction-formatting error to product file handling.
+
+
+A DOM dialog count of zero does not establish that a Windows native file or confirmation dialog closed. Verify native modality and the completed operation's actual result before dispatching another action to the owner page. Do not click through an unresolved native modal via Playwright simply because the underlying DOM button remains enabled. A pending or stale post-key snapshot is not cancellation/saving success; retain the uncertainty rather than replaying Save or opening a second request.
