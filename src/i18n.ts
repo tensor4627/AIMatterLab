@@ -1,4 +1,5 @@
 const english:Record<string,string> = {
+ '计算权限':'Compute Permissions','新建计算项目':'New Compute Project','计算权限设置':'Compute Permission Settings','管理计算项目可用的资源与运行限额。':'Manage resources and run limits for compute projects.','选择计算项目，或创建独立的计算权限范围。':'Select a compute project or create a separate compute permission scope.',
 "规划说明":"Planning notes",
 "来源与说明":"Sources and notes",
 "原始字段标签":"Original field label",
