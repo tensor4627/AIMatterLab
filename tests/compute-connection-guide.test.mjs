@@ -42,3 +42,13 @@ for(const [scope,intent,label] of [['global','existing','Existing local connecti
  const summary=h.find(n=>n.props?.className==='connection-review');assert.match(h.text(summary),new RegExp(label));
  assert(!h.calls.some(c=>c.method==='compute.connection.connect'));h.unmount();
 });
+
+
+test('manual reread announces only successful current summary; blocked plan is not success',async()=>{
+ let value=review();const h=harness({plan:()=>value});await h.flush();assert.throws(()=>h.find(n=>n.props?.['data-testid']==='connection-reread-feedback'));
+ const reread=()=>h.find(n=>n.type==='button'&&h.text(n)==='重新读取').props.onClick();reread();await h.flush();assert.match(h.text(h.find(n=>n.props?.['data-testid']==='connection-reread-feedback')),/连接摘要已重新读取/);
+ value={...review(),status:'blocked',error:{code:'binding_missing',message:'source missing'}};reread();await h.flush();assert.throws(()=>h.find(n=>n.props?.['data-testid']==='connection-reread-feedback'));assert(!h.calls.some(c=>c.method==='compute.connection.connect'));h.unmount();
+});
+test('cancelled late reread cannot announce completion',async()=>{
+ const wait=deferred();let first=true;const h=harness({plan:()=>{if(first){first=false;return review();}return wait.promise;}});await h.flush();h.find(n=>n.type==='button'&&h.text(n)==='重新读取').props.onClick();await h.flush();h.find(n=>n.type==='button'&&h.text(n)==='取消').props.onClick();await h.flush();wait.resolve({...review(),planId:'late'});await h.flush();assert.throws(()=>h.find(n=>n.props?.['data-testid']==='connection-reread-feedback'));assert.deepEqual(h.closed,[false]);h.unmount();
+});

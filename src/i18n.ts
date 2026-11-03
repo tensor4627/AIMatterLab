@@ -1,4 +1,9 @@
 const english:Record<string,string> = {
+"正在同步记录…":"Syncing records…",
+"记录已刷新":"Records refreshed",
+"部分记录未刷新":"Some records were not refreshed",
+"记录刷新失败":"Record refresh failed",
+"工作区列表已刷新":"Workspace list refreshed",
 "假设与来源":"Assumptions and sources",
 "几何检查":"Geometry check",
 "最大化或还原":"Maximize or restore",
