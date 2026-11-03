@@ -1,4 +1,8 @@
 const english:Record<string,string> = {
+"规划说明":"Planning notes",
+"来源与说明":"Sources and notes",
+"原始字段标签":"Original field label",
+"默认值来源":"Default source",
 "正在同步记录…":"Syncing records…",
 "记录已刷新":"Records refreshed",
 "部分记录未刷新":"Some records were not refreshed",

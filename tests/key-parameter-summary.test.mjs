@@ -1,3 +1,4 @@
+import {parameterDisplayLabel} from '../shared/parameter-label.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,10 +16,10 @@ function walk(n){
  ts.forEachChild(n,walk);
 }walk(ast);
 const compile=text=>ts.transpileModule(text,{compilerOptions:{jsx:ts.JsxEmit.React,target:ts.ScriptTarget.ES2022}}).outputText;
-function fixture(value,type='list'){
+function fixture(value,type='list',manualEdits){
  const parameters={cv:{atoms:value}},before=structuredClone(parameters),field={key:'cv.atoms',label:'Atoms',type},calls=[];
  const fieldSummary=new Function('parameters','parameterValue','t',compile(summary)+';return fieldSummary;')(parameters,parameterValue,x=>x);
- const element=new Function('React','overviewFields','parameters','fieldMissing','fieldSummary','locateField','t',compile('return ('+card+');'))(React,[{step:{id:'cv-step'},field}],parameters,fieldMissing,fieldSummary,(...args)=>calls.push(args),x=>x);
+ const element=new Function('React','overviewFields','parameters','fieldMissing','fieldSummary','locateField','parameterDisplayLabel','task','t',compile('return ('+card+');'))(React,[{step:{id:'cv-step'},field}],parameters,fieldMissing,fieldSummary,(...args)=>calls.push(args),parameterDisplayLabel,{manualEdits},x=>x);
  return {parameters,before,field,fieldSummary,element,calls,html:renderToStaticMarkup(element)};
 }
 function buttons(node){if(!node||typeof node!=='object')return [];return [...(node.type==='button'?[node]:[]),...React.Children.toArray(node.props?.children).flatMap(buttons)];}
@@ -38,4 +39,9 @@ test('matrix and ragged nested values use dimensions or row count; file summarie
  const matrix=fixture([[8.18,0,0],[0,8.18,0],[0,0,8.18]]);assert.equal(matrix.fieldSummary(matrix.field),'3 × 3');assert.doesNotMatch(matrix.html,/8\.18/);assert.deepEqual(matrix.parameters,matrix.before);
  const ragged=fixture([[1],[2,3]]);assert.match(ragged.fieldSummary(ragged.field),/^2 /);
  const files=fixture(['/owned/a.xyz','/owned/b.xyz','/owned/c.xyz'],'files');assert.equal(files.fieldSummary(files.field),'3 个文件 · a.xyz, b.xyz…');assert.deepEqual(files.parameters,files.before);
+});
+
+
+test('actual key-parameter title uses the same canonical identity for a manually edited field and keeps locate action',()=>{
+ const f=fixture([0,1,2],'list',{'cv.atoms':2});assert.match(f.html,/cv.atoms/);assert.doesNotMatch(f.html,/>Atoms</);buttons(f.element)[0].props.onClick();assert.deepEqual(f.calls,[['cv-step','cv.atoms']]);assert.deepEqual(f.parameters,f.before);
 });

@@ -75,3 +75,6 @@
 .job-record-meta{border-top:1px solid var(--line);display:flex;gap:10px 16px;flex-wrap:wrap;align-items:center;padding:10px 16px;color:var(--muted);font-size:max(calc(11px * var(--ui-scale,1)),var(--ui-min-font,12px));overflow-wrap:anywhere}
 .job-record-meta button{display:inline-flex;gap:6px;align-items:center;text-align:left;overflow-wrap:anywhere}
 @media(max-width:850px){.workspace-shell .sidebar{width:220px}.workspace-modebar{padding:6px}.workspace-shell .resource-mini{display:none}.workspace-shell .title-path{display:none}.workspace-shell .page,.workspace-shell .home-page{padding:18px 14px}.workspace-shell .workspace-priority{display:none}}
+
+.workspace-shell .parameter-notes,.workspace-shell .workflow-planning-notes{min-width:0;max-width:100%}
+.workspace-shell .parameter-notes p,.workspace-shell .workflow-planning-notes p{min-width:0;max-width:100%;overflow-wrap:anywhere;white-space:pre-wrap}
