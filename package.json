@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "0.18.9-dev.38",
+  "version": "0.18.9-dev.39",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -33,6 +33,7 @@
     "three": "0.172.0"
   },
   "devDependencies": {
+    "@lydell/node-pty": "1.2.0-beta.10",
     "@types/react": "19.0.3",
     "@types/react-dom": "19.0.2",
     "@types/three": "0.172.0",
@@ -48,7 +49,7 @@
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "directories": {
-      "output": "release/v0.18.9-dev.38"
+      "output": "release/v0.18.9-dev.39"
     },
     "files": [
       "dist/**",
@@ -67,6 +68,11 @@
       "target": "portable"
     },
     "extraResources": [
+      {
+        "from": "desktop/terminal-service",
+        "to": "terminal-service",
+        "filter": ["**/*.mjs"]
+      },
       {
         "from": ".studio/agent-runtimes/node_modules",
         "to": "agent-runtimes/node_modules",

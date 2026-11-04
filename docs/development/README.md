@@ -17,6 +17,8 @@ flowchart LR
     UI[自定义 Electron / React 工作台] --> Main[主进程：类型化 IPC、索引、账户]
     Main --> Agents[Codex / Kimi / Qwen / DeepSeek / 兼容 API]
     Agents --> MCP[结构化科学工具]
+    Main --> Terminal[独立本机共享 PTY 服务]
+    Terminal --> SSHInteractive[交互式 SSH / 密钥登录]
     Main --> Worker[独立 WSL Python 作业服务]
     MCP --> Worker
     Worker --> Engines[MD / pyGAS / NEP / HotPP]
@@ -58,6 +60,8 @@ flowchart LR
 仓库保存通用代码、契约、公开技能、通用示例和开发文档；不得包含个人主机、账户、端口、队列、节点、密钥、私有输入和实际环境路径。`.studio/`、`release/`、`.env`、`.env.*` 和 `custom-cv-library/` 保持 Git 忽略；`.env.example` 可跟踪且只允许通用占位符。私有连接、测试环境、运行时收据和本地 skill overlay 留在忽略目录或系统私有存储中。
 
 当前工作树的清理不会改写 Git 历史。历史文档和验收脚本曾包含本机路径与环境信息，旧提交仍可恢复这些字节；对外分发采用精确当前源码树的新单根 Git 快照，使用通用作者且不包含旧对象历史、远程连接或 ignored 运行数据；原工作仓库历史保留本地。若未来公开原历史，仍须另行净化审阅。不得把当前树扫描通过表述为全部历史已清理。本轮不改写原历史、不设置远程仓库或推送。
+
+共享终端、交互式登录、密钥自动登录及私有认证的生命周期和权限边界见 [共享终端说明](shared-terminal.md)。本地终端验收与真实集群连接、环境探测和作业生命周期分别记账。
 
 WSL 选择使用目标机器实际发行版；SSH 使用用户明确选择的来源和用户名，密码、私钥、OTP 由用户私下处理。不能把 SSH 设置权限扩大为软件安装、调度器探测或提交权限。后续站点适配先向用户索取少量成功模板及允许范围，再给出可审阅设置；模板是数据，不可直接执行。详见 [计算资源 skill](../../agents/skills/studio-compute-workflow/SKILL.md) 与 [可迁移技能](../portable-skills.md)。
 

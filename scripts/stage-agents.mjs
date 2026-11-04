@@ -18,5 +18,6 @@ function stage(name,from=root){
  for(const dependency of Object.keys(pkg.dependencies||{}))stage(dependency,source);
 }
 stage('@moonshot-ai/kimi-code');stage('@qwen-code/qwen-code');
-fs.writeFileSync(path.join(target,'manifest.json'),JSON.stringify({scope:'Official ACP CLI runtimes; no user credentials or sessions',packages:Object.fromEntries(copied)},null,2));
-console.log('Staged '+copied.size+' official runtime packages');
+stage('@lydell/node-pty');stage('@lydell/node-pty-'+process.platform+'-'+process.arch);
+fs.writeFileSync(path.join(target,'manifest.json'),JSON.stringify({scope:'Agent CLI and native PTY runtimes; no user credentials or sessions',packages:Object.fromEntries(copied)},null,2));
+console.log('Staged '+copied.size+' agent and terminal runtime packages');

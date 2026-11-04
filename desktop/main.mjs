@@ -1,3 +1,4 @@
+import {createSharedTerminal} from './shared-terminal.mjs';
 import {selectConversation} from './conversation-selection.mjs';
 import {createWindowsSaveAs} from './windows-save-as.mjs';
 import {createStructureWithAuthoringContext} from './structure-authoring.mjs';
@@ -157,13 +158,22 @@ worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,
  return scientificSkills.call(name,args,scope);
 });
 materials=new MaterialsProject({root:path.join(app.getPath('userData'),'credentials'),encryption:safeStorage,fetchApi:(...a)=>net.fetch(...a),worker});
-worker.setLocalTools(materials.tools(),(name,args)=>materials.call(name,args));
+
 handle('materials.status',()=>materials.status());
 handle('materials.key',({apiKey,remove=false})=>remove?materials.clear():materials.save(apiKey));
 handle('materials.search',({query})=>materials.search(query));
 handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 workflowContext=createAgentWorkflowContext({records:taskRecords,activeTasks:activeAuthoringTasks,selectedProvider:()=>agents.active});
+const sharedTerminal=createSharedTerminal({worker,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,
+ root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:path.join(app.getPath('userData'),'shared-terminal','runtime'),
+ dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):root,
+ servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'terminal-service','broker.mjs'),nodeExecutable:process.execPath,
+ sourceGuard:()=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),{}),worker)});
+const terminalTools=sharedTerminal.tools(),terminalToolNames=new Set(terminalTools.map(tool=>tool.name));
+worker.setLocalTools([...materials.tools(),...terminalTools],(name,args,scope)=>terminalToolNames.has(name)?sharedTerminal.callTool(name,args,scope):materials.call(name,args));
+for(const method of ['list','open','read','input','resize','owner','close'])handle('sharedTerminal.'+method,value=>sharedTerminal[method](value));
+
 registerTaskStage({handle,records:taskRecords,worker,current:()=>workflowContext.current(),assertHuman:event=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;}});
 localReview=registerCalculationReview({handle,records:taskRecords,worker,current:()=>workflowContext.current(),
  assertHuman:event=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},
