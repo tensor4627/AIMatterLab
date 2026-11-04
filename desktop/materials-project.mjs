@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 export const MP_ENDPOINT='https://api.materialsproject.org/materials/summary/';
+// MP AlphaID uses lowercase base26 (a=0); leading a padding preserves identity.
+function materialIdValue(id){if(typeof id!=='string'||id.length>80||!/^mp-(?:[0-9]+|[a-z]+)$/.test(id))return null;const value=id.slice(3);return /^[0-9]+$/.test(value)?BigInt(value):[...value].reduce((n,c)=>n*26n+BigInt(c.charCodeAt(0)-97),0n);}
 export function mpQuery(query,structure=false){
  if(typeof query!=='string'||query.length>80||!query.trim())throw Error('Enter a material ID or formula');
- query=query.trim();if(!/^mp-[0-9]+$/.test(query)&&!/^([A-Z][a-z]?[0-9.]*)+$/.test(query))throw Error('Use an exact formula or mp-ID');
+ query=query.trim();if(materialIdValue(query)===null&&!/^([A-Z][a-z]?[0-9.]*)+$/.test(query))throw Error('Use an exact formula or mp-ID');
  const url=new URL(MP_ENDPOINT);url.searchParams.set(/^mp-/.test(query)?'material_ids':'formula',query);url.searchParams.set('_limit',structure?'1':'10');url.searchParams.set('_fields','material_id,formula_pretty,nsites,symmetry,energy_above_hull,is_stable,origins,last_updated'+(structure?',structure':''));return url;
 }
 export function mpRecipe(doc){
@@ -30,9 +32,9 @@ export class MaterialsProject{
  }
  async search(query){const result=await this.query(query);return {...result,documents:result.documents.map(d=>({material_id:d.material_id,formula:d.formula_pretty,n_atoms:d.nsites,symmetry:d.symmetry,energy_above_hull:d.energy_above_hull,is_stable:d.is_stable})),scope:'Candidate database structures; select the intended phase before import. MP DFT geometry does not establish compatibility with your MD potential.'};}
  async import({project_id,environment_id,material_id}){
-  if(typeof material_id!=='string'||!/^mp-[0-9]+$/.test(material_id))throw Error('Select a Materials Project ID');
-  const result=await this.query(material_id,true),doc=result.documents[0];if(!doc||doc.material_id!==material_id)throw Error('Exact MP structure not found');
-  const receipt={provider:'Materials Project',material_id,formula:doc.formula_pretty,origins:doc.origins,last_updated:doc.last_updated,retrieved_at:result.retrieved_at,endpoint:result.endpoint,response_sha256:createHash('sha256').update(JSON.stringify(doc)).digest('hex')};
+  if(materialIdValue(material_id)===null)throw Error('Select a Materials Project ID');
+  const result=await this.query(material_id,true),doc=result.documents[0];if(!doc||materialIdValue(doc.material_id)!==materialIdValue(material_id))throw Error('Exact MP structure not found');
+  const receipt={provider:'Materials Project',material_id:doc.material_id,requested_material_id:material_id,formula:doc.formula_pretty,origins:doc.origins,last_updated:doc.last_updated,retrieved_at:result.retrieved_at,endpoint:result.endpoint,response_sha256:createHash('sha256').update(JSON.stringify(doc)).digest('hex')};
   return this.worker.request('POST','/api/structures/import-material',{project_id,environment_id,recipe:mpRecipe(doc),external_provenance:receipt});
  }
  tools(){return [
