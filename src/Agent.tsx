@@ -31,7 +31,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  const [provider,setProvider]=useState<AgentProvider>(drafts.owner().provider as AgentProvider),[login,setLogin]=useState(false);
  useEffect(()=>{providerChangeRef.current?.(provider);},[provider]);
  const [workflowId,setWorkflowId]=useState<string|null>(null),[newWorkflow,setNewWorkflow]=useState(false);
- const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<symbol|null>(null),providerTouched=useRef(false);
+ const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<symbol|null>(null),providerTouched=useRef(false),handledSelection=useRef<string|undefined>(undefined),sendOwner=useRef<symbol|null>(null);
  const handledDraftIntents=useRef(new Set<string>());
  const loginRef=useRef(login);loginRef.current=login;
  const providerRef=useRef<AgentProvider>(provider);providerRef.current=provider;
@@ -41,8 +41,8 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  const [thread,setThread]=useState<string|null>(null),[threads,setThreads]=useState<any[]>([]),[messages,setMessages]=useState<Message[]>([]);
  const [recovery,setRecovery]=useState<{threadId:string;error?:string}|null>(null),pendingResume=useRef<string|null>(null);
  const [modelCall,setModelCall]=useState<ModelCall|null>(null),modelCallRef=useRef<ModelCall|null>(null),modelRef=useRef(model);modelRef.current=model;
- const [prompt,setPrompt]=useState(()=>drafts.text()),[busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null);
- function updatePrompt(text:string){providerTouched.current=true;setPrompt(drafts.edit(text));}
+ const [prompt,setPrompt]=useState(()=>drafts.text()),[busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null),[sendNotice,setSendNotice]=useState('');
+ function updatePrompt(text:string){providerTouched.current=true;setSendNotice('');setPrompt(drafts.edit(text));}
  function selectDraft(value:AgentProvider,id:string|null=null,fresh=false){setPrompt(drafts.activate(value,id,fresh));}
  const [requests,setRequests]=useState<RpcEvent[]>([]),[answers,setAnswers]=useState<Record<string,string>>({});
  const [effort,setEffort]=useState(storedPreference('studio.effort')||''),[contextWindow,setContextWindow]=useState(''),[compactLimit,setCompactLimit]=useState(''),[options,setOptions]=useState(false),[usage,setUsage]=useState<any>(null),[applying,setApplying]=useState(false),[applied,setApplied]=useState('');
@@ -144,7 +144,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  }
  async function resume(id:string,seq=++selectionSeq.current,selectedProject=projectId,rebuild=false){
   if(busy)return;attachmentClearRef.current?.();const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
-  selectDraft(selectedProvider,id);
+  setSendNotice('');selectDraft(selectedProvider,id);
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
   modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
   try{
@@ -169,7 +169,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   }catch(e){if(current()){if(rebuild)setRecovery({threadId:pendingResume.current||id,error:e instanceof Error?e.message:String(e)});else onError(e);}}finally{if(current()){pendingResume.current=null;selectionPending.current=false;setApplying(false);}}
  }
  useEffect(()=>{
-  if(!sessionSelection||busy)return;const seq=++selectionSeq.current;
+  if(!sessionSelection||busy||handledSelection.current===sessionSelection.nonce)return;handledSelection.current=sessionSelection.nonce;const seq=++selectionSeq.current;
   if(sessionSelection.conversation)selectDraft(sessionSelection.conversation.provider,sessionSelection.conversation.threadId);
   selectionPending.current=true;threadRef.current=null;setThread(null);setApplying(true);
   if(sessionSelection.pending){pendingResume.current=null;return;}
@@ -182,7 +182,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
    if((!connected||different)&&!await connect(false,seq))return;
    if(seq!==selectionSeq.current)return;await resume(selected.threadId,seq,selected.projectId||'');
   }finally{if(seq===selectionSeq.current){selectionPending.current=false;setApplying(false);}}};void activate();
- },[sessionSelection?.nonce]);
+ },[sessionSelection?.nonce,busy]);
  useEffect(()=>{
   if(!intent||intent.autoSend||handledDraftIntents.current.has(intent.id))return;
   handledDraftIntents.current.add(intent.id);
@@ -192,12 +192,16 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  },[intent?.id,sessionSelection?.nonce]);
  useEffect(()=>{if(!intent?.autoSend||consumedIntent.current===intent.id||busy||applying||connecting||!connected||!models.length||(intent.threadId&&thread!==intent.threadId)||(intent.provider&&providerRef.current!==intent.provider))return;consumedIntent.current=intent.id;void send(intent.text,{reviewMode:intent.reviewMode,taskId:intent.taskId});},[intent?.id,connected,busy,applying,connecting,thread,models.length]);
  async function send(textOverride?:string,action:{reviewMode?:boolean;taskId?:string}={}){
-  const text=textOverride??prompt;if(needsAuth){openAccounts();return;}if(!text.trim()||busy||applying||connecting||selectionPending.current||recovery||!connected||!models.length||drafts.owner().provider!==providerRef.current||drafts.owner().threadId!==threadRef.current)return;
-  if((planningMode||workflowId||action.reviewMode)&&tools.status==='blocked'){onError(t(tools.message||'请先修复科学工具连接'));return;}
+  const text=textOverride??prompt;if(needsAuth){openAccounts();return;}if(!text.trim()||busy||sendOwner.current)return;
+  if(applying||connecting||selectionPending.current){setSendNotice(t('正在恢复会话，请稍后发送。'));return;}
+  if(recovery){setSendNotice(t('请先恢复当前对话，输入草稿已保留。'));return;}
+  if(!connected||!models.length){setSendNotice(t('请先连接服务商并选择模型。'));return;}
+  if(drafts.owner().provider!==providerRef.current||drafts.owner().threadId!==threadRef.current){setSendNotice(t('当前对话尚未恢复，输入草稿已保留。'));return;}
+  if((planningMode||workflowId||action.reviewMode)&&tools.status==='blocked'){setSendNotice(t(tools.message||'请先修复科学工具连接'));onError(t(tools.message||'请先修复科学工具连接'));return;}
   const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,draft=drafts.capture(),manual=textOverride===undefined;
   const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
-  setBusy(true);
+  const owner=Symbol();sendOwner.current=owner;let acknowledged=false;setSendNotice('');setBusy(true);
   const retainRequest=()=>{if(!manual&&drafts.retain(draft,text))setPrompt(drafts.text());};
   try{
    let id=threadRef.current;
@@ -210,8 +214,8 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
    setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text}]);
    const input:any[]=[{type:'text',text},{type:'text',text:'[Studio workspace context]\n'+context}];if(attachment&&'path' in attachment)input.push({type:'skill',name:attachment.name,path:attachment.path});
    const call:ModelCall={requestId:crypto.randomUUID(),provider:selectedProvider,model:modelRef.current,threadId:id!,turnId:null,output:false,status:'in_progress'};modelCallRef.current=call;setModelCall({...call});
-   const r=await selectedRpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});if(!current())return;if(r.studioRecovery?.status==='required'){setRecovery({threadId:r.studioRecovery.oldThreadId});setBusy(false);retainRequest();if(modelCallRef.current===call){call.status='failed';setModelCall({...call});}return;}if(typeof r.turn?.id!=='string'||!r.turn.id)throw Error('Agent did not acknowledge the submitted message');if(manual&&drafts.acknowledge(draft))setPrompt(drafts.text());if(modelCallRef.current===call){if(attachment)attachmentConsumedRef.current?.(attachment.attachmentId);if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}
-  }catch(e){if(!current())return;retainRequest();const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===threadRef.current){call.status='failed';setModelCall({...call});}setBusy(false);onError(e);}
+   const r=await selectedRpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});acknowledged=typeof r.turn?.id==='string'&&!!r.turn.id;if(acknowledged&&modelCallRef.current===call){if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}if(!current())return;if(r.studioRecovery?.status==='required'){setRecovery({threadId:r.studioRecovery.oldThreadId});setBusy(false);retainRequest();if(modelCallRef.current===call){call.status='failed';setModelCall({...call});}return;}if(!acknowledged)throw Error('Agent did not acknowledge the submitted message');if(manual&&drafts.acknowledge(draft))setPrompt(drafts.text());if(modelCallRef.current===call){if(attachment)attachmentConsumedRef.current?.(attachment.attachmentId);if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}
+  }catch(e){if(!current())return;retainRequest();const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===threadRef.current){call.status='failed';setModelCall({...call});}setBusy(false);onError(e);}finally{if(sendOwner.current===owner){sendOwner.current=null;if(!acknowledged)setBusy(false);}}
  }
  async function applyOptions(){
   const selectedProvider=providerRef.current,seq=selectionSeq.current,draft=drafts.capture(),current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current;
@@ -229,6 +233,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  }
  const providerLabel=provider==='codex'?'Codex':provider==='kimi'?'Kimi':provider==='deepseek'?'DeepSeek API':provider==='compatible'?t('自定义 API'):'Qwen';
  const optionSummary=[providerLabel,models.find(m=>m.model===model)?.displayName||model,effort].filter(Boolean).join(' · ');
+ const composerOwner=drafts.owner(),composerUnbound=composerOwner.provider!==provider||composerOwner.threadId!==thread;
  return <aside className="agent-panel" style={{width,display:hidden?'none':undefined}}>
   <div className={"agent-top-surface"+(options?" is-expanded":"")}>
   <div className="panel-heading agent-heading"><span className="agent-heading-title"><Sparkles size={16}/>{tr("科研助手")}</span>{!options&&<span className="agent-collapsed-summary" data-testid="agent-options-summary" title={optionSummary}>{optionSummary}</span>}<div className="agent-header-actions"><button className="icon-button" data-testid="agent-options" title={t("Agent 选项")} aria-label={t("Agent 选项")} aria-expanded={options} aria-controls="agent-options-region" onClick={()=>setOptions(!options)}><Settings2 size={16}/></button>{!onNewConversation&&<button className="icon-button" data-testid="agent-new-conversation-fallback" title={tr("新会话")} aria-label={tr("新会话")} onClick={()=>resetConversation()} disabled={busy||connecting||applying}><Plus size={17}/></button>}</div></div>
@@ -267,7 +272,9 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   {autoSkillStatus&&autoSkillStatus.threadId===thread&&autoSkillStatus.provider===provider&&<details className="agent-auto-skills"><summary>{t(autoSkillStatus.status==='passed'?'本轮已载入任务指导':autoSkillStatus.status==='already_loaded'?'当前会话已有相同指导':autoSkillStatus.status==='permission_required'?'需要公开指导共享许可':autoSkillStatus.status==='prepared'?'指导已准备，等待服务接受':autoSkillStatus.status==='failed'?'指导发送未通过':autoSkillStatus.status==='unknown'?'指导接收状态未知':autoSkillStatus.status==='not_run'?'本轮未载入任务指导':'任务指导暂不可用')} · {(autoSkillStatus.names||[]).length}</summary>{(autoSkillStatus.names||[]).map((name:string)=><div key={name}>{name}</div>)}{autoSkillStatus.source&&<p>{autoSkillStatus.source}</p>}{autoSkillStatus.attachments?.map((a:any)=><p className="skill-loaded-file" key={a.name+a.sha256}>{a.name}<small>SHA256 · {a.sha256} · {a.bytes} bytes</small></p>)}{autoSkillStatus.message&&<p>{autoSkillStatus.message}</p>}</details>}
   {needsAuth&&<div className="account-login-guidance" role="status" data-testid="agent-login-required"><p>{t(ACCOUNT_GUIDANCE)}</p><button className="button" onClick={openAccounts}>{t('打开账号与 API')}</button></div>}
   {sessionSelection?.pending&&sessionSelection.error&&<div className="notice" role="alert"><span>{sessionSelection.error}</span><button className="button" onClick={()=>onNewConversation?.()}>{t("重试")}</button></div>}
-  <div className="composer"><div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{(workflowId||planningMode||newWorkflow)&&<Tooltip className="agent-mode-explanation" content={t(newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}><span className="agent-mode-inline">{t(newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</span></Tooltip>}{workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}<textarea aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{t('Enter 发送 · Shift+Enter 换行')}</span>{busy?<button className="send" title={tr("中断 Agent，计算作业继续")} aria-label={tr("中断 Agent，计算作业继续")} onClick={()=>void rpc('turn/interrupt',{threadId:thread,turnId:turn}).catch(onError)}><Square size={13}/></button>:<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={!!recovery||applying||connecting||!connected||!models.length||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
+  {connected&&composerUnbound&&!recovery&&!applying&&!connecting&&!sessionSelection?.pending&&<div className="agent-send-recovery" data-testid="agent-draft-unbound" role="status"><span>{t('当前对话尚未恢复，输入草稿已保留。')}</span>{composerOwner.provider===provider&&composerOwner.threadId&&<button className="button" data-testid="agent-restore-draft" disabled={busy} onClick={()=>void resume(composerOwner.threadId!)}>{t('恢复当前对话')}</button>}</div>}
+  {sendNotice&&!composerUnbound&&<div className="agent-send-notice" role="status">{sendNotice}</div>}
+  <div className="composer"><div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{(workflowId||planningMode||newWorkflow)&&<Tooltip className="agent-mode-explanation" content={t(newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}><span className="agent-mode-inline">{t(newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</span></Tooltip>}{workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}<textarea aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{t('Enter 发送 · Shift+Enter 换行')}</span>{busy?<button className="send" title={tr("中断 Agent，计算作业继续")} aria-label={tr("中断 Agent，计算作业继续")} onClick={()=>void rpc('turn/interrupt',{threadId:thread,turnId:turn}).catch(onError)}><Square size={13}/></button>:<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={!!recovery||applying||connecting||selectionPending.current||composerUnbound||!connected||!models.length||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
   <div className="agent-footer">{tr("Agent 会话与科学计算队列独立运行")}</div>
   {login&&<ProviderLogin provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{setLogin(false);void connect();}} onError={onError}/>}
  </aside>;

@@ -1,4 +1,9 @@
 const english:Record<string,string> = {
+"当前对话尚未恢复，输入草稿已保留。":"This conversation has not been restored. Your draft is saved.",
+"恢复当前对话":"Restore current conversation",
+"正在恢复会话，请稍后发送。":"Restoring the conversation. Send when it is ready.",
+"请先恢复当前对话，输入草稿已保留。":"Restore this conversation first. Your draft is saved.",
+"请先连接服务商并选择模型。":"Connect a provider and select a model first.",
 "断开连接":"Disconnect",
 "关闭终端":"Close terminal",
 "关闭当前终端，保留已保存连接和其他会话":"Close this terminal; keep saved connections and other sessions",
