@@ -27,7 +27,7 @@ export const api=<T=any>(method:string,target:string,data?:unknown)=>invoke<T>('
 export interface WorkerStatus {status:'connected'|'disconnected'|'unknown'|'checking';checkedAt:number;taskId?:string;conversationId?:string;scope?:'global';serviceVersion?:'current'|'different'|'unconfirmed';reason?:string}
 export const readWorkerStatus=()=>invoke<WorkerStatus>('worker.status');
 export const restoreWorker=(owner:string|{conversationId:string}|{scope:'global'})=>invoke<WorkerStatus>('worker.restore',typeof owner==='string'?{taskId:owner}:owner);
-export interface ComputeConnectionView {planId:string|null;status:string;phase:string;scope?:'task'|'saved-global'|'global';intent?:'standard'|'existing';taskId?:string|null;ownerName?:string|null;locked?:boolean;needsLegacyPort?:boolean;portSource?:'unknown'|'saved'|'verified'|'human-confirmed';canChooseSource?:boolean;canUpdate?:boolean;distributions?:string[];target?:{distribution:string;root:string;port:number|null}|null;connection:string;discovery:string;scientificValidation?:'not_run';serviceVersion?:string;resolvedRoot?:string;mode?:string;environments?:number;finished:boolean;error?:{code:string;message:string}}
+export interface ComputeConnectionView {planId:string|null;status:string;phase:string;scope?:'task'|'saved-global'|'saved-profile'|'global';profileId?:string;profileVersion?:number;profileName?:string;intent?:'standard'|'existing';taskId?:string|null;ownerName?:string|null;locked?:boolean;needsLegacyPort?:boolean;portSource?:'unknown'|'saved'|'verified'|'human-confirmed';canChooseSource?:boolean;canUpdate?:boolean;distributions?:string[];target?:{distribution:string;root:string;port:number|null}|null;connection:string;discovery:string;scientificValidation?:'not_run';serviceVersion?:string;resolvedRoot?:string;mode?:string;environments?:number;finished:boolean;error?:{code:string;message:string}}
 export function wslPath(path:string){return /^[a-z]:[\\/]/i.test(path)?'/mnt/'+path[0].toLowerCase()+'/'+path.slice(3).replaceAll('\\','/'):path}
 export const engines=[
  ['gpumd.neb','GPU-Sampling · NEB'],['gpumd.md','GPUMD · 传统 MD'],['pydyn.md','PyDyn · 传统 MD'],['pygas.build','pyGAS · Bias 构建'],
@@ -74,3 +74,7 @@ export interface ClusterQueueProfile {id?:string;version?:number;queue?:string;q
 export interface ClusterSchedulerObservation {queues?:string[];detected_schedulers?:string[];selected_scheduler?:string;selected_scheduler_match?:boolean;schedulers?:Record<string,{queues?:string[];commands?:unknown;queue_status?:string}>}
 
 export interface ExistingSshReference {ref:string;label:string;source?:'codex'|'xshell';action?:'select-session'}
+
+export interface WslComputeProfile {id:string;version:number;kind:'wsl';name:string;distribution:string;root:string;port:number;intent:'standard'|'existing'}
+export interface SshComputeProfile {id:string;version:number;kind:'ssh';name:string;host:string;username:string;port:number;ssh_client:string;distribution?:string;identity_file?:string;proxy_jump?:string[];via?:string[];mode:'interactive'|'key'}
+export type ComputeProfile=WslComputeProfile|SshComputeProfile;

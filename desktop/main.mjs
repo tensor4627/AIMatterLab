@@ -1,3 +1,4 @@
+import {createComputeProfiles} from './compute-profiles.mjs';
 import {createSharedTerminal} from './shared-terminal.mjs';
 import {selectConversation} from './conversation-selection.mjs';
 import {createWindowsSaveAs} from './windows-save-as.mjs';
@@ -9,7 +10,7 @@ import {taskOperation} from './task-operations.mjs';
 import {workspaceController} from './workspaces.mjs';
 import {explicitSetupStage} from './explicit-setup-stage.mjs';
 import {createComputeOnboarding} from './compute-onboarding.mjs';
-import {createComputeConnection} from './compute-connection.mjs';
+import {createComputeConnection,installedWslDistributions} from './compute-connection.mjs';
 import {customCvNumericDialog,referenceImportDialog} from './custom-cv-dialog.mjs';
 import {registerTaskStage} from './task-stage-ipc.mjs';
 import {localReviewDialog} from './local-review-dialog.mjs';
@@ -165,7 +166,13 @@ handle('materials.search',({query})=>materials.search(query));
 handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 workflowContext=createAgentWorkflowContext({records:taskRecords,activeTasks:activeAuthoringTasks,selectedProvider:()=>agents.active});
-const sharedTerminal=createSharedTerminal({worker,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,
+const lastCompute=catalog.get('worker-binding','last-explicit');
+const computeProfiles=createComputeProfiles({catalog,initialWsl:validExplicitBinding(lastCompute,settings)?{distribution:lastCompute.distribution,root:lastCompute.root,port:lastCompute.port,intent:lastCompute.intent||'standard'}:undefined});
+handle('compute.profiles.list',value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid connection listing');return {profiles:computeProfiles.list(),...worker.connection&&!worker.connecting&&!worker.restoring&&worker.identity&&worker.connectionTarget?{activeLocal:{distribution:worker.identity.distribution,root:worker.identity.root,requestedRoot:worker.connectionTarget.requestedRoot,port:worker.connectionTarget.port}}:{},defaults:{distribution:settings.distribution,root:settings.workerRoot,port:settings.workerPort,ssh_client:process.platform==='win32'?path.join(process.env.SystemRoot||'C:\\Windows','System32','OpenSSH','ssh.exe'):'/usr/bin/ssh'}};});
+handle('compute.profiles.read',value=>computeProfiles.read(value));
+handle('compute.profiles.save',value=>computeProfiles.save(value));
+handle('compute.profiles.inventory',async value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid WSL inventory request');return {distributions:await installedWslDistributions()};});
+const sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,
  root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:path.join(app.getPath('userData'),'shared-terminal','runtime'),
  dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):root,
  servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'terminal-service','broker.mjs'),nodeExecutable:process.execPath,
@@ -275,7 +282,7 @@ function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activ
 const configureCompute=createComputeOnboarding({worker,publish:event=>emit('studio:event',event)});
 function discoverCompute(){if(settings.autoDiscoverCompute!==false)return configureCompute().catch(()=>null);return Promise.resolve(null);}
 handle('compute.setup',async data=>configureCompute(data||{}));
-const computeConnection=createComputeConnection({worker,records:taskRecords,catalog,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),source:()=>({path:workerSource,id:worker.bundledRuntimeId}),beforeSwitch:()=>{assertIdleAgent();agents.close();},bindFreshSources:bindSources,saveSettings:target=>{settings=catalog.put('settings','main',{...settings,distribution:target.distribution,workerRoot:target.workerRoot,workerPort:target.workerPort});},remember:(target,evidence)=>{const value={version:1,distribution:worker.identity?.distribution,root:worker.identity?.root,port:target.workerPort,intent:evidence.intent||'standard',settingsSignature:workerSettingsSignature(settings),checkedAt:evidence.checkedAt,...evidence.serviceVersion==='current'?{sourceIdentity:{runtimeId:worker.bundledRuntimeId}}:{}};if(!validExplicitBinding(value,settings)||worker.connection?.health?.root!==value.root||worker.connectionTarget?.port!==value.port)throw Error('Verified connection receipt changed');catalog.put('worker-binding','last-explicit',value);},onConnected:()=>emit('studio:event',{method:'studio/workerConnected',params:{}})});
+const computeConnection=createComputeConnection({worker,profiles:computeProfiles,records:taskRecords,catalog,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),source:()=>({path:workerSource,id:worker.bundledRuntimeId}),beforeSwitch:()=>{assertIdleAgent();agents.close();},bindFreshSources:bindSources,saveSettings:target=>{settings=catalog.put('settings','main',{...settings,distribution:target.distribution,workerRoot:target.workerRoot,workerPort:target.workerPort});},remember:(target,evidence)=>{const value={version:1,distribution:worker.identity?.distribution,root:worker.identity?.root,port:target.workerPort,intent:evidence.intent||'standard',settingsSignature:workerSettingsSignature(settings),checkedAt:evidence.checkedAt,...evidence.serviceVersion==='current'?{sourceIdentity:{runtimeId:worker.bundledRuntimeId}}:{}};if(!validExplicitBinding(value,settings)||worker.connection?.health?.root!==value.root||worker.connectionTarget?.port!==value.port)throw Error('Verified connection receipt changed');catalog.put('worker-binding','last-explicit',value);},onConnected:()=>emit('studio:event',{method:'studio/workerConnected',params:{}})});
 handle('compute.connection.plan',value=>computeConnection.plan(value));
 handle('compute.connection.status',value=>computeConnection.status(value));
 handle('compute.connection.connect',value=>{assertIdleAgent();return computeConnection.connect(value);});

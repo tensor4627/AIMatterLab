@@ -6,7 +6,7 @@ import {invoke} from './types';
 import {t} from './i18n';
 import './shared-terminal.css';
 
-export type SharedTerminalRequest={nonce:string;kind:'local'|'ssh';mode:'interactive'|'key';clusterId?:string;version?:number};
+export type SharedTerminalRequest={nonce:string;kind:'local'|'ssh';mode:'interactive'|'key';clusterId?:string;profileId?:string;version?:number};
 type Session={sessionId:string;name:string;kind:string;mode:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;status:string;expired?:boolean;sequence:number;exitCode?:number|null};
 type ReadResult=Session&{output:string;cursor:number;dropped:boolean};
 
@@ -56,6 +56,7 @@ export default function SharedTerminalPanel({visible,request,canShare,onError}:{
    {active&&<><span className={'shared-terminal-owner '+(active.owner==='agent'?'is-agent':'')}>{t(active.owner==='human'?'由你操作':'由 Agent 操作')}</span><button className="button" data-testid="shared-terminal-handoff" disabled={busy||active.alive!==true||active.expired||(active.owner==='human'&&!canShare)} title={t(active.owner==='human'?'仅共享交接后的输出；认证时请先接管。':'立即停止 Agent 读写并由你操作')} onClick={()=>void ownership()}>{t(active.owner==='human'?'交给 Agent':'我来操作')}</button></>}
    <details className="shared-terminal-menu" ref={menu}><summary aria-label={t('会话操作')}>⋯</summary><div onClick={()=>{if(menu.current)menu.current.open=false;}}><button className="button" disabled={busy} onClick={()=>void open({kind:'local',mode:'interactive'})}>{t('打开本地交互终端')}</button><button className="button" disabled={busy} onClick={()=>void list().catch(report)}>{t('刷新会话列表')}</button>{active&&<><button className="button" disabled={busy} onClick={detach}>{t('分离视图')}</button><button className="button" disabled={busy} onClick={()=>setConfirmEnd(true)}>{t('结束会话')}</button></>}</div></details>
   </div>
+  {busy&&!active&&<p className="shared-terminal-notice" role="status">{t('正在打开终端…')}</p>}
   {notice&&<p className="shared-terminal-notice" role="status">{notice}</p>}
   {confirmEnd&&<div className="shared-terminal-confirm"><span>{t('结束此会话会关闭对应终端进程。')}</span><button className="button" disabled={busy} onClick={()=>setConfirmEnd(false)}>{t('取消')}</button><button className="button" data-testid="confirm-end-shared-terminal" disabled={busy} onClick={()=>void end()}>{t('确认结束')}</button></div>}
   {active?<><div className="shared-terminal-host" ref={host}/><div className="shared-terminal-caption"><span>{t(active.kind==='local'?'本地会话':active.mode==='key'?'密钥自动登录':'交互式登录')} · {active.sessionId.slice(0,8)}</span><span>{active.expired?t('访问已过期，请结束此会话后重新打开。'):active.alive===true?t('终端进程运行中'):active.alive===null?t('状态未知'):t('终端进程已结束')}{typeof active.exitCode==='number'?' · '+active.exitCode:''}</span></div></>:<div className="shared-terminal-empty"><p>{t('附加已有会话，或打开本地交互终端。')}</p><button className="button" data-testid="open-local-shared-terminal" disabled={busy} onClick={()=>void open({kind:'local',mode:'interactive'})}>{t('打开本地交互终端')}</button></div>}
