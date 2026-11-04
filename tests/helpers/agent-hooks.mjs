@@ -8,6 +8,7 @@ import * as drafts from '../../shared/composer-drafts.mjs';
 import * as effort from '../../shared/resume-effort.mjs';
 import * as activity from '../../shared/tool-activity.mjs';
 import * as fields from '../../shared/task-fields.mjs';
+import {conversationSelectionHarness} from './conversation-selection-hooks.mjs';
 
 const source=fs.readFileSync(process.env.STUDIO_AGENT_SOURCE?path.resolve(process.env.STUDIO_AGENT_SOURCE):new URL('../../src/Agent.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
@@ -15,11 +16,8 @@ export function deferred(){let resolve,reject;const promise=new Promise((yes,no)
 export function memoryStorage(){const values=new Map();return {values,getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key)};}
 export function conversation(provider,threadId){return {id:provider+':'+threadId,provider,threadId,name:threadId,projectId:null,taskId:null};}
 export function appConversationRecorder(storage){
- const source=fs.readFileSync(new URL('../../src/App.tsx',import.meta.url),'utf8'),parsed=ts.createSourceFile('App.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),functions=new Map();
- const collect=node=>{if(ts.isFunctionDeclaration(node)&&['storedConversation','storeConversation','conversationChanged'].includes(node.name?.text))functions.set(node.name.text,node.getText(parsed));node.forEachChild(collect);};collect(parsed);
- const code=ts.transpileModule([...functions.values()].join('\n'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
- const selectedConversationRef={current:null},selections=[],rows=[];
- const onConversation=new Function('localStorage','selectedConversationRef','setSelectedConversationId','setConversations',code+';return conversationChanged;')(storage,selectedConversationRef,value=>selections.push(value),update=>{const next=update(rows);rows.splice(0,rows.length,...next);});
+ const h=conversationSelectionHarness({storage}),selectedConversationRef=h.current().selectedConversationRef,selections=[],rows=[];
+ const onConversation=value=>{h.current().conversationChanged(value);h.render();selections.push(h.current().selectedConversationId);rows.splice(0,rows.length,...h.current().conversations);};
  return {onConversation,selectedConversationRef,selections,rows};
 }
 export function agentHarness({storage=memoryStorage(),props={},override}={}){

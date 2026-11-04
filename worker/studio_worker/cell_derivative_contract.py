@@ -5,8 +5,8 @@ import hashlib,json
 from pathlib import Path
 from .composition_store import encoded
 from .util import contained,digest,run_json
-from .adapters import SCIENTIFIC,process_env
-from .derivative_selection import cv_atoms
+from .tools.adapters import SCIENTIFIC,process_env
+from .tools.derivative_selection import cv_atoms
 
 NEIGHBOR_SHA='58e2a18477af49c8fe52333e4a7f59b7dbdcf15e9ea75b7339e68a2c06630ec3'
 

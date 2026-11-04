@@ -1,4 +1,4 @@
-import {SHARED_TERMINAL_CHAT_INSTRUCTIONS} from '../../desktop/agent-settings.mjs';
+import {SHARED_TERMINAL_CHAT_INSTRUCTIONS} from './agent-settings.mjs';
 
 /** Pure model-facing assembly from an already prepared workflow snapshot. */
 export function formatPreparedTaskTurn({params,interaction}){

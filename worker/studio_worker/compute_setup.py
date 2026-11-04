@@ -195,7 +195,7 @@ def readiness(service):
 
 
 def draft(service, proposal):
-    from .adapters import process_env
+    from .tools.adapters import process_env
     if not isinstance(proposal,dict) or set(proposal)-{'name','executables','repositories','variables'}:raise ValueError('Only environment paths and loader settings may be proposed')
     name=proposal.get('name')
     if not isinstance(name,str) or not name.strip() or len(name)>120:raise ValueError('Environment name required')

@@ -63,7 +63,7 @@ class CustomCvService:
   if not item.get('code_approval')or item.get('missing_parameters'):return None
   if not ctx['structure']or ctx['runtime'].get('status')!='observed':return None
   from studio_worker.util import run_json
-  from studio_worker.adapters import SCIENTIFIC,process_env
+  from studio_worker.tools.adapters import SCIENTIFIC,process_env
   report=run_json(ctx['environment']['executables']['python'],SCIENTIFIC,'structure',{'path':ctx['structure']['path'],'frame':0},process_env(ctx['environment']),timeout=20)
   count=report.get('n_atoms',report.get('natoms'))
   if type(count)is not int or not 1<=count<=256:raise ValueError('Primitive authoring checks require an actual 1..256 atom structure')
@@ -136,7 +136,7 @@ class CustomCvService:
    if old:
     if old['scope_sha256']!=scope['sha256']:raise ValueError('Human action was already bound to a different CPU scope')
     return self.status({**data,'attempt_id':attempt_id})
-   from studio_worker.adapters import process_env
+   from studio_worker.tools.adapters import process_env
    from studio_worker.util import atomic_json
    directory=self.library.root/'numerical'/attempt_id
    directory.mkdir();(directory/'simulation').mkdir();(directory/'results').mkdir()

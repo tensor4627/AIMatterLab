@@ -104,7 +104,7 @@ hist=next(x for x in at.body if isinstance(x,ast.FunctionDef) and x.name=='_hist
 # Actual Studio adapter branch under inert executable/validation boundaries.
 worker=pathlib.Path(sys.argv[3]);contract=json.loads((worker/'engine_contracts.json').read_text())
 assert contract['engines']['pygas.opes-reweight']['required_inputs']==doc['studio_binding']['required_input_names']
-adapter_tree=ast.parse((worker/'adapters.py').read_text());cls=next(x for x in adapter_tree.body if isinstance(x,ast.ClassDef) and x.name=='Adapter')
+adapter_tree=ast.parse((worker/'tools/adapters.py').read_text());cls=next(x for x in adapter_tree.body if isinstance(x,ast.ClassDef) and x.name=='Adapter')
 prepare=next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='prepare');require=next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='require');require.decorator_list=[]
 package=types.ModuleType('fixture');package.__path__=[];sys.modules['fixture']=package
 validation=types.ModuleType('fixture.derivative_selection');validation.validate_controls=lambda p,e:None;sys.modules['fixture.derivative_selection']=validation

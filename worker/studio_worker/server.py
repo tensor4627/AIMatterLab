@@ -9,7 +9,7 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-from .adapters import Adapter, ENGINES
+from .tools.adapters import Adapter, ENGINES
 from .service import Service
 from .runtime_projection import result_for_agent
 from .templates import build_bias
@@ -268,7 +268,7 @@ def dispatch(service, method, path, data, admin=False):
         if action=='access':return custom.access(data.get('provider'))
         raise ValueError('Unknown private CV action')
     if path=="/api/engine/describe":
-        from .engine_contracts import describe
+        from .tools.engine_contracts import describe
         return describe(data["engine"])
     if path in ("/api/authoring/context","/api/authoring/adopt"):
         if not admin:raise PermissionError("Only desktop can bind draft workspaces or adopt inputs")

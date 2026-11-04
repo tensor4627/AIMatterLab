@@ -28,9 +28,9 @@ def check(payload):
    "saved_cv_nums":torch.tensor(len(history),device=device,dtype=torch.int32)})
  output=evaluate(positions,cell)
  if __package__:
-  from .derivative_selection import selection,validate_controls,validate_cell_group
+  from .tools.derivative_selection import selection,validate_controls,validate_cell_group
  else:
-  from derivative_selection import selection,validate_controls,validate_cell_group
+  from tools.derivative_selection import selection,validate_controls,validate_cell_group
  coverage=selection(payload,len(atoms));indices=coverage['indices'];controls=validate_controls(payload)
  step=float(controls.get("fd_step",payload.get("fd_step",1e-5)));tolerance=float(controls.get("fd_atol",payload.get("fd_atol",1e-4)))
  if not 0<step<.01 or not 0<tolerance<.1:raise ValueError("Invalid finite-difference tolerances")

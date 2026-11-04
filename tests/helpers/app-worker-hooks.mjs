@@ -8,6 +8,7 @@ import * as workflows from '../../shared/workflows.mjs';
 import * as diagnostics from '../../shared/ui-diagnostics.mjs';
 import * as computeCommand from '../../shared/compute-connection-command.mjs';
 import {memoryStorage} from './agent-hooks.mjs';
+import {loadConversationSelection} from './conversation-selection-hooks.mjs';
 const source=fs.readFileSync(new URL('../../src/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 // App tests explicitly acknowledge the child guide result; no automatic completion.
@@ -29,9 +30,11 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   throw Error('Unexpected App fixture call '+method+' '+JSON.stringify(data));
  };
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
+ const conversationSelection=loadConversationSelection({react:{useState,useRef,useEffect},storage});
  const require=name=>{
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
+  if(name==='../frontend/features/conversations/useConversationSelection')return conversationSelection;
   if(name==='lucide-react')return new Proxy({},{get:(_target,key)=>String(key)});
   if(name==='./workspace-shell.mjs')return shell;
   if(name==='./workspace-navigation.mjs')return navigation;

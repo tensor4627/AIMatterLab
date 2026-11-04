@@ -15,7 +15,7 @@ class EngineContracts(unittest.TestCase):
   self.assertEqual(set(CONTRACTS['engines']),set(ENGINES))
   for engine in ENGINES:self.assertEqual(describe(engine)['runtime_validation'],'not_run')
   # Required keys remain aligned with the concrete Adapter.prepare branch calls.
-  source=(Path(__file__).parents[1]/'studio_worker/adapters.py').read_text()
+  source=(Path(__file__).parents[1]/'studio_worker/tools/adapters.py').read_text()
   for node in ast.walk(ast.parse(source)):
    if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute) and node.func.attr=='parameters' and len(node.args)>1 and isinstance(node.args[1],ast.Tuple):
     keys=set(ast.literal_eval(node.args[1]));self.assertTrue(any(keys==set(c['required_parameters']) for c in CONTRACTS['engines'].values()),keys)

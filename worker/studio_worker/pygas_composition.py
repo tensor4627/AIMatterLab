@@ -6,7 +6,7 @@ from .pygas_catalog import catalog
 from .pygas_values import compiler_graph,normalize_graph
 from .pygas_settings import validate_settings
 from .util import contained,digest,leaf,run_json
-from .adapters import SCIENTIFIC,process_env
+from .tools.adapters import SCIENTIFIC,process_env
 
 
 def context(service,data):

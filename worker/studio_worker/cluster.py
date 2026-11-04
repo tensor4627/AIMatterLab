@@ -15,7 +15,7 @@ import tarfile
 import threading
 import time
 from pathlib import Path
-from .adapters import Adapter, ENGINES, SUPPORTED_ENGINES
+from .tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES
 from .util import atomic_json, contained, digest, leaf
 
 TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+-]+$")
@@ -1012,11 +1012,11 @@ print('__STUDIO_JSON__'+json.dumps(out))
         validate = """import sys,json,os
 from pathlib import Path
 sys.path.insert(0,str(Path('.studio').resolve()))
-from studio_worker.adapters import Adapter
+from studio_worker.tools.adapters import Adapter
 from studio_worker.util import atomic_json,digest,contained
 r=json.load(open('.studio/run.json'))
 environment=r['environment_snapshot']
-import studio_worker.adapters as a
+import studio_worker.tools.adapters as a
 _original=a.process_env
 a.process_env=lambda environment,gpu=None:_original(environment,None)
 for a in r['snapshots']:
@@ -1047,8 +1047,8 @@ except Exception as e:
             payload.pop("cluster_snapshot",None);payload.pop("cluster",None)
             add(".studio/run.json",json.dumps(payload))
             add(".studio/validate.py",validate)
-            for name in ["__init__.py","adapters.py","util.py","scientific.py","source_git_identity.py","science_checks.py","derivatives.py","derivative_selection.py","composition_store.py","neb_checks.py", "structure_tools.py"]:
-                add(".studio/studio_worker/"+name,Path(__file__).with_name(name).read_bytes())
+            for name in ["__init__.py","adapters.py","engine_contracts.py","engine_contracts.json","util.py","scientific.py","source_git_identity.py","science_checks.py","derivatives.py","derivative_selection.py","composition_store.py","neb_checks.py", "structure_tools.py", "tools/__init__.py","tools/adapters.py","tools/engine_contracts.py","tools/derivative_selection.py"]:
+                add(".studio/studio_worker/"+name,(Path(__file__).parent/name).read_bytes())
         return buffer.getvalue()
 
     def submit(self, identifier):

@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from .adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env
+from .tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env
 from .store import Store
 from .runtime_service import RuntimeServiceMixin
 from .util import alive, atomic_json, contained, digest, identity, leaf, run_json

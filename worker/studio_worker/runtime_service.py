@@ -1,7 +1,7 @@
 """Authoritative selected-environment probes shared by HTTP and MCP readers."""
 import copy
 
-from .adapters import Adapter, ENGINES
+from .tools.adapters import Adapter, ENGINES
 from .runtime_guides import RuntimeGuides, fingerprint, safe_identifier
 
 

@@ -3,7 +3,7 @@ import hashlib
 import shutil
 from pathlib import Path
 from .util import leaf, contained, digest
-from .engine_contracts import CONTRACTS
+from .tools.engine_contracts import CONTRACTS
 
 def ensure(service, data):
  key=leaf(data['workspace_id']);projects=service.store.list('project');project=next((p for p in projects if p['id']==data.get('project_id')),None)

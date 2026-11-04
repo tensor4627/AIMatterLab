@@ -366,8 +366,33 @@ class ClusterLifecycle(unittest.TestCase):
         r=self.cluster.prepare(self.spec());raw=self.cluster.raw(r["id"])
         with tarfile.open(fileobj=io.BytesIO(self.cluster.archive(raw)),mode="r:gz") as t:
             files=t.getnames();self.assertIn(".studio/validate.py",files);self.assertIn(".studio/studio_worker/derivatives.py",files);self.assertIn(".studio/studio_worker/derivative_selection.py",files);self.assertIn(".studio/studio_worker/composition_store.py",files);self.assertIn(".studio/studio_worker/neb_checks.py",files)
+            for name in ("tools/__init__.py","tools/adapters.py","tools/engine_contracts.py","tools/derivative_selection.py","engine_contracts.py","engine_contracts.json"):
+                self.assertIn(".studio/studio_worker/"+name,files)
             gate=t.extractfile(".studio/validate.py").read().decode();self.assertIn("Adapter(r['engine']).validate",gate);self.assertIn("_original(environment,None)",gate)
+            self.assertIn("from studio_worker.tools.adapters import Adapter",gate)
             spec=json.load(t.extractfile(".studio/run.json"));self.assertNotIn("cluster_snapshot",spec)
+            # Exercise the exact archive source package independently of this checkout.
+            with tempfile.TemporaryDirectory() as tmp:
+                extracted=Path(tmp)
+                for name in files:
+                    if name.startswith('.studio/studio_worker/'):
+                        target=extracted/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(t.extractfile(name).read())
+                import subprocess
+                code="""import importlib,pathlib,sys
+sys.path.insert(0,sys.argv[1])
+from studio_worker.tools import adapters
+assert importlib.import_module('studio_worker.adapters') is adapters
+from studio_worker.tools.engine_contracts import describe
+assert describe('pydyn.md')['runtime_validation']=='not_run'
+assert pathlib.Path(adapters.SCIENTIFIC).is_file()
+sys.path.insert(0,str(pathlib.Path(sys.argv[1])/'studio_worker'))
+from derivative_selection import selection
+assert selection({},2)['indices']==[0,1]
+print('archive imports passed; no engine executed')
+"""
+                result=subprocess.run([sys.executable,'-I','-B','-c',code,str(extracted/'.studio')],capture_output=True,text=True,timeout=20)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertIn('archive imports passed',result.stdout)
     def test_lsf_slurm_script_and_scope_guards(self):
         r=self.cluster.raw(self.cluster.prepare(self.spec())["id"]);self.assertIn("#BSUB -q fixture",r["script"]);self.assertIn('"$HOME"',batch_script({**r,"remote_directory":"~/.gss/id"}))
         r["cluster_snapshot"]["scheduler"]="slurm";s=batch_script(r);self.assertIn("#SBATCH --partition=fixture",s);self.assertIn("#SBATCH --export=NONE",s)
