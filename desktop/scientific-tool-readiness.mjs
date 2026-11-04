@@ -1,5 +1,5 @@
 import {isDeepStrictEqual} from 'node:util';
-import {DEFINITION_ONLY_TOOLS} from './private-definition-scope.mjs';
+import {DEFINITION_ONLY_TOOLS,sharedTerminalToolAllowed} from './private-definition-scope.mjs';
 const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 /** Readiness observes the main-owned selection; it never selects a conversation or grants access. */
@@ -52,7 +52,7 @@ export async function scientificToolReadiness({worker,codex,workflowContext,reco
     const names=Object.keys(server.tools),required=new Set(DEFINITION_ONLY_TOOLS);
     const ambient=inventory.data.filter(row=>row?.name!=='gpusampling');
     const ambientEmpty=ambient.every(row=>object(row)&&typeof row.name==='string'&&row.name.length>0&&object(row.tools)&&Object.keys(row.tools).length===0&&Array.isArray(row.resources)&&row.resources.length===0&&Array.isArray(row.resourceTemplates)&&row.resourceTemplates.length===0);
-    if(inventory.nextCursor||!ambientEmpty||names.length!==required.size||names.some(name=>!required.has(name)||!object(server.tools[name])||server.tools[name].name!==name)||!Array.isArray(server.resources)||server.resources.length||!Array.isArray(server.resourceTemplates)||server.resourceTemplates.length)throw Error('当前私有定义仅允许七个受限科学工具；工具目录不匹配，请重新连接');
+    if(inventory.nextCursor||!ambientEmpty||DEFINITION_ONLY_TOOLS.some(name=>!Object.hasOwn(server.tools,name))||names.some(name=>(!required.has(name)&&!sharedTerminalToolAllowed(name))||!object(server.tools[name])||server.tools[name].name!==name)||!Array.isArray(server.resources)||server.resources.length||!Array.isArray(server.resourceTemplates)||server.resourceTemplates.length)throw Error('当前私有定义仅允许七个受限科学工具；工具目录不匹配，请重新连接');
    }else if(!server.tools.present_task)throw Error('Agent 尚未挂载科学工具，请重新连接');
   }
   const final=await access();fresh();

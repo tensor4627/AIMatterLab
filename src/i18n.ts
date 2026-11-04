@@ -1,4 +1,8 @@
 const english:Record<string,string> = {
+"断开连接":"Disconnect",
+"关闭终端":"Close terminal",
+"关闭当前终端，保留已保存连接和其他会话":"Close this terminal; keep saved connections and other sessions",
+"共享终端可用":"Shared terminal ready",
 "交互终端":"Interactive terminal",
 "SSH 进程已退出，此会话不可输入。":"The SSH process exited; this session cannot accept input.",
 "终端进程已退出，此会话不可输入。":"The terminal process exited; this session cannot accept input.",

@@ -1,3 +1,4 @@
+import {sharedTerminalToolAllowed} from './private-definition-scope.mjs';
 import {ACCOUNT_GUIDANCE} from '../shared/provider-account.mjs';
 import {EventEmitter} from 'node:events';
 import {randomUUID} from 'node:crypto';
@@ -83,7 +84,7 @@ export class DeepSeekBridge extends EventEmitter{
  }
  async tools(mode='chat'){
   if(!this.getWorker())return [];
-  const result=await this.mcp('tools/list');return (result.tools||[]).filter(t=>READ_TOOLS.has(t.name)||['draft_local_environment','draft_cluster_setup'].includes(t.name)||mode==='workflow'&&DRAFT_TOOLS.has(t.name));
+  const result=await this.mcp('tools/list');return (result.tools||[]).filter(t=>sharedTerminalToolAllowed(t.name)||READ_TOOLS.has(t.name)||['draft_local_environment','draft_cluster_setup'].includes(t.name)||mode==='workflow'&&DRAFT_TOOLS.has(t.name));
  }
  async request(method,params={}){
   if(!this.process)throw Error('Connect DeepSeek first');
@@ -117,7 +118,8 @@ export class DeepSeekBridge extends EventEmitter{
   const signal=active.controller.signal;let tools;
   try{tools=await this.tools(context.mode);}catch(error){if(context.mode==='workflow')throw error;tools=[];}
   const inventory=new Map(tools.map(t=>[t.name,t]));
-  if(context.mode==='workflow'&&!inventory.has('present_task'))throw Error('科学工具缺少 present_task；请先修复工具连接');
+  const terminalOnly=tools.length>0&&tools.every(tool=>sharedTerminalToolAllowed(tool.name));
+  if(context.mode==='workflow'&&!inventory.has('present_task')&&!terminalOnly)throw Error('科学工具缺少 present_task；请先修复工具连接');
   for(let round=0;round<24;round++){
    signal.throwIfAborted();const item={id:randomUUID(),type:'agentMessage',text:''};turn.items.push(item);
    const request={...this.provider==='compatible'&&this.getCredential()?.reasoningMode==='reasoning_effort'?{reasoning_effort:this.getCredential().reasoningEffort}:{},model:s.model,messages:[{role:'system',content:STUDIO_INSTRUCTIONS+(tools.length?'':' Scientific tools are currently unavailable. Answer in conversation, state this limitation when relevant, and do not claim any tool action.')},...s.messages.map(message=>this.provider==='compatible'?Object.fromEntries(Object.entries(message).filter(([key])=>key!=='reasoning_content')):message)],stream:true,...this.provider==='deepseek'?{stream_options:{include_usage:true}}:{},max_tokens:known&&s.effort!=='none'?32768:8192,...known?{thinking:{type:s.effort==='none'?'disabled':'enabled'},reasoning_effort:s.effort}:{},...tools.length?{tools:tools.map(t=>({type:'function',function:{name:t.name,description:t.description+(t.name==='present_task'?' Use object steps {id,title,fields:[{key,label,type,required}]}; file paths use file/files, numbers use number/integer. Update the same task_id.':''),parameters:providerToolSchema(t)}})),tool_choice:'auto'}:{}};

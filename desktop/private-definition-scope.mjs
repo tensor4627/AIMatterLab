@@ -2,6 +2,10 @@ const clone=value=>structuredClone(value);
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 export const DEFINITION_ONLY_TOOLS=Object.freeze(['describe_engine','inspect_source_project','inspect_pygas_catalog','scientific_skill_catalog','read_scientific_skill','read_custom_cv','propose_custom_cv']);
 const allowed=new Set(DEFINITION_ONLY_TOOLS);
+// A separate human-handoff capability, never a scientific definition/file grant.
+export const SHARED_TERMINAL_TOOL_NAMES=Object.freeze(['list_shared_terminals','read_shared_terminal','write_shared_terminal']);
+const terminals=new Set(SHARED_TERMINAL_TOOL_NAMES);
+export function sharedTerminalToolAllowed(name){return terminals.has(name);}
 /** A definition checkbox is never a grant to files, environment observations or run results. */
 export function definitionOnlyScope(task,policy){const projects=new Set([task?.authoring?.projectId,task?.projectId,task?.deployment?.config?.projectId].filter(Boolean));return !!task&&(!!task.customCv?.id||(policy?.bindings||[]).some(row=>row.workspace_id===task.id||projects.has(row.project_id)));}
 export function definitionToolAllowed(name){return allowed.has(name);}

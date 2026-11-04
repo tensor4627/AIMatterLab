@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import {scientificToolReadiness} from '../desktop/scientific-tool-readiness.mjs';
 import {createAgentWorkflowContext} from '../desktop/agent-workflow-context.mjs';
 import {createPrivateCvAccess} from '../desktop/private-cv-access.mjs';
-import {DEFINITION_ONLY_TOOLS} from '../desktop/private-definition-scope.mjs';
+import {DEFINITION_ONLY_TOOLS,SHARED_TERMINAL_TOOL_NAMES} from '../desktop/private-definition-scope.mjs';
 import {WorkerClient} from '../desktop/worker.mjs';
 const clone=value=>structuredClone(value),h='a'.repeat(64);
 const tool=name=>({name,inputSchema:{type:'object',properties:{}}});
@@ -135,3 +135,8 @@ for(const variant of ['tool','resource','template','missing-tools','array-tools'
  if(variant==='missing-tools')delete row.tools;if(variant==='array-tools')row.tools=[];if(variant==='missing-resources')delete row.resources;if(variant==='missing-templates')delete row.resourceTemplates;
  if(variant==='malformed-resources')row.resources={};if(variant==='malformed-templates')row.resourceTemplates=null;if(variant==='null-row')f.state.response.data[1]=null;blocked(await f.run());
 });
+
+
+test('definition-only readiness permits independent terminal tools while retaining exactly seven scientific capabilities',async()=>{const f=await fixture(),before=f.workflowContext.current();f.state.response=inventory([...DEFINITION_ONLY_TOOLS,...SHARED_TERMINAL_TOOL_NAMES]);const value=await f.run();assert.equal(value.status,'ready');assert.equal(value.count,7);assert.equal(value.scope,'definition-only');assert.equal(DEFINITION_ONLY_TOOLS.length,7);assert.deepEqual(f.workflowContext.current(),before);assert.deepEqual(f.counts(),{policyCalls:2,probeCalls:1,inventoryCalls:1});});
+test('definition-only readiness accepts optional terminal subset but rejects malformed terminal definitions',async()=>{const f=await fixture();f.state.response=inventory([...DEFINITION_ONLY_TOOLS,'read_shared_terminal']);assert.equal((await f.run()).status,'ready');f.state.response.data[0].tools.read_shared_terminal.name='read_project_input';blocked(await f.run());});
+test('terminal tools cannot replace missing scientific capabilities or make terminal-only inventory science-ready',async()=>{for(const names of [SHARED_TERMINAL_TOOL_NAMES,[...DEFINITION_ONLY_TOOLS.slice(1),...SHARED_TERMINAL_TOOL_NAMES]]){const f=await fixture();f.state.response=inventory(names);blocked(await f.run());}});

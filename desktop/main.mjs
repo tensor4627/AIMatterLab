@@ -1,5 +1,7 @@
 import {createComputeProfiles} from './compute-profiles.mjs';
 import {createSharedTerminal} from './shared-terminal.mjs';
+import {TerminalMcp} from './terminal-mcp.mjs';
+import {terminalOnlyTurn} from './terminal-turn.mjs';
 import {selectConversation} from './conversation-selection.mjs';
 import {createWindowsSaveAs} from './windows-save-as.mjs';
 import {createStructureWithAuthoringContext} from './structure-authoring.mjs';
@@ -83,7 +85,7 @@ else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',im
 let window, catalog, settings, agents,taskRecords,materials;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
-let scientificSkills,privateAccess,customCv,workflowContext,localReview;
+let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp;
 const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
 Object.defineProperty(worker,'bundledRuntimeId',{value:bundledWorkerRuntimeId(workerSource)});
@@ -135,7 +137,7 @@ if(installationVerifying){
  const sourceIds=config.desktop.source_ids??[];if(!Array.isArray(sourceIds)||sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id)))throw Error('Invalid installation source summary scope');
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
-agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider),releaseWorker:provider=>worker.revokeProvider(provider),bindWorkerContext:(provider,context,options)=>worker.bindProviderContext(provider,context,options)});
+agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider)||terminalMcp?.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>{const local=terminalMcp?.bindProviderContext(provider,context,options),scientific=worker.bindProviderContext(provider,context,options);return worker.providerConnection(provider)?scientific:local||scientific;}});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(here,'scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
 scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route)});
@@ -172,14 +174,14 @@ handle('compute.profiles.list',value=>{if(!value||typeof value!=='object'||Array
 handle('compute.profiles.read',value=>computeProfiles.read(value));
 handle('compute.profiles.save',value=>computeProfiles.save(value));
 handle('compute.profiles.inventory',async value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid WSL inventory request');return {distributions:await installedWslDistributions()};});
-const sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,
+sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,
  root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:path.join(app.getPath('userData'),'shared-terminal','runtime'),
  dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):root,
  servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'terminal-service','broker.mjs'),nodeExecutable:process.execPath,
  sourceGuard:()=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),{}),worker)});
 const terminalTools=sharedTerminal.tools(),terminalToolNames=new Set(terminalTools.map(tool=>tool.name));
 worker.setLocalTools([...materials.tools(),...terminalTools],(name,args,scope)=>terminalToolNames.has(name)?sharedTerminal.callTool(name,args,scope):materials.call(name,args));
-for(const method of ['list','open','read','input','resize','owner','close'])handle('sharedTerminal.'+method,value=>sharedTerminal[method](value));
+for(const method of ['list','open','read','input','resize','owner','close'])handle('sharedTerminal.'+method,async value=>{const result=await sharedTerminal[method](value);if(['owner','close'].includes(method)){const provider=workflowContext.current()?.provider;if(provider)void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});}return result;});
 
 registerTaskStage({handle,records:taskRecords,worker,current:()=>workflowContext.current(),assertHuman:event=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;}});
 localReview=registerCalculationReview({handle,records:taskRecords,worker,current:()=>workflowContext.current(),
@@ -193,6 +195,8 @@ localReview=registerCalculationReview({handle,records:taskRecords,worker,current
 
 privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:activeAuthoringTasks});
 worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
+terminalMcp=new TerminalMcp({terminal:sharedTerminal,guard:()=>worker.authoringGuard});
+await terminalMcp.start();
 customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.active||settings.agentProvider||'codex',getActiveTaskId:provider=>activeAuthoringTasks.get(provider),assertProvider:context=>{workflowContext.assertScope(context);return providerId(context.provider);},assertHuman:event=>{trusted(event);return true;},access:()=>true,
  validateRuntimeReceipt:async(runtime,context)=>{const current=await worker.request('POST','/api/runtime-guide',{environment_id:context.args.environment_id,engine:'pygas.build'});return current.status==='observed'&&runtime.status==='observed'&&current.receipt===runtime.receipt_sha256;},
  confirmNumericScope:async({scope,task,structure},event)=>{
@@ -329,7 +333,10 @@ handle('workflow.save',value=>{
  const key=id||randomUUID();return catalog.put('workflow-plan',key,{...plan,id:key,status:'draft',updatedAt:Date.now()});
 });
 async function scientificTools(provider){
- return scientificToolReadiness({worker,codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:()=>agents.active},provider);
+ const terminalReady=()=>sharedTerminal?.hasCurrentGrant(provider)?{status:'ready',scope:'terminal-only',scientificStatus:'blocked',count:3,transport:'desktop-terminal',message:'共享终端可用',checkedAt:Date.now()}:null;
+ if(!worker.providerConnection(provider)&&terminalReady())return terminalReady();
+ const result=await scientificToolReadiness({worker,codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:()=>agents.active},provider);
+ return result.status==='blocked'?terminalReady()||result:result;
 }
 handle('agent.connect',async({provider,repairTools=false})=>{
  providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');
@@ -362,13 +369,14 @@ async function agentRpc({provider,method,params={}}){
   const task=taskRecords.bound(provider,params.threadId);
   if(task&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');
  }
- let ticket,skillContext,skillKey;
+ let ticket,skillContext,skillKey,terminalOnly=false;
  const check=()=>{if(ticket)workflowContext.assert(ticket);};
  const synchronize=async()=>{check();await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));check();};
  if(['thread/start','thread/resume','turn/start'].includes(method)){
   assertIdleAgent();ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId);await synchronize();
  }
- if(method==='turn/start'){
+ terminalOnly=method==='turn/start'&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
+ if(method==='turn/start'&&!terminalOnly){
   let task=taskRecords.bound(provider,params.threadId);
   if(task){const access=await privateAccess.assertTask(task,provider);check();if(access.definitionOnly){
    if(params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
@@ -378,7 +386,16 @@ async function agentRpc({provider,method,params={}}){
   }}
  }
  skillKey=provider+':'+params.threadId;
- if(method==='turn/start'){
+ if(method==='turn/start'&&terminalOnly){
+  params=terminalOnlyTurn(params,{provider});check();
+  if(provider==='codex'&&!agents.threadReady(params.threadId)){
+   const resumed=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=resumed.ticket;check();
+   if(resumed.result.studioRecovery?.status==='required')return resumed.result;
+   params={...params,threadId:resumed.result.thread.id};
+  }
+  if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');
+ }
+ if(method==='turn/start'&&!terminalOnly){
   const before=taskRecords.bound(provider,params.threadId);let definitionOnly=!!before?.customCv?.id;if(before&&worker.connection){definitionOnly=(await privateAccess.assertTask(before,provider)).definitionOnly;check();}
   if(definitionOnly&&params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
   const text=visibleUserText(params.input||[]);
@@ -550,7 +567,7 @@ if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw ne
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
 if(verifying){const errors=[];window.webContents.on('console-message',(_event,level,message)=>{if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./install-verification.mjs':improvementsVerifying?'./improvements-verification.mjs':providerVerifying?'./provider-verification.mjs':'./verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{sshConnection.shutdown();agents.close();worker.close();for(const t of terminals.values())t.child.kill();});
+app.on('before-quit',()=>{terminalMcp?.close();sshConnection.shutdown();agents.close();worker.close();for(const t of terminals.values())t.child.kill();});
 
 }
 app.whenReady().then(initialize).catch(error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}app.exit(1);});

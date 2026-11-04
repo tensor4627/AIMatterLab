@@ -1,7 +1,7 @@
-import {definitionOnlyScope,definitionToolAllowed,definitionToolResult} from './private-definition-scope.mjs';
+import {definitionOnlyScope,definitionToolAllowed,definitionToolResult,sharedTerminalToolAllowed} from './private-definition-scope.mjs';
 import path from 'node:path';
-// Exhaustive MCP boundary, including hidden worker routes and desktop-local tools.
-// New tools must be classified explicitly; desktop human/admin requests do not use this guard.
+// Scientific MCP boundary, including hidden worker routes and desktop-local tools.
+// Shared terminals have their own explicit lane below; all other new tools fail closed.
 export const SCIENTIFIC_TOOL_ACCESS=Object.freeze({
  describe_engine:'public',list_source_projects:'public',inspect_source_project:'public',inspect_pygas_catalog:'public',scientific_skill_catalog:'public',read_scientific_skill:'public',search_materials_project:'public',
  compute_readiness:'discovery',discover_local_environments:'discovery',draft_local_environment:'discovery',diagnose_tools:'discovery',list_projects:'discovery',list_runs:'discovery',list_workflows:'discovery',list_environments:'discovery',
@@ -15,6 +15,7 @@ const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const sources=new Set(['pygas','pydyn','gpumd','hotpp','torchnep']);
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const object=v=>v&&typeof v==='object'&&!Array.isArray(v);
+function terminalLease(provider,scope){let current=false;try{current=scope?.checkCurrent?.()===true;}catch{}if(!providers.has(provider)||scope?.provider!==provider||!current||typeof scope.threadId!=='string'||!scope.threadId||scope.threadId.length>512)throw Error('Shared terminal requires a current provider conversation lease');}
 const absolute=v=>typeof v==='string'&&(v.startsWith('/')||/^[A-Za-z]:[\\/]/.test(v));
 function canonical(value){if(typeof value!=='string'||!value||value.includes('\0')||value.includes('\\')||value.split('/').some(p=>p==='..'||p==='.')||!value.startsWith('/'))return null;return path.posix.normalize(value);}
 const within=(file,root)=>file===root||file.startsWith(root+'/');
@@ -73,9 +74,14 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
  }
  return {
   async assertTask(task,provider){if(!providers.has(provider))throw Error('Invalid scientific provider');const value=await policy(provider);checkTask(task,provider,value);return {definitionOnly:definitionOnlyScope(task,value)};},
-  async filterTools(tools,provider,scope){let task=taskFor(provider);if(scope?.taskId){const owned=records.read(scope.taskId);if(owned.provider!==provider||owned.id!==scope.taskId)throw Error('Untrusted tool inventory context');task=owned;}const value=await policy(provider);return definitionOnlyScope(task,value)?tools.filter(tool=>definitionToolAllowed(tool.name)):tools;},
-  async before(name,args,provider){const {task,kind,definitionOnly}=await check(name,args,provider);return {name,args:structuredClone(args),provider,kind,definitionOnly,taskId:task?.id||null,owner:identity(task),previousCustom:task?.customCv?structuredClone(task.customCv):null};},
-  async after(token,result){if(!token)throw Error('Missing scientific access token');const task=taskFor(token.provider);if(identity(task)!==token.owner)throw Error('Conversation changed before the scientific result was returned');let value=parsedResult(result);if(soleMetadataResult(result)&&draftAcknowledgement(token,value,task)){await policy(token.provider);const current=taskFor(token.provider);if(identity(current)!==token.owner||!draftAcknowledgement(token,value,current))throw Error('Private proposal acknowledgement changed before return');if(token.definitionOnly)definitionToolResult(token.name,token.args,result,current);return;}
+  async filterTools(tools,provider,scope){
+   const terminalTools=()=>{try{terminalLease(provider,scope);return tools.filter(tool=>sharedTerminalToolAllowed(tool.name));}catch{return [];}};
+   const scientific=tools.filter(tool=>!sharedTerminalToolAllowed(tool.name));if(!scientific.length)return terminalTools();
+   try{let task=taskFor(provider);if(scope?.taskId){const owned=records.read(scope.taskId);if(owned.provider!==provider||owned.id!==scope.taskId)throw Error('Untrusted tool inventory context');task=owned;}const value=await policy(provider),permitted=new Set([...(definitionOnlyScope(task,value)?scientific.filter(tool=>definitionToolAllowed(tool.name)):scientific),...terminalTools()]);return tools.filter(tool=>permitted.has(tool));}
+   catch(error){const independent=terminalTools();if(independent.length)return independent;throw error;}
+  },
+  async before(name,args,provider,scope){if(sharedTerminalToolAllowed(name)){if(!object(args))throw Error('Invalid shared terminal arguments');terminalLease(provider,scope);return {name,provider,kind:'terminal',scope};}const {task,kind,definitionOnly}=await check(name,args,provider);return {name,args:structuredClone(args),provider,kind,definitionOnly,taskId:task?.id||null,owner:identity(task),previousCustom:task?.customCv?structuredClone(task.customCv):null};},
+  async after(token,result){if(!token)throw Error('Missing scientific access token');if(token.kind==='terminal'){if(!sharedTerminalToolAllowed(token.name))throw Error('Unclassified terminal tool');terminalLease(token.provider,token.scope);return;}const task=taskFor(token.provider);if(identity(task)!==token.owner)throw Error('Conversation changed before the scientific result was returned');let value=parsedResult(result);if(soleMetadataResult(result)&&draftAcknowledgement(token,value,task)){await policy(token.provider);const current=taskFor(token.provider);if(identity(current)!==token.owner||!draftAcknowledgement(token,value,current))throw Error('Private proposal acknowledgement changed before return');if(token.definitionOnly)definitionToolResult(token.name,token.args,result,current);return;}
    const checked=await check(token.name,token.args,token.provider);if(identity(taskFor(token.provider))!==token.owner)throw Error('Conversation changed during the private access check');
    if(token.definitionOnly&&token.kind!=='public'){definitionToolResult(token.name,token.args,result,task);value=parsedResult(result);}if(!value)return;if(token.name==='list_environments'&&redactRegisteredSkillPaths(value)&&Array.isArray(result?.content)){result.content.find(c=>c.type==='text').text=JSON.stringify(value);}
    // Response identities are checked independently of caller-supplied identities.
@@ -86,7 +92,7 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
 }
 export function composeToolGuards(...guards){return {
  async filterTools(tools,provider,scope){let selected=tools;for(const guard of guards)if(guard.filterTools)selected=await guard.filterTools(selected,provider,scope);return selected;},
- async before(name,args,provider){const tokens=[];try{for(const guard of guards)tokens.push({guard,token:await guard.before?.(name,args,provider)});return tokens;}catch(error){for(const {guard,token}of tokens)guard.cancel?.(token);throw error;}},
+ async before(name,args,provider,scope){const tokens=[];try{for(const guard of guards)tokens.push({guard,token:await guard.before?.(name,args,provider,scope)});return tokens;}catch(error){for(const {guard,token}of tokens)guard.cancel?.(token);throw error;}},
  async after(tokens,result){try{for(const {guard,token}of tokens||[])await guard.after?.(token,result);}catch(error){for(const {guard,token}of tokens||[])guard.cancel?.(token);throw error;}},
  cancel(tokens){for(const {guard,token}of tokens||[])guard.cancel?.(token);},
 };}

@@ -39,7 +39,7 @@ export class McpProviderScopes {
   if(!this.base||origin!==undefined||host!==this.base.host||typeof pathname!=='string')return null;
   const generation=this.identity,baseLease=this.baseLease;
   if(pathname==='/mcp')return sameToken(authorization,'Bearer '+this.base.connection.tokens.mcp)?Object.freeze({provider:null,localReaders:false,generation,epoch:null,...providerContext(),checkCurrent:()=>this.identity===generation&&this.baseLease===baseLease&&!!this.base}):null;
-  const match=/^\/providers\/(codex|kimi|qwen|deepseek)\/mcp$/.exec(pathname);
+  const match=/^\/providers\/(codex|kimi|qwen|deepseek|compatible)\/mcp$/.exec(pathname);
   if(!match)return null;
   const scope=this.scopes.get(match[1]);
   if(!scope||scope.generation!==this.identity||!sameToken(authorization,'Bearer '+scope.token))return null;
