@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "1.0.0-dev.2",
+  "version": "1.0.0-dev.3",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -50,7 +50,7 @@
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "directories": {
-      "output": "release/v1.0.0-dev.2"
+      "output": "release/v1.0.0-dev.3"
     },
     "files": [
       "dist/**",
@@ -75,7 +75,9 @@
       {
         "from": "desktop/terminal-service",
         "to": "terminal-service",
-        "filter": ["**/*.mjs"]
+        "filter": [
+          "**/*.mjs"
+        ]
       },
       {
         "from": ".studio/agent-runtimes/node_modules",

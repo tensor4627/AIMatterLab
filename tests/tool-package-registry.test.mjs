@@ -1,0 +1,146 @@
+// Real temporary Git repositories and snapshots; no tool, engine, hook or installation is executed.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {Catalog} from '../desktop/catalog.mjs';
+import {createToolPackageRegistry} from '../backend/main/tools/package-registry.mjs';
+import {packageIdentityText} from '../contracts/tools/tool-package.mjs';
+
+const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),nullFile=process.platform==='win32'?'NUL':'/dev/null';
+const env={...Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('GIT_')&&key!=='NODE_OPTIONS')),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:nullFile,GIT_TERMINAL_PROMPT:'0'};
+function git(root,args){return execFileSync('git',['-c','core.hooksPath='+nullFile,'-c','core.fsmonitor=false','-C',root,...args],{env,encoding:'utf8',stdio:['ignore','pipe','pipe'],windowsHide:true});}
+function write(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}
+function evidenceSnapshot(value,label){
+ const requested=process.env.STUDIO_TOOL_PACKAGE_EVIDENCE_ROOT;if(!requested)return;
+ const output=path.resolve(requested),allowed=path.resolve('.studio'),relative=path.relative(allowed,output);assert(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative),'Fixture export must stay in ignored .studio');
+ const destination=path.join(output,label,'atlas-package');assert(!fs.existsSync(destination),'Fixture exports refuse reuse');fs.mkdirSync(path.dirname(destination),{recursive:true});fs.cpSync(value.snapshot_root,destination,{recursive:true,verbatimSymlinks:true,dereference:false});
+ fs.writeFileSync(path.join(output,label,'receipt.json'),JSON.stringify({scope:'Synthetic real-Git cross-language fixture; tool programs were never executed',snapshot_root:destination,package_id:value.package_id,package_version:value.package_version,manifest_sha256:value.manifest_sha256,files:value.files},null,2)+'\n');
+}
+function unlock(directory){for(const entry of fs.readdirSync(directory,{withFileTypes:true})){const file=path.join(directory,entry.name);if(entry.isSymbolicLink())continue;if(entry.isDirectory()){fs.chmodSync(file,0o755);unlock(file);}else fs.chmodSync(file,0o644);}fs.chmodSync(directory,0o755);}
+function fixture(run){
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-tool-package-fixture-')),packageRoot=path.join(root,'atlas-package'),repo=path.join(packageRoot,'upstream-layout');fs.mkdirSync(repo,{recursive:true});
+ git(repo,['init','--initial-branch=main']);git(repo,['config','user.name','Tool package fixture']);git(repo,['config','user.email','fixture@example.invalid']);git(repo,['config','core.autocrlf','false']);
+ for(const [name,text]of Object.entries({'src/main.py':'# inert version one; never execute\n','qa/smoke.py':'# inert original test; never execute\n','qa/input.txt':'fixture input\n','qa/README.md':'Original tests\n','qa/smoke/README.md':'Original smoke instructions\n'}))write(path.join(repo,name),text);
+ git(repo,['add','.']);git(repo,['commit','-m','Fixture source and original tests']);
+ const display={priority:100,advanced:false,reason:'Required result'},manifest={schema_version:1,id:'atlas',name:'Inert Atlas fixture',repository:{path:'upstream-layout',commit:git(repo,['rev-parse','HEAD']).trim()},manual:'manual.md',guidance:{delivery:'SKILL.md',installation:['install.md']},environment:{hardware:'cpu',requirements:['Python declared, never installed here'],parallelism:{supported:['serial']}},functions:[{id:'smoke',name:'Smoke',description:'Declared smoke function',entrypoint:'upstream-layout/src/main.py',inputs:[],outputs:[{id:'result',type:'file',format:'json',description:'Declared result',required:true,display}],operation:{command:['{python}','{entrypoint}'],failure_handling:'Record a failure without replay'},tests:['minimal']}],tests:{directory:'atlas-tests',introduction:'atlas-tests/README.md',cases:[{id:'minimal',function_id:'smoke',directory:'atlas-tests/smoke',instructions:'atlas-tests/smoke/README.md',entrypoint:'upstream-layout/qa/smoke.py',resources:['upstream-layout/qa/input.txt'],expected_outputs:[{path:'smoke-result.json',format:'json',description:'Declared output only'}],pass_criteria:['The actual runner must validate JSON output']}]}};
+ for(const [name,text]of Object.entries({'manual.md':'Human manual\n','SKILL.md':'---\nname: atlas-delivery\ndescription: Portable Atlas operations and test guidance.\n---\nUse the declared inputs and test cases.\n','install.md':'Installation guidance, never executed\n','atlas-tests/README.md':'Agent tests introduction\n','atlas-tests/smoke/README.md':'Minimal instructions\n','atlas-tests/extra.md':'Entire tests tree is retained\n'}))write(path.join(packageRoot,name),text);
+ const save=()=>write(path.join(packageRoot,'tool.json'),JSON.stringify(manifest,null,2)+'\n');save();
+ const catalogRoot=path.join(root,'catalog'),catalog=new Catalog(catalogRoot),storeRoot=path.join(root,'owned-store');let registry=createToolPackageRegistry({catalog,storeRoot,now:()=>123});
+ const h={root,packageRoot,repo,manifest,save,catalog,storeRoot,get registry(){return registry;},commit(){git(repo,['add','.']);git(repo,['commit','-m','Fixture update']);manifest.repository.commit=git(repo,['rev-parse','HEAD']).trim();save();},reopen(){catalog.db.close();h.catalog=new Catalog(catalogRoot);registry=createToolPackageRegistry({catalog:h.catalog,storeRoot,now:()=>124});return registry;}};
+ return Promise.resolve().then(()=>run(h)).finally(()=>{try{h.catalog.db.close();}catch{}unlock(root);fs.rmSync(root,{recursive:true,force:true,maxRetries:3});});
+}
+
+test('inspection validates actual HEAD, defaults and the whole declared closure without recording installation or tests',()=>fixture(h=>{
+ const head=git(h.repo,['rev-parse','HEAD']).trim(),before={config:sha(fs.readFileSync(path.join(h.repo,'.git/config'))),index:sha(fs.readFileSync(path.join(h.repo,'.git/index')))};
+ const value=h.registry.inspect({package_root:h.packageRoot});assert.equal(value.source_commit,head);assert.equal(value.manifest.environment.parallelism.threads,1);assert.equal(value.manifest.environment.parallelism.gpus,0);assert.equal(value.scope,'definition_checked');assert.equal(value.installation.status,'not_run');assert.equal(value.tests.status,'not_run');assert(value.files.some(file=>file.path==='atlas-tests/extra.md'));assert(value.files.some(file=>file.path==='upstream-layout/qa/README.md'));assert.equal(h.registry.list().length,0);assert(!fs.existsSync(h.storeRoot));
+ assert.equal(value.package_version,sha(Buffer.from(packageIdentityText({id:'atlas',commit:head,manifestSha256:value.manifest_sha256,files:value.files}))));assert.equal(value.delivery_skill.name,'atlas-delivery');assert.equal(value.delivery_skill.description,'Portable Atlas operations and test guidance.');assert.equal(value.delivery_skill.sha256,sha(fs.readFileSync(path.join(h.packageRoot,'SKILL.md'))));assert.equal(sha(fs.readFileSync(path.join(h.repo,'.git/config'))),before.config);assert.equal(sha(fs.readFileSync(path.join(h.repo,'.git/index'))),before.index);
+}));
+
+test('registration retains an independent complete Git snapshot, portable layout and protected Catalog namespaces',()=>fixture(h=>{
+ h.catalog.put('run','protected',{id:'protected',status:'running'});h.catalog.put('settings','protected',{id:'protected',marker:'unchanged'});
+ const value=h.registry.register({package_root:h.packageRoot}),snapshotRepo=path.join(value.snapshot_root,h.manifest.repository.path);assert.equal(value.record_id,sha(Buffer.from('atlas\0'+value.package_version)));assert.equal(value.immutable,true);assert.equal(value.revision,1);assert.equal(value.tests.status,'not_run');assert.equal(git(snapshotRepo,['rev-parse','HEAD']).trim(),h.manifest.repository.commit);assert.equal(git(snapshotRepo,['status','--porcelain']).trim(),'');assert.equal(git(snapshotRepo,['remote','-v']).trim(),'');assert(!fs.existsSync(path.join(snapshotRepo,'.git/objects/info/alternates')));
+ assert.equal(fs.readFileSync(path.join(snapshotRepo,'src/main.py'),'utf8'),'# inert version one; never execute\n');assert.equal(fs.readFileSync(path.join(value.snapshot_root,'atlas-tests/extra.md'),'utf8'),'Entire tests tree is retained\n');
+ function checkObjects(directory){for(const item of fs.readdirSync(directory,{withFileTypes:true})){const file=path.join(directory,item.name);if(item.isDirectory())checkObjects(file);else assert.equal(fs.statSync(file).nlink,1,'Snapshot objects must not hardlink source objects');}}checkObjects(path.join(snapshotRepo,'.git/objects'));
+ assert.deepEqual(h.catalog.get('run','protected'),{id:'protected',status:'running'});assert.equal(h.catalog.get('settings','protected').marker,'unchanged');assert.equal(h.registry.register({package_root:h.packageRoot}).revision,1);assert.equal(h.registry.list().length,1);assert.equal(fs.statSync(path.join(snapshotRepo,'src/main.py')).mode&0o222,0);evidenceSnapshot(value,'regular');
+}));
+
+test('Windows long-path snapshots support registration, relocation and retained version reads without global or source configuration', {skip:process.platform!=='win32'},()=>fixture(h=>{
+ const id='cpu-worker-reference-full-path',packageRoot=path.join(h.root,id+'-package');fs.renameSync(h.packageRoot,packageRoot);
+ fs.renameSync(path.join(packageRoot,'atlas-tests'),path.join(packageRoot,id+'-tests'));h.manifest.id=id;h.manifest.tests.directory=id+'-tests';h.manifest.tests.introduction=id+'-tests/README.md';for(const item of h.manifest.tests.cases){item.directory=item.directory.replace('atlas-tests',id+'-tests');item.instructions=item.instructions.replace('atlas-tests',id+'-tests');}
+ const save=()=>write(path.join(packageRoot,'tool.json'),JSON.stringify(h.manifest,null,2)+'\n');save();const repo=path.join(packageRoot,h.manifest.repository.path),before={config:sha(fs.readFileSync(path.join(repo,'.git/config'))),index:sha(fs.readFileSync(path.join(repo,'.git/index')))};
+ const destinationTail=path.join('versions',id,'0'.repeat(64),id+'-package',h.manifest.repository.path,'.git','packed-refs'),storeLength=262-destinationTail.length-1,prefix=path.join(h.root,'long-store-');assert(storeLength>prefix.length,'Fixture root leaves enough room to separate staging and final path limits');const storeRoot=prefix+'x'.repeat(storeLength-prefix.length),registry=createToolPackageRegistry({catalog:h.catalog,storeRoot});
+ const first=registry.register({package_root:packageRoot}),snapshotRepo=path.join(first.snapshot_root,h.manifest.repository.path);assert.equal(path.join(snapshotRepo,'.git/packed-refs').length,262);assert.equal(first.installation.status,'not_run');assert.equal(first.tests.status,'not_run');assert.equal(sha(fs.readFileSync(path.join(repo,'.git/config'))),before.config);assert.equal(sha(fs.readFileSync(path.join(repo,'.git/index'))),before.index);
+ const moved=path.join(h.root,'moved',id+'-package');fs.mkdirSync(path.dirname(moved));fs.cpSync(packageRoot,moved,{recursive:true});const relocated=registry.relocate({package_id:id,expected_revision:1,package_root:moved});assert.equal(relocated.package_version,first.package_version);assert.equal(relocated.snapshot_root,first.snapshot_root);assert.deepEqual(registry.inspect({package_root:first.snapshot_root}).files,first.files);
+ const movedRepo=path.join(moved,h.manifest.repository.path);write(path.join(movedRepo,'src/main.py'),'# inert updated long-path version; never execute\n');git(movedRepo,['add','.']);git(movedRepo,['commit','-m','Long path version fixture']);h.manifest.repository.commit=git(movedRepo,['rev-parse','HEAD']).trim();write(path.join(moved,'tool.json'),JSON.stringify(h.manifest,null,2)+'\n');
+ const updated=registry.update({package_id:id,expected_revision:2,package_root:moved});assert.notEqual(updated.package_version,first.package_version);assert.equal(updated.versions.length,2);const old=registry.read({package_id:id,package_version:first.package_version});assert.equal(old.snapshot_root,first.snapshot_root);assert.equal(registry.inspect({package_root:old.snapshot_root}).source_commit,first.source_commit);assert.equal(fs.readFileSync(path.join(old.snapshot_root,h.manifest.repository.path,'src/main.py'),'utf8'),'# inert version one; never execute\n');assert.equal(registry.read({package_id:id}).package_version,updated.package_version);assert.equal(sha(fs.readFileSync(path.join(repo,'.git/config'))),before.config);assert.equal(sha(fs.readFileSync(path.join(repo,'.git/index'))),before.index);
+}));
+
+test('full package relocation preserves version identity and snapshots while list/read never read guidance bodies',()=>fixture(h=>{
+ const first=h.registry.register({package_root:h.packageRoot}),moved=path.join(h.root,'moved/atlas-package');fs.mkdirSync(path.dirname(moved));fs.cpSync(h.packageRoot,moved,{recursive:true});const relocated=h.registry.relocate({package_id:'atlas',expected_revision:1,package_root:moved});assert.equal(relocated.package_version,first.package_version);assert.equal(relocated.snapshot_root,first.snapshot_root);assert.equal(relocated.revision,2);
+ fs.renameSync(h.packageRoot,h.packageRoot+'-removed');fs.renameSync(moved,moved+'-removed');const read=fs.readFileSync;fs.readFileSync=function(){throw Error('Daily metadata lookup must not open a package resource');};try{assert.equal(h.registry.list()[0].package_version,first.package_version);assert.equal(h.registry.read({package_id:'atlas'}).package_root,moved);}finally{fs.readFileSync=read;}
+ assert.throws(()=>h.registry.update({package_id:'atlas',expected_revision:1,package_root:moved+'-removed'}));
+}));
+
+test('a real local git pull updates source and tests together without losing the old immutable snapshot',()=>fixture(h=>{
+ const first=h.registry.register({package_root:h.packageRoot}),remote=path.join(h.root,'remote.git'),author=path.join(h.root,'author');git(h.root,['init','--bare',remote]);git(h.repo,['remote','add','origin',remote]);git(h.repo,['push','origin','HEAD:main']);git(h.root,['clone','--branch','main',remote,author]);git(author,['config','user.name','Fixture author']);git(author,['config','user.email','author@example.invalid']);git(author,['config','core.autocrlf','false']);
+ write(path.join(author,'src/main.py'),'# inert version two; never execute\n');write(path.join(author,'qa/smoke.py'),'# inert version two test; never execute\n');git(author,['add','.']);git(author,['commit','-m','Source and tests move together']);git(author,['push','origin','main']);git(h.repo,['pull','--ff-only','origin','main']);h.manifest.repository.commit=git(h.repo,['rev-parse','HEAD']).trim();h.save();
+ const updated=h.registry.update({package_id:'atlas',expected_revision:1,package_root:h.packageRoot});assert.notEqual(updated.package_version,first.package_version);assert.equal(updated.versions.length,2);assert.equal(git(h.repo,['branch','--show-current']).trim(),'main');
+ const old=h.registry.read({package_id:'atlas',package_version:first.package_version});assert.equal(git(path.join(old.snapshot_root,h.manifest.repository.path),['rev-parse','HEAD']).trim(),first.source_commit);assert.equal(fs.readFileSync(path.join(old.snapshot_root,'upstream-layout/src/main.py'),'utf8'),'# inert version one; never execute\n');assert.equal(fs.readFileSync(path.join(updated.snapshot_root,'upstream-layout/qa/smoke.py'),'utf8'),'# inert version two test; never execute\n');assert.equal(updated.tests.status,'not_run');
+}));
+
+test('metadata and both versions survive a real Catalog restart',()=>fixture(h=>{
+ const first=h.registry.register({package_root:h.packageRoot});write(path.join(h.repo,'src/main.py'),'# next inert version\n');h.commit();const second=h.registry.update({package_id:'atlas',expected_revision:1,package_root:h.packageRoot});h.reopen();assert.equal(h.registry.read({package_id:'atlas'}).package_version,second.package_version);assert.equal(h.registry.read({package_id:'atlas',package_version:first.package_version}).snapshot_root,first.snapshot_root);assert.equal(h.registry.list()[0].versions.length,2);
+}));
+
+test('dirty source, mismatched commit and invalid coverage/defaults are rejected without cleanup or Catalog writes',()=>fixture(h=>{
+ const original=structuredClone(h.manifest);write(path.join(h.repo,'src/main.py'),'# uncommitted user edit\n');assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/dirty/);assert.equal(fs.readFileSync(path.join(h.repo,'src/main.py'),'utf8'),'# uncommitted user edit\n');write(path.join(h.repo,'src/main.py'),'# inert version one; never execute\n');
+ h.manifest.repository.commit='0'.repeat(40);h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/commit_mismatch/);Object.assign(h.manifest,structuredClone(original));h.manifest.functions[0].tests=['missing'];h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/coverage|missing/);Object.assign(h.manifest,structuredClone(original));h.manifest.functions[0].parameters=[{id:'count',type:'integer',description:'Optional count',required:false,display:{priority:1,advanced:true,reason:'Rare setting'}}];h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/default/);assert.equal(h.registry.list().length,0);assert(!fs.existsSync(h.storeRoot));
+}));
+
+test('absolute, escaping, missing and unscoped program entrypoints are rejected',()=>fixture(h=>{
+ const original=structuredClone(h.manifest);for(const invalid of ['/outside/file','../outside','upstream-layout/absent.py']){h.manifest.functions[0].entrypoint=invalid;h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}));}
+ Object.assign(h.manifest,structuredClone(original));write(path.join(h.packageRoot,'extra-code/runtime-output.txt'),'Unlisted runtime data');h.manifest.functions[0].entrypoint='extra-code';h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/program_entrypoint_not_file/);
+ Object.assign(h.manifest,structuredClone(original));write(path.join(h.packageRoot,'outer-test.py'),'# program outside declared standard wrappers\n');h.manifest.tests.cases[0].entrypoint='outer-test.py';h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/program_wrapper_outside_tests/);assert.equal(h.registry.list().length,0);
+}));
+
+test('standard outer wrappers and explicitly named non-Git data directories form a complete versioned snapshot',()=>fixture(h=>{
+ write(path.join(h.repo,'.gitignore'),'model-data/\nignored-program.py\n');h.commit();write(path.join(h.repo,'model-data/weights.bin'),'Synthetic non-Git model data');write(path.join(h.repo,'ignored-program.py'),'# untracked original program, never execute\n');
+ write(path.join(h.packageRoot,'atlas-tests/smoke/wrapper.py'),'# generated outer wrapper, never execute\n');write(path.join(h.packageRoot,'models/weights.bin'),'Synthetic outer model data');write(path.join(h.packageRoot,'models/config/settings.json'),'{"fixture":true}\n');write(path.join(h.packageRoot,'runtime/actual-output.log'),'Unrelated runtime output must stay out');
+ h.manifest.tests.cases[0].entrypoint='atlas-tests/smoke/wrapper.py';h.manifest.tests.cases[0].resources=['upstream-layout/model-data','models'];h.save();const value=h.registry.register({package_root:h.packageRoot});
+ for(const name of ['atlas-tests/smoke/wrapper.py','upstream-layout/model-data/weights.bin','models/weights.bin','models/config/settings.json'])assert(value.files.some(file=>file.path===name)&&fs.existsSync(path.join(value.snapshot_root,name)));assert(!value.files.some(file=>file.path.startsWith('runtime/')));assert.equal(value.tests.status,'not_run');evidenceSnapshot(value,'outer-wrapper');
+ h.manifest.tests.cases[0].entrypoint='upstream-layout/ignored-program.py';h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/program_not_in_source_revision/);
+}));
+
+test('A to B to C relocation keeps every registered origin through restart and provides an explicit legacy fallback',()=>fixture(h=>{
+ const first=h.registry.register({package_root:h.packageRoot}),a=h.packageRoot,b=path.join(h.root,'second/atlas-package'),c=path.join(h.root,'third/atlas-package');for(const target of [b,c]){fs.mkdirSync(path.dirname(target));fs.cpSync(a,target,{recursive:true});}
+ const second=h.registry.relocate({package_id:'atlas',expected_revision:1,package_root:b}),third=h.registry.relocate({package_id:'atlas',expected_revision:2,package_root:c});assert.deepEqual(second.package_roots,[a,b]);assert.deepEqual(third.package_roots,[a,b,c]);assert.equal(third.snapshot_root,first.snapshot_root);h.reopen();assert.deepEqual(h.registry.read({package_id:'atlas'}).package_roots,[a,b,c]);assert.deepEqual(h.registry.list()[0].package_roots,[a,b,c]);
+ const legacy=h.catalog.get('tool-package','atlas');delete legacy.package_roots;h.catalog.put('tool-package','atlas',legacy);assert.deepEqual(h.registry.read({package_id:'atlas'}).package_roots,[c]);assert.deepEqual(h.registry.list()[0].package_roots,[c]);const moved=h.registry.relocate({package_id:'atlas',expected_revision:3,package_root:a});assert.deepEqual(moved.package_roots,[c,a]);
+}));
+
+test('version identity binds declared resource bytes and the complete tests directory while excluding unrelated runtime output',()=>fixture(h=>{
+ const first=h.registry.inspect({package_root:h.packageRoot});write(path.join(h.packageRoot,'runtime/private-output.log'),'Synthetic unrelated runtime text\n');assert.equal(h.registry.inspect({package_root:h.packageRoot}).package_version,first.package_version);
+ write(path.join(h.packageRoot,'atlas-tests/extra.md'),'Changed whole-tests resource\n');const tests=h.registry.inspect({package_root:h.packageRoot});assert.notEqual(tests.package_version,first.package_version);write(path.join(h.packageRoot,'manual.md'),'Changed human instructions\n');assert.notEqual(h.registry.inspect({package_root:h.packageRoot}).package_version,tests.package_version);assert.equal(h.registry.list().length,0);
+}));
+
+test('delivery metadata is observed from complete actual frontmatter and invalid skills are refused without guessed names',()=>fixture(h=>{
+ const skill=path.join(h.packageRoot,'SKILL.md');write(skill,'---\nname: "actual-atlas"\ndescription: >-\n  Operate the real inputs\n  and record each test.\n---\nActual operation instructions.\n');const value=h.registry.inspect({package_root:h.packageRoot});assert.deepEqual(value.delivery_skill,{name:'actual-atlas',description:'Operate the real inputs and record each test.',path:'SKILL.md',sha256:sha(fs.readFileSync(skill))});
+ for(const source of ['# Missing frontmatter\n','---\nname: atlas\n---\nBody\n','---\nname: INVALID NAME\ndescription: text\n---\nBody\n','---\nname: atlas\nname: other\ndescription: text\n---\nBody\n','---\nname: |\n  atlas\ndescription: text\n---\nBody\n','---\nname: atlas\ndescription: text\n---\n','x'.repeat(256*1024+1)]){write(skill,source);assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/delivery_skill/);}assert.equal(h.registry.list().length,0);
+}));
+
+test('assume-unchanged index flags cannot hide edits or authorize an unverified snapshot',()=>fixture(h=>{
+ git(h.repo,['update-index','--assume-unchanged','src/main.py']);write(path.join(h.repo,'src/main.py'),'# hidden user edit\n');assert.throws(()=>h.registry.register({package_root:h.packageRoot}),/hidden_working_tree_changes|dirty/);assert.equal(h.registry.list().length,0);assert.equal(fs.readFileSync(path.join(h.repo,'src/main.py'),'utf8'),'# hidden user edit\n');
+}));
+
+test('foreign stores and linked staging directories cannot redirect snapshot writes outside the owned store',()=>fixture(h=>{
+ fs.mkdirSync(h.storeRoot);write(path.join(h.storeRoot,'foreign.txt'),'Not a registry');assert.throws(()=>h.registry.register({package_root:h.packageRoot}),/store_not_owned/);fs.unlinkSync(path.join(h.storeRoot,'foreign.txt'));
+ write(path.join(h.storeRoot,'registry.json'),JSON.stringify({schema_version:1,kind:'tool-package'}));const outside=path.join(h.root,'outside');fs.mkdirSync(outside);fs.symlinkSync(outside,path.join(h.storeRoot,'staging'),process.platform==='win32'?'junction':'dir');assert.throws(()=>h.registry.register({package_root:h.packageRoot}),/linked_store/);assert.deepEqual(fs.readdirSync(outside),[]);assert.equal(h.registry.list().length,0);
+}));
+
+test('partial-clone metadata and gitlinks are refused before any implicit fetch or submodule traversal',()=>fixture(h=>{
+ git(h.repo,['config','remote.untrusted.promisor','true']);assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/partial_git_storage/);git(h.repo,['config','--unset','remote.untrusted.promisor']);
+ git(h.repo,['update-index','--add','--cacheinfo','160000',h.manifest.repository.commit,'nested-module']);git(h.repo,['commit','-m','Unsupported synthetic gitlink']);h.manifest.repository.commit=git(h.repo,['rev-parse','HEAD']).trim();h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}),/unsupported_git_entry/);assert.equal(h.registry.list().length,0);assert(!fs.existsSync(h.storeRoot));
+}));
+
+test('source hooks, filters and fsmonitor are never executed during inspection or snapshotting',()=>fixture(h=>{
+ const marker=path.join(h.root,'must-not-exist'),command="printf executed > '"+marker.replaceAll('\\','/').replaceAll("'","'\\''")+"'";write(path.join(h.repo,'.gitattributes'),'src/main.py filter=trap\n');git(h.repo,['add','.gitattributes']);git(h.repo,['commit','-m','Fixture declares an inert filter trap']);h.manifest.repository.commit=git(h.repo,['rev-parse','HEAD']).trim();git(h.repo,['config','filter.trap.clean',command]);git(h.repo,['config','filter.trap.smudge',command]);git(h.repo,['config','core.fsmonitor',command]);write(path.join(h.repo,'.git/hooks/post-checkout'),'#!/bin/sh\n'+command+'\n');fs.chmodSync(path.join(h.repo,'.git/hooks/post-checkout'),0o755);h.save();
+ const value=h.registry.register({package_root:h.packageRoot});assert(value.snapshot_root);assert(!fs.existsSync(marker));assert.equal(h.registry.read({package_id:'atlas'}).scope,'definition_checked');
+}));
+
+test('internal relative aliases bind their exact target bytes and complete targets, and remain valid after moving the snapshot',t=>fixture(h=>{
+ const alias=path.join(h.packageRoot,'linked-manual.md');try{fs.symlinkSync('manual.md',alias,'file');}catch(error){if(['EPERM','EACCES'].includes(error.code)){t.skip('Host cannot create a real relative symlink');return;}throw error;}
+ git(h.repo,['config','core.symlinks','true']);fs.symlinkSync('main.py',path.join(h.repo,'src/linked.py'),'file');fs.symlinkSync('smoke.py',path.join(h.repo,'qa/smoke-code.py'),'file');h.commit();
+ fs.rmSync(path.join(h.packageRoot,'atlas-tests'),{recursive:true});fs.symlinkSync('upstream-layout/qa',path.join(h.packageRoot,'atlas-tests'),'dir');h.manifest.tests.cases[0].entrypoint='atlas-tests/smoke-code.py';
+ h.manifest.manual='linked-manual.md';h.save();const first=h.registry.register({package_root:h.packageRoot}),link=first.files.find(file=>file.path==='linked-manual.md');assert.equal(link.kind,'symlink');assert.equal(link.target,'manual.md');assert.equal(link.sha256,sha(Buffer.from('manual.md')));assert(first.files.some(file=>file.path==='manual.md'&&file.kind==='file'));assert.equal(fs.readlinkSync(path.join(first.snapshot_root,'linked-manual.md')),'manual.md');
+ assert.equal(first.files.find(file=>file.path==='atlas-tests').target,'upstream-layout/qa');assert.equal(first.files.find(file=>file.path==='upstream-layout/src/linked.py').kind,'symlink');assert.equal(fs.readFileSync(path.join(first.snapshot_root,h.manifest.tests.cases[0].entrypoint),'utf8'),'# inert original test; never execute\n');
+ const copied=path.join(h.root,'copied/atlas-package');fs.mkdirSync(path.dirname(copied));fs.cpSync(first.snapshot_root,copied,{recursive:true,verbatimSymlinks:true,dereference:false});assert.equal(fs.readlinkSync(path.join(copied,'linked-manual.md')),'manual.md');assert.equal(fs.readFileSync(path.join(copied,'linked-manual.md'),'utf8'),'Human manual\n');assert.equal(git(path.join(copied,'upstream-layout'),['rev-parse','HEAD']).trim(),first.source_commit);evidenceSnapshot(first,'linked');
+ fs.unlinkSync(alias);write(path.join(h.packageRoot,'same.md'),'Human manual\n');fs.symlinkSync('same.md',alias,'file');const different=h.registry.inspect({package_root:h.packageRoot});assert.notEqual(different.package_version,first.package_version,'Equal dereferenced contents cannot hide a changed link mapping');
+}));
+
+test('absolute, outside, dangling and cyclic real links fail closed',t=>fixture(h=>{
+ const alias=path.join(h.packageRoot,'manual-alias.md');try{fs.symlinkSync('manual.md',alias,'file');}catch(error){if(['EPERM','EACCES'].includes(error.code)){t.skip('Host cannot create a real relative symlink');return;}throw error;}h.manifest.manual='manual-alias.md';
+ for(const target of [path.join(h.packageRoot,'manual.md'),'../outside.md','missing.md','manual-alias.md']){fs.unlinkSync(alias);fs.symlinkSync(target,alias,'file');h.save();assert.throws(()=>h.registry.inspect({package_root:h.packageRoot}));}assert.equal(h.registry.list().length,0);
+}));

@@ -9,7 +9,12 @@ import {environmentApiTool,createEnvironmentApiReader} from './environment-api-r
 import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from './ssh-connection.mjs';
 import {createWorkbenchImageExporter} from './workbench-image.mjs';
 import {registerWorkspaceTaskRoutes} from '../backend/main/workspace/routes.mjs';
-import {explicitSetupStage} from './explicit-setup-stage.mjs';
+import {createToolPackageRegistry} from '../backend/main/tools/package-registry.mjs';
+import {createToolGroupRecords} from '../backend/main/tools/groups.mjs';
+import {registerToolDefinitionRoutes} from '../backend/main/tools/routes.mjs';
+import {createToolConfigurationController,registerToolConfigurationRoutes} from '../backend/main/compute/tool-configurations.mjs';
+import {toolGuidanceTarget} from '../backend/main/compute/tool-guidance-target.mjs';
+import {explicitSetupStage} from '../agent/skills/explicit-setup-stage.mjs';
 import {createComputeOnboarding} from './compute-onboarding.mjs';
 import {createComputeConnection,installedWslDistributions} from '../backend/main/compute/compute-connection.mjs';
 import {customCvNumericDialog,referenceImportDialog} from './custom-cv-dialog.mjs';
@@ -38,13 +43,15 @@ import { createInterface } from 'node:readline';
 import {ensureTaskAuthoring} from './task-authoring.mjs';
 import {readTaskPygas,bindComposition,compositionToolGuard} from './task-pygas.mjs';
 import {visibleUserText} from '../shared/tool-activity.mjs';
-import {ScientificSkills,validateScientificConsent,normalizeScientificSharing} from './scientific-skills.mjs';
+import {ScientificSkills,validateScientificConsent,normalizeScientificSharing} from '../agent/skills/scientific-skills.mjs';
+import {legacyGuidanceFacts} from '../agent/skills/read-policy.mjs';
 import {deliverScientificTurn} from './scientific-turn.mjs';
 import {MaterialsProject} from './materials-project.mjs';
 import {discoverSources,toolInventory} from '../backend/main/tools/source-projects.mjs';
 import {sourceContext} from '../agent/context/source-context.mjs';
-import { localSkills } from './skills.mjs';
-import { selectedSkillContext } from './skill-context.mjs';
+import { localSkills } from '../agent/skills/skills.mjs';
+import { selectedSkillContext } from '../agent/skills/skill-context.mjs';
+import { managedToolSkillContext } from '../agent/skills/managed-tool-context.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from '../agent/context/agent-settings.mjs';
 import {TaskRecords} from './task-records.mjs';
 import {existingConnections,existingProfile} from './existing-ssh.mjs';
@@ -70,7 +77,20 @@ const root = path.resolve(here,'..');
 const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'worker');
 // Physical resources keep skill references usable by an external agent process.
 const bundledSkillRoot = app.isPackaged ? path.join(process.resourcesPath,'studio-skills') : path.join(root,'agents','skills');
-function studioSkillRoots(){const sourceRoots=[...(settings.sourceRoots||[]),...(catalog?.list('source-binding')||[]).map(s=>s.root)];return [...new Set([bundledSkillRoot,...(settings.skillRoots||[]),...sourceRoots.map(p=>path.join(p,'agents','skills')).filter(p=>fs.existsSync(p))])];}
+function studioSkillRoots(){const sourceRoots=[...(settings.sourceRoots||[]),...(catalog?.list('source-binding')||[]).map(s=>s.root)];return [...new Set([bundledSkillRoot,...(settings.skillRoots||[]),...sourceRoots.map(p=>path.join(p,'agents','skills'))])];}
+// The backend composition root replaces this getter with authoritative worker facts.
+let resolveSkillGuidance=async()=>legacyGuidanceFacts();
+const guidanceLeases=new WeakMap();let guidanceEpoch=0;
+function skillGuidanceLease(provider){
+ const terminal=agents?.bridgeWorkers?.get(provider)?.transport==='desktop-terminal';
+ const raw=(terminal?terminalMcp?.scopes:worker.providerScopes)?.scopes?.get(provider);if(!raw)return undefined;
+ if(!guidanceLeases.has(raw))guidanceLeases.set(raw,{epoch:++guidanceEpoch,get context(){return raw.context;}});return guidanceLeases.get(raw);
+}
+function skillGuidanceScope(provider){const owner=workflowContext?.current(),revision=workflowContext?.revision(),stamp=JSON.stringify(owner),lease=skillGuidanceLease(provider);return {...owner,provider,epoch:lease?.epoch,checkCurrent:()=>revision===workflowContext?.revision()&&stamp===JSON.stringify(workflowContext?.current())&&skillGuidanceLease(provider)===lease};}
+function assertSkillGuidanceScope(scope){if(scope?.checkCurrent&&scope.checkCurrent()!==true)throw Error('Guidance scope changed');return {...scope,serial:workflowContext?.revision(),epoch:skillGuidanceLease(scope?.provider)?.epoch??scope?.epoch};}
+function managedSkillRecords(){return (toolPackages?.list({})||[]).flatMap(record=>(record.versions||[record.package_version]).map(package_version=>toolPackages.read({package_id:record.package_id,package_version})));}
+function managedSkillRoots(){return managedSkillRecords().map(record=>record.snapshot_root);}
+function managedSkillEntries(policy){return managedSkillRecords().map(record=>{const skill=record.delivery_skill;if(!skill)return null;const file=path.join(record.snapshot_root,skill.path);return {name:skill.name,description:skill.description,path:file,source:'registered delivery package',enabled:policy.allowsPath(file)};}).filter(Boolean);}
 const installationVerifying=process.argv.includes('--studio-install-verify');
 const improvementsVerifying=process.argv.includes('--studio-improvements-verify');
 const providerVerifying=process.argv.includes('--studio-providers-verify');
@@ -78,7 +98,7 @@ const verifying=installationVerifying||improvementsVerifying||providerVerifying|
 const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
 if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
-let window, catalog, settings, agents,taskRecords,materials;
+let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp;
@@ -136,7 +156,7 @@ if(installationVerifying){
 agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider)||terminalMcp?.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>{const local=terminalMcp?.bindProviderContext(provider,context,options),scientific=worker.bindProviderContext(provider,context,options);return worker.providerConnection(provider)?scientific:local||scientific;}});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(here,'scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
-scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route)});
+scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(here,'custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
@@ -164,6 +184,15 @@ handle('materials.search',({query})=>materials.search(query));
 handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 workflowContext=createAgentWorkflowContext({records:taskRecords,activeTasks:activeAuthoringTasks,selectedProvider:()=>agents.active});
+toolPackages=createToolPackageRegistry({catalog,storeRoot:path.join(app.getPath('userData'),'tool-packages')});
+toolGroups=createToolGroupRecords({catalog,packages:toolPackages});
+toolConfigurations=createToolConfigurationController({catalog,packages:toolPackages,worker,getSettings:()=>settings,current:()=>workflowContext.current(),
+ currentTarget:()=>{const owner=workflowContext.current();return owner?.taskId?toolGuidanceTarget(taskRecords.read(owner.taskId)):null;},getProvider:()=>agents.active,getLease:skillGuidanceLease,assertIdle:assertIdleAgent,toWorkerPath:linuxPath,
+ confirm:async(plan,event)=>{trusted(event);const result=await dialog.showMessageBox(window,{type:'question',buttons:settings.language==='en'?['Cancel','Install and test']:['取消','安装并测试'],defaultId:0,cancelId:0,message:settings.language==='en'?'Install and test this tool?':'安装并测试这个工具？',detail:[plan.package_id,'CPU worker engineering reference',plan.target.project_id,plan.target.environment_id,plan.installed_prefix,String(plan.tests.length)+' tests'].join('\n')});trusted(event);return result.response===1;}
+});
+resolveSkillGuidance=scope=>toolConfigurations.resolveGuidance(scope);
+registerToolDefinitionRoutes({handle,packages:toolPackages,groups:toolGroups,choosePackageDirectory:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openDirectory']});return value.canceled?null:value.filePaths[0];}});
+registerToolConfigurationRoutes({handle,controller:toolConfigurations});
 const lastCompute=catalog.get('worker-binding','last-explicit');
 const computeProfiles=createComputeProfiles({catalog,initialWsl:validExplicitBinding(lastCompute,settings)?{distribution:lastCompute.distribution,root:lastCompute.root,port:lastCompute.port,intent:lastCompute.intent||'standard'}:undefined});
 handle('compute.profiles.list',value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid connection listing');return {profiles:computeProfiles.list(),...worker.connection&&!worker.connecting&&!worker.restoring&&worker.identity&&worker.connectionTarget?{activeLocal:{distribution:worker.identity.distribution,root:worker.identity.root,requestedRoot:worker.connectionTarget.requestedRoot,port:worker.connectionTarget.port}}:{},defaults:{distribution:settings.distribution,root:settings.workerRoot,port:settings.workerPort,ssh_client:process.platform==='win32'?path.join(process.env.SystemRoot||'C:\\Windows','System32','OpenSSH','ssh.exe'):'/usr/bin/ssh'}};});
@@ -387,21 +416,23 @@ async function agentRpc({provider,method,params={}}){
   params=taskRecords.prepareTurn(provider,params);check();await synchronize();
   if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview});
   // Public software guidance is selected only for the actual current intent.
-  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId});
+  const guidanceScope=skillGuidanceScope(provider),readPolicy=await scientificSkills.resolvePolicy(guidanceScope);check();
+  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
   const explicitSetup=!definitionOnly&&studioSkillId&&['installation','setup','toolchain'].includes(scientificSkills.router.routes.get(studioSkillId)?.phase);
   skillContext=await(explicitSetup?setupInstructions.prepare(provider,studioSkillId,prepareGuidance):prepareGuidance());check();
-  if(!definitionOnly&&bound?.parameters?.engine&&worker.connection){
-   const environment_id=bound.deployment?.config?.environmentId||bound.authoring?.environmentId,engine=bound.parameters.engine;
+  if(!skillContext.guidanceKind&&!definitionOnly&&bound?.parameters?.engine&&worker.connection){
+   const selectedTarget=toolGuidanceTarget(bound),environment_id=selectedTarget?.kind==='local'?selectedTarget.environmentId:undefined,engine=bound.parameters.engine;
    if(environment_id){const selection={environment_id,engine};let guide;try{guide=await worker.request('POST','/api/runtime-guide',selection);}catch{guide={status:'blocked',reason:'Selected runtime guide unavailable; use an exact selected-engine probe, not an automatic reinstall'};}check();skillContext=scientificSkills.context.mergeRuntime(skillKey,provider,skillContext,guide,selection);}
   }
   if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
-  if(!definitionOnly)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSources())}]};
+  if(!definitionOnly&&!skillContext.guidanceKind)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSkills.sourcesForPolicy(readPolicy))}]};
   if(['deepseek','compatible'].includes(provider)){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
-  const registeredRoots=definitionOnly?[]:studioSkillRoots(),registered=definitionOnly?[]:localSkills(registeredRoots),input=[];
+  const normalRoots=definitionOnly?[]:studioSkillRoots(),registeredRoots=[...normalRoots,...managedSkillRoots()],registered=definitionOnly||!params.input?.some(item=>item.type==='skill')?[]:[...localSkills(normalRoots,{policy:readPolicy}),...managedSkillEntries(readPolicy)],input=[];
   for(const item of params.input||[]){
    if(item.type==='text')input.push(item);
    else if(item.type==='skill'){
-    const context=await selectedSkillContext({selection:item,registered,registeredRoots,bundledRoot:bundledSkillRoot,validatePrivateProfile:async value=>{const validator=app.isPackaged?path.join(process.resourcesPath,'studio-tools','localize-skill.mjs'):path.join(root,'scripts','localize-skill.mjs');return (await import(pathToFileURL(validator).href)).validateProfile(value);}});check();
+    const managed=!definitionOnly&&managedSkillRecords().find(record=>item.path===path.join(record.snapshot_root,record.delivery_skill.path));
+    const context=managed?await managedToolSkillContext({selection:item,record:managed,policy:readPolicy,scope:guidanceScope}):await selectedSkillContext({selection:item,registered,registeredRoots,bundledRoot:bundledSkillRoot,policy:readPolicy,scope:guidanceScope,validatePrivateProfile:async value=>{const validator=app.isPackaged?path.join(process.resourcesPath,'studio-tools','localize-skill.mjs'):path.join(root,'scripts','localize-skill.mjs');return (await import(pathToFileURL(validator).href)).validateProfile(value);}});check();
     input.push({type:'text',text:context.text});
    }else if(provider==='codex')input.push(item);else throw Error('Unsupported input content');
   }
@@ -448,8 +479,8 @@ handle('agent.testConnection',async value=>{if(!value||Object.keys(value).join('
 handle('agent.login.open',async({provider})=>{
   const state=await agents.account(provider);if(!state.url)throw Error('Start provider login first');return shell.openExternal(loginUrl(provider,state.url));
 });
-handle('skills.catalog',()=>localSkills(studioSkillRoots()));
-handle('scientific.skills',({provider})=>{providerId(provider);return scientificSkills.catalog(provider);});
+handle('skills.catalog',async()=>{const policy=await scientificSkills.resolvePolicy(skillGuidanceScope(agents.active));const result=[...localSkills(studioSkillRoots(),{policy}),...managedSkillEntries(policy)];await policy.revalidate();return result;});
+handle('scientific.skills',({provider})=>{providerId(provider);return scientificSkills.catalog(provider,skillGuidanceScope(provider));});
 handle('codex.respond',({id,result})=>codex.respond(id,result));
 handle('file.open',async() => {
   const response=await dialog.showOpenDialog(window,{properties:['openFile']});

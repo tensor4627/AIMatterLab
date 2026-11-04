@@ -1,0 +1,550 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "studio.tool-package/1",
+  "title": "GPU Sampling Studio portable tool definition",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "minLength": 1,
+      "maxLength": 63
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "repository": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        }
+      },
+      "required": [
+        "path",
+        "commit"
+      ],
+      "additionalProperties": false
+    },
+    "manual": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "guidance": {
+      "type": "object",
+      "properties": {
+        "delivery": {
+          "const": "SKILL.md",
+          "default": "SKILL.md"
+        },
+        "installation": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "default": []
+        },
+        "configuration": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "default": []
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "hardware": {
+          "enum": [
+            "cpu",
+            "gpu",
+            "cpu_or_gpu"
+          ]
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "parallelism": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "serial",
+                  "threads",
+                  "processes",
+                  "devices"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "threads": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536,
+              "default": 1
+            },
+            "processes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536,
+              "default": 1
+            },
+            "gpus": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65536,
+              "default": 0
+            }
+          },
+          "required": [
+            "supported"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "hardware",
+        "requirements",
+        "parallelism"
+      ],
+      "additionalProperties": false
+    },
+    "functions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+            "minLength": 1,
+            "maxLength": 96
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "engine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120,
+            "default": null
+          },
+          "entrypoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/port"
+            },
+            "minItems": 0,
+            "maxItems": 128
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/port"
+            },
+            "minItems": 1,
+            "maxItems": 128
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/parameter"
+            },
+            "minItems": 0,
+            "maxItems": 128,
+            "default": []
+          },
+          "operation": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "minItems": 1,
+                "maxItems": 128
+              },
+              "working_directory": {
+                "const": "{workdir}",
+                "default": "{workdir}"
+              },
+              "failure_handling": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              }
+            },
+            "required": [
+              "command",
+              "failure_handling"
+            ],
+            "additionalProperties": false
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+              "minLength": 1,
+              "maxLength": 96
+            },
+            "minItems": 1,
+            "maxItems": 128
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "entrypoint",
+          "inputs",
+          "outputs",
+          "operation",
+          "tests"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 128
+    },
+    "tests": {
+      "type": "object",
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "introduction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "function_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "instructions": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "entrypoint": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "minItems": 0,
+                "maxItems": 128
+              },
+              "expected_outputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "format": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "description": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "format",
+                    "description"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 128
+              },
+              "pass_criteria": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "minItems": 1,
+                "maxItems": 128
+              }
+            },
+            "required": [
+              "id",
+              "function_id",
+              "directory",
+              "instructions",
+              "entrypoint",
+              "resources",
+              "expected_outputs",
+              "pass_criteria"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "directory",
+        "introduction",
+        "cases"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "repository",
+    "manual",
+    "guidance",
+    "environment",
+    "functions",
+    "tests"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "display": {
+      "type": "object",
+      "properties": {
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "advanced": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        }
+      },
+      "required": [
+        "priority",
+        "advanced",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "port": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+          "minLength": 1,
+          "maxLength": 96
+        },
+        "type": {
+          "enum": [
+            "file",
+            "files",
+            "directory",
+            "value"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {},
+        "default_behavior": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 4000,
+          "default": null
+        },
+        "display": {
+          "$ref": "#/$defs/display"
+        },
+        "default_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 4000,
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "format",
+        "description",
+        "required",
+        "display"
+      ],
+      "additionalProperties": false
+    },
+    "parameter": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+          "minLength": 1,
+          "maxLength": 96
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "array",
+            "object"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {},
+        "default_behavior": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 4000,
+          "default": null
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 120
+        },
+        "display": {
+          "$ref": "#/$defs/display"
+        },
+        "default_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 4000,
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "description",
+        "required",
+        "display"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

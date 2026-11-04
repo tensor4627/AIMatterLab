@@ -13,6 +13,7 @@ export function assertWorkerRoute(method, path) {
       '/api/templates/bias','/api/workflows','/api/assets','/api/workspace/read','/api/workspace/write','/api/workspace/materialize','/api/run/validate','/api/run/submit',
       '/api/run/environment-identity','/api/run/cancel','/api/run/status','/api/run/log','/api/run/file','/api/run/collect','/api/run/resume','/api/run/export','/api/run/revise','/api/run/input']
   };
+  routes.POST.push('/api/tool-package/register','/api/tool-configuration/project/create','/api/tool-configuration/plan','/api/tool-configuration/execute','/api/tool-configuration/status','/api/tool-configuration/activate','/api/tool-execution-skill/read','/api/tool-guidance/state');
   const target = new URL(path, 'http://127.0.0.1');
   if (target.origin !== 'http://127.0.0.1' || !routes[method]?.includes(target.pathname))
     throw new Error('Unsupported worker route');
@@ -24,6 +25,7 @@ export function assertRendererWorkerRoute(method, path) {
   const target=new URL(path,'http://127.0.0.1');
   if(target.hash||path!==target.pathname+target.search)throw Error('Ambiguous worker path refused');
   assertWorkerRoute(method,path);
+  if(target.pathname.startsWith('/api/tool-'))throw Error('Use the typed human tool configuration interface');
   if(target.pathname.startsWith('/api/cluster/auth/')||target.pathname.startsWith('/api/cluster/tunnel/'))throw Error('Use the private main-owned human SSH pane');
   if(target.pathname==='/api/environment-api/read')throw Error('Use the main-owned scoped target API reader');
   if(target.pathname.startsWith('/api/studio-workspace/'))throw Error('Use the typed human workspace actions');

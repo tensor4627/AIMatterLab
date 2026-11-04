@@ -23,13 +23,13 @@ def claim_audit_root(location,guard,role):
     return expected
 
 def fingerprint(config):
-    files=[ROOT/"INSTALL_AGENT.md",ROOT/"AGENTS.md",ROOT/"docs/one-prompt-install.md",ROOT/"installation/manifest.json",ROOT/"installation/runtime.py",ROOT/"scripts/one_prompt.py",ROOT/"package.json",ROOT/"pnpm-lock.yaml",ROOT/"index.html",ROOT/"vite.config.ts",ROOT/"tsconfig.json",ROOT/"worker/studio_worker/engine_contracts.json",ROOT/"worker/studio_worker/pygas-editor-hints.json"]
+    files=[ROOT/"INSTALL_AGENT.md",ROOT/"AGENTS.md",ROOT/"docs/one-prompt-install.md",ROOT/"installation/manifest.json",ROOT/"installation/runtime.py",ROOT/"scripts/one_prompt.py",ROOT/"package.json",ROOT/"pnpm-lock.yaml",ROOT/"index.html",ROOT/"vite.config.ts",ROOT/"tsconfig.json",ROOT/"worker/studio_worker/engine_contracts.json",ROOT/"worker/studio_worker/pygas-editor-hints.json",ROOT/"worker/studio_worker/tool_package.schema.json"]
     for name in ("desktop-launch.mjs","start.mjs","dev.mjs","windows-launch-preflight.ps1","sync-tool-contracts.mjs"):
         file=ROOT/"scripts"/name
         if file.exists() or file.is_symlink():files.append(file)
     # Explicit public source roots only: generated protocol coverage is unchanged,
     # and .studio packages, execution skills and private run evidence stay excluded.
-    surfaces={"installation/examples":("**/*.py",),"agents/skills":("**/*.md","**/*.py","**/*.json","**/*.yaml","**/*.yml","**/*.toml"),"desktop":("**/*.mjs","**/*.cjs","**/*.ts","**/*.json"),"backend/main":("**/*.mjs","**/*.cjs","**/*.ts","**/*.json"),"agent":("**/*.mjs","**/*.json"),"contracts":("**/*.ts","**/*.json"),"frontend":("**/*.tsx","**/*.ts","**/*.css","**/*.json","**/*.svg"),"shared":("**/*.mjs","**/*.json"),"worker":("**/*.py",),"src":("**/*.tsx","**/*.ts","**/*.css")}
+    surfaces={"installation/examples":("**/*.py",),"agents/skills":("**/*.md","**/*.py","**/*.json","**/*.yaml","**/*.yml","**/*.toml"),"desktop":("**/*.mjs","**/*.cjs","**/*.ts","**/*.json"),"backend/main":("**/*.mjs","**/*.cjs","**/*.ts","**/*.json"),"agent":("**/*.mjs","**/*.json"),"contracts":("**/*.ts","**/*.mjs","**/*.json"),"frontend":("**/*.tsx","**/*.ts","**/*.css","**/*.json","**/*.svg"),"shared":("**/*.mjs","**/*.json"),"worker":("**/*.py",),"src":("**/*.tsx","**/*.ts","**/*.css")}
     for directory,patterns in surfaces.items():
         for pattern in patterns:
             for file in (ROOT/directory).glob(pattern):

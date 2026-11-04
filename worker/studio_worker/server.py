@@ -189,9 +189,20 @@ def mcp_tool_call(service, params):
 
 def dispatch(service, method, path, data, admin=False):
     store = service.store
+    if path == '/api/tool-guidance/state':
+        if method != 'POST' or not admin:
+            raise PermissionError('Desktop guidance metadata channel required')
+        from .tools.guidance_state import guidance_state
+        return guidance_state(service, data)
+    if path in ('/api/tool-package/register', '/api/tool-configuration/project/create', '/api/tool-configuration/plan', '/api/tool-configuration/execute', '/api/tool-configuration/status', '/api/tool-configuration/activate', '/api/tool-execution-skill/read'):
+        if method != 'POST' or not admin:
+            raise PermissionError('Desktop human tool configuration channel required')
+        from .tools.configurations import ToolConfigurations
+        operation = {'/api/tool-package/register': 'register', '/api/tool-configuration/project/create': 'create_project', '/api/tool-configuration/plan': 'plan', '/api/tool-configuration/execute': 'execute', '/api/tool-configuration/status': 'status', '/api/tool-configuration/activate': 'activate', '/api/tool-execution-skill/read': 'read'}[path]
+        return getattr(ToolConfigurations(service), operation)(data)
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.18.8", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1"}
+            return {"name": "gpu-sampling-studio", "version": "0.18.8", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1}
         if path == "/api/tools/status":
             return service.diagnose_tools()
         if path == "/api/compute/readiness":
@@ -286,7 +297,8 @@ def dispatch(service, method, path, data, admin=False):
         if not admin:raise PermissionError("Only desktop can register authoring sources")
         from .source_projects import inspect_source
         value={"id":data["id"],"root":str(Path(data["root"]).resolve()),"commit":data.get("commit"),"dirty":data.get("dirty")}
-        inspect_source(value)
+        from .tools.archive_guard import guidance_read_allowed
+        inspect_source(value,read_guard=lambda path:guidance_read_allowed(service,path))
         return store.put("source-project",value)
     if path=='/api/pygas/catalog':
         from .pygas_catalog import catalog
@@ -310,7 +322,8 @@ def dispatch(service, method, path, data, admin=False):
         return response(service,data) if path.endswith('read') else save(service,data,normalize=path.endswith('normalize'))
     if path=="/api/source-project/inspect":
         from .source_projects import inspect_source
-        return inspect_source(store.get("source-project",data["source_id"]),data.get("symbols"),data.get("api_symbols"))
+        from .tools.archive_guard import guidance_read_allowed
+        return inspect_source(store.get("source-project",data["source_id"]),data.get("symbols"),data.get("api_symbols"),read_guard=lambda path:guidance_read_allowed(service,path))
     if path=="/api/structures/import-material":
         if not admin:raise PermissionError("External database provenance must come from desktop")
         return service.authoring(data,"create_structure")

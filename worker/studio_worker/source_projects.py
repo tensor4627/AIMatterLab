@@ -39,7 +39,7 @@ def studio_render_contract():
  if sum(len((ast.get_source_segment(code,functions[name]) or '').encode('utf-8')) for name in names)>8192:return {'status':'blocked','reason':'Studio render wrapper exceeds source excerpt budget'}
  return {'status':'passed','source':{'name':'studio_worker/structure_tools.py','sha256':hashlib.sha256(data).hexdigest()},'required_settings':['atoms_path','pt_path'],'workflow_path':'workflow.json','scope':'Studio snapshot I/O only; graph rendering never builds or validates the serialized artifact','entrypoints':{name:ast.get_source_segment(code,functions[name]) for name in names},'guidance':"atoms_path is the actual authorized structure input; pt_path is the requested output artifact filename. Studio normalizes them to immutable run basenames and sets workflow_path=workflow.json. Include the structure, graph and build source in the reviewed task files. Version2 TorchScript-only requires artifact_formats=['torchscript'] and deployment_backend='torchscript'; AOTI/dual selection requires the matching explicit artifact formats and actual target/toolchain preflight, with no backend fallback."}
 
-def inspect_source(source,symbols=None,api_symbols=None):
+def inspect_source(source,symbols=None,api_symbols=None,read_guard=None):
  if symbols is not None and (not isinstance(symbols,list) or len(symbols)>4 or any(not isinstance(name,str) or len(name)>128 or re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',name) is None for name in symbols) or len(set(symbols))!=len(symbols)):raise ValueError('Choose up to four unique public catalog class names')
  if api_symbols is not None and source.get("id") not in ("hotpp","pydyn"):
   from .software_contracts import ApiExcerptInputError
@@ -50,6 +50,9 @@ def inspect_source(source,symbols=None,api_symbols=None):
  report={**source,"files":[],"catalog":{},"status":"passed","validation":"not_run","scope":"Source inspection only; no runtime or serialized-artifact validation"}
  for relative in ALLOWED[name]:
   path=root/relative
+  if read_guard is not None and not read_guard(path):
+   report['files'].append({'name':relative,'status':'archived','scope':'Use the authoritative execution skill; guidance content was not inspected'})
+   continue
   if not path.is_file():continue
   if not path.resolve().is_relative_to(root) or path.stat().st_size>2*1024*1024:raise ValueError("Unsafe source file")
   data=path.read_bytes();report["files"].append({"name":relative,"sha256":hashlib.sha256(data).hexdigest()})

@@ -79,7 +79,7 @@ function nativeHarness(config){
  fs.mkdirSync(config.profile);fs.mkdirSync(config.sessionData);fs.mkdirSync(config.appData);
  app.setPath('appData',config.appData);app.setPath('userData',config.profile);app.setPath('sessionData',config.sessionData);
  // Observe real registrations and replies. Forbidden routes fail before external work.
- const allowed=new Set(['studio:state','studio:conversation.list','studio:conversation.groups','studio:conversation.select','studio:task.list','studio:workflow.list','studio:worker.restore','studio:worker.status','studio:scientific.skills','studio:skills.catalog']);
+ const allowed=new Set(['studio:state','studio:conversation.list','studio:conversation.groups','studio:conversation.select','studio:task.list','studio:workflow.list','studio:worker.restore','studio:worker.status','studio:scientific.skills','studio:skills.catalog','studio:tools.packages.list','studio:tools.configurations.list','studio:tools.configurations.context']);
  const register=ipcMain.handle.bind(ipcMain);
  ipcMain.handle=(channel,handler)=>register(channel,async(event,...args)=>{
   const row={id:receipt.ipc.length+1,channel,startedAt:Date.now(),argumentKeys:args[0]&&typeof args[0]==='object'?Object.keys(args[0]):[]};receipt.ipc.push(row);
@@ -186,7 +186,13 @@ export function prepareNativeConversationCheck({repoRoot=desktopRoot,out,timeout
 
 export async function runNativeConversationCheck({args=process.argv.slice(2),repoRoot=desktopRoot,env=process.env,preflight=requireLaunchContext,resolveBinary=()=>createRequire(import.meta.url)('electron'),spawnTarget=spawn}={}){
  const options=parseNativeCheckArgs(args);const context=preflight();
- const binary=await resolveBinary(),prepared=prepareNativeConversationCheck({repoRoot,...options}),launchFile=path.join(prepared.target,'launch.json');
+ const binary=await resolveBinary(),prepared=prepareNativeConversationCheck({repoRoot,...options});
+ return launchPreparedNativeCheck({prepared,binary,context,repoRoot,env,spawnTarget});
+}
+
+/** Launch only the prepared owned harness; shared by the two explicit native checks. */
+export async function launchPreparedNativeCheck({prepared,binary,context,repoRoot=desktopRoot,env=process.env,spawnTarget=spawn}){
+ const launchFile=path.join(prepared.target,'launch.json'),options={timeoutMs:prepared.config.timeoutMs};
  const stdout=fs.openSync(path.join(prepared.target,'stdout.log'),'wx'),stderr=fs.openSync(path.join(prepared.target,'stderr.log'),'wx');let child,exit;
  try{
   child=spawnTarget(binary,[prepared.harness],{cwd:path.resolve(repoRoot),env:nativeCheckEnvironment(env,prepared.config.profile),stdio:['ignore','pipe','pipe'],windowsHide:true});

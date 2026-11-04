@@ -12,7 +12,11 @@ def read_input(service,data):
  if not isinstance(name,str) or not name or len(name)>4096:raise ValueError('Input name or authorized absolute path required')
  root=service.root/'projects'/project['id']/'inputs'
  roots=project['policy']['input_roots']+[str(root)]+[r['directory'] for r in service.store.runs() if r['project_id']==project['id']]
- path=contained(name if Path(name).is_absolute() else root/service.input_name(name),roots)
+ raw=name if Path(name).is_absolute() else root/service.input_name(name)
+ from .tools.archive_guard import assert_guidance_read,guard_path_before_resolve
+ guard_path_before_resolve(service,raw)
+ path=contained(raw,roots)
+ assert_guidance_read(service,path)
  if not path.is_file():raise ValueError('Input file does not exist')
  offset=data.get('offset',0)
  if type(offset)is not int or offset<0:raise ValueError('Nonnegative byte offset required')

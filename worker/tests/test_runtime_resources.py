@@ -12,6 +12,7 @@ class RuntimeResourcesTests(unittest.TestCase):
         (source / "studio_worker").mkdir(parents=True)
         (source / "bootstrap.py").write_text("# fixture\n", encoding="utf-8")
         (source / "studio_worker" / "engine_contracts.json").write_text('{"fixture":1}', encoding="utf-8")
+        (source / "studio_worker" / "tool_package.schema.json").write_text('{"fixture":1}', encoding="utf-8")
         return source
 
     def test_inventory_uses_relative_exclusions_and_stable_utf8_posix_names(self):
@@ -23,7 +24,7 @@ class RuntimeResourcesTests(unittest.TestCase):
             (source / "tests" / "ignored.py").write_text("# ignored", encoding="utf-8")
             (source / "studio_worker" / "private.json").write_text("{}", encoding="utf-8")
             names = worker_files(source)
-            self.assertEqual(names, ["bootstrap.py", "studio_worker/engine_contracts.json", "studio_worker/\ue000.py", "studio_worker/\U00010000.py"])
+            self.assertEqual(names, ["bootstrap.py", "studio_worker/engine_contracts.json", "studio_worker/tool_package.schema.json", "studio_worker/\ue000.py", "studio_worker/\U00010000.py"])
             digest = hashlib.sha256()
             for name in names:
                 digest.update(name.encode("utf-8"))

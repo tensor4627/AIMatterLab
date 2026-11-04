@@ -6,6 +6,13 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 const defaultRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const sourceName='contracts/tools/engine-contracts.json';
 const targetName='worker/studio_worker/engine_contracts.json';
+const resources=[
+ {source:sourceName,resource:targetName,validate:value=>value?.schema_version===1&&typeof value.scope==='string'&&value.engines&&!Array.isArray(value.engines)&&typeof value.engines==='object'&&Object.keys(value.engines).length},
+ {source:'contracts/tools/tool-package.schema.json',resource:'worker/studio_worker/tool_package.schema.json',validate:value=>value?.$id==='studio.tool-package/1'&&value.type==='object'&&value.additionalProperties===false},
+ {source:'contracts/tools/tool-package.schema.json',resource:'developer/skills/studio-tool-integration/references/tool-package.schema.json',validate:value=>value?.$id==='studio.tool-package/1'&&value.type==='object'},
+ {source:'contracts/tools/tool-package.mjs',resource:'developer/skills/studio-tool-integration/references/tool-package.mjs',text:true,validate:value=>value.includes('export function validateToolPackage(')&&value.includes("from './tool-package.schema.json'")},
+ {source:'installation/examples/worker-smoke.py',resource:'developer/skills/studio-tool-integration/assets/worker-smoke.py',text:true,validate:value=>value.trim().length>0}
+];
 function regularFile(file){
  const stat=fs.lstatSync(file);
  if(!stat.isFile()||stat.isSymbolicLink())throw Error('Tool contracts require regular files');
@@ -22,19 +29,23 @@ function ownedParent(file,root){
 /** Copy the canonical bytes; never serialize or change engine parameter semantics. */
 export function syncToolContracts({root=defaultRoot,check=false}={}){
  root=fs.realpathSync(path.resolve(root));
- const source=path.join(root,sourceName),target=path.join(root,targetName);
- ownedParent(source,root);ownedParent(target,root);
- const bytes=regularFile(source),contract=JSON.parse(bytes.toString('utf8'));
- if(contract?.schema_version!==1||typeof contract.scope!=='string'||!contract.engines||Array.isArray(contract.engines)||typeof contract.engines!=='object'||!Object.keys(contract.engines).length)throw Error('Unsupported canonical tool contract');
- const current=fs.existsSync(target)?regularFile(target):null;
- const matches=current?.equals(bytes)===true;
- if(!matches&&check)throw Error('Generated worker tool contract is stale; run node scripts/sync-tool-contracts.mjs');
- if(!matches){
-  fs.mkdirSync(path.dirname(target),{recursive:true});
-  const temporary=target+'.'+randomUUID()+'.tmp';
-  try{fs.writeFileSync(temporary,bytes,{flag:'wx'});fs.renameSync(temporary,target);}finally{if(fs.existsSync(temporary))fs.unlinkSync(temporary);}
+ // Validate every canonical source before changing any generated file.
+ const plans=resources.map(item=>{
+  const source=path.join(root,item.source),target=path.join(root,item.resource);
+  ownedParent(source,root);ownedParent(target,root);
+  const bytes=regularFile(source),value=item.text?new TextDecoder('utf-8',{fatal:true}).decode(bytes):JSON.parse(bytes.toString('utf8'));
+  if(!item.validate(value))throw Error('Unsupported canonical tool contract: '+item.source);
+  const current=fs.existsSync(target)?regularFile(target):null;
+  return {...item,target,bytes,matches:current?.equals(bytes)===true};
+ });
+ if(check&&plans.some(item=>!item.matches))throw Error('Generated tool contract or developer resource is stale; run node scripts/sync-tool-contracts.mjs');
+ for(const item of plans)if(!item.matches){
+  fs.mkdirSync(path.dirname(item.target),{recursive:true});
+  const temporary=item.target+'.'+randomUUID()+'.tmp';
+  try{fs.writeFileSync(temporary,item.bytes,{flag:'wx'});fs.renameSync(temporary,item.target);}finally{if(fs.existsSync(temporary))fs.unlinkSync(temporary);}
  }
- return {status:matches?'current':'updated',source:sourceName,resource:targetName,sha256:createHash('sha256').update(bytes).digest('hex')};
+ const receipts=plans.map(item=>({status:item.matches?'current':'updated',source:item.source,resource:item.resource,sha256:createHash('sha256').update(item.bytes).digest('hex')}));
+ return {...receipts[0],status:plans.every(item=>item.matches)?'current':'updated',resources:receipts};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  try{

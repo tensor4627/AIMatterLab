@@ -1,17 +1,17 @@
 ---
 name: studio-tool-integration
-description: Guide a software developer's agent to validate software for GPU Sampling Studio workflows and generate a portable delivery package, delivery skill, and redirected test entries while preserving the Git repository layout. Use for developer onboarding and package maintenance; user installation, environment configuration, and generation of real-environment execution skills are a separate stage.
+description: Help software developers produce portable GPU Sampling Studio tool packages with tool.json v1, delivery skills and redirected tests while preserving their Git layout. Use for developer onboarding or package updates; real user configuration and execution-skill activation are separate.
 ---
 
 # GPU Sampling Studio 工具接入
 
 与软件开发者协作，在指定工作空间生成 `工具名-package`。包内保留原软件的 Git 仓库，并在原仓库之外生成交付 skill 和测试重定向入口。`工具名` 为占位名称，不指某个特定软件。
 
-本 skill 是接入指导，产出的包根 `SKILL.md` 是指导后续 Agent 安装、使用和测试该工具的交付 skill。接入判据仍为：五项工具定义齐备，能够完成安装并通过测试用例；包目录存在不代表 Studio 已具备对应运行适配器。
+本 skill 是接入指导，产出的包根 `SKILL.md` 是指导后续 Agent 安装、使用和测试该工具的交付 skill。接入判据仍为：五项工具定义齐备，能够完成安装并通过测试用例。`tool.json` v1 已有定义检查和版本快照注册；其 `definition_checked` 只说明定义与文件闭包通过检查，不代表安装、测试、接入或用户配置通过。
 
 工具接入面向开发者，验证工具在声明流程中的可用性。工具配置面向用户，在其真实环境中安装、配置、测试后生成执行 skill；本接入流程不预造用户环境的执行 skill 或配置通过结果。
 
-编写交付材料时，阅读 [交付指南](references/deliverables.md)，使用其中的包结构、交付 skill 内容、重定向约定和结果记录格式。示例中的包外层约定不约束原仓库内部布局，也不是 Studio 已实现的注册协议。
+编写交付材料时，阅读 [交付指南](references/deliverables.md)；生成 `tool.json` 或准备注册、更新时再阅读 [注册与版本契约](references/registration.md)。随本目录附有完整 schema 和纯声明检查器，不需要取得 Studio 源码才能理解字段、默认值和额外约束。包外层约定不约束原仓库内部布局。
 
 ## 明确软件和功能范围
 
@@ -23,11 +23,13 @@ description: Guide a software developer's agent to validate software for GPU Sam
 
 ## 构成交付包
 
-在开发者指定的工作空间创建 `工具名-package`，包含原软件 Git 仓库、包根交付 `SKILL.md` 和 `工具名-tests`。已有包内仓库可直接复用；首次获取仓库时保留其原有结构，不移动或覆盖开发者正在使用的工作树。
+选择小写连字符工具 `id`，在开发者指定的工作空间创建 `<id>-package`，包含 `tool.json`、原软件独立完整 Git 仓库、包根交付 `SKILL.md`、人类说明和 `<id>-tests`。已有包内干净仓库可复用；首次获取仓库时保留原有结构，不移动或覆盖开发者正在使用的工作树。对未提交工作、worktree 或不完整仓库，保留原现场，准备独立候选副本后再注册。
 
 将补充说明、薄封装和补充测试写在包内原仓库之外。它们以包根为基准定位原文件；不要要求原作者把文档或测试搬到指定源码路径。
 
-交付包包含实际需要的源码和测试资源，不能仅引用原开发者机器上的另一个目录。安装环境和任务输出由所选计算资源和工作目录管理，不要求随源码打包。
+交付包包含实际需要的源码和测试资源，不能仅引用原开发者机器上的另一个目录。模型或大数据可以放在包外层并声明为 `resources`，不要求提交进作者的 Git。尚未取得的资源记 `blocked`；安装环境和任务输出由计算资源及工作目录管理，不随源码打包。
+
+按随附 [schema](references/tool-package.schema.json) 创建 `tool.json`，声明仓库路径与真实 `HEAD`、手册、前置指导文件、环境、逐功能 IO/参数/操作入口及测试映射。原作者只需维护原有源码和原位置测试；测试入口用相对路径重定向。运行 `node <本skill目录>/scripts/check-manifest.mjs <包根>/tool.json` 检查 schema、默认值与声明交叉约束；这一步不读取实际仓库闭包，也不安装或执行软件。实际注册还需 Studio 的包检查，约束见注册指南。
 
 ## 定义输入输出及参数优先级
 
@@ -54,6 +56,8 @@ description: Guide a software developer's agent to validate software for GPU Sam
 人类操作说明可保留在原仓库的实际位置，并由交付 skill 定位；缺少内容时在包外层补充。说明应覆盖用途、安装、输入准备、参数设置、运行、输出读取和错误处理，并能找到包内最小测试入口。
 
 交付 skill 可以调用真实 CLI/API；若软件提供 MCP，则按其实际实现说明启动、参数和返回。它须足以选择功能、准备输入、调用程序、定位输出、判断完成或失败及执行测试。相对路径及调用所需工作目录必须明确，不能只写一组文档链接或编造尚未实现的接口。
+
+不要把 `operation.command` 声明当成已实现的通用执行器。当前自动用户配置闭环只支持固定的串行 CPU `installation.check/worker` 工程 reference；其他软件仍可声明、检查和注册，安装/执行适配按实际支持范围另行实现验证。只有需要演示该 reference 时使用 [小示例](references/registration.md#可选cpu工程示例)，不将它替换为开发者软件或科学验证。
 
 接口应受其已有项目和资源授权约束；接入材料不授予额外文件访问或计算权限。需要接入 Studio 的实际接口时，检查当前实现再编写适配，保留其人工审阅和正式作业执行边界。
 
@@ -85,15 +89,19 @@ description: Guide a software developer's agent to validate software for GPU Sam
 
 源码和原有测试随原仓库同步，生成的交付 skill、重定向入口和测试结果须绑定本次实际版本。仓库同步成功不等于安装或测试通过。已有任务引用的包和环境保持原版本，在候选包或隔离副本中验证升级，不原地改变它们依赖的代码或程序。
 
+`git pull` 更新候选仓库后，记录新的真实提交，核对并更新包外层 `tool.json`、路径映射、交付指导和 wrapper；再检查、测试和显式注册更新。Studio 不自动 pull。包版本由源码提交、原始 manifest 字节和资源闭包共同计算，不能手填一个版本号覆盖旧快照。仅改变 wrapper 或说明也可能生成新包版本；详见注册指南。
+
 ## 向用户配置阶段交付
 
 交付 skill 说明如何在用户选择的真实计算资源上安装、配置并完成对应测试。用户配置成功后，由该阶段的 Agent 根据实际环境生成执行 skill，收录正常操作所需的实际入口、环境、软件版本、输入输出、参数、命令和失败处理。
 
 执行 skill 是该环境的日常工具入口。它生成后，之前的交付 skill、安装 skill 和配置指导由用户配置流程封存，保留版本与记录，不再自动读取。只有发生 bug 需要修复，或软件更新需要重新安装时，才重新使用所需封存指导并更新执行 skill。交付 skill 不应要求日常任务重新读取本接入指导或整套安装材料。
 
+封存和激活是后端/worker 的权威事实，不由交付文件或 Agent 的成功文字触发。日常使用自足执行快照；显式 configure/repair/update 的人工授权只按准确版本、资源 ID、当前 owner/lease/revision 和有效期开放所需前置资源。失效激活保持封存，不能降回旧安装指导；未配置工具保留原指导路线。交付 skill 不创建授权、不改变项目权限，也不把 probe 当成配置成功。
+
 ## 交付和接入判定
 
-交付 `工具名-package`：保留原仓库布局、生成独立交付 skill 和测试重定向目录，并补齐五项工具定义。原有文档、接口和测试通过明确路径复用，额外接入材料位于包内原仓库之外。
+交付 `<id>-package`：保留原仓库布局、提供 `tool.json` v1、独立交付 skill、人类说明和测试重定向目录，并补齐五项工具定义。整个包移动后重跑声明检查与实际文件检查；原有文档、接口和测试通过明确路径复用，额外接入材料位于包内原仓库之外。
 
 同时交付逐功能对照和安装、测试结果，指出剩余缺项。只有五项定义满足，实际安装、所声明功能及流程的测试均通过，才能按本次明确的功能、流程、版本和环境范围报告接入通过。材料完成而环境或测试未通过时，报告材料完成及具体缺口。
 

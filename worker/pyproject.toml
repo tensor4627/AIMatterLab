@@ -16,4 +16,4 @@ where = ["."]
 include = ["studio_worker*"]
 
 [tool.setuptools.package-data]
-studio_worker = ["engine_contracts.json", "pygas-editor-hints.json"]
+studio_worker = ["engine_contracts.json", "pygas-editor-hints.json", "tool_package.schema.json"]

@@ -15,7 +15,7 @@ export function bundledWorkerRuntimeId(source){
     const name=relative?relative+'/'+entry.name:entry.name;
     if(entry.isSymbolicLink())throw Error('Unconfirmed bundled source');
     if(entry.isDirectory())walk(name);
-    else if(entry.isFile()&&(/\.(py|toml)$/.test(name)||['studio_worker/engine_contracts.json','studio_worker/pygas-editor-hints.json'].includes(name)))names.push(name);
+    else if(entry.isFile()&&(/\.(py|toml)$/.test(name)||['studio_worker/engine_contracts.json','studio_worker/pygas-editor-hints.json','studio_worker/tool_package.schema.json'].includes(name)))names.push(name);
    }
   }
   walk();if(!names.includes('bootstrap.py'))return null;

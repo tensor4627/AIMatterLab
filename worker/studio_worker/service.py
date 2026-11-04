@@ -38,6 +38,7 @@ class Service(RuntimeServiceMixin):
         self.clusters = Clusters(self)
         self.stop_event = threading.Event()
         self.compute_setup_lock = threading.Lock()
+        self.tool_configuration_lock = threading.RLock()
         self.processes = {}
         self.provenance = {}
         for run in self.store.runs():
@@ -50,6 +51,10 @@ class Service(RuntimeServiceMixin):
             self.cluster_monitor.start()
 
     def register_project(self, value):
+        with self.store.lock:
+            return self._register_project(value)
+
+    def _register_project(self, value):
         value = dict(value)
         if not value.get("name"):
             raise ValueError("Project name required")
@@ -203,6 +208,8 @@ class Service(RuntimeServiceMixin):
         if name not in {asset["name"] for asset in run["snapshots"]}:
             raise ValueError("Select a recorded immutable input")
         root = Path(run["directory"]) / "simulation"
+        from .tools.archive_guard import guard_path_before_resolve
+        guard_path_before_resolve(self, root / name)
         path = contained(root / name, [root])
         asset = next(x for x in run["snapshots"] if x["name"] == name)
         if digest(path) != asset["sha256"]:
@@ -431,6 +438,8 @@ class Service(RuntimeServiceMixin):
     def file(self, identifier, name, offset=0):
         run = self.store.run(identifier)
         root = Path(run["directory"]) / "results"
+        from .tools.archive_guard import guard_path_before_resolve
+        guard_path_before_resolve(self, root / name)
         path = contained(root / name, [root])
         if not path.is_file():
             raise ValueError("Artifact unavailable")

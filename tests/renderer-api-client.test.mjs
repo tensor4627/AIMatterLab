@@ -145,3 +145,15 @@ test('DTO dependency graph stays type-only and within shared contracts',()=>{
   }
  }
 });
+
+test('tool clients dispatch exact typed package, group and human configuration requests through the renderer transport',async()=>{
+ const calls=[],answer={receipt:'typed-tool-answer'},f=clientModules({async invoke(method,data){calls.push({method,data});return answer;}}),{toolPackages:p,toolConfigurations:c,toolGroups:g}=f.load('frontend/api/tools.ts');
+ const root='/selected/data-tool-package',read={package_id:'data-tool',package_version:'a'.repeat(64)},change={package_id:'data-tool',package_root:root,expected_revision:1},ref={configuration_id:'configuration-001'},review={...ref,expected_revision:2,plan_sha256:'b'.repeat(64)},plan={...read,project_id:'cpu-check',environment_id:'cpu',request_id:'request-001'},binding={...ref,providers:['codex']},grant={...ref,purpose:'repair',resource_ids:['specific-guide']},definition={schema_version:1,id:'group'},project={environment_id:'cpu',name:'CPU reference',request_id:'project-001'};
+ const cases=[
+  [p.choose,[], 'tools.packages.choose',{}],[p.inspect,[root],'tools.packages.inspect',{package_root:root}],[p.register,[root],'tools.packages.register',{package_root:root}],[p.update,[change],'tools.packages.update',change],[p.relocate,[change],'tools.packages.relocate',change],[p.list,[],'tools.packages.list',{}],[p.read,[read],'tools.packages.read',read],
+  [c.context,[],'tools.configurations.context',{}],[c.list,[],'tools.configurations.list',{}],[c.createProject,[project],'tools.configurations.createProject',project],[c.plan,[plan],'tools.configurations.plan',plan],[c.execute,[review],'tools.configurations.execute',review],[c.status,[ref],'tools.configurations.status',ref],[c.activate,[review],'tools.configurations.activate',review],[c.read,[ref],'tools.configurations.read',ref],[c.bind,[binding],'tools.configurations.bind',binding],[c.grant,[grant],'tools.configurations.grant',grant],
+  [g.compile,[definition],'tools.groups.compile',{definition}],[g.save,[definition,3],'tools.groups.save',{definition,expected_revision:3}],[g.read,['group'],'tools.groups.read',{id:'group'}],[g.list,[],'tools.groups.list',{}]
+ ];
+ for(const [method,args,channel,data]of cases){assert.equal(await method(...args),answer);assert.deepEqual(calls.at(-1),{method:channel,data});}
+ assert.equal(calls.length,21);assert([...f.modules.keys()].every(file=>!file.includes(path.sep+'backend'+path.sep)&&!file.includes(path.sep+'contracts'+path.sep)));
+});
