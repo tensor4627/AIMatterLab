@@ -14,3 +14,6 @@ gpusampling-worker = "studio_worker.server:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["studio_worker*"]
+
+[tool.setuptools.package-data]
+studio_worker = ["engine_contracts.json", "pygas-editor-hints.json"]

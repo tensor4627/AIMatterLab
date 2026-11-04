@@ -1,13 +1,14 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "0.18.9-dev.45",
+  "version": "1.0.0-dev.1",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
-    "build": "tsc --noEmit && vite build",
-    "start": "node scripts/start.mjs",
+    "dev": "node scripts/sync-tool-contracts.mjs --check && node scripts/dev.mjs",
+    "build": "node scripts/sync-tool-contracts.mjs && tsc --noEmit && vite build",
+    "start": "node scripts/sync-tool-contracts.mjs --check && node scripts/start.mjs",
+    "check:contracts": "node scripts/sync-tool-contracts.mjs --check",
     "test": "node --test tests/*.test.mjs",
     "test:worker": "node scripts/test-worker.mjs",
     "test:frontend": "node scripts/frontend-regression.mjs",
@@ -49,11 +50,14 @@
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "directories": {
-      "output": "release/v0.18.9-dev.45"
+      "output": "release/v1.0.0-dev.1"
     },
     "files": [
       "dist/**",
       "desktop/**",
+      "backend/main/**",
+      "agent/**",
+      "contracts/**",
       "worker/**",
       "package.json",
       "!node_modules/**/*",

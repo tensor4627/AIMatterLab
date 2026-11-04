@@ -1,6 +1,7 @@
 import {useRef,useState} from 'react';
 import type {AssetOption,CanonicalGraph} from './pygas-composer-types';
-export interface CompositionAssetImportResult{taskId:string;cancelled:boolean;asset?:AssetOption;assets?:AssetOption[];receipt?:{kind:'human_native_dialog';sha256:string;size:number}}
+import type {CompositionAssetImportResult} from '../contracts/dto/assets';
+export type {CompositionAssetImportResult} from '../contracts/dto/assets';
 export interface CompositionAssetImportContext{taskId:string;ownerKey:string;graph:CanonicalGraph;pairIdentity:string;assets:AssetOption[]}
 /** Native dialog, file copying and filesystem authority remain main-owned. */
 export function useCompositionAssetImport(p:{readCurrent:()=>CompositionAssetImportContext;invokeImport:(request:{taskId:string})=>Promise<CompositionAssetImportResult>;onImported:(graph:CanonicalGraph,assets:AssetOption[])=>void;onError:(error:unknown)=>void}){

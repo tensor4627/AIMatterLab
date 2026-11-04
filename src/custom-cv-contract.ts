@@ -1,8 +1,5 @@
-import type {CustomCvCapabilities,CustomEntry,Expected,FormulaSpec,LibraryItem,LibraryReview,NumericScope,ParamValue,Provider,RuntimeReceipt,StructureReceipt} from './custom-cv-types';
-export interface CustomCvReadResult{taskId:string;entry:CustomEntry|null;entries:LibraryItem[];runtime:RuntimeReceipt|null;currentStructure:StructureReceipt|null;numericScope?:NumericScope|null;libraryReview?:LibraryReview|null;referenceAssets:{id:string;name:string;sha256:string}[];capabilities:CustomCvCapabilities}
-export interface CustomCvRequest{taskId:string;id?:string;expected?:Expected;provider?:Provider;spec?:FormulaSpec;parameterValues?:Record<string,ParamValue>;referenceAssetId?:string;enabled?:boolean}
-export type CustomCvMethod='customCv.read'|'customCv.saveSpec'|'customCv.approveFormula'|'customCv.approveCode'|'customCv.sharing'|'customCv.validate'|'customCv.attach'|'customCv.status'|'customCv.reuse';
-export type CustomCvInvoke=(method:CustomCvMethod,payload:CustomCvRequest)=>Promise<unknown>;
+import type {CustomCvReadResult} from '../contracts/dto/custom-cv';
+export type {CustomCvReadResult,CustomCvRequest,CustomCvMethod,CustomCvInvoke} from '../contracts/dto/custom-cv';
 const hash=(v:unknown)=>v===null||typeof v==='string'&&/^[a-f0-9]{64}$/.test(v),text=(v:unknown,n=8192)=>typeof v==='string'&&v.length<=n,array=(v:unknown,n=256):v is unknown[]=>Array.isArray(v)&&v.length<=n;
 export function customCvResult(value:unknown,taskId:string,id?:string):CustomCvReadResult{
  const v=value as CustomCvReadResult,e=v?.entry,c=v?.capabilities;

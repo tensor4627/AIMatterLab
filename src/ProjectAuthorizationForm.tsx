@@ -4,7 +4,8 @@ import './project-navigation.css';
 import {engines,wslPath,type Environment} from './types';
 import {t} from './i18n';
 import {projectPolicyChanges} from '../shared/project-policy-edit.mjs';
-export type ProjectAuthorizationSpec={name:string;policy:{engines:string[];gpus:number[];max_seconds:number;max_concurrent:number;input_roots:string[];environments:string[];clusters?:string[]}};
+import type {ProjectAuthorizationSpec} from '../contracts/dto/compute';
+export type {ProjectAuthorizationSpec} from '../contracts/dto/compute';
 const list=(value:string)=>value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean);
 export default function ProjectAuthorizationForm({environments,busy=false,suggestedInputRoot,suggestedEnvironmentId,onSubmit,initialSpec,defaults,onCancel}:{environments:Environment[];busy?:boolean;suggestedInputRoot?:string;suggestedEnvironmentId?:string;initialSpec?:ProjectAuthorizationSpec;defaults?:ProjectAuthorizationSpec;onCancel?:()=>void;onSubmit:(spec:ProjectAuthorizationSpec)=>Promise<void>}){
  const seed=initialSpec||defaults;

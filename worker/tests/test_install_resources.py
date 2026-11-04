@@ -25,7 +25,7 @@ class InstallResourcesTests(unittest.TestCase):
    relative = Path("studio_worker/pygas-editor-hints.json")
    self.assertEqual((runtime / relative).read_bytes(), (fixture / relative).read_bytes())
    self.assertFalse((runtime / "studio_worker/unrelated-private.json").exists())
-   self.assertTrue((runtime / "studio_worker/engine_contracts.json").is_file())
+   self.assertEqual((runtime / "studio_worker/engine_contracts.json").read_bytes(), (fixture / "studio_worker/engine_contracts.json").read_bytes())
    self.assertEqual(first, install())
    original = (runtime / relative).read_bytes()
    (fixture / relative).write_bytes(original + b"\n")

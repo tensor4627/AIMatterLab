@@ -1,6 +1,8 @@
 # GPU Sampling Studio 开发者文档
 
-开发版本以根目录 `package.json` 为准。各代具体变更和验证结果见 [CHANGELOG](../../CHANGELOG.md) 与 [当前版本记录](../v0.18.9.md)；未完成工作见 [ROADMAP](ROADMAP.md)。历史记录中的通过只适用于其明确版本、输入和环境，不自动成为当前版本的新验收。
+开发版本以根目录 `package.json` 为准。各代具体变更和验证结果见 [CHANGELOG](../../CHANGELOG.md) 与 [当前版本记录](../v1.0.md)；未完成工作见 [ROADMAP](ROADMAP.md)。历史记录中的通过只适用于其明确版本、输入和环境，不自动成为当前版本的新验收。
+
+产品职责与工具契约见 [软件规范](../software-specification.md)，目标目录、迁移映射和分阶段验证见 [仓库重组方案](repository-reorganization.md)；当前在 `codex/v1.0` 分支实施，结果和未完成项见 [v1.0记录](../v1.0.md)。
 
 ## 产品与交互规则
 

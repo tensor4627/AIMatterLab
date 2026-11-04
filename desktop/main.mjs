@@ -8,8 +8,7 @@ import {createStructureWithAuthoringContext} from './structure-authoring.mjs';
 import {environmentApiTool,createEnvironmentApiReader} from './environment-api-read.mjs';
 import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from './ssh-connection.mjs';
 import {createWorkbenchImageExporter} from './workbench-image.mjs';
-import {taskOperation} from './task-operations.mjs';
-import {workspaceController} from './workspaces.mjs';
+import {registerWorkspaceTaskRoutes} from '../backend/main/workspace/routes.mjs';
 import {explicitSetupStage} from './explicit-setup-stage.mjs';
 import {createComputeOnboarding} from './compute-onboarding.mjs';
 import {createComputeConnection,installedWslDistributions} from './compute-connection.mjs';
@@ -37,8 +36,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import {ensureTaskAuthoring} from './task-authoring.mjs';
-import {readTaskInput} from './task-input-preview.mjs';
-import {readTaskPygas,saveTaskPygas,initializeTaskPygas,bindComposition,compositionToolGuard} from './task-pygas.mjs';
+import {readTaskPygas,bindComposition,compositionToolGuard} from './task-pygas.mjs';
 import {visibleUserText} from '../shared/tool-activity.mjs';
 import {ScientificSkills,validateScientificConsent,normalizeScientificSharing} from './scientific-skills.mjs';
 import {deliverScientificTurn} from './scientific-turn.mjs';
@@ -47,10 +45,6 @@ import {discoverSources,sourceContext,toolInventory} from './source-projects.mjs
 import { localSkills } from './skills.mjs';
 import { selectedSkillContext } from './skill-context.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from './agent-settings.mjs';
-import {saveDeployment,prepareDeployment} from './task-deployment.mjs';
-import {saveDeploymentDraft,deploymentContext,createDeploymentProject} from './deployment-state.mjs';
-import {openDeploymentSession} from './deployment-session.mjs';
-import {executeTask} from './task-execution.mjs';
 import {TaskRecords} from './task-records.mjs';
 import {existingConnections,existingProfile} from './existing-ssh.mjs';
 import {sshEndpoint} from './ssh-endpoint.mjs';
@@ -206,32 +200,11 @@ customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.a
 for(const action of ['read','saveSpec','approveFormula','approveCode','sharing','validate','status','attach','reuse'])handle('customCv.'+action,(value,event)=>customCv.dispatch(action,value,event));
 handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
 agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
-handle('task.create',value=>{const task=taskRecords.create(value);if(task.workflowVersion===2&&!task.authoring&&task.workspaceChoice===undefined){const workspace=catalog.list('workspace-index').find(w=>w.id===value.projectId&&JSON.stringify(w.workerBinding)===JSON.stringify(worker.identity));task.workspaceChoice=workspace?'workspace':'pending';if(workspace)task.workspace=workspace;return taskRecords.save(task);}return task;});
-const workspaces=()=>workspaceController({records:taskRecords,worker,selection:()=>workflowContext.current(),assertIdle:assertIdleAgent,onBound:workspace=>catalog.put('workspace-index',workspace.workerBinding.distribution+':'+workspace.workerBinding.root+':'+workspace.id,{...workspace,assets:[]}),chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},refreshContext:async task=>{const current=workflowContext.current();if(current.taskId===task.id){const ticket=workflowContext.begin(task.provider,task.threadId);await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));}}});
-for(const [method,action]of [['workspace.list','list'],['workspace.create','create'],['workspace.select','select'],['workspace.keepDraft','keepDraft'],['workspace.import','importAsset'],['workspace.attach','attach']])handle(method,value=>action==='list'?workspaces()[action](value):taskOperation(taskRecords,value.taskId,'workspace-'+action,JSON.stringify(value),()=>workspaces()[action](value)));
-handle('task.deployment.save',value=>saveDeployment(taskRecords,value,localReview,worker));
-handle('task.deployment.draft',value=>saveDeploymentDraft(taskRecords,worker,value));
-handle('task.deployment.context',value=>deploymentContext(taskRecords,worker,value));
-handle('task.deployment.open',value=>openDeploymentSession({records:taskRecords,workflowContext,agents,assertIdle:assertIdleAgent,connect:async task=>{
- const source=taskWorkerSource(task);
- // Opening deployment is read-only. An unavailable original service stays
- // offline until the human reviews the same source in the connection guide.
- if(!source)return;
- const observed=await restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision()},{taskId:task.id});
- if(observed.status==='connected')emit('studio:event',{method:'studio/workerConnected',params:{}});
-}},value));
-handle('task.deployment.createProject',value=>{assertIdleAgent();return createDeploymentProject(taskRecords,worker,value);});
-handle('task.deployment.prepare',value=>prepareDeployment(taskRecords,worker,value,localReview));
-handle('task.list',()=>catalog.list('agent-task'));
-handle('task.read',({id})=>taskRecords.read(id));
-handle('task.input.read',value=>readTaskInput(taskRecords,worker,value));
-handle('task.pygas.read',value=>readTaskPygas(taskRecords,worker,value));
-handle('task.pygas.initialize',value=>initializeTaskPygas(taskRecords,worker,value,()=>workflowContext.current()));
-handle('task.pygas.save',value=>saveTaskPygas(taskRecords,worker,value));
-handle('task.pygas.normalize',value=>saveTaskPygas(taskRecords,worker,value,true));
-handle('task.edit',value=>taskRecords.edit(value));
-handle('task.execute',value=>executeTask(taskRecords,worker,value,localReview));
-handle('task.linkRun',async({taskId,runId,kind,expectedPrepared})=>{if(!['run','cluster-run'].includes(kind)||typeof runId!=='string')throw Error('Invalid run reference');const run=await worker.request('POST',kind==='run'?'/api/run/status':'/api/cluster/status',{run_id:runId});return taskRecords.linkRun(taskId,run,expectedPrepared);});
+registerWorkspaceTaskRoutes({
+ records:taskRecords,catalog,worker,workflowContext,agents,handle,assertIdle:assertIdleAgent,
+ getSettings:()=>settings,getLocalReview:()=>localReview,emit,
+ chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},
+});
 handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);workflowContext.clear(result.provider);agents.disconnect(result.provider);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));

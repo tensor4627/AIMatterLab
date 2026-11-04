@@ -90,8 +90,8 @@ class DesktopLauncherInstall(unittest.TestCase):
     self.assertEqual(result['status'],'blocked');self.assertTrue(result['reason']);self.assertTrue(result['user_action']);self.assertEqual(run.call_count,1)
  def test_fingerprint_changes_with_each_guard_file(self):
   with tempfile.TemporaryDirectory() as tmp:
-   root=Path(tmp);names=['INSTALL_AGENT.md','AGENTS.md','docs/one-prompt-install.md','installation/manifest.json','installation/runtime.py','scripts/one_prompt.py','package.json','pnpm-lock.yaml','index.html','vite.config.ts','tsconfig.json','worker/studio_worker/engine_contracts.json']
-   guards=['scripts/desktop-launch.mjs','scripts/start.mjs','scripts/dev.mjs','scripts/windows-launch-preflight.ps1']
+   root=Path(tmp);names=['INSTALL_AGENT.md','AGENTS.md','docs/one-prompt-install.md','installation/manifest.json','installation/runtime.py','scripts/one_prompt.py','package.json','pnpm-lock.yaml','index.html','vite.config.ts','tsconfig.json','worker/studio_worker/engine_contracts.json','worker/studio_worker/pygas-editor-hints.json']
+   guards=['scripts/desktop-launch.mjs','scripts/start.mjs','scripts/dev.mjs','scripts/windows-launch-preflight.ps1','scripts/sync-tool-contracts.mjs']
    for name in names+guards:
     file=root/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('baseline',encoding='utf-8')
    with patch.object(entry,'ROOT',root):

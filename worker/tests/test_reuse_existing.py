@@ -89,14 +89,15 @@ class ReuseExisting(unittest.TestCase):
  def test_fingerprint_covers_deployment_code_contracts_public_skill_schema_and_nested_styles(self):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp)
-   names=['INSTALL_AGENT.md','AGENTS.md','docs/one-prompt-install.md','installation/manifest.json','installation/runtime.py','scripts/one_prompt.py','package.json','pnpm-lock.yaml','index.html','worker/pyproject.toml','vite.config.ts','tsconfig.json','desktop/generated/v2/Protocol.ts','worker/studio_worker/engine_contracts.json','worker/install.py','agents/skills/public/references/profile.schema.json','src/theme/nested.css']
+   names=['INSTALL_AGENT.md','AGENTS.md','docs/one-prompt-install.md','installation/manifest.json','installation/runtime.py','scripts/one_prompt.py','package.json','pnpm-lock.yaml','index.html','worker/pyproject.toml','vite.config.ts','tsconfig.json','desktop/generated/v2/Protocol.ts','worker/studio_worker/engine_contracts.json','worker/studio_worker/pygas-editor-hints.json','worker/install.py','agents/skills/public/references/profile.schema.json','src/theme/nested.css','contracts/tools/engine-contracts.json','contracts/dto/workspace.ts','backend/main/workspace/routes.mjs','agent/context/task-turn-context.mjs','frontend/api/studio.ts','frontend/presentation/assets/icon.svg']
    for name in names:
     file=root/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('baseline',encoding='utf-8')
    with patch.object(entry,'ROOT',root),patch.object(entry,'fingerprint',self.actual_fingerprint):
     before=entry.fingerprint({})
     for name in names:
      file=root/name;file.write_text('changed',encoding='utf-8');self.assertNotEqual(entry.fingerprint({}),before,name);file.write_text('baseline',encoding='utf-8')
-    excluded=root/'worker/tests/excluded.py';excluded.parent.mkdir(parents=True);excluded.write_text('not deployed',encoding='utf-8');self.assertEqual(entry.fingerprint({}),before)
+    for name in ('worker/tests/excluded.py','.studio/tool-packages/example-package/source/private.py','.studio/tool-packages/example-package/execution/SKILL.md'):
+     excluded=root/name;excluded.parent.mkdir(parents=True,exist_ok=True);excluded.write_text('not deployed',encoding='utf-8');self.assertEqual(entry.fingerprint({}),before,name)
  def test_remote_probe_receives_selected_case_requirements_without_controller_connection(self):
   cfg=self.config();cfg['compute']['kind']='ssh';cfg['compute']['connection']={'host':'example.invalid','username':'synthetic'};cfg['cases']=['pydyn-md']
   with patch('studio_worker.cluster.profile',return_value={}),patch('studio_worker.cluster.SSH') as transport:

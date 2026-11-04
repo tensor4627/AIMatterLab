@@ -20,7 +20,8 @@ export function bundledWorkerRuntimeId(source){
   }
   walk();if(!names.includes('bootstrap.py'))return null;
   const digest=crypto.createHash('sha256');
-  for(const name of names.sort()){digest.update(name);digest.update(fs.readFileSync(path.join(source,name)));}
+  // Match the installer independently of the host path separator or locale.
+  for(const name of names.sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)))){digest.update(name);digest.update(fs.readFileSync(path.join(source,name)));}
   return digest.digest('hex').slice(0,20);
  }catch{return null;}
 }

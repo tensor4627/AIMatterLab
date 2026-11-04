@@ -1,4 +1,4 @@
-import contract from '../worker/studio_worker/engine_contracts.json' with {type:'json'};
+import contract from '../contracts/tools/engine-contracts.json' with {type:'json'};
 import {parameterValue} from './task-fields.mjs';
 export const engineContracts=contract;
 function normalizedPath(value){return value.replaceAll('\\','/').replace(/^([A-Za-z]):\//,(_,drive)=>'/mnt/'+drive.toLowerCase()+'/');}

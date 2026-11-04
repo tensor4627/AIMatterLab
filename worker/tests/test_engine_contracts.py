@@ -5,6 +5,12 @@ from studio_worker.adapters import ENGINES
 from studio_worker.server import dispatch,tools
 from studio_worker.service import Service
 class EngineContracts(unittest.TestCase):
+ def test_generated_worker_resource_matches_the_canonical_contract(self):
+  worker=Path(__file__).resolve().parents[1]
+  canonical=worker.parent/'contracts/tools/engine-contracts.json'
+  self.assertEqual((worker/'studio_worker/engine_contracts.json').read_bytes(),canonical.read_bytes())
+  self.assertEqual(CONTRACTS,json.loads(canonical.read_text(encoding='utf-8')))
+
  def test_public_contracts_cover_every_registered_engine_and_actual_required_calls(self):
   self.assertEqual(set(CONTRACTS['engines']),set(ENGINES))
   for engine in ENGINES:self.assertEqual(describe(engine)['runtime_validation'],'not_run')
