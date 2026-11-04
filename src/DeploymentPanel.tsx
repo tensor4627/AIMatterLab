@@ -1,3 +1,4 @@
+import {useDeploymentContext} from '../frontend/features/workflows/useDeploymentContext';
 import ConsumerTargetReview from './ConsumerTargetReview';
 import {consumerTargetApi} from './consumer-stage-client';
 import {useConsumerTargetStatus} from './useConsumerTargetStatus';
@@ -22,26 +23,19 @@ export default function DeploymentPanel({task,worker:connected,restoring=false,p
  const [connectionAction,setConnectionAction]=useState('');
  const authAction=(error:unknown)=>String(error).includes('needs_worker_update')?'update':String(error).includes('needs_human_auth')?'auth':'';
  const [busy,setBusy]=useState(false),[saved,setSaved]=useState(false),[run,setRun]=useState<Run|ClusterRun|null>(null),[reviewedReceipt,setReviewedReceipt]=useState<string|null>(null),[preview,setPreview]=useState<any>(null);
- const [creating,setCreating]=useState(false),[createdProject,setCreatedProject]=useState<Project|null>(null),[draftSaving,setDraftSaving]=useState(false),[draftError,setDraftError]=useState(''),[reconnecting,setReconnecting]=useState(false);
- const [catalog,setCatalog]=useState<{status:string;data?:any;error?:string}>({status:worker?'loading':'offline'}),catalogSequence=useRef(0),attemptedReconnect=useRef(false);
+ const [creating,setCreating]=useState(false),[createdProject,setCreatedProject]=useState<Project|null>(null),[draftSaving,setDraftSaving]=useState(false),[draftError,setDraftError]=useState('');
  const [diagnostics,setDiagnostics]=useState(()=>deploymentDiagnosticJournal.list(task.id));
  useEffect(()=>{setDiagnostics(deploymentDiagnosticJournal.list(task.id));},[task.id]);
  useEffect(()=>{setDiagnostics(deploymentDiagnosticJournal.reconcile(task));},[task.id,task.updatedAt,JSON.stringify(task.execution)]);
- const outbox=useMemo(()=>deploymentOutbox(task.id,localStorage),[task.id]),latestTask=useRef(task),alive=useRef(true);latestTask.current=task;
+ const outbox=useMemo(()=>deploymentOutbox(task.id,localStorage),[task.id]);
  const scienceDraft=useMemo(()=>{try{return workflowOutbox(task.id,localStorage);}catch{return {pendingCount:1,activeSave:null};}},[task.id]);
  const [,scienceChanged]=useState(0);
  useEffect(()=>{const pending=scienceDraft.activeSave;if(!pending)return;let current=true;void pending.finally(()=>{if(current){scienceChanged(n=>n+1);void onRefresh();}}).catch(()=>{});return()=>{current=false;};},[task.id,task.parameterRevision,scienceDraft.activeSave]);
- const catalogSources=JSON.stringify([parentProjects,parentEnvironments.map(environment=>({id:environment.id,executables:environment.executables,repositories:environment.repositories}))]),previousCatalogSources=useRef(catalogSources);
  const [config,setConfig]=useState<any>(()=>outbox.current(task)),configRef=useRef(config);configRef.current=config;
  const compositionDirty=useTaskPygasDirty(task.id);
  const aiReady=task.review?.status==='ready'&&task.review.parameterRevision===task.parameterRevision,localStatus=useLocalReviewStatus(task,worker),localReady=currentLocalReview(task,localStatus),ready=(aiReady||localReady&&config.target==='local')&&!compositionDirty&&!scienceDraft.pendingCount&&task.workspaceChoice!=='pending';
  const localNotice=localReviewNotice(task,localStatus,busy);
- const contextReady=worker&&catalog.status==='ready',projects:Project[]=contextReady?catalog.data.projects:parentProjects,environments:Environment[]=contextReady?catalog.data.environments:parentEnvironments,clusters:any[]=contextReady?catalog.data.clusters:[];
- useEffect(()=>{alive.current=true;return()=>{alive.current=false;catalogSequence.current++;};},[]);
- async function readContext(){if(!worker||restoring||!alive.current||latestTask.current.id!==task.id)return;const sequence=++catalogSequence.current;setCatalog({status:'loading'});try{const value=await deploymentApi.read(task.id);if(alive.current&&latestTask.current.id===task.id&&sequence===catalogSequence.current&&value.taskId===task.id)setCatalog({status:'ready',data:value});}catch(error){if(alive.current&&latestTask.current.id===task.id&&sequence===catalogSequence.current)setCatalog({status:'error',error:error instanceof Error?error.message:String(error)});}}
- async function reconnect(){if(!onReconnect||reconnecting)return;setReconnecting(true);try{await onReconnect();if(alive.current&&latestTask.current.id===task.id)await readContext();}finally{if(alive.current&&latestTask.current.id===task.id)setReconnecting(false);}}
- useEffect(()=>{if(worker)void readContext();else{catalogSequence.current++;setCatalog({status:'offline'});if(!restoring&&!attemptedReconnect.current&&(onAutomaticRestore||onReconnect)){attemptedReconnect.current=true;if(onAutomaticRestore)void Promise.resolve(onAutomaticRestore()).catch(onError);else void reconnect().catch(onError);}}},[worker,task.id,restoring]);
- useEffect(()=>{if(previousCatalogSources.current===catalogSources)return;previousCatalogSources.current=catalogSources;if(worker&&catalog.status==='ready')void readContext();},[catalogSources,worker,catalog.status]);
+ const {catalog,contextReady,projects,environments,clusters,readContext,reconnect,reconnecting,latestTask,alive}=useDeploymentContext({task,worker,restoring,parentProjects,parentEnvironments,readDeploymentContext:deploymentApi.read,onReconnect,onAutomaticRestore,onError});
  useEffect(()=>{if(createdProject&&projects.some(project=>project.id===createdProject.id))setCreatedProject(null);},[projects,createdProject]);
  useEffect(()=>{const value=outbox.current(task);configRef.current=value;setConfig(value);setSaved(!outbox.pending&&sameDeploymentConfig(value,task.deployment?.config));},[task.id,task.parameterRevision,task.deployment?.revision,task.deploymentDraft?.revision]);
  const runSequence=useRef(0),inspectSequence=useRef(0),mutationSequence=useRef(0),current=useRef({taskId:task.id,parameterRevision:task.parameterRevision,scope:''}),runRef=useRef(run),busyRef=useRef(busy);busyRef.current=busy;

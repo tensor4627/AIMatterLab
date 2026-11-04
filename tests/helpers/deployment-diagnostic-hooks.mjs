@@ -11,6 +11,7 @@ import {memoryStorage} from './agent-hooks.mjs';
 const source=fs.readFileSync(new URL('../../src/DeploymentPanel.tsx',import.meta.url),'utf8');
 const reviewSource=fs.readFileSync(new URL('../../src/useLocalReviewStatus.ts',import.meta.url),'utf8');
 const reviewCompiled=ts.transpileModule(reviewSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+const contextCompiled=ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/workflows/useDeploymentContext.ts',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 export function deploymentFixture(id='workflow-A'){
  const config={target:'local',projectId:'project',targetId:'env-A',inputSource:'local',directoryName:'run-'+id,maxSeconds:60,gpu:0,resources:{cpus:1,gpus:1,memory_mb:4096,queue:'',account:''}},run={id:'run-'+id,engine:'pydyn.md',status:'draft',snapshots:[{name:'run.py',sha256:'s'.repeat(64),size:42}]};
@@ -38,6 +39,7 @@ export function deploymentHarness({initial=deploymentFixture(),override,properti
  const require=name=>{
   if(name==='react')return {useState,useRef,useEffect,useMemo};
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};
+  if(name==='../frontend/features/workflows/useDeploymentContext'){const module={exports:{}};new Function('require','module','exports',contextCompiled)(dependency=>{if(dependency==='react')return {useState,useRef,useEffect};throw Error('Unexpected deployment context dependency '+dependency);},module,module.exports);return module.exports;}
   if(name==='../shared/ui-diagnostics.mjs')return {...diagnostics,deploymentDiagnosticJournal:journal};
   if(name==='./DiagnosticNotice')return {DeploymentDiagnostics:'DeploymentDiagnostics',InlineDiagnostic:'InlineDiagnostic'};
   if(name==='./types')return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),engines:[['pydyn.md','PyDyn MD']]};
