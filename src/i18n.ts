@@ -1,4 +1,7 @@
 const english:Record<string,string> = {
+"交互终端":"Interactive terminal",
+"SSH 进程已退出，此会话不可输入。":"The SSH process exited; this session cannot accept input.",
+"终端进程已退出，此会话不可输入。":"The terminal process exited; this session cannot accept input.",
 "正在打开终端…":"Opening terminal…",
 "当前操作尚未完成，请稍后连接。":"An operation is in progress. Connect when it finishes.",
 "连接本地 WSL 或 SSH 集群，保存常用连接。":"Connect local WSL or SSH clusters and save your connections.",

@@ -112,3 +112,10 @@ test('encryption unavailable or linked runtime refuses before daemon spawn',asyn
  const h=harness(t),b=createSharedTerminal({...h.options,encryption:{isEncryptionAvailable:()=>false}});await assert.rejects(b.open({kind:'local',mode:'interactive'}),/encryption_unavailable/);assert.equal(h.spawns.length,0);
  const target=path.join(h.base,'owned-target'),link=path.join(h.base,'owned-link');fs.mkdirSync(target);fs.symlinkSync(target,link,process.platform==='win32'?'junction':'dir');const c=createSharedTerminal({...h.options,runtimeRoot:path.join(link,'not-created')});await assert.rejects(c.open({kind:'local',mode:'interactive'}),/terminal_unavailable/);assert.equal(fs.existsSync(path.join(target,'not-created')),false);
 });
+
+
+test('ProgramData reaches daemon and PTY launch environment while secrets and injection variables remain excluded',async t=>{
+ const env={SystemRoot:'C:\\Windows',ProgramData:'C:\\fixture\\ProgramData',PATH:'fixture',MP_API_KEY:'TEST_ONLY_SECRET',API_TOKEN:'TEST_ONLY_TOKEN',NODE_OPTIONS:'--import=forbidden',ELECTRON_RUN_AS_NODE:'0'};
+ const child=terminalChildEnvironment(env);assert.equal(child.ProgramData,env.ProgramData);assert.equal(child.MP_API_KEY,undefined);assert.equal(child.API_TOKEN,undefined);assert.equal(child.NODE_OPTIONS,undefined);assert.equal(child.ELECTRON_RUN_AS_NODE,'1');
+ const h=harness(t),b=createSharedTerminal({...h.options,platform:'win32',env});await b.open({kind:'local',mode:'interactive'});assert.equal(h.spawns[0].options.env.ProgramData,env.ProgramData);const launch=h.requests.find(r=>r.route==='/sessions/open').body.launch;assert.equal(launch.env.ProgramData,env.ProgramData);assert.equal(launch.env.MP_API_KEY,undefined);assert.equal(launch.env.API_TOKEN,undefined);assert.equal(launch.env.NODE_OPTIONS,undefined);assert.equal(launch.env.ELECTRON_RUN_AS_NODE,undefined);
+});

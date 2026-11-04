@@ -52,7 +52,8 @@ export function buildTerminalLaunch(profile,mode,settings={}){
 }
 
 export function terminalChildEnvironment(env){
- const keys=['SystemRoot','WINDIR','ComSpec','PATH','PATHEXT','TEMP','TMP','USERPROFILE','LOCALAPPDATA','APPDATA','HOMEDRIVE','HOMEPATH','HOME','USER','LOGNAME','SHELL','LANG','LC_ALL','SSH_AUTH_SOCK'];
+ // Windows OpenSSH needs ProgramData during initialization, even for -V.
+ const keys=['SystemRoot','WINDIR','ComSpec','ProgramData','PATH','PATHEXT','TEMP','TMP','USERPROFILE','LOCALAPPDATA','APPDATA','HOMEDRIVE','HOMEPATH','HOME','USER','LOGNAME','SHELL','LANG','LC_ALL','SSH_AUTH_SOCK'];
  const result=Object.fromEntries(keys.filter(k=>typeof env[k]==='string').map(k=>[k,env[k]]));
  return {...result,ELECTRON_RUN_AS_NODE:'1'};
 }
