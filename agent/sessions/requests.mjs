@@ -20,22 +20,23 @@ import {managedToolSkillContext} from '../skills/managed-tool-context.mjs';
 
 export function createAgentRequests({runtime}){
  return async function agentRpc({provider,method,params={}}){
- const {agents,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
+ const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
  providerId(provider);assertRpc(method);
+ const resource=resourceRouting?.capture(),selectedSsh=resource?.selection?.kind==='ssh-terminal'?resource.selection:null;
  const {studioSkillId,studioTurnRequestId,...protocolParams}=params;params=protocolParams;
  if(studioTurnRequestId!==undefined&&(typeof studioTurnRequestId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(studioTurnRequestId)))throw Error('Invalid turn request identity');
  if(studioSkillId!==undefined&&(typeof studioSkillId!=='string'||!scientificSkills.router.routes.has(studioSkillId)))throw Error('Choose a listed scientific function');
- if(method==='turn/steer'){
-  const task=taskRecords.bound(provider,params.threadId);
-  if(task&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');
- }
  let ticket,skillContext,skillKey,terminalOnly=false;
- const check=()=>{if(ticket)workflowContext.assert(ticket);};
+ const check=()=>{resource?.assertCurrent();if(ticket)workflowContext.assert(ticket);};
+ const selectedTerminalReady=async()=>{const status=await resourceRouting.readiness(provider);check();if(status?.status!=='ready'||status.resource?.selectionId!==selectedSsh.selectionId)throw Error('请先将所选 SSH 终端交接给当前对话；不会改用其他计算资源。');};
  const synchronize=async()=>{check();await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));check();};
  if(['thread/start','thread/resume','turn/start'].includes(method)){
   assertIdleAgent();ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId);await synchronize();
  }
- terminalOnly=method==='turn/start'&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
+ if(selectedSsh&&['turn/start','turn/steer'].includes(method)){await selectedTerminalReady();terminalOnly=true;}
+ else terminalOnly=method==='turn/start'&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
+ if(method==='turn/steer'&&!terminalOnly){const task=taskRecords.bound(provider,params.threadId);if(task&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');check();}
+ if(method==='turn/steer'&&terminalOnly)params=terminalOnlyTurn(params,{provider,resource:selectedSsh});
  if(method==='turn/start'&&!terminalOnly){
   let task=taskRecords.bound(provider,params.threadId);
   if(task){const access=await privateAccess.assertTask(task,provider);check();if(access.definitionOnly){
@@ -47,13 +48,13 @@ export function createAgentRequests({runtime}){
  }
  skillKey=provider+':'+params.threadId;
  if(method==='turn/start'&&terminalOnly){
-  params=terminalOnlyTurn(params,{provider});check();
+  params=terminalOnlyTurn(params,{provider,resource:selectedSsh});check();
   if(provider==='codex'&&!agents.threadReady(params.threadId)){
    const resumed=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=resumed.ticket;check();
    if(resumed.result.studioRecovery?.status==='required')return resumed.result;
    params={...params,threadId:resumed.result.thread.id};
   }
-  if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');
+  if(selectedSsh)await selectedTerminalReady();else if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');
  }
  if(method==='turn/start'&&!terminalOnly){
   const before=taskRecords.bound(provider,params.threadId);let definitionOnly=!!before?.customCv?.id;if(before&&worker.connection){definitionOnly=(await privateAccess.assertTask(before,provider)).definitionOnly;check();}
@@ -95,7 +96,7 @@ export function createAgentRequests({runtime}){
   params={...params,input};
  }
  let result;
- try{check();if(provider==='codex'&&method==='thread/resume'){const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;}else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{check();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
+ try{check();if(selectedSsh&&terminalOnly)await selectedTerminalReady();if(provider==='codex'&&method==='thread/resume'){const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;}else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{check();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
  catch(error){if(method==='turn/start'){try{check();taskRecords.failedTurn(provider,params.threadId,error);}catch{}}throw error;}
  if(method==='thread/start'){if(!result.thread?.id)throw Error('The server did not return a real conversation');workflowContext.started(ticket,result.thread.id);await synchronize();}
  if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)catalog.put('thread',result.thread.id,result.thread);

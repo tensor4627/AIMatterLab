@@ -16,6 +16,7 @@ import {providerId} from "../../agent/providers/contracts.mjs";
 import {assertRpc} from "../../contracts/transport-policy.mjs";
 import {toolGuidanceTarget} from "../../backend/main/compute/tool-guidance-target.mjs";
 import {createAgentRequests} from "../../agent/sessions/requests.mjs";
+import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 
 function harness(t,{state='active',withOtherTool=false,withGuidanceSource=false}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-main-guidance-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
@@ -46,6 +47,7 @@ function harness(t,{state='active',withOtherTool=false,withGuidanceSource=false}
   localSkills:(...args)=>{scans++;return localSkills(...args);},selectedSkillContext:(...args)=>{reads++;return selectedSkillContext(...args);},managedToolSkillContext,sourceContext:()=>{if(withOtherTool)return 'Other registered source metadata';throw Error('No archived source guidance');},
   deliverScientificTurn,toolGuidanceTarget,emit:()=>{},randomUUID,handle:(name,handler)=>handlers.set(name,handler),
  };
+ context.resourceRouting=createAgentResourceRouting({resource:()=>null});
  vm.runInNewContext(leaseState.join('\n')+'\n'+functions.join('\n')+'\n'+assignments[0]+';\n'+requestFactories.join('\n')+'\n'+registrations.join(';\n'),context);
  const restore=[],operations={exists:0,readdir:0,stat:0,open:0,read:0};let allowArchivedReads=false;
  for(const api of [fs,promises])for(const [method,kind]of Object.entries({existsSync:'exists',readdirSync:'readdir',statSync:'stat',lstatSync:'stat',realpathSync:'stat',openSync:'open',readFileSync:'read',readdir:'readdir',stat:'stat',lstat:'stat',realpath:'stat',open:'open',readFile:'read'}))if(typeof api[method]==='function'){

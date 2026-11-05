@@ -19,7 +19,7 @@ const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarge
 const reviewSource=ts.createSourceFile('RunReview.tsx',fs.readFileSync(new URL('../../frontend/features/runs/RunReview.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const taskModuleSource=reviewSource.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='taskModule').getText(reviewSource).replace(/^export /,'');
 const taskModule=new Function('t',ts.transpileModule(taskModuleSource,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'; return taskModule;')(value=>value);
-const navigationModules=Object.fromEntries(['frontend/features/workflows/useToolWorkflowNavigation.ts','frontend/api/tool-workflows.ts','frontend/api/studio.ts'].map(file=>[file,ts.transpileModule(fs.readFileSync(new URL('../../'+file,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
+const navigationModules=Object.fromEntries(['frontend/features/workflows/useToolWorkflowNavigation.ts','frontend/api/tool-workflows.ts','frontend/api/compute-resources.ts','frontend/api/studio.ts'].map(file=>[file,ts.transpileModule(fs.readFileSync(new URL('../../'+file,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
 // App tests explicitly acknowledge the child guide result; no automatic completion.
 export async function completeComputeGuide(h,connected){const guide=h.find(node=>node.type==='./ComputeConnectionGuide');guide.props.onClose(connected);await h.flush();return guide.props;}
 export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={}){
@@ -28,6 +28,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
  const useEffect=(fn,deps)=>{const index=cursor++,previous=hooks[index];if(!previous||!deps||deps.some((value,i)=>!Object.is(value,previous.deps?.[i]))){const record={deps,cleanup:previous?.cleanup};hooks[index]=record;pending.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
  const standard=async(method,data)=>{
+  if(method==='compute.resource.status')return {schemaVersion:1,selectionId:null,kind:null,profileId:null,profileVersion:null,sessionId:null,status:'none',operator:'unknown',processStatus:'unknown',alive:null,agentReady:false,reason:null,authentication:'not_observed',managedRuns:false};
   if(method==='state')return {settings};
   if(['conversation.list','conversation.groups','task.list','workflow.list'].includes(method))return [];
   if(method==='worker.status')return {status:'connected',checkedAt:1};
@@ -46,12 +47,13 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   new Function('require','module','exports','window','crypto',navigationModules[file])(name=>{
    if(name==='react')return {useState,useRef,useEffect};
    if(file==='frontend/features/workflows/useToolWorkflowNavigation.ts'&&name==='../../api/tool-workflows')return loadNavigation('frontend/api/tool-workflows.ts');
-   if(file==='frontend/api/tool-workflows.ts'&&name==='./studio')return loadNavigation('frontend/api/studio.ts');
+   if(['frontend/api/tool-workflows.ts','frontend/api/compute-resources.ts'].includes(file)&&name==='./studio')return loadNavigation('frontend/api/studio.ts');
    throw Error('Unexpected workflow-navigation dependency '+file+': '+name);
   },module,module.exports,window,{randomUUID});return module.exports;
  }
  const require=name=>{
   if(name==='react')return {useState,useRef,useEffect};
+  if(name==='../api/compute-resources')return loadNavigation('frontend/api/compute-resources.ts');
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
   if(name==="../features/conversations/useConversationSelection")return conversationSelection;
   if(name==="../features/workflows/useToolWorkflowNavigation")return loadNavigation('frontend/features/workflows/useToolWorkflowNavigation.ts');

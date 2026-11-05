@@ -28,6 +28,10 @@ function harness({profiles=[local,ssh],override,props={}}={}){
  render();return {render,flush,find,id,input,submit,clickId,unmount,calls,connected,errors,all:()=>all(tree)};
 }
 const row=(h,id)=>h.find(n=>n.props?.['data-profile-id']===id);
+
+test('active SSH profile is marked current without treating an existing local worker as the selected resource',async()=>{
+ const h=harness({props:{localConnected:true,activeResource:{kind:'ssh-terminal',selectionId:'selected',profileId:ssh.id,profileVersion:ssh.version,status:'selected'}}});await h.flush();const text=n=>typeof n==='string'?n:Array.isArray(n)?n.map(text).join(''):n&&typeof n==='object'?text(n.props?.children):'';assert.match(text(row(h,ssh.id)),/当前连接/);assert.doesNotMatch(text(row(h,local.id)),/当前连接/);assert.deepEqual(h.connected,[]);h.unmount();
+});
 const children=n=>Array.isArray(n)?n.flatMap(children):n&&typeof n==='object'?[n,...children(n.props?.children)]:[];
 const edit=(h,id)=>children(row(h,id)).find(n=>n.props?.['aria-label']?.startsWith('编辑连接')).props.onClick();
 const connect=(h,id)=>children(row(h,id)).find(n=>n.type==='button'&&n.props.className==='button primary').props.onClick();

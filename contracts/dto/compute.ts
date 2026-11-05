@@ -28,4 +28,9 @@ export interface SshComputeProfile {id:string;version:number;kind:'ssh';name:str
 
 export type ComputeProfile=WslComputeProfile|SshComputeProfile;
 
+/** A selected SSH terminal is not an authenticated Studio worker or a run grant. */
+export interface SshTerminalResourceReference {kind:'ssh-terminal';profileId:string;profileVersion:number}
+export interface ComputeResourceActivation extends SshTerminalResourceReference {sessionId:string}
+export interface ComputeResourceState {schemaVersion:1;selectionId:string|null;kind:'ssh-terminal'|null;profileId:string|null;profileVersion:number|null;sessionId:string|null;status:'selected'|'stale'|'unavailable'|'none';operator:'human'|'agent'|'unknown';processStatus:'running'|'exited'|'expired'|'unknown';alive:boolean|null;agentReady:boolean;reason:string|null;authentication:'not_observed';managedRuns:false}
+
 export type ProjectAuthorizationSpec={name:string;policy:{engines:string[];gpus:number[];max_seconds:number;max_concurrent:number;input_roots:string[];environments:string[];clusters?:string[]}};

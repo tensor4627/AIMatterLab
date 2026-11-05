@@ -79,7 +79,7 @@ function nativeHarness(config){
  fs.mkdirSync(config.profile);fs.mkdirSync(config.sessionData);fs.mkdirSync(config.appData);
  app.setPath('appData',config.appData);app.setPath('userData',config.profile);app.setPath('sessionData',config.sessionData);
  // Observe real registrations and replies. Forbidden routes fail before external work.
- const allowed=new Set(['studio:state','studio:conversation.list','studio:conversation.groups','studio:conversation.select','studio:task.list','studio:workflow.list','studio:worker.restore','studio:worker.status','studio:scientific.skills','studio:skills.catalog','studio:tools.packages.list','studio:tools.configurations.list','studio:tools.configurations.context']);
+ const allowed=new Set(['studio:state','studio:conversation.list','studio:conversation.groups','studio:conversation.select','studio:task.list','studio:workflow.list','studio:worker.restore','studio:worker.status','studio:compute.resource.status','studio:scientific.skills','studio:skills.catalog','studio:tools.packages.list','studio:tools.configurations.list','studio:tools.configurations.context']);
  const register=ipcMain.handle.bind(ipcMain);
  ipcMain.handle=(channel,handler)=>register(channel,async(event,...args)=>{
   const row={id:receipt.ipc.length+1,channel,startedAt:Date.now(),argumentKeys:args[0]&&typeof args[0]==='object'?Object.keys(args[0]):[]};receipt.ipc.push(row);

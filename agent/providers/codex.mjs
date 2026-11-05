@@ -91,18 +91,19 @@ export class CodexBridge extends EventEmitter {
     if (!this.process || this.process.stdin.destroyed) throw new Error('Connect Codex first');
     this.process.stdin.write(JSON.stringify(value) + '\n');
   }
-  request(method,params={},timeout=120000){
+  request(method,params={},timeout=120000,{assertCurrent=()=>{}}={}){
+    assertCurrent();
     if(!this.strictIsolation)return this.rawRequest(method,params,timeout);
-    return this.isolatedRequest(method,params,timeout);
+    return this.isolatedRequest(method,params,timeout,assertCurrent);
   }
-  async isolatedRequest(method,params,timeout){
+  async isolatedRequest(method,params,timeout,assertCurrent=()=>{}){
     if(!this.isolationReady||!this.isolation)throw Error('Codex isolation has not been verified');
     const child=this.process,generation=this.lifecycle;if(method==='turn/start'&&this.isolation.catalog)params={...params,model:params.model??this.threadModels.get(params.threadId)??this.isolation.defaultModel};const scoped=this.host.constrainedRequest(method,params,this.isolation);
     if(['thread/start','thread/resume','turn/start','turn/steer'].includes(method)){
       const summary=await this.host.verifyIsolation((...args)=>this.rawRequest(...args),this.isolation,['turn/start','turn/steer'].includes(method)?{threadId:params.threadId}:{});
       if(this.process!==child||this.lifecycle!==generation||!this.isolationReady)throw Error('Codex isolated context changed before dispatch');this.isolationSummary=summary;
     }
-    const result=await this.rawRequest(method,scoped,timeout);
+    assertCurrent();const result=await this.rawRequest(method,scoped,timeout);assertCurrent();
     if(['thread/start','thread/resume','turn/start','turn/steer'].includes(method)&& (this.process!==child||this.lifecycle!==generation))throw Error('Codex isolated context changed during dispatch');
     if(['thread/start','thread/resume'].includes(method)){try{
       this.host.assertInstructionSources(result,this.isolation);if(this.isolation.catalog&&result.model!==scoped.model)throw Error('Resumed model differs from the Studio capability ceiling');
@@ -110,7 +111,7 @@ export class CodexBridge extends EventEmitter {
       // Complete this thread's MCP initialization before main binds its first lease context.
       const summary=await this.host.verifyIsolation((...args)=>this.rawRequest(...args),this.isolation,{threadId:result.thread.id});
       if(this.process!==child||this.lifecycle!==generation||!this.isolationReady)throw Error('Codex isolated context changed while initializing conversation tools');
-      this.isolationSummary=summary;this.threadModels.set(result.thread.id,scoped.model);
+      assertCurrent();this.isolationSummary=summary;this.threadModels.set(result.thread.id,scoped.model);
     }catch(error){if(this.process===child&&this.lifecycle===generation)this.close();throw error;}}
     return result;
   }

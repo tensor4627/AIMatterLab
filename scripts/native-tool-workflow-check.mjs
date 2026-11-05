@@ -24,7 +24,7 @@ function nativeWorkflowHarness(config){
  const deadline=setTimeout(()=>finish(Error('Native workflow gate check timed out')),config.timeoutMs);process.on('uncaughtException',finish);process.on('unhandledRejection',finish);
  assert.equal(process.env.STUDIO_PROFILE_DIR,config.profile);for(const folder of [config.profile,config.sessionData,config.appData]){assert(!fs.existsSync(folder),'A fresh isolated profile is required');fs.mkdirSync(folder);}app.setPath('appData',config.appData);app.setPath('userData',config.profile);app.setPath('sessionData',config.sessionData);
  const readonlyWorkflows=new Set(['studio:tools.workflows.context','studio:tools.workflows.list','studio:tools.workflows.locateRun','studio:tools.workflows.read','studio:tools.workflows.status']);
- const allowed=new Set(['state','conversation.list','conversation.groups','conversation.select','task.list','task.create','task.read','workflow.list','worker.restore','worker.status','scientific.skills','skills.catalog','tools.packages.list','tools.configurations.list','tools.configurations.context','worker.request'].map(name=>'studio:'+name));
+ const allowed=new Set(['state','conversation.list','conversation.groups','conversation.select','task.list','task.create','task.read','workflow.list','worker.restore','compute.resource.status','worker.status','scientific.skills','skills.catalog','tools.packages.list','tools.configurations.list','tools.configurations.context','worker.request'].map(name=>'studio:'+name));
  const register=ipcMain.handle.bind(ipcMain);ipcMain.handle=(channel,handler)=>register(channel,async(event,value)=>{
   const row={channel,startedAt:Date.now(),keys:value&&typeof value==='object'?Object.keys(value):[]};receipt.ipc.push(row);
   try{

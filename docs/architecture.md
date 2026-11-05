@@ -46,6 +46,8 @@ tests/                    frontend/backend/agent/contracts/integration 工程检
 
 桌面 Catalog 保存会话、任务草稿、版本引用和索引。worker Store 保存权威 Run、不可变输入、配置和流程事实；JSON 镜像可重建，不能代替 Store 判定作业状态。关闭桌面不会结束已提交任务；未知运行只观察和核对，不自动新建尝试。
 
+已保存的交互 SSH 连接可将已有共享终端绑定为当前计算资源，引用精确的 profile/version/session。Agent 按该资源的明确交接使用 Terminal MCP，已有本地 worker 不抢占这条路由；人工接管立即撤销终端读写权限。绑定不重开 SSH、不自动交接，也不改变 worker 或项目授权。终端通道状态与 SSH 认证、托管 Run 状态分别记录。
+
 Agent 从后端取得结构化事实，再生成模型上下文。MCP 和模型回复不能修改授权，也不能将计划、安装说明或推断变成真实运行结果。人工审阅执行门保留在真实来源和当前版本上。
 
 ## 工具、配置与流程

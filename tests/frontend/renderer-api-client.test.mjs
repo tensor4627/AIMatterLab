@@ -32,6 +32,11 @@ function clientModules(bridge){
  return {load,modules,runtime};
 }
 
+test('compute resource client preserves exact typed status, observed session activation and CAS-clear envelopes',async()=>{
+ const calls=[],answer={actual:'receipt'},f=clientModules({async invoke(method,data){calls.push({method,data});return answer;}}),{computeResources}=f.load('frontend/api/compute-resources.ts'),reference={kind:'ssh-terminal',profileId:'saved',profileVersion:3,sessionId:'actual-session'};
+ assert.equal(await computeResources.status(),answer);assert.equal(await computeResources.activate(reference),answer);assert.equal(await computeResources.clear('selection-A'),answer);assert.deepEqual(calls,[{method:'compute.resource.status',data:{}},{method:'compute.resource.activate',data:reference},{method:'compute.resource.clear',data:{selectionId:'selection-A'}}]);assert.equal(calls[1].data,reference);
+});
+
 test('canonical owners import without a browser and expose the eight runtime exports',()=>{
  const f=clientModules(),actual=f.runtime();
  assert.deepEqual(Object.keys(actual).sort(),runtimeNames);

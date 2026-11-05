@@ -1,6 +1,8 @@
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
+import {createAgentResourceRouting} from '../agent/sessions/resource-routing.mjs';
+import {createComputeResourceBinding} from '../backend/main/compute/resource-binding.mjs';
 import {computeRuntime} from './platform/compute-runtime.mjs';
 import {createComputeProfiles} from '../backend/main/compute/compute-profiles.mjs';
 import {createSharedTerminal} from "../backend/main/compute/shared-terminal.mjs";
@@ -103,10 +105,11 @@ else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',im
 let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
-let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp;
+let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource;
 const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map(), grants = new Map();
 Object.defineProperty(worker,'bundledRuntimeId',{value:bundledWorkerRuntimeId(workerSource)});
+const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents});
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
   sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
@@ -155,7 +158,7 @@ if(installationVerifying){
  const sourceIds=config.desktop.source_ids??[];if(!Array.isArray(sourceIds)||sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id)))throw Error('Invalid installation source summary scope');
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
-agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider)||terminalMcp?.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>{const local=terminalMcp?.bindProviderContext(provider,context,options),scientific=worker.bindProviderContext(provider,context,options);return worker.providerConnection(provider)?scientific:local||scientific;}});
+agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
 scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
@@ -206,11 +209,19 @@ handle('compute.profiles.list',value=>{if(!value||typeof value!=='object'||Array
 handle('compute.profiles.read',value=>computeProfiles.read(value));
 handle('compute.profiles.save',value=>computeProfiles.save(value));
 handle('compute.profiles.inventory',async value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid WSL inventory request');return {distributions:await installedWslDistributions()};});
-sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,
+sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,getSelectedResource:()=>computeResource?.peek(),selectionRevision:()=>computeResource?.revision()??0,
  root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:path.join(app.getPath('userData'),'shared-terminal','runtime'),
  dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):root,
  servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'platform','terminal-service','broker.mjs'),nodeExecutable:process.execPath,
  sourceGuard:()=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),{}),worker)});
+computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,current:()=>workflowContext.current(),revision:()=>workflowContext.revision()});
+handle('compute.resource.status',value=>computeResource.status(value));
+for(const method of ['activate','clear'])handle('compute.resource.'+method,async value=>{
+ assertIdleAgent();agents.assertContextIdle();const result=await computeResource[method](value);
+ if(computeResource.peek()?.kind==='ssh-terminal')for(const provider of ['codex','kimi','qwen','deepseek','compatible'])worker.revokeProvider(provider);
+ emit('studio:event',{method:'studio/computeResourceChanged',params:result});
+ const provider=agents.active;void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});return result;
+});
 const terminalTools=sharedTerminal.tools(),terminalToolNames=new Set(terminalTools.map(tool=>tool.name));
 worker.setLocalTools([...materials.tools(),...terminalTools],(name,args,scope)=>terminalToolNames.has(name)?sharedTerminal.callTool(name,args,scope):materials.call(name,args));
 for(const method of ['list','open','read','input','resize','owner','close'])handle('sharedTerminal.'+method,async value=>{const result=await sharedTerminal[method](value);if(['owner','close'].includes(method)){const provider=workflowContext.current()?.provider;if(provider)void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});}return result;});
@@ -339,6 +350,7 @@ handle('codex.configure',async({preferences={},threadId,model}) => {
 handle('codex.rpc',value=>agentRpc({...value,provider:'codex'}));
 registerWorkflowPlanRoutes({handle,catalog});
 async function scientificTools(provider){
+ const selected=await resourceRouting.readiness(provider);if(selected)return selected;
  const terminalReady=()=>sharedTerminal?.hasCurrentGrant(provider)?{status:'ready',scope:'terminal-only',scientificStatus:'blocked',count:3,transport:'desktop-terminal',message:'共享终端可用',checkedAt:Date.now()}:null;
  if(!worker.providerConnection(provider)&&terminalReady())return terminalReady();
  const result=await scientificToolReadiness({worker,codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:()=>agents.active},provider);
@@ -346,7 +358,9 @@ async function scientificTools(provider){
 }
 handle('agent.connect',async({provider,repairTools=false})=>{
  providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');
- if(repairTools){
+ const resource=resourceRouting.capture();
+ if(repairTools&&resource.selection?.kind==='ssh-terminal'){assertIdleAgent();agents.assertContextIdle();agents.close();}
+ else if(repairTools){
   assertIdleAgent();const revision=workflowContext.revision(),owner=workflowContext.current(),connection=worker.connection,epoch=worker.connectionEpoch;
   const task=owner?.taskId?taskRecords.read(owner.taskId):null;let source,target;try{source=taskWorkerSource(task);target=task?taskWorkerTarget(task,settings,catalog):settings;}catch{throw Error('请先通过“连接计算资源”核对原服务来源和端口，再修复工具连接。');}
   if(task&&(!source||!target||!validTransportPort(target.workerPort)))throw Error('请先通过“连接计算资源”核对原服务来源和端口，再修复工具连接。');
@@ -359,14 +373,14 @@ handle('agent.connect',async({provider,repairTools=false})=>{
  // Model/account recovery never registers sources or environments.
  // Compute setup owns discovery/registration; App restores its saved binding separately.
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- const info=await agents.connect(provider),tools=await scientificTools(provider);
+ const info=await agents.connect(provider);resource.assertCurrent();const tools=await scientificTools(provider);resource.assertCurrent();
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};
 });
 handle('agent.tools',async({provider})=>{providerId(provider);return scientificTools(provider);});
 handle('agent.disconnect',({provider})=>{providerId(provider);workflowContext.clear(provider);agents.disconnect(provider);return {};});
 handle('agent.account',({provider})=>agents.account(provider));
-const agentRequests=createAgentRequests({runtime:()=>({agents,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){return agentRequests(value);}
 handle('agent.rpc',agentRpc);
 handle('agent.recover',async({provider,threadId,model})=>{

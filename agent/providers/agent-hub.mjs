@@ -13,8 +13,9 @@ export function loginUrl(provider,url){
  return target.href;
 }
 export class AgentHub extends EventEmitter{
- constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,fetchApi,host=providerRuntime}){
+ constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,resourceScope=()=>null,fetchApi,host=providerRuntime}){
   super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bindWorkerContext=bindWorkerContext;this.contexts=new Map();this.contextGeneration=0;this.contextPending=0;this.contextQueue=Promise.resolve();this.pristineThreads=new Set();this.attemptedThreads=new Set();this.contextResume=new Map();this.pendingTurnDispatches=new Set();this.contextClosing=new Set();this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.host=host;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
+  this.resourceScope=resourceScope;
   this.codex.on?.('event',event=>{
    if(event.method==='studio/codexDisconnected')this.release('codex');
    const thread=event.params?.threadId;
@@ -128,9 +129,12 @@ export class AgentHub extends EventEmitter{
  }
  async rpc(provider,method,params={}){
   providerId(provider);this.host.assertRpc(method);if(this.contextPending&&!['turn/interrupt','account/read'].includes(method))throw Error('Wait for conversation context selection to finish');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');
-  const bridge=this.bridge(provider);if(!bridge?.process)throw Error('Connect '+provider+' first');
-  const generation=this.contextGeneration,selected=this.contexts.get(provider);
-  const assertSelected=()=>{if(generation!==this.contextGeneration||selected!==this.contexts.get(provider))throw Error('Conversation context selection was superseded');};
+  const bridge=this.bridge(provider);
+  const generation=this.contextGeneration,selected=this.contexts.get(provider),resource=this.resourceScope(provider,method);
+  const assertSelected=()=>{resource?.assertCurrent();if(provider!==this.active||this.bridge(provider)!==bridge||generation!==this.contextGeneration||selected!==this.contexts.get(provider))throw Error('Conversation context selection was superseded');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');};
+  // A spawned app-server is only a transport until initialize and isolation readbacks finish.
+  if(provider==='codex'&&bridge?.starting){const lifecycle=bridge.lifecycle;await bridge.starting;assertSelected();if(lifecycle!==bridge.lifecycle)throw Error('Codex context changed while connecting');}
+  if(!bridge?.process)throw Error('Connect '+provider+' first');
   if(selected&&params.threadId&&selected.threadId!==params.threadId)throw Error('Select the trusted conversation context first');
   if(selected?.threadId&&method==='thread/start')throw Error('Select an empty conversation context before starting a new thread');
   const resume=this.contextResume.get(provider);
@@ -166,7 +170,7 @@ export class AgentHub extends EventEmitter{
   const attemptedKey=params.threadId?this.contextKey(provider,params.threadId):null;
   if(method==='turn/start'){this.pristineThreads.delete(attemptedKey);this.attemptedThreads.add(attemptedKey);this.pendingTurnDispatches.add(attemptedKey);}
   const emptyDispatch=provider==='codex'&&method==='turn/start'&&this.codexThreadState(params.threadId)?.state==='empty';
-  let result;try{if(emptyDispatch)this.recordCodexThread(params.threadId,'pending');assertSelected();result=await bridge.request(method,params);assertSelected();}catch(error){
+  let result;try{if(emptyDispatch)this.recordCodexThread(params.threadId,'pending');assertSelected();result=await bridge.request(method,params,undefined,{assertCurrent:assertSelected});assertSelected();}catch(error){
    if(blankStart){this.pendingBlankTurns.delete(params.threadId);if(error.rpcResponse!==true)this.blankThreads.delete(params.threadId);}
    if(emptyDispatch)this.recordCodexThread(params.threadId,error.rpcResponse===true?'empty':'unknown');
    if(provider==='codex'&&method==='thread/resume'&&/no rollout found for thread/i.test(error.message)){const missing=Error('暂时无法读取此对话的聊天记录。计算流程和作业记录仍保留，可重新建立对话连接。',{cause:error});missing.code='STUDIO_CODEX_ROLLOUT_MISSING';throw missing;}
