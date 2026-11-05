@@ -11,6 +11,10 @@ import {memoryStorage} from './agent-hooks.mjs';
 import {loadConversationSelection} from './conversation-selection-hooks.mjs';
 const source=fs.readFileSync(new URL('../../src/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+const reviewSource=ts.createSourceFile('RunReview.tsx',fs.readFileSync(new URL('../../src/RunReview.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const taskModuleSource=reviewSource.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='taskModule').getText(reviewSource).replace(/^export /,'');
+const taskModule=new Function('t',ts.transpileModule(taskModuleSource,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'; return taskModule;')(value=>value);
+const navigationModules=Object.fromEntries(['frontend/features/workflows/useToolWorkflowNavigation.ts','frontend/api/tool-workflows.ts','frontend/api/studio.ts'].map(file=>[file,ts.transpileModule(fs.readFileSync(new URL('../../'+file,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
 // App tests explicitly acknowledge the child guide result; no automatic completion.
 export async function completeComputeGuide(h,connected){const guide=h.find(node=>node.type==='./ComputeConnectionGuide');guide.props.onClose(connected);await h.flush();return guide.props;}
 export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={}){
@@ -31,10 +35,22 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
  };
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
  const conversationSelection=loadConversationSelection({react:{useState,useRef,useEffect},storage});
+ const loadedNavigation=new Map();
+ function loadNavigation(file){
+  if(loadedNavigation.has(file))return loadedNavigation.get(file).exports;const module={exports:{}};loadedNavigation.set(file,module);
+  new Function('require','module','exports','window','crypto',navigationModules[file])(name=>{
+   if(name==='react')return {useState,useRef,useEffect};
+   if(file==='frontend/features/workflows/useToolWorkflowNavigation.ts'&&name==='../../api/tool-workflows')return loadNavigation('frontend/api/tool-workflows.ts');
+   if(file==='frontend/api/tool-workflows.ts'&&name==='./studio')return loadNavigation('frontend/api/studio.ts');
+   throw Error('Unexpected workflow-navigation dependency '+file+': '+name);
+  },module,module.exports,window,{randomUUID});return module.exports;
+ }
  const require=name=>{
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
   if(name==='../frontend/features/conversations/useConversationSelection')return conversationSelection;
+  if(name==='../frontend/features/workflows/useToolWorkflowNavigation')return loadNavigation('frontend/features/workflows/useToolWorkflowNavigation.ts');
+  if(name==='./RunReview')return {__esModule:true,default:name,taskModule};
   if(name==='lucide-react')return new Proxy({},{get:(_target,key)=>String(key)});
   if(name==='./workspace-shell.mjs')return shell;
   if(name==='./workspace-navigation.mjs')return navigation;
@@ -47,7 +63,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   return new Proxy({default:name},{get:(target,key)=>target[key]??String(key)});
  };
  const module={exports:{}},document={documentElement:{dataset:{},style:{setProperty(){}}},addEventListener(){},removeEventListener(){},querySelector(){return null;}};
- const window={innerWidth:width,dispatchEvent(){},addEventListener(){},removeEventListener(){},studio:{onEvent:fn=>{listeners.push(fn);return()=>listeners.splice(listeners.indexOf(fn),1);}}};
+ const window={innerWidth:width,dispatchEvent(){},addEventListener(){},removeEventListener(){},studio:{invoke,onEvent:fn=>{listeners.push(fn);return()=>listeners.splice(listeners.indexOf(fn),1);}}};
  new Function('require','module','exports','localStorage','window','document','crypto','setInterval','clearInterval','requestAnimationFrame','cancelAnimationFrame',compiled)(require,module,module.exports,storage,window,document,{randomUUID},()=>1,()=>{},()=>1,()=>{});
  function render(){cursor=0;dirty=false;tree=module.exports.default();}
  async function flush(){for(let i=0;i<20;i++){while(pending.length)pending.shift()();await new Promise(resolve=>setImmediate(resolve));if(dirty&&!disposed)render();}}

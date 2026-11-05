@@ -1,7 +1,7 @@
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
-import {readWorkerStatus} from './worker-status.mjs';
+import {createVerifiedWorkerScope} from './verified-worker-scope.mjs';
 
 const INDEX='tool-configuration-index',BINDING='tool-guidance-binding',METADATA='tool-guidance-metadata';
 const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
@@ -24,17 +24,7 @@ function guidancePaths(record,relative){
 /** Human configuration actions and desktop references; the worker owns all outcomes. */
 export function createToolConfigurationController({catalog,packages,worker,getSettings,current,currentTarget=()=>null,getProvider=()=>current()?.provider||getSettings().agentProvider||'codex',getLease=provider=>worker.providerScopes?.scopes?.get(provider),assertIdle,confirm,toWorkerPath,now=Date.now}){
  const grants=new Map(),bindingOperations=new Map();
- const currentBinding=()=>{
-  const identity=worker.identity,target=worker.connectionTarget;
-  if(!worker.connection||!identity||typeof identity.distribution!=='string'||typeof identity.root!=='string'||!Number.isInteger(target?.port))throw Error('Connect and verify the intended job service first');
-  return {distribution:identity.distribution,root:identity.root,port:target.port};
- };
- function capture(expected){
-  const observed=currentBinding(),connection=worker.connection,epoch=worker.connectionEpoch,owner=structuredClone(current()),target=structuredClone(currentTarget());
-  if(expected&&!equal(observed,expected))throw Error('Restore the original service for this configuration');
-  return {binding:observed,assert(){if(worker.connection!==connection||worker.connectionEpoch!==epoch||!equal(currentBinding(),observed)||!equal(current(),owner)||!equal(currentTarget(),target))throw Error('Configuration owner, target or service changed');}};
- }
- async function verified(expected){const ticket=capture(expected);const status=await readWorkerStatus(worker,getSettings);ticket.assert();if(status.status!=='connected')throw Error('Original service identity is not verified');return ticket;}
+ const {currentBinding,capture,verified}=createVerifiedWorkerScope({worker,getSettings,current,currentTarget});
  function index(value){id(value);const found=catalog.get(INDEX,value);if(!found||found.schema_version!==1)throw Error('Unknown tool configuration reference');return found;}
  const recordFor=reference=>{try{return packages.read({package_id:reference.package_id,package_version:reference.package_version});}catch{if(reference.package_metadata)return reference.package_metadata;throw Error('Registered package metadata unavailable');}};
  function compatibleTarget(reference){

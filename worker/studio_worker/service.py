@@ -39,6 +39,8 @@ class Service(RuntimeServiceMixin):
         self.stop_event = threading.Event()
         self.compute_setup_lock = threading.Lock()
         self.tool_configuration_lock = threading.RLock()
+        self.tool_workflow_lock = threading.RLock()
+        self._tool_workflow_token = object()
         self.processes = {}
         self.provenance = {}
         for run in self.store.runs():
@@ -116,10 +118,15 @@ class Service(RuntimeServiceMixin):
             raise PermissionError("Duration exceeds project authorization")
         return project, self.store.get("environment", spec["environment_id"])
 
-    def prepare(self, spec):
+    def prepare(self, spec, *, _workflow_context=None):
         spec = dict(spec)
         if "continuation_metadata" in spec:
             raise ValueError("Continuation metadata is worker-owned")
+        if set(spec) & {'studio_workflow_binding', 'workflow_execution_id', 'workflow_step_id', 'workflow_context', 'workflow_directory', '_workflow_context'}:
+            raise PermissionError('Workflow run binding is worker-owned')
+        if _workflow_context is not None:
+            from .workspace.tool_workflows import prepare_binding
+            spec['studio_workflow_binding'] = prepare_binding(self, _workflow_context, spec)
         for key in ("project_id", "environment_id", "engine", "inputs", "gpu", "max_seconds", "idempotency_key"):
             if key not in spec:
                 raise ValueError("Missing " + key)
@@ -129,8 +136,10 @@ class Service(RuntimeServiceMixin):
             raise ValueError("Explicit inputs required")
         spec["max_seconds"] = int(spec["max_seconds"])
         project, environment = self.authorize(spec)
-        if spec.get("workflow_id") and self.store.get("workflow",spec["workflow_id"])["project_id"] != project["id"]:
-            raise PermissionError("Workflow belongs to another project")
+        if spec.get("workflow_id"):
+            workflow = self.store.get("workflow", spec["workflow_id"])
+            if workflow["project_id"] != project["id"]: raise PermissionError("Workflow belongs to another project")
+            if workflow.get('schema_version') == 2 and _workflow_context is None: raise PermissionError('Tool-group workflows require the worker-owned step preparation route')
         roots = list(project["policy"]["input_roots"]) + [str(self.root / "projects" / project["id"] / "inputs")]
         if spec.get("parent_run"):
             parent = self.store.run(spec["parent_run"])
@@ -163,7 +172,11 @@ class Service(RuntimeServiceMixin):
             prefix = spec.get("directory_name", "")
             if prefix and (not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", prefix)):
                 raise ValueError("Invalid scoped working directory name")
-            directory = self.root / "runs" / ((prefix+"-" if prefix else "")+identifier)
+            if _workflow_context is not None:
+                from .workspace.tool_workflows import run_directory
+                directory = run_directory(self, _workflow_context, identifier)
+            else:
+                directory = self.root / "runs" / ((prefix+"-" if prefix else "")+identifier)
             (directory / "simulation").mkdir(parents=True)
             (directory / "results").mkdir()
             snapshots = []
@@ -194,13 +207,15 @@ class Service(RuntimeServiceMixin):
                        "environment_snapshot": environment, "identity": None}
                 atomic_json(directory / "reproduction.json", run)
                 self.store.add_run(run)
-                if spec.get("workflow_id"):
+                if spec.get("workflow_id") and _workflow_context is None:
                     workflow=self.store.get("workflow",spec["workflow_id"])
                     workflow["run_ids"].append(run["id"])
                     self.store.put("workflow",workflow)
                 return run
             except Exception:
-                shutil.rmtree(directory)
+                # A new workflow intent may already have a durable run row. Preserve its
+                # directory for exact by-key reconciliation; never erase unknown evidence.
+                if _workflow_context is None: shutil.rmtree(directory)
                 raise
 
     def input_file(self, identifier, name):
@@ -292,9 +307,12 @@ class Service(RuntimeServiceMixin):
                 if not path.is_file() or digest(path) != asset["sha256"]:
                     raise ValueError("Input changed after preparation: " + asset["name"])
 
-    def validate(self, identifier):
+    def validate(self, identifier, *, _workflow_context=None):
         with self.store.lock:
             run = self.store.run(identifier)
+            if run.get('studio_workflow_binding'):
+                from .workspace.tool_workflows import assert_bound_run
+                assert_bound_run(self, run, _workflow_context, 'validating')
             if run["status"] not in ("draft", "ready"):
                 raise ValueError("Only an unsubmitted run can be validated")
             self.authorize(run)
@@ -319,17 +337,25 @@ class Service(RuntimeServiceMixin):
                 options["probe_report"] = current_probe
             report = Adapter(run["engine"]).validate(run, run["environment_snapshot"],
                                                      Path(run["directory"]) / "results", **options)
-            self.store.update(run, status="ready", validation=report)
+            if run.get('studio_workflow_binding'):
+                with self.store.lock:
+                    assert_bound_run(self, run, _workflow_context, 'validating')
+                    self.store.update(run, status="ready", validation=report)
+            else:
+                self.store.update(run, status="ready", validation=report)
         except Exception as exc:
             self.store.update(run, status="draft", validation={"status": "failed", "message": str(exc)})
         atomic_json(Path(run["directory"]) / "validation.json", run["validation"])
         return run
 
-    def submit(self, identifier):
+    def submit(self, identifier, *, _workflow_context=None):
         with self.store.lock:
             run = self.store.run(identifier)
             if run["status"] in ("queued", "running", *TERMINAL):
                 return run
+            if run.get('studio_workflow_binding'):
+                from .workspace.tool_workflows import assert_bound_run
+                assert_bound_run(self, run, _workflow_context, 'submitting')
             self.authorize(run)
             if run["status"] != "ready" or run["validation"]["status"] != "passed":
                 raise ValueError("Successful validation required before submission")

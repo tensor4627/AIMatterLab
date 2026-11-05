@@ -1,7 +1,7 @@
 import {invoke} from './studio';
 import type {Project} from '../../contracts/dto/compute';
 import type {AgentProvider} from '../../contracts/dto/agent';
-import type {ToolPackageInspection,ToolPackageRecord,ToolPackageSummary,ToolPackageRead,ToolPackageChange,ToolConfigurationPlan,ToolConfiguration,ToolConfigurationReference,ToolConfigurationReview,ToolConfigurationIndex,ToolExecutionSkill,ToolGuidanceBinding,ToolGuidanceGrant,ToolGroupDefinition,ToolGroupCompiled,ToolGroupRecord} from '../../contracts/dto/tools';
+import type {ToolPackageInspection,ToolPackageRecord,ToolPackageSummary,ToolPackageRead,ToolPackageChange,ToolConfigurationPlan,ToolConfiguration,ToolConfigurationReference,ToolConfigurationReview,ToolConfigurationIndex,ToolExecutionSkill,ToolGuidanceBinding,ToolGuidanceGrant,ToolGroupDefinition,ToolGroupCompiled,ToolGroupRecord,ToolGroupSummary} from '../../contracts/dto/tools';
 
 export const toolPackages={
  choose:()=>invoke<{package_root:string|null}>('tools.packages.choose',{}),
@@ -27,6 +27,6 @@ export const toolConfigurations={
 export const toolGroups={
  compile:(definition:ToolGroupDefinition)=>invoke<ToolGroupCompiled>('tools.groups.compile',{definition}),
  save:(definition:ToolGroupDefinition,expected_revision:number)=>invoke<ToolGroupRecord>('tools.groups.save',{definition,expected_revision}),
- read:(id:string)=>invoke<ToolGroupRecord>('tools.groups.read',{id}),
- list:()=>invoke<Pick<ToolGroupRecord,'id'|'name'|'revision'|'updated_at'|'status'|'execution_status'>[]>('tools.groups.list',{})
+ read:(id:string,version?:string)=>invoke<ToolGroupRecord>('tools.groups.read',{id,...version!==undefined?{version}:{}}),
+ list:()=>invoke<ToolGroupSummary[]>('tools.groups.list',{})
 };

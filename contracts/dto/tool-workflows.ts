@@ -1,0 +1,18 @@
+import type {ToolJson,ToolConfigurationIndex,ToolGroupRecord} from './tools';
+import type {AgentProvider} from './agent';
+
+export interface ToolWorkflowTarget {target:'local';project_id:string;environment_id:string}
+export interface ToolWorkflowReview {review_sha256:string;run_id:string;request_hash:string;argv:string[];inputs:{name:string;sha256:string;size?:number;source?:string}[];target:ToolWorkflowTarget;directory:string;working_directory:string;criteria:Record<string,ToolJson>;configuration_id:string;execution_skill_id:string;execution_skill_sha256:string;package_id:string;package_version:string;function_id:string;group_id:string;group_version:string;environment_sha256:string;authorization_sha256:string;python:ToolJson;install_files:ToolJson;max_seconds:number}
+export type ToolWorkflowStepState='pending'|'preparing'|'prepared'|'validating'|'submitting'|'queued'|'running'|'passed'|'failed'|'cancelled'|'unknown'|'stale'|'blocked';
+export interface ToolWorkflowStep {id:string;tool_id:string;package_version:string;function_id:string;configuration_id:string;execution_skill_id:string;status:ToolWorkflowStepState;reason:string|null;run_id:string|null;run_status:string|null;eligible:boolean;review:ToolWorkflowReview|null;request_id?:string;idempotency_key?:string;run_request_hash?:string}
+export interface ToolWorkflow {schema_version:2;id:string;project_id:string;name:string;workspace_id:string;revision:number;root:string;execution_mode:'manual_step_review';tool_group_refs:{id:string;version:string}[];execution_ids:string[];steps:ToolJson[];run_ids:string[]}
+export interface ToolWorkflowExecution {schema_version:1;id:string;workflow_id:string;revision:number;status:string;execution_mode:'manual_step_review';workspace_id:string;target:ToolWorkflowTarget;group:{id:string;version:string};root:string;snapshot_sha256:string;steps:ToolWorkflowStep[];reason?:string|null}
+export interface ToolWorkflowRead {workflow:ToolWorkflow;execution:ToolWorkflowExecution;cancelled?:boolean}
+export interface ToolWorkflowCreate {task_id:string;workspace_id:string;name:string;directory_name:string;group_id:string;group_version:string;configurations:{step_id:string;configuration_id:string}[];request_id:string}
+export interface ToolWorkflowReference {task_id:string;execution_id:string}
+export interface ToolWorkflowLocation {task_id:string;provider:AgentProvider;thread_id:string;conversation_id:string;workspace_id:string;workflow_id:string;execution_id:string;step_id:string;run_id:string}
+export interface ToolWorkflowPrepare extends ToolWorkflowReference {step_id:string;expected_revision:number;request_id:string}
+export interface ToolWorkflowExecute extends ToolWorkflowReference {step_id:string;expected_revision:number;review_sha256:string}
+export interface ToolWorkflowIndex {schema_version:1;execution_id:string;workflow_id:string;task_id:string;workspace_id:string;name:string;group_id:string;group_version:string;target:ToolWorkflowTarget;worker_binding:{distribution:string;root:string;port:number};created_at:number;last_revision:number}
+export interface ToolWorkflowCreation {request_id:string;status:'creating'|'unknown'|'created';name:string;group_id:string;group_version:string;execution_id?:string;reason?:string}
+export interface ToolWorkflowContext {task_id:string;owner_key:string;workspace_id:string;worker_binding:{distribution:string;root:string;port:number};groups:Pick<ToolGroupRecord,'id'|'name'|'revision'|'version'|'has_frozen_version'|'updated_at'|'status'|'execution_status'>[];configurations:ToolConfigurationIndex[];workflows:ToolWorkflowIndex[];creations:ToolWorkflowCreation[]}

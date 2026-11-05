@@ -189,6 +189,11 @@ def mcp_tool_call(service, params):
 
 def dispatch(service, method, path, data, admin=False):
     store = service.store
+    if path in ('/api/workflow/tool-group/create', '/api/workflow/prepare-step', '/api/workflow/execute-step', '/api/workflow/status', '/api/workflow/read'):
+        if method != 'POST' or not admin: raise PermissionError('Desktop human tool-workflow channel required')
+        from .workspace.tool_workflows import ToolWorkflows
+        operation = {'/api/workflow/tool-group/create': 'create', '/api/workflow/prepare-step': 'prepare', '/api/workflow/execute-step': 'execute', '/api/workflow/status': 'status', '/api/workflow/read': 'read'}[path]
+        return getattr(ToolWorkflows(service), operation)(data)
     if path == '/api/tool-guidance/state':
         if method != 'POST' or not admin:
             raise PermissionError('Desktop guidance metadata channel required')
@@ -202,7 +207,7 @@ def dispatch(service, method, path, data, admin=False):
         return getattr(ToolConfigurations(service), operation)(data)
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.18.8", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1}
+            return {"name": "gpu-sampling-studio", "version": "0.18.8", "root": str(service.root), "runtime":str(Path(__file__).resolve().parents[1]), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1}
         if path == "/api/tools/status":
             return service.diagnose_tools()
         if path == "/api/compute/readiness":

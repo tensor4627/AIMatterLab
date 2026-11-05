@@ -13,6 +13,7 @@ import {createToolPackageRegistry} from '../backend/main/tools/package-registry.
 import {createToolGroupRecords} from '../backend/main/tools/groups.mjs';
 import {registerToolDefinitionRoutes} from '../backend/main/tools/routes.mjs';
 import {createToolConfigurationController,registerToolConfigurationRoutes} from '../backend/main/compute/tool-configurations.mjs';
+import {createToolWorkflowController,registerToolWorkflowRoutes} from '../backend/main/workspace/tool-workflows.mjs';
 import {toolGuidanceTarget} from '../backend/main/compute/tool-guidance-target.mjs';
 import {explicitSetupStage} from '../agent/skills/explicit-setup-stage.mjs';
 import {createComputeOnboarding} from './compute-onboarding.mjs';
@@ -98,7 +99,7 @@ const verifying=installationVerifying||improvementsVerifying||providerVerifying|
 const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
 if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
-let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations;
+let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp;
@@ -193,6 +194,11 @@ toolConfigurations=createToolConfigurationController({catalog,packages:toolPacka
 resolveSkillGuidance=scope=>toolConfigurations.resolveGuidance(scope);
 registerToolDefinitionRoutes({handle,packages:toolPackages,groups:toolGroups,choosePackageDirectory:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openDirectory']});return value.canceled?null:value.filePaths[0];}});
 registerToolConfigurationRoutes({handle,controller:toolConfigurations});
+toolWorkflows=createToolWorkflowController({catalog,groups:toolGroups,configurations:toolConfigurations,worker,getSettings:()=>settings,current:()=>workflowContext.current(),getTask:id=>taskRecords.read(id),
+ currentTarget:()=>{const owner=workflowContext.current();return owner?.taskId?toolGuidanceTarget(taskRecords.read(owner.taskId)):null;},assertIdle:assertIdleAgent,
+ confirm:async({workflow,step},event)=>{trusted(event);const review=step.review,result=await dialog.showMessageBox(window,{type:'question',buttons:settings.language==='en'?['Cancel','Execute this step']:['取消','执行这个步骤'],defaultId:0,cancelId:0,message:settings.language==='en'?'Execute this reviewed workflow step?':'执行已复核的这个流程步骤？',detail:[workflow.name,step.id,review.run_id,review.target.project_id,review.target.environment_id,review.directory,review.argv.join(' '),'Review SHA256: '+review.review_sha256].join('\n')});trusted(event);return result.response===1;}
+});
+registerToolWorkflowRoutes({handle,controller:toolWorkflows});
 const lastCompute=catalog.get('worker-binding','last-explicit');
 const computeProfiles=createComputeProfiles({catalog,initialWsl:validExplicitBinding(lastCompute,settings)?{distribution:lastCompute.distribution,root:lastCompute.root,port:lastCompute.port,intent:lastCompute.intent||'standard'}:undefined});
 handle('compute.profiles.list',value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid connection listing');return {profiles:computeProfiles.list(),...worker.connection&&!worker.connecting&&!worker.restoring&&worker.identity&&worker.connectionTarget?{activeLocal:{distribution:worker.identity.distribution,root:worker.identity.root,requestedRoot:worker.connectionTarget.requestedRoot,port:worker.connectionTarget.port}}:{},defaults:{distribution:settings.distribution,root:settings.workerRoot,port:settings.workerPort,ssh_client:process.platform==='win32'?path.join(process.env.SystemRoot||'C:\\Windows','System32','OpenSSH','ssh.exe'):'/usr/bin/ssh'}};});

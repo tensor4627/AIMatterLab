@@ -7,6 +7,12 @@ const exact=(value,allowed,required=allowed)=>{if(!object(value)||Object.keys(va
 const unique=values=>{if(new Set(values).size!==values.length)fail('duplicate identifier');};
 function compatible(source,target){if(source.type!==target.type||source.format!==target.format)fail('resource type or format does not match: '+source.id+' → '+target.id);if(target.required&&!source.required)fail('optional output/input cannot guarantee a required downstream input');}
 
+/** SHA256 UTF-8 preimage for an already compiled definition's exact JSON.stringify text. */
+export function toolGroupIdentityText(definitionText){
+ if(typeof definitionText!=='string'||!definitionText||new TextDecoder('utf-8',{fatal:true}).decode(new TextEncoder().encode(definitionText))!==definitionText)fail('exact UTF-8 definition text required');
+ return 'studio.tool-group/1\0'+definitionText;
+}
+
 /** Resolve a portable definition against exact registered versions, without executing it. */
 export function compileToolGroup(definition,lookup){
  validateToolJson(definition);if(typeof lookup!=='function')fail('registered package resolver required');

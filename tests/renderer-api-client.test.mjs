@@ -157,3 +157,10 @@ test('tool clients dispatch exact typed package, group and human configuration r
  for(const [method,args,channel,data]of cases){assert.equal(await method(...args),answer);assert.deepEqual(calls.at(-1),{method:channel,data});}
  assert.equal(calls.length,21);assert([...f.modules.keys()].every(file=>!file.includes(path.sep+'backend'+path.sep)&&!file.includes(path.sep+'contracts'+path.sep)));
 });
+
+test('workspace tool-workflow clients keep explicit creation and reviewed execution separate from readonly navigation/status',async()=>{
+ const calls=[],answer={authority:'controlled-bridge-result'},f=clientModules({async invoke(method,data){calls.push({method,data});return answer;}}),{toolWorkflows}=f.load('frontend/api/tool-workflows.ts');
+ const reference={task_id:'task',execution_id:'execution'},create={task_id:'task',workspace_id:'workspace',name:'CPU sequence',directory_name:'cpu-sequence',group_id:'group',group_version:'a'.repeat(64),configurations:[{step_id:'first',configuration_id:'configuration'}],request_id:'create-request'},prepare={...reference,step_id:'first',expected_revision:1,request_id:'prepare-request'},execute={...reference,step_id:'first',expected_revision:2,review_sha256:'b'.repeat(64)};
+ for(const [method,args,channel,data]of [[toolWorkflows.context,['task'],'context',{task_id:'task'}],[toolWorkflows.list,['task'],'list',{task_id:'task'}],[toolWorkflows.locateRun,['run'],'locateRun',{run_id:'run'}],[toolWorkflows.create,[create],'create',create],[toolWorkflows.retryCreate,['task','create-request'],'retryCreate',{task_id:'task',request_id:'create-request'}],[toolWorkflows.prepareStep,[prepare],'prepareStep',prepare],[toolWorkflows.executeStep,[execute],'executeStep',execute],[toolWorkflows.status,[reference],'status',reference],[toolWorkflows.read,[reference],'read',reference]]){assert.equal(await method(...args),answer);assert.deepEqual(calls.at(-1),{method:'tools.workflows.'+channel,data});}
+ assert.equal(calls.length,9);assert([...f.modules.keys()].every(file=>!file.includes(path.sep+'backend'+path.sep)&&!file.includes(path.sep+'contracts'+path.sep)));
+});

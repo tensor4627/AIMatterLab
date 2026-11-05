@@ -16,11 +16,12 @@ export function taskModule(engine:string){
  if(engine.startsWith('pygas.'))return t('结果分析');
  return t('分子动力学');
 }
-export default function RunReview({run,connected=true,environments,onRefresh,onError,onReplace,theme}:{run:Run;connected?:boolean;environments:Environment[];onRefresh:()=>void|Promise<void>;onError:(e:unknown)=>void;onReplace:(r:Run)=>void;theme:string}){
+export default function RunReview({run,connected=true,environments,onRefresh,onError,onReplace,onOpenWorkflow,theme}:{run:Run;connected?:boolean;environments:Environment[];onRefresh:()=>void|Promise<void>;onError:(e:unknown)=>void;onReplace:(r:Run)=>void;onOpenWorkflow?:(runId:string)=>void;theme:string}){
  const [name,setName]=useState(run.name),[environment,setEnvironment]=useState(run.environment_id),[gpu,setGpu]=useState(run.gpu),[seconds,setSeconds]=useState(run.max_seconds);
  const [inputs,setInputs]=useState<Record<string,string>>({}),[parameters,setParameters]=useState('{}'),[selected,setSelected]=useState(''),[source,setSource]=useState(''),[editable,setEditable]=useState(false),[inputInfo,setInputInfo]=useState<any>(null),[edits,setEdits]=useState<Record<string,string>>({}),[working,setWorking]=useState(false);
  const [step,setStep]=useState(''),[pendingRun,setPendingRun]=useState<Run|null>(null);
  const keyRef=useRef({sig:'',key:''}),openSeq=useRef(0);
+ const workflowBound=run.studio_workflow_binding!==undefined,workflowBoundRef=useRef(workflowBound);workflowBoundRef.current=workflowBound;
  useEffect(()=>{
   openSeq.current++;setPendingRun(null);setStep('');keyRef.current={sig:'',key:''};
   setName(run.name);setEnvironment(run.environment_id);setGpu(run.gpu);setSeconds(run.max_seconds);
@@ -34,15 +35,17 @@ export default function RunReview({run,connected=true,environments,onRefresh,onE
   catch(e){if(seq!==openSeq.current)return;setInputInfo({reason:e instanceof Error?e.message:String(e)});onError(e);}
  }
  async function execute(){
-  if(working)return;setWorking(true);
+  if(workflowBoundRef.current||working)return;setWorking(true);
   try{
    const parsed=JSON.parse(parameters);
    const sig=JSON.stringify([run.id,name,environment,gpu,seconds,inputs,parsed,edits]);
    if(keyRef.current.sig!==sig)keyRef.current={sig,key:crypto.randomUUID()};
    setStep(t('保存审阅后的输入'));
    const revised=await api<Run>('POST','/api/run/revise',{run_id:run.id,spec:{name,environment_id:environment,gpu,max_seconds:seconds,inputs,parameters:parsed,idempotency_key:keyRef.current.key},edits});
+   if(workflowBoundRef.current||revised.studio_workflow_binding!==undefined)return;
    setStep(t('验证输入与环境'));
    const validated=await api<Run>('POST','/api/run/validate',{run_id:revised.id});
+   if(workflowBoundRef.current||validated.studio_workflow_binding!==undefined)return;
    if(validated.status!=='ready'||validated.validation.status!=='passed'){onReplace(validated);throw Error(validated.validation.message||t('验证未通过，计算没有提交'));}
    setStep(t('提交计算'));
    let submitted:Run;
@@ -55,8 +58,9 @@ export default function RunReview({run,connected=true,environments,onRefresh,onE
    onReplace(submitted);await onRefresh();
   }catch(e){onError(e);await onRefresh();}finally{setWorking(false);setStep('');}
  }
- if(pendingRun)return <><div className="notice" role="status">{t('提交响应未确认；保留原修订任务，核对状态后再操作。')}<button className="button" disabled={!connected} onClick={()=>void api<Run>('POST','/api/run/status',{run_id:pendingRun.id}).then(setPendingRun).catch(onError)}>{t('核对状态')}</button></div><RunDetail connected={connected} run={pendingRun} onRefresh={async()=>{setPendingRun(await api<Run>('POST','/api/run/status',{run_id:pendingRun.id}));await onRefresh();}} onError={onError} onOpenRun={id=>void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError)}/></>;
- if(!['draft','ready'].includes(run.status))return <RunDetail connected={connected} run={run} onRefresh={onRefresh} onError={onError} onOpenRun={id=>{void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError);}}/>;
+ if(workflowBound)return <RunDetail connected={connected} run={run} onRefresh={onRefresh} onError={onError} onOpenWorkflow={onOpenWorkflow} onOpenRun={id=>void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError)}/>;
+ if(pendingRun)return <><div className="notice" role="status">{t('提交响应未确认；保留原修订任务，核对状态后再操作。')}<button className="button" disabled={!connected} onClick={()=>void api<Run>('POST','/api/run/status',{run_id:pendingRun.id}).then(setPendingRun).catch(onError)}>{t('核对状态')}</button></div><RunDetail connected={connected} run={pendingRun} onRefresh={async()=>{setPendingRun(await api<Run>('POST','/api/run/status',{run_id:pendingRun.id}));await onRefresh();}} onError={onError} onOpenWorkflow={onOpenWorkflow} onOpenRun={id=>void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError)}/></>;
+ if(!['draft','ready'].includes(run.status))return <RunDetail connected={connected} run={run} onRefresh={onRefresh} onError={onError} onOpenWorkflow={onOpenWorkflow} onOpenRun={id=>{void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError);}}/>;
  return <div className="task-review page" data-testid="task-review">
   <div className="page-heading"><div><span className="eyebrow">{t(taskModule(run.engine))} · {run.engine}</span><h1>{t('审阅计算参数')}</h1></div><span className="tag">{t('待你审阅')}</span></div>
   <ol className="run-flow">{['输入与科学条件','审阅参数','实际环境验证','提交与监控'].map(v=><li key={v}>{t(v)}</li>)}</ol>
