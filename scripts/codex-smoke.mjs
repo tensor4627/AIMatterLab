@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {CodexBridge} from '../desktop/codex.mjs';
-import {WorkerClient} from '../desktop/worker.mjs';
+import {CodexBridge} from "../agent/providers/codex.mjs";
+import {WorkerClient} from "../agent/tools/worker-client.mjs";
 const out=path.resolve('.studio/validation');fs.mkdirSync(out,{recursive:true});
 const forceRelay=process.argv.includes('--relay');
 const codex=new CodexBridge(),worker=new WorkerClient();
@@ -13,7 +13,7 @@ codex.on('event',e=>{
  if(e.id!==undefined)codex.respond(e.id,{decision:'decline'});
 });
 try{
- report.checks.worker=await worker.connect({distribution:'Ubuntu',workerRoot:JSON.parse(fs.readFileSync(path.join(out,'science.json'),'utf8')).desktop_worker_root,workerPort:8770,forceRelay},path.resolve('worker'));
+ report.checks.worker=await worker.connect({distribution:'Ubuntu',workerRoot:JSON.parse(fs.readFileSync(path.join(out,'science.json'),'utf8')).desktop_worker_root,workerPort:8770,forceRelay},path.resolve('backend/worker'));
  const bin=path.join(process.env.LOCALAPPDATA,'OpenAI/Codex/bin');
  const executable=fs.readdirSync(bin).map(x=>path.join(bin,x,'codex.exe')).filter(x=>fs.existsSync(x)).sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs)[0];
  report.checks.initialize=await codex.start(executable,worker.connection);

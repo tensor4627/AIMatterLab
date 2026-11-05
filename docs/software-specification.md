@@ -72,4 +72,4 @@ Agent 通过服务商适配接入大模型，提供账户、模型及实际支�
 
 执行 skill 生成后，前置的交付、安装和配置指导封存，保留版本和记录，日常不再读取。仅在 bug 修复或软件更新需要重新安装时，重新读取所需前置指导，完成实际检查与测试后更新执行 skill。
 
-开发者接入操作见 [接入指南](../developer/README.md)；代码组织与实施顺序见 [仓库重组方案](development/repository-reorganization.md)。
+开发者接入操作见 [接入指南](../developer/README.md)；当前实现见 [代码架构](architecture.md)，实施依据见 [仓库重组方案](development/repository-reorganization.md)。

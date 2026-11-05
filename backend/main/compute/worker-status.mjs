@@ -1,4 +1,4 @@
-import {workerServiceVersionEvidence} from '../../../desktop/worker-service-version.mjs';
+import {workerServiceVersionEvidence} from "./worker-service-version.mjs";
 // Observe only the existing bridge. Never bootstrap, reconnect, or publish secrets.
 export async function readWorkerStatus(worker,currentSettings,{timeoutMs=3000,now=Date.now}={}){
  const result=status=>({status,checkedAt:now()});

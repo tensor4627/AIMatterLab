@@ -9,7 +9,11 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 
 const PUBLIC_NAME='studio-compute-workflow';
-const GENERATED_PARENT='../../../agents/skills/studio-compute-workflow/SKILL.md';
+const GENERATED_PARENT='../../../agent/builtin-skills/studio-compute-workflow/SKILL.md';
+// Existing private overlays retain their exact logical token; neither token is resolved as a file path.
+const LEGACY_GENERATED_PARENT='../../../agents/skills/studio-compute-workflow/SKILL.md';
+// Exact pre-migration Windows CRLF bytes -> identical LF guide. Other revisions remain stale.
+const PARENT_NEWLINES={from:'d5ab63b2c2a514ffaaa60191d12ffd064f6a8f00610bfa8ec802d06322021550',to:'92feaf0c35fcbddd2599bbe449a999b07ff11eabb26ddb01fa94475bb9c4e1a5'};
 const PROVENANCE_SCOPE='private guidance only; no environment probe, registration, submission or execution performed';
 const DEFAULT_LIMITS={maxFiles:12,maxFileBytes:256*1024,maxTotalBytes:512*1024};
 class SkillContextError extends Error{constructor(code){super('Selected skill context is incomplete ('+code+')');this.code=code;}}
@@ -29,9 +33,10 @@ function relativeAttachment(target){
  if(!/^[A-Za-z0-9][A-Za-z0-9_./-]*\.(md|json)$/.test(target)||target.split('/').some(p=>!p||p==='.'||p==='..'))fail('invalid_attachment_reference');
  return target;
 }
-function checkProvenance(value,publicHash){
+function checkProvenance(value,publicHash,legacyParent=false){
  const allowed=['schema_version','portable_skill_sha256','created_at','validation_status','scope'];
- if(!plain(value)||Object.keys(value).length!==allowed.length||Object.keys(value).some(k=>!allowed.includes(k))||value.schema_version!==1||value.validation_status!=='not_run'||value.scope!==PROVENANCE_SCOPE||typeof value.created_at!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.created_at)||!Number.isFinite(Date.parse(value.created_at))||value.portable_skill_sha256!==publicHash)fail('invalid_or_stale_provenance');
+ const matching=plain(value)&&(value.portable_skill_sha256===publicHash||legacyParent&&publicHash===PARENT_NEWLINES.to&&value.portable_skill_sha256===PARENT_NEWLINES.from);
+ if(!plain(value)||Object.keys(value).length!==allowed.length||Object.keys(value).some(k=>!allowed.includes(k))||value.schema_version!==1||value.validation_status!=='not_run'||value.scope!==PROVENANCE_SCOPE||typeof value.created_at!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.created_at)||!Number.isFinite(Date.parse(value.created_at))||!matching)fail('invalid_or_stale_provenance');
  return value;
 }
 
@@ -97,7 +102,7 @@ export async function selectedSkillContext({selection,registered,registeredRoots
  if(isPublic)await loadPublic();
  else if(isOverlay){
   const links=markdownLinks(entry.text);
-  if(links.length!==1||links[0]!==GENERATED_PARENT)fail('invalid_generated_parent_reference');
+  if(links.length!==1||![GENERATED_PARENT,LEGACY_GENERATED_PARENT].includes(links[0]))fail('invalid_generated_parent_reference');
   const parent=await loadPublic();
   if(typeof validatePrivateProfile!=='function')fail('private_profile_validator_unavailable');
   const folder=path.dirname(selected),profile=read(path.join(folder,'profile.json'),selectedRoot,'profile.json','private-data'),provenance=read(path.join(folder,'provenance.json'),selectedRoot,'provenance.json','private-data');
@@ -105,7 +110,7 @@ export async function selectedSkillContext({selection,registered,registeredRoots
   try{parsed=JSON.parse(profile.text);origin=JSON.parse(provenance.text);}catch{fail('invalid_private_json');}
   let validated;try{validated=await validatePrivateProfile(parsed);}catch{fail('private_profile_validation_failed');}
   if(!plain(validated)||selection.name!=='studio-local-'+validated.id)fail('private_profile_identity_mismatch');
-  checkProvenance(origin,parent.sha256);
+  checkProvenance(origin,parent.sha256,links[0]===LEGACY_GENERATED_PARENT);
   // Metadata is explicitly delimited as data, never as executable instructions.
   profile.text=JSON.stringify(validated,null,2).replace(/</g,'\\u003c').replace(/>/g,'\\u003e');provenance.text=JSON.stringify(origin,null,2);
  }

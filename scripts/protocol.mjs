@@ -1,7 +1,7 @@
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import {PROTOCOL_VERSION} from '../desktop/codex.mjs';
+import {PROTOCOL_VERSION} from "../agent/providers/codex.mjs";
 const codex=process.env.STUDIO_CODEX || 'codex';
 const version=execFileSync(codex,['--version'],{encoding:'utf8',windowsHide:true}).trim().split(' ').at(-1);
 if(version!==PROTOCOL_VERSION) throw new Error('Update and verify the bridge before regenerating a different protocol');

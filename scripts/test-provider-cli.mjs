@@ -2,8 +2,8 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import {AcpBridge} from '../desktop/acp.mjs';
-import {prepareProfile} from '../desktop/providers.mjs';
+import {AcpBridge} from "../agent/providers/acp.mjs";
+import {prepareProfile} from '../desktop/platform/provider-runtime.mjs';
 let active,attempt=0;const calls=[],models=[],requests=[];
 const server=http.createServer(async(req,res)=>{
  let body='';for await(const part of req)body+=part;const value=body?JSON.parse(body):{};

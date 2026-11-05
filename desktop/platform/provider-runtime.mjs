@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {providerId} from '../../agent/providers/contracts.mjs';
-import {assertRpc} from '../security.mjs';
-import {STUDIO_VERSION} from '../studio-version.mjs';
+import {assertRpc} from "../../contracts/transport-policy.mjs";
+import {STUDIO_VERSION} from "./studio-version.mjs";
 export function cliCommand(executable,args=[]){
  if(typeof executable!=='string'||!executable.trim()||/[\r\n\0]/.test(executable))throw Error('Invalid CLI path');
  if(/\.(mjs|cjs|js)$/i.test(executable))return {file:process.execPath,args:[path.resolve(executable),...args],env:{ELECTRON_RUN_AS_NODE:'1'}};

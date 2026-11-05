@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {desktopRoot,requireLaunchContext} from './desktop-launch.mjs';
 import {parseNativeCheckArgs,prepareNativeConversationCheck,launchPreparedNativeCheck,nativeRendererEvidence} from './native-conversation-check.mjs';
 import {createToolPackageRegistry} from '../backend/main/tools/package-registry.mjs';
-import {Catalog} from '../desktop/catalog.mjs';
+import {Catalog} from "../backend/main/workspace/catalog.mjs";
 
 const sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 export function prepareNativeToolPackageCheck({repoRoot=desktopRoot,...options}){

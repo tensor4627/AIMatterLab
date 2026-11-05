@@ -1,11 +1,12 @@
-import {execFile} from 'node:child_process';
-import {promisify,isDeepStrictEqual as equal} from 'node:util';
+import {computeRuntime} from '../../../desktop/platform/compute-runtime.mjs';
+import {isDeepStrictEqual as equal} from 'node:util';
 import {randomUUID} from 'node:crypto';
-import {taskWorkerSource,taskWorkerSettings,validTaskWorkerSource} from '../../../shared/task-worker-binding.mjs';
+import {taskWorkerSource,taskWorkerSettings,validTaskWorkerSource} from "../../../contracts/compute/task-worker-binding.mjs";
+
 import {readWorkerStatus} from './worker-status.mjs';
-import {probeLegacyWorkerStart,inspectExistingDataRoot} from '../../../desktop/existing-worker.mjs';
+import {probeLegacyWorkerStart,inspectExistingDataRoot} from "./existing-worker.mjs";
 import {taskWorkerTarget,taskTransportScope,taskTransportReceipt,taskTransportNamespace} from './explicit-worker-binding.mjs';
-const exec=promisify(execFile),object=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
+const exec=computeRuntime.execute,object=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const signature=s=>[s.distribution,s.workerRoot,s.workerPort,s.autoDiscoverCompute,s.sourceIds,s.sourceRoots];
 const distro=value=>typeof value==='string'&&/^[\w .-]{1,80}$/.test(value);
 const root=value=>typeof value==='string'&&value.length<=4096&&/^(?:~\/|\/)/.test(value)&&!/[\r\n\0]/.test(value)&&value!=='/'&&value!=='~/';

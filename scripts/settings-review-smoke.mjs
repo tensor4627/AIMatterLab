@@ -1,6 +1,6 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';
-import {CodexBridge} from '../desktop/codex.mjs';import {WorkerClient} from '../desktop/worker.mjs';
-import {agentConfig,STUDIO_INSTRUCTIONS} from '../desktop/agent-settings.mjs';
+import {CodexBridge} from "../agent/providers/codex.mjs";import {WorkerClient} from "../agent/tools/worker-client.mjs";
+import {agentConfig,STUDIO_INSTRUCTIONS} from "../agent/context/agent-settings.mjs";
 const out=path.resolve('.studio/validation'),worker=new WorkerClient(),codex=new CodexBridge(),report={checks:{},events:[]};
 let finish,usage,prepared;
 codex.on('event',event=>{
@@ -19,7 +19,7 @@ async function turn(threadId,model,effort,text){
  assert.equal(ended.status,'completed');return {ended,usage};
 }
 try{
- report.checks.worker=await worker.connect({distribution:'Ubuntu',workerRoot:JSON.parse(fs.readFileSync(path.join(out,'science.json'),'utf8')).desktop_worker_root,workerPort:8770},path.resolve('worker'));
+ report.checks.worker=await worker.connect({distribution:'Ubuntu',workerRoot:JSON.parse(fs.readFileSync(path.join(out,'science.json'),'utf8')).desktop_worker_root,workerPort:8770},path.resolve('backend/worker'));
  assert.equal(report.checks.worker.execution_policy,'desktop-review-v1');
  const base=path.join(process.env.LOCALAPPDATA,'OpenAI/Codex/bin'),bin=fs.readdirSync(base).map(x=>path.join(base,x,'codex.exe')).filter(fs.existsSync).sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs)[0];
  const first={contextWindow:131072,compactLimit:98304};

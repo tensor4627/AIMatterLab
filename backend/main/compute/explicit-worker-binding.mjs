@@ -1,6 +1,7 @@
 import {isDeepStrictEqual as equal} from 'node:util';
 import {readWorkerStatus} from './worker-status.mjs';
-import {taskWorkerSettings,taskWorkerSource} from '../../../shared/task-worker-binding.mjs';
+import {taskWorkerSettings,taskWorkerSource} from "../../../contracts/compute/task-worker-binding.mjs";
+
 export const taskTransportNamespace='task-worker-transport';
 export const validTransportPort=value=>Number.isInteger(value)&&value>=1024&&value<=65535;
 export function taskTransportScope(task){const source=taskWorkerSource(task);return structuredClone({taskId:task.id,provider:task.provider,threadId:task.threadId,projectId:task.deployment?.config?.projectId??task.projectId??task.authoring?.projectId??task.workspace?.projectId??null,source,portEvidence:source&&source.binding.port===undefined?['deployment','deploymentDraft','workspace','authoring'].filter(key=>task[key]?.workerBinding?.distribution===source.binding.distribution&&task[key]?.workerBinding?.root===source.binding.root).map(key=>({source:key,binding:task[key].workerBinding})):[]});}

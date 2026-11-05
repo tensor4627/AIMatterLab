@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import type {Project,Environment} from '../../../contracts/dto/compute';
-import type {DeploymentContext} from '../../../src/deployment-client';
+import type {DeploymentContext} from "../../api/deployment-client";
 
 export interface DeploymentContextOptions{
  task:any;

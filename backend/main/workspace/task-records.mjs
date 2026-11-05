@@ -1,9 +1,12 @@
 import {graphAuthorityFacts,protectGraphMirrors} from './composition-authority.mjs';
-import {scienceOnly,scientificSpec,deploymentField,inputControlParameters} from '../../../shared/deployment.mjs';
+import {scienceOnly,scientificSpec,deploymentField,inputControlParameters} from "../../../contracts/compute/deployment.mjs";
+
 import {randomUUID} from 'node:crypto';
-import {conversationTitle,validConversationName} from '../../../shared/conversation-title.mjs';
+import {conversationTitle,validConversationName} from "../../../contracts/agent/conversation-title.mjs";
+
 import {isDeepStrictEqual} from 'node:util';
-import {normalizeSteps,workflowMissing,setParameter,parameterValue,fieldPath} from '../../../shared/task-fields.mjs';
+import {normalizeSteps,workflowMissing,setParameter,parameterValue,fieldPath} from "../../../contracts/workflows/task-fields.mjs";
+
 export function structuredResult(value){
  const found=[];function walk(v,depth=0){if(depth>8||v==null)return;if(typeof v==='string'){try{walk(JSON.parse(v),depth+1);}catch{}return;}if(Array.isArray(v)){for(const item of v)walk(item,depth+1);return;}if(typeof v!=='object')return;if(v.id&&(v.engine||Array.isArray(v.steps)||v.kind==='cluster-setup'||v.kind==='task-parameters'))found.push(v);for(const k of ['content','structuredContent','result','output','data','text'])if(k in v)walk(v[k],depth+1);}walk(value);return found;
 }

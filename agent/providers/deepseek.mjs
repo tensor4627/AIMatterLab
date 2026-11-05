@@ -1,5 +1,6 @@
 import {sharedTerminalToolAllowed} from '../tools/definition-scope.mjs';
-import {ACCOUNT_GUIDANCE} from '../../shared/provider-account.mjs';
+import {ACCOUNT_GUIDANCE} from "../../contracts/agent/provider-account.mjs";
+
 import {EventEmitter} from 'node:events';
 import {randomUUID} from 'node:crypto';
 import {redact} from './contracts.mjs';

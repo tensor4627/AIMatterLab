@@ -1,19 +1,19 @@
 # GPU Sampling Studio 仓库代码重组方案
 
-依据 [软件规范](../software-specification.md) 和 2026-11-04 工作树设计；初始审查版本为 `0.18.9-dev.44`。现已从修复后的 `e8ba66a` 在 `codex/v1.0` 分支按功能闭包实施，实际进度和验证见 [v1.0记录](../v1.0.md)。下列目录和能力是完整目标，不表示已全部完成。
+依据 [软件规范](../software-specification.md) 和 2026-11-04 工作树设计；初始审查版本为 `0.18.9-dev.44`。现已从修复后的 `e8ba66a` 在 `codex/v1.0` 分支完成本次代码重组，实际架构见 [代码架构](../architecture.md)，闭包与验证见 [v1.0记录](../v1.0.md)。以下保留原设计及实施顺序；通用科学工具扩展不因源码归位而自动成为已验证能力。
 
 目标是让前端、后端和 Agent 的职责在代码中可定位，并让后端围绕工具组、计算资源、工作空间组织。沿用现有 React、Electron、Node 和 Python 技术栈，先拆依赖和状态归属，再迁移目录。
 
-## 现状与重组依据
+## 初始清点与重组依据
 
-| 当前位置 | 已观察到的职责或依赖 | 重组方向 |
+| 初始位置（链接至当前实现） | 已观察到的职责或依赖 | 重组方向 |
 | --- | --- | --- |
-| [src/App.tsx](../../src/App.tsx)、[src/Agent.tsx](../../src/Agent.tsx) | 界面组合与会话、连接、消息、流程等状态集中；组件直接使用通用 invoke/api | 按界面功能分组，将状态协调放入对应 controller/hook，形成有类型的调用入口 |
+| [src/App.tsx](../../frontend/app/App.tsx)、[src/Agent.tsx](../../frontend/features/conversations/Agent.tsx) | 界面组合与会话、连接、消息、流程等状态集中；组件直接使用通用 invoke/api | 按界面功能分组，将状态协调放入对应 controller/hook，形成有类型的调用入口 |
 | [desktop/main.mjs](../../desktop/main.mjs) | 同时装配 Electron、Agent、worker、连接、工作区和 IPC 处理器 | 保留启动装配和安全边界，将业务处理器交给各域注册 |
-| [desktop/task-records.mjs](../../desktop/task-records.mjs) | 任务记录模块直接导入 Agent 的终端提示指令 | 工作空间提供结构化上下文，Agent 负责将其编排为模型上下文 |
-| [src/types.ts](../../src/types.ts)、[shared/engine-contracts.mjs](../../shared/engine-contracts.mjs) | 类型与调用混在一起；共享模块直接引用 worker 内部 JSON 文件路径 | 提取稳定的跨进程契约，客户端调用与类型定义分开 |
-| [worker/studio_worker/server.py](../../worker/studio_worker/server.py)、[worker/studio_worker/service.py](../../worker/studio_worker/service.py) | 路由、权限、工具操作、环境和作业生命周期汇集在总入口 | 按工具、计算、工作空间拆服务，传输层保留认证和分派 |
-| [desktop/scientific-skills.mjs](../../desktop/scientific-skills.mjs)、[desktop/skill-context.mjs](../../desktop/skill-context.mjs)、[worker/studio_worker/runtime_guides.py](../../worker/studio_worker/runtime_guides.py) | 已有来源授权、阶段限制、有界读取、哈希及环境收据；技能读取分布在多条入口 | 复用现有保护，补齐统一的交付、配置、执行及封存生命周期 |
+| [desktop/task-records.mjs](../../agent/sessions/task-records.mjs) | 任务记录模块直接导入 Agent 的终端提示指令 | 工作空间提供结构化上下文，Agent 负责将其编排为模型上下文 |
+| [src/types.ts](../../frontend/api/studio.ts)、[shared/engine-contracts.mjs](../../contracts/tools/engine-contracts.mjs) | 类型与调用混在一起；共享模块直接引用 worker 内部 JSON 文件路径 | 提取稳定的跨进程契约，客户端调用与类型定义分开 |
+| [worker/studio_worker/server.py](../../backend/worker/studio_worker/transport/server.py)、[worker/studio_worker/service.py](../../backend/worker/studio_worker/compute/service.py) | 路由、权限、工具操作、环境和作业生命周期汇集在总入口 | 按工具、计算、工作空间拆服务，传输层保留认证和分派 |
+| [desktop/scientific-skills.mjs](../../agent/skills/scientific-skills.mjs)、[desktop/skill-context.mjs](../../agent/skills/skill-context.mjs)、[worker/studio_worker/runtime_guides.py](../../backend/worker/studio_worker/compute/runtime_guides.py) | 已有来源授权、阶段限制、有界读取、哈希及环境收据；技能读取分布在多条入口 | 复用现有保护，补齐统一的交付、配置、执行及封存生命周期 |
 
 已有能力可以作为基础：持久 worker、任务输入快照、环境登记、来源和文件身份、会话租约、人工执行门、共享终端授权。标准工具包登记、流程中的通用输入输出匹配、真实配置生成执行 skill、封存后的读取隔离，需要分别落成明确模块；目录搬迁本身不完成这些能力。
 

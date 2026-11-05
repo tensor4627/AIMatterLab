@@ -1,7 +1,7 @@
 import {spawn,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {readFileSync} from 'node:fs';
-export const desktopRoot=fileURLToPath(new URL('../',import.meta.url));
+export const desktopRoot=fileURLToPath(new URL("..",import.meta.url));
 export function launchPreflight({platform=process.platform,probe=spawnSync}={}) {
   if(platform!=='win32') return {status:'allowed',reason:'not_windows'};
   try {

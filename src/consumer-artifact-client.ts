@@ -1,1 +1,0 @@
-import {invoke} from './types';import type {ConsumerArtifactApi} from './consumer-artifact-types';export const consumerArtifactApi:ConsumerArtifactApi={list:value=>invoke('task.stage.artifacts',value),adopt:value=>invoke('task.stage.adoptArtifact',value)};

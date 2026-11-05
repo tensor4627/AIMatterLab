@@ -1,4 +1,5 @@
-import {taskWorkerSource} from '../../../shared/task-worker-binding.mjs';
+import {taskWorkerSource} from "../../../contracts/compute/task-worker-binding.mjs";
+
 
 /** The deployment target uses targetId; authoring is a separate fallback only before deployment. */
 export function toolGuidanceTarget(task){

@@ -1,0 +1,1 @@
+"""Studio worker infrastructure domain."""

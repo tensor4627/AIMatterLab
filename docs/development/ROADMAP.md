@@ -79,7 +79,7 @@
 - [ ] 实现版本化的站点适配器，覆盖 LSF / Slurm 及站点包装脚本，保留现有作业身份和幂等提交约束。
 - [ ] 在后续明确授权的任务中核对逐目标环境，再验收提交、状态监控、断线恢复和结果回收。
 
-可迁移流程写在 [compute workflow skill](../../agents/skills/studio-compute-workflow/SKILL.md) 及其 [discovery reference](../../agents/skills/studio-compute-workflow/references/compute-discovery.md)。该文档不包含实际站点配置，也不代表模板解析器或站点适配器已经实现。
+可迁移流程写在 [compute workflow skill](../../agent/builtin-skills/studio-compute-workflow/SKILL.md) 及其 [discovery reference](../../agent/builtin-skills/studio-compute-workflow/references/compute-discovery.md)。该文档不包含实际站点配置，也不代表模板解析器或站点适配器已经实现。
 
 ## 尚待接入的产品能力
 

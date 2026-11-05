@@ -1,15 +1,22 @@
 // Actual DeploymentPanel hooks with controlled promises; no worker/model/UI process.
 import fs from 'node:fs';
 import ts from 'typescript';
-import * as deployment from '../../shared/deployment.mjs';
-import * as drafts from '../../shared/deployment-draft.mjs';
-import * as scienceDrafts from '../../shared/draft-outbox.mjs';
-import * as authorization from '../../shared/deployment-authorization.mjs';
-import * as setup from '../../src/project-setup-defaults.mjs';
-import * as diagnostics from '../../shared/ui-diagnostics.mjs';
+import * as deployment from "../../contracts/compute/deployment.mjs";
+
+import * as draftsOwner0 from "../../frontend/features/workflows/deployment-draft.mjs";
+import * as draftsOwner1 from "../../contracts/compute/deployment-draft.mjs";
+const drafts={...draftsOwner0,...draftsOwner1};
+
+import * as scienceDrafts from "../../frontend/features/workflows/draft-outbox.mjs";
+
+import * as authorization from "../../contracts/compute/deployment-authorization.mjs";
+
+import * as setup from '../../frontend/features/compute/project-setup-defaults.mjs';
+import * as diagnostics from "../../frontend/features/diagnostics/ui-diagnostics.mjs";
+
 import {memoryStorage} from './agent-hooks.mjs';
-const source=fs.readFileSync(new URL('../../src/DeploymentPanel.tsx',import.meta.url),'utf8');
-const reviewSource=fs.readFileSync(new URL('../../src/useLocalReviewStatus.ts',import.meta.url),'utf8');
+const source=fs.readFileSync(new URL('../../frontend/features/workflows/DeploymentPanel.tsx',import.meta.url),'utf8');
+const reviewSource=fs.readFileSync(new URL('../../frontend/features/workflows/useLocalReviewStatus.ts',import.meta.url),'utf8');
 const reviewCompiled=ts.transpileModule(reviewSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const contextCompiled=ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/workflows/useDeploymentContext.ts',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
@@ -39,20 +46,20 @@ export function deploymentHarness({initial=deploymentFixture(),override,properti
  const require=name=>{
   if(name==='react')return {useState,useRef,useEffect,useMemo};
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};
-  if(name==='../frontend/features/workflows/useDeploymentContext'){const module={exports:{}};new Function('require','module','exports',contextCompiled)(dependency=>{if(dependency==='react')return {useState,useRef,useEffect};throw Error('Unexpected deployment context dependency '+dependency);},module,module.exports);return module.exports;}
-  if(name==='../shared/ui-diagnostics.mjs')return {...diagnostics,deploymentDiagnosticJournal:journal};
-  if(name==='./DiagnosticNotice')return {DeploymentDiagnostics:'DeploymentDiagnostics',InlineDiagnostic:'InlineDiagnostic'};
-  if(name==='./types')return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),engines:[['pydyn.md','PyDyn MD']]};
-  if(name==='./deployment-client')return {deploymentApi:{read:taskId=>invoke('task.deployment.context',{taskId}),saveDraft:data=>invoke('task.deployment.draft',data)}};
-  if(name==='../shared/deployment.mjs')return deployment;
-  if(name==='../shared/deployment-draft.mjs')return drafts;
-  if(name==='../shared/draft-outbox.mjs')return scienceDrafts;
-  if(name==='../shared/deployment-authorization.mjs')return authorization;
-  if(name==='./project-setup-defaults.mjs')return setup;
-  if(name==='./useLocalReviewStatus'){const module={exports:{}};new Function('require','module','exports',reviewCompiled)(dependency=>{if(dependency==='react')return {useState,useRef,useEffect};if(dependency==='./local-review-client')return {readLocalReviewStatus:args=>invoke('task.localReview.status',args)};throw Error('Unexpected local review dependency '+dependency);},module,module.exports);return module.exports;}
+  if(name==="./useDeploymentContext"){const module={exports:{}};new Function('require','module','exports',contextCompiled)(dependency=>{if(dependency==='react')return {useState,useRef,useEffect};throw Error('Unexpected deployment context dependency '+dependency);},module,module.exports);return module.exports;}
+  if(["./ui-diagnostics.mjs","../diagnostics/ui-diagnostics.mjs"].includes(name))return {...diagnostics,deploymentDiagnosticJournal:journal};
+  if(name==="../diagnostics/DiagnosticNotice")return {DeploymentDiagnostics:'DeploymentDiagnostics',InlineDiagnostic:'InlineDiagnostic'};
+  if(["../../api/worker","../../api/studio","../../ui/presentation/engines"].includes(name))return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),engines:[['pydyn.md','PyDyn MD']]};
+  if(name==="../../api/deployment-client")return {deploymentApi:{read:taskId=>invoke('task.deployment.context',{taskId}),saveDraft:data=>invoke('task.deployment.draft',data)}};
+  if(["../../../contracts/compute/deployment.mjs"].includes(name))return deployment;
+  if(["./deployment-draft.mjs","../../../contracts/compute/deployment-draft.mjs"].includes(name))return drafts;
+  if(["./draft-outbox.mjs"].includes(name))return scienceDrafts;
+  if(["../../../contracts/compute/deployment-authorization.mjs"].includes(name))return authorization;
+  if(name==="../compute/project-setup-defaults.mjs")return setup;
+  if(name==='./useLocalReviewStatus'){const module={exports:{}};new Function('require','module','exports',reviewCompiled)(dependency=>{if(dependency==='react')return {useState,useRef,useEffect};if(dependency==="../../api/local-review-client")return {readLocalReviewStatus:args=>invoke('task.localReview.status',args)};throw Error('Unexpected local review dependency '+dependency);},module,module.exports);return module.exports;}
   if(name==='./useConsumerTargetStatus')return {useConsumerTargetStatus:()=>false};
-  if(name==='./pygas-local-draft')return {useTaskPygasDirty:()=>false,isTaskPygasDirty:()=>false};
-  if(name==='./i18n')return {t:value=>value};
+  if(name==="../pygas/pygas-local-draft")return {useTaskPygasDirty:()=>false,isTaskPygasDirty:()=>false};
+  if(name==="../../ui/i18n")return {t:value=>value};
   return new Proxy({},{get:(_target,key)=>String(key)});
  };
  const module={exports:{}};new Function('require','module','exports','localStorage',compiled)(require,module,module.exports,storage);

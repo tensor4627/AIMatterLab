@@ -1,8 +1,8 @@
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';
-import ViewBoundary from '@studio/ViewBoundary';
-import WorkspacePanel from '@studio/WorkspacePanel';
-import ProjectAuthorizationForm from '@studio/ProjectAuthorizationForm';
-import '@studio/style.css';
+import ViewBoundary from '@studio/ui/ViewBoundary';
+import WorkspacePanel from '@studio/features/workflows/WorkspacePanel';
+import ProjectAuthorizationForm from '@studio/features/compute/ProjectAuthorizationForm';
+import '@studio/app/style.css';
 import './style.css';
 const journal:{at:string;event:string;detail?:unknown}[]=[];function record(event:string,detail?:unknown){journal.push({at:new Date().toISOString(),event,detail});sessionStorage.setItem('fault-harness-journal',JSON.stringify(journal));window.dispatchEvent(new Event('fixture-journal'));}
 let requestMode:'ready'|'reject'|'timeout'|'hold'='ready',held:(()=>void)[]=[];

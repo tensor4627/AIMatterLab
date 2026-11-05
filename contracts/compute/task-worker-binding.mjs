@@ -1,0 +1,13 @@
+export function taskWorkerSource(task){for(const source of ['deployment','deploymentDraft','workspace','authoring'])if(task?.[source]?.workerBinding)return {source,binding:task[source].workerBinding};return null;}
+
+export function validTaskWorkerSource(source){const value=source?.binding;return !!value&&typeof value.distribution==='string'&&!!value.distribution&&typeof value.root==='string'&&value.root.startsWith('/')&&!/[\r\n\0]/.test(value.root)&&(source.source!=='authoring'||Number.isInteger(value.port)&&value.port>=1024&&value.port<=65535);}
+
+export function actualAuthoringWorker(worker){const value={...worker.identity,port:worker.connectionTarget?.port};if(!worker.connection||worker.connecting||worker.restoring||!validTaskWorkerSource({source:'authoring',binding:value})||worker.connection.health?.root!==value.root)throw Error('请先核对当前流程的实际作业服务连接。');return value;}
+
+export function sameWorkerBinding(binding,worker){return !!worker.connection&&binding?.distribution===worker.identity?.distribution&&binding?.root===worker.identity?.root&&(binding.port===undefined||binding.port===worker.connectionTarget?.port);}
+
+export function assertTaskWorker(task,worker){const source=taskWorkerSource(task);if(source&&(!validTaskWorkerSource(source)||!sameWorkerBinding(source.binding,worker)))throw Error('当前作业服务与此流程来源不同，请恢复原服务；不能自动替换来源。');}
+
+export function taskWorkerSettings(task,settings){const source=taskWorkerSource(task);if(!source)return null;if(!validTaskWorkerSource(source))throw Error('此流程保存的作业服务来源尚待核对。');return {...settings,distribution:source.binding.distribution,workerRoot:source.binding.root,...source.source==='authoring'?{workerPort:source.binding.port}:{}};}
+
+export function legacyAuthoringBindingEligible(task){return task?.workflowVersion===2&&!!task.authoring?.projectId&&!!task.authoring?.environmentId&&!!task.authoring?.inputRoot&&!taskWorkerSource(task)&&!task.deployment?.prepared&&!task.execution?.artifactId&&!['validating','submitting','unknown'].includes(task.execution?.phase)&&!['queued','running','unknown'].includes(task.execution?.status)&&!(task.artifacts||[]).some(value=>['run','cluster-run'].includes(value.kind));}

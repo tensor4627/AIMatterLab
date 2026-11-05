@@ -1,7 +1,7 @@
 // Real account -> native MCP -> saved draft -> manual edit -> AI review -> restart.
 // Uses an isolated desktop/worker profile; never validates or submits a compute job.
 import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';import {DatabaseSync} from 'node:sqlite';import assert from 'node:assert/strict';
-import {Catalog} from '../desktop/catalog.mjs';
+import {Catalog} from "../backend/main/workspace/catalog.mjs";
 let playwright;try{playwright=await import('playwright');}catch{playwright=await import(pathToFileURL(process.env.STUDIO_PLAYWRIGHT_MODULE||path.resolve(path.dirname(process.execPath),'../node_modules/playwright/index.mjs')).href);}
 const version=JSON.parse(fs.readFileSync('package.json','utf8')).version,out=path.resolve('.studio/audit-20261017'),profile=path.join(out,'acceptance-'+version+'-'+Date.now());fs.mkdirSync(out,{recursive:true});
 const original=new DatabaseSync(path.join(process.env.APPDATA,'gpu-sampling-studio/studio/catalog.sqlite'),{readOnly:true});const settings=JSON.parse(original.prepare("select data from records where kind='settings' and id='main'").get().data);original.close();

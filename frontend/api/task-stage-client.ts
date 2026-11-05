@@ -1,0 +1,1 @@
+import {invoke} from './studio';import type {TaskStageApi} from "../features/workflows/task-stage-types";export const taskStageApi:TaskStageApi={inspect:value=>invoke('task.stage.inspect',value),save:value=>invoke('task.stage.save',value)};

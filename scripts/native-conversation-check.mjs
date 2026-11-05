@@ -170,7 +170,7 @@ export function prepareNativeConversationCheck({repoRoot=desktopRoot,out,timeout
  const preloadBinding=mainPreloadBinding(fs.readFileSync(main,'utf8')),mainSha256=createHash('sha256').update(fs.readFileSync(main)).digest('hex'),preloadSha256=createHash('sha256').update(fs.readFileSync(preload)).digest('hex');
  const files=[];
  function collect(directory){if(!fs.existsSync(directory))return;for(const item of fs.readdirSync(directory,{withFileTypes:true})){const file=path.join(directory,item.name);if(item.isSymbolicLink())throw Error('Linked build/source input refused: '+file);if(item.isDirectory())collect(file);else if(item.isFile())files.push(file);}}
- for(const directory of ['src','frontend','shared','contracts'])collect(path.join(root,directory));files.push(path.join(root,'package.json'));
+ for(const directory of ['frontend','shared','contracts'])collect(path.join(root,directory));files.push(path.join(root,'package.json'));
  const indexTime=fs.statSync(index).mtimeMs,newest=Math.max(...files.map(file=>fs.statSync(file).mtimeMs));
  if(newest>indexTime+2000)throw Error('Renderer build predates its source inputs; build the current checkout before native acceptance');
  fs.mkdirSync(path.dirname(target),{recursive:true});fs.mkdirSync(target);

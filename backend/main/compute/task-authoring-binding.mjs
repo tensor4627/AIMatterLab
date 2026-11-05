@@ -1,5 +1,6 @@
 import {isDeepStrictEqual as equal} from 'node:util';
-import {actualAuthoringWorker,legacyAuthoringBindingEligible} from '../../../shared/task-worker-binding.mjs';
+import {actualAuthoringWorker,legacyAuthoringBindingEligible} from "../../../contracts/compute/task-worker-binding.mjs";
+
 import {readWorkerStatus} from './worker-status.mjs';
 import path from 'node:path';
 export async function bindLegacyAuthoringWorker({records,worker,selection,settings},args){

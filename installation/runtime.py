@@ -155,7 +155,7 @@ def bootstrap(config):
     return {"status":"passed","scope":"managed venv configured; scientific tests still required","pinned_sources":len(repositories),"requested_packages":len(packages),"environment":environment,"package_snapshot_sha256":hashlib.sha256(freeze.encode()).hexdigest()}
 def smoke(config,approved=False):
     # Runs on the LOCAL WSL controller, including when compute is SSH.
-    repo=Path(config["_suite_root"]);sys.path.insert(0,str(repo/"worker"))
+    repo=Path(config["_suite_root"]);sys.path.insert(0,str(repo/"backend/worker"))
     from studio_worker.service import Service
     from studio_worker.util import atomic_json
     state=Path(config["worker"]["root"]).expanduser()

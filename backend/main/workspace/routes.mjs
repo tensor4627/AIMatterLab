@@ -1,13 +1,14 @@
-import {workspaceController} from '../../../desktop/workspaces.mjs';
-import {taskOperation} from '../../../desktop/task-operations.mjs';
-import {saveDeployment,prepareDeployment} from '../../../desktop/task-deployment.mjs';
-import {saveDeploymentDraft,deploymentContext,createDeploymentProject} from '../../../desktop/deployment-state.mjs';
-import {openDeploymentSession} from '../../../desktop/deployment-session.mjs';
-import {executeTask} from '../../../desktop/task-execution.mjs';
-import {readTaskInput} from '../../../desktop/task-input-preview.mjs';
-import {readTaskPygas,saveTaskPygas,initializeTaskPygas} from '../../../desktop/task-pygas.mjs';
-import {restoreTaskWorker} from '../../../desktop/worker-restore.mjs';
-import {taskWorkerSource} from '../../../shared/task-worker-binding.mjs';
+import {workspaceController} from "./workspaces.mjs";
+import {taskOperation} from "./task-operations.mjs";
+import {saveDeployment,prepareDeployment} from "./task-deployment.mjs";
+import {saveDeploymentDraft,deploymentContext,createDeploymentProject} from "./deployment-state.mjs";
+import {openDeploymentSession} from "./deployment-session.mjs";
+import {executeTask} from "./task-execution.mjs";
+import {readTaskInput} from "./task-input-preview.mjs";
+import {readTaskPygas,saveTaskPygas,initializeTaskPygas} from "./task-pygas.mjs";
+import {restoreTaskWorker} from "../compute/worker-restore.mjs";
+import {taskWorkerSource} from "../../../contracts/compute/task-worker-binding.mjs";
+
 
 /** Register application operations through the host's existing trusted IPC port. */
 export function registerWorkspaceTaskRoutes({

@@ -5,10 +5,10 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const defaultRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const sourceName='contracts/tools/engine-contracts.json';
-const targetName='worker/studio_worker/engine_contracts.json';
+const targetName='backend/worker/studio_worker/engine_contracts.json';
 const resources=[
  {source:sourceName,resource:targetName,validate:value=>value?.schema_version===1&&typeof value.scope==='string'&&value.engines&&!Array.isArray(value.engines)&&typeof value.engines==='object'&&Object.keys(value.engines).length},
- {source:'contracts/tools/tool-package.schema.json',resource:'worker/studio_worker/tool_package.schema.json',validate:value=>value?.$id==='studio.tool-package/1'&&value.type==='object'&&value.additionalProperties===false},
+ {source:'contracts/tools/tool-package.schema.json',resource:'backend/worker/studio_worker/tool_package.schema.json',validate:value=>value?.$id==='studio.tool-package/1'&&value.type==='object'&&value.additionalProperties===false},
  {source:'contracts/tools/tool-package.schema.json',resource:'developer/skills/studio-tool-integration/references/tool-package.schema.json',validate:value=>value?.$id==='studio.tool-package/1'&&value.type==='object'},
  {source:'contracts/tools/tool-package.mjs',resource:'developer/skills/studio-tool-integration/references/tool-package.mjs',text:true,validate:value=>value.includes('export function validateToolPackage(')&&value.includes("from './tool-package.schema.json'")},
  {source:'installation/examples/worker-smoke.py',resource:'developer/skills/studio-tool-integration/assets/worker-smoke.py',text:true,validate:value=>value.trim().length>0}

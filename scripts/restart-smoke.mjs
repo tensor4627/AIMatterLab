@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {WorkerClient} from '../desktop/worker.mjs';
+import {WorkerClient} from "../agent/tools/worker-client.mjs";
 const out=path.resolve('.studio/validation'),report={checks:{}},worker=new WorkerClient(),pause=ms=>new Promise(r=>setTimeout(r,ms));
 const evidence=JSON.parse(fs.readFileSync(path.join(out,'science.json'),'utf8'));
 async function api(method,target,data){return worker.request(method,target,data);}
@@ -14,7 +14,7 @@ async function submitAndWait(run){
  return {status:run.status,run_id:run.id,exit:run.exit,log:(await api('POST','/api/run/log',{run_id:run.id})).text.slice(-3000)};
 }
 try{
- await worker.connect({distribution:'Ubuntu',workerRoot:evidence.desktop_worker_root,workerPort:8770},path.resolve('worker'));
+ await worker.connect({distribution:'Ubuntu',workerRoot:evidence.desktop_worker_root,workerPort:8770},path.resolve('backend/worker'));
  const runs=await api('GET','/api/runs'),gp=runs.find(r=>r.engine==='gpumd.md'&&r.status==='succeeded'),ht=runs.find(r=>r.id===evidence.checks['hotpp-train'].run_id);
  const original=await api('POST','/api/run/file',{run_id:gp.id,name:'run.in'});
  const continuation=await api('POST','/api/workspace/write',{project_id:gp.project_id,name:'continue-gpumd.in',content:original.text.split('\n').filter(l=>!l.trim().startsWith('velocity')).join('\n')});

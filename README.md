@@ -2,9 +2,11 @@
 
 面向 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 的中文 Agent 科学计算桌面工作台。Electron + React + TypeScript 自定义前端，Codex app server、Kimi / Qwen 官方 ACP CLI 与 DeepSeek API 负责 Agent，独立 Python/WSL 服务负责 GPU 作业。
 
+[软件规范](docs/software-specification.md) · [当前代码架构](docs/architecture.md) · [工具开发者接入](developer/README.md) · [1.0 重组与验证](docs/v1.0.md)
+
 ## 启动
 
-当前开发版本以 `package.json` 为准；开发产物位于 Git 忽略的 `release/`，具体构建与验证范围见 [本代记录](docs/v0.18.9.md)。已开发能力、验收边界和后续计划统一记录在 [开发者文档](docs/development/README.md)。首次启动：
+当前开发版本以 `package.json` 为准；开发产物位于 Git 忽略的 `release/`，具体构建与验证范围见 [本代记录](docs/v1.0.md)。已开发能力、验收边界和后续计划统一记录在 [开发者文档](docs/development/README.md)。首次启动：
 
 1. 普通对话可直接连接服务商；进行科学计算时先点击「连接 WSL」，在设置中选择已安装的发行版，默认 Ubuntu。
 2. 在「工具 → 算力与管理 → 计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。

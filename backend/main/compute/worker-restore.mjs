@@ -1,7 +1,8 @@
-import {workerServiceVersionEvidence} from '../../../desktop/worker-service-version.mjs';
+import {workerServiceVersionEvidence} from "./worker-service-version.mjs";
 import {isDeepStrictEqual as equal} from 'node:util';
 import {explicitWorkerBindingKey,validExplicitBinding,workerSettingsSignature,taskWorkerTarget,taskTransportScope,taskTransportReceipt,validTransportPort} from './explicit-worker-binding.mjs';
-import {taskWorkerSource,validTaskWorkerSource,taskWorkerSettings} from '../../../shared/task-worker-binding.mjs';
+import {taskWorkerSource,validTaskWorkerSource,taskWorkerSettings} from "../../../contracts/compute/task-worker-binding.mjs";
+
 export async function restoreConversationWorker({records,catalog,worker,settings,selection,selectionEpoch},args){
  const response=(status,reason)=>({status,reason,conversationId:args.conversationId,checkedAt:Date.now(),...status==='connected'?workerServiceVersionEvidence(worker):{}}),owner=selection();
  if(!owner?.threadId||args.conversationId!==owner.provider+':'+owner.threadId)return response('unknown','selection_changed');

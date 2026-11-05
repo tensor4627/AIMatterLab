@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import type {AgentProvider} from '../../../contracts/dto/agent';
 import type {Project,Environment} from '../../../contracts/dto/compute';
 import type {ToolPackageInspection,ToolPackageRecord,ToolPackageSummary,ToolConfiguration,ToolConfigurationIndex,ToolExecutionSkill,ToolGuidanceGrant} from '../../../contracts/dto/tools';
-import type {SkillAttachment} from '../../presentation/agent-types';
+import type {SkillAttachment} from "../conversations/agent-types";
 import {toolPackages,toolConfigurations} from '../../api/tools';
 import {api} from '../../api/worker';
 

@@ -1,5 +1,5 @@
 import {useEffect} from 'react';
-import {t} from '../../../src/i18n';
+import {t} from "../../ui/i18n";
 import type {ToolWorkflowReview} from '../../../contracts/dto/tool-workflows';
 import {referenceFunctions,supportedGroup,useToolWorkflows,type ToolWorkflowsOptions} from './useToolWorkflows';
 import './tool-workflows.css';

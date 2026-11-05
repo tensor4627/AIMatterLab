@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 def configure(config):
   # CLI/config validation runs before these optional scientific imports or writes.
   global BASE,FIX,PY,service,REPORT,build_bias,bulk,EMT,SinglePointCalculator,write,np,yaml
-  sys.path.insert(0,str(ROOT/"worker"))
+  sys.path.insert(0,str(ROOT/"backend/worker"))
   from studio_worker.service import Service
   from studio_worker.templates import build_bias
   from studio_worker.adapters import ENGINES

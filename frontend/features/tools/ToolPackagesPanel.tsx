@@ -1,7 +1,7 @@
 import type {AgentProvider} from '../../../contracts/dto/agent';
 import type {ToolPackageInspection,ToolPort,ToolParameter} from '../../../contracts/dto/tools';
-import type {SkillAttachment} from '../../presentation/agent-types';
-import {t} from '../../../src/i18n';
+import type {SkillAttachment} from "../conversations/agent-types";
+import {t} from "../../ui/i18n";
 import {referenceConfigurationSupported,useToolPackages} from './useToolPackages';
 import './tool-packages.css';
 

@@ -2,16 +2,21 @@
 import fs from 'node:fs';
 import ts from 'typescript';
 import {randomUUID} from 'node:crypto';
-import * as shell from '../../src/workspace-shell.mjs';
-import * as navigation from '../../src/workspace-navigation.mjs';
-import * as workflows from '../../shared/workflows.mjs';
-import * as diagnostics from '../../shared/ui-diagnostics.mjs';
-import * as computeCommand from '../../shared/compute-connection-command.mjs';
+import * as shell from '../../frontend/app/workspace-shell.mjs';
+import * as navigation from '../../frontend/app/workspace-navigation.mjs';
+import * as workflowsOwner0 from "../../frontend/features/workflows/workflow-catalog.mjs";
+import * as workflowsOwner1 from "../../contracts/workflows/plan.mjs";
+const workflows={...workflowsOwner0,...workflowsOwner1};
+
+import * as diagnostics from "../../frontend/features/diagnostics/ui-diagnostics.mjs";
+
+import * as computeCommand from "../../frontend/features/compute/compute-connection-command.mjs";
+
 import {memoryStorage} from './agent-hooks.mjs';
 import {loadConversationSelection} from './conversation-selection-hooks.mjs';
-const source=fs.readFileSync(new URL('../../src/App.tsx',import.meta.url),'utf8');
+const source=fs.readFileSync(new URL('../../frontend/app/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
-const reviewSource=ts.createSourceFile('RunReview.tsx',fs.readFileSync(new URL('../../src/RunReview.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const reviewSource=ts.createSourceFile('RunReview.tsx',fs.readFileSync(new URL('../../frontend/features/runs/RunReview.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const taskModuleSource=reviewSource.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='taskModule').getText(reviewSource).replace(/^export /,'');
 const taskModule=new Function('t',ts.transpileModule(taskModuleSource,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'; return taskModule;')(value=>value);
 const navigationModules=Object.fromEntries(['frontend/features/workflows/useToolWorkflowNavigation.ts','frontend/api/tool-workflows.ts','frontend/api/studio.ts'].map(file=>[file,ts.transpileModule(fs.readFileSync(new URL('../../'+file,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
@@ -48,19 +53,19 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
  const require=name=>{
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
-  if(name==='../frontend/features/conversations/useConversationSelection')return conversationSelection;
-  if(name==='../frontend/features/workflows/useToolWorkflowNavigation')return loadNavigation('frontend/features/workflows/useToolWorkflowNavigation.ts');
-  if(name==='./RunReview')return {__esModule:true,default:name,taskModule};
+  if(name==="../features/conversations/useConversationSelection")return conversationSelection;
+  if(name==="../features/workflows/useToolWorkflowNavigation")return loadNavigation('frontend/features/workflows/useToolWorkflowNavigation.ts');
+  if(name==="../features/runs/RunReview")return {__esModule:true,default:'./RunReview',taskModule};
   if(name==='lucide-react')return new Proxy({},{get:(_target,key)=>String(key)});
   if(name==='./workspace-shell.mjs')return shell;
   if(name==='./workspace-navigation.mjs')return navigation;
-  if(name==='../shared/workflows.mjs')return workflows;
-  if(name==='../shared/ui-diagnostics.mjs')return diagnostics;
-  if(name==='../shared/compute-connection-command.mjs')return computeCommand;
-  if(name==='../package.json')return {version:'source-fixture'};
-  if(name==='./types')return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),readWorkerStatus:()=>invoke('worker.status'),restoreWorker:owner=>invoke('worker.restore',typeof owner==='string'?{taskId:owner}:owner),engines:[],wslPath:value=>value};
-  if(name==='./i18n')return {t:value=>value,tr:value=>value,setLanguage:()=>{}};
-  return new Proxy({default:name},{get:(target,key)=>target[key]??String(key)});
+  if(["../features/workflows/workflow-catalog.mjs","../../contracts/workflows/plan.mjs"].includes(name))return workflows;
+  if(["../features/diagnostics/ui-diagnostics.mjs"].includes(name))return diagnostics;
+  if(["../features/compute/compute-connection-command.mjs"].includes(name))return computeCommand;
+  if(name==="../../package.json")return {version:'source-fixture'};
+  if(["../api/worker","../api/studio","../ui/presentation/paths","../ui/presentation/engines","../../api/worker"].includes(name))return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),readWorkerStatus:()=>invoke('worker.status'),restoreWorker:owner=>invoke('worker.restore',typeof owner==='string'?{taskId:owner}:owner),engines:[],wslPath:value=>value};
+  if(["../ui/i18n","../../ui/i18n"].includes(name))return {t:value=>value,tr:value=>value,setLanguage:()=>{}};
+  return new Proxy({default:'./'+name.split('/').pop()},{get:(target,key)=>target[key]??String(key)});
  };
  const module={exports:{}},document={documentElement:{dataset:{},style:{setProperty(){}}},addEventListener(){},removeEventListener(){},querySelector(){return null;}};
  const window={innerWidth:width,dispatchEvent(){},addEventListener(){},removeEventListener(){},studio:{invoke,onEvent:fn=>{listeners.push(fn);return()=>listeners.splice(listeners.indexOf(fn),1);}}};

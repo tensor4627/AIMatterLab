@@ -3,14 +3,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 import {randomUUID} from 'node:crypto';
-import * as account from '../../shared/provider-account.mjs';
-import * as drafts from '../../shared/composer-drafts.mjs';
-import * as effort from '../../shared/resume-effort.mjs';
-import * as activity from '../../shared/tool-activity.mjs';
-import * as fields from '../../shared/task-fields.mjs';
+import * as accountOwner0 from "../../frontend/features/conversations/provider-account.mjs";
+import * as accountOwner1 from "../../contracts/agent/provider-account.mjs";
+const account={...accountOwner0,...accountOwner1};
+
+import * as drafts from "../../frontend/features/conversations/composer-drafts.mjs";
+
+import * as effort from "../../frontend/features/conversations/resume-effort.mjs";
+
+import * as activityOwner0 from "../../frontend/features/conversations/tool-activity.mjs";
+import * as activityOwner1 from "../../contracts/agent/user-message.mjs";
+const activity={...activityOwner0,...activityOwner1};
+
+import * as fieldsOwner0 from "../../contracts/workflows/task-fields.mjs";
+import * as fieldsOwner1 from "../../frontend/ui/task-fields.mjs";
+import * as fieldsOwner2 from "../../frontend/features/conversations/workflow-intent.mjs";
+const fields={...fieldsOwner0,...fieldsOwner1,...fieldsOwner2};
+
 import {conversationSelectionHarness} from './conversation-selection-hooks.mjs';
 
-const source=fs.readFileSync(process.env.STUDIO_AGENT_SOURCE?path.resolve(process.env.STUDIO_AGENT_SOURCE):new URL('../../src/Agent.tsx',import.meta.url),'utf8');
+const source=fs.readFileSync(process.env.STUDIO_AGENT_SOURCE?path.resolve(process.env.STUDIO_AGENT_SOURCE):new URL('../../frontend/features/conversations/Agent.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 export function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 export function memoryStorage(){const values=new Map();return {values,getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key)};}
@@ -45,13 +57,13 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
   if(name==='lucide-react')return new Proxy({},{get:(_target,key)=>String(key)});
-  if(name==='../shared/provider-account.mjs')return account;
-  if(name==='../shared/composer-drafts.mjs')return drafts;
-  if(name==='../shared/resume-effort.mjs')return effort;
-  if(name==='../shared/tool-activity.mjs')return activity;
-  if(name==='../shared/task-fields.mjs')return fields;
-  if(name==='./types')return {invoke,recoverConversation:data=>invoke('agent.recover',data)};
-  if(name==='./i18n')return {t:value=>value,tr:value=>value};
+  if(["./provider-account.mjs","../../../contracts/agent/provider-account.mjs","../conversations/provider-account.mjs"].includes(name))return account;
+  if(["./composer-drafts.mjs"].includes(name))return drafts;
+  if(["./resume-effort.mjs"].includes(name))return effort;
+  if(["./tool-activity.mjs","../../../contracts/agent/user-message.mjs"].includes(name))return activity;
+  if(["./workflow-intent.mjs","../../../contracts/workflows/task-fields.mjs","../../ui/task-fields.mjs"].includes(name))return fields;
+  if(["../../api/studio","../../api/agent"].includes(name))return {invoke,recoverConversation:data=>invoke('agent.recover',data)};
+  if(name==="../../ui/i18n")return {t:value=>value,tr:value=>value};
   return {default:name};
  };
  const module={exports:{}};

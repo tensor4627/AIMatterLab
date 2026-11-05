@@ -7,7 +7,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash, randomUUID} from 'node:crypto';
 import {execFileSync, spawn} from 'node:child_process';
-import {Catalog} from '../desktop/catalog.mjs';
+import {Catalog} from "../backend/main/workspace/catalog.mjs";
 import {createToolPackageRegistry} from '../backend/main/tools/package-registry.mjs';
 import {createToolConfigurationController} from '../backend/main/compute/tool-configurations.mjs';
 
@@ -60,7 +60,7 @@ export async function runToolConfigurationIntegration({repositoryRoot, evidenceR
   fs.mkdirSync(evidenceRoot,{recursive:true});
   assert.equal(fs.realpathSync(evidenceRoot),evidenceRoot,'Linked evidence roots are forbidden');
   assert(path.isAbsolute(python)&&fs.statSync(python).isFile(),'Use an explicit existing system interpreter');
-  const root=fs.mkdtempSync(path.join(evidenceRoot,'wire-')),runId=randomUUID(),stateRoot=path.join(root,'worker');
+  const root=fs.mkdtempSync(path.join(evidenceRoot,'wire-')),runId=randomUUID(),stateRoot=path.join(root,'backend','worker');
   write(path.join(root,'integration-root.json'),JSON.stringify({schema_version:1,kind:'tool-configuration-integration',run_id:runId,scope},null,2));
   const trace=[],checks=[],catalogs=[];let child,tokens,stage='setup',port,worker,started=false,terminal=false;
   const report={schema_version:1,scope,status:'running',root,run_id:runId,node:process.version,python,checks,trace};
@@ -83,7 +83,7 @@ export async function runToolConfigurationIntegration({repositoryRoot, evidenceR
     check('Actual Git package registered and immutable snapshot created',{package_id:registered.package_id,package_version:registered.package_version,source_commit:registered.source_commit});
     report.package={id:registered.package_id,version:registered.package_version,snapshot_root:registered.snapshot_root};
     port=await unusedPort();const log=fs.openSync(path.join(root,'server.log'),'a');
-    child=spawn(python,['-B','-m','studio_worker.server','--root',stateRoot,'--port',String(port)],{cwd:repositoryRoot,env:{...process.env,PYTHONPATH:path.join(repositoryRoot,'worker'),PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
+    child=spawn(python,['-B','-m','studio_worker.server','--root',stateRoot,'--port',String(port)],{cwd:repositoryRoot,env:{...process.env,PYTHONPATH:path.join(repositoryRoot,'backend','worker'),PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
     fs.closeSync(log);let spawnError;child.once('error',error=>{spawnError=error;});
     report.server_pid=child.pid;report.port=port;
     stage='worker-start';let health;const deadline=Date.now()+15000;

@@ -1,4 +1,4 @@
-import React from 'react';import{createRoot}from'react-dom/client';import App from '@studio/App';import '@studio/style.css';import '@studio/task-flow.css';import './style.css';
+import React from 'react';import{createRoot}from'react-dom/client';import App from '@studio/app/App';import '@studio/app/style.css';import '@studio/features/workflows/task-flow.css';import './style.css';
 const settings={distribution:'TEST ONLY',workerRoot:'/fixture/worker',workerPort:19000,codexPath:'fixture-not-executable',cwd:'/fixture',skillRoots:[],theme:'dark',language:'zh-CN',agentProvider:'codex',agentLayout:'right',projectAgents:{}};
 const conversation={id:'codex:fixture-missing-thread',provider:'codex',threadId:'fixture-missing-thread',name:'TEST ONLY · 缺失流程会话',projectId:null,taskId:'fixture-missing'};
 const calls:unknown[]=[];const record=(method:string,data?:unknown)=>{calls.push({at:new Date().toISOString(),method,data});sessionStorage.setItem('app-fixture-calls',JSON.stringify(calls));};

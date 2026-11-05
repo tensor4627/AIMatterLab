@@ -3,7 +3,7 @@ import {resolveReadPolicy} from './read-policy.mjs';
 import {policyIo} from './policy-io.mjs';
 import {constants} from 'node:fs';
 import path from 'node:path';
-import {toolValueResult} from '../../desktop/tool-failure.mjs';
+import {toolValueResult} from "../tools/tool-failure.mjs";
 import {createHash} from 'node:crypto';
 const PROVIDERS=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const sha=value=>createHash('sha256').update(value).digest('hex');

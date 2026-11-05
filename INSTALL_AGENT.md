@@ -4,7 +4,7 @@
 
 ## 获取可信源码
 
-- 若本文位于完整仓库内，使用当前 checkout，先阅读 AGENTS.md、installation/manifest.json、installation/config.example.json、docs/one-prompt-install.md，以及 agents/skills/studio-compute-workflow/SKILL.md。
+- 若本文位于完整仓库内，使用当前 checkout，先阅读 AGENTS.md、installation/manifest.json、installation/config.example.json、docs/one-prompt-install.md，以及 agent/builtin-skills/studio-compute-workflow/SKILL.md。
 - 若只有本文，向用户一次询问源码 GitHub URL。发布仓库尚未填入 manifest 时不得猜测地址、伪造下载成功或把其他项目当作本项目。
 - 在用户选择的新目录 clone 指定发布版本。检查真实 Git revision、发布包哈希与依赖锁；不要覆盖旧安装、重置用户文件或切换现有科学引擎仓库分支。
 - 当前桌面平台为 Windows + WSL。缺少 WSL、重启权限、CUDA、兼容 Agent provider 或指定科学仓库时如实记录 blocked，并解释所缺条件。
@@ -51,7 +51,7 @@ NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、�
 
 ## 可迁移 skill 与本机沉淀
 
-发行携带 agents/skills 下公开的计算、工作流编写及安装验收技能及其通用 references；便携包中的物理位置是 resources/studio-skills，默认显示于技能库。原有本机 skill 保持原位置，不能打包其内容。DeepSeek 等 API 服务商选择技能后，主进程仅注入用户选定的、已登记的技能内容；凭据仍留在本机。
+发行携带 agent/builtin-skills 下公开的计算、工作流编写及安装验收技能及其通用 references；便携包中的物理位置是 resources/studio-skills，默认显示于技能库。原有本机 skill 保持原位置，不能打包其内容。DeepSeek 等 API 服务商选择技能后，主进程仅注入用户选定的、已登记的技能内容；凭据仍留在本机。
 
 按 docs/portable-skills.md 与公开 profile schema，将明确选定的连接 ID、环境 ID、版本及必要路径写入忽略的私有 JSON，再运行 scripts/localize-skill.mjs --profile <private-profile.json> --repo <checkout-root>，生成 .studio/local-skills/<profile-id>。将该目录登记为额外技能根目录。本机 overlay 是未验证的指导配置，不能授予项目授权或替代实际探测；后续运行证据另存忽略目录。local_skill_refs 仅保存用户选中的路径引用，脚本不读取或复制用户级 skill 全文。
 

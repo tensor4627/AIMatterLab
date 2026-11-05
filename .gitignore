@@ -8,7 +8,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 validation/local/
-worker/*.egg-info/
+backend/worker/*.egg-info/
 .env
 .env.*
 !.env.example

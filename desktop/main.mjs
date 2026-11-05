@@ -1,13 +1,17 @@
+import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
+import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
+import {createAgentRequests} from '../agent/sessions/requests.mjs';
+import {computeRuntime} from './platform/compute-runtime.mjs';
 import {createComputeProfiles} from '../backend/main/compute/compute-profiles.mjs';
-import {createSharedTerminal} from './shared-terminal.mjs';
-import {TerminalMcp} from './terminal-mcp.mjs';
-import {terminalOnlyTurn} from './terminal-turn.mjs';
-import {selectConversation} from './conversation-selection.mjs';
-import {createWindowsSaveAs} from './windows-save-as.mjs';
-import {createStructureWithAuthoringContext} from './structure-authoring.mjs';
-import {environmentApiTool,createEnvironmentApiReader} from './environment-api-read.mjs';
-import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from './ssh-connection.mjs';
-import {createWorkbenchImageExporter} from './workbench-image.mjs';
+import {createSharedTerminal} from "../backend/main/compute/shared-terminal.mjs";
+import {TerminalMcp} from "../agent/tools/terminal-mcp.mjs";
+
+import {selectConversation} from "../agent/sessions/conversation-selection.mjs";
+import {createWindowsSaveAs} from "./platform/windows-save-as.mjs";
+import {createStructureWithAuthoringContext} from "../backend/main/workspace/structure-authoring.mjs";
+import {environmentApiTool,createEnvironmentApiReader} from "../backend/main/compute/environment-api-read.mjs";
+import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from "../backend/main/compute/ssh-connection.mjs";
+import {createWorkbenchImageExporter} from "./platform/workbench-image.mjs";
 import {registerWorkspaceTaskRoutes} from '../backend/main/workspace/routes.mjs';
 import {createToolPackageRegistry} from '../backend/main/tools/package-registry.mjs';
 import {createToolGroupRecords} from '../backend/main/tools/groups.mjs';
@@ -16,68 +20,65 @@ import {createToolConfigurationController,registerToolConfigurationRoutes} from 
 import {createToolWorkflowController,registerToolWorkflowRoutes} from '../backend/main/workspace/tool-workflows.mjs';
 import {toolGuidanceTarget} from '../backend/main/compute/tool-guidance-target.mjs';
 import {explicitSetupStage} from '../agent/skills/explicit-setup-stage.mjs';
-import {createComputeOnboarding} from './compute-onboarding.mjs';
+import {createComputeOnboarding} from "../backend/main/compute/compute-onboarding.mjs";
 import {createComputeConnection,installedWslDistributions} from '../backend/main/compute/compute-connection.mjs';
-import {customCvNumericDialog,referenceImportDialog} from './custom-cv-dialog.mjs';
-import {registerTaskStage} from './task-stage-ipc.mjs';
-import {localReviewDialog} from './local-review-dialog.mjs';
-import {registerCalculationReview} from './task-consumer-ipc.mjs';
-import {consumerReviewDialog} from './consumer-review-dialog.mjs';
-import {ensureDefinitionContext} from './private-conversation-context.mjs';
-import {resumeConversationContext} from './conversation-recovery.mjs';
+import {customCvNumericDialog,referenceImportDialog} from "./platform/dialogs/custom-cv-dialog.mjs";
+import {registerTaskStage} from "../backend/main/workspace/task-stage-ipc.mjs";
+import {localReviewDialog} from "./platform/dialogs/local-review-dialog.mjs";
+import {registerCalculationReview} from "../backend/main/workspace/task-consumer-ipc.mjs";
+import {consumerReviewDialog} from "./platform/dialogs/consumer-review-dialog.mjs";
+
+import {resumeConversationContext} from "../agent/sessions/conversation-recovery.mjs";
 import {definitionReply} from '../agent/tools/definition-scope.mjs';
-import {scientificToolReadiness} from './scientific-tool-readiness.mjs';
+import {scientificToolReadiness} from "../agent/tools/scientific-tool-readiness.mjs";
 import {createAgentWorkflowContext} from '../agent/sessions/workflow-context.mjs';
-import {currentPrivateTurn} from './private-task-context.mjs';
-import {createPrivateCvAccess,composeToolGuards} from './private-cv-access.mjs';
-import {createTaskCustomCv} from './task-custom-cv.mjs';
-import {currentPairTool,readCurrentPair} from './current-pair-tool.mjs';
-import {importTaskAsset} from './task-asset-import.mjs';
+
+import {createPrivateCvAccess,composeToolGuards} from "../agent/tools/private-cv-access.mjs";
+import {createTaskCustomCv} from "../backend/main/workspace/task-custom-cv.mjs";
+import {currentPairTool,readCurrentPair} from "../agent/tools/current-pair-tool.mjs";
+import {importTaskAsset} from "../backend/main/workspace/task-asset-import.mjs";
 import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage } from 'electron';
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
+
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createInterface } from 'node:readline';
-import {ensureTaskAuthoring} from './task-authoring.mjs';
-import {readTaskPygas,bindComposition,compositionToolGuard} from './task-pygas.mjs';
-import {visibleUserText} from '../shared/tool-activity.mjs';
+import {fileURLToPath} from 'node:url';
+
+import {readTaskPygas,bindComposition,compositionToolGuard} from "../backend/main/workspace/task-pygas.mjs";
+
 import {ScientificSkills,validateScientificConsent,normalizeScientificSharing} from '../agent/skills/scientific-skills.mjs';
 import {legacyGuidanceFacts} from '../agent/skills/read-policy.mjs';
-import {deliverScientificTurn} from './scientific-turn.mjs';
-import {MaterialsProject} from './materials-project.mjs';
+
+import {MaterialsProject} from "../backend/main/tools/materials-project.mjs";
 import {discoverSources,toolInventory} from '../backend/main/tools/source-projects.mjs';
-import {sourceContext} from '../agent/context/source-context.mjs';
+
 import { localSkills } from '../agent/skills/skills.mjs';
-import { selectedSkillContext } from '../agent/skills/skill-context.mjs';
-import { managedToolSkillContext } from '../agent/skills/managed-tool-context.mjs';
-import {agentConfig,STUDIO_INSTRUCTIONS} from '../agent/context/agent-settings.mjs';
-import {TaskRecords} from './task-records.mjs';
-import {existingConnections,existingProfile} from './existing-ssh.mjs';
-import {sshEndpoint} from './ssh-endpoint.mjs';
-import { Catalog } from './catalog.mjs';
+
+import {agentConfig} from '../agent/context/agent-settings.mjs';
+import {TaskRecords} from "../agent/sessions/task-records.mjs";
+import {existingConnections,existingProfile} from "../backend/main/compute/existing-ssh.mjs";
+
+import { Catalog } from "../backend/main/workspace/catalog.mjs";
 import { CodexBridge } from '../agent/providers/codex.mjs';
-import {validatePlan} from '../shared/workflows.mjs';
+
 import {AgentHub,loginUrl} from '../agent/providers/agent-hub.mjs';
 import {CredentialVault} from './platform/credential-vault.mjs';
 import {providerId} from '../agent/providers/contracts.mjs';
-import { WorkerClient } from './worker.mjs';
+import { WorkerClient } from "../agent/tools/worker-client.mjs";
 import {readWorkerStatus} from '../backend/main/compute/worker-status.mjs';
-import {bundledWorkerRuntimeId} from './worker-service-version.mjs';
+import {bundledWorkerRuntimeId} from "../backend/main/compute/worker-service-version.mjs";
 import {restoreTaskWorker} from '../backend/main/compute/worker-restore.mjs';
 import {explicitWorkerReceipt,rememberExplicitWorker,workerSettingsSignature,validExplicitBinding,taskWorkerTarget,validTransportPort,taskTransportScope,taskTransportReceipt} from '../backend/main/compute/explicit-worker-binding.mjs';
-import {taskWorkerSettings,sameWorkerBinding,taskWorkerSource,validTaskWorkerSource} from '../shared/task-worker-binding.mjs';
-import {bindLegacyAuthoringWorker} from '../backend/main/compute/task-authoring-binding.mjs';
-import { assertRpc, assertRendererWorkerRoute, linuxPath, sshAlias, quoteShell } from './security.mjs';
+import {sameWorkerBinding,taskWorkerSource} from "../contracts/compute/task-worker-binding.mjs";
 
-const exec = promisify(execFile);
+import {bindLegacyAuthoringWorker} from '../backend/main/compute/task-authoring-binding.mjs';
+import {assertRendererWorkerRoute,linuxPath} from "../contracts/transport-policy.mjs";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here,'..');
-const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'worker');
+const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'backend','worker');
 // Physical resources keep skill references usable by an external agent process.
-const bundledSkillRoot = app.isPackaged ? path.join(process.resourcesPath,'studio-skills') : path.join(root,'agents','skills');
+const bundledSkillRoot = app.isPackaged ? path.join(process.resourcesPath,'studio-skills') : path.join(root,'agent','builtin-skills');
 function studioSkillRoots(){const sourceRoots=[...(settings.sourceRoots||[]),...(catalog?.list('source-binding')||[]).map(s=>s.root)];return [...new Set([bundledSkillRoot,...(settings.skillRoots||[]),...sourceRoots.map(p=>path.join(p,'agents','skills'))])];}
 // The backend composition root replaces this getter with authoritative worker facts.
 let resolveSkillGuidance=async()=>legacyGuidanceFacts();
@@ -104,7 +105,7 @@ let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp;
 const activeAuthoringTasks=new Map();
-const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient(), terminals = new Map(), grants = new Map();
+const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map(), grants = new Map();
 Object.defineProperty(worker,'bundledRuntimeId',{value:bundledWorkerRuntimeId(workerSource)});
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
@@ -155,10 +156,10 @@ if(installationVerifying){
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
 agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>worker.providerConnection(provider)||terminalMcp?.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>{const local=terminalMcp?.bindProviderContext(provider,context,options),scientific=worker.bindProviderContext(provider,context,options);return worker.providerConnection(provider)?scientific:local||scientific;}});
-const scientificMap=JSON.parse(fs.readFileSync(path.join(here,'scientific-skill-map.json'),'utf8'));
+const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
 scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
-const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(here,'custom-cv-tool-schema.json'),'utf8'))};
+const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(root,'agent','tools','custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
 worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool],async(name,args,scope)=>{
@@ -208,7 +209,7 @@ handle('compute.profiles.inventory',async value=>{if(!value||typeof value!=='obj
 sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,
  root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:path.join(app.getPath('userData'),'shared-terminal','runtime'),
  dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):root,
- servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'terminal-service','broker.mjs'),nodeExecutable:process.execPath,
+ servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'platform','terminal-service','broker.mjs'),nodeExecutable:process.execPath,
  sourceGuard:()=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),{}),worker)});
 const terminalTools=sharedTerminal.tools(),terminalToolNames=new Set(terminalTools.map(tool=>tool.name));
 worker.setLocalTools([...materials.tools(),...terminalTools],(name,args,scope)=>terminalToolNames.has(name)?sharedTerminal.callTool(name,args,scope):materials.call(name,args));
@@ -336,12 +337,7 @@ handle('codex.configure',async({preferences={},threadId,model}) => {
   return agents.configure('codex',preferences,threadId,model);
 });
 handle('codex.rpc',value=>agentRpc({...value,provider:'codex'}));
-handle('workflow.list',()=>catalog.list('workflow-plan'));
-handle('workflow.save',value=>{
- const plan=validatePlan(value),id=value.id;
- if(id!==undefined&&(typeof id!=='string'||!catalog.get('workflow-plan',id)))throw Error('Unknown workflow plan');
- const key=id||randomUUID();return catalog.put('workflow-plan',key,{...plan,id:key,status:'draft',updatedAt:Date.now()});
-});
+registerWorkflowPlanRoutes({handle,catalog});
 async function scientificTools(provider){
  const terminalReady=()=>sharedTerminal?.hasCurrentGrant(provider)?{status:'ready',scope:'terminal-only',scientificStatus:'blocked',count:3,transport:'desktop-terminal',message:'共享终端可用',checkedAt:Date.now()}:null;
  if(!worker.providerConnection(provider)&&terminalReady())return terminalReady();
@@ -370,88 +366,8 @@ handle('agent.connect',async({provider,repairTools=false})=>{
 handle('agent.tools',async({provider})=>{providerId(provider);return scientificTools(provider);});
 handle('agent.disconnect',({provider})=>{providerId(provider);workflowContext.clear(provider);agents.disconnect(provider);return {};});
 handle('agent.account',({provider})=>agents.account(provider));
-async function agentRpc({provider,method,params={}}){
- providerId(provider);assertRpc(method);
- const {studioSkillId,studioTurnRequestId,...protocolParams}=params;params=protocolParams;
- if(studioTurnRequestId!==undefined&&(typeof studioTurnRequestId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(studioTurnRequestId)))throw Error('Invalid turn request identity');
- if(studioSkillId!==undefined&&(typeof studioSkillId!=='string'||!scientificSkills.router.routes.has(studioSkillId)))throw Error('Choose a listed scientific function');
- if(method==='turn/steer'){
-  const task=taskRecords.bound(provider,params.threadId);
-  if(task&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');
- }
- let ticket,skillContext,skillKey,terminalOnly=false;
- const check=()=>{if(ticket)workflowContext.assert(ticket);};
- const synchronize=async()=>{check();await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));check();};
- if(['thread/start','thread/resume','turn/start'].includes(method)){
-  assertIdleAgent();ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId);await synchronize();
- }
- terminalOnly=method==='turn/start'&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
- if(method==='turn/start'&&!terminalOnly){
-  let task=taskRecords.bound(provider,params.threadId);
-  if(task){const access=await privateAccess.assertTask(task,provider);check();if(access.definitionOnly){
-   if(params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
-   const {planningMode,studioTaskId,reviewMode,...privateParams}=params;currentPrivateTurn(privateParams,task);
-   if(provider!=='codex')throw Error('Definition-only sharing requires an isolated fresh Codex context; this provider is not yet supported for private definitions');
-   const clean=await ensureDefinitionContext({records:taskRecords,workflowContext,agents,task,ticket,model:params.model,publish:event=>emit('studio:event',event)});ticket=clean.ticket;check();params={...params,threadId:clean.task.threadId};
-  }}
- }
- skillKey=provider+':'+params.threadId;
- if(method==='turn/start'&&terminalOnly){
-  params=terminalOnlyTurn(params,{provider});check();
-  if(provider==='codex'&&!agents.threadReady(params.threadId)){
-   const resumed=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=resumed.ticket;check();
-   if(resumed.result.studioRecovery?.status==='required')return resumed.result;
-   params={...params,threadId:resumed.result.thread.id};
-  }
-  if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');
- }
- if(method==='turn/start'&&!terminalOnly){
-  const before=taskRecords.bound(provider,params.threadId);let definitionOnly=!!before?.customCv?.id;if(before&&worker.connection){definitionOnly=(await privateAccess.assertTask(before,provider)).definitionOnly;check();}
-  if(definitionOnly&&params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
-  const text=visibleUserText(params.input||[]);
-  const authoring=definitionOnly?null:await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true,assertCurrent:check});check();
-  if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};
-  let bound=taskRecords.bound(provider,params.threadId);if(bound){definitionOnly=(await privateAccess.assertTask(bound,provider)).definitionOnly;check();}
-  const privateReview=params.reviewMode===true;
-  await synchronize();
-  if(provider==='codex'&&!agents.threadReady(params.threadId)){
-   const resumed=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=resumed.ticket;check();
-   if(resumed.result.studioRecovery?.status==='required')return resumed.result;
-   params={...params,threadId:resumed.result.thread.id};skillKey=provider+':'+params.threadId;bound=taskRecords.bound(provider,params.threadId);
-  }
-  params=taskRecords.prepareTurn(provider,params);check();await synchronize();
-  if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview});
-  // Public software guidance is selected only for the actual current intent.
-  const guidanceScope=skillGuidanceScope(provider),readPolicy=await scientificSkills.resolvePolicy(guidanceScope);check();
-  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
-  const explicitSetup=!definitionOnly&&studioSkillId&&['installation','setup','toolchain'].includes(scientificSkills.router.routes.get(studioSkillId)?.phase);
-  skillContext=await(explicitSetup?setupInstructions.prepare(provider,studioSkillId,prepareGuidance):prepareGuidance());check();
-  if(!skillContext.guidanceKind&&!definitionOnly&&bound?.parameters?.engine&&worker.connection){
-   const selectedTarget=toolGuidanceTarget(bound),environment_id=selectedTarget?.kind==='local'?selectedTarget.environmentId:undefined,engine=bound.parameters.engine;
-   if(environment_id){const selection={environment_id,engine};let guide;try{guide=await worker.request('POST','/api/runtime-guide',selection);}catch{guide={status:'blocked',reason:'Selected runtime guide unavailable; use an exact selected-engine probe, not an automatic reinstall'};}check();skillContext=scientificSkills.context.mergeRuntime(skillKey,provider,skillContext,guide,selection);}
-  }
-  if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
-  if(!definitionOnly&&!skillContext.guidanceKind)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSkills.sourcesForPolicy(readPolicy))}]};
-  if(['deepseek','compatible'].includes(provider)){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
-  const normalRoots=definitionOnly?[]:studioSkillRoots(),registeredRoots=[...normalRoots,...managedSkillRoots()],registered=definitionOnly||!params.input?.some(item=>item.type==='skill')?[]:[...localSkills(normalRoots,{policy:readPolicy}),...managedSkillEntries(readPolicy)],input=[];
-  for(const item of params.input||[]){
-   if(item.type==='text')input.push(item);
-   else if(item.type==='skill'){
-    const managed=!definitionOnly&&managedSkillRecords().find(record=>item.path===path.join(record.snapshot_root,record.delivery_skill.path));
-    const context=managed?await managedToolSkillContext({selection:item,record:managed,policy:readPolicy,scope:guidanceScope}):await selectedSkillContext({selection:item,registered,registeredRoots,bundledRoot:bundledSkillRoot,policy:readPolicy,scope:guidanceScope,validatePrivateProfile:async value=>{const validator=app.isPackaged?path.join(process.resourcesPath,'studio-tools','localize-skill.mjs'):path.join(root,'scripts','localize-skill.mjs');return (await import(pathToFileURL(validator).href)).validateProfile(value);}});check();
-    input.push({type:'text',text:context.text});
-   }else if(provider==='codex')input.push(item);else throw Error('Unsupported input content');
-  }
-  params={...params,input};
- }
- let result;
- try{check();if(provider==='codex'&&method==='thread/resume'){const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;}else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{check();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
- catch(error){if(method==='turn/start'){try{check();taskRecords.failedTurn(provider,params.threadId,error);}catch{}}throw error;}
- if(method==='thread/start'){if(!result.thread?.id)throw Error('The server did not return a real conversation');workflowContext.started(ticket,result.thread.id);await synchronize();}
- if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)catalog.put('thread',result.thread.id,result.thread);
- if(provider==='codex'&&method==='account/login/start'&&result.authUrl)await openUrl(result.authUrl);
- return result;
-}
+const agentRequests=createAgentRequests({runtime:()=>({agents,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+async function agentRpc(value){return agentRequests(value);}
 handle('agent.rpc',agentRpc);
 handle('agent.recover',async({provider,threadId,model})=>{
  if(provider!=='codex'||typeof threadId!=='string'||!threadId||threadId.length>200||model!==undefined&&(typeof model!=='string'||!model||model.length>200))throw Error('Invalid conversation recovery request');
@@ -501,59 +417,7 @@ handle('file.choose',async({directory=false}) => {
   const response=await dialog.showOpenDialog(window,{properties:[directory?'openDirectory':'openFile']});
   return response.canceled?null:response.filePaths[0];
 });
-handle('ssh.save',({alias,name}) => {
-  alias=sshAlias(alias); return catalog.put('ssh',alias,{alias,name:name||alias});
-});
-handle('ssh.browse',async({alias,directory='.',file}) => {
-  alias=sshAlias(alias);
-  const script=file ?
-    'import pathlib,json,sys;p=pathlib.Path(sys.argv[1]).expanduser();s=p.stat();assert s.st_size<=262144;print(json.dumps({"path":str(p),"content":p.read_text()}))' :
-    'import pathlib,json,sys;p=pathlib.Path(sys.argv[1]).expanduser().resolve();print(json.dumps({"path":str(p),"entries":[{"name":x.name,"directory":x.is_dir(),"size":x.stat().st_size} for x in list(p.iterdir())[:1000]]}))';
-  const command='python3 -c '+quoteShell(script)+' '+quoteShell(file||directory);
-  const {stdout}=await exec('ssh.exe',['-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
-    '-o','ConnectTimeout=10',alias,command],{windowsHide:true,timeout:20000,maxBuffer:1024*1024});
-  return JSON.parse(stdout);
-});
-handle('terminal.start',async({kind,alias,clusterId}) => {
-  if(terminals.size>=4) throw new Error('Close an existing terminal before opening another');
-  const id=randomUUID();
-  let child, protocol=false;
-  if(kind==='cluster'){
-    const p=await worker.request('POST','/api/cluster/profile',{cluster_id:clusterId});
-    if(p.auth_mode==='interactive')throw Error('请在集群连接页打开私有认证；普通 SSH 终端不能代替受控认证会话。');
-    const endpoint=sshEndpoint(p);
-    const args=['-tt','-l',endpoint.username,'-p',String(p.port),'-o','StrictHostKeyChecking=yes'];
-    if(p.identity_file)args.push('-i',p.identity_file);
-    if(p.proxy_jump?.length)args.push('-J',p.proxy_jump.join(','));
-    args.push(endpoint.host);
-    if(p.via?.length){const inner=p.via.reduceRight((cmd,hop)=>'ssh -tt -o StrictHostKeyChecking=yes '+quoteShell(hop)+(cmd?' '+quoteShell(cmd):''),'');args.push(inner);}
-    const native=p.ssh_client.startsWith('/mnt/c/')?'C:/'+p.ssh_client.slice(7):p.ssh_client;
-    child=/^[A-Za-z]:/.test(native)?spawn(native,args,{stdio:['pipe','pipe','pipe'],windowsHide:true}):spawn('wsl.exe',['-d',settings.distribution,'--',native,...args],{stdio:['pipe','pipe','pipe'],windowsHide:true});
-  }
-  else if(kind==='ssh') child=spawn('ssh.exe',['-tt',sshAlias(alias)],{stdio:['pipe','pipe','pipe'],windowsHide:true});
-  else {
-    protocol=true;
-    child=spawn('wsl.exe',['-d',settings.distribution,'--','python3',linuxPath(path.join(workerSource,'terminal.py'))],
-      {stdio:['pipe','pipe','pipe'],windowsHide:true});
-  }
-  terminals.set(id,{child,protocol});
-  if(protocol) {
-    createInterface({input:child.stdout}).on('line',line=>{
-      try{const value=JSON.parse(line); emit('studio:terminal',{id,...value});}catch{}
-    });
-  } else child.stdout.on('data',buffer=>emit('studio:terminal',{id,data:buffer.toString()}));
-  child.stderr.on('data',buffer=>emit('studio:terminal',{id,data:buffer.toString()}));
-  child.on('error',error=>emit('studio:terminal',{id,data:error.message}));
-  child.on('exit',code=>{terminals.delete(id);emit('studio:terminal',{id,closed:true,code});});
-  return {id};
-});
-handle('terminal.input',({id,data,cols,rows})=>{
-  const terminal=terminals.get(id); if(!terminal) throw new Error('Terminal is closed');
-  if(terminal.protocol) terminal.child.stdin.write(JSON.stringify(data===undefined?
-    {type:'resize',cols,rows}:{type:'input',data})+'\n');
-  else if(data!==undefined) terminal.child.stdin.write(data);
-});
-handle('terminal.close',({id})=>{terminals.get(id)?.child.kill();terminals.delete(id);});
+registerLegacyTerminalRoutes({handle,worker,catalog,terminals,getSettings:()=>settings,workerSource,emit,host:computeRuntime});
 handle('window',({action})=>{
   if(action==='minimize') window.minimize();
   if(action==='maximize') window.isMaximized()?window.unmaximize():window.maximize();
@@ -577,7 +441,7 @@ window.webContents.on('will-navigate',(event,url)=>{if(url!==window.webContents.
 const development=process.env.STUDIO_DEV_URL;
 if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw new Error('Invalid development origin');
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
-if(verifying){const errors=[];window.webContents.on('console-message',(_event,level,message)=>{if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./install-verification.mjs':improvementsVerifying?'./improvements-verification.mjs':providerVerifying?'./provider-verification.mjs':'./verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
+if(verifying){const errors=[];window.webContents.on('console-message',(_event,level,message)=>{if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',()=>{terminalMcp?.close();sshConnection.shutdown();agents.close();worker.close();for(const t of terminals.values())t.child.kill();});
 

@@ -1,5 +1,5 @@
 import ts from 'typescript';import fs from 'node:fs';
-for(const file of ['src/App.tsx','src/Agent.tsx','src/RunDetail.tsx','src/Dialogs.tsx','src/widgets.tsx']){
+for(const file of ['frontend/app/App.tsx','frontend/features/conversations/Agent.tsx','frontend/features/runs/RunDetail.tsx','frontend/ui/Dialogs.tsx','frontend/ui/widgets.tsx']){
  let source=fs.readFileSync(file,'utf8');const tree=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),edits=[];
  const chinese=value=>/[\u3400-\u9fff]/.test(value);
  function containsJsx(node){let found=false;function visit(n){if(ts.isJsxElement(n)||ts.isJsxSelfClosingElement(n)||ts.isJsxFragment(n))found=true;ts.forEachChild(n,visit);}visit(node);return found;}

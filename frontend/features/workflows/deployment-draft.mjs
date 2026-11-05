@@ -1,0 +1,14 @@
+import {object,validDeploymentDraft} from "../../../contracts/compute/deployment-draft.mjs";
+export function deploymentConfig(task){const defaults={target:'local',projectId:'',targetId:task.authoring?.environmentId||'',inputSource:'local',directoryName:'run-'+task.id.slice(0,8),maxSeconds:300,gpu:0,resources:{queue:'',cpus:1,gpus:1,memory_mb:4096,account:''}},value=task.deploymentDraft?.config||task.deployment?.config||{};return structuredClone({...defaults,...value,resources:{...defaults.resources,...value.resources}});}
+
+const boxes=new WeakMap();
+
+export function deploymentOutbox(id,storage){let map=boxes.get(storage);if(!map){map=new Map();boxes.set(storage,map);}if(!map.has(id))map.set(id,new DeploymentOutbox(id,storage));return map.get(id);}
+
+export class DeploymentOutbox{
+ constructor(id,storage){this.id=id;this.storage=storage;this.key='studio.deployment.pending.'+id;this.pending=null;this.seq=0;const raw=storage.getItem(this.key);if(raw){try{const entry=JSON.parse(raw);if(!object(entry)||entry.schema!==1||!Number.isSafeInteger(entry.seq)||entry.seq<1||!Number.isSafeInteger(entry.expectedRevision)||entry.expectedRevision<0||typeof entry.mutationId!=='string')throw Error('Invalid deployment outbox');validDeploymentDraft(entry.value);this.pending=entry;this.seq=entry.seq;}catch{this.error='部署草稿缓存无法读取，请保留并检查本机草稿。';}}}
+ get activeSave(){return this.flight||null;}
+ current(task){if(this.pending)return structuredClone(this.pending.value);return deploymentConfig(this.ack&&this.ack.deploymentDraft?.revision>(task.deploymentDraft?.revision||0)?this.ack:task);}
+ stage(value,task){if(this.error)throw Error(this.error);const entry={schema:1,seq:++this.seq,value:validDeploymentDraft(value),expectedRevision:this.pending?.expectedRevision??Math.max(task.deploymentDraft?.revision||0,this.ack?.deploymentDraft?.revision||0),mutationId:crypto.randomUUID()};this.storage.setItem(this.key,JSON.stringify(entry));this.pending=entry;}
+ flush(save){if(this.flight)return this.flight;if(this.error)return Promise.reject(Error(this.error));this.flight=(async()=>{let saved=this.ack;while(this.pending){const entry=structuredClone(this.pending);saved=await save({taskId:this.id,value:entry.value,expectedRevision:entry.expectedRevision,mutationId:entry.mutationId});const draft=saved?.deploymentDraft;if(saved?.id!==this.id||draft?.lastMutationId!==entry.mutationId||!Number.isSafeInteger(draft.revision)||JSON.stringify(draft.config)!==JSON.stringify(entry.value))throw Error('部署草稿保存未确认；本机修改已保留。');this.ack=saved;if(this.pending.seq===entry.seq){this.storage.removeItem(this.key);this.pending=null;}else{const next={...this.pending,expectedRevision:draft.revision};this.storage.setItem(this.key,JSON.stringify(next));this.pending=next;}}return saved;})().finally(()=>{this.flight=null;});return this.flight;}
+}

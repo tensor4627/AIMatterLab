@@ -1,5 +1,6 @@
 import {isDeepStrictEqual} from 'node:util';
-import {parameterValue,setParameter} from '../../../shared/task-fields.mjs';
+import {parameterValue,setParameter} from "../../../contracts/workflows/task-fields.mjs";
+
 const hash=value=>typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
 const declared=(entry,catalog)=>entry&&hash(entry.source?.sha256)&&catalog.source?.files?.[entry.source?.name]===entry.source.sha256;
 const humanRevision=(task,key)=>Math.max(0,...Object.entries(task.manualEdits||{}).filter(([field])=>field===key||field.startsWith(key+'.')||key.startsWith(field+'.')).map(([,revision])=>revision));

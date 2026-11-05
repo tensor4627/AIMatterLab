@@ -2,11 +2,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {CodexBridge} from '../desktop/codex.mjs';
-import {WorkerClient} from '../desktop/worker.mjs';
-import {agentConfig,STUDIO_INSTRUCTIONS} from '../desktop/agent-settings.mjs';
-import {TaskRecords} from '../desktop/task-records.mjs';
-import {Catalog} from '../desktop/catalog.mjs';
+import {CodexBridge} from "../agent/providers/codex.mjs";
+import {WorkerClient} from "../agent/tools/worker-client.mjs";
+import {agentConfig,STUDIO_INSTRUCTIONS} from "../agent/context/agent-settings.mjs";
+import {TaskRecords} from "../agent/sessions/task-records.mjs";
+import {Catalog} from "../backend/main/workspace/catalog.mjs";
 const root=process.cwd(),out=path.join(root,'.studio/validation'),worker=new WorkerClient(),bridge=new CodexBridge();
 const bins=path.join(process.env.LOCALAPPDATA,'OpenAI','Codex','bin');
 const executable=fs.readdirSync(bins).map(n=>path.join(bins,n,'codex.exe')).find(p=>fs.existsSync(p));
@@ -16,7 +16,7 @@ const events=[],taskEvents=[],tasks=new TaskRecords(catalog,e=>taskEvents.push(e
 const report={scope:'Real Codex app-server, current authenticated account and worker present_task only. No scientific jobs or remote submissions.',checks:{}};
 bridge.on('event',e=>{events.push(e);tasks.event({...e,provider:'codex'});if(e.id!==undefined){bridge.respond(e.id,e.method.includes('elicitation')?{action:'decline'}:{decision:'decline'});}});
 try{
- await worker.connect({distribution:'Ubuntu',workerRoot:prior.desktop_worker_root,workerPort:8770},path.join(root,'worker'));
+ await worker.connect({distribution:'Ubuntu',workerRoot:prior.desktop_worker_root,workerPort:8770},path.join(root,'backend','worker'));
  await bridge.start(executable,worker.connection,agentConfig({}));
  const account=await bridge.request('account/read',{refreshToken:true}),models=await bridge.request('model/list',{});
  const model=models.data.find(m=>m.isDefault)?.model||models.data[0]?.model;
