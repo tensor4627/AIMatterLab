@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
@@ -15,7 +16,7 @@ import {createSharedTerminal} from '../../backend/main/compute/shared-terminal.m
 import {startBroker} from '../../desktop/platform/terminal-service/broker.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
 
-const repository=fileURLToPath(new URL('../..',import.meta.url)),base=path.join(repository,'.studio/bugfix/dev6/compute');
+const repository=fileURLToPath(new URL('../..',import.meta.url)),base=process.env.STUDIO_COMPUTE_FIXTURE_ROOT?path.resolve(process.env.STUDIO_COMPUTE_FIXTURE_ROOT):path.join(os.tmpdir(),'studio-compute-resource-binding-fixtures');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function fixture(t,{now=Date.now}={}){
  fs.mkdirSync(base,{recursive:true});const root=fs.mkdtempSync(path.join(base,'binding-'));

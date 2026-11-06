@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
@@ -10,12 +11,12 @@ import {CodexBridge,PROTOCOL_VERSION} from '../../agent/providers/codex.mjs';
 import {codexRuntime} from '../../desktop/platform/codex-runtime.mjs';
 import {ISOLATION_FEATURES} from '../../desktop/platform/codex-isolation.mjs';
 
-const evidenceRoot=path.resolve('.studio/bugfix/dev7/codex-executable');
+const evidenceRoot=process.env.STUDIO_CODEX_EXECUTABLE_ROOT?path.resolve(process.env.STUDIO_CODEX_EXECUTABLE_ROOT):os.tmpdir();
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
 function fixture(t,{resolveExecutable,versionError,version='0.167.0-alpha.3.2',missingFeature=false}={}){
  fs.mkdirSync(evidenceRoot,{recursive:true});
- const root=fs.mkdtempSync(path.join(evidenceRoot,'controlled-')),calls=[],children=[];
+ const root=fs.mkdtempSync(path.join(evidenceRoot,'studio-codex-executable-')),calls=[],children=[];
  const host={...codexRuntime,resolveExecutable,
   execute:async(executable,args)=>{calls.push({kind:'version',executable,args});if(versionError)throw versionError;return {stdout:'codex-cli '+version};},
   spawnProcess:(executable,args,options)=>{
