@@ -892,6 +892,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
         directory = self.service.root / "cluster-runs" / identifier
         (directory/"simulation").mkdir(parents=True)
         snapshots, total = [], 0
+        persisted = False
         try:
             for name, src in local_inputs.items():
                 source = contained(src, roots)
@@ -927,12 +928,12 @@ print('__STUDIO_JSON__'+json.dumps(out))
             self.remote_name(run)
             run["script"] = batch_script(run)
             atomic_json(directory/"run.json", run)
-            self.store.put("cluster-run", run)
+            self.store.put("cluster-run", run); persisted = True
             if parent:
                 self.save(parent, superseded_by=identifier)
             return self.run(identifier)
         except Exception:
-            shutil.rmtree(directory)
+            if not persisted: shutil.rmtree(directory)
             raise
 
     def input_file(self, identifier, name):
@@ -972,6 +973,10 @@ print('__STUDIO_JSON__'+json.dumps(out))
         self.store.event(r["id"],{"kind":"cluster-run","state":r["status"]})
         atomic_json(Path(r["directory"])/"run.json",r)
         return r
+
+    def merge(self, identifier, **changes):
+        """Re-read the current row before writing fields gathered by a long remote call."""
+        return self.save(self.raw(identifier), **changes)
 
     def run(self, identifier):
         r = dict(self.raw(identifier))
@@ -1072,8 +1077,6 @@ except Exception as e:
             if r is None:return self.run(identifier)
             interactive=self.transport==self._transport and r['cluster_snapshot'].get('auth_mode','key')=='interactive'
             snapshot=dict(r['cluster_snapshot']) if interactive else None
-            if not interactive:
-                self.save(r,status="unknown",submit_attempted=True)
         if interactive:
             # Auth methods may acquire auth -> Store locks. Never invert that
             # ordering by checking authentication while holding Store.lock.
@@ -1084,9 +1087,6 @@ except Exception as e:
                 if r['cluster_snapshot']!=snapshot:
                     raise ValueError('Reviewed cluster snapshot changed before submission')
                 p=r['cluster_snapshot']
-                # An expiry after this proof is a genuine dispatch race. Record
-                # uncertainty before attempting transport and never replay it.
-                self.save(r,status="unknown",submit_attempted=True)
         source="""
 import pathlib,tarfile,sys,io,subprocess,os
 root=pathlib.Path(p['root']).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
@@ -1110,13 +1110,19 @@ record={'id':p['id'],'nonce':p['nonce'],'job_id':match.group(1)}
 (d/'.submission-receipt.json').write_text(json.dumps(record))
 print('__STUDIO_JSON__'+json.dumps(record))
 """
+        # Local archive construction makes no scheduler call. A failure here leaves
+        # the reviewed draft ready, so the human can retry instead of reconciling an
+        # "unknown" attempt that was never dispatched.
+        data=self.archive(r)
+        # Record uncertainty immediately before the only remote dispatch.
+        self.save(self.raw(identifier),status="unknown",submit_attempted=True)
         try:
-            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=self.archive(r),timeout=90))
+            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=data,timeout=90))
             if result.get("nonce")!=r["nonce"] or not re.fullmatch(r"[0-9]+",result.get("job_id","")):
                 raise ValueError("Invalid scheduler receipt")
-            self.save(r,status="queued",job_id=result["job_id"])
+            self.merge(identifier,status="queued",job_id=result["job_id"])
         except Exception:
-            self.save(r,status="unknown",error="Submission reply unavailable; reconcile only, never resubmit")
+            self.merge(identifier,status="unknown",error="Submission reply unavailable; reconcile only, never resubmit")
         return self.run(identifier)
 
     def poll(self, identifier):
@@ -1172,7 +1178,9 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 if result.get("validation",{}).get("status")!="passed" and status=="succeeded":
                     status="unknown"
             if state in ("EXIT","CANCELLED") and r.get("cancel_requested") and result.get("exit",{}).get("exit_code")!=0:status="cancelled"
-            self.save(r,status=status,job_id=result.get("job_id") or r["job_id"],scheduler_state=state,connection_action=None,
+            # The SSH round trip may outlive concurrent human cancellation or a newer
+            # attempt; re-read the current row instead of writing the stale snapshot.
+            self.merge(identifier,status=status,job_id=result.get("job_id") or r["job_id"],scheduler_state=state,connection_action=None,
                       scientific_validation=result.get("validation",r.get("scientific_validation")),exit=result.get("exit"),identity_verified=result.get("identity_verified",False))
         except Exception as error:
             from studio_worker.compute.ssh_auth import AuthError
@@ -1180,7 +1188,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
             if isinstance(error, AuthError) and str(error) == 'needs_human_auth':
                 changes['connection_action'] = {'kind': 'authenticate_original_run',
                                                 'code': 'needs_human_auth', 'runId': r['id']}
-            self.save(r,status="unknown",error="SSH or scheduler state unavailable; no resubmission",**changes)
+            self.merge(identifier,status="unknown",error="SSH or scheduler state unavailable; no resubmission",**changes)
         return self.run(identifier)
 
     def cancel(self, identifier):

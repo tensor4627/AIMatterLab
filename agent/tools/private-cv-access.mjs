@@ -61,6 +61,13 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
   const task=taskFor(provider,provider==='deepseek'||kind==='current'),owner=identity(task),value=await policy(provider);if(identity(taskFor(provider))!==owner)throw Error('Conversation changed during private access check');
   if(task)checkTask(task,provider,value);
   const definitionOnly=definitionOnlyScope(task,value);if(definitionOnly&&!definitionToolAllowed(name))throw Error('This private sharing permits only the current definition, not workflow files, environment observations or run results');if(definitionOnly&&name==='present_task'&&args.task_id!==task.id)throw Error('Update only this same conversation-owned draft');
+  // Project-scoped scientific tools may only act on the project owned by the current
+  // conversation. Without this check a provider could pass another project_id while
+  // the worker resolves relative input names against that other project's root.
+  if(kind==='project'&&task){
+   if(name==='present_task'){if(args.task_id!==task.id)throw Error('Update only the current conversation-owned task');}
+   else{const owned=task.authoring?.projectId||task.projectId,requested=args.project_id||args.spec?.project_id;if(!owned||requested!==owned)throw Error('Scientific tools can access only the current conversation project');}
+  }
   const blocked=new Set(value.blocked_project_ids),runs=new Set(value.blocked_run_ids),workspace=args.workspace_id||args.task_id,project=args.project_id||args.spec?.project_id;
   if(project&&blocked.has(project)||workspace&&value.bindings.some(b=>b.workspace_id===workspace&&!b.allowed))throw Error('Private CV sharing is required for the exact selected provider');
   if(args.run_id&&runs.has(args.run_id))throw Error('This run contains a private CV not shared with the selected provider');

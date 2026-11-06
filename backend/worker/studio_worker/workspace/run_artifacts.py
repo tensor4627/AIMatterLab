@@ -77,4 +77,5 @@ class RunArtifactsMixin:
             archive.writestr("reproduction.json", json.dumps({"run":run, **collected,
                 "exported_at":time.time(), "included_inputs":included, "omitted_inputs":omitted}, indent=2))
             archive.writestr("README.txt", "Inputs are immutable copies. Large inputs are listed by source and SHA256. Logs and output hashes are recorded; scientific validity is separate from process completion.")
-        return {"base64":base64.b64encode(buffer.getvalue()).decode(), "omitted_inputs":omitted}
+        bundle = buffer.getvalue()
+        return {"base64":base64.b64encode(bundle).decode(), "sha256":hashlib.sha256(bundle).hexdigest(), "omitted_inputs":omitted}

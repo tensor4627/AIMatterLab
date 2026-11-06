@@ -216,7 +216,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,draft=drafts.capture(),manual=textOverride===undefined,resourceSelection=resourceRef.current?.selectionId||null;
   const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current&&resourceSelection===(resourceRef.current?.selectionId||null);
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
-  const owner=Symbol();sendOwner.current=owner;let acknowledged=false;setSendNotice('');setBusy(true);
+  const owner=Symbol();sendOwner.current=owner;let acknowledged=false,optimisticId:string|null=null;setSendNotice('');setBusy(true);
   const retainRequest=()=>{if(!manual&&drafts.retain(draft,text))setPrompt(drafts.text());};
   try{
    let id=threadRef.current;
@@ -227,11 +227,11 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
    const fresh=newWorkflow||explicitNewWorkflow(text);
    if((planningMode||fresh)&&!action.reviewMode&&!terminalSelected&&tools.scope!=='terminal-only'){const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:selectedProvider,request:text,projectId:conversation.projectId||projectId||null});if(!current())return;taskId=task.id;openTaskRef.current?.(task.id);}
    setWorkflowId(taskId||null);setNewWorkflow(false);
-   setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text}]);
+   setMessages(prev=>[...prev,{id:(optimisticId=crypto.randomUUID()),role:'user',text}]);
    const input:any[]=[{type:'text',text},{type:'text',text:'[Studio workspace context]\n'+context}];if(attachment&&'path' in attachment)input.push({type:'skill',name:attachment.name,path:attachment.path});
    const call:ModelCall={requestId:crypto.randomUUID(),provider:selectedProvider,model:modelRef.current,threadId:id!,turnId:null,output:false,status:'in_progress'};modelCallRef.current=call;setModelCall({...call});
    const r=await selectedRpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});acknowledged=typeof r.turn?.id==='string'&&!!r.turn.id;if(acknowledged&&modelCallRef.current===call){if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}if(!current())return;if(r.studioRecovery?.status==='required'){setRecovery({threadId:r.studioRecovery.oldThreadId});setBusy(false);retainRequest();if(modelCallRef.current===call){call.status='failed';setModelCall({...call});}return;}if(!acknowledged)throw Error('Agent did not acknowledge the submitted message');if(manual&&drafts.acknowledge(draft))setPrompt(drafts.text());if(modelCallRef.current===call){if(attachment)attachmentConsumedRef.current?.(attachment.attachmentId);if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}
-  }catch(e){if(!current())return;retainRequest();const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===threadRef.current){call.status='failed';setModelCall({...call});}setBusy(false);onError(e);}finally{if(sendOwner.current===owner){sendOwner.current=null;if(!acknowledged)setBusy(false);}}
+  }catch(e){if(!current())return;retainRequest();if(!acknowledged&&optimisticId)setMessages(prev=>prev.filter(message=>message.id!==optimisticId));const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===threadRef.current){call.status='failed';setModelCall({...call});}setBusy(false);onError(e);}finally{if(sendOwner.current===owner){sendOwner.current=null;if(!acknowledged)setBusy(false);}}
  }
  async function applyOptions(){
   const selectedProvider=providerRef.current,seq=selectionSeq.current,draft=drafts.capture(),current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current;

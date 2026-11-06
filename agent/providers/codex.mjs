@@ -66,6 +66,9 @@ export class CodexBridge extends EventEmitter {
     }
     stage='spawn';child = (this.launchDependencies.spawnProcess||this.host.spawnProcess)(executable, args, { stdio: ['pipe','pipe','pipe'], windowsHide: true, env,...isolation?{cwd:isolation.cwd}:{} });
     this.process=child;
+    // A closed child stdin surfaces EPIPE asynchronously; without a listener the
+    // main process would die on an unhandled 'error' event.
+    if(typeof child.stdin?.on==='function')child.stdin.on('error', error => {if(this.process===child)this.emit('diagnostic','Codex stdin unavailable (' + String(error?.code || error) + '); reconnect explicitly.');});
     child.on('error', err => {if(this.process===child)this.close({reason:'transport_error',message:'Codex app-server transport failed; reconnect explicitly. The conversation is preserved.'});});
     child.on('exit', (code, signal) => {
       if(this.process!==child)return;
@@ -77,6 +80,7 @@ export class CodexBridge extends EventEmitter {
     this.reader = createInterface({ input: this.process.stdout });
     this.reader.on('line', line => {
       if(this.process!==child)return;
+      if(line.length>1048576){this.close({reason:'oversized_frame',message:'Codex JSONL frame exceeded 1 MiB; reconnect explicitly. The conversation is preserved.'});return;}
       let message;
       try { message = JSON.parse(line);if(!validEnvelope(message))throw Error('Invalid Codex envelope'); } catch {
         this.close({reason:'malformed_protocol',message:'Malformed Codex JSONL; reconnect explicitly. The conversation is preserved.'});return;

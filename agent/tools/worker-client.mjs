@@ -25,9 +25,12 @@ providerConnection(provider){
 revokeProvider(provider){this.providerScopes.revoke(provider);}
 async exposeTools(health){
   this.proxy=http.createServer(async(req,res)=>{
+   // Early rejects must close the connection: the request body is still unread,
+   // and a keep-alive client reusing this socket would otherwise get ECONNRESET.
+   const reject=(status,value)=>{req.resume();res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','Connection':'close'});res.end(value===undefined?'':JSON.stringify(value));};
    const scope=this.providerScopes.authenticate({pathname:req.url,authorization:req.headers.authorization,origin:req.headers.origin,host:req.headers.host});
-   if(!scope){res.writeHead(403);res.end();return;}
-   if(!['GET','POST'].includes(req.method)){res.writeHead(405);res.end();return;}
+   if(!scope){reject(403);return;}
+   if(!['GET','POST'].includes(req.method)){reject(405);return;}
    let authoringToken,body,dispatched=false;
    const fresh=()=>{if(scope.checkCurrent()!==true){const error=Error('Provider context lease expired');error.staleProviderScope=true;throw error;}};
    try{
@@ -55,7 +58,7 @@ async exposeTools(health){
     if(body?.method==='tools/list'&&response.data?.result?.tools){response.data.result.tools.push(...(this.localDefinitions||[]),...(scope.localReaders?this.scopedDefinitions||[]:[]));if(this.authoringGuard?.filterTools)response.data.result.tools=await this.authoringGuard.filterTools(response.data.result.tools,scope.provider,scope);}
     fresh();
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
-   }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){res.writeHead(403);res.end();}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched})}));}else{res.writeHead(502);res.end(JSON.stringify({error:e.message}));}}
+   }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){reject(403);}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched})}));}else{reject(502,{error:e.message});}}
   });
   await new Promise((resolve,reject)=>{this.proxy.once('error',reject);this.proxy.listen(0,'127.0.0.1',resolve);});
   this.connection.url='http://127.0.0.1:'+this.proxy.address().port;

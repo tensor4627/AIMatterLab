@@ -27,6 +27,12 @@ export class AcpBridge extends EventEmitter{
  event(method,params,id){this.emit('event',{method,params:{...params,provider:this.provider},provider:this.provider,...id!==undefined?{id}: {}});}
  async start(executable,profile,worker){
   if(this.process)return this.info;
+  if(this.starting)return this.starting;
+  this.starting=this._start(executable,profile,worker).finally(()=>{this.starting=null;});
+  return this.starting;
+ }
+ async _start(executable,profile,worker){
+  if(this.process)return this.info;
   const version=await new Promise((resolve,reject)=>{
    const probe=this.host.spawnCli(executable,['--version'],{env:profile.env});let output='';
    const timer=setTimeout(()=>{probe.kill();reject(Error('CLI version probe timed out'));},15000);
@@ -36,12 +42,15 @@ export class AcpBridge extends EventEmitter{
   if(version!==CLI_VERSIONS[this.provider])throw Error(this.provider+' CLI version mismatch: expected '+CLI_VERSIONS[this.provider]+', got '+version);
   this.executable=executable;this.profile=profile;this.worker=worker;
   const child=this.host.spawnCli(executable,profile.args,{cwd:profile.cwd,env:profile.env});this.process=child;
+  // A closed child stdin surfaces EPIPE asynchronously; without a listener the
+  // main process would die on an unhandled 'error' event.
+  if(typeof child.stdin?.on==='function')child.stdin.on('error',error=>{if(this.process===child)this.emit('diagnostic',this.provider+' stdin unavailable ('+String(error?.code||error)+'); reconnect explicitly.');});
   const secrets=[profile.env.OPENAI_API_KEY,worker?.tokens?.mcp];
   child.stderr.on('data',data=>{if(this.process===child)this.emit('diagnostic',redact(data.toString().slice(-4000),secrets));});
   child.on('error',error=>{if(this.process===child)this.disconnect(error);});
   child.on('exit',(code,signal)=>{if(this.process===child)this.disconnect(Error(this.provider+' disconnected ('+(signal||code)+')'));});
   this.reader=createInterface({input:child.stdout});
-  this.reader.on('line',line=>{if(this.process!==child)return;try{this.receive(JSON.parse(line));}catch(error){this.disconnect(Error('Malformed '+this.provider+' ACP JSONL'));}});
+  this.reader.on('line',line=>{if(this.process!==child)return;if(line.length>1048576){this.disconnect(Error(this.provider+' ACP JSONL frame exceeded 1 MiB'));return;}try{this.receive(JSON.parse(line));}catch(error){this.disconnect(Error('Malformed '+this.provider+' ACP JSONL'));}});
   try{
    this.info=await this.raw('initialize',{protocolVersion:1,clientInfo:{name:'gpu-sampling-studio',version:this.host.version},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false,elicitation:{form:{}},session:{configOptions:{boolean:{}}}}},30000);
    if(this.info.protocolVersion!==1)throw Error('Unsupported ACP protocol version');
@@ -219,7 +228,10 @@ export class AcpBridge extends EventEmitter{
  disconnect(error){
   for(const value of this.pending.values()){clearTimeout(value.timer);value.reject(error);}this.pending.clear();this.interactions.clear();
   const child=this.process;this.process=null;this.reader?.close();child?.kill();
+  // The process that produced these sessions is gone; stale metadata must not
+  // survive an explicit reconnect.
+  this.sessions.clear();this.current=null;
   this.event('studio/codexDisconnected',{reason:error.message});this.activeTurns.clear();
  }
- close(){this.disconnect(Error(this.provider+' bridge closed'));this.current=null;this.sessions.clear();}
+ close(){this.disconnect(Error(this.provider+' bridge closed'));}
 }

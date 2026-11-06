@@ -279,6 +279,7 @@ class ToolWorkflows:
             except (OSError, ValueError, KeyError, PermissionError) as error:
                 step.update(status='stale', reason=str(error)[:2000]); blocked = str(error)[:2000]
         if blocked: execution['blocked_reason'] = blocked
+        else: execution.pop('blocked_reason', None)
         self._derive(execution)
         return self._save(execution) if encoded(execution) != original else execution
 

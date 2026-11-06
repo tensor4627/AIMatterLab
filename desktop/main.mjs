@@ -268,9 +268,19 @@ handle('cluster.download',async value=>{
  if(typeof first.base64!=='string'||!first.sha256)throw Error('Select a regular file in an authorized read root');
  const response=await dialog.showSaveDialog(window,{defaultPath:path.basename(value.relative)});
  if(response.canceled)return null;
- const file=response.filePath,temp=file+'.partial-'+randomUUID(),fd=fs.openSync(temp,'w'),hash=createHash('sha256');let current=first,offset=0;
- try{for(;;){const data=Buffer.from(current.base64,'base64');if(!data.length&&offset<first.size)throw Error('Remote file changed');fs.writeSync(fd,data);hash.update(data);offset=current.offset;if(offset>=first.size)break;current=await worker.request('POST','/api/cluster/browse',{...value,offset});if(current.size!==first.size)throw Error('Remote file changed');}if(hash.digest('hex')!==first.sha256)throw Error('Remote file hash mismatch');}finally{fs.closeSync(fd);}
- fs.renameSync(temp,file);
+ const file=response.filePath,temp=file+'.partial-'+randomUUID(),hash=createHash('sha256');let fd=null,current=first,offset=0;
+ try{
+  fd=fs.openSync(temp,'w');
+  for(let pages=0;;pages++){
+   if(pages>16384)throw Error('Remote file exceeds the bounded download window');
+   const data=Buffer.from(current.base64,'base64');if(!data.length&&offset<first.size)throw Error('Remote file changed');fs.writeSync(fd,data);hash.update(data);offset=current.offset;
+   if(offset>=first.size)break;
+   current=await worker.request('POST','/api/cluster/browse',{...value,offset});if(current.size!==first.size)throw Error('Remote file changed');
+  }
+  if(hash.digest('hex')!==first.sha256)throw Error('Remote file hash mismatch');
+  fs.closeSync(fd);fd=null;
+  fs.renameSync(temp,file);
+ }catch(error){if(fd!==null)try{fs.closeSync(fd)}catch{};try{fs.unlinkSync(temp)}catch{};throw error;}
  return {path:file,bytes:offset,sha256:first.sha256};
 });
 handle('agent.bindProject',({projectId,provider})=>{providerId(provider);if(typeof projectId!=='string'||!projectId||projectId.length>100)throw Error('Select a project');settings=catalog.put('settings','main',{...settings,projectAgents:{...settings.projectAgents,[projectId]:provider}});return {projectId,provider};});
@@ -284,7 +294,7 @@ handle('settings',data => {
   agentConfig(next.agent);
   if(!['right','center'].includes(next.agentLayout||'right'))throw Error('Unsupported workspace layout');
   providerId(next.agentProvider||'codex');
-  for(const key of ['kimiPath','qwenPath'])if(next[key]!==undefined&&(typeof next[key]!=='string'||/[\r\n\0]/.test(next[key])))throw Error('Invalid CLI path');
+  for(const key of ['codexPath','kimiPath','qwenPath'])if(next[key]!==undefined&&(typeof next[key]!=='string'||/[\r\n\0]/.test(next[key])))throw Error('Invalid CLI path');
   if(!['zh-CN','en'].includes(next.language||'zh-CN'))throw Error('Unsupported language');
   for(const [key,min,max] of [['fontSize',12,24],['minimumFontSize',11,18],['chatFontSize',12,28],['editorFontSize',10,28],['terminalFontSize',10,24]])
     if(next[key]!==undefined&&(!Number.isInteger(next[key])||next[key]<min||next[key]>max))throw Error('Invalid font size');
@@ -375,7 +385,7 @@ handle('agent.connect',async({provider,repairTools=false})=>{
 });
 handle('agent.tools',async({provider})=>{providerId(provider);return scientificTools(provider);});
 handle('agent.disconnect',({provider})=>{providerId(provider);workflowContext.clear(provider);agents.disconnect(provider);return {};});
-handle('agent.account',({provider})=>agents.account(provider));
+handle('agent.account',({provider})=>{providerId(provider);return agents.account(provider);});
 const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){return agentRequests(value);}
 handle('agent.rpc',agentRpc);
@@ -385,7 +395,7 @@ handle('agent.recover',async({provider,threadId,model})=>{
  const ticket=workflowContext.begin(provider,threadId);await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));
  return (await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId,model,explicit:true,publish:event=>emit('studio:event',event)})).result;
 });
-handle('agent.respond',({provider,id,result})=>agents.respond(provider,id,result));
+handle('agent.respond',({provider,id,result})=>{providerId(provider);if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');return agents.respond(provider,id,result);});
 handle('agent.configure',async({provider,preferences={},threadId,model})=>{
   assertIdleAgent();
   providerId(provider);if(provider!=='codex')throw Error('Context budget changes are not supported by this ACP provider');
@@ -413,7 +423,7 @@ handle('agent.login.open',async({provider})=>{
 });
 handle('skills.catalog',async()=>{const policy=await scientificSkills.resolvePolicy(skillGuidanceScope(agents.active));const result=[...localSkills(studioSkillRoots(),{policy}),...managedSkillEntries(policy)];await policy.revalidate();return result;});
 handle('scientific.skills',({provider})=>{providerId(provider);return scientificSkills.catalog(provider,skillGuidanceScope(provider));});
-handle('codex.respond',({id,result})=>codex.respond(id,result));
+handle('codex.respond',({id,result})=>{if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');if(agents.active!=='codex')throw Error('Provider switched');return codex.respond(id,result);});
 handle('file.open',async() => {
   const response=await dialog.showOpenDialog(window,{properties:['openFile']});
   if(response.canceled) return null;
@@ -439,8 +449,13 @@ handle('export',async({run})=>{
   const bundle=await worker.request('POST','/api/run/export',{run_id:run.id});
   const response=await dialog.showSaveDialog(window,{defaultPath:'reproduction-'+run.id+'.zip'});
   if(response.canceled) return null;
-  fs.writeFileSync(response.filePath,Buffer.from(bundle.base64,'base64'));
-  return response.filePath;
+  const file=response.filePath,temp=file+'.partial-'+randomUUID();
+  try{
+   const bytes=Buffer.from(bundle.base64,'base64');if(!bytes.length)throw Error('Empty reproduction archive');
+   if(typeof bundle.sha256==='string'&&createHash('sha256').update(bytes).digest('hex')!==bundle.sha256)throw Error('Reproduction archive hash mismatch');
+   fs.writeFileSync(temp,bytes);fs.renameSync(temp,file);
+  }catch(error){try{fs.unlinkSync(temp)}catch{};throw error;}
+  return file;
 });
 window=new BrowserWindow({width:1540,height:980,minWidth:1100,minHeight:720,frame:false,
   backgroundColor:'#15151b',title:'GPU Sampling Studio',show:false,
@@ -453,7 +468,7 @@ if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw ne
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
 if(verifying){const errors=[];window.webContents.on('console-message',(_event,level,message)=>{if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{terminalMcp?.close();sshConnection.shutdown();agents.close();worker.close();for(const t of terminals.values())t.child.kill();});
+app.on('before-quit',()=>{for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}});
 
 }
 app.whenReady().then(initialize).catch(error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}app.exit(1);});

@@ -128,3 +128,23 @@ test('Passive account observers do not rotate a shared login token or infer acce
  codex.emit('event',{method:'item/agentMessage/delta',params:{threadId:'actual-turn',delta:'observed response'}});codex.emit('event',{method:'turn/completed',params:{threadId:'actual-turn',turn:{status:'completed'}}});
  const after=await hub.account('codex');assert.equal(after.account,null);assert.equal(after.requiresOpenaiAuth,true);assert.equal(after.modelAccess,'passed');assert(calls.every(call=>call.params.refreshToken===false));
 });
+
+test('ACP start is single-flight and disconnect drops stale process sessions',async()=>{
+ const {EventEmitter}=await import('node:events');const {PassThrough}=await import('node:stream');
+ const b=new AcpBridge('kimi'),mainSpawns=[];b.sessions.set('stale-thread',{id:'stale-thread',turns:[],tools:new Map()});
+ b.host={version:'fixture',
+  spawnCli:(_executable,args)=>{
+   const child=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>{};child.stdin=new PassThrough();
+   if(args[0]==='--version'){child.stdout=new EventEmitter();process.nextTick(()=>{child.stdout.emit('data',Buffer.from('kimi 2.1.1'));child.emit('exit',0);});return child;}
+   mainSpawns.push(args);child.stdout=new PassThrough();
+   child.stdin.on('data',chunk=>{const message=JSON.parse(String(chunk));child.stdout.write(JSON.stringify({jsonrpc:'2.0',id:message.id,result:{protocolVersion:1,agentInfo:{version:'2.1.1'}}})+'\n');});
+   return child;
+  }};
+ const profile={args:['acp'],cwd:process.cwd(),env:{}};
+ const first=b.start('kimi',profile,undefined),second=b.start('kimi',profile,undefined);
+ await Promise.all([first,second]);
+ assert.equal(mainSpawns.length,1,'concurrent connects must spawn one CLI only');
+ assert.equal(b.sessions.size,1,'live process keeps its session metadata');
+ b.disconnect(Error('process exited'));
+ assert.equal(b.sessions.size,0,'disconnect must not retain metadata from the dead process');
+});

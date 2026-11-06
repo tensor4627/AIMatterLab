@@ -86,6 +86,7 @@ class RunsMixin:
             (directory / "simulation").mkdir(parents=True)
             (directory / "results").mkdir()
             snapshots = []
+            persisted = False
             try:
                 for name, source in spec["inputs"].items():
                     self.input_name(name)
@@ -112,7 +113,7 @@ class RunsMixin:
                        "created_at": time.time(), "updated_at": time.time(),
                        "environment_snapshot": environment, "identity": None}
                 atomic_json(directory / "reproduction.json", run)
-                self.store.add_run(run)
+                self.store.add_run(run); persisted = True
                 if spec.get("workflow_id") and _workflow_context is None:
                     workflow=self.store.get("workflow",spec["workflow_id"])
                     workflow["run_ids"].append(run["id"])
@@ -121,7 +122,7 @@ class RunsMixin:
             except Exception:
                 # A new workflow intent may already have a durable run row. Preserve its
                 # directory for exact by-key reconciliation; never erase unknown evidence.
-                if _workflow_context is None: shutil.rmtree(directory)
+                if _workflow_context is None and not persisted: shutil.rmtree(directory)
                 raise
 
     def revise(self, identifier, changes, edits):

@@ -118,7 +118,7 @@ export default function App(){
  const [editorDirty,setEditorDirty]=useState(false),[paletteSearch,setPaletteSearch]=useState('');
  const [refreshFeedback,setRefreshFeedback]=useState<{seq:number;status:'loading'|'complete'|'partial'|'failed';at:number|null}|null>(null);
  const refreshing=useRef(false),gpuLoading=useRef(false),sourceFailures=useRef(new Map<string,number>()),sourceGeneration=useRef(0);const [gpuStale,setGpuStale]=useState(false);
- const refreshSeq=useRef(0),latestRefresh=useRef<Promise<void>>(Promise.resolve()),openSeq=useRef(0),settingsBackup=useRef<Settings|null>(null),editorSource=useRef(editor.source);editorSource.current=editor.source;
+ const refreshSeq=useRef(0),latestRefresh=useRef<Promise<void>>(Promise.resolve()),openSeq=useRef(0),settingsBackup=useRef<Settings|null>(null),settingsWorkerReady=useRef(false),editorSource=useRef(editor.source);editorSource.current=editor.source;
  const onError=(e:unknown)=>setError(createDiagnostic(e));
  const {conversations,setConversations,selectedConversationId,setSelectedConversationId,selectedConversationRef,conversationSelectionSeq,sessionSelection,setSessionSelection,freshSelectionPending,agentBusy,setAgentBusy,planningMode,setPlanningMode,conversationChanged,acceptAgentConversation,chooseConversation,newConversation,retryNewConversation}=useConversationSelection({
   invoke,mounted,settingsReady,editorDirty,confirmReplace,language:settings.language,
@@ -282,7 +282,7 @@ export default function App(){
  function replaceTask(run:Run){openSeq.current++;invalidateRefresh();setRuns(old=>[run,...old.filter(r=>r.id!==run.id)]);setSelected(run.id);setSection('task:'+run.id);}
  function openWorkflow(id:string){openSeq.current++;setSection('workflow:'+id);setSelected(null);}
  function go(id:string){if(section==='editor'&&id!=='editor'&&!confirmReplace())return;conversationSelectionSeq.current++;deploymentOpening.current=null;setPrimaryPanel('workspace');openSeq.current++;setSection(id);setSelected(id.startsWith('task:')?id.slice(5):null);}
- function openSettings(){settingsBackup.current=settings;setModal('settings');}
+ function openSettings(){settingsBackup.current=settings;settingsWorkerReady.current=workerReady.current;setModal('settings');}
  function openAccounts(provider:AgentProvider=agentProvider){setAccountsProvider(provider);setModal('accounts');}
  async function renameConversation(){if(!renameTarget||renaming)return;setRenaming(true);try{const value=await invoke<Conversation>('conversation.rename',{id:renameTarget.id,name:conversationName});setConversations(old=>old.map(c=>c.id===value.id?value:c));setRenameTarget(null);}catch(error){onError(error);}finally{setRenaming(false);}}
  function openComputeResources(){if(modal==='settings')closeSettings();setComputeChooser(true);}
@@ -294,7 +294,7 @@ export default function App(){
  function openLocalCompute(){if(modal==='settings')closeSettings();setComputeChooser(false);void connectWorker();}
  function openSshConfiguration(){if(modal==='settings')closeSettings();setComputeChooser(false);go('ssh');}
  function openProjects(){if(modal==='settings')closeSettings();setModal('projects');}
- function closeSettings(){const backup=settingsBackup.current;settingsBackup.current=null;if(backup){setSettings(backup);setLanguage(backup.language||'zh-CN');}setModal('');}
+ function closeSettings(){const backup=settingsBackup.current,wasReady=settingsWorkerReady.current;settingsBackup.current=null;settingsWorkerReady.current=false;if(backup){setSettings(backup);setLanguage(backup.language||'zh-CN');}setModal('');if(wasReady&&!workerReady.current)void observeWorker();}
  function openDeployment(taskId:string):Promise<void>{
   if(agentBusy)return Promise.resolve();if(deploymentOpening.current?.taskId===taskId)return deploymentOpening.current.promise;
   const sequence=++conversationSelectionSeq.current;beginWorkerGate();openSeq.current++;setPrimaryPanel('workspace');setAgentIntent(undefined);setSection('deployment:'+taskId);

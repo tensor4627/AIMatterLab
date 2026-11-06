@@ -21,14 +21,18 @@ export class TerminalMcp {
  revokeProvider(provider){this.scopes.revoke(provider);}
  close(){this.scopes.revokeAll();this.base=null;this.server?.close();this.server?.closeIdleConnections();}
  async receive(req,res){
-  const reply=(status,value)=>{if(res.destroyed)return;res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(value===undefined?'':JSON.stringify(value));};
+  // Rejections that happen before the request body is consumed must not leave a
+  // reusable keep-alive socket behind: Node tears the connection down after the
+  // response, and a client reusing it would see ECONNRESET instead of the error.
+  const reply=(status,value,close=false)=>{if(res.destroyed)return;res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store',...(close?{Connection:'close'}:{})});res.end(value===undefined?'':JSON.stringify(value));};
+  const reject=(status,value)=>{req.resume();reply(status,value,true);};
   const scope=this.scopes.authenticate({pathname:req.url,authorization:req.headers.authorization,origin:req.headers.origin,host:req.headers.host});
-  if(!scope?.localReaders){req.resume();reply(403);return;}
-  if(req.method!=='POST'){req.resume();reply(405);return;}
+  if(!scope?.localReaders){reject(403);return;}
+  if(req.method!=='POST'){reject(405);return;}
   let body,token,dispatched=false;const guard=this.guard(),fresh=()=>{if(scope.checkCurrent()!==true)throw Error('Terminal provider context changed');};
   try{
-   if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||'')){req.resume();reply(415);return;}
-   const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>32768){reply(413);return;}chunks.push(chunk);}
+   if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||'')){reject(415);return;}
+   const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>32768){reply(413,undefined,true);return;}chunks.push(chunk);}
    try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{reply(400);return;}
    fresh();
    if(body?.jsonrpc==='2.0'&&body.method==='notifications/initialized'&&body.id===undefined){reply(202);return;}
@@ -51,9 +55,9 @@ export class TerminalMcp {
    fresh();reply(200,{jsonrpc:'2.0',id:body.id,result});
   }catch(error){
    guard?.cancel?.(token);
-   if(scope.checkCurrent()!==true){reply(403);return;}
+   if(scope.checkCurrent()!==true){reject(403);return;}
    if(body?.method==='tools/call'&&validRpcRequest(body)){reply(200,{jsonrpc:'2.0',id:body.id,result:toolFailure(error,{dispatched})});return;}
-   reply(400,{error:'Invalid terminal MCP request'});
+   reply(400,{error:'Invalid terminal MCP request'},body===undefined);
   }
  }
 }

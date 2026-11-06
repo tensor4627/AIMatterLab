@@ -59,7 +59,7 @@ export default function RunDetail({run,connected=true,onRefresh,onError,onOpenRu
     try{const latest=await api<Run>('POST','/api/run/status',{run_id:run.id});if(latest.status==='ready')setLock('');}catch{}
     await onRefresh();
    }
-  }finally{setWorking(false);}
+  }finally{setWorking(false);if(name==='submit')setLock(current=>current===run.id?'':current);}
  }
  async function collect(manual=true){
   const observed=collection.current;if(!connectedRef.current||observed.identity!==identity||observed.pending||!manual&&observed.loaded)return;
