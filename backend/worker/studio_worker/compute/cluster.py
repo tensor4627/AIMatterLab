@@ -1199,7 +1199,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
         p=r["cluster_snapshot"]
         command=["bkill" if p["scheduler"]=="lsf" else "scancel",r["job_id"]]
         self.transport(p).run(shlex.join(command))
-        self.save(r,cancel_requested=True)
+        self.merge(identifier,cancel_requested=True)
         return self.run(identifier)
 
     def read(self, identifier, name="console.log", offset=0):

@@ -1,6 +1,7 @@
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -124,6 +125,42 @@ class SchedulerReconcileIsolation(unittest.TestCase):
         self.scheduler.tick()
         self.assertEqual(len(spawned), 1)
         self.assertEqual(self.scheduler.store.run("q")["status"], "running")
+
+    def test_dispatch_does_not_hold_store_lock_during_snapshot_verification(self):
+        self.add_queued("q")
+        entered, release = threading.Event(), threading.Event()
+
+        def verify(run):
+            entered.set()
+            release.wait(5)
+
+        self.scheduler.verify_snapshot = verify
+        self.patch_spawn()
+        worker = threading.Thread(target=self.scheduler.dispatch)
+        worker.start()
+        self.assertTrue(entered.wait(5))
+        acquired = threading.Event()
+
+        def acquire_store_lock():
+            with self.scheduler.store.lock:
+                acquired.set()
+
+        other = threading.Thread(target=acquire_store_lock)
+        other.start()
+        try:
+            self.assertTrue(acquired.wait(2), "dispatch must not hold the Store lock during I/O")
+        finally:
+            release.set()
+            worker.join(5)
+            other.join(5)
+
+    def test_cancelled_between_selection_and_launch_is_not_resurrected(self):
+        self.add_queued("q")
+        self.scheduler.verify_snapshot = lambda run: self.scheduler.store.update(run, status="cancelled")
+        self.patch_spawn()
+        self.scheduler.dispatch()
+        self.assertEqual(self.scheduler.store.run("q")["status"], "cancelled")
+        self.assertNotIn("q", self.scheduler.processes)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ import threading
 import time
 from pathlib import Path
 
+SCHEMA_VERSION = 1
+
 
 class Store:
     def __init__(self, root):
@@ -24,6 +26,24 @@ class Store:
             seq INTEGER PRIMARY KEY AUTOINCREMENT, run TEXT, time REAL, data TEXT);
         """)
         self.db.commit()
+        self._migrate()
+
+    def _migrate(self):
+        """Versioned schema upgrades. Existing pre-version stores become version 1."""
+        with self.lock:
+            current = self.db.execute("PRAGMA user_version").fetchone()[0]
+            if current > SCHEMA_VERSION:
+                raise RuntimeError(f"Worker store schema {current} is newer than supported {SCHEMA_VERSION}")
+            if current < 1:
+                # The tables above already exist for legacy stores; version 1 only
+                # records the baseline so future migrations can be ordered.
+                self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                self.db.commit()
+
+    @property
+    def schema_version(self):
+        with self.lock:
+            return self.db.execute("PRAGMA user_version").fetchone()[0]
 
     def put(self, kind, value):
         with self.lock:
@@ -76,20 +96,30 @@ class Store:
 
     def add_run(self, run):
         with self.lock:
-            self.db.execute("INSERT INTO runs VALUES(?,?,?,?,?)",
-                            (run["id"], run["project_id"], run["idempotency_key"],
-                             run["request_hash"], json.dumps(run)))
-            self.db.commit()
-        self.event(run["id"], {"state": run["status"]})
+            try:
+                self.db.execute("INSERT INTO runs VALUES(?,?,?,?,?)",
+                                (run["id"], run["project_id"], run["idempotency_key"],
+                                 run["request_hash"], json.dumps(run)))
+                self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
+                                (run["id"], time.time(), json.dumps({"state": run["status"]})))
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                raise
         return run
 
     def update(self, run, **changes):
         with self.lock:
             run.update(changes, updated_at=time.time())
-            self.db.execute("UPDATE runs SET data=? WHERE id=?", (json.dumps(run), run["id"]))
-            self.db.commit()
-        if "status" in changes:
-            self.event(run["id"], {"state": changes["status"]})
+            try:
+                self.db.execute("UPDATE runs SET data=? WHERE id=?", (json.dumps(run), run["id"]))
+                if "status" in changes:
+                    self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
+                                    (run["id"], time.time(), json.dumps({"state": changes["status"]})))
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                raise
         return run
 
     def event(self, run, value):

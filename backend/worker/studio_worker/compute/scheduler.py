@@ -31,44 +31,73 @@ def _receipt_fingerprint(receipt):
         return None
 
 
+def _terminate(process):
+    for method in ("terminate", "kill"):
+        terminate = getattr(process, method, None)
+        if callable(terminate):
+            try:
+                terminate()
+                return
+            except Exception:
+                pass
+
+
 class SchedulerMixin:
     def tick(self):
+        self.reconcile()
+        self.dispatch()
+
+    def reconcile(self):
         with self.store.lock:
-            for run in self.store.runs():
-                if run["status"] not in ("running", "unknown"):
-                    continue
-                try:
-                    self.reconcile_run(run)
-                except Exception as exc:
-                    # One unreadable run record or vanished directory must never stop
-                    # reconciliation or the queued-run dispatch loop below.
-                    self.store.event(run.get("id"), {"error": "Run reconciliation failed: " + str(exc)[:300]})
+            runs = self.store.runs()
+        for run in runs:
+            if run["status"] not in ("running", "unknown"):
+                continue
+            try:
+                self.reconcile_run(run)
+            except Exception as exc:
+                # One unreadable run record or vanished directory must never stop
+                # reconciliation or queued-run dispatch.
+                self.store.event(run.get("id"), {"error": "Run reconciliation failed: " + str(exc)[:300]})
+
+    def dispatch(self):
+        with self.store.lock:
             runs = self.store.runs()
             busy = [r for r in runs if r["status"] in ("running", "unknown")]
-            for run in reversed(runs):
-                if run["status"] != "queued":
+            candidates = [r for r in reversed(runs) if r["status"] == "queued"]
+            cluster_runs = self.store.list("cluster-run")
+        for run in candidates:
+            try:
+                # Authorization, snapshot hashing and process start are I/O bound and
+                # must not hold the Store lock shared with every HTTP request.
+                project, _ = self.authorize(run)
+                if any(busy_run["gpu"] == run["gpu"] for busy_run in busy):
                     continue
-                try:
-                    project, _ = self.authorize(run)
-                    if any(r["gpu"] == run["gpu"] for r in busy):
+                if sum(busy_run["project_id"] == run["project_id"] for busy_run in busy) + sum(
+                        value.get("project_id") == run["project_id"] and value.get("status") in ("queued", "running", "unknown")
+                        for value in cluster_runs) >= project["policy"]["max_concurrent"]:
+                    continue
+                self.verify_snapshot(run)
+                directory = Path(run["directory"])
+                atomic_json(directory / "launch.json", {"command": run["command"],
+                             "environment": process_env(run["environment_snapshot"], run["gpu"]),
+                             "max_seconds": run["max_seconds"]})
+                env = os.environ.copy()
+                env["PYTHONPATH"] = str(WORKER_ROOT)
+                process = subprocess.Popen([sys.executable, "-m", "studio_worker.runner", str(directory)],
+                                           env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                           stderr=subprocess.DEVNULL, start_new_session=True)
+                with self.store.lock:
+                    current = self.store.run(run["id"])
+                    if current["status"] != "queued":
+                        # Cancelled between selection and launch: never resurrect it.
+                        _terminate(process)
                         continue
-                    if sum(r["project_id"] == run["project_id"] for r in busy)+sum(r["project_id"]==run["project_id"] and r["status"] in ("queued","running","unknown") for r in self.store.list("cluster-run")) >= project["policy"]["max_concurrent"]:
-                        continue
-                    self.verify_snapshot(run)
-                    directory = Path(run["directory"])
-                    atomic_json(directory / "launch.json", {"command": run["command"],
-                                "environment": process_env(run["environment_snapshot"], run["gpu"]),
-                                "max_seconds": run["max_seconds"]})
-                    env = os.environ.copy()
-                    env["PYTHONPATH"] = str(WORKER_ROOT)
-                    process = subprocess.Popen([sys.executable, "-m", "studio_worker.runner", str(directory)],
-                                               env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                               stderr=subprocess.DEVNULL, start_new_session=True)
                     self.processes[run["id"]] = process
                     self.store.update(run, status="running", identity=identity(process.pid), started_at=time.time())
                     busy.append(run)
-                except Exception as exc:
-                    self.store.update(run, status="failed", error=str(exc))
+            except Exception as exc:
+                self.store.update(run, status="failed", error=str(exc))
 
     def reconcile_run(self, run):
         directory = Path(run["directory"])

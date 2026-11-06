@@ -304,6 +304,9 @@ handle('settings',data => {
   if(next.sourceIds!==undefined&&(!Array.isArray(next.sourceIds)||next.sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id))))throw Error('Invalid source allowlist');
   if(!Array.isArray(next.sourceRoots||[])||(next.sourceRoots||[]).some(v=>typeof v!=='string'||!path.isAbsolute(v)))throw Error('Source roots must be absolute paths');
   if(!Array.isArray(next.skillRoots)) throw new Error('Skill roots must be an array');
+  if(next.skillRoots.some(v=>typeof v!=='string'||!v.trim()||v.length>4096||/[\r\n\0]/.test(v)))throw new Error('Skill roots must be non-empty bounded paths');
+  if(next.cwd!==undefined&&(typeof next.cwd!=='string'||!next.cwd.trim()||/[\r\n\0]/.test(next.cwd)))throw new Error('Invalid working directory');
+  if(next.projectAgents!==undefined&&(!next.projectAgents||typeof next.projectAgents!=='object'||Array.isArray(next.projectAgents)||Object.entries(next.projectAgents).some(([id,agent])=>typeof id!=='string'||!id||!['codex','kimi','qwen','deepseek','compatible'].includes(agent))))throw new Error('Invalid project agent binding');
   settings=catalog.put('settings','main',next); return settings;
 });
 function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
@@ -463,6 +466,10 @@ window=new BrowserWindow({width:1540,height:980,minWidth:1100,minHeight:720,fram
 installSshPrivacyLifecycle(window.webContents,sshConnection);
 window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
 window.webContents.on('will-navigate',(event,url)=>{if(url!==window.webContents.getURL()) event.preventDefault();});
+// The renderer needs no web platform permissions; deny every request explicitly.
+window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
+window.webContents.session.setPermissionCheckHandler(()=>false);
+window.webContents.on('render-process-gone',(_event,details)=>{emit('studio:event',{method:'studio/diagnostic',params:{text:'Renderer process ended ('+(details?.reason||'unknown')+'); reopen the window to continue. No job state was changed.'}});});
 const development=process.env.STUDIO_DEV_URL;
 if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw new Error('Invalid development origin');
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
@@ -471,4 +478,13 @@ app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',()=>{for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}});
 
 }
-app.whenReady().then(initialize).catch(error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}app.exit(1);});
+function focusExistingWindow(){if(!window||window.isDestroyed())return;if(window.isMinimized())window.restore();window.show();window.focus();}
+// A second desktop instance would race the same Catalog, broker descriptor and
+// fixed worker port. Refuse it and focus the existing window instead.
+if(!app.requestSingleInstanceLock()){
+ console.error('GPU Sampling Studio is already running for this profile; closing this instance.');
+ app.exit(0);
+}else{
+ app.on('second-instance',focusExistingWindow);
+ app.whenReady().then(initialize).catch(error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}app.exit(1);});
+}

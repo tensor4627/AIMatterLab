@@ -11,7 +11,7 @@ export class TerminalMcp {
  async start(){
   if(this.base)return;
   this.server=http.createServer((req,res)=>void this.receive(req,res));
-  this.server.requestTimeout=15000;this.server.headersTimeout=10000;
+  this.server.requestTimeout=0;this.server.headersTimeout=10000;
   await new Promise((resolve,reject)=>{this.server.once('error',reject);this.server.listen(0,'127.0.0.1',resolve);});
   this.base={url:'http://127.0.0.1:'+this.server.address().port,tokens:{mcp:randomBytes(32).toString('base64url')},transport:'desktop-terminal'};
   this.scopes.bind(this.base);

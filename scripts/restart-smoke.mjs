@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import {WorkerClient} from "../agent/tools/worker-client.mjs";
 const out=path.resolve('.studio/validation'),report={checks:{}},worker=new WorkerClient(),pause=ms=>new Promise(r=>setTimeout(r,ms));
 const evidence=JSON.parse(fs.readFileSync(path.join(out,'science.json'),'utf8'));
+const packagedExecutable=process.env.STUDIO_PACKAGED_EXECUTABLE||path.resolve('release','v'+JSON.parse(fs.readFileSync('package.json','utf8')).version,'win-unpacked','GPU Sampling Studio.exe');
 async function api(method,target,data){return worker.request(method,target,data);}
 async function submitAndWait(run){
  run=await api('POST','/api/run/validate',{run_id:run.id});
@@ -31,7 +32,7 @@ try{
  const source=await api('POST','/api/workspace/write',{project_id:gp.project_id,name:'closure.py',content:"import time\ntime.sleep(14)\nprint('DESKTOP_CLOSED_JOB_SURVIVED',flush=True)\n"});
  const cr=await api('POST','/api/runs/prepare',{spec:{project_id:gp.project_id,environment_id:gp.environment_id,engine:'pydyn.md',name:'Desktop closure infrastructure smoke',gpu:0,max_seconds:30,idempotency_key:crypto.randomUUID(),inputs:{'run.py':source.path},parameters:{scope:'CPU lifecycle only; not scientific MD'}}});
  await api('POST','/api/run/validate',{run_id:cr.id});await api('POST','/api/run/submit',{run_id:cr.id});await pause(800);
- const desktop=spawn(path.resolve('release/win-unpacked/GPU Sampling Studio.exe'),['--studio-verify'],{windowsHide:true,stdio:'inherit',env:{...process.env,STUDIO_VERIFY_ROOT:process.cwd()}});
+ const desktop=spawn(packagedExecutable,['--studio-verify'],{windowsHide:true,stdio:'inherit',env:{...process.env,STUDIO_VERIFY_ROOT:process.cwd()}});
  const exit=await new Promise((resolve,reject)=>{desktop.on('exit',resolve);desktop.on('error',reject);});
  const afterClose=await api('POST','/api/run/status',{run_id:cr.id});
  let completed=afterClose;

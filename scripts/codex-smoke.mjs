@@ -14,7 +14,9 @@ codex.on('event',e=>{
 });
 try{
  report.checks.worker=await worker.connect({distribution:'Ubuntu',workerRoot:JSON.parse(fs.readFileSync(path.join(out,'science.json'),'utf8')).desktop_worker_root,workerPort:8770,forceRelay},path.resolve('backend/worker'));
- const bin=path.join(process.env.LOCALAPPDATA,'OpenAI/Codex/bin');
+ const binDir=process.env.STUDIO_CODEX_BIN||(process.env.LOCALAPPDATA?path.join(process.env.LOCALAPPDATA,'OpenAI/Codex/bin'):'');
+ if(!binDir||!fs.existsSync(binDir))throw Error('Set STUDIO_CODEX_BIN to the Codex bin directory; no default installation was found');
+ const bin=binDir;
  const executable=fs.readdirSync(bin).map(x=>path.join(bin,x,'codex.exe')).filter(x=>fs.existsSync(x)).sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs)[0];
  report.checks.initialize=await codex.start(executable,worker.connection);
  const a=await codex.request('account/read',{refreshToken:false});

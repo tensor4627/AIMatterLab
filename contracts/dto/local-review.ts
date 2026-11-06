@@ -6,4 +6,4 @@ export interface LocalReviewPreview extends LocalReviewEntry {text:string|null;b
 export interface LocalReviewConfirmation {status:'confirmed'|'cancelled';taskId:string;receipt?:{id:string;confirmedAt:number;scientificValidation:'not_run'};aiReview?:{status?:string};}
 export interface LocalReviewApi {inspect(value:{taskId:string}):Promise<LocalReviewInspection>;read(value:{taskId:string;snapshotId:string;entryId:string}):Promise<LocalReviewPreview>;confirm(value:{taskId:string;snapshotId:string}):Promise<LocalReviewConfirmation>;}
 
-export interface LocalReviewStatus {taskId:string;parameterRevision:number;provider:string;threadId:string;status:'current'|'stale'|'not_run';authority:{kind:'local-human';id:string;sha256:string}|null;scope:'local';fileCheck:string;}
+export interface LocalReviewStatus {taskId:string;parameterRevision:number;provider:string;threadId:string;status:'current'|'stale'|'not_run';authority:{kind:'local-human';id:string;sha256:string}|null;scope:'local';fileCheck:string;targetConfirmationRequired?:boolean;}

@@ -2,7 +2,7 @@ import {invoke} from './studio';
 import {type Project,type Environment} from '../../contracts/dto/compute';
 import {type Conversation} from '../../contracts/dto/agent';
 import type {ProjectAuthorizationSpec} from "../../contracts/dto/compute";
-export interface DeploymentDraftConfig {target:'local'|'cluster';projectId:string;targetId:string;inputSource:'local'|'remote';directoryName:string;maxSeconds:number;gpu:number;resources:{cpus:number;gpus:number;memory_mb:number;queue:string;account:string}}
+export interface DeploymentDraftConfig {target:'local'|'cluster';projectId:string;targetId:string;inputSource:'local'|'remote';directoryName:string;maxSeconds:number;gpu:number;queueSelection?:'policy';resources:{cpus:number;gpus:number;memory_mb:number;queue:string;account:string;queue_target_id?:string}}
 export interface DeploymentContext {taskId:string;worker:{distribution:string;root:string};projects:Project[];environments:Environment[];clusters:any[]}
 export interface DeploymentDraftRequest {taskId:string;value:DeploymentDraftConfig;expectedRevision:number;mutationId:string}
 export interface DeploymentProjectRequest {taskId:string;spec:ProjectAuthorizationSpec;config:DeploymentDraftConfig;expectedRevision:number;requestId:string}

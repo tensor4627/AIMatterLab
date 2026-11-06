@@ -22,6 +22,7 @@ import './navigation.css';
 import PaneDivider from "../ui/PaneDivider";
 import JobsPage,{type RecordObservation} from "../features/runs/JobsPage";
 import {initialBottomExpanded,conversationMatches,computeProjectForSelection,jobKey,toolGroups,type ClusterJob,type Job} from './workspace-shell.mjs';
+import {followedProjectId} from './project-follow.mjs';
 import ModuleIcon from "../ui/ModuleIcon";
 import {workspaceModule} from './workspace-navigation.mjs';
 import type {CustomCvInvoke} from "../features/custom-cv/custom-cv-contract";
@@ -140,7 +141,7 @@ export default function App(){
    if(selectedConversationRef.current?.provider===c.provider&&selectedConversationRef.current?.threadId===p.oldThreadId){selectedConversationRef.current=c;setSelectedConversationId(c.id);storeConversation(c.id);}
   }
   if(event.method==='studio/conversationDeleted')applyConversationDeletion(event.params);
-  if(event.method==='studio/conversationUpdated'){const conversation=event.params.conversation;setConversations(old=>[conversation,...old.filter(c=>c.id!==conversation.id)]);if(conversation.id===selectedConversationRef.current?.id){selectedConversationRef.current=conversation;if(conversation.projectId)setProjectId(conversation.projectId);void refresh();}}
+  if(event.method==='studio/conversationUpdated'){const conversation=event.params.conversation;setConversations(old=>[conversation,...old.filter(c=>c.id!==conversation.id)]);const previous=selectedConversationRef.current;if(previous&&conversation.id===previous.id){selectedConversationRef.current=conversation;setProjectId(current=>followedProjectId(current,previous.projectId,conversation.projectId));void refresh();}}
   if(event.method==='studio/taskUpdated'){const task=event.params.task;setAgentTasks(old=>[task,...old.filter(t=>t.id!==task.id)]);if(event.params.showFlow&&task.threadId===selectedConversationRef.current?.threadId&&task.provider===selectedConversationRef.current?.provider)setSection('agent-task:'+task.id);}
  }),[]);
  projectPolicyOwner.current={worker:worker&&!disconnected,projectId,selection:conversationSelectionSeq.current,modal,saving:busy};
