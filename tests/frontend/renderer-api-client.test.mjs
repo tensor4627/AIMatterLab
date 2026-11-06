@@ -140,13 +140,13 @@ test('existing typed renderer clients dispatch through the real extracted transp
 });
 
 test('DTO dependency graph stays type-only and within shared contracts',()=>{
- const directory=path.join(root,'contracts/dto');
+ const directory=path.join(root,'contracts/dto'),contractsRoot=path.join(root,'contracts');
  for(const filename of fs.readdirSync(directory).filter(name=>name.endsWith('.ts'))){
   const file=path.join(directory,filename),parsed=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
   for(const statement of parsed.statements){
    if(ts.isImportDeclaration(statement)||ts.isExportDeclaration(statement)){
     assert(ts.isImportDeclaration(statement)?statement.importClause?.isTypeOnly:statement.isTypeOnly,filename+' has a runtime import/export');
-    if(statement.moduleSpecifier){const specifier=statement.moduleSpecifier.text;assert(specifier.startsWith('.'),filename+' imports an external package');const target=path.resolve(directory,specifier);assert(target.startsWith(directory+path.sep),filename+' depends on renderer/platform source');}
+    if(statement.moduleSpecifier){const specifier=statement.moduleSpecifier.text;assert(specifier.startsWith('.'),filename+' imports an external package');const target=path.resolve(directory,specifier);assert(target.startsWith(contractsRoot+path.sep),filename+' depends on renderer/platform source');}
    }else assert(ts.isInterfaceDeclaration(statement)||ts.isTypeAliasDeclaration(statement),filename+' contains a runtime declaration');
   }
  }

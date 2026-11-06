@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "1.0.0-dev.11",
+  "version": "1.0.0-dev.12",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -24,8 +24,8 @@
   },
   "dependencies": {
     "@monaco-editor/react": "4.7.0",
-    "@xterm/xterm": "5.5.0",
     "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
     "echarts": "5.6.0",
     "lucide-react": "0.468.0",
     "monaco-editor": "0.52.2",
@@ -35,22 +35,23 @@
   },
   "devDependencies": {
     "@lydell/node-pty": "1.2.0-beta.10",
+    "@moonshot-ai/kimi-code": "2.1.1",
+    "@qwen-code/qwen-code": "0.24.7",
     "@types/react": "19.0.3",
     "@types/react-dom": "19.0.2",
     "@types/three": "0.172.0",
     "@vitejs/plugin-react": "4.3.4",
     "electron": "44.5.1",
     "electron-builder": "26.15.3",
+    "playwright": "1.65.0",
     "typescript": "5.7.3",
-    "vite": "6.4.1",
-    "@moonshot-ai/kimi-code": "2.1.1",
-    "@qwen-code/qwen-code": "0.24.7"
+    "vite": "6.4.1"
   },
   "build": {
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "directories": {
-      "output": "release/v1.0.0-dev.11"
+      "output": "release/v1.0.0-dev.12"
     },
     "files": [
       "dist/**",
@@ -62,7 +63,11 @@
       {
         "from": "backend/worker",
         "to": "worker",
-        "filter": ["**/*", "!tests/**", "!**/__pycache__/**"]
+        "filter": [
+          "**/*",
+          "!tests/**",
+          "!**/__pycache__/**"
+        ]
       },
       "package.json",
       "!node_modules/**/*"

@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState} from 'react';import {ParameterFields,GroupedParameterFields} from "../../ui/ParameterFields";import type {ConsumerEngine,ConsumerStageApi,ConsumerStageInspection,ConsumerStageProposal} from './consumer-stage-types';import './consumer-stage.css';
+import {useEffect,useRef,useState} from 'react';import {ParameterFields,GroupedParameterFields} from "../../ui/ParameterFields";import type {ConsumerEngine,ConsumerStageApi,ConsumerStageInspection,ConsumerStageProposal} from '../../../contracts/dto/stage';import './consumer-stage.css';
 const numeric=['temperature_K','dt_fs','steps','cv_log_interval','cv_storage_interval','cv_change_interval','dump_thermo','dump_restart','dump_exyz'];
 export default function ConsumerStageEditor({taskId,revision,workerReady,disabled=false,language='zh-CN',api,onSaved}:{taskId:string;revision:number;workerReady:boolean;disabled?:boolean;language?:'zh-CN'|'en';api:ConsumerStageApi;onSaved:()=>void|Promise<void>}){
  const m=(zh:string,en:string)=>language==='en'?en:zh;

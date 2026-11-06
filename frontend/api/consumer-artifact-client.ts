@@ -1,1 +1,1 @@
-import {invoke} from './studio';import type {ConsumerArtifactApi} from "../features/workflows/consumer-artifact-types";export const consumerArtifactApi:ConsumerArtifactApi={list:value=>invoke('task.stage.artifacts',value),adopt:value=>invoke('task.stage.adoptArtifact',value)};
+import {invoke} from './studio';import type {ConsumerArtifactApi} from "../../contracts/dto/stage";export const consumerArtifactApi:ConsumerArtifactApi={list:value=>invoke('task.stage.artifacts',value),adopt:value=>invoke('task.stage.adoptArtifact',value)};

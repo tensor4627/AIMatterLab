@@ -108,7 +108,7 @@ let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource;
 const activeAuthoringTasks=new Map();
-const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map(), grants = new Map();
+const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 Object.defineProperty(worker,'bundledRuntimeId',{value:bundledWorkerRuntimeId(workerSource)});
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents});
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
@@ -432,10 +432,10 @@ handle('file.open',async() => {
   if(response.canceled) return null;
   const file=response.filePaths[0], stat=fs.statSync(file);
   if(stat.size>2*1024*1024) throw new Error('Text editor limit is 2 MiB');
-  const id=randomUUID(); grants.set(id,file);
+  const id=randomUUID();
   return { id,path:file,name:path.basename(file),content:fs.readFileSync(file,'utf8') };
 });
-handle('file.save',createWindowsSaveAs({grants,choose:options=>dialog.showSaveDialog(window,options),write:(file,content)=>fs.writeFileSync(file,content,'utf8')}));
+handle('file.save',async value=>createWindowsSaveAs({grants:new Map(),choose:options=>dialog.showSaveDialog(window,options),write:(file,content)=>fs.writeFileSync(file,content,'utf8')})(value));
 handle('file.choose',async({directory=false}) => {
   const response=await dialog.showOpenDialog(window,{properties:[directory?'openDirectory':'openFile']});
   return response.canceled?null:response.filePaths[0];

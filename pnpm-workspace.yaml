@@ -5,3 +5,6 @@ allowBuilds:
   '@moonshot-ai/kimi-code': false
   '@qwen-code/audio-capture': false
   node-pty: false
+minimumReleaseAgeExclude:
+  - playwright-core@1.65.0
+  - playwright@1.65.0

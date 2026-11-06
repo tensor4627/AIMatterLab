@@ -1,6 +1,6 @@
 import Tooltip from "../../ui/Tooltip";
 import './consumer-stage.css';
-import {useEffect,useRef,useState} from 'react';import type {ConsumerArtifactApi,ConsumerArtifactList,ConsumerArtifactAdoption} from './consumer-artifact-types';
+import {useEffect,useRef,useState} from 'react';import type {ConsumerArtifactApi,ConsumerArtifactList,ConsumerArtifactAdoption} from '../../../contracts/dto/stage';
 export default function ConsumerArtifactPicker({taskId,revision,workerReady,disabled=false,language='zh-CN',api,onAdopted}:{taskId:string;revision:number;workerReady:boolean;disabled?:boolean;language?:'zh-CN'|'en';api:ConsumerArtifactApi;onAdopted:(result:ConsumerArtifactAdoption)=>void|Promise<void>}){
  const msg=(zh:string,en:string)=>language==='en'?en:zh;
  const [result,setResult]=useState<ConsumerArtifactList|null>(null),[selected,setSelected]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');const seq=useRef(0),owner=useRef('');const scope=JSON.stringify([taskId,revision,workerReady]);if(owner.current!==scope){owner.current=scope;seq.current++;}

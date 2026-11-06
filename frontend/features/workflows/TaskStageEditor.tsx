@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import {ParameterFields} from "../../ui/ParameterFields";import StructuredValue from "../pygas/PygasStructuredValue";import {fieldMissing} from "../../../contracts/workflows/task-fields.mjs";
 import {partitionFields} from "../../ui/task-fields.mjs";
 
-import type {TaskStageApi,StageInspection} from './task-stage-types';import {t} from "../../ui/i18n";import './task-stage.css';
+import type {TaskStageApi,StageInspection} from '../../../contracts/dto/stage';import {t} from "../../ui/i18n";import './task-stage.css';
 export default function TaskStageEditor({taskId,revision,workerReady,disabled=false,api,onSaved}:{taskId:string;revision:number;workerReady:boolean;disabled?:boolean;api:TaskStageApi;onSaved:()=>void|Promise<void>}){
  const [data,setData]=useState<StageInspection|null>(null),[values,setValues]=useState<Record<string,unknown>>({}),[selected,setSelected]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');const seq=useRef(0),scope=useRef('');const scopeKey=JSON.stringify([taskId,revision,workerReady]);if(scope.current!==scopeKey){scope.current=scopeKey;seq.current++;}
  useEffect(()=>{seq.current++;setData(null);setValues({});setSelected('');setBusy(false);setError('');setMessage('');return()=>{seq.current++;};},[taskId,revision,workerReady]);
