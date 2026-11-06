@@ -62,8 +62,8 @@ class DeclarationBinding(unittest.TestCase):
         (root / "bin").mkdir()
         (root / "bin" / "run.py").write_text("", encoding="utf-8")
         declaration_value = {"tool_id": "demo-tool", "repository": str(root), "function": value}
-        bound = bind_operation(declaration_value, {"inputs": {"run.py": "/tmp/run.py"}, "parameters": {"symbols": ["C", "N"]}}, self.environment())
-        self.assertEqual(bound["argv"], ["/usr/bin/python3", str(root / "bin" / "run.py"), "/tmp/run.py", "C", "N"])
+        bound = bind_operation(declaration_value, {"inputs": {"run.py": "/tasks/run.py"}, "parameters": {"symbols": ["C", "N"]}}, self.environment())
+        self.assertEqual(bound["argv"], ["/usr/bin/python3", str(root / "bin" / "run.py"), "run.py", "C", "N"])
 
     def test_omitted_optional_value_removes_its_flag(self):
         value = function(
@@ -72,7 +72,7 @@ class DeclarationBinding(unittest.TestCase):
             parameters=[{"id": "checkpoint", "required": False, "default": None}],
         )
         bound = bind_operation(declaration(value), {"inputs": {"input.yaml": "/tmp/input.yaml"}, "parameters": {}}, self.environment())
-        self.assertEqual(bound["argv"], ["/opt/hotpp/bin/hotpp", "train", "-i", "/tmp/input.yaml", "-o", "model"])
+        self.assertEqual(bound["argv"], ["/opt/hotpp/bin/hotpp", "train", "-i", "input.yaml", "-o", "model"])
 
     def test_missing_required_input_and_unknown_tokens_fail(self):
         required = function(["{executable:hotpp}", "{model-file}"], inputs=[{"id": "model-file", "required": True}])

@@ -10,6 +10,15 @@ ENGINES = ("gpumd.neb", "gpumd.md", "pydyn.md", "pygas.build", "bias.validate", 
            "hotpp.export", "pygas.reweight", "pygas.opes-reweight")
 # Installer-only fixed scripts are not scientific engine choices or defaults.
 SUPPORTED_ENGINES = ENGINES + ("installation.check",)
+# Migration set: declaration-driven prepare is the default for routes whose production argv
+# has been parity-checked against this adapter. nep.eval/nep.analyze stay on the hardcoded
+# path until their Studio-side wrappers move into the tool repositories.
+DEFAULT_DECLARATION_ENGINES = (
+    "gpumd.md", "gpumd.sampling", "gpumd.neb", "nep.train",
+    "pydyn.md", "pydyn.sampling",
+    "pygas.build", "bias.validate", "pygas.reweight", "pygas.opes-reweight",
+    "hotpp.train", "hotpp.eval", "hotpp.export",
+)
 INSTALLATION_CHECKS = {
     "worker": "badf992b842e3a6dbcb29a009475f1f1e98e98f70efeb86c34e682305c7d0c13",
     "reference-md": "ef19e44d075637647263bf5ffff804d8ce70a8b6f890510a21953920f027e751",
@@ -134,11 +143,18 @@ class Adapter:
         return command
 
     def _declaration_argv(self, spec, environment):
-        """Declaration-driven production argv for a pilot engine allowlist; None means fallback."""
-        if os.environ.get("STUDIO_DECLARATION_DRIVEN") != "1":
+        """Declaration-driven production argv for the migration set; None means fallback built-in adapter."""
+        mode = os.environ.get("STUDIO_DECLARATION_DRIVEN", "auto")
+        if mode == "0":
             return None
-        allowlist = os.environ.get("STUDIO_DECLARATION_ENGINES", "")
-        if allowlist and self.engine not in [item.strip() for item in allowlist.split(",") if item.strip()]:
+        allowlist = os.environ.get("STUDIO_DECLARATION_ENGINES")
+        if allowlist is not None:
+            enabled = self.engine in [item.strip() for item in allowlist.split(",") if item.strip()]
+        elif mode == "1":
+            enabled = True
+        else:
+            enabled = self.engine in DEFAULT_DECLARATION_ENGINES
+        if not enabled:
             return None
         from studio_worker.tools.declarations import bind_operation, find_declaration
         declaration = find_declaration(environment.get("repositories", {}), self.engine)

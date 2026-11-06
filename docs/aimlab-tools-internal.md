@@ -122,7 +122,7 @@ AimLab 内部工具的接入声明放在工具自己的 Git 仓库主工作分�
 - `{python}`：所选环境的 Python 解释器；
 - `{entrypoint}`：`entrypoint` 解析后的仓库内路径；
 - `{executable:<name>}`：所选环境注册的可执行文件（如 `{executable:gpumd}`、`{executable:gpu-sampling}`、`{executable:nep}`、`{executable:hotpp}`、`{executable:pygas}`）；
-- `{<输入 id>}`：该功能声明的必需/可选输入资源路径；
+- `{<输入 id>}`：该输入在运行工作目录中的**文件名**（Worker 会把任务输入复制进 run 目录，生产命令使用文件名而不是源路径）；
 - `{<参数 id>}`：该功能声明的参数值；数组参数按元素展开为多个 argv token。
 
 token 必须匹配保留 token、`executable:<name>`，或本功能已声明的输入/参数 ID；未声明的 token 检查失败。可选输入/参数省略时按声明默认行为处理。`tests.cases[].entrypoint` 与用例 wrapper 只用于环境/可运行性检查，不得作为 `operation.command` 的唯一实现来冒充生产调用。
@@ -214,8 +214,8 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 
 ## 7. 当前实现范围与限制
 
-- 已实现：本文件第 5 节的只读声明与文件闭包检查脚本、`tools.aimlab.*` 登记路由、生产声明与 `engine-contracts.json` 的 adapter 一致性检查、Worker 端声明绑定模块 `studio_worker.tools.declarations`，以及 `Adapter.prepare` 的声明驱动试点（仅当 `STUDIO_DECLARATION_DRIVEN=1` 且引擎命中 `STUDIO_DECLARATION_ENGINES` allowlist 时启用；未命中或没有声明时回退内置 adapter，默认关闭）；
-- 未实现：Studio 内的版本登记/快照、`engine` 与 Worker 适配器交叉校验、把声明驱动扩展到全部引擎并默认启用、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；
+- 已实现：本文件第 5 节的只读声明与文件闭包检查脚本、`tools.aimlab.*` 登记路由、生产声明与 `engine-contracts.json` 的 adapter 一致性检查、Worker 端声明绑定模块 `studio_worker.tools.declarations`，以及 `Adapter.prepare` 的声明驱动集成：`DEFAULT_DECLARATION_ENGINES` 中的 13 条 route 在已注册源码仓库存在 `aimlab-tools/manifest.json` 时默认使用声明 argv（`STUDIO_DECLARATION_DRIVEN=0` 可关闭、`=1` 可扩大试点、`STUDIO_DECLARATION_ENGINES` 可指定 allowlist；无声明时回退内置 adapter）。`nep.eval`/`nep.analyze` 仍走内置 adapter，因为生产实现依赖 Studio 侧 `nep_predict.py` 与外部 `nep-regression-rmse` skill，尚未移入工具仓库；
+- 未实现：Studio 内的版本登记/快照、`engine` 与 Worker 适配器交叉校验、`nep.eval`/`nep.analyze` 的 Studio 侧包装迁移、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；
 - 因此检查通过不等于“已接入 Studio”。登记、环境配置和真实测试通过须按实际实现另行完成并记录；
 - 第三方 `<id>-package` 的注册路径保持不变，仍由 `studio-tool-integration` 与现有包注册实现处理。
 

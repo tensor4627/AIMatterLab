@@ -81,6 +81,20 @@ def _lookup(values, declared_id):
     return _MISSING
 
 
+def _input_name(inputs, declared_id):
+    """Resolve a declared input id to the run-directory input file name (not the source path)."""
+    if not isinstance(inputs, dict):
+        return _MISSING
+    if declared_id in inputs:
+        return declared_id
+    target = _normalize(declared_id)
+    for name in inputs:
+        normalized = _normalize(name)
+        if normalized and (normalized == target or normalized.startswith(target) or target.startswith(normalized)):
+            return name
+    return _MISSING
+
+
 def _scalar(value):
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -134,13 +148,13 @@ def bind_operation(declaration, spec, environment):
             elif _EXECUTABLE.match(name):
                 expanded.append(_executable(environment, _EXECUTABLE.match(name).group(1)))
             elif name in declared_inputs:
-                value = _lookup(inputs, name)
+                value = _input_name(inputs, name)
                 if value is _MISSING:
                     if declared_inputs[name].get("required"):
                         raise DeclarationError("Missing required input: " + name)
                     omitted = True
                 else:
-                    _append_value(expanded, value, name)
+                    expanded.append(str(value))
             elif name in declared_parameters:
                 value = _lookup(parameters, name)
                 if value is _MISSING:

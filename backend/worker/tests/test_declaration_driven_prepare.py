@@ -46,7 +46,7 @@ class DeclarationDrivenPrepare(unittest.TestCase):
         self.root = tempfile.mkdtemp()
         write_manifest(self.root, hotpp_eval_manifest())
         self.environment = {
-            "executables": {"hotpp": sys.executable, "python": sys.executable},
+            "executables": {"hotpp": sys.executable, "nep": sys.executable, "python": sys.executable},
             "repositories": {"hotpp": self.root},
         }
         self.spec = {
@@ -73,6 +73,23 @@ class DeclarationDrivenPrepare(unittest.TestCase):
         baseline = adapters.Adapter("hotpp.eval").prepare(self.spec, self.environment)
         with patch.dict(os.environ, {"STUDIO_DECLARATION_DRIVEN": "1", "STUDIO_DECLARATION_ENGINES": "hotpp.eval"}):
             self.assertEqual(adapters.Adapter("hotpp.eval").prepare(self.spec, {"executables": self.environment["executables"], "repositories": {}}), baseline)
+
+    def test_default_migration_set_uses_declarations_and_keeps_nep_handlers_hardcoded(self):
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}
+        with patch.dict(os.environ, clean, clear=True):
+            self.assertIn("hotpp.eval", adapters.DEFAULT_DECLARATION_ENGINES)
+            self.assertNotIn("nep.eval", adapters.DEFAULT_DECLARATION_ENGINES)
+            with patch("studio_worker.tools.declarations.bind_operation", side_effect=lambda *args, **kwargs: {"argv": ["SENTINEL"]}):
+                self.assertEqual(adapters.Adapter("hotpp.eval").prepare(self.spec, self.environment), ["SENTINEL"])
+                nep_spec = {
+                    "engine": "nep.eval",
+                    "inputs": {"nep.in": "/tasks/nep.in", "evaluation.xyz": "/tasks/evaluation.xyz", "nep.txt": "/tasks/nep.txt"},
+                    "parameters": {"dataset_role": "test"},
+                }
+                self.assertEqual(
+                    adapters.Adapter("nep.eval").prepare(nep_spec, self.environment),
+                    [sys.executable, str(adapters.PACKAGE_ROOT / "nep_predict.py"), sys.executable, "test"],
+                )
 
     def test_binding_module_rejects_a_missing_required_parameter(self):
         declaration = find_declaration({"hotpp": self.root}, "hotpp.eval")
