@@ -37,13 +37,16 @@ def parse_gpu_rows(text):
         if not line:
             continue
         parts = [part.strip() for part in line.split(',')]
-        if len(parts) != 5:
+        if len(parts) < 5:
             raise ValueError('Unparseable nvidia-smi output')
         identifier = counter(parts[0])
         if identifier is None:
             raise ValueError('Unparseable nvidia-smi output')
-        rows.append({'id': identifier, 'name': parts[1], 'memory_used': counter(parts[2]),
-                     'memory_total': counter(parts[3]), 'utilization': counter(parts[4])})
+        name = ', '.join(parts[1:-3]).strip()
+        if not name:
+            raise ValueError('Unparseable nvidia-smi output')
+        rows.append({'id': identifier, 'name': name, 'memory_used': counter(parts[-3]),
+                     'memory_total': counter(parts[-2]), 'utilization': counter(parts[-1])})
     return rows
 
 

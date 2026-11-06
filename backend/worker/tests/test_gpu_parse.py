@@ -40,6 +40,14 @@ class GpuInventoryParseTest(unittest.TestCase):
         self.assertEqual(parse_gpu_rows(None), [])
 
 
+
+    def test_commas_inside_gpu_names_keep_all_counters(self):
+        rows = parse_gpu_rows("0, NVIDIA A100, 80GB, 1024, 81920, 37\n")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "NVIDIA A100, 80GB")
+        self.assertEqual(rows[0]["memory_used"], 1024)
+        self.assertEqual(rows[0]["memory_total"], 81920)
+        self.assertEqual(rows[0]["utilization"], 37)
 if __name__ == "__main__":
     unittest.main()
 
