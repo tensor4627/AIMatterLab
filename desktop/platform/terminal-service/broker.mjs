@@ -31,7 +31,7 @@ export async function startBroker(initialization,{pty,now=Date.now,onShutdown=()
   const session=sessions.get(sessionRoute[1]);if(!session)failure('session_not_found',404);const operation=sessionRoute[2];if(operation==='state')failure('invalid_method',405);const result=session[operation](value);if(operation==='close')sessions.delete(sessionRoute[1]);send(200,result);
  }catch(error){send(error instanceof TerminalFault?error.status:400,{error:error instanceof TerminalFault?error.code:'request_rejected'});}});
  server.requestTimeout=5000;server.headersTimeout=5000;server.keepAliveTimeout=1000;server.on('clientError',(_error,socket)=>socket.destroy());
- async function close(){if(stopping)return;stopping=true;for(const session of sessions.values())try{session.close({});}catch{}sessions.clear();await new Promise(resolve=>{server.close(resolve);server.closeIdleConnections?.();});}
+ async function close(){if(stopping)return;stopping=true;for(const session of sessions.values())try{session.dispose();}catch{}sessions.clear();await new Promise(resolve=>{server.close(resolve);server.closeIdleConnections?.();});}
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(config.port??0,'127.0.0.1',resolve);});origin='http://127.0.0.1:'+server.address().port;
  return{ready:{origin,...safeHealth()},close};
 }
