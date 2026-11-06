@@ -9,10 +9,10 @@ import {fileURLToPath} from 'node:url';
 import {desktopRoot,requireLaunchContext} from './desktop-launch.mjs';
 import {parseNativeCheckArgs,prepareNativeConversationCheck,launchPreparedNativeCheck,nativeRendererEvidence} from './native-conversation-check.mjs';
 
-const compiler='C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe';
+const compilerCandidates=[process.env.STUDIO_CSC_PATH,'C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe','C:/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe'].filter(Boolean),compiler=compilerCandidates.find(candidate=>fs.existsSync(candidate))||compilerCandidates[0];
 const digest=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 export function compileNativeResourceClient(directory){
- if(process.platform!=='win32'||!fs.existsSync(compiler))throw Error('Controlled native client requires the existing Framework64 csc.exe; no dependency installation is permitted');
+ if(process.platform!=='win32'||!fs.existsSync(compiler))throw Error('Controlled native client requires an existing .NET Framework csc.exe (set STUDIO_CSC_PATH to override); no dependency installation is permitted');
  fs.mkdirSync(directory,{recursive:true});const source=path.join(directory,'ControlledResourceClient.cs'),client=path.join(directory,'ControlledResourceClient.exe');
  fs.writeFileSync(source,'using System; using System.Text; public static class ControlledResourceClient { public static void Main(string[] ignored) { Console.OutputEncoding=new UTF8Encoding(false); Console.WriteLine("CONTROLLED_LOCAL_CLIENT_NO_SSH_AUTHENTICATION"); string line; while((line=Console.ReadLine())!=null) { Console.WriteLine("LOCAL_ECHO:"+line); } } }\n',{flag:'wx'});
  const output=execFileSync(compiler,['/nologo','/target:exe','/out:'+client,source],{encoding:'utf8',windowsHide:true,timeout:10000});

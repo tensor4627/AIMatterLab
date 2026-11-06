@@ -23,7 +23,7 @@ export function toolResult(update){
 }
 function optionsOf(option){return (option?.options||[]).flatMap(value=>Array.isArray(value.options)?value.options:[value]);}
 export class AcpBridge extends EventEmitter{
- constructor(provider,{host=providerRuntime}={}){super();this.host=host;this.provider=provider;this.pending=new Map();this.interactions=new Map();this.sessions=new Map();this.next=1;this.activeTurns=new Map();}
+ constructor(provider,{host=providerRuntime,probeTimeoutMs=15000}={}){super();this.host=host;this.provider=provider;this.probeTimeoutMs=probeTimeoutMs;this.pending=new Map();this.interactions=new Map();this.sessions=new Map();this.next=1;this.activeTurns=new Map();}
  event(method,params,id){this.emit('event',{method,params:{...params,provider:this.provider},provider:this.provider,...id!==undefined?{id}: {}});}
  async start(executable,profile,worker){
   if(this.process)return this.info;
@@ -34,10 +34,14 @@ export class AcpBridge extends EventEmitter{
  async _start(executable,profile,worker){
   if(this.process)return this.info;
   const version=await new Promise((resolve,reject)=>{
-   const probe=this.host.spawnCli(executable,['--version'],{env:profile.env});let output='';
-   const timer=setTimeout(()=>{probe.kill();reject(Error('CLI version probe timed out'));},15000);
-   probe.stdout.on('data',data=>output+=data.toString());probe.on('error',error=>{clearTimeout(timer);reject(error);});
-   probe.on('exit',code=>{clearTimeout(timer);if(code!==0)reject(Error('CLI version probe failed'));else resolve(output.trim().split(/\s+/).at(-1));});
+   const probe=this.host.spawnCli(executable,['--version'],{env:profile.env});let output='',settled=false;
+   const onData=data=>{output+=data.toString();};
+   const cleanup=()=>{clearTimeout(timer);probe.stdout?.removeListener?.('data',onData);probe.removeListener?.('error',onError);probe.removeListener?.('exit',onExit);};
+   const finish=(action,value)=>{if(settled)return;settled=true;cleanup();action(value);};
+   const onError=error=>finish(reject,error);
+   const onExit=code=>{if(code!==0)finish(reject,Error('CLI version probe failed'));else finish(resolve,output.trim().split(/\s+/).at(-1));};
+   const timer=setTimeout(()=>{try{probe.kill();}catch{}finish(reject,Error('CLI version probe timed out'));},this.probeTimeoutMs);
+   probe.stdout.on('data',onData);probe.on('error',onError);probe.on('exit',onExit);
   });
   if(version!==CLI_VERSIONS[this.provider])throw Error(this.provider+' CLI version mismatch: expected '+CLI_VERSIONS[this.provider]+', got '+version);
   this.executable=executable;this.profile=profile;this.worker=worker;

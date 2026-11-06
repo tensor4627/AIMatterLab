@@ -54,4 +54,4 @@ try{
   }catch(error){report.checks[provider]={...report.checks[provider],error:error.message};process.exitCode=1;}
   finally{bridge.close();}
  }
-}finally{server.closeAllConnections();server.close();fs.writeFileSync('.studio/validation/providers-fixture.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report.checks,null,2));}
+}finally{server.closeAllConnections();server.close();const output=process.env.STUDIO_PROVIDER_FIXTURE_OUT||'.studio/validation/providers-fixture.json';fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,JSON.stringify(report,null,2));console.log(JSON.stringify(report.checks,null,2));}

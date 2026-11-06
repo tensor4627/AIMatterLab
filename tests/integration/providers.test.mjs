@@ -148,3 +148,14 @@ test('ACP start is single-flight and disconnect drops stale process sessions',as
  b.disconnect(Error('process exited'));
  assert.equal(b.sessions.size,0,'disconnect must not retain metadata from the dead process');
 });
+
+test('ACP version probe timeout kills the probe and removes its listeners',async()=>{
+ const {PassThrough}=await import('node:stream');
+ let killed=0;const probe=new EventEmitter();probe.stdout=new PassThrough();probe.kill=()=>{killed++;};
+ const bridge=new AcpBridge('kimi',{probeTimeoutMs:20,host:{version:'fixture',spawnCli:()=>probe}});
+ await assert.rejects(()=>bridge.start('kimi',{args:['acp'],cwd:process.cwd(),env:{}},undefined),/version probe timed out/);
+ assert.equal(killed,1,'timed-out probe must be killed');
+ assert.equal(probe.stdout.listenerCount('data'),0,'stdout listener must be removed');
+ assert.equal(probe.listenerCount('error'),0,'error listener must be removed');
+ assert.equal(probe.listenerCount('exit'),0,'exit listener must be removed');
+});
