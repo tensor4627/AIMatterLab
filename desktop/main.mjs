@@ -18,6 +18,8 @@ import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,
 import {createWorkbenchImageExporter} from "./platform/workbench-image.mjs";
 import {registerWorkspaceTaskRoutes} from '../backend/main/workspace/routes.mjs';
 import {createToolPackageRegistry} from '../backend/main/tools/package-registry.mjs';
+import {createAimlabToolRegistry} from '../backend/main/tools/aimlab-source.mjs';
+import {registerAimlabToolSourceRoutes} from '../backend/main/tools/aimlab-routes.mjs';
 import {createToolGroupRecords} from '../backend/main/tools/groups.mjs';
 import {registerToolDefinitionRoutes} from '../backend/main/tools/routes.mjs';
 import {createToolConfigurationController,registerToolConfigurationRoutes} from '../backend/main/compute/tool-configurations.mjs';
@@ -105,7 +107,7 @@ const verifying=installationVerifying||improvementsVerifying||providerVerifying|
 const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
 if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
-let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows;
+let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource;
@@ -188,6 +190,8 @@ handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
 workflowContext=createAgentWorkflowContext({records:taskRecords,activeTasks:activeAuthoringTasks,selectedProvider:()=>agents.active});
 toolPackages=createToolPackageRegistry({catalog,storeRoot:path.join(app.getPath('userData'),'tool-packages')});
+aimlabSources=createAimlabToolRegistry({catalog});
+registerAimlabToolSourceRoutes({handle,sources:aimlabSources,chooseSourceDirectory:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openDirectory']});return value.canceled?null:value.filePaths[0];}});
 toolGroups=createToolGroupRecords({catalog,packages:toolPackages});
 toolConfigurations=createToolConfigurationController({catalog,packages:toolPackages,worker,getSettings:()=>settings,current:()=>workflowContext.current(),
  currentTarget:()=>{const owner=workflowContext.current();return owner?.taskId?toolGuidanceTarget(taskRecords.read(owner.taskId)):null;},getProvider:()=>agents.active,getLease:skillGuidanceLease,assertIdle:assertIdleAgent,toWorkerPath:linuxPath,

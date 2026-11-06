@@ -5,6 +5,7 @@ const methods=new Set(['diagnostics.saveWorkbenchImage','task.stage.artifacts','
 for(const name of [
  'compute.resource.status','compute.resource.activate','compute.resource.clear',
  'tools.workflows.context','tools.workflows.list','tools.workflows.locateRun','tools.workflows.create','tools.workflows.retryCreate','tools.workflows.prepareStep','tools.workflows.executeStep','tools.workflows.status','tools.workflows.read',
+ 'tools.aimlab.choose','tools.aimlab.sources.inspect','tools.aimlab.sources.register','tools.aimlab.sources.update','tools.aimlab.sources.list','tools.aimlab.sources.read',
  'tools.packages.choose','tools.packages.inspect','tools.packages.register','tools.packages.update','tools.packages.relocate','tools.packages.read','tools.packages.list',
  'tools.groups.compile','tools.groups.save','tools.groups.read','tools.groups.list',
  'tools.configurations.context','tools.configurations.list','tools.configurations.createProject','tools.configurations.plan','tools.configurations.execute','tools.configurations.status','tools.configurations.activate','tools.configurations.read','tools.configurations.bind','tools.configurations.grant'

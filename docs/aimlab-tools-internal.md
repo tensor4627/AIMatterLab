@@ -159,6 +159,8 @@ node scripts/verify-aimlab-sources.mjs --repo <工具仓库1> --repo <工具仓�
 
 汇总报告 `scope=aimlab_tools_sources`；任一来源失败时退出码为 1，并保留每个来源的失败原因。
 
+Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspect`、`sources.register`、`sources.update`、`sources.list`、`sources.read`）：按声明的 `declaration_sha256`（commit + manifest + 闭包）登记外部仓库，**不复制工具源码**；登记记录只保存来源路径、commit、声明与文件哈希。`installation` / `tests` / `release` 仍为 `not_run`，真实安装与测试按第 6 节单独记录。
+
 行为：
 
 - 只读：不写工具仓库、不安装、不运行测试、不注册 Studio；

@@ -34,7 +34,7 @@
 
 源码与原有测试按原 Git 仓库同步，交付 skill 和重定向须匹配对应提交；更新后重新验证。已有任务保留原版本，仓库同步成功不代表升级验证通过。
 
-**内部工具（AimLab）**：AimLab 自研工具（例如 GPU-Sampling）不按上述第三方交付包形态接入，而是在自身主工作分支维护 `aimlab-tools/` 声明（机器可读 manifest、交付 skill、精简手册、测试映射），声明随源码 commit 一起提交。Studio 侧按候选 commit 执行接入检查，校验声明、路径闭包和测试映射；检查通过后仍须在候选环境完成真实安装和声明测试，全部通过才放行登记。Studio 不自动 pull，不原地替换旧任务依赖的版本。当前检查实现为只读脚本，Studio 内登记与配置适配以实际实现和验证记录为准。详见 [AimLab 内部工具声明与接入检查标准](aimlab-tools-internal.md)。
+**内部工具（AimLab）**：AimLab 自研工具（例如 GPU-Sampling）不按上述第三方交付包形态接入，而是在自身主工作分支维护 `aimlab-tools/` 声明（机器可读 manifest、交付 skill、精简手册、测试映射），声明随源码 commit 一起提交。Studio 侧按候选 commit 执行接入检查，校验声明、路径闭包和测试映射；检查通过后仍须在候选环境完成真实安装和声明测试，全部通过才放行登记。Studio 不自动 pull，不原地替换旧任务依赖的版本。当前实现为只读检查脚本，以及主进程 `tools.aimlab.*` typed 登记路由（只登记来源 commit 与声明身份，不复制工具源码；安装/测试/放行仍为 `not_run`）。详见 [AimLab 内部工具声明与接入检查标准](aimlab-tools-internal.md)。
 
 #### 流程组织
 
