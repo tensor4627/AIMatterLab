@@ -3,85 +3,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync, execFileSync} from 'node:child_process';
+import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {createAimlabToolFixture, git} from '../helpers/aimlab-tools-fixture.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const checkScript = path.join(repositoryRoot, 'scripts/check-aimlab-tools.mjs');
-const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
-const gitOptions = ['-c', 'user.name=AimLab check fixture', '-c', 'user.email=aimlab-check@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', '-c', 'core.hooksPath=' + nullDevice];
+const verifyScript = path.join(repositoryRoot, 'scripts/verify-aimlab-sources.mjs');
 
-function git(root, args) {
-  return execFileSync('git', [...gitOptions, '-C', root, ...args], {encoding: 'utf8', windowsHide: true, timeout: 60000});
-}
-
-function write(root, name, text) {
-  const target = path.join(root, ...name.split('/'));
-  fs.mkdirSync(path.dirname(target), {recursive: true});
-  fs.writeFileSync(target, text);
-}
-
-function manifest() {
-  return {
-    schema_version: 1,
-    id: 'demo-tool',
-    name: 'Demo tool',
-    environment: {hardware: 'cpu', requirements: ['Python 3'], parallelism: {supported: ['serial']}},
-    functions: [{
-      id: 'demo.run',
-      name: 'Demo run',
-      description: 'Run the demo program',
-      entrypoint: 'tool.py',
-      inputs: [],
-      outputs: [{
-        id: 'result',
-        type: 'file',
-        format: 'json',
-        description: 'JSON receipt',
-        required: true,
-        display: {priority: 100, advanced: false, reason: 'Main result'}
-      }],
-      parameters: [],
-      operation: {command: ['{python}', '{entrypoint}'], failure_handling: 'Inspect the receipt and logs before retrying.'},
-      tests: ['basic']
-    }],
-    tests: {
-      cases: [{
-        id: 'basic',
-        function_id: 'demo.run',
-        directory: 'aimlab-tools/tests/basic',
-        instructions: 'aimlab-tools/tests/basic/README.md',
-        entrypoint: 'aimlab-tools/tests/basic/run-test.py',
-        resources: [],
-        expected_outputs: [{path: 'receipt.json', format: 'json', description: 'JSON receipt written by the wrapper.'}],
-        pass_criteria: ['Exit code 0', 'receipt.json parses']
-      }]
-    }
-  };
-}
-
-function createFixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aimlab-tools-check-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  write(root, 'tool.py', 'print("ok")\n');
-  write(root, 'aimlab-tools/SKILL.md', '---\nname: demo-tool-delivery\ndescription: Operate the demo tool.\n---\n\n# Demo tool\n\nRun tool.py with the selected Python 3 interpreter.\n');
-  write(root, 'aimlab-tools/manual.md', '# Demo tool\n\nRun the program and keep its receipt.\n');
-  write(root, 'aimlab-tools/tests/README.md', '# Demo tests\n\n| Function | Case |\n| --- | --- |\n| demo.run | basic |\n');
-  write(root, 'aimlab-tools/tests/basic/README.md', '# Basic case\n\nRun the wrapper; expect a JSON receipt.\n');
-  write(root, 'aimlab-tools/tests/basic/run-test.py', 'print("{}")\n');
-  write(root, 'aimlab-tools/manifest.json', JSON.stringify(manifest(), null, 2) + '\n');
-  git(root, ['init', '--quiet', '--initial-branch=main']);
-  git(root, ['add', '.']);
-  git(root, ['commit', '--quiet', '-m', 'Add AimLab internal tool declaration']);
-  return {root, commit: git(root, ['rev-parse', 'HEAD']).trim()};
-}
-
-function runCheck(args) {
-  return spawnSync(process.execPath, [checkScript, ...args], {encoding: 'utf8', windowsHide: true, timeout: 120000});
+function runCheck(args, script = checkScript) {
+  return spawnSync(process.execPath, [script, ...args], {encoding: 'utf8', windowsHide: true, timeout: 120000});
 }
 
 test('the internal declaration check passes on a committed tool repository', t => {
-  const fixture = createFixture(t);
+  const fixture = createAimlabToolFixture(t);
   const reportDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'aimlab-tools-report-'));
   t.after(() => fs.rmSync(reportDirectory, {recursive: true, force: true}));
   const reportPath = path.join(reportDirectory, 'report.json');
@@ -107,7 +42,7 @@ test('the internal declaration check passes on a committed tool repository', t =
 });
 
 test('the check fails when a declared test resource is missing from the commit', t => {
-  const fixture = createFixture(t);
+  const fixture = createAimlabToolFixture(t);
   const manifestPath = path.join(fixture.root, 'aimlab-tools', 'manifest.json');
   const value = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   value.tests.cases[0].resources = ['tests/missing-data'];
@@ -118,4 +53,27 @@ test('the check fails when a declared test resource is missing from the commit',
   assert.equal(result.status, 1);
   assert.match(result.stderr, /missing/);
   assert.equal(git(fixture.root, ['status', '--porcelain']).trim(), '');
+});
+
+test('the multi-source verification aggregates committed sources and reports failures', t => {
+  const first = createAimlabToolFixture(t);
+  const second = createAimlabToolFixture(t);
+  const passed = runCheck(['--repo', first.root, '--repo', second.root], verifyScript);
+  assert.equal(passed.status, 0, passed.stderr);
+  const receipt = JSON.parse(passed.stdout);
+  assert.equal(receipt.scope, 'aimlab_tools_sources');
+  assert.equal(receipt.status, 'passed');
+  assert.equal(receipt.source_count, 2);
+  assert.equal(receipt.failed_count, 0);
+  assert.deepEqual(receipt.sources.map(item => item.id), ['demo-tool', 'demo-tool']);
+  assert.equal(receipt.installation.status, 'not_run');
+
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'aimlab-tools-empty-'));
+  t.after(() => fs.rmSync(empty, {recursive: true, force: true}));
+  const failed = runCheck(['--repo', first.root, '--repo', empty], verifyScript);
+  assert.equal(failed.status, 1);
+  const failedReceipt = JSON.parse(failed.stdout);
+  assert.equal(failedReceipt.status, 'failed');
+  assert.equal(failedReceipt.source_count, 2);
+  assert.equal(failedReceipt.failed_count, 1);
 });

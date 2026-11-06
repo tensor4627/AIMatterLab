@@ -167,6 +167,20 @@ export function aimlabToolRepoPaths(manifest) {
   return [...new Set(paths)].sort();
 }
 
+/** Validate the delivery SKILL.md: YAML name/description, non-empty body, 256 KiB bound. */
+export function validateAimlabSkillText(text) {
+  if (typeof text !== 'string' || !text.trim()) fail('aimlab-tools/SKILL.md', 'empty');
+  if (Buffer.byteLength(text, 'utf8') > 256 * 1024) fail('aimlab-tools/SKILL.md', 'exceeds 256 KiB');
+  const front = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  if (!front) fail('aimlab-tools/SKILL.md', 'YAML front matter required');
+  const name = /^name:\s*(.+)$/m.exec(front[1]);
+  const description = /^description:\s*(.+)$/m.exec(front[1]);
+  if (!name || !/^[a-z][a-z0-9-]*$/.test(name[1].trim())) fail('aimlab-tools/SKILL.md', 'valid lowercase name required');
+  if (!description || !description[1].trim()) fail('aimlab-tools/SKILL.md', 'description required');
+  if (!text.slice(front[0].length).trim()) fail('aimlab-tools/SKILL.md', 'body required');
+  return text;
+}
+
 /** Validated declaration converted into the shared package contract shape (no filesystem access). */
 export function aimlabToolPackageShape(value, options = {}) {
   return packageShape(validateAimlabTools(value), options);

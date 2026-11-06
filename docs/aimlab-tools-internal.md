@@ -151,6 +151,14 @@ AimLab 内部工具的接入声明放在工具自己的 Git 仓库主工作分�
 node scripts/check-aimlab-tools.mjs --repo <工具仓库路径> [--commit <sha>] [--out <新报告文件>]
 ```
 
+需要一次核对多个已提交的工具仓库时：
+
+```powershell
+node scripts/verify-aimlab-sources.mjs --repo <工具仓库1> --repo <工具仓库2> ... [--out <新报告文件>]
+```
+
+汇总报告 `scope=aimlab_tools_sources`；任一来源失败时退出码为 1，并保留每个来源的失败原因。
+
 行为：
 
 - 只读：不写工具仓库、不安装、不运行测试、不注册 Studio；
