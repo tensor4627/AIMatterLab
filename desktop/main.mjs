@@ -3,6 +3,7 @@ import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-pla
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
 import {createAgentResourceRouting} from '../agent/sessions/resource-routing.mjs';
 import {createComputeResourceBinding} from '../backend/main/compute/resource-binding.mjs';
+import {findInstalledCodex} from './platform/codex-executable.mjs';
 import {computeRuntime} from './platform/compute-runtime.mjs';
 import {createComputeProfiles} from '../backend/main/compute/compute-profiles.mjs';
 import {createSharedTerminal} from "../backend/main/compute/shared-terminal.mjs";
@@ -114,11 +115,7 @@ const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-samplin
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
   sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
 function findCodex() {
-  const directory = path.join(process.env.LOCALAPPDATA || '', 'OpenAI','Codex','bin');
-  if (!fs.existsSync(directory)) return 'codex';
-  const candidates = fs.readdirSync(directory).map(p => path.join(directory,p,'codex.exe'))
-    .filter(p => fs.existsSync(p)).sort((a,b) => fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs);
-  return candidates[0] || 'codex';
+  return findInstalledCodex();
 }
 function findAgent(provider) {
   const entry=provider==='kimi'?'@moonshot-ai/kimi-code/dist/main.mjs':'@qwen-code/qwen-code/cli-entry.js';
@@ -151,7 +148,6 @@ settings = { ...defaults, codexPath:findCodex(),kimiPath:findAgent('kimi'),qwenP
 const normalizedSharing=normalizeScientificSharing(settings);
 if(normalizedSharing!==settings)settings=catalog.put('settings','main',normalizedSharing);
 for(const provider of ['kimi','qwen']){const stored=settings[provider+'Path'];if(typeof stored==='string'&&/[\\\\/]/.test(stored)&&!fs.existsSync(stored))settings[provider+'Path']=findAgent(provider);}
-if(typeof settings.codexPath==='string'&&/[\\\\/]/.test(settings.codexPath)&&!fs.existsSync(settings.codexPath))settings.codexPath=findCodex();
 if(verifying&&!installationVerifying)settings={...settings,agentProvider:'codex',agentLayout:'right',kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'),language:'zh-CN',fontSize:13,editorFontSize:13,terminalFontSize:12,fontFamily:'system',workerRoot:JSON.parse(fs.readFileSync(path.join(verificationRoot,'.studio/validation/science.json'),'utf8')).desktop_worker_root,workerPort:8770};
 if(installationVerifying){
  const config=JSON.parse(fs.readFileSync(process.env.STUDIO_INSTALL_CONFIG,'utf8'));

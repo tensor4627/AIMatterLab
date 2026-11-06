@@ -15,12 +15,19 @@ function checkedInitialize(value){
   return value;
 }
 function validEnvelope(value){return !!value&&typeof value==='object'&&!Array.isArray(value)&&(value.method===undefined||typeof value.method==='string'&&value.method.length>0&&value.method.length<=256)&&(value.id===undefined||typeof value.id==='string'&&value.id.length<=256||typeof value.id==='number'&&Number.isFinite(value.id))&&!(Object.hasOwn(value,'result')&&Object.hasOwn(value,'error'));}
+function versionFailure(cause){
+  if(cause?.code==='ENOENT')return ['cli_not_found','未找到已配置的 CLI。请确认 CLI 安装或更新已完成，再明确重连'];
+  if(['EACCES','EPERM'].includes(cause?.code))return ['cli_permission_denied','CLI 无法执行。请检查文件权限或安全策略，再明确重连'];
+  if(cause?.code==='ETIMEDOUT'||cause?.killed===true&&cause?.signal==='SIGTERM')return ['cli_version_timeout','读取 CLI 版本超时。请检查 CLI 是否能正常启动，再明确重连'];
+  if(Number.isInteger(cause?.code)&&cause.code!==0||typeof cause?.signal==='string')return ['cli_version_exit_failed','CLI 版本命令退出失败。请检查 CLI 是否能正常启动，再明确重连'];
+  return ['cli_version_failed','无法读取 CLI 版本。请检查 CLI 安装与可执行文件配置，再明确重连'];
+}
 function compatibilityFailure(cause,stage,version){
   if(cause?.code==='STUDIO_CODEX_PROTOCOL_MISMATCH')return cause;
   const gates={version:'读取 CLI 版本',isolation_prepare:'检查必需隔离能力和模型能力上限',spawn:'启动 app-server 传输',initialize:'核对 initialize 协议响应',effective_isolation:'回读有效隔离配置、技能与 MCP',lifecycle:'核对当前连接生命周期'};
   const failures={'Installed Codex lacks required isolation controls':'required_isolation_controls_missing','Effective Codex isolation controls do not match':'effective_isolation_mismatch','Native skills remain enabled':'native_skills_enabled','Unscoped MCP capabilities are exposed':'unscoped_mcp_capabilities','Effective model capability snapshot differs':'model_ceiling_mismatch','Invalid initialize response':'invalid_initialize_response'};
-  const failure=failures[cause?.message]||'gate_failed';
-  const error=new Error('Codex 兼容性检查失败（'+(gates[stage]||'建立 app-server 连接')+'，'+failure+'）：当前 '+(version||'unrecognized')+'；协议生成基线 '+PROTOCOL_VERSION+'。请检查该 CLI 是否支持所需协议和隔离控制，再明确重连；会话和计算流程仍保留，未自动重发消息。');
+  const [failure,hint]=stage==='version'?versionFailure(cause):[failures[cause?.message]||'gate_failed','请检查该 CLI 是否支持所需协议和隔离控制，再明确重连'];
+  const error=new Error('Codex 兼容性检查失败（'+(gates[stage]||'建立 app-server 连接')+'，'+failure+'）：当前 '+(version||'unrecognized')+'；协议生成基线 '+PROTOCOL_VERSION+'。'+hint+'；会话和计算流程仍保留，未自动重发消息。');
   error.failure=failure;
   error.code='STUDIO_CODEX_COMPATIBILITY_FAILED';error.stage=stage;error.installedVersion=version||'unrecognized';error.expectedVersion=PROTOCOL_VERSION;return error;
 }
@@ -39,6 +46,8 @@ export class CodexBridge extends EventEmitter {
   async launch(executable, worker, config = {}) {
     const generation=this.lifecycle;let child,version,stage='version';this.isolationReady=false;this.info=null;this.compatibility=null;this.isolationSummary=null;this.isolation=null;
     try{
+    if(this.host.resolveExecutable)executable=await this.host.resolveExecutable(executable);
+    if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
     const { stdout } = await (this.launchDependencies.execute||this.host.execute)(executable, ['--version'], { windowsHide: true, timeout: 15000 });
     const candidate=verifyProtocolVersion(stdout.trim().split(' ').at(-1),{strictIsolation:this.strictIsolation});version=candidate.installedVersion;
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
