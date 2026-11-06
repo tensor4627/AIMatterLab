@@ -18,6 +18,35 @@ from studio_worker.tools.templates import build_bias
 from studio_worker.transport.task_schema import STEP_SCHEMA, validate_task
 from studio_worker.infrastructure.util import leaf, atomic_json, digest, contained
 
+
+def parse_gpu_rows(text):
+    """Parse `nvidia-smi --format=csv,noheader,nounits` rows defensively.
+
+    Row names may contain commas in theory, so only the five documented columns are
+    required; non-numeric counters (e.g. MIG "[N/A]") become null instead of failing
+    the whole inventory.
+    """
+    def counter(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    rows = []
+    for line in (text or '').splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split(',')]
+        if len(parts) != 5:
+            raise ValueError('Unparseable nvidia-smi output')
+        identifier = counter(parts[0])
+        if identifier is None:
+            raise ValueError('Unparseable nvidia-smi output')
+        rows.append({'id': identifier, 'name': parts[1], 'memory_used': counter(parts[2]),
+                     'memory_total': counter(parts[3]), 'utilization': counter(parts[4])})
+    return rows
+
+
 def dispatch(service, method, path, data, admin=False):
     store = service.store
     if path in ('/api/workflow/tool-group/create', '/api/workflow/prepare-step', '/api/workflow/execute-step', '/api/workflow/status', '/api/workflow/read'):
@@ -59,7 +88,7 @@ def dispatch(service, method, path, data, admin=False):
             result = subprocess.run(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10)
             if result.returncode:
                 raise ValueError(result.stderr)
-            return [{"id":int(v[0]),"name":v[1],"memory_used":int(v[2]),"memory_total":int(v[3]),"utilization":int(v[4])} for v in [line.split(", ") for line in result.stdout.strip().splitlines()]]
+            return parse_gpu_rows(result.stdout)
         if path == "/api/task-parameters":
             return store.list("task-parameters")
         if path == "/api/clusters":

@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 const root=process.cwd(),target=path.join(root,'.studio','agent-runtimes'),modules=path.join(target,'node_modules');
+// Rebuild from scratch: a previous runtime set must not leave stale packages behind.
+fs.rmSync(target,{recursive:true,force:true});
 fs.mkdirSync(modules,{recursive:true});
 const copied=new Map();
 function stage(name,from=root){

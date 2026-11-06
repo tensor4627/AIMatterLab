@@ -122,7 +122,7 @@ function findAgent(provider) {
   const candidates=[path.join(process.resourcesPath,'agent-runtimes','node_modules',entry),path.join(root,'node_modules',entry)];
   return candidates.find(p=>fs.existsSync(p))||provider;
 }
-function emit(channel,data) { if (window && !window.isDestroyed()) window.webContents.send(channel,data); }
+function emit(channel,data) { if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel,data); }
 codex.on('event', event => {
   if(event.method==='studio/codexDisconnected'&&agents?.isContextTransition?.('codex'))return;
   const tagged={...event,provider:'codex'};taskRecords?.event(tagged);emit('studio:event',tagged);

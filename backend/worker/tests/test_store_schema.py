@@ -51,6 +51,17 @@ class StoreSchemaTest(unittest.TestCase):
         store.update(run, status="queued")
         self.assertEqual([event["state"] for event in store.events()], ["draft", "ready", "queued"])
 
+    def test_event_retention_keeps_the_latest_events_only(self):
+        store = Store(Path(self.tmp.name) / "service")
+        self.addCleanup(store.db.close)
+        for index in range(6):
+            store.event("run-a", {"index": index})
+        removed = store.prune_events(keep=2)
+        self.assertEqual(removed, 4)
+        self.assertEqual([event["index"] for event in store.events()], [4, 5])
+        with self.assertRaises(ValueError):
+            store.prune_events(keep=-1)
+
 
 if __name__ == "__main__":
     unittest.main()

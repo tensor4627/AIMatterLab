@@ -128,6 +128,17 @@ class Store:
                             (run, time.time(), json.dumps(value)))
             self.db.commit()
 
+    def prune_events(self, keep=200000):
+        """Bound the event log without touching runs or objects."""
+        if type(keep) is not int or keep < 0:
+            raise ValueError("Event retention must be a nonnegative integer")
+        with self.lock:
+            cursor = self.db.execute(
+                "DELETE FROM events WHERE seq <= (SELECT COALESCE(MAX(seq),0)-? FROM events)",
+                (keep,))
+            self.db.commit()
+            return cursor.rowcount
+
     def events(self, after=0):
         with self.lock:
             rows = self.db.execute("SELECT seq,run,time,data FROM events WHERE seq>? ORDER BY seq LIMIT 500",

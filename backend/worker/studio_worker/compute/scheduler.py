@@ -144,11 +144,18 @@ class SchedulerMixin:
                 self.store.event(None, {"kind": "cluster", "error": "Remote monitor unavailable; retrying in %ss" % delay})
 
     def loop(self):
+        ticks = 0
         while not self.stop_event.wait(0.3):
             try:
                 self.tick()
+                ticks += 1
             except Exception as exc:
                 self.store.event(None, {"error": str(exc)})
+            if ticks and ticks % 1000 == 0:
+                try:
+                    self.store.prune_events()
+                except Exception:
+                    pass
 
     def close(self):
         self.stop_event.set()
