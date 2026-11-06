@@ -6,8 +6,9 @@ import {fileURLToPath} from 'node:url';
 
 // Ratchet: translations may only increase. Lower this baseline when adding entries;
 // never raise it to accept new untranslated UI text. The dictionary mixes single and
-// double quoted keys, so both styles are parsed; the baseline after this generation is 166.
-const MAX_MISSING = 166;
+// double quoted keys, so both styles are parsed. The baseline is 0: every Chinese
+// t()/tr() literal in the renderer must have an English entry.
+const MAX_MISSING = 0;
 
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const i18n=fs.readFileSync(path.join(root,'frontend','ui','i18n.ts'),'utf8');
