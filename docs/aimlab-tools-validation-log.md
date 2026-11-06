@@ -6,9 +6,10 @@
 
 - 验证环境：WSL2 Ubuntu（Linux 6.18 WSL2），Python 3.12.3，PyTorch 2.11.0+cu128，CUDA 12.8，NVIDIA RTX 4090（驱动 621.01）。
 - 依赖环境：`/home/tensor/aimlab-verify-venv`（`--system-site-packages`）额外安装 `pytorch_lightning 2.6.5`、`cupy-cuda12x 13.4.1`、`tensorboardX`、`numpy 1.26.4`；系统已有 torch/ase/matplotlib/pyyaml。
+- 外部资源：`nep.analyze` 的 `{skill:nep-regression-rmse}` 使用本机已注册的 skill（`…/.codex/skills/nep-regression-rmse/scripts/plot_nep_regression.py`）；该路径不进入交付材料，属于调用时选择的本地资源。
 - GPUMD 测试构建：`/home/tensor/gpumd-opes-build`，CMake Release、`CMAKE_CUDA_ARCHITECTURES=89`、LibTorch `/home/tensor/.local/lib/python3.12/site-packages/torch`，由当前 `aimlab` 分支源码增量重建（`cmake --build -j 64`）。
-- 工具仓库 aimlab 分支（本轮验证时）：GPUMD `bd719b98`，pygas `ba578738`，pydyn 本轮修正后的 `aimlab` HEAD，torchnep `4c3474ba`，hotpp `fa4b33a8`。
-- Studio `tool` 分支包含声明检查、`tools.aimlab.*` 登记、adapter 一致性检查与声明驱动 prepare（15/15 parity）。
+- 工具仓库 aimlab 分支（本轮验证时）：GPUMD `bd719b98`，pygas `ba578738`，pydyn `2ac6915`，torchnep `4c3474ba`，hotpp `fa4b33a8`。
+- Studio `tool` 分支包含声明检查、`tools.aimlab.*` 登记、adapter 一致性检查与声明驱动 prepare（15/15 parity、生产 bootstrap 强制声明）。
 
 ## 逐功能最小测试结果
 
@@ -19,7 +20,7 @@
 | GPUMD | `gpumd.neb` / basic | **passed** | `gpu-sampling`；NEB step summary + `neb_energies.out` 7 点 + `final_traj.xyz` 7×63 |
 | GPUMD | `nep.train` / basic | **passed** | `nep`；训练结束日志、generation 100 loss、`nep4 2 Te Pb` 模型、restart、预测输出 |
 | GPUMD | `nep.eval` / basic | **passed** | 仓库 `tools/nep_predict.py` + `nep`；`evaluation.json` 角色/SHA256 与 4 类 `*_test.out` |
-| GPUMD | `nep.analyze` / basic | **blocked** | 缺少外部 `nep-regression-rmse` 分析程序（`{skill:nep-regression-rmse}` 未注册）；输入已准备好 |
+| GPUMD | `nep.analyze` / basic | **passed** | 注册的 `nep-regression-rmse` skill；`regression/` 内 PDF/PNG/metrics.csv/metrics.json/metrics.md |
 | pygas | `pygas.build` / build.basic | **passed** | `python -m entrypoints.cli compile`；`.pt` + manifest + compile report（CPU） |
 | pygas | `bias.validate` / validate.basic | **passed** | `validate_model.py`；`validate-result.json` ABI/形状（CPU） |
 | pygas | `pygas.reweight` / reweight.basic | **passed** | `GASrGaussian.txt`、`GASFES.txt`、`FES.png`（CPU） |
@@ -33,9 +34,10 @@
 
 ## 结论与限制
 
-- 本次开发者环境：**15/16 最小用例 passed，1 blocked（`nep.analyze` 缺少外部 skill）**；blocked 项未计为通过。
-- 未运行：Studio 安装/配置流水线、用户真实环境配置、科学精度/收敛验证、`.pt2` AOTI 工具链；上述结论只覆盖本文列出的版本、环境与最小用例。
-- 证据驱动修正（本轮，均已提交到对应工具仓库 `aimlab` 分支）：
+- 本次开发者环境：**16/16 最小用例 passed，0 failed / 0 blocked**（`nep.analyze` 在注册外部 skill 后通过）。
+- 范围限制：未运行 Studio 安装/配置流水线、用户真实环境配置、科学精度/收敛验证、`.pt2` AOTI 工具链；不据此声称任意环境、任意参数组合或科学结论已验证。
+- 外部资源：`nep.analyze` 需要调用时注册 `{skill:nep-regression-rmse}`；`pydyn`/`hotpp` 需要各自声明的 Python/GPU 依赖（本次用验证 venv 满足）。这些不随 Studio 源码分发。
+- 证据驱动修正（已提交到对应工具仓库 `aimlab` 分支）：
   - GPUMD `gpumd.md`：`dump_restart` 覆盖写整个文件，最终只保留最后一步快照（1 帧），不是 2 帧；
   - pydyn `pydyn.sampling`：真实 CV 日志为“初始行 + 每步一行”（2 步 → 3 行），原断言按 2 行错误；
   - pydyn wrapper 对缺失 CuPy 等依赖改为显式 `blocked`（exit 3）而不是 traceback/exit 1。
