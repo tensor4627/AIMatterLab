@@ -30,6 +30,24 @@ function rejectAimlabWrapperOutsideTests(value, where) {
   }
 }
 
+const OPERATION_TOKEN = /\{([^{}]+)\}/g;
+function validateOperationTokens(item, where) {
+  if (!Array.isArray(item.operation.command)) fail(where + '.operation.command', 'array required');
+  const allowed = new Set(['python', 'entrypoint']);
+  for (const port of item.inputs || []) allowed.add(port.id);
+  for (const parameter of item.parameters || []) allowed.add(parameter.id);
+  for (const token of item.operation.command) {
+    const remainder = token.replace(OPERATION_TOKEN, '');
+    if (remainder.includes('{') || remainder.includes('}')) fail(where + '.operation.command', 'invalid operation token syntax');
+    for (const match of token.matchAll(OPERATION_TOKEN)) {
+      const name = match[1];
+      if (allowed.has(name)) continue;
+      if (/^executable:[a-z][a-z0-9-]*$/.test(name)) continue;
+      fail(where + '.operation.command', 'unknown operation token {' + name + '}');
+    }
+  }
+}
+
 /**
  * Map a repository-relative declaration path into the equivalent package-relative path.
  * `aimlab-tools/tests/**` -> `<id>-tests/**`; other `aimlab-tools/**` -> package root; other repository paths -> `<id>/**`.
@@ -119,6 +137,7 @@ export function validateAimlabTools(value) {
     requireObject(item.operation, where + '.operation');
     requireArray(item.tests, where + '.tests');
     if (!item.tests.length) fail(where + '.tests', 'non-empty array required');
+    validateOperationTokens(item, where);
   }
 
   const tests = requireObject(manifest.tests, 'manifest.tests');

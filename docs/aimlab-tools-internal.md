@@ -112,8 +112,22 @@ AimLab 内部工具的接入声明放在工具自己的 Git 仓库主工作分�
 | `entrypoint` | 是 | 仓库相对路径的真实程序入口；若位于 `aimlab-tools/` 下，必须是 `aimlab-tools/tests/` 内的 wrapper |
 | `inputs` / `outputs` | 是 | `outputs` 至少一项；端口结构、默认值规则与 `tool.json` 相同 |
 | `parameters` | 是 | 可为 `[]`；可选参数必须有 `default`、`default_behavior`、`default_source` |
-| `operation` | 是 | `{command, failure_handling}`；`command` 是 argv 数组，不能含换行/NUL |
+| `operation` | 是 | `{command, failure_handling}`；`command` 是实际生产 argv 数组，不能含换行/NUL。token 规则见 3.5。 |
 | `tests` | 是 | 非空用例 ID 数组，必须与 `tests.cases` 双向一致 |
+
+### 3.5 生产调用与测试入口分离
+
+`functions[].operation.command` 必须描述**生产调用**，而不是接入检查用例：
+
+- `{python}`：所选环境的 Python 解释器；
+- `{entrypoint}`：`entrypoint` 解析后的仓库内路径；
+- `{executable:<name>}`：所选环境注册的可执行文件（如 `{executable:gpumd}`、`{executable:gpu-sampling}`、`{executable:nep}`、`{executable:hotpp}`、`{executable:pygas}`）；
+- `{<输入 id>}`：该功能声明的必需/可选输入资源路径；
+- `{<参数 id>}`：该功能声明的参数值；数组参数按元素展开为多个 argv token。
+
+token 必须匹配保留 token、`executable:<name>`，或本功能已声明的输入/参数 ID；未声明的 token 检查失败。可选输入/参数省略时按声明默认行为处理。`tests.cases[].entrypoint` 与用例 wrapper 只用于环境/可运行性检查，不得作为 `operation.command` 的唯一实现来冒充生产调用。
+
+编译型工具（GPUMD、NEP 等）的 `entrypoint` 可以是仓库内的启动 wrapper，但 `operation.command` 应调用 `{executable:<name>}` 指向用户环境实际注册的二进制；只有确实没有独立可执行入口的 Python 工具才使用 `{python}` + 入口脚本/模块。
 
 ### 3.3 `tests.cases[]`
 

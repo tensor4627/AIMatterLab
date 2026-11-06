@@ -91,3 +91,21 @@ test('declaration paths must be portable repository-relative paths', () => {
   value.functions[0].entrypoint = '..\\tool.py';
   assert.throws(() => validateAimlabTools(value), /portable repository-relative path required/);
 });
+
+test('operation tokens must reference declared ids or reserved executable tokens', () => {
+  const value = manifest();
+  value.functions[0].operation.command = ['{python}', '{entrypoint}', '{model-file}'];
+  assert.throws(() => validateAimlabTools(value), /unknown operation token \{model-file\}/);
+  value.functions[0].inputs = [{
+    id: 'model-file',
+    type: 'file',
+    format: 'text',
+    description: 'Model checkpoint consumed by the production command.',
+    required: true,
+    display: {priority: 90, advanced: false, reason: 'Production input'}
+  }];
+  value.functions[0].operation.command = ['{executable:hotpp}', 'eval', '-m', '{model-file}'];
+  assert.doesNotThrow(() => validateAimlabTools(value));
+  value.functions[0].operation.command = ['{executable:Not A Name}'];
+  assert.throws(() => validateAimlabTools(value), /unknown operation token/);
+});
