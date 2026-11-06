@@ -27,7 +27,7 @@ function ownedParent(file,root){
  }
 }
 /** Copy the canonical bytes; never serialize or change engine parameter semantics. */
-export function syncToolContracts({root=defaultRoot,check=false}={}){
+export function syncToolContracts({root=defaultRoot,check=false}={},{rename=fs.renameSync}={}){
  root=fs.realpathSync(path.resolve(root));
  // Validate every canonical source before changing any generated file.
  const plans=resources.map(item=>{
@@ -39,10 +39,31 @@ export function syncToolContracts({root=defaultRoot,check=false}={}){
   return {...item,target,bytes,matches:current?.equals(bytes)===true};
  });
  if(check&&plans.some(item=>!item.matches))throw Error('Generated tool contract or developer resource is stale; run node scripts/sync-tool-contracts.mjs');
- for(const item of plans)if(!item.matches){
-  fs.mkdirSync(path.dirname(item.target),{recursive:true});
-  const temporary=item.target+'.'+randomUUID()+'.tmp';
-  try{fs.writeFileSync(temporary,item.bytes,{flag:'wx'});fs.renameSync(temporary,item.target);}finally{if(fs.existsSync(temporary))fs.unlinkSync(temporary);}
+ // Stage every changed file first, then rename them together; a failed rename restores
+ // the files already replaced so a multi-resource update never stays half-applied.
+ const staged=[];
+ try{
+  for(const item of plans.filter(plan=>!plan.matches)){
+   fs.mkdirSync(path.dirname(item.target),{recursive:true});
+   const temporary=item.target+'.'+randomUUID()+'.tmp';
+   fs.writeFileSync(temporary,item.bytes,{flag:'wx'});
+   staged.push({...item,temporary,previous:fs.existsSync(item.target)?regularFile(item.target):null,renamed:false});
+  }
+  for(const item of staged){rename(item.temporary,item.target);item.renamed=true;}
+ }catch(error){
+  for(const item of staged){
+   try{
+    if(item.renamed){
+     if(item.previous===null)fs.unlinkSync(item.target);
+     else{
+      const restore=item.target+'.'+randomUUID()+'.restore';
+      fs.writeFileSync(restore,item.previous,{flag:'wx'});fs.renameSync(restore,item.target);
+     }
+    }
+   }catch{}
+   try{if(fs.existsSync(item.temporary))fs.unlinkSync(item.temporary);}catch{}
+  }
+  throw error;
  }
  const receipts=plans.map(item=>({status:item.matches?'current':'updated',source:item.source,resource:item.resource,sha256:createHash('sha256').update(item.bytes).digest('hex')}));
  return {...receipts[0],status:plans.every(item=>item.matches)?'current':'updated',resources:receipts};
