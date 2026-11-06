@@ -2,6 +2,7 @@ import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {createVerifiedWorkerScope} from './verified-worker-scope.mjs';
+import {remember} from '../workspace/bounded-map.mjs';
 
 const INDEX='tool-configuration-index',BINDING='tool-guidance-binding',METADATA='tool-guidance-metadata';
 const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
@@ -145,7 +146,7 @@ export function createToolConfigurationController({catalog,packages,worker,getSe
   async read(value){exact(value,['configuration_id']);const result=await request(value.configuration_id,'/api/tool-execution-skill/read');return {...result,guidance_resources:archiveResources().filter(item=>item.id.startsWith(result.package_id+':'+result.package_version+':'))};},
   async bind(value){
    exact(value,['configuration_id','providers']);assertIdle();if(!Array.isArray(value.providers)||new Set(value.providers).size!==value.providers.length||value.providers.some(item=>!providers.has(item)))throw Error('Choose explicit execution skill sharing');
-   const owner=structuredClone(current()),key=bindingKey(owner);if(!key)throw Error('Select an existing conversation before attaching a configuration');const operation=(bindingOperations.get(key)||0)+1;bindingOperations.set(key,operation);
+   const owner=structuredClone(current()),key=bindingKey(owner);if(!key)throw Error('Select an existing conversation before attaching a configuration');const operation=(bindingOperations.get(key)||0)+1;remember(bindingOperations,key,operation,{max:256});
    const result=await api.read({configuration_id:value.configuration_id});if(bindingOperations.get(key)!==operation||!equal(owner,current())||result.status!=='active')throw Error('Current configuration is not active or a newer selection superseded it');
    const reference=index(value.configuration_id);if(currentTarget()?!compatibleTarget(reference):owner.projectId&&owner.projectId!==reference.project_id)throw Error('Configuration target differs from the current workflow');
    const previous=catalog.get(BINDING,key);catalog.put(BINDING,key,{schema_version:1,id:key,owner,configuration_id:value.configuration_id,providers:[...value.providers],revision:(previous?.revision||0)+1});grants.delete(key);return {status:'bound',configuration_id:value.configuration_id};
@@ -175,7 +176,7 @@ export function createToolConfigurationController({catalog,packages,worker,getSe
    const prefix=facts.package.id+':'+facts.package.version+':',available=facts.archivedResources.filter(item=>item.id.startsWith(prefix)).map(item=>item.id),resourceIds=value.resource_ids;
    if(!resourceIds.length||new Set(resourceIds).size!==resourceIds.length||resourceIds.some(item=>!available.includes(item)))throw Error('Unknown archived guidance resource');
    const expiresAt=now()+10*60*1000;
-   grants.set(key,{baseRevision:facts.revision,workerBinding:facts.workerBinding,expiresAt,value:{id:randomUUID(),purpose:value.purpose,resourceIds,owner:{provider:owner.provider,threadId:owner.threadId,taskId:owner.taskId??null,leaseEpoch:lease.epoch},expiresAt}});
+   remember(grants,key,{baseRevision:facts.revision,workerBinding:facts.workerBinding,expiresAt,value:{id:randomUUID(),purpose:value.purpose,resourceIds,owner:{provider:owner.provider,threadId:owner.threadId,taskId:owner.taskId??null,leaseEpoch:lease.epoch},expiresAt}},{max:256});
    return {status:'granted',expires_at:expiresAt};
   }
  };
