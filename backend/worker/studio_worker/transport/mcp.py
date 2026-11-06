@@ -1,4 +1,6 @@
 """MCP schemas, bounded protocol errors and Agent-facing projections."""
+import copy
+from functools import cache
 from studio_worker.infrastructure.paths import WORKER_ROOT
 import re
 import argparse
@@ -89,7 +91,8 @@ DESCRIPTIONS = {
 }
 
 
-def tools():
+@cache
+def _tool_definitions():
     result = []
     for name, (method, route, properties) in TOOL_ROUTES.items():
         if name in ("validate_run", "submit_run"):
@@ -127,7 +130,17 @@ def tools():
                        "annotations": {"readOnlyHint": method == "GET" or name in (
                            "compute_readiness", "discover_local_environments", "describe_engine", "read_project_input", "inspect_source_project", "inspect_pygas_catalog", "read_runtime_guide", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
                                        "destructiveHint": name == "cancel_run"}})
-    return result
+    return tuple(result)
+
+
+@cache
+def _tool_map():
+    return {item["name"]: item for item in _tool_definitions()}
+
+
+def tools():
+    """Return independent schema copies so callers cannot mutate the cache."""
+    return [copy.deepcopy(item) for item in _tool_definitions()]
 
 
 def mcp_tool_call(service, params, *, dispatch):
@@ -137,7 +150,7 @@ def mcp_tool_call(service, params, *, dispatch):
         if not isinstance(params, dict) or not isinstance(params.get("name"), str):
             raise ValueError("Provide a tool name and an arguments object")
         name = params["name"]
-        definition = next((item for item in tools() if item["name"] == name), None)
+        definition = _tool_map().get(name)
         if definition is None:
             raise ValueError("Unknown tool. Read tools/list and use an exact available name")
         arguments = params.get("arguments", {})
