@@ -1256,7 +1256,8 @@ const english:Record<string,string> = {
  "新项目仅授权所选环境的 installation.check：30 秒、1 个并发。":"The new project only authorizes installation.check for the selected environment: 30 seconds, 1 concurrency.",
  "冻结工具组与真实执行配置，逐步骤准备输入、审阅并确认执行。当前支持固定串行 CPU 工程参考。":"Freeze tool groups with real execution configurations, then prepare inputs, review and confirm each step. Currently supports fixed serial CPU engineering references.",
  "当前步骤包含未支持的功能或资源连线。首个执行路线仅支持无输入与参数的固定 CPU 参考，不会按任意命令执行。":"The current step contains unsupported capabilities or resource links. The first execution route only supports fixed CPU references without inputs or parameters and never executes arbitrary commands.",
- "当前配置器仅支持固定 CPU installation.check / worker 参考；此工具的配置尚不支持。工具定义仍可登记。":"The current configurator only supports fixed CPU installation.check / worker references; configuration for this tool is not supported yet. The tool definition can still be registered."
+ "当前配置器仅支持固定 CPU installation.check / worker 参考；此工具的配置尚不支持。工具定义仍可登记。":"The current configurator only supports fixed CPU installation.check / worker references; configuration for this tool is not supported yet. The tool definition can still be registered.",
+ "…（较早输出已省略）":"… (earlier output omitted)"
 };
 let language:'zh-CN'|'en' = (localStorage.getItem('studio.language')==='en'?'en':'zh-CN');
 export function setLanguage(value:'zh-CN'|'en'){language=value;localStorage.setItem('studio.language',value);}

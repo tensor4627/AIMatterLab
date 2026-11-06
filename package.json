@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "1.0.0-dev.29",
+  "version": "1.0.0-dev.30",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -51,7 +51,7 @@
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "directories": {
-      "output": "release/v1.0.0-dev.29"
+      "output": "release/v1.0.0-dev.30"
     },
     "files": [
       "dist/**",
