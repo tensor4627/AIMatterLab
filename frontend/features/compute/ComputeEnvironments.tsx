@@ -40,6 +40,8 @@ export default function ComputeEnvironments({worker,workerGeneration,environment
     publish({status:guide.status,scope:{engine:route},runtime_guide:guide,saved:true});
    }catch(error){publish({status:'read_error',reason:String(error)});}
   }}
+  // Two concurrent saved-read passes share the queue as an intentional pool of 2;
+  // keep both (or measure before reducing) so a slow environment does not serialise the rest.
   if(worker){void read();void read();}return()=>{disposed=true;};
  },[receiptSerial]);
  // A probe is an operation on one registered environment/engine, not a saved-read generation.

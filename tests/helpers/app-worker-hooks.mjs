@@ -11,6 +11,7 @@ const workflows={...workflowsOwner0,...workflowsOwner1};
 import * as diagnostics from "../../frontend/features/diagnostics/ui-diagnostics.mjs";
 
 import * as computeCommand from "../../frontend/features/compute/compute-connection-command.mjs";
+import * as sshGuideQueue from "../../frontend/app/ssh-guide-queue.mjs";
 
 import {memoryStorage} from './agent-hooks.mjs';
 import {loadConversationSelection} from './conversation-selection-hooks.mjs';
@@ -45,13 +46,14 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
  function loadNavigation(file){
   if(loadedNavigation.has(file))return loadedNavigation.get(file).exports;const module={exports:{}};loadedNavigation.set(file,module);
   new Function('require','module','exports','window','crypto',navigationModules[file])(name=>{
-   if(name==='react')return {useState,useRef,useEffect};
+  if(name==='react')return {useState,useRef,useEffect};
    if(file==='frontend/features/workflows/useToolWorkflowNavigation.ts'&&name==='../../api/tool-workflows')return loadNavigation('frontend/api/tool-workflows.ts');
    if(['frontend/api/tool-workflows.ts','frontend/api/compute-resources.ts'].includes(file)&&name==='./studio')return loadNavigation('frontend/api/studio.ts');
    throw Error('Unexpected workflow-navigation dependency '+file+': '+name);
   },module,module.exports,window,{randomUUID});return module.exports;
  }
  const require=name=>{
+  if(name==='./ssh-guide-queue.mjs')return sshGuideQueue;
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='../api/compute-resources')return loadNavigation('frontend/api/compute-resources.ts');
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
