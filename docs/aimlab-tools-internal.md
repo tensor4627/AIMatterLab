@@ -194,7 +194,7 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 - 输出 JSON：`status`、`id`、`source_commit`、`manifest_sha256`、`declaration_sha256`、`file_count`、`files`、`installation`/`tests`/`release` 均为 `not_run`、`limitations`；
 - 失败时退出码为 1，并把失败原因写入 stderr；`--out` 只接受不存在的新文件，且不得位于工具仓库内。
 
-检查通过表示**声明与文件闭包一致**；不表示安装、功能或科学验证通过。
+检查通过表示**声明与文件闭包一致**；不表示安装、功能或科学验证通过。开发者环境的实际接入验证记录见 [AimLab 内部工具开发环境接入验证记录](aimlab-tools-validation-log.md)（只记录已验证范围与结论，原始证据保留在 ignored 运行目录）。
 
 ## 6. 状态与放行
 
