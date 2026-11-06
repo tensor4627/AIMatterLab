@@ -10,6 +10,18 @@
 
 它用于开发者的软件接入工作，与 Studio 中用于日常计算规划和执行的科学 skill 分开存放。可直接分发整个 skill 目录或 [ZIP](skills/studio-tool-integration.zip)；完整 schema、纯声明校验器、注册约束和小型 CPU 工程示例均在目录内，不需要访问 Studio 仓库才能理解交付格式。
 
+## 内部工具（AimLab Tools）声明
+
+AimLab 自研工具（例如 GPU-Sampling）不按第三方 `<id>-package` 交付，而是在工具自己的仓库主工作分支维护 `aimlab-tools/`：机器可读 `manifest.json`、交付 `SKILL.md`、精简 `manual.md` 和 `tests/` 测试映射。声明与源码 commit 一起提交，Studio 按候选 commit 执行接入检查。内部标准见 [AimLab 内部工具声明与接入检查标准](../docs/aimlab-tools-internal.md)。
+
+检查命令（只读；不安装、不执行测试、不注册 Studio）：
+
+```powershell
+node scripts/check-aimlab-tools.mjs --repo <工具仓库> --commit <sha> --out <新报告文件>
+```
+
+检查通过只表示声明与文件闭包一致（`installation` / `tests` / `release` 仍为 `not_run`）；真实安装和声明测试通过后才进入放行与登记。接入测试只验证用户运行环境和声明计算的可运行性，不做代码正确性回归。
+
 ## 开发者接入与用户配置
 
 | 阶段 | 面向谁 | 工作与产物 |
