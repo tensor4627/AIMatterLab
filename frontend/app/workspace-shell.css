@@ -14,7 +14,7 @@
 .workspace-shell .conversation-sidebar{overflow-x:hidden}
 .workspace-shell .conversation-project>button,.workspace-shell .conversation-row .conversation-item{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;text-align:left}
 .workspace-shell .conversation-project>button{width:100%}
-.workspace-shell .conversation-item>span:nth-child(2),.workspace-shell .conversation-project>button>span{display:block;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-shell .conversation-item>span:nth-child(2),.workspace-shell .conversation-project>button>span,.workspace-shell .conversation-project summary>span{display:block;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .workspace-shell .conversation-item>svg,.workspace-shell .conversation-project>button>svg{flex-shrink:0}
 .workspace-shell .sidebar-bottom{position:static;flex-shrink:0;margin-top:8px}
 .workspace-shell .resource-mini{padding:7px}

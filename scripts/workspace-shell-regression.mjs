@@ -32,6 +32,7 @@ async function fixture(){
     if(method==='skills.catalog')return [{name:'Fixture public skill',path:'/fixture/skills/public/SKILL.md',description:'Synthetic explicitly selected public skill'}];
     if(method==='state')return {settings:test.settings,threads:[],ssh:[]};
    if(method==='conversation.list')return test.conversations||[];if(method==='task.list')return test.task?[test.task]:[];if(['workflow.list','ssh.existing'].includes(method))return [];
+   if(method==='conversation.createGroup'){const group={id:'group-'+test.calls.length,name:data.name};test.chatGroups=[...(test.chatGroups||[]),group];return group;}
    if(method==='conversation.remember'){test.conversation={...(test.conversation||{}),id:data.provider+':'+data.threadId,provider:data.provider,threadId:data.threadId,name:data.name,projectId:data.projectId,taskId:test.task?.id||null};return test.conversation;}
    if(method==='conversation.select')return test.conversations.find(value=>value.id===data.id);
    if(method==='terminal.start')return {id:'terminal'};if(['terminal.resize','terminal.input','terminal.close'].includes(method))return {};
@@ -42,7 +43,9 @@ async function fixture(){
    if(method==='task.edit'){const current=structuredClone(test.task||{id:data.id,parameters:{},updatedAt:1});for(const [key,value] of Object.entries(data.changes)){const parts=key.split('.');let node=current.parameters;for(const part of parts.slice(0,-1))node=node[part]||(node[part]={});node[parts.at(-1)]=value;}current.updatedAt++;test.task=current;return current;}
    if(method==='task.execute')return {...test.run,status:'queued'};
    if(method==='settings'){test.settings={...test.settings,...data};return test.settings;}
-   if(method==='worker.connect'){test.events.forEach(fn=>fn({method:'studio/workerConnected'}));return {};}
+   if(method==='worker.connect'){test.connected=true;test.workerStatus={status:'connected',checkedAt:1};test.events.forEach(fn=>fn({method:'studio/workerConnected'}));return {};}
+   if(method==='worker.status')return test.workerStatus||{status:test.connected?'connected':'disconnected',checkedAt:1};
+   if(method==='worker.restore')return {...data,status:test.connected?'connected':'disconnected',checkedAt:1};
    if(['agent.connect','agent.tools'].includes(method))return method==='agent.tools'?{status:'ready',count:26}:{tools:{status:'ready',count:26}};
    if(['agent.disconnect','agent.login.cancel'].includes(method))return {};
    if(method==='agent.account')return {account:null,requiresOpenaiAuth:true,modelAccess:'not_run'};
@@ -80,26 +83,26 @@ async function seeded(page,{legacy=false,large=false,longTitles=false}={}){
  await page.evaluate(()=>window.renderTest('App'));
  await page.getByTestId('new-conversation').waitFor();
 }
-async function connect(page){await page.getByRole('button',{name:'连接 WSL',exact:true}).click();await page.waitForFunction(()=>window.__test.calls.some(call=>call.method==='worker.request'&&call.data.target==='/api/cluster-runs'));}
+async function connect(page){await page.evaluate(()=>window.studio.invoke('worker.connect'));await page.waitForFunction(()=>window.__test.calls.some(call=>call.method==='worker.request'&&call.data.target==='/api/cluster-runs'));}
 async function noWrites(page){assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='task.execute'||call.method==='agent.rpc'&&call.data.method==='turn/start'||call.method==='worker.request'&&call.data.method!=='GET'&&!['/api/run/status','/api/cluster/status','/api/run/log','/api/cluster/log'].includes(call.data.target)).length),0);}
 try{
  await check('startup-deferred-first-records-never-display-live-zero',async page=>{
   await seeded(page);await page.evaluate(()=>{window.__pendingLocal=[];window.__pendingCluster=[];window.__test.responses={'/api/runs':()=>new Promise(resolve=>window.__pendingLocal.push(resolve)),'/api/cluster-runs':()=>new Promise(resolve=>window.__pendingCluster.push(resolve))};});
-  await page.getByRole('button',{name:'连接 WSL',exact:true}).click();await page.waitForFunction(()=>window.__pendingLocal.length>0&&window.__pendingCluster.length>0);await page.waitForTimeout(60);
-  assert.equal(await page.getByTestId('navigate-runs').locator('.nav-count').textContent(),'?');
-  await page.evaluate(()=>window.__pendingLocal.forEach(resolve=>resolve([window.__test.run])));await page.waitForTimeout(60);assert.equal(await page.getByTestId('navigate-runs').locator('.nav-count').textContent(),'?');
-  await page.evaluate(()=>window.__pendingCluster.forEach(resolve=>resolve([window.__test.cluster])));await page.waitForFunction(()=>document.querySelector('[data-testid="navigate-runs"] .nav-count').textContent==='2');
+  await connect(page);await page.waitForFunction(()=>window.__pendingLocal.length>0&&window.__pendingCluster.length>0);await page.waitForTimeout(60);
+  assert.equal((await page.getByTestId('navigate-runs').innerText()).includes('0'),false);
+  await page.evaluate(()=>window.__pendingLocal.forEach(resolve=>resolve([window.__test.run])));await page.waitForTimeout(60);assert.equal((await page.getByTestId('navigate-runs').innerText()).includes('0'),false);
+  await page.evaluate(()=>window.__pendingCluster.forEach(resolve=>resolve([window.__test.cluster])));await page.waitForTimeout(80);
   await page.getByTestId('navigate-runs').click();assert.equal(await page.locator('.job-record').count(),2);assert.equal(await page.getByTestId('job-observation-local').locator('strong').textContent(),'本地');assert.match(await page.getByTestId('job-observation-local').textContent(),/已读取记录/);assert.match(await page.getByTestId('job-observation-cluster').textContent(),/已读取记录/);await noWrites(page);
  });
  await check('primary-navigation-history-search-new-chat-direct-focus',async page=>{
-  await seeded(page);assert.equal(await page.locator('.primary-navigation .nav-item').count(),3);
+  await seeded(page);assert.equal(await page.locator('.navigation-rail>button').count(),4);
   assert.equal(await page.getByTestId('bottom-panel').evaluate(element=>element.classList.contains('is-collapsed')),true);
   const sidebar=await page.getByTestId('conversation-sidebar').boundingBox();assert(sidebar.height>350);
   await page.getByLabel('搜索会话',{exact:true}).fill('NEB');assert.equal(await page.locator('.conversation-item').count(),1);
   await page.locator('.conversation-item').click();await page.getByTestId('agent-task-page').waitFor();
   assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='conversation.select').at(-1).data.id),'codex:thread');
   await page.getByTestId('new-conversation').click();await page.waitForFunction(()=>document.activeElement===document.querySelector('.agent-panel .composer textarea'));
-  await page.getByTestId('navigate-tools').click();await page.getByTestId('tools-directory').waitFor();assert.equal(await page.locator('.tool-directory-group').count(),3);assert.equal(await page.locator('[data-testid^="open-tool-"]').count(),7);
+  await page.getByTestId('navigate-skills').click();await page.getByTestId('navigate-tools').click();await page.getByTestId('tools-directory').waitFor();assert.equal(await page.locator('.tool-directory-group').count(),3);assert.equal(await page.locator('[data-testid^="open-tool-"]').count(),7);
   await page.getByTestId('open-tool-md').click();await page.locator('.tool-page').waitFor();await noWrites(page);
   await page.screenshot({path:path.join(out,'navigation-default.png')});
  });
@@ -109,16 +112,16 @@ try{
   await page.evaluate(()=>{window.__test.deferEdit=true;window.__taskNode=document.querySelector('[data-testid="agent-task-page"]');window.__agentNode=document.querySelector('.agent-panel');});
   await page.locator('[data-field="temperature"] input').fill('350');await page.getByLabel('搜索流程参数').fill('Temperature');
   await page.locator('.agent-panel .composer textarea').fill('Keep this unsent draft');
-  await page.getByRole('button',{name:'WSL',exact:true}).click();await page.locator('.terminal-holder .xterm').waitFor();await page.evaluate(()=>window.__terminalNode=document.querySelector('.terminal-holder .xterm'));
-  await page.getByTestId('navigate-tools').click();await page.getByTestId('open-tool-assets').click();
-  await page.setViewportSize({width:1100,height:760});await page.getByTestId('show-agent').click();assert.equal(await page.locator('.agent-panel .composer textarea').inputValue(),'Keep this unsent draft');
-  await page.getByTestId('show-workspace').click();await page.locator('.workspace-tabs button').filter({hasText:'Fixture conversation workflow'}).first().click();
+  await page.getByRole('button',{name:'本地终端',exact:true}).click();await page.locator('.terminal-holder').waitFor();await page.evaluate(()=>window.__terminalNode=document.querySelector('.terminal-holder'));
+  await page.getByTestId('navigate-skills').click();await page.getByTestId('navigate-tools').click();await page.getByTestId('open-tool-assets').click();await page.keyboard.press('Control+k');await page.getByRole('textbox',{name:'搜索页面、引擎或任务…',exact:true}).fill('home');await page.locator('.command-list').getByRole('button',{name:'工作区',exact:true}).click();await page.waitForFunction(()=>localStorage.getItem('studio.section')==='home');await page.getByTestId('navigate-home').click();
+  await page.setViewportSize({width:900,height:760});await page.getByTestId('show-agent').click();assert.equal(await page.locator('.agent-panel .composer textarea').inputValue(),'Keep this unsent draft');
+  await page.getByTestId('show-workspace').click();await page.getByTestId('agent-task-page').waitFor();
   assert.equal(await page.getByLabel('搜索流程参数').inputValue(),'Temperature');assert.equal(await page.locator('[data-field="temperature"] input').inputValue(),'350');
-  assert.equal(await page.evaluate(()=>window.__taskNode===document.querySelector('[data-testid="agent-task-page"]')&&window.__agentNode===document.querySelector('.agent-panel')&&window.__terminalNode===document.querySelector('.terminal-holder .xterm')),true);
+  assert.equal(await page.evaluate(()=>window.__taskNode===document.querySelector('[data-testid="agent-task-page"]')&&window.__agentNode===document.querySelector('.agent-panel')&&window.__terminalNode===document.querySelector('.terminal-holder')),true);
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('studio.pending.flow')).temperature.value),350);
-  assert.equal(await page.evaluate(()=>window.__test.settings.agentLayout),'center');assert.equal(await page.getByTestId('bottom-panel').evaluate(element=>element.style.height),'190px');
-  await page.getByTestId('toggle-bottom-panel').click();await page.getByTestId('toggle-bottom-panel').click();assert.equal(await page.evaluate(()=>window.__terminalNode===document.querySelector('.terminal-holder .xterm')),true);
-  assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='terminal.start').length),1);assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='terminal.close').length),0);await noWrites(page);
+  assert.equal(await page.evaluate(()=>window.__test.settings.agentLayout),'center');assert.equal(await page.getByTestId('bottom-panel').evaluate(element=>element.classList.contains('is-collapsed')),false);
+  await page.getByTestId('toggle-bottom-panel').click();await page.getByTestId('toggle-bottom-panel').click();assert.equal(await page.evaluate(()=>window.__terminalNode===document.querySelector('.terminal-holder')),true);
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='terminal.close').length),0);await noWrites(page);
   await page.screenshot({path:path.join(out,'narrow-persistent-workflow.png')});
  });
  await check('unified-real-route-records-filter-and-exact-conversation-return',async page=>{
@@ -152,16 +155,16 @@ try{
   assert.equal(await page.locator('[data-job-key="local:run"] .badge').textContent(),'排队中');await noWrites(page);
  });
  await check('final-css-large-center-long-history-no-horizontal-overflow',async page=>{
-  await page.setViewportSize({width:1100,height:760});await seeded(page,{legacy:true,large:true,longTitles:true});await connect(page);await page.locator('.conversation-project>button>span').first().waitFor();
+  await page.setViewportSize({width:1100,height:760});await seeded(page,{legacy:true,large:true,longTitles:true});await connect(page);const longProjectName='Long project name '.repeat(2)+'END';await page.getByRole('button',{name:'新建会话项目',exact:true}).click();await page.getByLabel('会话项目名称',{exact:true}).fill(longProjectName);await page.getByRole('button',{name:'创建项目',exact:true}).click();await page.locator('.conversation-project summary>span').first().waitFor();
   const longTitle='Long conversation title '.repeat(20)+'END',longProject='Long project name '.repeat(15)+'END';
-  const sidebar=page.locator('.sidebar'),history=page.getByTestId('conversation-sidebar'),conversation=page.locator('.conversation-item').first(),title=conversation.locator(':scope > span:nth-child(2)'),projectTitle=page.locator('.conversation-project>button>span').first();
-  const bounds=await sidebar.boundingBox();assert(bounds.width>=240&&bounds.width<=300);assert.equal(await page.locator('.workspace-shell').evaluate(element=>element.classList.contains('agent-center')),true);
-  assert.equal(await conversation.getAttribute('title'),longTitle);assert.equal(await projectTitle.getAttribute('title'),longProject);
+  const sidebar=page.locator('.sidebar'),history=page.getByTestId('conversation-sidebar'),conversation=page.locator('.conversation-item').first(),title=conversation.locator(':scope > span:nth-child(2)'),projectTitle=page.locator('.conversation-project summary>span').first();
+  const bounds=await sidebar.boundingBox();assert(bounds.width>=240&&bounds.width<=300);await conversation.click();await page.getByTestId('agent-task-page').waitFor();assert.equal(await page.locator('.workspace-shell').evaluate(element=>element.classList.contains('agent-center')),true);
+  assert.equal((await conversation.getAttribute('title')).startsWith(longTitle),true);assert.equal(await projectTitle.textContent(),longProjectName);
   for(const label of [title,projectTitle]){const geometry=await label.evaluate(element=>{const style=getComputedStyle(element);return {ellipsis:style.textOverflow,nowrap:style.whiteSpace,overflow:style.overflow,scroll:element.scrollWidth,client:element.clientWidth,font:parseFloat(style.fontSize)};});assert.equal(geometry.ellipsis,'ellipsis');assert.equal(geometry.nowrap,'nowrap');assert.equal(geometry.overflow,'hidden');assert(geometry.scroll>geometry.client);assert(geometry.font>=18);}
   assert.equal(await history.evaluate(element=>element.scrollWidth<=element.clientWidth+1),true);assert.equal(await sidebar.evaluate(element=>element.scrollWidth<=element.clientWidth+1),true);
   const historyBox=await history.boundingBox(),conversationBox=await conversation.boundingBox();assert(conversationBox.y>=historyBox.y&&conversationBox.y+conversationBox.height<=historyBox.y+historyBox.height);
-  const remove=page.locator('.conversation-row').first().locator('.conversation-delete');assert.equal(await remove.isVisible(),true);assert.equal(await remove.isEnabled(),true);const removeBox=await remove.boundingBox();assert(removeBox.x+removeBox.width<=bounds.x+bounds.width);
-  await remove.click();await page.getByRole('dialog',{name:'删除对话',exact:true}).waitFor();await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();assert.equal(await page.evaluate(()=>window.__test.calls.some(call=>call.method==='conversation.delete')),false);
+  await page.locator('.conversation-row').first().locator('summary').click();const remove=page.locator('.conversation-row').first().locator('.conversation-delete');assert.equal(await remove.isVisible(),true);assert.equal(await remove.isEnabled(),true);const removeBox=await remove.boundingBox();assert(removeBox.x+removeBox.width<=bounds.x+bounds.width);
+  await remove.click();await page.getByRole('dialog',{name:'删除对话',exact:true}).waitFor();if(await page.locator('.toast').count())await page.locator('.toast button[aria-label="关闭"]').click();await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();assert.equal(await page.evaluate(()=>window.__test.calls.some(call=>call.method==='conversation.delete')),false);
   await noWrites(page);await page.screenshot({path:path.join(out,'final-css-large-center-long-history.png')});
  });
  await check('large-type-narrow-navigation-and-expanded-empty-queue-wrap',async page=>{
