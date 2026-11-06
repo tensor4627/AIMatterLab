@@ -18,6 +18,20 @@ import time
 from pathlib import Path
 from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES
 from studio_worker.infrastructure.util import atomic_json, contained, digest, leaf
+from studio_worker.workspace.private_lineage import current_rows
+
+
+def private_copy_rows(rows, local_paths, runs, root):
+    """Rows whose owned project/run directories or exact paths this run selects."""
+    selected = []
+    for row in rows:
+        own = Path(root) / 'projects' / str(row['project_id']) / 'inputs'
+        directories = [own, *[Path(run['directory']) for run in runs if run['project_id'] == row['project_id']]]
+        exact = {Path(value).resolve() for value in row.get('paths', [])}
+        if any(source in exact or any(source == base or base in source.parents for base in directories)
+               for source in local_paths):
+            selected.append(row)
+    return selected
 
 TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+-]+$")
 LSF_QUEUE_TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+!-]+$")
@@ -883,13 +897,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
         # Private custom primitives are local-only in this generation. Reject
         # before any archive, local snapshot or SSH upload; do not imply a remote
         # private execution/access contract has been verified.
-        private_rows=self.store.list('private-cv-lineage')
-        private_projects={row['project_id']for row in private_rows}
-        if project['id']in private_projects:raise ValueError('Private custom CV remote deployment is not implemented; use a locally validated target or a public-library workflow')
         local_paths=[contained(src,roots)for src in local_inputs.values()]
-        private_roots=[self.service.root/'projects'/row['project_id']/'inputs'for row in private_rows]
-        private_roots.extend(Path(run['directory'])for run in self.store.runs()if run['project_id']in private_projects)
-        if any(any(base==source or base in source.parents for base in private_roots)for source in local_paths):raise ValueError('Private custom CV source cannot be copied to a remote task before a remote access contract is implemented')
+        if private_copy_rows(current_rows(self.service),local_paths,self.store.runs(),self.service.root):raise ValueError('Private custom CV source cannot be copied to a remote task before a remote access contract is implemented')
         identifier = secrets.token_hex(12)
         directory = self.service.root / "cluster-runs" / identifier
         (directory/"simulation").mkdir(parents=True)
