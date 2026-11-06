@@ -215,7 +215,7 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 
 ## 7. 当前实现范围与限制
 
-- 已实现：本文件第 5 节的只读声明与文件闭包检查脚本、`tools.aimlab.*` 登记路由、生产声明与 `engine-contracts.json` 的 adapter 一致性检查、Worker 端声明绑定模块 `studio_worker.tools.declarations`，以及 `Adapter.prepare` 的声明驱动集成：`DEFAULT_DECLARATION_ENGINES` 已覆盖全部 15 条内置 route；已注册源码仓库存在 `aimlab-tools/manifest.json` 时默认使用声明 argv，`STUDIO_DECLARATION_DRIVEN=0` 可关闭、`=1` 可扩大试点、`STUDIO_DECLARATION_ENGINES` 可指定 allowlist，无声明时回退内置 adapter。`nep.eval` 的生产 helper 已迁入 GPUMD 仓库 `tools/nep_predict.py`；`nep.analyze` 使用 `{skill:nep-regression-rmse}` 外部资源 token，未注册时检查/执行报错。Studio 侧旧 `nep_predict.py` 仅保留为无声明环境的兼容回退，待后续移除；
+- 已实现：本文件第 5 节的只读声明与文件闭包检查脚本、`tools.aimlab.*` 登记路由、生产声明与 `engine-contracts.json` 的 adapter 一致性检查、Worker 端声明绑定模块 `studio_worker.tools.declarations`，以及 `Adapter.prepare` 的声明驱动集成：`DEFAULT_DECLARATION_ENGINES` 已覆盖全部 15 条内置 route；已注册源码仓库存在 `aimlab-tools/manifest.json` 时默认使用声明 argv，`STUDIO_DECLARATION_DRIVEN=0` 可关闭、`=1` 可扩大试点、`STUDIO_DECLARATION_ENGINES` 可指定 allowlist，无声明时回退内置 adapter。`nep.eval` 的生产 helper 已迁入 GPUMD 仓库 `tools/nep_predict.py`，Studio 侧旧 `nep_predict.py` 已删除；`nep.eval` 在无声明时必须注册 GPUMD 工具源（内含 `tools/nep_predict.py`），否则明确报错。`nep.analyze` 使用 `{skill:nep-regression-rmse}` 外部资源 token，未注册时检查/执行报错；
 - 未实现：Studio 内的版本登记/快照、`engine` 与 Worker 适配器交叉校验、移除遗留兼容回退、真实安装/GPU 执行验证、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；
 - 因此检查通过不等于“已接入 Studio”。登记、环境配置和真实测试通过须按实际实现另行完成并记录；
 - 第三方 `<id>-package` 的注册路径保持不变，仍由 `studio-tool-integration` 与现有包注册实现处理。

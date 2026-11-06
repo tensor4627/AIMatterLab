@@ -110,17 +110,22 @@ class DeclarationDrivenPrepare(unittest.TestCase):
                 [sys.executable, str(Path(root) / "tools" / "nep_predict.py"), sys.executable, "test"],
             )
 
-    def test_nep_eval_falls_back_to_the_legacy_package_script_without_declaration(self):
+    def test_nep_eval_requires_a_registered_tool_source_without_declaration(self):
         spec = {
             "engine": "nep.eval",
             "inputs": {"nep.in": "/tasks/nep.in", "evaluation.xyz": "/tasks/evaluation.xyz", "nep.txt": "/tasks/nep.txt"},
             "parameters": {"dataset_role": "test"},
         }
         clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}
+        with patch.dict(os.environ, clean, clear=True), self.assertRaisesRegex(ValueError, "Register the GPUMD tool source"):
+            adapters.Adapter("nep.eval").prepare(spec, {**self.environment, "repositories": {}})
+        source = tempfile.mkdtemp()
+        (Path(source) / "tools").mkdir()
+        (Path(source) / "tools" / "nep_predict.py").write_text("", encoding="utf-8")
         with patch.dict(os.environ, clean, clear=True):
             self.assertEqual(
-                adapters.Adapter("nep.eval").prepare(spec, {**self.environment, "repositories": {}}),
-                [sys.executable, str(adapters.PACKAGE_ROOT / "nep_predict.py"), sys.executable, "test"],
+                adapters.Adapter("nep.eval").prepare(spec, {**self.environment, "repositories": {"gpumd": source}}),
+                [sys.executable, str(Path(source) / "tools" / "nep_predict.py"), sys.executable, "test"],
             )
 
     def test_binding_module_rejects_a_missing_required_parameter(self):

@@ -216,9 +216,11 @@ class Adapter:
             if "train.xyz" in assets or "test.xyz" in assets:
                 raise ValueError("NEP evaluation uses evaluation.xyz, copied explicitly to native prediction input")
             registered = environment.get("repositories", {}).get("gpumd")
-            script = Path(registered) / "tools" / "nep_predict.py" if registered else PACKAGE_ROOT / "nep_predict.py"
+            if not registered:
+                raise ValueError("Register the GPUMD tool source; nep.eval production helper tools/nep_predict.py is no longer shipped in Studio")
+            script = Path(registered) / "tools" / "nep_predict.py"
             if not script.is_file():
-                raise ValueError("Register the GPUMD tool source containing tools/nep_predict.py")
+                raise ValueError("The registered GPUMD tool source has no tools/nep_predict.py")
             return [self.executable(environment,"python"),str(script),
                     self.executable(environment,"nep"),p["dataset_role"]]
         if engine == "nep.train":
