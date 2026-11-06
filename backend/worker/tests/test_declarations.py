@@ -74,6 +74,23 @@ class DeclarationBinding(unittest.TestCase):
         bound = bind_operation(declaration(value), {"inputs": {"input.yaml": "/tmp/input.yaml"}, "parameters": {}}, self.environment())
         self.assertEqual(bound["argv"], ["/opt/hotpp/bin/hotpp", "train", "-i", "input.yaml", "-o", "model"])
 
+    def test_mixed_tokens_concatenate_scalar_values(self):
+        value = function(["{executable:hotpp}", "--nep-in={nep-in}", "--symbols={symbols}"],
+                         inputs=[{"id": "nep-in", "required": True}],
+                         parameters=[{"id": "symbols", "required": True}])
+        bound = bind_operation(declaration(value), {"inputs": {"nep.in": "/tasks/nep.in"}, "parameters": {"symbols": "C"}}, self.environment())
+        self.assertEqual(bound["argv"], ["/opt/hotpp/bin/hotpp", "--nep-in=nep.in", "--symbols=C"])
+
+    def test_skill_token_resolves_the_registered_external_resource_root(self):
+        value = function(["{python}", "{skill:nep-regression-rmse}/scripts/plot_nep_regression.py"])
+        environment = {"executables": {"python": "/usr/bin/python3"}, "skills": {"nep-regression-rmse": "/skills/nep-regression"}}
+        bound = bind_operation(declaration(value), {"inputs": {}, "parameters": {}}, environment)
+        self.assertEqual(bound["argv"], ["/usr/bin/python3", "/skills/nep-regression/scripts/plot_nep_regression.py"])
+
+    def test_array_parameter_embedded_inside_one_token_is_rejected(self):
+        value = function(["{executable:hotpp}", "--symbols={symbols}"], parameters=[{"id": "symbols", "required": True}])
+        with self.assertRaisesRegex(DeclarationError, "Array parameter cannot be embedded"):
+            bind_operation(declaration(value), {"inputs": {}, "parameters": {"symbols": ["C"]}}, self.environment())
     def test_missing_required_input_and_unknown_tokens_fail(self):
         required = function(["{executable:hotpp}", "{model-file}"], inputs=[{"id": "model-file", "required": True}])
         with self.assertRaisesRegex(DeclarationError, "Missing required input"):

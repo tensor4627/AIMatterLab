@@ -43,6 +43,7 @@ function validateOperationTokens(item, where) {
       const name = match[1];
       if (allowed.has(name)) continue;
       if (/^executable:[a-z][a-z0-9-]*$/.test(name)) continue;
+      if (/^skill:[a-z][a-z0-9-]*$/.test(name)) continue;
       fail(where + '.operation.command', 'unknown operation token {' + name + '}');
     }
   }

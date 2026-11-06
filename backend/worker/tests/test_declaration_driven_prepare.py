@@ -74,22 +74,54 @@ class DeclarationDrivenPrepare(unittest.TestCase):
         with patch.dict(os.environ, {"STUDIO_DECLARATION_DRIVEN": "1", "STUDIO_DECLARATION_ENGINES": "hotpp.eval"}):
             self.assertEqual(adapters.Adapter("hotpp.eval").prepare(self.spec, {"executables": self.environment["executables"], "repositories": {}}), baseline)
 
-    def test_default_migration_set_uses_declarations_and_keeps_nep_handlers_hardcoded(self):
+    def test_default_migration_set_covers_every_builtin_engine(self):
+        self.assertEqual(set(adapters.DEFAULT_DECLARATION_ENGINES), set(adapters.ENGINES))
         clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}
         with patch.dict(os.environ, clean, clear=True):
-            self.assertIn("hotpp.eval", adapters.DEFAULT_DECLARATION_ENGINES)
-            self.assertNotIn("nep.eval", adapters.DEFAULT_DECLARATION_ENGINES)
             with patch("studio_worker.tools.declarations.bind_operation", side_effect=lambda *args, **kwargs: {"argv": ["SENTINEL"]}):
                 self.assertEqual(adapters.Adapter("hotpp.eval").prepare(self.spec, self.environment), ["SENTINEL"])
-                nep_spec = {
-                    "engine": "nep.eval",
-                    "inputs": {"nep.in": "/tasks/nep.in", "evaluation.xyz": "/tasks/evaluation.xyz", "nep.txt": "/tasks/nep.txt"},
-                    "parameters": {"dataset_role": "test"},
-                }
-                self.assertEqual(
-                    adapters.Adapter("nep.eval").prepare(nep_spec, self.environment),
-                    [sys.executable, str(adapters.PACKAGE_ROOT / "nep_predict.py"), sys.executable, "test"],
-                )
+
+    def test_nep_eval_uses_the_declaration_when_the_repository_has_the_helper(self):
+        root = tempfile.mkdtemp()
+        (Path(root) / "tools").mkdir()
+        (Path(root) / "tools" / "nep_predict.py").write_text("", encoding="utf-8")
+        write_manifest(root, {
+            "schema_version": 1,
+            "id": "gpu-sampling",
+            "functions": [{
+                "id": "nep.eval",
+                "engine": "nep.eval",
+                "entrypoint": "tools/nep_predict.py",
+                "inputs": [{"id": "nep-in", "required": True}],
+                "parameters": [{"id": "dataset-role", "required": True}],
+                "operation": {"command": ["{python}", "{entrypoint}", "{executable:nep}", "{dataset-role}"], "failure_handling": "Inspect logs."}
+            }]
+        })
+        spec = {
+            "engine": "nep.eval",
+            "inputs": {"nep.in": "/tasks/nep.in", "evaluation.xyz": "/tasks/evaluation.xyz", "nep.txt": "/tasks/nep.txt"},
+            "parameters": {"dataset_role": "test"},
+        }
+        environment = {**self.environment, "repositories": {"gpu-sampling": root}}
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}
+        with patch.dict(os.environ, clean, clear=True):
+            self.assertEqual(
+                adapters.Adapter("nep.eval").prepare(spec, environment),
+                [sys.executable, str(Path(root) / "tools" / "nep_predict.py"), sys.executable, "test"],
+            )
+
+    def test_nep_eval_falls_back_to_the_legacy_package_script_without_declaration(self):
+        spec = {
+            "engine": "nep.eval",
+            "inputs": {"nep.in": "/tasks/nep.in", "evaluation.xyz": "/tasks/evaluation.xyz", "nep.txt": "/tasks/nep.txt"},
+            "parameters": {"dataset_role": "test"},
+        }
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}
+        with patch.dict(os.environ, clean, clear=True):
+            self.assertEqual(
+                adapters.Adapter("nep.eval").prepare(spec, {**self.environment, "repositories": {}}),
+                [sys.executable, str(adapters.PACKAGE_ROOT / "nep_predict.py"), sys.executable, "test"],
+            )
 
     def test_binding_module_rejects_a_missing_required_parameter(self):
         declaration = find_declaration({"hotpp": self.root}, "hotpp.eval")

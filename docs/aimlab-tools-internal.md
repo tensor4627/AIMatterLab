@@ -122,6 +122,7 @@ AimLab 内部工具的接入声明放在工具自己的 Git 仓库主工作分�
 - `{python}`：所选环境的 Python 解释器；
 - `{entrypoint}`：`entrypoint` 解析后的仓库内路径；
 - `{executable:<name>}`：所选环境注册的可执行文件（如 `{executable:gpumd}`、`{executable:gpu-sampling}`、`{executable:nep}`、`{executable:hotpp}`、`{executable:pygas}`）；
+- `{skill:<name>}`：所选环境注册的外部 skill 资源根目录（如 `{skill:nep-regression-rmse}/scripts/plot_nep_regression.py`）；资源不在工具仓库时用该 token 显式声明依赖，未注册时检查/执行报错；
 - `{<输入 id>}`：该输入在运行工作目录中的**文件名**（Worker 会把任务输入复制进 run 目录，生产命令使用文件名而不是源路径）；
 - `{<参数 id>}`：该功能声明的参数值；数组参数按元素展开为多个 argv token。
 
@@ -214,8 +215,8 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 
 ## 7. 当前实现范围与限制
 
-- 已实现：本文件第 5 节的只读声明与文件闭包检查脚本、`tools.aimlab.*` 登记路由、生产声明与 `engine-contracts.json` 的 adapter 一致性检查、Worker 端声明绑定模块 `studio_worker.tools.declarations`，以及 `Adapter.prepare` 的声明驱动集成：`DEFAULT_DECLARATION_ENGINES` 中的 13 条 route 在已注册源码仓库存在 `aimlab-tools/manifest.json` 时默认使用声明 argv（`STUDIO_DECLARATION_DRIVEN=0` 可关闭、`=1` 可扩大试点、`STUDIO_DECLARATION_ENGINES` 可指定 allowlist；无声明时回退内置 adapter）。`nep.eval`/`nep.analyze` 仍走内置 adapter，因为生产实现依赖 Studio 侧 `nep_predict.py` 与外部 `nep-regression-rmse` skill，尚未移入工具仓库；
-- 未实现：Studio 内的版本登记/快照、`engine` 与 Worker 适配器交叉校验、`nep.eval`/`nep.analyze` 的 Studio 侧包装迁移、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；
+- 已实现：本文件第 5 节的只读声明与文件闭包检查脚本、`tools.aimlab.*` 登记路由、生产声明与 `engine-contracts.json` 的 adapter 一致性检查、Worker 端声明绑定模块 `studio_worker.tools.declarations`，以及 `Adapter.prepare` 的声明驱动集成：`DEFAULT_DECLARATION_ENGINES` 已覆盖全部 15 条内置 route；已注册源码仓库存在 `aimlab-tools/manifest.json` 时默认使用声明 argv，`STUDIO_DECLARATION_DRIVEN=0` 可关闭、`=1` 可扩大试点、`STUDIO_DECLARATION_ENGINES` 可指定 allowlist，无声明时回退内置 adapter。`nep.eval` 的生产 helper 已迁入 GPUMD 仓库 `tools/nep_predict.py`；`nep.analyze` 使用 `{skill:nep-regression-rmse}` 外部资源 token，未注册时检查/执行报错。Studio 侧旧 `nep_predict.py` 仅保留为无声明环境的兼容回退，待后续移除；
+- 未实现：Studio 内的版本登记/快照、`engine` 与 Worker 适配器交叉校验、移除遗留兼容回退、真实安装/GPU 执行验证、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；
 - 因此检查通过不等于“已接入 Studio”。登记、环境配置和真实测试通过须按实际实现另行完成并记录；
 - 第三方 `<id>-package` 的注册路径保持不变，仍由 `studio-tool-integration` 与现有包注册实现处理。
 

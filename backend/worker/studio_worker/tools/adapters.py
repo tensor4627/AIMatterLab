@@ -14,7 +14,7 @@ SUPPORTED_ENGINES = ENGINES + ("installation.check",)
 # has been parity-checked against this adapter. nep.eval/nep.analyze stay on the hardcoded
 # path until their Studio-side wrappers move into the tool repositories.
 DEFAULT_DECLARATION_ENGINES = (
-    "gpumd.md", "gpumd.sampling", "gpumd.neb", "nep.train",
+    "gpumd.md", "gpumd.sampling", "gpumd.neb", "nep.train", "nep.eval", "nep.analyze",
     "pydyn.md", "pydyn.sampling",
     "pygas.build", "bias.validate", "pygas.reweight", "pygas.opes-reweight",
     "hotpp.train", "hotpp.eval", "hotpp.export",
@@ -215,7 +215,11 @@ class Adapter:
             self.parameters(p,("dataset_role",))
             if "train.xyz" in assets or "test.xyz" in assets:
                 raise ValueError("NEP evaluation uses evaluation.xyz, copied explicitly to native prediction input")
-            return [self.executable(environment,"python"),str(PACKAGE_ROOT / "nep_predict.py"),
+            registered = environment.get("repositories", {}).get("gpumd")
+            script = Path(registered) / "tools" / "nep_predict.py" if registered else PACKAGE_ROOT / "nep_predict.py"
+            if not script.is_file():
+                raise ValueError("Register the GPUMD tool source containing tools/nep_predict.py")
+            return [self.executable(environment,"python"),str(script),
                     self.executable(environment,"nep"),p["dataset_role"]]
         if engine == "nep.train":
             self.require(assets, ("nep.in", "train.xyz", "test.xyz"))

@@ -15,7 +15,9 @@ class DeclarationError(ValueError):
 
 
 _TOKEN = re.compile(r"\{([^{}]+)\}")
+_SINGLE_TOKEN = re.compile(r"^\{([^{}]+)\}$")
 _EXECUTABLE = re.compile(r"^executable:([a-z][a-z0-9-]*)$")
+_SKILL = re.compile(r"^skill:([a-z][a-z0-9-]*)$")
 _MISSING = object()
 
 
@@ -103,13 +105,51 @@ def _scalar(value):
     raise DeclarationError("Operation parameter is not a scalar or string array")
 
 
-def _append_value(argv, value, token):
-    if isinstance(value, list):
-        if not all(isinstance(item, (str, int, float)) and not isinstance(item, bool) for item in value):
-            raise DeclarationError("Operation parameter array must contain strings or numbers: " + token)
-        argv.extend(_scalar(item) for item in value)
-    else:
-        argv.append(_scalar(value))
+def _array(value):
+    if not isinstance(value, list) or not all(isinstance(item, (str, int, float)) and not isinstance(item, bool) for item in value):
+        raise DeclarationError("Operation parameter array must contain strings or numbers")
+    return [_scalar(item) for item in value]
+
+
+def _resolve(name, *, function, inputs, parameters, environment, entrypoint):
+    if name == "python":
+        return ("scalar", _executable(environment, "python"))
+    if name == "entrypoint":
+        if not entrypoint.is_file():
+            raise DeclarationError("Missing declared entrypoint: " + str(function.get("entrypoint", "")))
+        return ("scalar", str(entrypoint))
+    executable = _EXECUTABLE.match(name)
+    if executable:
+        return ("scalar", _executable(environment, executable.group(1)))
+    skill = _SKILL.match(name)
+    if skill:
+        roots = (environment or {}).get("skills", {})
+        value = roots.get(skill.group(1)) if isinstance(roots, dict) else None
+        if not isinstance(value, str) or not value:
+            raise DeclarationError("Register the external skill resource: " + skill.group(1))
+        return ("scalar", value)
+    declared_inputs = {item.get("id"): item for item in function.get("inputs", []) if isinstance(item, dict) and item.get("id")}
+    declared_parameters = {item.get("id"): item for item in function.get("parameters", []) if isinstance(item, dict) and item.get("id")}
+    if name in declared_inputs:
+        value = _input_name(inputs, name)
+        if value is _MISSING:
+            if declared_inputs[name].get("required"):
+                raise DeclarationError("Missing required input: " + name)
+            return ("omit", None)
+        return ("scalar", str(value))
+    if name in declared_parameters:
+        item = declared_parameters[name]
+        value = _lookup(parameters, name)
+        if value is _MISSING:
+            if item.get("required"):
+                raise DeclarationError("Missing required parameter: " + name)
+            value = item.get("default", _MISSING)
+            if value is _MISSING or value is None:
+                return ("omit", None)
+        if isinstance(value, list):
+            return ("array", _array(value))
+        return ("scalar", _scalar(value))
+    raise DeclarationError("Unknown operation token: {" + name + "}")
 
 
 def bind_operation(declaration, spec, environment):
@@ -120,65 +160,46 @@ def bind_operation(declaration, spec, environment):
         raise DeclarationError("Declaration operation.command is required")
     inputs = spec.get("inputs", {}) or {}
     parameters = spec.get("parameters", {}) or {}
-    declared_inputs = {item.get("id"): item for item in function.get("inputs", []) if isinstance(item, dict) and item.get("id")}
-    declared_parameters = {item.get("id"): item for item in function.get("parameters", []) if isinstance(item, dict) and item.get("id")}
     entrypoint = Path(declaration.get("repository", "")) / str(function.get("entrypoint", ""))
+    resolved = lambda name: _resolve(name, function=function, inputs=inputs, parameters=parameters, environment=environment, entrypoint=entrypoint)
     argv = []
     for token in command:
         if not isinstance(token, str) or not token:
             raise DeclarationError("Invalid operation token")
+        single = _SINGLE_TOKEN.match(token)
+        if single:
+            kind, value = resolved(single.group(1))
+            if kind == "omit":
+                if argv and argv[-1].startswith("-"):
+                    argv.pop()
+            elif kind == "array":
+                argv.extend(value)
+            else:
+                argv.append(value)
+            continue
         matches = list(_TOKEN.finditer(token))
         if not matches:
             argv.append(token)
             continue
         if token.count("{") != len(matches) or token.count("}") != len(matches):
             raise DeclarationError("Invalid operation token syntax: " + token)
-        expanded = []
+        pieces = []
         cursor = 0
         omitted = False
         for match in matches:
-            expanded.append(token[cursor:match.start()])
-            name = match.group(1)
-            if name == "python":
-                expanded.append(_executable(environment, "python"))
-            elif name == "entrypoint":
-                if not entrypoint.is_file():
-                    raise DeclarationError("Missing declared entrypoint: " + str(function.get("entrypoint", "")))
-                expanded.append(str(entrypoint))
-            elif _EXECUTABLE.match(name):
-                expanded.append(_executable(environment, _EXECUTABLE.match(name).group(1)))
-            elif name in declared_inputs:
-                value = _input_name(inputs, name)
-                if value is _MISSING:
-                    if declared_inputs[name].get("required"):
-                        raise DeclarationError("Missing required input: " + name)
-                    omitted = True
-                else:
-                    expanded.append(str(value))
-            elif name in declared_parameters:
-                value = _lookup(parameters, name)
-                if value is _MISSING:
-                    if declared_parameters[name].get("required"):
-                        raise DeclarationError("Missing required parameter: " + name)
-                    value = declared_parameters[name].get("default", _MISSING)
-                    if value is _MISSING or value is None:
-                        omitted = True
-                    else:
-                        _append_value(expanded, value, name)
-                else:
-                    _append_value(expanded, value, name)
-            else:
-                raise DeclarationError("Unknown operation token: {" + name + "}")
+            pieces.append(token[cursor:match.start()])
+            kind, value = resolved(match.group(1))
+            if kind == "omit":
+                omitted = True
+                break
+            if kind == "array":
+                raise DeclarationError("Array parameter cannot be embedded inside one argv token: " + token)
+            pieces.append(value)
             cursor = match.end()
-        expanded.append(token[cursor:])
-        parts = [part for part in expanded if part != ""]
         if omitted:
-            # An omitted optional value must not leave a dangling flag or group.
-            if not parts and argv and argv[-1].startswith("-"):
-                argv.pop()
             continue
-        if parts:
-            argv.extend(parts)
+        pieces.append(token[cursor:])
+        argv.append("".join(pieces))
     return {
         "argv": argv,
         "entrypoint": str(entrypoint),
