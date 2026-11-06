@@ -112,10 +112,8 @@ export default function App(){
  function acceptComputeResource(value:ComputeResourceState,label?:string){resourceReadSequence.current++;const previous=computeResourceRef.current;computeResourceRef.current=value;setComputeResource(value);if(label)setComputeResourceLabel(label);else if(previous?.sessionId!==value.sessionId)setComputeResourceLabel('');}
  async function refreshComputeResource(){const seq=++resourceReadSequence.current,scope=resourceScopeRef.current,selection=conversationSelectionSeq.current;try{const value=await computeResources.status();if(mounted.current&&seq===resourceReadSequence.current&&scope===resourceScopeRef.current&&selection===conversationSelectionSeq.current)acceptComputeResource(value);}catch{/* Unknown resource state must not replace the actual worker observation. */}}
  const deploymentOpening=useRef<{taskId:string;promise:Promise<void>}|null>(null);
- const [probeEngine,setProbeEngine]=useState('pydyn.md');
  const [assetPath,setAssetPath]=useState(''),[assetKind,setAssetKind]=useState('dataset'),[assetEnvironment,setAssetEnvironment]=useState(''),[assetResult,setAssetResult]=useState<any>(null),[structure,setStructure]=useState<any>(null),[frame,setFrame]=useState(0);
  const [agentWidth,setAgentWidth]=useState(stored('studio.agentWidth',340)),[overviewAgentWidth,setOverviewAgentWidth]=useState(stored('studio.overviewAgentWidth',340)),[tabs,setTabs]=useState<string[]>(['home']),[gpuStatus,setGpuStatus]=useState<any[]>([]),[disconnected,setDisconnected]=useState(false);
- const [probe,setProbe]=useState<any>(null);
  const [editorDirty,setEditorDirty]=useState(false),[paletteSearch,setPaletteSearch]=useState('');
  const [refreshFeedback,setRefreshFeedback]=useState<{seq:number;status:'loading'|'complete'|'partial'|'failed';at:number|null}|null>(null);
  const refreshing=useRef(false),gpuLoading=useRef(false),sourceFailures=useRef(new Map<string,number>()),sourceGeneration=useRef(0);const [gpuStale,setGpuStale]=useState(false);
@@ -198,10 +196,11 @@ export default function App(){
  function refresh(force=true,manual=false):Promise<void>{if(!workerReady.current)return Promise.resolve();if(!force&&refreshing.current)return latestRefresh.current;if(force){sourceFailures.current.clear();sourceGeneration.current++;}const seq=++refreshSeq.current;if(manual)setRefreshFeedback({seq,status:'loading',at:null});else if(force)setRefreshFeedback(null);refreshing.current=true;const job=loadAll(seq).finally(()=>{if(seq===refreshSeq.current)refreshing.current=false;});latestRefresh.current=job;return job;}
  async function loadAll(seq:number):Promise<void>{
    const paths=['/api/projects','/api/environments','/api/runs','/api/assets','/api/cluster-runs'];
-   const requested=paths.map(path=>(sourceFailures.current.get(path)||0)<3);
+   const assetsVisible=section==='assets';
+   const requested=paths.map(path=>path==='/api/assets'?assetsVisible&&(sourceFailures.current.get(path)||0)<3:(sourceFailures.current.get(path)||0)<3);
    const results=await Promise.allSettled(paths.map((path,index)=>requested[index]?api<any[]>('GET',path):Promise.reject(new Error('Read polling paused'))));
    if(seq!==refreshSeq.current)return latestRefresh.current;
-   results.forEach((result,index)=>{if(requested[index]){if(result.status==='fulfilled')sourceFailures.current.delete(paths[index]);else sourceFailures.current.set(paths[index],(sourceFailures.current.get(paths[index])||0)+1);}});
+   results.forEach((result,index)=>{if(!requested[index])return;if(result.status==='fulfilled')sourceFailures.current.delete(paths[index]);else sourceFailures.current.set(paths[index],(sourceFailures.current.get(paths[index])||0)+1);});
    const [p,e,r,a,c]=results;
    if(p.status==='fulfilled'){setProjects(p.value);}
    if(e.status==='fulfilled')setEnvironments(e.value);
@@ -210,10 +209,10 @@ export default function App(){
    if(c.status==='fulfilled')setClusterRuns(c.value);
    setDisconnected(r.status==='rejected');
    const at=Date.now()/1000;
-   if(mounted.current)setRefreshFeedback(previous=>previous?.seq===seq?{seq,status:results.every(result=>result.status==='fulfilled')?'complete':results.some(result=>result.status==='fulfilled')?'partial':'failed',at:Date.now()}:previous);
+   const scored=results.filter((result,index)=>paths[index]!=='/api/assets'||assetsVisible);if(mounted.current)setRefreshFeedback(previous=>previous?.seq===seq?{seq,status:scored.every(result=>result.status==='fulfilled')?'complete':scored.some(result=>result.status==='fulfilled')?'partial':'failed',at:Date.now()}:previous);
    setRecordObservations(previous=>({local:r.status==='fulfilled'?{at,stale:false,loaded:true}:{...previous.local,stale:true,paused:(sourceFailures.current.get('/api/runs')||0)>=3},cluster:c.status==='fulfilled'?{at,stale:false,loaded:true}:{...previous.cluster,stale:true,paused:(sourceFailures.current.get('/api/cluster-runs')||0)>=3}}));
  }
- useEffect(()=>{if(!worker)return;void refresh(false);const timer=setInterval(()=>void refresh(false),2500);return()=>clearInterval(timer);},[worker,projectId]);
+ useEffect(()=>{if(!worker)return;void refresh(false);const timer=setInterval(()=>void refresh(false),2500);return()=>clearInterval(timer);},[worker,projectId,section]);
  function openComputeGuide(taskId=selectedConversationRef.current?.taskId,profile?:{id:string;version:number}):Promise<boolean>{if(computeGuideRequest.current)return computeGuideRequest.current.promise;const id=crypto.randomUUID();let resolve!:(connected:boolean)=>void;const promise=new Promise<boolean>(done=>{resolve=done;});computeGuideRequest.current={id,promise,resolve};setConnecting(true);setComputeGuide({id,...profile?{profile}:taskId?{taskId}:{}});return promise;}
  function closeComputeGuide(id:string,connected:boolean){if(computeGuideRequest.current?.id!==id)return;const request=computeGuideRequest.current;computeGuideRequest.current=null;setComputeGuide(null);setConnecting(false);request.resolve(connected);}
  async function connectWorker(taskId=selectedConversationRef.current?.taskId){const sequence=conversationSelectionSeq.current,conversation=selectedConversationRef.current,current=()=>mounted.current&&sequence===conversationSelectionSeq.current&&conversation?.id===selectedConversationRef.current?.id;try{const pending=freshSelectionPending.current;if(pending?.sequence===sequence){await pending.promise;if(!current())return;taskId=selectedConversationRef.current?.taskId;}const connected=await openComputeGuide(taskId);if(!connected||!current())return;const state=await invoke<{settings:Settings}>('state');if(!current())return;setSettings(state.settings);settingsKnown.current=true;await observeWorker(taskId,true);}catch(error){if(current())onError(error);}}

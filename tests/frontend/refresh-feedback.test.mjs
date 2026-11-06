@@ -1,16 +1,17 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
-import {appWorkerHarness} from "../helpers/app-worker-hooks.mjs";import {deferred} from "../helpers/agent-hooks.mjs";import {workspacePresentation} from "../../frontend/features/workflows/workspace-presentation.mjs";
+import {appWorkerHarness} from "../helpers/app-worker-hooks.mjs";import {deferred,memoryStorage} from "../helpers/agent-hooks.mjs";import {workspacePresentation} from "../../frontend/features/workflows/workspace-presentation.mjs";
 
 const feedback=h=>h.text(h.find(n=>n.props?.['data-testid']==='manual-refresh-feedback'));
 test('App explicit toolbar and Jobs sync share refresh feedback; startup does not claim manual completion',async()=>{
  const h=appWorkerHarness();await h.flush();assert.throws(()=>feedback(h));
  h.find(n=>n.type==='button'&&n.props?.['aria-label']==='刷新').props.onClick();await h.flush();assert.match(feedback(h),/记录已刷新/);
- const before=h.calls.filter(c=>c.method==='worker.request').length;h.find(n=>n.type==='./JobsPage').props.onRefresh();await h.flush();assert.equal(h.calls.filter(c=>c.method==='worker.request').length-before,5);assert.match(feedback(h),/记录已刷新/);h.unmount();
+ const before=h.calls.filter(c=>c.method==='worker.request').length;h.find(n=>n.type==='./JobsPage').props.onRefresh();await h.flush();assert.equal(h.calls.filter(c=>c.method==='worker.request').length-before,4);assert.match(feedback(h),/记录已刷新/);h.unmount();
+ const storage=memoryStorage();storage.setItem('studio.section','assets');const assets=appWorkerHarness({storage});await assets.flush();assert(assets.calls.some(c=>c.method==='worker.request'&&c.data.target==='/api/assets'),'assets are read when the assets section is visible');assets.unmount();
 });
 test('App refresh partial/all failures do not claim complete and old owner cannot report success',async()=>{
  let fail='',wait=null;const h=appWorkerHarness({override:(m,d,standard)=>{if(m==='worker.request'){if(wait&&d.target==='/api/projects')return wait.promise;if(fail==='all'||fail===d.target)throw Error('read failed');}return standard(m,d);}});await h.flush();
  const click=()=>h.find(n=>n.type==='button'&&n.props?.['aria-label']==='刷新').props.onClick();
- fail='/api/assets';click();await h.flush();assert.match(feedback(h),/部分记录未刷新/);assert.doesNotMatch(feedback(h),/^记录已刷新/);
+ fail='/api/runs';click();await h.flush();assert.match(feedback(h),/部分记录未刷新/);assert.doesNotMatch(feedback(h),/^记录已刷新/);
  fail='all';click();await h.flush();assert.match(feedback(h),/记录刷新失败/);
  fail='';wait=deferred();click();await h.flush();assert.match(feedback(h),/正在同步/);
  const settings=h.openSettings();settings.onChange({...settings.settings,distribution:'Different fixture source'});await h.flush();wait.resolve([]);await h.flush();assert.throws(()=>feedback(h));h.unmount();
