@@ -13,6 +13,12 @@ const within=(file,root)=>file===root||file.startsWith(root+'/');
 
 export const legacyGuidanceFacts=()=>({schemaVersion:1,revision:'legacy_unconfigured',state:'legacy_unconfigured',archivedResources:[]});
 
+function stableJson(value){
+ if(Array.isArray(value))return '['+value.map(stableJson).join(',')+']';
+ if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+stableJson(value[key])).join(',')+'}';
+ return JSON.stringify(value);
+}
+
 function checkedFacts(value){
  if(!plain(value)||value.schemaVersion!==1||!text(value.revision)||!states.has(value.state))throw Error('Invalid guidance authority facts');
  const facts=structuredClone(value);
@@ -40,7 +46,7 @@ export async function resolveReadPolicy({resolveGuidance=async()=>legacyGuidance
 
 /** Synchronous readers consume an already resolved authority snapshot. */
 export function createReadPolicy(value,{scope={},assertScope=()=>{},reload}={}){
- const facts=checkedFacts(value),stamp=JSON.stringify(facts),archived=facts.archivedResources.flatMap(resource=>resource.paths.map(file=>({id:resource.id,path:normalized(file)})));let grantUsed=false;
+ const facts=checkedFacts(value),stamp=stableJson(facts),archived=facts.archivedResources.flatMap(resource=>resource.paths.map(file=>({id:resource.id,path:normalized(file)})));let grantUsed=false;
  const assertCurrent=()=>{const owner=assertScope(scope);if(scope.checkCurrent&&scope.checkCurrent()!==true)throw Error('Guidance scope changed');return plain(owner)?owner:scope;};
  const hasReadGrant=()=>{
   const owner=assertCurrent(),grant=facts.readGrant,known=new Set(facts.archivedResources.map(resource=>resource.id));
@@ -59,7 +65,7 @@ export function createReadPolicy(value,{scope={},assertScope=()=>{},reload}={}){
   isGrantedPath(file){assertCurrent();const resources=typeof file==='string'?matches(file):[],allowed=hasReadGrant()&&resources.length>0&&resources.every(resource=>facts.readGrant.resourceIds.includes(resource.id));if(allowed)grantUsed=true;return allowed;},
   assertGrantReadable(file){if(!policy.isGrantedPath(file))throw Error('Guidance resource is outside the explicit configuration read grant');},
   appliesTo(route){assertCurrent();return facts.state!=='legacy_unconfigured'&&((facts.applicableFunctions||[]).includes(route.id)||(route.engines||[]).some(engine=>(facts.engines||[]).includes(engine)));},
-  async revalidate(){policy.assertReadsCurrent();if(reload&&JSON.stringify(checkedFacts(await reload(scope)))!==stamp)throw Error('Guidance activation changed');policy.assertReadsCurrent();},
+  async revalidate(){policy.assertReadsCurrent();if(reload&&stableJson(checkedFacts(await reload(scope)))!==stamp)throw Error('Guidance activation changed');policy.assertReadsCurrent();},
   allowsPath(file){assertCurrent();return typeof file==='string'&&(!matches(file).length||policy.isGrantedPath(file));},
   assertReadable(file){if(!policy.allowsPath(file))throw Error('Guidance resource is archived; use the active execution skill or explicit configuration');},
   blocksAll(){assertCurrent();return facts.state==='stale'||facts.state==='revoked';},

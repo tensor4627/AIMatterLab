@@ -1,7 +1,7 @@
 import {codexRuntime} from '../../desktop/platform/codex-runtime.mjs';
 import {createHash} from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { createInterface } from 'node:readline';
+import { createJsonlFramer } from './jsonl-frames.mjs';
 import path from 'node:path';
 export const PROTOCOL_VERSION = '0.165.0-alpha.1.2';
 export function verifyProtocolVersion(version,{strictIsolation=false}={}){
@@ -77,16 +77,22 @@ export class CodexBridge extends EventEmitter {
       this.emit('event', { method: 'studio/codexDisconnected', params: { code, signal } });
     });
     this.process.stderr.on('data', data => this.emit('diagnostic', this.strictIsolation?'Isolated Codex diagnostic received (contents withheld)':data.toString().slice(-4000)));
-    this.reader = createInterface({ input: this.process.stdout });
-    this.reader.on('line', line => {
-      if(this.process!==child)return;
-      if(line.length>1048576){this.close({reason:'oversized_frame',message:'Codex JSONL frame exceeded 1 MiB; reconnect explicitly. The conversation is preserved.'});return;}
-      let message;
-      try { message = JSON.parse(line);if(!validEnvelope(message))throw Error('Invalid Codex envelope'); } catch {
-        this.close({reason:'malformed_protocol',message:'Malformed Codex JSONL; reconnect explicitly. The conversation is preserved.'});return;
-      }
-      this.receive(message);
+    // readline buffers a whole line before any guard could run; the bounded framer
+    // rejects an oversized frame without retaining more than its bound.
+    const framer = createJsonlFramer({
+      maxBytes: 1048576,
+      onFrame: line => {
+        if(this.process!==child)return;
+        let message;
+        try { message = JSON.parse(line);if(!validEnvelope(message))throw Error('Invalid Codex envelope'); } catch {
+          this.close({reason:'malformed_protocol',message:'Malformed Codex JSONL; reconnect explicitly. The conversation is preserved.'});return;
+        }
+        this.receive(message);
+      },
+      onOversize: bytes => {if(this.process===child)this.close({reason:'oversized_frame',message:'Codex JSONL frame exceeded 1 MiB (' + bytes + ' bytes); reconnect explicitly. The conversation is preserved.'});}
     });
+    this.framer = framer;
+    this.process.stdout.on('data', chunk => {if(this.process===child)framer.feed(chunk);});
       stage='initialize';const info = await this.rawRequest('initialize', {
         clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: this.host.version }
       });
@@ -173,5 +179,5 @@ export class CodexBridge extends EventEmitter {
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
     this.pending.clear(); this.requests.clear(); this.activeTurns.clear();
   }
-  close(detail={reason:'closed'}) { this.lifecycle++;this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;const child=this.process,active=!!child;this.process=null;this.reader?.close();this.reader=null;this.fail(new Error(detail.message||'Codex bridge closed'));child?.kill();if(active)this.emit('event',{method:'studio/codexDisconnected',params:detail}); }
+  close(detail={reason:'closed'}) { this.lifecycle++;this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;const child=this.process,active=!!child;this.process=null;this.framer?.reset();this.framer=null;this.fail(new Error(detail.message||'Codex bridge closed'));child?.kill();if(active)this.emit('event',{method:'studio/codexDisconnected',params:detail}); }
 }

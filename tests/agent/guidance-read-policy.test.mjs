@@ -171,3 +171,12 @@ test('global archives with no selected configuration use registered metadata in 
   const unregistered=new ScientificSkills({map:extended,bundledRoot:f.root,sources:()=>{throw Error('No fallback discovery');},settings:()=>({}),resolveGuidance:async()=>facts});assert.deepEqual(unregistered.sourcesForPolicy(policy),[]);
  }finally{trap.restore();}
 });
+
+test('revalidate compares authority facts independent of key order but rejects real changes',async t=>{
+ const f=fixture(t);
+ const reverseKeys=value=>{if(Array.isArray(value))return value.map(reverseKeys);if(value&&typeof value==='object'){const out={};for(const key of Object.keys(value).reverse())out[key]=reverseKeys(value[key]);return out;}return value;};
+ const policy=createReadPolicy(f.facts,{reload:async()=>reverseKeys(f.facts)});
+ await policy.revalidate();
+ const changed=createReadPolicy(f.facts,{reload:async()=>reverseKeys({...f.facts,revision:'authority-2'})});
+ await assert.rejects(()=>changed.revalidate(),/activation changed/);
+});

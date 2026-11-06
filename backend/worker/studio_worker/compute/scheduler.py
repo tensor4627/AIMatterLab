@@ -133,11 +133,15 @@ class SchedulerMixin:
             self.store.update(run, status="unknown")
 
     def cluster_loop(self):
-        while not self.stop_event.wait(15):
+        delay, failures = 15, 0
+        while not self.stop_event.wait(delay):
             try:
                 self.clusters.tick()
+                failures, delay = 0, 15
             except Exception:
-                self.store.event(None,{"kind":"cluster","error":"Remote monitor unavailable; state remains unknown"})
+                failures += 1
+                delay = min(300, 15 * (2 ** min(failures, 4)))
+                self.store.event(None, {"kind": "cluster", "error": "Remote monitor unavailable; retrying in %ss" % delay})
 
     def loop(self):
         while not self.stop_event.wait(0.3):

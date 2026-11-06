@@ -85,7 +85,7 @@ pnpm protocol
 
 真实科学验收脚本：`scripts/science-smoke.py`。仅在明确授权科学检查时运行，使用 `--config <IGNORED_PRIVATE_CONFIG.json>` 显式选择自己的环境和新运行目录；它没有开发者机器的默认路径。`--help` 不加载科学库或创建运行目录。合成 EMT Cu 短训练和 FES 不代表物理结果。配置字段见 [历史首版验收记录](docs/acceptance.md)。日常回归按改动层选择，不因界面改动或 dev 版本递增重跑科学短例。
 
-Codex 协议生成基线记录在 `desktop/codex.mjs`，类型位于 `desktop/generated`。实际连接核对协议响应和严格隔离能力；CLI 版本字符串变化不会单独导致拒绝，也不会跳过能力检查。协议变化时更新桥接与对应类型，并做受影响的协议验收。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
+Codex 协议生成基线记录在 `agent/providers/codex.mjs`，类型位于 `desktop/generated`。实际连接核对协议响应和严格隔离能力；CLI 版本字符串变化不会单独导致拒绝，也不会跳过能力检查。协议变化时更新桥接与对应类型，并做受影响的协议验收。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
 
 ## v0.2：对话设置与审阅工作流
 

@@ -24,7 +24,7 @@ LSF_QUEUE_TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+!-]+$")
 MARKER = "__STUDIO_JSON__"
 TERMINAL = ("succeeded", "failed", "cancelled")
 
-TRANSFER_CHUNK = 512 * 1024
+TRANSFER_CHUNK = 2 * 1024 * 1024
 TRANSFER_TOTAL = 128 * 1024 * 1024
 TRANSFER_FILES = 128
 # Names verified against the GPUMD/GPU-Sampling output contracts; other outputs
@@ -64,7 +64,7 @@ def directory_prefix(value):
 # so both ordinary symlinks and parent replacement races fail closed.
 TRANSFER_PROGRAM = r"""
 import os,stat,pathlib,hashlib,base64
-CHUNK=524288;TOTAL=134217728
+CHUNK=2097152;TOTAL=134217728
 
 def identity(st):
  return {k:int(getattr(st,k)) for k in ('st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns')}
@@ -479,6 +479,8 @@ class Clusters:
         self._auth, self._tunnels = None, None
         self.transport = transport or self._transport
         self.last_poll = 0
+        self._next_poll = {}
+        self._unknown_backoff = {}
         self.prepare_lock = threading.RLock()
         self._private_init_lock = threading.RLock()
 
@@ -999,7 +1001,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 raise ValueError("Input snapshot changed")
         PlanningAdapter(r["engine"]).prepare(r,r["cluster_snapshot"]["environment"])
         resources(r["resources"],r["cluster_snapshot"],r["max_seconds"])
-        self.save(r,status="ready",validation={"status":"passed","scope":"local immutable inputs and scheduler resource contract only; scientific checks run on execution node"})
+        # Input hashing can outlive a concurrent observation; merge into the current row.
+        self.merge(identifier,status="ready",validation={"status":"passed","scope":"local immutable inputs and scheduler resource contract only; scientific checks run on execution node"})
         return self.run(identifier)
 
     def revise(self,identifier,changes):
@@ -1365,7 +1368,33 @@ print('__STUDIO_JSON__'+json.dumps(out))
         return parse_output(self.transport(p).run(python_script({**p,"environment":{"executables":{"python":"python3"}}},source,{"root":roots[root_index],"relative":relative,"offset":offset})))
 
     def tick(self):
-        if time.time()-self.last_poll<15:return
-        self.last_poll=time.time()
-        for r in self.store.list("cluster-run"):
-            if r["status"] in ("queued","running","unknown"):self.poll(r["id"])
+        now = time.time()
+        if now - self.last_poll < 15:
+            return
+        self.last_poll = now
+        runs = self.store.list("cluster-run")
+        active = {r["id"] for r in runs if r["status"] in ("queued", "running", "unknown")}
+        for identifier in list(self._next_poll):
+            if identifier not in active:
+                self._next_poll.pop(identifier, None)
+                self._unknown_backoff.pop(identifier, None)
+        for r in runs:
+            status = r["status"]
+            if status not in ("queued", "running", "unknown"):
+                continue
+            if now < self._next_poll.get(r["id"], 0):
+                continue
+            try:
+                observed = self.poll(r["id"])
+                state = observed.get("status") if isinstance(observed, dict) else None
+            except Exception:
+                state = "unknown"
+            # Unresolvable runs must not spin every cycle: bounded exponential backoff,
+            # reset as soon as a poll produces a real state again.
+            delay = 15
+            if state == "unknown":
+                delay = min(300, self._unknown_backoff.get(r["id"], 15) * 2)
+                self._unknown_backoff[r["id"]] = delay
+            else:
+                self._unknown_backoff.pop(r["id"], None)
+            self._next_poll[r["id"]] = time.time() + delay
