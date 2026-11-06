@@ -27,6 +27,33 @@ def mcp_tool_call(service, params):
     # Preserve the old public namespace hook instead of capturing its dispatcher.
     return _mcp.mcp_tool_call(service, params, dispatch=dispatch)
 
+CONNECTION_TOKEN_KEYS = ("admin", "mcp")
+
+
+def load_tokens(root):
+    """Load or create worker credentials; a malformed file fails fast instead of booting half-valid."""
+    path = Path(root) / "connection.json"
+    if not path.exists():
+        atomic_json(path, {"schema_version": 1, **{key: secrets.token_urlsafe(32) for key in CONNECTION_TOKEN_KEYS}})
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    try:
+        value = json.loads(path.read_text())
+    except ValueError as exc:
+        raise RuntimeError("Worker connection credentials are not valid JSON; preserve the file for diagnosis") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError("Worker connection credentials must be a JSON object")
+    tokens = {key: value.get(key) for key in CONNECTION_TOKEN_KEYS}
+    for key, token in tokens.items():
+        if not isinstance(token, str) or len(token) < 16:
+            raise RuntimeError("Worker connection credentials are incomplete; remove connection.json to regenerate both tokens")
+    if value.get("schema_version") != 1:
+        # Legacy token files are stamped only after validation, so a broken file never boots.
+        atomic_json(path, {"schema_version": 1, **tokens})
+    return tokens
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="~/.local/state/gpu-sampling-studio")
@@ -40,11 +67,7 @@ def main():
     import fcntl
     lock = open(root / "service.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    secrets_path = root / "connection.json"
-    if not secrets_path.exists():
-        atomic_json(secrets_path, {"admin": secrets.token_urlsafe(32), "mcp": secrets.token_urlsafe(32)})
-    secrets_path.chmod(0o600)
-    tokens = json.loads(secrets_path.read_text())
+    tokens = load_tokens(root)
     service = Service(root)
     # Generated inputs are intrinsically owned by each project, not user-grantable cross-project paths.
     original_authorize = service.authorize

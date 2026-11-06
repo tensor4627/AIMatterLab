@@ -331,7 +331,7 @@ class RunsMixin:
                 if isinstance(child_parameters.get(group), dict):
                     child_parameters[group].pop(key, None)
         spec.update(inputs=inputs,parameters=child_parameters,
-            parent_run=run["id"],name=run["name"]+" 路 continuation",idempotency_key=parameters["idempotency_key"])
+            parent_run=run["id"],name=run["name"]+" → continuation",idempotency_key=parameters["idempotency_key"])
         with self.store.lock:
             existing = self.store.by_key(spec["project_id"], spec["idempotency_key"])
             prepared = self.prepare(spec)

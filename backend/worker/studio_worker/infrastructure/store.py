@@ -1,10 +1,26 @@
 import json
+import math
 import sqlite3
 import threading
 import time
 from pathlib import Path
 
 SCHEMA_VERSION = 1
+
+
+def finite_json(value):
+    """Normalize non-finite floats so persisted JSON and HTTP serialization agree."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: finite_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [finite_json(item) for item in value]
+    return value
+
+
+def encoded(value):
+    return json.dumps(finite_json(value), allow_nan=False)
 
 
 class Store:
@@ -48,7 +64,7 @@ class Store:
     def put(self, kind, value):
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO objects VALUES(?,?,?)",
-                            (kind, value["id"], json.dumps(value)))
+                            (kind, value["id"], encoded(value)))
             self.db.commit()
         return value
 
@@ -65,7 +81,7 @@ class Store:
         with self.lock:
             try:
                 self.db.executemany('INSERT OR REPLACE INTO objects VALUES(?,?,?)',
-                                    [(kind,value['id'],json.dumps(value)) for kind,value in records])
+                                    [(kind,value['id'],encoded(value)) for kind,value in records])
                 self.db.commit()
             except Exception:
                 self.db.rollback()
@@ -99,9 +115,9 @@ class Store:
             try:
                 self.db.execute("INSERT INTO runs VALUES(?,?,?,?,?)",
                                 (run["id"], run["project_id"], run["idempotency_key"],
-                                 run["request_hash"], json.dumps(run)))
+                                 run["request_hash"], encoded(run)))
                 self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
-                                (run["id"], time.time(), json.dumps({"state": run["status"]})))
+                                (run["id"], time.time(), encoded({"state": run["status"]})))
                 self.db.commit()
             except Exception:
                 self.db.rollback()
@@ -112,10 +128,10 @@ class Store:
         with self.lock:
             run.update(changes, updated_at=time.time())
             try:
-                self.db.execute("UPDATE runs SET data=? WHERE id=?", (json.dumps(run), run["id"]))
+                self.db.execute("UPDATE runs SET data=? WHERE id=?", (encoded(run), run["id"]))
                 if "status" in changes:
                     self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
-                                    (run["id"], time.time(), json.dumps({"state": changes["status"]})))
+                                    (run["id"], time.time(), encoded({"state": changes["status"]})))
                 self.db.commit()
             except Exception:
                 self.db.rollback()
@@ -125,7 +141,7 @@ class Store:
     def event(self, run, value):
         with self.lock:
             self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
-                            (run, time.time(), json.dumps(value)))
+                            (run, time.time(), encoded(value)))
             self.db.commit()
 
     def prune_events(self, keep=200000):

@@ -63,5 +63,21 @@ class StoreSchemaTest(unittest.TestCase):
             store.prune_events(keep=-1)
 
 
+
+    def test_non_finite_floats_are_persisted_as_null(self):
+        store = Store(Path(self.tmp.name) / "service")
+        self.addCleanup(store.db.close)
+        store.put("artifact", {"id": "nan-artifact", "finite": 1.5, "nan": float("nan"),
+                               "nested": {"inf": float("inf"), "values": [float("-inf"), 2.0]}})
+        stored = store.get("artifact", "nan-artifact")
+        self.assertEqual(stored["finite"], 1.5)
+        self.assertIsNone(stored["nan"])
+        self.assertIsNone(stored["nested"]["inf"])
+        self.assertEqual(stored["nested"]["values"], [None, 2.0])
+        run = store.add_run(_run())
+        store.update(run, status="ready", validation={"score": float("nan")})
+        self.assertIsNone(store.run("run-a")["validation"]["score"])
+        store.event("run-a", {"value": float("nan")})
+        self.assertIsNone(store.events()[-1]["value"])
 if __name__ == "__main__":
     unittest.main()

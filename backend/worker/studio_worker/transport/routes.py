@@ -47,6 +47,18 @@ def parse_gpu_rows(text):
     return rows
 
 
+def gpu_inventory(run=subprocess.run):
+    """Best-effort local GPU inventory; an unavailable driver is an empty list, not an API 500."""
+    try:
+        result = run(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu",
+                      "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode:
+        return []
+    return parse_gpu_rows(result.stdout)
+
+
 def dispatch(service, method, path, data, admin=False):
     store = service.store
     if path in ('/api/workflow/tool-group/create', '/api/workflow/prepare-step', '/api/workflow/execute-step', '/api/workflow/status', '/api/workflow/read'):
@@ -85,10 +97,7 @@ def dispatch(service, method, path, data, admin=False):
         if path == "/api/assets":
             return store.list("artifact")
         if path == "/api/gpu":
-            result = subprocess.run(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10)
-            if result.returncode:
-                raise ValueError(result.stderr)
-            return parse_gpu_rows(result.stdout)
+            return gpu_inventory()
         if path == "/api/task-parameters":
             return store.list("task-parameters")
         if path == "/api/clusters":

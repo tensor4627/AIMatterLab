@@ -1,5 +1,7 @@
+import subprocess
 import sys
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -40,3 +42,25 @@ class GpuInventoryParseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+from studio_worker.transport.routes import gpu_inventory
+
+
+class GpuInventoryAvailabilityTest(unittest.TestCase):
+    def test_successful_inventory_is_parsed(self):
+        def run(*args, **kwargs):
+            self.assertIn("nvidia-smi", args[0][0])
+            return SimpleNamespace(returncode=0, stdout="0, GPU A, 1, 2, 3\n", stderr="")
+        self.assertEqual(gpu_inventory(run)[0]["name"], "GPU A")
+
+    def test_missing_or_timed_out_driver_is_an_empty_inventory(self):
+        for error in (FileNotFoundError("nvidia-smi"), subprocess.TimeoutExpired("nvidia-smi", 10), OSError("unavailable")):
+            with self.subTest(error=type(error).__name__):
+                def run(*args, _error=error, **kwargs):
+                    raise _error
+                self.assertEqual(gpu_inventory(run), [])
+
+    def test_nonzero_exit_is_an_empty_inventory(self):
+        def run(*args, **kwargs):
+            return SimpleNamespace(returncode=9, stdout="", stderr="driver not loaded")
+        self.assertEqual(gpu_inventory(run), [])
