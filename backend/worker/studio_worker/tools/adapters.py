@@ -133,12 +133,28 @@ class Adapter:
             command += ["--kernel-capacity", str(p["kernel_capacity"])]
         return command
 
+    def _declaration_argv(self, spec, environment):
+        """Declaration-driven production argv for a pilot engine allowlist; None means fallback."""
+        if os.environ.get("STUDIO_DECLARATION_DRIVEN") != "1":
+            return None
+        allowlist = os.environ.get("STUDIO_DECLARATION_ENGINES", "")
+        if allowlist and self.engine not in [item.strip() for item in allowlist.split(",") if item.strip()]:
+            return None
+        from studio_worker.tools.declarations import bind_operation, find_declaration
+        declaration = find_declaration(environment.get("repositories", {}), self.engine)
+        if declaration is None:
+            return None
+        return bind_operation(declaration, spec, environment)["argv"]
+
     def prepare(self, spec, environment):
         assets, p, engine = spec["inputs"], spec.get("parameters", {}), self.engine
         if engine == "installation.check":
             if set(assets) != {"run.py"} or set(p) != {"installation_case"} or p["installation_case"] not in INSTALLATION_CHECKS:
                 raise ValueError("Only shipped worker/reference installation cases are accepted")
             return [self.executable(environment, "python"), "run.py"]
+        declared = self._declaration_argv(spec, environment)
+        if declared is not None:
+            return declared
         from studio_worker.tools.derivative_selection import validate_controls
         validate_controls(p,engine)
         if engine.endswith(".sampling"):
