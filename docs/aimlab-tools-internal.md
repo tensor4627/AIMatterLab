@@ -214,8 +214,8 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 
 ## 7. 当前实现范围与限制
 
-- 已实现：本文件第 5 节的只读声明与文件闭包检查脚本；
-- 未实现：Studio 内的版本登记/快照、`engine` 与 Worker 适配器交叉校验、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；
+- 已实现：本文件第 5 节的只读声明与文件闭包检查脚本、`tools.aimlab.*` 登记路由、生产声明与 `engine-contracts.json` 的 adapter 一致性检查，以及 Worker 端声明绑定模块 `studio_worker.tools.declarations`（把 token 展开为生产 argv，尚未接入 `Adapter.prepare` 的默认执行路径）；
+- 未实现：Studio 内的版本登记/快照、`engine` 与 Worker 适配器交叉校验、把声明绑定接入实际 run 准备/执行、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；
 - 因此检查通过不等于“已接入 Studio”。登记、环境配置和真实测试通过须按实际实现另行完成并记录；
 - 第三方 `<id>-package` 的注册路径保持不变，仍由 `studio-tool-integration` 与现有包注册实现处理。
 
