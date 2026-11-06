@@ -190,6 +190,7 @@ if value and value['health'].get('runtime') != expected_runtime:
 if not value:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(__file__).resolve().parent)
+    env.setdefault("STUDIO_REQUIRE_TOOL_DECLARATIONS", "1")
     with open(root / "service.log", "ab") as log:
         subprocess.Popen([sys.executable, "-m", "studio_worker.server", "--root", str(root),
                           "--port", str(args.port)], env=env, stdin=subprocess.DEVNULL,

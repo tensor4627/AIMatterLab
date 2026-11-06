@@ -159,6 +159,8 @@ class Adapter:
         from studio_worker.tools.declarations import bind_operation, find_declaration
         declaration = find_declaration(environment.get("repositories", {}), self.engine)
         if declaration is None:
+            if os.environ.get("STUDIO_REQUIRE_TOOL_DECLARATIONS") == "1":
+                raise ValueError("Tool declaration required for engine " + self.engine + "; register the tool source containing aimlab-tools/manifest.json")
             return None
         return bind_operation(declaration, spec, environment)["argv"]
 

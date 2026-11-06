@@ -128,6 +128,16 @@ class DeclarationDrivenPrepare(unittest.TestCase):
                 [sys.executable, str(Path(source) / "tools" / "nep_predict.py"), sys.executable, "test"],
             )
 
+    def test_strict_mode_rejects_missing_declarations_but_accepts_a_registered_source(self):
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_")}
+        with patch.dict(os.environ, {**clean, "STUDIO_REQUIRE_TOOL_DECLARATIONS": "1"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "Tool declaration required for engine hotpp.eval"):
+                adapters.Adapter("hotpp.eval").prepare(self.spec, {**self.environment, "repositories": {}})
+            self.assertEqual(
+                adapters.Adapter("hotpp.eval").prepare(self.spec, self.environment),
+                [sys.executable, "eval", "-m", "model.pth", "-d", "data.xyz", "--device", "cuda", "--datatype", "ase"],
+            )
+
     def test_binding_module_rejects_a_missing_required_parameter(self):
         declaration = find_declaration({"hotpp": self.root}, "hotpp.eval")
         with self.assertRaisesRegex(ValueError, "Missing required parameter"):
