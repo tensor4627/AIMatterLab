@@ -1,7 +1,26 @@
+import {constants as fsConstants} from 'node:fs';
+/** Interpose before every guidance file operation, including descriptor reads. */
+const MUTATING=new Set(['writeFile','appendFile','copyFile','cp','mkdir','mkdtemp','rename','link','symlink','unlink','rm','rmdir','truncate','chmod','chown','lchmod','lchown','utimes','lutimes','futimes','createWriteStream']);
+const WRITE_FLAGS=fsConstants.O_WRONLY|fsConstants.O_RDWR|fsConstants.O_CREAT|fsConstants.O_TRUNC|fsConstants.O_APPEND;
+function baseName(label){return label.split('.').pop().replace(/Sync$/,'');}
+function rejectsWrite(label,args){
+ if(baseName(label)==='open'){
+  const flags=args[1];
+  if(typeof flags==='number')return (flags&WRITE_FLAGS)!==0;
+  if(typeof flags==='string')return /[wa+]/.test(flags);
+  return false;
+ }
+ return MUTATING.has(baseName(label));
+}
 /** Interpose before every guidance file operation, including descriptor reads. */
 function wrapMethod(method,label,{policy,asynchronous,descriptors,check,handle}){
  const wrapped=new Proxy(method,{
   apply(target,thisArg,args){
+   if(rejectsWrite(label,args)){
+    const failure=Error('Guidance filesystem is read-only');
+    if(asynchronous)return Promise.reject(failure);
+    throw failure;
+   }
    if(asynchronous)return (async()=>{
     await policy.revalidate();
     check(args[0]);

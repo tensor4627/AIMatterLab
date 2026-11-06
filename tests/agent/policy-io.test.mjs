@@ -51,3 +51,23 @@ test('descriptor reads are checked against the path opened earlier',t=>{
   assert.throws(()=>io.readFileSync(archivedFd,'utf8'),/Archived resource read refused/);
  }finally{f.policy.blocked.clear();io.closeSync(archivedFd);}
 });
+
+test('mutating filesystem operations are refused through the guidance wrapper',async t=>{
+ const f=fixture(t),io=policyIo(fs,f.policy),asyncIo=policyIo(promises,f.policy,{asynchronous:true});
+ const destination=path.join(f.root,'written.txt');
+ for(const call of [
+  ()=>io.writeFileSync(destination,'x'),
+  ()=>io.appendFileSync(destination,'x'),
+  ()=>io.copyFileSync(f.allowed,destination),
+  ()=>io.mkdirSync(path.join(f.root,'directory')),
+  ()=>io.renameSync(f.allowed,destination),
+  ()=>io.symlinkSync(f.allowed,destination),
+  ()=>io.rmSync(destination,{force:true}),
+  ()=>io.createWriteStream(destination),
+  ()=>io.openSync(destination,'w')
+ ])assert.throws(call,/Guidance filesystem is read-only/);
+ await assert.rejects(()=>asyncIo.writeFile(destination,'x'),/Guidance filesystem is read-only/);
+ await assert.rejects(()=>asyncIo.open(destination,'a+'),/Guidance filesystem is read-only/);
+ assert.equal(await asyncIo.open(f.allowed,'r').then(handle=>handle.close()).then(()=>true),true);
+ assert.equal(fs.existsSync(destination),false);
+});
