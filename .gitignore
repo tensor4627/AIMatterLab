@@ -17,3 +17,7 @@ backend/worker/*.egg-info/
 
 # User-authored private CV runtime repository; never ship with Studio sources.
 custom-cv-library/
+
+# Locally generated NVIDIA driver logs and raw review/audit evidence.
+NVIDIA Corporation/
+review-artifacts/

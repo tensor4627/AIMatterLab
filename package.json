@@ -9,6 +9,7 @@
     "build": "node scripts/sync-tool-contracts.mjs && tsc --noEmit && vite build",
     "start": "node scripts/sync-tool-contracts.mjs --check && node scripts/start.mjs",
     "check:contracts": "node scripts/sync-tool-contracts.mjs --check",
+    "check:docs": "node scripts/check-doc-links.mjs",
     "test": "node scripts/test-node.mjs",
     "test:worker": "node scripts/test-worker.mjs",
     "test:frontend": "node scripts/frontend-regression.mjs",

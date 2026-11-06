@@ -64,7 +64,7 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 desktop 使用独立 profile、真实 renderer/worker 和 provider 请求；真实调用被拒绝或需要认证时记 blocked，由用户登录后重验；账户字段不可用仍需用真实回复判定调用能力，不伪造登录。生成的 Launch-Studio.ps1（或 Linux launcher）复用验收 profile，不覆盖用户原安装。finalize 绑定当前配置和源码指纹，要求三个阶段均通过、短例集合完整；不存在“跳过后也成功”的路径。
 
-本代验证与发布状态见 [v0.17](v0.17.md)；原始证据保留在忽略目录。
+本代验证与发布状态见 [v0.17](releases/v0.17.md)；原始证据保留在忽略目录。
 同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 Studio 核对任务，或选择独立安装 root。
 
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。
