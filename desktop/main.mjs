@@ -49,7 +49,8 @@ import {fileURLToPath} from 'node:url';
 
 import {readTaskPygas,bindComposition,compositionToolGuard} from "../backend/main/workspace/task-pygas.mjs";
 
-import {ScientificSkills,validateScientificConsent,normalizeScientificSharing} from '../agent/skills/scientific-skills.mjs';
+import {ScientificSkills,normalizeScientificSharing} from '../agent/skills/scientific-skills.mjs';
+import {normalizeSettings} from './settings-schema.mjs';
 import {legacyGuidanceFacts} from '../agent/skills/read-policy.mjs';
 
 import {MaterialsProject} from "../backend/main/tools/materials-project.mjs";
@@ -285,30 +286,7 @@ handle('cluster.download',async value=>{
 });
 handle('agent.bindProject',({projectId,provider})=>{providerId(provider);if(typeof projectId!=='string'||!projectId||projectId.length>100)throw Error('Select a project');settings=catalog.put('settings','main',{...settings,projectAgents:{...settings.projectAgents,[projectId]:provider}});return {projectId,provider};});
 handle('state',() => ({ settings, threads:catalog.list('thread'), ssh:catalog.list('ssh') }));
-handle('settings',data => {
-  const next={...settings,...data};
-  if(next.autoDiscoverCompute!==undefined&&typeof next.autoDiscoverCompute!=='boolean')throw Error('Invalid compute discovery preference');
-  if(!/^[\w .-]{1,80}$/.test(next.distribution) || !Number.isInteger(next.workerPort) ||
-     next.workerPort<1024 || next.workerPort>65535 ||
-     !/^~\/|^\//.test(next.workerRoot)) throw new Error('Invalid WSL settings');
-  agentConfig(next.agent);
-  if(!['right','center'].includes(next.agentLayout||'right'))throw Error('Unsupported workspace layout');
-  providerId(next.agentProvider||'codex');
-  for(const key of ['codexPath','kimiPath','qwenPath'])if(next[key]!==undefined&&(typeof next[key]!=='string'||/[\r\n\0]/.test(next[key])))throw Error('Invalid CLI path');
-  if(!['zh-CN','en'].includes(next.language||'zh-CN'))throw Error('Unsupported language');
-  for(const [key,min,max] of [['fontSize',12,24],['minimumFontSize',11,18],['chatFontSize',12,28],['editorFontSize',10,28],['terminalFontSize',10,24]])
-    if(next[key]!==undefined&&(!Number.isInteger(next[key])||next[key]<min||next[key]>max))throw Error('Invalid font size');
-  if(next.fontFamily && !['system','sans','serif'].includes(next.fontFamily))throw Error('Unsupported font');
-  if(!Array.isArray(next.pygasSkillProviders||[])||(next.pygasSkillProviders||[]).some(p=>!['codex','kimi','qwen','deepseek','compatible'].includes(p)))throw Error('Invalid skill sharing provider scope');
-  validateScientificConsent(next.scientificSkillProviders);
-  if(next.sourceIds!==undefined&&(!Array.isArray(next.sourceIds)||next.sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id))))throw Error('Invalid source allowlist');
-  if(!Array.isArray(next.sourceRoots||[])||(next.sourceRoots||[]).some(v=>typeof v!=='string'||!path.isAbsolute(v)))throw Error('Source roots must be absolute paths');
-  if(!Array.isArray(next.skillRoots)) throw new Error('Skill roots must be an array');
-  if(next.skillRoots.some(v=>typeof v!=='string'||!v.trim()||v.length>4096||/[\r\n\0]/.test(v)))throw new Error('Skill roots must be non-empty bounded paths');
-  if(next.cwd!==undefined&&(typeof next.cwd!=='string'||!next.cwd.trim()||/[\r\n\0]/.test(next.cwd)))throw new Error('Invalid working directory');
-  if(next.projectAgents!==undefined&&(!next.projectAgents||typeof next.projectAgents!=='object'||Array.isArray(next.projectAgents)||Object.entries(next.projectAgents).some(([id,agent])=>typeof id!=='string'||!id||!['codex','kimi','qwen','deepseek','compatible'].includes(agent))))throw new Error('Invalid project agent binding');
-  settings=catalog.put('settings','main',next); return settings;
-});
+handle('settings',data => { settings=catalog.put('settings','main',normalizeSettings(settings,data)); return settings; });
 function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
 async function bindSources(current=()=>{}){const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());
