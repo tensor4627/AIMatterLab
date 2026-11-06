@@ -26,6 +26,6 @@ export default function Tooltip({content,children,className='',asChild=false}:{c
  },[open]);
  const explanation=open&&createPortal(<span ref={popup} id={id} role="tooltip" className="explanation-tooltip-content" style={{left:position?.left||0,top:position?.top||0,visibility:position?'visible':'hidden',maxWidth:'min(320px, calc(100vw - 16px))',maxHeight:'calc(100vh - 16px)',overflowY:'auto'}} onMouseEnter={cancel} onMouseLeave={leave}>{content}</span>,document.body);
  const trigger={ref:anchor,'aria-describedby':open?id:undefined,onMouseEnter:show,onMouseLeave:leave,onFocus:()=>{focused.current=true;show();},onBlur:()=>{focused.current=false;hide();}};
- if(asChild&&isValidElement(children)){const child=children as ReactElement<any>;return cloneElement(child,trigger,child.props.children,explanation);}
+ if(asChild&&isValidElement(children)){const child=children as ReactElement<any>,merged:Record<string,unknown>={...trigger};for(const key of ['onMouseEnter','onMouseLeave','onFocus','onBlur'] as const){const own=child.props?.[key];if(typeof own==='function')merged[key]=(event:unknown)=>{own(event);(trigger as any)[key](event);};}return cloneElement(child,merged,child.props.children,explanation);}
  return <span {...trigger} className={'explanation-tooltip '+className} tabIndex={0}>{children}{explanation}</span>;
 }

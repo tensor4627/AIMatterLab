@@ -43,7 +43,9 @@ export default function ClusterQueueSettings({profile,project,worker,busy,profil
   try{const [projects,saved]=await Promise.all([api<Project[]>('GET','/api/projects'),api<ClusterQueueProfile>('POST','/api/cluster/profile',{cluster_id:id})]);if(!current())return;
    const latest=projects.find(value=>value.id===project!.id);if(!latest||saved.version!==version)throw Error(t('连接版本或项目已变化，请重新读取。'));
    const approved={...structuredClone(policy),profile_version:version};
-   await api('POST','/api/projects',{...latest,policy:{...latest.policy,clusters:[...new Set([...(latest.policy.clusters||[]),id])],cluster_queue_policies:{...latest.policy.cluster_queue_policies,[id]:approved}}});if(!current())return;
+   const updated=await api<Project>('POST','/api/projects',{...latest,policy:{...latest.policy,clusters:[...new Set([...(latest.policy.clusters||[]),id])],cluster_queue_policies:{...latest.policy.cluster_queue_policies,[id]:approved}}});if(!current())return;
+   const stable=(value:any):string=>JSON.stringify(value,(key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(name=>[name,item[name]])):item);
+   if(stable(updated?.policy?.cluster_queue_policies?.[id])!==stable(approved))throw Error(t('队列策略未按批准内容保存，请重新读取。'));
    setPolicy(approved);setNotice(t('队列策略已批准'));onRefresh();
   }catch(error){if(current())onError(error);}finally{if(current())setApproving(false);}
  }

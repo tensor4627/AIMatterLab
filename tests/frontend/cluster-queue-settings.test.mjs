@@ -69,3 +69,10 @@ test('remove and re-add draft target id cannot show deleted advanced JSON for a 
  const editor=()=>walk(h.find(n=>n.type==='fieldset'&&n.props.children?.[0]?.props?.children==='queue-5')).find(n=>n.type==='textarea'&&n.props['aria-invalid']!==undefined);
  h.id('queue-add').props.onClick();await h.flush();editor().props.onChange({target:{value:JSON.stringify({executables:{python:'/draft/deleted/python'}})}});await h.flush();h.id('queue-remove-4').props.onClick();await h.flush();h.id('queue-add').props.onClick();await h.flush();const fresh=h.props.profile.queue_targets.at(-1);assert.equal(fresh.id,'queue-5');assert.equal(fresh.environment.executables.python,'/registered/python');assert.equal(JSON.parse(editor().props.value).executables.python,fresh.environment.executables.python);assert.equal(h.writes().length,0);h.unmount();
 });
+
+test('approval is rejected when the saved project omits the approved policy',async()=>{
+ const h=fixture({override:(method,path,data)=>path==='/api/projects'&&method==='POST'?{...structuredClone(data),policy:{...data.policy,cluster_queue_policies:{...data.policy.cluster_queue_policies,cluster:{...data.policy.cluster_queue_policies.cluster,allowed_target_ids:[]}}}}:undefined});
+ await h.flush();h.id('queue-allow-a').props.onChange({target:{checked:true}});await h.flush();h.id('queue-policy-approve').props.onClick();await h.flush();
+ assert.equal(h.writes().length,1);assert.match(h.errors[0]?String(h.errors[0]):'',/未按批准内容保存/);
+ h.unmount();
+});

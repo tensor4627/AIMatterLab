@@ -11,10 +11,10 @@ function fixture({width=1000,height=800,top=300,left=980,popupWidth=300,popupHei
  const jsx=(type,props)=>({type,props}),module={exports:{}};
  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  new Function('require','module','exports','setTimeout','clearTimeout','window','document','Node',compiled)(name=>name==='react'?react:name==='react-dom'?{createPortal:node=>node}:{jsx,jsxs:jsx},module,module.exports,(fn,ms)=>{const id=++next;timers.set(id,{fn,at:clock+ms});return id;},id=>timers.delete(id),window,{body:{}},class Node {});
- function render(){index=0;tree=module.exports.default({content:'Saved inputs do not imply scientific validation.',children:asChild?{type:'summary',props:{children:'Inputs',onClick:()=> 'native-summary-handler'}}:'Inputs',asChild});return tree;}
+ const childEvents=[];function render(){index=0;tree=module.exports.default({content:'Saved inputs do not imply scientific validation.',children:asChild?{type:'summary',props:{children:'Inputs',onClick:()=> 'native-summary-handler',onMouseEnter:()=>childEvents.push('mouseenter'),onMouseLeave:()=>childEvents.push('mouseleave'),onFocus:()=>childEvents.push('focus'),onBlur:()=>childEvents.push('blur')}}:'Inputs',asChild});return tree;}
  function advance(ms){clock+=ms;for(const [id,t] of timers)if(t.at<=clock){timers.delete(id);t.fn();}return render();}
  function unmount(){for(const hook of hooks)hook?.cleanup?.();}
- render();return {render,advance,unmount,timers,listeners};
+ render();return {render,advance,unmount,timers,listeners,childEvents};
 }
 function popup(node){return node.props.children[1];}
 test('explanation delay, focus, Escape capture isolation and timer cleanup',()=>{
@@ -42,4 +42,12 @@ test('focus keeps popup on pointer leave; blur, scroll and unmount clean up',()=
 test('interactive summary is the actual trigger with no nested or duplicate focus stop',()=>{
  const h=fixture({asChild:true});let n=h.render();assert.equal(n.type,'summary');assert.equal(n.props.tabIndex,undefined);assert.equal(n.props.onClick(),'native-summary-handler');
  n.props.onFocus();h.advance(400);n=h.render();assert.equal(n.type,'summary');assert.equal(n.props['aria-describedby'],popup(n).props.id);assert.equal(n.props.children[0],'Inputs');h.unmount();
+});
+
+test('asChild preserves child handlers while adding tooltip handlers',()=>{
+ const h=fixture({asChild:true});const n=h.render();assert.equal(n.props.onClick(),'native-summary-handler');
+ n.props.onMouseEnter();n.props.onFocus();assert.deepEqual(h.childEvents,['mouseenter','focus']);
+ const shown=h.advance(400);assert.equal(shown.props['aria-describedby'],'explanation-id');assert.equal(popup(shown).props.role,'tooltip');
+ shown.props.onMouseLeave();shown.props.onBlur();assert.deepEqual(h.childEvents,['mouseenter','focus','mouseleave','blur']);
+ h.unmount();
 });

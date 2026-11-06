@@ -1258,7 +1258,8 @@ const english:Record<string,string> = {
  "当前步骤包含未支持的功能或资源连线。首个执行路线仅支持无输入与参数的固定 CPU 参考，不会按任意命令执行。":"The current step contains unsupported capabilities or resource links. The first execution route only supports fixed CPU references without inputs or parameters and never executes arbitrary commands.",
  "当前配置器仅支持固定 CPU installation.check / worker 参考；此工具的配置尚不支持。工具定义仍可登记。":"The current configurator only supports fixed CPU installation.check / worker references; configuration for this tool is not supported yet. The tool definition can still be registered.",
  "…（较早输出已省略）":"… (earlier output omitted)",
- "正在加载…":"Loading…"
+ "正在加载…":"Loading…",
+ "队列策略未按批准内容保存，请重新读取。":"The queue policy was not stored as approved. Reload it."
 };
 let language:'zh-CN'|'en' = (localStorage.getItem('studio.language')==='en'?'en':'zh-CN');
 export function setLanguage(value:'zh-CN'|'en'){language=value;localStorage.setItem('studio.language',value);}
