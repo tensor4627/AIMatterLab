@@ -1,3 +1,4 @@
+import {consoleMessage} from './platform/verification/console-message.mjs';
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
@@ -451,7 +452,7 @@ window.webContents.on('render-process-gone',(_event,details)=>{emit('studio:even
 const development=process.env.STUDIO_DEV_URL;
 if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw new Error('Invalid development origin');
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
-if(verifying){const errors=[];window.webContents.on('console-message',(_event,level,message)=>{if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
+if(verifying){const errors=[];window.webContents.on('console-message',(...args)=>{const {level,message}=consoleMessage(args);if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',()=>{for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}});
 
