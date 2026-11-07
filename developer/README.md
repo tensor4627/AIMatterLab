@@ -12,7 +12,7 @@
 
 ## 内部工具（AimLab Tools）声明
 
-AimLab 自研工具（例如 GPU-Sampling）不按第三方 `<id>-package` 交付，而是在工具自己的仓库主工作分支维护 `aimlab-tools/`：机器可读 `manifest.json`、交付 `SKILL.md`、精简 `manual.md` 和 `tests/` 测试映射。声明与源码 commit 一起提交，Studio 按候选 commit 执行接入检查。内部标准见 [AimLab 内部工具声明与接入检查标准](../docs/aimlab-tools-internal.md)。
+AimLab 自研工具（例如 GPU-Sampling）不按第三方 `<id>-package` 交付，而是在工具自己的仓库主工作分支维护 `aimlab-tools/`：机器可读 `manifest.json`、交付 `SKILL.md`、精简 `manual.md` 和 `tests/` 测试映射。声明与源码 commit 一起提交，Studio 按候选 commit 执行接入检查。内部标准见 [AimLab 内部工具声明与接入检查标准](../docs/aimlab-tools-internal.md)；随接入 skill 分发的摘要（目录、manifest、token、测试与检查要求）见 [AimLab 内部工具约定](skills/studio-tool-integration/references/aimlab-tools.md)。
 
 检查命令（只读；不安装、不执行测试、不注册 Studio）：
 

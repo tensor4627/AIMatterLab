@@ -13,7 +13,7 @@ description: Help software developers produce portable GPU Sampling Studio tool 
 
 编写交付材料时，阅读 [交付指南](references/deliverables.md)；生成 `tool.json` 或准备注册、更新时再阅读 [注册与版本契约](references/registration.md)。随本目录附有完整 schema 和纯声明检查器，不需要取得 Studio 源码才能理解字段、默认值和额外约束。包外层约定不约束原仓库内部布局。
 
-AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package` 交付形态，而是在工具仓库主工作分支维护 `aimlab-tools/` 声明，由 Studio 按候选 commit 执行接入检查。内部标准、文件清单和检查命令见 Studio 仓库 `docs/aimlab-tools-internal.md`；第三方开发者可忽略本段。
+AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package` 交付形态，而是在工具仓库主工作分支维护 `aimlab-tools/` 声明，由 Studio 按候选 commit 执行接入检查。仓库内文件夹要求、`manifest.json` 字段与生产 token、测试要求、检查命令和状态见 [AimLab 内部工具约定](references/aimlab-tools.md)；第三方开发者可忽略本段。
 
 ## 明确软件和功能范围
 
