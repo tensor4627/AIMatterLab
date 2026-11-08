@@ -29,6 +29,8 @@ pnpm run pack
 
 使用 PATH 中的 pnpm；安装器也支持在 desktop.pnpm 中登记可执行文件路径。
 
+测试阶段数据目录：Studio 本地数据默认放在当前 checkout 根目录的 `.config/`（已 Git 忽略；显式 `STUDIO_PROFILE_DIR` 仍优先）。换新版便携包测试前，关闭 Studio 后删除或改名 `.config` 即可重置；在仓库外运行的便携包使用其所在目录的 `.config`。旧共享 `%APPDATA%\gpu-sampling-studio` profile 不再使用。
+
 [v0.18.3](docs/releases/v0.18.3.md) 修复 Codex 空会话在修改上下文设置或重启后恢复失败：能证明为空的会话自动重连并保留原流程；旧会话记录无法读取时，点击 Agent 面板的“重新建立对话连接”。原流程、参数和作业保留，未确认的消息不会自动重发。
 
 上一代五轮改进见 [v0.18](docs/releases/v0.18.md)，第一轮入口、默认值与工具反馈修复见 [v0.18.1](docs/releases/v0.18.1.md)。第二轮 [v0.18.2](docs/releases/v0.18.2.md) 按[交互设计基线](docs/design/interaction-design.md)重排工作区：侧栏集中展示历史会话，一级入口为工作区、任务和工具，底部默认收起；对话和当前流程可切换优先布局。「任务」统一查看本地和集群保存的记录，并可返回所属会话。断连时保留已读取内容和观测时间，本地参数仍可编辑，重新连接后再复核执行。SSH、凭据与真实作业记录保留。

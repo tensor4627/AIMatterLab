@@ -3,6 +3,7 @@ node_modules/
 dist/
 release/
 .studio/
+.config/
 __pycache__/
 *.pyc
 .venv/

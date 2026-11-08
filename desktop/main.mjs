@@ -1,4 +1,5 @@
 import {consoleMessage} from './platform/verification/console-message.mjs';
+import {studioProfileRoot} from './platform/studio-profile.mjs';
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
@@ -107,6 +108,7 @@ const verifying=installationVerifying||improvementsVerifying||providerVerifying|
 const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
 if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
+else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,portableDir:process.env.PORTABLE_EXECUTABLE_DIR,execPath:process.execPath});fs.mkdirSync(profile,{recursive:true});app.setPath('userData',profile);}
 let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources;
 let shuttingDown=false;
 app.on("before-quit",()=>{shuttingDown=true;});
