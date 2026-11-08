@@ -72,9 +72,9 @@ def main():
  inputs={"train.xyz":FIX/"train.xyz","test.xyz":FIX/"validation.xyz",
  "nep.in":source("nep.in","type 1 Cu\nversion 4\ncutoff 4 3\nn_max 2 2\nbasis_size 3 3\nl_max 2 0 0\nneuron 8\nbatch 6\npopulation 10\ngeneration 100\n")}
  train=task("nep-train","nep.train",inputs)
- pred=task("nep-independent-test","nep.eval",{"evaluation.xyz":FIX/"test.xyz","nep.in":source("predict.in",(FIX/"nep.in").read_text()+"prediction 1\n"),"nep.txt":train/"nep.txt"},{"dataset_role":"independent_test"})
+ pred=task("nep-independent-test","nep.eval",{"train.xyz":FIX/"test.xyz","nep.in":source("predict.in",(FIX/"nep.in").read_text()+"prediction 1\n"),"nep.txt":train/"nep.txt"})
  REPORT["nep_test_metrics"]=service.inspect("acceptance","acceptance-core",str(pred),"regression");evidence()
- task("nep-publication-figure","nep.analyze",{n:pred/n for n in ("energy_test.out","force_test.out","virial_test.out","evaluation.json")})
+ task("nep-publication-figure","nep.analyze",{n:pred/n for n in ("energy_train.out","force_train.out")})
  inventories={k:service.inspect("acceptance","acceptance-core",str(FIX/(k+".xyz")),"dataset") for k in ("train","validation","test")}
  assert not set(inventories["train"]["structure_hashes"]) & set(inventories["test"]["structure_hashes"])
  assert not set(inventories["validation"]["structure_hashes"]) & set(inventories["test"]["structure_hashes"])

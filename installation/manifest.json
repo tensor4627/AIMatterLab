@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "product": "GPU Sampling Studio",
-  "version": "1.0.0-dev.42",
+  "version": "1.0.0-dev.43",
   "repository_url": null,
-  "release_revision": "v1.0.0-dev.42",
+  "release_revision": "v1.0.0-dev.43",
   "desktop_platform": "Windows + WSL",
   "entry": "INSTALL_AGENT.md",
   "cli": "scripts/one_prompt.py",

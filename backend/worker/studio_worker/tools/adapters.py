@@ -235,24 +235,16 @@ class Adapter:
             self.require(assets, (p["bias_file"], p["structure_file"]))
             return self.bias_command(spec, environment)
         if engine == "nep.analyze":
-            self.require(assets, ("energy_test.out","force_test.out","evaluation.json"))
+            self.require(assets, ("energy_train.out","force_train.out"))
             script = Path(environment.get("skills",{}).get("nep-regression-rmse","")) / "scripts/plot_nep_regression.py"
             if not script.is_absolute() or not script.is_file():
                 raise ValueError("Register the original nep-regression-rmse skill directory")
-            return [self.executable(environment,"python"),str(script),"--prediction-dir",".","--outdir","regression","--splits","test"]
+            return [self.executable(environment,"python"),str(script),"--prediction-dir",".","--outdir","regression","--splits","train"]
         if engine == "nep.eval":
-            self.require(assets, ("nep.in","evaluation.xyz","nep.txt"))
-            self.parameters(p,("dataset_role",))
-            if "train.xyz" in assets or "test.xyz" in assets:
-                raise ValueError("NEP evaluation uses evaluation.xyz, copied explicitly to native prediction input")
-            registered = environment.get("repositories", {}).get("gpumd")
-            if not registered:
-                raise ValueError("Register the GPUMD tool source; nep.eval production helper tools/nep_predict.py is no longer shipped in Studio")
-            script = Path(registered) / "tools" / "nep_predict.py"
-            if not script.is_file():
-                raise ValueError("The registered GPUMD tool source has no tools/nep_predict.py")
-            return [self.executable(environment,"python"),str(script),
-                    self.executable(environment,"nep"),p["dataset_role"]]
+            if "evaluation.xyz" in assets:
+                raise ValueError("NEP evaluation uses the native prediction input train.xyz; evaluation.xyz is no longer accepted")
+            self.require(assets, ("nep.in","train.xyz","nep.txt"))
+            return [self.executable(environment, "nep")]
         if engine == "nep.train":
             self.require(assets, ("nep.in", "train.xyz", "test.xyz"))
             return [self.executable(environment, "nep")]
@@ -386,8 +378,6 @@ class Adapter:
             if (modes[-1] if modes else "0") != expected:
                 raise ValueError("NEP prediction mode does not match run type")
             if self.engine == "nep.eval":
-                if p.get("dataset_role") not in ("independent_test","validation","train"):
-                    raise ValueError("Explicit dataset role required")
                 header=(directory/"nep.txt").read_text().splitlines()[:6]
                 config={r[0]:r[1:] for r in rows if r}
                 model={line.split()[0]:line.split()[1:] for line in header}

@@ -90,33 +90,24 @@
       "declaration_tokens": []
     },
     "nep.eval": {
-      "required_parameters": [
-        "dataset_role"
-      ],
+      "required_parameters": [],
       "input_file_parameters": [],
-      "aliases": {
-        "dataset_role": [
-          "dataset.role"
-        ]
-      },
+      "aliases": {},
       "required_inputs": [
         "nep.in",
-        "evaluation.xyz",
+        "train.xyz",
         "nep.txt"
       ],
       "aimlab_tool_id": "gpu-sampling",
-      "declaration_tokens": [
-        "dataset_role"
-      ]
+      "declaration_tokens": []
     },
     "nep.analyze": {
       "required_parameters": [],
       "input_file_parameters": [],
       "aliases": {},
       "required_inputs": [
-        "energy_test.out",
-        "force_test.out",
-        "evaluation.json"
+        "energy_train.out",
+        "force_train.out"
       ],
       "aimlab_tool_id": "gpu-sampling",
       "declaration_tokens": []

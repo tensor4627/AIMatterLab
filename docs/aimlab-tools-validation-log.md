@@ -61,3 +61,22 @@
 | Node / Python / 静态检查 | Node **3111（3103 通过/0 失败/8 skip）**；Python worker **779（2 skip）**；`tsc` 0；doc links 81；契约同步 current | `.studio/audit-tool-contracts/node-tests-final-dev42.log` 等 |
 
 **结论**：本轮范围内声明、绑定、检查、登记与参考配置流程通过；**未运行真实工具安装、GPU/CUDA、16 个最小用例复跑、科学精度/收敛或用户真实环境配置**，均记为 `not_run/blocked`。声明检查与 parity 通过不等于真实安装或科学验证通过；工具仓默认分支仍未合入 `aimlab-tools/`，严格声明模式需按发布顺序先合入默认分支再启用。
+
+## 2026-11-08 方案 B（nep.eval 原生命名）复验
+
+用户确认 NEP 原生 prediction 模式只需 `prediction 1`，**只读取 `train.xyz` 并写出 `*_train.out`**；`train.xyz` 只是原生固定文件名，内容可为任意评估/验证/测试数据集。Studio 因此采用方案 B：删除 `nep_predict.py` helper，`nep.eval` 直接使用原生命名；`nep.analyze` 改用 `energy_train.out`/`force_train.out` 与 `--splits train`。
+
+候选版本：GPUMD `aimlab` 分支重建为**基于 `GPU-Sampling` tip `7529f413` 的单提交 `2c716d71`（仅 `aimlab-tools/`；删除 helper；旧历史备份分支 `aimlab-helper-history-20261108`）**；pygas `4d981f8`、pydyn `5c6b67e`、hotpp `e5d0cc5`、torchnep `4c3474b`（无改动）。
+
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| AimLab 声明检查 | **5/5 passed**（GPUMD 闭包 45 文件、`worktree_dirty=false`；其余 23/15/11/18） | `.studio/final-planb-verification/20261108-200548/*-declaration.json` |
+| 多源汇总 | **5/5 passed，0 failed** | 同目录 `sources.json` |
+| adapter conformance | **15 passed + 1 pending**（`torchnep.train` 无 Studio adapter，预期）；`--allow-pending` 下 `status=passed` | 同目录 `conformance.json` |
+| 可复现 parity | **20/20 用例 argv 一致 + 2/2 负例双方拒绝** | `.studio/final-planb-parity.json` |
+| 真实 CPU reference 配置闭环 | **11/11 checks passed**（真实 worker 安装/固定测试/执行 skill/body-only 运行） | `.studio/audit-tool-contracts/e2e-dev43/` |
+| Electron 原生包面板 | **7/7 checks passed**（version `1.0.0-dev.43`） | `.studio/audit-tool-contracts/native-tool-package-dev43/` |
+| AimLab 登记（真实 Catalog） | **5/5 `definition_checked`**（GPUMD 新 commit `2c716d71`） | `.studio/audit-tool-contracts/reports/aimlab-registry.json` |
+| Node / Python / 静态 | Node **3111（3103 通过/0 失败/8 skip）**；Python worker **779（2 skip）**；`tsc` 0；doc links 81；契约同步 current | `.studio/audit-tool-contracts/node-tests-final-dev43.log` 等 |
+
+**结论**：方案 B 的契约/绑定/声明/检查与参考配置闭环通过；**真实 `nep` 二进制/GPU 最小用例未运行（not_run）**，不据此声称推理或科学结果通过。`train.xyz` 不表示训练用途；数据集角色改由任务说明和运行记录承载。GPUMD `aimlab` 分支当前相对 `GPU-Sampling` tip 为 **1 ahead / 0 behind**，该提交只改 `aimlab-tools/`。

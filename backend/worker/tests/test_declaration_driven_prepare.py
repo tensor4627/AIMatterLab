@@ -81,52 +81,41 @@ class DeclarationDrivenPrepare(unittest.TestCase):
             with patch("studio_worker.tools.declarations.bind_operation", side_effect=lambda *args, **kwargs: {"argv": ["SENTINEL"]}):
                 self.assertEqual(adapters.Adapter("hotpp.eval").prepare(self.spec, self.environment), ["SENTINEL"])
 
-    def test_nep_eval_uses_the_declaration_when_the_repository_has_the_helper(self):
+    def test_nep_eval_uses_the_declaration_with_native_prediction_inputs(self):
         root = tempfile.mkdtemp()
-        (Path(root) / "tools").mkdir()
-        (Path(root) / "tools" / "nep_predict.py").write_text("", encoding="utf-8")
         write_manifest(root, {
             "schema_version": 1,
             "id": "gpu-sampling",
             "functions": [{
                 "id": "nep.eval",
                 "engine": "nep.eval",
-                "entrypoint": "tools/nep_predict.py",
-                "inputs": [{"id": "nep-in", "required": True}],
-                "parameters": [{"id": "dataset-role", "required": True}],
-                "operation": {"command": ["{python}", "{entrypoint}", "{executable:nep}", "{dataset-role}"], "failure_handling": "Inspect logs."}
+                "entrypoint": "aimlab-tools/tests/nep-eval/run-test.py",
+                "inputs": [{"id": "nep-in", "required": True}, {"id": "train-xyz", "required": True}, {"id": "nep-txt", "required": True}],
+                "parameters": [],
+                "operation": {"command": ["{executable:nep}"], "failure_handling": "Inspect logs."}
             }]
         })
         spec = {
             "engine": "nep.eval",
-            "inputs": {"nep.in": "/tasks/nep.in", "evaluation.xyz": "/tasks/evaluation.xyz", "nep.txt": "/tasks/nep.txt"},
-            "parameters": {"dataset_role": "test"},
+            "inputs": {"nep.in": "/tasks/nep.in", "train.xyz": "/tasks/train.xyz", "nep.txt": "/tasks/nep.txt"},
+            "parameters": {},
         }
         environment = {**self.environment, "repositories": {"gpu-sampling": root}}
         clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}
         with patch.dict(os.environ, clean, clear=True):
-            self.assertEqual(
-                adapters.Adapter("nep.eval").prepare(spec, environment),
-                [sys.executable, str(Path(root) / "tools" / "nep_predict.py"), sys.executable, "test"],
-            )
+            self.assertEqual(adapters.Adapter("nep.eval").prepare(spec, environment), [sys.executable])
 
-    def test_nep_eval_requires_a_registered_tool_source_without_declaration(self):
+    def test_nep_eval_uses_native_prediction_inputs_without_a_helper(self):
         spec = {
             "engine": "nep.eval",
-            "inputs": {"nep.in": "/tasks/nep.in", "evaluation.xyz": "/tasks/evaluation.xyz", "nep.txt": "/tasks/nep.txt"},
-            "parameters": {"dataset_role": "test"},
+            "inputs": {"nep.in": "/tasks/nep.in", "train.xyz": "/tasks/train.xyz", "nep.txt": "/tasks/nep.txt"},
+            "parameters": {},
         }
-        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}
-        with patch.dict(os.environ, clean, clear=True), self.assertRaisesRegex(ValueError, "Register the GPUMD tool source"):
-            adapters.Adapter("nep.eval").prepare(spec, {**self.environment, "repositories": {}})
-        source = tempfile.mkdtemp()
-        (Path(source) / "tools").mkdir()
-        (Path(source) / "tools" / "nep_predict.py").write_text("", encoding="utf-8")
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_")}
         with patch.dict(os.environ, clean, clear=True):
-            self.assertEqual(
-                adapters.Adapter("nep.eval").prepare(spec, {**self.environment, "repositories": {"gpumd": source}}),
-                [sys.executable, str(Path(source) / "tools" / "nep_predict.py"), sys.executable, "test"],
-            )
+            self.assertEqual(adapters.Adapter("nep.eval").prepare(spec, {"executables": {"nep": sys.executable}}), [sys.executable])
+            with self.assertRaisesRegex(ValueError, "native prediction input"):
+                adapters.Adapter("nep.eval").prepare({"engine": "nep.eval", "inputs": {"nep.in": "/tasks/nep.in", "evaluation.xyz": "/tasks/evaluation.xyz", "nep.txt": "/tasks/nep.txt"}, "parameters": {}}, {"executables": {"nep": sys.executable}})
 
     def test_strict_mode_rejects_missing_declarations_but_accepts_a_registered_source(self):
         clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_")}

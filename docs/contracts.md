@@ -70,15 +70,15 @@ inputs 的键是独立运行目录内相对路径，值是授权源文件路径�
 | gpumd.sampling | run.in、model.xyz、GAScfg.yaml、bias；run.in 必须加载确切 bias 与配置 |
 | pydyn.sampling | run.py、bias/结构；独立 sampling 环境、SamplingConfig、同一 bias 实例及 hooks |
 | nep.train | nep.in、train.xyz、test.xyz（后者是验证集）；prediction 0 |
-| nep.eval | nep.in、nep.txt、evaluation.xyz；prediction 1、dataset_role=independent_test/validation/train |
-| nep.analyze | energy_test.out、force_test.out、evaluation.json，virial_test.out 可选；环境登记原绘图 skill |
+| nep.eval | nep.in、train.xyz、nep.txt；prediction 1；train.xyz 是 NEP 原生固定预测输入名，可放任意评估/验证/测试数据集（文件名不表示训练用途） |
+| nep.analyze | energy_train.out、force_train.out，virial_train.out/stress_train.out 可选；环境登记原绘图 skill；使用 --splits train |
 | hotpp.train | input.yaml、配置引用的数据集；可传 checkpoint |
 | hotpp.eval | model_file、dataset_file 和对应输入；默认 ASE 数据类型 |
 | hotpp.export | model_file、symbols（显式数组）；记录 ase-* / lammps-* 两类消费端 |
 | pygas.reweight | bias_file、GASGaussian.txt、fes.yaml |
 | pygas.opes-reweight | OPES_COLVAR、fes.yaml；独立于 WTMetaD |
 
-NEP prediction 模式原生读取 train.xyz。工作台由 evaluation.xyz 明确复制出原生输入，保留原输出，再生成匹配实际角色的分析别名并写 evaluation.json。模型 species 顺序和架构必须与 nep.in 匹配。独立性仍需对照模型训练/验证结构的来源哈希，不能仅由文件名判断。
+NEP prediction 模式原生只读取 train.xyz 并写出 `*_train.out`。`nep.eval` 直接使用该原生输入与原生输出，不再复制 evaluation.xyz、不做角色别名、不写 evaluation.json；数据用途（评估/验证/测试）由任务描述和运行记录说明，不能仅由 train.xyz 文件名判断。模型 species 顺序和架构必须与 nep.in 匹配。独立性仍需对照模型训练/验证结构的来源哈希，不能仅由文件名判断。
 
 ## Bias
 

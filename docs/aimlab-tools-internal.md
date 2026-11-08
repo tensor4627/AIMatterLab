@@ -240,7 +240,7 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 
 - 已实现：本文件第 5 节的只读声明与文件闭包检查（含自包含扫描）、`tools.aimlab.*` 登记路由、生产声明与中立契约的 conformance 检查、可复现 parity 脚本 `scripts/check-aimlab-parity.py`、Worker 端声明绑定模块 `studio_worker.tools.declarations`，以及 `Adapter.prepare` 的声明驱动集成：`DEFAULT_DECLARATION_ENGINES` 已覆盖全部 15 条内置 route；已注册源码仓库存在 `aimlab-tools/manifest.json` 时默认使用声明 argv，`STUDIO_DECLARATION_DRIVEN=0` 可关闭、`=1` 可扩大试点、`STUDIO_DECLARATION_ENGINES` 可指定 allowlist；
 - 声明只替换 argv 构造：`Adapter.prepare` 在声明路径仍执行内置校验（必需输入/参数、单 walker 采样限制、数值控制），并拒绝 `manifest.id` 与契约 `aimlab_tool_id` 不一致、`declaration_tokens` 未逐项出现在 `operation.command` 的声明；`bias.validate` 的 `mode` 归一化在 Studio 侧按契约 `parameter_transforms` 执行（static/metad/wtmetad→bias、cvonly、opes），声明绑定归一化后的值；
-- `nep.eval` 的生产 helper 已迁入 GPUMD 仓库 `tools/nep_predict.py`，Studio 侧旧 `nep_predict.py` 已删除；`nep.analyze` 使用 `{skill:nep-regression-rmse}` 外部资源 token，未注册时检查/执行报错；
+- `nep.eval` 直接使用 NEP 原生 prediction 输入 `train.xyz`（文件名固定，内容可为任意评估/验证/测试数据集）与原生 `*_train.out`，不再需要 Studio 或工具仓的 `nep_predict.py` helper，也不写 `evaluation.json`；`nep.analyze` 使用原生 `*_train.out` 与 `--splits train`，并继续使用 `{skill:nep-regression-rmse}` 外部资源 token，未注册时检查/执行报错；
 - 生产兼容默认：Worker 启动脚本（`bootstrap.py`）默认 `STUDIO_REQUIRE_TOOL_DECLARATIONS=0`，以兼容默认分支尚未合入 `aimlab-tools/` 的已有环境；只有显式设置 `=1` 才在缺少声明时严格报错。发布顺序要求：工具仓库先把 `aimlab-tools/` 合入默认分支并完成检查/验证，再在受控环境启用严格模式（当前各工具仓默认分支仍未合入）；
 - 未实现：登记/版本绑定的执行端强制（Worker 仍读取已注册环境仓库工作树的 `aimlab-tools/manifest.json`，不校验 commit 或 `declaration_sha256`；`tools.aimlab.*` 登记记录与执行路径仍是两套存储）、`engine` 与 Worker 适配器交叉校验、移除遗留兼容回退、真实安装/GPU 执行验证、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；
 - 因此检查通过不等于“已接入 Studio”。登记、环境配置和真实测试通过须按实际实现另行完成并记录；

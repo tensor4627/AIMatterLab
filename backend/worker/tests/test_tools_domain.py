@@ -40,10 +40,10 @@ class ToolsDomain(unittest.TestCase):
         self.assertEqual(CONTRACTS, json.loads((WORKER / 'studio_worker/engine_contracts.json').read_text(encoding='utf-8')))
         self.assertFalse((WORKER / 'studio_worker/tools/engine_contracts.json').exists())
         with tempfile.TemporaryDirectory() as tool_source:
-            (Path(tool_source) / 'tools').mkdir()
-            (Path(tool_source) / 'tools' / 'nep_predict.py').write_text('', encoding='utf-8')
-            command = Adapter('nep.eval').prepare({'inputs': {name: name for name in ('nep.in', 'evaluation.xyz', 'nep.txt')}, 'parameters': {'dataset_role': 'validation'}}, {'executables': {'python': sys.executable, 'nep': sys.executable}, 'repositories': {'gpumd': tool_source}})
-            self.assertEqual(command, [sys.executable, str(Path(tool_source) / 'tools/nep_predict.py'), sys.executable, 'validation'])
+            command = Adapter('nep.eval').prepare({'inputs': {name: name for name in ('nep.in', 'train.xyz', 'nep.txt')}, 'parameters': {}}, {'executables': {'nep': sys.executable}})
+            self.assertEqual(command, [sys.executable])
+            with self.assertRaisesRegex(ValueError, 'native prediction input'):
+                Adapter('nep.eval').prepare({'inputs': {name: name for name in ('nep.in', 'evaluation.xyz', 'nep.txt')}, 'parameters': {}}, {'executables': {'nep': sys.executable}})
 
     def test_installed_standalone_worker_contains_new_owners_and_old_imports(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -45,7 +45,7 @@
 
 当前静态 umbrella NVE 样例中，PyDyn 配对恢复的 r、p、box 最大绝对差均为 0。该结论仅适用于本次样例，不能推广到 NPT 或有历史状态的采样。短 WTMetaD 的 FES 仅用于检查读取和重加权链路，未验证收敛。
 
-NEP 原生 prediction 在此版本读取 train.xyz；适配器从明确 evaluation.xyz 建立独立预测目录并记录数据角色及哈希。不会把训练输出当作独立测试。缺失 virial 标签时返回 not_run。
+NEP 原生 prediction 只读取 train.xyz 并写出 `*_train.out`；`nep.eval` 直接使用该原生命名，数据集用途（评估/验证/测试）记录在任务说明与运行记录中，不能由文件名推断。不会把训练输出当作独立测试。缺失 virial 标签时返回 not_run。
 
 HotPP CLI 会搬移已有 model 输出目录；续算将输入 checkpoint 快照放在 resume.ckpt，并要求新的 continuation_config。只恢复后立即结束不算完成继续训练。
 
