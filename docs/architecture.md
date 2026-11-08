@@ -2,6 +2,8 @@
 
 产品要求见 [软件规范](software-specification.md)，迁移依据见 [重组方案](development/repository-reorganization.md)，实现与验证范围见 [v1.0 记录](v1.0.md)。本页描述当前源码所有者，不表示所有科学引擎均已通过新的工具配置路线。
 
+自 `1.0.1` 起，本文描述的源码所有者边界（前端 / 后端主进程 / Python worker / Agent）作为正式 Studio 本体设计基线冻结；后续变化必须同步更新本页与版本记录，并遵守 1.0 起的向后兼容与版本化迁移约定。
+
 ## 源码入口
 
 ```text

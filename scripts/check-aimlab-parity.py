@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend" / "worker"))
 
 from studio_worker.tools import adapters  # noqa: E402
+from studio_worker.tools.declarations import find_declaration  # noqa: E402
 
 REPOSITORIES = {"gpumd": "GPUMD", "pygas": "pygas", "pydyn": "pydyn", "hotpp": "hotpp", "torchnep": "torchnep"}
 EXECUTABLES = ("python", "gpumd", "gpu-sampling", "nep", "pygas", "hotpp")
@@ -91,13 +92,18 @@ def negative_cases():
 
 
 def prepare(engine, spec, env, *, declared):
-    previous = {key: os.environ.get(key) for key in ("STUDIO_DECLARATION_DRIVEN", "STUDIO_REQUIRE_TOOL_DECLARATIONS")}
+    previous = {key: os.environ.get(key) for key in
+                ("STUDIO_DECLARATION_DRIVEN", "STUDIO_REQUIRE_TOOL_DECLARATIONS", "STUDIO_DECLARATION_ENGINES")}
     try:
         if declared:
             os.environ.pop("STUDIO_DECLARATION_DRIVEN", None)
-            os.environ.pop("STUDIO_REQUIRE_TOOL_DECLARATIONS", None)
+            os.environ.pop("STUDIO_DECLARATION_ENGINES", None)
+            # Force the declaration gate open: a missing declaration must fail the case
+            # instead of silently comparing the built-in adapter against itself.
+            os.environ["STUDIO_REQUIRE_TOOL_DECLARATIONS"] = "1"
         else:
             os.environ["STUDIO_DECLARATION_DRIVEN"] = "0"
+            os.environ.pop("STUDIO_DECLARATION_ENGINES", None)
             os.environ.pop("STUDIO_REQUIRE_TOOL_DECLARATIONS", None)
         return {"argv": adapters.Adapter(engine).prepare(spec, env), "error": None}
     except Exception as error:  # noqa: BLE001 - evidence report keeps the concrete failure
@@ -123,11 +129,16 @@ def main(argv=None):
     for spec in cases():
         baseline = prepare(spec["engine"], spec, env, declared=False)
         declared = prepare(spec["engine"], spec, env, declared=True)
-        parity = baseline["error"] is None and declared["error"] is None and baseline["argv"] == declared["argv"]
+        declaration = find_declaration(env["repositories"], spec["engine"])
+        used = declaration is not None
+        parity = (baseline["error"] is None and declared["error"] is None
+                  and baseline["argv"] == declared["argv"] and used)
         results.append({"label": spec["label"], "engine": spec["engine"], "parity": parity,
+                        "declaration_used": used,
+                        "declaration_tool_id": declaration.get("tool_id") if declaration else None,
                         "baseline": baseline, "declared": declared})
         if not parity:
-            failures.append(spec["label"])
+            failures.append(spec["label"] + ("-no-declaration" if not used else ""))
     negatives = []
     for spec in negative_cases():
         baseline = prepare(spec["engine"], spec, env, declared=False)

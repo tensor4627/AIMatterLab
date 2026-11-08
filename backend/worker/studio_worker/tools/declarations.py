@@ -25,6 +25,18 @@ def _normalize(value) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value).lower())
 
 
+_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,10}$")
+
+
+def _trim_extension(value) -> str:
+    """Normalize a port or file name after removing one common file extension.
+
+    ``GAScfg.yaml`` and the declaration port ``gas-cfg`` describe the same input;
+    ``validation`` and ``validation-history`` must remain different parameters.
+    """
+    return _normalize(_EXTENSION.sub("", str(value)))
+
+
 def _load_manifest(repository):
     path = Path(repository) / "aimlab-tools" / "manifest.json"
     if not path.is_file():
@@ -39,11 +51,21 @@ def _load_manifest(repository):
 
 
 def find_declaration(repositories, engine):
-    """Return the single declaration for ``engine`` from registered repositories, or None."""
+    """Return the single declaration for ``engine`` from registered repositories, or None.
+
+    The same repository registered under more than one environment key is a legitimate
+    alias and is de-duplicated by resolved root; two different checkouts that both
+    declare the engine remain an explicit ambiguity error.
+    """
     matches = []
+    seen_roots = set()
     for root in (repositories or {}).values():
         if not root:
             continue
+        resolved = str(Path(root).resolve())
+        if resolved in seen_roots:
+            continue
+        seen_roots.add(resolved)
         manifest = _load_manifest(root)
         if manifest is None:
             continue
@@ -54,7 +76,7 @@ def find_declaration(repositories, engine):
             if declared == engine:
                 matches.append({
                     "tool_id": manifest.get("id"),
-                    "repository": str(Path(root).resolve()),
+                    "repository": resolved,
                     "function": function,
                 })
     if len(matches) > 1:
@@ -91,10 +113,30 @@ def _unique_match(values, declared_id, where):
     return _MISSING
 
 
+def _exact_match(values, declared_id, where):
+    """Resolve a declared id by original or normalized equality only.
+
+    Prefix matching is intentionally not used for parameter values: a user parameter
+    such as ``validation`` (reserved numerical controls object) must never be bound to a
+    declaration token ``validation-history`` merely because one string is a prefix.
+    """
+    target = _normalize(declared_id)
+    if not target or not isinstance(values, dict):
+        return _MISSING
+    if declared_id in values:
+        return declared_id
+    exact = [key for key in values if _normalize(key) == target]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        raise DeclarationError("Ambiguous " + where + ": " + str(declared_id))
+    return _MISSING
+
+
 def _lookup(values, declared_id):
     if not isinstance(values, dict):
         return _MISSING
-    key = _unique_match(values, declared_id, "parameter")
+    key = _exact_match(values, declared_id, "parameter")
     if key is _MISSING:
         return _MISSING
     return values[key]
@@ -115,16 +157,24 @@ def _ports(function):
 
 
 def _find_port(function, name):
+    """Resolve a contract name to one declared port by exact normalized identity.
+
+    File names may differ from declaration ids only by a common extension
+    (``GAScfg.yaml`` -> ``gas-cfg``); arbitrary prefix matching is rejected because it
+    lets a different concept such as ``model-file`` satisfy ``mode``.
+    """
     ports = _ports(function)
     target = _normalize(name)
+    if not target:
+        return None
     exact = [port for port in ports if _normalize(port["id"]) == target]
     if len(exact) == 1:
         return exact[0]
     if len(exact) > 1:
         return None
-    prefix = [port for port in ports if target and (
-        _normalize(port["id"]).startswith(target) or target.startswith(_normalize(port["id"])))]
-    return prefix[0] if len(prefix) == 1 else None
+    trimmed = _trim_extension(name)
+    folded = [port for port in ports if _trim_extension(port["id"]) == trimmed]
+    return folded[0] if len(folded) == 1 else None
 
 
 def _require_declaration_tokens(function, command):
@@ -224,7 +274,11 @@ def bind_operation(declaration, spec, environment):
                 if argv and argv[-1].startswith("-"):
                     argv.pop()
             elif kind == "array":
-                argv.extend(value)
+                if value:
+                    argv.extend(value)
+                elif argv and argv[-1].startswith("-"):
+                    # An omitted optional array must not leave its flag behind.
+                    argv.pop()
             else:
                 argv.append(value)
             continue

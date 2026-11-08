@@ -1,10 +1,5 @@
 const normalize = value => String(value).toLowerCase().replace(/[^a-z0-9]/g, '');
-
-function portMatch(declaredId, contractName) {
-  const left = normalize(declaredId);
-  const right = normalize(contractName);
-  return !!left && !!right && (left === right || left.startsWith(right) || right.startsWith(left));
-}
+const trimExtension = value => normalize(String(value).replace(/\.[A-Za-z0-9]{1,10}$/, ''));
 
 function findPort(name, ports) {
   const target = normalize(name);
@@ -12,9 +7,12 @@ function findPort(name, ports) {
   const exact = ports.filter(port => normalize(port.id) === target);
   if (exact.length === 1) return {status: 'found', port: exact[0]};
   if (exact.length > 1) return {status: 'ambiguous'};
-  const prefix = ports.filter(port => normalize(port.id) && (normalize(port.id).startsWith(target) || target.startsWith(normalize(port.id))));
-  if (prefix.length === 1) return {status: 'found', port: prefix[0]};
-  return {status: prefix.length > 1 ? 'ambiguous' : 'missing'};
+  // A contract file name and a declaration id may differ only by a common extension
+  // (GAScfg.yaml -> gas-cfg). Arbitrary prefix matching is rejected because it would let
+  // a different concept such as model-file satisfy mode.
+  const folded = ports.filter(port => trimExtension(port.id) === trimExtension(name));
+  if (folded.length === 1) return {status: 'found', port: folded[0]};
+  return {status: folded.length > 1 ? 'ambiguous' : 'missing'};
 }
 
 const TOKEN = /\{([^{}]+)\}/g;
@@ -70,8 +68,7 @@ export function checkAimlabAdapterConformance({declaration, engineContracts}) {
   checks.push(requiredPortCheck({fn, names: contract.required_inputs || [], kind: 'input', checkId: 'declared_required_inputs'}));
   checks.push(requiredPortCheck({fn, names: contract.required_parameters || [], kind: 'parameter', checkId: 'declared_required_parameters'}));
   const ports = declaredPorts(fn);
-  const tokens = new Set(operationTokens(fn.operation?.command || []).map(normalize));
-  const missing = [];
+  const tokens = new Set(operationTokens(fn.operation?.command || []).map(normalize));  const missing = [];
   const omitted = [];
   for (const name of contract.declaration_tokens || []) {
     const found = findPort(name, ports);

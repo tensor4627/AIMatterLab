@@ -145,7 +145,12 @@ class Adapter:
     def _declaration_binding(self, spec, environment):
         """Return the declaration-bound argv and source, or None for the built-in path."""
         mode = os.environ.get("STUDIO_DECLARATION_DRIVEN", "auto")
+        require_declarations = os.environ.get("STUDIO_REQUIRE_TOOL_DECLARATIONS") == "1"
         if mode == "0":
+            if require_declarations:
+                raise ValueError(
+                    "STUDIO_REQUIRE_TOOL_DECLARATIONS=1 cannot be combined with "
+                    "STUDIO_DECLARATION_DRIVEN=0; declarations are required in this mode")
             return None
         allowlist = os.environ.get("STUDIO_DECLARATION_ENGINES")
         if allowlist is not None:
@@ -159,7 +164,7 @@ class Adapter:
         from studio_worker.tools.declarations import bind_operation, find_declaration
         declaration = find_declaration(environment.get("repositories", {}), self.engine)
         if declaration is None:
-            if os.environ.get("STUDIO_REQUIRE_TOOL_DECLARATIONS") == "1":
+            if require_declarations:
                 raise ValueError("Tool declaration required for engine " + self.engine + "; register the tool source containing aimlab-tools/manifest.json")
             return None
         from studio_worker.tools import engine_contracts

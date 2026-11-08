@@ -161,13 +161,14 @@ class DeclarationDrivenPrepare(unittest.TestCase):
                     {"id": "mode", "required": True},
                     {"id": "cutoff", "required": True},
                     {"id": "cv-size", "required": True},
+                    {"id": "validation-history", "required": False, "default": None},
                     {"id": "validation", "required": False, "default": None},
                     {"id": "kernel-capacity", "required": False, "default": None},
                 ],
                 "operation": {"command": [
                     "{python}", "{entrypoint}", "{bias-file}", "{structure-file}",
                     "--mode", "{mode}", "--cutoff", "{cutoff}", "--cv-size", "{cv-size}",
-                    "--device", "cuda", "--history", "{validation}", "--kernel-capacity", "{kernel-capacity}",
+                    "--device", "cuda", "--history", "{validation-history}", "--kernel-capacity", "{kernel-capacity}",
                 ], "failure_handling": "Inspect logs."},
             }],
         })
@@ -178,7 +179,8 @@ class DeclarationDrivenPrepare(unittest.TestCase):
         spec = {
             "engine": "bias.validate",
             "inputs": {"bias.pt": "/tasks/bias.pt", "model.xyz": "/tasks/model.xyz"},
-            "parameters": {"bias_file": "bias.pt", "structure_file": "model.xyz", "cv_size": 1, "cutoff": 5, "mode": "metad"},
+            "parameters": {"bias_file": "bias.pt", "structure_file": "model.xyz", "cv_size": 1, "cutoff": 5,
+                           "mode": "metad", "validation": {"fd_step": 1e-5}},
         }
         clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_")}
         with patch.dict(os.environ, clean, clear=True):
@@ -221,6 +223,66 @@ class DeclarationDrivenPrepare(unittest.TestCase):
         declaration = find_declaration({"hotpp": root}, "hotpp.train")
         with self.assertRaisesRegex(ValueError, "missing required token"):
             bind_operation(declaration, {"inputs": {"input.yaml": "/tasks/input.yaml"}, "parameters": {}}, self.environment)
+
+
+    def test_parameter_values_use_exact_identity_not_prefixes(self):
+        root = tempfile.mkdtemp()
+        write_manifest(root, {
+            "schema_version": 1,
+            "id": "hotpp",
+            "functions": [{
+                "id": "hotpp.train",
+                "engine": "hotpp.train",
+                "entrypoint": "hotpp/entrypoints/main.py",
+                "inputs": [{"id": "input-yaml", "required": True}],
+                "parameters": [{"id": "checkpoint", "required": False, "default": None}],
+                "operation": {"command": [
+                    "{executable:hotpp}", "train", "-i", "{input-yaml}", "-o", "model",
+                    "--load_checkpoint", "{checkpoint}",
+                ], "failure_handling": "Inspect logs."},
+            }],
+        })
+        environment = {"executables": {"hotpp": sys.executable}, "repositories": {"hotpp": root}}
+        spec = {
+            "engine": "hotpp.train",
+            "inputs": {"input.yaml": "/tasks/input.yaml"},
+            "parameters": {"checkpoint_dir": "sneaky.ckpt"},
+        }
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_")}
+        with patch.dict(os.environ, clean, clear=True):
+            argv = adapters.Adapter("hotpp.train").prepare(spec, environment)
+        self.assertEqual(argv, [sys.executable, "train", "-i", "input.yaml", "-o", "model"])
+
+    def test_strict_declaration_requirement_cannot_be_bypassed_by_driven_zero(self):
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_")}
+        with patch.dict(os.environ, {**clean, "STUDIO_REQUIRE_TOOL_DECLARATIONS": "1", "STUDIO_DECLARATION_DRIVEN": "0"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "cannot be combined"):
+                adapters.Adapter("hotpp.eval").prepare(self.spec, self.environment)
+
+    def test_empty_optional_array_omits_its_flag(self):
+        root = tempfile.mkdtemp()
+        write_manifest(root, {
+            "schema_version": 1,
+            "id": "hotpp",
+            "functions": [{
+                "id": "hotpp.export",
+                "engine": "hotpp.export",
+                "entrypoint": "hotpp/entrypoints/main.py",
+                "inputs": [],
+                "parameters": [
+                    {"id": "model-file", "required": True},
+                    {"id": "symbols", "required": False, "default": []},
+                ],
+                "operation": {"command": [
+                    "{executable:hotpp}", "freeze", "{model-file}", "-s", "{symbols}", "-o", "infer.pt",
+                ], "failure_handling": "Inspect logs."},
+            }],
+        })
+        declaration = find_declaration({"hotpp": root}, "hotpp.export")
+        argv = bind_operation(declaration, {
+            "inputs": {}, "parameters": {"model_file": "best.pt", "symbols": []},
+        }, {"executables": {"hotpp": sys.executable}, "repositories": {"hotpp": root}})
+        self.assertEqual(argv["argv"], [sys.executable, "freeze", "best.pt", "-o", "infer.pt"])
 
 
 if __name__ == "__main__":

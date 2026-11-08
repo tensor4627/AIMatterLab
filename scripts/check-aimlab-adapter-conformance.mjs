@@ -82,7 +82,7 @@ function main(argv) {
     checked_at: new Date().toISOString()
   };
   if (options.out) fs.writeFileSync(resolveReportPath(options.out), JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
-  process.stdout.write(JSON.stringify({status, declaration_count: declarations.length, summary, failed, pending_adapter: pending}) + '\n');
+  process.stdout.write(JSON.stringify({status, declaration_count: declarations.length, summary, failed, pending_adapter: pending, source_errors: sourceErrors}) + '\n');
   return status === 'passed' ? 0 : 1;
 }
 

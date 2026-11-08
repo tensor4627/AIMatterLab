@@ -133,6 +133,8 @@ AimLab 内部工具不在 Studio 里再复制一份源码或单独维护交付�
 
 token 必须匹配保留 token、`executable:<name>`、`skill:<name>`，或本功能已声明的输入/参数 ID；未声明的 token 检查失败。可选输入/参数省略时按声明默认行为处理；可选 flag 与值建议用独立 token（如 `--load_checkpoint {checkpoint}`），省略时 flag 一并省略。数组参数不能嵌入单个 argv token 内部。声明驱动路径仍会执行 Studio 内置适配器的既有校验，声明只替换生产 argv 的构造。
 
+契约名、声明端口与用户参数按归一化精确匹配；输入文件名允许去掉一个常见扩展名后精确匹配（如 `GAScfg.yaml` 与 `gas-cfg`）。不要依赖任意前缀相似：例如 `validation`（数值控制对象）不会被当作 `validation-history`，`model-file` 也不能满足必需参数 `mode`。
+
 ### 4.4 测试用例字段
 
 每个 `tests.cases[]` 必需 `id`、`function_id`、`directory`、`instructions`、`entrypoint`、`resources`、`expected_outputs`、`pass_criteria`：

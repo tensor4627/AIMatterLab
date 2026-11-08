@@ -71,3 +71,18 @@ test('engines without a built-in adapter contract are pending rather than passin
   assert.equal(result.status, 'pending_adapter');
   assert.deepEqual(summarizeConformance([result, checkAimlabAdapterConformance({declaration: declaration(), engineContracts: contracts})]), {passed: 1, failed: 0, pending_adapter: 1});
 });
+
+test('prefix-similar ports cannot satisfy a different required contract name', () => {
+  const value = declaration({
+    parameters: [{id: 'model-file'}],
+    operation: {command: ['{python}', '{entrypoint}', '{run-in}', '{model-xyz}', '--mode', '{model-file}', '--history', '{validation_history}']}
+  });
+  const result = checkAimlabAdapterConformance({declaration: value, engineContracts: contracts});
+  assert.equal(result.status, 'failed');
+  const parameterCheck = result.checks.find(item => item.id === 'declared_required_parameters');
+  assert.equal(parameterCheck.status, 'failed');
+  assert.match(parameterCheck.detail, /Undeclared parameter: mode/);
+  const tokenCheck = result.checks.find(item => item.id === 'declaration_tokens');
+  assert.equal(tokenCheck.status, 'failed');
+  assert.match(tokenCheck.detail, /Undeclared contract token ports: mode/);
+});
