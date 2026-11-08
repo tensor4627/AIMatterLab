@@ -8,16 +8,27 @@
 
 这份接入指导 skill 指导 Agent 与软件开发者协作，保留原软件的仓库布局，在工作空间中生成一个 `工具名-package` 交付包。包内包含原软件的 Git 仓库、用于操作该工具的交付 skill 和标准测试重定向入口。交付格式见 [交付指南](skills/studio-tool-integration/references/deliverables.md)。
 
-它用于开发者的软件接入工作，与 Studio 中用于日常计算规划和执行的科学 skill 分开存放。可直接分发整个 skill 目录或 [ZIP](skills/studio-tool-integration.zip)；完整 schema、纯声明校验器、注册约束和小型 CPU 工程示例均在目录内，不需要访问 Studio 仓库才能理解交付格式。
+它用于开发者的软件接入工作，与 Studio 中用于日常计算规划和执行的科学 skill 分开存放。可直接分发整个 skill 目录或 [ZIP](skills/studio-tool-integration.zip)；完整 schema、纯声明校验器、注册约束、引擎契约副本和小型 CPU 工程示例均在目录内，不需要访问 Studio 仓库才能理解交付格式与内部声明契约。
 
 ## 内部工具（AimLab Tools）声明
 
-AimLab 自研工具（例如 GPU-Sampling）不按第三方 `<id>-package` 交付，而是在工具自己的仓库主工作分支维护 `aimlab-tools/`：机器可读 `manifest.json`、交付 `SKILL.md`、精简 `manual.md` 和 `tests/` 测试映射。声明与源码 commit 一起提交，Studio 按候选 commit 执行接入检查。内部标准见 [AimLab 内部工具声明与接入检查标准](../docs/aimlab-tools-internal.md)；随接入 skill 分发的摘要（目录、manifest、token、测试与检查要求）见 [AimLab 内部工具约定](skills/studio-tool-integration/references/aimlab-tools.md)。
+AimLab 自研工具（例如 GPU-Sampling）不按第三方 `<id>-package` 交付，而是在工具自己的仓库主工作分支维护 `aimlab-tools/`：机器可读 `manifest.json`、交付 `SKILL.md`、精简 `manual.md` 和 `tests/` 测试映射。声明与源码 commit 一起提交，Studio 按候选 commit 执行接入检查。内部标准见 [AimLab 内部工具声明与接入检查标准](../docs/aimlab-tools-internal.md)；随接入 skill 分发的自包含约定（目录、manifest、中立生产契约、token、测试与检查要求）见 [AimLab 内部工具约定](skills/studio-tool-integration/references/aimlab-tools.md)。
+
+内部声明必须按随 skill 分发的 `references/engine-contracts.json` 书写：`manifest.id` 必须等于所声明引擎的 `aimlab_tool_id`（当前为 `gpu-sampling`、`pygas`、`pydyn`、`hotpp`）；`operation.command` 必须逐项绑定契约的 `declaration_tokens`（包括可选参数 `validation_history`、`kernel_capacity` 等 token）；可选参数默认值来源只能引用随附契约条目（如 `references/engine-contracts.json#/engines/bias.validate`）或工具仓库内相对路径，不得引用 Studio 内部路径（`backend/worker`、`backend/main`、`contracts/tools`、`desktop/`、`frontend/`、`agent/tools`、`studio_worker/`）。生成或更新 `aimlab-tools/` 时只允许修改工具仓库的 `aimlab-tools/` 目录，工具仓库其他文件保持既有默认分支内容不变。
 
 检查命令（只读；不安装、不执行测试、不注册 Studio）：
 
 ```powershell
 node scripts/check-aimlab-tools.mjs --repo <工具仓库> --commit <sha> --out <新报告文件>
+node scripts/check-aimlab-adapter-conformance.mjs --repo <工具仓库1> --repo <工具仓库2> ... [--allow-pending] [--out <新报告文件>]
+```
+
+`check-aimlab-tools` 校验声明、路径闭包与测试映射，并扫描 `aimlab-tools/**` 文本、拒绝 Studio 内部路径引用。`check-aimlab-adapter-conformance` 对照生产声明与引擎契约检查必需输入/参数、`declaration_tokens` 覆盖和工具身份；没有内置引擎契约的功能记为 `pending_adapter`，默认不通过（退出码 1），只有显式 `--allow-pending` 才豁免。
+
+替换内置 adapter 前，可在 Linux/WSL 中用以下命令逐例复现声明绑定 argv 与内置 adapter argv 的对比（`--repos-root` 指向含 GPUMD、pygas、pydyn、hotpp、torchnep 检出的目录）：
+
+```bash
+python3 scripts/check-aimlab-parity.py --repos-root <目录> [--out <新报告文件>]
 ```
 
 检查通过只表示声明与文件闭包一致（`installation` / `tests` / `release` 仍为 `not_run`）；真实安装和声明测试通过后才进入放行与登记。接入测试只验证用户运行环境和声明计算的可运行性，不做代码正确性回归。

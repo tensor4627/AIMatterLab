@@ -16,6 +16,8 @@ const MAX_FILES = 100000;
 const NULL_DEVICE = process.platform === 'win32' ? 'NUL' : '/dev/null';
 const TOOL_KIND = 'aimlab-tool';
 const VERSION_KIND = 'aimlab-tool-version';
+const STUDIO_INTERNAL_REFERENCE = /(?:^|[^A-Za-z0-9_.-])(?:backend[\\/](?:worker|main)|contracts[\\/]tools|desktop[\\/]|frontend[\\/]|agent[\\/]tools|studio_worker[\\/])/;
+const TEXT_FILE = /\.(?:md|json|ya?ml|py|mjs|cjs|js|txt|sh|toml|cfg)$/i;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = message => { throw Error('aimlab_source: ' + message); };
 const absolute = (value, name) => {
@@ -142,6 +144,31 @@ function collectClosure({repositoryRoot, tree, manifest}) {
   return [...entries.values()].sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
 }
 
+function assertSelfContained({repositoryRoot, tree}) {
+  const hits = [];
+  for (const [name, entry] of tree) {
+    if (!name.startsWith(AIMLAB_DIRECTORY + '/') || !TEXT_FILE.test(name)) continue;
+    if (entry.type !== 'blob' || entry.mode === '120000') continue;
+    const bytes = readBlob(repositoryRoot, entry.object);
+    if (bytes.length > 512 * 1024) continue;
+    let text;
+    try {
+      text = new TextDecoder('utf-8', {fatal: true}).decode(bytes);
+    } catch {
+      continue;
+    }
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      if (STUDIO_INTERNAL_REFERENCE.test(lines[index])) {
+        hits.push(name + ':' + (index + 1));
+        break;
+      }
+    }
+    if (hits.length >= 20) break;
+  }
+  if (hits.length) fail('aimlab-tools declaration must be self-contained; Studio repository references found: ' + hits.join(', ') + (hits.length >= 20 ? ' …' : ''));
+}
+
 /**
  * Read an external AimLab tool repository at one commit and validate its `aimlab-tools/` declaration.
  * Read-only: no installation, test execution, Studio registration or repository copy.
@@ -178,6 +205,7 @@ export function inspectAimlabSource({repo_root: repositoryRoot, commit = 'HEAD'}
   for (const key of ['installation', 'configuration']) {
     for (const [index, file] of ((manifest.guidance || {})[key] || []).entries()) requireTrackedFile(tree, file, 'manifest.guidance.' + key + '[' + index + ']');
   }
+  assertSelfContained({repositoryRoot: repository, tree});
 
   const files = collectClosure({repositoryRoot: repository, tree, manifest});
   const manifestSha256 = sha256(manifestBytes);

@@ -11,9 +11,9 @@ description: Help software developers produce portable GPU Sampling Studio tool 
 
 工具接入面向开发者，验证工具在声明流程中的可用性。工具配置面向用户，在其真实环境中安装、配置、测试后生成执行 skill；本接入流程不预造用户环境的执行 skill 或配置通过结果。
 
-编写交付材料时，阅读 [交付指南](references/deliverables.md)；生成 `tool.json` 或准备注册、更新时再阅读 [注册与版本契约](references/registration.md)。随本目录附有完整 schema 和纯声明检查器，不需要取得 Studio 源码才能理解字段、默认值和额外约束。包外层约定不约束原仓库内部布局。
+编写交付材料时，阅读 [交付指南](references/deliverables.md)；生成 `tool.json` 或准备注册、更新时再阅读 [注册与版本契约](references/registration.md)。随本目录附有完整 schema 和纯声明检查器，不需要取得 Studio 源码才能理解字段、默认值和额外约束。包外层约定不约束原仓库内部布局。AimLab 内部声明也自包含：所需的 schema、纯声明校验器和引擎契约随本目录分发（`references/tool-package.schema.json`、`references/aimlab-tools.mjs`、`references/engine-contracts.json`），引擎契约是内部声明的唯一生产事实来源，编写声明不需要访问 Studio 源码。
 
-AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package` 交付形态，而是在工具仓库主工作分支维护 `aimlab-tools/` 声明，由 Studio 按候选 commit 执行接入检查。仓库内文件夹要求、`manifest.json` 字段与生产 token、测试要求、检查命令和状态见 [AimLab 内部工具约定](references/aimlab-tools.md)；第三方开发者可忽略本段。
+AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package` 交付形态，而是在工具仓库主工作分支维护 `aimlab-tools/` 声明，由 Studio 按候选 commit 执行接入检查。生成或更新 `aimlab-tools/` 时只允许修改工具仓库的 `aimlab-tools/` 目录，工具仓库其他文件保持既有默认分支内容不变；声明必须自包含，`manifest.id` 必须等于所声明引擎的 `aimlab_tool_id`，生产 token 必须覆盖契约的 `declaration_tokens`。仓库内文件夹要求、`manifest.json` 字段与生产 token、测试要求、检查命令和状态见 [AimLab 内部工具约定](references/aimlab-tools.md)；第三方开发者可忽略本段。
 
 ## 明确软件和功能范围
 

@@ -15,6 +15,7 @@ const checkout=fileURLToPath(new URL("../..",import.meta.url));
 const canonical=fs.readFileSync(new URL("../../contracts/tools/engine-contracts.json",import.meta.url));
 const packageSchema=fs.readFileSync(new URL("../../contracts/tools/tool-package.schema.json",import.meta.url));
 const packageValidator=fs.readFileSync(new URL("../../contracts/tools/tool-package.mjs",import.meta.url));
+const aimlabToolsContract=fs.readFileSync(new URL("../../contracts/tools/aimlab-tools.mjs",import.meta.url));
 const workerReference=fs.readFileSync(new URL("../../installation/examples/worker-smoke.py",import.meta.url));
 function temporary(t){
  const base=path.resolve(process.env.STUDIO_RESOURCE_TEST_ROOT||os.tmpdir());fs.mkdirSync(base,{recursive:true});
@@ -56,12 +57,14 @@ test('build synchronizes resources and distributable files include canonical and
 test('synchronization preserves canonical bytes and check refuses stale output without writing',t=>{
  const root=temporary(t),source=put(root,'contracts/tools/engine-contracts.json',canonical);
  put(root,'contracts/tools/tool-package.schema.json',packageSchema);
- put(root,'contracts/tools/tool-package.mjs',packageValidator);put(root,'installation/examples/worker-smoke.py',workerReference);
+ put(root,'contracts/tools/tool-package.mjs',packageValidator);put(root,'contracts/tools/aimlab-tools.mjs',aimlabToolsContract);put(root,'installation/examples/worker-smoke.py',workerReference);
  assert.throws(()=>syncToolContracts({root,check:true}),/stale/);
  assert(!fs.existsSync(path.join(root,'backend/worker/studio_worker/engine_contracts.json')));
  assert.equal(syncToolContracts({root}).status,'updated');
  assert.equal(syncToolContracts({root,check:true}).status,'current');
  assert.deepEqual(fs.readFileSync(path.join(root,'developer/skills/studio-tool-integration/references/tool-package.mjs')),packageValidator);
+ assert.deepEqual(fs.readFileSync(path.join(root,'developer/skills/studio-tool-integration/references/engine-contracts.json')),canonical);
+ assert.deepEqual(fs.readFileSync(path.join(root,'developer/skills/studio-tool-integration/references/aimlab-tools.mjs')),aimlabToolsContract);
  const developerSchema=path.join(root,'developer/skills/studio-tool-integration/references/tool-package.schema.json');fs.writeFileSync(developerSchema,'stale');assert.throws(()=>syncToolContracts({root,check:true}),/stale/);assert.equal(fs.readFileSync(developerSchema,'utf8'),'stale');syncToolContracts({root});assert.deepEqual(fs.readFileSync(developerSchema),packageSchema);
  const target=path.join(root,'backend/worker/studio_worker/engine_contracts.json'),before=fs.readFileSync(target);
  fs.writeFileSync(source,Buffer.concat([canonical,Buffer.from('\n')]));

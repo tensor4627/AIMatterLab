@@ -31,10 +31,10 @@ def _load_manifest(repository):
         return None
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    except (OSError, ValueError) as error:
+        raise DeclarationError("Invalid aimlab-tools/manifest.json at " + str(path)) from error
     if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
-        return None
+        raise DeclarationError("Unsupported aimlab-tools/manifest.json at " + str(path))
     return manifest
 
 
@@ -70,31 +70,82 @@ def _executable(environment, name):
     return value
 
 
+def _unique_match(values, declared_id, where):
+    """Resolve a declared id by normalized name, allowing only an unambiguous prefix match."""
+    target = _normalize(declared_id)
+    if not target or not isinstance(values, dict):
+        return _MISSING
+    if declared_id in values:
+        return declared_id
+    exact = [key for key in values if _normalize(key) == target]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        raise DeclarationError("Ambiguous " + where + ": " + str(declared_id))
+    prefix = [key for key in values if _normalize(key) and (
+        _normalize(key).startswith(target) or target.startswith(_normalize(key)))]
+    if len(prefix) == 1:
+        return prefix[0]
+    if len(prefix) > 1:
+        raise DeclarationError("Ambiguous " + where + ": " + str(declared_id) + " matches " + ", ".join(sorted(prefix)))
+    return _MISSING
+
+
 def _lookup(values, declared_id):
     if not isinstance(values, dict):
         return _MISSING
-    if declared_id in values:
-        return values[declared_id]
-    target = _normalize(declared_id)
-    for key, value in values.items():
-        normalized = _normalize(key)
-        if normalized and (normalized == target or normalized.startswith(target) or target.startswith(normalized)):
-            return value
-    return _MISSING
+    key = _unique_match(values, declared_id, "parameter")
+    if key is _MISSING:
+        return _MISSING
+    return values[key]
 
 
 def _input_name(inputs, declared_id):
     """Resolve a declared input id to the run-directory input file name (not the source path)."""
-    if not isinstance(inputs, dict):
-        return _MISSING
-    if declared_id in inputs:
-        return declared_id
-    target = _normalize(declared_id)
-    for name in inputs:
-        normalized = _normalize(name)
-        if normalized and (normalized == target or normalized.startswith(target) or target.startswith(normalized)):
-            return name
-    return _MISSING
+    return _unique_match(inputs, declared_id, "input")
+
+
+def _ports(function):
+    ports = []
+    for kind in ("inputs", "parameters"):
+        for item in function.get(kind, []):
+            if isinstance(item, dict) and item.get("id"):
+                ports.append({"kind": kind, "id": str(item["id"])})
+    return ports
+
+
+def _find_port(function, name):
+    ports = _ports(function)
+    target = _normalize(name)
+    exact = [port for port in ports if _normalize(port["id"]) == target]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return None
+    prefix = [port for port in ports if target and (
+        _normalize(port["id"]).startswith(target) or target.startswith(_normalize(port["id"])))]
+    return prefix[0] if len(prefix) == 1 else None
+
+
+def _require_declaration_tokens(function, command):
+    """Reject declarations that declare a contract parameter but omit its argv token.
+
+    This prevents silently dropping optional scientific choices when the declaration
+    path replaces the built-in adapter argv.
+    """
+    from studio_worker.tools import engine_contracts
+    engine = function.get("engine") or function.get("id")
+    required = engine_contracts.declaration_tokens(engine)
+    if not required:
+        return
+    tokens = {_normalize(match.group(1)) for entry in command for match in _TOKEN.finditer(entry)}
+    missing = []
+    for name in required:
+        port = _find_port(function, name)
+        if port is None or _normalize(port["id"]) not in tokens:
+            missing.append(name)
+    if missing:
+        raise DeclarationError("Declaration operation.command is missing required token(s): " + ", ".join(missing))
 
 
 def _scalar(value):
@@ -200,9 +251,15 @@ def bind_operation(declaration, spec, environment):
             continue
         pieces.append(token[cursor:])
         argv.append("".join(pieces))
+    from studio_worker.tools import engine_contracts
+    engine = function.get("engine") or function.get("id")
+    expected_tool = engine_contracts.aimlab_tool_id(engine)
+    if expected_tool and declaration.get("tool_id") != expected_tool:
+        raise DeclarationError("Declaration tool id " + str(declaration.get("tool_id")) + " does not match the engine contract tool id " + expected_tool + " for " + str(engine))
+    _require_declaration_tokens(function, command)
     return {
         "argv": argv,
         "entrypoint": str(entrypoint),
         "tool_id": declaration.get("tool_id"),
-        "engine": function.get("engine") or function.get("id"),
+        "engine": engine,
     }

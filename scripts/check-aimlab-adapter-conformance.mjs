@@ -6,11 +6,11 @@ import {pathToFileURL} from 'node:url';
 import {inspectAimlabSource} from '../backend/main/tools/aimlab-source.mjs';
 import {checkAimlabAdapterConformance, summarizeConformance} from '../backend/main/tools/aimlab-conformance.mjs';
 
-const usage = () => 'Usage: node scripts/check-aimlab-adapter-conformance.mjs --repo <tool-repository> [--repo <tool-repository> ...] [--out <new-report.json>]';
+const usage = () => 'Usage: node scripts/check-aimlab-adapter-conformance.mjs --repo <tool-repository> [--repo <tool-repository> ...] [--allow-pending] [--out <new-report.json>]';
 const fail = message => { throw Error('aimlab_conformance: ' + message); };
 
 function parseArguments(argv) {
-  const options = {repos: [], out: null, help: false};
+  const options = {repos: [], out: null, allowPending: false, help: false};
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--repo' || argument === '--out') {
@@ -19,6 +19,8 @@ function parseArguments(argv) {
       if (argument === '--repo') options.repos.push(value);
       else options.out = value;
       index += 1;
+    } else if (argument === '--allow-pending') {
+      options.allowPending = true;
     } else if (argument === '--help' || argument === '-h') {
       options.help = true;
     } else {
@@ -50,8 +52,8 @@ function main(argv) {
   for (const repository of options.repos) {
     try {
       const report = inspectAimlabSource({repo_root: repository});
-      for (const fn of report.package_shape.functions) {
-        declarations.push({tool_id: report.id, source_repo_root: report.source_repo_root, source_commit: report.source_commit, function: fn});
+      for (const fn of report.manifest.functions) {
+        declarations.push({tool_id: report.id, source_repo_root: report.source_repo_root, source_commit: report.source_commit, function: {...fn, source_entrypoint: fn.entrypoint}});
       }
     } catch (error) {
       sourceErrors.push({repo_root: path.resolve(repository), error: String(error.message || error)});
@@ -59,13 +61,19 @@ function main(argv) {
   }
   const results = declarations.map(declaration => checkAimlabAdapterConformance({declaration, engineContracts}));
   const summary = summarizeConformance(results);
+  const pending = results.filter(item => item.status === 'pending_adapter').map(item => item.tool_id + ':' + item.engine);
+  const failed = results.filter(item => item.status === 'failed').map(item => item.tool_id + ':' + item.engine);
+  const status = sourceErrors.length || failed.length || (pending.length && !options.allowPending) ? 'failed' : 'passed';
   const report = {
     schema_version: 1,
     scope: 'aimlab_adapter_conformance',
-    status: sourceErrors.length || summary.failed ? 'failed' : 'passed',
+    status,
     declaration_count: declarations.length,
     source_count: options.repos.length,
+    allow_pending: options.allowPending,
     summary,
+    failed,
+    pending_adapter: pending,
     results,
     source_errors: sourceErrors,
     installation: {status: 'not_run'},
@@ -74,8 +82,8 @@ function main(argv) {
     checked_at: new Date().toISOString()
   };
   if (options.out) fs.writeFileSync(resolveReportPath(options.out), JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
-  process.stdout.write(JSON.stringify({status: report.status, declaration_count: report.declaration_count, summary, failed: results.filter(item => item.status === 'failed').map(item => item.tool_id + ':' + item.engine), pending_adapter: results.filter(item => item.status === 'pending_adapter').map(item => item.tool_id + ':' + item.engine)}) + '\n');
-  return report.status === 'passed' ? 0 : 1;
+  process.stdout.write(JSON.stringify({status, declaration_count: declarations.length, summary, failed, pending_adapter: pending}) + '\n');
+  return status === 'passed' ? 0 : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

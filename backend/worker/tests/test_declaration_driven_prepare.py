@@ -37,7 +37,7 @@ def hotpp_eval_manifest():
 
 def write_manifest(root, value):
     target = Path(root) / "aimlab-tools" / "manifest.json"
-    target.parent.mkdir(parents=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(value), encoding="utf-8")
 
 
@@ -142,6 +142,96 @@ class DeclarationDrivenPrepare(unittest.TestCase):
         declaration = find_declaration({"hotpp": self.root}, "hotpp.eval")
         with self.assertRaisesRegex(ValueError, "Missing required parameter"):
             bind_operation(declaration, {"inputs": {}, "parameters": {"model_file": "model.pth"}}, self.environment)
+
+    def test_declaration_path_keeps_required_input_validation(self):
+        spec = {
+            "engine": "hotpp.eval",
+            "inputs": {},
+            "parameters": {"model_file": "model.pth", "dataset_file": "data.xyz"},
+        }
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_")}
+        with patch.dict(os.environ, clean, clear=True), self.assertRaisesRegex(ValueError, "Missing inputs"):
+            adapters.Adapter("hotpp.eval").prepare(spec, self.environment)
+
+    def test_declaration_path_normalizes_public_mode_before_binding(self):
+        root = tempfile.mkdtemp()
+        script = Path(root) / "agents/skills/pygas-check-gpumd-contract/scripts/validate_model.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("", encoding="utf-8")
+        write_manifest(root, {
+            "schema_version": 1,
+            "id": "pygas",
+            "functions": [{
+                "id": "bias.validate",
+                "engine": "bias.validate",
+                "entrypoint": "agents/skills/pygas-check-gpumd-contract/scripts/validate_model.py",
+                "inputs": [{"id": "bias-model", "required": False, "default": None}, {"id": "structure", "required": False, "default": None}],
+                "parameters": [
+                    {"id": "bias-file", "required": True},
+                    {"id": "structure-file", "required": True},
+                    {"id": "mode", "required": True},
+                    {"id": "cutoff", "required": True},
+                    {"id": "cv-size", "required": True},
+                    {"id": "validation", "required": False, "default": None},
+                    {"id": "kernel-capacity", "required": False, "default": None},
+                ],
+                "operation": {"command": [
+                    "{python}", "{entrypoint}", "{bias-file}", "{structure-file}",
+                    "--mode", "{mode}", "--cutoff", "{cutoff}", "--cv-size", "{cv-size}",
+                    "--device", "cuda", "--history", "{validation}", "--kernel-capacity", "{kernel-capacity}",
+                ], "failure_handling": "Inspect logs."},
+            }],
+        })
+        environment = {
+            "executables": {"python": sys.executable, "pygas": sys.executable},
+            "repositories": {"pygas": root},
+        }
+        spec = {
+            "engine": "bias.validate",
+            "inputs": {"bias.pt": "/tasks/bias.pt", "model.xyz": "/tasks/model.xyz"},
+            "parameters": {"bias_file": "bias.pt", "structure_file": "model.xyz", "cv_size": 1, "cutoff": 5, "mode": "metad"},
+        }
+        clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_")}
+        with patch.dict(os.environ, clean, clear=True):
+            argv = adapters.Adapter("bias.validate").prepare(spec, environment)
+        self.assertEqual(argv[argv.index("--mode") + 1], "bias")
+        self.assertNotIn("--history", argv)
+        self.assertNotIn("--kernel-capacity", argv)
+
+    def test_declaration_missing_required_token_or_tool_identity_is_rejected(self):
+        root = tempfile.mkdtemp()
+        write_manifest(root, {
+            "schema_version": 1,
+            "id": "gpu-sampling",
+            "functions": [{
+                "id": "hotpp.eval",
+                "engine": "hotpp.eval",
+                "entrypoint": "hotpp/entrypoints/main.py",
+                "inputs": [],
+                "parameters": [{"id": "model-file", "required": True}, {"id": "dataset-file", "required": True}],
+                "operation": {"command": ["{executable:hotpp}", "eval", "-m", "{model-file}", "-d", "{dataset-file}", "--device", "cuda"], "failure_handling": "Inspect logs."},
+            }],
+        })
+        declaration = find_declaration({"hotpp": root}, "hotpp.eval")
+        spec = {"inputs": {}, "parameters": {"model_file": "model.pth", "dataset_file": "data.xyz"}}
+        with self.assertRaisesRegex(ValueError, "does not match the engine contract tool id"):
+            bind_operation(declaration, spec, self.environment)
+
+        write_manifest(root, {
+            "schema_version": 1,
+            "id": "hotpp",
+            "functions": [{
+                "id": "hotpp.train",
+                "engine": "hotpp.train",
+                "entrypoint": "hotpp/entrypoints/main.py",
+                "inputs": [{"id": "input-yaml", "required": True}],
+                "parameters": [],
+                "operation": {"command": ["{executable:hotpp}", "train", "-i", "{input-yaml}", "-o", "model"], "failure_handling": "Inspect logs."},
+            }],
+        })
+        declaration = find_declaration({"hotpp": root}, "hotpp.train")
+        with self.assertRaisesRegex(ValueError, "missing required token"):
+            bind_operation(declaration, {"inputs": {"input.yaml": "/tasks/input.yaml"}, "parameters": {}}, self.environment)
 
 
 if __name__ == "__main__":

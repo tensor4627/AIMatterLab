@@ -41,3 +41,23 @@
   - GPUMD `gpumd.md`：`dump_restart` 覆盖写整个文件，最终只保留最后一步快照（1 帧），不是 2 帧；
   - pydyn `pydyn.sampling`：真实 CV 日志为“初始行 + 每步一行”（2 步 → 3 行），原断言按 2 行错误；
   - pydyn wrapper 对缺失 CuPy 等依赖改为显式 `blocked`（exit 3）而不是 traceback/exit 1。
+
+## 2026-11-08 工具接入契约硬化后复验（Studio dev.42）
+
+日期：2026-11-08 · 性质：声明/绑定/检查与参考配置闭环的软件复验（非真实安装、非科学验证）· 原始证据保存在 ignored 的 `.studio/final-verification/20261108-183824/`、`.studio/audit-tool-contracts/`、`.studio/tool-repo-updates/` 与 `.studio/final-parity.json`，本文件只记录范围与结论。
+
+**范围与候选版本**：Studio `tool` 分支 dev.42（`contracts/tools/engine-contracts.json` 新增 `aimlab_tool_id`/`declaration_tokens`/`parameter_transforms`/`aimlab_repository_keys`；声明路径保留硬编码校验；bias mode 归一化；自包含扫描；conformance/parity 强化；bootstrap 兼容默认）。工具仓 `aimlab` 分支候选提交：GPUMD `73ed40d4`、pygas `4d981f8`、pydyn `5c6b67e`、hotpp `e5d0cc5`、torchnep `4c3474ba`（torchnep 无改动，已符合）。
+
+| 检查 | 结果 | 范围/证据 |
+| --- | --- | --- |
+| AimLab 声明检查（5 仓） | **5/5 passed**（`definition_checked`；installation/tests/release=`not_run`） | `.studio/final-verification/20261108-183824/*-declaration.json` |
+| 多源汇总 | **5/5 passed，0 failed** | 同目录 `sources.json` |
+| adapter conformance（16 声明） | **15 passed + 1 pending**（`torchnep.train` 无 Studio adapter，预期）；`--allow-pending` 下 `status=passed` | 同目录 `conformance.json` |
+| 可复现 parity（替换自证审计） | **20/20 用例 argv 一致 + 2/2 负例双方拒绝** | `.studio/final-parity.json`；命令 `python3 scripts/check-aimlab-parity.py --repos-root <dir>` |
+| 真实 CPU reference 配置闭环 | **11/11 checks passed**（真实 worker 安装/固定测试/执行 skill/body-only 运行；native_ui/scientific=`not_run`） | `.studio/audit-tool-contracts/e2e-dev42/` |
+| Electron 原生包面板 | **7/7 checks passed**（version `1.0.0-dev.42`；tool installation/model/cluster/scientific=`not_run`） | `.studio/audit-tool-contracts/native-tool-package-dev42/` |
+| AimLab 登记（真实 Catalog） | **5/5 登记 passed**，`definition_checked`，不复制源码 | `.studio/audit-tool-contracts/reports/aimlab-registry.json` |
+| 开发者 skill CPU reference | 生成 → `schema_checked` → 真实 inspect/register `definition_checked`，快照存在 | `.studio/audit-tool-contracts/devskill/developer-package-report.json` |
+| Node / Python / 静态检查 | Node **3111（3103 通过/0 失败/8 skip）**；Python worker **779（2 skip）**；`tsc` 0；doc links 81；契约同步 current | `.studio/audit-tool-contracts/node-tests-final-dev42.log` 等 |
+
+**结论**：本轮范围内声明、绑定、检查、登记与参考配置流程通过；**未运行真实工具安装、GPU/CUDA、16 个最小用例复跑、科学精度/收敛或用户真实环境配置**，均记为 `not_run/blocked`。声明检查与 parity 通过不等于真实安装或科学验证通过；工具仓默认分支仍未合入 `aimlab-tools/`，严格声明模式需按发布顺序先合入默认分支再启用。

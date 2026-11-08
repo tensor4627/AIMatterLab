@@ -6,7 +6,7 @@
 
 | 工具 | 负责什么 | 输入与输出 | 本版状态 |
 | --- | --- | --- | --- |
-| MD 引擎 | 自研 PyDyn、修改的 GPUMD / GPU-Sampling；传统 MD、pyGAS 增强采样，未来 NEB | 结构、势、MD 参数、Bias → 轨迹、热力学、CV、checkpoint | MD / 采样适配器已接入；NEB 待接入 |
+| MD 引擎 | 自研 PyDyn、修改的 GPUMD / GPU-Sampling；传统 MD、pyGAS 增强采样、NEB（gpumd.neb） | 结构、势、MD 参数、Bias、NEB 初末态 → 轨迹、热力学、CV、checkpoint、NEB 路径与能垒 | MD / 采样 / NEB 适配器已接入；NEB 科学短例与势垒收敛 not_run |
 | 力场训练器 | HotPP、TorchNEP、GPUMD 原生 NEP | 已审计与划分的数据 → checkpoint、测试报告、部署模型 | HotPP / 原生 NEP 已接入；TorchNEP 待接入 |
 | 主动学习 | NEPMaker 对应 NEP，ActiveMiao 对应 HotPP；调用 MD 主动探索，再选帧、请求 DFT、回收标签和复训 | 初始势、探索域 → 待复核构型 → 新标签 → 新势版本 | 关系和计划入口已建立；两套适配器及 DFT 回收待接入 |
 | pyGAS 插件 | 独立仓库和 PyDyn 内置版本分别登记；定义 CV / Bias、轨迹 CV 分析、FES 重建与重加权 | CV / Bias 定义、结构、轨迹、偏置历史 → 部署产物、CV、FES、验证报告 | Bias、验证和已有重加权路线已接入；任意 CV 分析接口继续扩展 |
@@ -21,7 +21,7 @@ flowchart LR
     User["任务目标 / 用户已有输入"] --> Agent["Agent：计划与参数草稿"]
     Agent --> Review["用户审阅各模块草稿"]
     Review --> Queue["本机 / 集群队列与监视"]
-    Queue --> MD["PyDyn / GPUMD\nMD · pyGAS 采样 · 未来 NEB"]
+    Queue --> MD["PyDyn / GPUMD\nMD · pyGAS 采样 · NEB"]
     Queue --> Trainers["HotPP / TorchNEP / 原生 NEP"]
     Assets[("数据资产与请求\n结构 · 轨迹 · 数据集 · 模型 · Bias · 构型")] --> MD
     Assets --> Trainers

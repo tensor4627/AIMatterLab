@@ -11,8 +11,8 @@ ENGINES = ("gpumd.neb", "gpumd.md", "pydyn.md", "pygas.build", "bias.validate", 
 # Installer-only fixed scripts are not scientific engine choices or defaults.
 SUPPORTED_ENGINES = ENGINES + ("installation.check",)
 # Migration set: declaration-driven prepare is the default for routes whose production argv
-# has been parity-checked against this adapter. nep.eval/nep.analyze stay on the hardcoded
-# path until their Studio-side wrappers move into the tool repositories.
+# is parity-checked against this adapter. A declaration may replace only argv construction;
+# the built-in adapter still validates inputs, parameters, walkers and numerical controls.
 DEFAULT_DECLARATION_ENGINES = (
     "gpumd.md", "gpumd.sampling", "gpumd.neb", "nep.train", "nep.eval", "nep.analyze",
     "pydyn.md", "pydyn.sampling",
@@ -142,8 +142,8 @@ class Adapter:
             command += ["--kernel-capacity", str(p["kernel_capacity"])]
         return command
 
-    def _declaration_argv(self, spec, environment):
-        """Declaration-driven production argv for the migration set; None means fallback built-in adapter."""
+    def _declaration_binding(self, spec, environment):
+        """Return the declaration-bound argv and source, or None for the built-in path."""
         mode = os.environ.get("STUDIO_DECLARATION_DRIVEN", "auto")
         if mode == "0":
             return None
@@ -162,17 +162,45 @@ class Adapter:
             if os.environ.get("STUDIO_REQUIRE_TOOL_DECLARATIONS") == "1":
                 raise ValueError("Tool declaration required for engine " + self.engine + "; register the tool source containing aimlab-tools/manifest.json")
             return None
-        return bind_operation(declaration, spec, environment)["argv"]
+        from studio_worker.tools import engine_contracts
+        bound_spec = {**spec, "parameters": engine_contracts.transform_parameters(self.engine, spec.get("parameters", {}))}
+        return {
+            "argv": bind_operation(declaration, bound_spec, environment)["argv"],
+            "spec": bound_spec,
+            "declaration": declaration,
+        }
+
+    def _declaration_argv(self, spec, environment):
+        """Declaration-driven production argv for the migration set; None means fallback built-in adapter."""
+        binding = self._declaration_binding(spec, environment)
+        return None if binding is None else binding["argv"]
 
     def prepare(self, spec, environment):
+        """Prepare a production argv. A declaration may replace argv construction only.
+
+        The built-in adapter path always validates required inputs, required/optional
+        parameters, single-walker policy and numerical validation controls. When a
+        declaration exists, those checks still run through the built-in path before the
+        declaration-bound argv is returned, so a thinner declaration cannot silently
+        accept an unprepared task.
+        """
+        binding = self._declaration_binding(spec, environment)
+        if binding is not None:
+            from studio_worker.tools import engine_contracts
+            validation_environment = {**environment, "repositories": dict(environment.get("repositories") or {})}
+            repository_key = engine_contracts.repository_key(binding["declaration"].get("tool_id"))
+            if repository_key and repository_key not in validation_environment["repositories"]:
+                validation_environment["repositories"][repository_key] = binding["declaration"]["repository"]
+            self._builtin_prepare(binding["spec"], validation_environment)
+            return binding["argv"]
+        return self._builtin_prepare(spec, environment)
+
+    def _builtin_prepare(self, spec, environment):
         assets, p, engine = spec["inputs"], spec.get("parameters", {}), self.engine
         if engine == "installation.check":
             if set(assets) != {"run.py"} or set(p) != {"installation_case"} or p["installation_case"] not in INSTALLATION_CHECKS:
                 raise ValueError("Only shipped worker/reference installation cases are accepted")
             return [self.executable(environment, "python"), "run.py"]
-        declared = self._declaration_argv(spec, environment)
-        if declared is not None:
-            return declared
         from studio_worker.tools.derivative_selection import validate_controls
         validate_controls(p,engine)
         if engine.endswith(".sampling"):

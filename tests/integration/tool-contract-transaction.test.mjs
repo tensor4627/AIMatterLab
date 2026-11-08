@@ -9,6 +9,7 @@ import {syncToolContracts} from "../../scripts/sync-tool-contracts.mjs";
 const canonical=fs.readFileSync(new URL("../../contracts/tools/engine-contracts.json",import.meta.url));
 const packageSchema=fs.readFileSync(new URL("../../contracts/tools/tool-package.schema.json",import.meta.url));
 const packageValidator=fs.readFileSync(new URL("../../contracts/tools/tool-package.mjs",import.meta.url));
+const aimlabToolsContract=fs.readFileSync(new URL("../../contracts/tools/aimlab-tools.mjs",import.meta.url));
 const workerReference=fs.readFileSync(new URL("../../installation/examples/worker-smoke.py",import.meta.url));
 
 function temporary(t){
@@ -24,6 +25,7 @@ test('multi-resource synchronization stages files and rolls a failed update back
  put(root,'contracts/tools/engine-contracts.json',canonical);
  put(root,'contracts/tools/tool-package.schema.json',packageSchema);
  put(root,'contracts/tools/tool-package.mjs',packageValidator);
+ put(root,'contracts/tools/aimlab-tools.mjs',aimlabToolsContract);
  put(root,'installation/examples/worker-smoke.py',workerReference);
  const target=put(root,'backend/worker/studio_worker/engine_contracts.json','{"old":true}');
  let renames=0;

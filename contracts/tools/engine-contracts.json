@@ -50,7 +50,9 @@
             "potential_files"
           ]
         }
-      }
+      },
+      "aimlab_tool_id": "gpu-sampling",
+      "declaration_tokens": []
     },
     "gpumd.md": {
       "required_parameters": [],
@@ -59,13 +61,19 @@
       "required_inputs": [
         "run.in",
         "model.xyz"
-      ]
+      ],
+      "aimlab_tool_id": "gpu-sampling",
+      "declaration_tokens": []
     },
     "pydyn.md": {
       "required_parameters": [],
       "input_file_parameters": [],
       "aliases": {},
       "required_inputs": [
+        "run.py"
+      ],
+      "aimlab_tool_id": "pydyn",
+      "declaration_tokens": [
         "run.py"
       ]
     },
@@ -77,7 +85,9 @@
         "nep.in",
         "train.xyz",
         "test.xyz"
-      ]
+      ],
+      "aimlab_tool_id": "gpu-sampling",
+      "declaration_tokens": []
     },
     "nep.eval": {
       "required_parameters": [
@@ -93,6 +103,10 @@
         "nep.in",
         "evaluation.xyz",
         "nep.txt"
+      ],
+      "aimlab_tool_id": "gpu-sampling",
+      "declaration_tokens": [
+        "dataset_role"
       ]
     },
     "nep.analyze": {
@@ -103,7 +117,9 @@
         "energy_test.out",
         "force_test.out",
         "evaluation.json"
-      ]
+      ],
+      "aimlab_tool_id": "gpu-sampling",
+      "declaration_tokens": []
     },
     "hotpp.train": {
       "required_parameters": [],
@@ -113,6 +129,11 @@
       "aliases": {},
       "required_inputs": [
         "input.yaml"
+      ],
+      "aimlab_tool_id": "hotpp",
+      "declaration_tokens": [
+        "input.yaml",
+        "checkpoint"
       ]
     },
     "hotpp.eval": {
@@ -134,7 +155,12 @@
           "inputs.dataset_file"
         ]
       },
-      "required_inputs": []
+      "required_inputs": [],
+      "aimlab_tool_id": "hotpp",
+      "declaration_tokens": [
+        "model_file",
+        "dataset_file"
+      ]
     },
     "hotpp.export": {
       "required_parameters": [
@@ -153,7 +179,12 @@
           "model.symbols"
         ]
       },
-      "required_inputs": []
+      "required_inputs": [],
+      "aimlab_tool_id": "hotpp",
+      "declaration_tokens": [
+        "model_file",
+        "symbols"
+      ]
     },
     "pygas.reweight": {
       "required_parameters": [
@@ -171,6 +202,12 @@
       "required_inputs": [
         "GASGaussian.txt",
         "fes.yaml"
+      ],
+      "aimlab_tool_id": "pygas",
+      "declaration_tokens": [
+        "bias_file",
+        "GASGaussian.txt",
+        "fes.yaml"
       ]
     },
     "pygas.opes-reweight": {
@@ -178,6 +215,11 @@
       "input_file_parameters": [],
       "aliases": {},
       "required_inputs": [
+        "OPES_COLVAR",
+        "fes.yaml"
+      ],
+      "aimlab_tool_id": "pygas",
+      "declaration_tokens": [
         "OPES_COLVAR",
         "fes.yaml"
       ]
@@ -227,6 +269,10 @@
         ]
       },
       "required_inputs": [
+        "build_bias.py"
+      ],
+      "aimlab_tool_id": "pygas",
+      "declaration_tokens": [
         "build_bias.py"
       ]
     },
@@ -317,7 +363,7 @@
           "type": "number",
           "exclusive_minimum": 0,
           "exclusive_maximum": 0.01,
-          "default": 1e-05,
+          "default": 0.00001,
           "scope": "Numerical difference step; not a dynamics control"
         },
         "fd_atol": {
@@ -326,6 +372,26 @@
           "exclusive_maximum": 0.1,
           "default": 0.0001,
           "scope": "Numerical check tolerance, never a predeclared validation result"
+        }
+      },
+      "aimlab_tool_id": "pygas",
+      "declaration_tokens": [
+        "bias_file",
+        "structure_file",
+        "mode",
+        "cutoff",
+        "cv_size",
+        "validation_history",
+        "kernel_capacity"
+      ],
+      "parameter_transforms": {
+        "mode": {
+          "static": "bias",
+          "metad": "bias",
+          "wtmetad": "bias",
+          "bias": "bias",
+          "cvonly": "cvonly",
+          "opes": "opes"
         }
       }
     },
@@ -420,7 +486,7 @@
           "type": "number",
           "exclusive_minimum": 0,
           "exclusive_maximum": 0.01,
-          "default": 1e-05,
+          "default": 0.00001,
           "scope": "Numerical difference step; not a dynamics control"
         },
         "fd_atol": {
@@ -430,7 +496,9 @@
           "default": 0.0001,
           "scope": "Numerical check tolerance, never a predeclared validation result"
         }
-      }
+      },
+      "aimlab_tool_id": "gpu-sampling",
+      "declaration_tokens": []
     },
     "pydyn.sampling": {
       "required_parameters": [
@@ -521,7 +589,7 @@
           "type": "number",
           "exclusive_minimum": 0,
           "exclusive_maximum": 0.01,
-          "default": 1e-05,
+          "default": 0.00001,
           "scope": "Numerical difference step; not a dynamics control"
         },
         "fd_atol": {
@@ -531,7 +599,18 @@
           "default": 0.0001,
           "scope": "Numerical check tolerance, never a predeclared validation result"
         }
-      }
+      },
+      "aimlab_tool_id": "pydyn",
+      "declaration_tokens": [
+        "run.py"
+      ]
     }
-  }
+  },
+  "aimlab_repository_keys": {
+    "gpu-sampling": "gpumd",
+    "pygas": "pygas",
+    "pydyn": "pydyn",
+    "hotpp": "hotpp"
+  },
+  "aimlab_contract_note": "Neutral production contract distributed with the Studio tool-integration skill. Internal AimLab declarations bind to these engine rules; declaration files must not reference Studio repository source paths."
 }

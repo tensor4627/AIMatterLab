@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {Catalog} from '../../backend/main/workspace/catalog.mjs';
 import {createAimlabToolRegistry, inspectAimlabSource} from '../../backend/main/tools/aimlab-source.mjs';
-import {createAimlabToolFixture, git} from '../helpers/aimlab-tools-fixture.mjs';
+import {createAimlabToolFixture, aimlabManifest, git} from '../helpers/aimlab-tools-fixture.mjs';
 
 test('inspect returns declaration identity and the normalized package shape', t => {
   const fixture = createAimlabToolFixture(t);
@@ -64,4 +64,11 @@ test('the registry registers external declarations without copying the tool repo
   assert.equal(previous.version.source_commit, fixture.commit);
   assert.equal(previous.version.manifest.name, 'Demo tool');
   assert.equal(git(fixture.root, ['status', '--porcelain']).trim(), '');
+});
+
+test('the declaration check rejects Studio repository references inside aimlab-tools text', t => {
+  const manifest = aimlabManifest();
+  manifest.functions[0].description = 'Copy the helper from backend/worker/studio_worker/nep_predict.py before running.';
+  const fixture = createAimlabToolFixture(t, {manifest});
+  assert.throws(() => inspectAimlabSource({repo_root: fixture.root, commit: fixture.commit}), /self-contained|Studio repository references/);
 });
