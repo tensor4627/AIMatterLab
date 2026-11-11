@@ -5,7 +5,7 @@ import threading
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def finite_json(value):
@@ -53,7 +53,12 @@ class Store:
             if current < 1:
                 # The tables above already exist for legacy stores; version 1 only
                 # records the baseline so future migrations can be ordered.
-                self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                self.db.execute("PRAGMA user_version=1")
+                self.db.commit()
+            if current < 2:
+                # Project revisions are additive. Legacy rows remain byte-for-byte
+                # intact and read as revision zero until their first CAS update.
+                self.db.execute("PRAGMA user_version=2")
                 self.db.commit()
 
     @property
@@ -62,11 +67,38 @@ class Store:
             return self.db.execute("PRAGMA user_version").fetchone()[0]
 
     def put(self, kind, value):
+        if kind == "project":
+            return self.put_project(value)
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO objects VALUES(?,?,?)",
                             (kind, value["id"], encoded(value)))
             self.db.commit()
         return value
+
+    def put_project(self, value):
+        """All project writers, including internal workspace writers, use CAS."""
+        value = dict(value)
+        expected = value.pop("revision", 0)
+        if type(expected) is not int or expected < 0:
+            raise ValueError("project_edit_conflict: Invalid project revision")
+        with self.lock:
+            try:
+                self.db.execute("BEGIN IMMEDIATE")
+                row = self.db.execute("SELECT data FROM objects WHERE kind='project' AND id=?", (value["id"],)).fetchone()
+                previous = json.loads(row[0]) if row else None
+                revision = previous.pop("revision", 0) if previous is not None else 0
+                if previous == value:
+                    self.db.commit()
+                    return {**value, "revision": revision}
+                if revision != expected or (previous is None and expected != 0):
+                    raise ValueError("project_edit_conflict: Project changed; reload its current revision before saving")
+                result = {**value, "revision": revision + 1 if previous is not None else 0}
+                self.db.execute("INSERT OR REPLACE INTO objects VALUES('project',?,?)", (value["id"], encoded(result)))
+                self.db.commit()
+                return result
+            except Exception:
+                self.db.rollback()
+                raise
 
     def get(self, kind, identifier):
         with self.lock:
@@ -74,10 +106,14 @@ class Store:
                                   (kind, identifier)).fetchone()
         if not row:
             raise ValueError(f"Unknown {kind}: {identifier}")
-        return json.loads(row[0])
+        value = json.loads(row[0])
+        if kind == "project": value.setdefault("revision", 0)
+        return value
 
     def put_many(self, records):
         """Commit related desktop setup records together."""
+        if any(kind == "project" for kind, _ in records):
+            raise ValueError("Project updates require revision comparison through put_project")
         with self.lock:
             try:
                 self.db.executemany('INSERT OR REPLACE INTO objects VALUES(?,?,?)',
@@ -90,7 +126,10 @@ class Store:
     def list(self, kind):
         with self.lock:
             rows = self.db.execute("SELECT data FROM objects WHERE kind=?", (kind,)).fetchall()
-        return [json.loads(row[0]) for row in rows]
+        values = [json.loads(row[0]) for row in rows]
+        if kind == "project":
+            for value in values: value.setdefault("revision", 0)
+        return values
 
     def run(self, identifier):
         with self.lock:
@@ -125,10 +164,30 @@ class Store:
         return run
 
     def update(self, run, **changes):
+        """Merge explicit changes into the latest row under a cross-process lock.
+
+        Supervisors commit launch evidence through independent SQLite connections;
+        a caller's previously read dictionary must never replace that evidence.
+        State/claim changes still require the caller's observed ownership.
+        """
         with self.lock:
-            run.update(changes, updated_at=time.time())
             try:
-                self.db.execute("UPDATE runs SET data=? WHERE id=?", (encoded(run), run["id"]))
+                if not self.db.in_transaction:
+                    self.db.execute("BEGIN IMMEDIATE")
+                row = self.db.execute("SELECT data FROM runs WHERE id=?", (run["id"],)).fetchone()
+                if not row:
+                    raise ValueError("Unknown run")
+                current = json.loads(row[0])
+                if current.get("launch_claim") != run.get("launch_claim"):
+                    raise ValueError("Run launch claim changed; reread the current run")
+                if ("status" in changes and current["status"] != run["status"] and
+                        changes["status"] != current["status"]):
+                    raise ValueError("Run state changed; reread the current run")
+                if (current.get("child_start_intent") is not None and
+                        changes.get("child_start_intent", current["child_start_intent"]) != current["child_start_intent"]):
+                    raise ValueError("Committed child start evidence cannot be replaced")
+                updated = {**current, **changes, "updated_at": time.time()}
+                self.db.execute("UPDATE runs SET data=? WHERE id=?", (encoded(updated), run["id"]))
                 if "status" in changes:
                     self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
                                     (run["id"], time.time(), encoded({"state": changes["status"]})))
@@ -136,7 +195,54 @@ class Store:
             except Exception:
                 self.db.rollback()
                 raise
+            run.clear()
+            run.update(updated)
         return run
+
+    def claim_launch(self, run, claim):
+        """Commit an at-most-once launch intent, including across connections.
+
+        Compare against the exact previously read row so cancellation or another
+        scheduler's claim cannot be overwritten by a stale queued snapshot.
+        """
+        if run.get("status") != "queued" or run.get("launch_claim"):
+            return None
+        with self.lock:
+            updated = {**run, "status": "unknown", "launch_claim": claim,
+                       "launch_error": "Supervisor launch has not yet been confirmed", "updated_at": time.time()}
+            try:
+                changed = self.db.execute("UPDATE runs SET data=? WHERE id=? AND data=?",
+                                          (encoded(updated), run["id"], encoded(run))).rowcount
+                if not changed:
+                    self.db.rollback()
+                    return None
+                self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
+                                (run["id"], time.time(), encoded({"state": "unknown"})))
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                raise
+            run.update(updated)
+            return run
+
+    def compare_update(self, run, **changes):
+        """Update only the exact observed run, without stealing another claim."""
+        with self.lock:
+            updated = {**run, **changes, "updated_at": time.time()}
+            try:
+                changed = self.db.execute("UPDATE runs SET data=? WHERE id=? AND data=?",
+                                          (encoded(updated), run["id"], encoded(run))).rowcount
+                if not changed:
+                    self.db.rollback()
+                    return None
+                if "status" in changes:
+                    self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
+                                    (run["id"], time.time(), encoded({"state": changes["status"]})))
+                self.db.commit()
+                return updated
+            except Exception:
+                self.db.rollback()
+                raise
 
     def event(self, run, value):
         with self.lock:

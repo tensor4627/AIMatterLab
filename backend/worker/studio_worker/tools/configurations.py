@@ -54,7 +54,7 @@ class ToolConfigurations:
             self.store.get('environment', environment_id)
             previous = next((item for item in self.store.list('project') if item['id'] == project_id), None)
             if previous is not None:
-                if encoded(previous) != encoded(value): raise ValueError('Configuration project already exists with different metadata or authorization; existing project is preserved')
+                if encoded({key: item for key, item in previous.items() if key != 'revision'}) != encoded(value): raise ValueError('Configuration project already exists with different metadata or authorization; existing project is preserved')
                 return previous
             return self.service.register_project(value)
 

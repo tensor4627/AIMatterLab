@@ -1,6 +1,6 @@
 ---
 name: studio-tool-integration
-description: Help software developers produce portable GPU Sampling Studio tool packages with tool.json v1, delivery skills and redirected tests while preserving their Git layout. Use for developer onboarding or package updates; real user configuration and execution-skill activation are separate.
+description: Help developers produce portable GPU Sampling Studio tool packages or aimlab-tools declarations, delivery skills and minimal tests, including supported forcefield/MD and enhanced-sampling/MD runtime interfaces. Preserve source layouts; Studio configures and validates users' complete runtime groups separately.
 ---
 
 # GPU Sampling Studio 工具接入
@@ -11,6 +11,8 @@ description: Help software developers produce portable GPU Sampling Studio tool 
 
 工具接入面向开发者，验证工具在声明流程中的可用性。工具配置面向用户，在其真实环境中安装、配置、测试后生成执行 skill；本接入流程不预造用户环境的执行 skill 或配置通过结果。
 
+涉及力场与 MD 引擎、增强采样与 MD 引擎，或其他工具间接口时，必须阅读 [联用接口与运行环境交付](references/runtime-composition.md)。从实际实现枚举支持的接口和加载模式，区分产物交接、同进程调用及运行时通信，交付依赖约束、操作指导和最小联合用例。开发者负责接口事实，Studio 负责用户所选完整工具组的兼容环境配置和联合验收；两者不能用单工具安装成功相互替代。
+
 编写交付材料时，阅读 [交付指南](references/deliverables.md)；生成 `tool.json` 或准备注册、更新时再阅读 [注册与版本契约](references/registration.md)。随本目录附有完整 schema 和纯声明检查器，不需要取得 Studio 源码才能理解字段、默认值和额外约束。包外层约定不约束原仓库内部布局。AimLab 内部声明也自包含：所需的 schema、纯声明校验器和引擎契约随本目录分发（`references/tool-package.schema.json`、`references/aimlab-tools.mjs`、`references/engine-contracts.json`），引擎契约是内部声明的唯一生产事实来源，编写声明不需要访问 Studio 源码。
 
 AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package` 交付形态，而是在工具仓库主工作分支维护 `aimlab-tools/` 声明，由 Studio 按候选 commit 执行接入检查。生成或更新 `aimlab-tools/` 时只允许修改工具仓库的 `aimlab-tools/` 目录，工具仓库其他文件保持既有默认分支内容不变；声明必须自包含，`manifest.id` 必须等于所声明引擎的 `aimlab_tool_id`，生产 token 必须覆盖契约的 `declaration_tokens`。仓库内文件夹要求、`manifest.json` 字段与生产 token、测试要求、检查命令和状态见 [AimLab 内部工具约定](references/aimlab-tools.md)；第三方开发者可忽略本段。
@@ -20,6 +22,8 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 读取目标仓库的开发约束、源代码、公开接口、安装说明及已有测试，确认实际版本、Git 提交和本次接入范围。记录已有接口、文档、测试和资源的真实路径，优先引用原有材料。
 
 列出本次工具声明提供的各项功能及其实际入口，建立“功能 → 输入输出 → 环境 → 调用方式 → 原测试位置 → 包内测试入口”的对应关系。范围不明确时，与开发者确认需要纳入的功能；不能默默删掉失败功能来制造接入通过。声明功能均须有实际实现和最小测试。
+
+核对工具已有的跨工具接口，按真实版本、调用方向和模式建立“参与工具/功能 → 接口入口 → 运行边界 → 依赖约束 → 联合用例”表。只列实际支持关系，不按工具名称构造任意组合；未提供接口、未测试或存在冲突的模式分别说明。
 
 接入不改写或重排原仓库的源码目录，不往其中添加 Studio 接入材料。保留未提交修改、已有配置和真实任务。仅要求设计或准备材料时，将实际安装和测试记为 `not_run`；原程序缺陷或缺失功能单独报告，不通过修改源码把接入工作扩大为软件开发。
 
@@ -49,6 +53,8 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 
 开发者接入验证使用已有授权范围内的验证环境，记录声明功能和流程的实际覆盖范围。用户使用的计算资源、队列及真实安装配置由后续用户配置阶段确定。不要自动切换其他科学引擎的分支或改写已有环境登记；显式选择的后端不兼容时报告失败，不静默降级。
 
+为联用模式分别交付构建、导出和运行依赖，声明版本范围、必要的精确锁定、模型格式、dtype、设备和 ABI 等实际限制。同进程依赖须在一个兼容运行环境内满足；独立环境不能解决同一解释器的版本冲突。顺序阶段可以分环境，但必须在实际消费环境重新加载落盘产物。使用现有 `guidance.configuration` 和测试映射交付这些材料；当前 v1 不接受自创联用字段，声明检查不会自动证明联合兼容。
+
 ## 生成交付 skill 和操作说明
 
 生成可独立使用的包根 `SKILL.md`，按 [交付 skill 内容](references/deliverables.md#交付-skill-内容) 填写真实工具名、用途、软件提交、接口与文档定位、环境、安装、输入输出管理、测试和失败处理。不能用本接入指导原样充当交付 skill。
@@ -75,6 +81,8 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 
 最小用例用于检查工具的输入输出契约、安装和环境配置，不用于验证代码正确性。按功能和声明的执行方式设置有界规模及资源，不以一个 CPU 用例证明 GPU 或并行方式可用，也不以短例证明科学精度、收敛或生产适用性。
 
+为声明支持的联用模式提供最小联合用例，真实加载指定模型或偏置产物，经过实际接口执行并检查输出。on-the-fly 调用保留为同一运行任务，不能拆成每步另行提交的作业；力场—MD 与采样—MD 两项配对通过也不能证明三方组合可用。用例与证据要求见联用交付指南。
+
 ## 开发者接入验证
 
 在已有授权范围内，按交付 skill 和测试入口完成安装及逐功能测试。检查整个包移动后重定向仍可解析，实际调用与包内仓库版本相符。若原测试会写回源码目录，优先配置外部输出或在隔离副本运行，记录实际使用的源码和测试身份。
@@ -98,6 +106,8 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 ## 向用户配置阶段交付
 
 交付 skill 说明如何在用户选择的真实计算资源上安装、配置并完成对应测试。用户配置成功后，由该阶段的 Agent 根据实际环境生成执行 skill，收录正常操作所需的实际入口、环境、软件版本、输入输出、参数、命令和失败处理。
+
+联用配置按用户所选模式的完整依赖闭包建立版本化运行单元；不要求所有工具共用一个全局环境，也不默认每个工具独立环境即可。执行 skill 应绑定实际参与版本、模式、运行单元及联合测试证据。当前通用科学工具组的自动解析、环境配置和组级激活尚待实现，不能因交付材料齐备而报告配置成功。
 
 执行 skill 是该环境的日常工具入口。它生成后，之前的交付 skill、安装 skill 和配置指导由用户配置流程封存，保留版本与记录，不再自动读取。只有发生 bug 需要修复，或软件更新需要重新安装时，才重新使用所需封存指导并更新执行 skill。交付 skill 不应要求日常任务重新读取本接入指导或整套安装材料。
 

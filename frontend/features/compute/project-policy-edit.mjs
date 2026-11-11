@@ -1,5 +1,6 @@
 import {FIELDS,object,validateProjectSpec} from "../../../contracts/compute/project-policy.mjs";
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+const content=({revision,...record})=>record;
 
 function compute(record,id){if(!object(record)||record.id!==id||typeof record.name!=='string'||!object(record.policy))throw Error('project_edit_record_invalid');if(record.authoring_only!==undefined&&record.authoring_only!==false)throw Error('project_edit_authoring_only');return record;}
 
@@ -23,8 +24,8 @@ export function createProjectPolicyEditor({projectId,read,write,current,engines}
    busy=true;try{
     const actual=await load();guard();if(canonical(actual)!==canonical(baseline))throw Error('project_edit_conflict');
     const value={...structuredClone(baseline),name:projected.name,policy:{...structuredClone(baseline.policy),...projected.policy},id};
-    guard();let result;try{result=await write(value);}catch{throw Error('project_edit_save_unconfirmed');}if(closed||current()!==true)throw Error('project_edit_save_unconfirmed');compute(result,id);if(canonical(result)!==canonical(value))throw Error('project_edit_save_mismatch');
-    const saved=await load();guard();if(canonical(saved)!==canonical(value))throw Error('project_edit_save_mismatch');closed=true;return structuredClone(saved);
+    guard();let result;try{result=await write(value);}catch(error){if(String(error?.message||error).includes('project_edit_conflict'))throw Error('project_edit_conflict');throw Error('project_edit_save_unconfirmed');}if(closed||current()!==true)throw Error('project_edit_save_unconfirmed');compute(result,id);if(canonical(content(result))!==canonical(content(value))||value.revision!==undefined&&result.revision!==value.revision+1)throw Error('project_edit_save_mismatch');
+    const saved=await load();guard();if(canonical(saved)!==canonical(result))throw Error('project_edit_save_mismatch');closed=true;return structuredClone(saved);
    }finally{busy=false;}
   }
  };

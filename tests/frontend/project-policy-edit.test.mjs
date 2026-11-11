@@ -16,3 +16,12 @@ test('No changes or optional absent clusters do not POST',async()=>{const f=fixt
 test('Projection diff explicitly identifies only changed native editable fields',async()=>{const f=fixture(),before=await draft(f),next=clone(before);next.name='New';next.policy.input_roots.push('/new');assert.deepEqual(projectPolicyChanges(before,next).map(row=>row.key),['name','policy.input_roots']);assert.equal('unknown_top'in before,false);assert.equal('future_policy'in before.policy,false);});
 test('Concurrent saves cannot issue duplicate POST',async()=>{const f=fixture(),spec=await draft(f);spec.name='Changed';let release;f.hooks.read=n=>n===2?new Promise(r=>release=r):undefined;const first=f.api.save(spec);await new Promise(r=>setTimeout(r,0));await assert.rejects(f.api.save(spec),/busy/);release();await first;assert.equal(f.writes.length,1);});
 
+test('server revision advances without false save mismatch and remains part of the readback check',async()=>{
+ let row={...fixture().rows()[0],revision:4},sent;
+ const editor=createProjectPolicyEditor({projectId:row.id,engines:['pygas.build'],current:()=>true,read:async()=>[clone(row)],write:async value=>{sent=clone(value);row={...value,revision:5};return clone(row);}});
+ const {spec}=await editor.open();spec.name='Approved change';const result=await editor.save(spec);assert.equal(sent.revision,4);assert.equal(result.revision,5);assert.equal(result.name,'Approved change');
+});
+test('atomic server conflict after the last read is visible and never automatically replayed',async()=>{
+ const f=fixture(),spec=await draft(f);spec.name='Changed';f.hooks.write=()=>{throw Error('project_edit_conflict: reload current revision');};await assert.rejects(f.api.save(spec),/^Error: project_edit_conflict$/);assert.equal(f.writes.length,1);assert.equal(f.rows()[0].name,'Compute');
+});
+

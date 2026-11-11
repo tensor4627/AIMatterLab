@@ -4,7 +4,7 @@ import type {invoke as Invoke} from '../../api/studio';
 import {storedConversation,storeConversation} from './selection-preference';
 export {storedConversation,storeConversation} from './selection-preference';
 
-export interface SessionSelection{nonce:string;conversation?:Conversation;new?:boolean;pending?:boolean;error?:string;initialPrompt?:string}
+export interface SessionSelection{nonce:string;conversation?:Conversation;new?:boolean;pending?:boolean;error?:string;initialPrompt?:string;adoptDraft?:boolean}
 interface FreshSelection{sequence:number;promise:Promise<unknown>;failed?:boolean;planning:boolean;initialPrompt?:string}
 export interface ConversationSelectionPorts{
  invoke:typeof Invoke;

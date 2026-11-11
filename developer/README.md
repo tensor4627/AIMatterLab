@@ -10,6 +10,8 @@
 
 它用于开发者的软件接入工作，与 Studio 中用于日常计算规划和执行的科学 skill 分开存放。可直接分发整个 skill 目录或 [ZIP](skills/studio-tool-integration.zip)；完整 schema、纯声明校验器、注册约束、引擎契约副本和小型 CPU 工程示例均在目录内，不需要访问 Studio 仓库才能理解交付格式与内部声明契约。
 
+真实支持跨工具接口时，按 [联用接口与运行环境交付](skills/studio-tool-integration/references/runtime-composition.md) 提供接口、加载模式、依赖与最小联合用例，重点包括力场—MD 和增强采样—MD。开发者交付事实和使用指导；Studio 为用户所选完整组配置兼容环境并验收，三方组合不能由两个配对测试推定。当前使用既有 `guidance.configuration` 和测试映射承载联用材料，不新增 v1 机器字段；自动解析和配置科学工具组仍待实现。
+
 ## 内部工具（AimLab Tools）声明
 
 AimLab 自研工具（例如 GPU-Sampling）不按第三方 `<id>-package` 交付，而是在工具自己的仓库主工作分支维护 `aimlab-tools/`：机器可读 `manifest.json`、交付 `SKILL.md`、精简 `manual.md` 和 `tests/` 测试映射。声明与源码 commit 一起提交，Studio 按候选 commit 执行接入检查。内部标准见 [AimLab 内部工具声明与接入检查标准](../docs/aimlab-tools-internal.md)；随接入 skill 分发的自包含约定（目录、manifest、中立生产契约、token、测试与检查要求）见 [AimLab 内部工具约定](skills/studio-tool-integration/references/aimlab-tools.md)。
@@ -37,8 +39,8 @@ python3 scripts/check-aimlab-parity.py --repos-root <目录> [--out <新报告�
 
 | 阶段 | 面向谁 | 工作与产物 |
 | --- | --- | --- |
-| 工具接入 | 软件开发者及其 Agent | 保留原仓库布局，验证声明流程中的可用性，生成可迁移的工具交付包和交付 skill |
-| 工具配置 | 工具使用者及其 Agent | 在用户真实计算资源上安装、配置环境并完成对应测试，生成真实环境的执行 skill |
+| 工具接入 | 软件开发者及其 Agent | 保留原仓库布局，交付真实接口、联用约束、使用 skill 和最小用例，记录声明流程的实际验证范围 |
+| 工具配置 | 工具使用者及其 Agent，由 Studio 承接 | 核对所选完整依赖组，划分运行单元，在真实资源上配置兼容版本化环境并完成对应联合测试，生成执行 skill |
 | 日常执行 | 工具使用者及其 Agent | 使用执行 skill 操作已配置的工具，读取实际任务进度和结果 |
 
 交付 skill 包含如何安装、测试和操作工具，使用包内相对路径及通用环境要求；开发者的验证结果不代替用户环境的真实配置。执行 skill 根据用户现场的安装、环境及测试结果生成，保存在用户私有运行配置中。

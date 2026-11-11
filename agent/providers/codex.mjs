@@ -3,11 +3,13 @@ import {createHash} from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createJsonlFramer } from './jsonl-frames.mjs';
 import path from 'node:path';
+import {agentEnvironment} from '../../desktop/platform/agent-environment.mjs';
+import {isolationPreparationDiagnostic} from '../../desktop/platform/codex-isolation.mjs';
 export const PROTOCOL_VERSION = '0.165.0-alpha.1.2';
-export function verifyProtocolVersion(version,{strictIsolation=false}={}){
-  const valid=typeof version==='string'&&version.length<=128&&/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version);
-  if(valid&&(version===PROTOCOL_VERSION||strictIsolation))return {baselineVersion:PROTOCOL_VERSION,installedVersion:version,baselineMatch:version===PROTOCOL_VERSION,status:'pending_capability_verification'};
-  const error=new Error('Codex 兼容性检查未通过：需要有效版本与严格隔离能力检查；协议生成基线 '+PROTOCOL_VERSION+'。会话和计算流程仍保留。');
+export function verifyProtocolVersion(version){
+  const valid=typeof version==='string'&&version.length<=128&&/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version);
+  if(valid)return {baselineVersion:PROTOCOL_VERSION,installedVersion:version,baselineMatch:version===PROTOCOL_VERSION,status:'pending_capability_verification',...version!==PROTOCOL_VERSION?{versionWarning:{code:'STUDIO_CODEX_VERSION_DIFFERENCE',severity:'warning'}}:{}};
+  const error=new Error('Codex 版本信息无法识别。请检查所选 CLI 是否正常返回版本；协议生成参考版本 '+PROTOCOL_VERSION+' 不是连接版本限制。会话和计算流程仍保留。');
   error.code='STUDIO_CODEX_PROTOCOL_MISMATCH';error.stage='version';error.expectedVersion=PROTOCOL_VERSION;error.installedVersion=valid?version:'unrecognized';throw error;
 }
 function checkedInitialize(value){
@@ -26,9 +28,11 @@ function compatibilityFailure(cause,stage,version){
   if(cause?.code==='STUDIO_CODEX_PROTOCOL_MISMATCH')return cause;
   const gates={version:'读取 CLI 版本',isolation_prepare:'检查必需隔离能力和模型能力上限',spawn:'启动 app-server 传输',initialize:'核对 initialize 协议响应',effective_isolation:'回读有效隔离配置、技能与 MCP',lifecycle:'核对当前连接生命周期'};
   const failures={'Installed Codex lacks required isolation controls':'required_isolation_controls_missing','Effective Codex isolation controls do not match':'effective_isolation_mismatch','Native skills remain enabled':'native_skills_enabled','Unscoped MCP capabilities are exposed':'unscoped_mcp_capabilities','Effective model capability snapshot differs':'model_ceiling_mismatch','Invalid initialize response':'invalid_initialize_response'};
-  const [failure,hint]=stage==='version'?versionFailure(cause):[failures[cause?.message]||'gate_failed','请检查该 CLI 是否支持所需协议和隔离控制，再明确重连'];
-  const error=new Error('Codex 兼容性检查失败（'+(gates[stage]||'建立 app-server 连接')+'，'+failure+'）：当前 '+(version||'unrecognized')+'；协议生成基线 '+PROTOCOL_VERSION+'。'+hint+'；会话和计算流程仍保留，未自动重发消息。');
+  const preparation=isolationPreparationDiagnostic(cause);
+  const [failure,hint]=stage==='version'?versionFailure(cause):preparation?[preparation.failure,preparation.hint]:[failures[cause?.message]||'gate_failed','请检查该 CLI 是否支持所需协议和隔离控制，再明确重连'];
+  const error=new Error('Codex 兼容性检查失败（'+(gates[stage]||'建立 app-server 连接')+'，'+failure+'）：当前 '+(version||'unrecognized')+'；协议生成参考版本 '+PROTOCOL_VERSION+'（版本差异仅作提示）。'+hint+'；会话和计算流程仍保留，未自动重发消息。');
   error.failure=failure;
+  if(preparation)error.preparationStep=preparation.step;
   error.code='STUDIO_CODEX_COMPATIBILITY_FAILED';error.stage=stage;error.installedVersion=version||'unrecognized';error.expectedVersion=PROTOCOL_VERSION;return error;
 }
 
@@ -48,14 +52,17 @@ export class CodexBridge extends EventEmitter {
     try{
     if(this.host.resolveExecutable)executable=await this.host.resolveExecutable(executable);
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
-    const { stdout } = await (this.launchDependencies.execute||this.host.execute)(executable, ['--version'], { windowsHide: true, timeout: 15000 });
+    const { stdout } = await (this.launchDependencies.execute||this.host.execute)(executable, ['--version'], { windowsHide: true, timeout: 15000, env:agentEnvironment('codex') });
     const candidate=verifyProtocolVersion(stdout.trim().split(' ').at(-1),{strictIsolation:this.strictIsolation});version=candidate.installedVersion;
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
+    if(candidate.versionWarning)this.emit('event',{method:'studio/codexVersionWarning',params:candidate});
     stage='isolation_prepare';const isolation=this.strictIsolation?await this.host.prepareIsolation(executable,this.isolationRoot,config,worker,this.isolationDependencies):null;
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
     this.isolation=isolation;
-    const args = ['app-server',...this.strictIsolation?['--strict-config']:[],'--listen','stdio://',...this.host.overrideArgs({...config,...isolation?.config})];
-    const env = { ...process.env };
+    // Validate Studio's owned overlay and effective capabilities below. External
+    // desktop config can contain unrelated fields from a newer Codex release.
+    const args = ['app-server','--listen','stdio://',...this.host.overrideArgs({...config,...isolation?.config})];
+    const env = agentEnvironment('codex');
     if (worker) {
       if(!isolation)args.push('-c','mcp_servers.gpusampling.enabled=true');
       if(!isolation)args.push('-c', 'mcp_servers.gpusampling.url=' + JSON.stringify(worker.url + '/mcp'),
@@ -102,7 +109,8 @@ export class CodexBridge extends EventEmitter {
       let summary;if(isolation){stage='effective_isolation';summary=await this.host.verifyIsolation((...args)=>this.rawRequest(...args),isolation);}
       if(generation!==this.lifecycle||this.process!==child){stage='lifecycle';throw Error('Codex context launch was cancelled');}
       if(isolation){this.isolationSummary=summary;this.isolationReady=true;this.compatibility={...candidate,status:'capabilities_verified',scope:'Startup isolation configuration, skills, MCP inventory and model capability ceiling only; no thread, model reply or scientific workflow verified.'};}
-      this.info={...info,...isolation?{studioIsolation:summary,studioCompatibility:this.compatibility}:{}};
+      else this.compatibility={...candidate,status:'version_observed',scope:'Version metadata only; isolation capabilities have not been verified.'};
+      this.info={...info,studioCompatibility:this.compatibility,...isolation?{studioIsolation:summary}:{}};
       return this.info;
     } catch (error) { if(generation===this.lifecycle&&(!child||this.process===child))this.close();throw compatibilityFailure(error,stage,version); }
   }

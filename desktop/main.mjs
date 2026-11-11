@@ -1,14 +1,18 @@
 import {consoleMessage} from './platform/verification/console-message.mjs';
+import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
+import {clusterDownloadRequest} from '../contracts/compute/cluster-download.mjs';
 import {studioProfileRoot} from './platform/studio-profile.mjs';
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
+import {createTerminalHandoff} from '../agent/sessions/terminal-handoff.mjs';
 import {createAgentResourceRouting} from '../agent/sessions/resource-routing.mjs';
 import {createComputeResourceBinding} from '../backend/main/compute/resource-binding.mjs';
 import {findInstalledCodex} from './platform/codex-executable.mjs';
 import {computeRuntime} from './platform/compute-runtime.mjs';
 import {createComputeProfiles} from '../backend/main/compute/compute-profiles.mjs';
 import {createSharedTerminal} from "../backend/main/compute/shared-terminal.mjs";
+import {createSshService} from '../backend/main/compute/ssh-service.mjs';
 import {TerminalMcp} from "../agent/tools/terminal-mcp.mjs";
 
 import {selectConversation} from "../agent/sessions/conversation-selection.mjs";
@@ -85,6 +89,7 @@ import {assertRendererWorkerRoute,linuxPath} from "../contracts/transport-policy
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here,'..');
 const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'backend','worker');
+const sshTransportSource=app.isPackaged?path.join(process.resourcesPath,'terminal-service','python'):path.join(here,'platform','terminal-service','python');
 // Physical resources keep skill references usable by an external agent process.
 const bundledSkillRoot = app.isPackaged ? path.join(process.resourcesPath,'studio-skills') : path.join(root,'agent','builtin-skills');
 function studioSkillRoots(){const sourceRoots=[...(settings.sourceRoots||[]),...(catalog?.list('source-binding')||[]).map(s=>s.root)];return [...new Set([bundledSkillRoot,...(settings.skillRoots||[]),...sourceRoots.map(p=>path.join(p,'agents','skills'))])];}
@@ -110,13 +115,12 @@ if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.en
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
 else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,portableDir:process.env.PORTABLE_EXECUTABLE_DIR,execPath:process.execPath});fs.mkdirSync(profile,{recursive:true});app.setPath('userData',profile);}
 let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources;
-let shuttingDown=false;
-app.on("before-quit",()=>{shuttingDown=true;});
-let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource;
+let shuttingDown=false,desktopShutdown;
+let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService;
 const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 Object.defineProperty(worker,'bundledRuntimeId',{value:bundledWorkerRuntimeId(workerSource)});
-const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents});
+const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService});
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
   sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
@@ -208,27 +212,45 @@ toolWorkflows=createToolWorkflowController({catalog,groups:toolGroups,configurat
 });
 registerToolWorkflowRoutes({handle,controller:toolWorkflows});
 const lastCompute=catalog.get('worker-binding','last-explicit');
-const computeProfiles=createComputeProfiles({catalog,initialWsl:validExplicitBinding(lastCompute,settings)?{distribution:lastCompute.distribution,root:lastCompute.root,port:lastCompute.port,intent:lastCompute.intent||'standard'}:undefined});
-handle('compute.profiles.list',value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid connection listing');return {profiles:computeProfiles.list(),...worker.connection&&!worker.connecting&&!worker.restoring&&worker.identity&&worker.connectionTarget?{activeLocal:{distribution:worker.identity.distribution,root:worker.identity.root,requestedRoot:worker.connectionTarget.requestedRoot,port:worker.connectionTarget.port}}:{},defaults:{distribution:settings.distribution,root:settings.workerRoot,port:settings.workerPort,ssh_client:process.platform==='win32'?path.join(process.env.SystemRoot||'C:\\Windows','System32','OpenSSH','ssh.exe'):'/usr/bin/ssh'}};});
+const computeProfiles=createComputeProfiles({catalog,initialWsl:lastCompute?.kind!=='ssh'&&validExplicitBinding(lastCompute,settings)?{distribution:lastCompute.distribution,root:lastCompute.root,port:lastCompute.port,intent:lastCompute.intent||'standard'}:undefined});
+handle('compute.profiles.list',value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid connection listing');return {profiles:computeProfiles.list(),inUseProfileIds:sharedTerminal?.inUseProfileIds()||[],...worker.connection&&!worker.connecting&&!worker.restoring&&worker.identity&&worker.identity.kind!=='ssh'&&worker.connectionTarget?{activeLocal:{distribution:worker.identity.distribution,root:worker.identity.root,requestedRoot:worker.connectionTarget.requestedRoot,port:worker.connectionTarget.port}}:{},defaults:{distribution:settings.distribution,root:settings.workerRoot,port:settings.workerPort,ssh_client:process.platform==='win32'?path.join(process.env.SystemRoot||'C:\\Windows','System32','OpenSSH','ssh.exe'):'/usr/bin/ssh'}};});
 handle('compute.profiles.read',value=>computeProfiles.read(value));
 handle('compute.profiles.save',value=>computeProfiles.save(value));
+handle('compute.profiles.remove',value=>{
+ assertIdleAgent();agents.assertContextIdle();
+ if(sharedTerminal?.inUseProfileIds().includes(value?.id))throw Error('compute_profile_in_use');
+ return computeProfiles.remove(value);
+});
 handle('compute.profiles.inventory',async value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid WSL inventory request');return {distributions:await installedWslDistributions()};});
 sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,getSelectedResource:()=>computeResource?.peek(),selectionRevision:()=>computeResource?.revision()??0,
  root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:path.join(app.getPath('userData'),'shared-terminal','runtime'),
  dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):root,
  servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'platform','terminal-service','broker.mjs'),nodeExecutable:process.execPath,
  sourceGuard:()=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),{}),worker)});
-computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,current:()=>workflowContext.current(),revision:()=>workflowContext.revision()});
+// A terminal selection describes a connection in this desktop, not a saved
+// resource registration or a submitted job. It must not survive desktop exit.
+catalog.remove('compute-resource-selection','active');
+computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,current:()=>workflowContext.current(),revision:()=>workflowContext.revision(),serviceState:()=>sshService?.peek()});
+sshService=createSshService({worker,terminal:sharedTerminal,profiles:computeProfiles,resource:computeResource,source:workerSource,transportSource:sshTransportSource,current:()=>workflowContext.current(),assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},publish:()=>{emit('studio:event',{method:'studio/sshServiceChanged',params:sshService?.peek()||{status:'disconnected'}});},remember:(identity,health)=>{catalog.put('worker-binding','last-explicit',{...identity,checkedAt:Date.now(),sourceIdentity:{runtimeId:health.runtimeId}});}});
+handle('compute.sshService.connect',async value=>{
+ assertIdleAgent();agents.close();const result=await sshService.connect(value);
+ if(result.status==='connected')emit('studio:event',{method:'studio/workerConnected',params:{sourceKind:'ssh'}});
+ emit('studio:event',{method:'studio/computeResourceChanged',params:await computeResource.status({})});return result;
+});
+handle('compute.sshService.status',value=>sshService.status(value));
+handle('compute.sshService.scheduler',async value=>{const result=await sshService.scheduler(value);emit('studio:event',{method:'studio/sshSchedulerChanged',params:{profileId:result.id,version:result.version}});return result;});
+handle('compute.sshService.disconnect',async value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==2||typeof value.sessionId!=='string'||typeof value.attemptId!=='string')throw Error('ssh_service_invalid_request');const result=await sshService.disconnect(value);emit('studio:event',{method:'studio/computeResourceChanged',params:await computeResource.status({})});return result;});
 handle('compute.resource.status',value=>computeResource.status(value));
 for(const method of ['activate','clear'])handle('compute.resource.'+method,async value=>{
- assertIdleAgent();agents.assertContextIdle();const result=await computeResource[method](value);
+ assertIdleAgent();agents.assertContextIdle();const service=sshService?.peek();if(service&&service.status!=='disconnected'&&!(service.status==='failed'&&service.terminalAccess==='available')&&(method==='clear'||value?.sessionId!==service.sessionId||value?.profileId!==service.profileId||value?.profileVersion!==service.profileVersion))throw Error('请先在原 SSH 连接返回交互终端，再切换计算资源。');const result=await computeResource[method](value);
  if(computeResource.peek()?.kind==='ssh-terminal')for(const provider of ['codex','kimi','qwen','deepseek','compatible'])worker.revokeProvider(provider);
  emit('studio:event',{method:'studio/computeResourceChanged',params:result});
  const provider=agents.active;void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});return result;
 });
 const terminalTools=sharedTerminal.tools(),terminalToolNames=new Set(terminalTools.map(tool=>tool.name));
-worker.setLocalTools([...materials.tools(),...terminalTools],(name,args,scope)=>terminalToolNames.has(name)?sharedTerminal.callTool(name,args,scope):materials.call(name,args));
-for(const method of ['list','open','read','input','resize','owner','close'])handle('sharedTerminal.'+method,async value=>{const result=await sharedTerminal[method](value);if(['owner','close'].includes(method)){const provider=workflowContext.current()?.provider;if(provider)void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});}return result;});
+worker.setLocalTools([...materials.tools(),...terminalTools],(name,args,scope)=>terminalToolNames.has(name)?sharedTerminal.callTool(name,args,scope):materials.call(name,args,scope));
+const terminalHandoff=createTerminalHandoff({terminal:sharedTerminal,workflowContext,agents,records:taskRecords,resourceRouting,agentRpc:value=>agentRpc(value),assertIdle:assertIdleAgent});
+for(const method of ['list','open','read','input','resize','owner','close'])handle('sharedTerminal.'+method,async value=>{const result=await (['owner','close'].includes(method)?terminalHandoff:sharedTerminal)[method](value);if(method==='close'&&result.closed===true)sshService.terminalClosed(result.sessionId);if(['owner','close'].includes(method)){const provider=workflowContext.current()?.provider;if(provider)void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});}return result;});
 
 registerTaskStage({handle,records:taskRecords,worker,current:()=>workflowContext.current(),assertHuman:event=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;}});
 localReview=registerCalculationReview({handle,records:taskRecords,worker,current:()=>workflowContext.current(),
@@ -272,8 +294,11 @@ handle('ssh.import',({ref})=>existingProfile(app.getPath('home'),ref,{documents:
   return response.canceled?null:response.filePaths[0];
 }}));
 handle('cluster.download',async value=>{
- const first=await worker.request('POST','/api/cluster/browse',{...value,offset:0});
+ value=clusterDownloadRequest(value);
+ const {expected_sha256,...request}=value;
+ const first=await worker.request('POST','/api/cluster/browse',{...request,offset:0});
  if(typeof first.base64!=='string'||!first.sha256)throw Error('Select a regular file in an authorized read root');
+ if(expected_sha256!==undefined&&expected_sha256!==first.sha256)throw Error('远程文件已变化，请重新预览后下载');
  const response=await dialog.showSaveDialog(window,{defaultPath:path.basename(value.relative)});
  if(response.canceled)return null;
  const file=response.filePath,temp=file+'.partial-'+randomUUID(),hash=createHash('sha256');let fd=null,current=first,offset=0;
@@ -283,7 +308,7 @@ handle('cluster.download',async value=>{
    if(pages>16384)throw Error('Remote file exceeds the bounded download window');
    const data=Buffer.from(current.base64,'base64');if(!data.length&&offset<first.size)throw Error('Remote file changed');fs.writeSync(fd,data);hash.update(data);offset=current.offset;
    if(offset>=first.size)break;
-   current=await worker.request('POST','/api/cluster/browse',{...value,offset});if(current.size!==first.size)throw Error('Remote file changed');
+    current=await worker.request('POST','/api/cluster/browse',{...request,offset});if(current.size!==first.size)throw Error('Remote file changed');
   }
   if(hash.digest('hex')!==first.sha256)throw Error('Remote file hash mismatch');
   fs.closeSync(fd);fd=null;
@@ -295,7 +320,7 @@ handle('agent.bindProject',({projectId,provider})=>{providerId(provider);if(type
 handle('state',() => ({ settings, threads:catalog.list('thread'), ssh:catalog.list('ssh') }));
 handle('settings',data => { settings=catalog.put('settings','main',normalizeSettings(settings,data)); return settings; });
 function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
-async function bindSources(current=()=>{}){const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
+async function bindSources(current=()=>{}){if(worker.identity?.kind==='ssh'){current();return worker.request('GET','/api/source-projects');}const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());
 handle('sources.diagnose',async()=>{const sources=scientificSources();return {sources,tools:toolInventory(sources),worker:worker.connection?await worker.request('GET','/api/tools/status'):null};});
 function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activeTurns?.size))throw Error('请先停止当前回复，再调整连接或上下文设置');}
@@ -305,7 +330,7 @@ handle('compute.setup',async data=>configureCompute(data||{}));
 const computeConnection=createComputeConnection({worker,profiles:computeProfiles,records:taskRecords,catalog,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),source:()=>({path:workerSource,id:worker.bundledRuntimeId}),beforeSwitch:()=>{assertIdleAgent();agents.close();},bindFreshSources:bindSources,saveSettings:target=>{settings=catalog.put('settings','main',{...settings,distribution:target.distribution,workerRoot:target.workerRoot,workerPort:target.workerPort});},remember:(target,evidence)=>{const value={version:1,distribution:worker.identity?.distribution,root:worker.identity?.root,port:target.workerPort,intent:evidence.intent||'standard',settingsSignature:workerSettingsSignature(settings),checkedAt:evidence.checkedAt,...evidence.serviceVersion==='current'?{sourceIdentity:{runtimeId:worker.bundledRuntimeId}}:{}};if(!validExplicitBinding(value,settings)||worker.connection?.health?.root!==value.root||worker.connectionTarget?.port!==value.port)throw Error('Verified connection receipt changed');catalog.put('worker-binding','last-explicit',value);},onConnected:()=>emit('studio:event',{method:'studio/workerConnected',params:{}})});
 handle('compute.connection.plan',value=>computeConnection.plan(value));
 handle('compute.connection.status',value=>computeConnection.status(value));
-handle('compute.connection.connect',value=>{assertIdleAgent();return computeConnection.connect(value);});
+handle('compute.connection.connect',async value=>{assertIdleAgent();if(sshService.peek().status!=='disconnected'){const stopped=await sshService.disconnect({});if(stopped?.status!=='disconnected'||stopped.terminalAccess!=='available')throw Error('原 SSH 作业服务的停止状态尚未确认，请先核对原连接。');}return computeConnection.connect(value);});
 handle('compute.connection.cancel',value=>computeConnection.cancel(value));
 const sshConnection=createSshConnection({worker,selection:()=>workflowContext.current(),revision:()=>workflowContext.revision(),sourceScope:request=>sshTaskSource(taskRecords,()=>workflowContext.current(),request),assertSource:request=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),request),worker),validateRunReceipt:(request,receipt)=>{const proof=sshTaskSource(taskRecords,()=>workflowContext.current(),request);assertSshSource(proof,worker);if(proof?.preparedProject&&proof.preparedProject!==receipt.projectId)throw Error('original_run_changed');},beforeStart:assertIdleAgent,observeWorker:()=>readWorkerStatus(worker,()=>settings)});
 handle('ssh.auth.plan',(value,event)=>sshConnection.plan(value,event));
@@ -319,7 +344,7 @@ handle('ssh.tunnel.plan',(value,event)=>sshConnection.tunnelPlan(value,event));
 handle('ssh.tunnel.start',(value,event)=>sshConnection.tunnelStart(value,event));
 handle('ssh.tunnel.status',(value,event)=>sshConnection.tunnelStatus(value,event));
 handle('ssh.tunnel.close',(value,event)=>sshConnection.tunnelClose(value,event));
-handle('worker.connect',async()=>{assertIdleAgent();agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
+handle('worker.connect',async()=>{assertIdleAgent();if(sshService.peek().status!=='disconnected'){const stopped=await sshService.disconnect({});if(stopped?.status!=='disconnected'||stopped.terminalAccess!=='available')throw Error('原 SSH 作业服务的停止状态尚未确认，请先核对原连接。');}agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
 handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision()},value));
 handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAuthoringWorker({records:taskRecords,worker,selection:()=>workflowContext.current(),settings:()=>settings},value);});
@@ -445,6 +470,16 @@ handle('export',async({run})=>{
   }catch(error){try{fs.unlinkSync(temp)}catch{};throw error;}
   return file;
 });
+let terminalClosing;
+desktopShutdown=installDesktopShutdown({app,begin:()=>{
+ shuttingDown=true;
+ // Fence the terminal bridge on this exact stack, before already-queued open
+ // continuations can run. The asynchronous cleanup below only waits for it.
+ try{terminalClosing=sharedTerminal.shutdown({timeoutMs:4000});}catch{terminalClosing=Promise.resolve({status:'unconfirmed'});}
+},cleanup:async()=>{
+ for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}
+ return await terminalClosing;
+}});
 window=new BrowserWindow({width:1540,height:980,minWidth:1100,minHeight:720,frame:false,
   backgroundColor:'#15151b',title:'GPU Sampling Studio',show:false,
   webPreferences:{backgroundThrottling:!verifying,offscreen:improvementsVerifying,preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
@@ -458,9 +493,8 @@ window.webContents.on('render-process-gone',(_event,details)=>{emit('studio:even
 const development=process.env.STUDIO_DEV_URL;
 if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw new Error('Invalid development origin');
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
-if(verifying){const errors=[];window.webContents.on('console-message',(...args)=>{const {level,message}=consoleMessage(args);if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});shuttingDown=true;agents.close();worker.close();app.exit(ok?0:1);}else window.show();
+if(verifying){const errors=[];window.webContents.on('console-message',(...args)=>{const {level,message}=consoleMessage(args);if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});await desktopShutdown.run();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}});
 
 }
 function focusExistingWindow(){if(!window||window.isDestroyed())return;if(window.isMinimized())window.restore();window.show();window.focus();}
@@ -471,5 +505,5 @@ if(!app.requestSingleInstanceLock()){
  app.exit(0);
 }else{
  app.on('second-instance',focusExistingWindow);
- app.whenReady().then(initialize).catch(error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}app.exit(1);});
+ app.whenReady().then(initialize).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
 }

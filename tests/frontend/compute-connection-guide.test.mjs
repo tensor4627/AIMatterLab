@@ -52,3 +52,28 @@ test('manual reread announces only successful current summary; blocked plan is n
 test('cancelled late reread cannot announce completion',async()=>{
  const wait=deferred();let first=true;const h=harness({plan:()=>{if(first){first=false;return review();}return wait.promise;}});await h.flush();h.find(n=>n.type==='button'&&h.text(n)==='重新读取').props.onClick();await h.flush();h.find(n=>n.type==='button'&&h.text(n)==='取消').props.onClick();await h.flush();wait.resolve({...review(),planId:'late'});await h.flush();assert.throws(()=>h.find(n=>n.props?.['data-testid']==='connection-reread-feedback'));assert.deepEqual(h.closed,[false]);h.unmount();
 });
+
+for(const language of ['zh','en'])for(const status of ['blocked','failed'])test('WSL access denial gives safe '+language+' guidance and requires an explicit refresh from '+status,async()=>{
+ const raw='Command failed: wsl.exe -d PrivateDistro; C:\\private\\fixture-secret; Wsl/EnumerateDistros/Service/E_ACCESSDENIED';
+ const denied={...review(),status,phase:'finished',finished:true,connection:'unknown',error:{code:'wsl_access_denied',message:raw}},h=harness({plan:denied,props:{language}});
+ await h.flush();
+ const alert=h.text(h.find(n=>n.props?.role==='alert'));
+ if(language==='en'){
+  assert.match(alert,/execution context is not permitted to access WSL/);
+  assert.match(alert,/normal desktop of the Windows account that installed this distribution/);
+  assert.match(alert,/execution environment administrator to configure WSL access/);
+ }else assert.equal(alert,'当前执行身份无权访问 WSL。请从安装该发行版的 Windows 账户正常桌面启动，或由执行环境管理员配置 WSL 访问权限。');
+ assert(!alert.includes('fixture-secret'));assert(!alert.includes('PrivateDistro'));assert(!alert.includes('Command failed'));
+ assert(!/run as administrator|administrator mode|reinstall|recreate/i.test(alert));
+ const confirm=h.find(n=>n.type==='button'&&n.props.className==='button primary');assert.equal(confirm.props.disabled,true);
+ assert.equal(h.calls.filter(c=>c.method==='compute.connection.plan').length,1);
+ confirm.props.onClick();await h.flush();await h.poll();await h.flush();
+ assert.equal(h.calls.filter(c=>c.method==='compute.connection.plan').length,1);
+ assert(!h.calls.some(c=>c.method==='compute.connection.connect'||c.method==='compute.connection.status'));
+ const refresh=h.find(n=>n.type==='button'&&h.text(n)===(language==='en'?'Refresh':'重新读取'));assert.equal(refresh.props.disabled,false);
+ refresh.props.onClick();await h.flush();
+ assert.equal(h.calls.filter(c=>c.method==='compute.connection.plan').length,2);
+ assert(!h.calls.some(c=>c.method==='compute.connection.connect'||c.method==='compute.connection.status'));
+ assert.throws(()=>h.find(n=>n.props?.['data-testid']==='connection-reread-feedback'));
+ h.unmount();
+});

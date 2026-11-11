@@ -34,7 +34,7 @@ dev.18 的[连接引导实施契约](design/compute-connection-hil.md)进一步�
 
 ## 配置与命令
 
-复制 installation/config.example.json 到忽略目录，填写目标 Linux Python 及 repositories。Windows Node 22.19+、pnpm 11、目标 Python 3.10+。Codex 需要兼容固定 app-server 协议的 CLI；Kimi / Qwen 使用已锁定官方 ACP runtime，认证由用户完成。版本信息见 desktop/generated/version.json 和 package.json。
+复制 installation/config.example.json 到忽略目录，填写目标 Linux Python 及 repositories。Windows Node 22.19+、pnpm 11、目标 Python 3.10+。Codex 按所需 app-server 协议和实际隔离能力检查兼容性；CLI 与协议生成参考版本不同仅显示 warning，由用户决定是否继续使用。Kimi / Qwen 使用已锁定官方 ACP runtime，认证由用户完成。版本信息见 desktop/generated/version.json 和 package.json。
 
 ~~~text
 python scripts/one_prompt.py plan --config .studio/installation/config.json

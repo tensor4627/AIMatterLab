@@ -27,7 +27,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
  const hooks=[],pending=[],listeners=[],calls=[],settings={distribution:'Saved Ubuntu',workerRoot:'~/saved',workerPort:8767,theme:'dark',skillRoots:[]};let cursor=0,dirty=false,tree,disposed=false;
  const useState=initial=>{const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{const value=typeof next==='function'?next(hooks[index].value):next;if(!Object.is(value,hooks[index].value)){hooks[index].value=value;dirty=true;}}];};
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
- const useEffect=(fn,deps)=>{const index=cursor++,previous=hooks[index];if(!previous||!deps||deps.some((value,i)=>!Object.is(value,previous.deps?.[i]))){const record={deps,cleanup:previous?.cleanup};hooks[index]=record;pending.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
+ const useEffect=(fn,deps)=>{const index=cursor++,previous=hooks[index];if(!previous||!deps||deps.some((value,i)=>!Object.is(value,previous.deps?.[i]))){const record={deps,cleanup:previous?.cleanup,fn};hooks[index]=record;pending.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
  const standard=async(method,data)=>{
   if(method==='compute.resource.status')return {schemaVersion:1,selectionId:null,kind:null,profileId:null,profileVersion:null,sessionId:null,status:'none',operator:'unknown',processStatus:'unknown',alive:null,agentReady:false,reason:null,authentication:'not_observed',managedRuns:false};
   if(method==='state')return {settings};
@@ -53,6 +53,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   },module,module.exports,window,{randomUUID});return module.exports;
  }
  const require=name=>{
+  if(name==='../features/workflows/task-drafts')return {clearTaskDrafts:id=>calls.push({method:'fixture.clearTaskDrafts',data:{id}})};
   if(name==='./ssh-guide-queue.mjs')return sshGuideQueue;
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='../api/compute-resources')return loadNavigation('frontend/api/compute-resources.ts');
@@ -84,5 +85,6 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
  function connect(){find(node=>node.type==='./Agent').props.onReviewWorker();render();}
  function openSettings(){find(node=>node.type==='button'&&node.props?.['aria-label']==='设置').props.onClick();render();return find(node=>node.type==='./SettingsPage').props;}
  function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}
- render();return {calls,settings,find,text,flush,emit,connect,openSettings,unmount,storage,render};
+ function replayStrictEffects(){while(pending.length)pending.shift()();for(const hook of hooks)if(hook?.fn)hook.cleanup?.();for(const hook of hooks)if(hook?.fn)hook.cleanup=hook.fn();}
+ render();return {calls,settings,find,text,flush,emit,connect,openSettings,unmount,storage,render,replayStrictEffects};
 }

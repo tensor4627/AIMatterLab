@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import {providerId} from '../../agent/providers/contracts.mjs';
 import {assertRpc} from "../../contracts/transport-policy.mjs";
 import {STUDIO_VERSION} from "./studio-version.mjs";
+import {agentEnvironment} from './agent-environment.mjs';
 export function cliCommand(executable,args=[]){
  if(typeof executable!=='string'||!executable.trim()||/[\r\n\0]/.test(executable))throw Error('Invalid CLI path');
  if(/\.(mjs|cjs|js)$/i.test(executable))return {file:process.execPath,args:[path.resolve(executable),...args],env:{ELECTRON_RUN_AS_NODE:'1'}};
@@ -11,8 +12,8 @@ export function cliCommand(executable,args=[]){
  return {file:executable,args,env:{}};
 }
 export function spawnCli(executable,args,options={}){
- const command=cliCommand(executable,args);
- return spawn(command.file,command.args,{stdio:['pipe','pipe','pipe'],windowsHide:true,...options,env:{...process.env,...options.env,...command.env}});
+ const command=cliCommand(executable,args),{provider=null,...launch}=options;
+ return spawn(command.file,command.args,{stdio:['pipe','pipe','pipe'],windowsHide:true,...launch,env:{...agentEnvironment(provider,{overrides:launch.env}),...command.env}});
 }
 export function prepareProfile(root,id,credential){
  providerId(id);if(!['kimi','qwen'].includes(id))throw Error('This provider does not use a CLI profile');const home=path.join(root,id),cwd=path.join(home,'workspace');fs.mkdirSync(cwd,{recursive:true});

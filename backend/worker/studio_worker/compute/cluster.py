@@ -342,6 +342,8 @@ def profile(value):
 
 def public(p):
     value={k: p.get(k) for k in ("id", "name", "scheduler", "version", "queue", "environment", "limits", "activation", "probe", "lsf_memory_scope", "auth_mode")}
+    if p.get('transport_kind') == 'ssh-service-local':
+        value['transport_kind'] = 'ssh-service-local'
     if "queue_targets" in p:
         value["queue_targets"] = copy.deepcopy(p["queue_targets"])
     health=dict(p.get('connection_check') or {'status':'not_run','scope':'Connection has not been checked in this version'})
@@ -515,6 +517,9 @@ class Clusters:
         return self._tunnels
 
     def _transport(self, p):
+        if p.get('transport_kind') == 'ssh-service-local':
+            from studio_worker.compute.ssh_service import SameHostTransport
+            return SameHostTransport(self.service, p)
         # The immutable run snapshot reaches this factory unchanged. Never look up
         # a newer profile by id to resolve authentication for an old job.
         return SSH(p, self.auth if p.get('auth_mode', 'key') == 'interactive' else None)
@@ -530,6 +535,9 @@ class Clusters:
             return self._register(value)
 
     def _register(self, value):
+        if value.get('transport_kind') == 'ssh-service-local':
+            from studio_worker.compute.ssh_service import assert_binding
+            assert_binding(self.service, value)
         p = profile(value)
         p.setdefault("id", secrets.token_hex(10))
         leaf(p["id"])
@@ -938,10 +946,25 @@ print('__STUDIO_JSON__'+json.dumps(out))
                            queue_policy_digest=policy_digest(selected_policy), queue_profile_version=p["version"])
             self.remote_name(run)
             run["script"] = batch_script(run)
-            atomic_json(directory/"run.json", run)
-            self.store.put("cluster-run", run); persisted = True
-            if parent:
-                self.save(parent, superseded_by=identifier)
+            with self.store.lock:
+                # Copying/downloading revision inputs can overlap submission of
+                # the original draft. Never replace its real state with the
+                # pre-transfer parent snapshot or publish a stale revision link.
+                if parent:
+                    current_parent = self.raw(parent["id"])
+                    if (current_parent["status"] not in ("draft", "ready") or current_parent.get("superseded_by") or
+                            current_parent.get("nonce") != parent.get("nonce") or current_parent["snapshots"] != parent["snapshots"]):
+                        raise PermissionError("The revision parent changed or was submitted; reload its current run")
+                    parent = current_parent
+                atomic_json(directory/"run.json", run)
+                if parent:
+                    parent = {**parent, "superseded_by": identifier, "updated_at": time.time()}
+                    self.store.put_many([("cluster-run", run), ("cluster-run", parent)])
+                    persisted = True
+                    self.store.event(parent["id"], {"kind": "cluster-run", "state": parent["status"]})
+                    atomic_json(Path(parent["directory"])/"run.json", parent)
+                else:
+                    self.store.put("cluster-run", run); persisted = True
             return self.run(identifier)
         except Exception:
             if not persisted: shutil.rmtree(directory)
@@ -979,15 +1002,19 @@ print('__STUDIO_JSON__'+json.dumps(out))
         return self.store.get("cluster-run", identifier)
 
     def save(self, r, **changes):
-        r.update(changes,updated_at=time.time())
-        self.store.put("cluster-run",r)
-        self.store.event(r["id"],{"kind":"cluster-run","state":r["status"]})
-        atomic_json(Path(r["directory"])/"run.json",r)
-        return r
+        # Keep the SQLite row and its diagnostic snapshot ordered across HTTP
+        # requests and the background monitor (including the shared .tmp file).
+        with self.store.lock:
+            r.update(changes,updated_at=time.time())
+            self.store.put("cluster-run",r)
+            self.store.event(r["id"],{"kind":"cluster-run","state":r["status"]})
+            atomic_json(Path(r["directory"])/"run.json",r)
+            return r
 
     def merge(self, identifier, **changes):
         """Re-read the current row before writing fields gathered by a long remote call."""
-        return self.save(self.raw(identifier), **changes)
+        with self.store.lock:
+            return self.save(self.raw(identifier), **changes)
 
     def run(self, identifier):
         r = dict(self.raw(identifier))
@@ -1010,8 +1037,15 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 raise ValueError("Input snapshot changed")
         PlanningAdapter(r["engine"]).prepare(r,r["cluster_snapshot"]["environment"])
         resources(r["resources"],r["cluster_snapshot"],r["max_seconds"])
-        # Input hashing can outlive a concurrent observation; merge into the current row.
-        self.merge(identifier,status="ready",validation={"status":"passed","scope":"local immutable inputs and scheduler resource contract only; scientific checks run on execution node"})
+        # A concurrent submit may reserve/dispatch while input hashing is in
+        # progress. Validation must never reopen an attempted run as ready.
+        with self.store.lock:
+            current=self.raw(identifier)
+            if current["status"] not in ("draft","ready"):
+                return self.run(identifier)
+            if current.get("nonce")!=r.get("nonce") or current["snapshots"]!=r["snapshots"]:
+                raise ValueError("Run snapshot changed during validation; reload before validating")
+            self.save(current,status="ready",validation={"status":"passed","scope":"local immutable inputs and scheduler resource contract only; scientific checks run on execution node"})
         return self.run(identifier)
 
     def revise(self,identifier,changes):
@@ -1126,21 +1160,48 @@ print('__STUDIO_JSON__'+json.dumps(record))
         # the reviewed draft ready, so the human can retry instead of reconciling an
         # "unknown" attempt that was never dispatched.
         data=self.archive(r)
-        # Record uncertainty immediately before the only remote dispatch.
-        self.save(self.raw(identifier),status="unknown",submit_attempted=True)
+        with self.store.lock:
+            # Archive/authentication may overlap another cluster submission, a
+            # local dispatch or a policy edit. Recheck and reserve under the same
+            # Store lock used by the local scheduler's final concurrency check.
+            r,p=reviewed()
+            if r is None:return self.run(identifier)
+            if interactive:
+                if r['cluster_snapshot']!=snapshot:
+                    raise ValueError('Reviewed cluster snapshot changed before submission')
+                p=r['cluster_snapshot']
+            # This durable reservation is visible to both schedulers before any
+            # remote side effect. Unknown attempts are never automatically replayed.
+            self.save(r,status="unknown",submit_attempted=True)
         try:
             result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=data,timeout=90))
             if result.get("nonce")!=r["nonce"] or not re.fullmatch(r"[0-9]+",result.get("job_id","")):
                 raise ValueError("Invalid scheduler receipt")
-            self.merge(identifier,status="queued",job_id=result["job_id"])
+            with self.store.lock:
+                current=self.raw(identifier)
+                if current["status"] not in TERMINAL:
+                    changes={"job_id":result["job_id"]}
+                    if current["status"]=="unknown" and not current.get("exit"):
+                        changes["status"]="queued"
+                    self.save(current,**changes)
         except Exception:
-            self.merge(identifier,status="unknown",error="Submission reply unavailable; reconcile only, never resubmit")
+            with self.store.lock:
+                current=self.raw(identifier)
+                # A monitor may already have reconciled the scheduler receipt
+                # while the submission reply was delayed or lost.
+                if current["status"]=="unknown" and not current.get("job_id") and not current.get("exit"):
+                    self.save(current,error="Submission reply unavailable; reconcile only, never resubmit")
         return self.run(identifier)
 
     def poll(self, identifier):
-        r=self.raw(identifier);self.allowed(r["project_id"],r["cluster_id"])
-        if r["status"] in ("draft","ready",*TERMINAL):
-            return self.run(identifier)
+        with self.store.lock:
+            r=self.raw(identifier);self.allowed(r["project_id"],r["cluster_id"])
+            if r["status"] in ("draft","ready",*TERMINAL):
+                return self.run(identifier)
+            # Additive per-request ownership; legacy records need no migration.
+            # Only the latest started poll may commit a success or failure reply.
+            token=secrets.token_hex(16)
+            self.save(r,observation_token=token)
         p=r["cluster_snapshot"]
         source="""
 import pathlib,subprocess
@@ -1182,25 +1243,33 @@ print('__STUDIO_JSON__'+json.dumps(out))
 """
         try:
             result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"job_id":r["job_id"],"scheduler":p["scheduler"],"name":r["job_name"]})))
-            state=result.get("scheduler_state","unknown").upper()
-            mapped={"PEND":"queued","PENDING":"queued","RUN":"running","RUNNING":"running","PSUSP":"queued","USUSP":"queued","SSUSP":"queued","CONFIGURING":"queued","COMPLETING":"running","EXIT":"failed","FAILED":"failed","TIMEOUT":"failed","OUT_OF_MEMORY":"failed","CANCELLED":"cancelled"}
-            status=mapped.get(state,"unknown")
-            if result.get("exit"):
-                status="succeeded" if result["exit"]["exit_code"]==0 else "failed"
-                if result.get("validation",{}).get("status")!="passed" and status=="succeeded":
-                    status="unknown"
-            if state in ("EXIT","CANCELLED") and r.get("cancel_requested") and result.get("exit",{}).get("exit_code")!=0:status="cancelled"
-            # The SSH round trip may outlive concurrent human cancellation or a newer
-            # attempt; re-read the current row instead of writing the stale snapshot.
-            self.merge(identifier,status=status,job_id=result.get("job_id") or r["job_id"],scheduler_state=state,connection_action=None,
-                      scientific_validation=result.get("validation",r.get("scientific_validation")),exit=result.get("exit"),identity_verified=result.get("identity_verified",False))
+            with self.store.lock:
+                current=self.raw(identifier)
+                if current.get("observation_token")!=token or current["status"] in TERMINAL:
+                    return self.run(identifier)
+                state=result.get("scheduler_state","unknown").upper()
+                mapped={"PEND":"queued","PENDING":"queued","RUN":"running","RUNNING":"running","PSUSP":"queued","USUSP":"queued","SSUSP":"queued","CONFIGURING":"queued","COMPLETING":"running","EXIT":"failed","FAILED":"failed","TIMEOUT":"failed","OUT_OF_MEMORY":"failed","CANCELLED":"cancelled"}
+                status=mapped.get(state,"unknown")
+                receipt=result.get("exit") or current.get("exit")
+                validation=result.get("validation",current.get("scientific_validation"))
+                if receipt:
+                    status="succeeded" if receipt["exit_code"]==0 else "failed"
+                    if (validation or {}).get("status")!="passed" and status=="succeeded":
+                        status="unknown"
+                if state in ("EXIT","CANCELLED") and current.get("cancel_requested") and (receipt or {}).get("exit_code")!=0:status="cancelled"
+                self.save(current,status=status,job_id=result.get("job_id") or current["job_id"],scheduler_state=state,connection_action=None,
+                          scientific_validation=validation,exit=receipt,identity_verified=result.get("identity_verified",False))
         except Exception as error:
-            from studio_worker.compute.ssh_auth import AuthError
-            changes = {}
-            if isinstance(error, AuthError) and str(error) == 'needs_human_auth':
-                changes['connection_action'] = {'kind': 'authenticate_original_run',
-                                                'code': 'needs_human_auth', 'runId': r['id']}
-            self.merge(identifier,status="unknown",error="SSH or scheduler state unavailable; no resubmission",**changes)
+            with self.store.lock:
+                current=self.raw(identifier)
+                if current.get("observation_token")!=token or current["status"] in TERMINAL:
+                    return self.run(identifier)
+                from studio_worker.compute.ssh_auth import AuthError
+                changes = {}
+                if isinstance(error, AuthError) and str(error) == 'needs_human_auth':
+                    changes['connection_action'] = {'kind': 'authenticate_original_run',
+                                                    'code': 'needs_human_auth', 'runId': r['id']}
+                self.save(current,status="unknown",error="SSH or scheduler state unavailable; no resubmission",**changes)
         return self.run(identifier)
 
     def cancel(self, identifier):

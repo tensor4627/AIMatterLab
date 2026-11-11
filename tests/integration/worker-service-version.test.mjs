@@ -1,7 +1,14 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import ts from 'typescript';
-import {bundledWorkerRuntimeId,workerServiceVersionEvidence} from "../../backend/main/compute/worker-service-version.mjs";
+import {bundledWorkerRuntimeId,workerServiceVersionEvidence,workerObservationEvidence} from "../../backend/main/compute/worker-service-version.mjs";
 import {readWorkerStatus} from "../../backend/main/compute/worker-status.mjs";
 const digest='a'.repeat(20),other='b'.repeat(20),root='/fixture/worker';
+test('verified draft source is opaque, stable across runtime updates and isolated across ports and roots',()=>{
+ const worker=verifiedWorker();worker.connectionTarget={port:8767};const source=workerObservationEvidence(worker).sourceId;assert.match(source,/^[a-f0-9]{64}$/);
+ worker.connection.health.runtime=root+'/runtimes/'+other;assert.equal(workerObservationEvidence(worker).sourceId,source);
+ worker.connectionTarget.port=8768;assert.notEqual(workerObservationEvidence(worker).sourceId,source);
+ worker.identity={...worker.identity,root:'/other'};assert.equal(workerObservationEvidence(worker).sourceId,undefined);
+ worker.connection.health.root='/other';assert.notEqual(workerObservationEvidence(worker).sourceId,source);
+});
 function verifiedWorker(runtime=root+'/runtimes/'+digest){const health={name:'gpu-sampling-studio',root,runtime,execution_policy:'desktop-review-v1'};return{bundledRuntimeId:digest,connection:{health},identity:{distribution:'Fixture',root},connectionEpoch:1,request:async(method,target)=>{assert.equal(method,'GET');assert.equal(target,'/api/health');return {...health};}};}
 test('bundled fingerprint matches the installer fixed input specification and excludes tests, caches and other JSON',()=>{
  const folder=fs.mkdtempSync(path.join(os.tmpdir(),'studio-source-id-'));try{

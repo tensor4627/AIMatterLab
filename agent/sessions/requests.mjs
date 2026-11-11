@@ -12,6 +12,7 @@ import {terminalOnlyTurn} from './terminal-turn.mjs';
 import {ensureDefinitionContext} from './private-conversation-context.mjs';
 import {resumeConversationContext} from './conversation-recovery.mjs';
 import {currentPrivateTurn} from '../context/private-task-context.mjs';
+import {interactionFlags,interactionModeContext} from '../context/interaction-mode.mjs';
 import {deliverScientificTurn} from './scientific-turn.mjs';
 import {sourceContext} from '../context/source-context.mjs';
 import {localSkills} from '../skills/skills.mjs';
@@ -22,6 +23,7 @@ export function createAgentRequests({runtime}){
  return async function agentRpc({provider,method,params={}}){
  const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
  providerId(provider);assertRpc(method);
+ const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(),selectedSsh=resource?.selection?.kind==='ssh-terminal'?resource.selection:null;
  const {studioSkillId,studioTurnRequestId,...protocolParams}=params;params=protocolParams;
  if(studioTurnRequestId!==undefined&&(typeof studioTurnRequestId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(studioTurnRequestId)))throw Error('Invalid turn request identity');
@@ -33,15 +35,21 @@ export function createAgentRequests({runtime}){
  if(['thread/start','thread/resume','turn/start'].includes(method)){
   assertIdleAgent();ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId);await synchronize();
  }
- if(selectedSsh&&['turn/start','turn/steer'].includes(method)){await selectedTerminalReady();terminalOnly=true;}
- else terminalOnly=method==='turn/start'&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
+ if(selectedSsh&&['turn/start','turn/steer'].includes(method)){await selectedTerminalReady();terminalOnly=resourceRouting.workerSelected?.()!==true;}
+ else terminalOnly=['turn/start','turn/steer'].includes(method)&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
  if(method==='turn/steer'&&!terminalOnly){const task=taskRecords.bound(provider,params.threadId);if(task&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');check();}
  if(method==='turn/steer'&&terminalOnly)params=terminalOnlyTurn(params,{provider,resource:selectedSsh});
+ if(method==='turn/steer'&&!terminalOnly){
+  const task=taskRecords.bound(provider,params.threadId),{planningMode,reviewMode,studioTaskId,studioToolContext,...rest}=params;
+  if(studioTaskId!==undefined&&studioTaskId!==task?.id)throw Error('Task is not bound to this conversation');
+  if(turnFlags.reviewMode)throw Error('Review requires a new workflow turn');
+  params={...rest,input:[...(rest.input||[]),{type:'text',text:interactionModeContext({...turnFlags,scope:task?'workflow':'chat'})+(task?'\nstudioTaskId: '+task.id:'')}]};
+ }
  if(method==='turn/start'&&!terminalOnly){
   let task=taskRecords.bound(provider,params.threadId);
   if(task){const access=await privateAccess.assertTask(task,provider);check();if(access.definitionOnly){
    if(params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
-   const {planningMode,studioTaskId,reviewMode,...privateParams}=params;currentPrivateTurn(privateParams,task);
+   const {planningMode,studioTaskId,reviewMode,...privateParams}=params;currentPrivateTurn(privateParams,task,{planningMode:turnFlags.planningMode});
    if(provider!=='codex')throw Error('Definition-only sharing requires an isolated fresh Codex context; this provider is not yet supported for private definitions');
    const clean=await ensureDefinitionContext({records:taskRecords,workflowContext,agents,task,ticket,model:params.model,publish:event=>emit('studio:event',event)});ticket=clean.ticket;check();params={...params,threadId:clean.task.threadId};
   }}
@@ -71,7 +79,7 @@ export function createAgentRequests({runtime}){
    params={...params,threadId:resumed.result.thread.id};skillKey=provider+':'+params.threadId;bound=taskRecords.bound(provider,params.threadId);
   }
   params=taskRecords.prepareTurn(provider,params);check();await synchronize();
-  if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview});
+  if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview,planningMode:turnFlags.planningMode});
   // Public software guidance is selected only for the actual current intent.
   const guidanceScope=skillGuidanceScope(provider),readPolicy=await scientificSkills.resolvePolicy(guidanceScope);check();
   const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
@@ -96,7 +104,7 @@ export function createAgentRequests({runtime}){
   params={...params,input};
  }
  let result;
- try{check();if(selectedSsh&&terminalOnly)await selectedTerminalReady();if(provider==='codex'&&method==='thread/resume'){const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;}else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{check();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
+ try{check();if(terminalOnly){if(selectedSsh)await selectedTerminalReady();else if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');}if(provider==='codex'&&method==='thread/resume'){const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;}else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{check();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
  catch(error){if(method==='turn/start'){try{check();taskRecords.failedTurn(provider,params.threadId,error);}catch{}}throw error;}
  if(method==='thread/start'){if(!result.thread?.id)throw Error('The server did not return a real conversation');workflowContext.started(ticket,result.thread.id);await synchronize();}
  if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)catalog.put('thread',result.thread.id,result.thread);

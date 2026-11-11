@@ -26,7 +26,7 @@ function fixture(){
 }
 
 test('no-owner desktop restores only its verified last-explicit existing service, including a healthy prior runtime',async()=>{
- const f=fixture();try{const result=await f.restore();assert.equal(result.status,'connected');assert.deepEqual(Object.keys(result).sort(),['checkedAt','reason','scope','status']);assert.equal(result.scope,'global');assert.deepEqual(f.calls.map(v=>v.attach||v.read?.workerRoot),['/fixture/worker','/fixture/worker']);assert.equal(f.calls[0].read.workerPort,8767);assert(!/synthetic|tokens|url|runtime|root|distribution/.test(JSON.stringify(result)));assert.equal(f.worker.connection.health.runtime,'/fixture/prior-runtime');}finally{f.close();}
+ const f=fixture();try{const result=await f.restore();assert.equal(result.status,'connected');assert.deepEqual(Object.keys(result).sort(),['checkedAt','reason','scope','sourceId','status']);assert.match(result.sourceId,/^[a-f0-9]{64}$/);assert.equal(result.scope,'global');assert.deepEqual(f.calls.map(v=>v.attach||v.read?.workerRoot),['/fixture/worker','/fixture/worker']);assert.equal(f.calls[0].read.workerPort,8767);assert(!/synthetic|tokens|url|runtime|root|distribution/.test(JSON.stringify(result)));assert.equal(f.worker.connection.health.runtime,'/fixture/prior-runtime');}finally{f.close();}
 });
 
 for(const mode of ['missing','different-root-setting','different-port-setting','different-distribution','malformed-binding'])test('no-owner global recovery refuses an unverified target: '+mode,async()=>{

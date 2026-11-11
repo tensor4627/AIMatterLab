@@ -10,7 +10,7 @@ function reference(value){return object(value)&&value.schemaVersion===1&&id(valu
 const empty=()=>({schemaVersion:1,selectionId:null,kind:null,profileId:null,profileVersion:null,sessionId:null,status:'none',operator:'unknown',processStatus:'unknown',alive:null,agentReady:false,reason:null,authentication:'not_observed',managedRuns:false});
 const base=value=>({...empty(),selectionId:value.selectionId,kind:value.kind,profileId:value.profileId,profileVersion:value.profileVersion,sessionId:value.sessionId});
 
-export function createComputeResourceBinding({catalog,profiles,terminal,current=()=>null,revision=()=>0,uuid=randomUUID}){
+export function createComputeResourceBinding({catalog,profiles,terminal,current=()=>null,revision=()=>0,serviceState=()=>null,uuid=randomUUID}){
  let intent=0;
  const selected=()=>{const value=catalog.get(KIND,KEY);if(value==null)return null;if(!reference(value))throw Error('compute_resource_invalid_selection');return structuredClone(value);};
  const capture=()=>({intent,owner:structuredClone(current()),revision:revision()});
@@ -23,8 +23,10 @@ export function createComputeResourceBinding({catalog,profiles,terminal,current=
   const resource=facts?.resource;
   if(resource?.kind!=='ssh-terminal'||resource.profileId!==value.profileId||resource.profileVersion!==value.profileVersion||facts.sessionId!==value.sessionId)throw Error('compute_resource_session_mismatch');
   if(!['human','agent'].includes(facts.operator)||!['running','exited','expired'].includes(facts.processStatus)||typeof facts.alive!=='boolean'||typeof facts.agentReady!=='boolean'||facts.authentication!=='not_observed'||facts.managedRuns!==false)throw Error('compute_resource_unverified_state');
-  const ready=facts.agentReady&&facts.operator==='agent'&&facts.alive&&facts.processStatus==='running';
-  return {...initial,status:'selected',operator:facts.operator,processStatus:facts.processStatus,alive:facts.alive,agentReady:ready,reason:ready?null:facts.processStatus!=='running'?'terminal_'+facts.processStatus:facts.operator==='human'?'human_owned':'current_conversation_grant_required'};
+  const service=serviceState(),sameService=service?.sessionId===value.sessionId&&service.profileId===value.profileId&&service.profileVersion===value.profileVersion;
+  const workflowReady=sameService&&service.status==='connected'&&service.workflowReady===true&&facts.alive&&facts.processStatus==='running';
+  const ready=workflowReady||facts.agentReady&&facts.operator==='agent'&&facts.alive&&facts.processStatus==='running';
+  return {...initial,status:'selected',operator:facts.operator,processStatus:facts.processStatus,alive:facts.alive,agentReady:ready,workflowReady:!!workflowReady,serviceActive:!!sameService&&service.status!=='disconnected',serviceStatus:sameService?service.status:'disconnected',...workflowReady?{managedRuns:true,authentication:'verified'}:{},reason:ready?null:sameService&&service.status==='unknown'?'ssh_service_unavailable':facts.processStatus!=='running'?'terminal_'+facts.processStatus:facts.operator==='human'?'human_owned':'current_conversation_grant_required'};
  }
  async function status(data={}){exact(data,[]);const value=selected();if(!value)return empty();const context=capture(),result=await observe(value,context);fresh(context);if(!equal(value,selected()))throw Error('compute_resource_selection_changed');return result;}
  async function activate(data){

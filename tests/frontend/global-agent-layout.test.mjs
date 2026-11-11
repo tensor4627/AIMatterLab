@@ -50,3 +50,14 @@ test('global width changes retain editor text, terminal identity and unchanged A
 test('actual PaneDivider keyboard and pointer variants use effective right-side orientation and bounds',()=>{
  const code=ts.transpileModule(fs.readFileSync(new URL("../../frontend/ui/PaneDivider.tsx",import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;const module={exports:{}};new Function('require','module','exports',code)(n=>n==='./i18n'?{t:x=>x}:{jsx:(type,props)=>({type,props})},module,module.exports);const values=[],handlers=new Map(),node={setPointerCapture(){},addEventListener:(n,fn)=>handlers.set(n,fn),removeEventListener:n=>handlers.delete(n)};const divider=module.exports.default({label:'Resize',value:340,min:260,max:600,reverse:true,onChange:v=>values.push(v)});divider.props.onKeyDown({key:'ArrowRight',preventDefault(){}});divider.props.onKeyDown({key:'End',preventDefault(){}});divider.props.onPointerDown({clientX:100,pointerId:1,currentTarget:node,preventDefault(){}});handlers.get('pointermove')({clientX:80});handlers.get('pointermove')({clientX:1000});handlers.get('pointerup')();assert.deepEqual(values,[308,600,360,260]);assert.equal(handlers.size,0);
 });
+
+test('horizontal divider adjusts height with vertical keys and stops tracking on pointer cancellation',()=>{
+ const code=ts.transpileModule(fs.readFileSync(new URL('../../frontend/ui/PaneDivider.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,module={exports:{}};
+ new Function('require','module','exports',code)(name=>name==='./i18n'?{t:x=>x}:{jsx:(type,props)=>({type,props})},module,module.exports);
+ const values=[],handlers=new Map(),node={setPointerCapture(){},addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name)};
+ const divider=module.exports.default({label:'Height',orientation:'horizontal',value:190,min:90,max:380,reverse:true,onChange:value=>values.push(value)});
+ assert.equal(divider.props['aria-orientation'],'horizontal');
+ for(const [key,shiftKey] of [['ArrowUp',false],['ArrowDown',true],['Home',false],['End',false],['ArrowRight',false]])divider.props.onKeyDown({key,shiftKey,preventDefault(){}});
+ divider.props.onPointerDown({clientX:100,clientY:200,pointerId:1,currentTarget:node,preventDefault(){}});handlers.get('pointermove')({clientX:999,clientY:150});handlers.get('pointercancel')();
+ assert.deepEqual(values,[222,189,90,380,240]);assert.equal(handlers.size,0);
+});

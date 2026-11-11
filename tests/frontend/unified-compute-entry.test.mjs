@@ -1,8 +1,6 @@
-import {frontendSource} from "../helpers/frontend-source-paths.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import ts from 'typescript';
+import {settingsPageHarness} from '../helpers/settings-page-hooks.mjs';
 import {memoryStorage} from "../helpers/agent-hooks.mjs";
 import {appWorkerHarness,completeComputeGuide} from "../helpers/app-worker-hooks.mjs";
 const savedLocal={id:'fixture-wsl',version:2,kind:'wsl',name:'Fixture local',distribution:'Fixture Linux',root:'/fixture/service',port:9080,intent:'existing'};
@@ -31,19 +29,14 @@ for(const route of ['footer','settings'])test(route+' Local entry uses the exist
 test('project management remains reachable through Settings with rollback and existing modal',async()=>{
  const h=appWorkerHarness();await h.flush();const p=h.openSettings();p.onChange({...p.settings,workerRoot:'/unsaved'});await h.flush();h.find(n=>n.type==='./SettingsPage').props.onOpenProjects();await h.flush();h.find(n=>n.type==='Modal'&&n.props.title==='计算项目');findId(h,'new-project').props.onClick();await h.flush();h.find(n=>n.type==='Modal'&&n.props.title==='新建计算项目');h.find(n=>n.type==='./ProjectAuthorizationForm').props.onCancel();await h.flush();h.find(n=>n.type==='Modal'&&n.props.title==='计算项目').props.onClose();await h.flush();absent(h,n=>n.props?.['data-testid']==='project-management');assert(!h.calls.some(forbidden));h.unmount();
 });
-function component(name,category='connections'){const source=fs.readFileSync(frontendSource(name+'.tsx'),'utf8'),module={exports:{}},jsx=(type,props)=>({type,props});
- new Function('require','module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>n==='react'?{useState:v=>[v==='appearance'?category:v,()=>{}]}:n==='react/jsx-runtime'?{jsx,jsxs:jsx}:n==='../../ui/i18n'?{t:v=>v}:new Proxy({},{get:(_t,k)=>String(k)}),module,module.exports);return module.exports.default;
-}
-const all=n=>Array.isArray(n)?n.flatMap(all):n&&typeof n==='object'?[n,...all(n.props?.children)]:[];
-test('Settings retains explicit local/manual SSH and independent permissions routes',()=>{
- let local=0,ssh=0,projects=0;const callbacks={onLocal:()=>local++,onSsh:()=>ssh++};
- const settings=all(component('SettingsPage')({settings:{},onOpenLocalCompute:callbacks.onLocal,onOpenSshCompute:callbacks.onSsh,onOpenProjects:()=>projects++}));
- for(const id of ['settings-connect-local','settings-connect-ssh'])settings.find(n=>n.props?.['data-testid']===id).props.onClick();
- assert(!settings.some(n=>n.props?.['data-testid']==='settings-project-management'));
- const permissions=all(component('SettingsPage','permissions')({settings:{},onOpenProjects:()=>projects++}));
- permissions.find(n=>n.props?.['data-testid']==='settings-project-management').props.onClick();
- assert(!permissions.some(n=>['settings-connect-local','settings-connect-ssh'].includes(n.props?.['data-testid'])));
- assert.deepEqual([local,ssh,projects],[1,1,1]);assert(!settings.some(n=>n.props?.['data-testid']==='ssh-host'));
+test('Settings retains explicit local/manual SSH and independent permissions routes',async()=>{
+ let local=0,ssh=0,projects=0;const h=settingsPageHarness({onOpenLocalCompute:()=>local++,onOpenSshCompute:()=>ssh++,onOpenProjects:()=>projects++});
+ try{await h.flush();h.find(n=>n.type==='button'&&h.text(n)==='计算连接').props.onClick();await h.flush();
+ for(const id of ['settings-connect-local','settings-connect-ssh'])h.find(n=>n.props?.['data-testid']===id).props.onClick();
+ absent(h,n=>n.props?.['data-testid']==='settings-project-management');
+ h.find(n=>n.type==='button'&&h.text(n)==='计算权限').props.onClick();await h.flush();h.find(n=>n.props?.['data-testid']==='settings-project-management').props.onClick();
+ absent(h,n=>['settings-connect-local','settings-connect-ssh','ssh-host'].includes(n.props?.['data-testid']));assert.deepEqual([local,ssh,projects],[1,1,1]);
+ }finally{h.unmount();}
 });
 
 test('explicit saved Local entry uses its profile without changing selected task ownership',async()=>{

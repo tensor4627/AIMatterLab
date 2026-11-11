@@ -61,6 +61,7 @@ class ToolConfigurationProject(unittest.TestCase):
         for change in changes:
             with self.subTest(change=change):
                 existing = copy.deepcopy(baseline); change(existing)
+                existing['revision'] = self.service.store.get('project', baseline['id'])['revision']
                 self.service.register_project(existing)
                 before = self.service.store.get('project', existing['id'])
                 with self.assertRaisesRegex(ValueError, 'preserved'): self.call()
@@ -95,7 +96,7 @@ class ToolConfigurationProject(unittest.TestCase):
             finally: release.set()
             self.finish(writer, creator)
         self.assertNotIn('error', written); self.assertIsInstance(created.get('error'), ValueError)
-        self.assertEqual(self.service.store.get('project', self.request['project_id']), self.concurrent())
+        self.assertEqual(self.service.store.get('project', self.request['project_id']), {**self.concurrent(), 'revision': 0})
 
     def test_create_holds_lock_through_check_and_insert_before_later_explicit_edit(self):
         entered, writer_entered, release = threading.Event(), threading.Event(), threading.Event()
@@ -117,7 +118,16 @@ class ToolConfigurationProject(unittest.TestCase):
         self.assertNotIn('error', created); self.assertNotIn('error', written)
         self.assertEqual(created['value']['name'], 'CPU check')
         # A later explicit generic project edit retains its existing behavior; it is not undone.
-        self.assertEqual(self.service.store.get('project', self.request['project_id']), self.concurrent())
+        self.assertEqual(self.service.store.get('project', self.request['project_id']), {**self.concurrent(), 'revision': 1})
+
+    def test_project_api_rejects_stale_authorization_and_preserves_winning_update(self):
+        project = self.call()
+        updated = dispatch(self.service, 'POST', '/api/projects', {**project, 'name': 'Reviewed name'}, admin=True)
+        self.assertEqual(updated['revision'], 1)
+        with self.assertRaisesRegex(ValueError, 'project_edit_conflict'):
+            dispatch(self.service, 'POST', '/api/projects', {**project, 'policy': {**project['policy'], 'engines': ['pydyn.md']}}, admin=True)
+        self.assertEqual(self.service.store.get('project', project['id']), updated)
+        self.assertEqual(self.service.store.list('environment')[0]['id'], 'python-fixture')
 
     def test_two_conflicting_real_threads_create_exactly_one_project(self):
         barrier = threading.Barrier(2)

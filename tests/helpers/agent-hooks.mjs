@@ -12,6 +12,7 @@ import * as drafts from "../../frontend/features/conversations/composer-drafts.m
 import * as effort from "../../frontend/features/conversations/resume-effort.mjs";
 
 import * as activityOwner0 from "../../frontend/features/conversations/tool-activity.mjs";
+import * as elicitation from '../../frontend/features/conversations/elicitation-input.mjs';
 import * as activityOwner1 from "../../contracts/agent/user-message.mjs";
 const activity={...activityOwner0,...activityOwner1};
 
@@ -24,6 +25,7 @@ import {conversationSelectionHarness} from './conversation-selection-hooks.mjs';
 
 const source=fs.readFileSync(process.env.STUDIO_AGENT_SOURCE?path.resolve(process.env.STUDIO_AGENT_SOURCE):new URL('../../frontend/features/conversations/Agent.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+const chatCompiled=ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/conversations/ChatMessage.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 export function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 export function memoryStorage(){const values=new Map();return {values,getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key)};}
 export function conversation(provider,threadId){return {id:provider+':'+threadId,provider,threadId,name:threadId,projectId:null,taskId:null};}
@@ -54,12 +56,14 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
  };
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
  const require=name=>{
-  if(name==='react')return {useState,useRef,useEffect};
-  if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
+  if(name==='react')return {useState,useRef,useEffect,memo:component=>component};
+  if(name==='react/jsx-runtime'){const jsx=(type,props)=>typeof type==='function'?type(props):({type,props});return {jsx,jsxs:jsx,Fragment:'fragment'};}
+  if(name==='./ChatMessage'){const child={exports:{}};new Function('require','module','exports',chatCompiled)(require,child,child.exports);return {default:props=>({type:'./ChatMessage',props:{...props,children:child.exports.default(props)}})};}
   if(name==='lucide-react')return new Proxy({},{get:(_target,key)=>String(key)});
   if(["./provider-account.mjs","../../../contracts/agent/provider-account.mjs","../conversations/provider-account.mjs"].includes(name))return account;
   if(["./composer-drafts.mjs"].includes(name))return drafts;
   if(["./resume-effort.mjs"].includes(name))return effort;
+  if(name==='./elicitation-input.mjs')return elicitation;
   if(["./tool-activity.mjs","../../../contracts/agent/user-message.mjs"].includes(name))return activity;
   if(["./workflow-intent.mjs","../../../contracts/workflows/task-fields.mjs","../../ui/task-fields.mjs"].includes(name))return fields;
   if(["../../api/studio","../../api/agent"].includes(name))return {invoke,recoverConversation:data=>invoke('agent.recover',data)};

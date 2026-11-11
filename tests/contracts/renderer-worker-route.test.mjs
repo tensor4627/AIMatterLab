@@ -8,7 +8,7 @@ test('generic renderer port refuses every privileged custom action and all canon
  }
 });
 test('canonical ordinary UI routes remain available and unrelated targets fail',()=>{
- for(const [method,target]of [['GET','/api/projects'],['GET','/api/runs?project_id=owned'],['POST','/api/pygas/composition/read'],['POST','/api/cluster/cancel']])assert.doesNotThrow(()=>assertRendererWorkerRoute(method,target));
+ for(const [method,target]of [['GET','/api/projects'],['GET','/api/runs?project_id=owned'],['POST','/api/pygas/composition/read'],['POST','/api/cluster/cancel'],['POST','/api/run/reconcile']])assert.doesNotThrow(()=>assertRendererWorkerRoute(method,target));
  for(const value of [null,{},'/api/projects#hash','https://elsewhere.invalid/api/projects','/api/projects\n'])assert.throws(()=>assertRendererWorkerRoute('GET',value));
 });
 

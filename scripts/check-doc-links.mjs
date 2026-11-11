@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {execSync} from 'node:child_process';
+import {execFileSync} from 'node:child_process';
 
 const root=process.cwd();
-const files=execSync('git ls-files "*.md"',{cwd:root,encoding:'utf8'}).split('\n').filter(Boolean);
+// Include new local docs before staging; ignored runtime evidence stays excluded.
+const files=[...new Set(execFileSync('git',['ls-files','--cached','--others','--exclude-standard','-z','--','*.md'],{cwd:root,encoding:'utf8'}).split('\0').filter(Boolean))].filter(file=>fs.existsSync(path.join(root,file))).sort();
 const broken=[];
 const pattern=/\]\(([^)\s]+)\)/g;
 for(const file of files){

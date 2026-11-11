@@ -36,7 +36,7 @@ test('public document declares complete keys, illustrative YAML, native weight/s
 // in-memory spies; it executes no analysis, plotting, shell, import of engine,
 // model, GPU or scientific run. Source path is supplied only by the test caller.
 const sourceRoot=process.env.STUDIO_TEST_PYGAS_SOURCE;
-test('actual declared public CLI mapping/parser, native weighting expression and prefix/empty-bin contract',{skip:!sourceRoot,timeout:10000},()=>{
+test('actual declared public CLI mapping/parser, native weighting expression and prefix/empty-bin contract',{skip:!sourceRoot,timeout:10000},t=>{
  const script=String.raw`
 import ast,argparse,json,pathlib,sys,types,math,hashlib,contextlib,io
 root=pathlib.Path(sys.argv[1]);doc=json.loads(sys.argv[2]);cli=(root/'entrypoints/cli.py').read_text(encoding='utf8');analysis=(root/'base/opes_analysis.py').read_text(encoding='utf8');opes=(root/'base/opes.py').read_text(encoding='utf8')
@@ -105,11 +105,15 @@ hist=next(x for x in at.body if isinstance(x,ast.FunctionDef) and x.name=='_hist
 worker=pathlib.Path(sys.argv[3]);contract=json.loads((worker/'engine_contracts.json').read_text())
 assert contract['engines']['pygas.opes-reweight']['required_inputs']==doc['studio_binding']['required_input_names']
 adapter_tree=ast.parse((worker/'tools/adapters.py').read_text());cls=next(x for x in adapter_tree.body if isinstance(x,ast.ClassDef) and x.name=='Adapter')
-prepare=next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='prepare');require=next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='require');require.decorator_list=[]
-package=types.ModuleType('fixture');package.__path__=[];sys.modules['fixture']=package
-validation=types.ModuleType('fixture.derivative_selection');validation.validate_controls=lambda p,e:None;sys.modules['fixture.derivative_selection']=validation
-ae={'__name__':'fixture.adapter','__package__':'fixture'};exec(compile(ast.Module(body=[require,prepare],type_ignores=[]),'<actual-studio-adapter>','exec'),ae)
+methods=[next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name==name) for name in ('require','_declaration_binding','_builtin_prepare','prepare')];methods[0].decorator_list=[]
+for name in ('studio_worker','studio_worker.tools'):
+ package=types.ModuleType(name);package.__path__=[];sys.modules[name]=package
+validation=types.ModuleType('studio_worker.tools.derivative_selection');validation.validate_controls=lambda p,e:None;sys.modules[validation.__name__]=validation
+# This fixture checks the original built-in argv contract. Use the supported
+# declaration-off branch in memory; do not change process/product configuration.
+ae={'os':types.SimpleNamespace(environ={'STUDIO_DECLARATION_DRIVEN':'0'})};exec(compile(ast.Module(body=methods,type_ignores=[]),'<actual-studio-adapter>','exec'),ae)
 owner=types.SimpleNamespace(engine='pygas.opes-reweight',require=ae['require'],executable=lambda environment,name:'<registered pygas executable>')
+for name in ('_declaration_binding','_builtin_prepare'):setattr(owner,name,types.MethodType(ae[name],owner))
 inputs={name:name for name in doc['studio_binding']['required_input_names']}
 assert ae['prepare'](owner,{'inputs':inputs,'parameters':{}},{})==doc['studio_binding']['adapter_argv']
 for name in inputs:
@@ -117,5 +121,5 @@ for name in inputs:
  except ValueError:pass
 print(json.dumps({'actual_cli':'passed','source_files':3,'normalised_native_weights':'equivalent','blocks2_prefix_stop_for_N8':4,'scope':'stdlib AST/CLI spies only; no numerical analysis run'}))
 `;
- const result=spawnSync(process.env.PYTHON||'python',['-c',script,sourceRoot,JSON.stringify(document),fileURLToPath(new URL("../../backend/worker/studio_worker/",import.meta.url))],{encoding:'utf8',timeout:8000,windowsHide:true});assert.equal(result.status,0,result.stderr||result.stdout);const proof=JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));assert.equal(proof.actual_cli,'passed');assert.equal(proof.normalised_native_weights,'equivalent');
+ const result=spawnSync(process.env.PYTHON||'python',['-c',script,sourceRoot,JSON.stringify(document),fileURLToPath(new URL("../../backend/worker/studio_worker/",import.meta.url))],{encoding:'utf8',timeout:8000,windowsHide:true});assert.equal(result.status,0,result.stderr||result.stdout);const proof=JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));assert.equal(proof.actual_cli,'passed');assert.equal(proof.normalised_native_weights,'equivalent');t.diagnostic(JSON.stringify(proof));
 });

@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {appWorkerHarness} from "../helpers/app-worker-hooks.mjs";
 import {memoryStorage} from "../helpers/agent-hooks.mjs";
+import {RunReviewDraft} from '../../frontend/features/runs/run-review-draft.mjs';
 const defer=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const original={id:'codex:original',provider:'codex',threadId:'original',name:'CPU reference flow',projectId:'workspace',taskId:'original-task',updatedAt:1},ordinary={id:'codex:ordinary',provider:'codex',threadId:'ordinary',name:'Ordinary chat',projectId:null,taskId:null,updatedAt:1};
 const task={id:original.taskId,provider:'codex',threadId:'original',name:'CPU reference flow',workflowVersion:2,projectId:'workspace',parameters:{},steps:[],artifacts:[],workspaceChoice:'workspace',workspace:{id:'workspace',root:'/worker/projects/workspace/inputs',workerBinding:{distribution:'Fixture',root:'/worker',port:8888}}};
@@ -27,4 +28,12 @@ test('failed or superseded typed location cannot fall back to the generic execut
 
 test('legacy jobs still open the original review route without querying tool-workflow ownership',async()=>{
  const h=fixture({legacy:true});await h.flush();h.clickJob();await h.flush();assert.equal(h.find(node=>node.type==='./RunReview').props.run.id,h.record.id);assert.equal(h.storage.getItem('studio.section'),'task:'+h.record.id);assert(!h.calls.some(call=>call.method==='tools.workflows.locateRun'));assert.deepEqual(privileged(h),[]);h.unmount();
+});
+
+test('late task metadata cannot change the actual App Review draft scope or lose an edit',async()=>{
+ const pendingTasks=defer(),storage=memoryStorage();storage.setItem('studio.conversation',original.id);const record={...run,id:'legacy-late-task',engine:'pydyn.md',studio_workflow_binding:undefined};
+ const h=appWorkerHarness({storage,override:(method,data,standard)=>{if(method==='task.list')return pendingTasks.promise;if(method==='conversation.list')return [original];if(method==='conversation.select')return original;if(method==='worker.request'&&['/api/run/status','/api/runs'].includes(data.target))return data.target==='/api/runs'?[record]:record;return standard(method,data);}});
+ try{await h.flush();h.find(node=>node.type==='./JobsPage').props.onOpen({location:'local',run:record});await h.flush();const before=h.find(node=>node.type==='./RunReview').props;assert.deepEqual(JSON.parse(before.draftScope),['task-source',original.provider,original.id,original.taskId]);const draft=new RunReviewDraft(before.draftScope,before.run,storage);draft.stage({name:'Edit before task list returns'});
+ pendingTasks.resolve([task]);await h.flush();const after=h.find(node=>node.type==='./RunReview').props;assert.equal(after.draftScope,before.draftScope);assert.equal(new RunReviewDraft(after.draftScope,after.run,storage).values.name,'Edit before task list returns');assert.deepEqual(privileged(h),[]);
+ }finally{h.unmount();}
 });

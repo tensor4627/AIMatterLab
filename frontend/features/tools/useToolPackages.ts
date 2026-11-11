@@ -24,6 +24,7 @@ export function useToolPackages({provider,onSelect}:{provider:AgentProvider;onSe
  const [busy,setBusy]=useState(''),[loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [configuring,setConfiguring]=useState(false),[projects,setProjects]=useState<Project[]>([]),[environments,setEnvironments]=useState<Environment[]>([]),[projectId,setProjectId]=useState(''),[environmentId,setEnvironmentId]=useState(''),[projectName,setProjectName]=useState('');
  const [configuration,setConfiguration]=useState<ToolConfiguration|null>(null),[execution,setExecution]=useState<ToolExecutionSkill|null>(null),[pollPaused,setPollPaused]=useState(false);
+ const [selectedConfigurationId,setSelectedConfigurationId]=useState('');
  const [sharingProvider,setSharingProvider]=useState<AgentProvider|''>(''),[purpose,setPurpose]=useState<ToolGuidanceGrant['purpose']>('repair'),[resourceIds,setResourceIds]=useState<string[]>([]),[bound,setBound]=useState(false);
  const mounted=useRef(true),scope=useRef(0),catalogSequence=useRef(0),lock=useRef<symbol|null>(null),requestIds=useRef(new Map<string,string>()),currentProvider=useRef(provider);currentProvider.current=provider;
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;scope.current++;catalogSequence.current++;lock.current=null;};},[]);
@@ -43,7 +44,7 @@ export function useToolPackages({provider,onSelect}:{provider:AgentProvider;onSe
   if(lock.current||!mounted.current)return;const operation=Symbol(label),ticket=scope.current;lock.current=operation;setBusy(label);setError('');setNotice('');
   try{await work(ticket);}catch(error){if(valid(ticket)){setError(message(error));setPollPaused(true);}}finally{if(valid(ticket)&&lock.current===operation){lock.current=null;setBusy('');}}
  }
- function clearConfiguration(){setConfiguration(null);setExecution(null);setConfiguring(false);setProjects([]);setEnvironments([]);setProjectId('');setEnvironmentId('');setResourceIds([]);setBound(false);setPollPaused(false);}
+ function clearConfiguration(){setSelectedConfigurationId('');setConfiguration(null);setExecution(null);setConfiguring(false);setProjects([]);setEnvironments([]);setProjectId('');setEnvironmentId('');setResourceIds([]);setBound(false);setPollPaused(false);}
  function acceptRecord(value:ToolPackageRecord){invalidate();setSelected(value.package_id);setVersion(value.package_version);setRecord(value);setCandidate(null);clearConfiguration();}
  function selectPackage(packageId:string,packageVersion?:string){
   invalidate();setSelected(packageId);setVersion(packageVersion||'');setRecord(null);setCandidate(null);clearConfiguration();if(!packageId)return;
@@ -63,8 +64,8 @@ export function useToolPackages({provider,onSelect}:{provider:AgentProvider;onSe
  function startConfiguration(){if(!record||!referenceConfigurationSupported(record))return;void action('读取配置目标',async ticket=>{
   const results=await Promise.all([api<Project[]>('GET','/api/projects'),api<Environment[]>('GET','/api/environments')]);if(!valid(ticket))return;setProjects(results[0]);setEnvironments(results[1]);setProjectId('');setEnvironmentId('');setConfiguring(true);setProjectName(record.manifest.name+' · CPU 检查');
  });}
- function targetEnvironment(value:string){invalidate();setEnvironmentId(value);setProjectId('');setConfiguration(null);setExecution(null);setResourceIds([]);setBound(false);}
- function targetProject(value:string){invalidate();setProjectId(value);setConfiguration(null);setExecution(null);setResourceIds([]);setBound(false);}
+ function targetEnvironment(value:string){invalidate();setSelectedConfigurationId('');setEnvironmentId(value);setProjectId('');setConfiguration(null);setExecution(null);setResourceIds([]);setBound(false);}
+ function targetProject(value:string){invalidate();setSelectedConfigurationId('');setProjectId(value);setConfiguration(null);setExecution(null);setResourceIds([]);setBound(false);}
  const authorizedProjects=projects.filter(project=>!project.authoring_only&&project.policy.engines.includes('installation.check')&&project.policy.environments.includes(environmentId)&&project.policy.gpus.includes(0)&&project.policy.max_seconds>=30&&project.policy.max_concurrent>=1);
  function createProject(){if(!environmentId||!projectName.trim())return;void action('新建 CPU 检查项目',async ticket=>{
   const environment=environmentId,name=projectName.trim(),value=await toolConfigurations.createProject({environment_id:environment,name,request_id:requestId('project',[environment,name])});if(!valid(ticket))return;if(!value.policy.environments.includes(environment)||!value.policy.engines.includes('installation.check')||value.authoring_only)throw Error('新项目授权与所选配置目标不符');setProjects(old=>[...old.filter(item=>item.id!==value.id),value]);setProjectId(value.id);setNotice('已新建独立 CPU 检查项目，原项目授权保持不变。');
@@ -74,7 +75,7 @@ export function useToolPackages({provider,onSelect}:{provider:AgentProvider;onSe
   const environment=environmentId,project=projectId,value=await toolConfigurations.plan({package_id:record.package_id,package_version:record.package_version,project_id:project,environment_id:environment,request_id:requestId('plan',[identity(record),project,environment])});if(!valid(ticket))return;matchingConfiguration(value);if(value.target.project_id!==project||value.target.environment_id!==environment)throw Error('配置计划目标与所选项目和环境不符');setConfiguration(value);setExecution(null);setPollPaused(false);setResourceIds([]);setBound(false);const entries=await toolConfigurations.list();if(valid(ticket))setConfigurations(entries);
  });}
  function chooseConfiguration(configurationId:string){
-  invalidate();setConfiguration(null);setExecution(null);setResourceIds([]);setBound(false);setPollPaused(false);if(!configurationId)return;
+  invalidate();setSelectedConfigurationId(configurationId);setConfiguration(null);setExecution(null);setResourceIds([]);setBound(false);setPollPaused(false);if(!configurationId)return;
   void action('读取配置状态',async ticket=>{const value=await toolConfigurations.status({configuration_id:configurationId});if(!valid(ticket))return;matchingConfiguration(value,configurationId);setConfiguration(value);});
  }
  function status(){if(!configuration)return;const configurationId=configuration.configuration_id;void action('读取配置状态',async ticket=>{
@@ -103,5 +104,6 @@ export function useToolPackages({provider,onSelect}:{provider:AgentProvider;onSe
  }
  function toggleResource(id:string,checked:boolean){setResourceIds(old=>checked?[...new Set([...old,id])]:old.filter(value=>value!==id));}
  const matchingConfigurations=configurations.filter(value=>record&&identity(value)===identity(record));
- return {packages,configurations:matchingConfigurations,context,record,candidate,selected,version,busy,loading,error,notice,configuring,projects:authorizedProjects,environments,projectId,environmentId,projectName,configuration,execution,pollPaused,sharingProvider,purpose,resourceIds,bound,refresh,selectPackage,choose,changePackage,startConfiguration,targetEnvironment,targetProject,setProjectName,createProject,plan,chooseConfiguration,status,execute,activate,readExecution,bind,grant,setSharingProvider,setPurpose,toggleResource};
+ const configurationSource=matchingConfigurations.find(value=>value.configuration_id===(configuration?.configuration_id||selectedConfigurationId));
+ return {packages,configurations:matchingConfigurations,configurationSource,selectedConfigurationId,context,record,candidate,selected,version,busy,loading,error,notice,configuring,projects:authorizedProjects,environments,projectId,environmentId,projectName,configuration,execution,pollPaused,sharingProvider,purpose,resourceIds,bound,refresh,selectPackage,choose,changePackage,startConfiguration,targetEnvironment,targetProject,setProjectName,createProject,plan,chooseConfiguration,status,execute,activate,readExecution,bind,grant,setSharingProvider,setPurpose,toggleResource};
 }

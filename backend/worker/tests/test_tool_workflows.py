@@ -210,7 +210,7 @@ class ToolWorkflowLifecycle(unittest.TestCase):
     def test_explicit_project_grant_change_blocks_prepared_step_without_submission(self):
         value = self.prepare(self.create()); run_id = value['execution']['steps'][0]['run_id']
         changed = self.service.store.get('project', 'compute'); changed['policy']['max_seconds'] = 10
-        self.service.register_project(changed)
+        changed = self.service.register_project(changed)
         stale = self.call('status', {'execution_id': value['execution']['id']})
         self.assertEqual(stale['execution']['status'], 'stale')
         self.assertIn('Duration exceeds', stale['execution']['reason'])
@@ -258,6 +258,8 @@ class ToolWorkflowLifecycle(unittest.TestCase):
     def test_reopen_observes_nested_detached_run_and_does_not_advance_next_step(self):
         value = self.execute(self.prepare(self.create())); self.service.tick()
         old_root = self.service.root; original_run = value['execution']['steps'][0]['run_id']
+        supervisor = self.service.processes[original_run]
+        self.addCleanup(lambda: supervisor.wait(timeout=10))
         self.service.close(); self.service.store.db.close(); self.service = Service(old_root, schedule=False)
         self.addCleanup(self.service.store.db.close); self.addCleanup(self.service.close); self.api = ToolWorkflows(self.service)
         with patch.object(self.service, 'prepare', side_effect=AssertionError('Restart must not prepare')):

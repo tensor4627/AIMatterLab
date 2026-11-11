@@ -15,7 +15,7 @@ export function loginUrl(provider,url){
 export class AgentHub extends EventEmitter{
  constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,resourceScope=()=>null,fetchApi,host=providerRuntime}){
   super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bindWorkerContext=bindWorkerContext;this.contexts=new Map();this.contextGeneration=0;this.contextPending=0;this.contextQueue=Promise.resolve();this.pristineThreads=new Set();this.attemptedThreads=new Set();this.contextResume=new Map();this.pendingTurnDispatches=new Set();this.contextClosing=new Set();this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.host=host;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
-  this.resourceScope=resourceScope;
+  this.resourceScope=resourceScope;this.credentialRevisions=new Map();
   this.codex.on?.('event',event=>{
    if(event.method==='studio/codexDisconnected')this.release('codex');
    const thread=event.params?.threadId;
@@ -202,12 +202,12 @@ export class AgentHub extends EventEmitter{
   if(['qwen','deepseek','compatible'].includes(provider)){
    if(this.bridge(provider)?.activeTurns?.size)throw Error('Stop the current reply before replacing API credentials');
    if(provider==='compatible'&&value.apiKey===''){const old=this.vault.get(provider);let same=false;try{same=new URL(value.baseUrl).href.replace(/\/$/,'')===old?.baseUrl;}catch{}if(same&&old?.apiKey)value={...value,apiKey:old.apiKey};}
-   const credential=provider==='deepseek'?deepseekCredentials(value):provider==='compatible'?compatibleCredentials(value):qwenCredentials(value);this.vault.put(provider,credential);this.disconnect(provider);
+   const credential=provider==='deepseek'?deepseekCredentials(value):provider==='compatible'?compatibleCredentials(value):qwenCredentials(value);this.vault.put(provider,credential);this.credentialRevisions.set(provider,(this.credentialRevisions.get(provider)||0)+1);this.disconnect(provider);
    this.loginStatus[provider]={phase:'configured',modelAccess:'not_run'};return this.account(provider);
   }
   if(this.loginChild)throw Error('A provider login is already in progress');
   if(!['mainland-cn','global'].includes(value.region||'mainland-cn'))throw Error('Unsupported Kimi login region');
-  const profile=this.host.prepareProfile(this.root,'kimi');const child=this.host.spawnCli(this.path('kimi'),['acp','--login','--region',value.region||'mainland-cn'],{cwd:profile.cwd,env:profile.env});
+  const profile=this.host.prepareProfile(this.root,'kimi');const child=this.host.spawnCli(this.path('kimi'),['acp','--login','--region',value.region||'mainland-cn'],{provider:'kimi',cwd:profile.cwd,env:profile.env});
   this.loginChild=child;this.loginStatus.kimi={phase:'starting',modelAccess:'not_run'};
   let buffer='';
   const publish=()=>{
@@ -235,9 +235,12 @@ export class AgentHub extends EventEmitter{
  async logout(provider){providerId(provider);if(provider==='codex'){await this.account(provider);await this.codex.request('account/logout',{});}else if(['qwen','deepseek','compatible'].includes(provider))this.vault.remove(provider);else throw Error('Kimi 账户请使用重新授权更新。');this.disconnect(provider);this.loginStatus[provider]={phase:'signed_out',modelAccess:'not_run'};return this.account(provider);}
  async testConnection(provider){
   providerId(provider);if(!['deepseek','compatible'].includes(provider))throw Error('请使用此服务商的登录状态与会话连接检查');
+  const credential=structuredClone(this.vault.get(provider));if(!credential)throw Error('请先保存 API 凭据后再验证连接');
+  // Keep a private immutable snapshot: a running test must never follow a newly saved endpoint/key.
+  const revision=this.credentialRevisions.get(provider)||0,identity=JSON.stringify(credential),current=()=>revision===(this.credentialRevisions.get(provider)||0)&&JSON.stringify(this.vault.get(provider))===identity;
   const values=new Map(),catalog={put:(kind,id,value)=>values.set(kind+id,value),get:(kind,id)=>values.get(kind+id),list:()=>[]};
-  const bridge=new DeepSeekBridge({provider,catalog,credential:()=>this.vault.get(provider),worker:()=>null,...this.fetchApi?{fetchApi:this.fetchApi}:{}});let timer;
-  try{await bridge.start();await bridge.request('model/list');const thread=await bridge.request('thread/start',{});const completion=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('连接测试超时；没有提交计算。')),45000);bridge.on('event',event=>{if(event.method==='turn/completed'){event.params.turn.status==='completed'?resolve(event.params.turn):reject(Error(event.params.turn.error?.message||'API 测试未完成'));}});});await bridge.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Connection test. Reply exactly OK. Do not call tools.'}]});await completion;this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{}});return {status:'passed',model:thread.model,scope:'One streamed test reply; no conversation inputs or scientific files shared'};}finally{clearTimeout(timer);bridge.close();}
+  const bridge=new DeepSeekBridge({provider,catalog,credential:()=>credential,worker:()=>null,...this.fetchApi?{fetchApi:this.fetchApi}:{}});let timer;
+  try{await bridge.start();await bridge.request('model/list');const thread=await bridge.request('thread/start',{});const completion=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('连接测试超时；没有提交计算。')),45000);bridge.on('event',event=>{if(event.method==='turn/completed'){event.params.turn.status==='completed'?resolve(event.params.turn):reject(Error(event.params.turn.error?.message||'API 测试未完成'));}});});await bridge.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Connection test. Reply exactly OK. Do not call tools.'}]});await completion;if(!current())throw Error('API 配置已变化；请重新验证当前配置');this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{}});return {status:'passed',model:thread.model,scope:'One streamed test reply; no conversation inputs or scientific files shared'};}finally{clearTimeout(timer);bridge.close();}
  }
  async configure(provider,preferences,threadId,model){
   if(this.codex.activeTurns?.size)throw Error('Stop the current reply before changing context settings');

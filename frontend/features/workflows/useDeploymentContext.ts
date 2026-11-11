@@ -26,5 +26,6 @@ export function useDeploymentContext({task,worker,restoring,parentProjects,paren
  async function reconnect(){if(!onReconnect||reconnecting)return;setReconnecting(true);try{await onReconnect();if(alive.current&&latestTask.current.id===task.id)await readContext();}finally{if(alive.current&&latestTask.current.id===task.id)setReconnecting(false);}}
  useEffect(()=>{if(worker)void readContext();else{catalogSequence.current++;setCatalog({status:'offline'});if(!restoring&&!attemptedReconnect.current&&(onAutomaticRestore||onReconnect)){attemptedReconnect.current=true;if(onAutomaticRestore)void Promise.resolve(onAutomaticRestore()).catch(onError);else void reconnect().catch(onError);}}},[worker,task.id,restoring]);
  useEffect(()=>{if(previousCatalogSources.current===catalogSources)return;previousCatalogSources.current=catalogSources;if(worker&&catalog.status==='ready')void readContext();},[catalogSources,worker,catalog.status]);
+ useEffect(()=>{if(typeof window==='undefined')return;return window.studio?.onEvent(event=>{if(event.method==='studio/sshSchedulerChanged'&&worker&&!restoring)void readContext();});},[worker,restoring,task.id]);
  return {catalog,contextReady,projects,environments,clusters,readContext,reconnect,reconnecting,latestTask,alive};
 }

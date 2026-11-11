@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {DraftOutbox,workflowOutbox} from "../../frontend/features/workflows/draft-outbox.mjs";
+import {DraftOutbox,workflowOutbox,deleteWorkflowOutbox} from "../../frontend/features/workflows/draft-outbox.mjs";
 import {reviewState} from "../../frontend/features/workflows/review-state.mjs";
 
 function storage(){const values=new Map();return {getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};}
@@ -17,6 +17,11 @@ test('A remounted workflow shares its in-flight acknowledgement without losing a
 test('Failed saves survive remount and only acknowledged fields leave the durable outbox',async()=>{
  const local=storage(),first=new DraftOutbox('t',local);first.stage('md.temperature',345);await assert.rejects(first.flush(async()=>{throw Error('offline');}));
  const next=new DraftOutbox('t',local);assert.equal(next.apply({md:{temperature:300}}).md.temperature,345);await next.flush(async changes=>({id:'t',parameters:{md:{temperature:changes['md.temperature']}}}));assert.equal(next.pendingCount,0);assert.equal(local.getItem('studio.pending.t'),null);
+});
+test('confirmed deletion invalidates the shared outbox before an in-flight acknowledgement can replay newer edits',async()=>{
+ const local=storage(),box=workflowOutbox('deleted',local),other=workflowOutbox('kept',local),calls=[];let finish;
+ box.stage('temperature',300);other.stage('temperature',400);const pending=box.flush(async changes=>{calls.push(changes);await new Promise(resolve=>{finish=resolve;});return {id:'deleted',parameters:changes};});box.stage('temperature',350);deleteWorkflowOutbox('deleted',local);finish();await pending;
+ assert.equal(calls.length,1);assert.equal(box.pendingCount,0);assert.equal(local.getItem('studio.pending.deleted'),null);assert.throws(()=>workflowOutbox('deleted',local).stage('temperature',500),/deleted/);await assert.rejects(box.flush(async()=>{throw Error('Unexpected retry');}),/deleted/);assert.equal(other.pendingCount,1);assert(local.getItem('studio.pending.kept'));
 });
 test('A-B-A edits while saving cannot acknowledge a newer edit by value equality',async()=>{
  const outbox=new DraftOutbox('t',storage());let resolve;const saved=[];outbox.stage('temperature',300);

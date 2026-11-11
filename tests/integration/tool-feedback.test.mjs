@@ -5,6 +5,7 @@ import {toolActivity,toolLabel} from "../../frontend/features/conversations/tool
 
 import {WorkerClient} from "../../agent/tools/worker-client.mjs";
 import {workerConnectionFailure} from "../../backend/main/compute/worker-connection-failure.mjs";
+import {WSL_ACCESS_DENIED_MESSAGE} from '../../desktop/platform/wsl-access.mjs';
 
 test('Action names are readable while unknown names retain their identity',()=>{
  assert.equal(toolLabel('present_task'),'更新计算流程');assert.equal(toolLabel('future_tool'),'future tool');
@@ -23,6 +24,22 @@ test('Connection diagnostics contain bounded categories, never subprocess argume
  for(const [error,code] of [[{code:'ENOENT'},'wsl_unavailable'],[{stderr:'secret WSL_E_DISTRO_NOT_FOUND'},'distribution_not_found'],[{code:'ETIMEDOUT'},'worker_connection_timeout'],[{message:'command --token secret',stderr:'private path secret'},'worker_start_failed']]){
   const failure=workerConnectionFailure(error);assert.equal(failure.code,code);assert.equal(JSON.stringify(failure).includes('secret'),false);
  }
+});
+test('WSL access denial in encoded failure stdout is safe and remains distinct from target file permissions',()=>{
+ const text='private-user private-path --token private-secret\nWsl/EnumerateDistros/Service/E_ACCESSDENIED';
+ const bigEndian=Buffer.from(text,'utf16le');bigEndian.swap16();
+ for(const error of [
+  {stdout:Buffer.from(text,'utf16le')},
+  {stdout:Buffer.concat([Buffer.from([254,255]),bigEndian])},
+  {stdout:text.split('').join('\0')},
+  {stderr:Buffer.from(text,'utf16le')},
+  {message:text},
+ ]){
+  const failure=workerConnectionFailure(error);
+  assert.deepEqual(failure,{code:'wsl_access_denied',message:WSL_ACCESS_DENIED_MESSAGE});
+  assert(!JSON.stringify(failure).includes('private-'));
+ }
+ assert.equal(workerConnectionFailure({stderr:'Permission denied: private-path'}).code,'worker_start_failed');
 });
 test('Failed connection cleans the partial bridge and a successful reconnect clears its diagnosis',async()=>{
  const worker=new WorkerClient();let closed=0;worker.proxy={close(){closed++;}};worker.open=async()=>{worker.connection={partial:true};throw Object.assign(Error('secret'),{code:'ENOENT'});};

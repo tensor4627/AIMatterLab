@@ -71,7 +71,7 @@ class RegistrationsMixin:
                 raise ValueError("Environment paths must be absolute Linux paths")
         value.setdefault("id", secrets.token_hex(8))
         leaf(value["id"])
-        value["provider"] = "wsl"
+        value["provider"] = "ssh" if getattr(self, 'ssh_service_mode', False) else "wsl"
         if draft is not None:
             self.store.put_many([('environment',value),('environment-draft',{**draft,'status':'applied','environment_id':value['id'],'applied_at':time.time()})])
             return value

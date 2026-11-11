@@ -34,6 +34,10 @@ class Service(RegistrationsMixin, RunInputsMixin, RunsMixin, SchedulerMixin, Run
     def __init__(self, root, schedule=True):
         self.store = Store(root)
         self.root = self.store.root
+        # Captured before any scheduler thread starts. The transport installer
+        # sets this only for its dedicated, server-owned SSH service root.
+        from studio_worker.compute.ssh_service import mode_for_root
+        self.ssh_service_mode = mode_for_root(self.root)
         if os.name == "posix":
             import fcntl
             self.authority_lock = open(self.root / "authority.lock", "a")

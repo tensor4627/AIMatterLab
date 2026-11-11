@@ -1,0 +1,13 @@
+.jobs-page .jobs-overview{grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr))}
+.jobs-page .jobs-overview button{min-width:0;overflow-wrap:anywhere}
+.jobs-page .jobs-overview button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-bg)}
+.jobs-overview-hint{margin:-6px 0 18px;color:var(--muted);font-size:max(12px,var(--ui-min-font,12px));line-height:1.6}
+.jobs-page .planning-cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
+.jobs-page .planning-cards button{min-width:0;overflow-wrap:anywhere}
+.jobs-planning>summary{cursor:pointer;padding:8px 0;scroll-margin-top:12px}
+.jobs-filter-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:18px 0 12px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.jobs-filter-summary>div{display:grid;gap:5px;min-width:0;flex:1 1 180px;overflow-wrap:anywhere}
+.jobs-filter-summary span{color:var(--muted);font-size:max(12px,var(--ui-min-font,12px));line-height:1.6}
+.jobs-filter-summary>.button,.jobs-page .empty>.button{white-space:normal;max-width:100%}
+.jobs-page .page-heading{flex-wrap:wrap}
+.jobs-page .jobs-filters select,.jobs-page .jobs-filters input{width:100%;min-width:0}

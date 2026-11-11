@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "1.0.2-dev.1",
+  "version": "1.0.2-dev.9",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -10,6 +10,7 @@
     "start": "node scripts/sync-tool-contracts.mjs --check && node scripts/start.mjs",
     "check:contracts": "node scripts/sync-tool-contracts.mjs --check",
     "check:docs": "node scripts/check-doc-links.mjs",
+    "check:package-runtime": "node scripts/package-runtime.mjs --validate",
     "test": "node scripts/test-node.mjs",
     "test:worker": "node scripts/test-worker.mjs",
     "test:frontend": "node scripts/frontend-regression.mjs",
@@ -51,8 +52,9 @@
   "build": {
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
+    "beforeBuild": "scripts/package-runtime.mjs",
     "directories": {
-      "output": "release/v1.0.2-dev.1"
+      "output": "release/v1.0.2-dev.9"
     },
     "files": [
       "dist/**",
@@ -79,12 +81,17 @@
     "win": {
       "target": "portable"
     },
+    "portable": {
+      "unpackDirName": true,
+      "artifactName": "GPU-Sampling-Studio-${version}-win-${arch}-portable.${ext}"
+    },
     "extraResources": [
       {
         "from": "desktop/platform/terminal-service",
         "to": "terminal-service",
         "filter": [
-          "**/*.mjs"
+          "**/*.mjs",
+          "**/*.py"
         ]
       },
       {

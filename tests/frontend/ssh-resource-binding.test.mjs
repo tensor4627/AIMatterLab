@@ -9,6 +9,14 @@ const noModelOrTask=h=>assert(!h.calls.some(c=>c.method==='task.create'||c.metho
 const starts=h=>h.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='thread/start');
 const local={id:'saved-local',version:2,kind:'wsl',name:'Existing local',distribution:'Saved Ubuntu',root:'/fixture',port:8767,intent:'existing'};
 
+test('verified same-session SSH workflow capability creates the real task before the model turn without raw handoff',async()=>{
+ const verified=resource({workflowReady:true,managedRuns:true,authentication:'verified',serviceActive:true,serviceStatus:'connected'}),h=agentHarness({props:{planningMode:true,computeConnected:true,computeResource:verified},override:(method,data,standard)=>method==='agent.connect'?{tools:{status:'ready',scope:'scientific',count:20}}:method==='task.create'?{id:'ssh-flow'}:standard(method,data)});await h.flush();h.click('agent-connect');await h.flush();h.type('Prepare the selected SSH workflow');h.send();await h.flush();const calls=h.calls;assert.equal(calls.filter(call=>call.method==='task.create').length,1);assert.equal(calls.filter(call=>call.method==='sharedTerminal.owner').length,0);const turn=calls.find(call=>call.method==='agent.rpc'&&call.data.method==='turn/start');assert.equal(turn.data.params.studioTaskId,'ssh-flow');assert(calls.findIndex(call=>call.method==='task.create')<calls.indexOf(turn));h.unmount();
+});
+
+test('a claimed workflow flag without verified service identity or with stale terminal tools cannot create a task',async()=>{
+ for(const values of [{workflowReady:true},{workflowReady:true,managedRuns:true,authentication:'verified'}]){const h=agentHarness({props:{planningMode:true,computeResource:resource(values)},override:(m,d,s)=>m==='agent.connect'?{tools:{status:'ready',scope:'terminal-only',count:3}}:s(m,d)});await h.flush();h.click('agent-connect');await h.flush();h.type('Do not promote a shell');h.send();await h.flush();noModelOrTask(h);h.unmount();}
+});
+
 test('fresh planning SSH message establishes the ordinary conversation, retains its draft, and waits for explicit handoff before any turn',async()=>{
  const h=agentHarness({props:{planningMode:true,computeConnected:false,computeResource:resource()},override:(method,data,standard)=>method==='agent.connect'?{tools:{status:'blocked',count:0}}:standard(method,data)});await h.flush();h.click('agent-connect');await h.flush();h.type('Keep the original terminal and plan, 310 K');h.send();await h.flush();
  assert.equal(starts(h).length,1);assert.equal(h.conversations.at(-1)?.threadId,'started-thread');assert.equal(h.textarea().props.value,'Keep the original terminal and plan, 310 K');noModelOrTask(h);assert(!h.calls.some(c=>c.method.startsWith('sharedTerminal.')||c.method==='worker.connect'));assert.throws(()=>h.find(n=>n.props?.['data-testid']==='agent-tool-repair'));

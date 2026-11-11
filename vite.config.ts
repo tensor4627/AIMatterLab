@@ -15,4 +15,10 @@ function productionCsp(){
  };
 }
 
-export default defineConfig({plugins:[react(),productionCsp()],base:'./',server:{host:'127.0.0.1',port:5173,strictPort:true},build:{chunkSizeWarningLimit:4000}});
+export default defineConfig({
+ plugins:[react(),productionCsp()],base:'./',
+ // Runtime profiles contain locked Chromium/SQLite files, not frontend sources.
+ server:{host:'127.0.0.1',port:5173,strictPort:true,watch:{ignored:['**/.studio/**','**/.config/**']}},
+ optimizeDeps:{entries:['index.html']},
+ build:{chunkSizeWarningLimit:4000}
+});

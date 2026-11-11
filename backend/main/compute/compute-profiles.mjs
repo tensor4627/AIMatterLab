@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {isIP} from 'node:net';
 
-const KIND='compute-profile',UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const KIND='compute-profile',REGISTRY_KIND='compute-profile-registry',REGISTRY_ID='main',UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const object=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const fail=code=>{throw Error(code);};
 const string=(v,max)=>typeof v==='string'&&v.length>0&&v.length<=max&&!/[\x00-\x1f\x7f]/.test(v);
@@ -40,10 +40,25 @@ export function createComputeProfiles({catalog,id=randomUUID,initialWsl}={}){
   if(!UUID.test(requestedId||'')||expectedVersion<1)fail('compute_profile_invalid_request');const previous=read({id:requestedId});if(previous.version!==expectedVersion)fail('compute_profile_changed');if(previous.kind!==next.kind)fail('compute_profile_invalid_request');const {id:_,version,...oldBody}=previous;if(equal(oldBody,next))return previous;if(!Number.isSafeInteger(version+1))fail('compute_profile_unavailable');const value={id:requestedId,version:version+1,...next};catalog.put(KIND,requestedId,structuredClone(value));return structuredClone(value);
  }
  const save=request=>typeof catalog.transaction==='function'?catalog.transaction(()=>saveValue(request)):saveValue(request);
+ function seedConsumed(){const marker=catalog.get(REGISTRY_KIND,REGISTRY_ID);if(marker===null||marker===undefined)return false;if(!object(marker)||marker.schema_version!==1||marker.initial_wsl_seed_consumed!==true)fail('compute_profile_unavailable');return true;}
+ function removeValue(request){
+  exact(request,['id','expectedVersion'],['id','expectedVersion']);
+  if(!UUID.test(request.id||'')||!Number.isSafeInteger(request.expectedVersion)||request.expectedVersion<1)fail('compute_profile_invalid_request');
+  const profile=read({id:request.id,version:request.expectedVersion});
+  const consumed=seedConsumed();
+  if(typeof catalog.remove!=='function')fail('compute_profile_unavailable');
+  // Only the saved desktop reference is removed. The explicit worker binding,
+  // sessions, credentials, registered environments and run records are separate.
+  catalog.remove(KIND,profile.id);
+  if(!consumed)catalog.put(REGISTRY_KIND,REGISTRY_ID,{schema_version:1,initial_wsl_seed_consumed:true});
+  seedChecked=true;
+  return {removed:true,id:profile.id,version:profile.version};
+ }
+ const remove=request=>{if(typeof catalog.transaction!=='function')fail('compute_profile_unavailable');return catalog.transaction(()=>removeValue(request));};
  function list(request={}){
   exact(request,['kind']);if(request.kind!==undefined&&!['wsl','ssh'].includes(request.kind))fail('compute_profile_invalid_request');let rows=catalog.list(KIND);
-  if(!seedChecked){seedChecked=true;if(rows.length===0&&initialWsl){const {distribution,root,port,intent}=initialWsl;save({expectedVersion:0,kind:'wsl',name:'WSL',distribution,root,port,intent:intent||'standard'});rows=catalog.list(KIND);}}
+  if(!seedChecked){const consumed=seedConsumed();seedChecked=true;if(rows.length===0&&initialWsl&&!consumed){const {distribution,root,port,intent}=initialWsl;save({expectedVersion:0,kind:'wsl',name:'WSL',distribution,root,port,intent:intent||'standard'});rows=catalog.list(KIND);}}
   if(rows.length>1000)fail('compute_profile_unavailable');return rows.map(stored).filter(v=>request.kind===undefined||v.kind===request.kind).map(v=>structuredClone(v));
  }
- return {list,read,save};
+ return {list,read,save,remove};
 }

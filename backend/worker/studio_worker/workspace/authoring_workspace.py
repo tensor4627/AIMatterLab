@@ -18,7 +18,7 @@ def ensure(service, data):
   # Authoring interpreter access is distinct from engines, queues or resource grants.
   available=[e['id'] for e in service.store.list('environment') if e.get('executables',{}).get('python')]
   if project['policy']['environments']!=available:
-   project['policy']['environments']=available;service.store.put('project',project)
+    project['policy']['environments']=available;project=service.store.put('project',project)
  root=contained(service.root/'projects'/project['id']/'inputs',[service.root]);root.mkdir(parents=True,exist_ok=True)
  imported=[]
  structures=data.get('structure_paths',[]);selected=data.get('selected_paths',[])

@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import {inspect} from 'node:util';
 import {createComputeConnection,installedWslDistributions,parseWslDistributions} from "../../backend/main/compute/compute-connection.mjs";
 import {computeConnectionCommandMatches} from "../../frontend/features/compute/compute-connection-command.mjs";
+import {WSL_ACCESS_DENIED_MESSAGE} from '../../desktop/platform/wsl-access.mjs';
 
 import {assertWorkerRoute} from "../../contracts/transport-policy.mjs";
 const defer=()=>{let resolve;return {promise:new Promise(done=>{resolve=done;}),resolve:value=>resolve(value)};};
-function fixture({bound=true,connected=false,existing=false,legacy=false,names=['Saved Distro','Default'],discoveryFailure=false,serviceVersion='current',afterStartVersion='current',dataRootStatus='available',dataRootSchemaStatus=dataRootStatus,dataRootWait}={}){
+function fixture({bound=true,connected=false,existing=false,legacy=false,names=['Saved Distro','Default'],inventoryError,discoveryFailure=false,serviceVersion='current',afterStartVersion='current',dataRootStatus='available',dataRootSchemaStatus=dataRootStatus,dataRootWait}={}){
  let version=serviceVersion;
  let config={distribution:'Default',workerRoot:'/default/service',workerPort:8767},task={id:'flow',name:'Original workflow',provider:'codex',threadId:'thread',authoring:{workerBinding:{distribution:'Saved Distro',root:'/original/service',...legacy?{}:{port:8888}}}},selected=bound?{taskId:'flow',provider:'codex',threadId:'thread'}:null,ownerEpoch=1,last=null,runtime={path:'/bundled/worker',id:'reviewed-runtime'},next=0,taskReceipt=null;
  if(legacy){task.deployment={workerBinding:task.authoring.workerBinding};delete task.authoring;}
@@ -19,7 +20,7 @@ function fixture({bound=true,connected=false,existing=false,legacy=false,names=[
  worker.restore=async(target,{current})=>{calls.push(['restore',structuredClone(target)]);if(!current())return {status:'unknown'};if(existing){attach(target);return {status:'connected'};}return {status:'disconnected'};};
  worker.connect=(target,path)=>{calls.push(['start',structuredClone(target),path]);worker.bindingIntent++;worker.close();const epoch=worker.connectionEpoch;worker.connecting=Promise.resolve().then(()=>{if(worker.connectionEpoch!==epoch)throw Error('Cancelled connection');attach(target);version=afterStartVersion;}).finally(()=>{worker.connecting=null;});return worker.connecting;};
  worker.request=async(method,target,data)=>{calls.push([method,target,structuredClone(data)]);if(target.endsWith('discover')){if(discoveryFailure)throw Error('private-token-and-path');return {identity:'discovery-receipt',entries:[{id:'existing-env',status:'discovered'}],observed_at:123};}if(target.endsWith('adopt'))return {environments:[{id:'preserved-env'}]};throw Error('Unexpected worker operation');};
- const api=createComputeConnection({worker,records:{read:()=>structuredClone(task)},catalog:{get:(kind)=>kind==='task-worker-transport'?taskReceipt:last,put:(kind,id,value)=>{if(kind==='task-worker-transport')taskReceipt=structuredClone(value);calls.push(['receipt',kind,id]);return value;}},settings:()=>config,selection:()=>selected,selectionEpoch:()=>ownerEpoch,source:()=>runtime,inventory:async()=>names,inspectDataRoot:async(_target,options)=>{calls.push(['dataRoot']);if(dataRootWait)await dataRootWait;return {status:options?.schema===false?dataRootStatus:dataRootSchemaStatus};},probeStart:async()=>{calls.push(['probe']);return {status:'available'};},id:()=>`plan-${++next}`,readStatus:async(w,settings)=>{calls.push(['health',structuredClone(settings())]);return {status:w.matchesTarget(settings())?'connected':'unknown',serviceVersion:version};},beforeSwitch:()=>calls.push(['switch']),saveSettings:target=>{calls.push(['saveSettings']);config={...config,distribution:target.distribution,workerRoot:target.workerRoot,workerPort:target.workerPort};},remember:async()=>calls.push(['remember']),onConnected:()=>calls.push(['connected']),bindFreshSources:async current=>{current();calls.push(['bindSources']);}});
+ const api=createComputeConnection({worker,records:{read:()=>structuredClone(task)},catalog:{get:(kind)=>kind==='task-worker-transport'?taskReceipt:last,put:(kind,id,value)=>{if(kind==='task-worker-transport')taskReceipt=structuredClone(value);calls.push(['receipt',kind,id]);return value;}},settings:()=>config,selection:()=>selected,selectionEpoch:()=>ownerEpoch,source:()=>runtime,inventory:async()=>{if(inventoryError)throw inventoryError;return names;},inspectDataRoot:async(_target,options)=>{calls.push(['dataRoot']);if(dataRootWait)await dataRootWait;return {status:options?.schema===false?dataRootStatus:dataRootSchemaStatus};},probeStart:async()=>{calls.push(['probe']);return {status:'available'};},id:()=>`plan-${++next}`,readStatus:async(w,settings)=>{calls.push(['health',structuredClone(settings())]);return {status:w.matchesTarget(settings())?'connected':'unknown',serviceVersion:version};},beforeSwitch:()=>calls.push(['switch']),saveSettings:target=>{calls.push(['saveSettings']);config={...config,distribution:target.distribution,workerRoot:target.workerRoot,workerPort:target.workerPort};},remember:async()=>calls.push(['remember']),onConnected:()=>calls.push(['connected']),bindFreshSources:async current=>{current();calls.push(['bindSources']);}});
  return {api,worker,calls,attach,get config(){return config;},get task(){return task;},setTask:value=>{task=value;},setSelection:value=>{selected=value;ownerEpoch++;},setRuntime:value=>{runtime=value;},setConfig:value=>{config=value;},getReceipt:()=>taskReceipt,setReceipt:value=>{taskReceipt=value;},setLast:value=>{last=value;},setVersion:value=>{version=value;}};
 }
 const run=(f,p,requestId='request')=>f.api.connect({planId:p.planId,requestId});
@@ -27,6 +28,43 @@ test('WSL inventory decodes UTF8, BOM and unmarked UTF16 without installation',a
  for(const bytes of [Buffer.from('One\r\nTwo\r\n'),Buffer.from('\uFEFFOne\nTwo\n'),Buffer.from('One\r\nTwo\r\n','utf16le'),Buffer.concat([Buffer.from([255,254]),Buffer.from('One\nTwo\n','utf16le')])])assert.deepEqual(parseWslDistributions(bytes),['One','Two']);
  const be=Buffer.from('One\nTwo\n','utf16le');be.swap16();assert.deepEqual(parseWslDistributions(Buffer.concat([Buffer.from([254,255]),be])),['One','Two']);assert.deepEqual(parseWslDistributions(''),[]);assert.throws(()=>parseWslDistributions('bad;command'));assert.throws(()=>parseWslDistributions('a'.repeat(33000)));
  let call;await installedWslDistributions({execute:async(...args)=>{call=args;return {stdout:Buffer.from('One\n')};}});assert.deepEqual(call.slice(0,2),['wsl.exe',['--list','--quiet']]);assert.equal(call[2].windowsHide,true);assert.equal(call[2].timeout,6000);
+});
+const deniedText='private-user private-path private-token\nWsl/EnumerateDistros/Service/E_ACCESSDENIED';
+const deniedBigEndian=()=>{const bytes=Buffer.from(deniedText,'utf16le');bytes.swap16();return Buffer.concat([Buffer.from([254,255]),bytes]);};
+for(const [encoding,error] of [
+ ['UTF16LE stdout',{stdout:Buffer.from(deniedText,'utf16le')}],
+ ['UTF16BE stdout',{stdout:deniedBigEndian()}],
+ ['NUL-bearing stdout',{stdout:deniedText.split('').join('\0')}],
+ ['stderr',{stderr:deniedText}],
+ ['message',{message:deniedText}],
+])test('WSL inventory denial stays specific and blocks all connection effects: '+encoding,async()=>{
+ const f=fixture({connected:true,inventoryError:error}),connection=f.worker.connection,identity=f.worker.identity;
+ const config=structuredClone(f.config),task=structuredClone(f.task),plan=await f.api.plan();
+ assert.equal(plan.status,'blocked');assert.deepEqual(plan.error,{code:'wsl_access_denied',message:WSL_ACCESS_DENIED_MESSAGE});
+ assert.equal(plan.connection,'not_run');assert.equal(plan.scientificValidation,'not_run');
+ const result=await run(f,plan);assert.equal(result.error.code,'wsl_access_denied');
+ assert.equal(f.calls.length,0);assert.equal(f.worker.connection,connection);assert.equal(f.worker.identity,identity);
+ assert.deepEqual(f.config,config);assert.deepEqual(f.task,task);assert.equal(f.getReceipt(),null);
+ assert(!JSON.stringify(result).includes('private-'));
+});
+test('a WSL denial during existing-source read is specific, read-only and not automatically retried',async()=>{
+ const f=fixture(),config=structuredClone(f.config),task=structuredClone(f.task);let attempts=0;
+ f.worker.readExisting=async()=>{attempts++;throw {stdout:Buffer.from(deniedText,'utf16le')};};
+ const plan=await f.api.plan(),result=await run(f,plan);
+ assert.equal(result.status,'failed');assert.equal(result.connection,'unknown');
+ assert.deepEqual(result.error,{code:'wsl_access_denied',message:WSL_ACCESS_DENIED_MESSAGE});
+ assert.equal(attempts,1);assert(!f.calls.some(c=>['start','saveSettings','remember','receipt','bindSources','POST','connected'].includes(c[0])));
+ assert.deepEqual(f.config,config);assert.deepEqual(f.task,task);assert.equal(f.getReceipt(),null);
+ assert(!JSON.stringify(result).includes('private-'));
+ const count=f.calls.length;await run(f,plan);assert.equal(attempts,1);assert.equal(f.calls.length,count);
+});
+test('ordinary Linux file permission failures do not become WSL access diagnostics',async()=>{
+ const error={message:'Permission denied: private-path',stderr:'Permission denied'};
+ const inventory=fixture({inventoryError:error}),blocked=await inventory.api.plan();
+ assert.equal(blocked.error.code,'inventory_failed');assert.equal(inventory.calls.length,0);assert(!JSON.stringify(blocked).includes('private-'));
+ const connection=fixture();connection.worker.readExisting=async()=>{throw error;};
+ const result=await run(connection,await connection.api.plan());assert.equal(result.error.code,'connection_failed');
+ assert(!connection.calls.some(c=>c[0]==='start'));assert(!JSON.stringify(result).includes('private-'));
 });
 test('first local connection preselects a sole installed distro; multiple unselected distros need a choice',async()=>{
  const one=fixture({bound:false,names:['Only']}),p=await one.api.plan();assert.equal(p.target.distribution,'Only');assert.equal(p.status,'review');assert.equal(one.calls.length,0);

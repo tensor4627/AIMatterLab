@@ -69,6 +69,7 @@ def main():
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     tokens = load_tokens(root)
     service = Service(root)
+    service.listen_port = args.port
     # Generated inputs are intrinsically owned by each project, not user-grantable cross-project paths.
     original_authorize = service.authorize
     def authorize(spec):

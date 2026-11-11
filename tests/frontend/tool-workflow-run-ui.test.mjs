@@ -7,6 +7,7 @@ import ts from 'typescript';
 import {randomUUID} from 'node:crypto';
 import {ObservedRead} from "../../frontend/api/observed-read.mjs";
 import * as logBuffer from "../../frontend/features/runs/log-buffer.mjs";
+import * as runReviewDraft from "../../frontend/features/runs/run-review-draft.mjs";
 
 import {runContinuation} from "../../frontend/features/runs/run-continuation.mjs";
 
@@ -19,14 +20,15 @@ const taskFields={...taskFieldsOwner0,...taskFieldsOwner1,...taskFieldsOwner2};
 const binding={schema_version:1,workflow_id:'workflow',execution_id:'execution',step_id:'first',snapshot_sha256:'a'.repeat(64),group_id:'reference',group_version:'b'.repeat(64),configuration_id:'configuration',execution_skill_id:'skill',execution_skill_sha256:'c'.repeat(64)};
 const run=(status='draft',bound=false)=>({id:'run',name:'Controlled UI run',project_id:'project',environment_id:'environment',gpu:0,max_seconds:30,directory:'/fixture/run',engine:'gpumd.md',status,validation:{status:status==='ready'?'passed':'not_run'},parameters:{},command:['fixture'],inputs:{'run.in':'snapshot'},created_at:1,updated_at:1,...bound?{studio_workflow_binding:binding}:{}});
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
-function harness(t,{component='RunDetail',props={},override,storageValues=[]}={}){
+function harness(t,{component='RunDetail',props={},override,storageValues=[],storageUnavailable=false}={}){
  const calls=[],errors=[],opened=[],replaced=[],refreshes=[],frames=new Map(),modules=new Map(),effects=[],storage=new Map(storageValues);let active,dirty=false,tree,currentProps,disposed=false;
  const hooks={useState(initial){const frame=active,index=frame.cursor++;frame.hooks[index]??={value:typeof initial==='function'?initial():initial};return [frame.hooks[index].value,value=>{if(frame.disposed)return;const before=frame.hooks[index].value;frame.hooks[index].value=typeof value==='function'?value(before):value;if(!Object.is(before,frame.hooks[index].value))dirty=true;}];},useRef(value){const frame=active;return frame.hooks[frame.cursor++]??={current:value};},useEffect(fn,deps){const frame=active,index=frame.cursor++,previous=frame.hooks[index];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps[i]))){const record={deps,cleanup:previous?.cleanup};frame.hooks[index]=record;effects.push(()=>{if(frame.disposed)return;record.cleanup?.();record.cleanup=fn();});}}};
  const standard=async target=>target==='/api/run/log'?{offset:1,text:'CONTROLLED LOG BODY'}:target==='/api/run/collect'?{run:'run',artifacts:[{name:'receipt.json',size:5}]}:target==='/api/run/file'?{text:'CONTROLLED ARTIFACT BODY'}:target==='/api/run/revise'?{...run('draft'),id:'revision'}:target==='/api/run/validate'?{...run('ready'),id:'revision'}:target==='/api/run/submit'?{...run('queued'),id:'revision'}:target==='/api/run/resume'?{id:'continuation'}:target==='/api/run/cancel'?run('cancelled'):target==='/api/run/status'?run('unknown'):Promise.reject(Error('Unexpected controlled API '+target));
  const api=async(method,target,data)=>{calls.push({method,target,data});return override?override(target,data,()=>standard(target)):standard(target);};
  function load(name){if(modules.has(name))return modules.get(name);const source=fs.readFileSync(frontendSource(name+'.tsx'),'utf8'),compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,module={exports:{}};modules.set(name,module.exports);
-  const require=target=>target==='react'?hooks:target==='react/jsx-runtime'?{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'}:target==='./RunDetail'?load('RunDetail'):target==='./log-buffer.mjs'?logBuffer:["./run-continuation.mjs"].includes(target)?{runContinuation}:["../../api/observed-read.mjs"].includes(target)?{ObservedRead}:["./workflow-intent.mjs","../../../contracts/workflows/task-fields.mjs","../../ui/task-fields.mjs"].includes(target)?taskFields:['../../api/studio','../../api/worker'].includes(target)?{api,invoke:async(method,data)=>{calls.push({method,target:method,data});return {};}}:target==='../../ui/i18n'?{t:value=>value,tr:value=>value}:new Proxy({},{get:(_value,key)=>String(key)});
-  new Function('require','module','exports','window','localStorage','crypto',compiled)(require,module,module.exports,{studio:{onEvent:()=>()=>{}},confirm:()=>true},{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},{randomUUID});modules.set(name,module.exports);return module.exports;
+  const require=target=>target==='react'?hooks:target==='react/jsx-runtime'?{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'}:target==='./RunDetail'?load('RunDetail'):target==='./run-review-draft.mjs'?runReviewDraft:target==='./log-buffer.mjs'?logBuffer:["./run-continuation.mjs"].includes(target)?{runContinuation}:["../../api/observed-read.mjs"].includes(target)?{ObservedRead}:["./workflow-intent.mjs","../../../contracts/workflows/task-fields.mjs","../../ui/task-fields.mjs"].includes(target)?taskFields:['../../api/studio','../../api/worker'].includes(target)?{api,invoke:async(method,data)=>{calls.push({method,target:method,data});return {};}}:target==='../../ui/i18n'?{t:value=>value,tr:value=>value}:new Proxy({},{get:(_value,key)=>String(key)});
+  const storagePort={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},windowPort={studio:{onEvent:()=>()=>{}},confirm:()=>true,addEventListener(){},removeEventListener(){},get localStorage(){if(storageUnavailable)throw Error('SecurityError: storage getter blocked');return storagePort;}};
+  new Function('require','module','exports','window','localStorage','crypto',compiled)(require,module,module.exports,windowPort,storagePort,{randomUUID});modules.set(name,module.exports);return module.exports;
  }
  const Root=load(component).default,Detail=load('RunDetail').default;
  function dispose(frame){frame.disposed=true;for(const hook of frame.hooks)hook?.cleanup?.();}
@@ -39,7 +41,7 @@ function harness(t,{component='RunDetail',props={},override,storageValues=[]}={}
  function text(value=tree){return Array.isArray(value)?value.map(item=>text(item??null)).join(''):value&&typeof value==='object'?text(value.props?.children??null):value==null||typeof value==='boolean'?'':String(value);}
  const buttons=()=>nodes().filter(node=>node.type==='button'),find=label=>{const result=buttons().find(node=>text(node)===label);assert(result,'button '+label);return result;};
  async function flush(){for(let i=0;i<12;i++){while(effects.length)effects.shift()();await new Promise(done=>setImmediate(done));if(dirty&&!disposed)render();}}
- const unmount=()=>{disposed=true;for(const frame of frames.values())dispose(frame);frames.clear();};t.after(unmount);render();return {calls,errors,opened,replaced,refreshes,storage,render,flush,nodes,text,buttons,find,click:label=>{const button=find(label);if(!button.props.disabled)button.props.onClick();},run:()=>currentProps.run};
+ const unmount=()=>{disposed=true;for(const frame of frames.values())dispose(frame);frames.clear();};t.after(unmount);render();return {calls,errors,opened,replaced,refreshes,storage,render,flush,nodes,text,buttons,find,unmount,click:label=>{const button=find(label);if(!button.props.disabled)button.props.onClick();},run:()=>currentProps.run};
 }
 const mutations=h=>h.calls.filter(call=>/\/api\/run\/(revise|validate|submit|resume|cancel)$/.test(call.target));
 const operationButtons=h=>{const area=h.nodes().find(node=>node.props?.className==='run-actions');assert(area);return h.nodes(area).filter(node=>node.type==='button');};
@@ -72,4 +74,30 @@ test('bound transition blocks a captured Review execute and an in-flight legacy 
 
 test('bound transition hides a cached continuation dialog, prevents its stale handler, and preserves the old attempt record',async t=>{
  const cached=JSON.stringify({key:'unknown-attempt',parameters:{checkpoint_files:['restart.xyz']}}),h=harness(t,{props:{run:run('failed')},storageValues:[['studio.resume.run',cached]]});await h.flush();h.click('续算');await h.flush();const retry=h.find('重试同一续算请求');h.render({run:run('failed',true)});await h.flush();assert(!h.buttons().some(button=>['续算','重试同一续算请求','创建续算草稿'].includes(h.text(button))));retry.props.onClick();await h.flush();assert.equal(mutations(h).length,0);assert.equal(h.storage.get('studio.resume.run'),cached);
+});
+
+test('actual Review remount restores resources, scientific parameters, input paths and source edits without worker writes',async t=>{
+ const props={draftScope:'isolated-source'},override=(target,data,next)=>target==='/api/run/input'?{editable:true,text:'Original input',sha256:'a'.repeat(64)}:next();
+ const first=harness(t,{component:'RunReview',props,override});await first.flush();
+ const change=(predicate,value)=>{const node=first.nodes().find(predicate);assert(node,'editable target');node.props.onChange({target:{value}});};
+ change(node=>node.type==='input'&&node.props.value==='Controlled UI run','My unsent revision');await first.flush();
+ change(node=>node.type==='input'&&node.props.value===30,'120');await first.flush();
+ first.nodes().find(node=>node.type==='ParameterFields').props.onChange('temperature',350);await first.flush();
+ first.click('run.in');await first.flush();first.nodes().find(node=>node.type==='CodeEditor').props.onChange('Edited scientific input');await first.flush();
+ assert(first.text().includes('本地编辑草稿已保留'));assert.equal(mutations(first).length,0);const saved=[...first.storage];first.unmount();
+ const reopened=harness(t,{component:'RunReview',props,override,storageValues:saved});await reopened.flush();
+ assert(reopened.nodes().some(node=>node.type==='input'&&node.props.value==='My unsent revision'));assert(reopened.nodes().some(node=>node.type==='input'&&node.props.value===120));assert.equal(reopened.nodes().find(node=>node.type==='ParameterFields').props.parameters.temperature,350);
+ reopened.click('run.in *');await reopened.flush();assert.equal(reopened.nodes().find(node=>node.type==='CodeEditor').props.value,'Edited scientific input');
+ reopened.render({draftScope:'different-source'});await reopened.flush();assert(reopened.nodes().some(node=>node.type==='input'&&node.props.value==='Controlled UI run'));
+ reopened.render(props);await reopened.flush();assert(reopened.nodes().some(node=>node.type==='input'&&node.props.value==='My unsent revision'));assert.equal(mutations(reopened).length,0);
+ reopened.click('丢弃本地草稿');await reopened.flush();assert(reopened.nodes().some(node=>node.type==='input'&&node.props.value==='Controlled UI run'));assert(!reopened.text().includes('本地编辑草稿已保留'));assert.equal(mutations(reopened).length,0);
+});
+
+test('Review baseline conflicts expose the retained draft and block execution until explicit discard',async t=>{
+ const h=harness(t,{component:'RunReview',props:{draftScope:'same-source'}});await h.flush();h.nodes().find(node=>node.type==='input'&&node.props.value==='Controlled UI run').props.onChange({target:{value:'Important old edit'}});await h.flush();h.render({run:{...run(),parameters:{temperature:400}}});await h.flush();assert(h.text().includes('原始记录已变化'));assert(h.text().includes('Important old edit'));assert.equal(h.find('确认并执行').props.disabled,true);h.find('确认并执行').props.onClick();await h.flush();assert.equal(mutations(h).length,0);
+ h.click('丢弃本地草稿');await h.flush();assert.equal(h.find('确认并执行').props.disabled,false);assert.equal(h.nodes().find(node=>node.type==='ParameterFields').props.parameters.temperature,400);assert.equal(mutations(h).length,0);
+});
+
+test('Review remains editable when the localStorage getter throws and reports memory-only drafts',async t=>{
+ const props={draftScope:'blocked-storage-source'},first=harness(t,{component:'RunReview',props,storageUnavailable:true});await first.flush();assert(first.text().includes('本地持久化失败'));first.nodes().find(node=>node.type==='input'&&node.props.value==='Controlled UI run').props.onChange({target:{value:'Memory-only edit'}});await first.flush();assert(first.nodes().some(node=>node.type==='input'&&node.props.value==='Memory-only edit'));first.unmount();const remounted=harness(t,{component:'RunReview',props,storageUnavailable:true});await remounted.flush();assert(remounted.nodes().some(node=>node.type==='input'&&node.props.value==='Memory-only edit'));assert(remounted.text().includes('本地持久化失败'));assert.equal(mutations(first).length+mutations(remounted).length,0);
 });

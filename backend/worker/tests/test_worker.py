@@ -176,8 +176,9 @@ class Lifecycle(unittest.TestCase):
         run = self.submit()
         unrelated = {"pid": os.getpid(), "start": "wrong", "boot": "wrong"}
         self.service.store.update(run, status="unknown", identity=unrelated)
-        with self.assertRaisesRegex(ValueError, "identity"):
-            self.service.cancel(run["id"])
+        result = self.service.cancel(run["id"])
+        self.assertEqual(result["cancellation"]["status"], "unconfirmed")
+        self.assertFalse(result["cancellation"]["signal_sent"])
         with self.assertRaises(ValueError):
             self.service.submit(run["id"])
 

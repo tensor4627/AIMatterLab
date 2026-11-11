@@ -18,6 +18,7 @@ from pathlib import Path
 from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env
 from studio_worker.infrastructure.store import Store
 from studio_worker.compute.runtime_service import RuntimeServiceMixin
+from studio_worker.compute.launch_protocol import LAUNCH_SCHEMA, has_launch_evidence, launch_digest, host_identity
 from studio_worker.infrastructure.util import alive, atomic_json, contained, digest, identity, leaf, run_json
 
 TERMINAL = ("succeeded", "failed", "cancelled")
@@ -51,6 +52,14 @@ class SchedulerMixin:
         with self.store.lock:
             runs = self.store.runs()
         for run in runs:
+            if run["status"] == "queued" and has_launch_evidence(run):
+                # Older workers could crash after Popen while the row was still
+                # queued. Even launch.json alone is ambiguous: never retry it.
+                with self.store.lock:
+                    current = self.store.run(run["id"])
+                    if current["status"] == "queued":
+                        run = self.store.update(current, status="unknown",
+                            launch_error="Existing launch evidence requires reconciliation; not resubmitted")
             if run["status"] not in ("running", "unknown"):
                 continue
             try:
@@ -61,12 +70,16 @@ class SchedulerMixin:
                 self.store.event(run.get("id"), {"error": "Run reconciliation failed: " + str(exc)[:300]})
 
     def dispatch(self):
+        if getattr(self, 'ssh_service_mode', False):
+            return  # Reconnecting must never dispatch old local runs on a login host.
         with self.store.lock:
             runs = self.store.runs()
             busy = [r for r in runs if r["status"] in ("running", "unknown")]
             candidates = [r for r in reversed(runs) if r["status"] == "queued"]
             cluster_runs = self.store.list("cluster-run")
         for run in candidates:
+            claimed = False
+            baseline = deepcopy(run)
             try:
                 # Authorization, snapshot hashing and process start are I/O bound and
                 # must not hold the Store lock shared with every HTTP request.
@@ -79,28 +92,89 @@ class SchedulerMixin:
                     continue
                 self.verify_snapshot(run)
                 directory = Path(run["directory"])
-                atomic_json(directory / "launch.json", {"command": run["command"],
-                             "environment": process_env(run["environment_snapshot"], run["gpu"]),
-                             "max_seconds": run["max_seconds"]})
+                token = secrets.token_hex(24)
+                launch = {"schema": LAUNCH_SCHEMA, "protocol_version": 2, "run_id": run["id"], "claim": token,
+                          "store_root": str(self.store.root), "command": run["command"],
+                          "environment": process_env(run["environment_snapshot"], run["gpu"]),
+                          "max_seconds": run["max_seconds"]}
+                with self.store.lock:
+                    current = self.store.run(run["id"])
+                    if current["status"] != "queued":
+                        continue
+                    if has_launch_evidence(current):
+                        self.store.update(current, status="unknown",
+                            launch_error="Existing launch evidence requires reconciliation; not resubmitted")
+                        busy.append(current)
+                        continue
+                    # Authorization/hashing above can overlap a policy edit.
+                    # The returned project may have worker-owned input roots
+                    # added by the server, so compare its CAS revision only.
+                    # A changed policy is reauthorized on the next tick, without
+                    # reserving or starting anything from this stale snapshot.
+                    current_project = self.store.get("project", current["project_id"])
+                    if current_project.get("revision", 0) != project.get("revision", 0):
+                        continue
+                    current_busy = [value for value in self.store.runs() if value["status"] in ("running", "unknown")]
+                    if (any(value["gpu"] == current["gpu"] for value in current_busy) or
+                            sum(value["project_id"] == current["project_id"] for value in current_busy) + sum(
+                                value.get("project_id") == current["project_id"] and value.get("status") in ("queued", "running", "unknown")
+                                for value in self.store.list("cluster-run")) >= project["policy"]["max_concurrent"]):
+                        continue
+                    # This commit precedes every possible process creation. A
+                    # crash at any later point cannot make this run dispatchable.
+                    reserved = self.store.claim_launch(current,
+                        {"schema": 1, "protocol_version": 2, "host": host_identity(), "token": token, "claimed_at": time.time(), "payload_sha256": launch_digest(launch)})
+                    if reserved is None:
+                        continue
+                    run = reserved
+                    claimed = True
+                    busy.append(run)
+                atomic_json(directory / "launch.json", launch)
                 env = os.environ.copy()
                 env["PYTHONPATH"] = str(WORKER_ROOT)
-                process = subprocess.Popen([sys.executable, "-m", "studio_worker.runner", str(directory)],
+                process = subprocess.Popen([sys.executable, "-m", "studio_worker.runner", str(directory),
+                                            "--store-root", str(self.store.root), "--run-id", run["id"], "--launch-claim", token],
                                            env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                            stderr=subprocess.DEVNULL, start_new_session=True)
                 with self.store.lock:
                     current = self.store.run(run["id"])
-                    if current["status"] != "queued":
-                        # Cancelled between selection and launch: never resurrect it.
+                    if current.get("launch_claim", {}).get("token") != token or current["status"] in TERMINAL:
                         _terminate(process)
                         continue
                     self.processes[run["id"]] = process
-                    self.store.update(run, status="running", identity=identity(process.pid), started_at=time.time())
-                    busy.append(run)
+                    observed = identity(process.pid)
+                    self.store.update(current, status="running" if observed else "unknown", identity=observed, started_at=time.time(),
+                        launch_error=None if observed else "Supervisor identity has not yet been confirmed")
             except Exception as exc:
-                self.store.update(run, status="failed", error=str(exc))
+                with self.store.lock:
+                    current = self.store.run(run["id"])
+                    if claimed and current["status"] not in TERMINAL and current.get("launch_claim", {}).get("token") == token:
+                        self.store.compare_update(current, status="unknown", error=str(exc))
+                    elif not claimed:
+                        self.store.compare_update(baseline, status="failed", error=str(exc))
 
     def reconcile_run(self, run):
         directory = Path(run["directory"])
+        # Adopt the detached supervisor's own identity after a worker crash in
+        # Popen/identity persistence. Legacy identity files have no claim field.
+        identity_file = directory / "identity.json"
+        if not alive(run.get("identity")) and identity_file.is_file():
+            try:
+                observed = json.loads(identity_file.read_text(encoding="utf-8"))
+                expected_claim = run.get("launch_claim", {}).get("token")
+                if (isinstance(observed, dict) and all(key in observed for key in ("pid", "start", "boot")) and
+                        (not expected_claim or observed.get("launch_claim") == expected_claim)):
+                    observed = {key: observed[key] for key in ("pid", "start", "boot")}
+                    if alive(observed):
+                        with self.store.lock:
+                            current = self.store.run(run["id"])
+                            if current["status"] not in ("running", "unknown"):
+                                return
+                            run = self.store.update(current, identity=observed)
+            except (OSError, ValueError, TypeError):
+                # A bad identity must not hide an otherwise valid completion
+                # receipt. Missing identity remains unknown, never re-launched.
+                pass
         receipt = directory / "exit.json"
         if receipt.exists():
             fingerprint = _receipt_fingerprint(receipt)
@@ -108,17 +182,24 @@ class SchedulerMixin:
                 result = json.loads(receipt.read_text())
                 if not isinstance(result, dict) or "exit_code" not in result:
                     raise ValueError("Malformed run receipt")
+                expected_claim = run.get("launch_claim", {}).get("token")
+                if expected_claim and result.get("launch_claim") != expected_claim:
+                    raise ValueError("Run receipt does not match its launch claim")
             except Exception as exc:
                 # Preserve the unreadable receipt as evidence and stop retrying the
                 # same corrupt bytes on every tick. A rewritten valid receipt is
                 # processed on the next tick.
                 if run.get("receipt_error") and run.get("receipt_fingerprint") == fingerprint:
                     return
-                self.store.update(run, status="unknown", receipt_error="Unreadable run receipt: " + str(exc)[:200], receipt_fingerprint=fingerprint)
+                with self.store.lock:
+                    self.store.compare_update(run, status="unknown", receipt_error="Unreadable run receipt: " + str(exc)[:200], receipt_fingerprint=fingerprint)
                 return
-            state = "failed" if result.get("reason") == "time_limit" else (
+            state = "failed" if result.get("reason") in ("time_limit", "cancellation_state_unavailable") else (
                 "cancelled" if result.get("cancelled") else "succeeded" if result.get("exit_code") == 0 else "failed")
-            self.store.update(run, status=state, exit=result)
+            with self.store.lock:
+                run = self.store.compare_update(run, status=state, exit=result)
+                if run is None:
+                    return  # A concurrent state/evidence change is observed next tick.
             process = self.processes.pop(run["id"], None)
             if process:
                 try:
@@ -128,9 +209,12 @@ class SchedulerMixin:
             atomic_json(directory / "reproduction.json", run)
         elif alive(run.get("identity")):
             if run["status"] == "unknown":
-                self.store.update(run, status="running")
+                with self.store.lock:
+                    self.store.compare_update(run, status="running", launch_error=None)
         elif time.time() - run.get("started_at", 0) > 2:
-            self.store.update(run, status="unknown")
+            if run["status"] != "unknown":
+                with self.store.lock:
+                    self.store.compare_update(run, status="unknown")
 
     def cluster_loop(self):
         delay, failures = 15, 0

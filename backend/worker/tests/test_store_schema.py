@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -79,5 +80,81 @@ class StoreSchemaTest(unittest.TestCase):
         self.assertIsNone(store.run("run-a")["validation"]["score"])
         store.event("run-a", {"value": float("nan")})
         self.assertIsNone(store.events()[-1]["value"])
+
+    def test_legacy_project_migration_preserves_bytes_authorization_and_runs(self):
+        root = Path(self.tmp.name) / "service"
+        store = Store(root)
+        legacy = {"id": "p", "name": "Original", "policy": {"engines": ["pydyn.md"], "input_roots": ["/original"], "environments": ["e"]}}
+        raw = json.dumps(legacy, indent=2)
+        store.db.execute("INSERT INTO objects VALUES('project','p',?)", (raw,))
+        store.db.execute("PRAGMA user_version=1"); store.db.commit()
+        store.add_run(_run()); store.db.close()
+        store = Store(root); self.addCleanup(store.db.close)
+        self.assertEqual(store.schema_version, 2)
+        self.assertEqual(store.db.execute("SELECT data FROM objects WHERE kind='project'").fetchone()[0], raw)
+        self.assertEqual(store.get("project", "p"), {**legacy, "revision": 0})
+        self.assertEqual(store.run("run-a"), _run())
+
+    def test_project_revision_rejects_stale_writers_across_connections(self):
+        root = Path(self.tmp.name) / "service"
+        first, second = Store(root), Store(root)
+        self.addCleanup(first.db.close); self.addCleanup(second.db.close)
+        original = first.put("project", {"id": "p", "name": "Original", "policy": {"engines": []}})
+        stale = second.get("project", "p")
+        updated = first.put("project", {**original, "name": "Reviewed new name"})
+        self.assertEqual(updated["revision"], 1)
+        with self.assertRaisesRegex(ValueError, "project_edit_conflict"):
+            second.put("project", {**stale, "policy": {"engines": ["pydyn.md"]}})
+        self.assertEqual(first.get("project", "p"), updated)
+        self.assertEqual(second.put("project", {**original, "name": "Reviewed new name"}), updated)
+
+    def test_missing_revision_legacy_update_is_only_allowed_before_first_edit(self):
+        store = Store(Path(self.tmp.name) / "service"); self.addCleanup(store.db.close)
+        original = {"id": "p", "name": "Original"}
+        store.put("project", original)
+        changed = store.put("project", {**original, "name": "First edit"})
+        self.assertEqual(changed["revision"], 1)
+        with self.assertRaisesRegex(ValueError, "project_edit_conflict"):
+            store.put("project", {**original, "name": "Stale edit"})
+        self.assertEqual(store.put("project", {"id": "p", "name": "First edit"}), changed)
+        with self.assertRaises(ValueError): store.put_many([("project", original)])
+
+    def test_compare_update_cannot_remove_a_committed_claim(self):
+        store = Store(Path(self.tmp.name) / "service"); self.addCleanup(store.db.close)
+        run = _run(); run["status"] = "queued"; store.add_run(run)
+        stale = store.run(run["id"])
+        claimed = store.claim_launch(store.run(run["id"]), {"token": "owner"})
+        self.assertIsNone(store.compare_update(stale, status="failed"))
+        self.assertEqual(store.run(run["id"]), claimed)
+
+    def test_stale_update_merges_latest_supervisor_evidence_across_connections(self):
+        root = Path(self.tmp.name) / "service"
+        store, other = Store(root), Store(root)
+        self.addCleanup(store.db.close); self.addCleanup(other.db.close)
+        run = _run(); run["status"] = "unknown"; store.add_run(run)
+        stale = store.run(run["id"])
+        intent = {"claim": "fixture", "host": {"machine": "fixture", "boot": "same-boot"}}
+        other.update(other.run(run["id"]), child_start_intent=intent)
+        for changes in ({"identity": None}, {"cancel_requested": True}, {"reconciliation": {"status": "blocked"}}):
+            result = store.update(dict(stale), **changes)
+            self.assertEqual(result["child_start_intent"], intent)
+            self.assertEqual(other.run(run["id"])["child_start_intent"], intent)
+        with self.assertRaisesRegex(ValueError, "cannot be replaced"):
+            store.update(store.run(run["id"]), child_start_intent=None)
+
+    def test_stale_update_does_not_resurrect_terminal_state_or_replace_claim(self):
+        root = Path(self.tmp.name) / "service"
+        store, other = Store(root), Store(root)
+        self.addCleanup(store.db.close); self.addCleanup(other.db.close)
+        run = _run(); run["status"] = "unknown"; store.add_run(run)
+        stale = store.run(run["id"])
+        other.update(other.run(run["id"]), status="cancelled")
+        with self.assertRaisesRegex(ValueError, "state changed"):
+            store.update(stale, status="running")
+        self.assertEqual(store.run(run["id"])["status"], "cancelled")
+        other.update(other.run(run["id"]), launch_claim={"token": "other"})
+        with self.assertRaisesRegex(ValueError, "claim changed"):
+            store.update(stale, error="stale dispatch error")
+        self.assertNotIn("error", store.run(run["id"]))
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,11 @@ const binding=h=>h.text(h.find(node=>node.props?.['data-testid']==='deployment-b
 const retry=h=>h.find(node=>node.type==='button'&&h.text(node)==='重新读取');
 const execute=h=>h.find(node=>node.props?.['data-testid']==='execute-deployment');
 
+test('human SSH scheduler save event refreshes only the current trusted deployment catalog',async()=>{
+ const previous=globalThis.window,listeners=[];globalThis.window={studio:{onEvent:listener=>{listeners.push(listener);return()=>listeners.splice(listeners.indexOf(listener),1);}}};let h;
+ try{h=deploymentHarness();await h.flush();const before=reads(h).length,list=()=>[...listeners];for(const listener of list())listener({method:'studio/sshSchedulerChanged',params:{profileId:'inert-scheduler',version:2}});await h.flush();assert.equal(reads(h).length,before+1);assert(reads(h).every(call=>call.data.taskId===h.props.task.id));assert.deepEqual(writes(h),[]);h.update({worker:false,restoring:true});await h.flush();const disconnected=reads(h).length;for(const listener of list())listener({method:'studio/sshSchedulerChanged',params:{}});await h.flush();assert.equal(reads(h).length,disconnected);}finally{h?.unmount();globalThis.window=previous;}
+});
+
 test('production context hook keeps wrong-task data out of the active deployment and execution gates',async()=>{
  const h=deploymentHarness({override:async(method,data,standard)=>{const value=await standard(method,data);return method==='task.deployment.context'?{...value,taskId:'wrong-task',projects:value.projects.map(project=>({...project,name:'Wrong-scope project'}))}:value;}});
  await h.flush();assert(h.text(state(h)).includes('正在恢复'));assert(binding(h).includes('Compute project'));assert(!binding(h).includes('Wrong-scope'));assert.equal(execute(h).props.disabled,true);assert.equal(reads(h).length,1);assert.deepEqual(writes(h),[]);assert.deepEqual(h.externalErrors,[]);h.unmount();

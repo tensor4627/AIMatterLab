@@ -39,18 +39,20 @@ test('late rollback acknowledgement cannot restore old UI after a later user sel
 });
 
 
-for(const scenario of ['split','single','chat-only','hidden-agent'])test('modebar offers panel switching only when a panel is hidden: '+scenario,async()=>{
+for(const scenario of ['split','single','empty-home','hidden-agent'])test('modebar offers panel switching only when a panel is hidden: '+scenario,async()=>{
  const storage=memoryStorage(),original={...conversation('codex','layout-original'),name:'Layout workflow',taskId:'layout-task'},task={id:'layout-task',provider:'codex',threadId:'layout-original',name:'Layout flow',parameters:{},artifacts:[],steps:[]};
- if(scenario!=='chat-only'){storage.setItem('studio.conversation',original.id);storage.setItem('studio.section','agent-task:layout-task');}
+ if(scenario!=='empty-home'){storage.setItem('studio.conversation',original.id);storage.setItem('studio.section','agent-task:layout-task');}
  if(scenario==='hidden-agent')storage.setItem('studio.agent','false');
- const h=appWorkerHarness({storage,width:scenario==='single'?800:1440,override:(method,data,standard)=>{if(method==='conversation.list')return scenario==='chat-only'?[]:[original];if(method==='conversation.select')return original;if(method==='task.list')return [task];return standard(method,data);}});await h.flush();
+ const h=appWorkerHarness({storage,width:scenario==='single'?800:1440,override:(method,data,standard)=>{if(method==='conversation.list')return scenario==='empty-home'?[]:[original];if(method==='conversation.select')return original;if(method==='task.list')return [task];return standard(method,data);}});await h.flush();
  if(scenario==='hidden-agent'){h.find(n=>n.props?.['aria-label']==='切换 Agent 面板').props.onClick();await h.flush();}
  const has=id=>{try{h.find(n=>n.props?.['data-testid']===id);return true;}catch{return false;}};
- assert.equal(has('show-agent'),scenario!=='split');assert.equal(has('show-workspace'),scenario!=='split');
+ const switchable=scenario==='single'||scenario==='hidden-agent';
+ assert.equal(has('show-agent'),switchable);assert.equal(has('show-workspace'),switchable);
+ if(scenario==='empty-home')assert.equal(h.find(n=>n.type==='./Agent').props.hidden,false,'wide empty home retains both content and Agent');
  for(const id of ['priority-chat','priority-workflow'])assert.equal(has(id),true,'priority retained');
  h.find(n=>n.props?.['data-testid']==='navigate-home');h.find(n=>n.props?.['aria-label']==='设置');h.find(n=>n.props?.['aria-label']==='切换 Agent 面板');
  assert(h.text(h.find(n=>n.props?.['data-testid']==='workspace-modebar')).length>0);
- if(scenario!=='split'){
+ if(switchable){
   h.find(n=>n.props?.['data-testid']==='show-agent').props.onClick();await h.flush();assert.equal(h.find(n=>n.type==='./Agent').props.hidden,false);
   if(scenario!=='hidden-agent'){h.find(n=>n.props?.['data-testid']==='show-workspace').props.onClick();await h.flush();assert.equal(h.find(n=>n.type==='./Agent').props.hidden,true);}
  }

@@ -64,6 +64,14 @@ def gpu_inventory(run=subprocess.run):
 
 def dispatch(service, method, path, data, admin=False):
     store = service.store
+    if method == 'POST' and path in ('/api/runs/prepare', '/api/run/validate', '/api/run/submit', '/api/run/resume', '/api/run/revise'):
+        from studio_worker.compute.ssh_service import require_local_execution
+        require_local_execution(service)
+    if path == '/api/ssh-service/scheduler':
+        if method != 'POST' or not admin:
+            raise PermissionError('Desktop human scheduler registration required')
+        from studio_worker.compute.ssh_service import scheduler_profile
+        return scheduler_profile(service, data)
     if path in ('/api/workflow/tool-group/create', '/api/workflow/prepare-step', '/api/workflow/execute-step', '/api/workflow/status', '/api/workflow/read'):
         if method != 'POST' or not admin: raise PermissionError('Desktop human tool-workflow channel required')
         from studio_worker.workspace.tool_workflows import ToolWorkflows
@@ -82,7 +90,15 @@ def dispatch(service, method, path, data, admin=False):
         return getattr(ToolConfigurations(service), operation)(data)
     if method == "GET":
         if path == "/api/health":
-            return {"name": "gpu-sampling-studio", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1}
+            value = {"name": "gpu-sampling-studio", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1}
+            if getattr(service, 'ssh_service_mode', False):
+                from studio_worker.compute.ssh_service import identity
+                host = identity(service.root)
+                value.update(hostname=host['hostname'], uid=host['uid'], machineId=host['machineId'],
+                             hostIdentity={k: host[k] for k in ('hostname', 'uid', 'machineId')},
+                             home=str(Path.home().resolve()), runtime_id=WORKER_ROOT.name,
+                             port=getattr(service, 'listen_port', None), worker_role='ssh-login-service', ssh_service=True, local_execution=False)
+            return value
         if path == "/api/tools/status":
             return service.diagnose_tools()
         if path == "/api/compute/readiness":
@@ -295,6 +311,10 @@ def dispatch(service, method, path, data, admin=False):
         return run_environment_identity(store,data)
     if path == "/api/run/input":
         return service.input_file(data["run_id"], data["name"])
+    if path == "/api/run/reconcile":
+        if not admin:
+            raise PermissionError("Only the desktop user can reconcile an unknown run")
+        return service.resolve_unknown(data["run_id"])
     if path in ("/api/run/submit", "/api/run/validate") and not admin:
         raise PermissionError("Desktop review required: click Confirm and Execute in the task page")
     if path.startswith("/api/run/"):

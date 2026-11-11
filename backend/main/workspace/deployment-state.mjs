@@ -6,11 +6,11 @@ import {validateProjectSpec} from "../../../contracts/compute/project-policy.mjs
 import {engineContracts} from "../../../contracts/tools/engine-contracts.mjs";
 
 import {taskOperation} from './task-operations.mjs';
-import {assertTaskWorker} from "../../../contracts/compute/task-worker-binding.mjs";
+import {assertTaskWorker,actualAuthoringWorker} from "../../../contracts/compute/task-worker-binding.mjs";
 
 const locked=task=>['validating','submitting','unknown'].includes(task.execution?.phase);
 function request(value,keys){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==[...keys].sort().join(',')||typeof value.taskId!=='string'||!value.taskId||value.taskId.length>200)throw Error('Invalid typed deployment request');}
-export function deploymentWorker(worker){if(!worker?.connection||!worker.identity?.distribution||!worker.identity?.root)throw Error('请连接此流程的作业服务后继续。');const port=worker.connectionTarget?.port;if(port!==undefined&&(!Number.isInteger(port)||port<1024||port>65535))throw Error('实际作业服务端口无效，请重新核对连接。');return {...structuredClone(worker.identity),...port!==undefined?{port}:{}};}
+export function deploymentWorker(worker){if(worker?.identity?.kind==='ssh')return actualAuthoringWorker(worker);if(!worker?.connection||!worker.identity?.distribution||!worker.identity?.root)throw Error('请连接此流程的作业服务后继续。');const port=worker.connectionTarget?.port;if(port!==undefined&&(!Number.isInteger(port)||port<1024||port>65535))throw Error('实际作业服务端口无效，请重新核对连接。');return {...structuredClone(worker.identity),...port!==undefined?{port}:{}};}
 export function assertDeploymentWorker(task,worker){assertTaskWorker(task,worker);}
 export function assertConfirmedDeployment(task){if(task.deploymentDraft&&!sameDeploymentConfig(task.deploymentDraft.config,task.deployment?.config))throw Error('部署草稿与已确认版本不同，请先保存并核对最新部署设置。');}
 export function saveDeploymentDraft(records,worker,args){

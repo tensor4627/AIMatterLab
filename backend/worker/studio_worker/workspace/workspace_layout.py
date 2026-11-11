@@ -63,7 +63,7 @@ def import_asset(service,data):
  from studio_worker.workspace.private_lineage import propagate
  propagate(service,[str(source)],project['id'])
  if mode=='link' and str(source) not in project['policy']['input_roots']:
-  project['policy']['input_roots'].append(str(source));service.store.put('project',project)
+  project['policy']['input_roots'].append(str(source));project=service.store.put('project',project)
  asset={'id':identifier,'project_id':project['id'],'name':source.name,'path':str(target),'source':str(source),'sha256':sha,'role':role,'mode':mode,'validation':{'status':'not_run','scope':'Asset identity only; no format, model or scientific validation'}}
  return service.store.put('workspace-asset',asset)
 
@@ -79,5 +79,5 @@ def retain_inputs(service,data):
   from studio_worker.workspace.private_lineage import propagate
   propagate(service,[str(file)],project['id'])
   if str(file) not in project['policy']['input_roots']:project['policy']['input_roots'].append(str(file))
- service.store.put('project',project)
+ project=service.store.put('project',project)
  return describe(service,project)

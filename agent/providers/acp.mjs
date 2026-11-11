@@ -22,30 +22,38 @@ export function toolResult(update){
  return {content:[{type:'text',text:texts.join('\n')||JSON.stringify(update.rawOutput??update.content??update.status)}]};
 }
 function optionsOf(option){return (option?.options||[]).flatMap(value=>Array.isArray(value.options)?value.options:[value]);}
+function currentTurn(session){if(!session.current){session.current={id:'history',items:[]};session.turns.push(session.current);}return session.current;}
 export class AcpBridge extends EventEmitter{
- constructor(provider,{host=providerRuntime,probeTimeoutMs=15000}={}){super();this.host=host;this.provider=provider;this.probeTimeoutMs=probeTimeoutMs;this.pending=new Map();this.interactions=new Map();this.sessions=new Map();this.next=1;this.activeTurns=new Map();}
+ constructor(provider,{host=providerRuntime,probeTimeoutMs=15000}={}){super();this.host=host;this.provider=provider;this.probeTimeoutMs=probeTimeoutMs;this.pending=new Map();this.interactions=new Map();this.sessions=new Map();this.next=1;this.activeTurns=new Map();this.lifecycle=0;this.cancelProbe=null;}
  event(method,params,id){this.emit('event',{method,params:{...params,provider:this.provider},provider:this.provider,...id!==undefined?{id}: {}});}
  async start(executable,profile,worker){
-  if(this.process)return this.info;
   if(this.starting)return this.starting;
-  this.starting=this._start(executable,profile,worker).finally(()=>{this.starting=null;});
-  return this.starting;
- }
- async _start(executable,profile,worker){
   if(this.process)return this.info;
+  const starting=this._start(executable,profile,worker,this.lifecycle).finally(()=>{if(this.starting===starting)this.starting=null;});
+  this.starting=starting;return starting;
+ }
+ async _start(executable,profile,worker,generation){
+  if(this.process)return this.info;
+  const assertCurrent=()=>{if(this.lifecycle!==generation)throw Error(this.provider+' startup was cancelled');};
   const version=await new Promise((resolve,reject)=>{
-   const probe=this.host.spawnCli(executable,['--version'],{env:profile.env});let output='',settled=false;
+   const probe=this.host.spawnCli(executable,['--version'],{provider:this.provider,env:profile.env});let output='',settled=false;
    const onData=data=>{output+=data.toString();};
-   const cleanup=()=>{clearTimeout(timer);probe.stdout?.removeListener?.('data',onData);probe.removeListener?.('error',onError);probe.removeListener?.('exit',onExit);};
+   const cleanup=()=>{clearTimeout(timer);probe.stdout?.removeListener?.('data',onData);probe.removeListener?.('exit',onExit);if(this.cancelProbe===cancel)this.cancelProbe=null;};
    const finish=(action,value)=>{if(settled)return;settled=true;cleanup();action(value);};
+   const cancel=error=>{if(settled)return;finish(reject,error);try{probe.kill();}catch{}};
    const onError=error=>finish(reject,error);
+   // spawn errors can arrive on nextTick after an immediate close/kill. Keep the
+   // settle-safe error handler until ChildProcess close so cancellation cannot crash main.
+   const onClose=()=>probe.removeListener('error',onError);
    const onExit=code=>{if(code!==0)finish(reject,Error('CLI version probe failed'));else finish(resolve,output.trim().split(/\s+/).at(-1));};
-   const timer=setTimeout(()=>{try{probe.kill();}catch{}finish(reject,Error('CLI version probe timed out'));},this.probeTimeoutMs);
-   probe.stdout.on('data',onData);probe.on('error',onError);probe.on('exit',onExit);
+   const timer=setTimeout(()=>cancel(Error('CLI version probe timed out')),this.probeTimeoutMs);
+   this.cancelProbe=cancel;
+   probe.stdout.on('data',onData);probe.on('error',onError);probe.on('exit',onExit);probe.once('close',onClose);
   });
+  assertCurrent();
   if(version!==CLI_VERSIONS[this.provider])throw Error(this.provider+' CLI version mismatch: expected '+CLI_VERSIONS[this.provider]+', got '+version);
   this.executable=executable;this.profile=profile;this.worker=worker;
-  const child=this.host.spawnCli(executable,profile.args,{cwd:profile.cwd,env:profile.env});this.process=child;
+  const child=this.host.spawnCli(executable,profile.args,{provider:this.provider,cwd:profile.cwd,env:profile.env});this.process=child;
   // A closed child stdin surfaces EPIPE asynchronously; without a listener the
   // main process would die on an unhandled 'error' event.
   if(typeof child.stdin?.on==='function')child.stdin.on('error',error=>{if(this.process===child)this.emit('diagnostic',this.provider+' stdin unavailable ('+String(error?.code||error)+'); reconnect explicitly.');});
@@ -61,13 +69,14 @@ export class AcpBridge extends EventEmitter{
   this.framer=framer;
   child.stdout.on('data',chunk=>{if(this.process===child)framer.feed(chunk);});
   try{
-   this.info=await this.raw('initialize',{protocolVersion:1,clientInfo:{name:'gpu-sampling-studio',version:this.host.version},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false,elicitation:{form:{}},session:{configOptions:{boolean:{}}}}},30000);
-   if(this.info.protocolVersion!==1)throw Error('Unsupported ACP protocol version');
-   const version=this.info.agentInfo?.version;
+   const info=await this.raw('initialize',{protocolVersion:1,clientInfo:{name:'gpu-sampling-studio',version:this.host.version},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false,elicitation:{form:{}},session:{configOptions:{boolean:{}}}}},30000);
+   assertCurrent();if(this.process!==child)throw Error(this.provider+' startup was cancelled');
+   if(info.protocolVersion!==1)throw Error('Unsupported ACP protocol version');
+   const version=info.agentInfo?.version;
    // Kimi advertises product version; Qwen may advertise a separate kernel version.
    if(this.provider==='kimi'&&version&&version!==CLI_VERSIONS.kimi)throw Error('Kimi CLI version mismatch: expected '+CLI_VERSIONS.kimi+', got '+version);
-   return this.info;
-  }catch(error){this.close();throw error;}
+   this.info=info;return info;
+  }catch(error){if(this.lifecycle===generation&&this.process===child)this.close();throw error;}
  }
  send(value){if(!this.process||this.process.stdin.destroyed)throw Error('Connect '+this.provider+' first');this.process.stdin.write(JSON.stringify({jsonrpc:'2.0',...value})+'\n');}
  raw(method,params={},timeout=120000){
@@ -130,8 +139,7 @@ export class AcpBridge extends EventEmitter{
   const threadId=sessionId,type=u.sessionUpdate;
   if(type==='agent_message_chunk'||type==='user_message_chunk'){
    if(u.content?.type!=='text')return;
-   const role=type==='agent_message_chunk'?'agentMessage':'userMessage',turn=session.current||{id:'history',items:[]};
-   if(!session.current){session.current=turn;session.turns.push(turn);}
+   const role=type==='agent_message_chunk'?'agentMessage':'userMessage',turn=currentTurn(session);
    const last=turn.items.at(-1),itemId=u.messageId||((last?.type===role)?last.id:randomUUID());
    let item=turn.items.find(v=>v.id===itemId);
    if(!item){item={id:itemId,type:role,text:'',content:[]};turn.items.push(item);}
@@ -141,14 +149,19 @@ export class AcpBridge extends EventEmitter{
   }
   if(type==='tool_call'||type==='tool_call_update'){
    const previous=session.tools.get(u.toolCallId),merged={...previous,...u};
-   if(!previous){
-    const name=toolName(u._meta?.toolName||u._meta?.claudeCode?.toolName||u.title);
-    merged.name=name;session.tools.set(u.toolCallId,merged);
-    if(!session.replaying)this.event('item/started',{threadId,item:{id:u.toolCallId,type:'mcpToolCall',tool:name}});
-   }else{merged.name=previous.name;session.tools.set(u.toolCallId,merged);}
+   merged.name=previous?.name||toolName(merged._meta?.toolName||merged._meta?.claudeCode?.toolName||merged.title);
+   // Keep one canonical history item, including tool-only session/load replay.
+   // Later updates remain attached to their original turn rather than the current one.
+   const item=previous?.item||{id:u.toolCallId,type:'mcpToolCall'};
+   if(!previous?.item)currentTurn(session).items.push(item);
+   item.tool=merged.name;item.status=['completed','failed'].includes(merged.status)?merged.status:'inProgress';
+   if(Object.hasOwn(merged,'rawInput'))item.arguments=merged.rawInput;
+   if(['completed','failed'].includes(merged.status))item.result=toolResult(merged);
+   merged.item=item;session.tools.set(u.toolCallId,merged);
+   if(!previous&&!session.replaying)this.event('item/started',{threadId,item:{...item}});
    if(['completed','failed'].includes(u.status)&&!previous?.finished){
     merged.finished=true;
-    if(!session.replaying)this.event('item/completed',{threadId,item:{id:u.toolCallId,type:'mcpToolCall',tool:merged.name,status:u.status,result:toolResult(merged)}});
+    if(!session.replaying)this.event('item/completed',{threadId,item:{...item}});
    }
   }
   if(type==='config_option_update'){session.configOptions=u.configOptions||[];this.event('studio/configUpdated',{threadId});}
@@ -235,6 +248,7 @@ export class AcpBridge extends EventEmitter{
   throw Error('Unsupported '+this.provider+' operation: '+method);
  }
  disconnect(error){
+  this.lifecycle++;this.cancelProbe?.(error);this.starting=null;this.info=null;
   for(const value of this.pending.values()){clearTimeout(value.timer);value.reject(error);}this.pending.clear();this.interactions.clear();
   const child=this.process;this.process=null;this.framer?.reset();this.framer=null;child?.kill();
   // The process that produced these sessions is gone; stale metadata must not

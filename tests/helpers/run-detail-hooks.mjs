@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';import {randomUUID} from 'node:crypto';import {runContinuation} from '../../frontend/features/runs/run-continuation.mjs';
+import {memoryStorage} from './agent-hooks.mjs';
+import {ObservedRead} from '../../frontend/api/observed-read.mjs';
+import * as reviewDraft from '../../frontend/features/runs/run-review-draft.mjs';
+import {appendLogChunks} from '../../frontend/features/runs/log-buffer.mjs';
+const compiled=Object.fromEntries(['RunDetail','RunReview'].map(name=>[name,ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/runs/'+name+'.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText]));
+export function runDetailHarness({component='RunDetail',observeLogs=false,confirm=()=>true,storage=memoryStorage(),request=async()=>({run:'r',artifacts:[{name:'actual.xyz',size:12}]}),props={}}={}){
+ const hooks=[],effects=[],calls=[],listeners=[],errors=[],timers=new Map();let timerId=0;let cursor=0,dirty=false,tree,disposed=false,currentProps,lateWrites=0;
+ const useState=initial=>{const i=cursor++;hooks[i]??={value:typeof initial==='function'?initial():initial};return[hooks[i].value,v=>{if(disposed)lateWrites++;hooks[i].value=typeof v==='function'?v(hooks[i].value):v;dirty=true;}];};
+ const useRef=v=>hooks[cursor++]??=( {current:v});
+ const useEffect=(fn,deps)=>{const i=cursor++,prev=hooks[i];if(!prev||deps.some((v,j)=>!Object.is(v,prev.deps[j]))){const rec={deps,cleanup:prev?.cleanup};hooks[i]=rec;effects.push(()=>{rec.cleanup?.();rec.cleanup=fn();});}};
+ const api=async(method,target,data)=>{calls.push({target,data});return request(target,data);};
+ const require=name=>{if(name==='./run-review-draft.mjs')return reviewDraft;if(name.includes('task-fields.mjs'))return{flattenParameters:()=>[]};if(name==='react')return{useState,useRef,useEffect};if(name==='react/jsx-runtime')return{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};if(["./run-continuation.mjs"].includes(name))return{runContinuation};if(["../../api/observed-read.mjs"].includes(name))return{ObservedRead:observeLogs?class extends ObservedRead{constructor(read,publish,options){super(read,publish,{...options,schedule:fn=>{const id=++timerId;timers.set(id,fn);return id;},unschedule:id=>timers.delete(id)});}}:class{setConnected(){}dispose(){}refresh(){}}};if(name==='./log-buffer.mjs')return{appendLogChunks};if(name==="../../ui/i18n")return{tr:x=>x,t:x=>x};if(["../../api/worker","../../api/studio"].includes(name))return{api,invoke:()=>{throw Error('No privileged action expected');}};return new Proxy({},{get:(_,key)=>String(key)});};
+ const module={exports:{}};new Function('require','module','exports','window','localStorage','crypto',compiled[component])(require,module,module.exports,{confirm,localStorage:storage,addEventListener(){},removeEventListener(){},studio:{onEvent:fn=>{listeners.push(fn);return()=>listeners.splice(listeners.indexOf(fn),1);}}},storage,{randomUUID});
+ currentProps={run:{id:'r',project_id:'p',environment_id:'e',directory:'/owned/r',engine:'gpumd.md',status:'succeeded',name:'fixture',parameters:{},validation:{},command:[],inputs:{},created_at:1},draftScope:'worker-A',environments:[{id:'e',name:'Environment'}],theme:'dark',onReplace:()=>{},connected:true,onError:e=>errors.push(String(e)),onRefresh:()=>{},...props};
+ function render(changes={}){currentProps={...currentProps,...changes};cursor=0;dirty=false;tree=module.exports.default(currentProps);}
+ function nodes(n=tree){if(Array.isArray(n))return n.flatMap(x=>nodes(x??null));if(!n||typeof n!=='object')return[];return[n,...nodes(n.props?.children??null)];}
+ function text(n=tree){if(Array.isArray(n))return n.map(x=>text(x??null)).join('');if(n==null||typeof n==='boolean')return'';if(typeof n!=='object')return String(n);return text(n.props?.children??null);}
+ function button(label){const n=nodes().find(n=>n.type==='button'&&text(n)===label);assert(n,'button '+label);return n;}
+ async function flush(){for(let i=0;i<8;i++){while(effects.length)effects.shift()();await new Promise(r=>setImmediate(r));if(dirty&&!disposed)render();}}
+ function unmount(){disposed=true;for(const h of hooks)h?.cleanup?.();}
+ render();return{render,flush,unmount,calls,errors,storage,button,text,nodes,timers,tick:()=>{for(const [id,fn]of [...timers]){timers.delete(id);fn();}},click:label=>{const b=button(label);if(!b.props.disabled)b.props.onClick();},emit:()=>listeners.forEach(fn=>fn({method:'studio/workerConnected',params:{}})),run:()=>currentProps.run,lateWrites:()=>lateWrites};
+}

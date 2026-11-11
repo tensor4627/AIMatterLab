@@ -25,6 +25,8 @@ TERMINAL = ("succeeded", "failed", "cancelled")
 
 class RunsMixin:
     def prepare(self, spec, *, _workflow_context=None):
+        from studio_worker.compute.ssh_service import require_local_execution
+        require_local_execution(self)
         spec = dict(spec)
         if "continuation_metadata" in spec:
             raise ValueError("Continuation metadata is worker-owned")
@@ -193,6 +195,8 @@ class RunsMixin:
                     raise ValueError("Input changed after preparation: " + asset["name"])
 
     def validate(self, identifier, *, _workflow_context=None):
+        from studio_worker.compute.ssh_service import require_local_execution
+        require_local_execution(self)
         with self.store.lock:
             run = self.store.run(identifier)
             if run.get('studio_workflow_binding'):
@@ -212,7 +216,7 @@ class RunsMixin:
                 except Exception as exc:
                     current_probe = {"status":"blocked", "error":str(exc)}
                 self.provenance[key] = current_probe
-            run["provenance"] = current_probe if run["engine"] == "pydyn.md" else self.provenance[key]
+            self.store.update(run, provenance=current_probe if run["engine"] == "pydyn.md" else self.provenance[key])
             from studio_worker.tools.cell_derivative_contract import derive as derive_cell_contract
             contract=derive_cell_contract(self,run)
             self.verify_snapshot(run)
@@ -234,6 +238,8 @@ class RunsMixin:
         return run
 
     def submit(self, identifier, *, _workflow_context=None):
+        from studio_worker.compute.ssh_service import require_local_execution
+        require_local_execution(self)
         with self.store.lock:
             run = self.store.run(identifier)
             if run["status"] in ("queued", "running", *TERMINAL):
@@ -253,15 +259,66 @@ class RunsMixin:
         with self.store.lock:
             run = self.store.run(identifier)
             self.authorize(run)
-            if run["status"] == "queued":
+            from studio_worker.compute.launch_protocol import has_launch_evidence
+            if run["status"] == "queued" and not has_launch_evidence(run):
                 return self.store.update(run, status="cancelled")
+            if run["status"] == "queued":
+                run = self.store.update(run, status="unknown")
             if run["status"] not in ("running", "unknown"):
                 return run
+            if run.get("launch_claim"):
+                # Persist before signalling. A supervisor that has not acquired
+                # its child-start gate will observe this and never start a child;
+                # an already detached supervisor also polls this durable request.
+                self.store.update(run, cancel_requested=True)
+                signalled = False
+                try:
+                    signalled = bool(Adapter(run["engine"]).cancel(run))
+                except ProcessLookupError:
+                    pass  # The detached supervisor may have just completed.
+                return self.store.update(run, cancellation={"status": "requested", "signal_sent": signalled,
+                    "message": "Cancellation is recorded; process completion has not yet been confirmed."})
             if not Adapter(run["engine"]).cancel(run):
-                raise ValueError("Unknown process identity; no signal was sent")
-            return self.store.update(run, cancel_requested=True)
+                return self.store.update(run, cancellation={"status": "unconfirmed", "signal_sent": False,
+                    "message": "Run state is retained for reconciliation; process identity is unknown and no signal was sent."})
+            return self.store.update(run, cancel_requested=True, cancellation={"status": "requested", "signal_sent": True,
+                "message": "Stop signal sent; waiting for the completion receipt."})
+
+    def resolve_unknown(self, identifier):
+        """Human recovery only: never infer completion from missing process files."""
+        from studio_worker.compute.launch_protocol import recovery_proof
+        run = self.store.run(identifier)
+        self.authorize(run)
+        if run["status"] == "unknown":
+            self.reconcile_run(run)
+        with self.store.lock:
+            try:
+                # Shared with the supervisor's final check AND child creation.
+                # Once committed terminal, any late supervisor is fenced out.
+                self.store.db.execute("BEGIN IMMEDIATE")
+                run = self.store.run(identifier)
+                if run["status"] in TERMINAL:
+                    self.store.db.commit()
+                    return run
+                if run["status"] != "unknown":
+                    return self.store.update(run, reconciliation={"status": "blocked", "reason": "run_still_active",
+                        "message": "The supervisor is still active; request cancellation and wait for its receipt.", "checked_at": time.time()})
+                try:
+                    proven, reason, message = recovery_proof(run)
+                except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                    proven, reason, message = False, "evidence_unreadable", "Launch evidence could not be verified; the run remains unknown."
+                changes = {"reconciliation": {"status": "resolved" if proven else "blocked", "reason": reason,
+                                               "message": message, "checked_at": time.time()}}
+                if proven:
+                    changes.update(status="cancelled", cancel_requested=True, launch_error=None)
+                return self.store.update(run, **changes)
+            except Exception:
+                self.store.db.rollback()
+                raise
 
     def resume(self, identifier, parameters):
+        from studio_worker.compute.ssh_service import require_local_execution
+        require_local_execution(self)
         run = self.store.run(identifier)
         if run["status"] not in TERMINAL:
             raise ValueError("A continuation requires a terminal parent")

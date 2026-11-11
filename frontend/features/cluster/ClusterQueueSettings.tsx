@@ -47,7 +47,7 @@ export default function ClusterQueueSettings({profile,project,worker,busy,profil
    const stable=(value:any):string=>JSON.stringify(value,(key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(name=>[name,item[name]])):item);
    if(stable(updated?.policy?.cluster_queue_policies?.[id])!==stable(approved))throw Error(t('队列策略未按批准内容保存，请重新读取。'));
    setPolicy(approved);setNotice(t('队列策略已批准'));onRefresh();
-  }catch(error){if(current())onError(error);}finally{if(current())setApproving(false);}
+  }catch(error){if(current())onError(String(error).includes('project_edit_conflict')?new Error(t('项目记录已变化，请关闭后重新打开并检查最新授权。')):error);}finally{if(current())setApproving(false);}
  }
  function reset(){sequence.current++;setApproving(false);setPolicy(queuePolicy(profile,project));setNotice('');}
  function boundedTest(target:ClusterQueueTarget){if(!onQueueTest)return;const saved=queuePolicy(profile,project);if(profileDirty||!profile.id||!saved||saved.profile_version!==profile.version||!saved.allowed_target_ids.includes(target.id)||!target.enabled||target.usage_class==='unknown'||target.usage_class==='paid'&&(!saved.paid.permitted||!saved.paid.conditions_known))return;const engines=target.engines.filter(engine=>project!.policy.engines.includes(engine));if(!engines.length)return;const paid=target.usage_class==='paid'?saved.paid.limits:undefined;const limits={...target.limits,max_seconds:Math.min(target.limits.max_seconds,project!.policy.max_seconds)};if(paid)for(const key of ['cpus','gpus','memory_mb','max_seconds'] as const)limits[key]=Math.min(limits[key],paid[key]);void Promise.resolve(onQueueTest(queueTestPrompt(profile.id,{...target,engines,limits}))).catch(onError);}

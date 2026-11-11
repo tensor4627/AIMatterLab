@@ -1,3 +1,4 @@
+import {mockTerminalRuntime} from '../helpers/terminal-runtime-fixture.mjs';
 // Actual broker HTTP + provider MCP + controlled stdio child. Never invokes SSH.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,7 +34,7 @@ async function fixture(t,{now=Date.now}={}){
  }};
  const brokerSpawn=()=>{const child=new EventEmitter();child.pid=process.pid;child.stdout=new PassThrough();child.unref=()=>{};child.stdin=new Writable({write(chunk,_encoding,done){startBroker(JSON.parse(chunk.toString()),{pty,now}).then(broker=>{brokers.push(broker);child.stdout.write(JSON.stringify(broker.ready)+'\n');},error=>child.emit('error',error));done();}});return child;};
  const requestApi=async(descriptor,method,route,body)=>{calls.push({method,route});const response=await fetch(descriptor.origin+route,{method,headers:{Authorization:'Bearer '+descriptor.controlToken,...body!==undefined?{'Content-Type':'application/json'}:{}},...body!==undefined?{body:JSON.stringify(body)}:{}});if(response.status!==200)throw Error('fixture broker denied');const result=await response.json();if(gate&&route.endsWith('/state')){const wait=gate;gate=null;await wait;}return result;};
- const terminalOptions={worker,profiles,catalog,encryption,root:path.join(root,'credentials'),runtimeRoot:path.join(root,'runtime'),dependencyRoot:root,servicePath:path.join(root,'in-process-broker-fixture.mjs'),nodeExecutable:process.execPath,spawn:brokerSpawn,requestApi,current:()=>selected,settings:()=>({cwd:root}),getSelectedResource:()=>binding?.peek(),selectionRevision:()=>binding?.revision()??0,sourceGuard:()=>{throw Error('No scientific worker exists');}};const terminal=createSharedTerminal(terminalOptions);
+ const terminalOptions={desktopSessionId:'same-desktop-binding-fixture',prepareRuntime:mockTerminalRuntime,worker,profiles,catalog,encryption,root:path.join(root,'credentials'),runtimeRoot:path.join(root,'runtime'),dependencyRoot:root,servicePath:path.join(root,'in-process-broker-fixture.mjs'),nodeExecutable:process.execPath,spawn:brokerSpawn,requestApi,current:()=>selected,settings:()=>({cwd:root}),getSelectedResource:()=>binding?.peek(),selectionRevision:()=>binding?.revision()??0,sourceGuard:()=>{throw Error('No scientific worker exists');}};const terminal=createSharedTerminal(terminalOptions);
  binding=createComputeResourceBinding({catalog,profiles,terminal,current:()=>selected,revision:()=>contextRevision});
  const gateway=new TerminalMcp({terminal});await gateway.start();gateway.bindProviderContext('codex',{threadId:'thread-a',taskId:null});
  const session=await terminal.open({kind:'ssh',mode:'interactive',profileId:profile.id,version:profile.version});
@@ -97,7 +98,7 @@ test('active resource permits only its exact session, preserving other logged-in
  assert.equal(f.children.length,2);assert(f.children.every(child=>child.exitCode===null));assert.equal(f.calls.filter(call=>call.route.endsWith('/close')).length,0);
 });
 
-test('persisted selected reference restores the same channel without restoring an old Agent grant',async t=>{
+test('same-desktop reconstructed selected reference restores its channel without restoring an old Agent grant',async t=>{
  const f=await fixture(t);const active=await f.activate();await f.handoff();const pid=f.children[0].pid;
  const restoredTerminal=createSharedTerminal(f.terminalOptions),restored=createComputeResourceBinding({catalog:f.catalog,profiles:f.profiles,terminal:restoredTerminal});
  assert.equal(restored.peek().selectionId,active.selectionId);const before=f.calls.length,state=await restored.status({});

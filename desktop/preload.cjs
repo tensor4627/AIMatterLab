@@ -3,6 +3,9 @@ const methods=new Set(['diagnostics.saveWorkbenchImage','task.stage.artifacts','
   'codex.respond','codex.configure','workflow.list','workflow.save','agent.tools','agent.connect','agent.disconnect','agent.rpc','agent.recover','agent.respond','agent.configure','agent.account','agent.login','agent.login.cancel','agent.logout','agent.testConnection','agent.login.open','skills.catalog','scientific.skills','file.open','file.save','file.choose','ssh.save','ssh.browse','terminal.start',
   'sharedTerminal.list','sharedTerminal.open','sharedTerminal.read','sharedTerminal.input','sharedTerminal.resize','sharedTerminal.owner','sharedTerminal.close','terminal.input','terminal.close','window','export','compute.profiles.list','compute.profiles.read','compute.profiles.save','compute.profiles.inventory','compute.connection.plan','compute.connection.status','compute.connection.connect','compute.connection.cancel','ssh.auth.plan','ssh.auth.start','ssh.auth.read','ssh.auth.input','ssh.auth.resize','ssh.auth.finish','ssh.auth.closed','ssh.tunnel.plan','ssh.tunnel.start','ssh.tunnel.status','ssh.tunnel.close']);
 for(const name of [
+ 'compute.profiles.remove',
+ 'compute.sshService.connect','compute.sshService.status','compute.sshService.disconnect',
+ 'compute.sshService.scheduler',
  'compute.resource.status','compute.resource.activate','compute.resource.clear',
  'tools.workflows.context','tools.workflows.list','tools.workflows.locateRun','tools.workflows.create','tools.workflows.retryCreate','tools.workflows.prepareStep','tools.workflows.executeStep','tools.workflows.status','tools.workflows.read',
  'tools.aimlab.choose','tools.aimlab.sources.inspect','tools.aimlab.sources.register','tools.aimlab.sources.update','tools.aimlab.sources.list','tools.aimlab.sources.read',

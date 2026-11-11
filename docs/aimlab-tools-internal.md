@@ -4,6 +4,8 @@
 
 ## 1. 定位与原则
 
+联用接口与配置职责以 [随开发者接入指导分发的联用交付要求](../developer/skills/studio-tool-integration/references/runtime-composition.md) 为准：开发者在 `aimlab-tools/` 提供真实支持的力场—MD、增强采样—MD 等接口、加载模式、依赖约束、使用 skill 和最小联合用例；Studio 在用户配置阶段验证所选完整组并配置兼容的版本化环境。三方组合不得由两个配对结果推定。当前联用材料使用既有 `guidance.configuration` 和测试映射，不修改严格 v1 schema；自动依赖解析及科学组配置尚待实现，声明检查不证明联用兼容。
+
 AimLab 内部工具的接入声明放在工具自己的 Git 仓库主工作分支中，随源码版本走：
 
 - 工具开发者只维护工具仓库里的 `aimlab-tools/`：机器可读声明、交付/操作 skill、精简手册和测试映射；

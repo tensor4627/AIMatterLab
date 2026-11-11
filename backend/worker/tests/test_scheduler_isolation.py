@@ -3,6 +3,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -23,13 +24,14 @@ class _Scheduler(SchedulerMixin):
 
     def __init__(self, root):
         self.store = Store(Path(root) / "service")
+        self.store.put("project", {"id": "project", "policy": {"max_concurrent": 1}})
         self.processes = {}
 
     def close(self):
         self.store.db.close()
 
     def authorize(self, run):
-        return {"id": "project", "policy": {"max_concurrent": 1}}, {}
+        return self.store.get("project", run["project_id"]), {}
 
     def verify_snapshot(self, run):
         return None
@@ -82,6 +84,9 @@ class SchedulerReconcileIsolation(unittest.TestCase):
 
         scheduler_module.subprocess.Popen = fake
         self.addCleanup(setattr, scheduler_module.subprocess, "Popen", original)
+        identity_patch = patch.object(scheduler_module, "identity", return_value={"pid": 424242, "start": "fixture", "boot": "fixture"})
+        identity_patch.start()
+        self.addCleanup(identity_patch.stop)
         return spawned
 
     def test_corrupt_receipt_does_not_stop_other_run_reconciliation(self):
@@ -157,10 +162,65 @@ class SchedulerReconcileIsolation(unittest.TestCase):
     def test_cancelled_between_selection_and_launch_is_not_resurrected(self):
         self.add_queued("q")
         self.scheduler.verify_snapshot = lambda run: self.scheduler.store.update(run, status="cancelled")
-        self.patch_spawn()
+        spawned = self.patch_spawn()
         self.scheduler.dispatch()
         self.assertEqual(self.scheduler.store.run("q")["status"], "cancelled")
         self.assertNotIn("q", self.scheduler.processes)
+        self.assertEqual(spawned, [], "Cancellation before launch claim must prevent Popen itself")
+
+    def test_policy_limit_lowered_during_snapshot_verification_defers_dispatch(self):
+        project = self.scheduler.store.get("project", "project")
+        project["policy"]["max_concurrent"] = 2
+        self.scheduler.store.put("project", project)
+        self.add("busy")
+        self.add_queued("q", gpu=1)
+
+        def verify(run):
+            latest = self.scheduler.store.get("project", "project")
+            latest["policy"]["max_concurrent"] = 1
+            self.scheduler.store.put("project", latest)
+
+        self.scheduler.verify_snapshot = verify
+        spawned = self.patch_spawn()
+        self.scheduler.dispatch()
+        self.scheduler.dispatch()  # The current lower limit is applied next tick.
+        current = self.scheduler.store.run("q")
+        self.assertEqual(current["status"], "queued")
+        self.assertNotIn("launch_claim", current)
+        self.assertFalse((Path(current["directory"]) / "launch.json").exists())
+        self.assertEqual(spawned, [])
+
+    def test_authorization_revoked_during_snapshot_verification_defers_dispatch(self):
+        self.add_queued("q")
+
+        def verify(run):
+            latest = self.scheduler.store.get("project", "project")
+            latest["policy"]["engines"] = []
+            self.scheduler.store.put("project", latest)
+
+        self.scheduler.verify_snapshot = verify
+        spawned = self.patch_spawn()
+        self.scheduler.dispatch()
+        current = self.scheduler.store.run("q")
+        self.assertEqual(current["status"], "queued")
+        self.assertNotIn("launch_claim", current)
+        self.assertNotIn("q", self.scheduler.processes)
+        self.assertEqual(spawned, [])
+
+    def test_worker_added_authorized_input_roots_do_not_invalidate_project_revision(self):
+        self.add_queued("q")
+        original = self.scheduler.authorize
+
+        def authorize(run):
+            project, environment = original(run)
+            project["policy"]["input_roots"] = [str(self.scheduler.store.root / "projects" / "project" / "inputs")]
+            return project, environment
+
+        self.scheduler.authorize = authorize
+        spawned = self.patch_spawn()
+        self.scheduler.dispatch()
+        self.assertEqual(len(spawned), 1)
+        self.assertEqual(self.scheduler.store.run("q")["status"], "running")
 
 
 if __name__ == "__main__":

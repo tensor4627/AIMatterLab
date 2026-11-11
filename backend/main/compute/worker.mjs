@@ -4,11 +4,25 @@ import {workerConnectionFailure} from './worker-connection-failure.mjs';
 import {readExistingWorker,EXISTING_WORKER_RELAY} from './existing-worker.mjs';
 import {readWorkerStatus} from './worker-status.mjs';
 import path from 'node:path';
+import {randomBytes} from 'node:crypto';
 import {defaultWorkerResourceSource} from './worker-resources.mjs';
 import { linuxPath, assertWorkerRoute } from "../../../contracts/transport-policy.mjs";
 export class WorkerClient {
  constructor({host=computeRuntime,resourceSource=defaultWorkerResourceSource,providerScopes,readExisting=settings=>readExistingWorker(settings,{execute:host.execute}),launchRelay=host.spawnProcess}={}){Object.defineProperty(this,'resourceSource',{value:resourceSource});this.pending=new Map();this.next=1;this.host=host;this.providerScopes=providerScopes||{revokeAll(){}};this.connectionEpoch=0;this.bindingIntent=0;this.readExisting=readExisting;this.launchExistingRelay=launchRelay;}
  async exposeTools(health){return {...health,transport:this.connection.transport};}
+ async attachServiceTransport({health,identity,target,request,detach,source}){
+  if(health?.name!=='gpu-sampling-studio'||health.execution_policy!=='desktop-review-v1'||identity?.kind!=='ssh'||typeof identity.root!=='string'||health.root!==identity.root||typeof request!=='function'||!identity.hostIdentity||!Number.isSafeInteger(identity.hostIdentity.uid)||!identity.hostIdentity.hostname||!identity.hostIdentity.machineId)throw Error('ssh_service_identity_unavailable');
+  this.bindingIntent++;this.close();const epoch=this.connectionEpoch;
+  const transport={request,detach};this.serviceTransport=transport;
+  // These capabilities protect the local provider proxy only. Remote worker
+  // admin/MCP credentials never cross the authenticated SSH machine channel.
+  this.connection={url:'http://127.0.0.1',tokens:{mcp:randomBytes(32).toString('hex')},health:structuredClone(health),transport:'ssh-terminal'};
+  this.identity=structuredClone(identity);this.connectionTarget=structuredClone(target);this.connectedSource=source;
+  this.relay={kill:()=>{try{detach?.();}catch{}}};
+  const check=()=>{if(this.serviceTransport!==transport||this.connectionEpoch!==epoch)throw Error('ssh_service_context_changed');};
+   try{const observed=await this.forward('GET','/api/health',undefined,false,10000);check();const actual=observed.data,host=actual?.hostIdentity;if(observed.status!==200||actual?.name!==health.name||['root','runtime','execution_policy','port'].some(key=>actual?.[key]!==health[key])||(actual?.runtime_id||actual?.runtimeId)!==identity.runtimeId||['hostname','uid','machineId'].some(key=>host?.[key]!==identity.hostIdentity[key]))throw Error('ssh_service_identity_changed');const exposed=await this.exposeTools({...actual,transport:'ssh-terminal'});check();return exposed;}
+  catch(error){if(this.serviceTransport===transport)this.close();throw error;}
+ }
  async connect(settings,source){
   this.bindingIntent++;
   if(this.restoring)await this.restoring.catch(()=>{});
@@ -34,32 +48,18 @@ export class WorkerClient {
   return this.attachTransport(settings,this.connection.health,check);
  }
  async attachTransport(settings,initialHealth,check){
-  const runtime=initialHealth.runtime;
-  try{
-   if(settings.forceRelay)throw Error("WSL stdio relay explicitly selected");
-   const response=await fetch(this.upstream+'/api/health',{headers:{Authorization:'Bearer '+this.connection.tokens.admin},signal:AbortSignal.timeout(1500)});
-   if(!response.ok)throw Error('Health check rejected');
-   const health=await response.json();if(health.root!==this.connection.health.root)throw Error('Worker identity mismatch');
-   check();this.connection.transport='localhost';const exposed=await this.exposeTools(health);check();return exposed;
-  }catch{
-   check();
-   const relay=this.relay=this.host.spawnProcess('wsl.exe',['-d',settings.distribution,'--','python3',runtime+'/relay.py','--root',settings.workerRoot,'--port',String(settings.workerPort)],{stdio:['pipe','pipe','pipe'],windowsHide:true});
-   createInterface({input:this.relay.stdout}).on('line',line=>{
-    try{const value=JSON.parse(line),item=this.pending.get(value.id);if(item){clearTimeout(item.timer);this.pending.delete(value.id);item.resolve(value);}}catch{}
-   });
-   relay.on('error',e=>{if(this.relay===relay)this.reject(e);});
-   relay.on('exit',()=>{if(this.relay===relay){this.providerScopes.revokeAll();this.reject(Error('WSL relay disconnected; job status is unknown'));this.connection=null;}});
-   this.relay.stderr.on('data',()=>{});
-   const health=await this.forward('GET','/api/health',undefined,false,10000);
-   if(health.status!==200||health.data.root!==this.connection.health.root)throw Error('WSL relay identity mismatch');
-   check();const exposed=await this.exposeTools({...health.data,transport:'wsl-stdio'});check();return exposed;
-  }
+  // WSL bootstrap proves its Linux socket, not the Windows localhost listener.
+  // Keep all requests on the relay that verifies each accepted peer before auth.
+  return this.attachExistingTransport(settings,initialHealth,check);
  }
  async attachExistingTransport(settings,initialHealth,check){
+  if(initialHealth?.name!=='gpu-sampling-studio'||typeof initialHealth.root!=='string'||!initialHealth.root.startsWith('/')||typeof initialHealth.runtime!=='string'||!initialHealth.runtime.startsWith('/')||initialHealth.execution_policy!=='desktop-review-v1')throw Error('WSL worker identity unavailable');
   check();const relay=this.relay=this.launchExistingRelay('wsl.exe',['-d',settings.distribution,'--','python3','-B','-c',EXISTING_WORKER_RELAY,settings.workerRoot,String(settings.workerPort)],{stdio:['pipe','pipe','pipe'],windowsHide:true});
   createInterface({input:relay.stdout}).on('line',line=>{try{const value=JSON.parse(line),item=this.pending.get(value.id);if(item){clearTimeout(item.timer);this.pending.delete(value.id);item.resolve(value);}}catch{}});
-  relay.on('error',error=>{if(this.relay===relay)this.reject(error);});
-  relay.on('exit',()=>{if(this.relay===relay){this.providerScopes.revokeAll();this.reject(Error('Existing WSL relay disconnected; job status is unknown'));this.connection=null;}});
+  const disconnected=error=>{if(this.relay===relay)this.close(error);};
+  relay.on('error',disconnected);
+  relay.on('exit',()=>disconnected(Error('Verified WSL relay disconnected; job status is unknown')));
+  relay.stdin.on?.('error',()=>disconnected(Error('Verified WSL relay input unavailable; job status is unknown')));
   relay.stderr.on('data',()=>{});
   const health=await this.forward('GET','/api/health',undefined,false,10000);check();
   if(health.status!==200||health.data?.name!=='gpu-sampling-studio'||['root','runtime','execution_policy'].some(key=>health.data[key]!==initialHealth[key]))throw Error('Existing WSL worker identity unavailable');
@@ -82,11 +82,12 @@ export class WorkerClient {
     this.connection=attached;this.identity={distribution:settings.distribution,root:attached.health.root};this.upstream=attached.url;this.connectionTarget={distribution:settings.distribution,root:attached.health.root,requestedRoot:settings.workerRoot,port:settings.workerPort};
     const check=()=>{if(!valid()||this.connection!==attached||this.connectionEpoch!==epoch)throw Error('Existing attachment superseded');};
     await this.attachExistingTransport(settings,attached.health,check);check();return result('connected','restored');
-   }catch{if(attached&&this.connection===attached&&!this.connecting)this.close();return result('unknown','existing_unavailable');}
+   }catch(error){if(attached&&this.connection===attached&&!this.connecting)this.close();const failure=workerConnectionFailure(error);return result('unknown',failure.code==='wsl_access_denied'?'wsl_access_denied':'existing_unavailable');}
   })().finally(()=>{if(this.restoring===pending)this.restoring=null;});this.restoring=pending;return pending;
  }
  matchesTarget(settings){return this.identity?.distribution===settings.distribution&&(this.identity.root===settings.workerRoot||this.connectionTarget?.requestedRoot===settings.workerRoot)&&this.connectionTarget?.port===settings.workerPort;}
  forward(method,target,data,mcp=false,timeout=245000){
+  if(this.serviceTransport){const transport=this.serviceTransport,epoch=this.connectionEpoch;return Promise.resolve().then(()=>transport.request({method,path:target,data,mcp,timeoutMs:timeout})).then(value=>{if(this.serviceTransport!==transport||this.connectionEpoch!==epoch)throw Error('ssh_service_context_changed');if(!Number.isInteger(value?.status)||value.status<100||value.status>599)throw Error('ssh_service_invalid_response');return value;});}
   return new Promise((resolve,reject)=>{
    const id=this.next++,timer=setTimeout(()=>{this.pending.delete(id);reject(Error('Worker request timed out'));},timeout);
    this.pending.set(id,{resolve,reject,timer});
@@ -110,5 +111,5 @@ export class WorkerClient {
   return result;
  }
  reject(error){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(error);}this.pending.clear();}
- close(){this.connectionEpoch++;this.providerScopes.revokeAll();this.reject(Error('Worker bridge closed'));this.relay?.kill();this.relay=null;this.proxy?.close();this.proxy=null;this.connection=null;this.identity=null;this.connectionTarget=null;this.connectedSource=null;}
+ close(error=Error('Worker bridge closed')){this.connectionEpoch++;this.providerScopes.revokeAll();this.reject(error);this.serviceTransport=null;const relay=this.relay;this.relay=null;relay?.kill();this.proxy?.close();this.proxy=null;this.connection=null;this.identity=null;this.connectionTarget=null;this.connectedSource=null;}
 }
