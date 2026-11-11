@@ -77,3 +77,8 @@ for(const language of ['zh','en'])for(const status of ['blocked','failed'])test(
  assert.throws(()=>h.find(n=>n.props?.['data-testid']==='connection-reread-feedback'));
  h.unmount();
 });
+
+
+test('connecting acknowledges pending work and blocks duplicate clicks before rerender',async()=>{
+ const gate=deferred(),h=harness({connect:gate.promise});await h.flush();const click=h.find(node=>node.type==='button'&&node.props.className==='button primary').props.onClick;click();click();await h.flush();assert.equal(h.calls.filter(call=>call.method==='compute.connection.connect').length,1);assert(h.find(node=>node.props?.label==='连接中…').props.busy);gate.resolve({...review(),status:'connected',connection:'connected',finished:true});await h.flush();h.unmount();
+});

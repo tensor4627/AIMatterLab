@@ -3,13 +3,12 @@ import path from 'node:path';
 import {createRequire,isBuiltin} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import ts from 'typescript';
+import {validateCliRuntimeLock} from '../backend/main/compute/cli-runtime.mjs';
 
 const buildRequire=createRequire(import.meta.url);
 const builderRequire=createRequire(buildRequire.resolve('app-builder-lib/package.json'));
 const semver=builderRequire('semver');
 const RUNTIME_ENTRIES=new Map([
- ['@moonshot-ai/kimi-code','dist/main.mjs'],
- ['@qwen-code/qwen-code','cli-entry.js'],
  ['@lydell/node-pty','index.js'],
 ]);
 const relative=(root,file)=>path.relative(root,file).split(path.sep).join('/');
@@ -139,6 +138,8 @@ export function validatePackageRuntime({appDir,platform,arch}={}){
  platform=platform?.nodeName??platform??process.platform;arch=arch??process.arch;
  if(!['win32','linux','darwin'].includes(platform)||!['x64','arm64'].includes(arch))throw Error('Unsupported staged runtime target');
  const app=json(file(appDir,'package.json')),release=validateReleaseMetadata(appDir,app),dist=path.join(appDir,'dist'),index=fs.readFileSync(file(dist,'index.html'),'utf8');
+ const electronVersion=fs.readFileSync(file(appDir,'node_modules/electron/dist/version'),'utf8').trim();
+ if(!semver.valid(electronVersion)||electronVersion!==app.devDependencies?.electron)throw Error('Installed Electron distribution version does not match the pinned package version');
  let distAssets=0;
  for(const match of index.matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/g)){
   const value=match[1];if(value.startsWith('#')||value.startsWith('data:'))continue;
@@ -146,6 +147,9 @@ export function validatePackageRuntime({appDir,platform,arch}={}){
   file(dist,value.split(/[?#]/)[0]);distAssets++;
  }
  if(!distAssets)throw Error('Renderer build has no packaged assets');
+ file(dist,'cli-installer/archive.mjs');
+ const cliLock=validateCliRuntimeLock(json(file(appDir,'contracts/agent/cli-runtime-lock.json')));
+ for(const [provider,record]of Object.entries(cliLock.providers))if(app.devDependencies?.[record.package]!==record.version)throw Error('Pinned downloadable CLI version mismatch: '+provider);
  const runtime=path.join(appDir,'.studio','agent-runtimes'),modules=path.join(runtime,'node_modules'),manifest=json(file(runtime,'manifest.json'));
  if(!manifest.packages||typeof manifest.packages!=='object'||Array.isArray(manifest.packages)||Object.keys(manifest.packages).length===0)throw Error('Invalid staged runtime manifest');
  const packages=new Map();
@@ -161,7 +165,7 @@ export function validatePackageRuntime({appDir,platform,arch}={}){
   if(!record||!declared||!semver.satisfies(record.pkg.version,declared))throw Error('Required staged runtime missing or version mismatch: '+name);
   file(path.dirname(record.source),entry);
  }
- file(path.dirname(packages.get('@qwen-code/qwen-code').source),'cli.js');
+ for(const name of ['@moonshot-ai/kimi-code','@qwen-code/qwen-code'])if(packages.has(name)||fs.existsSync(path.join(modules,name)))throw Error('Provider CLI must not be bundled in the base portable package: '+name);
  const native='@lydell/node-pty-'+platform+'-'+arch,nativeRecord=packages.get(native),pty=packages.get('@lydell/node-pty').pkg;
  if(!nativeRecord||nativeRecord.pkg.version!==pty.version||!nativeRecord.pkg.os?.includes(platform)||!nativeRecord.pkg.cpu?.includes(arch))throw Error('Staged PTY platform package missing or incompatible: '+native);
  const nativeRoot=path.dirname(nativeRecord.source);file(nativeRoot,'lib/index.js');
@@ -187,7 +191,7 @@ export function validatePackageRuntime({appDir,platform,arch}={}){
   }
  }
  const sourceFiles=validateApplicationImports(appDir);
- return {...release,platform,arch,runtimePackages:packages.size,dependencyEdges,omittedOptional,distAssets,sourceFiles,nativePackage:native};
+ return {...release,electronVersion,platform,arch,runtimePackages:packages.size,dependencyEdges,omittedOptional,distAssets,sourceFiles,nativePackage:native};
 }
 
 /** Release labels must agree before validation can describe one concrete package. */

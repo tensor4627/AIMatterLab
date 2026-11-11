@@ -86,7 +86,7 @@ export function createComputeConnection({worker,records,catalog,settings,selecti
     // Existing helper proves the expanded root before attaching. Tokens stay main-owned.
     let existing=await worker.readExisting(p.target);guard(p);let restoreTarget=p.target;
     if(existing?.status==='connected'&&p.target.workerRoot.startsWith('~/')&&root(existing.connection?.health?.root)&&existing.connection.health.root.startsWith('/')){restoreTarget={...p.target,workerRoot:existing.connection.health.root};p.target=restoreTarget;}
-    observed=await worker.restore(restoreTarget,{current:()=>current(p)});
+    observed=await worker.restore(restoreTarget,{current:()=>current(p),existingProof:existing});
     if(!p.cancelled&&p.workerIntent===(worker.bindingIntent||0)&&!worker.connection)p.workerEpoch=worker.connectionEpoch||0;
     guard(p);
     if(observed.status!=='connected'){

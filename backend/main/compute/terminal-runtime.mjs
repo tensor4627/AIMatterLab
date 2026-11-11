@@ -3,12 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {createRequire} from 'node:module';
+import {prepareResourcesOffThread} from './preparation-worker-client.mjs';
+export function prepareTerminalRuntimeAsync(options){return prepareResourcesOffThread('terminal',options);}
 
 export const TERMINAL_RUNTIME_SCHEMA='studio-terminal-runtime-v1';
 const schema=TERMINAL_RUNTIME_SCHEMA;
 const MAX_FILES=2048,MAX_BYTES=1024*1024*1024,MAX_FILE_BYTES=512*1024*1024;
 const supportFiles=['chrome_100_percent.pak','chrome_200_percent.pak','d3dcompiler_47.dll','dxcompiler.dll','dxil.dll','ffmpeg.dll','icudtl.dat','resources.pak','snapshot_blob.bin','v8_context_snapshot.bin','vk_swiftshader_icd.json','vk_swiftshader.dll','vulkan-1.dll','LICENSE.electron.txt','LICENSES.chromium.html','version'];
-const active=new Map();
+const active=new Map(),planning=new Map();
 const fail=code=>{throw Error(code);};
 const samePath=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const absolute=value=>typeof value==='string'&&path.isAbsolute(value)&&!/[\0\r\n]/.test(value);
@@ -79,6 +81,7 @@ async function sourcePlan({nodeExecutable,servicePath,dependencyRoot,platform,ar
  await add(nodeExecutable,'node/'+executableName);
  for(const name of supportFiles){const file=path.join(binaryRoot,name);if(fs.existsSync(file))await add(file,'node/'+name);}
  for(const name of ['broker.mjs','session.mjs'])await add(path.join(path.dirname(servicePath),name),'service/'+name);
+ const codec=path.join(path.dirname(servicePath),'response-codec.mjs');if(fs.existsSync(codec))await add(codec,'service/response-codec.mjs');
  const resolver=createRequire(path.join(dependencyRoot,'runtime.cjs'));
  const wrapperEntry=resolver.resolve('@lydell/node-pty'),wrapper=packageRoot(wrapperEntry,'@lydell/node-pty',dependencyRoot);
  const nativeName='@lydell/node-pty-'+platform+'-'+arch;
@@ -120,7 +123,11 @@ function result(directory,plan){
 }
 
 /** Publish only a complete checked closure. Existing generations are never removed or overwritten. */
-export async function prepareTerminalRuntime({runtimeRoot,nodeExecutable,servicePath,dependencyRoot,platform=process.platform,arch=process.arch}){
+export function prepareTerminalRuntime(options){
+ const key=JSON.stringify(options);if(planning.has(key))return planning.get(key);
+ const promise=prepareTerminalRuntimeOnce(options);planning.set(key,promise);promise.finally(()=>{if(planning.get(key)===promise)planning.delete(key);}).catch(()=>{});return promise;
+}
+async function prepareTerminalRuntimeOnce({runtimeRoot,nodeExecutable,servicePath,dependencyRoot,platform=process.platform,arch=process.arch}){
  if(![runtimeRoot,nodeExecutable,servicePath,dependencyRoot].every(absolute))fail('terminal_runtime_invalid_source');
  const options={runtimeRoot:path.resolve(runtimeRoot),nodeExecutable:path.resolve(nodeExecutable),servicePath:path.resolve(servicePath),dependencyRoot:path.resolve(dependencyRoot),platform,arch};
  for(let current=options.runtimeRoot;;current=path.dirname(current)){

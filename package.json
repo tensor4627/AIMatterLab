@@ -1,13 +1,13 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "1.0.2-dev.9",
+  "version": "1.0.2-dev.10",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
   "scripts": {
-    "dev": "node scripts/sync-tool-contracts.mjs --check && node scripts/dev.mjs",
-    "build": "node scripts/sync-tool-contracts.mjs && tsc --noEmit && vite build",
-    "start": "node scripts/sync-tool-contracts.mjs --check && node scripts/start.mjs",
+    "dev": "node scripts/stage-agents.mjs && node scripts/build-cli-installer.mjs && node scripts/sync-tool-contracts.mjs --check && node scripts/dev.mjs",
+    "build": "node scripts/sync-tool-contracts.mjs && tsc --noEmit && vite build && node scripts/build-cli-installer.mjs && node scripts/stage-agents.mjs",
+    "start": "node scripts/stage-agents.mjs && node scripts/build-cli-installer.mjs && node scripts/sync-tool-contracts.mjs --check && node scripts/start.mjs",
     "check:contracts": "node scripts/sync-tool-contracts.mjs --check",
     "check:docs": "node scripts/check-doc-links.mjs",
     "check:package-runtime": "node scripts/package-runtime.mjs --validate",
@@ -16,13 +16,14 @@
     "test:frontend": "node scripts/frontend-regression.mjs",
     "test:frontend:recovery": "node scripts/frontend-source-recovery.mjs",
     "protocol": "node scripts/protocol.mjs",
-    "pack": "pnpm run build && pnpm run stage:agents && electron-builder --win portable",
+    "pack": "pnpm run build && electron-builder --win portable zip --config.electronDist=node_modules/electron/dist",
     "stage:agents": "node scripts/stage-agents.mjs",
     "test:task": "node scripts/task-integration-smoke.mjs",
     "test:pygas-ui": "node scripts/pygas-composer-regression.mjs",
     "test:pygas-order": "node scripts/pygas-reorder-regression.mjs",
     "test:frontend:compute": "node scripts/frontend-compute-receipts.mjs",
-    "test:frontend:commands": "node scripts/frontend-conversation-commands.mjs"
+    "test:frontend:commands": "node scripts/frontend-conversation-commands.mjs",
+    "check:cli-runtime-lock": "node scripts/generate-cli-runtime-lock.mjs --check"
   },
   "dependencies": {
     "@monaco-editor/react": "4.7.0",
@@ -47,14 +48,15 @@
     "electron-builder": "26.15.3",
     "playwright": "1.65.0",
     "typescript": "5.7.3",
-    "vite": "6.4.1"
+    "vite": "6.4.1",
+    "tar": "7.5.22"
   },
   "build": {
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "beforeBuild": "scripts/package-runtime.mjs",
     "directories": {
-      "output": "release/v1.0.2-dev.9"
+      "output": "release/v1.0.2-dev.10"
     },
     "files": [
       "dist/**",
@@ -79,7 +81,11 @@
       "backend/worker/**"
     ],
     "win": {
-      "target": "portable"
+      "target": [
+        "portable",
+        "zip"
+      ],
+      "artifactName": "GPU-Sampling-Studio-${version}-win-${arch}.${ext}"
     },
     "portable": {
       "unpackDirName": true,
@@ -120,6 +126,10 @@
         "from": "scripts/cluster-reconcile.mjs",
         "to": "studio-tools/cluster-reconcile.mjs"
       }
+    ],
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
     ]
   },
   "description": "Agent scientific workspace for PyDyn, GPUMD, pyGAS, NEP and HotPP",

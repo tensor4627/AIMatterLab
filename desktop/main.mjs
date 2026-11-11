@@ -1,5 +1,8 @@
 import {consoleMessage} from './platform/verification/console-message.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
+import {createCliRuntimeManager,migrateBundledCliPaths} from './platform/cli-runtimes.mjs';
+import {cliRuntimeRequest} from '../contracts/agent/cli-runtime.mjs';
+import {createPerformanceTimeline} from './platform/performance.mjs';
 import {clusterDownloadRequest} from '../contracts/compute/cluster-download.mjs';
 import {studioProfileRoot} from './platform/studio-profile.mjs';
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
@@ -88,6 +91,7 @@ import {assertRendererWorkerRoute,linuxPath} from "../contracts/transport-policy
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here,'..');
+const performanceTimeline=createPerformanceTimeline();
 const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'backend','worker');
 const sshTransportSource=app.isPackaged?path.join(process.resourcesPath,'terminal-service','python'):path.join(here,'platform','terminal-service','python');
 // Physical resources keep skill references usable by an external agent process.
@@ -114,8 +118,8 @@ const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
 if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
 else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,portableDir:process.env.PORTABLE_EXECUTABLE_DIR,execPath:process.execPath});fs.mkdirSync(profile,{recursive:true});app.setPath('userData',profile);}
-let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources;
-let shuttingDown=false,desktopShutdown;
+let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
+let shuttingDown=false,desktopShutdown,agentConnectionSerial=0;
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService;
 const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
@@ -126,11 +130,6 @@ const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-samplin
   sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
 function findCodex() {
   return findInstalledCodex();
-}
-function findAgent(provider) {
-  const entry=provider==='kimi'?'@moonshot-ai/kimi-code/dist/main.mjs':'@qwen-code/qwen-code/cli-entry.js';
-  const candidates=[path.join(process.resourcesPath,'agent-runtimes','node_modules',entry),path.join(root,'node_modules',entry)];
-  return candidates.find(p=>fs.existsSync(p))||provider;
 }
 function emit(channel,data) { if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel,data); }
 codex.on('event', event => {
@@ -153,18 +152,20 @@ function openUrl(url) {
 }
 
 async function initialize() {
+performanceTimeline.mark('desktop-initialize');
 catalog = new Catalog(path.join(app.getPath('userData'),'studio'));
-settings = { ...defaults, codexPath:findCodex(),kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'), ...catalog.get('settings','main') };
+settings = { ...defaults, codexPath:findCodex(),kimiPath:'',qwenPath:'', ...catalog.get('settings','main') };
 const normalizedSharing=normalizeScientificSharing(settings);
 if(normalizedSharing!==settings)settings=catalog.put('settings','main',normalizedSharing);
-for(const provider of ['kimi','qwen']){const stored=settings[provider+'Path'];if(typeof stored==='string'&&/[\\\\/]/.test(stored)&&!fs.existsSync(stored))settings[provider+'Path']=findAgent(provider);}
-if(verifying&&!installationVerifying)settings={...settings,agentProvider:'codex',agentLayout:'right',kimiPath:findAgent('kimi'),qwenPath:findAgent('qwen'),language:'zh-CN',fontSize:13,editorFontSize:13,terminalFontSize:12,fontFamily:'system',workerRoot:JSON.parse(fs.readFileSync(path.join(verificationRoot,'.studio/validation/science.json'),'utf8')).desktop_worker_root,workerPort:8770};
+const migratedCliSettings=migrateBundledCliPaths(settings);if(migratedCliSettings!==settings)settings=catalog.put('settings','main',migratedCliSettings);
+cliRuntimes=createCliRuntimeManager({root:path.join(app.getPath('userData'),'agent-runtimes'),settings:()=>settings,fetchApi:(...args)=>net.fetch(...args),dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):path.join(root,'.studio','agent-runtimes'),publish:params=>emit('studio:event',{method:'studio/cliInstallProgress',provider:params.provider,params})});
+if(verifying&&!installationVerifying)settings={...settings,agentProvider:'codex',agentLayout:'right',language:'zh-CN',fontSize:13,editorFontSize:13,terminalFontSize:12,fontFamily:'system',workerRoot:JSON.parse(fs.readFileSync(path.join(verificationRoot,'.studio/validation/science.json'),'utf8')).desktop_worker_root,workerPort:8770};
 if(installationVerifying){
  const config=JSON.parse(fs.readFileSync(process.env.STUDIO_INSTALL_CONFIG,'utf8'));
  const sourceIds=config.desktop.source_ids??[];if(!Array.isArray(sourceIds)||sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id)))throw Error('Invalid installation source summary scope');
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
-agents=new AgentHub({fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
+agents=new AgentHub({resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
 scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
@@ -318,6 +319,12 @@ handle('cluster.download',async value=>{
 });
 handle('agent.bindProject',({projectId,provider})=>{providerId(provider);if(typeof projectId!=='string'||!projectId||projectId.length>100)throw Error('Select a project');settings=catalog.put('settings','main',{...settings,projectAgents:{...settings.projectAgents,[projectId]:provider}});return {projectId,provider};});
 handle('state',() => ({ settings, threads:catalog.list('thread'), ssh:catalog.list('ssh') }));
+handle('diagnostics.performance',value=>{
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid performance observation');
+ if(Object.keys(value).length===0)return performanceTimeline.snapshot();
+ if(Object.keys(value).join(',')!=='phase'||!['renderer-interactive','workspace-observed'].includes(value.phase))throw Error('Invalid renderer performance phase');
+ return performanceTimeline.mark(value.phase);
+});
 handle('settings',data => { settings=catalog.put('settings','main',normalizeSettings(settings,data)); return settings; });
 function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
 async function bindSources(current=()=>{}){if(worker.identity?.kind==='ssh'){current();return worker.request('GET','/api/source-projects');}const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
@@ -376,7 +383,7 @@ async function scientificTools(provider){
  return result.status==='blocked'?terminalReady()||result:result;
 }
 handle('agent.connect',async({provider,repairTools=false})=>{
- providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');
+ providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');const connectionTicket=++agentConnectionSerial;
  const resource=resourceRouting.capture();
  if(repairTools&&resource.selection?.kind==='ssh-terminal'){assertIdleAgent();agents.assertContextIdle();agents.close();}
  else if(repairTools){
@@ -392,13 +399,23 @@ handle('agent.connect',async({provider,repairTools=false})=>{
  // Model/account recovery never registers sources or environments.
  // Compute setup owns discovery/registration; App restores its saved binding separately.
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- const info=await agents.connect(provider);resource.assertCurrent();const tools=await scientificTools(provider);resource.assertCurrent();
+ let info;try{info=await agents.connect(provider);}catch(error){if(connectionTicket===agentConnectionSerial&&error.readiness&&['missing','incompatible','invalid'].includes(error.readiness.status)&&['kimi','qwen'].includes(provider)){resource.assertCurrent();emit('studio:event',{method:'studio/cliRuntimeRequired',provider,params:error.readiness});return {cliRequired:error.readiness};}throw error;}resource.assertCurrent();const tools=await scientificTools(provider);resource.assertCurrent();
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};
 });
 handle('agent.tools',async({provider})=>{providerId(provider);return scientificTools(provider);});
 handle('agent.disconnect',({provider})=>{providerId(provider);workflowContext.clear(provider);agents.disconnect(provider);return {};});
 handle('agent.account',({provider})=>{providerId(provider);return agents.account(provider);});
+handle('agent.cli.inspect',value=>cliRuntimes.inspect(cliRuntimeRequest(value)));
+handle('agent.cli.install',value=>cliRuntimes.install(cliRuntimeRequest(value,{installation:true})));
+handle('agent.cli.cancel',value=>cliRuntimes.cancel(cliRuntimeRequest(value,{installation:true})));
+handle('agent.cli.choose',async value=>{
+ const {provider}=cliRuntimeRequest(value),response=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'CLI program',extensions:['exe','js','mjs','cjs','cmd','bat']}]});
+ if(response.canceled)return null;
+ const readiness=await cliRuntimes.inspect({provider,executable:response.filePaths[0]});
+ if(readiness.status==='ready')settings=catalog.put('settings','main',normalizeSettings(settings,{[provider+'Path']:response.filePaths[0]}));
+ return readiness;
+});
 const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){return agentRequests(value);}
 handle('agent.rpc',agentRpc);
@@ -483,6 +500,7 @@ desktopShutdown=installDesktopShutdown({app,begin:()=>{
 window=new BrowserWindow({width:1540,height:980,minWidth:1100,minHeight:720,frame:false,
   backgroundColor:'#15151b',title:'GPU Sampling Studio',show:false,
   webPreferences:{backgroundThrottling:!verifying,offscreen:improvementsVerifying,preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+performanceTimeline.mark('window-created');
 installSshPrivacyLifecycle(window.webContents,sshConnection);
 window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
 window.webContents.on('will-navigate',(event,url)=>{if(url!==window.webContents.getURL()) event.preventDefault();});
@@ -493,6 +511,7 @@ window.webContents.on('render-process-gone',(_event,details)=>{emit('studio:even
 const development=process.env.STUDIO_DEV_URL;
 if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw new Error('Invalid development origin');
 if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
+performanceTimeline.mark('window-loaded');
 if(verifying){const errors=[];window.webContents.on('console-message',(...args)=>{const {level,message}=consoleMessage(args);if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});await desktopShutdown.run();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
 

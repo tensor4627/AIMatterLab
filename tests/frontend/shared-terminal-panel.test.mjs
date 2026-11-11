@@ -281,3 +281,9 @@ test('temporary out-of-range terminal geometry never sends an invalid resize and
  for(const [cols,rows] of [[100,1],[9,30],[501,30],[100,301],[100,2.5]]){view.cols=cols;view.rows=rows;h.appearance(15);await h.flush();assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.resize').length,before);}
  view.cols=10;view.rows=2;h.appearance(16);await h.flush();const calls=h.calls.filter(c=>c.method==='sharedTerminal.resize');assert.equal(calls.length,before+1);assert.deepEqual(calls.at(-1).data,{sessionId:'session-1',cols:10,rows:2});assert(!panelText(h).includes('终端操作未完成'));h.unmount();
 });
+
+
+test('opening another terminal keeps the active view and shows pending feedback',async()=>{
+ const gate=deferred();let opens=0;const h=harness({override:(method,data,standard)=>method==='sharedTerminal.open'&&++opens===2?gate.promise:standard(method,data)});
+ try{await h.flush();const selected=h.find(node=>node.type==='select').props.value;h.update({request:{nonce:'second-open',kind:'local',mode:'interactive'}});await h.flush();assert.equal(h.find(node=>node.type==='select').props.value,selected);assert(h.find(node=>node.props?.label==='正在打开终端…').props.busy);gate.resolve(session('second'));await h.flush();assert.equal(h.find(node=>node.type==='select').props.value,'second');assert.deepEqual(h.errors,[]);}finally{h.unmount();}
+});

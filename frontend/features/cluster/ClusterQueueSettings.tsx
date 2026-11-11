@@ -1,3 +1,4 @@
+import LoadingFeedback from '../../ui/LoadingFeedback';
 import Tooltip from "../../ui/Tooltip";
 import {useEffect,useRef,useState} from 'react';
 import QueueChoices from "../compute/QueueChoices";
@@ -15,6 +16,7 @@ export function queueTestPrompt(profileId:string,target:ClusterQueueTarget){
 }
 export default function ClusterQueueSettings({profile,project,worker,busy,profileDirty,visible,canCancelOptIn=false,environmentText,probe,onTargets,onValidity,onRefresh,onError,onQueueTest}:{profile:ClusterQueueProfile;project?:Project;worker:boolean;busy:boolean;profileDirty:boolean;visible:boolean;canCancelOptIn?:boolean;environmentText:string;probe?:ClusterSchedulerObservation|null;onTargets:(targets:ClusterQueueTarget[]|undefined)=>void;onValidity:(valid:boolean)=>void;onRefresh:()=>void;onError:(error:unknown)=>void;onQueueTest?:(text:string)=>void|Promise<void>}){
  const [policy,setPolicy]=useState(()=>queuePolicy(profile,project)),[approving,setApproving]=useState(false),[notice,setNotice]=useState(''),[environments,setEnvironments]=useState<Environment[]>([]),[engines,setEngines]=useState<string[]>([]),[jsonDrafts,setJsonDrafts]=useState<Record<string,string>>({}),[invalid,setInvalid]=useState<Record<string,boolean>>({});
+ const approvalPending=useRef(false);
  const mounted=useRef(false),sequence=useRef(0),scope=useRef('');scope.current=JSON.stringify([profile.id,profile.version,project?.id,profileDirty,busy,worker]);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;sequence.current++;};},[]);
  useEffect(()=>{if(!visible||!worker)return;let current=true;void Promise.all([api<Environment[]>('GET','/api/environments'),api<string[]>('GET','/api/engines')]).then(([values,routes])=>{if(current){setEnvironments(values);setEngines(routes);}}).catch(error=>{if(current)onError(error);});return()=>{current=false;};},[visible,worker,profile.id,profile.version]);
@@ -38,7 +40,7 @@ export default function ClusterQueueSettings({profile,project,worker,busy,profil
  const paidReady=paidValid&&(!paidSelected||policy.paid.permitted);
  const canApprove=!!project&&!!profile.id&&!!profile.version&&!profileDirty&&!disabled&&valid&&selectedValid&&paidReady;
  async function approve(){
-  if(!canApprove)return;const wanted=scope.current,ticket=++sequence.current,id=profile.id!,version=profile.version!;setApproving(true);setNotice('');
+  if(!canApprove||approvalPending.current)return;approvalPending.current=true;const wanted=scope.current,ticket=++sequence.current,id=profile.id!,version=profile.version!;setApproving(true);setNotice('');
   const current=()=>mounted.current&&sequence.current===ticket&&scope.current===wanted;
   try{const [projects,saved]=await Promise.all([api<Project[]>('GET','/api/projects'),api<ClusterQueueProfile>('POST','/api/cluster/profile',{cluster_id:id})]);if(!current())return;
    const latest=projects.find(value=>value.id===project!.id);if(!latest||saved.version!==version)throw Error(t('连接版本或项目已变化，请重新读取。'));
@@ -47,7 +49,7 @@ export default function ClusterQueueSettings({profile,project,worker,busy,profil
    const stable=(value:any):string=>JSON.stringify(value,(key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(name=>[name,item[name]])):item);
    if(stable(updated?.policy?.cluster_queue_policies?.[id])!==stable(approved))throw Error(t('队列策略未按批准内容保存，请重新读取。'));
    setPolicy(approved);setNotice(t('队列策略已批准'));onRefresh();
-  }catch(error){if(current())onError(String(error).includes('project_edit_conflict')?new Error(t('项目记录已变化，请关闭后重新打开并检查最新授权。')):error);}finally{if(current())setApproving(false);}
+  }catch(error){if(current())onError(String(error).includes('project_edit_conflict')?new Error(t('项目记录已变化，请关闭后重新打开并检查最新授权。')):error);}finally{approvalPending.current=false;if(mounted.current&&sequence.current===ticket)setApproving(false);}
  }
  function reset(){sequence.current++;setApproving(false);setPolicy(queuePolicy(profile,project));setNotice('');}
  function boundedTest(target:ClusterQueueTarget){if(!onQueueTest)return;const saved=queuePolicy(profile,project);if(profileDirty||!profile.id||!saved||saved.profile_version!==profile.version||!saved.allowed_target_ids.includes(target.id)||!target.enabled||target.usage_class==='unknown'||target.usage_class==='paid'&&(!saved.paid.permitted||!saved.paid.conditions_known))return;const engines=target.engines.filter(engine=>project!.policy.engines.includes(engine));if(!engines.length)return;const paid=target.usage_class==='paid'?saved.paid.limits:undefined;const limits={...target.limits,max_seconds:Math.min(target.limits.max_seconds,project!.policy.max_seconds)};if(paid)for(const key of ['cpus','gpus','memory_mb','max_seconds'] as const)limits[key]=Math.min(limits[key],paid[key]);void Promise.resolve(onQueueTest(queueTestPrompt(profile.id,{...target,engines,limits}))).catch(onError);}
@@ -66,6 +68,7 @@ export default function ClusterQueueSettings({profile,project,worker,busy,profil
   {profile.queue_targets!==undefined&&<section className="queue-project-policy"><h4>{t('当前项目允许的队列与提交顺序')}</h4>{targets.map(target=><label className="check-label" key={target.id}><input type="checkbox" data-testid={'queue-allow-'+target.id} disabled={disabled||!target.enabled||target.usage_class==='unknown'} checked={policy.allowed_target_ids.includes(target.id)} onChange={event=>toggle(target.id,event.target.checked)}/>{target.id} · {target.queue}</label>)}<ol>{policy.new_submission_order.map((id,index)=><li key={id}>{id}<button disabled={disabled} aria-label={t('移除策略目标')+' '+id} onClick={()=>toggle(id,false)}>×</button><button aria-label={t('上移')+' '+id} disabled={disabled||index===0} onClick={()=>move(id,-1)}>↑</button><button aria-label={t('下移')+' '+id} disabled={disabled||index===policy.new_submission_order.length-1} onClick={()=>move(id,1)}>↓</button></li>)}</ol>
    <details><summary>{t('付费条件与资源上限')}</summary><label className="check-label"><input data-testid="queue-paid-permit" type="checkbox" checked={policy.paid.permitted} disabled={disabled} onChange={event=>setPolicy(old=>({...old,paid:{...old.paid,permitted:event.target.checked,limits:old.paid.limits||{cpus:1,gpus:0,memory_mb:1024,max_seconds:60}}}))}/>{t('允许使用付费队列')}</label><label className="check-label"><input data-testid="queue-paid-known" type="checkbox" checked={policy.paid.conditions_known} disabled={disabled} onChange={event=>setPolicy(old=>({...old,paid:{...old.paid,conditions_known:event.target.checked}}))}/>{t('已确认费用条件')}</label><textarea data-testid="queue-paid-conditions" aria-label={t('费用条件')} value={policy.paid.conditions} disabled={disabled} onChange={event=>setPolicy(old=>({...old,paid:{...old.paid,conditions:event.target.value}}))}/>{policy.paid.limits&&<div className="form-row">{(['cpus','gpus','memory_mb','max_seconds'] as const).map(key=><label key={key}>{key}<input type="number" min={key==='gpus'?0:1} value={policy.paid.limits![key]} disabled={disabled} onChange={event=>setPolicy(old=>({...old,paid:{...old.paid,limits:{...old.paid.limits!,[key]:Number(event.target.value)}}}))}/></label>)}</div>}</details>
    <div className="button-row"><button className="button" data-testid="queue-policy-approve" disabled={!canApprove} onClick={()=>void approve()}>{t('批准当前项目队列策略')}</button><button className="button" data-testid="queue-policy-cancel" onClick={reset}>{t('取消策略修改')}</button></div></section>}
+  <LoadingFeedback busy={approving} label={t('正在保存队列策略…')}/>
   {notice&&<p role="status">{notice}</p>}
  </section>;
 }

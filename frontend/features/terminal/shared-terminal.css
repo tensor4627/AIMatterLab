@@ -10,3 +10,11 @@
 .ssh-service-timing{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted)}
 .ssh-service-status [data-testid="ssh-service-transfer"]{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:var(--font-sm,12px);color:var(--muted)}
 .ssh-service-status progress{width:min(240px,100%);height:9px;accent-color:var(--accent)}
+
+/* Keep a usable terminal in the default 300px pane; diagnostics scroll first. */
+.shared-terminal-panel{overflow:auto;overscroll-behavior:contain}
+.shared-terminal-host{flex:1 0 64px;min-height:64px}
+.ssh-service-status{flex:0 1 auto;min-height:44px}
+.shared-terminal-notice{flex:0 1 auto;min-height:25px;max-height:52px;overflow:auto}
+.shared-terminal-toolbar{position:sticky;top:0;z-index:2}
+.shared-terminal-caption{position:sticky;bottom:0;background:#121218}

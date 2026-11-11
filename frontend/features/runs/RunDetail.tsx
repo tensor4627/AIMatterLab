@@ -1,3 +1,4 @@
+import LoadingFeedback from '../../ui/LoadingFeedback';
 import Tooltip from "../../ui/Tooltip";
 import {runContinuation} from "./run-continuation.mjs";
 
@@ -14,6 +15,9 @@ import {Badge,Modal} from "../../ui/Dialogs";
 import {Chart,Structure,CodeEditor} from "../../ui/widgets";
 const terminal=(status:string)=>['succeeded','failed','cancelled'].includes(status);
 export default function RunDetail({run,connected=true,onRefresh,onError,onOpenRun,onOpenWorkflow}:{run:Run;connected?:boolean;onRefresh:()=>void|Promise<void>;onError:(e:unknown)=>void;onOpenRun?:(id:string)=>void;onOpenWorkflow?:(runId:string)=>void}){
+ const workingRef=useRef<symbol|null>(null),auxiliaryRef=useRef(false),mounted=useRef(false),fileFlight=useRef<{key:string;sequence:number}|null>(null),previewFlight=useRef<{key:string;sequence:number}|null>(null);
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;workingRef.current=null;};},[]);
+ const [workingLabel,setWorkingLabel]=useState(''),[auxiliary,setAuxiliary]=useState<{identity:string;label:string}|null>(null),[previewLoading,setPreviewLoading]=useState<{identity:string;sequence:number}|null>(null);
  const [tab,setTab]=useState('日志'),[logState,setLogState]=useState({chunks:[] as string[],truncated:false}),[files,setFiles]=useState<any[]>([]),[selected,setSelected]=useState(''),[text,setText]=useState(''),[structure,setStructure]=useState<any>(null),[frame,setFrame]=useState(0);
  const [logObservation,setLogObservation]=useState<ReadObservation<{offset:number;text:string}>|null>(null),logReader=useRef<ObservedRead<{offset:number;text:string}>|null>(null),connectedRef=useRef(connected);connectedRef.current=connected;
  const [image,setImage]=useState(''),[analysis,setAnalysis]=useState<any>(null);
@@ -37,7 +41,7 @@ export default function RunDetail({run,connected=true,onRefresh,onError,onOpenRu
  useEffect(()=>window.studio?.onEvent(event=>{if(event.method==='studio/workerConnected'){collection.current.epoch++;collection.current.sequence++;collection.current.loaded=false;collection.current.pending=false;clearArtifactPreview();setFiles([]);setCollectionState('idle');setCollectionError('');}}),[]);
 
  useEffect(()=>{
-  fileSeq.current++;previewSeq.current++;
+  fileSeq.current++;previewSeq.current++;workingRef.current=null;setWorking(false);
   setLogState({chunks:[],truncated:false});setFiles([]);setSelected('');setStructure(null);setText('');setImage('');setAnalysis(null);setLoadingFile(false);setFileError('');setResume(false);setTab('日志');resumeAttempt.current=null;setResumePending(false);setResumeKey('');setResumeStorageError(false);
   setFileRange(null);setActionMessage('');setResumeCache(null);terminalLogRead.current=false;
   if(!workflowBound)try{const cached=localStorage.getItem('studio.resume.'+run.id);setResumeCache(cached);if(cached){const attempt=JSON.parse(cached);if(!attempt||typeof attempt.key!=='string'||!attempt.key||!attempt.parameters||typeof attempt.parameters!=='object'||Array.isArray(attempt.parameters))throw Error('续算请求记录无效，请先人工核对已有草稿');resumeAttempt.current=attempt;setResumePending(true);setResumeKey(attempt.key);setResumeParameters(JSON.stringify(attempt.parameters,null,2));}}catch(e){setResumeStorageError(true);onError(e);}
@@ -61,20 +65,20 @@ export default function RunDetail({run,connected=true,onRefresh,onError,onOpenRu
  useEffect(()=>{if(!connected||!terminal(run.status))terminalLogRead.current=false;logReader.current?.setConnected(connected&&!terminalLogRead.current);},[connected,run.status]);
  useEffect(()=>{if(run.status!=='ready')setLock('');},[run.status]);
  async function action(name:string){
-  const current=workflowRunRef.current;if(!connected||working||current.id!==run.id||current.bound&&(name!=='cancel'||!['queued','running'].includes(current.status)))return;
-  setWorking(true);
+  const current=workflowRunRef.current;if(!mounted.current||!connected||workingRef.current||collection.current.identity!==identity||current.id!==run.id||current.bound&&(name!=='cancel'||!['queued','running'].includes(current.status)))return;
+  const flight=Symbol();workingRef.current=flight;setWorkingLabel(tr(({validate:'正在验证输入…',submit:'正在提交计算…',cancel:'正在取消并核对作业…',reconcile:'正在核对运行状态…'} as Record<string,string>)[name]||'处理中…'));setWorking(true);
   try{
    if(name==='submit')setLock(run.id);
    const result=await api<Run>('POST','/api/run/'+name,{run_id:run.id});
-   setActionMessage(result.reconciliation?.message||result.cancellation?.message||'');
+   if(!mounted.current||workingRef.current!==flight||collection.current.identity!==identity)return;setActionMessage(result.reconciliation?.message||result.cancellation?.message||'');
    await onRefresh();
   }catch(e){
-   onError(e);
+   if(!mounted.current||workingRef.current!==flight||collection.current.identity!==identity)return;onError(e);
    if(name==='submit'){
-    try{const latest=await api<Run>('POST','/api/run/status',{run_id:run.id});if(latest.status==='ready')setLock('');}catch{}
+    try{const latest=await api<Run>('POST','/api/run/status',{run_id:run.id});if(workingRef.current===flight&&latest.status==='ready')setLock('');}catch{}
     await onRefresh();
    }
-  }finally{setWorking(false);if(name==='submit')setLock(current=>current===run.id?'':current);}
+  }finally{if(workingRef.current===flight){workingRef.current=null;if(mounted.current&&workflowRunRef.current.id===run.id){setWorking(false);if(name==='submit')setLock(current=>current===run.id?'':current);}}}
  }
  async function collect(manual=true){
   const observed=collection.current;if(!connectedRef.current||observed.identity!==identity||observed.pending||!manual&&observed.loaded)return;
@@ -86,24 +90,25 @@ export default function RunDetail({run,connected=true,onRefresh,onError,onOpenRu
   finally{if(current())observed.pending=false;}
  }
  async function openFile(name:string){
-  if(!connected)return;
-  const seq=++fileSeq.current;previewSeq.current++;
+  if(!connected||!mounted.current)return;const key=JSON.stringify([identity,name]);if(fileFlight.current?.key===key&&fileFlight.current.sequence===fileSeq.current)return;
+  const seq=++fileSeq.current,flight={key,sequence:seq};fileFlight.current=flight;previewSeq.current++;
   setSelected(name);setStructure(null);setImage('');setText('');setFileRange(null);setFileError('');setLoadingFile(true);
   try{const r=await api('POST','/api/run/file',{run_id:run.id,name});if(seq!==fileSeq.current)return;setText(r.text||"");setImage(r.image||"");if(Number.isSafeInteger(r.offset)&&Number.isSafeInteger(r.size))setFileRange({offset:r.offset,size:r.size});}
   catch(e){if(seq!==fileSeq.current)return;setFileError(e instanceof Error?e.message:String(e));onError(e);}
-  finally{if(seq===fileSeq.current)setLoadingFile(false);}
+  finally{if(fileFlight.current===flight)fileFlight.current=null;if(seq===fileSeq.current)setLoadingFile(false);}
  }
  async function preview(){
-  if(!connected)return;
-  const seq=++previewSeq.current,name=selected;
-  try{const value=await api('POST','/api/inspect',{project_id:run.project_id,environment_id:run.environment_id,path:run.directory+'/results/'+name,kind:'structure',frame});if(seq!==previewSeq.current)return;setStructure(value);}catch(e){if(seq===previewSeq.current)onError(e);}
+  if(!connected||!mounted.current)return;const key=JSON.stringify([identity,selected,frame]);if(previewFlight.current?.key===key&&previewFlight.current.sequence===previewSeq.current)return;
+  const seq=++previewSeq.current,name=selected,flight={key,sequence:seq};previewFlight.current=flight;setPreviewLoading({identity,sequence:seq});
+  try{const value=await api('POST','/api/inspect',{project_id:run.project_id,environment_id:run.environment_id,path:run.directory+'/results/'+name,kind:'structure',frame});if(seq!==previewSeq.current)return;setStructure(value);}catch(e){if(seq===previewSeq.current)onError(e);}finally{if(previewFlight.current===flight)previewFlight.current=null;if(seq===previewSeq.current)setPreviewLoading(null);}
  }
  async function createResume(){
-  if(workflowRunRef.current.bound||!connectedRef.current||collection.current.identity!==identity||working||resumeStorageError)return;
+  if(!mounted.current||workflowRunRef.current.bound||!connectedRef.current||collection.current.identity!==identity||workingRef.current||resumeStorageError)return;
   if(!continuationRef.current.allowed){onError(Error(tr(continuationRef.current.reason!)));return;}
-  setWorking(true);
-  try{if(!resumeAttempt.current){const parameters=JSON.parse(resumeParameters);if(!parameters||typeof parameters!=='object'||Array.isArray(parameters))throw Error('续算参数必须是 JSON 对象');resumeAttempt.current={key:resumeKey||crypto.randomUUID(),parameters};}const attempt=resumeAttempt.current;localStorage.setItem('studio.resume.'+run.id,JSON.stringify(attempt));setResumePending(true);const created=await api<Run>('POST','/api/run/resume',{run_id:run.id,parameters:{...attempt.parameters,idempotency_key:attempt.key}});localStorage.removeItem('studio.resume.'+run.id);resumeAttempt.current=null;setResumePending(false);setResume(false);onOpenRun?.(created.id);await onRefresh();}catch(e){onError(e);}finally{setWorking(false);}
+  const flight=Symbol();workingRef.current=flight;setWorkingLabel(tr('正在创建续算草稿…'));setWorking(true);
+  try{if(!resumeAttempt.current){const parameters=JSON.parse(resumeParameters);if(!parameters||typeof parameters!=='object'||Array.isArray(parameters))throw Error('续算参数必须是 JSON 对象');resumeAttempt.current={key:resumeKey||crypto.randomUUID(),parameters};}const attempt=resumeAttempt.current;localStorage.setItem('studio.resume.'+run.id,JSON.stringify(attempt));setResumePending(true);const created=await api<Run>('POST','/api/run/resume',{run_id:run.id,parameters:{...attempt.parameters,idempotency_key:attempt.key}});localStorage.removeItem('studio.resume.'+run.id);if(!mounted.current||workingRef.current!==flight||collection.current.identity!==identity)return;resumeAttempt.current=null;setResumePending(false);setResume(false);onOpenRun?.(created.id);await onRefresh();}catch(e){if(mounted.current&&workingRef.current===flight&&collection.current.identity===identity)onError(e);}finally{if(workingRef.current===flight){workingRef.current=null;if(workflowRunRef.current.id===run.id)setWorking(false);}}
  }
+ async function auxiliaryAction(label:string,read:()=>Promise<void>){if(!mounted.current||!connectedRef.current||auxiliaryRef.current)return;auxiliaryRef.current=true;setAuxiliary({identity,label});try{await read();}catch(error){if(mounted.current&&collection.current.identity===identity)onError(error);}finally{auxiliaryRef.current=false;if(mounted.current&&collection.current.identity===identity)setAuxiliary(null);}}
  function discardCorruptResume(){
   if(!window.confirm(tr('我已核对现有作业和草稿；清除损坏的本地续算记录后，需要重新填写并人工创建请求。继续？')))return;
   try{localStorage.removeItem('studio.resume.'+run.id);resumeAttempt.current=null;setResumePending(false);setResumeKey('');setResumeStorageError(false);setResumeCache(null);}catch(e){onError(e);}
@@ -115,15 +120,16 @@ export default function RunDetail({run,connected=true,onRefresh,onError,onOpenRu
   {!workflowBound&&run.superseded_by&&<div className="notice">{tr('此草稿已被审阅版本替换')}<button className="button" onClick={()=>onOpenRun?.(run.superseded_by!)}>{tr('打开审阅版本')}</button></div>}
   {resumeStorageError&&<div className="notice" role="alert">{tr('续算请求记录无法读取；先核对已有草稿，禁止自动创建新请求。')}{resumeCache!==null&&<details><summary>{tr('查看本地续算记录')}</summary><pre>{resumeCache}</pre></details>}<button className="button" disabled={working} onClick={discardCorruptResume}>{tr('已核对，清除损坏记录')}</button></div>}
   {actionMessage&&<div className="notice" role="status">{actionMessage}</div>}
+  <LoadingFeedback busy={working||collectionState==='loading'||loadingFile||previewLoading?.identity===identity&&previewLoading.sequence===previewSeq.current||auxiliary?.identity===identity} label={working?workingLabel:auxiliary?.identity===identity?auxiliary.label:loadingFile?tr('正在读取文件…'):previewLoading?.identity===identity&&previewLoading.sequence===previewSeq.current?tr('正在读取结构预览…'):tr('正在读取产物列表…')}/>
   <div className="run-actions">
    {!workflowBound&&['draft','ready'].includes(run.status)&&<><button className="button" disabled={!connected||working||!['draft','ready'].includes(run.status)} onClick={()=>void action('validate')}><ShieldCheck size={14}/>{tr("验证")}</button>
    <button className="button primary" disabled={!connected||working||run.status!=='ready'||lock===run.id} onClick={()=>void action('submit')}><Play size={14}/>{tr("提交计算")}</button></>}
-   {run.engine.startsWith('nep.')&&<button className="button" disabled={!connected} onClick={()=>{if(connected)void api('POST','/api/inspect',{project_id:run.project_id,environment_id:run.environment_id,path:run.directory+'/results',kind:'regression'}).then(r=>{setAnalysis(r);setTab('评估');}).catch(onError);}}>{tr("评估指标")}</button>}
+   {run.engine.startsWith('nep.')&&<button className="button" disabled={!connected} onClick={()=>void auxiliaryAction(tr('正在读取评估指标…'),async()=>{const r=await api('POST','/api/inspect',{project_id:run.project_id,environment_id:run.environment_id,path:run.directory+'/results',kind:'regression'});if(collection.current.identity===identity){setAnalysis(r);setTab('评估');}})}>{tr("评估指标")}</button>}
    {(workflowBound?['queued','running']:['queued','running','unknown']).includes(run.status)&&<button className="button" disabled={!connected||working||!['queued','running','unknown'].includes(run.status)} onClick={()=>void action('cancel')}><Square size={13}/>{tr("取消")}</button>}
    {!workflowBound&&run.status==='unknown'&&<button className="button" disabled={!connected||working} onClick={()=>void action('reconcile')}>{tr('核对停止状态')}</button>}
    <button className="button" disabled={!connected||collectionState==='loading'} onClick={()=>void collect()}><Files size={14}/>{tr("收集产物")}</button>
    {!workflowBound&&<button className="button" title={continuation.reason?tr(continuation.reason):undefined} disabled={!connected||!continuation.allowed||working||resumeStorageError||!!run.superseded_by||!['succeeded','failed','cancelled'].includes(run.status)} onClick={()=>{if(workflowRunRef.current.bound)return;if(!resumeAttempt.current)setResumeKey(crypto.randomUUID());setResume(true);}}><RotateCw size={14}/>{tr("续算")}</button>}
-   <button className="icon-button" title={tr("导出不可变输入与复现记录 ZIP")} disabled={!connected} aria-label={tr("导出不可变输入与复现记录 ZIP")} onClick={()=>{if(connected)void invoke('export',{run}).catch(onError);}}><Download size={16}/></button>
+   <button className="icon-button" title={tr("导出不可变输入与复现记录 ZIP")} disabled={!connected} aria-label={tr("导出不可变输入与复现记录 ZIP")} onClick={()=>void auxiliaryAction(tr('正在导出运行记录…'),async()=>{await invoke('export',{run});})}><Download size={16}/></button>
   </div>
   <div className="detail-meta"><span>GPU {run.gpu}</span><span>{tr("上限")}{run.max_seconds}s</span><span>{tr("输入已快照")}</span><span>{new Date(run.created_at*1000).toLocaleString()}</span></div>
   <div className="subtabs" role="tablist">{['日志','产物','验证','输入'].map(t=><button key={t} role="tab" aria-selected={tab===t} className={tab===t?'active':''} onClick={()=>{setTab(t);if(t==='产物')void collect(false);}}>{tr(t)}</button>)}</div>

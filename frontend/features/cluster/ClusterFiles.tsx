@@ -1,3 +1,4 @@
+import LoadingFeedback from '../../ui/LoadingFeedback';
 import {useEffect,useState} from 'react';
 import {api} from '../../api/worker';
 import {invoke} from '../../api/studio';
@@ -22,6 +23,7 @@ export default function ClusterFiles({projectId,clusterId,scope,roots,enabled,on
  return <section className="card" data-testid="cluster-files"><div className="form-row"><label>{t('已授权读取根目录')}<select aria-label={t('已授权读取根目录')} value={selection.rootIndex} onChange={event=>choose('',Number(event.target.value))}>{roots.map((root,index)=><option key={index} value={index}>{root}</option>)}</select></label><label>{t('相对路径')}<input value={selection.relative} onChange={event=>choose(event.target.value)}/></label></div>
   {!enabled&&<p role="status">{t('请连接作业服务并保存当前连接后浏览文件。')}</p>}
   <div className="button-row"><button className="button" disabled={!available||busy} onClick={()=>choose(selection.relative,selection.rootIndex,true)}>{t(browse.pending?'正在读取文件…':'浏览 / 预览')}</button>{selection.relative&&<button className="button" disabled={!available||busy} onClick={()=>choose(selection.relative.split('/').filter(Boolean).slice(0,-1).join('/'),selection.rootIndex,true)}>{t('上一级目录')}</button>}</div>
+  <LoadingFeedback busy={busy} label={t(download.pending?'正在准备下载…':'正在读取文件…')}/>
   {(browse.error||download.error)&&<p role="alert">{browse.error||download.error}</p>}
   {(browse.stale||download.stale)&&<p role="status" data-testid="cluster-files-stale">{t(download.stalePending?'文件来源已变化，旧状态已隐藏；已发送的下载仍可能完成，请核对所选保存位置。':download.staleSettled?'先前下载请求已结束，结果未用于当前文件，请核对所选保存位置。':'文件路径或连接已变化，旧预览已隐藏，请重新浏览。')}</p>}
   {result?.entries.map(file=><button className="cluster-run-row" key={file.name} disabled={!available||busy||file.symlink} onClick={()=>choose([result.relative,file.name].filter(Boolean).join('/'),result.rootIndex,true)}><span>{file.name}</span><small>{file.directory?'directory':file.size+' B'}</small></button>)}

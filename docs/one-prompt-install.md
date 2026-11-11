@@ -32,9 +32,19 @@ flowchart LR
 
 dev.18 的[连接引导实施契约](design/compute-connection-hil.md)进一步区分本地 WSL、已有密钥/转发入口与人工二步认证。安装 Agent 只收集所选来源、用户名和密钥引用等必要设置；密码、私钥和验证码由用户在对应认证界面处理，不写进安装 prompt 或交给模型。连接设置与项目使用范围分开，登录节点检查与执行节点短例分开。该改造目前处于源码阶段，安装器不能因文档存在就宣称支持真实 MFA，也不能用自动重试替代人工认证。日常运行继续使用登记环境与运行时收据，不重新载入安装说明或重新安装软件。
 
+## Kimi / Qwen 按需安装
+
+便携包不附带这两套 CLI。Studio 优先保留有效手动路径，再检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`；找不到兼容程序时复用已验证的 Studio 专用缓存。Windows 常见 npm/pnpm 入口会解析到实际程序，不执行命令包装脚本。有效程序仍须满足当前版本及 ACP 接口要求；安装位置、程序兼容、账户登录和真实模型调用分别判断。
+
+点击对应登录或连接入口时，缺失或不兼容会显示下载界面。用户可重新检测、选择已有程序、下载兼容版本或取消；启动应用、切换服务商、读取账户和后台恢复均不触发下载。下载使用锁定的官方 npm 地址和完整性值，无需另外安装 npm、Node 或 Python。主进程负责校验、受限解包和原子安装，不运行 postinstall，也不覆盖本机已有程序。
+
+安装放在当前 Studio profile 的 `agent-runtimes` 私有目录。界面显示实际下载字节、包数量及校验/安装/接口检查阶段；未知总量使用加载动画。失败或取消保留已有可用版本，成功后继续原登录流程。高级设置中的有效手动路径保留，仅迁移已失效的历史包内默认路径。用户在外部安装 CLI 后可点击重新检测。
+
+单 prompt 安装协作者遵循相同入口和 profile；`reuse-existing` 仍不下载，缺失时保留 blocked，完成用户选择的安装后再复核。CLI 安装通过不能替代桌面实际模型回复或科学短例。
+
 ## 配置与命令
 
-复制 installation/config.example.json 到忽略目录，填写目标 Linux Python 及 repositories。Windows Node 22.19+、pnpm 11、目标 Python 3.10+。Codex 按所需 app-server 协议和实际隔离能力检查兼容性；CLI 与协议生成参考版本不同仅显示 warning，由用户决定是否继续使用。Kimi / Qwen 使用已锁定官方 ACP runtime，认证由用户完成。版本信息见 desktop/generated/version.json 和 package.json。
+复制 installation/config.example.json 到忽略目录，填写目标 Linux Python 及 repositories。Windows Node 22.19+、pnpm 11、目标 Python 3.10+。Codex 按所需 app-server 协议和实际隔离能力检查兼容性；CLI 与协议生成参考版本不同仅显示 warning，由用户决定是否继续使用。Kimi / Qwen 优先复用兼容本机程序，缺失时由用户选择下载已锁定官方 ACP runtime，认证由用户完成。版本信息见 desktop/generated/version.json 和 package.json。
 
 ~~~text
 python scripts/one_prompt.py plan --config .studio/installation/config.json

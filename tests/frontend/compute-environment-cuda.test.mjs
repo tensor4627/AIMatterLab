@@ -23,7 +23,7 @@ function harness({probe=()=>report(),runtimeGuide=({environment_id,engine})=>({s
  function text(node){if(Array.isArray(node))return node.map(text).join('');return node===null||node===undefined||typeof node==='boolean'?'':typeof node==='object'?text(node.props?.children):String(node);}
  const badge=()=>text(find(node=>node.props?.className==='tag',find(node=>node.props?.className==='compute-env-list')));
  const summary=()=>text(find(node=>node.props?.className==='compute-summary'));
- function check(){find(node=>node.type==='button'&&text(node)==='检查依赖与 GPU').props.onClick();render();}
+ function check(count=1){const click=find(node=>node.type==='button'&&text(node)==='检查依赖与 GPU').props.onClick;for(let i=0;i<count;i++)click();render();}
  function route(engine){find(node=>node.type==='select').props.onChange({target:{value:engine}});render();}
  render();return {render,flush,badge,summary,check,route,calls,errors,text:()=>text(tree)};
 }
@@ -34,3 +34,8 @@ for(const group of ['executables','repositories','variables'])test('configuratio
 test('selected routes do not inherit another route success and late changed-configuration responses are ignored',async()=>{const pending=deferred();let next=report();const h=harness({probe:()=>next});await h.flush();h.check();await h.flush();h.route('gpumd.md');assert(h.badge().includes('待检查'));h.route('pydyn.md');assert(h.badge().includes('CUDA 已发现'));next=pending.promise;h.check();await h.flush();h.render({environments:[{...environment,executables:{python:'/different/python'}}]});pending.resolve(report());await h.flush();assert(h.badge().includes('待检查'));assert(h.summary().includes('0 个环境已观察到 CUDA'));});
 test('blocked or mismatched receipt identity cannot claim CUDA or check passed',async()=>{for(const bad of [{...report(),runtime_guide:{status:'blocked'}},report(true,'gpumd.md'),{...report(),runtime_guide:{status:'observed',facts:{...report().runtime_guide.facts,environment_id:'other'}}}]){const h=harness({probe:()=>bad});await h.flush();h.check();await h.flush();assert(h.badge().includes('待检查'));assert(!h.text().includes('检查通过'));}});
 test('worker disconnect invalidates prior checks; discovery fallback is configuration-bound',async()=>{const h=harness();await h.flush();h.check();await h.flush();assert(h.badge().includes('CUDA 已发现'));h.render({worker:false});await h.flush();h.render({worker:true});await h.flush();assert(h.badge().includes('待检查'));assert(h.summary().includes('0 个环境已观察到 CUDA'));const discovery=harness({readiness:{environments:[{...environment,cuda:{torch:{available:true}}}],clusters:[]}});await discovery.flush();assert(discovery.badge().includes('CUDA 已发现'));discovery.render({environments:[{...environment,variables:{LD_LIBRARY_PATH:'/changed'}}]});await discovery.flush();assert(discovery.badge().includes('待检查'));assert(discovery.summary().includes('0 个环境已观察到 CUDA'));});
+
+
+test('a pending dependency probe blocks duplicate clicks before rendering',async()=>{
+ const gate=deferred(),h=harness({probe:()=>gate.promise});await h.flush();h.check(2);await h.flush();assert.equal(h.calls.filter(call=>call.target==='/api/probe').length,1);assert.match(h.text(),/检查中/);gate.resolve(report());await h.flush();assert.match(h.badge(),/CUDA 已发现/);
+});

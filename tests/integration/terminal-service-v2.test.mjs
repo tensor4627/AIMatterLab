@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
 import {createHash} from 'node:crypto';
-import {gunzipSync} from 'node:zlib';
+import {gunzipSync,gzipSync} from 'node:zlib';
 import {createTerminalSession} from '../../desktop/platform/terminal-service/session.mjs';
 import {startBroker} from '../../desktop/platform/terminal-service/broker.mjs';
 
@@ -15,7 +15,7 @@ function bootstrap({transport='print("fixed transport")\n',source='print("fixed 
  const bytes=Buffer.from(content),files=[{path:'worker.py',size:bytes.length,sha256:hash(bytes),base64:bytes.toString('base64')}],runtime=createHash('sha256').update('worker.py').update(bytes).digest('hex');
  return {source,payload:{schema_version:1,profile_id:'owned-profile',port:28761,expected_runtime_id:runtime.slice(0,20),files},transport:{source:transport,sha256:hash(transport)}};
 }
-function fixture({transportCached=true,workerCached=true,auto=true,ack=true,resume=true,stop=true,failAt,sourceOptions,timeouts={}}={}){
+function fixture({transportCached=true,workerCached=true,auto=true,ack=true,resume=true,stop=true,failAt,sourceOptions,capabilities,timeouts={}}={}){
  const trusted=bootstrap(sourceOptions),writes=[],uploads=[],resizes=[];let output,exit,nonce,hello,parts=[];
  const frame=(kind,id,value,n=nonce)=>'__STUDIO_SERVICE_V1__:'+n+':'+kind+':'+id+':'+Buffer.from(JSON.stringify(value)).toString('base64')+'\r\n';
  const send=(kind,id,value,n)=>output(frame(kind,id,value,n));
@@ -23,7 +23,7 @@ function fixture({transportCached=true,workerCached=true,auto=true,ack=true,resu
  const workerCheck=()=>{if(workerCached){send('WORKER_READY','-',{cached:true});send('PHASE','-',{phase:'starting_worker'});send('READY','-',{...health,runtime_id:trusted.payload.expected_runtime_id});}else{parts=[];send('WORKER_NEEDED','-',{});}};
  const child={pid:7123,kills:0,onData:fn=>output=fn,onExit:fn=>exit=fn,resize:(...size)=>resizes.push(size),kill(){child.kills++;exit({exitCode:0});},write(text){
   writes.push(text);
-  if(text.startsWith('python3 ')){nonce=/'([a-f0-9]{64})'\r$/.exec(text)?.[1];assert(nonce);if(auto)queueMicrotask(()=>{if(failAt==='preflight'){send('ERROR','-',{code:'python_unsupported',phase:'waiting_python',python:[3,9,18]});send('EXITED','-',{reason:'failed'});}else send('BOOTSTRAP_READY','-',{protocol:2,python:[3,11,9],sqlite:[3,37,2]});});return;}
+  if(text.startsWith('python3 ')){nonce=/'([a-f0-9]{64})'\r$/.exec(text)?.[1];assert(nonce);if(auto)queueMicrotask(()=>{if(failAt==='preflight'){send('ERROR','-',{code:'python_unsupported',phase:'waiting_python',python:[3,9,18]});send('EXITED','-',{reason:'failed'});}else send('BOOTSTRAP_READY','-',{protocol:2,python:[3,11,9],sqlite:[3,37,2],...capabilities?{capabilities}:{}});});return;}
   if(text.startsWith('printf ')){const marker=/'(STUDIO_TERMINAL_RESUMED_[a-f0-9]{32})'\r$/.exec(text)?.[1];assert(marker);if(resume)queueMicrotask(()=>output('\x1b[2J\x1b[3J\x1b[H'+marker+'\r\nrestored shell'));return;}
   const [prefix,n,kind,id,encoded]=text.trimEnd().split(':');assert.equal(prefix,'__STUDIO_SERVICE_V1__');assert.equal(n,nonce);const value=JSON.parse(Buffer.from(encoded,'base64'));
   if(kind==='HELLO'){hello=value;if(auto)queueMicrotask(()=>{if(failAt==='cache')emitFailure();else if(transportCached){send('HELPER_READY','-',{cached:true});workerCheck();}else{parts=[];send('TRANSPORT_NEEDED','-',{});}});}
@@ -42,6 +42,41 @@ test('V2 single-line ASCII bootstrap validates both caches before sending any so
   const command=f.writes[0];assert.match(command,/^python3 -I -u -c /);assert(Buffer.byteLength(command)<4096);assert(!command.slice(0,-1).includes('\n'));assert.match(command.slice(0,-1),/^[\x20-\x7e]+$/);const encoded=/b64decode\("([A-Za-z0-9+/=]+)"\)/.exec(command)[1];assert.equal(gunzipSync(Buffer.from(encoded,'base64')).toString(),f.trusted.source);
   assert.equal(f.hello.worker_manifest_sha256.slice(0,20),f.trusted.payload.expected_runtime_id);assert.equal(f.hello.transport_sha256,f.trusted.transport.sha256);assert.equal(f.hello.worker_sha256,hash(Buffer.from(JSON.stringify(f.trusted.payload))));assert.equal(f.session.read({actor:'human',ownerEpoch:2}).chunks.map(c=>c.data).join(''),'previous human history\r\n');
  }finally{f.session.dispose();}
+});
+
+test('negotiated compressed responses preserve 96-byte frames, actual content and duplicate no-replay ledger',async()=>{
+ const f=fixture({capabilities:{responseEncodings:['gzip-fragments-v1'],uploadChunkBytes:[2048,4096,8192]}});
+ try{const ready=await f.start();assert.equal(f.hello.response_encoding,'gzip-fragments-v1');assert.equal(f.hello.upload_chunk_bytes,2048);
+  const args={serviceId:ready.serviceId,requestId:'compressed-owned',method:'GET',target:'/api/health',mcp:false},pending=f.session.serviceRequest(args),raw=Buffer.from(JSON.stringify({status:200,data:{content:'owned safe content '.repeat(4000)}})),packed=gzipSync(raw);
+  f.send('COMPRESSED_BEGIN',args.requestId,{kind:'RESPONSE',compressedBytes:packed.length,uncompressedBytes:raw.length,sha256:hash(packed)});
+  for(let at=0;at<packed.length;at+=96)f.send('COMPRESSED_FRAGMENT',args.requestId,{kind:'RESPONSE',index:at/96,last:at+96>=packed.length,chunk:packed.subarray(at,at+96).toString('base64')});
+  assert.deepEqual(await pending,JSON.parse(raw));assert.deepEqual(await f.session.serviceRequest(args),JSON.parse(raw));assert.equal(f.writes.filter(v=>v.includes(':REQUEST:')).length,1);assert.equal(f.session.read({actor:'human',ownerEpoch:2}).chunks.length,0);
+ }finally{f.session.dispose();}
+});
+
+test('compressed response requires negotiation and an authenticated bounded header before any fragments',async()=>{
+ for(const negotiated of [false,true]){const f=fixture({capabilities:negotiated?{responseEncodings:['gzip-fragments-v1'],uploadChunkBytes:[2048]}:undefined});try{const ready=await f.start(),pending=f.session.serviceRequest({serviceId:ready.serviceId,requestId:'owned-invalid-compression',method:'GET',target:'/api/health',mcp:false});pending.catch(()=>{});f.send('COMPRESSED_BEGIN','owned-invalid-compression',{kind:'RESPONSE',compressedBytes:80,uncompressedBytes:9*1024*1024,sha256:'a'.repeat(64)});await assert.rejects(pending,/service_protocol_failed/);assert.equal(f.session.serviceState().terminalAccess,'unknown');}finally{f.session.dispose();}}
+});
+
+test('STOP fences an in-progress compressed decode before restoring the shell and never publishes its late content',async()=>{
+ const f=fixture({capabilities:{responseEncodings:['gzip-fragments-v1'],uploadChunkBytes:[2048]}});
+ try{const ready=await f.start(),requestId='owned-stop-decode',pending=f.session.serviceRequest({serviceId:ready.serviceId,requestId,method:'GET',target:'/api/health',mcp:false});pending.catch(()=>{});
+  const raw=Buffer.from(JSON.stringify({status:200,data:{private:'MUST_STAY_PRIVATE'.repeat(8000)}})),packed=gzipSync(raw);
+  f.send('COMPRESSED_BEGIN',requestId,{kind:'RESPONSE',compressedBytes:packed.length,uncompressedBytes:raw.length,sha256:hash(packed)});
+  for(let at=0;at<packed.length;at+=96)f.send('COMPRESSED_FRAGMENT',requestId,{kind:'RESPONSE',index:at/96,last:at+96>=packed.length,chunk:packed.subarray(at,at+96).toString('base64')});
+  const stopping=f.session.serviceStop({serviceId:ready.serviceId});await assert.rejects(pending,/service_disconnected/);await stopping;await tick();
+  assert.equal(f.session.serviceState().serviceStatus,'disconnected');assert.equal(f.session.serviceState().terminalAccess,'available');assert(!f.session.read({actor:'human',ownerEpoch:3}).chunks.some(v=>/MUST_STAY_PRIVATE|COMPRESSED_|FRAGMENT/.test(v.data)));
+ }finally{f.session.dispose();}
+});
+
+test('compressed frame count is bounded by exact chunk lengths and an exact final-frame flag',async()=>{
+ for(const mode of ['empty','short','false-last']){const f=fixture({capabilities:{responseEncodings:['gzip-fragments-v1'],uploadChunkBytes:[2048]}});try{
+  const ready=await f.start(),requestId='owned-bounded-chunks',pending=f.session.serviceRequest({serviceId:ready.serviceId,requestId,method:'GET',target:'/api/health',mcp:false});pending.catch(()=>{});
+  const raw=Buffer.from(JSON.stringify({status:200,data:{fixture:'a'.repeat(2000)}})),packed=gzipSync(raw);
+  f.send('COMPRESSED_BEGIN',requestId,{kind:'RESPONSE',compressedBytes:packed.length,uncompressedBytes:raw.length,sha256:hash(packed)});
+  const part=mode==='empty'?Buffer.alloc(0):mode==='short'?packed.subarray(0,1):packed;
+  f.send('COMPRESSED_FRAGMENT',requestId,{kind:'RESPONSE',index:0,last:false,chunk:part.toString('base64')});await assert.rejects(pending,/service_protocol_failed/);assert.equal(f.session.serviceState().terminalAccess,'unknown');
+ }finally{f.session.dispose();}}
 });
 
 test('the shipped V2 loader fits one canonical terminal line after compression and is not typed as multiline Python',async()=>{

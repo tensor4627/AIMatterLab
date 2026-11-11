@@ -65,7 +65,7 @@ export class WorkerClient {
   if(health.status!==200||health.data?.name!=='gpu-sampling-studio'||['root','runtime','execution_policy'].some(key=>health.data[key]!==initialHealth[key]))throw Error('Existing WSL worker identity unavailable');
   this.connection.transport='wsl-stdio';const exposed=await this.exposeTools({...health.data,transport:'wsl-stdio'});check();return exposed;
  }
- async restore(settings,{current=()=>true}={}){
+ async restore(settings,{current=()=>true,existingProof}={}){
   const result=(status,reason)=>({status,reason}),intent=this.bindingIntent,epoch=this.connectionEpoch;
   const valid=()=>current()&&intent===this.bindingIntent;
   if(this.restoring){await this.restoring.catch(()=>{});if(!valid())return result('unknown','superseded');return this.restore(settings,{current});}
@@ -75,7 +75,7 @@ export class WorkerClient {
   let pending;pending=(async()=>{
    let attached;
    try{
-    const observed=await this.readExisting(settings);
+    const observed=existingProof??await this.readExisting(settings);
     if(!valid()||this.connectionEpoch!==epoch||this.connection||this.connecting)return result('unknown','superseded');
     if(observed.status!=='connected')return result(observed.status==='disconnected'?'disconnected':'unknown','existing_unavailable');
     attached=observed.connection;if(attached?.health?.name!=='gpu-sampling-studio'||attached.health.root!==settings.workerRoot||attached.health.execution_policy!=='desktop-review-v1'||typeof attached.health.runtime!=='string'||attached.url!=='http://127.0.0.1:'+settings.workerPort||!attached.tokens?.admin||!attached.tokens?.mcp)return result('unknown','identity_unavailable');

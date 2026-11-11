@@ -12,18 +12,19 @@ function fixture(t){
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const write=(name,content)=>{const target=path.join(root,name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,typeof content==='string'?content:JSON.stringify(content));return target;};
  for(const dir of ['desktop','backend/main','agent','contracts'])fs.mkdirSync(path.join(root,dir),{recursive:true});
- write('package.json',{name:'studio-package-fixture',version:'1.0.2-dev.2',devDependencies:{'@moonshot-ai/kimi-code':'2.1.1','@qwen-code/qwen-code':'0.24.7','@lydell/node-pty':'1.2.0-beta.10'}});
+ write('package.json',{name:'studio-package-fixture',version:'1.0.2-dev.2',devDependencies:{electron:'44.5.1','@moonshot-ai/kimi-code':'2.1.1','@qwen-code/qwen-code':'0.24.7','@lydell/node-pty':'1.2.0-beta.10'}});
+ write('node_modules/electron/dist/version','44.5.1\n');
  write('installation/manifest.json',{schema_version:1,version:'1.0.2-dev.2',release_revision:'v1.0.2-dev.2'});
  write('desktop/main.mjs',"import fs from 'node:fs'; import {app} from 'electron'; export const ready=true;");
  write('scripts/localize-skill.mjs',"import fs from 'node:fs';");
  write('scripts/cluster-reconcile.mjs',"import path from 'node:path';");
  write('dist/index.html','<script type="module" src="./assets/app.js"></script><link rel="stylesheet" href="./assets/app.css">');
  write('dist/assets/app.js','export const ready=true;');write('dist/assets/app.css','body{color:white}');
+ write('dist/cli-installer/archive.mjs','export const extractNpmArchive=()=>{};');
+ write('contracts/agent/cli-runtime-lock.json',JSON.parse(fs.readFileSync(new URL('../../contracts/agent/cli-runtime-lock.json',import.meta.url),'utf8')));
  const prefix='.studio/agent-runtimes/node_modules/',packages={};
  function pkg(name,metadata,files){packages[name]=metadata.version;write(prefix+name+'/package.json',{name,...metadata});for(const [name2,text]of Object.entries(files))write(prefix+name+'/'+name2,text);}
- pkg('@moonshot-ai/kimi-code',{version:'2.1.1',dependencies:{ws:'^8.18.0'}},{'dist/main.mjs':"import WebSocket from 'ws';"});
- pkg('@qwen-code/qwen-code',{version:'0.24.7'},{'cli-entry.js':"import './cli.js';",'cli.js':'export const cli=true;'});
- pkg('@lydell/node-pty',{version:'1.2.0-beta.10',exports:'./index.js',optionalDependencies:{'@lydell/node-pty-win32-x64':'1.2.0-beta.10','@lydell/node-pty-linux-x64':'1.2.0-beta.10'}},{'index.js':'module.exports={};'});
+ pkg('@lydell/node-pty',{version:'1.2.0-beta.10',exports:'./index.js',dependencies:{ws:'^8.18.0'},optionalDependencies:{'@lydell/node-pty-win32-x64':'1.2.0-beta.10','@lydell/node-pty-linux-x64':'1.2.0-beta.10'}},{'index.js':'module.exports={};'});
  pkg('@lydell/node-pty-win32-x64',{version:'1.2.0-beta.10',os:['win32'],cpu:['x64'],exports:'./lib/index.js'},Object.fromEntries(['lib/index.js','lib/windowsTerminal.js','lib/windowsPtyAgent.js','lib/windowsConoutConnection.js','lib/worker/conoutSocketWorker.js','lib/conpty_console_list_agent.js','prebuilds/win32-x64/conpty.node','prebuilds/win32-x64/conpty_console_list.node','prebuilds/win32-x64/conpty/conpty.dll','prebuilds/win32-x64/conpty/OpenConsole.exe'].map(file=>[file,'test fixture only; never executed'])));
  pkg('ws',{version:'8.22.0',exports:{'.':{import:'./wrapper.mjs',require:'./index.cjs'}}},{'wrapper.mjs':'export default {};','index.cjs':'module.exports={};'});
  const manifest='.studio/agent-runtimes/manifest.json';write(manifest,{scope:'test-only runtime',packages});
@@ -33,9 +34,17 @@ function fixture(t){
 test('public beforeBuild hook validates explicit target and leaves package/install inputs unchanged',t=>{
  const f=fixture(t);f.write('pnpm-lock.yaml','lockfile sentinel');f.write('node_modules/.modules.yaml','installed metadata sentinel');
  const inputs=['package.json','installation/manifest.json','pnpm-lock.yaml','node_modules/.modules.yaml'],before=inputs.map(p=>fs.readFileSync(path.join(f.root,p),'utf8'));
- const result=f.validate();assert.equal(result.runtimePackages,5);assert.equal(result.dependencyEdges,1);assert.equal(result.nativePackage,'@lydell/node-pty-win32-x64');assert.equal(result.omittedOptional,1);
+ const result=f.validate();assert.equal(result.runtimePackages,3);assert.equal(result.dependencyEdges,1);assert.equal(result.nativePackage,'@lydell/node-pty-win32-x64');assert.equal(result.omittedOptional,1);
  assert.equal(beforeBuild({appDir:f.root,platform:{nodeName:'win32'},arch:'x64'}),false);
  assert.deepEqual(inputs.map(p=>fs.readFileSync(path.join(f.root,p),'utf8')),before);
+});
+
+test('packaging reuses only the installed Electron distribution matching its exact pinned version',t=>{
+ const f=fixture(t);assert.equal(f.validate().electronVersion,'44.5.1');
+ f.write('node_modules/electron/dist/version','44.4.0');assert.throws(f.validate,/Electron distribution version/);
+ f.write('node_modules/electron/dist/version','not-a-version');assert.throws(f.validate,/Electron distribution version/);
+ fs.unlinkSync(path.join(f.root,'node_modules/electron/dist/version'));assert.throws(f.validate,/Package runtime file missing/);
+ const pkg=JSON.parse(fs.readFileSync(new URL('../../package.json',import.meta.url),'utf8'));assert(pkg.scripts.pack.includes('--config.electronDist=node_modules/electron/dist'));
 });
 
 test('missing required staged package fails even if development node_modules could satisfy it',t=>{
@@ -65,9 +74,11 @@ test('cross-target native package and missing native helper are rejected without
  assert.throws(f.validate,/Package runtime file missing/);
 });
 
-test('Qwen bootstrap is insufficient when its actual CLI module is absent',t=>{
- const f=fixture(t);fs.unlinkSync(path.join(f.root,f.prefix,'@qwen-code/qwen-code/cli.js'));
- assert.throws(f.validate,/Package runtime file missing/);
+test('base package rejects any bundled provider CLI',t=>{
+ const f=fixture(t);f.packages['@qwen-code/qwen-code']='0.24.7';
+ f.write(f.prefix+'@qwen-code/qwen-code/package.json',{name:'@qwen-code/qwen-code',version:'0.24.7',main:'cli.js'});
+ f.write(f.prefix+'@qwen-code/qwen-code/cli.js','export const inert=true;');f.write(f.manifest,{packages:f.packages});
+ assert.throws(f.validate,/Provider CLI must not be bundled/);
 });
 
 test('packaged main, contract, and studio-tool modules cannot acquire unstaged bare imports',t=>{
@@ -105,7 +116,7 @@ test('release metadata mismatches fail before package validation can report succ
 
 test('ordinary source comments and strings do not become false dependency requirements',t=>{
  const f=fixture(t);f.write('agent/example.mjs',"// import x from 'absent';\nconst prose=\"require('missing')\"; /* import('fake'); */ export {prose};");
- assert.equal(f.validate().runtimePackages,5);
+ assert.equal(f.validate().runtimePackages,3);
 });
 
 test('linked application directories cannot evade the bare dependency audit',t=>{

@@ -53,15 +53,17 @@ def main():
  if sys.version_info<(3,10):raise Failure('python_unsupported')
  try:import sqlite3
  except ImportError:raise Failure('sqlite_unavailable')
- send('BOOTSTRAP_READY','-',{'protocol':2,'python':list(sys.version_info[:3]),'sqlite':[int(x) for x in sqlite3.sqlite_version.split('.')[:3]]})
+ send('BOOTSTRAP_READY','-',{'protocol':2,'python':list(sys.version_info[:3]),'sqlite':[int(x) for x in sqlite3.sqlite_version.split('.')[:3]],'capabilities':{'responseEncodings':['gzip-fragments-v1'],'uploadChunkBytes':[2048,4096,8192],'workerEncodings':['gzip-files-v1']}})
  k,i,h=read()
  fields=set('schema_version profile_id port expected_runtime_id worker_manifest_sha256 transport_sha256 transport_size worker_gzip_size worker_gzip_sha256 worker_size worker_sha256'.split())
- if k!='HELLO' or i!='-' or set(h)!=fields or h['schema_version']!=2 or not isinstance(h['profile_id'],str) or not re.fullmatch('[A-Za-z0-9_-]{1,100}',h['profile_id']) or type(h['port']) is not int or not 1024<=h['port']<=65535:raise Failure('invalid_hello')
+ if k!='HELLO' or i!='-' or not fields<=set(h) or set(h)-fields-{'response_encoding','upload_chunk_bytes','worker_encoding'} or h['schema_version']!=2 or not isinstance(h['profile_id'],str) or not re.fullmatch('[A-Za-z0-9_-]{1,100}',h['profile_id']) or type(h['port']) is not int or not 1024<=h['port']<=65535:raise Failure('invalid_hello')
  for key in ['worker_manifest_sha256','transport_sha256','worker_gzip_sha256','worker_sha256']:
   if not isinstance(h[key],str) or not re.fullmatch('[a-f0-9]{64}',h[key]):raise Failure('invalid_hello')
  if h['expected_runtime_id']!=h['worker_manifest_sha256'][:20]:raise Failure('invalid_hello')
  for key,limit in [('transport_size',131072),('worker_gzip_size',8388608),('worker_size',16777216)]:
   if type(h[key]) is not int or not 0<h[key]<=limit:raise Failure('invalid_hello')
+ if h.get('worker_encoding') not in (None,'gzip-files-v1'):raise Failure('invalid_hello')
+ if h.get('response_encoding') not in (None,'gzip-fragments-v1') or h.get('upload_chunk_bytes',2048) not in (2048,4096,8192):raise Failure('invalid_hello')
  phase('checking_cache')
  folder=Path.home().resolve()/'.local/state/gpu-sampling-studio/ssh-transport-v2'/h['transport_sha256'];file=folder/'bridge.py';code=None
  if private(folder) and (file.exists() or file.is_symlink()):
@@ -79,7 +81,7 @@ def main():
     code=bytes(b);break
    if k!='INSTALL' or i!=str(index) or set(v)!={'chunk'}:raise Failure('protocol_failed')
    c=base64.b64decode(v['chunk'],validate=True)
-   if not 0<len(c)<=2048 or len(b)+len(c)>h['transport_size']:raise Failure('transport_hash_mismatch')
+   if not 0<len(c)<=h.get('upload_chunk_bytes',2048) or len(b)+len(c)>h['transport_size']:raise Failure('transport_hash_mismatch')
    b.extend(c);send('ACK',index,{'accepted':index});index+=1
   private(folder,True)
   temporary=folder/('.'+os.urandom(12).hex()+'.tmp')

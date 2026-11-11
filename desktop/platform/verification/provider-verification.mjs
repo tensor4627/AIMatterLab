@@ -8,7 +8,8 @@ export async function verifyDesktop(window,root,errors,hooks={}){
  async function choose(selector,value){await js("(()=>{const e=document.querySelector("+JSON.stringify(selector)+");Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(e,"+JSON.stringify(value)+");e.dispatchEvent(new Event('change',{bubbles:true}));})()");await pause(200);}
  async function clickText(selector,text){await js("[...document.querySelectorAll("+JSON.stringify(selector)+")].find(e=>e.textContent.includes("+JSON.stringify(text)+")).click()");await pause(200);}
  try{
-  if(hooks.packaged&&!Object.values(hooks.agentPaths).every(file=>file.includes('agent-runtimes')&&fs.existsSync(file)))throw Error('Packaged CLI missing or using development path');
+  report.checks.cliRuntimes=await js("Promise.all(['kimi','qwen'].map(provider=>window.studio.invoke('agent.cli.inspect',{provider})))");
+  if(report.checks.cliRuntimes.some(value=>value.status!=='ready')){report.status='blocked';report.reason='Prepare the selected local or explicitly downloaded compatible CLIs before running this all-provider check. No download was started.';return false;}
   await pause(1200);await clickText('.nav-item','工作台');
   report.checks.renderer=await js("({node:typeof require,bridge:typeof window.studio.invoke})");
   if(report.checks.renderer.node!=='undefined')throw Error('Renderer exposes Node');

@@ -111,13 +111,22 @@ class Client:
     def request(self, target, data=None, mcp=False):
         self.send('REQUEST', 'request-' + str(len(self.wire)), {'method': 'POST' if data is not None else 'GET', 'target': target,
                                                               'mcp': mcp, **({'data': data} if data is not None else {})})
-        result = bytearray()
+        result = bytearray(); compressed = None
         while True:
             kind, _, value = self.read()
-            assert kind == 'FRAGMENT' and value['kind'] == 'RESPONSE'
+            if kind == 'COMPRESSED_BEGIN':
+                assert self.hello.get('response_encoding') == 'gzip-fragments-v1'
+                compressed = value
+                continue
+            assert kind == ('COMPRESSED_FRAGMENT' if compressed else 'FRAGMENT') and value['kind'] == 'RESPONSE'
             assert value['index'] * 96 == len(result)
             result.extend(base64.b64decode(value['chunk']))
             if value['last']:
+                if compressed:
+                    assert len(result) == compressed['compressedBytes']
+                    assert hashlib.sha256(result).hexdigest() == compressed['sha256']
+                    result = gzip.decompress(result)
+                    assert len(result) == compressed['uncompressedBytes']
                 return json.loads(result)
 
     def stop(self):
@@ -140,7 +149,41 @@ class Client:
 
 @unittest.skipUnless(os.name == 'posix', 'Linux process/socket and terminal identities')
 class TransportTests(unittest.TestCase):
-    def test_canonical_released_worker_remains_exactly_138_files(self):
+    def test_compact_bundle_preserves_pinned_files_and_rejects_malformed_file_offsets(self):
+        hello, _, _, value, files = bundle()
+        header = json.dumps({**value, 'files': [{k: v for k, v in row.items() if k != 'base64'} for row in value['files']]}, separators=(',', ':')).encode()
+        raw = len(header).to_bytes(4, 'big') + header + b''.join(files[row['path']] for row in value['files'])
+        restored = bridge.unpack_files(raw)
+        self.assertEqual(bridge.validate_manifest(restored, hello), files)
+        for broken in (raw[:-1], raw + b'junk', b'\xff\xff\xff\xff' + raw[4:]):
+            with self.assertRaises(bridge.Failure):
+                bridge.unpack_files(broken)
+
+    def test_negotiated_compact_bundle_compressed_large_reply_and_large_request_keep_stop_barrier(self):
+        with tempfile.TemporaryDirectory(prefix='studio-v2-owned-') as home:
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]
+            hello, source, old_packed, value, files = bundle(port)
+            header = json.dumps({**value, 'files': [{k: v for k, v in row.items() if k != 'base64'} for row in value['files']]}, separators=(',', ':')).encode()
+            raw = len(header).to_bytes(4, 'big') + header + b''.join(files[row['path']] for row in value['files'])
+            packed = gzip.compress(raw, compresslevel=6, mtime=0)
+            self.assertLess(len(packed), len(old_packed) * .8)
+            hello.update(worker_encoding='gzip-files-v1', response_encoding='gzip-fragments-v1', upload_chunk_bytes=2048,
+                         worker_size=len(raw), worker_sha256=hashlib.sha256(raw).hexdigest(), worker_gzip_size=len(packed), worker_gzip_sha256=hashlib.sha256(packed).hexdigest())
+            root = Path(home) / '.local/state/gpu-sampling-studio/ssh-services' / hello['profile_id']
+            client = Client(home, hello, source, packed)
+            try:
+                health = client.start(); self.assertEqual(health['runtime_id'], '62034ec6cfc1428aaa4d')
+                context = client.request('/api/authoring/context', {'workspace_id': 'owned-compressed-fixture', 'name': 'Owned compressed transport', 'structure_paths': [], 'selected_paths': []})
+                project = context['data']['project']['id']; content = 'owned harmless transport data\n' * 3000
+                self.assertEqual(client.request('/api/workspace/write', {'project_id': project, 'name': 'large-fixture.txt', 'content': content})['status'], 200)
+                self.assertEqual(client.request('/api/workspace/read', {'project_id': project, 'name': 'large-fixture.txt'})['data']['text'], content)
+                self.assertTrue(any(decode(line)[0] == 'COMPRESSED_BEGIN' for line in client.wire))
+                client.stop(); self.assertTrue(self.owned_workers(root, port))
+            finally:
+                client.dispose(); self.stop_workers(root, port)
+
+    def test_current_worker_has_exactly_138_files_and_matches_frozen_manifest(self):
         self.assertEqual(len(worker_files(WORKER)), 138)
         self.assertEqual(runtime_identity(WORKER, worker_files(WORKER)), '62034ec6cfc1428aaa4d')
 

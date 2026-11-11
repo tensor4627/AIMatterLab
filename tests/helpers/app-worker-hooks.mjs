@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import ts from 'typescript';
 import {randomUUID} from 'node:crypto';
+import * as taskWorkerBinding from '../../contracts/compute/task-worker-binding.mjs';
 import * as shell from '../../frontend/app/workspace-shell.mjs';
 import * as navigation from '../../frontend/app/workspace-navigation.mjs';
 import * as workflowsOwner0 from "../../frontend/features/workflows/workflow-catalog.mjs";
@@ -53,6 +54,8 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   },module,module.exports,window,{randomUUID});return module.exports;
  }
  const require=name=>{
+  if(name==='../../contracts/compute/task-worker-binding.mjs')return taskWorkerBinding;
+  if(name==='../ui/lazy-panel')return {lazyPanel:(name)=>'./'+name};
   if(name==='../features/workflows/task-drafts')return {clearTaskDrafts:id=>calls.push({method:'fixture.clearTaskDrafts',data:{id}})};
   if(name==='./ssh-guide-queue.mjs')return sshGuideQueue;
   if(name==='react')return {useState,useRef,useEffect};

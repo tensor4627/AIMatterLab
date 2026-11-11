@@ -1,6 +1,6 @@
 /** Human connection action over the exact already-authenticated SSH terminal. */
 import {randomUUID} from 'node:crypto';
-import {prepareSshServiceResources} from './ssh-service-resources.mjs';
+import {prepareSshServiceResourcesAsync} from './ssh-service-resources.mjs';
 import {safeSshServiceError,safeSshServicePhase,safeSshServiceProgress} from './ssh-service-state.mjs';
 
 const object=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
@@ -15,7 +15,7 @@ export function normalizeSshServiceHealth(value){
  for(const key of ['tool_configuration_schema','tool_workflow_schema'])if(Number.isSafeInteger(v[key]))report[key]=v[key];
  return report;
 }
-export function createSshService({worker,terminal,profiles,resource,source,transportSource,current=()=>null,assertIdle=()=>{},publish=()=>{},remember=()=>{},prepareResources=prepareSshServiceResources}){
+export function createSshService({worker,terminal,profiles,resource,source,transportSource,current=()=>null,assertIdle=()=>{},publish=()=>{},remember=()=>{},prepareResources=prepareSshServiceResourcesAsync}){
  let record=null,connecting=null,stopping=null,serial=0,displayRevision=0;
  const modern=()=>!!transportSource||record?.v2===true;
  function safe(){
@@ -54,7 +54,7 @@ export function createSshService({worker,terminal,profiles,resource,source,trans
   const promise=(async()=>{
    record=attempt;changed();
    try{
-    const bootstrap=prepareResources(source,{profileId:data.profileId,...transportSource?{transportSource}:{}});check();
+    const prepared=prepareResources(source,{profileId:data.profileId,...transportSource?{transportSource}:{}}),bootstrap=prepared&&typeof prepared.then==='function'?await prepared:prepared;check();
     attempt.v2=!!bootstrap.transport;attempt.dispatched=true;attempt.terminalAccess='reserved';phase(attempt,'waiting_python');
     const result=await terminal.connectService({sessionId:data.sessionId,ownerEpoch:data.ownerEpoch,profileId:data.profileId,profileVersion:data.profileVersion,requestId:data.requestId},bootstrap);check();
     if(attempt.v2){applyView(attempt,result);if(result.status!=='connected'||result.serviceActive!==true){attempt.status=attempt.terminalAccess==='available'?'failed':'unknown';attempt.error=safeSshServiceError(result.error||'connection_unconfirmed',attempt.phase);changed(attempt);return safe();}}
@@ -65,7 +65,7 @@ export function createSshService({worker,terminal,profiles,resource,source,trans
     await worker.attachServiceTransport({health,identity,target:{...identity,sessionId:data.sessionId,port:health.port},source,request:async packet=>{
      if(record!==attached||attached.status!=='connected'&&attached.status!=='connecting')fail('ssh_service_context_changed');
      profiles.read({id:data.profileId,version:data.profileVersion});
-     try{return await terminal.serviceRequest({sessionId:data.sessionId,serviceId:attached.serviceId,requestId:randomUUID(),method:packet.method,target:packet.path,data:packet.data,mcp:packet.mcp});}
+     try{return await terminal.serviceRequest({sessionId:data.sessionId,serviceId:attached.serviceId,requestId:randomUUID(),method:packet.method,target:packet.path,data:packet.data,mcp:packet.mcp,timeoutMs:packet.timeoutMs});}
      catch(error){if(record===attached){attached.status='unknown';attached.terminalAccess='unknown';attached.error=safeSshServiceError(error?.message,attached.phase);changed(attached);}throw error;}
     },detach:()=>{if(record===attached&&attached.status==='connected'){attached.status='unknown';attached.terminalAccess='unknown';attached.error=safeSshServiceError('connection_unconfirmed',attached.phase);changed(attached);}}});check();
     attached.health=health;attached.connection=worker.connection;phase(attached,'checking_tools');

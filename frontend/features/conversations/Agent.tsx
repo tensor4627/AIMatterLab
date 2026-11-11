@@ -70,7 +70,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  useEffect(()=>{if(!versionNotice)return;const timer=setTimeout(()=>setVersionNotice(null),8000);return()=>clearTimeout(timer);},[versionNotice]);
  useEffect(()=>{providerChangeRef.current?.(provider);},[provider]);
  const [workflowId,setWorkflowId]=useState<string|null>(null),[newWorkflow,setNewWorkflow]=useState(false);
- const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<symbol|null>(null),providerTouched=useRef(false),handledSelection=useRef<string|undefined>(undefined),sendOwner=useRef<symbol|null>(null);
+ const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<{provider:AgentProvider;seq:number;nonce:string|undefined;promise:Promise<boolean>}|null>(null),providerTouched=useRef(false),handledSelection=useRef<string|undefined>(undefined),sendOwner=useRef<symbol|null>(null);
  const handledDraftIntents=useRef(new Set<string>());
  const activeSend=useRef<SendFlight|null>(null),[stopStatus,setStopStatus]=useState<'waiting'|'stopping'|'unknown'|null>(null);
  const [historyLoad,setHistoryLoad]=useState<HistoryLoad|null>(null);
@@ -182,18 +182,20 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   const current=()=>request===externalSeq.current&&seq===selectionSeq.current&&selectedProvider===providerRef.current;
   try{const result=await invoke('agent.rpc',{provider:selectedProvider,method:'thread/list',params:{limit:20}});if(current())setExternalThreads(result.data||[]);}catch(error){if(current())onError(error);}finally{if(current())setImportLoading(false);}
  }
- async function connect(repairTools=false,seq=selectionSeq.current){
-  modelCallRef.current=null;setModelCall(null);
+ function connect(repairTools=false,seq=selectionSeq.current):Promise<boolean>{
   const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
-  const owner=Symbol();connectionOwner.current=owner;providerTouched.current=true;setConnecting(true);setVersionWarning(null);try{
-   const connection=await invoke('agent.connect',{provider:selectedProvider,repairTools});if(!current())return false;setTools(connection.tools||{status:'not_run',count:0});setVersionWarning(selectedProvider==='codex'?codexVersionWarning(connection.studioCompatibility):null);
+  const existing=connectionOwner.current;if(existing&&existing.provider===selectedProvider&&existing.seq===seq&&existing.nonce===nonce)return existing.promise;
+  const owner={provider:selectedProvider,seq,nonce,promise:Promise.resolve(false)};connectionOwner.current=owner;
+  const promise=(async()=>{modelCallRef.current=null;setModelCall(null);providerTouched.current=true;setConnecting(true);setVersionWarning(null);try{
+   const connection=await invoke('agent.connect',{provider:selectedProvider,repairTools});if(!current())return false;if(connection.cliRequired){setNeedsAuth(true);setConnected(false);return false;}setTools(connection.tools||{status:'not_run',count:0});setVersionWarning(selectedProvider==='codex'?codexVersionWarning(connection.studioCompatibility):null);
    const [a,m,conversations]=await Promise.all([refreshAccount(selectedProvider,seq),selectedRpc('model/list'),invoke<Conversation[]>('conversation.list')]);if(!current())return false;
    if(providerAccountState(selectedProvider,a)==='missing'){setNeedsAuth(true);setConnected(false);return false;}setNeedsAuth(false);
    const list=m.data||[];setModels(list);setModel(list.find((v:any)=>v.model===storedPreference('studio.model.'+selectedProvider))?.model||list.find((v:any)=>v.isDefault)?.model||list[0]?.model||'');
    setThreads(conversations.filter(value=>value.provider===selectedProvider).map(value=>({...value,id:value.threadId})));setConnected(true);
    return true;
   }catch(e){if(current()){setConnected(false);setModels([]);if(authenticationError(e))setNeedsAuth(true);else onError(e);}return false;}finally{if(connectionOwner.current===owner){connectionOwner.current=null;setConnecting(false);}}
+ })();owner.promise=promise;return promise;
  }
  useEffect(()=>{if(!connected)return;let active=true,checking=false;const check=async()=>{if(checking)return;checking=true;try{const result=await invoke('agent.tools',{provider:providerRef.current});if(active)setTools(result);}catch{if(active)setTools({status:'blocked',message:'科学工具连接中断，请重新连接',count:0});}finally{checking=false;}};const timer=setInterval(()=>void check(),15000);return()=>{active=false;clearInterval(timer);};},[connected,provider]);
  function resetConversation(invalidate=true){setHistoryLoad(null);setStopStatus(null);activeSend.current=null;attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setRecovery(null);pendingResume.current=null;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);selectDraft(providerRef.current,null,true);setTurn(null);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);}

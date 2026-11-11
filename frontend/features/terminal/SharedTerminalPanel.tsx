@@ -1,3 +1,4 @@
+import LoadingFeedback from '../../ui/LoadingFeedback';
 import {useEffect,useRef,useState} from 'react';
 import {Terminal} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
@@ -39,6 +40,7 @@ function terminalMessage(error:unknown){
 }
 
 export default function SharedTerminalPanel({visible,request,canShare,onError,resourceScope='',onResourceChange,provider,onConversationPrepared}:{provider?:AgentProvider;onConversationPrepared?:(conversation:Conversation)=>void;resourceScope?:string;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;visible:boolean;request?:SharedTerminalRequest;canShare:boolean;onError:(error:unknown)=>void}){
+ const [busyLabel,setBusyLabel]=useState('');
  const [sessions,setSessions]=useState<Session[]>([]),[active,setActive]=useState<Session|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[recovery,setRecovery]=useState<OpenRecovery|null>(null);
  const [serviceBusy,setServiceBusy]=useState(false),serviceBusyRef=useRef(false);
  const [service,setService]=useState<SshServiceState|null>(null),serviceRef=useRef(service),[serviceIssue,setServiceIssue]=useState(''),[serviceStopping,setServiceStopping]=useState(false),serviceStoppingRef=useRef(false),[serviceChecking,setServiceChecking]=useState(false),[serviceNow,setServiceNow]=useState(Date.now());
@@ -96,14 +98,14 @@ export default function SharedTerminalPanel({visible,request,canShare,onError,re
   setSessions(value.sessions);const selected=value.sessions.find(item=>item.sessionId===activeRef.current?.sessionId);if(selected&&activeRef.current===selectedAtStart){activeRef.current=selected;setActive(selected);}return value.sessions;
  }
  function report(error:unknown){onError(new Error(terminalMessage(error)));}
- async function action(run:()=>Promise<void>,current=()=>mounted.current){if(busyRef.current)return;busyRef.current=true;setBusy(true);setNotice('');try{await run();}catch(error){if(current())report(error);}finally{busyRef.current=false;if(mounted.current)setBusy(false);}}
+ async function action(run:()=>Promise<void>,current=()=>mounted.current,label=t('正在处理终端会话…')){if(busyRef.current)return;busyRef.current=true;setBusyLabel(label);setBusy(true);setNotice('');try{await run();}catch(error){if(current())report(error);}finally{busyRef.current=false;if(mounted.current)setBusy(false);}}
  async function open(value:OpenTarget,explicit?:{newConnection:true;requestId:string}){const context={scope:resourceOwner.current,nonce:requestOwner.current,provider:providerOwner.current},current=()=>contextCurrent(context);await action(async()=>{
   if(!await serviceAllowsSelection()||!current())return;
   let session:Session;
   try{session=await invoke<Session>('sharedTerminal.open',{...value,...explicit});}
   catch(error){if(!current())return;const message=terminalMessage(error);if(/terminal_(?:recovery_required|unavailable)\b/.test(String(error))){setRecovery({...context,target:{...value},requestId:explicit?.requestId||crypto.randomUUID(),message});}else setNotice(message);report(error);return;}
   if(!current())return;if(!await activateResource(session)||!current())return;setRecovery(null);attach(session);setSessions(old=>[session,...old.filter(item=>item.sessionId!==session.sessionId)]);void list().catch(error=>{if(current())report(error);});
- },current);}
+ },current,t('正在打开终端…'));}
  async function newConnection(){const value=recoveryRef.current;if(!value||!contextCurrent(value)||!visibleOwner.current||busyRef.current)return;await open(value.target,{newConnection:true,requestId:value.requestId});}
  async function refreshSessions(){const context={scope:resourceOwner.current,nonce:requestOwner.current,provider:providerOwner.current};await action(async()=>{await list();},()=>contextCurrent(context));}
  useEffect(()=>{if(!visible)return;void refreshResource();},[visible,resourceScope]);
@@ -196,7 +198,8 @@ export default function SharedTerminalPanel({visible,request,canShare,onError,re
    {active&&<button className="button shared-terminal-disconnect" data-testid="shared-terminal-disconnect" disabled={busy||serviceStopping} title={t('关闭当前终端，保留已保存连接和其他会话')} onClick={()=>void end()}>{t(active.kind==='ssh'?serviceFailure&&serviceReserved?'结束此 SSH 会话':'断开连接':'关闭终端')}</button>}
    <details className="shared-terminal-menu" ref={menu}><summary aria-label={t('会话操作')}>⋯</summary><div onClick={()=>{if(menu.current)menu.current.open=false;}}><button className="button" disabled={busy||serviceReserved} onClick={()=>void open({kind:'local',mode:'interactive'})}>{t('打开本地交互终端')}</button><button className="button" disabled={busy} onClick={()=>void list().catch(report)}>{t('刷新会话列表')}</button>{active&&<button className="button" disabled={busy||serviceReserved} onClick={detach}>{t('分离视图')}</button>}</div></details>
   </div>
-  {busy&&!active&&<p className="shared-terminal-notice" role="status">{t('正在打开终端…')}</p>}
+  <LoadingFeedback busy={busy} label={busyLabel}/>
+  <LoadingFeedback busy={serviceInProgress} label={t('正在接入作业服务…')} phase={t(servicePhaseMessage(visibleService?.phase))} startedAt={visibleService?.startedAt}/>
   {visibleRecovery&&<div className="shared-terminal-confirm" role="alert" data-testid="shared-terminal-recovery"><span>{visibleRecovery.message}</span><button className="button" data-testid="shared-terminal-recovery-refresh" disabled={busy} onClick={()=>void refreshSessions()}>{t('刷新会话列表')}</button><button className="button" data-testid="shared-terminal-recovery-new" disabled={busy||!visible} onClick={()=>void newConnection()}>{t(visibleRecovery.target.kind==='ssh'?'保留原会话，另开新连接':'保留原会话，另开新终端')}</button></div>}
   {active?.kind==='ssh'&&(visibleService?.phase||serviceFailure||serviceReserved)&&<div className="ssh-service-status" data-testid="ssh-service-status">
    <div className="ssh-service-status-heading"><strong role="status" data-testid="ssh-service-phase">{t(servicePhaseMessage(visibleService?.phase))}</strong><button className="button" data-testid="ssh-service-refresh" disabled={serviceChecking} onClick={()=>void checkService()}>{t(serviceChecking?'正在核对…':'重新核对状态')}</button></div>

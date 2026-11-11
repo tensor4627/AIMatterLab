@@ -3,13 +3,13 @@ import {computeResources} from '../api/compute-resources';
 import type {ComputeResourceState} from '../../contracts/dto/compute';
 import {useToolWorkflowNavigation} from "../features/workflows/useToolWorkflowNavigation";
 import {useConversationSelection,storedConversation,storeConversation} from "../features/conversations/useConversationSelection";
-import ComputeConnectionChooser from "../features/compute/ComputeConnectionChooser";
+
 import ConversationCommands from "../features/conversations/ConversationCommands";
 import WorkbenchImageCommand from "../features/diagnostics/WorkbenchImageCommand";
 import {type WorkbenchImageResult} from '../../contracts/dto/diagnostics';
-import ComputeEnvironments from "../features/compute/ComputeEnvironments";
-import ComputeConnectionGuide from "../features/compute/ComputeConnectionGuide";
-import SshConnectionGuide,{type SshAuthenticationRequest} from "../features/cluster/SshConnectionGuide";
+
+
+import type {SshAuthenticationRequest} from "../features/cluster/SshConnectionGuide";
 import {enqueueSshGuide,takeQueuedSshGuide} from './ssh-guide-queue.mjs';
 import {computeConnectionCommandMatches} from "../features/compute/compute-connection-command.mjs";
 
@@ -39,24 +39,24 @@ import {TaskCards,Relations,ToolPage,WorkflowPage} from "../features/workflows/W
 import {tasks,tools} from "../features/workflows/workflow-catalog.mjs";
 import {type Plan} from "../../contracts/workflows/plan.mjs";
 
-import ClusterPage,{ClusterRunPage} from "../features/cluster/ClusterPage";
-import DeploymentPanel from "../features/workflows/DeploymentPanel";
+
+
 import {deploymentApi} from "../api/deployment-client";
-import AgentTaskPage from "../features/workflows/AgentTaskPage";
+
 import ProjectAuthorizationForm,{type ProjectAuthorizationSpec} from "../features/compute/ProjectAuthorizationForm";
 import {createProjectPolicyEditor,type ProjectPolicyEditor} from "../features/compute/project-policy-edit.mjs";
 
 import Agent from "../features/conversations/Agent";
-import AccountCenter from "../features/settings/AccountCenter";
-import SettingsPage from "../features/settings/SettingsPage";
-import SkillsWorkbench from "../features/tools/SkillsWorkbench";
-import PygasTaskComposer from "../features/pygas/PygasTaskComposer";
+
+
+
+
 import {t,setLanguage} from "../ui/i18n";
 import RunDetail from "../features/runs/RunDetail";
 import RunReview,{taskModule} from "../features/runs/RunReview";
-import {MaterialsProjectSearch} from "../features/assets/MaterialsProject";
-import StructureBuilder from "../features/assets/StructureBuilder";
-import AssetInspector from "../features/assets/AssetInspector";
+
+
+
 import {CodeEditor} from "../ui/widgets";
 import SharedTerminalPanel,{type SharedTerminalRequest} from "../features/terminal/SharedTerminalPanel";
 import {Modal,Empty,Badge,statusNames} from "../ui/Dialogs";
@@ -70,6 +70,26 @@ import {type Settings} from '../../contracts/dto/settings';
 import {type Artifact} from '../../contracts/dto/assets';
 import {type Conversation,type AgentProvider} from '../../contracts/dto/agent';
 import {type AgentIntent,type SkillAttachment} from '../features/conversations/agent-types';
+
+import {lazyPanel} from "../ui/lazy-panel";
+import LoadingFeedback from "../ui/LoadingFeedback";
+import CliRuntimeDialog from "../features/settings/CliRuntimeDialog";
+import type {CliReadiness} from "../../contracts/dto/cli-runtime";
+const ComputeConnectionChooser=lazyPanel("ComputeConnectionChooser",()=>import("../features/compute/ComputeConnectionChooser"));
+const ComputeEnvironments=lazyPanel("ComputeEnvironments",()=>import("../features/compute/ComputeEnvironments"));
+const ComputeConnectionGuide=lazyPanel("ComputeConnectionGuide",()=>import("../features/compute/ComputeConnectionGuide"));
+const DeploymentPanel=lazyPanel("DeploymentPanel",()=>import("../features/workflows/DeploymentPanel"));
+const AgentTaskPage=lazyPanel("AgentTaskPage",()=>import("../features/workflows/AgentTaskPage"));
+const AccountCenter=lazyPanel("AccountCenter",()=>import("../features/settings/AccountCenter"));
+const SettingsPage=lazyPanel("SettingsPage",()=>import("../features/settings/SettingsPage"));
+const SkillsWorkbench=lazyPanel("SkillsWorkbench",()=>import("../features/tools/SkillsWorkbench"));
+const PygasTaskComposer=lazyPanel("PygasTaskComposer",()=>import("../features/pygas/PygasTaskComposer"));
+const StructureBuilder=lazyPanel("StructureBuilder",()=>import("../features/assets/StructureBuilder"));
+const AssetInspector=lazyPanel("AssetInspector",()=>import("../features/assets/AssetInspector"));
+const ClusterPage=lazyPanel("ClusterPage",()=>import("../features/cluster/ClusterPage"));
+const ClusterRunPage=lazyPanel("ClusterRunPage",async()=>{const module=await import("../features/cluster/ClusterPage");return {default:module.ClusterRunPage};});
+const MaterialsProjectSearch=lazyPanel("MaterialsProjectSearch",async()=>{const module=await import("../features/assets/MaterialsProject");return {default:module.MaterialsProjectSearch};});
+const SshConnectionGuide=lazyPanel("SshConnectionGuide",()=>import("../features/cluster/SshConnectionGuide"));
 
 const sections=[['home','工作区',Layers3],['tools','工具',Layers3],['relations','工具关系图',GitBranch],['runs','任务',Activity],['bias','Bias 实验室',FlaskConical],['training','模型与训练',GraduationCap],['assets','数据资产',Database],['environments','计算环境',Server],['deployment','部署与执行',Play],['ssh','SSH 集群',Terminal],['skills','技能库',BookOpen]] as const;
 const initialSettings:Settings={distribution:'Ubuntu',workerRoot:'~/.local/state/gpu-sampling-studio',workerPort:8767,codexPath:'codex',cwd:'',skillRoots:[],theme:'dark'};
@@ -99,6 +119,7 @@ export default function App(){
  if(!settingsReady.current)settingsReady.current=new Promise<void>(resolve=>{finishSettings.current=resolve;});
  const [workerRestoring,setWorkerRestoring]=useState(true),[runSourceEpoch,setRunSourceEpoch]=useState<number|null>(null),[serviceVersion,setServiceVersion]=useState<'current'|'different'|'unconfirmed'>('unconfirmed');
  const [sidebarVisible,setSidebarVisible]=useState(localStorage.getItem('studio.sidebarVisible')!=='false'),[sidebarWidth,setSidebarWidth]=useState(stored('studio.sidebarWidth',240)),[railMode,setRailMode]=useState('chats'),[chatGroups,setChatGroups]=useState<{id:string;name:string}[]>([]),[chatGroupId,setChatGroupId]=useState<string|null>(null),[groupName,setGroupName]=useState('');
+ const [cliRequired,setCliRequired]=useState<CliReadiness|null>(null);
  const [accountsProvider,setAccountsProvider]=useState<AgentProvider>('codex'),[renameTarget,setRenameTarget]=useState<Conversation|null>(null),[conversationName,setConversationName]=useState(''),[renaming,setRenaming]=useState(false);
  const [deleteTarget,setDeleteTarget]=useState<Conversation|null>(null),[deleting,setDeleting]=useState(false);
  const [agentTasks,setAgentTasks]=useState<any[]>([]),[clusterDraft,setClusterDraft]=useState<any>();
@@ -124,9 +145,12 @@ export default function App(){
  async function refreshComputeResource(){const seq=++resourceReadSequence.current,scope=resourceScopeRef.current,selection=conversationSelectionSeq.current;try{const value=await computeResources.status();if(mounted.current&&seq===resourceReadSequence.current&&scope===resourceScopeRef.current&&selection===conversationSelectionSeq.current)acceptComputeResource(value);}catch{/* Unknown resource state must not replace the actual worker observation. */}}
  const deploymentOpening=useRef<{taskId:string;promise:Promise<void>}|null>(null);
  const [agentWidth,setAgentWidth]=useState(stored('studio.agentWidth',340)),[overviewAgentWidth,setOverviewAgentWidth]=useState(stored('studio.overviewAgentWidth',340)),[tabs,setTabs]=useState<string[]>(['home']),[gpuStatus,setGpuStatus]=useState<any[]>([]),[disconnected,setDisconnected]=useState(false);
+ const editorSaving=useRef(false),editorLatest=useRef(editor);editorLatest.current=editor;
+ const [editorSave,setEditorSave]=useState(''),[openingRun,setOpeningRun]=useState<{id:string;sequence:number}|null>(null),openingRunRef=useRef<{id:string;sequence:number}|null>(null);
  const [editorDirty,setEditorDirty]=useState(false),[paletteSearch,setPaletteSearch]=useState('');
  const [refreshFeedback,setRefreshFeedback]=useState<{seq:number;status:'loading'|'complete'|'partial'|'failed';at:number|null}|null>(null);
  const refreshing=useRef(false),gpuLoading=useRef(false),sourceFailures=useRef(new Map<string,number>()),sourceGeneration=useRef(0);const [gpuStale,setGpuStale]=useState(false);
+ const referenceReads=useRef(new Map<string,number>());
  const refreshSeq=useRef(0),latestRefresh=useRef<Promise<void>>(Promise.resolve()),openSeq=useRef(0),settingsBackup=useRef<Settings|null>(null),settingsWorkerReady=useRef(false),editorSource=useRef(editor.source);editorSource.current=editor.source;
  const onError=(e:unknown)=>setError(createDiagnostic(e));
  const {conversations,setConversations,selectedConversationId,setSelectedConversationId,selectedConversationRef,conversationSelectionSeq,sessionSelection,setSessionSelection,freshSelectionPending,agentBusy,setAgentBusy,planningMode,setPlanningMode,conversationChanged,acceptAgentConversation,chooseConversation,newConversation,retryNewConversation}=useConversationSelection({
@@ -141,6 +165,7 @@ export default function App(){
  useEffect(()=>{void refreshComputeResource();return()=>{resourceReadSequence.current++;};},[computeResourceScope]);
  const {focus:toolWorkflowFocus,open:openToolWorkflow}=useToolWorkflowNavigation({mounted,selected:selectedConversationRef,selectionSequence:conversationSelectionSeq,navigationSequence:openSeq,busy:agentBusy,conversations,chooseConversation,onError,onOpen:location=>{setPrimaryPanel('workspace');setSelected(null);setSection('agent-task:'+location.task_id);}});
  useEffect(()=>window.studio?.onEvent(event=>{
+  if(event.method==='studio/cliRuntimeRequired'&&['kimi','qwen'].includes(event.provider||'')&&event.params?.provider===event.provider)setCliRequired(event.params);
   if(event.method==='studio/computeResourceChanged'||event.method==='studio/toolsStatus'||event.method==='studio/sshServiceChanged')void refreshComputeResource();
   if(event.method==='studio/computeSetup'&&event.params.status!=='discovering')void refresh();
   if(event.method==='studio/workerConnected'&&explicitConnection.current===null){beginWorkerGate();if(initialSelectionReady.current)void observeWorker(selectedConversationRef.current?.taskId);}
@@ -159,6 +184,7 @@ export default function App(){
  const visibleRuns=runs.filter(r=>(!runProjectId||r.project_id===runProjectId)&&(!search||[r.name,r.engine,r.status,tr(statusNames[r.status]||r.status)].join('\n').toLowerCase().includes(search.toLowerCase())));
  useEffect(()=>{
    mounted.current=true;
+  const interactiveFrame=requestAnimationFrame(()=>void invoke('diagnostics.performance',{phase:'renderer-interactive'}).catch(()=>{}));
   let disposed=false;const revision=settingsRevision.current;
   const restoreSequence=conversationSelectionSeq.current,list=invoke<Conversation[]>('conversation.list').then(values=>{if(!disposed)setConversations(values);return values;}).catch(error=>{if(!disposed)onError(error);return [];});
   void invoke<any[]>('conversation.groups').then(setChatGroups).catch(onError);
@@ -167,7 +193,7 @@ export default function App(){
   const state=invoke('state').then(state=>{if(disposed||revision!==settingsRevision.current)return;setLanguage(state.settings.language||'zh-CN');settingsKnown.current=true;settingsRef.current=state.settings;applySettings(state.settings);}).catch(error=>{if(!disposed)onError(error);}).finally(()=>finishSettings.current());
   void Promise.all([list,state]).then(async([values])=>{if(disposed)return;initialSelectionReady.current=true;if(restoreSequence!==conversationSelectionSeq.current)return;const previous=values.find(c=>c.id===storedConversation());if(previous)await chooseConversation(previous);else if(revision===settingsRevision.current&&explicitConnection.current===null)await observeWorker(undefined,false,true);});
   const handle=(e:KeyboardEvent)=>{if(projectPolicyOwner.current.modal==='project-edit'&&projectPolicyOwner.current.saving&&(e.key==='Escape'||(e.ctrlKey||e.metaKey)&&e.key==='k')){e.preventDefault();return;}if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();setCommand(v=>!v);}if(e.key==='Escape'){setModal(m=>m==='settings'?m:'');setCommand(false);setPaletteSearch('');}};
-  document.addEventListener('keydown',handle);return()=>{disposed=true;mounted.current=false;workerHydrationEpoch.current++;workerReady.current=false;finishSettings.current();document.removeEventListener('keydown',handle);};
+  document.addEventListener('keydown',handle);return()=>{cancelAnimationFrame(interactiveFrame);disposed=true;mounted.current=false;workerHydrationEpoch.current++;workerReady.current=false;finishSettings.current();document.removeEventListener('keydown',handle);};
  },[]);
  useEffect(()=>{
   document.documentElement.dataset.theme=settings.theme;
@@ -195,7 +221,7 @@ export default function App(){
  useEffect(()=>{if(section!=='home')setPrimaryPanel('workspace');},[section]);
  useEffect(()=>{if(!sessionSelection?.new)return;const frame=requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.agent-panel .composer textarea')?.focus());return()=>cancelAnimationFrame(frame);},[sessionSelection?.nonce]);
  function invalidateRefresh(){setRefreshFeedback(null);refreshSeq.current++;refreshing.current=false;latestRefresh.current=Promise.resolve();}
- function beginWorkerGate(){workerHydrationEpoch.current++;workerReady.current=false;setRunSourceEpoch(null);setWorkerSourceId('');setWorkerNotice('');setServiceVersion('unconfirmed');setWorker(false);setWorkerRestoring(true);sourceGeneration.current++;projectPolicyWorkerEpoch.current++;invalidateRefresh();return workerHydrationEpoch.current;}
+ function beginWorkerGate(){workerHydrationEpoch.current++;workerReady.current=false;setRunSourceEpoch(null);setWorkerSourceId('');setWorkerNotice('');setServiceVersion('unconfirmed');setWorker(false);setWorkerRestoring(true);sourceGeneration.current++;referenceReads.current.clear();projectPolicyWorkerEpoch.current++;invalidateRefresh();return workerHydrationEpoch.current;}
  async function observeWorker(taskId?:string|null,explicit=false,global=false){
   const epoch=beginWorkerGate(),conversationId=!taskId&&!explicit?selectedConversationRef.current?.id:undefined,current=()=>mounted.current&&epoch===workerHydrationEpoch.current;
   await settingsReady.current;if(!current())return false;if(!settingsKnown.current){setWorkerRestoring(false);return true;}
@@ -204,24 +230,49 @@ export default function App(){
   catch(error){if(current()){setWorkerRestoring(false);onError(error);}}
   return current();
  }
- function refresh(force=true,manual=false):Promise<void>{if(!workerReady.current)return Promise.resolve();if(!force&&refreshing.current)return latestRefresh.current;if(force){sourceFailures.current.clear();sourceGeneration.current++;}const seq=++refreshSeq.current;if(manual)setRefreshFeedback({seq,status:'loading',at:null});else if(force)setRefreshFeedback(null);refreshing.current=true;const job=loadAll(seq).finally(()=>{if(seq===refreshSeq.current)refreshing.current=false;});latestRefresh.current=job;return job;}
- async function loadAll(seq:number):Promise<void>{
-   const paths=['/api/projects','/api/environments','/api/runs','/api/assets','/api/cluster-runs'];
-   const assetsVisible=section==='assets';
-   const requested=paths.map(path=>path==='/api/assets'?assetsVisible&&(sourceFailures.current.get(path)||0)<3:(sourceFailures.current.get(path)||0)<3);
-   const results=await Promise.allSettled(paths.map((path,index)=>requested[index]?api<any[]>('GET',path):Promise.reject(new Error('Read polling paused'))));
-   if(seq!==refreshSeq.current)return latestRefresh.current;
-   results.forEach((result,index)=>{if(!requested[index])return;if(result.status==='fulfilled')sourceFailures.current.delete(paths[index]);else sourceFailures.current.set(paths[index],(sourceFailures.current.get(paths[index])||0)+1);});
-   const [p,e,r,a,c]=results;
-   if(p.status==='fulfilled'){setProjects(p.value);}
-   if(e.status==='fulfilled')setEnvironments(e.value);
-   if(r.status==='fulfilled'){setRuns(r.value);setRunSourceEpoch(workerHydrationEpoch.current);}
-   if(a.status==='fulfilled')setAssets(a.value);
-   if(c.status==='fulfilled')setClusterRuns(c.value);
-   setDisconnected(r.status==='rejected');
-   const at=Date.now()/1000;
-   const scored=results.filter((result,index)=>paths[index]!=='/api/assets'||assetsVisible);if(mounted.current)setRefreshFeedback(previous=>previous?.seq===seq?{seq,status:scored.every(result=>result.status==='fulfilled')?'complete':scored.some(result=>result.status==='fulfilled')?'partial':'failed',at:Date.now()}:previous);
-   setRecordObservations(previous=>({local:r.status==='fulfilled'?{at,stale:false,loaded:true}:{...previous.local,stale:true,paused:(sourceFailures.current.get('/api/runs')||0)>=3},cluster:c.status==='fulfilled'?{at,stale:false,loaded:true}:{...previous.cluster,stale:true,paused:(sourceFailures.current.get('/api/cluster-runs')||0)>=3}}));
+ function refresh(force=true,manual=false):Promise<void>{
+  if(!workerReady.current)return Promise.resolve();
+  if(refreshing.current&&(!force||manual)){if(manual)setRefreshFeedback({seq:refreshSeq.current,status:'loading',at:null});return latestRefresh.current;}
+  if(force){sourceFailures.current.clear();sourceGeneration.current++;}
+  const seq=++refreshSeq.current;if(manual)setRefreshFeedback({seq,status:'loading',at:null});else if(force)setRefreshFeedback(null);
+  refreshing.current=true;const job=loadAll(seq,force).finally(()=>{if(seq===refreshSeq.current)refreshing.current=false;});latestRefresh.current=job;return job;
+ }
+ async function loadAll(seq:number,force:boolean):Promise<void>{
+  const paths=['/api/projects','/api/environments','/api/runs','/api/assets','/api/cluster-runs'],epoch=workerHydrationEpoch.current,generation=sourceGeneration.current;
+  const current=()=>mounted.current&&seq===refreshSeq.current&&epoch===workerHydrationEpoch.current&&generation===sourceGeneration.current;
+  const now=Date.now(),requested=paths.map(path=>{
+   if((sourceFailures.current.get(path)||0)>=3)return false;
+   if(path==='/api/assets')return section==='assets';
+   if(path==='/api/projects'||path==='/api/environments')return force||!referenceReads.current.has(path)||now-referenceReads.current.get(path)!>=30000;
+   return true;
+  });
+  const results=await Promise.allSettled(paths.map(async(path,index)=>{
+   if(!requested[index])return;
+   if(index<2)referenceReads.current.set(path,now);
+   try{
+    const value=await api<any[]>('GET',path);if(!current())return;
+    sourceFailures.current.delete(path);
+    if(index===0)setProjects(value);
+    if(index===1)setEnvironments(value);
+    if(index===2){setRuns(value);setRunSourceEpoch(epoch);setDisconnected(false);}
+    if(index===3)setAssets(value);
+    if(index===4)setClusterRuns(value);
+    const key=index===2?'local':index===4?'cluster':null;
+    if(key)setRecordObservations(previous=>({...previous,[key]:{at:Date.now()/1000,stale:false,loaded:true}}));
+   }catch(error){
+    if(current()){
+     const failures=(sourceFailures.current.get(path)||0)+1;sourceFailures.current.set(path,failures);
+     if(index===2)setDisconnected(true);
+     const key=index===2?'local':index===4?'cluster':null;
+     if(key)setRecordObservations(previous=>({...previous,[key]:{...previous[key],stale:true,paused:failures>=3}}));
+    }
+    throw error;
+   }
+  }));
+  if(!current())return;
+  const scored=results.filter((_result,index)=>requested[index]);
+  if(results[2].status==='fulfilled'&&requested[2]&&results[4].status==='fulfilled'&&requested[4])void invoke('diagnostics.performance',{phase:'workspace-observed'}).catch(()=>{});
+  setRefreshFeedback(previous=>previous?.seq===seq?{seq,status:scored.every(result=>result.status==='fulfilled')?'complete':scored.some(result=>result.status==='fulfilled')?'partial':'failed',at:Date.now()}:previous);
  }
  useEffect(()=>{if(!worker)return;void refresh(false);const timer=setInterval(()=>void refresh(false),2500);return()=>clearInterval(timer);},[worker,projectId,section]);
  function openComputeGuide(taskId=selectedConversationRef.current?.taskId,profile?:{id:string;version:number}):Promise<boolean>{if(computeGuideRequest.current)return computeGuideRequest.current.promise;const id=crypto.randomUUID();let resolve!:(connected:boolean)=>void;const promise=new Promise<boolean>(done=>{resolve=done;});computeGuideRequest.current={id,promise,resolve};setConnecting(true);setComputeGuide({id,...profile?{profile}:taskId?{taskId}:{}});return promise;}
@@ -271,10 +322,19 @@ export default function App(){
   try{const value=JSON.parse(runJson);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('JSON object required');setRunDraft(value);}catch(e){onError(e);}
  }
  function confirmReplace(extra=false){return !(editorDirty||extra)||window.confirm(tr('编辑器中有未保存的修改，是否替换？'));}
- async function saveInput(){
-  if(!project)throw new Error('先选择或创建项目');
-  const result=await api('POST','/api/workspace/write',{project_id:projectId,name:editor.name,content:editor.source});
-  if(editorSource.current===editor.source){setEditor(old=>({...old,path:result.path}));setEditorDirty(false);}return result.path;
+ async function saveInput(mode:'project'|'windows'='project'){
+  if(editorSaving.current)return;editorSaving.current=true;setEditorSave(mode);
+  const snapshot=editorLatest.current,epoch=workerHydrationEpoch.current,selectedProject=projectId;
+  const current=()=>mounted.current&&editorLatest.current.id===snapshot.id&&editorLatest.current.name===snapshot.name&&editorLatest.current.source===snapshot.source;
+  try{
+   if(mode==='windows'){
+    const result=await invoke('file.save',{id:snapshot.id,content:snapshot.source,name:snapshot.name});
+    if(result&&current()){setEditor(previous=>({...previous,...result}));setEditorDirty(false);}return result?.path;
+   }
+   if(!project)throw Error('先选择或创建项目');
+   const result=await api('POST','/api/workspace/write',{project_id:selectedProject,name:snapshot.name,content:snapshot.source});
+   if(current()&&epoch===workerHydrationEpoch.current&&projectPolicyOwner.current.projectId===selectedProject){setEditor(previous=>({...previous,path:result.path}));setEditorDirty(false);}return result.path;
+  }finally{editorSaving.current=false;if(mounted.current)setEditorSave('');}
  }
  async function runAction(id:string,action:string){try{await api('POST','/api/run/'+action,{run_id:id});await refresh();}catch(e){onError(e);}}
  function startTerminal(){
@@ -295,8 +355,9 @@ export default function App(){
  const active=runs.filter(r=>r.status==='running'),queued=runs.filter(r=>r.status==='queued'),unknownRuns=runs.filter(r=>r.status==='unknown'),queueItems=[...active,...queued,...unknownRuns,...clusterRuns.filter(run=>['queued','running','unknown'].includes(run.status))],statusKnown=worker&&!disconnected&&recordObservations.local.loaded&&recordObservations.cluster.loaded&&!recordObservations.local.stale&&!recordObservations.cluster.stale;
  const context=JSON.stringify({workflow:section.startsWith('plan:')?plans.find(p=>p.id===section.slice(5)):section.startsWith('workflow:')?tasks.find(t=>t.id===section.slice(9)):null,clusters:project?.policy.clusters||[],project:project?{id:project.id,name:project.name,policy:project.policy}:null,selectedRun:selectedRun?{id:selectedRun.id,engine:selectedRun.engine,status:selectedRun.status}:null,environments:environments.map(e=>({id:e.id,name:e.name}))});
  async function openTask(id:string){
-  const seq=++openSeq.current;
-  try{const run=await api<Run>('POST','/api/run/status',{run_id:id});if(seq!==openSeq.current)return;if(run.studio_workflow_binding){await openToolWorkflow(run.id);return;}invalidateRefresh();setRuns(old=>[run,...old.filter(r=>r.id!==run.id)]);setProjectId(run.project_id);setSelected(id);setSection('task:'+id);void refresh();}catch(e){if(seq===openSeq.current)onError(e);}
+  if(openingRunRef.current?.id===id&&openingRunRef.current.sequence===openSeq.current)return;
+  const sequence=++openSeq.current,ticket={id,sequence};openingRunRef.current=ticket;setOpeningRun(ticket);
+  try{const run=await api<Run>('POST','/api/run/status',{run_id:id});if(sequence!==openSeq.current||!mounted.current)return;if(run.studio_workflow_binding){await openToolWorkflow(run.id);return;}invalidateRefresh();setRuns(old=>[run,...old.filter(r=>r.id!==run.id)]);setProjectId(run.project_id);setSelected(id);setSection('task:'+id);void refresh();}catch(error){if(sequence===openSeq.current&&mounted.current)onError(error);}finally{if(openingRunRef.current===ticket){openingRunRef.current=null;if(mounted.current)setOpeningRun(null);}}
  }
  function replaceTask(run:Run){openSeq.current++;invalidateRefresh();setRuns(old=>[run,...old.filter(r=>r.id!==run.id)]);setSelected(run.id);setSection('task:'+run.id);}
  function openWorkflow(id:string){openSeq.current++;setSection('workflow:'+id);setSelected(null);}
@@ -382,7 +443,7 @@ export default function App(){
    <section className="workspace-stage">{conversationWorkspace&&<div className="workspace-modebar" data-testid="workspace-modebar">{needsPanelSelection&&<div className="panel-selection"><button data-testid="show-agent" aria-pressed={primaryPanel==='agent'} onClick={showAgent}><MessageSquare size={15}/>{t('对话')}</button><button data-testid="show-workspace" aria-pressed={primaryPanel==='workspace'} onClick={()=>{setPrimaryPanel('workspace');if(retainedTask)go('agent-task:'+retainedTask.id);}}><GitBranch size={15}/>{t(retainedTask?'计算流程':'工作区')}</button></div>}<div className="workspace-priority"><button data-testid="priority-chat" aria-pressed={settings.agentLayout==='center'} onClick={()=>switchPriority('center')}>{t('对话优先')}</button><button data-testid="priority-workflow" aria-pressed={settings.agentLayout!=='center'} onClick={()=>switchPriority('right')}>{t('流程优先')}</button></div></div>}<div className="workspace-panels">
    <main className="main-column">
     <div className="workspace-toolbar"><div className="workspace-tabs">{tabs.map(id=><div key={id} className={"workspace-tab "+(section===id?"selected-tab":"")}><span className="workspace-current-title"><ModuleIcon module={workspaceModule(id,id.startsWith('task:')?runs.find(run=>run.id===id.slice(5))?.engine||'':'')} size={13}/>{tr(sections.find(s=>s[0]===id)?.[1]||tabName(id)||(id.startsWith("task:")?taskModule(runs.find(r=>r.id===id.slice(5))?.engine||"")+" · "+(runs.find(r=>r.id===id.slice(5))?.name||id.slice(5,13)):(id==="editor"?editor.name:"工作台")))}</span></div>)}</div><div className="toolbar-actions"><button className="icon-button" title={tr("刷新")} aria-label={tr("刷新")} disabled={!worker||refreshFeedback?.status==='loading'} onClick={()=>void refresh(true,true)}><RefreshCw size={14}/></button><button className="icon-button" title={tr("切换 Agent 面板")} aria-label={tr("切换 Agent 面板")} onClick={toggleAgent}>{agentPanelVisible?<PanelRightClose size={16}/>:<PanelRightOpen size={16}/>}</button></div></div>
-    <div className="workspace-content">{worker&&!disconnected&&serviceVersion!=='current'&&<div className="notice" role="status" data-testid="worker-service-version" data-version={serviceVersion}><strong>{tr(serviceVersion==='different'?'作业服务与当前软件版本不同':'作业服务实现版本尚未核对')}</strong><p>{tr('历史记录可继续读取；当前软件的新工具接口尚未确认。需要更新时，请使用“连接计算资源 → 本地 WSL”明确连接，现有任务保留。')}</p></div>}<div hidden={section!=='runs'}><ViewBoundary onHome={()=>go('home')}><JobsPage local={runs} cluster={clusterRuns} observations={recordObservations} projects={projects} projectId={runProjectId} tasks={agentTasks} conversations={conversations} worker={worker} busy={agentBusy} onRefresh={()=>void refresh(true,true)} onOpen={openJob} onConversation={conversation=>void chooseConversation(conversation)}/></ViewBoundary></div>
+    <div className="workspace-content"><LoadingFeedback busy={!!openingRun&&openingRun.sequence===openSeq.current} label={tr("正在读取运行记录…")}/>{worker&&!disconnected&&serviceVersion!=='current'&&<div className="notice" role="status" data-testid="worker-service-version" data-version={serviceVersion}><strong>{tr(serviceVersion==='different'?'作业服务与当前软件版本不同':'作业服务实现版本尚未核对')}</strong><p>{tr('历史记录可继续读取；当前软件的新工具接口尚未确认。需要更新时，请使用“连接计算资源 → 本地 WSL”明确连接，现有任务保留。')}</p></div>}<div hidden={section!=='runs'}><ViewBoundary onHome={()=>go('home')}><JobsPage local={runs} cluster={clusterRuns} observations={recordObservations} projects={projects} projectId={runProjectId} tasks={agentTasks} conversations={conversations} worker={worker} busy={agentBusy} onRefresh={()=>void refresh(true,true)} onOpen={openJob} onConversation={conversation=>void chooseConversation(conversation)}/></ViewBoundary></div>
     <div hidden={!retainedTask||section!=='agent-task:'+retainedTask.id}>{retainedTask&&<ViewBoundary key={retainedTask.id} onHome={()=>go('home')}><AgentTaskPage toolWorkflowFocus={toolWorkflowFocus} onBindDraft={connectAndBindDraft} onDeploy={id=>void openDeployment(id)} navigationBusy={agentBusy} key={retainedTask.id} worker={worker&&!disconnected} onReconnect={connectWorker} task={retainedTask} environments={environments} theme={settings.theme} onError={onError} onRun={id=>void openTask(id)} onCluster={id=>setSection('cluster-run:'+id)} onSetup={id=>void api<any[]>('GET','/api/cluster-drafts').then(values=>{setClusterDraft(values.find(v=>v.id===id));setSection('ssh');}).catch(onError)} onAgent={askAgent} onReview={task=>void reviewWorkflow(task)} onReplace={replaceTask} onRefresh={()=>refresh()} customCvInvoke={customCvInvoke} customProvider={agentProvider} onCustomDiscussion={request=>void discussCustomCv(request)} importAsset={importCompositionAsset}/></ViewBoundary>}</div><ViewBoundary key={section} onHome={()=>go('home')}>
      {section==='deployment'&&<div className="page"><div className="page-heading"><div><h1>{tr('部署与执行')}</h1><p>{tr('选择已定义的科学流程，再配置算力和提交方式。')}</p></div></div><div className="task-cards">{agentTasks.filter(t=>t.workflowVersion===2).map(task=><button key={task.id} className="card" disabled={agentBusy} onClick={()=>void openDeployment(task.id)}><strong>{task.name}</strong><p>{tr(task.review?.status==='ready'?'科学参数已复核':'等待科学参数复核')}</p></button>)}</div></div>}
      {section.startsWith('deployment:')&&agentTasks.find(t=>t.id===section.slice(11))&&<DeploymentPanel onOpenConnections={openOriginalConnection} key={section} task={agentTasks.find(t=>t.id===section.slice(11))} worker={worker&&!disconnected} restoring={workerRestoring} onAutomaticRestore={()=>observeWorker(section.slice(11))} projects={projects} environments={environments} onTask={id=>setSection('agent-task:'+id)} onRun={(id,kind)=>kind==='cluster-run'?setSection('cluster-run:'+id):void openTask(id)} onError={onError} onRefresh={()=>refresh()} onProjectSettings={project=>void editProjectPolicy(project)} onReconnect={()=>connectWorker(section.slice(11))}/>}
@@ -406,7 +467,7 @@ export default function App(){
       {section==='tools'&&<div className="page tools-directory" data-testid="tools-directory"><div className="page-heading"><div><h1>{t('工具')}</h1><p>{t('按当前任务选择工具，已有软件能力与待接入模块保持标明。')}</p></div></div>{toolGroups.map(group=><section className="tool-directory-group" key={group.id}><h2>{t(group.label)}</h2><div className="tool-directory-grid">{group.tools.map(id=>{const tool=tools.find(value=>value.id===id)!;return <button key={id} data-testid={'open-tool-'+id} onClick={()=>go('tool:'+id)}><ModuleIcon module={id}/><span><strong>{t(tool.name)}</strong><small>{t(tool.description)}</small></span><ChevronRight size={16}/></button>;})}{group.pages.map(id=><button key={id} onClick={()=>go(id)}><ModuleIcon module={workspaceModule(id)}/><span><strong>{t(sections.find(value=>value[0]===id)?.[1]||id)}</strong></span><ChevronRight size={16}/></button>)}</div></section>)}</div>}
      {section==='bias'&&<div className="page"><div className="page-heading"><div><span className="eyebrow">PYGAS LIBRARY COMPOSITION</span><h1>{tr('Bias 实验室')}</h1><p>{tr('使用当前会话的实际 pyGAS 类库与组合图；保存后仍需独立复核和执行。')}</p></div><FileCode2 size={27}/></div>{(()=>{const current=agentTasks.find(task=>task.id===selectedConversationRef.current?.taskId);return current?<><button className="button" onClick={()=>setSection('agent-task:'+current.id)}>{tr('返回当前计算流程')}</button><PygasTaskComposer key={current.id+':'+(current.composition?.graphPath||'auto')} task={current} worker={worker} language={settings.language||'zh-CN'} onSaved={()=>refresh()} onError={onError} onDiscussion={askAgent} customCvInvoke={customCvInvoke} customProvider={agentProvider} onCustomDiscussion={request=>void discussCustomCv(request)} importAsset={importCompositionAsset}/></>:<section className="card"><p>{tr('先选择已有会话，或开启任务规划描述体系与目标。Agent 会选择实际类库并创建绑定当前会话的组合图。')}</p><button className="button primary" onClick={()=>{setAgentVisible(true);setPlanningMode(true);askAgent(tr('请基于我的实际体系准备 pyGAS CV/Bias 组合流程，使用已登记类库，展示参数供审阅；不构建、不运行。'));}}>{tr('开启任务规划')}</button></section>;})()}</div>}
      {section==='training'&&<div className="page"><div className="page-heading"><div><span className="eyebrow">MACHINE LEARNING POTENTIALS</span><h1>{tr("模型与训练")}</h1><p>{tr("保留数据划分、标签范围、checkpoint 和消费端格式。")}</p></div></div><div className="model-grid">{['nep','hotpp'].map(e=><section className="card" key={e}><div className="model-logo">{e==='nep'?<Atom size={27}/>:<Box size={27}/>}</div><h2>{e==='nep'?'NEP':'HotPP'}</h2><p>{tr(e==='nep'?'GPUMD 原生训练与 prediction 模式':'张量消息传递势 · train / eval / freeze')}</p><div className="button-row"><button className="button primary" disabled={!worker||!project} onClick={()=>newRun(e+'.train')}>{tr("训练")}</button><button className="button" disabled={!worker||!project} onClick={()=>newRun(e+'.eval')}>{tr("独立测试")}</button>{e==='hotpp'&&<button className="button" disabled={!worker||!project} onClick={()=>newRun('hotpp.export')}>{tr("导出")}</button>}</div></section>)}</div><div className="notice"><ShieldCheck size={16}/>{tr("PyDyn 使用 ase-* HotPP 导出。缺失 virial 标签时不报告虚假 RMSE。")}</div><RunTable items={visibleRuns.filter(r=>/^(nep|hotpp)\./.test(r.engine))} selected={selected} onOpen={id=>void openTask(id)} canPrepare={worker&&!!project} onPrepare={()=>newRun()}/></div>}
-     {section==='editor'&&<div className="editor-workspace"><div className="toolbar"><span><FileCode2 size={14}/>{editor.name}{editorDirty?' *':''}</span><input value={editor.name} aria-label={tr("文件路径")} onChange={e=>setEditor({...editor,name:e.target.value})}/><button className="button" disabled={!worker||!project} onClick={()=>void saveInput().catch(onError)}><Save size={14}/>{tr("保存到项目输入")}</button><button className="button" onClick={()=>void invoke('file.save',{id:editor.id,content:editor.source,name:editor.name}).then(r=>{if(r){setEditor({...editor,...r});setEditorDirty(false);}}).catch(onError)}>{tr("另存到 Windows")}</button></div><CodeEditor value={editor.source} onChange={v=>{if(v===editorSource.current)return;setEditor(old=>({...old,source:v}));setEditorDirty(true);}} theme={settings.theme}/><div className="editor-path">{tr(editor.path||'尚未保存')}{tr("· Python 源码不会在前端执行")}</div></div>}
+     {section==='editor'&&<div className="editor-workspace"><div className="toolbar"><span><FileCode2 size={14}/>{editor.name}{editorDirty?' *':''}</span><input value={editor.name} aria-label={tr("文件路径")} onChange={e=>setEditor({...editor,name:e.target.value})}/><button className="button" disabled={!worker||!project||!!editorSave} onClick={()=>void saveInput().catch(onError)}><Save size={14}/>{tr("保存到项目输入")}</button><button className="button" disabled={!!editorSave} onClick={()=>void saveInput('windows').catch(onError)}>{tr("另存到 Windows")}</button><LoadingFeedback busy={!!editorSave} label={tr("正在保存输入文件…")}/></div><CodeEditor value={editor.source} onChange={v=>{if(v===editorSource.current)return;setEditor(old=>({...old,source:v}));setEditorDirty(true);}} theme={settings.theme}/><div className="editor-path">{tr(editor.path||'尚未保存')}{tr("· Python 源码不会在前端执行")}</div></div>}
      {section==='assets'&&<div className="page"><StructureBuilder projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><MaterialsProjectSearch projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><AssetInspector projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><div className="asset-list">{assets.filter(a=>(a as any).project_id===projectId).map(a=><div className="asset-row" key={a.id}><Database size={17}/><div><strong>{a.name}</strong><small>{a.path}</small></div><span className="tag">{a.kind}</span><span className="mono">{a.sha256.slice(0,12)}</span></div>)}</div></div>}
      {section==='environments'&&<ComputeEnvironments worker={worker&&!disconnected} workerGeneration={workerHydrationEpoch.current} environments={environments} onRefresh={()=>refresh()} onConnect={openComputeResources} onManual={newEnvironment} onAgent={askAgent} onCluster={openComputeResources} onError={onError}/>}
      {section==='ssh'&&<ClusterPage selectedClusterId={clusterSelection||undefined} serviceVersion={serviceVersion} onAuthenticate={openSshGuide} onConnectCompute={connectWorker} worker={worker} project={project} settings={settings} draft={clusterDraft} onQueueTest={text=>newConversation(true,text)} onError={onError} onRefresh={()=>void refresh()} onAgent={askAgent} onRun={id=>setSection('cluster-run:'+id)} onTerminal={startClusterTerminal}/>}
@@ -425,6 +486,7 @@ export default function App(){
   {modal==='chat-project'&&<Modal title={t('新建会话项目')} onClose={()=>setModal('')}><label>{t('项目名称')}<input autoFocus aria-label={t('会话项目名称')} value={groupName} onChange={e=>setGroupName(e.target.value)} maxLength={60}/></label><p className="muted">{t('项目用于整理会话，计算工作区和算力设置随各自流程保存。')}</p><button className="button primary" disabled={busy||!groupName.trim()} onClick={()=>void createChatGroup()}>{t('创建项目')}</button></Modal>}
   {command&&<Modal title={tr("搜索与命令")} onClose={()=>{setCommand(false);setPaletteSearch('');}}><input autoFocus aria-label={tr("搜索页面、引擎或任务…")} placeholder={tr("搜索页面、引擎或任务…")} value={paletteSearch} onChange={e=>setPaletteSearch(e.target.value)}/><div className="command-list">{computeConnectionCommandMatches(paletteSearch)&&<button disabled={agentBusy||connecting} onClick={()=>{setCommand(false);setPaletteSearch('');setComputeChooser(true);}}><Server size={17}/>{settings.language==='en'?'Connect compute resources…':t('连接计算资源…')}<ChevronRight size={13}/></button>}<ConversationCommands query={paletteSearch} blocked={agentBusy||deleting||renaming||busy||imageSaving||!!modal||!!deleteTarget||!!renameTarget} onDismiss={()=>{setCommand(false);setPaletteSearch('');}} onNewConversation={newConversation} onShowConversations={()=>{setRailMode('chats');setSidebarVisible(true);}}/>{sections.filter(s=>tr(s[1]).toLowerCase().includes(paletteSearch.toLowerCase())||s[0].includes(paletteSearch.toLowerCase())).map(([id,label,Icon])=><button key={id} onClick={()=>{go(id);setCommand(false);setPaletteSearch('');}}><Icon size={17}/>{tr(label)}<ChevronRight size={13}/></button>)}{runs.filter(r=>r.name.toLowerCase().includes(paletteSearch.toLowerCase())).slice(0,8).map(r=><button key={r.id} onClick={()=>{void openTask(r.id);setCommand(false);setPaletteSearch('');}}><Activity size={17}/>{r.name}<Badge status={r.status}/></button>)}{conversations.filter(conversation=>conversationMatches(conversation,paletteSearch)).slice(0,8).map(conversation=><button key={'conversation:'+conversation.id} disabled={agentBusy} onClick={()=>{void chooseConversation(conversation);setCommand(false);setPaletteSearch('');}}><MessageSquare size={17}/>{conversation.name}<ChevronRight size={13}/></button>)}{tools.filter(tool=>t(tool.name).toLocaleLowerCase().includes(paletteSearch.toLocaleLowerCase())).map(tool=><button key={'tool:'+tool.id} onClick={()=>{go('tool:'+tool.id);setCommand(false);setPaletteSearch('');}}><ModuleIcon module={tool.id}/>{t(tool.name)}<ChevronRight size={13}/></button>)}<WorkbenchImageCommand query={paletteSearch} busy={imageSaving} onDismiss={()=>{setCommand(false);setPaletteSearch('');}} onBusy={setImageSaving} onSaved={setImageReceipt} onError={onError}/></div></Modal>}
   {imageReceipt?.status==='saved'&&<Modal title={t('工作台图像已保存')} onClose={()=>setImageReceipt(null)}><p>PNG · {imageReceipt.width} × {imageReceipt.height} · {imageReceipt.bytes} bytes</p><p className="mono">{imageReceipt.path}</p><small className="mono">SHA256 · {imageReceipt.sha256}</small><button className="button" onClick={()=>setImageReceipt(null)}>{t('关闭')}</button></Modal>}
+  {cliRequired&&<CliRuntimeDialog provider={cliRequired.provider} readiness={cliRequired} onClose={()=>setCliRequired(null)} onReady={()=>{const provider=cliRequired.provider;setCliRequired(null);openAccounts(provider);}}/>}
   {modal==='accounts'&&<Modal title={t('账号与 API')} onClose={()=>setModal('')}><AccountCenter provider={accountsProvider} busy={agentBusy} onError={onError}/></Modal>}
   {renameTarget&&<Modal title={t('重命名会话')} onClose={()=>{if(!renaming)setRenameTarget(null);}}><label>{t('会话简称')}<input autoFocus data-testid="conversation-name" maxLength={60} value={conversationName} disabled={renaming} onChange={e=>setConversationName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing)void renameConversation();}}/></label><div className="button-row"><button className="button" disabled={renaming} onClick={()=>setRenameTarget(null)}>{t('取消')}</button><button className="button primary" disabled={renaming||!conversationName.trim()} onClick={()=>void renameConversation()}>{t('保存名称')}</button></div></Modal>}
   {modal==='projects'&&<Modal title={t('计算项目')} onClose={()=>setModal('')}><section data-testid="project-management"><p className="project-management-intro">{t('选择计算项目，或创建独立的计算权限范围。')}</p><div className="project-management-actions"><button className="button primary" data-testid="new-project" onClick={newProject} disabled={!worker||disconnected||busy}><Plus size={15}/>{t('新建计算项目')}</button><button className="button" data-testid="project-compute-resources" onClick={()=>{setModal('');go('environments');}}><Server size={15}/>{t('计算资源')}</button></div><div className="project-management-list">{projects.map(p=><div key={p.id} className={'project-management-row '+(projectId===p.id?'current-project':'')}><button className="project-management-select" aria-label={projectLabel(p)} onClick={()=>{setSkill(undefined);setProjectId(p.id);setModal('');}}><ModuleIcon module="project"/><span><strong>{projectLabel(p)}</strong><small>{t(p.authoring_only?'草稿工作区':'计算项目')}{projectId===p.id?' · '+t('当前项目'):''}</small></span></button>{!p.authoring_only&&<button className="button" aria-label={t('计算权限设置')+' · '+p.name} disabled={!worker||disconnected||busy} onClick={()=>void editProjectPolicy(p)}><SettingsIcon size={15}/>{t('计算权限设置')}</button>}</div>)}{!projects.length&&<p className="project-management-empty">{t('尚无项目')}</p>}</div></section></Modal>}

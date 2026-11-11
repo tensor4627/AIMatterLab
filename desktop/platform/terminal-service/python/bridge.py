@@ -1,5 +1,7 @@
 """Versioned SSH transport; the separately pinned worker runtime stays unchanged."""
 import base64
+import gzip
+import threading
 import hashlib
 import http.client
 import json
@@ -103,6 +105,28 @@ def cached_files(hello, root):
     return files
 
 
+def unpack_files(raw):
+    if len(raw) < 4:
+        fail('worker_hash_mismatch', 'transferring_worker')
+    length = int.from_bytes(raw[:4], 'big')
+    if not 0 < length <= 512 * 1024 or length + 4 > len(raw):
+        fail('worker_hash_mismatch', 'transferring_worker')
+    value = json.loads(raw[4:4 + length])
+    if not isinstance(value, dict) or not isinstance(value.get('files'), list) or not 5 <= len(value['files']) <= MAX_FILES:
+        fail('worker_hash_mismatch', 'transferring_worker')
+    offset = 4 + length
+    for row in value['files']:
+        if (not isinstance(row, dict) or set(row) != {'path', 'size', 'sha256'}
+                or type(row['size']) is not int or not 0 <= row['size'] <= MAX_FILE
+                or offset + row['size'] > len(raw)):
+            fail('worker_hash_mismatch', 'transferring_worker')
+        row['base64'] = base64.b64encode(raw[offset:offset + row['size']]).decode()
+        offset += row['size']
+    if offset != len(raw):
+        fail('worker_hash_mismatch', 'transferring_worker')
+    return value
+
+
 def receive_bundle(hello, read, send):
     packed, index = bytearray(), 0
     while True:
@@ -119,7 +143,7 @@ def receive_bundle(hello, read, send):
             content = base64.b64decode(value['chunk'], validate=True)
         except (ValueError, TypeError):
             fail('protocol_failed', 'transferring_worker')
-        if not 0 < len(content) <= 2048 or len(packed) + len(content) > hello['worker_gzip_size']:
+        if not 0 < len(content) <= hello.get('upload_chunk_bytes', 2048) or len(packed) + len(content) > hello['worker_gzip_size']:
             fail('worker_hash_mismatch', 'transferring_worker')
         packed.extend(content); send('ACK', index, {'accepted': index}); index += 1
     try:
@@ -128,7 +152,7 @@ def receive_bundle(hello, read, send):
         if (len(raw) != hello['worker_size'] or not decoder.eof or decoder.unconsumed_tail or decoder.unused_data
                 or hashlib.sha256(raw).hexdigest() != hello['worker_sha256']):
             fail('worker_hash_mismatch', 'transferring_worker')
-        value = json.loads(raw)
+        value = unpack_files(raw) if hello.get('worker_encoding') == 'gzip-files-v1' else json.loads(raw)
     except (zlib.error, ValueError, UnicodeError):
         fail('worker_hash_mismatch', 'transferring_worker')
     return value
@@ -239,6 +263,73 @@ def forward(legacy, root, port, value, timeout=245):
         connection.close()
 
 
+def relay_lane(payload, nonce, send, restore, legacy, root, port, health, encoding):
+    """Transport framing only; every request retains the pinned socket-owner proof."""
+    lock, stopped, slots = threading.Lock(), threading.Event(), threading.Semaphore(8)
+    seen = set()
+
+    def fragmented(kind, identifier, value):
+        raw = json.dumps(value, separators=(',', ':'), allow_nan=False).encode()
+        if len(raw) > MAX_SOURCE:
+            fail('protocol_failed', 'request')
+        packed = gzip.compress(raw, compresslevel=6, mtime=0) if encoding and kind == 'RESPONSE' and len(raw) >= 1024 else None
+        compressed = packed is not None and len(packed) <= len(raw) * .8
+        content = packed if compressed else raw
+        with lock:
+            if stopped.is_set():
+                return
+            if compressed:
+                send('COMPRESSED_BEGIN', identifier, {'kind': kind, 'compressedBytes': len(content),
+                     'uncompressedBytes': len(raw), 'sha256': hashlib.sha256(content).hexdigest()})
+            for index, at in enumerate(range(0, len(content), 96)):
+                send('COMPRESSED_FRAGMENT' if compressed else 'FRAGMENT', identifier,
+                     {'kind': kind, 'index': index, 'last': at + 96 >= len(content),
+                      'chunk': base64.b64encode(content[at:at + 96]).decode()})
+
+    safe = {key: health[key] for key in ('name', 'root', 'runtime', 'execution_policy', 'hostname', 'uid', 'machineId', 'home')}
+    safe.update(runtime_id=payload['expected_runtime_id'], port=port, transport_kind='ssh-service', ssh_service=True)
+    fragmented('READY', '-', safe)
+
+    def request(identifier, value):
+        try:
+            try:
+                result = forward(legacy, root, port, value)
+            except Exception:
+                result = {'status': 502, 'data': {'error': 'SSH service request unconfirmed; reconcile existing state, never replay'}}
+            fragmented('RESPONSE', identifier, result)
+        finally:
+            slots.release()
+
+    try:
+        while True:
+            # Requests retain the released 16 MiB envelope bound; the small
+            # bootstrap loader's 16 KiB installation-line bound is separate.
+            line = sys.stdin.buffer.readline(MAX_JSON + 1)
+            if not line:
+                break
+            if len(line) > MAX_JSON:
+                fail('protocol_failed', 'request')
+            parts = line.decode('ascii').rstrip('\r\n').split(':')
+            if len(parts) != 5 or ':'.join(parts[:2]) + ':' != '__STUDIO_SERVICE_V1__:' + nonce + ':':
+                fail('protocol_failed', 'request')
+            kind, identifier = parts[2:4]
+            value = json.loads(base64.b64decode(parts[4], validate=True))
+            if kind == 'STOP' and re.fullmatch(r'[A-Za-z0-9_-]{1,100}', identifier) and value == {}:
+                with lock:
+                    stopped.set()
+                    restore()
+                    send('STOPPED', identifier, {}, True)
+                return
+            if (kind != 'REQUEST' or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', identifier)
+                    or identifier in seen or len(seen) >= 8192 or not slots.acquire(blocking=False)):
+                fail('protocol_failed', 'request')
+            seen.add(identifier)
+            threading.Thread(target=request, args=(identifier, value), daemon=True).start()
+    finally:
+        with lock:
+            stopped.set()
+
+
 def run(hello, nonce, read, send, phase, restore, original_termios=None):
     phase('checking_cache')
     root = namespace(hello)
@@ -266,4 +357,4 @@ def run(hello, nonce, read, send, phase, restore, original_termios=None):
     legacy['forward'] = lambda _root, _port, value: forward(legacy, _root, _port, value)
     # Existing bounded fragmented responses, no-replay ledger, per-request
     # socket ownership, and STOP quiescence remain the released implementation.
-    legacy['run'](payload, nonce, original_termios)
+    relay_lane(payload, nonce, send, restore, legacy, root, hello['port'], health, hello.get('response_encoding'))

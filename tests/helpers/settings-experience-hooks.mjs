@@ -16,11 +16,12 @@ export function experienceHarness({component,props:initial={},invoke:dispatch=as
   if(name==='../../api/worker')return {api:(method,target,data)=>invoke('worker.request',{method,target,data})};
   if(name==='../../ui/i18n')return {t:value=>value};
   if(name==='../../ui/Dialogs')return {Modal:'Modal'};
+  if(name.endsWith('/LoadingFeedback'))return {default:'LoadingFeedback',LoadingFeedback:'LoadingFeedback'};
   if(name==='lucide-react')return new Proxy({},{get:(_,key)=>key});
   if(name.startsWith('.')){const base=path.resolve(path.dirname(file),name),resolved=['.ts','.tsx','.mjs'].map(ext=>base+ext).find(candidate=>fs.existsSync(candidate));if(resolved)return load(resolved);}
   throw Error('Unexpected experience dependency '+name);
  };const compiled=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;new Function('require','module','exports','window',compiled)(require,module,module.exports,window);return module.exports;}
- const Component=load(path.resolve('frontend/features/'+(component==='ProviderLogin'?'settings/ProviderLogin':'cluster/ClusterFiles')+'.tsx')).default;
+ const Component=load(path.resolve('frontend/features/'+(component==='ProviderLogin'?'settings/ProviderLogin':component==='CliRuntimeDialog'?'settings/CliRuntimeDialog':'cluster/ClusterFiles')+'.tsx')).default;
  const all=node=>Array.isArray(node)?node.flatMap(all):!node||typeof node!=='object'?[]:[node,...all(node.props?.children)];
  const text=node=>Array.isArray(node)?node.map(text).join(''):node==null||typeof node==='boolean'?'':typeof node==='object'?text(node.props?.children):String(node);
  function render(next){if(next)props={...props,...next};cursor=0;dirty=false;tree=Component(props);}

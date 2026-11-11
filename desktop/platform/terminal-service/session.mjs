@@ -2,6 +2,7 @@
 import path from 'node:path';
 import {createHash,randomUUID,randomBytes} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
+import {decodeGzipResponse} from './response-codec.mjs';
 export class TerminalFault extends Error{constructor(code,status=400){super(code);this.code=code;this.status=status;}}
 const fail=(code,status)=>{throw new TerminalFault(code,status);};
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
@@ -20,6 +21,10 @@ const version=value=>Array.isArray(value)&&value.length===3&&value.every(n=>Numb
 const serviceId=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value);
 const shellQuote=value=>"'"+value.replaceAll("'","'\\''")+"'";
 function decode64(value,limit){if(typeof value!=='string'||value.length>Math.ceil(limit/3)*4||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))fail('service_protocol_failed',502);const bytes=Buffer.from(value,'base64');if(bytes.length>limit||bytes.toString('base64')!==value)fail('service_protocol_failed',502);return bytes;}
+function bootstrapMetadata(value){
+ exact(value,['protocol','python','sqlite','capabilities'],['protocol','python','sqlite']);if(value.protocol!==2||!version(value.python)||!version(value.sqlite))fail('service_protocol_failed',502);
+ if(value.capabilities!==undefined){exact(value.capabilities,['responseEncodings','uploadChunkBytes','workerEncodings'],['responseEncodings','uploadChunkBytes']);const c=value.capabilities;if(!Array.isArray(c.responseEncodings)||c.responseEncodings.length>1||c.responseEncodings.some(v=>v!=='gzip-fragments-v1')||!Array.isArray(c.uploadChunkBytes)||c.uploadChunkBytes.length>3||c.uploadChunkBytes.some(v=>![2048,4096,8192].includes(v))||c.workerEncodings!==undefined&&(!Array.isArray(c.workerEncodings)||c.workerEncodings.length>1||c.workerEncodings.some(v=>v!=='gzip-files-v1')))fail('service_protocol_failed',502);}
+}
 function vtBoundary(value,prelude=false,bootstrap=false){
  // ConPTY returns a bounded screen update stream, not the original SSH bytes.
  // Accept only display operations outside a complete private frame. Never
@@ -58,10 +63,10 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
  };
  const write=(kind,id,value)=>{try{terminal.write(SERVICE_PREFIX+current.nonce+':'+kind+':'+id+':'+Buffer.from(JSON.stringify(value)).toString('base64')+'\n');}catch{fault();}};
  let pumping=false;
- function beginInstall(s,bytes,phase,endKind,endValue){s.install=bytes;s.count=Math.ceil(bytes.length/2048);s.sent=0;s.acked=0;s.phase='install';s.publicPhase=phase;s.endKind=endKind;s.endValue=endValue;s.progress={kind:'transfer',completedBytes:0,totalBytes:bytes.length};pump();}
+ function beginInstall(s,bytes,phase,endKind,endValue){s.install=bytes;s.count=Math.ceil(bytes.length/(s.chunkBytes||2048));s.sent=0;s.acked=0;s.phase='install';s.publicPhase=phase;s.endKind=endKind;s.endValue=endValue;s.progress={kind:'transfer',completedBytes:0,totalBytes:bytes.length};pump();}
  function pump(){
   if(pumping)return;pumping=true;queueMicrotask(()=>{pumping=false;const s=current;if(!s?.active||s.phase!=='install'||s.status!=='connecting')return;
-   while(s.sent<s.count&&s.sent-s.acked<16){const index=s.sent++;write('INSTALL',String(index),{chunk:s.install.subarray(index*2048,(index+1)*2048).toString('base64')});if(s.status!=='connecting')return;}
+   const chunk=s.chunkBytes||2048;while(s.sent<s.count&&(s.sent-s.acked)*chunk<32768){const index=s.sent++;write('INSTALL',String(index),{chunk:s.install.subarray(index*chunk,(index+1)*chunk).toString('base64')});if(s.status!=='connecting')return;}
    if(s.acked===s.count){s.phase=s.endKind==='TRANSPORT_END'?'transport_ready':'ready';write(s.endKind||'INSTALL_END','-',s.endValue||{size:s.install.length,sha256:s.installSha});s.install=null;}
   });
  }
@@ -89,6 +94,10 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
   }
   if(s.status==='failed'||s.status==='disconnected')return;
   if(kind==='ERROR'){fault('service_remote_failed');return;}
+  if(s.phase==='stopping'&&['COMPRESSED_BEGIN','COMPRESSED_FRAGMENT'].includes(kind)&&s.requests.has(id)){
+   if(kind==='COMPRESSED_FRAGMENT'){exact(value,['kind','index','last','chunk']);if(value.kind!=='RESPONSE'||!Number.isSafeInteger(value.index)||value.index<0||typeof value.last!=='boolean')fail('service_protocol_failed',502);decode64(value.chunk,96);}
+   else{exact(value,['kind','compressedBytes','uncompressedBytes','sha256']);if(value.kind!=='RESPONSE'||!Number.isSafeInteger(value.compressedBytes)||value.compressedBytes<18||value.compressedBytes>MAX_REPLY||!Number.isSafeInteger(value.uncompressedBytes)||value.uncompressedBytes<1||value.uncompressedBytes>MAX_REPLY||!/^[a-f0-9]{64}$/.test(value.sha256))fail('service_protocol_failed',502);}return;
+  }
   if(s.phase==='stopping'&&kind==='RESPONSE'&&s.requests.has(id))return;
   if(s.phase==='stopping'&&kind==='FRAGMENT'&&value.kind==='RESPONSE'&&s.requests.has(id)){
    // Cancellation does not erase bytes already queued by the authenticated
@@ -101,7 +110,7 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
    // authenticated frames are private observations of the canceled attempt,
    // never a reason to resume input or to continue an upload/bootstrap.
    if(kind==='ACK'&&id===String(s.cancelledAck)&&s.cancelledAck<s.sent){exact(value,['accepted']);if(value.accepted!==s.cancelledAck)fail('service_protocol_failed',502);s.cancelledAck++;return;}
-   if(kind==='BOOTSTRAP_READY'&&id==='-'&&s.cancelledPhase==='bootstrap'&&!s.cancelledBootstrap){if(s.v2){exact(value,['protocol','python','sqlite']);if(value.protocol!==2||!version(value.python)||!version(value.sqlite))fail('service_protocol_failed',502);}else if(value.protocol!==1)fail('service_protocol_failed',502);s.cancelledBootstrap=true;return;}
+   if(kind==='BOOTSTRAP_READY'&&id==='-'&&s.cancelledPhase==='bootstrap'&&!s.cancelledBootstrap){if(s.v2){bootstrapMetadata(value);}else if(value.protocol!==1)fail('service_protocol_failed',502);s.cancelledBootstrap=true;return;}
    if(s.v2&&id==='-'&&['HELPER_READY','WORKER_READY'].includes(kind)){exact(value,['cached']);if(typeof value.cached!=='boolean')fail('service_protocol_failed',502);return;}
    if(s.v2&&id==='-'&&['TRANSPORT_NEEDED','WORKER_NEEDED'].includes(kind)){exact(value,[]);return;}
    if(s.v2&&kind==='PHASE'&&id==='-'){exact(value,['phase']);if(!['preparing_runtime','starting_worker','checking_health'].includes(value.phase))fail('service_protocol_failed',502);return;}
@@ -110,15 +119,15 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
   }
   if(kind==='BOOTSTRAP_READY'&&s.phase==='bootstrap'&&id==='-'){
    if(!s.v2&&value.protocol===1){s.publicPhase='transferring_worker';s.progress={kind:'transfer',completedBytes:0,totalBytes:s.install.length};s.phase='install';pump();return;}
-   if(s.v2){exact(value,['protocol','python','sqlite']);if(value.protocol!==2||!version(value.python)||!version(value.sqlite))fail('service_protocol_failed',502);clearTimeout(s.firstTimer);s.phase='hello';s.publicPhase='checking_cache';write('HELLO','-',s.hello);return;}
+   if(s.v2){bootstrapMetadata(value);clearTimeout(s.firstTimer);s.phase='hello';s.publicPhase='checking_cache';if(value.capabilities){const desired=timeouts.uploadChunkBytes??2048;s.chunkBytes=value.capabilities.uploadChunkBytes.includes(desired)?desired:2048;if(value.capabilities.responseEncodings.includes('gzip-fragments-v1'))s.hello.response_encoding='gzip-fragments-v1';s.hello.upload_chunk_bytes=s.chunkBytes;if(value.capabilities.workerEncodings?.includes('gzip-files-v1')){const metadata=Buffer.from(JSON.stringify({...s.workerPayload,files:s.workerPayload.files.map(({base64,...row})=>row)})),header=Buffer.alloc(4);header.writeUInt32BE(metadata.length);const raw=Buffer.concat([header,metadata,...s.workerPayload.files.map(row=>Buffer.from(row.base64,'base64'))]);s.workerPacked=gzipSync(raw,{level:6});Object.assign(s.hello,{worker_encoding:'gzip-files-v1',worker_gzip_size:s.workerPacked.length,worker_gzip_sha256:hash(s.workerPacked),worker_size:raw.length,worker_sha256:hash(raw)});}}write('HELLO','-',s.hello);return;}
   }
   if(s.v2&&kind==='TRANSPORT_NEEDED'&&id==='-'&&s.phase==='hello'){exact(value,[]);beginInstall(s,s.transportBytes,'transferring_transport','TRANSPORT_END',{size:s.transportBytes.length,sha256:s.hello.transport_sha256});return;}
   if(s.v2&&kind==='HELPER_READY'&&id==='-'&&['hello','transport_ready'].includes(s.phase)){exact(value,['cached']);if(typeof value.cached!=='boolean'||s.phase==='hello'&&!value.cached||s.phase==='transport_ready'&&value.cached)fail('service_protocol_failed',502);s.phase='worker_check';s.publicPhase='checking_cache';s.progress=null;return;}
   if(s.v2&&kind==='WORKER_NEEDED'&&id==='-'&&s.phase==='worker_check'){exact(value,[]);beginInstall(s,s.workerPacked,'transferring_worker','INSTALL_END',{encoding:'gzip',size:s.workerPacked.length,sha256:s.hello.worker_gzip_sha256,uncompressed_size:s.hello.worker_size,uncompressed_sha256:s.hello.worker_sha256});return;}
   if(s.v2&&kind==='WORKER_READY'&&id==='-'&&['worker_check','ready'].includes(s.phase)){exact(value,['cached']);if(typeof value.cached!=='boolean'||s.phase==='worker_check'&&!value.cached||s.phase==='ready'&&value.cached)fail('service_protocol_failed',502);s.phase='ready';s.publicPhase='preparing_runtime';s.progress=null;return;}
   if(s.v2&&kind==='PHASE'&&id==='-'){exact(value,['phase']);if(!SERVICE_PHASES.has(value.phase)||!['preparing_runtime','starting_worker','checking_health'].includes(value.phase)||s.phase!=='ready')fail('service_protocol_failed',502);s.publicPhase=value.phase;return;}
-  if(kind==='ACK'&&s.phase==='install'&&id===String(s.acked)&&value.accepted===s.acked&&s.acked<s.sent){exact(value,['accepted']);s.acked++;s.progress.completedBytes=Math.min(s.install.length,s.acked*2048);pump();return;}
-  if(kind==='READY'&&s.phase==='ready'&&id==='-'){s.health=serviceHealth(value);s.status='connected';s.phase='connected';s.publicPhase='ready';s.progress=null;s.transportBytes=null;s.workerPacked=null;clearTimeout(s.timer);s.startResolve(state());s.startResolve=null;s.startReject=null;return;}
+  if(kind==='ACK'&&s.phase==='install'&&id===String(s.acked)&&value.accepted===s.acked&&s.acked<s.sent){exact(value,['accepted']);s.acked++;s.progress.completedBytes=Math.min(s.install.length,s.acked*(s.chunkBytes||2048));pump();return;}
+  if(kind==='READY'&&s.phase==='ready'&&id==='-'){s.health=serviceHealth(value);s.status='connected';s.phase='connected';s.publicPhase='ready';s.progress=null;s.transportBytes=null;s.workerPacked=null;s.workerPayload=null;clearTimeout(s.timer);s.startResolve(state());s.startResolve=null;s.startReject=null;return;}
   if(kind==='RESPONSE'&&s.phase==='connected'){
    const item=s.pending.get(id);if(!item)return;if(!Number.isInteger(value.status)||value.status<100||value.status>599||!Object.hasOwn(value,'data'))fail('service_protocol_failed',502);
    clearTimeout(item.timer);s.pending.delete(id);const result=structuredClone(value),bytes=Buffer.byteLength(JSON.stringify(result));
@@ -127,11 +136,24 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
    item.promise=s.cachedBytes+bytes<=MAX_REPLY?Promise.resolve(result):null;if(item.promise)s.cachedBytes+=bytes;
    item.resolve(result);item.resolve=null;item.reject=null;return;
   }
+  if(kind==='COMPRESSED_BEGIN'){
+   exact(value,['kind','compressedBytes','uncompressedBytes','sha256']);
+   if(s.hello?.response_encoding!=='gzip-fragments-v1'||s.phase!=='connected'||value.kind!=='RESPONSE'||!s.pending.has(id)||!Number.isSafeInteger(value.compressedBytes)||value.compressedBytes<18||!Number.isSafeInteger(value.uncompressedBytes)||value.uncompressedBytes<1024||value.uncompressedBytes>MAX_REPLY||value.compressedBytes>Math.floor(value.uncompressedBytes*.8)||!/^[a-f0-9]{64}$/.test(value.sha256)||fragments.has('RESPONSE:'+id)||fragments.size>=9||fragmentBytes+value.uncompressedBytes>16*1024*1024)fail('service_protocol_failed',502);
+   fragments.set('RESPONSE:'+id,{compressed:true,index:0,bytes:0,parts:[],...value});fragmentBytes+=value.uncompressedBytes;return;
+  }
+  if(kind==='COMPRESSED_FRAGMENT'){
+   exact(value,['kind','index','last','chunk']);const key='RESPONSE:'+id,entry=fragments.get(key);
+   if(s.phase!=='connected'||value.kind!=='RESPONSE'||!s.pending.has(id)||!entry?.compressed||entry.decoding||!Number.isSafeInteger(value.index)||value.index!==entry.index++||typeof value.last!=='boolean')fail('service_protocol_failed',502);
+   const part=decode64(value.chunk,96);if(part.length!==Math.min(96,entry.compressedBytes-entry.bytes)||value.last!==(entry.bytes+part.length===entry.compressedBytes))fail('service_protocol_failed',502);entry.parts.push(part);entry.bytes+=part.length;
+   if(value.last){if(entry.bytes!==entry.compressedBytes)fail('service_protocol_failed',502);const packed=Buffer.concat(entry.parts);if(hash(packed)!==entry.sha256)fail('service_protocol_failed',502);entry.decoding=true;entry.parts=[];
+    decodeGzipResponse(packed,entry.uncompressedBytes).then(raw=>{if(current!==s||s.phase!=='connected'||fragments.get(key)!==entry)return;fragments.delete(key);fragmentBytes-=entry.uncompressedBytes;try{const decoded=JSON.parse(raw.toString('utf8'));if(!object(decoded))throw Error();consume('RESPONSE',id,decoded);}catch{fault('service_protocol_failed');}},()=>{if(current===s&&s.phase==='connected'&&fragments.get(key)===entry)fault('service_protocol_failed');});
+   }return;
+  }
   if(kind==='FRAGMENT'){
    exact(value,['kind','index','last','chunk']);if(!['READY','RESPONSE'].includes(value.kind)||!Number.isSafeInteger(value.index)||value.index<0||typeof value.last!=='boolean'||value.kind==='READY'&&(id!=='-'||s.phase!=='ready')||value.kind==='RESPONSE'&&!s.pending.has(id))fail('service_protocol_failed',502);
    const key=value.kind+':'+id,part=decode64(value.chunk,96);let entry=fragments.get(key);
    if(!entry){if(value.index!==0||fragments.size>=9)fail('service_protocol_failed',502);entry={index:0,bytes:0,parts:[]};fragments.set(key,entry);}
-   if(value.index!==entry.index++||entry.bytes+part.length>MAX_REPLY||fragmentBytes+part.length>16*1024*1024)fail('service_protocol_failed',502);entry.parts.push(part);entry.bytes+=part.length;fragmentBytes+=part.length;
+   if(entry.compressed||value.index!==entry.index++||entry.bytes+part.length>MAX_REPLY||fragmentBytes+part.length>16*1024*1024)fail('service_protocol_failed',502);entry.parts.push(part);entry.bytes+=part.length;fragmentBytes+=part.length;
    if(value.last){fragments.delete(key);fragmentBytes-=entry.bytes;const result=JSON.parse(Buffer.concat(entry.parts).toString('utf8'));if(!object(result))fail('service_protocol_failed',502);consume(value.kind,id,result);}return;
   }
   fail('service_protocol_failed',502);
@@ -192,7 +214,7 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
   const digest=createHash('sha256').update(source).update(install).update(transport?.sha256||'').digest('hex'),previous=starts.get(request.requestId);if(previous){if(previous.digest!==digest)fail('request_changed',409);return previous.promise;}
   available();if(kind!=='ssh')fail('service_requires_ssh',409);if(active())fail('service_active',423);if(request.ownerEpoch!==epoch())fail('owner_changed',409);if(starts.size>=16)fail('request_limit',429);
   flushPublic();reserve();buffer='';noise=0;fragments.clear();fragmentBytes=0;
-  const s=current={id:randomUUID(),requestId:request.requestId,active:true,status:'connecting',phase:'bootstrap',publicPhase:'waiting_python',v2,hello,transportBytes,workerPacked,nonce:randomBytes(32).toString('hex'),install:v2?null:install,installSha:hash(install),count:Math.ceil(install.length/2048),sent:0,acked:0,cachedBytes:0,pending:new Map(),requests:new Map()};
+  const s=current={id:randomUUID(),requestId:request.requestId,active:true,status:'connecting',phase:'bootstrap',publicPhase:'waiting_python',v2,hello,workerPayload:v2?payload:null,transportBytes,workerPacked,nonce:randomBytes(32).toString('hex'),install:v2?null:install,installSha:hash(install),count:Math.ceil(install.length/2048),sent:0,acked:0,cachedBytes:0,pending:new Map(),requests:new Map()};
   const promise=new Promise((resolve,reject)=>{s.startResolve=resolve;s.startReject=reject;});promise.catch(()=>{});starts.set(request.requestId,{digest,promise});
   if(v2)s.firstTimer=setTimeout(()=>fault('python_response_timeout'),Math.min(15000,timeouts.start??120000));
   s.timer=setTimeout(()=>fault('service_start_unknown'),timeouts.start??120000);
@@ -200,14 +222,15 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
   return promise;
  }
  function request(value){
-  exact(value,['serviceId','requestId','method','target','data','mcp'],['serviceId','requestId','method','target','mcp']);available();
+  exact(value,['serviceId','requestId','method','target','data','mcp','timeoutMs'],['serviceId','requestId','method','target','mcp']);available();
+  if(value.timeoutMs!==undefined&&(!Number.isInteger(value.timeoutMs)||value.timeoutMs<250||value.timeoutMs>245000))fail('invalid_request');
   if(!serviceId(value.requestId)||!['GET','POST'].includes(value.method)||typeof value.mcp!=='boolean'||!bounded(value.target,8192)||!value.target.startsWith(value.mcp?'/mcp':'/api/')||value.target.startsWith('//')||/[\r\n#\\]/.test(value.target)||value.mcp&&value.target!=='/mcp')fail('invalid_request');
   const s=current;if(!s?.active||s.status!=='connected'||s.phase!=='connected')fail('service_unavailable',409);if(value.serviceId!==s.id)fail('service_changed',409);
   const packet={method:value.method,target:value.target,...Object.hasOwn(value,'data')?{data:value.data}:{},mcp:value.mcp};let encoded;try{encoded=JSON.stringify(packet);}catch{fail('invalid_request');}if(Buffer.byteLength(encoded)>4*1024*1024)fail('request_too_large',413);
   const digest=createHash('sha256').update(encoded).digest('hex'),previous=s.requests.get(value.requestId);if(previous){if(previous.digest!==digest)fail('request_changed',409);if(!previous.promise)fail('service_reply_unavailable',409);return previous.promise;}
   if(s.requests.size>=4096)fail('request_limit',429);if(s.pending.size>=8)fail('service_busy',429);
   let item;const promise=new Promise((resolve,reject)=>{item={resolve,reject};});promise.catch(()=>{});item.digest=digest;item.promise=promise;s.requests.set(value.requestId,item);s.pending.set(value.requestId,item);
-  item.timer=setTimeout(()=>fault('service_request_unknown'),timeouts.request??245000);write('REQUEST',value.requestId,packet);return promise;
+  item.timer=setTimeout(()=>fault('service_request_unknown'),Math.min(value.timeoutMs??245000,timeouts.request??245000));write('REQUEST',value.requestId,packet);return promise;
  }
  function stop(value){
   exact(value,['serviceId']);if(value.serviceId!==current?.id)fail('service_changed',409);if(!current?.active)return Promise.resolve(state());if(current.stopPromise)return current.stopPromise;

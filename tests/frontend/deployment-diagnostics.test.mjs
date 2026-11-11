@@ -134,3 +134,14 @@ test('a late auth rejection cannot hand off the superseded prepared run after th
  const h=deploymentHarness({initial:{task,run:f.run}});await h.flush();assert.throws(()=>h.find(n=>n.type==='button'&&h.text(n)==='核对运行状态'),/not found/);assert(!h.calls.some(c=>c.data?.target==='/api/run/status'));h.unmount();
  const ready=deploymentHarness();await ready.flush();const before=ready.calls.length;ready.find(n=>n.type==='button'&&ready.text(n)==='核对运行状态').props.onClick();await ready.flush();assert(ready.calls.slice(before).some(c=>c.method==='worker.request'&&c.data.target==='/api/run/status'));assert(ready.calls.slice(before).some(c=>c.method==='task.linkRun'));assert(!ready.calls.slice(before).some(c=>['task.deployment.prepare','task.execute'].includes(c.method)));ready.update({worker:false});await ready.flush();assert.equal(ready.find(n=>n.type==='button'&&ready.text(n)==='核对运行状态').props.disabled,true);ready.unmount();
  });
+
+
+test('input preview feedback settles and a repeated click cannot dispatch twice before render',async()=>{
+ const gate=deferred(),h=deploymentHarness({override:(method,data,standard)=>method==='worker.request'&&data.target==='/api/run/input'?gate.promise:standard(method,data)});
+ try{await h.flush();const inspect=h.find(node=>node.type==='button'&&node.props.className==='tool-card').props.onClick;inspect();inspect();await h.flush();assert.equal(h.calls.filter(call=>call.data?.target==='/api/run/input').length,1);assert(h.find(node=>node.props?.label==='正在读取输入预览…').props.busy);gate.resolve({name:'run.py',sha256:'s'.repeat(64),text:'CURRENT INPUT'});await h.flush();assert.equal(h.find(node=>node.props?.label==='正在核对运行状态…').props.busy,false);h.find(node=>node.type==='button'&&node.props.className==='tool-card').props.onClick();await h.flush();assert.equal(h.calls.filter(call=>call.data?.target==='/api/run/input').length,2);assert.deepEqual(h.externalErrors,[]);}finally{h.unmount();}
+});
+
+test('manual run reconciliation coalesces repeated clicks and clears loading feedback',async()=>{
+ let hold=false;const gate=deferred(),h=deploymentHarness({override:(method,data,standard)=>hold&&method==='worker.request'&&data.target==='/api/run/status'?gate.promise:standard(method,data)});
+ try{await h.flush();hold=true;const click=h.find(node=>node.props?.['data-testid']==='reconcile-deployment-run').props.onClick,before=h.calls.length;click();click();await h.flush();assert.equal(h.calls.slice(before).filter(call=>call.data?.target==='/api/run/status').length,1);assert(h.find(node=>node.props?.label==='正在核对运行状态…').props.busy);gate.resolve(structuredClone(h.runs.get(h.props.task.deployment.prepared.artifactId)));await h.flush();assert.equal(h.find(node=>node.props?.label==='正在核对运行状态…').props.busy,false);assert.deepEqual(h.externalErrors,[]);}finally{h.unmount();}
+});

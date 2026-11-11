@@ -26,6 +26,12 @@ for(const mode of ['connection','epoch','identity','settings'])test('a health re
  const f=fixture(),pending=deferred();f.worker.request=()=>pending.promise;const check=readWorkerStatus(f.worker,f.current);if(mode==='connection')f.worker.connection={...f.worker.connection};if(mode==='epoch')f.worker.connectionEpoch++;if(mode==='identity')f.worker.identity={...f.worker.identity};if(mode==='settings')f.settings({workerRoot:'~/new'});pending.resolve(f.health);assert.equal((await check).status,'unknown');
 });
 test('health observation has its own bound even when the existing transport never settles',async()=>{const f=fixture();f.worker.request=()=>new Promise(()=>{});const at=Date.now();assert.equal((await readWorkerStatus(f.worker,f.current,{timeoutMs:5})).status,'unknown');assert(Date.now()-at<1000);});
+test('overlapping and locally timed-out status reads share one live health request, scoped to its connection epoch',async()=>{
+ const f=fixture(),pending=deferred();let calls=0;f.worker.request=()=>{calls++;return pending.promise;};
+ assert.equal((await readWorkerStatus(f.worker,f.current,{timeoutMs:5})).status,'unknown');
+ const next=readWorkerStatus(f.worker,f.current),same=readWorkerStatus(f.worker,f.current);assert.equal(calls,1);pending.resolve(f.health);assert.equal((await next).status,'connected');assert.equal((await same).status,'connected');assert.equal(calls,1);
+ f.worker.connectionEpoch++;await readWorkerStatus(f.worker,f.current);assert.equal(calls,2);
+});
 
 test('actual preload exposes only the new readonly status channel and forwards no private connection object',async()=>{
  const calls=[],exposed={};vm.runInNewContext(fs.readFileSync(new URL("../../desktop/preload.cjs",import.meta.url),'utf8'),{require:()=>({contextBridge:{exposeInMainWorld:(name,value)=>exposed[name]=value},ipcRenderer:{invoke:async(...args)=>{calls.push(args);return {status:'connected',checkedAt:1};}}})});

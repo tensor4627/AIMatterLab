@@ -23,3 +23,24 @@ test('failed API verification is visible and retry remains available',async()=>{
 test('refresh recovers a failed initial account read without leaving save and verification locked',async()=>{
  let first=true;const h=setup(method=>{if(method==='agent.account'&&first){first=false;return Promise.reject(Error('Synthetic initial read failed'));}});try{await h.flush();assert(h.button('保存 API 配置').props.disabled);assert.match(h.text(),/账户状态读取失败/);h.button('刷新账户状态').props.onClick();await h.flush();assert.equal(h.byId('compatible-model').props.value,'model-a');assert.equal(h.button('保存 API 配置').props.disabled,false);assert.equal(h.byId('test-api-connection').props.disabled,false);assert.equal(h.errors.length,1);assert.doesNotMatch(h.text(),/账户状态读取失败/);}finally{h.unmount();}
 });
+
+
+for(const provider of ['kimi','qwen'])test(provider+' missing CLI opens an explicit local/download choice before login with zero installation',async()=>{
+ const h=experienceHarness({component:'ProviderLogin',props:{provider},invoke:async(method,data)=>method==='agent.account'?{phase:'signed_out'}:method==='agent.cli.inspect'?{provider:data.provider,status:'missing',expectedVersion:'1.2.3',message:'Missing local runtime'}:Promise.reject(Error('Unexpected action '+method))});
+ try{await h.flush();if(provider==='qwen')h.change(h.byId('qwen-api-key'),'fixture-key');h.button(provider==='kimi'?'开始 Kimi 登录':'保存凭据并连接').props.onClick();await h.flush();const dialog=h.find(node=>node.props?.readiness?.status==='missing');assert.equal(dialog.props.provider,provider);assert.equal(h.calls.filter(call=>call.method==='agent.cli.inspect').length,1);assert(!h.calls.some(call=>call.method==='agent.cli.install'||call.method==='agent.login'));dialog.props.onClose();await h.flush();assert.throws(()=>h.find(node=>node.props?.readiness));}finally{h.unmount();}
+});
+
+for(const provider of ['kimi','qwen'])test(provider+' reuses a compatible local CLI without a dialog or download',async()=>{
+ const h=experienceHarness({component:'ProviderLogin',props:{provider},invoke:async(method,data)=>method==='agent.account'?{phase:'signed_out'}:method==='agent.cli.inspect'?{provider:data.provider,status:'ready',expectedVersion:'1.2.3',version:'1.2.3',source:'path',message:'Ready'}:method==='agent.login'?{phase:provider==='kimi'?'authorizing':'completed',credentialStored:true}:Promise.reject(Error('Unexpected action '+method))});
+ try{await h.flush();if(provider==='qwen')h.change(h.byId('qwen-api-key'),'fixture-key');h.button(provider==='kimi'?'开始 Kimi 登录':'保存凭据并连接').props.onClick();await h.flush();assert.equal(h.calls.filter(call=>call.method==='agent.login').length,1);assert(!h.calls.some(call=>call.method==='agent.cli.install'));assert.throws(()=>h.find(node=>node.props?.readiness));assert.deepEqual(h.errors,[]);}finally{h.unmount();}
+});
+
+test('a delayed pre-save account refresh cannot overwrite the confirmed credential configuration',async()=>{
+ const gate=deferred();let reads=0;const h=setup(method=>method==='agent.account'&&++reads>1?gate.promise:undefined);
+ try{await h.flush();h.change(h.byId('compatible-model'),'model-b');const refresh=h.button('刷新账户状态').props.onClick;refresh();refresh();await h.flush();assert.equal(reads,2);h.button('保存 API 配置').props.onClick();await h.flush();assert(h.byId('test-api-connection'));gate.resolve({provider:'compatible',credentialStored:false,phase:'signed_out',model:'stale-model'});await h.flush();assert.equal(h.byId('compatible-model').props.value,'model-b');assert.equal(h.byId('test-api-connection').props.disabled,false);assert.deepEqual(h.errors,[]);}finally{h.unmount();}
+});
+
+test('a late missing-runtime inspection cannot open a dialog after the provider changes',async()=>{
+ const gate=deferred(),h=experienceHarness({component:'ProviderLogin',props:{provider:'kimi'},invoke:async(method,data)=>method==='agent.account'?{phase:'signed_out'}:method==='agent.cli.inspect'?gate.promise:Promise.reject(Error('Unexpected action '+method))});
+ try{await h.flush();h.button('开始 Kimi 登录').props.onClick();await h.flush();h.render({provider:'qwen'});await h.flush();gate.resolve({provider:'kimi',status:'missing',expectedVersion:'1.2.3',message:'Old provider missing'});await h.flush();assert.throws(()=>h.find(node=>node.props?.readiness));assert(!h.calls.some(call=>call.method==='agent.login'||call.method==='agent.cli.install'));assert.deepEqual(h.errors,[]);}finally{h.unmount();}
+});

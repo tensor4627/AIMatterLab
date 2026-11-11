@@ -3,6 +3,7 @@
 export type AgentProvider='codex'|'kimi'|'qwen'|'deepseek'|'compatible';
 
 export interface AgentConnectRequest {provider:AgentProvider;repairTools?:boolean}
+export interface AgentCliRequiredResult {cliRequired:import('./cli-runtime').CliReadiness}
 
 export interface AgentRpcRequest extends AgentConnectRequest {method:string;params?:Record<string,unknown>}
 

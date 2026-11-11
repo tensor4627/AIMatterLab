@@ -21,6 +21,12 @@ function client(read=async()=>descriptor()){
  return {worker,calls};
 }
 function fixture(worker){let task={id:'flow',provider:'codex',threadId:'thread',deployment:{workerBinding:{distribution:settings.distribution,root:settings.workerRoot,port:settings.workerPort}}},selected={serial:1,provider:'codex',threadId:'thread',taskId:'flow'},config={...settings};return {context:{worker,records:{read:id=>{assert.equal(id,'flow');if(!task)throw Error('Deleted');return task;}},selection:()=>selected,settings:()=>config},setTask:value=>task=value,setSelection:value=>selected=value,setSettings:value=>config=value};}
+test('guarded restoration reuses its exact already-read proof and still verifies the attached relay identity',async()=>{
+ const f=client(async()=>{throw Error('Duplicate descriptor read');});
+ try{assert.equal((await f.worker.restore(settings,{existingProof:descriptor()})).status,'connected');assert.deepEqual(f.calls,['attach']);}finally{f.worker.close();}
+ const invalid=client(async()=>{throw Error('Duplicate descriptor read');}),proof=descriptor();proof.connection.health.root='/different-root';
+ assert.equal((await invalid.worker.restore(settings,{existingProof:proof})).status,'unknown');assert.deepEqual(invalid.calls,[]);assert(!invalid.worker.connection);
+});
 test('typed saved-task restoration derives target from registered binding, preserves a differing default and returns only safe fields',async()=>{
  let target;const f=client(async value=>{target=value;return descriptor();}),env=fixture(f.worker);env.setSettings({...settings,workerRoot:'~/default-other'});const value=await restoreTaskWorker(env.context,{taskId:'flow'});assert.equal(value.status,'connected');assert.equal(value.taskId,'flow');assert.deepEqual(Object.keys(value).sort(),['checkedAt','reason','sourceId','status','taskId']);assert.match(value.sourceId,/^[a-f0-9]{64}$/);assert.equal(target.workerRoot,settings.workerRoot);assert(!JSON.stringify(value).includes('private'));assert.deepEqual(f.calls,['attach']);f.worker.close();
 });

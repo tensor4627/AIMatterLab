@@ -1,3 +1,4 @@
+import LoadingFeedback from '../../ui/LoadingFeedback';
 import Tooltip from "../../ui/Tooltip";
 import {useEffect,useRef,useState} from 'react';
 import {Play,FileCode2,ShieldCheck} from 'lucide-react';
@@ -26,6 +27,7 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
  const draft=draftRef.current,{name,environment,gpu,seconds,inputs,parameters,edits}=draft.values;
  function patch(changes:Partial<ReviewValues>){draft.stage(changes);redraw(value=>value+1);}
  const [selected,setSelected]=useState(''),[source,setSource]=useState(''),[editable,setEditable]=useState(false),[inputInfo,setInputInfo]=useState<any>(null),[working,setWorking]=useState(false);
+ const [opening,setOpening]=useState<{identity:string;sequence:number}|null>(null);
  const [step,setStep]=useState(''),[pendingRun,setPendingRun]=useState<Run|null>(null);
  const keyRef=useRef({sig:'',key:''}),openSeq=useRef(0),executing=useRef<object|null>(null),mounted=useRef(true),connectedRef=useRef(connected);connectedRef.current=connected;
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
@@ -37,10 +39,10 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
  },[identity,baseline]);
  useEffect(()=>{const beforeUnload=(event:BeforeUnloadEvent)=>{if(draft.error&&(draft.dirty||draft.conflict)){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',beforeUnload);return()=>window.removeEventListener('beforeunload',beforeUnload);},[draft]);
  async function open(name:string){
-  const seq=++openSeq.current;
+  const seq=++openSeq.current;setOpening({identity,sequence:seq});
   setSelected(name);setEditable(false);setSource('');setInputInfo(null);
   try{const value=await api('POST','/api/run/input',{run_id:run.id,name});if(seq!==openSeq.current)return;setInputInfo(value);setEditable(value.editable);setSource(edits[name]??value.text??'');}
-  catch(e){if(seq!==openSeq.current)return;setInputInfo({reason:e instanceof Error?e.message:String(e)});onError(e);}
+  catch(e){if(seq!==openSeq.current)return;setInputInfo({reason:e instanceof Error?e.message:String(e)});onError(e);}finally{if(seq===openSeq.current)setOpening(null);}
  }
  async function execute(){
   if(workflowBoundRef.current||executing.current||draft.conflict||draftRef.current!==draft||!connected)return;const transaction={};executing.current=transaction;setWorking(true);
@@ -73,6 +75,7 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
  if(!working&&!['draft','ready'].includes(run.status))return <RunDetail connected={connected} run={run} onRefresh={onRefresh} onError={onError} onOpenWorkflow={onOpenWorkflow} onOpenRun={id=>{void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError);}}/>;
  return <div className="task-review page" data-testid="task-review">
   <div className="page-heading"><div><span className="eyebrow">{t(taskModule(run.engine))} · {run.engine}</span><h1>{t('审阅计算参数')}</h1></div><span className="tag">{t('待你审阅')}</span></div>
+  <LoadingFeedback busy={working||opening?.identity===identity&&opening.sequence===openSeq.current} label={working?step||t('处理中…'):t('读取输入中…')}/>
   {(draft.dirty||draft.conflict||draft.error)&&<div className="notice" role="status" data-testid="run-review-draft"><div>{t(draft.conflict?'原始记录已变化或本地草稿无法读取；旧草稿保留，未自动套用。':draft.error?'本地持久化失败；修改仅保留在当前界面会话，关闭界面前请重试保存。':'本地编辑草稿已保留，尚未提交；切换页面后可继续编辑。')}{draft.conflict&&draft.saved&&<details><summary>{t('查看原草稿')}</summary><pre>{JSON.stringify(draft.saved.values,null,2)}</pre></details>}</div><button className="button" disabled={working} data-testid="discard-run-review-draft" onClick={()=>{if(!window.confirm(t('丢弃本地编辑并恢复当前运行记录？')))return;if(draft.discard()){setSelected('');setSource('');setEditable(false);setInputInfo(null);openSeq.current++;}redraw(value=>value+1);}}>{t('丢弃本地草稿')}</button>{draft.error&&!draft.conflict&&<><button className="button" onClick={()=>patch({})}>{t('重试保存草稿')}</button><button className="button" disabled={working} onClick={()=>{if(window.confirm(t('将丢弃其他运行的本地未提交编辑；此操作不修改运行记录。继续？'))&&draft.clearOtherDrafts())patch({});}}>{t('清理其他本地审阅草稿')}</button></>}</div>}
   <ol className="run-flow">{['输入与科学条件','审阅参数','实际环境验证','提交与监控'].map(v=><li key={v}>{t(v)}</li>)}</ol>
   <section className="card"><h3><Tooltip content={t('任务草稿已准备。检查输入后，点击执行才会开始验证与计算。')}>{t('任务与资源')}</Tooltip></h3>

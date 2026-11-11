@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {bundledWorkerRuntimeId} from './worker-service-version.mjs';
+import {prepareResourcesOffThread} from './preparation-worker-client.mjs';
+export function prepareSshServiceResourcesAsync(source,settings={}){return prepareResourcesOffThread('ssh',{source,settings});}
 
 const jsonFiles=new Set(['studio_worker/engine_contracts.json','studio_worker/pygas-editor-hints.json','studio_worker/tool_package.schema.json']);
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');

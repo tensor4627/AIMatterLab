@@ -15,6 +15,7 @@ export function assetHarness({component='AssetInspector',override,props:initialP
   if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);
   const require=name=>{
    if(name==='react')return react;
+   if(name.endsWith('/LoadingFeedback'))return {default:'LoadingFeedback',LoadingFeedback:'LoadingFeedback'};
    if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
    if(name==='../../api/worker')return {api:(method,target,data)=>invoke('worker.request',{method,target,data})};
    if(name==='../../api/studio')return {invoke};

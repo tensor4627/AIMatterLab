@@ -101,3 +101,8 @@ test('Review baseline conflicts expose the retained draft and block execution un
 test('Review remains editable when the localStorage getter throws and reports memory-only drafts',async t=>{
  const props={draftScope:'blocked-storage-source'},first=harness(t,{component:'RunReview',props,storageUnavailable:true});await first.flush();assert(first.text().includes('本地持久化失败'));first.nodes().find(node=>node.type==='input'&&node.props.value==='Controlled UI run').props.onChange({target:{value:'Memory-only edit'}});await first.flush();assert(first.nodes().some(node=>node.type==='input'&&node.props.value==='Memory-only edit'));first.unmount();const remounted=harness(t,{component:'RunReview',props,storageUnavailable:true});await remounted.flush();assert(remounted.nodes().some(node=>node.type==='input'&&node.props.value==='Memory-only edit'));assert(remounted.text().includes('本地持久化失败'));assert.equal(mutations(first).length+mutations(remounted).length,0);
 });
+
+
+test('pending run validation gives feedback and excludes a second dispatch before rerender',async t=>{
+ const gate=deferred(),h=harness(t,{props:{run:run('ready')},override:(target,_data,standard)=>target==='/api/run/validate'?gate.promise:standard()});await h.flush();const click=h.find('验证').props.onClick;click();click();await h.flush();assert.equal(h.calls.filter(call=>call.target==='/api/run/validate').length,1);assert(h.nodes().find(node=>node.props?.label==='正在验证输入…')?.props.busy);gate.resolve(run('ready'));await h.flush();assert.equal(h.find('验证').props.disabled,false);
+});

@@ -5,7 +5,7 @@ import http from 'node:http';
 import {computeRuntime} from '../../../desktop/platform/compute-runtime.mjs';
 import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
-import {prepareTerminalRuntime,TERMINAL_RUNTIME_SCHEMA} from './terminal-runtime.mjs';
+import {prepareTerminalRuntimeAsync,TERMINAL_RUNTIME_SCHEMA} from './terminal-runtime.mjs';
 
 const object=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const fail=code=>{throw Error(code);};
@@ -96,7 +96,7 @@ export const sharedTerminalTools=Object.freeze([
 ]);
 
 /** Sender validation remains in main.handle. Injected storage/transport keep unit checks local. */
-export function createSharedTerminal({worker={},profiles,encryption,root,catalog,current=()=>null,settings=()=>({}),sourceGuard=()=>{},getSelectedResource=()=>null,selectionRevision=()=>0,runtimeRoot=path.join(root,'runtime'),dependencyRoot,servicePath=computeRuntime.terminalServicePath,nodeExecutable=process.execPath,prepareRuntime=prepareTerminalRuntime,spawn=computeRuntime.spawnProcess,requestApi=localRequest,platform=process.platform,env=process.env,uuid=randomUUID,secret=()=>randomBytes(32).toString('hex'),readyTimeoutMs=10000,desktopSessionId=randomUUID()}){
+export function createSharedTerminal({worker={},profiles,encryption,root,catalog,current=()=>null,settings=()=>({}),sourceGuard=()=>{},getSelectedResource=()=>null,selectionRevision=()=>0,runtimeRoot=path.join(root,'runtime'),dependencyRoot,servicePath=computeRuntime.terminalServicePath,nodeExecutable=process.execPath,prepareRuntime=prepareTerminalRuntimeAsync,spawn=computeRuntime.spawnProcess,requestApi=localRequest,platform=process.platform,env=process.env,uuid=randomUUID,secret=()=>randomBytes(32).toString('hex'),readyTimeoutMs=10000,desktopSessionId=randomUUID()}){
  if(!path.isAbsolute(root)||!path.isAbsolute(runtimeRoot)||!text(dependencyRoot,4096)||!path.isAbsolute(dependencyRoot)||!path.isAbsolute(servicePath)||!path.isAbsolute(nodeExecutable))fail('terminal_invalid_request');
  if(!identifier(desktopSessionId))fail('terminal_invalid_request');
  const registryFile=path.join(root,'brokers-v2-'+desktopSessionId+'.bin'),known=new Map(),grants=new Map(),opening=new Map(),pendingProfiles=new Map(),uncertain=new Set(),ownershipIntents=new Map(),registered=new Map(),available=new Map(),children=new Map(),serviceReservations=new Map(),serviceAttempts=new Map(),services=new Map();let daemon=null,booting=null,restoring=null,loaded=false,activeId=null,ownershipSerial=0,closing=false,shutdownPromise=null;
@@ -209,9 +209,9 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
   attempt.cancelPromise=(async()=>{const result=await api('POST','/sessions/'+data.sessionId+'/service/cancel',{requestId:data.requestId});check(c);assertOwnership();checkProfile(proof,result.mode);if(result.cancelled!==true||result.cancelledRequestId!==data.requestId)fail('terminal_service_unknown');remember(result,brokerFor('/sessions/'+data.sessionId+'/service/cancel'));const view=serviceView(result,proof);if(view.attemptId===data.requestId&&!view.serviceActive)services.delete(data.sessionId);return {...view,cancelled:true,cancelledAttemptId:data.requestId};})();return attempt.cancelPromise;
  }
  async function serviceRequest(data){
-  typed(data,['sessionId','serviceId','requestId','method','target','data','mcp']);if(!identifier(data.serviceId)||!identifier(data.requestId)||data.requestId.length>100||!['GET','POST'].includes(data.method)||typeof data.target!=='string'||data.mcp!==undefined&&typeof data.mcp!=='boolean')fail('terminal_invalid_request');
+  typed(data,['sessionId','serviceId','requestId','method','target','data','mcp','timeoutMs']);if(!identifier(data.serviceId)||!identifier(data.requestId)||data.requestId.length>100||!['GET','POST'].includes(data.method)||typeof data.target!=='string'||data.mcp!==undefined&&typeof data.mcp!=='boolean'||data.timeoutMs!==undefined&&(!Number.isInteger(data.timeoutMs)||data.timeoutMs<250||data.timeoutMs>245000))fail('terminal_invalid_request');
   const c=snapshot(true),proof=serviceProfile(data.sessionId),record=services.get(data.sessionId);if(!record||record.serviceId!==data.serviceId||!equal(record.proof,proof))fail('terminal_service_changed');
-  const result=await api('POST','/sessions/'+data.sessionId+'/service/request',{serviceId:data.serviceId,requestId:data.requestId,method:data.method,target:data.target,...Object.hasOwn(data,'data')?{data:data.data}:{},mcp:data.mcp===true});
+  const result=await api('POST','/sessions/'+data.sessionId+'/service/request',{serviceId:data.serviceId,requestId:data.requestId,method:data.method,target:data.target,...Object.hasOwn(data,'data')?{data:data.data}:{},mcp:data.mcp===true,...data.timeoutMs!==undefined?{timeoutMs:data.timeoutMs}:{}});
   check(c);checkProfile(proof,known.get(data.sessionId)?.mode);if(services.get(data.sessionId)!==record)fail('terminal_service_changed');if(!object(result)||!Number.isInteger(result.status)||result.status<100||result.status>599||!Object.hasOwn(result,'data'))fail('terminal_service_failed');return result;
  }
  async function disconnectService(data){
