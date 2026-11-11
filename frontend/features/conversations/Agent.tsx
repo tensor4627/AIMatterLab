@@ -3,6 +3,7 @@ import {providerAccountState,authenticationError} from "./provider-account.mjs";
 import {ACCOUNT_GUIDANCE} from "../../../contracts/agent/provider-account.mjs";
 
 import './agent.css';
+import './codex-version-notice.css';
 import {tr} from "../../ui/i18n";
 import {useEffect,useRef,useState} from 'react';
 import {ArrowUp,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2} from 'lucide-react';
@@ -28,6 +29,19 @@ type ModelCall={requestId:string;provider:AgentProvider;model:string;threadId:st
 type Message={id:string;role:string;text:string;diff?:string;toolName?:string;activity?:any};
 function connectionAction(details:unknown):'cluster'|'compute'|null{if(typeof details!=='string'||details.length>16000)return null;function visit(value:any,depth=0):'cluster'|'compute'|null{if(depth>8||value==null)return null;if(typeof value==='string'){try{return visit(JSON.parse(value),depth+1);}catch{return null;}}if(Array.isArray(value)){for(const item of value.slice(0,64)){const found=visit(item,depth+1);if(found)return found;}return null;}if(typeof value!=='object')return null;if(value.status==='needs_human_auth'||value.code==='needs_human_auth')return 'cluster';if(value.status==='needs_worker_update'||value.code==='needs_worker_update')return 'compute';for(const key of ['content','structuredContent','result','text','data']){const found=visit(value[key],depth+1);if(found)return found;}return null;}return visit(details);}
 function originalRunHint(details:unknown):string|null{if(typeof details!=='string'||details.length>16000)return null;function walk(value:any,depth=0):string|null{if(depth>8||value==null)return null;if(typeof value==='string'){try{return walk(JSON.parse(value),depth+1);}catch{return null;}}if(Array.isArray(value)){for(const item of value.slice(0,64)){const found=walk(item,depth+1);if(found)return found;}return null;}if(typeof value!=='object')return null;if(value.kind==='authenticate_original_run'&&value.code==='needs_human_auth'&&typeof value.runId==='string'&&/^[A-Za-z0-9_-]{1,200}$/.test(value.runId))return value.runId;for(const key of ['content','structuredContent','result','text','data','connection_action']){const found=walk(value[key],depth+1);if(found)return found;}return null;}return walk(details);}
+type CodexVersionWarning={installedVersion:string;baselineVersion:string};
+const versionNoticeStorageKey='studio.codexVersionNotice.shown';
+const versionNoticeSessions=new WeakSet<Storage>();
+let inaccessibleStorageNoticeShown=false;
+function claimVersionNotice(){
+ let storage:Storage;try{storage=localStorage;}catch{if(inaccessibleStorageNoticeShown)return false;inaccessibleStorageNoticeShown=true;return true;}
+ if(versionNoticeSessions.has(storage))return false;
+ try{if(storage.getItem(versionNoticeStorageKey)==='1')return false;}catch{/* Keep the notice once per renderer when storage is unavailable. */}
+ versionNoticeSessions.add(storage);
+ try{storage.setItem(versionNoticeStorageKey,'1');}catch{/* A warning must never prevent connection. */}
+ return true;
+}
+function codexVersionWarning(value:any):CodexVersionWarning|null {const version=(text:unknown)=>typeof text==='string'&&text.length<=128&&/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(text);return value?.baselineMatch===false&&value?.versionWarning?.code==='STUDIO_CODEX_VERSION_DIFFERENCE'&&version(value.installedVersion)&&version(value.baselineVersion)?{installedVersion:value.installedVersion,baselineVersion:value.baselineVersion}:null;}
 function storedPreference(key:string){try{return localStorage.getItem(key);}catch{return null;}}
 function storePreference(key:string,value:string){try{localStorage.setItem(key,value);}catch{/* Storage is optional for chat. */}}
 export default function Agent({conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,onNewConversation,hidden,visibleWorkflowId,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onReviewWorker,onOpenCluster,onOpenOriginalRun,computeResource}:{computeResource?:ComputeResourceState|null;onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;onReviewWorker?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:{nonce:string;conversation?:Conversation;new?:boolean;pending?:boolean;error?:string;initialPrompt?:string};onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean;visibleWorkflowId?:string|null}){
@@ -39,10 +53,17 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
  const attachmentConsumedRef=useRef(onAttachmentConsumed);attachmentConsumedRef.current=onAttachmentConsumed;
  const [autoSkillStatus,setAutoSkillStatus]=useState<any>(null);
  const [tools,setTools]=useState<any>({status:'not_run',count:0});
+ const [versionWarning,setVersionWarning]=useState<CodexVersionWarning|null>(null);
+ const [versionNotice,setVersionNotice]=useState<CodexVersionWarning|null>(null);
  const resourceRef=useRef(computeResource),toolsRef=useRef(tools);resourceRef.current=computeResource;toolsRef.current=tools;
  const terminalSelected=computeResource?.kind==='ssh-terminal';
  const terminalNotice=computeResource?.status!=='selected'||computeResource.alive!==true?'所选 SSH 终端不可用，请在终端核对或重新选择。':!computeResource.agentReady?computeResource.operator==='agent'?'当前对话尚无此终端权限，请先接管，再交给 Agent。':'请在终端点击“交给 Agent”，再发送当前消息。':'SSH 终端已交接，请连接或重新连接当前服务商。';
  const [provider,setProvider]=useState<AgentProvider>(drafts.owner().provider as AgentProvider),[login,setLogin]=useState(false);
+ useEffect(()=>{
+  if(hidden||provider!=='codex'){setVersionNotice(null);return;}
+  if(versionWarning&&claimVersionNotice())setVersionNotice(versionWarning);
+ },[versionWarning,provider,hidden]);
+ useEffect(()=>{if(!versionNotice)return;const timer=setTimeout(()=>setVersionNotice(null),8000);return()=>clearTimeout(timer);},[versionNotice]);
  useEffect(()=>{providerChangeRef.current?.(provider);},[provider]);
  const [workflowId,setWorkflowId]=useState<string|null>(null),[newWorkflow,setNewWorkflow]=useState(false);
  const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<symbol|null>(null),providerTouched=useRef(false),handledSelection=useRef<string|undefined>(undefined),sendOwner=useRef<symbol|null>(null);
@@ -77,6 +98,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
    if(event.method==='studio/conversationDeleted'){setPrompt(drafts.discard(event.params.provider||event.provider||'codex',event.params.threadId));}
    if(event.method==='studio/conversationContextChanged'){const p=event.params;setPrompt(drafts.rekey(p.conversation.provider,p.oldThreadId,p.conversation.threadId));}
    if((event.provider||'codex')!==providerRef.current)return;
+   if(event.method==='studio/codexVersionWarning'&&providerRef.current==='codex'){setVersionWarning(codexVersionWarning(event.params));return;}
    if(event.method==='studio/skillsLoaded'){const call=modelCallRef.current,p=event.params||{};if(call&&p.requestId===call.requestId&&p.threadId===call.threadId&&p.threadId===threadRef.current&&(!p.turnId||!call.turnId||p.turnId===call.turnId))setAutoSkillStatus({...p,provider:event.provider||'codex'});return;}
    if(event.method==='studio/conversationContextChanged'){
     if(sessionPendingRef.current)return;const p=event.params,c=p.conversation;if(threadRef.current!==p.oldThreadId&&pendingResume.current!==p.oldThreadId)return;
@@ -131,8 +153,8 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   modelCallRef.current=null;setModelCall(null);
   const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
-  const owner=Symbol();connectionOwner.current=owner;providerTouched.current=true;setConnecting(true);try{
-   const connection=await invoke('agent.connect',{provider:selectedProvider,repairTools});if(!current())return false;setTools(connection.tools||{status:'not_run',count:0});
+  const owner=Symbol();connectionOwner.current=owner;providerTouched.current=true;setConnecting(true);setVersionWarning(null);try{
+   const connection=await invoke('agent.connect',{provider:selectedProvider,repairTools});if(!current())return false;setTools(connection.tools||{status:'not_run',count:0});setVersionWarning(selectedProvider==='codex'?codexVersionWarning(connection.studioCompatibility):null);
    const [a,m,conversations]=await Promise.all([refreshAccount(selectedProvider,seq),selectedRpc('model/list'),invoke<Conversation[]>('conversation.list')]);if(!current())return false;
    if(providerAccountState(selectedProvider,a)==='missing'){setNeedsAuth(true);setConnected(false);return false;}setNeedsAuth(false);
    const list=m.data||[];setModels(list);setModel(list.find((v:any)=>v.model===storedPreference('studio.model.'+selectedProvider))?.model||list.find((v:any)=>v.isDefault)?.model||list[0]?.model||'');
@@ -147,6 +169,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   if(busy||!managed&&connecting)return false;providerTouched.current=true;
   setRecovery(null);pendingResume.current=null;
   const old=providerRef.current,current=()=>seq===selectionSeq.current;
+  setVersionWarning(null);
   try{setNeedsAuth(false);await invoke('agent.disconnect',{provider:old});if(!current())return false;await invoke('settings',{agentProvider:value});if(!current())return false;}catch(e){if(current())onError(e);return false;}
   modelCallRef.current=null;setModelCall(null);if(!managed)selectDraft(value);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(storedPreference('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);return true;
  }
@@ -272,6 +295,7 @@ export default function Agent({conversationGroupId,onOpenAccounts,planningMode,o
   </div>
   </div>
   {recovery&&<div className="agent-recovery" data-testid="conversation-recovery" role="status"><strong>{t('对话连接需要恢复')}</strong><p>{t('旧聊天历史目前无法读取。可为同一流程建立新的空白对话连接，本地流程和作业记录保留。')}</p><button className="button" disabled={applying||connecting||!connected} onClick={()=>void resume(recovery.threadId,++selectionSeq.current,projectId,true)}>{t('重新建立对话连接')}</button>{recovery.error&&<p role="alert">{recovery.error}</p>}</div>}
+  {provider==='codex'&&!hidden&&versionNotice&&<div className="codex-version-notice" role="alert" data-testid="codex-version-warning"><div><strong>{t('Codex CLI 版本不同，仍可继续使用。')}</strong><small>{versionNotice.installedVersion} · {t('参考版本')} {versionNotice.baselineVersion}</small></div><button className="text-button" aria-label={t('关闭版本提示')} onClick={()=>setVersionNotice(null)}>{t('关闭')}</button></div>}
   <div className="chat-scroll" ref={scroll} role="log">
    {!messages.length&&<div className="agent-welcome"><div className="agent-orb"><Sparkles size={24}/></div><h3>{tr("让想法进入计算")}</h3><p>{tr("定义实验、准备输入、运行计算，")}<br/>{tr("然后一起检查结果。")}</p><div className="prompt-hints">{['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(t=><button key={t} onClick={()=>updatePrompt(t)}>{tr(t)}<ArrowUp size={13}/></button>)}</div></div>}
    {messages.map(m=><div key={m.id} className={'message '+m.role}>{m.role==='tool'?<><ToolActivity message={m} onWorkflow={onOpenTask} onRun={onOpenRun}/>{originalRunHint(m.activity?.details)&&onOpenOriginalRun&&<button className="button" data-testid="agent-open-original-run" disabled={busy||connecting} onClick={()=>onOpenOriginalRun(originalRunHint(m.activity?.details)!)}>{t('打开原作业')}</button>}{!originalRunHint(m.activity?.details)&&connectionAction(m.activity?.details)==='cluster'&&onOpenCluster&&<button className="button" data-testid="agent-open-cluster" disabled={busy||connecting} onClick={onOpenCluster}>{t('打开集群连接')}</button>}{connectionAction(m.activity?.details)==='compute'&&(onReviewWorker||onConnectCompute)&&<button className="button" data-testid="agent-open-compute" disabled={busy||connecting} onClick={()=>void Promise.resolve().then(onReviewWorker||onConnectCompute).catch(onError)}>{t('核对作业服务更新')}</button>}</>:<><div className="message-role">{tr(m.role==='user'?'你':'GPU Sampling Studio')}</div><div className="message-text">{m.role==='agent'?<MessageText text={m.text}/>:m.text}</div></>}{m.diff&&<pre className="diff-text">{m.diff}</pre>}</div>)}

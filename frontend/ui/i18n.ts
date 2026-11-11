@@ -1,4 +1,8 @@
 const english:Record<string,string> = {
+"计算工作区":"Computational workspace",
+"Codex CLI 版本不同，仍可继续使用。":"Codex CLI version differs. You can continue using it.",
+"参考版本":"Reference version",
+"关闭版本提示":"Dismiss version notice",
 "SSH 终端已打开":"SSH terminal is open",
 "SSH 终端已退出":"SSH terminal has exited",
 "SSH 终端访问已过期":"SSH terminal access has expired",

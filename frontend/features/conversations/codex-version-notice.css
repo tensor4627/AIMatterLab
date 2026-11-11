@@ -1,0 +1,5 @@
+.codex-version-notice{position:fixed;top:56px;right:20px;z-index:1000;display:flex;align-items:flex-start;gap:16px;max-width:min(420px,calc(100vw - 40px));padding:14px 16px;background:var(--panel);color:var(--text);border:1px solid #b58a35;border-radius:10px;box-shadow:0 8px 28px #0003}
+.codex-version-notice strong{display:block;font-size:13px;font-weight:600;line-height:1.5}
+.codex-version-notice small{display:block;margin-top:4px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
+.codex-version-notice>div{min-width:0}
+.codex-version-notice>button{flex-shrink:0}
