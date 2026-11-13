@@ -58,6 +58,34 @@ def decode(line):
     return kind, identifier, json.loads(base64.b64decode(value, validate=True))
 
 
+def reuse_guard(path):
+    """Watch the real child without replacing its helper, HTTP, cache or worker."""
+    return '''import sys
+_reuse_guard_path = %r
+with open(_reuse_guard_path, 'w') as _guard_file:
+    _guard_file.write('active\\n')
+def _reuse_forbidden(kind):
+    with open(_reuse_guard_path, 'a') as _guard_file:
+        _guard_file.write(kind + '\\n')
+    raise RuntimeError('Reuse must not stage or launch a worker')
+def _reuse_profile(frame, event, arg):
+    if event == 'call' and frame.f_code.co_name in ('stage_runtime', 'health_checked', 'start_worker'):
+        _reuse_forbidden(frame.f_code.co_name)
+def _reuse_audit(event, args):
+    if event in ('subprocess.Popen', 'os.system', 'os.posix_spawn', 'os.fork'):
+        _reuse_forbidden(event)
+sys.setprofile(_reuse_profile)
+sys.addaudithook(_reuse_audit)
+''' % str(path)
+
+
+def cache_evidence(root):
+    paths = [root / 'ssh-service.json', root / 'connection.json']
+    paths.extend(item for item in (root / 'runtimes').rglob('*') if item.is_file())
+    return {str(item.relative_to(root)): (item.stat().st_ino, item.stat().st_mtime_ns,
+             item.stat().st_mode, hashlib.sha256(item.read_bytes()).hexdigest()) for item in paths if item.exists()}
+
+
 class Client:
     def __init__(self, home, hello, source, packed, prefix=''):
         self.hello, self.source, self.packed, self.wire, self.uploads = hello, source, packed, [], []
@@ -149,6 +177,54 @@ class Client:
 
 @unittest.skipUnless(os.name == 'posix', 'Linux process/socket and terminal identities')
 class TransportTests(unittest.TestCase):
+    def test_fixed_scheduler_inspection_uses_actual_programs_and_authenticated_bridge_without_registration(self):
+        with tempfile.TemporaryDirectory(prefix='studio-v2-probe-owned-') as home:
+            folder = Path(home) / 'bin'; folder.mkdir()
+            scripts = {
+                'sinfo': "assert sys.argv[1:] == ['-h','-o','%P|%a|%D|%t|%G']; print('gpu*|up|2|idle|gpu:a100:4')",
+                'bqueues': "assert sys.argv[1:] == ['-w']; print('QUEUE_NAME PRIO STATUS MAX JL/U JL/P JL/H NJOBS PEND RUN SUSP'); print('batch 30 Open:Active - - - - 0 0 0 0')",
+            }
+            for name, code in scripts.items():
+                file = folder / name; file.write_text('#!' + sys.executable + '\nimport sys\n' + code + '\n'); file.chmod(0o700)
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]
+            hello, source, packed, _, _ = bundle(port)
+            root = Path(home) / '.local/state/gpu-sampling-studio/ssh-services' / hello['profile_id']
+            client = Client(home, hello, source, packed, prefix='import os\nos.environ["PATH"] = %r\n' % str(folder))
+            try:
+                ready = client.start()
+                self.assertEqual(ready['bridge_capabilities'], ['scheduler-inspection-v1'])
+                before = cache_evidence(root)
+                result = client.request(bridge.SCHEDULER_INSPECTION, {})
+                self.assertEqual(result['status'], 200)
+                observed = result['data']; self.assertEqual(observed['status'], 'observed')
+                self.assertEqual(observed['observations'][0]['queues'], [{'name': 'gpu', 'default': True, 'availability': 'up', 'node_count': 2, 'node_state': 'idle', 'gres': 'gpu:a100:4'}])
+                self.assertEqual(observed['observations'][1]['queues'], [{'name': 'batch', 'availability': 'open:active'}])
+                self.assertFalse(observed['automatic_retry'])
+                self.assertEqual(cache_evidence(root), before)
+                for name in ('list_clusters', 'list_projects', 'list_workflows'):
+                    reply = client.request('/mcp', {'jsonrpc': '2.0', 'id': name, 'method': 'tools/call', 'params': {'name': name, 'arguments': {}}}, True)
+                    self.assertEqual(json.loads(reply['data']['result']['content'][0]['text']), [])
+                for data, mcp in [({'command': 'never'}, False), ({}, True), ({}, 0)]:
+                    self.assertEqual(client.request(bridge.SCHEDULER_INSPECTION, data, mcp)['status'], 502)
+                self.assertEqual(client.request('/api/health')['status'], 200)
+                client.stop()
+            finally:
+                client.dispose(); self.stop_workers(root, port)
+
+    def test_fixed_scheduler_output_and_timeout_are_bounded_with_no_partial_queue_claims(self):
+        with tempfile.TemporaryDirectory(prefix='studio-probe-bounds-') as folder:
+            executable = Path(folder) / 'sinfo'
+            for code, expected in [("print('x'*70000)", 'output_limit'), ("print('not|a|valid|row')", 'invalid_output'), ("import time; time.sleep(30)", 'timed_out')]:
+                executable.write_text('#!' + sys.executable + '\n' + code + '\n'); executable.chmod(0o700)
+                with patch.dict(os.environ, {'PATH': folder}):
+                    started = time.monotonic(); result = bridge.inspect_scheduler()
+                self.assertLess(time.monotonic() - started, 6)
+                self.assertEqual(result['status'], 'blocked')
+                self.assertEqual(result['observations'][0]['status'], expected)
+                self.assertEqual(result['observations'][0]['queues'], [])
+                self.assertEqual(result['observations'][1]['status'], 'not_found')
+
     def test_compact_bundle_preserves_pinned_files_and_rejects_malformed_file_offsets(self):
         hello, _, _, value, files = bundle()
         header = json.dumps({**value, 'files': [{k: v for k, v in row.items() if k != 'base64'} for row in value['files']]}, separators=(',', ':')).encode()
@@ -173,7 +249,7 @@ class TransportTests(unittest.TestCase):
             root = Path(home) / '.local/state/gpu-sampling-studio/ssh-services' / hello['profile_id']
             client = Client(home, hello, source, packed)
             try:
-                health = client.start(); self.assertEqual(health['runtime_id'], '62034ec6cfc1428aaa4d')
+                health = client.start(); self.assertEqual(health['runtime_id'], '57cc5d274c42747e679d')
                 context = client.request('/api/authoring/context', {'workspace_id': 'owned-compressed-fixture', 'name': 'Owned compressed transport', 'structure_paths': [], 'selected_paths': []})
                 project = context['data']['project']['id']; content = 'owned harmless transport data\n' * 3000
                 self.assertEqual(client.request('/api/workspace/write', {'project_id': project, 'name': 'large-fixture.txt', 'content': content})['status'], 200)
@@ -185,7 +261,7 @@ class TransportTests(unittest.TestCase):
 
     def test_current_worker_has_exactly_138_files_and_matches_frozen_manifest(self):
         self.assertEqual(len(worker_files(WORKER)), 138)
-        self.assertEqual(runtime_identity(WORKER, worker_files(WORKER)), '62034ec6cfc1428aaa4d')
+        self.assertEqual(runtime_identity(WORKER, worker_files(WORKER)), '57cc5d274c42747e679d')
 
     def test_actual_cold_then_cached_transport_worker_and_http_keep_remote_credentials(self):
         with tempfile.TemporaryDirectory(prefix='studio-v2-owned-') as home:
@@ -198,7 +274,7 @@ class TransportTests(unittest.TestCase):
             root = Path(home) / '.local/state/gpu-sampling-studio/ssh-services' / hello['profile_id']
             try:
                 cold = Client(home, hello, source, packed); clients.append(cold); health = cold.start()
-                self.assertEqual(health['runtime_id'], '62034ec6cfc1428aaa4d'); self.assertEqual(health['root'], str(root))
+                self.assertEqual(health['runtime_id'], '57cc5d274c42747e679d'); self.assertEqual(health['root'], str(root))
                 self.assertEqual([kind for kind, _ in cold.uploads], ['TRANSPORT_END', 'INSTALL_END'])
                 self.assertLess(len(packed), hello['worker_size'] // 2)
                 self.assertEqual(cold.request('/api/health')['data']['hostIdentity']['uid'], os.getuid())
@@ -225,6 +301,136 @@ class TransportTests(unittest.TestCase):
             finally:
                 for client in clients: client.dispose()
                 self.stop_workers(root, port)
+
+    def test_reuse_only_attaches_same_worker_without_upload_stage_or_bootstrap_and_stop_restores_tty(self):
+        with tempfile.TemporaryDirectory(prefix='studio-v2-reuse-owned-') as home:
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]
+            hello, source, packed, _, _ = bundle(port)
+            root = Path(home) / '.local/state/gpu-sampling-studio/ssh-services' / hello['profile_id']
+            clients = []
+            try:
+                setup = Client(home, hello, source, packed); clients.append(setup)
+                health = setup.start(); setup.stop()
+                before_workers = self.owned_workers(root, port)
+                self.assertEqual(len(before_workers), 1)
+                before_cache = cache_evidence(root)
+                daily_hello = {**hello, 'reuse_only': True}
+                guard = Path(home) / 'daily-guard.txt'
+                daily = Client(home, daily_hello, source, packed, reuse_guard(guard)); clients.append(daily)
+                self.assertEqual(daily.start(), health)
+                self.assertEqual(daily.uploads, [])
+                self.assertIn(('WORKER_READY', {'cached': True}), daily.receipts)
+                self.assertEqual(daily.request('/api/health')['status'], 200)
+                self.assertEqual(daily.request('/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize'}, True)['status'], 200)
+                self.assertEqual(self.owned_workers(root, port), before_workers)
+                daily.stop()
+                self.assertEqual(guard.read_text(), 'active\n')
+                self.assertEqual(cache_evidence(root), before_cache)
+                self.assert_tty_reuse_stop(home, daily_hello)
+                self.assertEqual(self.owned_workers(root, port), before_workers)
+                self.assertEqual(cache_evidence(root), before_cache)
+                # A different pinned runtime is a maintenance request, never an
+                # implicit upgrade of the installed and still-running worker.
+                upgrade = Client(home, {**daily_hello, 'expected_runtime_id': '0' * 20,
+                                 'worker_manifest_sha256': '0' * 64}, source, packed, reuse_guard(guard))
+                clients.append(upgrade)
+                error = upgrade.start(); self.assertEqual(error[2]['code'], 'maintenance_required')
+                self.assertEqual(error[2]['phase'], 'checking_cache')
+                self.assertEqual(upgrade.read(), ('EXITED', '-', {'reason': 'failed'})); upgrade.finish()
+                self.assertEqual(upgrade.uploads, [])
+                self.assertFalse((root / 'runtimes' / ('0' * 20)).exists())
+                self.assertEqual(guard.read_text(), 'active\n')
+                self.assertEqual(self.owned_workers(root, port), before_workers)
+                self.assertEqual(cache_evidence(root), before_cache)
+            finally:
+                for client in clients: client.dispose()
+                self.stop_workers(root, port)
+
+    def test_reuse_only_cold_cache_requires_maintenance_without_uploading_or_starting_worker(self):
+        with tempfile.TemporaryDirectory(prefix='studio-v2-reuse-cold-owned-') as home:
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]
+            hello, source, packed, _, _ = bundle(port); hello['reuse_only'] = True
+            root = Path(home) / '.local/state/gpu-sampling-studio/ssh-services' / hello['profile_id']
+            guard = Path(home) / 'daily-guard.txt'
+            client = Client(home, hello, source, packed, reuse_guard(guard))
+            try:
+                error = client.start(); self.assertEqual(error[2]['code'], 'maintenance_required')
+                self.assertEqual(error[2]['phase'], 'checking_cache')
+                self.assertEqual(client.read(), ('EXITED', '-', {'reason': 'failed'})); client.finish()
+                self.assertEqual([kind for kind, _ in client.uploads], ['TRANSPORT_END'])
+                self.assertFalse(any(kind == 'WORKER_NEEDED' for kind, _ in client.receipts))
+                self.assertFalse(root.exists()); self.assertEqual(self.owned_workers(root, port), [])
+                self.assertEqual(guard.read_text(), 'active\n')
+            finally:
+                client.dispose(); self.stop_workers(root, port)
+
+    def test_reuse_only_dead_daemon_requires_maintenance_without_restarting_or_rewriting_cache(self):
+        with tempfile.TemporaryDirectory(prefix='studio-v2-reuse-dead-owned-') as home:
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]
+            hello, source, packed, _, _ = bundle(port)
+            root = Path(home) / '.local/state/gpu-sampling-studio/ssh-services' / hello['profile_id']
+            setup = Client(home, hello, source, packed); daily = None
+            try:
+                self.assertIsInstance(setup.start(), dict); setup.stop()
+                self.assertEqual(len(self.owned_workers(root, port)), 1)
+                self.stop_workers(root, port)
+                before_cache = cache_evidence(root)
+                guard = Path(home) / 'daily-guard.txt'
+                daily = Client(home, {**hello, 'reuse_only': True}, source, packed, reuse_guard(guard))
+                error = daily.start(); self.assertEqual(error[2]['code'], 'maintenance_required')
+                self.assertEqual(error[2]['phase'], 'checking_health')
+                self.assertEqual(daily.read(), ('EXITED', '-', {'reason': 'failed'})); daily.finish()
+                self.assertEqual(daily.uploads, [])
+                self.assertFalse(any(kind == 'WORKER_NEEDED' for kind, _ in daily.receipts))
+                self.assertEqual(guard.read_text(), 'active\n')
+                self.assertEqual(cache_evidence(root), before_cache)
+                self.assertEqual(self.owned_workers(root, port), [])
+            finally:
+                setup.dispose()
+                if daily: daily.dispose()
+                self.stop_workers(root, port)
+
+    def test_handoff_starts_only_verified_cached_worker_without_upload_or_runtime_changes(self):
+        with tempfile.TemporaryDirectory(prefix='studio-v2-handoff-owned-') as home:
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]
+            hello, source, packed, _, _ = bundle(port)
+            root = Path(home) / '.local/state/gpu-sampling-studio/ssh-services' / hello['profile_id']
+            clients = []
+            try:
+                setup = Client(home, hello, source, packed); clients.append(setup)
+                health = setup.start(); setup.stop()
+                before_cache = cache_evidence(root)
+                before_workers = self.owned_workers(root, port)
+                live = Client(home, {**hello, 'reuse_only': True, 'start_cached': True}, source, packed); clients.append(live)
+                self.assertEqual(live.start(), health)
+                self.assertEqual(live.uploads, [])
+                self.assertEqual(self.owned_workers(root, port), before_workers)
+                live.stop(); self.stop_workers(root, port)
+                self.assertEqual(self.owned_workers(root, port), [])
+                restarted = Client(home, {**hello, 'reuse_only': True, 'start_cached': True}, source, packed); clients.append(restarted)
+                self.assertEqual(restarted.start(), health)
+                self.assertEqual(restarted.uploads, [])
+                self.assertEqual(cache_evidence(root), before_cache)
+                self.assertEqual(len(self.owned_workers(root, port)), 1)
+                self.assertEqual(restarted.request('/api/health')['status'], 200)
+                restarted.stop()
+            finally:
+                for client in clients: client.dispose()
+                self.stop_workers(root, port)
+
+    def test_cached_start_flag_requires_reuse_mode(self):
+        with tempfile.TemporaryDirectory(prefix='studio-v2-invalid-start-owned-') as home:
+            hello, source, packed, _, _ = bundle(); hello['start_cached'] = True
+            client = Client(home, hello, source, packed)
+            try:
+                self.assertEqual(client.start()[2]['code'], 'invalid_hello')
+                self.assertEqual(client.uploads, [])
+                self.assertEqual(client.read(), ('EXITED', '-', {'reason': 'failed'})); client.finish()
+            finally: client.dispose()
 
     def test_cached_helper_is_never_executed_without_its_full_hash(self):
         hello, source, packed, _, _ = bundle()
@@ -267,7 +473,7 @@ class TransportTests(unittest.TestCase):
 
     def test_unsupported_python_and_missing_sqlite_end_with_fixed_safe_error_then_exit(self):
         hello, source, packed, _, _ = bundle()
-        for prefix, code in [('import pathlib,sys;sys.version_info=(3,9,99)\n', 'python_unsupported'),
+        for prefix, code in [('import pathlib,sys;sys.version_info=(3,8,99)\n', 'python_unsupported'),
                              ('import sys;sys.modules["sqlite3"]=None\n', 'sqlite_unavailable')]:
             with tempfile.TemporaryDirectory(prefix='studio-v2-owned-') as home:
                 client = Client(home, hello, source, packed, prefix)
@@ -316,7 +522,7 @@ class TransportTests(unittest.TestCase):
 
     def test_tty_preflight_failure_and_cancel_restore_echo_before_final_control(self):
         import pty, termios
-        for prefix, action in [('import pathlib,sys;sys.version_info=(3,9,99)\n', None), ('', 'cancel')]:
+        for prefix, action in [('import pathlib,sys;sys.version_info=(3,8,99)\n', None), ('', 'cancel')]:
             with tempfile.TemporaryDirectory(prefix='studio-v2-owned-') as home:
                 master, slave = pty.openpty(); original = termios.tcgetattr(slave)
                 child = subprocess.Popen([sys.executable, '-I', '-u', '-c', prefix + (TRANSPORT / 'bootstrap.py').read_text(), NONCE],
@@ -339,6 +545,48 @@ class TransportTests(unittest.TestCase):
                 finally:
                     if child.poll() is None: child.kill(); child.wait(timeout=3)
                     child.stderr.close(); os.close(master); os.close(slave)
+
+    def assert_tty_reuse_stop(self, home, hello):
+        import pty, termios
+        master, slave = pty.openpty(); original = termios.tcgetattr(slave)
+        guard = Path(home) / 'tty-daily-guard.txt'
+        child = subprocess.Popen([sys.executable, '-I', '-u', '-c', reuse_guard(guard) +
+                                 (TRANSPORT / 'bootstrap.py').read_text(), NONCE],
+                                 stdin=slave, stdout=slave, stderr=subprocess.PIPE,
+                                 env={**os.environ, 'HOME': str(home), 'PYTHONDONTWRITEBYTECODE': '1'})
+        pending = bytearray(); cleared = b'\x1b[2J\x1b[3J\x1b[H'
+        def read():
+            deadline = time.monotonic() + 35
+            while b'\n' not in pending:
+                remaining = deadline - time.monotonic()
+                self.assertGreater(remaining, 0, 'Owned reuse TTY timed out')
+                if select.select([master], [], [], remaining)[0]: pending.extend(os.read(master, 65536))
+            line, _, rest = pending.partition(b'\n'); pending[:] = rest
+            return decode(line.removeprefix(cleared) + b'\n')
+        try:
+            self.assertEqual(read()[0], 'BOOTSTRAP_READY')
+            os.write(master, frame('HELLO', '-', hello)); fragments = bytearray()
+            while True:
+                kind, _, value = read()
+                self.assertNotIn(kind, ('TRANSPORT_NEEDED', 'WORKER_NEEDED', 'ERROR'))
+                if kind == 'FRAGMENT':
+                    self.assertEqual(value['kind'], 'READY'); fragments.extend(base64.b64decode(value['chunk']))
+                    if value['last']: break
+            self.assertEqual(json.loads(fragments)['runtime_id'], hello['expected_runtime_id'])
+            self.assertNotEqual(termios.tcgetattr(slave), original)
+            os.write(master, frame('STOP', 'owned-tty-stop', {}))
+            self.assertEqual(read(), ('STOPPED', 'owned-tty-stop', {})); child.wait(timeout=5)
+            self.assertEqual(termios.tcgetattr(slave), original)
+            self.assertEqual(child.stderr.read(), b''); self.assertEqual(guard.read_text(), 'active\n')
+            self.assertEqual(pending, b'')
+            # The restored line discipline accepts and echoes ordinary terminal
+            # input after STOP; no service protocol or shell is replayed.
+            os.write(master, b'OWNED_TERMINAL_INPUT_RESTORED\n')
+            self.assertTrue(select.select([master], [], [], 3)[0])
+            self.assertIn(b'OWNED_TERMINAL_INPUT_RESTORED', os.read(master, 4096))
+        finally:
+            if child.poll() is None: child.kill(); child.wait(timeout=5)
+            child.stderr.close(); os.close(master); os.close(slave)
 
     @staticmethod
     def owned_workers(root, port):

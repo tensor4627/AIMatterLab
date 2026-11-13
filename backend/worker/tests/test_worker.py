@@ -154,7 +154,14 @@ class Lifecycle(unittest.TestCase):
         (self.inputs / "run.py").write_text("import time;time.sleep(60)\n")
         run = self.submit()
         self.service.tick()
-        time.sleep(.3)
+        # Test cancellation of an actually started child. Interpreter startup on
+        # a mounted filesystem can exceed an arbitrary 300 ms sleep.
+        for _ in range(100):
+            if (Path(run["directory"]) / "child.json").is_file():
+                break
+            time.sleep(.05)
+        else:
+            self.fail("Supervisor did not confirm its owned child before cancellation")
         self.service.cancel(run["id"])
         self.assertEqual(self.await_end(run["id"])["status"], "cancelled")
         run = self.submit(idempotency_key="timeout", max_seconds=1)

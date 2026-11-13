@@ -73,7 +73,7 @@ export function createReadPolicy(value,{scope={},assertScope=()=>{},reload}={}){
   executionResult(functionId){
    assertCurrent();if(facts.state!=='active')return {status:'blocked',function_id:functionId,reason:'Execution guidance is '+facts.state+'; explicit configuration is required. Legacy guidance remains sealed.',attachments:[]};
    const execution=facts.executionSkill,resources=[execution,...execution.resources],digest=sha(facts.revision+'\0'+facts.activation.id+'\0'+resources.map(resource=>resource.sha256).join('\0'));
-   return {status:'passed',function_id:functionId,phase:'execution',digest,document_ids:resources.map(resource=>resource.id),attachments:resources.map(resource=>({source:'execution',skill:execution.id,name:resource.id,sha256:resource.sha256,bytes:Buffer.byteLength(resource.text)})),text:'[Studio active execution skill]\n'+resources.map(resource=>'['+resource.id+']\n'+resource.text).join('\n\n'),bytes:resources.reduce((sum,resource)=>sum+Buffer.byteLength(resource.text),0),scope:'Backend-activated execution snapshot; no archived guidance files were accessed.'};
+   return {status:'passed',function_id:functionId,phase:'execution',digest,document_ids:resources.map(resource=>resource.id),attachments:[{source:'execution',skill:execution.id,name:execution.id,sha256:execution.sha256,bytes:Buffer.byteLength(execution.text)}],text:'[Studio active execution skill]\n['+execution.id+']\n'+execution.text+'\nSupporting document IDs (read only when needed): '+JSON.stringify(execution.resources.map(resource=>resource.id)),bytes:Buffer.byteLength(execution.text),scope:'Backend-activated execution skill entry; supporting resources require focused reads. No archived guidance files were accessed.'};
   },
  };
  return Object.freeze(policy);

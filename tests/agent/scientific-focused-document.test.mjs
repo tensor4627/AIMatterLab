@@ -12,8 +12,8 @@ const native=result=>result.attachments.find(a=>a.name==='studio-md-workflow/'+r
 import {toolValueResult} from "../../agent/tools/tool-failure.mjs";
 import {ScientificSkills} from "../../agent/skills/scientific-skills.mjs";
 const documentId=skillId+'/'+reference;
-test('focused native document crosses real MCP serialization intact for all four providers',async t=>{
- const f=await fixture(t);for(const provider of ['codex','kimi','qwen','deepseek']){
+test('focused native document crosses real MCP serialization intact for all five providers',async t=>{
+ const f=await fixture(t);for(const provider of ['codex','kimi','qwen','deepseek','compatible']){
  const tools=Object.create(ScientificSkills.prototype);tools.map=map;tools.router=f.router;assert(tools.tools().find(tool=>tool.name==='read_scientific_skill').inputSchema.properties.document_id);const result=await tools.call('read_scientific_skill',{function_id:'sampling.gpumd',document_id:documentId},{provider}),wire=JSON.stringify(toolValueResult(result)),decoded=JSON.parse(JSON.parse(wire).content[0].text);
  assert.equal(decoded.status,'passed');assert.equal(decoded.attachments.length,1);assert.equal(decoded.attachments[0].source_evidence.status,'source_matched_reference');assert.deepEqual(JSON.parse(decoded.text),f.doc);assert.equal(sha(decoded.text),decoded.attachments[0].sha256);assert.equal(Buffer.byteLength(decoded.text),decoded.bytes);assert(Buffer.byteLength(wire)<=24*1024);assert(!wire.includes('RAW_SOURCE_MUST_NOT_BE_SHARED'));assert(!wire.includes(f.root));
  }

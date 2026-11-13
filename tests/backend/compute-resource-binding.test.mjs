@@ -13,13 +13,14 @@ import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {Catalog} from '../../backend/main/workspace/catalog.mjs';
 import {createComputeProfiles} from '../../backend/main/compute/compute-profiles.mjs';
 import {createComputeResourceBinding} from '../../backend/main/compute/resource-binding.mjs';
+import {saveComputeProfileWithEnvironment} from '../../backend/main/compute/compute-profile-environment-save.mjs';
 import {createSharedTerminal} from '../../backend/main/compute/shared-terminal.mjs';
 import {startBroker} from '../../desktop/platform/terminal-service/broker.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
 
 const repository=fileURLToPath(new URL('../..',import.meta.url)),base=process.env.STUDIO_COMPUTE_FIXTURE_ROOT?path.resolve(process.env.STUDIO_COMPUTE_FIXTURE_ROOT):path.join(os.tmpdir(),'studio-compute-resource-binding-fixtures');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function fixture(t,{now=Date.now}={}){
+async function fixture(t,{now=Date.now,serviceState=()=>null}={}){
  fs.mkdirSync(base,{recursive:true});const root=fs.mkdtempSync(path.join(base,'binding-'));
  fs.writeFileSync(path.join(root,'fixture.json'),JSON.stringify({kind:'controlled-stdio-resource-binding',scope:'Real broker/MCP HTTP and child PID; inert node echo protocol substitutes SSH. No authentication, scientific worker, queue or engine.'}));
  const catalog=new Catalog(path.join(root,'catalog')),profiles=createComputeProfiles({catalog}),worker={connection:null},children=[],brokers=[],calls=[];
@@ -35,7 +36,7 @@ async function fixture(t,{now=Date.now}={}){
  const brokerSpawn=()=>{const child=new EventEmitter();child.pid=process.pid;child.stdout=new PassThrough();child.unref=()=>{};child.stdin=new Writable({write(chunk,_encoding,done){startBroker(JSON.parse(chunk.toString()),{pty,now}).then(broker=>{brokers.push(broker);child.stdout.write(JSON.stringify(broker.ready)+'\n');},error=>child.emit('error',error));done();}});return child;};
  const requestApi=async(descriptor,method,route,body)=>{calls.push({method,route});const response=await fetch(descriptor.origin+route,{method,headers:{Authorization:'Bearer '+descriptor.controlToken,...body!==undefined?{'Content-Type':'application/json'}:{}},...body!==undefined?{body:JSON.stringify(body)}:{}});if(response.status!==200)throw Error('fixture broker denied');const result=await response.json();if(gate&&route.endsWith('/state')){const wait=gate;gate=null;await wait;}return result;};
  const terminalOptions={desktopSessionId:'same-desktop-binding-fixture',prepareRuntime:mockTerminalRuntime,worker,profiles,catalog,encryption,root:path.join(root,'credentials'),runtimeRoot:path.join(root,'runtime'),dependencyRoot:root,servicePath:path.join(root,'in-process-broker-fixture.mjs'),nodeExecutable:process.execPath,spawn:brokerSpawn,requestApi,current:()=>selected,settings:()=>({cwd:root}),getSelectedResource:()=>binding?.peek(),selectionRevision:()=>binding?.revision()??0,sourceGuard:()=>{throw Error('No scientific worker exists');}};const terminal=createSharedTerminal(terminalOptions);
- binding=createComputeResourceBinding({catalog,profiles,terminal,current:()=>selected,revision:()=>contextRevision});
+ binding=createComputeResourceBinding({catalog,profiles,terminal,current:()=>selected,revision:()=>contextRevision,serviceState});
  const gateway=new TerminalMcp({terminal});await gateway.start();gateway.bindProviderContext('codex',{threadId:'thread-a',taskId:null});
  const session=await terminal.open({kind:'ssh',mode:'interactive',profileId:profile.id,version:profile.version});
  let owned=session;
@@ -109,4 +110,41 @@ test('same-desktop reconstructed selected reference restores its channel without
 test('actual broker expiry revokes Agent readiness while retaining the existing live process',async t=>{
  let clock=Date.now();const f=await fixture(t,{now:()=>clock});await f.activate();await f.handoff();assert.equal((await f.binding.status({})).agentReady,true);
  clock+=86400001;const state=await f.binding.status({});assert.equal(state.processStatus,'expired');assert.equal(state.alive,true);assert.equal(state.agentReady,false);assert.equal(state.authentication,'not_observed');assert.equal(f.children[0].exitCode,null);assert.equal((await f.send('read_shared_terminal',{session_id:f.session.id})).value.result.isError,true);
+});
+
+test('human service-environment save advances exact profile and selected reference while preserving the same live child and login route',async t=>{
+ const f=await fixture(t);await f.activate();const before=f.binding.peek(),pid=f.children[0].pid,ownerEpoch=f.ownerEpoch,callStart=f.calls.length;
+ const {version,id,...body}=f.profile,serviceEnvironment={python:'/fixture/conda/envs/studio/bin/python',activation:'source /fixture/conda.sh\nconda activate studio'};
+ const saved=await saveComputeProfileWithEnvironment({profiles:f.profiles,terminal:f.terminal,resource:f.binding,sshService:{peek:()=>({status:'disconnected'})},assertIdle:()=>{}},{id,expectedVersion:version,...body,serviceEnvironment});
+ assert.equal(saved.version,2);assert.deepEqual(f.binding.peek(),{...before,profileVersion:2});assert.equal(f.children.length,1);assert.equal(f.children[0].pid,pid);assert.equal(f.children[0].exitCode,null);assert.equal(f.ownerEpoch,ownerEpoch);assert(f.calls.slice(callStart).every(call=>call.method==='GET'&&(call.route.endsWith('/service/state')||call.route==='/connections')));
+ const status=await f.binding.status({});assert.equal(status.status,'selected');assert.equal(status.sessionId,f.session.id);assert.equal(status.alive,true);assert.equal(status.operator,'human');assert.equal(status.agentReady,false);assert.equal(status.authentication,'not_observed');assert.equal(f.worker.connection,null);
+ const reused=await f.terminal.open({kind:'ssh',mode:'interactive',profileId:id,version:saved.version});assert.equal(reused.sessionId,f.session.id);assert.equal(f.children.length,1);assert.equal(f.children[0].pid,pid);assert(!f.calls.slice(callStart).some(call=>call.route==='/sessions/open'||call.route.endsWith('/input')||call.route.endsWith('/close')));
+});
+
+test('verified service readiness remains distinct from its current human or Agent operator',async t=>{
+ let service=null;const f=await fixture(t,{serviceState:()=>service});
+ service={sessionId:f.session.id,profileId:f.profile.id,profileVersion:1,status:'connected',workflowReady:true,operator:'human'};
+ const human=await f.activate();assert.equal(human.operator,'human');assert.equal(human.workflowReady,true);assert.equal(human.agentReady,false);assert.equal(human.authentication,'verified');assert.equal(human.managedRuns,true);assert.equal(human.reason,'service_human_owned');
+ assert.equal((await f.terminal.resourceState({sessionId:f.session.id})).operator,'human');
+ service={...service,operator:'agent'};const agent=await f.binding.status({});assert.equal(agent.operator,'agent');assert.equal(agent.workflowReady,true);assert.equal(agent.agentReady,true);assert.equal(agent.reason,null);
+ assert.equal((await f.terminal.resourceState({sessionId:f.session.id})).operator,'human');
+ service={...service,operator:'human'};const returned=await f.binding.status({});assert.equal(returned.operator,'human');assert.equal(returned.workflowReady,true);assert.equal(returned.agentReady,false);assert.equal(returned.reason,'service_human_owned');assert.equal(f.children.length,1);assert.equal(f.children[0].exitCode,null);assert.equal(f.worker.connection,null);
+});
+
+test('connected service without explicit Agent ownership never inherits an existing raw shell grant',async t=>{
+ let service=null;const f=await fixture(t,{serviceState:()=>service});await f.activate();await f.handoff();assert.equal((await f.binding.status({})).agentReady,true);
+ service={sessionId:f.session.id,profileId:f.profile.id,profileVersion:1,status:'connected',workflowReady:true};
+ for(const operator of [undefined,'human','unknown']){
+  service={...service,operator};const state=await f.binding.status({});assert.equal(state.operator,'human');assert.equal(state.workflowReady,true);assert.equal(state.agentReady,false);assert.equal(state.reason,'service_human_owned');
+ }
+ service={...service,operator:'agent',workflowReady:false};const incomplete=await f.binding.status({});assert.equal(incomplete.operator,'agent');assert.equal(incomplete.workflowReady,false);assert.equal(incomplete.agentReady,false);assert.equal(incomplete.authentication,'not_observed');assert.equal(incomplete.managedRuns,false);
+ service={...service,workflowReady:true,profileVersion:2,operator:'human'};const unrelated=await f.binding.status({});assert.equal(unrelated.operator,'agent');assert.equal(unrelated.agentReady,true);assert.equal(unrelated.workflowReady,false);assert.equal(unrelated.authentication,'not_observed');
+ service=null;assert.equal((await f.binding.status({})).agentReady,true);
+});
+
+test('a ready service snapshot cannot restore Agent readiness after the actual controlled terminal exits',async t=>{
+ let service=null;const f=await fixture(t,{serviceState:()=>service});await f.activate();await f.handoff();
+ service={sessionId:f.session.id,profileId:f.profile.id,profileVersion:1,status:'connected',workflowReady:true,operator:'agent'};assert.equal((await f.binding.status({})).agentReady,true);
+ await f.send('write_shared_terminal',{session_id:f.session.id,request_id:'service-view-exit',data:JSON.stringify({op:'exit'})+'\n'});
+ const state=await f.until(()=>f.binding.status({}),value=>value.processStatus==='exited');assert.equal(state.operator,'agent');assert.equal(state.alive,false);assert.equal(state.workflowReady,false);assert.equal(state.agentReady,false);assert.equal(state.authentication,'not_observed');assert.equal(state.managedRuns,false);assert.equal(state.reason,'terminal_exited');
 });

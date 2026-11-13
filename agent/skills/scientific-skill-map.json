@@ -104,6 +104,9 @@
       "folder": "studio-main-agent",
       "files": [
         "SKILL.md"
+      ],
+      "reference_files": [
+        "references/authoring.md"
       ]
     },
     {
@@ -164,7 +167,13 @@
       ],
       "reference_files": [
         "references/lsf.json",
-        "references/slurm.json"
+        "references/slurm.json",
+        "references/compute-discovery.md",
+        "references/profile-format.md",
+        "references/compute-profile.schema.json",
+        "references/scientific-gates.md",
+        "references/reconcile.md",
+        "references/job-service-connection.md"
       ]
     },
     {
@@ -581,7 +590,12 @@
         "collect_cluster_artifacts"
       ],
       "status": "implemented_collection_transfer_requires_authorized_target",
-      "phase": "results"
+      "phase": "results",
+      "reference_files": {
+        "studio-compute-workflow": [
+          "references/reconcile.md"
+        ]
+      }
     },
     {
       "id": "assets.processing-request",
@@ -621,7 +635,12 @@
         "probe_environment"
       ],
       "status": "implemented_tool_runtime_evidence_separate",
-      "phase": "discovery"
+      "phase": "discovery",
+      "reference_files": {
+        "studio-compute-workflow": [
+          "references/compute-discovery.md"
+        ]
+      }
     },
     {
       "id": "cluster.connection-setup",
@@ -636,7 +655,15 @@
         "draft_cluster_setup"
       ],
       "status": "implemented_draft_human_settings_required",
-      "phase": "setup"
+      "phase": "setup",
+      "reference_files": {
+        "studio-compute-workflow": [
+          "references/compute-discovery.md",
+          "references/profile-format.md",
+          "references/compute-profile.schema.json",
+          "references/job-service-connection.md"
+        ]
+      }
     },
     {
       "id": "compute.queue",
@@ -652,7 +679,12 @@
         "cluster_read_log"
       ],
       "status": "implemented_no_autoresubmit_unknown",
-      "phase": "monitor"
+      "phase": "monitor",
+      "reference_files": {
+        "studio-compute-workflow": [
+          "references/reconcile.md"
+        ]
+      }
     },
     {
       "id": "cluster.lsf-slurm-deployment",
@@ -668,7 +700,12 @@
       "reference_files": {
         "studio-compute-workflow": [
           "references/lsf.json",
-          "references/slurm.json"
+          "references/slurm.json",
+          "references/compute-discovery.md",
+          "references/profile-format.md",
+          "references/compute-profile.schema.json",
+          "references/scientific-gates.md",
+          "references/reconcile.md"
         ]
       }
     },
@@ -719,7 +756,12 @@
         "studio-main-agent"
       ],
       "status": "implemented_bundled_orchestrator_runtime_and_provider_capabilities_separate",
-      "phase": "orchestration"
+      "phase": "orchestration",
+      "reference_files": {
+        "studio-main-agent": [
+          "references/authoring.md"
+        ]
+      }
     },
     {
       "id": "pygas.custom-cv",

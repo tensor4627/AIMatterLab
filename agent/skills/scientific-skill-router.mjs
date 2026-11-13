@@ -68,7 +68,7 @@ export class ScientificSkillRouter {
    for(const id of route.skills)if(!await this.allowed(provider,this.definitions.get(id)))return {status:'permission_required',function_id:functionId,attachments:[]};
    const result=policy.executionResult(functionId);
    if(documentId!==undefined&&!result.document_ids.includes(documentId))return {status:'blocked',function_id:functionId,reason:'Only execution snapshot document IDs are available.',attachments:[]};
-   if(documentId!==undefined){const document=[policy.facts.executionSkill,...policy.facts.executionSkill.resources].find(item=>item.id===documentId);result.text=document.text;result.attachments=result.attachments.filter(item=>item.name===documentId);result.document_id=documentId;if(Buffer.byteLength(JSON.stringify(toolValueResult(result)))>24*1024)return {status:'blocked',function_id:functionId,reason:'Execution document exceeds the serialized MCP budget.',attachments:[]};}
+   if(documentId!==undefined){const document=[policy.facts.executionSkill,...policy.facts.executionSkill.resources].find(item=>item.id===documentId);result.text=document.text;result.attachments=[{source:'execution',skill:policy.facts.executionSkill.id,name:document.id,sha256:document.sha256,bytes:Buffer.byteLength(document.text)}];result.bytes=Buffer.byteLength(document.text);result.document_id=documentId;if(Buffer.byteLength(JSON.stringify(toolValueResult(result)))>24*1024)return {status:'blocked',function_id:functionId,reason:'Execution document exceeds the serialized MCP budget.',attachments:[]};}
    await policy.revalidate();for(const id of route.skills)if(!await this.allowed(provider,this.definitions.get(id)))return {status:'permission_required',function_id:functionId,attachments:[]};await policy.revalidate();return result;
   }
   if(documentId!==undefined&&(typeof documentId!=='string'||!documentIds.includes(documentId)))throw Error('Choose an exact document_id advertised for this function_id');
@@ -89,6 +89,7 @@ export class ScientificSkillRouter {
     roots.set(skill.source,{configured,root});
     for(const relative of [...skill.files,...route.reference_files?.[id]||[]]){
      if(documentId!==undefined&&skill.folder+'/'+relative!==documentId)continue;
+     if(documentId===undefined&&relative!=='SKILL.md')continue;
      const target=path.join(folder,...relative.split('/'));if(grantOnly)policy.assertGrantReadable(target);if(!inside(folder,target)||await fs.realpath(target)!==target)throw Error('Linked or out-of-root skill file refused');
      const stat=await fs.stat(target);if(!stat.isFile()||stat.size>this.limits.fileBytes||bytes+stat.size>this.limits.totalBytes)throw Error('Public skill context exceeds the bounded file budget');
      const data=await boundedText(fs,target,Math.min(this.limits.fileBytes,this.limits.totalBytes-bytes));if(data.length!==stat.size||await fs.realpath(target)!==target||data.includes(0))throw Error('Public skill file changed or is not text');
@@ -108,7 +109,7 @@ export class ScientificSkillRouter {
     if(Buffer.byteLength(JSON.stringify(toolValueResult(result)),'utf8')>24*1024)throw Error('Focused document exceeds the serialized MCP 24 KiB budget; document body was not delivered. Pagination is not available.');
     return result;
    }
-   return {status:'passed',function_id:functionId,document_ids:documentIds,focused_read:'For one complete document call read_scientific_skill with this function_id and an exact document_id from document_ids.',phase:route.phase,capability_status:route.status,scope:'Actual bounded public instructions only; no artifact, installation, engine capability or scientific validation is implied.',digest,bytes,attachments:files.map(({content,...receipt})=>receipt),text:'[Studio scientific function: '+functionId+']\n'+(route.adaptation||'')+'\n'+files.map(file=>'['+file.name+'; SHA256 '+file.sha256+']\n'+(file.source_evidence?'Current source applicability: '+JSON.stringify(file.source_evidence)+'\n':'')+file.content).join('\n')};
+   return {status:'passed',function_id:functionId,document_ids:documentIds,focused_read:'Only skill entries are loaded. Read a supporting document only when needed, using this function_id and its exact advertised document_id.',phase:route.phase,capability_status:route.status,scope:'Actual bounded public instructions only; no artifact, installation, engine capability or scientific validation is implied.',digest,bytes,attachments:files.map(({content,...receipt})=>receipt),text:'[Studio scientific function: '+functionId+']\n'+(route.adaptation||'')+'\n'+files.map(file=>'['+file.name+'; SHA256 '+file.sha256+']\n'+(file.source_evidence?'Current source applicability: '+JSON.stringify(file.source_evidence)+'\n':'')+file.content).join('\n')+'\nSupporting document IDs (read only when needed): '+JSON.stringify(documentIds.filter(id=>!files.some(file=>file.name===id)))};
   }catch(error){return {status:'blocked',function_id:functionId,reason:error.message,attachments:[]};}
  }
 }

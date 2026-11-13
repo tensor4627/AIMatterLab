@@ -13,6 +13,14 @@ test('fixed source manifest matches runtime identity and carries no runtime data
  const result=prepareSshServiceResources(root,{profileId:'owned-profile'});assert.equal(result.payload.expected_runtime_id,bundledWorkerRuntimeId(root));assert.equal(result.source,'# inert ssh_service_bootstrap.py\n');assert(!JSON.stringify(result).includes('PRIVATE NEVER TRANSFER'));assert(result.payload.port>=20000&&result.payload.port<50000);
  for(const file of result.payload.files)assert.equal(createHash('sha256').update(Buffer.from(file.base64,'base64')).digest('hex'),file.sha256);
 });
+
+test('explicit released worker binding retains exact legacy bytes after the Python metadata update',()=>{
+ const source=path.resolve('backend/worker'),current=prepareSshServiceResources(source,{profileId:'owned-profile'}),legacy=prepareSshServiceResources(source,{profileId:'owned-profile',expectedRuntimeId:'62034ec6cfc1428aaa4d'});
+ assert.equal(legacy.payload.expected_runtime_id,'62034ec6cfc1428aaa4d');assert.equal(current.payload.files.length,legacy.payload.files.length);
+ const changed=current.payload.files.filter((row,index)=>row.base64!==legacy.payload.files[index].base64);assert.deepEqual(changed.map(row=>row.path),['pyproject.toml']);
+ assert(Buffer.from(legacy.payload.files.find(row=>row.path==='pyproject.toml').base64,'base64').toString().includes('requires-python = ">=3.10"'));
+ assert.throws(()=>prepareSshServiceResources(source,{profileId:'owned-profile',expectedRuntimeId:'f'.repeat(20)}),/resources_changed/);
+});
 test('missing worker entry fails instead of sending a partial install',t=>{const root=fixture(t);fs.unlinkSync(path.join(root,'runtime_resources.py'));assert.throws(()=>prepareSshServiceResources(root,{profileId:'owned-profile'}),/resources_incomplete/);});
 test('linked source trees and arbitrary profile paths cannot enter the trusted bundle',t=>{
  const root=fixture(t);assert.throws(()=>prepareSshServiceResources(root,{profileId:'../escape'}),/resources_invalid/);const alias=path.join(root,'linked');fs.symlinkSync(path.join(root,'studio_worker'),alias,'junction');assert.throws(()=>prepareSshServiceResources(root,{profileId:'owned-profile'}),/resources_invalid/);

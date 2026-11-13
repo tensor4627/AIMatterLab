@@ -8,6 +8,9 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import selectors
+import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -23,6 +26,99 @@ TOP = {'bootstrap.py', 'install.py', 'runtime_resources.py', 'relay.py', 'termin
        'ssh_service_bridge.py', 'ssh_service_bootstrap.py', 'pyproject.toml'}
 RESOURCES = {'studio_worker/engine_contracts.json', 'studio_worker/pygas-editor-hints.json',
              'studio_worker/tool_package.schema.json'}
+SCHEDULER_INSPECTION = '/api/ssh-service/inspect-scheduler'
+
+
+def bounded_observation(arguments):
+    """Run one fixed read command with bounded output, time and child cleanup."""
+    process = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, start_new_session=True)
+    output, deadline, status = bytearray(), time.monotonic() + 3, 'observed'
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                status = 'timed_out'; break
+            if not selector.select(min(remaining, .1)):
+                continue
+            chunk = os.read(process.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            output.extend(chunk)
+            if len(output) > 65536:
+                status = 'output_limit'; break
+        if status == 'observed':
+            try:
+                if process.wait(timeout=max(.01, deadline - time.monotonic())):
+                    status = 'command_failed'
+            except subprocess.TimeoutExpired:
+                status = 'timed_out'
+    finally:
+        selector.close()
+        # Commands must not leave descendants running after an observation.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=2)
+        process.stdout.close()
+    return status, output.decode('utf8', 'replace') if status == 'observed' else ''
+
+
+def inspect_scheduler():
+    """No user command, profile registration, submission or SSH-to-self."""
+    observations = []
+    for family, command in [('slurm', ['sinfo', '-h', '-o', '%P|%a|%D|%t|%G']),
+                            ('lsf', ['bqueues', '-w'])]:
+        executable = shutil.which(command[0])
+        if not executable:
+            observations.append({'scheduler': family, 'status': 'not_found', 'queues': []})
+            continue
+        try:
+            status, output = bounded_observation([executable, *command[1:]])
+        except OSError:
+            status, output = 'command_failed', ''
+        queues = []
+        if status == 'observed':
+            lines = output.splitlines()
+            if len(lines) > 512:
+                status = 'output_limit'
+            elif family == 'slurm':
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    fields = line.split('|')
+                    if len(fields) != 5:
+                        status = 'invalid_output'; break
+                    name, available, nodes, state, gres = fields
+                    default = name.endswith('*'); name = name.removesuffix('*')
+                    if (not re.fullmatch(r'[A-Za-z0-9_.+\-]{1,120}', name)
+                            or available not in ('up', 'down', 'inact', 'drain')
+                            or not nodes.isdecimal() or int(nodes) > 10000000
+                            or not re.fullmatch(r'[A-Za-z0-9_+~#*%$@.!\-]{1,40}', state)
+                            or not re.fullmatch(r'[A-Za-z0-9_:.,()+/\-]{0,160}', gres)):
+                        status = 'invalid_output'; break
+                    queues.append({'name': name, 'default': default, 'availability': available,
+                                   'node_count': int(nodes), 'node_state': state, 'gres': gres})
+            else:
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    fields = line.split()
+                    if fields and fields[0] == 'QUEUE_NAME':
+                        continue
+                    if (len(fields) < 3 or not re.fullmatch(r'[A-Za-z0-9_.+\-]{1,120}', fields[0])
+                            or not re.fullmatch(r'(?:Open|Closed|open|closed):(?:Active|Inact|active|inact)', fields[2])):
+                        status = 'invalid_output'; break
+                    queues.append({'name': fields[0], 'availability': fields[2].lower()})
+        observations.append({'scheduler': family, 'status': status,
+                             'queues': queues if status == 'observed' else []})
+    return {'status': 'observed' if any(item['status'] == 'observed' for item in observations) else 'blocked',
+            'observed_at': time.time(), 'observations': observations,
+            'scope': 'Current login-host scheduler and visible queue observations only; not_found means absent on this bridge PATH, not proof that software is uninstalled. Compute-node GPU availability, execution authorization and scientific validation not_run',
+            'automatic_retry': False}
 
 
 class Failure(Exception):
@@ -216,6 +312,10 @@ def health_checked(legacy, root, runtime, port, phase):
             if time.monotonic() >= deadline:
                 fail('worker_start_failed', 'starting_worker')
             time.sleep(.1)
+    return verified_health(value,root,runtime)
+
+
+def verified_health(value,root,runtime):
     if (not isinstance(value, dict) or value.get('name') != 'gpu-sampling-studio'
             or value.get('root') != str(root) or value.get('runtime') != str(runtime)
             or value.get('execution_policy') != 'desktop-review-v1' or value.get('worker_role') != 'ssh-login-service'
@@ -287,13 +387,28 @@ def relay_lane(payload, nonce, send, restore, legacy, root, port, health, encodi
                       'chunk': base64.b64encode(content[at:at + 96]).decode()})
 
     safe = {key: health[key] for key in ('name', 'root', 'runtime', 'execution_policy', 'hostname', 'uid', 'machineId', 'home')}
-    safe.update(runtime_id=payload['expected_runtime_id'], port=port, transport_kind='ssh-service', ssh_service=True)
+    safe.update(runtime_id=payload['expected_runtime_id'], port=port, transport_kind='ssh-service', ssh_service=True,
+                bridge_capabilities=['scheduler-inspection-v1'])
     fragmented('READY', '-', safe)
 
     def request(identifier, value):
         try:
             try:
-                result = forward(legacy, root, port, value)
+                if isinstance(value, dict) and value.get('target') == SCHEDULER_INSPECTION:
+                    if (value != {'method': 'POST', 'target': SCHEDULER_INSPECTION, 'data': {}, 'mcp': False}
+                            or type(value.get('mcp')) is not bool or type(value.get('data')) is not dict):
+                        fail('protocol_failed', 'request')
+                    def verify():
+                        actual = forward(legacy, root, port, {'method': 'GET', 'target': '/api/health'}, timeout=2)
+                        if (actual['status'] != 200 or any(actual['data'].get(key) != health.get(key)
+                                for key in ('name', 'root', 'runtime', 'execution_policy', 'hostname', 'uid', 'machineId'))):
+                            fail('worker_identity_unavailable', 'request')
+                    verify()
+                    observation = inspect_scheduler()
+                    verify()
+                    result = {'status': 200, 'data': observation}
+                else:
+                    result = forward(legacy, root, port, value)
             except Exception:
                 result = {'status': 502, 'data': {'error': 'SSH service request unconfirmed; reconcile existing state, never replay'}}
             fragmented('RESPONSE', identifier, result)
@@ -336,6 +451,8 @@ def run(hello, nonce, read, send, phase, restore, original_termios=None):
     files = cached_files(hello, root)
     cached = files is not None
     if files is None:
+        if hello.get('reuse_only'):
+            fail('maintenance_required','checking_cache')
         phase('transferring_worker'); send('WORKER_NEEDED', '-', {})
         payload = receive_bundle(hello, read, send); files = validate_manifest(payload, hello)
     else:
@@ -346,11 +463,26 @@ def run(hello, nonce, read, send, phase, restore, original_termios=None):
     legacy = legacy_transport(files)
     files = legacy['validate_payload'](payload)
     send('WORKER_READY', '-', {'cached': cached}); phase('preparing_runtime')
-    try:
-        root, runtime = legacy['stage_runtime'](payload, files)
-    except (ValueError, TypeError):
-        fail('worker_cache_invalid' if cached else 'namespace_unsafe', 'preparing_runtime')
-    health = health_checked(legacy, root, runtime, hello['port'], phase)
+    if hello.get('reuse_only'):
+        runtime=root/'runtimes'/hello['expected_runtime_id'];phase('checking_health')
+        if not (root/'ssh-service.json').is_file():fail('maintenance_required','checking_cache')
+        try:
+            health=verified_health(forward(legacy,root,hello['port'],{'method':'GET','target':'/api/health'},timeout=2)['data'],root,runtime)
+        except ConnectionRefusedError:
+            # The human's unified handoff may start this exact verified cached
+            # runtime once. It never installs code or replays a job request.
+            if not hello.get('start_cached'):
+                fail('maintenance_required','checking_health')
+            health = health_checked(legacy, root, runtime, hello['port'], phase)
+        except (ConnectionError,TimeoutError,OSError):
+            fail('maintenance_required','checking_health')
+        # Without the explicit handoff flag, daily attach remains read-only.
+    else:
+        try:
+            root, runtime = legacy['stage_runtime'](payload, files)
+        except (ValueError, TypeError):
+            fail('worker_cache_invalid' if cached else 'namespace_unsafe', 'preparing_runtime')
+        health = health_checked(legacy, root, runtime, hello['port'], phase)
     legacy['validate_payload'] = lambda _payload: files
     legacy['stage_runtime'] = lambda _payload, _files: (root, runtime)
     legacy['start_worker'] = lambda _root, _runtime, _port: health

@@ -1,0 +1,11 @@
+.conversation-popover{position:fixed;z-index:140;width:240px;max-width:calc(100vw - 16px);overflow-y:auto;overscroll-behavior:contain;padding:6px;border:1px solid var(--line);border-radius:13px;background:var(--panel);color:var(--text);box-shadow:0 8px 28px #0003,0 2px 5px #0001;font-size:1rem;line-height:1.4;box-sizing:border-box}
+.conversation-popover>button{display:flex;align-items:center;gap:11px;width:100%;min-width:0;min-height:37px;margin:0;padding:8px 10px;border:0;border-radius:7px;background:transparent;color:var(--text);font:inherit;text-align:left;white-space:nowrap;cursor:pointer;box-sizing:border-box}
+.conversation-popover>button>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.conversation-popover>button>svg{flex-shrink:0;stroke-width:1.7}
+.conversation-popover>button:hover,.conversation-popover>button:focus-visible{outline:none;background:var(--raised)}
+.conversation-popover>button:disabled{color:var(--muted);opacity:.5;cursor:default;background:transparent}
+.conversation-popover>button.conversation-delete{width:100%;opacity:1;color:var(--danger)}
+.conversation-popover>button.conversation-delete:hover,.conversation-popover>button.conversation-delete:focus-visible{background:color-mix(in srgb,var(--danger) 11%,transparent)}
+.conversation-popover>button.conversation-delete:disabled{color:var(--muted);opacity:.5;background:transparent}
+.conversation-popover>.conversation-popover-separator{height:1px;margin:5px 7px;background:var(--line)}
+.conversation-popover .conversation-popover-check{color:var(--accent)}

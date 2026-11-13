@@ -18,28 +18,20 @@ function harness({request={nonce:'first',kind:'local',mode:'interactive'},overri
  const window={studio:{onEvent:fn=>{events.set('studio:event',fn);return()=>events.delete('studio:event');}},addEventListener:(n,f)=>events.set(n,f),removeEventListener:n=>events.delete(n)},document={documentElement:{style:{getPropertyValue:k=>k==='--terminal-font-size'?String(font):'11'}}};
  new Function('require','module','exports','window','document','ResizeObserver','crypto','setInterval','clearInterval',compiled)(name=>name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='@xterm/xterm'?{Terminal}:name==='@xterm/addon-fit'?{FitAddon}:name==="../../api/studio"?{invoke}:name==='../../api/compute-resources'?(()=>{const m={exports:{}};new Function('require','module','exports',ts.transpileModule(fs.readFileSync(new URL('../../frontend/api/compute-resources.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>{assert.equal(n,'./studio');return {invoke};},m,m.exports);return m.exports;})():name==='./ssh-service-presentation'?presentation.exports:name==="../../ui/i18n"?{t:x=>x}:{},module,module.exports,window,document,ResizeObserver,{randomUUID},fn=>{const id=++nextTimer;timers.set(id,fn);return id;},id=>timers.delete(id));
  const all=n=>Array.isArray(n)?n.flatMap(all):n&&typeof n==='object'?[n,...all(n.props?.children)]:[],text=n=>typeof n==='string'||typeof n==='number'?String(n):Array.isArray(n)?n.map(text).join(''):n&&typeof n==='object'?text(n.props?.children):'';
- function render(){cursor=0;dirty=false;tree=module.exports.default(props);for(const node of all(tree))if(node.props?.ref)node.props.ref.current={clientWidth:800,clientHeight:300};}
+ function render(){cursor=0;dirty=false;tree=module.exports.LegacySharedTerminalPanel(props);for(const node of all(tree))if(node.props?.ref)node.props.ref.current={clientWidth:800,clientHeight:300};}
  async function flush(){for(let i=0;i<25;i++){while(effects.length)effects.shift()();await new Promise(r=>setImmediate(r));if(dirty&&!disposed)render();}}
  const find=p=>{const value=all(tree).find(p);assert(value,'actual panel node missing');return value;};const click=label=>{const n=find(n=>n.type==='button'&&text(n)===label);assert(!n.props.disabled,'button disabled');n.props.onClick();render();};
  render();return{calls,errors,views,sessions,events,flush,find,click,text,update:v=>{Object.assign(props,v);render();},appearance:v=>{font=v;events.get('studio:appearance')?.();},fits:()=>fits,tick:()=>{for(const f of timers.values())f();},unmount:()=>{disposed=true;for(const h of hooks)h?.cleanup?.();}};
 }
 
-test('same SSH session becomes a service only after an explicit post-login click; private lane blocks raw input and duplicate requests',async()=>{
- const gate=deferred(),profile={kind:'ssh-terminal',profileId:'saved-ssh',profileVersion:3};let calls=0;
- const h=harness({request:{nonce:'ssh-login',kind:'ssh',mode:'interactive',profileId:profile.profileId,version:3},override:(method,data,standard,{sessions})=>{if(method==='sharedTerminal.open'){const value={...session('ssh-existing'),kind:'ssh',resource:profile};sessions.set(value.sessionId,value);return value;}if(method==='compute.sshService.connect'){calls++;return gate.promise.then(()=>{sessions.set('ssh-existing',{...sessions.get('ssh-existing'),serviceActive:true,serviceStatus:'connected'});return {status:'connected'};});}return standard(method,data);}});await h.flush();assert.equal(calls,0);const connect=h.find(n=>n.props?.['data-testid']==='ssh-service-connect');connect.props.onClick();connect.props.onClick();await h.flush();assert.equal(calls,1);const request=h.calls.find(call=>call.method==='compute.sshService.connect').data;assert.equal(request.sessionId,'ssh-existing');assert.equal(request.ownerEpoch,1);assert.equal(request.profileId,'saved-ssh');assert.equal(request.profileVersion,3);const inputs=h.calls.filter(call=>call.method==='sharedTerminal.input').length;h.views.at(-1).input('MUST_NOT_ENTER_PRIVATE_LANE');await h.flush();assert.equal(h.calls.filter(call=>call.method==='sharedTerminal.input').length,inputs);gate.resolve();await h.flush();h.tick();await h.flush();assert.equal(h.find(n=>n.props?.['data-testid']==='shared-terminal-handoff').props.disabled,true);assert(h.find(n=>n.props?.['data-testid']==='ssh-service-reserved'));assert.equal(h.calls.filter(call=>call.method==='sharedTerminal.open').length,1);h.unmount();
-});
-
 test('active service A blocks dropdown, detached view and external open B without changing the visible session',async()=>{
- let opened=false;const h=harness({request:{nonce:'A',kind:'ssh',mode:'interactive',profileId:'profile-A',version:1},override:(method,data,standard,{sessions})=>{if(method==='compute.sshService.status')return opened?{status:'connected',sessionId:'A',profileId:'profile-A',profileVersion:1}:{status:'disconnected'};if(method==='sharedTerminal.open'){opened=true;const a={...session('A'),kind:'ssh',serviceActive:true,serviceStatus:'connected',resource:{kind:'ssh-terminal',profileId:'profile-A',profileVersion:1}};sessions.set('A',a);sessions.set('B',{...session('B'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'profile-B',profileVersion:1}});return a;}return standard(method,data);}});await h.flush();const dropdown=h.find(node=>node.type==='select');assert.equal(dropdown.props.disabled,true);dropdown.props.onChange({target:{value:'B'}});await h.flush();assert.equal(h.find(node=>node.type==='select').props.value,'A');assert.equal(h.calls.some(call=>call.method==='compute.resource.activate'&&call.data.sessionId==='B'),false);h.update({request:{nonce:'B',kind:'ssh',mode:'interactive',profileId:'profile-B',version:1}});await h.flush();assert.equal(h.calls.filter(call=>call.method==='sharedTerminal.open').length,1);assert.equal(h.find(node=>node.type==='select').props.value,'A');assert(h.text(h.find(node=>node.props?.className==='shared-terminal-notice'&&h.text(node).includes('返回交互终端'))));assert.equal(h.calls.some(call=>call.method==='compute.sshService.disconnect'),false);h.unmount();
+ let opened=false;const h=harness({request:{nonce:'A',kind:'ssh',mode:'interactive',profileId:'profile-A',version:1},override:(method,data,standard,{sessions})=>{if(method==='compute.sshService.status')return opened?{status:'connected',sessionId:'A',profileId:'profile-A',profileVersion:1}:{status:'disconnected'};if(method==='sharedTerminal.open'){opened=true;const a={...session('A'),kind:'ssh',serviceActive:true,serviceStatus:'connected',resource:{kind:'ssh-terminal',profileId:'profile-A',profileVersion:1}};sessions.set('A',a);sessions.set('B',{...session('B'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'profile-B',profileVersion:1}});return a;}return standard(method,data);}});await h.flush();const dropdown=h.find(node=>node.type==='select');assert.equal(dropdown.props.disabled,true);dropdown.props.onChange({target:{value:'B'}});await h.flush();assert.equal(h.find(node=>node.type==='select').props.value,'A');assert.equal(h.calls.some(call=>call.method==='compute.resource.activate'&&call.data.sessionId==='B'),false);h.update({request:{nonce:'B',kind:'ssh',mode:'interactive',profileId:'profile-B',version:1}});await h.flush();assert.equal(h.calls.filter(call=>call.method==='sharedTerminal.open').length,1);assert.equal(h.find(node=>node.type==='select').props.value,'A');assert(h.text(h.find(node=>node.props?.className==='shared-terminal-notice'&&h.text(node).includes('连接计算资源中停止当前作业服务'))));assert.equal(h.calls.some(call=>call.method==='compute.sshService.disconnect'),false);h.unmount();
 });
 
 test('resource activation refusal never commits B to the visible terminal even if the local service hint was stale',async()=>{
  const h=harness({override:(method,data,standard,{sessions})=>{if(method==='sharedTerminal.open'){const a={...session('A'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'profile-A',profileVersion:1}};sessions.set('A',a);sessions.set('B',{...session('B'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'profile-B',profileVersion:1}});return a;}if(method==='compute.resource.activate'&&data.sessionId==='B')throw Error('请先在原 SSH 连接返回交互终端，再切换计算资源。');return standard(method,data);}});await h.flush();h.find(node=>node.type==='select').props.onChange({target:{value:'B'}});await h.flush();assert.equal(h.find(node=>node.type==='select').props.value,'A');assert.equal(h.calls.some(call=>call.method==='compute.sshService.disconnect'),false);h.unmount();
 });
 
-test('a stale visible B return action cannot disconnect the globally reserved service A',async()=>{
- let opened=false;const h=harness({override:(method,data,standard,{sessions})=>{if(method==='compute.sshService.status')return opened?{status:'connected',sessionId:'A'}:{status:'disconnected'};if(method==='sharedTerminal.open'){opened=true;const b={...session('B'),kind:'ssh',serviceActive:true,serviceStatus:'unknown',resource:{kind:'ssh-terminal',profileId:'profile-B',profileVersion:1}};sessions.set('B',b);return b;}if(method==='compute.sshService.disconnect')throw Error('Must not stop A');return standard(method,data);}});await h.flush();h.find(node=>node.props?.['data-testid']==='ssh-service-disconnect').props.onClick();await h.flush();assert.equal(h.calls.some(call=>call.method==='compute.sshService.disconnect'),false);assert.equal(h.find(node=>node.type==='select').props.value,'B');h.unmount();
-});
 test('busy open retains the second external request and opens it once after the first finishes',async()=>{const pending=deferred();let opens=0;const h=harness({override:(method,data,standard,{sessions})=>{if(method==='sharedTerminal.open'&&opens++===0)return pending.promise.then(()=>{const s=session('first');sessions.set(s.sessionId,s);return s;});return standard(method,data);}});await h.flush();assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);h.update({request:{nonce:'second',kind:'ssh',mode:'interactive',clusterId:'saved',version:1}});await h.flush();assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);pending.resolve();await h.flush();const calls=h.calls.filter(c=>c.method==='sharedTerminal.open');assert.equal(calls.length,2);assert.equal(calls[1].data.kind,'ssh');assert.deepEqual(h.errors,[]);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));h.unmount();});
 test('detach and reattach use the same session without close/open, and appearance changes refit actual terminal',async()=>{const h=harness();await h.flush();const original=h.calls.filter(c=>c.method==='sharedTerminal.open').length,id=[...h.sessions.keys()][0];h.click('分离视图');await h.flush();const select=h.find(n=>n.type==='select');select.props.onChange({target:{value:id}});await h.flush();assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,original);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));const before=h.fits();h.appearance(20);assert(h.fits()>before,JSON.stringify({before,after:h.fits(),views:h.views.length,events:[...h.events.keys()],selected:h.find(n=>n.type==='select').props.value,errors:h.errors.map(String)}));assert.equal(h.views.at(-1).options.fontSize,20);assert.deepEqual(h.errors,[]);h.unmount();});
 test('late human read cannot overwrite a newer handoff or paint stale output',async()=>{const pending=deferred();let hold=true;const h=harness({override:(method,data,standard)=>method==='sharedTerminal.read'&&hold?(hold=false,pending.promise):standard(method,data)});await h.flush();h.click('交给 Agent');await h.flush();assert.equal(h.find(n=>n.props?.['data-testid']==='shared-terminal-handoff').props.children,'我来操作');pending.resolve({...session([...h.sessions.keys()][0]),output:'STALE HUMAN OUTPUT',cursor:9,dropped:false});await h.flush();assert.equal(h.find(n=>n.props?.['data-testid']==='shared-terminal-handoff').props.children,'我来操作');assert(!h.views.some(v=>v.writes.some(x=>x.includes('STALE HUMAN OUTPUT'))));h.tick();await h.flush();const reads=h.calls.filter(c=>c.method==='sharedTerminal.read');assert.equal(reads.at(-1).data.ownerEpoch,2);assert.deepEqual(h.errors,[]);h.unmount();});
@@ -59,7 +51,7 @@ test('explicit saved SSH open binds only its returned resource ref and never rea
 });
 
 test('attaching a known SSH session binds once, and human/Agent ownership refreshes only readonly status on the same terminal',async()=>{
- const received=[],h=harness({override:(method,data,standard,{sessions})=>{if(method==='sharedTerminal.open'){const value={...session('same-ssh'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'saved',profileVersion:2}};sessions.set(value.sessionId,value);return value;}return standard(method,data);}});h.update({resourceScope:'same-owner',onResourceChange:value=>received.push(value)});await h.flush();h.click('交给 Agent');await h.flush();assert.equal(received.at(-1).agentReady,true);h.click('我来操作');await h.flush();assert.equal(received.at(-1).operator,'human');const before=h.calls.filter(c=>c.method==='compute.resource.activate').length;h.click('分离视图');h.find(n=>n.type==='select').props.onChange({target:{value:'same-ssh'}});await h.flush();assert.equal(h.calls.filter(c=>c.method==='compute.resource.activate').length,before+1);assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));assert.deepEqual(h.errors,[]);h.unmount();
+ const received=[],h=harness({override:(method,data,standard,{sessions})=>{if(method==='sharedTerminal.open'){const value={...session('same-ssh'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'saved',profileVersion:2}};sessions.set(value.sessionId,value);return value;}return standard(method,data);}});h.update({resourceScope:'same-owner',onResourceChange:value=>received.push(value)});await h.flush();h.click('登录完成，交给 Agent');await h.flush();assert.equal(received.at(-1).agentReady,true);h.click('我来操作');await h.flush();assert.equal(received.at(-1).operator,'human');const before=h.calls.filter(c=>c.method==='compute.resource.activate').length;h.click('分离视图');h.find(n=>n.type==='select').props.onChange({target:{value:'same-ssh'}});await h.flush();assert.equal(h.calls.filter(c=>c.method==='compute.resource.activate').length,before+1);assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));assert.deepEqual(h.errors,[]);h.unmount();
 });
 
 test('late open or activation after a source change cannot publish the old terminal resource',async()=>{
@@ -152,72 +144,116 @@ test('late list failure and late read failure cannot publish feedback after unmo
 });
 
 
-const serviceSnapshot=(value={})=>({status:'connecting',sessionId:'ssh-owned',profileId:'saved-ssh',profileVersion:3,attemptId:'owned-attempt',revision:1,phase:'waiting_python',phaseStartedAt:Date.now()-4000,startedAt:Date.now()-6000,updatedAt:Date.now(),terminalAccess:'reserved',workflowReady:false,...value});
-function serviceHarness({initial=null,connect,disconnect,status}={}){
+const serviceSnapshot=(value={})=>({status:'connecting',sessionId:'ssh-owned',profileId:'saved-ssh',profileVersion:3,attemptId:'owned-attempt',revision:1,phase:'waiting_python',phaseStartedAt:Date.now()-4000,startedAt:Date.now()-6000,updatedAt:Date.now(),terminalAccess:'reserved',workflowReady:false,operator:'human',...value});
+const reserved=value=>!!value&&(value.terminalAccess==='reserved'||value.terminalAccess==='unknown'||['connecting','connected','disconnecting','unknown'].includes(value.status));
+function serviceHarness({initial=null,status,operation}={}){
  const control={state:initial,opened:false};
  const h=harness({request:{nonce:'service-login',kind:'ssh',mode:'interactive',profileId:'saved-ssh',version:3},override:(method,data,standard,context)=>{
-  if(method==='sharedTerminal.open'){control.opened=true;const value={...session('ssh-owned'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'saved-ssh',profileVersion:3}};context.sessions.set(value.sessionId,value);return value;}
+  const custom=operation?.(method,data,standard,context,control);if(custom!==undefined)return custom;
+  if(method==='sharedTerminal.open'){control.opened=true;const value={...session('ssh-owned'),kind:'ssh',ownerEpoch:reserved(control.state)?2:1,serviceActive:reserved(control.state),serviceStatus:control.state?.status||'idle',resource:{kind:'ssh-terminal',profileId:'saved-ssh',profileVersion:3}};context.sessions.set(value.sessionId,value);return value;}
   if(method==='compute.sshService.status'){if(control.opened&&status)return status(control);return structuredClone(control.opened&&control.state||{status:'disconnected',revision:0,terminalAccess:'available'});}
-  if(method==='compute.sshService.connect'){const result=connect?.(data,control,context)||Promise.resolve(control.state);queueMicrotask(()=>h.events.get('studio:event')?.({method:'studio/sshServiceChanged'}));return result;}
-  if(method==='compute.sshService.disconnect')return disconnect?.(data,control,context)||Promise.resolve(control.state);
+  if(method==='sharedTerminal.owner'){
+   const current=context.sessions.get(data.sessionId);assert.equal(data.ownerEpoch,current.ownerEpoch,'handoff must use the actual broker epoch');
+   if(control.state?.status==='connected'&&control.state.workflowReady){control.state={...control.state,operator:data.owner,revision:control.state.revision+1};return {...structuredClone(current),handoffKind:'service',serviceOwner:data.owner};}
+  }
   return standard(method,data);
  }});
- const set=(value,{terminal=true}={})=>{control.state=value;if(terminal&&h.sessions.has('ssh-owned')){const current=h.sessions.get('ssh-owned');h.sessions.set('ssh-owned',{...current,serviceActive:value?.terminalAccess!=='available',serviceStatus:value?.status||'idle'});}h.events.get('studio:event')?.({method:'studio/sshServiceChanged',params:value});};
+ const set=(value,{terminal=true}={})=>{control.state=value;if(terminal&&h.sessions.has('ssh-owned')){const current=h.sessions.get('ssh-owned'),serviceActive=reserved(value);h.sessions.set('ssh-owned',{...current,ownerEpoch:current.ownerEpoch+(current.serviceActive===serviceActive?0:1),serviceActive,serviceStatus:value?.status||'idle'});}h.events.get('studio:event')?.({method:'studio/sshServiceChanged',params:value});};
  return {...h,set,control};
 }
 const panelText=h=>h.text(h.find(n=>n.props?.['data-testid']==='shared-terminal-panel'));
 const testId=(h,id)=>h.find(n=>n.props?.['data-testid']===id);
+const noServiceMutations=h=>assert(!h.calls.some(c=>['compute.sshService.connect','compute.sshService.disconnect','compute.sshService.scheduler'].includes(c.method)));
 
-test('real status snapshots show stages and ACK-only transfer progress without claiming whole-service completion or cache reuse',async()=>{
- const gate=deferred();let attempt;
- const h=serviceHarness({connect:(data,c)=>{attempt=data.requestId;c.state=serviceSnapshot({attemptId:attempt});return gate.promise;}});await h.flush();h.click('登录完成，连接作业服务');await h.flush();
- assert(panelText(h).includes('等待远端 Python 响应'));assert(panelText(h).includes('本阶段已用时'));assert(!panelText(h).includes('%'));
- h.set(serviceSnapshot({attemptId:attempt,revision:2,phase:'checking_cache'}));await h.flush();assert(panelText(h).includes('检查远端服务缓存和权限'));assert(!panelText(h).includes('已复用'));
- h.set(serviceSnapshot({attemptId:attempt,revision:3,phase:'transferring_worker',progress:{kind:'transfer',completedBytes:2048,totalBytes:8192}}));await h.flush();
- const transfer=testId(h,'ssh-service-transfer'),bar=h.find(n=>n.type==='progress');assert.equal(bar.props.value,2048);assert.equal(bar.props.max,8192);assert(h.text(transfer).includes('25%'));assert(h.text(transfer).includes('已确认传输'));
- h.set(serviceSnapshot({attemptId:attempt,revision:4,phase:'checking_tools',progress:{kind:'transfer',completedBytes:8192,totalBytes:8192}}));await h.flush();assert(panelText(h).includes('核对工作流工具'));assert(!panelText(h).includes('%'));
- const ready=serviceSnapshot({attemptId:attempt,revision:5,status:'connected',phase:'ready',workflowReady:true});h.set(ready);gate.resolve(ready);await h.flush();assert(panelText(h).includes('作业服务已就绪'));
- assert.equal(h.calls.filter(c=>c.method==='compute.sshService.connect').length,1);assert(!h.calls.some(c=>['agent.rpc','task.execute','sharedTerminal.owner','compute.sshService.scheduler'].includes(c.method)));h.unmount();
+test('interactive login has one explicit handoff and points service maintenance to connection settings without starting a service',async()=>{
+ const h=serviceHarness();await h.flush();assert.equal(h.text(testId(h,'shared-terminal-handoff')),'登录完成，交给 Agent');
+ for(const id of ['ssh-service-connect','ssh-service-disconnect'])assert.throws(()=>testId(h,id),/actual panel node missing/);
+ assert(panelText(h).includes('作业服务设置、检查和更新位于连接计算资源'));assert(!panelText(h).includes('连接作业服务'));
+ h.tick();await h.flush();noServiceMutations(h);assert(!h.calls.some(c=>c.method==='sharedTerminal.owner'));assert.equal(h.views.at(-1).options.disableStdin,false);h.unmount();
 });
 
-test('typed failed diagnostics survive terminal polling and refresh while unknown ownership never enables raw input',async()=>{
- const gate=deferred();let attempt;
- const h=serviceHarness({connect:(data,c)=>{attempt=data.requestId;c.state=serviceSnapshot({attemptId:attempt});return gate.promise;}});await h.flush();h.click('登录完成，连接作业服务');await h.flush();
- const failed=serviceSnapshot({attemptId:attempt,revision:2,status:'unknown',phase:'preparing_runtime',terminalAccess:'unknown',error:{code:'namespace_unsafe',phase:'checking_cache',message:'PRIVATE_PATH_TOKEN',python:[3,9,2]}});
- h.set(failed,{terminal:false});gate.resolve(failed);await h.flush();h.tick();await h.flush();
- assert(panelText(h).includes('目录的归属、权限或链接'));assert(panelText(h).includes('失败阶段'));assert(panelText(h).includes('Python 3.9.2'));assert(!panelText(h).includes('PRIVATE_PATH_TOKEN'));assert(testId(h,'ssh-service-unknown'));assert.equal(h.views.at(-1).options.disableStdin,true);
- const inputs=h.calls.filter(c=>c.method==='sharedTerminal.input').length;h.views.at(-1).input('MUST_REMAIN_PRIVATE');await h.flush();assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.input').length,inputs);
- testId(h,'ssh-service-refresh').props.onClick();await h.flush();assert(panelText(h).includes('目录的归属、权限或链接'));assert.equal(h.calls.filter(c=>c.method==='compute.sshService.connect').length,1);assert(!h.calls.some(c=>c.method==='compute.sshService.disconnect'||c.method==='sharedTerminal.close'));h.unmount();
+test('ready service handoff and reclaim use service ownership while the raw shell stays human and read-only',async()=>{
+ const h=serviceHarness({initial:serviceSnapshot({status:'connected',phase:'ready',workflowReady:true})});h.update({provider:'kimi'});await h.flush();
+ assert.equal(testId(h,'shared-terminal-handoff').props.disabled,false);assert(panelText(h).includes('作业服务由你操作'));assert.equal(h.views.at(-1).options.disableStdin,true);
+ h.click('交给 Agent');await h.flush();assert(panelText(h).includes('Agent 使用作业服务'));assert.equal(h.text(testId(h,'shared-terminal-handoff')),'我来操作');
+ assert.equal(h.sessions.get('ssh-owned').owner,'human');assert.equal(h.sessions.get('ssh-owned').ownerEpoch,2);assert.equal(h.views.at(-1).options.disableStdin,true);
+ h.views.at(-1).input('MUST_STAY_PRIVATE');await h.flush();assert(!h.calls.some(c=>c.method==='sharedTerminal.input'));
+ h.click('我来操作');await h.flush();assert(panelText(h).includes('作业服务由你操作'));assert.equal(h.views.at(-1).options.disableStdin,true);
+ assert.deepEqual(h.calls.filter(c=>c.method==='sharedTerminal.owner').map(c=>c.data),[{sessionId:'ssh-owned',ownerEpoch:2,owner:'agent',provider:'kimi'},{sessionId:'ssh-owned',ownerEpoch:2,owner:'human'}]);
+ noServiceMutations(h);assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);assert.deepEqual(h.errors,[]);h.unmount();
 });
 
-test('a human can cancel an in-flight attempt, but input resumes only after the exact terminal recovery proof',async()=>{
- const connection=deferred(),stopping=deferred();let attempt;
- const h=serviceHarness({connect:(data,c)=>{attempt=data.requestId;c.state=serviceSnapshot({attemptId:attempt});return connection.promise;},disconnect:(data,c)=>{assert.deepEqual(data,{sessionId:'ssh-owned',attemptId:attempt});c.state=serviceSnapshot({attemptId:attempt,revision:3,status:'disconnecting',phase:'returning_terminal',terminalAccess:'unknown'});return stopping.promise;}});await h.flush();h.click('登录完成，连接作业服务');await h.flush();
- const cancel=testId(h,'ssh-service-disconnect');assert.equal(cancel.props.disabled,false);assert.equal(h.text(cancel),'停止接入并返回终端');cancel.props.onClick();cancel.props.onClick();await h.flush();assert.equal(h.calls.filter(c=>c.method==='compute.sshService.disconnect').length,1);assert.equal(h.views.at(-1).options.disableStdin,true);
- const final=serviceSnapshot({attemptId:attempt,revision:4,status:'disconnected',phase:'returning_terminal',terminalAccess:'available'});h.set(final);stopping.resolve(final);await h.flush();assert.equal(h.views.at(-1).options.disableStdin,false);assert(panelText(h).includes('SSH 连接保持打开'));
- const ready=serviceSnapshot({attemptId:attempt,revision:2,status:'connected',phase:'ready',workflowReady:true});connection.resolve(ready);await h.flush();assert(!panelText(h).includes('作业服务已就绪'));
- h.views.at(-1).input('after confirmed recovery\r');await h.flush();assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.input').length,1);assert.equal(h.calls.filter(c=>c.method==='compute.sshService.connect').length,1);assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));h.unmount();
+test('service ownership response updates the button while a subsequent readonly status refresh is still pending',async()=>{
+ const statusGate=deferred();let hold=false;const h=serviceHarness({initial:serviceSnapshot({status:'connected',phase:'ready',workflowReady:true}),status:c=>hold?statusGate.promise:structuredClone(c.state)});await h.flush();hold=true;
+ h.click('交给 Agent');await h.flush();assert(panelText(h).includes('Agent 使用作业服务'));assert.equal(h.text(testId(h,'shared-terminal-handoff')),'我来操作');assert.equal(h.views.at(-1).options.disableStdin,true);
+ statusGate.resolve(structuredClone(h.control.state));await h.flush();assert.equal(testId(h,'shared-terminal-handoff').props.disabled,false);noServiceMutations(h);h.unmount();
 });
 
-test('unconfirmed stop remains read-only and only an explicit close ends the selected SSH session',async()=>{
- const initial=serviceSnapshot({status:'unknown',terminalAccess:'unknown',error:{code:'startup_timeout',phase:'waiting_python'}});
- const h=serviceHarness({initial,disconnect:(_data,c)=>{c.state=serviceSnapshot({revision:2,status:'unknown',phase:'returning_terminal',terminalAccess:'unknown',error:{code:'stop_timeout',phase:'returning_terminal'}});return c.state;}});await h.flush();h.click('返回交互终端');await h.flush();
- assert(panelText(h).includes('返回终端的确认超时'));assert.equal(h.views.at(-1).options.disableStdin,true);assert.equal(h.calls.filter(c=>c.method==='compute.sshService.disconnect').length,1);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));
- h.click('结束此 SSH 会话');await h.flush();assert.deepEqual(h.calls.filter(c=>c.method==='sharedTerminal.close').map(c=>c.data),[{sessionId:'ssh-owned'}]);assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);h.unmount();
-});
-
-test('safe unknown errors and rejected IPC never echo remote messages, paths or authentication output',async()=>{
- for(const error of [{code:'not_allowlisted_PRIVATE',phase:'waiting_python',message:'PRIVATE_STDERR'},null]){
-  const gate=deferred();let attempt;
-  const h=serviceHarness({connect:(data,c)=>{attempt=data.requestId;c.state=serviceSnapshot({attemptId:attempt,status:'unknown',terminalAccess:'unknown',error});return error?Promise.resolve(c.state):gate.promise.then(()=>{throw Error('UNEXPECTED PRIVATE_STDERR /private/auth');});}});await h.flush();h.click('登录完成，连接作业服务');await h.flush();if(!error){gate.resolve();await h.flush();}
-  const text=panelText(h);assert(!text.includes('PRIVATE'));assert(!text.includes('/private/auth'));assert(text.includes('重新核对状态'));assert(!h.calls.some(c=>c.method==='sharedTerminal.close'||c.method==='compute.sshService.disconnect'));h.unmount();
+test('connecting, stopping, unconfirmed and incomplete ready service states block handoff and raw input',async()=>{
+ for(const change of [{status:'connecting'},{status:'disconnecting',phase:'returning_terminal'},{status:'unknown',terminalAccess:'unknown'},{status:'connected',phase:'ready',workflowReady:false},{status:'connected',phase:'ready',workflowReady:true,terminalAccess:'unknown'}]){
+  const h=serviceHarness({initial:serviceSnapshot(change)});await h.flush();assert.equal(testId(h,'shared-terminal-handoff').props.disabled,true);assert.equal(h.views.at(-1).options.disableStdin,true);
+  h.views.at(-1).input('DO_NOT_SEND');await h.flush();assert(!h.calls.some(c=>c.method==='sharedTerminal.input'));testId(h,'ssh-service-refresh').props.onClick();await h.flush();noServiceMutations(h);assert(!h.calls.some(c=>c.method==='sharedTerminal.owner'));h.unmount();
  }
 });
 
-test('late status from an old scope or a lower revision cannot overwrite a newer service snapshot',async()=>{
- const initial=serviceSnapshot({status:'connected',phase:'ready',workflowReady:true,revision:9});const h=serviceHarness({initial});await h.flush();assert(panelText(h).includes('作业服务已就绪'));
- h.set(serviceSnapshot({status:'unknown',phase:'waiting_python',revision:8,error:{code:'startup_timeout',phase:'waiting_python'}}));await h.flush();assert(panelText(h).includes('作业服务已就绪'));assert(!panelText(h).includes('启动响应超时'));
- h.update({resourceScope:'replacement-scope'});await h.flush();h.unmount();h.set(serviceSnapshot({status:'unknown',revision:10,error:{code:'namespace_unsafe',phase:'checking_cache'}}));await h.flush();assert(!h.calls.some(c=>c.method==='compute.sshService.disconnect'||c.method==='sharedTerminal.close'));assert.deepEqual(h.errors,[]);
+test('external service reservation and release refresh the full broker epoch before handing the shell to Agent',async()=>{
+ const h=serviceHarness();await h.flush();assert.equal(h.sessions.get('ssh-owned').ownerEpoch,1);
+ h.set(serviceSnapshot({status:'connected',phase:'ready',workflowReady:true,revision:2}));await h.flush();assert.equal(h.sessions.get('ssh-owned').ownerEpoch,2);assert.equal(h.views.at(-1).options.disableStdin,true);
+ h.set(serviceSnapshot({status:'disconnected',phase:undefined,terminalAccess:'available',revision:3}));await h.flush();assert.equal(h.sessions.get('ssh-owned').ownerEpoch,3);assert.equal(h.views.at(-1).options.disableStdin,false);
+ h.click('登录完成，交给 Agent');await h.flush();assert.equal(h.calls.find(c=>c.method==='sharedTerminal.owner').data.ownerEpoch,3);assert.equal(h.sessions.get('ssh-owned').ownerEpoch,4);assert.equal(h.sessions.get('ssh-owned').owner,'agent');assert.equal(h.views.at(-1).options.disableStdin,true);noServiceMutations(h);assert.deepEqual(h.errors,[]);h.unmount();
+});
+
+test('a release status alone cannot enable handoff while the full session refresh is pending',async()=>{
+ const gate=deferred();let hold=false;const h=serviceHarness({initial:serviceSnapshot({status:'connected',phase:'ready',workflowReady:true}),operation:(method,_data,_standard,{sessions})=>method==='sharedTerminal.list'&&hold?gate.promise.then(()=>({sessions:[...sessions.values()].map(v=>structuredClone(v))})):undefined});await h.flush();hold=true;
+ h.set(serviceSnapshot({status:'disconnected',phase:undefined,terminalAccess:'available',revision:2}));await h.flush();assert.equal(testId(h,'shared-terminal-handoff').props.disabled,true);assert.equal(h.views.at(-1).options.disableStdin,true);
+ h.views.at(-1).input('MUST_WAIT_FOR_RECOVERY');await h.flush();assert(!h.calls.some(c=>c.method==='sharedTerminal.input'));
+ hold=false;gate.resolve();await h.flush();assert.equal(testId(h,'shared-terminal-handoff').props.disabled,false);assert.equal(h.views.at(-1).options.disableStdin,false);h.click('登录完成，交给 Agent');await h.flush();assert.equal(h.calls.find(c=>c.method==='sharedTerminal.owner').data.ownerEpoch,3);h.unmount();
+});
+
+test('explicit handoff waits for already sent login input and duplicate clicks dispatch once',async()=>{
+ const input=deferred(),handoff=deferred();let hold=true;const h=serviceHarness({operation:(method,data,standard)=>method==='sharedTerminal.input'?input.promise:method==='sharedTerminal.owner'&&hold?handoff.promise.then(()=>standard(method,data)):undefined});await h.flush();
+ h.views.at(-1).input('last authentication response\r');await h.flush();const button=testId(h,'shared-terminal-handoff');button.props.onClick();button.props.onClick();await h.flush();assert(!h.calls.some(c=>c.method==='sharedTerminal.owner'));assert.equal(h.views.at(-1).options.disableStdin,true);
+ input.resolve({accepted:true});await h.flush();assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.owner').length,1);hold=false;handoff.resolve();await h.flush();assert.equal(h.sessions.get('ssh-owned').owner,'agent');noServiceMutations(h);h.unmount();
+});
+
+test('handoff drains earlier queued authentication input before granting Agent access without accepting new typing',async()=>{
+ const gate=deferred();let writes=0;const h=serviceHarness({operation:(method,_data)=>method==='sharedTerminal.input'&&writes++===0?gate.promise:undefined});await h.flush();
+ h.views.at(-1).input('first login response');await h.flush();h.views.at(-1).input('queued authentication response\r');testId(h,'shared-terminal-handoff').props.onClick();h.views.at(-1).input('NEW INPUT AFTER HANDOFF');await h.flush();
+ assert(!h.calls.some(c=>c.method==='sharedTerminal.owner'));gate.resolve({accepted:true});await h.flush();
+ assert.deepEqual(h.calls.filter(c=>c.method==='sharedTerminal.input').map(c=>c.data.data),['first login response','queued authentication response\r']);
+ assert(h.calls.findIndex(c=>c.method==='sharedTerminal.owner')>h.calls.findLastIndex(c=>c.method==='sharedTerminal.input'));assert.equal(h.sessions.get('ssh-owned').owner,'agent');h.unmount();
+});
+
+test('real service snapshots show stages and ACK-only transfer progress without claiming whole-service completion or cache reuse',async()=>{
+ const h=serviceHarness({initial:serviceSnapshot()});await h.flush();assert(panelText(h).includes('等待远端 Python 响应'));assert(panelText(h).includes('本阶段已用时'));assert(!panelText(h).includes('%'));
+ h.set(serviceSnapshot({revision:2,phase:'checking_cache'}));await h.flush();assert(panelText(h).includes('检查远端服务缓存和权限'));assert(!panelText(h).includes('已复用'));
+ h.set(serviceSnapshot({revision:3,phase:'transferring_worker',progress:{kind:'transfer',completedBytes:2048,totalBytes:8192}}));await h.flush();const bar=h.find(n=>n.type==='progress');assert.equal(bar.props.value,2048);assert.equal(bar.props.max,8192);assert(h.text(testId(h,'ssh-service-transfer')).includes('25%'));
+ h.set(serviceSnapshot({revision:4,phase:'checking_tools',progress:{kind:'transfer',completedBytes:8192,totalBytes:8192}}));await h.flush();assert(panelText(h).includes('核对工作流工具'));assert(!panelText(h).includes('%'));
+ h.set(serviceSnapshot({revision:5,status:'connected',phase:'ready',workflowReady:true}));await h.flush();assert(panelText(h).includes('作业服务已就绪'));noServiceMutations(h);assert(!h.calls.some(c=>['agent.rpc','task.execute','sharedTerminal.owner'].includes(c.method)));h.unmount();
+});
+
+test('typed failed diagnostics survive terminal polling and refresh while unknown ownership keeps raw input locked',async()=>{
+ const failed=serviceSnapshot({revision:2,status:'unknown',phase:'preparing_runtime',terminalAccess:'unknown',error:{code:'namespace_unsafe',phase:'checking_cache',message:'PRIVATE_PATH_TOKEN',python:[3,9,2]}});
+ const h=serviceHarness({initial:failed});await h.flush();h.tick();await h.flush();const text=panelText(h);assert(text.includes('目录的归属、权限或链接'));assert(text.includes('失败阶段'));assert(text.includes('Python 3.9.2'));assert(!text.includes('PRIVATE_PATH_TOKEN'));assert(testId(h,'ssh-service-unknown'));assert.equal(h.views.at(-1).options.disableStdin,true);
+ testId(h,'ssh-service-refresh').props.onClick();await h.flush();assert(panelText(h).includes('目录的归属、权限或链接'));noServiceMutations(h);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));h.unmount();
+});
+
+test('unconfirmed stop stays read-only and explicit session end closes only that SSH session',async()=>{
+ const h=serviceHarness({initial:serviceSnapshot({status:'unknown',phase:'returning_terminal',terminalAccess:'unknown',error:{code:'stop_timeout',phase:'returning_terminal'}})});await h.flush();assert(panelText(h).includes('返回终端的确认超时'));assert.equal(h.views.at(-1).options.disableStdin,true);assert.equal(testId(h,'shared-terminal-handoff').props.disabled,true);
+ testId(h,'ssh-service-refresh').props.onClick();await h.flush();noServiceMutations(h);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));h.click('结束此 SSH 会话');await h.flush();assert.deepEqual(h.calls.filter(c=>c.method==='sharedTerminal.close').map(c=>c.data),[{sessionId:'ssh-owned'}]);assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);h.unmount();
+});
+
+test('safe unknown diagnostics and rejected status refresh never expose remote messages or authentication output',async()=>{
+ for(const reject of [false,true]){
+  const h=serviceHarness({initial:serviceSnapshot({status:'unknown',terminalAccess:'unknown',error:{code:'not_allowlisted_PRIVATE',phase:'waiting_python',message:'PRIVATE_STDERR'}}),status:reject?()=>{throw Error('UNEXPECTED PRIVATE_STDERR /private/auth');}:undefined});await h.flush();
+  const text=panelText(h);assert(!text.includes('PRIVATE'));assert(!text.includes('/private/auth'));assert(text.includes('重新核对状态'));noServiceMutations(h);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));h.unmount();
+ }
+});
+
+test('lower service revisions cannot release or replace the current service lane',async()=>{
+ const h=serviceHarness({initial:serviceSnapshot({status:'connected',phase:'ready',workflowReady:true,revision:9})});await h.flush();assert(panelText(h).includes('作业服务已就绪'));
+ h.set(serviceSnapshot({status:'disconnected',terminalAccess:'available',revision:8}),{terminal:false});await h.flush();assert(panelText(h).includes('作业服务已就绪'));assert.equal(h.views.at(-1).options.disableStdin,true);
+ h.set(serviceSnapshot({status:'unknown',phase:'waiting_python',revision:8,error:{code:'startup_timeout',phase:'waiting_python'}}),{terminal:false});await h.flush();assert(!panelText(h).includes('启动响应超时'));noServiceMutations(h);h.unmount();
 });
 
 test('invalid transfer counters and progress outside transfer stages never produce a percentage',async()=>{
@@ -226,54 +262,22 @@ test('invalid transfer counters and progress outside transfer stages never produ
  }
 });
 
-
-test('cancel before queued login input drains never dispatches a later service start',async()=>{
- const input=deferred();const h=harness({request:{nonce:'queued-login',kind:'ssh',mode:'interactive',profileId:'saved-ssh',version:3},override:(method,data,standard,{sessions})=>{
-  if(method==='sharedTerminal.open'){const value={...session('ssh-queued'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'saved-ssh',profileVersion:3}};sessions.set(value.sessionId,value);return value;}
-  if(method==='sharedTerminal.input')return input.promise;return standard(method,data);
- }});await h.flush();h.views.at(-1).input('final login input\r');await h.flush();h.click('登录完成，连接作业服务');await h.flush();assert(!h.calls.some(c=>c.method==='compute.sshService.connect'));
- h.click('停止接入并返回终端');await h.flush();input.resolve({accepted:true});await h.flush();assert(panelText(h).includes('尚未向远端启动作业服务'));assert(!h.calls.some(c=>c.method==='compute.sshService.connect'||c.method==='compute.sshService.disconnect'||c.method==='sharedTerminal.close'));assert.equal(h.views.at(-1).options.disableStdin,false);h.unmount();
-});
-
-test('a stale return button for attempt A cannot stop a newer attempt B on the same terminal',async()=>{
- const h=serviceHarness({initial:serviceSnapshot({attemptId:'attempt-A',revision:5,status:'unknown',terminalAccess:'unknown'})});await h.flush();const old=testId(h,'ssh-service-disconnect');
- h.set(serviceSnapshot({attemptId:'attempt-B',revision:6,status:'connected',phase:'ready',workflowReady:true}));await h.flush();old.props.onClick();await h.flush();assert(!h.calls.some(c=>c.method==='compute.sshService.disconnect'));assert(panelText(h).includes('未发送停止命令'));h.unmount();
-});
-
-
-test('an old in-flight status cannot publish errors or consume a newer scope revision',async()=>{
+test('an old in-flight service status cannot publish errors or consume a newer scope revision',async()=>{
  const stale=deferred();let reads=0;const ready=serviceSnapshot({revision:10,status:'connected',phase:'ready',workflowReady:true});
- const h=serviceHarness({initial:ready,status:c=>reads++===0?stale.promise:Promise.resolve(c.state)});h.update({resourceScope:'scope-A'});await h.flush();h.update({resourceScope:'scope-B'});await h.flush();assert(panelText(h).includes('作业服务已就绪'));
+ const h=serviceHarness({initial:ready,status:c=>reads++===0?stale.promise:structuredClone(c.state)});h.update({resourceScope:'scope-A'});await h.flush();h.update({resourceScope:'scope-B'});await h.flush();assert(panelText(h).includes('作业服务已就绪'));
  stale.resolve(serviceSnapshot({revision:99,status:'unknown',terminalAccess:'unknown',error:{code:'permission_denied',phase:'preparing_runtime'}}));await h.flush();assert(!panelText(h).includes('拒绝访问'));assert(panelText(h).includes('作业服务已就绪'));
- h.set(serviceSnapshot({revision:11,status:'connected',phase:'checking_tools'}));await h.flush();assert(panelText(h).includes('核对工作流工具'));assert(!h.calls.some(c=>c.method==='compute.sshService.disconnect'||c.method==='sharedTerminal.close'));h.unmount();
+ h.set(serviceSnapshot({revision:11,status:'connected',phase:'checking_tools'}));await h.flush();assert(panelText(h).includes('核对工作流工具'));noServiceMutations(h);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));h.unmount();
 });
 
-test('a status for a different saved profile cannot release the current reserved lane',async()=>{
+test('status for a different saved profile cannot release the current reserved lane',async()=>{
  const h=serviceHarness({initial:serviceSnapshot({status:'unknown',terminalAccess:'unknown',error:{code:'connection_unconfirmed',phase:'waiting_python'}})});await h.flush();
- h.set(serviceSnapshot({revision:9,profileId:'other-profile',status:'disconnected',terminalAccess:'available'}));await h.flush();assert.equal(h.views.at(-1).options.disableStdin,true);assert(testId(h,'ssh-service-unknown'));h.unmount();
+ h.set(serviceSnapshot({revision:9,profileId:'other-profile',status:'disconnected',terminalAccess:'available'}),{terminal:false});await h.flush();assert.equal(h.views.at(-1).options.disableStdin,true);assert(testId(h,'ssh-service-unknown'));assert.equal(testId(h,'shared-terminal-handoff').props.disabled,true);h.unmount();
 });
 
-
-test('the Python first-response timeout identifies only missing confirmation and keeps the lane private without retries',async()=>{
+test('Python first-response timeout reports missing confirmation and keeps the lane private without retries',async()=>{
  const h=serviceHarness({initial:serviceSnapshot({status:'unknown',phase:'waiting_python',terminalAccess:'unknown',error:{code:'python_response_timeout',phase:'waiting_python'}})});await h.flush();
  const text=panelText(h);assert(text.includes('等待远端 Python 响应超时'));assert(text.includes('不能据此判断 Python 未安装'));assert.equal(h.views.at(-1).options.disableStdin,true);
- testId(h,'ssh-service-refresh').props.onClick();await h.flush();assert(!h.calls.some(c=>c.method==='compute.sshService.connect'||c.method==='compute.sshService.disconnect'||c.method==='sharedTerminal.close'));assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);h.unmount();
-});
-
-test('confirmed cancel clears an old connect rejection and its completed recovery display',async()=>{
- const connection=deferred(),stop=deferred();let attempt;
- const h=serviceHarness({connect:(data,c)=>{attempt=data.requestId;c.state=serviceSnapshot({attemptId:attempt});return connection.promise.then(()=>{throw Error('service_disconnected');});},disconnect:(_data,c)=>{c.state=serviceSnapshot({attemptId:attempt,revision:2,status:'disconnecting',phase:'returning_terminal'});return stop.promise;}});
- await h.flush();h.click('登录完成，连接作业服务');await h.flush();h.click('停止接入并返回终端');await h.flush();connection.resolve();await h.flush();
- assert(testId(h,'ssh-service-error'));assert.equal(h.views.at(-1).options.disableStdin,true);
- const final=serviceSnapshot({attemptId:attempt,revision:4,status:'disconnected',phase:undefined,phaseStartedAt:undefined,terminalAccess:'available'});h.set(final);stop.resolve(final);await h.flush();
- assert.throws(()=>testId(h,'ssh-service-error'),/actual panel node missing/);assert.throws(()=>testId(h,'ssh-service-status'),/actual panel node missing/);assert(panelText(h).includes('SSH 连接保持打开'));assert.equal(h.views.at(-1).options.disableStdin,false);assert.equal(h.calls.filter(c=>c.method==='compute.sshService.disconnect').length,1);h.unmount();
-});
-
-test('a late rejected cancellation acknowledgement never clears a newer attempt error or announces recovery',async()=>{
- const stop=deferred(),initial=serviceSnapshot({attemptId:'attempt-A',revision:4,status:'unknown',terminalAccess:'unknown'});
- const h=serviceHarness({initial,disconnect:()=>stop.promise});await h.flush();h.click('返回交互终端');await h.flush();
- h.set(serviceSnapshot({attemptId:'attempt-B',revision:7,status:'unknown',terminalAccess:'unknown',error:{code:'namespace_unsafe',phase:'checking_cache'}}));await h.flush();
- stop.resolve(serviceSnapshot({attemptId:'attempt-A',revision:6,status:'disconnected',phase:undefined,terminalAccess:'available'}));await h.flush();assert(panelText(h).includes('目录的归属、权限或链接'));assert(!panelText(h).includes('SSH 连接保持打开'));assert.equal(h.views.at(-1).options.disableStdin,true);h.unmount();
+ testId(h,'ssh-service-refresh').props.onClick();await h.flush();noServiceMutations(h);assert(!h.calls.some(c=>c.method==='sharedTerminal.close'));assert.equal(h.calls.filter(c=>c.method==='sharedTerminal.open').length,1);h.unmount();
 });
 
 test('temporary out-of-range terminal geometry never sends an invalid resize and resumes when valid',async()=>{
@@ -287,3 +291,7 @@ test('opening another terminal keeps the active view and shows pending feedback'
  const gate=deferred();let opens=0;const h=harness({override:(method,data,standard)=>method==='sharedTerminal.open'&&++opens===2?gate.promise:standard(method,data)});
  try{await h.flush();const selected=h.find(node=>node.type==='select').props.value;h.update({request:{nonce:'second-open',kind:'local',mode:'interactive'}});await h.flush();assert.equal(h.find(node=>node.type==='select').props.value,selected);assert(h.find(node=>node.props?.label==='正在打开终端…').props.busy);gate.resolve(session('second'));await h.flush();assert.equal(h.find(node=>node.type==='select').props.value,'second');assert.deepEqual(h.errors,[]);}finally{h.unmount();}
 });
+
+test('the compatibility selector does not route independent connection shells through the old lane',async()=>{const h=harness({override:(method,data,standard,{sessions})=>{if(method==='sharedTerminal.list')sessions.set('independent',{...session('independent'),connectionId:'connection',kind:'ssh',resource:{kind:'ssh-connection',connectionId:'connection',profileId:'profile',profileVersion:1}});return standard(method,data);}});try{await h.flush();assert.throws(()=>h.find(node=>node.type==='option'&&node.props.value==='independent'));assert(!h.calls.some(call=>call.method==='sharedTerminal.owner'&&call.data.sessionId==='independent'));}finally{h.unmount();}});
+
+test('explicit ordinary SSH never invokes the independent service API or forwards UI-only request fields',async()=>{const request={nonce:'plain',kind:'ssh',mode:'interactive',profileId:'profile',version:1,profileName:'Saved SSH',connectionMode:'plain',connectionId:'must-not-forward'};const h=harness({request,override:(method,data,standard,{sessions})=>{if(method==='sharedTerminal.open'){const value={...session('plain'),kind:'ssh',resource:{kind:'ssh-terminal',profileId:'profile',profileVersion:1}};sessions.set(value.sessionId,value);return value;}return standard(method,data);}});try{await h.flush();assert.deepEqual(h.calls.find(c=>c.method==='sharedTerminal.open').data,{kind:'ssh',mode:'interactive',profileId:'profile',version:1});assert(!h.calls.some(c=>c.method.startsWith('compute.sshService.')));h.click('登录完成，交给 Agent');await h.flush();assert(h.calls.some(c=>c.method==='sharedTerminal.owner'));assert(!h.calls.some(c=>c.method.startsWith('compute.sshService.')));assert.match(h.text(h.find(n=>n.props?.['data-testid']==='ssh-resource-scope')),/普通 SSH 模式仅提供终端操作/);}finally{h.unmount();}});

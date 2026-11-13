@@ -9,3 +9,15 @@ test('Errors and explicit cancellation leave no reusable setup permission',async
 
 
 test('The selected project, runtime and input root are part of the exact setup owner',async()=>{for(const field of ['projectId','environmentId','inputRoot']){const f=fixture();await assert.rejects(f.api.prepare('codex','installation.readiness',async()=>{f.change({[field]:'new-selected-owner'});assert.equal(f.api.allowed('codex',f.routes.get('installation.readiness')),false);}),/changed/);assert.equal(f.api.allowed('codex',f.routes.get('installation.readiness')),false);}});
+
+test('explicit progressive setup references remain readable only in their exact selected turn and lease',async()=>{
+ const f=fixture();let lease=true;const options={retainForTurn:true,assertCurrent:()=>{},checkCurrent:()=>lease};
+ await f.api.prepare('codex','cluster.connection-setup',async()=>({status:'passed'}),options);
+ assert(f.api.allowed('codex',f.routes.get('cluster.connection-setup')));assert.equal(f.api.allowed('codex',f.routes.get('installation.readiness')),false);
+ lease=false;assert.equal(f.api.allowed('codex',f.routes.get('cluster.connection-setup')),false);lease=true;f.change({serial:2});assert.equal(f.api.allowed('codex',f.routes.get('cluster.connection-setup')),false);
+ await f.api.prepare('codex','cluster.connection-setup',async()=>({status:'already_loaded'}),options);assert(f.api.allowed('codex',f.routes.get('cluster.connection-setup')));f.api.clear('codex');assert.equal(f.api.allowed('codex',f.routes.get('cluster.connection-setup')),false);
+});
+test('failed entries or caller-supplied retention without trusted scope cannot retain setup reads',async()=>{
+ const f=fixture();await assert.rejects(f.api.prepare('codex','cluster.connection-setup',async()=>({status:'passed'}),{retainForTurn:true}),/explicit setup/);
+ await f.api.prepare('codex','cluster.connection-setup',async()=>({status:'blocked'}),{retainForTurn:true,assertCurrent:()=>{},checkCurrent:()=>true});assert.equal(f.api.allowed('codex',f.routes.get('cluster.connection-setup')),false);
+});

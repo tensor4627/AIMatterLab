@@ -53,7 +53,7 @@ function reference(target,base){
 const identity=stat=>[stat.dev,stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs];
 const identical=(left,right)=>identity(left).every((value,index)=>value===identity(right)[index]);
 
-export async function managedToolSkillContext({selection,record,policy,scope,limits={}}={}){
+export async function managedToolSkillContext({selection,record,policy,scope,limits={},documentId}={}){
  if(!policy||!['assertCurrent','assertReadable','revalidate'].every(key=>typeof policy[key]==='function'))fail('guidance_policy_required');
  if(!plain(record)||typeof record.snapshot_root!=='string'||!path.isAbsolute(record.snapshot_root)||!plain(record.delivery_skill)||record.delivery_skill.path!=='SKILL.md'||!Array.isArray(record.files)||record.files.length>100000)fail('invalid_registered_metadata');
  const root=path.resolve(record.snapshot_root),delivery=structuredClone(record.delivery_skill),expected=path.join(root,delivery.path);if(typeof delivery.name!=='string'||!delivery.name||!/^[a-f0-9]{64}$/.test(delivery.sha256))fail('invalid_registered_delivery');
@@ -94,10 +94,10 @@ export async function managedToolSkillContext({selection,record,policy,scope,lim
   const actual=await checked(spec.paths,()=>fs.realpath(absolute(spec.logical)));if(!same(actual,absolute(spec.canonical)))fail('resource_redirect_changed');
   const physical=await checked(spec.paths,()=>fs.realpath(absolute(spec.canonical)));if(!same(physical,absolute(spec.canonical)))fail('resource_redirect_changed');
  }
- let total=0;const seen=new Map(),attachments=[],queue=[],omitted=[];
+ let total=0;const seen=new Map(),attachments=[];
  async function read(logical,{entry=false}={}){
-  const spec=resolve(logical);if(seen.has(spec.canonical))return seen.get(spec.canonical);
-  if(spec.row.size>bounds.maxFileBytes){if(entry)fail('context_byte_limit');omitted.push(logical);return null;}
+  const spec=resolve(logical);if(seen.has(spec.canonical))return {...seen.get(spec.canonical),label:logical};
+  if(spec.row.size>bounds.maxFileBytes)fail('context_byte_limit');
   if(seen.size>=bounds.maxFiles||spec.row.size>bounds.maxTotalBytes-total)fail('context_byte_limit');
   await locations(spec);const file=absolute(spec.canonical),before=await checked(spec.paths,()=>fs.lstat(file,{bigint:true}));
   if(before.isSymbolicLink()||!before.isFile()||before.size!==BigInt(spec.row.size))fail('registered_file_changed');
@@ -109,14 +109,15 @@ export async function managedToolSkillContext({selection,record,policy,scope,lim
    const after=await checked(spec.paths,()=>handle.stat({bigint:true}));if(!identical(before,after)||count!==spec.row.size)fail('registered_file_changed');await locations(spec);const final=await checked(spec.paths,()=>fs.lstat(file,{bigint:true}));if(!identical(before,final))fail('registered_file_changed');
    const data=bytes.subarray(0,count),digest=sha(data);if(digest!==spec.row.sha256||entry&&digest!==delivery.sha256)fail('registered_hash_changed');
    const text=new TextDecoder('utf-8',{fatal:true}).decode(data);if(text.includes('\0'))fail('binary_guidance');
-   const value={label:logical,kind:!entry&&/\.json$/i.test(logical)?'reference-data':'instructions',sha256:digest,bytes:count,text,canonical:spec.canonical};seen.set(spec.canonical,value);attachments.push(value);total+=count;if(entry||/\.md$/i.test(logical))queue.push(value);return value;
+   const value={label:logical,kind:!entry&&/\.json$/i.test(logical)?'reference-data':'instructions',sha256:digest,bytes:count,text,canonical:spec.canonical};seen.set(spec.canonical,value);attachments.push(value);total+=count;return value;
   }finally{if(handle)await handle.close();}
  }
- await policy.revalidate();const entry=await read(delivery.path,{entry:true});
- while(queue.length){const source=queue.shift();for(const target of links(source.text)){const file=reference(target,source.canonical);if(file)await read(file);}}
- let text='[Selected skill: '+selection.name+']\n'+entry.text;
- for(const attachment of attachments.slice(1))text+='\n\n[Studio skill attachment: '+attachment.label+'; '+attachment.kind+']\n'+attachment.text;
- for(const file of [...new Set(omitted)])text+='\n\n[Reference not expanded: '+file+'; exceeds the bounded guidance file size. The path remains a reference only.]';
+ if(documentId!==undefined&&(typeof documentId!=='string'||!rows.has(documentId)||documentId!==delivery.path&&!/\.(md|json)$/i.test(documentId)))fail('unregistered_document_id');
+ await policy.revalidate();const entry=await read(delivery.path,{entry:true}),document=documentId===undefined||documentId===delivery.path?entry:await read(documentId);
+ const documents=new Set([delivery.path,documentId||delivery.path]);
+ if(document===entry||/\.md$/i.test(document.label))for(const target of links(document.text)){const file=reference(target,document.canonical);if(file){if(!rows.has(file))fail('resource_not_in_version');documents.add(file);}}
+ let text=documentId===undefined?'[Selected skill: '+selection.name+']\n'+entry.text:'[Selected skill document: '+selection.name+'; '+documentId+']\n'+document.text;
+ text+='\n\nSupporting document IDs (read only when needed within this exact registered package version): '+JSON.stringify([...documents].filter(id=>id!==document.label));
  if(Buffer.byteLength(text)>bounds.maxTotalBytes)fail('context_byte_limit');await policy.revalidate();current();
- return {text,attachments:attachments.map(({label,kind,sha256,bytes})=>({label,kind,sha256,bytes})),totalBytes:Buffer.byteLength(text)};
+ return {text,document_ids:[...documents],...documentId!==undefined?{document_id:documentId}:{},attachments:[document].map(({label,kind,sha256,bytes})=>({label,kind,sha256,bytes})),totalBytes:Buffer.byteLength(text)};
 }

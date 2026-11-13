@@ -1,7 +1,7 @@
 import type {SshServicePhase,SshServiceState} from '../../../contracts/dto/compute';
 
 export const servicePhaseMessages:Record<SshServicePhase,string>={
- preparing_local:'核对本地作业服务文件',waiting_python:'等待远端 Python 响应',
+ preparing_local:'核对本地作业服务文件',preparing_environment:'激活已保存的作业服务环境',waiting_python:'等待远端 Python 响应',
  checking_cache:'检查远端服务缓存和权限',transferring_transport:'传输连接组件',
  transferring_worker:'传输作业服务文件',preparing_runtime:'准备并校验作业服务文件',
  starting_worker:'启动远端作业服务',checking_health:'核对服务身份与健康状态',
@@ -9,6 +9,12 @@ export const servicePhaseMessages:Record<SshServicePhase,string>={
  stopping:'正在停止作业服务通道',returning_terminal:'等待交互终端恢复确认'
 };
 const errorMessages:Record<string,string>={
+ registration_required:'请在连接计算资源中完成此连接的首次作业服务设置。',
+ maintenance_required:'已保存的作业服务需要检查或维护，请在连接计算资源中处理。不会自动重装或更新。',
+ ssh_service_registration_required:'请在连接计算资源中完成此连接的首次作业服务设置。',
+ ssh_service_maintenance_required:'已保存的作业服务需要检查或维护，请在连接计算资源中处理。',
+ environment_activation_failed:'已保存的环境激活命令未能完成。请在原终端检查 Conda、venv 或 module 配置。',
+ python_start_failed:'未能启动所选 Python。请核对已保存的解释器路径和环境激活设置。',
  python_response_timeout:'等待远端 Python 响应超时。请返回终端核对登录状态和 Python 响应；不能据此判断 Python 未安装。',
  startup_timeout:'等待远端启动响应超时。尚不能区分登录未完成、Python 未响应或通道中断，请先返回终端核对。',
  connection_unconfirmed:'未收到完整的通道确认。请重新核对状态，不会自动重连。',

@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash,randomUUID,randomBytes} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {decodeGzipResponse} from './response-codec.mjs';
+import {serviceLaunch,validateServiceEnvironment} from './service-launch.mjs';
 export class TerminalFault extends Error{constructor(code,status=400){super(code);this.code=code;this.status=status;}}
 const fail=(code,status)=>{throw new TerminalFault(code,status);};
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
@@ -14,8 +15,9 @@ export function validateOpen(value){exact(value,['kind','mode','name','launch','
 const MAX_RING=512*1024,CHUNK=16384;
 function chunks(text){const out=[];let current='',bytes=0;for(const c of text){const n=Buffer.byteLength(c);if(bytes+n>CHUNK){out.push(current);current='';bytes=0;}current+=c;bytes+=n;}if(current)out.push(current);return out;}
 const SERVICE_PREFIX='__STUDIO_SERVICE_V1__:',MAX_INSTALL=16*1024*1024,MAX_REPLY=8*1024*1024;
-const SERVICE_PHASES=new Set(['waiting_python','checking_cache','transferring_transport','transferring_worker','preparing_runtime','starting_worker','checking_health','ready','stopping','returning_terminal']);
-const REMOTE_ERRORS=new Set(['python_unsupported','sqlite_unavailable','tty_unavailable','invalid_hello','protocol_failed','transport_hash_mismatch','transport_cache_invalid','worker_hash_mismatch','worker_cache_invalid','namespace_unsafe','permission_denied','storage_unavailable','worker_start_timeout','worker_start_failed','worker_identity_unavailable','worker_health_invalid','service_request_unconfirmed','internal_error']);
+const SERVICE_PHASES=new Set(['preparing_environment','waiting_python','checking_cache','transferring_transport','transferring_worker','preparing_runtime','starting_worker','checking_health','ready','stopping','returning_terminal']);
+const REMOTE_ERRORS=new Set(['environment_activation_failed','python_start_failed','python_unsupported','sqlite_unavailable','tty_unavailable','invalid_hello','protocol_failed','transport_hash_mismatch','transport_cache_invalid','worker_hash_mismatch','worker_cache_invalid','namespace_unsafe','permission_denied','storage_unavailable','worker_start_timeout','worker_start_failed','worker_identity_unavailable','worker_health_invalid','service_request_unconfirmed','internal_error']);
+REMOTE_ERRORS.add('maintenance_required');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const version=value=>Array.isArray(value)&&value.length===3&&value.every(n=>Number.isInteger(n)&&n>=0&&n<=65535);
 const serviceId=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value);
@@ -28,7 +30,7 @@ function bootstrapMetadata(value){
 function vtBoundary(value,prelude=false,bootstrap=false){
  // ConPTY returns a bounded screen update stream, not the original SSH bytes.
  // Accept only display operations outside a complete private frame. Never
- // remove printable characters, edit base64, or interpret arbitrary ANSI/OSC.
+ // edit frame payload bytes or interpret arbitrary ANSI/OSC.
  if(value.length>(prelude?512:128))return false;let at=0,count=0;
  while(at<value.length){if(++count>(prelude?32:8))return false;if(prelude&&value[at]==='\r'){at++;continue;}
   const m=/^\x1b\[([0-9;?]*)([A-Za-z])/.exec(value.slice(at));if(!m)return false;const p=m[1],op=m[2];let allowed=op==='K'&&(p===''||p==='0')||op==='X'&&/^(?:[1-9]\d{0,2})?$/.test(p)&&(p===''||Number(p)<=500);
@@ -38,10 +40,11 @@ function vtBoundary(value,prelude=false,bootstrap=false){
 }
 function serviceHealth(value){
  if(!object(value)||value.name!=='gpu-sampling-studio'||value.execution_policy!=='desktop-review-v1'||!['root','runtime'].every(key=>bounded(value[key],4096)&&value[key].startsWith('/')&&value[key]!=='/'&&!/[\r\n]/.test(value[key]))||! /^[a-f0-9]{20}$/.test(value.runtime_id||'')||!bounded(value.hostname,255)||!value.hostname||!Number.isSafeInteger(value.uid)||value.uid<0||!bounded(value.machineId,128)||!value.machineId||!Number.isInteger(value.port)||value.port<1024||value.port>65535||!bounded(value.transport_kind,80)||!value.transport_kind)fail('service_identity_failed',502);
- return Object.fromEntries(['name','execution_policy','root','runtime','runtime_id','hostname','uid','machineId','port','transport_kind'].map(key=>[key,value[key]]));
+ if(value.bridge_capabilities!==undefined&&(!Array.isArray(value.bridge_capabilities)||value.bridge_capabilities.length>1||value.bridge_capabilities.some(item=>item!=='scheduler-inspection-v1')))fail('service_identity_failed',502);
+ return {...Object.fromEntries(['name','execution_policy','root','runtime','runtime_id','hostname','uid','machineId','port','transport_kind'].map(key=>[key,value[key]])),...value.bridge_capabilities?{bridge_capabilities:[...value.bridge_capabilities]}:{}};
 }
 /** A private machine lane on this exact SSH PTY. No second process or login. */
-function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,available,publish,timeouts={}}){
+function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,available,publish,timeouts={},privateServiceChannel=false}){
  let current=null,buffer='',noise=0,fragmentBytes=0,publicCarry='',publicTimer;const starts=new Map(),cancelledStarts=new Set(),fragments=new Map(),resumeMarkers=new Set();
  function flushPublic(){clearTimeout(publicTimer);publicTimer=null;const text=publicCarry;publicCarry='';if(text)publish(text);}
  function publicOutput(data){
@@ -71,6 +74,14 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
   });
  }
  function beginReturn(s,failed=false){
+  if(privateServiceChannel){
+   // This authenticated slave is never exposed as a human shell. The owner
+   // closes it after this exact STOPPED/EXITED barrier; no public-PTY recovery
+   // or shell-input proof is involved. Unknown/malformed barriers stay closed.
+   clearTimeout(s.timer);clearTimeout(s.firstTimer);clearTimeout(s.exitTimer);clearTimeout(s.stopTimer);
+   s.active=false;s.phase='disconnected';s.publicPhase=failed?s.publicPhase:'stopping';s.status=failed?'failed':'disconnected';if(!failed)s.error=null;s.health=null;s.transportBytes=null;s.workerPacked=null;s.install=null;fragments.clear();fragmentBytes=0;
+   s.stopResolve?.(state());s.stopResolve=null;s.stopReject=null;if(failed){s.startResolve?.(state());s.startResolve=null;s.startReject=null;}return;
+  }
   s.phase='returning';s.publicPhase='returning_terminal';s.status='connecting';s.returnFailed=failed;s.progress=null;s.resumeMarker='STUDIO_TERMINAL_RESUMED_'+randomBytes(16).toString('hex');resumeMarkers.add(s.resumeMarker);
   clearTimeout(s.timer);clearTimeout(s.firstTimer);clearTimeout(s.exitTimer);clearTimeout(s.stopTimer);s.stopTimer=setTimeout(()=>fault('service_stop_unknown'),timeouts.stop??10000);
   try{prepareRelease();terminal.write("printf '\\033[2J\\033[3J\\033[H%s\\n' "+shellQuote(s.resumeMarker)+'\r');}catch{fault('service_stop_unknown');}
@@ -78,6 +89,7 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
  function consume(kind,id,value){
   const s=current;if(!s?.active)return;
   if(kind==='STOPPED'&&s.stopId===id){
+   exact(value,[]);
    // ConPTY may repaint its backing screen when the original width returns.
    // Keep that repaint private, then clear the remote terminal and prove that
    // the original shell has resumed before allowing any public output again.
@@ -185,7 +197,12 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
    }
    if(line.startsWith(ownedPrefix)){
     const frame=/^([A-Z_]+):(-|[A-Za-z0-9_-]{1,100}):([A-Za-z0-9+/=]+)(.*)$/.exec(line.slice(ownedPrefix.length));
-    if(frame&&frame[4]&&vtBoundary(frame[4]))line=ownedPrefix+frame[1]+':'+frame[2]+':'+frame[3];
+    // ConPTY repaints a shorter screen row with trailing ASCII erase cells.
+    // They are outside the complete owned frame and fit the reserved 500-column
+    // screen. Never trim/edit payload bytes or mix spaces with other controls;
+    // canonical base64 and all frame/state/value checks still run below.
+    const displayPadding=frame&&current.v2&&line.length<=500&&/^ +$/.test(frame[4]);
+    if(frame&&frame[4]&&(displayPadding||vtBoundary(frame[4])))line=ownedPrefix+frame[1]+':'+frame[2]+':'+frame[3];
    }
    if(!line.startsWith(SERVICE_PREFIX+current.nonce+':')){noise+=Buffer.byteLength(line);if(noise>131072)fault('service_protocol_failed');continue;}
    try{const fields=line.slice((SERVICE_PREFIX+current.nonce+':').length).split(':');if(fields.length!==3||! /^[A-Z_]+$/.test(fields[0])||fields[1]!=='-'&&!serviceId(fields[1]))fail('service_protocol_failed',502);const value=JSON.parse(decode64(fields[2],16384).toString('utf8'));if(!object(value))fail('service_protocol_failed',502);consume(fields[0],fields[1],value);}catch{fault('service_protocol_failed');}
@@ -193,9 +210,9 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
   }if(Buffer.byteLength(buffer)>32768){buffer='';fault('service_protocol_failed');}return true;
  }
  function start(request){
-  exact(request,['ownerEpoch','requestId','bootstrap']);if(!serviceId(request.requestId)||!Number.isSafeInteger(request.ownerEpoch))fail('invalid_request');exact(request.bootstrap,['source','payload','transport'],['source','payload']);
+  exact(request,['ownerEpoch','requestId','bootstrap']);if(!serviceId(request.requestId)||!Number.isSafeInteger(request.ownerEpoch))fail('invalid_request');exact(request.bootstrap,['source','payload','transport','serviceEnvironment','reuseOnly','startCached'],['source','payload']);
   if(cancelledStarts.has(request.requestId))fail('service_start_cancelled',409);
-  const {source,payload,transport}=request.bootstrap,v2=transport!==undefined;if(!bounded(source,v2?32768:16384)||!source.trim()||!object(payload))fail('invalid_request');let install;try{install=Buffer.from(JSON.stringify(payload));}catch{fail('invalid_request');}if(install.length>MAX_INSTALL)fail('request_too_large',413);
+  const {source,payload,transport,serviceEnvironment,reuseOnly,startCached}=request.bootstrap,v2=transport!==undefined;if(!bounded(source,v2?32768:16384)||!source.trim()||!object(payload)||reuseOnly!==undefined&&typeof reuseOnly!=='boolean'||reuseOnly&&!v2||startCached!==undefined&&typeof startCached!=='boolean'||startCached&&!reuseOnly)fail('invalid_request');let environment;try{environment=validateServiceEnvironment(serviceEnvironment);}catch{fail('invalid_request');}if(environment&&!v2)fail('invalid_request');let install;try{install=Buffer.from(JSON.stringify(payload));}catch{fail('invalid_request');}if(install.length>MAX_INSTALL)fail('request_too_large',413);
   let transportBytes,workerPacked,hello,launcher=source;
   if(v2){
    exact(transport,['source','sha256']);if(!bounded(transport.source,128*1024)||!transport.source||!/^[a-f0-9]{64}$/.test(transport.sha256)||hash(Buffer.from(transport.source))!==transport.sha256)fail('invalid_request');
@@ -207,18 +224,20 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
    }
    const workerManifest=manifest.digest('hex');if(workerManifest.slice(0,20)!==payload.expected_runtime_id)fail('invalid_request');
    transportBytes=Buffer.from(transport.source);workerPacked=gzipSync(install,{level:6});if(workerPacked.length>8*1024*1024)fail('request_too_large',413);
-   hello={schema_version:2,profile_id:payload.profile_id,port:payload.port,expected_runtime_id:payload.expected_runtime_id,worker_manifest_sha256:workerManifest,transport_sha256:transport.sha256,transport_size:transportBytes.length,worker_gzip_size:workerPacked.length,worker_gzip_sha256:hash(workerPacked),worker_size:install.length,worker_sha256:hash(install)};
+   hello={schema_version:2,profile_id:payload.profile_id,port:payload.port,expected_runtime_id:payload.expected_runtime_id,worker_manifest_sha256:workerManifest,transport_sha256:transport.sha256,transport_size:transportBytes.length,worker_gzip_size:workerPacked.length,worker_gzip_sha256:hash(workerPacked),worker_size:install.length,worker_sha256:hash(install),...reuseOnly?{reuse_only:true,...startCached?{start_cached:true}:{}}:{}};
    launcher='import base64,gzip;exec(compile(gzip.decompress(base64.b64decode("'+gzipSync(Buffer.from(source),{level:6}).toString('base64')+'")),"<studio-service-bootstrap>","exec"))';
    if(Buffer.byteLength('python3 -I -u -c '+shellQuote(launcher)+' '+shellQuote('0'.repeat(64))+'\r')>=4096||/[^\x20-\x7e]/.test(launcher))fail('invalid_request');
   }
-  const digest=createHash('sha256').update(source).update(install).update(transport?.sha256||'').digest('hex'),previous=starts.get(request.requestId);if(previous){if(previous.digest!==digest)fail('request_changed',409);return previous.promise;}
+  const digest=createHash('sha256').update(source).update(install).update(transport?.sha256||'').update(JSON.stringify(environment??null)).update(String(reuseOnly===true)).update(String(startCached===true)).digest('hex'),previous=starts.get(request.requestId);if(previous){if(previous.digest!==digest)fail('request_changed',409);return previous.promise;}
+  const nonce=randomBytes(32).toString('hex');let launch;try{launch=serviceLaunch((v2?'python3 -I -u -c ':'python3 -u -c ')+shellQuote(launcher)+' '+shellQuote(nonce),nonce,environment);}catch{fail('invalid_request');}
   available();if(kind!=='ssh')fail('service_requires_ssh',409);if(active())fail('service_active',423);if(request.ownerEpoch!==epoch())fail('owner_changed',409);if(starts.size>=16)fail('request_limit',429);
   flushPublic();reserve();buffer='';noise=0;fragments.clear();fragmentBytes=0;
-  const s=current={id:randomUUID(),requestId:request.requestId,active:true,status:'connecting',phase:'bootstrap',publicPhase:'waiting_python',v2,hello,workerPayload:v2?payload:null,transportBytes,workerPacked,nonce:randomBytes(32).toString('hex'),install:v2?null:install,installSha:hash(install),count:Math.ceil(install.length/2048),sent:0,acked:0,cachedBytes:0,pending:new Map(),requests:new Map()};
+  const s=current={id:randomUUID(),requestId:request.requestId,active:true,status:'connecting',phase:'bootstrap',publicPhase:'waiting_python',v2,hello,workerPayload:v2?payload:null,transportBytes,workerPacked,nonce,install:v2?null:install,installSha:hash(install),count:Math.ceil(install.length/2048),sent:0,acked:0,cachedBytes:0,pending:new Map(),requests:new Map()};
   const promise=new Promise((resolve,reject)=>{s.startResolve=resolve;s.startReject=reject;});promise.catch(()=>{});starts.set(request.requestId,{digest,promise});
-  if(v2)s.firstTimer=setTimeout(()=>fault('python_response_timeout'),Math.min(15000,timeouts.start??120000));
+  if(environment)s.publicPhase='preparing_environment';
+  if(v2)s.firstTimer=setTimeout(()=>fault('python_response_timeout'),Math.min(environment?30000:15000,timeouts.start??120000));
   s.timer=setTimeout(()=>fault('service_start_unknown'),timeouts.start??120000);
-  try{terminal.write((v2?'python3 -I -u -c ':'python3 -u -c ')+shellQuote(launcher)+' '+shellQuote(s.nonce)+'\r');}catch{fault('service_start_unknown');}
+  try{terminal.write(launch);}catch{fault('service_start_unknown');}
   return promise;
  }
  function request(value){
@@ -250,22 +269,24 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
  function dispose(){flushPublic();if(!current)return;fault('service_disconnected');clearTimeout(current.stopTimer);current.stopReject?.(new TerminalFault('service_disconnected',410));current.active=false;current.status='disconnected';}
  return {active,state,start,request,stop,cancelStart,receive,publicOutput,flushPublic,dispose};
 }
-export function createTerminalSession({pty,plan,id=randomUUID(),now=Date.now,serviceTimeouts}){
+export function createTerminalSession({pty,plan,id=randomUUID(),now=Date.now,serviceTimeouts,connectionId,privateServiceChannel=false}){
+ if(typeof privateServiceChannel!=='boolean'||privateServiceChannel&&connectionId!==undefined)fail('invalid_request');
+ if(connectionId!==undefined&&(typeof connectionId!=='string'||!/^[a-f0-9-]{36}$/i.test(connectionId)))fail('invalid_request');
  const value=validateOpen(plan);let terminal;try{terminal=pty.spawn(value.launch.file,value.launch.args,{name:'xterm-256color',cols:100,rows:30,cwd:value.launch.cwd,env:value.launch.env??Object.fromEntries(['SystemRoot','WINDIR','ComSpec','PATH','PATHEXT','TEMP','TMP','USERPROFILE'].filter(k=>typeof process.env[k]==='string').map(k=>[k,process.env[k]]))});}catch{fail('spawn_failed',502);}if(!Number.isSafeInteger(terminal.pid)||terminal.pid<=0){try{terminal.kill();}catch{}fail('spawn_failed',502);}
  const createdAt=now(),expiresAt=createdAt+(value.ttlMs??86400000);let alive=true,exitCode=null,exitSignal=null,owner='human',ownerEpoch=1,scope=null,readFloor=0,sequence=0,ringBytes=0,ring=[],closed=false,dimensions={cols:100,rows:30};const requests=new Map();
  const expired=()=>now()>=expiresAt;
- const state=()=>({id,kind:value.kind,mode:value.mode,name:value.name,pid:terminal.pid,alive,exitCode,exitSignal,owner,ownerEpoch,sequence,createdAt,expiresAt,expired:expired(),closed,serviceActive:service.active(),serviceStatus:service.state().serviceStatus,...scope?{scope:structuredClone(scope)}:{}});
+ const state=()=>({id,...connectionId?{connectionId}:{},kind:value.kind,mode:value.mode,name:value.name,pid:terminal.pid,alive,exitCode,exitSignal,owner,ownerEpoch,sequence,createdAt,expiresAt,expired:expired(),closed,serviceActive:service.active(),serviceStatus:service.state().serviceStatus,...scope?{scope:structuredClone(scope)}:{}});
  const available=(allowExited=false)=>{if(expired())fail('session_expired',410);if(closed||!alive&&!allowExited)fail('session_exited',410);};
  const authorize=(request,write=false)=>{if(!['human','agent'].includes(request.actor)||!Number.isSafeInteger(request.ownerEpoch))fail('invalid_request');if(write&&service.active())fail('service_active',423);if(request.actor==='agent'){if(owner!=='agent')fail('human_owns_session',423);if(!request.scope||scopeKey(request.scope)!==scopeKey(scope))fail('scope_mismatch',403);}else{if(request.scope!==undefined)fail('invalid_scope');if(write&&owner!=='human')fail('agent_owns_session',423);}if(request.ownerEpoch!==ownerEpoch)fail('owner_changed',409);available(!write);};
  const appendPublic=data=>{if(!alive||closed)return;for(const text of chunks(data)){const item={sequence:++sequence,data:text},bytes=Buffer.byteLength(text);ring.push(item);ringBytes+=bytes;while(ringBytes>MAX_RING){const first=ring.shift();ringBytes-=Buffer.byteLength(first.data);}}};
- const service=createServiceLane({terminal,kind:value.kind,epoch:()=>ownerEpoch,available,publish:appendPublic,reserve(){if(owner!=='human')fail('agent_owns_session',423);try{terminal.resize(500,dimensions.rows);}catch{fail('resize_failed',502);}scope=null;ownerEpoch++;readFloor=sequence;requests.clear();},prepareRelease(){terminal.resize(Math.max(100,dimensions.cols),dimensions.rows);},release(){ownerEpoch++;readFloor=sequence;requests.clear();try{terminal.resize(dimensions.cols,dimensions.rows);}catch{}},timeouts:serviceTimeouts});
+ const service=createServiceLane({terminal,kind:value.kind,epoch:()=>ownerEpoch,available,publish:appendPublic,privateServiceChannel,reserve(){if(owner!=='human')fail('agent_owns_session',423);try{terminal.resize(500,dimensions.rows);}catch{fail('resize_failed',502);}scope=null;ownerEpoch++;readFloor=sequence;requests.clear();},prepareRelease(){terminal.resize(Math.max(100,dimensions.cols),dimensions.rows);},release(){ownerEpoch++;readFloor=sequence;requests.clear();try{terminal.resize(dimensions.cols,dimensions.rows);}catch{}},timeouts:serviceTimeouts});
  terminal.onData(data=>{if(typeof data!=='string'||!alive||closed)return;const observation=service.receive(data);if(observation===true)return;if(observation)data=observation.output;appendPublic(service.publicOutput(data));});
  terminal.onExit(event=>{service.dispose();alive=false;exitCode=Number.isInteger(event.exitCode)?event.exitCode:null;exitSignal=Number.isInteger(event.signal)?event.signal:null;});
  return {state,
   read(request){exact(request,['actor','scope','ownerEpoch','cursor','maxBytes'],['actor','ownerEpoch']);authorize(request);const cursor=request.cursor??0,max=request.maxBytes??65536;if(!Number.isSafeInteger(cursor)||cursor<0||cursor>sequence||!Number.isSafeInteger(max)||max<CHUNK||max>262144)fail('invalid_cursor');const floor=request.actor==='agent'?readFloor:0,after=Math.max(cursor,floor),first=ring[0]?.sequence??sequence+1,dropped=after<first-1;let bytes=0,output=[];for(const item of ring){if(item.sequence<=after)continue;const n=Buffer.byteLength(item.data);if(bytes+n>max)break;output.push({...item});bytes+=n;}return{state:state(),chunks:output,cursor:output.at(-1)?.sequence??Math.max(after,first-1),dropped};},
   input(request){exact(request,['actor','scope','ownerEpoch','requestId','data'],['actor','ownerEpoch','requestId','data']);authorize(request,true);if(typeof request.requestId!=='string'||! /^[A-Za-z0-9_-]{1,100}$/.test(request.requestId)||!bounded(request.data,8192)||!request.data)fail('invalid_input');const digest=createHash('sha256').update(JSON.stringify([request.actor,request.actor==='agent'?scopeKey(request.scope):null,request.data])).digest('hex'),previous=requests.get(request.requestId);if(previous){if(previous.digest!==digest)fail('request_changed',409);return{...previous.result,duplicate:true};}if(requests.size>=2048)fail('request_limit',429);service.flushPublic();try{terminal.write(request.data);}catch{fail('input_failed',502);}const result={accepted:true,id,ownerEpoch,requestId:request.requestId};requests.set(request.requestId,{digest,result});return result;},
   owner(request){exact(request,['owner','ownerEpoch','scope'],['owner','ownerEpoch']);available();if(service.active())fail('service_active',423);if(!['human','agent'].includes(request.owner)||request.ownerEpoch!==ownerEpoch)fail('owner_changed',409);const next=request.owner==='agent'?terminalScope(request.scope):null;if(request.owner==='human'&&request.scope!==undefined)fail('invalid_scope');service.flushPublic();owner=request.owner;scope=next;ownerEpoch++;readFloor=sequence;requests.clear();return state();},
-  resize(request){exact(request,['actor','scope','ownerEpoch','cols','rows'],['actor','ownerEpoch','cols','rows']);authorize(request,true);if(!Number.isInteger(request.cols)||request.cols<10||request.cols>500||!Number.isInteger(request.rows)||request.rows<2||request.rows>300)fail('invalid_size');try{terminal.resize(request.cols,request.rows);dimensions={cols:request.cols,rows:request.rows};}catch{fail('resize_failed',502);}return{resized:true,id};},
+  resize(request){exact(request,['actor','scope','ownerEpoch','cols','rows'],['actor','ownerEpoch','cols','rows']);if(service.active())fail('service_active',423);authorize(request);if(!Number.isInteger(request.cols)||request.cols<10||request.cols>500||!Number.isInteger(request.rows)||request.rows<2||request.rows>300)fail('invalid_size');try{terminal.resize(request.cols,request.rows);dimensions={cols:request.cols,rows:request.rows};}catch{fail('resize_failed',502);}return{resized:true,id};},
   close(request){exact(request,['actor','scope','ownerEpoch'],['actor','ownerEpoch']);if(!['human','agent'].includes(request.actor)||!Number.isSafeInteger(request.ownerEpoch))fail('invalid_request');if(request.actor==='agent'&&(!request.scope||scopeKey(request.scope)!==scopeKey(scope)))fail('scope_mismatch',403);if(request.ownerEpoch!==ownerEpoch)fail('owner_changed',409);if(!closed){closed=true;ownerEpoch++;}service.dispose();if(alive){try{terminal.kill();}catch{fail('close_failed',502);}}return state();},
   serviceStart:service.start,serviceRequest:service.request,serviceStop:service.stop,serviceCancelStart:service.cancelStart,serviceState:()=>({...state(),...service.state()}),
   dispose(){if(!closed){closed=true;ownerEpoch++;}service.dispose();if(alive){try{terminal.kill();}catch{}}return state();},

@@ -1,5 +1,6 @@
 import copy,importlib.util,json,sys,tempfile,unittest
 from pathlib import Path
+from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[3]
 def load(name,path):
  spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
@@ -28,6 +29,27 @@ class Installation(unittest.TestCase):
  def test_remote_install_needs_site_policy(self):
   cfg={"compute":{"kind":"ssh"},"bootstrap":{"enabled":True}}
   self.assertEqual(runtime.bootstrap(cfg)["status"],"blocked")
+ def test_worker_probe_version_boundary_does_not_require_optional_science_modules(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   cfg=self.config(Path(tmp))
+   for version,expected in (("3.8.99","blocked"),("3.9.0","passed"),("3.9.25","passed"),("3.10.0","passed")):
+    receipt={"python":version,"executable":sys.executable,"modules":{"numpy":{"status":"blocked"},"torch":{"status":"blocked"}},"cuda":{}}
+    with self.subTest(version=version),patch.object(runtime,"run",return_value=json.dumps(receipt)):
+     result=runtime.probe(cfg)
+     self.assertEqual(result["status"],expected)
+     self.assertEqual(result["python_check"]["status"],expected)
+     self.assertEqual(result["required_modules"],{})
+     self.assertEqual(result["observation"]["modules"],receipt["modules"])
+ def test_actual_worker_probe_uses_registered_interpreter_without_installing(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   cfg=self.config(Path(tmp));before=copy.deepcopy(cfg)
+   result=runtime.probe(cfg)
+   self.assertEqual(result["status"],"passed")
+   self.assertEqual(result["python_check"]["version"],sys.version.split()[0])
+   self.assertEqual(result["python_check"]["observed_path"],sys.executable)
+   self.assertEqual(result["required_modules"],{})
+   self.assertEqual(cfg,before)
+   self.assertFalse((Path(tmp)/"worker").exists())
  def test_real_worker_short_case_and_idempotence(self):
   with tempfile.TemporaryDirectory() as tmp:
    cfg=self.config(Path(tmp));cfg.update(_suite_root=str(ROOT),_fingerprint="fixture")

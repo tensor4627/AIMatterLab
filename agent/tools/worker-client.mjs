@@ -7,6 +7,7 @@ import {toolFailure,toolValueResult,validToolCall,validRpcRequest,validToolRespo
 export class WorkerClient extends ComputeWorkerClient{
  constructor(options={}){super({...options,providerScopes:new McpProviderScopes()});this.providerContexts=new Map();}
 setAuthoringGuard(guard){this.authoringGuard=guard;}
+setResourceUseGuard(guard){this.resourceUseGuard=guard;}
 setLocalTools(definitions,handler){this.localDefinitions=definitions;this.localHandler=handler;}
 setScopedTools(definitions,handler){this.scopedDefinitions=definitions;this.scopedHandler=handler;}
 bindProviderContext(provider,context,options={}){
@@ -39,6 +40,10 @@ async exposeTools(health){
     body=bytes?JSON.parse(Buffer.concat(chunks).toString('utf8')):undefined;
     if(body?.method==='tools/call'&&!validRpcRequest(body)){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:typeof body.id==='string'||Number.isSafeInteger(body.id)?body.id:null,error:{code:-32600,message:'Tool calls require a JSON-RPC 2.0 request with a string or integer id'}}));return;}
     if(body?.method==='tools/call'&&!validToolCall(body))throw Error('Invalid tool request: provide a tool name and an arguments object');
+    if(body?.method==='tools/call'&&scope.provider&&this.resourceUseGuard){
+     let allowed=false;try{allowed=await this.resourceUseGuard(scope.provider,scope,body.params.name)===true;}catch{}
+     if(!allowed){reject(403);return;}fresh();
+    }
     authoringToken=body?.method==='tools/call'?await this.authoringGuard?.before(body.params?.name,body.params?.arguments||{},scope.provider,scope):null;
     fresh();
     let response;
@@ -55,7 +60,7 @@ async exposeTools(health){
     fresh();
     if(body?.method==='tools/call'&&(response.status!==200||!validToolResponse(response.data,body.id)))throw Error('Tool service returned an unconfirmed response; inspect the existing workflow before continuing');
     if(body?.method==='tools/call')await this.authoringGuard?.after(authoringToken,response.data?.result);
-    if(body?.method==='tools/list'&&response.data?.result?.tools){const local=(this.localDefinitions||[]).filter(tool=>this.identity?.kind!=='ssh'||!['list_shared_terminals','read_shared_terminal','write_shared_terminal'].includes(tool.name));response.data.result.tools.push(...local,...(scope.localReaders?this.scopedDefinitions||[]:[]));if(this.authoringGuard?.filterTools)response.data.result.tools=await this.authoringGuard.filterTools(response.data.result.tools,scope.provider,scope);}
+    if(body?.method==='tools/list'&&response.data?.result?.tools){const independent=this.identity?.version===3&&typeof this.identity.connectionId==='string',local=(this.localDefinitions||[]).filter(tool=>independent||this.identity?.kind!=='ssh'||!['list_shared_terminals','read_shared_terminal','write_shared_terminal'].includes(tool.name));response.data.result.tools.push(...local,...(scope.localReaders?this.scopedDefinitions||[]:[]));if(this.authoringGuard?.filterTools)response.data.result.tools=await this.authoringGuard.filterTools(response.data.result.tools,scope.provider,scope);}
     fresh();
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
    }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){reject(403);}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched})}));}else{reject(502,{error:e.message});}}

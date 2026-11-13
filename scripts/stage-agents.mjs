@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
+import {stageDshRuntime} from './stage-dsh-runtime.mjs';
 export function stageCoreRuntimes({root=process.cwd(),platform=process.platform,arch=process.arch}={}){
 root=fs.realpathSync(root);
 if(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).name!=='gpu-sampling-studio')throw Error('Native runtime staging requires a Studio checkout');
@@ -9,8 +10,11 @@ const target=path.resolve(root,'.studio','agent-runtimes'),modules=path.join(tar
 const contained=(base,file)=>{const relative=path.relative(base,file);return relative!==''&&relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);};
 if(!contained(root,target)||path.relative(root,target)!==path.join('.studio','agent-runtimes'))throw Error('Unsafe runtime staging target');
 for(let parent=target;contained(root,parent);parent=path.dirname(parent))if(fs.existsSync(parent)&&fs.lstatSync(parent).isSymbolicLink())throw Error('Linked runtime staging target');
-// Rebuild from scratch: a previous runtime set must not leave stale packages behind.
-fs.rmSync(target,{recursive:true,force:true});
+// Rebuild the native core without recopying the independently audited DSH tree.
+// Check every owned deletion target before touching any existing output.
+const nativeTargets=['node_modules','manifest.json'].map(name=>path.join(target,name));
+for(const file of nativeTargets)if(fs.existsSync(file)&&(fs.lstatSync(file).isSymbolicLink()||!contained(target,fs.realpathSync(file))))throw Error('Linked native runtime staging target');
+for(const file of nativeTargets)fs.rmSync(file,{recursive:true,force:true});
 fs.mkdirSync(modules,{recursive:true});
 const copied=new Map();
 function stage(name,from=root){
@@ -31,8 +35,9 @@ function stage(name,from=root){
 const wrapper=stage('@lydell/node-pty');
 // pnpm keeps the native optional dependency beside its wrapper in the virtual store.
 stage('@lydell/node-pty-'+platform+'-'+arch,wrapper);
-const manifest={scope:'Native PTY only; provider CLIs are discovered locally or installed with explicit user consent',packages:Object.fromEntries(copied)};
+const manifest={scope:'This manifest audits native PTY; the pinned DSH closure has its own dsh/runtime.json. Other provider CLIs are discovered locally or installed with explicit user consent.',packages:Object.fromEntries(copied)};
 fs.writeFileSync(path.join(target,'manifest.json'),JSON.stringify(manifest,null,2));
+if(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).devDependencies?.['@deepseek-ai/dsh'])stageDshRuntime({root,platform,arch});
 return manifest;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){const manifest=stageCoreRuntimes();console.log('Staged '+Object.keys(manifest.packages).length+' native terminal runtime packages; no provider CLIs');}
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){const manifest=stageCoreRuntimes();console.log('Staged '+Object.keys(manifest.packages).length+' native terminal runtime packages'+(JSON.parse(fs.readFileSync('package.json','utf8')).devDependencies?.['@deepseek-ai/dsh']?' and the pinned DSH closure':''));}

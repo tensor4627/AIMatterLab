@@ -1,11 +1,17 @@
 ---
 name: studio-compute-workflow
-description: Configure registered local WSL or SSH compute and prepare reviewable Studio deployment plans. Keep connection setup separate from scheduler adaptation, scientific validation and authorized execution.
+description: Configure local WSL or SSH environments, help activate an existing service Python environment, establish and verify the Studio job-service connection, and prepare reviewable deployment plans. Keep service readiness separate from project authorization, scheduler adaptation and scientific validation.
 ---
 
 # Studio compute workflow
 
 Use Studio's structured tools and the user's registered environments. Keep scientific intent separate from deployment. The agent prepares and updates one workflow attached to the conversation; the user reviews the concrete workflow and clicks execute. Normal chat does not create a workflow unless the user requests planning.
+
+## Connect a local or cluster job service
+
+For requests to authenticate/connect local or cluster compute as a Studio job service, or to fix Python/Conda/service setup, read [job-service-connection.md](references/job-service-connection.md). The normal flow is **log in → 交给 Agent**. Successful interactive login automatically prepares and records the worker once, then reuses verified cached code on later logins. The human handoff grants this conversation shell and service access; it is not a setup prerequisite. Advanced environment maintenance and scheduler settings remain under the saved connection editor. Fresh SSH authentication stays human-only and is observed automatically. Follow the selected connection's saved Python/activation recipe; login, service readiness, current-conversation handoff and project execution authorization are separate facts. Do not replace a logged-in SSH session or change scientific engine registrations to prepare the service.
+
+For a ready selected job service, use `inspect_compute_resource` to identify the actual service and current grant; use `probe_scheduler: true` for a user-requested queue observation. `list_clusters` lists saved scheduler profiles, not SSH login sessions. An empty registration list does not require another login, another terminal or scientific workflow. A verified SSH connection provides independent shell and service channels: the human can use the shell while an authorized Agent uses the service. Shell and service grants are verified separately in the backend and enabled together by the normal handoff; neither grants scientific execution.
 
 ## Establish the scientific workflow
 

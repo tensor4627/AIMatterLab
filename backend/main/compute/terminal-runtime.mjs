@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {createRequire} from 'node:module';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {prepareResourcesOffThread} from './preparation-worker-client.mjs';
 export function prepareTerminalRuntimeAsync(options){return prepareResourcesOffThread('terminal',options);}
 
@@ -11,11 +13,24 @@ const schema=TERMINAL_RUNTIME_SCHEMA;
 const MAX_FILES=2048,MAX_BYTES=1024*1024*1024,MAX_FILE_BYTES=512*1024*1024;
 const supportFiles=['chrome_100_percent.pak','chrome_200_percent.pak','d3dcompiler_47.dll','dxcompiler.dll','dxil.dll','ffmpeg.dll','icudtl.dat','resources.pak','snapshot_blob.bin','v8_context_snapshot.bin','vk_swiftshader_icd.json','vk_swiftshader.dll','vulkan-1.dll','LICENSE.electron.txt','LICENSES.chromium.html','version'];
 const active=new Map(),planning=new Map();
+const execute=promisify(execFile);
+// This fixed child prints only a mandatory integrity RID, never group names,
+// account identifiers, authentication data, or its inherited environment.
+const executionProbe='const{execFileSync}=require("node:child_process");const path=require("node:path");const out=execFileSync(path.win32.join(process.env.SystemRoot||"C:\\\\Windows","System32","whoami.exe"),["/groups","/fo","csv","/nh"],{encoding:"utf8",windowsHide:true,timeout:5000,maxBuffer:262144});const ids=[...out.matchAll(/S-1-16-([0-9]+)/g)];if(ids.length!==1)process.exit(2);process.stdout.write(JSON.stringify({schemaVersion:1,integrityRid:Number(ids[0][1])}));';
 const fail=code=>{throw Error(code);};
 const samePath=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const absolute=value=>typeof value==='string'&&path.isAbsolute(value)&&!/[\0\r\n]/.test(value);
 const inside=(root,file)=>{const relative=path.relative(root,file);return relative!==''&&relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);};
 const signature=stat=>[stat.dev,stat.ino,stat.size,stat.mtimeMs,stat.ctimeMs].join(':');
+
+/** Observe the actual executable token; content hashes do not include Windows MIC labels. */
+export async function probeWindowsTerminalRuntimeExecution(executable,{run=execute,env=process.env}={}){
+ const childEnv=Object.fromEntries(['SystemRoot','WINDIR','ComSpec','PATH','PATHEXT','TEMP','TMP','USERPROFILE'].filter(key=>typeof env[key]==='string').map(key=>[key,env[key]]));
+ let value;try{const result=await run(executable,['-e',executionProbe],{windowsHide:true,encoding:'utf8',timeout:10000,maxBuffer:4096,env:{...childEnv,ELECTRON_RUN_AS_NODE:'1'}});value=JSON.parse(result.stdout);}catch{fail('terminal_runtime_execution_unavailable');}
+ if(value?.schemaVersion!==1||!Number.isSafeInteger(value.integrityRid)||value.integrityRid<0||value.integrityRid>16384)fail('terminal_runtime_execution_unavailable');
+ if(value.integrityRid<8192)fail('terminal_runtime_low_integrity');
+ return {integrity:'medium_or_higher'};
+}
 
 function unlinked(file,directory=false){
  for(let current=path.resolve(file);;current=path.dirname(current)){
@@ -82,6 +97,8 @@ async function sourcePlan({nodeExecutable,servicePath,dependencyRoot,platform,ar
  for(const name of supportFiles){const file=path.join(binaryRoot,name);if(fs.existsSync(file))await add(file,'node/'+name);}
  for(const name of ['broker.mjs','session.mjs'])await add(path.join(path.dirname(servicePath),name),'service/'+name);
  const codec=path.join(path.dirname(servicePath),'response-codec.mjs');if(fs.existsSync(codec))await add(codec,'service/response-codec.mjs');
+ const launcher=path.join(path.dirname(servicePath),'service-launch.mjs');if(fs.existsSync(launcher))await add(launcher,'service/service-launch.mjs');
+ for(const name of ['ssh-connection.mjs','ssh-multiplex-helper.py']){const file=path.join(path.dirname(servicePath),name);if(fs.existsSync(file))await add(file,'service/'+name);}
  const resolver=createRequire(path.join(dependencyRoot,'runtime.cjs'));
  const wrapperEntry=resolver.resolve('@lydell/node-pty'),wrapper=packageRoot(wrapperEntry,'@lydell/node-pty',dependencyRoot);
  const nativeName='@lydell/node-pty-'+platform+'-'+arch;
@@ -127,7 +144,7 @@ export function prepareTerminalRuntime(options){
  const key=JSON.stringify(options);if(planning.has(key))return planning.get(key);
  const promise=prepareTerminalRuntimeOnce(options);planning.set(key,promise);promise.finally(()=>{if(planning.get(key)===promise)planning.delete(key);}).catch(()=>{});return promise;
 }
-async function prepareTerminalRuntimeOnce({runtimeRoot,nodeExecutable,servicePath,dependencyRoot,platform=process.platform,arch=process.arch}){
+async function prepareTerminalRuntimeOnce({runtimeRoot,nodeExecutable,servicePath,dependencyRoot,platform=process.platform,arch=process.arch,probeExecution=probeWindowsTerminalRuntimeExecution}){
  if(![runtimeRoot,nodeExecutable,servicePath,dependencyRoot].every(absolute))fail('terminal_runtime_invalid_source');
  const options={runtimeRoot:path.resolve(runtimeRoot),nodeExecutable:path.resolve(nodeExecutable),servicePath:path.resolve(servicePath),dependencyRoot:path.resolve(dependencyRoot),platform,arch};
  for(let current=options.runtimeRoot;;current=path.dirname(current)){
@@ -135,11 +152,13 @@ async function prepareTerminalRuntimeOnce({runtimeRoot,nodeExecutable,servicePat
   if(path.dirname(current)===current)fail('terminal_runtime_invalid_source');
  }
  const plan=await sourcePlan(options),key=options.runtimeRoot+'|'+plan.id;
+ if(typeof probeExecution!=='function')fail('terminal_runtime_invalid_source');
+ await probeExecution(options.nodeExecutable);
  if(active.has(key))return active.get(key);
  const promise=(async()=>{
   await fs.promises.mkdir(options.runtimeRoot,{recursive:true,mode:0o700});unlinked(options.runtimeRoot,true);
   const directory=path.join(options.runtimeRoot,plan.id);
-  if(fs.existsSync(directory)){await verify(directory,plan.receipt,plan.id);return result(directory,plan);}
+  if(fs.existsSync(directory)){await verify(directory,plan.receipt,plan.id);await probeExecution(path.join(directory,plan.receipt.executable));return result(directory,plan);}
   const temporary=path.join(options.runtimeRoot,'staging-'+randomUUID());
   await fs.promises.mkdir(temporary,{mode:0o700});
   try{
@@ -151,7 +170,8 @@ async function prepareTerminalRuntimeOnce({runtimeRoot,nodeExecutable,servicePat
    const after=await sourcePlan(options);if(after.id!==plan.id)fail('terminal_runtime_source_changed');
    await fs.promises.writeFile(path.join(temporary,'runtime.json'),JSON.stringify({id:plan.id,receipt:plan.receipt}),{flag:'wx',mode:0o600});
    await verify(temporary,plan.receipt,plan.id);
-   try{await fs.promises.rename(temporary,directory);}catch(error){if(!['EEXIST','ENOTEMPTY','EPERM'].includes(error.code)||!fs.existsSync(directory))throw error;await verify(directory,plan.receipt,plan.id);}
+   await probeExecution(path.join(temporary,plan.receipt.executable));
+   try{await fs.promises.rename(temporary,directory);}catch(error){if(!['EEXIST','ENOTEMPTY','EPERM'].includes(error.code)||!fs.existsSync(directory))throw error;await verify(directory,plan.receipt,plan.id);await probeExecution(path.join(directory,plan.receipt.executable));}
    return result(directory,plan);
   }finally{
    // Only this call's fresh staging directory is disposable. Published runtimes

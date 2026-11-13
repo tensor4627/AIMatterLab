@@ -6,7 +6,7 @@ _n=sys.argv[1]
 if not re.fullmatch('[a-f0-9]{64}',_n):raise SystemExit(2)
 _p='__STUDIO_SERVICE_V1__:'+_n+':'
 _old=None;_phase='waiting_python'
-_codes=set('python_unsupported sqlite_unavailable tty_unavailable invalid_hello protocol_failed transport_hash_mismatch transport_cache_invalid worker_hash_mismatch worker_cache_invalid namespace_unsafe permission_denied storage_unavailable worker_start_timeout worker_start_failed worker_identity_unavailable worker_health_invalid service_request_unconfirmed internal_error'.split())
+_codes=set('maintenance_required python_unsupported sqlite_unavailable tty_unavailable invalid_hello protocol_failed transport_hash_mismatch transport_cache_invalid worker_hash_mismatch worker_cache_invalid namespace_unsafe permission_denied storage_unavailable worker_start_timeout worker_start_failed worker_identity_unavailable worker_health_invalid service_request_unconfirmed internal_error'.split())
 _phases=set('waiting_python checking_cache transferring_transport transferring_worker preparing_runtime starting_worker checking_health request'.split())
 class Failure(Exception):
  def __init__(self,code,phase=None):self.code=code;self.phase=phase or _phase
@@ -50,13 +50,13 @@ def main():
    _old=termios.tcgetattr(0);tty.setraw(0)
    sys.stdout.write('\x1b[2J\x1b[3J\x1b[H');sys.stdout.flush()
   except Exception:raise Failure('tty_unavailable')
- if sys.version_info<(3,10):raise Failure('python_unsupported')
+ if sys.version_info<(3,9):raise Failure('python_unsupported')
  try:import sqlite3
  except ImportError:raise Failure('sqlite_unavailable')
  send('BOOTSTRAP_READY','-',{'protocol':2,'python':list(sys.version_info[:3]),'sqlite':[int(x) for x in sqlite3.sqlite_version.split('.')[:3]],'capabilities':{'responseEncodings':['gzip-fragments-v1'],'uploadChunkBytes':[2048,4096,8192],'workerEncodings':['gzip-files-v1']}})
  k,i,h=read()
  fields=set('schema_version profile_id port expected_runtime_id worker_manifest_sha256 transport_sha256 transport_size worker_gzip_size worker_gzip_sha256 worker_size worker_sha256'.split())
- if k!='HELLO' or i!='-' or not fields<=set(h) or set(h)-fields-{'response_encoding','upload_chunk_bytes','worker_encoding'} or h['schema_version']!=2 or not isinstance(h['profile_id'],str) or not re.fullmatch('[A-Za-z0-9_-]{1,100}',h['profile_id']) or type(h['port']) is not int or not 1024<=h['port']<=65535:raise Failure('invalid_hello')
+ if k!='HELLO' or i!='-' or not fields<=set(h) or set(h)-fields-{'response_encoding','upload_chunk_bytes','worker_encoding','reuse_only','start_cached'} or h.get('reuse_only',False) not in (True,False) or type(h.get('reuse_only',False)) is not bool or type(h.get('start_cached',False)) is not bool or h.get('start_cached',False) and not h.get('reuse_only',False) or h['schema_version']!=2 or not isinstance(h['profile_id'],str) or not re.fullmatch('[A-Za-z0-9_-]{1,100}',h['profile_id']) or type(h['port']) is not int or not 1024<=h['port']<=65535:raise Failure('invalid_hello')
  for key in ['worker_manifest_sha256','transport_sha256','worker_gzip_sha256','worker_sha256']:
   if not isinstance(h[key],str) or not re.fullmatch('[a-f0-9]{64}',h[key]):raise Failure('invalid_hello')
  if h['expected_runtime_id']!=h['worker_manifest_sha256'][:20]:raise Failure('invalid_hello')

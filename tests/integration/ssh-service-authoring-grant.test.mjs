@@ -1,0 +1,79 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import ts from 'typescript';
+import {WorkerClient} from '../../agent/tools/worker-client.mjs';
+import {createSshService} from '../../backend/main/compute/ssh-service.mjs';
+import {TaskRecords} from '../../agent/sessions/task-records.mjs';
+import {registerWorkspaceTaskRoutes} from '../../backend/main/workspace/routes.mjs';
+import {ensureTaskAuthoring} from '../../backend/main/workspace/task-authoring.mjs';
+import {createAgentWorkflowContext} from '../../agent/sessions/workflow-context.mjs';
+import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
+import {createAgentRequests} from '../../agent/sessions/requests.mjs';
+import {stableSshWorkerBinding} from '../../contracts/compute/task-worker-binding.mjs';
+
+// Real main authoring ports, service/controller ownership and loopback MCP; all
+// worker receipts and provider acknowledgements are inert local fixtures.
+const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'utf8'),tree=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true);
+function mainPorts(ports){let authorization,guard;function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(tree)==='authoringAuthorization')authorization=node.initializer.getText(tree);if(ts.isCallExpression(node)&&ts.isPropertyAccessExpression(node.expression)&&node.expression.name.text==='setResourceUseGuard')guard=node.arguments[0].getText(tree);ts.forEachChild(node,visit);}visit(tree);assert(authorization&&guard);const compile=value=>new Function(...Object.keys(ports),'return ('+value+');')(...Object.values(ports));return {authorization:compile(authorization),guard:compile(guard)};}
+const deferred=()=>{let resolve;const promise=new Promise(yes=>resolve=yes);return {promise,resolve};};
+const health={name:'gpu-sampling-studio',root:'/inert/service',runtime:'/inert/runtime/'+'a'.repeat(20),runtimeId:'a'.repeat(20),port:23456,execution_policy:'desktop-review-v1',hostIdentity:{hostname:'fixture',uid:1000,machineId:'fixture'}};
+async function fixture(t,{provider='deepseek'}={}){
+ const values=new Map(),catalog={get:(kind,id)=>structuredClone(values.get(kind+':'+id)),put:(kind,id,value)=>{values.set(kind+':'+id,structuredClone(value));return value;},list:kind=>[...values].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>structuredClone(value))},records=new TaskRecords(catalog,()=>{}),activeTasks=new Map(),workflow=createAgentWorkflowContext({records,activeTasks,selectedProvider:()=>provider}),worker=new WorkerClient(),selection={schemaVersion:2,kind:'ssh-connection',connectionId:'connection',selectionId:'selection',profileId:'profile',profileVersion:1};
+ let generation=1,service,gate,project='project',environment='environment',inputRoot='/inert/project/inputs',localCalls=0,turns=0,definitionOnly=false;const dispatched=[];
+ const computeResource={peek:()=>selection,capture:()=>({generation,selection:structuredClone(selection)}),assertCurrent:value=>assert.equal(value.generation,generation),status:async()=>({...selection,status:'selected',connectionStatus:'authenticated',authentication:'verified',agentReady:service.hasCurrentGrant(provider),operator:service.peek().operator})};
+ const serviceView={connectionId:'connection',profileId:'profile',profileVersion:1,attemptId:'attempt',status:'connected',serviceId:'service',serviceActive:true,service:health},connections={state:async()=>({schemaVersion:2,connectionId:'connection',profileId:'profile',profileVersion:1,status:'authenticated',authentication:'verified'}),openService:async()=>structuredClone(serviceView),serviceState:async()=>structuredClone(serviceView),closeService:async()=>({...serviceView,status:'disconnected',serviceActive:false}),serviceRequest:async packet=>{
+  if(packet.target==='/api/health')return {status:200,data:health};
+  if(packet.target==='/api/authoring/context'){if(gate){const held=gate;gate=null;held.entered.resolve();await held.release.promise;}return {status:200,data:{project:{id:project,authoring_only:true},environment_id:environment,input_root:inputRoot,imports:[]}};}
+  if(packet.target==='/api/studio-workspace/read')return {status:200,data:{id:project,root:inputRoot,assets:[],directories:{},asset_mode:'copy'}};
+  return {status:200,data:{jsonrpc:'2.0',id:packet.data?.id,result:{tools:[{name:'present_task',inputSchema:{type:'object'}}]}}};
+ }};
+ records.remember({provider,threadId:'thread',projectId:null});workflow.begin(provider,'thread');
+ service=createSshService({worker,connections,profiles:{read:()=>({kind:'ssh',id:'profile',version:1})},resource:computeResource,current:()=>workflow.current(),source:'/inert/source',transportSource:'/inert/transport',prepareResources:()=>({transport:{source:'inert'},payload:{expected_runtime_id:health.runtimeId}})});
+ await service.connect({connectionId:'connection',profileId:'profile',profileVersion:1,requestId:'attempt'});const ports=mainPorts({computeResource,sshService:service,worker,connections,sharedTerminal:{connections,hasCurrentGrant:()=>false}});worker.setResourceUseGuard(ports.guard);worker.setLocalTools([{name:'fixture_read'}],async()=>{localCalls++;return {fixture:true};});
+ const sync=()=>workflow.synchronize({provider,serial:workflow.revision()},(p,context)=>worker.bindProviderContext(p,context));await sync();
+ const grant=()=>service.owner({connectionId:'connection',attemptId:'attempt',owner:'agent',scope:workflow.current()});grant();const handlers=new Map(),agents={active:provider,bridgeWorkers:new Map(),threadReady:()=>true,selectContext:async(p,context)=>worker.bindProviderContext(p,context),rpc:async(p,method,params)=>{routing.scope(p,method).assertCurrent();assert.equal(method,'turn/start');turns++;dispatched.push(structuredClone(params));return {turn:{id:'synthetic-ack'}};}};
+ registerWorkspaceTaskRoutes({handle:(name,handler)=>handlers.set(name,handler),records,catalog,worker,workflowContext:workflow,agents,assertIdle(){},authoringAuthorization:ports.authorization});
+ const createTask=(extra={})=>handlers.get('task.create')({provider,threadId:'thread',request:'Synthetic first workflow',planningMode:true,workflowVersion:2,...extra});
+ const routing=createAgentResourceRouting({worker,terminal:()=>null,sharedTerminal:()=>null,resource:()=>computeResource,service:()=>service,agents:()=>agents});
+ const scientificSkills={router:{routes:new Map()},context:{prepare:async()=>({status:'passed',guidanceKind:'fixture',routes:[]}),accept(){}},resolvePolicy:async()=>({}),sourcesForPolicy:()=>[],clearManagedSelection(){}};
+ const rpc=createAgentRequests({runtime:()=>({agents,catalog,taskRecords:records,workflowContext:workflow,privateAccess:{assertTask:async()=>({definitionOnly})},worker,sharedTerminal:{},resourceRouting:routing,authoringAuthorization:ports.authorization,scientificSkills,setupInstructions:{clear(){}},studioSkillRoots:()=>[],managedSkillRoots:()=>[],managedSkillEntries:()=>[],managedSkillRecords:()=>[],skillGuidanceScope:()=>({}),assertIdleAgent(){},emit(){},root:process.cwd(),app:{isPackaged:false}})});
+ const call=async(connection=worker.providerConnection(provider))=>{const response=await fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'fixture_read',arguments:{}}})});await response.text();return response.status;};
+ t.after(()=>worker.close());
+ return {provider,worker,service,records,workflow,computeResource,routing,dispatched,authorization:ports.authorization,createTask,handlers,rpc,sync,grant,call,counts:()=>({localCalls,turns}),delayAuthoring:()=>{const held={entered:deferred(),release:deferred()};gate=held;return {entered:held.entered.promise,release:()=>held.release.resolve()};},changeResource:()=>generation++,setProject:value=>{project=value;},setEnvironment:value=>{environment=value;},setInputRoot:value=>{inputRoot=value;},setDefinitionOnly:value=>{definitionOnly=value;}};
+}
+for(const provider of ['deepseek','codex'])test(provider+' first human task and trusted authoring fill migrate the exact grant and rotate both old caller leases',async t=>{
+ const f=await fixture(t,{provider}),chatLease=f.worker.providerConnection(provider);assert.equal(await f.call(chatLease),200);const task=f.createTask();assert.equal(f.service.hasCurrentGrant(provider),true);assert.equal(f.workflow.current().taskId,task.id);assert.equal(await f.call(chatLease),403);await f.sync();const taskLease=f.worker.providerConnection(provider);assert.equal(await f.call(taskLease),200);
+ await ensureTaskAuthoring(f.records,f.worker,{provider,threadId:'thread',authorization:f.authorization});assert.equal(f.service.hasCurrentGrant(provider),true);assert.equal(f.workflow.current().projectId,'project');assert.equal(f.workflow.current().environmentId,'environment');assert.equal(await f.call(taskLease),403);await f.sync();assert.equal(await f.call(),200);assert.equal(f.service.peek().operator,'agent');
+});
+for(const provider of ['deepseek','codex'])test(provider+' actual turn preparation retains its first authoring grant without invoking a model',async t=>{
+ const f=await fixture(t,{provider});f.createTask();const input={provider,method:'turn/start',params:{threadId:'thread',input:[{type:'text',text:'Inspect the permitted fixture service'}]}},result=await f.rpc(input);assert.equal(result.turn.id,'synthetic-ack');assert.equal(f.service.hasCurrentGrant(provider),true);const current=f.worker.providerConnection(provider);assert.equal(await f.call(current),200);await f.rpc(input);assert.equal(f.counts().turns,2);assert.equal(f.service.hasCurrentGrant(provider),true);assert.equal(await f.call(current),200,'an unchanged second turn does not revoke the new authoring lease');
+});
+test('reclaim during first authoring never regains service use and invalidates both old and fresh callers',async t=>{
+ const f=await fixture(t);f.createTask();await f.sync();const old=f.worker.providerConnection(f.provider),gate=f.delayAuthoring(),pending=ensureTaskAuthoring(f.records,f.worker,{provider:f.provider,threadId:'thread',authorization:f.authorization});await gate.entered;f.service.owner({connectionId:'connection',attemptId:'attempt',owner:'human'});gate.release();await pending;assert.equal(f.service.hasCurrentGrant(f.provider),false);assert.equal(await f.call(old),403);await f.sync();assert.equal(await f.call(),403);
+});
+test('a new grant or another selection revision makes an outstanding first-fill ticket unusable',async t=>{
+ for(const change of ['grant','revision','resource','source']){
+  const f=await fixture(t);const task=f.createTask(),old=f.worker.providerConnection(f.provider),ticket=f.authorization.begin(task);assert(ticket);
+  if(change==='grant')f.grant();if(change==='revision')f.workflow.begin(f.provider,'thread');if(change==='resource')f.changeResource();if(change==='source')f.worker.identity={...f.worker.identity,root:'/other/service'};
+  const updated=f.records.read(task.id);updated.projectId='project';updated.authoring={projectId:'project',environmentId:'environment',inputRoot:'/inert/project/inputs'};f.records.save(updated);assert.equal(f.authorization.commit(ticket,updated),false,change);assert.equal(f.service.hasCurrentGrant(f.provider),false,change);assert.equal(await f.call(old),403,change);await f.sync();assert.equal(await f.call(),403,change);
+ }
+});
+test('old authoring completion cannot revoke or overwrite a newer explicit grant for another conversation',async t=>{
+ const f=await fixture(t),task=f.createTask(),ticket=f.authorization.begin(task);f.records.remember({provider:f.provider,threadId:'other-thread',projectId:null});f.workflow.begin(f.provider,'other-thread');await f.sync();f.grant();const newer=f.worker.providerConnection(f.provider);assert.equal(f.authorization.commit(ticket,task),false);assert.equal(f.service.hasCurrentGrant(f.provider),true);assert.equal(await f.call(newer),200);
+});
+for(const field of ['taskId','projectId','environmentId','inputRoot'])test('an existing '+field+' cannot be retargeted through a first-fill ticket',async t=>{
+ const f=await fixture(t);let task=f.createTask();if(field==='taskId'){const ticket=f.authorization.begin(task);task=f.createTask({newWorkflow:true});assert.equal(f.authorization.commit(ticket,task),false);}else{task=f.records.read(task.id);task.authoring={...(field==='projectId'?{projectId:'original-project'}:field==='environmentId'?{environmentId:'original-environment'}:{inputRoot:'/original/input'}),workerBinding:stableSshWorkerBinding(f.worker.identity)};f.records.save(task);await f.sync();f.grant();const ticket=f.authorization.begin(task);assert(ticket);task=f.records.read(task.id);task.authoring={projectId:'project',environmentId:'environment',inputRoot:'/inert/project/inputs',workerBinding:stableSshWorkerBinding(f.worker.identity)};task.projectId='project';f.records.save(task);assert.equal(f.authorization.commit(ticket,task),false);}assert.equal(f.service.hasCurrentGrant(f.provider),false);await f.sync();assert.equal(await f.call(),403);
+});
+test('first workspace selection uses the same trusted transaction before refreshing conversation context',async t=>{
+ const f=await fixture(t),task=f.createTask(),old=f.worker.providerConnection(f.provider);await f.handlers.get('workspace.select')({taskId:task.id,workspaceId:'project'});assert.equal(f.service.hasCurrentGrant(f.provider),true);assert.equal(f.workflow.current().environmentId,'environment');assert.equal(await f.call(old),403);await f.sync();assert.equal(await f.call(),200);
+});
+test('unrelated task creation and a forged authoring caller cannot revoke the current conversation grant',async t=>{
+ const f=await fixture(t),original=f.worker.providerConnection(f.provider);f.handlers.get('task.create')({provider:f.provider,request:'Detached fixture task',planningMode:true,workflowVersion:2});assert.equal(f.service.hasCurrentGrant(f.provider),true);assert.equal(await f.call(original),200);
+ const task=f.createTask();await f.sync();const current=f.worker.providerConnection(f.provider);await assert.rejects(ensureTaskAuthoring(f.records,f.worker,{provider:'codex',threadId:'thread',taskId:task.id,authorization:f.authorization}),/Invalid authoring conversation/);assert.equal(f.service.hasCurrentGrant(f.provider),true);assert.equal(await f.call(current),200);
+});
+test('a real requests definition-only turn does not append broader service inspection guidance',async t=>{
+ const f=await fixture(t,{provider:'codex'}),created=f.createTask();await ensureTaskAuthoring(f.records,f.worker,{provider:f.provider,threadId:'thread',authorization:f.authorization});await f.sync();const task=f.records.read(created.id);task.customCv={id:'private-entry',specSha:'a'.repeat(64),parametersSha:'b'.repeat(64),codeSha:null,revision:'c'.repeat(32)};task.privateDefinitionContext={provider:'codex',threadId:'thread',taskId:task.id,entryId:task.customCv.id,specSha:task.customCv.specSha,parametersSha:task.customCv.parametersSha,codeSha:null};f.records.save(task);f.setDefinitionOnly(true);let inspections=0;f.routing.turnContext=()=>{inspections++;return '[Fixture service facts] inspect_compute_resource';};
+ await f.rpc({provider:f.provider,method:'turn/start',params:{threadId:'thread',input:[{type:'text',text:'Discuss only the current private definition'}]}});assert.equal(inspections,0);assert.equal(f.dispatched.length,1);assert(!JSON.stringify(f.dispatched[0]).includes('inspect_compute_resource'));assert.equal(f.service.hasCurrentGrant(f.provider),true);
+});
+

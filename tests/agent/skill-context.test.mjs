@@ -28,11 +28,11 @@ function args(f,selection,extras={}){
 function overlay(f){return localizeSkill({repoRoot:f.root,profile:profile()}).directory;}
 function mutateJson(file,fn){const value=JSON.parse(fs.readFileSync(file,'utf8'));fn(value);fs.writeFileSync(file,JSON.stringify(value));}
 
-test('Public Studio skill expands only its linked bounded references, with exact registration identity',async()=>{
+test('Public Studio skill discloses its entry and names supporting documents without reading their bodies',async()=>{
  const f=fixture();try{
   const result=await selectedSkillContext(args(f));
-  assert.equal(result.attachments.length,6);assert(result.attachments.some(a=>a.label.endsWith('scientific-gates.md')));assert(result.attachments.some(a=>a.label.endsWith('compute-profile.schema.json')));assert(result.attachments.some(a=>a.label.endsWith('reconcile.md')));
-  assert(result.text.includes('Scientific gates for a short sampling test'));assert(result.text.includes('Private Studio compute overlay input'));assert.equal(result.totalBytes,Buffer.byteLength(result.text));
+  assert.equal(result.attachments.length,1);assert(result.document_ids.some(id=>id.endsWith('scientific-gates.md')));assert(result.document_ids.some(id=>id.endsWith('profile-format.md')));assert(!result.document_ids.some(id=>id.endsWith('compute-profile.schema.json')));assert(!result.document_ids.some(id=>id.endsWith('reconcile.md')));
+  assert(!result.text.includes('Scientific gates for a short sampling test'));assert(!result.text.includes('Private Studio compute overlay input'));assert.equal(result.totalBytes,Buffer.byteLength(result.text));
   const a=args(f);await assert.rejects(selectedSkillContext({...a,selection:{...a.selection,name:'other-name'}}),e=>e.code==='unregistered_selection');
   await assert.rejects(selectedSkillContext({...a,selection:{...a.selection,path:path.join(f.root,'not-registered','SKILL.md')}}),e=>e.code==='unregistered_selection');
  }finally{f.cleanup();}
@@ -42,15 +42,20 @@ test('Generated source overlay attaches exact public parent and validated privat
  const f=fixture();try{
   const privateRoot=overlay(f),selection=localSkills([privateRoot])[0];
   const result=await selectedSkillContext(args(f,selection,{privateRoot}));
-  assert.equal(result.attachments.length,9);assert.equal(result.attachments.filter(a=>a.kind==='private-data').length,2);
+  assert.equal(result.attachments.length,4);assert.equal(result.attachments.filter(a=>a.kind==='private-data').length,2);
   assert(result.text.includes('<studio-local-data>'));assert(result.text.includes('"connection_ref": "selected-connection"'));assert(result.text.includes('"gpu-sampling"'));
-  assert(result.text.includes('Scientific gates for a short sampling test'));assert(result.text.includes('"validation_status": "not_run"'));
+  assert(!result.text.includes('Scientific gates for a short sampling test'));assert(result.text.includes('"validation_status": "not_run"'));
   assert(!JSON.stringify(result.attachments).includes(f.root));
  }finally{f.cleanup();}
 });
 
 test('Existing overlays retain their exact legacy parent and the one recorded CRLF-to-LF provenance migration',async()=>{
  const f=fixture();try{
+  // The migration grants exactly one historical byte transformation, not every
+  // later guide revision. Keep the historical fixture independent of today's guide.
+  const historical=fs.readFileSync(path.join(cwd,'tests/fixtures/compute-workflow-provenance-legacy.txt'));
+  assert.equal(createHash('sha256').update(historical).digest('hex'),'92feaf0c35fcbddd2599bbe449a999b07ff11eabb26ddb01fa94475bb9c4e1a5');
+  fs.writeFileSync(path.join(f.bundle,'studio-compute-workflow','SKILL.md'),historical);
   const privateRoot=overlay(f),entry=path.join(privateRoot,'SKILL.md'),provenance=path.join(privateRoot,'provenance.json'),selection=localSkills([privateRoot])[0];
   const parent=path.join(f.bundle,'studio-compute-workflow','SKILL.md'),body=fs.readFileSync(parent,'utf8');
   assert(!body.includes('\r'));const oldHash=createHash('sha256').update(body.replaceAll('\n','\r\n')).digest('hex');
@@ -59,7 +64,7 @@ test('Existing overlays retain their exact legacy parent and the one recorded CR
   await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),error=>error.code==='invalid_or_stale_provenance');
   fs.writeFileSync(entry,fs.readFileSync(entry,'utf8').replaceAll('../../../agent/builtin-skills/','../../../agents/skills/'));
   assert(!fs.existsSync(path.join(f.root,'agents','skills')));
-  const result=await selectedSkillContext(args(f,selection,{privateRoot}));assert.equal(result.attachments.length,9);assert(result.text.includes(oldHash));
+  const result=await selectedSkillContext(args(f,selection,{privateRoot}));assert.equal(result.attachments.length,4);assert(result.text.includes(oldHash));
   assert.equal(JSON.parse(fs.readFileSync(provenance,'utf8')).portable_skill_sha256,oldHash,'private provenance is not rewritten');
   fs.appendFileSync(parent,'\nChanged actual guide.\n');
   await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),error=>error.code==='invalid_or_stale_provenance');
@@ -75,8 +80,8 @@ test('Packaged physical layout resolves logical generated parent to exact regist
   const tool=path.join(resources,'studio-tools','localize-skill.mjs');fs.mkdirSync(path.dirname(tool));fs.copyFileSync(path.join(cwd,'scripts','localize-skill.mjs'),tool);
   const selected=localSkills([privateRoot])[0];let imports=0;
   const result=await selectedSkillContext(args({...f,bundle},selected,{privateRoot,validatePrivateProfile:async value=>{imports++;return (await import(pathToFileURL(tool).href)).validateProfile(value);}}));
-  assert.equal(imports,1);assert.equal(result.attachments.length,9);assert(result.text.includes('"connection_ref": "selected-connection"'));
-  assert(result.attachments.some(a=>a.label.endsWith('scientific-gates.md')));
+  assert.equal(imports,1);assert.equal(result.attachments.length,4);assert(result.text.includes('"connection_ref": "selected-connection"'));
+  assert(result.document_ids.some(id=>id.endsWith('scientific-gates.md')));
  }finally{f.cleanup();}
 });
 
@@ -109,12 +114,13 @@ test('Private JSON cannot close its data delimiter or turn a metadata field into
  }finally{f.cleanup();}
 });
 
-test('Missing public references or private attachments fail truthfully without an entry-only fallback',async()=>{
+test('Unrequested public references are not opened while required private metadata remains mandatory',async()=>{
  for(const missing of ['reference','profile','provenance']){
   const f=fixture();try{
    const privateRoot=overlay(f),selection=localSkills([privateRoot])[0];
    fs.unlinkSync(missing==='reference'?path.join(f.bundle,'studio-compute-workflow','references','scientific-gates.md'):path.join(privateRoot,missing+'.json'));
-   await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),e=>e.code==='attachment_missing');
+   if(missing==='reference')assert.equal((await selectedSkillContext(args(f,selection,{privateRoot}))).attachments.length,4);
+   else await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),e=>e.code==='attachment_missing');
   }finally{f.cleanup();}
  }
 });
@@ -128,16 +134,16 @@ test('Unregistered or arbitrary parent references cannot escape the known bundle
  }finally{f.cleanup();}
 });
 
-test('Symlinked public references and private metadata fail before leaking outside data',async()=>{
+test('Unrequested linked references stay unread and linked private metadata remains rejected',async()=>{
  const f=fixture();try{
   const secret=path.join(f.root,'outside-secret');fs.writeFileSync(secret,'OUTSIDE_SECRET_MUST_NOT_APPEAR');
   const publicReference=path.join(f.bundle,'studio-compute-workflow','references','scientific-gates.md');fs.unlinkSync(publicReference);
   if(process.platform==='win32'){
    // Directory junctions exercise the same realpath boundary without symlink privilege.
    const refDir=path.dirname(publicReference),moved=refDir+'-original',outside=path.join(f.root,'outside-references');fs.renameSync(refDir,moved);fs.cpSync(moved,outside,{recursive:true});fs.writeFileSync(path.join(outside,'scientific-gates.md'),'OUTSIDE_SECRET_MUST_NOT_APPEAR');fs.symlinkSync(outside,refDir,'junction');
-   await assert.rejects(selectedSkillContext(args(f)),e=>e.code==='linked_attachment');fs.unlinkSync(refDir);fs.renameSync(moved,refDir);
+   const result=await selectedSkillContext(args(f));assert.equal(result.attachments.length,1);assert(!result.text.includes('OUTSIDE_SECRET_MUST_NOT_APPEAR'));fs.unlinkSync(refDir);fs.renameSync(moved,refDir);
   }else{
-   fs.symlinkSync(secret,publicReference);await assert.rejects(selectedSkillContext(args(f)),e=>e.code==='linked_attachment');fs.unlinkSync(publicReference);
+   fs.symlinkSync(secret,publicReference);const result=await selectedSkillContext(args(f));assert.equal(result.attachments.length,1);assert(!result.text.includes('OUTSIDE_SECRET_MUST_NOT_APPEAR'));fs.unlinkSync(publicReference);
   }
   fs.copyFileSync(path.join(cwd,'agent','builtin-skills','studio-compute-workflow','references','scientific-gates.md'),publicReference);
   const privateRoot=overlay(f),selection=localSkills([privateRoot])[0],file=path.join(privateRoot,'profile.json');
@@ -158,9 +164,11 @@ test('Public traversal references are rejected even if their destination is anot
 
 test('Context enforces per-file, aggregate and file-count caps before sending a provider payload',async()=>{
  const f=fixture();try{
-  for(const limits of [{maxFiles:1},{maxFileBytes:10},{maxTotalBytes:200}])await assert.rejects(selectedSkillContext(args(f,undefined,{limits})),e=>['context_file_limit','context_byte_limit'].includes(e.code));
+  assert.equal((await selectedSkillContext(args(f,undefined,{limits:{maxFiles:1}}))).attachments.length,1);
+  for(const limits of [{maxFileBytes:10},{maxTotalBytes:200}])await assert.rejects(selectedSkillContext(args(f,undefined,{limits})),e=>['context_file_limit','context_byte_limit'].includes(e.code));
+  const privateRoot=overlay(f);await assert.rejects(selectedSkillContext(args(f,localSkills([privateRoot])[0],{privateRoot,limits:{maxFiles:3}})),e=>e.code==='context_file_limit');
   const file=path.join(f.bundle,'studio-compute-workflow','references','scientific-gates.md');fs.writeFileSync(file,'x'.repeat(256*1024+1));
-  await assert.rejects(selectedSkillContext(args(f)),e=>e.code==='context_byte_limit');
+  assert.equal((await selectedSkillContext(args(f))).attachments.length,1);
  }finally{f.cleanup();}
 });
 

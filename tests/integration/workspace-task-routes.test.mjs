@@ -17,7 +17,7 @@ function mainRoutes({records,catalog,worker,workflowContext={current:()=>({})},a
   visit(parsed);assert.equal(declarations.length,2);assert.equal(registrations.length,1);
   const nativeWindow=id=>({isDestroyed:()=>false,webContents:{id,isDestroyed:()=>false,getURL:()=> 'file:///studio/index.html'}});
   const context={
-    registerWorkspaceTaskRoutes,taskRecords:records,catalog,worker,workflowContext,agents,dialog,
+    registerWorkspaceTaskRoutes,taskRecords:records,catalog,worker,workflowContext,agents,dialog,authoringAuthorization:null,
     ipcMain:{handle:(name,handler)=>{assert(!handlers.has(name),'Duplicate route '+name);handlers.set(name,handler);}},
     window:nativeWindow(7),shuttingDown:false,settings:{distribution:'Global',workerRoot:'/global',workerPort:9999},
     localReview:undefined,assertIdleAgent:()=>{},emit:()=>{},

@@ -55,7 +55,7 @@ test('manual archived entries, recursive references and source receipts are deni
  f.facts.archivedResources.push({id:'reference',role:'configuration',paths:[reference]});const policy=createReadPolicy(f.facts),trap=archivedTrap(f.facts.archivedResources.flatMap(resource=>resource.paths));
  try{
   await assert.rejects(selectedSkillContext({selection:{path:path.join(f.delivery,'SKILL.md'),name:'delivery'},registered:[{path:path.join(f.delivery,'SKILL.md'),name:'delivery'}],registeredRoots:[f.delivery],bundledRoot:bundle,policy}),/archived/);
-  await assert.rejects(selectedSkillContext({selection:{path:entry,name:'studio-compute-workflow'},registered:[{path:entry,name:'studio-compute-workflow'}],registeredRoots:[bundle],bundledRoot:bundle,policy}),/attachment_unavailable/);
+  const disclosed=await selectedSkillContext({selection:{path:entry,name:'studio-compute-workflow'},registered:[{path:entry,name:'studio-compute-workflow'}],registeredRoots:[bundle],bundledRoot:bundle,policy});assert.equal(disclosed.attachments.length,1);assert(!disclosed.text.includes('ARCHIVED REFERENCE'));assert(!disclosed.text.includes('SEALED REF'));assert.throws(()=>policy.assertReadable(reference),/archived/);
   const evidence=await new PublicRuleEvidence(()=>f.root).inspect({source_receipt:{local_files:[{source_id:'pygas',path:'delivery/SKILL.md',sha256:'d'.repeat(64)}]}},{policy});assert.equal(evidence.files[0].status,'blocked');
   assert.equal(policy.allowsPath(path.join(f.delivery,'program.py')),true);trap.assertZero();t.diagnostic('manual/reference/source operations '+JSON.stringify(trap.counts));
  }finally{trap.restore();}
@@ -154,7 +154,7 @@ test('a granted parent entry does not silently grant an archived reference in it
  const scope={provider:'codex',threadId:'thread',taskId:null,serial:1};f.facts.archivedResources.push({id:'parent',role:'delivery',paths:[entry]},{id:'reference',role:'configuration',paths:[reference]});
  f.facts.readGrant={id:'human-update',purpose:'update',resourceIds:['parent'],owner:{...scope},authorityRevision:f.facts.revision,activationId:f.facts.activation.id,expiresAt:Date.now()+60000};
  const policy=createReadPolicy(f.facts,{scope}),trap=archivedTrap([reference]);
- try{await assert.rejects(selectedSkillContext({selection:{path:entry,name:'studio-compute-workflow'},registered:[{path:entry,name:'studio-compute-workflow'}],registeredRoots:[bundle],bundledRoot:bundle,policy}),/attachment_unavailable/);trap.assertZero();}finally{trap.restore();}
+ try{const disclosed=await selectedSkillContext({selection:{path:entry,name:'studio-compute-workflow'},registered:[{path:entry,name:'studio-compute-workflow'}],registeredRoots:[bundle],bundledRoot:bundle,policy});assert.equal(disclosed.attachments.length,1);assert(!disclosed.text.includes('ARCHIVED REFERENCE'));assert(!disclosed.text.includes('SEALED REF'));assert.throws(()=>policy.assertReadable(reference),/archived/);trap.assertZero();}finally{trap.restore();}
 });
 
 test('global archives with no selected configuration use registered metadata in catalog, routes and source receipts',async t=>{
