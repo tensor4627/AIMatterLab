@@ -137,6 +137,19 @@ export function createConversationTerminals({terminal,service,registration,resou
   const operation=run();entry.pending=operation;
   try{await operation;}finally{entry.pending=null;entry.at=now();publish();}
  }
+ function prepareAuthoringGrant(){
+  const before=scopeOf(current()),pool=before&&getPool(before.provider);
+  const entry=pool?.entries.get(keyOf(before));
+  if(!entry?.shell||entry.retiring||!equal(before,entry.scope))return null;
+  const receipt=terminal.prepareConversationGrant(entry.shell.sessionId);
+  if(!receipt)return null;
+  return allow=>{
+   const after=scopeOf(current());
+   const stillOwned=allow&&after&&selected(pool)&&pool.entries.get(keyOf(before))===entry&&
+    !entry.retiring&&equal(entry.scope,before);
+   if(receipt.finish(stillOwned)){entry.scope=after;entry.at=now();}
+  };
+ }
  function releaseShell(id){
   for(const pool of pools.values()){
    const entry=session(pool,id);
@@ -175,6 +188,6 @@ export function createConversationTerminals({terminal,service,registration,resou
   const pool=getPool(provider),scope=scopeOf(current());
   return !!(pool?.enabled&&(!scope||!pool.entries.has(keyOf(scope))));
  }
- return {arm,acquire,canAcquire,describe,releaseShell,releaseConnection,serviceOwner,touch,sweep,forget,
+ return {arm,acquire,canAcquire,describe,prepareAuthoringGrant,releaseShell,releaseConnection,serviceOwner,touch,sweep,forget,
   stop(){stopped=true;pools.clear();}};
 }

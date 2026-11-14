@@ -49,6 +49,22 @@ function fixture({transportCached=true,workerCached=true,auto=true,ack=true,resu
  return {trusted,child,pty,plan,session,writes,uploads,resizes,send,output:text=>output(text),get hello(){return hello;},get nonce(){return nonce;},start:(requestId='owned-start')=>session.serviceStart({ownerEpoch:1,requestId,bootstrap:trusted})};
 }
 
+test('a progressing transfer outlives its idle timeout and still has a hard startup deadline',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout']});
+ for(const complete of [true,false]){
+  const f=fixture({transportCached:false,ack:false,sourceOptions:{transport:'a'.repeat(10000)},timeouts:{start:100,startMax:300}});
+  try{
+   const start=f.start();const observed=start.then(value=>value,error=>error);
+   await tick();await tick();
+   for(let i=0;i<(complete?5:3);i++){
+    t.mock.timers.tick(complete?55:85);f.send('ACK',String(i),{accepted:i});await tick();
+   }
+   if(complete)assert.equal((await observed).serviceStatus,'connected');
+   else{t.mock.timers.tick(46);assert.match((await observed).message,/service_start_unknown/);}
+  }finally{f.session.dispose();}
+ }
+});
+
 test('narrow-shell readiness uses a zero-width prompt marker, hides split frames, and rejects stale prompt counters',async()=>{
  const scope={provider:'codex',threadId:'owned-narrow'};
  for(const split of [1,5,30,56]){const f=fixture();try{f.session.resize({actor:'human',ownerEpoch:1,cols:56,rows:24});f.session.owner({owner:'agent',ownerEpoch:1,scope});const ready=await f.session.serviceStart({ownerEpoch:2,requestId:'narrow-start',borrowed:true,scope,bootstrap:f.trusted});await f.session.serviceStop({serviceId:ready.serviceId});const install=f.writes.find(text=>text.startsWith('STUDIO_PROMPT_'));assert(install.includes("'\\[\\e]0;'"));assert(install.includes("'\\a\\]'"));const marker=/__STUDIO_SHELL_READY_[a-f0-9]{24}_/.exec(install.replaceAll("'",''))[0],frame='\x1b]0;'+marker+'1__\x07';let settled=false;const first=f.session.waitShellReady(()=>{}).then(()=>settled=true);f.output(frame.slice(0,split));f.output(frame.slice(split));await first;assert.equal(settled,true);f.session.input({actor:'agent',ownerEpoch:2,scope,requestId:'narrow-input',data:'owned-narrow-input\r'});let fresh=false;const next=f.session.waitShellReady(()=>{}).then(()=>fresh=true);f.output(frame);f.output('foreground command still running\r\n$ ');await tick();assert.equal(fresh,false);f.output('\x1b]0;'+marker+'2__\x07');await next;assert.equal(fresh,true);const publicText=f.session.read({actor:'agent',ownerEpoch:2,scope}).chunks.map(c=>c.data).join('');assert.doesNotMatch(publicText,/__STUDIO_SHELL_READY_|\x1b\]0;|STUDIO_PROMPT_/);assert.deepEqual(f.resizes.at(-1),[56,24]);}finally{f.session.dispose();}}

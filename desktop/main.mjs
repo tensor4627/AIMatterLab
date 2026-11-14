@@ -252,7 +252,20 @@ conversationTerminals=createConversationTerminals({terminal:sharedTerminal,servi
  busy:scope=>agents.bridge(scope.provider)?.activeTurns?.has(scope.threadId)||agents.pendingTurnDispatches.has(agents.contextKey(scope.provider,scope.threadId)),
  publish:()=>emit('studio:event',{method:'studio/conversationTerminalChanged'})});
 const terminalIdleTimer=setInterval(()=>void conversationTerminals.sweep(),10000);terminalIdleTimer.unref();
-const authoringAuthorization={begin:task=>sshService.prepareAuthoringGrant(task),commit:(ticket,task)=>sshService.completeAuthoringGrant(ticket,task),abort:ticket=>sshService.abortAuthoringGrant(ticket)};
+const authoringAuthorization={
+ begin(task){
+  const service=sshService.prepareAuthoringGrant(task);
+  return service?{service,shell:conversationTerminals.prepareAuthoringGrant()}:null;
+ },
+ commit(ticket,task){
+  if(!ticket)return false;
+  const authorized=sshService.completeAuthoringGrant(ticket.service,task);
+  ticket.shell?.(authorized);return authorized;
+ },
+ abort(ticket){
+  if(ticket){ticket.shell?.(false);sshService.abortAuthoringGrant(ticket.service);}
+ },
+};
 worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  const selected=computeResource.peek(),terminalTool=['list_shared_terminals','read_shared_terminal','write_shared_terminal'].includes(toolName);
  if(selected?.kind==='ssh-connection'){
@@ -306,7 +319,7 @@ for(const method of ['list','open','read','input','resize','owner','close'])hand
   if(Object.keys(value).some(key=>!['sessionId','ownerEpoch','owner','provider'].includes(key)))throw Error('terminal_invalid_request');
   result=await conversationTerminals.arm(value,value.provider||agents.active);
   const context=workflowContext.current();
-  if(context?.threadId&&result.currentConversation)await agents.selectContext(context.provider,context);
+  if(context?.threadId&&result.currentConversation)await workflowContext.synchronize(context,(provider,scope)=>agents.selectContext(provider,scope));
  }else{
   result=await (['owner','close'].includes(method)?connectionHandoff:sharedTerminal)[method](value);
   if(method==='close'||method==='owner'&&value.owner==='human')conversationTerminals.releaseShell(value.sessionId);

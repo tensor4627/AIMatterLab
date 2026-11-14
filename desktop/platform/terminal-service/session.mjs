@@ -74,6 +74,10 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
  const write=(kind,id,value)=>{try{terminal.write(SERVICE_PREFIX+current.nonce+':'+kind+':'+id+':'+Buffer.from(JSON.stringify(value)).toString('base64')+'\n');}catch{fault();}};
  let pumping=false;
  function beginInstall(s,bytes,phase,endKind,endValue){s.install=bytes;s.count=Math.ceil(bytes.length/(s.chunkBytes||2048));s.sent=0;s.acked=0;s.phase='install';s.publicPhase=phase;s.endKind=endKind;s.endValue=endValue;s.progress={kind:'transfer',completedBytes:0,totalBytes:bytes.length};pump();}
+ function armStartupTimeout(s){
+  clearTimeout(s.timer);
+  s.timer=setTimeout(()=>fault('service_start_unknown'),Math.min(timeouts.start??120000,Math.max(0,s.startDeadline-Date.now())));
+ }
  function pump(){
   if(pumping)return;pumping=true;queueMicrotask(()=>{pumping=false;const s=current;if(!s?.active||s.phase!=='install'||s.status!=='connecting')return;
    const chunk=s.chunkBytes||2048;while(s.sent<s.count&&(s.sent-s.acked)*chunk<32768){const index=s.sent++;write('INSTALL',String(index),{chunk:s.install.subarray(index*chunk,(index+1)*chunk).toString('base64')});if(s.status!=='connecting')return;}
@@ -145,7 +149,7 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
   if(s.v2&&kind==='WORKER_NEEDED'&&id==='-'&&s.phase==='worker_check'){if(s.hello.cache_only||s.hello.reuse_only)fail('service_protocol_failed',502);if(s.hello.worker_encoding==='gzip-delta-v1'){exact(value,['files']);let delta;try{delta=deltaBundle(s.workerPayload,value.files);}catch{fail('service_protocol_failed',502);}beginInstall(s,delta.packed,'transferring_worker','INSTALL_END',delta.end);}else{exact(value,[]);beginInstall(s,s.workerPacked,'transferring_worker','INSTALL_END',{encoding:'gzip',size:s.workerPacked.length,sha256:s.hello.worker_gzip_sha256,uncompressed_size:s.hello.worker_size,uncompressed_sha256:s.hello.worker_sha256});}return;}
   if(s.v2&&kind==='WORKER_READY'&&id==='-'&&['worker_check','ready'].includes(s.phase)){exact(value,['cached']);if(typeof value.cached!=='boolean'||s.phase==='worker_check'&&!value.cached||s.phase==='ready'&&value.cached)fail('service_protocol_failed',502);s.phase='ready';s.publicPhase='preparing_runtime';s.progress=null;return;}
   if(s.v2&&kind==='PHASE'&&id==='-'){exact(value,['phase']);if(!SERVICE_PHASES.has(value.phase)||!['preparing_runtime','starting_worker','checking_health'].includes(value.phase)||s.phase!=='ready')fail('service_protocol_failed',502);s.publicPhase=value.phase;return;}
-  if(kind==='ACK'&&s.phase==='install'&&id===String(s.acked)&&value.accepted===s.acked&&s.acked<s.sent){exact(value,['accepted']);s.acked++;s.progress.completedBytes=Math.min(s.install.length,s.acked*(s.chunkBytes||2048));pump();return;}
+  if(kind==='ACK'&&s.phase==='install'&&id===String(s.acked)&&value.accepted===s.acked&&s.acked<s.sent){exact(value,['accepted']);s.acked++;armStartupTimeout(s);s.progress.completedBytes=Math.min(s.install.length,s.acked*(s.chunkBytes||2048));pump();return;}
   if(kind==='READY'&&s.phase==='ready'&&id==='-'){s.health=serviceHealth(value);s.status='connected';s.phase='connected';s.publicPhase='ready';s.progress=null;s.transportBytes=null;s.workerPacked=null;s.workerPayload=null;clearTimeout(s.timer);s.startResolve(state());s.startResolve=null;s.startReject=null;return;}
   if(kind==='RESPONSE'&&s.phase==='connected'){
    const item=s.pending.get(id);if(!item)return;if(!Number.isInteger(value.status)||value.status<100||value.status>599||!Object.hasOwn(value,'data'))fail('service_protocol_failed',502);
@@ -265,7 +269,10 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
   const promise=new Promise((resolve,reject)=>{s.startResolve=resolve;s.startReject=reject;});promise.catch(()=>{});starts.set(request.requestId,{digest,promise});
   if(environment)s.publicPhase='preparing_environment';
   if(v2)s.firstTimer=setTimeout(()=>fault('python_response_timeout'),Math.min(environment?30000:15000,timeouts.start??120000));
-  s.timer=setTimeout(()=>fault('service_start_unknown'),timeouts.start??120000);
+  // A verified upload may progress for several minutes over an interactive gateway.
+  // Every in-order ACK renews the idle timeout, within one absolute start deadline.
+  s.startDeadline=Date.now()+(timeouts.startMax??600000);
+  armStartupTimeout(s);
   try{terminal.write(launch);}catch{fault('service_start_unknown');}
   return promise;
  }
