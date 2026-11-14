@@ -202,6 +202,73 @@ def cached_files(hello, root):
     return files
 
 
+def delta_cache(hello, root):
+    """Offer measured bytes from one immutable, fully verified owned runtime."""
+    parent = root / 'runtimes'
+    if not parent.exists():
+        return {}
+    info = parent.lstat()
+    if parent.is_symlink() or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+        fail('worker_cache_invalid', 'checking_cache')
+    candidates = sorted((p for p in parent.iterdir() if re.fullmatch('[a-f0-9]{20}', p.name)),
+                        key=lambda p: p.lstat().st_mtime_ns, reverse=True)
+    for candidate in candidates[:16]:
+        try:
+            result = cached_files({**hello, 'expected_runtime_id': candidate.name, 'worker_manifest_sha256': None}, root)
+            if result:
+                return result
+        except Failure as error:
+            if error.code != 'worker_cache_invalid':
+                raise
+            # A corrupt previous release is not executable or reusable evidence.
+    return {}
+
+
+def send_inventory(files, send):
+    value = {'files': [{'path': name, 'size': len(content), 'sha256': hashlib.sha256(content).hexdigest()}
+                       for name, content in sorted(files.items())]}
+    raw = json.dumps(value, separators=(',', ':')).encode()
+    for index, at in enumerate(range(0, len(raw), 96)):
+        send('FRAGMENT', '-', {'kind': 'WORKER_NEEDED', 'index': index, 'last': at + 96 >= len(raw),
+                               'chunk': base64.b64encode(raw[at:at + 96]).decode()})
+
+
+def merge_delta(value, hello, previous):
+    if not isinstance(value, dict) or not isinstance(value.get('manifest'), list) or not 5 <= len(value['manifest']) <= MAX_FILES:
+        fail('worker_hash_mismatch', 'transferring_worker')
+    changes = value.get('files')
+    if not isinstance(changes, list) or len(changes) > MAX_FILES:
+        fail('worker_hash_mismatch', 'transferring_worker')
+    changed = {}
+    for row in changes:
+        if not isinstance(row, dict) or not allowed(row.get('path')) or row['path'] in changed:
+            fail('worker_hash_mismatch', 'transferring_worker')
+        changed[row['path']] = row
+    full, names = [], set()
+    for row in value['manifest']:
+        if (not isinstance(row, dict) or set(row) != {'path', 'size', 'sha256'} or not allowed(row['path'])
+                or row['path'] in names or type(row['size']) is not int or not 0 <= row['size'] <= MAX_FILE
+                or not isinstance(row['sha256'], str) or not re.fullmatch('[a-f0-9]{64}', row['sha256'])):
+            fail('worker_hash_mismatch', 'transferring_worker')
+        name = row['path']; names.add(name)
+        if name in changed:
+            change = changed.pop(name)
+            if any(change.get(key) != row[key] for key in row):
+                fail('worker_hash_mismatch', 'transferring_worker')
+            full.append(change)
+        elif name in previous:
+            full.append({**row, 'base64': base64.b64encode(previous[name]).decode()})
+        else:
+            fail('worker_hash_mismatch', 'transferring_worker')
+    if changed:
+        fail('worker_hash_mismatch', 'transferring_worker')
+    payload = {key: content for key, content in value.items() if key != 'manifest'}
+    payload['files'] = full
+    # Includes per-file verification, complete target membership and canonical digest.
+    files = validate_manifest(payload, hello)
+    return payload, files
+
+
 def unpack_files(raw):
     if len(raw) < 4:
         fail('worker_hash_mismatch', 'transferring_worker')
@@ -226,11 +293,19 @@ def unpack_files(raw):
 
 def receive_bundle(hello, read, send):
     packed, index = bytearray(), 0
+    delta = hello.get('worker_encoding') == 'gzip-delta-v1'
     while True:
         kind, identifier, value = read()
         if kind == 'INSTALL_END' and identifier == '-':
             expected = {'encoding': 'gzip', 'size': hello['worker_gzip_size'], 'sha256': hello['worker_gzip_sha256'],
                         'uncompressed_size': hello['worker_size'], 'uncompressed_sha256': hello['worker_sha256']}
+            if delta:
+                if (not isinstance(value, dict) or set(value) != set(expected) or value.get('encoding') != 'gzip'
+                        or type(value.get('size')) is not int or not 0 < value['size'] <= MAX_SOURCE
+                        or type(value.get('uncompressed_size')) is not int or not 0 < value['uncompressed_size'] <= MAX_JSON
+                        or any(not isinstance(value.get(key), str) or not re.fullmatch('[a-f0-9]{64}', value[key]) for key in ('sha256', 'uncompressed_sha256'))):
+                    fail('worker_hash_mismatch', 'transferring_worker')
+                expected = value
             if value != expected or len(packed) != expected['size'] or hashlib.sha256(packed).hexdigest() != expected['sha256']:
                 fail('worker_hash_mismatch', 'transferring_worker')
             break
@@ -240,14 +315,15 @@ def receive_bundle(hello, read, send):
             content = base64.b64decode(value['chunk'], validate=True)
         except (ValueError, TypeError):
             fail('protocol_failed', 'transferring_worker')
-        if not 0 < len(content) <= hello.get('upload_chunk_bytes', 2048) or len(packed) + len(content) > hello['worker_gzip_size']:
+        if not 0 < len(content) <= hello.get('upload_chunk_bytes', 2048) or len(packed) + len(content) > (MAX_SOURCE if delta else hello['worker_gzip_size']):
             fail('worker_hash_mismatch', 'transferring_worker')
         packed.extend(content); send('ACK', index, {'accepted': index}); index += 1
     try:
         decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        raw = decoder.decompress(bytes(packed), hello['worker_size'] + 1)
-        if (len(raw) != hello['worker_size'] or not decoder.eof or decoder.unconsumed_tail or decoder.unused_data
-                or hashlib.sha256(raw).hexdigest() != hello['worker_sha256']):
+        raw_size = expected['uncompressed_size']
+        raw = decoder.decompress(bytes(packed), raw_size + 1)
+        if (len(raw) != raw_size or not decoder.eof or decoder.unconsumed_tail or decoder.unused_data
+                or hashlib.sha256(raw).hexdigest() != expected['uncompressed_sha256']):
             fail('worker_hash_mismatch', 'transferring_worker')
         value = unpack_files(raw) if hello.get('worker_encoding') == 'gzip-files-v1' else json.loads(raw)
     except (zlib.error, ValueError, UnicodeError):
@@ -390,7 +466,7 @@ def relay_lane(payload, nonce, send, restore, legacy, root, port, health, encodi
     safe = {key: health[key] for key in ('name', 'root', 'runtime', 'execution_policy', 'hostname', 'uid', 'machineId', 'home')}
     safe.update(runtime_id=payload['expected_runtime_id'], port=port, transport_kind='ssh-service', ssh_service=True,
                 bridge_capabilities=['scheduler-inspection-v1'])
-    for key in ('runtime_manifest_sha256','runtime_source_scope'):
+    for key in ('runtime_manifest_sha256','runtime_source_scope','locations'):
         if key in health: safe[key] = health[key]
     fragmented('READY', '-', safe)
 
@@ -448,6 +524,37 @@ def relay_lane(payload, nonce, send, restore, legacy, root, port, health, encodi
             stopped.set()
 
 
+def location_evidence(legacy, root, port):
+    """Observe existing directories only; never create a workspace or skill here."""
+    result = {'schemaVersion': 1, 'scope': 'remote-observed', 'observedAt': time.time() * 1000,
+              'loginDirectory': str(Path.cwd().resolve()), 'workspaces': [], 'skills': []}
+    try:
+        reply = forward(legacy, root, port, {'method': 'GET', 'target': '/api/projects'}, timeout=2)
+        projects = reply['data'] if reply['status'] == 200 and isinstance(reply['data'], list) else []
+        seen = set()
+        for project in projects[:128]:
+            if not isinstance(project, dict) or not re.fullmatch('[A-Za-z0-9_-]{1,200}', str(project.get('id', ''))):
+                continue
+            policy = project.get('policy')
+            roots = policy.get('input_roots', []) if isinstance(policy, dict) else []
+            if not isinstance(roots, list):
+                continue
+            for raw in roots[:32]:
+                path = Path(raw) if isinstance(raw, str) else None
+                if (path is not None and path.is_absolute() and str(path) == str(path.resolve())
+                        and path.is_dir() and str(path) not in seen and len(result['workspaces']) < 32):
+                    seen.add(str(path)); result['workspaces'].append({'path': str(path), 'source': 'worker-project', 'projectId': project['id']})
+        parent = root / 'cluster-skills'
+        if parent.is_dir() and not parent.is_symlink():
+            for file in sorted(parent.glob('*/v*/SKILL.md'))[:32]:
+                if (file.is_file() and not file.is_symlink() and str(file) == str(file.resolve())
+                        and file.stat().st_uid == os.getuid()):
+                    result['skills'].append({'path': str(file.parent), 'source': 'worker-cluster-skill'})
+    except (Failure, OSError, TypeError, ValueError, AttributeError):
+        pass  # Absence is not proof of an installed remote skill or workspace.
+    return result
+
+
 def run(hello, nonce, read, send, phase, restore, original_termios=None):
     phase('checking_cache')
     root = namespace(hello)
@@ -456,8 +563,17 @@ def run(hello, nonce, read, send, phase, restore, original_termios=None):
     if files is None:
         if hello.get('reuse_only'):
             fail('maintenance_required','checking_cache')
-        phase('transferring_worker'); send('WORKER_NEEDED', '-', {})
-        payload = receive_bundle(hello, read, send); files = validate_manifest(payload, hello)
+        previous = delta_cache(hello, root) if hello.get('worker_encoding') == 'gzip-delta-v1' else None
+        phase('transferring_worker')
+        if previous is not None:
+            send_inventory(previous, send)
+        else:
+            send('WORKER_NEEDED', '-', {})
+        payload = receive_bundle(hello, read, send)
+        if previous is not None:
+            payload, files = merge_delta(payload, hello, previous)
+        else:
+            files = validate_manifest(payload, hello)
     else:
         payload = {'schema_version': 1, 'profile_id': hello['profile_id'], 'port': hello['port'],
                    'expected_runtime_id': hello['expected_runtime_id'],
@@ -486,6 +602,7 @@ def run(hello, nonce, read, send, phase, restore, original_termios=None):
         except (ValueError, TypeError):
             fail('worker_cache_invalid' if cached else 'namespace_unsafe', 'preparing_runtime')
         health = health_checked(legacy, root, runtime, hello['port'], phase)
+    health['locations'] = location_evidence(legacy, root, hello['port'])
     health['runtime_manifest_sha256'] = digest_files(files)
     health['runtime_source_scope'] = ('observed-legacy-cache' if hello.get('cache_only') and hello.get('worker_manifest_sha256') is None else 'verified-cached-manifest' if hello.get('cache_only') else 'shipped-manifest')
     legacy['validate_payload'] = lambda _payload: files

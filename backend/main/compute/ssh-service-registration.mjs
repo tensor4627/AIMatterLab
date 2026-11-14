@@ -1,4 +1,5 @@
 /** Persistent setup evidence, never a live channel or execution grant. */
+import {checkedSshLocations,mergeSshLocations} from '../../../contracts/compute/ssh-service-locations.mjs';
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {posix} from 'node:path';
@@ -19,7 +20,7 @@ function checkedHealth(value){
  const health=value?.health||value,host=health?.hostIdentity||{hostname:health?.hostname,uid:health?.uid,machineId:health?.machineId},runtimeId=health?.runtimeId||health?.runtime_id,runtimeManifestSha256=health?.runtimeManifestSha256??health?.runtime_manifest_sha256;
  if(!object(health)||health.name!=='gpu-sampling-studio'||health.execution_policy!=='desktop-review-v1'||!absolute(health.root)||!absolute(health.runtime)||!/^[a-f0-9]{20}$/.test(runtimeId||'')||!Number.isInteger(health.port)||health.port<1024||health.port>65535||!object(host)||!text(host.hostname,255)||!Number.isSafeInteger(host.uid)||host.uid<0||!text(host.machineId,256))fail('ssh_service_registration_invalid');
  if(runtimeManifestSha256!==undefined&&(!/^[a-f0-9]{64}$/.test(runtimeManifestSha256)||!runtimeManifestSha256.startsWith(runtimeId)))fail('ssh_service_registration_invalid');
- return {hostIdentity:{hostname:host.hostname,uid:host.uid,machineId:host.machineId},root:health.root,runtime:health.runtime,runtimeId,...runtimeManifestSha256!==undefined?{runtimeManifestSha256}:{},port:health.port};
+ return {...health.locations!==undefined?{locations:checkedSshLocations(health.locations)}:{},hostIdentity:{hostname:host.hostname,uid:host.uid,machineId:host.machineId},root:health.root,runtime:health.runtime,runtimeId,...runtimeManifestSha256!==undefined?{runtimeManifestSha256}:{},port:health.port};
 }
 function stored(value){
  if(!object(value)||value.schemaVersion!==SCHEMA||!id(value.profileId)||!Number.isSafeInteger(value.configuredAtProfileVersion)||value.configuredAtProfileVersion<1||!/^[a-f0-9]{64}$/.test(value.configurationSignature||'')||!Number.isSafeInteger(value.revision)||value.revision<1||!Number.isFinite(value.checkedAt)||value.checkedAt<=0)fail('ssh_service_registration_invalid');
@@ -60,6 +61,8 @@ export function createSshServiceRegistration({catalog,profiles,legacyBinding=()=
    if(observed.runtimeManifestSha256!==undefined&&observed.runtimeManifestSha256!==previous.runtimeManifestSha256)fail('ssh_service_registration_identity_changed');
    observed.runtimeManifestSha256=previous.runtimeManifestSha256;
   }
+  const sameHost=previous?.profileId===profile.id&&previous.configurationSignature===signature(profile)&&previous.root===observed.root&&equal(previous.hostIdentity,observed.hostIdentity);
+  if(sameHost){const locations=mergeSshLocations(previous.locations,observed.locations);if(locations)observed.locations=locations;}
   const value=stored({schemaVersion:SCHEMA,profileId:profile.id,configuredAtProfileVersion:profile.version,configurationSignature:signature(profile),revision,checkedAt:now(),...observed,tools:tools.count?{status:'ready',count:tools.count}:{status:'legacy_not_recorded'},...tools.status==='warning'?{toolWarnings:['tools_unavailable']}:{}});
   catalog.put(KIND,profile.id,value);return read({profileId:profile.id,profileVersion:profile.version});
  }

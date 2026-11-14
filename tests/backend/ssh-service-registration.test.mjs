@@ -53,3 +53,29 @@ test('reuse verifies original actual host, root and runtime without rewriting re
 test('only fully evidenced exact-version legacy setup migrates, never a guessed port or unrelated profile',()=>{for(const legacy of [{kind:'ssh',version:2,profileId:'other',profileVersion:1,checkedAt:1,...health},{kind:'ssh',version:2,profileId:profile.id,profileVersion:2,checkedAt:1,...health},{kind:'ssh',version:2,profileId:profile.id,profileVersion:1,checkedAt:1,...health,port:undefined}]){const f=fixture();f.setLegacy(legacy);assert.equal(f.registry.read(request).status,'unconfigured');assert.equal(f.values.size,0);}const f=fixture();f.setLegacy({kind:'ssh',version:2,profileId:profile.id,profileVersion:1,checkedAt:1,...health});const migrated=f.registry.read(request);assert.equal(migrated.status,'configured');assert.deepEqual(migrated.registration.tools,{status:'legacy_not_recorded'});});
 test('bad tool proof, malformed identity and stale profile cannot publish configured setup',()=>{const f=fixture();assert.throws(()=>f.registry.remember(profile,health,{status:'blocked',count:3}),/invalid/);assert.throws(()=>f.registry.remember(profile,{...health,root:'/'},{status:'ready',count:1}),/invalid/);f.setProfile({...profile,version:2});assert.throws(()=>f.registry.remember(profile,health,{status:'ready',count:1}),/profile_changed/);assert.equal(f.values.size,0);});
 test('confirmed cache or environment failure marks maintenance without destroying setup; verified success clears it',()=>{const f=fixture();const first=f.registry.remember(profile,health,{status:'ready',count:2});f.registry.markMaintenance(profile,'PRIVATE_REMOTE_ERROR');assert.equal(f.registry.read(request).status,'configured');const view=f.registry.markMaintenance(profile,'worker_cache_invalid');assert.equal(view.status,'maintenance_required');assert.equal(view.registration.root,first.registration.root);assert.equal(view.registration.checkedAt,first.registration.checkedAt);assert.deepEqual(view.registration.maintenance,{code:'worker_cache_invalid'});assert.throws(()=>f.registry.validateReuse(profile),/maintenance_required/);assert(!JSON.stringify([...f.values.values()]).includes('PRIVATE_REMOTE_ERROR'));const restored=f.registry.remember(profile,health,{status:'ready',count:2});assert.equal(restored.status,'configured');assert.equal(restored.registration.maintenance,undefined);});
+
+
+test('observed common locations survive refresh, runtime update and controller reload without crossing host or configuration',()=>{
+ const f=fixture(),locations={schemaVersion:1,scope:'remote-observed',loginDirectory:'/owned/home',observedAt:1000,workspaces:[{path:'/owned/project',projectId:'project-1',source:'worker-project'}],skills:[{path:'/owned/skill',source:'worker-cluster-skill'}]};
+ const saved=f.registry.remember(profile,{...health,locations},{status:'ready',count:1});assert.equal(saved.registration.locations.workspaces[0].status,'observed');
+ f.registry.remember(profile,health,{status:'ready',count:1});assert.deepEqual(f.registry.read(request).registration.locations,saved.registration.locations);
+ const updated={...health,runtime:health.root+'/runtimes/'+'b'.repeat(20),runtimeId:'b'.repeat(20),locations:{...locations,observedAt:2000,workspaces:[],skills:[]}};
+ const after=f.registry.remember(profile,updated,{status:'ready',count:1});assert.equal(after.registration.locations.workspaces[0].status,'previously-observed');assert.equal(after.registration.locations.workspaces[0].lastSeenAt,1000);assert.equal(after.registration.locations.skills[0].status,'previously-observed');
+ assert.equal(f.registry.read(request).registration.locations.workspaces[0].path,'/owned/project');
+ const other=f.registry.remember(profile,{...updated,locations:undefined,hostIdentity:{...health.hostIdentity,machineId:'changed-host'}},{status:'ready',count:1});assert.equal(other.registration.locations,undefined);
+});
+test('location records reject traversal and do not accept local skill paths as remote observations',()=>{
+ const f=fixture();for(const locations of [{schemaVersion:1,scope:'remote-observed',loginDirectory:'/owned/../other',observedAt:1,workspaces:[],skills:[]},{schemaVersion:1,scope:'local-profile',loginDirectory:'/owned/home',observedAt:1,workspaces:[],skills:[]}])assert.throws(()=>f.registry.remember(profile,{...health,locations},{status:'ready',count:1}),/locations_invalid/);
+});
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {Catalog} from '../../backend/main/workspace/catalog.mjs';
+test('common remote locations persist in the actual local catalog across close/reopen and application update',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-locations-owned-'));let catalog;
+ const profiles={read:()=>structuredClone(profile),list:()=>[structuredClone(profile)]};
+ try{catalog=new Catalog(root);let registry=createSshServiceRegistration({catalog,profiles});
+  const locations={schemaVersion:1,scope:'remote-observed',loginDirectory:'/owned/home',observedAt:1000,workspaces:[{path:'/owned/project',projectId:'owned-project',source:'worker-project'}],skills:[]};
+  registry.remember(profile,{...health,locations},{status:'ready',count:1});catalog.db.close();catalog=new Catalog(root);registry=createSshServiceRegistration({catalog,profiles});
+  assert.equal(registry.read(request).registration.locations.workspaces[0].path,'/owned/project');
+  registry.remember(profile,{...health,runtimeId:'c'.repeat(20),runtime:health.root+'/runtimes/'+'c'.repeat(20)},{status:'ready',count:1});
+  assert.equal(registry.read(request).registration.locations.workspaces[0].path,'/owned/project');
+ }finally{catalog?.db.close();fs.rmSync(root,{recursive:true,force:true});}
+});

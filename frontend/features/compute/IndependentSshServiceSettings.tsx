@@ -34,6 +34,27 @@ export default function IndependentSshServiceSettings({profile,activeResource,on
  const canUpdate=canStart||!!authenticated&&!loading&&!busy&&!connectionBusy&&ready&&!!ownService?.attemptId;
  return <section className="ssh-service-settings" data-testid="ssh-service-settings"><div className="compute-resource-editor-title"><button className="icon-button" aria-label={t('返回连接列表')} disabled={busy} onClick={onClose}><ChevronLeft size={18}/></button><strong>{profile.name} · {t('作业服务设置')}</strong><button className="icon-button" aria-label={t('刷新作业服务设置')} disabled={busy||loading} onClick={()=>void refresh()}><RefreshCw size={15}/></button></div>
   <p>{t('正常使用只需登录并交给 Agent；首次部署和以后复用自动完成。这里用于环境维护和调度器设置。')}</p><div className="ssh-service-registration" data-testid="ssh-service-registration">{t('服务登记')}：{t(registration?.status==='configured'?'已登记':registration?.status==='maintenance_required'?'需要维护':registration?'未登记':'正在读取')}</div>
+  {registration?.registration&&<details data-testid="ssh-service-locations">
+   <summary>{t('已登记的位置')}</summary>
+   <dl>
+    <dt>{t('作业服务目录')}</dt><dd><code>{registration.registration.root}</code></dd>
+    <dt>{t('作业服务管理包')}</dt><dd><code>{registration.registration.runtime}</code></dd>
+    {registration.registration.locations&&<>
+     <dt>{t('登录目录')}</dt><dd><code>{registration.registration.locations.loginDirectory}</code></dd>
+     <dt>{t('工作区（来自服务已登记项目）')}</dt>
+     <dd><ul>{registration.registration.locations.workspaces.map(row=>
+      <li key={row.path}><code>{row.path}</code> · {row.projectId} · {t(row.status==='observed'?'最近核对存在':'此前核对，当前未确认')}</li>
+     )}</ul></dd>
+     <dt>{t('远端集群技能目录')}</dt>
+     <dd>{registration.registration.locations.skills.length?<ul>{registration.registration.locations.skills.map(row=>
+      <li key={row.path}><code>{row.path}</code> · {t(row.status==='observed'?'最近核对存在':'此前核对，当前未确认')}</li>
+     )}</ul>:t('尚未观测到远端集群技能。')}</dd>
+    </>}
+    {registration.localProjectSkillsRoot&&<>
+     <dt>{t('本机项目技能目录')}</dt><dd><code>{registration.localProjectSkillsRoot}</code></dd>
+    </>}
+   </dl>
+  </details>}
   <div className="ssh-service-login"><button className="button" data-testid="ssh-service-login" disabled={busy||connectionBusy} onClick={()=>void onLogin(profile)}>{t('打开登录终端')}</button><label>{t('已登录的连接')}<select data-testid="ssh-service-connection" value={selected} disabled={busy||loading} onChange={event=>{serial.current++;setSelected(event.target.value);setService(null);const id=event.target.value;if(id)void invoke<IndependentSshService>('compute.sshService.status',{connectionId:id}).then(value=>{if(alive.current&&selectedRef.current===id)setService(value);}).catch(error=>setNotice(t(sshConnectionMessage(error))));}}><option value="">{t('请选择已登录的连接')}</option>{candidates.map((value,index)=><option key={value.connectionId} value={value.connectionId}>{t('终端')} {index+1} · v{value.profileVersion} · {t(sshStateLabel(value.status))} · {t(sshStateLabel(value.authentication))}</option>)}</select></label></div>
   {!authenticated&&<p role="status">{t('请先在终端完成此连接的登录。普通 SSH 模式仅提供终端操作。')}</p>}
   {authenticated&&serviceIdentityUnconfirmed(ownService?.error?.code)&&<p role="status" data-testid="ssh-service-identity-status">{t('SSH 认证有效；作业服务身份尚未核对。')}</p>}

@@ -1,4 +1,5 @@
 /** Service capability on an independently authenticated SSH connection. */
+import {checkedSshLocations} from '../../../contracts/compute/ssh-service-locations.mjs';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {posix} from 'node:path';
@@ -12,6 +13,7 @@ export function normalizeSshServiceHealth(value){
  const v=value?.health||value?.service?.health||value?.service||value,h=v?.hostIdentity||v?.host_identity||{hostname:v?.hostname,uid:v?.uid,machineId:v?.machineId},runtimeId=v?.runtimeId||v?.runtime_id;
  if(!object(v)||v.name!=='gpu-sampling-studio'||v.execution_policy!=='desktop-review-v1'||typeof v.root!=='string'||!v.root.startsWith('/')||typeof v.runtime!=='string'||!v.runtime.startsWith('/')||!(/^[a-f0-9]{20}$/).test(runtimeId||'')||typeof h.hostname!=='string'||!h.hostname||h.hostname.length>255||!Number.isSafeInteger(h.uid)||h.uid<0||typeof h.machineId!=='string'||!h.machineId||h.machineId.length>256||!Number.isInteger(v.port)||v.port<1024||v.port>65535)fail('ssh_service_identity_unavailable');
  const report={name:v.name,version:v.version,root:v.root,runtime:v.runtime,execution_policy:v.execution_policy,port:v.port,runtimeId,hostIdentity:{hostname:h.hostname,uid:h.uid,machineId:h.machineId},transport:'ssh-connection',ssh_service:true};
+ if(v.locations!==undefined){try{report.locations=checkedSshLocations(v.locations);}catch{fail('ssh_service_identity_unavailable');}}
  const manifest=v.runtimeManifestSha256||v.runtime_manifest_sha256;if(manifest!==undefined){if(!/^[a-f0-9]{64}$/.test(manifest)||manifest.slice(0,20)!==runtimeId)fail('ssh_service_identity_unavailable');report.runtimeManifestSha256=manifest;}
  if(['observed-legacy-cache','verified-cached-manifest','shipped-manifest'].includes(v.runtimeSourceScope||v.runtime_source_scope))report.runtimeSourceScope=v.runtimeSourceScope||v.runtime_source_scope;
  for(const key of ['tool_configuration_schema','tool_workflow_schema'])if(Number.isSafeInteger(v[key]))report[key]=v[key];return report;

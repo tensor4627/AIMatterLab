@@ -268,7 +268,10 @@ worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  return true;
 });
 registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,onClosing:connectionId=>{conversationTerminals.releaseConnection(connectionId);sshService.connectionLost(connectionId);},onClosed:connectionId=>sshService.connectionClosed(connectionId),onUnknown:connectionId=>sshService.connectionLost(connectionId),onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
-handle('compute.sshService.registration',value=>serviceRegistration.read(value));
+handle('compute.sshService.registration',value=>{
+ const registration=serviceRegistration.read(value);
+ return {...registration,localProjectSkillsRoot:projectSkills.root};
+});
 handle('compute.sshService.check',value=>sshService.check(value));
 handle('compute.sshService.connect',async value=>{
  assertIdleAgent();agents.assertContextIdle();const result=await sshService.connect(value);

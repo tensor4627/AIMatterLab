@@ -286,7 +286,7 @@ class TransportTests(unittest.TestCase):
                 self.assertEqual(cold.request('/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize'}, True)['status'], 200)
                 tokens = json.loads((root / 'connection.json').read_text())
                 cold.stop(); self.assertTrue(self.owned_workers(root, port))
-                warm = Client(home, hello, source, packed); clients.append(warm); self.assertEqual(warm.start(), health)
+                warm = Client(home, hello, source, packed); clients.append(warm); self.assertEqual({k: v for k, v in warm.start().items() if k != "locations"}, {k: v for k, v in health.items() if k != "locations"})
                 self.assertEqual(warm.uploads, [])
                 self.assertIn(('HELPER_READY', {'cached': True}), warm.receipts)
                 self.assertIn(('WORKER_READY', {'cached': True}), warm.receipts)
@@ -299,7 +299,7 @@ class TransportTests(unittest.TestCase):
                 # original worker fingerprint or force its source upload.
                 helper = Path(home) / '.local/state/gpu-sampling-studio/ssh-transport-v2' / hello['transport_sha256'] / 'bridge.py'
                 helper.unlink()
-                fresh = Client(home, hello, source, packed); clients.append(fresh); self.assertEqual(fresh.start(), health)
+                fresh = Client(home, hello, source, packed); clients.append(fresh); self.assertEqual({k: v for k, v in fresh.start().items() if k != "locations"}, {k: v for k, v in health.items() if k != "locations"})
                 self.assertEqual([kind for kind, _ in fresh.uploads], ['TRANSPORT_END']); fresh.stop()
                 self.assertEqual(len(self.owned_workers(root, port)), 1)
             finally:
@@ -322,7 +322,7 @@ class TransportTests(unittest.TestCase):
                 daily_hello = {**hello, 'reuse_only': True}
                 guard = Path(home) / 'daily-guard.txt'
                 daily = Client(home, daily_hello, source, packed, reuse_guard(guard)); clients.append(daily)
-                self.assertEqual(daily.start(), health)
+                self.assertEqual({k: v for k, v in daily.start().items() if k != "locations"}, {k: v for k, v in health.items() if k != "locations"})
                 self.assertEqual(daily.uploads, [])
                 self.assertIn(('WORKER_READY', {'cached': True}), daily.receipts)
                 self.assertEqual(daily.request('/api/health')['status'], 200)
@@ -428,13 +428,13 @@ class TransportTests(unittest.TestCase):
                 before_cache = cache_evidence(root)
                 before_workers = self.owned_workers(root, port)
                 live = Client(home, {**hello, 'reuse_only': True, 'start_cached': True}, source, packed); clients.append(live)
-                self.assertEqual(live.start(), health)
+                self.assertEqual({k: v for k, v in live.start().items() if k != "locations"}, {k: v for k, v in health.items() if k != "locations"})
                 self.assertEqual(live.uploads, [])
                 self.assertEqual(self.owned_workers(root, port), before_workers)
                 live.stop(); self.stop_workers(root, port)
                 self.assertEqual(self.owned_workers(root, port), [])
                 restarted = Client(home, {**hello, 'reuse_only': True, 'start_cached': True}, source, packed); clients.append(restarted)
-                self.assertEqual(restarted.start(), health)
+                self.assertEqual({k: v for k, v in restarted.start().items() if k != "locations"}, {k: v for k, v in health.items() if k != "locations"})
                 self.assertEqual(restarted.uploads, [])
                 self.assertEqual(cache_evidence(root), before_cache)
                 self.assertEqual(len(self.owned_workers(root, port)), 1)

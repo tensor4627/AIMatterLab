@@ -98,7 +98,7 @@ async function sourcePlan({nodeExecutable,servicePath,dependencyRoot,platform,ar
  for(const name of ['broker.mjs','session.mjs'])await add(path.join(path.dirname(servicePath),name),'service/'+name);
  const codec=path.join(path.dirname(servicePath),'response-codec.mjs');if(fs.existsSync(codec))await add(codec,'service/response-codec.mjs');
  const launcher=path.join(path.dirname(servicePath),'service-launch.mjs');if(fs.existsSync(launcher))await add(launcher,'service/service-launch.mjs');
- for(const name of ['ssh-connection.mjs','ssh-multiplex-helper.py','shared-shell-service.mjs']){const file=path.join(path.dirname(servicePath),name);if(fs.existsSync(file))await add(file,'service/'+name);}
+ for(const name of ['ssh-connection.mjs','ssh-multiplex-helper.py','shared-shell-service.mjs','worker-delta.mjs','ssh-service-locations.mjs']){const file=path.join(path.dirname(servicePath),name);if(fs.existsSync(file))await add(file,'service/'+name);}
  const resolver=createRequire(path.join(dependencyRoot,'runtime.cjs'));
  const wrapperEntry=resolver.resolve('@lydell/node-pty'),wrapper=packageRoot(wrapperEntry,'@lydell/node-pty',dependencyRoot);
  const nativeName='@lydell/node-pty-'+platform+'-'+arch;

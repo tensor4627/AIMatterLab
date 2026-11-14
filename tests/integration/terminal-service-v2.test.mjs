@@ -42,7 +42,7 @@ function fixture({transportCached=true,workerCached=true,auto=true,ack=true,resu
   if(kind==='HELLO'){hello=value;if(auto)queueMicrotask(()=>{if(failAt==='cache')emitFailure();else if(transportCached){send('HELPER_READY','-',{cached:true});workerCheck();}else{parts=[];send('TRANSPORT_NEEDED','-',{});}});}
   if(kind==='INSTALL'){parts.push({id,bytes:Buffer.from(value.chunk,'base64')});if(ack)queueMicrotask(()=>send('ACK',id,{accepted:Number(id)}));}
   if(kind==='TRANSPORT_END'){const bytes=Buffer.concat(parts.map(p=>p.bytes));assert.equal(value.size,bytes.length);assert.equal(value.sha256,hash(bytes));assert.equal(bytes.toString(),trusted.transport.source);uploads.push({kind:'transport',bytes});queueMicrotask(()=>{send('HELPER_READY','-',{cached:false});workerCheck();});}
-  if(kind==='INSTALL_END'){const bytes=Buffer.concat(parts.map(p=>p.bytes));assert.equal(value.encoding,'gzip');assert.equal(value.size,bytes.length);assert.equal(value.sha256,hash(bytes));const raw=gunzipSync(bytes);assert.equal(value.uncompressed_size,raw.length);assert.equal(value.uncompressed_sha256,hash(raw));assert.deepEqual(JSON.parse(raw),trusted.payload);uploads.push({kind:'worker',bytes,raw});queueMicrotask(()=>{send('WORKER_READY','-',{cached:false});send('PHASE','-',{phase:'checking_health'});send('READY','-',{...health,runtime_id:trusted.payload.expected_runtime_id});});}
+  if(kind==='INSTALL_END'){const bytes=Buffer.concat(parts.map(p=>p.bytes));assert.equal(value.encoding,'gzip');assert.equal(value.size,bytes.length);assert.equal(value.sha256,hash(bytes));const raw=gunzipSync(bytes);assert.equal(value.uncompressed_size,raw.length);assert.equal(value.uncompressed_sha256,hash(raw));if(hello.worker_encoding==='gzip-delta-v1'){const delta=JSON.parse(raw);assert.deepEqual(delta.manifest,trusted.payload.files.map(({base64,...row})=>row));assert(delta.files.every(row=>trusted.payload.files.some(file=>JSON.stringify(file)===JSON.stringify(row))));}else assert.deepEqual(JSON.parse(raw),trusted.payload);uploads.push({kind:'worker',bytes,raw});queueMicrotask(()=>{send('WORKER_READY','-',{cached:false});send('PHASE','-',{phase:'checking_health'});send('READY','-',{...health,runtime_id:trusted.payload.expected_runtime_id});});}
   if(kind==='STOP'&&stop)queueMicrotask(()=>send('STOPPED',id,{}));
  }};
  const pty={spawn:()=>child},plan={kind:'ssh',mode:'interactive',name:'Owned fake SSH',launch:{file:path.resolve('inert-shell'),args:[],cwd:process.cwd()}},session=createTerminalSession({pty,plan,privateServiceChannel,serviceTimeouts:{start:250,stop:250,request:250,...timeouts}});
@@ -337,4 +337,19 @@ test('main-owned private slave preflight failure requires exact EXITED but no pu
 });
 for(const variant of ['wrong-id','wrong-value'])test('private service STOP still rejects '+variant+' before closing its authenticated channel',async()=>{
  const f=fixture({privateServiceChannel:true,resume:false,stop:false});try{const ready=await f.start(),stopping=f.session.serviceStop({serviceId:ready.serviceId}),stopId=f.writes.at(-1).trimEnd().split(':')[3];f.send('STOPPED',variant==='wrong-id'?'foreign':stopId,variant==='wrong-value'?{extra:true}:{});await assert.rejects(stopping,/protocol_failed/);assert.equal(f.session.serviceState().serviceActive,true);assert(!f.writes.some(text=>text.startsWith('printf ')));}finally{f.session.dispose();}
+});
+
+
+test('negotiated worker delta inventory is fragmented and transfers only changed source',async()=>{
+ const f=fixture({auto:false});try{
+  const pending=f.start();f.send('BOOTSTRAP_READY','-',{protocol:2,python:[3,11,9],sqlite:[3,37,2],capabilities:{responseEncodings:[],uploadChunkBytes:[2048],workerEncodings:['gzip-files-v1','gzip-delta-v1']}});
+  assert.equal(f.hello.worker_encoding,'gzip-delta-v1');f.send('HELPER_READY','-',{cached:true});
+  const raw=Buffer.from(JSON.stringify({files:[]}));for(let i=0,at=0;at<raw.length;i++,at+=96)f.send('FRAGMENT','-',{kind:'WORKER_NEEDED',index:i,last:at+96>=raw.length,chunk:raw.subarray(at,at+96).toString('base64')});
+  const ready=await pending;assert.equal(ready.serviceStatus,'connected');assert.equal(f.uploads.length,1);const delta=JSON.parse(f.uploads[0].raw);assert.deepEqual(delta.files,f.trusted.payload.files);assert.equal(f.session.serviceState().serviceStatus,'connected');
+ }finally{f.session.dispose();}
+});
+test('delta worker inventory cannot turn reuse into a source upload',async()=>{
+ const f=fixture({auto:false});f.trusted.reuseOnly=true;try{
+  const pending=f.start();f.send('BOOTSTRAP_READY','-',{protocol:2,python:[3,11,9],sqlite:[3,37,2],capabilities:{responseEncodings:[],uploadChunkBytes:[2048],workerEncodings:['gzip-files-v1','gzip-delta-v1']}});assert.equal(f.hello.worker_encoding,'gzip-files-v1');f.send('HELPER_READY','-',{cached:true});f.send('WORKER_NEEDED','-',{});await assert.rejects(pending,/service_protocol_failed/);assert.equal(f.uploads.length,0);
+ }finally{f.session.dispose();}
 });
