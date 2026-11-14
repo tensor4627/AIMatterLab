@@ -10,6 +10,8 @@ AIMatterLab 0.1.0 是基于 GPU Sampling Studio 的科学计算桌面工作台�
 
 Windows 用户解压发行 ZIP 后，双击 `AIMatterLab.exe` 即可打开工作区。首次使用可按需要选择以下操作。升级时的数据位置见[命名与配置兼容说明](docs/development/product-naming.md)。
 
+从源码安装 0.1.0 时，复制[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词给本机 Agent 即可。Agent 使用官方仓库、固定提交和本机选用的计算环境。
+
 1. 普通对话可直接连接服务商；进行本地科学计算时从「连接计算资源 → 本地 WSL」选择已安装的发行版，默认 Ubuntu。
 2. 在「工具 → 算力与管理 → 计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
 3. 普通会话无需预先创建项目；任务规划自动创建仅供编写输入的会话草稿工作区。执行前在部署页选择计算项目；在「设置 → 计算权限」管理项目。新项目默认启用全部已实现工具，确认输入目录、登记环境和资源建议后保存。运行限额与额外环境位于折叠设置中；已有项目设置保持原值。
@@ -129,7 +131,7 @@ SSH 集群页可以导入已有连接，选择 LSF / Slurm，协作探测环境�
 
 Agent 默认普通对话，开启「任务规划模式」才自动生成中央流程页。SSH 提供主机、用户名、端口独立设置，以及保存前连接测试。
 
-将 [INSTALL_AGENT.md](INSTALL_AGENT.md) 交给通用本地 Agent，从完整 checkout 开始自动配置与短例验收；公开 GitHub URL 尚待登记。详见 [安装说明](docs/one-prompt-install.md) 和 [本代验证](docs/releases/v0.5.md)。
+该代引入了由本机 Agent 执行的安装与短例验收流程。[历史验证](docs/releases/v0.5.md)
 
 ## GPU Sampling Studio 历史 v0.5.1 · 前端修复与独立复核
 

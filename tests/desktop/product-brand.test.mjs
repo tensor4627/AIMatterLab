@@ -13,6 +13,21 @@ test('public package and installation identity use the canonical brand while app
  assert.match(read('index.html'),new RegExp('<title>'+PRODUCT_NAME+'</title>'));
  for(const file of ['desktop/main.mjs','frontend/app/App.tsx','frontend/features/settings/SettingsPage.tsx','frontend/features/conversations/ChatMessage.tsx'])assert.match(read(file),/contracts\/product\.(?:json|mjs)/);
 });
+test('both one-prompt installation entry points identify the same release source as the manifest',()=>{
+ const manifest=JSON.parse(read('installation/manifest.json'));
+ assert.equal(manifest.repository_url,'https://github.com/tensor4627/AIMatterLab.git');
+ assert.match(manifest.source_commit,/^[a-f0-9]{40}$/);
+ const version=JSON.parse(read('package.json')).version;
+ assert.equal(manifest.version,version);
+ for(const file of [manifest.entry,'docs/one-prompt-install.md']){
+  const instructions=read(file);
+  for(const value of [manifest.repository_url,manifest.source_commit,version]){
+   assert.ok(instructions.includes(value),file+' must identify '+value);
+  }
+ }
+ assert.ok(read('README.md').includes('(docs/one-prompt-install.md)'));
+});
+
 // Scope legacy aliases to a product-label slot, never arbitrary scientific/provenance prose.
 const retiredProductLabel=value=>['GPU Sampling Studio','GPU-Sampling-Studio','Studio'].includes(value.trim());
 test('actual renderer product-label slots use the canonical name without scanning unrelated prose',()=>{

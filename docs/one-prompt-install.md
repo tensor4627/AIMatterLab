@@ -1,8 +1,12 @@
-# One-prompt 安装入口
+# AIMatterLab 0.1.0 单 prompt 安装
 
-将根目录 INSTALL_AGENT.md 交给本机 Codex、Claude Code 等通用 Agent。它负责获取指定 GitHub 版本、收集配置、执行受控安装与真实验收；软件内聊天服务商仍是独立的 Codex / Kimi / Qwen / DeepSeek 选择。集群端不安装 Agent CLI。
+复制下面这一段给能使用本机终端和 Git 的 Agent。新机器从源码安装时，电脑需要能读取该 GitHub 仓库。
 
-manifest 的 repository_url 仍为 null。当前入口可从本地完整 checkout 使用；发布后维护者需填写真实仓库和 release 地址、revision/hash。线上 clone / release 下载属于 not_run，不能虚构一个 URL。
+```text
+请在我的 Windows 电脑安装 AIMatterLab 0.1.0。从 https://github.com/tensor4627/AIMatterLab.git 获取仓库，先读 main 的 INSTALL_AGENT.md，在新目录检出 27793f59cdac5fd318045b63db610a287e0a85e9 并核对版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
+```
+
+完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)提供官方仓库和固定源码提交。已有完整检出时也可直接交付安装提示，并说明希望复用当前检出还是安装指定版本。源码已通过有读取权限的 Git 账号从新目录克隆；需要登录时在本机 Git 凭据界面完成。
 
 Windows 的源码启动、开发启动和安装器桌面阶段统一使用令牌前置检查。`node scripts/start.mjs --preflight-only` 在受限上下文返回 blocked，安装器此时尚未安装依赖、构建或启动 Electron。改用正常桌面上下文即可，普通非管理员账户受支持；不自动提权或更改 ACL、sandbox 和执行策略。安装器生成的 `Launch-AIMatterLab.cmd` 为 Windows 优先启动文件，并保留相同 profile；PS1 保留兼容。详见[原生启动故障记录](development/windows-startup-diagnostics.md)。
 
@@ -22,15 +26,15 @@ flowchart LR
  Final -->|全部选定检查 passed| Done[installation_success]
 ~~~
 
-默认私有配置及收据在 .studio/installation。plan 无执行副作用。configure 创建独立 venv；源码使用完整 commit，不切换已有源码分支。现有环境可以显式复用。环境配置结果不会悄悄替换用户配置；Agent 审查 configure.json 后合并并重新探测。Node/pnpm/Python/WSL 的系统安装由通用 Agent 按本机权限处理；需要管理员操作或重启时保持 blocked。
+默认私有配置及收据在 `.studio/installation`。`plan` 校验配置并写入本次计划。选择新环境时 `configure` 创建独立 venv；源码使用完整 commit。现有环境可以显式复用。Agent 审查 `configure.json` 后合并配置并重新探测。Node/pnpm/Python/WSL 的系统安装由通用 Agent 按本机权限处理；需要管理员操作或重启时保持 blocked。
 
-### 环境交接（0.18.4）
+### 环境交接
 
 安装验收与日常使用必须指向生成 launcher 的同一个 worker root 和 profile。安装结束前在该实例读取 `compute_readiness` / `list_environments`，核对选中的 Python、引擎、源码来源与 CUDA 观察结果，并为实际路线保存 `probe_environment` 运行时收据。另一隔离验收实例跑通，不代表正常实例已经登记。首启/连接时默认发现现有的标准 venv、conda 索引、PATH/已绑定源码中的程序，新增独立版本登记，保留旧环境和项目授权。该搜索有明确范围；自定义前缀和非标准原生构建可由 Agent 用 `draft_local_environment` 提议，在计算环境页用表单审阅保存。GPU 发现、依赖探测与真实科学短例分别记录。
 
 询问用户是否需要集群，优先导入已有 SSH 引用。先只读核验登录用户、调度器及队列，再讨论目标队列、资源与激活路径，使用 `draft_cluster_setup` 生成可审阅设置；连接检查不提交任务。连接页显示实际检查时间，失败清除旧成功，修改配置或结果过旧后显示待复查。计算节点 GPU/模型仍需用户审阅后的短例，不把登录节点探测当成安装成功。
 
-dev.18 的[连接引导实施契约](design/compute-connection-hil.md)进一步区分本地 WSL、已有密钥/转发入口与人工二步认证。安装 Agent 只收集所选来源、用户名和密钥引用等必要设置；密码、私钥和验证码由用户在对应认证界面处理，不写进安装 prompt 或交给模型。连接设置与项目使用范围分开，登录节点检查与执行节点短例分开。该改造目前处于源码阶段，安装器不能因文档存在就宣称支持真实 MFA，也不能用自动重试替代人工认证。日常运行继续使用登记环境与运行时收据，不重新载入安装说明或重新安装软件。
+[连接引导实施契约](design/compute-connection-hil.md)区分本地 WSL、已有密钥或转发入口、人工二步认证。安装 Agent 收集所选来源、用户名和密钥引用等必要设置。密码、私钥和验证码由用户在对应界面处理。使用真实 SSH 站点时，分别记录登录结果、所选资源的执行授权和计算节点短例的结果。日常运行继续使用登记环境和运行时收据。
 
 ## Kimi / Qwen 按需安装
 
@@ -44,7 +48,7 @@ dev.18 的[连接引导实施契约](design/compute-connection-hil.md)进一步�
 
 ## 配置与命令
 
-复制 installation/config.example.json 到忽略目录，填写目标 Linux Python 及 repositories。Windows Node 22.19+、pnpm 11、目标 Python 3.10+。Codex 按所需 app-server 协议和实际隔离能力检查兼容性；CLI 与协议生成参考版本不同仅显示 warning，由用户决定是否继续使用。Kimi / Qwen 优先复用兼容本机程序，缺失时由用户选择下载已锁定官方 ACP runtime，认证由用户完成。版本信息见 desktop/generated/version.json 和 package.json。
+复制 `installation/config.example.json` 到忽略目录，填写目标 Linux Python 和源码仓库。Windows 源码构建使用 Node 22.19+、pnpm 11。仅运行基础 worker 时目标 Python 最低为 3.9；选择 PyDyn 或其他科学短例时还需满足对应工具和锁定依赖的要求。Codex 按所需 app-server 协议和实际隔离能力检查兼容性。Kimi / Qwen 优先复用兼容本机程序，缺失时由用户选择下载已锁定的官方 ACP runtime，认证由用户完成。
 
 ~~~text
 python scripts/one_prompt.py plan --config .studio/installation/config.json
@@ -72,9 +76,9 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 每例检查真实退出码及 smoke-result.json，MD 还检查原子数、步数、有限能量和位移。它们不证明生产收敛、模型精度或长时间稳定性。
 
-desktop 使用独立 profile、真实 renderer/worker 和 provider 请求；真实调用被拒绝或需要认证时记 blocked，由用户登录后重验；账户字段不可用仍需用真实回复判定调用能力，不伪造登录。生成的 Launch-AIMatterLab.ps1（或 Linux launcher）复用验收 profile，不覆盖用户原安装。finalize 绑定当前配置和源码指纹，要求三个阶段均通过、短例集合完整；不存在“跳过后也成功”的路径。
+desktop 使用独立 profile、真实 renderer/worker 和 provider 请求。需要认证时，由用户登录后重验。Windows 用户双击 `Launch-AIMatterLab.cmd` 进入验收过的同一 profile，另有兼容 PS1 启动文件。finalize 绑定当前配置和源码指纹，要求三个阶段均通过且选定的短例集合完整。
 
-本代验证与发布状态见 [v0.17](releases/v0.17.md)；原始证据保留在忽略目录。
+本版桌面、开发者工具包和 CPU 适配器的验收范围见 [AIMatterLab 0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
 同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 AIMatterLab 核对任务，或选择独立安装 root。
 
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。
@@ -94,4 +98,4 @@ python scripts/one_prompt.py reuse-existing --config .studio/installation/config
 
 每次审计实际执行 target-probe 和 desktop/provider 检查。完成过的 smoke 不会被默认冒充新运行；需要本轮全新科学证据时换用新的两个目录。仅在显式 `--reuse-smoke-receipt`、已登记环境身份未变且源码无 dirty 标记时，才可恢复标有原始时间的历史 smoke；报告同时显示 `cached_evidence=true`，不能称本轮新科学运行。
 
-报告分别给出 `reuse_readiness_success`、`dry_run=true`、`installation_success=false` 与下载/安装/配置的 `not_run` 记录。复用环境的收据不能通过普通 finalize 变成新机器安装成功。GPUMD、两条采样、NEB 和训练等全路线矩阵另外记录，不能伪装成安装器已内置的三条短例。线上下载、新机器安装和缺少 fixture 的路线保留 not_run / blocked。
+报告分别给出 `reuse_readiness_success`、`dry_run=true`、`installation_success=false` 与复用模式跳过的动作。每台新机器的完整安装结果由该机的 finalize 收据确认。Git 源码克隆、预编译发行包下载和目标环境的科学运行分别记录；额外引擎缺少所选 fixture 时保留 blocked。

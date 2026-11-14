@@ -1,12 +1,25 @@
-# AIMatterLab：交给本地 Agent 的安装提示
+# AIMatterLab 0.1.0 · 交给本机 Agent 的安装提示
 
 你是用户本机的安装协作者。请实际执行本文流程，安装 AIMatterLab、配置用户选定的计算环境，并运行版本化短例。适用于 Codex、Claude Code 等具备文件、终端和 Git 能力的通用 Agent。目标集群无需安装这些 Agent CLI。
 
 ## 获取可信源码
 
-- 若本文位于完整仓库内，使用当前 checkout，先阅读 AGENTS.md、installation/manifest.json、installation/config.example.json、docs/one-prompt-install.md，以及 agent/builtin-skills/studio-compute-workflow/SKILL.md。
-- 若只有本文，向用户一次询问源码 GitHub URL。发布仓库尚未填入 manifest 时不得猜测地址、伪造下载成功或把其他项目当作本项目。
-- 在用户选择的新目录 clone 指定发布版本。检查真实 Git revision、发布包哈希与依赖锁；不要覆盖旧安装、重置用户文件或切换现有科学引擎仓库分支。
+- 仅收到本文也可开始。官方源码仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.0 的固定源码提交为 `27793f59cdac5fd318045b63db610a287e0a85e9`。使用本机 Git 凭据读取仓库；需要登录时由用户在 Git 凭据界面完成。
+- 从新目录安装时，以本安装提示所列的完整提交为准。以下命令从用户选择的父目录执行，`AIMatterLab-0.1.0` 为新目录名。
+
+```powershell
+$sourceCommit = '27793f59cdac5fd318045b63db610a287e0a85e9'
+git clone --no-checkout --single-branch --branch main https://github.com/tensor4627/AIMatterLab.git AIMatterLab-0.1.0
+if ($LASTEXITCODE -ne 0) { throw '请核对仓库读取权限和新目录位置' }
+Set-Location -LiteralPath AIMatterLab-0.1.0
+git switch --detach $sourceCommit
+if ($LASTEXITCODE -ne 0 -or (git rev-parse HEAD) -ne $sourceCommit) { throw '源码提交核对失败' }
+$release = Get-Content -Raw -LiteralPath installation/manifest.json | ConvertFrom-Json
+if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.0') { throw '安装清单与所选产品版本不符' }
+```
+
+- 源码就位后，从该提交读取 `AGENTS.md`、`installation/config.example.json`、`scripts/one_prompt.py` 和 `agent/builtin-skills/studio-compute-workflow/SKILL.md`。按本次取得的安装提示继续配置。仓库和资源获取使用已核对的实际地址，版本化安装使用固定源码及其依赖锁。
+- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.1.0 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
 - 当前桌面平台为 Windows + WSL。缺少 WSL、重启权限、CUDA、兼容 Agent provider 或指定科学仓库时如实记录 blocked，并解释所缺条件。
 
 ## 一次收集关键配置
@@ -14,7 +27,7 @@
 先只读发现本机 Node、pnpm、Python、WSL 发行版、已有 Agent CLI、科学环境和 SSH 配置。然后将不能可靠发现的内容合并成一次问题：
 
 1. 本地 WSL 或 SSH 集群；集群必须明确 host、username、port、密钥路径引用及跳转，不询问或复制密钥/密码内容。
-2. 选择软件内 Agent provider：Codex / Kimi / Qwen / DeepSeek API。安装 Agent 可以是 Claude Code，软件内 provider 是独立选择。Codex、Kimi、Qwen 使用其对应登录方式；DeepSeek 使用 AIMatterLab 的「Agent → DeepSeek API → 登录 / 账户」输入 API Key，加密存入本机凭据库，不安装 DeepSeek CLI。不要让用户把 Key 发到对话，也不要把 Key 写入安装 JSON、启动参数、公开日志或集群。登录与 OAuth 必须由用户完成。
+2. 选择软件内服务商 Codex、Kimi、Qwen 或 DeepSeek。安装 Agent 可以是 Claude Code。Codex、Kimi、Qwen 使用各自的登录方式；DeepSeek 用户从「账号与 API」选择 DeepSeek 并输入 API Key，密钥保存在本机加密凭据库。由用户在认证界面输入凭据，安装配置与日志只记录验证结果。
 3. 需要验收的模块和短例；首版提供 worker、CPU reference-md、实际 PyDyn CUDA pydyn-md。默认验收这三项。用户明确只选 CPU 时保留实际选择范围，不宣称 GPU/PyDyn 验证通过。
 4. 已有目标 Python/引擎路径，或独立安装前缀、GitHub 科学源码 URL/full commit、精确版本的 Python 包。优先复用已登记环境，新增环境放独立目录。
 5. GPU、队列/partition、CPU、内存、时限，以及集群登录节点是否允许安装依赖。只读发现后仅补问无法可靠判定的字段。未知调度系统、LSF 内存按 slot/按 job 语义和 GPU 选项要与用户确认；不猜测站点参数。
@@ -56,6 +69,10 @@ Windows 桌面验证和启动均使用共用的 `scripts/start.mjs` 入口；可
 如果站点禁止登录节点安装/编译，不绕过政策：将安装 runtime 与 bootstrap recipe 放进用户审阅的调度脚本，使用已有基线 Python，在分配的计算节点创建环境，保存安装收据，再 probe 和 smoke。远端仅收到环境 recipe/单次任务 helper，不部署 Agent CLI，也不携带本机 SSH/模型凭据。
 
 NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、数据、偏置和短例验收。首版安装器未内置这些额外 fixture；选择未提供 fixture 的模块会 blocked。不要取消选定模块来制造成功，也不将 ASE 参考 MD 标成 PyDyn/GPUMD。`scripts/science-smoke.py` 是独立的科学验收入口，仅在明确授权后用 `--config` 指定用户自己的私有路径和新运行目录；安装器不自动调用它。
+
+## 第三方工具
+
+如用户选择接入第三方工具，安装后从「工具与资源 → 第三方工具包」检查并登记开发者交付目录。开发者 ZIP 和生成示例的命令见[开发者快速开始](developer/README.md)。0.1.0 提供固定 CPU `installation.check` 适配器；按所选计算项目和环境记录实际安装、测试及产物。第三方工具验收独立于上面的安装器短例。
 
 ## 可迁移 skill 与本机沉淀
 
