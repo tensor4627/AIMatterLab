@@ -10,6 +10,8 @@
 
 Windows 的源码启动、开发启动和安装器桌面阶段统一使用令牌前置检查。`node scripts/start.mjs --preflight-only` 在受限上下文返回 blocked，安装器此时尚未安装依赖、构建或启动 Electron。改用正常桌面上下文即可，普通非管理员账户受支持；不自动提权或更改 ACL、sandbox 和执行策略。安装器生成的 `Launch-AIMatterLab.cmd` 为 Windows 优先启动文件，并保留相同 profile；PS1 保留兼容。详见[原生启动故障记录](development/windows-startup-diagnostics.md)。
 
+需要额外科学工具时，按[工具仓库清单](../installation/tool-sources.json)获取用户选定的源码分支，然后按该仓库内的安装说明操作。Windows 解压版也提供 `resources/tool-sources.json`。
+
 ## 安装状态机
 
 ~~~mermaid

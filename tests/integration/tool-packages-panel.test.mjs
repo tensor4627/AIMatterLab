@@ -9,6 +9,24 @@ import {toolPackagesHarness,packageRecord,configurationRecord} from "../helpers/
 
 const calls=(h,method)=>h.calls.filter(call=>call.method===method);
 const node=(h,id)=>h.find(node=>node.props?.['data-testid']===id);
+test('an empty tool catalog shows the same source commands and upstream guides shipped with the desktop',async()=>{
+ const root=new URL('../../',import.meta.url);
+ const manifest=JSON.parse(fs.readFileSync(new URL('installation/manifest.json',root),'utf8'));
+ const sources=JSON.parse(fs.readFileSync(new URL(manifest.tool_sources,root),'utf8'));
+ assert.deepEqual(sources.map(tool=>tool.name),['GPU-Sampling / GPUMD','pyGAS','PyDyn','TorchNEP','HotPP']);
+ const pkg=JSON.parse(fs.readFileSync(new URL('package.json',root),'utf8'));
+ assert.ok(pkg.build.extraResources.some(rule=>rule.from===manifest.tool_sources&&rule.to==='tool-sources.json'));
+ const h=toolPackagesHarness({records:[]});
+ try{
+  await h.flush();
+  const list=h.text(node(h,'tool-source-list'));
+  for(const tool of sources){
+   assert.match(tool.validated_commit,/^[a-f0-9]{40}$/);
+   assert.ok(list.includes('git clone --branch '+tool.branch+' '+tool.url));
+   assert.ok(list.includes(tool.guide));
+  }
+ }finally{h.unmount();}
+});
 const selected=async(h,id='worker-reference')=>{await h.flush();h.change('已登记工具包',id);await h.flush();};
 async function planned(h){await selected(h);h.click('tool-configuration-start');await h.flush();h.change('工具配置环境','environment-A');h.change('工具配置项目','project-A');h.click('tool-configuration-plan');await h.flush();}
 async function active(h){await selected(h);h.change('已登记配置','configuration-01');await h.flush();h.click('查看执行技能与指导范围');await h.flush();}

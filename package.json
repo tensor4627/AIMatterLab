@@ -103,6 +103,10 @@
     },
     "extraResources": [
       {
+        "from": "installation/tool-sources.json",
+        "to": "tool-sources.json"
+      },
+      {
         "from": "desktop/platform/terminal-service",
         "to": "terminal-service",
         "filter": [

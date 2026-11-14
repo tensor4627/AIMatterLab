@@ -5,6 +5,7 @@
   "repository_url": "https://github.com/tensor4627/AIMatterLab.git",
   "release_revision": "v0.1.0",
   "source_commit": "27793f59cdac5fd318045b63db610a287e0a85e9",
+  "tool_sources": "installation/tool-sources.json",
   "desktop_platform": "Windows + WSL",
   "entry": "INSTALL_AGENT.md",
   "cli": "scripts/one_prompt.py",

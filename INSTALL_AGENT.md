@@ -22,6 +22,8 @@ if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.0') { throw
 - 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.1.0 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
 - 当前桌面平台为 Windows + WSL。缺少 WSL、重启权限、CUDA、兼容 Agent provider 或指定科学仓库时如实记录 blocked，并解释所缺条件。
 
+需要科学工具时，先读随 AIMatterLab 提供的[工具仓库清单](installation/tool-sources.json)。按用户选择从 `url` 克隆 `branch` 到新目录，再阅读其中的 `guide` 完成安装。`validated_commit` 记录历史接入验收版本，登记环境时使用实际检出的提交。
+
 ## 一次收集关键配置
 
 先只读发现本机 Node、pnpm、Python、WSL 发行版、已有 Agent CLI、科学环境和 SSH 配置。然后将不能可靠发现的内容合并成一次问题：
@@ -29,7 +31,7 @@ if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.0') { throw
 1. 本地 WSL 或 SSH 集群；集群必须明确 host、username、port、密钥路径引用及跳转，不询问或复制密钥/密码内容。
 2. 选择软件内服务商 Codex、Kimi、Qwen 或 DeepSeek。安装 Agent 可以是 Claude Code。Codex、Kimi、Qwen 使用各自的登录方式；DeepSeek 用户从「账号与 API」选择 DeepSeek 并输入 API Key，密钥保存在本机加密凭据库。由用户在认证界面输入凭据，安装配置与日志只记录验证结果。
 3. 需要验收的模块和短例；首版提供 worker、CPU reference-md、实际 PyDyn CUDA pydyn-md。默认验收这三项。用户明确只选 CPU 时保留实际选择范围，不宣称 GPU/PyDyn 验证通过。
-4. 已有目标 Python/引擎路径，或独立安装前缀、GitHub 科学源码 URL/full commit、精确版本的 Python 包。优先复用已登记环境，新增环境放独立目录。
+4. 核对已有目标 Python 和引擎路径，或选择独立安装前缀、清单中的科学工具及所需依赖版本。优先复用已登记环境，新增环境放独立目录。
 5. GPU、队列/partition、CPU、内存、时限，以及集群登录节点是否允许安装依赖。只读发现后仅补问无法可靠判定的字段。未知调度系统、LSF 内存按 slot/按 job 语义和 GPU 选项要与用户确认；不猜测站点参数。
 
 配置保存在忽略的 .studio/installation/config.json。复制样例后填真实值。不要把连接、代理、账号、密钥或日志写入源码、共享报告或对话摘要。

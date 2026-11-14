@@ -1,0 +1,37 @@
+[
+  {
+    "name": "GPU-Sampling / GPUMD",
+    "url": "https://github.com/bigd4/GPUMD.git",
+    "branch": "GPU-Sampling",
+    "guide": "README.md",
+    "validated_commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1"
+  },
+  {
+    "name": "pyGAS",
+    "url": "https://gitlab.com/tensor4627/pygas.git",
+    "branch": "main",
+    "guide": "GPU-MetaD_Manual_CN.md",
+    "validated_commit": "ba5787380181304a0e4c75578c2ecff736737e18"
+  },
+  {
+    "name": "PyDyn",
+    "url": "https://gitlab.com/bigd4/pydyn.git",
+    "branch": "main",
+    "guide": "README.md",
+    "validated_commit": "2ac69157856a994520eb6e8e03500e98bd3a5abc"
+  },
+  {
+    "name": "TorchNEP",
+    "url": "https://gitlab.com/tensor4627/torchnep.git",
+    "branch": "nep-zbl",
+    "guide": "README.md",
+    "validated_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd"
+  },
+  {
+    "name": "HotPP",
+    "url": "https://gitlab.com/bigd4/hotpp.git",
+    "branch": "master",
+    "guide": "docs/source/install.rst",
+    "validated_commit": "fa4b33a844080871dd998165926a089822a51b41"
+  }
+]

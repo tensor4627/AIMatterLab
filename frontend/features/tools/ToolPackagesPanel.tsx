@@ -2,6 +2,7 @@ import type {AgentProvider} from '../../../contracts/dto/agent';
 import type {ToolPackageInspection,ToolPort,ToolParameter} from '../../../contracts/dto/tools';
 import type {SkillAttachment} from "../conversations/agent-types";
 import {t} from "../../ui/i18n";
+import toolSources from '../../../installation/tool-sources.json';
 import {referenceConfigurationSupported,useToolPackages} from './useToolPackages';
 import './tool-packages.css';
 
@@ -21,6 +22,15 @@ export default function ToolPackagesPanel({provider,onSelect}:{provider:AgentPro
  const canShare=context?.hasConversation&&!!context.owner_key&&context.provider===provider&&state.sharingProvider===context.provider;
  const canGrant=canShare&&(state.bound||context?.configuration_id===execution?.configuration_id&&context?.providers.includes(provider));
  return <section className="card tool-packages-panel" data-testid="tool-packages-panel"><h2>{t('工具包与执行环境')}</h2><p>{t('登记保存工具声明和源码快照。真实环境的安装与测试通过后，再生成该环境的执行技能。')}</p><div className="button-row"><button className="button" disabled={working} onClick={state.choose} data-testid="tool-package-choose">{t('选择并检查工具包')}</button><button className="button" disabled={state.loading||working} onClick={()=>void state.refresh()}>{t('刷新工具包目录')}</button></div>
+  <details className="tool-source-list" data-testid="tool-source-list">
+   <summary>{t('已验证工具的源码仓库')}</summary>
+   <p>{t('复制命令拉取所列分支，再按仓库内的安装说明操作。分支版本可能与历史验收提交不同。')}</p>
+   <ul>{toolSources.map(tool=><li key={tool.url}>
+    <strong>{tool.name}</strong>
+    <code className="tool-source-command" dir="ltr">git clone --branch {tool.branch} {tool.url}</code>
+    <span>{t('安装说明')} · <code>{tool.guide}</code></span>
+   </li>)}</ul>
+  </details>
   {state.loading&&<p role="status">{t('正在读取工具包元数据…')}</p>}{state.busy&&<p role="status">{t(state.busy)}…</p>}{state.error&&<p role="alert" className="notice" data-testid="tool-package-error">{state.error}</p>}{state.notice&&<p role="status" className="notice" data-testid="tool-package-notice">{t(state.notice)}</p>}
   <label>{t('已登记工具包')}<select aria-label={t('已登记工具包')} value={state.selected} onChange={event=>state.selectPackage(event.target.value)}><option value="">{t('选择工具包')}</option>{state.packages.map(value=><option key={value.package_id} value={value.package_id}>{value.name} · {value.package_id}</option>)}</select></label>
   {candidate&&<div className="tool-package-candidate" data-testid="tool-package-candidate"><h3>{t('检查结果')} · {candidate.inspection.manifest.name}</h3><p>{t('定义检查通过；安装与功能测试未运行。')}</p><p className="mono">{candidate.root}</p>{declaration(candidate.inspection)}<div className="button-row"><button className="button primary" disabled={working||!!registeredCandidate} onClick={()=>state.changePackage('register')}>{t('登记此工具包')}</button>{samePackage&&<><button className="button" disabled={working||candidate.inspection.package_version===record.package_version} onClick={()=>state.changePackage('update')}>{t('更新为此版本')}</button><button className="button" disabled={working||candidate.inspection.package_version!==record.package_version||candidate.root===record.package_root} onClick={()=>state.changePackage('relocate')}>{t('仅更新包位置')}</button></>}</div>{registeredCandidate&&!samePackage&&<p>{t('此工具已登记。先在上方选择同一工具，再检查新版本或新位置。')}</p>}</div>}

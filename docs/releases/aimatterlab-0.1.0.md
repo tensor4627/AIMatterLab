@@ -7,6 +7,7 @@
 - Windows ZIP 解压后双击 `AIMatterLab.exe`。单文件便携 EXE 启动时先解压。两种发行方式使用同一桌面程序。
 - 使用本机 Agent 从源码安装时，可以复制[单 prompt 安装提示](../one-prompt-install.md)。从新目录按文档命令通过 HTTPS 克隆仓库，检出已验收的源码 `27793f5` 并运行 `plan` 已通过。该检查覆盖源码获取、版本核对与安装计划，目标机登录和科学短例仍需在用户选择的环境完成。
 - 从「工具与资源 → 第三方工具包」选择开发者交付的 `<id>-package` 目录。桌面检查 Git 提交、工具声明和文件内容，然后登记可追溯的版本。已有「技能库」入口也可访问同一面板。
+- 同一页面的「已验证工具的源码仓库」列出 GPU-Sampling、pyGAS、PyDyn、TorchNEP 和 HotPP 的克隆命令及仓库内安装文档。清单也随 Windows 包放在 `resources/tool-sources.json`。[源码清单](../../installation/tool-sources.json)
 - 独立开发者 ZIP 提供 `tool.json` v1 规范、声明检查器、交付指南和 CPU 示例生成器。示例可在解压目录中生成和检查；用户选择授权项目和环境后，固定串行 CPU `installation.check` 适配器可安装、测试、生成执行技能并启动新作业。其他工具可登记定义，运行支持取决于对应适配器。[开发者快速开始](../../developer/README.md)
 - `pnpm run pack` 将桌面 ZIP、单文件 EXE、开发者 ZIP 和 `SHA256SUMS.txt` 写入 `release/v0.1.0/`。本地 Windows 成品未签名。
 
@@ -49,3 +50,5 @@
 | not_run | 全界面按钮审计、全量科学回归、真实模型账户请求、生产 SSH 作业及多平台分发。CPU 示例检查工程执行与产物；科学数值正确性仍需各工具在目标环境独立验收。 |
 
 当次日志、截图、原始计时和文件核对结果存放在 Git 忽略的 `.studio/aimatterlab-dev34/`。产品源码、开发者规范和本记录随 `dev` 提交。
+
+**工具清单补验（2026-11-14）**　5/5 所列分支均从远端克隆并读到安装文档。使用无相邻工具仓库及全新桌面配置的 Windows ZIP 验证了五条克隆命令与随包清单，组件及封包测试 51 项通过。历史验收提交保存在 `validated_commit`；本次未另行安装科学引擎或运行科学计算。

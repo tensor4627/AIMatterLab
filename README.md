@@ -4,6 +4,8 @@ AIMatterLab 0.1.0 是基于 GPU Sampling Studio 的科学计算桌面工作台�
 
 [0.1.0 发布说明](docs/releases/aimatterlab-0.1.0.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
+要安装 GPU-Sampling、pyGAS、PyDyn、TorchNEP 或 HotPP，可以在「工具与资源 → 第三方工具包 → 已验证工具的源码仓库」复制克隆命令，再按工具仓库提供的说明安装。源码和桌面版都随附这份[工具仓库清单](installation/tool-sources.json)。
+
 开发者交付固定 Git 版本的源码、工具声明、操作指南和测试入口。用户在「工具与资源 → 第三方工具包」检查并登记交付包，在已有执行适配支持的范围内配置环境、运行检查。外部作者可使用独立的[开发者工具包](developer/skills/studio-tool-integration.zip)和[接入示例](developer/README.md)。
 
 ## 启动

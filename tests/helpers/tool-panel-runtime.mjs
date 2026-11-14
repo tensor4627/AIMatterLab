@@ -12,6 +12,7 @@ export function toolPanelRuntime({file,props,bridge,flushCycles,external}){
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
  const useEffect=(fn,deps)=>{const index=cursor++,old=hooks[index];if(!old||!deps||deps.some((value,i)=>!Object.is(value,old.deps?.[i]))){const record={deps,cleanup:old?.cleanup};hooks[index]=record;effects.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
  function load(file){
+  if(file.endsWith('.json'))return {default:JSON.parse(fs.readFileSync(file,'utf8'))};
   file=path.resolve(file);if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);
   const require=name=>{if(name==='react')return {useState,useRef,useEffect};if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};if(name.endsWith('/i18n')||name==='./i18n')return {t:value=>value};if(name.endsWith('.css'))return {};if(name.startsWith('.')){const target=path.resolve(path.dirname(file),name);return load(['.ts','.tsx'].map(ext=>target+ext).find(candidate=>fs.existsSync(candidate))||target);}return external(name);};
   new Function('require','module','exports','window','setTimeout','clearTimeout',compiled(file))(require,module,module.exports,bridge,(fn,delay)=>{const id=++timerSequence;timers.set(id,{fn,delay});return id;},id=>timers.delete(id));return module.exports;
