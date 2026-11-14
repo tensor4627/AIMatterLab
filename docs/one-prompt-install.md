@@ -3,7 +3,7 @@
 复制下面这一段给能使用本机终端和 Git 的 Agent。新机器从源码安装时，电脑需要能读取该 GitHub 仓库。
 
 ```text
-请在我的 Windows 电脑安装 AIMatterLab 0.1.0。从 https://github.com/tensor4627/AIMatterLab.git 获取仓库，先读 main 的 INSTALL_AGENT.md，在新目录检出 27793f59cdac5fd318045b63db610a287e0a85e9 并核对版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
+请在我的 Windows 电脑安装 AIMatterLab 0.1.0。从 https://github.com/tensor4627/AIMatterLab.git 获取仓库，先读 main 的 INSTALL_AGENT.md，在新目录检出 b2eba88374ec2c2df9dbc2d83d7b120f8615e479 并核对版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
 ```
 
 完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)提供官方仓库和固定源码提交。已有完整检出时也可直接交付安装提示，并说明希望复用当前检出还是安装指定版本。源码已通过有读取权限的 Git 账号从新目录克隆；需要登录时在本机 Git 凭据界面完成。

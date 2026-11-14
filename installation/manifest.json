@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "repository_url": "https://github.com/tensor4627/AIMatterLab.git",
   "release_revision": "v0.1.0",
-  "source_commit": "27793f59cdac5fd318045b63db610a287e0a85e9",
+  "source_commit": "b2eba88374ec2c2df9dbc2d83d7b120f8615e479",
   "tool_sources": "installation/tool-sources.json",
   "desktop_platform": "Windows + WSL",
   "entry": "INSTALL_AGENT.md",

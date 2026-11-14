@@ -4,11 +4,11 @@
 
 ## 获取可信源码
 
-- 仅收到本文也可开始。官方源码仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.0 的固定源码提交为 `27793f59cdac5fd318045b63db610a287e0a85e9`。使用本机 Git 凭据读取仓库；需要登录时由用户在 Git 凭据界面完成。
+- 仅收到本文也可开始。官方源码仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.0 的固定源码提交为 `b2eba88374ec2c2df9dbc2d83d7b120f8615e479`。使用本机 Git 凭据读取仓库；需要登录时由用户在 Git 凭据界面完成。
 - 从新目录安装时，以本安装提示所列的完整提交为准。以下命令从用户选择的父目录执行，`AIMatterLab-0.1.0` 为新目录名。
 
 ```powershell
-$sourceCommit = '27793f59cdac5fd318045b63db610a287e0a85e9'
+$sourceCommit = 'b2eba88374ec2c2df9dbc2d83d7b120f8615e479'
 git clone --no-checkout --single-branch --branch main https://github.com/tensor4627/AIMatterLab.git AIMatterLab-0.1.0
 if ($LASTEXITCODE -ne 0) { throw '请核对仓库读取权限和新目录位置' }
 Set-Location -LiteralPath AIMatterLab-0.1.0
