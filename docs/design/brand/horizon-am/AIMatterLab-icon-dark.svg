@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img">
+  <title>AIMatterLab · 双峰方形图标</title>
+  <rect id="dark-ground" width="1024" height="1024" rx="164" fill="#20192E"/>
+  <g transform="translate(512 512) scale(1) translate(-512 -512)"><g id="am-horizon">
+    <defs><clipPath id="snow-boundary"><path d="M320 244.275 L415.704 432.031 L229.588 481.359 Z"/></clipPath></defs>
+    <path id="am-body" fill="#8468BE" d="M120 768.725 L320 244.275 L512 620.947 L704 244.275 L904 768.725 L832 749.45 L704 367.958 L548 706.08 L476 706.08 L374 469.154 L276 494.854 L192 749.45 Z"/>
+    <path id="horizon" fill="#8468BE" stroke="#8468BE" stroke-width="0" stroke-linejoin="round" d="M78 779.725 C259 705.725 417 683.725 512 683.725 C607 683.725 765 705.725 946 779.725 C757 730.725 615 708.725 512 708.725 C409 708.725 267 730.725 78 779.725 Z"/>
+    <path id="snow" fill="#FFFFFF" d="M320 244.275 L415.704 432.031 L229.588 481.359 Z"/>
+    <path id="snow-rim" fill="none" stroke="#685C82" stroke-width="16" stroke-linejoin="miter" stroke-miterlimit="6" clip-path="url(#snow-boundary)" d="M229.588 481.359 L320 244.275 L415.704 432.031"/>
+    <path id="star" fill="#F2B54E" transform="translate(512 406.625) scale(1) translate(-512 -406.625)" d="M512 344.625 C520 387.625 530 399.625 575 406.625 C530 413.625 520 425.625 512 468.625 C504 425.625 494 413.625 449 406.625 C494 399.625 504 387.625 512 344.625 Z"/>
+  </g></g>
+</svg>
