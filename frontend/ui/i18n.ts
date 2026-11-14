@@ -199,7 +199,6 @@ const english:Record<string,string> = {
 "首次设置会保存此连接的服务登记。后续登录连接已登记服务，并重新核对本次通道；需要更换 Python 环境或服务文件时再更新。":"Initial setup saves a service registration for this connection. After future logins, connect the registered service and verify the new channel. Update when the Python environment or service files need to change.",
 "返回交互终端只断开本次服务通道，服务登记会保留。Agent 交接仅对当前对话生效。":"Returning to the interactive terminal disconnects only this service channel and retains the registration. Agent handoff applies only to the current conversation.",
 "已登记的位置":"Registered locations",
-"作业服务目录":"Job service directory",
 "作业服务管理包":"Worker runtime directory",
 "登录目录":"Login directory",
 "工作区（来自服务已登记项目）":"Workspaces from registered projects",
