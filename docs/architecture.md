@@ -82,7 +82,7 @@ Windows 可执行运行缓存存于独立的用户本地执行缓存，配置与
 
 DSH 在公开事件与历史读取时，将显示条目标识按会话、轮次、条目类型和原始标识组合；原生 SDK 调用／回复及审批标识独立保留。历史归一化作用于读取副本，避免重用的轮内计数覆盖旧消息，不重写既有历史文件或重放模型请求。
 
-DSH 发布资源使用 `studio-sdk-v2` 依赖投影：保留官方 CLI／profile-boot、插件实现、包声明及许可证原字节，仅对精确审计版本的 CLI 与 SDK app 两个 bundle carrier 选择 Studio 正向 profile 所用依赖；其它实现包继续验证完整必需依赖、peer、目标平台 optional 与文件哈希。未启用的独立 Web、Office、语音及实验 profile 不属于 Studio 的模型服务入口。manifest 记录投影身份，变更投影会重新 staging，升级 carrier 版本须重新审计；开发审计仍可显式请求完整闭包。真实 SDK 启动、MCP 权限、恢复和取消按原链路执行。
+DSH 发布资源使用 `studio-sdk-v2` 依赖投影：保留官方 CLI／profile-boot、插件实现、包声明及许可证原字节，仅对精确审计版本的 CLI 与 SDK app 两个 bundle carrier 选择 AIMatterLab 所启用配置的依赖；其它实现包继续验证完整必需依赖、peer、目标平台 optional 与文件哈希。未启用的独立 Web、Office、语音及实验 profile 不属于 AIMatterLab 的模型服务入口。manifest 记录投影身份，变更投影会重新 staging，升级 carrier 版本须重新审计；开发审计仍可显式请求完整闭包。真实 SDK 启动、MCP 权限、恢复和取消按原链路执行。
 
 科学指导统一走 `ScientificSkills`／`ScientificSkillRouter` 与渐进读取策略。旧的、应用已无消费者的 pyGAS eager-attachment 实现已移除；当前服务仍保留明确 provider 同意、读取上限、链接拒绝、撤销再验证和已归档资源禁读。桌面 Catalog 在每个数据库实例复用固定 SQL 语句，绑定参数与事务／损坏记录保全语义保持一致。随包 worker 指纹在首次需要真实服务版本比较时求值并固定，不在未连接桌面首屏扫描源树。
 

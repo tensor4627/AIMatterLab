@@ -2,6 +2,27 @@
 
 本目录保存面向其他软件开发者的接入说明和 Agent skill。工具接入以 [软件规范](../docs/software-specification.md) 为依据：满足 AIMatterLab 的工具定义，能够完成安装并通过测试用例。
 
+## 从示例走通第一次接入
+
+解压开发者 ZIP，进入其中的 `studio-tool-integration` 目录。以下命令需要 Node 22.13 或更高版本以及 Git，会在相邻目录生成一个带真实 Git 提交的小型 CPU 工具包。
+
+```powershell
+node scripts/create-cpu-reference.mjs --output ../cpu-worker-reference-package
+node scripts/check-manifest.mjs ../cpu-worker-reference-package/tool.json
+```
+
+1. 在 AIMatterLab 打开「工具与资源 → 第三方工具包」，点击「选择并检查工具包」，选择刚生成的 `cpu-worker-reference-package` 目录。核对源码提交和声明后点击「登记此工具包」。再次打开桌面，仍可查到同一工具版本。
+2. 连接可用的 WSL/Linux 作业服务。在「配置真实执行环境」中选择已登记的 Python 3 环境和有对应授权的计算项目，或显式新建示例项目。生成配置计划，核对后授权安装、运行检查并生成执行技能。
+3. 在 AIMatterLab 源码根目录可以对同一份交付包重复下面的工程验收。将示例包路径换为 WSL/Linux 的绝对路径。脚本在仓库忽略的 `.studio/` 下新建独立运行目录，启动真实本地 worker，检查配置、安装、执行产物、重启恢复和权限。
+
+```bash
+node scripts/tool-configuration-integration.mjs --repo-root "$PWD" \
+  --reference-package /path/to/cpu-worker-reference-package \
+  --evidence-root "$PWD/.studio/third-party-reference" --python /usr/bin/python3
+```
+
+0.1.0 支持按 `tool.json` v1 登记外部开发者的工具定义。上述自动安装与执行示例使用随版本交付的固定串行 CPU `installation.check` 适配器。接入新的运行方式时，需实现相应适配并验证它在目标环境的产物。
+
 ## 工具接入 skill
 
 入口：[studio-tool-integration](skills/studio-tool-integration/SKILL.md)。

@@ -19,7 +19,7 @@ Windows 用户解压发行 ZIP 后，双击 `AIMatterLab.exe` 即可打开工作
 
 Kimi/Qwen 不再随便携包附带：优先发现本机环境变量中的兼容 CLI，缺失时在对应登录/连接入口由用户选择下载，显示真实安装进度。另提供 ZIP 解压即用版以减少重复解压等待；配置目录规则相同。
 
-工具包路线从「技能库 → 工具包与执行环境」登记声明、配置环境并生成执行技能。当前内置配置器支持固定 CPU `installation.check` 参考；登记其他工具的定义不代表其安装、测试或执行适配已经通过。
+在「工具与资源 → 第三方工具包」登记声明、配置环境并生成执行技能。「技能库 → 工具包与执行环境」也可打开同一面板。当前内置配置器支持固定 CPU `installation.check` 参考；登记其他工具的定义不代表其安装、测试或执行适配已经通过。
 
 作业输入复制到 WSL Linux 文件系统。桌面正常退出会停止聊天连接并关闭本次交互式 SSH/本地终端，已提交的作业继续运行。重新打开后，选择保存的连接会建立新终端，不复用上次终端缓存；同一次桌面运行内可收起、切换页面和交接终端。作业服务源代码部署到持久化 Linux runtime，便携包退出不会删除运行依赖。系统/WSL 停止后只能按引擎 checkpoint 能力续算；未知进程不会自动重提。
 
@@ -41,7 +41,7 @@ pnpm run pack
 
 测试阶段数据目录：AIMatterLab 本地数据默认放在当前 checkout 根目录的 `.config/`（已 Git 忽略；显式 `STUDIO_PROFILE_DIR` 仍优先）。换新版便携包测试前，关闭 AIMatterLab 后删除或改名 `.config` 即可重置；在仓库外运行的便携包使用其所在目录的 `.config`。旧共享 `%APPDATA%\gpu-sampling-studio` profile 不再使用。
 
-[v0.18.3](docs/releases/v0.18.3.md) 修复 Codex 空会话在修改上下文设置或重启后恢复失败：能证明为空的会话自动重连并保留原流程；旧会话记录无法读取时，点击 Agent 面板的“重新建立对话连接”。原流程、参数和作业保留，未确认的消息不会自动重发。
+前身 GPU Sampling Studio 的 [v0.18.3](docs/releases/v0.18.3.md) 修复 Codex 空会话在修改上下文设置或重启后恢复失败：能证明为空的会话自动重连并保留原流程；旧会话记录无法读取时，点击 Agent 面板的“重新建立对话连接”。原流程、参数和作业保留，未确认的消息不会自动重发。
 
 上一代五轮改进见 [v0.18](docs/releases/v0.18.md)，第一轮入口、默认值与工具反馈修复见 [v0.18.1](docs/releases/v0.18.1.md)。第二轮 [v0.18.2](docs/releases/v0.18.2.md) 按[交互设计基线](docs/design/interaction-design.md)重排工作区：侧栏集中展示历史会话，一级入口为工作区、任务和工具，底部默认收起；对话和当前流程可切换优先布局。「任务」统一查看本地和集群保存的记录，并可返回所属会话。断连时保留已读取内容和观测时间，本地参数仍可编辑，重新连接后再复核执行。SSH、凭据与真实作业记录保留。
 
@@ -101,7 +101,7 @@ Windows 可先运行 `node scripts/test-worker.mjs --preflight-only`，只读核
 
 Codex 协议生成基线记录在 `agent/providers/codex.mjs`，类型位于 `desktop/generated`。实际连接核对协议响应和严格隔离能力；CLI 版本字符串变化不会单独导致拒绝，也不会跳过能力检查。协议变化时更新桥接与对应类型，并做受影响的协议验收。参考 [官方 app server 文档](https://learn.chatgpt.com/docs/app-server)。
 
-## v0.2：对话设置与审阅工作流
+## GPU Sampling Studio 历史 v0.2 · 对话设置与审阅工作流
 
 右侧对话面板可以选择模型和该模型实际支持的 reasoning effort。「上下文」支持 token 预算及自动压缩阈值，留空继承默认配置；应用设置会重连本应用的 app server 并恢复当前会话，不修改全局 Codex 配置或停止计算。实际有效窗口与用量来自服务器回报，预算不会扩大模型容量。
 
@@ -111,13 +111,13 @@ Agent 的 prepare_run/resume_run 会打开 MD、Bias、增强采样或 NEP/HotPP
 
 本轮新增验收见 [v0.2 改进记录](docs/releases/v0.2.md)。
 
-## v0.3：任务与工具生态
+## GPU Sampling Studio 历史 v0.3 · 任务与工具生态
 
 首页按任务开始，左侧按七类工具浏览能力；任务计划支持核心 / 可选步骤和用户已有输入。设置 → 工作区布局可将 Agent 改为中间大窗、任务标签放右侧。
 
 关系图与任务分析见 [工具生态](docs/architecture-workflows.md)，功能及验证边界见 [v0.3](docs/releases/v0.3.md)，每代记录见 [CHANGELOG](CHANGELOG.md)。本地 Git 从 v0.3 开始跟踪，不自动推送；运行目录、科学输入、原始证据与便携包不入库。
 
-## v0.4：可读界面与 SSH 集群
+## GPU Sampling Studio 历史 v0.4 · 可读界面与 SSH 集群
 
 外观设置现在可以调整所有小字下限和 Agent 对话字号。登录窗口支持真实账户状态与自动完成刷新；开启任务规划模式后，对话请求才会打开中央计算流程和参数页。
 
@@ -125,17 +125,17 @@ SSH 集群页可以导入已有连接，选择 LSF / Slurm，协作探测环境�
 
 见 [v0.4 功能与验证](docs/releases/v0.4.md) 和 [SSH 可行性与管理链路](docs/ssh-cluster-management.md)。连接信息保持私有，不进入仓库或报告。
 
-## v0.5：规划、SSH 修复和安装入口
+## GPU Sampling Studio 历史 v0.5 · 规划、SSH 修复和安装入口
 
 Agent 默认普通对话，开启「任务规划模式」才自动生成中央流程页。SSH 提供主机、用户名、端口独立设置，以及保存前连接测试。
 
 将 [INSTALL_AGENT.md](INSTALL_AGENT.md) 交给通用本地 Agent，从完整 checkout 开始自动配置与短例验收；公开 GitHub URL 尚待登记。详见 [安装说明](docs/one-prompt-install.md) 和 [本代验证](docs/releases/v0.5.md)。
 
-## v0.5.1：前端修复与独立复核
+## GPU Sampling Studio 历史 v0.5.1 · 前端修复与独立复核
 
 保留参数编辑、失联状态和未确认请求身份，修复输入法、设置取消、弹窗焦点与产物展示；复核额外修补了切换运行草稿后的状态隔离。便携包与验证范围见 [v0.5.1](docs/releases/v0.5.1.md)。
 
-## v0.6：会话流程与可视化审阅
+## GPU Sampling Studio 历史 v0.6 · 会话流程与可视化审阅
 
 左侧项目与对话同时恢复聊天和流程。同一会话可持续用自然语言或步骤菜单调整参数；红绿点提示缺项，手工修改后点击“复核”，准备当前版本草稿后点击“执行”。详见 [本代功能与验证](docs/releases/v0.6.md)。
 

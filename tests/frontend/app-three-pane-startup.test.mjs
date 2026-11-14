@@ -9,7 +9,7 @@ const terminal=h=>h.find(node=>node.type==='./SharedTerminalPanel');
 
 test('unbound terminal chat distinguishes the connected service without granting worker access',async()=>{
  const h=appWorkerHarness({override:(method,data,standard)=>method==='worker.restore'&&data.conversationId?{status:'disconnected',reason:'project_missing',conversationId:data.conversationId}:standard(method,data)});
- try{await h.flush();const before=h.calls.length;terminal(h).props.onConversationPrepared(conversation('codex','unbound-terminal'));await h.flush();
+ try{await h.flush();assert.throws(()=>terminal(h));h.find(node=>node.type==='button'&&h.text(node)==='本地终端').props.onClick();await h.flush();const before=h.calls.length;terminal(h).props.onConversationPrepared(conversation('codex','unbound-terminal'));await h.flush();
  assert.equal(agent(h).props.computeConnected,false);assert.match(h.text(h.find(n=>n.props?.['data-testid']==='current-compute-resource-status')),/服务已连接.*未绑定计算项目/);
  assert(!h.calls.slice(before).some(call=>call.method==='worker.request'));
  }finally{h.unmount();}

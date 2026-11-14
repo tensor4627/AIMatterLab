@@ -8,9 +8,7 @@ import {pathToFileURL} from 'node:url';
 const require=createRequire(import.meta.url),semver=createRequire(require.resolve('app-builder-lib/package.json'))('semver');
 const ROOTS=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client'];
 const ENTRY='node_modules/@deepseek-ai/dsh/lib/bin.js';
-// Audited official CLI entry/profile-boot imports for the Studio-owned profile.
-// This is not a general-purpose DSH distribution: other CLI profiles are not exposed.
-// Keep upstream files/manifests/licenses unchanged; project only this carrier's edges.
+// Dependencies used by the official CLI to boot the AIMatterLab profile.
 const STUDIO_PROFILE='studio-sdk-v2';
 const studioCarrierDependencies=new Set([
  '@deepseek-ai/cordis','@deepseek-ai/cordis-plugin-include','@deepseek-ai/cordis-plugin-loader',
@@ -24,7 +22,7 @@ const studioStartupDependencies=new Set([
 function runtimeDependencies(pkg,profile){
  const declared=dependencies(pkg);
  if(profile!==STUDIO_PROFILE||!['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-app'].includes(pkg.name))return declared;
- if(pkg.version!=='0.2.2-rc.1')throw Error('Studio DSH profile projection requires a new dependency audit for '+pkg.version);
+ if(pkg.version!=='0.2.2-rc.1')throw Error('AIMatterLab DSH profile projection requires a new dependency audit for '+pkg.version);
  const selected=pkg.name==='@deepseek-ai/dsh'?studioCarrierDependencies:studioStartupDependencies;
  // Required peers still describe the plugin implementation, not bundle inserts.
  return declared.filter(dependency=>dependency.kind==='peer'||selected.has(dependency.name));

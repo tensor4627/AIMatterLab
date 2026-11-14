@@ -52,7 +52,7 @@ async function unusedPort() {
 }
 
 /** Must be invoked explicitly in an isolated ignored evidence directory. Never reuses a worker root. */
-export async function runToolConfigurationIntegration({repositoryRoot, evidenceRoot, python='/usr/bin/python3'}) {
+export async function runToolConfigurationIntegration({repositoryRoot, evidenceRoot, python='/usr/bin/python3', referencePackage}) {
   assert.equal(process.platform, 'linux', 'This integration requires Linux process identity');
   repositoryRoot=fs.realpathSync(repositoryRoot);evidenceRoot=path.resolve(evidenceRoot);
   const allowed=path.join(repositoryRoot,'.studio'),relative=path.relative(allowed,evidenceRoot);
@@ -76,7 +76,7 @@ export async function runToolConfigurationIntegration({repositoryRoot, evidenceR
     return value;
   }
   try {
-    const packageRoot=fixture(root,repositoryRoot),catalog=catalogAt('desktop');
+    const packageRoot=referencePackage?fs.realpathSync(referencePackage):fixture(root,repositoryRoot),catalog=catalogAt('desktop');
     const packages=createToolPackageRegistry({catalog,storeRoot:path.join(root,'package-store')});
     stage='register-definition';const registered=packages.register({package_root:packageRoot});
     assert.equal(registered.scope,'definition_checked');assert.equal(registered.tests.status,'not_run');
@@ -188,6 +188,6 @@ export async function runToolConfigurationIntegration({repositoryRoot, evidenceR
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href) {
   const args=process.argv.slice(2),value=flag=>{const index=args.indexOf(flag);assert(index>=0&&args[index+1],`Explicit ${flag} required`);return args[index+1];};
-  try{const result=await runToolConfigurationIntegration({repositoryRoot:value('--repo-root'),evidenceRoot:value('--evidence-root'),python:value('--python')});console.log(JSON.stringify(result));if(result.status!=='passed')process.exitCode=1;}
+  try{const result=await runToolConfigurationIntegration({repositoryRoot:value('--repo-root'),evidenceRoot:value('--evidence-root'),python:value('--python'),referencePackage:args.includes('--reference-package')?value('--reference-package'):undefined});console.log(JSON.stringify(result));if(result.status!=='passed')process.exitCode=1;}
   catch(error){console.error(error.name+': '+error.message);process.exitCode=1;}
 }

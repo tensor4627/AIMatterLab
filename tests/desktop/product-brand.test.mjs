@@ -7,7 +7,7 @@ const read=file=>fs.readFileSync(new URL(file,root),'utf8');
 test('public package and installation identity use the canonical brand while app identity stays compatible',()=>{
  const pkg=JSON.parse(read('package.json')),installation=JSON.parse(read('installation/manifest.json'));
  assert.equal(PRODUCT_NAME,'AIMatterLab');assert.equal(PRODUCT_SLUG,'aimatterlab');
- assert.equal(pkg.name,PRODUCT_SLUG);assert.equal(pkg.build.productName,PRODUCT_NAME);assert.equal(pkg.author,PRODUCT_NAME);
+ assert.equal(pkg.name,PRODUCT_SLUG);assert.equal(pkg.productName,PRODUCT_NAME);assert.equal(pkg.build.productName,PRODUCT_NAME);assert.equal(pkg.author,PRODUCT_NAME);
  assert.equal(pkg.build.appId,'science.gpusampling.studio');assert.equal(installation.product,PRODUCT_NAME);
  for(const target of [pkg.build.win,pkg.build.portable])assert.ok(target.artifactName.startsWith(PRODUCT_NAME+'-'));
  assert.match(read('index.html'),new RegExp('<title>'+PRODUCT_NAME+'</title>'));

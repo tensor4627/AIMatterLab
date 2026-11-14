@@ -1,5 +1,6 @@
 {
   "name": "aimatterlab",
+  "productName": "AIMatterLab",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,7 +17,7 @@
     "test:frontend": "node scripts/frontend-regression.mjs",
     "test:frontend:recovery": "node scripts/frontend-source-recovery.mjs",
     "protocol": "node scripts/protocol.mjs",
-    "pack": "pnpm run build && electron-builder --win portable zip --config.electronDist=node_modules/electron/dist",
+    "pack": "pnpm run build && electron-builder --win portable zip --x64 --config.electronDist=node_modules/electron/dist && node scripts/package-companions.mjs",
     "stage:agents": "node scripts/stage-agents.mjs",
     "test:task": "node scripts/task-integration-smoke.mjs",
     "test:pygas-ui": "node scripts/pygas-composer-regression.mjs",

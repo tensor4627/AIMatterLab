@@ -32,6 +32,18 @@ test('staging refuses a dependency resolved outside its checkout instead of sile
  assert.throws(()=>stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64'}),/inside this checkout/);
 });
 
+test('restaging leaves a matching loaded native binary untouched and repairs stale resources',t=>{
+ const f=fixture(t),nativeEntry=path.join(f.nativeRoot,'lib','test.node');
+ fs.writeFileSync(nativeEntry,'unchanged bytes');
+ const stage=()=>stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64'});
+ stage();
+ const dest=path.join(f.root,'.studio','agent-runtimes','node_modules',f.native,'lib'),binary=path.join(dest,'test.node'),date=new Date('2001-01-01T00:00:00Z');
+ fs.utimesSync(binary,date,date);fs.writeFileSync(path.join(dest,'index.js'),'damaged');fs.writeFileSync(path.join(dest,'obsolete.txt'),'stale');
+ stage();
+ assert.equal(fs.statSync(binary).mtimeMs,date.getTime());
+ assert.deepEqual(fs.readFileSync(path.join(dest,'index.js')),fs.readFileSync(path.join(f.nativeRoot,'lib/index.js')));assert(!fs.existsSync(path.join(dest,'obsolete.txt')));
+});
+
 test('staging refuses a linked target before removing or copying any external files',t=>{
  const f=fixture(t),outside=fs.mkdtempSync(path.join(os.tmpdir(),'studio-stage-target-'));t.after(()=>fs.rmSync(outside,{recursive:true,force:true}));fs.writeFileSync(path.join(outside,'sentinel'),'preserve');
  f.link(outside,path.join(f.root,'.studio/agent-runtimes'));assert.throws(()=>stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64'}),/Linked runtime staging target/);assert.equal(fs.readFileSync(path.join(outside,'sentinel'),'utf8'),'preserve');
