@@ -1,6 +1,6 @@
 # AIMatterLab 代码架构
 
-产品要求见[软件规范](software-specification.md)。当前实现和验证范围见 [AIMatterLab 0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。
+产品要求见[软件规范](software-specification.md)。当前实现和验证范围见 [AIMatterLab 0.1.1 发布说明](releases/aimatterlab-0.1.1.md)。
 
 AIMatterLab 继承 GPU Sampling Studio 1.0.1 确立的前端、后端主进程、Python worker 和 Agent 分工，以及既有的数据兼容和版本化迁移约定。第三方工具通过开发者交付包接入，主进程登记版本并管理快照，worker 在用户选定的环境中执行已有适配支持的操作。架构沿革见[原软件重组记录](v1.0.md)。
 

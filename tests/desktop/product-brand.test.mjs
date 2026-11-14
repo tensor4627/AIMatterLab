@@ -16,15 +16,17 @@ test('public package and installation identity use the canonical brand while app
 test('both one-prompt installation entry points identify the same release source as the manifest',()=>{
  const manifest=JSON.parse(read('installation/manifest.json'));
  assert.equal(manifest.repository_url,'https://github.com/tensor4627/AIMatterLab.git');
- assert.match(manifest.source_commit,/^[a-f0-9]{40}$/);
  const version=JSON.parse(read('package.json')).version;
  assert.equal(manifest.version,version);
+ assert.equal(manifest.release_revision,'v'+version);
+ assert.equal(manifest.source_ref,'refs/tags/'+manifest.release_revision);
  for(const file of [manifest.entry,'docs/one-prompt-install.md']){
   const instructions=read(file);
-  for(const value of [manifest.repository_url,manifest.source_commit,version]){
+  for(const value of [manifest.repository_url,manifest.source_ref,version]){
    assert.ok(instructions.includes(value),file+' must identify '+value);
   }
  }
+ assert.ok(read(manifest.entry).includes("git rev-parse --verify '"+manifest.source_ref+"^{commit}'"));
  assert.ok(read('README.md').includes('(docs/one-prompt-install.md)'));
 });
 

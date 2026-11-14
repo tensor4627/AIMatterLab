@@ -1,8 +1,8 @@
 # AIMatterLab
 
-AIMatterLab 0.1.0 是基于 GPU Sampling Studio 的科学计算桌面工作台。它继承了原软件的设计理念：用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
+AIMatterLab 0.1.1 是基于 GPU Sampling Studio 的科学计算桌面工作台。它继承了原软件的设计理念：用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
 
-[0.1.0 发布说明](docs/releases/aimatterlab-0.1.0.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
+[更新日志](CHANGELOG.md) · [0.1.1 发布说明](docs/releases/aimatterlab-0.1.1.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
 要安装 GPU-Sampling、pyGAS、PyDyn、TorchNEP 或 HotPP，可以在「工具与资源 → 第三方工具包 → 已验证工具的源码仓库」复制克隆命令，再按工具仓库提供的说明安装。源码和桌面版都随附这份[工具仓库清单](installation/tool-sources.json)。
 
@@ -12,7 +12,7 @@ AIMatterLab 0.1.0 是基于 GPU Sampling Studio 的科学计算桌面工作台�
 
 Windows 用户解压发行 ZIP 后，双击 `AIMatterLab.exe` 即可打开工作区。首次使用可按需要选择以下操作。升级时的数据位置见[命名与配置兼容说明](docs/development/product-naming.md)。
 
-从源码安装 0.1.0 时，复制[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词给本机 Agent 即可。Agent 使用官方仓库、固定提交和本机选用的计算环境。
+从源码安装 0.1.1 时，复制[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词给本机 Agent 即可。Agent 使用官方仓库、固定提交和本机选用的计算环境。
 
 1. 普通对话可直接连接服务商；进行本地科学计算时从「连接计算资源 → 本地 WSL」选择已安装的发行版，默认 Ubuntu。
 2. 在「工具 → 算力与管理 → 计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。

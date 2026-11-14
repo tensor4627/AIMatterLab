@@ -1,6 +1,6 @@
 # AIMatterLab 开发者文档
 
-当前产品版本由根目录 `package.json` 给出。功能及验证证据见 [AIMatterLab 0.1.0](../releases/aimatterlab-0.1.0.md) 和[变更记录](../../CHANGELOG.md)。后续计划见[路线图](ROADMAP.md)。
+当前产品版本由根目录 `package.json` 给出。功能及验证证据见 [AIMatterLab 0.1.1](../releases/aimatterlab-0.1.1.md) 和[变更记录](../../CHANGELOG.md)。后续计划见[路线图](ROADMAP.md)。
 
 产品职责与工具契约见[软件规范](../software-specification.md)，第三方作者的交付格式、示例和测试入口见[开发者接入指南](../../developer/README.md)。原 GPU Sampling Studio 的仓库结构沿革见[重组记录](../v1.0.md)。
 
