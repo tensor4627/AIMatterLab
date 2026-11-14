@@ -14,3 +14,33 @@ test('tilde fences and longer closing fences are recognized without HTML syntax'
 test('HTML, image, javascript and data URL payloads remain text leaves',()=>{const payload='<img src="https://example.invalid/pixel" onerror="evil()">\n<script>evil()</script>\n[x](javascript:evil())\n![x](data:text/html,evil)';const blocks=messageMarkup(payload);assert.equal(text(inlineMarkup(blocks[0].text)),payload);assert.equal(JSON.stringify(blocks).includes('href'),false);});
 test('escape handling does not interpret paths or scientific backslashes',()=>{assert.equal(text(inlineMarkup(String.raw`C:\Users\Name\run.py and \**literal**`)),String.raw`C:\Users\Name\run.py and **literal**`);});
 test('all streamed prefixes retain only a bounded inert node vocabulary',()=>{const raw='目标 **12** `run.py`\n\n- 审阅\n- 保存\n\n```python\nprint("<img>")\n```';for(let end=0;end<=raw.length;end++){const blocks=messageMarkup(raw.slice(0,end));for(const block of blocks){assert(['paragraph','code','ul','ol'].includes(block.type));if(block.type==='paragraph')for(const node of inlineMarkup(block.text))assert(['text','code','strong'].includes(node.type));}}});
+
+test('ATX headings support six levels, Chinese strong and paragraph interruption',()=>{
+ for(let level=1;level<=6;level++)assert.deepEqual(messageMarkup('#'.repeat(level)+' **队列事实** ###'),[{type:'heading',level,text:'**队列事实**'}]);
+ assert.deepEqual(messageMarkup('说明\n## 队列事实\n正文').map(b=>b.type),['paragraph','heading','paragraph']);
+ for(const raw of ['####### 七级','#无空格',String.raw`\# 转义`])assert.equal(messageMarkup(raw)[0].type,'paragraph');
+ assert.equal(inlineMarkup('**中文加粗**')[0].type,'strong');
+});
+test('GFM tables preserve alignment, strong cells, escaped pipes and uneven rows',()=>{
+ const block=messageMarkup(String.raw`| 队列 | **状态** | 数量 |
+| :--- | :---: | ---: |
+| 队\|列 | **可用** | 12 |
+| 短行 |
+| A | B | C | excess |`)[0];
+ assert.equal(block.type,'table');assert.deepEqual(block.align,['left','center','right']);
+ assert.equal(text(inlineMarkup(block.rows[0][0])),'队|列');assert.equal(inlineMarkup(block.rows[0][1])[0].type,'strong');
+ assert.deepEqual(block.rows[1],['短行','','']);assert.deepEqual(block.rows[2],['A','B','C']);
+ assert.equal(messageMarkup('A | B\n--- | invalid')[0].type,'paragraph');
+ assert.equal(messageMarkup('A | B\n---')[0].type,'paragraph');
+ assert.equal(messageMarkup('A | B\n--- | ---\nx | y')[0].type,'table');
+});
+test('streamed headings and tables stay inert, fenced table text stays code',()=>{
+ const raw='## 队列事实\n\n| 队列 | 状态 |\n| :--- | ---: |\n| **学校** | <img onerror="evil()"> |';
+ for(let end=0;end<=raw.length;end++)for(const b of messageMarkup(raw.slice(0,end)))assert(['heading','table','paragraph'].includes(b.type));
+ assert.equal(messageMarkup('```text\n'+raw+'\n```')[0].type,'code');
+ assert.equal(messageMarkup('| 队列 | 状态 |\n| :--')[0].type,'paragraph');
+});
+test('escaped pipes inside table code spans render without the GFM escape',()=>{
+ const table=messageMarkup('| code | other |\n| --- | --- |\n| `a\\|b` | x |')[0];
+ assert.deepEqual(inlineMarkup(table.rows[0][0]),[{type:'code',text:'a|b'}]);
+});
