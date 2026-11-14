@@ -135,7 +135,7 @@ export class CodexApiBridge extends EventEmitter{
   if(value.method==='turn/started')this.output.delete(id);
   if(value.method==='item/agentMessage/delta'&&params.delta?.trim())this.output.add(id);
   if(value.method==='item/completed'&&params.item?.type==='agentMessage'&&params.item.text?.trim())this.output.add(id);
-  const binding=this.sessions.get(id)||this.catalog.get(KIND,id);
+  const binding=id&&(this.sessions.get(id)||this.catalog.get(KIND,id));
   if(binding&&value.method!=='studio/codexDisconnected'){
    if(value.method==='turn/started'){const turn=params.turn||{};if(!binding.nativeTurns.some(item=>item.id===turn.id))binding.nativeTurns.push({...turn,status:'inProgress',items:turn.items||[]});}
    const turn=binding.nativeTurns.find(turn=>turn.id===params.turnId)||binding.nativeTurns.at(-1);

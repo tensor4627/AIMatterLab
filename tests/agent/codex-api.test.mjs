@@ -5,11 +5,24 @@ import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import {CodexApiBridge} from '../../agent/providers/codex-api.mjs';
+import {Catalog} from '../../backend/main/workspace/catalog.mjs';
 import {createCodexApiRuntime,codexApiHome,prepareApiModelCeiling} from '../../desktop/platform/codex-api-runtime.mjs';
 import {assertModelCeiling} from '../../desktop/platform/codex-model-ceiling.mjs';
 import {prepareIsolation,ISOLATION_FEATURES} from '../../desktop/platform/codex-isolation.mjs';
 
 const configured={apiKey:'sk-synthetic-custom-secret',baseUrl:'https://vendor.example/v1',model:'vendor/model',reasoningMode:'omit',reasoningEffort:'',label:'Custom'};
+test('connection notifications without a thread reach the frontend with a real SQLite catalog',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-api-events-'));
+ const catalog=new Catalog(root);
+ t.after(()=>{catalog.db.close();fs.rmSync(root,{recursive:true,force:true});});
+ const f=fixture(t,{catalog});
+ await f.b.start();
+ for(const method of ['studio/codexVersionWarning','studio/toolsWarning','studio/codexDisconnected']){
+  f.natives[0].emit('event',{method,params:{}});
+  assert.equal(f.events.at(-1).method,method);
+ }
+ assert.deepEqual(catalog.keys('compatible-codex-thread'),[]);
+});
 function store(){const values=new Map(),writes=[];return {writes,put:(kind,id,value)=>{writes.push({kind,id});values.set(kind+':'+id,structuredClone(value));},get:(kind,id)=>structuredClone(values.get(kind+':'+id)||null),list:kind=>[...values].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>structuredClone(value))};}
 function fixture(t,{catalog=store(),credential={...configured},reject,worker=null}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-codex-api-')),calls=[],events=[],natives=[],gateways=[];
