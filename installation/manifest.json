@@ -22,5 +22,6 @@
     "sampling": "fixture_required",
     "neb": "fixture_required"
   },
-  "distribution_status": "not_run"
+  "distribution_status": "passed",
+  "distribution_scope": "Windows x64 portable EXE, desktop ZIP and developer kit checked locally"
 }
