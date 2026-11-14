@@ -1448,6 +1448,7 @@ const english:Record<string,string> = {
 "CPU 数量":"CPU count",
 "GPU 数量":"GPU count",
 "调度账户（可选）":"Scheduler account (optional)",
+"Slurm QoS（可选）":"Slurm QoS (optional)",
 "保存部署":"Save deployment",
 "准备提交草稿":"Prepare submission draft",
 "提交预览":"Submission preview",

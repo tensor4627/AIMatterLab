@@ -427,6 +427,9 @@ def resources(value, p, seconds):
     queue_word(r["queue"], p["scheduler"])
     if r.get("account"):
         word(r["account"], "scheduler account")
+    if "qos" in r:
+        if p["scheduler"] != "slurm" or not isinstance(r["qos"], str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", r["qos"]):
+            raise ValueError("Invalid Slurm quality of service")
     r["seconds"] = int(seconds)
     return r
 
@@ -444,6 +447,8 @@ def batch_script(run):
             header.append(f"#SBATCH --gres=gpu:{r['gpus']}")
         if r.get("account"):
             header.append("#SBATCH --account=" + r["account"])
+        if r.get("qos"):
+            header.append("#SBATCH --qos=" + r["qos"])
     else:
         header += [f"#BSUB -J {name}", f"#BSUB -q {r['queue']}", f"#BSUB -n {r['cpus']}",
                    f"#BSUB -W {math.ceil(r['seconds']/60)}", f"#BSUB -M {r['memory_mb']}MB",

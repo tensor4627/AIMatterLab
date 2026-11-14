@@ -4,7 +4,7 @@ import type {Environment,Project,ProjectAuthorizationSpec} from './compute';
 export interface DeploymentDraftConfig {
  target:'local'|'cluster';projectId:string;targetId:string;inputSource:'local'|'remote';directoryName:string;
  maxSeconds:number;gpu:number;queueSelection?:'policy';
- resources:{cpus:number;gpus:number;memory_mb:number;queue:string;account:string;queue_target_id?:string};
+ resources:{cpus:number;gpus:number;memory_mb:number;queue:string;account:string;qos?:string;queue_target_id?:string};
 }
 export interface DeploymentContext {
  taskId:string;
