@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {EventEmitter} from 'node:events';
-import {startSource,sourceOptions,sourceFingerprint,dependencyFingerprint} from '../../scripts/source-start.mjs';
+import {startSource,sourceOptions,sourceFingerprint,dependencyFingerprint,publishSourceOwner} from '../../scripts/source-start.mjs';
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimatterlab-source-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({name:'aimatterlab',version:'9.8.7'}));fs.writeFileSync(path.join(root,'pnpm-lock.yaml'),'lockfileVersion: 9');fs.mkdirSync(path.join(root,'frontend'));fs.writeFileSync(path.join(root,'frontend','main.tsx'),'original');return root;}
 function touch(root,file,value='fixture'){const full=path.join(root,file);fs.mkdirSync(path.dirname(full),{recursive:true});fs.writeFileSync(full,value);}
 function harness(root,extra={}){const calls=[],logs=[],children=[];const options={root,args:[],env:{STUDIO_DEV_URL:'http://unwanted'},preflight:()=>calls.push('preflight'),writeLog:v=>logs.push(v),run:async args=>{calls.push(args.join(' '));if(args[0]==='install'){touch(root,'node_modules/electron/dist/'+(process.platform==='win32'?'electron.exe':'electron'));touch(root,'node_modules/vite/bin/vite.js');}else{touch(root,'dist/index.html');touch(root,'.studio/agent-runtimes/manifest.json');}},launch:async value=>{calls.push('launch');const child=new EventEmitter();children.push({child,value});return child;},...extra};return {options,calls,logs,children};}
@@ -20,5 +20,45 @@ test('ignored profile/cache changes do not invalidate source or dependency finge
 test('a failed repair invalidates old successful cache even if partial build recreates missing artifact',async t=>{const root=fixture(t),h=harness(root);await stop(await startSource(h.options));fs.unlinkSync(path.join(root,'dist/index.html'));const good=h.options.run;h.options.run=async args=>{await good(args);if(args[0]==='run')throw Error('late staging failure');};await assert.rejects(startSource(h.options),/late staging failure/);assert.ok(!fs.existsSync(path.join(root,'.studio/source-entry/state.json')));h.options.run=good;h.calls.length=0;await stop(await startSource(h.options));assert.ok(h.calls.includes('run build'));});
 test('missing Electron binary after install provisions the pinned runtime before build',async t=>{const root=fixture(t),h=harness(root),run=h.options.run;h.options.run=async args=>{await run(args);if(args[0]==='install')fs.unlinkSync(path.join(root,'node_modules/electron/dist/'+(process.platform==='win32'?'electron.exe':'electron')));};h.options.installElectron=async()=>{h.calls.push('electron installer');touch(root,'node_modules/electron/dist/'+(process.platform==='win32'?'electron.exe':'electron'));};await stop(await startSource(h.options));assert.deepEqual(h.calls,['preflight','install --frozen-lockfile','electron installer','run build','launch']);});
 test('runtime provisioning failure cannot launch an incomplete desktop',async t=>{const root=fixture(t),h=harness(root,{run:async()=>{},installElectron:async()=>{}});await assert.rejects(startSource(h.options),/Electron runtime is missing/);assert.ok(!h.calls.includes('launch'));assert.ok(!fs.existsSync(path.join(root,'.studio/source-entry/state.json')));});
-import {spawnSync} from 'node:child_process';
+import {spawn,spawnSync} from 'node:child_process';
 test('Windows double-click wrapper sets checkout cwd and preserves a quoted profile argument', {skip:process.platform!=='win32'},t=>{const root=fixture(t);fs.copyFileSync(new URL('../../Launch-AIMatterLab.cmd',import.meta.url),path.join(root,'Launch-AIMatterLab.cmd'));touch(root,'scripts/source-start.mjs',"import fs from 'node:fs';fs.writeFileSync('receipt.json',JSON.stringify({cwd:process.cwd(),args:process.argv.slice(2)}));");const result=spawnSync(path.join(process.env.SystemRoot||'C:\\Windows','System32/cmd.exe'),['/d','/s','/c','Launch-AIMatterLab.cmd --profile "profile & safe"'],{cwd:root,encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true,timeout:10000});assert.equal(result.status,0,result.stderr);const receipt=JSON.parse(fs.readFileSync(path.join(root,'receipt.json'),'utf8'));assert.equal(receipt.cwd,root);assert.deepEqual(receipt.args,['--profile','profile & safe']);});
+
+test('version and descriptive metadata updates rebuild source without reinstalling dependencies',async t=>{
+ const root=fixture(t),h=harness(root);await stop(await startSource(h.options));
+ const manifest=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+ Object.assign(manifest,{version:'9.8.8',description:'New release',productName:'New display name'});
+ touch(root,'package.json',JSON.stringify(manifest));h.calls.length=0;
+ await stop(await startSource(h.options));assert.deepEqual(h.calls,['preflight','run build','launch']);
+});
+test('dependency declarations, installation hooks and package manager settings invalidate dependency preparation',t=>{
+ const root=fixture(t),original=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')),before=dependencyFingerprint(root);
+ for(const field of [{dependencies:{react:'next'}},{devDependencies:{vite:'next'}},{scripts:{postinstall:'node setup.mjs'}},{pnpm:{overrides:{react:'next'}}},{overrides:{react:'next'}},{packageManager:'pnpm@11.0.0'}]){
+  touch(root,'package.json',JSON.stringify({...original,...field}));assert.notEqual(dependencyFingerprint(root),before,JSON.stringify(field));
+ }
+ touch(root,'package.json',JSON.stringify({...original,scripts:{build:'different build',source:'different launch'}}));assert.equal(dependencyFingerprint(root),before);
+ touch(root,'package.json',JSON.stringify({version:original.version,name:original.name},null,4));assert.equal(dependencyFingerprint(root),before);
+});
+function childResult(code,args=[]){return new Promise((resolve,reject)=>{const child=spawn(process.execPath,['--input-type=module','-e',code,...args],{windowsHide:true,stdio:['ignore','pipe','pipe']});let output='',error='';child.stdout.on('data',value=>output+=value);child.stderr.on('data',value=>error+=value);child.once('error',reject);child.once('exit',exitCode=>resolve({exitCode,output,error}));});}
+test('real competing Node processes publish exactly one complete lock owner',async t=>{
+ const root=fixture(t),file=path.join(root,'launch.lock'),module=new URL('../../scripts/source-start.mjs',import.meta.url).href;
+ const code=`import {publishSourceOwner} from ${JSON.stringify(module)};try{publishSourceOwner(process.argv[1],{pid:process.pid,phase:'preparing',profile:'fixture'});console.log(process.pid)}catch(error){if(error.code==='EEXIST')process.exit(3);throw error;}`;
+ const outcomes=await Promise.all(Array.from({length:8},()=>childResult(code,[file])));
+ assert.equal(outcomes.filter(value=>value.exitCode===0).length,1);assert.equal(outcomes.filter(value=>value.exitCode===3).length,7);
+ const owner=JSON.parse(fs.readFileSync(file,'utf8'));assert.equal(owner.phase,'preparing');assert.equal(owner.pid,Number(outcomes.find(value=>value.exitCode===0).output.trim()));
+});
+test('process crash before atomic publication leaves no visible lock and next source launcher proceeds',async t=>{
+ const root=fixture(t),file=path.join(root,'.studio/source-entry/launch.lock'),module=new URL('../../scripts/source-start.mjs',import.meta.url).href;
+ fs.mkdirSync(path.dirname(file),{recursive:true});
+ const code=`import fs from 'node:fs';import {publishSourceOwner} from ${JSON.stringify(module)};fs.linkSync=()=>process.exit(17);publishSourceOwner(process.argv[1],{pid:process.pid,phase:'preparing',profile:'fixture'});`;
+ const outcome=await childResult(code,[file]);assert.equal(outcome.exitCode,17,outcome.error);assert.equal(fs.existsSync(file),false);
+ const h=harness(root);await stop(await startSource(h.options));assert.ok(h.calls.includes('launch'));
+});
+test('real source launcher processes serialize preparation and reuse the live owner',async t=>{
+ const root=fixture(t),module=new URL('../../scripts/source-start.mjs',import.meta.url).href;
+ const code=`import fs from 'node:fs';import path from 'node:path';import {EventEmitter} from 'node:events';import {startSource} from ${JSON.stringify(module)};const root=process.argv[1];function touch(file){const target=path.join(root,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,'fixture');}const result=await startSource({root,args:[],env:{},preflight:()=>{},writeLog:()=>{},run:async args=>{fs.appendFileSync(path.join(root,'operations'),args[0]+'\\n');await new Promise(resolve=>setTimeout(resolve,100));if(args[0]==='install'){touch('node_modules/electron/dist/'+(process.platform==='win32'?'electron.exe':'electron'));touch('node_modules/vite/bin/vite.js');}else{touch('dist/index.html');touch('.studio/agent-runtimes/manifest.json');}},launch:async()=>{const child=new EventEmitter();setTimeout(()=>child.emit('exit',0),600);return child;}});console.log(JSON.stringify({reused:!!result.reused}));`;
+ const outcomes=await Promise.all([childResult(code,[root]),childResult(code,[root])]);
+ for(const outcome of outcomes)assert.equal(outcome.exitCode,0,outcome.error);
+ assert.deepEqual(outcomes.map(value=>JSON.parse(value.output).reused).sort(),[false,true]);
+ assert.equal(fs.readFileSync(path.join(root,'operations'),'utf8'),'install\nrun\n');
+ assert.equal(fs.existsSync(path.join(root,'.studio/source-entry/launch.lock')),false);
+});
