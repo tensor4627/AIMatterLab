@@ -22,7 +22,7 @@ test('compact initial bottom is new-only and explicit or legacy preferences win'
 });
 test('tool groups expose each actual tool exactly once and retain real management routes',()=>{
  assert.deepEqual(toolGroups.flatMap(group=>group.tools).sort(),['activelearning','assets','md','pygas','queue','training','viewer']);
- assert.deepEqual(toolGroups.flatMap(group=>group.pages),['environments','ssh','skills','relations']);
+ assert.deepEqual(toolGroups.flatMap(group=>group.pages),['extensions','environments','ssh','skills','relations']);
 });
 test('conversation search includes actual name or project label, not private thread identifiers',()=>{
  const conversation={name:'Cu NEB Path',threadId:'secret'};

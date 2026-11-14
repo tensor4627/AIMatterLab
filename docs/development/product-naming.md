@@ -1,6 +1,6 @@
 # AIMatterLab naming and upgrade compatibility
 
-The current product name is **AIMatterLab**, with package/CLI slug `aimatterlab`. `contracts/product.json` supplies the visible name to the renderer and native window. Package, installation and HTML metadata are checked against it by `tests/desktop/product-brand.test.mjs`.
+**AIMatterLab 0.1.0** starts the AIMatterLab release series from GPU Sampling Studio 1.0.2-dev.33. The package/CLI slug is `aimatterlab`. `contracts/product.json` supplies the visible name to the renderer and native window. Package, installation and HTML metadata are checked against it by `tests/desktop/product-brand.test.mjs`.
 
 The rename changes product text, new executable/archive names, provider client display identity and current maintained guides. It does not rename the GPU-Sampling scientific engine, rewrite historical release/acceptance evidence, or modify existing run records.
 

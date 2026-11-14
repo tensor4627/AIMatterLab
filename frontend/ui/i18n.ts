@@ -1,4 +1,5 @@
 const english:Record<string,string> = {
+"第三方工具包":"Third-party tool packages",
 "作业服务已连接":"Job service connected",
 "程序已完成":"Program completed",
 "正在核对输入并提交…":"Checking inputs and submitting…",

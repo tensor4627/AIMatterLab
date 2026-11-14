@@ -9,6 +9,6 @@ export function workspaceModule(section,engine=''){
 // Highlight a destination from the displayed page, including detail pages.
 export function primaryDestination(section){
  if(section==='runs'||section.startsWith('task:')||section.startsWith('cluster-run:'))return 'runs';
- if(['tools','skills','relations','environments','ssh','bias','assets','viewer','training','activelearning'].includes(section)||section.startsWith('tool:'))return 'tools';
+ if(['tools','extensions','skills','relations','environments','ssh','bias','assets','viewer','training','activelearning'].includes(section)||section.startsWith('tool:'))return 'tools';
  return 'home';
 }

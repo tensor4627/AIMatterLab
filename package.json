@@ -1,6 +1,6 @@
 {
   "name": "aimatterlab",
-  "version": "1.0.2-dev.33",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -59,15 +59,18 @@
     "productName": "AIMatterLab",
     "beforeBuild": "scripts/package-runtime.mjs",
     "directories": {
-      "output": "release/v1.0.2-dev.33"
+      "output": "release/v0.1.0"
     },
     "files": [
       "dist/**",
       "desktop/**",
+      "!desktop/generated/**/*.ts",
       "backend/main/**",
       "agent/**",
       "!agent/builtin-skills/**",
       "contracts/**",
+      "!contracts/dto/**",
+      "!contracts/**/*.d.mts",
       {
         "from": "backend/worker",
         "to": "worker",
@@ -153,6 +156,6 @@
       "zh-CN"
     ]
   },
-  "description": "Agent scientific workspace for PyDyn, GPUMD, pyGAS, NEP and HotPP",
+  "description": "Scientific workspace for agent-assisted workflows and third-party tools",
   "author": "AIMatterLab"
 }

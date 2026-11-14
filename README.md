@@ -1,13 +1,14 @@
 # AIMatterLab
 
-面向 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 的中文 Agent 科学计算桌面工作台。Electron + React + TypeScript 自定义前端，Codex app server、Kimi / Qwen 官方 ACP CLI 与 DeepSeek API 负责 Agent，独立 Python/WSL 服务负责 GPU 作业。
+AIMatterLab 0.1.0 是基于 GPU Sampling Studio 的科学计算桌面工作台。它继承了原软件的设计理念：用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
 
-[软件规范](docs/software-specification.md) · [当前代码架构](docs/architecture.md) · [工具开发者接入](developer/README.md) · [1.0 重组与验证](docs/v1.0.md)
+[0.1.0 发布说明](docs/releases/aimatterlab-0.1.0.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
-[Product naming and upgrade compatibility](docs/development/product-naming.md)
+开发者交付固定 Git 版本的源码、工具声明、操作指南和测试入口。用户在「工具与资源 → 第三方工具包」检查并登记交付包，在已有执行适配支持的范围内配置环境、运行检查。外部作者可使用独立的[开发者工具包](developer/skills/studio-tool-integration.zip)和[接入示例](developer/README.md)。
+
 ## 启动
 
-当前开发版本以 `package.json` 为准；开发产物位于 Git 忽略的 `release/`，具体构建与验证范围见 [本代记录](docs/v1.0.md)。已开发能力、验收边界和后续计划统一记录在 [开发者文档](docs/development/README.md)。首次启动：
+Windows 用户解压发行 ZIP 后，双击 `AIMatterLab.exe` 即可打开工作区。首次使用可按需要选择以下操作。升级时的数据位置见[命名与配置兼容说明](docs/development/product-naming.md)。
 
 1. 普通对话可直接连接服务商；进行本地科学计算时从「连接计算资源 → 本地 WSL」选择已安装的发行版，默认 Ubuntu。
 2. 在「工具 → 算力与管理 → 计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。

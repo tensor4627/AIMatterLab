@@ -2,7 +2,7 @@
 export const toolGroups=[
  {id:'compute',label:'计算与建模',tools:['md','pygas','training','activelearning'],pages:[]},
  {id:'data',label:'数据与分析',tools:['assets','viewer'],pages:[]},
- {id:'resources',label:'算力与管理',tools:['queue'],pages:['environments','ssh','skills','relations']}
+ {id:'resources',label:'算力与管理',tools:['queue'],pages:['extensions','environments','ssh','skills','relations']}
 ];
 export function initialBottomExpanded(read){
  const explicit=read('studio.bottomExpanded');
