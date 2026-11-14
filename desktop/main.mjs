@@ -67,6 +67,7 @@ import {fileURLToPath} from 'node:url';
 
 import {readTaskPygas,bindComposition,compositionToolGuard} from "../backend/main/workspace/task-pygas.mjs";
 
+import {ProjectSkills} from '../agent/skills/project-skills.mjs';
 import {ScientificSkills,normalizeScientificSharing} from '../agent/skills/scientific-skills.mjs';
 import {saveComputeProfileWithEnvironment} from '../backend/main/compute/compute-profile-environment-save.mjs';
 import {preferredSshRuntime,carrySshRuntimePreference,globalSshBindingForProfile} from '../backend/main/compute/ssh-runtime-preference.mjs';
@@ -321,7 +322,9 @@ localReview=registerCalculationReview({handle,records:taskRecords,worker,current
 
 privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:activeAuthoringTasks});
 worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
-terminalMcp=new TerminalMcp({terminal:sharedTerminal,guard:()=>worker.authoringGuard});
+const projectSkills=new ProjectSkills({root:path.join(app.getPath('userData'),'project-skills'),current:()=>workflowContext.current()});
+worker.setProjectSkills(projectSkills);
+terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,guard:()=>worker.authoringGuard});
 await terminalMcp.start();
 customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.active||settings.agentProvider||'codex',getActiveTaskId:provider=>activeAuthoringTasks.get(provider),assertProvider:context=>{workflowContext.assertScope(context);return providerId(context.provider);},assertHuman:event=>{trusted(event);return true;},access:()=>true,
  validateRuntimeReceipt:async(runtime,context)=>{const current=await worker.request('POST','/api/runtime-guide',{environment_id:context.args.environment_id,engine:'pygas.build'});return current.status==='observed'&&runtime.status==='observed'&&current.receipt===runtime.receipt_sha256;},

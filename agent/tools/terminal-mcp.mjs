@@ -7,7 +7,7 @@ import {sharedTerminalToolAllowed} from "./definition-scope.mjs";
 // Desktop-owned terminals do not depend on a registered WSL scientific worker.
 // This endpoint exposes only the three existing, explicitly handed-off tools.
 export class TerminalMcp {
- constructor({terminal,guard=()=>null}){this.terminal=terminal;this.guard=guard;this.scopes=new McpProviderScopes();}
+ constructor({terminal,guard=()=>null,projectSkills}){this.projectSkills=projectSkills;this.terminal=terminal;this.guard=guard;this.scopes=new McpProviderScopes();}
  async start(){
   if(this.base)return;
   this.server=http.createServer((req,res)=>void this.receive(req,res));
@@ -45,9 +45,10 @@ export class TerminalMcp {
    else if(body.method==='tools/list'){
     // Discovery is required before a new conversation has a thread identity.
     // Definitions confer no access: every call still checks the actual handoff.
-    result={tools:this.terminal.tools().filter(tool=>sharedTerminalToolAllowed(tool.name))};
+    result={tools:[...this.terminal.tools().filter(tool=>sharedTerminalToolAllowed(tool.name)),...(this.projectSkills?.tools()||[])]};
    }else if(body.method==='tools/call'){
-    if(!validToolCall(body)||!sharedTerminalToolAllowed(body.params.name))throw Error('Unknown shared terminal tool');
+    if(!validToolCall(body)||!(sharedTerminalToolAllowed(body.params.name)||this.projectSkills?.owns(body.params.name)))throw Error('Unknown shared terminal tool');
+    if(this.projectSkills?.owns(body.params.name)){dispatched=true;result=toolValueResult(this.projectSkills.call(body.params.name,body.params.arguments||{},scope));fresh();reply(200,{jsonrpc:'2.0',id:body.id,result});return;}
     token=await guard?.before?.(body.params.name,body.params.arguments||{},scope.provider,scope);fresh();
     dispatched=true;result=toolValueResult(await this.terminal.callTool(body.params.name,body.params.arguments||{},scope));fresh();
     await guard?.after?.(token,result);

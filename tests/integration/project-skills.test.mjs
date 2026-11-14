@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {ProjectSkills} from '../../agent/skills/project-skills.mjs';
+import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
+const body='---\nname: local-analysis\ndescription: User project analysis instructions\n---\nUse the selected project data only.\n';
+test('real provider MCP writes, refreshes, reloads and isolates project skills without worker or terminal grant',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-project-skills-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let current={provider:'codex',threadId:'chat-a',projectId:'project-a',taskId:null,environmentId:null,inputRoot:null};let store=new ProjectSkills({root:path.join(root,'config','project-skills'),current:()=>current});
+ const server=new TerminalMcp({terminal:{tools:()=>[],callTool:()=>{throw Error('No shell grant');}},projectSkills:store});await server.start();t.after(()=>server.close());
+ async function bind(){server.bindProviderContext('codex',Object.fromEntries(['threadId','projectId','taskId','environmentId','inputRoot'].map(k=>[k,current[k]])));return server.providerConnection('codex');}let connection=await bind();
+ async function rpc(method,params){const r=await fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});assert.equal(r.status,200);return (await r.json()).result;}
+ async function call(name,args={}){const result=await rpc('tools/call',{name,arguments:args});assert.equal(result.isError,false,JSON.stringify(result));return JSON.parse(result.content[0].text);}
+ assert.deepEqual((await rpc('tools/list')).tools.map(x=>x.name),['project_skill_catalog','read_project_skill','write_project_skill']);assert.deepEqual((await call('project_skill_catalog')).skills,[]);
+ const saved=await call('write_project_skill',{name:'local-analysis',body,expected_sha256:null});assert.equal(saved.body,body);assert.equal((await call('project_skill_catalog')).skills[0].sha256,saved.sha256);assert.equal((await call('read_project_skill',{name:'local-analysis'})).body,body);
+ store=new ProjectSkills({root:path.join(root,'config','project-skills'),current:()=>current});server.projectSkills=store;assert.equal((await call('read_project_skill',{name:'local-analysis'})).body,body);
+ const updated=await call('write_project_skill',{name:'local-analysis',body:body+'Refreshed instructions.\n',expected_sha256:saved.sha256});assert.notEqual(updated.sha256,saved.sha256);
+ let failure=await rpc('tools/call',{name:'write_project_skill',arguments:{name:'local-analysis',body,expected_sha256:saved.sha256}});assert.equal(failure.isError,true);
+ current={...current,threadId:'chat-b',projectId:'project-b'};connection=await bind();assert.deepEqual((await call('project_skill_catalog')).skills,[]);
+ for(const name of ['../escape','C:\\credentials','../../project-a']){failure=await rpc('tools/call',{name:'read_project_skill',arguments:{name}});assert.equal(failure.isError,true);}
+ current={...current,threadId:'chat-c',projectId:'project-a'};connection=await bind();assert.equal((await call('read_project_skill',{name:'local-analysis'})).body,updated.body);
+ const scope={...current,checkCurrent:()=>true};assert.throws(()=>store.call('project_skill_catalog',{project_id:'project-b'},scope),/arguments/);assert.throws(()=>store.call('project_skill_catalog',{}, {...scope,threadId:'stale'}),/changed/);
+ const file=path.join(store.directory(scope).target,'local-analysis','SKILL.md');fs.linkSync(file,path.join(root,'outside.md'));assert.throws(()=>store.call('read_project_skill',{name:'local-analysis'},scope),/Unsafe/);
+});
+
+test('worker proxy registers the same desktop tools for model providers without remote resource permission',async t=>{
+ const {WorkerClient}=await import('../../agent/tools/worker-client.mjs');const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-worker-skills-'));const worker=new WorkerClient();worker.identity={kind:'ssh',version:3,connectionId:'fixture'};worker.connection={tokens:{mcp:'fixture-base'},transport:'fixture'};worker.setResourceUseGuard(()=>false);worker.setAuthoringGuard({before(){throw Error('Remote scientific access denied');}});
+ let current;worker.setProjectSkills(new ProjectSkills({root,current:()=>current}));await worker.exposeTools({});t.after(()=>{worker.close();fs.rmSync(root,{recursive:true,force:true});});
+ for(const provider of ['codex','kimi','qwen','deepseek','compatible']){current={provider,threadId:'chat',projectId:'owned-project',taskId:null,environmentId:null,inputRoot:null};worker.bindProviderContext(provider,Object.fromEntries(['threadId','projectId','taskId','environmentId','inputRoot'].map(k=>[k,current[k]])));const connection=worker.providerConnection(provider);const result=await fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'project_skill_catalog',arguments:{}}})});assert.equal(result.status,200);assert.equal((await result.json()).result.isError,false);}
+});
+
+test('real junction escape is rejected and unbound conversations remain isolated',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-skill-boundary-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let current={provider:'codex',threadId:'one',projectId:null};const store=new ProjectSkills({root:path.join(root,'owned'),current:()=>current});let scope={...current,checkCurrent:()=>true};store.call('write_project_skill',{name:'example',body,expected_sha256:null},scope);current={...current,threadId:'two'};scope={...current,checkCurrent:()=>true};assert.deepEqual(store.call('project_skill_catalog',{},scope).skills,[]);const outside=path.join(root,'outside');fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'SKILL.md'),'PRIVATE');fs.symlinkSync(outside,path.join(store.directory(scope).target,'escape'),process.platform==='win32'?'junction':'dir');assert.throws(()=>store.call('read_project_skill',{name:'escape'},scope),/Unsafe/);assert.equal(fs.readFileSync(path.join(outside,'SKILL.md'),'utf8'),'PRIVATE');
+});

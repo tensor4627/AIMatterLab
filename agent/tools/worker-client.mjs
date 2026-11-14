@@ -9,6 +9,7 @@ export class WorkerClient extends ComputeWorkerClient{
 setAuthoringGuard(guard){this.authoringGuard=guard;}
 setResourceUseGuard(guard){this.resourceUseGuard=guard;}
 setLocalTools(definitions,handler){this.localDefinitions=definitions;this.localHandler=handler;}
+setProjectSkills(skills){this.projectSkills=skills;}
 setScopedTools(definitions,handler){this.scopedDefinitions=definitions;this.scopedHandler=handler;}
 bindProviderContext(provider,context,options={}){
   if(!['codex','kimi','qwen','deepseek','compatible'].includes(provider))throw Error('Unsupported provider');
@@ -54,11 +55,12 @@ async exposeTools(health){
     body=bytes?JSON.parse(Buffer.concat(chunks).toString('utf8')):undefined;
     if(body?.method==='tools/call'&&!validRpcRequest(body)){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:typeof body.id==='string'||Number.isSafeInteger(body.id)?body.id:null,error:{code:-32600,message:'Tool calls require a JSON-RPC 2.0 request with a string or integer id'}}));return;}
     if(body?.method==='tools/call'&&!validToolCall(body))throw Error('Invalid tool request: provide a tool name and an arguments object');
-    if(body?.method==='tools/call'&&scope.provider&&this.resourceUseGuard){
+    const projectSkill=scope.localReaders&&this.projectSkills?.owns(body?.params?.name);
+    if(body?.method==='tools/call'&&!projectSkill&&scope.provider&&this.resourceUseGuard){
      let allowed=false;try{allowed=await this.resourceUseGuard(scope.provider,scope,body.params.name)===true;}catch{}
      if(!allowed){reject(403);return;}fresh();
     }
-    authoringToken=body?.method==='tools/call'?await this.authoringGuard?.before(body.params?.name,body.params?.arguments||{},scope.provider,scope):null;
+    authoringToken=body?.method==='tools/call'&&!projectSkill?await this.authoringGuard?.before(body.params?.name,body.params?.arguments||{},scope.provider,scope):null;
     fresh();
     let response;
     const independent=this.identity?.version===3&&typeof this.identity.connectionId==='string';
@@ -67,7 +69,7 @@ async exposeTools(health){
     if(independent&&req.method==='GET'){res.writeHead(405,{'Content-Type':'application/json'});res.end();return;}
     if(independent&&body?.method==='notifications/initialized'){res.writeHead(202);res.end();return;}
     const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
-    if(independent&&['initialize','ping','resources/list','resources/templates/list'].includes(body?.method)){
+    if(body?.method==='tools/call'&&projectSkill){dispatched=true;response={status:200,data:{jsonrpc:'2.0',id:body.id,result:toolValueResult(this.projectSkills.call(body.params.name,body.params.arguments||{},scope))}};}else if(independent&&['initialize','ping','resources/list','resources/templates/list'].includes(body?.method)){
      const result=body.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{listChanged:false}},serverInfo:{name:'aimatterlab',version:'1.0.0'}}:body.method==='resources/list'?{resources:[]}:body.method==='resources/templates/list'?{resourceTemplates:[]}:{};
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(independent&&body?.method==='tools/list'){
@@ -83,8 +85,9 @@ async exposeTools(health){
     else{fresh();dispatched=true;const upstream=await fetch(this.upstream+'/mcp',{method:req.method,headers:{Authorization:'Bearer '+this.connection.tokens.mcp,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(245000)});const text=await upstream.text();response={status:upstream.status,data:text?JSON.parse(text):null};}
     fresh();
     if(body?.method==='tools/call'&&(response.status!==200||!validToolResponse(response.data,body.id)))throw Error('Tool service returned an unconfirmed response; inspect the existing workflow before continuing');
-    if(body?.method==='tools/call')await this.authoringGuard?.after(authoringToken,response.data?.result);
+    if(body?.method==='tools/call'&&!projectSkill)await this.authoringGuard?.after(authoringToken,response.data?.result);
     if(body?.method==='tools/list'&&response.data?.result?.tools){const independent=this.identity?.version===3&&typeof this.identity.connectionId==='string',local=(this.localDefinitions||[]).filter(tool=>independent||this.identity?.kind!=='ssh'||!['list_shared_terminals','read_shared_terminal','write_shared_terminal'].includes(tool.name));response.data.result.tools.push(...local,...(scope.localReaders?this.scopedDefinitions||[]:[]));if(this.authoringGuard?.filterTools)response.data.result.tools=await this.authoringGuard.filterTools(response.data.result.tools,scope.provider,scope);}
+    if(body?.method==='tools/list'&&scope.localReaders&&response.data?.result?.tools)response.data.result.tools.push(...(this.projectSkills?.tools()||[]));
     fresh();
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
    }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){reject(403);}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched})}));}else{reject(502,{error:e.message});}}
