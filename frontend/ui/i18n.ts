@@ -1,5 +1,6 @@
 const english:Record<string,string> = {
 "工具调用":"Tool calls",
+"共享终端调用":"Shared terminal calls",
 "处理中":"In progress",
 "已验证工具的源码仓库":"Source repositories for validated tools",
 "安装说明":"Installation guide",
