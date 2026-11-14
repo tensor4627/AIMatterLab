@@ -194,7 +194,7 @@ def smoke(config,approved=False):
                 spec.update(cluster_id=cluster["id"],resources=config["compute"]["resources"])
                 result=service.clusters.prepare(spec)
                 if not approved:
-                    checks.append({"id":case,"status":"blocked","run_id":result["id"],"reason":"Draft prepared; review in Studio and approve before cluster submission"});continue
+                    checks.append({"id":case,"status":"blocked","run_id":result["id"],"reason":"Draft prepared; review in AIMatterLab and approve before cluster submission"});continue
                 if result["status"] in ("draft","ready"):result=service.clusters.validate(result["id"])
                 result=service.clusters.submit(result["id"])
             else:
@@ -226,7 +226,7 @@ def main(value):
         elif action=="configure":result=bootstrap(config)
         elif action=="smoke":result=smoke(config,value.get("approved",False))
         else:raise ValueError("Unknown installer action")
-    except BlockingIOError:result={"status":"blocked","reason":"Existing worker owns this state; use Studio monitoring or choose a separate installation root, never kill or resubmit jobs"}
+    except BlockingIOError:result={"status":"blocked","reason":"Existing worker owns this state; use AIMatterLab monitoring or choose a separate installation root, never kill or resubmit jobs"}
     except (ValueError,PermissionError) as error:result={"status":"blocked","reason":str(error)}
     except Exception:result={"status":"failed","reason":"Target action failed; inspect private evidence, not public logs"}
     print("__STUDIO_INSTALL__"+json.dumps(result),flush=True)

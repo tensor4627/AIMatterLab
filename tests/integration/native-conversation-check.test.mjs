@@ -47,7 +47,7 @@ test('preparation writes an isolated versioned harness and refuses reuse or an o
  const index=path.join(root,'dist/index.html');fs.utimesSync(index,new Date(0),new Date(0));assert.throws(()=>prepareNativeConversationCheck({repoRoot:root,out:'.studio/stale-build'}),/predates/);assert(!fs.existsSync(path.join(root,'.studio/stale-build')));
 }));
 
-test('native environment preserves ordinary OS environment while dropping inherited Studio modes and Node injection',()=>{
+test('native environment preserves ordinary OS environment while dropping inherited AIMatterLab modes and Node injection',()=>{
  const env={PATH:'fixture-path',STUDIO_PROFILE_DIR:'old-private-profile',STUDIO_DEV_URL:'http://fixture',STUDIO_INSTALL_CONFIG:'private-input',ELECTRON_RUN_AS_NODE:'1',NODE_OPTIONS:'--require unsafe',SAMPLE:'kept'};
  assert.deepEqual(nativeCheckEnvironment(env,'new-owned-profile'),{PATH:'fixture-path',SAMPLE:'kept',STUDIO_PROFILE_DIR:'new-owned-profile'});assert.equal(env.STUDIO_PROFILE_DIR,'old-private-profile');
 });

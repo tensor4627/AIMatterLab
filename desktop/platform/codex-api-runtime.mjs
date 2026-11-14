@@ -1,4 +1,4 @@
-// Studio-owned Codex profile for custom APIs. User Codex homes and authentication are never read.
+// AIMatterLab-owned Codex profile for custom APIs. User Codex homes and authentication are never read.
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -38,7 +38,7 @@ export function createCodexApiRuntime({home,credential,gateway,runtime=codexRunt
  };
  const execute=(file,args,options)=>runtime.execute(file,args,environment(options));
  const spawnProcess=(file,args,options)=>runtime.spawnProcess(file,args,environment(options,true));
- const expected={name:'Studio custom API',base_url:gateway.baseUrl,env_key:'STUDIO_COMPATIBLE_API_KEY',wire_api:'responses',requires_openai_auth:false,supports_websockets:false};
+ const expected={name:'AIMatterLab custom API',base_url:gateway.baseUrl,env_key:'STUDIO_COMPATIBLE_API_KEY',wire_api:'responses',requires_openai_auth:false,supports_websockets:false};
  const modelConfig={model:credential.model,model_provider:'studio_compatible','model_providers.studio_compatible':expected};
  return {...runtime,execute,spawnProcess,
   prepareIsolation:async(file,root,config,worker)=>{

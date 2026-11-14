@@ -11,20 +11,20 @@ const packagedResources=appRoot.endsWith('.asar')?process.resourcesPath:undefine
 const sourcePolicyPath=path.resolve(appRoot,'agent/providers/dsh-policy.mjs');
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 
-/** Only a Studio-staged, pinned official installation is used; never the user's DSH home. */
+/** Only a AIMatterLab-staged, pinned official installation is used; never the user's DSH home. */
 export function resolveDshRuntime({resourcesPath=packagedResources,projectRoot=appRoot,executable}={}){
  const roots=resourcesPath?[path.join(resourcesPath,'agent-runtimes','dsh','node_modules')]:[path.join(projectRoot,'.studio','agent-runtimes','dsh','node_modules'),path.join(projectRoot,'node_modules')];
  for(const root of roots){
   const directory=path.join(root,'@deepseek-ai','dsh'),entry=executable||path.join(directory,'lib','bin.js'),manifest=path.join(directory,'package.json');
   if(!fs.existsSync(manifest)||!fs.existsSync(entry))continue;
   const pkg=JSON.parse(fs.readFileSync(manifest,'utf8'));
-  if(pkg.name!=='@deepseek-ai/dsh'||pkg.version!==DSH_VERSION)throw Error('官方 DeepSeek Harness 版本不匹配；请重新配置 Studio 的模型运行组件');
+  if(pkg.name!=='@deepseek-ai/dsh'||pkg.version!==DSH_VERSION)throw Error('官方 DeepSeek Harness 版本不匹配；请重新配置 AIMatterLab 的模型运行组件');
   const mcpModule=path.join(root,'@deepseek-ai','dsh-mcp-client','lib','index.js');let toolsModule;
   try{toolsModule=createRequire(fs.realpathSync(mcpModule)).resolve('@deepseek-ai/dsh-tools');}catch{throw Error('官方 DeepSeek Harness 组件不完整；请重新配置模型运行组件');}
   if(!fs.existsSync(mcpModule)||!fs.existsSync(toolsModule))throw Error('官方 DeepSeek Harness 组件不完整；请重新配置模型运行组件');
   return {file:process.execPath,args:['--expose-internals',entry],version:pkg.version,mcpModule:pathToFileURL(mcpModule).href,toolsModule:pathToFileURL(toolsModule).href,policyPath:resourcesPath?path.join(resourcesPath,'studio-dsh','dsh-policy.mjs'):sourcePolicyPath};
  }
- throw Error('尚未配置官方 DeepSeek Harness；请运行 Studio 配置或重新安装包含模型运行组件的完整包');
+ throw Error('尚未配置官方 DeepSeek Harness；请运行 AIMatterLab 配置或重新安装包含模型运行组件的完整包');
 }
 
 export function scopedDshWorker(worker){
@@ -61,7 +61,7 @@ export function prepareDshProfile(root,runtime,worker,instructions,selection={})
  if(!object(runtime)||typeof runtime.mcpModule!=='string'||typeof runtime.toolsModule!=='string'||typeof instructions!=='string')throw Error('Invalid DSH runtime configuration');
  const scoped=scopedDshWorker(worker),home=path.join(path.resolve(root),'deepseek-dsh-v1'),profile=path.join(home,'profiles','studio'),cwd=path.join(home,'workspace'),sessions=path.join(home,'sessions');
  for(const directory of [profile,cwd,sessions])ownedDirectory(directory);
- // The home-level overlay is owned by Studio as well. No user profile is loaded.
+ // The home-level overlay is owned by AIMatterLab as well. No user profile is loaded.
  fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]\n');
  fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'studio-deepseek-profile',private:true,type:'module',dsh:{profile:{bundles:[]}}},null,2));
  const entries=kernel.map(([id,name,config])=>({id,name:name.startsWith('@')?name:'@deepseek-ai/'+name,...config?{config}:{}}));

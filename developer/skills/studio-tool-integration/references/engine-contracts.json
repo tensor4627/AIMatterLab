@@ -603,5 +603,5 @@
     "pydyn": "pydyn",
     "hotpp": "hotpp"
   },
-  "aimlab_contract_note": "Neutral production contract distributed with the Studio tool-integration skill. Internal AimLab declarations bind to these engine rules; declaration files must not reference Studio repository source paths."
+  "aimlab_contract_note": "Neutral production contract distributed with the AIMatterLab tool-integration skill. Internal AimLab declarations bind to these engine rules; declaration files must not reference AIMatterLab repository source paths."
 }

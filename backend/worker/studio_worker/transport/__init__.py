@@ -1,1 +1,1 @@
-"""Studio worker transport domain."""
+"""AIMatterLab worker transport domain."""

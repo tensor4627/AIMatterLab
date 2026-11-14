@@ -108,10 +108,10 @@ def _write_desktop_launcher(state,node,*,windows):
             return value.replace("%","%%")
         node_cmd,start_cmd,profile_cmd,root_cmd=(batch(value) for value in (node,start,state/"desktop-profile",ROOT))
         text='@echo off\nsetlocal DisableDelayedExpansion\nset "STUDIO_PROFILE_DIR='+profile_cmd+'"\ncd /d "'+root_cmd+'"\nif errorlevel 1 exit /b 1\n"'+node_cmd+'" "'+start_cmd+'"\nexit /b %errorlevel%\n'
-        (state/"Launch-Studio.cmd").write_text(text,encoding="utf-8")
+        (state/"Launch-AIMatterLab.cmd").write_text(text,encoding="utf-8")
         def literal(value):return "'"+str(value).replace("'","''")+"'"
         text="$env:STUDIO_PROFILE_DIR="+literal(state/"desktop-profile")+"\nSet-Location -LiteralPath "+literal(ROOT)+"\n& "+literal(node)+" "+literal(start)+"\nexit $LASTEXITCODE\n"
-        (state/"Launch-Studio.ps1").write_text(text,encoding="utf-8")
+        (state/"Launch-AIMatterLab.ps1").write_text(text,encoding="utf-8")
     else:
         import shlex
         text="#!/bin/sh\ncd "+shlex.quote(str(ROOT))+" || exit 1\nexport STUDIO_PROFILE_DIR="+shlex.quote(str(state/"desktop-profile"))+"\nexec "+shlex.join([node,start])+"\n"

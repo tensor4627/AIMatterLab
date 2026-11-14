@@ -66,7 +66,7 @@ inputs 的键是独立运行目录内相对路径，值是授权源文件路径�
 | gpumd.neb | run.in；初末态结构、势模型与 NEB 控制由 run.in 引用并经输入闭环与 neb 契约核对 |
 | pydyn.md | run.py 及所有引用的结构/模型；使用 pydyn.dynamics 公共 API |
 | pygas.build | 静态 build_bias.py、结构；family、cv_definition、cv_units、atom_selection、pbc_convention、cutoff、output_file |
-| bias.validate | bias_file、structure_file、cv_size、cutoff、mode（可选 static/metad/wtmetad/bias/cvonly/opes，Studio 生产调用归一化为 bias/cvonly/opes）；可附 validation_history、atom_selection、cv_reference、fd_step、fd_atol |
+| bias.validate | bias_file、structure_file、cv_size、cutoff、mode（可选 static/metad/wtmetad/bias/cvonly/opes，AIMatterLab 生产调用归一化为 bias/cvonly/opes）；可附 validation_history、atom_selection、cv_reference、fd_step、fd_atol |
 | gpumd.sampling | run.in、model.xyz、GAScfg.yaml、bias；run.in 必须加载确切 bias 与配置 |
 | pydyn.sampling | run.py、bias/结构；独立 sampling 环境、SamplingConfig、同一 bias 实例及 hooks |
 | nep.train | nep.in、train.xyz、test.xyz（后者是验证集）；prediction 0 |

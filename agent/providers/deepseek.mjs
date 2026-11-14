@@ -108,7 +108,7 @@ export class DeepSeekBridge extends EventEmitter{
    const turn={id:randomUUID(),status:'inProgress',items:[{id:randomUUID(),type:'userMessage',content:input,text:input.map(i=>i.text).join('\n')}]};
    s.turns.push(turn);s.messages.push({role:'user',content:input.map(i=>i.text).join('\n')});this.save(s);
    const active={id:turn.id,controller:new AbortController()};this.activeTurns.set(s.id,active);this.event('turn/started',{threadId:s.id,turn:{id:turn.id}});
-   // Return immediately; all actual network work is streamed via native Studio events.
+   // Return immediately; all actual network work is streamed via native AIMatterLab events.
    void this.run(s,turn,active,context,known).catch(error=>{turn.status=active.controller.signal.aborted?'cancelled':'failed';turn.error=turn.status==='failed'?{message:this.clean(error.message)}:undefined;}).finally(()=>{
     this.activeTurns.delete(s.id);s.updatedAt=Date.now();this.save(s);this.event('studio/sessionInfo',{thread:this.publicThread(s)});this.event('turn/completed',{threadId:s.id,turn:{id:turn.id,status:turn.status,error:turn.error,stopReason:turn.status==='completed'?'end_turn':turn.status,modelOutputReceived:turn.items.some(i=>i.type==='agentMessage'&&i.text.trim())}});
    });return {turn:{id:turn.id,status:'inProgress'}};
@@ -148,7 +148,7 @@ export class DeepSeekBridge extends EventEmitter{
    for(const call of ordered){
     const activity={id:randomUUID(),type:'mcpToolCall',tool:call.function.name,status:'inProgress'};turn.items.push(activity);this.event('item/started',{threadId:s.id,item:activity});let result;
     try{
-     signal.throwIfAborted();const tool=inventory.get(call.function.name);if(!tool)throw Error('Tool is not allowed in the current Studio mode');
+     signal.throwIfAborted();const tool=inventory.get(call.function.name);if(!tool)throw Error('Tool is not allowed in the current AIMatterLab mode');
      if(call.function.arguments.length>1024*1024)throw Error('Tool arguments exceed the size limit');
      const args=JSON.parse(call.function.arguments);checkValue(args,tool.inputSchema);
      if(call.function.name==='present_task'&&args.task_id!==context.taskId)throw Error('Workflow does not belong to this conversation');

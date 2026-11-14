@@ -119,7 +119,7 @@ def draft_graph(graph,receipt):
   if 'artifact_formats' not in settings:
    selected='aoti' if str(settings.get('pt_path','')).endswith('.pt2') else 'torchscript'
    settings['artifact_formats']=[selected]
-   normalized.setdefault('metadata',{}).setdefault('studio_defaults',{})['artifact_formats']={'value':[selected],'source':'Explicit .pt2 selection' if selected=='aoti' else 'Studio portable TorchScript product default; not upstream GUI default'}
+   normalized.setdefault('metadata',{}).setdefault('studio_defaults',{})['artifact_formats']={'value':[selected],'source':'Explicit .pt2 selection' if selected=='aoti' else 'AIMatterLab portable TorchScript product default; not upstream GUI default'}
   if 'deployment_backend' not in settings and len(settings['artifact_formats'])==1:settings['deployment_backend']=settings['artifact_formats'][0]
  graph=normalized
  if graph.get('parameter_format')=='structured-v1':

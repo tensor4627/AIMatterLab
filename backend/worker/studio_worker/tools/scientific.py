@@ -36,13 +36,13 @@ def probe(payload):
         import resource
         report["process_limits"] = {name: list(resource.getrlimit(getattr(resource, key)))
             for name, key in (("address_space", "RLIMIT_AS"), ("data", "RLIMIT_DATA"), ("rss", "RLIMIT_RSS"), ("stack", "RLIMIT_STACK"))}
-        print("Studio environment probe: process limits " + json.dumps(report["process_limits"]), file=sys.stderr, flush=True)
+        print("AIMatterLab environment probe: process limits " + json.dumps(report["process_limits"]), file=sys.stderr, flush=True)
     except ImportError:
         report["process_limits_status"] = "not_run"
     modules = probe_modules(payload.get("engine"))
     report["scope"] = {"engine": payload.get("engine"), "modules": list(modules)}
     for name in modules:
-        print("Studio environment probe: importing " + name, file=sys.stderr, flush=True)
+        print("AIMatterLab environment probe: importing " + name, file=sys.stderr, flush=True)
         try:
             module = importlib.import_module("base" if name == "pygas" else name)
             report["modules"][name] = {"version": str(getattr(module, "__version__", "unknown")),
@@ -55,17 +55,17 @@ def probe(payload):
                 if selected and report["modules"][name]["registration_match"] is False:
                     report["modules"][name].update(status="blocked",error="Imported pyGAS differs from explicit registered source")
             if name == "torch":
-                print("Studio environment probe: checking CUDA availability", file=sys.stderr, flush=True)
+                print("AIMatterLab environment probe: checking CUDA availability", file=sys.stderr, flush=True)
                 report["cuda"] = module.version.cuda
                 report["cuda_available"] = module.cuda.is_available()
                 if report["cuda_available"]:
-                    print("Studio environment probe: reading allocated GPU", file=sys.stderr, flush=True)
+                    print("AIMatterLab environment probe: reading allocated GPU", file=sys.stderr, flush=True)
                     report["gpu"] = module.cuda.get_device_name(0)
         except Exception as exc:
             report["modules"][name] = {"status": "blocked", "error": str(exc)}
-            print("Studio environment probe: " + name + " blocked: " + str(exc), file=sys.stderr, flush=True)
+            print("AIMatterLab environment probe: " + name + " blocked: " + str(exc), file=sys.stderr, flush=True)
     if "pydyn" in modules:
-        print("Studio environment probe: importing pydyn.sampling", file=sys.stderr, flush=True)
+        print("AIMatterLab environment probe: importing pydyn.sampling", file=sys.stderr, flush=True)
         try:
             from pydyn.sampling import PyGASForceModel
             report["pydyn_sampling"] = True

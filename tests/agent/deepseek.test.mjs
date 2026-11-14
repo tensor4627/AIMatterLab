@@ -43,7 +43,7 @@ test('Catalog is authenticated; fast mode is explicit and context capacity is ne
 });
 test('Native tools update the same conversation workflow and private reasoning survives tool rounds and restart',async()=>{
  const {b,api,mcp,events,store}=fixture({responses:[toolReply(),answer('草稿已填写'),answer('修改已收到')]});const records=new TaskRecords(store,()=>{});const id=await start(b);const task=records.create({planningMode:true,provider:'deepseek',threadId:id,request:'MD'});
- // Use the actual Studio task ID for this conversation.
+ // Use the actual AIMatterLab task ID for this conversation.
  b.fetchApi=async(url,opts)=>{api.push({url,...opts,body:opts.body?JSON.parse(opts.body):undefined});const index=api.filter(v=>v.url.endsWith('/chat/completions')).length;return index===1?toolReply('present_task',{task_id:task.id,parameters:{temperature:300}}):answer('草稿已填写');};
  b.fetchMcp=async(url,opts)=>{const request=JSON.parse(opts.body);mcp.push({url,...opts,request});return Response.json({result:request.method==='tools/list'?{tools}:{content:[{type:'text',text:JSON.stringify({id:task.id,kind:'task-parameters',name:'MD',steps:['输入'],parameters:{temperature:300},missing_fields:[]})}]}});};
  b.on('event',event=>records.event(event));records.prepareTurn('deepseek',{threadId:id,planningMode:true,studioTaskId:task.id});

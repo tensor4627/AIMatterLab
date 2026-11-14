@@ -1,4 +1,4 @@
-// One projection for model/provider text before it enters Studio history or UI.
+// One projection for model/provider text before it enters AIMatterLab history or UI.
 // Credentials remain private transport configuration, never transcript fields.
 const sensitiveKey=/^(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|client[_-]?secret|private[_-]?key)$/i;
 export function redactTranscriptText(value,secrets=[]){

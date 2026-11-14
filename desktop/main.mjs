@@ -1,3 +1,4 @@
+import {PRODUCT_NAME} from '../contracts/product.mjs';
 import {consoleMessage} from './platform/verification/console-message.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
 import {createCliRuntimeManager,migrateBundledCliPaths} from './platform/cli-runtimes.mjs';
@@ -535,7 +536,7 @@ desktopShutdown=installDesktopShutdown({app,begin:()=>{
  return await terminalClosing;
 }});
 window=new BrowserWindow({width:1540,height:980,minWidth:1100,minHeight:720,frame:false,
-  backgroundColor:'#15151b',title:'GPU Sampling Studio',show:false,
+  backgroundColor:'#15151b',title:PRODUCT_NAME,show:false,
   webPreferences:{backgroundThrottling:!verifying,offscreen:improvementsVerifying,preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
 performanceTimeline.mark('window-created');
 installSshPrivacyLifecycle(window.webContents,sshConnection);
@@ -557,9 +558,9 @@ function focusExistingWindow(){if(!window||window.isDestroyed())return;if(window
 // A second desktop instance would race the same Catalog, broker descriptor and
 // fixed worker port. Refuse it and focus the existing window instead.
 if(!app.requestSingleInstanceLock()){
- console.error('GPU Sampling Studio is already running for this profile; closing this instance.');
+ console.error('AIMatterLab is already running for this profile; closing this instance.');
  app.exit(0);
 }else{
  app.on('second-instance',focusExistingWindow);
- app.whenReady().then(initialize).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox('GPU Sampling Studio 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
+ app.whenReady().then(initialize).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox(PRODUCT_NAME+' 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
 }

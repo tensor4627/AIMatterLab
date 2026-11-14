@@ -18,7 +18,7 @@ test('real scientific skill facade advertises and returns one full source-matche
   const result=await read(f,provider),wire=JSON.stringify(toolValueResult(result)),decoded=JSON.parse(JSON.parse(wire).content[0].text);assert.equal(decoded.status,'passed');assert.equal(decoded.document_id,documentId);assert.deepEqual(JSON.parse(decoded.text),f.doc);assert.equal(decoded.attachments.length,1);assert.equal(decoded.attachments[0].sha256,sha(decoded.text));assert.equal(decoded.attachments[0].source_evidence.status,'source_matched_reference');assert(Buffer.byteLength(wire)<=16*1024,`focused wire ${Buffer.byteLength(wire)} exceeds16KiB`);t.diagnostic(provider+' complete focused serialized bytes='+Buffer.byteLength(wire));assert(!wire.includes(f.root));assert(!wire.includes('PRIVATE_SOURCE_BODY_MUST_NOT_BE_DELIVERED'));assert.equal((decoded.text.match(/"contract": "studio-pygas-opes-analysis-cli-v1"/g)||[]).length,1);
  }
 });
-test('focused Studio body cannot bypass revoked pyGAS consent, unknown documents or function scope',async t=>{
+test('focused AIMatterLab body cannot bypass revoked pyGAS consent, unknown documents or function scope',async t=>{
  const f=await fixture(t);for(const id of ['analysis.wtmetad','sampling.gpumd'])await assert.rejects(f.service.call('read_scientific_skill',{function_id:id,document_id:documentId},{provider:'codex'}),/exact document_id/);for(const id of ['../../private',documentId.replaceAll('/','%2F')])await assert.rejects(f.service.call('read_scientific_skill',{function_id:'analysis.opes',document_id:id},{provider:'codex'}),/exact document_id/);
  f.revoke();for(const provider of ['codex','kimi','qwen','deepseek']){const r=await read(f,provider);assert.equal(r.status,'permission_required');assert.deepEqual(r.attachments,[]);assert.equal(r.text,undefined);}
 });
@@ -101,7 +101,7 @@ rw=next(x for x in at.body if isinstance(x,ast.FunctionDef) and x.name=='reweigh
 stop=next(x.value for x in loop.body if isinstance(x,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='stop' for t in x.targets));assert eval(compile(ast.Expression(stop),'<prefix-stop>','eval'),{},dict(max=max,samples=types.SimpleNamespace(shape=(8,1)),block=1,blocks=2))==4
 assert any(isinstance(x,ast.Subscript) and isinstance(x.value,ast.Name) and x.value.id=='samples' and isinstance(x.slice,ast.Slice) and isinstance(x.slice.upper,ast.Name) and x.slice.upper.id=='stop' for x in ast.walk(loop))
 hist=next(x for x in at.body if isinstance(x,ast.FunctionDef) and x.name=='_histogram_fes');assert any(isinstance(x,ast.Call) and isinstance(x.func,ast.Attribute) and x.func.attr=='full_like' and any(isinstance(arg,ast.Attribute) and arg.attr=='inf' for arg in x.args) for x in ast.walk(hist))
-# Actual Studio adapter branch under inert executable/validation boundaries.
+# Actual AIMatterLab adapter branch under inert executable/validation boundaries.
 worker=pathlib.Path(sys.argv[3]);contract=json.loads((worker/'engine_contracts.json').read_text())
 assert contract['engines']['pygas.opes-reweight']['required_inputs']==doc['studio_binding']['required_input_names']
 adapter_tree=ast.parse((worker/'tools/adapters.py').read_text());cls=next(x for x in adapter_tree.body if isinstance(x,ast.ClassDef) and x.name=='Adapter')

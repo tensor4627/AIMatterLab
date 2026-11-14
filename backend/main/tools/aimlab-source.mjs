@@ -166,12 +166,12 @@ function assertSelfContained({repositoryRoot, tree}) {
     }
     if (hits.length >= 20) break;
   }
-  if (hits.length) fail('aimlab-tools declaration must be self-contained; Studio repository references found: ' + hits.join(', ') + (hits.length >= 20 ? ' …' : ''));
+  if (hits.length) fail('aimlab-tools declaration must be self-contained; AIMatterLab repository references found: ' + hits.join(', ') + (hits.length >= 20 ? ' …' : ''));
 }
 
 /**
  * Read an external AimLab tool repository at one commit and validate its `aimlab-tools/` declaration.
- * Read-only: no installation, test execution, Studio registration or repository copy.
+ * Read-only: no installation, test execution, AIMatterLab registration or repository copy.
  */
 export function inspectAimlabSource({repo_root: repositoryRoot, commit = 'HEAD'} = {}) {
   const repository = resolveRepository(repositoryRoot);
@@ -235,7 +235,7 @@ export function inspectAimlabSource({repo_root: repositoryRoot, commit = 'HEAD'}
     release: {status: 'not_run'},
     limitations: [
       'Read-only declaration and file-closure check; software is not installed or executed.',
-      'Installation, functional tests and Studio registration remain not_run.'
+      'Installation, functional tests and AIMatterLab registration remain not_run.'
     ],
     checked_at: new Date().toISOString()
   };

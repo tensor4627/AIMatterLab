@@ -14,7 +14,7 @@ function fixtureBridge(extra={}){return new DshBridge({root:'.',catalog:catalog(
 
 test('DSH uses an affirmative official kernel and only its explicit credential environment',t=>{
  const root=temporary(t),token='synthetic-tool-token',worker={url:'http://127.0.0.1:31415/providers/deepseek',tokens:{mcp:token,admin:'never-shared'},context:{taskId:'task'}};
- const p=prepareDshProfile(root,{mcpModule:'file:///official/mcp.js',toolsModule:'file:///official/tools.js'},worker,'Studio instructions',{models:['deepseek-flash']});
+ const p=prepareDshProfile(root,{mcpModule:'file:///official/mcp.js',toolsModule:'file:///official/tools.js'},worker,'AIMatterLab instructions',{models:['deepseek-flash']});
  const text=fs.readFileSync(path.join(p.home,'profiles','studio','cordis.patch.yml'),'utf8'),entries=JSON.parse(text)[0].insert;
  assert(entries.some(v=>v.name==='@deepseek-ai/dsh-agent-loop'));assert(entries.some(v=>v.name==='@deepseek-ai/dsh-sdk-jsonrpc-server'));
  assert(entries.every(v=>!/@deepseek-ai\/dsh-(tool-(?:fs|bash|pwsh|subagent|working-directory)|skill-|web-|subagent|ptc)/.test(v.name)));

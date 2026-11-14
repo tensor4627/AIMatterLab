@@ -167,7 +167,7 @@ class ToolWorkflows:
         identifier(data['request_id']); request(data['target'], ('target', 'project_id', 'environment_id'))
         if data['target']['target'] != 'local': raise ValueError('Only explicit local tool workflows supported')
         for key in ('workspace_id',):
-            if type(data[key]) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{3,80}', data[key]): raise ValueError('Existing Studio workspace identity required')
+            if type(data[key]) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{3,80}', data[key]): raise ValueError('Existing AIMatterLab workspace identity required')
         if type(data['name']) is not str or not data['name'].strip() or len(data['name']) > 200 or re.search(r'[\x00-\x1f]', data['name']): raise ValueError('Bounded workflow name required')
         if type(data['directory_name']) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', data['directory_name']): raise ValueError('Safe workflow main directory name required')
         if type(data['tool_groups']) is not list or len(data['tool_groups']) != 1 or type(data['configurations']) is not list: raise ValueError('Exactly one bounded fixed tool group and explicit configurations required')

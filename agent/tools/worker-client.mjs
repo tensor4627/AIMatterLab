@@ -68,7 +68,7 @@ async exposeTools(health){
     if(independent&&body?.method==='notifications/initialized'){res.writeHead(202);res.end();return;}
     const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
     if(independent&&['initialize','ping','resources/list','resources/templates/list'].includes(body?.method)){
-     const result=body.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{listChanged:false}},serverInfo:{name:'gpu-sampling-studio',version:'1.0.0'}}:body.method==='resources/list'?{resources:[]}:body.method==='resources/templates/list'?{resourceTemplates:[]}:{};
+     const result=body.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{listChanged:false}},serverInfo:{name:'aimatterlab',version:'1.0.0'}}:body.method==='resources/list'?{resources:[]}:body.method==='resources/templates/list'?{resourceTemplates:[]}:{};
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(independent&&body?.method==='tools/list'){
      response=await this.discoverTools(body.id,{refresh:scope.provider===null&&req.headers['x-studio-refresh-tools']==='1'});

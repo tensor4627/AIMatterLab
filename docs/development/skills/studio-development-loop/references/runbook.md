@@ -1,6 +1,6 @@
-# GPU Sampling Studio development evidence loop
+# AIMatterLab development evidence loop
 
-Use this runbook for an explicitly requested multi-round Studio development review. Keep it in development documentation; do not inject it into scientific Agent conversations. The workflow-authoring skill remains a separate product capability.
+Use this runbook for an explicitly requested multi-round AIMatterLab development review. Keep it in development documentation; do not inject it into scientific Agent conversations. The workflow-authoring skill remains a separate product capability.
 
 ## Roles and one-round gate
 
@@ -40,7 +40,7 @@ Separate application health, native control-channel health and functional accept
 
 A command executor can launch a GUI with inherited restrictions that differ from the normal desktop user. Preserve the exact executable, loaded package, isolated profile and launch context. For a native startup error, collect one bounded supported Chromium file log; Windows child stderr alone is insufficient. Diagnose the failed check before changing application code. Do not disable Electron sandboxing, erase profiles or caches, reset ACLs or alter system security based only on an exception number. A diagnostic's suggested cause is not independent evidence of directory permissions.
 
-For a Windows application-error popup, inspect the System log's Application Popup events as well as Application Error/WER records, and correlate exact event times with the individual launch receipts. An empty Application log does not establish absence of a native popup. Keep an unexpected exit with code zero separate from a recorded exception popup. A diagnostic process or dump collector exiting does not prove its system error dialog was dismissed. Before closing the diagnostic, identify any remaining native dialog against its exact event/dump and verify it actually disappears; do not close unrelated healthy Studio windows. Do not repeat the same failed restricted-context launch; reuse one verified normal-desktop instance and keep the explicitly approved frontend controller attached across batches. Do not weaken Electron security to make a test launcher work.
+For a Windows application-error popup, inspect the System log's Application Popup events as well as Application Error/WER records, and correlate exact event times with the individual launch receipts. An empty Application log does not establish absence of a native popup. Keep an unexpected exit with code zero separate from a recorded exception popup. A diagnostic process or dump collector exiting does not prove its system error dialog was dismissed. Before closing the diagnostic, identify any remaining native dialog against its exact event/dump and verify it actually disappears; do not close unrelated healthy AIMatterLab windows. Do not repeat the same failed restricted-context launch; reuse one verified normal-desktop instance and keep the explicitly approved frontend controller attached across batches. Do not weaken Electron security to make a test launcher work.
 
 Frontend automation must count exact targets before clicking, stop on missing or ambiguous targets, and use bounded waits. A locator error is a test-infrastructure failure, not evidence of a broken product button. Capture the first failure and correct the locator without silently replaying actions. An attach-only controller must not own application shutdown, call per-batch process exit or start replacement instances after an uncertain response.
 

@@ -737,7 +737,7 @@
       ],
       "status": "source_guidance_adapted_to_Studio_owned_layout",
       "phase": "bundle_handoff",
-      "adaptation": "Keep Studio worker-owned runtime roots and explicitly selected formats; upstream workspace/task.yaml and new-v2 dual defaults do not override Studio defaults or authorize upstream workspace initialization."
+      "adaptation": "Keep AIMatterLab worker-owned runtime roots and explicitly selected formats; upstream workspace/task.yaml and new-v2 dual defaults do not override AIMatterLab defaults or authorize upstream workspace initialization."
     },
     {
       "id": "environment.gpu-sampling-compatibility",

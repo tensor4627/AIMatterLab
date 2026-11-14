@@ -1,1 +1,1 @@
-"""Studio worker infrastructure domain."""
+"""AIMatterLab worker infrastructure domain."""

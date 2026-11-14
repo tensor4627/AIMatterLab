@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import {WorkerClient} from "../agent/tools/worker-client.mjs";
 const out=path.resolve('.studio/validation'),report={checks:{}},worker=new WorkerClient(),pause=ms=>new Promise(r=>setTimeout(r,ms));
 const evidence=JSON.parse(fs.readFileSync(path.join(out,'science.json'),'utf8'));
-const packagedExecutable=process.env.STUDIO_PACKAGED_EXECUTABLE||path.resolve('release','v'+JSON.parse(fs.readFileSync('package.json','utf8')).version,'win-unpacked','GPU Sampling Studio.exe');
+const packagedExecutable=process.env.STUDIO_PACKAGED_EXECUTABLE||path.resolve('release','v'+JSON.parse(fs.readFileSync('package.json','utf8')).version,'win-unpacked','AIMatterLab.exe');
 async function api(method,target,data){return worker.request(method,target,data);}
 async function submitAndWait(run){
  run=await api('POST','/api/run/validate',{run_id:run.id});

@@ -1,6 +1,6 @@
-# GPU Sampling Studio 开发者接入指南
+# AIMatterLab 开发者接入指南
 
-本目录保存面向其他软件开发者的接入说明和 Agent skill。工具接入以 [软件规范](../docs/software-specification.md) 为依据：满足 GPU Sampling Studio 的工具定义，能够完成安装并通过测试用例。
+本目录保存面向其他软件开发者的接入说明和 Agent skill。工具接入以 [软件规范](../docs/software-specification.md) 为依据：满足 AIMatterLab 的工具定义，能够完成安装并通过测试用例。
 
 ## 工具接入 skill
 
@@ -8,24 +8,24 @@
 
 这份接入指导 skill 指导 Agent 与软件开发者协作，保留原软件的仓库布局，在工作空间中生成一个 `工具名-package` 交付包。包内包含原软件的 Git 仓库、用于操作该工具的交付 skill 和标准测试重定向入口。交付格式见 [交付指南](skills/studio-tool-integration/references/deliverables.md)。
 
-它用于开发者的软件接入工作，与 Studio 中用于日常计算规划和执行的科学 skill 分开存放。可直接分发整个 skill 目录或 [ZIP](skills/studio-tool-integration.zip)；完整 schema、纯声明校验器、注册约束、引擎契约副本和小型 CPU 工程示例均在目录内，不需要访问 Studio 仓库才能理解交付格式与内部声明契约。
+它用于开发者的软件接入工作，与 AIMatterLab 中用于日常计算规划和执行的科学 skill 分开存放。可直接分发整个 skill 目录或 [ZIP](skills/studio-tool-integration.zip)；完整 schema、纯声明校验器、注册约束、引擎契约副本和小型 CPU 工程示例均在目录内，不需要访问 AIMatterLab 仓库才能理解交付格式与内部声明契约。
 
-真实支持跨工具接口时，按 [联用接口与运行环境交付](skills/studio-tool-integration/references/runtime-composition.md) 提供接口、加载模式、依赖与最小联合用例，重点包括力场—MD 和增强采样—MD。开发者交付事实和使用指导；Studio 为用户所选完整组配置兼容环境并验收，三方组合不能由两个配对测试推定。当前使用既有 `guidance.configuration` 和测试映射承载联用材料，不新增 v1 机器字段；自动解析和配置科学工具组仍待实现。
+真实支持跨工具接口时，按 [联用接口与运行环境交付](skills/studio-tool-integration/references/runtime-composition.md) 提供接口、加载模式、依赖与最小联合用例，重点包括力场—MD 和增强采样—MD。开发者交付事实和使用指导；AIMatterLab 为用户所选完整组配置兼容环境并验收，三方组合不能由两个配对测试推定。当前使用既有 `guidance.configuration` 和测试映射承载联用材料，不新增 v1 机器字段；自动解析和配置科学工具组仍待实现。
 
 ## 内部工具（AimLab Tools）声明
 
-AimLab 自研工具（例如 GPU-Sampling）不按第三方 `<id>-package` 交付，而是在工具自己的仓库主工作分支维护 `aimlab-tools/`：机器可读 `manifest.json`、交付 `SKILL.md`、精简 `manual.md` 和 `tests/` 测试映射。声明与源码 commit 一起提交，Studio 按候选 commit 执行接入检查。内部标准见 [AimLab 内部工具声明与接入检查标准](../docs/aimlab-tools-internal.md)；随接入 skill 分发的自包含约定（目录、manifest、中立生产契约、token、测试与检查要求）见 [AimLab 内部工具约定](skills/studio-tool-integration/references/aimlab-tools.md)。
+AimLab 自研工具（例如 GPU-Sampling）不按第三方 `<id>-package` 交付，而是在工具自己的仓库主工作分支维护 `aimlab-tools/`：机器可读 `manifest.json`、交付 `SKILL.md`、精简 `manual.md` 和 `tests/` 测试映射。声明与源码 commit 一起提交，AIMatterLab 按候选 commit 执行接入检查。内部标准见 [AimLab 内部工具声明与接入检查标准](../docs/aimlab-tools-internal.md)；随接入 skill 分发的自包含约定（目录、manifest、中立生产契约、token、测试与检查要求）见 [AimLab 内部工具约定](skills/studio-tool-integration/references/aimlab-tools.md)。
 
-内部声明必须按随 skill 分发的 `references/engine-contracts.json` 书写：`manifest.id` 必须等于所声明引擎的 `aimlab_tool_id`（当前为 `gpu-sampling`、`pygas`、`pydyn`、`hotpp`）；`operation.command` 必须逐项绑定契约的 `declaration_tokens`（包括可选参数 `validation_history`、`kernel_capacity` 等 token）；可选参数默认值来源只能引用随附契约条目（如 `references/engine-contracts.json#/engines/bias.validate`）或工具仓库内相对路径，不得引用 Studio 内部路径（`backend/worker`、`backend/main`、`contracts/tools`、`desktop/`、`frontend/`、`agent/tools`、`studio_worker/`）。生成或更新 `aimlab-tools/` 时只允许修改工具仓库的 `aimlab-tools/` 目录，工具仓库其他文件保持既有默认分支内容不变。
+内部声明必须按随 skill 分发的 `references/engine-contracts.json` 书写：`manifest.id` 必须等于所声明引擎的 `aimlab_tool_id`（当前为 `gpu-sampling`、`pygas`、`pydyn`、`hotpp`）；`operation.command` 必须逐项绑定契约的 `declaration_tokens`（包括可选参数 `validation_history`、`kernel_capacity` 等 token）；可选参数默认值来源只能引用随附契约条目（如 `references/engine-contracts.json#/engines/bias.validate`）或工具仓库内相对路径，不得引用 AIMatterLab 内部路径（`backend/worker`、`backend/main`、`contracts/tools`、`desktop/`、`frontend/`、`agent/tools`、`studio_worker/`）。生成或更新 `aimlab-tools/` 时只允许修改工具仓库的 `aimlab-tools/` 目录，工具仓库其他文件保持既有默认分支内容不变。
 
-检查命令（只读；不安装、不执行测试、不注册 Studio）：
+检查命令（只读；不安装、不执行测试、不注册 AIMatterLab）：
 
 ```powershell
 node scripts/check-aimlab-tools.mjs --repo <工具仓库> --commit <sha> --out <新报告文件>
 node scripts/check-aimlab-adapter-conformance.mjs --repo <工具仓库1> --repo <工具仓库2> ... [--allow-pending] [--out <新报告文件>]
 ```
 
-`check-aimlab-tools` 校验声明、路径闭包与测试映射，并扫描 `aimlab-tools/**` 文本、拒绝 Studio 内部路径引用。`check-aimlab-adapter-conformance` 对照生产声明与引擎契约检查必需输入/参数、`declaration_tokens` 覆盖和工具身份；没有内置引擎契约的功能记为 `pending_adapter`，默认不通过（退出码 1），只有显式 `--allow-pending` 才豁免。
+`check-aimlab-tools` 校验声明、路径闭包与测试映射，并扫描 `aimlab-tools/**` 文本、拒绝 AIMatterLab 内部路径引用。`check-aimlab-adapter-conformance` 对照生产声明与引擎契约检查必需输入/参数、`declaration_tokens` 覆盖和工具身份；没有内置引擎契约的功能记为 `pending_adapter`，默认不通过（退出码 1），只有显式 `--allow-pending` 才豁免。
 
 替换内置 adapter 前，可在 Linux/WSL 中用以下命令逐例复现声明绑定 argv 与内置 adapter argv 的对比（`--repos-root` 指向含 GPUMD、pygas、pydyn、hotpp、torchnep 检出的目录）：
 
@@ -40,7 +40,7 @@ python3 scripts/check-aimlab-parity.py --repos-root <目录> [--out <新报告�
 | 阶段 | 面向谁 | 工作与产物 |
 | --- | --- | --- |
 | 工具接入 | 软件开发者及其 Agent | 保留原仓库布局，交付真实接口、联用约束、使用 skill 和最小用例，记录声明流程的实际验证范围 |
-| 工具配置 | 工具使用者及其 Agent，由 Studio 承接 | 核对所选完整依赖组，划分运行单元，在真实资源上配置兼容版本化环境并完成对应联合测试，生成执行 skill |
+| 工具配置 | 工具使用者及其 Agent，由 AIMatterLab 承接 | 核对所选完整依赖组，划分运行单元，在真实资源上配置兼容版本化环境并完成对应联合测试，生成执行 skill |
 | 日常执行 | 工具使用者及其 Agent | 使用执行 skill 操作已配置的工具，读取实际任务进度和结果 |
 
 交付 skill 包含如何安装、测试和操作工具，使用包内相对路径及通用环境要求；开发者的验证结果不代替用户环境的真实配置。执行 skill 根据用户现场的安装、环境及测试结果生成，保存在用户私有运行配置中。
@@ -56,7 +56,7 @@ python3 scripts/check-aimlab-parity.py --repos-root <目录> [--out <新报告�
 可以使用以下请求，并填写实际仓库、功能和授权范围：
 
 ```text
-请读取 studio-tool-integration/SKILL.md，将我指定的软件整理为 GPU Sampling Studio 工具。
+请读取 studio-tool-integration/SKILL.md，将我指定的软件整理为 AIMatterLab 工具。
 软件仓库：填写实际位置或来源。
 交付包位置：填写工作空间中用于保存工具名-package 的位置。
 接入功能：填写本次需要纳入工具的功能；请先核对现有实现。
@@ -65,7 +65,7 @@ python3 scripts/check-aimlab-parity.py --repos-root <目录> [--out <新报告�
 并记录安装及各项功能的测试结果、未通过原因和剩余缺项。
 ```
 
-`工具名` 为占位名称。原软件不必按 Studio 的目录示例重新组织文件。`工具名-tests` 提供统一总介绍和各功能测试入口，重定向到包内原仓库的实际位置；缺少的说明或最小测试可以在交付包中补充。所有测试资源须在整个交付包内可取得，允许位于原仓库中。
+`工具名` 为占位名称。原软件不必按 AIMatterLab 的目录示例重新组织文件。`工具名-tests` 提供统一总介绍和各功能测试入口，重定向到包内原仓库的实际位置；缺少的说明或最小测试可以在交付包中补充。所有测试资源须在整个交付包内可取得，允许位于原仓库中。
 
 机器字段、默认值、额外文件约束和注册方式见 skill 内的 [注册与版本契约](skills/studio-tool-integration/references/registration.md)。模型或大型测试数据可放包外层并声明 resources，不要求原作者将它们放进 Git。声明校验命令只需支持 JSON import attributes 的 Node 22.13+；示例生成器另需 Git，实际执行示例才需 Python 3。
 
@@ -73,10 +73,10 @@ python3 scripts/check-aimlab-parity.py --repos-root <目录> [--out <新报告�
 
 源码、原有测试和资源继续按原作者的 Git 仓库维护。交付 skill 记录对应仓库提交和文件映射；同步仓库后核对这些映射、安装说明和环境要求，再运行相应测试并记录结果。原仓库中的路径或接口改变时，更新包内重定向和交付说明。
 
-接入材料可以独立维护，不要求原作者将它们写入源码目录。Studio 不自动 pull；候选仓库更新后同步 tool.json 中的真实提交、重定向和指导，再检查/测试并显式注册更新。包版本是源码提交、manifest 与资源闭包的内容身份；已登记快照与旧任务保留，不能原地替换其程序。
+接入材料可以独立维护，不要求原作者将它们写入源码目录。AIMatterLab 不自动 pull；候选仓库更新后同步 tool.json 中的真实提交、重定向和指导，再检查/测试并显式注册更新。包版本是源码提交、manifest 与资源闭包的内容身份；已登记快照与旧任务保留，不能原地替换其程序。
 
 ## 验收范围
 
-工具定义和测试材料齐备，与开发者实际安装、功能及声明流程测试通过分别记录。`schema_checked` 和 Studio `definition_checked` 分别证明声明检查、真实 Git/文件闭包检查；注册记录的安装及测试仍为 `not_run`。若缺少测试环境或资源，保留 failed/blocked/not_run 及原因，不把文档/注册完成视为接入通过。开发者接入通过与用户真实环境配置通过分别记录。
+工具定义和测试材料齐备，与开发者实际安装、功能及声明流程测试通过分别记录。`schema_checked` 和 AIMatterLab `definition_checked` 分别证明声明检查、真实 Git/文件闭包检查；注册记录的安装及测试仍为 `not_run`。若缺少测试环境或资源，保留 failed/blocked/not_run 及原因，不把文档/注册完成视为接入通过。开发者接入通过与用户真实环境配置通过分别记录。
 
-将软件整理为合格工具，不会自动为 Studio 新增运行适配器或界面入口。如还需要修改 Studio 的工具注册、worker 或前端，应依据其实际接口另行实施和验证。
+将软件整理为合格工具，不会自动为 AIMatterLab 新增运行适配器或界面入口。如还需要修改 AIMatterLab 的工具注册、worker 或前端，应依据其实际接口另行实施和验证。

@@ -1,8 +1,8 @@
-# GPU Sampling Studio 代码架构
+# AIMatterLab 代码架构
 
 产品要求见 [软件规范](software-specification.md)，迁移依据见 [重组方案](development/repository-reorganization.md)，实现与验证范围见 [v1.0 记录](v1.0.md)。本页描述当前源码所有者，不表示所有科学引擎均已通过新的工具配置路线。
 
-自 `1.0.1` 起，本文描述的源码所有者边界（前端 / 后端主进程 / Python worker / Agent）作为正式 Studio 本体设计基线冻结；后续变化必须同步更新本页与版本记录，并遵守 1.0 起的向后兼容与版本化迁移约定。
+自 `1.0.1` 起，本文描述的源码所有者边界（前端 / 后端主进程 / Python worker / Agent）作为正式 AIMatterLab 本体设计基线冻结；后续变化必须同步更新本页与版本记录，并遵守 1.0 起的向后兼容与版本化迁移约定。
 
 ## 源码入口
 
@@ -31,7 +31,7 @@ agent/
   context/                模型上下文装配
   skills/                 指导选择、受限读取和封存策略
   tools/                  对后端和共享终端的受限调用
-  builtin-skills/         Studio 自带公共指导
+  builtin-skills/         AIMatterLab 自带公共指导
 contracts/                DTO、schema 与无特权的跨边界验证规则
 desktop/                  main/preload 启动和桥接
   platform/               原生进程、凭据、对话框和系统适配
@@ -96,7 +96,7 @@ Agent 从后端取得结构化事实，再生成模型上下文。MCP 和模型�
 
 新的完整配置与逐步执行参考路线目前限定固定串行 CPU `installation.check` 工程示例。通用资源边执行、其他第三方工具安装及现场科学适配需要各自实现和验证；既有引擎路线继续保留其真实支持范围。
 
-科学联用配置的责任位于 Studio：从开发者交付的 `aimlab-tools` 接口声明和使用指导解析所选组，区分产物阶段与同进程运行组件，为每个必须共同运行的完整依赖闭包配置兼容的版本化环境，并验证实际产物及完整组合。预置接口类型覆盖已声明支持的力场—MD 和增强采样—MD 联用；三者组合须有对应的完整组证据。这是待实现的通用配置能力，不改变上述固定 CPU reference 的当前边界；开发者声明、skill 文本和单工具测试都不能直接激活科学组。详细要求见[依赖组审查](development/tool-dependency-groups.md)。
+科学联用配置的责任位于 AIMatterLab：从开发者交付的 `aimlab-tools` 接口声明和使用指导解析所选组，区分产物阶段与同进程运行组件，为每个必须共同运行的完整依赖闭包配置兼容的版本化环境，并验证实际产物及完整组合。预置接口类型覆盖已声明支持的力场—MD 和增强采样—MD 联用；三者组合须有对应的完整组证据。这是待实现的通用配置能力，不改变上述固定 CPU reference 的当前边界；开发者声明、skill 文本和单工具测试都不能直接激活科学组。详细要求见[依赖组审查](development/tool-dependency-groups.md)。
 
 ## 分发与证据
 

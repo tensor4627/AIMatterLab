@@ -23,7 +23,7 @@ export function providerSentinelObserver(provider,threadId){
 
 export async function verifyProviderAccess(provider,invoke,verifyTurn,stage=()=>{}){
  stage('provider_connect');const connection=await invoke('agent.connect',{provider});
- if(connection?.cliRequired){stage('provider_cli');throw Error('Selected CLI is not ready; choose a compatible local CLI or explicitly download it in the same Studio profile');}
+ if(connection?.cliRequired){stage('provider_cli');throw Error('Selected CLI is not ready; choose a compatible local CLI or explicitly download it in the same AIMatterLab profile');}
  stage('account_read');const account=await invoke('agent.account',{provider});
  stage('model_list');const models=await invoke('agent.rpc',{provider,method:'model/list'});
  const metadata={available:!!account.account,requiresOpenaiAuth:account.requiresOpenaiAuth??null,catalogAuthRequired:models.authRequired??null};

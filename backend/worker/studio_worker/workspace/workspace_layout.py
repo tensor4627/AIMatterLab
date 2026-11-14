@@ -13,7 +13,7 @@ def _root(service,project):
  return root
 
 def describe(service,project):
- if not project.get('studio_workspace'):raise ValueError('A registered Studio workspace is required')
+ if not project.get('studio_workspace'):raise ValueError('A registered AIMatterLab workspace is required')
  return {'id':project['id'],'name':project['name'],'root':str(_root(service,project)),'directories':LAYOUT,'asset_mode':project['studio_workspace']['asset_mode'],'assets':service.store.list('workspace-asset') and [a for a in service.store.list('workspace-asset') if a['project_id']==project['id']]}
 
 def create(service,data):

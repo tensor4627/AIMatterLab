@@ -47,7 +47,7 @@ export function selectNodeTests(args,files,{testsRoot,cwd}){
 
 export function runNodeTests(args=process.argv.slice(2),{testsRoot=path.join(repository,'tests'),cwd=repository,spawnTarget=spawnSync,write=value=>process.stdout.write(value)}={}){
  const selection=selectNodeTests(args,discoverNodeTests(testsRoot),{testsRoot,cwd});
- if(selection.help){write('Local Studio Node tests (no scientific runs):\n  node scripts/test-node.mjs [--suite='+nodeSuites.join(',')+'] [--file=tests/path.test.mjs] [--list] [--test-name-pattern=pattern]\nNo selection runs every discovered test. Suites may be combined; each file runs once.\n');return 0;}
+ if(selection.help){write('Local AIMatterLab Node tests (no scientific runs):\n  node scripts/test-node.mjs [--suite='+nodeSuites.join(',')+'] [--file=tests/path.test.mjs] [--list] [--test-name-pattern=pattern]\nNo selection runs every discovered test. Suites may be combined; each file runs once.\n');return 0;}
  const {files}=selection;
  if(selection.list){
   for(const file of files)write(path.relative(cwd,file).replaceAll('\\','/')+'\n');

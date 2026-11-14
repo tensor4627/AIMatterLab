@@ -3,7 +3,7 @@ name: studio-md-workflow
 description: Prepare and review PyDyn or GPUMD molecular dynamics from existing or ASE-created structures and a compatible potential; route enhanced sampling to pyGAS without confusing authoring with execution.
 ---
 
-# Molecular dynamics in Studio
+# Molecular dynamics in AIMatterLab
 
 Resolve the requested engine from the user's task and registered capabilities: pydyn.md, gpumd.md, pydyn.sampling or gpumd.sampling. Use describe_engine for its current input and parameter contract. Source registration supplies authoring information; inspect the selected compute environment for that engine and retain actual probe findings; diagnostic differences can be repaired within the current delegation. Never switch an engine checkout or choose a different registered version silently.
 

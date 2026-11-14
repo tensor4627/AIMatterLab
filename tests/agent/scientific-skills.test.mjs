@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
 test('Legacy pyGAS consent does not broaden other public sources or private skill roots',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-scientific-facade-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  for(const folder of ['builtin','pygas/agents/skills/cv','gpumd/agents/skills/runtime'])await fs.mkdir(path.join(root,folder),{recursive:true});
- await fs.writeFile(path.join(root,'builtin/SKILL.md'),'Studio-owned public guide');await fs.writeFile(path.join(root,'pygas/agents/skills/cv/SKILL.md'),'Public actual pyGAS entry');await fs.writeFile(path.join(root,'gpumd/agents/skills/runtime/SKILL.md'),'Public actual GPUMD entry');
+ await fs.writeFile(path.join(root,'builtin/SKILL.md'),'AIMatterLab-owned public guide');await fs.writeFile(path.join(root,'pygas/agents/skills/cv/SKILL.md'),'Public actual pyGAS entry');await fs.writeFile(path.join(root,'gpumd/agents/skills/runtime/SKILL.md'),'Public actual GPUMD entry');
  const settings={pygasSkillProviders:['codex','kimi','qwen','deepseek']},map={schema_version:1,skills:[{id:'builtin',source:'studio',folder:'builtin',files:['SKILL.md']},{id:'cv',source:'pygas',folder:'cv',files:['SKILL.md']},{id:'runtime',source:'gpumd',folder:'runtime',files:['SKILL.md']}],functions:[{id:'workflow.orchestrate',phase:'orchestration',skills:['builtin']},{id:'pygas.cv',phase:'authoring',skills:['cv']},{id:'environment.runtime',phase:'discovery',skills:['runtime']}]};
  // Bundle root has a child directory just as the packaged physical skill bundle.
  await fs.mkdir(path.join(root,'studio'),{recursive:true});await fs.rename(path.join(root,'builtin'),path.join(root,'studio/builtin'));

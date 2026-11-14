@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only parity check: declaration-bound argv vs built-in adapter argv.
 
-Run from the Studio checkout inside Linux/WSL with explicit repositories:
+Run from the AIMatterLab checkout inside Linux/WSL with explicit repositories:
 
     python3 scripts/check-aimlab-parity.py --repos-root /mnt/d/data/software
 

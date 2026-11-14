@@ -21,7 +21,7 @@ export function runWorkerTests({platform=process.platform,env=process.env,cwd=re
   return {exitCode:2};
  }
  const tests=path.resolve(cwd,'backend/worker/tests');
- if(args[0]==='--list'){write({scope:'Studio worker tests only',files:fs.readdirSync(tests).filter(name=>/^test_.*\.py$/.test(name)).sort()});return {exitCode:0};}
+ if(args[0]==='--list'){write({scope:'AIMatterLab worker tests only',files:fs.readdirSync(tests).filter(name=>/^test_.*\.py$/.test(name)).sort()});return {exitCode:0};}
  if(pattern){const match=new RegExp('^'+pattern.replaceAll('.','\\.').replaceAll('*','.*').replaceAll('?','.')+'$');if(!fs.readdirSync(tests).some(name=>match.test(name))){write({status:'blocked',reason:'no_tests_matched',message:'No local worker tests matched the pattern.'});return {exitCode:2};}}
  const result=preflight({platform,env});
  if(result.status!=='allowed'||args[0]==='--preflight-only'){

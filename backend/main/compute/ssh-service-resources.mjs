@@ -1,4 +1,4 @@
-/** Fixed, checked Studio worker source transfer. No user inputs, credentials or engine files. */
+/** Fixed, checked AIMatterLab worker source transfer. No user inputs, credentials or engine files. */
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';

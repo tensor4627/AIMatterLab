@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 import {stageDshRuntime} from './stage-dsh-runtime.mjs';
 export function stageCoreRuntimes({root=process.cwd(),platform=process.platform,arch=process.arch}={}){
 root=fs.realpathSync(root);
-if(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).name!=='gpu-sampling-studio')throw Error('Native runtime staging requires a Studio checkout');
+if(!['aimatterlab','gpu-sampling-studio'].includes(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).name))throw Error('Native runtime staging requires a AIMatterLab checkout');
 const target=path.resolve(root,'.studio','agent-runtimes'),modules=path.join(target,'node_modules'),sourceModules=path.join(root,'node_modules');
 const contained=(base,file)=>{const relative=path.relative(base,file);return relative!==''&&relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);};
 if(!contained(root,target)||path.relative(root,target)!==path.join('.studio','agent-runtimes'))throw Error('Unsafe runtime staging target');

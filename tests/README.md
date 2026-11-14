@@ -1,6 +1,6 @@
-# Studio 本地测试库
+# AIMatterLab 本地测试库
 
-本目录测试 Studio 自身的组件、接口、权限和持久化行为。相邻科学引擎、工具包内的测试及其通过标准由各工具维护，不在本库的整理范围内，也不会被以下默认入口执行。
+本目录测试 AIMatterLab 自身的组件、接口、权限和持久化行为。相邻科学引擎、工具包内的测试及其通过标准由各工具维护，不在本库的整理范围内，也不会被以下默认入口执行。
 
 ## 按改动选择入口
 
@@ -10,9 +10,9 @@
 | 受影响领域 | `node scripts/test-node.mjs --suite=frontend,contracts` | 按目录选择，重复选择不会重复运行同一文件 |
 | 精确回归文件 | `node scripts/test-node.mjs --file=tests/frontend/agent-send-lifecycle.test.mjs` | 仅运行指定的本库测试；可重复 `--file`，可与 suite 取交集 |
 | 查看选择结果 | `node scripts/test-node.mjs --suite=frontend --list` | 只列文件，不执行；未知领域、外部文件、空选择均报错 |
-| Worker 生命周期 | `node scripts/test-worker.mjs --pattern=test_launch_protocol.py` | 在明确的 Linux/WSL 环境执行 Studio worker 测试；不切换引擎环境 |
+| Worker 生命周期 | `node scripts/test-worker.mjs --pattern=test_launch_protocol.py` | 在明确的 Linux/WSL 环境执行 AIMatterLab worker 测试；不切换引擎环境 |
 | Worker 目录与预检查 | `node scripts/test-worker.mjs --list` / `--preflight-only` | 分别查看本库文件、核对实际可用的执行环境 |
-| 全部 Worker 检查 | `node scripts/test-worker.mjs` | Studio worker 的完整工程测试；不等于科学引擎验收 |
+| 全部 Worker 检查 | `node scripts/test-worker.mjs` | AIMatterLab worker 的完整工程测试；不等于科学引擎验收 |
 | 浏览器渲染回归 | `node scripts/frontend-regression.mjs` | 真实组件、布局和输入事件，服务请求为隔离替身 |
 | 会话侧栏定向交互 | `node scripts/conversation-sidebar-regression.mjs` | 当前 App、悬浮菜单、项目层级和键盘／主题／边缘布局；隔离模拟 IPC。设置 `STUDIO_SIDEBAR_ELECTRON=1` 使用实际 Electron 自动输入；证据写入 `.studio/conversation-sidebar-20261112/` |
 | 已暂存运行时校验 | `node scripts/package-runtime.mjs --validate` | 只读核对已存在构建资源、依赖、平台文件与版本；不安装、不打包 |
@@ -33,11 +33,11 @@ Remove-Item Env:STUDIO_FRONTEND_OUTPUT
 
 ## 需要显式环境的补测
 
-默认运行中的 `skipped` 不代表通过。以下 Studio 自有用例需要单独满足前置条件；不修改跳过条件或断言来消除跳过记录。
+默认运行中的 `skipped` 不代表通过。以下 AIMatterLab 自有用例需要单独满足前置条件；不修改跳过条件或断言来消除跳过记录。
 
 | 测试文件 | 前置条件 / 开关 | 实际范围 |
 | --- | --- | --- |
-| `agent/scientific-opes-analysis.test.mjs` | `STUDIO_TEST_PYGAS_SOURCE` 指向现有 pyGAS 源码；可用 Python 标准库 | 只读核对源码 receipt、CLI 参数、权重表达式与 Studio adapter；不运行科学分析或引擎测试 |
+| `agent/scientific-opes-analysis.test.mjs` | `STUDIO_TEST_PYGAS_SOURCE` 指向现有 pyGAS 源码；可用 Python 标准库 | 只读核对源码 receipt、CLI 参数、权重表达式与 AIMatterLab adapter；不运行科学分析或引擎测试 |
 | `agent/workspace-materialize-transport.test.mjs` | Windows 设置 `STUDIO_TEST_WSL_DISTRIBUTION` 为已存在的发行版 | 真实 WorkerClient、Python dispatch 和原子创建；独立临时数据库与服务，不接生产 worker |
 | `backend/tool-package-registry.test.mjs`、`integration/managed-tool-context.test.mjs` | 平台允许创建真实文件符号链接；Node 支持 `node:sqlite`，Git 可用 | 真实相对链接、迁移和越界拒绝；Linux 通过不能写成 Windows 原生链接通过 |
 | `integration/terminal-session-native.test.mjs` | Windows、已有 Electron/ConPTY 依赖，`STUDIO_TEST_TERMINAL_NATIVE=1` | 独立终端服务、真实 shell、交接隔离和退出码；不连接已有终端 |
@@ -50,7 +50,7 @@ Remove-Item Env:STUDIO_FRONTEND_OUTPUT
 - 发送、准备取消、历史恢复和迟到回执统一在 `frontend/agent-send-lifecycle.test.mjs`。原 `agent-send-blocked.test.mjs` 和 `agent-experience.test.mjs` 的有效断言保留；resume/read 两种恢复失败共用参数化场景。草稿持久化与问答各自保留专门文件。
 - 设置页入口与保存回归共用 `helpers/settings-page-hooks.mjs`，执行实际 SettingsPage 的 hooks，避免各文件自建过期 React 桩。
 - 结果页与审阅页回归共用 `helpers/run-detail-hooks.mjs`；保留未挂载后写入检测、迟到返回和时间推进能力。
-- 工具包与工作流面板共享组件执行底座，各自保留模拟服务、版本/授权/归属数据与业务断言。这些是 Studio 集成测试，不是工具包自带测试。
+- 工具包与工作流面板共享组件执行底座，各自保留模拟服务、版本/授权/归属数据与业务断言。这些是 AIMatterLab 集成测试，不是工具包自带测试。
 - 不因标题相近或同时涉及同一函数就删除用例。组件、接口、安全拒绝、真实渲染分别验证不同边界，不能相互替代。候选合并要先列出旧场景到新场景的对应关系，再确认断言与失败可见性保留。
 - 不为了减少统计数量删除晚到响应、不同 owner、重复点击、部分生效、unknown 不重提等独立风险用例。不按发布版本新增一份整套相同矩阵。
 

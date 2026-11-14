@@ -1,4 +1,4 @@
-# GPU Sampling Studio 仓库代码重组方案
+# AIMatterLab 仓库代码重组方案
 
 依据 [软件规范](../software-specification.md) 和 2026-11-04 工作树设计；初始审查版本为 `0.18.9-dev.44`。现已从修复后的 `e8ba66a` 在 `codex/v1.0` 分支完成本次代码重组，实际架构见 [代码架构](../architecture.md)，闭包与验证见 [v1.0记录](../v1.0.md)。以下保留原设计及实施顺序；通用科学工具扩展不因源码归位而自动成为已验证能力。
 
@@ -54,7 +54,7 @@ desktop/                               Electron 宿主与平台支持
   ipc/                                 sender 校验、路由注册
   platform/                            系统凭据、原生对话框、Windows WSL 路径等
   generated/                           按生成流程维护的外部协议类型
-installation/                          Studio 安装与分发入口
+installation/                          AIMatterLab 安装与分发入口
 developer/                             外部软件开发者的接入指导
 docs/                                  spec、架构方案、开发及版本记录
 tests/                                 按 frontend backend agent contracts integration 分组

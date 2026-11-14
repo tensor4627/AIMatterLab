@@ -26,9 +26,9 @@ flowchart LR
 
 1. 先连接本地 WSL 作业服务：选择已安装发行版，只有一个时会预选并展示。服务目录与端口放在高级设置；从已有计算流程进入时恢复该流程的原来源。连接后发现并复用已安装环境，不自动安装科学软件。[WSL 命令说明](https://learn.microsoft.com/en-us/windows/wsl/basic-commands)
 2. 进入“SSH 集群”，导入本机已有连接，或填写主机与明确的远程用户名。优先复用已有密钥、SSH agent 或外部转发入口。应用只把所选连接的必要字段填入表单，不复制全量记录；地址、端口和密钥引用默认遮蔽。客户端和密钥引用须属于对应的 Windows / WSL 命名空间，不自动转换路径或复制私钥。[OpenSSH 密钥管理](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement)
-3. 选择 LSF 或 Slurm。已有入口和内部 Slurm 登录节点可以建立两份配置，后者填写内部跳转 Host。内部跳转使用集群已有认证；Studio 不额外启用 agent forwarding、不复制密钥。既有密钥模式沿用原客户端配置，新受控人工认证模式显式禁用 agent forwarding。
+3. 选择 LSF 或 Slurm。已有入口和内部 Slurm 登录节点可以建立两份配置，后者填写内部跳转 Host。内部跳转使用集群已有认证；AIMatterLab 不额外启用 agent forwarding、不复制密钥。既有密钥模式沿用原客户端配置，新受控人工认证模式显式禁用 agent forwarding。
 4. 需要二步验证时，选择“WSL 私有交互认证”，在认证方式旁明确选择 WSL OpenSSH；自定义客户端仍可在高级设置填写，切换模式不会自动替换原客户端。核对 WSL 内的密钥引用后，先“保存连接”，再“打开私有认证”。首次主机提示须从管理员或可信渠道独立核对指纹，再亲自确认；密码、口令、OTP 或设备确认由用户在私有终端完成，不交给 Agent。通过会话核验后可保留连接并关闭界面；认证成功不表示调度器、计算节点或科学环境已验证。
-5. 已认证连接足以执行批处理时无需额外隧道。确需转发时，在私有认证界面的可选区域审阅目标与回环监听，再明确启动自有转发。Studio 不接管外部入口；“监听已建立”不表示目标服务已验证，也不表示目标 SSH 已认证。[OpenSSH 转发与连接复用说明](https://man.openbsd.org/ssh_config)
+5. 已认证连接足以执行批处理时无需额外隧道。确需转发时，在私有认证界面的可选区域审阅目标与回环监听，再明确启动自有转发。AIMatterLab 不接管外部入口；“监听已建立”不表示目标服务已验证，也不表示目标 SSH 已认证。[OpenSSH 转发与连接复用说明](https://man.openbsd.org/ssh_config)
 6. 保存连接与“允许当前项目使用此连接”是两个动作。SSH 配置、集群资源上限和项目授权只由用户在设置窗口修改；认证和连接检查不改变授权。Agent 只能提出配置草稿。
 7. 执行只读探测，确认命令可用性、队列 / 分区和注册的 Python / 引擎路径。登录节点没有 GPU 不等于计算节点不可用；发现 Python 或调度器也不等于科学模块通过验证。
 8. 让 Agent 协作检查 modules、虚拟环境、CUDA / LibTorch、引擎路径、队列策略和资源数量。调用 draft_cluster_setup 提出修改，在“提交 Skill”页审阅后保存。

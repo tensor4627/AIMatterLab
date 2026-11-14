@@ -47,7 +47,7 @@ def create(payload):
  return {**report,'path':str(output),'sha256':hashlib.sha256(output.read_bytes()).hexdigest(),'size':output.stat().st_size,'provenance':{'library':'ASE','version':ase.__version__,'recipe':recipe,'assumptions':assumptions},'suggested_parameters':{'n_atoms':{'value':len(atoms),'source':'serialized ASE structure'},'pbc':{'value':atoms.pbc.tolist(),'source':'serialized ASE structure'},'structure_file':{'value':str(output),'source':'created asset'}},'unresolved_science':['target temperature and ensemble when not supplied','potential compatibility and intended CV/atom selection']}
 
 def portable_graph(graph):
- """Change only Studio I/O locations; CV/bias science and backend stay exact."""
+ """Change only AIMatterLab I/O locations; CV/bias science and backend stay exact."""
  import copy
  result=copy.deepcopy(graph);settings=result.setdefault('settings',{});bindings={}
  for key in ('atoms_path','pt_path'):
@@ -174,12 +174,12 @@ def suggest(payload):
  supplied={k:{'value':v,'source':'supplied task intent','confidence':'user'} for k,v in intent.items()}
  parameters={**supplied,'n_atoms':{'value':len(atoms),'source':'ASE loaded structure','confidence':'measured'},'pbc':{'value':atoms.pbc.tolist(),'source':'ASE loaded structure','confidence':'measured'},'structure_file':{'value':payload['path'],'source':'authorized asset','confidence':'measured'}}
  topology=molecular_topology(atoms)
- defaults={'time_step_fs':{'value':0.25 if 'H' in facts['symbols'] else 1.0,'source':('conservative H-containing pilot heuristic' if 'H' in facts['symbols'] else 'conservative non-H pilot heuristic')+'; verify potential/time-scale','confidence':'proposal'},'pilot_steps':{'value':100,'source':'bounded software trial, not equilibration or convergence','confidence':'technical default'},'walkers':{'value':1,'source':'Studio supported single-walker contract','confidence':'capability'}}
+ defaults={'time_step_fs':{'value':0.25 if 'H' in facts['symbols'] else 1.0,'source':('conservative H-containing pilot heuristic' if 'H' in facts['symbols'] else 'conservative non-H pilot heuristic')+'; verify potential/time-scale','confidence':'proposal'},'pilot_steps':{'value':100,'source':'bounded software trial, not equilibration or convergence','confidence':'technical default'},'walkers':{'value':1,'source':'AIMatterLab supported single-walker contract','confidence':'capability'}}
  for k,v in defaults.items():parameters.setdefault(k,v)
  unresolved=[]
  if intent.get('temperature_K') is None and intent.get('temperature') is not None:parameters['temperature_K']={'value':intent['temperature'],'source':'supplied temperature alias','confidence':'user'}
  if intent.get('enhanced_sampling'):
-  for key,value,source in [('cv_internal_dtype',None,'pyGAS no internal downcast; preserve float64 authoring inputs'),('artifact_format','torchscript','Studio portable .pt authoring default'),('dtype','float64','GPU-Sampling Bias/CV input contract')]:parameters.setdefault(key,{'value':value,'source':source,'confidence':'technical default'})
+  for key,value,source in [('cv_internal_dtype',None,'pyGAS no internal downcast; preserve float64 authoring inputs'),('artifact_format','torchscript','AIMatterLab portable .pt authoring default'),('dtype','float64','GPU-Sampling Bias/CV input contract')]:parameters.setdefault(key,{'value':value,'source':source,'confidence':'technical default'})
   count=intent.get('n_steps',intent.get('steps',parameters['pilot_steps']['value']));pace=intent.get('pace')
   if type(count) is int and count>0 and type(pace) is int and pace>0:parameters.setdefault('history_capacity',{'value':1+math.ceil(count/pace),'source':'one initial slot + ceil(n_steps / deposition pace); single walker','confidence':'derived capacity, not convergence'})
  if not parameters.get('temperature_K') and intent.get('ambient') is True:parameters['temperature_K']={'value':300,'source':'ambient-temperature request mapped to a reviewable 300 K convention','confidence':'proposal'}

@@ -75,7 +75,7 @@ class Adapter:
         loader = shutil.which("ldd") or next((str(p) for p in (Path("/usr/bin/ldd"),Path("/bin/ldd")) if p.is_file()),None)
         if not loader:
             return {"status":"not_run", "scope":"Loader inspection unavailable; actual engine launch still required"}
-        print("Studio validation: native ELF loader check started", file=sys.stderr, flush=True)
+        print("AIMatterLab validation: native ELF loader check started", file=sys.stderr, flush=True)
         result = subprocess.run([loader,target],env=process_env(environment),capture_output=True,text=True,timeout=60)
         output = result.stdout + result.stderr
         if "not a dynamic executable" in output or "statically linked" in output:
@@ -408,13 +408,13 @@ class Adapter:
                     raise ValueError("Prediction species order does not match the model")
 
         if self.engine.endswith("sampling") or self.engine == "bias.validate":
-            print("Studio validation: serialized artifact ABI started", file=sys.stderr, flush=True)
+            print("AIMatterLab validation: serialized artifact ABI started", file=sys.stderr, flush=True)
             result = subprocess.run(self.bias_command(spec, environment), cwd=directory,
                                     env=process_env(environment, spec["gpu"]), text=True,
                                     capture_output=True, timeout=180)
             if result.returncode:
                 raise ValueError(result.stderr[-6000:] or result.stdout[-6000:])
-            print("Studio validation: serialized artifact ABI passed", file=sys.stderr, flush=True)
+            print("AIMatterLab validation: serialized artifact ABI passed", file=sys.stderr, flush=True)
             if self.engine == "gpumd.sampling":
                 from studio_worker.tools.science_checks import check_gascfg
                 check_gascfg(directory, p)
@@ -434,9 +434,9 @@ class Adapter:
                 payload = {**p, "engine":self.engine, "bias_file":str(directory / p["bias_file"]), "structure_file":str(directory / p["structure_file"]), "_studio_cell_contract":cell_derivative_contract}
                 if p.get("validation_history"):
                     payload["validation_history"] = str(directory / p["validation_history"])
-                print("Studio validation: sampled force/virial check started", file=sys.stderr, flush=True)
+                print("AIMatterLab validation: sampled force/virial check started", file=sys.stderr, flush=True)
                 derivatives = run_json(self.executable(environment,"python"),SCIENTIFIC,"derivatives",payload,process_env(environment,spec["gpu"]),timeout=120)
-                print("Studio validation: sampled force/virial check passed", file=sys.stderr, flush=True)
+                print("AIMatterLab validation: sampled force/virial check passed", file=sys.stderr, flush=True)
             return {"status": "passed", "native_runtime":runtime, "artifact_status":"passed", "scientific_status":"not_run", "output": result.stdout[-12000:], "derivatives":derivatives,
                     "scope": ("serialized OPES ABI/state checks only; finite differences not_run; target-engine and restart parity require run evidence" if p["mode"] == "opes" else "serialized bias ABI and sampled finite differences; target-engine and restart parity require run evidence")}
         if self.engine == "pygas.build" and p.get("output_file", "").endswith(".pt2"):

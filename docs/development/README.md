@@ -1,4 +1,4 @@
-# GPU Sampling Studio 开发者文档
+# AIMatterLab 开发者文档
 
 开发版本以根目录 `package.json` 为准。各代具体变更和验证结果见 [CHANGELOG](../../CHANGELOG.md) 与 [当前版本记录](../v1.0.md)；未完成工作见 [ROADMAP](ROADMAP.md)。历史记录中的通过只适用于其明确版本、输入和环境，不自动成为当前版本的新验收。
 

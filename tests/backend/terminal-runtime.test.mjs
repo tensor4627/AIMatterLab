@@ -11,7 +11,7 @@ function fixture(t){
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const source=path.join(root,'source'),runtimeRoot=path.join(root,'owned','runtimes'),dependencyRoot=path.join(source,'resources','agent-runtimes'),native='@lydell/node-pty-win32-x64';
  const write=(relative,text)=>{const file=path.join(source,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,typeof text==='string'?text:JSON.stringify(text));return file;};
- const nodeExecutable=write('Studio.exe','inert executable fixture; never launched');
+ const nodeExecutable=write('AIMatterLab.exe','inert executable fixture; never launched');
  write('ffmpeg.dll','inert runtime support');write('icudtl.dat','inert ICU support');write('LICENSE.electron.txt','fixture license');
  const servicePath=write('resources/terminal-service/broker.mjs',"import './session.mjs';");
  write('resources/terminal-service/session.mjs','export const fixture=true;');
@@ -94,7 +94,7 @@ test('source mutation during copying is rejected and leaves no partial published
 
 test('linked source inputs, package contents and destination ancestors are refused',async t=>{
  const f=fixture(t),linked=path.join(f.root,'linked-source');fs.symlinkSync(f.source,linked,process.platform==='win32'?'junction':'dir');
- await assert.rejects(()=>prepareTerminalRuntime({...f.options,nodeExecutable:path.join(linked,'Studio.exe')}),/terminal_runtime_invalid_source/);
+ await assert.rejects(()=>prepareTerminalRuntime({...f.options,nodeExecutable:path.join(linked,'AIMatterLab.exe')}),/terminal_runtime_invalid_source/);
  const external=path.join(f.root,'external');fs.mkdirSync(external);
  fs.symlinkSync(external,path.join(f.options.dependencyRoot,'node_modules',f.native,'linked'),process.platform==='win32'?'junction':'dir');
  await assert.rejects(f.prepare,/terminal_runtime_invalid_source/);
@@ -113,7 +113,7 @@ test('platform and absolute source requirements fail closed without invoking any
 
 
 test('runtime checks the source and copied executable actual integrity before publication without changing permissions',async t=>{
- const f=fixture(t),result=await f.prepare();assert.equal(f.probes[0],f.options.nodeExecutable);assert(f.probes.some(file=>file.includes('staging-')&&path.basename(file)==='Studio.exe'));assert.equal(fs.readFileSync(result.nodeExecutable,'utf8'),'inert executable fixture; never launched');
+ const f=fixture(t),result=await f.prepare();assert.equal(f.probes[0],f.options.nodeExecutable);assert(f.probes.some(file=>file.includes('staging-')&&path.basename(file)==='AIMatterLab.exe'));assert.equal(fs.readFileSync(result.nodeExecutable,'utf8'),'inert executable fixture; never launched');
 });
 test('a Low source execution context fails before creating an execution cache',async t=>{
  const f=fixture(t);f.options.probeExecution=async()=>{throw Error('terminal_runtime_low_integrity');};await assert.rejects(f.prepare,/terminal_runtime_low_integrity/);assert.equal(fs.existsSync(f.options.runtimeRoot),false);

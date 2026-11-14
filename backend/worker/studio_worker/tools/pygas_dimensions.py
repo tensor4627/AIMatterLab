@@ -1,4 +1,4 @@
-"""Source-bound Studio guards after the real pyGAS graph validator; no engine import."""
+"""Source-bound AIMatterLab guards after the real pyGAS graph validator; no engine import."""
 import ast,math
 if __package__:
  from studio_worker.tools.pygas_values import literal,tensor_shape

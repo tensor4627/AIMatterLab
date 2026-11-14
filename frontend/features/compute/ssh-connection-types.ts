@@ -51,7 +51,7 @@ const connectionErrors:Record<string,string>={
  ssh_control_identity_changed:'SSH 连接身份已变化，已停止使用。请核对原连接后重新登录。',
  ssh_linux_client_namespace_required:'请编辑此连接，核对 SSH 客户端、发行版和密钥所在的同一环境。',
  terminal_client_namespace_required:'请编辑此连接，核对 SSH 客户端、发行版和密钥所在的同一环境。',
- ssh_multiplex_unsupported:'此客户端可使用普通 SSH 终端。若需 Studio 作业服务，请在连接设置中选择受支持的 WSL/Linux 客户端。',
+ ssh_multiplex_unsupported:'此客户端可使用普通 SSH 终端。若需 AIMatterLab 作业服务，请在连接设置中选择受支持的 WSL/Linux 客户端。',
  ssh_route_requires_review:'此连接的登录路由需要核对。请编辑原连接并保存后再登录。',
  ssh_authentication_pending:'请在下方终端完成密码或验证码输入，登录完成后会自动进入终端。',
  ssh_connection_limit:'打开的 SSH 连接已达上限。请先核对并关闭不再使用的连接。',

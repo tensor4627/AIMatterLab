@@ -188,6 +188,6 @@
     "OPES_FES.npz": "axes, probability, free_energy, normalized log_weights, effective_sample_size, block_rmse. Serialized output is not a new input/source proof.",
     "OPES_FES.png": "One-CV line or two-CV contour; no physical convergence claim.",
     "OPES_FES_summary.json": "effective_sample_size, samples, finite_bins, total_bins, block_rmse_eV, weighting=exp(beta * total_instantaneous_bias), rct_used=false.",
-    "defaults": "These output basenames are CLI defaults and are used by the Studio adapter. Direct CLI flags --fes-out/--npz-out/--png-out/--summary-out may change them; no default device/GPU flag for opes-reweight."
+    "defaults": "These output basenames are CLI defaults and are used by the AIMatterLab adapter. Direct CLI flags --fes-out/--npz-out/--png-out/--summary-out may change them; no default device/GPU flag for opes-reweight."
   }
 }

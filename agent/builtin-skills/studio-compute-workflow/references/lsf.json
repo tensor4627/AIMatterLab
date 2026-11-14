@@ -19,7 +19,7 @@
       {
         "url": "https://www.ibm.com/docs/zh/spectrum-lsf/10.1.0?topic=reference-bsub",
         "status": "blocked_http_403",
-        "fallback": "Actual registered bsub/bjobs help/version and Studio adapter rules"
+        "fallback": "Actual registered bsub/bjobs help/version and AIMatterLab adapter rules"
       }
     ]
   },
@@ -42,7 +42,7 @@
     "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
     "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Current user delegation and existing project/resource authorization govern execution; required serialized-artifact and target-runtime checks remain separate."
   },
-  "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
+  "copyright": "AIMatterLab-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
   "source_receipt": {
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
@@ -63,7 +63,7 @@
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
       }
     ],
     "primary_references": [
@@ -103,7 +103,7 @@
       "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
-    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals."
+    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals."
   },
   "parameter_emission_policy": {
     "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",

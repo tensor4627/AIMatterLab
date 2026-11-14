@@ -1,9 +1,9 @@
 ---
 name: studio-tool-integration
-description: Help developers produce portable GPU Sampling Studio tool packages or aimlab-tools declarations, delivery skills and minimal tests, including supported forcefield/MD and enhanced-sampling/MD runtime interfaces. Preserve source layouts; Studio configures and validates users' complete runtime groups separately.
+description: Help developers produce portable AIMatterLab tool packages or aimlab-tools declarations, delivery skills and minimal tests, including supported forcefield/MD and enhanced-sampling/MD runtime interfaces. Preserve source layouts; AIMatterLab configures and validates users' complete runtime groups separately.
 ---
 
-# GPU Sampling Studio 工具接入
+# AIMatterLab 工具接入
 
 与软件开发者协作，在指定工作空间生成 `工具名-package`。包内保留原软件的 Git 仓库，并在原仓库之外生成交付 skill 和测试重定向入口。`工具名` 为占位名称，不指某个特定软件。
 
@@ -11,11 +11,11 @@ description: Help developers produce portable GPU Sampling Studio tool packages 
 
 工具接入面向开发者，验证工具在声明流程中的可用性。工具配置面向用户，在其真实环境中安装、配置、测试后生成执行 skill；本接入流程不预造用户环境的执行 skill 或配置通过结果。
 
-涉及力场与 MD 引擎、增强采样与 MD 引擎，或其他工具间接口时，必须阅读 [联用接口与运行环境交付](references/runtime-composition.md)。从实际实现枚举支持的接口和加载模式，区分产物交接、同进程调用及运行时通信，交付依赖约束、操作指导和最小联合用例。开发者负责接口事实，Studio 负责用户所选完整工具组的兼容环境配置和联合验收；两者不能用单工具安装成功相互替代。
+涉及力场与 MD 引擎、增强采样与 MD 引擎，或其他工具间接口时，必须阅读 [联用接口与运行环境交付](references/runtime-composition.md)。从实际实现枚举支持的接口和加载模式，区分产物交接、同进程调用及运行时通信，交付依赖约束、操作指导和最小联合用例。开发者负责接口事实，AIMatterLab 负责用户所选完整工具组的兼容环境配置和联合验收；两者不能用单工具安装成功相互替代。
 
-编写交付材料时，阅读 [交付指南](references/deliverables.md)；生成 `tool.json` 或准备注册、更新时再阅读 [注册与版本契约](references/registration.md)。随本目录附有完整 schema 和纯声明检查器，不需要取得 Studio 源码才能理解字段、默认值和额外约束。包外层约定不约束原仓库内部布局。AimLab 内部声明也自包含：所需的 schema、纯声明校验器和引擎契约随本目录分发（`references/tool-package.schema.json`、`references/aimlab-tools.mjs`、`references/engine-contracts.json`），引擎契约是内部声明的唯一生产事实来源，编写声明不需要访问 Studio 源码。
+编写交付材料时，阅读 [交付指南](references/deliverables.md)；生成 `tool.json` 或准备注册、更新时再阅读 [注册与版本契约](references/registration.md)。随本目录附有完整 schema 和纯声明检查器，不需要取得 AIMatterLab 源码才能理解字段、默认值和额外约束。包外层约定不约束原仓库内部布局。AimLab 内部声明也自包含：所需的 schema、纯声明校验器和引擎契约随本目录分发（`references/tool-package.schema.json`、`references/aimlab-tools.mjs`、`references/engine-contracts.json`），引擎契约是内部声明的唯一生产事实来源，编写声明不需要访问 AIMatterLab 源码。
 
-AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package` 交付形态，而是在工具仓库主工作分支维护 `aimlab-tools/` 声明，由 Studio 按候选 commit 执行接入检查。生成或更新 `aimlab-tools/` 时只允许修改工具仓库的 `aimlab-tools/` 目录，工具仓库其他文件保持既有默认分支内容不变；声明必须自包含，`manifest.id` 必须等于所声明引擎的 `aimlab_tool_id`，生产 token 必须覆盖契约的 `declaration_tokens`。仓库内文件夹要求、`manifest.json` 字段与生产 token、测试要求、检查命令和状态见 [AimLab 内部工具约定](references/aimlab-tools.md)；第三方开发者可忽略本段。
+AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package` 交付形态，而是在工具仓库主工作分支维护 `aimlab-tools/` 声明，由 AIMatterLab 按候选 commit 执行接入检查。生成或更新 `aimlab-tools/` 时只允许修改工具仓库的 `aimlab-tools/` 目录，工具仓库其他文件保持既有默认分支内容不变；声明必须自包含，`manifest.id` 必须等于所声明引擎的 `aimlab_tool_id`，生产 token 必须覆盖契约的 `declaration_tokens`。仓库内文件夹要求、`manifest.json` 字段与生产 token、测试要求、检查命令和状态见 [AimLab 内部工具约定](references/aimlab-tools.md)；第三方开发者可忽略本段。
 
 ## 明确软件和功能范围
 
@@ -25,7 +25,7 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 
 核对工具已有的跨工具接口，按真实版本、调用方向和模式建立“参与工具/功能 → 接口入口 → 运行边界 → 依赖约束 → 联合用例”表。只列实际支持关系，不按工具名称构造任意组合；未提供接口、未测试或存在冲突的模式分别说明。
 
-接入不改写或重排原仓库的源码目录，不往其中添加 Studio 接入材料。保留未提交修改、已有配置和真实任务。仅要求设计或准备材料时，将实际安装和测试记为 `not_run`；原程序缺陷或缺失功能单独报告，不通过修改源码把接入工作扩大为软件开发。
+接入不改写或重排原仓库的源码目录，不往其中添加 AIMatterLab 接入材料。保留未提交修改、已有配置和真实任务。仅要求设计或准备材料时，将实际安装和测试记为 `not_run`；原程序缺陷或缺失功能单独报告，不通过修改源码把接入工作扩大为软件开发。
 
 ## 构成交付包
 
@@ -35,7 +35,7 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 
 交付包包含实际需要的源码和测试资源，不能仅引用原开发者机器上的另一个目录。模型或大数据可以放在包外层并声明为 `resources`，不要求提交进作者的 Git。尚未取得的资源记 `blocked`；安装环境和任务输出由计算资源及工作目录管理，不随源码打包。
 
-按随附 [schema](references/tool-package.schema.json) 创建 `tool.json`，声明仓库路径与真实 `HEAD`、手册、前置指导文件、环境、逐功能 IO/参数/操作入口及测试映射。原作者只需维护原有源码和原位置测试；测试入口用相对路径重定向。运行 `node <本skill目录>/scripts/check-manifest.mjs <包根>/tool.json` 检查 schema、默认值与声明交叉约束；这一步不读取实际仓库闭包，也不安装或执行软件。实际注册还需 Studio 的包检查，约束见注册指南。
+按随附 [schema](references/tool-package.schema.json) 创建 `tool.json`，声明仓库路径与真实 `HEAD`、手册、前置指导文件、环境、逐功能 IO/参数/操作入口及测试映射。原作者只需维护原有源码和原位置测试；测试入口用相对路径重定向。运行 `node <本skill目录>/scripts/check-manifest.mjs <包根>/tool.json` 检查 schema、默认值与声明交叉约束；这一步不读取实际仓库闭包，也不安装或执行软件。实际注册还需 AIMatterLab 的包检查，约束见注册指南。
 
 ## 定义输入输出及参数优先级
 
@@ -67,7 +67,7 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 
 不要把 `operation.command` 声明当成已实现的通用执行器。当前自动用户配置闭环只支持固定的串行 CPU `installation.check/worker` 工程 reference；其他软件仍可声明、检查和注册，安装/执行适配按实际支持范围另行实现验证。只有需要演示该 reference 时使用 [小示例](references/registration.md#可选cpu工程示例)，不将它替换为开发者软件或科学验证。
 
-接口应受其已有项目和资源授权约束；接入材料不授予额外文件访问或计算权限。需要接入 Studio 的实际接口时，检查当前实现再编写适配，保留其人工审阅和正式作业执行边界。
+接口应受其已有项目和资源授权约束；接入材料不授予额外文件访问或计算权限。需要接入 AIMatterLab 的实际接口时，检查当前实现再编写适配，保留其人工审阅和正式作业执行边界。
 
 ## 建立测试重定向入口
 
@@ -93,7 +93,7 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 
 逐项记录安装和功能测试的版本、实际环境、命令、退出记录、输出检查、判定和证据位置。使用 `passed / failed / blocked / not_run`：实际检查通过才记 `passed`；执行或输出检查失败记 `failed`；缺少必要条件记 `blocked`；没有执行记 `not_run`。所有非通过项说明原因及下一步，不能用历史证据冒充本次测试。
 
-修复后只重跑受影响的安装或功能测试，保留首失败和修复后的记录。作业状态未知时核对原任务，不自动重提。接入多个功能不意味着需要运行未受影响的 Studio 全套软件或科学测试。
+修复后只重跑受影响的安装或功能测试，保留首失败和修复后的记录。作业状态未知时核对原任务，不自动重提。接入多个功能不意味着需要运行未受影响的 AIMatterLab 全套软件或科学测试。
 
 ## 保持仓库版本和重定向一致
 
@@ -101,7 +101,7 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 
 源码和原有测试随原仓库同步，生成的交付 skill、重定向入口和测试结果须绑定本次实际版本。仓库同步成功不等于安装或测试通过。已有任务引用的包和环境保持原版本，在候选包或隔离副本中验证升级，不原地改变它们依赖的代码或程序。
 
-`git pull` 更新候选仓库后，记录新的真实提交，核对并更新包外层 `tool.json`、路径映射、交付指导和 wrapper；再检查、测试和显式注册更新。Studio 不自动 pull。包版本由源码提交、原始 manifest 字节和资源闭包共同计算，不能手填一个版本号覆盖旧快照。仅改变 wrapper 或说明也可能生成新包版本；详见注册指南。
+`git pull` 更新候选仓库后，记录新的真实提交，核对并更新包外层 `tool.json`、路径映射、交付指导和 wrapper；再检查、测试和显式注册更新。AIMatterLab 不自动 pull。包版本由源码提交、原始 manifest 字节和资源闭包共同计算，不能手填一个版本号覆盖旧快照。仅改变 wrapper 或说明也可能生成新包版本；详见注册指南。
 
 ## 向用户配置阶段交付
 
@@ -119,4 +119,4 @@ AimLab 内部工具（例如 GPU-Sampling）不使用本 skill 的 `<id>-package
 
 同时交付逐功能对照和安装、测试结果，指出剩余缺项。只有五项定义满足，实际安装、所声明功能及流程的测试均通过，才能按本次明确的功能、流程、版本和环境范围报告接入通过。材料完成而环境或测试未通过时，报告材料完成及具体缺口。
 
-若任务还包含 Studio 内部注册或适配，另外报告其实际实现和验证状态；工具包检查不替代运行适配器、前端或共享接口变更的验证。
+若任务还包含 AIMatterLab 内部注册或适配，另外报告其实际实现和验证状态；工具包检查不替代运行适配器、前端或共享接口变更的验证。

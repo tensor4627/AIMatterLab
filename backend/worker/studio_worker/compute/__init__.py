@@ -1,1 +1,1 @@
-"""Studio worker compute domain."""
+"""AIMatterLab worker compute domain."""

@@ -1,4 +1,4 @@
-// Shared execution mechanics for Studio's two tool-panel component fixtures.
+// Shared execution mechanics for AIMatterLab's two tool-panel component fixtures.
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';

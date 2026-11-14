@@ -44,7 +44,7 @@ test('Tool cards use actual failure flags and link only successfully persisted a
  assert.equal(toolActivity({status:'completed',result}).artifact.id,'t');assert.equal(toolActivity({status:'completed',result:{...result,isError:true}}).state,'failed');assert.equal(toolActivity({status:'completed',result:{...result,isError:true}}).artifact,undefined);assert.equal(toolActivity({status:'inProgress'}).state,'running');
 });
 
-test('Restored user history hides Studio context while preserving the actual user message',async()=>{
+test('Restored user history hides AIMatterLab context while preserving the actual user message',async()=>{
  const {visibleUserText}=await import("../../contracts/agent/user-message.mjs");const context=JSON.stringify({environments:[],workflow:null,project:null});
  assert.equal(visibleUserText([{type:'text',text:'Run MD'},{type:'text',text:'[Studio workspace context]\n'+context},{type:'text',text:'[Studio interaction mode: planning]\nprivate instructions'}]),'Run MD');
  assert.equal(visibleUserText([{type:'text',text:'Run MD\n\n[Studio workspace context]\n'+context}]),'Run MD');

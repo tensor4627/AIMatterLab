@@ -1,5 +1,5 @@
 {
-  "scope": "Studio-authored editor hints reviewed against exact public source hashes; absent/mismatching hints must not guess a contract. Constructor defaults remain actual source defaults.",
+  "scope": "AIMatterLab-authored editor hints reviewed against exact public source hashes; absent/mismatching hints must not guess a contract. Constructor defaults remain actual source defaults.",
   "source_files": {
     "base/colvar.py": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
     "base/bias.py": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
@@ -346,7 +346,7 @@
         "sha256": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
         "formula": "V(s)=sum_k w_k exp(-sum_{i:scale_i!=0} delta_i^2/(2 sigma_i^2))",
         "scale_rule": "In this registered implementation scale.nonzero selects active dimensions; it does not multiply or normalize CV values. Do not apply PLUMED width conversions based on a guessed scaling role.",
-        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; Studio must check it against plan.cv_size.",
+        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; AIMatterLab must check it against plan.cv_size.",
         "delta_definition": "delta=cv_traj[k]-cv",
         "reorder_policy": "permutation",
         "ordered_cv_parameters": {
@@ -363,7 +363,7 @@
         "sha256": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
         "formula": "V(s)=sum_k w_k exp(-sum_{i:scale_i!=0} delta_i^2/(2 sigma_i^2))",
         "scale_rule": "In this registered implementation scale.nonzero selects active dimensions; it does not multiply or normalize CV values. Do not apply PLUMED width conversions based on a guessed scaling role.",
-        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; Studio must check it against plan.cv_size.",
+        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; AIMatterLab must check it against plan.cv_size.",
         "well_tempering": "w_k=weight*exp(-bias_traj[k]/(8.617343e-5*temp*(bias_factor-1))); the encoded Boltzmann constant uses eV/K.",
         "delta_definition": "delta=cv_traj[k]-cv",
         "reorder_policy": "permutation",
@@ -381,7 +381,7 @@
         "sha256": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
         "formula": "V(s)=sum_k w_k exp(-sum_{i:scale_i!=0} delta_i^2/(2 sigma_i^2))",
         "scale_rule": "In this registered implementation scale.nonzero selects active dimensions; it does not multiply or normalize CV values. Do not apply PLUMED width conversions based on a guessed scaling role.",
-        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; Studio must check it against plan.cv_size.",
+        "sigma_rule": "sigma and scale retain the FULL ordered CV-dimension vector; the implementation selects active indices internally. Widths have actual CV units and need explicit physical/pilot provenance. Canonical MetaD graph validation does not currently enforce this size; AIMatterLab must check it against plan.cv_size.",
         "well_tempering": "w_k=weight*exp(-bias_traj[k]/(8.617343e-5*temp*(bias_factor-1))); the encoded Boltzmann constant uses eV/K.",
         "periodic_rule": "pdl reshapes to (cv_count,2); L=upper-lower, s0=mean(bounds), delta_wrap=delta-L*round((delta-s0)/L). Symmetric torsion bounds [-pi,pi] match the usual difference wrapping; an asymmetric interval must not be assumed equivalent without a numerical reference test.",
         "delta_definition": "delta=cv_traj[k]-cv",
@@ -848,7 +848,7 @@
             621
           ]
         },
-        "proposal": "Journaled workflow.json is canonical Studio data; source GUI YAML path and Studio JSON pair are different layouts. Bind actual saved graph hash/path; never borrow sibling YAML.",
+        "proposal": "Journaled workflow.json is canonical AIMatterLab data; source GUI YAML path and AIMatterLab JSON pair are different layouts. Bind actual saved graph hash/path; never borrow sibling YAML.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -884,7 +884,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -903,7 +903,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -922,7 +922,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -941,7 +941,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -960,7 +960,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -979,7 +979,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -998,7 +998,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -1017,7 +1017,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}
@@ -1036,7 +1036,7 @@
             351
           ]
         },
-        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. Studio composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
+        "proposal": "Show derived identity/output where useful. Do not make novice enter repository/runtime paths or forward these source-GUI layout keys as constructor parameters. AIMatterLab composition allowlist currently excludes these; explicit adapter needed before any becomes an active setting.",
         "location": "settings",
         "read_only": true,
         "editor_hint": {}

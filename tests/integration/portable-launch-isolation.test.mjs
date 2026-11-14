@@ -31,7 +31,7 @@ async function portableDefines(options){
   packager:{
    projectDir:root,platformSpecificBuildOptions:{},config:{},compression:'store',
    appInfo:{id:'science.gpusampling.portable-fixture',name:'studio-portable-fixture',
-    productName:'Studio portable fixture',productFilename:'Studio portable fixture',
+    productName:'AIMatterLab portable fixture',productFilename:'AIMatterLab portable fixture',
     sanitizedName:'studio-portable-fixture',description:'Read-only define fixture',
     version:'1.0.0',getVersionInWeirdWindowsForm:()=> '1.0.0.0'},
    info:{metadata:{},buildResourcesDir:root,emitArtifactBuildStarted:async()=>{}},
@@ -75,7 +75,7 @@ test('per-launch extraction paths keep the existing checkout profile route uncha
  const portableDir=path.join(root,'release','portable-profile-fixture');
  const profiles=['launch-one','launch-two'].map(name=>studioProfileRoot({
   isPackaged:true,portableDir,
-  execPath:path.join(os.tmpdir(),'read-only-nsis-fixture',name,'app','GPU Sampling Studio.exe'),
+  execPath:path.join(os.tmpdir(),'read-only-nsis-fixture',name,'app','AIMatterLab.exe'),
  }));
  assert.deepEqual(profiles,[path.join(root,'.config'),path.join(root,'.config')]);
 });

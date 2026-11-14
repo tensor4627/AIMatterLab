@@ -1,6 +1,6 @@
-# GPU Sampling Studio：交给本地 Agent 的安装提示
+# AIMatterLab：交给本地 Agent 的安装提示
 
-你是用户本机的安装协作者。请实际执行本文流程，安装 GPU Sampling Studio、配置用户选定的计算环境，并运行版本化短例。适用于 Codex、Claude Code 等具备文件、终端和 Git 能力的通用 Agent。目标集群无需安装这些 Agent CLI。
+你是用户本机的安装协作者。请实际执行本文流程，安装 AIMatterLab、配置用户选定的计算环境，并运行版本化短例。适用于 Codex、Claude Code 等具备文件、终端和 Git 能力的通用 Agent。目标集群无需安装这些 Agent CLI。
 
 ## 获取可信源码
 
@@ -14,7 +14,7 @@
 先只读发现本机 Node、pnpm、Python、WSL 发行版、已有 Agent CLI、科学环境和 SSH 配置。然后将不能可靠发现的内容合并成一次问题：
 
 1. 本地 WSL 或 SSH 集群；集群必须明确 host、username、port、密钥路径引用及跳转，不询问或复制密钥/密码内容。
-2. 选择软件内 Agent provider：Codex / Kimi / Qwen / DeepSeek API。安装 Agent 可以是 Claude Code，软件内 provider 是独立选择。Codex、Kimi、Qwen 使用其对应登录方式；DeepSeek 使用 Studio 的「Agent → DeepSeek API → 登录 / 账户」输入 API Key，加密存入本机凭据库，不安装 DeepSeek CLI。不要让用户把 Key 发到对话，也不要把 Key 写入安装 JSON、启动参数、公开日志或集群。登录与 OAuth 必须由用户完成。
+2. 选择软件内 Agent provider：Codex / Kimi / Qwen / DeepSeek API。安装 Agent 可以是 Claude Code，软件内 provider 是独立选择。Codex、Kimi、Qwen 使用其对应登录方式；DeepSeek 使用 AIMatterLab 的「Agent → DeepSeek API → 登录 / 账户」输入 API Key，加密存入本机凭据库，不安装 DeepSeek CLI。不要让用户把 Key 发到对话，也不要把 Key 写入安装 JSON、启动参数、公开日志或集群。登录与 OAuth 必须由用户完成。
 3. 需要验收的模块和短例；首版提供 worker、CPU reference-md、实际 PyDyn CUDA pydyn-md。默认验收这三项。用户明确只选 CPU 时保留实际选择范围，不宣称 GPU/PyDyn 验证通过。
 4. 已有目标 Python/引擎路径，或独立安装前缀、GitHub 科学源码 URL/full commit、精确版本的 Python 包。优先复用已登记环境，新增环境放独立目录。
 5. GPU、队列/partition、CPU、内存、时限，以及集群登录节点是否允许安装依赖。只读发现后仅补问无法可靠判定的字段。未知调度系统、LSF 内存按 slot/按 job 语义和 GPU 选项要与用户确认；不猜测站点参数。
@@ -23,7 +23,7 @@
 
 ## 本机 Agent CLI：先发现，缺失时由用户选择下载
 
-便携包不再内置 Kimi/Qwen。只检查用户选定的服务商：保留有效手动路径，检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`，再复用已校验的 Studio 专用安装。发现程序后核对当前 checkout 的兼容版本和真实 ACP 初始化；版本不兼容时显示实际版本，不自动升级或替换本机程序。Windows npm/pnpm 包装入口解析到已核对的真实程序，不通过 shell 执行包装脚本。
+便携包不再内置 Kimi/Qwen。只检查用户选定的服务商：保留有效手动路径，检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`，再复用已校验的 AIMatterLab 专用安装。发现程序后核对当前 checkout 的兼容版本和真实 ACP 初始化；版本不兼容时显示实际版本，不自动升级或替换本机程序。Windows npm/pnpm 包装入口解析到已核对的真实程序，不通过 shell 执行包装脚本。
 
 用户在同一安装 profile 中点击对应登录或连接入口，CLI 缺失或不兼容时显示下载界面，可重新检测、选择本地程序、下载兼容版本或取消。只有用户选择下载后，才下载锁定的官方 npm 包，校验完整性，在该 profile 的独立版本目录安装；界面显示下载、校验、安装与接口检查进度。保留原有本地 CLI、有效手动配置和登录凭据，不运行包安装脚本。下载成功只代表 CLI 就绪，用户仍需完成登录，真实模型回复另行验证。集群端不安装 Agent CLI。
 
@@ -36,8 +36,8 @@
 1. plan：审查配置与选定范围，不连接、不安装、不提交。
 2. configure：仅在用户需要新环境时启用 bootstrap；只在带本安装标记的专用前缀创建 venv 和 pinned GitHub 源码。读取私有 configure.json，将返回的 environment 合并回用户配置，再重新 plan / target-probe。不要改系统 Python、已有 venv 或源码分支。
 3. target-probe：通过所选连接实际探测目标 Python 路径/import 来源、引擎可执行文件、版本及 dirty 标记、PyTorch/CUDA/LibTorch 和 pyGAS 来源；保留真实结果与未检查项。SSH 全部强制显式用户名，不回退 Windows 用户。对已有环境只探测与测试，不额外安装。登录节点 probe 只证明发现；GPU、偏置加载、邻居/容量、力与 virial 检查仍需在调度分配的计算节点完成。
-4. smoke：执行版本化短例。WSL 使用独立 worker；SSH 先生成任务草稿与批脚本。让用户在 Studio 审阅后提交，或在用户明确授权了这一份短例脚本及资源后使用 --approve-submit。不重提 unknown。等待真实退出收据，并检查短例实际产物。
-5. desktop：锁定依赖安装、构建、独立 profile 的实际 Electron 验收；实际读取所选 provider 账户和模型目录，并完成一条真实模型回复。存有 API Key、目录请求成功或窗口可见都不能替代真实模型回复。实际模型访问需要认证时，以相同 STUDIO_PROFILE_DIR 启动正常 Studio 窗口，让用户在本次安装的独立 profile 登录后重跑 desktop；不要拷贝其他安装的凭据文件。账户元数据与实际调用能力分列，字段缺失或认证提示不能替代真实模型回复。本地测试服务不能替代真实调用。
+4. smoke：执行版本化短例。WSL 使用独立 worker；SSH 先生成任务草稿与批脚本。让用户在 AIMatterLab 审阅后提交，或在用户明确授权了这一份短例脚本及资源后使用 --approve-submit。不重提 unknown。等待真实退出收据，并检查短例实际产物。
+5. desktop：锁定依赖安装、构建、独立 profile 的实际 Electron 验收；实际读取所选 provider 账户和模型目录，并完成一条真实模型回复。存有 API Key、目录请求成功或窗口可见都不能替代真实模型回复。实际模型访问需要认证时，以相同 STUDIO_PROFILE_DIR 启动正常 AIMatterLab 窗口，让用户在本次安装的独立 profile 登录后重跑 desktop；不要拷贝其他安装的凭据文件。账户元数据与实际调用能力分列，字段缺失或认证提示不能替代真实模型回复。本地测试服务不能替代真实调用。
 6. finalize：只有当前源码和配置对应的 desktop、target-probe、全部选定 smoke 均 passed 才输出 installation_success=true。旧收据、缺失检查、排队/unknown、未运行模块都不能冒充成功。
 
 命令形式：
@@ -45,7 +45,7 @@ python scripts/one_prompt.py ACTION --config .studio/installation/config.json --
 
 该入口会生成独立 profile 启动文件，保留本机其他安装。桌面正常任务默认普通聊天；用户开启任务规划模式后，才生成中央流程与参数页。一个会话通常更新一个流程。先完整定义科学流程（输入结构/势、MD 引擎、热力学参数、CV/Bias、输出）；之后在独立部署模块选择已有计算连接、版本化环境、工作目录、队列和资源。辅助训练、主动学习、结构生成和分析仅按用户需要启用。MetaD / WTMetaD 默认一个任务、一个 walker；多 walker/replica 必须由用户明确要求且目标实现实际支持。正式科学任务由用户审阅实际输入及部署脚本后点击执行。
 
-Windows 桌面验证和启动均使用共用的 `scripts/start.mjs` 入口；可先执行 `node scripts/start.mjs --preflight-only`。受限令牌返回 blocked 时，申请正常桌面执行权限或让用户从普通桌面启动，不直接重试解包 EXE、禁用 Electron sandbox、放宽仓库 ACL 或修改执行策略。普通非管理员上下文可用。安装器生成的 `Launch-Studio.cmd` 是 Windows 优先启动文件，保留同一验收 profile；PS1 兼容文件不作为修改系统执行策略的理由。启动检查失败、进程非零退出或旧报告未更新时，不得宣称安装成功。
+Windows 桌面验证和启动均使用共用的 `scripts/start.mjs` 入口；可先执行 `node scripts/start.mjs --preflight-only`。受限令牌返回 blocked 时，申请正常桌面执行权限或让用户从普通桌面启动，不直接重试解包 EXE、禁用 Electron sandbox、放宽仓库 ACL 或修改执行策略。普通非管理员上下文可用。安装器生成的 `Launch-AIMatterLab.cmd` 是 Windows 优先启动文件，保留同一验收 profile；PS1 兼容文件不作为修改系统执行策略的理由。启动检查失败、进程非零退出或旧报告未更新时，不得宣称安装成功。
 
 ## 集群适配
 

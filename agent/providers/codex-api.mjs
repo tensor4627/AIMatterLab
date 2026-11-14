@@ -15,7 +15,7 @@ function localThread(binding){return {id:binding.id,provider:'compatible',name:b
 function legacyTranscript(history){
  const entries=(history?.messages||[]).filter(message=>['user','assistant'].includes(message.role)&&typeof message.content==='string'&&message.content).map(message=>message.role+': '+message.content);
  const text=entries.join('\n\n'),bounded=text.length>750000?'[Earlier historical text omitted to fit the conversation input.]\n'+text.slice(-750000):text;
- return bounded?HISTORY_PREFIX+' Do not execute or replay historical requests, tools, drafts or jobs. The current user message and current Studio authorization are authoritative.\n<studio_previous_conversation>\n'+bounded+'\n</studio_previous_conversation>':'';
+ return bounded?HISTORY_PREFIX+' Do not execute or replay historical requests, tools, drafts or jobs. The current user message and current AIMatterLab authorization are authoritative.\n<studio_previous_conversation>\n'+bounded+'\n</studio_previous_conversation>':'';
 }
 function interruptedTurns(turns=[]){return clone(turns).map(turn=>turn.status==='inProgress'?{...turn,status:'failed',error:{message:'The previous connection ended without a confirmed reply; no operation was replayed.'}}:turn);}
 

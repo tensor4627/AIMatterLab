@@ -1,9 +1,9 @@
 ---
 name: studio-data-workflow
-description: Manage Studio structure, trajectory, dataset, potential and bias assets with ASE inspection, bounded previews and explicit analysis requests; avoid inventing files, credentials or future DFT execution.
+description: Manage AIMatterLab structure, trajectory, dataset, potential and bias assets with ASE inspection, bounded previews and explicit analysis requests; avoid inventing files, credentials or future DFT execution.
 ---
 
-# Assets and structure inspection in Studio
+# Assets and structure inspection in AIMatterLab
 
 Use actual registered assets and supplied paths. inspect_asset checks structures/datasets; read_project_input reads bounded text or binary metadata without deserializing a model. create_structure supports bounded ASE bulk, molecule, surface, explicit or authorized import recipes. suggest_parameters derives facts from the resulting real structure, preserving user intent. Read the saved structure back and check composition, atom order, cell and PBC before using a preview as input evidence.
 

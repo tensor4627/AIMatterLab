@@ -64,8 +64,8 @@
     "consumer_hazards": [
       "HotPP package name miaonet differs from import/CLI hotpp",
       "freeze mutates embedding representation for LAMMPS only after saving ASE artifact; outputs are not interchangeable",
-      "Studio hotpp.eval currently passes no properties override, so default energy/forces eval must not be called a dipole/virial evaluation",
-      "Studio export fixes CUDA+double; tutorial CPU/default freeze is not current adapter behavior",
+      "AIMatterLab hotpp.eval currently passes no properties override, so default energy/forces eval must not be called a dipole/virial evaluation",
+      "AIMatterLab export fixes CUDA+double; tutorial CPU/default freeze is not current adapter behavior",
       "branch acceleration report numbers are historical, not this campaign speed or generic support"
     ]
   },
@@ -75,7 +75,7 @@
     "先确定数据划分、目标性质、势模型消费端和训练预算；设备/文件路径由实际注册环境确定。",
     "checkpoint、完整eager对象和部署产物分开管理；PyDyn须匹配ASE原子序数语义，不能混用LAMMPS类型编号。"
   ],
-  "language_scope": "Studio-authored Chinese planning rules plus original source-backed fields; official bilingual availability is recorded separately, never invented.",
+  "language_scope": "AIMatterLab-authored Chinese planning rules plus original source-backed fields; official bilingual availability is recorded separately, never invented.",
   "source_receipt": {
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
@@ -194,7 +194,7 @@
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
       },
       {
         "source_id": "studio",
@@ -210,7 +210,7 @@
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted Studio source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
       }
     ],
     "primary_references": [],
@@ -222,7 +222,7 @@
       "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
-    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals.",
+    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals.",
     "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation"
   },
   "parameter_emission_policy": {

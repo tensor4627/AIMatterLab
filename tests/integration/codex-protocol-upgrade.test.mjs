@@ -38,7 +38,7 @@ function launchFixture(t,{version='0.166.0-alpha.5.1',strictIsolation=true,alter
   }
   const values={initialize:{userAgent:'synthetic-cli',codexHome:path.join(root,'public-home'),platformFamily:'windows',platformOs:'windows'},'config/read':{config},'skills/list':{data:[{cwd:options.cwd,skills:[]}]},'mcpServerStatus/list':{data:[],nextCursor:null}};
   child.stdin={destroyed:false,write:raw=>{const message=JSON.parse(raw);calls.push(message.method);if(message.id!==undefined)void(async()=>{if(replyGate&&replyGate.method===message.method){replyGate.enter();await replyGate.promise;}let result=structuredClone(values[message.method]);alter(message.method,result);child.stdout.write(JSON.stringify({id:message.id,result})+'\n');})();}};
-  assert.equal(args.includes('--strict-config'),false,'external host config is not a Studio-owned schema');children.push(child);return child;
+  assert.equal(args.includes('--strict-config'),false,'external host config is not a AIMatterLab-owned schema');children.push(child);return child;
  };
  bridge=new CodexBridge({strictIsolation,isolationRoot:root,launchDependencies:{execute:async()=>({stdout:'codex-cli '+version}),spawnProcess},isolationDependencies:{execute:async(_exe,args)=>{if(prepareGate){prepareGate.enter();await prepareGate.promise;}return {stdout:args[0]==='features'?[...ISOLATION_FEATURES.filter(key=>!missingFeature||key!=='shell_tool'),'skip_host_skill_discovery'].map(key=>key+' stable true').join('\n'):'[]'};},probe:async()=>[],prepareModels:directory=>{const file=path.join(directory,'public-model-ceiling.json'),bytes=Buffer.from('{"models":[]}');fs.writeFileSync(file,bytes);return {path:file,sha256:createHash('sha256').update(bytes).digest('hex'),models:['synthetic-model']};}}});
  t.after(()=>{bridge.close();fs.rmSync(root,{recursive:true,force:true});});return {bridge,calls,children};
@@ -57,7 +57,7 @@ for(const version of ['0.163.0-alpha.11.2','0.167.0-alpha.3.2'])test('non-isolat
  const x=launchFixture(t,{version,strictIsolation:false}),info=await x.bridge.start('fixture-cli');
  assert.equal(info.studioCompatibility.installedVersion,version);assert.equal(info.studioCompatibility.versionWarning.severity,'warning');assert.equal(info.studioCompatibility.status,'version_observed');assert.equal(x.bridge.isolationReady,false);assert.deepEqual(x.calls,['initialize','initialized']);
 });
-test('unrelated external config fields do not block verified Studio capability isolation',async t=>{
+test('unrelated external config fields do not block verified AIMatterLab capability isolation',async t=>{
  const x=launchFixture(t,{alter:(method,value)=>{if(method==='config/read'){value.config.computer_use={windows:{always_allowed_app_ids:['inert-public-fixture']}};assert.equal(value.config.features.computer_use,false);assert.equal(value.config.features.shell_tool,false);}}});
  assert.equal((await x.bridge.start('fixture-cli')).studioCompatibility.status,'capabilities_verified');assert.equal(x.calls.some(method=>/^(thread|turn)\//.test(method)),false);
 });
@@ -99,7 +99,7 @@ test('additive notification fields remain compatible after structural envelope v
  const x=launchFixture(t),events=[];await x.bridge.start('fixture-cli');x.bridge.on('event',value=>events.push(value));const event={method:'thread/readState/changed',params:{threadId:'synthetic',readState:{revision:'future'}},future:{opaque:true}};x.children[0].stdout.write(JSON.stringify(event)+'\n');assert.deepEqual(events,[event]);assert.equal(x.bridge.isolationReady,true);
 });
 
-test('legacy native skill path strings do not authorize relative or plugin paths in Studio isolation',async()=>{
+test('legacy native skill path strings do not authorize relative or plugin paths in AIMatterLab isolation',async()=>{
  for(const skillPath of ['relative/SKILL.md','plugin://unscoped/skills/SKILL.md']){
   const calls=[],initializers=[],child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{};
   child.stdin={write:value=>{const m=JSON.parse(value);calls.push(m.method);if(m.method==='initialize')initializers.push(m.params);if(m.id)queueMicrotask(()=>child.stdout.write(JSON.stringify({id:m.id,result:m.method==='skills/list'?{data:[{skills:[{path:skillPath,enabled:false}]}]}:{}})+'\n'));}};

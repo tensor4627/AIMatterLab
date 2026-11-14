@@ -52,7 +52,7 @@ class Registry:
    if key not in allowed or key=='repositoryformatversion'and value!='0'or key=='bare'and value!='false'or key not in('repositoryformatversion','bare')and value not in('true','false'):raise ValueError('Executable or nonstandard private Git configuration refused')
  def git(self,*args):
   self._git_safety()
-  command=['git','-c','user.name=GPU Sampling Studio','-c','user.email=studio@localhost','-c','commit.gpgsign=false','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','maintenance.auto=false','-c','gc.auto=0','-c','core.attributesFile='+str(self.root/'.empty-attributes'),'-c','core.hooksPath='+str(self.root/'.empty-hooks'),*args]
+  command=['git','-c','user.name=AIMatterLab','-c','user.email=studio@localhost','-c','commit.gpgsign=false','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','maintenance.auto=false','-c','gc.auto=0','-c','core.attributesFile='+str(self.root/'.empty-attributes'),'-c','core.hooksPath='+str(self.root/'.empty-hooks'),*args]
   env={k:v for k,v in os.environ.items() if not k.startswith('GIT_')}
   env.update(GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL=os.devnull,GIT_TERMINAL_PROMPT='0')
   result=subprocess.run(command,cwd=self.root,env=env,capture_output=True,timeout=20)

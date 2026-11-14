@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const PRODUCT_NAME = 'gpu-sampling-studio';
+// New branding must resolve the same checkout and .config as older builds.
+const PRODUCT_NAMES = new Set(['aimatterlab', 'gpu-sampling-studio']);
 
 /**
- * Find the repository checkout that owns this Studio build.
+ * Find the repository checkout that owns this AIMatterLab build.
  * Used only in the test phase so local state can live in the checkout `.config`
  * instead of the shared Windows `%APPDATA%` profile.
  */
@@ -14,7 +15,7 @@ export function findStudioRepository(start) {
   for (let depth = 0; depth < 64; depth += 1) {
     try {
       const manifest = JSON.parse(fs.readFileSync(path.join(current, 'package.json'), 'utf8'));
-      if (manifest?.name === PRODUCT_NAME && fs.existsSync(path.join(current, 'desktop', 'main.mjs'))) return current;
+      if (PRODUCT_NAMES.has(manifest?.name) && fs.existsSync(path.join(current, 'desktop', 'main.mjs'))) return current;
     } catch {}
     const parent = path.dirname(current);
     if (parent === current) break;
@@ -24,7 +25,7 @@ export function findStudioRepository(start) {
 }
 
 /**
- * Resolve the base directory whose `.config` holds the Studio profile in the test phase.
+ * Resolve the base directory whose `.config` holds the AIMatterLab profile in the test phase.
  * Priority: the checkout that contains this build, otherwise the portable bundle folder,
  * otherwise the unpacked executable folder. An explicit STUDIO_PROFILE_DIR still wins in
  * main.mjs and bypasses this resolver.
@@ -42,7 +43,7 @@ export function resolveStudioProfileBase({appRoot, isPackaged, portableDir, exec
   } else if (typeof appRoot === 'string' && appRoot) {
     return findStudioRepository(appRoot) || path.resolve(appRoot);
   }
-  throw new Error('Cannot resolve the Studio profile base directory');
+  throw new Error('Cannot resolve the AIMatterLab profile base directory');
 }
 
 export function studioProfileRoot(options) {

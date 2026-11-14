@@ -22,7 +22,7 @@ export function prepareProfile(root,id,credential){
   const file=path.join(home,'config.toml');let config=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'';
   // Owned profile only. Keep providers created by official login; replace our policy section.
   config=config.replace(/\n# STUDIO POLICY BEGIN[\s\S]*?# STUDIO POLICY END\n?/g,'\n');
-  // These tables are owned by Studio and cannot be replaced by restored session modes.
+  // These tables are owned by AIMatterLab and cannot be replaced by restored session modes.
   for(const table of ['tools','permission'])config=config.replace(new RegExp('\\n\\['+table+'\\][\\s\\S]*?(?=\\n\\[|$)','g'),'\n');
   config+='\n# STUDIO POLICY BEGIN\n[tools]\nenabled = ["mcp__gpusampling__*", "AskUserQuestion"]\n[permission]\ndangerous_command_guard = true\n[[permission.rules]]\ndecision = "allow"\npattern = "mcp__gpusampling__*"\n# STUDIO POLICY END\n';
   fs.writeFileSync(file,config,{mode:0o600});

@@ -1,9 +1,10 @@
-# GPU Sampling Studio
+# AIMatterLab
 
 面向 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 的中文 Agent 科学计算桌面工作台。Electron + React + TypeScript 自定义前端，Codex app server、Kimi / Qwen 官方 ACP CLI 与 DeepSeek API 负责 Agent，独立 Python/WSL 服务负责 GPU 作业。
 
 [软件规范](docs/software-specification.md) · [当前代码架构](docs/architecture.md) · [工具开发者接入](developer/README.md) · [1.0 重组与验证](docs/v1.0.md)
 
+[Product naming and upgrade compatibility](docs/development/product-naming.md)
 ## 启动
 
 当前开发版本以 `package.json` 为准；开发产物位于 Git 忽略的 `release/`，具体构建与验证范围见 [本代记录](docs/v1.0.md)。已开发能力、验收边界和后续计划统一记录在 [开发者文档](docs/development/README.md)。首次启动：
@@ -37,7 +38,7 @@ pnpm run pack
 
 打包使用 electron-builder 的 `beforeBuild` 外部依赖装配接口：先检查前端构建产物、已暂存 CLI/PTY 的版本、必需依赖和目标平台文件，以及应用模块的导入，再打包这些已装配资源。该过程不查询 pnpm 的全局 store 数据库；缺少资源时先重新构建前端或运行 `pnpm run stage:agents`。
 
-测试阶段数据目录：Studio 本地数据默认放在当前 checkout 根目录的 `.config/`（已 Git 忽略；显式 `STUDIO_PROFILE_DIR` 仍优先）。换新版便携包测试前，关闭 Studio 后删除或改名 `.config` 即可重置；在仓库外运行的便携包使用其所在目录的 `.config`。旧共享 `%APPDATA%\gpu-sampling-studio` profile 不再使用。
+测试阶段数据目录：AIMatterLab 本地数据默认放在当前 checkout 根目录的 `.config/`（已 Git 忽略；显式 `STUDIO_PROFILE_DIR` 仍优先）。换新版便携包测试前，关闭 AIMatterLab 后删除或改名 `.config` 即可重置；在仓库外运行的便携包使用其所在目录的 `.config`。旧共享 `%APPDATA%\gpu-sampling-studio` profile 不再使用。
 
 [v0.18.3](docs/releases/v0.18.3.md) 修复 Codex 空会话在修改上下文设置或重启后恢复失败：能证明为空的会话自动重连并保留原流程；旧会话记录无法读取时，点击 Agent 面板的“重新建立对话连接”。原流程、参数和作业保留，未确认的消息不会自动重发。
 

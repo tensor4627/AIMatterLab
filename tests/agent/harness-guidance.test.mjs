@@ -10,7 +10,7 @@ import {AgentHub} from '../../agent/providers/agent-hub.mjs';
 import {ScientificSkillRouter} from '../../agent/skills/scientific-skill-router.mjs';
 import {fileURLToPath} from 'node:url';
 
-test('ACP profiles deliver the same bounded Studio core and progressive skill routing',()=>{
+test('ACP profiles deliver the same bounded AIMatterLab core and progressive skill routing',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-harness-guidance-'));
  try{
   // The independent SSH channels need a provider-neutral permission paragraph;
@@ -31,7 +31,7 @@ test('ACP profiles deliver the same bounded Studio core and progressive skill ro
   assert.equal(qwen.args[qwen.args.indexOf('--append-system-prompt')+1],STUDIO_INSTRUCTIONS);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
-test('Codex login threads receive the same Studio core through the main-owned instruction path',async()=>{
+test('Codex login threads receive the same AIMatterLab core through the main-owned instruction path',async()=>{
  const codex=new EventEmitter(),calls=[];codex.process={};codex.close=()=>{};
  codex.request=async(method,params)=>{calls.push({method,params});return {thread:{id:'fixture',turns:[]}};};
  const hub=new AgentHub({codex,root:os.tmpdir(),catalog:{get:()=>null,put:()=>{},list:()=>[]},vault:{get:()=>null},settings:()=>({}),worker:()=>null});

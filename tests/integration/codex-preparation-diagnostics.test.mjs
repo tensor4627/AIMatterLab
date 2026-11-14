@@ -21,7 +21,7 @@ function fixture(t,{problem}={}){
    if(args[0]==='features')return {stdout:[...ISOLATION_FEATURES.filter(key=>problem!=='missing_feature'||key!=='shell_tool'),'skip_host_skill_discovery'].map(key=>key+' stable true').join('\n')};
    return {stdout:problem==='mcp_invalid'?'{}':'[]'};
   },
-  prepareModels:target=>{calls.push('model_catalog');return prepareModelCeiling(target,'Public Studio only',{cachePath:cache});},
+  prepareModels:target=>{calls.push('model_catalog');return prepareModelCeiling(target,'Public AIMatterLab only',{cachePath:cache});},
   probe:async()=>{calls.push('skill_bootstrap');if(problem==='skill_failed')throw Object.assign(Error(sentinel),{stderr:sentinel});return [];}
  };
  const bridge=new CodexBridge({strictIsolation:true,isolationRoot:path.join(root,'owned'),host:{

@@ -31,7 +31,7 @@ export type ComputeProfile=WslComputeProfile|SshComputeProfile;
 export interface ComputeProfileRemovalRequest {id:string;expectedVersion:number}
 export interface ComputeProfileRemovalResult {removed:true;id:string;version:number}
 
-/** A selected SSH terminal is not an authenticated Studio worker or a run grant. */
+/** A selected SSH terminal is not an authenticated AIMatterLab worker or a run grant. */
 export interface SshTerminalResourceReference {kind:'ssh-terminal';profileId:string;profileVersion:number}
 export interface SshConnectionResourceReference {kind:'ssh-connection';connectionId:string;profileId:string;profileVersion:number}
 export type ComputeResourceActivation=(SshTerminalResourceReference & {sessionId:string})|SshConnectionResourceReference;

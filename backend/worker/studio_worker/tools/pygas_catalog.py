@@ -62,7 +62,7 @@ def catalog(source):
    if overlay.get("source_files",{}).get(relative)==digest:
     for param in params:
      hint=overlay.get("hints",{}).get(kind,{}).get(node.name,{}).get(param["name"])
-     if hint:param["editor_hint"]={**hint,"provenance":{"kind":"Studio source-bound adapter","sha256":digest,"source":relative}}
+     if hint:param["editor_hint"]={**hint,"provenance":{"kind":"AIMatterLab source-bound adapter","sha256":digest,"source":relative}}
     semantics=overlay.get("class_semantics",{}).get(kind,{}).get(node.name)
     if semantics:entry["semantics"]=semantics
    if kind=="cv":entry["output_size"]=constants["CV_OUTPUT_SIZES"].get(node.name)

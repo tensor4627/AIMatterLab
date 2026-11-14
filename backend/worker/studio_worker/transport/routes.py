@@ -90,7 +90,7 @@ def dispatch(service, method, path, data, admin=False):
         return getattr(ToolConfigurations(service), operation)(data)
     if method == "GET":
         if path == "/api/health":
-            value = {"name": "gpu-sampling-studio", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1}
+            value = {"name": "gpu-sampling-studio", "product_name": "AIMatterLab", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1}
             if getattr(service, 'ssh_service_mode', False):
                 from studio_worker.compute.ssh_service import identity
                 host = identity(service.root)

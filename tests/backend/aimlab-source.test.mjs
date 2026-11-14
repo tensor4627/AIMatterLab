@@ -66,9 +66,9 @@ test('the registry registers external declarations without copying the tool repo
   assert.equal(git(fixture.root, ['status', '--porcelain']).trim(), '');
 });
 
-test('the declaration check rejects Studio repository references inside aimlab-tools text', t => {
+test('the declaration check rejects AIMatterLab repository references inside aimlab-tools text', t => {
   const manifest = aimlabManifest();
   manifest.functions[0].description = 'Copy the helper from backend/worker/studio_worker/nep_predict.py before running.';
   const fixture = createAimlabToolFixture(t, {manifest});
-  assert.throws(() => inspectAimlabSource({repo_root: fixture.root, commit: fixture.commit}), /self-contained|Studio repository references/);
+  assert.throws(() => inspectAimlabSource({repo_root: fixture.root, commit: fixture.commit}), /self-contained|AIMatterLab repository references/);
 });

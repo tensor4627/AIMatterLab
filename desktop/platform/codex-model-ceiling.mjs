@@ -10,10 +10,10 @@ export function prepareModelCeiling(directory,instructions,{cachePath=path.join(
  if(!path.isAbsolute(cachePath))throw metadataError('model_metadata_location_unavailable','Public model metadata location is unavailable');
  let bytes,value;
  try{bytes=bytesAt(cachePath);value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
- catch(error){const failure=error?.code==='STUDIO_CODEX_MODEL_METADATA'?error.failure:error?.code==='ENOENT'?'model_metadata_missing':['EACCES','EPERM'].includes(error?.code)?'model_metadata_unreadable':'model_metadata_invalid';throw metadataError(failure,'Refresh public Codex model metadata before connecting Studio');}
+ catch(error){const failure=error?.code==='STUDIO_CODEX_MODEL_METADATA'?error.failure:error?.code==='ENOENT'?'model_metadata_missing':['EACCES','EPERM'].includes(error?.code)?'model_metadata_unreadable':'model_metadata_invalid';throw metadataError(failure,'Refresh public Codex model metadata before connecting AIMatterLab');}
  const catalog=projectModelCatalog(value,instructions),file=path.join(directory,'studio-model-capabilities.json'),projected=Buffer.from(JSON.stringify(catalog));
- try{fs.writeFileSync(file,projected,{flag:'wx'});}catch{throw metadataError('model_snapshot_write_failed','Cannot save the owned Studio model capability snapshot');}
- return {path:file,sha256:sha(projected),sourceSha256:sha(bytes),models:catalog.models.map(m=>m.slug),policy:'Studio direct MCP; native execution, file patches, experimental tools and automatic instruction sources disabled'};
+ try{fs.writeFileSync(file,projected,{flag:'wx'});}catch{throw metadataError('model_snapshot_write_failed','Cannot save the owned AIMatterLab model capability snapshot');}
+ return {path:file,sha256:sha(projected),sourceSha256:sha(bytes),models:catalog.models.map(m=>m.slug),policy:'AIMatterLab direct MCP; native execution, file patches, experimental tools and automatic instruction sources disabled'};
 }
-export function assertModelCeiling(receipt){try{if(!receipt||typeof receipt.sha256!=='string'||sha(bytesAt(receipt.path))!==receipt.sha256)throw Error();}catch{throw metadataError('model_snapshot_changed','Studio model capability snapshot changed');}}
-export function verifiedModel(value,isolation){if(!isolation.catalog)return value;const model=value??isolation.defaultModel;if(typeof model!=='string'||!isolation.catalog.models.includes(model))throw Error('Choose a model in the verified Studio capability catalog');return model;}
+export function assertModelCeiling(receipt){try{if(!receipt||typeof receipt.sha256!=='string'||sha(bytesAt(receipt.path))!==receipt.sha256)throw Error();}catch{throw metadataError('model_snapshot_changed','AIMatterLab model capability snapshot changed');}}
+export function verifiedModel(value,isolation){if(!isolation.catalog)return value;const model=value??isolation.defaultModel;if(typeof model!=='string'||!isolation.catalog.models.includes(model))throw Error('Choose a model in the verified AIMatterLab capability catalog');return model;}

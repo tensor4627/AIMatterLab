@@ -4,28 +4,28 @@
 
 ## 1. 定位与原则
 
-联用接口与配置职责以 [随开发者接入指导分发的联用交付要求](../developer/skills/studio-tool-integration/references/runtime-composition.md) 为准：开发者在 `aimlab-tools/` 提供真实支持的力场—MD、增强采样—MD 等接口、加载模式、依赖约束、使用 skill 和最小联合用例；Studio 在用户配置阶段验证所选完整组并配置兼容的版本化环境。三方组合不得由两个配对结果推定。当前联用材料使用既有 `guidance.configuration` 和测试映射，不修改严格 v1 schema；自动依赖解析及科学组配置尚待实现，声明检查不证明联用兼容。
+联用接口与配置职责以 [随开发者接入指导分发的联用交付要求](../developer/skills/studio-tool-integration/references/runtime-composition.md) 为准：开发者在 `aimlab-tools/` 提供真实支持的力场—MD、增强采样—MD 等接口、加载模式、依赖约束、使用 skill 和最小联合用例；AIMatterLab 在用户配置阶段验证所选完整组并配置兼容的版本化环境。三方组合不得由两个配对结果推定。当前联用材料使用既有 `guidance.configuration` 和测试映射，不修改严格 v1 schema；自动依赖解析及科学组配置尚待实现，声明检查不证明联用兼容。
 
 AimLab 内部工具的接入声明放在工具自己的 Git 仓库主工作分支中，随源码版本走：
 
 - 工具开发者只维护工具仓库里的 `aimlab-tools/`：机器可读声明、交付/操作 skill、精简手册和测试映射；
-- Studio 侧按**指定 commit** 读取源码并检查声明、路径闭包和测试映射，不复制整个工具仓库；
+- AIMatterLab 侧按**指定 commit** 读取源码并检查声明、路径闭包和测试映射，不复制整个工具仓库；
 - 检查结果只是 `declaration_checked`。真实安装、逐功能测试和放行分别记录，不能用检查代替安装或科学验证；
-- Studio 不自动 pull。候选版本由受控流程取得，通过检查并在真实环境验证后才替换已放行版本；旧任务继续使用旧版本。
+- AIMatterLab 不自动 pull。候选版本由受控流程取得，通过检查并在真实环境验证后才替换已放行版本；旧任务继续使用旧版本。
 
-这样避免了两个问题：把整个工具仓库复制进 Studio 包（体积大、与“兄弟引擎仓库不改动”的约束冲突），以及“声明在 Studio 仓库、源码在工具仓库”导致的版本错位。
+这样避免了两个问题：把整个工具仓库复制进 AIMatterLab 包（体积大、与“兄弟引擎仓库不改动”的约束冲突），以及“声明在 AIMatterLab 仓库、源码在工具仓库”导致的版本错位。
 
 ### 1.1 中立生产契约与自包含
 
-内部工具的生产调用契约由 Studio 以中立形式随 `studio-tool-integration` skill 分发：`developer/skills/studio-tool-integration/references/engine-contracts.json`。Studio 仓库的 `contracts/tools/engine-contracts.json` 是同一内容的规范源，构建检查按字节同步，Worker 使用随包资源里的本地副本。工具仓库不需要、也不得回读 Studio 源码来推导生产 argv。
+内部工具的生产调用契约由 AIMatterLab 以中立形式随 `studio-tool-integration` skill 分发：`developer/skills/studio-tool-integration/references/engine-contracts.json`。AIMatterLab 仓库的 `contracts/tools/engine-contracts.json` 是同一内容的规范源，构建检查按字节同步，Worker 使用随包资源里的本地副本。工具仓库不需要、也不得回读 AIMatterLab 源码来推导生产 argv。
 
 - **唯一事实来源**：`engine` 对应的必需输入、必需参数、`declaration_tokens`、`parameter_transforms` 和 `aimlab_tool_id` 均以该契约条目为准；声明自身不是生产契约的替代。
-- **工具身份**：`manifest.id` 必须等于契约中该工具各 `engine` 条目的 `aimlab_tool_id`（当前为 `gpu-sampling`、`pygas`、`pydyn`、`hotpp`）；`aimlab_repository_keys` 记录工具 id 与 Studio 环境/来源键的对应关系。一致性检查与 Worker 绑定会拒绝身份不匹配的声明（声明检查负责结构、路径与自包含）。
+- **工具身份**：`manifest.id` 必须等于契约中该工具各 `engine` 条目的 `aimlab_tool_id`（当前为 `gpu-sampling`、`pygas`、`pydyn`、`hotpp`）；`aimlab_repository_keys` 记录工具 id 与 AIMatterLab 环境/来源键的对应关系。一致性检查与 Worker 绑定会拒绝身份不匹配的声明（声明检查负责结构、路径与自包含）。
 - **token 覆盖**：契约 `declaration_tokens` 列出的输入/参数必须逐项以 `{<id>}` 出现在 `operation.command`，可选参数（如 `bias.validate` 的 `validation_history`、`kernel_capacity`）同样计入；漏掉会被一致性检查与绑定拒绝，不能靠声明路径静默丢弃。
 - **匹配规则**：契约名、声明端口与用户参数按归一化精确匹配；输入文件名允许去掉一个常见扩展名后精确匹配（如 `GAScfg.yaml` ↔ `gas-cfg`）。不使用任意前缀匹配，避免保留数值控制 `validation` 被误绑为 `validation-history`，或让 `model-file` 冒充必需参数 `mode`；歧义必须显式报错。
-- **语义归一化**：契约 `parameter_transforms` 规定用户语义到工具 CLI 取值的映射（当前为 `bias.validate.mode`：`static`/`metad`/`wtmetad`→`bias`，`cvonly`→`cvonly`，`opes`→`opes`），由 Studio 在绑定前执行；声明必须绑定归一化后的参数，不得自行改写或省略。
-- **自包含**：`aimlab-tools/` 内文本文件（Markdown、JSON、YAML、Python、JS/MJS、TXT 等）不得出现 Studio 内部路径，包括 `backend/worker`、`backend/main`、`contracts/tools`、`desktop/`、`frontend/`、`agent/tools`、`studio_worker` 等；检查失败时报告 `文件:行号`。
-- **`default_source` 语义**：可选参数/输出的 `default_source` 只能引用契约条目（`engine`、参数 id 等）或工具仓库内的真实路径，不得指向 Studio 源码、其他仓库或开发者机器绝对路径。
+- **语义归一化**：契约 `parameter_transforms` 规定用户语义到工具 CLI 取值的映射（当前为 `bias.validate.mode`：`static`/`metad`/`wtmetad`→`bias`，`cvonly`→`cvonly`，`opes`→`opes`），由 AIMatterLab 在绑定前执行；声明必须绑定归一化后的参数，不得自行改写或省略。
+- **自包含**：`aimlab-tools/` 内文本文件（Markdown、JSON、YAML、Python、JS/MJS、TXT 等）不得出现 AIMatterLab 内部路径，包括 `backend/worker`、`backend/main`、`contracts/tools`、`desktop/`、`frontend/`、`agent/tools`、`studio_worker` 等；检查失败时报告 `文件:行号`。
+- **`default_source` 语义**：可选参数/输出的 `default_source` 只能引用契约条目（`engine`、参数 id 等）或工具仓库内的真实路径，不得指向 AIMatterLab 源码、其他仓库或开发者机器绝对路径。
 - **更新范围**：内部工具声明更新只允许落在工具仓库的 `aimlab-tools/` 目录；不修改工具源码、既有测试、环境登记或真实作业。
 
 ## 2. 目录结构
@@ -177,7 +177,7 @@ token 必须匹配保留 token、`executable:<name>`、`skill:<name>`，或本�
 
 ## 5. 接入检查
 
-检查命令在 Studio 仓库内执行（`--repo` 指向工具仓库根目录）：
+检查命令在 AIMatterLab 仓库内执行（`--repo` 指向工具仓库根目录）：
 
 ```powershell
 node scripts/check-aimlab-tools.mjs --repo <工具仓库路径> [--commit <sha>] [--out <新报告文件>]
@@ -207,14 +207,14 @@ python3 scripts/check-aimlab-parity.py --repos-root <包含 GPUMD/pygas/pydyn/ho
 
 脚本对内置基线强制 `STUDIO_DECLARATION_DRIVEN=0`，对声明侧使用生产默认路径，逐用例比较两侧 argv，并包含空输入、多 walker 等负向用例；只输出 JSON 报告，不安装、不启动科学引擎。
 
-Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspect`、`sources.register`、`sources.update`、`sources.list`、`sources.read`）：按声明的 `declaration_sha256`（commit + manifest + 闭包）登记外部仓库，**不复制工具源码**；登记记录只保存来源路径、commit、声明与文件哈希。`installation` / `tests` / `release` 仍为 `not_run`，真实安装与测试按第 6 节单独记录。
+AIMatterLab 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspect`、`sources.register`、`sources.update`、`sources.list`、`sources.read`）：按声明的 `declaration_sha256`（commit + manifest + 闭包）登记外部仓库，**不复制工具源码**；登记记录只保存来源路径、commit、声明与文件哈希。`installation` / `tests` / `release` 仍为 `not_run`，真实安装与测试按第 6 节单独记录。
 
 行为：
 
-- 只读：不写工具仓库、不安装、不运行测试、不注册 Studio；
+- 只读：不写工具仓库、不安装、不运行测试、不注册 AIMatterLab；
 - 默认检查 `HEAD`，也可指定任意已提交的 commit；
 - 校验 `aimlab-tools/` 在 commit 中已跟踪、必需文件存在、manifest 结构、声明路径闭包、测试/功能双向覆盖、`SKILL.md` 元数据；
-- 扫描 `aimlab-tools/` 内文本文件的自包含性：出现 Studio 内部源码路径（见 1.1）即失败，并报告命中文件的 `文件:行号`；
+- 扫描 `aimlab-tools/` 内文本文件的自包含性：出现 AIMatterLab 内部源码路径（见 1.1）即失败，并报告命中文件的 `文件:行号`；
 - 计算 `manifest_sha256`、`declaration_sha256` 和闭包哈希；闭包包含 `aimlab-tools/` 下全部已跟踪文件，以及 manifest 声明的仓库内入口和测试资源；
 - 检查基于 commit；工作树是否有未提交改动只记录在 `worktree_dirty`，不影响 commit 内容校验；
 - 输出 JSON：`status`、`id`、`source_commit`、`manifest_sha256`、`declaration_sha256`、`file_count`、`files`、`installation`/`tests`/`release` 均为 `not_run`、`limitations`；
@@ -237,17 +237,17 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 2. 在声明的候选环境完成真实安装；
 3. 声明的全部最小测试通过（`passed`），或缺失项已明确记为 `blocked`/`not_run` 并说明原因；
 4. 记录版本（commit、`declaration_sha256`）、环境、命令、退出码、输出检查和证据位置；
-5. 之后才在 Studio 侧登记/更新放行版本（登记与版本快照的 Studio 实现见第 7 节）。Studio 不自动 pull，不原地替换旧任务依赖的版本。
+5. 之后才在 AIMatterLab 侧登记/更新放行版本（登记与版本快照的 AIMatterLab 实现见第 7 节）。AIMatterLab 不自动 pull，不原地替换旧任务依赖的版本。
 
 ## 7. 当前实现范围与限制
 
 - 已实现：本文件第 5 节的只读声明与文件闭包检查（含自包含扫描）、`tools.aimlab.*` 登记路由、生产声明与中立契约的 conformance 检查、可复现 parity 脚本 `scripts/check-aimlab-parity.py`、Worker 端声明绑定模块 `studio_worker.tools.declarations`，以及 `Adapter.prepare` 的声明驱动集成：`DEFAULT_DECLARATION_ENGINES` 已覆盖全部 15 条内置 route；已注册源码仓库存在 `aimlab-tools/manifest.json` 时默认使用声明 argv，`STUDIO_DECLARATION_DRIVEN=0` 可关闭、`=1` 可扩大试点、`STUDIO_DECLARATION_ENGINES` 可指定 allowlist；
-- 声明只替换 argv 构造：`Adapter.prepare` 在声明路径仍执行内置校验（必需输入/参数、单 walker 采样限制、数值控制），并拒绝 `manifest.id` 与契约 `aimlab_tool_id` 不一致、`declaration_tokens` 未逐项出现在 `operation.command` 的声明；`bias.validate` 的 `mode` 归一化在 Studio 侧按契约 `parameter_transforms` 执行（static/metad/wtmetad→bias、cvonly、opes），声明绑定归一化后的值；
+- 声明只替换 argv 构造：`Adapter.prepare` 在声明路径仍执行内置校验（必需输入/参数、单 walker 采样限制、数值控制），并拒绝 `manifest.id` 与契约 `aimlab_tool_id` 不一致、`declaration_tokens` 未逐项出现在 `operation.command` 的声明；`bias.validate` 的 `mode` 归一化在 AIMatterLab 侧按契约 `parameter_transforms` 执行（static/metad/wtmetad→bias、cvonly、opes），声明绑定归一化后的值；
 - 绑定语义硬化（2026-11-08 最终复核修复）：声明参数值只按归一化精确匹配，契约 token 与声明端口只按归一化精确或扩展名折叠匹配（不再使用任意前缀匹配）；可选空数组省略时一并移除其 flag；`STUDIO_REQUIRE_TOOL_DECLARATIONS=1` 与 `STUDIO_DECLARATION_DRIVEN=0` 冲突时显式报错；同一仓库以多个环境键登记时按解析路径去重，不同仓库的多源声明仍报歧义；可复现 parity 脚本对声明侧强制严格模式并断言每个用例实际使用声明，缺少声明时整体失败而非静默回退；
-- `nep.eval` 直接使用 NEP 原生 prediction 输入 `train.xyz`（文件名固定，内容可为任意评估/验证/测试数据集）与原生 `*_train.out`，不再需要 Studio 或工具仓的 `nep_predict.py` helper，也不写 `evaluation.json`；`nep.analyze` 使用原生 `*_train.out` 与 `--splits train`，并继续使用 `{skill:nep-regression-rmse}` 外部资源 token，未注册时检查/执行报错；
+- `nep.eval` 直接使用 NEP 原生 prediction 输入 `train.xyz`（文件名固定，内容可为任意评估/验证/测试数据集）与原生 `*_train.out`，不再需要 AIMatterLab 或工具仓的 `nep_predict.py` helper，也不写 `evaluation.json`；`nep.analyze` 使用原生 `*_train.out` 与 `--splits train`，并继续使用 `{skill:nep-regression-rmse}` 外部资源 token，未注册时检查/执行报错；
 - 生产兼容默认：Worker 启动脚本（`bootstrap.py`）默认 `STUDIO_REQUIRE_TOOL_DECLARATIONS=0`，以兼容默认分支尚未合入 `aimlab-tools/` 的已有环境；只有显式设置 `=1` 才在缺少声明时严格报错。发布顺序要求：工具仓库先把 `aimlab-tools/` 合入默认分支并完成检查/验证，再在受控环境启用严格模式（当前各工具仓默认分支仍未合入）；
 - 未实现：登记/版本绑定的执行端强制（Worker 仍读取已注册环境仓库工作树的 `aimlab-tools/manifest.json`，不校验 commit 或 `declaration_sha256`；`tools.aimlab.*` 登记记录与执行路径仍是两套存储）、`engine` 与 Worker 适配器交叉校验、移除遗留兼容回退、真实安装/GPU 执行验证、通用安装与执行配置（当前自动配置仅支持固定串行 CPU `installation.check` reference）；`tools.aimlab.*` 登记目前只有主进程 typed 路由与 preload 白名单，尚无 frontend/agent 消费面（界面或 Agent 不能发起/查看登记）；
-- 因此检查通过不等于“已接入 Studio”。登记、环境配置和真实测试通过须按实际实现另行完成并记录；
+- 因此检查通过不等于“已接入 AIMatterLab”。登记、环境配置和真实测试通过须按实际实现另行完成并记录；
 - 第三方 `<id>-package` 的注册路径保持不变，仍由 `studio-tool-integration` 与现有包注册实现处理。
 
 ## 8. 更新流程
@@ -255,8 +255,8 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 自 `1.0.1` 起，本文件的声明格式、匹配规则与检查语义作为正式发布基线冻结；修改必须同时更新契约、检查器、Worker 绑定与版本记录，并按 1.0 起的向后兼容/版本化迁移约定处理。
 
 1. 工具开发者在主工作分支只更新 `aimlab-tools/`，与源码一起提交；声明更新不修改工具源码、既有测试或环境；
-2. 通知 Studio 候选 commit；
-3. Studio 在候选 commit 上运行接入检查（含自包含扫描）、conformance 与 parity，保存报告；
+2. 通知 AIMatterLab 候选 commit；
+3. AIMatterLab 在候选 commit 上运行接入检查（含自包含扫描）、conformance 与 parity，保存报告；
 4. 在候选环境安装并运行声明的测试，逐项记录 `passed / failed / blocked / not_run`；
 5. 全部通过后放行并登记新版本；旧版本和旧任务保持不变；
 6. 工具仓库把 `aimlab-tools/` 合入默认分支是启用生产严格声明（`STUDIO_REQUIRE_TOOL_DECLARATIONS=1`）的前置条件；发布顺序为“合入默认分支 → 在候选 commit 检查/验证 → 记录 CHANGELOG 与版本 → 本地 tag”，未合入的默认分支环境只能保持兼容默认 `=0`；

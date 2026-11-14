@@ -3,7 +3,7 @@ name: studio-neb-workflow
 description: Prepare the implemented native GPUMD GPU-Sampling NEB route from real endpoints and engine contracts; keep PyDyn NEB and physical barrier claims explicit when unsupported.
 ---
 
-# Native NEB in Studio
+# Native NEB in AIMatterLab
 
 The implemented adapter is gpumd.neb. Check describe_engine and the selected environment before authoring; do not promise a PyDyn NEB executor from a repository name. Read the actual initial and final structures, matching atom count, species/order, cell/PBC and the potential consumer. Check the requested mapping and interpolation for collisions rather than guessing atom correspondences.
 

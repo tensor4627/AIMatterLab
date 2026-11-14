@@ -1,4 +1,4 @@
-# GPU Sampling Studio
+# AIMatterLab
 
 Keep scientific engines in sibling repositories unchanged. Engine environments are explicit, versioned registrations; never switch their branches automatically. Run inputs and validation evidence belong to untracked runtime directories. No fabricated job status, metrics, model access, or scientific validation. Bias gates must load the serialized artifact and check the real target environment. An explicitly selected AOTI artifact must fail on incompatibility without backend fallback.
 

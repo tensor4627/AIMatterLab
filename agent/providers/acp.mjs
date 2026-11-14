@@ -76,7 +76,7 @@ export class AcpBridge extends EventEmitter{
   this.framer=framer;
   child.stdout.on('data',chunk=>{if(this.process===child)framer.feed(chunk);});
   try{
-   const info=await this.raw('initialize',{protocolVersion:1,clientInfo:{name:'gpu-sampling-studio',version:this.host.version},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false,elicitation:{form:{}},session:{configOptions:{boolean:{}}}}},30000);
+   const info=await this.raw('initialize',{protocolVersion:1,clientInfo:{name:'aimatterlab',version:this.host.version},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false,elicitation:{form:{}},session:{configOptions:{boolean:{}}}}},30000);
    assertCurrent();if(this.process!==child)throw Error(this.provider+' startup was cancelled');
    if(info.protocolVersion!==1)throw Error('Unsupported ACP protocol version');
    const version=info.agentInfo?.version;
@@ -121,13 +121,13 @@ export class AcpBridge extends EventEmitter{
     this.event('studio/question',{threadId:p.sessionId,message:call.title,questionOptions:p.options||[],rawInput:call.rawInput},id);return;
    }
    this.send({id,result:{outcome:{outcome:'cancelled'}}});
-   this.event('studio/policyDenied',{threadId:p.sessionId,message:'Use the current authorized Studio tools; native file and shell tools are disabled.'});return;
+   this.event('studio/policyDenied',{threadId:p.sessionId,message:'Use the current authorized AIMatterLab tools; native file and shell tools are disabled.'});return;
   }
   if(method==='elicitation/create'&&(!p.mode||p.mode==='form')){
    this.interactions.set(String(id),message);
    this.event('mcpServer/elicitation/request',{threadId:p.sessionId,message:p.message,requestedSchema:p.requestedSchema},id);return;
   }
-  this.send({id,error:{code:-32601,message:'Studio does not expose filesystem, terminal, or arbitrary client actions'}});
+  this.send({id,error:{code:-32601,message:'AIMatterLab does not expose filesystem, terminal, or arbitrary client actions'}});
  }
  respond(id,result){
   const key=String(id),request=this.interactions.get(key);if(!request)throw Error('Request already resolved');

@@ -26,7 +26,7 @@ test('Node list does not execute; unknown suites, external paths and empty selec
 test('Node runner preserves child failure instead of reporting a selected suite as passed',t=>{
  const f=fixture(t);assert.equal(runNodeTests(['--suite=frontend'],{...f.options,spawnTarget:()=>({status:7})}),7);
 });
-test('worker inventory is read-only and scoped pattern selects only Studio tests before spawning',t=>{
+test('worker inventory is read-only and scoped pattern selects only AIMatterLab tests before spawning',t=>{
  const f=fixture(t),calls=[],messages=[],child={},options={cwd:f.cwd,platform:'linux',env:{},preflight:()=>({status:'allowed'}),spawnTarget:(...args)=>{calls.push(args);return child;},write:value=>messages.push(value)};
  assert.equal(runWorkerTests({...options,args:['--list']}).exitCode,0);assert.equal(calls.length,0);
  assert.deepEqual(messages[0].files,['test_worker_a.py']);assert.equal(runWorkerTests({...options,args:['--pattern=test_worker_*.py']}).child,child);assert(calls[0][1].includes('test_worker_*.py'));

@@ -7,7 +7,7 @@
   "tutorials": {
     "zh-CN": [
       {
-        "source": "Studio-authored summary",
+        "source": "AIMatterLab-authored summary",
         "status": "source_fallback; official OVITO Chinese tutorial not confirmed"
       }
     ],
@@ -42,7 +42,7 @@
       "Actual Three.js Structure displays element-colored atom positions, retains order, drag rotation and wheel zoom. Cell is accepted in data but no unit-cell/bond/OVITO modifier implementation is claimed.",
       "Worker ASE structure inspection accepts an explicit zero-based frame and bounds preview to 20000 atoms; actual registered ASE parser determines format support. RunDetail currently exposes preview only for xyz/traj file names; do not claim all ASE formats have a frontend entry.",
       "No whole-trajectory animation, streaming index, OVITO pipeline or automatic scientific analysis is inferred from a visual preview.",
-      "OVITO official import and pipeline manuals are design references for a future integration; Studio does not ship those API capabilities."
+      "OVITO official import and pipeline manuals are design references for a future integration; AIMatterLab does not ship those API capabilities."
     ]
   },
   "display_policy": {
@@ -50,7 +50,7 @@
     "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
     "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Current user delegation and existing project/resource authorization govern execution; required serialized-artifact and target-runtime checks remain separate."
   },
-  "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
+  "copyright": "AIMatterLab-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
   "source_receipt": {
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
@@ -112,7 +112,7 @@
       "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
-    "language_policy": "Rule summaries are Studio-authored CN/EN. Do not claim unavailable official Chinese manuals."
+    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals."
   },
   "parameter_emission_policy": {
     "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",

@@ -4,7 +4,7 @@
 
 manifest 的 repository_url 仍为 null。当前入口可从本地完整 checkout 使用；发布后维护者需填写真实仓库和 release 地址、revision/hash。线上 clone / release 下载属于 not_run，不能虚构一个 URL。
 
-Windows 的源码启动、开发启动和安装器桌面阶段统一使用令牌前置检查。`node scripts/start.mjs --preflight-only` 在受限上下文返回 blocked，安装器此时尚未安装依赖、构建或启动 Electron。改用正常桌面上下文即可，普通非管理员账户受支持；不自动提权或更改 ACL、sandbox 和执行策略。安装器生成的 `Launch-Studio.cmd` 为 Windows 优先启动文件，并保留相同 profile；PS1 保留兼容。详见[原生启动故障记录](development/windows-startup-diagnostics.md)。
+Windows 的源码启动、开发启动和安装器桌面阶段统一使用令牌前置检查。`node scripts/start.mjs --preflight-only` 在受限上下文返回 blocked，安装器此时尚未安装依赖、构建或启动 Electron。改用正常桌面上下文即可，普通非管理员账户受支持；不自动提权或更改 ACL、sandbox 和执行策略。安装器生成的 `Launch-AIMatterLab.cmd` 为 Windows 优先启动文件，并保留相同 profile；PS1 保留兼容。详见[原生启动故障记录](development/windows-startup-diagnostics.md)。
 
 ## 安装状态机
 
@@ -34,11 +34,11 @@ dev.18 的[连接引导实施契约](design/compute-connection-hil.md)进一步�
 
 ## Kimi / Qwen 按需安装
 
-便携包不附带这两套 CLI。Studio 优先保留有效手动路径，再检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`；找不到兼容程序时复用已验证的 Studio 专用缓存。Windows 常见 npm/pnpm 入口会解析到实际程序，不执行命令包装脚本。有效程序仍须满足当前版本及 ACP 接口要求；安装位置、程序兼容、账户登录和真实模型调用分别判断。
+便携包不附带这两套 CLI。AIMatterLab 优先保留有效手动路径，再检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`；找不到兼容程序时复用已验证的 AIMatterLab 专用缓存。Windows 常见 npm/pnpm 入口会解析到实际程序，不执行命令包装脚本。有效程序仍须满足当前版本及 ACP 接口要求；安装位置、程序兼容、账户登录和真实模型调用分别判断。
 
 点击对应登录或连接入口时，缺失或不兼容会显示下载界面。用户可重新检测、选择已有程序、下载兼容版本或取消；启动应用、切换服务商、读取账户和后台恢复均不触发下载。下载使用锁定的官方 npm 地址和完整性值，无需另外安装 npm、Node 或 Python。主进程负责校验、受限解包和原子安装，不运行 postinstall，也不覆盖本机已有程序。
 
-安装放在当前 Studio profile 的 `agent-runtimes` 私有目录。界面显示实际下载字节、包数量及校验/安装/接口检查阶段；未知总量使用加载动画。失败或取消保留已有可用版本，成功后继续原登录流程。高级设置中的有效手动路径保留，仅迁移已失效的历史包内默认路径。用户在外部安装 CLI 后可点击重新检测。
+安装放在当前 AIMatterLab profile 的 `agent-runtimes` 私有目录。界面显示实际下载字节、包数量及校验/安装/接口检查阶段；未知总量使用加载动画。失败或取消保留已有可用版本，成功后继续原登录流程。高级设置中的有效手动路径保留，仅迁移已失效的历史包内默认路径。用户在外部安装 CLI 后可点击重新检测。
 
 单 prompt 安装协作者遵循相同入口和 profile；`reuse-existing` 仍不下载，缺失时保留 blocked，完成用户选择的安装后再复核。CLI 安装通过不能替代桌面实际模型回复或科学短例。
 
@@ -57,7 +57,7 @@ python scripts/one_prompt.py finalize --config .studio/installation/config.json
 
 bootstrap 示例字段：enabled、专用 Linux root、基线 python、精确 packages（name==version）、sources（name / credential-free GitHub url / full commit / install）。环境的 executables.python 指向 venv/bin/python；不要 resolve 掉符号链接。新增 GPU 包必须匹配驱动、CUDA、PyTorch/LibTorch/ABI；偏置 .pt2 不兼容时阻止，不降级后端。
 
-SSH compute 配置增加 connection 与 resources。connection 包括 host、username、port、ssh_client、identity_file、via、scheduler、queue、remote_root、activation、limits、lsf_memory_scope。Windows 凭据可以通过 WSL 中的原生 OpenSSH 路径使用，用户名通过 -l 强制指定。resources 必须有 queue/cpus/gpus/memory_mb。短例上限 120 秒、2 CPU、1 GPU、8192 MB；项目并发 1。smoke 默认只准备远程草稿；明确审阅批准后才使用 --approve-submit。排队超时和失联为 blocked，保留 Run，由 Studio 监控，不自动重复提交。
+SSH compute 配置增加 connection 与 resources。connection 包括 host、username、port、ssh_client、identity_file、via、scheduler、queue、remote_root、activation、limits、lsf_memory_scope。Windows 凭据可以通过 WSL 中的原生 OpenSSH 路径使用，用户名通过 -l 强制指定。resources 必须有 queue/cpus/gpus/memory_mb。短例上限 120 秒、2 CPU、1 GPU、8192 MB；项目并发 1。smoke 默认只准备远程草稿；明确审阅批准后才使用 --approve-submit。排队超时和失联为 blocked，保留 Run，由 AIMatterLab 监控，不自动重复提交。
 
 允许登录节点安装时，bootstrap.allow_login_install 必须明确为 true。否则 configure 阻止登录节点安装，由 Agent 按站点规则将同一 recipe 排入队列执行。所有远端配置与输入包都排除 SSH 地址、端口和密钥引用；它们只留在本地控制端。共享摘要只记录状态和范围。
 
@@ -72,10 +72,10 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 每例检查真实退出码及 smoke-result.json，MD 还检查原子数、步数、有限能量和位移。它们不证明生产收敛、模型精度或长时间稳定性。
 
-desktop 使用独立 profile、真实 renderer/worker 和 provider 请求；真实调用被拒绝或需要认证时记 blocked，由用户登录后重验；账户字段不可用仍需用真实回复判定调用能力，不伪造登录。生成的 Launch-Studio.ps1（或 Linux launcher）复用验收 profile，不覆盖用户原安装。finalize 绑定当前配置和源码指纹，要求三个阶段均通过、短例集合完整；不存在“跳过后也成功”的路径。
+desktop 使用独立 profile、真实 renderer/worker 和 provider 请求；真实调用被拒绝或需要认证时记 blocked，由用户登录后重验；账户字段不可用仍需用真实回复判定调用能力，不伪造登录。生成的 Launch-AIMatterLab.ps1（或 Linux launcher）复用验收 profile，不覆盖用户原安装。finalize 绑定当前配置和源码指纹，要求三个阶段均通过、短例集合完整；不存在“跳过后也成功”的路径。
 
 本代验证与发布状态见 [v0.17](releases/v0.17.md)；原始证据保留在忽略目录。
-同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 Studio 核对任务，或选择独立安装 root。
+同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 AIMatterLab 核对任务，或选择独立安装 root。
 
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。
 

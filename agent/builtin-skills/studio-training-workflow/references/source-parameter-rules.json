@@ -64,8 +64,8 @@
       "consumer_hazards": [
         "HotPP package name miaonet differs from import/CLI hotpp",
         "freeze mutates embedding representation for LAMMPS only after saving ASE artifact; outputs are not interchangeable",
-        "Studio hotpp.eval currently passes no properties override, so default energy/forces eval must not be called a dipole/virial evaluation",
-        "Studio export fixes CUDA+double; tutorial CPU/default freeze is not current adapter behavior",
+        "AIMatterLab hotpp.eval currently passes no properties override, so default energy/forces eval must not be called a dipole/virial evaluation",
+        "AIMatterLab export fixes CUDA+double; tutorial CPU/default freeze is not current adapter behavior",
         "branch acceleration report numbers are historical, not this campaign speed or generic support"
       ]
     },

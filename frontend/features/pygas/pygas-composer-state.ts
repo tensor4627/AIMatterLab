@@ -86,5 +86,5 @@ export function managedOutputNameProposal(graph:CanonicalGraph,catalog:CatalogRe
 export function adoptManagedOutputName(graph:CanonicalGraph,catalog:CatalogResponse,receipt:SourceReceipt):CanonicalGraph{
  const proposal=managedOutputNameProposal(graph,catalog,receipt);if(!proposal.available)throw Error(proposal.reason);
  const metadata=(graph.settings.scientific_metadata||{}) as Record<string,unknown>,defaults=(metadata.studio_technical_defaults||{}) as Record<string,unknown>;
- return {...graph,settings:{...graph.settings,pt_path:proposal.basename,scientific_metadata:{...metadata,studio_technical_defaults:{...defaults,pt_path:{value:proposal.basename,origin:'Studio technical default selected by an explicit human action',compiler_source:proposal.source!.path,compiler_sha256:proposal.source!.sha256}}}}};
+ return {...graph,settings:{...graph.settings,pt_path:proposal.basename,scientific_metadata:{...metadata,studio_technical_defaults:{...defaults,pt_path:{value:proposal.basename,origin:'AIMatterLab technical default selected by an explicit human action',compiler_source:proposal.source!.path,compiler_sha256:proposal.source!.sha256}}}}};
 }

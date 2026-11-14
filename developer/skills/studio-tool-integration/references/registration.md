@@ -1,6 +1,6 @@
 # tool.json v1：声明、注册与版本
 
-本目录带有 [完整 JSON Schema](tool-package.schema.json) 和 [纯声明校验实现](tool-package.mjs)，两者随 skill 一起迁移。`scripts/check-manifest.mjs` 使用这些文件，不依赖 Studio 仓库、第三方 Node 模块或网络。需要支持 JSON import attributes 的 Node 22.13+；小示例另需 Git，真正执行示例才需 Python 3。
+本目录带有 [完整 JSON Schema](tool-package.schema.json) 和 [纯声明校验实现](tool-package.mjs)，两者随 skill 一起迁移。`scripts/check-manifest.mjs` 使用这些文件，不依赖 AIMatterLab 仓库、第三方 Node 模块或网络。需要支持 JSON import attributes 的 Node 22.13+；小示例另需 Git，真正执行示例才需 Python 3。
 
 ## 字段与默认值
 
@@ -22,7 +22,7 @@
 | 字段 | 内容及默认 |
 | --- | --- |
 | `id`, `name`, `description` | 功能标识、名称和实际用途。功能/测试/端口/参数 ID 最多96字符，小写字母开头，允许字母数字及分隔的 `.`/`-` |
-| `engine` | 默认 `null`。有真实 Studio 适配时填其准确 engine 标识；仅填写字符串不创建适配器 |
+| `engine` | 默认 `null`。有真实 AIMatterLab 适配时填其准确 engine 标识；仅填写字符串不创建适配器 |
 | `entrypoint` | 实际程序文件的包内相对路径 |
 | `inputs`, `outputs` | 输入可为空，输出至少一项；每项 `{id,type,format,description,required,display}`，type 为 file/files/directory/value。description 应给出定位、单位、格式约束及管理行为 |
 | `parameters` | 默认 `[]`；每项 `{id,type,description,required,display}`，type 为 string/number/integer/boolean/array/object，unit 默认 null |
@@ -62,11 +62,11 @@ node <SKILL_DIR>/scripts/check-manifest.mjs <PACKAGE_ROOT>/tool.json
 - 资源目录可递归，最多100000文件。符号链接只允许相对、包内可解析目标；target 可含不越界的 `..`，链接链须无环。绝对目标、包外目标、链接仓库根或 `.git` 管理资源会拒绝。注册同时记录链接本身和实际目标闭包；推荐 wrapper 以避免平台链接权限差异。
 - 所需资源须已实际随包取得；下载 URL、包外私有文件和 Git LFS 指针本身不能替代测试所需实际字节。大型模型/数据不必进 Git，可放包外层明确 resources 目录；取得条件未满足时记录 blocked。
 
-Studio 包检查会验证真实文件、Git 和链接，并计算内容身份；不会安装软件、运行作者程序/测试、执行 Git hooks/filters、自动 fetch/pull 或修改作者历史。若文件变化导致检查不一致，保留现场并重做候选检查，不能报通过。
+AIMatterLab 包检查会验证真实文件、Git 和链接，并计算内容身份；不会安装软件、运行作者程序/测试、执行 Git hooks/filters、自动 fetch/pull 或修改作者历史。若文件变化导致检查不一致，保留现场并重做候选检查，不能报通过。
 
 ## 注册、快照和更新
 
-Studio 提供 typed `tools.packages.inspect/register/update/relocate/list/read`；这些是受 sender 验证的桌面入口，不是让普通 MCP 改权限的接口。运行在 Studio 外时交付完整包及检查结果，由用户在 Studio 选择目录检查/注册；不需要把 Studio 源码复制给开发者。
+AIMatterLab 提供 typed `tools.packages.inspect/register/update/relocate/list/read`；这些是受 sender 验证的桌面入口，不是让普通 MCP 改权限的接口。运行在 AIMatterLab 外时交付完整包及检查结果，由用户在 AIMatterLab 选择目录检查/注册；不需要把 AIMatterLab 源码复制给开发者。
 
 | 操作 | 事实边界 |
 | --- | --- |
@@ -78,7 +78,7 @@ Studio 提供 typed `tools.packages.inspect/register/update/relocate/list/read`�
 
 `package_version` 为 SHA256 内容身份，覆盖准确 source commit、原始 tool.json 字节和文件/链接闭包；不是可自由填写的 semver。重定位不改变身份，但 manifest 排版、交付说明或 wrapper 字节变化也会改变身份。快照保留完整 Git 历史以固定版本，清除远程及宿主 Git 配置；不是作者后续 pull 的活动工作树。
 
-在作者授权下，正常 `git pull` 可同步候选原仓库的代码及原位置测试。随后更新 tool.json commit，核对 wrapper、资源和交付指导，再作定义检查与受影响安装/功能测试，最后显式 update。Studio 不自动 pull，也不原地更新旧任务/环境依赖的快照。作者只需继续维护已有布局和必要最小测试；包外层材料由接入流程维护。
+在作者授权下，正常 `git pull` 可同步候选原仓库的代码及原位置测试。随后更新 tool.json commit，核对 wrapper、资源和交付指导，再作定义检查与受影响安装/功能测试，最后显式 update。AIMatterLab 不自动 pull，也不原地更新旧任务/环境依赖的快照。作者只需继续维护已有布局和必要最小测试；包外层材料由接入流程维护。
 
 ## 验证与生命周期
 
@@ -102,6 +102,6 @@ node <SKILL_DIR>/scripts/create-cpu-reference.mjs --output <ABSOLUTE_NEW_PARENT>
 node <SKILL_DIR>/scripts/check-manifest.mjs <ABSOLUTE_NEW_PARENT>/cpu-worker-reference-package/tool.json
 ```
 
-生成器只使用随 skill 的 `assets/worker-smoke.py`，保留其固定原始内容，创建一个自有的全新 Git 仓库与真实提交，生成 tool.json、交付 skill、人类说明、安装交接和外层测试 wrapper。它不会执行程序、安装环境、访问网络、复用现有输出目录、提交到 Studio 仓库或伪造原作者历史。仅生成时安装/测试为 not_run。
+生成器只使用随 skill 的 `assets/worker-smoke.py`，保留其固定原始内容，创建一个自有的全新 Git 仓库与真实提交，生成 tool.json、交付 skill、人类说明、安装交接和外层测试 wrapper。它不会执行程序、安装环境、访问网络、复用现有输出目录、提交到 AIMatterLab 仓库或伪造原作者历史。仅生成时安装/测试为 not_run。
 
-人工检查后，可把整个包复制到另一父目录（保留 `cpu-worker-reference-package` 目录名），运行声明检查，再通过 Studio inspect 检查真实闭包；移动后仍应得到同一版本身份。若另行授权执行，包内测试说明给出 Python 命令、全新输出目录和实际 JSON/stdout 判据。工程结果只能证明短 CPU 子进程及产物链，不能证明通用安装、GPU/集群能力或任何科学结论。
+人工检查后，可把整个包复制到另一父目录（保留 `cpu-worker-reference-package` 目录名），运行声明检查，再通过 AIMatterLab inspect 检查真实闭包；移动后仍应得到同一版本身份。若另行授权执行，包内测试说明给出 Python 命令、全新输出目录和实际 JSON/stdout 判据。工程结果只能证明短 CPU 子进程及产物链，不能证明通用安装、GPU/集群能力或任何科学结论。

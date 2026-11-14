@@ -1,5 +1,5 @@
 {
-  "name": "gpu-sampling-studio",
+  "name": "aimatterlab",
   "version": "1.0.2-dev.33",
   "private": true,
   "type": "module",
@@ -56,7 +56,7 @@
   },
   "build": {
     "appId": "science.gpusampling.studio",
-    "productName": "GPU Sampling Studio",
+    "productName": "AIMatterLab",
     "beforeBuild": "scripts/package-runtime.mjs",
     "directories": {
       "output": "release/v1.0.2-dev.33"
@@ -90,11 +90,11 @@
         "portable",
         "zip"
       ],
-      "artifactName": "GPU-Sampling-Studio-${version}-win-${arch}.${ext}"
+      "artifactName": "AIMatterLab-${version}-win-${arch}.${ext}"
     },
     "portable": {
       "unpackDirName": true,
-      "artifactName": "GPU-Sampling-Studio-${version}-win-${arch}-portable.${ext}",
+      "artifactName": "AIMatterLab-${version}-win-${arch}-portable.${ext}",
       "useZip": true
     },
     "extraResources": [
@@ -154,5 +154,5 @@
     ]
   },
   "description": "Agent scientific workspace for PyDyn, GPUMD, pyGAS, NEP and HotPP",
-  "author": "GPU Sampling Studio"
+  "author": "AIMatterLab"
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract": "gpumd-native-input-planning-v1",
-  "scope": "Studio-authored source-specific planning facts for native GPU-Sampling inputs; not an executable/source build attestation, artifact check or scientific validation. Read current source_evidence. If stale/unregistered/blocked, treat as conceptual reference; never claim current syntax/defaults.",
+  "scope": "AIMatterLab-authored source-specific planning facts for native GPU-Sampling inputs; not an executable/source build attestation, artifact check or scientific validation. Read current source_evidence. If stale/unregistered/blocked, treat as conceptual reference; never claim current syntax/defaults.",
   "source_receipt": {
     "local_files": [
       {

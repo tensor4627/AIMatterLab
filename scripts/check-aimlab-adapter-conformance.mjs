@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Read-only conformance check between AimLab production declarations and built-in Studio engine contracts. */
+/** Read-only conformance check between AimLab production declarations and built-in AIMatterLab engine contracts. */
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';

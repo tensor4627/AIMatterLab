@@ -4,7 +4,7 @@
 
 科学流程先定义结构、势模型、MD/CV/Bias 和输出；完整后再进入独立部署模块选择计算连接、环境、队列、资源和工作目录。MetaD / WTMetaD 默认一个任务、一个 walker；多 walker、replica 和共享 hills 必须由用户明确选择。短试运行和生产阶段不能被误当作多 walker。
 
-本机特殊值放在 `.studio/local-skills/<profile-id>/`，与发行文件分开。该目录由仓库既有 `.studio/` 规则忽略，不参与 Git、安装包、远端任务或公开报告。连接继续使用 Studio 的现有登记；overlay 只引用 `connection_ref` 和环境 ID，不再复制主机、端口、账号、密钥、模型 token 或代理配置。
+本机特殊值放在 `.studio/local-skills/<profile-id>/`，与发行文件分开。该目录由仓库既有 `.studio/` 规则忽略，不参与 Git、安装包、远端任务或公开报告。连接继续使用 AIMatterLab 的现有登记；overlay 只引用 `connection_ref` 和环境 ID，不再复制主机、端口、账号、密钥、模型 token 或代理配置。
 
 ## 生成本机 overlay
 
@@ -16,9 +16,9 @@ node scripts/localize-skill.mjs --profile <private-profile.json> --repo <checkou
 
 必须显式提供 profile。脚本不读取用户级 skill 全文，不扫描用户家目录，不执行 profile 中的任何路径，不连接或安装软件，也不修改 SSH、凭据、环境登记和项目授权。`local_skill_refs` 只保留明确选择的 SKILL.md 路径引用。凭据字段、主机/端口字段、自由 shell 激活脚本、路径遍历和未知字段均被拒绝。
 
-脚本核对目标为精确 Git 根目录、目标文件真实受 ignore 规则保护且未被跟踪，并拒绝目录链接/junction 越界。在临时子目录写完整后重命名，输出 `profile.json`、`SKILL.md` 和 `provenance.json`。已有同 ID overlay 不覆盖；修改时用新 ID 保存，确认后再在 Studio 中选择新版本。输出状态始终是 `validation_status=not_run`，没有真实探测或运行时不得改称通过。
+脚本核对目标为精确 Git 根目录、目标文件真实受 ignore 规则保护且未被跟踪，并拒绝目录链接/junction 越界。在临时子目录写完整后重命名，输出 `profile.json`、`SKILL.md` 和 `provenance.json`。已有同 ID overlay 不覆盖；修改时用新 ID 保存，确认后再在 AIMatterLab 中选择新版本。输出状态始终是 `validation_status=not_run`，没有真实探测或运行时不得改称通过。
 
-在 Studio 的额外技能根目录登记生成的私有目录，或其父目录 `.studio/local-skills`。源 checkout 默认发现 `agent/builtin-skills`，便携包默认发现物理目录 `resources/studio-skills`；这一根目录同时用于技能库和所选技能的注册校验。选定技能后，Codex 使用真实文件路径；Kimi、Qwen、DeepSeek API 由主进程校验后组装受限附件：Studio 公共入口及关联 references；生成的私有 overlay 还包含经 schema 和 provenance 核对的同目录元数据。父入口固定映射到已登记 bundled 根，不按任意相对路径读取。每项文件和总内容有大小及数量上限，拒绝链接/越界/缺失/过期附件；不读取 local_skill_refs 全文。其他已登记 skill 保持仅入口注入。renderer 不直接读文件，原有显式额外目录保持有效。
+在 AIMatterLab 的额外技能根目录登记生成的私有目录，或其父目录 `.studio/local-skills`。源 checkout 默认发现 `agent/builtin-skills`，便携包默认发现物理目录 `resources/studio-skills`；这一根目录同时用于技能库和所选技能的注册校验。选定技能后，Codex 使用真实文件路径；Kimi、Qwen、DeepSeek API 由主进程校验后组装受限附件：AIMatterLab 公共入口及关联 references；生成的私有 overlay 还包含经 schema 和 provenance 核对的同目录元数据。父入口固定映射到已登记 bundled 根，不按任意相对路径读取。每项文件和总内容有大小及数量上限，拒绝链接/越界/缺失/过期附件；不读取 local_skill_refs 全文。其他已登记 skill 保持仅入口注入。renderer 不直接读文件，原有显式额外目录保持有效。
 
 打包规则仅将 `agent/builtin-skills/**` 复制为 `resources/studio-skills`，并将通用 localizer 和作业核对脚本复制为 `resources/studio-tools/localize-skill.mjs`、`resources/studio-tools/cluster-reconcile.mjs`。不会将 `.studio/local-skills`、profile JSON、用户级 skill 或本机特化目录作为资源源路径。localizer 要求显式指定用户选择的完整 Git checkout；即使从便携包执行工具，输出也写该 checkout 的忽略目录，不能写 Electron 的资源目录。新用户安装时用其本机登记重新生成 overlay，不能拷贝开发者 `.studio`。
 

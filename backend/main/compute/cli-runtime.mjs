@@ -124,7 +124,7 @@ export function createCliRuntimeManager({root,settings=()=>({}),fetchApi=globalT
      signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
      child.stdout?.on('data',data=>{if(settled)return;output+=data.toString();if(Buffer.byteLength(output)>65536){finish({status:'failed',message:'CLI version output exceeded limit'});try{child.kill();}catch{}}});
      child.on('error',()=>finish({status:'failed',message:'CLI could not be started'}));
-     child.on('exit',code=>{const version=output.trim().split(/\s+/).at(-1);finish(code===0?{status:version===lock.providers[provider].version?'ready':'incompatible',version,message:version===lock.providers[provider].version?'CLI is ready':'Installed CLI version is not supported by this Studio version'}:{status:'failed',message:'CLI version check failed'});});
+     child.on('exit',code=>{const version=output.trim().split(/\s+/).at(-1);finish(code===0?{status:version===lock.providers[provider].version?'ready':'incompatible',version,message:version===lock.providers[provider].version?'CLI is ready':'Installed CLI version is not supported by this AIMatterLab version'}:{status:'failed',message:'CLI version check failed'});});
     });
    })();probes.set(key,pending);
   }

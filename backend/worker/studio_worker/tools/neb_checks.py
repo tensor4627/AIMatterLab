@@ -54,7 +54,7 @@ def contract(directory, inputs, declared=None):
                 pressure = [float(v) for v in values]
     for row in rows:
         if row and row[0] == "output_format" and row[1:] != ["xyz"]:
-            raise ValueError("Studio native NEB currently audits text XYZ; binary paths need their explicit reader contract")
+            raise ValueError("AIMatterLab native NEB currently audits text XYZ; binary paths need their explicit reader contract")
     potentials = [relative(r[1], inputs) for r in rows if len(r) > 1 and r[0] == "potential"]
     if not potentials:
         raise ValueError("NEB requires an explicitly snapshotted potential")
@@ -67,7 +67,7 @@ def contract(directory, inputs, declared=None):
         if "mid_name" in settings:structures += [relative(settings["mid_name"][0], inputs)]
         if "mid_name_list" in settings:structures += [relative(x, inputs) for x in settings["mid_name_list"]]
     if any(Path(x).suffix.lower() != ".xyz" for x in structures):
-        raise ValueError("Studio NEB structure audit requires explicit text .xyz inputs")
+        raise ValueError("AIMatterLab NEB structure audit requires explicit text .xyz inputs")
     interpolation = int(settings.get("interpolate", ["0"])[0])
     if interpolation < 0:raise ValueError("NEB interpolation count cannot be negative")
     hydro = pressure[0] if len(pressure) == 1 else (pressure[0] if pressure[:3] == [pressure[0]]*3 and all(v==0 for v in pressure[3:]) else None)

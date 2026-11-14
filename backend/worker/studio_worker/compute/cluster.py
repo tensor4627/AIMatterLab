@@ -1077,9 +1077,9 @@ for a in r['snapshots']:
 observed=None
 report=None
 try:
- print('Studio validation: environment probe started',file=sys.stderr,flush=True)
+ print('AIMatterLab validation: environment probe started',file=sys.stderr,flush=True)
  observed=Adapter(r['engine']).probe(environment)
- print('Studio validation: environment probe finished',file=sys.stderr,flush=True)
+ print('AIMatterLab validation: environment probe finished',file=sys.stderr,flush=True)
  atomic_json('environment.json',observed)
  Adapter(r['engine']).prepare(r,environment)
  report=Adapter(r['engine']).validate(r,environment,Path('simulation').resolve(),probe_report=observed)

@@ -10,7 +10,7 @@ if(electron)requireLaunchContext();
 const out=path.resolve(process.env.STUDIO_SIDEBAR_OUTPUT||('.studio/conversation-sidebar-20261112'+(electron?'/electron':'')));
 await fs.mkdir(out,{recursive:true});
 const harness=path.join(out,'harness.html');
-await fs.writeFile(harness,`<!doctype html><html><head><meta charset="utf-8"><title>Studio sidebar preview</title></head><body><div id="root"></div><script type="module">
+await fs.writeFile(harness,`<!doctype html><html><head><meta charset="utf-8"><title>AIMatterLab sidebar preview</title></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/frontend/app/App.tsx';import '/frontend/app/style.css';
 const query=new URLSearchParams(location.search),theme=query.get('theme')||'dark',large=query.has('large'),many=query.has('many'),long=query.has('long');
 localStorage.clear();localStorage.setItem('studio.sidebarWidth',query.get('sidebar')||'260');
@@ -59,7 +59,7 @@ if(process.env.STUDIO_SIDEBAR_NATIVE==='1'){
  const nativeMain=path.join(out,'electron-main.cjs');
  if(electron)await fs.writeFile(nativeMain,`const {app,BrowserWindow}=require('electron');
 app.setPath('userData',process.env.STUDIO_SIDEBAR_PROFILE);
-app.whenReady().then(()=>{const window=new BrowserWindow({width:Number(process.env.STUDIO_SIDEBAR_WIDTH),height:Number(process.env.STUDIO_SIDEBAR_HEIGHT),useContentSize:true,title:'Studio sidebar regression - isolated synthetic data',autoHideMenuBar:true,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});window.setMenu(null);window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));window.loadURL('about:blank');});
+app.whenReady().then(()=>{const window=new BrowserWindow({width:Number(process.env.STUDIO_SIDEBAR_WIDTH),height:Number(process.env.STUDIO_SIDEBAR_HEIGHT),useContentSize:true,title:'AIMatterLab sidebar regression - isolated synthetic data',autoHideMenuBar:true,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});window.setMenu(null);window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));window.loadURL('about:blank');});
 app.on('window-all-closed',()=>app.quit());`);
  const menu=p=>p.locator('.conversation-popover');
  const trigger=(p,name)=>p.getByRole('button',{name:'会话菜单 · '+name,exact:true});

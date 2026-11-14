@@ -55,7 +55,7 @@ function lockIdentity(root){const file=path.join(root,'pnpm-lock.yaml');if(!fs.e
 export function stageDshRuntime({root=process.cwd(),platform=process.platform,arch=process.arch,force=false,...options}={}){
  if(typeof force!=='boolean')throw Error('Invalid DSH staging force option');
  root=fs.realpathSync(root);const app=readJson(path.join(root,'package.json'));
- if(app.name!=='gpu-sampling-studio')throw Error('DSH runtime staging requires a Studio checkout');
+ if(!['aimatterlab','gpu-sampling-studio'].includes(app.name))throw Error('DSH runtime staging requires a AIMatterLab checkout');
  const version=app.devDependencies?.[ROOTS[0]];
  if(!semver.valid(version)||ROOTS.some(name=>app.devDependencies?.[name]!==version))throw Error('All official DSH roots must have the same exact version pin');
  const bound={...limits,...options};for(const key of Object.keys(limits))if(!Number.isSafeInteger(bound[key])||bound[key]<1)throw Error('Invalid DSH staging bound');

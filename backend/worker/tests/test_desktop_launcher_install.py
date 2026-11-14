@@ -28,8 +28,8 @@ class DesktopLauncherInstall(unittest.TestCase):
    def run(argv,**kwargs):return self.result(7) if '--studio-install-verify' in argv else self.result(0,'{"status":"allowed"}')
    with patch.object(entry.subprocess,'run',side_effect=run):result=entry.desktop(self.config(state),state)
    self.assertEqual(result['status'],'failed');self.assertEqual(result['exit_code'],7);self.assertEqual(report.read_bytes(),old)
-   self.assertFalse((state/'Launch-Studio.ps1').exists());self.assertFalse((state/'launch-studio.sh').exists())
-   self.assertFalse((state/'Launch-Studio.cmd').exists())
+   self.assertFalse((state/'Launch-AIMatterLab.ps1').exists());self.assertFalse((state/'launch-studio.sh').exists())
+   self.assertFalse((state/'Launch-AIMatterLab.cmd').exists())
  def test_zero_exit_with_unchanged_report_is_blocked(self):
   with tempfile.TemporaryDirectory() as tmp:
    state=Path(tmp);report=state/'desktop-install.json';report.write_text('{"status":"passed"}',encoding='utf-8')
@@ -58,7 +58,7 @@ class DesktopLauncherInstall(unittest.TestCase):
    self.assertTrue(all(call[1]['cwd']==ROOT for call in calls));self.assertTrue(all(not any('electron' in arg for arg in call[0]) for call in calls))
    for windows in (True,False):
     entry._write_desktop_launcher(state,node,windows=windows)
-    text=(state/('Launch-Studio.ps1' if windows else 'launch-studio.sh')).read_text(encoding='utf-8')
+    text=(state/('Launch-AIMatterLab.ps1' if windows else 'launch-studio.sh')).read_text(encoding='utf-8')
     self.assertIn('STUDIO_PROFILE_DIR',text);self.assertIn('start.mjs',text);self.assertNotIn('electron',text)
     if windows:self.assertIn("C:/Fixture Node''s/node.exe",text);self.assertIn("''",text);self.assertIn('$LASTEXITCODE',text)
     else:
@@ -68,11 +68,11 @@ class DesktopLauncherInstall(unittest.TestCase):
   with tempfile.TemporaryDirectory(prefix='studio %fixture%!') as tmp:
    state=Path(tmp);node='C:/Fixture %NODE%!/node.exe';root=state/'source %ROOT%!'
    with patch.object(entry,'ROOT',root):entry._write_desktop_launcher(state,node,windows=True)
-   text=(state/'Launch-Studio.cmd').read_text(encoding='utf-8')
+   text=(state/'Launch-AIMatterLab.cmd').read_text(encoding='utf-8')
    self.assertIn('setlocal DisableDelayedExpansion',text);self.assertIn('"C:/Fixture %%NODE%%!/node.exe"',text)
    self.assertIn('set "STUDIO_PROFILE_DIR='+str(state/'desktop-profile').replace('%','%%')+'"',text)
    self.assertIn('"'+str(root/'scripts/start.mjs').replace('%','%%')+'"',text);self.assertIn('exit /b %errorlevel%',text)
-   self.assertNotIn('powershell',text.lower());self.assertNotIn('bypass',text.lower());self.assertNotIn('electron',text.lower());self.assertTrue((state/'Launch-Studio.ps1').is_file())
+   self.assertNotIn('powershell',text.lower());self.assertNotIn('bypass',text.lower());self.assertNotIn('electron',text.lower());self.assertTrue((state/'Launch-AIMatterLab.ps1').is_file())
  def test_windows_cmd_rejects_quote_or_control_characters_before_writing_launchers(self):
   with tempfile.TemporaryDirectory() as tmp:
    base=Path(tmp)
@@ -81,7 +81,7 @@ class DesktopLauncherInstall(unittest.TestCase):
      with self.subTest(field=field,bad=repr(bad)):
       state=base/bad if field=='profile' else base;root=base/bad if field=='start' else ROOT;node=bad if field=='node' else 'node'
       with patch.object(entry,'ROOT',root),self.assertRaises(ValueError):entry._write_desktop_launcher(state,node,windows=True)
-   self.assertFalse((base/'Launch-Studio.cmd').exists());self.assertFalse((base/'Launch-Studio.ps1').exists())
+   self.assertFalse((base/'Launch-AIMatterLab.cmd').exists());self.assertFalse((base/'Launch-AIMatterLab.ps1').exists())
  def test_preflight_unavailable_timeout_or_malformed_response_never_starts_target(self):
   for outcome in (FileNotFoundError(),subprocess.TimeoutExpired(['node'],30),self.result(0,'not json')):
    with self.subTest(outcome=type(outcome).__name__),tempfile.TemporaryDirectory() as tmp:

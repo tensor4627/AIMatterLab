@@ -54,7 +54,7 @@ export default function CliRuntimeDialog({provider,readiness,onClose,onReady}:{p
    <p>{t(result.status==='missing'?'本机未找到对应 CLI。':result.status==='incompatible'?'检测到本机 CLI，但版本不兼容。':result.status==='invalid'?'已配置的 CLI 路径不可用。':'CLI 暂时不可用。')}</p>
    <p className="muted">{t('兼容版本')} · {result.expectedVersion}{result.version?' · '+t('本机版本')+' '+result.version:''}</p>
    {result.status==='failed'&&result.message&&<p className="muted">{result.message}</p>}
-   <p>{t('可以选择已有程序，或下载到 Studio 专用目录。下载不会更改本机已有 CLI。')}</p>
+   <p>{t('可以选择已有程序，或下载到 AIMatterLab 专用目录。下载不会更改本机已有 CLI。')}</p>
    <LoadingFeedback busy={!!pending} label={phase} progress={progress?.totalBytes?{completed:progress.receivedBytes,total:progress.totalBytes}:undefined}/>
    {progress&&progress.packageCount>0&&<p className="muted">{t('软件包')} {progress.packageIndex} / {progress.packageCount}</p>}
    {error&&<p role="alert">{error}</p>}

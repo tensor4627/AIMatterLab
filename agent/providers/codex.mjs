@@ -62,7 +62,7 @@ export class CodexBridge extends EventEmitter {
     stage='isolation_prepare';const isolation=this.strictIsolation?await this.host.prepareIsolation(executable,this.isolationRoot,config,worker,this.isolationDependencies):null;
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
     this.isolation=isolation;
-    // Validate Studio's owned overlay and effective capabilities below. External
+    // Validate AIMatterLab's owned overlay and effective capabilities below. External
     // desktop config can contain unrelated fields from a newer Codex release.
     const args = ['app-server','--listen','stdio://',...this.host.overrideArgs({...config,...isolation?.config})];
     const env = agentEnvironment('codex');
@@ -104,7 +104,7 @@ export class CodexBridge extends EventEmitter {
     this.framer = framer;
     this.process.stdout.on('data', chunk => {if(this.process===child)framer.feed(chunk);});
       stage='initialize';const info = await this.rawRequest('initialize', {
-        clientInfo: { name: 'gpu_sampling_studio', title: 'GPU Sampling Studio', version: this.host.version }
+        clientInfo: { name: 'aimatterlab', title: 'AIMatterLab', version: this.host.version }
       });
       if(generation!==this.lifecycle||this.process!==child){stage='lifecycle';throw Error('Codex context launch was cancelled');}
       if(isolation)checkedInitialize(info);
@@ -141,7 +141,7 @@ export class CodexBridge extends EventEmitter {
     assertCurrent();const result=await this.rawRequest(method,scoped,timeout);assertCurrent();
     if(['thread/start','thread/resume','turn/start','turn/steer'].includes(method)&& (this.process!==child||this.lifecycle!==generation))throw Error('Codex isolated context changed during dispatch');
     if(['thread/start','thread/resume'].includes(method)){try{
-      this.host.assertInstructionSources(result,this.isolation);if(this.isolation.catalog&&result.model!==scoped.model)throw Error('Resumed model differs from the Studio capability ceiling');
+      this.host.assertInstructionSources(result,this.isolation);if(this.isolation.catalog&&result.model!==scoped.model)throw Error('Resumed model differs from the AIMatterLab capability ceiling');
       if(typeof result.thread?.id!=='string'||!result.thread.id)throw Error('Codex did not return a verified conversation identity');
       // Complete this thread's MCP initialization before main binds its first lease context.
       const summary=await this.host.verifyIsolation((...args)=>this.rawRequest(...args),this.isolation,{threadId:result.thread.id});
@@ -161,21 +161,21 @@ export class CodexBridge extends EventEmitter {
   receive(message) {
     if(!validEnvelope(message)){this.close({reason:'malformed_protocol',message:'Invalid Codex RPC envelope; reconnect explicitly. The conversation is preserved.'});return;}
     if(this.strictIsolation&&message.method&&message.id!==undefined&&/^item\/(commandExecution|fileChange|permissions)/.test(message.method)){
-      this.send({id:message.id,error:{code:-32601,message:'Native privileged actions are unavailable in Studio isolation'}});return;
+      this.send({id:message.id,error:{code:-32601,message:'Native privileged actions are unavailable in AIMatterLab isolation'}});return;
     }
     if(this.strictIsolation&&message.method==='item/tool/call'&&message.id!==undefined){
       const tool=message.params?.tool;
       if(unsupportedCatalogQueries.has(tool)){
-        this.send({id:message.id,result:{success:false,contentItems:[{type:'inputText',text:'Native MCP resource catalog queries are unsupported in Studio isolation; no resource was read. Use the registered Studio tools for authorized project access.'}]}});return;
+        this.send({id:message.id,result:{success:false,contentItems:[{type:'inputText',text:'Native MCP resource catalog queries are unsupported in AIMatterLab isolation; no resource was read. Use the registered AIMatterLab tools for authorized project access.'}]}});return;
       }
       const name=typeof tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(tool)?tool:undefined;
-      this.close({reason:'isolation_violation',code:'STUDIO_CODEX_UNSCOPED_TOOL',activityType:'dynamicToolCall',...name?{tool:name}:{},message:'Studio isolation blocked '+(name||'dynamicToolCall')+'. The workflow and draft are preserved; reconnect explicitly and review results before sending another message.'});return;
+      this.close({reason:'isolation_violation',code:'STUDIO_CODEX_UNSCOPED_TOOL',activityType:'dynamicToolCall',...name?{tool:name}:{},message:'AIMatterLab isolation blocked '+(name||'dynamicToolCall')+'. The workflow and draft are preserved; reconnect explicitly and review results before sending another message.'});return;
     }
     if(this.strictIsolation&&message.method==='item/started'){
       const item=message.params?.item;
       if((['commandExecution','fileChange','webSearch','imageView','imageGeneration','collabAgentToolCall','subAgentActivity','dynamicToolCall'].includes(item?.type)&&!(item.type==='dynamicToolCall'&&unsupportedCatalogQueries.has(item.tool)))||item?.type==='mcpToolCall'&&item.server!=='gpusampling'){
         const tool=typeof item.tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(item.tool)?item.tool:undefined;
-        this.close({reason:'isolation_violation',code:'STUDIO_CODEX_UNSCOPED_TOOL',activityType:item.type,...tool?{tool}:{},message:'Studio isolation blocked '+(tool||item.type)+'. The workflow and draft are preserved; reconnect explicitly and review results before sending another message.'});return;
+        this.close({reason:'isolation_violation',code:'STUDIO_CODEX_UNSCOPED_TOOL',activityType:item.type,...tool?{tool}:{},message:'AIMatterLab isolation blocked '+(tool||item.type)+'. The workflow and draft are preserved; reconnect explicitly and review results before sending another message.'});return;
       }
     }
     if(message.method==='turn/started')this.activeTurns.add(message.params?.threadId);

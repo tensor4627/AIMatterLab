@@ -1,11 +1,11 @@
 ---
 name: studio-development-loop
-description: Coordinate an explicitly requested GPU Sampling Studio A/B/C development review with real human UI use, regression scoped to changed layers, independent engineering review and explicit acceptance gates.
+description: Coordinate an explicitly requested AIMatterLab A/B/C development review with real human UI use, regression scoped to changed layers, independent engineering review and explicit acceptance gates.
 ---
 
-# Studio A/B/C development review
+# AIMatterLab A/B/C development review
 
-Use for Studio software development and regression coordination. Do not attach this skill to product scientific conversations or use it as scientific authoring guidance. Put a published copy under development documentation, outside the application's default scientific skill roots.
+Use for AIMatterLab software development and regression coordination. Do not attach this skill to product scientific conversations or use it as scientific authoring guidance. Put a published copy under development documentation, outside the application's default scientific skill roots.
 
 Read the repository AGENTS instructions and [the development loop runbook](references/runbook.md). Follow the user's requested round count and existing authorization. Delegate only when directly authorized by the user or required by applicable repository instructions; preserve shared-file ownership.
 

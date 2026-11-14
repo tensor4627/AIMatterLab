@@ -2,14 +2,14 @@
 
 > 仅供 AimLab 内部工具（例如 GPU-Sampling）使用，第三方开发者可忽略本文件。第三方工具仍按本 skill 的 `<id>-package` 交付格式接入；本约定不改变现有包注册契约。
 >
-> 本文件随接入 skill 分发。内部声明所需的纯声明校验器、schema 与引擎契约都在 skill 目录内（`references/aimlab-tools.mjs`、`references/tool-package.mjs`、`references/tool-package.schema.json`、`references/engine-contracts.json`），编写声明不需要访问 Studio 源码；引擎参数事实以随附的 `references/engine-contracts.json` 为准。
+> 本文件随接入 skill 分发。内部声明所需的纯声明校验器、schema 与引擎契约都在 skill 目录内（`references/aimlab-tools.mjs`、`references/tool-package.mjs`、`references/tool-package.schema.json`、`references/engine-contracts.json`），编写声明不需要访问 AIMatterLab 源码；引擎参数事实以随附的 `references/engine-contracts.json` 为准。
 
 ## 1. 基本定位
 
-AimLab 内部工具不在 Studio 里再复制一份源码或单独维护交付包，而是把接入声明随工具源码放在工具仓库里：
+AimLab 内部工具不在 AIMatterLab 里再复制一份源码或单独维护交付包，而是把接入声明随工具源码放在工具仓库里：
 
 - 工具开发者在工具仓库的**主工作分支**维护根目录 `aimlab-tools/`；
-- Studio 按指定 commit 读取源码，校验声明、文件闭包与测试映射，**不复制整个工具仓库**；
+- AIMatterLab 按指定 commit 读取源码，校验声明、文件闭包与测试映射，**不复制整个工具仓库**；
 - `aimlab-tools/` 的声明和文件必须提交进 Git，只存在于工作树、未提交的内容不构成有效声明；
 - 检查通过只表示 `declaration_checked`；真实安装、逐功能测试和放行另行记录。
 
@@ -46,7 +46,7 @@ AimLab 内部工具不在 Studio 里再复制一份源码或单独维护交付�
 
 ## 3. 中立生产契约（随 skill 分发）
 
-`aimlab-tools/` 的声明以随 skill 分发的 `references/engine-contracts.json` 为**唯一生产事实来源**。该副本由 Studio 生成并随 skill 同步，与 Studio 侧使用的引擎契约字节一致；不要手改副本，也不要为了写声明去读取 Studio 仓库源码。声明中的 `engine`、参数、生产 token 与默认值依据都从该副本的 `engines` 条目取得；本节说明声明侧必须遵守的语义。
+`aimlab-tools/` 的声明以随 skill 分发的 `references/engine-contracts.json` 为**唯一生产事实来源**。该副本由 AIMatterLab 生成并随 skill 同步，与 AIMatterLab 侧使用的引擎契约字节一致；不要手改副本，也不要为了写声明去读取 AIMatterLab 仓库源码。声明中的 `engine`、参数、生产 token 与默认值依据都从该副本的 `engines` 条目取得；本节说明声明侧必须遵守的语义。
 
 ### 3.1 契约字段与声明要求
 
@@ -56,8 +56,8 @@ AimLab 内部工具不在 Studio 里再复制一份源码或单独维护交付�
 | `required_inputs` | 引擎必需输入 | `functions[].inputs` 必须逐项包含；输入 ID 以契约名称为准，允许仅大小写/分隔符不同的等价写法（如 `run.py` → `run-py`、`GASGaussian.txt` → `gas-gaussian-txt`） |
 | `required_parameters` | 引擎必需参数 | `functions[].parameters` 必须逐项包含，且以 `required: true` 声明 |
 | `declaration_tokens` | 生产命令必须绑定的端口 token | 每个 token 对应的输入/参数必须已声明，并且 `operation.command` 中必须出现 `{<对应端口 id>}`；缺失任一项时声明检查与生产执行都会失败 |
-| `parameter_transforms` | 公开参数值到 Studio 内部模式的归一化映射 | 声明只使用契约参数名与公开值（`choices`）；不要在命令里预映射，也不要写 Studio 内部模式名；归一化由 Studio 执行 |
-| `aimlab_repository_keys` | 工具 id → 环境仓库键 | 只读映射，Studio 用它定位已注册的环境仓库；声明侧不自行定义或改写 |
+| `parameter_transforms` | 公开参数值到 AIMatterLab 内部模式的归一化映射 | 声明只使用契约参数名与公开值（`choices`）；不要在命令里预映射，也不要写 AIMatterLab 内部模式名；归一化由 AIMatterLab 执行 |
+| `aimlab_repository_keys` | 工具 id → 环境仓库键 | 只读映射，AIMatterLab 用它定位已注册的环境仓库；声明侧不自行定义或改写 |
 
 当前 `aimlab_tool_id` 的取值及对应引擎：
 
@@ -76,13 +76,13 @@ AimLab 内部工具不在 Studio 里再复制一份源码或单独维护交付�
 
 完整 token 列表以 `references/engine-contracts.json` 每项的 `declaration_tokens` 为准，不能只按 `required_parameters` 推断。可选输入/参数的 token 仍须写入命令：用「flag、值」两个独立 argv token 排列（如 `--load_checkpoint {checkpoint}`、`--history {validation-history}`），省略时两者一并省略；数组参数按元素展开；省略后的行为按声明中的 `default` 与 `default_behavior` 处理。
 
-`parameter_transforms` 目前用于 `bias.validate` 的公开 `mode`：声明使用 `static` / `metad` / `wtmetad` / `bias` / `cvonly` / `opes` 等公开值，Studio 在绑定生产命令前按契约把前四种归一为 `bias`，执行与既有校验都基于归一化结果。声明不要复刻该映射，也不要直接声明内部值；值不在映射内时 Studio 报错，而不是静默透传。
+`parameter_transforms` 目前用于 `bias.validate` 的公开 `mode`：声明使用 `static` / `metad` / `wtmetad` / `bias` / `cvonly` / `opes` 等公开值，AIMatterLab 在绑定生产命令前按契约把前四种归一为 `bias`，执行与既有校验都基于归一化结果。声明不要复刻该映射，也不要直接声明内部值；值不在映射内时 AIMatterLab 报错，而不是静默透传。
 
-声明驱动只替换生产 argv 的构造；Studio 内置适配器原有的校验（必需输入与参数、单 walker 策略、数值验证控制等）仍然生效。声明无法通过写得更薄来绕过这些校验。
+声明驱动只替换生产 argv 的构造；AIMatterLab 内置适配器原有的校验（必需输入与参数、单 walker 策略、数值验证控制等）仍然生效。声明无法通过写得更薄来绕过这些校验。
 
 ### 3.2 自包含与 `default_source`
 
-内部声明必须**自包含**，不能引用 Studio 仓库内部路径。`check-aimlab-tools` 会扫描 `aimlab-tools/**` 下的文本文件（`.md`、`.json`、`.yaml`/`.yml`、`.py`、`.mjs`/`.cjs`/`.js`、`.txt`、`.sh`、`.toml`、`.cfg`；单文件不超过 512 KiB 的 UTF-8 文本），出现以下引用即检查失败并报告 `文件:行号`：
+内部声明必须**自包含**，不能引用 AIMatterLab 仓库内部路径。`check-aimlab-tools` 会扫描 `aimlab-tools/**` 下的文本文件（`.md`、`.json`、`.yaml`/`.yml`、`.py`、`.mjs`/`.cjs`/`.js`、`.txt`、`.sh`、`.toml`、`.cfg`；单文件不超过 512 KiB 的 UTF-8 文本），出现以下引用即检查失败并报告 `文件:行号`：
 
 - `backend/worker`、`backend/main`；
 - `contracts/tools`；
@@ -95,7 +95,7 @@ AimLab 内部工具不在 Studio 里再复制一份源码或单独维护交付�
 - 随 skill 分发的契约条目，例如 `references/engine-contracts.json#/engines/bias.validate`；
 - 工具仓库内的相对路径，例如 `aimlab-tools/manual.md`、`src/neb/GPU-cfneb_manual.md`。
 
-不要把 `default_source` 写成 `backend/worker/studio_worker/tools/adapters.py`、`contracts/tools/engine-contracts.json` 之类的 Studio 路径，否则 `check-aimlab-tools` 会拒绝该声明。`SKILL.md`、`manual.md`、`tests/README.md` 等说明文本同样使用仓库相对路径与随附契约条目，不写 Studio 源码位置或开发者机器的绝对路径。
+不要把 `default_source` 写成 `backend/worker/studio_worker/tools/adapters.py`、`contracts/tools/engine-contracts.json` 之类的 AIMatterLab 路径，否则 `check-aimlab-tools` 会拒绝该声明。`SKILL.md`、`manual.md`、`tests/README.md` 等说明文本同样使用仓库相对路径与随附契约条目，不写 AIMatterLab 源码位置或开发者机器的绝对路径。
 
 ## 4. `manifest.json` 的要求
 
@@ -116,7 +116,7 @@ AimLab 内部工具不在 Studio 里再复制一份源码或单独维护交付�
 | 字段 | 必需 | 说明 |
 | --- | --- | --- |
 | `id` / `name` / `description` | 是 | 功能标识与真实用途 |
-| `engine` | 否 | 取引擎契约 `engines` 中的键（如 `gpumd.md`、`bias.validate`）；功能 `id` 本身是契约引擎键时可省略。只填字符串不创建适配器；不在契约中的引擎没有内置适配，需单独实现 Studio 侧适配 |
+| `engine` | 否 | 取引擎契约 `engines` 中的键（如 `gpumd.md`、`bias.validate`）；功能 `id` 本身是契约引擎键时可省略。只填字符串不创建适配器；不在契约中的引擎没有内置适配，需单独实现 AIMatterLab 侧适配 |
 | `entrypoint` | 是 | 仓库相对路径的真实程序入口；位于 `aimlab-tools/` 下时只能是 `aimlab-tools/tests/` 内的 wrapper |
 | `inputs` / `outputs` | 是 | `outputs` 至少一项；端口结构与默认值规则沿用 `tool.json` v1 |
 | `parameters` | 是 | 可为 `[]`；`required:false` 必须有 `default`、`default_behavior`、`default_source`；`required:true` 不得有 default |
@@ -134,7 +134,7 @@ AimLab 内部工具不在 Studio 里再复制一份源码或单独维护交付�
 - `{<输入 id>}`：该输入在运行工作目录中的**文件名**（Worker 会把任务输入复制进 run 目录，命令用文件名而非源路径）；
 - `{<参数 id>}`：该功能声明的参数值；数组参数按元素展开为多个 argv token。
 
-token 必须匹配保留 token、`executable:<name>`、`skill:<name>`，或本功能已声明的输入/参数 ID；未声明的 token 检查失败。可选输入/参数省略时按声明默认行为处理；可选 flag 与值建议用独立 token（如 `--load_checkpoint {checkpoint}`），省略时 flag 一并省略。数组参数不能嵌入单个 argv token 内部。声明驱动路径仍会执行 Studio 内置适配器的既有校验，声明只替换生产 argv 的构造。
+token 必须匹配保留 token、`executable:<name>`、`skill:<name>`，或本功能已声明的输入/参数 ID；未声明的 token 检查失败。可选输入/参数省略时按声明默认行为处理；可选 flag 与值建议用独立 token（如 `--load_checkpoint {checkpoint}`），省略时 flag 一并省略。数组参数不能嵌入单个 argv token 内部。声明驱动路径仍会执行 AIMatterLab 内置适配器的既有校验，声明只替换生产 argv 的构造。
 
 契约名、声明端口与用户参数按归一化精确匹配；输入文件名允许去掉一个常见扩展名后精确匹配（如 `GAScfg.yaml` 与 `gas-cfg`）。不要依赖任意前缀相似：例如 `validation`（数值控制对象）不会被当作 `validation-history`，`model-file` 也不能满足必需参数 `mode`。
 
@@ -162,7 +162,7 @@ token 必须匹配保留 token、`executable:<name>`、`skill:<name>`，或本�
 
 联合用例沿用 `tests.cases` 的现有字段，每例仍关联一个真实 `function_id`，并与该功能的 `tests` 双向映射；其他参与者、模式、来源、资源和执行条件写在用例说明中。保持所有必需测试文件与资源可取得，补充内容仅写入 `aimlab-tools/`。
 
-当前 manifest 仍为严格 `schema_version: 1`，**不要增加 `couplings`、`members`、`runtime_units` 等未知字段**。声明检查不会解析联用说明、解析对端版本或求解联合环境。Studio 配置阶段负责完整所选组的依赖闭包、兼容环境和联合验收；通用科学工具组自动配置尚待实现。后续机器契约必须显式版本化并保持旧声明、环境登记与真实任务可用。
+当前 manifest 仍为严格 `schema_version: 1`，**不要增加 `couplings`、`members`、`runtime_units` 等未知字段**。声明检查不会解析联用说明、解析对端版本或求解联合环境。AIMatterLab 配置阶段负责完整所选组的依赖闭包、兼容环境和联合验收；通用科学工具组自动配置尚待实现。后续机器契约必须显式版本化并保持旧声明、环境登记与真实任务可用。
 
 ## 6. `SKILL.md`、`manual.md`、`tests/README.md` 的内容要求
 
@@ -172,7 +172,7 @@ token 必须匹配保留 token、`executable:<name>`、`skill:<name>`，或本�
 
 ## 7. 接入检查与状态
 
-编写声明只需 skill 内的 schema、校验器与契约副本；以下检查由 Studio 侧在 Studio 检出中运行（`--repo` 指向工具仓库根目录，只读，不写工具仓库、不安装、不执行测试、不注册 Studio）。
+编写声明只需 skill 内的 schema、校验器与契约副本；以下检查由 AIMatterLab 侧在 AIMatterLab 检出中运行（`--repo` 指向工具仓库根目录，只读，不写工具仓库、不安装、不执行测试、不注册 AIMatterLab）。
 
 ### 7.1 声明检查
 
@@ -181,7 +181,7 @@ node scripts/check-aimlab-tools.mjs --repo <工具仓库> [--commit <sha>] [--ou
 ```
 
 - 校验 `aimlab-tools/` 已跟踪、必需文件、manifest 结构、路径闭包、测试/功能双向覆盖、`SKILL.md` 元数据；
-- 扫描 `aimlab-tools/**` 文本并拒绝 Studio 内部路径引用（见 §3.2），失败时报告 `文件:行号`；
+- 扫描 `aimlab-tools/**` 文本并拒绝 AIMatterLab 内部路径引用（见 §3.2），失败时报告 `文件:行号`；
 - 输出 `status`、`id`、`source_commit`、`manifest_sha256`、`declaration_sha256`、文件闭包、`installation/tests/release=not_run`。
 
 多仓库汇总：
@@ -219,9 +219,9 @@ python3 scripts/check-aimlab-parity.py --repos-root <目录> [--out <新报告�
 - 逐例比较 argv，并验证缺输入、多 walker 等负例在两侧都被拒绝；
 - 只做 argv 对比，不安装、不启动引擎、不做科学验证；报告保留 `case_count`、`parity_count`、`negative_count`、`failures` 与逐例结果。
 
-### 7.4 Studio 登记与状态
+### 7.4 AIMatterLab 登记与状态
 
-Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspect`、`sources.register`、`sources.update`、`sources.list`、`sources.read`），按 `declaration_sha256` 登记外部来源，不复制工具源码。状态含义：
+AIMatterLab 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspect`、`sources.register`、`sources.update`、`sources.list`、`sources.read`），按 `declaration_sha256` 登记外部来源，不复制工具源码。状态含义：
 
 | 状态 | 含义 |
 | --- | --- |
@@ -230,13 +230,13 @@ Studio 主进程提供 `tools.aimlab.*` typed 路由（`choose`、`sources.inspe
 | `tests` | 逐功能真实测试结果；缺资源 `blocked`，失败 `failed` |
 | `release` | 放行/登记状态；未完成前保持 `not_run` |
 
-只有检查通过 + 候选环境真实安装 + 声明的最小测试通过后，才按明确版本/环境/功能范围报告放行；详细限制和记录格式见 Studio 侧的完整内部标准。
+只有检查通过 + 候选环境真实安装 + 声明的最小测试通过后，才按明确版本/环境/功能范围报告放行；详细限制和记录格式见 AIMatterLab 侧的完整内部标准。
 
 ## 8. 更新与版本纪律
 
 - 工具开发者在主工作分支更新 `aimlab-tools/`，与源码一起提交；只改 `aimlab-tools/` 目录，工具仓库其他文件保持既有默认分支内容不变；
-- Studio 不自动 pull；
-- 每次更新都由 Studio 在候选 commit 上重新执行检查与真实测试，通过后登记新版本；
+- AIMatterLab 不自动 pull；
+- 每次更新都由 AIMatterLab 在候选 commit 上重新执行检查与真实测试，通过后登记新版本；
 - 旧版本和旧任务保留其已登记的 commit/环境，不原地替换；
 - 声明、路径、依赖或通过标准变化都视为新版本，需重新检查与验证。
 

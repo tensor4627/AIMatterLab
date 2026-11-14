@@ -47,7 +47,7 @@ function requiredPortCheck({fn, names, kind, checkId}) {
 }
 
 /**
- * Compare one declared production operation with the neutral built-in Studio engine contract.
+ * Compare one declared production operation with the neutral built-in AIMatterLab engine contract.
  * This is a readiness check for replacing hardcoded adapters; it never executes anything.
  * It checks required ports, required argv tokens and the declared tool identity. It does not
  * prove argv equality; the reproducible parity script compares actual bound argv.
@@ -61,7 +61,7 @@ export function checkAimlabAdapterConformance({declaration, engineContracts}) {
       tool_id: declaration.tool_id,
       engine,
       status: 'pending_adapter',
-      checks: [{id: 'adapter_contract', status: 'not_run', detail: 'No built-in engine contract; a Studio adapter must be implemented separately'}]
+      checks: [{id: 'adapter_contract', status: 'not_run', detail: 'No built-in engine contract; a AIMatterLab adapter must be implemented separately'}]
     };
   }
   const checks = [];
