@@ -1,3 +1,4 @@
+import {legacyApiBridgeFactories} from '../helpers/legacy-api-bridge.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
@@ -15,7 +16,7 @@ async function setup(t){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-context-lifecycle-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const scopes=new McpProviderScopes(),base={url:'http://127.0.0.1:32123',tokens:{mcp:'base',admin:'not-shared'}};scopes.bind(base);const stored=new Map(),codex=new Bridge();
  const catalog={list:()=>[],get:(kind,id)=>stored.get(kind+':'+id),put:(kind,id,v)=>stored.set(kind+':'+id,v)};
- const hub=new AgentHub({codex,root,catalog,vault:{get:()=>null},settings:()=>({codexPath:'fixture-codex',kimiPath:'fixture-kimi',qwenPath:'fixture-qwen',agent:{}}),worker:p=>scopes.connection(p,base),releaseWorker:p=>scopes.revoke(p),bindWorkerContext:(p,c,o)=>{scopes.bind(base);return scopes.bindContext(p,c,o);}});t.after(()=>hub.close());
+ const hub=new AgentHub({apiBridgeFactories:legacyApiBridgeFactories,codex,root,catalog,vault:{get:()=>null},settings:()=>({codexPath:'fixture-codex',kimiPath:'fixture-kimi',qwenPath:'fixture-qwen',agent:{}}),worker:p=>scopes.connection(p,base),releaseWorker:p=>scopes.revoke(p),bindWorkerContext:(p,c,o)=>{scopes.bind(base);return scopes.bindContext(p,c,o);}});t.after(()=>hub.close());
  const auth=c=>scopes.authenticate({pathname:new URL(c.url).pathname+'/mcp',authorization:'Bearer '+c.tokens.mcp,host:'127.0.0.1:32123'});return {hub,codex,scopes,base,auth};
 }
 async function fresh(f){await f.hub.connect('codex');await f.hub.selectContext('codex',context());const response=await f.hub.rpc('codex','thread/start');await f.hub.selectContext('codex',context(response.thread.id));return response.thread.id;}

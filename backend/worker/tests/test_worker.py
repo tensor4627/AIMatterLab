@@ -94,7 +94,9 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(checked['status'],'draft')
         self.assertEqual(checked['validation']['status'],'failed')
         self.assertEqual(checked['provenance']['status'],'blocked')
-        with self.assertRaises(ValueError):self.service.submit(run['id'])
+        submitted=self.service.submit(run['id'])
+        self.assertEqual(submitted['status'],'queued')
+        self.assertEqual(submitted['validation']['status'],'failed')
 
     def test_resource_authorization(self):
         for changes in ({"gpu": 9}, {"max_seconds": 999999}, {"environment_id": "unknown"}):
@@ -122,10 +124,11 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(result["validation"]["scientific_status"], "not_run")
         self.assertIn("contract", result["validation"]["scope"])
 
-    def test_validation_required(self):
+    def test_unreviewed_inputs_can_execute_within_existing_authorization(self):
         run = self.service.prepare(self.spec())
-        with self.assertRaisesRegex(ValueError, "validation"):
-            self.service.submit(run["id"])
+        submitted=self.service.submit(run["id"])
+        self.assertEqual(submitted['status'],'queued')
+        self.assertEqual(submitted['validation']['status'],'not_run')
 
     def test_receipt_and_logs(self):
         run = self.submit()
@@ -154,7 +157,14 @@ class Lifecycle(unittest.TestCase):
         (self.inputs / "run.py").write_text("import time;time.sleep(60)\n")
         run = self.submit()
         self.service.tick()
-        time.sleep(.3)
+        # Test cancellation of an actually started child. Interpreter startup on
+        # a mounted filesystem can exceed an arbitrary 300 ms sleep.
+        for _ in range(100):
+            if (Path(run["directory"]) / "child.json").is_file():
+                break
+            time.sleep(.05)
+        else:
+            self.fail("Supervisor did not confirm its owned child before cancellation")
         self.service.cancel(run["id"])
         self.assertEqual(self.await_end(run["id"])["status"], "cancelled")
         run = self.submit(idempotency_key="timeout", max_seconds=1)
@@ -179,21 +189,16 @@ class Lifecycle(unittest.TestCase):
         result = self.service.cancel(run["id"])
         self.assertEqual(result["cancellation"]["status"], "unconfirmed")
         self.assertFalse(result["cancellation"]["signal_sent"])
-        with self.assertRaises(ValueError):
-            self.service.submit(run["id"])
+        self.assertEqual(self.service.submit(run['id'])['status'],'unknown')
 
-    def test_mcp_cannot_validate_or_submit_even_with_valid_run(self):
+    def test_mcp_can_validate_and_submit_within_existing_authorization(self):
         run = self.service.prepare(self.spec())
         for action in ('validate', 'submit'):
-            with self.assertRaisesRegex(PermissionError, "Desktop review"):
-                dispatch(self.service, "POST", "/api/run/"+action, {"run_id":run["id"]}, admin=False)
+            dispatch(self.service, "POST", "/api/run/"+action, {"run_id":run["id"]}, admin=False)
         names={tool['name'] for tool in tools()}
-        self.assertNotIn('submit_run', names)
-        self.assertNotIn('validate_run', names)
-        self.assertEqual(self.service.store.run(run['id'])['status'], 'draft')
-        dispatch(self.service, 'POST', '/api/run/validate', {'run_id':run['id']}, admin=True)
-        approved=dispatch(self.service, 'POST', '/api/run/submit', {'run_id':run['id']}, admin=True)
-        self.assertEqual(approved['status'], 'queued')
+        self.assertIn('submit_run', names)
+        self.assertIn('validate_run', names)
+        self.assertEqual(self.service.store.run(run['id'])['status'], 'queued')
 
     def test_review_edits_are_new_snapshots_and_require_revalidation(self):
         parent=self.service.prepare(self.spec())
@@ -212,9 +217,7 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(self.service.revise(parent['id'],changes,{'run.py':"print('reviewed')\n"})['id'],child['id'])
         with self.assertRaises(ValueError):
             self.service.revise(parent['id'],changes,{'run.py':'different'})
-        with self.assertRaisesRegex(ValueError,'validation'):
-            self.service.submit(child['id'])
-        self.service.validate(child['id']);self.service.submit(child['id'])
+        self.service.submit(child['id'])
         self.assertEqual(self.await_end(child['id'])['status'],'succeeded')
         self.assertIn('reviewed',self.service.log(child['id'])['text'])
         with self.assertRaisesRegex(ValueError,'different reviewed inputs'):

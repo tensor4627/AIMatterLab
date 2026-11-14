@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import ts from 'typescript';
 import * as deployment from "../../contracts/compute/deployment.mjs";
+import * as taskFields from '../../contracts/workflows/task-fields.mjs';
 
 import * as draftsOwner0 from "../../frontend/features/workflows/deployment-draft.mjs";
 import * as draftsOwner1 from "../../contracts/compute/deployment-draft.mjs";
@@ -50,8 +51,10 @@ export function deploymentHarness({initial=deploymentFixture(),override,properti
   if(["./ui-diagnostics.mjs","../diagnostics/ui-diagnostics.mjs"].includes(name))return {...diagnostics,deploymentDiagnosticJournal:journal};
   if(name==="../diagnostics/DiagnosticNotice")return {DeploymentDiagnostics:'DeploymentDiagnostics',InlineDiagnostic:'InlineDiagnostic'};
   if(["../../api/worker","../../api/studio","../../ui/presentation/engines"].includes(name))return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),engines:[['pydyn.md','PyDyn MD']]};
-  if(name==="../../api/deployment-client")return {deploymentApi:{read:taskId=>invoke('task.deployment.context',{taskId}),saveDraft:data=>invoke('task.deployment.draft',data)}};
+  if(name==="../../api/deployment-client")return {deploymentApi:{read:taskId=>invoke('task.deployment.context',{taskId}),saveDraft:data=>invoke('task.deployment.draft',data),save:data=>invoke('task.deployment.save',data),prepare:taskId=>invoke('task.deployment.prepare',{taskId})}};
+  if(name==='../../api/task-client')return {taskApi:{execute:data=>invoke('task.execute',data),linkRun:data=>invoke('task.linkRun',data)}};
   if(["../../../contracts/compute/deployment.mjs"].includes(name))return deployment;
+  if(name==='../../../contracts/workflows/task-fields.mjs')return taskFields;
   if(["./deployment-draft.mjs","../../../contracts/compute/deployment-draft.mjs"].includes(name))return drafts;
   if(["./draft-outbox.mjs"].includes(name))return scienceDrafts;
   if(["../../../contracts/compute/deployment-authorization.mjs"].includes(name))return authorization;

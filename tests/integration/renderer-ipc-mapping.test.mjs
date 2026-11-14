@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import ts from 'typescript';
 
 // Static guard for the renderer IPC contract: every channel the preload bridge
 // exposes must be registered by a main-process handler, and every statically
@@ -14,7 +15,7 @@ import {fileURLToPath} from 'node:url';
 // started and no business handler is invoked.
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const files=execSync('git ls-files',{cwd:root,encoding:'utf8'}).split('\n')
+const files=[...new Set(execSync('git ls-files --cached --others --exclude-standard',{cwd:root,encoding:'utf8'}).split('\n'))]
  .filter(name=>/\.(?:mjs|cjs)$/.test(name)&&/^(?:desktop|backend\/main)\//.test(name));
 
 function preloadMethods(){
@@ -35,6 +36,12 @@ function productionChannels(){
  for(const file of files){
   const text=fs.readFileSync(path.join(root,file),'utf8');
   for(const match of text.matchAll(/'([A-Za-z][A-Za-z0-9_.:-]{1,80})'/g))literals.add(match[1]);
+  // Registration tables may use ordinary identifier keys rather than quoted
+  // strings. Only count keys from the actual Object.keys(table) source.
+  if(text.includes('Object.keys(')){
+   const source=ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+   const visit=node=>{if(ts.isVariableDeclaration(node)&&ts.isIdentifier(node.name)&&node.initializer&&ts.isObjectLiteralExpression(node.initializer)&&text.includes('Object.keys('+node.name.text+')'))for(const member of node.initializer.properties){if(member.name&&(ts.isIdentifier(member.name)||ts.isStringLiteral(member.name)))literals.add(member.name.text);}ts.forEachChild(node,visit);};visit(source);
+  }
   for(const match of text.matchAll(/\bhandle\('([^']+)'/g)){
    let name=match[1];
    if(name==='studio:')continue;

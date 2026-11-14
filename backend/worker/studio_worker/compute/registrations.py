@@ -84,7 +84,7 @@ class RegistrationsMixin:
             raise PermissionError("Engine is not authorized")
         if spec["environment_id"] not in policy["environments"]:
             raise PermissionError("Environment is not authorized")
-        if spec["gpu"] not in policy["gpus"]:
+        if spec["engine"] != "installation.check" and spec["gpu"] not in policy["gpus"]:
             raise PermissionError("GPU is not authorized")
         if not 0 < int(spec["max_seconds"]) <= int(policy["max_seconds"]):
             raise PermissionError("Duration exceeds project authorization")

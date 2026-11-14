@@ -107,7 +107,7 @@ print(json.dumps({'python':sys.version.split()[0],'executable':sys.executable,'p
             value=json.loads(run([python,"-c",code],env=target_env(environment),timeout=90).strip().splitlines()[-1])
             if not isinstance(value,dict) or not isinstance(value.get('modules'),dict):raise ValueError('Malformed interpreter receipt')
             version=tuple(int(part) for part in str(value.get('python','')).split('.')[:2])
-            if not value.get('executable') or version<(3,10):raise ValueError('Python 3.10 or newer is required')
+            if not value.get('executable') or version<(3,9):raise ValueError('Python 3.9 or newer is required')
             python_check={'status':'passed','registered_path':python,'observed_path':value['executable'],'version':value['python']}
         except Exception as error:
             python_check={'status':'blocked','reason':'Registered interpreter could not produce a compatible import receipt','error_type':type(error).__name__}

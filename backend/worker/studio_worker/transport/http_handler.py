@@ -50,7 +50,7 @@ def handler_factory(service, tokens, *, dispatch, mcp_tool_call, tools):
                     if operation == "initialize":
                         value = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
                                  "serverInfo": {"name": "gpusampling", "version": "0.18.8"},
-                                 "instructions": "Use existing project authorization. Missing scientific choices must be collected. Prepare drafts for desktop review and stop. Only the desktop user can validate and submit with Confirm and Execute. Scientific jobs continue independently once submitted."}
+                                 "instructions": "Use existing project authorization and the current user delegation. Honor explicit draft-only, no-build, no-run and stop requests. Within that scope, prepare immutable inputs, execute intentional attempts, inspect results, cancel, repair and iterate without repeated approval for ordinary input revisions. Checks report evidence separately from permission and execution; preserve failed, stale and not_run findings truthfully. Serialized bias must be loaded in the actual target environment; explicitly selected incompatible AOTI must fail without fallback. Never automatically resubmit an unknown attempt; inspect the same original run while continuing independent authorized work. Scientific jobs continue independently once submitted."}
                     elif operation == "resources/list":
                         value = {"resources": []}
                     elif operation == "resources/templates/list":

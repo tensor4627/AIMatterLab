@@ -16,11 +16,11 @@ export class WorkerClient {
   const transport={request,detach};this.serviceTransport=transport;
   // These capabilities protect the local provider proxy only. Remote worker
   // admin/MCP credentials never cross the authenticated SSH machine channel.
-  this.connection={url:'http://127.0.0.1',tokens:{mcp:randomBytes(32).toString('hex')},health:structuredClone(health),transport:'ssh-terminal'};
+  this.connection={url:'http://127.0.0.1',tokens:{mcp:randomBytes(32).toString('hex')},health:structuredClone(health),transport:identity.version===3&&identity.connectionId?'ssh-connection':'ssh-terminal'};
   this.identity=structuredClone(identity);this.connectionTarget=structuredClone(target);this.connectedSource=source;
   this.relay={kill:()=>{try{detach?.();}catch{}}};
   const check=()=>{if(this.serviceTransport!==transport||this.connectionEpoch!==epoch)throw Error('ssh_service_context_changed');};
-   try{const observed=await this.forward('GET','/api/health',undefined,false,10000);check();const actual=observed.data,host=actual?.hostIdentity;if(observed.status!==200||actual?.name!==health.name||['root','runtime','execution_policy','port'].some(key=>actual?.[key]!==health[key])||(actual?.runtime_id||actual?.runtimeId)!==identity.runtimeId||['hostname','uid','machineId'].some(key=>host?.[key]!==identity.hostIdentity[key]))throw Error('ssh_service_identity_changed');const exposed=await this.exposeTools({...actual,transport:'ssh-terminal'});check();return exposed;}
+   try{const observed=await this.forward('GET','/api/health',undefined,false,10000);check();const actual=observed.data,host=actual?.hostIdentity;if(observed.status!==200||actual?.name!==health.name||['root','runtime','execution_policy','port'].some(key=>actual?.[key]!==health[key])||(actual?.runtime_id||actual?.runtimeId)!==identity.runtimeId||['hostname','uid','machineId'].some(key=>host?.[key]!==identity.hostIdentity[key]))throw Error('ssh_service_identity_changed');const exposed=await this.exposeTools({...actual,transport:this.connection.transport});check();return exposed;}
   catch(error){if(this.serviceTransport===transport)this.close();throw error;}
  }
  async connect(settings,source){

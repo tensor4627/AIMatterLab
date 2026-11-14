@@ -39,10 +39,13 @@ class ClusterLifecycle(unittest.TestCase):
     def test_prepare_no_ssh_side_effect_private_fields_absent(self):
         r=self.cluster.prepare(self.spec());self.assertEqual(r["status"],"draft");self.assertEqual(r["scientific_validation"]["status"],"not_run");self.assertFalse(FakeSSH.calls)
         for k in ("target","port","identity_file"):self.assertNotIn(k,r["cluster"])
-    def test_mcp_cannot_register_authorize_revise_submit(self):
-        for target in ("/api/clusters","/api/cluster/profile","/api/cluster/submit","/api/cluster/validate","/api/cluster/revise","/api/cluster/cancel"):
+    def test_mcp_cannot_register_authorize_or_revise_but_can_execute_authorized_snapshot(self):
+        for target in ("/api/clusters","/api/cluster/profile","/api/cluster/revise"):
             with self.assertRaises(PermissionError):dispatch(self.service,"POST",target,{},False)
-        names=[t["name"] for t in tools()];self.assertIn("present_task",names);self.assertIn("prepare_cluster_run",names);self.assertNotIn("submit_cluster_run",names)
+        names=[t["name"] for t in tools()];self.assertIn("present_task",names);self.assertIn("prepare_cluster_run",names);self.assertIn("submit_cluster_run",names)
+        run=self.cluster.prepare(self.spec())
+        submitted=dispatch(self.service,'POST','/api/cluster/submit',{'run_id':run['id']},False)
+        self.assertEqual(submitted['status'],'queued')
 
     def test_private_auth_and_tunnel_endpoints_are_admin_only_not_mcp_tools(self):
         from studio_worker.server import TOOL_ROUTES
@@ -351,6 +354,40 @@ class ClusterLifecycle(unittest.TestCase):
     def test_cancel_requires_matching_identity(self):
         r=self.submitted();FakeSSH.wrong_name=True
         with self.assertRaises(ValueError):self.cluster.cancel(r["id"])
+
+    def test_cancellation_intent_survives_a_lost_remote_acknowledgement(self):
+        run=self.submitted();owner=self
+        class LostCancellation(FakeSSH):
+            def run(self,script,data=None,timeout=40):
+                if script.startswith('bkill '):
+                    owner.assertTrue(owner.cluster.raw(run['id'])['cancel_requested'])
+                    raise ConnectionError('cancel acknowledgement lost')
+                return super().run(script,data,timeout)
+        self.cluster.transport=LostCancellation
+        with self.assertRaisesRegex(ConnectionError,'acknowledgement lost'):self.cluster.cancel(run['id'])
+        persisted=self.cluster.raw(run['id'])
+        self.assertTrue(persisted['cancel_requested'])
+        self.assertEqual(persisted['cancellation']['status'],'unconfirmed')
+        self.assertNotIn(persisted['status'],('cancelled','succeeded'))
+
+    def test_cancellation_is_durable_before_the_first_remote_status_query(self):
+        run=self.submitted()
+        def unavailable(_identifier):
+            self.assertTrue(self.cluster.raw(run['id'])['cancel_requested'])
+            raise ConnectionError('status query interrupted')
+        self.cluster.poll=unavailable
+        with self.assertRaisesRegex(ConnectionError,'status query interrupted'):self.cluster.cancel(run['id'])
+        actual=self.cluster.raw(run['id']);self.assertTrue(actual['cancel_requested']);self.assertFalse(actual['cancellation']['signal_sent'])
+
+    def test_exit_zero_and_failed_scientific_findings_are_independent(self):
+        run=self.submitted()
+        class Completed(FakeSSH):
+            def run(self,script,data=None,timeout=40):
+                return '__STUDIO_JSON__'+json.dumps({'job_id':'123','scheduler_state':'DONE','identity_verified':True,'exit':{'exit_code':0},'validation':{'status':'failed','message':'scientific warning'}})
+        self.cluster.transport=Completed
+        result=self.cluster.poll(run['id'])
+        self.assertEqual(result['status'],'succeeded')
+        self.assertEqual(result['scientific_validation']['status'],'failed')
         self.assertFalse(any("bkill 123" in text for text,_ in FakeSSH.calls))
     def test_receipts_persist_across_reopen(self):
         r=self.submitted();self.assertEqual(r["status"],"queued");r=self.cluster.poll(r["id"]);self.assertEqual(r["status"],"running")

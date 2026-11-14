@@ -70,7 +70,7 @@ class PyDynImportGate(unittest.TestCase):
             self.assertEqual(result["validation"]["status"], "failed")
             self.assertIn("pydyn", result["validation"]["message"])
             self.assertIn("source repositories", result["validation"]["message"])
-            with self.assertRaisesRegex(ValueError, "Successful validation"):
+            with self.assertRaisesRegex(ValueError, "Required PyDyn runtime imports failed"):
                 self.service.submit(result["id"])
             self.service.tick()
             launch.assert_not_called()

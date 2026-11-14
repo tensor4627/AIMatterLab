@@ -46,16 +46,16 @@ test('Foreign task results and native reasoning plans cannot replace a conversat
  records.event({provider:'codex',method:'turn/plan/updated',params:{threadId:'thread',plan:[{step:'internal reasoning',status:'completed'}]}});assert.equal(records.read(task.id).steps[0].id,'md');
  present(records,{id:'foreign'},{md:{temperature:900}});assert.equal(records.read(task.id).parameters.md.temperature,300);
 });
-test('Execution rechecks reviewed inputs after validation, before any submission',async()=>{
+test('Execution preserves the captured run while subsequent model changes remain an editable draft',async()=>{
  const {records}=fixture(),task=reviewed(records),calls=[];
- const worker={request:async(_method,route)=>{calls.push(route);if(route.endsWith('status'))return {id:'run',project_id:'project',status:'draft'};present(records,task,{md:{temperature:360,structure_file:'/fixture/model.xyz'}});return {validation:{status:'passed'}};}};
- await assert.rejects(executeTask(records,worker,{taskId:task.id,artifactId:'run'}),/Review/);assert.equal(calls.some(c=>c.endsWith('submit')),false);
+ const worker={request:async(_method,route)=>{calls.push(route);if(route.endsWith('status'))return {id:'run',project_id:'project',status:'draft'};if(route.endsWith('validate')){present(records,task,{md:{temperature:360,structure_file:'/fixture/model.xyz'}});return {validation:{status:'passed'}};}return {id:'run',project_id:'project',status:'queued'};}};
+ const result=await executeTask(records,worker,{runChecks:true,taskId:task.id,artifactId:'run'});assert.equal(result.status,'queued');assert.equal(records.read(task.id).parameters.md.temperature,360);assert.equal(calls.filter(c=>c.endsWith('submit')).length,1);
 });
 test('Unconfirmed submission persists the original identity and cannot be automatically resubmitted',async()=>{
  const {records}=fixture(),task=reviewed(records),calls=[];
  const worker={request:async(_method,route)=>{calls.push(route);if(route.endsWith('status'))return {id:'run',project_id:'project',status:'draft'};if(route.endsWith('validate'))return {validation:{status:'passed'}};throw Error('response lost');}};
- await assert.rejects(executeTask(records,worker,{taskId:task.id,artifactId:'run'}),/response lost/);assert.equal(records.read(task.id).execution.artifactId,'run');assert.equal(records.read(task.id).execution.phase,'unknown');
- await assert.rejects(executeTask(records,worker,{taskId:task.id,artifactId:'run'}),/Review/);assert.equal(calls.filter(c=>c.endsWith('submit')).length,1);
+ await assert.rejects(executeTask(records,worker,{runChecks:true,taskId:task.id,artifactId:'run'}),/response lost/);assert.equal(records.read(task.id).execution.artifactId,'run');assert.equal(records.read(task.id).execution.phase,'unknown');
+ await assert.rejects(executeTask(records,worker,{runChecks:true,taskId:task.id,artifactId:'run'}),/pending|never resubmit unknown/);assert.equal(calls.filter(c=>c.endsWith('submit')).length,1);
 });
 
 test('Read-only run queries cannot certify a newly prepared module for current parameters',()=>{

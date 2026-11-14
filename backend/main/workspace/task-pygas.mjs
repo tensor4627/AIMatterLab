@@ -12,7 +12,6 @@ function taskContext(records,value){
  if(!value||typeof value.taskId!=='string')throw Error('Select the conversation-owned task');
  const task=records.read(value.taskId);
  if(!task.threadId||records.deleted(task.provider,task.threadId)||records.bound(task.provider,task.threadId)?.id!==task.id)throw Error('Workflow is not bound to its conversation');
- if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('Reconcile the execution request before changing the CV workflow');
  const projectId=task.authoring?.projectId||task.projectId,environmentId=task.authoring?.environmentId,inputRoot=task.authoring?.inputRoot;
  if(typeof projectId!=='string'||typeof environmentId!=='string'||typeof inputRoot!=='string')throw Error('Connect the worker and prepare this conversation workspace first');
  const files=Array.isArray(task.parameters?.files)?task.parameters.files:[];
@@ -25,7 +24,6 @@ function taskContext(records,value){
 export function invalidateComposition(records,id){
  if(operations.get(records)?.get(id)?.writePending)throw Error('A CV graph/source save is in progress; wait before starting another write');
  const task=records.read(id);
- if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('Reconcile execution before editing');
  task.parameterRevision=(task.parameterRevision||0)+1;task.review={status:'not_run',summary:'CV/bias definition changed; review the saved input revision again'};
  if(task.deployment?.prepared){task.deployment={...task.deployment};delete task.deployment.prepared;}
  if(task.composition)task.composition={...task.composition,status:'blocked',render_blocked:true,reasons:['A graph/source write is pending; reload the saved pair before review']};

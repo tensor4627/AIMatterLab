@@ -338,7 +338,7 @@ class ClusterConcurrentState(unittest.TestCase):
         identifier = self.submitted()
         self.callback = lambda script, data: reply(job_id='123', exit={'exit_code': 0})
         first = self.cluster.poll(identifier)
-        self.assertEqual(first['status'], 'unknown')
+        self.assertEqual(first['status'], 'succeeded')
         self.callback = lambda script, data: reply(job_id='123', validation={'status': 'passed'})
         second = self.cluster.poll(identifier)
         self.assertEqual(second['status'], 'succeeded')

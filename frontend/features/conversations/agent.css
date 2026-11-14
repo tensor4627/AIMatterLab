@@ -1,4 +1,10 @@
 /* Agent conversation chrome: primary choices stay visible; rare setup is disclosed. */
+.agent-panel .agent-top-surface .agent-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;height:auto;min-height:48px;gap:8px;flex-shrink:0;align-items:center}
+.agent-panel .agent-top-surface .agent-heading-title{grid-column:1;grid-row:1;max-width:100%;line-height:1.5}
+.agent-panel .agent-top-surface .agent-header-actions{grid-column:2;grid-row:1;margin-left:0}
+.agent-panel .agent-top-surface .agent-collapsed-summary{display:block;grid-column:1/-1;grid-row:2;order:initial;flex:initial;max-width:100%;padding-top:0;line-height:1.5}
+.agent-panel .agent-tool-alert{flex-wrap:wrap;min-width:0;line-height:1.55}
+.agent-panel .agent-tool-alert>span{min-width:0;overflow-wrap:anywhere}
 .agent-header-actions{display:flex;align-items:center;gap:3px}
 .agent-primary{display:grid;gap:10px;padding:10px 13px}
 .agent-primary .agent-provider{margin:0;padding:0;display:flex;align-items:end;gap:8px}

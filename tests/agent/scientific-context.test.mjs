@@ -24,7 +24,7 @@ test('Selected runtime facts are attached once after real acknowledgment; stale 
  const context={status:'already_loaded',routes:[],attach:false,attachments:[],text:''};const guide={status:'observed',receipt:'actualreceipt',facts:{engine:'gpumd.md',environment_id:'selected',python:{version:'3.12'},executables:{python:'/selected/python'},file_observations:[{path:'DO_NOT_ATTACH_LONG_WATCHES'}],source_build_relation:{status:'not_run'}}};
  const first=manager.mergeRuntime(key,provider,context,guide,selection);assert.equal(first.attach,true);assert.equal(first.status,'passed');assert(!first.text.includes('DO_NOT_ATTACH_LONG_WATCHES'));assert.match(first.text,/source_build_relation/);
  assert.equal(manager.mergeRuntime(key,provider,context,guide,selection).attach,true);manager.accept(key,first);assert.equal(manager.mergeRuntime(key,provider,context,guide,selection).attach,false);
- const stale=manager.mergeRuntime(key,provider,context,{status:'stale',reason:'selected module changed'},selection);assert.equal(stale.attach,true);assert.match(stale.text,/targeted selected-engine probe/);assert(!stale.text.includes('/selected/python'));
+ const stale=manager.mergeRuntime(key,provider,context,{status:'stale',reason:'selected module changed'},selection);assert.equal(stale.attach,true);assert.match(stale.text,/inspect or repair the selected engine within the current delegation/);assert(!stale.text.includes('/selected/python'));
 });
 
 // Portable wording from the reproduced native authoring turn; no local paths/IDs/models.

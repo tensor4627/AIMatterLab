@@ -323,10 +323,10 @@ class LaunchProtocol(unittest.TestCase):
         self.assertTrue((self.directory / "launch.json").is_file())
         self.assertEqual(self.supervise(), 0, "A late supervisor cannot start the cancelled child")
 
-    def test_recovery_is_desktop_only_and_legacy_missing_files_are_not_proof(self):
+    def test_authorized_agent_recovery_still_requires_actual_legacy_launch_proof(self):
         self.claimed()
-        with self.assertRaises(PermissionError):
-            dispatch(self.owner, "POST", "/api/run/reconcile", {"run_id": "run"}, admin=False)
+        checked=dispatch(self.owner, "POST", "/api/run/reconcile", {"run_id": "run"}, admin=False)
+        self.assertEqual(checked["status"],"unknown")
         result = self.owner.resolve_unknown("run")
         self.assertEqual(result["status"], "unknown")
         self.assertEqual(result["reconciliation"]["status"], "blocked")

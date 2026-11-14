@@ -13,6 +13,21 @@ test('fixed source manifest matches runtime identity and carries no runtime data
  const result=prepareSshServiceResources(root,{profileId:'owned-profile'});assert.equal(result.payload.expected_runtime_id,bundledWorkerRuntimeId(root));assert.equal(result.source,'# inert ssh_service_bootstrap.py\n');assert(!JSON.stringify(result).includes('PRIVATE NEVER TRANSFER'));assert(result.payload.port>=20000&&result.payload.port<50000);
  for(const file of result.payload.files)assert.equal(createHash('sha256').update(Buffer.from(file.base64,'base64')).digest('hex'),file.sha256);
 });
+
+test('a registered prior runtime uses cache-only verification without reconstructing old shipped bytes',()=>{
+ const source=path.resolve('backend/worker'),options={profileId:'owned-profile',transportSource:path.resolve('desktop/platform/terminal-service/python')},current=prepareSshServiceResources(source,options),legacy=prepareSshServiceResources(source,{...options,reuseOnly:true,expectedRuntimeId:'62034ec6cfc1428aaa4d'});
+ assert.equal(legacy.payload.expected_runtime_id,'62034ec6cfc1428aaa4d');assert.deepEqual(legacy.payload.files,[]);assert.equal(legacy.payload.runtime_manifest_sha256,undefined);assert(current.payload.files.length>5);assert.equal(legacy.transport.sha256,current.transport.sha256);
+ assert.throws(()=>prepareSshServiceResources(source,{...options,expectedRuntimeId:'f'.repeat(20)}),/resources_changed/);
+ assert.throws(()=>prepareSshServiceResources(source,{...options,reuseOnly:true,expectedRuntimeId:'f'.repeat(20),expectedRuntimeManifestSha256:'a'.repeat(64)}),/resources_invalid/);
+});
+
+test('current-runtime reconciliation computes the full shipped manifest but sends no worker files',()=>{
+ const source=path.resolve('backend/worker'),options={profileId:'owned-profile',port:25252,transportSource:path.resolve('desktop/platform/terminal-service/python')},shipped=prepareSshServiceResources(source,options),cached=prepareSshServiceResources(source,{...options,reuseOnly:true,verifiedCacheOnly:true});
+ const digest=createHash('sha256');for(const row of shipped.payload.files){digest.update(row.path);digest.update(Buffer.from(row.base64,'base64'));}const expected=digest.digest('hex');
+ assert.deepEqual(cached.payload.files,[]);assert.equal(cached.payload.expected_runtime_id,shipped.payload.expected_runtime_id);assert.equal(cached.payload.runtime_manifest_sha256,expected);assert.equal(cached.payload.port,25252);
+ for(const changed of [{reuseOnly:false},{expectedRuntimeId:'a'.repeat(20)},{expectedRuntimeManifestSha256:'a'.repeat(64)},{transportSource:undefined}])assert.throws(()=>prepareSshServiceResources(source,{...options,reuseOnly:true,verifiedCacheOnly:true,...changed}),/resources_invalid/);
+});
+
 test('missing worker entry fails instead of sending a partial install',t=>{const root=fixture(t);fs.unlinkSync(path.join(root,'runtime_resources.py'));assert.throws(()=>prepareSshServiceResources(root,{profileId:'owned-profile'}),/resources_incomplete/);});
 test('linked source trees and arbitrary profile paths cannot enter the trusted bundle',t=>{
  const root=fixture(t);assert.throws(()=>prepareSshServiceResources(root,{profileId:'../escape'}),/resources_invalid/);const alias=path.join(root,'linked');fs.symlinkSync(path.join(root,'studio_worker'),alias,'junction');assert.throws(()=>prepareSshServiceResources(root,{profileId:'owned-profile'}),/resources_invalid/);

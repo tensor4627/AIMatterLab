@@ -89,6 +89,21 @@ class SchedulerReconcileIsolation(unittest.TestCase):
         self.addCleanup(identity_patch.stop)
         return spawned
 
+    def test_cpu_check_does_not_wait_for_busy_gpu_zero(self):
+        self.scheduler.store.put('project',{'id':'project','policy':{'max_concurrent':2}})
+        self.add('gpu-active',project='other')
+        directory=self.add_queued('cpu')
+        self.scheduler.store.update(self.scheduler.store.run('cpu'),engine='installation.check')
+        spawned=self.patch_spawn()
+        self.scheduler.dispatch()
+        self.assertEqual(len(spawned),1)
+        self.assertEqual(json.loads((directory/'launch.json').read_text())['environment']['CUDA_VISIBLE_DEVICES'],'')
+
+    def test_legacy_gpu_zero_still_waits_for_busy_gpu_zero(self):
+        self.add('gpu-active',project='other');self.add_queued('gpu')
+        spawned=self.patch_spawn();self.scheduler.dispatch()
+        self.assertEqual(spawned,[])
+
     def test_corrupt_receipt_does_not_stop_other_run_reconciliation(self):
         first = self.add("a", corrupt=True)
         second = self.add("b", receipt={"exit_code": 0, "cancelled": False})

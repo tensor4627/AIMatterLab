@@ -185,27 +185,43 @@ class ToolWorkflowLifecycle(unittest.TestCase):
             self.assertEqual(self.execute(recovered)['execution']['steps'][0]['run_id'], value['execution']['steps'][0]['run_id'])
             self.complete(recovered)
 
-    def test_stale_environment_target_and_installed_source_block_new_steps_without_grants(self):
+    def test_benign_environment_drift_warns_and_new_step_snapshots_current_authorized_registration(self):
         before = copy.deepcopy(self.service.store.list('project'))
         bad = copy.deepcopy(self.arguments); bad['target']['project_id'] = 'other'
         with self.assertRaises(PermissionError): self.api.create(bad)
         value = self.create()
         environment = self.service.store.get('environment', 'python'); environment['name'] = 'Explicit changed registration'; self.service.register_environment(environment)
-        stale = self.call('status', {'execution_id': value['execution']['id']})
-        self.assertEqual(stale['execution']['status'], 'stale'); self.assertFalse(any(item['eligible'] for item in stale['execution']['steps']))
-        with self.assertRaises(PermissionError): self.prepare(stale)
-        self.assertEqual(self.service.store.list('project'), before); self.assertEqual(len(self.service.store.runs()), self.baseline_runs)
+        current = self.call('status', {'execution_id': value['execution']['id']})
+        self.assertEqual(current['execution']['status'], 'planned'); self.assertTrue(current['execution']['steps'][0]['eligible'])
+        self.assertEqual(current['execution']['steps'][0]['check_findings'][0]['code'],'configuration_environment_changed')
+        prepared=self.prepare(current);run=self.service.store.run(prepared['execution']['steps'][0]['run_id'])
+        self.assertEqual(run['environment_snapshot']['name'],'Explicit changed registration')
+        self.assertNotEqual(prepared['execution']['steps'][0]['runtime_observation']['environment_sha256'],value['execution']['snapshot']['steps'][0]['configuration']['environment_sha256'])
+        self.assertEqual(self.service.store.list('project'), before); self.assertEqual(len(self.service.store.runs()), self.baseline_runs+1)
 
-    def test_real_output_tamper_blocks_downstream_and_mirror_never_supplies_job_state(self):
+    def test_failed_output_findings_remain_failed_while_completed_process_can_feed_independent_fixed_step(self):
         value = self.create(); manifest = Path(value['workflow']['root']) / 'workflow.json'; manifest.write_text('{"status":"passed","run_ids":["fake"]}')
         value = self.call('read', {'execution_id': value['execution']['id']}); self.assertEqual(value['execution']['status'], 'planned')
         value = self.complete(self.execute(self.prepare(value)))
         run = self.service.store.run(value['execution']['steps'][0]['run_id'])
         (Path(run['directory']) / 'results/smoke-result.json').write_text('{"status":"passed","case":"worker","pid":1}')
         stale = self.call('status', {'execution_id': value['execution']['id']})
-        self.assertEqual(stale['execution']['status'], 'stale'); self.assertIn('Reference output failed', stale['execution']['steps'][0]['reason'])
-        with self.assertRaises(PermissionError): self.prepare(stale, 'second')
-        self.assertEqual(len(self.service.store.runs()), self.baseline_runs + 1)
+        self.assertEqual(stale['execution']['steps'][0]['status'], 'completed'); self.assertEqual(stale['execution']['steps'][0]['run_status'],'succeeded');self.assertEqual(stale['execution']['steps'][0]['evidence']['status'],'failed')
+        self.assertIn('Reference output failed', stale['execution']['steps'][0]['reason'])
+        self.assertTrue(stale['execution']['steps'][1]['eligible']);self.prepare(stale, 'second')
+        self.assertEqual(len(self.service.store.runs()), self.baseline_runs + 2)
+
+    def test_benign_policy_change_does_not_revoke_authorized_configuration(self):
+        value=self.create();project=self.service.store.get('project','compute');project['policy']['max_concurrent']=2;self.service.register_project(project)
+        current=self.call('status',{'execution_id':value['execution']['id']});self.assertTrue(current['execution']['steps'][0]['eligible'])
+        prepared=self.prepare(current);self.assertEqual(prepared['execution']['steps'][0]['status'],'prepared')
+        self.assertEqual(prepared['execution']['steps'][0]['check_findings'][0]['status'],'warning')
+
+    def test_explicit_engine_authorization_revocation_cannot_create_an_attempt(self):
+        value=self.create();project=self.service.store.get('project','compute');project['policy']['engines']=[];self.service.register_project(project)
+        current=self.call('status',{'execution_id':value['execution']['id']});self.assertEqual(current['execution']['status'],'stale')
+        with self.assertRaises(PermissionError):self.prepare(current)
+        self.assertEqual(len(self.service.store.runs()),self.baseline_runs)
 
     def test_explicit_project_grant_change_blocks_prepared_step_without_submission(self):
         value = self.prepare(self.create()); run_id = value['execution']['steps'][0]['run_id']
@@ -238,11 +254,12 @@ class ToolWorkflowLifecycle(unittest.TestCase):
                 changed = self.service.store.get('environment', 'python'); changed['name'] = 'Changed during validation'
                 self.service.register_environment(changed)
             return result
-        with patch.object(Adapter, 'validate', validation), patch.object(self.service, 'submit', side_effect=AssertionError('Changed target cannot submit')):
-            with self.assertRaises(ValueError): self.execute(value)
+        with patch.object(Adapter, 'validate', validation):
+            submitted=self.execute(value)
         run = self.service.store.run(value['execution']['steps'][0]['run_id'])
-        self.assertEqual(run['status'], 'draft'); self.assertEqual(run['validation']['status'], 'failed')
-        self.assertEqual(self.call('status', {'execution_id': value['execution']['id']})['execution']['status'], 'stale')
+        self.assertEqual(run['status'], 'queued'); self.assertEqual(run['validation']['status'], 'passed')
+        self.assertEqual(run['environment_snapshot']['name'],'Existing system interpreter fixture')
+        self.assertEqual(submitted['execution']['steps'][0]['check_findings'][0]['code'],'configuration_environment_changed')
 
     def test_linked_workspace_workflow_parent_cannot_redirect_new_directories(self):
         outside = self.root / 'outside'; outside.mkdir()

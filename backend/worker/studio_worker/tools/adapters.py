@@ -42,6 +42,16 @@ def process_env(environment, gpu=None):
     return env
 
 
+def allocated_gpu(run):
+    """Legacy GPU ordinals remain unchanged; fixed CPU checks reserve no GPU."""
+    return None if run.get("engine") == "installation.check" else run.get("gpu")
+
+
+def run_process_env(run):
+    gpu = allocated_gpu(run)
+    return process_env(run["environment_snapshot"], "" if run.get("engine") == "installation.check" else gpu)
+
+
 class Adapter:
     def __init__(self, engine):
         if engine not in SUPPORTED_ENGINES:
@@ -317,14 +327,16 @@ class Adapter:
             checked.append("temperature")
         return {"status":"passed" if checked else "not_run", "checked_fields":checked, "scope":"declared simple GPUMD input controls only"}
 
-    def validate(self, spec, environment, directory, *, probe_report=None, cell_derivative_contract=None):
+    def validate(self, spec, environment, directory, *, probe_report=None, cell_derivative_contract=None, execution_only=False):
         # A provenance-only failure may be cached by local Service; the execution
         # gate must inspect the native loader again for every new validation.
         from studio_worker.tools.derivative_selection import validate_controls
-        validate_controls(spec.get("parameters", {}), self.engine)
+        if not execution_only:
+            validate_controls(spec.get("parameters", {}), self.engine)
         runtime = self.runtime_check(environment)
         p, directory = spec.get("parameters", {}), Path(directory)
-        self.input_contract(spec,directory)
+        if not execution_only:
+            self.input_contract(spec,directory)
         if self.engine == "installation.check":
             self.prepare(spec, environment)
             return {"status": "passed", "scientific_status": "not_run", "scope": "Fixed installation input contract; actual worker/reference run pending; not a PyDyn check"}
@@ -415,6 +427,8 @@ class Adapter:
                     raise ValueError("Native sampling probe belongs to a different engine/interpreter")
                 if observed.get("pydyn_sampling") is not True:
                     raise ValueError("Selected environment has no pydyn.sampling integration")
+            if execution_only:
+                return {"status":"passed", "artifact_status":"passed", "scientific_status":"not_run", "scope":"Serialized artifact load and actual target integration only; numerical findings are independent", "native_runtime":runtime}
             derivatives = {"status":"not_run", "reason":"OPES stateful finite-difference validation is not implemented; only serialized ABI/state checks were performed"} if p["mode"] == "opes" else None
             if p["mode"] != "opes" and not p["bias_file"].endswith(".pt2"):
                 payload = {**p, "engine":self.engine, "bias_file":str(directory / p["bias_file"]), "structure_file":str(directory / p["structure_file"]), "_studio_cell_contract":cell_derivative_contract}
@@ -447,7 +461,25 @@ class Adapter:
             return True
         return False
 
-    def collect(self, directory):
-        from studio_worker.infrastructure.util import digest
-        return [{"name": str(p.relative_to(directory)), "size": p.stat().st_size, "sha256": digest(p)}
-                for p in sorted(Path(directory).rglob("*")) if p.is_file() and not p.is_symlink()]
+    def collect(self, directory, hash_names=None):
+        from studio_worker.infrastructure.util import stable_file_snapshot
+        root = Path(directory).resolve()
+        if hash_names is not None and (not isinstance(hash_names,list) or len(hash_names)>100 or any(not isinstance(name,str) for name in hash_names)):
+            raise ValueError("Select at most 100 explicit artifact names for hash snapshots")
+        selected = set(hash_names or [])
+        assets = []
+        for path in sorted(root.rglob("*")):
+            try:
+                if path.is_symlink() or not path.is_file() or root not in path.resolve().parents:
+                    continue
+                name = str(path.relative_to(root))
+                info = path.stat()
+                metadata = {"name":name, "size":info.st_size, "mtime_ns":info.st_mtime_ns, "hash_status":"not_run"}
+                if name in selected:
+                    metadata.update(stable_file_snapshot(path))
+                assets.append(metadata)
+            except FileNotFoundError:
+                continue  # An active producer may remove an output between stats.
+        if selected - {asset['name'] for asset in assets}:
+            raise ValueError("Selected artifact unavailable for a stable hash snapshot")
+        return assets

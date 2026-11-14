@@ -34,9 +34,9 @@ test('Missing or foreign save acknowledgements never discard pending inputs',asy
 test('Outbox storage errors and prototype keys never silently change a draft',()=>{
  const box=new DraftOutbox('t',{getItem:()=>null,setItem:()=>{throw Error('quota');},removeItem:()=>{}});assert.throws(()=>box.stage('temperature',300),/quota/);assert.equal(box.pendingCount,0);assert.throws(()=>box.stage('__proto__.value',1));assert.equal({}.value,undefined);
 });
-test('Review instructions identify the actual gate, and unknown submission locks edits',()=>{
- const base={worker:true,saving:false,saveError:false,missing:[],task:{parameters:{temperature:300},parameterRevision:1,review:{status:'ready',parameterRevision:1,artifactIds:['r']}},artifact:{id:'r'},run:{status:'draft'}};
- assert.equal(reviewState(base).canExecute,true);assert.match(reviewState({...base,missing:['structure']}).reason,/1/);assert.equal(reviewState({...base,saveError:true}).canExecute,false);assert.equal(reviewState({...base,task:{...base.task,execution:{phase:'unknown'}}}).locked,true);assert.equal(reviewState({...base,task:{...base.task,review:{...base.task.review,parameterRevision:0}}}).canExecute,false);
+test('Missing inputs block execution while stale review and unknown submissions leave the next draft editable',()=>{
+ const base={worker:true,saving:false,saveError:false,missing:[],task:{parameters:{temperature:300},parameterRevision:1,review:{status:'ready',parameterRevision:1,artifactIds:['r']}},artifact:{id:'r',preparedRevision:1},run:{id:'r',status:'draft'}};
+ assert.equal(reviewState(base).canExecute,true);assert.match(reviewState({...base,missing:['structure']}).reason,/1/);assert.equal(reviewState({...base,saveError:true}).canExecute,false);const unknown=reviewState({...base,task:{...base.task,execution:{phase:'unknown'}}});assert.equal(unknown.locked,false);assert.equal(unknown.canExecute,false);assert.equal(reviewState({...base,task:{...base.task,review:{...base.task.review,parameterRevision:0}}}).canExecute,true);
 });
 
 test('Tool cards use actual failure flags and link only successfully persisted artifacts',async()=>{
@@ -59,5 +59,5 @@ test('Current draft stage is independent of the previous completed run',()=>{
  const reviewed={...base,task:{...base.task,review:{status:'ready',parameterRevision:3}}};assert.equal(reviewState(reviewed).stage,3);
  const current={...reviewed,artifact:{id:'new',preparedRevision:3},run:{id:'new',status:'running'}};assert.equal(reviewState(current).stage,4);assert.match(reviewState(current).reason,/running/);
  assert.equal(reviewState({...current,artifact:{id:'historical'}}).runRevision,null);assert.equal(reviewState({...current,artifact:{id:'historical'}}).stage,3);
- assert.equal(reviewState({...base,task:{...base.task,execution:{phase:'unknown'}}}).locked,true);
+ assert.equal(reviewState({...base,task:{...base.task,execution:{phase:'unknown'}}}).locked,false);
 });

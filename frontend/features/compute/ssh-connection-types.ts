@@ -1,0 +1,68 @@
+export type SshConnectionState={schemaVersion:2;connectionId:string;profileId:string;profileVersion:number;loginRequestId?:string;status:'authenticating'|'authenticated'|'unavailable'|'closed'|'requires_review'|'unsupported';authentication:'pending'|'verified'|'not_observed'|'lost';capabilities:{multiplex:boolean};terminalSessionIds:string[];serviceIds:string[];revision:number;error?:{code:string}};
+export type IndependentSshService=import('../../../contracts/dto/compute').SshServiceState&{conversation?:import('../../../contracts/dto/agent').Conversation};
+export function verifiedSshService(value:unknown,connectionId:string,attemptId?:string):value is IndependentSshService {
+ const v=value as IndependentSshService;
+ return !!v&&v.schemaVersion===2&&['idle','connecting','connected','disconnecting','disconnected','failed','unknown'].includes(v.status)&&(v.connectionId===connectionId||!v.connectionId&&v.status==='disconnected'&&!attemptId)&&(!attemptId||v.attemptId===attemptId);
+}
+export function verifiedSshConnection(value:unknown):value is SshConnectionState {const v=value as SshConnectionState;return !!v&&v.schemaVersion===2&&typeof v.connectionId==='string'&&!!v.connectionId&&typeof v.profileId==='string'&&Number.isSafeInteger(v.profileVersion)&&Number.isSafeInteger(v.revision)&&['authenticating','authenticated','unavailable','closed','requires_review','unsupported'].includes(v.status)&&['pending','verified','not_observed','lost'].includes(v.authentication)&&typeof v.capabilities?.multiplex==='boolean'&&Array.isArray(v.terminalSessionIds)&&v.terminalSessionIds.every(id=>typeof id==='string')&&Array.isArray(v.serviceIds)&&v.serviceIds.every(id=>typeof id==='string');}
+const connectionErrors:Record<string,string>={
+ terminal_login_unknown:'登录完成请求的结果尚未确认。正在只读查看原登录状态，不会重新发送登录请求。',
+ terminal_unavailable:'无法读取本机终端通道。请刷新原连接查看状态；原登录不会自动重发。',
+ terminal_invalid_request:'原登录请求与当前通道不匹配。请刷新并核对原连接。',
+ terminal_recovery_required:'原登录状态需要恢复。请查看原终端并刷新连接，不会自动另开登录。',
+ terminal_session_limit:'终端数量已达上限。请先关闭不再使用的终端，再继续原登录。',
+ terminal_session_exited:'此终端进程已退出。请核对原输出和连接状态。',
+ terminal_operation_failed:'终端操作未完成。请查看原终端并刷新连接状态。',
+ terminal_owner_changed:'终端操作权已变化。请刷新原终端后再操作。',
+ terminal_context_changed:'当前对话或计算资源已变化，已停止原操作。请核对后明确继续。',
+ terminal_human_owned:'终端操作权已变化。请先核对由谁操作当前终端。',
+ terminal_scope_denied:'此终端不属于当前对话的授权范围。请核对后重新交接。',
+ terminal_encryption_unavailable:'系统凭据存储不可用，无法恢复此终端通道。连接设置保留。',
+ terminal_saved_connection_changed:'保存的连接已变化。请核对原连接的保存版本后继续。',
+ terminal_route_review_required:'请编辑原连接，核对登录路由后再继续。',
+ terminal_unknown_operation:'此终端版本不支持请求的操作。请核对运行版本。',
+ terminal_service_active:'当前服务仍在使用，请先核对或停止对应服务后再修改。',
+ terminal_service_unknown:'作业服务操作结果尚未确认。请核对原服务状态，不会自动重发。',
+ terminal_service_unavailable:'此连接的作业服务尚不可用。请打开作业服务设置核对登记和状态。',
+ terminal_service_changed:'作业服务通道已变化。请核对原连接的服务状态。',
+ terminal_service_failed:'作业服务检查失败。请在作业服务设置中查看具体阶段和原因。',
+ ssh_connection_not_found:'找不到原 SSH 连接。请刷新连接列表并核对原终端。',
+ ssh_connection_changed:'原 SSH 连接状态已变化。请刷新查看原登录结果，不会自动另开连接。',
+ ssh_authentication_unconfirmed:'SSH 登录尚未确认。请在原终端完成密码或验证码输入，再继续原登录。',
+ ssh_authentication_not_pending:'此连接已不在等待认证输入。请刷新查看登录结果。',
+ ssh_control_output_limit:'本机 SSH 检查输出超出限制，已停止检查。请核对原连接设置。',
+ ssh_channel_unavailable:'SSH 已登录，但终端通道尚不可用。请查看原登录状态后明确继续。',
+ ssh_close_unconfirmed:'SSH 连接是否关闭尚未确认。请刷新原连接，不会自动重试关闭。',
+ ssh_close_cleanup_unconfirmed:'SSH 已停止，但本机清理尚未确认。请保留原连接记录并刷新状态。',
+ ssh_invalid_profile:'SSH 连接设置不完整或无效。请编辑原连接并核对。',
+ compute_resource_invalid_request:'选择计算资源的请求无效。SSH 登录保留，请核对原连接。',
+ compute_resource_invalid_selection:'保存的计算资源选择无效。SSH 登录保留，请明确重新选择。',
+ compute_resource_context_changed:'登录期间当前对话或计算资源已变化。原登录保留，请明确选择要使用的资源。',
+ compute_resource_profile_changed:'此计算资源的连接配置版本已变化。请核对原版本连接。',
+ compute_resource_unverified_state:'SSH 登录结果已收到，但计算资源状态未通过核对。请刷新原连接。',
+ compute_resource_session_mismatch:'终端与所选计算资源不一致。已停止选择，请核对原连接。',
+ compute_resource_not_available:'SSH 登录保留，但当前计算资源尚不可选。请刷新原连接后明确选择。',
+ compute_resource_selection_changed:'当前计算资源选择已变化。原 SSH 登录保留，不会切回旧资源。',
+ ssh_control_unavailable:'本机 SSH 状态检查未能完成。请查看原终端，并核对此连接的客户端及所在环境。',
+ ssh_control_timeout:'本机 SSH 登录检查超时。请查看终端并刷新原连接；不会自动重新登录。',
+ ssh_client_unavailable:'找不到此连接保存的 SSH 客户端。请编辑此连接并核对客户端路径。',
+ ssh_master_unavailable:'此 SSH 登录已中断或无法访问。请查看终端输出，再明确重新登录。',
+ ssh_master_identity_changed:'SSH 连接身份已变化，已停止使用。请核对原连接后重新登录。',
+ ssh_control_identity_changed:'SSH 连接身份已变化，已停止使用。请核对原连接后重新登录。',
+ ssh_linux_client_namespace_required:'请编辑此连接，核对 SSH 客户端、发行版和密钥所在的同一环境。',
+ terminal_client_namespace_required:'请编辑此连接，核对 SSH 客户端、发行版和密钥所在的同一环境。',
+ ssh_multiplex_unsupported:'此客户端可使用普通 SSH 终端。若需 Studio 作业服务，请在连接设置中选择受支持的 WSL/Linux 客户端。',
+ ssh_route_requires_review:'此连接的登录路由需要核对。请编辑原连接并保存后再登录。',
+ ssh_authentication_pending:'请在下方终端完成密码或验证码输入，登录完成后会自动进入终端。',
+ ssh_connection_limit:'打开的 SSH 连接已达上限。请先核对并关闭不再使用的连接。',
+ terminal_runtime_unavailable:'本机终端运行文件不可用。请重新打开软件后核对此连接。',
+ terminal_runtime_low_integrity:'本机终端缓存受到低权限目录限制，登录程序无法启动。连接设置已保留；请正常启动修复版后重试。',
+ terminal_runtime_execution_unavailable:'无法核验本机终端的运行权限。连接设置已保留，请正常启动软件后重试。',
+ terminal_start_failed:'本机登录终端未能启动。请核对连接设置后重试。',
+ compute_profile_changed:'保存的连接已变化。请编辑原连接并核对后再登录。',
+ compute_profile_not_found:'保存的连接已不存在。请刷新连接列表。',
+};
+export function sshConnectionCode(error:unknown){const value=error as {code?:unknown;message?:unknown}|null;for(const source of [value?.code,value?.message,String(error)]){const code=String(source??'').slice(0,4096).match(/\b(?:ssh_|terminal_|compute_profile_|compute_resource_)[a-z_]{1,80}\b/)?.[0];if(code)return code;}return '';}
+export function sshConnectionMessage(error:unknown){return connectionErrors[sshConnectionCode(error)]||'操作结果尚未确认，请刷新原连接；不会自动重连或重发。';}
+export function sshActionLabel(action?:string){return ({'compute.sshConnection.open':'打开登录终端','compute.sshConnection.completeLogin':'完成原登录','compute.sshConnection.loginStatus':'查看原登录状态','compute.resource.activate':'选择计算资源','compute.sshConnection.authInput':'输入登录信息','compute.sshConnection.authRead':'读取登录终端','compute.sshConnection.authResize':'调整登录终端','sharedTerminal.input':'输入终端','sharedTerminal.read':'读取终端','sharedTerminal.resize':'调整终端','sharedTerminal.owner':'交接终端','compute.sshService.connect':'连接作业服务','compute.sshService.owner':'交接作业服务','compute.sshService.check':'核对服务','compute.sshService.disconnect':'停止作业服务','checking_authentication':'检查登录状态','opening_shell':'打开终端'} as Record<string,string>)[action||'']||'连接操作';}
+export function sshStateLabel(value?:string){return ({authenticating:'正在认证',authenticated:'已连接',unavailable:'不可用',closed:'已关闭',requires_review:'需要核对',unsupported:'不支持',pending:'等待认证',verified:'已核验',not_observed:'尚未核验',lost:'认证已失效',connected:'已连接',connecting:'连接中',disconnected:'未连接',disconnecting:'停止中',failed:'失败',unknown:'状态未知',idle:'未连接',ready:'可用'} as Record<string,string>)[value||'unknown']||'状态未知';}

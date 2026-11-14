@@ -43,10 +43,11 @@ test('A late catalog response cannot prepare the old deployment after a user edi
  await assert.rejects(prepareDeployment(records,worker,{taskId:task.id}),/部署已修改/);
  assert.deepEqual(calls,['/api/projects']);assert.equal(records.read(task.id).deployment.request,undefined);
 });
-test('A revoked review during the catalog read cannot be reused through the local review facade',async()=>{
- const {records,task}=fixture(),calls=[],localReview={authority:t=>t.review?.status==='ready'?{kind:'ai',parameterRevision:t.parameterRevision}:null},worker={request:async(method,route)=>{calls.push(route);const next=records.read(task.id);next.review.status='needs-information';records.save(next);return [project];}};
- await assert.rejects(prepareDeployment(records,worker,{taskId:task.id},localReview),/部署已修改/);assert.deepEqual(calls,['/api/projects']);assert.equal(records.read(task.id).deployment.request,undefined);
+test('A changed advisory review during catalog read leaves actual project permission and preparation independent',async()=>{
+ const {records,task}=fixture(),calls=[],localReview={authority:t=>t.review?.status==='ready'?{kind:'ai',parameterRevision:t.parameterRevision}:null},worker={request:async(method,route)=>{calls.push(route);if(route==='/api/projects'){const next=records.read(task.id);next.review.status='needs-information';records.save(next);return [project];}if(route==='/api/authoring/adopt')return {paths:{}};return {id:'prepared',project_id:'compute',engine:'gpumd.md',status:'draft',snapshots:[]};}};
+ const run=await prepareDeployment(records,worker,{taskId:task.id},localReview);assert.equal(run.status,'draft');assert.equal(records.read(task.id).review.status,'needs-information');assert.deepEqual(calls,['/api/projects','/api/authoring/adopt','/api/runs/prepare']);
 });
+
 test('Explicit compute selection preserves the authoring workflow; adoption and preparation stay separate from execution',async()=>{
  const {records,task}=fixture(),calls=[],before=structuredClone(project),run={id:'prepared',status:'draft',engine:'gpumd.md',project_id:'compute',snapshots:[]};
  const worker={request:async(method,route,data)=>{calls.push([method,route]);if(route==='/api/projects')return [structuredClone(project)];if(route==='/api/authoring/adopt'){assert.equal(data.source_project_id,'draft');assert.equal(data.target_project_id,'compute');return {paths:{}};}if(route==='/api/runs/prepare')return run;if(route==='/api/run/status')return run;throw Error(route);}};

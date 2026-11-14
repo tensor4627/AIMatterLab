@@ -18,7 +18,7 @@ for(const section of ['agent-task:layout-task','deployment:layout-task'])test('c
 test('global width clamp respects content dominance without overwriting saved preferences',async()=>{
  const{h,storage}=fixture({width:1000});storage.setItem('studio.overviewAgentWidth','900');
  // State is loaded when App is created; exercise the existing actual divider setter.
- try{await h.flush();divider(h).props.onChange(900);await h.flush();const max=Math.floor((1000-54)*.45);assert.equal(divider(h).props.max,max);assert.equal(agent(h).props.width,max);assert.equal(shell(h).props.style['--agent-width'],max+'px');assert.equal(storage.getItem('studio.overviewAgentWidth'),'900');assert.equal(storage.getItem('studio.agentWidth'),'1100');}finally{h.unmount();}
+ try{await h.flush();divider(h).props.onChange(900);await h.flush();const max=Math.floor((1000-56)*.45);assert.equal(divider(h).props.max,max);assert.equal(agent(h).props.width,max);assert.equal(shell(h).props.style['--agent-width'],max+'px');assert.equal(storage.getItem('studio.overviewAgentWidth'),'900');assert.equal(storage.getItem('studio.agentWidth'),'1100');}finally{h.unmount();}
 });
 test('global and conversation drags persist independently while actual Agent draft/session/task survive route return',async()=>{
  const{h,storage,bound,task}=fixture({selected:true});await h.flush();const a=agentHarness({storage,props:agent(h).props,override:(m,d,standard)=>m==='conversation.remember'?bound:standard(m,d)});await a.flush();a.type('Preserve unsent layout draft');await a.flush();const selection=agent(h).props.sessionSelection;

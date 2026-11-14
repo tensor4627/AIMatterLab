@@ -223,7 +223,7 @@ class BootstrapHealth(unittest.TestCase):
         try:
             self.bootstrap.health()
         except self.bootstrap.BootstrapIdentityError as error:
-            rendered = ''.join(traceback.format_exception(error))
+            rendered = ''.join(traceback.format_exception(type(error), error, error.__traceback__))
             for secret in (PRIVATE, *TOKENS.values()):
                 self.assertNotIn(secret, str(error))
                 self.assertNotIn(secret, rendered)

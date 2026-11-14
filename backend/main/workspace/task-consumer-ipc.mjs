@@ -8,7 +8,7 @@ export function registerCalculationReview({handle,targetReceiptStore,consumerRec
  const stage=createTaskConsumerStage({...deps,artifactAccess:artifacts});
  const select=id=>['bias.validate','gpumd.sampling'].includes(deps.records.read(id).parameters?.engine)?consumer:build;
  const facade={};for(const name of ['inspect','read','confirm','status']){facade[name]=(value,event)=>select(value.taskId)[name](value,event);handle('task.localReview.'+name,facade[name]);}
- for(const name of ['verifyPrepared','beginOperation'])facade[name]=(id,...args)=>select(id)[name](id,...args);
+ for(const name of ['verifyPrepared','verifyPreparedActual','beginOperation'])facade[name]=(id,...args)=>select(id)[name](id,...args);
  facade.verify=async id=>{const selected=select(id),checked=await selected.verify(id);if(selected===consumer)await target.verify(id);return checked;};
  facade.assertOperation=token=>select(token.taskId).assertOperation(token);
  facade.authority=(task,kind)=>select(task.id).authority(task,kind);

@@ -4,6 +4,7 @@ import {createRequire,isBuiltin} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import ts from 'typescript';
 import {validateCliRuntimeLock} from '../backend/main/compute/cli-runtime.mjs';
+import {validateStagedDshRuntime} from './stage-dsh-runtime.mjs';
 
 const buildRequire=createRequire(import.meta.url);
 const builderRequire=createRequire(buildRequire.resolve('app-builder-lib/package.json'));
@@ -78,6 +79,9 @@ export function validateApplicationImports(appDir){
     if(ts.isConditionalExpression(node)){checkDynamic(node.whenTrue);checkDynamic(node.whenFalse);return;}
     // Existing private-skill validator is loaded from the separately packaged studio-tools directory.
     if(name==='agent/sessions/requests.mjs'&&node.getText(tree)==='pathToFileURL(validator).href')return;
+    // The isolated official DSH child loads these two positive-listed module
+    // URLs from the separately staged, integrity-audited DSH dependency tree.
+    if(name==='agent/providers/dsh-policy.mjs'&&['config.mcpModule','config.toolsModule'].includes(node.getText(tree)))return;
     throw Error('Cannot audit dynamic package import in '+name);
    }
    function inspect(node){
@@ -88,6 +92,7 @@ export function validateApplicationImports(appDir){
      const resolver=member(node.expression,'resolve')&&loader(node.expression.expression);
      if(direct||resolver){
       if(resolver&&stagedTerminalResolution(node.expression.expression,node.arguments)){ts.forEachChild(node,inspect);return;}
+      if(resolver&&name==='desktop/platform/dsh-runtime.mjs'&&node.expression.expression.getText(tree)==='createRequire(fs.realpathSync(mcpModule))'&&node.arguments.length===1&&ts.isStringLiteralLike(node.arguments[0])&&node.arguments[0].text==='@deepseek-ai/dsh-tools'){ts.forEachChild(node,inspect);return;}
       if(node.arguments.length!==1||!ts.isStringLiteralLike(node.arguments[0]))throw Error('Cannot audit package require in '+name);
       const source=direct?node.expression:node.expression.expression;
       check(node.arguments[0].text,!(ts.isIdentifier(source)&&source.text==='require'));
@@ -191,7 +196,13 @@ export function validatePackageRuntime({appDir,platform,arch}={}){
   }
  }
  const sourceFiles=validateApplicationImports(appDir);
- return {...release,electronVersion,platform,arch,runtimePackages:packages.size,dependencyEdges,omittedOptional,distAssets,sourceFiles,nativePackage:native};
+ const dshVersion=app.devDependencies?.['@deepseek-ai/dsh'];let dsh;
+ if(dshVersion){
+  if(['@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client'].some(name=>app.devDependencies?.[name]!==dshVersion))throw Error('Official DSH runtime versions disagree');
+  dsh=validateStagedDshRuntime(path.join(appDir,'.studio','agent-runtimes','dsh'),{expectedVersion:dshVersion,platform,arch});
+  file(appDir,'agent/providers/dsh-policy.mjs');
+ }
+ return {...release,electronVersion,platform,arch,runtimePackages:packages.size,dependencyEdges,omittedOptional,distAssets,sourceFiles,nativePackage:native,...dsh?{dsh}: {}};
 }
 
 /** Release labels must agree before validation can describe one concrete package. */

@@ -20,6 +20,14 @@ test('Nested success cannot hide transport failure or expose an execute link',()
  const activity=toolActivity({status:'failed',error:{message:'failed'},result});assert.equal(activity.state,'failed');assert.equal(activity.artifact,undefined);
  assert.equal(toolActivity({status:'completed',result:{content:[{type:'text',text:'{"status":"blocked"}'}]}}).state,'completed');
 });
+
+test('successful status queries keep the actual run result and do not claim a new draft was prepared',()=>{
+ for(const status of ['draft','ready','running','succeeded','failed','unknown']){
+  const run={id:'original',engine:'gpumd.sampling',status,validation:{status:'failed'}};
+  const activity=toolActivity({tool:'run_status',status:'completed',result:{content:[{type:'text',text:JSON.stringify(run)}]}});
+  assert.equal(activity.state,'completed');assert.equal(activity.summary,'运行记录已更新');assert.deepEqual(activity.artifact,run);
+ }
+});
 test('Connection diagnostics contain bounded categories, never subprocess arguments',()=>{
  for(const [error,code] of [[{code:'ENOENT'},'wsl_unavailable'],[{stderr:'secret WSL_E_DISTRO_NOT_FOUND'},'distribution_not_found'],[{code:'ETIMEDOUT'},'worker_connection_timeout'],[{message:'command --token secret',stderr:'private path secret'},'worker_start_failed']]){
   const failure=workerConnectionFailure(error);assert.equal(failure.code,code);assert.equal(JSON.stringify(failure).includes('secret'),false);

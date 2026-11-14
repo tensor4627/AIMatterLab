@@ -34,14 +34,29 @@ export class TaskRecords{
  }
  remember(value){
   if(this.deleted(value.provider,value.threadId))return null;
-  if(value.groupId!=null&&!this.catalog.get('conversation-project',value.groupId))throw Error('Unknown conversation project');
+  const requestedGroup=value.groupId!=null&&!this.catalog.get('conversation-project',value.groupId)&&this.catalog.get('deleted-conversation-project',value.groupId)?null:value.groupId;
+  if(requestedGroup!=null&&!this.catalog.get('conversation-project',requestedGroup))throw Error('Unknown conversation project');
   const previous=this.conversation(value.provider,value.threadId),id=value.provider+':'+value.threadId;
-  const next={...previous,id,provider:value.provider,threadId:value.threadId,groupId:previous?previous.groupId||null:value.groupId||null,projectId:previous?.projectId||value.projectId||null,name:previous?.name||conversationTitle(value.intent||value.name,{name:value.intent?undefined:value.name,existing:!value.intent}),titleVersion:1,titleSource:previous?.titleSource||'automatic',taskId:value.taskId||previous?.taskId||null,updatedAt:Date.now()};
+  const next={...previous,id,provider:value.provider,threadId:value.threadId,groupId:previous?previous.groupId||null:requestedGroup||null,projectId:previous?.projectId||value.projectId||null,name:previous?.name||conversationTitle(value.intent||value.name,{name:value.intent?undefined:value.name,existing:!value.intent}),titleVersion:1,titleSource:previous?.titleSource||'automatic',taskId:value.taskId||previous?.taskId||null,updatedAt:Date.now()};
   this.catalog.put('conversation',id,next);this.publish({method:'studio/conversationUpdated',provider:next.provider,params:{conversation:next}});return next;
  }
  rename({id,name}){if(typeof id!=='string')throw Error('Invalid conversation');const previous=this.catalog.get('conversation',id);if(!previous||this.deleted(previous.provider,previous.threadId))throw Error('Unknown conversation');const next={...previous,name:validConversationName(name),titleVersion:1,titleSource:'manual'};this.catalog.put('conversation',id,next);this.publish({method:'studio/conversationUpdated',provider:next.provider,params:{conversation:next}});return next;}
  groups(){return this.catalog.list('conversation-project').sort((a,b)=>a.createdAt-b.createdAt);}
  createGroup(value){if(!value||Object.keys(value).join(',')!=='name')throw Error('Invalid conversation project');const group={id:randomUUID(),name:validConversationName(value.name),createdAt:Date.now()};this.catalog.put('conversation-project',group.id,group);return group;}
+ deleteGroup(value){
+  if(!value||Object.keys(value).join(',')!=='id'||typeof value.id!=='string'||!value.id||value.id.length>200)throw Error('Invalid conversation group deletion');
+  const {id}=value;
+  if(this.catalog.get('deleted-conversation-project',id))return {id,conversations:[]};
+  if(!this.catalog.get('conversation-project',id))throw Error('Unknown conversation project');
+  const conversations=this.catalog.list('conversation').filter(row=>row.groupId===id).map(row=>({...row,groupId:null}));
+  this.catalog.transaction(()=>{
+   for(const conversation of conversations)this.catalog.put('conversation',conversation.id,conversation);
+   this.catalog.remove('conversation-project',id);
+   this.catalog.put('deleted-conversation-project',id,{id,deletedAt:Date.now()});
+  });
+  for(const conversation of conversations)this.publish({method:'studio/conversationUpdated',provider:conversation.provider,params:{conversation}});
+  const result={id,conversations};this.publish({method:'studio/conversationGroupDeleted',params:result});return result;
+ }
  organize(value){if(!value||Object.keys(value).sort().join(',')!=='groupId,id,pinned'||typeof value.id!=='string'||typeof value.pinned!=='boolean'||value.groupId!==null&&typeof value.groupId!=='string')throw Error('Invalid conversation organization');const old=this.catalog.get('conversation',value.id);if(!old||this.deleted(old.provider,old.threadId))throw Error('Unknown conversation');if(value.groupId!==null&&!this.catalog.get('conversation-project',value.groupId))throw Error('Unknown conversation project');const next={...old,pinned:value.pinned,groupId:value.groupId};this.catalog.put('conversation',next.id,next);this.publish({method:'studio/conversationUpdated',provider:next.provider,params:{conversation:next}});return next;}
  bindProject(provider,threadId,projectId){const previous=this.conversation(provider,threadId);if(!previous||this.deleted(provider,threadId))throw Error('Unknown conversation');const next={...previous,projectId,updatedAt:Date.now()};this.catalog.put('conversation',next.id,next);this.publish({method:'studio/conversationUpdated',provider,params:{conversation:next}});return next;}
  bound(provider,threadId){const conversation=this.conversation(provider,threadId);const id=conversation?.taskId||this.tasks().filter(t=>t.provider===provider&&t.threadId===threadId).sort((a,b)=>b.updatedAt-a.updatedAt)[0]?.id;return id?this.read(id):null;}
@@ -59,7 +74,7 @@ export class TaskRecords{
   this.active.set(provider+':'+threadId,id);task.threadId=threadId;this.remember({provider,threadId,projectId:task.projectId,name:task.name,taskId:id});return this.save(task);
  }
  edit(value){
-  const task=this.read(value.id);if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('Reconcile the execution request before editing its workflow');if(!value.changes||typeof value.changes!=='object'||Array.isArray(value.changes)||JSON.stringify(value.changes).length>200000||Object.keys(value.changes).length>100)throw Error('Invalid parameter edits');
+  const task=this.read(value.id);if(!value.changes||typeof value.changes!=='object'||Array.isArray(value.changes)||JSON.stringify(value.changes).length>200000||Object.keys(value.changes).length>100)throw Error('Invalid parameter edits');
   let changed=false;const fields=normalizeSteps(task.steps||[],task.parameters||{},[]).flatMap(step=>step.fields||[]);task.manualInputs={...task.manualInputs};
   for(const [key,next] of Object.entries(value.changes)){fieldPath(key);if(task.workflowVersion===2&&deploymentField(key))throw Error('请在独立部署模块设置运行环境和队列');
    const field=fields.find(field=>field.key===key),previous=parameterValue(task.parameters,key),receipt=task.manualInputs[key];

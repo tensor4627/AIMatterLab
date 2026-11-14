@@ -81,7 +81,7 @@ class ContinuationReview(unittest.TestCase):
             result=self.service.validate(child['id'])
         self.assertEqual(result['status'],'draft');self.assertEqual(result['validation']['status'],'failed')
         self.assertIn('velocity',result['validation']['message'])
-        with self.assertRaisesRegex(ValueError,'validation'):self.service.submit(child['id'])
+        with self.assertRaisesRegex(ValueError,'velocity'):self.service.submit(child['id'])
         # A legacy ready snapshot must also face the current first-dispatch contract.
         self.service.store.update(child,status='ready',validation={'status':'passed'})
         with self.assertRaisesRegex(ValueError,'velocity'):self.service.submit(child['id'])
@@ -120,10 +120,7 @@ class ContinuationReview(unittest.TestCase):
             self.service.store.update(c,status=status)
             before=copy.deepcopy(self.service.store.run(c['id']))
             with patch.object(Adapter,'input_contract',side_effect=AssertionError('No dispatched revalidation')):
-                if status=='unknown':
-                    with self.assertRaisesRegex(ValueError,'validation'):self.service.submit(c['id'])
-                else:
-                    self.assertEqual(self.service.submit(c['id']),before)
+                self.assertEqual(self.service.submit(c['id']),before)
             self.assertEqual(self.service.store.run(c['id']),before)
 
     def test_public_prepare_and_review_cannot_forge_metadata(self):

@@ -35,11 +35,11 @@ for(const engine of ['bias.validate','gpumd.sampling'])for(const [mode,biasClass
  const f=await fixture(engine);f.mutate(t=>t.parameters.mode=mode);f.pair.graph.nodes.find(node=>node.kind==='bias').class_name=biasClass;if(mode==='static')f.pair.graph.edges=f.pair.graph.edges.filter(edge=>edge.target.port!=='bias_traj');
  const i=await viewed(f);assert.equal(i.parameters.mode,mode);assert.equal((await f.service.confirm({taskId:'same-task',snapshotId:i.snapshotId},{})).status,'confirmed');assert.equal(f.receipts.size,1);assert.equal(f.task().review.status,'not_run');assert.equal(f.calls.some(call=>/prepare|submit|runtime|sharing/.test(call.url)),false);
 });
-test('unsupported diagnostic does not bypass human/owner/unknown-run guards or change receipt-only status',async()=>{
+test('unsupported diagnostics preserve human/owner guards and the original unknown run identity',async()=>{
  const f=await fixture();f.mutate(t=>{t.parameters.mode='opes';delete t.composition;});const before=clone(f.task());
  const status=f.service.status({taskId:'same-task'},{});assert.equal(status.status,'stale');assert.equal(status.authority,null);assert.deepEqual(f.task(),before);assert.equal(f.calls.length,0);
  f.setHuman(false);await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/Trusted human/);f.setHuman(true);f.mutate(t=>t.execution={phase:'unknown',artifactId:'original-run'});
- await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/Reconcile original active or unknown run; never resubmit/);assert.equal(f.task().execution.artifactId,'original-run');assert.equal(f.receipts.size,0);assert.equal(f.calls.length,0);
+ await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/LOCAL_REVIEW_UNSUPPORTED_OPES/);assert.deepEqual(f.task().execution,{phase:'unknown',artifactId:'original-run'});assert.equal(f.receipts.size,0);assert.equal(f.calls.length,0);
  const g=await fixture();g.mutate(t=>t.parameters.mode='opes');g.remove();await assert.rejects(g.service.inspect({taskId:'same-task'},{}),/Select the current consumer workflow/);assert.equal(g.calls.length,0);assert.equal(g.receipts.size,0);
 });
 
@@ -61,6 +61,6 @@ for(const engine of ['bias.validate','gpumd.sampling'])test(engine+' authoritati
 for(const engine of ['bias.validate','gpumd.sampling'])for(const path of ['bias.mode','sampling.mode'])test(engine+' actual scientificSpec resolves supported '+path+' without rewriting saved aliases',async()=>{
  const f=await fixture(engine);f.mutate(t=>{delete t.parameters.mode;const parts=path.split('.');t.parameters[parts[0]]={...t.parameters[parts[0]],[parts[1]]:'wtmetad'};for(const step of t.steps)for(const field of step.fields)if(field.key==='mode')field.key=path;});const before=clone(f.task().parameters),i=await viewed(f);assert.equal(i.parameters.mode,undefined);assert.equal(i.parameters[path.split('.')[0]].mode,'wtmetad');assert.equal((await f.service.confirm({taskId:'same-task',snapshotId:i.snapshotId},{})).status,'confirmed');assert.deepEqual(f.task().parameters,before);assert.equal(f.receipts.size,1);assert.equal(f.calls.some(call=>/submit|prepare|runtime/.test(call.url)),false);
 });
-for(const engine of ['bias.validate','gpumd.sampling'])test(engine+' valid alias does not erase an authored required canonical field',async()=>{
- const f=await fixture(engine);f.mutate(t=>{delete t.parameters.mode;t.parameters.bias={...t.parameters.bias,mode:'wtmetad'};});const before=clone(f.task()),writes=f.writes();await assert.rejects(f.service.inspect({taskId:'same-task'},{}),/Resolve missing native science: mode/);assert.deepEqual(f.task(),before);assert.equal(f.writes(),writes);assert.equal(f.calls.length,0);assert.equal(f.receipts.size,0);
+for(const engine of ['bias.validate','gpumd.sampling'])test(engine+' valid alias satisfies the actual adapter while preserving the authored canonical field',async()=>{
+ const f=await fixture(engine);f.mutate(t=>{delete t.parameters.mode;t.parameters.bias={...t.parameters.bias,mode:'wtmetad'};});const before=clone(f.task()),writes=f.writes(),inspection=await f.service.inspect({taskId:'same-task'},{});assert.equal(inspection.parameters.mode,undefined);assert.equal(inspection.parameters.bias.mode,'wtmetad');assert(inspection.entries.length>0);assert(before.steps.some(step=>step.fields.some(field=>field.key==='mode'&&field.required)));assert.deepEqual(f.task(),before);assert.equal(f.writes(),writes);assert.equal(f.receipts.size,0);assert.equal(f.native.length,0);assert.equal(f.calls.some(call=>/prepare|submit|validate/.test(call.url)),false);
 });

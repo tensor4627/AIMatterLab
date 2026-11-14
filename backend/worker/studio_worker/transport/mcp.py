@@ -40,6 +40,9 @@ TOOL_ROUTES = {
  "probe_cluster":("POST","/api/cluster/probe",{"cluster_id":"string"}),
  "draft_cluster_setup":("POST","/api/cluster/draft",{"project_id":"string","cluster_id":"string","proposal":"object"}),
  "prepare_cluster_run":("POST","/api/cluster/prepare",{"spec":"object"}),
+ "validate_cluster_run":("POST","/api/cluster/validate",{"run_id":"string"}),
+ "submit_cluster_run":("POST","/api/cluster/submit",{"run_id":"string"}),
+ "cancel_cluster_run":("POST","/api/cluster/cancel",{"run_id":"string"}),
  "cluster_run_status":("POST","/api/cluster/status",{"run_id":"string"}),
  "cluster_read_log":("POST","/api/cluster/log",{"run_id":"string"}),
  "list_workflows":("GET","/api/workflows",{}), "create_workflow":("POST","/api/workflows",{"project_id":"string","name":"string","steps":"array"}),
@@ -52,6 +55,7 @@ TOOL_ROUTES = {
  "validate_run": ("POST", "/api/run/validate", {"run_id": "string"}),
  "submit_run": ("POST", "/api/run/submit", {"run_id": "string"}),
  "cancel_run": ("POST", "/api/run/cancel", {"run_id": "string"}),
+ "reconcile_run": ("POST", "/api/run/reconcile", {"run_id": "string"}),
  "run_status": ("POST", "/api/run/status", {"run_id": "string"}),
  "read_log": ("POST", "/api/run/log", {"run_id": "string"}),
  "collect_artifacts": ("POST", "/api/run/collect", {"run_id": "string"}),
@@ -81,11 +85,15 @@ DESCRIPTIONS = {
  "create_structure":"Create and register an ASE structure asset from a bounded declarative recipe. kind bulk (name, optional crystalstructure/a/cubic); molecule (name, optional vacuum); surface (bulk kwargs, indices, layers, vacuum); explicit (symbols, positions, cell, pbc); import (authorized path). Optional repeat [nx,ny,nz]. Returns validated reloaded extxyz, preview, provenance and inferred facts. Authoring only; never runs MD/relaxation.",
  "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Save the canonical graph and executable build_bias.py directly as project inputs; return their paths, hashes and a bounded preview to avoid copying long code through chat. Does not execute or build the artifact. graph.settings must include atoms_path (actual structure) and pt_path (requested output artifact); Studio snapshots their basenames and sets workflow_path=workflow.json. Read inspect_source_project.graph_contract including studio_io and reduction/output-shape rules first. Include returned files and the source structure in a pygas.build task for human execution.",
  "present_task":"Fill the central Studio task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Put critical CV/bias parameters first; secondary settings can use advanced:true and a scalar default plus traceable default_source. Defaults are display guidance, not actual input edits. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters. Do not create required editable fields for runtime/scope/status notes or empty missing-information lists. Reserved parameters.validation accepts only describe_engine numerical controls; review explanations belong in step descriptions or a saved review manifest.",
- "prepare_cluster_run":"Prepare a local immutable SSH/LSF/Slurm run draft and its batch script. No upload or submission. Stop for desktop review.",
+ "prepare_cluster_run":"Prepare an immutable SSH/LSF/Slurm run snapshot and batch script. This operation does not submit. Continue validation or submission within the user's existing delegation and project/resource authorization.",
+ "validate_cluster_run":"Check a prepared cluster run in the registered target environment. Preserve actual passed/failed/not_run findings separately from execution authorization.",
+ "submit_cluster_run":"Submit the prepared cluster snapshot within existing project/resource authorization and current user delegation. Inspect an unknown original submission; never replay it.",
+ "cancel_cluster_run":"Request cancellation of the current conversation-owned cluster run. Keep cancellation pending until a terminal receipt is observed.",
  "draft_cluster_setup":"Propose queue, modules, engine paths and submission skill changes for user review. Cannot change SSH details or authorization.",
- "prepare_run": "Create an immutable run from explicit assets and scientific parameters. Returns a draft for desktop user review. Stop and wait for the user to click Execute; never validate or submit it. Never infer scientific choices.",
+ "prepare_run": "Create an immutable run snapshot from explicit assets and scientific parameters. Continue checks, build, execution and repair within the current user delegation and existing project/resource authorization. Honor explicit draft-only/no-run scope. Never infer scientific choices.",
  "validate_run": "Validate the copied inputs and serialized bias in the registered target environment.",
- "submit_run": "Submit a validated run within the project's existing resource authorization. Idempotent; never resubmit unknown runs.",
+ "submit_run": "Submit a prepared run within the project's existing resource authorization and current delegation. Required serialized bias/target-environment checks still apply; advisory validation findings remain truthful. Idempotent; never resubmit unknown runs.",
+ "reconcile_run": "Inspect the original unconfirmed run without replaying a submission. A missing or ambiguous receipt never authorizes another copy.",
  "resume_run": "Create a new continuation for supported GPUMD MD or HotPP training checkpoints. PyDyn and static GPUMD sampling require explicit continuation input; PyDyn sampling checks paired manifest hashes.",
  "generate_bias": "Generate static pyGAS pair-distance Python source from explicit zero-based atom indices, full PBC and bias parameters. Does not build or validate it."
 }
@@ -95,8 +103,6 @@ DESCRIPTIONS = {
 def _tool_definitions():
     result = []
     for name, (method, route, properties) in TOOL_ROUTES.items():
-        if name in ("validate_run", "submit_run"):
-            continue
         schema = {"type": "object", "properties": {k: {"type": v} for k, v in properties.items()},
                   "required": list(properties)}
         if name=="inspect_pygas_catalog":
@@ -121,6 +127,7 @@ def _tool_definitions():
                 "inputs":{"type":"object","additionalProperties":{"type":"string"}},"parameters":{"type":"object"},"name":{"type":"string"},"idempotency_key":{"type":"string"},
                 "resources":{"type":"object","required":["queue","cpus","gpus","memory_mb"],"properties":{"queue":{"type":"string"},"cpus":{"type":"integer","minimum":1},"gpus":{"type":"integer","minimum":0},"memory_mb":{"type":"integer","minimum":1},"account":{"type":"string"}}}}}
         if name=="write_project_input":schema["properties"]["expected_sha256"]={"type":"string","pattern":"^[0-9a-f]{64}$"}
+        if name=="collect_artifacts":schema["properties"]["names"]={"type":"array","items":{"type":"string"},"maxItems":128,"description":"Optional exact files for stable artifact snapshots; omit for bounded live metadata."}
         if name=="inspect_asset":schema["properties"]["kind"]={"type":"string","enum":["structure","dataset","regression"]}
         if name != "present_task":
             for key in ("offset", "frame"):
@@ -129,7 +136,7 @@ def _tool_definitions():
                        "inputSchema": schema,
                        "annotations": {"readOnlyHint": method == "GET" or name in (
                            "compute_readiness", "discover_local_environments", "describe_engine", "read_project_input", "inspect_source_project", "inspect_pygas_catalog", "read_runtime_guide", "suggest_parameters", "probe_environment", "run_status", "read_log", "collect_artifacts", "inspect_asset", "read_artifact"),
-                                       "destructiveHint": name == "cancel_run"}})
+                                       "destructiveHint": name in ("cancel_run", "cancel_cluster_run")}})
     return tuple(result)
 
 

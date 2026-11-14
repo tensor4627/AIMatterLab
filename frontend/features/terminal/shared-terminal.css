@@ -18,3 +18,7 @@
 .shared-terminal-notice{flex:0 1 auto;min-height:25px;max-height:52px;overflow:auto}
 .shared-terminal-toolbar{position:sticky;top:0;z-index:2}
 .shared-terminal-caption{position:sticky;bottom:0;background:#121218}
+.ssh-connection-panel{min-height:0;overflow:auto}.ssh-connection-panel .shared-terminal-host{flex:1 0 140px;min-height:140px}.ssh-connection-status{display:flex;flex-wrap:wrap;gap:6px 18px;padding:6px 12px;font-size:12px;border-bottom:1px solid var(--border,#333)}.ssh-connection-panel [role=alert]{padding:8px 12px}.ssh-connection-panel .shared-terminal-toolbar{flex-wrap:wrap;flex-shrink:0}.ssh-connection-panel .shared-terminal-toolbar strong{min-width:100px}.ssh-connection-panel .shared-terminal-toolbar select{max-width:280px}
+
+.ssh-service-observation{flex:0 0 auto;padding:0 10px;color:var(--muted);font-size:12px}.ssh-service-observation p{margin:5px 0}.ssh-service-observation>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.ssh-service-observation progress{max-width:180px}
+.ssh-worker-preparing{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px}.ssh-worker-preparing progress{width:160px;max-width:100%;height:8px;accent-color:var(--accent)}

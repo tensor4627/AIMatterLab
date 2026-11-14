@@ -26,6 +26,11 @@ for(const mode of ['connection','epoch','identity','settings'])test('a health re
  const f=fixture(),pending=deferred();f.worker.request=()=>pending.promise;const check=readWorkerStatus(f.worker,f.current);if(mode==='connection')f.worker.connection={...f.worker.connection};if(mode==='epoch')f.worker.connectionEpoch++;if(mode==='identity')f.worker.identity={...f.worker.identity};if(mode==='settings')f.settings({workerRoot:'~/new'});pending.resolve(f.health);assert.equal((await check).status,'unknown');
 });
 test('health observation has its own bound even when the existing transport never settles',async()=>{const f=fixture();f.worker.request=()=>new Promise(()=>{});const at=Date.now();assert.equal((await readWorkerStatus(f.worker,f.current,{timeoutMs:5})).status,'unknown');assert(Date.now()-at<1000);});
+
+test('a local service retains its three-second default health observation bound',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});const f=fixture();f.worker.request=()=>new Promise(()=>{});let settled=false;
+ const pending=readWorkerStatus(f.worker,f.current).then(value=>{settled=true;return value;});await new Promise(resolve=>setImmediate(resolve));t.mock.timers.tick(2999);await new Promise(resolve=>setImmediate(resolve));assert.equal(settled,false);t.mock.timers.tick(1);assert.equal((await pending).status,'unknown');
+});
 test('overlapping and locally timed-out status reads share one live health request, scoped to its connection epoch',async()=>{
  const f=fixture(),pending=deferred();let calls=0;f.worker.request=()=>{calls++;return pending.promise;};
  assert.equal((await readWorkerStatus(f.worker,f.current,{timeoutMs:5})).status,'unknown');

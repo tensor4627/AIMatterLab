@@ -48,7 +48,7 @@ const operationButtons=h=>{const area=h.nodes().find(node=>node.props?.className
 
 for(const status of ['draft','ready','unknown'])test('bound RunReview '+status+' renders the real readonly detail with log/artifacts and a run-ID-only return callback',async t=>{
  const h=harness(t,{component:'RunReview',props:{run:run(status,true)}});await h.flush();assert(h.text().includes('工具组步骤管理'));assert(h.text().includes('CONTROLLED LOG BODY'));assert(!h.buttons().some(button=>button.props['data-testid']==='execute-reviewed'));assert(!operationButtons(h).some(button=>['验证','提交计算','续算','取消'].includes(h.text(button))));
- const before=h.calls.length;h.click('返回所属工具组步骤');await h.flush();assert.deepEqual(h.opened,['run']);assert.equal(h.calls.length,before);h.click('产物');await h.flush();h.click('receipt.json0.0 KB');await h.flush();assert(h.nodes().some(node=>node.props?.value==='CONTROLLED ARTIFACT BODY'));assert.equal(mutations(h).length,0);
+ const before=h.calls.length;h.click('返回所属工具组步骤');await h.flush();assert.deepEqual(h.opened,['run']);assert.equal(h.calls.length,before);h.click('结果');await h.flush();h.click('receipt.json0.0 KB');await h.flush();assert(h.nodes().some(node=>node.props?.value==='CONTROLLED ARTIFACT BODY'));assert.equal(mutations(h).length,0);
 });
 
 test('bound detail remains readonly without a navigation callback, and keeps existing queued/running cancellation only',async t=>{
@@ -57,8 +57,8 @@ test('bound detail remains readonly without a navigation callback, and keeps exi
  function hText(value){return typeof value==='string'?value:Array.isArray(value)?value.map(hText).join(''):value&&typeof value==='object'?hText(value.props?.children):'';}
 });
 
-test('legacy RunReview preserves revise, validate and submit while hook order stays stable across bound/status transitions',async t=>{
- const h=harness(t,{component:'RunReview'});await h.flush();h.click('确认并执行');await h.flush();assert.deepEqual(mutations(h).map(call=>call.target),['/api/run/revise','/api/run/validate','/api/run/submit']);assert.equal(h.replaced.at(-1).status,'queued');
+test('legacy RunReview preserves revise and submit with optional validation while hook order stays stable across bound/status transitions',async t=>{
+ const h=harness(t,{component:'RunReview'});await h.flush();h.click('确认并执行');await h.flush();assert.deepEqual(mutations(h).map(call=>call.target),['/api/run/revise','/api/run/submit']);assert.equal(h.replaced.at(-1).status,'queued');
  for(const [status,bound]of [['draft',true],['ready',false],['unknown',true],['draft',false]]){h.render({run:run(status,bound)});await h.flush();assert.equal(h.buttons().some(button=>button.props['data-testid']==='execute-reviewed'),!bound&&['draft','ready'].includes(status));}
 });
 

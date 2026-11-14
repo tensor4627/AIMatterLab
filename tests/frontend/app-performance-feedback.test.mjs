@@ -21,7 +21,7 @@ test('same-tick manual refresh shares one request set and reports partial comple
 
 test('ordinary panel navigation keeps metadata cached while job observations continue',async()=>{
  const h=appWorkerHarness();try{await h.flush();const metadata=[reads(h,'/api/projects').length,reads(h,'/api/environments').length],local=reads(h,'/api/runs').length,cluster=reads(h,'/api/cluster-runs').length;
-  h.find(node=>node.type==='button'&&h.text(node)==='查看工具关系').props.onClick();await h.flush();h.find(node=>node.type==='button'&&node.props?.['aria-label']==='任务总览').props.onClick();await h.flush();h.find(node=>node.type==='./Agent').props.onOpenCluster();await h.flush();
+  h.find(node=>node.type==='button'&&h.text(node)==='查看工具关系').props.onClick();await h.flush();h.find(node=>node.type==='button'&&node.props?.['data-testid']==='navigate-runs').props.onClick();await h.flush();h.find(node=>node.type==='./Agent').props.onOpenCluster();await h.flush();
   assert.deepEqual([reads(h,'/api/projects').length,reads(h,'/api/environments').length],metadata);assert(reads(h,'/api/runs').length>=local+3);assert(reads(h,'/api/cluster-runs').length>=cluster+3);const before=reads(h,'/api/environments').length;refresh(h).props.onClick();await h.flush();assert.equal(reads(h,'/api/environments').length,before+1);
  }finally{h.unmount();}
 });

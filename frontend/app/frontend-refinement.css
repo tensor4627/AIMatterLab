@@ -1,0 +1,101 @@
+/* Presentation only: keep authoring, review and execution controls in their owners. */
+.navigation-rail[hidden]{display:none}
+.workspace-shell .navigation-rail{width:56px;flex-basis:56px;gap:8px;background:var(--sidebar)}
+.workspace-shell .sidebar{display:flex;flex-direction:column;padding:12px;background:var(--sidebar);overflow:hidden}
+.workspace-shell .sidebar-title{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 4px 16px;font-size:max(calc(15px * var(--ui-scale,1)),var(--ui-min-font,17px))}
+.workspace-shell .sidebar-title>span,.workspace-shell .primary-navigation button>span,.workspace-shell .sidebar-new-conversation>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-shell .sidebar-title>.icon-button,.workspace-shell .primary-navigation button>svg,.workspace-shell .sidebar-new-conversation>svg{flex-shrink:0}
+.workspace-shell .quick-search{white-space:nowrap;overflow:hidden;text-align:left}
+.workspace-shell .quick-search>span{flex-shrink:0}
+.workspace-shell .primary-navigation{display:grid;gap:4px;margin-bottom:16px}
+.workspace-shell .primary-navigation button{display:flex;align-items:center;gap:10px;min-height:38px;padding:8px 10px;text-align:left;border-radius:6px;color:var(--muted)}
+.workspace-shell .primary-navigation button[aria-current=page]{background:var(--accent-bg);color:var(--accent)}
+.workspace-shell .primary-navigation button:hover{background:var(--raised);color:var(--text)}
+.workspace-shell .sidebar-new-conversation{justify-content:flex-start;min-height:36px;margin-top:8px;padding:8px 10px;gap:8px;background:transparent;color:var(--text)}
+.workspace-shell .sidebar-new-conversation[data-testid=new-computation]{background:var(--accent-bg);border-color:transparent;color:var(--accent)}
+.workspace-shell .sidebar-accounts{padding:8px 10px;margin:4px 0}
+.workspace-shell .sidebar-scroll{flex:1;min-height:0;overflow-y:auto;margin-top:4px}
+.workspace-shell .sidebar-bottom{flex:none;position:static;padding-top:10px;border-top:1px solid var(--line)}
+.workspace-shell .sidebar-tools{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.workspace-shell .sidebar-tools button{display:flex;align-items:center;gap:8px;min-height:32px}
+.workspace-shell .workspace-toolbar{display:flex;gap:12px;align-items:center;min-height:48px;flex-shrink:0;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--bg);z-index:5}
+.workspace-shell .service-version-notice{display:block;flex:none;margin:8px 8px 0;padding:10px 12px;color:var(--muted);background:transparent}
+.workspace-shell .service-version-notice>summary{cursor:pointer;line-height:1.5;overflow-wrap:anywhere}
+.workspace-shell .service-version-notice>summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:3px}
+.workspace-shell .service-version-notice>p{margin:8px 0 0;line-height:1.6;overflow-wrap:anywhere}
+.workspace-shell .service-version-upgrade{margin-left:12px;padding:3px 9px;vertical-align:middle}
+.workspace-shell .workspace-current-title{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.workspace-shell .workspace-current-title strong{font-size:max(calc(14px * var(--ui-scale,1)),var(--ui-min-font,12px));font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-shell .workspace-current-title svg{flex:none;color:var(--muted)}
+.workspace-shell .toolbar-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.workspace-shell .workspace-layout-menu{position:relative;color:var(--muted)}
+.workspace-shell .workspace-layout-menu>summary{cursor:pointer;padding:6px 8px;list-style:none;min-height:32px;display:flex;align-items:center}
+.workspace-shell .workspace-layout-menu>summary::-webkit-details-marker{display:none}
+.workspace-shell .workspace-layout-menu>div{position:absolute;right:0;top:100%;display:grid;gap:4px;min-width:150px;padding:8px;background:var(--raised);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px #0003}
+.workspace-shell .workspace-layout-menu button{text-align:left;padding:8px;border-radius:6px;white-space:nowrap}
+.workspace-shell .workspace-layout-menu button:hover,.workspace-shell .workspace-layout-menu button[aria-pressed=true]{color:var(--accent);background:var(--accent-bg)}
+.workspace-shell .panel-selection{display:flex;flex-shrink:0;border:1px solid var(--line);border-radius:6px;padding:2px}
+.workspace-shell .panel-selection button{min-height:30px;padding:4px 8px;border-radius:4px;color:var(--muted)}
+.workspace-shell .panel-selection button[aria-pressed=true]{color:var(--accent);background:var(--accent-bg)}
+.workspace-shell .page-heading h1{font-size:max(calc(22px * var(--ui-scale,1)),var(--ui-min-font,12px));font-weight:600;line-height:1.4}
+.workspace-shell .page-heading{gap:12px;flex-wrap:wrap}
+.workspace-shell .home-page,.workspace-shell .page{padding:24px;min-width:0}
+.workspace-shell .continue-work{padding:20px 0;border-bottom:1px solid var(--line);margin-bottom:24px}
+.workspace-shell .continue-work h2{font-size:max(calc(20px * var(--ui-scale,1)),var(--ui-min-font,17px));font-weight:550;margin:8px 0;overflow-wrap:anywhere}
+.workspace-shell .continue-work p{color:var(--muted);line-height:1.6}
+.workspace-shell .recent-conversations{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:8px}
+.workspace-shell .recent-conversations button{display:flex;gap:8px;align-items:center;padding:12px;text-align:left;background:var(--panel);border-radius:6px;min-width:0}
+.workspace-shell .recent-conversations button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-shell .recent-runs>button{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 0;border-bottom:1px solid var(--line)}
+.workspace-shell .recent-runs>button>span:first-of-type{flex:1;min-width:0;overflow-wrap:anywhere}
+.workspace-shell .recent-runs small{display:block;margin-top:5px;color:var(--muted)}
+.workspace-shell .home-disclosure{border-top:1px solid var(--line);margin:24px 0;padding:12px 0}
+.workspace-shell .home-disclosure>summary{cursor:pointer;padding:8px 0;color:var(--muted)}
+.workspace-shell .home-disclosure>.task-cards{margin:12px 0}
+.workspace-shell .home-disclosure .stat{background:transparent;border:0;padding:12px}
+.workspace-shell .bottom-tabs button[hidden]{display:none}
+.workspace-shell .bottom-tabs{background:var(--bg);border-top:1px solid var(--line)}
+.workspace-shell .agent-top-surface{background:var(--sidebar);border-bottom:1px solid var(--line)}
+.workspace-shell .agent-top-surface::after{display:none}
+.workspace-shell .agent-heading{padding:12px;min-height:48px;flex-wrap:wrap}
+.workspace-shell .agent-heading-title{max-width:none;flex:1;order:0;font-size:max(calc(14px * var(--ui-scale,1)),var(--ui-min-font,17px))}
+.workspace-shell .agent-heading .agent-header-actions{order:1;gap:2px}
+.workspace-shell .agent-collapsed-summary{order:2;flex:0 0 100%;padding-top:4px;font-size:max(calc(12px * var(--ui-scale,1)),var(--ui-min-font,12px))}
+.workspace-shell .message.user{border:0;background:var(--raised);border-radius:8px;padding:12px}
+.workspace-shell .message-role{color:var(--muted);font-weight:500}
+.workspace-shell .chat-scroll{padding:16px;scrollbar-gutter:stable}
+.workspace-shell .agent-panel .composer{box-shadow:none}
+.application .button{min-height:36px;border-radius:6px}
+.application .icon-button{min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center}
+.history-conversations{display:grid;gap:4px;margin:12px 0 20px}
+.history-conversations .conversation-row{display:flex;align-items:center;gap:8px;min-width:0}
+.history-conversations .conversation-item{flex:1;min-width:0;text-align:left;padding:10px;border-radius:6px}
+.history-conversations .conversation-item span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.history-conversations .selected-conversation{background:var(--accent-bg);color:var(--accent)}
+.workspace-shell .conversation-project>summary>.group-menu-trigger{flex:0 0 30px;width:30px;height:30px;min-width:30px;opacity:1}
+.button.danger{color:var(--danger);border-color:var(--danger)}
+.run-detail .result-subtabs{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0;flex-shrink:0}
+.run-detail .result-subtabs button{min-height:32px;padding:6px 12px;color:var(--muted);border-radius:6px}
+.run-detail .result-subtabs button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent)}
+.run-detail .run-overview{overflow:auto;line-height:1.7}
+.run-overview dl,.submission-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px;margin:16px 0}
+.run-overview dl>div,.submission-summary>div{min-width:0;padding:12px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.run-overview dt,.submission-summary dt{color:var(--muted);margin-bottom:6px}
+.run-overview dd,.submission-summary dd{margin:0;overflow-wrap:anywhere}
+.settings-footer{position:sticky;bottom:-21px;background:var(--panel);padding-bottom:8px;flex-wrap:wrap;z-index:2}
+.settings-footer>span{min-width:120px}
+.jobs-page .jobs-overview{gap:8px}
+.jobs-page .jobs-overview button{border-radius:6px;box-shadow:none}
+.jobs-page .jobs-overview button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-bg)}
+.workspace-shell .agent-task-page .card .card,.workspace-shell .deployment-page .card .card{border:0;border-top:1px solid var(--line);border-radius:0;padding:16px 0;box-shadow:none;background:transparent}
+@media(max-width:800px){
+ .workspace-shell .workspace-toolbar{gap:6px;padding:6px 8px;flex-wrap:wrap}
+ .workspace-shell .workspace-current-title{min-width:100px}
+ .workspace-shell .page,.workspace-shell .home-page{padding:16px}
+ .settings-layout{gap:12px}.settings-nav{width:120px;padding-right:8px}
+}
+
+.deployment-check-summary{margin:12px 0;color:var(--muted);line-height:1.6}
+.deployment-check-details{margin:12px 0;color:var(--muted)}
+.deployment-check-details>summary{cursor:pointer;line-height:1.6}
+.deployment-check-details .notice{margin-top:8px}

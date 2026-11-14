@@ -21,6 +21,37 @@ def digest(path):
     return h.hexdigest()
 
 
+def stable_file_snapshot(path, *, include_bytes=False, max_bytes=None):
+    """Hash one observed file and reject replacements/appends during the read."""
+    def fingerprint(info):
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    path = Path(path)
+    if path.is_symlink():
+        raise ValueError("Snapshot source must not be a symbolic link")
+    with path.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        if max_bytes is not None and before.st_size > max_bytes:
+            raise ValueError("Snapshot exceeds the requested byte budget")
+        hasher = hashlib.sha256()
+        parts = []
+        total = 0
+        while True:
+            block = stream.read(1024 * 1024)
+            if not block:
+                break
+            total += len(block)
+            if max_bytes is not None and total > max_bytes:
+                raise ValueError("Snapshot grew beyond the requested byte budget")
+            hasher.update(block)
+            if include_bytes:
+                parts.append(block)
+        after = os.fstat(stream.fileno())
+    if fingerprint(before) != fingerprint(after) or fingerprint(after) != fingerprint(path.stat()) or total != after.st_size or path.is_symlink():
+        raise ValueError("File changed while creating its hash snapshot; retry explicitly")
+    result = {"size":total, "sha256":hasher.hexdigest(), "mtime_ns":after.st_mtime_ns, "hash_status":"snapshot"}
+    return (result, b"".join(parts)) if include_bytes else result
+
+
 def contained(path, roots):
     candidate = Path(path).expanduser().resolve()
     if not any(candidate == Path(root).expanduser().resolve() or

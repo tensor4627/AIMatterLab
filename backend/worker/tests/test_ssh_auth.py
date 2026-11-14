@@ -240,7 +240,7 @@ class SSHAuthentication(unittest.TestCase):
         private_input='SYNTHETIC_PRIVATE_INPUT'
         try:f.manager.input(f.request(view,data=private_input,sequence=1))
         except auth.AuthError as error:
-            rendered=''.join(traceback.format_exception(error));self.assertNotIn('SYNTHETIC',rendered);self.assertEqual(str(error),'private_input_out_of_scope')
+            rendered=''.join(traceback.format_exception(type(error),error,error.__traceback__));self.assertNotIn('SYNTHETIC',rendered);self.assertEqual(str(error),'private_input_out_of_scope')
         else:self.fail('Closed owned pipe must fail')
         self.assertEqual(s['state'],'closed')
 

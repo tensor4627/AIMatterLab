@@ -29,13 +29,40 @@ test('private epoch change after temporary PNG write prevents rename and cleans 
  const f=imageFixture();let state={active:false,revision:0};const operations=[];f.options.privacy=()=>state;f.options.showSaveDialog=async()=>({canceled:false,filePath:path.resolve(os.tmpdir(),'synthetic-workbench.png')});const filesystem={openSync:()=>{operations.push('open');return 5;},writeFileSync:()=>{operations.push('write');state={active:true,revision:1};state={active:false,revision:2};},fsyncSync:()=>operations.push('fsync'),closeSync:()=>operations.push('close'),renameSync:()=>operations.push('rename'),unlinkSync:()=>operations.push('unlink')};f.options.write=(destination,bytes,check)=>writePngAtomically(destination,bytes,check,{filesystem,uuid:()=> 'owned-synthetic'});await assert.rejects(createWorkbenchImageExporter(f.options)({},f.event),/私有认证/);assert(!operations.includes('rename'));assert.equal(operations.filter(value=>value==='unlink').length,1);
 });
 
-test('unscoped Codex event fails closed once with safe tool diagnostic',()=>{
- const bridge=new CodexBridge({strictIsolation:true}),events=[];let kills=0;
- bridge.process={kill(){kills++;}};bridge.on('event',e=>events.push(e));
+test('unsupported Codex catalog query returns an explicit failure and keeps the conversation connected',()=>{
+ const bridge=new CodexBridge({strictIsolation:true}),events=[],sent=[];let kills=0;
+ bridge.process={stdin:{destroyed:false,write:text=>sent.push(JSON.parse(text))},kill(){kills++;}};bridge.on('event',event=>events.push(event));
  bridge.receive({method:'item/started',params:{item:{type:'dynamicToolCall',tool:'list_mcp_resources',arguments:{}}}});
- assert.equal(kills,1);assert.equal(events.length,1);assert.equal(events[0].params.tool,'list_mcp_resources');assert.equal(events[0].params.code,'STUDIO_CODEX_UNSCOPED_TOOL');
- bridge.close();assert.equal(events.length,1);assert.equal(bridge.process,null);
+ bridge.receive({id:77,method:'item/tool/call',params:{tool:'list_mcp_resources',arguments:{}}});
+ assert.equal(kills,0);assert(bridge.process);assert.equal(sent.length,1);assert.equal(sent[0].id,77);assert.equal(sent[0].result.success,false);assert.match(sent[0].result.contentItems[0].text,/no resource was read/);assert(!events.some(event=>event.method==='studio/codexDisconnected'));
+ bridge.receive({method:'item/started',params:{item:{type:'imageView',path:'/ungranted'}}});assert.equal(kills,1);assert.equal(events.at(-1).params.code,'STUDIO_CODEX_UNSCOPED_TOOL');assert.equal(bridge.process,null);
 });
+
+for(const tool of ['list_mcp_resources','list_mcp_resource_templates'])for(const activity of [false,true])test('isolated '+tool+' '+(activity?'activity and request':'request only')+' reads no resource and preserves following protocol traffic',async()=>{
+ const bridge=new CodexBridge({strictIsolation:true}),events=[],sent=[],reads=[];let kills=0;
+ const child={stdin:{destroyed:false,write:text=>sent.push(JSON.parse(text))},kill(){kills++;}};bridge.process=child;bridge.on('event',event=>events.push(event));
+ const readFile=fs.readFileSync,open=fs.openSync;
+ try{
+  fs.readFileSync=(...args)=>{reads.push(args);throw Error('Catalog rejection must not read a file');};fs.openSync=(...args)=>{reads.push(args);throw Error('Catalog rejection must not open a resource');};
+  if(activity)bridge.receive({method:'item/started',params:{threadId:'thread',turnId:'turn',item:{id:'catalog-item',type:'dynamicToolCall',namespace:null,tool,arguments:{server:'outside',path:'/ungranted/private'}}}});
+  bridge.receive({id:activity?'catalog-request':78,method:'item/tool/call',params:{threadId:'thread',turnId:'turn',callId:'catalog-item',namespace:null,tool,arguments:{server:'outside',path:'/ungranted/private'}}});
+  bridge.receive({method:'item/completed',params:{threadId:'thread',turnId:'turn',item:{id:'catalog-item',type:'dynamicToolCall',namespace:null,tool,arguments:{},status:'completed',success:false}}});
+ }finally{fs.readFileSync=readFile;fs.openSync=open;}
+ assert.deepEqual(reads,[]);assert.equal(bridge.process,child);assert.equal(kills,0);assert.equal(sent.length,1);assert.equal(sent[0].id,activity?'catalog-request':78);assert.equal(sent[0].result.success,false);assert.equal(sent[0].result.contentItems[0].type,'inputText');assert.match(sent[0].result.contentItems[0].text,/unsupported.*no resource was read/);assert.equal(bridge.requests.size,0);assert(!events.some(event=>event.method==='studio/codexDisconnected'));
+ bridge.receive({method:'turn/started',params:{threadId:'thread',turn:{id:'following-turn'}}});assert(bridge.activeTurns.has('thread'));
+ bridge.receive({method:'item/agentMessage/delta',params:{threadId:'thread',turnId:'following-turn',itemId:'reply',delta:'Following normal reply.'}});assert(events.some(event=>event.params?.delta==='Following normal reply.'));
+ const pending=bridge.rawRequest('thread/read',{threadId:'thread'}),request=sent.at(-1);bridge.receive({id:request.id,result:{thread:{id:'thread',turns:[]}}});assert.equal((await pending).thread.id,'thread');assert.equal(bridge.process,child);
+ bridge.receive({method:'turn/completed',params:{threadId:'thread',turn:{id:'following-turn'}}});assert.equal(bridge.activeTurns.size,0);assert.equal(bridge.pending.size,0);assert.equal(kills,0);
+});
+
+for(const tool of ['read_mcp_resource','list_mcp_resources_extra','List_mcp_resources','submit_run','arbitrary_native_tool'])for(const request of [false,true])test('strict isolation still denies unscoped dynamic '+tool+' '+(request?'request':'activity'),()=>{
+ const bridge=new CodexBridge({strictIsolation:true}),events=[],sent=[];let kills=0;
+ bridge.process={stdin:{destroyed:false,write:text=>sent.push(JSON.parse(text))},kill(){kills++;}};bridge.on('event',event=>events.push(event));
+ bridge.receive(request?{id:79,method:'item/tool/call',params:{namespace:'gpusampling',tool,arguments:{}}}:{method:'item/started',params:{item:{type:'dynamicToolCall',namespace:'gpusampling',tool,arguments:{}}}});
+ assert.equal(kills,1);assert.equal(bridge.process,null);assert.equal(sent.length,0);assert.equal(bridge.requests.size,0);assert.equal(events.at(-1).params.code,'STUDIO_CODEX_UNSCOPED_TOOL');
+});
+
+test('catalog names never whitelist an actual unscoped MCP server call',()=>{const bridge=new CodexBridge({strictIsolation:true});let kills=0;bridge.process={kill(){kills++;}};bridge.receive({method:'item/started',params:{item:{type:'mcpToolCall',server:'outside',tool:'list_mcp_resources'}}});assert.equal(kills,1);assert.equal(bridge.process,null);});
 
 test('numeric .out selection preserves mapped paths and refuses private/ambiguous names',()=>{
  assert.deepEqual(explicitScientificInputs('Use "D:\\numeric data\\energy_test.out"'),['/mnt/d/numeric data/energy_test.out']);

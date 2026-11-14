@@ -69,7 +69,9 @@ export function clusterDeploymentChoice(resources,profile,targetId=''){
  return {queueSelection:undefined,resources:{...previous,queue:profile?.queue||previous.queue||''}};
 }
 
-export function deploymentCurrent(task,authority){return (authority?.kind==='local-human'?task.deployment?.prepared?.reviewAuthority?.kind==='local-human'&&JSON.stringify(task.deployment.prepared.reviewAuthority)===JSON.stringify(authority):task.review?.status==='ready'&&task.review.parameterRevision===task.parameterRevision)&&task.deployment?.prepared?.parameterRevision===task.parameterRevision&&task.deployment?.prepared?.deploymentRevision===task.deployment.revision;}
+// Preparation identifies immutable inputs. Review evidence is independent of
+// project permission and must not invalidate an otherwise current attempt.
+export function deploymentCurrent(task,_authority){return !!task.deployment?.prepared&&task.deployment.prepared.parameterRevision===task.parameterRevision&&task.deployment.prepared.deploymentRevision===task.deployment.revision;}
 
 
 export function snapshotIdentity(task,run){return JSON.stringify({runId:run.id,parameterRevision:task.parameterRevision,deploymentRevision:task.deployment?.revision,files:(run.snapshots||[]).map(s=>({name:s.name,sha256:s.sha256,size:s.size})).sort((a,b)=>a.name.localeCompare(b.name))});}

@@ -20,8 +20,8 @@ class McpSchemaCacheTest(unittest.TestCase):
         names = [item["name"] for item in tools()]
         self.assertEqual(len(names), len(set(names)))
         self.assertIn("present_task", names)
-        self.assertNotIn("submit_run", names)
-        self.assertNotIn("validate_run", names)
+        self.assertIn("submit_run", names)
+        self.assertIn("validate_run", names)
 
 
 if __name__ == "__main__":

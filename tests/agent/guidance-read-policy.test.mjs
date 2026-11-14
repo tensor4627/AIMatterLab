@@ -55,20 +55,22 @@ test('manual archived entries, recursive references and source receipts are deni
  f.facts.archivedResources.push({id:'reference',role:'configuration',paths:[reference]});const policy=createReadPolicy(f.facts),trap=archivedTrap(f.facts.archivedResources.flatMap(resource=>resource.paths));
  try{
   await assert.rejects(selectedSkillContext({selection:{path:path.join(f.delivery,'SKILL.md'),name:'delivery'},registered:[{path:path.join(f.delivery,'SKILL.md'),name:'delivery'}],registeredRoots:[f.delivery],bundledRoot:bundle,policy}),/archived/);
-  await assert.rejects(selectedSkillContext({selection:{path:entry,name:'studio-compute-workflow'},registered:[{path:entry,name:'studio-compute-workflow'}],registeredRoots:[bundle],bundledRoot:bundle,policy}),/attachment_unavailable/);
+  const disclosed=await selectedSkillContext({selection:{path:entry,name:'studio-compute-workflow'},registered:[{path:entry,name:'studio-compute-workflow'}],registeredRoots:[bundle],bundledRoot:bundle,policy});assert.equal(disclosed.attachments.length,1);assert(!disclosed.text.includes('ARCHIVED REFERENCE'));assert(!disclosed.text.includes('SEALED REF'));assert.throws(()=>policy.assertReadable(reference),/archived/);
   const evidence=await new PublicRuleEvidence(()=>f.root).inspect({source_receipt:{local_files:[{source_id:'pygas',path:'delivery/SKILL.md',sha256:'d'.repeat(64)}]}},{policy});assert.equal(evidence.files[0].status,'blocked');
   assert.equal(policy.allowsPath(path.join(f.delivery,'program.py')),true);trap.assertZero();t.diagnostic('manual/reference/source operations '+JSON.stringify(trap.counts));
  }finally{trap.restore();}
 });
 
-test('stale and revoked activation cannot use the legacy route or the old setup gate',async t=>{
+test('missing stale execution snapshot and revoked permission cannot use legacy fallback',async t=>{
  const f=fixture(t),trap=archivedTrap(f.facts.archivedResources.flatMap(resource=>resource.paths));
  try{for(const state of ['stale','revoked']){
-  const facts={...f.facts,state},policy=createReadPolicy(facts),router=new ScientificSkillRouter({map,sourceRoot:()=>{throw Error('No legacy fallback');},consent:()=>true,setupAllowed:()=>true,resolveGuidance:async()=>facts});
+  const facts={...f.facts,state};if(state==='stale'){delete facts.executionSkill;delete facts.activation;}const policy=createReadPolicy(facts),router=new ScientificSkillRouter({map,sourceRoot:()=>{throw Error('No legacy fallback');},consent:()=>true,setupAllowed:()=>true,resolveGuidance:async()=>facts});
   for(const route of map.functions)assert.equal((await router.read('codex',route.id)).status,'blocked');
   assert.deepEqual(localSkills([f.delivery],{policy}),[]);assert.equal(loadPygasSkills({text:'WTMetaD',sources:[],consented:true,policy}).status,'blocked');
  }trap.assertZero();}finally{trap.restore();}
 });
+
+test('stale check evidence retains a verified execution snapshot without reading archived sources',async t=>{const f=fixture(t),facts={...f.facts,state:'stale'},policy=createReadPolicy(facts),trap=archivedTrap(f.facts.archivedResources.flatMap(resource=>resource.paths));try{assert.ok(policy.catalogEntry());assert.equal(policy.blocksAll(),false);const result=policy.executionResult('pygas.bias');assert.equal(result.status,'passed');assert(result.text.includes(f.facts.executionSkill.text));assert(result.text.includes('stale'));trap.assertZero();assert.throws(()=>createReadPolicy({...facts,executionSkill:{...facts.executionSkill,text:'tampered'}}),/snapshot/);}finally{trap.restore();}});
 
 test('legacy tools retain existing source reads and explicit setup behavior',async t=>{
  const f=fixture(t),router=new ScientificSkillRouter({map,sourceRoot:()=>f.root,consent:()=>true,setupAllowed:()=>true,resolveGuidance:async()=>legacyGuidanceFacts()});
@@ -154,7 +156,7 @@ test('a granted parent entry does not silently grant an archived reference in it
  const scope={provider:'codex',threadId:'thread',taskId:null,serial:1};f.facts.archivedResources.push({id:'parent',role:'delivery',paths:[entry]},{id:'reference',role:'configuration',paths:[reference]});
  f.facts.readGrant={id:'human-update',purpose:'update',resourceIds:['parent'],owner:{...scope},authorityRevision:f.facts.revision,activationId:f.facts.activation.id,expiresAt:Date.now()+60000};
  const policy=createReadPolicy(f.facts,{scope}),trap=archivedTrap([reference]);
- try{await assert.rejects(selectedSkillContext({selection:{path:entry,name:'studio-compute-workflow'},registered:[{path:entry,name:'studio-compute-workflow'}],registeredRoots:[bundle],bundledRoot:bundle,policy}),/attachment_unavailable/);trap.assertZero();}finally{trap.restore();}
+ try{const disclosed=await selectedSkillContext({selection:{path:entry,name:'studio-compute-workflow'},registered:[{path:entry,name:'studio-compute-workflow'}],registeredRoots:[bundle],bundledRoot:bundle,policy});assert.equal(disclosed.attachments.length,1);assert(!disclosed.text.includes('ARCHIVED REFERENCE'));assert(!disclosed.text.includes('SEALED REF'));assert.throws(()=>policy.assertReadable(reference),/archived/);trap.assertZero();}finally{trap.restore();}
 });
 
 test('global archives with no selected configuration use registered metadata in catalog, routes and source receipts',async t=>{
@@ -179,4 +181,14 @@ test('revalidate compares authority facts independent of key order but rejects r
  await policy.revalidate();
  const changed=createReadPolicy(f.facts,{reload:async()=>reverseKeys({...f.facts,revision:'authority-2'})});
  await assert.rejects(()=>changed.revalidate(),/activation changed/);
+});
+
+
+test('a backend-issued durable repair grant permits focused stale-evidence guidance while scope or permission revocation refuses',async t=>{
+ const f=fixture(t),scope={provider:'codex',threadId:'thread',taskId:'task',projectId:'project',environmentId:'env',inputRoot:'/inputs',checkCurrent:()=>true};
+ f.facts.state='stale';f.facts.readGrant={id:'human-delegation',delegationId:'human-delegation',duration:'delegation',purpose:'repair',resourceIds:['delivery'],owner:Object.fromEntries(['provider','threadId','taskId','projectId','environmentId','inputRoot'].map(key=>[key,scope[key]])),authorityRevision:f.facts.revision,activationId:f.facts.activation.id,expiresAt:null};
+ const router=new ScientificSkillRouter({map,sourceRoot:()=>f.root,consent:()=>true,setupAllowed:()=>false,resolveGuidance:async()=>f.facts}),document='delivery/SKILL.md';
+ for(let attempt=0;attempt<3;attempt++){f.facts.revision='evidence-'+attempt;f.facts.readGrant.authorityRevision=f.facts.revision;const result=await router.read('codex','env.install',document,{scope});assert.equal(result.status,'passed');assert.match(result.text,/LEGACY BODY/);}
+ const denied=await router.read('codex','env.install',document,{scope:{...scope,threadId:'other'}});assert.equal(denied.status,'blocked');assert(!denied.text);
+ f.facts.state='revoked';const revoked=await router.read('codex','env.install',document,{scope});assert.equal(revoked.status,'blocked');assert(!revoked.text);
 });

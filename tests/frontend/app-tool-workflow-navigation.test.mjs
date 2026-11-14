@@ -17,13 +17,13 @@ function fixture({locate=()=>location,select=value=>value,legacy=false}={}){
 }
 const privileged=h=>h.calls.filter(call=>call.method==='worker.request'&&/\/api\/run\/(?:submit|validate|revise|resume)|\/api\/runs\/prepare/.test(call.data.target)||call.method.startsWith('tools.workflows.')&&!['tools.workflows.locateRun'].includes(call.method));
 
-test('actual Jobs→bound run waits for original conversation ACK before publishing the exact step focus',async()=>{
- const ack=defer(),h=fixture({select:()=>ack.promise});await h.flush();h.clickJob();await h.flush();assert.equal(h.calls.filter(call=>call.method==='tools.workflows.locateRun').length,1);assert.throws(()=>h.find(node=>node.type==='./RunReview'));
- ack.resolve(original);await h.flush();const page=h.find(node=>node.type==='./AgentTaskPage'&&node.props.task.id===task.id);assert.deepEqual({...page.props.toolWorkflowFocus,nonce:'fresh'},{task_id:task.id,execution_id:'execution',step_id:'first',nonce:'fresh'});assert.equal(h.storage.getItem('studio.section'),'agent-task:'+task.id);assert.deepEqual(privileged(h),[]);h.unmount();
+test('actual Jobs opens bound run details while preserving the current conversation and project',async()=>{
+ const h=fixture();await h.flush();h.clickJob();await h.flush();const page=h.find(node=>node.type==='./RunReview');assert.equal(page.props.run.id,run.id);assert.equal(h.storage.getItem('studio.section'),'task:'+run.id);assert.equal(h.storage.getItem('studio.conversation'),ordinary.id);assert(!h.calls.some(call=>call.method==='tools.workflows.locateRun'||call.method==='conversation.select'&&call.data.id===original.id));assert.deepEqual(privileged(h),[]);h.unmount();
 });
 
-test('failed or superseded typed location cannot fall back to the generic execution page',async()=>{
- for(const superseded of [false,true]){const pending=defer(),h=fixture({locate:()=>pending.promise});await h.flush();h.clickJob();await h.flush();if(superseded)h.find(node=>node.props?.['data-testid']==='navigate-skills').props.onClick();if(superseded)pending.resolve(location);else pending.reject(Error('Original owner unavailable'));await h.flush();assert.throws(()=>h.find(node=>node.type==='./RunReview'));assert(!h.calls.some(call=>call.method==='conversation.select'&&call.data.id===original.id));assert.deepEqual(privileged(h),[]);h.unmount();}
+test('explicit associated workflow action waits for original conversation acknowledgement and publishes exact step focus',async()=>{
+ const ack=defer(),h=fixture({select:()=>ack.promise});await h.flush();h.clickJob();await h.flush();h.find(node=>node.type==='./RunReview').props.onOpenWorkflow(run.id);await h.flush();assert.equal(h.storage.getItem('studio.section'),'task:'+run.id);assert.equal(h.calls.filter(call=>call.method==='tools.workflows.locateRun').length,1);
+ ack.resolve(original);await h.flush();const page=h.find(node=>node.type==='./AgentTaskPage'&&node.props.task.id===task.id);assert.deepEqual({...page.props.toolWorkflowFocus,nonce:'fresh'},{task_id:task.id,execution_id:'execution',step_id:'first',nonce:'fresh'});assert.equal(h.storage.getItem('studio.section'),'agent-task:'+task.id);assert.deepEqual(privileged(h),[]);h.unmount();
 });
 
 test('legacy jobs still open the original review route without querying tool-workflow ownership',async()=>{

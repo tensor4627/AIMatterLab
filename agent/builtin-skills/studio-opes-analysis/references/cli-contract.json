@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract": "studio-pygas-opes-analysis-cli-v1",
-  "scope": "Public source-specific authoring companion. It supplies runnable config grammar, not a scientific grid choice, execution authorization, runtime validation or FES convergence. Preserve the original workflow and pinned input; human Prepare/Execute remains separate.",
+  "scope": "Public source-specific authoring companion. It supplies runnable config grammar, not a scientific grid choice, execution authorization, runtime validation or FES convergence. Preserve the original workflow and pinned input; current user delegation governs Prepare/Execute while required artifact/runtime checks remain separate.",
   "source_receipt": {
     "local_files": [
       {

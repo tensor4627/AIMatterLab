@@ -4,18 +4,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {createToolConfigurationController,registerToolConfigurationRoutes} from "../../backend/main/compute/tool-configurations.mjs";
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {Catalog} from '../../backend/main/workspace/catalog.mjs';
 import {createReadPolicy} from "../../agent/skills/read-policy.mjs";
 
 const clone=value=>structuredClone(value),sha=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
 const INDEX='tool-configuration-index',BINDING='tool-guidance-binding',V1='1'.repeat(64),V2='2'.repeat(64);
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 
-function fixture({externalLease=false}={}){
- const data=new Map(),calls=[],confirmations=[],states=new Map(),records=new Map(),extraArchives=[];let clock=Date.now(),hook=null,confirmHook=null,scopeAlive=true;
+function fixture({externalLease=false,catalogOverride}={}){
+ const data=new Map(),calls=[],confirmations=[],states=new Map(),records=new Map(),extraArchives=[];let clock=Date.now(),hook=null,confirmHook=null,scopeAlive=true,resourceIdentity={kind:'worker'};
  const binding={distribution:'Fixture',root:'/worker',port:8888};
  let owner={provider:'codex',threadId:'thread',taskId:'task',projectId:'compute-project',environmentId:'environment',inputRoot:'/inputs',serial:1};
  let target={kind:'local',projectId:'compute-project',environmentId:'environment',engine:'installation.check',workerBinding:clone(binding)};
- const catalog={get:(kind,id)=>clone(data.get(kind+':'+id)),put:(kind,id,value)=>{data.set(kind+':'+id,clone(value));return clone(value);},list:kind=>[...data.entries()].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>clone(value)),transaction:perform=>{const before=new Map([...data].map(([key,value])=>[key,clone(value)]));try{return perform();}catch(error){data.clear();for(const item of before)data.set(...item);throw error;}}};
+ let catalog=catalogOverride||{get:(kind,id)=>clone(data.get(kind+':'+id)),put:(kind,id,value)=>{data.set(kind+':'+id,clone(value));return clone(value);},list:kind=>[...data.entries()].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>clone(value)),transaction:perform=>{const before=new Map([...data].map(([key,value])=>[key,clone(value)]));try{return perform();}catch(error){data.clear();for(const item of before)data.set(...item);throw error;}}};
  for(const version of [V1,V2])records.set(version,{schema_version:1,package_id:'atlas',package_version:version,manifest_sha256:'a'.repeat(64),source_commit:'b'.repeat(40),snapshot_root:'D:\\snapshots\\atlas\\'+version,package_root:'D:\\packages\\atlas-'+version[0],package_roots:['D:\\known-aliases\\A','D:\\known-aliases\\B'],guidance:[{role:'delivery',path:'SKILL.md'},{role:'installation',path:'setup/install.md'},{role:'configuration',path:'setup/config.md'}],files:[{kind:'file',path:'run.py',size:1,sha256:'c'.repeat(64)}],manifest:{id:'atlas',functions:[{id:'smoke',engine:'installation.check'}]}});
  const packages={read:({package_id,package_version=V1})=>{assert.equal(package_id,'atlas');const value=records.get(package_version);if(!value)throw Error('Unknown fixture package');return clone(value);}};
  const health={name:'gpu-sampling-studio',root:'/worker',runtime:'/fixture-runtime',execution_policy:'desktop-review-v1',tool_configuration_schema:1};
@@ -24,10 +28,10 @@ function fixture({externalLease=false}={}){
  function lease(){const value={epoch:4,context:{threadId:owner.threadId,taskId:owner.taskId,projectId:owner.projectId,environmentId:owner.environmentId,inputRoot:owner.inputRoot}};leaseMap.set('codex',value);return value;}
  lease();
  function response(state,{body=false}={}){
-  const pkg=records.get(state.package_version),value={schema_version:1,configuration_id:state.configuration_id,package_id:'atlas',package_version:state.package_version,manifest_sha256:pkg.manifest_sha256,target:clone(state.target),environment_sha256:'d'.repeat(64),revision:state.revision,status:state.status,plan_sha256:state.plan_sha256};
+  const pkg=records.get(state.package_version),value={schema_version:1,configuration_id:state.configuration_id,package_id:'atlas',package_version:state.package_version,manifest_sha256:pkg.manifest_sha256,target:clone(state.target),environment_sha256:'d'.repeat(64),revision:state.revision,status:state.status,plan_sha256:state.plan_sha256,install:{status:state.installed?'passed':'not_run'}};
   // Real plan/status records omit read-only guidance identity extensions.
   if(body)Object.assign(value,{source_commit:pkg.source_commit,archive_revision:1,functions:clone(pkg.manifest.functions),archived_resources:archiveFor(state)});
-  if(body&&state.status==='active')value.execution_skill={id:state.execution_skill.id,sha256:state.execution_skill.sha256,body:state.execution_skill.body};
+  if(body&&state.has_activation)value.execution_skill={id:state.execution_skill.id,sha256:state.execution_skill.sha256,body:state.execution_skill.body};
   return value;
  }
  function archiveFor(state){return state.has_activation?[{path:'/worker/packages/'+state.package_version+'/SKILL.md',role:'delivery',configuration_id:state.configuration_id,package_id:'atlas',package_version:state.package_version},...extraArchives.filter(resource=>resource.configuration_id===state.configuration_id).map(clone)]:[];}
@@ -36,7 +40,7 @@ function fixture({externalLease=false}={}){
   const value={schema_version:1,configurations,archived_resources:[...states.values()].flatMap(archiveFor),scope:'Persisted activation metadata only; controlled fixture, no runtime or file inspection'};return {...value,revision:sha(value)};
  }
  function activateState(state){
-  if(state.status!=='tested'||state.proof!==true)throw Error('All controlled worker test evidence required');
+  if(!state.installed)throw Error('Confirmed controlled installed source required');
   const body='Configured controlled worker fixture '+state.configuration_id;
   state.status='active';state.revision++;state.has_activation=true;state.execution_skill={id:sha(body),sha256:sha(body),body};
  }
@@ -53,19 +57,20 @@ function fixture({externalLease=false}={}){
   if(route==='/api/tool-configuration/status')return response(state);
   if(route==='/api/tool-execution-skill/read')return response(state,{body:true});
   assert.equal(args.expected_revision,state.revision,'Worker rejects stale expected revision');assert.equal(args.plan_sha256,state.plan_sha256);
-  if(route==='/api/tool-configuration/execute'){assert.equal(state.status,'planned');state.status='testing';state.revision++;return response(state);}
+  if(route==='/api/tool-configuration/execute'){assert.equal(state.status,'planned');state.status='testing';state.installed=true;state.revision++;return response(state);}
   if(route==='/api/tool-configuration/activate'){activateState(state);return response(state,{body:true});}
   throw Error('Unexpected controlled worker route '+route);
  }
  worker.request=async(method,route,args)=>{calls.push({method,route,args:clone(args)});const next=()=>dispatch(method,route,args);return hook?hook(method,route,args,next):next();};
- const controller=createToolConfigurationController({catalog,packages,worker,...externalLease?{getLease:provider=>leaseMap.get(provider)}:{},current:()=>clone(owner),currentTarget:()=>clone(target),getSettings:()=>({distribution:'Fixture',workerRoot:'/worker',workerPort:8888}),assertIdle:()=>{},confirm:async(plan,event)=>{confirmations.push({plan:clone(plan),event});return confirmHook?confirmHook(plan,event):true;},toWorkerPath:value=>'/mnt/'+value[0].toLowerCase()+value.slice(2).replaceAll('\\','/'),now:()=>clock});
+ const makeController=()=>createToolConfigurationController({catalog,packages,worker,getResourceIdentity:()=>clone(resourceIdentity),...externalLease?{getLease:provider=>leaseMap.get(provider)}:{},current:()=>clone(owner),currentTarget:()=>clone(target),getSettings:()=>({distribution:'Fixture',workerRoot:'/worker',workerPort:8888}),assertIdle:()=>{},confirm:async(plan,event)=>{confirmations.push({plan:clone(plan),event});return confirmHook?confirmHook(plan,event):true;},toWorkerPath:value=>'/mnt/'+value[0].toLowerCase()+value.slice(2).replaceAll('\\','/'),now:()=>clock});
+ const controller=makeController();
  const plan=async(version=V1,request_id='fixture-plan-1')=>controller.plan({package_id:'atlas',package_version:version,project_id:'compute-project',environment_id:'environment',request_id});
  const reviewed=value=>({configuration_id:value.configuration_id,expected_revision:value.revision,plan_sha256:value.plan_sha256});
  function complete(id){const state=states.get(id);assert.equal(state.status,'testing');state.proof=true;state.status='tested';state.revision++;return response(state);}
  async function active(version=V1,requestId='fixture-plan-1'){const planned=await plan(version,requestId);await controller.execute(reviewed(planned),{human:true});complete(planned.configuration_id);const tested=await controller.status({configuration_id:planned.configuration_id});return controller.activate(reviewed(tested));}
  function scope(){const selected=leaseMap.get(owner.provider);return {...clone(owner),epoch:selected?.epoch,checkCurrent:()=>scopeAlive&&leaseMap.get(owner.provider)===selected};}
  function hold(route,predicate=()=>true){const entered=deferred(),release=deferred();let used=false;hook=async(method,name,args,next)=>{if(name===route&&predicate(args)&&!used){used=true;const result=next();entered.resolve();await release.promise;return result;}return next();};return {entered:entered.promise,release:()=>release.resolve()};}
- return {controller,catalog,packages,worker,leaseMap,calls,confirmations,records,states,extraArchives,binding,plan,reviewed,complete,active,scope,hold,metadata,
+ return {controller,restart:makeController,replaceCatalog:value=>{catalog=value;},resource:value=>{resourceIdentity=value;},catalog,packages,worker,leaseMap,calls,confirmations,records,states,extraArchives,binding,plan,reviewed,complete,active,scope,hold,metadata,
   hook:value=>{hook=value;},confirm:value=>{confirmHook=value;},owner:value=>{owner={...owner,...value};},target:value=>{target=value===null?null:{...target,...value};},advance:value=>{clock+=value;},expireScope:()=>{scopeAlive=false;},get ownerValue(){return clone(owner);},get targetValue(){return clone(target);}};
 }
 
@@ -73,13 +78,17 @@ test('typed plan, human confirmation, execution, observed tests, activation, bin
  const f=fixture(),plan=await f.plan();assert.equal(plan.status,'planned');assert.equal(f.confirmations.length,0);
  await assert.rejects(Promise.resolve().then(()=>f.controller.activate({...f.reviewed(plan),passed:true})),/Exact typed/);assert.equal(f.states.get(plan.configuration_id).status,'planned');
  await f.controller.execute(f.reviewed(plan),{sender:'controlled-human'});assert.equal(f.confirmations.length,1);assert.equal(f.confirmations[0].event.sender,'controlled-human');assert.equal(f.states.get(plan.configuration_id).status,'testing');
- await assert.rejects(f.controller.activate(f.reviewed(await f.controller.status({configuration_id:plan.configuration_id}))),/evidence required/);
+ assert.equal((await f.controller.status({configuration_id:plan.configuration_id})).status,'testing');
  f.complete(plan.configuration_id);const tested=await f.controller.status({configuration_id:plan.configuration_id}),active=await f.controller.activate(f.reviewed(tested));assert.equal(active.status,'active');
  const read=await f.controller.read({configuration_id:active.configuration_id});assert.equal(read.execution_skill.sha256,sha(read.execution_skill.body));
  await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});f.calls.length=0;
  const facts=await f.controller.resolveGuidance(f.scope());assert.equal(facts.state,'active');assert.equal(facts.executionSkill.sha256,sha(facts.executionSkill.text));assert.equal(facts.target.environmentId,'environment');assert.deepEqual(facts.applicableFunctions,[]);assert.deepEqual(facts.engines,['installation.check']);
  const routes=f.calls.map(call=>call.route),metadata=routes.indexOf('/api/tool-guidance/state'),body=routes.indexOf('/api/tool-execution-skill/read');assert(metadata>=0&&body>metadata,'Resolve must read authority metadata before the execution body');
 });
+
+test('confirmed installed source can activate before optional tests complete without claiming they passed',async()=>{const f=fixture(),plan=await f.plan();await f.controller.execute(f.reviewed(plan),{human:true});const testing=await f.controller.status({configuration_id:plan.configuration_id});const enabled=await f.controller.activate(f.reviewed(testing));assert.ok(enabled.execution_skill);assert.equal(f.states.get(plan.configuration_id).proof,false);});
+test('benign stale evidence keeps the verified installed execution snapshot available across binding and read policy',async()=>{const f=fixture(),active=await f.active(),state=f.states.get(active.configuration_id);state.status='stale';state.revision++;await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});const facts=await f.controller.resolveGuidance(f.scope());assert.equal(facts.state,'stale');assert.ok(facts.executionSkill);const policy=createReadPolicy(facts,{scope:f.scope()});assert.ok(policy.catalogEntry());assert.equal(policy.blocksAll(),false);assert.equal(policy.executionResult('installation.check').status,'passed');});
+test('revoked worker authorization cannot publish a saved body or preserve execution availability',async()=>{const f=fixture(),active=await f.active();await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});f.hook((method,route,args,next)=>{if(route==='/api/tool-execution-skill/read')throw Error('Engine is not authorized');return next();});const facts=await f.controller.resolveGuidance(f.scope());assert.equal(facts.executionSkill,undefined);assert.equal(createReadPolicy(facts,{scope:f.scope()}).blocksAll(),true);});
 
 test('plan retry keeps its original local creation identity and typed aliases never reach the worker',async()=>{
  const f=fixture(),one=await f.plan(),before=f.catalog.get(INDEX,one.configuration_id);f.advance(500);assert.equal((await f.plan()).configuration_id,one.configuration_id);assert.equal(f.catalog.get(INDEX,one.configuration_id).created_at,before.created_at);
@@ -161,13 +170,13 @@ test('local Windows link metadata and historical roots are sealed without resolv
  assert.equal(facts.state,'legacy_unconfigured');const paths=facts.archivedResources.flatMap(resource=>resource.paths);for(const root of [record.snapshot_root,record.package_root,...record.package_roots])assert(paths.includes(root+'\\upstream\\docs\\SKILL.md'),root);assert(paths.some(path=>path.endsWith('redirect\\SKILL.md')));assert.equal(f.catalog.get(INDEX,active.configuration_id).has_execution,true);
 });
 
-test('grant scope is an exact current package version/resource subset and its bound live lease',async()=>{
+test('repair delegation keeps its exact package/resource scope across a current-lease reconnect',async()=>{
  const f=fixture(),active=await f.active();await f.active(V2,'fixture-plan-2');await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});let facts=await f.controller.resolveGuidance(f.scope());
  const resource=facts.archivedResources.find(resource=>resource.role==='delivery'&&resource.paths.some(path=>path.includes('snapshots')&&path.includes(V1))),other=facts.archivedResources.find(resource=>resource.role==='delivery'&&resource.paths.some(path=>path.includes('snapshots')&&path.includes(V2)));assert(resource&&other);
  for(const ids of [[],['unknown-resource'],[other.id],[resource.id,resource.id]])await assert.rejects(f.controller.grant({configuration_id:active.configuration_id,purpose:'repair',resource_ids:ids}),/resource|scope/i);
- await f.controller.grant({configuration_id:active.configuration_id,purpose:'repair',resource_ids:[resource.id]});facts=await f.controller.resolveGuidance(f.scope());assert.deepEqual(facts.readGrant.resourceIds,[resource.id]);assert.equal(facts.readGrant.owner.leaseEpoch,4);assert.equal(facts.readGrant.authorityRevision,facts.revision);
+ await f.controller.grant({configuration_id:active.configuration_id,purpose:'repair',resource_ids:[resource.id]});facts=await f.controller.resolveGuidance(f.scope());assert.deepEqual(facts.readGrant.resourceIds,[resource.id]);assert.equal(facts.readGrant.duration,'delegation');assert.equal(facts.readGrant.expiresAt,null);assert.equal(facts.readGrant.owner.environmentId,'environment');assert.equal(facts.readGrant.authorityRevision,facts.revision);
  const scope=f.scope(),policy=createReadPolicy(facts,{scope});assert.equal(policy.hasReadGrant(),true);assert.equal(policy.isGrantedPath(resource.paths[0]),true);assert.equal(policy.isGrantedPath(other.paths[0]),false);
- f.worker.providerScopes.scopes.set('codex',{...f.worker.providerScopes.scopes.get('codex'),epoch:5});assert.equal(createReadPolicy(await f.controller.resolveGuidance(f.scope()),{scope:f.scope()}).hasReadGrant(),false);
+ f.worker.providerScopes.scopes.set('codex',{...f.worker.providerScopes.scopes.get('codex'),epoch:5});assert.equal(createReadPolicy(await f.controller.resolveGuidance(f.scope()),{scope:f.scope()}).hasReadGrant(),true);
 });
 
 test('a lease rotated or reshaped during grant preparation cannot receive a success receipt',async()=>{
@@ -231,7 +240,7 @@ test('an activation rejected before dispatch cannot seal guidance or manufacture
  for(const mode of ['disconnected','unverified','untested']){
   const f=fixture(),plan=await f.plan();let reviewed=plan;if(mode!=='untested'){await f.controller.execute(f.reviewed(plan),{human:true});f.complete(plan.configuration_id);reviewed=await f.controller.status({configuration_id:plan.configuration_id});}
   if(mode==='disconnected')f.worker.connection=null;if(mode==='unverified')f.hook((method,route,args,next)=>route==='/api/health'?{name:'wrong-service'}:next());f.calls.length=0;
-  await assert.rejects(f.controller.activate(f.reviewed(reviewed)),/verify|not verified|evidence required/i);const stored=f.catalog.get(INDEX,plan.configuration_id);assert.equal(stored.has_execution,false);assert.equal(stored.may_have_execution,false);assert(!f.calls.some(call=>call.route==='/api/tool-configuration/activate'));
+  await assert.rejects(f.controller.activate(f.reviewed(reviewed)),/verify|not verified|installed source required/i);const stored=f.catalog.get(INDEX,plan.configuration_id);assert.equal(stored.has_execution,false);assert.equal(stored.may_have_execution,false);assert(!f.calls.some(call=>call.route==='/api/tool-configuration/activate'));
   if(mode==='disconnected'){assert.equal(f.calls.length,0);const facts=await f.controller.resolveGuidance(f.scope());assert.equal(facts.archivedResources.length,0);assert.equal(createReadPolicy(facts).allowsPath('D:\\packages\\atlas-1\\SKILL.md'),true);}
  }
 });
@@ -283,4 +292,37 @@ for(const [label,field,value]of [
 ])test('an active worker reply cannot change the registered '+label+' for the same configuration',async()=>{
  const f=fixture(),active=await f.active();f.hook((method,route,args,next)=>{const result=next();if(route==='/api/tool-execution-skill/read')result[field]=value;return result;});
  await assert.rejects(f.controller.read({configuration_id:active.configuration_id}),/identity|source|manifest|package|target|differs/i);
+});
+
+
+test('trusted repair delegation survives controller restart, evidence drift and several attempts without another grant',async()=>{
+ const f=fixture(),active=await f.active();await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});let facts=await f.controller.resolveGuidance(f.scope());const resource=facts.archivedResources.find(item=>item.paths.some(file=>file.includes('snapshots')));
+ assert.equal((await f.controller.grant({configuration_id:active.configuration_id,purpose:'repair',resource_ids:[resource.id]})).duration,'delegation');
+ f.advance(3*24*60*60*1000);f.owner({serial:55});const previous=f.leaseMap.get('codex');f.leaseMap.set('codex',{epoch:9,context:clone(previous.context)});
+ const restored=f.restart(),state=f.states.get(active.configuration_id);state.status='stale';
+ for(let attempt=0;attempt<3;attempt++){state.revision++;facts=await restored.resolveGuidance(f.scope());assert.equal(facts.state,'stale');const policy=createReadPolicy(facts,{scope:f.scope()});assert.equal(policy.hasReadGrant(),true);assert.equal(policy.isGrantedPath(resource.paths[0]),true);assert.equal(policy.isGrantedPath('/ungranted/other/SKILL.md'),false);}
+ assert.equal(f.catalog.list('tool-guidance-repair-delegation').length,1);
+});
+
+for(const [key,value]of [['threadId','different-thread'],['taskId','different-task'],['projectId','different-project'],['environmentId','different-environment'],['inputRoot','/different-inputs'],['provider','kimi']])test('durable repair cannot inherit changed '+key,async()=>{
+ const f=fixture(),active=await f.active();await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});const facts=await f.controller.resolveGuidance(f.scope());await f.controller.grant({configuration_id:active.configuration_id,purpose:'repair',resource_ids:[facts.archivedResources[0].id]});f.owner({[key]:value});
+ assert.equal((await f.restart().resolveGuidance(f.scope())).readGrant,undefined);
+});
+
+test('provider revocation, selected resource change and actual project-policy refusal revoke durable repair reads',async()=>{
+ for(const kind of ['sharing','resource','project-policy','resource-path']){
+  const f=fixture(),active=await f.active();await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});const facts=await f.controller.resolveGuidance(f.scope());await f.controller.grant({configuration_id:active.configuration_id,purpose:'repair',resource_ids:[facts.archivedResources[0].id]});
+  if(kind==='sharing')await f.controller.bind({configuration_id:active.configuration_id,providers:[]});
+  if(kind==='resource')f.resource({kind:'terminal'});
+  if(kind==='project-policy')f.hook((_method,route,_args,next)=>{if(route==='/api/tool-execution-skill/read')throw Error('Environment is not authorized');return next();});
+  if(kind==='resource-path')f.records.get(V1).guidance=[];
+  assert.equal((await f.restart().resolveGuidance(f.scope())).readGrant,undefined,kind);
+ }
+});
+
+
+test('repair delegation is reloaded from SQLite after catalog closure and a new controller',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'studio-repair-delegation-'));let catalog=new Catalog(directory);t.after(()=>{catalog.db.close();fs.rmSync(directory,{recursive:true,force:true});});
+ const f=fixture({catalogOverride:catalog}),active=await f.active();await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});const facts=await f.controller.resolveGuidance(f.scope()),resource=facts.archivedResources[0];await f.controller.grant({configuration_id:active.configuration_id,purpose:'repair',resource_ids:[resource.id]});
+ catalog.db.close();catalog=new Catalog(directory);f.replaceCatalog(catalog);const restarted=f.restart(),restored=await restarted.resolveGuidance(f.scope());assert.equal(restored.readGrant.duration,'delegation');assert.deepEqual(restored.readGrant.resourceIds,[resource.id]);assert(createReadPolicy(restored,{scope:f.scope()}).hasReadGrant());
 });

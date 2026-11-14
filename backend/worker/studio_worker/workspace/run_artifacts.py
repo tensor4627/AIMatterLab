@@ -24,10 +24,10 @@ TERMINAL = ("succeeded", "failed", "cancelled")
 
 
 class RunArtifactsMixin:
-    def collect(self, identifier):
+    def collect(self, identifier, names=None):
         run = self.store.run(identifier)
         return {"run": run["id"], "artifacts": Adapter(run["engine"]).collect(
-                Path(run["directory"]) / "results"), "validation": run["validation"]}
+                Path(run["directory"]) / "results", names), "validation": run["validation"], "observation":"live_metadata" if names is None else "selected_hash_snapshots", "observed_at":time.time()}
 
     def log(self, identifier, offset=0):
         run = self.store.run(identifier)
@@ -59,23 +59,48 @@ class RunArtifactsMixin:
                     "offset": stream.tell(), "size": path.stat().st_size}
 
     def export(self, identifier):
+        from studio_worker.infrastructure.util import stable_file_snapshot
         run = self.store.run(identifier)
         collected = self.collect(identifier)
         buffer = io.BytesIO()
         included, omitted, budget = [], [], 32 * 1024 * 1024
+        files, omitted_outputs = [], []
+        root = Path(run['directory'])
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for asset in run["snapshots"]:
-                path = Path(run["directory"]) / "simulation" / asset["name"]
-                if digest(path) != asset["sha256"]:
-                    raise ValueError("Immutable input snapshot changed")
+                path = root / "simulation" / asset["name"]
                 if path.stat().st_size <= budget:
-                    archive.write(path, "inputs/" + asset["name"])
+                    metadata, content = stable_file_snapshot(path, include_bytes=True, max_bytes=budget)
+                    if metadata['sha256'] != asset['sha256']:
+                        raise ValueError("Immutable input snapshot changed")
+                    name = "inputs/" + asset["name"]
+                    archive.writestr(name, content)
+                    files.append({"path":name, **metadata, "kind":"input"})
                     included.append(asset["name"])
-                    budget -= path.stat().st_size
+                    budget -= len(content)
                 else:
+                    if stable_file_snapshot(path)['sha256'] != asset['sha256']:
+                        raise ValueError("Immutable input snapshot changed")
                     omitted.append({**asset, "reason":"32 MiB bundle limit; supply original by hash"})
+            # Include bounded stable outputs and actual logs. Omitted live output
+            # metadata never pretends to be a verified output hash.
+            candidates=[("results/"+asset['name'],root/'results'/asset['name'],'output') for asset in collected['artifacts']]
+            candidates += [(name,root/name,'log') for name in ('console.log','validation.json','execution-check.json','environment.json','exit.json') if (root/name).is_file()]
+            for name,path,kind in candidates:
+                try:
+                    if path.stat().st_size > budget:
+                        omitted_outputs.append({"path":name,"reason":"32 MiB bundle limit", "hash_status":"not_run"})
+                        continue
+                    metadata,content=stable_file_snapshot(path,include_bytes=True,max_bytes=budget)
+                except (OSError,ValueError) as exc:
+                    omitted_outputs.append({"path":name,"reason":str(exc), "hash_status":"not_run"})
+                    continue
+                archive.writestr(name,content);budget-=len(content)
+                files.append({"path":name,**metadata,"kind":kind})
             archive.writestr("reproduction.json", json.dumps({"run":run, **collected,
-                "exported_at":time.time(), "included_inputs":included, "omitted_inputs":omitted}, indent=2))
-            archive.writestr("README.txt", "Inputs are immutable copies. Large inputs are listed by source and SHA256. Logs and output hashes are recorded; scientific validity is separate from process completion.")
+                "exported_at":time.time(), "included_inputs":included, "omitted_inputs":omitted,
+                "included_files":files,"omitted_outputs":omitted_outputs,
+                "scope":"Hashes describe included stable file bytes only. Live artifact metadata is an observation; scientific validity is separate."}, indent=2))
+            archive.writestr("README.txt", "Inputs are immutable copies. reproduction.json lists every included input, output and log with its snapshot hash, plus omitted files and reasons. Large inputs are listed by source and SHA256. Other artifact metadata is a live observation without a hash. Scientific validity is separate from process completion.")
         bundle = buffer.getvalue()
         return {"base64":base64.b64encode(bundle).decode(), "sha256":hashlib.sha256(bundle).hexdigest(), "omitted_inputs":omitted}

@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env
+from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env, allocated_gpu, run_process_env
 from studio_worker.infrastructure.store import Store
 from studio_worker.compute.runtime_service import RuntimeServiceMixin
 from studio_worker.compute.launch_protocol import LAUNCH_SCHEMA, has_launch_evidence, launch_digest, host_identity
@@ -84,7 +84,7 @@ class SchedulerMixin:
                 # Authorization, snapshot hashing and process start are I/O bound and
                 # must not hold the Store lock shared with every HTTP request.
                 project, _ = self.authorize(run)
-                if any(busy_run["gpu"] == run["gpu"] for busy_run in busy):
+                if allocated_gpu(run) is not None and any(allocated_gpu(busy_run) == allocated_gpu(run) for busy_run in busy):
                     continue
                 if sum(busy_run["project_id"] == run["project_id"] for busy_run in busy) + sum(
                         value.get("project_id") == run["project_id"] and value.get("status") in ("queued", "running", "unknown")
@@ -95,7 +95,7 @@ class SchedulerMixin:
                 token = secrets.token_hex(24)
                 launch = {"schema": LAUNCH_SCHEMA, "protocol_version": 2, "run_id": run["id"], "claim": token,
                           "store_root": str(self.store.root), "command": run["command"],
-                          "environment": process_env(run["environment_snapshot"], run["gpu"]),
+                          "environment": run_process_env(run),
                           "max_seconds": run["max_seconds"]}
                 with self.store.lock:
                     current = self.store.run(run["id"])
@@ -115,7 +115,7 @@ class SchedulerMixin:
                     if current_project.get("revision", 0) != project.get("revision", 0):
                         continue
                     current_busy = [value for value in self.store.runs() if value["status"] in ("running", "unknown")]
-                    if (any(value["gpu"] == current["gpu"] for value in current_busy) or
+                    if ((allocated_gpu(current) is not None and any(allocated_gpu(value) == allocated_gpu(current) for value in current_busy)) or
                             sum(value["project_id"] == current["project_id"] for value in current_busy) + sum(
                                 value.get("project_id") == current["project_id"] and value.get("status") in ("queued", "running", "unknown")
                                 for value in self.store.list("cluster-run")) >= project["policy"]["max_concurrent"]):

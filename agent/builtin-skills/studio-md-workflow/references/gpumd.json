@@ -49,7 +49,7 @@
   "display_policy": {
     "basic": "System/task-dependent scientific choices and consequential unresolved decisions first. Preserve upstream parameter names.",
     "details": "Group actual defaults and technical values by purpose in folded sections, retaining source/proposed/derived provenance.",
-    "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Human current-revision execution gate remains required."
+    "execution": "Saved inputs and completeness are distinct from artifact/runtime/numerical/physical validation. Current user delegation and existing project/resource authorization govern execution; required serialized-artifact and target-runtime checks remain separate."
   },
   "copyright": "Studio-authored concise rules. Official tutorial links and source references retain their own licenses; raw mirrored manuals are not part of this public reference.",
   "source_receipt": {

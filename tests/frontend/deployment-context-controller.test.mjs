@@ -58,7 +58,7 @@ test('explicit reconnect waits for its acknowledgement before refreshing the act
  reconnect.resolve();await h.flush();assert.equal(reads(h).length,2);assert.throws(()=>state(h),/not found/);assert.deepEqual(writes(h),[]);h.unmount();
 });
 
-test('resource readiness never replaces the exact human input receipt or starts execution implicitly',async()=>{
- const h=deploymentHarness();await h.flush();assert.equal(execute(h).props.disabled,true);assert.deepEqual(writes(h),[]);h.review();await h.flush();assert.equal(execute(h).props.disabled,false);
+test('resource readiness enables the explicit execution action without requiring optional human review or starting implicitly',async()=>{
+ const h=deploymentHarness();await h.flush();assert.equal(execute(h).props.disabled,false);assert.deepEqual(writes(h),[]);h.review();await h.flush();assert.equal(execute(h).props.disabled,false);
  h.update({worker:false,restoring:true});await h.flush();assert.equal(execute(h).props.disabled,true);assert.equal(h.props.task.deployment.prepared.artifactId,'run-workflow-A');assert.deepEqual(writes(h),[]);h.unmount();
 });

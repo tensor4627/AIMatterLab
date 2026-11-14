@@ -60,7 +60,17 @@ test('the generator refuses an existing destination without modifying author fil
 
 test('generated delivery Markdown links connect the registered snapshot to complete bounded manual/test context',async t=>{
  const h=fixture(t);h.create();const record=h.registry.register({package_root:h.output}),context=await managedToolSkillContext({selection:{name:record.delivery_skill.name,path:path.join(record.snapshot_root,record.delivery_skill.path)},record,policy:createReadPolicy(legacyGuidanceFacts())});
- assert.deepEqual(context.attachments.map(item=>item.label).sort(),['SKILL.md','manual.md','install.md','tool.json','cpu-worker-reference-tests/README.md','cpu-worker-reference-tests/smoke/README.md'].sort());assert(context.text.includes('--workdir <ABSOLUTE_NEW_OUTPUT_DIR>'));assert(context.text.includes('Pass requires a real exit code 0'));assert(context.text.includes('No scientific computation'));assert(!context.text.includes('time.sleep(.15)'));assert.equal(record.scope,'definition_checked');assert.equal(record.installation.status,'not_run');assert.equal(record.tests.status,'not_run');assert(!fs.existsSync(path.join(record.snapshot_root,'smoke-result.json')));
+ assert.deepEqual(context.attachments.map(item=>item.label),['SKILL.md']);
+ // The entry exposes a bounded document index; supporting files are read on demand.
+ const expected=['SKILL.md','manual.md','install.md','tool.json','cpu-worker-reference-tests/README.md','cpu-worker-reference-tests/smoke/README.md'];
+ const visited=new Set(),pending=[...context.document_ids],texts=[];
+ while(pending.length){
+  const documentId=pending.shift();if(visited.has(documentId))continue;visited.add(documentId);
+  const document=await managedToolSkillContext({selection:{name:record.delivery_skill.name,path:path.join(record.snapshot_root,record.delivery_skill.path)},record,policy:createReadPolicy(legacyGuidanceFacts()),documentId});
+  assert.deepEqual(document.attachments.map(item=>item.label),[documentId]);texts.push(document.text);pending.push(...document.document_ids.filter(id=>!visited.has(id)));
+ }
+ assert.deepEqual([...visited].sort(),expected.sort());const text=texts.join('\n');
+ assert(text.includes('--workdir <ABSOLUTE_NEW_OUTPUT_DIR>'));assert(text.includes('Pass requires a real exit code 0'));assert(text.includes('No scientific computation'));assert(!text.includes('time.sleep(.15)'));assert.equal(record.scope,'definition_checked');assert.equal(record.installation.status,'not_run');assert.equal(record.tests.status,'not_run');assert(!fs.existsSync(path.join(record.snapshot_root,'smoke-result.json')));
 });
 
 test('the published zip includes every current skill file with identical bytes',()=>{

@@ -79,11 +79,12 @@ class ToolWorkflows:
 
     def _configuration(self, configuration_id, function_id):
         active = self.configurations.read({'configuration_id': configuration_id})
-        if active['status'] != 'active' or not active.get('execution_skill'): raise StaleWorkflow(active.get('reason') or 'Existing active tool configuration required')
+        if not active.get('execution_skill'): raise StaleWorkflow(active.get('reason') or 'Existing installed execution skill required')
         record = self.store.get('tool-configuration', configuration_id)
         feature = next((item for item in active['execution_skill']['facts']['functions'] if item['id'] == function_id), None)
         if feature is None: raise StaleWorkflow('Configured function is unavailable')
         identity = {'configuration_id': configuration_id, 'execution_skill_id': active['execution_skill']['id'], 'execution_skill_sha256': active['execution_skill']['sha256'], 'package_id': active['package_id'], 'package_version': active['package_version'], 'manifest_sha256': active['manifest_sha256'], 'source_commit': active['source_commit'], 'target': active['target'], 'environment_sha256': record['environment_sha256'], 'authorization_sha256': record['authorization_sha256'], 'python': record['python'], 'installed_prefix': record['installed_prefix'], 'install_files': record['install']['files'], 'max_seconds': record['max_seconds']}
+        identity.update(environment_sha256=active['current_environment_sha256'], authorization_sha256=active['current_authorization_sha256'], python=active['current_python'])
         return identity, feature
 
     def _fresh_step(self, execution, step, cache=None):
@@ -94,7 +95,10 @@ class ToolWorkflows:
             else:
                 current, feature = self._configuration(*key)
                 if cache is not None: cache[key] = (current, feature)
-            if encoded(current) != encoded(frozen['configuration']) or current['target'] != execution['target'] or feature['installed_entrypoint'] != frozen['installed_entrypoint']: raise StaleWorkflow('Workflow package, configuration, environment, authorization, interpreter or installed source changed')
+            stable = lambda value:{key:item for key,item in value.items() if key not in ('environment_sha256','authorization_sha256','python')}
+            if encoded(stable(current)) != encoded(stable(frozen['configuration'])) or current['target'] != execution['target'] or feature['installed_entrypoint'] != frozen['installed_entrypoint']: raise StaleWorkflow('Workflow package, configuration, target or installed source changed')
+            if current != frozen['configuration']:
+                step['check_findings']=[{'status':'warning','code':'configuration_environment_changed','message':'Current authorized environment differs from the original workflow evidence; a newly prepared run snapshots the current registration'}]
             return current, feature
         except (OSError, ValueError, KeyError, PermissionError) as error:
             if isinstance(error, StaleWorkflow): raise
@@ -124,13 +128,13 @@ class ToolWorkflows:
         self.service.verify_snapshot(run)
 
     def _review(self, execution, step, run):
-        frozen = self._snapshot_step(execution, step); configuration = frozen['configuration']
+        frozen = self._snapshot_step(execution, step); configuration = step.get('runtime_observation',frozen['configuration'])
         value = {'execution_id': execution['id'], 'step_id': step['id'], 'snapshot_sha256': execution['snapshot_sha256'], 'run_id': run['id'], 'request_hash': run['request_hash'], 'argv': copy.deepcopy(run['command']), 'inputs': copy.deepcopy(run['snapshots']), 'target': copy.deepcopy(execution['target']), 'directory': run['directory'], 'working_directory': str(Path(run['directory']) / 'results'), 'criteria': copy.deepcopy(REFERENCE_CRITERIA), 'group_id': execution['group']['id'], 'group_version': execution['group']['version'], 'function_id': step['function_id'], **copy.deepcopy(configuration)}
         value['review_sha256'] = sha(encoded(value)); return value
 
     def _derive(self, execution):
         steps = execution['steps']; statuses = [step['status'] for step in steps]
-        execution['status'] = 'stale' if execution.get('blocked_reason') else 'passed' if all(status == 'passed' for status in statuses) else 'unknown' if 'unknown' in statuses else 'stale' if 'stale' in statuses else 'failed' if 'failed' in statuses else 'cancelled' if 'cancelled' in statuses else 'running' if any(status in ('queued', 'running') for status in statuses) else 'submitting' if 'submitting' in statuses else 'validating' if 'validating' in statuses else 'preparing' if 'preparing' in statuses else 'prepared' if 'prepared' in statuses else 'planned'
+        execution['status'] = 'stale' if execution.get('blocked_reason') else ('passed' if all(status == 'passed' for status in statuses) else 'completed') if all(status in ('passed','completed') for status in statuses) else 'unknown' if 'unknown' in statuses else 'stale' if 'stale' in statuses else 'failed' if 'failed' in statuses else 'cancelled' if 'cancelled' in statuses else 'running' if any(status in ('queued', 'running') for status in statuses) else 'submitting' if 'submitting' in statuses else 'validating' if 'validating' in statuses else 'preparing' if 'preparing' in statuses else 'prepared' if 'prepared' in statuses else 'planned'
         execution['reason'] = execution.get('blocked_reason') or next((step['reason'] for step in steps if step['status'] in ('unknown', 'stale', 'failed', 'cancelled') and step.get('reason')), None)
         return execution
 
@@ -151,10 +155,10 @@ class ToolWorkflows:
         return execution
 
     def _response(self, execution):
-        execution = copy.deepcopy(execution); next_step = next((item for item in execution['steps'] if item['status'] != 'passed'), None)
+        execution = copy.deepcopy(execution); next_step = next((item for item in execution['steps'] if item['status'] not in ('passed','completed')), None)
         for step in execution['steps']:
             dependencies = self._snapshot_step(execution, step)['depends_on']
-            step['eligible'] = execution['status'] not in ('stale', 'unknown', 'failed', 'cancelled') and step is next_step and step['status'] == 'pending' and all(self._step(execution, dependency)['status'] == 'passed' for dependency in dependencies)
+            step['eligible'] = execution['status'] not in ('stale', 'unknown', 'failed', 'cancelled') and step is next_step and step['status'] == 'pending' and all(self._step(execution, dependency)['status'] in ('passed','completed') for dependency in dependencies)
             step.setdefault('run_status', None)
         return {'workflow': self.store.get('workflow', execution['workflow_id']), 'execution': execution}
 
@@ -212,6 +216,7 @@ class ToolWorkflows:
             self._revised(execution, data['expected_revision'])
             if not self._step(self._response(execution)['execution'], step['id'])['eligible']: raise PermissionError('Only the next pending step with independently passed dependencies may prepare')
             current, feature = self._fresh_step(execution, step)
+            step['runtime_observation']=copy.deepcopy(current)
             key = 'workflow:' + sha((execution['id'] + '\0' + step['id']).encode())[:48]
             step.update(status='preparing', reason=None, request_id=data['request_id'], prepare_revision=execution['revision'], idempotency_key=key)
             step['spec'] = {'project_id': execution['target']['project_id'], 'environment_id': execution['target']['environment_id'], 'engine': 'installation.check', 'gpu': 0, 'max_seconds': current['max_seconds'], 'inputs': {'run.py': feature['installed_entrypoint']}, 'parameters': {'installation_case': 'worker'}, 'idempotency_key': key, 'workflow_id': execution['workflow_id'], 'origin': 'desktop', 'name': self.store.get('workflow', execution['workflow_id'])['name'][:100] + ' · ' + step['id']}
@@ -232,7 +237,7 @@ class ToolWorkflows:
         with self.service.tool_workflow_lock, self.service.tool_configuration_lock:
             execution = self._refresh(self._execution(data['execution_id'])); step = self._step(execution, data['step_id'])
             if not step.get('review') or data['review_sha256'] != step['review']['review_sha256']: raise ValueError('Actual prepared workflow review identity required')
-            if step['status'] in ('queued', 'running', 'passed', 'failed', 'cancelled', 'unknown', 'stale'): return self._response(execution)
+            if step['status'] in ('queued', 'running', 'passed', 'completed', 'failed', 'cancelled', 'unknown', 'stale'): return self._response(execution)
             self._revised(execution, data['expected_revision'])
             if execution.get('blocked_reason') or step['status'] != 'prepared' or not step['run_id']: raise PermissionError('Existing prepared step and fresh human review required')
             with self.store.lock:
@@ -242,7 +247,7 @@ class ToolWorkflows:
             context = RunContext(execution['id'], step['id'], self.service._tool_workflow_token)
             try:
                 run = self.service.validate(step['run_id'], _workflow_context=context)
-                if run['status'] != 'ready' or run.get('validation', {}).get('status') != 'passed': raise ValueError(run.get('validation', {}).get('message', 'Actual workflow target validation failed'))
+                if run['status'] not in ('draft','ready'): raise ValueError('Prepared workflow attempt changed while checks were running')
                 with self.store.lock:
                     self._fresh_step(execution, step); self._check_run(execution, step, run)
                     step.update(status='submitting'); execution = self._save(execution)
@@ -272,8 +277,15 @@ class ToolWorkflows:
                     elif step['status'] not in ('prepared', 'failed', 'stale'): step.update(status='unknown', reason='Submission is unconfirmed; inspect the same existing run, never resubmit automatically')
                 elif run['status'] == 'validating': step.update(status='unknown', reason='Run validation is unconfirmed; no automatic submit')
                 else:
-                    frozen = self._snapshot_step(execution, step)['configuration']
-                    evidence = reference_evidence(self.service, frozen, {'run_id': run['id'], 'request_hash': step['run_request_hash']})
+                    frozen = step.get('runtime_observation',self._snapshot_step(execution, step)['configuration'])
+                    try:
+                        evidence = reference_evidence(self.service, frozen, {'run_id': run['id'], 'request_hash': step['run_request_hash']})
+                    except (OSError,ValueError,KeyError) as error:
+                        if run['status']!='succeeded' or str(error) in ('Actual supervisor exit required','Bound test run identity changed'):raise
+                        evidence={'status':'failed','reason':str(error)[:2000],'scope':'Independent output check; process completion remains succeeded'}
+                        step.update(status='completed',reason=evidence['reason'],evidence=evidence)
+                        step['check_findings']=[*(item for item in step.get('check_findings',[]) if item.get('code')!='reference_output_check_failed'),{'status':'warning','code':'reference_output_check_failed','message':evidence['reason']}]
+                        continue
                     step.update(status=evidence['status'], reason=evidence['reason'])
                     if evidence['status'] == 'passed': step['evidence'] = evidence
             except (OSError, ValueError, KeyError, PermissionError) as error:

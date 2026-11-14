@@ -55,16 +55,12 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
    setStep(t('保存审阅后的输入'));
    const revised=await api<Run>('POST','/api/run/revise',{run_id:run.id,spec:{name,environment_id:environment,gpu,max_seconds:seconds,inputs,parameters:parsed,idempotency_key:keyRef.current.key},edits});
    revision=revised;if(!current()||revised.studio_workflow_binding!==undefined)return;if(!connectedRef.current){setPendingRun(revised);return;}
-   setStep(t('验证输入与环境'));
-   const validated=await api<Run>('POST','/api/run/validate',{run_id:revised.id});
-   revision=validated;if(!current()||validated.studio_workflow_binding!==undefined)return;if(!connectedRef.current){setPendingRun(validated);return;}
-   if(validated.status!=='ready'||validated.validation.status!=='passed'){onReplace(validated);throw Error(validated.validation.message||t('验证未通过，计算没有提交'));}
-   setStep(t('提交计算'));
+   setStep(t('正在核对输入并提交…'));
    let submitted:Run;
-   try{submitted=await api<Run>('POST','/api/run/submit',{run_id:validated.id});}
+   try{submitted=await api<Run>('POST','/api/run/submit',{run_id:revised.id});if(submitted.id!==revised.id)throw Error(t('提交响应与当前输入版本不匹配，请核对原作业。'));}
    catch(e){
-    revision={...validated,status:'unknown'};if(current())setPendingRun(revision);
-    if(current()&&connectedRef.current)try{const observed=await api<Run>('POST','/api/run/status',{run_id:validated.id});revision=observed;if(current())setPendingRun(observed);}catch{}
+    revision={...revised,status:'unknown'};if(current())setPendingRun(revision);
+    if(current()&&connectedRef.current)try{const observed=await api<Run>('POST','/api/run/status',{run_id:revised.id});if(observed.id===revised.id){revision=observed;if(current())setPendingRun(observed);}}catch{}
     throw e;
    }
    if(current()){draft.discard();onReplace(submitted);await onRefresh();}
@@ -89,7 +85,7 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
     {editable?<CodeEditor value={source} readOnly={working||draft.conflict} onChange={value=>{if(!working&&!draft.conflict){setSource(value);patch({edits:{...edits,[selected]:value}});}}} language={/\.py$/.test(selected)?'python':/\.ya?ml$/.test(selected)?'yaml':'plaintext'} theme={theme}/>:<p className="muted">{inputInfo?.reason||t('读取输入中…')}</p>}
    </div>}
   </section>
-  <div className="review-execute"><div><ShieldCheck size={17}/><span>{t('修改会生成新的输入快照；验证失败时不会提交计算。')}</span></div><button className="button primary" data-testid="execute-reviewed" disabled={working||draft.conflict||!connected||!environment||!(seconds>=1)||!(gpu>=0)} onClick={()=>void execute()}><Play size={15}/>{working?step:t('确认并执行')}</button></div>
+  <div className="review-execute"><div><ShieldCheck size={17}/><span>{t('修改会生成新的输入快照；提交时检查实际输入和目标环境。')}</span></div><button className="button primary" data-testid="execute-reviewed" disabled={working||draft.conflict||!connected||!environment||!(seconds>=1)||!(gpu>=0)} onClick={()=>void execute()}><Play size={15}/>{working?step:t('确认并执行')}</button></div>
   {run.validation.status==='failed'&&<pre className="report" role="alert">{run.validation.message}</pre>}
  </div>;
 }

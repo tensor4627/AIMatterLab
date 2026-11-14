@@ -1,7 +1,11 @@
 import {compatibleCredentials} from './compatible-api.mjs';
 import {createHash} from 'node:crypto';
 import {EventEmitter} from 'node:events';
-import {DeepSeekBridge,deepseekCredentials} from './deepseek.mjs';
+import {randomUUID} from 'node:crypto';
+import path from 'node:path';
+import {deepseekCredentials} from './deepseek.mjs';
+import {DshBridge} from './dsh.mjs';
+import {CodexApiBridge} from './codex-api.mjs';
 import {AcpBridge} from './acp.mjs';
 import {providerId,qwenCredentials,redact,CLI_VERSIONS} from './contracts.mjs';
 import {providerRuntime} from '../../desktop/platform/provider-runtime.mjs';
@@ -13,9 +17,9 @@ export function loginUrl(provider,url){
  return target.href;
 }
 export class AgentHub extends EventEmitter{
- constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,resourceScope=()=>null,fetchApi,host=providerRuntime,resolveCli}){
+ constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,resourceScope=()=>null,fetchApi,host=providerRuntime,resolveCli,apiBridgeFactories={}}){
   super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bindWorkerContext=bindWorkerContext;this.contexts=new Map();this.contextGeneration=0;this.contextPending=0;this.contextQueue=Promise.resolve();this.pristineThreads=new Set();this.attemptedThreads=new Set();this.contextResume=new Map();this.pendingTurnDispatches=new Set();this.contextClosing=new Set();this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.host=host;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
-  this.resourceScope=resourceScope;this.resolveCli=resolveCli;this.credentialRevisions=new Map();
+  this.resourceScope=resourceScope;this.resolveCli=resolveCli;this.credentialRevisions=new Map();this.apiBridgeFactories=apiBridgeFactories;
   this.codex.on?.('event',event=>{
    if(event.method==='studio/codexDisconnected')this.release('codex');
    const thread=event.params?.threadId;
@@ -85,9 +89,23 @@ export class AgentHub extends EventEmitter{
  preferences(provider){const settings=this.getSettings();return provider==='codex'?settings.agent||{}:settings.agentProviders?.[provider]||{};}
  path(provider){const settings=this.getSettings();return provider==='codex'?settings.codexPath:settings[provider+'Path'];}
  bridge(provider){return provider==='codex'?this.codex:this.bridges.get(provider);}
+ createApiBridge(provider,overrides={}){
+  const options={provider,root:this.root,catalog:this.catalog,credential:()=>this.vault.get(provider),worker:()=>this.bridgeWorkers.get(provider),...provider==='compatible'?{executable:()=>this.path('codex')}:{},...this.fetchApi?{fetchApi:this.fetchApi}:{},...overrides};
+  return this.apiBridgeFactories[provider]?this.apiBridgeFactories[provider](options):provider==='deepseek'?new DshBridge(options):new CodexApiBridge(options);
+ }
  deleted(provider,id){return !!(this.catalog.get?.('deleted-conversation',provider+':'+id)||this.catalog.get?.('retired-conversation-context',provider+':'+id));}
  forget(provider,id){const bridge=this.bridge(provider);bridge?.sessions?.delete(id);if(bridge?.current===id)bridge.current=null;if(provider==='codex'){this.blankThreads.delete(id);this.pendingBlankTurns.delete(id);this.readyThreads?.delete(id);this.codexOutput.delete(id);}}
- threads(provider){const saved=this.catalog.list('agent-thread').filter(t=>t.provider===provider&&!this.deleted(provider,t.id));return provider==='codex'?[...saved,...this.catalog.list('thread').filter(t=>!this.deleted(provider,t.id)&&!saved.some(s=>s.id===t.id)).map(t=>({...t,provider:'codex'}))]:saved;}
+ threads(provider){
+  const saved=this.catalog.list('agent-thread').filter(t=>t.provider===provider&&!this.deleted(provider,t.id));
+  if(provider!=='codex')return saved;
+  const known=new Set(saved.map(thread=>thread.id));
+  // Activity polling needs metadata. Read legacy history only when no metadata
+  // exists for that exact native ID; do not parse every transcript on each poll.
+  const legacy=this.catalog.keys?this.catalog.keys('thread').filter(id=>!known.has(id)&&!this.deleted(provider,id)).flatMap(id=>{
+   try{const value=this.catalog.get('thread',id);return value?[{id,...value}]:[];}catch(error){if(error.code==='catalog_record_corrupt')return [];throw error;}
+  }):this.catalog.list('thread');
+  return [...saved,...legacy.filter(thread=>!known.has(thread.id)&&!this.deleted(provider,thread.id)).map(({turns,...thread})=>({...thread,provider:'codex'}))];
+ }
  remember(provider,thread){if(this.deleted(provider,thread.id))return;const value={...thread,provider};delete value.turns;this.catalog.put('agent-thread',provider+':'+thread.id,value);}
  codexThreadState(id){return this.catalog.get?.('codex-thread-lifecycle',id)||this.codexThreadStates?.get(id)||null;}
  recordCodexThread(id,state,metadata={}){if(typeof id!=='string'||!id)return;const previous=this.codexThreadState(id);if(previous?.state==='has_turns'&&state!=='has_turns')return;const value={...previous,...metadata,id,state,updatedAt:Date.now()};(this.codexThreadStates??=new Map()).set(id,value);this.catalog.put?.('codex-thread-lifecycle',id,value);}
@@ -102,7 +120,7 @@ export class AgentHub extends EventEmitter{
   if(provider==='codex')return this.startCodex();
   let bridge=this.bridges.get(provider);
   if(!bridge){
-   bridge=['deepseek','compatible'].includes(provider)?new DeepSeekBridge({provider,catalog:this.catalog,credential:()=>this.vault.get(provider),worker:()=>this.bridgeWorkers.get(provider),...this.fetchApi?{fetchApi:this.fetchApi}:{}}):new AcpBridge(provider,{host:this.host});
+   bridge=['deepseek','compatible'].includes(provider)?this.createApiBridge(provider):new AcpBridge(provider,{host:this.host});
    bridge.on('event',event=>{
     if(event.method==='studio/codexDisconnected'){this.release(provider);if(this.isContextTransition(provider))return;}
     if(event.method==='thread/started'||event.method==='studio/sessionInfo')this.remember(provider,event.params.thread);
@@ -137,7 +155,7 @@ export class AgentHub extends EventEmitter{
   const generation=this.contextGeneration,selected=this.contexts.get(provider),resource=this.resourceScope(provider,method);
   const assertSelected=()=>{resource?.assertCurrent();if(provider!==this.active||this.bridge(provider)!==bridge||generation!==this.contextGeneration||selected!==this.contexts.get(provider))throw Error('Conversation context selection was superseded');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');};
   // A spawned app-server is only a transport until initialize and isolation readbacks finish.
-  if(provider==='codex'&&bridge?.starting){const lifecycle=bridge.lifecycle;await bridge.starting;assertSelected();if(lifecycle!==bridge.lifecycle)throw Error('Codex context changed while connecting');}
+  if(bridge?.starting){const lifecycle=bridge.lifecycle;await bridge.starting;assertSelected();if(lifecycle!==bridge.lifecycle)throw Error('Agent context changed while connecting');}
   if(!bridge?.process)throw Error('Connect '+provider+' first');
   if(selected&&params.threadId&&selected.threadId!==params.threadId)throw Error('Select the trusted conversation context first');
   if(selected?.threadId&&method==='thread/start')throw Error('Select an empty conversation context before starting a new thread');
@@ -247,8 +265,8 @@ export class AgentHub extends EventEmitter{
   // Keep a private immutable snapshot: a running test must never follow a newly saved endpoint/key.
   const revision=this.credentialRevisions.get(provider)||0,identity=JSON.stringify(credential),current=()=>revision===(this.credentialRevisions.get(provider)||0)&&JSON.stringify(this.vault.get(provider))===identity;
   const values=new Map(),catalog={put:(kind,id,value)=>values.set(kind+id,value),get:(kind,id)=>values.get(kind+id),list:()=>[]};
-  const bridge=new DeepSeekBridge({provider,catalog,credential:()=>credential,worker:()=>null,...this.fetchApi?{fetchApi:this.fetchApi}:{}});let timer;
-  try{await bridge.start();await bridge.request('model/list');const thread=await bridge.request('thread/start',{});const completion=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('连接测试超时；没有提交计算。')),45000);bridge.on('event',event=>{if(event.method==='turn/completed'){event.params.turn.status==='completed'?resolve(event.params.turn):reject(Error(event.params.turn.error?.message||'API 测试未完成'));}});});await bridge.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Connection test. Reply exactly OK. Do not call tools.'}]});await completion;if(!current())throw Error('API 配置已变化；请重新验证当前配置');this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{}});return {status:'passed',model:thread.model,scope:'One streamed test reply; no conversation inputs or scientific files shared'};}finally{clearTimeout(timer);bridge.close();}
+  const bridge=this.createApiBridge(provider,{root:path.join(this.root,'connection-checks',randomUUID()),catalog,credential:()=>credential,worker:()=>null});let timer;
+  try{await bridge.start();await bridge.request('model/list');const thread=await bridge.request('thread/start',{});const completion=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('连接测试超时；没有提交计算。')),45000);bridge.on('event',event=>{if(event.method==='turn/completed'){event.params.turn.status==='completed'&&event.params.turn.modelOutputReceived===true?resolve(event.params.turn):reject(Error(event.params.turn.error?.message||'API 测试未收到完整模型回复'));}});});await Promise.all([completion,bridge.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Connection test. Reply exactly OK. Do not call tools.'}]})]);if(!current())throw Error('API 配置已变化；请重新验证当前配置');this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{}});return {status:'passed',model:thread.model,scope:'One harness-streamed test reply; no conversation inputs or scientific files shared'};}finally{clearTimeout(timer);bridge.close();}
  }
  async configure(provider,preferences,threadId,model){
   if(this.codex.activeTurns?.size)throw Error('Stop the current reply before changing context settings');

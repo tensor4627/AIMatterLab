@@ -1,8 +1,11 @@
 import {EventEmitter} from 'node:events';
 import {createJsonlFramer} from './jsonl-frames.mjs';
 import {randomUUID} from 'node:crypto';
-import {CLI_VERSIONS,redact} from './contracts.mjs';
+import {CLI_VERSIONS} from './contracts.mjs';
 import {providerRuntime} from '../../desktop/platform/provider-runtime.mjs';
+import {sanitizeTranscript,sanitizeProtocolTranscript,createTranscriptStream} from '../../contracts/agent/transcript-sanitizer.mjs';
+import {SCIENTIFIC_TOOL_ACCESS} from '../tools/private-cv-access.mjs';
+import {sharedTerminalToolAllowed} from '../tools/definition-scope.mjs';
 const safeTool=/^(?:mcp__)?gpusampling(?:__|[.:/])([a-z_]+)$/;
 export function toolName(value){const match=String(value||'').match(safeTool);return match?match[1]:String(value||'');}
 export function toolResult(update){
@@ -24,8 +27,11 @@ export function toolResult(update){
 function optionsOf(option){return (option?.options||[]).flatMap(value=>Array.isArray(value.options)?value.options:[value]);}
 function currentTurn(session){if(!session.current){session.current={id:'history',items:[]};session.turns.push(session.current);}return session.current;}
 export class AcpBridge extends EventEmitter{
- constructor(provider,{host=providerRuntime,probeTimeoutMs=15000}={}){super();this.host=host;this.provider=provider;this.probeTimeoutMs=probeTimeoutMs;this.pending=new Map();this.interactions=new Map();this.sessions=new Map();this.next=1;this.activeTurns=new Map();this.lifecycle=0;this.cancelProbe=null;}
- event(method,params,id){this.emit('event',{method,params:{...params,provider:this.provider},provider:this.provider,...id!==undefined?{id}: {}});}
+ constructor(provider,{host=providerRuntime,probeTimeoutMs=15000,promptTimeoutMs=30*60*1000}={}){super();this.host=host;this.provider=provider;this.probeTimeoutMs=probeTimeoutMs;this.promptTimeoutMs=promptTimeoutMs;this.pending=new Map();this.interactions=new Map();this.sessions=new Map();this.isolatedSessions=new Map();this.pendingStarts=new Map();this.next=1;this.activeTurns=new Map();this.lifecycle=0;this.cancelProbe=null;}
+ secrets(){return [this.profile?.env?.OPENAI_API_KEY,this.profile?.env?.DASHSCOPE_API_KEY,this.worker?.tokens?.mcp];}
+ clean(value){return sanitizeTranscript(value,this.secrets());}
+ event(method,params,id){this.emit('event',sanitizeProtocolTranscript({method,params:{...params,provider:this.provider},provider:this.provider,...id!==undefined?{id}: {}},this.secrets()));}
+ flushStreams(sessionId){for(const [key,entry]of this.streams||[]){if(entry.sessionId!==sessionId)continue;this.streams.delete(key);const text=entry.stream.push('',{final:true});if(text)this.update({sessionId,update:{...entry.update,content:{type:'text',text}}},{streamFinal:true});}}
  async start(executable,profile,worker){
   if(this.starting)return this.starting;
   if(this.process)return this.info;
@@ -57,8 +63,9 @@ export class AcpBridge extends EventEmitter{
   // A closed child stdin surfaces EPIPE asynchronously; without a listener the
   // main process would die on an unhandled 'error' event.
   if(typeof child.stdin?.on==='function')child.stdin.on('error',error=>{if(this.process===child)this.emit('diagnostic',this.provider+' stdin unavailable ('+String(error?.code||error)+'); reconnect explicitly.');});
-  const secrets=[profile.env.OPENAI_API_KEY,worker?.tokens?.mcp];
-  child.stderr.on('data',data=>{if(this.process===child)this.emit('diagnostic',redact(data.toString().slice(-4000),secrets));});
+  const diagnosticStream=createTranscriptStream(()=>this.secrets());
+  child.stderr.on('data',data=>{if(this.process===child){const delta=diagnosticStream.push(data.toString());if(delta)this.emit('diagnostic',delta.slice(-4000));}});
+  child.stderr.on('end',()=>{if(this.process===child){const tail=diagnosticStream.push('',{final:true});if(tail)this.emit('diagnostic',tail.slice(-4000));}});
   child.on('error',error=>{if(this.process===child)this.disconnect(error);});
   child.on('exit',(code,signal)=>{if(this.process===child)this.disconnect(Error(this.provider+' disconnected ('+(signal||code)+')'));});
   // readline buffered a whole line before the guard; the bounded framer never
@@ -79,11 +86,11 @@ export class AcpBridge extends EventEmitter{
   }catch(error){if(this.lifecycle===generation&&this.process===child)this.close();throw error;}
  }
  send(value){if(!this.process||this.process.stdin.destroyed)throw Error('Connect '+this.provider+' first');this.process.stdin.write(JSON.stringify({jsonrpc:'2.0',...value})+'\n');}
- raw(method,params={},timeout=120000){
+ raw(method,params={},timeout=120000,{onTimeout,onLateResponse}={}){
   const id=this.next++;
   return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>{this.pending.delete(id);reject(Error(method+' timed out'));},timeout);
-   this.pending.set(id,{resolve,reject,timer});
+   const timer=setTimeout(()=>{const pending=this.pending.get(id);if(!pending)return;if(onLateResponse)pending.timedOut=true;else this.pending.delete(id);onTimeout?.();reject(Error(method+' timed out'));},timeout);
+   this.pending.set(id,{resolve,reject,timer,onLateResponse});
    try{this.send({id,method,params});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}
   });
  }
@@ -95,15 +102,17 @@ export class AcpBridge extends EventEmitter{
    return;
   }
   const pending=this.pending.get(message.id);if(!pending)return;clearTimeout(pending.timer);this.pending.delete(message.id);
-  if(message.error){const error=Error(message.error.message||'ACP request failed');error.code=message.error.code;error.data=message.error.data;pending.reject(error);}else pending.resolve(message.result??{});
+  if(pending.timedOut){pending.onLateResponse?.(message);return;}
+  if(message.error){const error=Error(this.clean(message.error.message||'ACP request failed'));error.code=message.error.code;error.data=this.clean(message.error.data);pending.reject(error);}else pending.resolve(message.result??{});
  }
  serverRequest(message){
   const {method,params:p={},id}=message;
+  if(this.isolatedSessions.has(p.sessionId)){this.send({id,...method==='session/request_permission'?{result:{outcome:{outcome:'cancelled'}}}:{error:{code:-32000,message:'This conversation is awaiting its previous turn receipt'}}});return;}
   if(method==='session/request_permission'){
    const call=p.toolCall||{},name=call._meta?.toolName||call._meta?.claudeCode?.toolName||call.title;
-   const science=safeTool.test(String(name||''))||call._meta?.serverId==='gpusampling';
+   const science=safeTool.test(String(name||''))||call._meta?.serverId==='gpusampling'&&(Object.hasOwn(SCIENTIFIC_TOOL_ACCESS,String(name||''))||sharedTerminalToolAllowed(name));
    const option=(p.options||[]).find(o=>o.kind==='allow_once');
-   if(science&&option&&call.kind!=='execute'){
+   if(science&&option){
     this.send({id,result:{outcome:{outcome:'selected',optionId:option.optionId}}});return;
    }
    // A question is the only non-MCP permission that can be shown to the user.
@@ -112,7 +121,7 @@ export class AcpBridge extends EventEmitter{
     this.event('studio/question',{threadId:p.sessionId,message:call.title,questionOptions:p.options||[],rawInput:call.rawInput},id);return;
    }
    this.send({id,result:{outcome:{outcome:'cancelled'}}});
-   this.event('studio/policyDenied',{threadId:p.sessionId,message:'Scientific jobs require task-page review; built-in file and shell tools are disabled.'});return;
+   this.event('studio/policyDenied',{threadId:p.sessionId,message:'Use the current authorized Studio tools; native file and shell tools are disabled.'});return;
   }
   if(method==='elicitation/create'&&(!p.mode||p.mode==='form')){
    this.interactions.set(String(id),message);
@@ -131,9 +140,17 @@ export class AcpBridge extends EventEmitter{
   }
   this.interactions.delete(key);this.event('serverRequest/resolved',{requestId:id});
  }
+ cancelInteractions(sessionId){for(const [key,request]of this.interactions){if(request.params?.sessionId!==sessionId)continue;try{this.send({id:request.id,result:request.method==='session/request_permission'?{outcome:{outcome:'cancelled'}}:{action:'cancel'}});}catch{}this.interactions.delete(key);this.event('serverRequest/resolved',{requestId:request.id});}}
  session(id){const session=this.sessions.get(id);if(!session)throw Error('Load this provider session first');return session;}
- update({sessionId,update:u}={}){
+ update({sessionId,update:u}={}, {streamFinal=false}={}){
   if(!u||!sessionId)return;
+  // ACP chunks have no reliable turn identity. Discard all updates from a
+  // timed-out prompt until its real RPC terminal receipt has arrived.
+  if(this.isolatedSessions.has(sessionId))return;
+  if(!streamFinal&&['agent_message_chunk','user_message_chunk'].includes(u.sessionUpdate)&&u.content?.type==='text'){
+   const key=JSON.stringify([sessionId,this.sessions.get(sessionId)?.current?.id,u.sessionUpdate,u.messageId]);this.streams??=new Map();let entry=this.streams.get(key);if(!entry){entry={sessionId,update:u,stream:createTranscriptStream(()=>this.secrets())};this.streams.set(key,entry);}const text=entry.stream.push(u.content.text);if(!text)return;u={...u,content:{type:'text',text}};
+  }
+  u=sanitizeProtocolTranscript({method:'session/update',params:{sessionId,update:u}},this.secrets()).params.update;
   let session=this.sessions.get(sessionId);
   if(!session){session={id:sessionId,turns:[],tools:new Map(),configOptions:[],models:{}};this.sessions.set(sessionId,session);}
   const threadId=sessionId,type=u.sessionUpdate;
@@ -173,7 +190,7 @@ export class AcpBridge extends EventEmitter{
   if(type==='session_info_update'&&u.title){session.name=u.title;this.event('studio/sessionInfo',{thread: this.thread(session)});}
  }
  mcpServers(){if(!this.worker)return [];if(!this.info.agentCapabilities?.mcpCapabilities?.http)throw Error('This CLI does not support the worker HTTP MCP transport');return [{type:'http',name:'gpusampling',url:this.worker.url+'/mcp',headers:[{name:'Authorization',value:'Bearer '+this.worker.tokens.mcp}]}];}
- thread(session){return {id:session.id,provider:this.provider,cwd:this.profile.cwd,name:session.name,preview:session.turns.flatMap(t=>t.items).find(i=>i.type==='userMessage')?.text?.slice(0,80)||'',turns:session.turns};}
+ thread(session){return sanitizeProtocolTranscript({id:session.id,provider:this.provider,cwd:this.profile.cwd,name:session.name,preview:session.turns.flatMap(t=>t.items).find(i=>i.type==='userMessage')?.text?.slice(0,80)||'',turns:session.turns},this.secrets());}
  async waitMcp(session){
   if(this.provider!=='qwen'||!this.worker)return;
   const deadline=Date.now()+30000;
@@ -227,23 +244,34 @@ export class AcpBridge extends EventEmitter{
    return {thread:this.thread(s),model:this.catalog(s).data.find(m=>m.isDefault)?.model,reasoningEffort:s.configOptions?.find(o=>o.category==='thought_level')?.currentValue};
   }
   if(method==='thread/resume'){
+   if(this.isolatedSessions.has(params.threadId))throw Error('The previous turn is still awaiting cancellation or its terminal receipt; use another conversation or explicitly reconnect. No message was replayed.');
    if(!this.info.agentCapabilities?.loadSession)throw Error('Session restoration is unsupported by this CLI');
    const s={id:params.threadId,turns:[],tools:new Map(),configOptions:[],models:{},replaying:true};this.sessions.set(s.id,s);
-   try{const result=await this.raw('session/load',{sessionId:s.id,cwd:this.profile.cwd,mcpServers:this.mcpServers()});Object.assign(s,{configOptions:result.configOptions||[],models:result.models||{},replaying:false,current:null});await this.waitMcp(s);this.current=s.id;await this.setChoice(s,'model',params.model);return {thread:this.thread(s),model:this.catalog(s).data.find(m=>m.isDefault)?.model,reasoningEffort:s.configOptions?.find(o=>o.category==='thought_level')?.currentValue};}catch(error){this.sessions.delete(s.id);throw error;}
+   try{const result=await this.raw('session/load',{sessionId:s.id,cwd:this.profile.cwd,mcpServers:this.mcpServers()});this.flushStreams(s.id);Object.assign(s,{configOptions:result.configOptions||[],models:result.models||{},replaying:false,current:null});await this.waitMcp(s);this.current=s.id;await this.setChoice(s,'model',params.model);return {thread:this.thread(s),model:this.catalog(s).data.find(m=>m.isDefault)?.model,reasoningEffort:s.configOptions?.find(o=>o.category==='thought_level')?.currentValue};}catch(error){this.sessions.delete(s.id);throw error;}
   }
   if(method==='thread/read')return {thread:this.thread(this.session(params.threadId))};
-  if(method==='turn/interrupt'){this.notify('session/cancel',{sessionId:params.threadId});return {};}
+  if(method==='turn/interrupt'){const active=this.activeTurns.get(params.threadId)||this.isolatedSessions.get(params.threadId)?.turnId;if(params.turnId&&params.turnId!==active)throw Error('Turn no longer active');if(active)this.notify('session/cancel',{sessionId:params.threadId});return {};}
   if(method==='turn/start'){
-   const s=this.session(params.threadId);if(this.activeTurns.has(s.id))throw Error('A turn is already active');
+   if(this.isolatedSessions.has(params.threadId))throw Error('The previous turn is still awaiting cancellation or its terminal receipt; use another conversation or explicitly reconnect. No message was replayed.');
+   const s=this.session(params.threadId);if(this.activeTurns.has(s.id)||this.pendingStarts.has(s.id))throw Error('A turn is already active');
+   const startToken={},dispatchGeneration=this.lifecycle;this.pendingStarts.set(s.id,startToken);
+   try{
    await this.setChoice(s,'model',params.model);await this.setChoice(s,'thought_level',params.effort);
-   const id=randomUUID(),turn={id,items:[]};s.current=turn;s.turns.push(turn);
-   const prompt=(params.input||[]).filter(i=>i.type==='text').map(i=>({type:'text',text:i.text}));
-   turn.items.push({id:randomUUID(),type:'userMessage',content:prompt,text:prompt.map(c=>c.text).join('\n')});
+   if(this.lifecycle!==dispatchGeneration||this.sessions.get(s.id)!==s)throw Error('Provider conversation changed before prompt dispatch; no message was replayed');
+   const id=randomUUID(),turn={id,status:'inProgress',items:[]};s.current=turn;s.turns.push(turn);
+   const prompt=this.clean((params.input||[]).filter(i=>i.type==='text').map(i=>({type:'text',text:i.text})));
+   turn.items.push(this.clean({id:randomUUID(),type:'userMessage',content:prompt,text:prompt.map(c=>c.text).join('\n')}));
    this.activeTurns.set(s.id,id);this.event('turn/started',{threadId:s.id,turn:{id}});
-   this.raw('session/prompt',{sessionId:s.id,prompt},30*60*1000).then(result=>{
-    this.event('turn/completed',{threadId:s.id,turn:{id,status:result.stopReason==='cancelled'?'cancelled':'completed',stopReason:result.stopReason,modelOutputReceived:turn.items.some(item=>item.type==='agentMessage'&&item.text.trim())}});
-   }).catch(error=>this.event('turn/completed',{threadId:s.id,turn:{id,status:'failed',error:{message:error.message}}})).finally(()=>{this.activeTurns.delete(s.id);s.current=null;});
+   const generation=this.lifecycle,current=()=>generation===this.lifecycle&&this.sessions.get(s.id)===s;
+   this.raw('session/prompt',{sessionId:s.id,prompt},this.promptTimeoutMs,{onTimeout:()=>{
+    if(!current())return;this.flushStreams(s.id);this.isolatedSessions.set(s.id,{turnId:id,reason:'prompt_timeout'});this.cancelInteractions(s.id);
+    try{this.notify('session/cancel',{sessionId:s.id});}catch{}
+   },onLateResponse:message=>{if(current()&&this.isolatedSessions.get(s.id)?.turnId===id){this.isolatedSessions.delete(s.id);turn.cancellationPending=false;turn.lateReceipt=this.clean(message.error?{status:'failed',error:message.error}:{stopReason:message.result?.stopReason});this.event('studio/sessionReady',{threadId:s.id,turnId:id,message:'The previous turn receipt arrived. No message or job was replayed.'});}}}).then(result=>{
+    if(!current())return;this.flushStreams(s.id);this.cancelInteractions(s.id);
+    Object.assign(turn,{status:result.stopReason==='cancelled'?'cancelled':'completed',stopReason:result.stopReason});this.event('turn/completed',{threadId:s.id,turn:{id,status:turn.status,stopReason:result.stopReason,modelOutputReceived:turn.items.some(item=>item.type==='agentMessage'&&item.text.trim())}});
+   }).catch(error=>{if(current()){this.flushStreams(s.id);this.cancelInteractions(s.id);Object.assign(turn,{status:'failed',error:{message:this.clean(error.message)},...this.isolatedSessions.has(s.id)?{operationState:'unconfirmed',cancellationPending:true}:{}});this.event('turn/completed',{threadId:s.id,turn:{...turn,items:undefined}});}}).finally(()=>{if(this.activeTurns.get(s.id)===id)this.activeTurns.delete(s.id);if(s.current===turn)s.current=null;});
    return {turn:{id,status:'inProgress'}};
+   }finally{if(this.pendingStarts.get(s.id)===startToken)this.pendingStarts.delete(s.id);}
   }
   throw Error('Unsupported '+this.provider+' operation: '+method);
  }
@@ -253,7 +281,7 @@ export class AcpBridge extends EventEmitter{
   const child=this.process;this.process=null;this.framer?.reset();this.framer=null;child?.kill();
   // The process that produced these sessions is gone; stale metadata must not
   // survive an explicit reconnect.
-  this.sessions.clear();this.current=null;
+  this.sessions.clear();this.isolatedSessions.clear();this.pendingStarts.clear();this.streams?.clear();this.current=null;
   this.event('studio/codexDisconnected',{reason:error.message});this.activeTurns.clear();
  }
  close(){this.disconnect(Error(this.provider+' bridge closed'));}

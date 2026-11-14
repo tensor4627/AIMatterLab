@@ -29,7 +29,7 @@ function checkedFacts(value){
  if(facts.state!=='legacy_unconfigured'){
   if(!plain(facts.package)||!['id','version','manifestSha256','sourceCommit'].every(key=>text(facts.package[key]))||!plain(facts.workerBinding)||!text(facts.workerBinding.distribution)||!text(facts.workerBinding.root)||!Number.isInteger(facts.workerBinding.port)||!plain(facts.target)||facts.target.kind!=='local'||!['projectId','environmentId','fingerprint'].every(key=>text(facts.target[key])))throw Error('Incomplete guidance authority binding');
  }
- if(facts.state==='active'){
+ if(facts.state==='active'||facts.state==='stale'&&facts.executionSkill){
   if(!plain(facts.activation)||!['id','revision','configurationId'].every(key=>text(facts.activation[key])))throw Error('Missing authoritative guidance activation');
   const execution=facts.executionSkill;
   if(!plain(execution)||!text(execution.id)||!text(execution.text)||execution.sha256!==sha(execution.text)||!Array.isArray(execution.resources))throw Error('Invalid execution skill snapshot');
@@ -50,7 +50,9 @@ export function createReadPolicy(value,{scope={},assertScope=()=>{},reload}={}){
  const assertCurrent=()=>{const owner=assertScope(scope);if(scope.checkCurrent&&scope.checkCurrent()!==true)throw Error('Guidance scope changed');return plain(owner)?owner:scope;};
  const hasReadGrant=()=>{
   const owner=assertCurrent(),grant=facts.readGrant,known=new Set(facts.archivedResources.map(resource=>resource.id));
-  if(!plain(grant)||!text(grant.id)||!['configure','repair','update'].includes(grant.purpose)||grant.authorityRevision!==facts.revision||grant.activationId!==(facts.activation?.id??null)||!Number.isFinite(grant.expiresAt)||grant.expiresAt<=Date.now()||!Array.isArray(grant.resourceIds)||!grant.resourceIds.length||new Set(grant.resourceIds).size!==grant.resourceIds.length||grant.resourceIds.some(id=>!known.has(id))||!plain(grant.owner))return false;
+  const durable=plain(grant)&&grant.duration==='delegation'&&grant.purpose==='repair'&&text(grant.delegationId)&&grant.expiresAt===null;
+  if(facts.state==='revoked'||!plain(grant)||!text(grant.id)||!['configure','repair','update'].includes(grant.purpose)||grant.authorityRevision!==facts.revision||grant.activationId!==(facts.activation?.id??null)||!durable&&(!Number.isFinite(grant.expiresAt)||grant.expiresAt<=Date.now())||!Array.isArray(grant.resourceIds)||!grant.resourceIds.length||new Set(grant.resourceIds).size!==grant.resourceIds.length||grant.resourceIds.some(id=>!known.has(id))||!plain(grant.owner))return false;
+  if(durable){const keys=['provider','threadId','taskId','projectId','environmentId','inputRoot'];return typeof scope.checkCurrent==='function'&&Object.keys(grant.owner).length===keys.length&&Object.keys(grant.owner).every(key=>keys.includes(key))&&text(grant.owner.provider)&&text(grant.owner.threadId)&&keys.every(key=>(scope[key]??null)===grant.owner[key]);}
   const expected=grant.owner;if(Object.keys(expected).some(key=>!['provider','threadId','taskId','serial','leaseEpoch'].includes(key))||!text(expected.provider)||!text(expected.threadId)||expected.taskId!==null&&!text(expected.taskId)||!['provider','threadId','taskId'].every(key=>(scope[key]??null)===(expected[key]??null)))return false;
   if(expected.serial===undefined&&expected.leaseEpoch===undefined)return false;
   if(expected.serial!==undefined&&(!Number.isSafeInteger(expected.serial)||expected.serial<0||(scope.serial??owner.serial)!==expected.serial))return false;
@@ -68,12 +70,12 @@ export function createReadPolicy(value,{scope={},assertScope=()=>{},reload}={}){
   async revalidate(){policy.assertReadsCurrent();if(reload&&stableJson(checkedFacts(await reload(scope)))!==stamp)throw Error('Guidance activation changed');policy.assertReadsCurrent();},
   allowsPath(file){assertCurrent();return typeof file==='string'&&(!matches(file).length||policy.isGrantedPath(file));},
   assertReadable(file){if(!policy.allowsPath(file))throw Error('Guidance resource is archived; use the active execution skill or explicit configuration');},
-  blocksAll(){assertCurrent();return facts.state==='stale'||facts.state==='revoked';},
-  catalogEntry(){assertCurrent();if(facts.state!=='active')return null;return {name:facts.executionSkill.id,description:'Active execution skill for '+facts.package.id,path:'studio-execution:'+encodeURIComponent(facts.executionSkill.id),source:'execution snapshot',enabled:true};},
+  blocksAll(){assertCurrent();return facts.state==='stale'&&!facts.executionSkill||facts.state==='revoked';},
+  catalogEntry(){assertCurrent();if(!['active','stale'].includes(facts.state)||!facts.executionSkill)return null;return {name:facts.executionSkill.id,description:'Configured execution skill for '+facts.package.id,path:'studio-execution:'+encodeURIComponent(facts.executionSkill.id),source:'execution snapshot',enabled:true};},
   executionResult(functionId){
-   assertCurrent();if(facts.state!=='active')return {status:'blocked',function_id:functionId,reason:'Execution guidance is '+facts.state+'; explicit configuration is required. Legacy guidance remains sealed.',attachments:[]};
+   assertCurrent();if(!policy.catalogEntry())return {status:'blocked',function_id:functionId,reason:'Execution guidance is '+facts.state+'; an authorized installed snapshot is unavailable. Legacy guidance remains sealed.',attachments:[]};
    const execution=facts.executionSkill,resources=[execution,...execution.resources],digest=sha(facts.revision+'\0'+facts.activation.id+'\0'+resources.map(resource=>resource.sha256).join('\0'));
-   return {status:'passed',function_id:functionId,phase:'execution',digest,document_ids:resources.map(resource=>resource.id),attachments:resources.map(resource=>({source:'execution',skill:execution.id,name:resource.id,sha256:resource.sha256,bytes:Buffer.byteLength(resource.text)})),text:'[Studio active execution skill]\n'+resources.map(resource=>'['+resource.id+']\n'+resource.text).join('\n\n'),bytes:resources.reduce((sum,resource)=>sum+Buffer.byteLength(resource.text),0),scope:'Backend-activated execution snapshot; no archived guidance files were accessed.'};
+   return {status:'passed',function_id:functionId,phase:'execution',digest,document_ids:resources.map(resource=>resource.id),attachments:[{source:'execution',skill:execution.id,name:execution.id,sha256:execution.sha256,bytes:Buffer.byteLength(execution.text)}],text:'[Studio configured execution skill; check evidence '+facts.state+']\n['+execution.id+']\n'+execution.text+(facts.state==='stale'?'\nConfiguration check evidence is stale. This saved guidance remains available within existing authorization; actual execution snapshots and required target/artifact checks are enforced by the worker.':'')+'\nSupporting document IDs (read only when needed): '+JSON.stringify(execution.resources.map(resource=>resource.id)),bytes:Buffer.byteLength(execution.text),scope:'Backend-activated execution skill entry; supporting resources require focused reads. No archived guidance files were accessed.'};
   },
  };
  return Object.freeze(policy);

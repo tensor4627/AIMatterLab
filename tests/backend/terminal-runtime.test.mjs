@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {prepareTerminalRuntime} from '../../backend/main/compute/terminal-runtime.mjs';
+import {prepareTerminalRuntime,probeWindowsTerminalRuntimeExecution} from '../../backend/main/compute/terminal-runtime.mjs';
 
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-terminal-runtime-'));
@@ -21,8 +21,8 @@ function fixture(t){
  const nativeFiles=['lib/index.js','lib/windowsTerminal.js','lib/windowsPtyAgent.js','lib/windowsConoutConnection.js','lib/worker/conoutSocketWorker.js','lib/conpty_console_list_agent.js','prebuilds/win32-x64/conpty.node','prebuilds/win32-x64/conpty_console_list.node','prebuilds/win32-x64/conpty/conpty.dll','prebuilds/win32-x64/conpty/OpenConsole.exe'];
  for(const name of nativeFiles)write('resources/agent-runtimes/node_modules/'+native+'/'+name,'inert '+name);
  write('.config/broker.bin','private fixture must never be copied');write('resources/agent-runtimes/.env','fixture private key; never copied');
- const options={runtimeRoot,nodeExecutable,servicePath,dependencyRoot,platform:'win32',arch:'x64'};
- return {root,source,write,options,native,nativeFiles,prepare:()=>prepareTerminalRuntime(options)};
+ const probes=[],options={runtimeRoot,nodeExecutable,servicePath,dependencyRoot,platform:'win32',arch:'x64',probeExecution:async file=>{probes.push(file);return {integrity:'medium_or_higher'};}};
+ return {root,source,write,options,native,nativeFiles,probes,prepare:()=>prepareTerminalRuntime(options)};
 }
 
 function files(root){
@@ -109,4 +109,23 @@ test('platform and absolute source requirements fail closed without invoking any
  await assert.rejects(()=>prepareTerminalRuntime({...f.options,nodeExecutable:'relative.exe'}),/terminal_runtime_invalid_source/);
  await assert.rejects(()=>prepareTerminalRuntime({...f.options,platform:'linux'}),/terminal_runtime_platform_unsupported/);
  assert.equal(fs.existsSync(f.options.runtimeRoot),false);
+});
+
+
+test('runtime checks the source and copied executable actual integrity before publication without changing permissions',async t=>{
+ const f=fixture(t),result=await f.prepare();assert.equal(f.probes[0],f.options.nodeExecutable);assert(f.probes.some(file=>file.includes('staging-')&&path.basename(file)==='Studio.exe'));assert.equal(fs.readFileSync(result.nodeExecutable,'utf8'),'inert executable fixture; never launched');
+});
+test('a Low source execution context fails before creating an execution cache',async t=>{
+ const f=fixture(t);f.options.probeExecution=async()=>{throw Error('terminal_runtime_low_integrity');};await assert.rejects(f.prepare,/terminal_runtime_low_integrity/);assert.equal(fs.existsSync(f.options.runtimeRoot),false);
+});
+test('a copied executable inheriting Low integrity is never published or silently elevated',async t=>{
+ const f=fixture(t);f.options.probeExecution=async file=>{if(file!==f.options.nodeExecutable)throw Error('terminal_runtime_low_integrity');};await assert.rejects(f.prepare,/terminal_runtime_low_integrity/);assert.deepEqual(fs.readdirSync(f.options.runtimeRoot),[]);
+});
+test('an existing Low runtime is refused without changing its files or ACL',async t=>{
+ const f=fixture(t),result=await f.prepare(),before=fs.readFileSync(result.nodeExecutable);f.options.probeExecution=async file=>{if(file!==f.options.nodeExecutable)throw Error('terminal_runtime_low_integrity');};await assert.rejects(f.prepare,/terminal_runtime_low_integrity/);assert.deepEqual(fs.readFileSync(result.nodeExecutable),before);assert.equal(fs.readdirSync(f.options.runtimeRoot).length,1);
+});
+test('execution probe exposes only a fixed integrity receipt and strips injected environment flags and secrets',async()=>{
+ let called;const result=await probeWindowsTerminalRuntimeExecution(path.resolve('fixture.exe'),{env:{SystemRoot:'C:\\Windows',PATH:'fixture',NODE_OPTIONS:'PRIVATE_INJECTED_FLAGS',API_KEY:'PRIVATE_SECRET'},run:async(...args)=>{called=args;return {stdout:JSON.stringify({schemaVersion:1,integrityRid:8192})};}});assert.deepEqual(result,{integrity:'medium_or_higher'});assert.equal(called[1][0],'-e');assert(called[1][1].includes('whoami.exe'));assert(called[1][1].includes('S-1-16-'));assert(!JSON.stringify(called).includes('PRIVATE'));assert.equal(called[2].env.ELECTRON_RUN_AS_NODE,'1');assert.equal(called[2].windowsHide,true);
+ for(const integrityRid of [0,4096])await assert.rejects(probeWindowsTerminalRuntimeExecution(path.resolve('fixture.exe'),{run:async()=>({stdout:JSON.stringify({schemaVersion:1,integrityRid})})}),/terminal_runtime_low_integrity/);
+ await assert.rejects(probeWindowsTerminalRuntimeExecution(path.resolve('fixture.exe'),{run:async()=>({stdout:'unrecognized output'})}),/terminal_runtime_execution_unavailable/);
 });

@@ -22,7 +22,7 @@ export const toolConfigurations={
  activate:(value:ToolConfigurationReview)=>invoke<ToolExecutionSkill>('tools.configurations.activate',value),
  read:(value:ToolConfigurationReference)=>invoke<ToolExecutionSkill>('tools.configurations.read',value),
  bind:(value:ToolGuidanceBinding)=>invoke<{status:'bound';configuration_id:string}>('tools.configurations.bind',value),
- grant:(value:ToolGuidanceGrant)=>invoke<{status:'granted';expires_at:number}>('tools.configurations.grant',value)
+ grant:(value:ToolGuidanceGrant)=>invoke<{status:'granted';duration:'delegation';expires_at:null}|{status:'granted';duration?:'temporary';expires_at:number}>('tools.configurations.grant',value)
 };
 export const toolGroups={
  compile:(definition:ToolGroupDefinition)=>invoke<ToolGroupCompiled>('tools.groups.compile',{definition}),

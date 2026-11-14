@@ -5,6 +5,7 @@ import type {ToolPackageInspection,ToolPackageRecord,ToolPackageSummary,ToolConf
 import type {SkillAttachment} from "../conversations/agent-types";
 import {toolPackages,toolConfigurations} from '../../api/tools';
 import {api} from '../../api/worker';
+import {t} from '../../ui/i18n';
 
 type Context=Awaited<ReturnType<typeof toolConfigurations.context>>;
 type Candidate={root:string;inspection:ToolPackageInspection};
@@ -85,7 +86,7 @@ export function useToolPackages({provider,onSelect}:{provider:AgentProvider;onSe
  function execute(){if(!configuration||configuration.status!=='planned')return;const reviewed=configuration;void action('等待原生确认并执行',async ticket=>{
   const value=await toolConfigurations.execute({configuration_id:reviewed.configuration_id,expected_revision:reviewed.revision,plan_sha256:reviewed.plan_sha256});if(!valid(ticket))return;matchingConfiguration(value,reviewed.configuration_id);setConfiguration(value);setPollPaused(false);if(value.cancelled)setNotice('已取消本次配置执行。');
  });}
- function activate(){if(!configuration||configuration.status!=='tested')return;const reviewed=configuration;void action('生成执行技能',async ticket=>{
+ function activate(){if(!configuration||configuration.install?.status!=='passed')return;const reviewed=configuration;void action('生成执行技能',async ticket=>{
   const value=await toolConfigurations.activate({configuration_id:reviewed.configuration_id,expected_revision:reviewed.revision,plan_sha256:reviewed.plan_sha256});if(!valid(ticket))return;matchingConfiguration(value,reviewed.configuration_id);setExecution(value);setConfiguration(old=>old?{...old,status:value.status,revision:value.revision}:old);setResourceIds([]);setBound(false);if(value.status!=='active'||!value.execution_skill)throw Error(value.reason||'服务未返回可用的执行技能，请核对真实状态');setNotice('执行技能已生成，交付与安装指导已封存。');
  });}
  function readExecution(){if(!configuration)return;const configurationId=configuration.configuration_id;void action('读取执行技能',async ticket=>{
@@ -93,13 +94,13 @@ export function useToolPackages({provider,onSelect}:{provider:AgentProvider;onSe
  });}
  async function currentContext(ticket:number){const value=await toolConfigurations.context();if(!valid(ticket))return null;setContext(value);if(!value.hasConversation||!value.owner_key||value.provider!==provider||sharingProvider!==value.provider)throw Error('请选择当前对话的服务商，并先建立真实对话');if(context?.owner_key!==value.owner_key){setBound(false);setResourceIds([]);throw Error('对话、服务商或计算目标已变化，请重新选择');}return value;}
  async function sameOwner(ticket:number,owner:Context){const value=await toolConfigurations.context();if(!valid(ticket))return false;setContext(value);if(value.owner_key!==owner.owner_key||value.provider!==owner.provider||!value.hasConversation){setBound(false);setResourceIds([]);throw Error('对话、服务商或计算目标已变化，请重新选择');}return true;}
- function bind(){if(!execution?.execution_skill||execution.status!=='active')return;const skill=execution;void action('授权当前对话',async ticket=>{
+ function bind(){if(!execution?.execution_skill)return;const skill=execution;void action('授权当前对话',async ticket=>{
   const owner=await currentContext(ticket);if(!owner)return;await toolConfigurations.bind({configuration_id:skill.configuration_id,providers:[owner.provider]});if(!valid(ticket)||!await sameOwner(ticket,owner))return;setBound(true);onSelect({attachmentId:crypto.randomUUID(),name:skill.execution_skill!.id,path:'studio-execution:'+encodeURIComponent(skill.execution_skill!.id)});setNotice('已授权当前对话引用执行技能。');
  });}
  function grant(){if(!execution||!record||!resourceIds.length)return;const skill=execution,attachment=record.delivery_attachment,ids=[...resourceIds],selectedPurpose=purpose;
-  void action('限时授权前置指导',async ticket=>{
+  void action(selectedPurpose==='repair'?'授权本次委托的修复指导':'限时授权前置指导',async ticket=>{
    const owner=await currentContext(ticket);if(!owner)return;const value=await toolConfigurations.grant({configuration_id:skill.configuration_id,purpose:selectedPurpose,resource_ids:ids});if(!valid(ticket)||!await sameOwner(ticket,owner))return;
-   const delivery=skill.guidance_resources.filter(resource=>resource.role==='delivery').some(resource=>ids.includes(resource.id));if(delivery&&attachment)onSelect({attachmentId:crypto.randomUUID(),name:attachment.name,path:attachment.path});setNotice('所选指导已限时授权至 '+new Date(value.expires_at).toLocaleTimeString()+(delivery?'，交付技能用于下条消息。':'；未附加未授权的交付技能。'));
+   const delivery=skill.guidance_resources.filter(resource=>resource.role==='delivery').some(resource=>ids.includes(resource.id));if(delivery&&attachment)onSelect({attachmentId:crypto.randomUUID(),name:attachment.name,path:attachment.path});setNotice((value.duration==='delegation'?t('修复指导已授权给当前委托；同一会话、项目、环境和所选资源内可持续重试，重启后保留，可在共享设置撤销。'):t('所选指导已限时授权至 ')+new Date(value.expires_at!).toLocaleTimeString())+t(delivery?'，交付技能用于下条消息。':'；未附加未授权的交付技能。'));
   });
  }
  function toggleResource(id:string,checked:boolean){setResourceIds(old=>checked?[...new Set([...old,id])]:old.filter(value=>value!==id));}

@@ -1,6 +1,6 @@
 {
   "name": "gpu-sampling-studio",
-  "version": "1.0.2-dev.10",
+  "version": "1.0.2-dev.33",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -37,6 +37,9 @@
     "three": "0.172.0"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-mcp-client": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-sdk-minimal": "0.2.2-rc.1",
     "@lydell/node-pty": "1.2.0-beta.10",
     "@moonshot-ai/kimi-code": "2.1.1",
     "@qwen-code/qwen-code": "0.24.7",
@@ -47,16 +50,16 @@
     "electron": "44.5.1",
     "electron-builder": "26.15.3",
     "playwright": "1.65.0",
+    "tar": "7.5.22",
     "typescript": "5.7.3",
-    "vite": "6.4.1",
-    "tar": "7.5.22"
+    "vite": "6.4.1"
   },
   "build": {
     "appId": "science.gpusampling.studio",
     "productName": "GPU Sampling Studio",
     "beforeBuild": "scripts/package-runtime.mjs",
     "directories": {
-      "output": "release/v1.0.2-dev.10"
+      "output": "release/v1.0.2-dev.33"
     },
     "files": [
       "dist/**",
@@ -75,10 +78,12 @@
         ]
       },
       "package.json",
-      "!node_modules/**/*"
+      "!node_modules/**/*",
+      "!**/__pycache__/**",
+      "!**/*.pyc"
     ],
     "asarUnpack": [
-      "backend/worker/**"
+      "**/worker/**"
     ],
     "win": {
       "target": [
@@ -89,7 +94,8 @@
     },
     "portable": {
       "unpackDirName": true,
-      "artifactName": "GPU-Sampling-Studio-${version}-win-${arch}-portable.${ext}"
+      "artifactName": "GPU-Sampling-Studio-${version}-win-${arch}-portable.${ext}",
+      "useZip": true
     },
     "extraResources": [
       {
@@ -110,6 +116,21 @@
       {
         "from": ".studio/agent-runtimes/manifest.json",
         "to": "agent-runtimes/manifest.json"
+      },
+      {
+        "from": ".studio/agent-runtimes/dsh/runtime.json",
+        "to": "agent-runtimes/dsh/runtime.json"
+      },
+      {
+        "from": ".studio/agent-runtimes/dsh/node_modules",
+        "to": "agent-runtimes/dsh/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "agent/providers/dsh-policy.mjs",
+        "to": "studio-dsh/dsh-policy.mjs"
       },
       {
         "from": "agent/builtin-skills",

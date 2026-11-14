@@ -69,7 +69,7 @@
       "source_match": "Only exact registered file hashes support source-specific authoring. Commit alone does not cover dirty files.",
       "selected_executable_support": "not_run unless separately evidenced; no source/build equality inferred",
       "runtime_and_scientific_validation": "not_run",
-      "execution_gates": "This reference adds no requirement to prove compiled source/build correspondence and no arbitrary compatibility precondition. Report unknown provenance as not_run; actual execution remains governed by existing target artifact/runtime, project authorization and human review/Execute gates. Unknown provenance never creates a user-internal required field or justifies leaving mechanically authorable inputs absent; no real target compatibility gate is weakened."
+      "execution_gates": "This reference adds no requirement to prove compiled source/build correspondence and no arbitrary compatibility precondition. Report unknown provenance as not_run; actual execution remains governed by existing target artifact/runtime, project authorization and current user delegation and required artifact/runtime checks. Unknown provenance never creates a user-internal required field or justifies leaving mechanically authorable inputs absent; no real target compatibility gate is weakened."
     }
   },
   "run_in": {

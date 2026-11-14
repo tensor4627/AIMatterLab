@@ -4,14 +4,16 @@ import {isDeepStrictEqual as equal} from 'node:util';
 import {createVerifiedWorkerScope} from './verified-worker-scope.mjs';
 import {remember} from '../workspace/bounded-map.mjs';
 
-const INDEX='tool-configuration-index',BINDING='tool-guidance-binding',METADATA='tool-guidance-metadata';
+const INDEX='tool-configuration-index',BINDING='tool-guidance-binding',METADATA='tool-guidance-metadata',DELEGATION='tool-guidance-repair-delegation';
 const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const exact=(value,keys)=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==[...keys].sort().join(','))throw Error('Exact typed tool configuration request required');};
 const id=value=>{if(typeof value!=='string'||! /^[A-Za-z0-9_-]{8,80}$/.test(value))throw Error('Invalid tool configuration identity');return value;};
 const bindingKey=owner=>owner?.provider&&owner?.threadId?owner.provider+':'+owner.threadId+':'+(owner.taskId??'-'):null;
+const delegationOwner=owner=>Object.fromEntries(['provider','threadId','taskId','projectId','environmentId','inputRoot'].map(key=>[key,owner?.[key]??null]));
 const joined=(root,relative)=>/^[A-Za-z]:[\\/]|^\\\\/.test(root)?path.win32.join(root,...relative.split('/')):path.posix.join(root,relative);
 const mergedResources=(...groups)=>[...new Map(groups.flat().map(item=>[JSON.stringify([item.path,item.role,item.package_id,item.package_version,item.configuration_id]),item])).values()].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+function executionSnapshot(value){const skill=value?.execution_skill;if(!skill)return false;if(typeof skill.id!=='string'||!skill.id||typeof skill.body!=='string'||!skill.body||!/^[a-f0-9]{64}$/.test(skill.sha256||'')||createHash('sha256').update(skill.body).digest('hex')!==skill.sha256)throw Error('Worker execution skill snapshot identity differs');return true;}
 function guidancePaths(record,relative){
  const result=new Set([relative]),links=(record.files||[]).filter(item=>item.kind==='symlink');let current=relative;
  for(let count=0;count<40;count++){
@@ -23,7 +25,7 @@ function guidancePaths(record,relative){
 }
 
 /** Human configuration actions and desktop references; the worker owns all outcomes. */
-export function createToolConfigurationController({catalog,packages,worker,getSettings,current,currentTarget=()=>null,getProvider=()=>current()?.provider||getSettings().agentProvider||'codex',getLease=provider=>worker.providerScopes?.scopes?.get(provider),assertIdle,confirm,toWorkerPath,now=Date.now}){
+export function createToolConfigurationController({catalog,packages,worker,getSettings,current,currentTarget=()=>null,getProvider=()=>current()?.provider||getSettings().agentProvider||'codex',getLease=provider=>worker.providerScopes?.scopes?.get(provider),getResourceIdentity=()=>({kind:'worker'}),assertIdle,confirm,toWorkerPath,now=Date.now}){
  const grants=new Map(),bindingOperations=new Map();
  const {currentBinding,capture,verified}=createVerifiedWorkerScope({worker,getSettings,current,currentTarget});
  function index(value){id(value);const found=catalog.get(INDEX,value);if(!found||found.schema_version!==1)throw Error('Unknown tool configuration reference');return found;}
@@ -42,8 +44,8 @@ export function createToolConfigurationController({catalog,packages,worker,getSe
   return catalog.transaction(()=>{
    const fresh=index(reference.configuration_id);if(!equal([fresh.package_id,fresh.package_version,fresh.worker_binding,fresh.project_id,fresh.environment_id],[reference.package_id,reference.package_version,reference.worker_binding,reference.project_id,reference.environment_id]))throw Error('Configuration index identity changed');
    if(!Number.isSafeInteger(response.revision)||response.revision<(fresh.last_revision??0)||(response.archive_revision??fresh.authority_metadata?.archive_revision??0)<(fresh.authority_metadata?.archive_revision??0))throw Error('Late configuration authority reply');
-   const active=response.status==='active',archived=response.archived_resources;
-   const next={...fresh,last_revision:response.revision,has_execution:!!(fresh.has_execution||active),may_have_execution:!!(fresh.may_have_execution||active),...archived?{authority_metadata:{revision:response.revision,archive_revision:response.archive_revision??1,manifest_sha256:response.manifest_sha256,source_commit:response.source_commit,environment_sha256:response.environment_sha256,functions:response.functions,archived_resources:mergedResources(fresh.authority_metadata?.archived_resources||[],archived)}}:{}};
+   const active=executionSnapshot(response),archived=response.archived_resources;
+   const next={...fresh,last_revision:response.revision,has_execution:!!(fresh.has_execution||active),may_have_execution:!!(fresh.may_have_execution||active),...archived?{authority_metadata:{revision:response.revision,archive_revision:response.archive_revision??1,manifest_sha256:response.manifest_sha256,source_commit:response.source_commit,environment_sha256:response.current_environment_sha256??response.environment_sha256,functions:response.functions,archived_resources:mergedResources(fresh.authority_metadata?.archived_resources||[],archived)}}:{}};
    catalog.put(INDEX,reference.configuration_id,next);return response;
   });
  }
@@ -137,7 +139,7 @@ export function createToolConfigurationController({catalog,packages,worker,getSe
   async activate(value){
    exact(value,['configuration_id','expected_revision','plan_sha256']);assertIdle();const reference=index(value.configuration_id),record=packages.read({package_id:reference.package_id,package_version:reference.package_version});
    const ticket=await verified(reference.worker_binding),observed=await worker.request('POST','/api/tool-configuration/status',{configuration_id:value.configuration_id});ticket.assert();note(reference,observed);
-   if(observed.status!=='tested'||observed.revision!==value.expected_revision||observed.plan_sha256!==value.plan_sha256)throw Error('Configuration test evidence required; plan or tests changed, review again');
+   if(observed.install?.status!=='passed'||observed.revision!==value.expected_revision||observed.plan_sha256!==value.plan_sha256)throw Error('Confirmed installed source required; configuration identity changed');
    return request(value.configuration_id,'/api/tool-configuration/activate',{expected_revision:value.expected_revision,plan_sha256:value.plan_sha256},fresh=>{
     // Persist only at the verified dispatch boundary; a reply may be lost after this call.
     catalog.transaction(()=>{const latest=index(value.configuration_id);if(!equal([latest.package_id,latest.package_version,latest.worker_binding,latest.project_id,latest.environment_id],[fresh.package_id,fresh.package_version,fresh.worker_binding,fresh.project_id,fresh.environment_id]))throw Error('Configuration reference changed');catalog.put(INDEX,value.configuration_id,{...latest,may_have_execution:true,package_metadata:{manifest:record.manifest,guidance:record.guidance,files:record.files,snapshot_root:record.snapshot_root,package_root:record.package_root,manifest_sha256:record.manifest_sha256,source_commit:record.source_commit}});});
@@ -147,9 +149,9 @@ export function createToolConfigurationController({catalog,packages,worker,getSe
   async bind(value){
    exact(value,['configuration_id','providers']);assertIdle();if(!Array.isArray(value.providers)||new Set(value.providers).size!==value.providers.length||value.providers.some(item=>!providers.has(item)))throw Error('Choose explicit execution skill sharing');
    const owner=structuredClone(current()),key=bindingKey(owner);if(!key)throw Error('Select an existing conversation before attaching a configuration');const operation=(bindingOperations.get(key)||0)+1;remember(bindingOperations,key,operation,{max:256});
-   const result=await api.read({configuration_id:value.configuration_id});if(bindingOperations.get(key)!==operation||!equal(owner,current())||result.status!=='active')throw Error('Current configuration is not active or a newer selection superseded it');
+   const result=await api.read({configuration_id:value.configuration_id});if(bindingOperations.get(key)!==operation||!equal(owner,current())||!executionSnapshot(result))throw Error('Current installed execution snapshot unavailable or a newer selection superseded it');
    const reference=index(value.configuration_id);if(currentTarget()?!compatibleTarget(reference):owner.projectId&&owner.projectId!==reference.project_id)throw Error('Configuration target differs from the current workflow');
-   const previous=catalog.get(BINDING,key);catalog.put(BINDING,key,{schema_version:1,id:key,owner,configuration_id:value.configuration_id,providers:[...value.providers],revision:(previous?.revision||0)+1});grants.delete(key);return {status:'bound',configuration_id:value.configuration_id};
+   const previous=catalog.get(BINDING,key);catalog.put(BINDING,key,{schema_version:1,id:key,owner,configuration_id:value.configuration_id,providers:[...value.providers],revision:(previous?.revision||0)+1});grants.delete(key);catalog.remove?.(DELEGATION,key);return {status:'bound',configuration_id:value.configuration_id};
   },
   async resolveGuidance(scope){
    const check=()=>{if(scope.checkCurrent&&scope.checkCurrent()!==true)throw Error('Guidance owner changed');};check();await refreshMetadata();check();const selected=catalog.get(BINDING,bindingKey(scope)),archived=archiveResources();
@@ -160,11 +162,16 @@ export function createToolConfigurationController({catalog,packages,worker,getSe
    if(!equal(selected,catalog.get(BINDING,bindingKey(scope))))throw Error('Execution skill sharing changed');
    const state=!permitted?'revoked':!compatibleTarget(reference)?'stale':result?.status==='active'?'active':'stale',freshArchived=archiveResources(),facts=metadataFacts(reference,state,freshArchived);
    facts.revision=digest([facts.revision,selected.revision,result?.revision??reference.last_revision??0,result?.archive_revision??reference.authority_metadata?.archive_revision??1]);
-   if(state==='active'){
+   if(permitted&&compatibleTarget(reference)&&executionSnapshot(result)){
     facts.activation={id:result.execution_skill.id,revision:String(result.revision),configurationId:reference.configuration_id};
     facts.executionSkill={id:result.execution_skill.id,sha256:result.execution_skill.sha256,text:result.execution_skill.body,resources:[]};
+    if(result.check_findings?.length)facts.checkFindings=structuredClone(result.check_findings);
    }
    const grant=grants.get(bindingKey(scope));if(facts.state!=='revoked'&&grant&&equal(grant.workerBinding,reference.worker_binding)&&grant.baseRevision===facts.revision&&grant.expiresAt>now())facts.readGrant={...grant.value,authorityRevision:facts.revision,activationId:facts.activation?.id??null};
+   // This authority originates only in the sender-validated grant action below.
+   // Probe/configuration evidence revisions do not revoke a repair delegation.
+   const delegated=catalog.get(DELEGATION,bindingKey(scope)),lease=getLease(scope.provider),record=recordFor(reference);let observedBinding;try{observedBinding=currentBinding();}catch{}
+   if(result&&facts.state!=='revoked'&&targetMatches&&delegated?.schema_version===1&&delegated.binding_revision===selected.revision&&delegated.configuration_id===reference.configuration_id&&equal(delegated.owner,delegationOwner(scope))&&equal(delegated.resourceIdentity,getResourceIdentity(scope.provider))&&equal(delegated.worker_binding,reference.worker_binding)&&equal(delegated.worker_binding,observedBinding)&&equal(delegated.package,{id:reference.package_id,version:reference.package_version,manifestSha256:record.manifest_sha256,sourceCommit:record.source_commit})&&equal(delegated.target,{projectId:reference.project_id,environmentId:reference.environment_id})&&lease&&['threadId','taskId','projectId','environmentId','inputRoot'].every(key=>equal(lease.context?.[key]??null,scope[key]??null))&&equal(delegated.resources,facts.archivedResources.filter(item=>delegated.value.resourceIds.includes(item.id))))facts.readGrant={...delegated.value,authorityRevision:facts.revision,activationId:facts.activation?.id??null};
    return facts;
   },
   async grant(value){
@@ -175,6 +182,10 @@ export function createToolConfigurationController({catalog,packages,worker,getSe
    const facts=await api.resolveGuidance({...owner,epoch:lease.epoch});if(!equal(owner,current())||!equal(selected,catalog.get(BINDING,key))||getLease(owner.provider)!==lease||!equal(lease.context,leaseContext)||facts.state==='revoked'||!compatibleTarget(index(value.configuration_id)))throw Error('Conversation, sharing or target changed');
    const prefix=facts.package.id+':'+facts.package.version+':',available=facts.archivedResources.filter(item=>item.id.startsWith(prefix)).map(item=>item.id),resourceIds=value.resource_ids;
    if(!resourceIds.length||new Set(resourceIds).size!==resourceIds.length||resourceIds.some(item=>!available.includes(item)))throw Error('Unknown archived guidance resource');
+   if(value.purpose==='repair'){
+    const record=recordFor(index(value.configuration_id)),grantId=randomUUID(),delegated={schema_version:1,id:key,binding_revision:selected.revision,configuration_id:value.configuration_id,owner:delegationOwner(owner),resourceIdentity:structuredClone(getResourceIdentity(owner.provider)),worker_binding:facts.workerBinding,target:{projectId:facts.target.projectId,environmentId:facts.target.environmentId},package:structuredClone(facts.package),resources:facts.archivedResources.filter(item=>resourceIds.includes(item.id)),value:{id:grantId,delegationId:grantId,duration:'delegation',purpose:'repair',resourceIds:[...resourceIds],owner:delegationOwner(owner),expiresAt:null}};
+    if(record.manifest_sha256!==facts.package.manifestSha256||record.source_commit!==facts.package.sourceCommit)throw Error('Repair package identity changed');catalog.put(DELEGATION,key,delegated);grants.delete(key);return {status:'granted',duration:'delegation',expires_at:null};
+   }
    const expiresAt=now()+10*60*1000;
    remember(grants,key,{baseRevision:facts.revision,workerBinding:facts.workerBinding,expiresAt,value:{id:randomUUID(),purpose:value.purpose,resourceIds,owner:{provider:owner.provider,threadId:owner.threadId,taskId:owner.taskId??null,leaseEpoch:lease.epoch},expiresAt}},{max:256});
    return {status:'granted',expires_at:expiresAt};

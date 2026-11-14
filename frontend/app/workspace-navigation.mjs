@@ -5,3 +5,10 @@ export function workspaceModule(section,engine=''){
  if(section==='editor')return 'code';if(section==='ssh'||section==='environments')return 'resources';if(section==='runs'||section.startsWith('cluster-run:')||section.startsWith('deployment'))return 'queue';
  return section==='home'?'home':section==='skills'?'skills':section==='relations'?'workflow':section;
 }
+
+// Highlight a destination from the displayed page, including detail pages.
+export function primaryDestination(section){
+ if(section==='runs'||section.startsWith('task:')||section.startsWith('cluster-run:'))return 'runs';
+ if(['tools','skills','relations','environments','ssh','bias','assets','viewer','training','activelearning'].includes(section)||section.startsWith('tool:'))return 'tools';
+ return 'home';
+}

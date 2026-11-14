@@ -44,7 +44,7 @@ TRANSFER_FILES = 128
 # Names verified against the GPUMD/GPU-Sampling output contracts; other outputs
 # remain explicitly selectable relative to this run, rather than globbed.
 DEFAULT_COLLECT = (
-    "console.log", "environment.json", "validation.json", "exit.json",
+    "console.log", "environment.json", "validation.json", "execution-check.json", "exit.json",
     "queue.out", "queue.err", "validation.stdout", "validation.stderr",
     "simulation/neb_energies.out", "simulation/final_traj.xyz", "simulation/interpolate.xyz",
     "simulation/peek_traj.xyz", "simulation/neb_fire_diagnostics.out", "simulation/neb_fire_imagewise.out",
@@ -550,7 +550,7 @@ class Clusters:
         skill_root.mkdir(parents=True,exist_ok=True)
         skill_fields={k:p.get(k) for k in ("id","name","version","scheduler","queue","limits","lsf_memory_scope","environment")}
         if "queue_targets" in p:skill_fields["queue_targets"]=p["queue_targets"]
-        source="# Cluster submission skill\n\n"+json.dumps(skill_fields,indent=2)+"\n\nUse only registered cluster IDs; never put SSH addresses, ports, keys or model proxy credentials in prompts or scripts. Probe the login node, then confirm queue/resource semantics with the user. Queue visibility never grants permission. For opt-in queue targets use the saved project cluster_queue_policies and exact profile version; order applies to new submissions only. Within explicitly approved paid conditions and limits, reuse project authorization without a repeated paid permission prompt. Unknown or changed conditions require review. Use present_task to show workflow and parameters. Prepare immutable inputs with prepare_cluster_run and STOP for the user to review the batch script and click Submit. Scientific validation executes on allocated compute nodes before the engine; never treat login-node discovery as science validation. Do not change project authorization. Never resubmit an unknown run; reconcile receipts and scheduler job identity. Read bounded logs and assets through cluster tools.\n\n"+str(p.get("notes",""))
+        source="# Cluster submission skill\n\n"+json.dumps(skill_fields,indent=2)+"\n\nUse only registered cluster IDs; never put SSH addresses, ports, keys or model proxy credentials in prompts or scripts. Probe the login node, then confirm queue/resource semantics with the user. Queue visibility never grants permission. For opt-in queue targets use the saved project cluster_queue_policies and exact profile version; order applies to new submissions only. Within explicitly approved paid conditions and limits, reuse project authorization without a repeated paid permission prompt. Unknown or changed conditions require review. Use present_task to show workflow and parameters. Within existing project authorization and user delegation, prepare immutable inputs, submit intentional new attempts, inspect results and repair failures; scientific review remains optional evidence. Scientific validation executes on allocated compute nodes before the engine; never treat login-node discovery as science validation. Do not change project authorization. Never resubmit an unknown run; reconcile receipts and scheduler job identity. Read bounded logs and assets through cluster tools.\n\n"+str(p.get("notes",""))
         (skill_root/"SKILL.md").write_text(source,encoding="utf8")
         self.store.put("cluster-version",{**p,"id":p["id"]+"-v"+str(p["version"])})
         self.store.put("cluster", p)
@@ -1074,6 +1074,8 @@ a.process_env=lambda environment,gpu=None:_original(environment,None)
 for a in r['snapshots']:
  f=contained(Path('simulation')/a['name'],[Path('simulation')])
  if digest(f)!=a['sha256']:raise ValueError('Remote immutable input changed')
+observed=None
+report=None
 try:
  print('Studio validation: environment probe started',file=sys.stderr,flush=True)
  observed=Adapter(r['engine']).probe(environment)
@@ -1084,7 +1086,22 @@ try:
  atomic_json('validation.json',report)
 except Exception as e:
  atomic_json('validation.json',{'status':'failed','message':str(e)})
- raise
+if r['engine'].endswith('sampling') or r['engine']=='bias.validate':
+ try:
+  required=report if (report or {}).get('artifact_status')=='passed' else Adapter(r['engine']).validate(r,environment,Path('simulation').resolve(),probe_report=observed,execution_only=True)
+  if required.get('artifact_status')!='passed':raise ValueError('Serialized artifact/target compatibility was not confirmed')
+  atomic_json('execution-check.json',{'status':'passed','required':True,'report':required})
+ except Exception as e:
+  atomic_json('execution-check.json',{'status':'failed','required':True,'message':str(e)})
+  raise
+elif r['engine']=='pydyn.md':
+ try:
+  adapter=Adapter(r['engine'])
+  required=adapter.pydyn_import_contract(environment,observed or adapter.probe(environment))
+  atomic_json('execution-check.json',{'status':'passed','required':True,'report':required})
+ except Exception as e:
+  atomic_json('execution-check.json',{'status':'failed','required':True,'message':str(e)})
+  raise
 """
         with tarfile.open(fileobj=buffer,mode="w:gz") as tar:
             def add(name, content):
@@ -1110,8 +1127,8 @@ except Exception as e:
             if r.get("superseded_by"):raise ValueError("Review and submit the revised snapshot")
             if r["status"] in ("queued","running","unknown",*TERMINAL):
                 return None,None
-            if r["status"]!="ready" or r["validation"]["status"]!="passed":
-                raise ValueError("Review and validate before submitting")
+            if r["status"] not in ("draft","ready"):
+                raise ValueError("Only an unsubmitted input snapshot can be submitted")
             self.validate(identifier)
             busy=[x for x in self.store.list("cluster-run") if x["project_id"]==r["project_id"] and x["status"] in ("queued","running","unknown")]
             if len(busy)+sum(x["project_id"]==r["project_id"] and x["status"] in ("running","unknown") for x in self.store.runs())>=project["policy"]["max_concurrent"]:
@@ -1223,6 +1240,7 @@ if (d/'exit.json').exists():
  v=json.load(open(d/'exit.json'))
  if v.get('nonce')==p['nonce']:out['exit']=v
 if (d/'validation.json').exists():out['validation']=json.load(open(d/'validation.json'))
+if (d/'execution-check.json').exists():out['execution_check']=json.load(open(d/'execution-check.json'))
 if out['job_id']:
  if p['scheduler']=='lsf':cmd=['bjobs','-a','-l',out['job_id']]
  else:cmd=['squeue','-h','-j',out['job_id'],'-o','%i|%T|%j']
@@ -1254,11 +1272,9 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 validation=result.get("validation",current.get("scientific_validation"))
                 if receipt:
                     status="succeeded" if receipt["exit_code"]==0 else "failed"
-                    if (validation or {}).get("status")!="passed" and status=="succeeded":
-                        status="unknown"
                 if state in ("EXIT","CANCELLED") and current.get("cancel_requested") and (receipt or {}).get("exit_code")!=0:status="cancelled"
                 self.save(current,status=status,job_id=result.get("job_id") or current["job_id"],scheduler_state=state,connection_action=None,
-                          scientific_validation=validation,exit=receipt,identity_verified=result.get("identity_verified",False))
+                          scientific_validation=validation,execution_check=result.get('execution_check',current.get('execution_check')),exit=receipt,identity_verified=result.get("identity_verified",False))
         except Exception as error:
             with self.store.lock:
                 current=self.raw(identifier)
@@ -1273,14 +1289,28 @@ print('__STUDIO_JSON__'+json.dumps(out))
         return self.run(identifier)
 
     def cancel(self, identifier):
+        # Record the user's intent before even the status query can lose its
+        # acknowledgement. Polling never proves the cancellation was delivered.
+        with self.store.lock:
+            before=self.raw(identifier)
+            self.allowed(before['project_id'],before['cluster_id'])
+            if before['status'] in TERMINAL:return self.run(identifier)
+            self.save(before,cancel_requested=True,cancellation={"status":"requested", "requested_at":time.time(), "signal_sent":False})
         current=self.poll(identifier);r=self.raw(identifier)
         if current["status"] in TERMINAL:return current
         if not r.get("job_id") or not r.get("identity_verified"):
+            self.merge(identifier,cancellation={"status":"unconfirmed", "signal_sent":False, "message":"Original scheduler identity is not verified; no cancellation command was sent"})
             raise ValueError("Cannot cancel an unverified scheduler identity")
         p=r["cluster_snapshot"]
         command=["bkill" if p["scheduler"]=="lsf" else "scancel",r["job_id"]]
-        self.transport(p).run(shlex.join(command))
-        self.merge(identifier,cancel_requested=True)
+        # A lost remote acknowledgement must not erase cancellation intent.
+        self.merge(identifier,cancel_requested=True,cancellation={"status":"requested", "requested_at":time.time(), "signal_sent":False})
+        try:
+            self.transport(p).run(shlex.join(command))
+        except Exception as exc:
+            self.merge(identifier,cancellation={"status":"unconfirmed", "signal_sent":False, "message":str(exc)[:300]})
+            raise
+        self.merge(identifier,cancellation={"status":"requested", "signal_sent":True})
         return self.run(identifier)
 
     def read(self, identifier, name="console.log", offset=0):

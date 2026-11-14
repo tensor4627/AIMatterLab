@@ -44,21 +44,22 @@ test('A trusted private workflow requires the actual seven scoped names, not pub
  assert.deepEqual(f.counts(),{policyCalls:2,probeCalls:1,inventoryCalls:1});
 });
 test('Switching to a public workflow retains the original present_task sentinel and full count',async()=>{
- const f=await fixture();assert.equal((await f.run()).count,7);await f.select('public');blocked(await f.run());f.state.response=inventory(['present_task','describe_engine']);
+ const f=await fixture();assert.equal((await f.run()).count,7);await f.select('public');assert.equal((await f.run()).warning,true);f.state.response=inventory(['present_task','describe_engine']);
  const result=await f.run();assert.equal(result.status,'ready');assert.equal(result.count,57);assert.equal(result.scope,undefined);assert.equal('threadId' in f.requests.at(-1)[1],false);
 });
 test('Initial ordinary connection with no selected task remains public and does not query private policy',async()=>{
  const f=await fixture({selected:null});f.workflowContext.clear();f.state.response=inventory(['present_task']);assert.equal((await f.run()).status,'ready');assert.equal(f.counts().policyCalls,0);assert.equal('threadId' in f.requests[0][1],false);
 });
 test('A caller cannot select the private policy with mode data or a foreign provider',async()=>{
- const f=await fixture({selected:'public'});f.state.response=inventory(DEFINITION_ONLY_TOOLS);blocked(await scientificToolReadiness(f.deps,{provider:'codex',definitionOnly:true}));assert.equal(f.counts().probeCalls,0);blocked(await f.run());
+ const f=await fixture({selected:'public'});f.state.response=inventory(DEFINITION_ONLY_TOOLS);blocked(await scientificToolReadiness(f.deps,{provider:'codex',definitionOnly:true}));assert.equal(f.counts().probeCalls,0);assert.equal((await f.run()).warning,true);
  f.setProvider('kimi');blocked(await f.run());assert.equal(f.counts().probeCalls,1);
 });
 test('Context provider mismatch fails before probing even if the selected provider matches the argument',async()=>{const f=await fixture();f.setProvider('kimi');blocked(await f.run('kimi'));assert.equal(f.counts().probeCalls,0);});
 test('A lineage binding also derives definition-only access without a task customCv field',async()=>{const f=await fixture();delete f.tasks.get('private-task').customCv;const result=await f.run();assert.equal(result.status,'ready');assert.equal(result.count,7);});
-for(const name of DEFINITION_ONLY_TOOLS)test('Missing private tool '+name+' blocks readiness',async()=>{const f=await fixture();f.state.response=inventory(DEFINITION_ONLY_TOOLS.filter(value=>value!==name));blocked(await f.run());});
+for(const name of DEFINITION_ONLY_TOOLS)test('Missing private tool '+name+' warns without granting extra tools',async()=>{const f=await fixture();f.state.response=inventory(DEFINITION_ONLY_TOOLS.filter(value=>value!==name));const v=await f.run();assert.equal(v.status,'ready');assert.equal(v.warning,true);assert.equal(v.count,6);assert.equal(v.scope,'definition-only');});
+test('tool metadata warning preserves ordinary setup discussion and final authorization checks',async()=>{const f=await fixture({selected:'public'});f.state.probe={status:'warning',count:0};f.state.response=inventory([]);f.state.response.data[0].toolsError='not configured';const v=await f.run();assert.equal(v.status,'ready');assert.equal(v.warning,true);assert.match(v.message,/配置/);assert.equal(f.counts().policyCalls,2);});
 for(const name of ['present_task','read_project_input','read_pygas_workflow','submit_run','unclassified_future_tool'])test('Extra private namespace tool '+name+' is never accepted',async()=>{const f=await fixture();f.state.response=inventory([...DEFINITION_ONLY_TOOLS,name]);blocked(await f.run());});
-for(const variant of ['outsider-server','duplicate-server','page','tools-array','wrong-tool-name','null-tool','missing-server','error','resources','templates','missing-resources','missing-templates','malformed-resources','malformed-templates','malformed'])test('Malformed or broader private inventory '+variant+' is blocked',async()=>{
+for(const variant of ['outsider-server','duplicate-server','page','tools-array','wrong-tool-name','null-tool','missing-server','resources','templates','missing-resources','missing-templates','malformed-resources','malformed-templates','malformed'])test('Malformed or broader private inventory '+variant+' is blocked',async()=>{
  const f=await fixture(),v=f.state.response,s=v.data[0];
  if(variant==='outsider-server')v.data.push({name:'outsider',tools:{}});
  if(variant==='duplicate-server')v.data.push(clone(s));
@@ -139,4 +140,4 @@ for(const variant of ['tool','resource','template','missing-tools','array-tools'
 
 test('definition-only readiness permits independent terminal tools while retaining exactly seven scientific capabilities',async()=>{const f=await fixture(),before=f.workflowContext.current();f.state.response=inventory([...DEFINITION_ONLY_TOOLS,...SHARED_TERMINAL_TOOL_NAMES]);const value=await f.run();assert.equal(value.status,'ready');assert.equal(value.count,7);assert.equal(value.scope,'definition-only');assert.equal(DEFINITION_ONLY_TOOLS.length,7);assert.deepEqual(f.workflowContext.current(),before);assert.deepEqual(f.counts(),{policyCalls:2,probeCalls:1,inventoryCalls:1});});
 test('definition-only readiness accepts optional terminal subset but rejects malformed terminal definitions',async()=>{const f=await fixture();f.state.response=inventory([...DEFINITION_ONLY_TOOLS,'read_shared_terminal']);assert.equal((await f.run()).status,'ready');f.state.response.data[0].tools.read_shared_terminal.name='read_project_input';blocked(await f.run());});
-test('terminal tools cannot replace missing scientific capabilities or make terminal-only inventory science-ready',async()=>{for(const names of [SHARED_TERMINAL_TOOL_NAMES,[...DEFINITION_ONLY_TOOLS.slice(1),...SHARED_TERMINAL_TOOL_NAMES]]){const f=await fixture();f.state.response=inventory(names);blocked(await f.run());}});
+test('terminal tools retain setup access while missing scientific capabilities remain explicitly unverified',async()=>{for(const names of [SHARED_TERMINAL_TOOL_NAMES,[...DEFINITION_ONLY_TOOLS.slice(1),...SHARED_TERMINAL_TOOL_NAMES]]){const f=await fixture();f.state.response=inventory(names);const v=await f.run();assert.equal(v.status,'ready');assert.equal(v.warning,true);assert.equal(v.count,names.filter(n=>DEFINITION_ONLY_TOOLS.includes(n)).length);assert.match(v.message,/尚未验证/);}});

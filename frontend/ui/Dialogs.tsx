@@ -1,7 +1,7 @@
 import {tr} from './i18n';
 import {useEffect,useId,useRef,type ReactNode} from 'react';
 import {X} from 'lucide-react';
-export const statusNames:Record<string,string>={draft:'草稿',validating:'验证中',ready:'已验证',queued:'排队中',running:'运行中',succeeded:'已完成',failed:'失败',cancelled:'已取消',unknown:'状态未知',passed:'通过',blocked:'环境阻塞',not_run:'未验证'};
+export const statusNames:Record<string,string>={draft:'草稿',validating:'验证中',ready:'就绪',queued:'排队中',running:'运行中',succeeded:'已完成',failed:'失败',cancelled:'已取消',unknown:'状态未知',passed:'通过',blocked:'环境阻塞',not_run:'未验证'};
 export function Modal({title,onClose,children,wide=false,closeDisabled=false}:{title:string;onClose:()=>void;children:ReactNode;wide?:boolean;closeDisabled?:boolean}){
  const ref=useRef<HTMLElement>(null),titleId=useId(),closeRef=useRef(onClose);closeRef.current=()=>{if(!closeDisabled)onClose();};
  function focusable(){return [...(ref.current?.querySelectorAll<HTMLElement>('a[href],button,input,select,textarea,[tabindex]')||[])].filter(el=>!el.matches(':disabled,[tabindex="-1"],[type="hidden"]')&&el.getClientRects().length>0);}

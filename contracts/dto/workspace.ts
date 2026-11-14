@@ -4,7 +4,7 @@ export interface Workflow {id:string;project_id:string;name:string;steps:unknown
 
 export interface TaskEditRequest {id:string;changes:Record<string,unknown>}
 
-export interface TaskExecuteRequest {taskId:string;artifactId:string;inputReceipt?:string}
+export interface TaskExecuteRequest {taskId:string;artifactId:string;inputReceipt?:string;runChecks?:boolean}
 
 export interface TaskLinkRunRequest {taskId:string;runId:string;kind:'run'|'cluster-run';expectedPrepared?:{artifactId:string;parameterRevision:number;deploymentRevision:number}}
 

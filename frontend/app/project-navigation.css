@@ -12,3 +12,81 @@
 @media(max-width:700px){.project-management-row{align-items:flex-start;flex-wrap:wrap}.project-management-row>.button{margin-left:32px}.project-authorization .project-basic-resources{grid-template-columns:1fr}.project-setting-content .authorization-options{grid-template-columns:1fr}}
 
 .deployment-binding h3{margin:9px 0;overflow-wrap:anywhere;font-size:1.12rem}.deployment-binding p{margin-bottom:0;line-height:1.65}.deployment-project-settings{border-top:1px solid var(--line);padding:12px 0;margin:10px 0}.deployment-project-settings>summary{cursor:pointer;line-height:1.7;font-weight:500}.deployment-project-settings>label{display:flex;flex-direction:column;gap:8px;margin:12px 0}.deployment-project-settings .button-row{flex-wrap:wrap}.deployment-page .notice>.button{margin-left:10px}.deployment-page [data-testid=deployment-context-state]{line-height:1.7}
+
+/* Keep conversation labels aligned while project children read as a second level. */
+.workspace-shell .conversation-sidebar .conversation-project{
+ margin-bottom:8px;
+ border-left:0;
+}
+.workspace-shell .conversation-sidebar .conversation-project>summary{
+ min-height:36px;
+ padding:7px 8px;
+ gap:8px;
+ border-radius:8px;
+ list-style:none;
+ color:var(--text);
+}
+.workspace-shell .conversation-sidebar .conversation-project>summary::-webkit-details-marker{display:none}
+.workspace-shell .conversation-sidebar .conversation-project>summary:hover{background:var(--raised)}
+.workspace-shell .conversation-sidebar .conversation-project>summary>svg{flex-shrink:0;color:var(--muted)}
+.workspace-shell .conversation-sidebar .conversation-project>summary>span{white-space:nowrap}
+.workspace-shell .conversation-sidebar .conversation-project>summary>button{
+ display:grid;
+ place-items:center;
+ flex-shrink:0;
+ width:26px;
+ height:26px;
+ padding:0;
+ border-radius:5px;
+}
+.workspace-shell .conversation-sidebar .conversation-row{
+ position:relative;
+ flex:none;
+ gap:0;
+ min-height:34px;
+ margin:1px 0;
+ border-radius:8px;
+}
+.workspace-shell .conversation-sidebar .conversation-row:hover,
+.workspace-shell .conversation-sidebar .conversation-row:focus-within,
+.workspace-shell .conversation-sidebar .conversation-row:has(.selected-conversation){background:var(--raised)}
+.workspace-shell .conversation-sidebar .conversation-row .conversation-item{
+ min-height:34px;
+ padding:7px 8px;
+ line-height:1.5;
+ border-radius:8px;
+ background:transparent;
+ color:var(--text);
+}
+.workspace-shell .conversation-sidebar .conversation-project>.conversation-row .conversation-item{padding-left:30px}
+.workspace-shell .conversation-sidebar .conversation-item>span{
+ display:block;
+ flex:1;
+ min-width:0;
+ overflow:hidden;
+ text-overflow:ellipsis;
+ white-space:nowrap;
+}
+.workspace-shell .conversation-sidebar .conversation-row .conversation-menu-trigger{
+ display:grid;
+ place-items:center;
+ flex:0 0 30px;
+ width:30px;
+ height:30px;
+ margin-right:3px;
+ padding:0;
+ border-radius:6px;
+ color:var(--muted);
+}
+.workspace-shell .conversation-sidebar .conversation-row .conversation-menu-trigger:hover,
+.workspace-shell .conversation-sidebar .conversation-row .conversation-menu-trigger[aria-expanded=true]{
+ background:var(--panel);
+ color:var(--text);
+}
+@media(hover:hover) and (pointer:fine){
+ .workspace-shell .conversation-sidebar .conversation-row .conversation-menu-trigger{opacity:0}
+ .workspace-shell .conversation-sidebar .conversation-row:hover .conversation-menu-trigger,
+ .workspace-shell .conversation-sidebar .conversation-row:focus-within .conversation-menu-trigger,
+ .workspace-shell .conversation-sidebar .conversation-row:has(.selected-conversation) .conversation-menu-trigger,
+ .workspace-shell .conversation-sidebar .conversation-row .conversation-menu-trigger[aria-expanded=true]{opacity:1}
+}

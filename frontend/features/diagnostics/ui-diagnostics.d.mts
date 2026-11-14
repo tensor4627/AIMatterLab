@@ -1,4 +1,4 @@
-export interface DiagnosticContext {operation:string;taskId:string;taskName:string;parameterRevision:number;deploymentRevision:number;target:string;targetId:string;targetName:string;projectId:string;runId:string|null;preparedId:string|null;requestId:string|null;configuration:string;executionBefore:string;taskVersion:any;phase:string}
+export interface DiagnosticContext {operation:string;taskId:string;provider?:string|null;threadId?:string|null;inputParameters?:Record<string,unknown>;taskName:string;parameterRevision:number;deploymentRevision:number;target:string;targetId:string;targetName:string;projectId:string;runId:string|null;preparedId:string|null;requestId:string|null;configuration:string;executionBefore:string;taskVersion:any;phase:string}
 
 export interface UiDiagnostic {id:string;observedAt:number;raw:string;stack:string|null;context:DiagnosticContext|null;resolution?:{phase:string;observedAt:number;execution:any}}
 

@@ -35,10 +35,10 @@ class Authoring(unittest.TestCase):
     p=service.register_project({'name':'test','policy':{'input_roots':[d],'environments':[]}})
     with self.assertRaises(PermissionError):service.authoring({'project_id':p['id'],'environment_id':'unknown','recipe':{}},'create_structure')
    finally:service.close();service.store.db.close()
- def test_mcp_catalog_exposes_authoring_not_submission(self):
+ def test_mcp_catalog_exposes_authorized_execution(self):
   names={t['name'] for t in tools()}
   self.assertTrue({'list_source_projects','inspect_source_project','create_structure','render_pygas_workflow'}<=names)
-  self.assertNotIn('submit_run',names)
+  self.assertIn('submit_run',names)
   for tool in tools():
    if tool['name'] in ('inspect_source_project','suggest_parameters'):self.assertTrue(tool['annotations']['readOnlyHint'])
 

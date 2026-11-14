@@ -9,7 +9,8 @@ import time
 
 from studio_worker.tools.adapters import Adapter, INSTALLATION_CHECKS
 from studio_worker.tools.package_contract import encoded, load_package, owned, read_bytes, sha
-from studio_worker.compute.runtime_guides import fingerprint, file_digest
+from studio_worker.compute.runtime_guides import fingerprint
+from studio_worker.infrastructure.util import stable_file_snapshot
 
 from studio_worker.tools.reference_worker import SCOPE, REFERENCE_CRITERIA, run_reason, reference_evidence
 
@@ -32,8 +33,10 @@ def python_identity(environment):
     value = environment.get('executables', {}).get('python')
     if type(value) is not str or not Path(value).is_absolute() or not Path(value).is_file() or not os.access(value, os.X_OK): raise ValueError('Registered Python executable unavailable')
     path = Path(value)
-    if path.stat().st_size > 512 * 1024 * 1024: raise ValueError('Interpreter observation exceeds supported bound')
-    return {'path': value, 'resolved': str(path.resolve()), 'size': path.stat().st_size, 'sha256': file_digest(path)}
+    resolved=path.resolve()
+    snapshot=stable_file_snapshot(resolved,max_bytes=512*1024*1024)
+    if path.resolve()!=resolved:raise ValueError('Registered interpreter changed during observation')
+    return {'path': value, 'resolved': str(resolved), 'size': snapshot['size'], 'sha256': snapshot['sha256']}
 
 
 class ToolConfigurations:
@@ -103,9 +106,15 @@ class ToolConfigurations:
         self.service.authorize({'project_id': target['project_id'], 'environment_id': target['environment_id'], 'engine': 'installation.check', 'gpu': 0, 'max_seconds': configuration['max_seconds']})
         return project, environment
 
-    def _fresh(self, configuration, full_package=False):
+    def _fresh(self, configuration, full_package=False, allow_environment_drift=False):
         project, environment = self._target(configuration)
-        if fingerprint(environment) != configuration['environment_sha256'] or sha(encoded(project['policy'])) != configuration['authorization_sha256'] or python_identity(environment) != configuration['python']: raise ValueError('Configuration environment, authorization or interpreter changed')
+        current_environment=fingerprint(environment);current_python=python_identity(environment)
+        if current_environment==configuration['environment_sha256'] and current_python!=configuration['python']:
+            raise ValueError('Installed interpreter content changed without a new registered environment identity')
+        if current_environment != configuration['environment_sha256'] or sha(encoded(project['policy'])) != configuration['authorization_sha256'] or current_python != configuration['python']:
+            if not allow_environment_drift:raise ValueError('Configuration environment, authorization or interpreter changed')
+            configuration['check_findings']=[{'status':'warning','code':'configuration_environment_changed','message':'Current authorized environment differs from the original plan; current target observations are recorded separately'}]
+            configuration['runtime_observation']={'environment_sha256':current_environment,'authorization_sha256':sha(encoded(project['policy'])),'python':current_python}
         package = self._package(configuration)
         if full_package:
             current = load_package(package['snapshot_root'], package['package_version'])
@@ -181,7 +190,7 @@ class ToolConfigurations:
         with self.service.tool_configuration_lock:
             record = self._get(data, True)
             if record['status'] != 'planned': return self.status({'configuration_id': record['id']})
-            package, _environment = self._fresh(record, True)
+            package, _environment = self._fresh(record, True, allow_environment_drift=True)
             self._reference(package)
             record = self._save(record, status='installing')
             try:
@@ -196,18 +205,18 @@ class ToolConfigurations:
                     installed.append({'path': entry, 'size': len(value), 'sha256': sha(value)})
                 temporary.rename(prefix)
                 record = self._save(record, install={'status': 'passed', 'files': installed, 'method': 'private-copy-sha256'}, status='testing')
-                self._installed(record); self._fresh(record, True)
+                self._installed(record); self._fresh(record, True, allow_environment_drift=True)
                 for test in record['tests']:
                     spec = {'project_id': record['target']['project_id'], 'environment_id': record['target']['environment_id'], 'engine': 'installation.check', 'gpu': 0, 'max_seconds': record['max_seconds'], 'inputs': {'run.py': str(prefix / test['entrypoint'])}, 'parameters': {'installation_case': 'worker'}, 'idempotency_key': 'tool-config:' + record['id'] + ':' + sha(test['id'].encode())[:20], 'name': 'Tool reference ' + test['id']}
                     with self.store.lock:
-                        self._fresh(record); self._installed(record)
+                        self._fresh(record, allow_environment_drift=True); self._installed(record)
                         run = self.service.prepare(spec)
-                    test['run_id'] = run['id']; test['request_hash'] = run['request_hash']; test['status'] = 'prepared'
+                    test['run_id'] = run['id']; test['request_hash'] = run['request_hash']; test['status'] = 'prepared'; test['environment_sha256']=fingerprint(run['environment_snapshot'])
                     record = self._save(record, tests=record['tests'])
                     run = self.service.validate(run['id'])
-                    if run['status'] != 'ready': raise ValueError('Reference test input validation failed')
+                    if run['status'] not in ('draft','ready'): raise ValueError('Reference test attempt changed during checks')
                     with self.store.lock:
-                        self._fresh(record, True); self._installed(record)
+                        self._fresh(record, True, allow_environment_drift=True); self._installed(record)
                         run = self.service.submit(run['id'])
                     test['status'] = run['status']
                     record = self._save(record, tests=record['tests'])
@@ -217,7 +226,7 @@ class ToolConfigurations:
                 raise
 
     def _evidence(self, record, test):
-        return reference_evidence(self.service, record, test)
+        return reference_evidence(self.service, {**record,'environment_sha256':test.get('environment_sha256',record['environment_sha256'])}, test)
 
     def status(self, data):
         with self.service.tool_configuration_lock:
@@ -248,28 +257,27 @@ class ToolConfigurations:
             record = self._get(data, True)
             record = self.status({'configuration_id': record['id']})
             if record['status'] == 'active': return self.read({'configuration_id': record['id']})
-            if record['status'] != 'tested': raise ValueError('All actual installed functional tests must pass before activation')
-            package, _environment = self._fresh(record, True); self._installed(record)
-            for test in record['tests']:
-                if self._evidence(record, test)['status'] != 'passed': raise ValueError('Actual complete test evidence required')
+            if record['install']['status'] != 'passed': raise ValueError('Confirmed installed source required before activation; reconcile an unknown installation')
+            package, _environment = self._fresh(record, True, allow_environment_drift=True); self._installed(record)
+            actual_python=python_identity(_environment)
             body = '# Configured CPU worker reference\n\n' + SCOPE + '\n\n'
-            body += '## Normal operation\n\nUse the complete function run_spec below with a fresh idempotency_key for each newly reviewed request. The fixed run.py input is the installed program; there are no user input files, adjustable parameters or optional values. installation_case=worker is fixed, not a user option. CPU serial resources are one thread, one process and zero GPUs; gpu=0 is the existing authorization slot. Keep the recorded project, environment, installed path and time bound.\n\n'
-            body += 'Prepare that exact run through Studio, review its actual immutable input snapshots and target, then stop for human execution approval. Only the human execution channel validates and submits the existing run. The worker creates a separate run directory; worker_argv executes the snapshotted run.py in its results directory (task_workdir). argv identifies the installed source entrypoint. Do not execute the installed source in the installation prefix.\n\n'
+            body += '## Normal operation\n\nUse the complete function run_spec below with a fresh idempotency_key for each intentional new attempt. The fixed run.py input is the installed program; there are no user input files, adjustable parameters or optional values. installation_case=worker is fixed, not a user option. CPU serial resources are one thread, one process and zero GPUs; legacy gpu=0 reserves no GPU for installation.check. Keep the recorded project, environment, installed path and time bound.\n\n'
+            body += 'Within existing user delegation, prepare immutable input snapshots, validate when useful, submit, inspect and repair. Check findings are evidence independent of permission; never claim failed or unexecuted tests passed. The worker creates a separate run directory; worker_argv executes the snapshotted run.py in its results directory (task_workdir). argv identifies the installed source entrypoint. Do not execute the installed source in the installation prefix.\n\n'
             body += 'Read run status and collect its artifacts. The normal product is smoke-result.json (JSON) in task_workdir. To inspect it use read_artifact with the existing run_id and that filename. The reference_criteria below state the actual independent setup/test checks, including supervisor exit.json, child.json PID, JSON contents and the console.log marker. A historical passed status or hash alone does not establish a new run passed.\n\n'
-            body += 'On failed or cancelled runs, retain that run and report its persisted validation/error/exit reason; inspect its console without substituting output. For unknown status or an unconfirmed response, read the same original run and never prepare or submit a replacement automatically. If the configuration, interpreter or installed files are stale, stop for explicit repair/update. Normal operation uses this snapshot and the installed source; no installation or delivery document is needed.\n\n## Exact execution facts\n\n'
+            body += 'On failed or cancelled runs, retain that run and report its persisted validation/error/exit reason; inspect its console without substituting output. For unknown status or an unconfirmed response, read the same original run and never prepare or submit a replacement automatically. If configuration or environment evidence is stale, report the change and repair within existing delegation; preserve immutable source snapshots and never silently reinstall. Normal operation uses this snapshot and the installed source; no installation or delivery document is needed.\n\n## Exact execution facts\n\n'
             functions = []
             for feature in package['manifest']['functions']:
                 entry = str(Path(record['installed_prefix']) / feature['entrypoint'])
                 run_spec = {'project_id': record['target']['project_id'], 'environment_id': record['target']['environment_id'], 'engine': REFERENCE_CRITERIA['run']['engine'], 'gpu': 0, 'max_seconds': record['max_seconds'], 'inputs': {'run.py': entry}, 'parameters': copy.deepcopy(REFERENCE_CRITERIA['run']['parameters']), 'idempotency_key': '{new_reviewed_request_id}'}
-                functions.append({**copy.deepcopy(feature), 'installed_entrypoint': entry, 'argv': [record['python']['path'], entry], 'working_directory': '{task_workdir}',
+                functions.append({**copy.deepcopy(feature), 'installed_entrypoint': entry, 'argv': [actual_python['path'], entry], 'working_directory': '{task_workdir}',
                     'worker_argv': Adapter(REFERENCE_CRITERIA['run']['engine']).prepare(run_spec, _environment),
                     'input_files': [{'name': 'run.py', 'source': entry, 'format': 'python', 'required': True, 'role': 'Fixed installed engine program; no user-supplied input'}],
                     'output_files': [{'port_id': feature['outputs'][0]['id'], 'name': REFERENCE_CRITERIA['output']['name'], 'format': REFERENCE_CRITERIA['output']['format'], 'directory': '{task_workdir}', 'required': True}],
                     'parameter_policy': {'user_adjustable': False, 'optional_inputs': [], 'optional_parameters': [], 'fixed_parameters': copy.deepcopy(REFERENCE_CRITERIA['run']['parameters'])},
-                    'resources': {'hardware': 'cpu', 'parallelism': 'serial', 'threads': 1, 'processes': 1, 'gpus': 0, 'authorization_gpu_slot': 0, 'max_seconds': record['max_seconds']},
-                    'failure_handling': {'declared': feature['operation']['failure_handling'], 'failed_or_cancelled': 'Retain the original run; report persisted validation/error/exit reason and inspect console', 'unknown': 'Read the same original run; never automatically prepare, resubmit or fall back', 'stale_configuration': 'Stop for explicit repair/update; never silently reinstall'},
+                    'resources': {'hardware': 'cpu', 'parallelism': 'serial', 'threads': 1, 'processes': 1, 'gpus': 0, 'legacy_gpu_field': 0, 'max_seconds': record['max_seconds']},
+                    'failure_handling': {'declared': feature['operation']['failure_handling'], 'failed_or_cancelled': 'Retain the original run; report persisted validation/error/exit reason and inspect console', 'unknown': 'Read the same original run; never automatically prepare, resubmit or fall back', 'stale_configuration': 'Report stale evidence and repair within current delegation; never silently reinstall'},
                     'run_spec': run_spec})
-            facts = {'configuration_id': record['id'], 'package_id': record['package_id'], 'package_version': record['package_version'], 'manifest_sha256': record['manifest_sha256'], 'source_commit': package['source_commit'], 'target': record['target'], 'environment_sha256': record['environment_sha256'], 'python': record['python']['path'], 'installed_prefix': record['installed_prefix'], 'environment': copy.deepcopy(package['manifest']['environment']), 'functions': functions, 'reference_criteria': copy.deepcopy(REFERENCE_CRITERIA), 'tests': record['tests'], 'scientific_status': 'not_run'}
+            facts = {'configuration_id': record['id'], 'package_id': record['package_id'], 'package_version': record['package_version'], 'manifest_sha256': record['manifest_sha256'], 'source_commit': package['source_commit'], 'target': record['target'], 'environment_sha256': record['environment_sha256'], 'python': actual_python['path'], 'runtime_observation':record.get('runtime_observation'), 'check_findings':record.get('check_findings',[]), 'installed_prefix': record['installed_prefix'], 'environment': copy.deepcopy(package['manifest']['environment']), 'functions': functions, 'reference_criteria': copy.deepcopy(REFERENCE_CRITERIA), 'tests': record['tests'], 'scientific_status': 'not_run'}
             body += '```json\n' + json.dumps(facts, ensure_ascii=False, indent=2) + '\n```\n'
             skill_id = sha(body.encode('utf-8'))
             skill = {'schema_version': 1, 'id': skill_id, 'configuration_id': record['id'], 'sha256': skill_id, 'body': body, 'facts': facts, 'scope': SCOPE}
@@ -285,8 +293,15 @@ class ToolConfigurations:
             from studio_worker.tools.archive_guard import archived_resources
             alias = self.store.get('tool-package-alias', package['id'])
             facts = {'package_id': record['package_id'], 'package_version': record['package_version'], 'manifest_sha256': record['manifest_sha256'], 'source_commit': package['source_commit'], 'functions': copy.deepcopy(package['manifest']['functions']), 'target': record['target'], 'environment_sha256': record['environment_sha256'], 'archive_revision': alias.get('revision', 1), 'archived_resources': [item for item in archived_resources(self.service) if item['configuration_id'] == record['id']]}
-            if record['status'] != 'active': return {'schema_version': 1, 'status': record['status'], 'configuration_id': record['id'], 'revision': record['revision'], **facts, 'reason': record.get('reason', 'No active execution skill'), 'scope': SCOPE}
+            if not record.get('execution_skill_id'): return {'schema_version': 1, 'status': record['status'], 'configuration_id': record['id'], 'revision': record['revision'], **facts, 'reason': record.get('reason', 'No saved execution skill'), 'scope': SCOPE}
+            project, environment = self._target(record)
+            self._installed(record)
+            current_environment = fingerprint(environment)
+            current_python = python_identity(environment)
+            if current_environment == record['environment_sha256'] and current_python != record['python']:
+                raise ValueError('Installed interpreter content changed without a new registered environment identity')
             activation = self.store.get('tool-activation', record['id'])
             skill = self.store.get('tool-execution-skill', activation['execution_skill_id'])
             if skill['id'] != record['execution_skill_id'] or sha(skill['body'].encode('utf-8')) != skill['sha256'] or activation['environment_sha256'] != record['environment_sha256']: raise ValueError('Execution snapshot identity changed')
-            return {'schema_version': 1, 'status': 'active', 'configuration_id': record['id'], 'revision': record['revision'], **facts, 'execution_skill': copy.deepcopy(skill), 'scope': SCOPE}
+            findings = ([{'status':'warning','code':'stale_configuration_evidence','message':record.get('reason','Configuration evidence changed')} ] if record['status'] != 'active' else [])
+            return {'schema_version': 1, 'status': record['status'], 'configuration_id': record['id'], 'revision': record['revision'], **facts, 'execution_skill': copy.deepcopy(skill), 'current_environment_sha256':current_environment, 'current_authorization_sha256':sha(encoded(project['policy'])), 'current_python':current_python, 'check_findings':findings, 'scope': SCOPE}

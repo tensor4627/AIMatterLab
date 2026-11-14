@@ -13,11 +13,13 @@ import * as diagnostics from "../../frontend/features/diagnostics/ui-diagnostics
 
 import * as computeCommand from "../../frontend/features/compute/compute-connection-command.mjs";
 import * as sshGuideQueue from "../../frontend/app/ssh-guide-queue.mjs";
+import * as selectedServiceRecords from '../../frontend/features/runs/selected-service-records.mjs';
 
 import {memoryStorage} from './agent-hooks.mjs';
 import {loadConversationSelection} from './conversation-selection-hooks.mjs';
 const source=fs.readFileSync(new URL('../../frontend/app/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+const connectionUi={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/compute/ssh-connection-types.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(connectionUi,connectionUi.exports);
 const reviewSource=ts.createSourceFile('RunReview.tsx',fs.readFileSync(new URL('../../frontend/features/runs/RunReview.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const taskModuleSource=reviewSource.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='taskModule').getText(reviewSource).replace(/^export /,'');
 const taskModule=new Function('t',ts.transpileModule(taskModuleSource,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'; return taskModule;')(value=>value);
@@ -54,10 +56,12 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   },module,module.exports,window,{randomUUID});return module.exports;
  }
  const require=name=>{
+  if(name==='../features/compute/ssh-connection-types')return connectionUi.exports;
   if(name==='../../contracts/compute/task-worker-binding.mjs')return taskWorkerBinding;
   if(name==='../ui/lazy-panel')return {lazyPanel:(name)=>'./'+name};
   if(name==='../features/workflows/task-drafts')return {clearTaskDrafts:id=>calls.push({method:'fixture.clearTaskDrafts',data:{id}})};
   if(name==='./ssh-guide-queue.mjs')return sshGuideQueue;
+  if(name==='../features/runs/selected-service-records.mjs')return selectedServiceRecords;
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='../api/compute-resources')return loadNavigation('frontend/api/compute-resources.ts');
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};

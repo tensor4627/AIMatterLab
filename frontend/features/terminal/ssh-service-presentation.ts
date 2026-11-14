@@ -1,7 +1,7 @@
 import type {SshServicePhase,SshServiceState} from '../../../contracts/dto/compute';
 
 export const servicePhaseMessages:Record<SshServicePhase,string>={
- preparing_local:'核对本地作业服务文件',waiting_python:'等待远端 Python 响应',
+ preparing_local:'核对本地作业服务文件',preparing_environment:'激活已保存的作业服务环境',waiting_python:'等待远端 Python 响应',
  checking_cache:'检查远端服务缓存和权限',transferring_transport:'传输连接组件',
  transferring_worker:'传输作业服务文件',preparing_runtime:'准备并校验作业服务文件',
  starting_worker:'启动远端作业服务',checking_health:'核对服务身份与健康状态',
@@ -9,9 +9,19 @@ export const servicePhaseMessages:Record<SshServicePhase,string>={
  stopping:'正在停止作业服务通道',returning_terminal:'等待交互终端恢复确认'
 };
 const errorMessages:Record<string,string>={
+ registration_required:'请在连接计算资源中完成此连接的首次作业服务设置。',
+ maintenance_required:'已保存的作业服务需要检查或维护，请在连接计算资源中处理。不会自动重装或更新。',
+ ssh_service_registration_required:'请在连接计算资源中完成此连接的首次作业服务设置。',
+ ssh_service_maintenance_required:'已保存的作业服务需要检查或维护，请在连接计算资源中处理。',
+ environment_activation_failed:'已保存的环境激活命令未能完成。请在原终端检查 Conda、venv 或 module 配置。',
+ python_start_failed:'未能启动所选 Python。请核对已保存的解释器路径和环境激活设置。',
  python_response_timeout:'等待远端 Python 响应超时。请返回终端核对登录状态和 Python 响应；不能据此判断 Python 未安装。',
  startup_timeout:'等待远端启动响应超时。尚不能区分登录未完成、Python 未响应或通道中断，请先返回终端核对。',
  connection_unconfirmed:'未收到完整的通道确认。请重新核对状态，不会自动重连。',
+ exec_unavailable:'SSH 网关拒绝远程命令，尚未运行 Python。请在连接设置使用“用户名/资产 IP/资产账号”的直达格式，或使用允许服务命令的集群入口，再人工登录。现有终端仍可使用。',
+ channel_refused:'SSH 服务通道被拒绝，尚未运行 Python。请核对网关资产直达配置及多通道支持。现有终端仍可使用，不会自动重新登录。',
+ channel_timeout:'SSH 服务通道未就绪，尚未运行 Python。请核对网关路由和服务通道支持。现有终端仍可使用，不会自动重新登录。',
+ terminal_busy:'终端尚未回到可确认的 shell 提示符，未发送服务命令。请等待当前命令结束，再明确交接。',
  identity_unconfirmed:'远端服务身份或版本未通过核对，已停止接入。',
  tools_unavailable:'远端服务已响应，但工作流工具尚未通过检查，不能创建或执行流程。',
  local_resources_unavailable:'本地作业服务文件不可用或校验未通过，未继续接入。',
@@ -54,6 +64,7 @@ const errorMessages:Record<string,string>={
 };
 export function servicePhaseMessage(phase:unknown){return typeof phase==='string'&&Object.hasOwn(servicePhaseMessages,phase)?servicePhaseMessages[phase as SshServicePhase]:'正在核对作业服务接入状态';}
 export function serviceErrorMessage(code:unknown){return typeof code==='string'&&Object.hasOwn(errorMessages,code)?errorMessages[code]:'未收到完整的接入结果。请重新核对状态，不会自动重连或重发请求。';}
+export function serviceIdentityUnconfirmed(code:unknown){return typeof code==='string'&&['worker_health_invalid','worker_identity_unavailable','identity_unconfirmed','ssh_service_identity_unavailable','ssh_service_runtime_changed'].includes(code);}
 /** Electron may wrap a rejected error. Only a known code selects a fixed message. */
 export function serviceRejectedMessage(error:unknown){const code=String(error).slice(0,4096).match(/\b(?:ssh_service|terminal)_[a-z_]+\b/)?.[0];return serviceErrorMessage(code);}
 export function serviceTransfer(state:SshServiceState|null){

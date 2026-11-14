@@ -39,7 +39,8 @@ export async function scientificToolReadiness({worker,codex,workflowContext,reco
   const initial=await access();fresh();
   if(initial.definitionOnly&&provider!=='codex')throw Error('Definition-only sharing requires the isolated Codex scientific tool connection');
   const status=await worker.probeTools();fresh();
-  if(!object(status)||status.status!=='ready')throw Error(status?.message||'Scientific worker tools are not ready');
+  if(!object(status)||!['ready','warning'].includes(status.status))throw Error(status?.message||'Scientific worker tools are not ready');
+  let warning=status.status==='warning',actualPrivateCount=DEFINITION_ONLY_TOOLS.length;
   if(provider==='codex'){
    // Probe the process-owned scoped server before any stored thread has been resumed.
    // Fresh thread/turn fences independently verify its native per-thread inventory.
@@ -47,16 +48,20 @@ export async function scientificToolReadiness({worker,codex,workflowContext,reco
    fresh();
    if(!Array.isArray(inventory?.data))throw Error('Agent 科学工具目录不可用，请重新连接');
    const servers=inventory.data.filter(value=>value?.name==='gpusampling'),server=servers[0];
-   if(servers.length!==1||!object(server?.tools)||server.toolsError)throw Error('Agent 尚未挂载科学工具，请重新连接');
+   if(servers.length>1||servers.length===1&&!object(server?.tools))throw Error('Agent 科学工具目录格式无效，请核对连接');
+   if(!server||server.toolsError)warning=true;
    if(initial.definitionOnly){
-    const names=Object.keys(server.tools),required=new Set(DEFINITION_ONLY_TOOLS);
+    const names=Object.keys(server?.tools||{}),required=new Set(DEFINITION_ONLY_TOOLS);
     const ambient=inventory.data.filter(row=>row?.name!=='gpusampling');
     const ambientEmpty=ambient.every(row=>object(row)&&typeof row.name==='string'&&row.name.length>0&&object(row.tools)&&Object.keys(row.tools).length===0&&Array.isArray(row.resources)&&row.resources.length===0&&Array.isArray(row.resourceTemplates)&&row.resourceTemplates.length===0);
-    if(inventory.nextCursor||!ambientEmpty||DEFINITION_ONLY_TOOLS.some(name=>!Object.hasOwn(server.tools,name))||names.some(name=>(!required.has(name)&&!sharedTerminalToolAllowed(name))||!object(server.tools[name])||server.tools[name].name!==name)||!Array.isArray(server.resources)||server.resources.length||!Array.isArray(server.resourceTemplates)||server.resourceTemplates.length)throw Error('当前私有定义仅允许七个受限科学工具；工具目录不匹配，请重新连接');
-   }else if(!server.tools.present_task)throw Error('Agent 尚未挂载科学工具，请重新连接');
+    if(inventory.nextCursor||!ambientEmpty||names.some(name=>(!required.has(name)&&!sharedTerminalToolAllowed(name))||!object(server.tools[name])||server.tools[name].name!==name)||server&&(!Array.isArray(server.resources)||server.resources.length||!Array.isArray(server.resourceTemplates)||server.resourceTemplates.length))throw Error('当前私有定义仅允许七个受限科学工具；工具目录不匹配，请重新连接');
+    actualPrivateCount=names.filter(name=>required.has(name)).length;
+    if(actualPrivateCount<DEFINITION_ONLY_TOOLS.length)warning=true;
+   }else if(!server?.tools?.present_task)warning=true;
   }
   const final=await access();fresh();
   if(final.definitionOnly!==initial.definitionOnly)throw Error('Scientific sharing scope changed during the tool check');
-  return initial.definitionOnly?{...status,count:DEFINITION_ONLY_TOOLS.length,scope:'definition-only',message:'当前私有定义的七个受限科学工具已就绪'}:status;
+  if(warning)return {...status,status:'ready',warning:true,...initial.definitionOnly?{count:actualPrivateCount,scope:'definition-only'}:{},message:'工具清单待核对，可继续讨论并通过已授权终端配置环境；实际执行能力尚未验证。',checkedAt:Date.now()};
+  return initial.definitionOnly?{...status,count:actualPrivateCount,scope:'definition-only',message:'当前私有定义的七个受限科学工具已就绪'}:status;
  }catch(error){return {status:'blocked',count:0,message:error.message,checkedAt:Date.now()};}
 }

@@ -18,7 +18,7 @@ test('unbound terminal chat distinguishes the connected service without granting
 for(const width of [1000,1440])test('empty profile shows sidebar, content and Agent together at width '+width,async()=>{
  const h=appWorkerHarness({width});try{
   await h.flush();assert(!shell(h).props.className.includes('chat-only'));assert(!shell(h).props.className.includes('single-panel'));
-  assert.equal(h.find(node=>node.type==='nav'&&node.props.className==='sidebar').props.hidden,false);
+  assert.equal(h.find(node=>node.type==='nav'&&node.props.className==='sidebar').props.hidden,width<1180);
   h.find(node=>node.type==='main'&&node.props.className==='main-column');assert.equal(agent(h).props.hidden,false);
   await agent(h).props.onNewConversation();await h.flush();assert.equal(agent(h).props.sessionSelection.pending,undefined);
   h.find(node=>node.type==='button'&&h.text(node)==='本地终端').props.onClick();await h.flush();

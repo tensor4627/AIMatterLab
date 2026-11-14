@@ -58,7 +58,7 @@ test('Agent context settings are scoped and validated',async()=>{
   'features.shell_tool':false,'features.unified_exec':false,model_context_window:131072,model_auto_compact_token_limit:98304});
  assert.throws(()=>agentConfig({contextWindow:8192,compactLimit:8192}));
  assert.throws(()=>agentConfig({contextWindow:'131072'}));
- assert.match(STUDIO_INSTRUCTIONS,/STOP/);
+ assert.match(STUDIO_INSTRUCTIONS,/current user-delegated goal/);
  assertWorkerRoute('POST','/api/run/revise');
  assertWorkerRoute('POST','/api/run/input');
 });

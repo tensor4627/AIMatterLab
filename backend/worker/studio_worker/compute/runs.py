@@ -67,6 +67,9 @@ class RunsMixin:
                     raise ValueError("Idempotency key already used for a different request")
                 return previous
             command = Adapter(spec["engine"]).prepare(spec, environment)
+            from studio_worker.infrastructure.util import stable_file_snapshot
+            executable = Path(command[0]).resolve()
+            executable_snapshot = {"path":command[0], "resolved_path":str(executable), **stable_file_snapshot(executable)}
             from studio_worker.workspace.private_lineage import propagate,check_producer,versions_for
             selected_paths=[]
             for input_name,input_source in spec['inputs'].items():
@@ -107,6 +110,7 @@ class RunsMixin:
                 run = {**spec, "id": identifier, "name": spec.get("name", spec["engine"]),
                        "request_hash": request_hash, "status": "draft", "validation": {"status": "not_run"},
                        "directory": str(directory), "snapshots": snapshots, "command": command,
+                       "executable_snapshot":executable_snapshot,
                        **({"private_cv_entries":private_entries} if private_entries else {}),
                        **({"input_contract":input_contract} if input_contract is not None else {}),
                        "private_cv_versions":private_versions,
@@ -188,6 +192,12 @@ class RunsMixin:
                     shutil.rmtree(staging)
 
     def verify_snapshot(self, run):
+        executable = run.get("executable_snapshot")
+        if executable:
+            from studio_worker.infrastructure.util import stable_file_snapshot
+            current = Path(run["command"][0]).resolve()
+            if str(current) != executable['resolved_path'] or stable_file_snapshot(current)['sha256'] != executable['sha256']:
+                raise ValueError("Prepared executable changed; create a new attempt with the current environment")
         for asset in run["snapshots"]:
             for folder in ("simulation", "results"):
                 path = Path(run["directory"]) / folder / asset["name"]
@@ -242,18 +252,48 @@ class RunsMixin:
         require_local_execution(self)
         with self.store.lock:
             run = self.store.run(identifier)
-            if run["status"] in ("queued", "running", *TERMINAL):
+            if run["status"] in ("queued", "running", "unknown", *TERMINAL):
                 return run
             if run.get('studio_workflow_binding'):
                 from studio_worker.workspace.tool_workflows import assert_bound_run
                 assert_bound_run(self, run, _workflow_context, 'submitting')
             self.authorize(run)
-            if run["status"] != "ready" or run["validation"]["status"] != "passed":
-                raise ValueError("Successful validation required before submission")
+            if run["status"] not in ("draft", "ready"):
+                raise ValueError("Only an unsubmitted input snapshot can be submitted")
             self.verify_snapshot(run)
             if run["engine"] in ("gpumd.md", "gpumd.sampling") and run.get("parent_run"):
                 Adapter(run["engine"]).input_contract(run, Path(run["directory"]) / "simulation")
-            return self.store.update(run, status="queued")
+            # Scientific/parameter findings do not grant permission and do not
+            # revoke it. Serialized bias compatibility remains mandatory.
+            required = run["engine"].endswith("sampling") or run["engine"] in ("bias.validate", "pydyn.md")
+        check = {"status":"not_run", "required":False, "scope":"No serialized bias artifact for this engine"}
+        if required:
+            try:
+                adapter = Adapter(run["engine"])
+                if run["engine"] == "pydyn.md":
+                    observed = adapter.probe(run["environment_snapshot"])
+                    report = {**adapter.pydyn_import_contract(run["environment_snapshot"], observed), "provenance":observed}
+                else:
+                    report = adapter.validate(run, run["environment_snapshot"],
+                        Path(run["directory"]) / "results", execution_only=True)
+                    if report.get("artifact_status") != "passed":
+                        raise ValueError("Serialized artifact/target check did not confirm compatibility")
+                check = {"status":"passed", "required":True, "checked_at":time.time(), "report":report}
+            except Exception as exc:
+                with self.store.lock:
+                    self.store.update(self.store.run(identifier), execution_check={"status":"failed", "required":True, "message":str(exc), "checked_at":time.time()})
+                raise
+        with self.store.lock:
+            current = self.store.run(identifier)
+            if current["status"] in ("queued", "running", "unknown", *TERMINAL):
+                return current
+            if current["status"] not in ("draft", "ready"):
+                raise ValueError("Run changed during execution checks")
+            if current.get('studio_workflow_binding'):
+                assert_bound_run(self, current, _workflow_context, 'submitting')
+            self.authorize(current)
+            self.verify_snapshot(current)
+            return self.store.update(current, status="queued", execution_check=check)
 
     def cancel(self, identifier):
         with self.store.lock:

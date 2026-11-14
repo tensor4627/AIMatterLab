@@ -41,7 +41,11 @@ export function workerServiceVersionEvidence(worker){
 // Opaque, stable identity for local drafts. Called only after health verification;
 // neither paths nor credentials are exposed to the renderer.
 export function workerObservationEvidence(worker){
- if(worker.identity?.kind==='ssh'){try{const binding=actualAuthoringWorker(worker);return {...workerServiceVersionEvidence(worker),sourceId:crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v2',binding])).digest('hex'),sourceKind:'ssh',profileId:binding.profileId,profileVersion:binding.profileVersion};}catch{return {serviceVersion:'unconfirmed'};}}
+ if(worker.identity?.kind==='ssh'){try{
+  const binding=actualAuthoringWorker(worker),identity=worker.identity,target=worker.connectionTarget;
+  const connection=identity.version===3&&/^[A-Za-z0-9_-]{1,200}$/.test(identity.connectionId||'')&&worker.connection.transport==='ssh-connection'&&target?.kind==='ssh'&&target.version===3&&target.connectionId===identity.connectionId?{connectionId:identity.connectionId}:{};
+  return {...workerServiceVersionEvidence(worker),sourceId:crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v2',binding])).digest('hex'),sourceKind:'ssh',profileId:binding.profileId,profileVersion:binding.profileVersion,...connection};
+ }catch{return {serviceVersion:'unconfirmed'};}}
  const identity=worker.identity,port=worker.connectionTarget?.port;
  const source=typeof identity?.distribution==='string'&&identity.distribution&&typeof identity.root==='string'&&identity.root.startsWith('/')&&Number.isInteger(port)&&port>=1024&&port<=65535&&worker.connection?.health?.root===identity.root
   ?{sourceId:crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v1',identity.distribution,identity.root,port])).digest('hex')}:{};

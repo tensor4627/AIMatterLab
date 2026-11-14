@@ -172,11 +172,12 @@ class ToolConfigurationContract(unittest.TestCase):
         with self.assertRaises(ValueError): self.api.execute(self.mutation(record))
         self.assertEqual(self.service.store.runs(), [])
 
-    def test_environment_registration_change_cannot_install(self):
+    def test_benign_environment_registration_change_warns_and_uses_current_snapshot(self):
         record = self.plan()
         environment = self.service.store.get('environment', 'environment'); environment['name'] = 'Changed'; self.service.store.put('environment', environment)
-        with self.assertRaises(ValueError): self.api.execute(self.mutation(record))
-        self.assertFalse(Path(record['installed_prefix']).exists()); self.assertEqual(self.service.store.runs(), [])
+        result=self.api.execute(self.mutation(record))
+        self.assertTrue(Path(record['installed_prefix']).exists());self.assertEqual(result['check_findings'][0]['code'],'configuration_environment_changed')
+        run=self.service.store.run(result['tests'][0]['run_id']);self.assertEqual(run['environment_snapshot']['name'],'Changed')
 
     def test_interpreter_content_change_cannot_install(self):
         executable = self.root / 'owned-fake-python'; executable.write_text('not executed'); executable.chmod(0o700)
@@ -185,14 +186,14 @@ class ToolConfigurationContract(unittest.TestCase):
         with self.assertRaises(ValueError): self.api.execute(self.mutation(record))
         self.assertEqual(self.service.store.runs(), [])
 
-    def test_validation_failure_and_installed_tamper_cannot_activate(self):
+    def test_unreviewed_installed_reference_can_activate_without_fabricated_test_pass(self):
         record = self.plan()
-        with patch.object(self.service, 'validate', return_value={'status': 'draft'}):
-            with self.assertRaises(ValueError): self.api.execute(self.mutation(record))
-        failed = self.api.status({'configuration_id': record['id']}); self.assertEqual(failed['status'], 'failed')
-        self.assertIn('Reference test input validation failed', failed['tests'][0]['reason'])
-        with self.assertRaises(ValueError): self.api.activate(self.mutation(failed))
-        self.assertEqual(self.service.store.list('tool-activation'), [])
+        with patch.object(self.service, 'validate', side_effect=lambda identifier:self.service.store.run(identifier)):
+            testing = self.api.execute(self.mutation(record))
+        active = self.api.activate(self.mutation(testing))
+        self.assertEqual(active['status'], 'active')
+        self.assertNotEqual(active['execution_skill']['facts']['tests'][0]['status'], 'passed')
+        self.assertEqual(self.service.store.run(testing['tests'][0]['run_id'])['status'],'queued')
 
     def complete(self, record):
         deadline = time.monotonic() + 15
@@ -201,17 +202,19 @@ class ToolConfigurationContract(unittest.TestCase):
         self.assertEqual(record['status'], 'tested', record)
         return record
 
-    def test_unknown_run_is_never_submitted_again_and_no_activation(self):
+    def test_unknown_run_is_never_submitted_again_and_independent_activation_preserves_evidence(self):
         record = self.api.execute(self.mutation(self.plan()))
         run = self.service.store.run(record['tests'][0]['run_id']); self.service.store.update(run, status='unknown')
         unknown = self.api.status({'configuration_id': record['id']}); self.assertEqual(unknown['status'], 'unknown')
         self.assertIn('Persisted run status is unknown', unknown['tests'][0]['reason'])
         with patch.object(self.service, 'submit', side_effect=AssertionError('Unknown must not submit')):
             self.assertEqual(self.api.execute(self.mutation(unknown))['status'], 'unknown')
-        with self.assertRaises(ValueError): self.api.activate(self.mutation(unknown))
-        self.assertEqual(self.service.store.list('tool-activation'), [])
+        active=self.api.activate(self.mutation(unknown))
+        self.assertEqual(active['status'],'active')
+        self.assertEqual(active['execution_skill']['facts']['tests'][0]['status'],'unknown')
+        self.assertEqual(self.service.store.run(run['id'])['status'],'unknown')
 
-    def test_failed_run_reason_uses_persisted_error_and_activation_is_denied(self):
+    def test_failed_run_reason_is_preserved_when_configuration_is_enabled(self):
         # A durable launch-error fixture exercises reporting only; no scientific or child failure is claimed.
         record = self.api.execute(self.mutation(self.plan()))
         run = self.service.store.run(record['tests'][0]['run_id'])
@@ -219,8 +222,9 @@ class ToolConfigurationContract(unittest.TestCase):
         failed = self.api.status({'configuration_id': record['id']})
         self.assertEqual(failed['status'], 'failed'); self.assertEqual(failed['tests'][0]['status'], 'failed')
         self.assertEqual(failed['tests'][0]['reason'], 'Run error: Synthetic persisted launch failure for reporting')
-        with self.assertRaises(ValueError): self.api.activate(self.mutation(failed))
-        self.assertEqual(self.service.store.list('tool-activation'), [])
+        active=self.api.activate(self.mutation(failed))
+        self.assertEqual(active['status'],'active')
+        self.assertEqual(active['execution_skill']['facts']['tests'],failed['tests'])
 
     def test_actual_queued_cancellation_is_reported_without_inventing_a_supervisor_reason(self):
         record = self.api.execute(self.mutation(self.plan()))
@@ -228,8 +232,9 @@ class ToolConfigurationContract(unittest.TestCase):
         failed = self.api.status({'configuration_id': record['id']})
         self.assertEqual(failed['status'], 'failed'); self.assertEqual(failed['tests'][0]['status'], 'cancelled')
         self.assertEqual(failed['tests'][0]['reason'], 'Persisted run status is cancelled; no supervisor reason is recorded')
-        with self.assertRaises(ValueError): self.api.activate(self.mutation(failed))
-        self.assertEqual(self.service.store.list('tool-activation'), [])
+        active=self.api.activate(self.mutation(failed))
+        self.assertEqual(active['status'],'active')
+        self.assertEqual(active['execution_skill']['facts']['tests'],failed['tests'])
 
     def test_persisted_supervisor_and_validation_reasons_are_not_replaced_by_generic_status(self):
         from studio_worker.tools.configurations import run_reason
@@ -315,7 +320,9 @@ class ToolConfigurationContract(unittest.TestCase):
         self.assertEqual(self.api.read({'configuration_id': record['id']})['execution_skill']['body'], body)
         environment = self.service.store.get('environment', 'environment'); environment['name'] = 'Changed registration'; self.service.store.put('environment', environment)
         stale = self.api.read({'configuration_id': record['id']}); self.assertEqual(stale['status'], 'stale')
-        self.assertNotIn('execution_skill', stale)
+        self.assertEqual(stale['execution_skill']['body'],body)
+        self.assertEqual(stale['check_findings'][0]['status'],'warning')
+        self.assertNotEqual(stale['current_environment_sha256'],stale['environment_sha256'])
         with self.assertRaises(PermissionError): read_input(self.service, {'project_id': 'project', 'name': str(origin / 'SKILL.md')})
 
     @unittest.skipUnless(os.name == 'posix' and Path('/proc').exists(), 'Linux worker lifecycle required')
@@ -387,15 +394,15 @@ class ToolConfigurationContract(unittest.TestCase):
         self.assertTrue(result['isError']); self.assertNotIn('execution_skill', json.dumps(result))
 
     @unittest.skipUnless(os.name == 'posix' and Path('/proc').exists(), 'Linux worker lifecycle required')
-    def test_real_output_tamper_and_unexecuted_extra_case_cannot_activate(self):
+    def test_changed_output_is_failed_evidence_even_when_configuration_is_enabled(self):
         record = self.complete(self.api.execute(self.mutation(self.plan())))
         run = self.service.store.run(record['tests'][0]['run_id'])
         (Path(run['directory']) / 'results/smoke-result.json').write_text('{"status":"passed","case":"worker","pid":1}')
-        with self.assertRaises(ValueError): self.api.activate(self.mutation(record))
+        active=self.api.activate(self.mutation(record));self.assertEqual(active['status'],'active')
         failed = self.api.status({'configuration_id': record['id']})
-        self.assertEqual(failed['status'], 'stale'); self.assertEqual(failed['tests'][0]['status'], 'failed')
+        self.assertEqual(failed['status'], 'active'); self.assertEqual(failed['tests'][0]['status'], 'failed')
         self.assertEqual(failed['tests'][0]['reason'], 'Reference output failed the fixed independent criteria')
-        self.assertEqual(self.service.store.list('tool-activation'), [])
+        self.assertEqual(len(self.service.store.list('tool-activation')),1)
 
     @unittest.skipUnless(os.name == 'posix' and Path('/proc').exists(), 'Linux worker lifecycle required')
     def test_all_cases_execute_and_installed_tamper_stales_active_snapshot(self):
@@ -409,7 +416,7 @@ class ToolConfigurationContract(unittest.TestCase):
         self.assertFalse((Path(record['installed_prefix']) / 'studio-worker-tests/process/run.py').is_symlink())
         self.assertEqual(self.api.activate(self.mutation(record))['status'], 'active')
         (Path(record['installed_prefix']) / 'repo/run.py').write_text('changed installed source')
-        self.assertEqual(self.api.read({'configuration_id': record['id']})['status'], 'stale')
+        with self.assertRaisesRegex(ValueError,'Installed tool changed'):self.api.read({'configuration_id': record['id']})
 
 
 if __name__ == '__main__': unittest.main()

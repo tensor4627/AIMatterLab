@@ -15,7 +15,7 @@ export function assertDeploymentWorker(task,worker){assertTaskWorker(task,worker
 export function assertConfirmedDeployment(task){if(task.deploymentDraft&&!sameDeploymentConfig(task.deploymentDraft.config,task.deployment?.config))throw Error('部署草稿与已确认版本不同，请先保存并核对最新部署设置。');}
 export function saveDeploymentDraft(records,worker,args){
  request(args,['taskId','value','expectedRevision','mutationId']);const {taskId,value,expectedRevision,mutationId}=args;
- const task=records.read(taskId);if(task.workflowVersion!==2||locked(task))throw Error('请先核对原作业状态，再修改部署设置。');
+ const task=records.read(taskId);if(task.workflowVersion!==2)throw Error('This workflow uses the legacy execution page');
  if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0||typeof mutationId!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(mutationId))throw Error('无效的部署草稿保存请求');
  const config=validDeploymentDraft(value),identity=deploymentWorker(worker);assertDeploymentWorker(task,worker);
  if(task.deploymentDraft?.lastMutationId===mutationId){if(!equal(config,task.deploymentDraft.config))throw Error('部署草稿请求内容发生变化');return task;}

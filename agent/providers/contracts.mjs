@@ -1,10 +1,7 @@
 export const PROVIDERS=['codex','kimi','qwen','deepseek','compatible'];
 export const CLI_VERSIONS={kimi:'2.1.1',qwen:'0.24.7'};
 export function providerId(id){if(!PROVIDERS.includes(id))throw Error('Unsupported Agent provider');return id;}
-export function redact(text,secrets=[]){
- let result=String(text);for(const secret of secrets.filter(Boolean))result=result.replaceAll(secret,'[redacted]');
- return result.replace(/\bsk-[A-Za-z0-9_-]{8,}/g,'[redacted]').replace(/(Bearer\s+)[^\s"']+/gi,'$1[redacted]');
-}
+export {redactTranscriptText as redact} from '../../contracts/agent/transcript-sanitizer.mjs';
 export const QWEN_ENDPOINTS={
  'coding-cn':'https://coding.dashscope.aliyuncs.com/v1',
  'coding-intl':'https://coding-intl.dashscope.aliyuncs.com/v1',

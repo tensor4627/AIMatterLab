@@ -60,7 +60,7 @@ export function useToolWorkflows({task,worker,busy:parentBusy,toolWorkflowFocus}
  function configurationIndex(id:string,facts:ToolWorkflowContext){const value=facts.configurations.find(item=>item.configuration_id===id);if(!value)throw Error('所选配置不属于当前作业服务');return value;}
  function checkConfiguration(value:ToolExecutionSkill,index:ToolConfigurationIndex,feature?:{tool_id:string;package_version:string;function_id:string}){
   if(value.configuration_id!==index.configuration_id||value.package_id!==index.package_id||value.package_version!==index.package_version||value.target.project_id!==index.project_id||value.target.environment_id!==index.environment_id)throw Error('配置回执与所选配置身份不符');
-  if(value.status!=='active'||!value.execution_skill)throw Error(value.reason||'此配置没有已激活的执行技能');
+  if(!value.execution_skill)throw Error(value.reason||'此配置没有已激活的执行技能');
   if(!referenceFunctions(value).length)throw Error('当前流程仅支持固定串行 CPU installation.check 参考');
   if(feature&&(value.package_id!==feature.tool_id||value.package_version!==feature.package_version||!referenceFunctions(value).some(item=>item.id===feature.function_id)))throw Error('配置与步骤的准确包版本或功能不匹配');
  }

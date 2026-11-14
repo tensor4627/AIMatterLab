@@ -7,9 +7,9 @@ for(const width of[1800,600])test('App forwards actual visible workflow identity
 
 test('current singleton workspace tab is a noninteractive title while global navigation and toolbar stay reachable',async()=>{
  const h=appWorkerHarness();await h.flush();
- const tab=h.find(n=>n.props?.className?.includes?.('workspace-tab ')||n.props?.className==='workspace-tab selected-tab');
+ const tab=h.find(n=>n.props?.className==='workspace-current-title');
  const children=Array.isArray(tab.props.children)?tab.props.children:[tab.props.children];
- assert(children.some(n=>n?.type==='span'&&n.props?.className==='workspace-current-title'));
+ assert(children.some(n=>n?.type==='strong'));
  assert(!children.some(n=>n?.type==='button'));
  h.find(n=>n.props?.['data-testid']==='navigate-home');h.find(n=>n.props?.['aria-label']==='切换 Agent 面板');h.unmount();
 });

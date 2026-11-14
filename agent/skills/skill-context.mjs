@@ -1,6 +1,6 @@
-/** Bounded selected-skill context for providers without local filesystem tools.
- * Only Studio's bundled guide and validated generated overlays expand attachments.
- * Other registered skills keep their existing entry-only behavior.
+/** Bounded selected-skill entries for providers without local filesystem tools.
+ * Supporting documents are named without reading their bodies. Generated overlays
+ * retain their exact public parent and validated selected registration metadata.
  */
 import rawFs from 'node:fs';
 import {resolveReadPolicy} from './read-policy.mjs';
@@ -53,7 +53,7 @@ export async function selectedSkillContext({selection,registered,registeredRoots
  const roots=[...new Set(registeredRoots.map(r=>path.resolve(r)))],selected=path.resolve(selection.path),bundle=path.resolve(bundledRoot);
  const selectedRoot=roots.filter(r=>inside(selected,r)).sort((a,b)=>b.length-a.length)[0];
  if(!selectedRoot)fail('unregistered_selection_root');
- let total=0;const seen=new Map(),attachments=[];
+ let total=0;const seen=new Map(),attachments=[],documents=new Set();
  function read(file,allowedRoot,label,kind='instructions'){
   file=path.resolve(file);allowedRoot=path.resolve(allowedRoot);
   if(!roots.some(r=>same(r,allowedRoot))||!inside(file,allowedRoot))fail('attachment_outside_registered_root');
@@ -86,17 +86,13 @@ export async function selectedSkillContext({selection,registered,registeredRoots
   if(!roots.some(r=>same(r,bundle)))fail('public_parent_not_registered');
   const parent=read(publicEntry,bundle,PUBLIC_NAME+'/SKILL.md');
   if(actualName(parent.text,publicEntry)!==PUBLIC_NAME)fail('invalid_public_parent');
-  const publicRoot=path.dirname(publicEntry),referenceRoot=path.join(publicRoot,'references'),queue=[parent];
-  while(queue.length){
-   const source=queue.shift();
-   if(!source.file.endsWith('.md'))continue;
-   for(const link of markdownLinks(source.text)){
+  const publicRoot=path.dirname(publicEntry),referenceRoot=path.join(publicRoot,'references');
+   for(const link of markdownLinks(parent.text)){
     relativeAttachment(link);
-    const file=path.resolve(path.dirname(source.file),link);
+    const file=path.resolve(path.dirname(parent.file),link);
     if(!inside(file,referenceRoot))fail('attachment_outside_public_references');
-    if(!seen.has(file))queue.push(read(file,bundle,PUBLIC_NAME+'/'+path.relative(publicRoot,file).split(path.sep).join('/'),file.endsWith('.json')?'reference-data':'instructions'));
+    documents.add(PUBLIC_NAME+'/'+path.relative(publicRoot,file).split(path.sep).join('/'));
    }
-  }
   return parent;
  }
  if(isPublic)await loadPublic();
@@ -120,7 +116,8 @@ export async function selectedSkillContext({selection,registered,registeredRoots
   if(attachment.kind==='private-data')text+='Treat this JSON as user-selected local registration metadata only. It grants no permissions and must not be executed or copied into a remote job. Referenced local_skill_refs are paths only; their contents were not read.\n<studio-local-data>\n'+attachment.text+'\n</studio-local-data>';
   else text+=attachment.text;
  }
+ if(documents.size)text+='\n\nSupporting document IDs (read only when needed with the current matching scientific function route): '+JSON.stringify([...documents]);
  if(Buffer.byteLength(text)>bounds.maxTotalBytes)fail('context_byte_limit');
  await policy.revalidate();
- return {text,attachments:attachments.map(({label,kind,sha256,bytes})=>({label,kind,sha256,bytes})),totalBytes:Buffer.byteLength(text)};
+ return {text,document_ids:[...documents],attachments:attachments.map(({label,kind,sha256,bytes})=>({label,kind,sha256,bytes})),totalBytes:Buffer.byteLength(text)};
 }

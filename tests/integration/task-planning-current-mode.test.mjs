@@ -59,7 +59,7 @@ test('a turn waiting for context preparation retains its explicit current state 
 });
 
 test('selected SSH planning acknowledges enabled then disabled without worker authoring or task creation',async()=>{
- const f=fixture({terminal:true});for(const enabled of [false,true,false]){await f.send(enabled);const turn=lastTurn(f),text=assertMode(turn,enabled);assert.match(text,/Current capability scope: terminal/);assert.match(text,enabled?/mode: planning/:/mode: chat/);assert.match(text,/formal workflow authoring tools.*unavailable/);assert.match(text,/Never validate, build, train, execute or submit/);assert.doesNotThrow(()=>constrainedRequest('turn/start',turn,{cwd:process.cwd()}));}
+ const f=fixture({terminal:true});for(const enabled of [false,true,false]){await f.send(enabled);const turn=lastTurn(f),text=assertMode(turn,enabled);assert.match(text,/Current capability scope: terminal/);assert.match(text,enabled?/mode: planning/:/mode: chat/);assert.match(text,/formal workflow authoring tools.*unavailable/);assert.match(text,/checkbox does not grant project\/file access/);assert.doesNotThrow(()=>constrainedRequest('turn/start',turn,{cwd:process.cwd()}));}
  assert.equal(f.records.tasks().length,0);assert.deepEqual(f.workerCalls,[]);
 });
 

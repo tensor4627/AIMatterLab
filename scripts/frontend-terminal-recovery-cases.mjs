@@ -22,13 +22,24 @@ async function mount(page){
    throw Error('Unexpected isolated recovery fixture IPC '+method);
   };
   const root=document.getElementById('root');root.style.width='720px';root.style.height='300px';
-  window.renderTerminalRecovery=(scope='recovery-owner')=>window.testRoot.render(window.React.createElement(Panel,{visible:true,request:{nonce:'recovery-request',...target},resourceScope:scope,provider:'codex',canShare:true,onError:error=>fixture.errors.push(String(error)),onResourceChange:value=>fixture.changes.push(value)}));
+  window.renderTerminalRecovery=(scope='recovery-owner')=>window.testRoot.render(window.React.createElement(Panel,{visible:true,request:{nonce:'recovery-request',...target,connectionMode:'plain'},resourceScope:scope,provider:'codex',canShare:true,onError:error=>fixture.errors.push(String(error)),onResourceChange:value=>fixture.changes.push(value)}));
   window.renderTerminalRecovery();
  });
  await page.getByTestId('shared-terminal-recovery').waitFor();
 }
 
 export async function frontendTerminalRecoveryCases({check,out}){
+ for(const maintenance of [false,true])await check(maintenance?'ssh-service-update-disconnected-maintenance-no-login':'ssh-service-update-existing-shared-shell-explicit-cas',async page=>{
+  const errors=[];page.on('pageerror',error=>errors.push(String(error)));
+  await page.evaluate(async maintenance=>{
+   const {default:Panel}=await import('/frontend/features/compute/IndependentSshServiceSettings.tsx'),profile={id:'owned-update-profile',version:2,kind:'ssh',name:'Owned update fixture',host:'fixture.invalid',username:'fixture',port:22,ssh_client:'/usr/bin/ssh',mode:'interactive'},connection={schemaVersion:2,connectionId:'owned-existing-connection',profileId:profile.id,profileVersion:2,status:'authenticated',authentication:'verified',capabilities:{multiplex:true},terminalSessionIds:['owned-original-shell'],serviceIds:['owned-service'],revision:1},service={schemaVersion:2,connectionId:connection.connectionId,serviceId:'owned-service',attemptId:'old-attempt',status:'connected',workflowReady:true,operator:'agent'},fixture=window.__test.serviceUpdate={calls:[],changes:0};
+   if(maintenance)Object.assign(service,{status:'disconnected',workflowReady:false,serviceActive:false});
+   window.studio.invoke=async(method,data)=>{fixture.calls.push({method,data});if(method==='compute.sshService.registration')return {status:maintenance&&!fixture.configured?'maintenance_required':'configured',profileId:profile.id,profileVersion:2,registration:{revision:1,checkedAt:1}};if(method==='compute.sshConnection.list')return {connections:[connection]};if(method==='compute.sshConnection.state')return connection;if(method==='compute.sshService.status')return service;if(method==='compute.resource.activate')return {...data,schemaVersion:2,status:'selected'};if(method==='compute.sshService.connect'){fixture.configured=true;return Object.assign(service,{status:'connected',workflowReady:true,attemptId:data.requestId});}throw Error('Unexpected isolated update IPC '+method);};
+   window.testRoot.render(window.React.createElement(Panel,{profile,onClose:()=>{},onLogin:()=>{throw Error('Update must not request a login');},onChanged:()=>fixture.changes++}));
+  },maintenance);
+  const update=page.getByTestId('ssh-service-update');await update.waitFor();await page.waitForFunction(()=>!document.querySelector('[data-testid="ssh-service-update"]').disabled);await update.click();await page.waitForFunction(()=>window.__test.serviceUpdate.changes===1);
+  const calls=await page.evaluate(()=>window.__test.serviceUpdate.calls),starts=calls.filter(row=>row.method==='compute.sshService.connect');assert.equal(starts.length,1);assert.deepEqual({...starts[0].data,requestId:'new-request'},{connectionId:'owned-existing-connection',profileId:'owned-update-profile',profileVersion:2,requestId:'new-request',mode:'update',...maintenance?{}:{expectedAttemptId:'old-attempt'}});assert.match(await page.getByTestId('ssh-service-registration').textContent(),/已登记/);assert.equal(calls.filter(row=>row.method==='compute.sshService.registration').length,2);assert(!calls.some(row=>['compute.sshConnection.open','compute.sshService.disconnect','sharedTerminal.owner','compute.profiles.save'].includes(row.method)));assert.deepEqual(errors,[]);await page.screenshot({path:path.join(out,maintenance?'explicit-disconnected-maintenance-update.png':'explicit-same-shell-update.png')});
+ });
  await check('terminal-recovery-experience-explicit-new-keeps-target-and-old-session',async page=>{
   await mount(page);
   await page.screenshot({path:path.join(out,'terminal-recovery-keeps-original.png')});

@@ -31,8 +31,8 @@ test('an actually bound ordinary chat gets the execution snapshot once after ACK
  h.facts.revision='authority-2';assert.equal((await h.prepare()).attach,true);h.service.context.forget('thread');assert.equal((await h.prepare()).attach,true);assert.equal((await h.prepare({hasWorkflow:true})).guidanceKind,'execution');assert.deepEqual(h.counts,{exists:0,readdir:0,stat:0,open:0,read:0});
 });
 
-test('bound no-domain stale/revoked messages block without legacy bodies or execution text',async t=>{
- const h=fixture(t);for(const state of ['stale','revoked']){h.facts.state=state;const result=await h.prepare();assert.equal(result.status,'blocked');assert.equal(result.guidanceKind,'sealed');assert.equal(result.attach,false);assert(!result.text.includes(h.facts.executionSkill.text));assert.deepEqual(result.attachments,[]);}assert.deepEqual(h.counts,{exists:0,readdir:0,stat:0,open:0,read:0});
+test('bound stale evidence retains verified guidance while revoked authority blocks',async t=>{
+ const h=fixture(t);h.facts.state='stale';const stale=await h.prepare();assert.equal(stale.status,'passed');assert.equal(stale.guidanceKind,'execution');assert(stale.text.includes(h.facts.executionSkill.text));h.facts.state='revoked';const result=await h.prepare();assert.equal(result.status,'blocked');assert.equal(result.guidanceKind,'sealed');assert.equal(result.attach,false);assert(!result.text.includes(h.facts.executionSkill.text));assert.deepEqual(result.attachments,[]);assert.deepEqual(h.counts,{exists:0,readdir:0,stat:0,open:0,read:0});
 });
 
 test('explicit other-tool/manual routes, repair scopes and unbound legacy chats keep their existing paths',async t=>{

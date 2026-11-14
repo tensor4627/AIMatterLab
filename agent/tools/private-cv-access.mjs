@@ -4,14 +4,15 @@ import path from 'node:path';
 // Shared terminals have their own explicit lane below; all other new tools fail closed.
 export const SCIENTIFIC_TOOL_ACCESS=Object.freeze({
  describe_engine:'public',list_source_projects:'public',inspect_source_project:'public',inspect_pygas_catalog:'public',scientific_skill_catalog:'public',read_scientific_skill:'public',search_materials_project:'public',
- compute_readiness:'discovery',discover_local_environments:'discovery',draft_local_environment:'discovery',diagnose_tools:'discovery',list_projects:'discovery',list_runs:'discovery',list_workflows:'discovery',list_environments:'discovery',
+ inspect_compute_resource:'discovery',compute_readiness:'discovery',discover_local_environments:'discovery',draft_local_environment:'discovery',diagnose_tools:'discovery',list_projects:'discovery',list_runs:'discovery',list_workflows:'discovery',list_environments:'discovery',
  inspect_environment_api:'environment',read_runtime_guide:'environment',probe_environment:'environment',
  read_project_input:'project',write_project_input:'project',inspect_asset:'project',suggest_parameters:'project',create_structure:'project',render_pygas_workflow:'project',present_task:'project',prepare_run:'project',create_workflow:'project',import_materials_project:'project',
- validate_run:'run',submit_run:'run',cancel_run:'run',run_status:'run',read_log:'run',read_run_input:'run',read_artifact:'run',collect_artifacts:'run',resume_run:'run',
+ validate_run:'run',submit_run:'run',cancel_run:'run',reconcile_run:'run',validate_cluster_run:'run',submit_cluster_run:'run',cancel_cluster_run:'run',run_status:'run',read_log:'run',read_run_input:'run',read_artifact:'run',collect_artifacts:'run',resume_run:'run',
  list_clusters:'ssh',probe_cluster:'ssh',read_cluster_skill:'ssh',cluster_browse:'ssh',draft_cluster_setup:'ssh',prepare_cluster_run:'ssh',cluster_run_status:'ssh',cluster_read_log:'ssh',read_cluster_input:'ssh',read_cluster_result:'ssh',collect_cluster_artifacts:'ssh',
  read_pygas_workflow:'current',propose_custom_cv:'current',read_custom_cv:'current',
 });
 const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
+const executionTools=new Set(['validate_run','submit_run','cancel_run','reconcile_run','validate_cluster_run','submit_cluster_run','cancel_cluster_run']);
 const sources=new Set(['pygas','pydyn','gpumd','hotpp','torchnep']);
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const object=v=>v&&typeof v==='object'&&!Array.isArray(v);
@@ -40,8 +41,9 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
  function taskFor(provider,required=false){const id=activeTasks.get(provider);if(!id){if(required)throw Error('Select the current conversation-owned workflow first');return null;}const task=records.read(id);if(task.id!==id||task.provider!==provider||!task.threadId||records.deleted(provider,task.threadId)||records.bound(provider,task.threadId)?.id!==id)throw Error('Scientific access is not bound to this conversation');return task;}
  function checkTask(task,provider,value){if(task.provider!==provider||!task.threadId||records.deleted(provider,task.threadId)||records.bound(provider,task.threadId)?.id!==task.id)throw Error('Scientific access is not bound to this conversation');const projects=new Set([task.projectId,task.authoring?.projectId,task.deployment?.config?.projectId].filter(Boolean));if(value.blocked_project_ids.some(id=>projects.has(id))||value.bindings.some(b=>!b.allowed&&(b.workspace_id===task.id||projects.has(b.project_id))))throw Error('Private CV sharing is required for this provider before reading or changing this workflow');}
  function deepseek(name,args,kind,task){
-  if(['discovery','ssh'].includes(kind))throw Error('DeepSeek access excludes SSH and other projects; use the human environment/cluster panel');
-  if(kind==='current')return;
+  // Discovery and SSH use the common privacy policy and the proxy's current
+  // service grant. They do not inherit authority from a scientific workflow.
+  if(['discovery','ssh','current'].includes(kind))return;
   if(kind==='environment'){const environment=task.authoring?.environmentId||task.deployment?.config?.environmentId;if(!environment||args.environment_id!==environment)throw Error('DeepSeek can inspect only the current workflow environment');return;}
   if(kind==='run'){if(!runIds(task).has(args.run_id))throw Error('DeepSeek can read only runs linked to the current conversation');return;}
   if(kind!=='project')return;
@@ -58,7 +60,9 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
  async function check(name,args,provider){
   const kind=SCIENTIFIC_TOOL_ACCESS[name];if(!kind||!providers.has(provider)||!object(args))throw Error('Unclassified scientific tool or invalid provider/input');
   if(kind==='public'){const task=taskFor(provider),owner=identity(task),value=task?await policy(provider):null;if(identity(taskFor(provider))!==owner)throw Error('Conversation changed during public catalog check');const definitionOnly=definitionOnlyScope(task,value);if(definitionOnly&&!definitionToolAllowed(name))throw Error('This private sharing permits only the current definition, not other files, environment observations or results');if(name==='inspect_source_project'&&!sources.has(args.source_id)||name==='inspect_pygas_catalog'&&args.source_id!=='pygas')throw Error('Inspect only a registered public software catalog');return {task,kind,definitionOnly};}
-  const task=taskFor(provider,provider==='deepseek'||kind==='current'),owner=identity(task),value=await policy(provider);if(identity(taskFor(provider))!==owner)throw Error('Conversation changed during private access check');
+  const taskRequired=kind==='current'||provider==='deepseek'&&!['discovery','ssh'].includes(kind);
+  const task=taskFor(provider,taskRequired),owner=identity(task),value=await policy(provider);if(identity(taskFor(provider))!==owner)throw Error('Conversation changed during private access check');
+  if(executionTools.has(name)&&(!task||!runIds(task).has(args.run_id)))throw Error('Execute, validate, cancel and reconcile only runs linked to the current conversation-owned workflow');
   if(task)checkTask(task,provider,value);
   const definitionOnly=definitionOnlyScope(task,value);if(definitionOnly&&!definitionToolAllowed(name))throw Error('This private sharing permits only the current definition, not workflow files, environment observations or run results');if(definitionOnly&&name==='present_task'&&args.task_id!==task.id)throw Error('Update only this same conversation-owned draft');
   // Project-scoped scientific tools may only act on the project owned by the current
@@ -82,12 +86,16 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
  return {
   async assertTask(task,provider){if(!providers.has(provider))throw Error('Invalid scientific provider');const value=await policy(provider);checkTask(task,provider,value);return {definitionOnly:definitionOnlyScope(task,value)};},
   async filterTools(tools,provider,scope){
+   // Native MCP initializes before a fresh conversation receives its ID.
+   // Publish classified interface schemas in that current bootstrap lease;
+   // remote privacy reads and all tool calls still require their own context.
+   if(providers.has(provider)&&!activeTasks.get(provider)&&scope?.provider===provider&&scope.threadId===null&&scope.checkCurrent?.()===true)return tools.filter(tool=>Object.hasOwn(SCIENTIFIC_TOOL_ACCESS,tool.name)||sharedTerminalToolAllowed(tool.name));
    const terminalTools=()=>{try{terminalLease(provider,scope);return tools.filter(tool=>sharedTerminalToolAllowed(tool.name));}catch{return [];}};
    const scientific=tools.filter(tool=>!sharedTerminalToolAllowed(tool.name));if(!scientific.length)return terminalTools();
    try{let task=taskFor(provider);if(scope?.taskId){const owned=records.read(scope.taskId);if(owned.provider!==provider||owned.id!==scope.taskId)throw Error('Untrusted tool inventory context');task=owned;}const value=await policy(provider),permitted=new Set([...(definitionOnlyScope(task,value)?scientific.filter(tool=>definitionToolAllowed(tool.name)):scientific),...terminalTools()]);return tools.filter(tool=>permitted.has(tool));}
    catch(error){const independent=terminalTools();if(independent.length)return independent;throw error;}
   },
-  async before(name,args,provider,scope){if(sharedTerminalToolAllowed(name)){if(!object(args))throw Error('Invalid shared terminal arguments');terminalLease(provider,scope);return {name,provider,kind:'terminal',scope};}const {task,kind,definitionOnly}=await check(name,args,provider);return {name,args:structuredClone(args),provider,kind,definitionOnly,taskId:task?.id||null,owner:identity(task),previousCustom:task?.customCv?structuredClone(task.customCv):null};},
+  async before(name,args,provider,scope){if(sharedTerminalToolAllowed(name)){if(!object(args))throw Error('Invalid shared terminal arguments');terminalLease(provider,scope);return {name,provider,kind:'terminal',scope};}const {task,kind,definitionOnly}=await check(name,args,provider);if(executionTools.has(name)&&(!scope||scope.provider!==provider||scope.threadId!==task?.threadId||scope.taskId!==task?.id||scope.checkCurrent?.()!==true))throw Error('Execution requires the exact current provider/conversation/workflow lease');return {name,args:structuredClone(args),provider,kind,definitionOnly,taskId:task?.id||null,owner:identity(task),previousCustom:task?.customCv?structuredClone(task.customCv):null};},
   async after(token,result){if(!token)throw Error('Missing scientific access token');if(token.kind==='terminal'){if(!sharedTerminalToolAllowed(token.name))throw Error('Unclassified terminal tool');terminalLease(token.provider,token.scope);return;}const task=taskFor(token.provider);if(identity(task)!==token.owner)throw Error('Conversation changed before the scientific result was returned');let value=parsedResult(result);if(soleMetadataResult(result)&&draftAcknowledgement(token,value,task)){await policy(token.provider);const current=taskFor(token.provider);if(identity(current)!==token.owner||!draftAcknowledgement(token,value,current))throw Error('Private proposal acknowledgement changed before return');if(token.definitionOnly)definitionToolResult(token.name,token.args,result,current);return;}
    const checked=await check(token.name,token.args,token.provider);if(identity(taskFor(token.provider))!==token.owner)throw Error('Conversation changed during the private access check');
    if(token.definitionOnly&&token.kind!=='public'){definitionToolResult(token.name,token.args,result,task);value=parsedResult(result);}if(!value)return;if(token.name==='list_environments'&&redactRegisteredSkillPaths(value)&&Array.isArray(result?.content)){result.content.find(c=>c.type==='text').text=JSON.stringify(value);}

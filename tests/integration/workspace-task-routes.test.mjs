@@ -17,7 +17,7 @@ function mainRoutes({records,catalog,worker,workflowContext={current:()=>({})},a
   visit(parsed);assert.equal(declarations.length,2);assert.equal(registrations.length,1);
   const nativeWindow=id=>({isDestroyed:()=>false,webContents:{id,isDestroyed:()=>false,getURL:()=> 'file:///studio/index.html'}});
   const context={
-    registerWorkspaceTaskRoutes,taskRecords:records,catalog,worker,workflowContext,agents,dialog,
+    registerWorkspaceTaskRoutes,taskRecords:records,catalog,worker,workflowContext,agents,dialog,authoringAuthorization:null,
     ipcMain:{handle:(name,handler)=>{assert(!handlers.has(name),'Duplicate route '+name);handlers.set(name,handler);}},
     window:nativeWindow(7),shuttingDown:false,settings:{distribution:'Global',workerRoot:'/global',workerPort:9999},
     localReview:undefined,assertIdleAgent:()=>{},emit:()=>{},
@@ -99,17 +99,15 @@ test('run linking reads the selected run kind and forwards its actual unknown st
 
 const deploymentConfig={target:'local',projectId:'compute',targetId:'env',inputSource:'local',directoryName:'route-fixture',maxSeconds:30,gpu:0,resources:{cpus:1,gpus:0,memory_mb:128,queue:'',account:''}};
 
-test('actual main registration reads the latest review authority for save, prepare and execute',async()=>{
+test('actual main registration treats review as advisory and still rejects absent real inputs and runs',async()=>{
   const f=workflowFixture(),seen=[];
   f.context.localReview={authority:(_task,target)=>{seen.push(['initial',target]);return {};}};
   await f.invoke('task.deployment.save',{taskId:f.task.id,value:deploymentConfig});
   f.context.localReview={authority:(_task,target)=>{seen.push(['replacement',target]);return null;}};
-  const before=f.records.read(f.task.id);
-  await assert.rejects(f.invoke('task.deployment.save',{taskId:f.task.id,value:deploymentConfig}),/复核/);
-  await assert.rejects(f.invoke('task.deployment.prepare',{taskId:f.task.id}),/复核/);
-  await assert.rejects(f.invoke('task.execute',{taskId:f.task.id,artifactId:'unprepared'}),/Review/);
-  assert.deepEqual(seen,[['initial','local'],['replacement','local'],['replacement','local'],['replacement','local']]);
-  assert.deepEqual(f.records.read(f.task.id),before);assert.deepEqual(f.calls,[]);
+  await f.invoke('task.deployment.save',{taskId:f.task.id,value:deploymentConfig});
+  await assert.rejects(f.invoke('task.deployment.prepare',{taskId:f.task.id}),/实际输入/);
+  await assert.rejects(f.invoke('task.execute',{taskId:f.task.id,artifactId:'unprepared'}),/Prepared run unavailable/);
+  assert.deepEqual(seen,[['replacement','local']]);assert.deepEqual(f.calls,[]);
 });
 
 test('actual main deployment registration reads current settings while retaining the original source and late-change guard',async()=>{

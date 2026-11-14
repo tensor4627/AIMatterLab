@@ -1,14 +1,13 @@
 import {invoke} from './studio';
-import {type Project,type Environment} from '../../contracts/dto/compute';
-import {type Conversation} from '../../contracts/dto/agent';
-import type {ProjectAuthorizationSpec} from "../../contracts/dto/compute";
-export interface DeploymentDraftConfig {target:'local'|'cluster';projectId:string;targetId:string;inputSource:'local'|'remote';directoryName:string;maxSeconds:number;gpu:number;queueSelection?:'policy';resources:{cpus:number;gpus:number;memory_mb:number;queue:string;account:string;queue_target_id?:string}}
-export interface DeploymentContext {taskId:string;worker:{kind?:'wsl'|'ssh';distribution?:string;root:string;profileId?:string;profileVersion?:number};projects:Project[];environments:Environment[];clusters:any[]}
-export interface DeploymentDraftRequest {taskId:string;value:DeploymentDraftConfig;expectedRevision:number;mutationId:string}
-export interface DeploymentProjectRequest {taskId:string;spec:ProjectAuthorizationSpec;config:DeploymentDraftConfig;expectedRevision:number;requestId:string}
+import type {DeploymentDraftRequest,DeploymentProjectRequest,DeploymentSaveRequest} from '../../contracts/dto/deployment';
+import type {TypedInvoke} from '../../contracts/dto/ipc';
+export type {DeploymentDraftConfig,DeploymentContext,DeploymentDraftRequest,DeploymentProjectRequest} from '../../contracts/dto/deployment';
+const request:TypedInvoke=invoke;
 export const deploymentApi={
- read:(taskId:string)=>invoke<DeploymentContext>('task.deployment.context',{taskId}),
- open:(taskId:string)=>invoke<{conversation:Conversation;task:any}>('task.deployment.open',{taskId}),
- saveDraft:(value:DeploymentDraftRequest)=>invoke<any>('task.deployment.draft',value),
- createProject:(value:DeploymentProjectRequest)=>invoke<{project:Project;task:any}>('task.deployment.createProject',value)
+ read:(taskId:string)=>request('task.deployment.context',{taskId}),
+ open:(taskId:string)=>request('task.deployment.open',{taskId}),
+ saveDraft:(value:DeploymentDraftRequest)=>request('task.deployment.draft',value),
+ save:(value:DeploymentSaveRequest)=>request('task.deployment.save',value),
+ prepare:(taskId:string)=>request('task.deployment.prepare',{taskId}),
+ createProject:(value:DeploymentProjectRequest)=>request('task.deployment.createProject',value)
 };

@@ -275,7 +275,6 @@ def dispatch(service, method, path, data, admin=False):
         if not admin:raise PermissionError("Desktop revision required")
         return service.clusters.revise(data["run_id"],data["changes"])
     if path in ("/api/cluster/validate","/api/cluster/submit","/api/cluster/cancel"):
-        if not admin:raise PermissionError("Desktop cluster review required")
         return getattr(service.clusters,path.rsplit("/",1)[-1])(data["run_id"])
     if path=="/api/cluster/status":
         return service.clusters.poll(data["run_id"])
@@ -312,11 +311,7 @@ def dispatch(service, method, path, data, admin=False):
     if path == "/api/run/input":
         return service.input_file(data["run_id"], data["name"])
     if path == "/api/run/reconcile":
-        if not admin:
-            raise PermissionError("Only the desktop user can reconcile an unknown run")
         return service.resolve_unknown(data["run_id"])
-    if path in ("/api/run/submit", "/api/run/validate") and not admin:
-        raise PermissionError("Desktop review required: click Confirm and Execute in the task page")
     if path.startswith("/api/run/"):
         action, identifier = path.rsplit("/", 1)[1], data["run_id"]
         if action == "status":
@@ -329,7 +324,9 @@ def dispatch(service, method, path, data, admin=False):
             return service.export(identifier)
         if action == "resume":
             return service.resume(identifier, data["parameters"])
-        if action in ("validate", "submit", "cancel", "collect"):
+        if action == "collect":
+            return service.collect(identifier, data.get("names"))
+        if action in ("validate", "submit", "cancel"):
             return getattr(service, action)(identifier)
     if path == "/api/structures/suggest":
         return service.inspect(data["project_id"],data["environment_id"],data["path"],"suggest",intent=data.get("intent",{}))

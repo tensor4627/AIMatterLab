@@ -44,9 +44,9 @@ function observe(root,{deny=[]}={}){
 }
 function active(h,resources){const text='Self-contained execution snapshot';return {schemaVersion:1,revision:'authority',state:'active',package:{id:h.record.package_id,version:h.record.package_version,manifestSha256:h.record.manifest_sha256,sourceCommit:h.record.source_commit},workerBinding:{distribution:'Fixture',root:'/worker',port:1},target:{kind:'local',projectId:'project',environmentId:'env',fingerprint:'environment'},activation:{id:'execution',revision:'1',configurationId:'configuration'},archivedResources:resources,executionSkill:{id:'execution',sha256:sha(text),text,resources:[]}};}
 
-test('a registered delivery expands bounded Markdown/JSON references from the original layout and relocates unchanged',async t=>{
+test('a registered delivery loads only its entry, advertises exact references and relocates unchanged',async t=>{
  const h=fixture(t,{large:true}),trap=observe(h.record.snapshot_root);let result;
- try{result=await h.read();assert(result.text.includes('GUIDE BODY'));assert(result.text.includes('DEEP BODY'));assert(result.text.includes('"value":7'));assert(!result.text.includes('DO NOT LOAD OR EXECUTE THIS CODE'));assert(result.text.includes('Reference not expanded: reference-source/docs/large.md'));assert.equal(result.totalBytes,Buffer.byteLength(result.text));assert.equal(result.attachments.length,4);assert.equal(result.attachments.find(item=>item.label.endsWith('values.json')).kind,'reference-data');assert(!trap.events.some(event=>event.file.endsWith('program.py')||event.file.endsWith('large.md')));}finally{trap.restore();}
+ try{result=await h.read();assert(!result.text.includes('GUIDE BODY'));assert(!result.text.includes('DEEP BODY'));assert(!result.text.includes('"value":7'));assert(!result.text.includes('DO NOT LOAD OR EXECUTE THIS CODE'));assert(result.document_ids.includes('reference-source/docs/large.md'));assert.equal(result.totalBytes,Buffer.byteLength(result.text));assert.equal(result.attachments.length,1);assert(!trap.events.some(event=>event.file.endsWith('program.py')||event.file.endsWith('large.md')||event.file.endsWith('guide.md')));}finally{trap.restore();}
  const moved=path.join(h.root,'moved','cpu-worker-reference-package');fs.cpSync(h.record.snapshot_root,moved,{recursive:true,verbatimSymlinks:true,dereference:false});const record={...h.record,snapshot_root:moved},selection={...h.selection,path:path.join(moved,'SKILL.md')},relocated=await h.read({record,selection});assert.deepEqual(relocated,result);
 });
 
@@ -55,23 +55,33 @@ test('sealed delivery and mismatched selections perform zero filesystem operatio
  try{await assert.rejects(h.read({policy}),/archived/);await assert.rejects(h.read({selection:{...h.selection,name:'other'}}),/unregistered_selection/);await assert.rejects(h.read({selection:{...h.selection,path:path.join(h.packageRoot,'SKILL.md')}}),/unregistered_selection/);assert.deepEqual(trap.counts,{exists:0,readdir:0,stat:0,open:0,read:0});}finally{trap.restore();}
 });
 
+test('focused registered documents load one body and advertise the next references without eager expansion',async t=>{
+ const h=fixture(t),guide='reference-source/docs/guide.md',values='reference-source/data/values.json',deep='reference-source/docs/sub/deep.md',trap=observe(h.record.snapshot_root);
+ try{const result=await h.read({documentId:guide});assert(result.text.includes('GUIDE BODY'));assert(!result.text.includes('DEEP BODY'));assert(!result.text.includes('"value":7'));assert.deepEqual(result.attachments.map(row=>row.label),[guide]);assert(result.document_ids.includes(values));assert(result.document_ids.includes(deep));assert(!trap.events.some(event=>event.file.endsWith('values.json')||event.file.endsWith('deep.md')));}finally{trap.restore();}
+ const json=await h.read({documentId:values});assert(json.text.includes('"value":7'));assert.equal(json.attachments[0].kind,'reference-data');assert.equal(json.document_id,values);
+});
+
+test('focused document identifiers must name guidance inside the exact selected package version before IO',async t=>{
+ const h=fixture(t),trap=observe(h.record.snapshot_root);try{for(const documentId of ['../outside.md','reference-source/program.py','reference-source/docs/unregistered.md'])await assert.rejects(h.read({documentId}),/unregistered_document_id/);assert.deepEqual(trap.counts,{exists:0,readdir:0,stat:0,open:0,read:0});}finally{trap.restore();}
+});
+
 test('a repair grant for the entry cannot silently read independently sealed references',async t=>{
  const h=fixture(t),guide=path.join(h.record.snapshot_root,'reference-source/docs/guide.md'),values=path.join(h.record.snapshot_root,'reference-source/data/values.json'),deep=path.join(h.record.snapshot_root,'reference-source/docs/sub/deep.md'),facts=active(h,[{id:'delivery',role:'delivery',paths:[h.selection.path]},{id:'reference',role:'configuration',paths:[guide,values,deep]}]);
  facts.readGrant={id:'human-repair',purpose:'repair',resourceIds:['delivery'],owner:{provider:'codex',threadId:'thread',taskId:null,leaseEpoch:3},authorityRevision:facts.revision,activationId:facts.activation.id,expiresAt:Date.now()+60000};
- const trap=observe(h.record.snapshot_root,{deny:[guide,values,deep]});try{await assert.rejects(h.read({policy:createReadPolicy(facts,{scope:h.scope})}),/archived/);assert(!trap.events.some(event=>[guide,values,deep].includes(event.file)));}finally{trap.restore();}
- facts.readGrant.resourceIds.push('reference');assert((await h.read({policy:createReadPolicy(facts,{scope:h.scope})})).text.includes('DEEP BODY'));
+ const trap=observe(h.record.snapshot_root,{deny:[guide,values,deep]});try{assert.equal((await h.read({policy:createReadPolicy(facts,{scope:h.scope})})).attachments.length,1);await assert.rejects(h.read({documentId:'reference-source/docs/guide.md',policy:createReadPolicy(facts,{scope:h.scope})}),/archived/);assert(!trap.events.some(event=>[guide,values,deep].includes(event.file)));}finally{trap.restore();}
+ facts.readGrant.resourceIds.push('reference');const result=await h.read({documentId:'reference-source/docs/guide.md',policy:createReadPolicy(facts,{scope:h.scope})});assert(result.text.includes('GUIDE BODY'));assert(!result.text.includes('DEEP BODY'));assert.equal(result.attachments.length,1);
 });
 
 test('actual snapshot content tampering fails the bound size or SHA instead of returning changed guidance',async t=>{
- const h=fixture(t),file=path.join(h.record.snapshot_root,'reference-source/docs/guide.md'),original=fs.readFileSync(file);fs.chmodSync(file,0o644);fs.writeFileSync(file,Buffer.from(original.toString().replace('GUIDE BODY','WRONG BODY')));await assert.rejects(h.read(),/registered_hash_changed/);
- fs.writeFileSync(file,'short');await assert.rejects(h.read(),/registered_file_changed/);
+ const h=fixture(t),file=path.join(h.record.snapshot_root,'reference-source/docs/guide.md'),original=fs.readFileSync(file);fs.chmodSync(file,0o644);fs.writeFileSync(file,Buffer.from(original.toString().replace('GUIDE BODY','WRONG BODY')));assert.equal((await h.read()).attachments.length,1);await assert.rejects(h.read({documentId:'reference-source/docs/guide.md'}),/registered_hash_changed/);
+ fs.writeFileSync(file,'short');await assert.rejects(h.read({documentId:'reference-source/docs/guide.md'}),/registered_file_changed/);
 });
 
 test('missing, undeclared and out-of-package document references fail without opening an unversioned target',async t=>{
  for(const [body,expected]of [['[Missing](reference-source/docs/missing.md)',/resource_not_in_version/],['[Outside](../outside.md)',/reference_outside_package/],['[Encoded outside](..%2Foutside.md)',/reference_outside_package/]]){
   const h=fixture(t,{body}),trap=observe(h.record.snapshot_root);try{await assert.rejects(h.read(),expected);assert.equal(trap.events.filter(event=>event.kind==='open').length,1);}finally{trap.restore();}
  }
- const h=fixture(t),file=path.join(h.record.snapshot_root,'reference-source/docs/guide.md');fs.chmodSync(path.dirname(file),0o755);fs.unlinkSync(file);await assert.rejects(h.read(),/ENOENT/);
+ const h=fixture(t),file=path.join(h.record.snapshot_root,'reference-source/docs/guide.md');fs.chmodSync(path.dirname(file),0o755);fs.unlinkSync(file);assert.equal((await h.read()).attachments.length,1);await assert.rejects(h.read({documentId:'reference-source/docs/guide.md'}),/ENOENT/);
 });
 
 test('scope changes during an asynchronous stat or open return no body and close an already opened handle',async t=>{
@@ -83,9 +93,9 @@ test('scope changes during an asynchronous stat or open return no body and close
 });
 
 test('file budgets, invalid UTF8 and unused reference definitions cannot silently broaden the attachment set',async t=>{
- const h=fixture(t),trap=observe(h.record.snapshot_root);try{await assert.rejects(h.read({limits:{maxFiles:1}}),/context_byte_limit/);assert.equal(trap.events.filter(event=>event.kind==='open').length,1);}finally{trap.restore();}
- const invalid=fixture(t,{invalidUtf8:true});await assert.rejects(invalid.read(),TypeError);
- const unused=fixture(t,{body:'[Guide](reference-source/docs/guide.md)\n[unused]: ../../not-requested.md\n'});assert((await unused.read()).text.includes('DEEP BODY'));
+ const h=fixture(t),trap=observe(h.record.snapshot_root);try{assert.equal((await h.read({limits:{maxFiles:1}})).attachments.length,1);await assert.rejects(h.read({documentId:'reference-source/docs/guide.md',limits:{maxFiles:1}}),/context_byte_limit/);assert.equal(trap.events.filter(event=>event.kind==='open').length,2);}finally{trap.restore();}
+ const invalid=fixture(t,{invalidUtf8:true});assert.equal((await invalid.read()).attachments.length,1);await assert.rejects(invalid.read({documentId:'reference-source/docs/guide.md'}),TypeError);
+ const unused=fixture(t,{body:'[Guide](reference-source/docs/guide.md)\n[unused]: ../../not-requested.md\n'});assert((await unused.read()).document_ids.includes('reference-source/docs/guide.md'));
 });
 
 test('metadata-only redirects enforce physical archive policy and reject cycles/escapes before any IO',async t=>{
@@ -103,7 +113,7 @@ test('actual versioned destinations support balanced/escaped parentheses, angle 
 [Encoded](reference-source/docs/guide%28v1%29.md)
 [Angle](<reference-source/docs/angle guide(v1).md> "angle title")
 [External](https://example.invalid/guide(v1).md)
-`,h=fixture(t,{body,parentheses:true}),result=await h.read();assert(result.text.includes('BALANCED PARENTHESIS GUIDANCE'));assert(result.text.includes('ANGLE PATH GUIDANCE'));assert.equal(result.attachments.length,3);assert.equal(result.attachments.filter(item=>item.label.endsWith('guide(v1).md')).length,2);
+`,h=fixture(t,{body,parentheses:true}),result=await h.read();assert(!result.text.includes('BALANCED PARENTHESIS GUIDANCE'));assert(!result.text.includes('ANGLE PATH GUIDANCE'));assert.equal(result.attachments.length,1);assert.equal(result.document_ids.filter(id=>id.endsWith('guide(v1).md')).length,2);assert((await h.read({documentId:'reference-source/docs/guide(v1).md'})).text.includes('BALANCED PARENTHESIS GUIDANCE'));assert((await h.read({documentId:'reference-source/docs/angle guide(v1).md'})).text.includes('ANGLE PATH GUIDANCE'));
 });
 
 test('malformed destination parentheses fail clearly instead of silently omitting a guidance document',async t=>{
@@ -111,7 +121,7 @@ test('malformed destination parentheses fail clearly instead of silently omittin
 });
 
 test('registered relative delivery symlinks preserve the original content-directory references and relocation',async t=>{
- const h=fixture(t,{linked:true,linkedEntry:'original-guide.txt'});if(!h)return;assert.equal(h.record.files.find(item=>item.path==='SKILL.md').kind,'symlink');const result=await h.read();assert(result.text.includes('GUIDE BODY'));assert(result.text.includes('"value":7'));assert.equal(result.attachments[0].kind,'instructions');
+ const h=fixture(t,{linked:true,linkedEntry:'original-guide.txt'});if(!h)return;assert.equal(h.record.files.find(item=>item.path==='SKILL.md').kind,'symlink');const result=await h.read();assert(!result.text.includes('GUIDE BODY'));assert(!result.text.includes('"value":7'));assert(result.document_ids.includes('reference-source/docs/guide.md'));assert.equal(result.attachments[0].kind,'instructions');
  const moved=path.join(h.root,'linked-moved','cpu-worker-reference-package');fs.cpSync(h.record.snapshot_root,moved,{recursive:true,verbatimSymlinks:true,dereference:false});assert.deepEqual(await h.read({record:{...h.record,snapshot_root:moved},selection:{...h.selection,path:path.join(moved,'SKILL.md')}}),result);
 });
 

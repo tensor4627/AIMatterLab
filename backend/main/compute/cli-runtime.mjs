@@ -4,7 +4,6 @@ import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawnCli as nativeSpawnCli,prepareProfile,providerRuntime} from '../../../desktop/platform/provider-runtime.mjs';
-import {AcpBridge} from '../../../agent/providers/acp.mjs';
 
 const PROVIDERS=['kimi','qwen'];
 const DEFAULT_LOCK=fileURLToPath(new URL('../../../contracts/agent/cli-runtime-lock.json',import.meta.url));
@@ -100,7 +99,7 @@ async function treeReceipt(root,{maxFiles=16000,maxBytes=512*1024*1024}={}){
  await visit(root);return files.sort((a,b)=>a.path.localeCompare(b.path));
 }
 
-export function createCliRuntimeManager({root,settings=()=>({}),fetchApi=globalThis.fetch,publish=()=>{},env=process.env,spawnCli=nativeSpawnCli,platform=process.platform,arch=process.arch,lock=JSON.parse(fs.readFileSync(DEFAULT_LOCK,'utf8')),extractArchive,dependencyRoot,probeTimeoutMs=15000,interfaceTimeoutMs=30000}={}){
+export function createCliRuntimeManager({root,settings=()=>({}),fetchApi=globalThis.fetch,publish=()=>{},env=process.env,spawnCli=nativeSpawnCli,platform=process.platform,arch=process.arch,lock=JSON.parse(fs.readFileSync(DEFAULT_LOCK,'utf8')),extractArchive,dependencyRoot,createBridge,probeTimeoutMs=15000,interfaceTimeoutMs=30000}={}){
  if(typeof root!=='string'||!path.isAbsolute(root)||typeof settings!=='function'||typeof fetchApi!=='function'||typeof publish!=='function')throw Error('cli_runtime_invalid_configuration');
  root=path.resolve(root);validateCliRuntimeLock(lock);const lockHash=sha(JSON.stringify(lock)),active=new Map(),probes=new Map();
  const selectionFile=provider=>path.join(root,'selections',provider+'.json');
@@ -177,7 +176,8 @@ export function createCliRuntimeManager({root,settings=()=>({}),fetchApi=globalT
   signal.throwIfAborted();
   const owned=[];
   const interfaceSpawn=(...args)=>{const child=spawnCli(...args),closed=new Promise(resolve=>child.once('close',resolve));owned.push(closed);return child;};
-  const profile=prepareProfile(profileRoot,provider),bridge=new AcpBridge(provider,{host:{...providerRuntime,spawnCli:interfaceSpawn},probeTimeoutMs});
+  if(typeof createBridge!=='function')throw Error('CLI interface probe adapter is unavailable');
+  const profile=prepareProfile(profileRoot,provider),bridge=createBridge(provider,{host:{...providerRuntime,spawnCli:interfaceSpawn},probeTimeoutMs});
   let timer,rejectCancelled;
   const interrupted=new Promise((resolve,reject)=>{rejectCancelled=reject;timer=setTimeout(()=>{reject(Error('CLI ACP initialization timed out'));bridge.close();},interfaceTimeoutMs);});
   const abort=()=>{rejectCancelled(cancelled());bridge.close();};signal.addEventListener('abort',abort,{once:true});

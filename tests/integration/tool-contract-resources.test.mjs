@@ -39,7 +39,11 @@ test('Node old public interface and standalone worker consume the exact canonica
 test('build synchronizes resources and distributable files include canonical and standalone copies',()=>{
  const manifest=JSON.parse(fs.readFileSync(new URL("../../package.json",import.meta.url),'utf8'));
  assert.equal(manifest.scripts.build.split(/\s*&&\s*/)[0],'node scripts/sync-tool-contracts.mjs');
- for(const name of ['dev','start'])assert.equal(manifest.scripts[name].split(/\s*&&\s*/)[0],'node scripts/sync-tool-contracts.mjs --check');
+ for(const name of ['dev','start']){
+  const commands=manifest.scripts[name].split(/\s*&&\s*/);
+  const check=commands.indexOf('node scripts/sync-tool-contracts.mjs --check'),launch=commands.indexOf('node scripts/'+name+'.mjs');
+  assert(check>=0&&launch>check,'Runtime contract check must precede launching '+name);
+ }
  assert.equal(manifest.scripts['check:contracts'],'node scripts/sync-tool-contracts.mjs --check');
  for(const included of ['contracts/**'])assert(manifest.build.files.includes(included),included);
  assert.deepEqual(manifest.build.files.find(value=>value?.from==='backend/worker'),{from:'backend/worker',to:'worker',filter:['**/*','!tests/**','!**/__pycache__/**']});

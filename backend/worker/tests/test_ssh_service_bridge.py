@@ -222,7 +222,7 @@ class DaemonTests(unittest.TestCase):
                     'data': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'}})
                 self.assertEqual(result['status'], 200)
                 names = {item['name'] for item in result['data']['result']['tools']}
-                self.assertNotIn('submit_run', names); self.assertNotIn('validate_run', names)
+                self.assertIn('submit_run', names); self.assertIn('validate_run', names)
                 with self.assertRaises(ValueError): bridge.forward(root, value['port'], {'method': 'POST', 'target': '/api/projects', 'mcp': True, 'data': {}})
                 refused = bridge.forward(root, value['port'], {'method': 'POST', 'target': '/api/runs/prepare', 'data': {}})
                 self.assertEqual(refused['status'], 403)
