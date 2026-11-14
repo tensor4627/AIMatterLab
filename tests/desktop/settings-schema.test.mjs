@@ -13,7 +13,9 @@ const base = {
 
 test('known settings keys are accepted and merged over the current settings',()=>{
  assert.deepEqual(normalizeSettings(base,{}),base);
- assert.equal(SETTINGS_KEYS.length,26);
+ assert.equal(SETTINGS_KEYS.length,27);
+ assert.equal(normalizeSettings(base,{terminalIdleMinutes:60}).terminalIdleMinutes,60);
+ for(const value of [0,1441,1.5,null])assert.throws(()=>normalizeSettings(base,{terminalIdleMinutes:value}),/idle timeout/);
  const next = normalizeSettings(base,{theme:'light', fontSize:18, autoDiscoverCompute:true, projectAgents:{project: 'kimi'}, agentProviders:{codex:{contextWindow:200000}}});
  assert.equal(next.theme,'light');
  assert.equal(next.fontSize,18);

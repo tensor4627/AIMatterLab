@@ -38,6 +38,15 @@ test('closing one base removes only its service and never disturbs a different s
  const f=fixture(t);await f.connect('A');await f.switch('B');await f.connect('B');f.grant();const worker=f.worker.connection;f.service.connectionClosed('A');assert.equal(f.service.peek({connectionId:'A'}).status,'disconnected');assert.equal(f.service.peek().connectionId,'B');assert.equal(f.worker.connection,worker);assert.equal(f.service.hasCurrentGrant('codex'),true);
 });
 
+test('idle status during channel dispatch cannot invalidate the later verified conversation service',async t=>{
+ const f=fixture(t),open=f.connections.openService,observe=f.connections.serviceState;
+ let release,notify;const gate=new Promise(r=>release=r),started=new Promise(r=>notify=r);
+ f.connections.openService=async(...args)=>{notify();await gate;return open(...args);};
+ f.connections.serviceState=async data=>f.channels.has(data.connectionId)?observe(data):{connectionId:data.connectionId,status:'idle',serviceActive:false};
+ const pending=f.service.connectForConversations({connectionId:'A',profileId:'profile-A',profileVersion:1,requestId:'one',mode:'setup'});
+ await started;assert.equal((await f.service.status()).status,'connecting');f.setCurrent({...f.current(),threadId:'different'});release();
+ const result=await pending;assert.equal(result.workflowReady,true);assert.equal(result.status,'connected');assert.equal(f.service.hasCurrentGrant('codex'),false);
+});
 test('unknown service state revokes its grant, preserves the base, and cannot auto-attach or bootstrap',async t=>{
  const f=fixture(t);await f.connect();f.grant();f.channels.get('A').status='unknown';await f.service.status();assert.equal(f.service.peek().status,'unknown');assert.equal(f.service.hasCurrentGrant('codex'),false);assert.equal(f.bases.get('A').status,'authenticated');await assert.rejects(f.connect('A','reuse','retry'),/channel_in_use/);assert.equal(f.calls.filter(v=>v.open).length,1);
 });

@@ -14,7 +14,7 @@ export const SETTINGS_KEYS = Object.freeze([
  'agentLayout','agentProvider','kimiPath','qwenPath','agentProviders',
  'distribution','workerRoot','workerPort','codexPath','cwd','sourceRoots','sourceIds',
  'skillRoots','theme','language','fontFamily','fontSize','minimumFontSize','chatFontSize',
- 'editorFontSize','terminalFontSize','agent'
+ 'editorFontSize','terminalFontSize','terminalIdleMinutes','agent'
 ]);
 
 export function normalizeSettings(current, data = {}) {
@@ -23,6 +23,7 @@ export function normalizeSettings(current, data = {}) {
  const unknown = Object.keys(data).filter(key => !SETTINGS_KEYS.includes(key));
  if (unknown.length) throw Error('Unknown settings: ' + unknown.slice(0, 8).join(', '));
  const next = {...current, ...data};
+ if(next.terminalIdleMinutes!==undefined&&(!Number.isInteger(next.terminalIdleMinutes)||next.terminalIdleMinutes<1||next.terminalIdleMinutes>1440))throw Error('Terminal idle timeout must be 1 to 1440 minutes');
  if (next.autoDiscoverCompute !== undefined && typeof next.autoDiscoverCompute !== 'boolean') throw Error('Invalid compute discovery preference');
  if (!/^[\w .-]{1,80}$/.test(next.distribution) || !Number.isInteger(next.workerPort) ||
      next.workerPort < 1024 || next.workerPort > 65535 ||

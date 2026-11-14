@@ -12,6 +12,7 @@ import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-pla
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
 import {createTerminalHandoff} from '../agent/sessions/terminal-handoff.mjs';
 import {createSshTerminalHandoff} from '../agent/sessions/ssh-terminal-handoff.mjs';
+import {createConversationTerminals} from '../agent/sessions/conversation-terminals.mjs';
 import {createAgentResourceRouting} from '../agent/sessions/resource-routing.mjs';
 import {createComputeResourceBinding} from '../backend/main/compute/resource-binding.mjs';
 import {findInstalledCodex} from './platform/codex-executable.mjs';
@@ -129,13 +130,13 @@ else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',im
 else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,portableDir:process.env.PORTABLE_EXECUTABLE_DIR,execPath:process.execPath});fs.mkdirSync(profile,{recursive:true});app.setPath('userData',profile);}
 let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
 let shuttingDown=false,desktopShutdown,agentConnectionSerial=0;
-let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService;
+let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
 const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 bindBundledWorkerRuntimeId(worker,workerSource);
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService});
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
-  workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
+  workerPort:8767, terminalIdleMinutes:60, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
   sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
 function findCodex() {
   return findInstalledCodex();
@@ -245,6 +246,11 @@ sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:
 // versioned transition rather than discarding saved state on desktop startup.
 computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,connections:sharedTerminal.connections,current:()=>workflowContext.current(),revision:()=>workflowContext.revision(),serviceState:connectionId=>sshService?.peek(connectionId?{connectionId}:{})});
 sshService=createSshService({worker,connections:sharedTerminal.connections,profiles:computeProfiles,resource:computeResource,registration:serviceRegistration,source:workerSource,transportSource:sshTransportSource,preferredRuntimeId:profile=>preferredSshRuntime(profile,selectedSshBinding(profile),catalog.get('ssh-runtime-preference',profile.id)),current:()=>workflowContext.current(),assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},publish:()=>{emit('studio:event',{method:'studio/sshServiceChanged',params:sshService?.peek()||{status:'disconnected'}});},remember:(identity,health)=>{catalog.put('worker-binding','last-explicit',{...identity,port:health.port,health,checkedAt:Date.now(),sourceIdentity:{runtimeId:health.runtimeId}});}});
+conversationTerminals=createConversationTerminals({terminal:sharedTerminal,service:sshService,registration:serviceRegistration,
+ resource:computeResource,current:()=>workflowContext.current(),idleMinutes:()=>settings.terminalIdleMinutes,
+ busy:scope=>agents.bridge(scope.provider)?.activeTurns?.has(scope.threadId)||agents.pendingTurnDispatches.has(agents.contextKey(scope.provider,scope.threadId)),
+ publish:()=>emit('studio:event',{method:'studio/conversationTerminalChanged'})});
+const terminalIdleTimer=setInterval(()=>void conversationTerminals.sweep(),10000);terminalIdleTimer.unref();
 const authoringAuthorization={begin:task=>sshService.prepareAuthoringGrant(task),commit:(ticket,task)=>sshService.completeAuthoringGrant(ticket,task),abort:ticket=>sshService.abortAuthoringGrant(ticket)};
 worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  const selected=computeResource.peek(),terminalTool=['list_shared_terminals','read_shared_terminal','write_shared_terminal'].includes(toolName);
@@ -260,7 +266,7 @@ worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  if(selected?.kind==='ssh-terminal'||worker.identity?.kind==='ssh')return selected?.kind==='ssh-terminal'&&terminalTool&&scope?.provider===provider&&sharedTerminal.hasCurrentGrant(provider,selected.sessionId)===true;
  return true;
 });
-registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,onClosing:connectionId=>sshService.connectionLost(connectionId),onClosed:connectionId=>sshService.connectionClosed(connectionId),onUnknown:connectionId=>sshService.connectionLost(connectionId),onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
+registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,onClosing:connectionId=>{conversationTerminals.releaseConnection(connectionId);sshService.connectionLost(connectionId);},onClosed:connectionId=>sshService.connectionClosed(connectionId),onUnknown:connectionId=>sshService.connectionLost(connectionId),onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
 handle('compute.sshService.registration',value=>serviceRegistration.read(value));
 handle('compute.sshService.check',value=>sshService.check(value));
 handle('compute.sshService.connect',async value=>{
@@ -270,11 +276,12 @@ handle('compute.sshService.connect',async value=>{
 });
 handle('compute.sshService.status',value=>sshService.status(value));
 handle('compute.sshService.scheduler',async value=>{const result=await sshService.scheduler(value);emit('studio:event',{method:'studio/sshSchedulerChanged',params:{profileId:result.id,version:result.version}});return result;});
-handle('compute.sshService.disconnect',async value=>{const result=await sshService.disconnect(value);emit('studio:event',{method:'studio/computeResourceChanged',params:await computeResource.status({})});return result;});
-handle('compute.resource.status',value=>computeResource.status(value));
+handle('compute.sshService.disconnect',async value=>{conversationTerminals.serviceOwner(value.connectionId,'human');const result=await sshService.disconnect(value);emit('studio:event',{method:'studio/computeResourceChanged',params:await computeResource.status({})});return result;});
+handle('compute.resource.status',async value=>{const result=await computeResource.status(value);return result.kind==='ssh-connection'&&result.authentication==='verified'?{...result,canAcquireConversationTerminal:conversationTerminals.canAcquire(agents.active)}:result;});
 for(const method of ['activate','clear'])handle('compute.resource.'+method,async value=>{
  assertIdleAgent();agents.assertContextIdle();const before=computeResource.capture(),result=await computeResource[method](value),after=computeResource.capture();
  if(before.revision!==after.revision||JSON.stringify(before.selection)!==JSON.stringify(after.selection)){
+  if(before.selection?.connectionId)conversationTerminals.releaseConnection(before.selection.connectionId);
   await sshService.resourceChanged();
   for(const provider of ['codex','kimi','qwen','deepseek','compatible']){worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);}
  }
@@ -287,8 +294,20 @@ worker.setLocalTools([...materials.tools(),...terminalTools,...computeInspection
 const terminalHandoff=createTerminalHandoff({terminal:sharedTerminal,workflowContext,agents,records:taskRecords,resourceRouting,agentRpc:value=>agentRpc(value),assertIdle:assertIdleAgent});
 const connectionHandoff=createSshTerminalHandoff({terminalHandoff,terminal:sharedTerminal,service:()=>sshService,registration:serviceRegistration,resourceRouting,workflowContext,agents,records:taskRecords,agentRpc:value=>agentRpc(value)});
 const serviceHandoff=createServiceHandoff({service:()=>sshService,workflowContext,agents,records:taskRecords,resourceRouting,agentRpc:value=>agentRpc(value),assertIdle:assertIdleAgent});
-handle('compute.sshService.owner',async value=>{const result=await serviceHandoff.owner(value);emit('studio:event',{method:'studio/computeResourceChanged'});const provider=workflowContext.current()?.provider;if(provider)void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});return result;});
-for(const method of ['list','open','read','input','resize','owner','close'])handle('sharedTerminal.'+method,async value=>{const result=await (['owner','close'].includes(method)?connectionHandoff:sharedTerminal)[method](value);if(['owner','close'].includes(method)){emit('studio:event',{method:'studio/computeResourceChanged'});const provider=workflowContext.current()?.provider;if(provider)void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});}return result;});
+handle('compute.sshService.owner',async value=>{const result=await serviceHandoff.owner(value);conversationTerminals.serviceOwner(value.connectionId,value.owner);emit('studio:event',{method:'studio/computeResourceChanged'});const provider=workflowContext.current()?.provider;if(provider)void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});return result;});
+for(const method of ['list','open','read','input','resize','owner','close'])handle('sharedTerminal.'+method,async value=>{let result;
+ if(method==='list'){const list=await sharedTerminal.list(value);return {...list,sessions:list.sessions.map(conversationTerminals.describe)};}
+ if(method==='owner'&&value.owner==='agent'&&computeResource.peek()?.kind==='ssh-connection'){
+  assertIdleAgent();agents.assertContextIdle();providerId(value.provider||agents.active);
+  if(Object.keys(value).some(key=>!['sessionId','ownerEpoch','owner','provider'].includes(key)))throw Error('terminal_invalid_request');
+  result=await conversationTerminals.arm(value,value.provider||agents.active);
+  const context=workflowContext.current();
+  if(context?.threadId&&result.currentConversation)await agents.selectContext(context.provider,context);
+ }else{
+  result=await (['owner','close'].includes(method)?connectionHandoff:sharedTerminal)[method](value);
+  if(method==='close'||method==='owner'&&value.owner==='human')conversationTerminals.releaseShell(value.sessionId);
+ }
+ if(['owner','close'].includes(method)){emit('studio:event',{method:'studio/computeResourceChanged'});const provider=workflowContext.current()?.provider;if(provider)void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});}return result;});
 
 registerTaskStage({handle,records:taskRecords,worker,current:()=>workflowContext.current(),assertHuman:event=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;}});
 localReview=registerCalculationReview({handle,records:taskRecords,worker,current:()=>workflowContext.current(),
@@ -312,13 +331,13 @@ customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.a
 });
 for(const action of ['read','saveSpec','approveFormula','approveCode','sharing','validate','status','attach','reuse'])handle('customCv.'+action,(value,event)=>customCv.dispatch(action,value,event));
 handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
-agents.on('event',event=>{taskRecords.event(event);emit('studio:event',event);});
+agents.on('event',event=>{if(event.params?.threadId)conversationTerminals.touch(event.provider,event.params.threadId);taskRecords.event(event);emit('studio:event',event);});
 registerWorkspaceTaskRoutes({
  records:taskRecords,catalog,worker,workflowContext,agents,handle,assertIdle:assertIdleAgent,authoringAuthorization,
  getSettings:()=>settings,getLocalReview:()=>localReview,emit,
  chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},
 });
-handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);workflowContext.clear(result.provider);agents.disconnect(result.provider);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
+handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);conversationTerminals.forget(result.provider,result.threadId);workflowContext.clear(result.provider);agents.disconnect(result.provider);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));
 handle('conversation.groups',()=>taskRecords.groups());
@@ -326,7 +345,7 @@ handle('conversation.createGroup',value=>taskRecords.createGroup(value));
 handle('conversation.deleteGroup',value=>{assertIdleAgent();return taskRecords.deleteGroup(value);});
 handle('conversation.organize',value=>taskRecords.organize(value));
 handle('conversation.rename',value=>{if(!value||Object.keys(value).sort().join(',')!=='id,name')throw Error('Invalid typed conversation name');return taskRecords.rename(value);});
-handle('conversation.select',value=>selectConversation({catalog,records:taskRecords,workflowContext,agents,assertIdle:assertIdleAgent},value));
+handle('conversation.select',async value=>{const result=await selectConversation({catalog,records:taskRecords,workflowContext,agents,conversationTerminals,assertIdle:assertIdleAgent},value);emit('studio:event',{method:'studio/conversationTerminalChanged'});return result;});
 handle('ssh.existing',()=>existingConnections(app.getPath('home'),{documents:app.getPath('documents'),includeXshellPicker:true}));
 handle('ssh.import',({ref})=>existingProfile(app.getPath('home'),ref,{documents:app.getPath('documents'),selectXshellSession:async()=>{
   const response=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'Xshell session',extensions:['xsh']}]});
@@ -454,7 +473,7 @@ handle('agent.cli.choose',async value=>{
  if(readiness.status==='ready')settings=catalog.put('settings','main',normalizeSettings(settings,{[provider+'Path']:response.filePaths[0]}));
  return readiness;
 });
-const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,authoringAuthorization,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){return agentRequests(value);}
 handle('agent.rpc',agentRpc);
 handle('agent.recover',async({provider,threadId,model})=>{
@@ -527,7 +546,7 @@ handle('export',async({run})=>{
 });
 let terminalClosing;
 desktopShutdown=installDesktopShutdown({app,begin:()=>{
- shuttingDown=true;
+ shuttingDown=true;clearInterval(terminalIdleTimer);conversationTerminals.stop();
  // Fence the terminal bridge on this exact stack, before already-queued open
  // continuations can run. The asynchronous cleanup below only waits for it.
  try{terminalClosing=sharedTerminal.shutdown({timeoutMs:4000});}catch{terminalClosing=Promise.resolve({status:'unconfirmed'});}

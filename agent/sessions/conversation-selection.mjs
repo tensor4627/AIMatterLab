@@ -1,5 +1,5 @@
 /** Sender-validated desktop selection actions; never exposed to scientific MCP. */
-export async function selectConversation({catalog,records,workflowContext,agents,assertIdle},value){
+export async function selectConversation({catalog,records,workflowContext,agents,assertIdle,conversationTerminals},value){
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid conversation selection');
  const fresh=value.new===true&&Object.keys(value).length===1;
  if(!fresh&&(typeof value.id!=='string'||Object.keys(value).length!==1))throw Error('Invalid conversation selection');
@@ -15,7 +15,10 @@ export async function selectConversation({catalog,records,workflowContext,agents
  }
  if(agents.active!==conversation.provider){workflowContext.clear(agents.active);agents.disconnect(agents.active);}
  const ticket=workflowContext.begin(conversation.provider,conversation.threadId);
- await workflowContext.synchronize(ticket,(provider,context)=>agents.selectContext(provider,context));
+ await workflowContext.synchronize(ticket,async(provider,context)=>{
+  await conversationTerminals?.acquire(provider,context);workflowContext.assert(ticket);
+  return agents.selectContext(provider,context);
+ });
  workflowContext.assert(ticket);
  return {...conversation,task:conversation.taskId?records.read(conversation.taskId):null};
 }

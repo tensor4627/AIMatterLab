@@ -21,7 +21,7 @@ import {managedToolSkillContext} from '../skills/managed-tool-context.mjs';
 
 export function createAgentRequests({runtime}){
  return async function agentRpc({provider,method,params={}}){
- const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,authoringAuthorization,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
+ const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
  providerId(provider);assertRpc(method);
  const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(),selectedSsh=['ssh-terminal','ssh-connection'].includes(resource?.selection?.kind)?resource.selection:null;
@@ -34,7 +34,9 @@ export function createAgentRequests({runtime}){
  const selectedTerminalReady=async()=>{const status=await resourceRouting.readiness(provider);check();if(status?.status!=='ready'||status.resource?.selectionId!==selectedSsh.selectionId)throw Error('请先将所选 SSH 终端交接给当前对话；不会改用其他计算资源。');};
  const synchronize=async()=>{check();await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));check();};
  if(['thread/start','thread/resume','turn/start'].includes(method)){
-  assertIdleAgent();if(method==='turn/start'){scientificSkills.clearManagedSelection?.(provider);setupInstructions?.clear?.(provider);}ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId);await synchronize();
+  assertIdleAgent();if(method==='turn/start'){scientificSkills.clearManagedSelection?.(provider);setupInstructions?.clear?.(provider);}ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId);
+  if(method!=='thread/start'){await conversationTerminals?.acquire(provider,workflowContext.current());check();}
+  await synchronize();
  }
  if(selectedSsh&&['turn/start','turn/steer'].includes(method)){await selectedTerminalReady();terminalOnly=resourceRouting.workerSelected?.(provider)!==true;}
  else terminalOnly=['turn/start','turn/steer'].includes(method)&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
@@ -112,7 +114,7 @@ export function createAgentRequests({runtime}){
  let result;
  try{check();if(terminalOnly){if(selectedSsh){await selectedTerminalReady();if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');}else if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');}const capability=()=>{check();if(selectedSsh&&['turn/start','turn/steer'].includes(method)&&(terminalOnly?!sharedTerminal.hasCurrentGrant(provider):resourceRouting.workerSelected(provider)!==true))throw Error('当前请求所属的 SSH 能力授权已变化，不会改用另一通道。');};capability();if(provider==='codex'&&method==='thread/resume'){const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;}else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{capability();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
  catch(error){if(method==='turn/start'){setupInstructions?.clear?.(provider);scientificSkills.clearManagedSelection?.(provider);try{check();taskRecords.failedTurn(provider,params.threadId,error);}catch{}}throw error;}
- if(method==='thread/start'){if(!result.thread?.id)throw Error('The server did not return a real conversation');workflowContext.started(ticket,result.thread.id);await synchronize();}
+ if(method==='thread/start'){if(!result.thread?.id)throw Error('The server did not return a real conversation');workflowContext.started(ticket,result.thread.id);await conversationTerminals?.acquire(provider,workflowContext.current());check();await synchronize();}
  if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)catalog.put('thread',result.thread.id,result.thread);
  if(provider==='codex'&&method==='account/login/start'&&result.authUrl)await openUrl(result.authUrl);
  return result;

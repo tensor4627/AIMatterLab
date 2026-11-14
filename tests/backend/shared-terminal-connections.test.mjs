@@ -25,6 +25,20 @@ test('main human ports hide master authentication from shell inventory, safe sta
 });
 test('human terminal observation rechecks a harmless message revision without suppressing a real conversation switch',async t=>{const f=fixture(t),c=await f.ready();f.select(c);const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'shell'});let once=true;f.onState(()=>{if(once){once=false;f.change({serial:1});}});assert.equal((await f.bridge.read({sessionId:shell.id,ownerEpoch:1})).sessionId,shell.id);once=true;f.onState(()=>{if(once){once=false;f.change({threadId:'other-thread',serial:2});}});await assert.rejects(f.bridge.read({sessionId:shell.id,ownerEpoch:1}),/terminal_context_changed/);});
 
+test('conversation PTYs keep their original shell and deny cross-thread reads after a switch',async t=>{
+ const f=fixture(t),connection=await f.ready();f.select(connection);
+ const a=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'A'});
+ const grant=s=>f.bridge.owner({sessionId:s.sessionId,owner:'agent',ownerEpoch:s.ownerEpoch},{conversation:true});
+ await grant(a);const original=f.context();f.change({threadId:'B'});f.bridge.reconcileContext();
+ const b=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'B'});const handed=await grant(b);
+ assert.deepEqual((await f.bridge.callTool('list_shared_terminals',{},f.scope())).sessions.map(s=>s.sessionId),[b.sessionId]);
+ await assert.rejects(f.bridge.callTool('read_shared_terminal',{session_id:a.sessionId},f.scope()),/scope_denied/);
+ f.change(original);f.bridge.reconcileContext();assert.equal(f.bridge.hasCurrentGrant('codex',a.sessionId),true);
+ await f.bridge.closeConversationShell({connectionId:connection.connectionId,sessionId:b.sessionId,ownerEpoch:handed.ownerEpoch});
+ assert.equal(f.sessions.has(b.sessionId),false);assert.equal(f.sessions.has(a.sessionId),true);
+ f.change({projectId:'changed-project'});f.bridge.reconcileContext();f.change(original);assert.equal(f.bridge.hasCurrentGrant('codex',a.sessionId),false);
+});
+
 function emulateByteOnlyBrokerRead(session){
  const currentRead=session.read.bind(session);
  session.read=request=>{
