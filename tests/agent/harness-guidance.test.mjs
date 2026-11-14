@@ -45,3 +45,20 @@ test('public compute references advertised by selected skills have focused route
  const doc='studio-compute-workflow/references/job-service-connection.md';assert.equal((await router.read('deepseek','cluster.connection-setup',doc)).status,'blocked');setup=true;assert.equal((await router.read('deepseek','cluster.connection-setup',doc)).status,'passed');
  await assert.rejects(router.read('deepseek','compute.queue',doc),/exact document_id/);
 });
+
+test('project skill guidance reaches generated Kimi/Qwen/DSH profiles and DSH chat policy',async t=>{
+ const {prepareDshProfile}=await import('../../desktop/platform/dsh-runtime.mjs');
+ const {dshToolAllowed}=await import('../../agent/providers/dsh-policy.mjs');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-project-skill-profiles-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ for(const name of ['project_skill_catalog','read_project_skill','write_project_skill'])assert.match(STUDIO_INSTRUCTIONS,new RegExp(name));
+ assert.match(STUDIO_INSTRUCTIONS,/writable even though native filesystem access is disabled/);
+ const kimi=prepareProfile(root,'kimi'),qwen=prepareProfile(root,'qwen');
+ assert.match(fs.readFileSync(path.join(kimi.home,'SYSTEM.md'),'utf8'),/project_skill_catalog/);
+ assert.match(qwen.args[qwen.args.indexOf('--append-system-prompt')+1],/write_project_skill/);
+ const dsh=prepareDshProfile(root,{mcpModule:'file:///fixture/mcp.mjs',toolsModule:'file:///fixture/tools.mjs'},null,STUDIO_INSTRUCTIONS);
+ const profile=JSON.parse(fs.readFileSync(path.join(dsh.home,'profiles','studio','cordis.patch.yml'),'utf8'));
+ assert.equal(profile[0].insert.find(entry=>entry.id==='studio-policy').config.instructions,STUDIO_INSTRUCTIONS);
+ for(const name of ['project_skill_catalog','read_project_skill','write_project_skill'])assert.equal(dshToolAllowed(name,false),true);
+ assert.equal(dshToolAllowed('submit_run',false),false);
+});

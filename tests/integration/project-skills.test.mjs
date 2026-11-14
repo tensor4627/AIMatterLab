@@ -31,5 +31,64 @@ test('worker proxy registers the same desktop tools for model providers without 
 });
 
 test('real junction escape is rejected and unbound conversations remain isolated',t=>{
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-skill-boundary-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let current={provider:'codex',threadId:'one',projectId:null};const store=new ProjectSkills({root:path.join(root,'owned'),current:()=>current});let scope={...current,checkCurrent:()=>true};store.call('write_project_skill',{name:'example',body,expected_sha256:null},scope);current={...current,threadId:'two'};scope={...current,checkCurrent:()=>true};assert.deepEqual(store.call('project_skill_catalog',{},scope).skills,[]);const outside=path.join(root,'outside');fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'SKILL.md'),'PRIVATE');fs.symlinkSync(outside,path.join(store.directory(scope).target,'escape'),process.platform==='win32'?'junction':'dir');assert.throws(()=>store.call('read_project_skill',{name:'escape'},scope),/Unsafe/);assert.equal(fs.readFileSync(path.join(outside,'SKILL.md'),'utf8'),'PRIVATE');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-skill-boundary-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let current={provider:'codex',threadId:'one',projectId:null};const store=new ProjectSkills({root:path.join(root,'owned'),current:()=>current});let scope={...current,checkCurrent:()=>true};store.call('write_project_skill',{name:'local-analysis',body,expected_sha256:null},scope);current={...current,threadId:'two'};scope={...current,checkCurrent:()=>true};assert.deepEqual(store.call('project_skill_catalog',{},scope).skills,[]);const outside=path.join(root,'outside');fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'SKILL.md'),'PRIVATE');fs.symlinkSync(outside,path.join(store.directory(scope).target,'escape'),process.platform==='win32'?'junction':'dir');assert.throws(()=>store.call('read_project_skill',{name:'escape'},scope),/Unsafe/);assert.equal(fs.readFileSync(path.join(outside,'SKILL.md'),'utf8'),'PRIVATE');
+});
+
+test('failed new saves and interrupted legacy folders do not poison discovery',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-skill-recovery-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const current={provider:'codex',threadId:'chat',projectId:'project'};
+ const scope={...current,checkCurrent:()=>true};
+ const store=new ProjectSkills({root,current:()=>current});
+ const target=store.directory(scope).target;
+ assert.throws(()=>store.call('write_project_skill',{name:'local-analysis',body,expected_sha256:'a'.repeat(64)},scope),/revision/);
+ assert.equal(fs.existsSync(path.join(target,'local-analysis')),false);
+ fs.mkdirSync(path.join(target,'interrupted'));
+ store.call('write_project_skill',{name:'local-analysis',body,expected_sha256:null},scope);
+ assert.deepEqual(store.call('project_skill_catalog',{},scope).skills.map(entry=>entry.name),['local-analysis']);
+ const repaired=body.replace('name: local-analysis','name: interrupted');
+ store.call('write_project_skill',{name:'interrupted',body:repaired,expected_sha256:null},scope);
+ assert.equal(store.call('project_skill_catalog',{},scope).skills.length,2);
+});
+
+test('metadata comes only from opening frontmatter and target name must agree',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-skill-metadata-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const current={provider:'codex',threadId:'chat',projectId:'project'};
+ const scope={...current,checkCurrent:()=>true};
+ const store=new ProjectSkills({root,current:()=>current});
+ for(const invalid of [
+  '---\nname: local-analysis\n---\ndescription: forged in body\n',
+  '---\ndescription: valid description\n---\nname: local-analysis\n',
+  'prefix\n'+body,
+  body.replace('name: local-analysis','name: wrong'),
+  body.replace('name: local-analysis','name: local-analysis\nname: local-analysis'),
+ ]) assert.throws(()=>store.call('write_project_skill',{name:'local-analysis',body:invalid,expected_sha256:null},scope),/frontmatter/);
+ assert.deepEqual(store.call('project_skill_catalog',{},scope).skills,[]);
+ store.call('write_project_skill',{name:'local-analysis',body:body+'description: BODY SPOOF\n',expected_sha256:null},scope);
+ assert.equal(store.call('project_skill_catalog',{},scope).skills[0].description,'User project analysis instructions');
+});
+
+test('all five providers can discover and read project skills in ordinary chat without worker or shell',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-skill-chat-'));
+ let current;
+ const store=new ProjectSkills({root,current:()=>current});
+ const server=new TerminalMcp({terminal:{tools:()=>[],callTool(){throw Error('No shell');}},projectSkills:store});
+ await server.start();
+ t.after(()=>{server.close();fs.rmSync(root,{recursive:true,force:true});});
+ for(const provider of ['codex','kimi','qwen','deepseek','compatible']){
+  current={provider,threadId:'chat-'+provider,projectId:'same-project',taskId:null,environmentId:null,inputRoot:null};
+  server.bindProviderContext(provider,Object.fromEntries(['threadId','projectId','taskId','environmentId','inputRoot'].map(key=>[key,current[key]])));
+  const connection=server.providerConnection(provider);
+  const rpc=async(method,params)=>{
+   const response=await fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
+   assert.equal(response.status,200);
+   return (await response.json()).result;
+  };
+  const inventory=await rpc('tools/list');
+  assert.deepEqual(inventory.tools.map(tool=>tool.name),store.tools().map(tool=>tool.name));
+  if(provider==='codex')assert.equal((await rpc('tools/call',{name:'write_project_skill',arguments:{name:'local-analysis',body,expected_sha256:null}})).isError,false);
+  const read=await rpc('tools/call',{name:'read_project_skill',arguments:{name:'local-analysis'}});
+  assert.equal(JSON.parse(read.content[0].text).body,body);
+ }
 });

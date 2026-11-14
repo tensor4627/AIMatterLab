@@ -74,14 +74,14 @@ function messagesStream(index,{tool,text='Official harness fixture output'}={}){
  const events=[{type:'message_start',message:{id:'fixture-message-'+index,type:'message',role:'assistant',model:'deepseek-flash',content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:12,output_tokens:0}}},{type:'content_block_start',index:0,content_block:tool?{type:'tool_use',id:'fixture-call-'+index,name:tool.name,input:{}}:{type:'text',text:''}},{type:'content_block_delta',index:0,delta:tool?{type:'input_json_delta',partial_json:JSON.stringify(tool.args||{})}:{type:'text_delta',text}},{type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:tool?'tool_use':'end_turn',stop_sequence:null},usage:{output_tokens:3}},{type:'message_stop'}];
  return events.map(e=>'event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n').join('');
 }
-async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}]}={}){
+async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}],toolCatalog}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-dsh-native-')),store=catalog(),calls=[],events=[],children=[];let count=0,held;
  const server=createServer(async(req,res)=>{
   let text='';for await(const chunk of req)text+=chunk;const body=text?JSON.parse(text):{};calls.push({url:req.url,authorization:req.headers.authorization,apiKey:req.headers['x-api-key'],body});
   res.setHeader('Content-Type','application/json');
   if(req.url==='/models'){res.end(JSON.stringify({data:[{id:'deepseek-flash'}]}));return;}
   if(req.url==='/providers/deepseek/mcp'){
-   const tools=[{name:'run_status',description:'Read fixture saved status',inputSchema:{type:'object',properties:{id:{type:'string'}}}},{name:'submit_run',description:'Forbidden submission',inputSchema:{type:'object'}},{name:'present_task',description:'Save fixture draft',inputSchema:{type:'object',properties:{task_id:{type:'string'}}}}];
+   const tools=toolCatalog||[{name:'run_status',description:'Read fixture saved status',inputSchema:{type:'object',properties:{id:{type:'string'}}}},{name:'submit_run',description:'Forbidden submission',inputSchema:{type:'object'}},{name:'present_task',description:'Save fixture draft',inputSchema:{type:'object',properties:{task_id:{type:'string'}}}}];
    res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.method==='tools/list'?{tools}:{content:[{type:'text',text:JSON.stringify({status:'fixture-only'})}]}}));return;
   }
   if(req.url==='/v1/messages'){
@@ -124,4 +124,19 @@ test('First-task scope can expand only through a new DSH profile and an explicit
 test('Interrupting an official DSH runtime marks the existing turn cancelled and never resends it',{timeout:60000},async t=>{
  const f=await nativeFixture(t,{responses:[{hold:true}]});await f.b.start();const thread=await f.b.request('thread/start'),done=completion(f.b);await f.b.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Wait in the local fixture'}]});
  for(let i=0;i<100&&!f.count;i++)await new Promise(r=>setTimeout(r,10));assert.equal(f.count,1);await f.b.request('turn/interrupt',{threadId:thread.thread.id});assert.equal((await done).status,'cancelled');assert.equal(f.b.activeTurns.size,0);assert.equal(f.b.process,null);assert.equal(f.count,1);
+});
+
+test('actual official DSH chat runtime registers project skills and forwards model tool calls',{timeout:60000},async t=>{
+ const {ProjectSkills}=await import('../../agent/skills/project-skills.mjs');
+ const tools=new ProjectSkills({root:'.',current:()=>null}).tools();
+ const f=await nativeFixture(t,{toolCatalog:tools,responses:[{tool:{name:'mcp__gpusampling__read_project_skill',args:{name:'local-analysis'}}},{}]});
+ const info=await f.b.start();
+ assert.deepEqual(info.studioIsolation.tools,[...tools.map(tool=>'mcp__gpusampling__'+tool.name)].sort());
+ const thread=await f.b.request('thread/start'),done=completion(f.b);
+ await f.b.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Read the project skill'}]});
+ assert.equal((await done).status,'completed');
+ const request=f.calls.find(call=>call.url==='/v1/messages').body;
+ assert.match(JSON.stringify(request.system),/project_skill_catalog/);
+ assert(request.tools.some(tool=>tool.name==='mcp__gpusampling__write_project_skill'));
+ assert.equal(f.calls.find(call=>call.body.method==='tools/call').body.params.name,'read_project_skill');
 });

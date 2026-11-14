@@ -91,3 +91,13 @@ test('custom API reasoning deltas also buffer a split configured credential outs
  for(const delta of ['reason '+key.slice(0,12),key.slice(12)+' done'])native.emit('event',{method:'item/reasoning/textDelta',params:{threadId:id,turnId:'turn',itemId:'reason',delta}});
  native.emit('event',{method:'turn/completed',params:{threadId:id,turn:{id:'turn',status:'completed'}}});assert(!JSON.stringify(f.events).includes(key));assert.equal(f.b.streams.size,0);
 });
+
+test('custom API native thread receives project skill instructions without a scientific worker',async t=>{
+ const f=fixture(t);
+ await f.b.start();
+ await f.b.request('thread/start');
+ const start=f.calls.find(([method])=>method==='thread/start');
+ assert.match(start[1].developerInstructions,/project_skill_catalog/);
+ assert.match(start[1].developerInstructions,/write_project_skill/);
+ assert.equal(start[1].sandbox,'read-only');
+});
