@@ -35,10 +35,21 @@ test('reserve without creating a conversation, capture, park, return, expire and
 test('two conversations arriving during a cached attach share the attempt and only the current one gets its grant',async()=>{
  const f=fixture();await f.pool.arm(f.shell(),'codex');let resolve;f.gate(new Promise(r=>resolve=r));
  f.change('A');const first=f.pool.acquire('codex',f.scope());await new Promise(setImmediate);
- f.change('B');const second=f.pool.acquire('codex',f.scope());await new Promise(setImmediate);resolve();
- await assert.rejects(first,/context_changed/);await second;assert.equal(f.calls.length,1);assert.equal(f.grant(),'B');assert.equal(f.sessions.size,2);
+ await first;assert.equal(f.grant(),null);assert.equal(f.pool.describe([...f.sessions.values()][0]).currentConversation,true);
+ f.change('B');const second=f.pool.acquire('codex',f.scope());await second;assert.equal(f.grant(),null);resolve();await new Promise(setImmediate);assert.equal(f.calls.length,1);assert.equal(f.grant(),'B');assert.equal(f.sessions.size,2);
 });
 test('human reclaim disables new captures and expiry also handles an unclaimed handoff',async()=>{
  const f=fixture(),a=f.shell();await f.pool.arm(a,'codex');f.advance(60001);await f.pool.sweep();assert.deepEqual(f.closed,[a.sessionId]);
  f.change('A');await f.pool.acquire('codex',f.scope());const [b]=f.sessions.values();f.pool.releaseShell(b.sessionId);f.change('B');await f.pool.acquire('codex',f.scope());assert.equal(f.sessions.size,1);
+});
+
+test('resource deselection revokes access immediately, preserves PTYs and applies the existing idle deadline',async()=>{
+ const f=fixture();f.change('A');const a=f.shell();await f.pool.arm(a,'codex');f.pool.detachConnection('connection');
+ assert(f.sessions.has(a.sessionId));assert.equal(f.pool.canAcquire('codex'),false);assert(!f.pool.describe(a).currentConversation);
+ f.advance(60001);await f.pool.sweep();assert.deepEqual(f.closed,[a.sessionId]);
+});
+test('human reclaim during slow service preparation never grants the late service result',async()=>{
+ const f=fixture();let release;f.gate(new Promise(r=>release=r));f.change('A');const p=f.shell();
+ const handed=await f.pool.arm(p,'codex');assert.equal(handed.owner,'agent');assert.equal(f.grant(),null);f.pool.releaseShell(p.sessionId);
+ release();await new Promise(setImmediate);assert.equal(f.grant(),null);
 });

@@ -62,8 +62,8 @@ def args(profile, socket, master=False, control=None, tty=False):
     if master:
         result = [profile['ssh_client'], '-F', '/dev/null', '-M', '-N', '-S', socket,
                   '-o', 'ControlMaster=yes', '-o', 'ControlPersist=no', '-o', 'ForkAfterAuthentication=no',
-                  '-o', 'SessionType=none', '-o', 'RemoteCommand=none', '-o', 'StrictHostKeyChecking=ask',
-                  '-o', 'BatchMode=no', '-o', 'ConnectionAttempts=1', '-o', 'ConnectTimeout=15',
+                  '-o', 'SessionType=none', '-o', 'RemoteCommand=none', '-o', 'StrictHostKeyChecking=yes' if profile.get('mode')=='key' else 'StrictHostKeyChecking=ask',
+                  '-o', 'BatchMode=yes' if profile.get('mode')=='key' else 'BatchMode=no', '-o', 'ConnectionAttempts=1', '-o', 'ConnectTimeout=15',
                   '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes', '-o', 'PermitLocalCommand=no',
                   '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2']
         if profile.get('proxy_jump'):
@@ -89,7 +89,7 @@ def args(profile, socket, master=False, control=None, tty=False):
 
 
 def profile_valid(profile):
-    if not isinstance(profile, dict) or set(profile)-{'host', 'username', 'port', 'ssh_client', 'identity_file', 'proxy_jump', 'via', 'known_hosts_file'}:
+    if not isinstance(profile, dict) or set(profile)-{'host', 'username', 'port', 'ssh_client', 'identity_file', 'proxy_jump', 'via', 'known_hosts_file', 'mode'} or profile.get('mode', 'interactive') not in ('interactive','key'):
         fail('ssh_invalid_profile')
     if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.:-]{0,254}', profile.get('host', '')) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}(?:/[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}/[A-Za-z0-9_][A-Za-z0-9_.-]{0,99})?', profile.get('username', '')) or type(profile.get('port')) is not int or not 1 <= profile['port'] <= 65535:
         fail('ssh_invalid_profile')
@@ -121,7 +121,8 @@ def describe(profile):
         key, _, value = line.partition(' ')
         values.setdefault(key, []).append(value)
     expected = {'controlmaster': {'true', 'yes'}, 'controlpersist': {'no', '0'}, 'forkafterauthentication': {'no', 'false'},
-                'sessiontype': {'none'}, 'stricthostkeychecking': {'ask'}, 'forwardagent': {'no', 'false'},
+                'sessiontype': {'none'}, 'stricthostkeychecking': {'yes', 'true'} if profile.get('mode')=='key' else {'ask'},
+                'batchmode': {'yes', 'true'} if profile.get('mode')=='key' else {'no', 'false'}, 'forwardagent': {'no', 'false'},
                 'clearallforwardings': {'yes', 'true'}, 'permitlocalcommand': {'no', 'false'},
                 'controlpath': {'/__studio_mux_capability__'}, 'hostname': {profile['host']},
                 'user': {profile['username']}, 'port': {str(profile['port'])}}

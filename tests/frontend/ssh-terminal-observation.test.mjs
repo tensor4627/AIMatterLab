@@ -1,3 +1,4 @@
+import * as humanInput from '../../frontend/features/terminal/human-input.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,6 +20,7 @@ function fixture(t,invoke,initial={}){
  class Terminal{cols=80;rows=24;options={};element={remove:()=>{this.detached=true;}};constructor(){views.push(this);}loadAddon(addon){this.addon=addon;}open(){timeouts.push(()=>assert(!this.disposed,'Queued xterm viewport initialization requires a live renderer'));}onData(fn){this.input=fn;return {dispose(){}};}write(data){writes.push(data);}dispose(){this.disposed=true;this.addon?.dispose?.();}}
  class ResizeObserver{constructor(fn){resize=fn;}observe(){}disconnect(){}}
  const jsx=(type,props)=>({type,props}),module={exports:{}},require=name=>{
+  if(name==='./human-input.mjs')return humanInput;
   if(name==='react')return {useRef,useEffect};
   if(name==='react/jsx-runtime')return {jsx,jsxs:jsx};
   if(name==='@xterm/xterm')return {Terminal};

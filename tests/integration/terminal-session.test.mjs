@@ -16,3 +16,19 @@ test('actual process exit is explicit state, not command/SSH/scientific success;
 test('launch/input/resize exact bounds reject hostile or unknown fields without dispatch',()=>{const f=fixture();for(const request of [{...req(f.session),requestId:'x',data:'x',grant:true},{...req(f.session),requestId:'x',data:'x'.repeat(8193)}])assert.throws(()=>f.session.input(request));assert.equal(f.writes.length,0);for(const size of [{cols:0,rows:24},{cols:80,rows:301},{cols:80,rows:24,extra:true}])assert.throws(()=>f.session.resize({...req(f.session),...size}));assert.deepEqual(f.session.resize({...req(f.session),cols:80,rows:24}),{resized:true,id:f.session.state().id});assert.deepEqual(f.sizes,[[80,24]]);assert.throws(()=>createTerminalSession({pty:{spawn:()=>{throw Error('private launch arguments');}},plan:{kind:'ssh',mode:'key',name:'x',launch:{file:path.resolve('ssh.exe'),args:[],cwd:process.cwd()}}}),e=>e instanceof TerminalFault&&e.message==='spawn_failed');});
 test('request ledger is bounded and never evicts an old input into repeat execution',()=>{const f=fixture();for(let i=0;i<2048;i++)f.session.input({...req(f.session),requestId:'r'+i,data:'x'});assert.throws(()=>f.session.input({...req(f.session),requestId:'new',data:'x'}),/request_limit/);assert(f.session.input({...req(f.session),requestId:'r0',data:'x'}).duplicate);assert.equal(f.writes.length,2048);});
 test('resize and close require the current owner epoch and matching scope',()=>{const f=fixture();assert.throws(()=>f.session.resize({cols:80,rows:24}),/invalid_request/);assert.throws(()=>f.session.close({}),/invalid_request/);f.session.owner({owner:'agent',ownerEpoch:1,scope});assert.throws(()=>f.session.resize({...req(f.session,'agent'),cols:80,rows:24,scope:{...scope,threadId:'foreign'}}),/scope_mismatch/);assert.equal(f.session.resize({...req(f.session),cols:80,rows:24}).resized,true);assert.throws(()=>f.session.close({actor:'agent',ownerEpoch:2,scope:{...scope,threadId:'foreign'}}),/scope_mismatch/);assert.throws(()=>f.session.close({actor:'agent',ownerEpoch:1,scope}),/owner_changed/);assert(f.session.close({actor:'human',ownerEpoch:2}).closed);});
+
+test('ordered human keystrokes remain writable past 2048 and old, changed or skipped sequences never replay',()=>{
+ const f=fixture(),request=(n,data='x')=>({...req(f.session),requestId:'key-'+n,inputSequence:n,data});
+ for(let n=1;n<=4100;n++)assert.equal(f.session.input(request(n)).inputSequence,n);
+ assert.equal(f.session.input(request(4100)).duplicate,true);
+ for(const value of [request(4100,'z'),request(2048),request(4102)])assert.throws(()=>f.session.input(value),/request_changed/);
+ assert.equal(f.writes.length,4100);assert.equal(f.session.state().humanInputSequence,4100);
+ f.session.owner({ownerEpoch:1,owner:'agent',scope});assert.throws(()=>f.session.input({...request(1),...req(f.session,'agent')}),/invalid_input/);
+ f.session.owner({ownerEpoch:2,owner:'human'});assert.equal(f.session.input(request(1)).inputSequence,1);
+});
+test('output arrival wakes a bounded cursor read and changing owner rejects an outstanding observation',async()=>{
+ const f=fixture(),pending=f.session.waitRead({...req(f.session),cursor:0,waitMs:1100});
+ f.output('hello');const observed=await pending;assert.equal(observed.chunks[0].data,'hello');
+ const changed=f.session.waitRead({...req(f.session),cursor:observed.cursor,waitMs:1100});f.session.owner({ownerEpoch:1,owner:'agent',scope});
+ await assert.rejects(changed,/owner_changed/);assert.equal((await f.session.waitRead({...req(f.session),cursor:observed.cursor,waitMs:1})).cursor,observed.cursor);
+});

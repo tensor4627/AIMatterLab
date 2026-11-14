@@ -239,7 +239,7 @@ handle('compute.profiles.remove',value=>{
 handle('compute.profiles.inventory',async value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid WSL inventory request');return {distributions:await installedWslDistributions()};});
 sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,getSelectedResource:()=>computeResource?.peek(),selectionRevision:()=>computeResource?.revision()??0,
  root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:terminalExecutionCache({profileRoot:app.getPath('userData'),home:app.getPath('home')}),
- dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):root,
+ dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):path.join(root,'.studio','agent-runtimes'),
  servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'platform','terminal-service','broker.mjs'),nodeExecutable:process.execPath,
  sourceGuard:()=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),{}),worker)});
 // Persisted references are observations, never authentication or Agent leases.
@@ -248,22 +248,22 @@ sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:
 computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,connections:sharedTerminal.connections,current:()=>workflowContext.current(),revision:()=>workflowContext.revision(),serviceState:connectionId=>sshService?.peek(connectionId?{connectionId}:{})});
 sshService=createSshService({worker,connections:sharedTerminal.connections,profiles:computeProfiles,resource:computeResource,registration:serviceRegistration,source:workerSource,transportSource:sshTransportSource,preferredRuntimeId:profile=>preferredSshRuntime(profile,selectedSshBinding(profile),catalog.get('ssh-runtime-preference',profile.id)),current:()=>workflowContext.current(),assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},publish:()=>{emit('studio:event',{method:'studio/sshServiceChanged',params:sshService?.peek()||{status:'disconnected'}});},remember:(identity,health)=>{catalog.put('worker-binding','last-explicit',{...identity,port:health.port,health,checkedAt:Date.now(),sourceIdentity:{runtimeId:health.runtimeId}});}});
 conversationTerminals=createConversationTerminals({terminal:sharedTerminal,service:sshService,registration:serviceRegistration,
- resource:computeResource,current:()=>workflowContext.current(),idleMinutes:()=>settings.terminalIdleMinutes,
+ resource:computeResource,current:()=>workflowContext.current(),conversationName:(provider,threadId)=>taskRecords.conversation(provider,threadId)?.name,idleMinutes:()=>settings.terminalIdleMinutes,
  busy:scope=>agents.bridge(scope.provider)?.activeTurns?.has(scope.threadId)||agents.pendingTurnDispatches.has(agents.contextKey(scope.provider,scope.threadId)),
  publish:()=>emit('studio:event',{method:'studio/conversationTerminalChanged'})});
 const terminalIdleTimer=setInterval(()=>void conversationTerminals.sweep(),10000);terminalIdleTimer.unref();
 const authoringAuthorization={
  begin(task){
   const service=sshService.prepareAuthoringGrant(task);
-  return service?{service,shell:conversationTerminals.prepareAuthoringGrant()}:null;
+  const shell=conversationTerminals.prepareAuthoringGrant();return service||shell?{service,shell}:null;
  },
  commit(ticket,task){
   if(!ticket)return false;
-  const authorized=sshService.completeAuthoringGrant(ticket.service,task);
-  ticket.shell?.(authorized);return authorized;
+  const authorized=ticket.service?sshService.completeAuthoringGrant(ticket.service,task):false;
+  ticket.shell?.(ticket.service?authorized:true);return authorized;
  },
  abort(ticket){
-  if(ticket){ticket.shell?.(false);sshService.abortAuthoringGrant(ticket.service);}
+  if(ticket){ticket.shell?.(false);if(ticket.service)sshService.abortAuthoringGrant(ticket.service);}
  },
 };
 worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
@@ -298,7 +298,7 @@ handle('compute.resource.status',async value=>{const result=await computeResourc
 for(const method of ['activate','clear'])handle('compute.resource.'+method,async value=>{
  assertIdleAgent();agents.assertContextIdle();const before=computeResource.capture(),result=await computeResource[method](value),after=computeResource.capture();
  if(before.revision!==after.revision||JSON.stringify(before.selection)!==JSON.stringify(after.selection)){
-  if(before.selection?.connectionId)conversationTerminals.releaseConnection(before.selection.connectionId);
+  if(before.selection?.connectionId)conversationTerminals.detachConnection(before.selection.connectionId);
   await sshService.resourceChanged();
   for(const provider of ['codex','kimi','qwen','deepseek','compatible']){worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);}
  }

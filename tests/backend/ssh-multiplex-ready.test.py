@@ -23,6 +23,15 @@ class LocalReadyTests(unittest.TestCase):
         self.master = {'pid': 123, 'start': '1', 'boot': 'inert'}
         self.argv = ['helper', 'ready', json.dumps({'profile': self.profile, 'proof': self.proof, 'master': self.master})]
 
+    def test_real_openssh_configuration_matches_the_saved_login_mode(self):
+        profile = dict(ssh_client='/usr/bin/ssh', host='127.0.0.1', username='fixture', port=22)
+        for mode in ('interactive','key'):
+            configured = dict(profile, mode=mode)
+            self.assertTrue(helper.describe(configured)['targetDigest'])
+            self.assertIn('StrictHostKeyChecking='+('yes' if mode=='key' else 'ask'), helper.args(configured, '/tmp/fixture', master=True))
+        with self.assertRaises(helper.Refused):
+            helper.profile_valid(dict(profile, mode='other'))
+
     def test_absent_socket_is_pending_without_client_or_remote_probe(self):
         with patch.object(sys, 'argv', self.argv), patch.object(helper, 'private') as private, patch.object(helper.os, 'lstat', side_effect=FileNotFoundError), patch.object(helper, 'check') as check, patch.object(helper, 'run') as run:
             self.assertEqual(helper.main(), {'ready': False})
