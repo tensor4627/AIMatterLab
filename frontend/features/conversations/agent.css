@@ -78,3 +78,14 @@
 .agent-panel .send.agent-stop-action:hover:not(:disabled){background:#bdacef;color:#211d31}
 .agent-panel .send.agent-stop-action:disabled{opacity:.7}
 .agent-stop-action svg{flex-shrink:0}
+
+/* One native disclosure per consecutive tool sequence; message boundaries remain intact. */
+.tool-group{border:1px solid var(--line);border-radius:8px;background:var(--panel);min-width:0;margin:8px 0;align-self:stretch}
+.tool-group>summary{cursor:pointer;padding:7px 10px;color:var(--muted);white-space:nowrap;overflow:hidden;line-height:1.5}
+.tool-group>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.tool-group-label{display:inline-block;max-width:58%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;color:var(--text)}
+.tool-group-status{margin-left:10px;font-size:.9em}
+.tool-group-content{padding:0 8px 8px}
+.tool-group-content .message.tool{margin:6px 0;max-width:100%;width:auto}
+.tool-group-content .agent-activity{padding:8px}
+.tool-group-content .agent-activity p{margin:6px 0}

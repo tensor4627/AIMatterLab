@@ -1,4 +1,6 @@
 const english:Record<string,string> = {
+"工具调用":"Tool calls",
+"处理中":"In progress",
 "已验证工具的源码仓库":"Source repositories for validated tools",
 "安装说明":"Installation guide",
 "复制命令拉取所列分支，再按仓库内的安装说明操作。分支版本可能与历史验收提交不同。":"Copy the command to clone the listed branch, then follow the guide in the repository. The branch can differ from the commit used for validation.",
