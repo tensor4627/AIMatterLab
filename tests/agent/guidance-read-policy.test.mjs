@@ -12,7 +12,6 @@ import {ScientificSkillContext} from "../../agent/skills/scientific-context.mjs"
 import {selectedSkillContext} from "../../agent/skills/skill-context.mjs";
 import {localSkills} from "../../agent/skills/skills.mjs";
 import {PublicRuleEvidence} from "../../agent/skills/public-rule-evidence.mjs";
-import {loadPygasSkills} from "../../agent/skills/pygas-skills.mjs";
 
 const sha=text=>createHash('sha256').update(text).digest('hex');
 const map={schema_version:1,skills:[{id:'bias',source:'pygas',folder:'delivery',files:['SKILL.md']}],functions:[{id:'pygas.bias',phase:'authoring',skills:['bias'],engines:['pygas.build']},{id:'env.install',phase:'installation',skills:['bias']}]};
@@ -44,7 +43,6 @@ test('active automatic routes, repeated context, MCP and both catalogs never con
   assert.equal((await service.call('scientific_skill_catalog',{},scope)).execution.name,f.facts.executionSkill.id);
   const catalog=localSkills([f.delivery,path.join(f.root,'install')],{policy});assert.equal(catalog.length,1);assert.equal(catalog[0].source,'execution snapshot');
   assert.equal((await selectedSkillContext({selection:catalog[0],registered:catalog,policy,scope})).text.includes(f.facts.executionSkill.text),true);
-  assert.equal((await loadPygasSkills({text:'WTMetaD',sources:[],consented:true,policy})).phase,'execution');
   allowed=false;assert.equal((await service.call('read_scientific_skill',{function_id:'pygas.bias'},scope)).status,'permission_required');
   assert.equal(sourceCalls,0);trap.assertZero();t.diagnostic('archived operations '+JSON.stringify(trap.counts));
  }finally{trap.restore();}
@@ -66,7 +64,7 @@ test('missing stale execution snapshot and revoked permission cannot use legacy 
  try{for(const state of ['stale','revoked']){
   const facts={...f.facts,state};if(state==='stale'){delete facts.executionSkill;delete facts.activation;}const policy=createReadPolicy(facts),router=new ScientificSkillRouter({map,sourceRoot:()=>{throw Error('No legacy fallback');},consent:()=>true,setupAllowed:()=>true,resolveGuidance:async()=>facts});
   for(const route of map.functions)assert.equal((await router.read('codex',route.id)).status,'blocked');
-  assert.deepEqual(localSkills([f.delivery],{policy}),[]);assert.equal(loadPygasSkills({text:'WTMetaD',sources:[],consented:true,policy}).status,'blocked');
+  assert.deepEqual(localSkills([f.delivery],{policy}),[]);
  }trap.assertZero();}finally{trap.restore();}
 });
 

@@ -15,7 +15,7 @@ function fixture(){
  const pkg=(name,values={},location=path.join(modules,name))=>{fs.mkdirSync(path.join(location,'lib'),{recursive:true});fs.writeFileSync(path.join(location,'package.json'),JSON.stringify({name,version:'1.0.0',main:'lib/index.js',...values}));fs.writeFileSync(path.join(location,'lib/index.js'),'module.exports = '+JSON.stringify(values.version||'1.0.0')+';');return location;};
  for(const name of roots)pkg(name,{version});fs.writeFileSync(path.join(modules,roots[0],'lib/bin.js'),'// synthetic fixture CLI: never executed');
  const change=(name,values)=>{const file=path.join(modules,name,'package.json');fs.writeFileSync(file,JSON.stringify({...JSON.parse(fs.readFileSync(file,'utf8')),...values}));};
- return {root,modules,target,app,pkg,change,stage:()=>stageDshRuntime({root,platform:'win32',arch:'x64'}),validate:()=>validateStagedDshRuntime(target,{expectedVersion:version,platform:'win32',arch:'x64'}),close:()=>fs.rmSync(root,{recursive:true,force:true})};
+ return {root,modules,target,app,pkg,change,stage:()=>stageDshRuntime({root,platform:'win32',arch:'x64',profile:'full'}),validate:()=>validateStagedDshRuntime(target,{expectedVersion:version,platform:'win32',arch:'x64',profile:'full'}),close:()=>fs.rmSync(root,{recursive:true,force:true})};
 }
 
 test('offline DSH staging preserves conflicting dependency versions and required peer resolution in a symlink-free portable tree',()=>{
@@ -58,7 +58,7 @@ for(const [name,change,pattern]of [
  ['escaped receipt path',f=>{const file=path.join(f.target,'runtime.json'),manifest=JSON.parse(fs.readFileSync(file));manifest.files[0].path='../outside';fs.writeFileSync(file,JSON.stringify(manifest));},/escapes runtime/],
 ])test('DSH integrity validation refuses '+name,()=>{const f=fixture();try{f.stage();change(f);assert.throws(f.validate,pattern);}finally{f.close();}});
 
-test('runtime file bounds fail before replacing an intact DSH runtime',()=>{const f=fixture();try{f.stage();const before=fs.readFileSync(path.join(f.target,'runtime.json'));assert.throws(()=>stageDshRuntime({root:f.root,platform:'win32',arch:'x64',maxFiles:2}),/file\/byte bound/);assert.deepEqual(fs.readFileSync(path.join(f.target,'runtime.json')),before);}finally{f.close();}});
+test('runtime file bounds fail before replacing an intact DSH runtime',()=>{const f=fixture();try{f.stage();const before=fs.readFileSync(path.join(f.target,'runtime.json'));assert.throws(()=>stageDshRuntime({root:f.root,platform:'win32',arch:'x64',profile:'full',maxFiles:2}),/file\/byte bound/);assert.deepEqual(fs.readFileSync(path.join(f.target,'runtime.json')),before);}finally{f.close();}});
 
 test('verified DSH cache preserves staged bytes without recopying when exact root pins and source lock remain identical',()=>{
  const f=fixture();try{fs.writeFileSync(path.join(f.root,'pnpm-lock.yaml'),'fixture lock v1');const first=f.stage(),entry=path.join(f.target,first.entry),before=fs.readFileSync(entry),manifestBefore=fs.readFileSync(path.join(f.target,'runtime.json'));fs.writeFileSync(path.join(f.modules,roots[0],'lib/bin.js'),'source changed without a new lock; cached pinned runtime remains immutable');const cached=f.stage();assert.equal(cached.sourceLockSha256,first.sourceLockSha256);assert.deepEqual(fs.readFileSync(entry),before);assert.deepEqual(fs.readFileSync(path.join(f.target,'runtime.json')),manifestBefore);assert.equal(cached.rootPins[roots[0]],version);}finally{f.close();}
@@ -69,13 +69,36 @@ test('changed source lock or exact official root version invalidates the DSH cac
 });
 
 test('tampered matching DSH cache fails explicitly and only a forced rebuild replaces it',()=>{
- const f=fixture();try{fs.writeFileSync(path.join(f.root,'pnpm-lock.yaml'),'fixture lock');const first=f.stage(),entry=path.join(f.target,first.entry);fs.writeFileSync(entry,'tampered');assert.throws(f.stage,/differs from integrity receipt/);assert.equal(fs.readFileSync(entry,'utf8'),'tampered');stageDshRuntime({root:f.root,platform:'win32',arch:'x64',force:true});assert.notEqual(fs.readFileSync(entry,'utf8'),'tampered');f.validate();}finally{f.close();}
+ const f=fixture();try{fs.writeFileSync(path.join(f.root,'pnpm-lock.yaml'),'fixture lock');const first=f.stage(),entry=path.join(f.target,first.entry);fs.writeFileSync(entry,'tampered');assert.throws(f.stage,/differs from integrity receipt/);assert.equal(fs.readFileSync(entry,'utf8'),'tampered');stageDshRuntime({root:f.root,platform:'win32',arch:'x64',profile:'full',force:true});assert.notEqual(fs.readFileSync(entry,'utf8'),'tampered');f.validate();}finally{f.close();}
 });
 
 test('rebuilding the native terminal core preserves the independently verified DSH cache',()=>{
- const f=fixture();try{fs.writeFileSync(path.join(f.root,'pnpm-lock.yaml'),'fixture native+DSH lock');f.pkg('@lydell/node-pty');f.pkg('@lydell/node-pty-win32-x64');stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64'});const dshReceipt=fs.readFileSync(path.join(f.target,'runtime.json')),native=path.join(f.root,'.studio/agent-runtimes/node_modules/@lydell/node-pty/lib/index.js');fs.writeFileSync(native,'stale native runtime');fs.writeFileSync(path.join(f.modules,roots[0],'lib/bin.js'),'source mutation must not recopy the immutable cached DSH');stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64'});assert.deepEqual(fs.readFileSync(path.join(f.target,'runtime.json')),dshReceipt);assert.notEqual(fs.readFileSync(native,'utf8'),'stale native runtime');f.validate();}finally{f.close();}
+ const f=fixture();try{fs.writeFileSync(path.join(f.root,'pnpm-lock.yaml'),'fixture native+DSH lock');f.pkg('@lydell/node-pty');f.pkg('@lydell/node-pty-win32-x64');stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64',dshProfile:'full'});const dshReceipt=fs.readFileSync(path.join(f.target,'runtime.json')),native=path.join(f.root,'.studio/agent-runtimes/node_modules/@lydell/node-pty/lib/index.js');fs.writeFileSync(native,'stale native runtime');fs.writeFileSync(path.join(f.modules,roots[0],'lib/bin.js'),'source mutation must not recopy the immutable cached DSH');stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64',dshProfile:'full'});assert.deepEqual(fs.readFileSync(path.join(f.target,'runtime.json')),dshReceipt);assert.notEqual(fs.readFileSync(native,'utf8'),'stale native runtime');f.validate();}finally{f.close();}
 });
 
 test('native staging rejects a linked deletion target before modifying external files or DSH',()=>{
- const f=fixture(),outside=fs.mkdtempSync(path.join(os.tmpdir(),'studio-native-linked-'));try{f.stage();const receipt=fs.readFileSync(path.join(f.target,'runtime.json'));fs.writeFileSync(path.join(outside,'sentinel'),'preserve');fs.symlinkSync(outside,path.join(f.root,'.studio/agent-runtimes/node_modules'),'junction');assert.throws(()=>stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64'}),/Linked native runtime staging target/);assert.equal(fs.readFileSync(path.join(outside,'sentinel'),'utf8'),'preserve');assert.deepEqual(fs.readFileSync(path.join(f.target,'runtime.json')),receipt);}finally{f.close();fs.rmSync(outside,{recursive:true,force:true});}
+ const f=fixture(),outside=fs.mkdtempSync(path.join(os.tmpdir(),'studio-native-linked-'));try{f.stage();const receipt=fs.readFileSync(path.join(f.target,'runtime.json'));fs.writeFileSync(path.join(outside,'sentinel'),'preserve');fs.symlinkSync(outside,path.join(f.root,'.studio/agent-runtimes/node_modules'),'junction');assert.throws(()=>stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64',dshProfile:'full'}),/Linked native runtime staging target/);assert.equal(fs.readFileSync(path.join(outside,'sentinel'),'utf8'),'preserve');assert.deepEqual(fs.readFileSync(path.join(f.target,'runtime.json')),receipt);}finally{f.close();fs.rmSync(outside,{recursive:true,force:true});}
+});
+
+
+test('Studio profile projects only audited carrier edges, retaining implementation dependencies and peers unchanged',()=>{
+ const f=fixture();try{
+  f.change(roots[0],{dependencies:{commander:'1.0.0','@deepseek-ai/dsh-sdk-app':version,'unused-web-bundle':'1.0.0'}});
+  f.change(roots[1],{dependencies:{'@deepseek-ai/dsh-sdk-app':version}});
+  f.pkg('commander');f.pkg('@deepseek-ai/dsh-sdk-app',{version,dependencies:{'@deepseek-ai/dsh-cmdline':version,'unused-office-bundle':'1.0.0'},peerDependencies:{'required-peer':'1.0.0'}});
+  f.pkg('@deepseek-ai/dsh-cmdline',{version,dependencies:{'required-implementation':'1.0.0'}});f.pkg('required-peer');f.pkg('required-implementation');
+  f.pkg('unused-web-bundle');f.pkg('unused-office-bundle');
+  const original=fs.readFileSync(path.join(f.modules,roots[0],'package.json'));
+  const manifest=stageDshRuntime({root:f.root,platform:'win32',arch:'x64'});
+  assert.equal(manifest.profile,'studio-sdk-v2');
+  assert.deepEqual(fs.readFileSync(path.join(f.target,'node_modules',roots[0],'package.json')),original);
+  for(const name of ['commander','required-peer','required-implementation'])assert(manifest.packages.some(record=>record.name===name));
+  for(const name of ['unused-web-bundle','unused-office-bundle'])assert(!manifest.packages.some(record=>record.name===name));
+  f.validate();
+  fs.rmSync(path.join(f.target,'node_modules/required-peer'),{recursive:true});assert.throws(f.validate,/integrity receipt/);
+ }finally{f.close();}
+});
+
+test('a changed official carrier version cannot silently reuse the audited Studio dependency projection',()=>{
+ const f=fixture();try{for(const name of roots){f.app.devDependencies[name]='0.2.2-rc.2';f.change(name,{version:'0.2.2-rc.2'});}fs.writeFileSync(path.join(f.root,'package.json'),JSON.stringify(f.app));assert.throws(()=>stageDshRuntime({root:f.root,platform:'win32',arch:'x64'}),/new dependency audit/);}finally{f.close();}
 });

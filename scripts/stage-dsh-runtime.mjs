@@ -8,6 +8,27 @@ import {pathToFileURL} from 'node:url';
 const require=createRequire(import.meta.url),semver=createRequire(require.resolve('app-builder-lib/package.json'))('semver');
 const ROOTS=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client'];
 const ENTRY='node_modules/@deepseek-ai/dsh/lib/bin.js';
+// Audited official CLI entry/profile-boot imports for the Studio-owned profile.
+// This is not a general-purpose DSH distribution: other CLI profiles are not exposed.
+// Keep upstream files/manifests/licenses unchanged; project only this carrier's edges.
+const STUDIO_PROFILE='studio-sdk-v2';
+const studioCarrierDependencies=new Set([
+ '@deepseek-ai/cordis','@deepseek-ai/cordis-plugin-include','@deepseek-ai/cordis-plugin-loader',
+ '@deepseek-ai/cordis-plugin-timer','@deepseek-ai/dsh-hmr','@deepseek-ai/dsh-app-boot',
+ '@deepseek-ai/dsh-home-paths','@deepseek-ai/dsh-official-bundles','@deepseek-ai/dsh-http-proxy',
+ '@deepseek-ai/dsh-launch-environment','@deepseek-ai/dsh-cmdline','commander',
+]);
+const studioStartupDependencies=new Set([
+ '@deepseek-ai/dsh-cmdline','@deepseek-ai/dsh-sdk-jsonrpc-server','@deepseek-ai/schemastery','commander',
+]);
+function runtimeDependencies(pkg,profile){
+ const declared=dependencies(pkg);
+ if(profile!==STUDIO_PROFILE||!['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-app'].includes(pkg.name))return declared;
+ if(pkg.version!=='0.2.2-rc.1')throw Error('Studio DSH profile projection requires a new dependency audit for '+pkg.version);
+ const selected=pkg.name==='@deepseek-ai/dsh'?studioCarrierDependencies:studioStartupDependencies;
+ // Required peers still describe the plugin implementation, not bundle inserts.
+ return declared.filter(dependency=>dependency.kind==='peer'||selected.has(dependency.name));
+}
 const limits={maxFiles:100000,maxBytes:1024*1024*1024,maxPackages:4096,maxDepth:64};
 const relative=(root,file)=>path.relative(root,file).split(path.sep).join('/');
 const contained=(root,file)=>{const rel=path.relative(root,file);return rel!==''&&rel!=='..'&&!rel.startsWith('..'+path.sep)&&!path.isAbsolute(rel);};
@@ -52,7 +73,8 @@ function checkPackage(pkg,name,range){const spec=specFor(name,range);if(pkg.name
 function noLinkedParents(root,target){for(let parent=target;contained(root,parent);parent=path.dirname(parent))if(fs.existsSync(parent)&&fs.lstatSync(parent).isSymbolicLink())throw Error('Linked DSH staging target');}
 function lockIdentity(root){const file=path.join(root,'pnpm-lock.yaml');if(!fs.existsSync(file))return null;const info=fs.lstatSync(file);if(info.isSymbolicLink()||!info.isFile()||info.size>32*1024*1024)throw Error('Invalid DSH source lockfile');return hash(fs.readFileSync(file));}
 
-export function stageDshRuntime({root=process.cwd(),platform=process.platform,arch=process.arch,force=false,...options}={}){
+export function stageDshRuntime({root=process.cwd(),platform=process.platform,arch=process.arch,force=false,profile=STUDIO_PROFILE,...options}={}){
+ if(![STUDIO_PROFILE,'full'].includes(profile))throw Error('Invalid DSH runtime profile');
  if(typeof force!=='boolean')throw Error('Invalid DSH staging force option');
  root=fs.realpathSync(root);const app=readJson(path.join(root,'package.json'));
  if(!['aimatterlab','gpu-sampling-studio'].includes(app.name))throw Error('DSH runtime staging requires an AIMatterLab checkout');
@@ -64,7 +86,7 @@ export function stageDshRuntime({root=process.cwd(),platform=process.platform,ar
  const sourceLockSha256=lockIdentity(root),rootPins=Object.fromEntries(ROOTS.map(name=>[name,version])),rootPackages=ROOTS.map(name=>{const found=findPackage(root,name,sourceModules);if(!found)throw Error('Missing required DSH root: '+name);checkPackage(found.pkg,name,version);if(!availableFor(found.pkg,platform,arch))throw Error('Required DSH root does not support target platform');return {name,...found};});
  if(!force&&sourceLockSha256&&fs.existsSync(path.join(target,'runtime.json'))){
   let cached;try{cached=readJson(path.join(target,'runtime.json'));}catch{throw Error('Cached DSH runtime manifest is unreadable; rebuild with force after inspecting the staged runtime');}
-  if(cached.sourceLockSha256===sourceLockSha256&&JSON.stringify(cached.rootPins)===JSON.stringify(rootPins)&&cached.version===version&&cached.platform===platform&&cached.arch===arch){validateStagedDshRuntime(target,{expectedVersion:version,platform,arch,...bound});if(lockIdentity(root)!==sourceLockSha256||ROOTS.some(name=>readJson(path.join(root,'package.json')).devDependencies?.[name]!==version))throw Error('DSH source lock or root pins changed while verifying cache');return cached;}
+  if(cached.profile===profile&&cached.sourceLockSha256===sourceLockSha256&&JSON.stringify(cached.rootPins)===JSON.stringify(rootPins)&&cached.version===version&&cached.platform===platform&&cached.arch===arch){validateStagedDshRuntime(target,{expectedVersion:version,platform,arch,...bound});if(lockIdentity(root)!==sourceLockSha256||ROOTS.some(name=>readJson(path.join(root,'package.json')).devDependencies?.[name]!==version))throw Error('DSH source lock or root pins changed while verifying cache');return cached;}
  }
  const staging=path.join(path.dirname(target),'dsh-staging-'+randomUUID()),modules=path.join(staging,'node_modules'),installed=new Map(),packages=[],resolutions=[],skippedOptional=[],files=[];let bytes=0,packageCount=0;
  fs.mkdirSync(modules,{recursive:true});
@@ -89,7 +111,7 @@ export function stageDshRuntime({root=process.cwd(),platform=process.platform,ar
   function stageDependencies(item,depth=0){
    if(depth>bound.maxDepth)throw Error('DSH dependency depth exceeds staging bound');
    const {source,pkg,destination,ancestors}=item;
-   for(const dependency of dependencies(pkg)){
+   for(const dependency of runtimeDependencies(pkg,profile)){
     const from=relative(staging,destination),found=findPackage(source,dependency.name,sourceModules);
     if(!found){if(dependency.optional){skippedOptional.push({from,name:dependency.name,range:dependency.range,kind:dependency.kind,reason:'missing'});continue;}throw Error('Missing required DSH dependency: '+pkg.name+' -> '+dependency.name);}
     checkPackage(found.pkg,dependency.name,dependency.range);
@@ -105,7 +127,7 @@ export function stageDshRuntime({root=process.cwd(),platform=process.platform,ar
    }
   }
   for(const item of pending)stageDependencies(item);
-  const manifest={schemaVersion:1,version,entry:ENTRY,platform,arch,sourceLockSha256,rootPins,packages:packages.sort((a,b)=>a.path.localeCompare(b.path)),resolutions:resolutions.sort((a,b)=>(a.from+'/'+a.name).localeCompare(b.from+'/'+b.name)),skippedOptional:skippedOptional.sort((a,b)=>(a.from+'/'+a.name).localeCompare(b.from+'/'+b.name)),files:files.sort((a,b)=>a.path.localeCompare(b.path))};
+  const manifest={schemaVersion:1,profile,version,entry:ENTRY,platform,arch,sourceLockSha256,rootPins,packages:packages.sort((a,b)=>a.path.localeCompare(b.path)),resolutions:resolutions.sort((a,b)=>(a.from+'/'+a.name).localeCompare(b.from+'/'+b.name)),skippedOptional:skippedOptional.sort((a,b)=>(a.from+'/'+a.name).localeCompare(b.from+'/'+b.name)),files:files.sort((a,b)=>a.path.localeCompare(b.path))};
   fs.writeFileSync(path.join(staging,'runtime.json'),JSON.stringify(manifest,null,2));validateStagedDshRuntime(staging,{expectedVersion:version,platform,arch,...bound});
   if(lockIdentity(root)!==sourceLockSha256||ROOTS.some(name=>readJson(path.join(root,'package.json')).devDependencies?.[name]!==version))throw Error('DSH source lock or root pins changed during staging');
   noLinkedParents(root,target);const backup=path.join(path.dirname(target),'dsh-backup-'+randomUUID());let moved=false;
@@ -121,6 +143,7 @@ export function validateStagedDshRuntime(directory,{expectedVersion,platform=pro
  if(fs.lstatSync(directory).isSymbolicLink())throw Error('Linked staged DSH runtime');
  const manifestFile=path.join(directory,'runtime.json');if(fs.lstatSync(manifestFile).isSymbolicLink()||!fs.statSync(manifestFile).isFile()||fs.statSync(manifestFile).size>64*1024*1024)throw Error('Invalid staged DSH manifest');
  const manifest=readJson(manifestFile);
+ const profile=manifest.profile??'full';if(![STUDIO_PROFILE,'full'].includes(profile))throw Error('Invalid staged DSH profile');
  if(manifest.sourceLockSha256!==undefined&&manifest.sourceLockSha256!==null&&!/^[a-f0-9]{64}$/.test(manifest.sourceLockSha256)||manifest.rootPins!==undefined&&(!manifest.rootPins||typeof manifest.rootPins!=='object'||Array.isArray(manifest.rootPins)||Object.keys(manifest.rootPins).length!==ROOTS.length||ROOTS.some(name=>manifest.rootPins[name]!==manifest.version)))throw Error('Invalid staged DSH source identity');
  if(manifest.schemaVersion!==1||!semver.valid(manifest.version)||expectedVersion!==undefined&&manifest.version!==expectedVersion||manifest.entry!==ENTRY||manifest.platform!==platform||manifest.arch!==arch||!Array.isArray(manifest.packages)||!manifest.packages.length||manifest.packages.length>bound.maxPackages||!Array.isArray(manifest.files)||manifest.files.length>bound.maxFiles||!Array.isArray(manifest.resolutions)||!Array.isArray(manifest.skippedOptional))throw Error('Invalid staged DSH runtime manifest');
  const diskFiles=new Map();let bytes=0;
@@ -134,7 +157,7 @@ export function validateStagedDshRuntime(directory,{expectedVersion,platform=pro
  if(!recordedFiles.has(ENTRY))throw Error('Staged DSH CLI entry missing');
  const links=new Map(),skips=new Map();for(const link of manifest.resolutions){const key=link.from+'\0'+link.name;if(links.has(key)||!packages.has(link.from)||!packages.has(link.to))throw Error('Invalid DSH dependency resolution receipt');links.set(key,link);}for(const skip of manifest.skippedOptional){const key=skip.from+'\0'+skip.name;if(skips.has(key)||links.has(key)||!packages.has(skip.from)||!['missing','platform'].includes(skip.reason))throw Error('Invalid DSH optional dependency receipt');skips.set(key,skip);}
  const usedLinks=new Set(),usedSkips=new Set();
- for(const [from,{pkg,root}]of packages)for(const dependency of dependencies(pkg)){
+ for(const [from,{pkg,root}]of packages)for(const dependency of runtimeDependencies(pkg,profile)){
   const key=from+'\0'+dependency.name,link=links.get(key),skip=skips.get(key);
   if(!link){if(!dependency.optional||!skip||skip.range!==dependency.range||skip.kind!==dependency.kind)throw Error('Missing staged DSH dependency resolution: '+from+' -> '+dependency.name);if(findPackage(root,dependency.name,directory))throw Error('Skipped optional DSH dependency became visible: '+dependency.name);usedSkips.add(key);continue;}
   if(link.range!==dependency.range||link.kind!==dependency.kind||link.optional!==dependency.optional)throw Error('DSH dependency receipt differs from declaration');
@@ -142,7 +165,7 @@ export function validateStagedDshRuntime(directory,{expectedVersion,platform=pro
  }
  if(usedLinks.size!==links.size||usedSkips.size!==skips.size)throw Error('Extraneous DSH dependency receipts');
  const reachable=new Set(),visit=name=>{if(reachable.has(name))return;reachable.add(name);for(const link of manifest.resolutions)if(link.from===name)visit(link.to);};for(const name of ROOTS)visit('node_modules/'+name);if(reachable.size!==packages.size)throw Error('Staged DSH runtime contains packages outside the required closure');
- return {version:manifest.version,packages:packages.size,files:diskFiles.size,bytes,entry:pathWithin(directory,ENTRY)};
+ return {version:manifest.version,profile,packages:packages.size,files:diskFiles.size,bytes,entry:pathWithin(directory,ENTRY)};
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){const args=process.argv.slice(2);if(args.some(value=>value!=='--force')||args.length>1)throw Error('Usage: node scripts/stage-dsh-runtime.mjs [--force]');const manifest=stageDshRuntime({force:args.includes('--force')});console.log('Staged DSH '+manifest.version+' ('+manifest.packages.length+' packages, '+manifest.files.length+' files)');}

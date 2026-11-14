@@ -90,7 +90,7 @@ import {CredentialVault} from './platform/credential-vault.mjs';
 import {providerId} from '../agent/providers/contracts.mjs';
 import { WorkerClient } from "../agent/tools/worker-client.mjs";
 import {readWorkerStatus} from '../backend/main/compute/worker-status.mjs';
-import {bundledWorkerRuntimeId} from "../backend/main/compute/worker-service-version.mjs";
+import {bindBundledWorkerRuntimeId} from "../backend/main/compute/worker-service-version.mjs";
 import {restoreTaskWorker} from '../backend/main/compute/worker-restore.mjs';
 import {explicitWorkerReceipt,rememberExplicitWorker,workerSettingsSignature,validExplicitBinding,taskWorkerTarget,validTransportPort,taskTransportScope,taskTransportReceipt} from '../backend/main/compute/explicit-worker-binding.mjs';
 import {sameWorkerBinding,taskWorkerSource} from "../contracts/compute/task-worker-binding.mjs";
@@ -132,7 +132,7 @@ let shuttingDown=false,desktopShutdown,agentConnectionSerial=0;
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService;
 const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
-Object.defineProperty(worker,'bundledRuntimeId',{value:bundledWorkerRuntimeId(workerSource)});
+bindBundledWorkerRuntimeId(worker,workerSource);
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService});
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,

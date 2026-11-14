@@ -1,5 +1,5 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import ts from 'typescript';
-import {bundledWorkerRuntimeId,workerServiceVersionEvidence,workerObservationEvidence} from "../../backend/main/compute/worker-service-version.mjs";
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';
+import {bindBundledWorkerRuntimeId,bundledWorkerRuntimeId,workerServiceVersionEvidence,workerObservationEvidence} from "../../backend/main/compute/worker-service-version.mjs";
 import {readWorkerStatus} from "../../backend/main/compute/worker-status.mjs";
 const digest='a'.repeat(20),other='b'.repeat(20),root='/fixture/worker';
 test('verified draft source is opaque, stable across runtime updates and isolated across ports and roots',()=>{
@@ -24,6 +24,17 @@ for(const mode of ['matching','different','foreign-namespace','malformed-id','wr
 });
 test('health-verified different service stays connected and historical reads remain available without update',async()=>{const f=verifiedWorker(root+'/runtimes/'+other),calls=[];f.request=async(method,target)=>{calls.push([method,target]);return {...f.connection.health};};const result=await readWorkerStatus(f,()=>({distribution:'Fixture',workerRoot:root,workerPort:8767}));assert.equal(result.status,'connected');assert.equal(result.serviceVersion,'different');assert.deepEqual(calls,[['GET','/api/health']]);assert(!Object.keys(result).some(key=>/runtime|root|token|url/.test(key)));});
 test('a stale or failed health receipt cannot publish a service-version claim',async()=>{for(const mode of ['health','epoch','connection']){const f=verifiedWorker();f.request=async()=>{if(mode==='epoch')f.connectionEpoch++;if(mode==='connection')f.connection={health:{...f.connection.health}};return {...f.connection.health,...mode==='health'?{runtime:'/unrelated'}:{}};};const value=await readWorkerStatus(f,()=>({}));assert.equal(value.status,'unknown');assert.equal(value.serviceVersion,undefined);}});
-test('actual main initialization fixes the expected digest to bundled source only as a nonwritable property',()=>{
- const source=fs.readFileSync(new URL("../../desktop/main.mjs",import.meta.url),'utf8'),parsed=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);const node=parsed.statements.find(n=>ts.isExpressionStatement(n)&&ts.isCallExpression(n.expression)&&n.expression.expression.getText(parsed)==='Object.defineProperty'&&n.expression.arguments[1]?.text==='bundledRuntimeId');assert(node);const worker={},calls=[];new Function('worker','bundledWorkerRuntimeId','workerSource',node.getText(parsed))(worker,value=>{calls.push(value);return digest;},'/synthetic/bundled-source');assert.deepEqual(calls,['/synthetic/bundled-source']);assert.equal(worker.bundledRuntimeId,digest);assert.equal(Object.getOwnPropertyDescriptor(worker,'bundledRuntimeId').writable,false);assert.throws(()=>{worker.bundledRuntimeId=other;},TypeError);
+test('main binds a lazy nonwritable bundled digest and disconnected status never reads the tree',async()=>{
+ const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'utf8');
+ assert(source.includes('bindBundledWorkerRuntimeId(worker,workerSource)'));
+ const folder=fs.mkdtempSync(path.join(os.tmpdir(),'studio-lazy-worker-'));
+ try{
+  const worker={connection:null};bindBundledWorkerRuntimeId(worker,folder);
+  await readWorkerStatus(worker,()=>({}));
+  fs.writeFileSync(path.join(folder,'bootstrap.py'),'first requested bundled bytes');
+  const expected=bundledWorkerRuntimeId(folder);assert.equal(worker.bundledRuntimeId,expected);
+  fs.writeFileSync(path.join(folder,'bootstrap.py'),'subsequent mutation does not change this desktop comparison');
+  assert.equal(worker.bundledRuntimeId,expected);
+  assert.throws(()=>{worker.bundledRuntimeId='changed';},TypeError);
+ }finally{fs.rmSync(folder,{recursive:true,force:true});}
 });

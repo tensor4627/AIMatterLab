@@ -17,6 +17,8 @@ function productionCsp(){
 
 export default defineConfig({
  plugins:[react(),productionCsp()],base:'./',
+ // Keep generated dependency caches local when node_modules is shared by worktrees.
+ cacheDir:'.studio/vite-cache',
  // Runtime profiles contain locked Chromium/SQLite files, not frontend sources.
  server:{host:'127.0.0.1',port:5173,strictPort:true,watch:{ignored:['**/.studio/**','**/.config/**']}},
  optimizeDeps:{entries:['index.html']},

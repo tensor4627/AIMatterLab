@@ -27,6 +27,16 @@ export function bundledWorkerRuntimeId(source){
  }catch{return null;}
 }
 
+// A disconnected desktop needs no bundled/service comparison. Capture the source
+// location now and retain the first real hash when version evidence is requested.
+export function bindBundledWorkerRuntimeId(worker,source){
+ let resolved=false,value;
+ Object.defineProperty(worker,'bundledRuntimeId',{get(){
+  if(!resolved){value=bundledWorkerRuntimeId(source);resolved=true;}
+  return value;
+ }});
+}
+
 // Call only after the connection's health/identity has been verified. No paths escape.
 export function workerServiceVersionEvidence(worker){
  if(!Object.hasOwn(worker,'bundledRuntimeId'))return {}; // Non-desktop callers have no bundle evidence.

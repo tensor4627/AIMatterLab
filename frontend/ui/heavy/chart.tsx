@@ -2,7 +2,13 @@ import {parseChartData} from "../chart-data.mjs";
 import {pixelFontSize} from "../ui-font.mjs";
 import {tr} from '../i18n';
 import {useEffect,useMemo,useRef,useState} from 'react';
-import * as echarts from 'echarts';
+import * as echarts from 'echarts/core';
+import {LineChart} from 'echarts/charts';
+import {GridComponent,TooltipComponent,LegendComponent,DataZoomComponent} from 'echarts/components';
+import {CanvasRenderer} from 'echarts/renderers';
+
+// Register the complete feature set used below without unrelated chart families.
+echarts.use([LineChart,GridComponent,TooltipComponent,LegendComponent,DataZoomComponent,CanvasRenderer]);
 import {viewStateCache} from './view-state';
 
 type ChartView={zoom:{start:number;end:number}[];selected:Record<string,boolean>};

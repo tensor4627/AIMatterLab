@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {stageDshRuntime} from './stage-dsh-runtime.mjs';
-export function stageCoreRuntimes({root=process.cwd(),platform=process.platform,arch=process.arch}={}){
+export function stageCoreRuntimes({root=process.cwd(),platform=process.platform,arch=process.arch,dshProfile}={}){
 root=fs.realpathSync(root);
 if(!['aimatterlab','gpu-sampling-studio'].includes(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).name))throw Error('Native runtime staging requires an AIMatterLab checkout');
 const target=path.resolve(root,'.studio','agent-runtimes'),modules=path.join(target,'node_modules'),sourceModules=path.join(root,'node_modules');
@@ -37,7 +37,7 @@ const wrapper=stage('@lydell/node-pty');
 stage('@lydell/node-pty-'+platform+'-'+arch,wrapper);
 const manifest={scope:'This manifest audits native PTY; the pinned DSH closure has its own dsh/runtime.json. Other provider CLIs are discovered locally or installed with explicit user consent.',packages:Object.fromEntries(copied)};
 fs.writeFileSync(path.join(target,'manifest.json'),JSON.stringify(manifest,null,2));
-if(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).devDependencies?.['@deepseek-ai/dsh'])stageDshRuntime({root,platform,arch});
+if(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).devDependencies?.['@deepseek-ai/dsh'])stageDshRuntime({root,platform,arch,...dshProfile?{profile:dshProfile}:{}});
 return manifest;
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){const manifest=stageCoreRuntimes();console.log('Staged '+Object.keys(manifest.packages).length+' native terminal runtime packages'+(JSON.parse(fs.readFileSync('package.json','utf8')).devDependencies?.['@deepseek-ai/dsh']?' and the pinned DSH closure':''));}
