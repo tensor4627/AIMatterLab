@@ -12,6 +12,10 @@ Windows 的源码启动、开发启动和安装器桌面阶段统一使用令牌
 
 需要额外科学工具时，按[工具仓库清单](../installation/tool-sources.json)获取用户选定的源码分支，然后按该仓库内的安装说明操作。Windows 解压版也提供 `resources/tool-sources.json`。
 
+## 已有源码的日常启动
+
+已有 Git 检出可双击根目录 `Launch-AIMatterLab.cmd`，或执行 `pnpm run source`。以后关闭桌面，在同一目录 `git pull` 再启动，自动补齐受影响的依赖／构建。默认沿用仓库 `.config`；需要复用安装器生成的 profile 时用 `--profile` 指向同一目录。[源码启动说明](source-desktop.md)包含首次使用与便携包并存规则。
+
 ## 安装状态机
 
 ~~~mermaid

@@ -6,6 +6,7 @@
   "type": "module",
   "main": "desktop/main.mjs",
   "scripts": {
+    "source": "node scripts/source-start.mjs",
     "dev": "node scripts/stage-agents.mjs && node scripts/build-cli-installer.mjs && node scripts/sync-tool-contracts.mjs --check && node scripts/dev.mjs",
     "build": "node scripts/sync-tool-contracts.mjs && tsc --noEmit && vite build && node scripts/build-cli-installer.mjs && node scripts/stage-agents.mjs",
     "start": "node scripts/stage-agents.mjs && node scripts/build-cli-installer.mjs && node scripts/sync-tool-contracts.mjs --check && node scripts/start.mjs",

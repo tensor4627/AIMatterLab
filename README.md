@@ -27,6 +27,8 @@ Kimi/Qwen 不再随便携包附带：优先发现本机环境变量中的兼容 
 
 作业输入复制到 WSL Linux 文件系统。桌面正常退出会停止聊天连接并关闭本次交互式 SSH/本地终端，已提交的作业继续运行。重新打开后，选择保存的连接会建立新终端，不复用上次终端缓存；同一次桌面运行内可收起、切换页面和交接终端。作业服务源代码部署到持久化 Linux runtime，便携包退出不会删除运行依赖。系统/WSL 停止后只能按引擎 checkpoint 能力续算；未知进程不会自动重提。
 
+日常从 Git 源码启动：双击根目录 `Launch-AIMatterLab.cmd`，或运行 `pnpm run source`。首次自动准备依赖并构建；以后关闭桌面，在同一目录 `git pull` 再启动，沿用同一套 `.config` 设置与缓存。参见[首次启动、增量更新与 profile](docs/source-desktop.md)。
+
 开发运行（Node 22.19+，pnpm 11）：
 
 ```powershell
