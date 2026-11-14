@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "product": "AIMatterLab",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "repository_url": "https://github.com/tensor4627/AIMatterLab.git",
-  "release_revision": "v0.1.1",
-  "source_ref": "refs/tags/v0.1.1",
+  "release_revision": "v0.1.2",
+  "source_ref": "refs/heads/dev",
   "tool_sources": "installation/tool-sources.json",
   "desktop_platform": "Windows + WSL",
   "entry": "INSTALL_AGENT.md",
