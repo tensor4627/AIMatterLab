@@ -61,7 +61,7 @@ export function checkAimlabAdapterConformance({declaration, engineContracts}) {
       tool_id: declaration.tool_id,
       engine,
       status: 'pending_adapter',
-      checks: [{id: 'adapter_contract', status: 'not_run', detail: 'No built-in engine contract; a AIMatterLab adapter must be implemented separately'}]
+      checks: [{id: 'adapter_contract', status: 'not_run', detail: 'No built-in engine contract; an AIMatterLab adapter must be implemented separately'}]
     };
   }
   const checks = [];

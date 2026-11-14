@@ -8,7 +8,7 @@ Choose the requested stage before acting. Connection-only setup ends at the WSL/
 
 ## Portable WSL and SSH connection setup
 
-For local WSL, use an actually installed distribution and a user-selected dedicated Linux-filesystem worker directory. Check the selected local endpoint, keep worker identity with the project and do not replace another service because its version differs. Starting a AIMatterLab worker is separate from installing scientific engines. A window close does not stop submitted jobs.
+For local WSL, use an actually installed distribution and a user-selected dedicated Linux-filesystem worker directory. Check the selected local endpoint, keep worker identity with the project and do not replace another service because its version differs. Starting an AIMatterLab worker is separate from installing scientific engines. A window close does not stop submitted jobs.
 
 For SSH, import a user-selected existing connection or use the manual editor. Preserve explicit username, known-host checks and credential references. An existing client's default key or agent is valid when no key file is specified. Passwords, one-time codes and key material stay out of templates and chats. Two-factor authentication is a human handoff; a tunnel is proposed and reviewed as a connection recipe, not created by copying credentials or weakening host checks. Do not install an Agent CLI on a cluster to make SSH work.
 

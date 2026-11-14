@@ -13,3 +13,5 @@ Compatibility identities intentionally retained:
 - Historical changelog, version/release reports, iteration reports and archived acceptance evidence retain their original names and validation scope. Engine names such as GPUMD GPU-Sampling retain their scientific meaning.
 
 The canonical brand tests and profile upgrade test cover these boundaries. Branding alone makes no new scientific validation claim. Native UI/package acceptance is recorded separately in the release evidence.
+
+Brand regression checks target actual product-label slots and generated handoff text. They do not ban the words `GPU Sampling`, `Visual Studio`, `ModelStudio`, or explanations of the former product name. The source ID `studio` remains stable; its current Chinese resource-catalog display maps to AIMatterLab, while scientific engine names stay unchanged. Developer-kit checks execute the relocated generator, inspect its generated installation guide, and verify ZIP bytes against every current kit file.

@@ -168,12 +168,10 @@ try{
   await p.locator('.titlebar .brand strong').waitFor();
   assert.equal(await p.locator('.titlebar .brand strong').innerText(),'AIMatterLab');
   assert.equal(await p.locator('.sidebar-title>span').innerText(),'AIMatterLab');
-  assert.doesNotMatch(await p.locator('body').innerText(),/GPU Sampling|GPU Sampling Studio/);
   await p.screenshot({path:path.join(out,'aimatterlab-workspace.png')});
   for(const language of ['zh-CN','en']){
    await p.evaluate(async language=>{const i18n=await import('/frontend/ui/i18n.ts');i18n.setLanguage(language);return window.renderTest('SettingsPage',{settings:{...window.__test.settings,language},onChange:()=>{},onClose:()=>{},onError:error=>{throw error;}});},language);
    await p.locator('.font-preview').waitFor();assert.match(await p.locator('.font-preview').innerText(),/AIMatterLab/);
-   assert.doesNotMatch(await p.locator('body').innerText(),/GPU Sampling|\bStudio\b/);
    await p.screenshot({path:path.join(out,'aimatterlab-settings-'+language+'.png')});
   }
  });

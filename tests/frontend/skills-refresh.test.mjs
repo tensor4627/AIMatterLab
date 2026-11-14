@@ -31,3 +31,10 @@ test('partial catalog results retain errors and do not announce success',async()
 test('late old-provider refresh cannot announce completion in the new provider',async()=>{
  const old=deferred(),next=deferred();const h=harness((m,d)=>m==='scientific.skills'?(d.provider==='codex'?old.promise:next.promise):undefined);await h.flush();h.props.provider='kimi';h.render();await h.flush();old.resolve({schema_version:1,functions:[]});await h.flush();assert.equal(h.text(h.status()),'');next.resolve({schema_version:1,functions:[]});await h.flush();assert.match(h.text(h.status()),/已刷新/);h.unmount();
 });
+
+test('current Chinese source labels map stable studio IDs to AIMatterLab and preserve engine names',async()=>{
+ const route={id:'sampling.gpumd',phase:'sampling',status:'source_guidance_only',engines:['GPU-Sampling'],tools:[],sources:['studio','gpumd'],permission:'allowed',source_status:'registered'};
+ const h=harness(method=>method==='scientific.skills'?{schema_version:1,functions:[route]}:undefined);await h.flush();
+ const displayed=h.text(h.find(node=>node.props?.className==='skill-function'));
+ assert.match(displayed,/GPU-Sampling/);assert.match(displayed,/AIMatterLab \+ gpumd/);assert.doesNotMatch(displayed,/Studio/);assert.deepEqual(route.sources,['studio','gpumd']);h.unmount();
+});

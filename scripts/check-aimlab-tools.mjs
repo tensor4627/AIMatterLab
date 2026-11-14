@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Read-only internal AimLab tool declaration check. It never writes the tool repository, installs software, runs tests or registers a AIMatterLab package. */
+/** Read-only internal AimLab tool declaration check. It never writes the tool repository, installs software, runs tests or registers an AIMatterLab package. */
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';

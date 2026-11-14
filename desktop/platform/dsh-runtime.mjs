@@ -11,7 +11,7 @@ const packagedResources=appRoot.endsWith('.asar')?process.resourcesPath:undefine
 const sourcePolicyPath=path.resolve(appRoot,'agent/providers/dsh-policy.mjs');
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 
-/** Only a AIMatterLab-staged, pinned official installation is used; never the user's DSH home. */
+/** Only an AIMatterLab-staged, pinned official installation is used; never the user's DSH home. */
 export function resolveDshRuntime({resourcesPath=packagedResources,projectRoot=appRoot,executable}={}){
  const roots=resourcesPath?[path.join(resourcesPath,'agent-runtimes','dsh','node_modules')]:[path.join(projectRoot,'.studio','agent-runtimes','dsh','node_modules'),path.join(projectRoot,'node_modules')];
  for(const root of roots){
