@@ -136,9 +136,13 @@ const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 bindBundledWorkerRuntimeId(worker,workerSource);
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService});
+const previousSkillRoot=path.join(app.getPath('userData'),'project-skills');
+const userCacheBase=!verifying&&!process.env.STUDIO_PROFILE_DIR&&process.env.LOCALAPPDATA
+ ? path.join(process.env.LOCALAPPDATA,'AIMatterLab') : app.getPath('userData');
+const defaultUserCacheDirectory=fs.existsSync(previousSkillRoot)?previousSkillRoot:path.join(userCacheBase,'user-cache','skills');
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, terminalIdleMinutes:60, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
-  sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
+  sourceRoots:[],skillRoots:[],userCacheDirectory:defaultUserCacheDirectory, theme:'dark', agentProvider:'codex',agentLayout:'right' };
 function findCodex() {
   return findInstalledCodex();
 }
@@ -338,7 +342,7 @@ localReview=registerCalculationReview({handle,records:taskRecords,worker,current
 
 privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:activeAuthoringTasks});
 worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
-const projectSkills=new ProjectSkills({root:path.join(app.getPath('userData'),'project-skills'),current:()=>workflowContext.current()});
+const projectSkills=new ProjectSkills({root:settings.userCacheDirectory||defaultUserCacheDirectory,current:()=>workflowContext.current()});
 worker.setProjectSkills(projectSkills);
 terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,guard:()=>worker.authoringGuard});
 await terminalMcp.start();
@@ -401,7 +405,13 @@ handle('diagnostics.performance',value=>{
  if(Object.keys(value).join(',')!=='phase'||!['renderer-interactive','workspace-observed'].includes(value.phase))throw Error('Invalid renderer performance phase');
  return performanceTimeline.mark(value.phase);
 });
-handle('settings',data => { settings=catalog.put('settings','main',normalizeSettings(settings,data)); return settings; });
+handle('settings',data=>{
+ const next=normalizeSettings(settings,data);
+ next.userCacheDirectory=projectSkills.prepareRoot(next.userCacheDirectory||defaultUserCacheDirectory);
+ settings=catalog.put('settings','main',next);
+ projectSkills.root=settings.userCacheDirectory;
+ return settings;
+});
 function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
 async function bindSources(current=()=>{}){if(worker.identity?.kind==='ssh'){current();return worker.request('GET','/api/source-projects');}const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());
