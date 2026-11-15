@@ -2,6 +2,23 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {createAgentWorkflowContext} from "../../agent/sessions/workflow-context.mjs";
 function fixture(){let provider='codex';const tasks=new Map(),conversations=new Map(),activeTasks=new Map(),records={deleted:()=>false,conversation:(p,id)=>conversations.get(p+':'+id),bound:(p,id)=>{const c=conversations.get(p+':'+id);return c?.taskId?tasks.get(c.taskId):null;},read:id=>structuredClone(tasks.get(id))};for(const id of ['a','b']){const task={id:'task-'+id,provider:'codex',threadId:id,projectId:'project-'+id,authoring:{projectId:'project-'+id,environmentId:'environment-'+id,inputRoot:'/inputs/'+id}};tasks.set(task.id,task);conversations.set('codex:'+id,{taskId:task.id,projectId:task.projectId});}const api=createAgentWorkflowContext({records,activeTasks,selectedProvider:()=>provider});return {api,records,activeTasks,tasks,conversations,setProvider:p=>provider=p};}
 const bind=async()=>{};
+test('a fresh thread has the selected project before its first save, without inheriting history',async()=>{
+ const f=fixture();
+ f.api.begin('codex','a');
+ const ticket=f.api.begin('codex',null,'chosen-project');
+ assert.equal(f.api.current().projectId,null);
+ f.api.started(ticket,'fresh');
+ const first=await f.api.synchronize(ticket,bind);
+ assert.deepEqual(first,{threadId:'fresh',projectId:'chosen-project',taskId:null,environmentId:null,inputRoot:null});
+ f.conversations.set('codex:fresh',{projectId:'chosen-project'});
+ assert.deepEqual(await f.api.synchronize(f.api.begin('codex','fresh'),bind),first);
+ f.conversations.set('codex:fresh',{projectId:null});
+ assert.equal(f.api.current().projectId,null);
+ assert.equal(f.api.begin('codex','a').provider,'codex');
+ assert.equal(f.api.current().projectId,'project-a');
+ assert.throws(()=>f.api.begin('codex','a','other-project'));
+ assert.throws(()=>f.api.begin('codex',null,{}));
+});
 function lease(context,extra={}){return {provider:'codex',...context,epoch:'synthetic-epoch',checkCurrent:()=>true,...extra};}
 test('Actual owned workflow context includes its selected environment and input root',async()=>{const f=fixture(),ticket=f.api.begin('codex','a'),context=await f.api.synchronize(ticket,bind);assert.equal(f.api.assertScope(lease(context)).id,'task-a');for(const key of ['threadId','taskId','projectId','environmentId','inputRoot'])assert.throws(()=>f.api.assertScope(lease(context,{[key]:'foreign'})),/another workflow/);assert.throws(()=>f.api.assertScope(lease(context,{checkCurrent:()=>false})),/no longer current/);assert.throws(()=>f.api.assertScope({provider:'codex',...context}),/lease/);});
 test('A late preparation cannot reselect an older conversation after an awaited bind',async()=>{const f=fixture();let release;const first=f.api.begin('codex','a'),pending=f.api.synchronize(first,()=>new Promise(resolve=>release=resolve));const second=f.api.begin('codex','b'),current=await f.api.synchronize(second,bind);release();await assert.rejects(pending,/Selected conversation changed/);assert.equal(f.activeTasks.get('codex'),'task-b');assert.equal(f.api.assertScope(lease(current)).id,'task-b');assert.throws(()=>f.api.assert(first),/Selected conversation changed/);});

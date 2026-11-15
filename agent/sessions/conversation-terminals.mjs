@@ -35,11 +35,11 @@ export function createConversationTerminals({terminal,service,registration,resou
   return entry?{...shell,conversationTerminal:true,currentConversation:selected(pool)&&equal(entry.scope,scope),conversationName:conversationName(entry.scope.provider,entry.scope.threadId)||undefined}:shell;
  }
  async function arm(value,provider){
-  const ref=resource.peek(),ticket=resource.capture(),scope=scopeOf(current());
+  const ref=resource.peek(),ticket=resource.capture(),selection=current(),scope=scopeOf(selection);
   if(stopped||ref?.kind!=='ssh-connection'||!provider||(scope&&scope.provider!==provider))changed();
   const state=await terminal.resourceState({sessionId:value.sessionId});
   resource.assertCurrent(ticket);
-  if(!equal(scope,scopeOf(current()))||state.resource?.connectionId!==ref.connectionId||state.resource.profileId!==ref.profileId||
+  if(!equal(scope,scopeOf(current()))||!scope&&selection?.serial!==current()?.serial||state.resource?.connectionId!==ref.connectionId||state.resource.profileId!==ref.profileId||
      state.resource.profileVersion!==ref.profileVersion||state.operator!=='human'||state.ownerEpoch!==value.ownerEpoch||
      !state.alive||state.processStatus!=='running')changed();
   let pool=pools.get(ref.connectionId);
@@ -51,7 +51,7 @@ export function createConversationTerminals({terminal,service,registration,resou
    await retire(pool,previous);resource.assertCurrent(ticket);if(!equal(scope,scopeOf(current())))changed();
   }
   pool.enabled=true;pool.serviceAllowed=true;pool.serviceFailure=null;
-  pool.available={sessionId:value.sessionId,ownerEpoch:value.ownerEpoch,at:now()};
+  pool.available={sessionId:value.sessionId,ownerEpoch:value.ownerEpoch,at:now(),awaitingNewConversation:!scope};
   if(scope){await acquire(provider,scope);const entry=pool.entries.get(keyOf(scope));live(pool,scope,entry);
    publish();return {...describe(entry.shell),service:service.peek({connectionId:pool.connectionId})};}
   publish();
@@ -102,12 +102,17 @@ export function createConversationTerminals({terminal,service,registration,resou
   const pending=bindService(pool,scope,entry).catch(()=>{}).finally(()=>{if(entry.servicePending===pending)entry.servicePending=null;publish();});
   entry.servicePending=pending;
  }
- async function acquire(provider,context){
+ function pendingForNewConversation(provider){
+  const handoff=getPool(provider)?.available;
+  return handoff?.awaitingNewConversation&&!scopeOf(current())?handoff:null;
+ }
+ async function acquire(provider,context,reservedShell=null){
   const scope=scopeOf({...context,provider}),pool=getPool(provider);
   if(!scope||!pool)return;
   const key=keyOf(scope);let entry=pool.entries.get(key);
   if(entry?.retiring){await entry.retiring;if(!equal(scope,scopeOf(current())))changed();entry=pool.entries.get(key);}
-  if(!entry&&!pool.enabled)return;
+  if(reservedShell&&pool.available!==reservedShell)return;
+  if(!entry&&(!pool.enabled||pool.available?.awaitingNewConversation&&pool.available!==reservedShell))return;
   if(entry&&!equal(scope,entry.scope))return;
   if(!entry){entry={scope,at:now()};pool.entries.set(key,entry);}
   entry.at=now();
@@ -185,7 +190,7 @@ export function createConversationTerminals({terminal,service,registration,resou
   const cutoff=now()-(idleMinutes()??60)*60000,closing=[];
   for(const pool of [...parked,...pools.values()]){
    if(pool.available?.at<=cutoff){const shell=pool.available;pool.available=null;
-    closing.push(terminal.closeConversationShell({...shell,connectionId:pool.connectionId}).catch(()=>{if(!pool.available&&pool.enabled)pool.available=shell;}));}
+    closing.push(terminal.closeConversationShell({sessionId:shell.sessionId,ownerEpoch:shell.ownerEpoch,connectionId:pool.connectionId}).catch(()=>{if(!pool.available&&pool.enabled)pool.available=shell;}));}
    for(const entry of pool.entries.values()){
     if(selected(pool)&&busy(entry.scope)){entry.at=now();continue;}
     if(entry.at<=cutoff&&!entry.pending&&!entry.retiring)closing.push(retire(pool,entry));
@@ -199,8 +204,8 @@ export function createConversationTerminals({terminal,service,registration,resou
  }
  function canAcquire(provider){
   const pool=getPool(provider),scope=scopeOf(current());
-  return !!(pool?.enabled&&(!scope||!pool.entries.has(keyOf(scope))));
+  return !!(pool?.enabled&&(!scope||!pool.available?.awaitingNewConversation&&!pool.entries.has(keyOf(scope))));
  }
- return {arm,acquire,canAcquire,describe,prepareAuthoringGrant,releaseShell,detachConnection,releaseConnection,serviceOwner,touch,sweep,forget,
+ return {arm,acquire,pendingForNewConversation,canAcquire,describe,prepareAuthoringGrant,releaseShell,detachConnection,releaseConnection,serviceOwner,touch,sweep,forget,
   stop(){stopped=true;pools.clear();parked.clear();}};
 }
