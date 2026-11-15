@@ -1,6 +1,6 @@
 # AIMatterLab 软件规范
 
-AIMatterLab 0.1.2 源自 GPU Sampling Studio。用户在同一工作区中与 Agent 准备计算、核对输入和资源、执行作业并追踪结果。第三方开发者可将已有软件按工具包契约交付，为用户增加工具与工作流。
+AIMatterLab 0.1.3 源自 GPU Sampling Studio。用户在同一工作区中与 Agent 准备计算、核对输入和资源、执行作业并追踪结果。第三方开发者可将已有软件按工具包契约交付，为用户增加工具与工作流。
 
 本版沿用原软件自 1.0.1 起确定的前端、后端和 Agent 职责，以及工具声明、中立契约、命令绑定和一致性检查。桌面负责交互与索引，worker 管理运行状态，Agent 在项目授权内调用工具。更改这些约定时须同步更新[代码架构](architecture.md)和版本记录，并保持原有数据与接口兼容。
 
@@ -8,7 +8,7 @@ AIMatterLab 0.1.2 源自 GPU Sampling Studio。用户在同一工作区中与 Ag
 
 ## 桌面启动与配置
 
-Windows 用户可使用便携包或双击源码仓库根目录的 `Launch-AIMatterLab.cmd`。源码更新后继续读取同一个 profile。Agent 可以用内置 MCP 工具为当前项目保存并读取单文件技能，存储位置见[项目技能工作区](project-skill-workspace.md)。
+Windows 用户可使用便携包或双击源码仓库根目录的 `Launch-AIMatterLab.cmd`。源码更新后继续读取同一个 profile。Agent 启动时读取技能工具清单，可在本地个人库、项目库或私有对话库保存和读取单文件技能。用户可在设置中更改缓存目录。见[本地技能工作区](project-skill-workspace.md)。
 
 已交接的 SSH 连接为各个对话保留独立终端，空闲时长可设，默认 60 分钟。退出桌面会关闭终端和连接，调度作业继续运行。集群登记保留实测工作区、作业服务和技能目录，更新服务时按文件哈希增量传输。
 
