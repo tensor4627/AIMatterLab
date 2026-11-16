@@ -1,7 +1,7 @@
 {
   "name": "aimatterlab",
   "productName": "AIMatterLab",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -61,7 +61,7 @@
     "productName": "AIMatterLab",
     "beforeBuild": "scripts/package-runtime.mjs",
     "directories": {
-      "output": "release/v0.1.3"
+      "output": "release/v0.1.4"
     },
     "files": [
       "dist/**",
