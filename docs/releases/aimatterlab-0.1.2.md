@@ -2,7 +2,7 @@
 
 2026-11-16 · Windows 11 x64 · Node.js 24.22.1 · pnpm 11.28.5 · Electron 44.5.1
 
-本地在 `main` 整理提交；计划的合并请求来源为 `fix/provider-model-configuration`，目标为当前仓库的 `main`。本次是源码更新，未生成 ZIP、便携 EXE 或安装包。
+本地在 `main` 整理提交；PR 来源为个人 fork 的 `main`，目标为原仓库 `Tensor4627/AIMatterLab` 的 `main`，仅请求审查，不执行合并。本次是源码更新，未生成 ZIP、便携 EXE 或安装包。
 
 ## 用户可见变更
 
