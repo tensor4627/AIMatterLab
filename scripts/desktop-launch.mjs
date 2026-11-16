@@ -1,6 +1,6 @@
 import {spawn,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {readFileSync} from 'node:fs';
+import {readFileSync,realpathSync} from 'node:fs';
 export const desktopRoot=fileURLToPath(new URL("..",import.meta.url));
 export function launchPreflight({platform=process.platform,probe=spawnSync}={}) {
   if(platform!=='win32') return {status:'allowed',reason:'not_windows'};
@@ -23,7 +23,10 @@ export function requireLaunchContext(options) {
   return result;
 }
 export function childExitCode(code,signal) { return Number.isInteger(code)?code:signal==='SIGINT'?130:signal==='SIGTERM'?143:1; }
-export async function launchDesktop({preflight=requireLaunchContext,resolveBinary=async()=> (await import('electron')).default,spawnTarget=spawn,args=process.argv.slice(2),cwd=desktopRoot,env=process.env}={}) {
+// Launch the physical executable so downstream strict runtime checks never see
+// dependency-manager links or an explicitly relocated Electron dist alias.
+export async function resolveDesktopBinary(){return realpathSync((await import('electron')).default);}
+export async function launchDesktop({preflight=requireLaunchContext,resolveBinary=resolveDesktopBinary,spawnTarget=spawn,args=process.argv.slice(2),cwd=desktopRoot,env=process.env}={}) {
   preflight();
   return spawnTarget(await resolveBinary(),['.',...args],{cwd,env,stdio:'inherit'});
 }

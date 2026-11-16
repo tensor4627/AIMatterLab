@@ -50,3 +50,16 @@
 - 界面保存、发现、测试的迟到响应不能更新另一个服务商页；未保存配置不能触发连接验证。
 
 这些失败均已修正并在上述最终检查中通过；不将首次失败计入通过数量。
+
+## 2026-11-16 本地终端启动补验
+
+用户报告新建本地终端返回 `terminal_runtime_unavailable`。以源码默认 Electron 入口复现出内部 `terminal_runtime_invalid_source`；同一 EXE 经实际路径启动时运行时准备通过。根因是本机 Electron `dist` 目录连接在 `process.execPath` 中保留为逻辑路径，触发终端逐级防链接校验，并非缺少 PTY 文件。
+
+修正源码启动器：上下文预检后先解析 Electron 实际路径，再启动桌面。终端自身的哈希、完整性等级、防链接、会话隔离及移交授权校验保持不变，不修改目录权限、SSH 配置、账户凭据或科学任务。
+
+- 定向回归：passed，启动入口、源码缓存、终端运行时、安全范围及移交共 89 项通过；首次两项 CMD 检查因诊断进程 PATH 未刷新而失败，读取系统现有 PATH 后重跑通过，未修改系统 PATH。
+- 实际桌面：passed，当前生产 main/preload/构建 renderer、独立 profile，从界面新建真实 PowerShell 终端、测试输出往返、关闭该测试终端均通过。
+- 真实终端移交：passed，真实 Windows ConPTY 验证独立 broker 启动、Shell 存活、移交前输出不向 Agent 暴露、移交后命令与退出码 7、会话关闭均通过（1 项原生集成）。未通过真实模型发送命令，未读取用户 SSH 配置。
+- 软件构建与发行：本次只改源码启动入口，无 renderer 代码变更，沿用上面的构建证据；未打包、未创建 tag、未自动推送。
+
+原始补验证据在忽略目录 `.studio/local-checks/provider-models-20261116/`，不纳入 Git。
