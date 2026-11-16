@@ -5,6 +5,10 @@ allowBuilds:
   '@moonshot-ai/kimi-code': false
   '@qwen-code/audio-capture': false
   node-pty: false
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': true
+  koffi: true
+  protobufjs: true
 minimumReleaseAgeExclude:
   - playwright-core@1.65.0
   - playwright@1.65.0

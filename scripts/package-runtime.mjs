@@ -7,7 +7,9 @@ import {validateCliRuntimeLock} from '../backend/main/compute/cli-runtime.mjs';
 import {validateStagedDshRuntime} from './stage-dsh-runtime.mjs';
 
 const buildRequire=createRequire(import.meta.url);
-const builderRequire=createRequire(buildRequire.resolve('app-builder-lib/package.json'));
+// app-builder-lib belongs to electron-builder, not the application root.
+const electronBuilderRequire=createRequire(buildRequire.resolve('electron-builder/package.json'));
+const builderRequire=createRequire(electronBuilderRequire.resolve('app-builder-lib/package.json'));
 const semver=builderRequire('semver');
 const RUNTIME_ENTRIES=new Map([
  ['@lydell/node-pty','index.js'],
