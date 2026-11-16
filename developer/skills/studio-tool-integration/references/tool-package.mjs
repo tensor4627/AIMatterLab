@@ -37,6 +37,8 @@ function normalize(value,rule,where){
  }
  return value;
 }
+// Other portable contracts can use the same schema subset with fully inline rules.
+export {normalize as normalizeInlineSchema};
 export function portableResourcePath(value,{workingDirectory=false}={}){
  if(workingDirectory&&value==='.')return value;
  if(typeof value!=='string'||!value||Array.from(value).length>512||/[\\<>:"|?*\x00-\x1f\x7f]/.test(value)||value.startsWith('/')||value.split('/').some(part=>!part||part==='.'||part==='..'||part.toLowerCase()==='.git')||new TextDecoder('utf-8',{fatal:true}).decode(new TextEncoder().encode(value))!==value)fail('resource path','canonical package-relative path required');

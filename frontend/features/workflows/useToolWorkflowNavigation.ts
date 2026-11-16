@@ -3,7 +3,7 @@ import type {Conversation} from '../../../contracts/dto/agent';
 import type {ToolWorkflowLocation} from '../../../contracts/dto/tool-workflows';
 import {toolWorkflows} from '../../api/tool-workflows';
 
-export interface ToolWorkflowFocus {task_id:string;execution_id:string;step_id:string;nonce:string}
+export interface ToolWorkflowFocus {task_id:string;execution_id:string;step_id:string;nonce:string;roadmap?:boolean}
 interface NavigationPorts {
  mounted:MutableRefObject<boolean>;
  selected:MutableRefObject<Conversation|null>;
@@ -31,7 +31,7 @@ export function useToolWorkflowNavigation(ports:NavigationPorts){
    if(!current(selected,opened))return;const acknowledged=latest.current.selected.current;
    if(!latest.current.conversations.some(value=>value.id===location.conversation_id&&value.provider===location.provider&&value.threadId===location.thread_id&&value.taskId===location.task_id))return;
    if(acknowledged?.id!==conversation.id||acknowledged.taskId!==location.task_id||acknowledged.provider!==location.provider||acknowledged.threadId!==location.thread_id)return;
-   setFocus({task_id:location.task_id,execution_id:location.execution_id,step_id:location.step_id,nonce:crypto.randomUUID()});latest.current.onOpen(location);
+   setFocus({task_id:location.task_id,execution_id:location.execution_id,step_id:location.step_id,nonce:crypto.randomUUID(),...(location.roadmap?{roadmap:true}:{})});latest.current.onOpen(location);
   }catch(error){if(current(selected,opened))latest.current.onError(error);}
  }
  return {focus,open};

@@ -61,6 +61,7 @@ test('build synchronizes resources and distributable files include canonical and
 test('synchronization preserves canonical bytes and check refuses stale output without writing',t=>{
  const root=temporary(t),source=put(root,'contracts/tools/engine-contracts.json',canonical);
  put(root,'contracts/tools/tool-package.schema.json',packageSchema);
+ put(root,'contracts/workflows/roadmap.schema.json',fs.readFileSync(new URL('../../contracts/workflows/roadmap.schema.json',import.meta.url)));
  put(root,'contracts/tools/tool-package.mjs',packageValidator);put(root,'contracts/tools/aimlab-tools.mjs',aimlabToolsContract);put(root,'installation/examples/worker-smoke.py',workerReference);
  assert.throws(()=>syncToolContracts({root,check:true}),/stale/);
  assert(!fs.existsSync(path.join(root,'backend/worker/studio_worker/engine_contracts.json')));

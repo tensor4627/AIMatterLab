@@ -6,6 +6,7 @@ import {conversationTitle,validConversationName} from "../../../contracts/agent/
 
 import {isDeepStrictEqual} from 'node:util';
 import {normalizeSteps,workflowMissing,setParameter,parameterValue,fieldPath} from "../../../contracts/workflows/task-fields.mjs";
+import {analyzeRoadmap,validateRoadmap} from "../../../contracts/workflows/roadmap.mjs";
 
 export function structuredResult(value){
  const found=[];function walk(v,depth=0){if(depth>8||v==null)return;if(typeof v==='string'){try{walk(JSON.parse(v),depth+1);}catch{}return;}if(Array.isArray(v)){for(const item of v)walk(item,depth+1);return;}if(typeof v!=='object')return;if(v.id&&(v.engine||Array.isArray(v.steps)||v.kind==='cluster-setup'||v.kind==='task-parameters'))found.push(v);for(const k of ['content','structuredContent','result','output','data','text'])if(k in v)walk(v[k],depth+1);}walk(value);return found;
@@ -98,9 +99,13 @@ export class TaskRecords{
   const key=provider+':'+params.threadId;
   if(task){task=this.attach(task.id,provider,params.threadId);this.turns.set(key,{taskId:task.id,revision:task.parameterRevision||0,reviewMode,presented:false});if(reviewMode){task.review={status:'reviewing'};this.save(task);}}
   else{if(reviewMode)throw Error('Review requires an existing workflow');this.active.delete(key);this.turns.delete(key);}
+  const roadmap=task?.roadmap&&analyzeRoadmap(task.roadmap,task.parameters);
+  const executionObservation=roadmap&&this.catalog.list?.('roadmap-execution-index').filter(row=>row.task_id===task.id).sort((a,b)=>b.confirmed_at-a.confirmed_at)[0]?.observation;
   const workflow=task?{
    id:task.id,workflowVersion:task.workflowVersion,parameterRevision:task.parameterRevision,
    parameters:task.parameters,steps:task.steps,artifacts:task.artifacts,composition:task.composition,
+   ...(roadmap?{roadmap:task.roadmap,roadmapFindings:roadmap.findings,roadmapOrder:roadmap.order}:{}),
+   ...(executionObservation?{executionObservation}:{}),
    ...(task.inputBinding?{inputBinding:{parameters:inputControlParameters(task.inputBinding.parameters)}}:{}),
    graphAuthority:graphAuthorityFacts(task)
   }:null;
@@ -125,7 +130,11 @@ export class TaskRecords{
    for(const item of artifacts){
     if(item.kind==='task-parameters'){
      if(item.id!==task.id)continue;
-     try{normalizeSteps(item.steps,item.parameters,item.missing_fields);}catch{continue;}
+     let roadmap;
+     try{
+      normalizeSteps(item.steps,item.parameters,item.missing_fields);
+      if(Object.hasOwn(item,'roadmap'))roadmap=validateRoadmap(item.roadmap);
+     }catch{continue;}
      let parameters=item.parameters||{};
      if(task.workflowVersion===2){const split=scienceOnly(parameters,item.steps,item.missing_fields||[]);parameters=split.parameters;item.steps=split.steps;item.missing_fields=split.missing;task.deploymentHints={...task.deploymentHints,...split.hints};}
      for(const [field,revision] of Object.entries(task.manualEdits||{}))if(turn.reviewMode||revision>turn.revision){
@@ -136,6 +145,7 @@ export class TaskRecords{
       }else parameters=setParameter(parameters,field,manual);
      }
      parameters=protectGraphMirrors(task,parameters);
+     if(roadmap)task.roadmap=roadmap;
      if(!isDeepStrictEqual(parameters,task.parameters)||!isDeepStrictEqual(item.steps,task.steps)){task.parameterRevision=(task.parameterRevision||0)+1;task.review={status:'not_run'};}
      task.name=item.name;task.parameters=parameters;task.steps=item.steps;task.plan=item.steps.map(v=>({step:typeof v==='string'?v:v.title,assistantStatus:'proposed'}));task.missingFields=workflowMissing(task.steps,parameters,item.missing_fields||[]);const c=this.conversation(provider,p.threadId);if(c&&c.titleSource!=='manual'){c.name=conversationTitle(task.request,{name:item.name,engine:parameters.engine});c.titleVersion=1;c.titleSource='workflow';this.catalog.put('conversation',c.id,c);this.publish({method:'studio/conversationUpdated',provider,params:{conversation:c}});}updated=presented=true;turn.presented=true;continue;
     }

@@ -15,6 +15,7 @@ export function assertWorkerRoute(method, path) {
   };
   routes.POST.push('/api/tool-package/register','/api/tool-configuration/project/create','/api/tool-configuration/plan','/api/tool-configuration/execute','/api/tool-configuration/status','/api/tool-configuration/activate','/api/tool-execution-skill/read','/api/tool-guidance/state');
   routes.POST.push('/api/workflow/tool-group/create','/api/workflow/prepare-step','/api/workflow/execute-step','/api/workflow/status','/api/workflow/read');
+  routes.POST.push(...['preview','confirm','list','status','snapshot'].map(action=>'/api/workflow/roadmap/'+action));
   routes.POST.push('/api/ssh-service/scheduler');
   const target = new URL(path, 'http://127.0.0.1');
   if (target.origin !== 'http://127.0.0.1' || !routes[method]?.includes(target.pathname))

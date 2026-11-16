@@ -5,6 +5,7 @@ const methods=new Set(['diagnostics.saveWorkbenchImage','task.stage.artifacts','
 for(const name of [
  'agent.cli.inspect','agent.cli.choose','agent.cli.install','agent.cli.cancel',
  'diagnostics.performance',
+ 'task.roadmap.preview','task.roadmap.confirm','task.roadmap.list','task.roadmap.snapshot',
  'compute.profiles.remove',
  'compute.sshService.connect','compute.sshService.status','compute.sshService.disconnect',
  'compute.sshService.scheduler','compute.sshService.registration','compute.sshService.check',

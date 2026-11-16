@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "resources": [
+    {"id":"structure","label":"初始结构","format":"extxyz","field":"structure_file","basis":"user"},
+    {"id":"model","label":"势模型","field":"potential_file","basis":"user"},
+    {"id":"control","label":"模拟参数","field":"control_file","basis":"user"},
+    {"id":"frames","label":"MD 轨迹","format":"extxyz","basis":"user"},
+    {"id":"thermo","label":"热力学序列","basis":"inferred","requirements":["温度（K）和总能量（eV）","采样间隔 0.1 ps"]},
+    {"id":"msd","label":"均方位移"},
+    {"id":"rdf","label":"径向分布"},
+    {"id":"report","label":"分析报告","basis":"user"}
+  ],
+  "inputs":["structure","model","control"],
+  "steps":[
+    {"id":"report","tool":"example.report","label":"汇总分析","inputs":[{"port":"msd","resource":"msd"},{"port":"rdf","resource":"rdf"}],"outputs":[{"port":"report","resource":"report"}]},
+    {"id":"msd","tool":"example.trajectory","label":"计算均方位移","inputs":[{"port":"trajectory","resource":"frames"}],"outputs":[{"port":"series","resource":"msd"}]},
+    {"id":"md","tool":"gpumd.md","label":"分子动力学","runtime":{"top":"NEP 受力计算","bottom":"在线统计"},"inputs":[{"port":"structure","resource":"structure"},{"port":"potential","resource":"model"},{"port":"control","resource":"control"}],"outputs":[{"port":"trajectory","resource":"frames"},{"port":"thermo","resource":"thermo"}]},
+    {"id":"rdf","tool":"example.trajectory","label":"计算径向分布","inputs":[{"port":"trajectory","resource":"frames"}],"outputs":[{"port":"series","resource":"rdf"}]}
+  ],
+  "outputs":["frames","thermo","report"]
+}

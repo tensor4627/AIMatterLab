@@ -91,6 +91,13 @@ class SchedulerMixin:
                         for value in cluster_runs) >= project["policy"]["max_concurrent"]:
                     continue
                 self.verify_snapshot(run)
+                link = run.get("studio_workflow_binding") or {}
+                if link.get("schema_version")==2:
+                    from studio_worker.workspace.roadmap_execution import RoadmapContext, records, check_version, check_run, check_fresh_outputs
+                    state,snapshot,node,active = records(self,RoadmapContext(link["execution_id"],link["step_id"],self._tool_workflow_token))
+                    check_version(self,snapshot,node)
+                    check_run(self,state,node,active,run)
+                    check_fresh_outputs(run,node)
                 directory = Path(run["directory"])
                 token = secrets.token_hex(24)
                 launch = {"schema": LAUNCH_SCHEMA, "protocol_version": 2, "run_id": run["id"], "claim": token,
@@ -227,6 +234,15 @@ class SchedulerMixin:
                 delay = min(300, 15 * (2 ** min(failures, 4)))
                 self.store.event(None, {"kind": "cluster", "error": "Remote monitor unavailable; retrying in %ss" % delay})
 
+    def roadmap_loop(self):
+        from studio_worker.workspace.roadmap_execution import RoadmapExecutions
+        executions = RoadmapExecutions(self)
+        while not self.stop_event.wait(0.5):
+            try:
+                executions.pump()
+            except Exception as exc:
+                self.store.event(None,{"kind":"roadmap","error":str(exc)[:2000]})
+
     def loop(self):
         ticks = 0
         while not self.stop_event.wait(0.3):
@@ -243,6 +259,8 @@ class SchedulerMixin:
 
     def close(self):
         self.stop_event.set()
+        if hasattr(self,"roadmap_scheduler"):
+            self.roadmap_scheduler.join()
         self.clusters.close()
         if hasattr(self, "scheduler"):
             self.scheduler.join(3)

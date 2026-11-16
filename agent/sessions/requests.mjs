@@ -86,7 +86,7 @@ export function createAgentRequests({runtime}){
   if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview,planningMode:turnFlags.planningMode});
   // Public software guidance is selected only for the actual current intent.
   const guidanceScope=skillGuidanceScope(provider),readPolicy=await scientificSkills.resolvePolicy(guidanceScope);check();
-  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
+  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,planRoadmap:turnFlags.planningMode&&!bound?.roadmap,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
   const explicitSetup=!definitionOnly&&studioSkillId&&['installation','setup','toolchain'].includes(scientificSkills.router.routes.get(studioSkillId)?.phase);
   skillContext=await(explicitSetup?setupInstructions.prepare(provider,studioSkillId,prepareGuidance,{retainForTurn:true,assertCurrent:check,checkCurrent:guidanceScope.checkCurrent}):prepareGuidance());check();
   if(!skillContext.guidanceKind&&!definitionOnly&&bound?.parameters?.engine&&worker.connection){

@@ -100,6 +100,19 @@ class Store:
                 self.db.rollback()
                 raise
 
+    def put_task_parameters(self, value):
+        # Legacy clients replace the form without sending a roadmap. Merge just that
+        # omitted column of the JSON object in the same SQLite write as the form.
+        with self.lock, self.db:
+            self.db.execute("""
+                INSERT INTO objects(kind,id,data) VALUES ('task-parameters',?,?)
+                ON CONFLICT(kind,id) DO UPDATE SET data=CASE
+                  WHEN json_type(excluded.data,'$.roadmap') IS NULL
+                   AND json_type(objects.data,'$.roadmap')='object'
+                  THEN json_set(excluded.data,'$.roadmap',json_extract(objects.data,'$.roadmap'))
+                  ELSE excluded.data END""", (value["id"], encoded(value)))
+        return value
+
     def get(self, kind, identifier):
         with self.lock:
             row = self.db.execute("SELECT data FROM objects WHERE kind=? AND id=?",
@@ -130,6 +143,19 @@ class Store:
         if kind == "project":
             for value in values: value.setdefault("revision", 0)
         return values
+
+    def db_exists(self, kind, identifier):
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM objects WHERE kind=? AND id=?", (kind,identifier)).fetchone() is not None
+
+    def roadmap_ids(self, *, task_id=None, active=False):
+        query = "SELECT id FROM objects WHERE kind='roadmap-state'"
+        if active:
+            query += " AND json_extract(data,'$.status') IN ('running','unknown')"
+        else:
+            query += " AND json_extract(data,'$.task_id')=? ORDER BY json_extract(data,'$.confirmed_at') DESC"
+        with self.lock:
+            return [row[0] for row in self.db.execute(query,() if active else (task_id,))]
 
     def run(self, identifier):
         with self.lock:

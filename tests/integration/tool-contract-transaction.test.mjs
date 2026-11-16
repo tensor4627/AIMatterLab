@@ -24,6 +24,7 @@ test('multi-resource synchronization stages files and rolls a failed update back
  const root=temporary(t);
  put(root,'contracts/tools/engine-contracts.json',canonical);
  put(root,'contracts/tools/tool-package.schema.json',packageSchema);
+ put(root,'contracts/workflows/roadmap.schema.json',fs.readFileSync(new URL('../../contracts/workflows/roadmap.schema.json',import.meta.url)));
  put(root,'contracts/tools/tool-package.mjs',packageValidator);
  put(root,'contracts/tools/aimlab-tools.mjs',aimlabToolsContract);
  put(root,'installation/examples/worker-smoke.py',workerReference);
