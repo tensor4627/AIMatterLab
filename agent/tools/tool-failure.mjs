@@ -2,6 +2,7 @@
 // action. This is guidance only: no retry, resource grant or dispatch occurs here.
 export function toolFailure(error,{dispatched=false}={}){
  const message=String(error?.message||error||'Tool request failed').slice(0,4000);
+ if(error?.operationNotStarted===true)dispatched=false;
  let code='tool_error',next_step='Inspect the tool details and correct the request before continuing.';
  if(/unknown (?:tool|project|environment)|not (?:bound|belong)|conversation-owned|active conversation|another conversation/i.test(message)){
   code='context_required';next_step='Read the current conversation workflow and its registered project/environment. Use those identities; do not create a replacement workflow or broaden access.';

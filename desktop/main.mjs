@@ -86,6 +86,8 @@ import {existingConnections,existingProfile} from "../backend/main/compute/exist
 
 import { Catalog } from "../backend/main/workspace/catalog.mjs";
 import { CodexBridge } from '../agent/providers/codex.mjs';
+import {codexRuntime} from './platform/codex-runtime.mjs';
+import {createCodexSubscriptionRuntime} from './platform/codex-subscription-runtime.mjs';
 
 import {AgentHub,loginUrl} from '../agent/providers/agent-hub.mjs';
 import {CredentialVault} from './platform/credential-vault.mjs';
@@ -134,7 +136,8 @@ let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGro
 let shuttingDown=false,desktopShutdown,agentConnectionSerial=0;
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
 const activeAuthoringTasks=new Map();
-const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
+const codexRoot=path.join(app.getPath('userData'),'provider-contexts','codex');
+const codex = new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host:createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime})}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 bindBundledWorkerRuntimeId(worker,workerSource);
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService});
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',

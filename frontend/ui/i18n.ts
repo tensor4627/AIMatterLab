@@ -1,5 +1,6 @@
 const english:Record<string,string> = {
 "工具调用":"Tool calls",
+"正在重新连接模型服务…":"Reconnecting to the model service…",
 "处理中":"In progress",
 "已验证工具的源码仓库":"Source repositories for validated tools",
 "安装说明":"Installation guide",

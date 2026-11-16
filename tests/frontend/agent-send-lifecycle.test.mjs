@@ -90,6 +90,12 @@ test('selection queued during acknowledged turn activates only after completion'
  const storage=memoryStorage();seed(storage,'other','other original');const h=agentHarness({storage});await h.flush();h.click('agent-connect');await h.flush();h.type('old request');h.send();await h.flush();assert.equal(starts(h).length,1);h.render({sessionSelection:{nonce:'queued-after-ack',conversation:conversation('codex','other')}});await h.flush();assert.notEqual(h.textarea().props.value,'other original');h.emit({method:'turn/completed',provider:'codex',params:{threadId:'started-thread',turn:{id:'accepted-turn',status:'completed'}}});await h.flush();assert.equal(h.textarea().props.value,'other original');assert.equal(starts(h).length,1);h.unmount();
 });
 
+test('Codex willRetry is transient progress, not failed model access or a persistent error',async()=>{
+ const h=await connected();try{h.type('one harmless request');h.send();await h.flush();h.emit({method:'error',provider:'codex',params:{threadId:'started-thread',turnId:'accepted-turn',willRetry:true,error:{message:'Reconnecting... 2/5'}}});await h.flush();assert.deepEqual(h.errors,[]);assert.match(JSON.stringify(h.find(n=>n.props?.['data-testid']==='agent-work-state')),/正在重新连接模型服务/);assert.equal(starts(h).length,1);
+ h.emit({method:'item/agentMessage/delta',provider:'codex',params:{threadId:'started-thread',turnId:'accepted-turn',itemId:'reply',delta:'actual reply'}});h.emit({method:'turn/completed',provider:'codex',params:{threadId:'started-thread',turn:{id:'accepted-turn',status:'completed'}}});await h.flush();assert.deepEqual(h.errors,[]);assert.throws(()=>stop(h));assert.equal(starts(h).length,1);
+ }finally{h.unmount();}
+});
+test('nonretryable Codex errors remain visible',async()=>{const h=await connected();try{h.type('one');h.send();await h.flush();h.emit({method:'error',provider:'codex',params:{threadId:'started-thread',turnId:'accepted-turn',willRetry:false,error:{message:'definitive failure'}}});await h.flush();assert.deepEqual(h.errors,['definitive failure']);assert.equal(starts(h).length,1);}finally{h.unmount();}});
 // Both history-fetch failure modes share one recovery contract, without duplicate setup.
 for(const phase of ['thread/resume','thread/read'])test(phase+' failure offers one explicit recovery and preserves the exact bound draft',async()=>{
  let failed=false;const bound={...conversation('codex','failed-history'),taskId:'owned-fixture-task'};

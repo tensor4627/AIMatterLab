@@ -63,3 +63,33 @@
 - 软件构建与发行：本次只改源码启动入口，无 renderer 代码变更，沿用上面的构建证据；未打包、未创建 tag、未自动推送。
 
 原始补验证据在忽略目录 `.studio/local-checks/provider-models-20261116/`，不纳入 Git。
+
+## 2026-11-16 终端输入与 Codex 发送修复
+
+### 终端输入
+
+`write_shared_terminal` 增加 `action:type|enter|interrupt`。`type` 保留原样文本，默认行为与旧调用兼容；不自动追加回车，不把 LF 转换成回车。`enter` 和 `interrupt` 不携带 `data`，分别由主进程映射为 CR 和 Ctrl+C。中断只能在用户当前委托范围内显式调用，软件不自动发送。三种操作沿用同一会话移交、provider/thread/task、owner epoch 和请求去重校验，不增加工具权限。
+
+空文本、缺少标识、非法 action、文本超限、NUL 或按键夹带文字均返回具体原因，并明确本次未发送；错误消息不包含原始输入。成功回执的 `execution_status:not_observed` 表示只接收了输入，Agent 必须继续读回结果，不能把回显当作命令执行或成功。
+
+### Codex 根因与修正
+
+本机 CLI `0.167.0-alpha.3.2` 的登录、模型列表和初始隔离检查可以通过；首次 `thread/start` 却返回额外的用户级全局指令来源，触发 `Unexpected native instruction source`。关闭项目指令读取并不能关闭这个独立来源；模型尚未收到用户消息。官方实现将 [全局指令](https://github.com/openai/codex/blob/main/codex-rs/codex-home/src/instructions/mod.rs) 与 [项目指令](https://github.com/openai/codex/blob/main/codex-rs/core/src/agents_md.rs) 分别加载。本机实际返回值是本次诊断依据，远端 main 源码只用于核对实现方式。
+
+Codex 现在使用 AIMatterLab 自有 `CODEX_HOME`，不载入用户全局指令、外部 MCP 或用户配置。用户已有 ChatGPT access token 通过官方 `chatgptAuthTokens` 协议在内存中复用，启动时声明该协议要求的 experimental API capability；不复制原生 refresh token，不写入导入令牌文件，不修改官方登录。后续只读回同一账户的更新 access token；账户变化时要求明确重连，不自动切换或重发消息。显式退出 AIMatterLab 会禁止下次自动复用，不退出官方 Codex。
+
+全局指令、原生工具、动态工具、项目权限与模型能力校验仍保留。CLI 的 `willRetry:true` 事件只显示正在重连，不标记本轮失败；最终错误仍显示，桌面不自行重放消息。
+
+**兼容性说明**：原生 Codex 的历史和配置不迁移到独立运行时，也不删除。已有旧开发会话如不能从新运行时读取，应使用显式对话恢复入口；真实流程、作业、SSH、凭据和原生历史保留。此次不保证旧开发聊天跨 `CODEX_HOME` 无损恢复。
+
+### 本次验证
+
+- 定向协议与安全回归：passed，12 个测试文件共 275 项，另有两个服务商上下文文件 25 项，共 300 项，0 failed/0 skipped，覆盖终端按键、错误状态、去重、移交撤销、Codex 独立目录、内存认证、账户变化、退出、生命周期与前端重连状态。
+- 真实 PowerShell：passed，使用生产 MCP/controller/broker 与独立配置，LF 不提交、`enter` 执行缓冲命令、`interrupt` 清除未完成输入后恢复执行；测试终端和 broker 均关闭。
+- 官方 DSH 0.2.2-rc.1：passed，本机合成模型通过真实 DSH 子进程原样传递 `type`、`enter`、`interrupt` 参数，不调用远端模型。
+- 真实 Codex 桌面：passed，当前 main/preload/构建 renderer、独立配置和既有 ChatGPT 登录，从输入框发送无文件访问、无工具调用的测试消息，收到真实 `AIMATTERLAB_CODEX_OK` 回复与 completed 回执；输入框清空，重连后无残留失败提示。没有生成导入登录的 `auth.json`，原登录保留。仅验证实际测试的 `gpt-6.1-sol`，其余两个模型未声称已完成回复测试。重启后恢复同一测试对话、读取原历史通过；后续测试回复由最终消息项确认，初始诊断脚本仅收集 delta 而误判缺少回复，检查既有结果后只读核对，未重发该消息。
+- 源码构建：passed，TypeScript、Vite、CLI installer 资源及固定运行时暂存通过。首次 PowerShell 将 pnpm 的 stderr 提示当成终止错误；调整该诊断命令的错误处理后完成构建。新增重连状态首次 TypeScript 检查指出空值访问，修正后重建通过。
+- 首次定向测试发现测试夹具未提供 `conversationTerminals`，补齐夹具后重跑；这不是放宽产品权限。终端错误白名单首次未保留具体错误，修正后回归通过。
+- 未重跑全量 CI；先前已知的整套测试失败和 Runner 环境问题不属于本轮通过结论。科学引擎、远端 SSH 和真实作业 not_run；未打包、未建 tag、未自动推送。
+
+本轮诊断回执、测试日志和桌面截图均存放于上述忽略目录，不把用户登录、全局指令内容或真实对话加入 Git。

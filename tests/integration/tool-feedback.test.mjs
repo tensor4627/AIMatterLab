@@ -12,6 +12,7 @@ test('Action names are readable while unknown names retain their identity',()=>{
 });
 test('Expected blockers and uncertain completion retain separate status and next steps',()=>{
  const input=toolActivity({status:'completed',result:toolFailure(Error('Missing required field'))});assert.equal(input.state,'blocked');assert.match(input.hint,/Agent/);assert.equal(input.artifact,undefined);
+ const rejected=toolActivity({status:'completed',result:toolFailure(Object.assign(Error('invalid terminal input'),{operationNotStarted:true}),{dispatched:true})});assert.equal(rejected.state,'blocked');
  const unknown=toolActivity({status:'completed',result:toolFailure(Error('Missing acknowledgement'),{dispatched:true})});assert.equal(unknown.state,'unknown');assert.match(unknown.hint,/重复提交/);
  const generic=toolActivity({status:'failed',error:{message:'Unexpected failure'}});assert.equal(generic.state,'failed');
 });
