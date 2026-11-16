@@ -8,7 +8,9 @@ import LoadingFeedback from '../../ui/LoadingFeedback';
 import CliRuntimeDialog from './CliRuntimeDialog';
 import {cliRuntime} from '../../api/cli-runtime';
 import type {CliReadiness} from '../../../contracts/dto/cli-runtime';
-export default function ProviderLogin({provider,onClose,onConfigured,onError,embedded=false,disabled=false}:{projectId?:string;embedded?:boolean;disabled?:boolean;provider:AgentProvider;onClose:()=>void;onConfigured:()=>void;onError:(e:unknown)=>void}){
+import ModelProviders from './ModelProviders';
+export default function ProviderLogin(props:Parameters<typeof LegacyProviderLogin>[0]){if(props.provider==='qwen'||props.provider==='compatible')return props.embedded?<ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured}/>:<Modal title={t('模型与 API')} onClose={props.onClose}><ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured}/></Modal>;return <LegacyProviderLogin {...props}/>;}
+function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=false,disabled=false}:{projectId?:string;embedded?:boolean;disabled?:boolean;provider:AgentProvider;onClose:()=>void;onConfigured:()=>void;onError:(e:unknown)=>void}){
  const [confirmRemove,setConfirmRemove]=useState(false),[baseUrl,setBaseUrl]=useState(''),[apiLabel,setApiLabel]=useState('');
  const [sharePublicGuides,setSharePublicGuides]=useState(false),[sharingTouched,setSharingTouched]=useState(false);
  const [reasoningMode,setReasoningMode]=useState('omit'),[reasoningEffort,setReasoningEffort]=useState('');

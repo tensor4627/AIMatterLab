@@ -9,7 +9,7 @@ import {pathToFileURL} from 'node:url';
 const require=createRequire(import.meta.url);
 const electronBuilderRequire=createRequire(require.resolve('electron-builder/package.json'));
 const semver=createRequire(electronBuilderRequire.resolve('app-builder-lib/package.json'))('semver');
-const ROOTS=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client'];
+const ROOTS=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client','@deepseek-ai/dsh-llm-pi-ai'];
 const ENTRY='node_modules/@deepseek-ai/dsh/lib/bin.js';
 // Dependencies used by the official CLI to boot the AIMatterLab profile.
 const STUDIO_PROFILE='studio-sdk-v2';

@@ -89,6 +89,7 @@ import { CodexBridge } from '../agent/providers/codex.mjs';
 
 import {AgentHub,loginUrl} from '../agent/providers/agent-hub.mjs';
 import {CredentialVault} from './platform/credential-vault.mjs';
+import {registerModelProfileRoutes} from './platform/model-profile-routes.mjs';
 import {providerId} from '../agent/providers/contracts.mjs';
 import { WorkerClient } from "../agent/tools/worker-client.mjs";
 import {readWorkerStatus} from '../backend/main/compute/worker-status.mjs';
@@ -179,7 +180,7 @@ if(installationVerifying){
 agents=new AgentHub({resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
-scientificSkills=new ScientificSkills({map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
+scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compatible'].includes(provider)||agents.bridge(provider)?.selection?.profile.sharePublicGuides===true,map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(root,'agent','tools','custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
@@ -468,6 +469,7 @@ handle('agent.connect',async({provider,repairTools=false})=>{
 });
 handle('agent.tools',async({provider})=>{providerId(provider);return scientificTools(provider);});
 handle('agent.disconnect',({provider})=>{providerId(provider);workflowContext.clear(provider);agents.disconnect(provider);return {};});
+registerModelProfileRoutes({handle,agents,assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},emit:event=>emit('studio:event',event),fetchApi:(...args)=>net.fetch(...args)});
 handle('agent.account',({provider})=>{providerId(provider);return agents.account(provider);});
 handle('agent.cli.inspect',value=>cliRuntimes.inspect(cliRuntimeRequest(value)));
 handle('agent.cli.install',value=>cliRuntimes.install(cliRuntimeRequest(value,{installation:true})));

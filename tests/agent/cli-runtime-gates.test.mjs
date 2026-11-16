@@ -5,9 +5,9 @@ import {AgentHub} from '../../agent/providers/agent-hub.mjs';
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const unavailable=provider=>Object.assign(Error('CLI is missing'),{readiness:{provider,status:'missing',expectedVersion:'fixture',message:'CLI is missing'}});
 function fixture(t,resolveCli){
- const calls=[],credentials=new Map(),children=[],codex=new EventEmitter();codex.close=()=>calls.push({method:'codex.close'});codex.activeTurns=new Map();
+ const calls=[],credentials=new Map(),records=new Map(),children=[],codex=new EventEmitter();codex.close=()=>calls.push({method:'codex.close'});codex.activeTurns=new Map();
  const host={prepareProfile:(root,provider)=>{calls.push({method:'profile',provider});return {cwd:root,args:['acp'],env:{}};},spawnCli:(file,args,options)=>{calls.push({method:'spawn',file,args,options});const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>child.emit('exit',null);children.push(child);return child;}};
- const hub=new AgentHub({codex,root:'.',catalog:{list:()=>[],get:()=>null},vault:{get:key=>credentials.get(key),put:(key,value)=>credentials.set(key,value)},settings:()=>({kimiPath:'stored-kimi',qwenPath:'stored-qwen'}),worker:()=>null,resolveCli,host});
+ const hub=new AgentHub({codex,root:'.',catalog:{list:kind=>[...records].filter(([id])=>id.startsWith(kind+':')).map(([,value])=>value),get:(kind,id)=>records.get(kind+':'+id),put:(kind,id,value)=>records.set(kind+':'+id,value)},vault:{get:key=>credentials.get(key),put:(key,value)=>credentials.set(key,value)},settings:()=>({kimiPath:'stored-kimi',qwenPath:'stored-qwen'}),worker:()=>null,resolveCli,host});
  for(const provider of ['kimi','qwen'])hub.bridges.set(provider,{activeTurns:new Map(),start:async file=>{calls.push({method:'start',provider,file});return {protocolVersion:1};},close:()=>calls.push({method:'close',provider})});
  t.after(()=>{hub.close();for(const child of children)child.emit('exit',null);});return {hub,calls,credentials};
 }

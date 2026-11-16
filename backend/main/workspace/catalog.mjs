@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import {sanitizeProtocolTranscript} from '../../../contracts/agent/transcript-sanitizer.mjs';
-const transcriptKind=kind=>/^(?:(?:compatible|deepseek)(?:-native|-legacy|-dsh)?-history|compatible-codex-thread|thread|agent-thread|conversation-context-history)$/.test(kind);
+const transcriptKind=kind=>/^(?:(?:compatible|deepseek)(?:-native|-legacy|-dsh)?-history|compatible-codex-thread|api-dsh-history|thread|agent-thread|conversation-context-history)$/.test(kind);
 function transcriptRecord(kind,value){
  if(!transcriptKind(kind))return value;
  const {id,threadId,thread_id,provider,...content}=value;

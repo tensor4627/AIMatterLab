@@ -4,6 +4,7 @@ const methods=new Set(['diagnostics.saveWorkbenchImage','task.stage.artifacts','
   'sharedTerminal.list','sharedTerminal.open','sharedTerminal.read','sharedTerminal.input','sharedTerminal.resize','sharedTerminal.owner','sharedTerminal.close','terminal.input','terminal.close','window','export','compute.profiles.list','compute.profiles.read','compute.profiles.save','compute.profiles.inventory','compute.connection.plan','compute.connection.status','compute.connection.connect','compute.connection.cancel','ssh.auth.plan','ssh.auth.start','ssh.auth.read','ssh.auth.input','ssh.auth.resize','ssh.auth.finish','ssh.auth.closed','ssh.tunnel.plan','ssh.tunnel.start','ssh.tunnel.status','ssh.tunnel.close']);
 for(const name of [
  'agent.cli.inspect','agent.cli.choose','agent.cli.install','agent.cli.cancel',
+ 'models.profiles.list','models.profiles.save','models.profiles.remove','models.profiles.discover','models.profiles.test',
  'diagnostics.performance',
  'compute.profiles.remove',
  'compute.sshService.connect','compute.sshService.status','compute.sshService.disconnect',

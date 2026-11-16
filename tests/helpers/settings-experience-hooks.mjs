@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import * as modelProfiles from '../../contracts/agent/model-profiles.mjs';
 export function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 export function experienceHarness({component,props:initial={},invoke:dispatch=async()=>({})}){
  const hooks=[],effects=[],calls=[],errors=[],configured=[],events=new Set(),modules=new Map();let cursor=0,dirty=false,disposed=false,tree;
@@ -11,6 +12,8 @@ export function experienceHarness({component,props:initial={},invoke:dispatch=as
  const invoke=(method,data)=>{calls.push({method,data});return dispatch(method,data);},window={studio:{invoke,onEvent:fn=>{events.add(fn);return()=>events.delete(fn);}}};
  function load(file){if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);const require=name=>{
   if(name==='react')return {useState,useRef,useEffect};
+   if(name.endsWith('.css'))return {};
+   if(name==='../../../contracts/agent/model-profiles.mjs')return modelProfiles;
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
   if(name==='../../api/studio')return {invoke};
   if(name==='../../api/worker')return {api:(method,target,data)=>invoke('worker.request',{method,target,data})};
@@ -21,7 +24,7 @@ export function experienceHarness({component,props:initial={},invoke:dispatch=as
   if(name.startsWith('.')){const base=path.resolve(path.dirname(file),name),resolved=['.ts','.tsx','.mjs'].map(ext=>base+ext).find(candidate=>fs.existsSync(candidate));if(resolved)return load(resolved);}
   throw Error('Unexpected experience dependency '+name);
  };const compiled=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;new Function('require','module','exports','window',compiled)(require,module,module.exports,window);return module.exports;}
- const Component=load(path.resolve('frontend/features/'+(component==='ProviderLogin'?'settings/ProviderLogin':component==='CliRuntimeDialog'?'settings/CliRuntimeDialog':'cluster/ClusterFiles')+'.tsx')).default;
+ const Component=load(path.resolve('frontend/features/'+(component==='ModelProviders'?'settings/ModelProviders':component==='ProviderLogin'?'settings/ProviderLogin':component==='CliRuntimeDialog'?'settings/CliRuntimeDialog':'cluster/ClusterFiles')+'.tsx')).default;
  const all=node=>Array.isArray(node)?node.flatMap(all):!node||typeof node!=='object'?[]:[node,...all(node.props?.children)];
  const text=node=>Array.isArray(node)?node.map(text).join(''):node==null||typeof node==='boolean'?'':typeof node==='object'?text(node.props?.children):String(node);
  function render(next){if(next)props={...props,...next};cursor=0;dirty=false;tree=Component(props);}

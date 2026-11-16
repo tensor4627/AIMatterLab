@@ -1,7 +1,7 @@
 {
   "name": "aimatterlab",
   "productName": "AIMatterLab",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -41,6 +41,7 @@
   "devDependencies": {
     "@deepseek-ai/dsh": "0.2.2-rc.1",
     "@deepseek-ai/dsh-mcp-client": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.2.2-rc.1",
     "@deepseek-ai/dsh-sdk-minimal": "0.2.2-rc.1",
     "@lydell/node-pty": "1.2.0-beta.10",
     "@moonshot-ai/kimi-code": "2.1.1",
@@ -61,7 +62,7 @@
     "productName": "AIMatterLab",
     "beforeBuild": "scripts/package-runtime.mjs",
     "directories": {
-      "output": "release/v0.1.1"
+      "output": "release/v0.1.2"
     },
     "files": [
       "dist/**",

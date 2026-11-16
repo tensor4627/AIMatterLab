@@ -39,6 +39,9 @@ importers:
       '@deepseek-ai/dsh':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(6f57ad7c7ae157942f51575379da0c47)
+      '@deepseek-ai/dsh-llm-pi-ai':
+        specifier: 0.2.2-rc.1
+        version: 0.2.2-rc.1(70f61c6bb8b61ca8acf090dd87cc4ca5)
       '@deepseek-ai/dsh-mcp-client':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(f493aa6df3539275aa669c2bcea3e03a)
