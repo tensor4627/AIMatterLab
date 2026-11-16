@@ -2,6 +2,11 @@
   "schema_version": 1,
   "scope": "Adapter input contract only. Alias mapping uses explicit existing facts, rejects conflicts, and never proves scientific or serialized-model correctness. File parameters must identify an actual files entry by its preserved basename. Reserved parameters.validation accepts only the declared numerical FD controls on supported sampling/validation routes. Runtime state, scope, missing-information lists and review commentary belong in step descriptions or a separate saved review manifest, never required editable scientific fields. An empty diagnostic list means no issue; it is not missing scientific input.",
   "engines": {
+    "trajectory.density": {
+      "required_parameters": [], "input_file_parameters": [], "aliases": {},
+      "required_inputs": ["trajectory.xyz"], "declaration_tokens": [],
+      "scope": "Built-in CPU analysis of periodic GPUMD extended XYZ. Per-frame volume and atom number density with a digest of the parsed input stream."
+    },
     "gpumd.neb": {
       "required_parameters": [],
       "input_file_parameters": [],

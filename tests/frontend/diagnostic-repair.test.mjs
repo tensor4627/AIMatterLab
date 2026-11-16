@@ -37,11 +37,11 @@ test('actual diagnostic action only supplies a bound draft when clicked, includi
 
 function handoffFixture(select){
  const source=fs.readFileSync(new URL('../../frontend/app/App.tsx',import.meta.url),'utf8');
- const body=source.slice(source.indexOf('async function repairWorkflow('),source.indexOf(' function askAgent('));
+ const body=source.slice(source.indexOf('async function openWorkflowDiscussion('),source.indexOf(' function askAgent('));
  const javascript=ts.transpileModule(body,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
  const intents=[],selections=[],errors=[],seq={current:0},mounted={current:true};
  const values={agentBusy:false,agentTasks:[task],conversationSelectionSeq:seq,setAgentIntent:value=>intents.push(value),settingsReady:{current:Promise.resolve()},mounted,invoke:select,selectedConversationRef:{current:{id:'other-chat'}},beginWorkerGate(){},setSkill(){},conversationChanged(){},setProjectId(){},setSessionSelection:value=>selections.push(value),observeWorker:async()=>true,setAgentVisible(){},setPrimaryPanel(){},onError:error=>errors.push(error),t:value=>value,crypto};
- const run=new Function(...Object.keys(values),javascript+'\nreturn repairWorkflow;')(...Object.values(values));
+ const run=new Function(...Object.keys(values),javascript+'\nreturn openWorkflowDiscussion;')(...Object.values(values));
  return {run,intents,selections,errors,seq,mounted};
 }
 test('actual App handoff selects exact original conversation and stages a draft without sending',async()=>{

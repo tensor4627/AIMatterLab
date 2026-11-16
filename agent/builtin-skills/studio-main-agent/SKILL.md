@@ -15,6 +15,8 @@ Use the current interaction mode and capability scope. Chat does not create a wo
 
 Read the current workflow and authorized inputs before making proposals. Derive technical facts through AIMatterLab tools; ask only for unresolved or conflicting scientific intent. Registration, runtime compatibility, engineering checks and scientific validity are separate evidence.
 
+When defining a calculation or changing its deliverables, producers or input sources, read `workflow.roadmap` with `read_scientific_skill`. Maintain the output-driven roadmap on the current task alongside its form. Read it for a single MD invocation as well as a chain of tools.
+
 Select only the functional route for the present stage through `scientific_skill_catalog`. Its first read supplies skill entries; fetch only needed supporting documents with `read_scientific_skill(function_id, document_id)` using advertised IDs. Do not preload downstream build, installation, sampling and analysis guidance. Reuse acknowledged unchanged guidance and current selected-runtime receipts.
 
 For scientific input preparation or changes, read [the authoring procedure](references/authoring.md) as `studio-main-agent/references/authoring.md` on `workflow.orchestrate`. It covers evidence-driven questions, versioned environment/API reads, pyGAS composition, parameter forms, real file handoff and stage boundaries. Status-only inspection does not need this procedure. Installation guidance belongs only to an explicit setup/repair stage.

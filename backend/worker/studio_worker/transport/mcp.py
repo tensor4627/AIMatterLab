@@ -18,6 +18,8 @@ from studio_worker.compute.service import Service
 from studio_worker.transport.runtime_projection import result_for_agent
 from studio_worker.tools.templates import build_bias
 from studio_worker.transport.task_schema import STEP_SCHEMA, validate_task
+from studio_worker.transport.roadmap_schema import ROADMAP_SCHEMA
+from studio_worker.transport.roadmap import RoadmapError
 from studio_worker.infrastructure.util import leaf, atomic_json, digest, contained
 
 TOOL_ROUTES = {
@@ -84,7 +86,7 @@ DESCRIPTIONS = {
  "inspect_source_project":"Read the registered public catalog and source-hashed graph/AIMatterLab I/O contract. For hotpp/pydyn omit symbols and read public_api_contract; request up to four advertised exact source-qualified IDs with api_symbols for bounded method source or explicitly advertised HotPP train.py DefaultPara tree/helpers, not arbitrary files or complete configuration semantics. Qualified output symbol_id values are identities, not symbols selectors. Optional symbols selects up to four exact pyGAS class names and returns bounded AST method bodies, e.g. PairwiseDistanceMean forward/MIC/output rank. No arbitrary file path, import or execution. read_project_input reads project assets, not source repositories. Inspect actual CV output shape and supported reduce semantics before collecting scalar CVs; prose alone is not executable.",
  "create_structure":"Create and register an ASE structure asset from a bounded declarative recipe. kind bulk (name, optional crystalstructure/a/cubic); molecule (name, optional vacuum); surface (bulk kwargs, indices, layers, vacuum); explicit (symbols, positions, cell, pbc); import (authorized path). Optional repeat [nx,ny,nz]. Returns validated reloaded extxyz, preview, provenance and inferred facts. Authoring only; never runs MD/relaxation.",
  "render_pygas_workflow":"Validate a saved graph against the actual pyGAS catalog and render executable build source using its graph compiler. Save the canonical graph and executable build_bias.py directly as project inputs; return their paths, hashes and a bounded preview to avoid copying long code through chat. Does not execute or build the artifact. graph.settings must include atoms_path (actual structure) and pt_path (requested output artifact); AIMatterLab snapshots their basenames and sets workflow_path=workflow.json. Read inspect_source_project.graph_contract including studio_io and reduction/output-shape rules first. Include returned files and the source structure in a pygas.build task for human execution.",
- "present_task":"Fill the central AIMatterLab task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Put critical CV/bias parameters first; secondary settings can use advanced:true and a scalar default plus traceable default_source. Defaults are display guidance, not actual input edits. Record actual scientific parameters, file paths and missing fields. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters. Do not create required editable fields for runtime/scope/status notes or empty missing-information lists. Reserved parameters.validation accepts only describe_engine numerical controls; review explanations belong in step descriptions or a saved review manifest.",
+ "present_task":"Fill the central AIMatterLab task page using the task_id supplied in context. Update this conversation-owned workflow in place. Prefer structured steps {id,title,description,tool,fields:[{key,label,type,required,unit,options}]} with stable IDs and dot-path keys into nested parameters. Put critical CV/bias parameters first; secondary settings can use advanced:true and a scalar default plus traceable default_source. Defaults are display guidance, not actual input edits. Record actual scientific parameters, file paths and missing fields. Optionally supply a top-level roadmap of requested outputs, observable requirements, tool invocation ports and initial inputs. Omitting it preserves the saved roadmap. This creates no calculation and cannot claim validation. Call this before giving a calculation design or updating parameters. Do not create required editable fields for runtime/scope/status notes or empty missing-information lists. Reserved parameters.validation accepts only describe_engine numerical controls; review explanations belong in step descriptions or a saved review manifest.",
  "prepare_cluster_run":"Prepare an immutable SSH/LSF/Slurm run snapshot and batch script. This operation does not submit. Continue validation or submission within the user's existing delegation and project/resource authorization.",
  "validate_cluster_run":"Check a prepared cluster run in the registered target environment. Preserve actual passed/failed/not_run findings separately from execution authorization.",
  "submit_cluster_run":"Submit the prepared cluster snapshot within existing project/resource authorization and current user delegation. Inspect an unknown original submission; never replay it.",
@@ -115,6 +117,7 @@ def _tool_definitions():
         if name=="describe_engine":schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name in ("probe_environment","read_runtime_guide"):schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name == "present_task":
+            schema["properties"]["roadmap"]={key:value for key,value in ROADMAP_SCHEMA.items() if key!="$id"}
             schema["properties"]["steps"]={"type":"array","items":STEP_SCHEMA}
             schema["properties"]["missing_fields"]={"type":"array","items":{"type":"string"}}
             schema["additionalProperties"]=False
@@ -187,6 +190,10 @@ def mcp_tool_call(service, params, *, dispatch):
         started = True
         result = result_for_agent(name, dispatch(service, method, route, arguments, admin=False),arguments)
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": False}
+    except RoadmapError as exc:
+        failure = {"status":"blocked", "code":"invalid_input", "operation_state":"not_started",
+                   "message":str(exc), "next_step":"Correct the roadmap on this same task. The previous draft is still saved."}
+        return {"content":[{"type":"text","text":json.dumps(failure)}], "isError":True}
     except Exception as exc:
         from studio_worker.compute.ssh_auth import AuthError
         if isinstance(exc, AuthError):

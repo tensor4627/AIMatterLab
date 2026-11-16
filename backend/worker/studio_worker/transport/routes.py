@@ -63,6 +63,15 @@ def gpu_inventory(run=subprocess.run):
 
 
 def dispatch(service, method, path, data, admin=False):
+    if path.startswith('/api/workflow/roadmap/'):
+        if method!='POST' or not admin:
+            raise PermissionError('Desktop workflow confirmation channel required')
+        from studio_worker.workspace.roadmap_execution import RoadmapExecutions
+        controller=RoadmapExecutions(service)
+        operations={'preview':controller.preview,'confirm':controller.confirm,'status':controller.status,'list':controller.list,'snapshot':controller.snapshot}
+        operation=operations.get(path.removeprefix('/api/workflow/roadmap/'))
+        if operation is None:raise ValueError('Unknown roadmap operation')
+        return operation(data)
     store = service.store
     if method == 'POST' and path in ('/api/runs/prepare', '/api/run/validate', '/api/run/submit', '/api/run/resume', '/api/run/revise'):
         from studio_worker.compute.ssh_service import require_local_execution
@@ -91,6 +100,8 @@ def dispatch(service, method, path, data, admin=False):
     if method == "GET":
         if path == "/api/health":
             value = {"name": "gpu-sampling-studio", "product_name": "AIMatterLab", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1}
+            if not getattr(service,'ssh_service_mode',False):
+                value["roadmap_execution_schema"]=1
             if getattr(service, 'ssh_service_mode', False):
                 from studio_worker.compute.ssh_service import identity
                 host = identity(service.root)
@@ -226,7 +237,11 @@ def dispatch(service, method, path, data, admin=False):
     if path=="/api/tasks/present":
         leaf(data["task_id"])
         validate_task(data)
-        return store.put("task-parameters",{"id":data["task_id"],"kind":"task-parameters","name":data["name"],"parameters":data["parameters"],"steps":data["steps"],"missing_fields":data["missing_fields"],"status":"draft"})
+        draft = {"id":data["task_id"], "kind":"task-parameters", "name":data["name"],
+                 "parameters":data["parameters"], "steps":data["steps"], "missing_fields":data["missing_fields"], "status":"draft"}
+        if "roadmap" in data:
+            draft["roadmap"] = data["roadmap"]
+        return store.put_task_parameters(draft)
     if path.startswith('/api/cluster/auth/') or path.startswith('/api/cluster/tunnel/'):
         if not admin:
             raise PermissionError('Private SSH authentication requires the desktop human pane')

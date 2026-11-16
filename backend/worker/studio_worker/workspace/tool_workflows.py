@@ -33,6 +33,9 @@ def _context(service, context):
 
 
 def prepare_binding(service, context, spec):
+    from studio_worker.workspace import roadmap_execution as roadmap
+    if isinstance(context,roadmap.RoadmapContext):
+        return roadmap.prepare_binding(service,context,spec)
     context = _context(service, context); owner = ToolWorkflows(service)
     execution = owner._execution(context.execution_id); step = owner._step(execution, context.step_id)
     if step['status'] != 'preparing' or encoded(spec) != encoded(step.get('spec')): raise PermissionError('Exact persisted workflow preparation intent required')
@@ -41,6 +44,9 @@ def prepare_binding(service, context, spec):
 
 
 def run_directory(service, context, run_id):
+    from studio_worker.workspace import roadmap_execution as roadmap
+    if isinstance(context,roadmap.RoadmapContext):
+        return roadmap.run_directory(service,context,run_id)
     context = _context(service, context); owner = ToolWorkflows(service)
     execution = owner._execution(context.execution_id); step = owner._step(execution, context.step_id)
     if step['status'] != 'preparing': raise PermissionError('Persisted workflow preparation intent required')
@@ -49,6 +55,9 @@ def run_directory(service, context, run_id):
 
 def assert_bound_run(service, run, context, phase):
     if not run.get('studio_workflow_binding'): return
+    if run['studio_workflow_binding'].get('schema_version')==2:
+        from studio_worker.workspace import roadmap_execution as roadmap
+        return roadmap.assert_bound_run(service,run,context,phase)
     context = _context(service, context); owner = ToolWorkflows(service)
     execution = owner._execution(context.execution_id); step = owner._step(execution, context.step_id)
     if step['status'] != phase: raise PermissionError('Human-reviewed workflow execution phase required')

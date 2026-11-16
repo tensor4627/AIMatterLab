@@ -7,7 +7,7 @@ from pathlib import Path
 from studio_worker.infrastructure.util import run_json, digest
 ENGINES = ("gpumd.neb", "gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
            "pydyn.sampling", "nep.train", "nep.eval", "nep.analyze", "hotpp.train", "hotpp.eval",
-           "hotpp.export", "pygas.reweight", "pygas.opes-reweight")
+           "hotpp.export", "pygas.reweight", "pygas.opes-reweight", "trajectory.density")
 # Installer-only fixed scripts are not scientific engine choices or defaults.
 SUPPORTED_ENGINES = ENGINES + ("installation.check",)
 # Migration set: declaration-driven prepare is the default for routes whose production argv
@@ -27,8 +27,8 @@ PACKAGE_ROOT = Path(__file__).parent.parent
 SCIENTIFIC = PACKAGE_ROOT / "scientific.py"
 
 
-def process_env(environment, gpu=None):
-    env = os.environ.copy()
+def process_env(environment, gpu=None, *, base=None):
+    env = os.environ.copy() if base is None else dict(base)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     if gpu is not None:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
@@ -44,12 +44,14 @@ def process_env(environment, gpu=None):
 
 def allocated_gpu(run):
     """Legacy GPU ordinals remain unchanged; fixed CPU checks reserve no GPU."""
-    return None if run.get("engine") == "installation.check" else run.get("gpu")
+    return None if run.get("engine") in ("installation.check","trajectory.density") else run.get("gpu")
 
 
 def run_process_env(run):
     gpu = allocated_gpu(run)
-    return process_env(run["environment_snapshot"], "" if run.get("engine") == "installation.check" else gpu)
+    bound = (run.get("studio_workflow_binding") or {}).get("schema_version")==2
+    base = {"PATH":os.defpath,"LANG":"C","LC_ALL":"C"} if bound else None
+    return process_env(run["environment_snapshot"], "" if gpu is None else gpu, base=base)
 
 
 class Adapter:
@@ -199,6 +201,10 @@ class Adapter:
         declaration-bound argv is returned, so a thinner declaration cannot silently
         accept an unprepared task.
         """
+        if self.engine == "trajectory.density":
+            self.require(spec["inputs"], ("trajectory.xyz",))
+            script = Path(__file__).with_name("trajectory_density.py")
+            return [self.executable(environment, "python"), "-I", "density-analysis.py" if spec.get("studio_workflow_binding") else str(script)]
         binding = self._declaration_binding(spec, environment)
         if binding is not None:
             from studio_worker.tools import engine_contracts
@@ -295,6 +301,10 @@ class Adapter:
 
         Arbitrary Python drivers and undeclared controls are not semantically proven.
         """
+        if self.engine == "trajectory.density" and spec.get("studio_workflow_binding"):
+            if digest(Path(directory)/"density-analysis.py") != digest(Path(__file__).with_name("trajectory_density.py")):
+                raise ValueError("Analysis implementation differs from the frozen built-in tool")
+            return {"status":"passed","scope":"Frozen analysis implementation"}
         if self.engine == "installation.check":
             import hashlib
             case = spec.get("parameters", {}).get("installation_case")

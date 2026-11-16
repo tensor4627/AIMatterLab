@@ -1,5 +1,6 @@
 import re
 import math
+from studio_worker.transport.roadmap import RoadmapError, validate_roadmap
 
 FIELD_TYPES = ["text", "number", "integer", "boolean", "file", "files", "list", "object", "select", "multiline"]
 FIELD_SCHEMA = {"type": "object", "required": ["key", "label", "type", "required"], "additionalProperties": False,
@@ -21,7 +22,7 @@ def field_key(value):
 
 
 def validate_task(data):
-    if set(data) != {"task_id", "name", "steps", "parameters", "missing_fields"}:
+    if set(data) - {"roadmap"} != {"task_id", "name", "steps", "parameters", "missing_fields"}:
         raise ValueError("present_task requires task_id, name, steps, parameters, missing_fields")
     if not isinstance(data["name"], str) or not data["name"].strip() or len(data["name"]) > 200 or not isinstance(data["parameters"], dict):
         raise ValueError("Invalid task name or parameters")
@@ -70,3 +71,8 @@ def validate_task(data):
             if isinstance(value, dict):
                 walk(value, path)
     walk(data["parameters"])
+    if "roadmap" in data:
+        try:
+            validate_roadmap(data["roadmap"], field_key)
+        except ValueError as exc:
+            raise RoadmapError(str(exc)) from exc

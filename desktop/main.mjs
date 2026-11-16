@@ -36,6 +36,7 @@ import {createToolGroupRecords} from '../backend/main/tools/groups.mjs';
 import {registerToolDefinitionRoutes} from '../backend/main/tools/routes.mjs';
 import {createToolConfigurationController,registerToolConfigurationRoutes} from '../backend/main/compute/tool-configurations.mjs';
 import {createToolWorkflowController,registerToolWorkflowRoutes} from '../backend/main/workspace/tool-workflows.mjs';
+import {createRoadmapController} from '../backend/main/workspace/roadmap-execution.mjs';
 import {toolGuidanceTarget} from '../backend/main/compute/tool-guidance-target.mjs';
 import {explicitSetupStage} from '../agent/skills/explicit-setup-stage.mjs';
 import {createComputeOnboarding} from "../backend/main/compute/compute-onboarding.mjs";
@@ -228,6 +229,15 @@ toolWorkflows=createToolWorkflowController({catalog,groups:toolGroups,configurat
  confirm:async({workflow,step},event)=>{trusted(event);const review=step.review,result=await dialog.showMessageBox(window,{type:'question',buttons:settings.language==='en'?['Cancel','Execute this step']:['取消','执行这个步骤'],defaultId:0,cancelId:0,message:settings.language==='en'?'Execute this reviewed workflow step?':'执行已复核的这个流程步骤？',detail:[workflow.name,step.id,review.run_id,review.target.project_id,review.target.environment_id,review.directory,review.argv.join(' '),'Review SHA256: '+review.review_sha256].join('\n')});trusted(event);return result.response===1;}
 });
 registerToolWorkflowRoutes({handle,controller:toolWorkflows});
+const roadmapExecutions=createRoadmapController({worker,catalog,groups:toolGroups,packages:toolPackages,getSettings:()=>settings,current:()=>workflowContext.current(),getTask:id=>taskRecords.read(id),assertIdle:assertIdleAgent,
+ confirm:async(review,event)=>{
+  trusted(event);const {snapshot}=review,en=settings.language==='en';
+  const result=await dialog.showMessageBox(window,{type:'question',buttons:en?['Cancel','Freeze and run']:['取消','冻结并执行'],defaultId:0,cancelId:0,
+   message:en?'Run the reviewed workflow?':'按照已核对的流程执行？',detail:[snapshot.name,snapshot.original_request,snapshot.target.project_id+' / '+snapshot.target.environment_id,
+    snapshot.steps.map(node=>node.label+' ('+node.tool+')').join(' → '),...snapshot.goals.map(goal=>goal.label+' · '+(goal.requirements||[]).join(' / ')),review.snapshot_sha256].join('\n')});
+  trusted(event);return result.response===1;
+ }});
+for(const action of ['preview','confirm','list','snapshot'])handle('task.roadmap.'+action,(data,event)=>roadmapExecutions[action](data,event));
 const lastCompute=catalog.get('worker-binding','last-explicit');
 const computeProfiles=createComputeProfiles({catalog,guideRoot:path.join(app.getPath('userData'),'ssh-service-environments'),initialWsl:lastCompute?.kind!=='ssh'&&validExplicitBinding(lastCompute,settings)?{distribution:lastCompute.distribution,root:lastCompute.root,port:lastCompute.port,intent:lastCompute.intent||'standard'}:undefined});
 const serviceRegistration=createSshServiceRegistration({catalog,profiles:computeProfiles,legacyBinding:()=>catalog.get('worker-binding','last-explicit')});

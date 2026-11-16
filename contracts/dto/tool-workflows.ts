@@ -10,7 +10,7 @@ export interface ToolWorkflowExecution {schema_version:1;id:string;workflow_id:s
 export interface ToolWorkflowRead {workflow:ToolWorkflow;execution:ToolWorkflowExecution;cancelled?:boolean}
 export interface ToolWorkflowCreate {task_id:string;workspace_id:string;name:string;directory_name:string;group_id:string;group_version:string;configurations:{step_id:string;configuration_id:string}[];request_id:string}
 export interface ToolWorkflowReference {task_id:string;execution_id:string}
-export interface ToolWorkflowLocation {task_id:string;provider:AgentProvider;thread_id:string;conversation_id:string;workspace_id:string;workflow_id:string;execution_id:string;step_id:string;run_id:string}
+export interface ToolWorkflowLocation {roadmap?:boolean;task_id:string;provider:AgentProvider;thread_id:string;conversation_id:string;workspace_id:string;workflow_id:string;execution_id:string;step_id:string;run_id:string}
 export interface ToolWorkflowPrepare extends ToolWorkflowReference {step_id:string;expected_revision:number;request_id:string}
 export interface ToolWorkflowExecute extends ToolWorkflowReference {step_id:string;expected_revision:number;review_sha256:string}
 export interface ToolWorkflowIndex {schema_version:1;execution_id:string;workflow_id:string;task_id:string;workspace_id:string;name:string;group_id:string;group_version:string;target:ToolWorkflowTarget;worker_binding:{distribution:string;root:string;port:number};created_at:number;last_revision:number}

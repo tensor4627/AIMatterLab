@@ -186,6 +186,12 @@
       ]
     },
     {
+      "id": "studio-workflow-roadmap",
+      "source": "studio",
+      "folder": "studio-workflow-roadmap",
+      "files": ["SKILL.md"]
+    },
+    {
       "id": "studio-workflow-authoring",
       "source": "studio",
       "folder": "studio-workflow-authoring",
@@ -753,6 +759,15 @@
       "status": "read_only_compatibility_guidance_builds_are_separate_reviewed_stage",
       "phase": "toolchain",
       "adaptation": "Do not auto-attach to ordinary MD or require benchmarks for routine use; never invoke an unrequested build or fallback from selected AOTI."
+    },
+    {
+      "id": "workflow.roadmap",
+      "title": "计算流程图与输入输出规划",
+      "engines": [],
+      "skills": ["studio-workflow-roadmap"],
+      "tools": ["present_task", "describe_engine"],
+      "phase": "orchestration",
+      "status": "implemented_bundled_planning"
     },
     {
       "id": "workflow.orchestrate",

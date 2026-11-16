@@ -1,14 +1,20 @@
 import {useEffect} from 'react';
 import {t} from "../../ui/i18n";
 import type {ToolWorkflowReview} from '../../../contracts/dto/tool-workflows';
+import type {FrozenGroupView} from './roadmap-layout';
 import {referenceFunctions,supportedGroup,useToolWorkflows,type ToolWorkflowsOptions} from './useToolWorkflows';
 import './tool-workflows.css';
 
 const short=(value:string)=>value.slice(0,12);
 function reviewCard(review:ToolWorkflowReview){return <details className="tool-step-review" open data-testid="tool-step-review"><summary>{t('本步骤实际执行回执')}</summary><dl><dt>{t('原任务')}</dt><dd>{review.run_id}</dd><dt>{t('计算项目 / 环境')}</dt><dd>{review.target.project_id} / {review.target.environment_id}</dd><dt>{t('步骤目录')}</dt><dd>{review.directory}</dd><dt>{t('运行工作目录')}</dt><dd>{review.working_directory}</dd><dt>{t('时限')}</dt><dd>{review.max_seconds}s</dd><dt>{t('包 / 功能')}</dt><dd>{review.package_id} · {review.package_version} · {review.function_id}</dd><dt>{t('冻结工具组')}</dt><dd>{review.group_id} · {review.group_version}</dd><dt>{t('配置 / 执行技能')}</dt><dd>{review.configuration_id} · {review.execution_skill_id} · {review.execution_skill_sha256}</dd></dl><h5>{t('实际命令参数')}</h5><pre>{JSON.stringify(review.argv,null,2)}</pre><h5>{t('不可变输入快照')}</h5><ul>{review.inputs.map(input=><li key={input.name}>{input.name} · SHA256 {input.sha256}{input.size!==undefined?' · '+input.size+' bytes':''}{input.source&&<p>{input.source}</p>}</li>)}</ul><h5>{t('实际输出通过标准')}</h5><pre>{JSON.stringify(review.criteria,null,2)}</pre><details><summary>{t('环境、授权与安装身份')}</summary><p>{review.environment_sha256}</p><p>{review.authorization_sha256}</p><pre>{JSON.stringify({python:review.python,install_files:review.install_files},null,2)}</pre><p>{t('任务请求哈希')}: {review.request_hash}</p><p>{t('审阅摘要')}: {review.review_sha256}</p></details></details>;}
 
-export default function ToolWorkflowsPanel(props:ToolWorkflowsOptions){
+export default function ToolWorkflowsPanel(props:ToolWorkflowsOptions&{onFrozenGroup?:(group:FrozenGroupView|null)=>void}){
  const state=useToolWorkflows(props),{context,group,bundle}=state,disabled=!state.enabled||!!state.working||state.loading||!context;
+ useEffect(()=>{
+  const current=props.worker&&context?.task_id===props.task.id&&context?.workspace_id===props.task.workspace?.id;
+  props.onFrozenGroup?.(current&&context&&group?.version?{taskId:context.task_id,workspaceId:context.workspace_id,record:group}:null);
+  return ()=>props.onFrozenGroup?.(null);
+ },[props.onFrozenGroup,props.worker,props.task.id,props.task.workspace?.id,context?.owner_key,group]);
  useEffect(()=>{if(state.focusedStep&&bundle&&typeof document!=='undefined'){const element=document.getElementById('tool-flow-step-'+bundle.execution.id+'-'+state.focusedStep);element?.scrollIntoView?.({block:'nearest'});element?.focus?.({preventScroll:true});}},[bundle?.execution.id,state.focusedStep]);
  return <section className="tool-workflows-panel" data-testid="tool-workflows-panel"><h3>{t('工作区工具组流程')}</h3><p>{t('冻结工具组与真实执行配置，逐步骤准备输入、审阅并确认执行。当前支持固定串行 CPU 工程参考。')}</p>
   {!props.task.workspace?.id&&<p role={props.toolWorkflowFocus?'alert':undefined}>{t(props.toolWorkflowFocus?'请返回此流程原来保存的工作区；未自动切换或执行。':'先选择已保存的工作区，再组织工具组流程。')}</p>}
