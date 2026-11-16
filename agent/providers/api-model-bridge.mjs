@@ -16,7 +16,7 @@ export class ApiModelBridge extends DshBridge{
  modelCatalog(){return {data:this.profiles.list(this.provider).flatMap(profile=>profile.models.map(model=>{
   const efforts=model.reasoningEfforts&&Object.entries(model.reasoningEfforts).map(([id])=>({reasoningEffort:id,description:id}))||[];
   const info=profile.id===this.selection?.profile.id?this.modelInfos?.find(v=>v.id===model.id):null;
-  const available=info?.reasoning?.efforts?.map(v=>({reasoningEffort:v.id,description:v.name||v.id}))||efforts;
+  const available=profile.authMode==='deepseek-account'?efforts:info?.reasoning?.efforts?.map(v=>({reasoningEffort:v.id,description:v.name||v.id}))||efforts;
   return {id:apiModelKey(profile.id,model.id),model:apiModelKey(profile.id,model.id),displayName:model.name||model.id,providerName:profile.name,profileId:profile.id,isDefault:apiModelKey(profile.id,model.id)===this.model,supportedReasoningEfforts:available,defaultReasoningEffort:available.find(v=>v.reasoningEffort==='off')?.reasoningEffort||info?.reasoning?.defaultEffort||available[0]?.reasoningEffort,...model.contextWindow?{contextWindow:model.contextWindow}:{},...model.maxTokens?{maxTokens:model.maxTokens}:{}};
  }))};}
  async start(){if(this.starting)return this.starting;if(this.process)return this.info;if(!this.profiles.list(this.provider).length)throw Error('请先保存 API Key 和服务商模型配置');this.choose(this.model);const promise=this.launch(this.model).finally(()=>{if(this.starting===promise)this.starting=null;});this.starting=promise;return promise;}
@@ -54,7 +54,7 @@ export class ApiModelBridge extends DshBridge{
   const turns=binding?[...(binding.legacyTurns||[]),...(binding.nativeTurns||[])]:legacy.turns||[];
   session={schemaVersion:1,harness:'dsh',provider:this.provider,id,nativeId:randomUUID(),nativeStarted:false,legacyContextPending:true,name:legacy.name||'',model:apiModelKey(profile.id,legacy.model),profileId:profile.id,apiEndpoint:profile.baseUrl,apiProtocol:profile.api,turns:structuredClone(turns),updatedAt:legacy.updatedAt||Date.now()};this.sessions.set(id,session);this.save(session);return session;
  }
- assertBinding(session){const profile=this.profiles.read(session.profileId);if(profile.provider!==this.provider||profile.baseUrl!==session.apiEndpoint||profile.api!==session.apiProtocol)throw Error('此对话绑定的 API 地址或协议已变化；请恢复原配置或新建对话，不会发送旧历史');}
+ assertBinding(session){const profile=this.profiles.read(session.profileId);if(profile.provider!==this.provider||profile.baseUrl!==session.apiEndpoint||profile.api!==session.apiProtocol||(profile.authMode||'api-key')!==(session.authMode||'api-key'))throw Error('此对话绑定的 API 地址或协议已变化；请恢复原配置或新建对话，不会发送旧历史');}
  prepareTurnModel(params){
   const session=this.session(params.threadId),selected=this.profiles.resolve(this.provider,params.model||session.model);
   if(selected.profile.id!==session.profileId)throw Error('不能在现有对话中切换 API 服务商；请新建对话，防止历史被发送到其他服务');
@@ -65,7 +65,7 @@ export class ApiModelBridge extends DshBridge{
   options.assertCurrent?.();if(method==='model/list')return this.modelCatalog();if(method==='model/select'){if(this.activeTurns.size)throw Error('请先停止当前回复再切换模型');this.choose(params.model);return this.modelCatalog();}
   if(method==='thread/start'){
    this.choose(params.model);const selected=this.selection,effort=this.modelCatalog().data.find(v=>v.model===this.model)?.defaultReasoningEffort;
-   const session={schemaVersion:1,harness:'dsh',provider:this.provider,id:randomUUID(),nativeId:randomUUID(),nativeStarted:false,legacyContextPending:false,name:'',model:this.model,effort,profileId:selected.profile.id,apiEndpoint:selected.profile.baseUrl,apiProtocol:selected.profile.api,turns:[],updatedAt:Date.now()};this.sessions.set(session.id,session);this.current=session.id;this.save(session);const thread=this.publicThread(session);this.event('thread/started',{thread});return {thread,model:this.model,reasoningEffort:effort};
+   const session={schemaVersion:1,harness:'dsh',provider:this.provider,id:randomUUID(),nativeId:randomUUID(),nativeStarted:false,legacyContextPending:false,name:'',model:this.model,effort,profileId:selected.profile.id,apiEndpoint:selected.profile.baseUrl,apiProtocol:selected.profile.api,...selected.profile.authMode?{authMode:selected.profile.authMode}:{},turns:[],updatedAt:Date.now()};this.sessions.set(session.id,session);this.current=session.id;this.save(session);const thread=this.publicThread(session);this.event('thread/started',{thread});return {thread,model:this.model,reasoningEffort:effort};
   }
   if(['thread/resume','turn/start'].includes(method)){
    const session=this.session(params.threadId),selected=this.profiles.resolve(this.provider,params.model||session.model);

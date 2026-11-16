@@ -62,7 +62,10 @@ export function prepareApiDshProfile(root,runtime,worker,instructions,selection)
  const entries=kernel.filter(([id])=>!['llm-deepseek','deepseek-llm-api-extensions','session-log-deepseek'].includes(id)).map(([id,name,config])=>({id,name:name.startsWith('@')?name:'@deepseek-ai/'+name,...config?{config}:{}}));
  const compaction=entries.find(v=>v.id==='compaction-basic');if(compaction)compaction.config={headroomTokens:2048,maxTokens:4096};
  const adapterPath=path.resolve(path.dirname(runtime.args[1]),'../../../@deepseek-ai/dsh-llm-pi-ai/lib/index.js');
- entries.push({id:'models',name:adapterPath,config:{providers:{[route]:adapterProfile}}});
+ if(selection.profile.authMode==='deepseek-account'){
+  if(selection.profile.baseUrl!=='https://api.deepseek.com/anthropic'||selection.profile.api!=='anthropic-messages'||selection.provider!=='compatible')throw Error('Invalid DeepSeek account profile');
+  entries.push({id:'models',name:path.join(appRoot,'agent/providers/dsh-account-adapter.mjs'),inject:['llm'],config:{route,displayName:selection.profile.name,baseUrl:selection.profile.baseUrl,models:selection.profile.models,module:path.resolve(path.dirname(runtime.args[1]),'../../../@deepseek-ai/dsh-llm-deepseek/lib/index.js')}});
+ }else entries.push({id:'models',name:adapterPath,config:{providers:{[route]:adapterProfile}}});
  entries.push({id:'sessions',name:'@deepseek-ai/dsh-session-persistence-jsonl',config:{root:sessions,compression:'none'}});
  entries.push({id:'studio-policy',name:runtime.policyPath||sourcePolicyPath,inject:['tools','systemPrompt','appReady','llm'],config:{mcpModule:runtime.mcpModule,toolsModule:runtime.toolsModule,workerUrl:scoped?.url||null,workflow:!!scoped?.context.taskId,taskId:scoped?.context.taskId||null,projectId:scoped?.context.projectId||null,modelProvider:route,models:selection.profile.models.map(v=>v.id),instructions}});
  fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]\n');fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'studio-model-profile',private:true,type:'module',dsh:{profile:{bundles:[]}}}));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),JSON.stringify([{insert:entries}],null,2));

@@ -1977,6 +1977,8 @@ const english:Record<string,string> = {
 "当前服务可继续使用已有工具和提交获准的任务。需要更新时，请在当前连接设置中选择“更新作业服务”，现有任务保留。":"The current service can keep using its existing tools and submitting authorized tasks. To update, choose Update job service in the current connection settings. Existing jobs are preserved.",
 "当前服务已响应，实现版本尚未核对；可查看记录，工具与任务操作以实际可用接口及项目授权为准。请在当前连接设置中核对作业服务。":"The current service has responded, but its implementation version is unconfirmed. Records remain readable; tool and task actions depend on available interfaces and project authorization. Review the job service in the current connection settings.",
 "当前服务可继续使用已有工具和提交获准的任务。需要更新时，请使用“连接计算资源 → 本地 WSL”明确连接，现有任务保留。":"The current service can keep using its existing tools and submitting authorized tasks. To update, explicitly connect through Connect compute resources → Local WSL. Existing jobs are preserved.",
+"DeepSeek 账户令牌":"DeepSeek account token",
+"账户令牌与 API Key 不同，仅发送到官方 DeepSeek 地址；过期后需重新导入。":"Account tokens differ from API keys and are sent only to the official DeepSeek endpoint. Import again after expiry.",
 "服务商配置":"Provider configuration",
 "添加服务商":"Add provider",
 "服务商名称":"Provider name",

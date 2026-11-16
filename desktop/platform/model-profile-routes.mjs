@@ -11,7 +11,7 @@ export function registerModelProfileRoutes({handle,agents,assertIdle,emit,fetchA
  handle('models.profiles.discover',async value=>{
   request(value,['profile','apiKey']);const profile=validateModelProfile({...value.profile,models:value.profile?.models?.some(v=>v.id?.trim())?value.profile.models.filter(v=>v.id?.trim()):[{id:'discovery-placeholder'}]});
   if(value.apiKey!==undefined&&(typeof value.apiKey!=='string'||value.apiKey.length>4096||/[\s\0]/.test(value.apiKey)))throw Error('Invalid API Key');
-  let apiKey=value.apiKey||'';if(!apiKey&&store.catalog.get('model-provider',profile.id)){const old=store.read(profile.id);if(old.baseUrl!==profile.baseUrl||old.api!==profile.api)throw Error('更换地址或协议后，请重新输入密钥再获取模型');apiKey=store.credential(profile.id).apiKey;}
+  let apiKey=value.apiKey||'';if(!apiKey&&store.catalog.get('model-provider',profile.id)){const old=store.read(profile.id);if(old.baseUrl!==profile.baseUrl||old.api!==profile.api||(old.authMode||'api-key')!==(profile.authMode||'api-key'))throw Error('更换地址或协议后，请重新输入密钥再获取模型');apiKey=store.credential(profile.id).apiKey;}
   if(!apiKey&&!['localhost','127.0.0.1','[::1]'].includes(new URL(profile.baseUrl).hostname))throw Error('请填写此服务商的 API Key 后获取模型');
   const identity=store.catalog.get('model-provider',profile.id)?store.identity(profile.id):null;
   const result=await discoverProfileModels(profile,{apiKey,fetchApi});if(identity&&store.identity(profile.id)!==identity)throw Error('服务商配置已变化，请重新获取模型');return result;

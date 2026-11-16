@@ -19,6 +19,9 @@ export function validateModelProfile(value){
  let url;try{url=new URL(value.baseUrl);}catch{throw Error('请填写有效的 API Base URL');}
  if(url.username||url.password||url.search||url.hash||url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))||/\/(chat\/completions|responses|models|messages|mcp)\/?$/i.test(url.pathname))throw Error('请填写 HTTPS 服务根地址或本机 HTTP 地址，不包含具体请求路径');
  if(!API_PROTOCOLS.includes(value.api))throw Error('不支持的 API 协议');
+ if(value.authMode!==undefined&&value.authMode!=='api-key'&&value.authMode!=='deepseek-account')throw Error('Invalid API authentication mode');
+ const authMode=value.authMode||'api-key';
+ if(authMode==='deepseek-account'&&(value.provider!=='compatible'||value.api!=='anthropic-messages'||url.href.replace(/\/+$/,'')!=='https://api.deepseek.com/anthropic'))throw Error('DeepSeek 账户令牌仅适用于官方账户地址与 Messages 协议');
  if(!Array.isArray(value.models)||!value.models.length||value.models.length>200)throw Error('请配置 1–200 个模型');
  const ids=new Set(),models=value.models.map(item=>{
   if(!item||typeof item!=='object'||typeof item.id!=='string'||!item.id.trim()||item.id.length>200||/[\s\x00-\x1f]/.test(item.id)||ids.has(item.id))throw Error('模型 ID 不能为空或重复');ids.add(item.id);
@@ -38,5 +41,5 @@ export function validateModelProfile(value){
  const baseUrl=url.href.replace(/\/+$/,'');
  // Catalog defaults apply only to the preset's exact official endpoint.
  const catalogProvider=API_PRESETS[preset].baseUrl===baseUrl&&API_PRESETS[preset].api===value.api?API_PRESETS[preset].catalogProvider:undefined;
- return {schemaVersion:1,id:value.id,provider:value.provider,name,baseUrl,api:value.api,preset,models,sharePublicGuides:value.sharePublicGuides===true,defaultModel:models.some(m=>m.id===value.defaultModel)?value.defaultModel:models[0].id,...catalogProvider?{catalogProvider}:{}};
+ return {schemaVersion:1,id:value.id,provider:value.provider,name,baseUrl,api:value.api,...authMode==='deepseek-account'?{authMode}:{},preset,models,sharePublicGuides:value.sharePublicGuides===true,defaultModel:models.some(m=>m.id===value.defaultModel)?value.defaultModel:models[0].id,...catalogProvider?{catalogProvider}:{}};
 }

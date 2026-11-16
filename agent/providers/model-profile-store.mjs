@@ -24,7 +24,7 @@ export class ModelProfileStore{
   if(!old&&expectedRevision!==undefined)throw Error('服务商配置已移除，请刷新后重试');
   if(old&&expectedRevision!==old.revision)throw Error('服务商配置已变化，请刷新后重试');
   if(old&&old.provider!==profile.provider)throw Error('不能更改服务商所属分组');
-  const same=old?.baseUrl===profile.baseUrl&&old?.api===profile.api;
+  const same=old?.baseUrl===profile.baseUrl&&old?.api===profile.api&&(old?.authMode||'api-key')===(profile.authMode||'api-key');
   if(old&&!same&&profile.sharePublicGuides)throw Error('更换地址或协议后，请先取消公开指导共享并保存，再为新地址明确开启');
   if(!apiKey&&old&&!same)throw Error('更换服务地址或协议时请重新输入密钥，不会将原密钥发送到新地址');
   const key=apiKey||same&&this.vault.get(secretId(profile.id))?.apiKey||'';

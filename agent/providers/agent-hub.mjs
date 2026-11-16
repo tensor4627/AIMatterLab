@@ -208,6 +208,10 @@ export class AgentHub extends EventEmitter{
   if(method==='thread/resume'&&result.thread?.id===this.contextResume.get(provider))this.contextResume.delete(provider);
   if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');
   if(method==='thread/list'&&result.data)result={...result,data:result.data.filter(t=>!this.deleted(provider,t.id))};
+  if(provider==='codex'&&method==='model/list'&&Array.isArray(result.data)){
+   const imported=this.catalog.get('dsh-provider-import','codex');
+   if(imported?.modelIds?.length){const data=result.data.filter(model=>imported.modelIds.includes(model.model));if(data.length)result={...result,data:data.map(model=>{const saved=imported.models?.find(entry=>entry.id===model.model),efforts=saved?.reasoning?.efforts,actual=model.supportedReasoningEfforts||[],supported=efforts?actual.filter(value=>efforts.some(entry=>entry.id===value.reasoningEffort)):actual;return {...model,displayName:saved?.name||model.displayName,supportedReasoningEfforts:supported,defaultReasoningEffort:supported.some(value=>value.reasoningEffort===saved?.reasoning?.defaultEffort)?saved.reasoning.defaultEffort:model.defaultReasoningEffort};})};}
+  }
   if(provider==='codex'&&method==='turn/start'){this.pendingBlankTurns.delete(params.threadId);this.blankThreads.delete(params.threadId);}
   if(provider==='codex'&&method==='turn/start')this.recordCodexThread(params.threadId,'has_turns');
   if(provider==='codex'&&method==='thread/start'&&result.thread&&Array.isArray(result.thread.turns)&&result.thread.turns.length===0)this.recordCodexThread(result.thread.id,'empty',{model:result.model||null});

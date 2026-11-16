@@ -21,8 +21,8 @@ async function readBounded(response){const reader=response.body?.getReader();if(
 export async function discoverProfileModels(profile,{apiKey='',fetchApi=fetch,catalog=installedModelCatalog}={}){
  const config=validateModelProfile({...profile,models:profile.models?.length?profile.models:[{id:'discovery-placeholder'}]});
  const native=config.catalogProvider?catalog(config.catalogProvider):[],defaults=new Map(native.map(v=>[v.id,v]));
- const base=config.baseUrl,url=config.api==='anthropic-messages'?base.replace(/\/v1$/,'')+'/v1/models?limit=1000':base+'/models';
- const headers=config.api==='anthropic-messages'?{'x-api-key':apiKey,'anthropic-version':'2023-06-01'}:{Authorization:'Bearer '+apiKey};
+ const base=config.baseUrl,url=config.authMode==='deepseek-account'?'https://api.deepseek.com/models':config.api==='anthropic-messages'?base.replace(/\/v1$/,'')+'/v1/models?limit=1000':base+'/models';
+ const headers=config.authMode==='deepseek-account'?{'x-dsh-auth-token':apiKey}:config.api==='anthropic-messages'?{'x-api-key':apiKey,'anthropic-version':'2023-06-01'}:{Authorization:'Bearer '+apiKey};
  let response;try{response=await fetchApi(url,{headers,redirect:'error',signal:AbortSignal.timeout(20000)});}catch{throw Error('模型发现请求失败或超时，请检查服务地址和网络');}
  if(!response.ok){if([404,405,501].includes(response.status)&&native.length)return {models:native,source:'catalog',notice:'此接口不支持模型发现；显示已安装 DSH 的官方服务商目录，实际可用性仍需测试。'};throw Error('模型发现失败 · HTTP '+response.status+([401,403].includes(response.status)?'，请核对密钥和套餐地址':''));}
  let body;try{body=await readBounded(response);}catch(error){throw Error(error.message==='模型目录超过 4 MiB 限制'?error.message:'模型发现接口未返回有效 JSON；响应内容未展示');}
