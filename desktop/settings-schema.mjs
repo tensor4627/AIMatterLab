@@ -13,7 +13,7 @@ export const SETTINGS_KEYS = Object.freeze([
  'autoDiscoverCompute','scientificSkillProviders','pygasSkillProviders','projectAgents',
  'agentLayout','agentProvider','kimiPath','qwenPath','agentProviders',
  'distribution','workerRoot','workerPort','codexPath','cwd','sourceRoots','sourceIds',
- 'skillRoots','theme','language','fontFamily','fontSize','minimumFontSize','chatFontSize',
+ 'skillRoots','userCacheDirectory','theme','language','fontFamily','fontSize','minimumFontSize','chatFontSize',
  'editorFontSize','terminalFontSize','terminalIdleMinutes','agent'
 ]);
 
@@ -42,6 +42,11 @@ export function normalizeSettings(current, data = {}) {
  if (next.sourceIds !== undefined && (!Array.isArray(next.sourceIds) || next.sourceIds.some(id => !SOURCE_IDS.includes(id)))) throw Error('Invalid source allowlist');
  if (!Array.isArray(next.sourceRoots || []) || (next.sourceRoots || []).some(v => typeof v !== 'string' || !path.isAbsolute(v))) throw Error('Source roots must be absolute paths');
  if (!Array.isArray(next.skillRoots)) throw new Error('Skill roots must be an array');
+ if(next.userCacheDirectory!==undefined&&next.userCacheDirectory!==''){
+  const dir=next.userCacheDirectory;
+  if(typeof dir!=='string'||dir.length>4096||/[\r\n\0]/.test(dir)||/^[\\/]{2}/.test(dir)||!path.isAbsolute(dir)||
+     process.platform==='win32'&&!/^[A-Za-z]:[\\/]/.test(dir)||path.resolve(dir)===path.parse(path.resolve(dir)).root)throw Error('Choose a local absolute skill cache directory');
+ }
  if (next.skillRoots.some(v => typeof v !== 'string' || !v.trim() || v.length > 4096 || /[\r\n\0]/.test(v))) throw new Error('Skill roots must be non-empty bounded paths');
  if (next.cwd !== undefined && (typeof next.cwd !== 'string' || !next.cwd.trim() || /[\r\n\0]/.test(next.cwd))) throw new Error('Invalid working directory');
  if (next.projectAgents !== undefined && (!next.projectAgents || typeof next.projectAgents !== 'object' || Array.isArray(next.projectAgents) ||

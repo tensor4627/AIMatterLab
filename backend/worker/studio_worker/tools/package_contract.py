@@ -55,6 +55,9 @@ def _normalize(value, rule, where):
     return copy.deepcopy(value)
 
 
+normalize_inline_schema = _normalize
+
+
 def portable_resource_path(value):
     if type(value) is not str or not value or len(value) > 512 or re.search(r'[\\<>:"|?*\x00-\x1f\x7f]', value) or value.startswith('/') or any(part in ('', '.', '..') for part in value.split('/')): raise ValueError('Canonical package-relative resource path required')
     return value

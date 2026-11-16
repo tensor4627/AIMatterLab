@@ -26,15 +26,17 @@ export function createAgentRequests({runtime}){
  const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(),selectedSsh=['ssh-terminal','ssh-connection'].includes(resource?.selection?.kind)?resource.selection:null;
  if(turnFlags)resourceRouting?.assertHandoffComplete?.(provider);
- const {studioSkillId,studioTurnRequestId,...protocolParams}=params;params=protocolParams;
+ const {studioSkillId,studioTurnRequestId,studioInitialProjectId,...protocolParams}=params;params=protocolParams;
+ if(studioInitialProjectId!==undefined&&method!=='thread/start')throw Error('An initial project belongs to a new conversation');
  if(studioTurnRequestId!==undefined&&(typeof studioTurnRequestId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(studioTurnRequestId)))throw Error('Invalid turn request identity');
  if(studioSkillId!==undefined&&(typeof studioSkillId!=='string'||!scientificSkills.router.routes.has(studioSkillId)))throw Error('Choose a listed scientific function');
+ const reservedShell=method==='thread/start'?conversationTerminals?.pendingForNewConversation(provider):null;
  let ticket,skillContext,skillKey,terminalOnly=false,definitionOnlyTurn=false;
  const check=()=>{resource?.assertCurrent();if(ticket)workflowContext.assert(ticket);};
  const selectedTerminalReady=async()=>{const status=await resourceRouting.readiness(provider);check();if(status?.status!=='ready'||status.resource?.selectionId!==selectedSsh.selectionId)throw Error('请先将所选 SSH 终端交接给当前对话；不会改用其他计算资源。');};
  const synchronize=async()=>{check();await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));check();};
  if(['thread/start','thread/resume','turn/start'].includes(method)){
-  assertIdleAgent();if(method==='turn/start'){scientificSkills.clearManagedSelection?.(provider);setupInstructions?.clear?.(provider);}ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId);
+  assertIdleAgent();if(method==='turn/start'){scientificSkills.clearManagedSelection?.(provider);setupInstructions?.clear?.(provider);}ticket=workflowContext.begin(provider,method==='thread/start'?null:params.threadId,studioInitialProjectId);
   if(method!=='thread/start'){await conversationTerminals?.acquire(provider,workflowContext.current());check();}
   await synchronize();
  }
@@ -86,7 +88,7 @@ export function createAgentRequests({runtime}){
   if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview,planningMode:turnFlags.planningMode});
   // Public software guidance is selected only for the actual current intent.
   const guidanceScope=skillGuidanceScope(provider),readPolicy=await scientificSkills.resolvePolicy(guidanceScope);check();
-  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
+  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,planRoadmap:turnFlags.planningMode&&!bound?.roadmap,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
   const explicitSetup=!definitionOnly&&studioSkillId&&['installation','setup','toolchain'].includes(scientificSkills.router.routes.get(studioSkillId)?.phase);
   skillContext=await(explicitSetup?setupInstructions.prepare(provider,studioSkillId,prepareGuidance,{retainForTurn:true,assertCurrent:check,checkCurrent:guidanceScope.checkCurrent}):prepareGuidance());check();
   if(!skillContext.guidanceKind&&!definitionOnly&&bound?.parameters?.engine&&worker.connection){
@@ -114,7 +116,11 @@ export function createAgentRequests({runtime}){
  let result;
  try{check();if(terminalOnly){if(selectedSsh){await selectedTerminalReady();if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');}else if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');}const capability=()=>{check();if(selectedSsh&&['turn/start','turn/steer'].includes(method)&&(terminalOnly?!sharedTerminal.hasCurrentGrant(provider):resourceRouting.workerSelected(provider)!==true))throw Error('当前请求所属的 SSH 能力授权已变化，不会改用另一通道。');};capability();if(provider==='codex'&&method==='thread/resume'){const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;}else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch:()=>{capability();return agents.rpc(provider,method,params);},emit:event=>emit('studio:event',event)}):await agents.rpc(provider,method,params);check();}
  catch(error){if(method==='turn/start'){setupInstructions?.clear?.(provider);scientificSkills.clearManagedSelection?.(provider);try{check();taskRecords.failedTurn(provider,params.threadId,error);}catch{}}throw error;}
- if(method==='thread/start'){if(!result.thread?.id)throw Error('The server did not return a real conversation');workflowContext.started(ticket,result.thread.id);await conversationTerminals?.acquire(provider,workflowContext.current());check();await synchronize();}
+ if(method==='thread/start'){
+  if(!result.thread?.id)throw Error('The server did not return a real conversation');
+  if(reservedShell&&(result.thread.turns?.length||taskRecords.conversation(provider,result.thread.id)||taskRecords.bound(provider,result.thread.id)))throw Error('A reserved terminal requires a newly created conversation');
+  workflowContext.started(ticket,result.thread.id);await conversationTerminals?.acquire(provider,workflowContext.current(),reservedShell);check();await synchronize();
+ }
  if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)catalog.put('thread',result.thread.id,result.thread);
  if(provider==='codex'&&method==='account/login/start'&&result.authUrl)await openUrl(result.authUrl);
  return result;

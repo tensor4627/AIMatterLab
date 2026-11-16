@@ -10,7 +10,7 @@ import {deploymentHarness,deploymentFixture} from "../helpers/deployment-diagnos
 
 const resources={cpus:1,gpus:1,memory_mb:4096,queue:'legacy-queue',account:'legacy-account'};
 const config={target:'cluster',projectId:'project',targetId:'cluster',inputSource:'local',directoryName:'short-fixture',maxSeconds:60,gpu:0,resources};
-const cluster={id:'cluster',name:'Fixture cluster',version:4,queue:'legacy-queue',queue_targets:[{id:'owned',queue:'owned-queue',enabled:true,usage_class:'owned',engines:['pydyn.md']},{id:'paid',queue:'paid-queue',enabled:true,usage_class:'paid',engines:['pydyn.md']}]};
+const cluster={id:'cluster',name:'Fixture cluster',scheduler:'slurm',version:4,queue:'legacy-queue',queue_targets:[{id:'owned',queue:'owned-queue',enabled:true,usage_class:'owned',engines:['pydyn.md']},{id:'paid',queue:'paid-queue',enabled:true,usage_class:'paid',engines:['pydyn.md']}]};
 const policy={profile_version:4,allowed_target_ids:['owned','paid'],new_submission_order:['owned','paid'],paid:{permitted:true,conditions_known:true,conditions:'Fixture terms'}};
 
 test('explicit policy selection omits legacy queue/account and empty target without mutating its input',()=>{
@@ -30,6 +30,18 @@ test('manual legacy queue validation is retained and policy selection is strict 
  assert.throws(()=>validDeployment({...config,queueSelection:'policy',target:'local'}),/集群/);
  assert.throws(()=>validDeployment({...config,queueSelection:'automatic'}),/选择方式/);
  assert.throws(()=>validDeployment({...config,resources:{...resources,queue_target_id:'owned'}}),/目标/);
+});
+
+test('Slurm QoS is optional, survives validation and is cleared outside Slurm',()=>{
+ const withQos={...resources,qos:'priority-1'};
+ for(const selection of [{resources:withQos},clusterDeploymentChoice(withQos,cluster,'owned')]){
+  const value={...config,...selection};assert.equal(validDeploymentDraft(value).resources.qos,'priority-1');assert.equal(validDeployment(value).resources.qos,'priority-1');
+ }
+ assert(!('qos' in clusterDeploymentChoice(withQos,{scheduler:'lsf'}).resources));
+ assert(!('qos' in validDeployment({...config,resources:{...resources,qos:''}}).resources));
+ assert.deepEqual(scienceOnly({qos:'priority-1',temperature:300}).parameters,{temperature:300});
+ for(const qos of [null,1,'-bad','a\nb','a b','z'.repeat(129)])for(const validate of [validDeployment,validDeploymentDraft])assert.throws(()=>validate({...config,resources:{...resources,qos}}),/QoS/);
+ for(const validate of [validDeployment,validDeploymentDraft])assert.throws(()=>validate({...config,target:'local',resources:withQos}),/QoS/);
 });
 
 test('policy target survives settings draft/outbox restart without preparing a run or granting access',()=>{
@@ -61,6 +73,13 @@ test('mounting an existing manual draft does not migrate it; explicit policy sel
  const saved=h.servers.get(h.props.task.id).deploymentDraft.config;
  assert.equal(saved.queueSelection,'policy');assert.equal(saved.resources.queue,'');assert.equal(saved.resources.account,'');assert(!('queue_target_id' in saved.resources));
  assert(!h.calls.some(c=>c.method==='worker.request'&&c.data.method==='POST'&&c.data.target!=='/api/cluster/status'||/prepare|execute/.test(c.method)));
+ h.unmount();
+});
+
+test('the Slurm QoS field persists the value on the selected task draft',async()=>{
+ const h=harness({mode:'policy'});await h.flush();
+ h.find(n=>n.type==='input'&&n.props['aria-label']==='Slurm QoS').props.onChange({target:{value:'priority-1'}});await h.flush();
+ assert.equal(h.servers.get(h.props.task.id).deploymentDraft.config.resources.qos,'priority-1');
  h.unmount();
 });
 

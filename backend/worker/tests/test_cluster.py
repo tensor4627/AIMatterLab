@@ -430,6 +430,20 @@ print('archive imports passed; no engine executed')
                 result=subprocess.run([sys.executable,'-I','-B','-c',code,str(extracted/'.studio')],capture_output=True,text=True,timeout=20)
                 self.assertEqual(result.returncode,0,result.stderr)
                 self.assertIn('archive imports passed',result.stdout)
+    def test_explicit_slurm_qos_is_validated_and_in_reviewed_script(self):
+        from studio_worker.compute.cluster import resources
+        current = self.cluster.raw(self.cluster.prepare(self.spec())["id"])
+        profile = {**current["cluster_snapshot"], "scheduler": "slurm"}
+        requested = {**current["resources"], "qos": "science-high"}
+        reviewed = resources(requested, profile, 60)
+        self.assertIn("#SBATCH --qos=science-high\n", batch_script({**current, "resources": reviewed, "cluster_snapshot": profile}))
+        self.assertNotIn("#SBATCH --qos", batch_script({**current, "cluster_snapshot": profile}))
+        for bad in ("", "-bad", "normal\n#SBATCH --nodes=40", None):
+            with self.assertRaises(ValueError):
+                resources({**requested, "qos": bad}, profile, 60)
+        with self.assertRaises(ValueError):
+            resources(requested, current["cluster_snapshot"], 60)
+
     def test_lsf_slurm_script_and_scope_guards(self):
         r=self.cluster.raw(self.cluster.prepare(self.spec())["id"]);self.assertIn("#BSUB -q fixture",r["script"]);self.assertIn('"$HOME"',batch_script({**r,"remote_directory":"~/.gss/id"}))
         r["cluster_snapshot"]["scheduler"]="slurm";s=batch_script(r);self.assertIn("#SBATCH --partition=fixture",s);self.assertIn("#SBATCH --export=NONE",s)

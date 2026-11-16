@@ -49,6 +49,9 @@ class RunsMixin:
             if workflow["project_id"] != project["id"]: raise PermissionError("Workflow belongs to another project")
             if workflow.get('schema_version') == 2 and _workflow_context is None: raise PermissionError('Tool-group workflows require the worker-owned step preparation route')
         roots = list(project["policy"]["input_roots"]) + [str(self.root / "projects" / project["id"] / "inputs")]
+        if (spec.get("studio_workflow_binding") or {}).get("schema_version")==2:
+            # prepare_binding matched this exact server-created spec and invocation.
+            roots.extend(spec["inputs"].values())
         if spec.get("parent_run"):
             parent = self.store.run(spec["parent_run"])
             if parent["project_id"] != project["id"] or parent["status"] not in TERMINAL:
@@ -79,6 +82,13 @@ class RunsMixin:
             check_producer(self,spec)
             private_entries=propagate(self,selected_paths,project['id'])
             private_versions=versions_for(self,selected_paths)
+            if (spec.get("studio_workflow_binding") or {}).get("schema_version")==2:
+                from studio_worker.workspace.roadmap_execution import records
+                state,_,node,_ = records(self,_workflow_context)
+                for ref in node["inputs"].values():
+                    for version in state.get("initial_private_versions",{}).get(ref["resource"],[]):
+                        if version not in private_versions: private_versions.append(version)
+                        if version["entry_id"] not in private_entries: private_entries.append(version["entry_id"])
             identifier = secrets.token_hex(12)
             prefix = spec.get("directory_name", "")
             if prefix and (not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", prefix)):
@@ -134,6 +144,8 @@ class RunsMixin:
     def revise(self, identifier, changes, edits):
         with self.store.lock:
             parent = self.store.run(identifier)
+            if (parent.get("studio_workflow_binding") or {}).get("schema_version")==2:
+                raise PermissionError("A confirmed graph invocation cannot be revised in place")
             allowed = ("name","engine","environment_id","gpu","max_seconds","inputs","parameters")
             spec = {k:parent[k] for k in ("project_id",*allowed) if k in parent}
             if any(k not in allowed and k != "idempotency_key" for k in changes):

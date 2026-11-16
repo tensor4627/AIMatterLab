@@ -79,3 +79,10 @@ test('a pending owned PTY exit and a cleanup failure cannot initially claim succ
  const f=fixture(t,{closeWaitMs:0}),c=await f.ready(),ref={connectionId:c.connectionId};f.holdKill(true);assert.equal((await f.manager.close(ref)).closed,false);assert.equal((await f.manager.state(ref)).closed,false);f.processes[0].exit();assert.equal((await f.manager.state(ref)).closed,true);assert.equal(f.calls.filter(x=>x==='close').length,1);
  const g=fixture(t,{closeWaitMs:0}),other=await g.ready(),otherRef={connectionId:other.connectionId};g.cleanupFails(true);const failed=await g.manager.close(otherRef);assert.equal(failed.closed,false);assert.equal(failed.status,'unavailable');assert.equal(failed.error.code,'ssh_close_cleanup_unconfirmed');const count=g.calls.filter(x=>x==='cleanup').length;assert.equal((await g.manager.state(otherRef)).closed,true);assert.equal(g.calls.filter(x=>x==='cleanup').length,count);g.cleanupFails(false);assert.equal((await g.manager.close(otherRef)).closed,true);assert.equal(g.processes.length,1);
 });
+
+test('key login uses strict host verification and batch mode while interactive login permits a challenge',()=>{
+ for(const mode of ['key','interactive']){
+  const argv=multiplexArgs(multiplexProfile({...profile,mode}),'/tmp/fixture-socket',{master:true});
+  assert(argv.includes('BatchMode='+(mode==='key'?'yes':'no')));assert(argv.includes('StrictHostKeyChecking='+(mode==='key'?'yes':'ask')));
+ }
+});

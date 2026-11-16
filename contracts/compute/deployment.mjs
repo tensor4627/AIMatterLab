@@ -1,6 +1,6 @@
 import {fieldPath} from "../workflows/task-fields.mjs";
 import {adapterParameters} from "../tools/engine-contracts.mjs";
-const deploymentKeys=new Set(['project_id','environment_id','cluster_id','workdir','working_directory','remote_directory','remote_root','queue','queue_target_id','queueSelection','partition','account','cpus','gpus','gpu','memory_mb','max_seconds','deployment','resources','environment']);
+const deploymentKeys=new Set(['project_id','environment_id','cluster_id','workdir','working_directory','remote_directory','remote_root','queue','queue_target_id','queueSelection','partition','account','qos','cpus','gpus','gpu','memory_mb','max_seconds','deployment','resources','environment']);
 
 export function deploymentField(key){return fieldPath(key).some(part=>deploymentKeys.has(part));}
 
@@ -9,7 +9,7 @@ export function scienceOnly(parameters,steps=[],missing=[]){
  const science=strip(parameters);return {parameters:science,steps:steps.map(s=>typeof s==='string'?s:{...s,fields:s.fields.filter(f=>!deploymentField(f.key))}).filter(s=>typeof s==='string'||s.fields.length||!/部署|队列|集群|提交|deployment|queue|submit/i.test(s.title)),missing:missing.filter(k=>{try{return !deploymentField(k);}catch{return true;}}),hints};
 }
 
-const engines=new Set(['gpumd.neb','gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']);
+const engines=new Set(['trajectory.density','gpumd.neb','gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']);
 
 export function scientificSpec(task){
  if(task.composition&&(task.composition.status!=='rendered'||task.composition.render_blocked))throw Error('CV/bias组合图尚不能生成；先在原会话补齐、保存并复核当前输入');
@@ -47,6 +47,11 @@ export function inputControlParameters(parameters){
  return controls(canonical);
 }
 
+export function validateDeploymentQos(target,qos){
+ if(qos===undefined||qos==='')return;
+ if(target!=='cluster'||typeof qos!=='string'||!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(qos))throw Error('Invalid Slurm QoS');
+}
+
 export function validDeployment(value){
  if(!value||!['local','cluster'].includes(value.target)||typeof value.projectId!=='string'||!value.projectId||typeof value.targetId!=='string'||!value.targetId)throw Error('请选择项目和计算目标');
  if(!['local','remote'].includes(value.inputSource||'local')||value.target==='local'&&value.inputSource==='remote')throw Error('无效的输入来源');
@@ -58,13 +63,15 @@ export function validDeployment(value){
  if(value.queueSelection==='policy'&&value.target!=='cluster')throw Error('队列策略仅用于集群');
  if(value.target==='cluster'&&(!queuePolicy||resources.queue!==undefined&&resources.queue!=='')&&(typeof resources.queue!=='string'||!/^[A-Za-z0-9_.@:/+-]{1,128}$/.test(resources.queue)))throw Error('请选择队列或分区');
  if(resources.queue_target_id!==undefined&&resources.queue_target_id!==''&&(!queuePolicy||typeof resources.queue_target_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(resources.queue_target_id)))throw Error('无效的队列环境目标');
+ validateDeploymentQos(value.target,resources.qos);
  if(resources.account&& !/^[A-Za-z0-9_.@:/+-]{1,128}$/.test(resources.account))throw Error('无效的调度账户');
- return {target:value.target,projectId:value.projectId,targetId:value.targetId,inputSource:value.inputSource||'local',maxSeconds:value.maxSeconds,directoryName:value.directoryName,...queuePolicy?{queueSelection:'policy'}:{},resources:{cpus:resources.cpus,gpus:resources.gpus,memory_mb:resources.memory_mb,...queuePolicy?{...resources.queue?{queue:resources.queue}:{},...resources.account?{account:resources.account}:{},...resources.queue_target_id?{queue_target_id:resources.queue_target_id}:{}}:{queue:resources.queue||'',account:resources.account||''}},gpu:Number.isSafeInteger(value.gpu)&&value.gpu>=0?value.gpu:0};
+ return {target:value.target,projectId:value.projectId,targetId:value.targetId,inputSource:value.inputSource||'local',maxSeconds:value.maxSeconds,directoryName:value.directoryName,...queuePolicy?{queueSelection:'policy'}:{},resources:{cpus:resources.cpus,gpus:resources.gpus,memory_mb:resources.memory_mb,...resources.qos?{qos:resources.qos}:{},...queuePolicy?{...resources.queue?{queue:resources.queue}:{},...resources.account?{account:resources.account}:{},...resources.queue_target_id?{queue_target_id:resources.queue_target_id}:{}}:{queue:resources.queue||'',account:resources.account||''}},gpu:Number.isSafeInteger(value.gpu)&&value.gpu>=0?value.gpu:0};
 }
 
 // Called only after an explicit target/selection change. Saved drafts are never migrated on read.
 export function clusterDeploymentChoice(resources,profile,targetId=''){
- const {queue_target_id,...previous}=resources||{};
+ const {queue_target_id,qos,...previous}=resources||{};
+ if(profile?.scheduler==='slurm'&&qos)previous.qos=qos;
  if(profile&&Object.hasOwn(profile,'queue_targets'))return {queueSelection:'policy',resources:{...previous,queue:'',account:'',...targetId?{queue_target_id:targetId}:{}}};
  return {queueSelection:undefined,resources:{...previous,queue:profile?.queue||previous.queue||''}};
 }

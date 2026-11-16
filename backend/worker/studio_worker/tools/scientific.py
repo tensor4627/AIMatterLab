@@ -15,7 +15,7 @@ else:
 
 def probe_modules(engine):
     """Import only the selected route; unrelated SDKs can have expensive startup."""
-    if engine == "installation.check":
+    if engine in ("installation.check", "trajectory.density"):
         return ()
     if engine is None:
         return ("torch", "cupy", "ase", "pygas", "pydyn", "hotpp")

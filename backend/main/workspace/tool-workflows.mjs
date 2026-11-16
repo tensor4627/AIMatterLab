@@ -55,7 +55,16 @@ export function createToolWorkflowController({catalog,groups,configurations,work
   list(value){exact(value,['task_id']);const task=taskFor(value.task_id);return listFor(value.task_id).filter(item=>item.workspace_id===task.workspace.id);},
   async locateRun(value){
    exact(value,['run_id']);token(value.run_id);const ticket=await scopes.verified(),run=await worker.request('POST','/api/run/status',{run_id:value.run_id});ticket.assert();
-   const binding=run?.studio_workflow_binding;if(run?.id!==value.run_id||binding?.schema_version!==1)throw Error('This run is not a registered tool-group workflow step');
+   const binding=run?.studio_workflow_binding;
+   if(run?.id===value.run_id&&binding?.schema_version===2){
+    const ref=catalog.get('roadmap-execution-index',binding.execution_id);
+    if(!ref||!equal(ref.worker_binding,ticket.binding)||ref.snapshot_sha256!==binding.snapshot_sha256||ref.task_id!==binding.workflow_id)throw Error('Restore the original confirmed workflow and service');
+    const state=await worker.request('POST','/api/workflow/roadmap/status',{task_id:ref.task_id,execution_id:ref.id});ticket.assert();
+    const task=getTask(ref.task_id);
+    if(!task?.threadId||state.id!==ref.id||state.snapshot_sha256!==ref.snapshot_sha256||state.nodes?.[binding.step_id]?.run_id!==run.id)throw Error('Unexpected roadmap run identity');
+    return {roadmap:true,task_id:task.id,provider:task.provider,thread_id:task.threadId,conversation_id:task.provider+':'+task.threadId,workspace_id:task.workspace?.id||'',workflow_id:task.id,execution_id:ref.id,step_id:binding.step_id,run_id:run.id};
+   }
+   if(run?.id!==value.run_id||binding?.schema_version!==1)throw Error('This run is not a registered tool-group workflow step');
    const expected=catalog.get(INDEX,binding.execution_id);if(!expected||expected.schema_version!==1)throw Error('The run is retained by the worker but its desktop workflow reference is unavailable');
    if(!equal(expected.worker_binding,ticket.binding))throw Error('Restore this run’s original verified job service');
    const result=await worker.request('POST','/api/workflow/read',{execution_id:expected.execution_id});ticket.assert();note(expected,result);const step=result.execution.steps.find(step=>step.id===binding.step_id);

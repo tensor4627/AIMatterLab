@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {EventEmitter} from 'node:events';import {PassThrough,Writable} from 'node:stream';import {randomUUID} from 'node:crypto';
 import {createSharedTerminal} from '../../backend/main/compute/shared-terminal.mjs';
+import {createConversationTerminals} from '../../agent/sessions/conversation-terminals.mjs';
 import {createComputeProfiles} from '../../backend/main/compute/compute-profiles.mjs';
 import {createSshConnections} from '../../desktop/platform/terminal-service/ssh-connection.mjs';
 import {mockTerminalRuntime} from '../helpers/terminal-runtime-fixture.mjs';
@@ -37,6 +38,49 @@ test('conversation PTYs keep their original shell and deny cross-thread reads af
  await f.bridge.closeConversationShell({connectionId:connection.connectionId,sessionId:b.sessionId,ownerEpoch:handed.ownerEpoch});
  assert.equal(f.sessions.has(b.sessionId),false);assert.equal(f.sessions.has(a.sessionId),true);
  f.change({projectId:'changed-project'});f.bridge.reconcileContext();f.change(original);assert.equal(f.bridge.hasCurrentGrant('codex',a.sessionId),false);
+});
+
+async function planningShell(t){
+ const f=fixture(t),connection=await f.ready();f.select(connection);
+ f.change({provider:'deepseek',taskId:null,projectId:null,environmentId:null,inputRoot:null,serial:1});
+ const ref={kind:'ssh-connection',connectionId:connection.connectionId,profileId:f.profile.id,profileVersion:f.profile.version};
+ const service={peek:()=>({...ref,workflowReady:true,status:'connected',attemptId:'attempt'}),hasCurrentGrant:()=>true,reclaimTerminalHandoff(){}};
+ const pool=createConversationTerminals({terminal:f.bridge,service,resource:{peek:()=>ref,capture:()=>ref,assertCurrent:v=>assert.equal(v,ref)},
+  current:f.context,idleMinutes:()=>60});
+ const shell=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'chat'});
+ const owned=await pool.arm(shell,'deepseek');
+ return {...f,pool,shell:owned,read:scope=>f.bridge.callTool('read_shared_terminal',{session_id:shell.sessionId},scope)};
+}
+
+test('DeepSeek chat, task creation and first workspace binding retain the same PTY, read cursor and input ledger',async t=>{
+ const f=await planningShell(t),id=f.shell.sessionId,chat=f.scope(),pty=f.processes.at(-1);
+ const write=scope=>f.bridge.callTool('write_shared_terminal',{session_id:id,request_id:'one-input',data:'pwd\r'},scope);
+ await write(chat);pty.emit('first output\r\n');
+ const initial=await f.read(chat);assert.match(initial.output,/first output/);
+ const task=f.pool.prepareAuthoringGrant();f.change({taskId:'real-task'});f.bridge.reconcileContext();
+ assert.equal(f.bridge.hasCurrentGrant('deepseek',id),false);task(true);
+ assert(f.pool.describe(f.shell).currentConversation);const unbound=f.scope();
+ const workspace=f.pool.prepareAuthoringGrant();f.change({projectId:'project',environmentId:'environment',inputRoot:'/project/input'});workspace(true);
+ const bound=f.scope();await f.pool.acquire('deepseek',f.context());
+ const listed=await f.bridge.callTool('list_shared_terminals',{},bound);
+ assert.deepEqual(listed.sessions.map(s=>[s.sessionId,s.ownerEpoch]),[[id,f.shell.ownerEpoch]]);
+ await assert.rejects(f.read(chat),/scope_denied/);await assert.rejects(f.read(unbound),/scope_denied/);
+ await write(bound);assert.deepEqual(pty.writes,['pwd\r']);assert.match((await f.read(bound)).output,/first output/);
+ pty.emit('next output\r\n');const page=await f.bridge.callTool('read_shared_terminal',{session_id:id,cursor:initial.cursor},bound);
+ assert.match(page.output,/next output/);assert.doesNotMatch(page.output,/first output/);
+});
+
+test('pending authoring cannot recreate a reclaimed shell, change projects or cross a selection',async t=>{
+ for(const reason of ['reclaim','project','selection','aborted']){
+  const f=await planningShell(t),id=f.shell.sessionId;
+  const first=f.pool.prepareAuthoringGrant();f.change({taskId:'owned',projectId:'initial'});first(true);
+  const second=f.pool.prepareAuthoringGrant();
+  if(reason==='reclaim')await f.bridge.owner({sessionId:id,owner:'human',ownerEpoch:f.shell.ownerEpoch});
+  if(reason==='selection')f.change({serial:2});
+  f.change({environmentId:'env',...reason==='project'?{projectId:'other'}:{}});
+  second(reason!=='aborted');f.bridge.reconcileContext();assert.equal(f.bridge.hasCurrentGrant('deepseek',id),false,reason);
+  await assert.rejects(f.read(f.scope()),/scope_denied/);
+ }
 });
 
 function emulateByteOnlyBrokerRead(session){

@@ -22,3 +22,4 @@
 
 .ssh-service-observation{flex:0 0 auto;padding:0 10px;color:var(--muted);font-size:12px}.ssh-service-observation p{margin:5px 0}.ssh-service-observation>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.ssh-service-observation progress{max-width:180px}
 .ssh-worker-preparing{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px}.ssh-worker-preparing progress{width:160px;max-width:100%;height:8px;accent-color:var(--accent)}
+.ssh-shell-tabs{display:flex;gap:4px;overflow-x:auto;max-width:100%}.ssh-shell-tabs .button{white-space:nowrap}.ssh-shell-tabs [aria-pressed="true"]{border-color:var(--accent);color:var(--text)}

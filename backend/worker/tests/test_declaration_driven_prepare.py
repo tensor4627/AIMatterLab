@@ -74,8 +74,11 @@ class DeclarationDrivenPrepare(unittest.TestCase):
         with patch.dict(os.environ, {"STUDIO_DECLARATION_DRIVEN": "1", "STUDIO_DECLARATION_ENGINES": "hotpp.eval"}):
             self.assertEqual(adapters.Adapter("hotpp.eval").prepare(self.spec, {"executables": self.environment["executables"], "repositories": {}}), baseline)
 
-    def test_default_migration_set_covers_every_builtin_engine(self):
-        self.assertEqual(set(adapters.DEFAULT_DECLARATION_ENGINES), set(adapters.ENGINES))
+    def test_default_migration_set_covers_every_package_engine_and_preserves_studio_analysis(self):
+        from studio_worker.tools.engine_contracts import aimlab_tool_id
+        self.assertEqual(set(adapters.DEFAULT_DECLARATION_ENGINES), {e for e in adapters.ENGINES if aimlab_tool_id(e)})
+        for_studio = adapters.Adapter("trajectory.density").prepare({"inputs":{"trajectory.xyz":"/t/frames"}, "studio_workflow_binding":{"schema_version":2}},self.environment)
+        self.assertEqual(for_studio,[sys.executable,"-I","density-analysis.py"])
         clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}
         with patch.dict(os.environ, clean, clear=True):
             with patch("studio_worker.tools.declarations.bind_operation", side_effect=lambda *args, **kwargs: {"argv": ["SENTINEL"]}):

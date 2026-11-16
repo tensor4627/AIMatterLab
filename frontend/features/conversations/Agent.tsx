@@ -294,7 +294,7 @@ export default function Agent({onOpenHistory,onCollapse,conversationGroupId,onOp
   const retainRequest=()=>{if(!manual&&drafts.retain(draft,text))setPrompt(drafts.text());};
   try{
    let id=threadRef.current;
-   if(!id){const r=await selectedRpc('thread/start',{model:model||undefined});if(!preparing())return;id=r.thread.id;}
+   if(!id){const r=await selectedRpc('thread/start',{model:model||undefined,...(terminalSelected && projectId ? {studioInitialProjectId:projectId} : {})});if(!preparing())return;id=r.thread.id;}
    else if(acquiring){const r=await selectedRpc('thread/resume',{threadId:id});if(!preparing())return;if(r.studioRecovery?.status==='required'){setRecovery({threadId:id});return;}id=r.thread.id;}
    flight.threadId=id;
    if(acquiring){

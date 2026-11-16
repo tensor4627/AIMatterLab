@@ -10,8 +10,8 @@ const changed = () => { throw Error('terminal_context_changed'); };
 /** A desktop handoff applies to one authenticated connection and provider. Only the
  * main process can allocate a PTY for a real, selected provider conversation. */
 export function createConversationTerminals({terminal,service,registration,resource,current,idleMinutes,busy=()=>false,
- publish=()=>{},now=Date.now,uuid=randomUUID}){
- const pools=new Map();
+ publish=()=>{},conversationName=()=>null,now=Date.now,uuid=randomUUID}){
+ const pools=new Map(),parked=new Set();
  let stopped=false;
  function selected(pool){
   if(stopped||pools.get(pool.connectionId)!==pool)return false;
@@ -32,18 +32,18 @@ export function createConversationTerminals({terminal,service,registration,resou
   if(!pool)return shell;
   if(pool.available?.sessionId===shell.sessionId)return {...shell,awaitingConversation:true};
   const entry=session(pool,shell.sessionId),scope=scopeOf(current());
-  return entry?{...shell,conversationTerminal:true,currentConversation:equal(entry.scope,scope)}:shell;
+  return entry?{...shell,conversationTerminal:true,currentConversation:selected(pool)&&equal(entry.scope,scope),conversationName:conversationName(entry.scope.provider,entry.scope.threadId)||undefined}:shell;
  }
  async function arm(value,provider){
-  const ref=resource.peek(),ticket=resource.capture(),scope=scopeOf(current());
+  const ref=resource.peek(),ticket=resource.capture(),selection=current(),scope=scopeOf(selection);
   if(stopped||ref?.kind!=='ssh-connection'||!provider||(scope&&scope.provider!==provider))changed();
   const state=await terminal.resourceState({sessionId:value.sessionId});
   resource.assertCurrent(ticket);
-  if(!equal(scope,scopeOf(current()))||state.resource?.connectionId!==ref.connectionId||state.resource.profileId!==ref.profileId||
+  if(!equal(scope,scopeOf(current()))||!scope&&selection?.serial!==current()?.serial||state.resource?.connectionId!==ref.connectionId||state.resource.profileId!==ref.profileId||
      state.resource.profileVersion!==ref.profileVersion||state.operator!=='human'||state.ownerEpoch!==value.ownerEpoch||
      !state.alive||state.processStatus!=='running')changed();
   let pool=pools.get(ref.connectionId);
-  if(pool&&(pool.provider!==provider||!selected(pool))){releaseConnection(ref.connectionId);pool=null;}
+  if(pool&&(pool.provider!==provider||!selected(pool))){detachConnection(ref.connectionId);pool=null;}
   if(!pool){pool={...ref,provider,ticket,entries:new Map(),serviceAllowed:true};pools.set(ref.connectionId,pool);}
   // A second explicit handoff in a bound conversation replaces only its PTY.
   const previous=scope&&pool.entries.get(keyOf(scope));
@@ -51,7 +51,7 @@ export function createConversationTerminals({terminal,service,registration,resou
    await retire(pool,previous);resource.assertCurrent(ticket);if(!equal(scope,scopeOf(current())))changed();
   }
   pool.enabled=true;pool.serviceAllowed=true;pool.serviceFailure=null;
-  pool.available={sessionId:value.sessionId,ownerEpoch:value.ownerEpoch,at:now()};
+  pool.available={sessionId:value.sessionId,ownerEpoch:value.ownerEpoch,at:now(),awaitingNewConversation:!scope};
   if(scope){await acquire(provider,scope);const entry=pool.entries.get(keyOf(scope));live(pool,scope,entry);
    publish();return {...describe(entry.shell),service:service.peek({connectionId:pool.connectionId})};}
   publish();
@@ -60,6 +60,7 @@ export function createConversationTerminals({terminal,service,registration,resou
  async function retire(pool,entry){
   if(entry.retiring)return entry.retiring;
   if(entry.pending){await entry.pending.catch(()=>{});if(entry.retiring)return entry.retiring;}
+  if(pool.entries.get(keyOf(entry.scope))!==entry&&entry.released)return;
   const shell=entry.shell;
   const close=async()=>{
    if(shell)await terminal.closeConversationShell({sessionId:shell.sessionId,connectionId:pool.connectionId,ownerEpoch:shell.ownerEpoch});
@@ -82,7 +83,7 @@ export function createConversationTerminals({terminal,service,registration,resou
      requestId:uuid(),mode:reuse?'reuse':'setup'});
     pool.connecting=operation;
     try{state=await operation;if(!state.workflowReady)pool.serviceFailure=true;}
-    catch(error){pool.serviceFailure=true;throw error;}
+    catch(error){if(selected(pool))pool.serviceFailure=true;throw error;}
     finally{if(pool.connecting===operation)pool.connecting=null;}
    }else state=await pool.connecting;
   }
@@ -96,12 +97,22 @@ export function createConversationTerminals({terminal,service,registration,resou
   }
   entry.attemptId=state.attemptId;
  }
- async function acquire(provider,context){
+ function prepareService(pool,scope,entry){
+  if(entry.servicePending||!pool.serviceAllowed||pool.serviceFailure||service.hasCurrentGrant(scope.provider,scope))return;
+  const pending=bindService(pool,scope,entry).catch(()=>{}).finally(()=>{if(entry.servicePending===pending)entry.servicePending=null;publish();});
+  entry.servicePending=pending;
+ }
+ function pendingForNewConversation(provider){
+  const handoff=getPool(provider)?.available;
+  return handoff?.awaitingNewConversation&&!scopeOf(current())?handoff:null;
+ }
+ async function acquire(provider,context,reservedShell=null){
   const scope=scopeOf({...context,provider}),pool=getPool(provider);
   if(!scope||!pool)return;
   const key=keyOf(scope);let entry=pool.entries.get(key);
   if(entry?.retiring){await entry.retiring;if(!equal(scope,scopeOf(current())))changed();entry=pool.entries.get(key);}
-  if(!entry&&!pool.enabled)return;
+  if(reservedShell&&pool.available!==reservedShell)return;
+  if(!entry&&(!pool.enabled||pool.available?.awaitingNewConversation&&pool.available!==reservedShell))return;
   if(entry&&!equal(scope,entry.scope))return;
   if(!entry){entry={scope,at:now()};pool.entries.set(key,entry);}
   entry.at=now();
@@ -132,23 +143,43 @@ export function createConversationTerminals({terminal,service,registration,resou
     }
    }
    live(pool,scope,entry);
-   if(terminal.hasCurrentGrant(provider,entry.shell.sessionId))await bindService(pool,scope,entry);
+   if(terminal.hasCurrentGrant(provider,entry.shell.sessionId))prepareService(pool,scope,entry);
   };
   const operation=run();entry.pending=operation;
   try{await operation;}finally{entry.pending=null;entry.at=now();publish();}
  }
+ function prepareAuthoringGrant(){
+  const before=scopeOf(current()),pool=before&&getPool(before.provider);
+  const entry=pool?.entries.get(keyOf(before));
+  if(!entry?.shell||entry.retiring||!equal(before,entry.scope))return null;
+  const receipt=terminal.prepareConversationGrant(entry.shell.sessionId);
+  if(!receipt)return null;
+  return allow=>{
+   const after=scopeOf(current());
+   const stillOwned=allow&&after&&selected(pool)&&pool.entries.get(keyOf(before))===entry&&
+    !entry.retiring&&equal(entry.scope,before);
+   if(receipt.finish(stillOwned)){entry.scope=after;entry.at=now();}
+  };
+ }
  function releaseShell(id){
-  for(const pool of pools.values()){
+  for(const pool of [...parked,...pools.values()]){
    const entry=session(pool,id);
    if(!entry&&pool.available?.sessionId!==id)continue;
-   if(entry){pool.entries.delete(keyOf(entry.scope));if(entry.attemptId)service.reclaimTerminalHandoff({connectionId:pool.connectionId,attemptId:entry.attemptId,sessionId:id});}
-   pool.available=null;pool.enabled=false;
+   if(entry){entry.released=true;pool.entries.delete(keyOf(entry.scope));if(entry.attemptId)service.reclaimTerminalHandoff({connectionId:pool.connectionId,attemptId:entry.attemptId,sessionId:id});}
+   if(pool.available?.sessionId===id)pool.available=null;pool.enabled=false;if(!pool.entries.size)parked.delete(pool);
   }
  }
- function releaseConnection(id){
+ function detachConnection(id){
   const pool=pools.get(id);if(!pool)return;
-  pool.enabled=false;pool.available=null;pools.delete(id);
-  for(const entry of pool.entries.values())void retire(pool,entry).catch(()=>{});
+  pool.enabled=false;pool.available=null;pool.serviceAllowed=false;
+  // Detach the allocation policy. Its PTYs stay available to their human owner
+  // until explicitly closed or retired at the original idle deadline.
+  for(const entry of pool.entries.values())if(entry.shell)terminal.revokeConversationGrant?.(entry.shell.sessionId);
+  pools.delete(id);if(pool.entries.size)parked.add(pool);publish();
+ }
+ function releaseConnection(id){
+  const all=[...parked,...pools.values()].filter(pool=>pool.connectionId===id);pools.delete(id);
+  for(const pool of all){parked.delete(pool);pool.enabled=false;pool.available=null;for(const entry of pool.entries.values())void retire(pool,entry).catch(()=>{});}
  }
  function serviceOwner(id,owner){const pool=pools.get(id);if(pool){pool.serviceAllowed=owner==='agent';pool.serviceFailure=null;}}
  function touch(provider,threadId){
@@ -157,24 +188,24 @@ export function createConversationTerminals({terminal,service,registration,resou
  }
  async function sweep(){
   const cutoff=now()-(idleMinutes()??60)*60000,closing=[];
-  for(const pool of pools.values()){
+  for(const pool of [...parked,...pools.values()]){
    if(pool.available?.at<=cutoff){const shell=pool.available;pool.available=null;
-    closing.push(terminal.closeConversationShell({...shell,connectionId:pool.connectionId}).catch(()=>{if(!pool.available&&pool.enabled)pool.available=shell;}));}
+    closing.push(terminal.closeConversationShell({sessionId:shell.sessionId,ownerEpoch:shell.ownerEpoch,connectionId:pool.connectionId}).catch(()=>{if(!pool.available&&pool.enabled)pool.available=shell;}));}
    for(const entry of pool.entries.values()){
-    if(busy(entry.scope)){entry.at=now();continue;}
+    if(selected(pool)&&busy(entry.scope)){entry.at=now();continue;}
     if(entry.at<=cutoff&&!entry.pending&&!entry.retiring)closing.push(retire(pool,entry));
    }
   }
-  await Promise.allSettled(closing);if(closing.length)publish();
+  await Promise.allSettled(closing);for(const pool of parked)if(!pool.entries.size)parked.delete(pool);if(closing.length)publish();
  }
  function forget(provider,threadId){
   const key=keyOf({provider,threadId});
-  for(const pool of pools.values()){const entry=pool.entries.get(key);if(entry){pool.entries.delete(key);void retire(pool,entry).catch(()=>{});}}
+  for(const pool of [...parked,...pools.values()]){const entry=pool.entries.get(key);if(entry){pool.entries.delete(key);void retire(pool,entry).catch(()=>{});}}
  }
  function canAcquire(provider){
   const pool=getPool(provider),scope=scopeOf(current());
-  return !!(pool?.enabled&&(!scope||!pool.entries.has(keyOf(scope))));
+  return !!(pool?.enabled&&(!scope||!pool.available?.awaitingNewConversation&&!pool.entries.has(keyOf(scope))));
  }
- return {arm,acquire,canAcquire,describe,releaseShell,releaseConnection,serviceOwner,touch,sweep,forget,
-  stop(){stopped=true;pools.clear();}};
+ return {arm,acquire,pendingForNewConversation,canAcquire,describe,prepareAuthoringGrant,releaseShell,detachConnection,releaseConnection,serviceOwner,touch,sweep,forget,
+  stop(){stopped=true;pools.clear();parked.clear();}};
 }

@@ -98,3 +98,40 @@ for(const phase of ['thread/resume','thread/read'])test(phase+' failure offers o
  h.type('Retained editable draft');assert.equal(sendButton(h).props.disabled,true);assert.equal(starts(h).length,0);h.click('agent-history-retry');await h.flush();assert.equal(h.textarea().props.value,'Retained editable draft');assert.equal(sendButton(h).props.disabled,false);assert.equal(starts(h).length,0);h.send();await h.flush();assert.equal(starts(h).length,1);assert.equal(starts(h)[0].data.params.threadId,'failed-history');
  }finally{h.unmount();}
 });
+
+test('live and resumed shared terminal sequences form one group across empty assistant messages',async()=>{
+ const terminalTools=['list_shared_terminals','read_shared_terminal','write_shared_terminal','read_shared_terminal','write_shared_terminal','read_shared_terminal','write_shared_terminal'];
+ const items=terminalTools.flatMap((tool,i)=>[
+  {id:'assistant-'+i,type:'agentMessage',text:i%2?' \n\t':''},
+  {id:'call-'+i,type:'mcpToolCall',tool,status:'completed',result:{content:[{type:'text',text:'terminal result '+i}]}}
+ ]);
+ const id='terminal-thread';
+ const treeNodes=node=>Array.isArray(node)?node.flatMap(treeNodes):node&&typeof node==='object'?[node,...treeNodes(node.props?.children)]:[];
+ for(const history of [false,true]){
+  const h=agentHarness({
+   props:{sessionSelection:{nonce:'terminal',conversation:conversation('codex',id)}},
+   override:(method,data,standard)=>history&&method==='agent.rpc'&&data.method==='thread/read'?{thread:{id,turns:[{items}]}}:standard(method,data)
+  });
+  try{
+   await h.flush();
+   const emit=(method,params)=>h.emit({provider:'codex',method,params:{threadId:id,...params}});
+   if(!history){
+    for(const item of items){
+     if(item.type==='mcpToolCall')emit('item/started',{item:{...item,status:'inProgress',result:null}});
+     emit('item/completed',{item});
+    }
+    await h.flush();
+   }
+   const rendered=()=>treeNodes(h.find(node=>node.props?.className==='chat-scroll'));
+   const groups=()=>rendered().filter(node=>node.props?.['data-testid']==='tool-group');
+   assert.equal(groups().length,1,history?'history':'live');
+   assert.deepEqual(messages(h).map(row=>row.toolName),terminalTools);
+   assert.equal(groups()[0].props.open,undefined);
+   // The empty item retains its transcript position if a later delta gives it real text.
+   emit('item/agentMessage/delta',{itemId:'assistant-3',delta:'继续检查输出'});
+   await h.flush();
+   assert.deepEqual(groups().map(group=>treeNodes(group).filter(node=>node.type==='./ChatMessage').length),[3,4]);
+   assert.equal(messages(h)[3].text.trim(),'继续检查输出');
+  }finally{h.unmount();}
+ }
+});

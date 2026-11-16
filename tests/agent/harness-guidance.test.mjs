@@ -52,6 +52,9 @@ test('project skill guidance reaches generated Kimi/Qwen/DSH profiles and DSH ch
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-project-skill-profiles-'));
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  for(const name of ['project_skill_catalog','read_project_skill','write_project_skill'])assert.match(STUDIO_INSTRUCTIONS,new RegExp(name));
+ const directory=fs.readFileSync(new URL('../../agent/context/skill-directory.md',import.meta.url),'utf8').trim();
+ assert(STUDIO_INSTRUCTIONS.includes(directory));
+ for(const instruction of ['scope:"user"','scope:"current"','expected_sha256','Writing a file over SSH','read_scientific_skill'])assert(directory.includes(instruction));
  assert.match(STUDIO_INSTRUCTIONS,/writable even though native filesystem access is disabled/);
  const kimi=prepareProfile(root,'kimi'),qwen=prepareProfile(root,'qwen');
  assert.match(fs.readFileSync(path.join(kimi.home,'SYSTEM.md'),'utf8'),/project_skill_catalog/);

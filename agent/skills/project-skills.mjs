@@ -6,9 +6,9 @@ const MAX_BYTES = 16384;
 const NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const digest = value => createHash('sha256').update(value).digest('hex');
 const descriptions = {
- project_skill_catalog: 'Discover saved user-authored skills in this selected project (or this chat when no project is selected). Read relevant entries each turn; instructions never grant permissions.',
- read_project_skill: 'Read a saved SKILL.md from the selected project micro workspace. No host paths accepted.',
- write_project_skill: 'Save a user-requested SKILL.md in the selected project micro workspace. Persisted and discovered immediately; no execution or permission changes. expected_sha256 must match catalog/read, or null for a new skill.',
+ project_skill_catalog: 'List local user-authored skills. Use scope=user for the reusable personal library; scope=current (default) selects this project or unbound chat.',
+ read_project_skill: 'Read a saved local SKILL.md by name from the requested user, project or private conversation library.',
+ write_project_skill: 'Save a local SKILL.md. Use scope=user for reusable guidance across chats; scope=current (default) for this project or chat. expected_sha256 must match the previous read, or be null to create.',
 };
 
 // Deliberately accept simple, single-line YAML fields only. Never inspect body text
@@ -38,6 +38,22 @@ function assertDirectory(directory) {
  if (stat.isSymbolicLink() || !stat.isDirectory()) throw Error('Unsafe skill workspace directory');
 }
 
+function ensureDirectory(directory) {
+ const absolute = path.resolve(directory);
+ const base = path.parse(absolute).root;
+ let cursor = base;
+ for (const part of path.relative(base, absolute).split(path.sep).filter(Boolean)) {
+  cursor = path.join(cursor, part);
+  if (!fs.existsSync(cursor)) fs.mkdirSync(cursor, {mode: 0o700});
+  assertDirectory(cursor);
+ }
+}
+
+function containsDirectory(parent, child) {
+ const relative = path.relative(parent, child);
+ return !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..' + path.sep);
+}
+
 export class ProjectSkills {
  constructor({root, current}) {
   this.root = path.resolve(root);
@@ -53,9 +69,13 @@ export class ProjectSkills {
     annotations: {readOnlyHint: !write, openWorldHint: false},
     inputSchema: {
      type: 'object',
-     properties: catalog ? {} : {
-      name: {type: 'string', pattern: NAME.source},
-      ...(write ? {body: {type: 'string', maxLength: MAX_BYTES}, expected_sha256: {type: ['string', 'null']}} : {}),
+     properties: {
+      scope: {type: 'string', enum: ['current', 'user']},
+      ...(catalog ? {} : {name: {type: 'string', pattern: NAME.source}}),
+      ...(write ? {
+       body: {type: 'string', maxLength: MAX_BYTES},
+       expected_sha256: {oneOf: [{type: 'string'}, {type: 'null'}]},
+      } : {}),
      },
      required: catalog ? [] : write ? ['name', 'body', 'expected_sha256'] : ['name'],
      additionalProperties: false,
@@ -75,17 +95,13 @@ export class ProjectSkills {
   return {kind: actual.projectId ? 'project' : 'conversation', id: actual.projectId || actual.provider + ':' + actual.threadId};
  }
 
- directory(scope) {
-  const owner = this.owner(scope);
-  const target = path.join(this.root, digest(owner.kind + ':' + owner.id));
-  // Check every ancestor, including the application-owned root. Never follow junctions.
-  const parts = path.resolve(target).split(path.sep);
-  let cursor = parts.shift() + path.sep;
-  for (const part of parts) {
-   cursor = path.join(cursor, part);
-   if (fs.existsSync(cursor)) assertDirectory(cursor);
-   else fs.mkdirSync(cursor);
-  }
+ directory(scope, library = 'current') {
+  const selected = this.owner(scope);
+  if (!['current','user'].includes(library)) throw Error('Unknown skill library');
+  const owner = library === 'user' ? {kind:'user'} : selected;
+  const key = library === 'user' ? 'user' : digest(owner.kind + ':' + owner.id);
+  const target = path.join(this.root, key);
+  ensureDirectory(target);
   return {target, owner};
  }
 
@@ -114,11 +130,12 @@ export class ProjectSkills {
   return skills;
  }
 
- write(target, directory, file, args, scope) {
+ write(target, directory, file, args, checkCurrent) {
   metadata(args.body, args.name);
   const previous = fs.existsSync(file) ? this.read(file).sha256 : null;
   if (args.expected_sha256 !== previous) throw Error('Skill revision changed; read before saving');
-  this.owner(scope);
+  if (previous === null && this.catalog(target).length >= 64) throw Error('Project skill limit reached');
+  checkCurrent();
   if (fs.existsSync(directory)) {
    const temporary = path.join(directory, '.' + randomUUID() + '.tmp');
    try {
@@ -129,7 +146,6 @@ export class ProjectSkills {
    }
    return;
   }
-  if (this.catalog(target).length >= 64) throw Error('Project skill limit reached');
   // Publish a complete new directory in one rename; failed writes leave no catalog entry.
   const staging = path.join(target, '.' + randomUUID() + '.tmp');
   fs.mkdirSync(staging);
@@ -141,12 +157,49 @@ export class ProjectSkills {
   }
  }
 
+ prepareRoot(directory) {
+  const next = path.resolve(directory);
+  if (!path.relative(this.root, next)) return this.root;
+  if (containsDirectory(this.root, next) || containsDirectory(next, this.root)) throw Error('Choose independent skill cache directories');
+  ensureDirectory(next);
+  const probe = path.join(next, '.write-' + randomUUID());
+  fs.writeFileSync(probe, '', {flag:'wx', mode:0o600});
+  fs.unlinkSync(probe);
+  if (!fs.existsSync(this.root)) return next;
+  ensureDirectory(this.root);
+  const copies = [];
+  for (const key of fs.readdirSync(this.root).filter(key => key === 'user' || /^[a-f0-9]{64}$/.test(key))) {
+   const from = path.join(this.root, key);
+   const to = path.join(next, key);
+   assertDirectory(from);
+   ensureDirectory(to);
+   const existing = new Map(this.catalog(to).map(skill => [skill.name, skill.sha256]));
+   const source = this.catalog(from);
+   if (new Set([...existing.keys(), ...source.map(skill=>skill.name)]).size > 64) throw Error('Skill cache library limit reached');
+   for (const {name, sha256} of source) {
+    if (!existing.has(name)) {
+     copies.push({from:path.join(from, name, 'SKILL.md'), to, name, sha256});
+    } else if (existing.get(name) !== sha256) {
+     throw Error('Conflicting SKILL.md in the chosen cache: ' + name);
+    }
+   }
+  }
+  for (const {from, to, name, sha256} of copies) {
+   const entry = this.read(from);
+   if (entry.sha256 !== sha256) throw Error('Skill changed while copying the local cache');
+   const folder = path.join(to, name);
+   if (fs.existsSync(folder)) assertDirectory(folder);
+   this.write(to, folder, path.join(folder,'SKILL.md'), {name, body:entry.body, expected_sha256:null}, ()=>{});
+  }
+  return next;
+ }
+
  call(tool, args, scope) {
-  const keys = tool === 'project_skill_catalog' ? [] : tool === 'read_project_skill' ? ['name'] : ['name', 'body', 'expected_sha256'];
+  const keys = tool === 'project_skill_catalog' ? ['scope'] : tool === 'read_project_skill' ? ['scope','name'] : ['scope','name', 'body', 'expected_sha256'];
   if (!this.owns(tool) || !args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(key => !keys.includes(key))) {
    throw Error('Invalid project skill arguments');
   }
-  const {target, owner} = this.directory(scope);
+  const {target, owner} = this.directory(scope,args.scope);
   if (tool === 'project_skill_catalog') {
    const skills = this.catalog(target);
    this.owner(scope);
@@ -156,7 +209,7 @@ export class ProjectSkills {
   const directory = path.join(target, args.name);
   if (fs.existsSync(directory)) assertDirectory(directory);
   const file = path.join(directory, 'SKILL.md');
-  if (tool === 'write_project_skill') this.write(target, directory, file, args, scope);
+  if (tool === 'write_project_skill') this.write(target, directory, file, args,()=>this.owner(scope));
   const result = this.read(file);
   metadata(result.body, args.name);
   this.owner(scope);

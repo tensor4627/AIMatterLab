@@ -13,7 +13,10 @@ const resources=[
  {source:'contracts/tools/tool-package.schema.json',resource:'developer/skills/studio-tool-integration/references/tool-package.schema.json',validate:value=>value?.$id==='studio.tool-package/1'&&value.type==='object'},
  {source:'contracts/tools/tool-package.mjs',resource:'developer/skills/studio-tool-integration/references/tool-package.mjs',text:true,validate:value=>value.includes('export function validateToolPackage(')&&value.includes("from './tool-package.schema.json'")},
  {source:'contracts/tools/aimlab-tools.mjs',resource:'developer/skills/studio-tool-integration/references/aimlab-tools.mjs',text:true,validate:value=>value.includes('export function validateAimlabTools(')&&value.includes("from './tool-package.mjs'")},
- {source:'installation/examples/worker-smoke.py',resource:'developer/skills/studio-tool-integration/assets/worker-smoke.py',text:true,validate:value=>value.trim().length>0}
+ {source:'installation/examples/worker-smoke.py',resource:'developer/skills/studio-tool-integration/assets/worker-smoke.py',text:true,validate:value=>value.trim().length>0},
+ {source:'contracts/workflows/roadmap.schema.json',resource:'backend/worker/studio_worker/transport/roadmap_schema.py',
+  validate:value=>value?.$id==='studio.workflow-roadmap/1'&&value.additionalProperties===false,
+  render:source=>Buffer.from("# Generated from contracts/workflows/roadmap.schema.json by sync-tool-contracts.mjs.\nimport json\n\nROADMAP_SCHEMA = json.loads(r'''"+source.toString('utf8').replaceAll('\r\n','\n').trimEnd()+"''')\n")}
 ];
 function regularFile(file){
  const stat=fs.lstatSync(file);
@@ -38,7 +41,8 @@ export function syncToolContracts({root=defaultRoot,check=false}={},{rename=fs.r
   const bytes=regularFile(source),value=item.text?new TextDecoder('utf-8',{fatal:true}).decode(bytes):JSON.parse(bytes.toString('utf8'));
   if(!item.validate(value))throw Error('Unsupported canonical tool contract: '+item.source);
   const current=fs.existsSync(target)?regularFile(target):null;
-  return {...item,target,bytes,matches:current?.equals(bytes)===true};
+  const output=item.render?item.render(bytes):bytes;
+  return {...item,target,bytes:output,matches:current?.equals(output)===true};
  });
  if(check&&plans.some(item=>!item.matches))throw Error('Generated tool contract or developer resource is stale; run node scripts/sync-tool-contracts.mjs');
  // Stage every changed file first, then rename them together; a failed rename restores

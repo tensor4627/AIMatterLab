@@ -4,10 +4,15 @@ import type {Run,ClusterRun} from './runs';
 import type {TaskEditRequest,TaskExecuteRequest,TaskInputReadRequest,TaskInputReadResult,TaskLinkRunRequest} from './workspace';
 import type {DeploymentContext,DeploymentDraftRequest,DeploymentSaveRequest,DeploymentProjectRequest,TaskRecord} from './deployment';
 import type {ToolWorkflowContext,ToolWorkflowCreate,ToolWorkflowReference,ToolWorkflowPrepare,ToolWorkflowExecute,ToolWorkflowRead,ToolWorkflowIndex,ToolWorkflowLocation} from './tool-workflows';
+import type {RoadmapPreview,RoadmapExecution} from './roadmap-execution';
 
 type Route<Request,Response>={request:Request;response:Response};
 /** Critical authoring/execution boundary. Authorization remains a main/worker responsibility. */
 export interface StudioIpcMap {
+ 'task.roadmap.preview':Route<{taskId:string;environments:Record<string,string>},RoadmapPreview>;
+ 'task.roadmap.confirm':Route<{taskId:string;snapshotSha256:string;environments:Record<string,string>},RoadmapExecution|null>;
+ 'task.roadmap.list':Route<{taskId:string},RoadmapExecution[]>;
+ 'task.roadmap.snapshot':Route<{taskId:string;executionId:string},RoadmapPreview>;
  'task.read':Route<{id:string},TaskRecord>;
  'task.edit':Route<TaskEditRequest,TaskRecord>;
  'task.input.read':Route<TaskInputReadRequest,TaskInputReadResult>;

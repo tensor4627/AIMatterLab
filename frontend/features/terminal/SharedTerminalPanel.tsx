@@ -1,6 +1,7 @@
 import LoadingFeedback from '../../ui/LoadingFeedback';
 import {useEffect,useRef,useState} from 'react';
 import {Terminal} from '@xterm/xterm';
+import {createHumanInputWriter} from './human-input.mjs';
 import {FitAddon} from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import {invoke} from '../../api/studio';
@@ -15,7 +16,7 @@ import SshConnectionPanel from './SshConnectionPanel';
 export type SharedTerminalRequest={nonce:string;kind:'local'|'ssh';mode:'interactive'|'key';clusterId?:string;profileId?:string;version?:number;profileName?:string;connectionId?:string;connectionMode?:'plain'|'managed'};
 type OpenTarget=Omit<SharedTerminalRequest,'nonce'|'profileName'|'connectionMode'|'connectionId'>;
 type OpenRecovery={target:OpenTarget;scope:string;nonce?:string;provider?:AgentProvider;requestId:string;message:string};
-type Session={connectionId?:string;resource?:SshTerminalResourceReference|SshConnectionResourceReference;sessionId:string;name:string;kind:string;mode:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;status:string;expired?:boolean;sequence:number;exitCode?:number|null;serviceActive?:boolean;serviceStatus?:string};
+type Session={humanInputSequence?:number;outputWait?:boolean;connectionId?:string;resource?:SshTerminalResourceReference|SshConnectionResourceReference;sessionId:string;name:string;kind:string;mode:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;status:string;expired?:boolean;sequence:number;exitCode?:number|null;serviceActive?:boolean;serviceStatus?:string};
 type ReadResult=Session&{output:string;cursor:number;dropped:boolean};
 function terminalMessage(error:unknown){
  const code=String(error).slice(0,4096).match(/terminal_[a-z_]+/)?.[0];
@@ -130,13 +131,13 @@ export function LegacySharedTerminalPanel({visible,request,canShare,onError,reso
 
  useEffect(()=>{
   if(!active?.sessionId||!host.current)return;
-  const currentId=active.sessionId;let stopped=false;
+  const currentId=active.sessionId,writeInput=createHumanInputWriter();let stopped=false;
   const minimum=parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||11;
   const view=new Terminal({fontSize:Math.max(minimum,Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||13),fontFamily:'Cascadia Code, Consolas, monospace',scrollback:5000,convertEol:false,cursorBlink:true,theme:{background:'#121218',foreground:'#d1d5e4',cursor:'#b8a0f7'}});
   const addon=new FitAddon();view.loadAddon(addon);view.open(host.current);terminal.current=view;fit.current=addon;
   const resize=()=>{if(stopped||activeRef.current?.sessionId!==currentId||!host.current?.clientWidth||!host.current.clientHeight)return;view.options.fontSize=Math.max(parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||11,Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||13);addon.fit();if(activeRef.current?.alive===true&&!laneReserved(activeRef.current)&&Number.isInteger(view.cols)&&view.cols>=10&&view.cols<=500&&Number.isInteger(view.rows)&&view.rows>=2&&view.rows<=300){const context={scope:resourceOwner.current,nonce:requestOwner.current,provider:providerOwner.current};void invoke('sharedTerminal.resize',{sessionId:currentId,cols:view.cols,rows:view.rows}).catch(error=>{if(!stopped&&contextCurrent(context)&&activeRef.current?.sessionId===currentId)setNotice(terminalMessage(error));});}};
   const observer=new ResizeObserver(resize);observer.observe(host.current);
-  const input=view.onData(data=>{const owner=activeRef.current;if(stopped||busyRef.current||laneReserved(owner)||owner?.sessionId!==currentId||owner.owner!=='human'||owner.alive!==true||owner.expired)return;const ownerEpoch=owner.ownerEpoch,requestId=crypto.randomUUID();inputQueue.current=inputQueue.current.then(async()=>{const latest=activeRef.current;if(stopped||busyRef.current&&!drainingInputRef.current||laneReserved(latest)||latest?.sessionId!==currentId||latest.ownerEpoch!==ownerEpoch||latest.owner!=='human'||latest.expired)return;await invoke('sharedTerminal.input',{sessionId:currentId,ownerEpoch,requestId,data});}).catch(error=>{if(!stopped&&mounted.current)report(error);});});
+  const input=view.onData(data=>{const owner=activeRef.current;if(stopped||busyRef.current||laneReserved(owner)||owner?.sessionId!==currentId||owner.owner!=='human'||owner.alive!==true||owner.expired)return;const ownerEpoch=owner.ownerEpoch,requestId=crypto.randomUUID();inputQueue.current=inputQueue.current.then(async()=>{const latest=activeRef.current;if(stopped||busyRef.current&&!drainingInputRef.current||laneReserved(latest)||latest?.sessionId!==currentId||latest.ownerEpoch!==ownerEpoch||latest.owner!=='human'||latest.expired)return;await writeInput((payload:unknown)=>invoke('sharedTerminal.input',payload),latest,requestId,data);}).catch(error=>{if(!stopped&&mounted.current)report(error);});});
   window.addEventListener('studio:appearance',resize);resize();view.focus();
   return()=>{
    if(stopped)return;stopped=true;input.dispose();observer.disconnect();window.removeEventListener('studio:appearance',resize);if(terminal.current===view){terminal.current=null;fit.current=null;}
@@ -147,14 +148,14 @@ export function LegacySharedTerminalPanel({visible,request,canShare,onError,reso
  },[active?.sessionId]);
  useEffect(()=>{const view=terminal.current;if(view){const editable=visible&&!busy&&!serviceReserved&&active?.owner==='human'&&active?.alive===true&&!active?.expired;view.options.disableStdin=!editable;view.options.cursorBlink=!!editable;if(editable)view.focus();}},[visible,busy,serviceReserved,active?.sessionId,active?.owner,active?.alive,active?.expired]);
  useEffect(()=>{
-  if(!visible||!active?.sessionId)return;const id=active.sessionId,epoch=++generation.current;let reading=false,stopped=false;
+  if(!visible||!active?.sessionId)return;const id=active.sessionId,epoch=++generation.current;let reading=false,stopped=false,followup:ReturnType<typeof setTimeout>|undefined;
   const read=async()=>{if(reading||stopped)return;const current=activeRef.current;if(current?.sessionId!==id||current.expired||current.alive===null)return;reading=true;
-   try{const result=await invoke<ReadResult>('sharedTerminal.read',{sessionId:id,ownerEpoch:current.ownerEpoch,cursor:cursor.current,maxBytes:65536});if(stopped||generation.current!==epoch||activeRef.current?.sessionId!==id||activeRef.current.ownerEpoch!==current.ownerEpoch)return;
+   try{const result=await invoke<ReadResult>('sharedTerminal.read',{sessionId:id,ownerEpoch:current.ownerEpoch,cursor:cursor.current,maxBytes:65536,...current.outputWait?{waitMs:1000}:{}});if(stopped||generation.current!==epoch||activeRef.current?.sessionId!==id||activeRef.current.ownerEpoch!==current.ownerEpoch)return;
     if(result.dropped)terminal.current?.write('\r\n['+t('较早输出已超出回放容量')+']\r\n');
-    if(result.output)terminal.current?.write(result.output);if(result.owner!==current.owner||result.ownerEpoch!==current.ownerEpoch||result.alive!==current.alive||result.expired!==current.expired||result.serviceActive!==current.serviceActive||result.serviceStatus!==current.serviceStatus)void refreshResource();cursor.current=result.cursor;activeRef.current=result;setActive(result);setSessions(old=>old.map(item=>item.sessionId===id?result:item));const priorReadNotice=readNotice.current;readNotice.current='';setNotice(old=>old===priorReadNotice?'':old);
+    if(result.output)terminal.current?.write(result.output);if(result.owner!==current.owner||result.ownerEpoch!==current.ownerEpoch||result.alive!==current.alive||result.expired!==current.expired||result.serviceActive!==current.serviceActive||result.serviceStatus!==current.serviceStatus)void refreshResource();cursor.current=result.cursor;if(result.outputWait&&result.alive===true){clearTimeout(followup);followup=setTimeout(()=>void read(),0);}activeRef.current=result;setActive(result);setSessions(old=>old.map(item=>item.sessionId===id?result:item));const priorReadNotice=readNotice.current;readNotice.current='';setNotice(old=>old===priorReadNotice?'':old);
    }catch(error){if(!stopped&&generation.current===epoch){readNotice.current=terminalMessage(error);setNotice(readNotice.current);if(activeRef.current?.status!=='unknown')await list().catch(()=>{});}}
    finally{reading=false;}
-  };void read();const timer=setInterval(()=>void read(),500);return()=>{stopped=true;clearInterval(timer);};
+  };void read();const timer=setInterval(()=>void read(),500);return()=>{stopped=true;clearInterval(timer);clearTimeout(followup);};
  },[visible,active?.sessionId,resourceScope,request?.nonce,provider]);
  useEffect(()=>{if(visible&&host.current?.clientWidth)try{fit.current?.fit();}catch{}},[visible]);
 

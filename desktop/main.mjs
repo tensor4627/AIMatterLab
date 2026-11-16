@@ -36,6 +36,7 @@ import {createToolGroupRecords} from '../backend/main/tools/groups.mjs';
 import {registerToolDefinitionRoutes} from '../backend/main/tools/routes.mjs';
 import {createToolConfigurationController,registerToolConfigurationRoutes} from '../backend/main/compute/tool-configurations.mjs';
 import {createToolWorkflowController,registerToolWorkflowRoutes} from '../backend/main/workspace/tool-workflows.mjs';
+import {createRoadmapController} from '../backend/main/workspace/roadmap-execution.mjs';
 import {toolGuidanceTarget} from '../backend/main/compute/tool-guidance-target.mjs';
 import {explicitSetupStage} from '../agent/skills/explicit-setup-stage.mjs';
 import {createComputeOnboarding} from "../backend/main/compute/compute-onboarding.mjs";
@@ -136,9 +137,13 @@ const activeAuthoringTasks=new Map();
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:path.join(app.getPath('userData'),'provider-contexts','codex')}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 bindBundledWorkerRuntimeId(worker,workerSource);
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService});
+const previousSkillRoot=path.join(app.getPath('userData'),'project-skills');
+const userCacheBase=!verifying&&!process.env.STUDIO_PROFILE_DIR&&process.env.LOCALAPPDATA
+ ? path.join(process.env.LOCALAPPDATA,'AIMatterLab') : app.getPath('userData');
+const defaultUserCacheDirectory=fs.existsSync(previousSkillRoot)?previousSkillRoot:path.join(userCacheBase,'user-cache','skills');
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, terminalIdleMinutes:60, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
-  sourceRoots:[],skillRoots:[], theme:'dark', agentProvider:'codex',agentLayout:'right' };
+  sourceRoots:[],skillRoots:[],userCacheDirectory:defaultUserCacheDirectory, theme:'dark', agentProvider:'codex',agentLayout:'right' };
 function findCodex() {
   return findInstalledCodex();
 }
@@ -224,6 +229,15 @@ toolWorkflows=createToolWorkflowController({catalog,groups:toolGroups,configurat
  confirm:async({workflow,step},event)=>{trusted(event);const review=step.review,result=await dialog.showMessageBox(window,{type:'question',buttons:settings.language==='en'?['Cancel','Execute this step']:['取消','执行这个步骤'],defaultId:0,cancelId:0,message:settings.language==='en'?'Execute this reviewed workflow step?':'执行已复核的这个流程步骤？',detail:[workflow.name,step.id,review.run_id,review.target.project_id,review.target.environment_id,review.directory,review.argv.join(' '),'Review SHA256: '+review.review_sha256].join('\n')});trusted(event);return result.response===1;}
 });
 registerToolWorkflowRoutes({handle,controller:toolWorkflows});
+const roadmapExecutions=createRoadmapController({worker,catalog,groups:toolGroups,packages:toolPackages,getSettings:()=>settings,current:()=>workflowContext.current(),getTask:id=>taskRecords.read(id),assertIdle:assertIdleAgent,
+ confirm:async(review,event)=>{
+  trusted(event);const {snapshot}=review,en=settings.language==='en';
+  const result=await dialog.showMessageBox(window,{type:'question',buttons:en?['Cancel','Freeze and run']:['取消','冻结并执行'],defaultId:0,cancelId:0,
+   message:en?'Run the reviewed workflow?':'按照已核对的流程执行？',detail:[snapshot.name,snapshot.original_request,snapshot.target.project_id+' / '+snapshot.target.environment_id,
+    snapshot.steps.map(node=>node.label+' ('+node.tool+')').join(' → '),...snapshot.goals.map(goal=>goal.label+' · '+(goal.requirements||[]).join(' / ')),review.snapshot_sha256].join('\n')});
+  trusted(event);return result.response===1;
+ }});
+for(const action of ['preview','confirm','list','snapshot'])handle('task.roadmap.'+action,(data,event)=>roadmapExecutions[action](data,event));
 const lastCompute=catalog.get('worker-binding','last-explicit');
 const computeProfiles=createComputeProfiles({catalog,guideRoot:path.join(app.getPath('userData'),'ssh-service-environments'),initialWsl:lastCompute?.kind!=='ssh'&&validExplicitBinding(lastCompute,settings)?{distribution:lastCompute.distribution,root:lastCompute.root,port:lastCompute.port,intent:lastCompute.intent||'standard'}:undefined});
 const serviceRegistration=createSshServiceRegistration({catalog,profiles:computeProfiles,legacyBinding:()=>catalog.get('worker-binding','last-explicit')});
@@ -239,7 +253,7 @@ handle('compute.profiles.remove',value=>{
 handle('compute.profiles.inventory',async value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid WSL inventory request');return {distributions:await installedWslDistributions()};});
 sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,getSelectedResource:()=>computeResource?.peek(),selectionRevision:()=>computeResource?.revision()??0,
  root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:terminalExecutionCache({profileRoot:app.getPath('userData'),home:app.getPath('home')}),
- dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):root,
+ dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):path.join(root,'.studio','agent-runtimes'),
  servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'platform','terminal-service','broker.mjs'),nodeExecutable:process.execPath,
  sourceGuard:()=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),{}),worker)});
 // Persisted references are observations, never authentication or Agent leases.
@@ -248,11 +262,24 @@ sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:
 computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,connections:sharedTerminal.connections,current:()=>workflowContext.current(),revision:()=>workflowContext.revision(),serviceState:connectionId=>sshService?.peek(connectionId?{connectionId}:{})});
 sshService=createSshService({worker,connections:sharedTerminal.connections,profiles:computeProfiles,resource:computeResource,registration:serviceRegistration,source:workerSource,transportSource:sshTransportSource,preferredRuntimeId:profile=>preferredSshRuntime(profile,selectedSshBinding(profile),catalog.get('ssh-runtime-preference',profile.id)),current:()=>workflowContext.current(),assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},publish:()=>{emit('studio:event',{method:'studio/sshServiceChanged',params:sshService?.peek()||{status:'disconnected'}});},remember:(identity,health)=>{catalog.put('worker-binding','last-explicit',{...identity,port:health.port,health,checkedAt:Date.now(),sourceIdentity:{runtimeId:health.runtimeId}});}});
 conversationTerminals=createConversationTerminals({terminal:sharedTerminal,service:sshService,registration:serviceRegistration,
- resource:computeResource,current:()=>workflowContext.current(),idleMinutes:()=>settings.terminalIdleMinutes,
+ resource:computeResource,current:()=>workflowContext.current(),conversationName:(provider,threadId)=>taskRecords.conversation(provider,threadId)?.name,idleMinutes:()=>settings.terminalIdleMinutes,
  busy:scope=>agents.bridge(scope.provider)?.activeTurns?.has(scope.threadId)||agents.pendingTurnDispatches.has(agents.contextKey(scope.provider,scope.threadId)),
  publish:()=>emit('studio:event',{method:'studio/conversationTerminalChanged'})});
 const terminalIdleTimer=setInterval(()=>void conversationTerminals.sweep(),10000);terminalIdleTimer.unref();
-const authoringAuthorization={begin:task=>sshService.prepareAuthoringGrant(task),commit:(ticket,task)=>sshService.completeAuthoringGrant(ticket,task),abort:ticket=>sshService.abortAuthoringGrant(ticket)};
+const authoringAuthorization={
+ begin(task){
+  const service=sshService.prepareAuthoringGrant(task);
+  const shell=conversationTerminals.prepareAuthoringGrant();return service||shell?{service,shell}:null;
+ },
+ commit(ticket,task){
+  if(!ticket)return false;
+  const authorized=ticket.service?sshService.completeAuthoringGrant(ticket.service,task):false;
+  ticket.shell?.(ticket.service?authorized:true);return authorized;
+ },
+ abort(ticket){
+  if(ticket){ticket.shell?.(false);if(ticket.service)sshService.abortAuthoringGrant(ticket.service);}
+ },
+};
 worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  const selected=computeResource.peek(),terminalTool=['list_shared_terminals','read_shared_terminal','write_shared_terminal'].includes(toolName);
  if(selected?.kind==='ssh-connection'){
@@ -285,7 +312,7 @@ handle('compute.resource.status',async value=>{const result=await computeResourc
 for(const method of ['activate','clear'])handle('compute.resource.'+method,async value=>{
  assertIdleAgent();agents.assertContextIdle();const before=computeResource.capture(),result=await computeResource[method](value),after=computeResource.capture();
  if(before.revision!==after.revision||JSON.stringify(before.selection)!==JSON.stringify(after.selection)){
-  if(before.selection?.connectionId)conversationTerminals.releaseConnection(before.selection.connectionId);
+  if(before.selection?.connectionId)conversationTerminals.detachConnection(before.selection.connectionId);
   await sshService.resourceChanged();
   for(const provider of ['codex','kimi','qwen','deepseek','compatible']){worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);}
  }
@@ -306,7 +333,7 @@ for(const method of ['list','open','read','input','resize','owner','close'])hand
   if(Object.keys(value).some(key=>!['sessionId','ownerEpoch','owner','provider'].includes(key)))throw Error('terminal_invalid_request');
   result=await conversationTerminals.arm(value,value.provider||agents.active);
   const context=workflowContext.current();
-  if(context?.threadId&&result.currentConversation)await agents.selectContext(context.provider,context);
+  if(context?.threadId&&result.currentConversation)await workflowContext.synchronize(context,(provider,scope)=>agents.selectContext(provider,scope));
  }else{
   result=await (['owner','close'].includes(method)?connectionHandoff:sharedTerminal)[method](value);
   if(method==='close'||method==='owner'&&value.owner==='human')conversationTerminals.releaseShell(value.sessionId);
@@ -325,7 +352,7 @@ localReview=registerCalculationReview({handle,records:taskRecords,worker,current
 
 privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:activeAuthoringTasks});
 worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
-const projectSkills=new ProjectSkills({root:path.join(app.getPath('userData'),'project-skills'),current:()=>workflowContext.current()});
+const projectSkills=new ProjectSkills({root:settings.userCacheDirectory||defaultUserCacheDirectory,current:()=>workflowContext.current()});
 worker.setProjectSkills(projectSkills);
 terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,guard:()=>worker.authoringGuard});
 await terminalMcp.start();
@@ -388,7 +415,13 @@ handle('diagnostics.performance',value=>{
  if(Object.keys(value).join(',')!=='phase'||!['renderer-interactive','workspace-observed'].includes(value.phase))throw Error('Invalid renderer performance phase');
  return performanceTimeline.mark(value.phase);
 });
-handle('settings',data => { settings=catalog.put('settings','main',normalizeSettings(settings,data)); return settings; });
+handle('settings',data=>{
+ const next=normalizeSettings(settings,data);
+ next.userCacheDirectory=projectSkills.prepareRoot(next.userCacheDirectory||defaultUserCacheDirectory);
+ settings=catalog.put('settings','main',next);
+ projectSkills.root=settings.userCacheDirectory;
+ return settings;
+});
 function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
 async function bindSources(current=()=>{}){if(worker.identity?.kind==='ssh'){current();return worker.request('GET','/api/source-projects');}const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());

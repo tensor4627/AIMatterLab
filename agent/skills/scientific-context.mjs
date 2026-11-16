@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 const ENGINE_ROUTES={'pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
-export function selectScientificFunctions({text='',parameters={},hasWorkflow=false,manualFunction}={}){
+export function selectScientificFunctions({text='',parameters={},hasWorkflow=false,planRoadmap=false,manualFunction}={}){
  const value=String(text),engine=parameters.engine;let id;
  const consumerIntent=/分子动力学|\bmd\b|metad|opes|增强采样/i.test(value);
  const dynamicsIntent=/\b(?:md|nve|nvt|npt|metad|opes)\b|wtmetad|分子动力学|增强采样|偏置模拟|积分|沉积/i.test(value);
@@ -31,18 +31,19 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  else if(/gpumd/i.test(value))id='md.gpumd';
  else if(/materials.?project|\bmp-[0-9]+/i.test(value))id='structure.materials-project';
  else if(/\base\b|生成.*结构|构建.*结构/i.test(value))id='structure.ase';
- return [...new Set([...(hasWorkflow?['workflow.orchestrate']:[]),...id?[id]:[]])];
+ const roadmap=hasWorkflow&&!manualFunction&&(planRoadmap||/流程图|输入输出规划|流程总览|计算路线图|workflow (?:roadmap|diagram)|artifact handoffs/i.test(value));
+ return [...new Set([...(hasWorkflow?['workflow.orchestrate']:[]),...(roadmap?['workflow.roadmap']:[]),...id?[id]:[]])];
 }
 export class ScientificSkillContext{
  constructor(router){this.router=router;this.accepted=new Map();}
  forget(key){for(const cached of this.accepted.keys())if(cached.endsWith('\0'+key))this.accepted.delete(cached);}
  async prepare(key,provider,options){
-  let functions=selectScientificFunctions(options);const policy=options.policy,fallback=policy&&policy.state!=='legacy_unconfigured'&&policy.facts?.package&&options.manualFunction===undefined&&!policy.hasReadGrant()&&functions.every(id=>id==='workflow.orchestrate');
+  let functions=selectScientificFunctions(options);const policy=options.policy,fallback=policy&&policy.state!=='legacy_unconfigured'&&policy.facts?.package&&options.manualFunction===undefined&&!policy.hasReadGrant()&&functions.every(id=>id==='workflow.orchestrate'||id==='workflow.roadmap');
   // Non-legacy authority is supplied only for an actually bound configuration, including ordinary chats.
   // With no domain intent, its self-contained receipt replaces the optional generic workflow guide.
-  if(fallback)functions=['@execution:'+policy.facts.package.id];
+  if(fallback)functions=['@execution:'+policy.facts.package.id,...functions.filter(id=>id==='workflow.roadmap')];
   const managed=fallback||policy&&functions.some(id=>policy.appliesTo(this.router.routes?.get(id)||{id})),receipts=[];
-  for(const id of functions){if(fallback){await policy.revalidate();receipts.push(policy.executionResult(id));await policy.revalidate();}else receipts.push(await this.router.read(provider,id,undefined,{scope:options.scope||{provider},policy}));}
+  for(const id of functions){if(fallback&&id.startsWith('@execution:')){await policy.revalidate();receipts.push(policy.executionResult(id));await policy.revalidate();}else receipts.push(await this.router.read(provider,id,undefined,{scope:options.scope||{provider},policy}));}
   const blocked=receipts.filter(r=>r.status!=='passed');
   if(blocked.length)return {status:blocked.some(r=>r.status==='permission_required')?'permission_required':'blocked',...managed?{guidanceKind:'sealed'}:{},routes:functions,attach:false,attachments:[],text:'[Studio scientific guidance unavailable]\n'+blocked.map(r=>r.function_id+': '+(r.reason||r.status)).join('\n')+'\nUse real inspection tools; do not invent software parameters or bypass pyGAS.'};
   if(!functions.length)return {status:'not_run',routes:[],attach:false,attachments:[],text:''};
