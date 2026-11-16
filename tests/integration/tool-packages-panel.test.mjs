@@ -13,7 +13,7 @@ test('an empty tool catalog shows the same source commands and upstream guides s
  const root=new URL('../../',import.meta.url);
  const manifest=JSON.parse(fs.readFileSync(new URL('installation/manifest.json',root),'utf8'));
  const sources=JSON.parse(fs.readFileSync(new URL(manifest.tool_sources,root),'utf8'));
- assert.deepEqual(sources.map(tool=>tool.name),['GPU-Sampling / GPUMD','pyGAS','PyDyn','TorchNEP','HotPP']);
+ assert.deepEqual(sources.map(tool=>tool.name),['GPU-Sampling / GPUMD','pyGAS','PyDyn','TorchNEP','HotPP','HotHam']);
  const pkg=JSON.parse(fs.readFileSync(new URL('package.json',root),'utf8'));
  assert.ok(pkg.build.extraResources.some(rule=>rule.from===manifest.tool_sources&&rule.to==='tool-sources.json'));
  const h=toolPackagesHarness({records:[]});

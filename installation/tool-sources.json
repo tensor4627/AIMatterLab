@@ -33,5 +33,12 @@
     "branch": "master",
     "guide": "docs/source/install.rst",
     "validated_commit": "fa4b33a844080871dd998165926a089822a51b41"
+  },
+  {
+    "name": "HotHam",
+    "url": "https://github.com/liangzhixin-202169/Hot-Ham.git",
+    "branch": "master",
+    "guide": "aimlab-tools/SKILL.md",
+    "validated_commit": "7518adfe2cd1405de452eda362e45e55b522a836"
   }
 ]

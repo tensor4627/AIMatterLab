@@ -18,6 +18,22 @@
 | 导入边界 | failed | 6 项中 4 项通过。两项静态断言在合并前的 `main`（`d7258e7`）和本版复现相同失败。一项沿 SSH 位置类型的导入路径到达桌面服务目录，另一项发现共享的 `contracts/product.mjs` 引入 `node:fs`。 |
 | 发行与额外运行 | not_run | 本次范围为本地源码合并。未制作用于分发的 0.1.4 Windows 包、创建版本标签或推送远端。合并验证复用已有真实 MD 文件，未另起科学作业、提交现场集群或调用线上模型。 |
 
+## 2026-11-17 HotHam 来源合并
+
+从 PR !1 的提交 `df9dc0428584bc9e433b19d4a5308ac5d7a3a1e7` 合入 HotHam 来源清单、交付入口说明和来源面板测试，归入 0.1.4。
+
+公开仓库为 `https://github.com/liangzhixin-202169/Hot-Ham.git`，分支 `master`，交付入口 `aimlab-tools/SKILL.md`，历史检查提交为 `7518adfe2cd1405de452eda362e45e55b522a836`。登记环境时仍使用实际检出的提交。HotHam 原生执行适配处于待接入状态。
+
+| 范围 | 结果 | 验证 |
+| --- | --- | --- |
+| 公开来源与交付入口 | passed | 远端 `master` 对应上述固定提交，交付文件可读取并标识 HotHam。 |
+| 版本与来源面板 | passed | `node --test tests/desktop/product-brand.test.mjs tests/integration/tool-packages-panel.test.mjs` 共 33 项通过。 |
+| 原生来源面板交互 | passed | 隔离隐藏 Electron 的 3 项检查通过，使用真实来源组件、空目录桥接数据及原生鼠标和键盘事件，覆盖折叠、展开、六项来源与 HotHam 路径。首轮调试启动超时，改用独立进程后通过。 |
+| 文档与合并差异 | passed | 139 个 Markdown 文件的链接检查与差异空白检查通过，合并差异限定为 5 个 HotHam 相关文件，版本配置与既有发布记录核对通过。 |
+| HotHam 安装与文档测试 | passed（开发者报告） | 来源 PR 记录开发者按 HotHam 仓库内 Markdown 完成安装与文档测试并报告通过，保留其原始范围。 |
+| AIMatterLab 完整安装与测试 | not_run | 后续通过 AIMatterLab 在选定环境安装 HotHam，按上游 Markdown 运行测试，保存安装过程、逐项结果与证据。 |
+| 本次桌面成品 | not_run | 本次范围为 HotHam 来源合并。 |
+
 ## 计算流程的前序验收
 
 以下两次验收对应 0.1.1 发布后、合并 dev 前的流程图源码，改动保存在提交 `6555665`。保留各次实际结果及当时的测试范围。
