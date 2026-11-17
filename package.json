@@ -1,7 +1,7 @@
 {
   "name": "aimatterlab",
   "productName": "AIMatterLab",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -18,7 +18,7 @@
     "test:frontend": "node scripts/frontend-regression.mjs",
     "test:frontend:recovery": "node scripts/frontend-source-recovery.mjs",
     "protocol": "node scripts/protocol.mjs",
-    "pack": "pnpm run build && electron-builder --win nsis zip --x64 --config.electronDist=node_modules/electron/dist && node scripts/package-companions.mjs",
+    "pack": "pnpm run build && electron-builder --win nsis zip --x64 --publish never --config.electronDist=node_modules/electron/dist && node scripts/package-companions.mjs",
     "stage:agents": "node scripts/stage-agents.mjs",
     "test:task": "node scripts/task-integration-smoke.mjs",
     "test:pygas-ui": "node scripts/pygas-composer-regression.mjs",
@@ -63,7 +63,7 @@
     "beforeBuild": "scripts/package-runtime.mjs",
     "afterPack": "scripts/workspace-installer-files.mjs",
     "directories": {
-      "output": "release/v0.1.7"
+      "output": "release/v0.1.8"
     },
     "files": [
       "dist/**",
@@ -94,6 +94,10 @@
     ],
     "win": {
       "icon": "build/icon.ico",
+      "signtoolOptions": {
+        "sign": "scripts/sign-windows-setup.mjs",
+        "signingHashAlgorithms": ["sha256"]
+      },
       "target": [
         "nsis",
         "zip"
@@ -107,8 +111,7 @@
       "packElevateHelper": false,
       "createDesktopShortcut": "always",
       "deleteAppDataOnUninstall": false,
-      "differentialPackage": false,
-      "useZip": true,
+      "differentialPackage": true,
       "installerLanguages": ["en_US", "zh_CN"],
       "include": "build/workspace-installer.nsh",
       "artifactName": "AIMatterLab-${version}-win-${arch}-setup.${ext}"

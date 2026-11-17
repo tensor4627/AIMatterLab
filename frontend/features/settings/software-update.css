@@ -1,0 +1,6 @@
+.software-update{display:grid;justify-items:start;gap:12px}
+.software-update p{margin:0}
+.software-update progress{width:min(100%,340px);accent-color:var(--accent)}
+.software-update small{overflow-wrap:anywhere}
+.brand button.version{appearance:none;background:none;color:var(--muted);border:0;cursor:pointer;-webkit-app-region:no-drag}
+.brand button.version:hover,.brand button.version:focus-visible,.brand button.version.has-update{color:var(--accent)}

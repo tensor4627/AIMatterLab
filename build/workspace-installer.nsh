@@ -8,6 +8,8 @@ LangString WorkspaceError 2052 "无法使用此工作区"
 LangString WorkspaceError 1033 "Cannot use this workspace"
 LangString WorkspaceBusy 2052 "请先关闭从这个工作区启动的 AIMatterLab，再重新运行安装或卸载。"
 LangString WorkspaceBusy 1033 "Close the copy of AIMatterLab running from this workspace and retry."
+LangString WorkspaceApplying 2052 "正在更新 AIMatterLab，完成后将重新打开工作区。"
+LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reopen when installation finishes."
 
 !macro customCheckAppRunning
   IfFileExists "$INSTDIR\AIMatterLab.exe" 0 +7
@@ -38,8 +40,54 @@ LangString WorkspaceBusy 1033 "Close the copy of AIMatterLab running from this w
 !macroend
 
 !macro customInit
+  Var /GLOBAL workspaceUpdateBanner
   ${If} ${Silent}
-    !insertmacro workspaceFiles Install
+    ${GetParameters} $R0
+    ClearErrors
+    ${GetOptions} $R0 "--wait-pid=" $R1
+    ${IfNot} ${Errors}
+      GetFullPathName $R3 "$EXEDIR\..\.."
+      ${If} "$EXEDIR" != "$R3\user-cache\updates"
+      ${OrIfNot} ${FileExists} "$R3\.aimatterlab-workspace"
+        SetErrorLevel 1
+        Abort
+      ${EndIf}
+      StrCpy $INSTDIR "$R3"
+      ; Detect another registered workspace before asking the desktop to close.
+      ReadRegStr $R2 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
+      ${If} $R2 != ""
+        GetFullPathName $R2 "$R2"
+        ${If} $R2 != $R3
+          SetErrorLevel 1
+          Abort
+        ${EndIf}
+      ${EndIf}
+      ; workspaceFiles uses scratch registers. Save the parent PID across this call.
+      Push $R1
+      !insertmacro workspaceFiles Install
+      Pop $R1
+      System::Call 'kernel32::CreateFileW(w "$EXEDIR\restart.ready", i 0x40000000, i 0, p 0, i 1, i 0x80, p 0)p.r0'
+      ${If} $0 == -1
+        SetErrorLevel 1
+        Abort
+      ${EndIf}
+      System::Call 'kernel32::CloseHandle(p r0)'
+      Banner::show /NOUNLOAD "$(WorkspaceApplying)"
+      StrCpy $workspaceUpdateBanner "1"
+      ; Let the originating desktop finish its normal terminal and agent cleanup.
+      StrCpy $2 $R1
+      System::Call 'kernel32::OpenProcess(i 0x100000, i 0, i r2)p.r0'
+      ${If} $0 != 0
+        System::Call 'kernel32::WaitForSingleObject(p r0, i 60000)i.r1'
+        System::Call 'kernel32::CloseHandle(p r0)'
+        ${If} $1 != 0
+          SetErrorLevel 1
+          Abort
+        ${EndIf}
+      ${EndIf}
+    ${Else}
+      !insertmacro workspaceFiles Install
+    ${EndIf}
   ${EndIf}
 !macroend
 
@@ -58,8 +106,15 @@ LangString WorkspaceBusy 1033 "Close the copy of AIMatterLab running from this w
   File /oname=$PLUGINSDIR\workspace-guide.md "${PROJECT_DIR}\installation\workspace-guide.md"
   ; CopyFile's fail-if-exists flag preserves any user-authored project instructions.
   System::Call 'kernel32::CopyFileW(w "$PLUGINSDIR\workspace-guide.md", w "$INSTDIR\AGENTS.md", i 1)i.r0'
-  ; The upstream NSIS template caches a full installer for electron-updater.
-  ; This app has no updater. Discard only an exact duplicate, never the running setup.
+  ; Seed a fresh base even for an offline/manual installation. Replace atomically.
+  GetTempFileName $R3 "$INSTDIR\user-cache\updates"
+  StrCpy $2 $R3
+  System::Call 'kernel32::CopyFileW(w "$EXEPATH", w r2, i 0)i.r0'
+  ${If} $0 != 0
+    System::Call 'kernel32::MoveFileExW(w r2, w "$INSTDIR\user-cache\updates\installer.exe", i 9)i.r0'
+  ${EndIf}
+  Delete "$R3"
+  ; Drop only the upstream duplicate after comparing it with the running setup.
   GetFullPathName $R4 "$LOCALAPPDATA\${APP_INSTALLER_STORE_FILE}"
   ${If} ${FileExists} "$R4"
   ${AndIf} $R4 != $EXEPATH
@@ -72,6 +127,9 @@ LangString WorkspaceBusy 1033 "Close the copy of AIMatterLab running from this w
       ${StdUtils.GetParentPath} $R7 "$R4"
       RMDir "$R7"
     ${EndIf}
+  ${EndIf}
+  ${If} $workspaceUpdateBanner == "1"
+    Banner::destroy
   ${EndIf}
 !macroend
 

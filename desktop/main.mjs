@@ -1,6 +1,7 @@
 import {PRODUCT_NAME} from '../contracts/product.mjs';
 import {consoleMessage} from './platform/verification/console-message.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
+import {createWorkspaceUpdater,launchWorkspaceUpdate} from './platform/workspace-updater.mjs';
 import {createCliRuntimeManager,migrateBundledCliPaths} from './platform/cli-runtimes.mjs';
 import {cliRuntimeRequest} from '../contracts/agent/cli-runtime.mjs';
 import {createPerformanceTimeline} from './platform/performance.mjs';
@@ -137,6 +138,9 @@ else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,por
 if(workspace)app.setPath('sessionData',workspaceSessionDirectory(workspace,app.getPath('userData')));
 let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
 let shuttingDown=false,desktopShutdown,agentConnectionSerial=0;
+const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&process.arch==='x64'?workspace:null,currentVersion:app.getVersion(),
+  fetchApi:(url,options)=>net.fetch(url,options),install:launchWorkspaceUpdate,quit:()=>app.quit(),
+  publish:params=>emit('studio:event',{method:'studio/update',params})});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
 const activeAuthoringTasks=new Map();
 const codexRoot=path.join(app.getPath('userData'),'provider-contexts','codex');
@@ -166,6 +170,16 @@ function trusted(event) {
       event.senderFrame?.url!==window.webContents.getURL()) throw new Error('Untrusted IPC sender');
 }
 function handle(name, fn) { ipcMain.handle('studio:'+name,async(event,data) => { if(shuttingDown||!window||window.isDestroyed()||window.webContents.isDestroyed()||event.sender.isDestroyed())return null;trusted(event); try{return await fn(data||{},event);}catch(error){if(shuttingDown)return null;throw error;} }); }
+function updateAction(action) {
+  return request=>{
+    if(!request||typeof request!=='object'||Array.isArray(request)||Object.keys(request).length)throw Error('Update actions take no arguments');
+    return action();
+  };
+}
+handle('updates.status',updateAction(updater.snapshot));
+handle('updates.check',updateAction(updater.check));
+handle('updates.download',updateAction(updater.download));
+handle('updates.install',updateAction(updater.apply));
 function openUrl(url) {
   const parsed = new URL(url);
   if(parsed.protocol !== 'https:' || !['chatgpt.com','auth.openai.com','login.openai.com'].includes(parsed.hostname))
@@ -623,7 +637,7 @@ handle('export',async({run})=>{
 });
 let terminalClosing;
 desktopShutdown=installDesktopShutdown({app,begin:()=>{
- shuttingDown=true;clearInterval(terminalIdleTimer);conversationTerminals.stop();
+ shuttingDown=true;updater.close();clearInterval(terminalIdleTimer);conversationTerminals.stop();
  // Fence the terminal bridge on this exact stack, before already-queued open
  // continuations can run. The asynchronous cleanup below only waits for it.
  try{terminalClosing=sharedTerminal.shutdown({timeoutMs:4000});}catch{terminalClosing=Promise.resolve({status:'unconfirmed'});}
@@ -648,6 +662,7 @@ if(development) await window.loadURL(development); else await window.loadFile(pa
 performanceTimeline.mark('window-loaded');
 if(verifying){const errors=[];window.webContents.on('console-message',(...args)=>{const {level,message}=consoleMessage(args);if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});await desktopShutdown.run();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
+if(workspace){const timer=setTimeout(()=>{if(!shuttingDown&&updater.snapshot().phase==='idle')void updater.check();},4000);timer.unref();}
 
 }
 function focusExistingWindow(){if(!window||window.isDestroyed())return;if(window.isMinimized())window.restore();window.show();window.focus();}

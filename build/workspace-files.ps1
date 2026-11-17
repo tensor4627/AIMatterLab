@@ -56,7 +56,7 @@ try {
             $asar = [IO.Path]::Combine($rootDir.FullName,'resources','app.asar')
             if (![IO.File]::Exists($exe) -or ![IO.File]::Exists($asar) -or [Diagnostics.FileVersionInfo]::GetVersionInfo($exe).ProductName -ne 'AIMatterLab') { throw 'Program filenames already exist here. Choose a dedicated workspace folder.' }
         }
-        foreach ($name in @('sources','user-cache','user-cache\skills','user-cache\skills\user','.config')) {
+        foreach ($name in @('sources','user-cache','user-cache\updates','user-cache\skills','user-cache\skills\user','.config')) {
             $dir = [IO.DirectoryInfo]::new([IO.Path]::Combine($rootDir.FullName,$name))
             if ([IO.File]::Exists($dir.FullName) -or ($dir.Exists -and ($dir.Attributes -band [IO.FileAttributes]::ReparsePoint))) { throw "Conflicting data directory: $name" }
             $dir.Create()

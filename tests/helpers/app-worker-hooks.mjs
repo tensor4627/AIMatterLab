@@ -56,6 +56,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   },module,module.exports,window,{randomUUID});return module.exports;
  }
  const require=name=>{
+  if(name.endsWith('/SoftwareUpdate'))return {useWorkspaceUpdate:()=>({state:{phase:'disabled'}})};
   if(name==='../features/compute/ssh-connection-types')return connectionUi.exports;
   if(name==='../../contracts/compute/task-worker-binding.mjs')return taskWorkerBinding;
   if(name==='../ui/lazy-panel')return {lazyPanel:(name)=>'./'+name};

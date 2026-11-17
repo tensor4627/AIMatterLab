@@ -1,4 +1,5 @@
 import type {Conversation} from './agent';
+import type {UpdateState} from './update';
 import type {Project,ComputeResourceActivation,ComputeResourceState} from './compute';
 import type {Run,ClusterRun} from './runs';
 import type {TaskEditRequest,TaskExecuteRequest,TaskInputReadRequest,TaskInputReadResult,TaskLinkRunRequest} from './workspace';
@@ -9,6 +10,10 @@ import type {RoadmapPreview,RoadmapExecution} from './roadmap-execution';
 type Route<Request,Response>={request:Request;response:Response};
 /** Critical authoring/execution boundary. Authorization remains a main/worker responsibility. */
 export interface StudioIpcMap {
+ 'updates.status':Route<Record<string,never>,UpdateState>;
+ 'updates.check':Route<Record<string,never>,UpdateState>;
+ 'updates.download':Route<Record<string,never>,UpdateState>;
+ 'updates.install':Route<Record<string,never>,UpdateState>;
  'task.roadmap.preview':Route<{taskId:string;environments:Record<string,string>},RoadmapPreview>;
  'task.roadmap.confirm':Route<{taskId:string;snapshotSha256:string;environments:Record<string,string>},RoadmapExecution|null>;
  'task.roadmap.list':Route<{taskId:string},RoadmapExecution[]>;

@@ -1,11 +1,12 @@
+import {SoftwareUpdate,useWorkspaceUpdate} from "./SoftwareUpdate";
 import product from "../../../contracts/product.json";
 import {MaterialsProjectSettings} from "../assets/MaterialsProject";
 import {useEffect,useRef,useState} from 'react';
-import {PanelsTopLeft,Palette,Languages,Brain,Server,BookOpen,Save} from 'lucide-react';
+import {PanelsTopLeft,Palette,Languages,Brain,Server,BookOpen,Save,RefreshCw} from 'lucide-react';
 import {invoke} from '../../api/studio';
 import {type Settings} from '../../../contracts/dto/settings';
 import {t,setLanguage} from "../../ui/i18n";
-const categories=[['appearance','外观',Palette],['layout','工作区布局',PanelsTopLeft],['language','语言',Languages],['agent','Agent',Brain],['connections','计算连接',Server],['permissions','计算权限',Server],['science','科学资源与技能',BookOpen],['data','数据源',Server]] as const;
+const categories=[['appearance','外观',Palette],['layout','工作区布局',PanelsTopLeft],['language','语言',Languages],['agent','Agent',Brain],['connections','计算连接',Server],['permissions','计算权限',Server],['science','科学资源与技能',BookOpen],['data','数据源',Server],['updates','软件更新',RefreshCw]] as const;
 const num=(value:string)=>value===''?undefined:Number(value);
 // Keep the raw edit text until blur so clearing does not reinsert a display default.
 function FontNumberInput({value,min,max,onChange,testId}:{value:number;min:number;max:number;onChange:(value:number|undefined)=>void;testId?:string}){
@@ -13,7 +14,7 @@ function FontNumberInput({value,min,max,onChange,testId}:{value:number;min:numbe
  return <input data-testid={testId} type="number" min={min} max={max} value={draft??value} onFocus={()=>setDraft(String(value))} onChange={event=>{setDraft(event.target.value);onChange(num(event.target.value));}} onBlur={()=>setDraft(null)}/>;
 }
 function fit(value:number|undefined,min:number,max:number){return typeof value==='number'&&Number.isFinite(value)?Math.min(max,Math.max(min,value)):undefined;}
-export default function SettingsPage({settings,onChange,onClose,onSaved,onSavingChange,onError,onOpenSkills,onOpenComputeResources,onOpenLocalCompute,onOpenSshCompute,onOpenProjects}:{onOpenComputeResources?:()=>void;onOpenLocalCompute?:()=>void;onOpenSshCompute?:()=>void;onOpenProjects?:()=>void;onOpenSkills?:()=>void;settings:Settings;onChange:(s:Settings)=>void;onClose:()=>void;onSaved?:(s:Settings)=>void;onSavingChange?:(saving:boolean)=>void;onError:(e:unknown)=>void}){
+export default function SettingsPage({updates,settings,onChange,onClose,onSaved,onSavingChange,onError,onOpenSkills,onOpenComputeResources,onOpenLocalCompute,onOpenSshCompute,onOpenProjects}:{updates?:ReturnType<typeof useWorkspaceUpdate>;onOpenComputeResources?:()=>void;onOpenLocalCompute?:()=>void;onOpenSshCompute?:()=>void;onOpenProjects?:()=>void;onOpenSkills?:()=>void;settings:Settings;onChange:(s:Settings)=>void;onClose:()=>void;onSaved?:(s:Settings)=>void;onSavingChange?:(saving:boolean)=>void;onError:(e:unknown)=>void}){
  const [category,setCategory]=useState('appearance'),[saving,setSaving]=useState(false),[saved,setSaved]=useState('');
  const savedSettings=useRef(settings);
  const dirty=JSON.stringify(settings)!==JSON.stringify(savedSettings.current);
@@ -29,7 +30,8 @@ export default function SettingsPage({settings,onChange,onClose,onSaved,onSaving
   savingRef.current=true;onSavingChange?.(true);setSaving(true);try{const result=await invoke<Settings>('settings',next);if(!mounted.current||sequence!==saveSequence.current)return;savedSettings.current=result;onSaved?.(result);if(revision.current!==submittedRevision||settingsRef.current!==submittedSettings){setSaved(t('未保存修改'));return;}onChange(result);setSaved(t('设置已保存'));}catch(e){if(mounted.current&&sequence===saveSequence.current)onError(e);}finally{savingRef.current=false;if(mounted.current&&sequence===saveSequence.current){onSavingChange?.(false);setSaving(false);}}
  }
  return <div className="settings-layout"><nav className="settings-nav">{categories.map(([id,label,Icon])=><button key={id} className={category===id?'active':''} aria-current={category===id?'page':undefined} onClick={()=>setCategory(id)}><Icon size={17}/>{t(label)}</button>)}</nav><div className="settings-content">
-  <div className="settings-heading"><h2>{t(categories.find(c=>c[0]===category)?.[1]||'设置')}</h2><p>{t('按工作习惯配置你的工作台。')}</p></div>
+  <div className="settings-heading"><h2>{t(categories.find(c=>c[0]===category)?.[1]||'设置')}</h2>{category!=='updates'&&<p>{t('按工作习惯配置你的工作台。')}</p>}</div>
+  {category==='updates'&&updates&&<SoftwareUpdate {...updates}/>}
   {category==='appearance'&&<>
    <label>{t('主题')}<select value={settings.theme} onChange={e=>patch({theme:e.target.value})}><option value="dark">{t('深色石墨')}</option><option value="light">{t('浅色')}</option></select></label>
    <label>{t('界面字体')}<select value={settings.fontFamily||'system'} onChange={e=>patch({fontFamily:e.target.value})}><option value="system">{t('系统默认')}</option><option value="sans">Segoe UI / Microsoft YaHei</option><option value="serif">Georgia / SimSun</option></select></label>
