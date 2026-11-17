@@ -32,6 +32,44 @@ test('account inspection and login start a tool-free authentication connection b
  const hub=new AgentHub({codex,root:path.resolve('.studio/codex-auth-fixture'),catalog:{get:()=>null,list:()=>[]},vault:{get:()=>null},settings:()=>({codexPath:'fixture-cli'}),worker:()=>{workerReads++;return null;}});
  try{assert.equal((await hub.account('codex')).account,null);assert.equal((await hub.login('codex',{type:'chatgpt'})).phase,'authorizing');assert.equal(starts.length,1);assert.equal(starts[0].worker,null);assert.equal(starts[0].options.authenticationOnly,true);assert.equal(workerReads,0);assert.deepEqual(requests.map(v=>v.method),['account/read','account/login/start']);}finally{hub.close();}
 });
+
+test('a first desktop Connect checks authentication before asking for any worker scope',async()=>{
+ const codex=new EventEmitter(),starts=[];
+ codex.host={needsModelCatalog:()=>true};
+ codex.start=async(file,worker,config,options)=>{starts.push({worker,options});codex.process={};codex.isolation={authenticationOnly:true};return {};};
+ codex.prepareChatAccount=async current=>{current();return {account:null,requiresOpenaiAuth:true};};
+ const hub=new AgentHub({codex,root:'fixture',catalog:{get:()=>null,list:()=>[]},vault:{get:()=>null},settings:()=>({codexPath:'fixture'}),worker:()=>assert.fail('signed-out connection requested a worker')});
+ assert.deepEqual(await hub.connect('codex',{checkLogin:true}),{loginRequired:true,provider:'codex'});
+ assert.equal(starts.length,1);assert.equal(starts[0].worker,null);assert.equal(starts[0].options.authenticationOnly,true);
+});
+
+test('cacheless sign-in selects only listed models, rechecks the ceiling and respects a corrupt native cache',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-listed-catalog-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const sourceHome=path.join(root,'native');fs.mkdirSync(sourceHome);
+ const model=slug=>({slug,display_name:slug,supported_reasoning_levels:[],input_modalities:['text']});
+ const models=['listed','other'].map(model);
+ const runtime={execute:async(_file,args)=>({stdout:args[0]==='debug'?JSON.stringify({models}):args[0]==='features'?[...ISOLATION_FEATURES,'skip_host_skill_discovery'].map(k=>k+' stable true').join('\n'):'[]'})};
+ const host=createCodexSubscriptionRuntime({root,sourceHome,runtime}),dependencies={probe:async()=>[]};
+ await host.readListedCatalog('fixture-cli',new Set(['listed']),root,()=>{});
+ const prepare=(file='fixture-cli')=>host.prepareIsolation(file,path.join(root,'contexts'),{},null,dependencies);
+ assert.deepEqual((await prepare()).catalog.models,['listed']);
+ await assert.rejects(prepare('different-cli'),error=>error.failure==='model_metadata_missing');
+ fs.writeFileSync(path.join(sourceHome,'models_cache.json'),'broken');
+ await assert.rejects(prepare(),error=>error.failure==='model_metadata_invalid');
+ fs.unlinkSync(path.join(sourceHome,'models_cache.json'));
+ host.accountOperation('account/logout');
+ await assert.rejects(prepare(),error=>error.failure==='model_metadata_missing');
+});
+
+test('cancellation is bound to the active authorization and a late callback cannot undo it',async()=>{
+ const codex=new EventEmitter(),calls=[];codex.process={};codex.request=async(method,params)=>{calls.push({method,params});return {status:'canceled'};};
+ const hub=new AgentHub({codex,root:'fixture',catalog:{},vault:{},settings:()=>({})});
+ hub.loginStatus.codex={phase:'authorizing',loginId:'current'};
+ await assert.rejects(hub.cancelCodexLogin('old'));assert.deepEqual(calls,[]);
+ assert.equal((await hub.cancelCodexLogin('current')).phase,'cancelled');
+ codex.emit('event',{method:'account/login/completed',params:{loginId:'current',success:false,error:'late'}});
+ assert.equal(hub.loginStatus.codex.phase,'cancelled');assert.deepEqual(calls,[{method:'account/login/cancel',params:{loginId:'current'}}]);
+});
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-codex-subscription-')),sourceHome=path.join(root,'native');fs.mkdirSync(sourceHome);const original={auth_mode:'chatgpt',tokens:{access_token:'synthetic-access-token',account_id:'synthetic-account',refresh_token:'never-copy-refresh'}};fs.writeFileSync(path.join(sourceHome,'auth.json'),JSON.stringify(original));fs.writeFileSync(path.join(sourceHome,'AGENTS.md'),'PRIVATE GLOBAL MUST NOT LOAD');const calls=[],runtime={execute:async(...args)=>calls.push(args),spawnProcess:(...args)=>calls.push(args)},host=createCodexSubscriptionRuntime({root:path.join(root,'studio'),sourceHome,runtime});t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return {root,sourceHome,original,calls,host};}
 test('subscription children use a private home without copying config, AGENTS or credentials',async t=>{const f=fixture(t);await f.host.execute('cli',['--version'],{env:{CODEX_HOME:f.sourceHome,PATH:'fixture'}});f.host.spawnProcess('cli',['app-server'],{env:{CODEX_HOME:f.sourceHome,GSS_MCP_TOKEN:'scoped'}});for(const call of f.calls){const home=call[2].env.CODEX_HOME;assert.notEqual(home,f.sourceHome);assert.deepEqual(fs.readdirSync(home),[]);}assert.equal(f.calls[1][2].env.GSS_MCP_TOKEN,'scoped');assert.equal(f.calls[0][2].env.PATH,'fixture');});
 test('native ChatGPT access is imported only in memory using the official external auth protocol',async t=>{const f=fixture(t),calls=[],secrets=[];await f.host.initializeAuth(async(method,params)=>{calls.push({method,params});return {account:null};},v=>secrets.push(v));assert.deepEqual(calls.map(v=>v.method),['account/read','account/login/start']);assert.equal(calls[1].params.type,'chatgptAuthTokens');assert.equal(calls[1].params.accessToken,'synthetic-access-token');assert.deepEqual(secrets,['synthetic-access-token']);assert(!JSON.stringify(calls).includes('never-copy-refresh'));assert.deepEqual(fs.readdirSync(path.join(f.root,'studio/subscription-home')),[]);assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.sourceHome,'auth.json'))),f.original);});

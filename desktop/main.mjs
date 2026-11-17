@@ -499,7 +499,10 @@ handle('agent.connect',async({provider,repairTools=false})=>{
  // Model/account recovery never registers sources or environments.
  // Compute setup owns discovery/registration; App restores its saved binding separately.
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- let info;try{info=await agents.connect(provider);}catch(error){if(connectionTicket===agentConnectionSerial&&error.readiness&&['missing','incompatible','invalid'].includes(error.readiness.status)&&['kimi','qwen'].includes(provider)){resource.assertCurrent();emit('studio:event',{method:'studio/cliRuntimeRequired',provider,params:error.readiness});return {cliRequired:error.readiness};}throw error;}resource.assertCurrent();const tools=await scientificTools(provider);resource.assertCurrent();
+ let info;try{info=await agents.connect(provider,{checkLogin:true,assertCurrent:()=>{resource.assertCurrent();if(connectionTicket!==agentConnectionSerial)throw Error('Agent connection was superseded');}});}catch(error){if(connectionTicket===agentConnectionSerial&&error.readiness&&['missing','incompatible','invalid'].includes(error.readiness.status)&&['kimi','qwen'].includes(provider)){resource.assertCurrent();emit('studio:event',{method:'studio/cliRuntimeRequired',provider,params:error.readiness});return {cliRequired:error.readiness};}throw error;}
+ resource.assertCurrent();
+ if(info?.loginRequired)return info;
+ const tools=await scientificTools(provider);resource.assertCurrent();
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};
 });
@@ -546,7 +549,11 @@ handle('agent.login',async({provider,...value})=>{
   if(provider==='codex'&&result.url)await openUrl(result.url);
   return result;
 });
-handle('agent.login.cancel',()=>{agents.cancelLogin();return {};});
+handle('agent.login.cancel',value=>{
+ if(value.provider==='codex'&&Object.keys(value).length===2&&Object.hasOwn(value,'loginId'))return agents.cancelCodexLogin(value.loginId);
+ if(Object.keys(value).length===0||value.provider==='kimi'&&Object.keys(value).length===1){agents.cancelLogin('kimi');return {};}
+ throw Error('Invalid provider login cancellation');
+});
 handle('agent.logout',async value=>{if(!value||Object.keys(value).join(',')!=='provider')throw Error('Invalid typed account request');assertIdleAgent();const result=await agents.logout(value.provider);emit('studio:event',{method:'studio/accountUpdated',provider:value.provider,params:{credentialsChanged:true}});return result;});
 handle('agent.testConnection',async value=>{if(!value||Object.keys(value).join(',')!=='provider')throw Error('Invalid typed account request');assertIdleAgent();return agents.testConnection(value.provider);});
 handle('agent.login.open',async({provider})=>{

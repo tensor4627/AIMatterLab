@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "product": "AIMatterLab",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "repository_url": "https://github.com/tensor4627/AIMatterLab.git",
-  "release_revision": "v0.1.5",
-  "source_ref": "refs/tags/v0.1.5",
+  "release_revision": "v0.1.6",
+  "source_ref": "refs/tags/v0.1.6",
   "tool_sources": "installation/tool-sources.json",
   "desktop_platform": "Windows + WSL",
   "entry": "INSTALL_AGENT.md",
@@ -22,6 +22,6 @@
     "sampling": "fixture_required",
     "neb": "fixture_required"
   },
-  "distribution_status": "not_run",
-  "distribution_scope": "Local source integration; 0.1.5 distribution has not been built or published"
+  "distribution_status": "passed",
+  "distribution_scope": "Local Windows x64 ZIP, portable launcher, developer kit and SHA-256 verification. Remote publication not run."
 }

@@ -13,11 +13,23 @@ export async function frontendModelProviderCases({check,out}){
  });
  await check('model-providers-codex-first-login-account-entry',async page=>{
   await page.evaluate(()=>{
-   window.__authFixture={calls:[]};window.studio.invoke=async(method,data)=>{window.__authFixture.calls.push({method,data});if(method==='agent.account')return {account:null,requiresOpenaiAuth:true};if(method==='agent.login')return {provider:'codex',phase:'authorizing',url:'https://auth.openai.com/fixture-only',userCode:'FIXTURE-AUTH-CODE'};if(method==='agent.login.open')return {};throw Error('Unexpected authentication fixture action');};
+   window.__authFixture={calls:[]};window.studio.invoke=async(method,data)=>{
+    window.__authFixture.calls.push({method,data});
+    if(method==='agent.account')return {account:null,requiresOpenaiAuth:true};
+    if(method==='agent.login')return {provider:'codex',phase:'authorizing',loginId:'attempt',url:'https://auth.openai.com/fixture-only',userCode:'FIXTURE-AUTH-CODE'};
+    if(method==='agent.login.cancel')return {provider:'codex',phase:'cancelled'};
+    if(method==='agent.login.open')return {};
+    throw Error('Unexpected authentication fixture action');
+   };
    return window.renderTest('ProviderLogin',{provider:'codex',embedded:true,onClose(){},onConfigured(){},onError:error=>{throw error;}});
   });
-  const method=page.getByRole('combobox');await method.waitFor();await method.selectOption('chatgptDeviceCode');await page.getByRole('button',{name:'开始登录',exact:true}).click();await page.getByText('FIXTURE-AUTH-CODE',{exact:true}).waitFor();await page.getByRole('button',{name:'打开官方授权页面',exact:true}).click();
-  const calls=await page.evaluate(()=>window.__authFixture.calls);assert.equal(calls.find(v=>v.method==='agent.login').data.type,'chatgptDeviceCode');assert(calls.some(v=>v.method==='agent.login.open'));assert(!calls.some(v=>v.method==='agent.connect'));
+  await page.getByText('尚未登录',{exact:true}).waitFor();const method=page.getByRole('combobox');await method.waitFor();await method.selectOption('chatgptDeviceCode');await page.getByRole('button',{name:'开始登录',exact:true}).click();await page.getByText('FIXTURE-AUTH-CODE',{exact:true}).waitFor();await page.getByRole('button',{name:'打开官方授权页面',exact:true}).click();
+  await page.getByText('请在浏览器完成授权',{exact:true}).waitFor();
+  await page.evaluate(()=>window.__test.events.forEach(fn=>fn({method:'studio/login',provider:'codex',params:{phase:'failed',message:'Fixture authorization declined'}})));
+  await page.getByRole('alert').filter({hasText:'Fixture authorization declined'}).waitFor();
+  await page.getByRole('button',{name:'重新登录',exact:true}).click();await page.getByRole('button',{name:'取消登录',exact:true}).click();
+  await page.getByText('已取消登录',{exact:true}).waitFor();
+  const calls=await page.evaluate(()=>window.__authFixture.calls);assert.deepEqual(calls.find(v=>v.method==='agent.login.cancel').data,{provider:'codex',loginId:'attempt'});assert.equal(calls.find(v=>v.method==='agent.login').data.type,'chatgptDeviceCode');assert(calls.some(v=>v.method==='agent.login.open'));assert(!calls.some(v=>v.method==='agent.connect'));
  });
  async function editor(page){await page.evaluate(()=>{
   const saved={schemaVersion:1,id:'fixture-api',provider:'qwen',name:'Qwen Token Plan · Fixture',baseUrl:'https://fixture.invalid/v1',api:'openai-completions',preset:'custom',models:[{id:'model-a',name:'Model A',contextWindow:128000,maxTokens:8192,reasoningEfforts:{off:null,low:'low',high:'xhigh'}},{id:'model-b',name:'Model B',reasoningEfforts:false}],defaultModel:'model-a',credentialStored:true,revision:1};
@@ -27,6 +39,18 @@ export async function frontendModelProviderCases({check,out}){
  await check('model-providers-qwen-multiple-models-discovery-and-write-only-key',async page=>{
   await editor(page);assert.equal(await page.getByTestId('provider-api-key').inputValue(),'');assert.equal(await page.locator('.api-model-card').count(),2);assert.equal(await page.getByTestId('provider-public-guides').isChecked(),false);
   await page.getByTestId('api-model-0').locator('summary').click();await page.getByLabel('high API 参数值',{exact:true}).fill('vendor-high');await page.getByTestId('discover-api-models').click();await page.getByLabel('搜索发现的模型',{exact:true}).fill('model-c');await page.locator('.model-discovery-candidates input[type=checkbox]').check();await page.getByTestId('adopt-api-models').click();assert.equal(await page.locator('.api-model-card').count(),3);await page.getByTestId('save-api-provider').click();await page.waitForFunction(()=>window.__modelProfiles.saved.models.length===3);const saved=await page.evaluate(()=>window.__modelProfiles.saved);assert.equal(saved.models[0].reasoningEfforts.high,'vendor-high');assert.equal(saved.models[2].id,'model-c');assert.equal(await page.getByTestId('provider-api-key').inputValue(),'');assert.equal(await page.evaluate(()=>window.__modelProfiles.calls.some(v=>v.method.startsWith('agent.cli')||v.method==='agent.login')),false);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:path.join(out,'qwen-model-providers.png'),fullPage:true});
+ });
+ await check('model-providers-visible-operation-feedback',async page=>{
+  await editor(page);
+  await page.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=(method,data)=>new Promise((resolve,reject)=>{window.__modelProfiles.finish=()=>Promise.resolve(original(method,data)).then(resolve,reject);});});
+  for(const [id,label] of [['discover-api-models','正在获取可用模型'],['save-api-provider','正在保存服务商配置'],['test-api-provider','正在验证 API 连接']]){
+   const button=page.getByTestId(id);await button.click();const status=button.getByRole('status');await status.waitFor();
+   assert.equal(await status.innerText(),label);
+   assert(await status.evaluate(element=>{const rect=element.getBoundingClientRect();return rect.top>=0&&rect.bottom<=innerHeight;}));
+   await page.evaluate(()=>{void window.__modelProfiles.finish();});
+   if(id==='test-api-provider'){await page.waitForFunction(()=>!!window.__modelProfiles.complete);await page.evaluate(()=>window.__modelProfiles.complete());}
+   await status.waitFor({state:'detached'});
+  }
  });
  await check('model-providers-dirty-save-validation-single-flight',async page=>{
   await editor(page);await page.getByTestId('test-api-provider').click();await page.waitForFunction(()=>window.__modelProfiles.complete);assert.equal(await page.getByTestId('save-api-provider').isDisabled(),true);await page.evaluate(()=>window.__modelProfiles.complete());await page.getByText('测试调用成功 · model-a',{exact:true}).waitFor();await page.getByTestId('api-model-id-0').fill('renamed-model');assert.equal(await page.getByTestId('test-api-provider').isDisabled(),true);assert.equal(await page.getByText('测试调用成功 · model-a',{exact:true}).count(),0);await page.getByTestId('save-api-provider').click();await page.getByTestId('test-api-provider').click();await page.evaluate(()=>window.__modelProfiles.complete());await page.getByText('测试调用成功 · renamed-model',{exact:true}).waitFor();assert.deepEqual(await page.evaluate(()=>window.__modelProfiles.errors),[]);

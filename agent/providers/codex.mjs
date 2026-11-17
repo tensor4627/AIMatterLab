@@ -117,6 +117,7 @@ export class CodexBridge extends EventEmitter {
       if(generation!==this.lifecycle||this.process!==child){stage='lifecycle';throw Error('Codex context launch was cancelled');}
       if(isolation){this.recordIsolationSummary(summary);this.isolationReady=true;this.compatibility={...candidate,status:'capabilities_verified',scope:authenticationOnly?'Account operations and public model metadata only; conversations, model calls and scientific tools are unavailable.':'Startup isolation configuration, skills, MCP inventory and model capability ceiling only; no thread, model reply or scientific workflow verified.'};}
       else this.compatibility={...candidate,status:'version_observed',scope:'Version metadata only; isolation capabilities have not been verified.'};
+      this.executable=executable;
       this.info={...info,studioCompatibility:this.compatibility,...isolation?{studioIsolation:summary}:{}};
       return this.info;
     } catch (error) { if(generation===this.lifecycle&&(!child||this.process===child))this.close();throw compatibilityFailure(error,stage,version); }
@@ -130,6 +131,37 @@ export class CodexBridge extends EventEmitter {
   send(value) {
     if (!this.process || this.process.stdin.destroyed) throw new Error('Connect Codex first');
     this.process.stdin.write(JSON.stringify(value) + '\n');
+  }
+  async prepareChatAccount(assertCurrent){
+    const child=this.process,generation=this.lifecycle;
+    const check=()=>{
+      assertCurrent();
+      if(!child||this.process!==child||this.lifecycle!==generation||!this.isolationReady||!this.isolation?.authenticationOnly)throw Error('Codex authentication connection changed');
+    };
+    const request=async(method,params)=>{
+      check();
+      const result=await this.rawRequest(method,this.host.constrainedRequest(method,params,this.isolation));
+      check();
+      return result;
+    };
+    // Explicit Connect may reuse a subscription. Passive account reads never import it.
+    check();
+    const observed=await this.host.initializeAuth?.(request,secret=>this.rememberSecret(secret));
+    check();
+    const account=observed??await request('account/read',{refreshToken:false});
+    if(account.account&&this.host.needsModelCatalog()){
+      const listed=new Set();let cursor=null;
+      for(let page=0;page<8;page++){
+        const result=await request('model/list',{limit:100,...cursor?{cursor}:{}});
+        if(!this.host.needsModelCatalog())return account;
+        if(!Array.isArray(result.data)||result.data.length>100)throw Error('Invalid Codex model list');
+        for(const row of result.data)if(typeof row.model==='string')listed.add(row.model);
+        cursor=result.nextCursor;if(!cursor)break;
+      }
+      if(cursor)throw Error('Codex model list exceeds the supported page limit');
+      await this.host.readListedCatalog(this.executable,listed,this.isolation.cwd,check);check();
+    }
+    return account;
   }
   request(method,params={},timeout=120000,{assertCurrent=()=>{}}={}){
     assertCurrent();

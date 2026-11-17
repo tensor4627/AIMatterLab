@@ -68,6 +68,9 @@ test('repository portable build cannot enable shared extraction and cleanup acro
   'Pinned electron-builder needs true to omit its fixed per-build UNPACK_DIR_NAME');
  const defines=await portableDefines(packageManifest.build.portable);
  assert.equal(Object.hasOwn(defines,'UNPACK_DIR_NAME'),false);
+ const bitmap=fs.readFileSync(defines.SPLASH_IMAGE);
+ assert.equal(bitmap.toString('ascii',0,2),'BM');assert.equal(bitmap.readUInt16LE(28),24);
+ assert(portableTemplate.indexOf('BgImage::Redraw')<portableTemplate.indexOf('!insertmacro extractEmbeddedAppPackage'));
  assert.match(portableTemplate,/SetEnvironmentVariable\(t, t\)i \("PORTABLE_EXECUTABLE_DIR", "\$EXEDIR"\)/);
 });
 

@@ -17,6 +17,8 @@ import {createReadingPositions,readingKey} from './reading-position.mjs';
 import {elicitationHasEditableInput} from './elicitation-input.mjs';
 
 import ProviderLogin from "../settings/ProviderLogin";
+import LoadingFeedback from "../../ui/LoadingFeedback";
+import type {AgentConnectResult} from "../../../contracts/dto/agent";
 import {explicitNewWorkflow} from "./workflow-intent.mjs";
 
 import {createComposerDrafts} from "./composer-drafts.mjs";
@@ -197,13 +199,19 @@ export default function Agent({onOpenHistory,onCollapse,conversationGroupId,onOp
   const current=()=>request===externalSeq.current&&seq===selectionSeq.current&&selectedProvider===providerRef.current;
   try{const result=await invoke('agent.rpc',{provider:selectedProvider,method:'thread/list',params:{limit:20}});if(current())setExternalThreads(result.data||[]);}catch(error){if(current())onError(error);}finally{if(current())setImportLoading(false);}
  }
- function connect(repairTools=false,seq=selectionSeq.current):Promise<boolean>{
+  function connect(repairTools=false,seq=selectionSeq.current,showLogin=false):Promise<boolean>{
   const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
   const existing=connectionOwner.current;if(existing&&existing.provider===selectedProvider&&existing.seq===seq&&existing.nonce===nonce)return existing.promise;
   const owner={provider:selectedProvider,seq,nonce,promise:Promise.resolve(false)};connectionOwner.current=owner;
   const promise=(async()=>{modelCallRef.current=null;setModelCall(null);providerTouched.current=true;setConnecting(true);setVersionWarning(null);try{
-   const connection=await invoke('agent.connect',{provider:selectedProvider,repairTools});if(!current())return false;if(connection.cliRequired){setNeedsAuth(true);setConnected(false);return false;}setTools(connection.tools||{status:'not_run',count:0});setVersionWarning(selectedProvider==='codex'?codexVersionWarning(connection.studioCompatibility):null);
+   const connection=await invoke<AgentConnectResult>('agent.connect',{provider:selectedProvider,repairTools});if(!current())return false;
+   if('loginRequired' in connection||'cliRequired' in connection){
+    setNeedsAuth(true);setConnected(false);
+    if(showLogin&&'loginRequired' in connection)openAccounts();
+    return false;
+   }
+   setTools(connection.tools||{status:'not_run',count:0});setVersionWarning(selectedProvider==='codex'?codexVersionWarning(connection.studioCompatibility):null);
    const [a,m,conversations]=await Promise.all([refreshAccount(selectedProvider,seq),selectedRpc('model/list'),invoke<Conversation[]>('conversation.list')]);if(!current())return false;
    if(providerAccountState(selectedProvider,a)==='missing'){setNeedsAuth(true);setConnected(false);return false;}setNeedsAuth(false);
    const list=m.data||[];setModels(list);const chosen=list.find((v:any)=>v.model===storedPreference('studio.model.'+selectedProvider))||list.find((v:any)=>v.isDefault)||list[0];setModel(chosen?.model||'');setEffort(resumedEffort({provider:selectedProvider,model:chosen,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+chosen?.model)||storedPreference('studio.effort.'+selectedProvider)}}));
@@ -361,7 +369,7 @@ export default function Agent({onOpenHistory,onCollapse,conversationGroupId,onOp
     <section className="agent-option-section"><h4>{t(terminalSelected?'当前计算资源':'科学工具连接')}</h4><div className="agent-tools-status" data-testid="agent-tools-status" data-status={terminalSelected&&!terminalReady?'blocked':tools.status} data-scope={tools.scope}><span><i className={'flow-dot '+((terminalSelected?terminalReady:tools.status==='ready')?'ready':'missing')}/>{t(terminalSelected?!terminalGranted?(workflowResource?'SSH 作业服务待交接':'SSH 终端待交接'):workflowResource?(terminalReady?'SSH 工作流工具已连接':'请重新连接服务商'):(terminalReady?'共享终端可用':'终端工具待连接'):tools.scope==='terminal-only'?'共享终端可用':tools.status==='ready'?'科学工具通道已连接':tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}</span>{tools.status==='blocked'&&<small>{t(tools.message||'')}</small>}</div></section>
    </div>}
    </div>
-   {!connected&&<button className="button wide" data-testid="agent-connect" onClick={()=>void connect()} disabled={connecting}>{connecting?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>}{t("连接")} {provider==='codex'?'Codex':provider==='kimi'?'Kimi':provider==='deepseek'?'DeepSeek API':provider==='compatible'?t('自定义 API'):'Qwen'}</button>}
+    {!connected&&<button className="button wide" data-testid="agent-connect" onClick={()=>void connect(false,selectionSeq.current,true)} disabled={connecting}>{connecting?<LoadingFeedback busy inline label={t('正在连接服务商')+' · '+providerLabel}/>:<><Sparkles size={15}/>{t("连接")} {providerLabel}</>}</button>}
    {terminalSelected&&!terminalReady&&!canAcquireTerminal?<div className="agent-tool-alert" role="status" data-testid="agent-ssh-resource-notice"><span>{t(terminalNotice)}</span>{terminalGranted&&computeResource.status==='selected'&&computeResource.alive===true&&connected&&<button className="text-button" data-testid="agent-ssh-reconnect" disabled={busy||connecting||applying} onClick={()=>void connect()}>{t('重新连接服务商')}</button>}</div>:!terminalSelected&&(tools.status==='blocked'||computeConnected===false&&tools.scope!=='terminal-only')&&<div className="agent-tool-alert" role="status"><span>{t(tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}</span><button className="text-button" data-testid="agent-tool-repair" disabled={busy||connecting} onClick={()=>{if(computeConnected===false&&onConnectCompute)void Promise.resolve().then(onConnectCompute).catch(onError);else void connect(true);}}>{t(computeConnected===false?'连接计算资源':'修复工具连接')}</button></div>}
   </div>
   {connected&&(tools.warning||tools.inventoryWarning)&&<div className="agent-tool-alert" role="status" data-testid="agent-tools-warning">{t(tools.inventoryWarning||tools.message||'工具清单待核对，可继续讨论并由 Agent 协助配置环境。')}</div>}

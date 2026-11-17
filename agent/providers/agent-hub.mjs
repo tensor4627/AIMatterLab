@@ -22,14 +22,22 @@ export class AgentHub extends EventEmitter{
   super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bindWorkerContext=bindWorkerContext;this.contexts=new Map();this.contextGeneration=0;this.contextPending=0;this.contextQueue=Promise.resolve();this.pristineThreads=new Set();this.attemptedThreads=new Set();this.contextResume=new Map();this.pendingTurnDispatches=new Set();this.contextClosing=new Set();this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.host=host;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
   this.resourceScope=resourceScope;this.resolveCli=resolveCli;this.credentialRevisions=new Map();this.apiBridgeFactories=apiBridgeFactories;this.modelProfiles=new ModelProfileStore({catalog,vault,settings});
   this.codex.on?.('event',event=>{
-   if(event.method==='studio/codexDisconnected')this.release('codex');
+    if(event.method==='studio/codexDisconnected'){
+     this.release('codex');
+     if(this.loginStatus.codex?.phase==='authorizing'){
+      this.loginStatus.codex={phase:'failed',message:'登录连接已关闭，请重新登录。',modelAccess:'not_run'};
+      this.emit('event',{method:'studio/login',provider:'codex',params:{provider:'codex',...this.loginStatus.codex}});
+     }
+    }
    const thread=event.params?.threadId;
    if(event.method==='turn/started'){this.codexOutput.delete(thread);this.blankThreads.delete(thread);this.pendingBlankTurns.delete(thread);this.recordCodexThread(thread,'has_turns');}
    if(event.method==='item/agentMessage/delta'&&event.params?.delta?.trim())this.codexOutput.add(thread);
    if(event.method==='turn/completed'&&event.params?.turn?.status==='completed'&&this.codexOutput.has(thread)){this.loginStatus.codex={...this.loginStatus.codex,modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider:'codex',params:{}});}
 
    if(event.method==='account/login/completed'){
-    this.loginStatus.codex={phase:event.params?.success?'completed':'failed',message:event.params?.error||'',modelAccess:'not_run'};
+     const loginId=event.params?.loginId,previous=this.loginStatus.codex;
+     if(loginId&&previous?.loginId&&(previous.phase==='authorizing'&&previous.loginId!==loginId||previous.phase==='cancelled'&&previous.loginId===loginId))return;
+     this.loginStatus.codex={phase:event.params?.success?'completed':'failed',loginId,message:event.params?.error||'',modelAccess:'not_run'};
     this.emit('event',{method:'studio/login',provider:'codex',params:{provider:'codex',...this.loginStatus.codex}});
     this.emit('event',{method:'studio/accountUpdated',provider:'codex',params:{}});
    }
@@ -120,14 +128,24 @@ export class AgentHub extends EventEmitter{
  codexThreadState(id){return this.catalog.get?.('codex-thread-lifecycle',id)||this.codexThreadStates?.get(id)||null;}
  recordCodexThread(id,state,metadata={}){if(typeof id!=='string'||!id)return;const previous=this.codexThreadState(id);if(previous?.state==='has_turns'&&state!=='has_turns')return;const value={...previous,...metadata,id,state,updatedAt:Date.now()};(this.codexThreadStates??=new Map()).set(id,value);this.catalog.put?.('codex-thread-lifecycle',id,value);}
  threadReady(id){return this.threadProcess===this.codex.process&&this.readyThreads?.has(id)&&this.contextResume.get('codex')!==id;}
- async connect(provider){
+ async connect(provider,{checkLogin=false,assertCurrent=()=>{}}={}){
   providerId(provider);
   const generation=this.contextGeneration,connectEpoch=this.connectEpoch||0;this.connectIntentProvider=provider;
   if(provider!=='kimi')this.cliLoginGeneration=(this.cliLoginGeneration||0)+1;
   let executable;try{executable=provider==='kimi'&&this.resolveCli?await this.resolveCli(provider):this.path(provider);}catch(error){if(this.connectIntentProvider!==provider||this.contextGeneration!==generation||(this.connectEpoch||0)!==connectEpoch)throw Error('Provider selection changed during CLI discovery');throw error;}
   if(this.connectIntentProvider!==provider||this.contextGeneration!==generation||(this.connectEpoch||0)!==connectEpoch)throw Error('Provider selection changed during CLI discovery');
   if(this.active!==provider){this.disconnect(this.active);this.active=provider;}
-  if(provider==='codex')return this.startCodex();
+  if(provider==='codex'){
+   if(checkLogin&&(this.codex.isolation?.authenticationOnly||!this.codex.process&&this.codex.host?.needsModelCatalog?.())){
+    const current=()=>{assertCurrent();if(this.active!==provider||this.connectIntentProvider!==provider||generation!==this.contextGeneration||connectEpoch!==(this.connectEpoch||0))throw Error('Provider changed during account check');};
+    await this.startCodexAuthentication();current();
+    if(this.codex.isolation?.authenticationOnly){
+     const account=await this.codex.prepareChatAccount(current);current();
+     if(!account.account&&account.requiresOpenaiAuth===true)return {loginRequired:true,provider};
+    }
+   }
+   return this.startCodex();
+  }
   let bridge=this.bridges.get(provider);
   if(!bridge){
    bridge=['deepseek','compatible','qwen'].includes(provider)?this.createApiBridge(provider):new AcpBridge(provider,{host:this.host});
@@ -154,7 +172,6 @@ export class AgentHub extends EventEmitter{
    else if(!this.codex.process)await this.startCodexAuthentication();
    let result;try{result=await this.codex.request('account/read',{refreshToken:false});}
    catch(error){if(error.message!=='Codex bridge closed'||!this.codex.starting)throw error;await this.codex.starting;result=await this.codex.request('account/read',{refreshToken:false});}
-   if(result.account&&this.codex.isolation?.authenticationOnly)await this.codex.request('model/list',{});
    return {...result,provider,...this.loginStatus.codex,login:'chatgpt',modelAccess:this.loginStatus.codex?.modelAccess||'not_run'};
   }
   const status=this.loginStatus[provider]||{},credential=['qwen','deepseek','compatible'].includes(provider)?this.vault.get(provider):null;
@@ -234,8 +251,12 @@ export class AgentHub extends EventEmitter{
    if(!['chatgpt','chatgptDeviceCode','apiKey'].includes(value.type||'chatgpt'))throw Error('Unsupported Codex login');
    if(value.type==='apiKey'&&(typeof value.apiKey!=='string'||value.apiKey.length<8||/\s/.test(value.apiKey)))throw Error('Invalid API key');
    if(this.active!==provider){this.disconnect(this.active);this.active=provider;}
-   await this.startCodexAuthentication();const result=await this.codex.request('account/login/start',{type:value.type||'chatgpt',...value.type==='apiKey'?{apiKey:value.apiKey}:{}});
-   if(result.type==='apiKey'&&this.codex.isolation?.authenticationOnly)await this.codex.request('model/list',{});
+   await this.startCodexAuthentication();
+   const previous=this.loginStatus.codex;
+   if(previous?.phase==='authorizing')return {provider,...previous};
+   const result=await this.codex.request('account/login/start',{type:value.type||'chatgpt',...value.type==='apiKey'?{apiKey:value.apiKey}:{}});
+   const latest=this.loginStatus.codex;
+   if(latest&&latest!==previous&&latest.loginId===result.loginId&&['completed','failed'].includes(latest.phase))return {provider,...latest};
    this.loginStatus.codex={phase:result.type==='apiKey'?'completed':'authorizing',loginId:result.loginId,url:result.authUrl||result.verificationUrl,userCode:result.userCode,modelAccess:'not_run'};
    return {provider,...this.loginStatus.codex};
   }
@@ -264,16 +285,27 @@ export class AgentHub extends EventEmitter{
    this.loginStatus.kimi.phase='authorizing';this.loginStatus.kimi.message=redact(buffer).slice(-3000);publish();
   };
   child.stdout.on('data',output);child.stderr.on('data',output);
-  const timer=setTimeout(()=>this.cancelLogin(),10*60*1000);
+  const timer=setTimeout(()=>this.cancelLogin('kimi'),10*60*1000);
   const settle=(error,code)=>{
    clearTimeout(timer);if(this.loginChild!==child)return;this.loginChild=null;
    this.loginStatus.kimi={phase:error||code!==0?'failed':'completed',message:error?.message||(code!==0?'Login exited with '+code:'Login completed'),modelAccess:'not_run'};this.disconnect('kimi');publish();
   };
   child.on('error',error=>settle(error));child.on('exit',code=>settle(null,code));publish();return {provider:'kimi',phase:'starting'};
  }
- cancelLogin(){
+ async cancelCodexLogin(loginId){
+  const pending=this.loginStatus.codex;
+  if(typeof loginId!=='string'||!loginId||loginId.length>512||pending?.phase!=='authorizing'||loginId!==pending.loginId)throw Error('授权请求已变化，请刷新账户状态。');
+  const {status}=await this.codex.request('account/login/cancel',{loginId});
+  const latest=this.loginStatus.codex;
+  if(latest?.loginId!==loginId||latest.phase==='completed')return {provider:'codex',...latest};
+  if(status!=='canceled'&&status!=='notFound')throw Error('无法确认取消结果，请刷新账户状态。');
+  const result={phase:status==='canceled'?'cancelled':'failed',loginId,modelAccess:'not_run',...status==='notFound'?{message:'授权请求已结束，请刷新账户状态。'}:{}};
+  this.loginStatus.codex=result;this.emit('event',{method:'studio/login',provider:'codex',params:{provider:'codex',...result}});
+  return {provider:'codex',...result};
+ }
+ cancelLogin(provider){
   this.cliLoginGeneration=(this.cliLoginGeneration||0)+1;
-  if(this.loginStatus.codex?.phase==='authorizing'&&this.codex.process){void this.codex.request('account/login/cancel',{loginId:this.loginStatus.codex.loginId}).catch(()=>{});}
+  if(!provider&&this.loginStatus.codex?.phase==='authorizing'&&this.codex.process){void this.cancelCodexLogin(this.loginStatus.codex.loginId).catch(()=>{});}
   const child=this.loginChild;if(!child)return;this.loginChild=null;child.kill();this.loginStatus.kimi={phase:'cancelled',modelAccess:'not_run'};this.emit('event',{method:'studio/login',provider:'kimi',params:{provider:'kimi',phase:'cancelled'}});
  }
  async logout(provider){providerId(provider);if(provider==='codex'){await this.account(provider);await this.codex.request('account/logout',{});}else if(['qwen','deepseek','compatible'].includes(provider))this.vault.remove(provider);else throw Error('Kimi 账户请使用重新授权更新。');this.disconnect(provider);this.loginStatus[provider]={phase:'signed_out',modelAccess:'not_run'};return this.account(provider);}

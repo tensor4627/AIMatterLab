@@ -1,7 +1,7 @@
 {
   "name": "aimatterlab",
   "productName": "AIMatterLab",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -62,7 +62,7 @@
     "productName": "AIMatterLab",
     "beforeBuild": "scripts/package-runtime.mjs",
     "directories": {
-      "output": "release/v0.1.5"
+      "output": "release/v0.1.6"
     },
     "files": [
       "dist/**",
@@ -101,6 +101,7 @@
     },
     "portable": {
       "unpackDirName": true,
+      "splashImage": "build/portable-startup.bmp",
       "artifactName": "AIMatterLab-${version}-win-${arch}-portable.${ext}",
       "useZip": true
     },

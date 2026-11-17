@@ -9,6 +9,8 @@ import CliRuntimeDialog from './CliRuntimeDialog';
 import {cliRuntime} from '../../api/cli-runtime';
 import type {CliReadiness} from '../../../contracts/dto/cli-runtime';
 import ModelProviders from './ModelProviders';
+import type {CancelProviderLoginRequest} from '../../../contracts/dto/agent';
+const loginPhases:Record<string,string>={starting:'正在准备登录',authorizing:'等待授权',completed:'已登录',failed:'登录失败',cancelled:'已取消登录',signed_out:'尚未登录'};
 export default function ProviderLogin(props:Parameters<typeof LegacyProviderLogin>[0]){if(props.provider==='qwen'||props.provider==='compatible')return props.embedded?<ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured}/>:<Modal title={t('模型与 API')} onClose={props.onClose}><ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured}/></Modal>;return <LegacyProviderLogin {...props}/>;}
 function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=false,disabled=false}:{projectId?:string;embedded?:boolean;disabled?:boolean;provider:AgentProvider;onClose:()=>void;onConfigured:()=>void;onError:(e:unknown)=>void}){
  const [confirmRemove,setConfirmRemove]=useState(false),[baseUrl,setBaseUrl]=useState(''),[apiLabel,setApiLabel]=useState('');
@@ -18,6 +20,8 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=fal
  const [status,setStatus]=useState<any>({}),[busy,setBusy]=useState(false),[region,setRegion]=useState('mainland-cn'),[key,setKey]=useState(''),[plan,setPlan]=useState('coding-cn'),[method,setMethod]=useState('chatgpt'),[codexKey,setCodexKey]=useState(''),[model,setModel]=useState(provider==='compatible'?'':'qwen3-coder-plus');
  const [dirty,setDirty]=useState(false),[accountLoaded,setAccountLoaded]=useState(false),[accountError,setAccountError]=useState(false);
  const lifecycle=useRef(0),revision=useRef(0),operation=useRef(false);
+ const loginEvents=useRef(0);
+ const [cancelling,setCancelling]=useState(false),[removing,setRemoving]=useState(false);
  const [runtimePrompt,setRuntimePrompt]=useState<CliReadiness|null>(null),[accountRefreshing,setAccountRefreshing]=useState(false);
  const accountSequence=useRef(0),accountFlight=useRef<{epoch:number;promise:Promise<void>}|null>(null);
  const apiProvider=provider==='compatible'||provider==='deepseek';
@@ -32,7 +36,7 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=fal
  useEffect(()=>{
   const epoch=++lifecycle.current;accountFlight.current=null;setAccountLoaded(false);setAccountError(false);setRuntimePrompt(null);void refreshAccount();
   const off=window.studio?.onEvent(event=>{
-    if(epoch===lifecycle.current&&event.method==='studio/login'&&event.provider===provider){setStatus(event.params);setBusy(['starting','authorizing'].includes(event.params.phase));if(event.params.phase==='completed'){void refreshAccount().then(()=>{if(epoch===lifecycle.current)onConfigured();});}}
+    if(epoch===lifecycle.current&&event.method==='studio/login'&&event.provider===provider){loginEvents.current++;accountSequence.current++;accountFlight.current=null;setAccountRefreshing(false);setStatus(event.params);setBusy(['starting','authorizing'].includes(event.params.phase));if(event.params.phase==='completed'){void refreshAccount().then(()=>{if(epoch===lifecycle.current)onConfigured();});}}
   });
   return()=>{off?.();lifecycle.current++;accountSequence.current++;accountFlight.current=null;operation.current=false;};
  },[provider]);
@@ -41,12 +45,17 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=fal
   try{
    if(provider==='kimi'||provider==='qwen'){const readiness=await cliRuntime.inspect(provider);if(epoch!==lifecycle.current)return;if(readiness.status!=='ready'){setRuntimePrompt(readiness);setBusy(false);return;}}
    accountSequence.current++;accountFlight.current=null;setAccountRefreshing(false);
+   const eventAtStart=loginEvents.current;
+   if(provider==='codex'||provider==='kimi')setStatus((previous:any)=>({...previous,phase:'starting',message:'',url:undefined,userCode:undefined}));
    const result=await invoke('agent.login',provider==='compatible'?{provider,apiKey:key,baseUrl,model,reasoningMode,reasoningEffort,label:apiLabel,...sharingTouched?{sharePublicGuides}:{}}:provider==='deepseek'?{provider,apiKey:key}:provider==='qwen'?{provider,apiKey:key,plan,model}:provider==='codex'?{provider,type:method,...method==='apiKey'?{apiKey:codexKey}:{}}:{provider,region});
    if(epoch!==lifecycle.current)return;
    if(submittedRevision===revision.current){setDirty(false);setSharingTouched(false);}
-   setKey('');setCodexKey('');setStatus((previous:any)=>provider==='kimi'&&['authorizing','completed','failed','cancelled'].includes(previous.phase)?previous:result);
+   setKey('');setCodexKey('');
+   if(loginEvents.current!==eventAtStart)return;
+   setStatus(result);
+   if(result.phase==='failed'||result.phase==='cancelled')setBusy(false);
    if(provider==='qwen'||provider==='deepseek'||provider==='compatible'||provider==='codex'&&result.phase==='completed'){setBusy(false);onConfigured();}
-  }catch(e){if(epoch===lifecycle.current){setBusy(false);onError(e);}}finally{if(epoch===lifecycle.current)operation.current=false;}
+  }catch(e){if(epoch===lifecycle.current){setBusy(false);if(provider==='codex')setStatus({phase:'failed',message:e instanceof Error?e.message:String(e)});else onError(e);}}finally{if(epoch===lifecycle.current)operation.current=false;}
  }
  async function testConnection(){
   if(disabled||operation.current||busy||testing||dirty||!accountLoaded)return;
@@ -54,21 +63,42 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=fal
   operation.current=true;setTesting(true);setTestResult('');
   try{const result=await invoke('agent.testConnection',{provider});if(!current())return;const account=await invoke('agent.account',{provider});if(!current())return;setTestResult(t('测试调用成功')+' · '+result.model);setStatus(account);}catch(error){if(current())setTestResult(error instanceof Error?error.message:String(error));}finally{if(epoch===lifecycle.current){operation.current=false;setTesting(false);}}
  }
- async function remove(){if(disabled||operation.current||busy||testing)return;const epoch=lifecycle.current;operation.current=true;accountSequence.current++;accountFlight.current=null;setAccountRefreshing(false);setBusy(true);setTestResult('');try{const result=await invoke('agent.logout',{provider});if(epoch===lifecycle.current){setStatus(result);setConfirmRemove(false);}}catch(error){if(epoch===lifecycle.current){setAccountError(true);onError(error);}}finally{if(epoch===lifecycle.current){operation.current=false;setBusy(false);}}}
+ async function cancelCodex(){
+  if(operation.current||disabled||!status.loginId)return;
+  const epoch=lifecycle.current,eventAtStart=loginEvents.current;operation.current=true;setCancelling(true);
+  try{const result=await invoke('agent.login.cancel',{provider:'codex',loginId:status.loginId} satisfies CancelProviderLoginRequest);if(epoch===lifecycle.current&&eventAtStart===loginEvents.current){setStatus(result);setBusy(result.phase==='authorizing');}}
+  catch(error){if(epoch===lifecycle.current)onError(error);}
+  finally{if(epoch===lifecycle.current){operation.current=false;setCancelling(false);}}
+ }
+ async function remove(){if(disabled||operation.current||busy||testing)return;const epoch=lifecycle.current;operation.current=true;accountSequence.current++;accountFlight.current=null;setAccountRefreshing(false);setBusy(true);setRemoving(true);setTestResult('');try{const result=await invoke('agent.logout',{provider});if(epoch===lifecycle.current){setStatus(result);setConfirmRemove(false);}}catch(error){if(epoch===lifecycle.current){setAccountError(true);onError(error);}}finally{if(epoch===lifecycle.current){operation.current=false;setBusy(false);setRemoving(false);}}}
+ const accountSummary=status.account?.email||status.account?.type||(status.credentialStored?t('已保存 API 凭据'):
+  status.phase?t(loginPhases[status.phase]||status.phase):provider==='codex'&&status.requiresOpenaiAuth===true?t('尚未登录'):t('等待认证状态'));
  const content=<fieldset className="account-login-fields" onChangeCapture={changed} disabled={disabled||apiProvider&&(busy||testing)} style={{border:0,padding:0,margin:0,minWidth:0}}>
-  <div className="provider-login"><div className="account-summary"><strong>{t('实际账户状态')}</strong><span>{status.account?.email||status.account?.type||(status.credentialStored?t('已保存 API 凭据'):status.phase||t('等待认证状态'))}</span><small>{t('模型访问')} · {status.modelAccess||'not_run'}</small><button className="button" disabled={accountRefreshing||busy||testing} onClick={()=>void refreshAccount()}>{t('刷新账户状态')}</button></div>
+  <div className="provider-login"><div className="account-summary"><strong>{t('实际账户状态')}</strong><span>{accountSummary}</span><small>{t('模型访问')} · {status.modelAccess||'not_run'}</small><button className="button" disabled={accountRefreshing||busy||testing} onClick={()=>void refreshAccount()}>{t('刷新账户状态')}</button></div>
    <LoadingFeedback busy={accountRefreshing} label={t('正在读取账户状态')}/>
-   <LoadingFeedback busy={busy||testing} label={t(testing?'正在验证 API 连接':provider==='kimi'?'正在等待 Kimi 登录':provider==='codex'?'正在准备登录':'正在保存账户配置')}/>
+   {provider!=='codex'&&<LoadingFeedback busy={busy||testing} label={t(testing?'正在验证 API 连接':provider==='kimi'?'正在等待 Kimi 登录':'正在保存账户配置')}/>}
    {(provider==='kimi'||provider==='qwen')&&testResult&&<p role="status">{testResult}</p>}
    {accountError&&<p role="alert">{t('账户状态读取失败，请刷新账户状态后重试。')}</p>}
-   {provider==='codex'&&<><p>{t('使用现有 ChatGPT 账户，在官方浏览器页面完成登录。')}</p><label>{t('登录方式')}<select value={method} disabled={busy} onChange={e=>setMethod(e.target.value)}><option value="chatgpt">{t('ChatGPT 浏览器登录')}</option><option value="chatgptDeviceCode">{t('ChatGPT 设备码登录')}</option><option value="apiKey">OpenAI API Key</option></select></label>{method==='apiKey'&&<label>API Key<input type="password" autoComplete="off" value={codexKey} onChange={e=>setCodexKey(e.target.value)}/></label>}<button className="button primary" onClick={()=>void start()} disabled={busy||method==='apiKey'&&!codexKey}><LogIn size={15}/>{t('开始登录')}</button>{status.userCode&&<div className="device-code">{status.userCode}</div>}{status.url&&<button className="button" onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}>{t('打开官方授权页面')}</button>}<p className="muted">{t('完成授权后自动刷新账户和模型目录。')}</p></>}
+   {provider==='codex'&&<>
+    <p>{t('使用现有 ChatGPT 账户，在官方浏览器页面完成登录。')}</p>
+    <label>{t('登录方式')}<select value={method} disabled={busy} onChange={e=>setMethod(e.target.value)}><option value="chatgpt">{t('ChatGPT 浏览器登录')}</option><option value="chatgptDeviceCode">{t('ChatGPT 设备码登录')}</option><option value="apiKey">OpenAI API Key</option></select></label>
+    {method==='apiKey'&&<label>API Key<input type="password" autoComplete="off" value={codexKey} onChange={e=>setCodexKey(e.target.value)}/></label>}
+    <div className="button-row"><button className="button primary" onClick={()=>void start()} disabled={busy||method==='apiKey'&&!codexKey}><LogIn size={15}/>{t(status.phase==='failed'||status.phase==='cancelled'?'重新登录':'开始登录')}</button>
+     {status.phase==='authorizing'&&status.loginId&&<button className="button" disabled={cancelling} onClick={()=>void cancelCodex()}>{t('取消登录')}</button>}
+    </div>
+    <LoadingFeedback busy={busy} label={t(removing?'正在退出登录':cancelling?'正在取消登录':status.phase==='authorizing'?'请在浏览器完成授权':'正在准备登录')}/>
+    {status.userCode&&<div className="device-code">{status.userCode}</div>}
+    {status.url&&<button className="button" onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}>{t('打开官方授权页面')}</button>}
+    {status.phase==='failed'&&<p role="alert">{status.message?t(status.message):t('登录失败，请重新登录。')}</p>}
+    <p className="muted">{t('完成授权后自动刷新账户和模型目录。')}</p>
+   </>}
    {provider==='kimi'&&<>
     <p>{t('使用 Kimi Code 官方设备授权。账户凭据保存在本应用独立的 CLI 配置中。')}</p>
     <label>{t('账户地区')}<select value={region} disabled={busy} onChange={e=>setRegion(e.target.value)}><option value="mainland-cn">{t('中国大陆 · kimi.com')}</option><option value="global">{t('国际 · kimi.ai')}</option></select></label>
     <button className="button primary" onClick={()=>void start()} disabled={busy}>{busy?<LoaderCircle size={15} className="spin"/>:<LogIn size={15}/>}{t('开始 Kimi 登录')}</button>
     {status.url&&<><div className="notice">{t('在授权页面输入下方终端显示的验证码。')}</div><button className="button" onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}><ExternalLink size={15}/>{t('打开官方授权页面')}</button></>}
     {status.message&&<pre className="login-output">{status.message}</pre>}
-    {busy&&<button className="button" onClick={()=>void invoke('agent.login.cancel').catch(onError)}>{t('取消登录')}</button>}
+    {busy&&<button className="button" onClick={()=>void invoke('agent.login.cancel',{provider:'kimi'} satisfies CancelProviderLoginRequest).catch(onError)}>{t('取消登录')}</button>}
     {status.phase==='completed'&&<button className="button primary" onClick={onConfigured}><CheckCircle2 size={15}/>{t('登录完成，连接 Kimi')}</button>}
    </>}
    {provider==='compatible'&&<><p>{t('接入支持 Chat Completions、SSE 和工具调用的 OpenAI 兼容接口。')}</p><label>{t('服务名称')}<input value={apiLabel} onChange={e=>setApiLabel(e.target.value)} placeholder="My API"/></label><label>Base URL<input data-testid="compatible-base-url" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} placeholder="https://example.com/v1"/></label><label>API Key<small>{t('同一服务地址留空可保留已保存密钥')}</small><input type="password" autoComplete="off" data-testid="compatible-api-key" value={key} onChange={e=>setKey(e.target.value)}/></label><label>{t('模型 ID')}<input data-testid="compatible-model" value={model} onChange={e=>setModel(e.target.value)}/></label><p className="muted">{t('无需模型发现接口，模型名按服务商文档手填。')}</p><label>{t('推理参数')}<select aria-label={t('推理参数')} value={reasoningMode} onChange={e=>setReasoningMode(e.target.value)}><option value="omit">{t('服务商默认 · 不发送')}</option><option value="reasoning_effort">reasoning_effort</option></select></label>{reasoningMode==='reasoning_effort'&&<label>{t('推理强度')}<input aria-label={t('自定义推理强度')} value={reasoningEffort} onChange={e=>setReasoningEffort(e.target.value)} placeholder="low / medium / high" list="reasoning-suggestions"/><datalist id="reasoning-suggestions">{['none','minimal','low','medium','high','xhigh','max'].map(v=><option key={v} value={v}/>)}</datalist><small>{t('仅填写此 API 支持的值；不支持时选择不发送。')}</small></label>}<label className="check-label"><input type="checkbox" checked={sharePublicGuides} onChange={e=>{setSharingTouched(true);setSharePublicGuides(e.target.checked);}}/>{t('允许向此 API 发送公开科学软件指南，不包括私有 CV、凭据或其他研究文件。')}</label><button className="button primary" disabled={busy||testing||!accountLoaded||!baseUrl||!model} onClick={()=>void start()}>{t('保存 API 配置')}</button><p className="muted">{t('模型 ID 由你指定，成功调用前标为待验证。更换地址不会把旧对话发送给新服务。')}</p></>}

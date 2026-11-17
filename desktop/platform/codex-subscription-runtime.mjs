@@ -2,6 +2,7 @@
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';
 import {prepareIsolation,bootstrapSkills} from './codex-isolation.mjs';
 import {prepareModelCeiling} from './codex-model-ceiling.mjs';
+import {agentEnvironment} from './agent-environment.mjs';
 
 function ownedHome(root){
  if(typeof root!=='string'||!path.isAbsolute(root))throw Error('A main-owned Codex subscription root is required');
@@ -13,6 +14,8 @@ function ownedHome(root){
 }
 export function createCodexSubscriptionRuntime({root,runtime,sourceHome=process.env.CODEX_HOME||path.join(os.homedir(),'.codex')}){
  const home=ownedHome(root),disabled=path.join(home,'native-login-disabled');let importedAccount=null;
+ const catalogPath=()=>fs.existsSync(path.join(home,'models_cache.json'))?path.join(home,'models_cache.json'):path.join(sourceHome,'models_cache.json');
+ let listedCatalog=null;
  const environment=options=>({...options,env:{...options?.env,CODEX_HOME:home}});
  const execute=(file,args,options)=>runtime.execute(file,args,environment(options));
  const spawnProcess=(file,args,options)=>runtime.spawnProcess(file,args,environment(options));
@@ -25,19 +28,35 @@ export function createCodexSubscriptionRuntime({root,runtime,sourceHome=process.
   return {accessToken,chatgptAccountId,chatgptPlanType:null};
  }
  return {...runtime,execute,spawnProcess,
-  prepareIsolation:(file,isolationRoot,config,worker,dependencies={})=>prepareIsolation(file,isolationRoot,config,worker,{...dependencies,execute,probe:dependencies.probe||((exe,args,cwd)=>bootstrapSkills(exe,args,cwd,{spawnProcess})),prepareModels:(directory,instructions)=>prepareModelCeiling(directory,instructions,{cachePath:fs.existsSync(path.join(home,'models_cache.json'))?path.join(home,'models_cache.json'):path.join(sourceHome,'models_cache.json')})}),
+  needsModelCatalog:()=>!fs.existsSync(catalogPath()),
+  async readListedCatalog(file,listed,cwd,assertCurrent){
+   // API-key sign-in can list models without writing a native models_cache.json.
+   // Match only IDs observed from this account to metadata from the selected CLI.
+   let models;
+   try{
+    const {stdout}=await execute(file,['debug','models','--bundled'],{cwd,env:agentEnvironment('codex'),windowsHide:true,timeout:15000,maxBuffer:8*1024*1024});
+    models=JSON.parse(stdout).models;
+   }catch{assertCurrent();throw Error('无法读取当前 Codex 的模型能力目录。请在官方 Codex 刷新模型目录后重连。');}
+   assertCurrent();
+   if(!Array.isArray(models)||models.length>128)throw Error('无法读取当前 Codex 的模型能力目录。');
+   const selected=models.filter(model=>listed.has(model?.slug));
+   if(!selected.length)throw Error('已登录，但当前 CLI 缺少所列模型的能力数据。请在官方 Codex 刷新模型目录后重连。');
+   listedCatalog={file,bytes:Buffer.from(JSON.stringify({models:selected}))};
+  },
+  prepareIsolation:(file,isolationRoot,config,worker,dependencies={})=>prepareIsolation(file,isolationRoot,config,worker,{...dependencies,execute,probe:dependencies.probe||((exe,args,cwd)=>bootstrapSkills(exe,args,cwd,{spawnProcess})),prepareModels:(directory,instructions)=>prepareModelCeiling(directory,instructions,{cachePath:catalogPath(),missingCatalog:listedCatalog?.file===file?listedCatalog.bytes:undefined})}),
   async initializeAuth(request,rememberSecret){
    importedAccount=null;
    if(fs.existsSync(disabled)&&fs.readFileSync(disabled,'utf8')==='disabled\n')return;
    // An explicit AIMatterLab login owns its own native credential store.
-   if((await request('account/read',{refreshToken:false})).account)return;
-   const auth=nativeAuth();if(!auth)return;rememberSecret(auth.accessToken);
+   const observed=await request('account/read',{refreshToken:false});
+   if(observed.account)return observed;
+   const auth=nativeAuth();if(!auth)return observed;rememberSecret(auth.accessToken);
    await request('account/login/start',{type:'chatgptAuthTokens',...auth});importedAccount=auth.chatgptAccountId;
   },
   refreshAuth(params,rememberSecret){
    const auth=nativeAuth();if(!auth||!importedAccount||auth.chatgptAccountId!==importedAccount||params?.previousAccountId&&params.previousAccountId!==importedAccount)throw Error('Codex 登录已变化，请明确重连；不会切换账户或重放消息。');
    rememberSecret(auth.accessToken);return auth;
   },
-  accountOperation(){fs.writeFileSync(disabled,'disabled\n',{mode:0o600});importedAccount=null;}
+  accountOperation(){fs.writeFileSync(disabled,'disabled\n',{mode:0o600});importedAccount=null;listedCatalog=null;}
  };
 }

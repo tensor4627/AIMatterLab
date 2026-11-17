@@ -29,6 +29,20 @@ function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
 }
 const row=(h,id)=>h.find(n=>n.props?.['data-profile-id']===id);
 
+test('WSL inventory shows failure, retries once clicked and preserves manual input',async()=>{
+ const first=deferred(),second=deferred();let count=0;
+ const h=harness({override:(m,d,s)=>m==='compute.profiles.inventory'?(++count===1?first:second).promise:s(m,d)});
+ try{
+  await h.flush();h.clickId('compute-choice-local');await h.flush();
+  assert(h.find(n=>n.props?.busy&&n.props?.label==='正在查找已安装的 WSL 发行版'));
+  first.reject(Error('fixture unavailable'));await h.flush();
+  assert(h.find(n=>n.props?.role==='alert'&&n.props.children.includes('可以手动填写')));
+  h.find(n=>n.type==='button'&&n.props.children==='重新检测').props.onClick();await h.flush();
+  h.input('compute-profile-distribution','My Linux');second.resolve({distributions:['Other Linux']});await h.flush();
+  assert.equal(h.id('compute-profile-distribution').props.value,'My Linux');assert.equal(count,2);
+ }finally{h.unmount();}
+});
+
 test('saved SSH has a discoverable service settings entry that does not connect, update or save',async()=>{const h=harness();try{await h.flush();h.clickId('compute-profile-service');await h.flush();const service=h.find(n=>n.props?.profile?.id==='fixture-ssh'&&typeof n.props.onLogin==='function');assert.equal(service.props.profile.version,3);assert.deepEqual(h.connected,[]);assert(!h.calls.some(c=>c.method.includes('connect')||c.method.endsWith('.save')));}finally{h.unmount();}});
 
 test('active SSH profile is marked current without treating an existing local worker as the selected resource',async()=>{

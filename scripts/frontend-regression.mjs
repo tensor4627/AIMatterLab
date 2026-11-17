@@ -187,6 +187,25 @@ try{
  await frontendReviewCases({check,out});
  await frontendVisualizationExperienceCases({check,out});
  await frontendSettingsExperienceCases({check,out});
+ await check('wsl-inventory-visible-feedback-retry',async page=>{
+  await page.evaluate(()=>{
+   const fixture=window.__test;
+   window.studio.invoke=async(method)=>{
+    if(method==='compute.profiles.list')return {profiles:[],defaults:{}};
+    if(method==='compute.profiles.inventory')return new Promise((resolve,reject)=>{fixture.finish=resolve;fixture.fail=reject;});
+    throw Error('Unexpected WSL inventory action');
+   };
+   return window.renderTest('ComputeConnectionChooser',{onLocal(){},onSsh(){},onClose(){}});
+  });
+  await page.getByTestId('compute-choice-local').click();
+  const field=page.getByTestId('compute-profile-distribution');
+  await page.getByText('正在查找已安装的 WSL 发行版',{exact:true}).waitFor();
+  await field.fill('My Linux');await page.evaluate(()=>window.__test.fail(Error('Fixture timeout')));
+  await page.getByRole('alert').filter({hasText:'可以手动填写'}).waitFor();
+  await page.getByRole('button',{name:'重新检测'}).click();await page.evaluate(()=>window.__test.finish({distributions:['Other Linux']}));
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('#compute-wsl-distributions option')).some(option=>option.value==='Other Linux'));
+  assert.equal(await field.inputValue(),'My Linux');
+ });
  await frontendModelProviderCases({check,out});
  await frontendChatExperienceCases({check,out});
  await frontendWorkflowExperienceCases({check,out});
