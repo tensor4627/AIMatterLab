@@ -21,7 +21,9 @@ async function openObservedTerminal(page,human=false){
    if(method==='sharedTerminal.read'){
     f.calls.push({method,data});if(data.ownerEpoch!==f.actualEpoch)throw Error('terminal_owner_changed');if(f.readFailure)throw Error('terminal_unavailable');f.readSuccesses++;return {...f.observedShell(f.actualEpoch),output:data.cursor?'':'RECOVERED ORIGINAL SHELL> ',cursor:1,dropped:false};
    }
-   if(method==='sharedTerminal.resize')return {accepted:true};
+   if(method==='sharedTerminal.resize'){
+    f.calls.push({method,data});if(f.geometryFailure)throw Error('terminal_context_changed');return {accepted:true};
+   }
    if(method==='sharedTerminal.input'){f.calls.push({method,data});f.inputCount++;throw Error('terminal_owner_changed');}
    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return {model:'fixture-model',thread:{id:f.terminalChat.threadId,turns:[{items:[{id:'saved-terminal-message',type:'agentMessage',text:'Preserved terminal history'}]}]}};
    if(method==='worker.request'&&['/api/runs','/api/cluster-runs'].includes(data.target))return [];
@@ -32,6 +34,19 @@ async function openObservedTerminal(page,human=false){
 }
 
 export async function frontendTerminalReadObservationCases({check,out}){
+ await check('terminal-resize-stays-local-through-reply-and-recovers-on-the-current-epoch',async page=>{
+  await openObservedTerminal(page);
+  await page.evaluate(()=>{const f=window.__test;f.listEpoch=f.actualEpoch;f.geometryFailure=true;});
+  await page.getByTestId('ssh-login-refresh').click();
+  await page.getByTestId('ssh-resize-observation').filter({hasText:'terminal_context_changed'}).waitFor();
+  assert.equal(await page.getByTestId('ssh-login-error').count(),0);assert.equal(await page.locator('.toast').count(),0);
+  await page.evaluate(()=>{const f=window.__test;f.geometryFailure=false;f.listEpoch=++f.actualEpoch;});
+  await page.getByTestId('ssh-login-refresh').click();
+  await page.waitForFunction(()=>window.__test.calls.some(c=>c.method==='sharedTerminal.resize'&&c.data.ownerEpoch===window.__test.actualEpoch));
+  await page.getByTestId('ssh-resize-observation').waitFor({state:'detached'});
+  assert.equal(await page.locator('.composer textarea').inputValue(),'Keep these unsent terminal instructions');
+  const calls=await page.evaluate(()=>window.__test.calls);assert(!calls.some(c=>['compute.sshConnection.open','sharedTerminal.owner','sharedTerminal.input'].includes(c.method)));
+ });
  await check('terminal-read-observation-experience-stale-epoch-refresh-current-read-clears-local-only',async page=>{
   await openObservedTerminal(page);await page.getByTestId('ssh-read-error-code').filter({hasText:'terminal_owner_changed'}).waitFor();assert.equal(await page.locator('.toast').count(),0);
   await page.evaluate(()=>{window.__test.listEpoch=3;window.__test.readFailure=true;});await page.getByTestId('ssh-login-refresh').click();await page.getByTestId('ssh-read-error-code').filter({hasText:'terminal_unavailable'}).waitFor();assert.equal(await page.locator('.toast').count(),0);assert.equal(await page.getByTestId('ssh-read-observation').evaluate(node=>{const notice=node.getBoundingClientRect(),panel=node.closest('[data-testid="bottom-panel"]').getBoundingClientRect();return notice.top>=panel.top&&notice.bottom<=panel.bottom;}),true,'current read fault must be fully visible within the terminal panel');await page.screenshot({path:path.join(out,'terminal-current-read-failure-remains-visible.png')});

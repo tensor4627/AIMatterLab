@@ -5,6 +5,25 @@ const file=new URL('../../frontend/features/terminal/SshConnectionPanel.tsx',imp
 const connection={schemaVersion:2,connectionId:'connection',profileId:'profile',profileVersion:1,status:'authenticated',authentication:'verified',capabilities:{multiplex:true},terminalSessionIds:['shell'],serviceIds:['service'],revision:1};
 const shell={sessionId:'shell',connectionId:'connection',name:'Independent shell',owner:'human',ownerEpoch:2,alive:true,resource:{kind:'ssh-connection',connectionId:'connection'}};
 const service={schemaVersion:2,connectionId:'connection',serviceId:'service',attemptId:'attempt',status:'connected',workflowReady:true,operator:'human'};
+test('a failed inventory refresh stays in the terminal panel and a successful read clears it',async()=>{
+ let fail=false;const errors=[];
+ const h=await selected({props:{onError:error=>errors.push(error)},override:method=>{
+  if(fail&&method==='sharedTerminal.list')throw Error('terminal_context_changed');
+ }});
+ try{
+  fail=true;await h.tick(2000);assert(h.id('ssh-inventory-observation'));
+  assert.deepEqual(errors,[]);assert(!h.find(n=>n.props?.['data-testid']==='ssh-login-error'));
+  fail=false;await h.tick(2000);assert(!h.find(n=>n.props?.['data-testid']==='ssh-inventory-observation'));
+ }finally{h.unmount();}
+});
+test('a visible terminal cannot hand itself to a different active connection',async()=>{
+ const h=await selected();try{
+  h.render({activeResource:{kind:'ssh-connection',status:'selected',connectionId:'other',profileId:'profile',profileVersion:1}});
+  await h.flush();assert.equal(h.id('ssh-shell-owner').props.disabled,true);assert.equal(h.id('ssh-agent-separate').props.disabled,true);
+  h.click('ssh-shell-owner');await h.flush();assert(!h.calls.some(c=>c.method==='sharedTerminal.owner'));
+  assert(h.id('ssh-activate-resource'));
+ }finally{h.unmount();}
+});
 for(const code of ['exec_unavailable','channel_refused','channel_timeout'])test('pre-Python '+code+' remains a visible service failure while Agent keeps the shell',async()=>{
  const h=await selected({override:(method,data)=>method==='sharedTerminal.owner'?{...shell,owner:data.owner,ownerEpoch:3,service:{...service,status:'failed',serviceActive:false,workflowReady:false,error:{code,phase:'preparing_local'}}}:undefined});
  try{h.click('ssh-shell-owner');await h.flush();assert.equal(h.id('ssh-shell-owner').props.children,'我来操作');assert(!h.find(n=>n.props?.['data-testid']==='ssh-worker-ready'));assert(!h.find(n=>n.props?.['data-testid']==='ssh-worker-preparing'));assert(JSON.stringify(h.id('ssh-worker-error')).includes('尚未运行 Python'));}finally{h.unmount();}

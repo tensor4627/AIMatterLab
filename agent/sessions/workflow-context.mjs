@@ -4,7 +4,7 @@ const keys=['threadId','taskId','projectId','environmentId','inputRoot'];
 function identity(value,label,nullable=false){if(value===null&&nullable)return null;if(typeof value!=='string'||!value||value.length>(label==='inputRoot'?4096:200)||value.includes('\0'))throw Error('Invalid '+label);return value;}
 /** Selection tickets are created only by the sender-validated main process. */
 export function createAgentWorkflowContext({records,activeTasks,selectedProvider}){
- let serial=0,current=null;
+ let serial=0,selectionRevision=0,current=null;
  function owner(provider,threadId,initialProjectId=null){
   if(!providers.has(provider))throw Error('Invalid provider');
   identity(threadId,'threadId',true);
@@ -22,12 +22,15 @@ export function createAgentWorkflowContext({records,activeTasks,selectedProvider
  return {
   begin(provider,threadId,initialProjectId=null){
    if(initialProjectId!==null){if(threadId!==null)throw Error('An initial project belongs to a new conversation');identity(initialProjectId,'projectId');}
-   owner(provider,threadId);current={provider,threadId,serial:++serial,initialProjectId};return Object.freeze({provider,serial});
+   owner(provider,threadId);
+   if(!current||current.provider!==provider||current.threadId!==threadId||current.replacement||
+      (threadId===null&&current.initialProjectId!==initialProjectId))selectionRevision++;
+   current={provider,threadId,serial:++serial,initialProjectId};return Object.freeze({provider,serial});
   },
-  beginReplacement(provider,threadId){const replacement=owner(provider,threadId);if(!replacement.taskId)throw Error('A bound workflow is required for a private context');current={provider,threadId:null,replacement,serial:++serial};return Object.freeze({provider,serial});},
-  beginConversationReplacement(provider,threadId){const replacement=owner(provider,threadId);if(provider!=='codex'||!records.conversation(provider,threadId))throw Error('A saved Codex conversation is required');current={provider,threadId:null,replacement,serial:++serial};return Object.freeze({provider,serial});},
+  beginReplacement(provider,threadId){const replacement=owner(provider,threadId);if(!replacement.taskId)throw Error('A bound workflow is required for a private context');selectionRevision++;current={provider,threadId:null,replacement,serial:++serial};return Object.freeze({provider,serial});},
+  beginConversationReplacement(provider,threadId){const replacement=owner(provider,threadId);if(provider!=='codex'||!records.conversation(provider,threadId))throw Error('A saved Codex conversation is required');selectionRevision++;current={provider,threadId:null,replacement,serial:++serial};return Object.freeze({provider,serial});},
   assert,
-  started(ticket,threadId){const state=assert(ticket);if(state.threadId!==null)throw Error('Only a newly started conversation can receive its real identity');identity(threadId,'threadId');const actual=owner(state.provider,threadId,state.initialProjectId);if(state.replacement&&actual.taskId!==state.replacement.taskId)throw Error('The new context must retain its original workflow');current={provider:state.provider,serial:state.serial,threadId,initialProjectId:state.initialProjectId};return actual;},
+  started(ticket,threadId){const state=assert(ticket);if(state.threadId!==null)throw Error('Only a newly started conversation can receive its real identity');identity(threadId,'threadId');const actual=owner(state.provider,threadId,state.initialProjectId);if(state.replacement&&actual.taskId!==state.replacement.taskId)throw Error('The new context must retain its original workflow');selectionRevision++;current={provider:state.provider,serial:state.serial,threadId,initialProjectId:state.initialProjectId};return actual;},
   async synchronize(ticket,bind){const state=assert(ticket),context=ownedState(state);await bind(state.provider,context);assert(ticket);if(!isDeepStrictEqual(context,ownedState(state)))throw Error('Workflow ownership changed during context binding');if(context.taskId)activeTasks.set(state.provider,context.taskId);else activeTasks.delete(state.provider);return context;},
   assertScope(scope){
    if(!scope||typeof scope.checkCurrent!=='function'||scope.checkCurrent()!==true)throw Error('The scientific tool lease is no longer current');
@@ -37,7 +40,10 @@ export function createAgentWorkflowContext({records,activeTasks,selectedProvider
    if(scope.checkCurrent()!==true)throw Error('The scientific tool lease changed during its ownership check');
    return records.read(context.taskId);
   },
-  clear(provider){if(current&&(!provider||provider===current.provider)){current=null;serial++;}if(provider)activeTasks.delete(provider);else activeTasks.clear();},
+  clear(provider){if(current&&(!provider||provider===current.provider)){current=null;serial++;selectionRevision++;}if(provider)activeTasks.delete(provider);else activeTasks.clear();},
+  // A message renews its operation ticket. The desktop view follows the selected
+  // owner and must still notice a switch away and back to the same conversation.
+  selectedOwner(){return {revision:selectionRevision,context:current?{provider:current.provider,...ownedState(current)}:null};},
   revision(){return serial;},
   current(){if(!current)return null;const {initialProjectId,...selection}=current;return {...selection,...ownedState(current)};}
  };

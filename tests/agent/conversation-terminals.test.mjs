@@ -4,13 +4,13 @@ import {createConversationTerminals} from '../../agent/sessions/conversation-ter
 
 function fixture(){
  const ref={kind:'ssh-connection',schemaVersion:2,selectionId:'selection',connectionId:'connection',profileId:'profile',profileVersion:1};
- const sessions=new Map(),owners=new Map(),closed=[],calls=[];let time=0,context={provider:'codex',threadId:null},sequence=0,granted=null,serviceState={status:'disconnected'},waiting=Promise.resolve(),active=null;
+ const sessions=new Map(),owners=new Map(),closed=[],calls=[];let time=0,context={provider:'codex',threadId:null},sequence=0,granted=null,serviceState={status:'disconnected'},waiting=Promise.resolve(),active=null,ownerGate;
  function shell(){
   const s={connectionId:ref.connectionId,sessionId:'shell-'+ ++sequence,kind:'ssh',owner:'human',ownerEpoch:1,alive:true};
   sessions.set(s.sessionId,s);return s;
  }
  const terminal={connections:{openShell:async()=>shell()},resourceState:async({sessionId})=>{const s=sessions.get(sessionId);return {resource:ref,operator:s.owner,ownerEpoch:s.ownerEpoch,alive:true,processStatus:'running'};},
-  owner:async(data,options)=>{options.assertCurrent();const s=sessions.get(data.sessionId);assert.equal(s.ownerEpoch,data.ownerEpoch);owners.set(s.sessionId,context.threadId);s.owner=data.owner;s.ownerEpoch++;return {...s};},
+  owner:async(data,options)=>{if(ownerGate)await ownerGate();options.assertCurrent();const s=sessions.get(data.sessionId);assert.equal(s.ownerEpoch,data.ownerEpoch);owners.set(s.sessionId,context.threadId);s.owner=data.owner;s.ownerEpoch++;return {...s};},
   hasCurrentGrant:(p,id)=>p===context.provider&&owners.get(id)===context.threadId,
   closeConversationShell:async({sessionId,ownerEpoch})=>{assert.equal(sessions.get(sessionId).ownerEpoch,ownerEpoch);sessions.delete(sessionId);closed.push(sessionId);},
   discardConversationShell:async({sessionId})=>sessions.delete(sessionId)};
@@ -18,9 +18,9 @@ function fixture(){
   connectForConversations:async value=>{calls.push(value);await waiting;return serviceState={...ref,workflowReady:true,status:'connected',attemptId:'attempt'};},
   owner:({scope})=>{granted=scope.threadId;},markTerminalHandoff(){},reclaimTerminalHandoff(){}};
  const pool=createConversationTerminals({terminal,service,resource:{peek:()=>ref,capture:()=>ref,assertCurrent:ticket=>assert.equal(ticket,ref)},registration:{read:()=>({status:'configured'})},
-  current:()=>context,idleMinutes:()=>1,busy:scope=>active===scope.threadId,now:()=>time});
+  current:()=>context,idleMinutes:()=>1,busy:scope=>active===scope.threadId,serviceBusy:()=>active!==null,now:()=>time});
  return {pool,sessions,closed,calls,shell,scope:()=>context,change:id=>{context={provider:'codex',threadId:id};},
-  advance:ms=>{time+=ms;},active:id=>{active=id;},gate:promise=>{waiting=promise;},grant:()=>granted};
+  advance:ms=>{time+=ms;},active:id=>{active=id;},gate:promise=>{waiting=promise;},grant:()=>granted,replaceAttempt:value=>{serviceState={...serviceState,attemptId:value};},beforeOwner:fn=>{ownerGate=fn;}};
 }
 test('reserve without creating a conversation, capture, park, return, expire and wake separate PTYs',async()=>{
  const f=fixture(),a=f.shell(),provider='codex',choose=async id=>{const pending=f.pool.pendingForNewConversation(provider);f.change(id);await f.pool.acquire(provider,f.scope(),pending);};
@@ -64,4 +64,29 @@ test('human reclaim during slow service preparation never grants the late servic
  const f=fixture();let release;f.gate(new Promise(r=>release=r));f.change('A');const p=f.shell();
  const handed=await f.pool.arm(p,'codex');assert.equal(handed.owner,'agent');assert.equal(f.grant(),null);f.pool.releaseShell(p.sessionId);
  release();await new Promise(setImmediate);assert.equal(f.grant(),null);
+});
+
+for(const outcome of ['idle','other-reply','reclaim-shell','reclaim-service','switch-chat','replace-attempt'])test('service ready during first reply waits for the original idle handoff: '+outcome,async()=>{
+ const f=fixture();let ready;f.gate(new Promise(resolve=>ready=resolve));
+ f.change('A');const shell=f.shell();await f.pool.arm(shell,'codex');
+ f.active(outcome==='other-reply'?'B':'A');ready();await new Promise(setImmediate);
+ assert.equal(f.grant(),null);assert.equal(f.pool.describe(shell).serviceGrantPending,true);
+ if(outcome==='reclaim-shell')f.pool.releaseShell(shell.sessionId);
+ if(outcome==='reclaim-service')f.pool.serviceOwner('connection','human');
+ if(outcome==='switch-chat')f.change('B');
+ if(outcome==='replace-attempt')f.replaceAttempt('another-attempt');
+ f.active(null);f.pool.finishDeferredService('codex','A');
+ assert.equal(f.grant(),['idle','other-reply'].includes(outcome)?'A':null);assert.equal(f.calls.length,1);
+});
+
+test('cancelling a blank-chat handoff while the owner request is pending disables future captures',async()=>{
+ const f=fixture(),shell=f.shell();await f.pool.arm(shell,'codex');
+ const reserved=f.pool.pendingForNewConversation('codex');f.change('new');
+ let entered,release;const started=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+ f.beforeOwner(async()=>{entered();await gate;});
+ const capturing=f.pool.acquire('codex',f.scope(),reserved);await started;
+ assert.equal(f.pool.describe(shell).awaitingConversation,true);
+ f.pool.releaseShell(shell.sessionId);release();await assert.rejects(capturing,/terminal_context_changed/);
+ assert.equal(shell.owner,'human');f.change('other');await f.pool.acquire('codex',f.scope());
+ assert.equal(f.sessions.size,1);assert.equal(f.pool.canAcquire('codex'),false);
 });

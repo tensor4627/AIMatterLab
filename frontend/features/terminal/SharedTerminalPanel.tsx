@@ -6,7 +6,7 @@ import {FitAddon} from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import {invoke} from '../../api/studio';
 import {computeResources,sshService} from '../../api/compute-resources';
-import type {ComputeResourceState,SshTerminalResourceReference,SshConnectionResourceReference,SshServiceState} from '../../../contracts/dto/compute';
+import type {ComputeResourceState,SharedTerminalResizeRequest,SshTerminalResourceReference,SshConnectionResourceReference,SshServiceState} from '../../../contracts/dto/compute';
 import type {AgentProvider,Conversation} from '../../../contracts/dto/agent';
 import {t} from "../../ui/i18n";
 import './shared-terminal.css';
@@ -40,7 +40,7 @@ function terminalMessage(error:unknown){
  return t(messages[code||'']||'终端操作未完成，请刷新会话状态后重试。');
 }
 
-type PanelProps={provider?:AgentProvider;onConversationPrepared?:(conversation:Conversation)=>void;resourceScope?:string;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;visible:boolean;request?:SharedTerminalRequest;canShare:boolean;onError:(error:unknown)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"})=>void;onPlainSsh?:()=>void};
+type PanelProps={activeResource?:ComputeResourceState|null;provider?:AgentProvider;onConversationPrepared?:(conversation:Conversation)=>void;resourceScope?:string;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;visible:boolean;request?:SharedTerminalRequest;canShare:boolean;onError:(error:unknown)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"})=>void;onPlainSsh?:()=>void};
 export default function SharedTerminalPanel(props:PanelProps){
  if(props.request?.kind==='ssh'&&props.request.profileId&&props.request.connectionMode!=='plain')return <SshConnectionPanel {...props} request={props.request}/>;
  return <LegacySharedTerminalPanel {...props}/>;
@@ -135,7 +135,7 @@ export function LegacySharedTerminalPanel({visible,request,canShare,onError,reso
   const minimum=parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||11;
   const view=new Terminal({fontSize:Math.max(minimum,Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||13),fontFamily:'Cascadia Code, Consolas, monospace',scrollback:5000,convertEol:false,cursorBlink:true,theme:{background:'#121218',foreground:'#d1d5e4',cursor:'#b8a0f7'}});
   const addon=new FitAddon();view.loadAddon(addon);view.open(host.current);terminal.current=view;fit.current=addon;
-  const resize=()=>{if(stopped||activeRef.current?.sessionId!==currentId||!host.current?.clientWidth||!host.current.clientHeight)return;view.options.fontSize=Math.max(parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||11,Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||13);addon.fit();if(activeRef.current?.alive===true&&!laneReserved(activeRef.current)&&Number.isInteger(view.cols)&&view.cols>=10&&view.cols<=500&&Number.isInteger(view.rows)&&view.rows>=2&&view.rows<=300){const context={scope:resourceOwner.current,nonce:requestOwner.current,provider:providerOwner.current};void invoke('sharedTerminal.resize',{sessionId:currentId,cols:view.cols,rows:view.rows}).catch(error=>{if(!stopped&&contextCurrent(context)&&activeRef.current?.sessionId===currentId)setNotice(terminalMessage(error));});}};
+  const resize=()=>{if(stopped||activeRef.current?.sessionId!==currentId||!host.current?.clientWidth||!host.current.clientHeight)return;view.options.fontSize=Math.max(parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||11,Number(document.documentElement.style.getPropertyValue('--terminal-font-size'))||13);addon.fit();if(activeRef.current?.alive===true&&!laneReserved(activeRef.current)&&Number.isInteger(view.cols)&&view.cols>=10&&view.cols<=500&&Number.isInteger(view.rows)&&view.rows>=2&&view.rows<=300){const context={scope:resourceOwner.current,nonce:requestOwner.current,provider:providerOwner.current};void invoke('sharedTerminal.resize',{sessionId:currentId,ownerEpoch:activeRef.current.ownerEpoch,cols:view.cols,rows:view.rows} satisfies SharedTerminalResizeRequest).catch(error=>{if(!stopped&&contextCurrent(context)&&activeRef.current?.sessionId===currentId)setNotice(terminalMessage(error));});}};
   const observer=new ResizeObserver(resize);observer.observe(host.current);
   const input=view.onData(data=>{const owner=activeRef.current;if(stopped||busyRef.current||laneReserved(owner)||owner?.sessionId!==currentId||owner.owner!=='human'||owner.alive!==true||owner.expired)return;const ownerEpoch=owner.ownerEpoch,requestId=crypto.randomUUID();inputQueue.current=inputQueue.current.then(async()=>{const latest=activeRef.current;if(stopped||busyRef.current&&!drainingInputRef.current||laneReserved(latest)||latest?.sessionId!==currentId||latest.ownerEpoch!==ownerEpoch||latest.owner!=='human'||latest.expired)return;await writeInput((payload:unknown)=>invoke('sharedTerminal.input',payload),latest,requestId,data);}).catch(error=>{if(!stopped&&mounted.current)report(error);});});
   window.addEventListener('studio:appearance',resize);resize();view.focus();

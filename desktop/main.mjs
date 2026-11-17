@@ -270,7 +270,7 @@ handle('compute.profiles.remove',value=>{
  return computeProfiles.remove(value);
 });
 handle('compute.profiles.inventory',async value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid WSL inventory request');return {distributions:await installedWslDistributions()};});
-sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),settings:()=>settings,getSelectedResource:()=>computeResource?.peek(),selectionRevision:()=>computeResource?.revision()??0,
+sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:safeStorage,catalog,current:()=>workflowContext.current(),currentView:()=>workflowContext.selectedOwner(),settings:()=>settings,getSelectedResource:()=>computeResource?.peek(),selectionRevision:()=>computeResource?.revision()??0,
  root:path.join(app.getPath('userData'),'shared-terminal'),runtimeRoot:terminalExecutionCache({profileRoot:app.getPath('userData'),home:app.getPath('home')}),
  dependencyRoot:app.isPackaged?path.join(process.resourcesPath,'agent-runtimes'):path.join(root,'.studio','agent-runtimes'),
  servicePath:app.isPackaged?path.join(process.resourcesPath,'terminal-service','broker.mjs'):path.join(here,'platform','terminal-service','broker.mjs'),nodeExecutable:process.execPath,
@@ -278,12 +278,18 @@ sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:
 // Persisted references are observations, never authentication or Agent leases.
 // Schema 1 remains readable; selecting a real new connection archives it in a
 // versioned transition rather than discarding saved state on desktop startup.
-computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,connections:sharedTerminal.connections,current:()=>workflowContext.current(),revision:()=>workflowContext.revision(),serviceState:connectionId=>sshService?.peek(connectionId?{connectionId}:{})});
+computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,connections:sharedTerminal.connections,current:()=>workflowContext.selectedOwner(),serviceState:connectionId=>sshService?.peek(connectionId?{connectionId}:{})});
 sshService=createSshService({worker,connections:sharedTerminal.connections,profiles:computeProfiles,resource:computeResource,registration:serviceRegistration,source:workerSource,transportSource:sshTransportSource,preferredRuntimeId:profile=>preferredSshRuntime(profile,selectedSshBinding(profile),catalog.get('ssh-runtime-preference',profile.id)),current:()=>workflowContext.current(),assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},publish:()=>{emit('studio:event',{method:'studio/sshServiceChanged',params:sshService?.peek()||{status:'disconnected'}});},remember:(identity,health)=>{catalog.put('worker-binding','last-explicit',{...identity,port:health.port,health,checkedAt:Date.now(),sourceIdentity:{runtimeId:health.runtimeId}});}});
 conversationTerminals=createConversationTerminals({terminal:sharedTerminal,service:sshService,registration:serviceRegistration,
  resource:computeResource,current:()=>workflowContext.current(),conversationName:(provider,threadId)=>taskRecords.conversation(provider,threadId)?.name,idleMinutes:()=>settings.terminalIdleMinutes,
  busy:scope=>agents.bridge(scope.provider)?.activeTurns?.has(scope.threadId)||agents.pendingTurnDispatches.has(agents.contextKey(scope.provider,scope.threadId)),
- publish:()=>emit('studio:event',{method:'studio/conversationTerminalChanged'})});
+ serviceBusy:()=>agents.contextBusy(),
+ publish:scope=>{
+  emit('studio:event',{method:'studio/conversationTerminalChanged'});
+  if(scope)void scientificTools(scope.provider).then(params=>{
+   if(sshService.hasCurrentGrant(scope.provider,scope))emit('studio:event',{method:'studio/toolsStatus',provider:scope.provider,params});
+  }).catch(()=>{});
+ }});
 const terminalIdleTimer=setInterval(()=>void conversationTerminals.sweep(),10000);terminalIdleTimer.unref();
 const authoringAuthorization={
  begin(task){
@@ -383,7 +389,12 @@ customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.a
 });
 for(const action of ['read','saveSpec','approveFormula','approveCode','sharing','validate','status','attach','reuse'])handle('customCv.'+action,(value,event)=>customCv.dispatch(action,value,event));
 handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
-agents.on('event',event=>{if(event.params?.threadId)conversationTerminals.touch(event.provider,event.params.threadId);taskRecords.event(event);emit('studio:event',event);});
+agents.on('event',event=>{
+ const threadId=event.params?.threadId;
+ if(threadId)conversationTerminals.touch(event.provider,threadId);
+ taskRecords.event(event);emit('studio:event',event);
+ if(threadId&&event.method==='turn/completed')setImmediate(()=>conversationTerminals.finishDeferredService(event.provider,threadId));
+});
 registerWorkspaceTaskRoutes({
  records:taskRecords,catalog,worker,workflowContext,agents,handle,assertIdle:assertIdleAgent,authoringAuthorization,
  getSettings:()=>settings,getLocalReview:()=>localReview,emit,

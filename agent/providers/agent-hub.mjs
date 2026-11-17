@@ -61,9 +61,8 @@ export class AgentHub extends EventEmitter{
  isContextTransition(provider){return this.contextClosing.has(provider);}
  closeForContext(provider){this.contextClosing.add(provider);try{this.disconnect(provider);}finally{this.contextClosing.delete(provider);}}
  contextKey(provider,threadId){return provider+':'+threadId;}
- assertContextIdle(){
-  if(this.pendingTurnDispatches.size||this.codex.activeTurns?.size||[...this.bridges.values()].some(b=>b.activeTurns?.size))throw Error('Stop the current reply before switching conversation context');
- }
+ contextBusy(){return !!(this.pendingTurnDispatches.size||this.codex.activeTurns?.size||[...this.bridges.values()].some(b=>b.activeTurns?.size));}
+ assertContextIdle(){if(this.contextBusy())throw Error('Stop the current reply before switching conversation context');}
  selectContext(provider,value={}){
   providerId(provider);this.assertContextIdle();const context=providerContext(value);
   if(typeof this.bindWorkerContext!=='function')throw Error('Trusted worker context binding is unavailable');

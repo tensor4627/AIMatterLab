@@ -1,6 +1,8 @@
 import type {SshLocations} from '../compute/ssh-service-locations.mjs';
 /** Pure cross-process contracts. Runtime and renderer state belong to their owners. */
 
+export interface SharedTerminalResizeRequest {sessionId:string;ownerEpoch:number;cols:number;rows:number}
+
 export interface Project {revision?:number;authoring_only?:boolean;authoring_task_id?:string;id:string;name:string;policy:{engines:string[];gpus:number[];max_seconds:number;max_concurrent:number;input_roots:string[];environments:string[];clusters?:string[];cluster_queue_policies?:Record<string,ClusterQueuePolicy>}}
 
 export interface Environment {id:string;name:string;provider?:'wsl'|'ssh';executables:Record<string,string>;repositories?:Record<string,string>;variables?:Record<string,string>}

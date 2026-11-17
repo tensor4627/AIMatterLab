@@ -26,6 +26,72 @@ test('main human ports hide master authentication from shell inventory, safe sta
 });
 test('human terminal observation rechecks a harmless message revision without suppressing a real conversation switch',async t=>{const f=fixture(t),c=await f.ready();f.select(c);const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'shell'});let once=true;f.onState(()=>{if(once){once=false;f.change({serial:1});}});assert.equal((await f.bridge.read({sessionId:shell.id,ownerEpoch:1})).sessionId,shell.id);once=true;f.onState(()=>{if(once){once=false;f.change({threadId:'other-thread',serial:2});}});await assert.rejects(f.bridge.read({sessionId:shell.id,ownerEpoch:1}),/terminal_context_changed/);});
 
+test('listing the authenticated SSH terminals during first send survives thread creation and worker attachment',async t=>{
+ const f=fixture(t),connection=await f.ready();f.select(connection);
+ const shell=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'first-send'});
+ f.change({threadId:null,taskId:null});const session=f.sessions.get(shell.id),state=session.state;
+ session.state=()=>{
+  session.state=state;f.change({threadId:'first-message',serial:1});
+  f.worker.connection={};f.worker.connectionEpoch++;
+  return state();
+ };
+ const list=await f.bridge.list({});
+ assert.deepEqual(list.sessions.map(s=>[s.id,s.owner,s.ownerEpoch]),[[shell.id,'human',1]]);
+ assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),false);
+ session.state=()=>{session.state=state;f.select(connection);return state();};
+ await assert.rejects(f.bridge.list({}),/terminal_context_changed/);
+});
+
+test('late shell state cannot roll a completed handoff back to the previous owner',async t=>{
+ const f=fixture(t),connection=await f.ready();f.select(connection);
+ const shell=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'owner-race'});
+ let release,observed;const gate=new Promise(resolve=>release=resolve),entered=new Promise(resolve=>observed=resolve);
+ f.onState(async()=>{f.onState(null);observed();await gate;});
+ const old=f.bridge.resourceState({sessionId:shell.id});await entered;
+ const handed=await f.bridge.owner({sessionId:shell.id,ownerEpoch:1,owner:'agent'},{conversation:true});
+ release();await assert.rejects(old,/terminal_owner_changed/);
+ assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),true);
+ const row=(await f.bridge.list({})).sessions[0];assert.equal(row.ownerEpoch,handed.ownerEpoch);
+ const input=await f.bridge.callTool('write_shared_terminal',{session_id:shell.id,request_id:'once',data:'marker'},f.scope());
+ assert.equal(input.accepted,true);assert.deepEqual(f.processes.at(-1).writes,['marker']);
+});
+
+test('a read result for a different owner epoch cannot publish output or replace the current owner',async t=>{
+ const f=fixture(t),connection=await f.ready();f.select(connection);
+ const shell=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'read-epoch'});
+ const {ownerEpoch}=await f.bridge.owner({sessionId:shell.id,ownerEpoch:1,owner:'agent'});
+ const session=f.sessions.get(shell.id),read=session.read.bind(session);
+ session.read=request=>{const page=read(request);return {...page,state:{...page.state,ownerEpoch:ownerEpoch+1}};};
+ await assert.rejects(f.bridge.read({sessionId:shell.id,ownerEpoch}),/terminal_owner_changed/);
+ await assert.rejects(f.bridge.callTool('read_shared_terminal',{session_id:shell.id},f.scope()),/terminal_owner_changed/);
+ assert.equal((await f.bridge.resourceState({sessionId:shell.id})).ownerEpoch,ownerEpoch);
+ assert(f.bridge.hasCurrentGrant('codex',shell.id));
+});
+
+test('layout during a message on the same handed-off SSH shell does not report a context switch',async t=>{
+ const f=fixture(t),connection=await f.ready();f.select(connection);
+ const shell=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'layout'});
+ await f.bridge.owner({sessionId:shell.id,ownerEpoch:1,owner:'agent'},{conversation:true});
+ f.onState(()=>{f.onState(null);f.change({serial:2});});
+ // Payload from the 0.1.5 renderer's ResizeObserver.
+ assert.deepEqual(await f.bridge.resize({sessionId:shell.id,cols:110,rows:32}),{accepted:true});
+ assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),true);
+});
+
+test('SSH resize follows the displayed PTY epoch through a normal message and refuses a stale display',async t=>{
+ const f=fixture(t),connection=await f.ready();f.select(connection);
+ const shell=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'resize'});
+ const handoff=await f.bridge.owner({sessionId:shell.id,ownerEpoch:1,owner:'agent'},{conversation:true});
+ const size={sessionId:shell.id,ownerEpoch:handoff.ownerEpoch,cols:110,rows:32};
+ f.onState(()=>{f.onState(null);f.change({serial:1});f.worker.connection={};f.worker.connectionEpoch++;});
+ assert.deepEqual(await f.bridge.resize(size),{accepted:true});
+ assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),true);
+ const resizes=()=>f.requests.filter(r=>r.route.endsWith('/resize')).length;
+ await f.bridge.owner({sessionId:shell.id,ownerEpoch:size.ownerEpoch,owner:'human'});
+ await assert.rejects(f.bridge.resize(size),/terminal_owner_changed/);
+ assert.equal(resizes(),1);assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),false);
+});
+
 test('conversation PTYs keep their original shell and deny cross-thread reads after a switch',async t=>{
  const f=fixture(t),connection=await f.ready();f.select(connection);
  const a=await f.bridge.connections.openShell({connectionId:connection.connectionId,requestId:'A'});

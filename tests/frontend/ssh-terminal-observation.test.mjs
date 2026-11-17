@@ -56,6 +56,16 @@ test('a current read failure remains visible rather than suppressing context err
  await flush();assert.equal(f.errors.length,1);assert.equal(f.errors[0].code,'terminal_context_changed');
 });
 
+test('resize is addressed to the displayed ownership epoch and stays a local geometry diagnostic',async t=>{
+ const geometry=[],pending=[];const f=fixture(t,(method,data)=>method==='sharedTerminal.resize'?new Promise((resolve,reject)=>pending.push({data,resolve,reject})):{...shell,output:'',cursor:0},{onGeometry:value=>geometry.push(value),resourceScope:'blank'});
+ assert.equal(pending[0].data.ownerEpoch,1);
+ f.render({shell:{...shell,awaitingConversation:true}});f.resize();assert.equal(pending.length,1);
+ pending[0].reject(Error('terminal_context_changed'));await flush();assert.deepEqual(geometry,[]);
+ f.render({resourceScope:'bound',shell:{...shell,owner:'agent',ownerEpoch:2}});assert.equal(pending[1].data.ownerEpoch,2);
+ pending[1].reject(Error('terminal_unavailable'));await flush();assert.equal(geometry.at(-1).code,'terminal_unavailable');assert.deepEqual(f.errors,[]);
+ f.resize();pending[2].resolve({accepted:true});await flush();assert.equal(geometry.at(-1),null);
+});
+
 test('an in-flight resize is invalidated even when it returns after handoff unlocks',async t=>{
  let rejectResize;const f=fixture(t,async method=>method==='sharedTerminal.resize'?new Promise((_r,reject)=>rejectResize=reject):{...shell,output:'',cursor:0});
  f.lock();f.unlock();rejectResize(Error('terminal_context_changed'));await flush();assert.deepEqual(f.errors,[]);

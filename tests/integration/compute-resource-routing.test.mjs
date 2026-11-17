@@ -2,6 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
 import {createComputeResourceBinding} from '../../backend/main/compute/resource-binding.mjs';
 import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 import {createAgentRequests} from '../../agent/sessions/requests.mjs';
+import {createAgentWorkflowContext} from '../../agent/sessions/workflow-context.mjs';
 import {AgentHub} from '../../agent/providers/agent-hub.mjs';import {CodexBridge} from '../../agent/providers/codex.mjs';
 import {WorkerClient} from '../../agent/tools/worker-client.mjs';import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
 import {providerId} from '../../agent/providers/contracts.mjs';
@@ -10,8 +11,7 @@ const main=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'ut
 function find(predicate){let value;function visit(node){if(predicate(node))value=node;ts.forEachChild(node,visit);}visit(ast);assert(value,'Actual main wiring is present');return value.getText(ast);}
 const initializer=name=>{let value;function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(ast)===name)value=node.initializer?.getText(ast);if(ts.isBinaryExpression(node)&&node.left.getText(ast)===name)value=node.right.getText(ast);ts.forEachChild(node,visit);}visit(ast);assert(value,name);return value;};
 async function fixture(t,{connectedWorker=true}={}){
- const rows=new Map(),cache=[],calls=[],events=[],revokes=[];let serial=1,ready=false,readySession=null,profileValid=true,readGate,readEntered;
- const owner={provider:'codex',threadId:'thread',taskId:null,projectId:null,environmentId:null,inputRoot:null};
+ const rows=new Map(),cache=[],calls=[],events=[],revokes=[];let ready=false,readySession=null,profileValid=true,readGate,readEntered;
  const catalog={get:(kind,id)=>clone(rows.get(kind+':'+id)),put:(kind,id,value)=>{rows.set(kind+':'+id,clone(value));cache.push({kind,id,value:clone(value)});return clone(value);},remove:(kind,id)=>rows.delete(kind+':'+id),list:kind=>[...rows].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>clone(value))};
  const profiles={read:({id,version})=>{if(!profileValid)throw Error('Changed');return {id,version,kind:'ssh',name:'Fixture'};}};
  const shellConnection=sessionId=>sessionId?.startsWith('shell-')?sessionId.slice(6):'foreign-connection';
@@ -21,8 +21,10 @@ async function fixture(t,{connectedWorker=true}={}){
  const revoke=worker.revokeProvider.bind(worker);worker.revokeProvider=provider=>{revokes.push(provider);revoke(provider);};
  const terminalMcp=new TerminalMcp({terminal:shared});await terminalMcp.start();
  const codex=new EventEmitter();codex.activeTurns=new Set();codex.starts=0;codex.closes=0;codex.process={};codex.close=()=>{codex.closes++;codex.process=null;codex.emit('event',{method:'studio/codexDisconnected',params:{}});};codex.start=async(_file,connection)=>{codex.starts++;codex.process={};codex.attached=connection;return {};};codex.request=async(method,params,_timeout,options)=>{options?.assertCurrent();calls.push({method,params:clone(params)});if(method==='turn/start')return {turn:{id:'synthetic-turn'}};if(method==='thread/start'||method==='thread/resume')return {thread:{id:method==='thread/start'?'new-thread':params.threadId,turns:[]}};return {};};
- const mcpContext=()=>Object.fromEntries(['threadId','taskId','projectId','environmentId','inputRoot'].map(key=>[key,owner[key]]));
- const workflowContext={current:()=>({...owner,serial}),revision:()=>serial,begin:(provider,threadId)=>{owner.provider=provider;owner.threadId=threadId;serial++;return {provider,serial};},assert:ticket=>{assert.equal(ticket.serial,serial);},synchronize:async(ticket,bind)=>bind(ticket.provider,mcpContext()),started:(_ticket,id)=>{owner.threadId=id;}};
+ const taskRecords={conversation:()=>null,bound:()=>null,deleted:()=>false,failedTurn:()=>{},prepareTurn:()=>assert.fail('No automatic workflow context')};
+ const workflowContext=createAgentWorkflowContext({records:taskRecords,activeTasks:new Map(),selectedProvider:()=>'codex'});
+ workflowContext.begin('codex','thread');const owner=workflowContext.current();
+ const mcpContext=()=>Object.fromEntries(['threadId','taskId','projectId','environmentId','inputRoot'].map(key=>[key,workflowContext.current()[key]]));
  const handlers=new Map(),sender={id:7,isDestroyed:()=>false},window={isDestroyed:()=>false,webContents:{id:7,isDestroyed:()=>false,getURL:()=> 'file:///studio/index.html'}},event={sender,senderFrame:{url:'file:///studio/index.html'}};
  const context={authoringAuthorization:null,sshService:{peek:()=>null,prepareForConnection:async data=>{events.push({data:{method:'test/loginPreparation',params:data}});},resourceChanged:async()=>{},connectionLost:()=>{},reconcileContext:()=>{}},path,createAgentResourceRouting,createComputeResourceBinding,createAgentRequests,AgentHub,conversationTerminals:{acquire:async()=>{},pendingForNewConversation:()=>null,canAcquire:()=>false,detachConnection(){},releaseConnection(){}},worker,terminalMcp,sharedTerminal:shared,computeProfiles:profiles,catalog,codex,root:process.cwd(),settings:{codexPath:'synthetic',agent:{}},workflowContext,window,shuttingDown:false,app:{getPath:()=>process.cwd(),isPackaged:false},safeStorage:{},CredentialVault:class{get(){return null;}},net:{fetch:()=>assert.fail('No external network')},emit:(channel,data)=>events.push({channel,data}),assertIdleAgent:()=>{if(codex.activeTurns.size)throw Error('busy');},scientificToolReadiness:()=>assert.fail('No selected-SSH scientific readiness query'),ipcMain:{handle:(name,handler)=>handlers.set(name,handler)}};
  Object.assign(context,{providerId,agentConnectionSerial:0});
@@ -33,7 +35,6 @@ async function fixture(t,{connectedWorker=true}={}){
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='compute.resource.status'),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='agent.connect'),context);
  vm.runInNewContext(find(node=>ts.isForOfStatement(node)&&node.getText(ast).includes("handle('compute.resource.'+method")),context);
- const taskRecords={bound:()=>null,deleted:()=>false,failedTurn:()=>{},prepareTurn:()=>assert.fail('No automatic workflow context')};
  Object.assign(context,{taskRecords,privateAccess:{assertTask:()=>assert.fail('No WSL private read')},scientificSkills:{router:{routes:new Map()},context:{}},setupInstructions:{},bundledSkillRoot:process.cwd(),studioSkillRoots:()=>[],managedSkillRoots:()=>[],managedSkillEntries:()=>[],managedSkillRecords:()=>[],skillGuidanceScope:()=>{},openUrl:()=>{}});
  const request=vm.runInNewContext(initializer('agentRequests'),context);
  const invoke=(name,data={},suppliedEvent=event)=>handlers.get('studio:'+name)(suppliedEvent,data);

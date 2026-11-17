@@ -48,6 +48,19 @@ test('the visible shell cannot be handed off before the original login finishes 
  const held=deferred(),f=fixture({complete:()=>complete,activate:()=>held.promise}),{h}=f;
  try{await h.flush();assert.equal(h.id('ssh-shell-owner').props.disabled,true);assert(!h.calls.some(c=>c.method==='sharedTerminal.owner'));held.resolve({schemaVersion:2,kind:'ssh-connection',connectionId:'connection',profileId:'profile',profileVersion:1,status:'selected'});await h.flush();assert.equal(h.id('ssh-shell-owner').props.disabled,false);assert.equal(f.resources.length,1);assert.equal(f.postCount(),1);}finally{held.resolve(null);h.unmount();}
 });
+
+test('failed selection keeps the original shell visible and handoff waits for explicit successful activation',async()=>{
+ let attempts=0;const f=fixture({complete:()=>complete,activate:data=>{
+  if(++attempts===1)throw Error('compute_resource_context_changed');
+  return {...data,schemaVersion:2,status:'selected'};
+ }}),{h}=f;
+ try{
+  await h.flush();assert.equal(h.id('ssh-shell-owner').props.disabled,true);
+  assert.equal(h.id('ssh-agent-separate').props.disabled,true);
+  h.click('ssh-activate-resource');await h.flush();
+  assert.equal(h.id('ssh-shell-owner').props.disabled,false);assert.equal(f.postCount(),1);
+ }finally{h.unmount();}
+});
 for(const foreign of [
  {...complete,connection:{...connected,profileId:'foreign'}},
  {...complete,connection:{...connected,loginRequestId:'foreign-request'}},

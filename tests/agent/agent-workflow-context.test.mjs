@@ -2,6 +2,16 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {createAgentWorkflowContext} from "../../agent/sessions/workflow-context.mjs";
 function fixture(){let provider='codex';const tasks=new Map(),conversations=new Map(),activeTasks=new Map(),records={deleted:()=>false,conversation:(p,id)=>conversations.get(p+':'+id),bound:(p,id)=>{const c=conversations.get(p+':'+id);return c?.taskId?tasks.get(c.taskId):null;},read:id=>structuredClone(tasks.get(id))};for(const id of ['a','b']){const task={id:'task-'+id,provider:'codex',threadId:id,projectId:'project-'+id,authoring:{projectId:'project-'+id,environmentId:'environment-'+id,inputRoot:'/inputs/'+id}};tasks.set(task.id,task);conversations.set('codex:'+id,{taskId:task.id,projectId:task.projectId});}const api=createAgentWorkflowContext({records,activeTasks,selectedProvider:()=>provider});return {api,records,activeTasks,tasks,conversations,setProvider:p=>provider=p};}
 const bind=async()=>{};
+test('desktop observations survive a same-thread message but distinguish A to B to A and a new blank chat',()=>{
+ const {api,tasks}=fixture();const first=api.begin('codex','a'),original=api.selectedOwner();
+ api.begin('codex','a');assert.throws(()=>api.assert(first));assert.deepEqual(api.selectedOwner(),original);
+ api.begin('codex','b');api.begin('codex','a');const back=api.selectedOwner();
+ assert.deepEqual(back.context,original.context);assert.notEqual(back.revision,original.revision);
+ tasks.get('task-a').authoring.inputRoot='/new';assert.notDeepEqual(api.selectedOwner(),back);
+ api.clear();api.begin('codex',null);const blank=api.selectedOwner();
+ api.clear();const ticket=api.begin('codex',null);assert.notDeepEqual(api.selectedOwner(),blank);
+ api.started(ticket,'fresh');assert.equal(api.selectedOwner().context.threadId,'fresh');
+});
 test('a fresh thread has the selected project before its first save, without inheriting history',async()=>{
  const f=fixture();
  f.api.begin('codex','a');
