@@ -184,6 +184,15 @@ export default function App(){
  });
  const computeResourceScope=agentProvider+'|'+conversationSelectionSeq.current+'|'+(sessionSelection?.nonce||'')+'|'+(selectedConversationId||'');resourceScopeRef.current=computeResourceScope;
  const selectedRecords=selectedRecordScope(computeResource,conversationSelectionSeq.current);
+ const activeFlow=agentTasks.find(task=>task.id===selectedConversationRef.current?.taskId);
+ const flowWorker=taskWorkerSource(activeFlow)?.binding;
+ const sshDraftTaskId=computeResource?.kind==='ssh-connection'&&computeResource.status==='selected'&&
+  computeResource.authentication==='verified'&&computeResource.workflowReady&&flowWorker?.kind==='ssh'&&
+  computeResource.profileId===flowWorker.profileId&&computeResource.profileVersion===flowWorker.profileVersion?activeFlow.id:undefined;
+ useEffect(()=>{
+  // The workflow may receive its draft binding after the first disconnected observation.
+  if(sshDraftTaskId&&!agentBusy&&!workerReady.current&&initialSelectionReady.current)void observeWorker(sshDraftTaskId);
+ },[sshDraftTaskId,selectedRecords?.key,agentBusy]);
  useEffect(()=>{
   recordReadSequence.current++;recordReadPending.current=null;
   if(selectedRecords){setRecordService({phase:'checking',scopeKey:selectedRecords.key});setRecordObservations(old=>({local:{...old.local,stale:old.local.loaded,sourceChanged:old.local.loaded},cluster:{...old.cluster,stale:old.cluster.loaded,sourceChanged:old.cluster.loaded}}));void refreshSelectedRecords();}

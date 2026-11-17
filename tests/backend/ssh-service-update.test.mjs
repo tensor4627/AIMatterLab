@@ -1,6 +1,33 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {connectionServiceFixture as fixture} from '../helpers/ssh-connection-service-fixture.mjs';
+import {updateDraftWorker} from '../../backend/main/workspace/update-draft-worker.mjs';
+import {stableSshWorkerBinding,assertTaskWorker} from '../../contracts/compute/task-worker-binding.mjs';
 const request=(extra={})=>({connectionId:'A',profileId:'profile-A',profileVersion:1,requestId:'explicit-update',mode:'update',expectedAttemptId:'attempt-A',...extra});
+
+test('explicit service update carries the same unsubmitted draft to its verified replacement runtime only',async t=>{
+ const owner={provider:'codex',threadId:'thread',taskId:'flow',projectId:'draft-flow',inputRoot:'/owned/A/projects/draft-flow/inputs',serial:1};
+ const oldId='a'.repeat(20),newId='b'.repeat(20);let task,updating=false,callback;
+ const records={read:()=>structuredClone(task),save:value=>{task=structuredClone(value);}};
+ const f=fixture(t,{current:()=>owner,prepareResources:async()=>({payload:{expected_runtime_id:updating?newId:oldId},transport:{}}),onRuntimeUpdated:async args=>{callback=args;await updateDraftWorker(records,f.worker,args);}});
+ await f.connect();origin(f);
+ task={id:'flow',provider:owner.provider,threadId:owner.threadId,workflowVersion:2,authoring:{projectId:owner.projectId,inputRoot:owner.inputRoot,authoringOnly:true,workerBinding:stableSshWorkerBinding(f.worker.identity)},artifacts:[]};
+ const original=structuredClone(task),transport=f.connections.openService,requestService=f.connections.serviceRequest;
+ const newHealth={...f.health('A'),runtimeId:newId,runtime:'/owned/A/runtimes/'+newId};
+ f.connections.openService=async(...args)=>{const value=await transport(...args);f.channels.get('A').service=newHealth;return {...value,service:newHealth};};
+ f.connections.serviceRequest=async packet=>{
+  if(packet.target==='/api/health')return {status:200,data:newHealth};
+  if(packet.target==='/api/projects')return {status:200,data:[{id:owner.projectId,authoring_only:true,authoring_task_id:'flow',policy:{input_roots:[owner.inputRoot]}}]};
+  return requestService(packet);
+ };
+ updating=true;assert.equal((await f.service.connect(request())).workflowReady,true);
+ assert.equal(task.authoring.workerBinding.runtimeId,newId);assert.doesNotThrow(()=>assertTaskWorker(task,f.worker));
+ for(const changed of [{artifacts:[{kind:'run',id:'saved-run'}]},{deployment:{prepared:{artifactId:'saved-run'}}},
+                       {authoring:{...original.authoring,inputRoot:'/somewhere/else'}},
+                       {authoring:{...original.authoring,workerBinding:{...original.authoring.workerBinding,profileId:'different'}}}]){
+  task={...structuredClone(original),...changed};const saved=structuredClone(task);
+  await updateDraftWorker(records,f.worker,{...callback,assertCurrent(){}});assert.deepEqual(task,saved);
+ }
+});
 test('confirmed disconnected maintenance update retains the original authenticated master and never acquires its raw shell',async t=>{const f=fixture(t);const old=await f.connect();f.grant();await f.service.disconnect({connectionId:'A',attemptId:old.attemptId});f.registration.markMaintenance(f.profile('A'),'worker_cache_invalid');let originCalls=0;f.connections.prepareServiceUpdate=async()=>{originCalls++;throw Error('Must not acquire original shell for disconnected maintenance');};const result=await f.connect('A','update','maintenance-update');assert.equal(result.workflowReady,true);assert.equal(result.operator,'human');assert.equal(f.bases.get('A').authentication,'verified');assert.equal(originCalls,0);assert.equal(f.preparations.at(-1).expectedRuntimeId,undefined);assert.equal(f.calls.filter(v=>v.close).length,1);assert.equal(f.calls.filter(v=>v.open).length,2);});
 test('unknown service cannot use disconnected maintenance update to bypass active-attempt protection',async t=>{const f=fixture(t);await f.connect();f.channels.get('A').status='unknown';await f.service.status();const before=f.calls.filter(v=>v.open).length;await assert.rejects(f.connect('A','update','unknown-maintenance'),/channel_in_use/);await assert.rejects(f.service.connect(request()),/context_changed/);assert.equal(f.calls.filter(v=>v.open).length,before);});
 function origin(f,{staleAfterClose=false}={}){let live=true;const close=f.connections.closeService;f.connections.prepareServiceUpdate=async value=>{assert.equal(value.connectionId,'A');assert.equal(value.serviceId,'service-A');return {sessionId:'original-shell',assertCurrent(){if(!live)throw Error('terminal_scope_denied');}};};f.connections.closeService=async value=>{const result=await close(value);if(staleAfterClose)live=false;return result;};return {revoke(){live=false;}};}

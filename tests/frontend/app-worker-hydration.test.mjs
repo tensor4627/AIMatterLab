@@ -10,6 +10,28 @@ const dependent=h=>h.calls.filter(call=>['worker.request','workspace.list','task
 const held=(h,method,data)=>{const calls=h.calls.filter(call=>call.method===method);assert.equal(calls.length,1,'deferred '+method+' must be actually invoked');if(data!==undefined)assert.deepEqual(calls[0].data,data);};
 const writes=h=>h.calls.filter(call=>['worker.connect','task.create','task.deployment.prepare','task.execute'].includes(call.method)||call.method.startsWith('agent.')||call.method==='worker.request'&&call.data.method!=='GET');
 
+test('a first SSH workflow binding rechecks the current verified worker and unlocks workspace choices',async()=>{
+ const storage=memoryStorage(),chat={id:'codex:current',provider:'codex',threadId:'current',name:'SSH draft',taskId:'flow'};
+ const task={id:'flow',provider:'codex',threadId:'current',name:'SSH draft',workflowVersion:2,workspaceChoice:'pending',parameters:{},artifacts:[],steps:[]};
+ const resource={kind:'ssh-connection',status:'selected',selectionId:'selection',connectionId:'connection',profileId:'profile',profileVersion:1,workflowReady:true,authentication:'verified'};
+ let bound=false;storage.setItem('studio.conversation',chat.id);
+ const h=appWorkerHarness({storage,override:(method,data,standard)=>{
+  if(method==='conversation.list')return [chat];if(method==='conversation.select')return chat;
+  if(method==='task.list')return [task];if(method==='compute.resource.status')return resource;
+  if(method==='worker.restore'&&data.taskId==='flow')return {taskId:'flow',status:bound?'connected':'disconnected',reason:bound?'restored':'binding_missing',checkedAt:1};
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();const panel=()=>h.find(node=>node.type==='./AgentTaskPage').props;
+  assert.equal(panel().worker,false);bound=true;
+  const authoring={inputRoot:'/worker/projects/p/inputs',projectId:'p',workerBinding:{kind:'ssh',profileId:'wrong',profileVersion:1}};
+  h.emit({method:'studio/taskUpdated',params:{task:{...task,authoring}}});await h.flush();
+  assert.equal(panel().worker,false);
+  h.emit({method:'studio/taskUpdated',params:{task:{...task,authoring:{...authoring,workerBinding:{kind:'ssh',profileId:'profile',profileVersion:1}}}}});await h.flush();
+  assert.equal(panel().worker,true);assert.deepEqual(writes(h),[]);
+ }finally{h.unmount();}
+});
+
 test('App reload observes the existing worker and derives idle queue only from successful current run reads',async()=>{
  const h=appWorkerHarness();assert(footer(h).includes('WSL 未连接'));assert(queue(h).includes('状态未知'));assert(queueTab(h).includes('运行队列?'));await h.flush();assert(footer(h).includes('WSL 已连接'));assert(queue(h).includes('队列空闲'));assert(queueTab(h).includes('运行队列0'));assert.deepEqual(h.calls.filter(call=>call.method==='worker.restore').map(call=>call.data),[{scope:'global'}]);assert(!h.calls.some(call=>call.method==='worker.status'));assert(h.calls.some(call=>call.method==='worker.request'&&call.data.target==='/api/runs'));assert.deepEqual(writes(h),[]);h.unmount();
 });

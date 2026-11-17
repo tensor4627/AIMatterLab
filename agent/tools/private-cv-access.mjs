@@ -6,7 +6,7 @@ export const SCIENTIFIC_TOOL_ACCESS=Object.freeze({
  describe_engine:'public',list_source_projects:'public',inspect_source_project:'public',inspect_pygas_catalog:'public',scientific_skill_catalog:'public',read_scientific_skill:'public',search_materials_project:'public',
  inspect_compute_resource:'discovery',compute_readiness:'discovery',discover_local_environments:'discovery',draft_local_environment:'discovery',diagnose_tools:'discovery',list_projects:'discovery',list_runs:'discovery',list_workflows:'discovery',list_environments:'discovery',
  inspect_environment_api:'environment',read_runtime_guide:'environment',probe_environment:'environment',
- read_project_input:'project',write_project_input:'project',inspect_asset:'project',suggest_parameters:'project',create_structure:'project',render_pygas_workflow:'project',present_task:'project',prepare_run:'project',create_workflow:'project',import_materials_project:'project',
+ copy_project_inputs:'project',read_project_input:'project',write_project_input:'project',inspect_asset:'project',suggest_parameters:'project',create_structure:'project',render_pygas_workflow:'project',present_task:'project',prepare_run:'project',create_workflow:'project',import_materials_project:'project',
  validate_run:'run',submit_run:'run',cancel_run:'run',reconcile_run:'run',validate_cluster_run:'run',submit_cluster_run:'run',cancel_cluster_run:'run',run_status:'run',read_log:'run',read_run_input:'run',read_artifact:'run',collect_artifacts:'run',resume_run:'run',
  list_clusters:'ssh',probe_cluster:'ssh',read_cluster_skill:'ssh',cluster_browse:'ssh',draft_cluster_setup:'ssh',prepare_cluster_run:'ssh',cluster_run_status:'ssh',cluster_read_log:'ssh',read_cluster_input:'ssh',read_cluster_result:'ssh',collect_cluster_artifacts:'ssh',
  read_pygas_workflow:'current',propose_custom_cv:'current',read_custom_cv:'current',
@@ -51,11 +51,13 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
   if(!root)throw Error('Prepare the current conversation-owned inputs first');
   if(name==='present_task'){if(args.task_id!==task.id)throw Error('DeepSeek can update only the current workflow');}
   else if((args.project_id||args.spec?.project_id)!==project)throw Error('DeepSeek can access only the current conversation project');
+  // The scoped copy accepts external sources. Common privacy checks run before this lane.
+  if(name==='copy_project_inputs')return;
   const files=pathsIn(args,root);if(['read_project_input','write_project_input'].includes(name)){if(typeof args.name!=='string'||!args.name)throw Error('A scientific input name is required');files.push(...pathsIn({path:args.name},root));}if(object(args.spec?.inputs))for(const file of Object.values(args.spec.inputs)){if(typeof file!=='string')throw Error('Scientific input files must be paths');files.push(...pathsIn({path:file},root));}
   // Owned output names can be newly generated; existing scientific inputs must already be selected.
   const outputs=new Set();if(name==='write_project_input'){const p=canonical(absolute(args.name)?args.name:path.posix.join(root,args.name||''));if(!p||p===root||!within(p,root))throw Error('Generated input must stay inside the current workspace');outputs.add(p);}
   if(name==='render_pygas_workflow'){if(args.path)outputs.add(canonical(args.path));for(const key of ['pt_path','pt2_path','workflow_path','manifest_path']){const value=args.graph?.settings?.[key];if(typeof value==='string'){const p=canonical(absolute(value)?value:path.posix.join(root,value));if(p&&within(p,root))outputs.add(p);}}}
-  for(const file of files){if(outputs.has(file))continue;if(name==='render_pygas_workflow'&&['workflow.json','build_bias.py'].includes(path.posix.basename(file))&&within(file,root))continue;if(!selected.has(file))throw Error('This input is not selected or generated in the current conversation; SSH, credentials and other project files are outside the sharing scope');}
+  for(const file of files){if(outputs.has(file))continue;if(name==='render_pygas_workflow'&&['workflow.json','build_bias.py'].includes(path.posix.basename(file))&&within(file,root))continue;if(!selected.has(file))throw Error('This input is not selected or generated in the current conversation; SSH, credentials and other project files are outside the sharing scope. For external input data use copy_project_inputs and read the returned copy');}
  }
  async function check(name,args,provider){
   const kind=SCIENTIFIC_TOOL_ACCESS[name];if(!kind||!providers.has(provider)||!object(args))throw Error('Unclassified scientific tool or invalid provider/input');
@@ -101,6 +103,16 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
    if(token.definitionOnly&&token.kind!=='public'){definitionToolResult(token.name,token.args,result,task);value=parsedResult(result);}if(!value)return;if(token.name==='list_environments'&&redactRegisteredSkillPaths(value)&&Array.isArray(result?.content)){result.content.find(c=>c.type==='text').text=JSON.stringify(value);}
    // Response identities are checked independently of caller-supplied identities.
    if(token.kind!=='public'){const access=checked.policy;if(value.project_id&&access.blocked_project_ids.includes(value.project_id)||value.id&&access.blocked_run_ids.includes(value.id))throw Error('Scientific result belongs to an unshared private workflow');for(const file of pathsIn(value,canonical(task?.authoring?.inputRoot))){if(protectedPath(file)||[...privateRoots(access),...access.blocked_paths].some(p=>within(file,p)))throw Error('Scientific result contains protected private paths');}}
+   if(task&&token.name==='copy_project_inputs'){
+    const latest=taskFor(token.provider);
+    if(identity(latest)!==token.owner||!Array.isArray(value.files))throw Error('Conversation changed before recording the workspace copies');
+    const copies=value.files,paths=new Set(copies.map(file=>file.path));
+    const retained=(latest.authoring.imports||[]).filter(file=>!paths.has(file.path));
+    const copiedSources=new Set(copies.map(file=>file.source));
+    latest.authoring={...latest.authoring,imports:[...retained,...copies].slice(-128),
+     pendingInputs:(latest.authoring.pendingInputs||[]).filter(source=>!copiedSources.has(source))};
+    records.save(latest);
+   }
    if(task&&['write_project_input','create_structure','import_materials_project'].includes(token.name)&&hash(value.sha256)){const root=canonical(task.authoring?.inputRoot),file=canonical(value.path);if(root&&file&&file!==root&&within(file,root)&&(token.args.project_id===(task.authoring?.projectId||task.projectId))){const latest=taskFor(token.provider);if(identity(latest)!==token.owner)throw Error('Conversation changed before recording generated input');latest.authoring={...latest.authoring,generatedInputs:[...new Set([...(latest.authoring.generatedInputs||[]),file])].slice(-128)};records.save(latest);}}
   },
  };

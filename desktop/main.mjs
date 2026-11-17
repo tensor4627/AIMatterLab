@@ -27,6 +27,7 @@ import {selectConversation} from "../agent/sessions/conversation-selection.mjs";
 import {createWindowsSaveAs} from "./platform/windows-save-as.mjs";
 import {createStructureWithAuthoringContext} from "../backend/main/workspace/structure-authoring.mjs";
 import {environmentApiTool,createEnvironmentApiReader} from "../backend/main/compute/environment-api-read.mjs";
+import {copyProjectInputsTool,copyProjectInputs} from '../backend/main/workspace/copy-project-inputs.mjs';
 import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from "../backend/main/compute/ssh-connection.mjs";
 import {createWorkbenchImageExporter} from "./platform/workbench-image.mjs";
 import {registerWorkspaceTaskRoutes} from '../backend/main/workspace/routes.mjs';
@@ -99,6 +100,7 @@ import { WorkerClient } from "../agent/tools/worker-client.mjs";
 import {readWorkerStatus} from '../backend/main/compute/worker-status.mjs';
 import {bindBundledWorkerRuntimeId} from "../backend/main/compute/worker-service-version.mjs";
 import {restoreTaskWorker} from '../backend/main/compute/worker-restore.mjs';
+import {updateDraftWorker} from '../backend/main/workspace/update-draft-worker.mjs';
 import {explicitWorkerReceipt,rememberExplicitWorker,workerSettingsSignature,validExplicitBinding,taskWorkerTarget,validTransportPort,taskTransportScope,taskTransportReceipt} from '../backend/main/compute/explicit-worker-binding.mjs';
 import {sameWorkerBinding,taskWorkerSource} from "../contracts/compute/task-worker-binding.mjs";
 
@@ -221,7 +223,8 @@ scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compa
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(root,'agent','tools','custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
-worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool],async(name,args,scope)=>{
+worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool,copyProjectInputsTool],async(name,args,scope)=>{
+ if(name==='copy_project_inputs')return copyProjectInputs({worker,current:value=>workflowContext.assertScope(value)},args,scope);
  if(name==='inspect_environment_api')return readEnvironmentApi(args,scope);
  if(['read_pygas_workflow','propose_custom_cv','read_custom_cv'].includes(name))workflowContext.assertScope(scope);
  if(name==='read_pygas_workflow'){const result=await readCurrentPair({records:taskRecords,worker,activeTasks:activeAuthoringTasks,readTaskPygas,privateAccess:(task,provider)=>privateAccess.assertTask(task,provider)},args,scope);workflowContext.assertScope(scope);return result;}
@@ -293,7 +296,7 @@ sharedTerminal=createSharedTerminal({worker,profiles:computeProfiles,encryption:
 // Schema 1 remains readable; selecting a real new connection archives it in a
 // versioned transition rather than discarding saved state on desktop startup.
 computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,terminal:sharedTerminal,connections:sharedTerminal.connections,current:()=>workflowContext.selectedOwner(),serviceState:connectionId=>sshService?.peek(connectionId?{connectionId}:{})});
-sshService=createSshService({worker,connections:sharedTerminal.connections,profiles:computeProfiles,resource:computeResource,registration:serviceRegistration,source:workerSource,transportSource:sshTransportSource,preferredRuntimeId:profile=>preferredSshRuntime(profile,selectedSshBinding(profile),catalog.get('ssh-runtime-preference',profile.id)),current:()=>workflowContext.current(),assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},publish:()=>{emit('studio:event',{method:'studio/sshServiceChanged',params:sshService?.peek()||{status:'disconnected'}});},remember:(identity,health)=>{catalog.put('worker-binding','last-explicit',{...identity,port:health.port,health,checkedAt:Date.now(),sourceIdentity:{runtimeId:health.runtimeId}});}});
+sshService=createSshService({worker,connections:sharedTerminal.connections,profiles:computeProfiles,resource:computeResource,registration:serviceRegistration,source:workerSource,transportSource:sshTransportSource,preferredRuntimeId:profile=>preferredSshRuntime(profile,selectedSshBinding(profile),catalog.get('ssh-runtime-preference',profile.id)),current:()=>workflowContext.current(),assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},publish:()=>{emit('studio:event',{method:'studio/sshServiceChanged',params:sshService?.peek()||{status:'disconnected'}});},onRuntimeUpdated:update=>updateDraftWorker(taskRecords,worker,update),remember:(identity,health)=>{catalog.put('worker-binding','last-explicit',{...identity,port:health.port,health,checkedAt:Date.now(),sourceIdentity:{runtimeId:health.runtimeId}});}});
 conversationTerminals=createConversationTerminals({terminal:sharedTerminal,service:sshService,registration:serviceRegistration,
  resource:computeResource,current:()=>workflowContext.current(),conversationName:(provider,threadId)=>taskRecords.conversation(provider,threadId)?.name,idleMinutes:()=>settings.terminalIdleMinutes,
  busy:scope=>agents.bridge(scope.provider)?.activeTurns?.has(scope.threadId)||agents.pendingTurnDispatches.has(agents.contextKey(scope.provider,scope.threadId)),

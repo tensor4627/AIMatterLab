@@ -185,6 +185,11 @@ def dispatch(service, method, path, data, admin=False):
     if path=="/api/engine/describe":
         from studio_worker.tools.engine_contracts import describe
         return describe(data["engine"])
+    if path == '/api/studio-workspace/copy-inputs':
+        if method != 'POST' or not admin:
+            raise PermissionError('The current desktop workflow and compute resource are required')
+        from studio_worker.workspace.input_copies import copy_inputs
+        return copy_inputs(service, data)
     if path in ("/api/authoring/context","/api/authoring/adopt"):
         if not admin:raise PermissionError("Only desktop can bind draft workspaces or adopt inputs")
         from studio_worker.workspace.authoring_workspace import ensure,adopt

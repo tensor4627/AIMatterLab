@@ -7,7 +7,7 @@ import {redact} from './contracts.mjs';
 import {STUDIO_INSTRUCTIONS} from '../context/agent-settings.mjs';
 export const DEEPSEEK_URL='https://api.deepseek.com';
 const READ_TOOLS=new Set(['project_skill_catalog','read_project_skill','write_project_skill','compute_readiness','discover_local_environments','read_project_input','read_pygas_workflow','read_custom_cv','scientific_skill_catalog','read_scientific_skill','diagnose_tools','suggest_parameters','search_materials_project','list_source_projects','inspect_source_project','inspect_pygas_catalog','inspect_environment_api','collect_cluster_artifacts','read_cluster_input','read_cluster_result','read_cluster_skill','cluster_browse','list_clusters','probe_cluster','cluster_run_status','cluster_read_log','list_workflows','list_projects','list_environments','list_runs','probe_environment','read_runtime_guide','run_status','read_log','collect_artifacts','inspect_asset','read_run_input','read_artifact']);
-const DRAFT_TOOLS=new Set(['draft_local_environment','propose_custom_cv','import_materials_project','create_structure','render_pygas_workflow','present_task','draft_cluster_setup','prepare_cluster_run','create_workflow','prepare_run','resume_run','write_project_input']);
+const DRAFT_TOOLS=new Set(['copy_project_inputs','draft_local_environment','propose_custom_cv','import_materials_project','create_structure','render_pygas_workflow','present_task','draft_cluster_setup','prepare_cluster_run','create_workflow','prepare_run','resume_run','write_project_input']);
 export function deepseekCredentials(value){
  if(typeof value.apiKey!=='string'||!/^sk-[A-Za-z0-9_-]{8,250}$/.test(value.apiKey))throw Error('Enter a valid DeepSeek API key');
  return {apiKey:value.apiKey,baseUrl:DEEPSEEK_URL};

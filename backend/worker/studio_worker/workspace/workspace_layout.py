@@ -36,6 +36,7 @@ def import_asset(service,data):
  project=service.store.get('project',data['project_id']);root=_root(service,project)
  if not project.get('studio_workspace'):raise ValueError('A registered workspace is required')
  source=Path(data['source']);mode=data.get('mode',project['studio_workspace']['asset_mode'])
+ if data['source'].startswith('~/'):source=source.expanduser()
  previous=next((a for a in service.store.list('workspace-asset') if a['project_id']==project['id'] and a['path']==str(source)),None)
  if previous:
   if source.is_file() and digest(source)==previous['sha256']:return previous

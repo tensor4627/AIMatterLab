@@ -19,7 +19,7 @@ export function normalizeSshServiceHealth(value){
  for(const key of ['tool_configuration_schema','tool_workflow_schema'])if(Number.isSafeInteger(v[key]))report[key]=v[key];return report;
 }
 const sameHealth=(a,b)=>['root','runtime','runtimeId','port'].every(k=>a[k]===b[k])&&equal(a.hostIdentity,b.hostIdentity);
-function createConnectionService({worker,connections,profiles,resource,source,transportSource,registration,preferredRuntimeId=()=>undefined,current=()=>null,assertIdle=()=>{},publish=()=>{},remember=()=>{},prepareResources=prepareSshServiceResourcesAsync}){
+function createConnectionService({worker,connections,profiles,resource,source,transportSource,registration,preferredRuntimeId=()=>undefined,current=()=>null,assertIdle=()=>{},publish=()=>{},remember=()=>{},onRuntimeUpdated,prepareResources=prepareSshServiceResourcesAsync}){
  let record=null,connecting=null,stopping=null,updating=null,updatingGrant=null,serial=0,revision=0,grant=null,grantIntent=0;
  const updates=new Map(),updateOrigins=new WeakSet();
  const authoringGrants=new WeakMap(),scope=v=>v&&typeof v.provider==='string'&&typeof v.threadId==='string'&&v.threadId?{provider:v.provider,threadId:v.threadId,...v.taskId?{taskId:v.taskId}:{}}:null;
@@ -55,10 +55,15 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
   const owned=record;if(!owned||owned.status!=='connected'||!safe().workflowReady||!selectedRecord(owned)||data.expectedAttemptId!==owned.attemptId||data.connectionId!==owned.connectionId||data.profileId!==owned.profileId||data.profileVersion!==owned.profileVersion)fail('ssh_service_context_changed');
   if(typeof connections.prepareServiceUpdate!=='function')fail('ssh_service_context_changed');if(updates.size>=64)fail('ssh_service_busy');
   const ticket=resource.capture(),owner=structuredClone(current()),previousGrant=hasCurrentGrant(scope(owner)?.provider)?grant:null,previousGrantIntent=grantIntent;
+  const previousIdentity=structuredClone(worker.identity);
   const fresh=()=>{resource.assertCurrent(ticket);if(!equal(owner,current()))fail('ssh_service_context_changed');profiles.read({id:data.profileId,version:data.profileVersion});};
   updatingGrant=previousGrant;const operation=(async()=>{fresh();const origin=await connections.prepareServiceUpdate({connectionId:owned.connectionId,serviceId:owned.serviceId});fresh();origin.assertCurrent();if(record!==owned||owned.status!=='connected')fail('ssh_service_context_changed');const mayRestoreGrant=previousGrant&&grant===previousGrant&&hasCurrentGrant(previousGrant.provider);
    const closed=await disconnect({connectionId:owned.connectionId,attemptId:owned.attemptId});if(closed.status!=='disconnected'||closed.serviceActive!==false)return closed;
    fresh();origin.assertCurrent();updateOrigins.add(origin);const result=await connect(data,{terminalSessionId:origin.sessionId,conversationChannel:origin.conversationChannel===true,updateOrigin:origin});fresh();origin.assertCurrent();
+   if(result.workflowReady&&onRuntimeUpdated&&previousIdentity?.runtimeId!==worker.identity?.runtimeId){
+    const updated=record,assertCurrent=()=>{fresh();origin.assertCurrent();if(record!==updated||worker.connection!==updated.connection)fail('ssh_service_context_changed');};
+    await onRuntimeUpdated({owner,previous:previousIdentity,assertCurrent});assertCurrent();
+   }
    if(result.workflowReady&&mayRestoreGrant&&grantIntent===previousGrantIntent){grant={...previousGrant,serviceId:record.serviceId,attemptId:record.attemptId,identity:structuredClone(worker.identity)};changed();return safe();}return safe();
   })();updates.set(data.requestId,{signature,promise:operation,owner,ticket});updating=operation;try{return await operation;}finally{if(updating===operation){updating=null;updatingGrant=null;}}
  }
