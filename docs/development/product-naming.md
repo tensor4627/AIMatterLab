@@ -6,7 +6,7 @@ The rename changes product text, new executable/archive names, provider client d
 
 Compatibility identities intentionally retained:
 
-- Electron `science.gpusampling.studio` app ID, `.config` profile location and `STUDIO_PROFILE_DIR` override. The repository resolver accepts both `aimatterlab` and legacy `gpu-sampling-studio` manifests without moving data. Existing SSH registrations, credential vault, project grants and run index remain in the same profile. Portable upgrades must retain the existing portable folder (or use the explicit profile override), as before the rename.
+- Electron retains the `science.gpusampling.studio` app ID, `.config` name and explicit `STUDIO_PROFILE_DIR` override. In 0.1.7 a Windows installer workspace owns the profile beside its executable. Selecting the previous profile’s parent reuses the SSH registrations, credential vault, project grants and run index. Source checkouts and standalone ZIPs retain their previous profile resolution.
 - `studio:*` IPC/MCP and context markers, `studio_worker` Python module, schema IDs, catalog keys, localStorage keys, runtime resource names and provider isolation identifiers. These are interfaces and persisted identities, not current product labels.
 - Existing worker health `name: gpu-sampling-studio` remains the authenticated wire identity accepted by older clients and services. Current worker health adds `product_name: AIMatterLab` for display. Renaming the authenticated identity would unnecessarily reject existing registered services.
 - Existing remote worker/SSH state and run directory defaults, and the Windows `GPU Sampling Studio/terminal-runtime` executable cache, retain their established paths. No credential, connection, job or runtime migration runs as part of branding.

@@ -1,17 +1,17 @@
-# AIMatterLab 0.1.6 · 交给本机 Agent 的安装提示
+# AIMatterLab 0.1.7 · 交给本机 Agent 的安装提示
 
 你是用户本机的安装协作者。请实际执行本文流程，安装 AIMatterLab、配置用户选定的计算环境，并运行版本化短例。适用于 Codex、Claude Code 等具备文件、终端和 Git 能力的通用 Agent。目标集群无需安装这些 Agent CLI。
 
 ## 获取可信源码
 
-- 官方仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.6 的发布引用为 `refs/tags/v0.1.6`。需要登录时由用户在本机 Git 凭据界面完成。
-- 从官方仓库安装时，以下命令适用于该标签已发布的版本。在用户选定的父目录核对标签对应的完整提交，并建立跟踪官方 main 的本地分支。已有本地 0.1.6 源码的安装方式见下文。
+- 官方仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.7 的发布引用为 `refs/tags/v0.1.7`。需要登录时由用户在本机 Git 凭据界面完成。
+- 从官方仓库安装时，以下命令适用于该标签已发布的版本。在用户选定的父目录核对标签对应的完整提交，并建立跟踪官方 main 的本地分支。已有本地 0.1.7 源码的安装方式见下文。
 
 ```powershell
-git clone --no-checkout --branch v0.1.6 https://github.com/tensor4627/AIMatterLab.git AIMatterLab-0.1.6
+git clone --no-checkout --branch v0.1.7 https://github.com/tensor4627/AIMatterLab.git AIMatterLab-0.1.7
 if ($LASTEXITCODE -ne 0) { throw '请核对仓库读取权限和新目录位置' }
-Set-Location -LiteralPath AIMatterLab-0.1.6
-$sourceCommit = git rev-parse --verify 'refs/tags/v0.1.6^{commit}'
+Set-Location -LiteralPath AIMatterLab-0.1.7
+$sourceCommit = git rev-parse --verify 'refs/tags/v0.1.7^{commit}'
 if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw '发布标签核对失败' }
 git merge-base --is-ancestor $sourceCommit refs/remotes/origin/main
 if ($LASTEXITCODE -ne 0) { throw '发布提交不在官方 main 历史中' }
@@ -20,13 +20,13 @@ if ($LASTEXITCODE -ne 0 -or (git rev-parse HEAD) -ne $sourceCommit) { throw '源
 git branch --set-upstream-to=origin/main
 if ($LASTEXITCODE -ne 0) { throw '源码更新分支配置失败' }
 $release = Get-Content -Raw -LiteralPath installation/manifest.json | ConvertFrom-Json
-if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.6' -or $release.source_ref -ne 'refs/tags/v0.1.6') { throw '安装清单与所选版本不符' }
+if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.7' -or $release.source_ref -ne 'refs/tags/v0.1.7') { throw '安装清单与所选版本不符' }
 ```
 
 记录 `$sourceCommit` 作为此次安装的版本。用户以后选择更新时，在同一目录运行 `git pull --ff-only`，再双击仓库根目录的 `Launch-AIMatterLab.cmd`。
 
 - 源码就位后，从该提交读取 `AGENTS.md`、`installation/config.example.json`、`scripts/one_prompt.py` 和 `agent/builtin-skills/studio-compute-workflow/SKILL.md`。按本次取得的安装提示继续配置。仓库和资源获取使用已核对的实际地址，版本化安装使用固定源码及其依赖锁。
-- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.1.6 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
+- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.1.7 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
 - 当前桌面平台为 Windows + WSL。缺少 WSL、重启权限、CUDA、兼容 Agent provider 或指定科学仓库时如实记录 blocked，并解释所缺条件。
 
 需要科学工具时，先读随 AIMatterLab 提供的[工具仓库清单](installation/tool-sources.json)。按用户选择从 `url` 克隆 `branch` 到新目录，再阅读其中的 `guide` 完成安装。`validated_commit` 记录历史接入验收版本，登记环境时使用实际检出的提交。
@@ -45,7 +45,7 @@ if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.6' -or $rel
 
 ## 本机 Agent CLI：先发现，缺失时由用户选择下载
 
-便携包不再内置 Kimi/Qwen。只检查用户选定的服务商：保留有效手动路径，检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`，再复用已校验的 AIMatterLab 专用安装。发现程序后核对当前 checkout 的兼容版本和真实 ACP 初始化；版本不兼容时显示实际版本，不自动升级或替换本机程序。Windows npm/pnpm 包装入口解析到已核对的真实程序，不通过 shell 执行包装脚本。
+桌面安装包不再内置 Kimi/Qwen。只检查用户选定的服务商：保留有效手动路径，检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`，再复用已校验的 AIMatterLab 专用安装。发现程序后核对当前 checkout 的兼容版本和真实 ACP 初始化；版本不兼容时显示实际版本，不自动升级或替换本机程序。Windows npm/pnpm 包装入口解析到已核对的真实程序，不通过 shell 执行包装脚本。
 
 用户在同一安装 profile 中点击对应登录或连接入口，CLI 缺失或不兼容时显示下载界面，可重新检测、选择本地程序、下载兼容版本或取消。只有用户选择下载后，才下载锁定的官方 npm 包，校验完整性，在该 profile 的独立版本目录安装；界面显示下载、校验、安装与接口检查进度。保留原有本地 CLI、有效手动配置和登录凭据，不运行包安装脚本。下载成功只代表 CLI 就绪，用户仍需完成登录，真实模型回复另行验证。集群端不安装 Agent CLI。
 
@@ -81,11 +81,11 @@ NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、�
 
 ## 第三方工具
 
-如用户选择接入第三方工具，安装后从「工具与资源 → 第三方工具包」检查并登记开发者交付目录。开发者 ZIP 和生成示例的命令见[开发者快速开始](developer/README.md)。0.1.6 提供固定 CPU `installation.check` 适配器；按所选计算项目和环境记录实际安装、测试及产物。第三方工具验收独立于上面的安装器短例。
+如用户选择接入第三方工具，安装后从「工具与资源 → 第三方工具包」检查并登记开发者交付目录。开发者 ZIP 和生成示例的命令见[开发者快速开始](developer/README.md)。0.1.7 提供固定 CPU `installation.check` 适配器；按所选计算项目和环境记录实际安装、测试及产物。第三方工具验收独立于上面的安装器短例。
 
 ## 可迁移 skill 与本机沉淀
 
-发行携带 agent/builtin-skills 下公开的计算、工作流编写及安装验收技能及其通用 references；便携包中的物理位置是 resources/studio-skills，默认显示于技能库。原有本机 skill 保持原位置，不能打包其内容。DeepSeek 等 API 服务商选择技能后，主进程仅注入用户选定的、已登记的技能内容；凭据仍留在本机。
+发行携带 agent/builtin-skills 下公开的计算、工作流编写及安装验收技能及其通用 references；桌面安装包中的物理位置是 resources/studio-skills，默认显示于技能库。原有本机 skill 保持原位置，不能打包其内容。DeepSeek 等 API 服务商选择技能后，主进程仅注入用户选定的、已登记的技能内容；凭据仍留在本机。
 
 按 docs/portable-skills.md 与公开 profile schema，将明确选定的连接 ID、环境 ID、版本及必要路径写入忽略的私有 JSON，再运行 scripts/localize-skill.mjs --profile <private-profile.json> --repo <checkout-root>，生成 .studio/local-skills/<profile-id>。将该目录登记为额外技能根目录。本机 overlay 是未验证的指导配置，不能授予项目授权或替代实际探测；后续运行证据另存忽略目录。local_skill_refs 仅保存用户选中的路径引用，脚本不读取或复制用户级 skill 全文。
 

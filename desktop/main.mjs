@@ -5,7 +5,7 @@ import {createCliRuntimeManager,migrateBundledCliPaths} from './platform/cli-run
 import {cliRuntimeRequest} from '../contracts/agent/cli-runtime.mjs';
 import {createPerformanceTimeline} from './platform/performance.mjs';
 import {clusterDownloadRequest} from '../contracts/compute/cluster-download.mjs';
-import {studioProfileRoot} from './platform/studio-profile.mjs';
+import {installedWorkspace,studioProfileRoot,workspaceSessionDirectory} from './platform/studio-profile.mjs';
 import {terminalExecutionCache} from './platform/terminal-execution-cache.mjs';
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
@@ -130,9 +130,11 @@ const improvementsVerifying=process.argv.includes('--studio-improvements-verify'
 const providerVerifying=process.argv.includes('--studio-providers-verify');
 const verifying=installationVerifying||improvementsVerifying||providerVerifying||process.argv.includes('--studio-verify');
 const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
+const workspace=!verifying&&!process.env.STUDIO_PROFILE_DIR?installedWorkspace({isPackaged:app.isPackaged,execPath:process.execPath}):null;
 if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
 else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,portableDir:process.env.PORTABLE_EXECUTABLE_DIR,execPath:process.execPath});fs.mkdirSync(profile,{recursive:true});app.setPath('userData',profile);}
+if(workspace)app.setPath('sessionData',workspaceSessionDirectory(workspace,app.getPath('userData')));
 let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
 let shuttingDown=false,desktopShutdown,agentConnectionSerial=0;
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
@@ -144,7 +146,7 @@ const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMc
 const previousSkillRoot=path.join(app.getPath('userData'),'project-skills');
 const userCacheBase=!verifying&&!process.env.STUDIO_PROFILE_DIR&&process.env.LOCALAPPDATA
  ? path.join(process.env.LOCALAPPDATA,'AIMatterLab') : app.getPath('userData');
-const defaultUserCacheDirectory=fs.existsSync(previousSkillRoot)?previousSkillRoot:path.join(userCacheBase,'user-cache','skills');
+const defaultUserCacheDirectory=workspace?path.join(workspace.cache,'skills'):fs.existsSync(previousSkillRoot)?previousSkillRoot:path.join(userCacheBase,'user-cache','skills');
 const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio',
   workerPort:8767, terminalIdleMinutes:60, codexPath:'codex', cwd: app.isPackaged ? app.getPath('documents') : root,
   sourceRoots:[],skillRoots:[],userCacheDirectory:defaultUserCacheDirectory, theme:'dark', agentProvider:'codex',agentLayout:'right' };
@@ -174,7 +176,20 @@ function openUrl(url) {
 async function initialize() {
 performanceTimeline.mark('desktop-initialize');
 catalog = new Catalog(path.join(app.getPath('userData'),'studio'));
-settings = { ...defaults, codexPath:findCodex(),kimiPath:'',qwenPath:'', ...catalog.get('settings','main') };
+const savedSettings=catalog.get('settings','main');
+settings = { ...defaults, codexPath:findCodex(),kimiPath:'',qwenPath:'', ...savedSettings };
+if(workspace){
+ const oldDefault=path.join(userCacheBase,'user-cache','skills');
+ const legacy=savedSettings?.userCacheDirectory || (fs.existsSync(previousSkillRoot)?previousSkillRoot:savedSettings?oldDefault:null);
+ if(legacy&&[oldDefault,previousSkillRoot].some(directory=>path.relative(directory,legacy)==='')&&fs.existsSync(legacy)){
+  try{settings.userCacheDirectory=new ProjectSkills({root:legacy}).prepareRoot(defaultUserCacheDirectory);}
+  catch{settings.userCacheDirectory=legacy;console.warn('Existing skill cache retained. Review the cache directory in Settings.');}
+  settings=catalog.put('settings','main',settings);
+ }else if(legacy&&path.relative(oldDefault,legacy)===''){
+  settings.userCacheDirectory=defaultUserCacheDirectory;
+  settings=catalog.put('settings','main',settings);
+ }
+}
 const normalizedSharing=normalizeScientificSharing(settings);
 if(normalizedSharing!==settings)settings=catalog.put('settings','main',normalizedSharing);
 const migratedCliSettings=migrateBundledCliPaths(settings);if(migratedCliSettings!==settings)settings=catalog.put('settings','main',migratedCliSettings);
@@ -426,7 +441,7 @@ handle('settings',data=>{
  projectSkills.root=settings.userCacheDirectory;
  return settings;
 });
-function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
+function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,workspaceSources:workspace?.sources,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
 async function bindSources(current=()=>{}){if(worker.identity?.kind==='ssh'){current();return worker.request('GET','/api/source-projects');}const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());
 handle('sources.diagnose',async()=>{const sources=scientificSources();return {sources,tools:toolInventory(sources),worker:worker.connection?await worker.request('GET','/api/tools/status'):null};});

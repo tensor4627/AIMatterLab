@@ -4,6 +4,35 @@ import path from 'node:path';
 // New branding must resolve the same checkout and .config as older builds.
 const PRODUCT_NAMES = new Set(['aimatterlab', 'gpu-sampling-studio']);
 
+// Only the Windows installer opts the adjacent executable into a managed workspace.
+export function installedWorkspace({isPackaged,execPath}) {
+  if (!isPackaged || !path.isAbsolute(execPath || '')) return null;
+  const directory = path.dirname(execPath);
+  const marker = path.join(directory, '.aimatterlab-workspace');
+  try {
+    const stat = fs.lstatSync(marker);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 || fs.readFileSync(marker,'utf8') !== 'AIMatterLab workspace v1') throw Error('Invalid AIMatterLab workspace marker');
+  } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  return {directory,sources:path.join(directory,'sources'),cache:path.join(directory,'user-cache')};
+}
+
+export function workspaceSessionDirectory(workspace, profile) {
+  // Cookies and renderer storage share Electron's sessionData directory with its disk caches.
+  // A previously used profile must retain its session, including drafts and login state.
+  const directory=path.join(workspace.cache,'chromium');
+  const marker=path.join(directory,'.aimatterlab-session');
+  const persistentEntries=['Local Storage','Session Storage','IndexedDB','Network','Cookies','Partitions','WebStorage','Service Worker','Preferences','Cache'];
+  if (!fs.existsSync(marker) && persistentEntries.some(entry=>fs.existsSync(path.join(profile,entry)))) return profile;
+  fs.mkdirSync(directory,{recursive:true});
+  const stat=fs.lstatSync(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('Invalid workspace session directory');
+  if(!fs.existsSync(marker)){
+    try{fs.writeFileSync(marker,'1\n',{flag:'wx',mode:0o600});}
+    catch(error){if(error.code!=='EEXIST')throw error;}
+  }
+  return directory;
+}
+
 /**
  * Find the repository checkout that owns this AIMatterLab build.
  * Used only in the test phase so local state can live in the checkout `.config`
@@ -32,6 +61,8 @@ export function findStudioRepository(start) {
  */
 export function resolveStudioProfileBase({appRoot, isPackaged, portableDir, execPath}) {
   if (isPackaged) {
+    const workspace = installedWorkspace({isPackaged,execPath});
+    if (workspace) return workspace.directory;
     const starts = [];
     if (typeof portableDir === 'string' && portableDir) starts.push(portableDir);
     if (typeof execPath === 'string' && execPath) starts.push(path.dirname(execPath));

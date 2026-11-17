@@ -1,9 +1,9 @@
-# AIMatterLab 0.1.6 单 prompt 安装
+# AIMatterLab 0.1.7 单 prompt 安装
 
-复制下面这一段给能使用本机终端和 Git 的 Agent。已有本地 0.1.6 检出即可安装。通过 GitHub 获取固定版本时，需能读取官方仓库及相应发布标签。
+复制下面这一段给能使用本机终端和 Git 的 Agent。已有本地 0.1.7 检出即可安装。通过 GitHub 获取固定版本时，需能读取官方仓库及相应发布标签。
 
 ```text
-请在我的 Windows 电脑安装 AIMatterLab 0.1.6。使用我提供的本地 0.1.6 检出，记录完整提交和本地改动。如果从 https://github.com/tensor4627/AIMatterLab.git 安装，请在新目录获取已发布的 refs/tags/v0.1.6，核对该标签的完整提交。从所选提交读取 INSTALL_AGENT.md 并核对安装清单的版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
+请在我的 Windows 电脑安装 AIMatterLab 0.1.7。使用我提供的本地 0.1.7 检出，记录完整提交和本地改动。如果从 https://github.com/tensor4627/AIMatterLab.git 安装，请在新目录获取已发布的 refs/tags/v0.1.7，核对该标签的完整提交。从所选提交读取 INSTALL_AGENT.md 并核对安装清单的版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
 ```
 
 完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)列出官方仓库、本版版本号和发布引用。需要登录仓库时由用户在本机 Git 凭据界面完成。
@@ -14,7 +14,7 @@ Windows 的源码启动、开发启动和安装器桌面阶段统一使用令牌
 
 ## 已有源码的日常启动
 
-已有 Git 检出可双击根目录 `Launch-AIMatterLab.cmd`，或执行 `pnpm run source`。以后关闭桌面，在同一目录 `git pull` 再启动，自动补齐受影响的依赖／构建。默认沿用仓库 `.config`；需要复用安装器生成的 profile 时用 `--profile` 指向同一目录。[源码启动说明](source-desktop.md)包含首次使用与便携包并存规则。
+已有 Git 检出可双击根目录 `Launch-AIMatterLab.cmd`，或执行 `pnpm run source`。以后关闭桌面，在同一目录 `git pull` 再启动，自动补齐受影响的依赖／构建。默认沿用仓库 `.config`；需要复用安装器生成的 profile 时用 `--profile` 指向同一目录。[源码启动说明](source-desktop.md)包含首次使用与桌面安装包并存规则。
 
 ## 安装状态机
 
@@ -44,7 +44,7 @@ flowchart LR
 
 ## Kimi / Qwen 按需安装
 
-便携包不附带这两套 CLI。AIMatterLab 优先保留有效手动路径，再检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`；找不到兼容程序时复用已验证的 AIMatterLab 专用缓存。Windows 常见 npm/pnpm 入口会解析到实际程序，不执行命令包装脚本。有效程序仍须满足当前版本及 ACP 接口要求；安装位置、程序兼容、账户登录和真实模型调用分别判断。
+桌面安装包不附带这两套 CLI。AIMatterLab 优先保留有效手动路径，再检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`；找不到兼容程序时复用已验证的 AIMatterLab 专用缓存。Windows 常见 npm/pnpm 入口会解析到实际程序，不执行命令包装脚本。有效程序仍须满足当前版本及 ACP 接口要求；安装位置、程序兼容、账户登录和真实模型调用分别判断。
 
 点击对应登录或连接入口时，缺失或不兼容会显示下载界面。用户可重新检测、选择已有程序、下载兼容版本或取消；启动应用、切换服务商、读取账户和后台恢复均不触发下载。下载使用锁定的官方 npm 地址和完整性值，无需另外安装 npm、Node 或 Python。主进程负责校验、受限解包和原子安装，不运行 postinstall，也不覆盖本机已有程序。
 
@@ -84,7 +84,7 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 desktop 使用独立 profile、真实 renderer/worker 和 provider 请求。需要认证时，由用户登录后重验。Windows 用户双击 `Launch-AIMatterLab.cmd` 进入验收过的同一 profile，另有兼容 PS1 启动文件。finalize 绑定当前配置和源码指纹，要求三个阶段均通过且选定的短例集合完整。
 
-本版桌面验收见 [0.1.6 发布说明](releases/aimatterlab-0.1.6.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
+本版桌面验收见 [0.1.7 发布说明](releases/aimatterlab-0.1.7.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
 同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 AIMatterLab 核对任务，或选择独立安装 root。
 
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。

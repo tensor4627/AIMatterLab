@@ -4,8 +4,8 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const definitions={pygas:['pyproject.toml','base/colvar.py','tools/graph_workflow.py'],pydyn:['pyproject.toml','pydyn'],gpumd:['src/main_gpumd/run.cu'],hotpp:['setup.py','hotpp'],torchnep:['pyproject.toml']};
-export function discoverSources({cwd,applicationRoot,roots=[],ids}){
- const parents=[cwd&&path.dirname(cwd),applicationRoot&&path.dirname(applicationRoot)].filter(Boolean);
+export function discoverSources({cwd,applicationRoot,workspaceSources,roots=[],ids}){
+ const parents=[workspaceSources,cwd&&path.dirname(cwd),applicationRoot&&path.dirname(applicationRoot)].filter(Boolean);
  const candidates=[...roots,...parents.flatMap(p=>Object.keys(definitions).map(n=>path.join(p,n==='gpumd'?'GPUMD':n)))];
  const seen=new Set(),result=[];
  for(const candidate of candidates){

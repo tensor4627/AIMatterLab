@@ -1,8 +1,8 @@
 # AIMatterLab
 
-AIMatterLab 0.1.6 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
+AIMatterLab 0.1.7 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
 
-[更新日志](CHANGELOG.md) · [0.1.6 发布说明](docs/releases/aimatterlab-0.1.6.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
+[更新日志](CHANGELOG.md) · [0.1.7 发布说明](docs/releases/aimatterlab-0.1.7.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
 要安装 GPU-Sampling、pyGAS、PyDyn、TorchNEP、HotPP 或 HotHam，可以在「工具与资源 → 第三方工具包 → 已验证工具的源码仓库」复制克隆命令，再按工具仓库提供的说明安装。源码和桌面版都随附这份[工具仓库清单](installation/tool-sources.json)。
 
@@ -12,9 +12,9 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-Windows 日常使用推荐 `AIMatterLab-0.1.6-win-x64.zip`。解压一次，以后双击目录中的 `AIMatterLab.exe` 即可打开工作区。单文件便携 EXE 每次启动都会解压，会先显示“正在解压 AIMatterLab”。首次使用可按需要选择以下操作。升级时的数据位置见[命名与配置兼容说明](docs/development/product-naming.md)。
+Windows 推荐双击 `AIMatterLab-0.1.7-win-x64-setup.exe`，选择一个可写的工作区。安装完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。升级时选择原工作区即可。另提供 ZIP 解压版。[项目提示词和用户技能](docs/project-skill-workspace.md)
 
-从源码安装 0.1.6 时，复制[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词给本机 Agent 即可。Agent 使用官方仓库、固定提交和本机选用的计算环境。
+从源码安装 0.1.7 时，复制[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词给本机 Agent 即可。Agent 使用官方仓库、固定提交和本机选用的计算环境。
 
 1. 普通对话可直接连接服务商；进行本地科学计算时从「连接计算资源 → 本地 WSL」选择已安装的发行版，默认 Ubuntu。
 2. 在「工具 → 算力与管理 → 计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
@@ -23,11 +23,11 @@ Windows 日常使用推荐 `AIMatterLab-0.1.6-win-x64.zip`。解压一次，以�
 5. 确认 Agent 显示「科学工具通道已连接」。这表示工具连接可用；具体环境、输入和执行配置仍须另行核对。连接异常时点击「修复工具连接」。
 6. 可先在同一对话讨论，再开启 Agent 的「任务规划模式」并发送消息。工作流工具可用时，创建草稿会打开中央流程及对应模块审阅页；若当前只有共享终端，规划仍保持开启，可先讨论方案，界面会提示连接作业服务以生成正式流程。在同一会话流程中直接改参数，使用缺项定位并点击「复核」。参数与实际文件复核后点击「配置部署」，选择计算项目和环境、核对快照，再点击「执行」，由 worker 验证与提交。日志、结果文件、曲线和轨迹在任务记录中打开。
 
-Kimi/Qwen 不再随便携包附带：优先发现本机环境变量中的兼容 CLI，缺失时在对应登录/连接入口由用户选择下载，显示真实安装进度。另提供 ZIP 解压即用版以减少重复解压等待；配置目录规则相同。
+Kimi/Qwen CLI 单独发现和安装。在需要相应 CLI 的入口，应用先检查本机环境，用户可在缺失时选择下载并查看安装进度。
 
 在「工具与资源 → 第三方工具包」登记声明、配置环境并生成执行技能。「技能库 → 工具包与执行环境」也可打开同一面板。当前内置配置器支持固定 CPU `installation.check` 参考；登记其他工具的定义不代表其安装、测试或执行适配已经通过。
 
-作业输入复制到 WSL Linux 文件系统。桌面正常退出会停止聊天连接并关闭本次交互式 SSH/本地终端，已提交的作业继续运行。重新打开后，选择保存的连接会建立新终端，不复用上次终端缓存；同一次桌面运行内可收起、切换页面和交接终端。作业服务源代码部署到持久化 Linux runtime，便携包退出不会删除运行依赖。系统/WSL 停止后只能按引擎 checkpoint 能力续算；未知进程不会自动重提。
+作业输入复制到 WSL Linux 文件系统。桌面正常退出会停止聊天连接并关闭本次交互式 SSH/本地终端，已提交的作业继续运行。重新打开后，选择保存的连接会建立新终端，不复用上次终端缓存；同一次桌面运行内可收起、切换页面和交接终端。作业服务源代码部署到持久化 Linux runtime，桌面程序退出不会删除运行依赖。系统/WSL 停止后只能按引擎 checkpoint 能力续算；未知进程不会自动重提。
 
 日常从 Git 源码启动：双击根目录 `Launch-AIMatterLab.cmd`，或运行 `pnpm run source`。首次自动准备依赖并构建；以后关闭桌面，在同一目录 `git pull` 再启动，沿用同一套 `.config` 设置与缓存。参见[首次启动、增量更新与 profile](docs/source-desktop.md)。
 
@@ -47,7 +47,7 @@ pnpm run pack
 
 打包使用 electron-builder 的 `beforeBuild` 外部依赖装配接口：先检查前端构建产物、已暂存 CLI/PTY 的版本、必需依赖和目标平台文件，以及应用模块的导入，再打包这些已装配资源。该过程不查询 pnpm 的全局 store 数据库；缺少资源时先重新构建前端或运行 `pnpm run stage:agents`。
 
-测试阶段数据目录：AIMatterLab 本地数据默认放在当前 checkout 根目录的 `.config/`（已 Git 忽略；显式 `STUDIO_PROFILE_DIR` 仍优先）。换新版便携包测试前，关闭 AIMatterLab 后删除或改名 `.config` 即可重置；在仓库外运行的便携包使用其所在目录的 `.config`。旧共享 `%APPDATA%\gpu-sampling-studio` profile 不再使用。
+安装版的 `.config/` 保存在选定工作区的根目录，包含连接、授权和作业索引。升级已有 ZIP 或旧版单文件程序时，可选择原 `.config/` 所在目录。源码开发继续使用 checkout 下的 `.config/`，显式 `STUDIO_PROFILE_DIR` 优先。
 
 前身 GPU Sampling Studio 的 [v0.18.3](docs/releases/v0.18.3.md) 修复 Codex 空会话在修改上下文设置或重启后恢复失败：能证明为空的会话自动重连并保留原流程；旧会话记录无法读取时，点击 Agent 面板的“重新建立对话连接”。原流程、参数和作业保留，未确认的消息不会自动重发。
 
@@ -125,7 +125,7 @@ Agent 的 prepare_run/resume_run 会打开 MD、Bias、增强采样或 NEP/HotPP
 
 首页按任务开始，左侧按七类工具浏览能力；任务计划支持核心 / 可选步骤和用户已有输入。设置 → 工作区布局可将 Agent 改为中间大窗、任务标签放右侧。
 
-关系图与任务分析见 [工具生态](docs/architecture-workflows.md)，功能及验证边界见 [v0.3](docs/releases/v0.3.md)，每代记录见 [CHANGELOG](CHANGELOG.md)。本地 Git 从 v0.3 开始跟踪，不自动推送；运行目录、科学输入、原始证据与便携包不入库。
+关系图与任务分析见 [工具生态](docs/architecture-workflows.md)，功能及验证边界见 [v0.3](docs/releases/v0.3.md)，每代记录见 [CHANGELOG](CHANGELOG.md)。本地 Git 从 v0.3 开始跟踪，不自动推送；运行目录、科学输入、原始证据与分发包不入库。
 
 ## GPU Sampling Studio 历史 v0.4 · 可读界面与 SSH 集群
 

@@ -7,6 +7,46 @@ import {ProjectSkills} from '../../agent/skills/project-skills.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
 const body='---\nname: local-analysis\ndescription: User project analysis instructions\n---\nUse the selected project data only.\n';
 
+test('editable project prompts link personal and project skills without crossing projects, including after relocation',t=>{
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-project-prompt-'));
+ t.after(()=>fs.rmSync(temp,{recursive:true,force:true}));
+ let selected={provider:'codex',threadId:'one',projectId:'alpha'};
+ const lease=()=>({...selected,checkCurrent:()=>true}),store=new ProjectSkills({root:path.join(temp,'skills'),current:()=>selected});
+ const catalog=()=>store.call('project_skill_catalog',{},lease());
+ const first=catalog().instructions;
+ assert.equal(first.document,'AGENTS.md');assert.ok(first.body.includes('alpha'));
+ assert.equal(path.resolve(store.root,first.relativePath),path.join(store.directory(lease()).target,'AGENTS.md'));
+ const file=path.join(store.directory(lease()).target,'AGENTS.md');
+ fs.writeFileSync(file,'# My own project instructions\n');
+ for(const scope of ['user','current']){
+  const result=store.call('write_project_skill',{scope,name:'local-analysis',body,expected_sha256:null},lease());
+  assert.equal(result.instructionsWarning,undefined);
+ }
+ const instructions=catalog().instructions.body;
+ assert.ok(instructions.startsWith('# My own project instructions'));
+ for(const relative of ['../user/local-analysis/SKILL.md','./local-analysis/SKILL.md']){
+  assert.ok(instructions.includes(']('+relative+')'));assert.equal(fs.readFileSync(path.resolve(path.dirname(file),relative),'utf8'),body);
+ }
+ assert.equal(store.call('project_skill_catalog',{scope:'user'},lease()).instructions,undefined);
+ store.root=store.prepareRoot(path.join(temp,'moved'));assert.equal(catalog().instructions.body,instructions);
+ selected={...selected,projectId:'beta'};assert.doesNotMatch(catalog().instructions.body,/My own project|local-analysis/);
+ selected={...selected,projectId:null};assert.equal(catalog().instructions,undefined);
+});
+
+test('relocation rejects conflicting project prompts and a linked document cannot receive a skill link',t=>{
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-prompt-conflict-'));t.after(()=>fs.rmSync(temp,{recursive:true,force:true}));
+ const scope={provider:'codex',projectId:'alpha',threadId:'a',checkCurrent:()=>true};
+ const store=new ProjectSkills({root:path.join(temp,'original'),current:()=>scope}),other=new ProjectSkills({root:path.join(temp,'other'),current:()=>scope});
+ const catalog=()=>store.call('project_skill_catalog',{},scope);
+ const doc=path.join(store.root,catalog().instructions.relativePath);
+ fs.writeFileSync(path.join(other.directory(scope).target,'AGENTS.md'),'Handwritten destination prompt');
+ assert.throws(()=>store.prepareRoot(other.root),/Conflicting project AGENTS/);
+ fs.unlinkSync(doc);const outside=path.join(temp,'outside');fs.writeFileSync(outside,'Outside');fs.linkSync(outside,doc);
+ assert.throws(catalog,/Unsafe/);
+ const saved=store.call('write_project_skill',{scope:'user',name:'local-analysis',body,expected_sha256:null},scope);
+ assert.equal(saved.body,body);assert.match(saved.instructionsWarning,/Skill saved/);assert.equal(fs.readFileSync(outside,'utf8'),'Outside');
+});
+
 test('personal and scoped skills survive cache relocation and conflicting files keep their original revisions',t=>{
  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-skill-cache-'));
  t.after(()=>fs.rmSync(tmp,{recursive:true,force:true}));

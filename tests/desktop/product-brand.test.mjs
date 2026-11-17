@@ -9,7 +9,7 @@ test('public package and installation identity use the canonical brand while app
  assert.equal(PRODUCT_NAME,'AIMatterLab');assert.equal(PRODUCT_SLUG,'aimatterlab');
  assert.equal(pkg.name,PRODUCT_SLUG);assert.equal(pkg.productName,PRODUCT_NAME);assert.equal(pkg.build.productName,PRODUCT_NAME);assert.equal(pkg.author,PRODUCT_NAME);
  assert.equal(pkg.build.appId,'science.gpusampling.studio');assert.equal(installation.product,PRODUCT_NAME);
- for(const target of [pkg.build.win,pkg.build.portable])assert.ok(target.artifactName.startsWith(PRODUCT_NAME+'-'));
+ for(const target of [pkg.build.win,pkg.build.nsis])assert.ok(target.artifactName.startsWith(PRODUCT_NAME+'-'));
  assert.match(read('index.html'),new RegExp('<title>'+PRODUCT_NAME+'</title>'));
  for(const file of ['desktop/main.mjs','frontend/app/App.tsx','frontend/features/settings/SettingsPage.tsx','frontend/features/conversations/ChatMessage.tsx'])assert.match(read(file),/contracts\/product\.(?:json|mjs)/);
 });

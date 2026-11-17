@@ -6,7 +6,7 @@ const MAX_BYTES = 16384;
 const NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const digest = value => createHash('sha256').update(value).digest('hex');
 const descriptions = {
- project_skill_catalog: 'List local user-authored skills. Use scope=user for the reusable personal library; scope=current (default) selects this project or unbound chat.',
+ project_skill_catalog: 'List local user-authored skills. The current project includes its AGENTS.md instructions. Use scope=user for the personal library or scope=current for this project or private chat.',
  read_project_skill: 'Read a saved local SKILL.md by name from the requested user, project or private conversation library.',
  write_project_skill: 'Save a local SKILL.md. Use scope=user for reusable guidance across chats; scope=current (default) for this project or chat. expected_sha256 must match the previous read, or be null to create.',
 };
@@ -53,6 +53,8 @@ function containsDirectory(parent, child) {
  const relative = path.relative(parent, child);
  return !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..' + path.sep);
 }
+
+const PROJECT_GUIDE = '# 项目提示词\n\n根据本项目的任务选择下方引用的技能。个人技能来自[用户技能库](../user/)，项目技能位于本目录。可在这里添加项目约定和技能链接。\n';
 
 export class ProjectSkills {
  constructor({root, current}) {
@@ -112,6 +114,32 @@ export class ProjectSkills {
   return {body, sha256: digest(body)};
  }
 
+ projectGuide(target, projectId) {
+  const file = path.join(target, 'AGENTS.md');
+  if (!fs.existsSync(file)) {
+   const initial=/^[a-zA-Z0-9_-]{1,128}$/.test(projectId)?PROJECT_GUIDE.replace('# 项目提示词','# 项目提示词 · '+projectId):PROJECT_GUIDE;
+   try { fs.writeFileSync(file, initial, {flag:'wx',mode:0o600}); }
+   catch (error) { if (error.code !== 'EEXIST') throw error; }
+  }
+  return {document:'AGENTS.md',relativePath:path.basename(target)+'/AGENTS.md',...this.read(file)};
+ }
+
+ referenceSkill(target, projectId, name, library, checkCurrent) {
+  const guide = this.projectGuide(target,projectId);
+  const link = (library === 'user' ? '../user/' : './') + name + '/SKILL.md';
+  if (guide.body.includes(']('+link+')')) return;
+  const line = '\n- [' + name + '](' + link + ')\n';
+  if (Buffer.byteLength(guide.body + line) > MAX_BYTES) throw Error('Project AGENTS.md exceeds the text limit');
+  const file = path.join(target,'AGENTS.md');
+  const fd = fs.openSync(file,fs.constants.O_APPEND | fs.constants.O_WRONLY);
+  try {
+   const opened=fs.fstatSync(fd),current=fs.lstatSync(file);
+   if (!opened.isFile() || current.isSymbolicLink() || opened.ino!==current.ino || opened.nlink!==1 || opened.size+Buffer.byteLength(line)>MAX_BYTES) throw Error('Project AGENTS.md changed');
+   checkCurrent();
+   fs.writeFileSync(fd,line);
+  } finally { fs.closeSync(fd); }
+ }
+
  catalog(target) {
   const skills = [];
   for (const name of fs.readdirSync(target).filter(name => NAME.test(name))) {
@@ -167,7 +195,7 @@ export class ProjectSkills {
   fs.unlinkSync(probe);
   if (!fs.existsSync(this.root)) return next;
   ensureDirectory(this.root);
-  const copies = [];
+  const copies = [], guides = [];
   for (const key of fs.readdirSync(this.root).filter(key => key === 'user' || /^[a-f0-9]{64}$/.test(key))) {
    const from = path.join(this.root, key);
    const to = path.join(next, key);
@@ -175,6 +203,12 @@ export class ProjectSkills {
    ensureDirectory(to);
    const existing = new Map(this.catalog(to).map(skill => [skill.name, skill.sha256]));
    const source = this.catalog(from);
+   const guideFile=path.join(from,'AGENTS.md');
+   if (key !== 'user' && fs.existsSync(guideFile)) {
+    const guide=this.read(guideFile), destination=path.join(to,'AGENTS.md');
+    if (!fs.existsSync(destination)) guides.push({guideFile,destination,sha256:guide.sha256});
+    else if (this.read(destination).sha256 !== guide.sha256) throw Error('Conflicting project AGENTS.md in the chosen cache');
+   }
    if (new Set([...existing.keys(), ...source.map(skill=>skill.name)]).size > 64) throw Error('Skill cache library limit reached');
    for (const {name, sha256} of source) {
     if (!existing.has(name)) {
@@ -191,6 +225,12 @@ export class ProjectSkills {
    if (fs.existsSync(folder)) assertDirectory(folder);
    this.write(to, folder, path.join(folder,'SKILL.md'), {name, body:entry.body, expected_sha256:null}, ()=>{});
   }
+  for(const {guideFile,destination,sha256} of guides){
+   const guide=this.read(guideFile);
+   if(guide.sha256!==sha256)throw Error('Project AGENTS.md changed while copying');
+   try{fs.writeFileSync(destination,guide.body,{flag:'wx',mode:0o600});}
+   catch(error){if(error.code!=='EEXIST'||this.read(destination).sha256!==sha256)throw error;}
+  }
   return next;
  }
 
@@ -202,17 +242,27 @@ export class ProjectSkills {
   const {target, owner} = this.directory(scope,args.scope);
   if (tool === 'project_skill_catalog') {
    const skills = this.catalog(target);
+   const instructions = owner.kind==='project'?this.projectGuide(target,owner.id):undefined;
    this.owner(scope);
-   return {scope: owner.kind, skills};
+   return {scope: owner.kind, skills,...instructions&&{instructions}};
   }
   if (typeof args.name !== 'string' || !NAME.test(args.name)) throw Error('Invalid skill name');
   const directory = path.join(target, args.name);
   if (fs.existsSync(directory)) assertDirectory(directory);
   const file = path.join(directory, 'SKILL.md');
-  if (tool === 'write_project_skill') this.write(target, directory, file, args,()=>this.owner(scope));
+  let instructionsWarning;
+  if (tool === 'write_project_skill') {
+   this.write(target, directory, file, args,()=>this.owner(scope));
+   if(scope.projectId){
+    try{
+     const {target:project,owner:projectOwner}=this.directory(scope);
+     this.referenceSkill(project,projectOwner.id,args.name,args.scope,()=>this.owner(scope));
+    }catch(error){this.owner(scope);instructionsWarning='Skill saved. Check the project AGENTS.md link: '+error.message;}
+   }
+  }
   const result = this.read(file);
   metadata(result.body, args.name);
   this.owner(scope);
-  return {name: args.name, document: 'SKILL.md', scope: owner.kind, ...result};
+  return {name: args.name, document: 'SKILL.md', scope: owner.kind, ...result,...instructionsWarning&&{instructionsWarning}};
  }
 }

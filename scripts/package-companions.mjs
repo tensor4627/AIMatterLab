@@ -11,7 +11,7 @@ const kit=prefix+'-developer-kit.zip';
 const unpacked='win-unpacked';
 const artifacts=[
   prefix+'-win-x64.zip',
-  prefix+'-win-x64-portable.exe',
+  prefix+'-win-x64-setup.exe',
   kit,
   unpacked+'/'+metadata.productName+'.exe',
   unpacked+'/resources/app.asar'
