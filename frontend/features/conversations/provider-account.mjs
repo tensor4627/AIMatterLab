@@ -3,7 +3,7 @@ export const providerNames={codex:'Codex',kimi:'Kimi',qwen:'Qwen',deepseek:'Deep
 export function providerAccountState(provider,value){
  if(!value||value.metadataUnavailable)return 'unknown';
  if(provider==='codex')return value.account?'configured':value.requiresOpenaiAuth===true?'missing':'unknown';
- if(['deepseek','qwen','compatible'].includes(provider))return value.credentialStored===true?'configured':'missing';
+ if(['deepseek','qwen','compatible'].includes(provider))return value.credentialStored===true||['qwen','compatible'].includes(provider)&&value.profiles?.some(profile=>profile.requiresApiKey===false)?'configured':'missing';
  return value.phase==='completed'||value.modelAccess==='passed'?'configured':'unknown';
 }
 

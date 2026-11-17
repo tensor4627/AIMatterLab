@@ -64,7 +64,7 @@ test('corrupt catalog rows are isolated and their original bytes remain recovera
 });
 test('transcript sanitation migrates history while preserving credentials and run metadata',t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-sanitize-')),catalog=new Catalog(root);t.after(()=>{catalog.db.close();fs.rmSync(root,{recursive:true,force:true});});
- for(const kind of ['compatible-history','compatible-codex-thread','deepseek-dsh-history','thread','agent-thread','conversation-context-history']){
+ for(const kind of ['compatible-history','compatible-codex-thread','deepseek-dsh-history','api-dsh-history','thread','agent-thread','conversation-context-history']){
   catalog.db.prepare('INSERT INTO records VALUES(?,?,?)').run(kind,'id',JSON.stringify({id:'id',turns:[{text:'Bearer private-token sk-sensitive-value'}]}));
   assert(!JSON.stringify(catalog.get(kind,'id')).includes('private-token'));assert(!catalog.db.prepare('SELECT data FROM records WHERE kind=?').get(kind).data.includes('sk-sensitive-value'));
  }

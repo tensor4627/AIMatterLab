@@ -49,6 +49,38 @@ const kernel=[
  ['agent','dsh-agent'],['llm-retry','dsh-llm-retry'],['agent-loop','dsh-agent-loop',{agents:[]}],
  ['session-checkpoint-policy','dsh-session-checkpoint-policy']
 ];
+export function prepareApiDshProfile(root,runtime,worker,instructions,selection){
+ if(typeof selection?.profile?.id!=='string'||!/^[a-z][a-z0-9-]{0,63}$/.test(selection.profile.id)||!['qwen','compatible'].includes(selection.provider))throw Error('Invalid API runtime provider identity');
+ const id=selection.profile.id,route=selection.profile.catalogProvider||'studio-api-'+id,home=path.join(path.resolve(root),'model-providers',id),profile=path.join(home,'profiles','studio'),cwd=path.join(home,'workspace'),sessions=path.join(home,'sessions');
+ // The pinned pi-ai transport requires a nonempty key even for unauthenticated local servers.
+ // This public marker is never stored as a credential and is restricted to explicit loopback routes.
+ const local=['localhost','127.0.0.1','[::1]'].includes(new URL(selection.profile.baseUrl).hostname),apiKey=selection.profile.apiKey||(local?'aimatterlab-local-no-auth':'');
+ if(!apiKey)throw Error('请填写此服务商的 API Key');
+ for(const directory of [profile,cwd,sessions])ownedDirectory(directory);
+ const scoped=scopedApiDshWorker(worker,selection.provider);
+ const models=selection.profile.models.map(({thinkingFormat,supportsReasoningEffort,supportsDeveloperRole,requiresReasoningContentOnAssistantMessages,requiresThinkingAsText,...model})=>{
+  const compat=Object.fromEntries(Object.entries({thinkingFormat,supportsReasoningEffort,supportsDeveloperRole,requiresReasoningContentOnAssistantMessages,requiresThinkingAsText}).filter(([,value])=>value!==undefined));
+  return {...model,...Object.keys(compat).length?{compat}:{}};
+ });
+ const adapterProfile={displayName:selection.profile.name,api:selection.profile.api,baseURL:selection.profile.api==='anthropic-messages'?selection.profile.baseUrl.replace(/\/v1$/,''):selection.profile.baseUrl,apiKeyEnv:'STUDIO_MODEL_API_KEY',models,retryPolicy:{mode:'normal',maxRetries:0},defaultContextWindow:32768,defaultMaxTokens:8192};
+ const entries=kernel.filter(([id])=>!['llm-deepseek','deepseek-llm-api-extensions','session-log-deepseek'].includes(id)).map(([id,name,config])=>({id,name:name.startsWith('@')?name:'@deepseek-ai/'+name,...config?{config}:{}}));
+ const compaction=entries.find(v=>v.id==='compaction-basic');if(compaction)compaction.config={headroomTokens:2048,maxTokens:4096};
+ const adapterPath=path.resolve(path.dirname(runtime.args[1]),'../../../@deepseek-ai/dsh-llm-pi-ai/lib/index.js');
+ if(selection.profile.authMode==='deepseek-account'){
+  if(selection.profile.baseUrl!=='https://api.deepseek.com/anthropic'||selection.profile.api!=='anthropic-messages'||selection.provider!=='compatible')throw Error('Invalid DeepSeek account profile');
+  entries.push({id:'models',name:path.join(appRoot,'agent/providers/dsh-account-adapter.mjs'),inject:['llm'],config:{route,displayName:selection.profile.name,baseUrl:selection.profile.baseUrl,models:selection.profile.models,module:path.resolve(path.dirname(runtime.args[1]),'../../../@deepseek-ai/dsh-llm-deepseek/lib/index.js')}});
+ }else entries.push({id:'models',name:adapterPath,config:{providers:{[route]:adapterProfile}}});
+ entries.push({id:'sessions',name:'@deepseek-ai/dsh-session-persistence-jsonl',config:{root:sessions,compression:'none'}});
+ entries.push({id:'studio-policy',name:runtime.policyPath||sourcePolicyPath,inject:['tools','systemPrompt','appReady','llm'],config:{mcpModule:runtime.mcpModule,toolsModule:runtime.toolsModule,workerUrl:scoped?.url||null,workflow:!!scoped?.context.taskId,taskId:scoped?.context.taskId||null,projectId:scoped?.context.projectId||null,modelProvider:route,models:selection.profile.models.map(v=>v.id),instructions}});
+ fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]\n');fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'studio-model-profile',private:true,type:'module',dsh:{profile:{bundles:[]}}}));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),JSON.stringify([{insert:entries}],null,2));
+ const env={...agentEnvironment(null),DSH_HOME:home,STUDIO_MODEL_API_KEY:apiKey,GSS_MCP_TOKEN:scoped?.token||'',ELECTRON_RUN_AS_NODE:'1'};
+ return {home,cwd,args:['--profile','studio'],env,route};
+}
+export function scopedApiDshWorker(worker,provider){
+ if(!worker)return null;let url;try{url=new URL(worker.url);}catch{throw Error('A provider-scoped API worker is required');}
+ if(!['qwen','compatible'].includes(provider)||url.protocol!=='http:'||url.hostname!=='127.0.0.1'||!url.port||url.pathname!=='/providers/'+provider||url.search||url.hash||url.username||url.password||worker.url!==url.origin+url.pathname||!worker.tokens?.mcp)throw Error('A provider-scoped API worker is required');
+ return {url:worker.url+'/mcp',context:worker.context||{},token:worker.tokens.mcp};
+}
 function ownedDirectory(directory){
  if(!path.isAbsolute(directory))throw Error('A main-owned DSH directory is required');
  let current=path.parse(directory).root;

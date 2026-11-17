@@ -28,7 +28,7 @@ function versionFailure(cause){
 }
 function compatibilityFailure(cause,stage,version){
   if(cause?.code==='STUDIO_CODEX_PROTOCOL_MISMATCH')return cause;
-  const gates={version:'读取 CLI 版本',isolation_prepare:'检查必需隔离能力和模型能力上限',spawn:'启动 app-server 传输',initialize:'核对 initialize 协议响应',effective_isolation:'回读有效隔离配置、技能与 MCP',lifecycle:'核对当前连接生命周期'};
+  const gates={version:'读取 CLI 版本',isolation_prepare:'检查必需隔离能力和模型能力上限',spawn:'启动 app-server 传输',initialize:'核对 initialize 协议响应',account:'在独立配置中复用登录',effective_isolation:'回读有效隔离配置、技能与 MCP',lifecycle:'核对当前连接生命周期'};
   const failures={'Installed Codex lacks required isolation controls':'required_isolation_controls_missing','Effective Codex isolation controls do not match':'effective_isolation_mismatch','Native skills remain enabled':'native_skills_enabled','Unscoped MCP capabilities are exposed':'unscoped_mcp_capabilities','Effective model capability snapshot differs':'model_ceiling_mismatch','Invalid initialize response':'invalid_initialize_response'};
   const preparation=isolationPreparationDiagnostic(cause);
   const [failure,hint]=stage==='version'?versionFailure(cause):preparation?[preparation.failure,preparation.hint]:[failures[cause?.message]||'gate_failed','请检查该 CLI 是否支持所需协议和隔离控制，再明确重连'];
@@ -40,16 +40,16 @@ function compatibilityFailure(cause,stage,version){
 
 export class CodexBridge extends EventEmitter {
   constructor({strictIsolation=false,isolationRoot,isolationDependencies={},launchDependencies={},host=codexRuntime}={}) { super();Object.assign(this,{strictIsolation,isolationRoot,isolationDependencies,launchDependencies,host});this.lifecycle=0;this.isolationReady=false; this.pending = new Map(); this.requests = new Map(); this.next = 1; this.activeTurns=new Set();this.threadModels=new Map(); }
-  async start(executable,worker,config={}) {
-    const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config])).digest('hex');
-    if(this.starting){await this.starting;return this.start(executable,worker,config);}
+  async start(executable,worker,config={},options={}) {
+    const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config,...options.authenticationOnly?['authentication-only']:[]])).digest('hex');
+    if(this.starting){await this.starting;return this.start(executable,worker,config,options);}
     if(this.process&&this.contextKey===key)return this.info;
     if(this.activeTurns.size)throw Error('Stop the current reply before reconnecting scientific tools');
     if(this.process)this.close();this.contextKey=key;
-    this.starting=this.launch(executable,worker,config).finally(()=>{this.starting=null;});
+    this.starting=this.launch(executable,worker,config,options).finally(()=>{this.starting=null;});
     return this.starting;
   }
-  async launch(executable, worker, config = {}) {
+  async launch(executable, worker, config = {}, {authenticationOnly=false}={}) {
     this.transcriptSecrets=[worker?.tokens?.mcp];this.transcriptStreams??=new Map();
     const generation=this.lifecycle;let child,version,stage='version';this.isolationReady=false;this.info=null;this.compatibility=null;this.isolationSummary=null;this.isolation=null;
     try{
@@ -59,7 +59,9 @@ export class CodexBridge extends EventEmitter {
     const candidate=verifyProtocolVersion(stdout.trim().split(' ').at(-1),{strictIsolation:this.strictIsolation});version=candidate.installedVersion;
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
     if(candidate.versionWarning)this.emit('event',{method:'studio/codexVersionWarning',params:candidate});
-    stage='isolation_prepare';const isolation=this.strictIsolation?await this.host.prepareIsolation(executable,this.isolationRoot,config,worker,this.isolationDependencies):null;
+    if(authenticationOnly&&(!this.strictIsolation||worker))throw Error('Authentication requires an isolated connection without scientific tools');
+    stage='isolation_prepare';const isolation=this.strictIsolation?await this.host.prepareIsolation(executable,this.isolationRoot,config,worker,{...this.isolationDependencies,...authenticationOnly?{authenticationOnly:true}:{}}):null;
+    if(authenticationOnly&&isolation?.authenticationOnly!==true)throw Error('Authentication isolation was not established');
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
     this.isolation=isolation;
     // Validate AIMatterLab's owned overlay and effective capabilities below. External
@@ -104,14 +106,16 @@ export class CodexBridge extends EventEmitter {
     this.framer = framer;
     this.process.stdout.on('data', chunk => {if(this.process===child)framer.feed(chunk);});
       stage='initialize';const info = await this.rawRequest('initialize', {
-        clientInfo: { name: 'aimatterlab', title: 'AIMatterLab', version: this.host.version }
+        clientInfo: { name: 'aimatterlab', title: 'AIMatterLab', version: this.host.version },
+        ...this.host.initializeAuth?{capabilities:{experimentalApi:true}}:{}
       });
       if(generation!==this.lifecycle||this.process!==child){stage='lifecycle';throw Error('Codex context launch was cancelled');}
       if(isolation)checkedInitialize(info);
       this.send({ method: 'initialized', params: {} });
+      if(this.host.initializeAuth&&!authenticationOnly){stage='account';await this.host.initializeAuth((...args)=>this.rawRequest(...args),secret=>this.rememberSecret(secret));if(generation!==this.lifecycle||this.process!==child)throw Error('Codex context launch was cancelled');}
       let summary;if(isolation){stage='effective_isolation';summary=await this.host.verifyIsolation((...args)=>this.rawRequest(...args),isolation);}
       if(generation!==this.lifecycle||this.process!==child){stage='lifecycle';throw Error('Codex context launch was cancelled');}
-      if(isolation){this.recordIsolationSummary(summary);this.isolationReady=true;this.compatibility={...candidate,status:'capabilities_verified',scope:'Startup isolation configuration, skills, MCP inventory and model capability ceiling only; no thread, model reply or scientific workflow verified.'};}
+      if(isolation){this.recordIsolationSummary(summary);this.isolationReady=true;this.compatibility={...candidate,status:'capabilities_verified',scope:authenticationOnly?'Account operations and public model metadata only; conversations, model calls and scientific tools are unavailable.':'Startup isolation configuration, skills, MCP inventory and model capability ceiling only; no thread, model reply or scientific workflow verified.'};}
       else this.compatibility={...candidate,status:'version_observed',scope:'Version metadata only; isolation capabilities have not been verified.'};
       this.info={...info,studioCompatibility:this.compatibility,...isolation?{studioIsolation:summary}:{}};
       return this.info;
@@ -122,12 +126,14 @@ export class CodexBridge extends EventEmitter {
     if(this.info)this.info={...this.info,studioIsolation:summary};
     this.emit('event',{method:'studio/toolsWarning',params:{warnings:summary?.warnings||[],message:'工具清单待核对，可继续讨论并由 Agent 使用已授权终端协助配置。'}});
   }
+  rememberSecret(secret){if(typeof secret==='string'&&secret&&!this.transcriptSecrets.includes(secret))this.transcriptSecrets.push(secret);}
   send(value) {
     if (!this.process || this.process.stdin.destroyed) throw new Error('Connect Codex first');
     this.process.stdin.write(JSON.stringify(value) + '\n');
   }
   request(method,params={},timeout=120000,{assertCurrent=()=>{}}={}){
     assertCurrent();
+    if(['account/login/start','account/logout'].includes(method))this.host.accountOperation?.(method);
     if(!this.strictIsolation)return this.rawRequest(method,params,timeout);
     return this.isolatedRequest(method,params,timeout,assertCurrent);
   }
@@ -160,6 +166,9 @@ export class CodexBridge extends EventEmitter {
   }
   receive(message) {
     if(!validEnvelope(message)){this.close({reason:'malformed_protocol',message:'Invalid Codex RPC envelope; reconnect explicitly. The conversation is preserved.'});return;}
+    if(message.method==='account/chatgptAuthTokens/refresh'&&message.id!==undefined&&this.host.refreshAuth){
+      try{const result=this.host.refreshAuth(message.params,secret=>this.rememberSecret(secret));this.send({id:message.id,result});}catch{this.send({id:message.id,error:{code:-32000,message:'Native Codex login needs refresh; reconnect explicitly. No message was replayed.'}});}return;
+    }
     if(this.strictIsolation&&message.method&&message.id!==undefined&&/^item\/(commandExecution|fileChange|permissions)/.test(message.method)){
       this.send({id:message.id,error:{code:-32601,message:'Native privileged actions are unavailable in AIMatterLab isolation'}});return;
     }

@@ -23,6 +23,16 @@ test('runtime provisioning failure cannot launch an incomplete desktop',async t=
 import {spawn,spawnSync} from 'node:child_process';
 test('Windows double-click wrapper sets checkout cwd and preserves a quoted profile argument', {skip:process.platform!=='win32'},t=>{const root=fixture(t);fs.copyFileSync(new URL('../../Launch-AIMatterLab.cmd',import.meta.url),path.join(root,'Launch-AIMatterLab.cmd'));touch(root,'scripts/source-start.mjs',"import fs from 'node:fs';fs.writeFileSync('receipt.json',JSON.stringify({cwd:process.cwd(),args:process.argv.slice(2)}));");const result=spawnSync(path.join(process.env.SystemRoot||'C:\\Windows','System32/cmd.exe'),['/d','/s','/c','Launch-AIMatterLab.cmd --profile "profile & safe"'],{cwd:root,encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true,timeout:10000});assert.equal(result.status,0,result.stderr);const receipt=JSON.parse(fs.readFileSync(path.join(root,'receipt.json'),'utf8'));assert.equal(receipt.cwd,root);assert.deepEqual(receipt.args,['--profile','profile & safe']);});
 
+test('Windows double-click wrapper reports ordinary and native crash exits instead of disappearing', {skip:process.platform!=='win32'},t=>{
+ const root=fixture(t);fs.copyFileSync(new URL('../../Launch-AIMatterLab.cmd',import.meta.url),path.join(root,'Launch-AIMatterLab.cmd'));
+ for(const code of [1,7,0x80000003]){
+  touch(root,'scripts/source-start.mjs',`process.exitCode=${code};`);
+  const result=spawnSync(path.join(process.env.SystemRoot||'C:\\Windows','System32/cmd.exe'),['/d','/s','/c','Launch-AIMatterLab.cmd'],{cwd:root,input:'\r\n',encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true,timeout:10000});
+  assert.equal(result.error,undefined);assert.equal(result.status,code,result.stdout+'\n'+result.stderr);
+  assert.match(result.stdout,/AIMatterLab could not start/);assert.ok(result.stdout.includes(String(code|0)),result.stdout);
+ }
+});
+
 test('version and descriptive metadata updates rebuild source without reinstalling dependencies',async t=>{
  const root=fixture(t),h=harness(root);await stop(await startSource(h.options));
  const manifest=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));

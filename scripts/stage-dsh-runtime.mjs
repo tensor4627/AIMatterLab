@@ -5,8 +5,11 @@ import {createHash,randomUUID} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 
-const require=createRequire(import.meta.url),semver=createRequire(require.resolve('app-builder-lib/package.json'))('semver');
-const ROOTS=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client'];
+// Resolve transitive build tools through their declaring packages, including pnpm's isolated layout.
+const require=createRequire(import.meta.url);
+const electronBuilderRequire=createRequire(require.resolve('electron-builder/package.json'));
+const semver=createRequire(electronBuilderRequire.resolve('app-builder-lib/package.json'))('semver');
+const ROOTS=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client','@deepseek-ai/dsh-llm-pi-ai'];
 const ENTRY='node_modules/@deepseek-ai/dsh/lib/bin.js';
 // Dependencies used by the official CLI to boot the AIMatterLab profile.
 const STUDIO_PROFILE='studio-sdk-v2';

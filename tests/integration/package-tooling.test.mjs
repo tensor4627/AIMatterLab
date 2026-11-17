@@ -5,7 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import beforeBuild,{validatePackageRuntime,packageRuntimeCLI} from '../../scripts/package-runtime.mjs';
+import beforeBuild,{validatePackageRuntime,packageRuntimeCLI,validateApplicationImports} from '../../scripts/package-runtime.mjs';
+
+test('only the known DSH account adapter can import its main-owned module expression',t=>{
+ const f=fixture(t),source="import {pathToFileURL} from 'node:url';export async function apply(ctx,config){return import(pathToFileURL(config.module).href);}";
+ f.write('agent/providers/dsh-account-adapter.mjs',source);assert(validateApplicationImports(f.root)>0);
+ f.write('agent/providers/unknown-adapter.mjs',source);assert.throws(()=>validateApplicationImports(f.root),/Cannot audit dynamic package import/);
+});
 
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-package-runtime-'));

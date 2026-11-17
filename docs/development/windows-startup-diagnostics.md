@@ -8,6 +8,22 @@ Electron 44.5.1 在创建界面前，以当前进程令牌派生一个低完整�
 
 [Electron 的对应源码](https://github.com/electron/electron/blob/v44.5.1/shell/browser/win/install_dir_access.cc)实际检查访问结果，没有枚举文件 ACL 中的 AppContainer SID。其 fatal 文案关于特定 ACL 条目的说明是固定推断，不能直接当作本机权限事实。[Windows CreateRestrictedToken 文档](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)说明：父令牌已经受限时，新 restricting SID 集合取交集。
 
+## 低完整性可执行文件：另一种已确认原因（2026-11-16）
+
+本次本地源码安装出现相同的 `0x80000003`，但精确匹配 Electron 44.5.1 的符号将调用栈定位到 `sandbox::policy::Sandbox::Initialize` 中创建隔离窗口站的检查，并非上节的 `icudtl.dat` 读取检查。独立 `--version` 探针的 `CreateAltWindowStation` 返回 `SBOX_ERROR_CANNOT_CREATE_WINSTATION`（12），Windows 错误为 `ERROR_ACCESS_DENIED`（5）。
+
+研究目录的低完整性标记被 Electron EXE 继承。实际读取子进程令牌确认：父终端为高完整性，Electron 主进程却是低完整性 `S-1-16-4096`，且 `IsTokenRestricted` 为 false，因此现有启动前检查不会拦截。按 [Windows 完整性控制规则](https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control)，新进程取启动者和 EXE 文件完整性等级的较低者；从正常桌面双击也不能消除 EXE 自身的低完整性标记。[Chromium 对应检查](https://github.com/chromium/chromium/blob/152.0.7977.130/sandbox/policy/sandbox.cc#L49-L74)在应用 JS 执行前完成。
+
+本机对照使用缓存的同版本官方 Electron 压缩包，在当前用户的正常程序目录重新解压运行文件，不复制旧安全描述符；两份 EXE 的 SHA-256 完全相同。新位置的 `--version` 退出 0，经原源码启动器打开的实际窗口可响应，renderer 保持 `--enable-sandbox`。本地将依赖的 `dist` 目录接到该位置，旧目录保留为备份；未修改研究目录权限、所有者、系统策略或 profile。这个目录连接是本机安装修复，不是随 Git 分发的自动修复；如果依赖重装替换了连接，需重新检查运行文件的实际存放位置与完整性等级。[本轮证据与范围](../releases/aimatterlab-0.1.1.md#2026-11-16-本地源码安装修复验证)。
+
+另修复 [CMD 源码入口](../../Launch-AIMatterLab.cmd) 的退出判断：`if errorlevel 1` 只覆盖大于等于 1 的值，而 `0x80000003` 在 CMD 中是负数。入口现在保存原退出码，按“不等于 0”判断，打印数值并暂停；1、7 和 `0x80000003` 的真实 CMD 子进程回归均通过。
+
+## 源码运行文件别名导致本地终端拒绝启动（2026-11-16）
+
+Electron 依赖的 `dist` 经目录连接指向实际程序目录时，桌面可正常启动，但 `process.execPath` 仍保留连接路径。终端运行时会逐级拒绝源路径中的链接，因而返回 `terminal_runtime_invalid_source`，界面将其显示为“终端运行文件暂不可用”。直接从实际 EXE 路径启动时，同版本资源准备通过，PTY 所需文件均齐全。
+
+[源码启动器](../../scripts/desktop-launch.mjs)现在在正常上下文预检后解析 Electron 的真实路径，再启动桌面；不放宽终端运行时的防链接校验，不改 ACL 或进程令牌。源码版用户更新后关闭并用原入口重新打开即可，不需要自行修改目录连接或重新配置 SSH。若已发布版本存在相同问题，需要由开发者更新入口；不能把反复重启旧版当作修复。
+
 ## 统一启动入口
 
 - 源码启动使用 `node scripts/start.mjs`，也就是 `npm start`；开发入口在启动 Vite 前运行同一检查。

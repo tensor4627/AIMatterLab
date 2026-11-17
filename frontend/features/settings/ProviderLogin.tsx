@@ -8,7 +8,9 @@ import LoadingFeedback from '../../ui/LoadingFeedback';
 import CliRuntimeDialog from './CliRuntimeDialog';
 import {cliRuntime} from '../../api/cli-runtime';
 import type {CliReadiness} from '../../../contracts/dto/cli-runtime';
-export default function ProviderLogin({provider,onClose,onConfigured,onError,embedded=false,disabled=false}:{projectId?:string;embedded?:boolean;disabled?:boolean;provider:AgentProvider;onClose:()=>void;onConfigured:()=>void;onError:(e:unknown)=>void}){
+import ModelProviders from './ModelProviders';
+export default function ProviderLogin(props:Parameters<typeof LegacyProviderLogin>[0]){if(props.provider==='qwen'||props.provider==='compatible')return props.embedded?<ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured}/>:<Modal title={t('模型与 API')} onClose={props.onClose}><ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured}/></Modal>;return <LegacyProviderLogin {...props}/>;}
+function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=false,disabled=false}:{projectId?:string;embedded?:boolean;disabled?:boolean;provider:AgentProvider;onClose:()=>void;onConfigured:()=>void;onError:(e:unknown)=>void}){
  const [confirmRemove,setConfirmRemove]=useState(false),[baseUrl,setBaseUrl]=useState(''),[apiLabel,setApiLabel]=useState('');
  const [sharePublicGuides,setSharePublicGuides]=useState(false),[sharingTouched,setSharingTouched]=useState(false);
  const [reasoningMode,setReasoningMode]=useState('omit'),[reasoningEffort,setReasoningEffort]=useState('');
@@ -30,7 +32,7 @@ export default function ProviderLogin({provider,onClose,onConfigured,onError,emb
  useEffect(()=>{
   const epoch=++lifecycle.current;accountFlight.current=null;setAccountLoaded(false);setAccountError(false);setRuntimePrompt(null);void refreshAccount();
   const off=window.studio?.onEvent(event=>{
-   if(epoch===lifecycle.current&&event.method==='studio/login'&&event.provider===provider){setStatus(event.params);setBusy(['starting','authorizing'].includes(event.params.phase));if(event.params.phase==='completed'){void refreshAccount();onConfigured();}}
+    if(epoch===lifecycle.current&&event.method==='studio/login'&&event.provider===provider){setStatus(event.params);setBusy(['starting','authorizing'].includes(event.params.phase));if(event.params.phase==='completed'){void refreshAccount().then(()=>{if(epoch===lifecycle.current)onConfigured();});}}
   });
   return()=>{off?.();lifecycle.current++;accountSequence.current++;accountFlight.current=null;operation.current=false;};
  },[provider]);
@@ -89,7 +91,7 @@ export default function ProviderLogin({provider,onClose,onConfigured,onError,emb
     {status.credentialStored&&<div className="notice">{t('已有加密凭据，可关闭此窗口直接连接。')}</div>}
    </>}
   {['deepseek','compatible'].includes(provider)&&status.credentialStored&&<div><button className="button" data-testid="test-api-connection" disabled={busy||testing||dirty||!accountLoaded} onClick={()=>void testConnection()}>{t(testing?'测试连接中…':'验证 API 连接')}</button>{dirty&&<p role="status">{t('配置有未保存修改；保存后验证当前配置。')}</p>}{testResult&&<p role="status">{testResult}</p>}</div>}
-  {((provider==='codex'&&status.account)||(['qwen','deepseek','compatible'].includes(provider)&&status.credentialStored))&&<div className="account-remove"><button className="button" disabled={busy||testing} onClick={()=>setConfirmRemove(true)}>{t(provider==='codex'?'退出 Codex 登录':'移除 API 凭据')}</button>{confirmRemove&&<div className="notice" role="alert"><p>{t(provider==='codex'?'退出将影响共享此登录的本机 Codex；对话和计算记录保留。':'移除本机保存的密钥；对话和计算记录保留，不会撤销平台上的密钥。')}</p><button className="button" onClick={()=>setConfirmRemove(false)}>{t('取消')}</button><button className="button" disabled={busy||testing} onClick={()=>void remove()}>{t('确认移除')}</button></div>}</div>}
+  {((provider==='codex'&&status.account)||(['qwen','deepseek','compatible'].includes(provider)&&status.credentialStored))&&<div className="account-remove"><button className="button" disabled={busy||testing} onClick={()=>setConfirmRemove(true)}>{t(provider==='codex'?'退出 Codex 登录':'移除 API 凭据')}</button>{confirmRemove&&<div className="notice" role="alert"><p>{t(provider==='codex'?'退出 AIMatterLab 的 Codex 登录；本机 Codex 的登录、对话和计算记录保留。':'移除本机保存的密钥；对话和计算记录保留，不会撤销平台上的密钥。')}</p><button className="button" onClick={()=>setConfirmRemove(false)}>{t('取消')}</button><button className="button" disabled={busy||testing} onClick={()=>void remove()}>{t('确认移除')}</button></div>}</div>}
   </div>
  </fieldset>;
  return <>{embedded?content:<Modal title={t('服务商登录')+' · '+(provider==='codex'?'Codex':provider==='kimi'?'Kimi':provider==='deepseek'?'DeepSeek API':provider==='compatible'?t('自定义 API'):'Qwen')} onClose={onClose}>{content}</Modal>}{runtimePrompt&&(provider==='kimi'||provider==='qwen')&&<CliRuntimeDialog provider={provider} readiness={runtimePrompt} onClose={()=>setRuntimePrompt(null)} onReady={()=>{setRuntimePrompt(null);setTestResult(t('CLI 已就绪，请继续登录。'));}}/>}</>;

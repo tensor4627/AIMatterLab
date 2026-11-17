@@ -7,7 +7,9 @@ import {validateCliRuntimeLock} from '../backend/main/compute/cli-runtime.mjs';
 import {validateStagedDshRuntime} from './stage-dsh-runtime.mjs';
 
 const buildRequire=createRequire(import.meta.url);
-const builderRequire=createRequire(buildRequire.resolve('app-builder-lib/package.json'));
+// app-builder-lib belongs to electron-builder, not the application root.
+const electronBuilderRequire=createRequire(buildRequire.resolve('electron-builder/package.json'));
+const builderRequire=createRequire(electronBuilderRequire.resolve('app-builder-lib/package.json'));
 const semver=builderRequire('semver');
 const RUNTIME_ENTRIES=new Map([
  ['@lydell/node-pty','index.js'],
@@ -82,6 +84,8 @@ export function validateApplicationImports(appDir){
     // The isolated official DSH child loads these two positive-listed module
     // URLs from the separately staged, integrity-audited DSH dependency tree.
     if(name==='agent/providers/dsh-policy.mjs'&&['config.mcpModule','config.toolsModule'].includes(node.getText(tree)))return;
+    // The account adapter loads only the main-owned, pinned DSH module from that same audited tree.
+    if(name==='agent/providers/dsh-account-adapter.mjs'&&node.getText(tree)==='pathToFileURL(config.module).href')return;
     throw Error('Cannot audit dynamic package import in '+name);
    }
    function inspect(node){

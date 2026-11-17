@@ -42,5 +42,5 @@ export async function apply(ctx,config){
  ctx.on('agent/assistant-stream',({agent,frame})=>{
   if(frame.type==='chunk'&&frame.chunk?.type==='text-delta')send('studio/dshText',{sessionId:String(agent.session.id),attemptId:frame.attemptId,text:frame.chunk.text});
  });
- ctx.effect(()=>ctx.appReady.onReady(async()=>{try{const tools=inventory(),models=await Promise.all((config.models||[]).map(id=>ctx.llm.resolveModelInfo('deepseek-official',id)));send('studio/dshIsolation',{status:'verified',tools,nativeTools:0,models});}catch{send('studio/dshIsolation',{status:'failed'});}}),'studio-dsh.readiness');
+ ctx.effect(()=>ctx.appReady.onReady(async()=>{try{const tools=inventory(),models=await Promise.all((config.models||[]).map(id=>ctx.llm.resolveModelInfo(config.modelProvider||'deepseek-official',id)));send('studio/dshIsolation',{status:'verified',tools,nativeTools:0,models});}catch(error){send('studio/dshIsolation',{status:'failed',...(config.modelProvider?{message:String(error.message).replaceAll(process.env.STUDIO_MODEL_API_KEY||'\0','[REDACTED]').slice(0,500)}:{})});}}),'studio-dsh.readiness');
 }

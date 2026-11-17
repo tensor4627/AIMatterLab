@@ -31,8 +31,8 @@ export function createAgentRequests({runtime}){
  if(studioTurnRequestId!==undefined&&(typeof studioTurnRequestId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(studioTurnRequestId)))throw Error('Invalid turn request identity');
  if(studioSkillId!==undefined&&(typeof studioSkillId!=='string'||!scientificSkills.router.routes.has(studioSkillId)))throw Error('Choose a listed scientific function');
  const reservedShell=method==='thread/start'?conversationTerminals?.pendingForNewConversation(provider):null;
- let ticket,skillContext,skillKey,terminalOnly=false,definitionOnlyTurn=false;
- const check=()=>{resource?.assertCurrent();if(ticket)workflowContext.assert(ticket);};
+ let ticket,skillContext,skillKey,modelCurrent,terminalOnly=false,definitionOnlyTurn=false;
+ const check=()=>{resource?.assertCurrent();if(ticket)workflowContext.assert(ticket);modelCurrent?.();};
  const selectedTerminalReady=async()=>{const status=await resourceRouting.readiness(provider);check();if(status?.status!=='ready'||status.resource?.selectionId!==selectedSsh.selectionId)throw Error('请先将所选 SSH 终端交接给当前对话；不会改用其他计算资源。');};
  const synchronize=async()=>{check();await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));check();};
  if(['thread/start','thread/resume','turn/start'].includes(method)){
@@ -40,7 +40,8 @@ export function createAgentRequests({runtime}){
   if(method!=='thread/start'){await conversationTerminals?.acquire(provider,workflowContext.current());check();}
   await synchronize();
  }
- if(selectedSsh&&['turn/start','turn/steer'].includes(method)){await selectedTerminalReady();terminalOnly=resourceRouting.workerSelected?.(provider)!==true;}
+ if(method==='turn/start'&&['qwen','compatible'].includes(provider))modelCurrent=agents.bridge?.(provider)?.prepareTurnModel?.(params);
+  if(selectedSsh&&['turn/start','turn/steer'].includes(method)){await selectedTerminalReady();terminalOnly=resourceRouting.workerSelected?.(provider)!==true;}
  else terminalOnly=['turn/start','turn/steer'].includes(method)&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
  if(method==='turn/steer'&&!terminalOnly){const task=taskRecords.bound(provider,params.threadId);if(task&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');check();}
  if(method==='turn/steer'&&terminalOnly)params=terminalOnlyTurn(params,{provider,resource:selectedSsh});
@@ -97,7 +98,7 @@ export function createAgentRequests({runtime}){
   }
   if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
   if(!definitionOnly&&!skillContext.guidanceKind)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSkills.sourcesForPolicy(readPolicy))}]};
-  if(['deepseek','compatible'].includes(provider)){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
+  if(['deepseek','compatible','qwen'].includes(provider)){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
   const normalRoots=definitionOnly?[]:studioSkillRoots(),registeredRoots=[...normalRoots,...managedSkillRoots()],registered=definitionOnly||!params.input?.some(item=>item.type==='skill')?[]:[...localSkills(normalRoots,{policy:readPolicy}),...managedSkillEntries(readPolicy)],input=[];
   for(const item of params.input||[]){
    if(item.type==='text')input.push(item);

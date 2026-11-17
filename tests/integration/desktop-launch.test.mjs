@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
-import {launchPreflight,requireLaunchContext,launchDesktop,childExitCode,desktopRoot} from "../../scripts/desktop-launch.mjs";
+import {launchPreflight,requireLaunchContext,launchDesktop,resolveDesktopBinary,childExitCode,desktopRoot} from "../../scripts/desktop-launch.mjs";
 import {fileURLToPath} from 'node:url';
-import {readFileSync} from 'node:fs';
+import {readFileSync,realpathSync} from 'node:fs';
 import {runDevelopment} from "../../scripts/dev.mjs";
 import {runStart} from "../../scripts/start.mjs";
 const child=()=>Object.assign(new EventEmitter(),{kill(){this.killed=true;}});
@@ -24,6 +24,11 @@ test('normal launch preserves argument/env/cwd and one target',async()=>{
  assert.equal(await launchDesktop({preflight:()=>{},resolveBinary:async()=> 'electron',spawnTarget:(...args)=>{seen=args;return target;},args:['--flag','a b'],cwd:'fixture',env}),target);
  assert.deepEqual(seen,['electron',['.','--flag','a b'],{cwd:'fixture',env,stdio:'inherit'}]);
  assert.equal(childExitCode(7),7);assert.equal(childExitCode(null,'SIGTERM'),143);assert.equal(childExitCode(null),1);
+});
+test('default source launch resolves the physical Electron path before spawning',async()=>{
+ const logical=(await import('electron')).default,physical=realpathSync(logical);assert.equal(await resolveDesktopBinary(),physical);
+ let seen;const target=child();assert.equal(await launchDesktop({preflight:()=>{},spawnTarget:(...args)=>{seen=args;return target;},args:['--fixture']}),target);
+ assert.equal(seen[0],physical);assert.deepEqual(seen[1],['.','--fixture']);
 });
 test('development rejects before Vite and Electron; never retries launch',async()=>{
  let effects=0;

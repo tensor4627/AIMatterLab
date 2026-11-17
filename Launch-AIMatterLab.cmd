@@ -8,8 +8,10 @@ if errorlevel 1 (
   exit /b 1
 )
 node "%~dp0scripts\source-start.mjs" %*
-if errorlevel 1 (
-  echo AIMatterLab could not start. Review the error above; your profile was preserved.
+set "AIMATTERLAB_EXIT_CODE=%ERRORLEVEL%"
+if not "%AIMATTERLAB_EXIT_CODE%"=="0" (
+  echo AIMatterLab could not start ^(exit %AIMATTERLAB_EXIT_CODE%^). Review the error above; your profile was preserved.
   pause
-  exit /b 1
+  exit /b %AIMATTERLAB_EXIT_CODE%
 )
+exit /b 0

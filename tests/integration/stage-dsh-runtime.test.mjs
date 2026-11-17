@@ -7,7 +7,7 @@ import {createRequire} from 'node:module';
 import {stageDshRuntime,validateStagedDshRuntime} from '../../scripts/stage-dsh-runtime.mjs';
 import {stageCoreRuntimes} from '../../scripts/stage-agents.mjs';
 
-const roots=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client'],version='0.2.2-rc.1';
+const roots=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client','@deepseek-ai/dsh-llm-pi-ai'],version='0.2.2-rc.1';
 function fixture(){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-stage-dsh-')),modules=path.join(root,'node_modules'),target=path.join(root,'.studio/agent-runtimes/dsh');fs.mkdirSync(modules,{recursive:true});
  const app={name:'gpu-sampling-studio',devDependencies:Object.fromEntries(roots.map(name=>[name,version]))};
