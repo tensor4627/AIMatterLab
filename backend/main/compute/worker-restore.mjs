@@ -1,7 +1,7 @@
 import {workerObservationEvidence} from "./worker-service-version.mjs";
 import {isDeepStrictEqual as equal} from 'node:util';
 import {explicitWorkerBindingKey,validExplicitBinding,workerSettingsSignature,taskWorkerTarget,taskTransportScope,taskTransportReceipt,validTransportPort} from './explicit-worker-binding.mjs';
-import {taskWorkerSource,validTaskWorkerSource,taskWorkerSettings,sameWorkerBinding} from "../../../contracts/compute/task-worker-binding.mjs";
+import {taskWorkerSource,validTaskWorkerSource,taskWorkerSettings,sameWorkerBinding,unboundWorkflow,actualAuthoringWorker} from "../../../contracts/compute/task-worker-binding.mjs";
 import {readWorkerStatus} from './worker-status.mjs';
 
 async function observeSsh(bound,worker,settings,current){
@@ -13,13 +13,13 @@ async function observeSsh(bound,worker,settings,current){
  return {...observed,...detail,reason:observed.status==='connected'?'restored':'ssh_service_unconfirmed'};
 }
 
-export async function restoreConversationWorker({records,catalog,worker,settings,selection,selectionEpoch},args){
+export async function restoreConversationWorker({records,catalog,worker,settings,selection,selectionEpoch,selectedResource},args){
  const response=(status,reason)=>({status,reason,conversationId:args.conversationId,checkedAt:Date.now(),...status==='connected'?workerObservationEvidence(worker):{}}),owner=selection();
  if(!owner?.threadId||args.conversationId!==owner.provider+':'+owner.threadId)return response('unknown','selection_changed');
  const conversation=records.conversation(owner.provider,owner.threadId);
  if(!conversation||records.deleted(owner.provider,owner.threadId))return response('unknown','selection_changed');
  // An explicit task owns its original binding, including failure. Never fall back to a global record.
- if(owner.taskId||conversation.taskId){if(!owner.taskId||owner.taskId!==conversation.taskId)return response('unknown','selection_changed');return restoreTaskWorker({records,catalog,worker,settings,selection,selectionEpoch},{taskId:owner.taskId});}
+ if(owner.taskId||conversation.taskId){if(!owner.taskId||owner.taskId!==conversation.taskId)return response('unknown','selection_changed');return restoreTaskWorker({records,catalog,worker,settings,selection,selectionEpoch,selectedResource},{taskId:owner.taskId});}
  if(!conversation.projectId)return response('disconnected','project_missing');
  const project=catalog.get('projects',conversation.projectId);if(!project||project.id!==conversation.projectId)return response('disconnected','project_missing');
  const target=settings(),bound=catalog.get('worker-binding',explicitWorkerBindingKey);
@@ -47,11 +47,20 @@ export async function restoreGlobalWorker({catalog,worker,settings,selection,sel
  if(!current())return response('unknown','selection_changed');
  return {...response(observed.status,observed.reason),...bound.kind==='ssh'?{sourceKind:'ssh',profileId:bound.profileId,profileVersion:bound.profileVersion}:{}};
 }
-export async function restoreTaskWorker({records,catalog,worker,settings,selection,selectionEpoch},args){
+export async function restoreTaskWorker({records,catalog,worker,settings,selection,selectionEpoch,selectedResource},args){
  if(args&&typeof args==='object'&&Object.keys(args).join(',')==='scope'&&args.scope==='global')return restoreGlobalWorker({catalog,worker,settings,selection,selectionEpoch});
- if(args&&typeof args==='object'&&Object.keys(args).join(',')==='conversationId'&&typeof args.conversationId==='string'&&args.conversationId&&args.conversationId.length<=210)return restoreConversationWorker({records,catalog,worker,settings,selection,selectionEpoch},args);
+ if(args&&typeof args==='object'&&Object.keys(args).join(',')==='conversationId'&&typeof args.conversationId==='string'&&args.conversationId&&args.conversationId.length<=210)return restoreConversationWorker({records,catalog,worker,settings,selection,selectionEpoch,selectedResource},args);
  if(!args||typeof args!=='object'||Object.keys(args).join(',')!=='taskId'||typeof args.taskId!=='string'||!args.taskId||args.taskId.length>200)throw Error('Invalid typed worker restoration');
  const response=(status,reason)=>({status,reason,taskId:args.taskId,checkedAt:Date.now(),...status==='connected'?workerObservationEvidence(worker):{}}),task=records.read(args.taskId),source=taskWorkerSource(task);
+ if(!source&&unboundWorkflow(task)&&worker.identity?.kind==='ssh'&&selectedResource){
+  const owner=structuredClone(selection()),resource=structuredClone(selectedResource()),revision=selectionEpoch?.();
+  if(owner?.taskId!==task.id||owner.provider!==task.provider||owner.threadId!==task.threadId)return response('unknown','selection_changed');
+  if(resource?.kind!=='ssh-connection'||resource.connectionId!==worker.identity.connectionId||resource.profileId!==worker.identity.profileId||resource.profileVersion!==worker.identity.profileVersion)return response('disconnected','source_mismatch');
+  const binding=actualAuthoringWorker(worker);
+  const current=()=>{try{return equal(owner,selection())&&equal(resource,selectedResource())&&equal(task,records.read(task.id))&&(!selectionEpoch||selectionEpoch()===revision);}catch{return false;}};
+  const observed=await observeSsh(binding,worker,settings,current);
+  return {...response(observed.status,observed.reason),sourceKind:'ssh',profileId:binding.profileId,profileVersion:binding.profileVersion};
+ }
  if(!validTaskWorkerSource(source))return response('disconnected','binding_missing');
  if(source.binding.kind==='ssh'){
   const owner=structuredClone(selection()),revision=selectionEpoch?.(),scope=taskTransportScope(task);

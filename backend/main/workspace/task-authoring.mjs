@@ -2,7 +2,7 @@ import {linuxPath} from "../../../contracts/transport-policy.mjs";
 import {normalizeSteps,parameterValue} from "../../../contracts/workflows/task-fields.mjs";
 
 import {isDeepStrictEqual as equal} from 'node:util';
-import {actualAuthoringWorker,assertTaskWorker,sameWorkerBinding,taskWorkerSource} from "../../../contracts/compute/task-worker-binding.mjs";
+import {actualAuthoringWorker,assertTaskWorker,sameWorkerBinding,taskWorkerSource,unboundWorkflow} from "../../../contracts/compute/task-worker-binding.mjs";
 
 export function explicitStructures(text=''){
  const result=[];const patterns=[/["`']([A-Za-z]:[\\/][^"`'\r\n]+\.(?:extxyz|xyz|cif|pdb|vasp)|\/[^"`'\r\n]+\.(?:extxyz|xyz|cif|pdb|vasp))["`']/gi,/(?<![\w:/])(?:[A-Za-z]:[\\/](?![\\/])|\/(?:mnt|home|tmp|data)\/)[^\s"`'<>]+\.(?:extxyz|xyz|cif|pdb|vasp)\b/gi];
@@ -36,10 +36,17 @@ export function selectedInputs(task){
  if(selected.length>64)throw Error('Too many selected scientific input files');return selected;
 }
 export async function ensureTaskAuthoring(records,worker,options){
- const {authorization,...input}=options,task=input.taskId?records.read(input.taskId):records.bound(input.provider,input.threadId);if(!task)return null;
+ const {authorization,baseWorkspace,...input}=options,task=input.taskId?records.read(input.taskId):records.bound(input.provider,input.threadId);if(!task)return null;
  if(task.provider!==input.provider||task.threadId!==input.threadId||records.deleted(input.provider,input.threadId))throw Error('Invalid authoring conversation');
  const ticket=authorization?.begin?.(task);
- try{return await ensureTaskAuthoringValue(records,worker,{...input,commitAuthoring:()=>authorization?.commit?.(ticket,records.read(task.id))});}
+ try{
+  if(baseWorkspace&&worker.identity?.kind==='ssh'&&unboundWorkflow(task)&&task.workspaceChoice!=='draft'){
+   const check=()=>{input.assertCurrent?.();if(!equal(task,records.read(task.id)))throw Error('当前流程已更新，请重新读取');};
+   const workspace=await baseWorkspace.forTask(task,check);check();
+   records.save({...task,projectId:workspace.id,workspaceChoice:'workspace',workspace});
+  }
+  return await ensureTaskAuthoringValue(records,worker,{...input,commitAuthoring:()=>authorization?.commit?.(ticket,records.read(task.id))});
+ }
  catch(error){authorization?.abort?.(ticket);throw error;}
 }
 async function ensureTaskAuthoringValue(records,worker,{provider,threadId,taskId,text='',guidance='',allowExplicitInputs=true,assertCurrent=()=>{},commitAuthoring=()=>{}}){

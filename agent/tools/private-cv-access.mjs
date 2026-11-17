@@ -4,7 +4,7 @@ import path from 'node:path';
 // Shared terminals have their own explicit lane below; all other new tools fail closed.
 export const SCIENTIFIC_TOOL_ACCESS=Object.freeze({
  describe_engine:'public',list_source_projects:'public',inspect_source_project:'public',inspect_pygas_catalog:'public',scientific_skill_catalog:'public',read_scientific_skill:'public',search_materials_project:'public',
- inspect_compute_resource:'discovery',compute_readiness:'discovery',discover_local_environments:'discovery',draft_local_environment:'discovery',diagnose_tools:'discovery',list_projects:'discovery',list_runs:'discovery',list_workflows:'discovery',list_environments:'discovery',
+ setup_base_workspace:'setup',inspect_compute_resource:'discovery',compute_readiness:'discovery',discover_local_environments:'discovery',draft_local_environment:'discovery',diagnose_tools:'discovery',list_projects:'discovery',list_runs:'discovery',list_workflows:'discovery',list_environments:'discovery',
  inspect_environment_api:'environment',read_runtime_guide:'environment',probe_environment:'environment',
  copy_project_inputs:'project',read_project_input:'project',write_project_input:'project',inspect_asset:'project',suggest_parameters:'project',create_structure:'project',render_pygas_workflow:'project',present_task:'project',prepare_run:'project',create_workflow:'project',import_materials_project:'project',
  validate_run:'run',submit_run:'run',cancel_run:'run',reconcile_run:'run',validate_cluster_run:'run',submit_cluster_run:'run',cancel_cluster_run:'run',run_status:'run',read_log:'run',read_run_input:'run',read_artifact:'run',collect_artifacts:'run',resume_run:'run',
@@ -62,7 +62,7 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
  async function check(name,args,provider){
   const kind=SCIENTIFIC_TOOL_ACCESS[name];if(!kind||!providers.has(provider)||!object(args))throw Error('Unclassified scientific tool or invalid provider/input');
   if(kind==='public'){const task=taskFor(provider),owner=identity(task),value=task?await policy(provider):null;if(identity(taskFor(provider))!==owner)throw Error('Conversation changed during public catalog check');const definitionOnly=definitionOnlyScope(task,value);if(definitionOnly&&!definitionToolAllowed(name))throw Error('This private sharing permits only the current definition, not other files, environment observations or results');if(name==='inspect_source_project'&&!sources.has(args.source_id)||name==='inspect_pygas_catalog'&&args.source_id!=='pygas')throw Error('Inspect only a registered public software catalog');return {task,kind,definitionOnly};}
-  const taskRequired=kind==='current'||provider==='deepseek'&&!['discovery','ssh'].includes(kind);
+  const taskRequired=kind==='current'||provider==='deepseek'&&!['discovery','ssh','setup'].includes(kind);
   const task=taskFor(provider,taskRequired),owner=identity(task),value=await policy(provider);if(identity(taskFor(provider))!==owner)throw Error('Conversation changed during private access check');
   if(executionTools.has(name)&&(!task||!runIds(task).has(args.run_id)))throw Error('Execute, validate, cancel and reconcile only runs linked to the current conversation-owned workflow');
   if(task)checkTask(task,provider,value);

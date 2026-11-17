@@ -31,6 +31,8 @@ export interface SshServiceEnvironment {python:string;activation:string}
 export interface SshComputeProfile {id:string;version:number;kind:'ssh';name:string;host:string;username:string;port:number;ssh_client:string;distribution?:string;identity_file?:string;proxy_jump?:string[];via?:string[];mode:'interactive'|'key';serviceEnvironment?:SshServiceEnvironment}
 
 export type ComputeProfile=WslComputeProfile|SshComputeProfile;
+export interface BaseWorkspaceRequest {connectionId:string;profileId:string;profileVersion:number;action:'inspect'|'ensure';name?:string;directory?:string}
+export type BaseWorkspaceResult={status:'unconfigured';suggested:{name:string;directory:string}}|{status:'ready';workspace:{id:string;name:string;root:string;directories:string[];asset_mode:'copy'|'link'}};
 export interface ComputeProfileRemovalRequest {id:string;expectedVersion:number}
 export interface ComputeProfileRemovalResult {removed:true;id:string;version:number}
 

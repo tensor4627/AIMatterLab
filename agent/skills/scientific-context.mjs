@@ -10,6 +10,7 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  if(manualFunction!==undefined&&typeof manualFunction!=='string')throw Error('Invalid selected scientific function');
  // Present intent takes priority over the previous run: analysis never loads the build/install stack.
  if(manualFunction)id=manualFunction;
+ else if(/(?:基础|默认|初始化|设置|选择|创建).*工作区|工作区.*(?:灰|设置|配置|不可用)|(?:base|default|setup|initialize).*workspace/i.test(value))id='cluster.workspace-setup';
  else if(/(?:reweight|重加权)/i.test(value))id=/opes/i.test(value)?'analysis.opes':'analysis.wtmetad';
  else if(/(?:分析轨迹|轨迹分析|analy[sz]e.*traject|trajectory.*analy)/i.test(value))id='analysis.trajectory';
  else if(/(?:monitor|监测|监控).*?(?:cv|pygas)|(?:cv|pygas).*?(?:monitor|监测)/i.test(value))id='pygas.monitor';

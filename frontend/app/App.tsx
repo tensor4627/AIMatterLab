@@ -1,7 +1,7 @@
 import product from "../../contracts/product.json";
 import type {DeleteConversationGroupRequest,DeleteConversationGroupResult} from '../../contracts/dto/agent';
 import {sshStateLabel} from "../features/compute/ssh-connection-types";
-import {taskWorkerSource} from '../../contracts/compute/task-worker-binding.mjs';
+import {taskWorkerSource,unboundWorkflow} from '../../contracts/compute/task-worker-binding.mjs';
 import type {DiagnosticRepairRequest} from '../features/diagnostics/repair-request.mjs';
 import {computeResources} from '../api/compute-resources';
 import type {ComputeResourceState} from '../../contracts/dto/compute';
@@ -187,12 +187,12 @@ export default function App(){
  const activeFlow=agentTasks.find(task=>task.id===selectedConversationRef.current?.taskId);
  const flowWorker=taskWorkerSource(activeFlow)?.binding;
  const sshDraftTaskId=computeResource?.kind==='ssh-connection'&&computeResource.status==='selected'&&
-  computeResource.authentication==='verified'&&computeResource.workflowReady&&flowWorker?.kind==='ssh'&&
-  computeResource.profileId===flowWorker.profileId&&computeResource.profileVersion===flowWorker.profileVersion?activeFlow.id:undefined;
+  computeResource.authentication==='verified'&&computeResource.workflowReady&&
+  (unboundWorkflow(activeFlow)||flowWorker?.kind==='ssh'&&computeResource.profileId===flowWorker.profileId&&computeResource.profileVersion===flowWorker.profileVersion)?activeFlow.id:undefined;
  useEffect(()=>{
   // The workflow may receive its draft binding after the first disconnected observation.
   if(sshDraftTaskId&&!agentBusy&&!workerReady.current&&initialSelectionReady.current)void observeWorker(sshDraftTaskId);
- },[sshDraftTaskId,selectedRecords?.key,agentBusy]);
+ },[sshDraftTaskId,selectedRecords?.key,JSON.stringify(flowWorker),agentBusy]);
  useEffect(()=>{
   recordReadSequence.current++;recordReadPending.current=null;
   if(selectedRecords){setRecordService({phase:'checking',scopeKey:selectedRecords.key});setRecordObservations(old=>({local:{...old.local,stale:old.local.loaded,sourceChanged:old.local.loaded},cluster:{...old.cluster,stale:old.cluster.loaded,sourceChanged:old.cluster.loaded}}));void refreshSelectedRecords();}

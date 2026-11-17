@@ -1,6 +1,6 @@
 ---
 name: studio-compute-workflow
-description: Configure local WSL or SSH environments, help activate an existing service Python environment, establish and verify the AIMatterLab job-service connection, and prepare reviewable deployment plans. Keep service readiness separate from project authorization, scheduler adaptation and scientific validation.
+description: Configure local WSL or SSH environments, establish the AIMatterLab job-service connection, assist first-login base-workspace setup, and prepare deployment plans using registered resources.
 ---
 
 # AIMatterLab compute workflow
@@ -8,6 +8,8 @@ description: Configure local WSL or SSH environments, help activate an existing 
 Use AIMatterLab's structured tools and the user's registered environments. Keep scientific intent separate from deployment. The agent prepares and updates one workflow attached to the conversation; the user reviews the concrete workflow and clicks execute. Normal chat does not create a workflow unless the user requests planning.
 
 ## Connect a local or cluster job service
+
+After the user's first SSH handoff, help establish the connection's base workspace using [base-workspace.md](references/base-workspace.md). It can be inspected and initialized in ordinary chat. New SSH workflows use the verified base workspace. Use the existing workflow directory for a saved workflow, and report the actual directory returned by the tools. Manual setup is under the saved cluster connection's advanced options.
 
 For requests to authenticate/connect local or cluster compute as an AIMatterLab job service, or to fix Python/Conda/service setup, read [job-service-connection.md](references/job-service-connection.md). The normal flow is **log in → 交给 Agent**. Interactive login first opens only an ordinary terminal. Only after the human clicks **交给 Agent** may service inspection, first worker setup/registration or verified cached reuse begin. The same handoff grants this conversation shell and verified service access. Do not probe or deploy a remote service merely because SSH authentication succeeded. Advanced environment maintenance and scheduler settings remain under the saved connection editor. Fresh SSH authentication stays human-only and is observed automatically. Follow the selected connection's saved Python/activation recipe; login, service readiness, current-conversation handoff and project execution authorization are separate facts. Do not replace a logged-in SSH session or change scientific engine registrations to prepare the service.
 

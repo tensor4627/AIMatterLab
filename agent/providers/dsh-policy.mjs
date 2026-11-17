@@ -7,7 +7,7 @@ const READ=new Set(['project_skill_catalog','read_project_skill','write_project_
 const DRAFT=new Set(['copy_project_inputs','draft_local_environment','propose_custom_cv','import_materials_project','create_structure','render_pygas_workflow','present_task','draft_cluster_setup','prepare_cluster_run','create_workflow','prepare_run','resume_run','write_project_input']);
 const EXECUTE=new Set(['validate_run','submit_run','cancel_run','validate_cluster_run','submit_cluster_run','cancel_cluster_run','reconcile_run']);
 const prefix='mcp__gpusampling__';
-export function dshToolAllowed(name,workflow){return READ.has(name)||['draft_local_environment','draft_cluster_setup'].includes(name)||workflow===true&&(DRAFT.has(name)||EXECUTE.has(name));}
+export function dshToolAllowed(name,workflow){return READ.has(name)||['setup_base_workspace','draft_local_environment','draft_cluster_setup'].includes(name)||workflow===true&&(DRAFT.has(name)||EXECUTE.has(name));}
 export function checkDshInventory(names,expected){if(!Array.isArray(names)||names.some(n=>typeof n!=='string'||!expected.has(n))||names.length!==expected.size||new Set(names).size!==expected.size)throw Error('DSH tool inventory differs from the verified AIMatterLab capability set');return names;}
 function send(method,params){process.stdout.write(JSON.stringify({jsonrpc:'2.0',method,params})+'\n');}
 

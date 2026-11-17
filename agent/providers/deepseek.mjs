@@ -85,7 +85,7 @@ export class DeepSeekBridge extends EventEmitter{
  }
  async tools(mode='chat'){
   if(!this.getWorker())return [];
-  const result=await this.mcp('tools/list');return (result.tools||[]).filter(t=>sharedTerminalToolAllowed(t.name)||READ_TOOLS.has(t.name)||['draft_local_environment','draft_cluster_setup'].includes(t.name)||mode==='workflow'&&DRAFT_TOOLS.has(t.name));
+  const result=await this.mcp('tools/list');return (result.tools||[]).filter(t=>sharedTerminalToolAllowed(t.name)||READ_TOOLS.has(t.name)||['setup_base_workspace','draft_local_environment','draft_cluster_setup'].includes(t.name)||mode==='workflow'&&DRAFT_TOOLS.has(t.name));
  }
  async request(method,params={}){
   if(!this.process)throw Error('Connect DeepSeek first');

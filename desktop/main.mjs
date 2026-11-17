@@ -101,6 +101,7 @@ import {readWorkerStatus} from '../backend/main/compute/worker-status.mjs';
 import {bindBundledWorkerRuntimeId} from "../backend/main/compute/worker-service-version.mjs";
 import {restoreTaskWorker} from '../backend/main/compute/worker-restore.mjs';
 import {updateDraftWorker} from '../backend/main/workspace/update-draft-worker.mjs';
+import {createBaseWorkspace,baseWorkspaceTool} from '../backend/main/workspace/base-workspace.mjs';
 import {explicitWorkerReceipt,rememberExplicitWorker,workerSettingsSignature,validExplicitBinding,taskWorkerTarget,validTransportPort,taskTransportScope,taskTransportReceipt} from '../backend/main/compute/explicit-worker-binding.mjs';
 import {sameWorkerBinding,taskWorkerSource} from "../contracts/compute/task-worker-binding.mjs";
 
@@ -223,7 +224,8 @@ scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compa
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(root,'agent','tools','custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
-worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool,copyProjectInputsTool],async(name,args,scope)=>{
+worker.setScopedTools([...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool,copyProjectInputsTool,baseWorkspaceTool],async(name,args,scope)=>{
+ if(name==='setup_base_workspace')return baseWorkspace.call(args,scope);
  if(name==='copy_project_inputs')return copyProjectInputs({worker,current:value=>workflowContext.assertScope(value)},args,scope);
  if(name==='inspect_environment_api')return readEnvironmentApi(args,scope);
  if(['read_pygas_workflow','propose_custom_cv','read_custom_cv'].includes(name))workflowContext.assertScope(scope);
@@ -363,6 +365,8 @@ for(const method of ['activate','clear'])handle('compute.resource.'+method,async
 });
 const terminalTools=sharedTerminal.tools(),terminalToolNames=new Set(terminalTools.map(tool=>tool.name));
 const computeInspection=createComputeResourceInspection({worker,resource:()=>computeResource,service:()=>sshService,connections:()=>sharedTerminal.connections});
+const baseWorkspace=createBaseWorkspace({catalog,worker,resource:computeResource,service:sshService,current:()=>workflowContext.current(),emit:()=>emit('studio:event',{method:'studio/baseWorkspaceChanged'})});
+handle('compute.workspace.setup',value=>{assertIdleAgent();return baseWorkspace.manual(value);});
 worker.setLocalTools([...materials.tools(),...terminalTools,...computeInspection.tools()],(name,args,scope)=>name==='inspect_compute_resource'?computeInspection.call(name,args,scope):terminalToolNames.has(name)?sharedTerminal.callTool(name,args,scope):materials.call(name,args,scope));
 const terminalHandoff=createTerminalHandoff({terminal:sharedTerminal,workflowContext,agents,records:taskRecords,resourceRouting,agentRpc:value=>agentRpc(value),assertIdle:assertIdleAgent});
 const connectionHandoff=createSshTerminalHandoff({terminalHandoff,terminal:sharedTerminal,service:()=>sshService,registration:serviceRegistration,resourceRouting,workflowContext,agents,records:taskRecords,agentRpc:value=>agentRpc(value)});
@@ -496,7 +500,7 @@ handle('ssh.tunnel.status',(value,event)=>sshConnection.tunnelStatus(value,event
 handle('ssh.tunnel.close',(value,event)=>sshConnection.tunnelClose(value,event));
 handle('worker.connect',async()=>{assertIdleAgent();if(computeResource.peek())throw Error('请先在连接设置明确选择本地计算资源；后台 SSH 通道会保留。');await sshService.resourceChanged();agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
-handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision()},value));
+handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),selectedResource:()=>computeResource.peek()},value));
 handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAuthoringWorker({records:taskRecords,worker,selection:()=>workflowContext.current(),settings:()=>settings},value);});
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
@@ -563,7 +567,7 @@ handle('agent.cli.choose',async value=>{
  if(readiness.status==='ready')settings=catalog.put('settings','main',normalizeSettings(settings,{[provider+'Path']:response.filePaths[0]}));
  return readiness;
 });
-const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){return agentRequests(value);}
 handle('agent.rpc',agentRpc);
 handle('agent.recover',async({provider,threadId,model})=>{

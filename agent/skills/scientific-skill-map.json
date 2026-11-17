@@ -174,7 +174,8 @@
         "references/compute-profile.schema.json",
         "references/scientific-gates.md",
         "references/reconcile.md",
-        "references/job-service-connection.md"
+        "references/job-service-connection.md",
+        "references/base-workspace.md"
       ]
     },
     {
@@ -649,6 +650,15 @@
           "references/compute-discovery.md"
         ]
       }
+    },
+    {
+      "id": "cluster.workspace-setup",
+      "engines": [],
+      "skills": ["studio-compute-workflow"],
+      "tools": ["setup_base_workspace", "copy_project_inputs", "read_project_input"],
+      "status": "implemented_selected_connection_authoring_workspace",
+      "phase": "workspace",
+      "reference_files": {"studio-compute-workflow": ["references/base-workspace.md"]}
     },
     {
       "id": "cluster.connection-setup",

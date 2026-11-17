@@ -21,7 +21,7 @@ import {managedToolSkillContext} from '../skills/managed-tool-context.mjs';
 
 export function createAgentRequests({runtime}){
  return async function agentRpc({provider,method,params={}}){
- const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
+ const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
  providerId(provider);assertRpc(method);
  const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(),selectedSsh=['ssh-terminal','ssh-connection'].includes(resource?.selection?.kind)?resource.selection:null;
@@ -74,7 +74,8 @@ export function createAgentRequests({runtime}){
   const before=taskRecords.bound(provider,params.threadId);let definitionOnly=!!before?.customCv?.id;if(before&&worker.connection){definitionOnly=(await privateAccess.assertTask(before,provider)).definitionOnly;check();}
   if(definitionOnly&&params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
   const text=visibleUserText(params.input||[]);
-  const authoring=definitionOnly?null:await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true,assertCurrent:check,authorization:authoringAuthorization});check();
+  const authoring=definitionOnly?null:await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true,assertCurrent:check,authorization:authoringAuthorization,baseWorkspace});check();
+  if(selectedSsh&&!definitionOnly)params={...params,input:[...(params.input||[]),{type:'text',text:'For first use after SSH handoff and base-workspace configuration, follow the bundled cluster.workspace-setup skill route. setup_base_workspace can inspect or initialize the selected connection workspace in ordinary chat. Reuse the returned directory and the current workflow context.'}]};
   if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};
   let bound=taskRecords.bound(provider,params.threadId);if(bound){definitionOnly=(await privateAccess.assertTask(bound,provider)).definitionOnly;check();}
   definitionOnlyTurn=definitionOnly;

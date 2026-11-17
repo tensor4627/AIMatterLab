@@ -489,6 +489,29 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   await p.getByRole('button',{name:'导入此文件',exact:true}).click();await p.waitForFunction(()=>window.__test.remoteImport);
   assert.equal(await p.evaluate(()=>window.__test.remoteImport.source),'~/external/model.xyz');
  });
+ await check('cluster-base-workspace-is-configured-in-advanced-connection-options',async p=>{
+  await p.evaluate(()=>{
+   const profile={id:'base-profile',version:1,kind:'ssh',name:'Fixture cluster',host:'fixture.invalid',username:'fixture',port:22,ssh_client:'/usr/bin/ssh',distribution:'Ubuntu',mode:'interactive'};
+   const resource={kind:'ssh-connection',status:'selected',selectionId:'selected',connectionId:'base-connection',profileId:profile.id,profileVersion:1,authentication:'verified',workflowReady:true};
+   const original=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>{
+    if(method==='compute.profiles.list')return {profiles:[profile],defaults:{distribution:'Ubuntu',root:'/worker',port:8767,ssh_client:'/usr/bin/ssh'}};
+    if(method==='compute.profiles.inventory')return {distributions:['Ubuntu']};
+    if(method==='compute.workspace.setup'){
+     (window.__test.baseRequests??=[]).push(data);
+     if(data.action==='inspect')return {status:'unconfigured',suggested:{name:'基础工作区',directory:'base'}};
+     return {status:'ready',workspace:{id:'workspace-'+data.directory,name:data.name,root:'/worker/projects/workspace-'+data.directory+'/inputs',directories:[],asset_mode:'copy'}};
+    }
+    return original(method,data);
+   };
+   return window.renderTest('ComputeConnectionChooser',{initialEdit:{profileId:profile.id,profileVersion:1,nonce:'base'},activeResource:resource,onLocal:()=>{},onSsh:()=>{},onClose:()=>{}});
+  });
+  const advanced=p.getByTestId('compute-base-workspace-advanced');await advanced.waitFor();assert.equal(await advanced.evaluate(e=>e.open),false);
+  await advanced.locator('summary').click();await p.getByLabel('基础工作区名称',{exact:true}).fill('Research inputs');await p.getByLabel('基础工作区目录名',{exact:true}).fill('research');
+  assert.equal(await p.evaluate(()=>window.__test.baseRequests.some(r=>r.action==='ensure')),false);
+  await p.getByRole('button',{name:'设为基础工作区',exact:true}).click();await p.getByTestId('base-workspace-ready').getByText('/worker/projects/workspace-research/inputs',{exact:true}).waitFor();
+  assert.deepEqual(await p.evaluate(()=>window.__test.baseRequests.at(-1)),{connectionId:'base-connection',profileId:'base-profile',profileVersion:1,action:'ensure',name:'Research inputs',directory:'research'});
+ });
  await check('accounts-global-entry-keeps-login-out-of-conversation-and-project-binding',async p=>{
   await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>{if(method==='agent.login'){window.__test.login=data;return {credentialStored:true,phase:'configured',modelAccess:'not_run'};}return original(method,data);};return window.renderTest('App');});
   const entry=p.getByTestId('open-accounts');await entry.waitFor();assert.equal(await p.evaluate(()=>document.querySelector('.quick-search').nextElementSibling.dataset.testid),'open-accounts');await entry.click();await p.getByTestId('account-center').waitFor();await p.getByRole('dialog').getByRole('button',{name:'DeepSeek API',exact:true}).click();await p.getByTestId('deepseek-api-key').fill('sk-fixture-global-only');await p.getByRole('dialog').getByRole('button',{name:'保存凭据并连接',exact:true}).click();await p.waitForFunction(()=>window.__test.login);assert.equal(await p.getByTestId('agent-provider').inputValue(),'codex');assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>['conversation.remember','conversation.select','agent.bindProject','task.create'].includes(c.method)).length),0);assert.equal(await p.getByTestId('deepseek-api-key').inputValue(),'');

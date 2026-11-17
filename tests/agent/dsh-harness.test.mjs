@@ -6,6 +6,7 @@ import {EventEmitter} from 'node:events';import {PassThrough} from 'node:stream'
 import {DshBridge,dshLegacyContext,dshPublicItemId,normalizeDshPublicTurns} from '../../agent/providers/dsh.mjs';
 import {dshToolAllowed,checkDshInventory} from '../../agent/providers/dsh-policy.mjs';
 import {dshRuntime,prepareDshProfile,scopedDshWorker} from '../../desktop/platform/dsh-runtime.mjs';
+import {baseWorkspaceTool} from '../../backend/main/workspace/base-workspace.mjs';
 
 function catalog(){const values=new Map();return {get:(k,id)=>values.get(k+':'+id),put:(k,id,v)=>values.set(k+':'+id,structuredClone(v)),values};}
 function temporary(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-dsh-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
@@ -126,12 +127,12 @@ test('Interrupting an official DSH runtime marks the existing turn cancelled and
  for(let i=0;i<100&&!f.count;i++)await new Promise(r=>setTimeout(r,10));assert.equal(f.count,1);await f.b.request('turn/interrupt',{threadId:thread.thread.id});assert.equal((await done).status,'cancelled');assert.equal(f.b.activeTurns.size,0);assert.equal(f.b.process,null);assert.equal(f.count,1);
 });
 
-test('actual official DSH chat runtime registers project skills and forwards model tool calls',{timeout:60000},async t=>{
+test('actual official DSH chat runtime registers project skills and base workspace setup and forwards model tool calls',{timeout:60000},async t=>{
  const {ProjectSkills}=await import('../../agent/skills/project-skills.mjs');
- const tools=new ProjectSkills({root:'.',current:()=>null}).tools();
- const f=await nativeFixture(t,{toolCatalog:tools,responses:[{tool:{name:'mcp__gpusampling__read_project_skill',args:{name:'local-analysis'}}},{}]});
+ const tools=[...new ProjectSkills({root:'.',current:()=>null}).tools(),baseWorkspaceTool];
+ const f=await nativeFixture(t,{toolCatalog:tools,responses:[{tool:{name:'mcp__gpusampling__read_project_skill',args:{name:'local-analysis'}}},{tool:{name:'mcp__gpusampling__setup_base_workspace',args:{action:'ensure'}}},{}]});
  const info=await f.b.start();
- assert.deepEqual(info.studioIsolation.tools,[...tools.map(tool=>'mcp__gpusampling__'+tool.name)].sort());
+ assert.deepEqual([...info.studioIsolation.tools].sort(),tools.map(tool=>'mcp__gpusampling__'+tool.name).sort());
  const thread=await f.b.request('thread/start'),done=completion(f.b);
  await f.b.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Read the project skill'}]});
  assert.equal((await done).status,'completed');
@@ -139,4 +140,5 @@ test('actual official DSH chat runtime registers project skills and forwards mod
  assert.match(JSON.stringify(request.system),/project_skill_catalog/);
  assert(request.tools.some(tool=>tool.name==='mcp__gpusampling__write_project_skill'));
  assert.equal(f.calls.find(call=>call.body.method==='tools/call').body.params.name,'read_project_skill');
+ assert(f.calls.some(call=>call.body.method==='tools/call'&&call.body.params.name==='setup_base_workspace'&&call.body.params.arguments.action==='ensure'));
 });

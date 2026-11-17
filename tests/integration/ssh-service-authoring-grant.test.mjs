@@ -7,6 +7,7 @@ import {createSshService} from '../../backend/main/compute/ssh-service.mjs';
 import {TaskRecords} from '../../agent/sessions/task-records.mjs';
 import {registerWorkspaceTaskRoutes} from '../../backend/main/workspace/routes.mjs';
 import {ensureTaskAuthoring} from '../../backend/main/workspace/task-authoring.mjs';
+import {createBaseWorkspace} from '../../backend/main/workspace/base-workspace.mjs';
 import {createAgentWorkflowContext} from '../../agent/sessions/workflow-context.mjs';
 import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 import {createAgentRequests} from '../../agent/sessions/requests.mjs';
@@ -18,12 +19,15 @@ const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'
 function mainPorts(ports){let authorization,guard;function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(tree)==='authoringAuthorization')authorization=node.initializer.getText(tree);if(ts.isCallExpression(node)&&ts.isPropertyAccessExpression(node.expression)&&node.expression.name.text==='setResourceUseGuard')guard=node.arguments[0].getText(tree);ts.forEachChild(node,visit);}visit(tree);assert(authorization&&guard);const compile=value=>new Function(...Object.keys(ports),'return ('+value+');')(...Object.values(ports));return {authorization:compile(authorization),guard:compile(guard)};}
 const deferred=()=>{let resolve;const promise=new Promise(yes=>resolve=yes);return {promise,resolve};};
 const health={name:'gpu-sampling-studio',root:'/inert/service',runtime:'/inert/runtime/'+'a'.repeat(20),runtimeId:'a'.repeat(20),port:23456,execution_policy:'desktop-review-v1',hostIdentity:{hostname:'fixture',uid:1000,machineId:'fixture'}};
-async function fixture(t,{provider='deepseek'}={}){
+async function fixture(t,{provider='deepseek',withBaseWorkspace=false}={}){
  const values=new Map(),catalog={get:(kind,id)=>structuredClone(values.get(kind+':'+id)),put:(kind,id,value)=>{values.set(kind+':'+id,structuredClone(value));return value;},list:kind=>[...values].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>structuredClone(value))},records=new TaskRecords(catalog,()=>{}),activeTasks=new Map(),workflow=createAgentWorkflowContext({records,activeTasks,selectedProvider:()=>provider}),worker=new WorkerClient(),selection={schemaVersion:2,kind:'ssh-connection',connectionId:'connection',selectionId:'selection',profileId:'profile',profileVersion:1};
  let generation=1,service,gate,project='project',environment='environment',inputRoot='/inert/project/inputs',localCalls=0,turns=0,definitionOnly=false;const dispatched=[];
  const computeResource={peek:()=>selection,capture:()=>({generation,selection:structuredClone(selection)}),assertCurrent:value=>assert.equal(value.generation,generation),status:async()=>({...selection,status:'selected',connectionStatus:'authenticated',authentication:'verified',agentReady:service.hasCurrentGrant(provider),operator:service.peek().operator})};
  const serviceView={connectionId:'connection',profileId:'profile',profileVersion:1,attemptId:'attempt',status:'connected',serviceId:'service',serviceActive:true,service:health},connections={state:async()=>({schemaVersion:2,connectionId:'connection',profileId:'profile',profileVersion:1,status:'authenticated',authentication:'verified'}),openService:async()=>structuredClone(serviceView),serviceState:async()=>structuredClone(serviceView),closeService:async()=>({...serviceView,status:'disconnected',serviceActive:false}),serviceRequest:async packet=>{
   if(packet.target==='/api/health')return {status:200,data:health};
+  if(withBaseWorkspace&&packet.target==='/api/studio-workspace/create'){project=packet.data.id;environment=null;inputRoot=health.root+'/projects/'+project+'/inputs';return {status:200,data:{id:project}};}
+  if(withBaseWorkspace&&packet.target==='/api/projects')return {status:200,data:[{id:project,authoring_only:true,studio_workspace:{asset_mode:'copy'}}]};
+  if(withBaseWorkspace&&packet.target==='/api/studio-workspace/read')return {status:200,data:{id:project,name:'基础工作区',root:inputRoot,assets:[],directories:['assets/structures'],asset_mode:'copy'}};
   if(packet.target==='/api/authoring/context'){if(gate){const held=gate;gate=null;held.entered.resolve();await held.release.promise;}return {status:200,data:{project:{id:project,authoring_only:true},environment_id:environment,input_root:inputRoot,imports:[]}};}
   if(packet.target==='/api/studio-workspace/read')return {status:200,data:{id:project,root:inputRoot,assets:[],directories:{},asset_mode:'copy'}};
   return {status:200,data:{jsonrpc:'2.0',id:packet.data?.id,result:{tools:[{name:'present_task',inputSchema:{type:'object'}}]}}};
@@ -37,7 +41,8 @@ async function fixture(t,{provider='deepseek'}={}){
  const createTask=(extra={})=>handlers.get('task.create')({provider,threadId:'thread',request:'Synthetic first workflow',planningMode:true,workflowVersion:2,...extra});
  const routing=createAgentResourceRouting({worker,terminal:()=>null,sharedTerminal:()=>null,resource:()=>computeResource,service:()=>service,agents:()=>agents});
  const scientificSkills={router:{routes:new Map()},context:{prepare:async()=>({status:'passed',guidanceKind:'fixture',routes:[]}),accept(){}},resolvePolicy:async()=>({}),sourcesForPolicy:()=>[],clearManagedSelection(){}};
- const rpc=createAgentRequests({runtime:()=>({agents,catalog,taskRecords:records,workflowContext:workflow,privateAccess:{assertTask:async()=>({definitionOnly})},worker,sharedTerminal:{},resourceRouting:routing,authoringAuthorization:ports.authorization,scientificSkills,setupInstructions:{clear(){}},studioSkillRoots:()=>[],managedSkillRoots:()=>[],managedSkillEntries:()=>[],managedSkillRecords:()=>[],skillGuidanceScope:()=>({}),assertIdleAgent(){},emit(){},root:process.cwd(),app:{isPackaged:false}})});
+ const baseWorkspace=withBaseWorkspace?createBaseWorkspace({catalog,worker,resource:computeResource,service,current:()=>workflow.current()}):undefined;
+ const rpc=createAgentRequests({runtime:()=>({agents,catalog,taskRecords:records,workflowContext:workflow,privateAccess:{assertTask:async()=>({definitionOnly})},worker,sharedTerminal:{},resourceRouting:routing,authoringAuthorization:ports.authorization,baseWorkspace,scientificSkills,setupInstructions:{clear(){}},studioSkillRoots:()=>[],managedSkillRoots:()=>[],managedSkillEntries:()=>[],managedSkillRecords:()=>[],skillGuidanceScope:()=>({}),assertIdleAgent(){},emit(){},root:process.cwd(),app:{isPackaged:false}})});
  const call=async(connection=worker.providerConnection(provider))=>{const response=await fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'fixture_read',arguments:{}}})});await response.text();return response.status;};
  t.after(()=>worker.close());
  return {provider,worker,service,records,workflow,computeResource,routing,dispatched,authorization:ports.authorization,createTask,handlers,rpc,sync,grant,call,counts:()=>({localCalls,turns}),delayAuthoring:()=>{const held={entered:deferred(),release:deferred()};gate=held;return {entered:held.entered.promise,release:()=>held.release.resolve()};},changeResource:()=>generation++,setProject:value=>{project=value;},setEnvironment:value=>{environment=value;},setInputRoot:value=>{inputRoot=value;},setDefinitionOnly:value=>{definitionOnly=value;}};
@@ -48,6 +53,15 @@ for(const provider of ['deepseek','codex'])test(provider+' first human task and 
 });
 for(const provider of ['deepseek','codex'])test(provider+' actual turn preparation retains its first authoring grant without invoking a model',async t=>{
  const f=await fixture(t,{provider});f.createTask();const input={provider,method:'turn/start',params:{threadId:'thread',input:[{type:'text',text:'Inspect the permitted fixture service'}]}},result=await f.rpc(input);assert.equal(result.turn.id,'synthetic-ack');assert.equal(f.service.hasCurrentGrant(provider),true);const current=f.worker.providerConnection(provider);assert.equal(await f.call(current),200);await f.rpc(input);assert.equal(f.counts().turns,2);assert.equal(f.service.hasCurrentGrant(provider),true);assert.equal(await f.call(current),200,'an unchanged second turn does not revoke the new authoring lease');
+});
+for(const provider of ['deepseek','codex'])test(provider+' automatic base workspace initialization preserves the actual first-turn service grant',async t=>{
+ const f=await fixture(t,{provider,withBaseWorkspace:true}),task=f.createTask();await f.sync();const old=f.worker.providerConnection(provider);
+ const input={provider,method:'turn/start',params:{threadId:'thread',input:[{type:'text',text:'设置基础工作区并核对输入'}]}};
+ await f.rpc(input);
+ const saved=f.records.read(task.id);assert.equal(saved.projectId,'workspace-base');assert.equal(saved.workspaceChoice,'workspace');assert.equal(saved.authoring.inputRoot,health.root+'/projects/workspace-base/inputs');
+ assert.equal(f.service.hasCurrentGrant(provider),true);assert.equal(await f.call(old),403);assert.equal(await f.call(),200);
+ assert(JSON.stringify(f.dispatched[0]).includes('cluster.workspace-setup'));
+ await f.rpc(input);assert.equal(f.counts().turns,2);assert.equal(f.service.hasCurrentGrant(provider),true);assert.equal(await f.call(),200);
 });
 test('reclaim during first authoring never regains service use and invalidates both old and fresh callers',async t=>{
  const f=await fixture(t);f.createTask();await f.sync();const old=f.worker.providerConnection(f.provider),gate=f.delayAuthoring(),pending=ensureTaskAuthoring(f.records,f.worker,{provider:f.provider,threadId:'thread',authorization:f.authorization});await gate.entered;f.service.owner({connectionId:'connection',attemptId:'attempt',owner:'human'});gate.release();await pending;assert.equal(f.service.hasCurrentGrant(f.provider),false);assert.equal(await f.call(old),403);await f.sync();assert.equal(await f.call(),403);

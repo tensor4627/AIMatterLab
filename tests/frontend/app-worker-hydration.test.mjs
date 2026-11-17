@@ -10,6 +10,23 @@ const dependent=h=>h.calls.filter(call=>['worker.request','workspace.list','task
 const held=(h,method,data)=>{const calls=h.calls.filter(call=>call.method===method);assert.equal(calls.length,1,'deferred '+method+' must be actually invoked');if(data!==undefined)assert.deepEqual(calls[0].data,data);};
 const writes=h=>h.calls.filter(call=>['worker.connect','task.create','task.deployment.prepare','task.execute'].includes(call.method)||call.method.startsWith('agent.')||call.method==='worker.request'&&call.data.method!=='GET');
 
+test('a verified first-login service unlocks workspace controls before a fresh workflow has a saved binding',async()=>{
+ const storage=memoryStorage(),chat={id:'codex:current',provider:'codex',threadId:'current',taskId:'flow'};
+ const task={id:'flow',provider:'codex',threadId:'current',workflowVersion:2,workspaceChoice:'pending',parameters:{},artifacts:[],steps:[]};
+ let ready=false;storage.setItem('studio.conversation',chat.id);
+ const h=appWorkerHarness({storage,override:(method,data,standard)=>{
+  if(method==='conversation.list')return [chat];if(method==='conversation.select')return chat;if(method==='task.list')return [task];
+  if(method==='compute.resource.status')return {kind:'ssh-connection',status:'selected',selectionId:'selected',connectionId:'connection',profileId:'profile',profileVersion:1,authentication:'verified',workflowReady:ready};
+  if(method==='worker.restore')return {taskId:'flow',status:ready?'connected':'disconnected',checkedAt:1};
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();const panel=()=>h.find(node=>node.type==='./AgentTaskPage').props;assert.equal(panel().worker,false);
+  ready=true;h.emit({method:'studio/sshServiceChanged',params:{status:'connected'}});await h.flush();
+  assert.equal(panel().worker,true);assert.equal(panel().task.authoring,undefined);assert.deepEqual(writes(h),[]);
+ }finally{h.unmount();}
+});
+
 test('a first SSH workflow binding rechecks the current verified worker and unlocks workspace choices',async()=>{
  const storage=memoryStorage(),chat={id:'codex:current',provider:'codex',threadId:'current',name:'SSH draft',taskId:'flow'};
  const task={id:'flow',provider:'codex',threadId:'current',name:'SSH draft',workflowVersion:2,workspaceChoice:'pending',parameters:{},artifacts:[],steps:[]};

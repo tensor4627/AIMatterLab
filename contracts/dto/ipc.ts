@@ -1,6 +1,6 @@
 import type {Conversation} from './agent';
 import type {UpdateState} from './update';
-import type {Project,ComputeResourceActivation,ComputeResourceState} from './compute';
+import type {Project,ComputeResourceActivation,ComputeResourceState,BaseWorkspaceRequest,BaseWorkspaceResult} from './compute';
 import type {Run,ClusterRun} from './runs';
 import type {TaskEditRequest,TaskExecuteRequest,TaskInputReadRequest,TaskInputReadResult,TaskLinkRunRequest} from './workspace';
 import type {DeploymentContext,DeploymentDraftRequest,DeploymentSaveRequest,DeploymentProjectRequest,TaskRecord} from './deployment';
@@ -10,6 +10,7 @@ import type {RoadmapPreview,RoadmapExecution} from './roadmap-execution';
 type Route<Request,Response>={request:Request;response:Response};
 /** Critical authoring/execution boundary. Authorization remains a main/worker responsibility. */
 export interface StudioIpcMap {
+ 'compute.workspace.setup':Route<BaseWorkspaceRequest,BaseWorkspaceResult>;
  'updates.status':Route<Record<string,never>,UpdateState>;
  'updates.check':Route<Record<string,never>,UpdateState>;
  'updates.download':Route<Record<string,never>,UpdateState>;
