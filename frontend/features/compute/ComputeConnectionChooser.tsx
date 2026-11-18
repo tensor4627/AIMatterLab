@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {Server,Terminal,Plus,ChevronLeft,Pencil,RefreshCw,Trash2} from 'lucide-react';
 import {Modal} from "../../ui/Dialogs";
 import {invoke} from '../../api/studio';
-import {type ComputeResourceState,type ComputeProfile,type WslComputeProfile,type SshComputeProfile,type ComputeProfileRemovalRequest,type ComputeProfileRemovalResult} from '../../../contracts/dto/compute';
+import {type ComputeResourceState,type ComputeProfile,type WslComputeProfile,type SshComputeProfile,type ComputeProfileRemovalRequest,type ComputeProfileRemovalResult,type ExistingSshReference} from '../../../contracts/dto/compute';
 import {t} from "../../ui/i18n";
 import SshServiceSettings from './SshServiceSettings';
 import BaseWorkspaceSettings from './BaseWorkspaceSettings';
@@ -20,8 +20,9 @@ function draftFor(kind:'wsl'|'ssh',defaults?:Listing['defaults'],profile?:Comput
 const lines=(value:string)=>value.split('\n').map(v=>v.trim()).filter(Boolean);
 function message(error:unknown){const code=String(error);return t(code.includes('compute_profile_environment_in_use')?'当前服务通道仍在使用环境。请先停止对应服务，再只修改 Python 环境。':(code.includes('profile_conflict')||code.includes('profile_changed'))?'连接已被修改，请重新打开后编辑。':code.includes('profile_invalid')?'请核对连接名称、地址和端口。':(code.includes('profile_not_found')||code.includes('profile_unavailable'))?'连接已不存在，请刷新列表。':'无法保存或读取连接，请重试。');}
 function removalMessage(error:unknown){const code=String(error);return t(code.includes('compute_profile_in_use')?'请先断开该 SSH 连接，再删除保存项。':(code.includes('profile_conflict')||code.includes('profile_changed')||code.includes('profile_unavailable')||code.includes('profile_not_found'))?'连接已变化或已不存在；请取消删除，刷新列表后重新核对。':'删除结果尚未确认；请刷新列表核对，不会自动重试。');}
-export default function ComputeConnectionChooser({onLocal,onSsh,onClose,localConnected=false,onManageSsh,onServiceEnvironmentHelp,onServiceChange,connectionBusy=false,activeResource,initialEdit}:{initialEdit?:{profileId:string;profileVersion:number;nonce:string;section?:"service"};activeResource?:ComputeResourceState|null;onLocal:(profile:WslComputeProfile)=>void|Promise<void>;onSsh:(profile:SshComputeProfile,options?:{plain?:boolean})=>void|Promise<void>;onClose:()=>void;localConnected?:boolean;onManageSsh?:()=>void;onServiceEnvironmentHelp?:(profile:SshComputeProfile)=>void;onServiceChange?:()=>void;connectionBusy?:boolean}){
+export default function ComputeConnectionChooser({preferredKind,onLocal,onSsh,onClose,localConnected=false,onManageSsh,onServiceEnvironmentHelp,onServiceChange,connectionBusy=false,activeResource,initialEdit}:{preferredKind?:'ssh'|'wsl';initialEdit?:{profileId:string;profileVersion:number;nonce:string;section?:"service"};activeResource?:ComputeResourceState|null;onLocal:(profile:WslComputeProfile)=>void|Promise<void>;onSsh:(profile:SshComputeProfile,options?:{plain?:boolean})=>void|Promise<void>;onClose:()=>void;localConnected?:boolean;onManageSsh?:()=>void;onServiceEnvironmentHelp?:(profile:SshComputeProfile)=>void;onServiceChange?:()=>void;connectionBusy?:boolean}){
  const [listing,setListing]=useState<Listing|null>(null),[draft,setDraft]=useState<Draft|null>(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[distributions,setDistributions]=useState<string[]>([]);
+ const [references,setReferences]=useState<ExistingSshReference[]|null>(null);
  const [inventoryState,setInventoryState]=useState<'idle'|'loading'|'ready'|'empty'|'failed'>('idle');
  const inventorySequence=useRef(0),distributionEdited=useRef(false);
  const [removal,setRemoval]=useState<ComputeProfile|null>(null),[removalError,setRemovalError]=useState(''),[removalFailed,setRemovalFailed]=useState(false);
@@ -48,6 +49,24 @@ export default function ComputeConnectionChooser({onLocal,onSsh,onClose,localCon
  </div>:null;
  function edit(profile:ComputeProfile){if(operation.current)return;setDistributions([]);distributionEdited.current=false;setDraft(draftFor(profile.kind,listing?.defaults,profile));dirty.current=false;setNotice('');setError('');void inventory();}
  function create(kind:'wsl'|'ssh'){if(operation.current)return;setDistributions([]);distributionEdited.current=false;setDraft(draftFor(kind,listing?.defaults));dirty.current=false;setNotice('');setError('');void inventory();}
+ async function importSsh(ref?:string){
+  if(operation.current||!listing)return;
+  operation.current=true;setBusy(true);setError('');
+  try{
+   if(!ref){
+    const values=await invoke<ExistingSshReference[]>('ssh.existing');
+    if(mounted.current)setReferences(values);
+    return;
+   }
+   type Imported={cancelled?:boolean;name:string;host:string;username:string;port:number;ssh_client:string;identity_file:string;proxy_jump:string[];via:string[];import_review?:{requires_review:boolean}};
+   const value=await invoke<Imported>('ssh.import',{ref});
+   if(!mounted.current||value.cancelled)return;
+   if(value.import_review?.requires_review){setError(t('导入来源包含尚未支持的路由或认证引用；请手动核对连接，暂不能测试或保存。'));return;}
+   const imported:Draft={...draftFor('ssh',listing.defaults),name:value.name,host:value.host,username:value.username,port:String(value.port),mode:'key',ssh_client:value.ssh_client,identity_file:value.identity_file,proxy_jump:value.proxy_jump.join('\n'),via:value.via.join('\n')};
+   setDraft(imported);dirty.current=true;setReferences(null);setNotice(t('连接仅填入表单，尚未保存或授权'));void inventory();
+  }catch(e){if(mounted.current)setError(e instanceof Error?e.message:String(e));}
+  finally{operation.current=false;if(mounted.current)setBusy(false);}
+ }
  function patch(value:Partial<Draft>){if(value.distribution!==undefined)distributionEdited.current=true;dirty.current=true;setDraft(old=>old?{...old,...value}:old);setError('');}
  function back(){if(operation.current)return;if(dirty.current&&!window.confirm(t('放弃此连接的未保存修改？')))return;inventorySequence.current++;dirty.current=false;setDraft(null);setError('');}
  function close(){if(operation.current||busy)return;if(dirty.current&&!window.confirm(t('放弃此连接的未保存修改？')))return;onClose();}
@@ -66,11 +85,13 @@ export default function ComputeConnectionChooser({onLocal,onSsh,onClose,localCon
   try{const data:ComputeProfileRemovalRequest={id:own.id,expectedVersion:own.version},value=await invoke<ComputeProfileRemovalResult>('compute.profiles.remove',data);if(!mounted.current)return;if(value?.removed!==true||value.id!==own.id||value.version!==own.version)throw Error('Invalid removal acknowledgement');setListing(old=>old?{...old,profiles:old.profiles.filter(profile=>profile.id!==own.id),inUseProfileIds:old.inUseProfileIds?.filter(id=>id!==own.id)}:old);setRemoval(null);setNotice(t('已删除保存的连接；现有作业、环境和凭据保留。'));
   }catch(e){if(mounted.current){setRemovalError(removalMessage(e));setRemovalFailed(true);}}finally{operation.current=false;if(mounted.current)setBusy(false);}}
  const current=(p:ComputeProfile)=>p.kind==='ssh'?(activeResource?.kind==='ssh-terminal'||activeResource?.kind==='ssh-connection')&&activeResource.status==='selected'&&activeResource.profileId===p.id&&activeResource.profileVersion===p.version:!activeResource?.selectionId&&p.kind==='wsl'&&localConnected&&listing?.activeLocal&&p.distribution===listing.activeLocal.distribution&&(p.root===listing.activeLocal.root||p.root===listing.activeLocal.requestedRoot)&&p.port===listing.activeLocal.port;
+ const visibleProfiles=(listing?.profiles||[]).filter(profile=>!preferredKind||profile.kind===preferredKind);
  const environmentProfile=draft?.kind==='ssh'&&draft.id?listing?.profiles.find((profile):profile is SshComputeProfile=>profile.kind==='ssh'&&profile.id===draft.id):undefined;
  return <><Modal title={t('连接计算资源')} onClose={close} wide closeDisabled={busy}><div className="compute-resource-manager" data-testid="compute-resource-manager">
   {serviceProfile?<SshServiceSettings profile={serviceProfile} activeResource={activeResource} onLogin={profile=>connect(profile)} onClose={closeService} onChanged={onServiceChange} onBusyChange={setBusy} connectionBusy={connectionBusy}/>:!draft?<><div className="compute-resource-heading"><div><p>{t('保存常用连接，按需接入本地或集群。')}</p><small>{t('在终端登录后，点击交给 Agent 即可使用终端和作业服务。首次自动部署，以后复用。')}</small></div><button className="icon-button" aria-label={t('刷新连接列表')} disabled={loading||busy} onClick={()=>void load()}><RefreshCw size={15}/></button></div>
-   <div className="compute-resource-add"><button className="button" data-testid="compute-choice-local" disabled={loading||busy} onClick={()=>create('wsl')}><Plus size={14}/>{t('添加本地 WSL')}</button><button className="button" data-testid="compute-choice-ssh" disabled={loading||busy} onClick={()=>create('ssh')}><Plus size={14}/>{t('添加 SSH 集群')}</button></div>
-   {loading?<p role="status">{t('正在读取连接…')}</p>:!listing?.profiles.length?<div className="compute-resource-empty">{t('还没有保存的连接')}</div>:<ul className="compute-resource-list">{listing.profiles.map(profile=><li key={profile.id} data-testid="saved-compute-profile" data-profile-id={profile.id} data-profile-version={profile.version}>
+   <div className="compute-resource-add">{preferredKind!=='ssh'&&<button className="button" data-testid="compute-choice-local" disabled={loading||busy} onClick={()=>create('wsl')}><Plus size={14}/>{t('添加本地 WSL')}</button>}{preferredKind!=='wsl'&&<button className="button" data-testid="compute-choice-ssh" disabled={loading||busy} onClick={()=>create('ssh')}><Plus size={14}/>{t('添加 SSH 集群')}</button>}{preferredKind==='ssh'&&<button className="button" data-testid="compute-import-ssh" disabled={loading||busy} onClick={()=>void importSsh()}>{t('导入已有连接')}</button>}</div>
+   {references&&<label>{t('选择连接来源')}<select aria-label={t('选择连接来源')} value="" disabled={busy} onChange={event=>{if(event.target.value)void importSsh(event.target.value);}}><option value="">{t(references.length?'请选择已有连接':'未发现可导入的连接')}</option>{references.map(reference=><option key={reference.ref} value={reference.ref}>{t(reference.label)}</option>)}</select></label>}
+   {loading?<p role="status">{t('正在读取连接…')}</p>:!visibleProfiles.length?<div className="compute-resource-empty">{t('还没有保存的连接')}</div>:<ul className="compute-resource-list">{visibleProfiles.map(profile=><li key={profile.id} data-testid="saved-compute-profile" data-profile-id={profile.id} data-profile-version={profile.version}>
     <div className="compute-resource-symbol">{profile.kind==='wsl'?<Server size={20}/>:<Terminal size={20}/>}</div><div className="compute-resource-summary"><strong>{profile.name}</strong><span>{profile.kind==='wsl'?'WSL · '+profile.distribution:t('SSH 集群')+' · '+t(profile.mode==='interactive'?'交互式登录':'密钥自动登录')}{current(profile)&&<em>{t('当前连接')}</em>}</span></div>
     {profile.kind==='ssh'&&<button className="button" data-testid="compute-profile-service" disabled={busy} onClick={()=>openService(profile)}>{t('作业服务')}</button>}<button className="icon-button" aria-label={t('编辑连接')+' '+profile.name} disabled={busy} onClick={()=>edit(profile)}><Pencil size={15}/></button><button className="icon-button" data-testid="compute-profile-delete" data-profile-id={profile.id} aria-label={t('删除保存的连接')+' '+profile.name} title={t(inUse(profile)?'请先断开该 SSH 连接，再删除保存项。':'删除保存的连接')} disabled={busy||connectionBusy||!!inUse(profile)} onClick={()=>beginRemoval(profile)}><Trash2 size={15}/></button><button className="button primary" disabled={busy||connectionBusy} onClick={()=>void connect(profile)}>{t(profile.kind==='wsl'?'连接':profile.mode==='interactive'?'交互式登录':'密钥自动登录')}</button>
    </li>)}</ul>}

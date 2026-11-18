@@ -160,3 +160,30 @@ test('service settings for an older live connection load only its immutable hist
 test('a mismatched historical profile cannot configure a different connection version',async()=>{const h=harness({props:{initialEdit:{profileId:ssh.id,profileVersion:2,nonce:'wrong-history',section:'service'}},override:(method,data,standard)=>method==='compute.profiles.read'?structuredClone(ssh):standard(method,data)});try{await h.flush();assert(!h.all().some(n=>n.props?.profile&&typeof n.props.onLogin==='function'));assert(h.all().some(n=>n.props?.role==='alert'));assert(!h.calls.some(c=>c.method==='compute.profiles.save'));}finally{h.unmount();}});
 
 test('the login card keeps one SSH login action and shares its service settings entry with the editor',async()=>{const h=harness();try{await h.flush();assert(h.id('compute-profile-service'));assert(!h.all().some(n=>n.props?.['data-testid']==='compute-profile-plain-ssh'));const saved=row(h,ssh.id);assert.equal(saved.props.children.flat().filter(n=>n?.type==='button'&&n.props.className==='button primary').length,1);edit(h,ssh.id);await h.flush();assert(h.id('compute-editor-service'));assert.deepEqual(h.connected,[]);}finally{h.unmount();}});
+test('setup imports only the chosen SSH reference into an unsaved form',async()=>{
+ const ref='fixture-ref',imported={name:'Example cluster',host:'example.invalid',username:'researcher',port:2222,ssh_client:'/usr/bin/ssh',identity_file:'~/.ssh/example',proxy_jump:['jump.example.invalid'],via:[]};
+ const h=harness({profiles:[local,ssh],props:{preferredKind:'ssh'},override:(method,data,standard)=>{
+  if(method==='ssh.existing')return [{ref,label:'Example'}];
+  if(method==='ssh.import'){assert.deepEqual(data,{ref});return imported;}
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();assert.deepEqual(h.calls.map(call=>call.method),['compute.profiles.list']);
+  assert.equal(h.all().filter(n=>n.props?.['data-testid']==='saved-compute-profile').length,1);
+  h.clickId('compute-import-ssh');await h.flush();
+  h.find(n=>n.type==='select'&&n.props['aria-label']==='选择连接来源').props.onChange({target:{value:ref}});
+  await h.flush();assert.equal(h.id('compute-profile-host').props.value,imported.host);
+  assert.equal(h.id('compute-profile-username').props.value,imported.username);
+  assert.deepEqual(h.connected,[]);assert.ok(!h.calls.some(c=>c.method==='compute.profiles.save'));
+ }finally{h.unmount();}
+});
+
+test('an imported route needing review cannot become a saved or active SSH profile',async()=>{
+ const h=harness({props:{preferredKind:'ssh'},override:(m,d,standard)=>m==='ssh.existing'?[{ref:'r',label:'Example'}]:m==='ssh.import'?{import_review:{requires_review:true}}:standard(m,d)});
+ try{
+  await h.flush();h.clickId('compute-import-ssh');await h.flush();
+  h.find(n=>n.type==='select'&&n.props['aria-label']==='选择连接来源').props.onChange({target:{value:'r'}});
+  await h.flush();assert.ok(h.all().some(n=>n.props?.role==='alert'));
+  assert.ok(!h.all().some(n=>n.props?.['data-testid']==='compute-profile-editor'));assert.deepEqual(h.connected,[]);
+ }finally{h.unmount();}
+});

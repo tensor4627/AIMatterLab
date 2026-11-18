@@ -14,6 +14,7 @@
 | Worker 目录与预检查 | `node scripts/test-worker.mjs --list` / `--preflight-only` | 分别查看本库文件、核对实际可用的执行环境 |
 | 全部 Worker 检查 | `node scripts/test-worker.mjs` | AIMatterLab worker 的完整工程测试；不等于科学引擎验收 |
 | 浏览器渲染回归 | `node scripts/frontend-regression.mjs` | 真实组件、布局和输入事件，服务请求为隔离替身 |
+| 桌面新手引导 | 构建后运行 `node scripts/setup-guide-native.mjs` | Windows Electron 实测首次配置、重启续接、升级、主题及字号、教程与工作页往返。使用独立配置，截图和结果在 `.studio/setup-guide-native/` |
 | 会话侧栏定向交互 | `node scripts/conversation-sidebar-regression.mjs` | 当前 App、悬浮菜单、项目层级和键盘／主题／边缘布局；隔离模拟 IPC。设置 `STUDIO_SIDEBAR_ELECTRON=1` 使用实际 Electron 自动输入；证据写入 `.studio/conversation-sidebar-20261112/` |
 | 已暂存运行时校验 | `node scripts/package-runtime.mjs --validate` | 只读核对已存在构建资源、依赖、平台文件与版本；不安装、不打包 |
 

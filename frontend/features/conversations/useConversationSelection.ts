@@ -1,11 +1,11 @@
 import {useRef,useState,type MutableRefObject} from 'react';
-import type {Conversation} from '../../../contracts/dto/agent';
+import type {AgentProvider,Conversation} from '../../../contracts/dto/agent';
 import type {invoke as Invoke} from '../../api/studio';
 import {storedConversation,storeConversation} from './selection-preference';
 export {storedConversation,storeConversation} from './selection-preference';
 
-export interface SessionSelection{nonce:string;conversation?:Conversation;new?:boolean;pending?:boolean;error?:string;initialPrompt?:string;adoptDraft?:boolean}
-interface FreshSelection{sequence:number;promise:Promise<unknown>;failed?:boolean;planning:boolean;initialPrompt?:string}
+export interface SessionSelection{nonce:string;conversation?:Conversation;new?:boolean;pending?:boolean;error?:string;initialPrompt?:string;provider?:AgentProvider;adoptDraft?:boolean}
+interface FreshSelection{sequence:number;promise:Promise<unknown>;failed?:boolean;planning:boolean;initialPrompt?:string;provider?:AgentProvider}
 export interface ConversationSelectionPorts{
  invoke:typeof Invoke;
  mounted:MutableRefObject<boolean>;
@@ -51,14 +51,14 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
    setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});
   }catch(error){if(seq===conversationSelectionSeq.current&&mounted.current)onSelectionError(error);}
  }
- async function newConversation(planning=false,initialPrompt?:string){
+ async function newConversation(planning=false,initialPrompt?:string,provider?:AgentProvider){
   if(agentBusy&&!freshSelectionPending.current?.failed||editorDirty&&!confirmReplace())return;
   const previous=selectedConversationRef.current;beforeSelection();const sequence=++conversationSelectionSeq.current;beginWorkerGate();clearIntent();
-  const promise=invoke('conversation.select',{new:true});freshSelectionPending.current={sequence,promise,planning,initialPrompt};setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true});
+  const promise=invoke('conversation.select',{new:true});freshSelectionPending.current={sequence,promise,planning,initialPrompt,provider};setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true});
   try{
    await promise;if(sequence!==conversationSelectionSeq.current||!mounted.current)return;
    freshSelectionPending.current=null;conversationChanged(null);setPlanningMode(planning);onFreshSelected();
-   setSessionSelection({nonce:crypto.randomUUID(),new:true,...initialPrompt!==undefined?{initialPrompt}:{}});void observeWorker();
+   setSessionSelection({nonce:crypto.randomUUID(),new:true,...initialPrompt!==undefined?{initialPrompt}:{},...provider?{provider}:{}});void observeWorker();
   }catch(error){
    if(sequence!==conversationSelectionSeq.current||!mounted.current)return;onError(error);
    if(previous)try{
@@ -69,6 +69,6 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
    setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true,error:language==='en'?'The new chat is not ready. Try again.':'新对话尚未准备好，请重试。'});
   }
  }
- const retryNewConversation=()=>newConversation(freshSelectionPending.current?.planning||false,freshSelectionPending.current?.initialPrompt);
+ const retryNewConversation=()=>newConversation(freshSelectionPending.current?.planning||false,freshSelectionPending.current?.initialPrompt,freshSelectionPending.current?.provider);
  return {conversations,setConversations,selectedConversationId,setSelectedConversationId,selectedConversationRef,conversationSelectionSeq,sessionSelection,setSessionSelection,freshSelectionPending,agentBusy,setAgentBusy,planningMode,setPlanningMode,conversationChanged,acceptAgentConversation,chooseConversation,newConversation,retryNewConversation};
 }

@@ -11,8 +11,8 @@ import type {CliReadiness} from '../../../contracts/dto/cli-runtime';
 import ModelProviders from './ModelProviders';
 import type {CancelProviderLoginRequest} from '../../../contracts/dto/agent';
 const loginPhases:Record<string,string>={starting:'正在准备登录',authorizing:'等待授权',completed:'已登录',failed:'登录失败',cancelled:'已取消登录',signed_out:'尚未登录'};
-export default function ProviderLogin(props:Parameters<typeof LegacyProviderLogin>[0]){if(props.provider==='qwen'||props.provider==='compatible')return props.embedded?<ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured}/>:<Modal title={t('模型与 API')} onClose={props.onClose}><ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured}/></Modal>;return <LegacyProviderLogin {...props}/>;}
-function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=false,disabled=false}:{projectId?:string;embedded?:boolean;disabled?:boolean;provider:AgentProvider;onClose:()=>void;onConfigured:()=>void;onError:(e:unknown)=>void}){
+export default function ProviderLogin(props:Parameters<typeof LegacyProviderLogin>[0]){if(props.provider==='qwen'||props.provider==='compatible')return props.embedded?<ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured} onTested={props.onTested}/>:<Modal title={t('模型与 API')} onClose={props.onClose}><ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError} onConfigured={props.onConfigured} onTested={props.onTested}/></Modal>;return <LegacyProviderLogin {...props}/>;}
+function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onError,embedded=false,disabled=false}:{projectId?:string;embedded?:boolean;disabled?:boolean;provider:AgentProvider;onClose:()=>void;onConfigured:()=>void;onTested?:(model:string)=>void;onError:(e:unknown)=>void}){
  const [confirmRemove,setConfirmRemove]=useState(false),[baseUrl,setBaseUrl]=useState(''),[apiLabel,setApiLabel]=useState('');
  const [sharePublicGuides,setSharePublicGuides]=useState(false),[sharingTouched,setSharingTouched]=useState(false);
  const [reasoningMode,setReasoningMode]=useState('omit'),[reasoningEffort,setReasoningEffort]=useState('');
@@ -61,7 +61,7 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onError,embedded=fal
   if(disabled||operation.current||busy||testing||dirty||!accountLoaded)return;
   const epoch=lifecycle.current,submittedRevision=revision.current,current=()=>epoch===lifecycle.current&&submittedRevision===revision.current;
   operation.current=true;setTesting(true);setTestResult('');
-  try{const result=await invoke('agent.testConnection',{provider});if(!current())return;const account=await invoke('agent.account',{provider});if(!current())return;setTestResult(t('测试调用成功')+' · '+result.model);setStatus(account);}catch(error){if(current())setTestResult(error instanceof Error?error.message:String(error));}finally{if(epoch===lifecycle.current){operation.current=false;setTesting(false);}}
+  try{const result=await invoke('agent.testConnection',{provider});if(!current())return;const account=await invoke('agent.account',{provider});if(!current())return;setTestResult(t('测试调用成功')+' · '+result.model);setStatus(account);if(result.status==='passed')onTested?.(result.model);}catch(error){if(current())setTestResult(error instanceof Error?error.message:String(error));}finally{if(epoch===lifecycle.current){operation.current=false;setTesting(false);}}
  }
  async function cancelCodex(){
   if(operation.current||disabled||!status.loginId)return;

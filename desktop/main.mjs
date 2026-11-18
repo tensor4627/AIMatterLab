@@ -7,6 +7,7 @@ import {cliRuntimeRequest} from '../contracts/agent/cli-runtime.mjs';
 import {createPerformanceTimeline} from './platform/performance.mjs';
 import {clusterDownloadRequest} from '../contracts/compute/cluster-download.mjs';
 import {installedWorkspace,studioProfileRoot,workspaceSessionDirectory} from './platform/studio-profile.mjs';
+import {createSetupGuide} from './platform/setup-guide.mjs';
 import {terminalExecutionCache} from './platform/terminal-execution-cache.mjs';
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
@@ -139,7 +140,7 @@ if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.en
 else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',improvementsVerifying?'verification-v'+app.getVersion():providerVerifying?'verification-providers':app.isPackaged?'verification-packaged':'verification-desktop'));
 else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,portableDir:process.env.PORTABLE_EXECUTABLE_DIR,execPath:process.execPath});fs.mkdirSync(profile,{recursive:true});app.setPath('userData',profile);}
 if(workspace)app.setPath('sessionData',workspaceSessionDirectory(workspace,app.getPath('userData')));
-let window, catalog, settings, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
+let window, catalog, settings, setupGuide, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
 let shuttingDown=false,desktopShutdown,agentConnectionSerial=0;
 const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&process.arch==='x64'?workspace:null,currentVersion:app.getVersion(),
   fetchApi:(url,options)=>net.fetch(url,options),install:launchWorkspaceUpdate,quit:()=>app.quit(),
@@ -198,9 +199,15 @@ function openUrl(url) {
 
 async function initialize() {
 performanceTimeline.mark('desktop-initialize');
-catalog = new Catalog(path.join(app.getPath('userData'),'studio'));
+const profileDirectory=app.getPath('userData'),catalogRoot=path.join(profileDirectory,'studio');
+const existingProfile=fs.existsSync(path.join(catalogRoot,'catalog.sqlite'));
+catalog = new Catalog(catalogRoot);
+const explicitProfile=Boolean(process.env.STUDIO_PROFILE_DIR)||verifying;
+setupGuide=createSetupGuide({catalog,existingProfile,directory:explicitProfile?profileDirectory:path.dirname(profileDirectory),directoryKind:explicitProfile?'profile':'workspace',openDirectory:directory=>shell.openPath(directory)});
 const savedSettings=catalog.get('settings','main');
-settings = { ...defaults, codexPath:findCodex(),kimiPath:'',qwenPath:'', ...savedSettings };
+const firstLanguage=!existingProfile&&!verifying ? {language:/^zh\b/i.test(app.getPreferredSystemLanguages()[0]||app.getLocale())?'zh-CN':'en'} : {};
+settings = { ...defaults, ...firstLanguage, codexPath:findCodex(),kimiPath:'',qwenPath:'', ...savedSettings };
+if(!savedSettings&&firstLanguage.language)catalog.put('settings','main',firstLanguage);
 if(workspace){
  const oldDefault=path.join(userCacheBase,'user-cache','skills');
  const legacy=savedSettings?.userCacheDirectory || (fs.existsSync(previousSkillRoot)?previousSkillRoot:savedSettings?oldDefault:null);
@@ -465,7 +472,9 @@ handle('cluster.download',async value=>{
  return {path:file,bytes:offset,sha256:first.sha256};
 });
 handle('agent.bindProject',({projectId,provider})=>{providerId(provider);if(typeof projectId!=='string'||!projectId||projectId.length>100)throw Error('Select a project');settings=catalog.put('settings','main',{...settings,projectAgents:{...settings.projectAgents,[projectId]:provider}});return {projectId,provider};});
-handle('state',() => ({ settings, threads:catalog.list('thread'), ssh:catalog.list('ssh') }));
+handle('state',() => ({ settings, threads:catalog.list('thread'), ssh:catalog.list('ssh'), setupGuide:verifying?null:setupGuide.info() }));
+handle('onboarding.progress',request=>setupGuide.progress(request));
+handle('onboarding.openDirectory',request=>setupGuide.open(request));
 handle('diagnostics.performance',value=>{
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid performance observation');
  if(Object.keys(value).length===0)return performanceTimeline.snapshot();

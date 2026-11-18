@@ -31,6 +31,8 @@ Kimi/Qwen CLI 单独发现和安装。在需要相应 CLI 的入口，应用先�
 
 日常从 Git 源码启动：双击根目录 `Launch-AIMatterLab.cmd`，或运行 `pnpm run source`。首次自动准备依赖并构建；以后关闭桌面，在同一目录 `git pull` 再启动，沿用同一套 `.config` 设置与缓存。参见[首次启动、增量更新与 profile](docs/source-desktop.md)。
 
+当前源码在全新配置首次启动时打开新手引导，可选择语言、外观、模型服务商及本地或集群算力。完成页提供铜晶胞 MD 操作示例和环境短例入口。已有用户可点击标题栏的「新手引导」，从工作页点击「返回新手引导」可回到上一步。
+
 开发运行（Node 22.19+，pnpm 11）：
 
 ```powershell

@@ -45,6 +45,8 @@ if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.9' -or $rel
 
 ## 本机 Agent CLI：先发现，缺失时由用户选择下载
 
+当前源码桌面的 Qwen 与自定义 API 使用 API 配置入口。按用户选择填写订阅或端点、认证与模型，通过该服务商实际调用核验。以下 CLI 步骤适用于 Kimi，以及明确使用 Qwen ACP 的旧环境。
+
 桌面安装包不再内置 Kimi/Qwen。只检查用户选定的服务商：保留有效手动路径，检查 `STUDIO_KIMI_CLI` / `STUDIO_QWEN_CLI` 和本机 `PATH` / `PATHEXT`，再复用已校验的 AIMatterLab 专用安装。发现程序后核对当前 checkout 的兼容版本和真实 ACP 初始化；版本不兼容时显示实际版本，不自动升级或替换本机程序。Windows npm/pnpm 包装入口解析到已核对的真实程序，不通过 shell 执行包装脚本。
 
 用户在同一安装 profile 中点击对应登录或连接入口，CLI 缺失或不兼容时显示下载界面，可重新检测、选择本地程序、下载兼容版本或取消。只有用户选择下载后，才下载锁定的官方 npm 包，校验完整性，在该 profile 的独立版本目录安装；界面显示下载、校验、安装与接口检查进度。保留原有本地 CLI、有效手动配置和登录凭据，不运行包安装脚本。下载成功只代表 CLI 就绪，用户仍需完成登录，真实模型回复另行验证。集群端不安装 Agent CLI。
