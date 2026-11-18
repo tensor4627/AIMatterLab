@@ -1,3 +1,4 @@
+import SetupLesson,{type SetupLessonLocation} from '../features/onboarding/SetupLesson';
 import type {SetupGuideInfo,SetupPage,SetupProgress,SetupProgressRequest} from '../../contracts/dto/setup-guide';
 import type {ModelReply,SetupPreferences,SetupVisit} from '../features/onboarding/SetupAssistant';
 import {CircleHelp} from 'lucide-react';
@@ -121,9 +122,10 @@ export default function App(){
  const updates=useWorkspaceUpdate();
  const updateVisible=['available','downloading','verifying','ready'].includes(updates.state.phase);
  const [guideInfo,setGuideInfo]=useState<SetupGuideInfo|null>(null),[guidePage,setGuidePage]=useState<SetupPage|null>(null);
- const [guideAway,setGuideAway]=useState(false),[guideKind,setGuideKind]=useState<'wsl'|'ssh'>();
+ const [lesson,setLesson]=useState<SetupLessonLocation|null>(null),[guideKind,setGuideKind]=useState<'wsl'|'ssh'>();
  const [guideProvider,setGuideProvider]=useState<{provider:AgentProvider;nonce:string}>(),[guideReply,setGuideReply]=useState<ModelReply|null>(null);
- const guideShowing=guidePage!==null&&!guideAway;
+ const guideShowing=guidePage!==null&&!lesson;
+ const lessonOpener=useRef<HTMLElement|null>(null);
  const [computeChooser,setComputeChooser]=useState(false);
  const [computeChooserEdit,setComputeChooserEdit]=useState<{profileId:string;profileVersion:number;nonce:string;section?:"service"}|undefined>();
  const [sshGuide,setSshGuide]=useState<SshGuideState|null>(null),[clusterSelection,setClusterSelection]=useState<string|null>(null);
@@ -463,11 +465,11 @@ export default function App(){
  }
  function replaceTask(run:Run){openSeq.current++;invalidateRefresh();setRuns(old=>[run,...old.filter(r=>r.id!==run.id)]);setSelected(run.id);setSection('task:'+run.id);}
  function openWorkflow(id:string){openSeq.current++;setSection('workflow:'+id);setSelected(null);}
- function go(id:string){if(section==='editor'&&id!=='editor'&&!confirmReplace())return;conversationSelectionSeq.current++;deploymentOpening.current=null;setPrimaryPanel('workspace');openSeq.current++;setSection(id);setSelected(id.startsWith('task:')?id.slice(5):null);}
+ function go(id:string){if(section==='editor'&&id!=='editor'&&!confirmReplace())return;conversationSelectionSeq.current++;deploymentOpening.current=null;setPrimaryPanel('workspace');openSeq.current++;setSection(id);setSelected(id.startsWith('task:')?id.slice(5):null);return true;}
  async function guideProgress(page:SetupProgress){
   const info=await invoke<SetupGuideInfo>('onboarding.progress',{page} satisfies SetupProgressRequest);
   if(!info||page==='complete'&&info.page!=='complete')throw Error(t('引导进度未保存，请重试。'));
-  setGuideInfo(info);setGuidePage(page==='complete'?null:page);setGuideAway(false);
+  setGuideInfo(info);setGuidePage(page==='complete'?null:page);setLesson(null);
  }
  async function guidePreferences(patch:SetupPreferences){
   const saved=await invoke<Settings>('settings',patch);
@@ -476,7 +478,9 @@ export default function App(){
   if(patch.agentProvider){setGuideReply(null);setGuideProvider({provider:patch.agentProvider,nonce:crypto.randomUUID()});}
  }
  function openSetupGuide(){
-  setGuideAway(false);if(!guidePage)setGuidePage('welcome');else requestAnimationFrame(()=>document.getElementById('setup-heading')?.focus());
+  setLesson(null);if(!guidePage)setGuidePage('welcome');else requestAnimationFrame(()=>{const anchor=lessonOpener.current;
+   (anchor?.isConnected&&anchor.getClientRects().length?anchor:document.getElementById('setup-heading'))?.focus({preventScroll:true});lessonOpener.current=null;
+  });
   const revision=settingsRevision.current;
   void invoke<{settings:Settings}>('state').then(state=>{
    if(!mounted.current||revision!==settingsRevision.current||!state?.settings)return;
@@ -485,30 +489,31 @@ export default function App(){
  }
  function connectFromGuide(kind:'wsl'|'ssh'){
   if(kind==='wsl'&&!isSshResource(computeResource)&&!selectedConversationRef.current?.taskId){openLocalCompute();return;}
+  lessonOpener.current=document.activeElement as HTMLElement|null;
   setGuideKind(kind);setComputeChooserEdit(undefined);setComputeChooser(true);
  }
- function visitFromGuide(destination:SetupVisit,shortCase?:string){
-  setGuideAway(true);
+ async function visitFromGuide(destination:SetupVisit,shortCase?:string){
+  lessonOpener.current=document.activeElement as HTMLElement|null;
   const english=settings.language==='en',provider=settingsRef.current.agentProvider||'codex';
   switch(destination){
    case 'model-test': {
     const message=english?'Reply with OK to test this model connection.':'请回复 OK，测试这条模型连接。';
-    void newConversation(false,message,provider);
+    if(await newConversation(false,message,provider))setLesson({destination});
     break;
    }
    case 'tour-goal': {
     const goal=english?'I want to run a short molecular dynamics simulation of FCC copper and inspect its temperature and trajectory. List the structure, potential and compute environment I need, then draft a workflow for me to review.':
       '我想对面心立方铜做一次分子动力学短试算，观察温度和轨迹。请先列出需要的结构、势模型和计算环境，再给我一份待核对的流程草稿。';
-    void newConversation(true,goal,provider);
+    if(await newConversation(true,goal,provider))setLesson({destination});
     break;
    }
    case 'short-check': {
     const check=english?`Use studio-install-readiness to prepare the installation check ${shortCase}. Use the selected resource and registered environment. Show me the inputs and resources before running.`:
       `请按 studio-install-readiness 准备安装短例 ${shortCase}。沿用所选计算资源和已登记环境，先给我看输入和资源，再决定执行。`;
-    void newConversation(true,check,provider);
+    if(await newConversation(true,check,provider))setLesson({destination,shortCase});
     break;
    }
-   default: go(destination);
+   default: if(go(destination))setLesson({destination});
   }
  }
  function openSettings(){settingsBackup.current=settings;settingsWorkerReady.current=workerReady.current;setModal('settings');}
@@ -541,7 +546,7 @@ export default function App(){
   }catch(e){onError(e);}finally{if(explicitConnection.current===token)explicitConnection.current=null;}
  }
 
- function connectSavedSsh(profile:SshComputeProfile,options?:{plain?:boolean}){if(guideShowing)setGuideAway(true);setGuideKind(undefined);setComputeChooser(false);setComputeChooserEdit(undefined);setPrimaryPanel('workspace');setTerminalRequest({nonce:crypto.randomUUID(),kind:'ssh',mode:profile.mode,profileId:profile.id,version:profile.version,profileName:profile.name,...computeResource?.kind==="ssh-connection"&&!!computeResource.connectionId&&computeResource.profileId===profile.id&&computeResource.profileVersion===profile.version?{connectionId:computeResource.connectionId}:{},connectionMode:options?.plain?'plain':'managed'});showTerminal();}
+ function connectSavedSsh(profile:SshComputeProfile,options?:{plain?:boolean}){if(guideShowing)setLesson({destination:'ssh-login'});setGuideKind(undefined);setComputeChooser(false);setComputeChooserEdit(undefined);setPrimaryPanel('workspace');setTerminalRequest({nonce:crypto.randomUUID(),kind:'ssh',mode:profile.mode,profileId:profile.id,version:profile.version,profileName:profile.name,...computeResource?.kind==="ssh-connection"&&!!computeResource.connectionId&&computeResource.profileId===profile.id&&computeResource.profileVersion===profile.version?{connectionId:computeResource.connectionId}:{},connectionMode:options?.plain?'plain':'managed'});showTerminal();}
  function configureTerminalSsh(ref?:{profileId:string;profileVersion:number;section?:"service"}){setComputeChooserEdit(ref?{...ref,nonce:crypto.randomUUID()}:undefined);setComputeChooser(true);}
  function openCurrentServiceUpdate(expected:NonNullable<ReturnType<typeof selectedRecordScope>>){
   const value=computeResourceRef.current,observed=recordServiceRef.current;
@@ -549,7 +554,7 @@ export default function App(){
   configureTerminalSsh({profileId:value.profileId,profileVersion:value.profileVersion,section:'service'});
  }
  function openLocalCompute(){if(modal==='settings'){if(settingsSavingRef.current)return;closeSettings();}setComputeChooser(false);void connectWorker();}
- function openSshConfiguration(){if(guideShowing)setGuideAway(true);setGuideKind(undefined);if(modal==='settings'){if(settingsSavingRef.current)return;closeSettings();}setComputeChooser(false);go('ssh');}
+ function openSshConfiguration(){setGuideKind(undefined);if(modal==='settings'){if(settingsSavingRef.current)return;closeSettings();}setComputeChooser(false);if(go('ssh')&&guideShowing)setLesson({destination:'ssh-settings'});}
  function openProjects(){if(modal==='settings'){if(settingsSavingRef.current)return;closeSettings();}setModal('projects');}
  function closeSettings(){if(settingsSavingRef.current)return;const backup=settingsBackup.current,wasReady=settingsWorkerReady.current;settingsBackup.current=null;settingsWorkerReady.current=false;if(backup){setSettings(backup);setLanguage(backup.language||'zh-CN');}setModal('');if(wasReady&&!workerReady.current)void observeWorker();}
  function openDeployment(taskId:string):Promise<void>{
@@ -664,8 +669,10 @@ export default function App(){
  function showAgent(){setAgentVisible(true);setPrimaryPanel('agent');requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.agent-panel .composer textarea')?.focus());}
  function selectToolSkill(value:SkillAttachment){setSkill(value);setAgentVisible(true);}
  function toggleAgent(){if(!agentVisible){showAgent();return;}if(singlePanel){setPrimaryPanel(agentPanelVisible?'workspace':'agent');return;}setAgentVisible(false);}
+ const lessonBubble=lesson&&guidePage&&!modal&&!command&&!computeChooser&&!computeGuide&&!sshGuide
+  ? <SetupLesson lesson={lesson} english={settings.language==='en'} onReturn={openSetupGuide}/> : null;
  return <div className={guideShowing?"application showing-setup":"application"}>
-  <header className="titlebar"><div className="brand"><span className="brand-mark"><Atom size={19}/></span><strong>{product.name}</strong><button className={'version'+(updateVisible?' has-update':'')} aria-label={tr('软件更新')} title={tr('软件更新')} onClick={()=>setModal('updates')}>{updateVisible?tr('软件更新')+' '+updates.state.version:STUDIO_VERSION}</button></div><div className="title-path"><Folder size={12}/>{project?projectLabel(project):tr('科学计算工作台')}</div>{guideInfo&&!guideShowing&&<button className={'setup-help'+(guideAway?' resume':'')} data-testid="open-setup-guide" disabled={!!modal||computeChooser||!!computeGuide||!!sshGuide} onClick={openSetupGuide}><CircleHelp size={15}/>{t(guideAway?'返回新手引导':'新手引导')}</button>}<div className="window-buttons"><button aria-label={tr('最小化')} onClick={()=>void invoke('window',{action:'minimize'}).catch(()=>{})}><Minus size={13}/></button><button aria-label={tr('最大化或还原')} title={tr('最大化或还原')} onClick={()=>void invoke('window',{action:'maximize'}).catch(()=>{})}><Square size={11}/></button><button className="close" aria-label={tr('关闭')} onClick={()=>void invoke('window',{action:'close'}).catch(()=>{})}><X size={14}/></button></div></header>
+  <header className="titlebar"><div className="brand"><span className="brand-mark"><Atom size={19}/></span><strong>{product.name}</strong><button className={'version'+(updateVisible?' has-update':'')} aria-label={tr('软件更新')} title={tr('软件更新')} onClick={()=>setModal('updates')}>{updateVisible?tr('软件更新')+' '+updates.state.version:STUDIO_VERSION}</button></div><div className="title-path"><Folder size={12}/>{project?projectLabel(project):tr('科学计算工作台')}</div>{guideInfo&&!guidePage&&<button className="setup-help" data-testid="open-setup-guide" disabled={!!modal||computeChooser||!!computeGuide||!!sshGuide} onClick={openSetupGuide}><CircleHelp size={15}/>{t('新手引导')}</button>}<div className="window-buttons"><button aria-label={tr('最小化')} onClick={()=>void invoke('window',{action:'minimize'}).catch(()=>{})}><Minus size={13}/></button><button aria-label={tr('最大化或还原')} title={tr('最大化或还原')} onClick={()=>void invoke('window',{action:'maximize'}).catch(()=>{})}><Square size={11}/></button><button className="close" aria-label={tr('关闭')} onClick={()=>void invoke('window',{action:'close'}).catch(()=>{})}><X size={14}/></button></div></header>
   <div inert={guideShowing||undefined} className={"shell workspace-shell "+(centerLayout?'agent-center ':'')+(singlePanel?'single-panel':'')} style={{'--agent-width':displayAgentWidth+'px','--conversation-width':sidebarWidth+'px'} as React.CSSProperties} data-primary-panel={agentVisible?primaryPanel:'workspace'}>
    <nav hidden={sidebarExpanded} className="navigation-rail" aria-label={t('主导航')}><Tooltip asChild content={t('工作区')}><button data-testid={sidebarExpanded?undefined:"navigate-home"} aria-label={t('工作区')} aria-current={primaryDestination(section)==='home'?'page':undefined} onClick={()=>go(retainedTask?'agent-task:'+retainedTask.id:'home')}><Home size={21}/></button></Tooltip><Tooltip asChild content={t('工具与资源')}><button data-testid={sidebarExpanded?undefined:"navigate-tools"} aria-label={t('工具与资源')} aria-current={primaryDestination(section)==='tools'?'page':undefined} onClick={()=>go('tools')}><BookOpen size={21}/></button></Tooltip><Tooltip asChild content={t('运行记录')}><button data-testid={sidebarExpanded?undefined:"navigate-runs"} aria-label={t('运行记录')} aria-current={primaryDestination(section)==='runs'?'page':undefined} onClick={()=>go('runs')}><Clock size={21}/></button></Tooltip><button aria-label={t(windowWidth<1180?'历史会话':'展开导航')} onClick={()=>{if(windowWidth<1180)setModal('history');else setSidebarVisible(true);}}><PanelRightOpen size={20}/></button><button aria-label={t('连接计算资源')} onClick={openComputeResources}><PlugZap size={20}/></button><span className="rail-spacer"/><Tooltip asChild content={t('设置')}><button aria-label={t('设置')} onClick={openSettings}><SettingsIcon size={21}/></button></Tooltip></nav>
    <nav className="sidebar" aria-label={t('工作台导航')} hidden={!sidebarExpanded}><div className="sidebar-title"><span>{product.name}</span><button className="icon-button" aria-label={t('收起导航')} onClick={()=>setSidebarVisible(false)}><PanelRightClose size={16}/></button></div><div className="primary-navigation">{([['home','工作区',Home],['runs','运行记录',Clock],['tools','工具与资源',Layers3]] as const).map(([id,label,Icon])=><button key={id} data-testid={sidebarExpanded?'navigate-'+id:undefined} aria-current={primaryDestination(section)===id?'page':undefined} onClick={()=>go(id==='home'&&retainedTask?'agent-task:'+retainedTask.id:id)}><Icon size={18}/><span>{t(label)}</span></button>)}</div>
@@ -681,6 +688,7 @@ export default function App(){
 <div className="sidebar-tools"><button aria-label={t('设置')} onClick={openSettings}><SettingsIcon size={16}/><span>{t('设置')}</span></button><button title={tr("切换主题")} aria-label={tr("切换主题")} onClick={()=>{const theme=settings.theme==='dark'?'light':'dark';setSettings({...settings,theme});void invoke('settings',{theme}).catch(onError);}}>{settings.theme==='dark'?<Sun size={15}/>:<Moon size={15}/>}</button></div></div>
    </nav>{sidebarExpanded&&<PaneDivider label={t('调整会话列表宽度')} value={sidebarWidth} min={170} max={Math.min(420,windowWidth-360)} onChange={setSidebarWidth}/>}
    <section className="workspace-stage">
+    {lessonBubble}
     <div className="workspace-toolbar" data-testid="workspace-modebar">
      <div className="workspace-current-title"><ModuleIcon module={workspaceModule(section,selectedRun?.engine||'')} size={16}/><strong>{tr(tabName(section)||sections.find(value=>value[0]===section)?.[1]||(section.startsWith('task:')?selectedRun?.name:section==='editor'?editor.name:'工作区')||'工作区')}</strong></div>
      {needsPanelSelection&&<div className="panel-selection"><button data-testid="show-workspace" aria-pressed={workspacePanelVisible} onClick={()=>setPrimaryPanel('workspace')}>{t('工作区')}</button><button data-testid="show-agent" aria-pressed={agentPanelVisible} onClick={showAgent}>{t('对话')}</button></div>}
@@ -714,7 +722,7 @@ export default function App(){
      {section==='editor'&&<div className="editor-workspace"><div className="toolbar"><span><FileCode2 size={14}/>{editor.name}{editorDirty?' *':''}</span><input value={editor.name} aria-label={tr("文件路径")} onChange={e=>setEditor({...editor,name:e.target.value})}/><button className="button" disabled={!worker||!project||!!editorSave} onClick={()=>void saveInput().catch(onError)}><Save size={14}/>{tr("保存到项目输入")}</button><button className="button" disabled={!!editorSave} onClick={()=>void saveInput('windows').catch(onError)}>{tr("另存到 Windows")}</button><LoadingFeedback busy={!!editorSave} label={tr("正在保存输入文件…")}/></div><CodeEditor value={editor.source} onChange={v=>{if(v===editorSource.current)return;setEditor(old=>({...old,source:v}));setEditorDirty(true);}} theme={settings.theme}/><div className="editor-path">{tr(editor.path||'尚未保存')}{tr("· Python 源码不会在前端执行")}</div></div>}
      {section==='assets'&&<div className="page"><StructureBuilder projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><MaterialsProjectSearch projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><AssetInspector projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><div className="asset-list">{assets.filter(a=>(a as any).project_id===projectId).map(a=><div className="asset-row" key={a.id}><Database size={17}/><div><strong>{a.name}</strong><small>{a.path}</small></div><span className="tag">{a.kind}</span><span className="mono">{a.sha256.slice(0,12)}</span></div>)}</div></div>}
      {section==='environments'&&<ComputeEnvironments worker={worker&&!disconnected} workerGeneration={workerHydrationEpoch.current} environments={environments} onRefresh={()=>refresh()} onConnect={openComputeResources} onManual={newEnvironment} onAgent={askAgent} onCluster={openComputeResources} onError={onError}/>}
-     {section==='ssh'&&<ClusterPage selectedClusterId={clusterSelection||undefined} serviceVersion={serviceVersion} onAuthenticate={openSshGuide} onConnectCompute={connectWorker} worker={worker} project={project} settings={settings} draft={clusterDraft} onQueueTest={text=>newConversation(true,text)} onError={onError} onRefresh={()=>void refresh()} onAgent={askAgent} onRun={id=>setSection('cluster-run:'+id)} onTerminal={startClusterTerminal}/>}
+     {section==='ssh'&&<ClusterPage selectedClusterId={clusterSelection||undefined} serviceVersion={serviceVersion} onAuthenticate={openSshGuide} onConnectCompute={connectWorker} worker={worker} project={project} settings={settings} draft={clusterDraft} onQueueTest={async text=>{await newConversation(true,text);}} onError={onError} onRefresh={()=>void refresh()} onAgent={askAgent} onRun={id=>setSection('cluster-run:'+id)} onTerminal={startClusterTerminal}/>}
      {section==='extensions'&&<div className="page"><ToolPackagesPanel provider={agentProvider} onSelect={selectToolSkill}/></div>}
      {section==='skills'&&<><div className="skill-navigation"><button className="button" onClick={()=>go('relations')}>{t('计算链条')}</button><button data-testid="navigate-tools" className="button" onClick={()=>go('tools')}>{t('软件功能')}</button></div><SkillsWorkbench provider={agentProvider} settings={settings} onSaved={setSettings} selected={skill} onSelect={selectToolSkill} onError={onError}/></>}
      {section.startsWith('task:')&&(!runSourceReady||!runs.some(r=>r.id===section.slice(5)))&&<div className="page" data-testid="run-record-unavailable" data-observed={runSourceReady?'current':'unconfirmed'}><Empty title={tr(runSourceReady?'当前连接未返回此记录':'运行记录尚待核对')} body={tr(runSourceReady?'当前连接已读取运行列表，但未返回此记录。请核对原作业服务；此提示不代表记录已被删除。':'尚未取得当前服务的运行记录。恢复原作业服务后再核对，当前页面将保留。')} action={<button className="button" disabled={connecting} onClick={()=>worker?void refresh():void connectWorker()}>{tr(worker?'同步记录':'连接 WSL')}</button>}/></div>}
@@ -726,7 +734,7 @@ export default function App(){
    </main>
    {<>{agentVisible&&<PaneDivider className="agent-divider" label={t('调整对话与内容比例')} value={displayAgentWidth} min={260} max={paneMax} reverse={!centerLayout} onChange={conversationWorkspace?setAgentWidth:setOverviewAgentWidth}/>} <Agent setupProviderChoice={guideProvider} onSetupReply={setGuideReply} onOpenHistory={()=>setModal('history')} onCollapse={()=>setAgentVisible(false)} visibleWorkflowId={workspacePanelVisible&&section.startsWith('agent-task:')&&agentTasks.some(task=>task.id===section.slice(11))?section.slice(11):null} onOpenOriginalRun={id=>openWorkflowRun(id,'cluster',activeFlow)} onOpenCluster={()=>{setClusterSelection(null);go('ssh');}} computeConnected={worker&&!disconnected} computeResource={computeResource} onComputeResource={acceptComputeResource} onConnectCompute={openComputeResources} onReviewWorker={connectWorker} conversationGroupId={chatGroupId} onOpenAccounts={openAccounts} onProviderChange={setAgentProvider} onAttachmentClear={()=>setSkill(undefined)} onAttachmentConsumed={id=>setSkill(current=>current?.attachmentId===id?undefined:current)} onNewConversation={retryNewConversation} hidden={!agentPanelVisible} sessionSelection={sessionSelection} onConversation={acceptAgentConversation} onBusyChange={setAgentBusy} planningMode={planningMode} onPlanningModeChange={setPlanningMode} projectId={projectId} onOpenTask={id=>{setSection('agent-task:'+id);setAgentVisible(true);}} intent={agentIntent} context={context} onError={onError} skill={skill} width={displayAgentWidth} onOpenRun={id=>openWorkflowRun(id,'local',activeFlow)}/></>}
   </div></section></div>
-  {guidePage&&guideInfo&&<div className="setup-layer" hidden={guideAway}><SetupAssistant info={guideInfo} page={guidePage} settings={settings} localConnected={!isSshResource(computeResource)&&worker&&!disconnected} resource={computeResource} agentBusy={agentBusy} reply={guideReply} onReply={setGuideReply} onPreferences={guidePreferences} onProgress={guideProgress} onConnect={connectFromGuide} onVisit={visitFromGuide}/></div>}
+  {guidePage&&guideInfo&&<div className="setup-layer" hidden={!!lesson}><SetupAssistant info={guideInfo} page={guidePage} settings={settings} localConnected={!isSshResource(computeResource)&&worker&&!disconnected} resource={computeResource} agentBusy={agentBusy} reply={guideReply} onReply={setGuideReply} onPreferences={guidePreferences} onProgress={guideProgress} onConnect={connectFromGuide} onVisit={visitFromGuide}/></div>}
   {error&&<div className="toast" role="alert"><DiagnosticNotice record={error}/><button className="icon-button" aria-label={tr('关闭')} onClick={()=>setError(null)}><X size={16}/></button></div>}
   {deleteTarget&&<Modal title={t('删除对话')} onClose={()=>{if(!deleting)setDeleteTarget(null);}}><p>{deleteTarget.name}</p><p>{t('删除此会话及附带流程页面。已提交作业和计算文件保留。')}</p><div className="button-row"><button className="button" disabled={deleting} onClick={()=>setDeleteTarget(null)}>{t('取消')}</button><button className="button danger" disabled={deleting||agentBusy} onClick={()=>void deleteConversation()}>{t(deleting?'删除中…':'确认删除')}</button></div></Modal>}
   {modal==='history'&&<Modal title={t('历史会话')} onClose={()=>setModal('')}><label className="conversation-search"><Search size={16}/><input autoFocus aria-label={t('搜索历史会话')} placeholder={t('搜索会话')} value={conversationSearch} onChange={event=>setConversationSearch(event.target.value)}/></label><div className="history-conversations conversation-sidebar">{shownConversations.map(conversationRow)}{!shownConversations.length&&<p className="muted">{t('没有匹配的会话')}</p>}</div><button className="button" disabled={agentBusy} onClick={()=>{setModal('');newConversation();}}><Plus size={16}/>{t('新对话')}</button></Modal>}
@@ -744,7 +752,7 @@ export default function App(){
   {modal==='run'&&<Modal title={tr("高级：原生计算草稿")} wide onClose={()=>setModal('')}><div className="form-row"><label>{tr("计算名称")}<input disabled={runDirty} value={runDraft.name||''} onChange={e=>setRunDraft({...runDraft,name:e.target.value})}/></label><label>{tr("引擎")}<select disabled={runDirty} value={runDraft.engine||''} onChange={e=>changeEngine(e.target.value)}>{engines.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label></div><div className="form-row"><label>{tr("计算环境")}<select disabled={runDirty} value={runDraft.environment_id||''} onChange={e=>setRunDraft({...runDraft,environment_id:e.target.value})}><option value="">{tr("选择环境")}</option>{environments.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label><label>{t('GPU 编号')}<input disabled={runDirty} type="number" min={0} value={runDraft.gpu??''} onChange={e=>setRunDraft({...runDraft,gpu:Number(e.target.value)})}/></label><label>{tr("时长上限 · s")}<input disabled={runDirty} type="number" min={1} value={runDraft.max_seconds??''} onChange={e=>setRunDraft({...runDraft,max_seconds:Number(e.target.value)})}/></label></div><label>{tr("完整任务描述 · inputs 是运行目录文件名 → 已授权源文件路径")}</label><textarea className="json-input" aria-label={tr("完整任务描述 · inputs 是运行目录文件名 → 已授权源文件路径")} value={runJson} onChange={e=>setRunJson(e.target.value)}/>{runDirty&&<div className="button-row"><button className="button" onClick={applyRunJson}>{tr('应用 JSON')}</button><span className="muted">{tr('存在未应用的 JSON 修改')}</span></div>}<p className="muted">{tr("采样任务需 bias_file、structure_file、cv_size、cutoff 和 mode。输入复制到独立目录；检查结果单独记录，可在授权范围内提交。")}</p><button className="button primary" disabled={busy||runDirty} onClick={async()=>{setBusy(true);try{const r=await api('POST','/api/runs/prepare',{spec:runDraft});void openTask(r.id);setModal('');await refresh();}catch(e){onError(e);}finally{setBusy(false);}}}>{tr("创建输入快照与草稿")}</button></Modal>}
   {modal==='updates'&&<Modal title={t('软件更新')} onClose={()=>setModal('')}><SoftwareUpdate {...updates}/></Modal>}
   {modal==='settings'&&<Modal title={t('工作台设置')} wide closeDisabled={settingsSaving} onClose={closeSettings}><SettingsPage updates={updates} onOpenComputeResources={openComputeResources} onOpenLocalCompute={openLocalCompute} onOpenSshCompute={openSshConfiguration} onOpenProjects={openProjects} onOpenSkills={()=>{if(settingsSavingRef.current)return;closeSettings();setSection('skills');}} settings={settings} onChange={setSettings} onClose={closeSettings} onSavingChange={saving=>{settingsSavingRef.current=saving;setSettingsSaving(saving);}} onSaved={saved=>{settingsBackup.current=saved;}} onError={onError}/></Modal>}
-  {computeChooser&&<ComputeConnectionChooser preferredKind={guideShowing?guideKind:undefined} initialEdit={computeChooserEdit} activeResource={computeResource} connectionBusy={agentBusy||connecting} onLocal={connectSavedLocal} onSsh={connectSavedSsh} onManageSsh={openSshConfiguration} onServiceChange={()=>void refreshComputeResource()} onServiceEnvironmentHelp={profile=>{if(guideShowing)setGuideAway(true);setComputeChooser(false);askAgent('协助配置此 SSH 连接的 AIMatterLab 作业服务环境：连接 ID '+profile.id+'，保存版本 '+profile.version+'。先读取 studio-compute-workflow 的作业服务接入指引；使用我已核验的基础 SSH 连接及明确交给 Agent 的独立 Shell，优先查找已有 Conda/venv/module 环境，核对 Python 版本与 sqlite3，给出明确的解释器路径和激活命令，再由我保存到该连接的作业服务环境。不要新建 SSH 登录、代输认证信息、安装软件、更改项目授权或提交计算；未取得服务就绪证据时不要声称已完成。');}} onClose={()=>{setComputeChooser(false);setComputeChooserEdit(undefined);setGuideKind(undefined);}} localConnected={worker&&!disconnected}/>}
+  {computeChooser&&<ComputeConnectionChooser preferredKind={guideShowing?guideKind:undefined} initialEdit={computeChooserEdit} activeResource={computeResource} connectionBusy={agentBusy||connecting} onLocal={connectSavedLocal} onSsh={connectSavedSsh} onManageSsh={openSshConfiguration} onServiceChange={()=>void refreshComputeResource()} onServiceEnvironmentHelp={profile=>{if(guideShowing)setLesson({destination:'ssh-service'});setComputeChooser(false);askAgent('协助配置此 SSH 连接的 AIMatterLab 作业服务环境：连接 ID '+profile.id+'，保存版本 '+profile.version+'。先读取 studio-compute-workflow 的作业服务接入指引；使用我已核验的基础 SSH 连接及明确交给 Agent 的独立 Shell，优先查找已有 Conda/venv/module 环境，核对 Python 版本与 sqlite3，给出明确的解释器路径和激活命令，再由我保存到该连接的作业服务环境。不要新建 SSH 登录、代输认证信息、安装软件、更改项目授权或提交计算；未取得服务就绪证据时不要声称已完成。');}} onClose={()=>{setComputeChooser(false);setComputeChooserEdit(undefined);setGuideKind(undefined);}} localConnected={worker&&!disconnected}/>}
   {sshGuide&&<SshConnectionGuide request={sshGuide.request} language={settings.language} onClose={()=>closeSshGuide()} onWorkerUpdate={sshGuide.standalone?undefined:()=>{if(conversationSelectionSeq.current!==sshGuide.selectionSeq||selectedConversationRef.current?.id!==sshGuide.conversationId)return;return connectWorker(sshGuide.taskId);}}/>}
   {computeGuide&&<ComputeConnectionGuide key={computeGuide.id} taskId={computeGuide.taskId} profile={computeGuide.profile} language={settings.language} onConnectStart={()=>{if(computeGuideRequest.current?.id===computeGuide.id){beginWorkerGate();setWorkerRestoring(false);}}} onClose={connected=>closeComputeGuide(computeGuide.id,connected)}/>}
 

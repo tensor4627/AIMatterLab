@@ -10,10 +10,11 @@ requireLaunchContext();
 const output=path.join(desktopRoot,'.studio','setup-guide-native');
 await fs.mkdir(output,{recursive:true});
 const run=await fs.mkdtemp(path.join(output,'run-')),profile=path.join(run,'profile');
-const executablePath=await resolveDesktopBinary(),errors=[];
+const packaged=process.argv[2];
+const executablePath=packaged?await fs.realpath(packaged):await resolveDesktopBinary(),errors=[];
 let application,page;
 async function launch(directory=profile){
-  application=await electron.launch({executablePath,args:['.'],cwd:desktopRoot,env:{...process.env,STUDIO_PROFILE_DIR:directory,STUDIO_DEV_URL:''}});
+  application=await electron.launch({executablePath,args:packaged?[]:['.'],cwd:desktopRoot,env:{...process.env,STUDIO_PROFILE_DIR:directory,STUDIO_DEV_URL:''}});
   page=await application.firstWindow();
   page.on('pageerror',e=>errors.push(e.message));
   page.setDefaultTimeout(8000);
@@ -29,6 +30,17 @@ const guide=()=>page.getByTestId('setup-assistant');
 const button=(name)=>guide().getByRole('button',{name,exact:true});
 const state=()=>page.evaluate(()=>window.studio.invoke('state'));
 async function heading(name){await guide().getByRole('heading',{name,exact:true}).waitFor();}
+async function returnFromLesson(destination,title,{keyboard=false,screenshot}={}){
+  const bubble=page.getByTestId('setup-lesson');
+  await bubble.waitFor();assert.equal(await bubble.getAttribute('data-lesson'),destination);
+  assert.equal(await bubble.locator('strong').innerText(),title);
+  assert((await bubble.locator('.setup-lesson-hint').innerText()).length>12);
+  assert.equal(await page.getByTestId('open-setup-guide').count(),0);
+  assert(await bubble.evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&el.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));}));
+  if(screenshot)await page.screenshot({path:path.join(run,screenshot+'.png'),animations:'disabled'});
+  if(keyboard){await bubble.focus();await page.keyboard.press('Enter');}else await bubble.click();
+  await guide().waitFor();await bubble.waitFor({state:'detached'});
+}
 async function capture(name){
   await page.screenshot({path:path.join(run,name+'.png'),animations:'disabled'});
   const usable=await guide().locator('.setup-primary').evaluate(element=>{
@@ -59,7 +71,7 @@ try {
   await button('Try a message').click();
   await page.waitForFunction(()=>document.querySelector('.agent-panel .composer textarea')?.value==='Reply with OK to test this model connection.');
   assert.equal(await page.getByTestId('agent-provider').inputValue(),'qwen');
-  await page.getByTestId('open-setup-guide').click();await heading('Choose your AI assistant');
+  await returnFromLesson('model-test','Test the model connection',{keyboard:true,screenshot:'lesson-chat-wide'});await heading('Choose your AI assistant');
   await button('Continue').click();await heading('Where will you compute?');
   await close();await launch();await resize(1024,768);
   await heading('Where will you compute?');assert.equal((await state()).settings.agentProvider,'qwen');
@@ -75,24 +87,24 @@ try {
   await button('Continue').click();await heading('Explore your workspace');
   await button('Set up my first scientific tool').click();
   await button('Register an environment').click();await page.locator('.compute-environments').waitFor();
-  await page.getByTestId('open-setup-guide').click();await heading('Explore your workspace');
-  await button('Get tools and install guides').click();await page.getByTestId('tool-source-list').waitFor();await page.getByTestId('open-setup-guide').click();
+  await returnFromLesson('environments','Register an environment');await heading('Explore your workspace');
+  await button('Get tools and install guides').click();await page.getByTestId('tool-source-list').waitFor();await returnFromLesson('extensions','Find a scientific tool');
   await heading('Explore your workspace');
   await guide().getByRole('button',{name:/Take the guided tour/}).click();
-  await button('Open data assets').click();await page.getByTestId('asset-inspector').waitFor();await page.getByTestId('open-setup-guide').click();
+  await button('Open data assets').click();await page.getByTestId('asset-inspector').waitFor();await returnFromLesson('assets','Import a structure',{screenshot:'lesson-assets-en'});
   await button('Next step').click();await button('Draft a goal in chat').click();
   await page.waitForFunction(()=>document.querySelector('.agent-panel .composer textarea')?.value.includes('molecular dynamics simulation of FCC copper'));
-  await page.getByTestId('open-setup-guide').click();await guide().getByRole('heading',{name:'Describe your goal'}).waitFor();
+  await returnFromLesson('tour-goal','Describe your goal');await guide().getByRole('heading',{name:'Describe your goal'}).waitFor();
   for(let step=1;step<4;step++)await button('Next step').click();
   await guide().getByRole('heading',{name:'Inspect the results'}).waitFor();await capture('tour-en');
-  await button('Open run history').click();await page.getByTestId('open-setup-guide').click();
+  await button('Open run history').click();await returnFromLesson('runs','Inspect run results');
   await heading('Explore your workspace');
   await button('Close tour').click();await button('Check a compute environment').click();
   await guide().getByRole('combobox').selectOption('reference-md');await button('Prepare check in chat').click();
   await page.waitForFunction(()=>document.querySelector('.agent-panel .composer textarea')?.value.includes('reference-md'));
   assert.equal(await page.getByTestId('agent-provider').inputValue(),'qwen');
-  await page.getByTestId('open-setup-guide').click();await heading('Explore your workspace');
-  await resize(630,720);await capture('ready-narrow');
+  await resize(630,720);await returnFromLesson('short-check','Prepare the ASE · CPU MD check',{keyboard:true,screenshot:'lesson-check-narrow'});await heading('Explore your workspace');
+  assert.equal(await guide().getByRole('combobox').inputValue(),'reference-md');await capture('ready-narrow');
   await button('Enter workspace').click();assert.equal((await state()).setupGuide.page,'complete');
   await close();await launch();await page.getByTestId('open-setup-guide').waitFor();
   assert.equal(await guide().count(),0);
@@ -102,7 +114,10 @@ try {
   catalog.put('settings','main',{language:'en',theme:'light'});catalog.db.close();
   await launch(legacy);await page.getByTestId('open-setup-guide').waitFor();assert.equal(await guide().count(),0);
   assert.equal((await state()).settings.theme,'light');assert.equal((await state()).setupGuide.page,'complete');
-  await close();await launch(path.join(run,'skip-profile'));await guide().waitFor();await button('English').click();
+  await close();await launch(path.join(run,'skip-profile'));await guide().waitFor();await resize(1366,768);
+  await button('简体中文').click();await button('深色石墨').click();await button('继续').click();
+  await button('试发一条消息').click();await returnFromLesson('model-test','测试模型连接',{screenshot:'lesson-chat-zh-dark'});
+  await button('上一步').click();await button('English').click();
   await button('Skip setup').click();assert.equal((await state()).setupGuide.page,'complete');
   assert.deepEqual(errors,[]);
   await fs.writeFile(path.join(run,'result.json'),JSON.stringify({status:'passed',profile:'isolated',errors},null,2));

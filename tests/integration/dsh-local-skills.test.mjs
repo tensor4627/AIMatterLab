@@ -8,6 +8,9 @@ import {createServer} from 'node:http';
 import {DshBridge} from '../../agent/providers/dsh.mjs';
 import {dshRuntime} from '../../desktop/platform/dsh-runtime.mjs';
 import {ProjectSkills} from '../../agent/skills/project-skills.mjs';
+import {fileURLToPath} from 'node:url';
+import {ScientificSkills} from '../../agent/skills/scientific-skills.mjs';
+import {workspaceAgentInstructions} from '../../agent/context/agent-settings.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
 
 test('official DSH creates, reads and updates a personal skill in chat without a project, shell or worker', {timeout:60000}, async t => {
@@ -16,7 +19,12 @@ test('official DSH creates, reads and updates a personal skill in chat without a
  let current = {provider:'deepseek',threadId:null,projectId:null};
  const cache = path.join(root,'user-cache');
  const store = new ProjectSkills({root:cache,current:()=>current});
- const endpoint = new TerminalMcp({terminal:{tools:()=>[]},projectSkills:store});
+ const bundledRoot=fileURLToPath(new URL('../../agent/builtin-skills/',import.meta.url));
+ const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
+ const scientificSkills=new ScientificSkills({map,bundledRoot,sources:()=>[],settings:()=>({}),setupAllowed:()=>false});
+ fs.writeFileSync(path.join(root,'AGENTS.md'),'Consult the local-analysis skill for this workspace.');
+ const instructions=workspaceAgentInstructions({directory:root});
+ const endpoint = new TerminalMcp({terminal:{tools:()=>[]},projectSkills:store,scientificSkills});
  await endpoint.start();
 
  const name = 'local-analysis';
@@ -29,6 +37,8 @@ test('official DSH creates, reads and updates a personal skill in chat without a
   ['read_project_skill',{...scope,name}],
   ['write_project_skill',{...scope,name,body:body+'Verify.\n',expected_sha256:sha256(body)}],
   ['read_project_skill',{...scope,name}],
+  ['scientific_skill_catalog',{}],
+  ['read_scientific_skill',{function_id:'environment.probe'}],
  ];
  const packets = [];
  const model = createServer(async (req,res) => {
@@ -49,7 +59,7 @@ test('official DSH creates, reads and updates a personal skill in chat without a
  });
  await new Promise(resolve=>model.listen(0,'127.0.0.1',resolve));
  const bridge=new DshBridge({
-  root,catalog:{get:(k,id)=>saved.get(k+':'+id),put:(k,id,v)=>saved.set(k+':'+id,structuredClone(v))},
+  root,instructions,catalog:{get:(k,id)=>saved.get(k+':'+id),put:(k,id,v)=>saved.set(k+':'+id,structuredClone(v))},
   credential:()=>({apiKey:'local-test'}),worker:()=>endpoint.providerConnection('deepseek'),
   fetchApi:async()=>Response.json({data:[{id:'deepseek-flash'}]}),
   host:{...dshRuntime,prepare(...args){
@@ -73,9 +83,19 @@ test('official DSH creates, reads and updates a personal skill in chat without a
   const listener=e=>{if(e.method==='turn/completed'){clearTimeout(timer);bridge.off('event',listener);resolve(e.params.turn);}};
   bridge.on('event',listener);t.after(()=>{clearTimeout(timer);bridge.off('event',listener);});
  });
- await bridge.request('turn/start',{threadId:current.threadId,input:[{type:'text',text:'Save the local skill and check its revision.'}]});
+ await bridge.request('turn/start',{threadId:current.threadId,input:[{type:'text',text:'Save the local skill, check its revision, then find the public guide for inspecting my compute environment.'}]});
  assert.equal((await done).status,'completed');
  assert.equal(packets.length,steps.length+1);
+ const first=packets[0],system=Array.isArray(first.system)?first.system.map(block=>block.text).join('\n'):first.system;
+ assert(system.includes(instructions),'First DeepSeek system packet must carry the packaged core and the workspace index');
+ const tools=first.tools.map(tool=>tool.name.replace(/^mcp__gpusampling__/, ''));
+ for(const name of ['project_skill_catalog','read_project_skill','write_project_skill','scientific_skill_catalog','read_scientific_skill'])assert(tools.includes(name),name);
+ assert(!tools.includes('submit_run'));
+ const entry='studio-compute-workflow/SKILL.md';
+ const heading=fs.readFileSync(path.join(bundledRoot,entry),'utf8').split(/\r?\n/).find(line=>line.startsWith('# '));
+ assert(heading);assert(!JSON.stringify(first).includes(heading),'A new chat starts from the index');
+ const result=JSON.stringify(packets.at(-1).messages.at(-1));
+ assert(result.includes(heading));assert(result.includes(entry));assert(result.includes('passed'));
  const items=bridge.session(current.threadId).turns[0].items.filter(item=>item.type==='mcpToolCall');
  assert.equal(items.length,steps.length);
  for(const item of items){assert.equal(item.status,'completed');assert.equal(item.result.isError,false);}

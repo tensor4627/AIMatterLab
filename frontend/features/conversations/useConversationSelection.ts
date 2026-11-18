@@ -58,7 +58,7 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
   try{
    await promise;if(sequence!==conversationSelectionSeq.current||!mounted.current)return;
    freshSelectionPending.current=null;conversationChanged(null);setPlanningMode(planning);onFreshSelected();
-   setSessionSelection({nonce:crypto.randomUUID(),new:true,...initialPrompt!==undefined?{initialPrompt}:{},...provider?{provider}:{}});void observeWorker();
+   setSessionSelection({nonce:crypto.randomUUID(),new:true,...initialPrompt!==undefined?{initialPrompt}:{},...provider?{provider}:{}});void observeWorker();return true;
   }catch(error){
    if(sequence!==conversationSelectionSeq.current||!mounted.current)return;onError(error);
    if(previous)try{

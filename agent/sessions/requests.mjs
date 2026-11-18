@@ -90,17 +90,21 @@ export function createAgentRequests({runtime}){
   if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview,planningMode:turnFlags.planningMode});
   // Public software guidance is selected only for the actual current intent.
   const guidanceScope=skillGuidanceScope(provider),readPolicy=await scientificSkills.resolvePolicy(guidanceScope);check();
-  const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,planRoadmap:turnFlags.planningMode&&!bound?.roadmap,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
-  const explicitSetup=!definitionOnly&&studioSkillId&&['installation','setup','toolchain'].includes(scientificSkills.router.routes.get(studioSkillId)?.phase);
-  skillContext=await(explicitSetup?setupInstructions.prepare(provider,studioSkillId,prepareGuidance,{retainForTurn:true,assertCurrent:check,checkCurrent:guidanceScope.checkCurrent}):prepareGuidance());check();
-  if(!skillContext.guidanceKind&&!definitionOnly&&bound?.parameters?.engine&&worker.connection){
-   const selectedTarget=toolGuidanceTarget(bound),environment_id=selectedTarget?.kind==='local'?selectedTarget.environmentId:undefined,engine=bound.parameters.engine;
-   if(environment_id){const selection={environment_id,engine};let guide;try{guide=await worker.request('POST','/api/runtime-guide',selection);}catch{guide={status:'blocked',reason:'Selected runtime guide unavailable; use an exact selected-engine probe, not an automatic reinstall'};}check();skillContext=scientificSkills.context.mergeRuntime(skillKey,provider,skillContext,guide,selection);}
+  // An ordinary unbound chat starts from AGENTS.md and reads its chosen skill via MCP.
+  if(bound||studioSkillId||readPolicy.state!=='legacy_unconfigured'){
+   const prepareGuidance=()=>scientificSkills.context.prepare(skillKey,provider,{...(definitionOnly?{text,parameters:{},hasWorkflow:false,manualFunction:'pygas.custom-cv'}:{text,parameters:bound?.parameters||{},hasWorkflow:!!bound,planRoadmap:turnFlags.planningMode&&!bound?.roadmap,manualFunction:studioSkillId}),scope:guidanceScope,policy:readPolicy});
+   const explicitSetup=!definitionOnly&&studioSkillId&&['installation','setup','toolchain'].includes(scientificSkills.router.routes.get(studioSkillId)?.phase);
+   skillContext=await(explicitSetup?setupInstructions.prepare(provider,studioSkillId,prepareGuidance,{retainForTurn:true,assertCurrent:check,checkCurrent:guidanceScope.checkCurrent}):prepareGuidance());check();
+   if(!skillContext.guidanceKind&&!definitionOnly&&bound?.parameters?.engine&&worker.connection){
+    const selectedTarget=toolGuidanceTarget(bound),environment_id=selectedTarget?.kind==='local'?selectedTarget.environmentId:undefined,engine=bound.parameters.engine;
+    if(environment_id){const selection={environment_id,engine};let guide;try{guide=await worker.request('POST','/api/runtime-guide',selection);}catch{guide={status:'blocked',reason:'Selected runtime guide unavailable; use an exact selected-engine probe, not an automatic reinstall'};}check();skillContext=scientificSkills.context.mergeRuntime(skillKey,provider,skillContext,guide,selection);}
+   }
+   if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
+   if(!definitionOnly&&!skillContext.guidanceKind)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSkills.sourcesForPolicy(readPolicy))}]};
   }
-  if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
-  if(!definitionOnly&&!skillContext.guidanceKind)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSkills.sourcesForPolicy(readPolicy))}]};
   if(['deepseek','compatible','qwen'].includes(provider)){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
-  const normalRoots=definitionOnly?[]:studioSkillRoots(),registeredRoots=[...normalRoots,...managedSkillRoots()],registered=definitionOnly||!params.input?.some(item=>item.type==='skill')?[]:[...localSkills(normalRoots,{policy:readPolicy}),...managedSkillEntries(readPolicy)],input=[];
+  const selected=params.input?.some(item=>item.type==='skill');
+  const normalRoots=selected&&!definitionOnly?studioSkillRoots():[],registeredRoots=selected?[...normalRoots,...managedSkillRoots()]:[],registered=definitionOnly||!selected?[]:[...localSkills(normalRoots,{policy:readPolicy}),...managedSkillEntries(readPolicy)],input=[];
   for(const item of params.input||[]){
    if(item.type==='text')input.push(item);
    else if(item.type==='skill'){

@@ -5,9 +5,13 @@ import {toolFailure,toolValueResult,validRpcRequest,validToolCall} from './tool-
 import {sharedTerminalToolAllowed} from "./definition-scope.mjs";
 
 // Desktop-owned terminals do not depend on a registered WSL scientific worker.
-// This endpoint exposes only the three existing, explicitly handed-off tools.
+// Project skills and public scientific guidance use the same authenticated conversation.
 export class TerminalMcp {
- constructor({terminal,guard=()=>null,projectSkills}){this.projectSkills=projectSkills;this.terminal=terminal;this.guard=guard;this.scopes=new McpProviderScopes();}
+ constructor({terminal,guard=()=>null,projectSkills,scientificSkills}){
+  this.terminal=terminal;this.guard=guard;this.projectSkills=projectSkills;this.scientificSkills=scientificSkills;
+  this.guides=(scientificSkills?.tools()||[]).filter(tool=>tool.annotations?.readOnlyHint===true);
+  this.scopes=new McpProviderScopes();
+ }
  async start(){
   if(this.base)return;
   this.server=http.createServer((req,res)=>void this.receive(req,res));
@@ -45,13 +49,21 @@ export class TerminalMcp {
    else if(body.method==='tools/list'){
     // Discovery is required before a new conversation has a thread identity.
     // Definitions confer no access: every call still checks the actual handoff.
-    result={tools:[...this.terminal.tools().filter(tool=>sharedTerminalToolAllowed(tool.name)),...(this.projectSkills?.tools()||[])]};
+    result={tools:[...this.terminal.tools().filter(tool=>sharedTerminalToolAllowed(tool.name)),...(this.projectSkills?.tools()||[]),...this.guides]};
    }else if(body.method==='tools/call'){
-    if(!validToolCall(body)||!(sharedTerminalToolAllowed(body.params.name)||this.projectSkills?.owns(body.params.name)))throw Error('Unknown shared terminal tool');
-    if(this.projectSkills?.owns(body.params.name)){dispatched=true;result=toolValueResult(this.projectSkills.call(body.params.name,body.params.arguments||{},scope));fresh();reply(200,{jsonrpc:'2.0',id:body.id,result});return;}
-    token=await guard?.before?.(body.params.name,body.params.arguments||{},scope.provider,scope);fresh();
-    dispatched=true;result=toolValueResult(await this.terminal.callTool(body.params.name,body.params.arguments||{},scope));fresh();
-    await guard?.after?.(token,result);
+    if(!validToolCall(body))throw Error('Invalid tool call');
+    const {name,arguments:args={}}=body.params;
+    if(this.projectSkills?.owns(name)){
+     dispatched=true;result=toolValueResult(this.projectSkills.call(name,args,scope));
+    }else if(this.guides.some(tool=>tool.name===name)){
+     if(!scope.threadId)throw Error('Select a conversation before reading skill guidance');
+     dispatched=true;result=toolValueResult(await this.scientificSkills.call(name,args,scope));
+    }else{
+     if(!sharedTerminalToolAllowed(name))throw Error('Unknown shared terminal tool');
+     token=await guard?.before?.(name,args,scope.provider,scope);fresh();
+     dispatched=true;result=toolValueResult(await this.terminal.callTool(name,args,scope));fresh();
+     await guard?.after?.(token,result);
+    }
    }else{reply(200,{jsonrpc:'2.0',id:body.id,error:{code:-32601,message:'Method not found'}});return;}
    fresh();reply(200,{jsonrpc:'2.0',id:body.id,result});
   }catch(error){
