@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "product": "AIMatterLab",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "repository_url": "https://github.com/tensor4627/AIMatterLab.git",
-  "release_revision": "v0.1.8",
-  "source_ref": "refs/tags/v0.1.8",
+  "release_revision": "v0.1.9",
+  "source_ref": "refs/tags/v0.1.9",
   "tool_sources": "installation/tool-sources.json",
   "desktop_platform": "Windows + WSL",
   "entry": "INSTALL_AGENT.md",
@@ -23,5 +23,5 @@
     "neb": "fixture_required"
   },
   "distribution_status": "passed",
-  "distribution_scope": "Local Windows x64 workspace installer, ZIP and developer kit verified, including desktop shortcut, reinstall, uninstall and SHA-256. Remote publication not run."
+  "distribution_scope": "Windows x64 workspace installer, portable ZIP, developer kit and signed update feed. See docs/releases/aimatterlab-0.1.9.md for verification scope."
 }

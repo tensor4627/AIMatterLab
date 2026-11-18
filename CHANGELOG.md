@@ -1,6 +1,8 @@
 # 版本更新与验证
 
-## 待发布
+## 0.1.9
+
+2026-11-18
 
 - 计算流程图以不同形状区分输入、工具和输出。节点及中间产物显示简称，悬停或键盘聚焦即可查看全称。
 - 运行记录优先展示搜索、位置和状态，时间与项目筛选可用键盘展开。记录来源异常时自动展开详情。
@@ -10,17 +12,13 @@
 - 撤销作业时先保存意图并核对作业身份。集群详情分别显示命令未发出、送达情况未知和已送达等待终态。
 - 本地运行的复现包补全命令、环境与输入快照清单，输入副本或日志缺失时可导出其余证据并查看缺项。
 
-[五方面设计审查、问题修正与验证](docs/releases/aimatterlab-spec-audit-unreleased.md)
-
 - 首次 SSH 登录并交接后，新流程会核对当前服务并使用基础工作区，工作区按钮不再因尚无流程绑定而持续置灰。
 - Agent 可按内置 skill 在普通对话中检查、初始化和复用基础工作区；手动设置位于集群连接的“高级：基础工作区”。
 - Agent 可以把当前计算资源上可读的结构、势、配置和偏置文件成组复制到流程工作区，尚未选择具名工作区时可直接使用当前草稿。
 - 工作区显示每份副本的来源、保存路径和 SHA256，手动导入 SSH 文件时可以填写服务器上的绝对路径或 `~/` 路径。
 - 首次绑定 SSH 草稿后会刷新工作区操作。在原连接明确更新作业服务后，尚未部署的当前草稿可以继续使用已核对的原项目。
 
-[集群工作区外输入复制验证](docs/releases/aimatterlab-external-input-copies.md)
-
-[集群基础工作区设置验证](docs/releases/aimatterlab-base-workspace.md)
+[0.1.9 发布与验证](docs/releases/aimatterlab-0.1.9.md) · [五方面设计审查](docs/releases/aimatterlab-spec-audit-unreleased.md) · [集群输入复制](docs/releases/aimatterlab-external-input-copies.md) · [集群基础工作区](docs/releases/aimatterlab-base-workspace.md)
 
 ## 0.1.8
 

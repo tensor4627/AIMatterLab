@@ -1,17 +1,17 @@
-# AIMatterLab 0.1.8 · 交给本机 Agent 的安装提示
+# AIMatterLab 0.1.9 · 交给本机 Agent 的安装提示
 
 你是用户本机的安装协作者。请实际执行本文流程，安装 AIMatterLab、配置用户选定的计算环境，并运行版本化短例。适用于 Codex、Claude Code 等具备文件、终端和 Git 能力的通用 Agent。目标集群无需安装这些 Agent CLI。
 
 ## 获取可信源码
 
-- 官方仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.8 的发布引用为 `refs/tags/v0.1.8`。需要登录时由用户在本机 Git 凭据界面完成。
-- 从官方仓库安装时，以下命令适用于该标签已发布的版本。在用户选定的父目录核对标签对应的完整提交，并建立跟踪官方 main 的本地分支。已有本地 0.1.8 源码的安装方式见下文。
+- 官方仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.9 的发布引用为 `refs/tags/v0.1.9`。需要登录时由用户在本机 Git 凭据界面完成。
+- 从官方仓库安装时，以下命令适用于该标签已发布的版本。在用户选定的父目录核对标签对应的完整提交，并建立跟踪官方 main 的本地分支。已有本地 0.1.9 源码的安装方式见下文。
 
 ```powershell
-git clone --no-checkout --branch v0.1.8 https://github.com/tensor4627/AIMatterLab.git AIMatterLab-0.1.8
+git clone --no-checkout --branch v0.1.9 https://github.com/tensor4627/AIMatterLab.git AIMatterLab-0.1.9
 if ($LASTEXITCODE -ne 0) { throw '请核对仓库读取权限和新目录位置' }
-Set-Location -LiteralPath AIMatterLab-0.1.8
-$sourceCommit = git rev-parse --verify 'refs/tags/v0.1.8^{commit}'
+Set-Location -LiteralPath AIMatterLab-0.1.9
+$sourceCommit = git rev-parse --verify 'refs/tags/v0.1.9^{commit}'
 if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw '发布标签核对失败' }
 git merge-base --is-ancestor $sourceCommit refs/remotes/origin/main
 if ($LASTEXITCODE -ne 0) { throw '发布提交不在官方 main 历史中' }
@@ -20,13 +20,13 @@ if ($LASTEXITCODE -ne 0 -or (git rev-parse HEAD) -ne $sourceCommit) { throw '源
 git branch --set-upstream-to=origin/main
 if ($LASTEXITCODE -ne 0) { throw '源码更新分支配置失败' }
 $release = Get-Content -Raw -LiteralPath installation/manifest.json | ConvertFrom-Json
-if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.8' -or $release.source_ref -ne 'refs/tags/v0.1.8') { throw '安装清单与所选版本不符' }
+if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.9' -or $release.source_ref -ne 'refs/tags/v0.1.9') { throw '安装清单与所选版本不符' }
 ```
 
 记录 `$sourceCommit` 作为此次安装的版本。用户以后选择更新时，在同一目录运行 `git pull --ff-only`，再双击仓库根目录的 `Launch-AIMatterLab.cmd`。
 
 - 源码就位后，从该提交读取 `AGENTS.md`、`installation/config.example.json`、`scripts/one_prompt.py` 和 `agent/builtin-skills/studio-compute-workflow/SKILL.md`。按本次取得的安装提示继续配置。仓库和资源获取使用已核对的实际地址，版本化安装使用固定源码及其依赖锁。
-- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.1.8 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
+- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.1.9 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
 - 当前桌面平台为 Windows + WSL。缺少 WSL、重启权限、CUDA、兼容 Agent provider 或指定科学仓库时如实记录 blocked，并解释所缺条件。
 
 需要科学工具时，先读随 AIMatterLab 提供的[工具仓库清单](installation/tool-sources.json)。按用户选择从 `url` 克隆 `branch` 到新目录，再阅读其中的 `guide` 完成安装。`validated_commit` 记录历史接入验收版本，登记环境时使用实际检出的提交。
@@ -81,7 +81,7 @@ NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、�
 
 ## 第三方工具
 
-如用户选择接入第三方工具，安装后从「工具与资源 → 第三方工具包」检查并登记开发者交付目录。开发者 ZIP 和生成示例的命令见[开发者快速开始](developer/README.md)。0.1.8 提供固定 CPU `installation.check` 适配器；按所选计算项目和环境记录实际安装、测试及产物。第三方工具验收独立于上面的安装器短例。
+如用户选择接入第三方工具，安装后从「工具与资源 → 第三方工具包」检查并登记开发者交付目录。开发者 ZIP 和生成示例的命令见[开发者快速开始](developer/README.md)。0.1.9 提供固定 CPU `installation.check` 适配器；按所选计算项目和环境记录实际安装、测试及产物。第三方工具验收独立于上面的安装器短例。
 
 ## 可迁移 skill 与本机沉淀
 
