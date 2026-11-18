@@ -19,8 +19,8 @@ def finite_json(value):
     return value
 
 
-def encoded(value):
-    return json.dumps(finite_json(value), allow_nan=False)
+def encoded(value, *, sort_keys=False):
+    return json.dumps(finite_json(value), allow_nan=False, sort_keys=sort_keys)
 
 
 class Store:
@@ -87,7 +87,7 @@ class Store:
                 row = self.db.execute("SELECT data FROM objects WHERE kind='project' AND id=?", (value["id"],)).fetchone()
                 previous = json.loads(row[0]) if row else None
                 revision = previous.pop("revision", 0) if previous is not None else 0
-                if previous == value:
+                if previous is not None and encoded(previous, sort_keys=True) == encoded(value, sort_keys=True):
                     self.db.commit()
                     return {**value, "revision": revision}
                 if revision != expected or (previous is None and expected != 0):

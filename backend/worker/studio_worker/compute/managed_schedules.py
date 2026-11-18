@@ -34,7 +34,7 @@ class ManagedSchedules:
         self._cancel_token = object()
         self.explicit_parent_cancel = object()
         self._dispatching = set()
-        self._manually_observing = set()
+        self._manually_observing = {}
 
     def _read(self, source, schedule_id):
         row = self.store.get(SCHEDULE, identifier(schedule_id))
@@ -206,6 +206,25 @@ class ManagedSchedules:
     def _terminal(observation):
         return observation['status'] in TERMINAL_JOBS or observation['schedulerTerminal']
 
+    def _observe_cluster_run(self, parent, *, managed, timeout, use_saved_terminal=False):
+        current, observation = parent, project_run(parent)
+        if not use_saved_terminal or not self._terminal(observation):
+            current = self.service.clusters.poll(parent['id'], managed=managed, timeout=timeout)
+            # poll returns the run with a public cluster profile. The pinned snapshot supplies
+            # the scheduler for this projection without reading a newer run row.
+            observation = project_run({**current, 'cluster_snapshot': parent['cluster_snapshot']})
+
+        exit_receipt = current.get('exit')
+        if observation['schedulerTerminal'] or (
+                observation['status'] in TERMINAL_JOBS and isinstance(exit_receipt, dict) and
+                exit_receipt.get('nonce') == parent['nonce'] and type(exit_receipt.get('exit_code')) is int):
+            return observation, True
+        token = current.get('observation_token')
+        verified = (observation['status'] in ACTIVE_JOBS and observation['observedAt'] is not None and
+                    bool(observation['jobId']) and current.get('identity_verified') is True and
+                    token is not None and token != parent.get('observation_token'))
+        return observation, verified
+
     def observe_once(self, data):
         fields(data, ('sourceId', 'scheduleId', 'requestId'), ('sourceId', 'scheduleId', 'requestId'))
         source, request = identifier(data['sourceId']), identifier(data['requestId'])
@@ -218,35 +237,44 @@ class ManagedSchedules:
             if parent['status'] in ('draft', 'ready') or not (parent.get('job_id') or parent.get('submit_attempted')):
                 raise PermissionError('Manual observation requires an original submission')
             run_id = parent['id']
+            observation = project_run(parent)
             key = fingerprint([source, row['id'], request])
             receipt = {'id': key, 'sourceId': source, 'scheduleId': row['id'], 'requestId': request,
                        'runId': run_id, 'startedAt': self.clock(), 'status': 'started'}
             if self.store.db_exists(MANUAL_OBSERVATION, key):
                 previous = self.store.get(MANUAL_OBSERVATION, key)
-                status = previous['status']
-                if status == 'started':
-                    status = 'in_progress' if run_id in self._manually_observing else 'unknown'
-                return self._manual_result(row, request, status, parent)
+                if previous['status'] == 'started' and self._manually_observing.get(run_id) == key:
+                    return self._manual_result(row, request, 'in_progress', observation)
+                recorded = previous.get('run')
+                if (previous['status'] in ('observed', 'unknown') and isinstance(recorded, dict) and
+                        recorded.get('id') == run_id and recorded.get('projectId') == observation['projectId'] and
+                        'status' in recorded and 'observedAt' in recorded):
+                    return self._manual_result(row, request, previous['status'], recorded)
+                # Legacy or interrupted receipts cannot prove which run projection they saw.
+                # Keep its identity for the client and send the current evidence in the snapshot.
+                unconfirmed = {**observation, 'status': 'unknown', 'observedAt': None,
+                               'schedulerState': None, 'schedulerTerminal': False}
+                return self._manual_result(row, request, 'unknown', unconfirmed)
             if run_id in self._manually_observing:
-                return self._manual_result(row, request, 'in_progress', parent)
+                return self._manual_result(row, request, 'in_progress', observation)
             self.store.put(MANUAL_OBSERVATION, receipt)
-            self._manually_observing.add(run_id)
+            self._manually_observing[run_id] = key
         status = 'unknown'
         try:
-            if not self._terminal(project_run(parent)):
-                self.service.clusters.poll(run_id, managed=self._manual_poll_token, timeout=30)
-            observed = project_run(self.service.clusters.raw(run_id))
-            if self._terminal(observed) or observed['status'] in ACTIVE_JOBS and observed['observedAt'] is not None:
+            observation, verified = self._observe_cluster_run(
+                parent, managed=self._manual_poll_token, timeout=30, use_saved_terminal=True)
+            if verified:
                 status = 'observed'
         finally:
             with self.store.lock:
-                self._manually_observing.discard(run_id)
-                self.store.put(MANUAL_OBSERVATION, {**receipt, 'status': status, 'finishedAt': self.clock()})
-        return self._manual_result(row, request, status, self.service.clusters.raw(run_id))
+                self._manually_observing.pop(run_id)
+                self.store.put(MANUAL_OBSERVATION, {**receipt, 'status': status, 'finishedAt': self.clock(),
+                                                    'run': observation})
+        return self._manual_result(row, request, status, observation)
 
-    def _manual_result(self, row, request, status, run):
+    def _manual_result(self, row, request, status, observation):
         return {'sourceId': row['sourceId'], 'scheduleId': row['id'], 'requestId': request, 'status': status,
-                'run': project_run(run), 'snapshot': self.snapshot({'sourceId': row['sourceId']})}
+                'run': observation, 'snapshot': self.snapshot({'sourceId': row['sourceId']})}
 
     def _advance(self, row, now):
         interval = row['intervalSeconds']
@@ -359,14 +387,15 @@ class ManagedSchedules:
             return {'status': 'succeeded', 'observedAt': self.clock(), 'evidence': 'bounded_log',
                     'output': {'name': action['name'], 'offset': log['offset'], 'text': log['text'][:16384]}}
         if row['parent']['kind'] == 'cluster':
-            clusters.poll(parent['id'], managed=(self._poll_token, row), timeout=min(40, self._remaining(row)))
-            parent = clusters.raw(parent['id'])
-        observation = project_run(parent)
-        # Status can be a normal saved draft or a terminal receipt. For running
-        # cluster jobs, require the scheduler's original job identity evidence.
-        verified = bool(observation['observedAt'] and parent['status'] != 'unknown')
-        status = 'succeeded' if verified or observation['schedulerTerminal'] or parent['status'] in ('draft', 'ready') else 'unknown'
-        return {'status': status, 'observedAt': observation['observedAt'], 'evidence': 'run_state', 'run': observation}
+            observation, verified = self._observe_cluster_run(
+                parent, managed=(self._poll_token, row), timeout=min(40, self._remaining(row)))
+            observed_at = observation['observedAt'] if verified else None
+        else:
+            observation = project_run(parent)
+            observed_at = observation['observedAt']
+            verified = bool(observed_at and observation['status'] != 'unknown')
+        status = 'succeeded' if verified or observation['status'] in ('draft', 'ready') else 'unknown'
+        return {'status': status, 'observedAt': observed_at, 'evidence': 'run_state', 'run': observation}
 
     def _submit_child(self, row, parent):
         child = prepare_child(self.service, row, row['active'], parent)

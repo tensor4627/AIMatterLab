@@ -105,6 +105,46 @@ class ExecutionFindings(unittest.TestCase):
         self.assertEqual(run_process_env(cpu)['CUDA_VISIBLE_DEVICES'],'')
         self.assertEqual(allocated_gpu({'engine':'pydyn.md','gpu':0}),0)
 
+    def test_fixed_cpu_routes_prepare_with_empty_or_different_gpu_grants(self):
+        check = Path(__file__).resolve().parents[3] / 'installation' / 'examples' / 'worker-smoke.py'
+        (self.inputs / 'run.py').write_bytes(check.read_bytes())
+        (self.inputs / 'trajectory.xyz').write_text('1\nLattice="1 0 0 0 1 0 0 0 1"\nH 0 0 0\n')
+        engines = ['installation.check', 'trajectory.density']
+        for gpus in ([], [2]):
+            project = self.service.register_project({'name':'CPU preparation',
+                'policy':{**self.project['policy'], 'engines':engines, 'gpus':gpus}})
+            self.assertEqual(project['policy']['gpus'],gpus)
+            for engine, input_name in zip(engines, ('run.py','trajectory.xyz')):
+                with self.subTest(gpus=gpus, engine=engine):
+                    run = self.service.prepare({'project_id':project['id'], 'environment_id':self.environment['id'],
+                        'engine':engine, 'gpu':7, 'max_seconds':5, 'inputs':{input_name:str(self.inputs / input_name)},
+                        'parameters':{'installation_case':'worker'} if engine == 'installation.check' else {},
+                        'idempotency_key':engine})
+                    self.assertEqual(run['status'],'draft')
+                    self.assertEqual(run['gpu'],7)
+                    self.assertIsNone(allocated_gpu(run))
+                    self.assertEqual(run_process_env(run)['CUDA_VISIBLE_DEVICES'],'')
+
+    def test_gpu_routes_require_exact_grants_and_reject_malformed_ordinals_and_policies(self):
+        allowed = self.service.register_project({'name':'Explicit GPU 2','policy':{**self.project['policy'],'gpus':[2]}})
+        empty = self.service.register_project({'name':'No local GPU','policy':{**self.project['policy'],'gpus':[]}})
+        original = self.service.store.get('project',allowed['id'])
+        for malformed in ('2', [True], [False], ['2'], [2.0], [-1], [2**53], None):
+            with self.subTest(policy=malformed), self.assertRaisesRegex(ValueError,'GPU IDs'):
+                self.service.register_project({**allowed,'policy':{**allowed['policy'],'gpus':malformed}})
+        self.assertEqual(self.service.store.get('project',allowed['id']),original)
+        spec={'project_id':allowed['id'],'environment_id':self.environment['id'],'engine':'pydyn.md','gpu':2,
+              'max_seconds':5,'inputs':{'run.py':str(self.inputs/'run.py')},'idempotency_key':'exact-gpu'}
+        self.assertEqual(self.service.prepare(spec)['gpu'],2)
+        with self.assertRaisesRegex(PermissionError,'GPU is not authorized'):
+            self.service.prepare({**spec,'gpu':0})
+        with self.assertRaisesRegex(PermissionError,'GPU is not authorized'):
+            self.service.prepare({**spec,'project_id':empty['id']})
+        for engine in ('pydyn.md','trajectory.density'):
+            for gpu in (True, False, '2', [], 2.0, -1, 2**53):
+                with self.subTest(engine=engine, gpu=gpu), self.assertRaisesRegex(ValueError,'GPU ID'):
+                    self.service.prepare({**spec,'engine':engine,'gpu':gpu})
+
     def test_live_artifact_list_does_not_hash_output_bytes(self):
         run=self.prepare();out=Path(run['directory'])/'results/trajectory.xyz';out.write_bytes(b'frame\n')
         with patch.object(util,'stable_file_snapshot',side_effect=AssertionError('listing must not hash')):

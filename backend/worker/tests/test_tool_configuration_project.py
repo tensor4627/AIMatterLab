@@ -1,5 +1,6 @@
 """Atomic create-only project authorization tests with real isolated Store/thread interleavings."""
 import copy
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -57,7 +58,7 @@ class ToolConfigurationProject(unittest.TestCase):
 
     def test_every_conflicting_name_policy_or_authoring_field_is_preserved(self):
         baseline = self.call()
-        changes = [lambda item: item.update(name='Other human name'), lambda item: item.update(authoring_only=True), lambda item: item.update(authoring_only=False), lambda item: item.update(studio_workspace={'schema_version': 1}), lambda item: item['policy'].update(engines=['gpumd.md']), lambda item: item['policy'].update(gpus=[False]), lambda item: item['policy'].update(max_seconds=10), lambda item: item['policy'].update(input_roots=[str(self.root)]), lambda item: item['policy'].update(cluster_queue_policies={})]
+        changes = [lambda item: item.update(name='Other human name'), lambda item: item.update(authoring_only=True), lambda item: item.update(authoring_only=False), lambda item: item.update(studio_workspace={'schema_version': 1}), lambda item: item['policy'].update(engines=['gpumd.md']), lambda item: item['policy'].update(gpus=[]), lambda item: item['policy'].update(max_seconds=10), lambda item: item['policy'].update(input_roots=[str(self.root)]), lambda item: item['policy'].update(cluster_queue_policies={})]
         for change in changes:
             with self.subTest(change=change):
                 existing = copy.deepcopy(baseline); change(existing)
@@ -67,6 +68,23 @@ class ToolConfigurationProject(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'preserved'): self.call()
                 self.assertEqual(self.service.store.get('project', existing['id']), before)
         self.assertEqual(self.service.store.runs(), [])
+
+    def test_legacy_boolean_gpu_grant_is_preserved_until_an_explicit_integer_edit(self):
+        project = self.call()
+        legacy = {**project, 'policy':{**project['policy'],'gpus':[False]}}
+        # Simulate an existing record saved before the registration validator rejected bools.
+        with self.service.store.lock, self.service.store.db:
+            self.service.store.db.execute("UPDATE objects SET data=? WHERE kind='project' AND id=?",
+                                          (json.dumps(legacy), project['id']))
+        with self.assertRaisesRegex(ValueError, 'preserved'):
+            self.call()
+        stored = self.service.store.get('project', project['id'])
+        self.assertEqual(stored['revision'], legacy['revision'])
+        self.assertIs(stored['policy']['gpus'][0], False)
+        saved = dispatch(self.service, 'POST', '/api/projects', project, admin=True)
+        self.assertEqual(saved['revision'], project['revision'] + 1)
+        self.assertEqual(self.service.store.get('project', project['id']), saved)
+        self.assertIs(type(self.service.store.get('project', project['id'])['policy']['gpus'][0]), int)
 
     def test_admin_exact_fields_and_real_environment_are_required(self):
         for extra in ({'policy': {}}, {'passed': True}, {'root': '/caller-selected-root'}):

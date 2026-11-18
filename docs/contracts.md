@@ -28,9 +28,9 @@
 
 loader 变量仅允许 LD_LIBRARY_PATH、LIBRARY_PATH、OMP_NUM_THREADS、MKL_NUM_THREADS。环境 probe 记录实际模块路径、CUDA、源码 commit 与 dirty 标记。注册普通/采样 PyDyn 时分别指向实际环境源码；sampling probe 记录其固定 pyGAS 来源。
 
-## 用户审阅与执行（v0.2）
+## 用户审阅与执行
 
-Agent 仅准备草稿和输入文件。MCP 不暴露 validate_run/submit_run；旧会话的这两种调用也被服务拒绝。桌面上的「确认并执行」以用户凭据创建修订快照、验证并提交，验证失败则保持未执行草稿。
+用户可只委托准备草稿，也可授权执行具体运行或冻结流程。桌面的「确认并执行」绑定不可变输入。托管计算工具在主进程核对当前会话、项目、原服务、运行身份及该操作的人类指示，worker 按引擎、资源和时限再次验证。要求走已复核流程的运行沿用原执行入口。MCP 无法更改项目授权。项目的本地 GPU 清单表示可用设备；固定 CPU 阶段按输入、环境、时限和并发数执行。[托管计算入口](../agent/tools/managed-compute-tools.mjs) · [worker 项目授权](../backend/worker/studio_worker/compute/registrations.py)
 
 /api/run/input 读取不可变输入文本及哈希；/api/run/revise 仅允许桌面用户修订未提交草稿。旧版本保留 superseded_by 并停止使用；修订标识绑定原任务、参数和文本修改。修改后的源码保留在项目输入目录，独立运行目录保持不可变。
 

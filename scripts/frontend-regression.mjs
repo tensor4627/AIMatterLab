@@ -1040,6 +1040,35 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
  await check('project-setup-multiple-environments-needs-one-explicit-choice',async p=>{
   await p.evaluate(()=>window.renderTest('ProjectAuthorizationForm',{environments:[window.__test.environment,{...window.__test.environment,id:'env-two',name:'Second environment'}],suggestedInputRoot:'/fixture/current/inputs',onSubmit:async value=>window.__test.authorization=value}));await p.getByLabel('项目名称',{exact:true}).fill('Two environments');assert.equal(await p.getByLabel('计算环境',{exact:true}).inputValue(),'');await p.getByTestId('save-project-authorization').click();assert.equal(await p.evaluate(()=>!!window.__test.authorization),false);await p.getByLabel('计算环境',{exact:true}).selectOption('env-two');await p.getByTestId('save-project-authorization').click();await p.waitForFunction(()=>window.__test.authorization);assert.deepEqual(await p.evaluate(()=>window.__test.authorization.policy.environments),['env-two']);assert.deepEqual(await p.evaluate(()=>window.__test.authorization.policy.clusters),[]);
  });
+ await check('project-gpu-ids-blank-grants-zero-and-invalid-text-never-saves',async p=>{
+  await p.evaluate(()=>{
+   window.__test.gpuSpec={name:'CPU project',policy:{engines:['installation.check'],gpus:[2],max_seconds:60,max_concurrent:1,input_roots:['/fixture/inputs'],environments:['env']}};
+   return window.renderTest('ProjectAuthorizationForm',{environments:[window.__test.environment],initialSpec:window.__test.gpuSpec,onSubmit:async value=>window.__test.authorization=value});
+  });
+  const form=p.getByTestId('project-authorization'),gpu=form.getByLabel('GPU 编号',{exact:true}),save=form.getByTestId('save-project-authorization');
+  const advanced=form.getByLabel('高级 JSON 授权',{exact:true});
+  await gpu.waitFor();
+  assert.equal(await gpu.inputValue(),'2');
+  assert.match(await form.innerText(),/留空表示不授权本地 GPU/);
+  await gpu.fill('2,,7');
+  assert.equal(await gpu.getAttribute('aria-invalid'),'true');
+  assert.equal(await save.isDisabled(),true);
+  await form.locator('.authorization-json summary').click();
+  assert.equal(JSON.parse(await advanced.inputValue()).policy.gpus,'2,,7');
+  const setJson=async gpus=>advanced.fill(await p.evaluate(value=>JSON.stringify({...window.__test.gpuSpec,policy:{...window.__test.gpuSpec.policy,gpus:value}}),gpus));
+  await setJson([true]);
+  await form.getByRole('button',{name:'应用 JSON',exact:true}).click();
+  assert.equal(await gpu.inputValue(),'2,,7');
+  assert.equal(await p.evaluate(()=>!!window.__test.authorization),false);
+  await setJson([]);
+  await form.getByRole('button',{name:'应用 JSON',exact:true}).click();
+  assert.equal(await gpu.inputValue(),'');
+  assert.equal(await gpu.getAttribute('aria-invalid'),'false');
+  assert.match(await form.getByTestId('project-resource-summary').innerText(),/未授权本地 GPU/);
+  await save.click();
+  await p.waitForFunction(()=>window.__test.authorization);
+  assert.deepEqual(await p.evaluate(()=>window.__test.authorization),await p.evaluate(()=>({...window.__test.gpuSpec,policy:{...window.__test.gpuSpec.policy,gpus:[]}})));
+ });
  await check('project-setup-explicit-cluster-entry-blocks-late-local-environment-default',async p=>{
   await p.evaluate(()=>{window.__projectLateProps={environments:[],suggestedInputRoot:'/fixture/current/inputs',onSubmit:async value=>window.__test.authorization=value};return window.renderTest('ProjectAuthorizationForm',window.__projectLateProps);});await p.getByLabel('项目名称',{exact:true}).fill('Explicit remote scope');await p.getByTestId('project-resource-details').locator('summary').click();await p.getByLabel('允许的集群 ID · 每行一个',{exact:true}).fill('explicit-cluster');await p.evaluate(()=>window.renderTest('ProjectAuthorizationForm',{...window.__projectLateProps,environments:[window.__test.environment]}));await p.waitForFunction(()=>document.querySelector('.project-basic-resources select option[value="env"]'));assert.equal(await p.getByLabel('计算环境',{exact:true}).inputValue(),'');await p.getByTestId('save-project-authorization').click();await p.waitForFunction(()=>window.__test.authorization);assert.deepEqual(await p.evaluate(()=>window.__test.authorization.policy.environments),[]);assert.deepEqual(await p.evaluate(()=>window.__test.authorization.policy.clusters),['explicit-cluster']);
  });

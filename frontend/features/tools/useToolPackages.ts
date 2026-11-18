@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import type {AgentProvider} from '../../../contracts/dto/agent';
 import type {Project,Environment} from '../../../contracts/dto/compute';
+import {deploymentProjectIssue} from '../../../contracts/compute/deployment-authorization.mjs';
 import type {ToolPackageInspection,ToolPackageRecord,ToolPackageSummary,ToolConfiguration,ToolConfigurationIndex,ToolExecutionSkill,ToolGuidanceGrant} from '../../../contracts/dto/tools';
 import type {SkillAttachment} from "../conversations/agent-types";
 import {toolPackages,toolConfigurations} from '../../api/tools';
@@ -67,7 +68,7 @@ export function useToolPackages({provider,onSelect}:{provider:AgentProvider;onSe
  });}
  function targetEnvironment(value:string){invalidate();setSelectedConfigurationId('');setEnvironmentId(value);setProjectId('');setConfiguration(null);setExecution(null);setResourceIds([]);setBound(false);}
  function targetProject(value:string){invalidate();setSelectedConfigurationId('');setProjectId(value);setConfiguration(null);setExecution(null);setResourceIds([]);setBound(false);}
- const authorizedProjects=projects.filter(project=>!project.authoring_only&&project.policy.engines.includes('installation.check')&&project.policy.environments.includes(environmentId)&&project.policy.gpus.includes(0)&&project.policy.max_seconds>=30&&project.policy.max_concurrent>=1);
+ const authorizedProjects=projects.filter(project=>!deploymentProjectIssue(project,{target:'local',targetId:environmentId,gpu:0,maxSeconds:30},'installation.check')&&project.policy.max_concurrent>=1);
  function createProject(){if(!environmentId||!projectName.trim())return;void action('新建 CPU 检查项目',async ticket=>{
   const environment=environmentId,name=projectName.trim(),value=await toolConfigurations.createProject({environment_id:environment,name,request_id:requestId('project',[environment,name])});if(!valid(ticket))return;if(!value.policy.environments.includes(environment)||!value.policy.engines.includes('installation.check')||value.authoring_only)throw Error('新项目授权与所选配置目标不符');setProjects(old=>[...old.filter(item=>item.id!==value.id),value]);setProjectId(value.id);setNotice('已新建独立 CPU 检查项目，原项目授权保持不变。');
  });}

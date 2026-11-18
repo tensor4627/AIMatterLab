@@ -128,8 +128,13 @@ export async function managedWorkerProject(scope,resource,service,assertCurrent)
  if(!service||!scope.projectId)return null;
  assertCurrent();
  const query=async(method,target,data)=>{
-  const rows=unwrap(await service.forward(method,target,data,false,10000,assertCurrent));
-  assertCurrent();return rows;
+  const response=await service.forward(method,target,data,false,10000,assertCurrent);
+  assertCurrent();
+  if(response?.status===403)return null;
+  const rows=unwrap(response);
+  const valid=target==='/api/cluster/profile'?rows&&typeof rows==='object'&&!Array.isArray(rows):Array.isArray(rows);
+  if(!valid)fail('managed_compute_worker_request_failed');
+  return rows;
  };
  const projects=await query('GET','/api/projects');
  const project=Array.isArray(projects)&&projects.find(row=>row?.id===scope.projectId);

@@ -18,7 +18,7 @@ export interface ManagedSchedule {
   id:string; name?:string; sourceId:string; kind:string; status:string;
   scope:{provider:AgentProvider;threadId:string;taskId?:string;projectId:string;runId?:string};
   intervalSeconds:number; maxRuns:number; count:number; delegationCount?:number; expiresAt:number; nextAt:number|null;
-  connected?:boolean; history?:unknown[]; revision?:number; stopRequestedAt?:number|null; lastResult?:unknown;
+  connected?:boolean; history?:unknown[]; revision?:number; stopRequestedAt?:number|null; stopNeedsConfirmation?:boolean; lastResult?:unknown;
   active?:{jobId?:string;childId?:string;status?:string}|null; script?:{language?:string;sha256?:string;version?:number;text?:string}|null;
 }
 export interface ManagedSource {

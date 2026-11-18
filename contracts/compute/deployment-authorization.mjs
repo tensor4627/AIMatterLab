@@ -1,3 +1,5 @@
+import {isLocalGpuId,validLocalGpuIds} from './project-policy.mjs';
+
 /** Shared UI/main preflight. The worker remains the final authorization authority. */
 export function deploymentProjectIssue(project,config,engine){
  if(!project||project.authoring_only)return {code:'compute-project-required',message:'请选择或创建计算项目；草稿工作区仅用于编写输入，不能执行计算。'};
@@ -6,7 +8,12 @@ export function deploymentProjectIssue(project,config,engine){
  const remote=config.target==='cluster',allowed=policy[remote?'clusters':'environments'];
  if(!config.targetId)return {code:'target-required',message:remote?'请选择已登记的集群。':'请选择已登记的计算环境。'};
  if(!Array.isArray(allowed)||!allowed.includes(config.targetId))return {code:'target',message:remote?'此集群不在项目的计算范围内，请检查项目设置。':'此计算环境不在项目的计算范围内，请检查项目设置。'};
- if(!remote&&(!Array.isArray(policy.gpus)||!policy.gpus.includes(config.gpu)))return {code:'gpu',message:'所选 GPU 不在项目的资源范围内，请调整 GPU 或项目设置。'};
+ if(!remote){
+  const gpu=config.gpu===undefined?0:config.gpu;
+  if(!isLocalGpuId(gpu)||!validLocalGpuIds(policy.gpus))return {code:'gpu',message:'本地 GPU 编号或项目授权列表无效，请核对部署和项目设置。'};
+  const fixedCpu=engine==='installation.check'||engine==='trajectory.density';
+  if(!fixedCpu&&!policy.gpus.includes(gpu))return {code:'gpu',message:'所选 GPU 不在项目的资源范围内，请调整 GPU 或项目设置。'};
+ }
  if(!Number.isSafeInteger(config.maxSeconds)||config.maxSeconds<1||!Number.isSafeInteger(policy.max_seconds)||config.maxSeconds>policy.max_seconds)return {code:'duration',message:'运行时长超出项目上限，请调整时长或项目设置。'};
  return null;
 }

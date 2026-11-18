@@ -15,12 +15,20 @@ import sys
 import threading
 import time
 from pathlib import Path
-from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env
+from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, allocated_gpu, process_env
 from studio_worker.infrastructure.store import Store
 from studio_worker.compute.runtime_service import RuntimeServiceMixin
 from studio_worker.infrastructure.util import alive, atomic_json, contained, digest, identity, leaf, run_json
 
 TERMINAL = ("succeeded", "failed", "cancelled")
+
+
+def _gpu_id(value):
+    return type(value) is int and 0 <= value < 2**53
+
+
+def _gpu_ids(value):
+    return isinstance(value, list) and all(_gpu_id(gpu) for gpu in value)
 
 
 class RegistrationsMixin:
@@ -40,9 +48,8 @@ class RegistrationsMixin:
             policy.setdefault(key, default)
         if not policy["input_roots"] or any(not Path(p).is_absolute() for p in policy["input_roots"]):
             raise ValueError("Explicit absolute input roots required")
-        if not isinstance(policy["gpus"], list) or not policy["gpus"] or any(
-                not isinstance(g, int) or g < 0 for g in policy["gpus"]):
-            raise ValueError("GPU IDs must be nonnegative integers")
+        if not _gpu_ids(policy["gpus"]):
+            raise ValueError("GPU IDs must be a list of nonnegative integers within the safe integer range")
         if int(policy["max_seconds"]) <= 0 or int(policy["max_concurrent"]) <= 0:
             raise ValueError("Resource limits must be positive")
         policy["max_seconds"] = int(policy["max_seconds"])
@@ -84,7 +91,10 @@ class RegistrationsMixin:
             raise PermissionError("Engine is not authorized")
         if spec["environment_id"] not in policy["environments"]:
             raise PermissionError("Environment is not authorized")
-        if spec["engine"] not in ("installation.check", "trajectory.density") and spec["gpu"] not in policy["gpus"]:
+        if not _gpu_id(spec.get("gpu")):
+            raise ValueError("GPU ID must be a nonnegative integer within the safe integer range")
+        gpu = allocated_gpu(spec)
+        if not _gpu_ids(policy.get("gpus")) or gpu is not None and gpu not in policy["gpus"]:
             raise PermissionError("GPU is not authorized")
         if not 0 < int(spec["max_seconds"]) <= int(policy["max_seconds"]):
             raise PermissionError("Duration exceeds project authorization")
