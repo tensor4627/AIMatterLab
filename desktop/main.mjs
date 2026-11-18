@@ -160,8 +160,11 @@ const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&proc
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
 let activeAuthoringTasks;
 const codexRoot=path.join(app.getPath('userData'),'provider-contexts','codex');
-const createCodex=()=>new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host:createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime})});
-const codex=createCodex(), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
+const subscriptionRuntime=createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime,
+ onEnvPrompt:prompt=>emit('studio:event',{method:'studio/codexEnvImport',params:{prompt}})});
+const createCodex=(host=createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime,sharedEnvImport:subscriptionRuntime.envImport}))=>
+ new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host});
+const codex=createCodex(subscriptionRuntime), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 bindBundledWorkerRuntimeId(worker,workerSource);
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService,managed:()=>managedResources,taskSource:scope=>taskWorkerSource(taskRecords?.bound(scope.provider,scope.threadId))});
 const previousSkillRoot=path.join(app.getPath('userData'),'project-skills');
@@ -585,7 +588,12 @@ handle('worker.request',async({method,target,data}) => {
     for(const item of result) catalog.put(target.split('/').at(-1),item.id,item);
   return result;
 });
-handle('codex.connect',async() => agents.connect('codex'));
+handle('codex.envImport.pending',input=>{
+ if(Object.keys(input).length)throw Error('Invalid Codex configuration request');
+ return subscriptionRuntime.envImport.current();
+});
+handle('codex.envImport.decide',input=>{subscriptionRuntime.envImport.decide(input);return null;});
+handle('codex.connect',async() => agents.connect('codex',{checkLogin:true}));
 handle('codex.configure',async({preferences={},threadId,model}) => {
   assertIdleAgent();
   agentConfig(preferences);
@@ -628,7 +636,8 @@ handle('agent.connect',async({provider,repairTools=false,threadId})=>{
  if(info?.loginRequired)return info;
  const tools=await scientificTools(provider,threadId);resource.assertCurrent();
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
- return {...info,tools};
+ const defaults=provider==='codex'?subscriptionRuntime.envImport.settings().defaults:null;
+ return {...info,tools,...defaults?{nativeCodexDefaults:defaults}:{}};
  }finally{if(current())agentConnectAttempts.delete(key);}
 });
 handle('agent.tools',async({provider,threadId})=>{providerId(provider);return scientificTools(provider,threadId);});

@@ -3,6 +3,7 @@ const methods=new Set(['diagnostics.saveWorkbenchImage','task.stage.artifacts','
   'codex.respond','codex.configure','workflow.list','workflow.save','agent.tools','agent.connect','agent.disconnect','agent.rpc','agent.recover','agent.respond','agent.configure','agent.account','agent.login','agent.login.cancel','agent.logout','agent.testConnection','agent.login.open','skills.catalog','scientific.skills','file.open','file.save','file.choose','ssh.save','ssh.browse','terminal.start',
   'sharedTerminal.list','sharedTerminal.open','sharedTerminal.read','sharedTerminal.input','sharedTerminal.resize','sharedTerminal.owner','sharedTerminal.close','terminal.input','terminal.close','window','export','compute.profiles.list','compute.profiles.read','compute.profiles.save','compute.profiles.inventory','compute.connection.plan','compute.connection.status','compute.connection.connect','compute.connection.cancel','ssh.auth.plan','ssh.auth.start','ssh.auth.read','ssh.auth.input','ssh.auth.resize','ssh.auth.finish','ssh.auth.closed','ssh.tunnel.plan','ssh.tunnel.start','ssh.tunnel.status','ssh.tunnel.close']);
 for(const name of [
+ 'codex.envImport.pending','codex.envImport.decide',
  'compute.managed.snapshot','compute.managed.refresh','compute.managed.publish','compute.managed.configureService','compute.managed.projectAccess','compute.managed.scheduleDetails','compute.managed.stopSchedule','compute.managed.acknowledgeNotice','compute.managed.observeOnce',
  'onboarding.progress','onboarding.openDirectory',
  'compute.workspace.setup',

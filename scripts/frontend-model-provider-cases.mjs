@@ -2,6 +2,134 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 export async function frontendModelProviderCases({check,out}){
+ for(const scenario of ['matched','missing-model','missing-effort']){
+  await check('model-providers-codex-native-defaults-'+scenario,async page=>{
+   await page.evaluate(async scenario=>{
+    const original=window.studio.invoke;
+    const defaults={id:'fixture-import',model:scenario==='missing-model'?'unlisted':'native-model',effort:scenario==='missing-effort'?'unlisted-effort':'high'};
+    window.studio.invoke=async(method,data)=>{
+     if(method==='agent.connect')return {tools:{status:'ready',count:1},nativeCodexDefaults:defaults};
+     if(method==='agent.rpc'&&data.method==='model/list'){
+      const next=data.params?.cursor==='next-page',model=next?'native-model':'account-model';
+      return {data:[{model,displayName:model,isDefault:!next,supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],defaultReasoningEffort:'low'}],nextCursor:next?null:'next-page'};
+     }
+     return original(method,data);
+    };
+    await window.renderTest('Agent',{width:640,planningMode:false,onPlanningModeChange(){},context:'{}',onError:error=>{throw error;}});
+   },scenario);
+   const connect=page.getByTestId('agent-connect');
+   if(!await connect.isVisible())await page.getByTestId('agent-options').click();
+   await connect.click();
+   const model=page.getByTestId('agent-model'),effort=page.getByTestId('agent-effort');
+   await page.locator('.composer textarea').fill('Synthetic selection check');
+   const send=page.getByRole('button',{name:'发送',exact:true});
+   if(scenario!=='matched'){
+    const review=page.getByTestId('codex-model-defaults-review');await review.waitFor();
+    assert.match(await review.innerText(),scenario==='missing-model'?/unlisted/:/unlisted-effort/);
+    assert(await send.isDisabled());
+    await model.selectOption('native-model');await effort.selectOption('high');
+    await review.getByRole('button',{name:'确认使用所选配置'}).click();
+    await review.waitFor({state:'detached'});
+   }
+   await page.waitForFunction(()=>localStorage.getItem('studio.codex.appliedDefaults')==='fixture-import');
+   assert.equal(await model.inputValue(),'native-model');
+   assert.equal(await effort.inputValue(),'high');
+   await send.click();
+   await page.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='turn/start'));
+   const turn=await page.evaluate(()=>window.__test.calls.find(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').data.params);
+   assert.equal(turn.model,'native-model');assert.equal(turn.effort,'high');
+  });
+ }
+ await check('model-providers-codex-first-use-import-choices',async page=>{
+  await page.evaluate(()=>{
+   const previous=window.studio.invoke;
+   window.importModes=[];
+   window.showImport=()=>{
+    window.pendingImport={requestId:String(window.importModes.length+1),sourceState:'available'};
+    window.__test.events.forEach(fn=>fn({method:'studio/codexEnvImport',params:{prompt:window.pendingImport}}));
+   };
+   window.pendingImport={requestId:'1',sourceState:'available',hasModelDefaults:true};
+   window.studio.invoke=async(method,data)=>{
+    if(method==='codex.envImport.pending')return window.pendingImport;
+    if(method==='codex.envImport.decide'){
+     window.importModes.push(data.mode);
+     if(data.requestId==='1')window.useModels=data.useModelDefaults;
+     window.__test.events.forEach(fn=>fn({method:'studio/codexEnvImport',params:{prompt:null}}));
+     return null;
+    }
+    return previous(method,data);
+   };
+   return window.renderTest('App');
+  });
+  const dialog=page.getByRole('dialog',{name:'首次启动 Codex'});
+  for(const [index,mode] of ['proxy','full','none','cancel'].entries()){
+   if(index)await page.evaluate(()=>window.showImport());
+   await dialog.waitFor();
+   const proxy=dialog.getByLabel('仅迁移代理变量'),full=dialog.getByLabel('复制整份 .env');
+   assert(await proxy.isChecked());assert.equal(await full.isChecked(),false);
+   if(!index){const modelDefaults=dialog.getByLabel('沿用本机默认模型和推理强度');assert.equal(await modelDefaults.isChecked(),false);await modelDefaults.check();}
+   if(mode==='full'){await full.check();assert.equal(await proxy.isChecked(),false);}
+   if(mode==='none'){await proxy.uncheck();assert.equal(await full.isChecked(),false);}
+   if(mode==='cancel')await page.keyboard.press('Escape');else await dialog.getByRole('button',{name:'继续启动'}).click();
+   await dialog.waitFor({state:'detached'});
+  }
+  assert.deepEqual(await page.evaluate(()=>window.importModes),['proxy','full','none','cancel']);
+  assert.equal(await page.evaluate(()=>window.useModels),true);
+ });
+ await check('model-providers-codex-fresh-install-connect-to-login',async page=>{
+  await page.evaluate(()=>{
+   const previous=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>{
+    if(method==='codex.envImport.pending')return null;
+    if(method==='agent.account')return {account:null,requiresOpenaiAuth:true};
+    if(method==='agent.connect'){
+     window.__test.events.forEach(fn=>fn({method:'studio/codexEnvImport',params:{prompt:{sourceState:'absent',requestId:'new'}}}));
+     return new Promise(resolve=>{window.finishConnect=resolve;});
+    }
+    if(method==='codex.envImport.decide'){
+     window.selectedMode=data.mode;
+     window.__test.events.forEach(fn=>fn({method:'studio/codexEnvImport',params:{prompt:null}}));
+     window.finishConnect({provider:'codex',loginRequired:true});return null;
+    }
+    if(method==='agent.login'){window.loginType=data.type;return {provider:'codex',phase:'authorizing',loginId:'fixture',url:'https://auth.openai.com/fixture'};}
+    return previous(method,data);
+   };
+   return window.renderTest('App');
+  });
+  const connect=page.getByTestId('agent-connect');
+  await page.getByTestId('agent-options').waitFor();
+  if(!await connect.isVisible())await page.getByTestId('agent-options').click();
+  await connect.click();
+  const dialog=page.getByRole('dialog',{name:'首次启动 Codex'});await dialog.waitFor();
+  assert.equal(await dialog.getByRole('checkbox').count(),0);
+  assert.match(await dialog.innerText(),/本机没有 Codex .env/);
+  await dialog.getByRole('button',{name:'继续启动'}).click();
+  const account=page.getByTestId('account-center');
+  await account.getByLabel('登录方式').waitFor();
+  assert.equal(await account.getByLabel('登录方式').inputValue(),'chatgpt');
+  assert.equal(await page.evaluate(()=>window.selectedMode),'none');
+  await account.getByRole('button',{name:'开始登录'}).click();
+  await page.waitForFunction(()=>window.loginType==='chatgpt');
+  await account.getByRole('button',{name:'打开官方授权页面'}).waitFor();
+  await page.screenshot({path:path.join(out,'codex-fresh-install-login.png')});
+ });
+ await check('model-providers-codex-config-without-env',async page=>{
+  await page.evaluate(()=>{
+   const original=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>{
+    if(method==='codex.envImport.pending')return {requestId:'config-only',sourceState:'absent',hasSystemProxy:true,hasModelDefaults:true};
+    if(method==='codex.envImport.decide'){window.importAnswer=data;return null;}
+    return original(method,data);
+   };
+   return window.renderTest('App');
+  });
+  const dialog=page.getByRole('dialog',{name:'首次启动 Codex'}),proxy=dialog.getByLabel('沿用本机 Codex 代理设置'),model=dialog.getByLabel('沿用本机默认模型和推理强度');
+  assert(await proxy.isChecked());assert.equal(await model.isChecked(),false);
+  assert.equal(await dialog.getByLabel('复制整份 .env').count(),0);
+  await proxy.uncheck();await model.check();await dialog.getByRole('button',{name:'继续启动'}).click();
+  await page.waitForFunction(()=>!!window.importAnswer);
+  assert.deepEqual(await page.evaluate(()=>window.importAnswer),{requestId:'config-only',mode:'none',useModelDefaults:true,useSystemProxy:false});
+ });
  await check('model-providers-keyless-local-text-only-settings',async page=>{
   await page.evaluate(()=>{
    const saved={schemaVersion:1,id:'fixture-local',provider:'compatible',name:'Local fixture',baseUrl:'http://127.0.0.1:11434/v1',api:'openai-completions',preset:'custom',models:[{id:'local-model',input:['text','image']}],defaultModel:'local-model',credentialStored:false,requiresApiKey:false,revision:1};

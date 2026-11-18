@@ -1,1 +1,3 @@
 export function resumedEffort(value:{provider:string;preferences?:Record<string,string|null|undefined>;model?:{supportedReasoningEfforts?:{reasoningEffort:string}[];defaultReasoningEffort?:string};serverEffort?:unknown}):string;
+export function importedCodexSelection(models:{model:string;isDefault?:boolean;supportedReasoningEfforts?:{reasoningEffort:string}[];defaultReasoningEffort?:string}[],defaults:{model?:string;effort?:string}):{model:string;effort:string;reason:'model'|'effort'|null};
+export function readCodexDefaultsCatalog(readPage:(page:{limit:number;cursor?:string})=>Promise<any>,current:()=>boolean):Promise<{data:any[]}>;

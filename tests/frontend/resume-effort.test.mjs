@@ -1,6 +1,18 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {resumedEffort} from "../../frontend/features/conversations/resume-effort.mjs";
+import test from 'node:test';import assert from 'node:assert/strict';import {resumedEffort,importedCodexSelection,readCodexDefaultsCatalog} from "../../frontend/features/conversations/resume-effort.mjs";
 
 const model={supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],defaultReasoningEffort:'high'};
+test('fresh model preferences use only the advertised model and reasoning levels',()=>{
+ const catalog=[{...model,model:'default',isDefault:true},{...model,model:'chosen'}];
+ assert.deepEqual(importedCodexSelection(catalog,{effort:'low'}),{model:'default',effort:'low',reason:null});
+ assert.deepEqual(importedCodexSelection(catalog,{model:'chosen'}),{model:'chosen',effort:'high',reason:null});
+ assert.equal(importedCodexSelection(catalog,{model:'unlisted',effort:'low'}).reason,'model');
+ assert.equal(importedCodexSelection(catalog,{model:'chosen',effort:'unlisted'}).reason,'effort');
+});
+test('incomplete or repeated model pages cannot be reported as an unavailable account model',async()=>{
+ const page=async()=>({data:[],nextCursor:'same-cursor'});
+ await assert.rejects(readCodexDefaultsCatalog(page,()=>true),/模型目录读取不完整/);
+ await assert.rejects(readCodexDefaultsCatalog(()=>assert.fail('stale connection'),()=>false),/connection changed/);
+});
 test('explicit provider low survives a restored server high when supported',()=>assert.equal(resumedEffort({provider:'codex',preferences:{codex:'low'},model,serverEffort:'high'}),'low'));
 test('unsupported saved choice falls back only to a supported server choice',()=>assert.equal(resumedEffort({provider:'codex',preferences:{codex:'xhigh'},model,serverEffort:'high'}),'high'));
 test('missing saved choice uses supported server effort before model default',()=>assert.equal(resumedEffort({provider:'codex',model,serverEffort:'low'}),'low'));

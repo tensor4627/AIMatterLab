@@ -277,7 +277,13 @@ export class ConversationAgentHub extends EventEmitter{
   if(!entry?.requests.has(String(id)))throw Error('Agent request no longer belongs to this conversation');
   const value=entry.hub.respond(provider,id,result);entry.requests.delete(String(id));return value;
  }
- account(provider){return this.auth.account(provider);}
+ account(provider){
+  const entry=this.scope.getStore()||this.foreground,bridge=entry?.hub.codex;
+  // A reused ChatGPT subscription can be held in the conversation process only.
+  if(provider==='codex'&&entry.provider==='codex'&&bridge?.process&&bridge.isolationReady&&
+     !bridge.isolation?.authenticationOnly&&!this.auth.loginStatus?.codex?.phase)return entry.hub.account(provider);
+  return this.auth.account(provider);
+ }
  async login(provider,value){
   this.assertProviderIdle(provider);
   const result=await this.auth.login(provider,value);
