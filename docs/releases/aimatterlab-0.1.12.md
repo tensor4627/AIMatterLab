@@ -1,6 +1,6 @@
 # AIMatterLab 0.1.12
 
-2026-11-19 · Windows x64 · [下载本版](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.1.12) · [更新日志](../../CHANGELOG.md)
+2026-11-19 · Windows x64 · [私有仓库源码标签](https://github.com/tensor4627/AIMatterLab/tree/v0.1.12) · [更新日志](../../CHANGELOG.md)
 
 ## 个人库与内置指南
 
@@ -27,6 +27,6 @@
 | passed | 成品和更新清单 | 已核对安装包的项目签名者、更新清单签名、安装包和块索引 SHA-512、清单内 7 项 SHA-256 和两个 ZIP 的 CRC。便携包中的桌面程序及应用归档与发布目录逐字节一致。 |
 | not_run | 线上模型与真实计算 | 冲突识别属于模型按主提示词执行的行为。本轮验证提示词和双向对话协议，未评估各线上模型对任意自然语言冲突的识别率，也未提交科学计算。 |
 
-Windows 工作区安装包为 158,329,408 字节，SHA-256 为 `fe9b54d7fb9c69e3dcea26c0b42f812a9326faef094a4be91f17a43ef39db4cf`。便携 ZIP 为 211,248,941 字节。项目使用自签代码证书，Windows 对签名根的信任由本机证书库决定。
+Windows 安装包、便携包和校验清单保存在本地 `release/v0.1.12/`。工作区安装包为 158,329,408 字节，SHA-256 为 `fe9b54d7fb9c69e3dcea26c0b42f812a9326faef094a4be91f17a43ef39db4cf`。便携 ZIP 为 211,248,941 字节。项目使用自签代码证书，Windows 对签名根的信任由本机证书库决定。
 
 原始回执存放在验收工作树的 `.studio/`。
