@@ -1,19 +1,24 @@
 /* Presentation only: keep authoring, review and execution controls in their owners. */
 .navigation-rail[hidden]{display:none}
 .workspace-shell .navigation-rail{width:56px;flex-basis:56px;gap:8px;background:var(--sidebar)}
-.workspace-shell .sidebar{display:flex;flex-direction:column;padding:12px;background:var(--sidebar);overflow:hidden}
-.workspace-shell .sidebar-title{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 4px 16px;font-size:max(calc(15px * var(--ui-scale,1)),var(--ui-min-font,17px))}
-.workspace-shell .sidebar-title>span,.workspace-shell .primary-navigation button>span,.workspace-shell .sidebar-new-conversation>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-shell .sidebar{display:flex;flex-direction:column;padding:12px;background:var(--sidebar);overflow:hidden;container:sidebar / inline-size}
+.workspace-shell .sidebar-title{display:flex;align-items:center;gap:4px;padding:0 0 12px}
+.workspace-shell .sidebar-title .quick-search{flex:1;min-width:0;min-height:34px;margin:0}
+.workspace-shell .sidebar-title .quick-search>svg{flex:none}
+.workspace-shell .sidebar-title .quick-search>span{flex:1;min-width:0;margin:0;overflow:hidden;text-overflow:ellipsis;font:inherit;opacity:1}
+.workspace-shell .quick-search kbd{font:inherit;font-size:.8em;white-space:nowrap;color:var(--muted)}
+@container sidebar (max-width:220px){.workspace-shell .quick-search kbd{display:none}}
+.workspace-shell .primary-navigation button>span,.workspace-shell .sidebar-new-conversation>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .workspace-shell .sidebar-title>.icon-button,.workspace-shell .primary-navigation button>svg,.workspace-shell .sidebar-new-conversation>svg{flex-shrink:0}
 .workspace-shell .quick-search{white-space:nowrap;overflow:hidden;text-align:left}
 .workspace-shell .quick-search>span{flex-shrink:0}
-.workspace-shell .primary-navigation{display:grid;gap:4px;margin-bottom:16px}
+.workspace-shell .primary-navigation{display:grid;gap:2px;padding-bottom:10px;margin-bottom:4px;border-bottom:1px solid var(--line)}
 .workspace-shell .primary-navigation button{display:flex;align-items:center;gap:10px;min-height:38px;padding:8px 10px;text-align:left;border-radius:6px;color:var(--muted)}
 .workspace-shell .primary-navigation button[aria-current=page]{background:var(--accent-bg);color:var(--accent)}
 .workspace-shell .primary-navigation button:hover{background:var(--raised);color:var(--text)}
-.workspace-shell .sidebar-new-conversation{justify-content:flex-start;min-height:36px;margin-top:8px;padding:8px 10px;gap:8px;background:transparent;color:var(--text)}
+.workspace-shell .sidebar-new-conversation{justify-content:flex-start;min-height:36px;margin:4px 0;padding:7px 10px;gap:8px;background:transparent;color:var(--text)}
 .workspace-shell .sidebar-new-conversation[data-testid=new-computation]{background:var(--accent-bg);border-color:transparent;color:var(--accent)}
-.workspace-shell .sidebar-accounts{padding:8px 10px;margin:4px 0}
+.workspace-shell .sidebar-accounts{display:flex;align-items:center;justify-content:flex-start;gap:10px;padding:8px 10px;margin:0;color:var(--muted)}
 .workspace-shell .sidebar-scroll{flex:1;min-height:0;overflow-y:auto;margin-top:4px}
 .workspace-shell .sidebar-bottom{flex:none;position:static;padding-top:10px;border-top:1px solid var(--line)}
 .workspace-shell .sidebar-tools{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -49,7 +54,7 @@
 .workspace-shell .recent-runs>button{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 0;border-bottom:1px solid var(--line)}
 .workspace-shell .recent-runs>button>span:first-of-type{flex:1;min-width:0;overflow-wrap:anywhere}
 .workspace-shell .recent-runs small{display:block;margin-top:5px;color:var(--muted)}
-.workspace-shell .home-disclosure{border-top:1px solid var(--line);margin:24px 0;padding:12px 0}
+.workspace-shell .home-disclosure{border-top:1px solid var(--line);margin:12px 0 0;padding:4px 0}
 .workspace-shell .home-disclosure>summary{cursor:pointer;padding:8px 0;color:var(--muted)}
 .workspace-shell .home-disclosure>.task-cards{margin:12px 0}
 .workspace-shell .home-disclosure .stat{background:transparent;border:0;padding:12px}

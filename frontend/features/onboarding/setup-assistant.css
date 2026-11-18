@@ -44,7 +44,7 @@ li[data-done=true] .setup-step-mark {background:var(--su-tint);}
 .setup-scroll {flex:1; min-height:0; overflow:auto; padding:3px 6px 10px 3px; scrollbar-gutter:stable;}
 .setup-scroll h1 {font-size:clamp(28px,2.7vw,42px); line-height:1.18; font-weight:650; letter-spacing:-.035em; color:var(--su-ink); margin:0;}
 .setup-scroll h1:focus {outline:none;}
-.setup-intro {color:var(--su-muted); margin:11px 0 clamp(19px,2.7vh,29px); font-size:.96em;}
+.setup-scroll h1 {margin-block-end:clamp(16px,2.6vh,26px);}
 .setup-screen fieldset {border:0; padding:0; margin:0; min-width:0;}
 .setup-screen legend {font-size:.86em; font-weight:600; color:var(--su-ink); margin-bottom:8px;}
 .setup-welcome {display:grid; gap:20px;}

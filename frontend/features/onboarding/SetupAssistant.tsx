@@ -40,10 +40,6 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
   const index=pages.indexOf(page);
   const labels=[say('欢迎','Welcome'),say('助手','Agent'),say('算力','Compute'),say('开始','Start')];
   const titles=[say('欢迎使用 AIMatterLab','Welcome to AIMatterLab'),say('选择你的 AI 助手','Choose your AI assistant'),say('在哪里运行计算？','Where will you compute?'),say('开始使用工作台','Explore your workspace')];
-  const descriptions=[say('先选好语言和外观，再连接助手与计算资源。','Choose your language and appearance, then connect an assistant and compute resource.'),
-    say('选择一个服务商，使用自己的账号或 API 接入。','Choose a provider and connect your account or API.'),
-    say('可以先连接一处资源，以后随时添加其他连接。','Start with one resource. You can add more later.'),
-    say('用一个铜晶胞，了解从结构到结果的操作流程。','Follow a copper unit cell from its structure to the results of a calculation.')];
   const provider=settings.agentProvider||'codex';
   const names:Record<string,string>={...providerNames,compatible:say('自定义 API','Custom API')};
   const [account,setAccount]=useState<{provider:AgentProvider;state:ReturnType<typeof providerAccountState>}|null>(null);
@@ -92,7 +88,6 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
             {page!=='ready'&&<button className="setup-text" disabled={busy} onClick={()=>move('complete')}>{say('跳过引导','Skip setup')}</button>}</header>
           <div className="setup-scroll" ref={summary}>
             <h1 id="setup-heading" ref={heading} tabIndex={-1}>{titles[index]}</h1>
-            <p className="setup-intro">{descriptions[index]}</p>
             {page==='welcome'&&<div className="setup-welcome">
               <fieldset><legend>{say('界面语言','Language')}</legend><div className="setup-segments">{(['zh-CN','en'] as const).map(lang=><button key={lang} lang={lang} disabled={busy} aria-pressed={(settings.language||'zh-CN')===lang} onClick={()=>preference({language:lang})}>{lang==='en'?'English':'简体中文'}{(settings.language||'zh-CN')===lang&&<Check size={16}/>}</button>)}</div></fieldset>
               <fieldset><legend>{say('外观','Appearance')}</legend><div className="setup-themes">{(['light','dark'] as const).map(theme=><button key={theme} disabled={busy} aria-pressed={settings.theme===theme} onClick={()=>preference({theme})}>

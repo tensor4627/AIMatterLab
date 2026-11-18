@@ -168,7 +168,7 @@ try{
   await p.evaluate(()=>window.renderTest('App'));
   await p.locator('.titlebar .brand strong').waitFor();
   assert.equal(await p.locator('.titlebar .brand strong').innerText(),'AIMatterLab');
-  assert.equal(await p.locator('.sidebar-title>span').innerText(),'AIMatterLab');
+  assert.equal(await p.locator('.sidebar-title .quick-search').count(),1);
   await p.screenshot({path:path.join(out,'aimatterlab-workspace.png')});
   for(const language of ['zh-CN','en']){
    await p.evaluate(async language=>{const i18n=await import('/frontend/ui/i18n.ts');i18n.setLanguage(language);return window.renderTest('SettingsPage',{settings:{...window.__test.settings,language},onChange:()=>{},onClose:()=>{},onError:error=>{throw error;}});},language);

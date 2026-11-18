@@ -1,4 +1,5 @@
 const english:Record<string,string> = {
+"对话示例":"Conversation starters","对话草稿":"Message draft",
 "导入已有连接":"Import an existing connection",
 "选择连接来源":"Choose a connection source","请选择已有连接":"Select a saved connection","未发现可导入的连接":"No importable connections found",
 "新手引导":"Setup guide","返回新手引导":"Return to setup","引导进度未保存，请重试。":"Setup progress could not be saved. Try again.","设置未保存，请重试。":"Settings could not be saved. Try again.",
