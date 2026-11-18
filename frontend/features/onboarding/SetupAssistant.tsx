@@ -8,6 +8,7 @@ import {invoke} from '../../api/studio';
 import {Modal} from '../../ui/Dialogs';
 import {providerAccountState,providerNames} from '../conversations/provider-account.mjs';
 import ProviderLogin from '../settings/ProviderLogin';
+import GuideSpotlight from './GuideSpotlight';
 import CopperCell from './CopperCell';
 import './setup-assistant.css';
 
@@ -142,6 +143,7 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
         </div>
       </div>
     </section>
+    {login&&<GuideSpotlight step="account" english={english}/>}
     {login&&<Modal title={names[provider]+' · '+say('账号与 API','Account and API')} onClose={()=>setLogin(false)}>{error&&<p role="alert" className="setup-error">{error}</p>}<ProviderLogin key={provider} embedded provider={provider} disabled={agentBusy} onClose={()=>setLogin(false)} onConfigured={()=>onReply(null)} onTested={model=>onReply({provider,model})} onError={e=>setError(e instanceof Error?e.message:String(e))}/></Modal>}
   </>;
 }

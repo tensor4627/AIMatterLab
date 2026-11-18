@@ -246,12 +246,14 @@ try{
   await fs.writeFile(path.join(out,'shared-terminal-last-row-geometry.json'),JSON.stringify({scope:'Real browser component and xterm geometry with synthetic IPC; not native or SSH acceptance',measurements,restored},null,2));
   await p.screenshot({path:path.join(out,'shared-terminal-last-row-visible.png')});
  });
- await check('app-cold-start-three-pane-strict-mode-terminal-handoff',async p=>{
-  await p.evaluate(async()=>{
+ for(const guided of [false,true])await check(guided?'interaction-experience-guided-ssh':'app-cold-start-three-pane-strict-mode-terminal-handoff',async p=>{
+  await p.evaluate(async guided=>{
    const test=window.__test,original=window.studio.invoke,profile={id:'fixture-ssh',version:1,kind:'ssh',name:'Fixture SSH',host:'fixture.invalid',username:'fixture',port:22,ssh_client:'ssh',mode:'interactive'};
    let connection=null;let session={connectionId:'fixture-connection',sessionId:'fixture-terminal',name:'Fixture SSH',kind:'ssh',mode:'interactive',owner:'human',ownerEpoch:1,alive:true,status:'running',sequence:0,resource:{kind:'ssh-connection',connectionId:'fixture-connection',profileId:profile.id,profileVersion:profile.version}};
    test.terminalResource={schemaVersion:2,selectionId:'fixture-selection',kind:'ssh-connection',connectionId:'fixture-connection',profileId:profile.id,profileVersion:profile.version,sessionId:session.sessionId,status:'selected',operator:'human',processStatus:'running',alive:true,agentReady:false,reason:null,authentication:'not_observed',managedRuns:false};
    window.studio.invoke=async(method,data)=>{
+    if(guided&&method==='state')return {...await original(method,data),setupGuide:{page:'compute',directory:'fixture',directoryKind:'profile'}};
+    if(guided&&method==='compute.sshConnection.loginStatus')return {connection,login:{status:'waiting_authentication'}};
     if(method==='compute.profiles.list')return {profiles:[profile],defaults:{distribution:'Ubuntu',root:'~/fixture',port:8767,ssh_client:'ssh'}};
     if(method==='compute.profiles.read')return profile;
     if(method==='compute.sshConnection.list')return {connections:connection?[connection]:[]};
@@ -282,7 +284,23 @@ try{
    };
    const App=(await import('/frontend/app/App.tsx')).default;
    window.testRoot.render(React.createElement(React.StrictMode,null,React.createElement(App)));
-  });
+  },guided);
+  if(guided){
+   const guide=p.getByTestId('setup-assistant'),spot=p.locator('dialog.guide-spotlight[open]');
+   await guide.getByRole('button',{name:/远程集群/}).click();
+   await guide.getByRole('button',{name:'配置 SSH 连接',exact:true}).click();
+   await p.waitForFunction(()=>document.querySelector('dialog.guide-spotlight[open]')?.dataset.target==='saved-ssh');
+   await p.keyboard.press('Escape');
+   await p.getByTestId('saved-compute-profile').getByRole('button',{name:'交互式登录',exact:true}).click();
+   await p.waitForFunction(()=>document.querySelector('dialog.guide-spotlight[open]')?.dataset.target==='ssh-terminal');
+   assert.equal(await spot.getAttribute('data-step'),'ssh-login');
+   await spot.getByRole('button',{name:'关闭提示'}).click();
+   await p.getByTestId('setup-lesson').click();await guide.waitFor();
+   const calls=await p.evaluate(()=>window.__test.calls);
+   assert.equal(calls.filter(c=>c.method==='compute.sshConnection.open').length,1);
+   assert.equal(calls.filter(c=>['sharedTerminal.write','compute.sshConnection.authWrite','task.execute'].includes(c.method)).length,0);
+   return;
+  }
   await p.locator('.home-page').waitFor();assert.equal(await p.locator('.sidebar').isVisible(),true);assert.equal(await p.locator('.agent-panel').isVisible(),true);
   await p.waitForFunction(()=>window.__test.calls.some(call=>call.method==='worker.request'&&call.data.target==='/api/runs'));
   await p.getByTestId('new-conversation').click();await p.locator('.composer textarea').fill('Keep these unsent cluster instructions');

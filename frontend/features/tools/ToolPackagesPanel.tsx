@@ -23,7 +23,7 @@ export default function ToolPackagesPanel({provider,onSelect}:{provider:AgentPro
  const canGrant=canShare&&(state.bound||context?.configuration_id===execution?.configuration_id&&context?.providers.includes(provider));
  return <section className="card tool-packages-panel" data-testid="tool-packages-panel"><h2>{t('工具包与执行环境')}</h2><p>{t('登记保存工具声明和源码快照。真实环境的安装与测试通过后，再生成该环境的执行技能。')}</p><div className="button-row"><button className="button" disabled={working} onClick={state.choose} data-testid="tool-package-choose">{t('选择并检查工具包')}</button><button className="button" disabled={state.loading||working} onClick={()=>void state.refresh()}>{t('刷新工具包目录')}</button></div>
   <details className="tool-source-list" data-testid="tool-source-list">
-   <summary>{t('已验证工具的源码仓库')}</summary>
+   <summary data-guide-target="tool-sources">{t('已验证工具的源码仓库')}</summary>
    <p>{t('复制命令拉取所列分支，再按仓库内的安装说明操作。分支版本可能与历史验收提交不同。')}</p>
    <ul>{toolSources.map(tool=><li key={tool.url}>
     <strong>{tool.name}</strong>

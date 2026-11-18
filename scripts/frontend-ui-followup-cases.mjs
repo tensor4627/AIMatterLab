@@ -10,6 +10,59 @@ export async function frontendUiFollowupCases({check,out}){
    if(method==='compute.resource.status')return {schemaVersion:1,kind:null,status:'none',selectionId:null};return original(method,data);
   };return window.renderTest('App');
  },{custom,empty});await page.locator('.primary-navigation').waitFor({state:'attached'});}
+ for(const reduced of [false,true]){
+  const preference=reduced?'reduce':'no-preference';
+  await check('interaction-experience-menus-and-groups-'+preference,async page=>{
+   await page.emulateMedia({reducedMotion:preference});
+   await app(page);
+   const group=page.locator('.conversation-project').filter({hasText:'metad'}),summary=group.locator('summary');
+   const duration=await group.evaluate(el=>getComputedStyle(el,'::details-content').transitionDuration);
+   assert.equal(parseFloat(duration)>0,!reduced);
+   await summary.press('Enter');await page.waitForFunction(()=>!document.querySelector('.conversation-project').open);
+   await summary.press('Space');await group.getByText('Keep this chat',{exact:true}).waitFor();
+   await group.getByRole('button',{name:'分组菜单 · metad'}).press('ArrowDown');
+   const menu=page.getByRole('menu');await menu.waitFor();
+   assert.equal(await menu.evaluate(el=>getComputedStyle(el).animationName),reduced?'none':'ui-reveal');
+   await page.keyboard.press('Escape');await menu.waitFor({state:'detached'});
+   const layout=page.locator('.workspace-layout-menu');
+   await layout.locator('summary').click();await page.getByTestId('priority-chat').click();
+   assert.equal(await layout.evaluate(el=>el.open),false);
+   assert.equal(await layout.locator('summary').evaluate(el=>el===document.activeElement),true);
+   await page.getByTestId('agent-options').click();
+   const select=page.getByTestId('agent-provider'),value=await select.inputValue();
+   await select.focus();await page.keyboard.press('Alt+ArrowDown');
+   await page.waitForFunction(()=>document.querySelector('[data-testid="agent-provider"]').matches(':open'));
+   assert.equal(await select.evaluate(el=>getComputedStyle(el,'::picker(select)').animationName),reduced?'none':'ui-reveal');
+   await page.keyboard.press('Escape');
+   assert.equal(await select.inputValue(),value);
+  });
+  await check('interaction-experience-new-message-and-replay-'+preference,async page=>{
+   await page.emulateMedia({reducedMotion:preference});
+   await page.evaluate(async()=>{
+    await import('/frontend/app/interactions.css');
+    const original=window.studio.invoke;
+    window.studio.invoke=async(method,data)=>{
+     if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return {model:'fixture-model',thread:{
+       id:data.params.threadId,turns:[{items:[{id:'old-message',type:'userMessage',content:[{type:'text',text:'Saved message'}]}]}]}};
+     return original(method,data);
+    };
+    window.startAnimations=[];
+    document.addEventListener('animationstart',event=>window.startAnimations.push(event.animationName));
+    return window.renderTest('Agent',{planningMode:false,onPlanningModeChange(){},context:'{}',onError:error=>{throw error;},
+      sessionSelection:{nonce:'resume',conversation:{provider:'codex',threadId:'motion-thread',name:'Previous conversation'}}});
+   });
+   const previous=page.locator('[data-message-id="old-message"]');
+   await previous.waitFor();assert.equal(await previous.evaluate(el=>getComputedStyle(el).animationName),'none');
+   const composer=page.locator('.composer textarea');await composer.fill('New message');
+   await composer.press('Enter');
+   const sent=page.locator('.message.user[data-just-sent]');await sent.waitFor();
+   assert.equal(await sent.locator('.message-text').innerText(),'New message');
+   assert.equal(await sent.evaluate(el=>getComputedStyle(el).animationName),reduced?'none':'message-sent');
+   if(!reduced)await page.waitForFunction(()=>window.startAnimations.includes('message-sent'));
+   assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').length),1);
+   assert.equal(await previous.evaluate(el=>el.hasAttribute('data-just-sent')),false);
+  });
+ }
  for(const theme of ['light','dark'])for(const width of [320,420])await check('ui-followup-header-'+theme+'-'+width,async page=>{
   await page.evaluate(async({theme,width})=>{await import('/frontend/app/frontend-refinement.css');document.documentElement.dataset.theme=theme;const root=document.getElementById('root');root.className='workspace-shell';root.style.cssText='height:100vh;display:flex;justify-content:center';const original=window.studio.invoke;
    window.studio.invoke=async(method,data)=>{if(method==='agent.connect')return {tools:{status:'blocked',message:'Synthetic disconnected tool state'}};if(method==='agent.tools')return {status:'blocked',message:'Synthetic disconnected tool state'};if(method==='agent.rpc'&&data.method==='model/list')return {data:[{model:'synthetic-long-model',displayName:'Synthetic model with a long descriptive name',isDefault:true,supportedReasoningEfforts:[]}]};return original(method,data);};

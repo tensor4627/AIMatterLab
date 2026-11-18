@@ -30,7 +30,7 @@ export default function JobsPage({local,cluster,observations,projects,projectId,
   <details className="jobs-planning" id="planning-overview" hidden={!planning.length&&!planningExpanded} open={planningExpanded??(planning.length>0&&planning.length<=6)} onToggle={event=>setPlanningExpanded(event.currentTarget.open)}><summary>{t('规划中的计算流程')} · {planning.length}</summary><div className="planning-cards">{planning.map(task=>{const conversation=conversations.find(c=>c.taskId===task.id);return <button key={task.id} disabled={busy||!conversation} onClick={()=>conversation&&onConversation(conversation)}><strong>{task.name}</strong><small>{task.parameters?.engine||t('待选择引擎')} · {t(task.review?.status==='ready'?'待部署':'待完善')}</small></button>;})}</div>{!planning.length&&<p className="muted">{t('尚无规划中的计算流程')}</p>}</details>
   <details className="jobs-sources" key={showSourceWarning?'attention':'current'} open={showSourceWarning}><summary>{t('记录来源与读取时间')}</summary><div className="job-observations">{(['local','cluster'] as const).map(source=>{const observed=observations[source];return <div key={source} data-testid={'job-observation-'+source} className={observed.stale?'stale':''}><Server size={15}/><strong>{t(source==='local'?'本地':'集群')}</strong><span>{t(observed.sourceChanged?'其他作业服务的上次记录':observed.paused?'自动同步已暂停 · 点击同步记录重试':observed.stale?servicePhase==='ready'?'记录读取失败 · 保留上次记录':'连接中断 · 状态待核对':observed.loaded?'已读取记录':'尚未读取记录')}</span><small>{t('记录读取时间')} · {time(observed.at)}</small></div>;})}</div></details>
   <div className="jobs-filters">
-   <label className="jobs-search"><span><Search size={14}/>{t('搜索任务')}</span><input aria-label={t('搜索任务')} value={query} onChange={event=>setQuery(event.target.value)} placeholder={t('名称、引擎或队列作业号')}/></label>
+   <label className="jobs-search"><span><Search size={14}/>{t('搜索任务')}</span><input data-guide-target="run-search" aria-label={t('搜索任务')} value={query} onChange={event=>setQuery(event.target.value)} placeholder={t('名称、引擎或队列作业号')}/></label>
    <label>{t('计算位置')}<select aria-label={t('计算位置筛选')} value={location} onChange={event=>setLocation(event.target.value)}>
     <option value="all">{t('全部位置')}</option><option value="local">{t('本地')}</option><option value="cluster">{t('集群')}</option>
    </select></label>
@@ -54,7 +54,7 @@ export default function JobsPage({local,cluster,observations,projects,projectId,
    const conversation=!observed.sourceChanged&&boundJobConversation(job,tasks,conversations,observed.sourceId);
    const staleLabel=observed.sourceChanged?'其他作业服务的上次记录':['queued','running','unknown'].includes(run.status)?'上次记录 · 请核对原作业':'上次记录';
    return <article className="job-record" key={job.key} data-job-key={job.key}>
-    <button className="job-record-open" disabled={!enabled} onClick={()=>{if(enabled)onOpen(job);}}>
+    <button className="job-record-open" data-guide-target="run-record" disabled={!enabled} onClick={()=>{if(enabled)onOpen(job);}}>
      <Activity size={18}/><span><strong>{run.name}</strong><small>{run.engine} · {t(job.location==='local'?'本地':'集群')}{job.location==='cluster'&&job.run.job_id?' · '+job.run.job_id:''}</small></span>
      <Badge status={run.status}/><ArrowUpRight size={15}/>
     </button>
@@ -63,6 +63,6 @@ export default function JobsPage({local,cluster,observations,projects,projectId,
      {conversation?<button className="text-button" disabled={busy} onClick={()=>onConversation(conversation)}><MessageSquare size={14}/>{t('返回会话')} · {conversation.name}</button>:<span>{t('未关联会话')}</span>}
     </div>
    </article>;
-  })}{!jobs.length&&<div className="empty" data-testid="jobs-empty"><h3>{t(missingSource?'记录尚未读取完整':activeFilters.length?'没有匹配的运行记录':'尚无运行记录')}</h3><p>{t(missingSource?'所选来源尚未读取成功，可同步原记录后再查看。':activeFilters.length?'可清除筛选，查看全部已读取记录。':'准备计算流程后，可在此查看保存的运行记录。')}</p>{!!activeFilters.length&&<button className="button" onClick={()=>clearFilters()}>{t('清除筛选，查看全部记录')}</button>}</div>}</div>
+  })}{!jobs.length&&<div className="empty" data-testid="jobs-empty" data-guide-target="run-empty" tabIndex={-1}><h3>{t(missingSource?'记录尚未读取完整':activeFilters.length?'没有匹配的运行记录':'尚无运行记录')}</h3><p>{t(missingSource?'所选来源尚未读取成功，可同步原记录后再查看。':activeFilters.length?'可清除筛选，查看全部已读取记录。':'准备计算流程后，可在此查看保存的运行记录。')}</p>{!!activeFilters.length&&<button className="button" onClick={()=>clearFilters()}>{t('清除筛选，查看全部记录')}</button>}</div>}</div>
  </div>;
 }

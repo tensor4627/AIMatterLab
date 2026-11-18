@@ -7,7 +7,7 @@ export function Modal({title,onClose,children,wide=false,closeDisabled=false}:{t
  function focusable(){return [...(ref.current?.querySelectorAll<HTMLElement>('a[href],button,input,select,textarea,[tabindex]')||[])].filter(el=>!el.matches(':disabled,[tabindex="-1"],[type="hidden"]')&&el.getClientRects().length>0);}
  useEffect(()=>{
   const previous=document.activeElement as HTMLElement|null,node=ref.current;
-  const top=()=>node===document.querySelectorAll('[role="dialog"]').item(document.querySelectorAll('[role="dialog"]').length-1);
+  const top=()=>node===[...document.querySelectorAll('[role="dialog"]:not(dialog:not([open]))')].at(-1);
   const focus=()=>{const items=focusable();(items.find(el=>el.closest('.modal-body'))||items[0]||node)?.focus();};
   if(node&&!node.contains(document.activeElement))focus();
   const onKey=(e:KeyboardEvent)=>{if(!top())return;if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeRef.current();}else if(e.key==='Tab')trap(e);};

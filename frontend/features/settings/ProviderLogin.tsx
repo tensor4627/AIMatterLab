@@ -81,7 +81,7 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onError,emb
    {accountError&&<p role="alert">{t('账户状态读取失败，请刷新账户状态后重试。')}</p>}
    {provider==='codex'&&<>
     <p>{t('使用现有 ChatGPT 账户，在官方浏览器页面完成登录。')}</p>
-    <label>{t('登录方式')}<select value={method} disabled={busy} onChange={e=>setMethod(e.target.value)}><option value="chatgpt">{t('ChatGPT 浏览器登录')}</option><option value="chatgptDeviceCode">{t('ChatGPT 设备码登录')}</option><option value="apiKey">OpenAI API Key</option></select></label>
+    <label>{t('登录方式')}<select data-guide-target="login-method" value={method} disabled={busy} onChange={e=>setMethod(e.target.value)}><option value="chatgpt">{t('ChatGPT 浏览器登录')}</option><option value="chatgptDeviceCode">{t('ChatGPT 设备码登录')}</option><option value="apiKey">OpenAI API Key</option></select></label>
     {method==='apiKey'&&<label>API Key<input type="password" autoComplete="off" value={codexKey} onChange={e=>setCodexKey(e.target.value)}/></label>}
     <div className="button-row"><button className="button primary" onClick={()=>void start()} disabled={busy||method==='apiKey'&&!codexKey}><LogIn size={15}/>{t(status.phase==='failed'||status.phase==='cancelled'?'重新登录':'开始登录')}</button>
      {status.phase==='authorizing'&&status.loginId&&<button className="button" disabled={cancelling} onClick={()=>void cancelCodex()}>{t('取消登录')}</button>}
@@ -94,7 +94,7 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onError,emb
    </>}
    {provider==='kimi'&&<>
     <p>{t('使用 Kimi Code 官方设备授权。账户凭据保存在本应用独立的 CLI 配置中。')}</p>
-    <label>{t('账户地区')}<select value={region} disabled={busy} onChange={e=>setRegion(e.target.value)}><option value="mainland-cn">{t('中国大陆 · kimi.com')}</option><option value="global">{t('国际 · kimi.ai')}</option></select></label>
+    <label>{t('账户地区')}<select data-guide-target="login-region" value={region} disabled={busy} onChange={e=>setRegion(e.target.value)}><option value="mainland-cn">{t('中国大陆 · kimi.com')}</option><option value="global">{t('国际 · kimi.ai')}</option></select></label>
     <button className="button primary" onClick={()=>void start()} disabled={busy}>{busy?<LoaderCircle size={15} className="spin"/>:<LogIn size={15}/>}{t('开始 Kimi 登录')}</button>
     {status.url&&<><div className="notice">{t('在授权页面输入下方终端显示的验证码。')}</div><button className="button" onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}><ExternalLink size={15}/>{t('打开官方授权页面')}</button></>}
     {status.message&&<pre className="login-output">{status.message}</pre>}
@@ -105,7 +105,7 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onError,emb
    {provider==='deepseek'&&<>
     <p>{t('使用 DeepSeek 开放平台 API Key，无需安装 CLI。')}</p>
     <label>{t('官方 API 地址')}<input value="https://api.deepseek.com" readOnly/></label>
-    <label>DeepSeek API Key<input data-testid="deepseek-api-key" type="password" autoComplete="off" value={key} disabled={busy} onChange={e=>setKey(e.target.value)} placeholder="sk-…"/></label>
+    <label>DeepSeek API Key<input data-testid="deepseek-api-key" data-guide-target="api-key" type="password" autoComplete="off" value={key} disabled={busy} onChange={e=>setKey(e.target.value)} placeholder="sk-…"/></label>
     <button className="button primary" disabled={busy||testing||!key} onClick={()=>void start()}>{busy?<LoaderCircle size={15} className="spin"/>:<KeyRound size={15}/>} {t('保存凭据并连接')}</button>
     <p className="muted">{t('密钥由主进程使用系统加密保存。模型是否可用以实际调用为准。')}</p>
     <p className="muted">{t('连接后读取账户模型目录，默认关闭思考以减少等待；也可切换思考强度。')}</p>

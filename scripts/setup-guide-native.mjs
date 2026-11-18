@@ -9,12 +9,16 @@ import {requireLaunchContext,resolveDesktopBinary,desktopRoot} from './desktop-l
 requireLaunchContext();
 const output=path.join(desktopRoot,'.studio','setup-guide-native');
 await fs.mkdir(output,{recursive:true});
-const run=await fs.mkdtemp(path.join(output,'run-')),profile=path.join(run,'profile');
 const packaged=process.argv[2];
+const run=await fs.mkdtemp(path.join(output,packaged?'packaged-':'run-')),profile=path.join(run,'profile');
+const expectedVersion=process.argv[3]||(!packaged&&JSON.parse(await fs.readFile(path.join(desktopRoot,'package.json'),'utf8')).version);
 const executablePath=packaged?await fs.realpath(packaged):await resolveDesktopBinary(),errors=[];
-let application,page;
+let application,page,runningVersion;
 async function launch(directory=profile){
   application=await electron.launch({executablePath,args:packaged?[]:['.'],cwd:desktopRoot,env:{...process.env,STUDIO_PROFILE_DIR:directory,STUDIO_DEV_URL:''}});
+  const receipt=await application.evaluate(({app})=>({packaged:app.isPackaged,version:app.getVersion()}));
+  assert.equal(receipt.packaged,Boolean(packaged));runningVersion=receipt.version;
+  if(expectedVersion)assert.equal(runningVersion,expectedVersion);
   page=await application.firstWindow();
   page.on('pageerror',e=>errors.push(e.message));
   page.setDefaultTimeout(8000);
@@ -30,16 +34,50 @@ const guide=()=>page.getByTestId('setup-assistant');
 const button=(name)=>guide().getByRole('button',{name,exact:true});
 const state=()=>page.evaluate(()=>window.studio.invoke('state'));
 async function heading(name){await guide().getByRole('heading',{name,exact:true}).waitFor();}
-async function returnFromLesson(destination,title,{keyboard=false,screenshot}={}){
-  const bubble=page.getByTestId('setup-lesson');
-  await bubble.waitFor();assert.equal(await bubble.getAttribute('data-lesson'),destination);
-  assert.equal(await bubble.locator('strong').innerText(),title);
-  assert((await bubble.locator('.setup-lesson-hint').innerText()).length>12);
-  assert.equal(await page.getByTestId('open-setup-guide').count(),0);
-  assert(await bubble.evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&el.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));}));
+const focusChecks=[];
+async function dismissFocus(step,title,{keyboard=false,screenshot}={}){
+  const layer=page.getByTestId('guide-spotlight');
+  await layer.waitFor();
+  await page.waitForFunction(()=>document.querySelector('dialog.guide-spotlight[open]')?.dataset.target);
+  assert.equal(await layer.getAttribute('data-step'),step);
+  assert.equal(await layer.locator('strong').innerText(),title);
+  await layer.getByRole('button').press('Tab');
+  const geometry=await layer.evaluate(el=>{
+    const key=el.dataset.target;
+    const target=[...document.querySelectorAll('[data-guide-target="'+key+'"]')].find(node=>
+      !node.matches(':disabled')&&!node.closest('[hidden], [inert]')&&node.checkVisibility({visibilityProperty:true})&&node.getClientRects().length);
+    const r=el.querySelector('.guide-focus-ring').getBoundingClientRect(),t=target.getBoundingClientRect(),c=el.querySelector('aside').getBoundingClientRect();
+    const x=r.x+r.width/2,y=r.y+r.height/2;
+    window.spotlightClickProbe=new AbortController();
+    target.addEventListener('click',()=>{target.dataset.hintClick='leaked';},{signal:window.spotlightClickProbe.signal});
+    return {key,x,y,focus:el.contains(document.activeElement),covers:el===document.elementFromPoint(x,y),
+      anchored:x>=t.left&&x<=t.right&&y>=t.top&&y<=t.bottom,visible:c.left>=0&&c.top>=0&&c.right<=innerWidth&&c.bottom<=innerHeight,
+      clear:c.right<=r.left||c.left>=r.right||c.bottom<=r.top||c.top>=r.bottom};
+  });
+  assert(geometry.focus&&geometry.covers&&geometry.anchored&&geometry.visible&&geometry.clear,JSON.stringify({step,...geometry}));
   if(screenshot)await page.screenshot({path:path.join(run,screenshot+'.png'),animations:'disabled'});
-  if(keyboard){await bubble.focus();await page.keyboard.press('Enter');}else await bubble.click();
-  await guide().waitFor();await bubble.waitFor({state:'detached'});
+  if(keyboard)await page.keyboard.press('Escape');
+  else await page.mouse.click(geometry.x,geometry.y);
+  await layer.waitFor({state:'detached'});
+  assert.equal(await page.locator('[data-hint-click="leaked"]').count(),0);
+  assert.equal(await page.evaluate(()=>document.activeElement?.closest('[data-guide-target]')?.dataset.guideTarget),geometry.key);
+  // Remove the passive click probe before a deliberate second click is tested.
+  await page.evaluate(()=>{window.spotlightClickProbe.abort();delete window.spotlightClickProbe;});
+  focusChecks.push({step,target:geometry.key,keyboard});
+}
+async function returnFromLesson(destination,title,options={}){
+  await dismissFocus(destination,title,options);
+  const back=page.getByTestId('setup-lesson');
+  assert.equal(await back.getAttribute('data-lesson'),destination);
+  assert.equal(await page.getByTestId('open-setup-guide').count(),0);
+  if(destination==='extensions'){
+    const details=page.getByTestId('tool-source-list');
+    assert.equal(await details.evaluate(el=>el.open),false);
+    await details.locator('summary').press('Enter');
+    assert.equal(await details.evaluate(el=>el.open),true);
+  }
+  if(options.keyboard){await back.focus();await page.keyboard.press('Enter');}else await back.click();
+  await guide().waitFor();await back.waitFor({state:'detached'});
 }
 async function capture(name){
   await page.screenshot({path:path.join(run,name+'.png'),animations:'disabled'});
@@ -64,6 +102,7 @@ try {
   await button('English').click();await heading('Welcome to AIMatterLab');
   await button('Continue').click();await heading('Choose your AI assistant');
   await guide().getByRole('button',{name:/Qwen/}).click();await button('Configure account').click();
+  await dismissFocus('account','Configure account',{keyboard:true});
   const dialog=page.getByRole('dialog');await dialog.getByTestId('model-providers').waitFor();
   await dialog.getByTestId('add-api-provider').click();await dialog.getByTestId('provider-preset').waitFor();
   assert.equal(await page.locator('[data-testid="cli-runtime-dialog"]').count(),0);
@@ -77,13 +116,27 @@ try {
   await heading('Where will you compute?');assert.equal((await state()).settings.agentProvider,'qwen');
   await page.evaluate(()=>window.studio.invoke('settings',{fontSize:24,minimumFontSize:18}));await page.reload();await heading('Where will you compute?');
   await guide().getByRole('button',{name:/Local WSL/}).click();await button('Choose WSL distribution').click();
-  await page.getByTestId('compute-connection-guide').waitFor();
+  await page.getByTestId('compute-connection-guide').waitFor();await dismissFocus('wsl','Choose a WSL distribution');
   await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).first().click();
   await heading('Where will you compute?');
   await guide().getByRole('button',{name:/Remote cluster/}).click();await button('Set up SSH').click();
+  await dismissFocus('choose-ssh','Set up SSH');
   await page.getByTestId('compute-choice-ssh').click();await page.getByTestId('compute-profile-host').waitFor();
   assert.equal(await page.getByTestId('compute-choice-local').count(),0);
-  await page.keyboard.press('Escape');await capture('compute-small');
+  await page.getByTestId('compute-profile-name').fill('Guide fixture');
+  await page.getByTestId('compute-profile-host').fill('guide.invalid');
+  await page.getByTestId('compute-profile-username').fill('fixture');
+  await page.getByTestId('compute-profile-editor').locator('button[type=submit]').click();
+  const saved=page.getByTestId('saved-compute-profile');
+  await saved.getByRole('button',{name:/Edit.*Guide fixture/i}).click();
+  await page.getByTestId('compute-profile-editor').locator('details').filter({has:page.getByTestId('compute-service-agent-help')}).locator('summary').click();
+  await page.getByTestId('compute-service-agent-help').click();
+  await returnFromLesson('ssh-service','Prepare the remote job service');
+  await button('Set up SSH').click();await dismissFocus('choose-ssh','Set up SSH',{keyboard:true});
+  await page.locator('.compute-resource-advanced > summary').click();
+  await page.getByRole('button',{name:'Open existing cluster settings'}).click();
+  await returnFromLesson('ssh-settings','Configure the remote connection');
+  await capture('compute-small');
   await button('Continue').click();await heading('Explore your workspace');
   await button('Set up my first scientific tool').click();
   await button('Register an environment').click();await page.locator('.compute-environments').waitFor();
@@ -120,7 +173,7 @@ try {
   await button('上一步').click();await button('English').click();
   await button('Skip setup').click();assert.equal((await state()).setupGuide.page,'complete');
   assert.deepEqual(errors,[]);
-  await fs.writeFile(path.join(run,'result.json'),JSON.stringify({status:'passed',profile:'isolated',errors},null,2));
+  await fs.writeFile(path.join(run,'result.json'),JSON.stringify({status:'passed',version:runningVersion,packaged:Boolean(packaged),profile:'isolated',focusChecks,errors},null,2));
   console.log('Native setup checks passed. '+run);
 }catch(error){
   if(page&&!page.isClosed())await page.screenshot({path:path.join(run,'failure.png')}).catch(()=>{});
