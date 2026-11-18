@@ -25,7 +25,9 @@ class DesktopLauncherInstall(unittest.TestCase):
  def test_stale_passed_report_and_nonzero_exit_cannot_pass(self):
   with tempfile.TemporaryDirectory() as tmp:
    state=Path(tmp);report=state/'desktop-install.json';report.write_text('{"status":"passed"}',encoding='utf-8');old=report.read_bytes()
-   def run(argv,**kwargs):return self.result(7) if '--studio-install-verify' in argv else self.result(0,'{"status":"allowed"}')
+   def run(argv,**kwargs):
+    if any('network-environment.mjs' in arg for arg in argv):return self.result(0,'{}')
+    return self.result(7) if '--studio-install-verify' in argv else self.result(0,'{"status":"allowed"}')
    with patch.object(entry.subprocess,'run',side_effect=run):result=entry.desktop(self.config(state),state)
    self.assertEqual(result['status'],'failed');self.assertEqual(result['exit_code'],7);self.assertEqual(report.read_bytes(),old)
    self.assertFalse((state/'Launch-AIMatterLab.ps1').exists());self.assertFalse((state/'launch-studio.sh').exists())
@@ -33,12 +35,13 @@ class DesktopLauncherInstall(unittest.TestCase):
  def test_zero_exit_with_unchanged_report_is_blocked(self):
   with tempfile.TemporaryDirectory() as tmp:
    state=Path(tmp);report=state/'desktop-install.json';report.write_text('{"status":"passed"}',encoding='utf-8')
-   with patch.object(entry.subprocess,'run',return_value=self.result(0,'{"status":"allowed"}')):result=entry.desktop(self.config(state),state)
+   with patch.object(entry.subprocess,'run',side_effect=lambda argv,**kwargs:self.result(0,'{}' if any('network-environment.mjs' in arg for arg in argv) else '{"status":"allowed"}')):result=entry.desktop(self.config(state),state)
    self.assertEqual(result['status'],'blocked');self.assertEqual(result['reason'],'desktop_receipt_not_fresh');self.assertFalse(result['receipt_evidence']['fresh'])
  def test_nonzero_exit_cannot_pass_even_with_new_passed_receipt(self):
   with tempfile.TemporaryDirectory() as tmp:
    state=Path(tmp)
    def run(argv,**kwargs):
+    if any('network-environment.mjs' in arg for arg in argv):return self.result(0,'{}')
     if '--studio-install-verify' in argv:
      (state/'desktop-install.json').write_text('{"status":"passed"}',encoding='utf-8');return self.result(9)
     return self.result(0,'{"status":"allowed"}')
@@ -49,9 +52,14 @@ class DesktopLauncherInstall(unittest.TestCase):
    state=Path(tmp);node="C:/Fixture Node's/node.exe";calls=[]
    def run(argv,**kwargs):
     calls.append((argv,kwargs))
+    if any('network-environment.mjs' in arg for arg in argv):return self.result(0,json.dumps({'HTTPS_PROXY':'http://fixture.invalid:8888','ELECTRON_GET_USE_PROXY':'1'}))
     if '--studio-install-verify' in argv:(state/'desktop-install.json').write_text('{"status":"passed","current":true}',encoding='utf-8')
     return self.result(0,'{"status":"allowed"}')
    with patch.object(entry.subprocess,'run',side_effect=run):result=entry.desktop(self.config(state,node),state)
+   self.assertEqual(calls[1][1]['stdout'],subprocess.PIPE)
+   self.assertNotIn('capture_output',calls[1][1])
+   self.assertIsNone(calls[1][1].get('stderr'))
+   for argv,kwargs in calls[2:]:self.assertEqual(kwargs['env'].get('HTTPS_PROXY'),'http://fixture.invalid:8888')
    self.assertEqual(result['status'],'passed');self.assertTrue(result['current']);self.assertTrue(result['receipt_evidence']['fresh'])
    self.assertEqual(calls[0][0],[node,str(ROOT/'scripts/start.mjs'),'--preflight-only']);self.assertEqual(calls[-1][0],[node,str(ROOT/'scripts/start.mjs'),'--studio-install-verify'])
    self.assertEqual(calls[0][1]['env']['STUDIO_PROFILE_DIR'],calls[-1][1]['env']['STUDIO_PROFILE_DIR']);self.assertEqual(calls[-1][1]['env']['STUDIO_PROFILE_DIR'],str(state/'desktop-profile'))
@@ -88,10 +96,18 @@ class DesktopLauncherInstall(unittest.TestCase):
     state=Path(tmp)
     with patch.object(entry.subprocess,'run',side_effect=outcome if isinstance(outcome,Exception) else None,return_value=outcome) as run:result=entry.desktop(self.config(state),state)
     self.assertEqual(result['status'],'blocked');self.assertTrue(result['reason']);self.assertTrue(result['user_action']);self.assertEqual(run.call_count,1)
+ def test_proxy_preparation_failure_starts_no_download_or_build(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   state=Path(tmp);calls=[]
+   def run(argv,**kwargs):
+    calls.append(argv)
+    return self.result(0,'{"status":"allowed"}') if '--preflight-only' in argv else self.result(1,'private proxy failure')
+   with patch.object(entry.subprocess,'run',side_effect=run):result=entry.desktop(self.config(state),state)
+   self.assertEqual(result['reason'],'desktop_proxy_unavailable');self.assertEqual(len(calls),2);self.assertFalse(any('pnpm' in arg for argv in calls for arg in argv));self.assertNotIn('private',json.dumps(result))
  def test_fingerprint_changes_with_each_guard_file(self):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);names=['INSTALL_AGENT.md','AGENTS.md','docs/one-prompt-install.md','installation/manifest.json','installation/runtime.py','scripts/one_prompt.py','package.json','pnpm-lock.yaml','index.html','vite.config.ts','tsconfig.json','backend/worker/studio_worker/engine_contracts.json','backend/worker/studio_worker/pygas-editor-hints.json','backend/worker/studio_worker/tool_package.schema.json']
-   guards=['scripts/desktop-launch.mjs','scripts/start.mjs','scripts/dev.mjs','scripts/windows-launch-preflight.ps1','scripts/sync-tool-contracts.mjs']
+   guards=['scripts/desktop-launch.mjs','scripts/start.mjs','scripts/dev.mjs','scripts/windows-launch-preflight.ps1','scripts/sync-tool-contracts.mjs','scripts/network-environment.mjs']
    for name in names+guards:
     file=root/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('baseline',encoding='utf-8')
    with patch.object(entry,'ROOT',root):

@@ -1,3 +1,4 @@
+import {networkProxy,configureNetworkSession} from './platform/network-proxy.mjs';
 import {PRODUCT_NAME} from '../contracts/product.mjs';
 import {consoleMessage} from './platform/verification/console-message.mjs';
 import {installManagedTray} from './platform/managed-tray.mjs';
@@ -65,7 +66,7 @@ import {createServiceHandoff} from '../agent/sessions/service-handoff.mjs';
 import {createTaskCustomCv} from "../backend/main/workspace/task-custom-cv.mjs";
 import {currentPairTool,readCurrentPair} from "../agent/tools/current-pair-tool.mjs";
 import {importTaskAsset} from "../backend/main/workspace/task-asset-import.mjs";
-import { app, BrowserWindow, Tray, Menu, Notification, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, Notification, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage, session } from 'electron';
 
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -776,5 +777,12 @@ if(!app.requestSingleInstanceLock()){
  app.exit(0);
 }else{
  app.on('second-instance',focusExistingWindow);
- app.whenReady().then(initialize).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox(PRODUCT_NAME+' 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
+ app.whenReady().then(async()=>{
+  const network=networkProxy();
+  for(const [key,value] of Object.entries(network.env)){
+   if(process.env[key]!==value)process.env[key]=value;
+  }
+  await configureNetworkSession(session.defaultSession,network);
+  return initialize();
+ }).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox(PRODUCT_NAME+' 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
 }

@@ -1,3 +1,3 @@
 import {Activity,Atom,Box,Database,FileCode2,FlaskConical,Folder,GraduationCap,LayoutDashboard,LibraryBig,Route,Server,Workflow,type LucideIcon} from 'lucide-react';
-const icons:Record<string,LucideIcon>={md:Atom,training:GraduationCap,activelearning:Workflow,pygas:FlaskConical,assets:Database,viewer:Box,queue:Activity,workflow:Workflow,neb:Route,code:FileCode2,resources:Server,home:LayoutDashboard,skills:LibraryBig,project:Folder};
+const icons:Record<string,LucideIcon>={md:Atom,training:GraduationCap,hamiltonian:Atom,activelearning:Workflow,pygas:FlaskConical,assets:Database,viewer:Box,queue:Activity,workflow:Workflow,neb:Route,code:FileCode2,resources:Server,home:LayoutDashboard,skills:LibraryBig,project:Folder};
 export default function ModuleIcon({module,size=17}:{module:string;size?:number}){const Icon=icons[module]||Folder;return <Icon className="module-icon" data-module-icon={module} size={size} aria-hidden="true"/>;}

@@ -1,6 +1,6 @@
 // Renderer-only presentation rules. These never prepare, submit or retry a job.
 export const toolGroups=[
- {id:'compute',label:'计算与建模',tools:['md','pygas','training','activelearning'],pages:[]},
+ {id:'compute',label:'计算与建模',tools:['md','pygas','training','hamiltonian','activelearning'],pages:[]},
  {id:'data',label:'数据与分析',tools:['assets','viewer'],pages:[]},
  {id:'resources',label:'算力与管理',tools:['queue'],pages:['extensions','environments','ssh','skills','relations']}
 ];

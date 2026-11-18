@@ -24,7 +24,7 @@ def claim_audit_root(location,guard,role):
 
 def fingerprint(config):
     files=[ROOT/"INSTALL_AGENT.md",ROOT/"AGENTS.md",ROOT/"docs/one-prompt-install.md",ROOT/"installation/manifest.json",ROOT/"installation/runtime.py",ROOT/"scripts/one_prompt.py",ROOT/"package.json",ROOT/"pnpm-lock.yaml",ROOT/"index.html",ROOT/"vite.config.ts",ROOT/"tsconfig.json",ROOT/"backend/worker/studio_worker/engine_contracts.json",ROOT/"backend/worker/studio_worker/pygas-editor-hints.json",ROOT/"backend/worker/studio_worker/tool_package.schema.json"]
-    for name in ("desktop-launch.mjs","start.mjs","dev.mjs","windows-launch-preflight.ps1","sync-tool-contracts.mjs"):
+    for name in ("desktop-launch.mjs","start.mjs","dev.mjs","windows-launch-preflight.ps1","sync-tool-contracts.mjs","network-environment.mjs"):
         file=ROOT/"scripts"/name
         if file.exists() or file.is_symlink():files.append(file)
     # Explicit public source roots only: generated protocol coverage is unchanged,
@@ -132,12 +132,22 @@ def desktop(config,state,*,reuse_existing=False):
     if preflight.returncode or not isinstance(observed,dict) or observed.get("status")!="allowed":
         reason=observed.get("reason") if isinstance(observed,dict) else None
         return {"status":"blocked","scope":"desktop launch preflight","reason":reason if reason in ("restricted_token","token_probe_failed","invalid_preflight_arguments") else "desktop_preflight_blocked","user_action":action}
+    # Resolve local proxy before pnpm/Electron downloads; endpoints stay in this private pipe.
+    try:
+        # stdout is private. The helper's stderr provides public PAC / discovery guidance.
+        proxy=subprocess.run([node,str(ROOT/"scripts/network-environment.mjs")],cwd=ROOT,env=env,stdout=subprocess.PIPE,text=True,encoding="utf-8",errors="replace",timeout=15)
+        if proxy.returncode:raise ValueError("Proxy discovery failed")
+        network=json.loads(proxy.stdout)
+        allowed={"HTTP_PROXY","HTTPS_PROXY","ALL_PROXY","NO_PROXY","http_proxy","https_proxy","all_proxy","no_proxy","ELECTRON_GET_USE_PROXY","NODE_USE_ENV_PROXY"}
+        if not isinstance(network,dict) or any(key not in allowed or not isinstance(value,str) for key,value in network.items()):raise ValueError("Invalid network environment")
+        env.update(network)
+    except (OSError,subprocess.TimeoutExpired,ValueError):return {"status":"blocked","scope":"desktop proxy preparation","reason":"desktop_proxy_unavailable","user_action":"Check system or explicit proxy settings; no direct retry was attempted."}
     pnpm=config["desktop"].get("pnpm") or ("pnpm.cmd" if os.name=="nt" else "pnpm")
     if not reuse_existing and config["desktop"].get("install_dependencies",True):
         commands=[[pnpm,"install","--frozen-lockfile"],[pnpm,"run","build"]]
     else:commands=[[pnpm,"run","build"]]
     for index,argv in enumerate(commands):
-        result=subprocess.run(argv,cwd=ROOT,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=1200)
+        result=subprocess.run(argv,cwd=ROOT,env=env,capture_output=True,text=True,encoding="utf-8",errors="replace",timeout=1200)
         (state/("desktop-command-"+str(index)+".log")).write_text(result.stdout+result.stderr,encoding="utf-8")
         if result.returncode:return {"status":"failed","scope":"desktop dependency or build command"}
     report=state/"desktop-install.json"

@@ -72,3 +72,11 @@ test('real source launcher processes serialize preparation and reuse the live ow
  assert.equal(fs.readFileSync(path.join(root,'operations'),'utf8'),'install\nrun\n');
  assert.equal(fs.existsSync(path.join(root,'.studio/source-entry/launch.lock')),false);
 });
+
+test('discovered proxy reaches dependency install, explicit Electron repair, build and desktop',async t=>{
+ const root=fixture(t),seen=[],h=harness(root),run=h.options.run;
+ h.options.prepareNetwork=({env})=>({env:{...env,HTTPS_PROXY:'http://fixture.invalid:9876',ELECTRON_GET_USE_PROXY:'1',NODE_USE_ENV_PROXY:'1',NO_PROXY:'localhost,127.0.0.1,::1'}});
+ h.options.run=async(args,options)=>{seen.push(options.env);await run(args,options);if(args[0]==='install')fs.unlinkSync(path.join(root,'node_modules/electron/dist/'+(process.platform==='win32'?'electron.exe':'electron')));};
+ h.options.installElectron=async options=>{seen.push(options.env);touch(root,'node_modules/electron/dist/'+(process.platform==='win32'?'electron.exe':'electron'));};
+ const result=await startSource(h.options);seen.push(h.children[0].value.env);assert.equal(seen.length,4);for(const env of seen){assert.equal(env.HTTPS_PROXY,'http://fixture.invalid:9876');assert.equal(env.ELECTRON_GET_USE_PROXY,'1');assert.equal(env.NODE_USE_ENV_PROXY,'1');assert.match(env.NO_PROXY,/127.0.0.1/);}await stop(result);
+});

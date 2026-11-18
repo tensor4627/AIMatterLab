@@ -76,6 +76,11 @@ const english:Record<string,string> = {
 "导入已有连接":"Import an existing connection",
 "选择连接来源":"Choose a connection source","请选择已有连接":"Select a saved connection","未发现可导入的连接":"No importable connections found",
 "新手引导":"Setup guide","返回新手引导":"Return to setup","引导进度未保存，请重试。":"Setup progress could not be saved. Try again.","设置未保存，请重试。":"Settings could not be saved. Try again.",
+"入口已提供；计算后端待接入，当前仅展示流程范围。":"This entry shows the workflow scope. The compute backend is pending.",
+"机器学习哈密顿量":"Machine Learning Hamiltonian",
+"数据准备、模型训练、独立评估、哈密顿量重构与能带分析。入口已提供，计算后端待接入。":"Data preparation, training, independent evaluation, Hamiltonian reconstruction and band analysis. The entry is available; the compute backend is pending.",
+"数据准备":"Data preparation","模型训练":"Model training","独立评估":"Independent evaluation","哈密顿量重构":"Hamiltonian reconstruction","能带分析":"Band analysis","HotHam（待接入）":"HotHam (planned)",
+
 "高级：基础工作区":"Advanced: base workspace",
 "基础工作区":"Base workspace",
 "基础工作区名称":"Base workspace name",

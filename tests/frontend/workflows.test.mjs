@@ -26,3 +26,7 @@ test('Plan prompts retain human inputs, unavailable tools and the review gate wi
  assert.equal('status' in validatePlan({...plan,status:'succeeded'}),false);
  assert.throws(()=>createPlan('unknown'));
 });
+
+test('Hamiltonian entry is discoverable but exposes no backend execution action',()=>{
+ const entry=tools.find(tool=>tool.id==='hamiltonian');assert.equal(entry.name,'机器学习哈密顿量');assert.equal(entry.status,'planned');assert.deepEqual(entry.engines,[]);assert.equal(entry.page,entry.id);assert.match(entry.description,/后端待接入/);
+});

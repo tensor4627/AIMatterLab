@@ -1,9 +1,9 @@
-# AIMatterLab 0.1.13 单 prompt 安装
+# AIMatterLab 0.1.14 单 prompt 安装
 
-复制下面这一段给能使用本机终端和 Git 的 Agent。本地交付使用 0.1.13 检出或本地标签。通过 GitHub 获取固定版本时，需能读取官方仓库及相应发布标签。
+复制下面这一段给能使用本机终端和 Git 的 Agent。本地交付使用 0.1.14 检出或本地标签。通过 GitHub 获取固定版本时，需能读取官方仓库及相应发布标签。
 
 ```text
-请在我的 Windows 电脑安装 AIMatterLab 0.1.13。使用我提供的本地 0.1.13 检出，记录完整提交和本地改动。如果从 https://github.com/tensor4627/AIMatterLab.git 安装，请在新目录获取已发布的 refs/tags/v0.1.13，核对该标签的完整提交。从所选提交读取 INSTALL_AGENT.md 并核对安装清单的版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
+请在我的 Windows 电脑安装 AIMatterLab 0.1.14。使用我提供的本地 0.1.14 检出，记录完整提交和本地改动。若从南大 GitLab 的 https://git.nju.edu.cn/Tensor4627/AIMatterLab.git 或已同步该标签的官方仓库 https://github.com/tensor4627/AIMatterLab.git 安装，请在新目录获取已发布的 refs/tags/v0.1.14，核对该标签的完整提交。从所选提交读取 INSTALL_AGENT.md 并核对安装清单的版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
 ```
 
 完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)列出官方仓库、本版版本号和发布引用。需要登录仓库时由用户在本机 Git 凭据界面完成。
@@ -86,7 +86,7 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 desktop 使用独立 profile、真实 renderer/worker 和 provider 请求。需要认证时，由用户登录后重验。Windows 用户双击 `Launch-AIMatterLab.cmd` 进入验收过的同一 profile，另有兼容 PS1 启动文件。finalize 绑定当前配置和源码指纹，要求三个阶段均通过且选定的短例集合完整。
 
-本版桌面验收见 [0.1.13 发布说明](releases/aimatterlab-0.1.13.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
+本版桌面验收见 [0.1.14 发布说明](releases/aimatterlab-0.1.14.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
 同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 AIMatterLab 核对任务，或选择独立安装 root。
 
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。
@@ -107,3 +107,9 @@ python scripts/one_prompt.py reuse-existing --config .studio/installation/config
 每次审计实际执行 target-probe 和 desktop/provider 检查。完成过的 smoke 不会被默认冒充新运行；需要本轮全新科学证据时换用新的两个目录。仅在显式 `--reuse-smoke-receipt`、已登记环境身份未变且源码无 dirty 标记时，才可恢复标有原始时间的历史 smoke；报告同时显示 `cached_evidence=true`，不能称本轮新科学运行。
 
 报告分别给出 `reuse_readiness_success`、`dry_run=true`、`installation_success=false` 与复用模式跳过的动作。每台新机器的完整安装结果由该机的 finalize 收据确认。Git 源码克隆、预编译发行包下载和目标环境的科学运行分别记录；额外引擎缺少所选 fixture 时保留 blocked。
+
+## Codex 首次连接与桌面网络
+
+首次连接 Codex 时，用户可使用独立配置并登录 ChatGPT，也可按需导入本机代理设置、整份 `.env` 或默认模型和推理强度。仅在首次使用 Codex 时询问，已有独立 `.env` 优先。模型和推理强度按当前账号实际列出的选项核对。[首次使用 Codex](source-desktop.md#首次使用-codex)
+
+桌面和安装器优先采用显式代理变量。在 Windows 上也可以发现已启用的静态系统代理，计算服务的回环地址加入直连名单。安装器或 CLI 遇到仅有 PAC 的网络时需要另行配置显式代理。[代理与 Electron 下载](network-and-electron-install.md)

@@ -3,6 +3,24 @@ import path from 'node:path';
 
 export async function frontendWorkflowExperienceCases({check,out}){
  const snapshot=(page,name)=>page.screenshot({path:path.join(out,name+'.png'),fullPage:true});
+ await check('workflow-experience-hamiltonian-directory-opens-planned-tool',async page=>{
+  await page.evaluate(()=>window.renderTest('App'));
+  await page.locator('nav').getByTestId('navigate-tools').click();
+  const computeGroup = page.getByTestId('tools-directory').locator('section').filter({
+   has: page.getByRole('heading',{name:'计算与建模',exact:true})
+  });
+  await computeGroup.getByTestId('open-tool-hamiltonian').click();
+  const detail = page.locator('.tool-page');
+  await detail.getByRole('heading',{name:'机器学习哈密顿量',exact:true}).waitFor();
+  assert.match(await detail.locator('.notice').innerText(),/后端待接入/);
+  for(const label of ['数据准备','模型训练','独立评估','哈密顿量重构','能带分析']){
+   await detail.locator('.tool-capabilities').getByText(label,{exact:true}).waitFor();
+  }
+  assert.equal(await detail.getByRole('button').count(),0);
+  await snapshot(page,'hamiltonian-tool');
+  await page.locator('nav').getByTestId('navigate-tools').click();
+  await page.getByTestId('open-tool-training').waitFor();
+ });
  async function setup(page){await page.evaluate(async()=>{window.workflowFixtures=await import('/tests/fixtures/frontend-workflow-experience.mjs');window.workflowEvents=[];window.workflowErrors=[];document.getElementById('root').style.cssText='padding:24px;max-width:1000px;margin:auto;background:var(--bg);color:var(--text)';});}
  async function plan(page){await setup(page);await page.evaluate(async()=>{
   const {WorkflowPage}=await import('/frontend/features/workflows/Workflows.tsx');window.planSaved=[];window.planAgent=[];window.planPending=[];

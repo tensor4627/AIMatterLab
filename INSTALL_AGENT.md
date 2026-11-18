@@ -1,17 +1,17 @@
-# AIMatterLab 0.1.13 · 交给本机 Agent 的安装提示
+# AIMatterLab 0.1.14 · 交给本机 Agent 的安装提示
 
 你是用户本机的安装协作者。请实际执行本文流程，安装 AIMatterLab、配置用户选定的计算环境，并运行版本化短例。适用于 Codex、Claude Code 等具备文件、终端和 Git 能力的通用 Agent。目标集群无需安装这些 Agent CLI。
 
 ## 获取可信源码
 
-- 官方仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.13 的发布引用为 `refs/tags/v0.1.13`。需要登录时由用户在本机 Git 凭据界面完成。
-- 从官方仓库安装时，以下命令适用于该标签已发布的版本。在用户选定的父目录核对标签对应的完整提交，并建立跟踪官方 main 的本地分支。已有本地 0.1.13 源码的安装方式见下文。
+- 官方仓库为 `https://github.com/tensor4627/AIMatterLab.git`。0.1.14 的发布引用为 `refs/tags/v0.1.14`。需要登录时由用户在本机 Git 凭据界面完成。
+- 从官方仓库安装时，以下命令适用于该标签已发布的版本。在用户选定的父目录核对标签对应的完整提交，并建立跟踪官方 main 的本地分支。本版也可从南大 GitLab 的同名标签获取，将下列克隆命令的远端替换为 `https://git.nju.edu.cn/Tensor4627/AIMatterLab.git` 即可。已有本地 0.1.14 源码的安装方式见下文。
 
 ```powershell
-git clone --no-checkout --branch v0.1.13 https://github.com/tensor4627/AIMatterLab.git AIMatterLab-0.1.13
+git clone --no-checkout --branch v0.1.14 https://github.com/tensor4627/AIMatterLab.git AIMatterLab-0.1.14
 if ($LASTEXITCODE -ne 0) { throw '请核对仓库读取权限和新目录位置' }
-Set-Location -LiteralPath AIMatterLab-0.1.13
-$sourceCommit = git rev-parse --verify 'refs/tags/v0.1.13^{commit}'
+Set-Location -LiteralPath AIMatterLab-0.1.14
+$sourceCommit = git rev-parse --verify 'refs/tags/v0.1.14^{commit}'
 if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw '发布标签核对失败' }
 git merge-base --is-ancestor $sourceCommit refs/remotes/origin/main
 if ($LASTEXITCODE -ne 0) { throw '发布提交不在官方 main 历史中' }
@@ -20,13 +20,13 @@ if ($LASTEXITCODE -ne 0 -or (git rev-parse HEAD) -ne $sourceCommit) { throw '源
 git branch --set-upstream-to=origin/main
 if ($LASTEXITCODE -ne 0) { throw '源码更新分支配置失败' }
 $release = Get-Content -Raw -LiteralPath installation/manifest.json | ConvertFrom-Json
-if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.13' -or $release.source_ref -ne 'refs/tags/v0.1.13') { throw '安装清单与所选版本不符' }
+if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.1.14' -or $release.source_ref -ne 'refs/tags/v0.1.14') { throw '安装清单与所选版本不符' }
 ```
 
 记录 `$sourceCommit` 作为此次安装的版本。用户以后选择更新时，在同一目录运行 `git pull --ff-only`，再双击仓库根目录的 `Launch-AIMatterLab.cmd`。
 
 - 源码就位后，从该提交读取 `AGENTS.md`、`installation/config.example.json`、`scripts/one_prompt.py` 和 `agent/builtin-skills/studio-compute-workflow/SKILL.md`。按本次取得的安装提示继续配置。仓库和资源获取使用已核对的实际地址，版本化安装使用固定源码及其依赖锁。
-- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.1.13 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
+- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.1.14 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
 - 当前桌面平台为 Windows + WSL。缺少 WSL、重启权限、CUDA、兼容 Agent provider 或指定科学仓库时如实记录 blocked，并解释所缺条件。
 
 需要科学工具时，先读随 AIMatterLab 提供的[工具仓库清单](installation/tool-sources.json)。按用户选择从 `url` 克隆 `branch` 到新目录，再阅读其中的 `guide` 完成安装。`validated_commit` 记录历史接入验收版本，登记环境时使用实际检出的提交。
@@ -83,7 +83,7 @@ NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、�
 
 ## 第三方工具
 
-如用户选择接入第三方工具，安装后从「工具与资源 → 第三方工具包」检查并登记开发者交付目录。开发者 ZIP 和生成示例的命令见[开发者快速开始](developer/README.md)。0.1.13 提供固定 CPU `installation.check` 适配器；按所选计算项目和环境记录实际安装、测试及产物。第三方工具验收独立于上面的安装器短例。
+如用户选择接入第三方工具，安装后从「工具与资源 → 第三方工具包」检查并登记开发者交付目录。开发者 ZIP 和生成示例的命令见[开发者快速开始](developer/README.md)。0.1.14 提供固定 CPU `installation.check` 适配器；按所选计算项目和环境记录实际安装、测试及产物。第三方工具验收独立于上面的安装器短例。
 
 ## 可迁移 skill 与本机沉淀
 
@@ -103,3 +103,9 @@ NEP / HotPP / pyGAS / GPUMD / sampling 等模块需要对应版本的模型、�
 使用公开 `studio-install-readiness` skill 和命名的 `reuse-existing` action。读取实际命令接口后，选择全新的控制端 state-dir 和 worker.root；把配置保存在审计目录外，设置 bootstrap.enabled=false 和明确的 desktop.source_ids（模型回声可为 []）。此模式强制跳过下载、科学环境配置和依赖安装，仍实际探测所选环境、运行选定短例、启动独立桌面 profile 并取得真实模型回复。不得把已有生产 worker 根目录当安装目录，不拷贝其注册、授权或凭据。
 
 第一次验收不得使用旧短例收据。重入只有同一审计所有权标记才可写；环境身份变化时换用新目录，不重提原有 unknown 作业。报告保持 installation_success=false，仅在真实选定检查通过时标 reuse_readiness_success=true，并注明历史收据、skipped/not_run 与科学验收边界。详见 docs/one-prompt-install.md。新机器完整安装仍采用原 configure/probe/smoke/desktop/finalize 链路。
+
+## Codex 首次连接与桌面网络
+
+首次连接 Codex 时，用户可使用独立配置并登录 ChatGPT，也可按需导入本机代理设置、整份 `.env` 或默认模型和推理强度。仅在首次使用 Codex 时询问，已有独立 `.env` 优先。模型和推理强度按当前账号实际列出的选项核对。[首次使用 Codex](docs/source-desktop.md#首次使用-codex)
+
+桌面和安装器优先采用显式代理变量。在 Windows 上也可以发现已启用的静态系统代理，计算服务的回环地址加入直连名单。安装器或 CLI 遇到仅有 PAC 的网络时需要另行配置显式代理。[代理与 Electron 下载](docs/network-and-electron-install.md)
