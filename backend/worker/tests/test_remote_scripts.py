@@ -12,15 +12,19 @@ root=Path(os.environ["FIXTURE_QUEUE_ROOT"]);state=root/"job.json";cmd=Path(sys.a
 if cmd in ("bsub","sbatch"):
  d=Path.cwd();script=(d/"job.sh").read_text()
  name=re.search(r"(?:-J |--job-name=)(gss-[a-z0-9]+)",script).group(1)
- child=subprocess.Popen(["bash","job.sh"],cwd=d,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
- state.write_text(json.dumps({"id":"123","name":name,"directory":str(d),"pid":child.pid}))
+ if not (root/"owner-cancel").exists():
+  subprocess.Popen(["bash","job.sh"],cwd=d,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+ state.write_text(json.dumps({"id":"123","name":name,"directory":str(d)}))
  print("Job <123> is submitted to queue <fixture>." if cmd=="bsub" else "123")
 else:
  v=json.loads(state.read_text());receipt=Path(v["directory"])/"exit.json"
  status="RUNNING"
  if receipt.exists():status="COMPLETED" if json.loads(receipt.read_text())["exit_code"]==0 else "FAILED"
  if cmd=="bjobs" and "-l" not in sys.argv:print("123|"+{"RUNNING":"RUN","COMPLETED":"DONE","FAILED":"EXIT"}[status]+"|"+v["name"])
- elif cmd=="bjobs":print("Job <123>, Job Name <"+v["name"]+">, User <fixture>, Status <"+{"RUNNING":"RUN","COMPLETED":"DONE","FAILED":"EXIT"}[status]+">")
+ elif cmd=="bjobs":
+  cancelled=(root/"owner-cancel").exists()
+  print("Job <123>, Job Name <"+v["name"]+">, User <fixture>, Status <"+("EXIT" if cancelled else {"RUNNING":"RUN","COMPLETED":"DONE","FAILED":"EXIT"}[status])+">")
+  if cancelled:print("     TERM_OWNER: job killed by owner.")
  elif cmd=="squeue":
   if status=="RUNNING":print("123|"+status+"|"+v["name"])
  elif cmd=="sacct":print("123|"+status+"|"+v["name"]+"|")
@@ -32,9 +36,10 @@ class LocalWire:
         if r.returncode:raise RuntimeError(r.stderr.decode()[-2000:])
         return r.stdout.decode()
 class WireIntegration(unittest.TestCase):
-    def execute(self,scheduler,missing_pydyn=False):
+    def execute(self,scheduler,missing_pydyn=False,owner_cancel=False):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);(root/"inputs").mkdir();(root/"bin").mkdir()
+            if owner_cancel:(root/"owner-cancel").touch()
             for command in ("bsub","bjobs","sbatch","squeue","sacct"):
                 f=root/"bin"/command;f.write_text(SCHEDULER);f.chmod(0o755)
             (root/"inputs/run.py").write_bytes((Path(__file__).resolve().parents[3]/"installation/examples/worker-smoke.py").read_bytes())
@@ -54,8 +59,13 @@ class WireIntegration(unittest.TestCase):
                 cluster.validate(run["id"]);submitted=cluster.submit(run["id"]);self.assertEqual(submitted["status"],"queued",submitted.get("error"))
                 for _ in range(50):
                     result=cluster.poll(run["id"])
-                    if result["status"] in ("succeeded","failed"):break
+                    if result["status"] in ("succeeded","failed","cancelled"):break
                     time.sleep(.1)
+                if owner_cancel:
+                    self.assertEqual(result["status"],"cancelled")
+                    self.assertTrue(result["identity_verified"])
+                    self.assertFalse(result.get("exit"))
+                    return
                 if missing_pydyn:
                     self.assertEqual(result["status"],"failed")
                     self.assertEqual(result["scientific_validation"]["status"],"failed")
@@ -70,5 +80,6 @@ class WireIntegration(unittest.TestCase):
                 self.assertIn("STUDIO_WORKER_SMOKE_OK",cluster.read(run["id"])["text"])
             finally:service.close();service.store.db.close()
     def test_lsf_archive_gate_and_exit_receipt(self):self.execute("lsf")
+    def test_lsf_owner_termination_proves_cancellation(self):self.execute("lsf",owner_cancel=True)
     def test_slurm_archive_gate_and_exit_receipt(self):self.execute("slurm")
     def test_remote_missing_pydyn_stops_before_user_script(self):self.execute("slurm",missing_pydyn=True)

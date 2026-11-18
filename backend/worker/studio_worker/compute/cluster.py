@@ -502,6 +502,7 @@ class Clusters:
         self.last_poll = 0
         self._next_poll = {}
         self._unknown_backoff = {}
+        self._cancelling = set()
         self.prepare_lock = threading.RLock()
         self._private_init_lock = threading.RLock()
 
@@ -1223,7 +1224,7 @@ print('__STUDIO_JSON__'+json.dumps(record))
             # Additive per-request ownership; legacy records need no migration.
             # Only the latest started poll may commit a success or failure reply.
             token=secrets.token_hex(16)
-            self.save(r,observation_token=token)
+            self.save(r,observation_token=token,identity_verified=False)
         p=r["cluster_snapshot"]
         source="""
 import pathlib,subprocess
@@ -1262,6 +1263,8 @@ if out['job_id']:
  for row in rows:
   if len(row)>=3 and row[0].strip()==out['job_id'] and row[2].strip()==p['name']:
    out['scheduler_state']=row[1].strip().split()[0];out['identity_verified']=True
+   if p['scheduler']=='lsf' and out['scheduler_state']=='EXIT' and re.search(r'(?:^|;)\\s*TERM_OWNER\\s*:',result.stdout,re.MULTILINE):
+    out['cancelled_by_owner']=True
 print('__STUDIO_JSON__'+json.dumps(out))
 """
         try:
@@ -1277,7 +1280,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 validation=result.get("validation",current.get("scientific_validation"))
                 if receipt:
                     status="succeeded" if receipt["exit_code"]==0 else "failed"
-                if state in ("EXIT","CANCELLED") and current.get("cancel_requested") and (receipt or {}).get("exit_code")!=0:status="cancelled"
+                if (state=="CANCELLED" or result.get("cancelled_by_owner") is True) and (receipt or {}).get("exit_code")!=0:
+                    status="cancelled"
                 self.save(current,status=status,job_id=result.get("job_id") or current["job_id"],scheduler_state=state,connection_action=None,
                           scientific_validation=validation,execution_check=result.get('execution_check',current.get('execution_check')),exit=receipt,identity_verified=result.get("identity_verified",False))
         except Exception as error:
@@ -1299,23 +1303,35 @@ print('__STUDIO_JSON__'+json.dumps(out))
         with self.store.lock:
             before=self.raw(identifier)
             self.allowed(before['project_id'],before['cluster_id'])
-            if before['status'] in TERMINAL:return self.run(identifier)
-            self.save(before,cancel_requested=True,cancellation={"status":"requested", "requested_at":time.time(), "signal_sent":False})
-        current=self.poll(identifier);r=self.raw(identifier)
-        if current["status"] in TERMINAL:return current
-        if not r.get("job_id") or not r.get("identity_verified"):
-            self.merge(identifier,cancellation={"status":"unconfirmed", "signal_sent":False, "message":"Original scheduler identity is not verified; no cancellation command was sent"})
-            raise ValueError("Cannot cancel an unverified scheduler identity")
-        p=r["cluster_snapshot"]
-        command=["bkill" if p["scheduler"]=="lsf" else "scancel",r["job_id"]]
-        # A lost remote acknowledgement must not erase cancellation intent.
-        self.merge(identifier,cancel_requested=True,cancellation={"status":"requested", "requested_at":time.time(), "signal_sent":False})
+            if before['status'] in TERMINAL or identifier in self._cancelling:return self.run(identifier)
+            requested={"status":"requested", "requested_at":(before.get('cancellation') or {}).get('requested_at') or time.time(), "signal_sent":False}
+            self.save(before,cancel_requested=True,cancellation=requested)
+            self._cancelling.add(identifier)
+        try:
+            return self._cancel_verified_job(identifier,requested)
+        finally:
+            with self.store.lock:
+                self._cancelling.discard(identifier)
+
+    def _cancel_verified_job(self, identifier, requested):
+        observed=self.poll(identifier)
+        with self.store.lock:
+            r=self.raw(identifier)
+            self.allowed(r['project_id'],r['cluster_id'])
+            if r['status'] in TERMINAL:return self.run(identifier)
+            if (not r.get("job_id") or not r.get("identity_verified") or not observed.get("identity_verified")
+                    or r["job_id"]!=observed.get("job_id") or r.get("observation_token")!=observed.get("observation_token")):
+                self.save(r,cancellation={**requested,"status":"unconfirmed","message":"Original scheduler identity is not verified; no cancellation command was sent"})
+                raise ValueError("Cannot cancel an unverified scheduler identity")
+            p=r["cluster_snapshot"]
+            command=["bkill" if p["scheduler"]=="lsf" else "scancel",r["job_id"]]
+            self.save(r,cancellation={**requested,"signal_sent":None})
         try:
             self.transport(p).run(shlex.join(command))
         except Exception as exc:
-            self.merge(identifier,cancellation={"status":"unconfirmed", "signal_sent":False, "message":str(exc)[:300]})
+            self.merge(identifier,cancellation={**requested,"status":"unconfirmed","signal_sent":None,"message":str(exc)[:300]})
             raise
-        self.merge(identifier,cancellation={"status":"requested", "signal_sent":True})
+        self.merge(identifier,cancellation={**requested,"signal_sent":True})
         return self.run(identifier)
 
     def read(self, identifier, name="console.log", offset=0):

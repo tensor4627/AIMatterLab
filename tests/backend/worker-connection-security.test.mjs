@@ -59,6 +59,41 @@ test('closing during initial health revokes attachment and ignores the late repl
  const f=fixture();f.hold=true;try{const pending=f.worker.connect(settings,source);const rejected=assert.rejects(pending,/bridge closed|superseded/);await eventually(()=>!!f.held);f.worker.close();f.held();await rejected;assert.equal(f.worker.connection,null);assert.equal(f.worker.pending.size,0);assert.equal(f.executions.length,2);}finally{f.close();}
 });
 
+test('late WSL installation and queued WSL selection leave a newer SSH service connected',async()=>{
+ const f=fixture();let release,installed=0,detached=0;
+ f.worker.host.execute=()=>{installed++;return new Promise(resolve=>{release=resolve;});};
+ const health={...f.health,hostIdentity:{hostname:'fixture',uid:1000,machineId:'fixture-machine'},runtime_id:'fixture-runtime',ssh_service:true};
+ try{
+  const first=assert.rejects(f.worker.connect(settings,source),/superseded/);
+  const queued=assert.rejects(f.worker.connect({...settings,workerRoot:'/fixture/other'},source),/superseded/);
+  await f.worker.attachServiceTransport({identity:{kind:'ssh',version:3,root:health.root,hostIdentity:health.hostIdentity,runtimeId:health.runtime_id,connectionId:'chosen'},health,
+   target:{kind:'ssh',version:3,connectionId:'chosen'},request:async()=>({status:200,data:health}),detach:()=>detached++});
+  const selected=f.worker.connection;
+  release({stdout:'{}'});await Promise.all([first,queued]);
+  assert.equal(installed,1);assert.equal(f.worker.connection,selected);assert.equal(f.worker.connectionFailure,null);assert.equal(detached,0);
+  assert.equal((await f.worker.request('GET','/api/health')).root,health.root);
+ }finally{f.close();}
+});
+
+test('closing the SSH channel before a queued read is dispatched skips the old transport',async()=>{
+ const f=fixture();let reads=0;
+ f.worker.serviceTransport={request:async()=>{reads++;return {status:200,data:{}};}};
+ const read=f.worker.forward('GET','/api/health');f.worker.close();
+ await assert.rejects(read,/ssh_service_context_changed/);assert.equal(reads,0);
+});
+
+test('reselecting the in-flight WSL target supersedes a different queued target',async()=>{
+ const f=fixture(),opened=[];let finish;
+ f.worker.open=async selected=>{opened.push(selected.workerRoot);await new Promise(resolve=>{finish=resolve;});return 'original';};
+ try{
+  const first=f.worker.connect(settings,source);
+  const changed=assert.rejects(f.worker.connect({...settings,workerRoot:'/other'},source),/superseded/);
+  const last=f.worker.connect(settings,source);finish();
+  assert.deepEqual(await Promise.all([first,last]),['original','original']);await changed;
+  assert.deepEqual(opened,[settings.workerRoot]);
+ }finally{f.close();}
+});
+
 for(const event of ['exit','error','stdin-error'])test('verified relay '+event+' invalidates readiness without resubmission',async()=>{
   const f=fixture();try{await f.worker.connect(settings,source);const child=f.children[0],before=f.revocations;f.hold=true;const pending=f.worker.request('GET','/api/runs'),rejected=assert.rejects(pending,/disconnected|unavailable|Synthetic/);if(event==='stdin-error')child.stdin.emit('error',Error('Synthetic pipe error'));else child.emit(event,event==='error'?Error('Synthetic relay error'):1);await rejected;assert.equal(f.worker.connection,null);assert.equal(f.worker.relay,null);assert.equal(f.worker.identity,null);assert.equal(child.killed,1);assert.equal(f.worker.pending.size,0);assert.equal(f.revocations,before+1);assert.equal(f.executions.length,2);}finally{f.close();}
 });

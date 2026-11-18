@@ -39,6 +39,8 @@ def validate_roadmap(value, field_key):
     for step in steps.values():
         if "parameter_field" in step:
             field_key(step["parameter_field"])
+        if step.get("runtime_labels", {}).keys() - step.get("runtime", {}).keys():
+            raise ValueError("A runtime label needs a component on the same port")
         for side in (step["inputs"], step["outputs"]):
             _unique([binding["port"] for binding in side], "port on " + step["id"])
             if any(binding["resource"] not in known for binding in side):

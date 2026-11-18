@@ -10,9 +10,13 @@ export async function executeTask(records,worker,value,localReview){
  return taskOperation(records,taskId,'execute',JSON.stringify([artifactId,inputReceipt,runChecks]),()=>executeOnce(records,worker,{taskId,artifactId,inputReceipt,runChecks},localReview));
 }
 async function executeOnce(records,worker,{taskId,artifactId,inputReceipt,runChecks},localReview){
- const task=records.read(taskId),artifact=task.artifacts.find(a=>a.id===artifactId);
+ const task=records.read(taskId),target=task.workflowVersion===2?task.deployment?.config?.target:null;
+ const kind=target==='local'?'run':target==='cluster'?'cluster-run':null;
+ const matches=task.artifacts.filter(row=>row.id===artifactId&&['run','cluster-run'].includes(row.kind)&&(!kind||row.kind===kind));
+ const [artifact]=matches;
  assertDeploymentWorker(task,worker);assertConfirmedDeployment(task);
- if(!artifact||!['run','cluster-run'].includes(artifact.kind))throw Error('Prepared run unavailable');
+ if(!artifact)throw Error('Prepared run unavailable');
+ if(matches.length>1)throw Error('Run ID matches multiple records. Open the original run to continue.');
  if(task.workflowVersion===2&&(!deploymentCurrent(task)||task.deployment.prepared.artifactId!==artifactId))throw Error('Prepare the current input revision before execution');
  if(task.workflowVersion===2&&inputReceipt!==task.deployment.prepared.inputIdentity)throw Error('Review the actual input snapshots for this deployment before execution');
  const prefix=artifact.kind==='cluster-run'?'/api/cluster/':'/api/run/',connection=worker.connection,connectionEpoch=worker.connectionEpoch;
@@ -27,7 +31,7 @@ async function executeOnce(records,worker,{taskId,artifactId,inputReceipt,runChe
  if(!['draft','ready'].includes(current.status)){records.linkRun(taskId,current);return current;}
  const pending=records.read(taskId);
  if(pending.execution&&['validating','submitting','unknown'].includes(pending.execution.phase))throw Error('An execution request is pending; reconcile its recorded run, never resubmit unknown');
- const attempt={artifactId,parameterRevision:task.parameterRevision,deploymentRevision:task.deployment?.revision,inputIdentity:inputReceipt,runChecks};
+ const attempt={artifactId,artifactKind:artifact.kind,parameterRevision:task.parameterRevision,deploymentRevision:task.deployment?.revision,inputIdentity:inputReceipt,runChecks};
  pending.execution={...attempt,phase:'validating'};records.save(pending);
  try{
   if(observesInputs&&sameDraft()){await localReview.verifyPreparedActual(taskId,current,task.deployment.config,current.inputs,true);assertWorker();}

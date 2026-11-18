@@ -47,6 +47,18 @@ test('genuinely unavailable service retains stale history, refuses details and p
  const f=fixture(),{h}=f;try{await h.flush();f.state.available=false;f.jobs().onRefresh();await h.flush();assert.equal(f.jobs().worker,false);assert.equal(f.jobs().canRefresh,true);assert.equal(f.jobs().servicePhase,'unavailable');assert.equal(f.jobs().local[0].id,'run-A');assert.equal(f.jobs().observations.local.stale,true);const before=h.calls.length;f.jobs().onOpen({location:'local',run:run('A')});await h.flush();assert.equal(h.calls.length,before);noExecutionMutations(h);}finally{h.unmount();}
 });
 
+test('switching resources while viewing a run with the same ID returns to the list',async()=>{
+ const {h,state,jobs}=fixture();
+ try{
+  state.read=({target})=>{const row={...run(state.id),id:'shared'};return target==='/api/runs'?[row]:target==='/api/run/status'?row:undefined;};
+  await h.flush();jobs().onOpen({location:'local',run:jobs().local[0]});await h.flush();
+  assert.equal(h.find(n=>n.type==='./RunDetail').props.run.name,'History A');
+  state.id='B';h.emit({method:'studio/computeResourceChanged'});await h.flush();
+  assert.equal(jobs().local[0].name,'History B');assert.throws(()=>h.find(n=>n.type==='./RunDetail'));
+  assert.equal(h.storage.getItem('studio.section'),'runs');noExecutionMutations(h);
+ }finally{h.unmount();}
+});
+
 test('same selected profile with an intervening source identity is rejected after the GET responses',async()=>{
  const scope=selectedRecordScope(resource('A'),1);let observations=0;const result=await readSelectedServiceRecords({scope,current:()=>true,readStatus:async()=>++observations===1?status('A'):{...status('A'),sourceId:'c'.repeat(64)},read:async()=>[run('A')]});assert.deepEqual(result,{phase:'unavailable',sourceChanged:true});
 });

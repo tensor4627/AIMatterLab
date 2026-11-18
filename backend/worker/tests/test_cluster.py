@@ -355,6 +355,22 @@ class ClusterLifecycle(unittest.TestCase):
         r=self.submitted();FakeSSH.wrong_name=True
         with self.assertRaises(ValueError):self.cluster.cancel(r["id"])
 
+    def test_cancel_after_failed_poll_does_not_use_a_previously_verified_job_id(self):
+        run=self.submitted()
+        self.assertTrue(self.cluster.poll(run['id'])['identity_verified'])
+        class Offline(FakeSSH):
+            def run(self,script,data=None,timeout=40):
+                if script.startswith('bkill '):
+                    raise AssertionError('A failed identity check must not dispatch cancellation')
+                raise ConnectionError('Read unavailable')
+        self.cluster.transport=Offline
+        with self.assertRaisesRegex(ValueError,'unverified'):
+            self.cluster.cancel(run['id'])
+        actual=self.cluster.raw(run['id'])
+        self.assertEqual(actual['job_id'], '123')
+        self.assertFalse(actual['identity_verified'])
+        self.assertFalse(actual['cancellation']['signal_sent'])
+
     def test_cancellation_intent_survives_a_lost_remote_acknowledgement(self):
         run=self.submitted();owner=self
         class LostCancellation(FakeSSH):
@@ -368,6 +384,8 @@ class ClusterLifecycle(unittest.TestCase):
         persisted=self.cluster.raw(run['id'])
         self.assertTrue(persisted['cancel_requested'])
         self.assertEqual(persisted['cancellation']['status'],'unconfirmed')
+        self.assertIsNone(persisted['cancellation']['signal_sent'])
+        self.assertGreater(persisted['cancellation']['requested_at'],0)
         self.assertNotIn(persisted['status'],('cancelled','succeeded'))
 
     def test_cancellation_is_durable_before_the_first_remote_status_query(self):

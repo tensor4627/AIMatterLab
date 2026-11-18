@@ -469,7 +469,10 @@ class LaunchProtocol(unittest.TestCase):
 
     def test_legacy_cancel_returns_unknown_and_unconfirmed_without_signalling(self):
         atomic_json(self.directory / "launch.json", {"command": ["legacy"]})
-        with patch("studio_worker.compute.runs.Adapter.cancel", return_value=False):
+        def inspect_before_signal(_run):
+            self.assertTrue(self.owner.store.run("run")["cancel_requested"])
+            return False
+        with patch("studio_worker.compute.runs.Adapter.cancel", side_effect=inspect_before_signal):
             result = self.owner.cancel("run")
         self.assertEqual(result["status"], "unknown")
         self.assertEqual(result["cancellation"]["status"], "unconfirmed")

@@ -31,7 +31,7 @@ async function fixture(){
    if(method==='scientific.skills')return {schema_version:1,functions:[{id:'md.pydyn',title:'PyDyn MD',phase:'authoring',engines:['pydyn.md'],tools:[],status:'implemented_adapter_missing_project_skill',sources:['studio'],permission:'allowed',source_status:'registered'},{id:'analysis.wtmetad',title:'WTMetaD',phase:'analysis',engines:['pygas.reweight'],tools:[],status:'implemented',sources:['pygas'],permission:(test.settings.pygasSkillProviders||[]).includes(data.provider)?'allowed':'permission_required',source_status:'registered'}],sharing:{...test.settings.scientificSkillProviders||{},pygas:test.settings.pygasSkillProviders||[]},source_scope:'Only public allowlisted skills'};
     if(method==='skills.catalog')return [{name:'Fixture public skill',path:'/fixture/skills/public/SKILL.md',description:'Synthetic explicitly selected public skill'}];
     if(method==='state')return {settings:test.settings,threads:[],ssh:[]};
-   if(method==='conversation.list')return test.conversations||[];if(method==='task.list')return test.task?[test.task]:[];if(['workflow.list','ssh.existing'].includes(method))return [];
+   if(method==='conversation.list')return test.conversations||[];if(method==='conversation.groups')return test.chatGroups||[];if(method==='task.list')return test.task?[test.task]:[];if(['workflow.list','ssh.existing'].includes(method))return [];
    if(method==='conversation.createGroup'){const group={id:'group-'+test.calls.length,name:data.name};test.chatGroups=[...(test.chatGroups||[]),group];return group;}
    if(method==='conversation.remember'){test.conversation={...(test.conversation||{}),id:data.provider+':'+data.threadId,provider:data.provider,threadId:data.threadId,name:data.name,projectId:data.projectId,taskId:test.task?.id||null};return test.conversation;}
    if(method==='conversation.select')return test.conversations.find(value=>value.id===data.id);
@@ -127,7 +127,7 @@ try{
  await check('unified-real-route-records-filter-and-exact-conversation-return',async page=>{
   await seeded(page);await connect(page);await page.getByTestId('navigate-runs').click();await page.locator('[data-job-key="cluster:run"]').waitFor();
   assert.equal(await page.locator('.job-record').count(),2);assert.equal(await page.locator('[data-job-key="local:run"] .badge').textContent(),'排队中');
-  await page.getByLabel('计算位置筛选').selectOption('cluster');await page.getByLabel('任务状态筛选').selectOption('unknown');await page.getByLabel('任务时间筛选').selectOption('7');await page.getByLabel('搜索任务',{exact:true}).fill('1001');assert.equal(await page.locator('.job-record').count(),1);
+  await page.getByLabel('计算位置筛选').selectOption('cluster');await page.getByLabel('任务状态筛选').selectOption('unknown');await page.locator('.jobs-more-filters>summary').click();await page.getByLabel('任务时间筛选').selectOption('7');await page.getByLabel('搜索任务',{exact:true}).fill('1001');assert.equal(await page.locator('.job-record').count(),1);
   await page.getByRole('button',{name:'返回会话 · Current NEB workflow'}).click();await page.getByTestId('agent-task-page').waitFor();assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='conversation.select').at(-1).data.id),'codex:thread');
   assert.equal(await page.evaluate(()=>window.__test.cluster.status),'unknown');await noWrites(page);
  });
@@ -141,7 +141,7 @@ try{
   await noWrites(page);await page.screenshot({path:path.join(out,'jobs-partial-offline.png')});
  });
  await check('failed-read-sources-pause-after-three-and-explicit-sync-recovers',async page=>{
-  await page.evaluate(()=>{const interval=window.setInterval;window.setInterval=(fn,ms,...args)=>interval(fn,ms===2500||ms===5000?50:ms,...args);});
+  await page.evaluate(()=>{const interval=window.setInterval,wall=Date.now(),start=performance.now();Date.now=()=>wall+Math.floor((performance.now()-start)*1000);window.setInterval=(fn,ms,...args)=>interval(fn,ms===2500||ms===5000?50:ms,...args);});
   await seeded(page);await connect(page);await page.getByTestId('navigate-runs').click();await page.locator('[data-job-key="cluster:run"]').waitFor();
   await page.evaluate(()=>{window.__test.failedSources=['/api/environments','/api/cluster-runs','/api/gpu'];window.__test.countsBefore=Object.fromEntries(['/api/environments','/api/cluster-runs','/api/gpu'].map(target=>[target,window.__test.calls.filter(call=>call.method==='worker.request'&&call.data.target===target).length]));});
   await page.waitForFunction(()=>document.querySelector('[data-testid="job-observation-cluster"]').textContent.includes('自动同步已暂停'));

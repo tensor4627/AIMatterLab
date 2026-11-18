@@ -170,8 +170,10 @@ export default function Agent({onOpenHistory,onCollapse,conversationGroupId,onOp
    if(event.params?.threadId&&event.params.threadId!==threadRef.current)return;
    if(event.id!==undefined){requestScope(event);setRequests(prev=>[...prev.filter(r=>r.id!==event.id),event]);return;}
    const p=event.params||{};
+   if(event.method==='studio/sessionReady'&&p.threadId===threadRef.current){
+    setSendNotice(t(p.status?p.message:'上一轮回复已收到原服务回执。'));
+   }
    if(event.method==='serverRequest/resolved')setRequests(prev=>prev.filter(r=>String(r.id)!==String(p.requestId)));
-   if(p.threadId && p.threadId!==threadRef.current)return;
    if(event.method==='item/agentMessage/delta'){const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId===p.turnId&&p.delta?.trim())call.output=true;}
    if(event.method==='item/agentMessage/delta')setRetrying(null);
     if(event.method==='turn/completed'||event.method==='studio/codexDisconnected')setRetrying(null);

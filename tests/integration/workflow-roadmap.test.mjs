@@ -46,9 +46,19 @@ test('structural ambiguity is rejected before a plan replaces a draft',()=>{
   p=>p.steps[0].inputs.push(p.steps[0].inputs[0]),p=>p.steps[0].outputs[0].resource='model',
   p=>p.steps[0].outputs[0].resource='frames',p=>p.steps[2].inputs[0].resource='report',
   p=>p.resources[0].field='__proto__.secret',p=>p.resources[3].field='temperature',p=>p.schema_version=2,
-  p=>p.steps[0].status='passed']){
+  p=>p.steps[0].status='passed',p=>p.resources[0].short_label='x'.repeat(17),
+  p=>p.steps[0].short_label=' ',p=>p.steps[0].runtime_labels={top:{short_label:'NEP'}}]){
    const plan=structuredClone(fixture);change(plan);assert.throws(()=>validateRoadmap(plan));
  }
+});
+
+test('aliases survive validation without changing scientific dependencies',()=>{
+ const legacy=structuredClone(fixture);
+ for(const item of [...legacy.resources,...legacy.steps]){delete item.short_label;delete item.runtime_labels;}
+ const plain=validateRoadmap(legacy),named=validateRoadmap(fixture);
+ assert.deepEqual(analyzeRoadmap(named),analyzeRoadmap(plain));
+ assert.equal(named.resources[4].short_label,'热力学');assert.deepEqual(named.steps[2].runtime_labels,fixture.steps[2].runtime_labels);
+ assert.equal(named.steps[2].runtime.top,'potential');
 });
 
 test('task tool results, parameter edits and full subsequent turns retain the same planning context',()=>{

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {actualAuthoringWorker} from '../../../contracts/compute/task-worker-binding.mjs';
+import {actualAuthoringWorker,stableSshWorkerBinding,taskWorkerSource} from '../../../contracts/compute/task-worker-binding.mjs';
 
 // Pure bundled-file identity, matching install.py's POSIX path+bytes algorithm.
 // This never invokes the installer or observes/changes any running service.
@@ -48,16 +48,32 @@ export function workerServiceVersionEvidence(worker){
  return {serviceVersion:health.runtime===prefix+expected?'current':'different'};
 }
 
+const sshSourceId=binding=>crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v2',binding])).digest('hex');
+function wslSourceId(binding){
+ const {distribution,root,port}=binding||{};
+ if(typeof distribution!=='string'||!distribution||typeof root!=='string'||!root.startsWith('/')||!Number.isInteger(port)||port<1024||port>65535)return null;
+ return crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v1',distribution,root,port])).digest('hex');
+}
+
+// Derive a display hint from existing saved bindings without modifying the catalog.
+export function taskForRecordIndex(task){
+ const binding=taskWorkerSource(task)?.binding;
+ if(!binding)return task;
+ if(binding.kind!=='ssh')return {...task,workerSourceId:wslSourceId(binding)};
+ try{return {...task,workerSourceId:sshSourceId(stableSshWorkerBinding(binding))};}
+ catch{return {...task,workerSourceId:null};}
+}
+
 // Opaque, stable identity for local drafts. Called only after health verification;
 // neither paths nor credentials are exposed to the renderer.
 export function workerObservationEvidence(worker){
  if(worker.identity?.kind==='ssh'){try{
   const binding=actualAuthoringWorker(worker),identity=worker.identity,target=worker.connectionTarget;
   const connection=identity.version===3&&/^[A-Za-z0-9_-]{1,200}$/.test(identity.connectionId||'')&&worker.connection.transport==='ssh-connection'&&target?.kind==='ssh'&&target.version===3&&target.connectionId===identity.connectionId?{connectionId:identity.connectionId}:{};
-  return {...workerServiceVersionEvidence(worker),sourceId:crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v2',binding])).digest('hex'),sourceKind:'ssh',profileId:binding.profileId,profileVersion:binding.profileVersion,...connection};
+  return {...workerServiceVersionEvidence(worker),sourceId:sshSourceId(binding),sourceKind:'ssh',profileId:binding.profileId,profileVersion:binding.profileVersion,...connection};
  }catch{return {serviceVersion:'unconfirmed'};}}
  const identity=worker.identity,port=worker.connectionTarget?.port;
- const source=typeof identity?.distribution==='string'&&identity.distribution&&typeof identity.root==='string'&&identity.root.startsWith('/')&&Number.isInteger(port)&&port>=1024&&port<=65535&&worker.connection?.health?.root===identity.root
-  ?{sourceId:crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v1',identity.distribution,identity.root,port])).digest('hex')}:{};
+ const sourceId=identity&&worker.connection?.health?.root===identity.root?wslSourceId({...identity,port}):null;
+ const source=sourceId?{sourceId}:{};
  return {...workerServiceVersionEvidence(worker),...source};
 }

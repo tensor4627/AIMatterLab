@@ -15,6 +15,7 @@
         "properties": {
           "id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$"},
           "label": {"type": "string", "pattern": "\\S", "maxLength": 160},
+          "short_label": {"type":"string","pattern":"^\\S(?:[^\\r\\n]*\\S)?$","maxLength":16,"description":"Compact display name for this resource. Keep its full name in label."},
           "format": {"type": "string", "pattern": "\\S", "maxLength": 80},
           "requirements": {"type": "array", "maxItems": 12, "items": {"type": "string", "pattern": "\\S", "maxLength": 240}, "description": "Observable requirements for this resource, such as fields, units, sampling interval or time coverage."},
           "checks": {"type":"array","maxItems":48,"items":{"type":"object","additionalProperties":false,"required":["requirement","fact","op","value"],"properties":{
@@ -37,6 +38,11 @@
           "tool": {"type": "string", "pattern": "\\S", "maxLength": 160},
           "parameter_field":{"type":"string","maxLength":200,"description":"Optional dot path into the task form containing this invocation's engine parameters."},
           "label": {"type": "string", "pattern": "\\S", "maxLength": 160},
+          "short_label": {"type":"string","pattern":"^\\S(?:[^\\r\\n]*\\S)?$","maxLength":16,"description":"Compact display name for this invocation. Keep its full name in label."},
+          "runtime_labels": {"type":"object","additionalProperties":false,"description":"Display names for the corresponding runtime ports. An omitted full label uses the original runtime name.","properties":{
+            "top":{"type":"object","additionalProperties":false,"required":["short_label"],"properties":{"short_label":{"type":"string","pattern":"^\\S(?:[^\\r\\n]*\\S)?$","maxLength":16},"label":{"type":"string","pattern":"\\S","maxLength":160}}},
+            "bottom":{"type":"object","additionalProperties":false,"required":["short_label"],"properties":{"short_label":{"type":"string","pattern":"^\\S(?:[^\\r\\n]*\\S)?$","maxLength":16},"label":{"type":"string","pattern":"\\S","maxLength":160}}}
+          }},
           "inputs": {"type": "array", "maxItems": 64, "items": {
             "type": "object", "additionalProperties": false, "required": ["port", "resource"],
             "properties": {"port": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$"}, "resource": {"type": "string", "maxLength": 64}}

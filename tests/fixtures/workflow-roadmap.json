@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "resources": [
-    {"id":"structure","label":"初始结构","format":"extxyz","field":"structure_file","basis":"user"},
-    {"id":"model","label":"势模型","field":"potential_file","basis":"user"},
-    {"id":"control","label":"模拟参数","field":"control_file","basis":"user"},
-    {"id":"frames","label":"MD 轨迹","format":"extxyz","basis":"user"},
-    {"id":"thermo","label":"热力学序列","basis":"inferred","requirements":["温度（K）和总能量（eV）","采样间隔 0.1 ps"]},
-    {"id":"msd","label":"均方位移"},
-    {"id":"rdf","label":"径向分布"},
-    {"id":"report","label":"分析报告","basis":"user"}
+    {"id":"structure","label":"分子动力学的初始结构","short_label":"结构","format":"extxyz","field":"structure_file","basis":"user"},
+    {"id":"model","label":"原子间相互作用势模型","short_label":"势模型","field":"potential_file","basis":"user"},
+    {"id":"control","label":"分子动力学模拟控制参数","short_label":"控制参数","field":"control_file","basis":"user"},
+    {"id":"frames","label":"分子动力学原子轨迹","short_label":"轨迹","format":"extxyz","basis":"user"},
+    {"id":"thermo","label":"温度与总能量的热力学时间序列","short_label":"热力学","basis":"inferred","requirements":["温度（K）和总能量（eV）","采样间隔 0.1 ps"]},
+    {"id":"msd","label":"均方位移时间序列","short_label":"位移序列"},
+    {"id":"rdf","label":"径向分布函数","short_label":"g(r)"},
+    {"id":"report","label":"轨迹与结构分析汇总报告","short_label":"报告","basis":"user"}
   ],
   "inputs":["structure","model","control"],
   "steps":[
-    {"id":"report","tool":"example.report","label":"汇总分析","inputs":[{"port":"msd","resource":"msd"},{"port":"rdf","resource":"rdf"}],"outputs":[{"port":"report","resource":"report"}]},
-    {"id":"msd","tool":"example.trajectory","label":"计算均方位移","inputs":[{"port":"trajectory","resource":"frames"}],"outputs":[{"port":"series","resource":"msd"}]},
-    {"id":"md","tool":"gpumd.md","label":"分子动力学","runtime":{"top":"NEP 受力计算","bottom":"在线统计"},"inputs":[{"port":"structure","resource":"structure"},{"port":"potential","resource":"model"},{"port":"control","resource":"control"}],"outputs":[{"port":"trajectory","resource":"frames"},{"port":"thermo","resource":"thermo"}]},
-    {"id":"rdf","tool":"example.trajectory","label":"计算径向分布","inputs":[{"port":"trajectory","resource":"frames"}],"outputs":[{"port":"series","resource":"rdf"}]}
+    {"id":"report","tool":"example.report","label":"汇总轨迹与结构分析结果","short_label":"汇总","inputs":[{"port":"msd","resource":"msd"},{"port":"rdf","resource":"rdf"}],"outputs":[{"port":"report","resource":"report"}]},
+    {"id":"msd","tool":"example.trajectory","label":"计算原子轨迹的均方位移","short_label":"MSD 分析","inputs":[{"port":"trajectory","resource":"frames"}],"outputs":[{"port":"series","resource":"msd"}]},
+    {"id":"md","tool":"gpumd.md","label":"分子动力学轨迹采样","short_label":"MD 采样","runtime":{"top":"potential","bottom":"在线热力学统计"},"runtime_labels":{"top":{"short_label":"NEP","label":"神经演化势的原子受力计算"},"bottom":{"short_label":"在线统计"}},"inputs":[{"port":"structure","resource":"structure"},{"port":"potential","resource":"model"},{"port":"control","resource":"control"}],"outputs":[{"port":"trajectory","resource":"frames"},{"port":"thermo","resource":"thermo"}]},
+    {"id":"rdf","tool":"example.trajectory","label":"计算原子对的径向分布函数","short_label":"RDF 分析","inputs":[{"port":"trajectory","resource":"frames"}],"outputs":[{"port":"series","resource":"rdf"}]}
   ],
   "outputs":["frames","thermo","report"]
 }

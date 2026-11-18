@@ -26,6 +26,7 @@ function indexRoadmap(plan){
  for(const id of [...plan.inputs,...plan.outputs])known(id);
  for(const step of plan.steps){
   if(step.parameter_field!==undefined)fieldPath(step.parameter_field);
+  if(Object.keys(step.runtime_labels||{}).some(side=>!step.runtime?.[side]))throw Error('A runtime label needs a component on the same port');
   for(const side of [step.inputs,step.outputs]){
    unique(side.map(binding=>binding.port),'port on '+step.id);
    for(const binding of side)known(binding.resource);

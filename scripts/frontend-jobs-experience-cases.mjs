@@ -10,8 +10,20 @@ export async function frontendJobsExperienceCases({check,out}){
   window.testRoot.render(window.React.createElement(JobsPage,f.props));
  },{narrow,missing});await page.getByTestId('jobs-page').waitFor();}
  const noActions=async page=>assert.deepEqual(await page.evaluate(()=>window.__jobsFixture.actions),[]);
+ await check('experience-jobs-secondary-filters-are-keyboard-accessible',async page=>{
+  await show(page,{narrow:true});
+  const more=page.locator('.jobs-more-filters>summary'),time=page.getByLabel('任务时间筛选',{exact:true});
+  assert.equal(await time.isVisible(),false);
+  await more.focus();await page.keyboard.press('Enter');assert.equal(await time.isVisible(),true);
+  await page.keyboard.press('Tab');assert(await time.evaluate(node=>node===document.activeElement));
+  await time.selectOption('7');await more.focus();await page.keyboard.press('Space');
+  assert.equal(await time.isVisible(),false);assert.match(await page.getByTestId('jobs-filter-summary').innerText(),/最近七天/);
+  await page.getByLabel('搜索任务',{exact:true}).fill('no matching record');
+  assert.equal(await page.getByRole('button',{name:/清除筛选/}).count(),1);
+  await page.getByRole('button',{name:/清除筛选/}).click();assert.equal(await page.locator('.job-record').count(),4);await noActions(page);
+ });
  await check('experience-round2-jobs-global-count-preserves-other-filters',async page=>{
-  await show(page);await page.getByLabel('计算位置筛选',{exact:true}).selectOption('cluster');await page.getByLabel('任务时间筛选',{exact:true}).selectOption('1');await page.getByLabel('任务项目筛选',{exact:true}).selectOption('current');await page.getByLabel('搜索任务',{exact:true}).fill('not-found');await page.getByTestId('jobs-empty').getByText('没有匹配的运行记录',{exact:true}).waitFor();
+  await show(page);await page.getByLabel('计算位置筛选',{exact:true}).selectOption('cluster');await page.locator('.jobs-more-filters>summary').click();await page.getByLabel('任务时间筛选',{exact:true}).selectOption('1');await page.getByLabel('任务项目筛选',{exact:true}).selectOption('current');await page.getByLabel('搜索任务',{exact:true}).fill('not-found');await page.getByTestId('jobs-empty').getByText('没有匹配的运行记录',{exact:true}).waitFor();
   await page.getByTestId('jobs-overview-running').click();assert.equal(await page.locator('.job-record').count(),0);for(const [label,value] of [['计算位置筛选','cluster'],['任务时间筛选','1'],['任务项目筛选','current']])assert.equal(await page.getByLabel(label,{exact:true}).inputValue(),value);assert.equal(await page.getByLabel('搜索任务',{exact:true}).inputValue(),'not-found');assert.equal(await page.getByLabel('任务状态筛选',{exact:true}).inputValue(),'running');assert.equal(await page.getByTestId('jobs-overview-running').getAttribute('aria-pressed'),'true');await page.screenshot({path:path.join(out,'round2-jobs-global-running.png'),fullPage:true});await noActions(page);
  });
  await check('experience-round2-jobs-seven-plans-expand-and-focus',async page=>{

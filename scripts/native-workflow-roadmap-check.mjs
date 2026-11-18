@@ -12,17 +12,18 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const runtime=path.join(root,'.studio');fs.mkdirSync(runtime,{recursive:true});
 const out=fs.mkdtempSync(path.join(runtime,'workflow-roadmap-')),profile=path.join(out,'profile');
 const catalog=new Catalog(path.join(profile,'studio')),records=new TaskRecords(catalog,()=>{});
-function seed(name,roadmap){
+function seed(name,roadmap,files=['model.xyz','run.in']){
  const task=records.create({provider:'deepseek',planningMode:true,workflowVersion:2,request:name});
  const thread='fixture-'+task.id;
  records.attach(task.id,'deepseek',thread);
  const fields=['structure_file','potential_file','control_file'].map(key=>({key,label:key,type:'file',required:true}));
  const steps=[{id:'sources',title:'输入文件',fields},...Array.from({length:18},(_,i)=>({id:'form-'+i,title:'参数分组 '+(i+1),fields:[]}))];
  records.event({provider:'deepseek',method:'item/completed',params:{threadId:thread,item:{tool:'present_task',
-  result:{id:task.id,kind:'task-parameters',name,steps,parameters:{engine:'gpumd.md',structure_file:'model.xyz',control_file:'run.in',potential_file:null,files:['model.xyz','run.in']},missing_fields:['potential_file'],...(roadmap?{roadmap}:{})}}}});
+  result:{id:task.id,kind:'task-parameters',name,steps,parameters:{engine:'gpumd.md',structure_file:'model.xyz',control_file:'run.in',potential_file:null,files},missing_fields:['potential_file'],...(roadmap?{roadmap}:{})}}}});
  return task.id;
 }
-const id=seed('分子动力学轨迹、热力学与结构分析',plan),old=seed('既有 MD 草稿');
+const oldFiles=['基准计算/含有长名称的初始结构目录/第一组/model.xyz','重复计算/含有长名称的另一结构目录/第二组/model.xyz'];
+const id=seed('分子动力学轨迹、热力学与结构分析',plan),old=seed('既有 MD 草稿',undefined,oldFiles);
 const longPlan={schema_version:1,resources:Array.from({length:33},(_,i)=>({id:'r'+i,label:'产物 '+i,basis:'user'})),inputs:['r0'],outputs:['r32'],
  steps:Array.from({length:32},(_,i)=>({id:'s'+i,tool:'example.transform',label:'处理 '+(i+1),inputs:[{port:'source',resource:'r'+i}],outputs:[{port:'product',resource:'r'+(i+1)}]}))};
 const longId=seed('32 次调用的接口示例',longPlan);
@@ -55,6 +56,27 @@ try{
  assert.equal(await drawing.locator('.roadmap-runtime').count(),2);
  assert.equal(await page.getByText('CONVERSATION WORKFLOW',{exact:false}).count(),0);
  assert.equal(await page.getByText('在对话中持续调整，或展开步骤直接填写参数与文件。').count(),0);
+ const hint=drawing.getByRole('tooltip'),node=key=>drawing.locator('[data-node-key="'+key+'"]');
+ const names=[
+  [node('input:structure'),'结构',plan.resources[0].label],
+  [node('step:md'),'MD 采样',plan.steps[2].label],
+  [node('output:thermo'),'热力学',plan.resources[4].label],
+  [drawing.locator('.roadmap-runtime[data-side="top"]'),'NEP',plan.steps[2].runtime_labels.top.label],
+  [drawing.locator('.roadmap-handoff').filter({hasText:'位移序列'}),'位移序列',plan.resources[5].label],
+ ];
+ for(const [item,short,full] of names){
+  assert.equal(await item.locator('text').textContent(),short);
+  await item.hover();await hint.waitFor();assert.equal(await hint.textContent(),full);
+  await header.locator('h1').hover();await hint.waitFor({state:'hidden'});
+  await item.focus();await hint.waitFor();assert.equal(await hint.textContent(),full);
+ }
+ assert.equal(await drawing.locator('.roadmap-port text').count(),0);
+ assert.equal(await drawing.locator('.roadmap-canvas text').allTextContents().then(names=>names.some(n=>n.includes('…'))),false);
+ assert.equal(await drawing.locator('.roadmap-handoff').count(),2);
+ await header.locator('h1').click();await node('output:thermo').hover();
+ await drawing.screenshot({path:path.join(out,'hover.png')});
+ await header.locator('h1').click();await hint.waitFor({state:'hidden'});
+ checks.push('input, tool, output, in-process module and handoff show the short label and reveal the exact full name on hover and keyboard focus');
  await header.screenshot({path:path.join(out,'expanded.png')});checks.push('four invocations, branching and joining artifact edges, internal runtime ports');
  await scroller.screenshot({path:path.join(out,'parameter-panel.png')});
  const execution=page.getByTestId('roadmap-execution');
@@ -96,24 +118,52 @@ try{
  await page.getByRole('button',{name:'收起计算流程图'}).click();
  const mini=page.getByTestId('roadmap-mini');await mini.waitFor();
  assert.equal(await mini.locator('.roadmap-node.step').count(),4);
+ assert.equal(await mini.locator('text,[tabindex]').count(),0);
  const reduced=await header.boundingBox();assert(reduced.height<original.height-60);
  assert((await mini.boundingBox()).x>(await header.locator('h1').boundingBox()).x);
  await scrollTo(850);assert(Math.abs((await header.boundingBox()).y-original.y)<2);
  await header.screenshot({path:path.join(out,'collapsed.png')});
  await mini.press('Enter');await drawing.waitFor();checks.push('same graph in title thumbnail, space reclaimed, pinned while collapsed, keyboard restores');
- await app.evaluate(({BrowserWindow})=>{const win=BrowserWindow.getAllWindows()[0];win.setContentSize(1100,720);});
- await page.evaluate(()=>document.documentElement.setAttribute('data-theme','light'));
- assert(await drawing.isVisible());const narrow=await canvas.boundingBox();assert(narrow.width>120&&narrow.height>70);
- checks.push('narrow desktop and light theme');
+ async function resize(width,height){
+  await app.evaluate(({BrowserWindow},[w,h])=>{const win=BrowserWindow.getAllWindows()[0];win.setMinimumSize(800,600);win.setContentSize(w,h);},[width,height]);
+  await page.waitForFunction(w=>innerWidth===w,width);
+ }
+ await resize(1366,768);await scrollTo(0);
+ await drawing.screenshot({path:path.join(out,'laptop.png')});
+ await resize(1024,768);
+ await page.evaluate(()=>{
+  document.documentElement.dataset.theme='light';
+  document.documentElement.style.setProperty('--ui-scale',String(24/13));
+  document.documentElement.style.setProperty('--ui-min-font','18px');
+  window.dispatchEvent(new Event('studio:appearance'));
+ });
+ const narrow=await canvas.boundingBox();assert(narrow.width>120&&narrow.height>70);
+ await node('output:thermo').focus();await hint.waitFor();
+ const bubble=await hint.boundingBox();assert(bubble.x>=narrow.x&&bubble.x+bubble.width<=narrow.x+narrow.width+1);
+ await node('output:thermo').press('Enter');await drawing.locator('.roadmap-node-detail').waitFor();
+ assert.match(await drawing.locator('.roadmap-node-detail').innerText(),/采样间隔 0\.1 ps/);
+ await page.getByRole('button',{name:'关闭节点详情'}).click();
+ await page.getByRole('button',{name:'适应全图',exact:true}).click();
+ await drawing.screenshot({path:path.join(out,'narrow-light.png')});
+ checks.push('1366 and 1024 pixel windows, light theme, large type, in-bounds hover and focused offscreen output');
  await open(old);
  assert.equal(await drawing.locator('.roadmap-node.step').count(),1);
  assert.equal(await drawing.locator('.roadmap-node.output').count(),0);
+ for(const [i,full] of oldFiles.entries()){
+  const input=node('input:file-'+i);
+  assert.equal(await input.locator('text').textContent(),'model.xyz · '+(i+1));
+  await input.hover();await hint.waitFor();assert.equal(await hint.textContent(),full);
+ }
  await drawing.getByRole('button',{name:/待明确/}).click();assert.match(await drawing.locator('.roadmap-findings').innerText(),/待定义目标产物/);
- checks.push('legacy engine/files projection preserves unknown outputs');
+ checks.push('legacy files preserve both full paths on hover, distinguish matching basenames and preserve unknown outputs');
  await open(longId);assert.equal(await drawing.locator('.roadmap-node.step').count(),32);
+ const firstBox=await node('step:s0').locator('text').boundingBox();
+ assert(firstBox.height>=12);
+ await node('output:r32').focus();await hint.waitFor();assert.equal(await hint.textContent(),'产物 32');
+ await drawing.getByRole('button',{name:'适应全图',exact:true}).click();
  const bounds=await canvas.boundingBox(),ends=await drawing.locator('.roadmap-node.input, .roadmap-node.output').evaluateAll(nodes=>nodes.map(el=>({x:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right})));
  assert(ends.length===2&&ends.every(end=>end.x>=bounds.x&&end.right<=bounds.x+bounds.width));
- checks.push('32-invocation chain fits both boundaries in the narrow viewport');
+ checks.push('32-invocation chain opens at readable size, keyboard reaches its last output and Fit shows both boundaries');
  assert.deepEqual(errors,[]);
  fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({status:'passed',checks,scope:'Offline planning fixtures, real Electron pointer/keyboard input; no model or calculation.'},null,2));
  console.log(JSON.stringify({out,checks}));

@@ -28,6 +28,7 @@ export class ApiModelBridge extends DshBridge{
   let worker=this.getWorker();if(worker&&toolContext)worker={...worker,context:{...worker.context,taskId:toolContext.mode==='workflow'?toolContext.taskId:null,projectId:toolContext.mode==='workflow'?toolContext.projectId:null}};
   const contextKey=createHash('sha256').update(JSON.stringify([selected.key,effort,identity,worker?.url,worker?.tokens?.mcp,worker?.context])).digest('hex');
   if(this.process&&this.contextKey===contextKey)return this.info;if(this.activeTurns.size)throw Error('请先停止当前回复再切换模型');
+  if(this.unconfirmedTurns.size)throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');
   if(this.process||this.pending.size||this.isolationWaiter)this.stop({notify:false,preserveStart:true});
   const generation=this.lifecycle,runtime=this.host.resolve({executable:this.executable}),profile=prepareApiDshProfile(this.root,runtime,worker,STUDIO_INSTRUCTIONS,{profile:credential,provider:this.provider});
   let readyResolve,readyReject;const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;}),waiter={resolve:readyResolve,reject:readyReject};this.isolationWaiter=waiter;
@@ -40,19 +41,18 @@ export class ApiModelBridge extends DshBridge{
    this.modelInfos=isolation.models||[];this.launchIdentity=identity;this.launchProfileId=selected.profile.id;this.effort=effort;this.info={transport:'dsh-sdk-jsonl',agentInfo:{name:'DeepSeek Harness · API',version:runtime.version},studioIsolation:isolation};return this.info;
   }catch(error){if(this.process===child)this.stop({notify:false});throw Error(this.cleanValue(error.message));}finally{clearTimeout(timer);if(this.isolationWaiter===waiter)this.isolationWaiter=null;}
  }
- receive(message){if(message.method==='session.event'&&message.params?.event?.type==='turn/end'&&message.params.event.data?.reason?.kind==='error')this.lastModelError=this.cleanValue(message.params.event.data.reason.error?.message||'API 模型调用失败');if(message.method==='studio/dshIsolation'&&message.params?.status==='failed'){this.isolationWaiter?.reject(Error(message.params.message||'模型运行组件隔离检查失败'));return;}return super.receive(message);}
- finish(session,active,status,message){if(status==='failed'&&this.lastModelError)message=this.lastModelError;this.lastModelError=null;return super.finish(session,active,status,message);}
+ receive(message){if(message?.method==='studio/dshIsolation'&&message.params?.status==='failed'){this.isolationWaiter?.reject(Error(message.params.message||'模型运行组件隔离检查失败'));return;}return super.receive(message);}
  save(session){this.catalog.put(KIND,session.id,this.cleanProtocol(session));}
  publicThread(session){return {...super.publicThread(session),provider:this.provider};}
  session(id){
   if(typeof id!=='string'||!id||id.length>200||/[\x00-\x1f]/.test(id))throw Error('Invalid API conversation');
   let session=this.sessions.get(id);if(session){this.assertBinding(session);return session;}
-  session=this.catalog.get(KIND,id);if(session){if(session.schemaVersion!==1||session.harness!=='dsh'||session.provider!==this.provider)throw Error('Unsupported API conversation record');session=this.cleanProtocol(structuredClone(session));this.assertBinding(session);for(const turn of session.turns||[])if(turn.status==='inProgress'){turn.status='failed';turn.error={message:'Previous reply was interrupted; no operation was replayed.'};}this.sessions.set(id,session);this.save(session);return session;}
+  session=this.catalog.get(KIND,id);if(session){if(session.id!==id||session.schemaVersion!==1||session.harness!=='dsh'||session.provider!==this.provider)throw Error('Unsupported API conversation record');this.assertBinding(session);return this.restoreSession(session);}
   if(this.provider!=='compatible')throw Error('旧 Qwen CLI 会话不能在 API 模式恢复；请新建 API 对话，原会话数据和计算记录保留');
   const binding=this.catalog.get('compatible-codex-thread',id),legacy=binding||this.catalog.get('compatible-history',id);if(!legacy)throw Error('Unknown API conversation');
   const profile=this.profiles.list(this.provider).find(p=>p.baseUrl===legacy.apiEndpoint&&p.api==='openai-completions'&&p.models.some(v=>v.id===legacy.model));if(!profile)throw Error('请恢复旧对话的原 API 地址；不会将历史发送到新服务');
   const turns=binding?[...(binding.legacyTurns||[]),...(binding.nativeTurns||[])]:legacy.turns||[];
-  session={schemaVersion:1,harness:'dsh',provider:this.provider,id,nativeId:randomUUID(),nativeStarted:false,legacyContextPending:true,name:legacy.name||'',model:apiModelKey(profile.id,legacy.model),profileId:profile.id,apiEndpoint:profile.baseUrl,apiProtocol:profile.api,turns:structuredClone(turns),updatedAt:legacy.updatedAt||Date.now()};this.sessions.set(id,session);this.save(session);return session;
+  session={schemaVersion:1,harness:'dsh',provider:this.provider,id,nativeId:randomUUID(),nativeStarted:false,legacyContextPending:true,name:legacy.name||'',model:apiModelKey(profile.id,legacy.model),profileId:profile.id,apiEndpoint:profile.baseUrl,apiProtocol:profile.api,turns:structuredClone(turns),updatedAt:legacy.updatedAt||Date.now()};return this.restoreSession(session);
  }
  assertBinding(session){const profile=this.profiles.read(session.profileId);if(profile.provider!==this.provider||profile.baseUrl!==session.apiEndpoint||profile.api!==session.apiProtocol||(profile.authMode||'api-key')!==(session.authMode||'api-key'))throw Error('此对话绑定的 API 地址或协议已变化；请恢复原配置或新建对话，不会发送旧历史');}
  prepareTurnModel(params){

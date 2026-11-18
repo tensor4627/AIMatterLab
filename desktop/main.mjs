@@ -98,7 +98,7 @@ import {registerModelProfileRoutes} from './platform/model-profile-routes.mjs';
 import {providerId} from '../agent/providers/contracts.mjs';
 import { WorkerClient } from "../agent/tools/worker-client.mjs";
 import {readWorkerStatus} from '../backend/main/compute/worker-status.mjs';
-import {bindBundledWorkerRuntimeId} from "../backend/main/compute/worker-service-version.mjs";
+import {bindBundledWorkerRuntimeId,taskForRecordIndex} from "../backend/main/compute/worker-service-version.mjs";
 import {restoreTaskWorker} from '../backend/main/compute/worker-restore.mjs';
 import {updateDraftWorker} from '../backend/main/workspace/update-draft-worker.mjs';
 import {createBaseWorkspace,baseWorkspaceTool} from '../backend/main/workspace/base-workspace.mjs';
@@ -160,7 +160,13 @@ const defaults = { distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-samplin
 function findCodex() {
   return findInstalledCodex();
 }
-function emit(channel,data) { if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel,data); }
+function emit(channel,data) {
+ if(!window||window.isDestroyed()||window.webContents.isDestroyed())return;
+ if(channel==='studio:event'&&data?.method==='studio/taskUpdated'&&data.params?.task){
+  data={...data,params:{...data.params,task:taskForRecordIndex(data.params.task)}};
+ }
+ window.webContents.send(channel,data);
+}
 codex.on('event', event => {
   if(event.method==='studio/codexDisconnected'&&agents?.isContextTransition?.('codex'))return;
   const tagged={...event,provider:'codex'};taskRecords?.event(tagged);emit('studio:event',tagged);
@@ -501,7 +507,7 @@ handle('ssh.tunnel.close',(value,event)=>sshConnection.tunnelClose(value,event))
 handle('worker.connect',async()=>{assertIdleAgent();if(computeResource.peek())throw Error('请先在连接设置明确选择本地计算资源；后台 SSH 通道会保留。');await sshService.resourceChanged();agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
 handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),selectedResource:()=>computeResource.peek()},value));
-handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAuthoringWorker({records:taskRecords,worker,selection:()=>workflowContext.current(),settings:()=>settings},value);});
+handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAuthoringWorker({records:taskRecords,worker,selection:()=>workflowContext.current(),settings:()=>settings},value).then(taskForRecordIndex);});
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
   const route=new URL(target,'http://127.0.0.1').pathname;

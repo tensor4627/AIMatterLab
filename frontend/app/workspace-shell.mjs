@@ -31,9 +31,9 @@ export function filterJobs(jobs,{location='all',status='all',since=0,projectId='
  const text=query.trim().toLocaleLowerCase();
  return jobs.filter(({location:source,run})=>(location==='all'||source===location)&&(status==='all'||(status==='active'?['queued','running','unknown'].includes(run.status):run.status===status))&&(!since||(Number.isFinite(run.created_at)&&run.created_at>=since))&&(!projectId||run.project_id===projectId)&&(!text||[run.name,run.engine,run.status,run.job_id||''].join('\n').toLocaleLowerCase().includes(text)));
 }
-export function boundJobConversation(job,tasks,conversations){
+export function boundJobConversation(job,tasks,conversations,sourceId){
  const kind=job.location==='cluster'?'cluster-run':'run';
- const owners=tasks.filter(task=>Array.isArray(task.artifacts)&&task.artifacts.some(artifact=>artifact.id===job.run.id&&artifact.kind===kind));
+ const owners=tasks.filter(task=>(sourceId?task.workerSourceId===sourceId:task.workerSourceId===undefined)&&Array.isArray(task.artifacts)&&task.artifacts.some(artifact=>artifact.id===job.run.id&&artifact.kind===kind));
  const matches=conversations.filter(conversation=>owners.some(task=>task.id===conversation.taskId&&task.provider===conversation.provider&&task.threadId===conversation.threadId));
  return matches.length===1?matches[0]:null;
 }

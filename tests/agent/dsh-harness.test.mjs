@@ -13,6 +13,38 @@ function temporary(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-ds
 const credential={apiKey:'sk-synthetic-dsh-contract'};
 function fixtureBridge(extra={}){return new DshBridge({root:'.',catalog:catalog(),credential:()=>credential,worker:()=>null,fetchApi:async()=>Response.json({data:[{id:'deepseek-flash'}]}),...extra});}
 
+for(const delayed of ['session/prompt','session/wait'])test('late '+delayed+' reconciles only its original DSH turn without resending',async t=>{
+ const b=fixtureBridge(),requests=[],events=[];
+ b.models=['fixture'];b.model='fixture';b.process={kill(){}};b.launch=async()=>{};
+ b.on('event',e=>events.push(e));t.after(()=>b.close());
+ const a=(await b.request('thread/start')).thread,other=(await b.request('thread/start')).thread;
+ const native=b.session(a.id).nativeId,raw=b.raw.bind(b);
+ b.raw=(method,params,timeout,late)=>raw(method,params,method===delayed&&params.sessionId===native?10:timeout,late);
+ b.send=request=>{
+  requests.push(request);
+  if(request.method!==delayed||request.params.sessionId!==native)queueMicrotask(()=>b.receive({id:request.id,result:{}}));
+ };
+ const prompt=id=>b.request('turn/start',{threadId:id,input:[{type:'text',text:'one fixture message'}]});
+ if(delayed==='session/prompt')await assert.rejects(prompt(a.id),/timed out/);else{
+  const ended=new Promise(resolve=>b.on('event',e=>{if(e.method==='turn/completed'&&e.params.threadId===a.id)resolve();}));
+  await prompt(a.id);await ended;
+ }
+ const original=b.session(a.id).turns[0];assert.equal(original.operationState,'unconfirmed');
+ await assert.rejects(DshBridge.prototype.launch.call(b,'different-model','off'),/待核对/);
+ await assert.rejects(prompt(a.id),/待核对/);
+ await b.request('thread/resume',{threadId:a.id});
+ await prompt(other.id);
+ b.receive({method:'studio/dshText',params:{sessionId:native,text:'old partial text'}});
+ b.sessionEvent({sessionId:native,event:{type:'turn/end',data:{reason:{kind:'completed'}}}});
+ assert(!events.some(e=>e.params?.delta==='old partial text'));
+ const done=new Promise(resolve=>b.on('event',e=>{if(e.method==='studio/sessionReady')resolve(e);}));
+ b.receive({id:requests.find(r=>r.method===delayed&&r.params.sessionId===native).id,result:{}});
+ assert.equal((await done).params.turnId,original.id);
+ assert.equal(original.lateReceipt.status,'completed');assert.equal(original.operationState,'reconciled');
+ assert.match(original.error.message,/原服务已完成/);
+ assert.equal(requests.filter(r=>r.method==='session/prompt'&&r.params.sessionId===native).length,1);
+});
+
 test('DSH uses an affirmative official kernel and only its explicit credential environment',t=>{
  const root=temporary(t),token='synthetic-tool-token',worker={url:'http://127.0.0.1:31415/providers/deepseek',tokens:{mcp:token,admin:'never-shared'},context:{taskId:'task'}};
  const p=prepareDshProfile(root,{mcpModule:'file:///official/mcp.js',toolsModule:'file:///official/tools.js'},worker,'AIMatterLab instructions',{models:['deepseek-flash']});

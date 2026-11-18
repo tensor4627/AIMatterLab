@@ -112,14 +112,26 @@ export class TaskRecords{
   return {params,interaction:structuredClone({planningMode,reviewMode,workflow})};
  }
  save(task,showFlow=false){if(task.threadId&&this.deleted(task.provider,task.threadId))return task;const previous=this.catalog.get('agent-task',task.id);task.updatedAt=Math.max(Date.now(),(previous?.updatedAt||0)+1);this.catalog.put('agent-task',task.id,task);this.cache.set(task.id,task);this.publish({method:'studio/taskUpdated',provider:task.provider,params:{task,showFlow}});return task;}
- linkRun(id,run,expectedPrepared){const task=this.read(id);
+ linkRun(id,run,expectedPrepared){
+  const task=this.read(id),kind=run.kind==='cluster-run'?'cluster-run':'run';
+  const target=task.deployment?.config?.target;
+  const deployedKind=target==='cluster'?'cluster-run':target==='local'?'run':null;
   if(expectedPrepared!==undefined){
    const expected=expectedPrepared,keys=['artifactId','parameterRevision','deploymentRevision'];
    if(!expected||typeof expected!=='object'||Array.isArray(expected)||Object.keys(expected).length!==3||keys.some(key=>!Object.hasOwn(expected,key))||typeof expected.artifactId!=='string'||!expected.artifactId||expected.artifactId.length>128||keys.slice(1).some(key=>!Number.isSafeInteger(expected[key])||expected[key]<0))throw Error('Invalid prepared reference');
    const current=task.deployment?.prepared;
-   if(run.id!==expected.artifactId||task.deployment?.revision!==expected.deploymentRevision||!current||keys.some(key=>current[key]!==expected[key]))throw Error('Prepared run changed; refresh the current input snapshots');
+   if(run.id!==expected.artifactId||(deployedKind&&kind!==deployedKind)||task.deployment?.revision!==expected.deploymentRevision||!current||keys.some(key=>current[key]!==expected[key]))throw Error('Prepared run changed; refresh the current input snapshots');
   }
-  const old=task.artifacts.find(a=>a.id===run.id);if(task.projectId&&task.projectId!==run.project_id&&task.deployment?.config?.projectId!==run.project_id)throw Error('Run project does not match workflow');task.artifacts=task.artifacts.filter(a=>a.id!==run.id);task.artifacts.push({kind:run.kind==='cluster-run'?'cluster-run':'run',id:run.id,name:run.name,engine:run.engine,parameters:run.parameters||{},preparedRevision:old?.preparedRevision??null});if(task.workflowVersion!==2)task.review={status:'not_run',summary:'运行状态从作业服务读取'};if(task.execution?.artifactId===run.id)task.execution={...task.execution,phase:run.status==='unknown'?'unknown':run.status==='validating'?'validating':'confirmed',status:run.status};return this.save(task);}
+  if(task.projectId&&task.projectId!==run.project_id&&task.deployment?.config?.projectId!==run.project_id)throw Error('Run project does not match workflow');
+  const matches=row=>row.id===run.id&&row.kind===kind,old=task.artifacts.find(matches);
+  task.artifacts=task.artifacts.filter(row=>!matches(row));
+  task.artifacts.push({kind,id:run.id,name:run.name,engine:run.engine,parameters:run.parameters||{},preparedRevision:old?.preparedRevision??null});
+  if(task.workflowVersion!==2)task.review={status:'not_run',summary:'运行状态从作业服务读取'};
+  const attemptKind=task.execution?.artifactKind||deployedKind;
+  const sameAttempt=attemptKind?attemptKind===kind:!task.artifacts.some(row=>row.id===run.id&&row.kind!==kind);
+  if(task.execution?.artifactId===run.id&&sameAttempt)task.execution={...task.execution,phase:run.status==='unknown'?'unknown':run.status==='validating'?'validating':'confirmed',status:run.status};
+  return this.save(task);
+ }
  failedTurn(provider,threadId,error){const turn=this.turns.get(provider+':'+threadId);if(!turn?.reviewMode)return;const task=this.read(turn.taskId);task.review={status:'needs-information',summary:'Agent 复核请求失败：'+error.message};this.save(task);}
  event(event){
   const p=event.params||{},provider=event.provider||'codex',key=provider+':'+p.threadId,id=this.active.get(key);if(!id)return;
@@ -149,8 +161,8 @@ export class TaskRecords{
      if(!isDeepStrictEqual(parameters,task.parameters)||!isDeepStrictEqual(item.steps,task.steps)){task.parameterRevision=(task.parameterRevision||0)+1;task.review={status:'not_run'};}
      task.name=item.name;task.parameters=parameters;task.steps=item.steps;task.plan=item.steps.map(v=>({step:typeof v==='string'?v:v.title,assistantStatus:'proposed'}));task.missingFields=workflowMissing(task.steps,parameters,item.missing_fields||[]);const c=this.conversation(provider,p.threadId);if(c&&c.titleSource!=='manual'){c.name=conversationTitle(task.request,{name:item.name,engine:parameters.engine});c.titleVersion=1;c.titleSource='workflow';this.catalog.put('conversation',c.id,c);this.publish({method:'studio/conversationUpdated',provider,params:{conversation:c}});}updated=presented=true;turn.presented=true;continue;
     }
-    const kind=item.kind==='cluster-run'?'cluster-run':item.kind==='cluster-setup'?'cluster-setup':item.engine?'run':'workflow',old=task.artifacts.find(a=>a.id===item.id);
-    task.artifacts=task.artifacts.filter(a=>a.id!==item.id);task.artifacts.push({kind,id:item.id,name:item.name,engine:item.engine,parameters:item.parameters||{},steps:item.steps,preparedRevision:old?old.preparedRevision:['prepare_run','prepare_cluster_run','resume_run'].includes(p.item?.tool)?task.parameterRevision:null});updated=true;
+    const kind=item.kind==='cluster-run'?'cluster-run':item.kind==='cluster-setup'?'cluster-setup':item.engine?'run':'workflow',old=task.artifacts.find(a=>a.id===item.id&&a.kind===kind);
+    task.artifacts=task.artifacts.filter(a=>a.id!==item.id||a.kind!==kind);task.artifacts.push({kind,id:item.id,name:item.name,engine:item.engine,parameters:item.parameters||{},steps:item.steps,preparedRevision:old?old.preparedRevision:['prepare_run','prepare_cluster_run','resume_run'].includes(p.item?.tool)?task.parameterRevision:null});updated=true;
    }
    if(updated){task.phase='review';this.save(task,presented||['prepare_run','prepare_cluster_run','resume_run','draft_cluster_setup'].includes(p.item?.tool));}
   }

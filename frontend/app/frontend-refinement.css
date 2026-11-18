@@ -86,7 +86,6 @@
 .settings-footer>span{min-width:120px}
 .jobs-page .jobs-overview{gap:8px}
 .jobs-page .jobs-overview button{border-radius:6px;box-shadow:none}
-.jobs-page .jobs-overview button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-bg)}
 .workspace-shell .agent-task-page .card .card,.workspace-shell .deployment-page .card .card{border:0;border-top:1px solid var(--line);border-radius:0;padding:16px 0;box-shadow:none;background:transparent}
 @media(max-width:800px){
  .workspace-shell .workspace-toolbar{gap:6px;padding:6px 8px;flex-wrap:wrap}

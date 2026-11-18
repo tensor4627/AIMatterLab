@@ -39,7 +39,7 @@ function fixture({workspaceIdentity={distribution:'Original',root:'/original'},t
     linkRun:(taskId,run,expected)=>{calls.push(['link',taskId,run,expected]);return {taskId,run};},
   };
   const catalog={list:kind=>kind==='workspace-index'?[{id:'project',root:'/inputs',workerBinding:workspaceIdentity}]:[{id:'existing'}],put:()=>{throw Error('Unexpected catalog write');}};
-  const worker={identity,request:async(method,target,data)=>{calls.push(['request',method,target,data]);return {id:data.run_id,status:'unknown'};}};
+  const worker={identity,request:async(method,target,data)=>{calls.push(['request',method,target,data]);return {id:data.run_id,status:'unknown',...target==='/api/cluster/status'?{kind:'cluster-run'}:{}};}};
   return {calls,saved,...mainRoutes({records,catalog,worker})};
 }
 
@@ -91,7 +91,7 @@ test('run linking reads the selected run kind and forwards its actual unknown st
     const f=fixture(),expected={artifactId:'original',parameterRevision:3};
     const value=await f.invoke('task.linkRun',{taskId:'flow',runId:'original',kind,expectedPrepared:expected});
     assert.equal(value.run.status,'unknown');
-    assert.deepEqual(f.calls,[['request','POST',target,{run_id:'original'}],['link','flow',{id:'original',status:'unknown'},expected]]);
+    assert.deepEqual(f.calls,[['request','POST',target,{run_id:'original'}],['link','flow',{id:'original',status:'unknown',...kind==='cluster-run'?{kind}:{}},expected]]);
     assert.equal(f.saved.length,0);
   }
   const f=fixture();await assert.rejects(f.invoke('task.linkRun',{taskId:'flow',runId:'original',kind:'invalid'}),/Invalid run reference/);assert.deepEqual(f.calls,[]);
@@ -155,10 +155,22 @@ test('actual workspace handler joins identical in-flight imports, rejects confli
   await f.invoke('workspace.import',{...request});assert.equal(f.calls.length,2);
 });
 
+test('linking a stored run requires its original service and the requested record on both sides of the read',async()=>{
+ const f=workflowFixture(),args={taskId:f.task.id,kind:'run',runId:'shared'};
+ const original=f.worker.identity;f.worker.identity={...original,root:'/elsewhere'};
+ await assert.rejects(f.invoke('task.linkRun',args),/流程来源不同/);assert.equal(f.calls.length,0);
+ f.worker.identity=original;
+ f.worker.request=async()=>({id:'other',project_id:'project'});
+ await assert.rejects(f.invoke('task.linkRun',args),/does not match/);
+ f.worker.request=async()=>{f.worker.connectionEpoch++;return {id:'shared',project_id:'project'};};
+ await assert.rejects(f.invoke('task.linkRun',args),/连接已变化/);
+ assert.equal(f.records.read(f.task.id).artifacts.length,0);
+});
+
 test('actual execute handler keeps unknown runs read-only and rejects stale input receipts before worker access',async()=>{
   const f=workflowFixture(),run={id:'original',kind:'cluster-run',project_id:'compute',engine:'pygas.build',status:'unknown',snapshots:[{name:'input.in',sha256:'a'.repeat(64),size:12}]};
   const task=f.records.read(f.task.id);task.projectId='compute';
-  task.artifacts=[{id:run.id,kind:run.kind,engine:run.engine,preparedRevision:task.parameterRevision}];
+  task.artifacts=[{id:run.id,kind:'run',name:'Local namesake',preparedRevision:0},{id:run.id,kind:run.kind,engine:run.engine,preparedRevision:task.parameterRevision}];
   task.review={status:'ready',parameterRevision:task.parameterRevision,artifactIds:[run.id]};
   task.deployment={revision:2,workerBinding:{...f.worker.identity,port:8888},config:{...deploymentConfig,target:'cluster',targetId:'cluster'},prepared:{artifactId:run.id,parameterRevision:task.parameterRevision,deploymentRevision:2}};
   task.deployment.prepared.inputIdentity=snapshotIdentity(task,run);
@@ -166,6 +178,8 @@ test('actual execute handler keeps unknown runs read-only and rejects stale inpu
   f.worker.request=async(method,target,value)=>{f.calls.push({method,target,value});assert.equal(method,'POST');assert.equal(target,'/api/cluster/status');assert.deepEqual(value,{run_id:run.id});return structuredClone(run);};
   const request={taskId:task.id,artifactId:run.id,inputReceipt:task.deployment.prepared.inputIdentity};
   assert.equal((await f.invoke('task.execute',request)).status,'unknown');
+  assert.deepEqual(f.records.read(task.id).artifacts.map(item=>item.kind),['run','cluster-run']);
+  assert.equal(f.records.read(task.id).artifacts[0].name,'Local namesake');
   assert.equal(f.records.read(task.id).execution.phase,'unknown');assert.equal(f.calls.length,1);
   run.status='ready';const before=f.records.read(task.id);
   await assert.rejects(f.invoke('task.execute',request),/never resubmit unknown/);

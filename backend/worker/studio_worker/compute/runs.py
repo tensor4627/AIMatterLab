@@ -318,23 +318,17 @@ class RunsMixin:
                 run = self.store.update(run, status="unknown")
             if run["status"] not in ("running", "unknown"):
                 return run
-            if run.get("launch_claim"):
-                # Persist before signalling. A supervisor that has not acquired
-                # its child-start gate will observe this and never start a child;
-                # an already detached supervisor also polls this durable request.
-                self.store.update(run, cancel_requested=True)
+            # Preserve intent before signalling, including for pre-claim runs.
+            self.store.update(run, cancel_requested=True)
+            try:
+                signalled = bool(Adapter(run["engine"]).cancel(run))
+            except ProcessLookupError:
                 signalled = False
-                try:
-                    signalled = bool(Adapter(run["engine"]).cancel(run))
-                except ProcessLookupError:
-                    pass  # The detached supervisor may have just completed.
-                return self.store.update(run, cancellation={"status": "requested", "signal_sent": signalled,
-                    "message": "Cancellation is recorded; process completion has not yet been confirmed."})
-            if not Adapter(run["engine"]).cancel(run):
+            if not signalled and not run.get("launch_claim"):
                 return self.store.update(run, cancellation={"status": "unconfirmed", "signal_sent": False,
                     "message": "Run state is retained for reconciliation; process identity is unknown and no signal was sent."})
-            return self.store.update(run, cancel_requested=True, cancellation={"status": "requested", "signal_sent": True,
-                "message": "Stop signal sent; waiting for the completion receipt."})
+            return self.store.update(run, cancellation={"status": "requested", "signal_sent": signalled,
+                "message": "Cancellation is recorded; process completion has not yet been confirmed."})
 
     def resolve_unknown(self, identifier):
         """Human recovery only: never infer completion from missing process files."""

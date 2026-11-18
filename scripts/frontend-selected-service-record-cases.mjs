@@ -30,6 +30,53 @@ async function selectedServiceApp(page,{unavailable=false}={}){
 const assertNoExecutionMutations=async page=>assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['worker.connect','compute.sshConnection.open','compute.resource.activate','compute.profiles.save','task.execute','task.authoring.bindWorker'].includes(c.method)||c.method==='agent.rpc'&&c.data?.method==='turn/start'||c.method==='worker.request'&&/\/(submit|cancel|resume|revise|validate|prepare)$/.test(c.data?.target||'')).length),0);
 
 export async function frontendSelectedServiceRecordCases({check,out}){
+ for(const width of [1024,1366])await check('selected-service-records-experience-workbench-'+width,async page=>{
+  await page.setViewportSize({width,height:768});await selectedServiceApp(page);
+  await page.waitForFunction(()=>document.querySelector('.job-record-open')?.disabled===false);
+  const detail=page.locator('.jobs-more-filters');assert.equal(await detail.evaluate(node=>node.open),false);
+  await page.mouse.move(0,0);await page.keyboard.press('Escape');
+  const sources=page.locator('.jobs-sources');assert.equal(await sources.evaluate(node=>node.open),false);
+  const first=await page.locator('.job-record-open').first().boundingBox(),content=await page.locator('.workspace-content').boundingBox();
+  assert(first&&content&&first.y+first.height<=content.y+content.height+1,'The first record can be opened in the initial viewport');
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+  await page.screenshot({path:path.join(out,'workbench-jobs-'+width+'.png')});await assertNoExecutionMutations(page);
+ });
+ await check('selected-service-records-experience-open-cluster-switch-with-reused-id',async page=>{
+  await selectedServiceApp(page);
+  await page.evaluate(()=>{const f=window.__test,original=f.clusterHistory;f.clusterHistory=id=>({...original(id),id:'shared-cluster-run'});});
+  await page.getByRole('button',{name:'同步记录',exact:true}).click();
+  await page.locator('[data-job-key="cluster:shared-cluster-run"] .job-record-open').click();
+  await page.getByRole('heading',{name:'Cluster history A',exact:true}).waitFor();
+  await page.evaluate(()=>{const f=window.__test;f.recordSource='B';f.events.forEach(fn=>fn({method:'studio/computeResourceChanged'}));});
+  await page.getByTestId('jobs-page').waitFor();
+  await page.locator('[data-job-key="cluster:shared-cluster-run"]').getByText('Cluster history B',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('cluster-review').count(),0);assert.equal(await page.locator('.composer textarea').inputValue(),'Keep my unsent history question');await assertNoExecutionMutations(page);
+ });
+ await check('selected-service-records-experience-uncertain-cancel-receipt',async page=>{
+  await selectedServiceApp(page);
+  await page.evaluate(()=>{const f=window.__test,original=f.clusterHistory;f.clusterHistory=id=>({...original(id),status:'unknown',cancellation:{status:'unconfirmed',signal_sent:null}});});
+  await page.locator('[data-job-key="cluster:cluster-history-A"] .job-record-open').click();
+  await page.getByTestId('cluster-cancellation-receipt').getByText('撤销命令的送达情况未知，请核对原作业。',{exact:true}).waitFor();
+  await assertNoExecutionMutations(page);
+ });
+ await check('selected-service-records-experience-recent-queue-and-command-open-readonly-history',async page=>{
+  await selectedServiceApp(page);
+  await page.evaluate(()=>{const f=window.__test,original=f.history;f.history=id=>({...original(id),status:'queued'});});
+  await page.getByRole('button',{name:'同步记录',exact:true}).click();
+  await page.locator('nav [data-testid="navigate-home"]:visible').click();
+  const recent=page.locator('.recent-runs').getByRole('button',{name:/^History A/});
+  await recent.click();
+  await page.getByTestId('run-readonly-observation').waitFor();
+  await page.locator('nav [data-testid="navigate-runs"]:visible').click();
+  await page.locator('.bottom-tabs button').filter({hasText:'运行队列'}).click();
+  await page.locator('.queue-strip button').filter({has:page.getByText('History A',{exact:true})}).click();
+  await page.getByTestId('run-readonly-observation').waitFor();
+  await page.keyboard.press('Control+k');await page.getByRole('textbox',{name:'搜索页面、引擎或任务…',exact:true}).fill('Cluster history A');
+  await page.locator('.command-list button').filter({hasText:'Cluster history A'}).click();
+  await page.getByRole('heading',{name:'Cluster history A',exact:true}).waitFor();
+  await page.getByTestId('run-readonly-observation').waitFor();await assertNoExecutionMutations(page);
+  assert.equal(await page.locator('.composer textarea').inputValue(),'Keep my unsent history question');
+ });
  await check('selected-service-records-experience-unbound-history-and-readonly-details',async page=>{
   await selectedServiceApp(page);const local=page.locator('.job-record-open').filter({has:page.getByText('History A',{exact:true})});await page.waitForFunction(()=>!document.querySelector('.job-record-open')?.disabled);await page.getByText('运行记录可查看；提交、续算等操作需匹配原服务与权限。',{exact:true}).waitFor();const version=page.getByTestId('worker-service-version');assert.equal(await version.getAttribute('data-version'),'different');assert.equal(await version.evaluate(node=>node.open),false);await page.getByTestId('worker-service-version-summary').click();assert.match(await version.innerText(),/当前连接设置.*更新作业服务/);assert.doesNotMatch(await version.innerText(),/本地 WSL/);await page.getByTestId('worker-service-version-summary').click();assert.equal(await page.getByText('作业服务未连接；请先恢复原服务，再打开运行记录。',{exact:true}).isVisible().catch(()=>false),false);
   const before=await page.evaluate(()=>({restores:window.__test.calls.filter(c=>c.method==='worker.restore').length,reads:window.__test.calls.filter(c=>c.method==='worker.request'&&c.data.target==='/api/runs').length}));await page.getByRole('button',{name:'同步记录',exact:true}).click();await page.waitForFunction(count=>window.__test.calls.filter(c=>c.method==='worker.request'&&c.data.target==='/api/runs').length>count,before.reads);await page.waitForFunction(()=>!document.querySelector('.job-record-open')?.disabled);assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='worker.restore').length),before.restores);

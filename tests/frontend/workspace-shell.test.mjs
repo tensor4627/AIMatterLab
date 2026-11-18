@@ -51,6 +51,10 @@ test('run return requires exact kind/id plus owning task/provider/thread and rej
  const task={id:'t',provider:'codex',threadId:'thread',artifacts:[{id:'same',kind:'cluster-run'}]};
  assert.equal(boundJobConversation(jobs.find(job=>job.key==='cluster:same'),[task],[conversation]),conversation);
  assert.equal(boundJobConversation(jobs.find(job=>job.key==='local:same'),[task],[conversation]),null);
+ const remote=jobs.find(job=>job.key==='cluster:same'),bound={...task,workerSourceId:'service-a'};
+ assert.equal(boundJobConversation(remote,[bound],[conversation],'service-a'),conversation);
+ for(const source of [undefined,'service-b'])assert.equal(boundJobConversation(remote,[bound],[conversation],source),null);
+ assert.equal(boundJobConversation(remote,[task],[conversation],'service-a'),null);
  for(const changed of [{...conversation,taskId:'other'},{...conversation,provider:'kimi'},{...conversation,threadId:'other'}])assert.equal(boundJobConversation(jobs[1],[task],[changed]),null);
  assert.equal(boundJobConversation(jobs[1],[task],[conversation,{...conversation,id:'duplicate'}]),null);
  assert.equal(boundJobConversation(jobs[1],[{...task,artifacts:[],deployment:{prepared:{artifactId:'same'}}}],[conversation]),null);

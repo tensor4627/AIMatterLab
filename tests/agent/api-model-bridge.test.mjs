@@ -2,6 +2,19 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
 import {ApiModelBridge} from '../../agent/providers/api-model-bridge.mjs';import {ModelProfileStore} from '../../agent/providers/model-profile-store.mjs';import {dshRuntime} from '../../desktop/platform/dsh-runtime.mjs';import {apiModelKey} from '../../contracts/agent/model-profiles.mjs';
 import {providerAccountState} from '../../frontend/features/conversations/provider-account.mjs';
 
+test('reading interrupted API history resolves orphaned tool indicators without dispatching a turn',async t=>{
+ const {bridge,catalog,calls}=await fixture(t);
+ await bridge.start();const before=calls.length;
+ const {thread}=await bridge.request('thread/start',{model:apiModelKey('fixture-a','model-a')});
+ const row=catalog.get('api-dsh-history',thread.id);
+ row.turns=[{id:'original',status:'inProgress',items:[{id:'tool',type:'mcpToolCall',status:'inProgress'}]}];
+ catalog.put('api-dsh-history',thread.id,row);bridge.sessions.clear();
+ const restored=(await bridge.request('thread/read',{threadId:thread.id})).thread.turns[0];
+ assert.equal(restored.status,'failed');assert.equal(restored.items[0].status,'failed');
+ assert.match(restored.items[0].result.content[0].text,/Unconfirmed/);
+ assert.equal(catalog.get('api-dsh-history',thread.id).turns[0].items[0].status,'failed');assert.equal(calls.length,before);
+});
+
 test('keyless loopback API completes a real DSH turn without storing a fabricated credential',{timeout:60000},async t=>{
  const f=await fixture(t,{provider:'compatible',apiKey:'',models:[{id:'model-a',reasoningEfforts:false}]}),profiles=f.store.list('compatible');
  assert.equal(profiles[0].credentialStored,false);assert.equal(profiles[0].requiresApiKey,false);

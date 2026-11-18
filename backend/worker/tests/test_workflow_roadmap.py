@@ -47,11 +47,23 @@ class WorkflowRoadmap(unittest.TestCase):
                        lambda p: p["steps"][2]["inputs"][0].update(resource="report"),
                        lambda p: p["steps"][0]["outputs"][0].update(resource="frames"),
                        lambda p: p["resources"][0].update(field="__proto__.x"),
-                       lambda p: p["steps"][0].update(status="passed")):
+                       lambda p: p["steps"][0].update(status="passed"),
+                       lambda p: p["resources"][0].update(short_label="x" * 17),
+                       lambda p: p["steps"][0].update(runtime_labels={"top": {"short_label": "NEP"}})):
             changed = copy.deepcopy(self.plan)
             mutate(changed)
             self.assertTrue(self.present(name="Invalid replacement", roadmap=changed)["isError"])
             self.assertEqual(self.read(), before)
+
+    def test_existing_graph_without_aliases_can_be_named_and_reopened(self):
+        legacy = copy.deepcopy(self.plan)
+        for item in legacy["resources"] + legacy["steps"]:
+            item.pop("short_label", None)
+            item.pop("runtime_labels", None)
+        self.assertFalse(self.present(roadmap=legacy)["isError"])
+        self.assertEqual(self.read()["roadmap"], legacy)
+        self.assertFalse(self.present(roadmap=self.plan)["isError"])
+        self.assertEqual(self.read()["roadmap"], self.plan)
 
     def test_partial_goal_and_old_payload(self):
         self.assertFalse(self.present()["isError"])

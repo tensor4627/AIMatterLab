@@ -99,14 +99,14 @@ export function ClusterRunPage({id,readOnly=false,onError,onAgent,onOpenConnecti
  const [activeId,setActiveId]=useState(id),[run,setRun]=useState<ClusterRun|null>(null),[busy,setBusy]=useState(false),[log,setLog]=useState(''),[revised,setRevised]=useState(''),[edit,setEdit]=useState(false);
  const [connectionAction,setConnectionAction]=useState('');
  function runConnectionError(error:unknown){const text=String(error);if(text.includes('needs_human_auth')||text.includes('needs_worker_update')){setConnectionAction(text.includes('needs_worker_update')?'update':'auth');return;}onError(error);}
- const loadingRef=useRef(false),revisedRef=useRef(''),activeRef=useRef(id);activeRef.current=activeId;
+ const loadingRef=useRef<string|null>(null),revisedRef=useRef(''),activeRef=useRef(id);activeRef.current=activeId;
  function putRevised(next:string){revisedRef.current=next;setRevised(next);}
  async function load(){
-  if(loadingRef.current)return;loadingRef.current=true;
   const wanted=activeId;
-  try{const r=await api<ClusterConnectionObservation>('POST','/api/cluster/status',{run_id:wanted});if(wanted!==activeRef.current)return;setRun(r);if(r.connection_action?.kind==='authenticate_original_run'&&r.connection_action.code==='needs_human_auth'&&r.connection_action.runId===wanted)setConnectionAction('auth');else if(Object.hasOwn(r,'connection_action')&&r.connection_action===null)setConnectionAction('');if(!revisedRef.current)putRevised(JSON.stringify({name:r.name,engine:r.engine,project_id:r.project_id,cluster_id:r.cluster_id,max_seconds:r.max_seconds,resources:r.resources,parameters:r.parameters||{},inputs:Object.fromEntries(r.snapshots.map(s=>[s.name,r.directory+'/simulation/'+s.name]))},null,2));if(r.job_id){const data=await api('POST','/api/cluster/log',{run_id:wanted});if(wanted!==activeRef.current)return;setLog(data.text);}}catch(e){if(wanted===activeRef.current)runConnectionError(e);}finally{loadingRef.current=false;}
+  if(loadingRef.current===wanted)return;loadingRef.current=wanted;
+  try{const r=await api<ClusterConnectionObservation>('POST','/api/cluster/status',{run_id:wanted});if(wanted!==activeRef.current)return;if(r.id!==wanted)throw Error(t('作业服务返回的记录与所选作业不一致。'));setRun(r);if(r.connection_action?.kind==='authenticate_original_run'&&r.connection_action.code==='needs_human_auth'&&r.connection_action.runId===wanted)setConnectionAction('auth');else if(Object.hasOwn(r,'connection_action')&&r.connection_action===null)setConnectionAction('');if(!revisedRef.current)putRevised(JSON.stringify({name:r.name,engine:r.engine,project_id:r.project_id,cluster_id:r.cluster_id,max_seconds:r.max_seconds,resources:r.resources,parameters:r.parameters||{},inputs:Object.fromEntries(r.snapshots.map(s=>[s.name,r.directory+'/simulation/'+s.name]))},null,2));if(r.job_id){const data=await api('POST','/api/cluster/log',{run_id:wanted});if(wanted!==activeRef.current)return;setLog(data.text);}}catch(e){if(wanted===activeRef.current)runConnectionError(e);}finally{if(loadingRef.current===wanted)loadingRef.current=null;}
  }
- useEffect(()=>{setRun(null);putRevised('');setLog('');void load();const timer=setInterval(()=>void load(),10000);return()=>clearInterval(timer);},[activeId]);
+ useEffect(()=>{activeRef.current=activeId;setRun(null);putRevised('');setLog('');void load();const timer=setInterval(()=>void load(),10000);return()=>{clearInterval(timer);activeRef.current='';};},[activeId]);
  async function submit(){
   if(readOnlyRef.current||!beginBusy(t('正在核对输入并提交…')))return;setConnectionAction('');
   try{const identifier=activeId;
@@ -116,6 +116,9 @@ export function ClusterRunPage({id,readOnly=false,onError,onAgent,onOpenConnecti
  if(!run)return <div className="page"><LoadingFeedback busy={!connectionAction} label={t('读取任务中…')}/>{connectionAction?<section className="notice" role="status"><p>{t('需要核对原作业连接；作业状态仍未确认，不会重新提交。')}</p>{onOpenConnections&&<button className="button" onClick={()=>onOpenConnections({runId:activeId})}>{t('核对原作业连接')}</button>}</section>:null}</div>;
  return <div className="page cluster-review" data-testid="cluster-review"><div className="page-heading"><div><span className="eyebrow">{run.cluster.scheduler} · {run.engine}</span><h1>{run.name}</h1><p>{t('审阅运行参数与完整提交脚本；计算节点验证失败时不会启动科学引擎。')}</p></div><span className="tag">{run.status}</span></div>
  {connectionAction&&<section className="notice" role="status"><p>{t(connectionAction==='update'?'此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。':'需要人工认证；请打开私有认证界面，现有作业不会重提。')}</p>{onOpenConnections&&<button className="button" onClick={()=>onOpenConnections({runId:activeId})}>{t('核对原作业连接')}</button>}</section>}
+ {run.cancellation&&['running','queued','unknown'].includes(run.status)&&<p className="notice" role="status" data-testid="cluster-cancellation-receipt">
+  {t(run.cancellation.signal_sent===true?'撤销命令已送达，正在等待作业的最终状态。':run.cancellation.status==='requested'?'已记录撤销请求，正在核对原作业。':run.cancellation.signal_sent===false?'原作业身份尚未核实，本次撤销命令未发出。':'撤销命令的送达情况未知，请核对原作业。')}
+ </p>}
  {readOnly&&<p className="notice" role="status" data-testid="run-readonly-observation">{t('运行记录可查看；提交、续算等操作需匹配原服务与权限。')}</p>}
  <LoadingFeedback busy={busy} label={busyLabel}/>
  <ol className="run-flow">{['输入快照','审阅与资源检查','SSH 上传与提交','执行节点科学验证','计算与结果监控'].map(v=><li key={v}>{t(v)}</li>)}</ol>

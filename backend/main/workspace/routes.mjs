@@ -7,7 +7,8 @@ import {executeTask} from "./task-execution.mjs";
 import {readTaskInput} from "./task-input-preview.mjs";
 import {readTaskPygas,saveTaskPygas,initializeTaskPygas} from "./task-pygas.mjs";
 import {restoreTaskWorker} from "../compute/worker-restore.mjs";
-import {taskWorkerSource} from "../../../contracts/compute/task-worker-binding.mjs";
+import {assertTaskWorker,taskWorkerSource} from "../../../contracts/compute/task-worker-binding.mjs";
+import {taskForRecordIndex} from "../compute/worker-service-version.mjs";
 
 
 /** Register application operations through the host's existing trusted IPC port. */
@@ -59,7 +60,7 @@ export function registerWorkspaceTaskRoutes({
   },value));
   handle('task.deployment.createProject',value=>{assertIdle();return createDeploymentProject(records,worker,value);});
   handle('task.deployment.prepare',value=>prepareDeployment(records,worker,value,getLocalReview()));
-  handle('task.list',()=>catalog.list('agent-task'));
+  handle('task.list',()=>catalog.list('agent-task').map(taskForRecordIndex));
   handle('task.read',({id})=>records.read(id));
   handle('task.input.read',value=>readTaskInput(records,worker,value));
   handle('task.pygas.read',value=>readTaskPygas(records,worker,value));
@@ -70,7 +71,12 @@ export function registerWorkspaceTaskRoutes({
   handle('task.execute',value=>executeTask(records,worker,value,getLocalReview()));
   handle('task.linkRun',async({taskId,runId,kind,expectedPrepared})=>{
     if(!['run','cluster-run'].includes(kind)||typeof runId!=='string')throw Error('Invalid run reference');
+    const connection=worker.connection,epoch=worker.connectionEpoch;
+    assertTaskWorker(records.read(taskId),worker);
     const run=await worker.request('POST',kind==='run'?'/api/run/status':'/api/cluster/status',{run_id:runId});
+    if(connection!==worker.connection||epoch!==worker.connectionEpoch)throw Error('作业服务连接已变化，请核对原作业状态。');
+    assertTaskWorker(records.read(taskId),worker);
+    if(run?.id!==runId||(run.kind==='cluster-run'?'cluster-run':'run')!==kind)throw Error('Returned run does not match the selected record');
     return records.linkRun(taskId,run,expectedPrepared);
   });
 }

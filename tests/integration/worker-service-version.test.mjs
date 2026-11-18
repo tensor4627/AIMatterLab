@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';
-import {bindBundledWorkerRuntimeId,bundledWorkerRuntimeId,workerServiceVersionEvidence,workerObservationEvidence} from "../../backend/main/compute/worker-service-version.mjs";
+import {bindBundledWorkerRuntimeId,bundledWorkerRuntimeId,taskForRecordIndex,workerServiceVersionEvidence,workerObservationEvidence} from "../../backend/main/compute/worker-service-version.mjs";
 import {readWorkerStatus} from "../../backend/main/compute/worker-status.mjs";
 const digest='a'.repeat(20),other='b'.repeat(20),root='/fixture/worker';
 test('verified draft source is opaque, stable across runtime updates and isolated across ports and roots',()=>{
@@ -10,6 +10,16 @@ test('verified draft source is opaque, stable across runtime updates and isolate
  worker.connection.health.root='/other';assert.notEqual(workerObservationEvidence(worker).sourceId,source);
 });
 function verifiedWorker(runtime=root+'/runtimes/'+digest){const health={name:'gpu-sampling-studio',root,runtime,execution_policy:'desktop-review-v1'};return{bundledRuntimeId:digest,connection:{health},identity:{distribution:'Fixture',root},connectionEpoch:1,request:async(method,target)=>{assert.equal(method,'GET');assert.equal(target,'/api/health');return {...health};}};}
+test('record indexes use the verified WSL or SSH binding without writing into a saved workflow',()=>{
+ const wsl=verifiedWorker();wsl.connectionTarget={port:8767};
+ const binding={kind:'ssh',version:2,profileId:'fixture',profileVersion:2,hostIdentity:{hostname:'fixture',uid:1,machineId:'fixture'},root,runtime:root+'/runtimes/'+digest,runtimeId:digest};
+ const ssh={identity:binding,connection:{health:{...binding,ssh_service:true}},connectionTarget:{kind:'ssh',version:2}};
+ for(const [worker,saved] of [[wsl,{...wsl.identity,port:8767}],[ssh,binding]]){
+  const task={id:'flow',deployment:{workerBinding:saved}},source=workerObservationEvidence(worker).sourceId;
+  assert.match(source,/^[a-f0-9]{64}$/);assert.equal(taskForRecordIndex(task).workerSourceId,source);assert(!Object.hasOwn(task,'workerSourceId'));
+ }
+ assert.equal(taskForRecordIndex({workspace:{workerBinding:wsl.identity}}).workerSourceId,null);
+});
 test('bundled fingerprint matches the installer fixed input specification and excludes tests, caches and other JSON',()=>{
  const folder=fs.mkdtempSync(path.join(os.tmpdir(),'studio-source-id-'));try{
   const files={'bootstrap.py':'bootstrap','pyproject.toml':'metadata','studio_worker/server.py':'server','studio_worker/engine_contracts.json':'contract','studio_worker/pygas-editor-hints.json':'hints','tests/not-shipped.py':'ignored-test','studio_worker/__pycache__/ignored.py':'ignored-cache','studio_worker/other.json':'ignored-json','README.md':'ignored-doc'};

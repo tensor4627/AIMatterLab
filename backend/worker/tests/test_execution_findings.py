@@ -125,10 +125,41 @@ class ExecutionFindings(unittest.TestCase):
         bundle=self.service.export(run['id'])
         with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle['base64']))) as archive:
             manifest=json.loads(archive.read('reproduction.json'))
+            self.assertEqual(manifest['run'],run['id'])
+            self.assertEqual(manifest['execution']['command'],run['command'])
+            self.assertEqual(manifest['execution']['snapshots'],run['snapshots'])
+            self.assertEqual(manifest['execution']['environment']['id'],run['environment_id'])
+            self.assertNotIn('launch_claim',manifest['execution'])
+            self.assertIn('exit.json',{item['path'] for item in manifest['omitted_outputs']})
             self.assertEqual(archive.read('console.log'),b'actual console\n')
             self.assertEqual(archive.read('results/output.json'),b'{"actual":true}')
             for item in manifest['included_files']:
                 self.assertEqual(util.hashlib.sha256(archive.read(item['path'])).hexdigest(),item['sha256'])
+
+    def test_export_identifies_missing_inputs_and_still_refuses_modified_immutable_inputs(self):
+        run=self.prepare();snapshot=run['snapshots'][0]
+        path=Path(run['directory'])/'simulation'/snapshot['name']
+        path.unlink()
+        bundle=self.service.export(run['id'])
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle['base64']))) as archive:
+            manifest=json.loads(archive.read('reproduction.json'))
+            self.assertEqual(manifest['included_inputs'],[])
+            self.assertEqual(manifest['omitted_inputs'][0]['sha256'],snapshot['sha256'])
+            self.assertEqual(manifest['omitted_inputs'][0]['hash_status'],'not_run')
+        path.write_text('changed fixture')
+        with self.assertRaisesRegex(ValueError,'Immutable input snapshot changed'):
+            self.service.export(run['id'])
+
+    def test_export_verifies_legacy_snapshot_without_a_recorded_size(self):
+        run=self.prepare()
+        run['snapshots'][0].pop('size')
+        self.service.store.update(run,snapshots=run['snapshots'])
+        bundle=self.service.export(run['id'])
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle['base64']))) as archive:
+            manifest=json.loads(archive.read('reproduction.json'))
+            included=next(item for item in manifest['included_files'] if item['kind']=='input')
+            self.assertEqual(included['sha256'],run['snapshots'][0]['sha256'])
+            self.assertEqual(included['size'],len(archive.read(included['path'])))
 
 
 if __name__=='__main__':unittest.main()

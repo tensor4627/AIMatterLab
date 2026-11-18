@@ -344,7 +344,7 @@ class ClusterConcurrentState(unittest.TestCase):
         self.assertEqual(second['status'], 'succeeded')
         self.assertEqual(second['exit'], first['exit'])
 
-    def test_poll_uses_cancellation_requested_after_query_started(self):
+    def test_generic_exit_keeps_concurrent_cancel_intent_separate_from_outcome(self):
         identifier = self.submitted()
         entered, release = threading.Event(), threading.Event()
 
@@ -362,8 +362,32 @@ class ClusterConcurrentState(unittest.TestCase):
             finally:
                 release.set()
             run = future.result()
-        self.assertEqual(run['status'], 'cancelled')
+        self.assertEqual(run['status'], 'failed')
         self.assertTrue(run['cancel_requested'])
+
+    def test_concurrent_cancel_dispatches_one_command_and_retains_the_original_request(self):
+        identifier = self.submitted()
+        entered, release = threading.Event(), threading.Event()
+        def waiting(script, data):
+            if script == 'bkill 123':
+                entered.set()
+                self.assertTrue(release.wait(5))
+                return ''
+            return reply(job_id='123',scheduler_state='RUN',identity_verified=True)
+        self.callback = waiting
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            first = pool.submit(self.cluster.cancel,identifier)
+            try:
+                self.assertTrue(entered.wait(5))
+                pending = self.cluster.cancel(identifier)
+                self.assertTrue(pending['cancel_requested'])
+                self.assertIsNone(pending['cancellation']['signal_sent'])
+            finally:
+                release.set()
+            result = first.result()
+        self.assertEqual([script for script,_ in self.calls].count('bkill 123'),1)
+        self.assertEqual(result['cancellation']['requested_at'],pending['cancellation']['requested_at'])
+        self.assertIs(result['cancellation']['signal_sent'],True)
 
     def late_submission_reply(self, failure):
         identifier = self.ready()

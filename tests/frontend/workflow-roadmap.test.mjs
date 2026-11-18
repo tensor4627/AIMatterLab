@@ -36,5 +36,30 @@ test('resource edges keep individual port coordinates and legacy projections sta
  assert(graph.nodes.find(node=>node.key==='output:report').notes.some(note=>note.includes('初始结构')));
  assert.equal(legacyRoadmap({}),null);
  const legacy=legacyRoadmap({engine:'gpumd.md',files:['folder/model.xyz']});
- assert.deepEqual(legacy.outputs,[]);assert.equal(legacy.resources[0].label,'model.xyz');
+ assert.deepEqual(legacy.outputs,[]);assert.equal(legacy.resources[0].label,'folder/model.xyz');
+ assert.deepEqual(layoutRoadmap(legacy,{},'legacy').nodes[0].caption.lines,['model.xyz']);
+});
+
+test('short labels stay separate from full names and each intermediate is named once at its producer',()=>{
+ const graph=layoutRoadmap(fixture,{});
+ assert.equal(graph.nodes.find(n=>n.key==='output:thermo').label,'温度与总能量的热力学时间序列');
+ assert.deepEqual(graph.nodes.find(n=>n.key==='output:thermo').caption.lines,['热力学']);
+ assert.deepEqual(graph.nodes.find(n=>n.key==='step:md').runtime.top.caption.lines,['NEP']);
+ assert.equal(graph.nodes.find(n=>n.key==='step:md').runtime.top.id,'potential');
+ assert.deepEqual(new Set(graph.handoffs.map(h=>h.resource)),new Set(['msd','rdf']));
+ const branched=structuredClone(fixture);
+ branched.steps.find(s=>s.id==='rdf').inputs.push({port:'extra',resource:'msd'});
+ assert.equal(layoutRoadmap(branched,{}).handoffs.filter(h=>h.resource==='msd').length,1);
+});
+
+test('older paths, repeated names, long explicit aliases and a missing goal source remain distinguishable',()=>{
+ const plan=legacyRoadmap({engine:'gpumd.md',files:['left/model.xyz','right/model.xyz']});
+ const graph=layoutRoadmap(plan,{},'legacy'),files=graph.nodes.filter(n=>n.kind==='input');
+ assert.deepEqual(files.map(n=>n.caption.lines.join(' ')),['model.xyz · 1','model.xyz · 2']);
+ assert.deepEqual(files.map(n=>n.label),['left/model.xyz','right/model.xyz']);
+ const partial={schema_version:1,resources:[{id:'orphan',label:'待补齐的结果',short_label:'WWWWWWWWWWWWWWWW',basis:'user'}],
+  inputs:[],steps:[],outputs:['orphan']};
+ const pending=layoutRoadmap(partial,{});
+ assert.equal(pending.nodes.find(n=>n.kind==='output').caption.lines.join(''),'WWWWWWWWWWWWWWWW');
+ assert.deepEqual(pending.edges.map(e=>[e.from,e.to]),[['missing:orphan','output:orphan']]);
 });
