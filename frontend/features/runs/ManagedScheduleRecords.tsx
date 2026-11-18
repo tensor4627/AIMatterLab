@@ -39,9 +39,13 @@ export default function ManagedScheduleRecords({sources,resources,projectId,noti
     manual.current.set(key,requestId);
     setChecking(old=>new Set(old).add(key));
     try{
-      const result=await invoke<{sourceId:string;scheduleId:string;requestId:string;run?:{status?:string}}>('compute.managed.observeOnce',{sourceId,scheduleId,requestId});
-      if(result?.sourceId!==sourceId||result.scheduleId!==scheduleId||result.requestId!==requestId)throw Error(t('原服务记录待核对'));
-      manual.current.delete(key);setManualStatus(old=>({...old,[key]:t('最近状态')+' · '+t(statuses[result.run?.status||'unknown']||result.run?.status||'待核对')}));
+      const result=await invoke<{sourceId:string;scheduleId:string;requestId:string;status:string;run:{status:string}}>('compute.managed.observeOnce',{sourceId,scheduleId,requestId});
+      if(result?.sourceId!==sourceId||result.scheduleId!==scheduleId||result.requestId!==requestId||
+          !['observed','in_progress','unknown'].includes(result.status)||!result.run?.status)throw Error(t('原服务记录待核对'));
+      if(result.status!=='in_progress')manual.current.delete(key);
+      const feedback=result.status==='observed'?t('最近状态')+' · '+t(statuses[result.run.status]||result.run.status):
+        t(result.status==='in_progress'?'原作业正在核对，可稍后查看本次回执。':'本次核对未取得原作业的新回执。');
+      setManualStatus(old=>({...old,[key]:feedback}));
     }catch(e){setManualStatus(old=>({...old,[key]:e instanceof Error?e.message:String(e)}));}
     finally{setChecking(old=>{const next=new Set(old);next.delete(key);return next;});}
   }
@@ -63,7 +67,8 @@ export default function ManagedScheduleRecords({sources,resources,projectId,noti
       const detail=details[key],script=detail?.script||plan.script;
       const child=source.runs.find(run=>run.id===plan.active?.childId);
       const finished=stopStates.has(plan.status);
-      const state=plan.stopRequestedAt&&!finished?t(source.connected?'正在停止':'停止待远端确认'):t(statuses[plan.status]||plan.status);
+      const state=plan.stopNeedsConfirmation?t('旧版停止请求待确认，请在此核对并终止计划。'):
+        plan.stopRequestedAt!=null&&!finished?t(source.connected?'正在停止':'停止待远端确认'):t(statuses[plan.status]||plan.status);
       return <article key={key} className="job-record" ref={current?focusedRow:undefined} tabIndex={current?-1:undefined} data-testid="managed-schedule-record"><div className="job-record-meta">
         <strong>{plan.name||t(kinds[plan.kind]||plan.kind)}</strong><span>{state}</span>
         {!finished&&<button className="button danger" disabled={pending.has(key)||!!plan.stopRequestedAt} onClick={()=>void stop(source.id,plan)}>{t('终止计划')}</button>}

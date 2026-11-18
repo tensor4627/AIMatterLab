@@ -20,7 +20,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from studio_worker.compute.managed_child import child_batch
-from studio_worker.compute.managed_schedules import DELEGATION, ROUND, ManagedSchedules
+from studio_worker.compute.managed_schedule_policy import fingerprint
+from studio_worker.compute.managed_schedules import DELEGATION, MANUAL_OBSERVATION, ROUND, ManagedSchedules
 from studio_worker.compute.service import Service
 from studio_worker.transport.routes import dispatch
 
@@ -118,6 +119,10 @@ class ManagedScheduleTest(unittest.TestCase):
 
     def status(self, plan):
         return self.schedules.status(self.request(plan))
+
+    def observe(self, plan, request_id):
+        return dispatch(self.service, 'POST', '/api/managed-schedules/observe-once',
+                        {**self.request(plan), 'requestId': request_id}, True)
 
     def pump(self, **fields):
         return self.schedules.pump({'sourceId': 'source-a', **fields})
@@ -276,6 +281,112 @@ class ManagedScheduleTest(unittest.TestCase):
         self.assertFalse(self.pump()['deliveries'])
         self.assertEqual(self.status(plan)['status'], 'exhausted')
         self.assertEqual(len(self.status(plan)['history']), 1)
+
+    def test_manual_observation_replays_its_own_run_after_a_later_check_and_worker_restart(self):
+        plan = self.upsert(intervalSeconds=2, maxRuns=1)
+        with patch('studio_worker.compute.cluster.time', SimpleNamespace(time=lambda: self.time)):
+            self.time = 1002
+            self.pump()
+            self.calls.clear()
+            self.time = 1003
+            first = self.observe(plan, 'first-check')
+            self.assertEqual((first['status'], first['run']['status'], first['run']['observedAt']),
+                             ('observed', 'running', 1003))
+            self.terminal.add(self.parent['id'])
+            self.time = 1004
+            latest = self.observe(plan, 'later-check')
+            self.assertEqual((latest['status'], latest['run']['status'], latest['run']['observedAt']),
+                             ('observed', 'succeeded', 1004))
+        self.assertEqual([timeout for _, _, timeout in self.calls], [30, 30])
+        stored = {row['requestId']: row for row in self.service.store.list(MANUAL_OBSERVATION)}
+        self.assertEqual((stored['first-check']['run'], stored['first-check']['finishedAt']), (first['run'], 1003))
+        self.assertNotIn('nonce', stored['first-check']['run'])
+
+        self.close()
+        self.open()
+        self.time = 1005
+        replay = self.observe(plan, 'first-check')
+        self.assertEqual((replay['status'], replay['run']), (first['status'], first['run']))
+        self.assertEqual((replay['snapshot']['observedAt'], replay['snapshot']['runs']), (1005, [latest['run']]))
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual((self.status(plan)['count'], self.status(plan)['delegationCount']), (1, 1))
+
+    def test_legacy_completed_and_abandoned_manual_receipts_stay_unconfirmed(self):
+        plan = self.upsert(intervalSeconds=2, maxRuns=1)
+        self.time = 1002
+        self.pump()
+        self.calls.clear()
+        for receipt_status in ('observed', 'started'):
+            request_id = 'legacy-' + receipt_status
+            self.service.store.put(MANUAL_OBSERVATION, {**self.request(plan), 'requestId': request_id,
+                'id': fingerprint(['source-a', plan['id'], request_id]), 'runId': self.parent['id'],
+                'startedAt': 1003, 'status': receipt_status})
+            response = self.observe(plan, request_id)
+            self.assertEqual((response['status'], response['run']['status'], response['run']['observedAt']),
+                             ('unknown', 'unknown', None))
+            self.assertEqual((response['run']['id'], response['run']['projectId']),
+                             (self.parent['id'], self.project['id']))
+            current = response['snapshot']['runs'][0]
+            self.assertEqual(current['status'], 'running')
+            self.assertIsNotNone(current['observedAt'])
+        self.assertFalse(self.calls)
+
+    def unverified_active_transport(self, _profile):
+        def wire(script, data=None, timeout=40):
+            receipt = json.loads(self.wire(script, data, timeout).removeprefix('__STUDIO_JSON__'))
+            return '__STUDIO_JSON__' + json.dumps({**receipt, 'identity_verified': False})
+        return SimpleNamespace(run=wire)
+
+    def test_unconfirmed_manual_poll_preserves_its_result_and_reports_in_flight(self):
+        plan = self.upsert(intervalSeconds=2, maxRuns=1)
+        with patch('studio_worker.compute.cluster.time', SimpleNamespace(time=lambda: self.time)):
+            self.time = 1002
+            self.pump()
+            self.calls.clear()
+            self.time = 1003
+            def during_request(_payload):
+                for request_id in ('pending', 'another-click'):
+                    self.assertEqual(self.observe(plan, request_id)['status'], 'in_progress')
+                self.assertEqual([row['status'] for row in self.service.store.list(MANUAL_OBSERVATION)], ['started'])
+
+            self.before_poll = during_request
+            with patch.object(self.clusters, 'transport', self.unverified_active_transport):
+                unconfirmed = self.observe(plan, 'pending')
+            self.assertEqual((unconfirmed['status'], unconfirmed['run']['observedAt']), ('unknown', 1002))
+            self.assertIsNone(unconfirmed['run']['schedulerState'])
+            self.before_poll = None
+            self.time = 1004
+            later = self.observe(plan, 'another-click')
+            self.assertEqual((later['status'], later['run']['observedAt']), ('observed', 1004))
+            replay = self.observe(plan, 'pending')
+        self.assertEqual((replay['status'], replay['run']), ('unknown', unconfirmed['run']))
+        self.assertEqual(replay['snapshot']['runs'], [later['run']])
+        self.assertEqual([timeout for _, _, timeout in self.calls], [30, 30])
+
+    def test_saved_verified_active_run_without_a_new_poll_is_not_an_observation(self):
+        plan = self.upsert(intervalSeconds=2, maxRuns=1)
+        self.time = 1002
+        self.pump()
+        existing = self.clusters.run(self.parent['id'])
+        self.assertTrue(existing['identity_verified'])
+        with patch.object(self.clusters, 'poll', return_value=existing):
+            result = self.observe(plan, 'unchanged')
+        self.assertEqual(result['status'], 'unknown')
+
+    def test_finite_status_round_with_stale_time_and_unverified_active_state_is_unconfirmed(self):
+        plan = self.upsert('action', action={'type': 'status'}, intervalSeconds=2, maxRuns=2)
+        with patch('studio_worker.compute.cluster.time', SimpleNamespace(time=lambda: self.time)):
+            self.time = 1002
+            self.pump()
+            self.assertEqual(self.status(plan)['lastResult']['observedAt'], 1002)
+            self.time = 1004
+            with patch.object(self.clusters, 'transport', self.unverified_active_transport):
+                self.pump()
+        detail = self.status(plan)
+        self.assertEqual((detail['count'], detail['delegationCount']), (2, 2))
+        last = detail['lastResult']
+        self.assertEqual((last['status'], last['observedAt']), ('unknown', None))
+        self.assertEqual((last['run']['status'], last['run']['observedAt']), ('running', 1002))
 
     def test_last_counted_poll_uses_verified_terminal_state_before_exhausted(self):
         self.terminal.add(self.parent['id'])

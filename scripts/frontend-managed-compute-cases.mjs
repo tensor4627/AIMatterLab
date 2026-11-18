@@ -81,7 +81,7 @@ async function managedApp(page, {manyBadges = false, monitorNotices = false} = {
         const source = f.managed.sources.find(value => value.id === data.sourceId);
         const item = source?.schedules.find(value => value.id === data.scheduleId);
         if (!item || source.connected) throw Error('Unexpected stop target in native managed fixture');
-        Object.assign(item,{status:'stopping',stopRequestedAt:now,nextAt:null});
+        Object.assign(item,{status:'stopping',stopRequestedAt:now,nextAt:null,stopNeedsConfirmation:false});
         f.emitManaged();
         return structuredClone(item);
       }
@@ -110,6 +110,10 @@ async function managedApp(page, {manyBadges = false, monitorNotices = false} = {
         const run = source?.runs.find(value => value.id === plan?.scope.runId && value.projectId === plan.scope.projectId);
         const notice = f.managed.notices?.find(value => value.sourceId === data.sourceId && value.scheduleId === data.scheduleId);
         if (!source?.connected || plan?.status !== 'exhausted' || !run || !notice) throw Error('Missing original fixture monitor');
+        const observedStatus = f.observationReplies?.shift();
+        if (observedStatus && observedStatus !== 'observed') {
+          return {sourceId:source.id,scheduleId:plan.id,requestId:data.requestId,status:observedStatus,run:structuredClone(run)};
+        }
         Object.assign(run,{status:'running',observedAt:now + 60});
         Object.assign(notice,{status:run.status,observedAt:run.observedAt});
         f.emitManaged();
@@ -297,5 +301,33 @@ export async function frontendManagedComputeCases({check, out}) {
     ]);
     assert.deepEqual(evidence.plan,{status:'exhausted',count:48,maxRuns:48,nextAt:null,revision:2});
     await capture(page,'managed-exhausted-monitor-after-manual-check');
+  });
+
+  await check('managed-schedule-incomplete-receipts-and-legacy-stop', async page => {
+    await managedApp(page,{monitorNotices:true});
+    await page.evaluate(() => {
+      const f = window.__test;
+      f.observationReplies = ['in_progress','unknown','observed'];
+      f.managed.sources[0].schedules[0].stopNeedsConfirmation = true;
+      f.emitManaged();
+    });
+    await page.locator('nav [data-testid="navigate-runs"]:visible').click();
+    const records = page.getByTestId('managed-schedule-record');
+    const legacy = records.filter({hasText:'离线巡检计划'});
+    await legacy.getByText('旧版停止请求待确认，请在此核对并终止计划。',{exact:true}).waitFor();
+    await legacy.getByRole('button',{name:'终止计划',exact:true}).click();
+    await legacy.getByText('停止待远端确认',{exact:true}).waitFor();
+    const original = records.filter({hasText:'其他服务巡检计划'});
+    const manual = original.getByRole('button',{name:'手动核对一次',exact:true});
+    for (const feedback of ['原作业正在核对，可稍后查看本次回执。','本次核对未取得原作业的新回执。','最近状态 · 运行中']) {
+      await manual.click();
+      await original.getByRole('status').getByText(feedback,{exact:true}).waitFor();
+    }
+    const ids = await page.evaluate(() => window.__test.managedCallLog
+      .filter(call => call.method==='compute.managed.observeOnce').map(call=>call.data.requestId));
+    assert.equal(ids.length,3);
+    assert.equal(ids[0],ids[1]);
+    assert.notEqual(ids[1],ids[2]);
+    await original.getByText('剩余次数 0 / 48',{exact:true}).waitFor();
   });
 }

@@ -70,7 +70,14 @@ function requiresWorkflowReview(task,runId){
 }
 
 /** The model selects an acquired resource and operation. Main supplies every owner and worker identity. */
-export function createManagedComputeTools({resources,schedules,assertWorkflow,authorizeTask=async()=>{},assertScheduleIntent=()=>{},assertRunIntent,assertRunSource,onRunObserved=()=>{}}){
+export function createManagedComputeTools({resources,schedules,assertWorkflow,authorizeTask=async()=>{},assertScheduleIntent,assertRunIntent,assertRunSource,onRunObserved=()=>{}}){
+ function scheduleIntent(scope,operation,args){
+  try{
+   const delegation=assertScheduleIntent?.(scope,operation,args);
+   if(typeof delegation!=='string'||!delegation)throw deny('managed_schedule_task_delegation_required');
+   return delegation;
+  }catch(error){throw Object.assign(error,{operationNotStarted:true});}
+ }
  async function checkedSource(scope,resourceId){
   if(scope?.checkCurrent?.()!==true||!scope.threadId||!scope.taskId||!scope.projectId)throw Error('An exact current workflow tool lease is required');
   const task=assertWorkflow(scope);
@@ -102,8 +109,11 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
  async function call(name,args,scope){
   if(resources.owns(name))return resources.callTool(name,args,scope);
   const shape=byName.get(name);
-  if(!shape||!valid(args,shape))throw Error('Invalid managed compute tool arguments');
-  const {task,service,sourceId,assertCurrent}=await checkedSource(scope,args.resource_id);
+  if(!shape||!valid(args,shape))throw deny('Invalid managed compute tool arguments');
+  const {task,service,sourceId,assertCurrent}=await checkedSource(scope,args.resource_id).catch(error=>{
+   // Only read-only checks have run for this tool operation.
+   throw Object.assign(error,{operationNotStarted:true});
+  });
   const {resource_id:resourceId,run_id:runId,schedule_id:scheduleId}=args;
   const anchor=id=>runKind({task,scope,runId:id,sourceId,resourceId});
   if(name==='inspect_compute_service')return {resource_id:resourceId,environment_ids:service.environmentIds||[],cluster_ids:service.clusterIds||[]};
@@ -148,22 +158,27 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
   }
   const owner={provider:scope.provider,threadId:scope.threadId,taskId:scope.taskId,projectId:scope.projectId};
   const current=()=>schedules.snapshot().sources.find(source=>source.id===sourceId)?.schedules.filter(item=>scheduleOwner(item,sourceId,owner))||[];
-  const operation={assertCurrent,request:async(method,target,data)=>{
+  const operationFor=beforeScheduleDispatch=>({assertCurrent,request:async(method,target,data)=>{
    assertCurrent();
    const observed=await resources.resolveService(scope,resourceId);
-   if(observed?.sourceId!==sourceId)throw Error('The acquired resource changed its original service identity');
-   const result=await resources.serviceRequest(scope,{resourceId,method,target,data,checkCurrent:assertCurrent});
+   if(observed?.sourceId!==sourceId)throw deny('The acquired resource changed its original service identity');
+   const result=await resources.serviceRequest(scope,{resourceId,method,target,data,checkCurrent:assertCurrent,beforeScheduleDispatch});
    assertCurrent();
    if(result?.status!==200)throw Error('The original service did not confirm the schedule request');
    return result.data;
-  }};
+  }});
+  const recheck=(action,selection,turn)=>()=>{
+   if(scheduleIntent(scope,action,selection)!==turn)throw deny('managed_schedule_task_delegation_required');
+  };
   if(name==='list_task_schedules')return {schedules:current()};
+  if(!service.supportsManagedSchedules)throw deny('managed_compute_worker_update_required');
   if(name==='task_schedule_status'||name==='stop_task_schedule'){
    const item=current().find(value=>value.id===scheduleId);
    if(!item)throw Error('This schedule is not registered to the current workflow on the original service');
    if(item.scope.runId)anchor(item.scope.runId);
-   if(name==='stop_task_schedule')assertScheduleIntent(scope,'stop',args);
-   const result=await schedules[name==='task_schedule_status'?'status':'stop']({sourceId,scheduleId},operation);
+   const stopping=name==='stop_task_schedule';
+   const confirm=stopping?recheck('stop',args,scheduleIntent(scope,'stop',args)):undefined;
+   const result=await schedules[stopping?'stop':'status']({sourceId,scheduleId},operationFor(confirm));
    assertCurrent();return result;
   }
   const {kind,key:requestedKey,name:displayName,mutation_id:mutationId,expected_revision:expectedRevision,interval_seconds:intervalSeconds,max_runs:maxRuns,expires_at:expiresAt,timeout_seconds:timeoutSeconds,action,script,wake_text:wakeText}=args;
@@ -172,9 +187,10 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
   const targetRun=runId??previous?.scope.runId??null,key=requestedKey??previous?.key;
   if(kind!=='wake_agent'||targetRun)anchor(targetRun);
   if(!editing&&(kind==='wake_agent'&&!wakeText||kind==='action'&&!action||kind==='script'&&(!script||!key)))throw Error('Schedule payload does not match the selected operation');
-  const intent=assertScheduleIntent(scope,'upsert',args),delegationId=previous?previous.delegationId:intent;
+  const effectiveIntent=kind==='action'&&action===undefined&&previous?{...args,action:previous.action}:args;
+  const intent=scheduleIntent(scope,'upsert',effectiveIntent),delegationId=previous?previous.delegationId:intent;
   const request=Object.fromEntries(Object.entries({sourceId,scope:{...owner,runId:targetRun},kind,key,name:displayName,mutationId,expectedRevision,intervalSeconds,maxRuns,expiresAt,timeoutSeconds,action,script,wakeText,delegationId}).filter(([,value])=>value!==undefined));
-  const result=await schedules.upsert(request,operation);
+  const result=await schedules.upsert(request,operationFor(recheck('upsert',effectiveIntent,intent)));
   assertCurrent();return result;
  }
  return {tools:()=>[...resources.tools(),...definitions],owns:name=>resources.owns(name)||byName.has(name),call};

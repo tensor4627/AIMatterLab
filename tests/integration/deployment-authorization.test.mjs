@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {deploymentProjectIssue,deploymentProjectId} from "../../contracts/compute/deployment-authorization.mjs";
+import {validDeployment} from "../../contracts/compute/deployment.mjs";
 
 import {TaskRecords} from "../../agent/sessions/task-records.mjs";
 import {saveDeployment,prepareDeployment} from "../../backend/main/workspace/task-deployment.mjs";
@@ -23,13 +24,54 @@ test('Draft workspaces are never compute projects, even with permissive legacy f
 for(const [label,change,code] of [
  ['missing',()=>null,'compute-project-required'],['draft',p=>({...p,authoring_only:true}),'compute-project-required'],
  ['engine',p=>({...p,policy:{...p.policy,engines:[]}}),'engine'],['environment',p=>({...p,policy:{...p.policy,environments:[]}}),'target'],
- ['GPU',p=>({...p,policy:{...p.policy,gpus:[1]}}),'gpu'],['duration',p=>({...p,policy:{...p.policy,max_seconds:20}}),'duration'],
+ ['GPU',p=>({...p,policy:{...p.policy,gpus:[1]}}),'gpu'],['zero local GPUs',p=>({...p,policy:{...p.policy,gpus:[]}}),'gpu'],
+ ['duration',p=>({...p,policy:{...p.policy,max_seconds:20}}),'duration'],
 ])test('Prepare rejects '+label+' before saving an idempotency request, adopting inputs or creating a run',async()=>{
  const {records,task}=fixture(),before=records.read(task.id),candidate=change(structuredClone(project)),calls=[];
  const worker={request:async(method,route)=>{calls.push([method,route]);assert.equal(route,'/api/projects');return candidate?[candidate]:[];}};
  assert.equal(deploymentProjectIssue(candidate,config,'gpumd.md').code,code);
  await assert.rejects(prepareDeployment(records,worker,{taskId:task.id}),new RegExp(deploymentProjectIssue(candidate,config,'gpumd.md').message));
  assert.deepEqual(records.read(task.id),before);assert.deepEqual(calls,[['GET','/api/projects']]);
+});
+test('Local GPU authorization uses only explicit GPU IDs and honors the two fixed CPU routes',()=>{
+ const engines=['installation.check','trajectory.density','gpumd.md'];
+ const withGpus=gpus=>({...project,policy:{...project.policy,engines,gpus}});
+ for(const gpus of [[2],[]]){
+  for(const engine of engines.slice(0,2))assert.equal(deploymentProjectIssue(withGpus(gpus),{...config,gpu:7},engine),null);
+  assert.equal(deploymentProjectIssue(withGpus(gpus),config,'gpumd.md').code,'gpu');
+ }
+ assert.equal(deploymentProjectIssue(withGpus([2]),{...config,gpu:2},'gpumd.md'),null);
+ assert.equal(deploymentProjectIssue(withGpus([]),{...config,target:'cluster',targetId:'cluster'},'gpumd.md'),null);
+ for(const gpus of ['0',['0'],[false],[0,1.5],[-1],[2**53],Array(1)]){
+  for(const engine of engines)assert.equal(deploymentProjectIssue(withGpus(gpus),config,engine).code,'gpu');
+ }
+ for(const gpu of ['0',[],null,false,-1,2**53]){
+  for(const engine of engines)assert.equal(deploymentProjectIssue(withGpus([0]),{...config,gpu},engine).code,'gpu');
+  assert.throws(()=>validDeployment({...config,gpu}),/gpu/);
+ }
+ assert.equal(validDeployment({...config,gpu:undefined}).gpu,0);
+});
+test('The deployment entry point prepares a fixed trajectory analysis for a project with zero local GPUs',async()=>{
+ const {records,task}=fixture(),calls=[],engine='trajectory.density';
+ const cpuProject={...project,policy:{...project.policy,engines:[engine],gpus:[]}};
+ const next=records.read(task.id);
+ next.parameters={engine,files:['/inputs/trajectory.xyz']};
+ records.save(next);
+ saveDeployment(records,{taskId:task.id,value:{...config,gpu:7}});
+ const worker={request:async(_method,route,data)=>{
+  calls.push(route);
+  if(route==='/api/projects')return [cpuProject];
+  if(route==='/api/authoring/adopt')return {paths:{}};
+  assert.equal(route,'/api/runs/prepare');
+  assert.deepEqual(data.spec.inputs,{'trajectory.xyz':'/inputs/trajectory.xyz'});
+  assert.equal(data.spec.engine,engine);
+  assert.equal(data.spec.gpu,7);
+  assert.equal(data.spec.project_id,cpuProject.id);
+  return {id:'prepared-analysis',status:'draft',engine,project_id:cpuProject.id,snapshots:[]};
+ }};
+ const result=await prepareDeployment(records,worker,{taskId:task.id});
+ assert.equal(result.status,'draft');
+ assert.deepEqual(calls,['/api/projects','/api/authoring/adopt','/api/runs/prepare']);
 });
 test('An unavailable project catalog fails closed without input copying or record writes',async()=>{
  for(const response of [null,{},'offline']){

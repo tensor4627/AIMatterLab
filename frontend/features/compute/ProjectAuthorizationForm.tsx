@@ -1,18 +1,33 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useId,useRef,useState} from 'react';
 import {newProjectDefaults,scopedSuggestedInputRoot,suggestedProjectEnvironment} from './project-setup-defaults.mjs';
 import "../../app/project-navigation.css";
 import {engines} from '../../ui/presentation/engines';
 import {wslPath} from '../../ui/presentation/paths';
 import {type Environment} from '../../../contracts/dto/compute';
+import {validLocalGpuIds} from '../../../contracts/compute/project-policy.mjs';
 import {t} from "../../ui/i18n";
 import {projectPolicyChanges} from "./project-policy-edit.mjs";
 
 import type {ProjectAuthorizationSpec} from "../../../contracts/dto/compute";
 export type {ProjectAuthorizationSpec} from "../../../contracts/dto/compute";
 const list=(value:string)=>value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean);
+function parseGpuIds(value:string):number[]|null {
+ const input=value.trim();
+ if(!input)return [];
+ if(!/^(?:0|[1-9]\d*)(?:\s*,\s*(?:0|[1-9]\d*))*$/.test(input))return null;
+ const ids=[...new Set(input.split(',').map(Number))];
+ return validLocalGpuIds(ids)?ids:null;
+}
 export default function ProjectAuthorizationForm({environments,busy=false,suggestedInputRoot,suggestedEnvironmentId,onSubmit,initialSpec,defaults,onCancel}:{environments:Environment[];busy?:boolean;suggestedInputRoot?:string;suggestedEnvironmentId?:string;initialSpec?:ProjectAuthorizationSpec;defaults?:ProjectAuthorizationSpec;onCancel?:()=>void;onSubmit:(spec:ProjectAuthorizationSpec)=>Promise<void>}){
  const seed=initialSpec||defaults;
- const [draft,setDraft]=useState<ProjectAuthorizationSpec>(()=>seed?structuredClone(seed):newProjectDefaults(engines.map(([id])=>id),environments.map(environment=>environment.id),suggestedEnvironmentId,suggestedInputRoot)),[gpuText,setGpuText]=useState(()=>seed?seed.policy.gpus.join(','):'0'),[rootText,setRootText]=useState(()=>seed?seed.policy.input_roots.join('\n'):scopedSuggestedInputRoot(suggestedInputRoot)||''),[clusterText,setClusterText]=useState(seed?.policy.clusters?.join('\n')||''),[issues,setIssues]=useState<Record<string,string>>({}),[json,setJson]=useState(''),[jsonDirty,setJsonDirty]=useState(false),[toolsOpen,setToolsOpen]=useState(false),[resourcesOpen,setResourcesOpen]=useState(false);
+ const engineOptions=initialSpec?.policy.engines.includes('installation.check')?[...engines,['installation.check','固定 CPU 安装检查']]:engines;
+ const [draft,setDraft]=useState<ProjectAuthorizationSpec>(()=>seed?structuredClone(seed):newProjectDefaults(engines.map(([id])=>id),environments.map(environment=>environment.id),suggestedEnvironmentId,suggestedInputRoot)),[rootText,setRootText]=useState(()=>seed?seed.policy.input_roots.join('\n'):scopedSuggestedInputRoot(suggestedInputRoot)||''),[clusterText,setClusterText]=useState(seed?.policy.clusters?.join('\n')||''),[issues,setIssues]=useState<Record<string,string>>({}),[json,setJson]=useState(''),[jsonDirty,setJsonDirty]=useState(false),[toolsOpen,setToolsOpen]=useState(false),[resourcesOpen,setResourcesOpen]=useState(false);
+ const [gpuText,setGpuText]=useState(()=>{
+  if(!seed)return '0';
+  const saved=seed.policy.gpus;
+  return validLocalGpuIds(saved)?saved.join(','):JSON.stringify({gpus:saved});
+ });
+ const gpuIds=parseGpuIds(gpuText),gpuHintId=useId(),gpuError=t('GPU 编号须为以逗号分隔的非负整数。');
  const environmentTouched=useRef(false);
  useEffect(()=>{if(initialSpec||environmentTouched.current||draft.policy.environments.length||draft.policy.clusters?.length)return;const id=suggestedProjectEnvironment(environments.map(environment=>environment.id),suggestedEnvironmentId);if(id)setDraft(old=>({...old,policy:{...old.policy,environments:[id]}}));},[initialSpec,environments,suggestedEnvironmentId]);
  function showIssues(errors:Record<string,string>){setIssues(errors);if(errors.engines)setToolsOpen(true);if(errors.limits)setResourcesOpen(true);}
@@ -25,8 +40,8 @@ export default function ProjectAuthorizationForm({environments,busy=false,sugges
   const policy=value?.policy;if(!policy||typeof policy!=='object')errors.json=t('请提供完整授权策略');
   else{
    if(Object.keys(policy).some(key=>!['engines','gpus','max_seconds','max_concurrent','input_roots','environments','clusters'].includes(key)))errors.json=t('存在不支持的授权字段');
-   if(!Array.isArray(policy.engines)||!policy.engines.length||policy.engines.some((engine:any)=>!engines.some(([id])=>id===engine)))errors.engines=t('请选择至少一个计算引擎');
-   if(!Array.isArray(policy.gpus)||!policy.gpus.length||policy.gpus.some((gpu:any)=>!Number.isSafeInteger(gpu)||gpu<0))errors.gpus=t('请明确填写 GPU 编号，如 0 或 0,1');
+   if(!Array.isArray(policy.engines)||!policy.engines.length||policy.engines.some((engine:any)=>!engineOptions.some(([id])=>id===engine)))errors.engines=t('请选择至少一个计算引擎');
+   if(!validLocalGpuIds(policy.gpus))errors.gpus=gpuError;
    if(!Number.isSafeInteger(policy.max_seconds)||policy.max_seconds<1||!Number.isSafeInteger(policy.max_concurrent)||policy.max_concurrent<1)errors.limits=t('时长和并发数必须为正整数');
    if(!Array.isArray(policy.input_roots)||!policy.input_roots.length||policy.input_roots.some((root:any)=>typeof root!=='string'||!root.startsWith('/')||/[\r\n\0]/.test(root)||root.split('/').includes('..')))errors.roots=t('请填写至少一个明确的 Linux 绝对输入目录');
    if(!Array.isArray(policy.environments)||policy.environments.some((id:any)=>typeof id!=='string'||!id.trim())||policy.clusters!==undefined&&(!Array.isArray(policy.clusters)||policy.clusters.some((id:any)=>typeof id!=='string'||!id.trim())))errors.environments=t('环境与集群必须是明确的登记 ID');
@@ -34,12 +49,13 @@ export default function ProjectAuthorizationForm({environments,busy=false,sugges
   }
   return errors;
  }
- function fromForm(){const gpus=/^(?:0|[1-9]\d*)(?:\s*,\s*(?:0|[1-9]\d*))*$/.test(gpuText.trim())?[...new Set(gpuText.split(',').map(value=>Number(value.trim())))]:[],clusters=[...new Set(list(clusterText))],policy={...draft.policy,gpus,input_roots:[...new Set(list(rootText).map(wslPath))]};if(clusters.length||Object.hasOwn(draft.policy,'clusters'))policy.clusters=clusters;return {...draft,name:draft.name.trim(),policy};}
- useEffect(()=>{if(!jsonDirty)setJson(JSON.stringify(fromForm(),null,2));},[draft,gpuText,rootText,clusterText,jsonDirty]);
- function showJson(){setJson(JSON.stringify(fromForm(),null,2));setJsonDirty(false);setIssues(old=>{const {json,...remaining}=old;return remaining;});}
+ function fromForm<GpuIds extends number[]|string>(gpus:GpuIds){const clusters=[...new Set(list(clusterText))],policy={...draft.policy,gpus,input_roots:[...new Set(list(rootText).map(wslPath))]};if(clusters.length||Object.hasOwn(draft.policy,'clusters'))policy.clusters=clusters;return {...draft,name:draft.name.trim(),policy};}
+ function formJson(){return JSON.stringify(fromForm(gpuIds??gpuText),null,2);}
+ useEffect(()=>{if(!jsonDirty)setJson(formJson());},[draft,gpuText,rootText,clusterText,jsonDirty]);
+ function showJson(){setJson(formJson());setJsonDirty(false);setIssues(old=>{const {json,...remaining}=old;return remaining;});}
  function applyJson(){try{const next=JSON.parse(json),errors=validate(next);showIssues(errors);if(Object.keys(errors).length)return;environmentTouched.current=true;setDraft(next);setGpuText(next.policy.gpus.join(','));setRootText(next.policy.input_roots.join('\n'));setClusterText((next.policy.clusters||[]).join('\n'));setJsonDirty(false);}catch{setIssues({json:t('JSON 格式无效，请检查后再应用')});}}
- async function submit(){if(busy)return;if(jsonDirty){setIssues({json:t('请先应用或放弃高级 JSON 修改')});return;}const value=fromForm(),errors=validate(value);showIssues(errors);if(Object.keys(errors).length)return;try{await onSubmit(value);}catch(error){setIssues({form:error instanceof Error?error.message:String(error)});}}
- const changes=initialSpec?projectPolicyChanges(initialSpec,fromForm()):[];
+ async function submit(){if(busy)return;if(jsonDirty){setIssues({json:t('请先应用或放弃高级 JSON 修改')});return;}if(gpuIds===null){showIssues({gpus:gpuError});return;}const value=fromForm(gpuIds),errors=validate(value);showIssues(errors);if(Object.keys(errors).length)return;try{await onSubmit(value);}catch(error){setIssues({form:error instanceof Error?error.message:String(error)});}}
+ const changes=initialSpec&&gpuIds!==null?projectPolicyChanges(initialSpec,fromForm(gpuIds)):[];
  const display=(value:any)=>value===undefined||value===null?t('未设置'):Array.isArray(value)?value.join(', '):String(value);
  const error=(key:string)=>issues[key]&&<p className="field-error" role="alert">{issues[key]}</p>;
  const selectedEnvironment=draft.policy.environments.length===1?draft.policy.environments[0]:'',multipleEnvironments=draft.policy.environments.length>1;
@@ -50,11 +66,11 @@ export default function ProjectAuthorizationForm({environments,busy=false,sugges
   <fieldset disabled={busy}>
    <h3 className="project-basic-heading">{t('项目基础')}</h3>
    <label>{t('项目名称')}<input aria-label={t('项目名称')} value={draft.name} onChange={e=>{setDraft({...draft,name:e.target.value});setIssues({});}}/>{error('name')}</label>
-   <div className="project-basic-resources"><label>{t('计算环境')}<select aria-label={t('计算环境')} value={selectedEnvironment} onChange={e=>{environmentTouched.current=true;patchPolicy('environments',e.target.value?[e.target.value]:[]);}}><option value="" disabled={multipleEnvironments}>{multipleEnvironments?t('多个计算环境')+' · '+draft.policy.environments.length:t(environments.length?'选择环境':'尚无已登记环境')}</option>{selectedEnvironment&&!environments.some(environment=>environment.id===selectedEnvironment)&&<option value={selectedEnvironment}>{t('已保存的计算环境')} · {selectedEnvironment}</option>}{environments.map(environment=><option key={environment.id} value={environment.id}>{environment.name}</option>)}</select>{error('environments')}</label><label>{t('GPU 编号')}<input aria-label={t('GPU 编号')} placeholder="0,1" value={gpuText} onChange={e=>{setGpuText(e.target.value);setIssues({});}}/>{error('gpus')}</label></div>
+   <div className="project-basic-resources"><label>{t('计算环境')}<select aria-label={t('计算环境')} value={selectedEnvironment} onChange={e=>{environmentTouched.current=true;patchPolicy('environments',e.target.value?[e.target.value]:[]);}}><option value="" disabled={multipleEnvironments}>{multipleEnvironments?t('多个计算环境')+' · '+draft.policy.environments.length:t(environments.length?'选择环境':'尚无已登记环境')}</option>{selectedEnvironment&&!environments.some(environment=>environment.id===selectedEnvironment)&&<option value={selectedEnvironment}>{t('已保存的计算环境')} · {selectedEnvironment}</option>}{environments.map(environment=><option key={environment.id} value={environment.id}>{environment.name}</option>)}</select>{error('environments')}</label><label>{t('GPU 编号')}<input aria-label={t('GPU 编号')} aria-describedby={gpuHintId} aria-invalid={gpuIds===null||!!issues.gpus} placeholder="0,1" value={gpuText} onChange={e=>{setGpuText(e.target.value);setIssues({});}}/><small className="muted" id={gpuHintId}>{t('留空表示不授权本地 GPU。多个编号用逗号分隔。')}</small>{gpuIds===null&&!issues.gpus?<p className="field-error" role="alert">{gpuError}</p>:error('gpus')}</label></div>
    <div className="project-input-root"><label>{t('输入目录')}<textarea aria-label={t('输入目录')} rows={2} value={rootText} onChange={e=>{setRootText(e.target.value);setIssues({});}}/>{error('roots')}</label>{scopedSuggestedInputRoot(suggestedInputRoot)&&<div className="authorization-suggestion"><button className="button" onClick={()=>{setRootText([...new Set([...list(rootText),suggestedInputRoot!])].join('\n'));setIssues({});}}>{t('使用当前流程输入目录')}</button></div>}</div>
    <p className="muted">{t('仅使用已登记的计算环境和明确的输入目录。')}</p>
-   <div className="project-resource-summary" data-testid="project-resource-summary"><span>GPU {gpuText||t('未设置')}</span><span>{draft.policy.max_seconds??t('未设置')} s</span><span>{draft.policy.max_concurrent??t('未设置')} {t('个并发任务')}</span></div>
-   <details className="project-setting-group" data-testid="project-tools-details" open={toolsOpen} onToggle={event=>setToolsOpen(event.currentTarget.open)}><summary>{t('工具与引擎')}<span className="setting-summary">{t('已启用')} {draft.policy.engines.length} / {engines.length}</span></summary><div className="project-setting-content"><p>{t('工具可用性仍取决于所选环境，执行前会检查。')}</p><div className="authorization-options">{engines.map(([id,name])=><label key={id}><input type="checkbox" checked={draft.policy.engines.includes(id)} onChange={e=>patchPolicy('engines',e.target.checked?[...draft.policy.engines,id]:draft.policy.engines.filter(value=>value!==id))}/><span>{t(name)}</span></label>)}</div>{error('engines')}</div></details>
+   <div className="project-resource-summary" data-testid="project-resource-summary"><span>{gpuIds?.length===0?t('未授权本地 GPU'):'GPU '+gpuText}</span><span>{draft.policy.max_seconds??t('未设置')} s</span><span>{draft.policy.max_concurrent??t('未设置')} {t('个并发任务')}</span></div>
+   <details className="project-setting-group" data-testid="project-tools-details" open={toolsOpen} onToggle={event=>setToolsOpen(event.currentTarget.open)}><summary>{t('工具与引擎')}<span className="setting-summary">{t('已启用')} {draft.policy.engines.length} / {engineOptions.length}</span></summary><div className="project-setting-content"><p>{t('工具可用性仍取决于所选环境，执行前会检查。')}</p><div className="authorization-options">{engineOptions.map(([id,name])=><label key={id}><input type="checkbox" checked={draft.policy.engines.includes(id)} onChange={e=>patchPolicy('engines',e.target.checked?[...draft.policy.engines,id]:draft.policy.engines.filter(value=>value!==id))}/><span>{t(name)}</span></label>)}</div>{error('engines')}</div></details>
    <details className="project-setting-group" data-testid="project-resource-details" open={resourcesOpen} onToggle={event=>setResourcesOpen(event.currentTarget.open)}><summary>{t('资源与访问范围')}<span className="setting-summary">{t('运行限额')}</span></summary><div className="project-setting-content"><div className="form-row"><label>{t('时长上限 · s')}<input aria-label={t('授权时长上限')} type="number" min={1} value={draft.policy.max_seconds??''} onChange={e=>patchPolicy('max_seconds',e.target.value===''?null:Number(e.target.value))}/></label><label>{t('最大并发数')}<input aria-label={t('最大并发数')} type="number" min={1} value={draft.policy.max_concurrent??''} onChange={e=>patchPolicy('max_concurrent',e.target.value===''?null:Number(e.target.value))}/></label></div>{error('limits')}<h4>{t('更多计算环境')}</h4><div className="authorization-options">{environments.map(environment=><label key={environment.id}><input type="checkbox" checked={draft.policy.environments.includes(environment.id)} onChange={e=>{environmentTouched.current=true;patchPolicy('environments',e.target.checked?[...draft.policy.environments,environment.id]:draft.policy.environments.filter(value=>value!==environment.id));}}/><span>{environment.name}</span></label>)}</div><label>{t('远程集群（可选）')}<textarea aria-label={t('允许的集群 ID · 每行一个')} value={clusterText} onChange={e=>{environmentTouched.current=true;setClusterText(e.target.value);setIssues({});}} rows={2}/></label></div></details>
    <details className="project-setting-group authorization-json" onToggle={e=>{if(e.currentTarget.open&&!json)showJson();}}><summary>{t('高级配置')}</summary><div className="project-setting-content"><label>{t('高级 JSON 授权')}<textarea aria-label={t('高级 JSON 授权')} rows={12} value={json} onChange={e=>{setJson(e.target.value);setJsonDirty(true);}}/></label><div className="button-row"><button className="button" onClick={applyJson}>{t('应用 JSON')}</button><button className="button" onClick={showJson}>{t('从表单重置 JSON')}</button>{jsonDirty&&<span>{t('存在未应用的 JSON 修改')}</span>}</div></div></details>
    {issues.json&&<p className="field-error" role="alert">{issues.json}</p>}{error('form')}

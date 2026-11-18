@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools.mjs';
+import {toolFailure} from '../../agent/tools/tool-failure.mjs';
 
-function fixture({runIntent,protectedTask=false}={}){
+function fixture({runIntent,protectedTask=false,supportsManagedSchedules=true}={}){
  let current=true,delegation='original-delegation';
  const scope={provider:'codex',threadId:'thread-a',taskId:'task-a',projectId:'project-a',inputRoot:'/worker/inputs',checkCurrent:()=>current};
  const owner={provider:scope.provider,threadId:scope.threadId,taskId:scope.taskId,projectId:scope.projectId,runId:'run-b'};
@@ -10,7 +11,7 @@ function fixture({runIntent,protectedTask=false}={}){
  const serviceCalls=[],mutations=[],observed=[];
  const resources={
   owns:()=>false,tools:()=>[],
-  resolveService:async(_scope,id)=>({sourceId:id==='ssh:target-b'?'source-b':'source-a',environmentIds:['env'],clusterIds:['cluster']}),
+  resolveService:async(_scope,id)=>({sourceId:id==='ssh:target-b'?'source-b':'source-a',environmentIds:['env'],clusterIds:['cluster'],supportsManagedSchedules}),
   serviceRequest:async(_scope,request)=>{
    request.checkCurrent();serviceCalls.push(request);
    const {id,params}=request.data;
@@ -30,6 +31,25 @@ function fixture({runIntent,protectedTask=false}={}){
   onRunObserved:entry=>observed.push(entry)});
  return {tools,scope,serviceCalls,mutations,observed,resources,schedules,assertWorkflow,revoke:()=>{current=false;},delegate:value=>{delegation=value;}};
 }
+
+test('an older worker keeps its run and indexed schedule reads and identifies the missing schedule capability',async()=>{
+ const f=fixture({supportsManagedSchedules:false}),args={resource_id:'ssh:target-b'};
+ assert.equal((await f.tools.call('list_task_schedules',args,f.scope)).schedules.length,1);
+ assert.equal((await f.tools.call('read_compute_run_status',{...args,run_id:'run-b'},f.scope)).status,'running');
+ await assert.rejects(f.tools.call('task_schedule_status',{...args,schedule_id:'schedule-b'},f.scope),error=>{
+  const receipt=JSON.parse(toolFailure(error,{dispatched:true}).content[0].text);
+  return receipt.code==='capability_required'&&receipt.operation_state==='not_started';
+ });
+ assert.equal(f.mutations.length,0);
+});
+
+test('an absent schedule delegation prevents scoped stop before any worker mutation',async()=>{
+ const f=fixture();
+ const tools=createManagedComputeTools({resources:f.resources,schedules:f.schedules,assertWorkflow:f.assertWorkflow,assertRunSource:()=> 'cluster-run'});
+ await assert.rejects(tools.call('stop_task_schedule',{resource_id:'ssh:target-b',schedule_id:'schedule-b'},f.scope),
+  {message:'managed_schedule_task_delegation_required',operationNotStarted:true});
+ assert.equal(f.mutations.length,0);
+});
 
 test('explicit service run observations preserve both task authority and original target',async()=>{
  const f=fixture();
@@ -64,6 +84,24 @@ test('schedule list and exact edit keep scope and the original human delegation 
  assert.equal(result.delegationId,'original-delegation');assert.equal(result.scope.runId,'run-b');
  await assert.rejects(f.tools.call('attach_task_schedule',{...edit,schedule_id:'other-owner'},f.scope),/exact ID and revision/);
  assert.equal(f.mutations.length,1);
+});
+
+test('an edit checks the saved action subtype and current delegation before sending it',async()=>{
+ const f=fixture(),original=f.schedules.snapshot().sources[0].schedules[0];
+ Object.assign(original,{kind:'action',action:{type:'read_log',name:'queue.out'}});
+ let grant='edit-turn',sent=0;
+ const tools=createManagedComputeTools({resources:{...f.resources,async serviceRequest(_scope,request){
+  grant='later-turn';
+  request.beforeScheduleDispatch();
+  sent++;
+  return {status:200,data:{}};
+ }},schedules:{...f.schedules,upsert:(data,op)=>op.request('POST','/api/managed-schedules/upsert',data)},
+ assertWorkflow:f.assertWorkflow,assertRunSource:()=> 'cluster-run',
+ assertScheduleIntent:(_scope,_operation,args)=>{assert.deepEqual(args.action,original.action);return grant;}});
+ await assert.rejects(tools.call('attach_task_schedule',{resource_id:'ssh:target-b',kind:'action',
+  schedule_id:'schedule-b',expected_revision:3,mutation_id:'edit-2',interval_seconds:120},f.scope),
+  {message:'managed_schedule_task_delegation_required',operationNotStarted:true});
+ assert.equal(sent,0);
 });
 
 test('a workflow revoked during service approval cannot dispatch',async()=>{

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIMatterLab 0.1.13 内置诊断索引</title>
+<style>
+  :root{color-scheme:light dark;font:16px/1.55 system-ui,sans-serif}
+  body{max-width:96rem;margin:2rem auto;padding:0 1.2rem} h1{font-size:1.7rem} h2{font-size:1rem}
+  label{display:grid;gap:.25rem} .filters,nav{display:flex;align-items:end;flex-wrap:wrap;gap:.7rem}
+  input,select,button{font:inherit;padding:.35rem .55rem} input{width:min(24rem,78vw)}
+  table{width:100%;border-collapse:collapse;table-layout:fixed} th,td{padding:.5rem;text-align:left;vertical-align:top;border-bottom:1px solid #8887;overflow-wrap:anywhere}
+  th:nth-child(1){width:44%}th:nth-child(2){width:18%} th:nth-child(3){width:33%}
+  code,pre{font: .85rem/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere} summary,button{cursor:pointer}
+  .muted{font-size:.88rem;opacity:.85} nav{align-items:center;margin:1rem 0}
+  @media(max-width:700px){body{padding:0 .65rem}th,td{padding:.35rem} th:nth-child(1){width:48%}th:nth-child(2){width:19%}}
+</style>
+<main>
+  <h1>AIMatterLab 0.1.13 内置诊断索引</h1>
+  <p id="scope"></p>
+  <p>可查原文、英文译文、错误码、路径、函数和条件。每行对应一处源码。展开第一列可读触发分支、影响及处理依据。同一消息可能由多个入口发出。</p>
+  <div class="filters">
+    <label>查找<input id="query" type="search" placeholder="错误码、消息或源码条件"></label>
+    <label>源码范围<select id="area"><option value="">全部</option></select></label>
+    <label>触发条件性质<select id="category"><option value="">全部</option></select></label>
+    <label>原因与设计取舍<select id="family"><option value="">全部</option></select></label>
+    <label>发出方式<select id="kind"><option value="">全部</option></select></label>
+    <button id="clear">清除筛选</button>
+  </div>
+  <nav aria-label="分页"><button id="prev">上一页</button><span id="count" aria-live="polite"></span><button id="next">下一页</button></nav>
+  <table><thead><tr><th>诊断与触发条件</th><th>归因与处理</th><th>发布源码位置</th></tr></thead><tbody id="rows"></tbody></table>
+  <details><summary>提取范围与静态分析限制</summary>
+    <p>覆盖 Git 标签中的第一方可执行源码、安装和开发者交付入口。测试夹具、第三方依赖及生成的协议类型另有用途。下列列表含逐个扫描的源文件。位置指向所示 Git 提交，可用 git show 查看该版本。转发、对照文案、warning、局部降级和导致当前操作中止的代码分别保留原发出方式。</p>
+    <p>触发条件来自可定位的语法分支、断言或捕获点；跨函数权限、调用者处理和外部程序的运行结果需要回到原操作核实。原因和处理由本次审计的归类规则给出，具体修订与已运行的验证见改进清单。</p>
+    <p id="gaps"></p><details><summary>扫描文件</summary><pre id="files"></pre></details>
+  </details>
+</main>
+<script type="application/json" id="inventory"><!--DIAGNOSTIC_DATA--></script>
+<script>
+  const data=JSON.parse(document.getElementById('inventory').textContent);
+  const $=id=>document.getElementById(id);
+  const node=(tag,text)=>{const element=document.createElement(tag);element.textContent=text;return element};
+  function area(path){
+    return ['backend/main','backend/worker','desktop/platform'].find(prefix=>path.startsWith(prefix+'/'))||path.split('/')[0];
+  }
+  const areas=data.files.map(area);
+  const impact={
+    throw:'本函数沿异常分支退出。是否影响整个操作取决于调用者如何捕获该异常。',
+    reject:'本分支拒绝请求、返回非成功检查或结束异步尝试。按所属接口判断影响。',
+    result:'本处构造结构化结果。调用者依据实际状态决定能否继续。',
+    warning:'本处记录检查发现。需要该证据的操作另行核验。',
+    ui:'界面显示当前条件或调用结果。实际执行边界在原操作的所有者。',
+    forward:'本处传递已有值或底层异常。原因及派发状态应回到原操作核实。',
+    catalog:'当相应键被上层选中时显示此文案。定义本身不会发起或终止操作。',
+    error_value:'本处创建异常对象，实际抛出或转述发生在使用点。',
+    error_code:'本处为原诊断设置代码。后果取决于接收者如何处理该代码。',
+    exit:'子进程或包装器从此处退出或传递退出状态，调用方读取退出码与原回执。'
+  };
+  function options(id,list){for(const [value,label] of list) $(id).append(new Option(label,value))}
+  options('area',[...new Set(areas)].sort().map(x=>[x,x]));
+  options('category',Object.keys(data.categories).map(x=>[x,x]));
+  options('family',Object.entries(data.decisions).map(([key,value])=>[key,value[0]]));
+  options('kind',[...new Set(data.rows.map(row=>row[3]))].sort().map(x=>[x,x]));
+  $('scope').textContent='发布提交 '+data.revision.slice(0,12)+' · '+data.files.length+' 个源码文件 · '+data.rows.length+' 处静态记录';
+  $('gaps').textContent=data.notes.join(' / ');
+  $('files').textContent=data.files.join('\n');
+  const search=data.rows.map(([f,l,c,k,o,s,g,d,key,en,note])=>
+    [data.files[f],l,c,k,o,s,g,...data.decisions[d],key,en,note].join(' ').toLowerCase());
+  const pageSize=60;
+  let page=0,matches=[];
+  function render(){
+    const start=page*pageSize,end=Math.min(matches.length,start+pageSize);
+    $('count').textContent=matches.length?(start+1)+'–'+end+' / '+matches.length:'没有匹配记录';
+    $('prev').disabled=page===0;$('next').disabled=end===matches.length;
+    const body=document.createDocumentFragment();
+    for(const i of matches.slice(start,end)){
+      const [f,l,c,k,o,s,g,d,key,en,note,reviewed]=data.rows[i],decision=data.decisions[d];
+      const tr=node('tr',''),message=node('td',''),details=node('details','');
+      const summary=node('summary',s.length>160?s.slice(0,157)+'…':s);
+      details.append(summary,node('h2','源码表达式'),node('code',s));
+      if(en)details.append(node('p',en));
+      if(key)details.append(node('p','查找键 '+key));
+      details.append(node('h2','可定位的条件'),node('code',g||'进入下列函数的这处发出点。请结合调用者和原始回执核对。'),
+        node('h2','此处对流程的影响'),node('p',impact[k]||k),
+        node('h2','处理依据'),node('p',decision[2]));
+      if(note)details.append(node('p',note));
+      details.append(node('small',reviewed?'已按发布源码单独归类':'按源码归类规则判读'),node('br',''),
+        node('code','git show '+data.revision.slice(0,12)+':'+data.files[f]));
+      message.append(details);
+      const family=node('td',decision[0]);family.append(node('br',''),node('small',decision[1]));
+      const source=node('td','');source.append(node('code',data.files[f]+':'+l+':'+c),node('br',''),node('small',o+' · '+k));
+      tr.append(message,family,source);body.append(tr);
+    }
+    $('rows').replaceChildren(body);
+  }
+  function filter(){
+    const terms=$('query').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    matches=[];
+    data.rows.forEach((row,i)=>{
+      if((!$('area').value||areas[row[0]]===$('area').value)&&(!$('family').value||row[7]===$('family').value)&&
+          (!$('category').value||data.categories[$('category').value].includes(row[7]))&&
+          (!$('kind').value||row[3]===$('kind').value)&&terms.every(term=>search[i].includes(term)))matches.push(i);
+    });
+    page=0;render();
+  }
+  for(const id of ['query','area','category','family','kind'])$(id).addEventListener('input',filter);
+  $('clear').onclick=()=>{for(const id of ['query','area','category','family','kind'])$(id).value='';filter()};
+  $('prev').onclick=()=>{page--;render()};$('next').onclick=()=>{page++;render()};filter();
+</script>
+</html>

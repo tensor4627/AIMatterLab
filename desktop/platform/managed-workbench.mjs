@@ -3,7 +3,7 @@ import {createManagedComputeServices} from '../../backend/main/compute/managed-c
 import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
 import {createManagedSchedules} from '../../backend/main/compute/managed-schedules.mjs';
 import {createMonitorAttention} from '../../backend/main/compute/monitor-attention.mjs';
-import {createScheduleDelegations,createRunActionIntents} from '../../backend/main/compute/schedule-delegation.mjs';
+import {createScheduleDelegations,createRunActionIntents,runActionTarget} from '../../backend/main/compute/schedule-delegation.mjs';
 import {taskForRecordIndex} from '../../backend/main/compute/worker-service-version.mjs';
 import {taskWorkerSource} from '../../contracts/compute/task-worker-binding.mjs';
 import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools.mjs';
@@ -38,7 +38,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     if(sourceId)for(const item of task.artifacts||[]){
       if(['run','cluster-run'].includes(item.kind))available.set(JSON.stringify([sourceId,item.id]),{sourceId,runId:item.id});
     }
-    return runIntents.permits(scope,action,runId,[...available.values()],resources.snapshot().find(r=>r.resourceId===resourceId)?.name);
+    return runIntents.permits(scope,action,runId,[...available.values()],runActionTarget(resources.snapshot(),resourceId));
   }
   const resources=createManagedComputeResources({terminal,profiles,aliases:createManagedComputeAliases({projectSkills}),
     services:createManagedComputeServices({connections:terminal.connections,registration,source:workerSource,transportSource:sshTransportSource}),
@@ -55,7 +55,8 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     const checkCurrent=()=>{
       const task=records.bound(scope.provider,scope.threadId);
       const row=schedules.snapshot().sources.find(s=>s.id===event.sourceId)?.schedules.find(p=>p.id===event.scheduleId);
-      return !!task&&task.id===scope.taskId&&(task.authoring?.projectId||task.projectId)===scope.projectId&&!!row&&!row.stopRequestedAt;
+      return !!task&&task.id===scope.taskId&&(task.authoring?.projectId||task.projectId)===scope.projectId&&!!row&&
+        row.stopRequestedAt==null&&!row.stopNeedsConfirmation;
     };
     return checkCurrent()&&resources.eligibleForWake({...scope,checkCurrent},event.sourceId);
   }

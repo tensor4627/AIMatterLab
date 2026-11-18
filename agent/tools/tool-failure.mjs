@@ -1,10 +1,22 @@
+const managedRecovery=new Map([
+ ['ssh_service_registration_required',['service_setup_required','Open the original resource settings and prepare its job service. Its authorized terminal can still be used.']],
+ ['ssh_service_maintenance_required',['service_setup_required','Inspect the registered job service on the original resource. Updating it requires the explicit update action.']],
+ ['managed_compute_worker_update_required',['capability_required','Inspect the original worker version and its advertised capabilities. Update through its resource settings to use this operation.']],
+ ['managed_compute_worker_request_failed',['observation_unavailable','Read the project and service health again on the original worker before making any permission change.']],
+ ['managed_compute_private_service_unavailable',['connection_unavailable','Check the job service on the original resource. Use its authorized terminal to diagnose the connection.']],
+ ['managed_compute_project_grant_required',['access_required','Check the current project on its original worker. Project permissions can be changed only in the trusted desktop settings.']],
+ ['managed_schedule_task_delegation_required',['access_required','Check the user’s requested schedule purpose in this workflow and confirm any additional action with the user.']],
+]);
+
 // Tool-level failures stay on the MCP channel so the Agent can correct its next
 // action. This is guidance only: no retry, resource grant or dispatch occurs here.
 export function toolFailure(error,{dispatched=false}={}){
  const message=String(error?.message||error||'Tool request failed').slice(0,4000);
  if(error?.operationNotStarted===true)dispatched=false;
  let code='tool_error',next_step='Inspect the tool details and correct the request before continuing.';
- if(/unknown (?:tool|project|environment)|not (?:bound|belong)|conversation-owned|active conversation|another conversation/i.test(message)){
+ if(managedRecovery.has(message)){
+  [code,next_step]=managedRecovery.get(message);
+ }else if(/unknown (?:tool|project|environment)|not (?:bound|belong)|conversation-owned|active conversation|another conversation/i.test(message)){
   code='context_required';next_step='Read the current conversation workflow and its registered project/environment. Use those identities; do not create a replacement workflow or broaden access.';
  }else if(/stale|hash|newer human|existing graph in place|saved canonical|reload/i.test(message)){
   code='input_changed';next_step='Read the latest saved workflow and input hashes, preserve human edits, then update that same workflow. Do not reuse a stale preparation.';

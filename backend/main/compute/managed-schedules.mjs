@@ -4,35 +4,94 @@ const indexKind = 'managed-worker-snapshot';
 const stopKind = 'managed-schedule-stop';
 const route = action => '/api/managed-schedules/' + action;
 const token = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:+@~-]{0,511}$/.test(value);
+const object = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const stopKey = (sourceId, scheduleId) => sourceId + '/' + scheduleId;
 const nowSeconds = () => Date.now() / 1000;
-const taskKey = row => JSON.stringify([row.scope.provider, row.scope.threadId, row.scope.taskId, row.scope.projectId]);
+const taskFields = ['provider', 'threadId', 'taskId', 'projectId'];
+const taskKey = row => JSON.stringify(taskFields.map(field => row.scope[field]));
 const savedRunRefreshSeconds = 30;
 
-function checkedRow(row, sourceId, scheduleId = row?.id) {
-  if (!token(scheduleId) || row?.id !== scheduleId || row.sourceId !== sourceId ||
-      !Number.isSafeInteger(row.stateRevision) || row.stateRevision < 1 || !row.scope || !Number.isFinite(row.expiresAt) ||
-      !['scheduled', 'running', 'unknown', 'stopped', 'completed', 'exhausted', 'expired'].includes(row.status)) {
-    throw Error('managed_schedule_unverified_reply');
-  }
-  const {history, script, ...summary} = row;
+function validRow(row, sourceId, scheduleId = row?.id) {
+  if (!object(row) || !token(sourceId) || !token(scheduleId) || row.id !== scheduleId || row.sourceId !== sourceId ||
+      !['poll', 'action', 'script', 'wake_agent'].includes(row.kind)) return false;
+  const {scope, stateRevision, expiresAt, status, stopRequestedAt, history, script} = row;
+  return object(scope) && Object.keys(scope).length === taskFields.length + 1 &&
+    taskFields.every(field => Object.hasOwn(scope, field) && token(scope[field])) && Object.hasOwn(scope, 'runId') &&
+    (token(scope.runId) || row.kind === 'wake_agent' && scope.runId === null) &&
+    Number.isSafeInteger(stateRevision) && stateRevision >= 1 && Number.isFinite(expiresAt) &&
+    ['scheduled', 'running', 'unknown', 'stopped', 'completed', 'exhausted', 'expired'].includes(status) &&
+    (status === 'stopped' ? Number.isFinite(stopRequestedAt) : stopRequestedAt == null) &&
+    (history === undefined || Array.isArray(history)) && (script === undefined || object(script));
+}
+
+function summaryRow(row) {
+  const {history, script, stopPending, stopNeedsConfirmation, ...summary} = row;
   if (!script) return summary;
   const {text, ...scriptIdentity} = script;
   return {...summary, script: scriptIdentity};
 }
 
+function checkedRow(row, sourceId, scheduleId = row?.id) {
+  if (!validRow(row, sourceId, scheduleId)) throw Error('managed_schedule_unverified_reply');
+  return summaryRow(row);
+}
+
+function sameSchedule(left, right) {
+  return left.id === right.id && left.sourceId === right.sourceId && left.kind === right.kind &&
+    isDeepStrictEqual(left.scope, right.scope);
+}
+
+function isCurrentRow(previous, row) {
+  if (!previous) return true;
+  if (!sameSchedule(previous, row)) throw Error('managed_schedule_unverified_reply');
+  if (row.stateRevision < previous.stateRevision) return false;
+  if (previous.stopRequestedAt != null && previous.stopRequestedAt !== row.stopRequestedAt ||
+      row.stateRevision === previous.stateRevision && row.status !== previous.status) {
+    throw Error('managed_schedule_unverified_reply');
+  }
+  return true;
+}
+
 function mergeRows(existing, fresh) {
   const byId = new Map(existing.map(row => [row.id, row]));
   for (const row of fresh) {
-    if (!byId.has(row.id) || byId.get(row.id).stateRevision <= row.stateRevision) byId.set(row.id, row);
+    if (isCurrentRow(byId.get(row.id), row)) byId.set(row.id, row);
   }
   return [...byId.values()];
 }
 
-function nextDispatch(rows) {
+function cachedRecord(record, sourceId = record?.id) {
+  if (!object(record) || !token(sourceId) || record.id !== sourceId) return null;
+  const schedules = Array.isArray(record.schedules) ? record.schedules.filter(row => validRow(row, sourceId)).map(summaryRow) : [];
+  return {...record, schedules, runs: Array.isArray(record.runs) ? record.runs : []};
+}
+
+function assertOperation(operation) {
+  if (operation === undefined) return;
+  if (typeof operation?.assertCurrent !== 'function' || typeof operation.request !== 'function') {
+    throw Object.assign(Error('managed_schedule_invalid_request'), {operationNotStarted: true});
+  }
+  operation.assertCurrent();
+}
+
+function originalSourceOffline() {
+  return Object.assign(Error('managed_schedule_original_source_offline'), {operationNotStarted: true});
+}
+
+function scopedStopFailure(error) {
+  if (error?.operationNotStarted === true) return error;
+  if (['managed_compute_project_grant_required', 'managed_compute_invalid_request', 'managed_compute_worker_update_required',
+    'The acquired resource changed its original service identity'].includes(error?.message)) {
+    return Object.assign(Error(error.message, {cause: error}), {operationNotStarted: true});
+  }
+  return Error('managed_schedule_stop_unconfirmed. Check task_schedule_status on the original service and schedule before requesting another stop.', {cause: error});
+}
+
+function nextDispatch(rows, skipped) {
   const occupied = new Set(rows.filter(row => row.active).map(taskKey));
   let next = Infinity;
   for (const row of rows) {
+    if (skipped.has(row.id)) continue;
     if (Number.isFinite(row.active?.nextCheckAt)) next = Math.min(next, row.active.nextCheckAt);
     if (row.status === 'scheduled') {
       next = Math.min(next, row.expiresAt);
@@ -48,7 +107,7 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
   const present = new Map();
   const pumps = new Map();
   const refreshes = new Map();
-  const stops = new Map();
+  const desktopStops = new Map();
   const notifications = new Set();
   let timer = null;
   let active = false;
@@ -56,7 +115,7 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
   let discovery = 0;
 
   function cached(sourceId) {
-    return catalog.get(indexKind, sourceId);
+    return cachedRecord(catalog.get(indexKind, sourceId), sourceId);
   }
 
   function publish(source, update) {
@@ -77,15 +136,30 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
     return record;
   }
 
+  function pendingStop(row) {
+    if (row.stopRequestedAt != null) return null;
+    const intent = catalog.get(stopKind, stopKey(row.sourceId, row.id));
+    if (intent?.sourceId !== row.sourceId || intent.scheduleId !== row.id || !Number.isFinite(intent.requestedAt)) return null;
+    if (!Object.hasOwn(intent, 'authority')) return intent;
+    return intent.authority === 'desktop' && intent.kind === row.kind && isDeepStrictEqual(intent.scope, row.scope) ? intent : null;
+  }
+
+  function pendingStops(rows) {
+    return rows.map(pendingStop).filter(Boolean);
+  }
+
   function overlay(row) {
-    const pending = catalog.get(stopKind, stopKey(row.sourceId, row.id));
-    if (!pending || row.stopRequestedAt != null) return row;
-    return {...row, status: 'stopping', stopRequestedAt: pending.requestedAt, stopPending: true, nextAt: null};
+    const intent = pendingStop(row);
+    if (!intent) return row;
+    // Old intents used one format for both entry points. Keep their dispatch
+    // pause until a verified receipt or a fresh explicit desktop stop.
+    if (intent.authority !== 'desktop') return {...row, stopNeedsConfirmation: true, nextAt: null};
+    return {...row, status: 'stopping', stopRequestedAt: intent.requestedAt, stopPending: true, nextAt: null};
   }
 
   function snapshot() {
-    return {sources: catalog.list(indexKind).map(entry => ({...entry, connected: present.get(entry.id)?.ready === true,
-      schedules: entry.schedules.map(overlay)}))};
+    return {sources: catalog.list(indexKind).map(entry => cachedRecord(entry)).filter(Boolean).map(entry => ({...entry,
+      connected: present.get(entry.id)?.ready === true, schedules: entry.schedules.map(overlay)}))};
   }
 
   async function sources() {
@@ -115,75 +189,128 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
     return row;
   }
 
-  async function upsert(data, {assertCurrent = () => {}, request} = {}) {
-    assertCurrent();
-    const source = await find(data?.sourceId);
-    assertCurrent();
-    if (!source) throw Error('managed_schedule_original_source_offline');
-    const row = checkedRow(await (request ?? source.request)('POST', route('upsert'), data), source.id);
-    if (row.kind !== data.kind || !isDeepStrictEqual(row.scope, data.scope)) throw Error('managed_schedule_unverified_reply');
-    publish(source, {schedules: [row]});
-    assertCurrent();
-    return overlay(row);
+  function verifiedReply(result, source, original) {
+    const row = checkedRow(result, source.id, original.id);
+    if (!sameSchedule(original, row)) throw Error('managed_schedule_unverified_reply');
+    if (!isCurrentRow(known({sourceId: original.sourceId, scheduleId: original.id}), row)) {
+      throw Error('managed_schedule_stale_reply');
+    }
+    return row;
   }
 
-  async function status(data, {assertCurrent = () => {}, request} = {}) {
-    assertCurrent();
+  async function upsert(data, operation) {
+    assertOperation(operation);
+    const source = await find(data?.sourceId);
+    operation?.assertCurrent();
+    if (!source) throw originalSourceOffline();
+    const result = await (operation?.request ?? source.request)('POST', route('upsert'), data);
+    operation?.assertCurrent();
+    const row = checkedRow(result, source.id);
+    if (row.kind !== data.kind || !isDeepStrictEqual(row.scope, data.scope) ||
+        row.key !== (data.key ?? data.kind) || row.delegationId !== (data.delegationId ?? data.scope.taskId)) {
+      throw Error('managed_schedule_unverified_reply');
+    }
+    publish(source, {schedules: [row]});
+    operation?.assertCurrent();
+    return operation ? row : overlay(row);
+  }
+
+  function offlineStatus(data) {
+    return {...overlay(known(data)), connected: false, observedAt: cached(data.sourceId).observedAt};
+  }
+
+  async function status(data, operation) {
+    assertOperation(operation);
     const previous = known(data);
     const source = await find(data.sourceId);
-    assertCurrent();
-    if (!source) return {...overlay(previous), connected: false, observedAt: cached(data.sourceId).observedAt};
-    let result;
-    try { result = await (request ?? source.request)('POST', route('status'), data); }
-    catch (error) {
-      assertCurrent();
-      if (request) throw error;
-      return {...overlay(previous), connected: false, observedAt: cached(data.sourceId).observedAt};
+    operation?.assertCurrent();
+    if (!source) {
+      if (operation) throw originalSourceOffline();
+      return offlineStatus(data);
     }
-    const row = checkedRow(result, source.id, data.scheduleId);
+    let result;
+    try { result = await (operation?.request ?? source.request)('POST', route('status'), data); }
+    catch (error) {
+      if (operation) {
+        operation.assertCurrent();
+        throw error;
+      }
+      return offlineStatus(data);
+    }
+    operation?.assertCurrent();
+    const row = verifiedReply(result, source, previous);
     publish(source, {schedules: [row]});
-    assertCurrent();
-    return {...overlay(row), connected: true, history: result.history, ...result.script ? {script: result.script} : {}};
+    operation?.assertCurrent();
+    return {...(operation ? row : overlay(row)), connected: true, history: result.history,
+      ...result.script ? {script: result.script} : {}};
   }
 
-  function sendStop(source, intent, {assertCurrent = () => {}, request} = {}) {
+  function verifiedStop(result, source, previous) {
+    const row = verifiedReply(result, source, previous);
+    if (row.status !== 'stopped') throw Error('managed_schedule_stop_unconfirmed');
+    return row;
+  }
+
+  async function stopScoped(data, operation) {
+    assertOperation(operation);
+    const previous = known(data);
+    const payload = {sourceId: previous.sourceId, scheduleId: previous.id};
+    const source = await find(payload.sourceId);
+    operation.assertCurrent();
+    if (!source) throw originalSourceOffline();
+    let row;
+    try {
+      const result = await operation.request('POST', route('stop'), payload);
+      operation.assertCurrent();
+      row = verifiedStop(result, source, previous);
+    } catch (error) {
+      operation.assertCurrent();
+      throw scopedStopFailure(error);
+    }
+    publish(source, {schedules: [row]});
+    operation.assertCurrent();
+    return row;
+  }
+
+  function sendDesktopStop(source, intent) {
     const key = stopKey(intent.sourceId, intent.scheduleId);
-    const previous = stops.get(key);
-    if (previous) return previous;
     const payload = {sourceId: intent.sourceId, scheduleId: intent.scheduleId};
+    const previous = known(payload);
+    if (previous.stopRequestedAt != null) return Promise.resolve(previous);
+    if (source.id !== intent.sourceId || intent.authority !== 'desktop' || !isDeepStrictEqual(pendingStop(previous), intent)) {
+      throw Error('managed_schedule_unverified_stop_intent');
+    }
+    const pending = desktopStops.get(key);
+    if (pending) return pending;
     const operation = (async () => {
-      assertCurrent();
-      const row = checkedRow(await (request ?? source.request)('POST', route('stop'), payload), source.id, intent.scheduleId);
-      if (row.status !== 'stopped' || row.stopRequestedAt == null) throw Error('managed_schedule_stop_unconfirmed');
+      const row = verifiedStop(await source.request('POST', route('stop'), payload), source, previous);
       publish(source, {schedules: [row]});
       catalog.remove(stopKind, key);
-      onChange();
       return row;
-    })().finally(() => stops.delete(key));
-    stops.set(key, operation);
+    })().finally(() => desktopStops.delete(key));
+    desktopStops.set(key, operation);
     return operation;
   }
 
-  async function stop(data, {assertCurrent = () => {}, request} = {}) {
-    assertCurrent();
+  async function stop(data, operation) {
+    if (operation !== undefined) return stopScoped(data, operation);
     const row = known(data);
     if (row.stopRequestedAt != null) return row;
     const key = stopKey(data.sourceId, data.scheduleId);
-    const intent = catalog.get(stopKind, key) ?? catalog.put(stopKind, key,
-      {sourceId: data.sourceId, scheduleId: data.scheduleId, requestedAt: clock()});
-    onChange();
-    let result;
+    let intent = pendingStop(row);
+    if (intent?.authority !== 'desktop') {
+      intent = catalog.put(stopKind, key, {authority: 'desktop', sourceId: row.sourceId, scheduleId: row.id,
+        kind: row.kind, scope: row.scope, requestedAt: clock()});
+      onChange();
+    }
     try {
       const source = await find(data.sourceId);
-      assertCurrent();
-      if (source) result = await sendStop(source, intent, {assertCurrent, request});
-    } catch (error) {
-      assertCurrent();
+      if (source) return await sendDesktopStop(source, intent);
+    } catch {
       // A lost reply can follow a committed stop. Preserve the local intent
       // until its exact original worker acknowledges the stopped schedule.
     }
-    assertCurrent();
-    return result ?? overlay(known(data));
+    return overlay(known(data));
   }
 
   function validDispatch(source, entry, generation) {
@@ -194,9 +321,10 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
     const seen = new Set();
     for (const event of events) {
       if (!token(event?.id) || !token(event.scheduleId) || event.sourceId !== source.id || !event.scope) continue;
-      if (notifications.has(event.id) || catalog.get(stopKind, stopKey(source.id, event.scheduleId))) continue;
+      if (notifications.has(event.id)) continue;
       const schedule = cached(source.id)?.schedules.find(row => row.id === event.scheduleId);
-      if (schedule?.kind !== 'wake_agent' || schedule.stopRequestedAt != null || !isDeepStrictEqual(event.scope, schedule.scope)) continue;
+      if (schedule?.kind !== 'wake_agent' || schedule.stopRequestedAt != null || pendingStop(schedule) ||
+          !isDeepStrictEqual(event.scope, schedule.scope)) continue;
       const owner = JSON.stringify([event.scope.provider, event.scope.threadId]);
       if (seen.has(owner)) continue;
       seen.add(owner);
@@ -263,13 +391,13 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
   }
 
   async function pumpSource(source, entry, generation) {
-    const relevant = record => record.sourceId === source.id;
-    for (const intent of catalog.list(stopKind).filter(relevant)) {
+    for (const intent of pendingStops(cached(source.id)?.schedules ?? [])) {
+      if (intent.authority !== 'desktop') continue;
       if (!validDispatch(source, entry, generation)) return;
-      try { await sendStop(source, intent); } catch { /* retain the stop and exclude that schedule */ }
+      try { await sendDesktopStop(source, intent); } catch { /* retain the stop and exclude that schedule */ }
     }
     if (!validDispatch(source, entry, generation)) return;
-    const skipScheduleIds = catalog.list(stopKind).filter(relevant).map(row => row.scheduleId);
+    const skipScheduleIds = pendingStops(cached(source.id)?.schedules ?? []).map(intent => intent.scheduleId);
     const resume = !entry.ready || entry.resume === true;
     const result = await source.request('POST', route('pump'), {sourceId: source.id, resume, skipScheduleIds});
     if (!validDispatch(source, entry, generation)) return;
@@ -314,9 +442,10 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
       if (entry.ready) deliver(source, entry, generation, entry.deliveries);
       if (now < entry.retryAt) continue;
       const state = cached(source.id);
-      const pendingStop = catalog.list(stopKind).some(intent => intent.sourceId === source.id);
-      const due = nextDispatch((state?.schedules ?? []).map(overlay));
-      if (entry.ready && !pendingStop && due > now + entry.offset) {
+      const pending = pendingStops(state?.schedules ?? []);
+      const needsStop = pending.some(intent => intent.authority === 'desktop');
+      const due = nextDispatch(state?.schedules ?? [], new Set(pending.map(intent => intent.scheduleId)));
+      if (entry.ready && !needsStop && due > now + entry.offset) {
         if (now >= entry.nextAuditAt &&
             state?.runs.some(run => ['queued', 'running', 'unknown'].includes(run.status) && !run.scheduleId && !run.managedObservation)) {
           entry.nextAuditAt = now + savedRunRefreshSeconds;

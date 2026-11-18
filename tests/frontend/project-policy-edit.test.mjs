@@ -10,6 +10,30 @@ for(const change of [rows=>rows[0].policy.gpus.push(1),rows=>rows[0].unknown_top
 for(const phase of ['open','save'])test('Authoring-only refused at '+phase+' without upgrade',async()=>{const f=fixture();if(phase==='save'){const spec=await draft(f);spec.name='Changed';f.mutate(rows=>rows[0].authoring_only=true);await assert.rejects(f.api.save(spec),/authoring_only/);}else{f.mutate(rows=>rows[0].authoring_only=true);await assert.rejects(f.api.open(),/authoring_only/);}assert.equal(f.writes.length,0);});
 for(const property of ['id','authoring_only','unknown_top'])test('Editable JSON cannot supply '+property,async()=>{const f=fixture(),spec=await draft(f);spec.name='Changed';spec[property]=property==='id'?'other':true;await assert.rejects(f.api.save(spec),/invalid_fields/);assert.equal(f.writes.length,0);});
 test('Unknown policy JSON cannot replace preserved future fields',async()=>{const f=fixture(),spec=await draft(f);spec.policy.future_policy={keep:false};await assert.rejects(f.api.save(spec),/invalid_fields/);assert.equal(f.writes.length,0);});
+test('An explicit zero-GPU edit retains the same project, environments and other policy fields',async()=>{
+ const f=fixture(),spec=await draft(f),before=f.rows()[0];
+ spec.policy.gpus=[];
+ assert.deepEqual(await f.api.save(spec),{...before,policy:{...before.policy,gpus:[]}});
+ assert.equal(f.writes.length,1);
+});
+test('Malformed local GPU lists never issue a project edit request',async()=>{
+ const f=fixture(),spec=await draft(f);
+ for(const gpus of ['0',null,[true],['1'],[2**53],Array(1)]){
+  await assert.rejects(f.api.save({...spec,policy:{...spec.policy,gpus}}),/invalid_fields/);
+ }
+ assert.equal(f.writes.length,0);
+});
+test('Dedicated installation grants can be retained while editing GPU IDs in the same project',async()=>{
+ const repair=fixture();repair.mutate(rows=>{rows[0].policy.engines=['installation.check'];});
+ const spec=await draft(repair);spec.policy.gpus=[];
+ const saved=await repair.api.save(spec);
+ assert.deepEqual(saved.policy.engines,['installation.check']);
+ assert.deepEqual(saved.policy.gpus,[]);
+ const generic=fixture(),before=await draft(generic);
+ before.policy.engines=['installation.check'];
+ await assert.rejects(generic.api.save(before),/invalid_fields/);
+ assert.equal(generic.writes.length,0);
+});
 test('Changed worker/selection during latest read causes zero POST',async()=>{const f=fixture(),spec=await draft(f);spec.name='Changed';f.hooks.read=async n=>{if(n===2)f.switch();};await assert.rejects(f.api.save(spec),/unavailable/);assert.equal(f.writes.length,0);});
 test('Late changed owner after dispatched save reports unconfirmed,never claims cancellation',async()=>{const f=fixture(),spec=await draft(f);spec.name='Changed';f.hooks.write=async()=>f.switch();await assert.rejects(f.api.save(spec),/save_unconfirmed/);assert.equal(f.writes.length,1);assert.equal(f.rows()[0].name,'Changed');});
 test('No changes or optional absent clusters do not POST',async()=>{const f=fixture(),spec=await draft(f);spec.policy.clusters=[];await assert.rejects(f.api.save(spec),/no_changes/);assert.equal(f.writes.length,0);assert.deepEqual(projectPolicyChanges(editableProjectSpec(f.rows()[0]),spec),[]);});

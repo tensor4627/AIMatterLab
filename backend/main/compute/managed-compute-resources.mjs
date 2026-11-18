@@ -103,7 +103,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    }catch(error){
     if(resources.get(resource.resourceId)===resource){
      resource.serviceStatus=['ssh_service_registration_required','ssh_service_maintenance_required'].includes(error.message)?'configuration_required':'unavailable';
-     resource.serviceError=['ssh_service_maintenance_required','managed_compute_service_changed','terminal_service_active','terminal_service_unknown','ssh_authentication_unconfirmed'].includes(error.message)?error.message:'managed_compute_private_service_unavailable';
+     resource.serviceError=['ssh_service_registration_required','ssh_service_maintenance_required','managed_compute_service_changed','terminal_service_active','terminal_service_unknown','ssh_authentication_unconfirmed'].includes(error.message)?error.message:'managed_compute_private_service_unavailable';
     }
     return null;
    }finally{if(resource.preparing===preparation)resource.preparing=null;changed();}
@@ -177,14 +177,15 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   return view(resource);
  }
 
- async function projectGrant(scope,resource){
+ async function projectGrant(scope,resource,{required=false}={}){
   const expected=resource.service;
   const assertCurrent=()=>{liveScope(scope);current(resource);if(resource.service!==expected)fail('managed_compute_service_changed');};
   assertCurrent();
+  if(required&&!expected)fail(resource.serviceError||'managed_compute_private_service_unavailable');
   try{return await managedWorkerProject(scope,resource,expected,assertCurrent);}
   catch(error){
-   if(sourceFailure(error.message)){discardService(resource,expected);return null;}
-   if(error.message==='managed_compute_worker_request_failed')return null;
+   if(sourceFailure(error.message))discardService(resource,expected);
+   if(!required&&(sourceFailure(error.message)||error.message==='managed_compute_worker_request_failed'))return null;
    throw error;
   }
  }
@@ -347,9 +348,15 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(rows.length!==1)fail(rows.length?'managed_compute_resource_choice_required':'managed_compute_resource_lease_required');
   const lease=rows[0];
   await lease.opening;assertLease(scope,lease);
-  if(!await allowed(scope,lease.resource,action))fail('managed_compute_project_grant_required');
+  const service=lease.resource.service;
+  let grant;
+  if(action==='service'){
+   grant=await projectGrant(scope,lease.resource,{required:true});
+   if(lease.resource.service!==service)fail('managed_compute_service_changed');
+   if(!grant)fail('managed_compute_project_grant_required');
+  }else if(!await allowed(scope,lease.resource,action))fail('managed_compute_project_grant_required');
   assertLease(scope,lease);lease.touchedAt=now();
-  return lease;
+  return {lease,service,grant};
  }
 
  async function callTerminalTool(name,args,scope){
@@ -369,7 +376,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(!id(args.session_id)||reading&&(args.cursor!==undefined&&(!Number.isSafeInteger(args.cursor)||args.cursor<0)||args.max_bytes!==undefined&&(!Number.isInteger(args.max_bytes)||args.max_bytes<1||args.max_bytes>65536)))fail('managed_compute_invalid_request');
   const own=[...leases.values()].find(lease=>lease.shell?.sessionId===args.session_id&&equal(lease.scope,ownerOf(scope)));
   if(!own)fail('managed_compute_resource_lease_required');
-  const lease=await resolveLease(scope,own.resource.resourceId,'terminal');
+  const {lease}=await resolveLease(scope,own.resource.resourceId,'terminal');
   if(lease!==own)fail('managed_compute_resource_lease_changed');
   const ref={...shellRef(lease),sessionId:lease.shell.sessionId,ownerEpoch:lease.shell.ownerEpoch};
   const maxBytes=Math.max(16384,args.max_bytes??65536);
@@ -415,11 +422,11 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
 
  async function resolveService(scope,resourceId){
-  const lease=await resolveLease(scope,resourceId,'service'),resource=lease.resource,service=resource.service;
-  const grant=await projectGrant(scope,resource);
+  const {lease,service,grant}=await resolveLease(scope,resourceId,'service'),resource=lease.resource;
   assertLease(scope,lease);
-  if(!grant||!service||resource.service!==service)fail('managed_compute_project_grant_required');
-  return {sourceId:service.id,resourceId:resource.resourceId,profileId:resource.profileId,kind:resource.kind,...grant};
+  if(!service||resource.service!==service)fail('managed_compute_service_changed');
+  return {sourceId:service.id,resourceId:resource.resourceId,profileId:resource.profileId,kind:resource.kind,
+   supportsManagedSchedules:service.health?.managed_schedule_schema===1,...grant};
  }
 
  async function assertRun(scope,resource,service,runId,kind){
@@ -447,7 +454,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(dispatchedRunActions.has(attemptKey))fail('managed_compute_run_action_unconfirmed');
   activeRunActions.add(runKey);
   try{
-   const grant=await projectGrant(scope,resource);
+   const grant=await projectGrant(scope,resource,{required:true});
    if(!grant)fail('managed_compute_project_grant_required');
    // Observation is passive. In particular, cluster/status can poll the
    // scheduler and cannot substitute for the current immutable worker record.
@@ -484,8 +491,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
 
  async function serviceRequest(scope,data){
-  exact(data,['resourceId','method','target','data','mcp','timeoutMs','checkCurrent'],['resourceId','method','target']);
-  const lease=await resolveLease(scope,data.resourceId,'service'),resource=lease.resource,service=resource.service;
+  exact(data,['resourceId','method','target','data','mcp','timeoutMs','checkCurrent','beforeScheduleDispatch'],['resourceId','method','target']);
+  const {lease,service,grant}=await resolveLease(scope,data.resourceId,'service'),resource=lease.resource;
   const check=()=>{assertLease(scope,lease);data.checkCurrent?.();};
   const payload=data.data;
   if(data.method!=='POST'||!service)fail('managed_compute_private_service_unavailable');
@@ -495,7 +502,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
     const {name,arguments:args}=payload.params||{};
     if(runMutations.has(name))return runMutation(scope,lease,service,data,...runMutations.get(name),check);
     if(['prepare_run','prepare_cluster_run'].includes(name)){
-     const remote=name==='prepare_cluster_run',grant=await projectGrant(scope,resource),spec=args?.spec;
+     const remote=name==='prepare_cluster_run',spec=args?.spec;
      if(!grant||spec?.project_id!==scope.projectId||remote!==(resource.kind==='ssh')||
          !(remote?grant.clusterIds.includes(spec?.cluster_id):grant.environmentIds.includes(spec?.environment_id)))fail('managed_compute_project_grant_required');
     }else if(['read_log','run_status','cluster_run_status','cluster_read_log'].includes(name)){
@@ -504,13 +511,19 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    }
   }else{
    if(!/^\/api\/managed-schedules\/(?:upsert|stop|status)$/.test(data.target)||payload?.sourceId!==service.id)fail('managed_compute_invalid_request');
+   if(service.health?.managed_schedule_schema!==1)fail('managed_compute_worker_update_required');
    if(data.target.endsWith('/upsert')){
     if(payload.scope?.projectId!==scope.projectId||payload.scope?.taskId!==scope.taskId||payload.scope?.threadId!==scope.threadId||payload.scope?.provider!==scope.provider)fail('managed_compute_project_grant_required');
     if(payload.scope.runId)await assertRun(scope,resource,service,payload.scope.runId,resource.kind==='ssh'?'cluster-run':'run');
    }else if(!authorizeSchedule||!await authorizeSchedule(scope,payload))fail('managed_compute_project_grant_required');
   }
   check();
-  const response=await anchored(resource,service,data.method,data.target,payload,data.mcp===true,data.timeoutMs,check);
+  const beforeDispatch=health=>{
+   check();
+   if(data.mcp!==true&&health?.managed_schedule_schema!==1)fail('managed_compute_worker_update_required');
+   if(data.mcp!==true)data.beforeScheduleDispatch?.();
+  };
+  const response=await anchored(resource,service,data.method,data.target,payload,data.mcp===true,data.timeoutMs,beforeDispatch);
   check();return response;
  }
 

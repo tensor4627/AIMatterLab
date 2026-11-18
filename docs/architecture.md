@@ -44,6 +44,10 @@ tests/                    frontend/backend/agent/contracts/integration 工程检
 
 ## 请求与状态归属
 
+0.1.13 中，`ConversationAgentHub` 按服务商和会话管理活动轮次与可撤回的工具租约。主进程的 `createManagedComputeResources` 持有已认证资源及各会话的子终端。Windows 原生 OpenSSH 使用原连接及远端 relay，WSL/Linux 使用已核验的 OpenSSH master。下文关于控制 socket 的实现对应 WSL/Linux 路径。普通终端与显式交接仍有各自的入口。[会话所有者](../agent/providers/conversation-agent-hub.mjs) · [资源所有者](../backend/main/compute/managed-compute-resources.mjs) · [Windows 原生通道](../desktop/platform/terminal-service/native-ssh.mjs)
+
+有限次计划由 worker 持久保存，桌面保存带来源和观察时间的索引。桌面定时器通过原服务检查到期轮次，worker 原子记账并调度。人工离线停止可以排队，Agent 停止要在原会话的受限通道内完成。原会话的唤醒另存投递回执。工作台进入托盘后可以继续派发，明确退出时停止派发。[桌面计划索引](../backend/main/compute/managed-schedules.mjs) · [worker 计划](../backend/worker/studio_worker/compute/managed_schedules.py) · [唤醒投递](../agent/sessions/wake-delivery.mjs)
+
 前端只拥有展示和未发送的编辑状态，通过 `frontend/api` 请求主进程。`desktop/main.mjs` 保留启动装配、可信 sender 校验与 IPC 注册；业务委托对应后端或 Agent 所有者。原生能力通过宿主适配器传入，后端不反向引用前端或 Agent 提示词。
 
 桌面 Catalog 保存会话、任务草稿、版本引用和索引。worker Store 保存权威 Run、不可变输入、配置和流程事实；JSON 镜像可重建，不能代替 Store 判定作业状态。关闭桌面不会结束已提交任务；未知运行只观察和核对，不自动新建尝试。交互式 SSH/本地终端属于本次桌面生命周期，正常退出会有界关闭；保存的连接配置保留，下一次建立新终端。旧终端缓存仅作历史诊断，不用于恢复本次操作权限。

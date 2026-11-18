@@ -6,7 +6,7 @@ import path from 'node:path';
 import {ProjectSkills} from '../../agent/skills/project-skills.mjs';
 import {createManagedComputeAliases,resourceFingerprint} from '../../backend/main/compute/managed-compute-aliases.mjs';
 import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
-import {createManagedComputeServices} from '../../backend/main/compute/managed-compute-services.mjs';
+import {createManagedComputeServices,managedWorkerProject} from '../../backend/main/compute/managed-compute-services.mjs';
 import {taskForRecordIndex} from '../../backend/main/compute/worker-service-version.mjs';
 import {assertRendererWorkerRoute} from '../../contracts/transport-policy.mjs';
 
@@ -14,6 +14,15 @@ const profile=(id,name)=>({id,kind:'ssh',version:1,name,host:'private-'+id+'.inv
  ssh_client:'/usr/bin/ssh',distribution:'Private WSL',mode:'interactive',identity_file:'/secret/key',proxy_jump:[],via:[]});
 const verified=(connectionId,profile)=>({connectionId,profileId:profile.id,profileVersion:profile.version,status:'authenticated',authentication:'verified',capabilities:{multiplex:true}});
 const fixtureScope=(provider,threadId,projectId='project')=>({provider,threadId,projectId,taskId:'task-'+threadId,checkCurrent:()=>true});
+
+test('an unreadable project catalog is distinct from an observed absence of authority',async()=>{
+ const check=response=>managedWorkerProject({projectId:'p'},{kind:'wsl'},{forward:async()=>response},()=>{});
+ assert.equal(await check({status:403}),null);
+ assert.equal(await check({status:200,data:[]}),null);
+ for(const response of [{status:500},{status:200,data:{}}]){
+  await assert.rejects(check(response),/managed_compute_worker_request_failed/);
+ }
+});
 function deferred(){let resolve;const promise=new Promise(ack=>resolve=ack);return {promise,resolve};}
 
 function fixture(t,options={}){
@@ -305,6 +314,8 @@ test('human first-use setup opens one private service on its published host with
  assert.equal(manager.snapshot().find(row=>row.profileId==='A').serviceStatus,'configuration_required');
  f.turn(f.owner,'用材料中心','independent',manager);
  assert((await manager.acquire(f.owner,{resourceId:'ssh:A'})).terminal?.sessionId);
+ await assert.rejects(manager.resolveService(f.owner,'ssh:A'),/ssh_service_registration_required/);
+ assert.equal((await manager.callTerminalTool('list_compute_terminals',{},f.owner)).sessions.length,1);
  const ref={connectionId:'conn-A',profileId:'A',profileVersion:1};
  const views=await Promise.all([manager.configureService(ref),manager.configureService(ref)]);
  assert(views.every(row=>row.serviceStatus==='ready'));
