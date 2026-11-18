@@ -1,0 +1,47 @@
+mirror-main-to-github:
+  stage: deploy
+  image: docker.io/library/buildpack-deps:bookworm-scm@sha256:5bac6b3020afcf0358de87990605d5dc4c3f060629381912266b9b9278375af3
+  resource_group: github-main-mirror
+  timeout: 5 minutes
+  retry:
+    max: 1
+    when: runner_system_failure
+    exit_codes: [124, 128, 255]
+  variables:
+    GIT_DEPTH: "0"
+    GIT_CHECKOUT: "false"
+  environment:
+    name: github-main-mirror
+    action: prepare
+  rules:
+    - if: '$CI_PROJECT_ID == "25392" && $CI_COMMIT_BRANCH == "main" && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'
+  script:
+    - |
+      set -eu
+      umask 077
+      ssh_dir=$(mktemp -d)
+      trap 'rm -rf "$ssh_dir"' EXIT
+      printf '%s' "$GITHUB_MAIN_DEPLOY_KEY_B64" | base64 -d > "$ssh_dir/key"
+      unset GITHUB_MAIN_DEPLOY_KEY_B64
+      printf '%s\n' '[ssh.github.com]:443 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$ssh_dir/known_hosts"
+      cat > "$ssh_dir/config" <<EOF
+      Host ssh.github.com
+        AddressFamily inet
+        # The NJU runner can stall during Git transfer with the default traffic class.
+        IPQoS none
+        BatchMode yes
+        ConnectTimeout 12
+        HostKeyAlgorithms ssh-ed25519
+        KexAlgorithms curve25519-sha256
+        IdentitiesOnly yes
+        IdentityFile $ssh_dir/key
+        UserKnownHostsFile $ssh_dir/known_hosts
+        StrictHostKeyChecking yes
+        ServerAliveInterval 10
+        ServerAliveCountMax 2
+      EOF
+      export GIT_SSH_COMMAND="ssh -F $ssh_dir/config"
+
+      # Queued jobs always publish the current NJU main, even if they start out of order.
+      git fetch --no-tags origin refs/heads/main
+      timeout 75s git -c push.followTags=false push --verbose ssh://git@ssh.github.com:443/tensor4627/AIMatterLab.git FETCH_HEAD:refs/heads/main
