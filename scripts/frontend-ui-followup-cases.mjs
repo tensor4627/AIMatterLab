@@ -10,6 +10,37 @@ export async function frontendUiFollowupCases({check,out}){
    if(method==='compute.resource.status')return {schemaVersion:1,kind:null,status:'none',selectionId:null};return original(method,data);
   };return window.renderTest('App');
  },{custom,empty});await page.locator('.primary-navigation').waitFor({state:'attached'});}
+ await check('interaction-experience-guided-connected-pages',async page=>{
+  await page.evaluate(()=>{
+   const original=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>{
+    if(method==='state')return {...await original(method,data),setupGuide:{page:'ready',directory:'fixture',directoryKind:'profile'}};
+    if(method==='worker.request'&&data.target==='/api/compute/readiness')return {environments:[],clusters:[]};
+    if(method==='worker.request'&&data.target==='/api/environments/drafts')return [];
+    return original(method,data);
+   };
+   return window.renderTest('App');
+  });
+  const guide=page.getByTestId('setup-assistant'),spot=page.getByTestId('guide-spotlight');
+  await page.waitForFunction(()=>window.__test.calls.some(c=>c.method==='worker.request'&&c.data.target==='/api/runs'));
+  await guide.getByRole('button',{name:'配置我的第一个科学工具'}).click();
+  await guide.getByRole('button',{name:'登记已有环境'}).click();
+  await page.waitForFunction(()=>document.querySelector('dialog[open]')?.dataset.target==='discover');
+  await page.keyboard.press('Space');await spot.waitFor({state:'detached'});
+  assert.equal(await page.getByTestId('discover-compute').evaluate(el=>el===document.activeElement),true);
+  await page.getByTestId('setup-lesson').click();
+  await guide.getByRole('button',{name:/跟着示例走一遍/}).click();
+  await guide.getByRole('button',{name:'查看结果',exact:true}).click();
+  await guide.getByRole('button',{name:'打开运行记录'}).click();
+  await page.waitForFunction(()=>document.querySelector('dialog[open]')?.dataset.target==='run-record');
+  await spot.getByRole('button').click();
+  assert.equal(await page.locator('.job-record-open').first().evaluate(el=>el===document.activeElement),true);
+  const calls=await page.evaluate(()=>window.__test.calls);
+  assert.deepEqual(calls.filter(c=>c.method==='compute.setup'||c.method==='task.execute'),[]);
+  // Loading the registered environment reads its existing check with POST /api/runtime-guide.
+  assert.deepEqual(calls.filter(c=>c.method==='worker.request'&&c.data.method==='POST'&&c.data.target!=='/api/runtime-guide').map(c=>c.data.target),[]);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('studio.section')),'runs');
+ });
  for(const reduced of [false,true]){
   const preference=reduced?'reduce':'no-preference';
   await check('interaction-experience-menus-and-groups-'+preference,async page=>{
