@@ -18,8 +18,8 @@ export function loginUrl(provider,url){
  return target.href;
 }
 export class AgentHub extends EventEmitter{
- constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,resourceScope=()=>null,fetchApi,host=providerRuntime,resolveCli,apiBridgeFactories={}}){
-  super();Object.assign(this,{codex,root,catalog,vault,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bindWorkerContext=bindWorkerContext;this.contexts=new Map();this.contextGeneration=0;this.contextPending=0;this.contextQueue=Promise.resolve();this.pristineThreads=new Set();this.attemptedThreads=new Set();this.contextResume=new Map();this.pendingTurnDispatches=new Set();this.contextClosing=new Set();this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.host=host;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
+ constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,resourceScope=()=>null,fetchApi,host=providerRuntime,resolveCli,instructions=STUDIO_INSTRUCTIONS,apiBridgeFactories={}}){
+  super();Object.assign(this,{codex,root,catalog,vault,instructions,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bindWorkerContext=bindWorkerContext;this.contexts=new Map();this.contextGeneration=0;this.contextPending=0;this.contextQueue=Promise.resolve();this.pristineThreads=new Set();this.attemptedThreads=new Set();this.contextResume=new Map();this.pendingTurnDispatches=new Set();this.contextClosing=new Set();this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.host=host;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
   this.resourceScope=resourceScope;this.resolveCli=resolveCli;this.credentialRevisions=new Map();this.apiBridgeFactories=apiBridgeFactories;this.modelProfiles=new ModelProfileStore({catalog,vault,settings});
   this.codex.on?.('event',event=>{
     if(event.method==='studio/codexDisconnected'){
@@ -103,7 +103,7 @@ export class AgentHub extends EventEmitter{
  path(provider){const settings=this.getSettings();return provider==='codex'?settings.codexPath:settings[provider+'Path'];}
  bridge(provider){return provider==='codex'?this.codex:this.bridges.get(provider);}
  createApiBridge(provider,overrides={}){
-  const options={provider,root:this.root,catalog:this.catalog,credential:()=>this.vault.get(provider),worker:()=>this.bridgeWorkers.get(provider),...this.fetchApi?{fetchApi:this.fetchApi}:{},...overrides};
+  const options={provider,instructions:this.instructions,root:this.root,catalog:this.catalog,credential:()=>this.vault.get(provider),worker:()=>this.bridgeWorkers.get(provider),...this.fetchApi?{fetchApi:this.fetchApi}:{},...overrides};
   if(this.apiBridgeFactories[provider])return this.apiBridgeFactories[provider](options);
    if(provider==='deepseek')return new DshBridge(options);
    options.profiles=overrides.profiles||this.modelProfiles;
@@ -158,7 +158,7 @@ export class AgentHub extends EventEmitter{
   }
   if(['deepseek','compatible','qwen'].includes(provider)){this.workerFor(provider);try{return await bridge.start();}catch(error){this.release(provider);throw error;}}
   const credential=['qwen','deepseek','compatible'].includes(provider)?this.vault.get(provider):null;
-  const profile=this.host.prepareProfile(this.root,provider,credential);
+  const profile=this.host.prepareProfile(this.root,provider,credential,this.instructions);
   const previous=this.bridgeWorkers.get(provider);let scoped=this.workerFor(provider);
   if(bridge.process&&(bridge.executable!==executable||previous?.url!==scoped?.url||previous?.tokens?.mcp!==scoped?.tokens?.mcp)){this.disconnect(provider,{preserveConnectIntent:true});scoped=this.workerFor(provider);}
   try{return await bridge.start(executable,profile,scoped);}catch(error){this.release(provider);throw error;}
@@ -192,7 +192,7 @@ export class AgentHub extends EventEmitter{
    await this.rpc(provider,'thread/resume',{threadId:resume,model:params.model});assertSelected();
   }
 
-  if(provider==='codex'&&['thread/start','thread/resume'].includes(method))params={...params,cwd:this.getSettings().cwd,approvalPolicy:'on-request',sandbox:'read-only',config:{...params.config,...agentConfig(this.preferences('codex'))},developerInstructions:STUDIO_INSTRUCTIONS};
+  if(provider==='codex'&&['thread/start','thread/resume'].includes(method))params={...params,cwd:this.getSettings().cwd,approvalPolicy:'on-request',sandbox:'read-only',config:{...params.config,...agentConfig(this.preferences('codex'))},developerInstructions:this.instructions};
   if(provider!=='codex'&&method==='account/read')return {...await this.account(provider),transportConnected:true};
   if(provider!=='codex'&&method==='thread/list')return {data:this.threads(provider)};
   if(provider!=='codex'&&method==='turn/start'){
@@ -270,7 +270,7 @@ export class AgentHub extends EventEmitter{
   const loginGeneration=this.cliLoginGeneration||0,executable=this.resolveCli?await this.resolveCli('kimi'):this.path('kimi');
   if(loginGeneration!==(this.cliLoginGeneration||0))throw Error('Kimi login was cancelled');
   if(this.loginChild)throw Error('A provider login is already in progress');
-  const profile=this.host.prepareProfile(this.root,'kimi');const child=this.host.spawnCli(executable,['acp','--login','--region',value.region||'mainland-cn'],{provider:'kimi',cwd:profile.cwd,env:profile.env});
+  const profile=this.host.prepareProfile(this.root,'kimi',undefined,this.instructions);const child=this.host.spawnCli(executable,['acp','--login','--region',value.region||'mainland-cn'],{provider:'kimi',cwd:profile.cwd,env:profile.env});
   this.loginChild=child;this.loginStatus.kimi={phase:'starting',modelAccess:'not_run'};
   let buffer='';
   const publish=()=>{

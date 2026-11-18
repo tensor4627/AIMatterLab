@@ -84,7 +84,7 @@ import {discoverSources,toolInventory} from '../backend/main/tools/source-projec
 
 import { localSkills } from '../agent/skills/skills.mjs';
 
-import {agentConfig} from '../agent/context/agent-settings.mjs';
+import {agentConfig,workspaceAgentInstructions} from '../agent/context/agent-settings.mjs';
 import {TaskRecords} from "../agent/sessions/task-records.mjs";
 import {existingConnections,existingProfile} from "../backend/main/compute/existing-ssh.mjs";
 
@@ -230,7 +230,7 @@ if(installationVerifying){
  const sourceIds=config.desktop.source_ids??[];if(!Array.isArray(sourceIds)||sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id)))throw Error('Invalid installation source summary scope');
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
-agents=new AgentHub({resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
+agents=new AgentHub({instructions:workspaceAgentInstructions(workspace),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
 scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compatible'].includes(provider)||agents.bridge(provider)?.selection?.profile.sharePublicGuides===true,map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
@@ -413,7 +413,7 @@ privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:acti
 worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
 const projectSkills=new ProjectSkills({root:settings.userCacheDirectory||defaultUserCacheDirectory,current:()=>workflowContext.current()});
 worker.setProjectSkills(projectSkills);
-terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,guard:()=>worker.authoringGuard});
+terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,scientificSkills,guard:()=>worker.authoringGuard});
 await terminalMcp.start();
 customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.active||settings.agentProvider||'codex',getActiveTaskId:provider=>activeAuthoringTasks.get(provider),assertProvider:context=>{workflowContext.assertScope(context);return providerId(context.provider);},assertHuman:event=>{trusted(event);return true;},access:()=>true,
  validateRuntimeReceipt:async(runtime,context)=>{const current=await worker.request('POST','/api/runtime-guide',{environment_id:context.args.environment_id,engine:'pygas.build'});return current.status==='observed'&&runtime.status==='observed'&&current.receipt===runtime.receipt_sha256;},

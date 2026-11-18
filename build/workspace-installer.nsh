@@ -103,9 +103,24 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
 !macroend
 
 !macro customInstall
-  File /oname=$PLUGINSDIR\workspace-guide.md "${PROJECT_DIR}\installation\workspace-guide.md"
-  ; CopyFile's fail-if-exists flag preserves any user-authored project instructions.
+  File /oname=$PLUGINSDIR\workspace-guide.md "${PROJECT_DIR}\agent\context\AGENTS.md"
+  ; Seed new workspaces and update only the unchanged guide shipped in 0.1.9.
   System::Call 'kernel32::CopyFileW(w "$PLUGINSDIR\workspace-guide.md", w "$INSTDIR\AGENTS.md", i 1)i.r0'
+  ${If} $0 == 0
+    File /oname=$PLUGINSDIR\legacy-workspace-guide.md "${PROJECT_DIR}\installation\workspace-guide.md"
+    ${StdUtils.HashFile} $R5 "SHA2-256" "$PLUGINSDIR\legacy-workspace-guide.md"
+    ${StdUtils.HashFile} $R6 "SHA2-256" "$INSTDIR\AGENTS.md"
+    StrLen $R7 $R5
+    ${If} $R7 == 64
+    ${AndIf} $R5 == $R6
+      GetTempFileName $R3 "$INSTDIR"
+      System::Call 'kernel32::CopyFileW(w "$PLUGINSDIR\workspace-guide.md", w "$R3", i 0)i.r0'
+      ${If} $0 != 0
+        System::Call 'kernel32::MoveFileExW(w "$R3", w "$INSTDIR\AGENTS.md", i 9)i.r0'
+      ${EndIf}
+      Delete "$R3"
+    ${EndIf}
+  ${EndIf}
   ; Seed a fresh base even for an offline/manual installation. Replace atomically.
   GetTempFileName $R3 "$INSTDIR\user-cache\updates"
   StrCpy $2 $R3

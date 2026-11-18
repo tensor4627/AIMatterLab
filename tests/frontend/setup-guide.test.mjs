@@ -44,7 +44,9 @@ test('SSH authentication is handed to the existing terminal and its setup page r
   assert.equal(shell(h).props.inert,undefined);
   const terminal=h.find(n=>n.type==='./SharedTerminalPanel');
   assert.equal(terminal.props.request.profileId,'saved-example');assert.equal(terminal.props.request.version,3);
-  help(h).props.onClick();await h.flush();assert.equal(guide(h).props.page,'compute');
+  const bubble=h.find(n=>n.type==='./SetupLesson');
+  assert.equal(bubble.props.lesson.destination,'ssh-login');assert.throws(()=>help(h));
+  bubble.props.onReturn();await h.flush();assert.equal(guide(h).props.page,'compute');
   assert.ok(!h.calls.some(c=>c.method==='compute.sshService.connect'||c.method==='task.execute'));
  }finally{h.unmount();}
 });
@@ -61,4 +63,21 @@ test('setting a new default preserves the open chat and its draft; the setup tes
   assert.equal(h.find(node=>node.props?.['data-testid']==='agent-provider').props.value,'qwen');
   assert.equal(h.textarea().props.value,'Reply OK');assert.ok(!h.calls.slice(start).some(c=>c.data?.method==='turn/start'));
  }finally{h.unmount();}
+});
+
+test('a failed conversation handoff keeps the lesson and a successful handoff retains the selected check',async()=>{
+ const h=fixture('ready');try{
+  await h.flush();await guide(h).props.onVisit('short-check','pydyn-md');await h.flush();
+  const bubble=h.find(n=>n.type==='./SetupLesson');assert.deepEqual(bubble.props.lesson,{destination:'short-check',shortCase:'pydyn-md'});
+  assert.equal(shell(h).props.inert,undefined);bubble.props.onReturn();await h.flush();
+  assert.equal(shell(h).props.inert,true);assert.equal(guide(h).props.page,'ready');
+ }finally{h.unmount();}
+ const failed=appWorkerHarness({override:async(method,data,standard)=>{
+  if(method==='state')return {...await standard(method,data),setupGuide:{page:'agent',directory:'workspace',directoryKind:'workspace'}};
+  if(method==='conversation.select')throw Error('Chat unavailable');
+  return standard(method,data);
+ }});try{
+  await failed.flush();await guide(failed).props.onVisit('model-test');await failed.flush();
+  assert.equal(shell(failed).props.inert,true);assert.throws(()=>failed.find(n=>n.type==='./SetupLesson'));
+ }finally{failed.unmount();}
 });

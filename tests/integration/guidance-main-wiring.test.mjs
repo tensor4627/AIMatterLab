@@ -40,7 +40,7 @@ function harness(t,{state='active',withOtherTool=false,withGuidanceSource=false}
  const context={conversationTerminals:null,path,createAgentRequests,app:{isPackaged:false},openUrl:()=>{},privateAccess:{},sharedTerminal:{hasCurrentGrant:()=>false},ScientificSkills,scientificMap:map,bundledSkillRoot:path.join(root,'bundle'),root,settings:{skillRoots:[archived],sourceRoots:[],pygasSkillProviders:['codex'],scientificSkillProviders:{gpumd:['codex']}},catalog:{list:kind=>kind==='source-binding'?sources:[]},scientificSources:()=>{if(withOtherTool)return sources;throw Error('Active main must not discover sources');},resolveSkillGuidance:async scope=>{resolved.push(scope);return facts;},
   setupInstructions:{allowed:()=>false,prepare:async(_provider,_id,callback)=>callback()},
   workflowContext:{current:()=>owner,revision:()=>owner.serial,begin:()=>owner,assert:()=>{},synchronize:async(_ticket,bind)=>bind('codex',owner)},
-  taskRecords:{bound:()=>null,prepareTurn:(_provider,value)=>value},authoringAuthorization:null,
+  taskRecords:{bound:()=>null,prepareTurn:(_provider,value)=>value},authoringAuthorization:null,baseWorkspace:null,
   worker:{providerScopes:{scopes:workerLeases},providerConnection:()=>({}),connection:{},request:()=>{throw Error('No runtime probe or guide needed');}},terminalMcp:{scopes:{scopes:terminalLeases}},toolPackages:{list:query=>{assert.deepEqual(Object.keys(query),[]);managedQueries++;return toolRecords.filter(value=>value.package_version===value.versions.at(-1));},read:query=>{const value=toolRecords.find(record=>record.package_id===query.package_id&&record.package_version===query.package_version);assert(value);return value;}},
   agents:{active:'codex',bridgeWorkers,threadReady:()=>true,selectContext:()=>{},rpc:async(_provider,_method,params)=>{sent.push(params);return {turn:{id:'acknowledged'}};}},
   ensureTaskAuthoring:async()=>null,assertIdleAgent:()=>{},visibleUserText:input=>input.filter(item=>item.type==='text').map(item=>item.text).join('\n'),providerId,assertRpc,
@@ -61,7 +61,7 @@ test('actual main constructor, turn and catalogs consume injected active authori
  const h=harness(t);assert.equal((await h.turn()).turn.id,'acknowledged');assert.equal(h.scans,0);assert.equal(h.reads,0);assert(h.sent[0].input.some(item=>item.text.includes(h.facts.executionSkill.text)));
  const catalog=await h.invoke('skills.catalog');assert.equal(catalog[0].source,'execution snapshot');assert.equal((await h.invoke('scientific.skills',{provider:'codex'})).guidanceState,'active');assert.equal(h.scans,1);
  assert(h.resolved.every(scope=>scope.provider==='codex'&&scope.threadId==='thread'&&scope.checkCurrent()));
- assert(h.managedQueries>=2);
+ assert.equal(h.managedQueries,1);
  assert.deepEqual(h.operations,{exists:0,readdir:0,stat:0,open:0,read:0});
 });
 
@@ -102,4 +102,12 @@ test('actual main selects historical managed entry and reads its exact version o
  const catalog=await h.invoke('skills.catalog'),deliveries=catalog.filter(value=>value.name==='historical-delivery');assert.equal(deliveries.length,2);assert.deepEqual(Array.from(deliveries,value=>value.path).sort(),h.toolRecords.map(value=>path.join(value.snapshot_root,'SKILL.md')).sort());
  const old=h.toolRecords[0],selection={type:'skill',name:old.delivery_skill.name,path:path.join(old.snapshot_root,'SKILL.md')};await h.turn({input:[{type:'text',text:'WTMetaD'},selection]});assert(!JSON.stringify(h.sent.at(-1).input).includes('Version 1 instructions'));assert(!JSON.stringify(h.sent.at(-1).input).includes('Version 2 instructions'));const selected=(await h.invoke('scientific.skills',{provider:'codex'})).selected_skill,document_id=selected.document_ids.find(id=>id.endsWith(':manual.md'));assert(document_id);const detail=await h.readDocument(h.scope(),{function_id:'selected.managed',document_id});assert(detail.text.includes('Version 1 instructions'));assert(!detail.text.includes('Version 2 instructions'));
  h.facts.archivedResources.push({id:'historical-delivery',role:'delivery',paths:[selection.path]});const before=h.sent.length;await assert.rejects(h.turn({input:[{type:'text',text:'WTMetaD'},selection]}),/archived/);assert.equal(h.sent.length,before);assert.equal((await h.invoke('skills.catalog')).find(value=>value.path===selection.path).enabled,false);
+});
+
+
+test('ordinary first-turn guidance comes from the index without eagerly reading source or skill bodies',async t=>{
+ const h=harness(t,{state:'legacy_unconfigured'});
+ const input=[{type:'text',text:'How do I set up a WTMetaD simulation?'}];
+ await h.turn({input});assert.deepEqual(h.sent[0].input,input);
+ assert.equal(h.managedQueries,0);assert.equal(h.scans,0);assert.equal(h.reads,0);
 });

@@ -3,7 +3,6 @@
   display:flex; align-items:center; gap:6px; background:none; border:0; color:var(--muted);
   padding:4px 12px; -webkit-app-region:no-drag; cursor:pointer;
 }
-.titlebar .setup-help.resume {color:var(--accent); background:var(--accent-bg); border-radius:6px;}
 @media(max-width:850px) {
   .showing-setup .title-path {display:none;}
   .showing-setup .brand {margin-right:auto;}
