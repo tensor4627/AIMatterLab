@@ -230,7 +230,21 @@ if(installationVerifying){
  const sourceIds=config.desktop.source_ids??[];if(!Array.isArray(sourceIds)||sourceIds.some(id=>!['pygas','pydyn','gpumd','hotpp','torchnep'].includes(id)))throw Error('Invalid installation source summary scope');
  settings=catalog.put('settings','main',{...settings,distribution:config.worker.distribution,workerRoot:config.worker.root,workerPort:config.worker.port||8767,cwd:root,sourceIds,agentProvider:config.desktop.agent_provider||'codex'});
 }
-agents=new AgentHub({instructions:workspaceAgentInstructions(workspace),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
+const projectSkills=new ProjectSkills({root:settings.userCacheDirectory||defaultUserCacheDirectory,current:()=>workflowContext.current(),bundledRoot:bundledSkillRoot,
+ previousRoots:[defaultUserCacheDirectory,previousSkillRoot,path.join(userCacheBase,'user-cache','skills'),...(catalog.get('skill-cache','history')?.roots||[])]});
+function rememberSkillCache(){
+ projectSkills.previousRoots.add(projectSkills.root);
+ catalog.put('skill-cache','history',{roots:[...projectSkills.previousRoots]});
+}
+if(projectSkills.overlapsBundle(projectSkills.root)){
+ try {
+  const directory=projectSkills.prepareRoot(defaultUserCacheDirectory);
+  rememberSkillCache();
+  settings=catalog.put('settings','main',{...settings,userCacheDirectory:directory});
+  projectSkills.root=directory;
+ }catch{console.warn('Existing skill cache retained. Choose a directory separate from built-in skills in Settings.');}
+}
+agents=new AgentHub({instructions:workspaceAgentInstructions(workspace,projectSkills.personalDirectory),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
 scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compatible'].includes(provider)||agents.bridge(provider)?.selection?.profile.sharePublicGuides===true,map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
@@ -411,7 +425,6 @@ localReview=registerCalculationReview({handle,records:taskRecords,worker,current
 
 privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:activeAuthoringTasks});
 worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
-const projectSkills=new ProjectSkills({root:settings.userCacheDirectory||defaultUserCacheDirectory,current:()=>workflowContext.current()});
 worker.setProjectSkills(projectSkills);
 terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,scientificSkills,guard:()=>worker.authoringGuard});
 await terminalMcp.start();
@@ -484,8 +497,12 @@ handle('diagnostics.performance',value=>{
 handle('settings',data=>{
  const next=normalizeSettings(settings,data);
  next.userCacheDirectory=projectSkills.prepareRoot(next.userCacheDirectory||defaultUserCacheDirectory);
+ if(projectSkills.root!==next.userCacheDirectory)rememberSkillCache();
  settings=catalog.put('settings','main',next);
- projectSkills.root=settings.userCacheDirectory;
+ if(projectSkills.root!==settings.userCacheDirectory){
+  projectSkills.root=settings.userCacheDirectory;
+  agents.updateInstructions(workspaceAgentInstructions(workspace,projectSkills.personalDirectory));
+ }
  return settings;
 });
 function scientificSources(){return discoverSources({cwd:settings.cwd,applicationRoot:app.isPackaged?undefined:root,workspaceSources:workspace?.sources,ids:settings.sourceIds,roots:[...(settings.sourceRoots||[]),...catalog.list('source-binding').map(v=>v.root)]});}
@@ -582,7 +599,7 @@ handle('agent.cli.choose',async value=>{
  if(readiness.status==='ready')settings=catalog.put('settings','main',normalizeSettings(settings,{[provider+'Path']:response.filePaths[0]}));
  return readiness;
 });
-const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){return agentRequests(value);}
 handle('agent.rpc',agentRpc);
 handle('agent.recover',async({provider,threadId,model})=>{
@@ -621,7 +638,7 @@ handle('agent.testConnection',async value=>{if(!value||Object.keys(value).join('
 handle('agent.login.open',async({provider})=>{
   const state=await agents.account(provider);if(!state.url)throw Error('Start provider login first');return shell.openExternal(loginUrl(provider,state.url));
 });
-handle('skills.catalog',async()=>{const policy=await scientificSkills.resolvePolicy(skillGuidanceScope(agents.active));const result=[...localSkills(studioSkillRoots(),{policy}),...managedSkillEntries(policy)];await policy.revalidate();return result;});
+handle('skills.catalog',async()=>{const policy=await scientificSkills.resolvePolicy(skillGuidanceScope(agents.active));const result=[...localSkills(studioSkillRoots(),{policy,projectSkills,bundledRoot:bundledSkillRoot}),...managedSkillEntries(policy)];await policy.revalidate();return result;});
 handle('scientific.skills',({provider})=>{providerId(provider);return scientificSkills.catalog(provider,skillGuidanceScope(provider));});
 handle('codex.respond',({id,result})=>{if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');if(agents.active!=='codex')throw Error('Provider switched');return codex.respond(id,result);});
 handle('file.open',async() => {

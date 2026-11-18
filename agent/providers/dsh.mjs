@@ -67,7 +67,7 @@ export class DshBridge extends EventEmitter{
   if(effort===undefined||effort==='none')effort='off';
   let worker=this.getWorker();
   if(worker&&toolContext)worker={...worker,context:{...worker.context,taskId:toolContext.mode==='workflow'?toolContext.taskId:null,projectId:toolContext.mode==='workflow'?toolContext.projectId:null}};
-  const key=createHash('sha256').update(JSON.stringify([model,effort,worker?.url,worker?.tokens?.mcp,worker?.context?.taskId,worker?.context?.projectId,this.getCredential()?.apiKey])).digest('hex');
+  const key=createHash('sha256').update(JSON.stringify([model,effort,worker?.url,worker?.tokens?.mcp,worker?.context?.taskId,worker?.context?.projectId,this.getCredential()?.apiKey,this.instructions])).digest('hex');
   if(this.process&&this.contextKey===key)return this.info;
   if(this.activeTurns.size)throw Error('Stop the current reply before changing the DeepSeek runtime');
   if(this.unconfirmedTurns.size)throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');

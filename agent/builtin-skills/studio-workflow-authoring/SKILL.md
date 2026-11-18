@@ -1,11 +1,11 @@
 ---
 name: studio-workflow-authoring
-description: Turn a natural-language scientific request into saved, reviewable AIMatterLab inputs and update the same conversation workflow. Use in AIMatterLab planning or continuation/review when the user expects the Agent to complete structures, CV/bias code and routine parameters rather than hand back blank forms.
+description: Detailed examples for preparing topology, engine input files and pyGAS graphs inside an existing AIMatterLab workflow.
 ---
 
 # AIMatterLab workflow authoring
 
-Use the current interaction mode and conversation-owned task ID. Ordinary chat does not create files or a workflow. In planning and workflow review, prepare the concrete inputs while leaving execution to the desktop's human gate. Never run builds, MD, training, evaluation or scheduler submissions through a skill or shell to make a draft appear complete.
+Use `workflow.orchestrate` for the general authoring procedure. Read these examples when preparing topology, files or a graph for the current workflow. Ordinary chat can save a requested personal skill with `write_project_skill` and `scope="user"`. A draft-only request ends with saved inputs. An explicit execution request follows the authorized desktop workflow and its runtime checks.
 
 ## Own the authoring work
 

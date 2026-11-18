@@ -31,6 +31,10 @@ test('the installed workspace contributes its own short index once and falls bac
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-workspace-index-'));
  t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
  const file=path.join(directory,'AGENTS.md'),read=()=>workspaceAgentInstructions({directory});
+ const location=path.join(directory,'研究 $&','user');
+ const located=()=>workspaceAgentInstructions({directory},location);
+ assert.ok(located().includes(JSON.stringify(location)));
+ assert.ok(workspaceAgentInstructions(null,location).includes(JSON.stringify(location)));
  assert.equal(workspaceAgentInstructions(null),STUDIO_INSTRUCTIONS);assert.equal(read(),STUDIO_INSTRUCTIONS);
  fs.writeFileSync(file,STUDIO_INSTRUCTIONS.replaceAll('\n','\r\n')+'\r\n');assert.equal(read(),STUDIO_INSTRUCTIONS);
  const extra='For diffraction lookup the powder-indexing skill.';
@@ -38,7 +42,9 @@ test('the installed workspace contributes its own short index once and falls bac
  const previous=STUDIO_INSTRUCTIONS.slice(0,STUDIO_INSTRUCTIONS.lastIndexOf('\n\n'));
  fs.writeFileSync(file,previous+'\n\n'+extra);
  assert.equal(read(),STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra);
+ assert.ok(located().includes(JSON.stringify(location)));assert.ok(located().endsWith(extra));
  fs.writeFileSync(file,'x'.repeat(8193));assert.equal(read(),STUDIO_INSTRUCTIONS);
+ assert.ok(located().includes(JSON.stringify(location)));
  fs.writeFileSync(file,'private text');fs.linkSync(file,path.join(directory,'other.md'));assert.equal(read(),STUDIO_INSTRUCTIONS);
 });
 
@@ -47,7 +53,13 @@ test('Codex login threads receive the same AIMatterLab core through the main-own
  codex.request=async(method,params)=>{calls.push({method,params});return {thread:{id:'fixture',turns:[]}};};
  const instructions=STUDIO_INSTRUCTIONS+'\nLocal index';
  const hub=new AgentHub({codex,instructions,root:os.tmpdir(),catalog:{get:()=>null,put:()=>{},list:()=>[]},vault:{get:()=>null},settings:()=>({}),worker:()=>null});
- try{await hub.rpc('codex','thread/start');assert.equal(calls[0].params.developerInstructions,instructions);}finally{hub.close();}
+ try{
+  await hub.rpc('codex','thread/start');
+  assert.equal(calls[0].params.developerInstructions,instructions);
+  const moved=workspaceAgentInstructions(null,path.join(os.tmpdir(),'moved cache','user'));
+  hub.updateInstructions(moved);await hub.rpc('codex','thread/start');
+  assert.equal(calls.at(-1).params.developerInstructions,moved);
+ }finally{hub.close();}
 });
 test('public compute references advertised by selected skills have focused routes without eager bodies or setup bypass',async()=>{
  const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));

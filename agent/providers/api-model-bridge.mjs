@@ -25,7 +25,7 @@ export class ApiModelBridge extends DshBridge{
   if(effort&&(!levels.length||!levels.includes(effort))&&!this.modelInfos?.find(v=>v.id===selected.model.id)?.reasoning?.efforts?.some(v=>v.id===effort))throw Error('此模型不支持所选推理等级');
   effort=effort||levels.find(v=>v==='off')||levels[0];
   let worker=this.getWorker();if(worker&&toolContext)worker={...worker,context:{...worker.context,taskId:toolContext.mode==='workflow'?toolContext.taskId:null,projectId:toolContext.mode==='workflow'?toolContext.projectId:null}};
-  const contextKey=createHash('sha256').update(JSON.stringify([selected.key,effort,identity,worker?.url,worker?.tokens?.mcp,worker?.context])).digest('hex');
+  const contextKey=createHash('sha256').update(JSON.stringify([selected.key,effort,identity,worker?.url,worker?.tokens?.mcp,worker?.context,this.instructions])).digest('hex');
   if(this.process&&this.contextKey===contextKey)return this.info;if(this.activeTurns.size)throw Error('请先停止当前回复再切换模型');
   if(this.unconfirmedTurns.size)throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');
   if(this.process||this.pending.size||this.isolationWaiter)this.stop({notify:false,preserveStart:true});

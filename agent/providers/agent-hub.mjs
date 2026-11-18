@@ -44,6 +44,10 @@ export class AgentHub extends EventEmitter{
    if(event.method==='account/updated')this.emit('event',{method:'studio/accountUpdated',provider:'codex',params:{}});
   });
  }
+ updateInstructions(instructions){
+  this.instructions=instructions;
+  for(const [provider,bridge] of this.bridges)if(provider!=='kimi')bridge.instructions=instructions;
+ }
  release(provider){this.bridgeWorkers.delete(provider);this.releaseWorker(provider);}
  disconnect(provider,{preserveConnectIntent=false}={}){if(!preserveConnectIntent&&this.connectIntentProvider===provider){this.connectIntentProvider=null;this.connectEpoch=(this.connectEpoch||0)+1;}if(provider==='kimi')this.cliLoginGeneration=(this.cliLoginGeneration||0)+1;this.bridge(provider)?.close();this.release(provider);}
  workerFor(provider){const worker=this.getWorker(provider);if(worker)this.bridgeWorkers.set(provider,worker);else this.bridgeWorkers.delete(provider);return worker;}
@@ -78,7 +82,9 @@ export class AgentHub extends EventEmitter{
   const work=this.contextQueue.catch(()=>{}).then(async()=>{
    if(!current())throw Error('Conversation context selection was superseded');
    let binding=first;
-   if(first.rotated&&wasConnected){
+   const kimiProfile=provider==='kimi'&&this.bridge(provider)?.profile;
+   const promptChanged=kimiProfile?.instructions!==undefined&&kimiProfile.instructions!==this.instructions;
+   if((first.rotated||promptChanged)&&wasConnected){
     const bridge=this.bridge(provider),models=['deepseek','compatible','qwen'].includes(provider)?{models:[...(bridge.models||[])],model:bridge.model}:null;
     this.closeForContext(provider); // close may revoke; only mint the new process lease after close.
     binding=this.bindWorkerContext(provider,context,{allowInitialFill:false});
@@ -174,8 +180,8 @@ export class AgentHub extends EventEmitter{
    return {...result,provider,...this.loginStatus.codex,login:'chatgpt',modelAccess:this.loginStatus.codex?.modelAccess||'not_run'};
   }
   const status=this.loginStatus[provider]||{},credential=['qwen','deepseek','compatible'].includes(provider)?this.vault.get(provider):null;
-   if(['qwen','compatible'].includes(provider)){const profiles=this.modelProfiles.list(provider);return {provider,login:'api-key',...status,credentialStored:profiles.some(v=>v.credentialStored),profiles,modelAccess:status.modelAccess||'not_run'};}
-  return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan,...provider==='compatible'?{baseUrl:credential.baseUrl,label:credential.label,reasoningMode:credential.reasoningMode||'omit',reasoningEffort:credential.reasoningEffort||'',publicGuidesAllowed:['pygas','pydyn','gpumd','hotpp','torchnep'].every(source=>(source==='pygas'?this.getSettings().pygasSkillProviders||[]:this.getSettings().scientificSkillProviders?.[source]||[]).includes('compatible'))}:{}}:{},modelAccess:status.modelAccess||'not_run'};
+  const profiles=['qwen','compatible'].includes(provider)?this.modelProfiles.list(provider):null;
+  return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan,...provider==='compatible'?{baseUrl:credential.baseUrl,label:credential.label,reasoningMode:credential.reasoningMode||'omit',reasoningEffort:credential.reasoningEffort||'',publicGuidesAllowed:['pygas','pydyn','gpumd','hotpp','torchnep'].every(source=>(source==='pygas'?this.getSettings().pygasSkillProviders||[]:this.getSettings().scientificSkillProviders?.[source]||[]).includes('compatible'))}:{}}:{},...profiles?{profiles,credentialStored:profiles.some(v=>v.credentialStored)}:{},modelAccess:status.modelAccess||'not_run'};
  }
  async rpc(provider,method,params={}){
   providerId(provider);this.host.assertRpc(method);if(this.contextPending&&!['turn/interrupt','account/read'].includes(method))throw Error('Wait for conversation context selection to finish');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');

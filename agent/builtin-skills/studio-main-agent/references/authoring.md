@@ -24,6 +24,8 @@ For a new planning workflow whose engine route is still empty, first call `prese
 
 For `pydyn.sampling`, derive driver calls from the explicitly selected registered environment. When available, use `inspect_environment_api` with that environment ID and engine to read its partial API index, then request only needed advertised `api_symbols`. A global `inspect_source_project` result describes its registered source, which may differ from the compute version; a runtime guide supplies observed identity, not complete API bodies. Missing target API evidence needs the matching environment check or a concrete capability report, not a silent source switch, reinstall, arbitrary file-reader workaround or invented interface. This read does not change the authoring environment or execution grants.
 
+For detailed topology, file assembly or pyGAS graph examples, use `read_scientific_skill` with `workflow.authoring`.
+
 ## Use fixed software workflows
 
 Environment discovery, reuse or installation, environment registration, immutable preparation and submission follow the maintained software/install/compute skills and typed AIMatterLab flows. Reuse an applicable current probe; inspect and resolve missing prerequisites through that fixed flow rather than making a novice compose shell commands or fill internal paths. Ask only for necessary target-machine, version/resource choices or an action outside existing authorization. A task-specific scientific choice is separate from these technical steps. Never modify a registered engine source or silently replace its version.
@@ -34,7 +36,7 @@ For enhanced sampling, follow the real pyGAS workflow, specialized CV/bias/OPES 
 
 Merge research with actual structure, topology, units, potential consumer and selected engine facts. Supplied scientific choices take precedence. Derive routine facts and technical details from actual tools; do not ask users for atom count, CV dimension, dtype, generated output paths or internal API keys. Offer reversible, labeled pilot proposals with provenance when the user delegated an example. Paper settings are evidence with conditions, not automatically correct values for another system.
 
-Ask only about genuinely unresolved or conflicting scientific intent that changes the result, such as an ambiguous reaction coordinate, atom mapping, thermodynamic state or potential choice. Finish independent preparation before a focused question; prefer a small meaningful choice to a long blank form. Never fabricate an atom group or present a guessed production/convergence setting as established.
+Ask about an unresolved choice that changes the result, such as an ambiguous reaction coordinate, atom mapping, thermodynamic state or potential choice. Finish independent preparation before a focused question; identify the competing procedures when personal and bundled guidance disagree, then wait for the user’s choice. Never fabricate an atom group or present a guessed production/convergence setting as established.
 
 Start from one natural-language goal and produce a mostly complete proposal, not a questionnaire. Put the few system/task-dependent basic parameters and unresolved decisions first. Group secondary settings by purpose below them and fold large groups into secondary menus. Show a concise summary of consequential choices and their basis so a novice can confirm and adjust them; do not make the user audit every technical parameter individually. Technical details remain inspectable, with source/proposed/derived status, without occupying the primary review path.
 

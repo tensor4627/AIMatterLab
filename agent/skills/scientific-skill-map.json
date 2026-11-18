@@ -780,6 +780,14 @@
       "status": "implemented_bundled_planning"
     },
     {
+      "id": "workflow.authoring",
+      "title": "Detailed input and graph authoring",
+      "engines": [],
+      "skills": ["studio-workflow-authoring"],
+      "phase": "authoring",
+      "status": "implemented_bundled_authoring"
+    },
+    {
       "id": "workflow.orchestrate",
       "engines": [],
       "skills": [

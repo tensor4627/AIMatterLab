@@ -17,18 +17,18 @@ test('official DSH creates, reads and updates a personal skill in chat without a
  const root = fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-dsh-local-skill-'));
  const saved = new Map(), children = [];
  let current = {provider:'deepseek',threadId:null,projectId:null};
- const cache = path.join(root,'user-cache');
+ const cache = path.join(root,'自定义 $& 缓存');
  const store = new ProjectSkills({root:cache,current:()=>current});
  const bundledRoot=fileURLToPath(new URL('../../agent/builtin-skills/',import.meta.url));
  const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
  const scientificSkills=new ScientificSkills({map,bundledRoot,sources:()=>[],settings:()=>({}),setupAllowed:()=>false});
- fs.writeFileSync(path.join(root,'AGENTS.md'),'Consult the local-analysis skill for this workspace.');
- const instructions=workspaceAgentInstructions({directory:root});
+ fs.writeFileSync(path.join(root,'AGENTS.md'),'Consult the applicable workspace skill by scope.');
+ const instructions=workspaceAgentInstructions({directory:root},store.personalDirectory);
  const endpoint = new TerminalMcp({terminal:{tools:()=>[]},projectSkills:store,scientificSkills});
  await endpoint.start();
 
- const name = 'local-analysis';
- const body = '---\nname: local-analysis\ndescription: Local skills regression\n---\nCheck the selected data.\n';
+ const name = 'studio-compute-workflow';
+ const body = '---\nname: studio-compute-workflow\ndescription: Local skills regression\n---\nCheck the selected data.\n';
  const sha256 = value => createHash('sha256').update(value).digest('hex');
  const scope = {scope:'user'};
  const steps = [
@@ -78,17 +78,20 @@ test('official DSH creates, reads and updates a personal skill in chat without a
  const started=await bridge.request('thread/start');
  current={...current,threadId:started.thread.id};
  endpoint.bindProviderContext('deepseek',{threadId:current.threadId});
- const done=new Promise((resolve,reject)=>{
+ const completion=()=>new Promise((resolve,reject)=>{
   const timer=setTimeout(()=>reject(Error('DSH skill turn timed out')),25000);
   const listener=e=>{if(e.method==='turn/completed'){clearTimeout(timer);bridge.off('event',listener);resolve(e.params.turn);}};
   bridge.on('event',listener);t.after(()=>{clearTimeout(timer);bridge.off('event',listener);});
  });
+ const done=completion();
  await bridge.request('turn/start',{threadId:current.threadId,input:[{type:'text',text:'Save the local skill, check its revision, then find the public guide for inspecting my compute environment.'}]});
  assert.equal((await done).status,'completed');
  assert.equal(packets.length,steps.length+1);
  const first=packets[0],system=Array.isArray(first.system)?first.system.map(block=>block.text).join('\n'):first.system;
  assert(system.includes(instructions),'First DeepSeek system packet must carry the packaged core and the workspace index');
  assert.match(system,/写到本机工作区.*scope="user"/);
+ assert.ok(system.includes(JSON.stringify(store.personalDirectory)));
+ assert.match(system,/If steps conflict, name both skills and the difference, ask which to follow and wait/);
  const tools=first.tools.map(tool=>tool.name.replace(/^mcp__gpusampling__/, ''));
  for(const name of ['project_skill_catalog','read_project_skill','write_project_skill','scientific_skill_catalog','read_scientific_skill'])assert(tools.includes(name),name);
  assert(!tools.includes('submit_run'));
@@ -107,4 +110,19 @@ test('official DSH creates, reads and updates a personal skill in chat without a
  assert.equal(JSON.parse(items[0].result.content[0].text).directory,path.dirname(path.dirname(file)));
  for(const item of items.slice(1,5))assert.equal(JSON.parse(item.result.content[0].text).path,file);
  assert.equal(fs.readFileSync(file,'utf8'),body+'Verify.\n');
+ assert.equal(JSON.parse(items[2].result.content[0].text).scope,'user');
+ assert.ok(!result.includes('Local skills regression'));
+ const previousDirectory=store.personalDirectory,priorChildren=children.length;
+ store.root=store.prepareRoot(path.join(root,'relocated'));
+ bridge.instructions=workspaceAgentInstructions({directory:root},store.personalDirectory);
+ const next=completion();
+ await bridge.request('turn/start',{threadId:current.threadId,input:[{type:'text',text:'Check the changed library location.'}]});
+ assert.equal((await next).status,'completed');
+ assert.equal(children.length,priorChildren+1);
+ // The pinned DeepSeek transport preserves the initial system message and appends later system revisions in history.
+ const last=packets.at(-1);
+ const latestSystem=last.messages.filter(message=>message.role==='system').at(-1)?.content??last.system;
+ const refreshed=Array.isArray(latestSystem)?latestSystem.map(block=>block.text).join('\n'):latestSystem;
+ assert.ok(refreshed.includes(JSON.stringify(store.personalDirectory)));
+ assert.ok(!refreshed.includes(JSON.stringify(previousDirectory)));
 });

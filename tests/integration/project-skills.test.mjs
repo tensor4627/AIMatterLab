@@ -5,7 +5,37 @@ import os from 'node:os';
 import path from 'node:path';
 import {ProjectSkills} from '../../agent/skills/project-skills.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
+import {localSkills} from '../../agent/skills/skills.mjs';
 const body='---\nname: local-analysis\ndescription: User project analysis instructions\n---\nUse the selected project data only.\n';
+
+test('manual skill discovery keeps bundled names separate from personal, project and retired cache directories',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-library-split-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const bundle=path.join(root,'public'),cache=path.join(root,'cache');
+ const scope={provider:'deepseek',threadId:'one',projectId:'project-a',checkCurrent:()=>true};
+ const store=new ProjectSkills({root:cache,bundledRoot:bundle,current:()=>scope});
+ const same='local-analysis',entry=path.join(bundle,same,'SKILL.md');
+ fs.mkdirSync(path.dirname(entry),{recursive:true});
+ fs.writeFileSync(entry,body+'Bundled edition.');
+ for(const library of ['user','current'])store.call('write_project_skill',{scope:library,name:same,body,expected_sha256:null},scope);
+ const roots=[root,store.personalDirectory,store.directory(scope).target,bundle];
+ const catalog=()=>localSkills(roots,{projectSkills:store,bundledRoot:bundle});
+ assert.deepEqual(catalog().map(s=>[s.name,s.source,s.path]),[[same,'studio',entry]]);
+ assert.equal(fs.readFileSync(entry,'utf8'),body+'Bundled edition.');
+ for(const invalid of [bundle,path.dirname(bundle),path.join(bundle,'subdir')]){
+  assert.throws(()=>store.prepareRoot(invalid),/separate from the built-in/);
+ }
+ const old=store.root;
+ store.root=store.prepareRoot(path.join(root,'new-cache'));store.previousRoots.add(old);
+ assert.deepEqual(catalog().map(s=>s.path),[entry]);
+ const restored=new ProjectSkills({root:store.root,bundledRoot:bundle,previousRoots:[old],current:()=>scope});
+ const alias=path.join(root,'alias');fs.symlinkSync(path.join(old,'user'),alias,process.platform==='win32'?'junction':'dir');
+ assert.deepEqual(localSkills([alias,...roots],{projectSkills:restored,bundledRoot:bundle}).map(s=>s.path),[entry]);
+ const legacy=new ProjectSkills({root:bundle,bundledRoot:bundle,current:()=>scope});
+ assert.equal(legacy.personalDirectory,undefined);
+ assert.throws(()=>legacy.call('project_skill_catalog',{scope:'user'},scope),/separate from the built-in/);
+ assert.ok(!fs.existsSync(path.join(bundle,'user')));
+});
 
 test('editable project prompts link personal and project skills without crossing projects, including after relocation',t=>{
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-project-prompt-'));

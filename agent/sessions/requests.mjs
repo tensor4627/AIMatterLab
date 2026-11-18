@@ -21,7 +21,7 @@ import {managedToolSkillContext} from '../skills/managed-tool-context.mjs';
 
 export function createAgentRequests({runtime}){
  return async function agentRpc({provider,method,params={}}){
- const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
+ const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app}=runtime();
  providerId(provider);assertRpc(method);
  const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(),selectedSsh=['ssh-terminal','ssh-connection'].includes(resource?.selection?.kind)?resource.selection:null;
@@ -104,7 +104,7 @@ export function createAgentRequests({runtime}){
   }
   if(['deepseek','compatible','qwen'].includes(provider)){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
   const selected=params.input?.some(item=>item.type==='skill');
-  const normalRoots=selected&&!definitionOnly?studioSkillRoots():[],registeredRoots=selected?[...normalRoots,...managedSkillRoots()]:[],registered=definitionOnly||!selected?[]:[...localSkills(normalRoots,{policy:readPolicy}),...managedSkillEntries(readPolicy)],input=[];
+  const normalRoots=selected&&!definitionOnly?studioSkillRoots():[],registeredRoots=selected?[...normalRoots,...managedSkillRoots()]:[],registered=definitionOnly||!selected?[]:[...localSkills(normalRoots,{policy:readPolicy,projectSkills,bundledRoot:bundledSkillRoot}),...managedSkillEntries(readPolicy)],input=[];
   for(const item of params.input||[]){
    if(item.type==='text')input.push(item);
    else if(item.type==='skill'){

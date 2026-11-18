@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {createServer} from 'node:http';
 import {ApiModelBridge} from '../../agent/providers/api-model-bridge.mjs';import {ModelProfileStore} from '../../agent/providers/model-profile-store.mjs';import {dshRuntime} from '../../desktop/platform/dsh-runtime.mjs';import {apiModelKey} from '../../contracts/agent/model-profiles.mjs';
+import {workspaceAgentInstructions} from '../../agent/context/agent-settings.mjs';
 import {providerAccountState} from '../../frontend/features/conversations/provider-account.mjs';
 
 test('reading interrupted API history resolves orphaned tool indicators without dispatching a turn',async t=>{
@@ -23,6 +24,20 @@ test('keyless loopback API completes a real DSH turn without storing a fabricate
  await f.bridge.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'Keyless loopback fixture only'}]});
  assert.equal((await done).status,'completed');assert.equal(f.calls.length,1);assert.equal(f.calls[0].authorization,'Bearer aimatterlab-local-no-auth');
  assert.equal(f.store.credential(profiles[0].id).apiKey,'');
+});
+for(const provider of ['qwen','compatible'])test(provider+' sends the current personal library with a newly opened API conversation', {timeout:60000}, async t=>{
+ const f=await fixture(t,{provider});
+ for(const folder of ['factory default','changed 缓存']){
+  const personal=path.join(f.root,folder,'user');
+  f.bridge.instructions=workspaceAgentInstructions(null,personal);
+  await f.bridge.start();
+  const {thread}=await f.bridge.request('thread/start');
+  const done=completion(f.bridge);done.catch(()=>{});
+  await f.bridge.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'Locate the skill library.'}]});
+  assert.equal((await done).status,'completed');
+  const messages=f.calls.at(-1).body.messages;
+  assert.ok(messages.some(m=>['system','developer'].includes(m.role)&&String(m.content).includes(JSON.stringify(personal))));
+ }
 });
 function completion(bridge){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{bridge.off('event',listener);reject(Error('Model fixture did not complete'));},25000),listener=event=>{if(event.method==='turn/completed'){clearTimeout(timer);bridge.off('event',listener);resolve(event.params.turn);}};bridge.on('event',listener);});}
 async function fixture(t,{api='openai-completions',models,tool=false,provider='qwen',apiKey='synthetic-api-key'}={}){const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-api-model-')),records=new Map(),keys=new Map(),calls=[],children=[];const catalog={get:(k,id)=>records.get(k+':'+id)||null,put:(k,id,v)=>{records.set(k+':'+id,structuredClone(v));return v;},list:k=>[...records].filter(([id])=>id.startsWith(k+':')).map(([,v])=>v),remove:(k,id)=>records.delete(k+':'+id)},vault={get:id=>keys.get(id),put:(id,v)=>keys.set(id,v),remove:id=>keys.delete(id)},store=new ModelProfileStore({catalog,vault});const server=createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const body=JSON.parse(raw||'{}');calls.push({url:req.url,body,authorization:req.headers.authorization});

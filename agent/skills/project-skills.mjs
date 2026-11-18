@@ -57,9 +57,27 @@ function containsDirectory(parent, child) {
 const PROJECT_GUIDE = '# 项目提示词\n\n根据本项目的任务选择下方引用的技能。个人技能来自[用户技能库](../user/)，项目技能位于本目录。可在这里添加项目约定和技能链接。\n';
 
 export class ProjectSkills {
- constructor({root, current}) {
+ constructor({root, current, bundledRoot, previousRoots=[]}) {
   this.root = path.resolve(root);
+  this.bundledRoot = bundledRoot && path.resolve(bundledRoot);
+  this.previousRoots = new Set(previousRoots);
   this.current = current;
+ }
+
+ overlapsBundle(directory) {
+  return !!this.bundledRoot && (containsDirectory(this.bundledRoot,directory) || containsDirectory(directory,this.bundledRoot));
+ }
+
+ ownsDirectory(directory) {
+  for (const root of [this.root,...this.previousRoots]) {
+   const first = path.relative(root,directory).split(path.sep)[0];
+   if (/^(?:user|[a-f0-9]{64})$/i.test(first)) return true;
+  }
+  return false;
+ }
+
+ get personalDirectory() {
+  return this.overlapsBundle(this.root) ? undefined : path.join(this.root,'user');
  }
 
  tools() {
@@ -99,10 +117,10 @@ export class ProjectSkills {
 
  directory(scope, library = 'current') {
   const selected = this.owner(scope);
+  if (this.overlapsBundle(this.root)) throw Error('Choose a skill cache separate from the built-in skill directory in Settings');
   if (!['current','user'].includes(library)) throw Error('Unknown skill library');
   const owner = library === 'user' ? {kind:'user'} : selected;
-  const key = library === 'user' ? 'user' : digest(owner.kind + ':' + owner.id);
-  const target = path.join(this.root, key);
+  const target = library === 'user' ? this.personalDirectory : path.join(this.root, digest(owner.kind + ':' + owner.id));
   ensureDirectory(target);
   return {target, owner};
  }
@@ -188,6 +206,7 @@ export class ProjectSkills {
  prepareRoot(directory) {
   const next = path.resolve(directory);
   if (!path.relative(this.root, next)) return this.root;
+  if (this.overlapsBundle(next)) throw Error('Choose a skill cache separate from the built-in skill directory in Settings');
   if (containsDirectory(this.root, next) || containsDirectory(next, this.root)) throw Error('Choose independent skill cache directories');
   ensureDirectory(next);
   const probe = path.join(next, '.write-' + randomUUID());

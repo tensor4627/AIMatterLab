@@ -13,7 +13,7 @@ Check requirements when the corresponding operation needs them. Continue indepen
 
 Use the current interaction mode and capability scope. Chat does not create a workflow. Preserve the existing `studioTaskId`, manual edits, registered engine versions and real run state. A new workflow needs an explicit request.
 
-Read the current workflow and authorized inputs before making proposals. Derive technical facts through AIMatterLab tools; ask only for unresolved or conflicting scientific intent. Registration, runtime compatibility, engineering checks and scientific validity are separate evidence.
+Read the current workflow and authorized inputs before making proposals. Derive technical facts through AIMatterLab tools; ask about unresolved scientific intent or incompatible steps in a personal and a bundled skill. Identify both procedures and wait for the user to choose before using the disputed step. Registration, runtime compatibility, engineering checks and scientific validity are separate evidence.
 
 When defining a calculation or changing its deliverables, producers or input sources, read `workflow.roadmap` with `read_scientific_skill`. Maintain the output-driven roadmap on the current task alongside its form. Read it for a single MD invocation as well as a chain of tools.
 

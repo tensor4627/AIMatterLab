@@ -20,6 +20,18 @@ async function setup(t){
  const auth=c=>scopes.authenticate({pathname:new URL(c.url).pathname+'/mcp',authorization:'Bearer '+c.tokens.mcp,host:'127.0.0.1:32123'});return {hub,codex,scopes,base,auth};
 }
 async function fresh(f){await f.hub.connect('codex');await f.hub.selectContext('codex',context());const response=await f.hub.rpc('codex','thread/start');await f.hub.selectContext('codex',context(response.thread.id));return response.thread.id;}
+test('Kimi loads a relocated personal library at the next idle context without closing an in-flight session on save',async t=>{
+ const {hub}=await setup(t),kimi=new EventEmitter();
+ kimi.start=async(executable,profile)=>{kimi.executable=executable;kimi.profile=profile;kimi.process={};return {};};
+ kimi.close=()=>{kimi.process=null;};
+ hub.bridges.set('kimi',kimi);await hub.selectContext('kimi',context());await hub.connect('kimi');
+ const initial=kimi.process;
+ hub.updateInstructions('Personal library at a new location.');
+ assert.equal(kimi.process,initial);
+ await hub.selectContext('kimi',context());
+ assert.notEqual(kimi.process,initial);
+ assert.equal(await fs.readFile(path.join(kimi.profile.home,'SYSTEM.md'),'utf8'),hub.instructions);
+});
 test('Selecting a context before connection never starts login or network',async t=>{const {hub,codex}=await setup(t);const r=await hub.selectContext('codex',context('existing','task-a'));assert.equal(r.connected,false);assert.equal(codex.starts.length,0);assert.equal(codex.process,undefined);});
 test('Real zero-turn thread and pristine first task bind without restarting or changing MCP token',async t=>{
  const f=await setup(t);await f.hub.connect('codex');const first=f.codex.worker,thread=await fresh(f);assert.equal(f.codex.starts.length,1);assert.equal(f.auth(first).threadId,thread);await f.hub.selectContext('codex',context(thread,'task-a'));assert.equal(f.codex.starts.length,1);assert.equal(f.auth(first).taskId,'task-a');await f.hub.rpc('codex','turn/start',{threadId:thread,input:[]});await f.hub.selectContext('codex',context(thread,'task-a'));assert.equal(f.codex.starts.length,1);assert.equal(f.codex.calls.filter(x=>x.method==='thread/resume').length,0);

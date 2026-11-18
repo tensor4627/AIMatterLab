@@ -27,7 +27,7 @@ export function prepareProfile(root,id,credential,instructions=STUDIO_INSTRUCTIO
   config+='\n# STUDIO POLICY BEGIN\n[tools]\nenabled = ["mcp__gpusampling__*", "AskUserQuestion"]\n[permission]\ndangerous_command_guard = true\n[[permission.rules]]\ndecision = "allow"\npattern = "mcp__gpusampling__*"\n# STUDIO POLICY END\n';
   fs.writeFileSync(file,config,{mode:0o600});
   fs.writeFileSync(path.join(home,'SYSTEM.md'),instructions);
-  return {cwd,home,args:['acp'],env:{KIMI_CODE_HOME:home,KIMI_API_KEY:'',KIMI_BASE_URL:''}};
+  return {cwd,home,instructions,args:['acp'],env:{KIMI_CODE_HOME:home,KIMI_API_KEY:'',KIMI_BASE_URL:''}};
  }
  const settings={security:{auth:{selectedType:'openai'}},telemetry:{enabled:false},hooks:{enabled:false},tools:{core:['ask_user_question']},general:{enableAutoUpdate:false}};
  if(credential){settings.modelProviders={openai:[{id:credential.model,name:credential.model,baseUrl:credential.baseUrl,envKey:'STUDIO_QWEN_API_KEY'}]};settings.model={name:credential.model};}

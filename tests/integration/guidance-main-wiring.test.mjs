@@ -8,6 +8,7 @@ import vm from 'node:vm';
 import {createHash,randomUUID} from 'node:crypto';
 import ts from 'typescript';
 import {ScientificSkills} from "../../agent/skills/scientific-skills.mjs";
+import {ProjectSkills} from "../../agent/skills/project-skills.mjs";
 import {localSkills} from "../../agent/skills/skills.mjs";
 import {selectedSkillContext} from "../../agent/skills/skill-context.mjs";
 import {managedToolSkillContext} from "../../agent/skills/managed-tool-context.mjs";
@@ -37,7 +38,7 @@ function harness(t,{state='active',withOtherTool=false,withGuidanceSource=false}
  if(withOtherTool){map.skills.push({id:'nep',source:'gpumd',folder:'nep',files:['SKILL.md']});map.functions.push({id:'training.nep',phase:'authoring',skills:['nep'],engines:['nep.train']});}
  const owner={provider:'codex',threadId:'thread',taskId:null,projectId:null,environmentId:null,inputRoot:null,serial:1},handlers=new Map(),sent=[],resolved=[],workerLeases=new Map([['codex',{epoch:1,context:{...owner}}]]),terminalLeases=new Map([['codex',{epoch:1,context:{...owner}}]]),bridgeWorkers=new Map([['codex',{transport:'worker'}]]);let scans=0,reads=0,managedQueries=0;
  const sources=[...withOtherTool?[{id:'gpumd',root:otherRoot}]:[],...withGuidanceSource?[{id:'pygas',root}]:[]],toolRecords=[];
- const context={conversationTerminals:null,path,createAgentRequests,app:{isPackaged:false},openUrl:()=>{},privateAccess:{},sharedTerminal:{hasCurrentGrant:()=>false},ScientificSkills,scientificMap:map,bundledSkillRoot:path.join(root,'bundle'),root,settings:{skillRoots:[archived],sourceRoots:[],pygasSkillProviders:['codex'],scientificSkillProviders:{gpumd:['codex']}},catalog:{list:kind=>kind==='source-binding'?sources:[]},scientificSources:()=>{if(withOtherTool)return sources;throw Error('Active main must not discover sources');},resolveSkillGuidance:async scope=>{resolved.push(scope);return facts;},
+ const context={projectSkills:new ProjectSkills({root:path.join(root,'user-cache')}),conversationTerminals:null,path,createAgentRequests,app:{isPackaged:false},openUrl:()=>{},privateAccess:{},sharedTerminal:{hasCurrentGrant:()=>false},ScientificSkills,scientificMap:map,bundledSkillRoot:path.join(root,'bundle'),root,settings:{skillRoots:[archived],sourceRoots:[],pygasSkillProviders:['codex'],scientificSkillProviders:{gpumd:['codex']}},catalog:{list:kind=>kind==='source-binding'?sources:[]},scientificSources:()=>{if(withOtherTool)return sources;throw Error('Active main must not discover sources');},resolveSkillGuidance:async scope=>{resolved.push(scope);return facts;},
   setupInstructions:{allowed:()=>false,prepare:async(_provider,_id,callback)=>callback()},
   workflowContext:{current:()=>owner,revision:()=>owner.serial,begin:()=>owner,assert:()=>{},synchronize:async(_ticket,bind)=>bind('codex',owner)},
   taskRecords:{bound:()=>null,prepareTurn:(_provider,value)=>value},authoringAuthorization:null,baseWorkspace:null,
