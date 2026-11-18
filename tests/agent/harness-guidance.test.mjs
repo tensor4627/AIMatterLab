@@ -35,6 +35,9 @@ test('the installed workspace contributes its own short index once and falls bac
  fs.writeFileSync(file,STUDIO_INSTRUCTIONS.replaceAll('\n','\r\n')+'\r\n');assert.equal(read(),STUDIO_INSTRUCTIONS);
  const extra='For diffraction lookup the powder-indexing skill.';
  fs.writeFileSync(file,STUDIO_INSTRUCTIONS+'\n'+extra);assert.equal(read(),STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra);
+ const previous=STUDIO_INSTRUCTIONS.slice(0,STUDIO_INSTRUCTIONS.lastIndexOf('\n\n'));
+ fs.writeFileSync(file,previous+'\n\n'+extra);
+ assert.equal(read(),STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra);
  fs.writeFileSync(file,'x'.repeat(8193));assert.equal(read(),STUDIO_INSTRUCTIONS);
  fs.writeFileSync(file,'private text');fs.linkSync(file,path.join(directory,'other.md'));assert.equal(read(),STUDIO_INSTRUCTIONS);
 });

@@ -60,6 +60,9 @@ test('personal and scoped skills survive cache relocation and conflicting files 
  store.call('write_project_skill',{...args,body:privateBody},lease());
  const personalFile=dir=>path.join(dir,'user','local-analysis','SKILL.md');
  const read=(library='current')=>store.call('read_project_skill',{name:args.name,scope:library},lease());
+ assert.equal(store.call('project_skill_catalog',{scope:'user'},lease()).directory,path.join(root,'user'));
+ assert.equal(personal.path,personalFile(root));
+ assert.equal(read().path,path.join(store.call('project_skill_catalog',{},lease()).directory,args.name,'SKILL.md'));
  assert.throws(()=>store.prepareRoot(path.join(root,'inside')),/independent/);
  assert.throws(()=>store.prepareRoot(path.dirname(root)),/independent/);
  const other=new ProjectSkills({root:conflict,current:()=>current});
@@ -74,6 +77,8 @@ test('personal and scoped skills survive cache relocation and conflicting files 
  store.root=next;
  assert.equal(read().body,privateBody);
  assert.equal(read('user').sha256,personal.sha256);
+ assert.equal(read('user').path,personalFile(next));
+ assert.equal(store.call('project_skill_catalog',{scope:'user'},lease()).directory,path.join(next,'user'));
  current={provider:'codex',threadId:'chat-b',projectId:'another-project'};
  assert.equal(read('user').body,body);
  assert.deepEqual(store.call('project_skill_catalog',{},lease()).skills,[]);

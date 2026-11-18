@@ -6,9 +6,9 @@ const MAX_BYTES = 16384;
 const NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const digest = value => createHash('sha256').update(value).digest('hex');
 const descriptions = {
- project_skill_catalog: 'List local user-authored skills. The current project includes its AGENTS.md instructions. Use scope=user for the personal library or scope=current for this project or private chat.',
- read_project_skill: 'Read a saved local SKILL.md by name from the requested user, project or private conversation library.',
- write_project_skill: 'Save a local SKILL.md. Use scope=user for reusable guidance across chats; scope=current (default) for this project or chat. expected_sha256 must match the previous read, or be null to create.',
+ project_skill_catalog: 'List skills and return the absolute directory of the selected library. Use scope=user for the local workspace skill library across chats. Use scope=current for this project or private chat, including its project AGENTS.md.',
+ read_project_skill: 'Read a local SKILL.md by name and return its absolute path. Use the same scope as the catalog entry.',
+ write_project_skill: 'Save a local SKILL.md and return its absolute path. Explicitly set scope=user for the local workspace skill library. Use scope=current for a project- or chat-specific skill. Pass the previous SHA-256 in expected_sha256, or null to create.',
 };
 
 // Deliberately accept simple, single-line YAML fields only. Never inspect body text
@@ -244,7 +244,7 @@ export class ProjectSkills {
    const skills = this.catalog(target);
    const instructions = owner.kind==='project'?this.projectGuide(target,owner.id):undefined;
    this.owner(scope);
-   return {scope: owner.kind, skills,...instructions&&{instructions}};
+   return {scope: owner.kind, directory: target, skills,...instructions&&{instructions}};
   }
   if (typeof args.name !== 'string' || !NAME.test(args.name)) throw Error('Invalid skill name');
   const directory = path.join(target, args.name);
@@ -263,6 +263,6 @@ export class ProjectSkills {
   const result = this.read(file);
   metadata(result.body, args.name);
   this.owner(scope);
-  return {name: args.name, document: 'SKILL.md', scope: owner.kind, ...result,...instructionsWarning&&{instructionsWarning}};
+  return {name: args.name, document: 'SKILL.md', scope: owner.kind, path: file, ...result,...instructionsWarning&&{instructionsWarning}};
  }
 }

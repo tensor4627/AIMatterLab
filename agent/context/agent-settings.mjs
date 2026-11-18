@@ -33,7 +33,11 @@ export function workspaceAgentInstructions(workspace) {
   const bytes=Buffer.alloc(limit+1),count=fs.readSync(fd,bytes,0,bytes.length,0);
   if (count!==opened.size || count>limit) return STUDIO_INSTRUCTIONS;
   const local=new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(0,count)).replaceAll('\r\n','\n').trim();
-  const extra=local.startsWith(STUDIO_INSTRUCTIONS)?local.slice(STUDIO_INSTRUCTIONS.length).trim():local;
+  // A workspace may contain the previous bundled index followed by the user's notes.
+  const localLines=local.split('\n'),bundledLines=STUDIO_INSTRUCTIONS.split('\n');
+  let firstLocal=0;
+  while(firstLocal<localLines.length && localLines[firstLocal]===bundledLines[firstLocal]) firstLocal++;
+  const extra=localLines.slice(firstLocal).join('\n').trim();
   if (extra && !extra.includes('\0')) return STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra;
  } catch { /* A missing or unreadable workspace index still has the packaged routes. */ }
  finally {if(fd!==undefined)fs.closeSync(fd);}

@@ -88,6 +88,7 @@ test('official DSH creates, reads and updates a personal skill in chat without a
  assert.equal(packets.length,steps.length+1);
  const first=packets[0],system=Array.isArray(first.system)?first.system.map(block=>block.text).join('\n'):first.system;
  assert(system.includes(instructions),'First DeepSeek system packet must carry the packaged core and the workspace index');
+ assert.match(system,/写到本机工作区.*scope="user"/);
  const tools=first.tools.map(tool=>tool.name.replace(/^mcp__gpusampling__/, ''));
  for(const name of ['project_skill_catalog','read_project_skill','write_project_skill','scientific_skill_catalog','read_scientific_skill'])assert(tools.includes(name),name);
  assert(!tools.includes('submit_run'));
@@ -103,5 +104,7 @@ test('official DSH creates, reads and updates a personal skill in chat without a
   assert(JSON.stringify(packets[index].messages.at(-1)).includes(sha256(expected)));
  }
  const file=path.join(cache,'user',name,'SKILL.md');
+ assert.equal(JSON.parse(items[0].result.content[0].text).directory,path.dirname(path.dirname(file)));
+ for(const item of items.slice(1,5))assert.equal(JSON.parse(item.result.content[0].text).path,file);
  assert.equal(fs.readFileSync(file,'utf8'),body+'Verify.\n');
 });
