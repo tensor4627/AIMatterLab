@@ -212,7 +212,8 @@ export class ProjectSkills {
  confirmedComputeAliases({checkCurrent, body, expectedSha256}) {
   const check = () => { if (checkCurrent?.() !== true) throw Error('Selected skill workspace changed'); };
   check();
-  const target=path.join(this.root,'user'), name=COMPUTE_ALIASES_SKILL;
+  const target=this.personalDirectory, name=COMPUTE_ALIASES_SKILL;
+  if (!target) throw Error('Choose a skill cache separate from the built-in skill directory in Settings');
   const directory=path.join(target,name), file=path.join(directory,'SKILL.md');
   if (body === undefined && !fs.existsSync(target)) return null;
   ensureDirectory(target);

@@ -1,13 +1,19 @@
 import {isDeepStrictEqual as equal} from 'node:util';
 import {sameWorkerBinding} from '../../contracts/compute/task-worker-binding.mjs';
+const managedInstructions=[
+ 'Use list_compute_resources to discover currently hosted compute resources. Call acquire_compute_resource on the exact named resource the user requests. Ask for a choice when the tool returns choice_required. Reuse the conversation lease and release it when the user requests release.',
+ 'Use the acquired terminal for interactive checks. Inspect the registered workflow targets with inspect_compute_service and prepare a draft with prepare_compute_run. Use validate_compute_run, submit_compute_run, and cancel_compute_run for the corresponding user-requested action on an exact linked run. Keep its original service and the workflow review gates. Inspect the original receipt when a result is unconfirmed.',
+ 'Use attach_task_schedule only for a user-delegated schedule. Select poll for periodic observation, action for a bounded status or log read, script for a temporary scheduler job, or wake_agent to wake this conversation on request. Read the existing schedule and revision before editing.'
+].join('\n');
 /** Route independently granted capabilities of the explicitly selected resource. */
 export function createAgentResourceRouting({worker,terminal,resource,sharedTerminal,agents,service=()=>null,managed=()=>null,taskSource=()=>null}){
  const handoffHints=new Map(),workerPins=new Map();
  const directory=()=>typeof managed==='function'?managed():managed;
  function assertHandoffComplete(provider,threadId,sessionId){
   const hint=handoffHints.get(provider);
+  if(!hint)return;
   const caller=sessionId??(threadId?agents()?.sessionIdentity?.(provider,threadId)?.id:undefined);
-  if(hint&&(hint.sessionId&&caller?hint.sessionId===caller:!hint.threadId||!threadId||hint.threadId===threadId))throw Error('请等待当前能力交接完成；未发送或重发请求。');
+  if(hint.sessionId&&caller?hint.sessionId===caller:!hint.threadId||!threadId||hint.threadId===threadId)throw Error('请等待当前能力交接完成；未发送或重发请求。');
  }
  const selected=()=>resource()?.peek()||null,controller=()=>typeof service==='function'?service():service;
  const connection=()=>{const v=selected();return v?.schemaVersion===2&&v.kind==='ssh-connection'?v:null;};
@@ -109,7 +115,7 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
   return {status:ready?'ready':'blocked',scope:'terminal-only',scientificStatus:'blocked',count:ready?3:0,transport:'desktop-terminal',message:ready?'所选连接的共享终端可用；服务状态不影响此独立通道。':'请在此连接的终端点击“交给 Agent”。',reason:ready?null:'current_capability_grant_required',resource:state,checkedAt:Date.now()};
  }
  function turnContext(provider,threadId){
-  if(threadId&&directory())return 'Use list_compute_resources to discover currently hosted compute resources. Acquire the exact resource requested by the user with acquire_compute_resource. Ask for an exact choice when the tool returns choice_required. Reuse the scoped lease across turns. Use resource-specific tools for formal run drafts, run observations and schedules. The original source of an existing run remains authoritative.';
+  if(threadId&&directory())return managedInstructions;
   if(!workerSelected(provider))return null;return '[Studio selected compute resource]\n'+JSON.stringify({kind:'ssh-connection',status:'authenticated',service:'connected',serviceAuthorizedForThisConversation:true,shellAuthorizedForThisConversation:shellGranted(provider),schedulerRegistration:'not_checked'})+'\nThe selected SSH connection is authenticated. The human handoff enables separately verified shell and service grants. The managed service uses its own channel. When the user explicitly selects a shared-shell service transport, ordinary input resumes after its exchange is confirmed. Connection readiness does not establish installed scientific tools, a configured environment or execution readiness. Incomplete inventory and repairable environment issues are warnings: inspect and help configure within the granted terminal and project scope. list_clusters returns saved scheduler profiles, not SSH sessions. For a requested current-host queue observation call inspect_compute_resource with probe_scheduler=true, without creating a workflow or asking the human to paste commands. A missing profile does not mean disconnected. A service failure does not by itself establish shell failure; only an independently verified and granted shell can be used. Never reconnect, upgrade, switch resources or replay unknown requests automatically.';
  }
  return {selected,capture,providerConnection,bindWorkerContext,scope,readiness,workerSelected,turnContext,prepareHandoff,assertHandoffComplete,

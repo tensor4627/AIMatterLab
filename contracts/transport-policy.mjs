@@ -18,7 +18,7 @@ export function assertWorkerRoute(method, path) {
   routes.POST.push(...['preview','confirm','list','status','snapshot'].map(action=>'/api/workflow/roadmap/'+action));
   routes.POST.push('/api/ssh-service/scheduler');
   routes.POST.push('/api/cluster/observation');
-  routes.POST.push(...['upsert','stop','status','list','snapshot','pump','ack'].map(action=>'/api/managed-schedules/'+action));
+  routes.POST.push(...['upsert','stop','status','list','snapshot','pump','ack','observe-once'].map(action=>'/api/managed-schedules/'+action));
   const target = new URL(path, 'http://127.0.0.1');
   if (target.origin !== 'http://127.0.0.1' || !routes[method]?.includes(target.pathname))
     throw new Error('Unsupported worker route');

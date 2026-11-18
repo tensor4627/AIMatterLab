@@ -8,6 +8,7 @@ import {selectConversation} from '../../agent/sessions/conversation-selection.mj
 import {createAgentWakeDelivery,serviceHistory} from '../../agent/sessions/wake-delivery.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
 import {createAgentRequests} from '../../agent/sessions/requests.mjs';
+import {workspaceAgentInstructions} from '../../agent/context/agent-settings.mjs';
 
 class FakeBridge extends EventEmitter{
  constructor(provider){super();this.provider=provider;this.activeTurns=new Set();this.messages=new Map();this.calls=[];this.approvals=new Map();}
@@ -15,7 +16,7 @@ class FakeBridge extends EventEmitter{
  close(){if(this.process){this.process=null;this.activeTurns.clear();this.emit('event',{method:'studio/codexDisconnected',params:{}});}}
  async request(method,params){
   const {threadId}=params;this.calls.push([method,threadId]);
-  if(method==='thread/start')return {thread:{id:'new-managed',turns:[]},model:'test'};
+  if(method==='thread/start'){this.newThreadInstructions=params.developerInstructions;return {thread:{id:'new-managed',turns:[]},model:'test'};}
   if(method==='account/read')return {account:{type:'chatgpt'}};
   if(method==='thread/resume'||method==='thread/read')return {thread:{id:threadId,turns:this.messages.get(threadId)||[]},model:'test'};
   if(method==='turn/start'){
@@ -178,10 +179,11 @@ test('one wake is admitted in its own idle conversation and reconciled with nati
  await f.select('codex','beta');
  const a=await f.activate('codex','alpha');await f.send('codex','alpha');
  let dispatched=0;
- const wake=createAgentWakeDelivery({agents:f.agents,catalog:f.catalog,dispatch:async({provider,method,params},authority)=>{
+ const requests=productionRequests(f,{recordUserTurn:()=>assert.fail('A service wake cannot create an authorized human turn')});
+ const wake=createAgentWakeDelivery({agents:f.agents,catalog:f.catalog,dispatch:async(value,authority)=>{
   assert.equal(authority.notification.threadId,'alpha');assert.equal(f.context.current().threadId,'alpha');
   dispatched++;
-  return f.agents.rpc(provider,method,params);
+  return requests(value,authority);
  }});
  const delivery={id:'delivery-1',scheduleId:'schedule-1',scope:{provider:'codex',threadId:'alpha',taskId:'task-alpha',projectId:'project-alpha'},text:'Check the scheduled observation.'};
  assert.equal(await wake(delivery),false);
@@ -189,8 +191,25 @@ test('one wake is admitted in its own idle conversation and reconciled with nati
  a.finish('alpha');
  assert.equal(await wake(delivery),true);assert.equal(await wake(delivery),true);
  assert.equal(dispatched,1);assert.equal(f.context.current().threadId,'beta');
+ assert.equal(f.agents.turnOrigin('codex','alpha'),'service');
  const history=serviceHistory(f.catalog,'codex','alpha',a.messages.get('alpha'));
  assert.deepEqual(history.flatMap(turn=>turn.items).map(({id,text,type})=>[id,text,type]),[['service:delivery-1',delivery.text,'serviceMessage']]);
  assert.equal(f.events.filter(event=>event.method==='studio/serviceNotification').length,1);
  assert.equal(serviceHistory(f.catalog,'codex','beta').length,0);
+});
+
+test('the relocated personal library reaches new native conversations without restarting active sessions',async t=>{
+ const f=fixture();t.after(()=>f.agents.close());
+ const prior='D:/Profile fixture/prior user',current='D:/Profile fixture/current user';
+ f.agents.updateInstructions(workspaceAgentInstructions(null,prior));
+ await f.select('codex','alpha');const alpha=await f.activate('codex','alpha');await f.send('codex','alpha');
+ await f.select('codex','beta');const beta=await f.activate('codex','beta');await f.send('codex','beta');
+ const original=[alpha.process,beta.process];
+ f.agents.updateInstructions(workspaceAgentInstructions(null,current));
+ assert.deepEqual([alpha.process,beta.process],original);assert(f.agents.isBusy('codex','alpha'));assert(f.agents.isBusy('codex','beta'));
+ f.agents.selectForeground('codex',null);await f.agents.connect('codex');
+ const request=productionRequests(f),created=await request({provider:'codex',method:'thread/start',params:{}});
+ const instruction=f.agents.bridge('codex',created.thread.id).newThreadInstructions;
+ assert(instruction.includes(JSON.stringify(current)));assert(!instruction.includes(prior));
+ assert.match(instruction,/project_skill_catalog/);assert.match(instruction,/conflict/i);
 });

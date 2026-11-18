@@ -91,12 +91,23 @@ class ManagedScheduleTest(unittest.TestCase):
         return '__STUDIO_JSON__' + json.dumps(receipt)
 
     def start_parent(self, cluster):
-        parent = self.clusters.prepare({
+        parent = self.draft(cluster, 'parent-' + cluster)
+        return self.clusters.submit(parent['id'])
+
+    def draft(self, cluster, key):
+        return self.clusters.prepare({
             'name': 'Parent fixture', 'project_id': self.project['id'], 'cluster_id': cluster,
             'engine': 'pydyn.md', 'inputs': {'run.py': str(self.path)}, 'parameters': {},
-            'idempotency_key': 'parent-' + cluster, 'max_seconds': 120,
+            'idempotency_key': key, 'max_seconds': 120,
         })
-        return self.clusters.submit(parent['id'])
+
+    def managed_submit_request(self, run):
+        return {'run_id': run['id'], 'managed_monitor': {
+            'schemaVersion': 1, 'sourceId': 'source-a', 'scope': {**self.scope, 'runId': run['id']},
+        }}
+
+    def submit_managed(self, data, admin=True):
+        return dispatch(self.service, 'POST', '/api/cluster/submit', data, admin)
 
     def upsert(self, kind='poll', **fields):
         return self.schedules.upsert({'sourceId': 'source-a', 'scope': self.scope, 'kind': kind,
@@ -139,6 +150,156 @@ class ManagedScheduleTest(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         self.pump()
         self.assertEqual(len(self.calls), 1)
+
+    def test_managed_parent_monitor_is_reserved_with_submit_and_closes_on_terminal_evidence(self):
+        draft = self.draft(self.profile['id'], 'managed-first')
+        data = self.managed_submit_request(draft)
+        health = dispatch(self.service, 'GET', '/api/health', {}, True)
+        self.assertEqual(health['managed_submit_monitor_schema'], 1)
+        def before_dispatch(p):
+            self.assertEqual(p['id'], draft['id'])
+            reserved = self.clusters.raw(draft['id'])
+            observed = self.schedules.list({'sourceId': 'source-a'})
+            self.assertEqual(len(observed), 1)
+            self.assertEqual(reserved['status'], 'unknown')
+            self.assertTrue(reserved['submit_attempted'])
+            self.assertTrue(reserved['managed_schedule_parent'])
+            self.assertEqual(reserved['managed_submit_monitor']['scheduleId'], observed[0]['id'])
+            self.assertEqual(observed[0]['scope'], data['managed_monitor']['scope'])
+        self.before_submit = before_dispatch
+        queued = self.submit_managed(data)
+        plan = self.schedules.list({'sourceId': 'source-a'})[0]
+        self.assertEqual(queued['status'], 'queued')
+        self.assertEqual(plan['kind'], 'poll')
+        self.assertEqual((plan['intervalSeconds'], plan['maxRuns'], plan['count'], plan['nextAt']), (1800, 48, 0, 2800))
+        self.assertEqual(self.submit_managed(data)['job_id'], queued['job_id'])
+        self.assertEqual(len(self.submissions), 2)
+        self.assertNotIn('managed_schedule_parent', self.clusters.raw(self.parent['id']))
+        polled = []
+        self.before_poll = lambda p: polled.append(p['id'])
+        self.clusters.tick()
+        self.clusters.poll(draft['id'])
+        self.assertEqual(polled, [self.parent['id']])
+        self.time = 2799
+        self.pump()
+        self.assertEqual(self.status(plan)['count'], 0)
+        self.terminal.add(draft['id'])
+        self.time = 2800
+        self.assertFalse(self.pump()['deliveries'])
+        final = self.status(plan)
+        self.assertEqual((final['count'], final['status'], final['nextAt']), (1, 'completed', None))
+        self.assertEqual(final['lastResult']['run']['status'], 'succeeded')
+        self.time += 5000
+        self.pump()
+        self.assertEqual(polled, [self.parent['id'], draft['id']])
+
+    def test_failed_managed_submit_preflight_creates_no_monitor_and_legacy_cannot_inject(self):
+        draft = self.draft(self.profile['id'], 'enrollment-preflight')
+        data = self.managed_submit_request(draft)
+        with self.assertRaises(PermissionError):
+            self.submit_managed(data, admin=False)
+        foreign = {**data, 'managed_monitor': {**data['managed_monitor'], 'scope': {
+            **data['managed_monitor']['scope'], 'projectId': 'foreign-project',
+        }}}
+        with self.assertRaises(PermissionError):
+            self.submit_managed(foreign)
+        with patch.object(self.clusters, 'archive', side_effect=ValueError('fixture archive unavailable')):
+            with self.assertRaisesRegex(ValueError, 'archive unavailable'):
+                self.submit_managed(data)
+        self.assertEqual(len(self.submissions), 1)
+        self.assertEqual(self.clusters.raw(draft['id'])['status'], 'ready')
+        self.assertEqual(self.schedules.list({'sourceId': 'source-a'}), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'Exercise the worker MCP endpoint in its supported POSIX environment')
+    def test_direct_mcp_rejects_managed_submit_metadata_before_dispatch(self):
+        from studio_worker.transport.server import mcp_tool_call
+        draft = self.draft(self.profile['id'], 'mcp-forgery')
+        result = mcp_tool_call(self.service, {'name': 'submit_cluster_run', 'arguments': self.managed_submit_request(draft)})
+        self.assertTrue(result['isError'])
+        self.assertEqual(json.loads(result['content'][0]['text'])['operation_state'], 'not_started')
+        self.assertEqual(self.clusters.raw(draft['id'])['status'], 'draft')
+        self.assertEqual(self.schedules.list({'sourceId': 'source-a'}), [])
+
+    def test_lost_managed_submit_retains_exact_finite_monitor_without_resubmission(self):
+        draft = self.draft(self.profile['id'], 'managed-unknown')
+        data = self.managed_submit_request(draft)
+        self.lost = True
+        self.assertEqual(self.submit_managed(data)['status'], 'unknown')
+        original = self.schedules.list({'sourceId': 'source-a'})[0]
+        self.close()
+        self.open()
+        self.assertEqual(self.submit_managed(data)['status'], 'unknown')
+        self.assertEqual(len(self.submissions), 2)
+        self.assertEqual(self.schedules.list({'sourceId': 'source-a'}), [original])
+        self.time = original['expiresAt']
+        self.pump(resume=True)
+        expired = self.status(original)
+        self.assertEqual((expired['status'], expired['count'], expired['nextAt']), ('expired', 0, None))
+
+    def test_managed_submit_reuses_explicit_monitor_and_its_budget(self):
+        draft = self.draft(self.profile['id'], 'managed-existing')
+        self.scope = {**self.scope, 'runId': draft['id']}
+        explicit = self.upsert(intervalSeconds=60, maxRuns=3)
+        self.time = explicit['nextAt']
+        self.pump()
+        queued = self.submit_managed(self.managed_submit_request(draft))
+        self.assertEqual(queued['status'], 'queued')
+        self.assertEqual(queued['managed_submit_monitor']['scheduleId'], explicit['id'])
+        plans = self.schedules.list({'sourceId': 'source-a'})
+        self.assertEqual(len(plans), 1)
+        self.assertEqual((plans[0]['count'], plans[0]['maxRuns']), (1, 3))
+
+    def test_exhausted_monitor_allows_one_exact_manual_poll_without_reset_or_wake(self):
+        plan = self.upsert(intervalSeconds=2, maxRuns=1, expiresAt=1010)
+        method, route = 'POST', '/api/managed-schedules/observe-once'
+        request = {**self.request(plan), 'requestId': 'human-click'}
+        with self.assertRaises(PermissionError):
+            dispatch(self.service, method, route, request, True)
+        self.time = 1002
+        self.pump()
+        self.assertEqual(self.status(plan)['status'], 'exhausted')
+        polled = []
+        self.before_poll = lambda payload: polled.append(payload['id'])
+        with self.assertRaises(PermissionError):
+            dispatch(self.service, method, route, request, False)
+        with self.assertRaises(PermissionError):
+            dispatch(self.service, method, route, {**request, 'sourceId': 'other'}, True)
+        self.terminal.add(self.parent['id'])
+        observed = dispatch(self.service, method, route, request, True)
+        self.assertEqual((observed['status'], observed['run']['status']), ('observed', 'succeeded'))
+        self.assertEqual(observed['snapshot']['runs'][0], observed['run'])
+        self.assertEqual(observed['snapshot']['schedules'][0]['count'], 1)
+        self.assertEqual(polled, [self.parent['id']])
+        self.time = 2000
+        self.assertEqual(dispatch(self.service, method, route, request, True)['run'], observed['run'])
+        self.assertEqual(polled, [self.parent['id']])
+        self.assertFalse(self.pump()['deliveries'])
+        self.assertEqual(self.status(plan)['status'], 'exhausted')
+        self.assertEqual(len(self.status(plan)['history']), 1)
+
+    def test_last_counted_poll_uses_verified_terminal_state_before_exhausted(self):
+        self.terminal.add(self.parent['id'])
+        plan = self.upsert('action', action={'type': 'status'}, intervalSeconds=2, maxRuns=1)
+        self.time = 1002
+        self.pump()
+        done = self.status(plan)
+        self.assertEqual((done['count'], done['status'], done['nextAt']), (1, 'completed', None))
+        self.assertEqual(done['lastResult']['run']['status'], 'succeeded')
+
+    def test_verified_scheduler_completion_does_not_invent_a_run_exit_receipt(self):
+        def done_wire(script, data=None, timeout=40):
+            return '__STUDIO_JSON__' + json.dumps({'job_id': self.parent['job_id'], 'scheduler_state': 'COMPLETED',
+                                                   'identity_verified': True})
+        with patch.object(self.clusters, 'transport', lambda _profile: SimpleNamespace(run=done_wire)):
+            plan = self.upsert(intervalSeconds=2, maxRuns=1)
+            self.time = 1002
+            self.pump()
+        done = self.status(plan)
+        observation = done['lastResult']['run']
+        self.assertTrue(observation['schedulerTerminal'])
+        self.assertEqual(observation['status'], 'unknown')
+        self.assertEqual(done['status'], 'completed')
+        self.assertIsNone(self.clusters.raw(self.parent['id'])['exit'])
 
     def test_restart_skips_missed_rounds_and_edit_preserves_count_and_expiry(self):
         plan = self.upsert(intervalSeconds=10, maxRuns=6, expiresAt=1100)

@@ -77,8 +77,8 @@ export function createManagedComputeServices({connections,registration,source,tr
    return observed;
   }
   return {id:sshSourceId(binding),generation:channelId,binding,health,verify,async forward(method,target,data,mcp,timeoutMs,beforeDispatch){
-   fresh();await verify();
-   beforeDispatch?.();
+   fresh();const observed=await verify();
+   beforeDispatch?.(observed);
    const result=await forward(method,target,data,mcp,timeoutMs);
    fresh();return result;
   }};
@@ -104,8 +104,8 @@ export function createManagedComputeServices({connections,registration,source,tr
    if(result.status!=='connected')fail('managed_compute_private_service_unavailable');
    const health=await verify();
    return {id,generation:uuid(),binding,health,verify,close:()=>client.close(),async forward(method,target,data,mcp,timeoutMs,beforeDispatch){
-    await verify();
-    beforeDispatch?.();
+    const observed=await verify();
+    beforeDispatch?.(observed);
     const response=await client.forward(method,target,data,mcp,timeoutMs);
     fresh();return response;
    }};

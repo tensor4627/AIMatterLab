@@ -17,7 +17,7 @@ export interface ConversationActivity {
 export interface ManagedSchedule {
   id:string; name?:string; sourceId:string; kind:string; status:string;
   scope:{provider:AgentProvider;threadId:string;taskId?:string;projectId:string;runId?:string};
-  intervalSeconds:number; maxRuns:number; count:number; expiresAt:number; nextAt:number|null;
+  intervalSeconds:number; maxRuns:number; count:number; delegationCount?:number; expiresAt:number; nextAt:number|null;
   connected?:boolean; history?:unknown[]; revision?:number; stopRequestedAt?:number|null; lastResult?:unknown;
   active?:{jobId?:string;childId?:string;status?:string}|null; script?:{language?:string;sha256?:string;version?:number;text?:string}|null;
 }
@@ -25,6 +25,12 @@ export interface ManagedSource {
   id:string;profileId:string;name?:string;connected:boolean;observedAt:number|null;
   schedules:ManagedSchedule[];runs:{id:string;projectId:string;status:string;jobId?:string;observedAt:number|null}[];
 }
+export interface MonitorNotice {
+ id:string;sourceId:string;profileId:string;resourceName:string;scheduleId:string;runId:string;projectId:string;
+ provider:AgentProvider;threadId:string;jobId:string|null;status:string;observedAt:number|null;count:number;maxRuns:number;
+ delegationExhausted:boolean;createdAt:number;acknowledgedAt:number|null;
+}
 export interface ManagedSnapshot {
+ notices?:MonitorNotice[];
   resources:ManagedResource[];conversations:ConversationActivity[];sources:ManagedSource[];
 }

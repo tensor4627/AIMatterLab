@@ -65,7 +65,7 @@ import {createServiceHandoff} from '../agent/sessions/service-handoff.mjs';
 import {createTaskCustomCv} from "../backend/main/workspace/task-custom-cv.mjs";
 import {currentPairTool,readCurrentPair} from "../agent/tools/current-pair-tool.mjs";
 import {importTaskAsset} from "../backend/main/workspace/task-asset-import.mjs";
-import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, Notification, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage } from 'electron';
 
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -116,6 +116,7 @@ import {assertRendererWorkerRoute,linuxPath} from "../contracts/transport-policy
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here,'..');
+if(process.platform==='win32'&&app.isPackaged)app.setAppUserModelId('science.gpusampling.studio');
 const performanceTimeline=createPerformanceTimeline();
 const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'backend','worker');
 const sshTransportSource=app.isPackaged?path.join(process.resourcesPath,'terminal-service','python'):path.join(here,'platform','terminal-service','python');
@@ -127,8 +128,10 @@ let resolveSkillGuidance=async()=>legacyGuidanceFacts();
 const guidanceLeases=new WeakMap();let guidanceEpoch=0;
 function skillGuidanceLease(provider){
  const terminal=agents?.bridgeWorkers?.get(provider)?.transport==='desktop-terminal';
- const leases=terminal?terminalMcp?.scopes:worker.providerScopes;
- const raw=leases?.get(provider,workflowContext?.sessionId())||leases?.scopes?.get(provider);if(!raw)return undefined;
+ const sessionId=workflowContext?.sessionId?.()??agents?.sessionIdentity?.(provider,workflowContext?.current()?.threadId)?.id;
+ const terminalScopes=terminalMcp?.scopes,workerScopes=worker.providerScopes,legacy=terminal?terminalScopes:workerScopes;
+ const raw=sessionId===undefined?legacy?.scopes.get(provider):terminalScopes?.get(provider,sessionId)??workerScopes?.get(provider,sessionId);
+ if(!raw)return undefined;
  if(!guidanceLeases.has(raw))guidanceLeases.set(raw,{epoch:++guidanceEpoch,get context(){return raw.context;}});return guidanceLeases.get(raw);
 }
 function skillGuidanceScope(provider){const owner=workflowContext?.current(),revision=workflowContext?.revision(),stamp=JSON.stringify(owner),lease=skillGuidanceLease(provider);return {...owner,provider,epoch:lease?.epoch,checkCurrent:()=>revision===workflowContext?.revision()&&stamp===JSON.stringify(workflowContext?.current())&&skillGuidanceLease(provider)===lease};}
@@ -149,6 +152,7 @@ if(workspace)app.setPath('sessionData',workspaceSessionDirectory(workspace,app.g
 let window, catalog, settings, setupGuide, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
 let managedWorkbench,managedResources,managedSchedules,resourceActivity,projectTerminalAccess,workbenchTray;
 let shuttingDown=false,desktopShutdown;
+const attentionBalloons=new Set();
 const agentConnectAttempts=new Map();
 const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&process.arch==='x64'?workspace:null,currentVersion:app.getVersion(),
   fetchApi:(url,options)=>net.fetch(url,options),install:launchWorkspaceUpdate,quit:()=>app.quit(),
@@ -391,7 +395,7 @@ handle('compute.sshService.scheduler',async value=>{const result=await sshServic
 handle('compute.sshService.disconnect',async value=>{conversationTerminals.serviceOwner(value.connectionId,'human');const result=await sshService.disconnect(value);emit('studio:event',{method:'studio/computeResourceChanged',params:await computeResource.status({})});return result;});
 handle('compute.resource.status',async value=>{const result=await computeResource.status(value);return result.kind==='ssh-connection'&&result.authentication==='verified'?{...result,canAcquireConversationTerminal:conversationTerminals.canAcquire(agents.active)}:result;});
 for(const method of ['activate','clear'])handle('compute.resource.'+method,async value=>{
- assertIdleAgent();agents.assertContextIdle();const before=computeResource.capture(),result=await computeResource[method](value),after=computeResource.capture();
+ assertLegacyWorkerIdle();const before=computeResource.capture(),result=await computeResource[method](value),after=computeResource.capture();
  if(before.revision!==after.revision||JSON.stringify(before.selection)!==JSON.stringify(after.selection)){
   if(before.selection?.connectionId)conversationTerminals.detachConnection(before.selection.connectionId);
   await sshService.resourceChanged();
@@ -440,7 +444,17 @@ const runToolScope=(scope,run)=>agents.runForScope(scope,()=>workflowContext.run
 worker.setToolScope(runToolScope);
 managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,registration:serviceRegistration,terminal:sharedTerminal,projectSkills,resourceActivity,
  projectAccess:projectTerminalAccess,records:taskRecords,workflow:workflowContext,agents,privateAccess,workerSource,sshTransportSource,handle,
- notify:()=>emit('studio:event',{method:'studio/managedActivity'}),dispatch:(...args)=>agentRequests(...args)});
+ notify:()=>emit('studio:event',{method:'studio/managedActivity'}),dispatch:(...args)=>agentRequests(...args),
+ announce:notice=>{
+  if(shuttingDown||!window||window.isFocused()&&window.isVisible()||!Notification.isSupported())return;
+  const en=settings.language==='en';
+  const alert=new Notification({title:en?'AIMatterLab · Monitoring limit reached':'AIMatterLab · 巡检已达上限',
+   body:notice.resourceName+' · '+(notice.jobId||notice.runId)+'\n'+(en?'Follow the original job in Run records.':'作业尚无终态回执，请在运行记录中自行关注。')});
+  attentionBalloons.add(alert);
+  alert.once('click',()=>{focusExistingWindow();emit('studio:event',{method:'studio/openManagedAttention',params:{id:notice.id,sourceId:notice.sourceId,scheduleId:notice.scheduleId}});attentionBalloons.delete(alert);});
+  alert.once('close',()=>attentionBalloons.delete(alert));alert.once('failed',()=>attentionBalloons.delete(alert));
+  try{alert.show();}catch{attentionBalloons.delete(alert);}
+ }});
 managedResources=managedWorkbench.resources;managedSchedules=managedWorkbench.schedules;
 terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,scientificSkills,guard:()=>worker.authoringGuard,desktopTools:managedWorkbench.desktopTools,
  workerTools:workerToolBridge({connection:scope=>resourceRouting.scopedWorkerConnection(scope)}),runScope:runToolScope,captureScope:scope=>agents.captureToolScope(scope)});
@@ -560,6 +574,7 @@ handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAu
 handle('worker.request',async({method,target,data}) => {
   assertRendererWorkerRoute(method,target);
   const route=new URL(target,'http://127.0.0.1').pathname;
+  if(method==='POST'&&route==='/api/cluster/submit'&&data&&Object.hasOwn(data,'managed_monitor'))throw Error('Managed submission metadata belongs to the private resource service');
   if(method==='POST'&&route==='/api/structures/create')return createStructureWithAuthoringContext({records:taskRecords,worker,selection:()=>workflowContext.current()},data);
   if(method==='POST'&&['/api/clusters','/api/cluster/test'].includes(route)&&requiresCurrentSshWorker(route==='/api/cluster/test'?data?.connection:data))await requireCurrentSshWorker(worker,()=>readWorkerStatus(worker,()=>settings));
   if(method==='POST'&&['/api/cluster/probe','/api/cluster/browse'].includes(route)&&data?.cluster_id){const connection=worker.connection,epoch=worker.connectionEpoch,observed=await readWorkerStatus(worker,()=>settings);if(observed.status!=='connected'||observed.serviceVersion!=='current'){const profile=await worker.request('POST','/api/cluster/profile',{cluster_id:data.cluster_id});if(worker.connection!==connection||worker.connectionEpoch!==epoch||requiresCurrentSshWorker(profile))throw Error('needs_worker_update');}}
@@ -589,6 +604,7 @@ async function scientificTools(provider,threadId){
 }
 handle('agent.connect',async({provider,repairTools=false,threadId})=>{
  providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');if(threadId!==undefined&&(typeof threadId!=='string'||!threadId.trim()||threadId.length>200))throw Error('Invalid connection conversation');
+ if(repairTools&&threadId!==undefined){const owner=workflowContext.current();if(owner?.provider!==provider||owner?.threadId!==threadId)throw Error('请先选择要修复工具连接的原对话。');}
  const key=JSON.stringify([provider,threadId||null]),connectionTicket=Symbol();agentConnectAttempts.set(key,connectionTicket);
  const current=()=>agentConnectAttempts.get(key)===connectionTicket;
  try{

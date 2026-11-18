@@ -1014,12 +1014,15 @@ print('__STUDIO_JSON__'+json.dumps(out))
     def raw(self, identifier):
         return self.store.get("cluster-run", identifier)
 
-    def save(self, r, **changes):
+    def save(self, r, *, related=(), **changes):
         # Keep the SQLite row and its diagnostic snapshot ordered across HTTP
         # requests and the background monitor (including the shared .tmp file).
         with self.store.lock:
             r.update(changes,updated_at=time.time())
-            self.store.put("cluster-run",r)
+            if related:
+                self.store.put_many([("cluster-run", r), *related])
+            else:
+                self.store.put("cluster-run",r)
             self.store.event(r["id"],{"kind":"cluster-run","state":r["status"]})
             atomic_json(Path(r["directory"])/"run.json",r)
             return r
@@ -1140,17 +1143,22 @@ elif r['engine']=='pydyn.md':
                 add(".studio/studio_worker/"+name,data)
         return buffer.getvalue()
 
-    def submit(self, identifier, *, managed=None, timeout=90):
+    def submit(self, identifier, *, managed=None, timeout=90, monitor=None):
+        scheduler = getattr(self.service, 'managed_schedules', None)
+
         def reviewed():
             r=self.raw(identifier)
             project,p=self.allowed(r["project_id"],r["cluster_id"])
+            if monitor is not None:
+                if scheduler is None:
+                    raise PermissionError("Managed submission monitoring is unavailable")
+                scheduler.submit_monitor_owner(r, monitor)
             if r.get("superseded_by"):raise ValueError("Review and submit the revised snapshot")
             if r["status"] in ("queued","running","unknown",*TERMINAL):
                 return None,None
             if r["status"] not in ("draft","ready"):
                 raise ValueError("Only an unsubmitted input snapshot can be submitted")
             if r.get("managed_child"):
-                scheduler = getattr(self.service, 'managed_schedules', None)
                 if scheduler is None or not scheduler.can_submit_child(r, managed):
                     raise PermissionError("Only the owning due schedule may submit this child")
                 from studio_worker.compute.managed_child import validate_child
@@ -1216,7 +1224,12 @@ print('__STUDIO_JSON__'+json.dumps(record))
                 p=r['cluster_snapshot']
             # This durable reservation is visible to both schedulers before any
             # remote side effect. Unknown attempts are never automatically replayed.
-            self.save(r,status="unknown",submit_attempted=True)
+            if monitor is not None:
+                enrollment, related = scheduler.enrollment(scheduler.submit_monitor_owner(r, monitor))
+                self.save(r, related=related, status="unknown", submit_attempted=True, managed_schedule_parent=True,
+                          managed_submit_monitor=enrollment)
+            else:
+                self.save(r,status="unknown",submit_attempted=True)
         try:
             result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=data,timeout=timeout))
             if result.get("nonce")!=r["nonce"] or not re.fullmatch(r"[0-9]+",result.get("job_id","")):
@@ -1327,12 +1340,14 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 self.save(current,status="unknown",error="SSH or scheduler state unavailable; no resubmission",**changes)
         return self.run(identifier)
 
-    def cancel(self, identifier, *, managed=None, timeout=None):
+    def cancel(self, identifier, *, managed=None, timeout=None, require_known=False):
         # Record the user's intent before even the status query can lose its
         # acknowledgement. Polling never proves the cancellation was delivered.
         with self.store.lock:
             before=self.raw(identifier)
             self.allowed(before['project_id'],before['cluster_id'])
+            if require_known and (before['status'] not in ('queued', 'running') or before.get('cancel_requested')):
+                raise ValueError('Original run status does not confirm a cancellable scheduler job')
             scheduler = getattr(self.service, 'managed_schedules', None)
             if before.get("managed_child") and (scheduler is None or not scheduler.can_cancel_child(before, managed)):
                 raise PermissionError("Stop the owning schedule to cancel its verified child")
@@ -1344,19 +1359,22 @@ print('__STUDIO_JSON__'+json.dumps(out))
             self.save(before,cancel_requested=True,cancellation=requested)
             self._cancelling.add(identifier)
         try:
-            if managed is None and timeout is None:
+            if managed is None and timeout is None and not require_known:
                 return self._cancel_verified_job(identifier,requested)
-            return self._cancel_verified_job(identifier,requested,managed=managed,timeout=timeout)
+            return self._cancel_verified_job(identifier,requested,managed=managed,timeout=timeout,require_known=require_known)
         finally:
             with self.store.lock:
                 self._cancelling.discard(identifier)
 
-    def _cancel_verified_job(self, identifier, requested, *, managed=None, timeout=None):
+    def _cancel_verified_job(self, identifier, requested, *, managed=None, timeout=None, require_known=False):
         observed=self.poll(identifier) if managed is None else self.poll(identifier,managed=managed,timeout=timeout)
         with self.store.lock:
             r=self.raw(identifier)
             self.allowed(r['project_id'],r['cluster_id'])
             if r['status'] in TERMINAL:return self.run(identifier)
+            if require_known and (r['status'] not in ('queued', 'running') or observed['status'] not in ('queued', 'running')):
+                self.save(r,cancellation={**requested,'status':'unconfirmed','message':'Original scheduler status could not be confirmed; no signal was sent'})
+                raise ValueError('Original scheduler status could not be confirmed')
             if (not r.get("job_id") or not r.get("identity_verified") or not observed.get("identity_verified")
                     or r["job_id"]!=observed.get("job_id") or r.get("observation_token")!=observed.get("observation_token")):
                 self.save(r,cancellation={**requested,"status":"unconfirmed","message":"Original scheduler identity is not verified; no cancellation command was sent"})

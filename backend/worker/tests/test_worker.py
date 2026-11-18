@@ -153,6 +153,17 @@ class Lifecycle(unittest.TestCase):
         self.service.tick()
         self.assertFalse((Path(run["directory"]) / "launch.json").exists())
 
+    def test_managed_known_cancel_refuses_drift_under_the_worker_lock(self):
+        run = self.submit()
+        payload = {"run_id": run["id"], "require_known": True}
+        self.assertEqual(dispatch(self.service, "GET", "/api/health", {})["managed_run_action_schema"], 1)
+        self.service.store.update(run, status="unknown")
+        with self.assertRaisesRegex(ValueError, "does not confirm"):
+            dispatch(self.service, "POST", "/api/run/cancel", payload, admin=False)
+        self.assertFalse(self.service.store.run(run["id"]).get("cancel_requested"))
+        self.service.store.update(run, status="queued")
+        self.assertEqual(dispatch(self.service, "POST", "/api/run/cancel", payload, admin=False)["status"], "cancelled")
+
     def test_running_cancel_and_timeout(self):
         (self.inputs / "run.py").write_text("import time;time.sleep(60)\n")
         run = self.submit()

@@ -1,4 +1,12 @@
 const english:Record<string,string> = {
+"巡检已达上限":"Monitoring limit reached",
+"本次委托的执行额度已用完。":"This delegation’s execution budget has been used.",
+"自动巡检次数已用完。":"All automatic job checks have been used.",
+"请自行关注原作业的后续状态。":"Please follow the original job for further updates.",
+"最近状态":"Last reported state",
+"手动核对一次":"Check original job once",
+"知道了":"Dismiss",
+"查看运行记录":"Open run records",
 "准备作业服务":"Prepare job service",
 "所选客户端无法建立受管连接。请使用 Windows OpenSSH 或 WSL/Linux OpenSSH，也可打开普通 SSH 终端。":"This client cannot open a managed connection. Select Windows or WSL/Linux OpenSSH, or open a plain SSH terminal.",
 "Windows OpenSSH 需要此 Windows 账户可读取的密钥路径。请核对密钥文件，或留空使用默认认证。":"Choose a key accessible to your Windows account, or leave it blank for default authentication.",

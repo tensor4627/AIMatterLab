@@ -17,9 +17,11 @@ MUTATION = 'managed-schedule-mutation'
 DELIVERY = 'managed-schedule-delivery'
 DELEGATION = 'managed-schedule-delegation'
 PLAN_IDENTITY = 'managed-schedule-identity'
+MANUAL_OBSERVATION = 'managed-schedule-manual-observation'
 TERMINAL_JOBS = ('succeeded', 'failed', 'cancelled')
 ACTIVE_JOBS = ('queued', 'running')
 CHILD_OBSERVATION_SECONDS = 15
+BUILTIN_MONITOR = 'managed-submit'
 
 
 class ManagedSchedules:
@@ -28,9 +30,11 @@ class ManagedSchedules:
         self._pump_lock = threading.Lock()
         self._dispatch_token = object()
         self._poll_token = object()
+        self._manual_poll_token = object()
         self._cancel_token = object()
         self.explicit_parent_cancel = object()
         self._dispatching = set()
+        self._manually_observing = set()
 
     def _read(self, source, schedule_id):
         row = self.store.get(SCHEDULE, identifier(schedule_id))
@@ -58,6 +62,49 @@ class ManagedSchedules:
         row['updatedAt'] = self.clock()
         self.store.put_many([(SCHEDULE, row), *records])
         return row
+
+    @staticmethod
+    def _new_schedule(schedule_id, source, scope, kind, key, delegation, reference, plan, now):
+        return {'schemaVersion': 1, 'id': schedule_id, 'sourceId': source, 'scope': scope, 'kind': kind,
+                'key': key, 'delegationId': delegation, 'parent': reference, 'createdAt': now, 'stateRevision': 0,
+                'revision': 0, 'count': 0, 'active': None, 'lastResult': None, 'stopRequestedAt': None,
+                'cancellation': None, 'nextAt': now + plan['intervalSeconds']}
+
+    def submit_monitor_owner(self, run, data):
+        fields(data, ('schemaVersion', 'sourceId', 'scope'), ('schemaVersion', 'sourceId', 'scope'))
+        if type(data['schemaVersion']) is not int or data['schemaVersion'] != 1 or run.get('managed_child'):
+            raise ValueError('Use the supported managed parent monitor schema')
+        scope = normalize_scope(data['scope'], 'poll')
+        if (scope['runId'], scope['projectId']) != (run['id'], run['project_id']):
+            raise PermissionError('The job monitor must belong to this original run and project')
+        owner = {'sourceId': identifier(data['sourceId']), 'scope': scope}
+        existing = run.get('managed_submit_monitor')
+        if existing and any(existing[key] != value for key, value in owner.items()):
+            raise PermissionError('The job already belongs to another original monitor scope')
+        return owner
+
+    def enrollment(self, owner):
+        """Build the monitor in the submit reservation's lock. The caller commits both rows together."""
+        source, scope = owner['sourceId'], owner['scope']
+        _, reference = project_parent(self.service, scope)
+        existing = [row for row in self._rows(source) if row['kind'] == 'poll' and
+                    row['scope'] == scope and row['parent'] == reference]
+        if existing:
+            plan = max(existing, key=lambda row: (row['createdAt'], row['id']))
+            return {**owner, 'scheduleId': plan['id']}, ()
+
+        key = 'built-in-status'
+        delegation = 'managed-submit-' + scope['runId']
+        kind = 'poll'
+        now = self.clock()
+        plan = schedule_plan({'kind': kind, 'key': key}, None, now)
+        del plan['name']  # Desktop uses the translated poll label.
+        schedule_id = fingerprint([source, scope, kind, key, delegation])
+        row = self._new_schedule(schedule_id, source, scope, kind, key, delegation, reference, plan, now)
+        row.update(plan, origin=BUILTIN_MONITOR, stateRevision=1, revision=1, updatedAt=now, status='scheduled')
+        identity = fingerprint([source, scope, kind, delegation, None, None, None, None])
+        records = ((SCHEDULE, row), (PLAN_IDENTITY, {'id': identity, 'owner': schedule_id}))
+        return {**owner, 'scheduleId': schedule_id}, records
 
     def upsert(self, data):
         fields(data, UPSERT_KEYS, ('sourceId', 'scope', 'kind', 'mutationId'))
@@ -93,10 +140,7 @@ class ManagedSchedules:
                 checked_target(self.service, parent, plan['timeoutSeconds'], plan['script']['resources'])
             if kind == 'action' and plan['action']['type'] == 'read_log' and reference['kind'] != 'cluster':
                 raise ValueError('The scheduled log action requires an original Slurm or LSF run')
-            record = old or {'schemaVersion': 1, 'id': schedule_id, 'sourceId': source, 'scope': scope, 'kind': kind,
-                             'key': key, 'delegationId': delegation, 'parent': reference, 'createdAt': now, 'stateRevision': 0, 'revision': 0,
-                             'count': 0, 'active': None, 'lastResult': None, 'stopRequestedAt': None,
-                             'cancellation': None, 'nextAt': now + plan['intervalSeconds']}
+            record = old or self._new_schedule(schedule_id, source, scope, kind, key, delegation, reference, plan, now)
             if self._budget(record)['count'] >= MAX_BUDGET:
                 raise ValueError('The original delegation has used its 336 execution credits')
             identity = fingerprint([source, scope, kind, delegation, plan.get('script', {}).get('sha256'),
@@ -120,14 +164,14 @@ class ManagedSchedules:
     def _schedule_state(self, row, now):
         if row['stopRequestedAt'] is not None:
             row['status'] = 'stopped'
-        elif row.get('status') == 'unknown':
+        elif row.get('status') in ('completed', 'exhausted', 'expired', 'unknown'):
             return
         elif row['active']:
             row['status'] = 'running'
-        elif now >= row['expiresAt']:
-            row['status'] = 'expired'
         elif row['count'] >= row['maxRuns'] or self._budget(row)['count'] >= MAX_BUDGET:
             row['status'] = 'exhausted'
+        elif now >= row['expiresAt']:
+            row['status'] = 'expired'
         else:
             row['status'] = 'scheduled'
 
@@ -153,6 +197,56 @@ class ManagedSchedules:
             return {'sourceId': source, 'observedAt': self.clock(),
                     'runs': [project_run(row) for row in (*self.store.runs(), *self.store.list('cluster-run'))],
                     'schedules': [self._public(row) for row in self._rows(source)]}
+
+    @staticmethod
+    def _observes_status(row):
+        return row['kind'] == 'poll' or row['kind'] == 'action' and row['action']['type'] == 'status'
+
+    @staticmethod
+    def _terminal(observation):
+        return observation['status'] in TERMINAL_JOBS or observation['schedulerTerminal']
+
+    def observe_once(self, data):
+        fields(data, ('sourceId', 'scheduleId', 'requestId'), ('sourceId', 'scheduleId', 'requestId'))
+        source, request = identifier(data['sourceId']), identifier(data['requestId'])
+        with self.store.lock:
+            row = self._read(source, data['scheduleId'])
+            if (row['status'] != 'exhausted' or not self._observes_status(row) or
+                    (row.get('parent') or {}).get('kind') != 'cluster'):
+                raise PermissionError('Manual observation requires an exhausted monitor of an original cluster job')
+            parent, _ = project_parent(self.service, row['scope'], row['parent'])
+            if parent['status'] in ('draft', 'ready') or not (parent.get('job_id') or parent.get('submit_attempted')):
+                raise PermissionError('Manual observation requires an original submission')
+            run_id = parent['id']
+            key = fingerprint([source, row['id'], request])
+            receipt = {'id': key, 'sourceId': source, 'scheduleId': row['id'], 'requestId': request,
+                       'runId': run_id, 'startedAt': self.clock(), 'status': 'started'}
+            if self.store.db_exists(MANUAL_OBSERVATION, key):
+                previous = self.store.get(MANUAL_OBSERVATION, key)
+                status = previous['status']
+                if status == 'started':
+                    status = 'in_progress' if run_id in self._manually_observing else 'unknown'
+                return self._manual_result(row, request, status, parent)
+            if run_id in self._manually_observing:
+                return self._manual_result(row, request, 'in_progress', parent)
+            self.store.put(MANUAL_OBSERVATION, receipt)
+            self._manually_observing.add(run_id)
+        status = 'unknown'
+        try:
+            if not self._terminal(project_run(parent)):
+                self.service.clusters.poll(run_id, managed=self._manual_poll_token, timeout=30)
+            observed = project_run(self.service.clusters.raw(run_id))
+            if self._terminal(observed) or observed['status'] in ACTIVE_JOBS and observed['observedAt'] is not None:
+                status = 'observed'
+        finally:
+            with self.store.lock:
+                self._manually_observing.discard(run_id)
+                self.store.put(MANUAL_OBSERVATION, {**receipt, 'status': status, 'finishedAt': self.clock()})
+        return self._manual_result(row, request, status, self.service.clusters.raw(run_id))
+
+    def _manual_result(self, row, request, status, run):
+        return {'sourceId': row['sourceId'], 'scheduleId': row['id'], 'requestId': request, 'status': status,
+                'run': project_run(run), 'snapshot': self.snapshot({'sourceId': row['sourceId']})}
 
     def _advance(self, row, now):
         interval = row['intervalSeconds']
@@ -207,8 +301,11 @@ class ManagedSchedules:
                                  row['active'].get('cancelAttemptedAt') is None))
         if token is self.explicit_parent_cancel:
             return True
+        if token is self._manual_poll_token:
+            return run['id'] in self._manually_observing
         return (isinstance(token, tuple) and token[0] is self._poll_token and
-                token[1]['scope']['runId'] == run['id'] and self._dispatchable(token[1]))
+                token[1]['scope']['runId'] == run['id'] and run['id'] not in self._manually_observing and
+                self._dispatchable(token[1]))
 
     def _remaining(self, row):
         return max(1, math.ceil(row['active']['deadlineAt'] - self.clock()))
@@ -237,7 +334,9 @@ class ManagedSchedules:
                 row['cancellation'] = cancellation
             elif row['stopRequestedAt'] is not None and not active['childId']:
                 row['cancellation'] = {'status': 'not_needed', 'childId': None, 'signalSent': False}
-            if result['status'] == 'unknown':
+            if self._observes_status(row) and result['status'] == 'succeeded' and result.get('run') and self._terminal(result['run']):
+                row['status'] = 'completed'
+            elif result['status'] == 'unknown' and row.get('origin') != BUILTIN_MONITOR:
                 row['status'] = 'unknown'
             if row['nextAt'] <= now:
                 self._advance(row, now)
@@ -266,7 +365,7 @@ class ManagedSchedules:
         # Status can be a normal saved draft or a terminal receipt. For running
         # cluster jobs, require the scheduler's original job identity evidence.
         verified = bool(observation['observedAt'] and parent['status'] != 'unknown')
-        status = 'succeeded' if verified or parent['status'] in ('draft', 'ready') else 'unknown'
+        status = 'succeeded' if verified or observation['schedulerTerminal'] or parent['status'] in ('draft', 'ready') else 'unknown'
         return {'status': status, 'observedAt': observation['observedAt'], 'evidence': 'run_state', 'run': observation}
 
     def _submit_child(self, row, parent):
@@ -518,6 +617,12 @@ class ManagedSchedules:
         if self._pump_lock.acquire(blocking=False):
             try:
                 self._step(source, skip)
+                with self.store.lock:
+                    # A sibling may have spent the last shared credit during this dispatch.
+                    for row in self._rows(source):
+                        if row['id'] not in skip and row['status'] == 'scheduled' and self._budget(row)['count'] >= MAX_BUDGET:
+                            self._schedule_state(row, self.clock())
+                            self._put(row)
             finally:
                 self._pump_lock.release()
         with self.store.lock:

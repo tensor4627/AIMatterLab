@@ -62,11 +62,21 @@ def gpu_inventory(run=subprocess.run):
     return parse_gpu_rows(result.stdout)
 
 
+def cancel_options(data):
+    if 'require_known' not in data:
+        return {}
+    if data['require_known'] is not True:
+        raise ValueError('Known status guard requires an explicit true value')
+    return {'require_known': True}
+
+
 def dispatch(service, method, path, data, admin=False):
     if path.startswith('/api/managed-schedules/'):
         if method != 'POST' or not admin:
             raise PermissionError('Desktop managed schedule channel required')
         action = path.removeprefix('/api/managed-schedules/')
+        if action == 'observe-once':
+            return service.managed_schedules.observe_once(data)
         if action not in ('upsert', 'stop', 'status', 'list', 'snapshot', 'pump', 'ack'):
             raise ValueError('Unknown managed schedule action')
         return getattr(service.managed_schedules, action)(data)
@@ -106,7 +116,7 @@ def dispatch(service, method, path, data, admin=False):
         return getattr(ToolConfigurations(service), operation)(data)
     if method == "GET":
         if path == "/api/health":
-            value = {"name": "gpu-sampling-studio", "product_name": "AIMatterLab", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1, "managed_schedule_schema":1}
+            value = {"name": "gpu-sampling-studio", "product_name": "AIMatterLab", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1, "managed_schedule_schema":1, "managed_run_action_schema":1, "managed_submit_monitor_schema":1}
             if not getattr(service,'ssh_service_mode',False):
                 value["roadmap_execution_schema"]=1
             if getattr(service, 'ssh_service_mode', False):
@@ -301,8 +311,15 @@ def dispatch(service, method, path, data, admin=False):
     if path=="/api/cluster/revise":
         if not admin:raise PermissionError("Desktop revision required")
         return service.clusters.revise(data["run_id"],data["changes"])
+    if path == '/api/cluster/submit' and 'managed_monitor' in data:
+        if not admin:
+            raise PermissionError('Managed submission requires the desktop resource channel')
+        if set(data) != {'run_id', 'managed_monitor'} or not isinstance(data['managed_monitor'], dict):
+            raise ValueError('Use the managed submission schema')
+        return service.clusters.submit(data['run_id'], monitor=data['managed_monitor'])
     if path in ("/api/cluster/validate","/api/cluster/submit","/api/cluster/cancel"):
-        return getattr(service.clusters,path.rsplit("/",1)[-1])(data["run_id"])
+        action=path.rsplit("/",1)[-1]
+        return getattr(service.clusters,action)(data["run_id"], **(cancel_options(data) if action == 'cancel' else {}))
     if path=="/api/cluster/status":
         return service.clusters.poll(data["run_id"])
     if path=='/api/cluster/observation':
@@ -358,7 +375,7 @@ def dispatch(service, method, path, data, admin=False):
         if action == "collect":
             return service.collect(identifier, data.get("names"))
         if action in ("validate", "submit", "cancel"):
-            return getattr(service, action)(identifier)
+            return getattr(service, action)(identifier, **(cancel_options(data) if action == 'cancel' else {}))
     if path == "/api/structures/suggest":
         return service.inspect(data["project_id"],data["environment_id"],data["path"],"suggest",intent=data.get("intent",{}))
     if path == "/api/inspect":

@@ -79,18 +79,20 @@ function nativeHarness(config){
  fs.mkdirSync(config.profile);fs.mkdirSync(config.sessionData);fs.mkdirSync(config.appData);
  app.setPath('appData',config.appData);app.setPath('userData',config.profile);app.setPath('sessionData',config.sessionData);
  // Observe real registrations and replies. Forbidden routes fail before external work.
- const allowed=new Set(['studio:state','studio:conversation.list','studio:conversation.groups','studio:conversation.select','studio:task.list','studio:workflow.list','studio:worker.restore','studio:worker.status','studio:compute.resource.status','studio:scientific.skills','studio:skills.catalog','studio:tools.packages.list','studio:tools.configurations.list','studio:tools.configurations.context']);
+ const allowed=new Set(['studio:diagnostics.performance','studio:compute.managed.snapshot','studio:updates.status','studio:state','studio:conversation.list','studio:conversation.groups','studio:conversation.select','studio:task.list','studio:workflow.list','studio:worker.restore','studio:worker.status','studio:compute.resource.status','studio:scientific.skills','studio:skills.catalog','studio:tools.packages.list','studio:tools.configurations.list','studio:tools.configurations.context']);
  const register=ipcMain.handle.bind(ipcMain);
  ipcMain.handle=(channel,handler)=>register(channel,async(event,...args)=>{
   const row={id:receipt.ipc.length+1,channel,startedAt:Date.now(),argumentKeys:args[0]&&typeof args[0]==='object'?Object.keys(args[0]):[]};receipt.ipc.push(row);
   try{
    assert(allowed.has(channel),'Native acceptance refuses unexpected IPC: '+channel);
    if(channel==='studio:conversation.select')assert.deepEqual(args[0],{new:true});
+   if(channel==='studio:diagnostics.performance')assert(['renderer-interactive','workspace-observed'].includes(args[0]?.phase));
    if(channel==='studio:worker.restore')assert.deepEqual(args[0],{scope:'global'});
    const result=await handler(event,...args);row.completedAt=Date.now();
    if(channel==='studio:conversation.select'){assert.deepEqual(result,{fresh:true});row.reply={fresh:true};}
    if(channel==='studio:worker.restore'){assert.equal(result.status,'disconnected');assert.equal(result.reason,'explicit_binding_missing');row.reply={status:result.status,reason:result.reason};}
    if(channel==='studio:worker.status')row.reply=nativeWorkerStatusEvidence(result);
+   if(channel==='studio:compute.managed.snapshot')assert.deepEqual(result,{resources:[],conversations:[],sources:[],notices:[]});
    return result;
   }catch(error){row.error=String(error.message||error);finish(error);throw error;}
  });
@@ -145,7 +147,10 @@ function nativeHarness(config){
   const empty=await evaluate(`Promise.all(['conversation.list','task.list','workflow.list'].map(method=>window.studio.invoke(method))).then(values=>values.map(value=>value.length))`);assert.deepEqual(empty,[0,0,0]);
   record('fresh isolated native main/preload with secure renderer',{version:app.getVersion(),renderer,preloadBinding:config.preloadBinding,mainSha256:config.mainSha256,realBridgeAndTypedIpcRoundtrip:true,emptyConversationTaskWorkflowCounts:empty});
   const draft='Native acceptance: preserve this unsent blank draft.';const edited=await type(draft);assert.equal(edited.sendDisabled,true);record('real React input updates a durable unsent blank draft',{sendDisabled:true});
-  await click('[data-testid="navigate-skills"]');await until('actual skills route',async()=>{const value=await snapshot();return value.skills&&value.section==='skills'&&value;});
+  await click('.quick-search');
+  await until('skill library command',()=>evaluate(`!!document.querySelector('.command-list')`));
+  await evaluate(`(()=>{const node=[...document.querySelectorAll('.command-list button')].find(button=>['技能库','Skill library','Skills library','Skills','Skill Library'].includes(button.textContent.trim()));if(!node||node.disabled)throw Error('Skill library command absent');node.click();})()`);
+  await until('actual skills route',async()=>{const value=await snapshot();return value.skills&&value.section==='skills'&&value;});
   await click('[data-testid="navigate-home"]');await click('.quick-search');
   await until('real command palette',()=>evaluate(`!!document.querySelector('.command-list')`));
   await evaluate(`(()=>{const node=[...document.querySelectorAll('.command-list button')].find(button=>['工作区','Workspace'].includes(button.textContent.trim()));if(!node||node.disabled)throw Error('Workspace return command absent');node.click();})()`);

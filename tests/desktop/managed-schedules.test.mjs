@@ -248,3 +248,28 @@ test('script source and receipts are available only on explicit connected detail
   assert.equal(offline.connected, false);
   assert.deepEqual(offline.script, script);
 });
+
+test('manual observation uses the exact exhausted plan and refreshes only the original worker record', async t => {
+  const f = fixture(t);
+  f.state.sources = [f.source(), f.source('another')];
+  const exhausted = plan({status:'exhausted',count:48,nextAt:null});
+  f.state.schedules = [exhausted, plan({id:'pending'})];
+  const controller = f.create();
+  await f.start(controller);
+  f.state.calls.length = 0;
+  const data = {...request,requestId:'human-click'};
+  await assert.rejects(controller.observeOnce({...data,scheduleId:'pending'}),/exhausted_monitor/);
+  await assert.rejects(controller.observeOnce({...data,sourceId:'another'}),/original_source/);
+  assert.equal(f.state.calls.length,0);
+  const completed = {id:scope.runId,projectId:scope.projectId,status:'succeeded',scheduler:'slurm',observedAt:1000};
+  f.state.hook = async ({action}) => {
+    if (action === 'observe-once') return {...data,status:'observed',run:completed,
+      snapshot:{sourceId:'origin',observedAt:1000,schedules:f.state.schedules,runs:[completed]}};
+  };
+  assert.deepEqual(await controller.observeOnce(data),{...data,status:'observed',run:completed});
+  const snapshots = controller.snapshot().sources;
+  assert.deepEqual(snapshots.find(source => source.id === 'origin').runs,[completed]);
+  assert.equal(snapshots.find(source => source.id === 'origin').schedules[0].count,48);
+  assert.deepEqual(f.state.calls,[{id:'origin',action:'observe-once',data}]);
+  assert.throws(() => assertRendererWorkerRoute('POST','/api/managed-schedules/observe-once'));
+});

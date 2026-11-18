@@ -11,6 +11,7 @@ DEFAULT_BUDGET = 48
 MAX_BUDGET = 336
 SCHEDULE_KINDS = ('poll', 'action', 'script', 'wake_agent')
 LOGS = ('console.log', 'queue.out', 'queue.err')
+SCHEDULER_TERMINAL = frozenset(('COMPLETED', 'DONE', 'FAILED', 'EXIT', 'CANCELLED', 'TIMEOUT', 'OUT_OF_MEMORY'))
 SCOPE_KEYS = ('provider', 'threadId', 'taskId', 'projectId', 'runId')
 PLAN_KEYS = ('name', 'intervalSeconds', 'maxRuns', 'expiresAt', 'timeoutSeconds', 'action', 'script', 'wakeText')
 UPSERT_KEYS = ('sourceId', 'scope', 'kind', 'key', 'delegationId', 'mutationId', 'expectedRevision', *PLAN_KEYS)
@@ -130,12 +131,14 @@ def project_parent(service, scope, previous=None):
 
 def project_run(row):
     snapshot = row.get('cluster_snapshot', {})
+    scheduler_state = row.get('scheduler_state') if row.get('identity_verified') is True else None
     local_observed = None
     if not snapshot and (row.get('exit') or row['status'] == 'running' and row.get('identity')):
         local_observed = row.get('updated_at') or row.get('started_at')
     return {
         'id': row['id'], 'projectId': row['project_id'], 'status': row['status'],
         'jobId': row.get('job_id'), 'scheduler': snapshot.get('scheduler'),
+        'schedulerState': scheduler_state, 'schedulerTerminal': scheduler_state in SCHEDULER_TERMINAL,
         'updatedAt': row.get('updated_at'), 'observedAt': row.get('observed_at') or local_observed,
         'managedObservation': row.get('managed_schedule_parent', False) is True,
         **({'scheduleId': row['managed_child']['scheduleId'], 'parentRunId': row['managed_child']['scope']['runId']}

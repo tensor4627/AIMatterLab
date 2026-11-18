@@ -17,6 +17,8 @@ export interface StudioIpcMap {
  'compute.managed.configureService':Route<{connectionId:string;profileId:string;profileVersion:number},ManagedResource>;
  'compute.managed.projectAccess':Route<{resourceId:string;projectId:string;allowed:boolean},{allowed:boolean}>;
  'compute.managed.scheduleDetails':Route<{sourceId:string;scheduleId:string},ManagedSchedule>;
+ 'compute.managed.acknowledgeNotice':Route<{id:string},{acknowledged:true}>;
+ 'compute.managed.observeOnce':Route<{sourceId:string;scheduleId:string;requestId:string},{sourceId:string;scheduleId:string;requestId:string;status:string;run:unknown}>;
  'compute.managed.stopSchedule':Route<{sourceId:string;scheduleId:string},unknown>;
  'compute.workspace.setup':Route<BaseWorkspaceRequest,BaseWorkspaceResult>;
  'updates.status':Route<Record<string,never>,UpdateState>;

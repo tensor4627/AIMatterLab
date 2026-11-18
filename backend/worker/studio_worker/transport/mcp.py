@@ -167,6 +167,8 @@ def mcp_tool_call(service, params, *, dispatch):
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be an object")
         schema = definition["inputSchema"]
+        if name == "submit_cluster_run" and set(arguments) - schema["properties"].keys():
+            raise ValueError("Cluster submission accepts only its documented run identifier")
         missing = [key for key in schema.get("required", []) if key not in arguments]
         if missing:
             raise ValueError("Missing required fields: " + ", ".join(missing))

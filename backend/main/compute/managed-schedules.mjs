@@ -12,7 +12,7 @@ const savedRunRefreshSeconds = 30;
 function checkedRow(row, sourceId, scheduleId = row?.id) {
   if (!token(scheduleId) || row?.id !== scheduleId || row.sourceId !== sourceId ||
       !Number.isSafeInteger(row.stateRevision) || row.stateRevision < 1 || !row.scope || !Number.isFinite(row.expiresAt) ||
-      !['scheduled', 'running', 'unknown', 'stopped', 'exhausted', 'expired'].includes(row.status)) {
+      !['scheduled', 'running', 'unknown', 'stopped', 'completed', 'exhausted', 'expired'].includes(row.status)) {
     throw Error('managed_schedule_unverified_reply');
   }
   const {history, script, ...summary} = row;
@@ -243,6 +243,25 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
     return snapshot();
   }
 
+  async function observeOnce(data) {
+    const row = overlay(known(data));
+    if (!token(data.requestId) || row.status !== 'exhausted' ||
+        !(row.kind === 'poll' || row.kind === 'action' && row.action?.type === 'status')) {
+      throw Error('managed_schedule_manual_observation_requires_exhausted_monitor');
+    }
+    const source = await find(data.sourceId);
+    if (!source) throw Error('managed_schedule_original_source_offline');
+    const result = await source.request('POST', route('observe-once'), data);
+    if (result?.sourceId !== source.id || result.scheduleId !== row.id || result.requestId !== data.requestId ||
+        result.run?.id !== row.scope.runId || result.run.projectId !== row.scope.projectId ||
+        !['observed', 'in_progress', 'unknown'].includes(result.status)) {
+      throw Error('managed_schedule_unverified_reply');
+    }
+    acceptSnapshot(source, result.snapshot);
+    const {snapshot: _snapshot, ...observation} = result;
+    return observation;
+  }
+
   async function pumpSource(source, entry, generation) {
     const relevant = record => record.sourceId === source.id;
     for (const intent of catalog.list(stopKind).filter(relevant)) {
@@ -332,5 +351,5 @@ export function createManagedSchedules({catalog, listSources, wake = async () =>
     present.clear();
   }
 
-  return {start, halt, pump, refresh, snapshot, upsert, status, stop};
+  return {start, halt, pump, refresh, snapshot, upsert, status, stop, observeOnce};
 }

@@ -355,6 +355,17 @@ class ClusterLifecycle(unittest.TestCase):
         r=self.submitted();FakeSSH.wrong_name=True
         with self.assertRaises(ValueError):self.cluster.cancel(r["id"])
 
+    def test_managed_known_cancel_requires_known_scheduler_status_at_the_signal_gate(self):
+        run = self.submitted()
+        FakeSSH.state = 'UNKNOWN_FUTURE_SCHEDULER_STATUS'
+        with self.assertRaisesRegex(ValueError, 'Original scheduler status could not be confirmed'):
+            dispatch(self.service, 'POST', '/api/cluster/cancel', {'run_id': run['id'], 'require_known': True}, admin=False)
+        actual = self.cluster.raw(run['id'])
+        self.assertTrue(actual['identity_verified'])
+        self.assertEqual(actual['status'], 'unknown')
+        self.assertFalse(actual['cancellation']['signal_sent'])
+        self.assertFalse(any(script.startswith('bkill ') for script, _ in FakeSSH.calls))
+
     def test_cancel_after_failed_poll_does_not_use_a_previously_verified_job_id(self):
         run=self.submitted()
         self.assertTrue(self.cluster.poll(run['id'])['identity_verified'])

@@ -19,7 +19,7 @@ const one={provider:'codex',threadId:'one',projectId:'p',taskId:'t1'};
 const two={provider:'codex',threadId:'two',projectId:'p',taskId:'t2'};
 
 test('persistent badges reflect only the exact source and conversation while turns and wake times update independently',()=>{
- const catalog=storage(),index=createConversationActivity({catalog});
+ const catalog=storage(),index=createConversationActivity({catalog,now:()=>200});
  for(const p of [a,b,local]) index.style(p);
  for(const r of [a,b,local,a])index.acquired(one,r);
  index.acquired(two,a);
@@ -33,6 +33,10 @@ test('persistent badges reflect only the exact source and conversation while tur
  const [r1,r2]=index.snapshot(input).conversations;
  assert.equal(r1.replying,true);assert.deepEqual(r1.badges.map(x=>[x.label,x.status]),[['Center A','running'],['Center B','idle'],['local','idle']]);
  assert.equal(r2.replying,false);assert.equal(r2.nextWakeAt,400);assert.equal(r2.badges[0].status,'idle');
+ // A passive source snapshot timestamp cannot certify a scheduler run.
+ const stale=structuredClone(input);
+ stale.sources[0].runs[0].observedAt=null;
+ assert.equal(index.snapshot(stale).conversations[0].badges[0].status,'unknown');
  index.style({...a,name:'Renamed A'});
  const reloaded=createConversationActivity({catalog}).snapshot({resources:[],turns:[]}).conversations[0];
  assert.equal(reloaded.badges[0].label,'Renamed A');assert.equal(reloaded.badges[0].color,colors[0]);assert.equal(reloaded.badges[0].status,'offline');

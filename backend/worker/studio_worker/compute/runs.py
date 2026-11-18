@@ -307,14 +307,18 @@ class RunsMixin:
             self.verify_snapshot(current)
             return self.store.update(current, status="queued", execution_check=check)
 
-    def cancel(self, identifier):
+    def cancel(self, identifier, *, require_known=False):
         with self.store.lock:
             run = self.store.run(identifier)
             self.authorize(run)
+            if require_known and (run['status'] not in ('queued', 'running') or run.get('cancel_requested')):
+                raise ValueError('Original run status does not confirm a cancellable job')
             from studio_worker.compute.launch_protocol import has_launch_evidence
             if run["status"] == "queued" and not has_launch_evidence(run):
                 return self.store.update(run, status="cancelled")
             if run["status"] == "queued":
+                if require_known:
+                    raise ValueError('Queued run launch evidence requires reconciliation')
                 run = self.store.update(run, status="unknown")
             if run["status"] not in ("running", "unknown"):
                 return run

@@ -14,7 +14,9 @@ const base = {
 
 test('known settings keys are accepted and merged over the current settings',()=>{
  assert.deepEqual(normalizeSettings(base,{}),base);
- assert.equal(SETTINGS_KEYS.length,28);
+ assert(SETTINGS_KEYS.includes('resourceBadgeMotion'));
+ for(const mode of ['wave','breathe'])assert.equal(normalizeSettings(base,{resourceBadgeMotion:mode}).resourceBadgeMotion,mode);
+ assert.throws(()=>normalizeSettings(base,{resourceBadgeMotion:'unknown'}),/badge motion/);
  const cache=path.resolve('cache','skills');
  assert.equal(normalizeSettings(base,{userCacheDirectory:cache}).userCacheDirectory,cache);
  for(const value of ['relative',null,path.parse(cache).root,'//server/share/skills','/invalid\ncache']){

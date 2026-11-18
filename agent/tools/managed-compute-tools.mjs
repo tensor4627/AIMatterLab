@@ -135,7 +135,13 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
     if(assertRunIntent(scope,runAction,args)===false)throw deny('The workflow has no current human authorization for this run operation');
    };
    checkOperation();
-   const value=await callWorker(scope,resourceId,checkOperation,runAction+(kind==='cluster-run'?'_cluster_run':'_run'),{run_id:runId});
+   let value;
+   try{
+    value=await callWorker(scope,resourceId,checkOperation,runAction+(kind==='cluster-run'?'_cluster_run':'_run'),{run_id:runId});
+   }catch(error){
+    if(runAction==='submit'&&kind==='cluster-run')void schedules.refresh?.(sourceId).catch(()=>{});
+    throw error;
+   }
    const observation=observedRun(value,{kind,runId,projectId:scope.projectId});
    await onRunObserved({scope,task,sourceId,resourceId,kind,runId,operation:runAction,observation});
    assertCurrent();return observation;

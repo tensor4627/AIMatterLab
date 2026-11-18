@@ -20,3 +20,7 @@
 .jobs-more-filters>summary{width:fit-content;max-width:100%;padding:6px 0;color:var(--muted);cursor:pointer}
 .jobs-more-filters>summary:hover,.jobs-more-filters[open]>summary{color:var(--text)}
 .jobs-more-filters>.jobs-filters{margin-top:6px}
+.monitor-attention{position:fixed;z-index:70;inset-block-start:48px;inset-inline-end:16px;width:min(420px,calc(100vw - 32px));border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);box-shadow:0 4px 18px #0003;padding:12px 16px}
+.monitor-attention strong,.monitor-attention>div{display:flex;align-items:center;gap:8px}
+.monitor-attention p,.managed-manual-followup p{margin:6px 0;overflow-wrap:anywhere}
+.managed-manual-followup{padding:8px 12px;border-inline-start:3px solid var(--accent);background:var(--accent-bg)}

@@ -7,8 +7,8 @@ const row = (page, name) => page.getByTestId('conversation-sidebar').locator('.c
   .filter({has: page.getByText(name, {exact: true})});
 const motion = node => node.evaluate(element => getComputedStyle(element).animationName);
 
-async function managedApp(page, {manyBadges = false} = {}) {
-  await page.evaluate(async ({names, manyBadges}) => {
+async function managedApp(page, {manyBadges = false, monitorNotices = false} = {}) {
+  await page.evaluate(async ({names, manyBadges, monitorNotices}) => {
     const f = window.__test;
     localStorage.setItem('studio.sidebarWidth', manyBadges ? '192' : '290');
     f.settings.resourceBadgeMotion = 'wave';
@@ -25,6 +25,7 @@ async function managedApp(page, {manyBadges = false} = {}) {
       taskId:'workflow-' + n, projectId:'fixture-project-' + n, runId:'parent-' + n});
     const script = {language:'python', version:2, sha256:'b'.repeat(64)};
     f.managedCallLog = [];
+    f.managedSnapshotReads = 0;
     f.managed = {
       resources:badges.map(resource),
       conversations:f.managedChats.map((chat, i) => ({provider:chat.provider,threadId:chat.threadId,
@@ -46,10 +47,30 @@ async function managedApp(page, {manyBadges = false} = {}) {
           active:{childId:'fixture-child-b',jobId:'17',status:'running'}}]},
       ],
     };
+    if (monitorNotices) {
+      f.managed.notices = [1,0].map(index => {
+        const source = f.managed.sources[index];
+        const scope = {...owner(index),runId:'exhausted-fixture-run'};
+        const jobId = index === 0 ? '41414' : '72727';
+        const run = {id:scope.runId,projectId:scope.projectId,jobId,status:'queued',observedAt:source.observedAt};
+        const plan = {id:'exhausted-monitor',name:index === 0 ? '原服务巡检计划' : '其他服务巡检计划',
+          sourceId:source.id,kind:'poll',status:'exhausted',scope,intervalSeconds:1800,count:48,maxRuns:48,
+          revision:2,nextAt:null,expiresAt:now + 86400,lastResult:{status:'succeeded',run}};
+        source.schedules.push(plan);
+        source.runs.push(run);
+        return {id:(index === 0 ? 'a' : 'b').repeat(64),sourceId:source.id,profileId:source.profileId,
+          resourceName:badges[index],scheduleId:plan.id,runId:run.id,projectId:scope.projectId,provider:scope.provider,
+          threadId:scope.threadId,jobId,status:run.status,observedAt:run.observedAt,count:plan.count,maxRuns:plan.maxRuns,
+          delegationExhausted:false,createdAt:now + (1-index),acknowledgedAt:null};
+      });
+    }
     f.emitManaged = (method = 'studio/managedActivity') => f.events.slice().forEach(callback => callback({method}));
     const original = window.studio.invoke;
     window.studio.invoke = async (method, data) => {
-      if (method === 'compute.managed.snapshot') return structuredClone(f.managed);
+      if (method === 'compute.managed.snapshot') {
+        f.managedSnapshotReads++;
+        return structuredClone(f.managed);
+      }
       if (method === 'conversation.list') return structuredClone(f.managedChats);
       if (method === 'conversation.select') {
         f.managedCallLog.push({method,data});
@@ -74,6 +95,26 @@ async function managedApp(page, {manyBadges = false} = {}) {
           history:[{occurrence:1,childId:'fixture-child-b',status:'running'}],
         } : {}};
       }
+      if (method === 'compute.managed.acknowledgeNotice') {
+        f.managedCallLog.push({method,data});
+        const notice = f.managed.notices?.find(value => value.id === data.id);
+        if (!notice) throw Error('Unrecognized fixture monitor notice');
+        notice.acknowledgedAt ??= now;
+        f.emitManaged();
+        return {acknowledged:true};
+      }
+      if (method === 'compute.managed.observeOnce') {
+        f.managedCallLog.push({method,data});
+        const source = f.managed.sources.find(value => value.id === data.sourceId);
+        const plan = source?.schedules.find(value => value.id === data.scheduleId);
+        const run = source?.runs.find(value => value.id === plan?.scope.runId && value.projectId === plan.scope.projectId);
+        const notice = f.managed.notices?.find(value => value.sourceId === data.sourceId && value.scheduleId === data.scheduleId);
+        if (!source?.connected || plan?.status !== 'exhausted' || !run || !notice) throw Error('Missing original fixture monitor');
+        Object.assign(run,{status:'running',observedAt:now + 60});
+        Object.assign(notice,{status:run.status,observedAt:run.observedAt});
+        f.emitManaged();
+        return {sourceId:source.id,scheduleId:plan.id,requestId:data.requestId,status:'observed',run:structuredClone(run)};
+      }
       if (method === 'compute.resource.status') return {schemaVersion:1,kind:null,status:'none',selectionId:null};
       if (method === 'compute.profiles.list') return {profiles:[],defaults:{}};
       if (method === 'sharedTerminal.list') return {sessions:[]};
@@ -85,7 +126,7 @@ async function managedApp(page, {manyBadges = false} = {}) {
       return original(method,data);
     };
     return window.renderTest('App');
-  }, {names, manyBadges});
+  }, {names, manyBadges, monitorNotices});
   await page.getByTestId('conversation-sidebar').waitFor();
   await row(page,names[0]).locator('.conversation-resource-badge').first().waitFor();
 }
@@ -186,5 +227,75 @@ export async function frontendManagedComputeCases({check, out}) {
     await offline.getByText('已停止',{exact:true}).waitFor();
     assert.equal(await offline.getByRole('button',{name:'终止计划',exact:true}).count(),0);
     assert.equal(await other.getByRole('button',{name:'终止计划',exact:true}).isEnabled(),true);
+  });
+
+  await check('managed-compute-experience-exhausted-monitor-follows-original-job-once', async page => {
+    await managedApp(page,{monitorNotices:true});
+    const notice = page.getByTestId('monitor-budget-notice');
+    const repeatSnapshots = async () => {
+      const before = await page.evaluate(() => window.__test.managedSnapshotReads);
+      for (let i = 1; i <= 3; i++) {
+        await page.evaluate(() => window.__test.emitManaged());
+        await page.waitForFunction(reads => window.__test.managedSnapshotReads >= reads,before + i);
+      }
+    };
+    await notice.getByText('巡检已达上限 · 2',{exact:true}).waitFor();
+    await repeatSnapshots();
+    assert.equal(await notice.count(),1);
+    assert.match(await notice.innerText(),/结果集群 B · 72727 · 最近状态 排队中/);
+    await notice.getByRole('button',{name:'知道了',exact:true}).click();
+    await notice.getByText(/集群 A · 41414 · 最近状态 排队中/).waitFor();
+    await repeatSnapshots();
+    assert.equal(await notice.count(),1);
+    assert.doesNotMatch(await notice.innerText(),/72727|巡检已达上限 · 2/);
+    assert.match(await notice.innerText(),/自动巡检次数已用完。.*请自行关注原作业的后续状态。/s);
+    await capture(page,'managed-exhausted-monitor-notice');
+
+    await notice.getByRole('button',{name:'查看运行记录',exact:true}).click();
+    await notice.waitFor({state:'hidden'});
+    const jobs = page.getByTestId('jobs-page');
+    const original = jobs.getByTestId('managed-schedule-record').filter({hasText:'原服务巡检计划'});
+    const peer = jobs.getByTestId('managed-schedule-record').filter({hasText:'其他服务巡检计划'});
+    await page.waitForFunction(() => document.activeElement?.querySelector('strong')?.textContent === '原服务巡检计划');
+    await original.getByText('关联作业 · exhausted-fixture-run',{exact:true}).waitFor();
+    assert.equal(await original.locator('details').evaluate(element => element.open),true);
+    assert.equal(await peer.locator('details').evaluate(element => element.open),false);
+    await page.waitForFunction(() => window.__test.managedCallLog.some(call => call.method === 'compute.managed.scheduleDetails'));
+    const manual = original.getByRole('button',{name:'手动核对一次',exact:true});
+    assert.equal(await manual.isDisabled(),true);
+    assert.equal(await peer.getByRole('button',{name:'手动核对一次',exact:true}).isEnabled(),true);
+    assert.equal(await original.getByText('次数已用完',{exact:true}).count(),1);
+    assert.equal(await original.getByText('剩余次数 0 / 48',{exact:true}).count(),1);
+
+    await page.evaluate(() => {
+      window.__test.managed.sources.find(source => source.id === 'source-offline').connected = true;
+      window.__test.emitManaged();
+    });
+    await manual.click();
+    await original.getByRole('status').getByText('最近状态 · 运行中',{exact:true}).waitFor();
+    await repeatSnapshots();
+    assert.equal(await notice.count(),0);
+    assert.equal(await original.getByText('次数已用完',{exact:true}).count(),1);
+    assert.equal(await original.getByText('剩余次数 0 / 48',{exact:true}).count(),1);
+    assert.equal(await original.getByRole('button',{name:'终止计划',exact:true}).count(),0);
+    assert.match(await original.innerText(),/集群 A · 41414 · 最近状态 运行中/);
+    assert.match(await peer.innerText(),/结果集群 B · 72727 · 最近状态 排队中/);
+
+    const evidence = await page.evaluate(() => {
+      const f = window.__test;
+      const source = f.managed.sources.find(item => item.id === 'source-offline');
+      const {status,count,maxRuns,nextAt,revision} = source.schedules.find(item => item.id === 'exhausted-monitor');
+      return {calls:f.managedCallLog,plan:{status,count,maxRuns,nextAt,revision}};
+    });
+    const {requestId} = evidence.calls.find(call => call.method === 'compute.managed.observeOnce')?.data || {};
+    assert.match(requestId,/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/);
+    assert.deepEqual(evidence.calls,[
+      {method:'compute.managed.acknowledgeNotice',data:{id:'b'.repeat(64)}},
+      {method:'compute.managed.acknowledgeNotice',data:{id:'a'.repeat(64)}},
+      {method:'compute.managed.scheduleDetails',data:{sourceId:'source-offline',scheduleId:'exhausted-monitor'}},
+      {method:'compute.managed.observeOnce',data:{sourceId:'source-offline',scheduleId:'exhausted-monitor',requestId}},
+    ]);
+    assert.deepEqual(evidence.plan,{status:'exhausted',count:48,maxRuns:48,nextAt:null,revision:2});
+    await capture(page,'managed-exhausted-monitor-after-manual-check');
   });
 }

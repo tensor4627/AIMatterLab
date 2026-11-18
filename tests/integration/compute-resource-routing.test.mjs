@@ -36,13 +36,16 @@ async function fixture(t,{connectedWorker=true}={}){
   worker:provider=>routing.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp.revokeProvider(provider);},
   bindWorkerContext:(provider,value,options)=>routing.bindWorkerContext(provider,value,options),resourceScope:(provider,method)=>routing.scope(provider,method)});
  context.agents.isBusy=()=>context.agents.contextBusy();
+ context.agents.turnStates=()=>[...context.agents.pendingTurnDispatches].map(id=>{const [provider,threadId]=id.split(':');return {provider,threadId};});
+ context.agents.sessionIdentity=(provider,threadId=owner.threadId)=>({id:provider+':'+threadId,provider,threadId});
+ routing.usesForegroundWorker=id=>id===owner.provider+':'+owner.threadId;
  t.after(()=>{context.agents.close();worker.close();});
  context.computeResource=vm.runInNewContext(initializer('computeResource'),context);
- for(const name of ['trusted','handle','scientificTools'])vm.runInNewContext(find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name),context);
+ for(const name of ['trusted','handle','scientificTools','assertLegacyWorkerIdle'])vm.runInNewContext(find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='compute.resource.status'),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='agent.connect'),context);
  vm.runInNewContext(find(node=>ts.isForOfStatement(node)&&node.getText(ast).includes("handle('compute.resource.'+method")),context);
- Object.assign(context,{taskRecords,baseWorkspace:null,privateAccess:{assertTask:()=>assert.fail('No WSL private read')},scientificSkills:{router:{routes:new Map()},context:{}},setupInstructions:{},bundledSkillRoot:process.cwd(),studioSkillRoots:()=>[],managedSkillRoots:()=>[],managedSkillEntries:()=>[],managedSkillRecords:()=>[],skillGuidanceScope:()=>{},openUrl:()=>{}});
+ Object.assign(context,{taskRecords,baseWorkspace:null,projectSkills:null,privateAccess:{assertTask:()=>assert.fail('No WSL private read')},scientificSkills:{router:{routes:new Map()},context:{}},setupInstructions:{},bundledSkillRoot:process.cwd(),studioSkillRoots:()=>[],managedSkillRoots:()=>[],managedSkillEntries:()=>[],managedSkillRecords:()=>[],skillGuidanceScope:()=>{},openUrl:()=>{}});
  const request=vm.runInNewContext(initializer('agentRequests'),context);
  const invoke=(name,data={},suppliedEvent=event)=>handlers.get('studio:'+name)(suppliedEvent,data);
  const activate=async(connectionId='session')=>invoke('compute.resource.activate',{kind:'ssh-connection',profileId:'profile',profileVersion:1,connectionId});
@@ -72,9 +75,16 @@ test('actual UI reattachment to the same resource during message preparation per
  const f=await fixture(t);await f.activate();f.setReady(true);f.context.agents.bridgeWorkers.set('codex',f.context.agents.getWorker('codex'));f.context.agents.threadProcess=f.codex.process;f.context.agents.readyThreads=new Set(['thread']);const held=f.delayRead(),pending=f.request({provider:'codex',method:'turn/start',params:{threadId:'thread',input:[{type:'text',text:'Observe the current queue'}]}});await held.entered;const attached=f.activate();held.release();await attached;assert.equal((await pending).turn.id,'synthetic-turn');assert.equal(f.calls.filter(c=>c.method==='turn/start').length,1);
 });
 
-test('resource actions reject pending turn dispatch before changing the selection',async t=>{
- const f=await fixture(t);f.context.agents.pendingTurnDispatches.add('codex:thread');await assert.rejects(f.activate(),/current reply/);assert.equal(f.context.computeResource.peek(),null);f.context.agents.pendingTurnDispatches.clear();
- await f.activate();const selection=f.context.computeResource.peek();f.context.agents.pendingTurnDispatches.add('codex:thread');await assert.rejects(f.invoke('compute.resource.clear',{selectionId:selection.selectionId}),/current reply/);assert.deepEqual(f.context.computeResource.peek(),selection);
+test('resource actions reject pending turn dispatch that uses the changed worker before changing the selection',async t=>{
+ const f=await fixture(t);f.context.agents.pendingTurnDispatches.add('codex:thread');await assert.rejects(f.activate(),/still using this workbench worker/);assert.equal(f.context.computeResource.peek(),null);f.context.agents.pendingTurnDispatches.clear();
+ await f.activate();const selection=f.context.computeResource.peek();f.context.agents.pendingTurnDispatches.add('codex:thread');await assert.rejects(f.invoke('compute.resource.clear',{selectionId:selection.selectionId}),/still using this workbench worker/);assert.deepEqual(f.context.computeResource.peek(),selection);
+});
+
+test('a pending turn on an independent conversation does not block foreground resource actions',async t=>{
+ const f=await fixture(t);f.context.agents.pendingTurnDispatches.add('codex:peer');
+ await f.activate();const selection=f.context.computeResource.peek();assert.equal(selection.connectionId,'session');
+ await f.invoke('compute.resource.clear',{selectionId:selection.selectionId});assert.equal(f.context.computeResource.peek(),null);
+ assert(f.context.agents.pendingTurnDispatches.has('codex:peer'));assert.equal(f.codex.closes,0);
 });
 
 test('same conversation switches transport and rebinds a new connection token without creating another conversation',async t=>{

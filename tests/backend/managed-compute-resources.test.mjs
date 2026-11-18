@@ -8,6 +8,7 @@ import {createManagedComputeAliases,resourceFingerprint} from '../../backend/mai
 import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
 import {createManagedComputeServices} from '../../backend/main/compute/managed-compute-services.mjs';
 import {taskForRecordIndex} from '../../backend/main/compute/worker-service-version.mjs';
+import {assertRendererWorkerRoute} from '../../contracts/transport-policy.mjs';
 
 const profile=(id,name)=>({id,kind:'ssh',version:1,name,host:'private-'+id+'.invalid',username:'private-user',port:22,
  ssh_client:'/usr/bin/ssh',distribution:'Private WSL',mode:'interactive',identity_file:'/secret/key',proxy_jump:[],via:[]});
@@ -118,6 +119,15 @@ test('a user-selected alias uses the stable profile after rename and requires co
  assert.equal(aliases.read('学校集群',()=>true).targetFingerprint,resourceFingerprint(moved));
 });
 
+test('confirmed alias storage honors the 0.1.12 built-in skill boundary',t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'managed-builtin-'));
+ t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const projectSkills=new ProjectSkills({root:directory,bundledRoot:directory,current:()=>null});
+ const aliases=createManagedComputeAliases({projectSkills});
+ assert.throws(()=>aliases.read('fixture',()=>true),/separate from the built-in/);
+ assert.deepEqual(fs.readdirSync(directory),[]);
+});
+
 test('generic user choice is temporary and old clarification replies cannot authorize a fresh or unrelated turn',async t=>{
  const f=fixture(t),{manager,owner}=f;
  await f.publish('A');
@@ -224,9 +234,17 @@ test('private services verify exact registration, authorize the selected worker 
  const read={jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'cluster_run_status',arguments:{run_id:'run-on-A'}}};
  await assert.rejects(manager.serviceRequest(f.owner,{resourceId:'ssh:B',method:'POST',target:'/mcp',data:read,mcp:true}),/run_source_changed/);
  assert.equal((await manager.serviceRequest(f.owner,{resourceId:'ssh:A',method:'POST',target:'/mcp',data:read,mcp:true})).data.fixture,'A');
+ const sourceA=original.find(source=>source.profileId==='A'),sourceB=original.find(source=>source.profileId==='B');
+ const observeRoute='/api/managed-schedules/observe-once',observe={sourceId:sourceB.id,scheduleId:'fixture-schedule',requestId:'manual-check'};
+ assert.throws(()=>assertRendererWorkerRoute('POST',observeRoute));
+ await assert.rejects(manager.serviceRequest(f.owner,{resourceId:'ssh:B',method:'POST',target:observeRoute,data:observe}),/invalid_request/);
+ await assert.rejects(sourceA.request('POST',observeRoute,observe),/invalid_request/);
+ assert.equal((await sourceB.request('POST',observeRoute,observe)).fixture,'B');
+ assert.deepEqual(packets.filter(packet=>packet.target===observeRoute).map(({connectionId,data,mcp})=>({connectionId,data,mcp})),
+  [{connectionId:'conn-B',data:observe,mcp:false}]);
  await manager.revokeConnection({connectionId:'conn-A'});
- await assert.rejects(original.find(source=>source.profileId==='A').request('GET','/api/health'),/resource_unavailable/);
- assert.equal((await original.find(source=>source.profileId==='B').request('GET','/api/health')).hostIdentity.hostname,'remote-B');
+ await assert.rejects(sourceA.request('GET','/api/health'),/resource_unavailable/);
+ assert.equal((await sourceB.request('GET','/api/health')).hostIdentity.hostname,'remote-B');
  assert.equal(packets.filter(packet=>packet.target==='/mcp').length,2);
 });
 
@@ -297,4 +315,72 @@ test('human first-use setup opens one private service on its published host with
  assert.equal((await manager.callTerminalTool('list_compute_terminals',{},f.owner)).sessions.length,1);
  assert.equal(manager.owns('configureService'),false);
  await assert.rejects(manager.configureService({...ref,connectionId:'conn-B'}),/resource_unavailable/);
+});
+
+test('run mutations check exact source, active project grant, user intent and known canonical state before dispatch',async t=>{
+ const dispatched=[],runStates=new Map(),f=fixture(t),held=deferred(),entered=deferred();
+ let authorized=false,monitorAvailable=true;
+ const workerBinding={kind:'ssh',root:'/fixture/worker',hostIdentity:{hostname:'fixture',uid:100,machineId:'fixture'}};
+ const services={async ssh(resource){
+  const id=resource.profileId,clusterId='cluster-'+id,cluster={id:clusterId,version:1,transport_kind:'ssh-service-local'};
+  const health=id==='A'?{managed_run_action_schema:1,managed_submit_monitor_schema:1}:{};
+  return {id:'worker-'+id,binding:workerBinding,health,async verify(){},
+   async forward(method,target,data,mcp,_timeout,check){
+    const observed=monitorAvailable?health:{...health,managed_submit_monitor_schema:undefined};
+    check?.(observed);
+    if(target==='/api/projects')return {status:200,data:[{id:'project',policy:{clusters:[clusterId]}}]};
+    if(target==='/api/clusters')return {status:200,data:[cluster]};
+    if(target==='/api/cluster/profile')return {status:200,data:{...cluster,service_binding:{root:workerBinding.root,...workerBinding.hostIdentity}}};
+    if(target==='/api/cluster/observation')return {status:200,data:structuredClone(runStates.get(data.run_id))};
+    if(target==='/api/cluster/submit'){
+     assert.equal(method,'POST');assert.equal(mcp,false);
+     dispatched.push({resource:id,name:'submit_cluster_run',arguments:data});
+     if(data.run_id==='run-confirmed-A')return {status:200,data:{...runStates.get(data.run_id),status:'queued',job_id:'456'}};
+     entered.resolve();await held.promise;return {status:502,data:{fixture:'lost acknowledgement'}};
+    }
+    if(target==='/mcp'){
+     dispatched.push({resource:id,...data.params});
+     assert.notEqual(data.params.name,'submit_cluster_run','Managed submissions must use the trusted worker endpoint');
+     return {status:200,data:{fixture:true}};
+    }
+    assert.fail('Unexpected route '+target);
+   }};
+ }};
+ const manager=f.make({services,authorizeRun:(_scope,ref)=>ref.runId.endsWith(ref.resourceId.at(-1)),authorizeRunAction:()=>authorized});
+ t.after(()=>manager.stop());
+ await Promise.all(['A','B'].map(id=>f.publish(id,'conn-'+id,manager)));
+ await Promise.all(['A','B'].map(id=>manager.refreshService({connectionId:'conn-'+id})));
+ f.turn(f.owner,'用材料中心和图形中心','use-both',manager);
+ await Promise.all(['A','B'].map(id=>manager.acquire(f.owner,{resourceId:'ssh:'+id})));
+ const mutation=(id,name,runId='run-'+id,extra)=>manager.serviceRequest(f.owner,{resourceId:'ssh:'+id,method:'POST',target:'/mcp',mcp:true,
+  data:{jsonrpc:'2.0',id:'fixture',method:'tools/call',params:{name,arguments:{run_id:runId,...extra}}}});
+ runStates.set('run-A',{id:'run-A',project_id:'project',cluster_id:'cluster-A',status:'draft'});
+ await assert.rejects(mutation('A','submit_cluster_run'),/run_intent_required/);
+ authorized=true;
+ await assert.rejects(mutation('B','submit_cluster_run','run-A'),/run_source_changed/);
+ await assert.rejects(mutation('B','submit_cluster_run'),/worker_update_required/);
+ await assert.rejects(mutation('A','submit_cluster_run','run-A',{managed_monitor:{sourceId:'worker-B'}}),/invalid_request/);
+ runStates.get('run-A').status='unknown';
+ await assert.rejects(mutation('A','validate_cluster_run'),/state_unconfirmed/);
+ await assert.rejects(mutation('A','cancel_cluster_run'),/state_unconfirmed/);
+ await assert.rejects(mutation('B','cancel_cluster_run'),/worker_update_required/);
+ runStates.get('run-A').status='draft';
+ assert.equal((await mutation('A','validate_cluster_run')).status,200);
+ monitorAvailable=false;
+ await assert.rejects(mutation('A','submit_cluster_run'),/worker_update_required/);
+ monitorAvailable=true;
+ const first=mutation('A','submit_cluster_run');
+ await Promise.race([first,entered.promise]);
+ await assert.rejects(mutation('A','submit_cluster_run'),/run_busy/);
+ held.resolve();assert.equal((await first).status,502);
+ await assert.rejects(mutation('A','submit_cluster_run'),/action_unconfirmed/);
+ runStates.get('run-A').status='running';runStates.get('run-A').job_id='123';
+ assert.equal((await mutation('A','cancel_cluster_run')).status,200);
+ runStates.set('run-confirmed-A',{id:'run-confirmed-A',project_id:'project',cluster_id:'cluster-A',status:'ready'});
+ const confirmed=await mutation('A','submit_cluster_run','run-confirmed-A');
+ assert.deepEqual(confirmed,{status:200,data:{jsonrpc:'2.0',id:'fixture',result:{isError:false,content:[{type:'text',text:JSON.stringify({...runStates.get('run-confirmed-A'),status:'queued',job_id:'456'})}]}}});
+ assert.deepEqual(dispatched.filter(item=>item.name==='submit_cluster_run').map(item=>item.arguments),['run-A','run-confirmed-A'].map(runId=>({run_id:runId,
+  managed_monitor:{schemaVersion:1,sourceId:'worker-A',scope:{provider:f.owner.provider,threadId:f.owner.threadId,taskId:f.owner.taskId,projectId:f.owner.projectId,runId}}})));
+ assert.deepEqual(dispatched.map(({resource,name,arguments:args})=>[resource,name,args.require_known??false]),
+  [['A','validate_cluster_run',false],['A','submit_cluster_run',false],['A','cancel_cluster_run',true],['A','submit_cluster_run',false]]);
 });

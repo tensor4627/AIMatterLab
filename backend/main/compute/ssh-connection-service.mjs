@@ -16,7 +16,7 @@ export function normalizeSshServiceHealth(value){
  if(v.locations!==undefined){try{report.locations=checkedSshLocations(v.locations);}catch{fail('ssh_service_identity_unavailable');}}
  const manifest=v.runtimeManifestSha256||v.runtime_manifest_sha256;if(manifest!==undefined){if(!/^[a-f0-9]{64}$/.test(manifest)||manifest.slice(0,20)!==runtimeId)fail('ssh_service_identity_unavailable');report.runtimeManifestSha256=manifest;}
  if(['observed-legacy-cache','verified-cached-manifest','shipped-manifest'].includes(v.runtimeSourceScope||v.runtime_source_scope))report.runtimeSourceScope=v.runtimeSourceScope||v.runtime_source_scope;
- for(const key of ['tool_configuration_schema','tool_workflow_schema','managed_schedule_schema'])if(Number.isSafeInteger(v[key]))report[key]=v[key];return report;
+ for(const key of ['tool_configuration_schema','tool_workflow_schema','managed_schedule_schema','managed_run_action_schema','managed_submit_monitor_schema'])if(Number.isSafeInteger(v[key]))report[key]=v[key];return report;
 }
 const sameHealth=(a,b)=>['root','runtime','runtimeId','port'].every(k=>a[k]===b[k])&&equal(a.hostIdentity,b.hostIdentity);
 function createConnectionService({worker,connections,profiles,resource,source,transportSource,registration,preferredRuntimeId=()=>undefined,current=()=>null,assertIdle=()=>{},publish=()=>{},remember=()=>{},onRuntimeUpdated,prepareResources=prepareSshServiceResourcesAsync}){

@@ -63,13 +63,14 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(latest?.version!==resource.profileVersion||resourceFingerprint(latest)!==resource.targetFingerprint)fail('managed_compute_profile_changed');
  }
  const saved=resource=>{try{current(resource);return true;}catch{return false;}};
+ const visible=resource=>saved(resource)&&(resource.kind==='ssh'||resource.serviceStatus==='ready');
  const count=resource=>[...leases.values()].filter(lease=>lease.resource===resource).length;
  const view=resource=>({...candidate(resource),profileVersion:resource.profileVersion,available:resource.kind==='ssh'||resource.serviceStatus==='ready',
   serviceStatus:resource.serviceStatus,...resource.kind==='ssh'?{terminalCapacity:MANAGED_SSH_SHELL_CAPACITY,terminalAvailable:Math.max(0,MANAGED_SSH_SHELL_CAPACITY-count(resource))}:{}});
- function snapshot(){return [...resources.values()].filter(saved).map(resource=>({...view(resource),...resource.kind==='ssh'?{connectionId:resource.connectionId}:{}}));}
+ function snapshot(){return [...resources.values()].filter(visible).map(resource=>({...view(resource),...resource.kind==='ssh'?{connectionId:resource.connectionId}:{}}));}
  async function list(scope){
   liveScope(scope);
-  const entries=await Promise.all([...resources.values()].filter(saved).map(async resource=>{
+  const entries=await Promise.all([...resources.values()].filter(visible).map(async resource=>{
    const terminalGrant=resource.kind==='ssh'&&await authorizeTerminal(scope,resource)===true;
    const lease=leases.get(leaseKey(scope,resource.resourceId));
    const acquired=!!(lease&&lease.resource===resource&&lease.projectId===projectOf(scope)&&!lease.releasing);
@@ -77,7 +78,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    return {resource,entry:{...view(resource),canAcquire,acquired}};
   }));
   liveScope(scope);
-  return {resources:entries.filter(({resource})=>saved(resource)).map(({entry})=>entry)};
+  return {resources:entries.filter(({resource})=>visible(resource)).map(({entry})=>entry)};
  }
  function changed(){if(!stopped)onChange();}
 
@@ -138,6 +139,9 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const profile=profiles.read({id:receipt.profileId});
   if(profile.kind!=='wsl'||profile.version!==receipt.profileVersion||profile.distribution!==receipt.distribution||profile.port!==receipt.port||profile.root.startsWith('/')&&profile.root!==receipt.root)fail('managed_compute_profile_changed');
   const resourceId='wsl:'+profile.id,previous=resources.get(resourceId);
+  const duplicate=[...resources.values()].some(row=>row.kind==='wsl'&&row.resourceId!==resourceId&&saved(row)&&
+   ['distribution','root','port'].every(key=>row.receipt[key]===receipt[key]));
+  if(duplicate)fail('managed_compute_profile_already_published');
   if(previous&&equal(receipt,previous.receipt)&&(previous.service||previous.preparing)){
    if(previous.preparing)await previous.preparing;
    if(previous.service)return view(previous);
@@ -398,6 +402,10 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    const service=resource.service;
    if(!service||resource.serviceStatus!=='ready'||scheduleReady&&service.health?.managed_schedule_schema!==1)continue;
    sources.push({id:service.id,generation:service.generation,profileId:resource.profileId,kind:resource.kind,health:structuredClone(service.health),async request(method,path,data){
+    if(path==='/api/managed-schedules/observe-once'){
+     const fields=['sourceId','scheduleId','requestId'];exact(data,fields,fields);
+     if(method!=='POST'||data.sourceId!==service.id)fail('managed_compute_invalid_request');
+    }
     const response=await anchored(resource,service,method,path,data);
     if(response.status!==200)throw Error(response.data?.error||'managed_compute_worker_request_failed');
     return response.data;
@@ -424,17 +432,22 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  async function runMutation(scope,lease,service,data,action,kind,check){
   const resource=lease.resource,args=data.data.params.arguments;
   exact(args,['run_id'],['run_id']);
-  const runId=args.run_id,ref={sourceId:service.id,resourceId:resource.resourceId,runId,kind,action};
+  const runId=args.run_id,cluster=kind==='cluster-run',monitoredSubmit=cluster&&action==='submit';
+  const ref={sourceId:service.id,resourceId:resource.resourceId,runId,kind,action};
   await assertRun(scope,resource,service,runId,kind);
   check();
   const intent=()=>{if(authorizeRunAction?.(scope,ref)!==true)fail('managed_compute_run_intent_required');};
   intent();
+  const capability=monitoredSubmit?'managed_submit_monitor_schema':action==='cancel'?'managed_run_action_schema':null;
+  const requireCapability=health=>{if(capability&&health?.[capability]!==1)fail('managed_compute_worker_update_required');};
+  requireCapability(service.health);
+  if(monitoredSubmit&&!scope.taskId)fail('managed_compute_project_grant_required');
   const runKey=JSON.stringify([service.id,runId]),attemptKey=JSON.stringify([runKey,action]);
   if(activeRunActions.has(runKey))fail('managed_compute_run_busy');
   if(dispatchedRunActions.has(attemptKey))fail('managed_compute_run_action_unconfirmed');
   activeRunActions.add(runKey);
   try{
-   const grant=await projectGrant(scope,resource),cluster=kind==='cluster-run';
+   const grant=await projectGrant(scope,resource);
    if(!grant)fail('managed_compute_project_grant_required');
    // Observation is passive. In particular, cluster/status can poll the
    // scheduler and cannot substitute for the current immutable worker record.
@@ -447,13 +460,24 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    if(action==='cancel'){
     if(!['queued','running'].includes(run.status)||run.cancel_requested||cluster&&!/^[0-9]+$/.test(run.job_id||''))fail('managed_compute_run_state_unconfirmed');
    }else if(!['draft','ready'].includes(run.status)||run.submit_attempted||run.job_id||dispatchedRunActions.has(JSON.stringify([runKey,'submit'])))fail('managed_compute_run_state_unconfirmed');
-   const beforeDispatch=()=>{
-    check();intent();
+   const beforeDispatch=observed=>{
+    check();intent();requireCapability(observed);
     // The worker has its own durable reservation under its Store lock. This
     // app also suppresses uncertain duplicate actions before they reach it.
     if(action!=='validate')dispatchedRunActions.add(attemptKey);
    };
-   const response=await anchored(resource,service,'POST','/mcp',data.data,true,data.timeoutMs,beforeDispatch);
+   if(monitoredSubmit){
+    // The worker reserves its bounded observation schedule in the same durable
+    // transaction as the exact submission. Only this trusted bridge supplies it.
+    const managed_monitor={schemaVersion:1,sourceId:service.id,
+     scope:{provider:scope.provider,threadId:scope.threadId,taskId:scope.taskId,projectId:scope.projectId,runId}};
+    const response=await anchored(resource,service,'POST','/api/cluster/submit',{run_id:runId,managed_monitor},false,data.timeoutMs,beforeDispatch);
+    check();
+    if(response.status!==200)return response;
+    return {status:200,data:{jsonrpc:'2.0',id:data.data.id,result:{isError:false,content:[{type:'text',text:JSON.stringify(response.data)}]}}};
+   }
+   const payload=action==='cancel'?{...data.data,params:{...data.data.params,arguments:{run_id:runId,require_known:true}}}:data.data;
+   const response=await anchored(resource,service,'POST','/mcp',payload,true,data.timeoutMs,beforeDispatch);
    check();
    return response;
   }finally{activeRunActions.delete(runKey);}

@@ -2,6 +2,7 @@ import {createManagedComputeAliases,resourceFingerprint} from '../../backend/mai
 import {createManagedComputeServices} from '../../backend/main/compute/managed-compute-services.mjs';
 import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
 import {createManagedSchedules} from '../../backend/main/compute/managed-schedules.mjs';
+import {createMonitorAttention} from '../../backend/main/compute/monitor-attention.mjs';
 import {createScheduleDelegations,createRunActionIntents} from '../../backend/main/compute/schedule-delegation.mjs';
 import {taskForRecordIndex} from '../../backend/main/compute/worker-service-version.mjs';
 import {taskWorkerSource} from '../../contracts/compute/task-worker-binding.mjs';
@@ -14,9 +15,12 @@ function fields(value,expected) {
      expected.some(key=>!Object.hasOwn(value,key)))throw Error('invalid_managed_resource_request');
 }
 export function createManagedWorkbench({catalog,profiles,registration,terminal,projectSkills,resourceActivity,projectAccess,
- records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch}) {
+ records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{}}) {
   const delegations=createScheduleDelegations(catalog),runIntents=createRunActionIntents();
   let schedules;
+  const named=notice=>({...notice,resourceName:resourceActivity.label(notice.profileId)||notice.profileId});
+  const attention=createMonitorAttention({catalog,announce:notice=>announce(named(notice))});
+  const updated=()=>{if(schedules)attention.reconcile(schedules.snapshot().sources);notify();};
   function authorizeRun(scope,{sourceId,runId,kind}) {
     const task=records.bound(scope.provider,scope.threadId);
     if(!task||!scope.projectId||task.id!==scope.taskId)return null;
@@ -56,7 +60,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     return checkCurrent()&&resources.eligibleForWake({...scope,checkCurrent},event.sourceId);
   }
   const wake=createAgentWakeDelivery({catalog,agents,dispatch,canWake:authorizedWake});
-  schedules=createManagedSchedules({catalog,listSources:()=>resources.listSources({scheduleReady:true}),wake,onChange:notify});
+  schedules=createManagedSchedules({catalog,listSources:()=>resources.listSources({scheduleReady:true}),wake,onChange:updated});
   const desktopTools=createManagedComputeTools({resources,schedules,assertWorkflow:scope=>workflow.assertScope(scope),
     authorizeTask:async(task,scope)=>{if(task.customCv?.id&&(await privateAccess.assertTask(task,scope.provider)).definitionOnly)throw Error('managed_compute_private_task_scope');},
     assertScheduleIntent:(scope,action,args)=>{
@@ -79,7 +83,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
       return {...row,color:style.color,serviceReady:row.serviceStatus==='ready',terminalReady:row.kind==='ssh',
         authorizedProjects:projectAccess.projects(detail)};
     });
-    return resourceActivity.snapshot({resources:published,sources:schedules.snapshot().sources,turns:agents.turnStates(),tasks:records.tasks().map(taskForRecordIndex)});
+    return {...resourceActivity.snapshot({resources:published,sources:schedules.snapshot().sources,turns:agents.turnStates(),tasks:records.tasks().map(taskForRecordIndex)}),notices:attention.list().map(named)};
   }
   handle('compute.managed.snapshot',value=>{fields(value,[]);return snapshot();});
   handle('compute.managed.refresh',async value=>{fields(value,[]);await schedules.refresh();return snapshot();});
@@ -94,6 +98,8 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     const result=projectAccess.set(value.projectId,descriptor(target),value.allowed);notify();return result;
   });
   handle('compute.managed.scheduleDetails',value=>{fields(value,['sourceId','scheduleId']);return schedules.status(value);});
+  handle('compute.managed.acknowledgeNotice',value=>{fields(value,['id']);const result=attention.acknowledge(value.id);notify();return result;});
+  handle('compute.managed.observeOnce',value=>{fields(value,['sourceId','scheduleId','requestId']);return schedules.observeOnce(value);});
   handle('compute.managed.stopSchedule',value=>{fields(value,['sourceId','scheduleId']);return schedules.stop(value);});
   function userMessage({provider,method,params={}}) {
     if(!['turn/start','turn/steer'].includes(method)||typeof params.threadId!=='string'||!Array.isArray(params.input))return;

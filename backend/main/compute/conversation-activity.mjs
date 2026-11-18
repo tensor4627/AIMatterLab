@@ -6,7 +6,7 @@ const runKey = (scope,sourceId,runId) => JSON.stringify([scope.provider,scope.th
 const paletteSize = 12;
 const scopeKey = (provider, threadId) => JSON.stringify([provider, threadId]);
 
-export function createConversationActivity({catalog}) {
+export function createConversationActivity({catalog,now=()=>Date.now()/1000}) {
   function style(profile) {
     const profileId = profile.profileId || profile.id;
     const previous = catalog.get(STYLE, profileId);
@@ -72,13 +72,21 @@ export function createConversationActivity({catalog}) {
     const linkedRuns = catalog.list(RUNS);
     for (const source of sources) {
       const observations = new Map((source.runs || []).map(run => [run.id, run]));
+      const intervals=new Map();
+      for(const plan of source.schedules||[]){
+        if(!['scheduled','running'].includes(plan.status)||!plan.intervalSeconds)continue;
+        for(const runId of [plan.scope.runId,plan.active?.childId].filter(Boolean))
+          intervals.set(runId,Math.max(intervals.get(runId)||0,plan.intervalSeconds));
+      }
       const observe = (owner, run) => {
         const item = badge(owner, source.profileId);
         if (!item || !run) return;
-        if (!source.connected || !online.has(source.profileId)) { item.status='offline'; return; }
-        const timestamp = run.observedAt || source.observedAt || null;
+        const timestamp=Number.isFinite(run.observedAt)&&run.observedAt>0?run.observedAt:null;
         item.observedAt = Math.max(item.observedAt || 0, timestamp || 0) || null;
-        if (run.status === 'running' && timestamp) item.status='running';
+        if (!online.has(source.profileId)) { item.status='offline'; return; }
+        if (!source.connected) { if(item.status==='idle')item.status='unknown'; return; }
+        if (run.status === 'running' && timestamp && now()-timestamp <= (intervals.get(run.id)||60)+120) item.status='running';
+        else if (run.status === 'running' && item.status==='idle') item.status='unknown';
         else if (item.status !== 'running' && run.status === 'queued') item.status='queued';
         else if (item.status === 'idle' && run.status === 'unknown') item.status='unknown';
       };
@@ -102,5 +110,5 @@ export function createConversationActivity({catalog}) {
     }
     return {resources,conversations:[...conversations.values()],sources:sources.map(source=>({...source,name:styles.get(source.profileId)?.label||source.kind}))};
   }
-  return {style,acquired,recordRun,runKind,runsFor,snapshot,forget(provider,threadId){catalog.remove(HISTORY,scopeKey(provider,threadId));}};
+  return {style,label:profileId=>catalog.get(STYLE,profileId)?.label,acquired,recordRun,runKind,runsFor,snapshot,forget(provider,threadId){catalog.remove(HISTORY,scopeKey(provider,threadId));}};
 }
