@@ -3,6 +3,7 @@ import fs from 'node:fs';import path from 'node:path';import os from 'node:os';
 import {prepareIsolation,bootstrapSkills} from './codex-isolation.mjs';
 import {prepareModelCeiling} from './codex-model-ceiling.mjs';
 import {agentEnvironment} from './agent-environment.mjs';
+import {createCodexEnvImport} from './codex-env-import.mjs';
 
 function ownedHome(root){
  if(typeof root!=='string'||!path.isAbsolute(root))throw Error('A main-owned Codex subscription root is required');
@@ -12,13 +13,19 @@ function ownedHome(root){
  if(identity(fs.realpathSync(home))!==identity(path.resolve(home)))throw Error('Codex subscription home identity changed');
  return home;
 }
-export function createCodexSubscriptionRuntime({root,runtime,sourceHome=process.env.CODEX_HOME||path.join(os.homedir(),'.codex')}){
- const home=ownedHome(root),disabled=path.join(home,'native-login-disabled');let importedAccount=null;
+export function createCodexSubscriptionRuntime({root,runtime,onEnvPrompt,sharedEnvImport,sourceHome=process.env.CODEX_HOME||path.join(os.homedir(),'.codex')}){
+ const home=ownedHome(root);
+ const envImport=sharedEnvImport??createCodexEnvImport({home,sourceHome,notify:onEnvPrompt});
+ const disabled=path.join(home,'native-login-disabled');let importedAccount=null;
  const catalogPath=()=>fs.existsSync(path.join(home,'models_cache.json'))?path.join(home,'models_cache.json'):path.join(sourceHome,'models_cache.json');
  let listedCatalog=null;
  const environment=options=>({...options,env:{...options?.env,CODEX_HOME:home}});
  const execute=(file,args,options)=>runtime.execute(file,args,environment(options));
- const spawnProcess=(file,args,options)=>runtime.spawnProcess(file,args,environment(options));
+ const spawnProcess=(file,args,options)=>{
+  const proxy=args[0]==='app-server'?envImport.settings().systemProxy:undefined;
+  const cliArgs=typeof proxy==='boolean'?[...args,'-c','features.respect_system_proxy='+proxy]:args;
+  return runtime.spawnProcess(file,cliArgs,environment(options));
+ };
  function nativeAuth(){
   const file=path.join(sourceHome,'auth.json');let value,fd;
   try{const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>128*1024)throw Error();fd=fs.openSync(file,'r');const before=fs.fstatSync(fd);if(before.ino!==stat.ino||before.size!==stat.size||before.nlink!==1)throw Error();const bytes=fs.readFileSync(fd),after=fs.fstatSync(fd),current=fs.lstatSync(file);if(bytes.length!==before.size||after.mtimeMs!==before.mtimeMs||after.size!==before.size||current.ino!==before.ino||current.isSymbolicLink())throw Error();value=JSON.parse(bytes.toString('utf8'));}catch(error){if(error.code==='ENOENT')return null;throw Error('无法安全读取已有 Codex 登录，请在账号页重新登录。');}finally{if(fd!==undefined)fs.closeSync(fd);}
@@ -27,7 +34,7 @@ export function createCodexSubscriptionRuntime({root,runtime,sourceHome=process.
   if(typeof accessToken!=='string'||!accessToken||typeof chatgptAccountId!=='string'||!chatgptAccountId)throw Error('已有 Codex 登录不完整，请在官方 Codex 刷新登录后重连。');
   return {accessToken,chatgptAccountId,chatgptPlanType:null};
  }
- return {...runtime,execute,spawnProcess,
+ return {...runtime,execute,spawnProcess,envImport,
   needsModelCatalog:()=>!fs.existsSync(catalogPath()),
   async readListedCatalog(file,listed,cwd,assertCurrent){
    // API-key sign-in can list models without writing a native models_cache.json.

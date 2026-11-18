@@ -52,6 +52,13 @@ export class CodexBridge extends EventEmitter {
   async launch(executable, worker, config = {}, {authenticationOnly=false}={}) {
     this.transcriptSecrets=[worker?.tokens?.mcp];this.transcriptStreams??=new Map();
     const generation=this.lifecycle;let child,version,stage='version';this.isolationReady=false;this.info=null;this.compatibility=null;this.isolationSummary=null;this.isolation=null;
+    if(this.host.envImport){
+      const waiting=new AbortController();
+      this.envImportWait=waiting;
+      try {await this.host.envImport.request(waiting.signal);}
+      finally {if(this.envImportWait===waiting)this.envImportWait=null;}
+      if(generation!==this.lifecycle)throw Error('已取消启动 Codex。');
+    }
     try{
     if(this.host.resolveExecutable)executable=await this.host.resolveExecutable(executable);
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
@@ -253,5 +260,5 @@ export class CodexBridge extends EventEmitter {
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
     this.pending.clear(); this.requests.clear(); this.activeTurns.clear();
   }
-  close(detail={reason:'closed'}) { this.lifecycle++;this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;const child=this.process,active=!!child;this.process=null;this.framer?.reset();this.framer=null;this.fail(new Error(detail.message||'Codex bridge closed'));child?.kill();if(active)this.emit('event',{method:'studio/codexDisconnected',params:detail}); }
+  close(detail={reason:'closed'}) { this.lifecycle++;this.envImportWait?.abort();this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;const child=this.process,active=!!child;this.process=null;this.framer?.reset();this.framer=null;this.fail(new Error(detail.message||'Codex bridge closed'));child?.kill();if(active)this.emit('event',{method:'studio/codexDisconnected',params:detail}); }
 }

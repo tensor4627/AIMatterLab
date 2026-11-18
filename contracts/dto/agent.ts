@@ -5,7 +5,8 @@ export type AgentProvider='codex'|'kimi'|'qwen'|'deepseek'|'compatible';
 export interface AgentConnectRequest {provider:AgentProvider;repairTools?:boolean}
 export interface AgentCliRequiredResult {cliRequired:import('./cli-runtime').CliReadiness}
 export interface AgentLoginRequiredResult {loginRequired:true;provider:'codex'}
-export type AgentConnectResult=AgentCliRequiredResult|AgentLoginRequiredResult|{tools?:Record<string,unknown>;studioCompatibility?:unknown};
+export interface NativeCodexDefaults {id:string;model?:string;effort?:string}
+export type AgentConnectResult=AgentCliRequiredResult|AgentLoginRequiredResult|{tools?:Record<string,unknown>;studioCompatibility?:unknown;nativeCodexDefaults?:NativeCodexDefaults};
 export type CancelProviderLoginRequest={provider:'kimi'}|{provider:'codex';loginId:string};
 
 export interface AgentRpcRequest extends AgentConnectRequest {method:string;params?:Record<string,unknown>}

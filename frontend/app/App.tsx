@@ -2,6 +2,7 @@ import MonitorAttention from '../features/runs/MonitorAttention';
 import type {MonitorNotice} from '../../contracts/dto/managed-compute';
 import ConversationResourceStatus from '../features/conversations/ConversationResourceStatus';
 import {useManagedResources} from '../features/compute/useManagedResources';
+import CodexEnvImportDialog from '../features/conversations/CodexEnvImportDialog';
 import GuideSpotlight from '../features/onboarding/GuideSpotlight';
 import SetupLesson,{type SetupLessonLocation} from '../features/onboarding/SetupLesson';
 import type {SetupGuideInfo,SetupPage,SetupProgress,SetupProgressRequest} from '../../contracts/dto/setup-guide';
@@ -780,5 +781,6 @@ export default function App(){
   {sshGuide&&<SshConnectionGuide request={sshGuide.request} language={settings.language} onClose={()=>closeSshGuide()} onWorkerUpdate={sshGuide.standalone?undefined:()=>{if(conversationSelectionSeq.current!==sshGuide.selectionSeq||selectedConversationRef.current?.id!==sshGuide.conversationId)return;return connectWorker(sshGuide.taskId);}}/>}
   {computeGuide&&<ComputeConnectionGuide key={computeGuide.id} taskId={computeGuide.taskId} profile={computeGuide.profile} language={settings.language} onConnectStart={()=>{if(computeGuideRequest.current?.id===computeGuide.id){beginWorkerGate();setWorkerRestoring(false);}}} onClose={connected=>closeComputeGuide(computeGuide.id,connected)}/>}
 
+  <CodexEnvImportDialog/>
  </div>;
 }

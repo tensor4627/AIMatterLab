@@ -9,8 +9,15 @@ import type {ToolWorkflowContext,ToolWorkflowCreate,ToolWorkflowReference,ToolWo
 import type {RoadmapPreview,RoadmapExecution} from './roadmap-execution';
 
 type Route<Request,Response>={request:Request;response:Response};
+export type CodexEnvImportMode='none'|'proxy'|'full'|'cancel';
+export interface CodexEnvImportPrompt {
+ requestId:string; sourceState:'available'|'absent'|'existing'|'unavailable';
+ hasModelDefaults:boolean; hasSystemProxy:boolean; configIssue:boolean;
+}
 /** Critical authoring/execution boundary. Authorization remains a main/worker responsibility. */
 export interface StudioIpcMap {
+ 'codex.envImport.pending':Route<Record<string,never>,CodexEnvImportPrompt|null>;
+ 'codex.envImport.decide':Route<{requestId:string;mode:CodexEnvImportMode;useModelDefaults?:boolean;useSystemProxy?:boolean},null>;
  'compute.managed.refresh':Route<Record<string,never>,ManagedSnapshot>;
  'compute.managed.snapshot':Route<Record<string,never>,ManagedSnapshot>;
  'compute.managed.publish':Route<{connectionId:string;profileId:string;profileVersion:number},ManagedResource>;

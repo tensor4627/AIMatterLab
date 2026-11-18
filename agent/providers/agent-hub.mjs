@@ -141,7 +141,8 @@ export class AgentHub extends EventEmitter{
   if(this.connectIntentProvider!==provider||this.contextGeneration!==generation||(this.connectEpoch||0)!==connectEpoch)throw Error('Provider selection changed during CLI discovery');
   if(this.active!==provider){this.disconnect(this.active);this.active=provider;}
   if(provider==='codex'){
-   if(checkLogin&&(this.codex.isolation?.authenticationOnly||!this.codex.process&&this.codex.host?.needsModelCatalog?.())){
+   // A public model cache can outlive the login. Check the account before attaching tools on a cold connection.
+   if(checkLogin&&(this.codex.isolation?.authenticationOnly||!this.codex.process&&this.codex.prepareChatAccount)){
     const current=()=>{assertCurrent();if(this.active!==provider||this.connectIntentProvider!==provider||generation!==this.contextGeneration||connectEpoch!==(this.connectEpoch||0))throw Error('Provider changed during account check');};
     await this.startCodexAuthentication();current();
     if(this.codex.isolation?.authenticationOnly){
@@ -173,6 +174,9 @@ export class AgentHub extends EventEmitter{
   providerId(provider);
   if(provider==='codex'){
    // Account observers must never reconfigure a connection captured before tools attached.
+   if(!this.codex.process&&this.codex.host?.envImport?.needsChoice()){
+    return {provider,login:'chatgpt',account:null,metadataUnavailable:true,modelAccess:'not_run'};
+   }
    if(this.codex.starting)await this.codex.starting;
    else if(!this.codex.process)await this.startCodexAuthentication();
    let result;try{result=await this.codex.request('account/read',{refreshToken:false});}
