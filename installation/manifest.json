@@ -22,6 +22,6 @@
     "sampling": "fixture_required",
     "neb": "fixture_required"
   },
-  "distribution_status": "not_run",
-  "distribution_scope": "Windows x64 artifact verification is pending. See docs/releases/aimatterlab-0.1.14.md."
+  "distribution_status": "passed",
+  "distribution_scope": "Verified local Windows x64 workspace installer, portable ZIP, developer kit and signed update feed. See docs/releases/aimatterlab-0.1.14.md for verification scope."
 }

@@ -2,7 +2,7 @@
 
 ## Clash 系统代理的适用范围
 
-Codex 首次连接时可单独选择导入本机 `.env`。仅勾选代理会导入 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`、`NODE_USE_ENV_PROXY`、`ELECTRON_GET_USE_PROXY` 及其大小写形式。含变量引用或特殊转义的代理值可通过整份复制保留。全局配置里的 `features.respect_system_proxy` 也可按用户选择沿用。新用户无需创建文件，直接使用独立配置即可继续登录。在 AIMatterLab 中明确选择整份复制后，Codex 将按自己的规则读取整个文件。
+Codex 首次连接时可单独选择导入本机 `.env`。仅勾选代理会导入 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`、`NODE_USE_ENV_PROXY`、`ELECTRON_GET_USE_PROXY` 及其大小写形式。含变量引用或特殊转义的代理值可通过整份复制保留。全局配置里的 `features.respect_system_proxy` 也可按用户选择沿用。新用户无需创建文件，直接使用独立配置即可继续登录。仅迁移代理时会补入本机回环地址。选择整份复制时，Codex 按自己的规则读取原始配置；如文件中已指定 `NO_PROXY`，需在其中保留本机服务所用的 `localhost`、`127.0.0.1` 和 `::1`。
 
 Clash 的系统代理设置、Rule/Global 路由模式和 TUN 是不同机制。系统代理供支持该系统设置的程序使用；Rule/Global 决定进入 Clash 后如何分流；TUN 用于捕获流量。切换 Global 本身不会让不读取系统代理的子进程开始读取系统代理。[Mihomo 模式说明](https://github.com/MetaCubeX/Meta-Docs/blob/main/docs/config/general.md)、[TUN 说明](https://wiki.metacubex.one/en/config/inbound/tun/)。
 
