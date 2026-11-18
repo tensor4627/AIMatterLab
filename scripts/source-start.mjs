@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {networkProxy} from '../desktop/platform/network-proxy.mjs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
@@ -64,11 +65,12 @@ export async function startSource({
  root=desktopRoot,args=process.argv.slice(2),env=process.env,
  preflight=requireLaunchContext,run=runPnpm,
  installElectron=({root,env})=>runCommand(process.execPath,[path.join(root,'node_modules','electron','install.js')],{root,env}),
- launch=launchDesktop,writeLog=console.log,
+ launch=launchDesktop,writeLog=console.log,prepareNetwork=networkProxy,
  wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),isAlive=alive,
 }={}){
  const options=sourceOptions(args,root,env);
  preflight();
+ options.env=prepareNetwork({env:options.env,report:writeLog}).env;
  const cache=path.join(root,'.studio','source-entry');
  fs.mkdirSync(cache,{recursive:true});
  const lock=path.join(cache,'launch.lock'),stateFile=path.join(cache,'state.json');

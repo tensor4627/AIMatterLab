@@ -21,7 +21,7 @@ test('compact initial bottom is new-only and explicit or legacy preferences win'
  for(const value of ['',0,-1,'NaN'])assert.equal(initialBottomExpanded(from({'studio.bottom':String(value)})),false);
 });
 test('tool groups expose each actual tool exactly once and retain real management routes',()=>{
- assert.deepEqual(toolGroups.flatMap(group=>group.tools).sort(),['activelearning','assets','md','pygas','queue','training','viewer']);
+ assert.deepEqual(toolGroups.flatMap(group=>group.tools).sort(),['activelearning','assets','hamiltonian','md','pygas','queue','training','viewer']);
  assert.deepEqual(toolGroups.flatMap(group=>group.pages),['extensions','environments','ssh','skills','relations']);
 });
 test('conversation search includes actual name or project label, not private thread identifiers',()=>{

@@ -1,3 +1,4 @@
+import {networkProxy,configureNetworkSession} from './platform/network-proxy.mjs';
 import {PRODUCT_NAME} from '../contracts/product.mjs';
 import {consoleMessage} from './platform/verification/console-message.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
@@ -61,7 +62,7 @@ import {createServiceHandoff} from '../agent/sessions/service-handoff.mjs';
 import {createTaskCustomCv} from "../backend/main/workspace/task-custom-cv.mjs";
 import {currentPairTool,readCurrentPair} from "../agent/tools/current-pair-tool.mjs";
 import {importTaskAsset} from "../backend/main/workspace/task-asset-import.mjs";
-import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage, session } from 'electron';
 
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -146,6 +147,7 @@ const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&proc
   publish:params=>emit('studio:event',{method:'studio/update',params})});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
 const activeAuthoringTasks=new Map();
+const networkConfiguration=networkProxy();Object.assign(process.env,networkConfiguration.env);
 const codexRoot=path.join(app.getPath('userData'),'provider-contexts','codex');
 const codex = new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host:createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime})}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 bindBundledWorkerRuntimeId(worker,workerSource);
@@ -686,5 +688,5 @@ if(!app.requestSingleInstanceLock()){
  app.exit(0);
 }else{
  app.on('second-instance',focusExistingWindow);
- app.whenReady().then(initialize).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox(PRODUCT_NAME+' 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
+ app.whenReady().then(async()=>{await configureNetworkSession(session.defaultSession,networkConfiguration);return initialize();}).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox(PRODUCT_NAME+' 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
 }

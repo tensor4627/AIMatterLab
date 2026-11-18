@@ -12,8 +12,23 @@ function ownedHome(root){
  if(identity(fs.realpathSync(home))!==identity(path.resolve(home)))throw Error('Codex subscription home identity changed');
  return home;
 }
+// Persist the attempt, including missing/failed sources: startup is not an env sync.
+export function initializeSubscriptionEnv(home,sourceHome,{report=console.log,files=fs}={}){
+ const target=path.join(home,'.env'),marker=path.join(home,'.env-initialized');
+ const manual=`如需此配置，请自行复制到 ${target}。`;
+ try{files.writeFileSync(marker,'1\n',{flag:'wx',mode:0o600});}
+ catch(error){if(error.code==='EEXIST')return;report(`[Codex] .env 初始化失败（${error.code||'unknown'}）；${manual}`);return;}
+ try{files.lstatSync(target);return;}catch(error){if(error.code!=='ENOENT'){report(`[Codex] .env 复制失败（${error.code||'unknown'}）；${manual}`);return;}}
+ const source=path.join(sourceHome,'.env');
+ try{files.statSync(source);}catch(error){
+  report(error.code==='ENOENT'?`[Codex] 未找到本地 Codex .env；${manual}`:`[Codex] .env 复制失败（${error.code||'unknown'}）；${manual}`);return;
+ }
+ try{files.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);report(`[Codex] 已复制 .env 到 ${target}。`);}
+ catch(error){if(error.code==='EEXIST')return;report(`[Codex] .env 复制失败（${error.code||'unknown'}）；${manual}`);}
+}
 export function createCodexSubscriptionRuntime({root,runtime,sourceHome=process.env.CODEX_HOME||path.join(os.homedir(),'.codex')}){
- const home=ownedHome(root),disabled=path.join(home,'native-login-disabled');let importedAccount=null;
+ const home=ownedHome(root);initializeSubscriptionEnv(home,sourceHome);
+ const disabled=path.join(home,'native-login-disabled');let importedAccount=null;
  const catalogPath=()=>fs.existsSync(path.join(home,'models_cache.json'))?path.join(home,'models_cache.json'):path.join(sourceHome,'models_cache.json');
  let listedCatalog=null;
  const environment=options=>({...options,env:{...options?.env,CODEX_HOME:home}});

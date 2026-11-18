@@ -2,6 +2,7 @@ import {validatePlan} from "../../../contracts/workflows/plan.mjs";
 export const tools=[
  {id:'md',name:'分子动力学引擎',description:'PyDyn 与 GPUMD / GPU-Sampling；传统 MD 和 pyGAS 增强采样。GPU-Sampling 原生 NEB；PyDyn NEB 待接入。',engines:['gpumd.neb','pydyn.md','gpumd.md','pydyn.sampling','gpumd.sampling'],status:'partial',capabilities:['MD','增强采样','GPU-Sampling NEB'],page:'runs'},
  {id:'training',name:'力场训练器',description:'HotPP、TorchNEP、GPUMD 原生 NEP；数据审计、训练、独立评估和部署。',engines:['hotpp.train','hotpp.eval','hotpp.export','nep.train','nep.eval','nep.analyze'],status:'partial',capabilities:['HotPP','NEP','TorchNEP（待接入）'],page:'training'},
+ {id:'hamiltonian',name:'机器学习哈密顿量',description:'数据准备、模型训练、独立评估、哈密顿量重构与能带分析。入口已提供，计算后端待接入。',engines:[],status:'planned',capabilities:['数据准备','模型训练','独立评估','哈密顿量重构','能带分析','HotHam（待接入）'],page:'hamiltonian'},
  {id:'activelearning',name:'主动学习',description:'NEPMaker → NEP；ActiveMiao → HotPP。探索、选帧、DFT 复核、复训形成闭环。',engines:[],status:'planned',capabilities:['NEPMaker（待接入）','ActiveMiao（待接入）'],page:'activelearning'},
  {id:'pygas',name:'pyGAS 插件',description:'独立 pyGAS 与 PyDyn 内置 pyGAS 分别注册版本。定义 CV、偏置、轨迹分析和自由能重建。',engines:['pygas.build','bias.validate','pygas.reweight','pygas.opes-reweight'],status:'partial',capabilities:['CV / Bias','WTMetaD / OPES 重加权','目标环境验证'],page:'bias'},
  {id:'assets',name:'数据资产与请求',description:'结构、轨迹、训练数据、模型、Bias 和待 DFT 复核构型；向计算或分析模块提出请求。',engines:[],status:'partial',capabilities:['资产登记 / 哈希','来源追踪','跨模块请求草稿'],page:'assets'},

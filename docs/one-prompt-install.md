@@ -1,9 +1,11 @@
-# AIMatterLab 0.1.9 单 prompt 安装
+# AIMatterLab 0.1.10 单 prompt 安装
 
-复制下面这一段给能使用本机终端和 Git 的 Agent。已有本地 0.1.9 检出即可安装。通过 GitHub 获取固定版本时，需能读取官方仓库及相应发布标签。
+当前为 0.1.10 未发布源码；发布标签获取方式须等标签正式发布后使用。
+
+复制下面这一段给能使用本机终端和 Git 的 Agent。已有本地 0.1.10 检出即可安装。通过 GitHub 获取固定版本时，需能读取官方仓库及相应发布标签。
 
 ```text
-请在我的 Windows 电脑安装 AIMatterLab 0.1.9。使用我提供的本地 0.1.9 检出，记录完整提交和本地改动。如果从 https://github.com/tensor4627/AIMatterLab.git 安装，请在新目录获取已发布的 refs/tags/v0.1.9，核对该标签的完整提交。从所选提交读取 INSTALL_AGENT.md 并核对安装清单的版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
+请在我的 Windows 电脑安装 AIMatterLab 0.1.10。使用我提供的本地 0.1.10 检出，记录完整提交和本地改动。如果从 https://github.com/tensor4627/AIMatterLab.git 安装，请在 v0.1.10 正式发布后于新目录获取 refs/tags/v0.1.10，核对该标签的完整提交。从所选提交读取 INSTALL_AGENT.md 并核对安装清单的版本。先发现本机可复用的 WSL、Python 和计算环境，和我确认要验收的服务商与短例后，按安装提示执行。完成后给我启动文件和每项实际验收结果。
 ```
 
 完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)列出官方仓库、本版版本号和发布引用。需要登录仓库时由用户在本机 Git 凭据界面完成。
@@ -84,7 +86,7 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 desktop 使用独立 profile、真实 renderer/worker 和 provider 请求。需要认证时，由用户登录后重验。Windows 用户双击 `Launch-AIMatterLab.cmd` 进入验收过的同一 profile，另有兼容 PS1 启动文件。finalize 绑定当前配置和源码指纹，要求三个阶段均通过且选定的短例集合完整。
 
-本版桌面验收见 [0.1.9 发布说明](releases/aimatterlab-0.1.9.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
+本版源码验证及成品缺项见 [0.1.10 更新与验证](releases/aimatterlab-0.1.10.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
 同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 AIMatterLab 核对任务，或选择独立安装 root。
 
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。
@@ -105,3 +107,13 @@ python scripts/one_prompt.py reuse-existing --config .studio/installation/config
 每次审计实际执行 target-probe 和 desktop/provider 检查。完成过的 smoke 不会被默认冒充新运行；需要本轮全新科学证据时换用新的两个目录。仅在显式 `--reuse-smoke-receipt`、已登记环境身份未变且源码无 dirty 标记时，才可恢复标有原始时间的历史 smoke；报告同时显示 `cached_evidence=true`，不能称本轮新科学运行。
 
 报告分别给出 `reuse_readiness_success`、`dry_run=true`、`installation_success=false` 与复用模式跳过的动作。每台新机器的完整安装结果由该机的 finalize 收据确认。Git 源码克隆、预编译发行包下载和目标环境的科学运行分别记录；额外引擎缺少所选 fixture 时保留 blocked。
+
+## Codex 独立 home 的首次配置
+
+Codex 独立目录在应用启动时初始化，安装器阶段不创建。首次初始化仅在目标缺少 `.env` 时，从本机 `CODEX_HOME`（未设置时为用户目录下 `.codex`）复制 `.env`。源码默认目标为 `.config/provider-contexts/codex/subscription-home/.env`；自定义 `--profile` 和安装包使用实际 profile 下的 `provider-contexts/codex/subscription-home/.env`，以启动 CMD 输出的绝对目标为准。成功输出“已复制”及目标；源缺失明确输出“未找到”并提示自行复制到实际目标；读取或复制失败明确输出“失败”，不输出文件内容。复制成功仅表示文件已复制，不代表代理连通、登录或模型可用。
+
+已有目标不覆盖；`.env-initialized` 记录首次尝试（含缺失或失败），升级及后续启动不反复同步。如首次未复制成功，请按提示手动复制到实际目标，不删除初始化标记来强制同步。只复制 `.env`，不复制整个 `.codex`、sessions、历史数据库或其他配置，不迁移或清理已有对话、登录、连接、凭据及真实运行状态。现有 Codex 认证生命周期保持不变。
+
+## 代理与 Electron 下载排查
+
+启动时自动复用显式代理；没有显式代理时发现 Windows 已启用的系统 HTTP/mixed 代理，供依赖安装、Electron 下载、桌面及 Agent 子进程使用。本机 worker/MCP 回环直连，不改系统代理设置。按[代理与 Electron 下载说明](network-and-electron-install.md)在本机排查，保留原代理设置和配置；不要把复制 `.env` 当作连通成功。
