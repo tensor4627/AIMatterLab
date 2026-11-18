@@ -213,7 +213,13 @@ class DaemonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root, runtime = bridge.stage_runtime(value, bridge.validate_payload(value), home=folder)
             try:
-                health = bridge.start_worker(root, runtime, value['port'])
+                # A login shell can start in another worker checkout. The staged runtime must win.
+                real_run = subprocess.run
+                def from_other_checkout(*args, **kwargs):
+                    kwargs.setdefault('cwd', str(SOURCE))
+                    return real_run(*args, **kwargs)
+                with patch.object(bridge.subprocess, 'run', side_effect=from_other_checkout):
+                    health = bridge.start_worker(root, runtime, value['port'])
                 self.assertEqual(health['worker_role'], 'ssh-login-service'); self.assertFalse(health['local_execution'])
                 self.assertEqual(health['uid'], os.getuid()); self.assertEqual(health['port'], value['port'])
                 self.assertNotIn('tokens', health)

@@ -193,7 +193,7 @@ if not value:
     env.setdefault("STUDIO_REQUIRE_TOOL_DECLARATIONS", "0")
     with open(root / "service.log", "ab") as log:
         subprocess.Popen([sys.executable, "-m", "studio_worker.server", "--root", str(root),
-                          "--port", str(args.port)], env=env, stdin=subprocess.DEVNULL,
+                          "--port", str(args.port)], env=env, cwd=expected_runtime, stdin=subprocess.DEVNULL,
                          stdout=log, stderr=log, start_new_session=True)
     for _ in range(50):
         time.sleep(0.1)

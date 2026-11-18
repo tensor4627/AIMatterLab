@@ -382,6 +382,54 @@ class ManagedScheduleTest(unittest.TestCase):
         self.assertEqual(self.clusters.raw(self.parent['id'])['status'], 'queued')
         self.assertEqual(self.status(plan)['count'], 1)
 
+    @unittest.skipUnless(os.name == 'posix', 'Uses bounded local Bash processes for the scheduler fixture')
+    def test_plan_stop_ends_child_process_while_parent_and_peer_keep_running(self):
+        peer = self.draft(self.profile['id'], 'other-session-job')
+        self.clusters.submit(peer['id'])
+        processes = {}
+
+        def start(job_id, command):
+            process = subprocess.Popen(command, cwd=self.root, stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            processes[job_id] = process
+            def finish():
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=3)
+            self.addCleanup(finish)
+            return process
+
+        parent = start(self.submissions[self.parent['id']][0], ['sleep', '20'])
+        other = start(self.submissions[peer['id']][0], ['sleep', '20'])
+        wire = self.wire
+        def scheduler_command(script, data=None, timeout=40):
+            result = wire(script, data, timeout)
+            argv = shlex.split(script)
+            if data is not None:
+                receipt = json.loads(result.removeprefix('__STUDIO_JSON__'))
+                with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
+                    actual = archive.extractfile('simulation/scheduled.sh').read().decode()
+                start(receipt['job_id'], ['/bin/bash', '-c', actual])
+            elif argv[0] == 'scancel':
+                processes[argv[1]].terminate()
+            return result
+        self.clusters.transport = lambda _profile: SimpleNamespace(run=scheduler_command)
+        plan = self.script(script={'language': 'bash', 'text': 'exec sleep 20\n'})
+        self.time = 1002
+        active = self.pump()['schedules'][0]['active']
+        child = processes[active['jobId']]
+        self.assertIsNone(child.poll())
+        self.schedules.stop(self.request(plan))
+        self.assertLess(child.wait(timeout=3), 0)
+        self.assertIsNone(parent.poll())
+        self.assertIsNone(other.poll())
+        self.time += 10
+        self.pump()
+        stopped = self.status(plan)
+        self.assertEqual((stopped['count'], stopped['cancellation']['status']), (1, 'confirmed'))
+        self.assertEqual(self.cancelled, {active['jobId']})
+        self.assertEqual(len(processes), 3)
+
     def test_unverified_child_and_lost_submit_are_never_retried(self):
         plan = self.script()
         self.time = 1002
