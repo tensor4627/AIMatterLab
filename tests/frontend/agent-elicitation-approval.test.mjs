@@ -14,7 +14,7 @@ const responses=h=>h.calls.filter(call=>call.method==='agent.respond');
 async function setup(override){const h=agentHarness({props:{sessionSelection:{nonce:'approvals',conversation:conversation('codex','approvals')}},override:(method,data,standard)=>method==='agent.respond'?(override?.(data)??{}):standard(method,data)});await h.flush();return h;}
 
 test('zero-field MCP forms hide only the empty argument editor while preserving tool/command context and explicit decisions',async()=>{
- const h=await setup();try{h.emit(event('zero'));await h.flush();assert.equal(editors(h,'zero').length,0);assert.match(text(panel(h,'zero')),/write_shared_terminal/);assert.match(text(panel(h,'zero')),/printf PUBLIC_APPROVAL_FIXTURE/);assert(action(h,'zero','接受'));assert(action(h,'zero','拒绝'));assert.equal(responses(h).length,0);action(h,'zero','接受').props.onClick();await h.flush();assert.deepEqual(responses(h)[0].data,{provider:'codex',id:'zero',result:{action:'accept',content:{}}});assert.throws(()=>panel(h,'zero'));}finally{h.unmount();}
+ const h=await setup();try{h.emit(event('zero'));await h.flush();assert.equal(editors(h,'zero').length,0);assert.match(text(panel(h,'zero')),/write_shared_terminal/);assert.match(text(panel(h,'zero')),/printf PUBLIC_APPROVAL_FIXTURE/);assert(action(h,'zero','接受'));assert(action(h,'zero','拒绝'));assert.equal(responses(h).length,0);action(h,'zero','接受').props.onClick();await h.flush();assert.deepEqual(responses(h)[0].data,{provider:'codex',threadId:'approvals',id:'zero',result:{action:'accept',content:{}}});assert.throws(()=>panel(h,'zero'));}finally{h.unmount();}
 });
 
 test('declining a confirmation still sends decline/null without requesting terminal execution',async()=>{

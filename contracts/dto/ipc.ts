@@ -1,3 +1,4 @@
+import type {ManagedResource,ManagedSnapshot,ManagedSchedule} from './managed-compute';
 import type {Conversation} from './agent';
 import type {UpdateState} from './update';
 import type {Project,ComputeResourceActivation,ComputeResourceState,BaseWorkspaceRequest,BaseWorkspaceResult} from './compute';
@@ -10,6 +11,13 @@ import type {RoadmapPreview,RoadmapExecution} from './roadmap-execution';
 type Route<Request,Response>={request:Request;response:Response};
 /** Critical authoring/execution boundary. Authorization remains a main/worker responsibility. */
 export interface StudioIpcMap {
+ 'compute.managed.refresh':Route<Record<string,never>,ManagedSnapshot>;
+ 'compute.managed.snapshot':Route<Record<string,never>,ManagedSnapshot>;
+ 'compute.managed.publish':Route<{connectionId:string;profileId:string;profileVersion:number},ManagedResource>;
+ 'compute.managed.configureService':Route<{connectionId:string;profileId:string;profileVersion:number},ManagedResource>;
+ 'compute.managed.projectAccess':Route<{resourceId:string;projectId:string;allowed:boolean},{allowed:boolean}>;
+ 'compute.managed.scheduleDetails':Route<{sourceId:string;scheduleId:string},ManagedSchedule>;
+ 'compute.managed.stopSchedule':Route<{sourceId:string;scheduleId:string},unknown>;
  'compute.workspace.setup':Route<BaseWorkspaceRequest,BaseWorkspaceResult>;
  'updates.status':Route<Record<string,never>,UpdateState>;
  'updates.check':Route<Record<string,never>,UpdateState>;

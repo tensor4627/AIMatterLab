@@ -100,7 +100,7 @@ export function createComputeConnection({worker,records,catalog,settings,selecti
    rememberTask(p);
    if(p.intent!=='existing'&&p.view.scope==='global'&&mode==='started'){await bindFreshSources(()=>guard(p));guard(p);}
    if(!p.taskId){saveSettings(p.persistTarget);p.settingsSignature=signature(settings());const remembered=remember(p.persistTarget,{...checked,intent:p.intent,checkedAt:now()});p.saved=structuredClone(saved());if(remembered&&typeof remembered.then==='function')await remembered;guard(p);}
-   stage(p,'connected',{status:'connected',connection:'connected',serviceVersion:checked.serviceVersion||'unconfirmed',canUpdate:p.intent!=='existing'&&checked.serviceVersion!=='current'&&!p.legacyPort,resolvedRoot:worker.identity?.root,mode,checkedAt:now()});onConnected();guard(p);
+   stage(p,'connected',{status:'connected',connection:'connected',serviceVersion:checked.serviceVersion||'unconfirmed',canUpdate:p.intent!=='existing'&&checked.serviceVersion!=='current'&&!p.legacyPort,resolvedRoot:worker.identity?.root,mode,checkedAt:now()});onConnected(p.view);guard(p);
    if(args.update&&checked.serviceVersion!=='current'){stage(p,'finished',{status:'failed',finished:true,error:{code:'update_unconfirmed',message:messages.update_unconfirmed}});return;}
    if(args.update||p.taskId||p.intent==='existing'||settings().autoDiscoverCompute===false){stage(p,'finished',{finished:true,discovery:'not_run'});return;}
    stage(p,'discovering',{discovery:'discovering'});

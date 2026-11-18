@@ -19,7 +19,7 @@ async function fixture(t,{connectedWorker=true}={}){
 
  const worker=new WorkerClient();worker.request=()=>assert.fail('Selected SSH must not access WSL worker APIs');if(connectedWorker){worker.connection={url:'http://127.0.0.1:31234',tokens:{admin:'synthetic-admin',mcp:'synthetic-mcp'},transport:'localhost'};worker.identity={distribution:'Fixture',root:'/untouched'};worker.connectionTarget={distribution:'Fixture',root:'/untouched',port:31234};}
  const revoke=worker.revokeProvider.bind(worker);worker.revokeProvider=provider=>{revokes.push(provider);revoke(provider);};
- const terminalMcp=new TerminalMcp({terminal:shared});await terminalMcp.start();
+ const terminalMcp=new TerminalMcp({terminal:shared});await terminalMcp.start();t.after(()=>terminalMcp.close());
  const codex=new EventEmitter();codex.activeTurns=new Set();codex.starts=0;codex.closes=0;codex.process={};codex.close=()=>{codex.closes++;codex.process=null;codex.emit('event',{method:'studio/codexDisconnected',params:{}});};codex.start=async(_file,connection)=>{codex.starts++;codex.process={};codex.attached=connection;return {};};codex.request=async(method,params,_timeout,options)=>{options?.assertCurrent();calls.push({method,params:clone(params)});if(method==='turn/start')return {turn:{id:'synthetic-turn'}};if(method==='thread/start'||method==='thread/resume')return {thread:{id:method==='thread/start'?'new-thread':params.threadId,turns:[]}};return {};};
  const taskRecords={conversation:()=>null,bound:()=>null,deleted:()=>false,failedTurn:()=>{},prepareTurn:()=>assert.fail('No automatic workflow context')};
  const workflowContext=createAgentWorkflowContext({records:taskRecords,activeTasks:new Map(),selectedProvider:()=>'codex'});
@@ -27,19 +27,25 @@ async function fixture(t,{connectedWorker=true}={}){
  const mcpContext=()=>Object.fromEntries(['threadId','taskId','projectId','environmentId','inputRoot'].map(key=>[key,workflowContext.current()[key]]));
  const handlers=new Map(),sender={id:7,isDestroyed:()=>false},window={isDestroyed:()=>false,webContents:{id:7,isDestroyed:()=>false,getURL:()=> 'file:///studio/index.html'}},event={sender,senderFrame:{url:'file:///studio/index.html'}};
  const context={authoringAuthorization:null,sshService:{peek:()=>null,prepareForConnection:async data=>{events.push({data:{method:'test/loginPreparation',params:data}});},resourceChanged:async()=>{},connectionLost:()=>{},reconcileContext:()=>{}},path,createAgentResourceRouting,createComputeResourceBinding,createAgentRequests,AgentHub,conversationTerminals:{acquire:async()=>{},pendingForNewConversation:()=>null,canAcquire:()=>false,detachConnection(){},releaseConnection(){}},worker,terminalMcp,sharedTerminal:shared,computeProfiles:profiles,catalog,codex,root:process.cwd(),settings:{codexPath:'synthetic',agent:{}},workflowContext,window,shuttingDown:false,app:{getPath:()=>process.cwd(),isPackaged:false},safeStorage:{},CredentialVault:class{get(){return null;}},net:{fetch:()=>assert.fail('No external network')},emit:(channel,data)=>events.push({channel,data}),assertIdleAgent:()=>{if(codex.activeTurns.size)throw Error('busy');},scientificToolReadiness:()=>assert.fail('No selected-SSH scientific readiness query'),ipcMain:{handle:(name,handler)=>handlers.set(name,handler)}};
- Object.assign(context,{providerId,agentConnectionSerial:0});
+ Object.assign(context,{providerId,agentConnectAttempts:new Map(),managedResources:null,managedWorkbench:{userMessage(){}}});
  context.resourceRouting=vm.runInNewContext(initializer('resourceRouting'),context);
- context.agents=vm.runInNewContext(initializer('agents'),context);
+ // These tests cover the explicitly selected legacy terminal routing lane.
+ // Managed conversation wiring has separate per-transport integration coverage.
+ const routing=context.resourceRouting;
+ context.agents=new AgentHub({codex,root:process.cwd(),catalog,vault:{get:()=>null},settings:()=>context.settings,
+  worker:provider=>routing.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp.revokeProvider(provider);},
+  bindWorkerContext:(provider,value,options)=>routing.bindWorkerContext(provider,value,options),resourceScope:(provider,method)=>routing.scope(provider,method)});
+ context.agents.isBusy=()=>context.agents.contextBusy();
+ t.after(()=>{context.agents.close();worker.close();});
  context.computeResource=vm.runInNewContext(initializer('computeResource'),context);
  for(const name of ['trusted','handle','scientificTools'])vm.runInNewContext(find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='compute.resource.status'),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='agent.connect'),context);
  vm.runInNewContext(find(node=>ts.isForOfStatement(node)&&node.getText(ast).includes("handle('compute.resource.'+method")),context);
- Object.assign(context,{taskRecords,privateAccess:{assertTask:()=>assert.fail('No WSL private read')},scientificSkills:{router:{routes:new Map()},context:{}},setupInstructions:{},bundledSkillRoot:process.cwd(),studioSkillRoots:()=>[],managedSkillRoots:()=>[],managedSkillEntries:()=>[],managedSkillRecords:()=>[],skillGuidanceScope:()=>{},openUrl:()=>{}});
+ Object.assign(context,{taskRecords,baseWorkspace:null,privateAccess:{assertTask:()=>assert.fail('No WSL private read')},scientificSkills:{router:{routes:new Map()},context:{}},setupInstructions:{},bundledSkillRoot:process.cwd(),studioSkillRoots:()=>[],managedSkillRoots:()=>[],managedSkillEntries:()=>[],managedSkillRecords:()=>[],skillGuidanceScope:()=>{},openUrl:()=>{}});
  const request=vm.runInNewContext(initializer('agentRequests'),context);
  const invoke=(name,data={},suppliedEvent=event)=>handlers.get('studio:'+name)(suppliedEvent,data);
  const activate=async(connectionId='session')=>invoke('compute.resource.activate',{kind:'ssh-connection',profileId:'profile',profileVersion:1,connectionId});
- t.after(()=>{context.agents.close();worker.close();terminalMcp.close();});
  return {context,worker,codex,calls,cache,events,revokes,shared,owner,mcpContext,activate,invoke,request,setReady:(value,sessionId='shell-'+context.computeResource.peek()?.connectionId)=>{ready=value;readySession=sessionId;},setProfileValid:value=>{profileValid=value;},delayRead:()=>{readGate=deferred();readEntered=deferred();return {entered:readEntered.promise,release:()=>{readGate.resolve();readGate=null;}};}};
 }
 

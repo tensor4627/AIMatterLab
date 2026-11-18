@@ -29,7 +29,7 @@ export class ApiModelBridge extends DshBridge{
   if(this.process&&this.contextKey===contextKey)return this.info;if(this.activeTurns.size)throw Error('请先停止当前回复再切换模型');
   if(this.unconfirmedTurns.size)throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');
   if(this.process||this.pending.size||this.isolationWaiter)this.stop({notify:false,preserveStart:true});
-  const generation=this.lifecycle,runtime=this.host.resolve({executable:this.executable}),profile=prepareApiDshProfile(this.root,runtime,worker,this.instructions,{profile:credential,provider:this.provider});
+  const generation=this.lifecycle,runtime=this.host.resolve({executable:this.executable}),profile=prepareApiDshProfile(this.root,runtime,worker,this.instructions,{profile:credential,provider:this.provider,sessionProfileId:this.sessionProfileId});
   let readyResolve,readyReject;const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;}),waiter={resolve:readyResolve,reject:readyReject};this.isolationWaiter=waiter;
   const child=this.host.spawn(runtime.file,[...runtime.args,...profile.args],{cwd:profile.cwd,env:profile.env});this.process=child;this.contextKey=contextKey;this.loaded.clear();
   child.stdin?.on('error',()=>{if(this.process===child)this.stop({reason:'transport_error'});});child.stderr.on('data',()=>this.emit('diagnostic','DSH API adapter diagnostic (private contents withheld)'));child.on('error',()=>{if(this.process===child)this.stop({reason:'transport_error'});});child.on('exit',()=>{if(this.process===child)this.stop({reason:'transport_closed'});});

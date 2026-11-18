@@ -132,9 +132,10 @@ test('execution probe exposes only a fixed integrity receipt and strips injected
 import {pathToFileURL} from 'node:url';
 test('published real session can load delta and location helpers after the owned source copy is removed',async t=>{
  const f=fixture(t),directory=new URL('../../desktop/platform/terminal-service/',import.meta.url);
- for(const name of ['session.mjs','response-codec.mjs','service-launch.mjs','worker-delta.mjs','ssh-service-locations.mjs'])f.write('resources/terminal-service/'+name,fs.readFileSync(new URL(name,directory),'utf8'));
- const runtime=await f.prepare();for(const name of ['worker-delta.mjs','ssh-service-locations.mjs'])assert(fs.existsSync(path.join(path.dirname(runtime.servicePath),name)));
+ for(const name of ['session.mjs','response-codec.mjs','service-launch.mjs','worker-delta.mjs','ssh-service-locations.mjs','ssh-connection.mjs','shared-shell-service.mjs','native-ssh.mjs','native-ssh-stdio.mjs','native-ssh-relay.py','managed-ssh-shells.mjs'])f.write('resources/terminal-service/'+name,fs.readFileSync(new URL(name,directory),'utf8'));
+ const runtime=await f.prepare();for(const name of ['worker-delta.mjs','ssh-service-locations.mjs','native-ssh-relay.py','managed-ssh-shells.mjs'])assert(fs.existsSync(path.join(path.dirname(runtime.servicePath),name)));
  fs.rmSync(f.source,{recursive:true,force:true});
  const loaded=await import(pathToFileURL(path.join(path.dirname(runtime.servicePath),'session.mjs')).href);assert.equal(typeof loaded.createTerminalSession,'function');
  const delta=await import(pathToFileURL(path.join(path.dirname(runtime.servicePath),'worker-delta.mjs')).href);assert.equal(delta.deltaBundle({files:[]},[]).sourceBytes,0);
+ const connection=await import(pathToFileURL(path.join(path.dirname(runtime.servicePath),'ssh-connection.mjs')).href);assert.equal(typeof connection.createSshConnections,'function');
 });

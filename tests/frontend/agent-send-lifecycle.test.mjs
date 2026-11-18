@@ -54,7 +54,7 @@ test('loading and failed conversation never display previous messages; explicit 
 });
 
 test('retry after provider-switch failure selects the intended provider before reading its history',async()=>{
- let failed=false;const h=agentHarness({props:{sessionSelection:{nonce:'A',conversation:conversation('codex','A')}},override:(method,data,standard)=>{if(method==='agent.disconnect'&&!failed){failed=true;throw Error('switch acknowledgement missing');}return standard(method,data);}});
+ let failed=false;const h=agentHarness({props:{sessionSelection:{nonce:'A',conversation:conversation('codex','A')}},override:(method,data,standard)=>{if(method==='agent.connect'&&data.provider==='qwen'&&!failed){failed=true;throw Error('switch acknowledgement missing');}return standard(method,data);}});
  try{await h.flush();h.render({sessionSelection:{nonce:'B',conversation:conversation('qwen','B')}});await h.flush();assert(h.find(node=>node.props?.['data-testid']==='agent-history-retry'));h.click('agent-history-retry');await h.flush();assert.equal(rpcCalls(h,'thread/read').at(-1).data.provider,'qwen');assert.equal(rpcCalls(h,'thread/read').at(-1).data.params.threadId,'B');assert.equal(rpcCalls(h,'turn/start').length,0);}finally{h.unmount();}
 });
 
@@ -83,11 +83,50 @@ test('stored thread draft without initial selection is explicitly restored befor
  const storage=memoryStorage();storage.setItem('studio.conversation','codex:fixture-existing');seed(storage,'fixture-existing','PUBLIC TEST stored draft');
  const h=agentHarness({storage});await h.flush();h.click('agent-connect');await h.flush();assert.equal(sendButton(h).props.disabled,true);h.click('agent-restore-draft');await h.flush();assert.equal(h.textarea().props.value,'PUBLIC TEST stored draft');assert.equal(sendButton(h).props.disabled,false);h.send();await h.flush();assert.equal(starts(h).length,1);assert.equal(starts(h)[0].data.params.threadId,'fixture-existing');h.unmount();
 });
-for(const phase of ['thread/start','turn/start'])test('selection queued before '+phase+' acknowledgement preserves both drafts and never replays',async()=>{
- const storage=memoryStorage(),late=deferred();seed(storage,'other','other original');const h=agentHarness({storage,override:(m,d,standard)=>m==='agent.rpc'&&d.method===phase?late.promise:m==='agent.rpc'&&d.method==='turn/interrupt'?{}:standard(m,d)});await h.flush();h.click('agent-connect');await h.flush();h.type('old request');h.send();await h.flush();h.render({sessionSelection:{nonce:'switch-'+phase,conversation:conversation('codex','other')}});await h.flush();late.resolve(phase==='thread/start'?{thread:{id:'started-thread'}}:{turn:{id:'late-turn'}});await h.flush();if(phase==='turn/start'){assert.notEqual(h.textarea().props.value,'other original');h.find(n=>n.type==='button'&&n.props?.['aria-label']==='中断 Agent，计算作业继续').props.onClick();await h.flush();const interrupts=h.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/interrupt');assert.equal(interrupts.length,0,'never interrupt a request after its selection identity changed');assert(h.find(n=>typeof n.props?.children==='string'&&n.props.children.includes('请求归属已变化')));h.emit({method:'turn/completed',provider:'codex',params:{threadId:'started-thread',turn:{id:'late-turn',status:'completed'}}});await h.flush();}assert.equal(h.textarea().props.value,'other original');h.type('other newest');await h.flush();assert.equal(h.textarea().props.value,'other newest');assert.equal(starts(h).length,phase==='turn/start'?1:0);const d=createComposerDrafts(()=>storage);d.activate('codex',phase==='turn/start'?'started-thread':null);assert.equal(d.text(),'old request');h.unmount();
+for(const phase of ['thread/start','turn/start'])test('selection before '+phase+' acknowledgement leaves both conversations independent',async()=>{
+ const storage=memoryStorage(),late=deferred();seed(storage,'other','other original');
+ const h=agentHarness({storage,override:(m,d,standard)=>m==='agent.rpc'&&d.method===phase?late.promise:standard(m,d)});
+ try{await h.flush();h.click('agent-connect');await h.flush();h.type('old request');h.send();await h.flush();
+  h.render({sessionSelection:{nonce:'switch-'+phase,conversation:conversation('codex','other')}});await h.flush();
+  assert.equal(h.textarea().props.value,'other original');assert.throws(()=>stop(h));
+  late.resolve(phase==='thread/start'?{thread:{id:'started-thread'}}:{turn:{id:'late-turn'}});await h.flush();
+  assert.equal(h.textarea().props.value,'other original');assert.equal(starts(h).length,phase==='turn/start'?1:0);
+  const draft=createComposerDrafts(()=>storage);draft.activate('codex',phase==='turn/start'?'started-thread':null);
+  assert.equal(draft.text(),phase==='thread/start'?'old request':'');
+ }finally{h.unmount();}
 });
-test('selection queued during acknowledged turn activates only after completion',async()=>{
- const storage=memoryStorage();seed(storage,'other','other original');const h=agentHarness({storage});await h.flush();h.click('agent-connect');await h.flush();h.type('old request');h.send();await h.flush();assert.equal(starts(h).length,1);h.render({sessionSelection:{nonce:'queued-after-ack',conversation:conversation('codex','other')}});await h.flush();assert.notEqual(h.textarea().props.value,'other original');h.emit({method:'turn/completed',provider:'codex',params:{threadId:'started-thread',turn:{id:'accepted-turn',status:'completed'}}});await h.flush();assert.equal(h.textarea().props.value,'other original');assert.equal(starts(h).length,1);h.unmount();
+
+test('a second same-provider conversation sends immediately and a returned in-flight turn stops by exact identity',async()=>{
+ const storage=memoryStorage(),a=conversation('codex','a'),b=conversation('codex','b');seed(storage,'a','first');seed(storage,'b','second');
+ const h=agentHarness({storage,props:{sessionSelection:{nonce:'a',conversation:a}},override:(method,data,standard)=>{
+  const id=data?.params?.threadId;
+  if(method==='agent.rpc'&&data.method==='thread/read'&&id==='a')return {thread:{id,turns:[]},...starts(h).some(call=>call.data.params.threadId==='a')?{studioSession:{threadId:'a',busy:true,turnId:'turn-a',requests:[]}}:{}};
+  if(method==='agent.rpc'&&data.method==='turn/start')return {turn:{id:'turn-'+id}};
+  if(method==='agent.rpc'&&data.method==='turn/interrupt')return {};
+  return standard(method,data);
+ }});
+ try{await h.flush();h.send();await h.flush();h.render({sessionSelection:{nonce:'b',conversation:b}});await h.flush();
+  assert.equal(h.textarea().props.value,'second');h.send();await h.flush();
+  assert.deepEqual(starts(h).map(call=>call.data.params.threadId),['a','b']);assert.equal(h.calls.some(call=>call.method==='agent.disconnect'),false);
+  h.emit({method:'studio/codexDisconnected',provider:'codex',params:{threadId:'a'}});await h.flush();assert(stop(h));
+  h.render({sessionSelection:{nonce:'return-a',conversation:a}});await h.flush();h.click('agent-stop');await h.flush();
+  assert.deepEqual(rpcCalls(h,'turn/interrupt').map(call=>call.data.params),[{threadId:'a',turnId:'turn-a'}]);
+ }finally{h.unmount();}
+});
+
+test('stop requested before acknowledgment still targets its origin when the response arrives in the background',async()=>{
+ const ack=deferred(),a=conversation('codex','a'),b=conversation('codex','b');
+ const h=agentHarness({props:{sessionSelection:{nonce:'a',conversation:a}},override:(method,data,standard)=>{
+  if(method==='agent.rpc'&&data.method==='turn/start')return ack.promise;
+  if(method==='agent.rpc'&&data.method==='turn/interrupt')return {};
+  return standard(method,data);
+ }});
+ try{await h.flush();h.type('Stop this first reply');h.send();await h.flush();h.click('agent-stop');await h.flush();
+  h.render({sessionSelection:{nonce:'b',conversation:b}});await h.flush();
+  ack.resolve({turn:{id:'turn-a'}});await h.flush();
+  assert.deepEqual(rpcCalls(h,'turn/interrupt').map(call=>call.data.params),[{threadId:'a',turnId:'turn-a'}]);
+  assert.throws(()=>stop(h));assert.equal(h.textarea().props.value,'');
+ }finally{h.unmount();}
 });
 
 test('Codex willRetry is transient progress, not failed model access or a persistent error',async()=>{

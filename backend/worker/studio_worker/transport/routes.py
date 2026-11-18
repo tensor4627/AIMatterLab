@@ -63,6 +63,13 @@ def gpu_inventory(run=subprocess.run):
 
 
 def dispatch(service, method, path, data, admin=False):
+    if path.startswith('/api/managed-schedules/'):
+        if method != 'POST' or not admin:
+            raise PermissionError('Desktop managed schedule channel required')
+        action = path.removeprefix('/api/managed-schedules/')
+        if action not in ('upsert', 'stop', 'status', 'list', 'snapshot', 'pump', 'ack'):
+            raise ValueError('Unknown managed schedule action')
+        return getattr(service.managed_schedules, action)(data)
     if path.startswith('/api/workflow/roadmap/'):
         if method!='POST' or not admin:
             raise PermissionError('Desktop workflow confirmation channel required')
@@ -99,7 +106,7 @@ def dispatch(service, method, path, data, admin=False):
         return getattr(ToolConfigurations(service), operation)(data)
     if method == "GET":
         if path == "/api/health":
-            value = {"name": "gpu-sampling-studio", "product_name": "AIMatterLab", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1}
+            value = {"name": "gpu-sampling-studio", "product_name": "AIMatterLab", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1, "managed_schedule_schema":1}
             if not getattr(service,'ssh_service_mode',False):
                 value["roadmap_execution_schema"]=1
             if getattr(service, 'ssh_service_mode', False):
@@ -298,6 +305,10 @@ def dispatch(service, method, path, data, admin=False):
         return getattr(service.clusters,path.rsplit("/",1)[-1])(data["run_id"])
     if path=="/api/cluster/status":
         return service.clusters.poll(data["run_id"])
+    if path=='/api/cluster/observation':
+        run = service.clusters.raw(leaf(data['run_id']))
+        service.clusters.allowed(run['project_id'], run['cluster_id'])
+        return service.clusters.run(run['id'])
     if path=="/api/cluster/log":
         return service.clusters.read(data["run_id"],data.get("name","console.log"),data.get("offset",0))
     if path == "/api/workflows":

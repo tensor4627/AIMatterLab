@@ -40,13 +40,18 @@ test('late saved selection acknowledgement cannot replace a newer selected owner
  assert.deepEqual(h.calls.filter(call=>call[0]==='onSelected').map(call=>call[1]),[latest]);assert.equal(calls.length,2);
 });
 
-test('busy and rejected editor replacement guard both saved and fresh selection without changing ownership',async()=>{
- for(const mode of ['busy','dirty']){
-  let confirmations=0;const h=conversationSelectionHarness({ports:{editorDirty:mode==='dirty',confirmReplace:()=>{confirmations++;return false;}}}),original=conversation('codex','kept');
-  h.current().conversationChanged(original);h.current().setAgentBusy(mode==='busy');h.render();
-  await h.current().chooseConversation(conversation('qwen','other'));await h.current().newConversation(true,'seed');h.render();
-  assert.equal(h.current().selectedConversationRef.current,original);assert.equal(h.current().freshSelectionPending.current,null);assert.equal(h.current().conversationSelectionSeq.current,0);assert.deepEqual(h.calls,[]);assert.equal(confirmations,mode==='busy'?0:2);
- }
+test('a reply in progress permits saved and fresh navigation, while a dirty editor still asks before replacement',async()=>{
+ const original=conversation('codex','kept'),other=conversation('qwen','other');
+ const active=conversationSelectionHarness({ports:{invoke:async(_method,data)=>data.new?{fresh:true}:other}});
+ active.current().conversationChanged(original);active.current().setAgentBusy(true);active.render();
+ await active.current().chooseConversation(other);active.render();
+ assert.equal(active.current().selectedConversationRef.current,other);
+ await active.current().newConversation(true,'seed');active.render();
+ assert.equal(active.current().sessionSelection.initialPrompt,'seed');
+ let confirmations=0;const guarded=conversationSelectionHarness({ports:{editorDirty:true,confirmReplace:()=>{confirmations++;return false;}}});
+ guarded.current().conversationChanged(original);guarded.render();
+ await guarded.current().chooseConversation(other);await guarded.current().newConversation(true,'seed');guarded.render();
+ assert.equal(guarded.current().selectedConversationRef.current,original);assert.equal(guarded.current().conversationSelectionSeq.current,0);assert.deepEqual(guarded.calls,[]);assert.equal(confirmations,2);
 });
 
 test('Agent owner callbacks require the current nonce and cannot escape a pending fresh selection',async()=>{

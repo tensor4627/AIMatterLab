@@ -78,6 +78,13 @@ test('late queue fresh acknowledgement cannot prefill a subsequently selected ch
 test('failed queue fresh selection rolls back main before restoring the original chat without queue seed',async()=>{
  const f=queueFreshFixture(()=>Promise.reject(Error('fresh bind failed')));await f.h.flush();const a=agentHarness({storage:f.storage,props:f.props(),override:(m,d,standard)=>m==='conversation.remember'?f.original:standard(m,d)});await a.flush();await (await f.open())('Never overwrite original');await f.h.flush();assert.equal(f.props().sessionSelection.conversation.id,f.original.id);assert.equal(f.props().sessionSelection.initialPrompt,undefined);a.render(f.props());await a.flush();assert.equal(a.textarea().props.value,'Preserve original unsent OPES draft');assert.equal(f.h.calls.filter(c=>c.method==='conversation.select'&&c.data.id===f.original.id).length,2);a.unmount();f.h.unmount();
 });
-test('failed unbound queue fresh can explicitly Retry seed after fresh ack, and busy guard creates nothing',async()=>{
- let attempts=0;const h=appWorkerHarness({override:(m,d,standard)=>m==='conversation.select'&&d.new?++attempts===1?Promise.reject(Error('fresh failed')):{fresh:true}:standard(m,d)});await h.flush();const props=()=>h.find(n=>n.type==='./Agent').props;props().onOpenCluster();await h.flush();const queue=h.find(n=>n.type==='./ClusterPage').props.onQueueTest;props().onBusyChange(true);await h.flush();await h.find(n=>n.type==='./ClusterPage').props.onQueueTest('busy ignored');await h.flush();assert.equal(attempts,0);props().onBusyChange(false);await h.flush();await h.find(n=>n.type==='./ClusterPage').props.onQueueTest('Retry queue test');await h.flush();assert.equal(props().sessionSelection.pending,true);assert.equal(props().sessionSelection.initialPrompt,undefined);await props().onNewConversation();await h.flush();assert.equal(props().planningMode,true);assert.equal(props().sessionSelection.initialPrompt,'Retry queue test');assert.equal(attempts,2);assert(!h.calls.some(c=>c.method==='task.create'||c.method==='task.execute'));h.unmount();
+test('an ongoing reply permits a fresh queue chat and a failed first selection can be retried explicitly',async()=>{
+ let attempts=0;const h=appWorkerHarness({override:(m,d,standard)=>m==='conversation.select'&&d.new?++attempts===1?Promise.reject(Error('fresh failed')):{fresh:true}:standard(m,d)});
+ try{
+  await h.flush();const props=()=>h.find(n=>n.type==='./Agent').props;props().onOpenCluster();await h.flush();
+  props().onBusyChange(true);await h.flush();await h.find(n=>n.type==='./ClusterPage').props.onQueueTest('Retry queue test');await h.flush();
+  assert.equal(attempts,1);assert.equal(props().sessionSelection.pending,true);assert.equal(props().sessionSelection.initialPrompt,undefined);
+  await props().onNewConversation();await h.flush();assert.equal(props().planningMode,true);assert.equal(props().sessionSelection.initialPrompt,'Retry queue test');
+  assert.equal(attempts,2);assert(!h.calls.some(c=>c.method==='task.create'||c.method==='task.execute'));
+ }finally{h.unmount();}
 });

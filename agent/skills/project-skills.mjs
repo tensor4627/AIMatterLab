@@ -4,6 +4,7 @@ import {createHash, randomUUID} from 'node:crypto';
 
 const MAX_BYTES = 16384;
 const NAME = /^[a-z][a-z0-9-]{0,63}$/;
+export const COMPUTE_ALIASES_SKILL = 'compute-resource-aliases';
 const digest = value => createHash('sha256').update(value).digest('hex');
 const descriptions = {
  project_skill_catalog: 'List skills and return the absolute directory of the selected library. Use scope=user for the local workspace skill library across chats. Use scope=current for this project or private chat, including its project AGENTS.md.',
@@ -186,6 +187,9 @@ export class ProjectSkills {
    const temporary = path.join(directory, '.' + randomUUID() + '.tmp');
    try {
     fs.writeFileSync(temporary, args.body, {flag: 'wx', mode: 0o600});
+    checkCurrent();
+    const actual = fs.existsSync(file) ? this.read(file).sha256 : null;
+    if (actual !== previous) throw Error('Skill revision changed; read before saving');
     fs.renameSync(temporary, file);
    } finally {
     if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
@@ -201,6 +205,23 @@ export class ProjectSkills {
   } finally {
    if (fs.existsSync(staging)) fs.rmSync(staging, {recursive: true});
   }
+ }
+
+ // Main-only owner of the confirmed aliases document. A background conversation
+ // supplies its authenticated scope rather than borrowing the selected page.
+ confirmedComputeAliases({checkCurrent, body, expectedSha256}) {
+  const check = () => { if (checkCurrent?.() !== true) throw Error('Selected skill workspace changed'); };
+  check();
+  const target=path.join(this.root,'user'), name=COMPUTE_ALIASES_SKILL;
+  const directory=path.join(target,name), file=path.join(directory,'SKILL.md');
+  if (body === undefined && !fs.existsSync(target)) return null;
+  ensureDirectory(target);
+  if (fs.existsSync(directory)) assertDirectory(directory);
+  if (body !== undefined) this.write(target,directory,file,{name,body,expected_sha256:expectedSha256},check);
+  const result=fs.existsSync(file)?this.read(file):null;
+  if (result) metadata(result.body,name);
+  check();
+  return result;
  }
 
  prepareRoot(directory) {
@@ -271,6 +292,7 @@ export class ProjectSkills {
   const file = path.join(directory, 'SKILL.md');
   let instructionsWarning;
   if (tool === 'write_project_skill') {
+   if (owner.kind === 'user' && args.name === COMPUTE_ALIASES_SKILL) throw Error('Compute aliases require the human resource choice');
    this.write(target, directory, file, args,()=>this.owner(scope));
    if(scope.projectId){
     try{

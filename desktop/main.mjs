@@ -1,5 +1,8 @@
 import {PRODUCT_NAME} from '../contracts/product.mjs';
 import {consoleMessage} from './platform/verification/console-message.mjs';
+import {installManagedTray} from './platform/managed-tray.mjs';
+import {createConversationActivity} from '../backend/main/compute/conversation-activity.mjs';
+import {managedProjectAccess} from '../backend/main/compute/managed-project-access.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
 import {createWorkspaceUpdater,launchWorkspaceUpdate} from './platform/workspace-updater.mjs';
 import {createCliRuntimeManager,migrateBundledCliPaths} from './platform/cli-runtimes.mjs';
@@ -22,7 +25,7 @@ import {computeRuntime} from './platform/compute-runtime.mjs';
 import {createComputeProfiles} from '../backend/main/compute/compute-profiles.mjs';
 import {createSharedTerminal} from "../backend/main/compute/shared-terminal.mjs";
 import {createSshService} from '../backend/main/compute/ssh-service.mjs';
-import {TerminalMcp} from "../agent/tools/terminal-mcp.mjs";
+import {TerminalMcp,workerToolBridge} from "../agent/tools/terminal-mcp.mjs";
 
 import {selectConversation} from "../agent/sessions/conversation-selection.mjs";
 import {createWindowsSaveAs} from "./platform/windows-save-as.mjs";
@@ -53,7 +56,7 @@ import {consumerReviewDialog} from "./platform/dialogs/consumer-review-dialog.mj
 import {resumeConversationContext} from "../agent/sessions/conversation-recovery.mjs";
 import {definitionReply} from '../agent/tools/definition-scope.mjs';
 import {scientificToolReadiness} from "../agent/tools/scientific-tool-readiness.mjs";
-import {createAgentWorkflowContext} from '../agent/sessions/workflow-context.mjs';
+import {createParallelAgentWorkflowContext} from '../agent/sessions/workflow-context.mjs';
 
 import {createPrivateCvAccess,composeToolGuards} from "../agent/tools/private-cv-access.mjs";
 import {createComputeResourceInspection} from '../agent/tools/compute-resource-inspection.mjs';
@@ -62,7 +65,7 @@ import {createServiceHandoff} from '../agent/sessions/service-handoff.mjs';
 import {createTaskCustomCv} from "../backend/main/workspace/task-custom-cv.mjs";
 import {currentPairTool,readCurrentPair} from "../agent/tools/current-pair-tool.mjs";
 import {importTaskAsset} from "../backend/main/workspace/task-asset-import.mjs";
-import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, safeStorage, net, screen, nativeImage } from 'electron';
 
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -93,7 +96,9 @@ import { CodexBridge } from '../agent/providers/codex.mjs';
 import {codexRuntime} from './platform/codex-runtime.mjs';
 import {createCodexSubscriptionRuntime} from './platform/codex-subscription-runtime.mjs';
 
-import {AgentHub,loginUrl} from '../agent/providers/agent-hub.mjs';
+import {ConversationAgentHub} from '../agent/providers/conversation-agent-hub.mjs';
+import {createManagedWorkbench} from './platform/managed-workbench.mjs';
+import {loginUrl} from '../agent/providers/agent-hub.mjs';
 import {CredentialVault} from './platform/credential-vault.mjs';
 import {registerModelProfileRoutes} from './platform/model-profile-routes.mjs';
 import {providerId} from '../agent/providers/contracts.mjs';
@@ -122,7 +127,8 @@ let resolveSkillGuidance=async()=>legacyGuidanceFacts();
 const guidanceLeases=new WeakMap();let guidanceEpoch=0;
 function skillGuidanceLease(provider){
  const terminal=agents?.bridgeWorkers?.get(provider)?.transport==='desktop-terminal';
- const raw=(terminal?terminalMcp?.scopes:worker.providerScopes)?.scopes?.get(provider);if(!raw)return undefined;
+ const leases=terminal?terminalMcp?.scopes:worker.providerScopes;
+ const raw=leases?.get(provider,workflowContext?.sessionId())||leases?.scopes?.get(provider);if(!raw)return undefined;
  if(!guidanceLeases.has(raw))guidanceLeases.set(raw,{epoch:++guidanceEpoch,get context(){return raw.context;}});return guidanceLeases.get(raw);
 }
 function skillGuidanceScope(provider){const owner=workflowContext?.current(),revision=workflowContext?.revision(),stamp=JSON.stringify(owner),lease=skillGuidanceLease(provider);return {...owner,provider,epoch:lease?.epoch,checkCurrent:()=>revision===workflowContext?.revision()&&stamp===JSON.stringify(workflowContext?.current())&&skillGuidanceLease(provider)===lease};}
@@ -141,16 +147,19 @@ else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',im
 else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,portableDir:process.env.PORTABLE_EXECUTABLE_DIR,execPath:process.execPath});fs.mkdirSync(profile,{recursive:true});app.setPath('userData',profile);}
 if(workspace)app.setPath('sessionData',workspaceSessionDirectory(workspace,app.getPath('userData')));
 let window, catalog, settings, setupGuide, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
-let shuttingDown=false,desktopShutdown,agentConnectionSerial=0;
+let managedWorkbench,managedResources,managedSchedules,resourceActivity,projectTerminalAccess,workbenchTray;
+let shuttingDown=false,desktopShutdown;
+const agentConnectAttempts=new Map();
 const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&process.arch==='x64'?workspace:null,currentVersion:app.getVersion(),
   fetchApi:(url,options)=>net.fetch(url,options),install:launchWorkspaceUpdate,quit:()=>app.quit(),
   publish:params=>emit('studio:event',{method:'studio/update',params})});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
-const activeAuthoringTasks=new Map();
+let activeAuthoringTasks;
 const codexRoot=path.join(app.getPath('userData'),'provider-contexts','codex');
-const codex = new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host:createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime})}), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
+const createCodex=()=>new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host:createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime})});
+const codex=createCodex(), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
 bindBundledWorkerRuntimeId(worker,workerSource);
-const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService});
+const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService,managed:()=>managedResources,taskSource:scope=>taskWorkerSource(taskRecords?.bound(scope.provider,scope.threadId))});
 const previousSkillRoot=path.join(app.getPath('userData'),'project-skills');
 const userCacheBase=!verifying&&!process.env.STUDIO_PROFILE_DIR&&process.env.LOCALAPPDATA
  ? path.join(process.env.LOCALAPPDATA,'AIMatterLab') : app.getPath('userData');
@@ -168,13 +177,6 @@ function emit(channel,data) {
  }
  window.webContents.send(channel,data);
 }
-codex.on('event', event => {
-  if(event.method==='studio/codexDisconnected'&&agents?.isContextTransition?.('codex'))return;
-  const tagged={...event,provider:'codex'};taskRecords?.event(tagged);emit('studio:event',tagged);
-  if(event.method==='thread/started' && event.params?.thread&&!taskRecords?.deleted('codex',event.params.thread.id))
-    catalog.put('thread',event.params.thread.id,event.params.thread);
-});
-codex.on('diagnostic', data => emit('studio:event',{ method:'studio/diagnostic',params:{text:data} }));
 function trusted(event) {
   if(!window || event.sender.id!==window.webContents.id || event.senderFrame?.parent ||
       event.senderFrame?.url!==window.webContents.getURL()) throw new Error('Untrusted IPC sender');
@@ -202,6 +204,7 @@ performanceTimeline.mark('desktop-initialize');
 const profileDirectory=app.getPath('userData'),catalogRoot=path.join(profileDirectory,'studio');
 const existingProfile=fs.existsSync(path.join(catalogRoot,'catalog.sqlite'));
 catalog = new Catalog(catalogRoot);
+resourceActivity=createConversationActivity({catalog});projectTerminalAccess=managedProjectAccess({catalog});
 const explicitProfile=Boolean(process.env.STUDIO_PROFILE_DIR)||verifying;
 setupGuide=createSetupGuide({catalog,existingProfile,directory:explicitProfile?profileDirectory:path.dirname(profileDirectory),directoryKind:explicitProfile?'profile':'workspace',openDirectory:directory=>shell.openPath(directory)});
 const savedSettings=catalog.get('settings','main');
@@ -244,7 +247,8 @@ if(projectSkills.overlapsBundle(projectSkills.root)){
   projectSkills.root=directory;
  }catch{console.warn('Existing skill cache retained. Choose a directory separate from built-in skills in Settings.');}
 }
-agents=new AgentHub({instructions:workspaceAgentInstructions(workspace,projectSkills.personalDirectory),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),codex,root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:provider=>resourceRouting.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method)=>resourceRouting.scope(provider,method)});
+agents=new ConversationAgentHub({authCodex:codex,createCodex,initialProvider:settings.agentProvider||'codex',
+ runSession:(identity,run)=>workflowContext.runInSession(identity,run),dropSession:id=>{resourceRouting.releaseSession(id);workflowContext?.dropSession(id);},instructions:workspaceAgentInstructions(workspace,projectSkills.personalDirectory),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,worker:(provider,sessionId,context)=>resourceRouting.providerConnection(provider,sessionId,context),releaseWorker:(provider,sessionId)=>{worker.revokeProvider(provider,sessionId);terminalMcp?.revokeProvider(provider,sessionId);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method,context,sessionId)=>resourceRouting.scope(provider,method,context,sessionId)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
 scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compatible'].includes(provider)||agents.bridge(provider)?.selection?.profile.sharePublicGuides===true,map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
@@ -276,7 +280,8 @@ handle('materials.key',({apiKey,remove=false})=>remove?materials.clear():materia
 handle('materials.search',({query})=>materials.search(query));
 handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
-workflowContext=createAgentWorkflowContext({records:taskRecords,activeTasks:activeAuthoringTasks,selectedProvider:()=>agents.active});
+workflowContext=createParallelAgentWorkflowContext({records:taskRecords,selectedProvider:()=>agents.foregroundProvider});
+activeAuthoringTasks=workflowContext.activeTasks;
 toolPackages=createToolPackageRegistry({catalog,storeRoot:path.join(app.getPath('userData'),'tool-packages')});
 aimlabSources=createAimlabToolRegistry({catalog});
 registerAimlabToolSourceRoutes({handle,sources:aimlabSources,chooseSourceDirectory:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openDirectory']});return value.canceled?null:value.filePaths[0];}});
@@ -305,13 +310,14 @@ const roadmapExecutions=createRoadmapController({worker,catalog,groups:toolGroup
 for(const action of ['preview','confirm','list','snapshot'])handle('task.roadmap.'+action,(data,event)=>roadmapExecutions[action](data,event));
 const lastCompute=catalog.get('worker-binding','last-explicit');
 const computeProfiles=createComputeProfiles({catalog,guideRoot:path.join(app.getPath('userData'),'ssh-service-environments'),initialWsl:lastCompute?.kind!=='ssh'&&validExplicitBinding(lastCompute,settings)?{distribution:lastCompute.distribution,root:lastCompute.root,port:lastCompute.port,intent:lastCompute.intent||'standard'}:undefined});
+for(const profile of computeProfiles.list())resourceActivity.style(profile);
 const serviceRegistration=createSshServiceRegistration({catalog,profiles:computeProfiles,legacyBinding:()=>catalog.get('worker-binding','last-explicit')});
 handle('compute.profiles.list',value=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length)throw Error('Invalid connection listing');return {profiles:computeProfiles.list(),serviceRegistrations:serviceRegistration.list().map(({profileId,profileVersion,status})=>({profileId,profileVersion,status})),inUseProfileIds:sharedTerminal?.inUseProfileIds()||[],...worker.connection&&!worker.connecting&&!worker.restoring&&worker.identity&&worker.identity.kind!=='ssh'&&worker.connectionTarget?{activeLocal:{distribution:worker.identity.distribution,root:worker.identity.root,requestedRoot:worker.connectionTarget.requestedRoot,port:worker.connectionTarget.port}}:{},defaults:{distribution:settings.distribution,root:settings.workerRoot,port:settings.workerPort,ssh_client:process.platform==='win32'?path.join(process.env.SystemRoot||'C:\\Windows','System32','OpenSSH','ssh.exe'):'/usr/bin/ssh'}};});
 handle('compute.profiles.read',value=>computeProfiles.read(value));
 function selectedSshBinding(profile){const owner=workflowContext.current(),task=owner?.taskId?taskRecords.read(owner.taskId):null;return task?taskWorkerSource(task)?.binding:owner?.taskId?null:globalSshBindingForProfile(profile,catalog.get('worker-binding','last-explicit'));}
-handle('compute.profiles.save',async value=>{const previous=value?.id?computeProfiles.read({id:value.id}):null,preference=previous?catalog.get('ssh-runtime-preference',previous.id):null,binding=selectedSshBinding(previous);const saved=await saveComputeProfileWithEnvironment({profiles:computeProfiles,terminal:sharedTerminal,resource:computeResource,sshService,assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();}},value);if(previous&&saved.version!==previous.version){const carried=carrySshRuntimePreference(previous,saved,binding,preference);if(carried)catalog.put('ssh-runtime-preference',saved.id,carried);else catalog.remove('ssh-runtime-preference',saved.id);}emit('studio:event',{method:'studio/computeResourceChanged'});return saved;});
+handle('compute.profiles.save',async value=>{const previous=value?.id?computeProfiles.read({id:value.id}):null,preference=previous?catalog.get('ssh-runtime-preference',previous.id):null,binding=selectedSshBinding(previous);const saved=await saveComputeProfileWithEnvironment({profiles:computeProfiles,terminal:sharedTerminal,resource:computeResource,sshService,assertIdle:()=>{if(previous&&sharedTerminal.inUseProfileIds().includes(previous.id))assertLegacyWorkerIdle();}},value);if(previous&&saved.version!==previous.version){const carried=carrySshRuntimePreference(previous,saved,binding,preference);if(carried)catalog.put('ssh-runtime-preference',saved.id,carried);else catalog.remove('ssh-runtime-preference',saved.id);}resourceActivity.style(saved);emit('studio:event',{method:'studio/computeResourceChanged'});return saved;});
 handle('compute.profiles.remove',value=>{
- assertIdleAgent();agents.assertContextIdle();
+ if(managedResources?.snapshot().some(row=>row.profileId===value?.id))throw Error('compute_profile_in_use');
  if(sharedTerminal?.inUseProfileIds().includes(value?.id))throw Error('compute_profile_in_use');
  return computeProfiles.remove(value);
 });
@@ -328,7 +334,7 @@ computeResource=createComputeResourceBinding({catalog,profiles:computeProfiles,t
 sshService=createSshService({worker,connections:sharedTerminal.connections,profiles:computeProfiles,resource:computeResource,registration:serviceRegistration,source:workerSource,transportSource:sshTransportSource,preferredRuntimeId:profile=>preferredSshRuntime(profile,selectedSshBinding(profile),catalog.get('ssh-runtime-preference',profile.id)),current:()=>workflowContext.current(),assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},publish:()=>{emit('studio:event',{method:'studio/sshServiceChanged',params:sshService?.peek()||{status:'disconnected'}});},onRuntimeUpdated:update=>updateDraftWorker(taskRecords,worker,update),remember:(identity,health)=>{catalog.put('worker-binding','last-explicit',{...identity,port:health.port,health,checkedAt:Date.now(),sourceIdentity:{runtimeId:health.runtimeId}});}});
 conversationTerminals=createConversationTerminals({terminal:sharedTerminal,service:sshService,registration:serviceRegistration,
  resource:computeResource,current:()=>workflowContext.current(),conversationName:(provider,threadId)=>taskRecords.conversation(provider,threadId)?.name,idleMinutes:()=>settings.terminalIdleMinutes,
- busy:scope=>agents.bridge(scope.provider)?.activeTurns?.has(scope.threadId)||agents.pendingTurnDispatches.has(agents.contextKey(scope.provider,scope.threadId)),
+ busy:scope=>agents.isBusy(scope.provider,scope.threadId),
  serviceBusy:()=>agents.contextBusy(),
  publish:scope=>{
   emit('studio:event',{method:'studio/conversationTerminalChanged'});
@@ -336,7 +342,10 @@ conversationTerminals=createConversationTerminals({terminal:sharedTerminal,servi
    if(sshService.hasCurrentGrant(scope.provider,scope))emit('studio:event',{method:'studio/toolsStatus',provider:scope.provider,params});
   }).catch(()=>{});
  }});
-const terminalIdleTimer=setInterval(()=>void conversationTerminals.sweep(),10000);terminalIdleTimer.unref();
+const terminalIdleTimer=setInterval(()=>{
+ void conversationTerminals.sweep();
+ void managedResources?.sweep({idleMs:(settings.terminalIdleMinutes||60)*60000}).catch(()=>{});
+},10000);terminalIdleTimer.unref();
 const authoringAuthorization={
  begin(task){
   const service=sshService.prepareAuthoringGrant(task);
@@ -352,6 +361,7 @@ const authoringAuthorization={
  },
 };
 worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
+ if(scope?.sessionId)return !!resourceRouting.scopedWorkerConnection(scope);
  const selected=computeResource.peek(),terminalTool=['list_shared_terminals','read_shared_terminal','write_shared_terminal'].includes(toolName);
  if(selected?.kind==='ssh-connection'){
   if(scope?.provider!==provider||scope.checkCurrent?.()!==true)return false;
@@ -365,14 +375,14 @@ worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  if(selected?.kind==='ssh-terminal'||worker.identity?.kind==='ssh')return selected?.kind==='ssh-terminal'&&terminalTool&&scope?.provider===provider&&sharedTerminal.hasCurrentGrant(provider,selected.sessionId)===true;
  return true;
 });
-registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,onClosing:connectionId=>{conversationTerminals.releaseConnection(connectionId);sshService.connectionLost(connectionId);},onClosed:connectionId=>sshService.connectionClosed(connectionId),onUnknown:connectionId=>sshService.connectionLost(connectionId),onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
+registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,onClosing:connectionId=>{managedResources?.revokeConnection({connectionId});conversationTerminals.releaseConnection(connectionId);sshService.connectionLost(connectionId);},onClosed:connectionId=>sshService.connectionClosed(connectionId),onUnknown:connectionId=>sshService.connectionLost(connectionId),onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
 handle('compute.sshService.registration',value=>{
  const registration=serviceRegistration.read(value);
  return {...registration,localProjectSkillsRoot:projectSkills.root};
 });
 handle('compute.sshService.check',value=>sshService.check(value));
 handle('compute.sshService.connect',async value=>{
- assertIdleAgent();agents.assertContextIdle();const result=await sshService.connect(value);
+ assertIdleAgent();agents.assertContextIdle();const result=await sshService.connect(value);if(result.workflowReady)await managedResources?.refreshService({connectionId:value.connectionId});
  if(result.status==='connected')emit('studio:event',{method:'studio/workerConnected',params:{sourceKind:'ssh'}});
  emit('studio:event',{method:'studio/computeResourceChanged',params:await computeResource.status({})});return result;
 });
@@ -426,7 +436,14 @@ localReview=registerCalculationReview({handle,records:taskRecords,worker,current
 privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:activeAuthoringTasks});
 worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
 worker.setProjectSkills(projectSkills);
-terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,scientificSkills,guard:()=>worker.authoringGuard});
+const runToolScope=(scope,run)=>agents.runForScope(scope,()=>workflowContext.runForScope(scope,run));
+worker.setToolScope(runToolScope);
+managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,registration:serviceRegistration,terminal:sharedTerminal,projectSkills,resourceActivity,
+ projectAccess:projectTerminalAccess,records:taskRecords,workflow:workflowContext,agents,privateAccess,workerSource,sshTransportSource,handle,
+ notify:()=>emit('studio:event',{method:'studio/managedActivity'}),dispatch:(...args)=>agentRequests(...args)});
+managedResources=managedWorkbench.resources;managedSchedules=managedWorkbench.schedules;
+terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,scientificSkills,guard:()=>worker.authoringGuard,desktopTools:managedWorkbench.desktopTools,
+ workerTools:workerToolBridge({connection:scope=>resourceRouting.scopedWorkerConnection(scope)}),runScope:runToolScope,captureScope:scope=>agents.captureToolScope(scope)});
 await terminalMcp.start();
 customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.active||settings.agentProvider||'codex',getActiveTaskId:provider=>activeAuthoringTasks.get(provider),assertProvider:context=>{workflowContext.assertScope(context);return providerId(context.provider);},assertHuman:event=>{trusted(event);return true;},access:()=>true,
  validateRuntimeReceipt:async(runtime,context)=>{const current=await worker.request('POST','/api/runtime-guide',{environment_id:context.args.environment_id,engine:'pygas.build'});return current.status==='observed'&&runtime.status==='observed'&&current.receipt===runtime.receipt_sha256;},
@@ -438,7 +455,8 @@ for(const action of ['read','saveSpec','approveFormula','approveCode','sharing',
 handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
 agents.on('event',event=>{
  const threadId=event.params?.threadId;
- if(threadId)conversationTerminals.touch(event.provider,threadId);
+ if(threadId){conversationTerminals.touch(event.provider,threadId);managedResources?.touch(event.provider,threadId);}
+ if(event.method==='thread/started'&&event.provider==='codex'&&event.params?.thread&&!taskRecords.deleted('codex',event.params.thread.id))catalog.put('thread',event.params.thread.id,event.params.thread);
  taskRecords.event(event);emit('studio:event',event);
  if(threadId&&event.method==='turn/completed')setImmediate(()=>conversationTerminals.finishDeferredService(event.provider,threadId));
 });
@@ -447,12 +465,13 @@ registerWorkspaceTaskRoutes({
  getSettings:()=>settings,getLocalReview:()=>localReview,emit,
  chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},
 });
-handle('conversation.delete',({id})=>{assertIdleAgent();const result=taskRecords.remove(id);conversationTerminals.forget(result.provider,result.threadId);workflowContext.clear(result.provider);agents.disconnect(result.provider);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
+handle('conversation.delete',({id})=>{const prior=catalog.get('conversation',id);if(prior&&agents.isBusy(prior.provider,prior.threadId))throw Error('Stop this conversation before deleting it');
+ const result=taskRecords.remove(id);conversationTerminals.forget(result.provider,result.threadId);managedResources?.forget?.(result.provider,result.threadId);resourceActivity.forget(result.provider,result.threadId);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));
 handle('conversation.groups',()=>taskRecords.groups());
 handle('conversation.createGroup',value=>taskRecords.createGroup(value));
-handle('conversation.deleteGroup',value=>{assertIdleAgent();return taskRecords.deleteGroup(value);});
+handle('conversation.deleteGroup',value=>taskRecords.deleteGroup(value));
 handle('conversation.organize',value=>taskRecords.organize(value));
 handle('conversation.rename',value=>{if(!value||Object.keys(value).sort().join(',')!=='id,name')throw Error('Invalid typed conversation name');return taskRecords.rename(value);});
 handle('conversation.select',async value=>{const result=await selectConversation({catalog,records:taskRecords,workflowContext,agents,conversationTerminals,assertIdle:assertIdleAgent},value);emit('studio:event',{method:'studio/conversationTerminalChanged'});return result;});
@@ -498,7 +517,7 @@ handle('settings',data=>{
  const next=normalizeSettings(settings,data);
  next.userCacheDirectory=projectSkills.prepareRoot(next.userCacheDirectory||defaultUserCacheDirectory);
  if(projectSkills.root!==next.userCacheDirectory)rememberSkillCache();
- settings=catalog.put('settings','main',next);
+ settings=catalog.put('settings','main',next);workbenchTray?.menu();
  if(projectSkills.root!==settings.userCacheDirectory){
   projectSkills.root=settings.userCacheDirectory;
   agents.updateInstructions(workspaceAgentInstructions(workspace,projectSkills.personalDirectory));
@@ -509,14 +528,18 @@ function scientificSources(){return discoverSources({cwd:settings.cwd,applicatio
 async function bindSources(current=()=>{}){if(worker.identity?.kind==='ssh'){current();return worker.request('GET','/api/source-projects');}const sources=scientificSources();for(const source of sources){current();await worker.request('POST','/api/source-projects',{...source,root:linuxPath(source.root)});current();catalog.put('source-binding',source.id,source);}return sources;}
 handle('sources.list',()=>scientificSources());
 handle('sources.diagnose',async()=>{const sources=scientificSources();return {sources,tools:toolInventory(sources),worker:worker.connection?await worker.request('GET','/api/tools/status'):null};});
-function assertIdleAgent(){if([codex,...agents.bridges.values()].some(b=>b.activeTurns?.size))throw Error('请先停止当前回复，再调整连接或上下文设置');}
+function assertIdleAgent(){agents.assertContextIdle();}
+function assertLegacyWorkerIdle(){
+ if(agents.turnStates().some(turn=>resourceRouting.usesForegroundWorker(agents.sessionIdentity(turn.provider,turn.threadId)?.id)))
+  throw Error('An active conversation is still using this workbench worker');
+}
 const configureCompute=createComputeOnboarding({worker,publish:event=>emit('studio:event',event)});
 function discoverCompute(){if(settings.autoDiscoverCompute!==false)return configureCompute().catch(()=>null);return Promise.resolve(null);}
 handle('compute.setup',async data=>configureCompute(data||{}));
-const computeConnection=createComputeConnection({worker,profiles:computeProfiles,records:taskRecords,catalog,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),source:()=>({path:workerSource,id:worker.bundledRuntimeId}),beforeSwitch:()=>{assertIdleAgent();agents.close();},bindFreshSources:bindSources,saveSettings:target=>{settings=catalog.put('settings','main',{...settings,distribution:target.distribution,workerRoot:target.workerRoot,workerPort:target.workerPort});},remember:(target,evidence)=>{const value={version:1,distribution:worker.identity?.distribution,root:worker.identity?.root,port:target.workerPort,intent:evidence.intent||'standard',settingsSignature:workerSettingsSignature(settings),checkedAt:evidence.checkedAt,...evidence.serviceVersion==='current'?{sourceIdentity:{runtimeId:worker.bundledRuntimeId}}:{}};if(!validExplicitBinding(value,settings)||worker.connection?.health?.root!==value.root||worker.connectionTarget?.port!==value.port)throw Error('Verified connection receipt changed');catalog.put('worker-binding','last-explicit',value);},onConnected:()=>emit('studio:event',{method:'studio/workerConnected',params:{}})});
+const computeConnection=createComputeConnection({worker,profiles:computeProfiles,records:taskRecords,catalog,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),source:()=>({path:workerSource,id:worker.bundledRuntimeId}),beforeSwitch:assertLegacyWorkerIdle,bindFreshSources:bindSources,saveSettings:target=>{settings=catalog.put('settings','main',{...settings,distribution:target.distribution,workerRoot:target.workerRoot,workerPort:target.workerPort});},remember:(target,evidence)=>{const value={version:1,distribution:worker.identity?.distribution,root:worker.identity?.root,port:target.workerPort,intent:evidence.intent||'standard',settingsSignature:workerSettingsSignature(settings),checkedAt:evidence.checkedAt,...evidence.serviceVersion==='current'?{sourceIdentity:{runtimeId:worker.bundledRuntimeId}}:{}};if(!validExplicitBinding(value,settings)||worker.connection?.health?.root!==value.root||worker.connectionTarget?.port!==value.port)throw Error('Verified connection receipt changed');catalog.put('worker-binding','last-explicit',value);},onConnected:view=>{emit('studio:event',{method:'studio/workerConnected',params:{}});void managedWorkbench.publishLocal(worker,view?.profileId).catch(()=>emit('studio:event',{method:'studio/managedActivity'}));}});
 handle('compute.connection.plan',value=>computeConnection.plan(value));
 handle('compute.connection.status',value=>computeConnection.status(value));
-handle('compute.connection.connect',async value=>{assertIdleAgent();if(computeResource.peek())throw Error('请先在连接设置明确选择本地计算资源；后台 SSH 通道会保留。');await sshService.resourceChanged();return computeConnection.connect(value);});
+handle('compute.connection.connect',async value=>{assertLegacyWorkerIdle();if(computeResource.peek())throw Error('请先在连接设置明确选择本地计算资源；后台 SSH 通道会保留。');await sshService.resourceChanged();return computeConnection.connect(value);});
 handle('compute.connection.cancel',value=>computeConnection.cancel(value));
 const sshConnection=createSshConnection({worker,selection:()=>workflowContext.current(),revision:()=>workflowContext.revision(),sourceScope:request=>sshTaskSource(taskRecords,()=>workflowContext.current(),request),assertSource:request=>assertSshSource(sshTaskSource(taskRecords,()=>workflowContext.current(),request),worker),validateRunReceipt:(request,receipt)=>{const proof=sshTaskSource(taskRecords,()=>workflowContext.current(),request);assertSshSource(proof,worker);if(proof?.preparedProject&&proof.preparedProject!==receipt.projectId)throw Error('original_run_changed');},beforeStart:assertIdleAgent,observeWorker:()=>readWorkerStatus(worker,()=>settings)});
 handle('ssh.auth.plan',(value,event)=>sshConnection.plan(value,event));
@@ -530,7 +553,7 @@ handle('ssh.tunnel.plan',(value,event)=>sshConnection.tunnelPlan(value,event));
 handle('ssh.tunnel.start',(value,event)=>sshConnection.tunnelStart(value,event));
 handle('ssh.tunnel.status',(value,event)=>sshConnection.tunnelStatus(value,event));
 handle('ssh.tunnel.close',(value,event)=>sshConnection.tunnelClose(value,event));
-handle('worker.connect',async()=>{assertIdleAgent();if(computeResource.peek())throw Error('请先在连接设置明确选择本地计算资源；后台 SSH 通道会保留。');await sshService.resourceChanged();agents.close();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
+handle('worker.connect',async()=>{assertLegacyWorkerIdle();if(computeResource.peek())throw Error('请先在连接设置明确选择本地计算资源；后台 SSH 通道会保留。');await sshService.resourceChanged();const target={...settings},result=await worker.connect(target,workerSource),receipt=explicitWorkerReceipt(worker,target);await bindSources();await rememberExplicitWorker({catalog,worker,settings:()=>settings},receipt);discoverCompute();await managedWorkbench.publishLocal(worker);emit('studio:event',{method:'studio/workerConnected',params:{}});return result;});
 handle('worker.status',()=>readWorkerStatus(worker,()=>settings));
 handle('worker.restore',value=>restoreTaskWorker({records:taskRecords,catalog,worker,settings:()=>settings,selection:()=>workflowContext.current(),selectionEpoch:()=>workflowContext.revision(),selectedResource:()=>computeResource.peek()},value));
 handle('task.authoring.bindWorker',value=>{assertIdleAgent();return bindLegacyAuthoringWorker({records:taskRecords,worker,selection:()=>workflowContext.current(),settings:()=>settings},value).then(taskForRecordIndex);});
@@ -541,6 +564,8 @@ handle('worker.request',async({method,target,data}) => {
   if(method==='POST'&&['/api/clusters','/api/cluster/test'].includes(route)&&requiresCurrentSshWorker(route==='/api/cluster/test'?data?.connection:data))await requireCurrentSshWorker(worker,()=>readWorkerStatus(worker,()=>settings));
   if(method==='POST'&&['/api/cluster/probe','/api/cluster/browse'].includes(route)&&data?.cluster_id){const connection=worker.connection,epoch=worker.connectionEpoch,observed=await readWorkerStatus(worker,()=>settings);if(observed.status!=='connected'||observed.serviceVersion!=='current'){const profile=await worker.request('POST','/api/cluster/profile',{cluster_id:data.cluster_id});if(worker.connection!==connection||worker.connectionEpoch!==epoch||requiresCurrentSshWorker(profile))throw Error('needs_worker_update');}}
   const result=await worker.request(method,target,data);
+  if(method==='POST'&&['/api/cluster/submit','/api/runs/submit','/api/run/submit','/api/cluster/cancel','/api/run/cancel'].includes(target))
+    void readWorkerStatus(worker,()=>settings).then(status=>status.sourceId&&managedSchedules?.refresh(status.sourceId)).catch(()=>{});
   if(method==='GET' && ['/api/projects','/api/environments'].includes(target))
     for(const item of result) catalog.put(target.split('/').at(-1),item.id,item);
   return result;
@@ -554,38 +579,43 @@ handle('codex.configure',async({preferences={},threadId,model}) => {
 });
 handle('codex.rpc',value=>agentRpc({...value,provider:'codex'}));
 registerWorkflowPlanRoutes({handle,catalog});
-async function scientificTools(provider){
- const selected=await resourceRouting.readiness(provider);if(selected)return selected;
+async function scientificTools(provider,threadId){
+ const available=state=>managedResources?{...state,managedCompute:true}:state;
+ const selected=await resourceRouting.readiness(provider,threadId);if(selected)return available(selected);
  const terminalReady=()=>sharedTerminal?.hasCurrentGrant(provider)?{status:'ready',scope:'terminal-only',scientificStatus:'blocked',count:3,transport:'desktop-terminal',message:'共享终端可用',checkedAt:Date.now()}:null;
- if(!worker.providerConnection(provider)&&terminalReady())return terminalReady();
- const result=await scientificToolReadiness({worker,codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:()=>agents.active},provider);
- return result.status==='blocked'?terminalReady()||result:result;
+ if(!worker.providerConnection(provider)&&terminalReady())return available(terminalReady());
+ const result=await scientificToolReadiness({worker,codex:agents.bridge('codex')||codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:()=>agents.active},provider);
+ return available(result.status==='blocked'?terminalReady()||result:result);
 }
-handle('agent.connect',async({provider,repairTools=false})=>{
- providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');const connectionTicket=++agentConnectionSerial;
- const resource=resourceRouting.capture();
- if(repairTools&&['ssh-terminal','ssh-connection'].includes(resource.selection?.kind)){assertIdleAgent();agents.assertContextIdle();agents.close();}
+handle('agent.connect',async({provider,repairTools=false,threadId})=>{
+ providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');if(threadId!==undefined&&(typeof threadId!=='string'||!threadId.trim()||threadId.length>200))throw Error('Invalid connection conversation');
+ const key=JSON.stringify([provider,threadId||null]),connectionTicket=Symbol();agentConnectAttempts.set(key,connectionTicket);
+ const current=()=>agentConnectAttempts.get(key)===connectionTicket;
+ try{
+ const resource=resourceRouting.capture(provider,threadId);
+ if(repairTools&&['ssh-terminal','ssh-connection'].includes(resource.selection?.kind)){if(agents.isBusy(provider,threadId))throw Error('Conversation in progress');agents.disconnect(provider,threadId);}
  else if(repairTools){
-  assertIdleAgent();const revision=workflowContext.revision(),owner=workflowContext.current(),connection=worker.connection,epoch=worker.connectionEpoch;
+  if(agents.isBusy(provider,threadId))throw Error('Conversation in progress');const revision=workflowContext.revision(),owner=workflowContext.current(),connection=worker.connection,epoch=worker.connectionEpoch;
   const task=owner?.taskId?taskRecords.read(owner.taskId):null;let source,target;try{source=taskWorkerSource(task);target=task?taskWorkerTarget(task,settings,catalog):settings;}catch{throw Error('请先通过“连接计算资源”核对原服务来源和端口，再修复工具连接。');}
   if(task&&(!source||!target||!validTransportPort(target.workerPort)))throw Error('请先通过“连接计算资源”核对原服务来源和端口，再修复工具连接。');
   const transportScope=task?taskTransportScope(task):null,transportReceipt=task?taskTransportReceipt(task,catalog):null;
   const observed=await readWorkerStatus(worker,()=>target||settings);
   if(observed.status!=='connected'||workflowContext.revision()!==revision||worker.connection!==connection||worker.connectionEpoch!==epoch||task&&(JSON.stringify(transportScope)!==JSON.stringify(taskTransportScope(taskRecords.read(task.id)))||JSON.stringify(transportReceipt)!==JSON.stringify(taskTransportReceipt(taskRecords.read(task.id),catalog)))||source&&(!sameWorkerBinding(source.binding,worker)||worker.connectionTarget?.port!==target.workerPort))throw Error('请先通过“连接计算资源”恢复此流程的原作业服务，再修复工具连接。');
-  assertIdleAgent();
-  agents.close();
+  if(agents.isBusy(provider,threadId))throw Error('Conversation in progress');
+  agents.disconnect(provider,threadId);
  }
  // Model/account recovery never registers sources or environments.
  // Compute setup owns discovery/registration; App restores its saved binding separately.
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- let info;try{info=await agents.connect(provider,{checkLogin:true,assertCurrent:()=>{resource.assertCurrent();if(connectionTicket!==agentConnectionSerial)throw Error('Agent connection was superseded');}});}catch(error){if(connectionTicket===agentConnectionSerial&&error.readiness&&['missing','incompatible','invalid'].includes(error.readiness.status)&&['kimi','qwen'].includes(provider)){resource.assertCurrent();emit('studio:event',{method:'studio/cliRuntimeRequired',provider,params:error.readiness});return {cliRequired:error.readiness};}throw error;}
+ let info;try{info=await agents.connect(provider,{threadId,checkLogin:true,assertCurrent:()=>{resource.assertCurrent();if(!current())throw Error('Agent connection was superseded');}});}catch(error){if(current()&&error.readiness&&['missing','incompatible','invalid'].includes(error.readiness.status)&&['kimi','qwen'].includes(provider)){resource.assertCurrent();emit('studio:event',{method:'studio/cliRuntimeRequired',provider,params:error.readiness});return {cliRequired:error.readiness};}throw error;}
  resource.assertCurrent();
  if(info?.loginRequired)return info;
- const tools=await scientificTools(provider);resource.assertCurrent();
+ const tools=await scientificTools(provider,threadId);resource.assertCurrent();
  emit('studio:event',{method:'studio/toolsStatus',provider,params:tools});
  return {...info,tools};
+ }finally{if(current())agentConnectAttempts.delete(key);}
 });
-handle('agent.tools',async({provider})=>{providerId(provider);return scientificTools(provider);});
+handle('agent.tools',async({provider,threadId})=>{providerId(provider);return scientificTools(provider,threadId);});
 handle('agent.disconnect',({provider})=>{providerId(provider);workflowContext.clear(provider);agents.disconnect(provider);return {};});
 registerModelProfileRoutes({handle,agents,assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},emit:event=>emit('studio:event',event),fetchApi:(...args)=>net.fetch(...args)});
 handle('agent.account',({provider})=>{providerId(provider);return agents.account(provider);});
@@ -599,16 +629,18 @@ handle('agent.cli.choose',async value=>{
  if(readiness.status==='ready')settings=catalog.put('settings','main',normalizeSettings(settings,{[provider+'Path']:response.filePaths[0]}));
  return readiness;
 });
-const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,recordUserTurn:managedWorkbench.userMessage,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){return agentRequests(value);}
+managedSchedules.start();
 handle('agent.rpc',agentRpc);
 handle('agent.recover',async({provider,threadId,model})=>{
  if(provider!=='codex'||typeof threadId!=='string'||!threadId||threadId.length>200||model!==undefined&&(typeof model!=='string'||!model||model.length>200))throw Error('Invalid conversation recovery request');
- assertIdleAgent();const current=workflowContext.current();if(current?.provider!==provider||current.threadId!==threadId)throw Error('Select this conversation before rebuilding its connection');
+ return agents.runInConversation(provider,threadId,async()=>{agents.assertContextIdle();
  const ticket=workflowContext.begin(provider,threadId);await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));
  return (await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId,model,explicit:true,publish:event=>emit('studio:event',event)})).result;
+ });
 });
-handle('agent.respond',({provider,id,result})=>{providerId(provider);if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');return agents.respond(provider,id,result);});
+handle('agent.respond',({provider,threadId,id,result})=>{providerId(provider);if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');return agents.respond(provider,threadId,id,result);});
 handle('agent.configure',async({provider,preferences={},threadId,model})=>{
   assertIdleAgent();
   providerId(provider);if(provider!=='codex')throw Error('Context budget changes are not supported by this ACP provider');
@@ -640,7 +672,7 @@ handle('agent.login.open',async({provider})=>{
 });
 handle('skills.catalog',async()=>{const policy=await scientificSkills.resolvePolicy(skillGuidanceScope(agents.active));const result=[...localSkills(studioSkillRoots(),{policy,projectSkills,bundledRoot:bundledSkillRoot}),...managedSkillEntries(policy)];await policy.revalidate();return result;});
 handle('scientific.skills',({provider})=>{providerId(provider);return scientificSkills.catalog(provider,skillGuidanceScope(provider));});
-handle('codex.respond',({id,result})=>{if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');if(agents.active!=='codex')throw Error('Provider switched');return codex.respond(id,result);});
+handle('codex.respond',({threadId,id,result})=>{if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');if(agents.active!=='codex')throw Error('Provider switched');return codex.respond(id,result);});
 handle('file.open',async() => {
   const response=await dialog.showOpenDialog(window,{properties:['openFile']});
   if(response.canceled) return null;
@@ -674,20 +706,27 @@ handle('export',async({run})=>{
   }catch(error){try{fs.unlinkSync(temp)}catch{};throw error;}
   return file;
 });
-let terminalClosing;
+let terminalClosing,managedClosing;
 desktopShutdown=installDesktopShutdown({app,begin:()=>{
- shuttingDown=true;updater.close();clearInterval(terminalIdleTimer);conversationTerminals.stop();
+ shuttingDown=true;agentConnectAttempts.clear();managedSchedules?.halt();managedClosing=managedResources?.stop();updater.close();clearInterval(terminalIdleTimer);conversationTerminals.stop();
  // Fence the terminal bridge on this exact stack, before already-queued open
  // continuations can run. The asynchronous cleanup below only waits for it.
  try{terminalClosing=sharedTerminal.shutdown({timeoutMs:4000});}catch{terminalClosing=Promise.resolve({status:'unconfirmed'});}
 },cleanup:async()=>{
  for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}
+ await managedClosing;
  return await terminalClosing;
 }});
 window=new BrowserWindow({width:1540,height:980,minWidth:1100,minHeight:720,frame:false,
   backgroundColor:'#15151b',title:PRODUCT_NAME,show:false,
   webPreferences:{backgroundThrottling:!verifying,offscreen:improvementsVerifying,preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
 performanceTimeline.mark('window-created');
+if(!verifying) {
+ const appIcon=nativeImage.createFromPath(path.join(root,'build','icon.ico'));
+ const icon=appIcon.isEmpty()?await app.getFileIcon(process.execPath,{size:'small'}):appIcon;
+ workbenchTray=installManagedTray({app,window,Tray,Menu,icon,language:()=>settings.language,isQuitting:()=>shuttingDown});
+ app.on('activate',focusExistingWindow);
+}
 installSshPrivacyLifecycle(window.webContents,sshConnection);
 window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
 window.webContents.on('will-navigate',(event,url)=>{if(url!==window.webContents.getURL()) event.preventDefault();});

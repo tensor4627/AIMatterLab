@@ -1,4 +1,5 @@
 import {isDeepStrictEqual} from 'node:util';
+import {AsyncLocalStorage} from 'node:async_hooks';
 const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 const keys=['threadId','taskId','projectId','environmentId','inputRoot'];
 function identity(value,label,nullable=false){if(value===null&&nullable)return null;if(typeof value!=='string'||!value||value.length>(label==='inputRoot'?4096:200)||value.includes('\0'))throw Error('Invalid '+label);return value;}
@@ -20,6 +21,7 @@ export function createAgentWorkflowContext({records,activeTasks,selectedProvider
  function ownedState(state){if(!state.replacement)return owner(state.provider,state.threadId,state.initialProjectId);const actual=owner(state.provider,state.replacement.threadId);if(!isDeepStrictEqual(actual,state.replacement))throw Error('Workflow ownership changed during private context preparation');return {...actual,threadId:null};}
  function assert(ticket){if(!current||!ticket||ticket.serial!==current.serial||ticket.provider!==current.provider)throw Error('Selected conversation changed during preparation');return current;}
  return {
+  owner(provider,threadId){return {provider,...owner(provider,threadId)};},
   begin(provider,threadId,initialProjectId=null){
    if(initialProjectId!==null){if(threadId!==null)throw Error('An initial project belongs to a new conversation');identity(initialProjectId,'projectId');}
    owner(provider,threadId);
@@ -46,5 +48,59 @@ export function createAgentWorkflowContext({records,activeTasks,selectedProvider
   selectedOwner(){return {revision:selectionRevision,context:current?{provider:current.provider,...ownedState(current)}:null};},
   revision(){return serial;},
   current(){if(!current)return null;const {initialProjectId,...selection}=current;return {...selection,...ownedState(current)};}
+ };
+}
+
+/** The view and each transport have separate selection tickets and task bindings. */
+export function createParallelAgentWorkflowContext({records,selectedProvider}){
+ const storage=new AsyncLocalStorage(),sessions=new Map(),foregroundTasks=new Map();
+ const foreground=createAgentWorkflowContext({records,activeTasks:foregroundTasks,selectedProvider});
+ const state=()=>storage.getStore();
+ const selected=()=>state()?.context||foreground;
+ const tasks=()=>state()?.tasks||foregroundTasks;
+ const activeTasks={get:provider=>tasks().get(provider),set:(provider,id)=>tasks().set(provider,id),delete:provider=>tasks().delete(provider),clear:()=>tasks().clear()};
+ function runInSession(identity,run){
+  let entry=sessions.get(identity.id);
+  if(!entry){
+   const tasks=new Map(),context=createAgentWorkflowContext({records,activeTasks:tasks,selectedProvider:()=>identity.provider});
+   context.begin(identity.provider,identity.threadId);
+   entry={identity,tasks,context};sessions.set(identity.id,entry);
+  }
+  if(entry.identity.provider!==identity.provider)throw Error('Agent workflow session belongs to a different provider');
+  return storage.run(entry,run);
+ }
+ function sessionScopeCurrent(scope){
+  const entry=sessions.get(scope?.sessionId);
+  if(!entry||scope.provider!==entry.identity.provider||scope.checkCurrent?.()!==true)return false;
+  const current=entry.context.current();
+  return !!current&&keys.every(key=>(current[key]??null)===(scope[key]??null));
+ }
+ function runForScope(scope,run){
+  if(scope?.sessionId===undefined)return run();
+  if(!sessionScopeCurrent(scope)){const error=Error('The scientific tool lease no longer owns this conversation');error.staleProviderScope=true;throw error;}
+  return storage.run(sessions.get(scope.sessionId),run);
+ }
+ async function synchronize(ticket,bind){
+  const context=selected(),result=await context.synchronize(ticket,bind),entry=state();
+  if(entry?.identity.isForeground()&&foreground.current()?.threadId===result.threadId&&foreground.current()?.provider===ticket.provider){
+   if(result.taskId)foregroundTasks.set(ticket.provider,result.taskId);else foregroundTasks.delete(ticket.provider);
+  }
+  return result;
+ }
+ return {
+  runInSession,runForScope,sessionScopeCurrent,activeTasks,
+  dropSession:id=>sessions.delete(id),sessionId:()=>state()?.identity.id,
+  currentFor:(provider,threadId)=>foreground.owner(provider,threadId),
+  current:()=>selected().current(),revision:()=>selected().revision(),selectedOwner:()=>foreground.selectedOwner(),
+  begin:(...args)=>selected().begin(...args),beginReplacement:(...args)=>selected().beginReplacement(...args),
+  beginConversationReplacement:(...args)=>selected().beginConversationReplacement(...args),assert:ticket=>selected().assert(ticket),
+  started(ticket,threadId){
+   const entry=state(),result=selected().started(ticket,threadId);
+   if(entry?.identity.isForeground())foreground.begin(ticket.provider,threadId);
+   return result;
+  },
+  synchronize,
+  assertScope:scope=>runForScope(scope,()=>selected().assertScope(scope)),
+  clear:provider=>selected().clear(provider)
  };
 }

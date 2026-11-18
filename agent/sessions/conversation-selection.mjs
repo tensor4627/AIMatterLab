@@ -1,10 +1,20 @@
+import {providerId} from '../providers/contracts.mjs';
+
 /** Sender-validated desktop selection actions; never exposed to scientific MCP. */
 export async function selectConversation({catalog,records,workflowContext,agents,assertIdle,conversationTerminals},value){
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid conversation selection');
- const fresh=value.new===true&&Object.keys(value).length===1;
+ const fresh=value.new===true&&Object.keys(value).every(key=>key==='new'||agents.selectForeground&&key==='provider');
  if(!fresh&&(typeof value.id!=='string'||Object.keys(value).length!==1))throw Error('Invalid conversation selection');
  const conversation=fresh?null:catalog.get('conversation',value.id);
  if(!fresh&&!conversation)throw Error('Unknown conversation');
+ if(agents.selectForeground){
+  const provider=providerId(conversation?.provider||value.provider||agents.foregroundProvider),threadId=conversation?.threadId||null;
+  workflowContext.clear();
+  const ticket=workflowContext.begin(provider,threadId);
+  agents.selectForeground(provider,threadId);
+  await workflowContext.synchronize(ticket,async()=>{});
+  return fresh?{fresh:true}:{...conversation,task:conversation.taskId?records.read(conversation.taskId):null};
+ }
  assertIdle();
  if(fresh){
   // Revoke old selection tickets and active tool ownership before awaiting the provider bind.
@@ -16,7 +26,7 @@ export async function selectConversation({catalog,records,workflowContext,agents
  if(agents.active!==conversation.provider){workflowContext.clear(agents.active);agents.disconnect(agents.active);}
  const ticket=workflowContext.begin(conversation.provider,conversation.threadId);
  await workflowContext.synchronize(ticket,async(provider,context)=>{
-  await conversationTerminals?.acquire(provider,context);workflowContext.assert(ticket);
+  if(conversationTerminals)await conversationTerminals.acquire(provider,context);workflowContext.assert(ticket);
   return agents.selectContext(provider,context);
  });
  workflowContext.assert(ticket);

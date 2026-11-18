@@ -1,0 +1,387 @@
+"""Portable clock, store and scheduler-wire fixtures. No SSH sessions are opened."""
+
+import base64
+import io
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from studio_worker.compute.managed_child import child_batch
+from studio_worker.compute.managed_schedules import DELEGATION, ROUND, ManagedSchedules
+from studio_worker.compute.service import Service
+from studio_worker.transport.routes import dispatch
+
+
+class ManagedScheduleTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.path = self.root / 'run.py'
+        self.path.write_text("print('managed fixture')", encoding='utf8')
+        self.time = 1000
+        self.calls, self.cancelled, self.submissions, self.terminal = [], set(), {}, set()
+        self.lost, self.wrong_identity = False, False
+        self.before_submit, self.before_poll = None, None
+        self.open()
+        self.profile = self.clusters.register({
+            'name': 'fixture', 'scheduler': 'slurm', 'target': 'fixture@example.invalid', 'port': 22,
+            'ssh_client': '/usr/bin/ssh', 'remote_root': '/tmp/isolated-managed-test', 'queue': 'fixture',
+            'environment': {'executables': {'python': '/usr/bin/python3'}},
+        })
+        self.project = self.service.register_project({'name': 'fixture', 'policy': {
+            'input_roots': [str(self.root)], 'clusters': [self.profile['id']], 'max_concurrent': 3,
+        }})
+        self.parent = self.start_parent(self.profile['id'])
+        self.scope = {'provider': 'codex', 'threadId': 'thread-a', 'taskId': 'task-a',
+                      'projectId': self.project['id'], 'runId': self.parent['id']}
+        self.addCleanup(self.close)
+
+    def open(self):
+        self.service = Service(self.root / 'worker', schedule=False)
+        self.clusters = self.service.clusters
+        self.clusters.transport = lambda _profile: SimpleNamespace(run=self.wire)
+        self.schedules = self.service.managed_schedules = ManagedSchedules(self.service, lambda: self.time)
+
+    def close(self):
+        self.service.close()
+        self.service.store.db.close()
+
+    def wire(self, script, data=None, timeout=40):
+        args = shlex.split(script)
+        self.assertFalse(self.service.store.lock._is_owned())
+        self.calls.append((script, data, timeout))
+        if args[0] in ('scancel', 'bkill'):
+            self.cancelled.add(args[1])
+            return ''
+        encoded = re.search(r"base64.b64decode\('([^']+)'\)", args[-1]).group(1)
+        p = json.loads(base64.b64decode(encoded))
+        if data is not None:
+            job = str(len(self.submissions) + 1)
+            self.submissions[p['id']] = (job, p['nonce'])
+            if self.before_submit:
+                self.before_submit(p)
+            if self.lost:
+                raise ConnectionError('fixture lost reply')
+            receipt = {'nonce': p['nonce'], 'job_id': job}
+        elif 'scheduler_state' in script:
+            if self.before_poll:
+                self.before_poll(p)
+            job = p['job_id']
+            receipt = {'job_id': job, 'identity_verified': not self.wrong_identity}
+            if not self.wrong_identity:
+                receipt['scheduler_state'] = 'CANCELLED' if job in self.cancelled else 'RUNNING'
+            if p['id'] in self.terminal:
+                receipt['exit'] = {'nonce': p['nonce'], 'exit_code': 0}
+        else:
+            receipt = {'present': True, 'offset': 6, 'text': 'hello\n'}
+        return '__STUDIO_JSON__' + json.dumps(receipt)
+
+    def start_parent(self, cluster):
+        parent = self.clusters.prepare({
+            'name': 'Parent fixture', 'project_id': self.project['id'], 'cluster_id': cluster,
+            'engine': 'pydyn.md', 'inputs': {'run.py': str(self.path)}, 'parameters': {},
+            'idempotency_key': 'parent-' + cluster, 'max_seconds': 120,
+        })
+        return self.clusters.submit(parent['id'])
+
+    def upsert(self, kind='poll', **fields):
+        return self.schedules.upsert({'sourceId': 'source-a', 'scope': self.scope, 'kind': kind,
+                                      'mutationId': 'create', **fields})
+
+    def request(self, plan):
+        return {'sourceId': 'source-a', 'scheduleId': plan['id']}
+
+    def status(self, plan):
+        return self.schedules.status(self.request(plan))
+
+    def pump(self, **fields):
+        return self.schedules.pump({'sourceId': 'source-a', **fields})
+
+    def script(self, key='analysis', **fields):
+        defaults = {'key': key, 'name': 'Fixture analysis', 'intervalSeconds': 2, 'timeoutSeconds': 45,
+                    'script': {'language': 'bash', 'text': 'printf "%s\\n" fixture-script\n'}}
+        return self.upsert('script', **{**defaults, **fields})
+
+    def test_default_budget_only_clock_due_dispatch_and_cache_reads(self):
+        plan = self.upsert()
+        self.assertEqual((plan['intervalSeconds'], plan['maxRuns'], plan['nextAt']), (1800, 48, 2800))
+        self.assertEqual(self.upsert(), plan)
+        self.calls.clear()
+        self.clusters.tick()
+        dispatch(self.service, 'POST', '/api/cluster/observation', {'run_id': self.parent['id']}, True)
+        dispatch(self.service, 'POST', '/api/cluster/status', {'run_id': self.parent['id']}, False)
+        self.status(plan)
+        self.pump()
+        self.assertFalse(self.calls)
+        self.time = 2800
+        def at_dispatch(_payload):
+            claimed = self.status(plan)
+            self.assertEqual(claimed['count'], 1)
+            self.assertEqual(claimed['history'][0]['status'], 'started')
+        self.before_poll = at_dispatch
+        view = self.pump()
+        self.assertFalse(view['deliveries'])
+        self.assertEqual(view['schedules'][0]['lastResult']['run']['status'], 'running')
+        self.assertEqual(len(self.calls), 1)
+        self.pump()
+        self.assertEqual(len(self.calls), 1)
+
+    def test_restart_skips_missed_rounds_and_edit_preserves_count_and_expiry(self):
+        plan = self.upsert(intervalSeconds=10, maxRuns=6, expiresAt=1100)
+        self.time = plan['nextAt']
+        self.pump()
+        old = self.status(plan)
+        updated = self.upsert(mutationId='edit', expectedRevision=old['revision'], intervalSeconds=7)
+        self.assertEqual((updated['count'], updated['expiresAt']), (1, 1100))
+        self.assertEqual(self.upsert(intervalSeconds=10, maxRuns=6, expiresAt=1100), updated)
+        with self.assertRaises(ValueError):
+            self.upsert(mutationId='edit', expectedRevision=old['revision'], intervalSeconds=5)
+        self.close()
+        self.open()
+        self.time = 1040
+        view = self.pump(resume=True)
+        self.assertEqual(view['schedules'][0]['count'], 1)
+        self.assertGreater(view['schedules'][0]['nextAt'], self.time)
+        self.time = view['schedules'][0]['nextAt']
+        self.pump()
+        self.assertEqual(self.status(plan)['count'], 2)
+        self.time = 1100
+        self.pump()
+        self.assertEqual(self.status(plan)['status'], 'expired')
+        with self.assertRaises(ValueError):
+            self.upsert(mutationId='extend', expectedRevision=updated['revision'], expiresAt=2000)
+
+    def test_wake_outbox_is_source_bound_durable_and_deduplicated(self):
+        self.scope = {**self.scope, 'runId': None}
+        plan = self.upsert('wake_agent', intervalSeconds=10, maxRuns=2, wakeText='Review the latest approved analysis')
+        self.time = 1010
+        first = self.pump()['deliveries']
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0]['text'], 'Review the latest approved analysis')
+        self.assertEqual(first[0]['scope'], self.scope)
+        self.assertEqual(self.pump()['deliveries'], first)
+        self.close()
+        self.open()
+        self.assertEqual(self.pump(resume=True)['deliveries'], first)
+        with self.assertRaises(PermissionError):
+            self.schedules.ack({'sourceId': 'other-source', 'deliveryId': first[0]['id']})
+        payload = {'sourceId': 'source-a', 'deliveryId': first[0]['id']}
+        self.assertEqual(self.schedules.ack(payload), self.schedules.ack(payload))
+        self.assertFalse(self.pump()['deliveries'])
+        self.time = 1020
+        self.assertEqual(len(self.pump()['deliveries']), 1)
+        stopped = self.schedules.stop(self.request(plan))
+        self.assertEqual(stopped['status'], 'stopped')
+        self.assertFalse(self.pump()['deliveries'])
+
+    def test_script_is_only_in_scheduler_archive_and_cancels_verified_child(self):
+        plan = self.script()
+        self.time = 1002
+        self.calls.clear()
+        view = self.pump()
+        active = view['schedules'][0]['active']
+        self.assertEqual(active['status'], 'queued')
+        child_id = active['childId']
+        script, archive, timeout = self.calls[0]
+        self.assertNotIn('fixture-script', script)
+        with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as tar:
+            self.assertIn(b'fixture-script', tar.extractfile('simulation/scheduled.sh').read())
+            batch = tar.extractfile('job.sh').read()
+            self.assertIn(b'#SBATCH --partition=fixture', batch)
+            self.assertIn(b'45s /bin/bash', batch)
+            self.assertIn(self.parent['id'].encode(), batch)
+            self.assertEqual(json.load(tar.extractfile('.studio/schedule.json'))['scope'], self.scope)
+        self.assertLessEqual(timeout, 45)
+        self.assertEqual(self.clusters.poll(child_id)['status'], 'queued')
+        with self.assertRaises(PermissionError):
+            self.clusters.cancel(child_id)
+        stopped = self.schedules.stop(self.request(plan))
+        self.assertEqual(stopped['status'], 'stopped')
+        self.assertEqual(stopped['cancellation']['signalSent'], True)
+        self.time += 5
+        self.pump()
+        final = self.status(plan)
+        self.assertEqual(final['cancellation']['status'], 'confirmed')
+        self.assertIsNone(final['active'])
+        self.assertEqual(self.cancelled, {active['jobId']})
+        self.assertEqual(self.clusters.raw(self.parent['id'])['status'], 'queued')
+        self.assertEqual(self.status(plan)['count'], 1)
+
+    def test_unverified_child_and_lost_submit_are_never_retried(self):
+        plan = self.script()
+        self.time = 1002
+        self.lost = True
+        self.pump()
+        first = self.status(plan)
+        self.assertEqual(first['status'], 'unknown')
+        self.assertEqual(first['count'], 1)
+        self.assertIsNotNone(first['active']['childId'])
+        self.time = 1200
+        self.pump()
+        self.assertEqual(len(self.submissions), 2)
+        self.wrong_identity = True
+        stopped = self.schedules.stop(self.request(plan))
+        self.assertEqual(stopped['cancellation']['status'], 'unconfirmed')
+        self.assertEqual(stopped['cancellation']['signalSent'], False)
+        self.assertFalse(self.cancelled)
+        self.schedules.stop(self.request(plan))
+        self.assertEqual(len(self.submissions), 2)
+
+    def test_stop_wins_while_child_archive_is_prepared(self):
+        plan = self.script()
+        self.time = 1002
+        original = self.clusters.archive
+        entered, release = threading.Event(), threading.Event()
+        errors = []
+        def held_archive(row):
+            entered.set()
+            if not release.wait(10):
+                raise RuntimeError('fixture barrier not released')
+            return original(row)
+        def run_pump():
+            try:
+                self.pump()
+            except Exception as error:
+                errors.append(error)
+        with patch.object(self.clusters, 'archive', held_archive):
+            thread = threading.Thread(target=run_pump)
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(10))
+                self.assertEqual(self.schedules.stop(self.request(plan))['status'], 'stopped')
+            finally:
+                release.set()
+                thread.join(10)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(errors)
+        self.assertEqual(len(self.submissions), 1)
+        final = self.status(plan)
+        self.assertEqual((final['status'], final['count']), ('stopped', 1))
+        self.assertIsNone(final['active'])
+
+    def test_task_slot_and_lifetime_hard_cap_apply_to_sibling_plans(self):
+        poll = self.upsert(intervalSeconds=3, maxRuns=336)
+        different = self.upsert('action', action={'type': 'status'}, intervalSeconds=2, maxRuns=336)
+        with self.assertRaises(ValueError):
+            self.upsert(mutationId='clone', key='another-copy')
+        with self.assertRaises(ValueError):
+            self.upsert('wake_agent', maxRuns=337, wakeText='fixture')
+        raw = self.service.store.get('managed-schedule', poll['id'])
+        budget = self.schedules._budget(raw)
+        self.service.store.put(DELEGATION, {**budget, 'count': 335})
+        self.time = 1002
+        self.pump()
+        self.time = 1010
+        self.pump()
+        self.assertEqual((self.status(poll)['count'], self.status(different)['count']), (0, 1))
+        self.assertEqual(self.status(poll)['status'], 'exhausted')
+        self.assertEqual(self.status(different)['delegationCount'], 336)
+
+    def test_child_deadline_owns_only_its_single_cancellation_attempt(self):
+        plan = self.script()
+        sibling = self.script(key='analysis-two', script={'language': 'python', 'text': 'print("second fixture")\n'})
+        self.time = 1002
+        self.pump()
+        self.pump()
+        running = next(row for row in (self.status(plan), self.status(sibling)) if row['active'])
+        waiting = sibling if running['id'] == plan['id'] else plan
+        self.assertEqual(self.status(waiting)['count'], 0)
+        self.time = running['active']['deadlineAt']
+        self.pump()
+        self.assertEqual(self.cancelled, {running['active']['jobId']})
+        self.time += 5
+        self.pump()
+        self.assertEqual(self.status(running)['lastResult']['status'], 'timed_out')
+        self.assertEqual(self.clusters.raw(self.parent['id'])['status'], 'queued')
+        self.assertEqual(sum(script.startswith('scancel ') for script, _, _ in self.calls), 1)
+
+    def test_script_details_keep_revision_and_history_out_of_passive_summary(self):
+        original = self.script()
+        self.assertNotIn('text', original['script'])
+        self.assertEqual(original['script']['version'], 1)
+        self.time = 1002
+        self.pump()
+        edit = self.upsert('script', key='analysis', mutationId='change-program', expectedRevision=original['revision'],
+                           script={'language': 'python', 'text': 'print("changed")\n'})
+        self.assertEqual((edit['count'], edit['script']['version']), (1, 2))
+        detail = self.status(edit)
+        self.assertEqual(detail['script']['text'], 'print("changed")\n')
+        self.assertEqual(detail['history'][0]['plan']['script']['sha256'], original['script']['sha256'])
+        self.assertEqual(detail['history'][0]['plan']['script']['version'], 1)
+        self.assertNotIn('text', self.schedules.snapshot({'sourceId': 'source-a'})['schedules'][0]['script'])
+
+    def test_interrupted_claim_is_never_replayed(self):
+        raw = self.service.store.get('managed-schedule', self.upsert()['id'])
+        self.time = raw['nextAt']
+        with self.service.store.lock:
+            self.schedules._claim(raw, self.time)
+        self.assertEqual(len(self.service.store.list(ROUND)), 1)
+        self.close()
+        self.open()
+        self.calls.clear()
+        self.pump()
+        self.assertFalse(self.calls)
+        self.assertEqual(self.status(raw)['status'], 'unknown')
+
+    def test_worker_administration_and_current_project_scope_are_required(self):
+        with self.assertRaises(PermissionError):
+            dispatch(self.service, 'POST', '/api/managed-schedules/pump', {'sourceId': 'source-a'}, False)
+        with self.assertRaises(PermissionError):
+            self.upsert(scope={**self.scope, 'projectId': self.service.register_project({
+                'name': 'other', 'policy': {'input_roots': [str(self.root)]},
+            })['id']})
+        plan = self.upsert(intervalSeconds=2)
+        project = self.service.store.get('project', self.project['id'])
+        project['policy']['clusters'] = []
+        self.service.store.put('project', project)
+        self.calls.clear()
+        self.time = 1002
+        self.pump()
+        self.assertFalse(self.calls)
+        self.assertEqual(self.status(plan)['lastResult']['status'], 'blocked')
+
+    def test_bash_and_python_child_wrappers_run_locally_without_a_scheduler(self):
+        bash = shutil.which('bash') if os.name == 'posix' else os.environ.get('STUDIO_TEST_GIT_BASH')
+        if not bash or not Path(bash).is_file():
+            self.skipTest('A verified POSIX-compatible Bash was unavailable')
+        for scheduler, language in [('slurm', 'bash'), ('lsf', 'python')]:
+            with self.subTest(scheduler=scheduler, language=language):
+                fixture = self.root / scheduler
+                simulation = fixture / 'simulation'
+                simulation.mkdir(parents=True)
+                source = 'printf "%s\\n" fixture-bash\n' if language == 'bash' else 'print("fixture-python")\n'
+                import hashlib
+                name = 'scheduled.sh' if language == 'bash' else 'scheduled.py'
+                (simulation / name).write_text(source, encoding='utf8', newline='\n')
+                run = {'job_name': 'gss-fixture', 'nonce': 'receipt-fixture', 'remote_directory': fixture.as_posix(),
+                       'max_seconds': 2, 'resources': {'queue': 'fixture', 'cpus': 1, 'memory_mb': 512, 'gpus': 0, 'seconds': 2},
+                       'cluster_snapshot': {'scheduler': scheduler, 'environment': {'executables': {'python': Path(sys.executable).as_posix()}}},
+                       'snapshots': [{'name': name, 'sha256': hashlib.sha256(source.encode()).hexdigest()}],
+                       'managed_child': {'language': language, 'parentDirectory': self.root.as_posix(),
+                                         'scheduleId': 'fixture', 'occurrence': 1}}
+                path = fixture / 'job.sh'
+                script = child_batch(run)
+                self.assertIn('#SBATCH --time=1' if scheduler == 'slurm' else '#BSUB -W 1', script)
+                path.write_text(script, encoding='utf8', newline='\n')
+                result = subprocess.run([bash, str(path)], cwd=fixture, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+                self.assertEqual(json.loads((fixture / 'exit.json').read_text()), {'nonce': 'receipt-fixture', 'exit_code': 0})
+                self.assertEqual((fixture / 'console.log').read_text().strip(), 'fixture-' + language)
+
+
+if __name__ == '__main__':
+    unittest.main()

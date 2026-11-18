@@ -51,7 +51,8 @@ const kernel=[
 ];
 export function prepareApiDshProfile(root,runtime,worker,instructions,selection){
  if(typeof selection?.profile?.id!=='string'||!/^[a-z][a-z0-9-]{0,63}$/.test(selection.profile.id)||!['qwen','compatible'].includes(selection.provider))throw Error('Invalid API runtime provider identity');
- const id=selection.profile.id,route=selection.profile.catalogProvider||'studio-api-'+id,home=path.join(path.resolve(root),'model-providers',id),profile=path.join(home,'profiles','studio'),cwd=path.join(home,'workspace'),sessions=path.join(home,'sessions');
+ const id=selection.profile.id,route=selection.profile.catalogProvider||'studio-api-'+id,base=path.join(path.resolve(root),'model-providers',id);
+ const {home,profile,cwd,sessions}=dshDirectories(base,selection.sessionProfileId);
  // The pinned pi-ai transport requires a nonempty key even for unauthenticated local servers.
  // This public marker is never stored as a credential and is restricted to explicit loopback routes.
  const local=['localhost','127.0.0.1','[::1]'].includes(new URL(selection.profile.baseUrl).hostname),apiKey=selection.profile.apiKey||(local?'aimatterlab-local-no-auth':'');
@@ -87,11 +88,16 @@ function ownedDirectory(directory){
  for(const part of path.relative(current,directory).split(path.sep)){if(!part)continue;current=path.join(current,part);if(fs.existsSync(current)&&(!fs.lstatSync(current).isDirectory()||fs.lstatSync(current).isSymbolicLink()))throw Error('DSH runtime directories cannot be links');}
  fs.mkdirSync(directory,{recursive:true});
 }
+function dshDirectories(base,sessionProfileId){
+ if(sessionProfileId!==undefined&&(typeof sessionProfileId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(sessionProfileId)))throw Error('Invalid agent runtime profile identity');
+ const home=sessionProfileId?path.join(base,'processes',sessionProfileId):base;
+ return {home,profile:path.join(home,'profiles','studio'),cwd:path.join(base,'workspace'),sessions:path.join(base,'sessions')};
+}
 
 /** An affirmative plugin list excludes all shell, file, skill, web and subagent producers. */
 export function prepareDshProfile(root,runtime,worker,instructions,selection={}){
  if(!object(runtime)||typeof runtime.mcpModule!=='string'||typeof runtime.toolsModule!=='string'||typeof instructions!=='string')throw Error('Invalid DSH runtime configuration');
- const scoped=scopedDshWorker(worker),home=path.join(path.resolve(root),'deepseek-dsh-v1'),profile=path.join(home,'profiles','studio'),cwd=path.join(home,'workspace'),sessions=path.join(home,'sessions');
+ const scoped=scopedDshWorker(worker),{home,profile,cwd,sessions}=dshDirectories(path.join(path.resolve(root),'deepseek-dsh-v1'),selection.sessionProfileId);
  for(const directory of [profile,cwd,sessions])ownedDirectory(directory);
  // The home-level overlay is owned by AIMatterLab as well. No user profile is loaded.
  fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]\n');

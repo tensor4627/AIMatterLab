@@ -1,0 +1,190 @@
+// Actual App interactions. Provider, worker, authorization and scheduler results are fixtures.
+import assert from 'node:assert/strict';
+import path from 'node:path';
+
+const names = ['活跃会话 A', '活跃会话 B', '有定时提醒的会话', '需要换行的长会话名称与资源徽记'];
+const row = (page, name) => page.getByTestId('conversation-sidebar').locator('.conversation-row')
+  .filter({has: page.getByText(name, {exact: true})});
+const motion = node => node.evaluate(element => getComputedStyle(element).animationName);
+
+async function managedApp(page, {manyBadges = false} = {}) {
+  await page.evaluate(async ({names, manyBadges}) => {
+    const f = window.__test;
+    localStorage.setItem('studio.sidebarWidth', manyBadges ? '192' : '290');
+    f.settings.resourceBadgeMotion = 'wave';
+    const now = Math.floor(Date.now() / 1000);
+    const conversation = (name, i) => ({id: 'codex:managed-chat-' + i, provider: 'codex',
+      threadId: 'managed-chat-' + i, name, updatedAt: i + 1, taskId:null, projectId:null});
+    f.managedChats = names.map(conversation);
+    const badges = ['集群 A', '结果集群 B', '独立资源 C', '长资源名称 D', '计算课题 E'];
+    const resource = (name, i) => ({resourceId:'managed-' + i, profileId:'profile-' + i,
+      kind:'ssh', name, color:i + 1, serviceReady:i !== 0, terminalReady:true, authorizedProjects:[]});
+    const badge = (i, status) => ({profileId:'profile-' + i, label:badges[i],
+      kind:'ssh', color:i + 1, status, observedAt:now});
+    const owner = n => ({provider:'codex', threadId:f.managedChats[n].threadId,
+      taskId:'workflow-' + n, projectId:'fixture-project-' + n, runId:'parent-' + n});
+    const script = {language:'python', version:2, sha256:'b'.repeat(64)};
+    f.managedCallLog = [];
+    f.managed = {
+      resources:badges.map(resource),
+      conversations:f.managedChats.map((chat, i) => ({provider:chat.provider,threadId:chat.threadId,
+        replying:i < 2, nextWakeAt:i === 0 || i === 2 ? now + 1800 : null,
+        badges:i === 0 ? [badge(0, 'running'),badge(1, 'running')] :
+          i === 1 ? [badge(1,'idle'),badge(2,'offline')] :
+          i === 2 ? [badge(2,'queued')] : manyBadges ? badges.map((_label, k) => badge(k, 'running')) : [],
+      })),
+      sources:[
+        {id:'source-offline',profileId:'profile-0',connected:false,observedAt:now - 3600,runs:[{id:'parent-0',
+          projectId:'fixture-project-0',status:'running',observedAt:now - 3600}],schedules:[{id:'offline-poll',
+          name:'离线巡检计划',sourceId:'source-offline',kind:'poll',status:'scheduled',scope:owner(0),
+          intervalSeconds:1800,count:4,maxRuns:48,nextAt:now + 1800,expiresAt:now + 86400,
+          lastResult:{status:'succeeded',run:{id:'parent-0',status:'running'}}}]},
+        {id:'source-online',profileId:'profile-1',connected:true,observedAt:now,runs:[{id:'fixture-child-b',
+          projectId:'fixture-project-1',status:'running',jobId:'17',observedAt:now}],schedules:[{id:'other-script',
+          name:'同行资源脚本',sourceId:'source-online',kind:'script',status:'running',scope:owner(1),
+          intervalSeconds:1800,count:1,maxRuns:48,nextAt:now + 1800,expiresAt:now + 86400,script,
+          active:{childId:'fixture-child-b',jobId:'17',status:'running'}}]},
+      ],
+    };
+    f.emitManaged = (method = 'studio/managedActivity') => f.events.slice().forEach(callback => callback({method}));
+    const original = window.studio.invoke;
+    window.studio.invoke = async (method, data) => {
+      if (method === 'compute.managed.snapshot') return structuredClone(f.managed);
+      if (method === 'conversation.list') return structuredClone(f.managedChats);
+      if (method === 'conversation.select') {
+        f.managedCallLog.push({method,data});
+        return structuredClone(f.managedChats.find(value => value.id === data.id));
+      }
+      if (method === 'compute.managed.stopSchedule') {
+        f.managedCallLog.push({method,data});
+        const source = f.managed.sources.find(value => value.id === data.sourceId);
+        const item = source?.schedules.find(value => value.id === data.scheduleId);
+        if (!item || source.connected) throw Error('Unexpected stop target in native managed fixture');
+        Object.assign(item,{status:'stopping',stopRequestedAt:now,nextAt:null});
+        f.emitManaged();
+        return structuredClone(item);
+      }
+      if (method === 'compute.managed.scheduleDetails') {
+        f.managedCallLog.push({method,data});
+        const source = f.managed.sources.find(value => value.id === data.sourceId);
+        const item = source?.schedules.find(value => value.id === data.scheduleId);
+        if (!item) throw Error('Unrecognized fixture schedule');
+        return {...item,connected:source.connected,...item.script ? {
+          script:{...item.script,text:'print("isolated fixture script")'},
+          history:[{occurrence:1,childId:'fixture-child-b',status:'running'}],
+        } : {}};
+      }
+      if (method === 'compute.resource.status') return {schemaVersion:1,kind:null,status:'none',selectionId:null};
+      if (method === 'compute.profiles.list') return {profiles:[],defaults:{}};
+      if (method === 'sharedTerminal.list') return {sessions:[]};
+      if (method === 'worker.restore') return {status:'disconnected',checkedAt:1};
+      if (method === 'agent.rpc' && ['thread/read','thread/resume'].includes(data.method)) {
+        return {thread:{id:data.params.threadId,turns:[]}};
+      }
+      if (method === 'agent.rpc' && data.method === 'turn/start') throw Error('No model turns in the managed renderer fixture');
+      return original(method,data);
+    };
+    return window.renderTest('App');
+  }, {names, manyBadges});
+  await page.getByTestId('conversation-sidebar').waitFor();
+  await row(page,names[0]).locator('.conversation-resource-badge').first().waitFor();
+}
+
+export async function frontendManagedComputeCases({check, out}) {
+  const capture = (page, file) => page.screenshot({path:path.join(out, file + '.png')});
+
+  await check('managed-compute-experience-concurrent-conversations-and-clock', async page => {
+    await managedApp(page);
+    const first = row(page,names[0]), second = row(page,names[1]), scheduled = row(page,names[2]);
+    for (const chat of [first, second]) {
+      assert.equal(await chat.getByRole('img',{name:'Agent 正在工作',exact:true}).count(),1);
+      assert.equal(await chat.locator('.conversation-menu-trigger').isDisabled(),true);
+    }
+    assert.equal(await first.getByRole('img',{name:/下次唤醒/}).count(),0);
+    assert.equal(await scheduled.getByRole('img',{name:/下次唤醒/}).count(),1);
+    assert.equal(await scheduled.locator('.conversation-menu-trigger').isEnabled(),true);
+    assert.deepEqual(await first.locator('.conversation-resource-badge').evaluateAll(nodes =>
+      nodes.map(node => [node.textContent,node.dataset.status,getComputedStyle(node).animationName])),
+    [['集群 A','running','conversation-job-wave'],['结果集群 B','running','conversation-job-wave']]);
+    await second.locator('.conversation-item').click();
+    await page.waitForFunction(() => window.__test.managedCallLog.some(call =>
+      call.method === 'conversation.select' && call.data.id === 'codex:managed-chat-1'));
+    assert.equal(await first.getByRole('img',{name:'Agent 正在工作',exact:true}).count(),1);
+    await page.evaluate(() => {
+      window.__test.managed.conversations[0].replying = false;
+      window.__test.emitManaged('studio/agentTurnState');
+    });
+    await first.getByRole('img',{name:/下次唤醒/}).waitFor();
+    assert.equal(await second.getByRole('img',{name:'Agent 正在工作',exact:true}).count(),1);
+    await capture(page,'managed-concurrent-clock');
+  });
+
+  await check('managed-compute-experience-badge-styles-reduced-motion-and-wrap', async (page,captureNative) => {
+    await managedApp(page,{manyBadges:true});
+    const first = row(page,names[0]), badges = first.locator('.conversation-resource-badge');
+    assert.equal(await motion(badges.first()),'conversation-job-wave');
+    const t0 = await badges.first().evaluate(element => element.getAnimations()[0]?.currentTime);
+    await page.waitForFunction(time => document.querySelector('.conversation-resource-badge[data-status="running"]')?.
+      getAnimations()[0]?.currentTime > time,t0);
+    await page.getByRole('button',{name:'设置',exact:true}).first().click();
+    const picker = page.getByLabel('作业徽记动效',{exact:true});
+    assert.equal(await picker.inputValue(),'wave');
+    await picker.selectOption('breathe');
+    await page.getByRole('button',{name:'保存设置',exact:true}).click();
+    await page.getByText('设置已保存',{exact:true}).waitFor();
+    assert.equal(await page.evaluate(() => window.__test.settings.resourceBadgeMotion),'breathe');
+    await page.keyboard.press('Escape');
+    await picker.waitFor({state:'hidden'});
+    assert.deepEqual(await badges.evaluateAll(nodes => nodes.map(node => getComputedStyle(node).animationName)),
+      ['conversation-job-breathe','conversation-job-breathe']);
+    assert.deepEqual(await row(page,names[1]).locator('.conversation-resource-badge').evaluateAll(nodes =>
+      nodes.map(node => getComputedStyle(node).animationName)), ['none','none']);
+    const dimensions = await row(page,names[3]).evaluate(element => {
+      const within = element.querySelector('.conversation-item').getBoundingClientRect();
+      const sidebar = element.closest('.conversation-sidebar');
+      const tags = Array.from(element.querySelectorAll('.conversation-resource-badge'), tag => tag.getBoundingClientRect());
+      return {rows:new Set(tags.map(tag => Math.round(tag.top))).size,
+        inside:tags.every(tag => tag.right <= within.right && tag.left >= within.left),
+        sidebarWidth:sidebar.clientWidth,scrollWidth:sidebar.scrollWidth};
+    });
+    assert.ok(dimensions.rows > 1 && dimensions.inside && dimensions.scrollWidth <= dimensions.sidebarWidth + 1,
+      JSON.stringify(dimensions));
+    await capture(page,'managed-breathe-wrap');
+    await page.emulateMedia({reducedMotion:'reduce'});
+    assert.equal(await motion(badges.first()),'none');
+    assert.equal(await motion(first.locator('.conversation-turn-spinner')),'none');
+    assert.notEqual(await badges.first().evaluate(element => getComputedStyle(element).boxShadow),'none');
+    await captureNative('managed-reduced-motion');
+  });
+
+  await check('managed-compute-experience-offline-stop-and-original-script-details', async page => {
+    await managedApp(page);
+    await page.locator('nav [data-testid="navigate-runs"]:visible').click();
+    const jobs = page.getByTestId('jobs-page');
+    const offline = jobs.getByTestId('managed-schedule-record').filter({hasText:'离线巡检计划'});
+    const other = jobs.getByTestId('managed-schedule-record').filter({hasText:'同行资源脚本'});
+    await offline.getByRole('button',{name:'终止计划',exact:true}).click();
+    await offline.getByText('停止待远端确认',{exact:true}).waitFor();
+    assert.equal(await offline.getByRole('button',{name:'终止计划',exact:true}).isDisabled(),true);
+    assert.equal(await other.getByRole('button',{name:'终止计划',exact:true}).isEnabled(),true);
+    await other.locator('summary').click();
+    await other.getByText('print("isolated fixture script")',{exact:true}).waitFor();
+    assert.match(await other.innerText(),/脚本版本 · 2.*\n[\s\S]*"childId": "fixture-child-b"/);
+    assert.match(await other.innerText(),/子作业 17/);
+    assert.deepEqual(await page.evaluate(() => window.__test.managedCallLog.filter(call => call.method.startsWith('compute.'))),
+      [{method:'compute.managed.stopSchedule',data:{sourceId:'source-offline',scheduleId:'offline-poll'}},
+       {method:'compute.managed.scheduleDetails',data:{sourceId:'source-online',scheduleId:'other-script'}}]);
+    assert.deepEqual(await page.evaluate(() => window.__test.calls.filter(call =>
+      ['/api/cluster/cancel','/api/run/cancel'].includes(call.data?.target))), []);
+    await capture(page,'managed-offline-stop');
+    await page.evaluate(() => {
+      const source = window.__test.managed.sources[0];
+      source.connected = true;
+      source.schedules[0].status = 'stopped';
+      window.__test.emitManaged();
+    });
+    await offline.getByText('已停止',{exact:true}).waitFor();
+    assert.equal(await offline.getByRole('button',{name:'终止计划',exact:true}).count(),0);
+    assert.equal(await other.getByRole('button',{name:'终止计划',exact:true}).isEnabled(),true);
+  });
+}

@@ -28,7 +28,7 @@ export class ScientificSkills{
   this.context=new ScientificSkillContext(this.router);
   this.selectedManaged=new SelectedManagedGuidance();
  }
- clearManagedSelection(provider){this.selectedManaged.clear(provider);}
+ clearManagedSelection(provider,threadId){this.selectedManaged.clear(provider,threadId);}
  bindManagedSelection(value){return this.selectedManaged.bind(value);}
  async resolvePolicy(scope){return resolveReadPolicy({resolveGuidance:this.resolveGuidance,assertScope:this.assertScope},scope);}
  async catalog(provider,scope={provider}){

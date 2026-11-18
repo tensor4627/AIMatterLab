@@ -4,7 +4,10 @@ const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)
 function request(value,keys){if(!object(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('Invalid typed model settings request');return value;}
 export function registerModelProfileRoutes({handle,agents,assertIdle,emit,fetchApi,checkConnection=testProfileConnection}){
  const store=agents.modelProfiles;
- const invalidate=provider=>{agents.disconnect(provider);const bridge=agents.bridge(provider);if(bridge){bridge.sessions?.clear();bridge.model=undefined;bridge.modelInfos=[];}};
+ const invalidate=provider=>{
+  if(agents.resetProvider){agents.resetProvider(provider,{clearModels:true});return;}
+  agents.disconnect(provider);const bridge=agents.bridge(provider);if(bridge){bridge.sessions?.clear();bridge.model=undefined;bridge.modelInfos=[];}
+ };
  handle('models.profiles.list',value=>{request(value,['provider']);if(value.provider!==undefined&&!['qwen','compatible'].includes(value.provider))throw Error('Invalid API provider group');return store.list(value.provider);});
  handle('models.profiles.save',value=>{request(value,['profile','apiKey','expectedRevision']);assertIdle();const profile=validateModelProfile(value.profile),result=store.save({...value,profile});invalidate(profile.provider);agents.loginStatus[profile.provider]={phase:'configured',modelAccess:'not_run'};emit({method:'studio/accountUpdated',provider:profile.provider,params:{credentialsChanged:true}});return result;});
  handle('models.profiles.remove',value=>{request(value,['id','expectedRevision']);assertIdle();const profile=store.read(value.id),result=store.remove(value);invalidate(profile.provider);emit({method:'studio/accountUpdated',provider:profile.provider,params:{credentialsChanged:true}});return result;});

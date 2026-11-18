@@ -48,8 +48,8 @@ export function workerServiceVersionEvidence(worker){
  return {serviceVersion:health.runtime===prefix+expected?'current':'different'};
 }
 
-const sshSourceId=binding=>crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v2',binding])).digest('hex');
-function wslSourceId(binding){
+export const sshSourceId=binding=>crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v2',binding])).digest('hex');
+export function wslSourceId(binding){
  const {distribution,root,port}=binding||{};
  if(typeof distribution!=='string'||!distribution||typeof root!=='string'||!root.startsWith('/')||!Number.isInteger(port)||port<1024||port>65535)return null;
  return crypto.createHash('sha256').update(JSON.stringify(['studio-worker-source-v1',distribution,root,port])).digest('hex');

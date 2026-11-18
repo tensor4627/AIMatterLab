@@ -48,7 +48,9 @@ class Service(RegistrationsMixin, RunInputsMixin, RunsMixin, SchedulerMixin, Run
                 self.store.db.close()
                 raise
         from studio_worker.compute.cluster import Clusters
+        from studio_worker.compute.managed_schedules import ManagedSchedules
         self.clusters = Clusters(self)
+        self.managed_schedules = ManagedSchedules(self)
         self.stop_event = threading.Event()
         self.compute_setup_lock = threading.Lock()
         self.tool_configuration_lock = threading.RLock()

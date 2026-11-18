@@ -40,8 +40,8 @@ export function dshLegacyContext(turns){
 
 /** AIMatterLab protocol adapter. The official DSH subprocess owns every model/tool loop. */
 export class DshBridge extends EventEmitter{
- constructor({root,catalog,credential,worker,executable,instructions=STUDIO_INSTRUCTIONS,fetchApi=fetch,host=dshRuntime}={}){
-  super();Object.assign(this,{root,catalog,getCredential:credential,getWorker:worker,executable,instructions,fetchApi,host});this.provider='deepseek';this.pending=new Map();this.activeTurns=new Map();this.unconfirmedTurns=new Map();this.sessions=new Map();this.loaded=new Set();this.models=[];this.next=0;this.lifecycle=0;this.current=null;
+ constructor({root,catalog,credential,worker,executable,instructions=STUDIO_INSTRUCTIONS,fetchApi=fetch,host=dshRuntime,sessionProfileId}={}){
+  super();Object.assign(this,{root,catalog,getCredential:credential,getWorker:worker,executable,instructions,fetchApi,host,sessionProfileId});this.provider='deepseek';this.pending=new Map();this.activeTurns=new Map();this.unconfirmedTurns=new Map();this.sessions=new Map();this.loaded=new Set();this.models=[];this.next=0;this.lifecycle=0;this.current=null;
  }
  event(method,params){this.emit('event',this.cleanProtocol({provider:'deepseek',method,params}));}
  cleanValue(value){return sanitizeTranscript(value,[this.getCredential()?.apiKey,this.getWorker()?.tokens?.mcp]);}
@@ -72,7 +72,7 @@ export class DshBridge extends EventEmitter{
   if(this.activeTurns.size)throw Error('Stop the current reply before changing the DeepSeek runtime');
   if(this.unconfirmedTurns.size)throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');
   if(this.process||this.pending.size||this.isolationWaiter)this.stop({notify:false,preserveStart:true});
-  const generation=this.lifecycle,runtime=this.host.resolve({executable:this.executable}),profile=this.host.prepare(this.root,runtime,worker,this.instructions,{models:this.models});
+  const generation=this.lifecycle,runtime=this.host.resolve({executable:this.executable}),profile=this.host.prepare(this.root,runtime,worker,this.instructions,{models:this.models,sessionProfileId:this.sessionProfileId});
   let readyResolve,readyReject;const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;}),isolationWaiter={resolve:readyResolve,reject:readyReject};this.isolationWaiter=isolationWaiter;
   const child=this.host.spawn(runtime.file,[...runtime.args,...profile.args],{cwd:profile.cwd,env:{...profile.env,DEEPSEEK_API_KEY:this.getCredential().apiKey}});this.process=child;this.contextKey=key;this.loaded.clear();
   child.stdin?.on?.('error',()=>{if(this.process===child)this.stop({reason:'transport_error'});});

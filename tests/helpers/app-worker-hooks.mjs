@@ -66,6 +66,8 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440}={
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='../api/compute-resources')return loadNavigation('frontend/api/compute-resources.ts');
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
+  if(name==="../features/compute/useManagedResources")return {useManagedResources:()=>({resources:[],conversations:[],sources:[]})};
+  if(name==="../features/conversations/ConversationResourceStatus")return {__esModule:true,default:'ConversationResourceStatus'};
   if(name==="../features/conversations/useConversationSelection")return conversationSelection;
   if(name==="../features/workflows/useToolWorkflowNavigation")return loadNavigation('frontend/features/workflows/useToolWorkflowNavigation.ts');
   if(name==="../features/runs/RunReview")return {__esModule:true,default:'./RunReview',taskModule};

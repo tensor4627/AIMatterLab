@@ -7,6 +7,9 @@ import {deltaBundle} from './worker-delta.mjs';
 import {decodeGzipResponse} from './response-codec.mjs';
 import {serviceLaunch,validateServiceEnvironment} from './service-launch.mjs';
 export class TerminalFault extends Error{constructor(code,status=400){super(code);this.code=code;this.status=status;}}
+// The bundled node-pty ConPTY DLL waits for a final console byte to drain its
+// worker. An owned SSH PTY can exit silently, leaving that worker's pipe alive.
+export function drainOwnedConpty(terminal){terminal._agent?._conoutSocketWorker?.dispose?.();}
 const fail=(code,status)=>{throw new TerminalFault(code,status);};
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 export function exact(value,keys,required=keys){if(!object(value)||Object.keys(value).some(k=>!keys.includes(k))||required.some(k=>!Object.hasOwn(value,k)))fail('invalid_request');}
@@ -305,11 +308,17 @@ function createServiceLane({terminal,kind,epoch,reserve,prepareRelease,release,a
  function dispose(){flushPublic();if(!current)return;fault('service_disconnected');clearTimeout(current.stopTimer);current.stopReject?.(new TerminalFault('service_disconnected',410));current.active=false;current.status='disconnected';}
  return {active,state,start,request,stop,cancelStart,receive,publicOutput,flushPublic,dispose,hideMarker:value=>promptPrefixes.add(value)};
 }
-export function createTerminalSession({pty,plan,id=randomUUID(),now=Date.now,serviceTimeouts,connectionId,privateServiceChannel=false}){
+export function createTerminalSession({pty,plan,id=randomUUID(),now=Date.now,serviceTimeouts,connectionId,privateServiceChannel=false,useConptyDll=false}){
  if(typeof privateServiceChannel!=='boolean'||privateServiceChannel&&connectionId!==undefined)fail('invalid_request');
  if(connectionId!==undefined&&(typeof connectionId!=='string'||!/^[a-f0-9-]{36}$/i.test(connectionId)))fail('invalid_request');
- const value=validateOpen(plan);let terminal;try{terminal=pty.spawn(value.launch.file,value.launch.args,{name:'xterm-256color',cols:100,rows:30,cwd:value.launch.cwd,env:value.launch.env??Object.fromEntries(['SystemRoot','WINDIR','ComSpec','PATH','PATHEXT','TEMP','TMP','USERPROFILE'].filter(k=>typeof process.env[k]==='string').map(k=>[k,process.env[k]]))});}catch{fail('spawn_failed',502);}if(!Number.isSafeInteger(terminal.pid)||terminal.pid<=0){try{terminal.kill();}catch{}fail('spawn_failed',502);}
+ const value=validateOpen(plan);let terminal;try{terminal=pty.spawn(value.launch.file,value.launch.args,{name:'xterm-256color',cols:100,rows:30,cwd:value.launch.cwd,env:value.launch.env??Object.fromEntries(['SystemRoot','WINDIR','ComSpec','PATH','PATHEXT','TEMP','TMP','USERPROFILE'].filter(k=>typeof process.env[k]==='string').map(k=>[k,process.env[k]])),...useConptyDll?{useConptyDll:true}:{}});}catch{fail('spawn_failed',502);}if(!Number.isSafeInteger(terminal.pid)||terminal.pid<=0){try{terminal.kill();}catch{}fail('spawn_failed',502);}
  const createdAt=now(),expiresAt=createdAt+(value.ttlMs??86400000);let alive=true,exitCode=null,exitSignal=null,owner='human',ownerEpoch=1,scope=null,readFloor=0,sequence=0,ringBytes=0,ring=[],closed=false,dimensions={cols:100,rows:30},borrowing=false;const requests=new Map(),readWaiters=new Set();let humanInputSequence=0,lastHumanInput=null;
+ let terminating=false;
+ function terminate(){
+  if(!alive||terminating)return;
+  terminating=true;
+  try{terminal.kill();}catch(error){terminating=false;throw error;}
+ }
  const wakeReaders=()=>{for(const wake of [...readWaiters])wake();};
  const shellMarker='__STUDIO_SHELL_READY_'+randomBytes(12).toString('hex')+'_',shellCounter='STUDIO_PROMPT_'+randomBytes(8).toString('hex');let shellIntegrated=false,shellReady=false,shellTail='',shellSequence=0;
  const expired=()=>now()>=expiresAt;
@@ -320,8 +329,25 @@ export function createTerminalSession({pty,plan,id=randomUUID(),now=Date.now,ser
  const service=createServiceLane({terminal:{write(data){if(borrowing&&!shellIntegrated){shellIntegrated=true;const split=24;terminal.write(shellCounter+'=0; export '+shellCounter+'; PS1="${PS1-}"'+shellQuote('\\[\\e]0;')+shellQuote(shellMarker.slice(0,split))+shellQuote(shellMarker.slice(split))+shellQuote('$(( '+shellCounter+' += 1 ))__')+shellQuote('\\a\\]')+'; export PS1\r');}terminal.write(data);}},kind:value.kind,epoch:()=>ownerEpoch,available,publish:appendPublic,privateServiceChannel,reserve(request){if(request.borrowed){if(owner!=='agent'||scopeKey(request.scope)!==scopeKey(scope))fail('scope_mismatch',403);borrowing=true;shellReady=false;}else{if(owner!=='human')fail('agent_owns_session',423);borrowing=false;}try{terminal.resize(500,dimensions.rows);}catch{fail('resize_failed',502);}if(!borrowing){scope=null;ownerEpoch++;readFloor=sequence;requests.clear();humanInputSequence=0;lastHumanInput=null;wakeReaders();}},prepareRelease(){terminal.resize(Math.max(100,dimensions.cols),dimensions.rows);},release(){if(!borrowing){ownerEpoch++;readFloor=sequence;requests.clear();humanInputSequence=0;lastHumanInput=null;wakeReaders();}borrowing=false;try{terminal.resize(dimensions.cols,dimensions.rows);}catch{}},timeouts:serviceTimeouts});
  service.hideMarker('\x1b]0;'+shellMarker);
  terminal.onData(data=>{if(typeof data!=='string'||!alive||closed)return;shellTail=(shellTail+data).slice(-2048);if(shellIntegrated){for(const match of shellTail.matchAll(new RegExp(shellMarker+'([0-9]{1,12})__','g')))if(Number(match[1])>shellSequence){shellSequence=Number(match[1]);shellReady=true;}shellTail=shellTail.slice(-128);}const observation=service.receive(data);if(observation===true)return;if(observation)data=observation.output;appendPublic(service.publicOutput(data));});
- terminal.onExit(event=>{service.dispose();alive=false;wakeReaders();exitCode=Number.isInteger(event.exitCode)?event.exitCode:null;exitSignal=Number.isInteger(event.signal)?event.signal:null;});
+ terminal.onExit(event=>{if(useConptyDll)drainOwnedConpty(terminal);service.dispose();alive=false;wakeReaders();exitCode=Number.isInteger(event.exitCode)?event.exitCode:null;exitSignal=Number.isInteger(event.signal)?event.signal:null;});
  return {state,
+  async confirmFreshShell(assertCurrent){
+   const marker='__STUDIO_FRESH_SHELL_'+randomBytes(24).toString('hex')+'__';
+   assertCurrent();available();
+   // The echoed command contains quotes. Only a complete, bare marker line
+   // proves that the private PTY's login shell has executed it.
+   this.input({actor:'human',ownerEpoch,requestId:randomUUID(),data:"printf '\\n%s\\n' '"+marker+"'\r"});
+   const deadline=Date.now()+15000;let cursor=0,carry='';
+   while(Date.now()<deadline){
+    assertCurrent();available();
+    const result=await this.waitRead({actor:'human',ownerEpoch,cursor,maxBytes:65536,waitMs:250});
+    cursor=result.cursor;
+    carry=(carry+result.chunks.map(chunk=>chunk.data).join('')).slice(-8192);
+    const visible=carry.replace(/\x1b\](?:0|2);[^\x00-\x1f\x7f]{0,512}(?:\x07|\x1b\\)/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'');
+    if(visible.split(/\r?\n/).slice(0,-1).some(line=>line.trimEnd()===marker)){assertCurrent();return;}
+   }
+   fail('ssh_channel_unavailable',502);
+  },
   async waitShellReady(assertCurrent){const deadline=Date.now()+10000;while(Date.now()<deadline){assertCurrent();available();if(!service.active()&&(shellIntegrated?shellReady:/(?:^|[\r\n])[^\r\n]{0,300}[#$%>]\s*$/.test(shellTail.replace(/\x1b\](?:0|2);[^\x00-\x1f\x7f]{0,512}\x07/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,''))))return;await new Promise(resolve=>setTimeout(resolve,20));}fail('terminal_busy',423);},
   async waitRead(request){
    exact(request,['actor','ownerEpoch','cursor','maxBytes','waitMs'],['actor','ownerEpoch','waitMs']);
@@ -352,9 +378,9 @@ export function createTerminalSession({pty,plan,id=randomUUID(),now=Date.now,ser
   },
   owner(request){exact(request,['owner','ownerEpoch','scope'],['owner','ownerEpoch']);available();if(service.active())fail('service_active',423);if(!['human','agent'].includes(request.owner)||request.ownerEpoch!==ownerEpoch)fail('owner_changed',409);const next=request.owner==='agent'?terminalScope(request.scope):null;if(request.owner==='human'&&request.scope!==undefined)fail('invalid_scope');service.flushPublic();owner=request.owner;scope=next;ownerEpoch++;readFloor=sequence;requests.clear();humanInputSequence=0;lastHumanInput=null;wakeReaders();return state();},
   resize(request){exact(request,['actor','scope','ownerEpoch','cols','rows'],['actor','ownerEpoch','cols','rows']);if(service.active())fail('service_active',423);authorize(request);available();if(!Number.isInteger(request.cols)||request.cols<10||request.cols>500||!Number.isInteger(request.rows)||request.rows<2||request.rows>300)fail('invalid_size');try{terminal.resize(request.cols,request.rows);dimensions={cols:request.cols,rows:request.rows};}catch{fail('resize_failed',502);}return{resized:true,id};},
-  close(request){exact(request,['actor','scope','ownerEpoch'],['actor','ownerEpoch']);if(!['human','agent'].includes(request.actor)||!Number.isSafeInteger(request.ownerEpoch))fail('invalid_request');if(request.actor==='agent'&&(!request.scope||scopeKey(request.scope)!==scopeKey(scope)))fail('scope_mismatch',403);if(request.ownerEpoch!==ownerEpoch)fail('owner_changed',409);if(!closed){closed=true;ownerEpoch++;}service.dispose();if(alive){try{terminal.kill();}catch{fail('close_failed',502);}}return state();},
+  close(request){exact(request,['actor','scope','ownerEpoch'],['actor','ownerEpoch']);if(!['human','agent'].includes(request.actor)||!Number.isSafeInteger(request.ownerEpoch))fail('invalid_request');if(request.actor==='agent'&&(!request.scope||scopeKey(request.scope)!==scopeKey(scope)))fail('scope_mismatch',403);if(request.ownerEpoch!==ownerEpoch)fail('owner_changed',409);if(!closed){closed=true;ownerEpoch++;}service.dispose();try{terminate();}catch{fail('close_failed',502);}return state();},
   serviceStart:service.start,serviceRequest:service.request,serviceStop:service.stop,serviceCancelStart:service.cancelStart,serviceState:()=>({...state(),...service.state()}),
-  dispose(){if(!closed){closed=true;ownerEpoch++;}service.dispose();if(alive){try{terminal.kill();}catch{}}return state();},
+  dispose(){if(!closed){closed=true;ownerEpoch++;}service.dispose();try{terminate();}catch{}return state();},
   bufferedBytes:()=>ringBytes
  };
 }

@@ -434,9 +434,9 @@ def resources(value, p, seconds):
     return r
 
 
-def batch_script(run):
+def scheduler_headers(run):
     p, r = run["cluster_snapshot"], run["resources"]
-    name, remote = run["job_name"], run["remote_directory"]
+    name = run["job_name"]
     header = ["#!/bin/bash"]
     if p["scheduler"] == "slurm":
         header += [f"#SBATCH --job-name={name}", f"#SBATCH --partition={r['queue']}",
@@ -457,6 +457,13 @@ def batch_script(run):
             header.append(f'#BSUB -gpu "num={r["gpus"]}"')
         if r.get("account"):
             header.append("#BSUB -P " + r["account"])
+    return header
+
+
+def batch_script(run):
+    p, r = run["cluster_snapshot"], run["resources"]
+    remote = run["remote_directory"]
+    header = scheduler_headers(run)
     python = shlex.quote(p["environment"]["executables"]["python"])
 
     remote_path='"$HOME"/'+shlex.quote(remote[2:]) if remote.startswith("~/") else shlex.quote(remote)
@@ -905,7 +912,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
         parent = None
         if spec.get("revision_of"):
             parent = self.raw(spec["revision_of"])
-            if parent["project_id"] != project["id"] or parent["status"] not in ("draft", "ready"):
+            if parent["project_id"] != project["id"] or parent["status"] not in ("draft", "ready") or parent.get('managed_child'):
                 raise PermissionError("Only an unsubmitted run in the same project may be revised")
             roots.append(parent["directory"])
         # Private custom primitives are local-only in this generation. Reject
@@ -1029,6 +1036,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
 
     def validate(self, identifier):
         r = self.raw(identifier)
+        if r.get("managed_child"):
+            raise PermissionError("Managed child plans are verified by their owning schedule")
         project,current=self.allowed(r["project_id"],r["cluster_id"])
         if r["engine"] not in project["policy"]["engines"] or r["max_seconds"]>project["policy"]["max_seconds"]:
             raise PermissionError("Current project policy no longer permits this draft")
@@ -1056,6 +1065,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
 
     def revise(self,identifier,changes):
         parent=self.raw(identifier)
+        if parent.get("managed_child"):
+            raise PermissionError("Use the owning schedule to edit this operation")
         allowed=("name","engine","max_seconds","resources","inputs","remote_inputs","directory_name","parameters")
         if any(k not in allowed for k in changes):raise ValueError("Unsupported revision field")
         spec={k:parent[k] for k in ("project_id","cluster_id",*allowed) if k in parent}
@@ -1065,6 +1076,9 @@ print('__STUDIO_JSON__'+json.dumps(out))
         return self.prepare(spec)
 
     def archive(self, r):
+        if r.get("managed_child"):
+            from studio_worker.compute.managed_child import archive_child
+            return archive_child(r)
         buffer = io.BytesIO()
         root = Path(r["directory"])
         validate = """import sys,json,os
@@ -1126,7 +1140,7 @@ elif r['engine']=='pydyn.md':
                 add(".studio/studio_worker/"+name,data)
         return buffer.getvalue()
 
-    def submit(self, identifier):
+    def submit(self, identifier, *, managed=None, timeout=90):
         def reviewed():
             r=self.raw(identifier)
             project,p=self.allowed(r["project_id"],r["cluster_id"])
@@ -1135,7 +1149,14 @@ elif r['engine']=='pydyn.md':
                 return None,None
             if r["status"] not in ("draft","ready"):
                 raise ValueError("Only an unsubmitted input snapshot can be submitted")
-            self.validate(identifier)
+            if r.get("managed_child"):
+                scheduler = getattr(self.service, 'managed_schedules', None)
+                if scheduler is None or not scheduler.can_submit_child(r, managed):
+                    raise PermissionError("Only the owning due schedule may submit this child")
+                from studio_worker.compute.managed_child import validate_child
+                validate_child(self.service, r)
+            else:
+                self.validate(identifier)
             busy=[x for x in self.store.list("cluster-run") if x["project_id"]==r["project_id"] and x["status"] in ("queued","running","unknown")]
             if len(busy)+sum(x["project_id"]==r["project_id"] and x["status"] in ("running","unknown") for x in self.store.runs())>=project["policy"]["max_concurrent"]:
                 raise PermissionError("Project concurrency limit reached")
@@ -1197,7 +1218,7 @@ print('__STUDIO_JSON__'+json.dumps(record))
             # remote side effect. Unknown attempts are never automatically replayed.
             self.save(r,status="unknown",submit_attempted=True)
         try:
-            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=data,timeout=90))
+            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=data,timeout=timeout))
             if result.get("nonce")!=r["nonce"] or not re.fullmatch(r"[0-9]+",result.get("job_id","")):
                 raise ValueError("Invalid scheduler receipt")
             with self.store.lock:
@@ -1216,9 +1237,13 @@ print('__STUDIO_JSON__'+json.dumps(record))
                     self.save(current,error="Submission reply unavailable; reconcile only, never resubmit")
         return self.run(identifier)
 
-    def poll(self, identifier):
+    def poll(self, identifier, *, managed=None, timeout=None):
         with self.store.lock:
             r=self.raw(identifier);self.allowed(r["project_id"],r["cluster_id"])
+            scheduler = getattr(self.service, 'managed_schedules', None)
+            if (r.get("managed_child") or r.get("managed_schedule_parent")) and (
+                    scheduler is None or not scheduler.can_poll(r, managed)):
+                return self.run(identifier)
             if r["status"] in ("draft","ready",*TERMINAL):
                 return self.run(identifier)
             # Additive per-request ownership; legacy records need no migration.
@@ -1227,12 +1252,12 @@ print('__STUDIO_JSON__'+json.dumps(record))
             self.save(r,observation_token=token,identity_verified=False)
         p=r["cluster_snapshot"]
         source="""
-import pathlib,subprocess
+import pathlib,re,subprocess
 d=pathlib.Path(p['root']).expanduser().resolve()/p.get('directory',p['id']);out={'job_id':p.get('job_id'),'state':'unknown'}
 receipt=d/'.submission-receipt.json'
 if receipt.exists():
  v=json.load(open(receipt))
- if v.get('nonce')==p['nonce']:out['job_id']=v['job_id']
+ if v.get('nonce')==p['nonce'] and re.fullmatch(r'[0-9]+',str(v.get('job_id',''))):out['job_id']=str(v['job_id'])
 if not out['job_id'] and (d/'.submit-attempt').exists() and (d/'.submit-attempt').read_text()==p['nonce']:
  if p['scheduler']=='lsf':
   found=subprocess.run(['bjobs','-a','-J',p['name'],'-l'],capture_output=True,text=True,timeout=15)
@@ -1241,10 +1266,10 @@ if not out['job_id'] and (d/'.submit-attempt').exists() and (d/'.submit-attempt'
  else:
   found=subprocess.run(['squeue','-h','--name',p['name'],'-o','%i|%j'],capture_output=True,text=True,timeout=15)
   matches=[row.split('|')[0] for row in found.stdout.splitlines() if row.split('|')[-1].strip()==p['name']]
- if len(matches)==1:out['job_id']=matches[0]
+ if len(matches)==1 and re.fullmatch(r'[0-9]+',matches[0]):out['job_id']=matches[0]
 if (d/'exit.json').exists():
  v=json.load(open(d/'exit.json'))
- if v.get('nonce')==p['nonce']:out['exit']=v
+ if v.get('nonce')==p['nonce'] and type(v.get('exit_code')) is int:out['exit']=v
 if (d/'validation.json').exists():out['validation']=json.load(open(d/'validation.json'))
 if (d/'execution-check.json').exists():out['execution_check']=json.load(open(d/'execution-check.json'))
 if out['job_id']:
@@ -1268,7 +1293,9 @@ if out['job_id']:
 print('__STUDIO_JSON__'+json.dumps(out))
 """
         try:
-            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"job_id":r["job_id"],"scheduler":p["scheduler"],"name":r["job_name"]})))
+            script=python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"job_id":r["job_id"],"scheduler":p["scheduler"],"name":r["job_name"]})
+            transport=self.transport(p)
+            result=parse_output(transport.run(script) if timeout is None else transport.run(script,timeout=timeout))
             with self.store.lock:
                 current=self.raw(identifier)
                 if current.get("observation_token")!=token or current["status"] in TERMINAL:
@@ -1282,39 +1309,50 @@ print('__STUDIO_JSON__'+json.dumps(out))
                     status="succeeded" if receipt["exit_code"]==0 else "failed"
                 if (state=="CANCELLED" or result.get("cancelled_by_owner") is True) and (receipt or {}).get("exit_code")!=0:
                     status="cancelled"
+                verified = result.get("identity_verified") is True
                 self.save(current,status=status,job_id=result.get("job_id") or current["job_id"],scheduler_state=state,connection_action=None,
-                          scientific_validation=validation,execution_check=result.get('execution_check',current.get('execution_check')),exit=receipt,identity_verified=result.get("identity_verified",False))
+                          scientific_validation=validation,execution_check=result.get('execution_check',current.get('execution_check')),exit=receipt,identity_verified=verified,
+                          observed_at=time.time() if verified or receipt else current.get('observed_at'))
         except Exception as error:
             with self.store.lock:
                 current=self.raw(identifier)
                 if current.get("observation_token")!=token or current["status"] in TERMINAL:
                     return self.run(identifier)
-                from studio_worker.compute.ssh_auth import AuthError
                 changes = {}
-                if isinstance(error, AuthError) and str(error) == 'needs_human_auth':
-                    changes['connection_action'] = {'kind': 'authenticate_original_run',
-                                                    'code': 'needs_human_auth', 'runId': r['id']}
+                if str(error) == 'needs_human_auth':
+                    from studio_worker.compute.ssh_auth import AuthError
+                    if isinstance(error, AuthError):
+                        changes['connection_action'] = {'kind': 'authenticate_original_run',
+                                                        'code': 'needs_human_auth', 'runId': r['id']}
                 self.save(current,status="unknown",error="SSH or scheduler state unavailable; no resubmission",**changes)
         return self.run(identifier)
 
-    def cancel(self, identifier):
+    def cancel(self, identifier, *, managed=None, timeout=None):
         # Record the user's intent before even the status query can lose its
         # acknowledgement. Polling never proves the cancellation was delivered.
         with self.store.lock:
             before=self.raw(identifier)
             self.allowed(before['project_id'],before['cluster_id'])
+            scheduler = getattr(self.service, 'managed_schedules', None)
+            if before.get("managed_child") and (scheduler is None or not scheduler.can_cancel_child(before, managed)):
+                raise PermissionError("Stop the owning schedule to cancel its verified child")
+            if before.get("managed_schedule_parent") and not before.get("managed_child") and scheduler is not None:
+                # The explicit run-cancel action is independent of stopping a schedule.
+                managed = scheduler.explicit_parent_cancel
             if before['status'] in TERMINAL or identifier in self._cancelling:return self.run(identifier)
             requested={"status":"requested", "requested_at":(before.get('cancellation') or {}).get('requested_at') or time.time(), "signal_sent":False}
             self.save(before,cancel_requested=True,cancellation=requested)
             self._cancelling.add(identifier)
         try:
-            return self._cancel_verified_job(identifier,requested)
+            if managed is None and timeout is None:
+                return self._cancel_verified_job(identifier,requested)
+            return self._cancel_verified_job(identifier,requested,managed=managed,timeout=timeout)
         finally:
             with self.store.lock:
                 self._cancelling.discard(identifier)
 
-    def _cancel_verified_job(self, identifier, requested):
-        observed=self.poll(identifier)
+    def _cancel_verified_job(self, identifier, requested, *, managed=None, timeout=None):
+        observed=self.poll(identifier) if managed is None else self.poll(identifier,managed=managed,timeout=timeout)
         with self.store.lock:
             r=self.raw(identifier)
             self.allowed(r['project_id'],r['cluster_id'])
@@ -1327,14 +1365,15 @@ print('__STUDIO_JSON__'+json.dumps(out))
             command=["bkill" if p["scheduler"]=="lsf" else "scancel",r["job_id"]]
             self.save(r,cancellation={**requested,"signal_sent":None})
         try:
-            self.transport(p).run(shlex.join(command))
+            transport = self.transport(p)
+            transport.run(shlex.join(command)) if timeout is None else transport.run(shlex.join(command),timeout=timeout)
         except Exception as exc:
             self.merge(identifier,cancellation={**requested,"status":"unconfirmed","signal_sent":None,"message":str(exc)[:300]})
             raise
         self.merge(identifier,cancellation={**requested,"signal_sent":True})
         return self.run(identifier)
 
-    def read(self, identifier, name="console.log", offset=0):
+    def read(self, identifier, name="console.log", offset=0, *, limit=262144, timeout=None):
         r=self.raw(identifier);self.allowed(r["project_id"],r["cluster_id"])
         if name not in ("console.log","queue.out","queue.err","validation.stdout","validation.stderr"):
             raise ValueError("Select a bounded known log")
@@ -1343,13 +1382,15 @@ print('__STUDIO_JSON__'+json.dumps(out))
 import pathlib
 d=pathlib.Path(p['root']).expanduser().resolve()/p.get('directory',p['id']);f=(d/p['name']).resolve()
 if d.resolve() not in f.parents:raise ValueError('Invalid log path')
-text='';offset=0
-if f.is_file():
+text='';offset=0;present=f.is_file()
+if present:
  with open(f,'rb') as stream:
-  stream.seek(max(0,int(p['offset'])));text=stream.read(262144).decode('utf8','replace');offset=stream.tell()
-print('__STUDIO_JSON__'+json.dumps({'text':text,'offset':offset}))
+  stream.seek(max(0,int(p['offset'])));text=stream.read(p['limit']).decode('utf8','replace');offset=stream.tell()
+print('__STUDIO_JSON__'+json.dumps({'text':text,'offset':offset,'present':present}))
 """
-        return parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"name":name,"offset":offset})))
+        script=python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"name":name,"offset":offset,"limit":limit})
+        transport=self.transport(p)
+        return parse_output(transport.run(script) if timeout is None else transport.run(script,timeout=timeout))
 
 
     @staticmethod
@@ -1502,13 +1543,16 @@ print('__STUDIO_JSON__'+json.dumps(out))
             return
         self.last_poll = now
         runs = self.store.list("cluster-run")
-        active = {r["id"] for r in runs if r["status"] in ("queued", "running", "unknown")}
+        active = {r["id"] for r in runs if r["status"] in ("queued", "running", "unknown") and
+                  not (r.get("managed_child") or r.get("managed_schedule_parent"))}
         for identifier in list(self._next_poll):
             if identifier not in active:
                 self._next_poll.pop(identifier, None)
                 self._unknown_backoff.pop(identifier, None)
         for r in runs:
             status = r["status"]
+            if r.get("managed_child") or r.get("managed_schedule_parent"):
+                continue
             if status not in ("queued", "running", "unknown"):
                 continue
             if now < self._next_poll.get(r["id"], 0):

@@ -6,6 +6,7 @@ import {toolActivity} from './tool-activity.mjs';
 export function messageForItem(item){
  if(!item||typeof item.id!=='string')return null;
  if(item.type==='userMessage')return {id:item.id,role:'user',text:visibleUserText(item.content||[])};
+ if(item.type==='serviceMessage')return {id:item.id,role:'service',text:item.text||''};
  if(item.type==='agentMessage')return {id:item.id,role:'agent',text:item.text||''};
  if(item.type==='mcpToolCall')return {id:item.id,role:'tool',text:item.tool||'工具',toolName:item.tool,activity:toolActivity(item)};
  if(item.type==='commandExecution'){

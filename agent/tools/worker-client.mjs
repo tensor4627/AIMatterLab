@@ -5,7 +5,8 @@ import {environmentApiFailure} from '../../backend/main/compute/environment-api-
 import {McpProviderScopes,providerContext} from './provider-scope.mjs';
 import {toolFailure,toolValueResult,validToolCall,validRpcRequest,validToolResponse} from './tool-failure.mjs';
 export class WorkerClient extends ComputeWorkerClient{
- constructor(options={}){super({...options,providerScopes:new McpProviderScopes()});this.providerContexts=new Map();}
+ constructor(options={}){super({...options,providerScopes:new McpProviderScopes()});this.providerContexts=new Map();this.runToolScope=(_scope,run)=>run();}
+setToolScope(run){this.runToolScope=run;}
 setAuthoringGuard(guard){this.authoringGuard=guard;}
 setResourceUseGuard(guard){this.resourceUseGuard=guard;}
 setLocalTools(definitions,handler){this.localDefinitions=definitions;this.localHandler=handler;}
@@ -13,18 +14,18 @@ setProjectSkills(skills){this.projectSkills=skills;}
 setScopedTools(definitions,handler){this.scopedDefinitions=definitions;this.scopedHandler=handler;}
 bindProviderContext(provider,context,options={}){
   if(!['codex','kimi','qwen','deepseek','compatible'].includes(provider))throw Error('Unsupported provider');
-  const normalized=providerContext(context);this.providerContexts.set(provider,normalized);
+  const normalized=providerContext(context);this.providerContexts.set(options.sessionId??provider,{provider,context:normalized});
   if(!this.connection)return {context:normalized,epoch:null,changed:true,rotated:false};
   this.providerScopes.bind(this.connection);return this.providerScopes.bindContext(provider,normalized,options);
  }
-providerConnection(provider){
+providerConnection(provider,sessionId){
   if(!this.connection||this.connecting||this.restoring)return undefined;
   this.providerScopes.bind(this.connection);
-  const context=this.providerContexts.get(provider);
-  if(context&&!this.providerScopes.scopes.has(provider))this.providerScopes.bindContext(provider,context);
-  return this.providerScopes.connection(provider,this.connection);
+  const binding=this.providerContexts.get(sessionId??provider);
+  if(binding?.provider===provider&&!this.providerScopes.get(provider,sessionId))this.providerScopes.bindContext(provider,binding.context,{sessionId});
+  return this.providerScopes.connection(provider,this.connection,sessionId);
  }
-revokeProvider(provider){this.providerScopes.revoke(provider);}
+revokeProvider(provider,sessionId){this.providerScopes.revoke(provider,sessionId);if(sessionId!==undefined)this.providerContexts.delete(sessionId);}
 async discoverTools(id,{refresh=false}={}){
   const connection=this.connection,previous=this.toolCatalog?.connection===connection?this.toolCatalog:null;
   let catalog=previous;
@@ -49,7 +50,7 @@ async exposeTools(health){
    if(!['GET','POST'].includes(req.method)){reject(405);return;}
    let authoringToken,body,dispatched=false;
    const fresh=()=>{if(scope.checkCurrent()!==true){const error=Error('Provider context lease expired');error.staleProviderScope=true;throw error;}};
-   try{
+   try{await this.runToolScope(scope,async()=>{
     const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>4*1024*1024)throw Error('Request too large');chunks.push(chunk);}
     fresh();
     body=bytes?JSON.parse(Buffer.concat(chunks).toString('utf8')):undefined;
@@ -90,7 +91,7 @@ async exposeTools(health){
     if(body?.method==='tools/list'&&scope.localReaders&&response.data?.result?.tools)response.data.result.tools.push(...(this.projectSkills?.tools()||[]));
     fresh();
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
-   }catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){reject(403);}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched})}));}else{reject(502,{error:e.message});}}
+   });}catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){reject(403);}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched})}));}else{reject(502,{error:e.message});}}
   });
   await new Promise((resolve,reject)=>{this.proxy.once('error',reject);this.proxy.listen(0,'127.0.0.1',resolve);});
   this.connection.url='http://127.0.0.1:'+this.proxy.address().port;

@@ -13,7 +13,7 @@ export const SETTINGS_KEYS = Object.freeze([
  'autoDiscoverCompute','scientificSkillProviders','pygasSkillProviders','projectAgents',
  'agentLayout','agentProvider','kimiPath','qwenPath','agentProviders',
  'distribution','workerRoot','workerPort','codexPath','cwd','sourceRoots','sourceIds',
- 'skillRoots','userCacheDirectory','theme','language','fontFamily','fontSize','minimumFontSize','chatFontSize',
+ 'skillRoots','userCacheDirectory','theme','resourceBadgeMotion','language','fontFamily','fontSize','minimumFontSize','chatFontSize',
  'editorFontSize','terminalFontSize','terminalIdleMinutes','agent'
 ]);
 
@@ -51,6 +51,7 @@ export function normalizeSettings(current, data = {}) {
  if (next.cwd !== undefined && (typeof next.cwd !== 'string' || !next.cwd.trim() || /[\r\n\0]/.test(next.cwd))) throw new Error('Invalid working directory');
  if (next.projectAgents !== undefined && (!next.projectAgents || typeof next.projectAgents !== 'object' || Array.isArray(next.projectAgents) ||
      Object.entries(next.projectAgents).some(([id,agent]) => typeof id !== 'string' || !id || !PROVIDERS.includes(agent)))) throw new Error('Invalid project agent binding');
+ if (next.resourceBadgeMotion !== undefined && !['wave','breathe'].includes(next.resourceBadgeMotion)) throw Error('Invalid resource badge motion');
  if (next.theme !== undefined && !THEMES.includes(next.theme)) throw Error('Unsupported theme');
  return next;
 }

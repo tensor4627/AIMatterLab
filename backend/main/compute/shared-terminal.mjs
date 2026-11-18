@@ -7,14 +7,14 @@ import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {prepareTerminalRuntimeAsync,TERMINAL_RUNTIME_SCHEMA} from './terminal-runtime.mjs';
 import {sshServiceEnvironmentGuide} from './ssh-service-environment-guide.mjs';
-import {multiplexProfile} from '../../../desktop/platform/terminal-service/ssh-connection.mjs';
+import {multiplexProfile,sshLoginName} from '../../../desktop/platform/terminal-service/ssh-connection.mjs';
 
 const object=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const fail=code=>{throw Error(code);};
 const readErrors={cursor:'terminal_invalid_request: cursor must be a non-negative integer sequence returned by read, or omitted.',maxBytes:'terminal_invalid_request: max_bytes must be a positive integer at most 65536, or omitted.'};
 const writeErrors={session:'terminal_invalid_request: session_id is required; use the id returned by list_shared_terminals.',request:'terminal_invalid_request: request_id is required and must contain 1-100 letters, digits, underscores or hyphens; reuse it only for the same input.',action:'terminal_invalid_request: action must be type, enter or interrupt.',data:'terminal_invalid_request: action type requires non-empty data of at most 8192 UTF-8 bytes without NUL. Use action enter for Enter or interrupt for Ctrl+C.',keyData:'terminal_invalid_request: enter and interrupt accept no data; send text separately with action type.'};
 function invalidWrite(message){throw Object.assign(Error(message),{operationNotStarted:true});}
-function terminalToolInput(args){
+export function terminalToolInput(args){
  if(!identifier(args.session_id))invalidWrite(writeErrors.session);
  if(typeof args.request_id!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(args.request_id))invalidWrite(writeErrors.request);
  const action=args.action===undefined?'type':args.action;if(!['type','enter','interrupt'].includes(action))invalidWrite(writeErrors.action);
@@ -33,7 +33,7 @@ brokerRefusals.set('service_start_cancelled','terminal_service_changed');
 codes.add('terminal_login_unknown');
 const servicePhases=new Set(['preparing_environment','waiting_python','checking_cache','transferring_transport','transferring_worker','preparing_runtime','starting_worker','checking_health','ready','stopping','returning_terminal']);
 const remoteServiceErrors=new Set(['environment_activation_failed','python_start_failed','python_response_timeout','python_unsupported','sqlite_unavailable','tty_unavailable','invalid_hello','protocol_failed','transport_hash_mismatch','transport_cache_invalid','worker_hash_mismatch','worker_cache_invalid','namespace_unsafe','permission_denied','storage_unavailable','worker_start_timeout','worker_start_failed','worker_identity_unavailable','worker_health_invalid','service_request_unconfirmed','internal_error']);
-for(const code of ['ssh_connection_not_found','ssh_connection_changed','ssh_connection_limit','ssh_authentication_unconfirmed','ssh_authentication_not_pending','ssh_multiplex_unsupported','ssh_linux_client_namespace_required','ssh_route_requires_review','ssh_master_identity_changed','ssh_master_unavailable','ssh_control_identity_changed','ssh_control_unavailable','ssh_control_timeout','ssh_control_output_limit','ssh_channel_unavailable','ssh_close_unconfirmed','ssh_close_cleanup_unconfirmed','ssh_invalid_profile','ssh_client_unavailable']){codes.add(code);brokerRefusals.set(code,code);}
+for(const code of ['ssh_connection_not_found','ssh_connection_changed','ssh_connection_limit','ssh_authentication_unconfirmed','ssh_authentication_not_pending','ssh_multiplex_unsupported','ssh_native_key_path_required','ssh_remote_terminal_unavailable','ssh_linux_client_namespace_required','ssh_route_requires_review','ssh_master_identity_changed','ssh_master_unavailable','ssh_control_identity_changed','ssh_control_unavailable','ssh_control_timeout','ssh_control_output_limit','ssh_channel_unavailable','ssh_close_unconfirmed','ssh_close_cleanup_unconfirmed','ssh_invalid_profile','ssh_client_unavailable']){codes.add(code);brokerRefusals.set(code,code);}
 remoteServiceErrors.add('maintenance_required');
 function typed(v,keys){if(!object(v)||Object.keys(v).some(k=>!keys.includes(k)))fail('terminal_invalid_request');}
 function text(v,max=512){return typeof v==='string'&&v.length>0&&v.length<=max&&!/[\r\n\0]/.test(v);}
@@ -49,7 +49,7 @@ const winAbsolute=v=>/^[A-Za-z]:[\\/]/.test(v)||/^\\\\[^\\]/.test(v);
 export function buildTerminalLaunch(profile,mode,settings={}){
  if(!['interactive','key'].includes(mode)||!object(profile))fail('terminal_invalid_request');
  const host=profile.host,user=profile.username,port=profile.port;
- if(!text(host,255)||!/^[A-Za-z0-9_][A-Za-z0-9_.:-]*$/.test(host)||!text(user,100)||!/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(user)||!Number.isInteger(port)||port<1||port>65535)fail('terminal_saved_connection_changed');
+ if(!text(host,255)||!/^[A-Za-z0-9_][A-Za-z0-9_.:-]*$/.test(host)||!text(user,457)||!sshLoginName.test(user)||!Number.isInteger(port)||port<1||port>65535)fail('terminal_saved_connection_changed');
  if(profile.import_review?.requires_review===true)fail('terminal_route_review_required');
  const client=profile.ssh_client,key=profile.identity_file||'',jumps=profile.proxy_jump||[],via=profile.via||[];
  if(!text(client,4096)||!text(key||'default',4096)||!Array.isArray(jumps)||jumps.length>8||!Array.isArray(via)||via.length>8||[...jumps,...via].some(v=>!text(v,255)||!/^[A-Za-z0-9_][A-Za-z0-9_.@:\[\]-]*$/.test(v)))fail('terminal_route_review_required');
@@ -96,12 +96,12 @@ function descriptorValid(d){
  try{const u=new URL(d.origin);return u.protocol==='http:'&&u.hostname==='127.0.0.1'&&!!u.port&&u.pathname==='/'&&!u.search&&!u.hash&&!u.username&&!u.password&&d.origin===u.origin;}catch{return false;}
 }
 function localRequest(d,method,route,body){return new Promise((resolve,reject)=>{
- if(!descriptorValid(d)||!/^\/(?:health|shutdown|connections(?:\/open|\/profile\/(?:prepare|commit|abort)|\/[A-Za-z0-9_-]+\/(?:state|confirm|login\/(?:complete|status\/[A-Za-z0-9_-]{1,100})|auth\/(?:read|input|resize)|shell\/open|close|service\/(?:start|state|request|stop|cancel)))?|sessions(?:\/[A-Za-z0-9_-]+(?:\/(?:state|read|input|resize|owner|close|service\/(?:start|request|stop|cancel|state)))?)?)$/.test(route))return reject(Error('terminal_unavailable'));
- const serviceRoute=route.includes('/service/'),loginRoute=route.endsWith('/login/complete'),queuedShellRoute=/^\/sessions\/[^/]+\/(?:input|resize|owner|close)$/.test(route),transportError=()=>{const error=Error(serviceRoute||queuedShellRoute?'terminal_service_unknown':loginRoute?'terminal_login_unknown':'terminal_unavailable');if(serviceRoute||loginRoute||queuedShellRoute)error.terminalRejected=true;return error;};
+ if(!descriptorValid(d)||!/^\/(?:health|shutdown|connections(?:\/open|\/profile\/(?:prepare|commit|abort)|\/[A-Za-z0-9_-]+\/(?:state|confirm|login\/(?:complete|status\/[A-Za-z0-9_-]{1,100})|auth\/(?:read|input|resize)|shell\/open|close|managed-shell\/(?:open|state|read|input|close)|service\/(?:start|state|request|private-request|stop|cancel)))?|sessions(?:\/[A-Za-z0-9_-]+(?:\/(?:state|read|input|resize|owner|close|service\/(?:start|request|stop|cancel|state)))?)?)$/.test(route))return reject(Error('terminal_unavailable'));
+ const serviceRoute=route.includes('/service/'),managedRoute=route.includes('/managed-shell/'),loginRoute=route.endsWith('/login/complete'),queuedShellRoute=/^\/sessions\/[^/]+\/(?:input|resize|owner|close)$/.test(route),transportError=()=>{const error=Error(serviceRoute||queuedShellRoute?'terminal_service_unknown':loginRoute?'terminal_login_unknown':'terminal_unavailable');if(serviceRoute||loginRoute||queuedShellRoute||managedRoute)error.terminalRejected=true;return error;};
  const data=body===undefined?undefined:JSON.stringify(body),req=http.request(d.origin+route,{method,headers:{Authorization:'Bearer '+d.controlToken,...data?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(data)}:{}}},res=>{
   const chunks=[];let size=0;res.on('data',chunk=>{size+=chunk.length;if(size>(serviceRoute?8*1024*1024+65536:1024*1024)){res.destroy();reject(transportError());}else chunks.push(chunk);});
   res.on('error',()=>reject(transportError()));res.on('aborted',()=>reject(transportError()));res.on('end',()=>{try{const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(res.statusCode===200)return resolve(value);const code=brokerRefusals.get(value?.error);if(code&&[400,403,409,410,413,423,429,502,503].includes(res.statusCode)){const error=Error(code);error.terminalRejected=true;error.noSessionCreated=route==='/sessions/open'&&['session_limit','spawn_failed'].includes(value.error);return reject(error);}}catch{}reject(transportError());});
- });req.on('error',()=>reject(transportError()));req.setTimeout(loginRoute?60000:route.endsWith('/service/start')?630000:route.endsWith('/confirm')?20000:route.endsWith('/service/request')||queuedShellRoute?260000:/\/service\/(stop|cancel)$/.test(route)?15000:5000,()=>{req.destroy();reject(transportError());});if(data)req.write(data);req.end();
+ });req.on('error',()=>reject(transportError()));req.setTimeout(loginRoute?60000:route.endsWith('/service/start')?630000:route.endsWith('/confirm')?20000:/\/service\/(?:private-)?request$/.test(route)||queuedShellRoute?260000:managedRoute?55000:/\/service\/(stop|cancel)$/.test(route)?15000:5000,()=>{req.destroy();reject(transportError());});if(data)req.write(data);req.end();
 });}
 const safeState=s=>({id:s.id,sessionId:s.id,kind:s.kind,mode:s.mode,name:s.kind==='ssh'?'SSH terminal':'Local terminal',owner:s.owner,ownerEpoch:s.ownerEpoch,...Number.isSafeInteger(s.humanInputSequence)&&s.humanInputSequence>=0?{humanInputSequence:s.humanInputSequence}:{},...s.outputWait===true?{outputWait:true}:{},alive:s.alive===true,expired:s.expired===true,status:s.expired===true?'expired':s.alive===true?'running':s.alive===false?'exited':'unknown',sequence:s.sequence||0,serviceActive:s.serviceActive===true,serviceStatus:['idle','connecting','connected','disconnected','failed'].includes(s.serviceStatus)?s.serviceStatus:'idle',...Number.isInteger(s.exitCode)?{exitCode:s.exitCode}:{}});
 function stateValid(s){return object(s)&&identifier(s.id)&&['local','ssh'].includes(s.kind)&&['interactive','key'].includes(s.mode)&&['human','agent'].includes(s.owner)&&Number.isSafeInteger(s.ownerEpoch)&&s.ownerEpoch>=0&&typeof s.alive==='boolean';}
@@ -237,7 +237,7 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
  async function ownedHuman(data,keys,context=current){typed(data,['sessionId',...keys]);const c=snapshot(!!known.get(data.sessionId)?.profile,context);const s=await state(data.sessionId);check(c);return {c,s};}
  function boundsRead(data){if(data.waitMs!==undefined&&(!Number.isInteger(data.waitMs)||data.waitMs<1||data.waitMs>1500))fail('terminal_invalid_request');if(data.cursor!==undefined)epoch(data.cursor);if(data.maxBytes!==undefined&&(!Number.isInteger(data.maxBytes)||data.maxBytes<16384||data.maxBytes>65536))fail('terminal_invalid_request');}
  function inputValid(data){if(typeof data.requestId!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(data.requestId)||typeof data.data!=='string'||!data.data||Buffer.byteLength(data.data)>8192)fail('terminal_invalid_request');}
- function readResult(r,id,ownerEpoch,requestedCursor=0,maxBytes=65536){
+ function readResult(r,id,ownerEpoch,requestedCursor=0,maxBytes=65536,managed=false){
   if(!object(r)||!stateValid(r.state)||r.state.id!==id||!Number.isSafeInteger(r.state.sequence)||r.state.sequence<0||!Array.isArray(r.chunks)||r.chunks.length>MAX_READ_BYTES||!Number.isSafeInteger(r.cursor)||r.cursor<requestedCursor||r.cursor>r.state.sequence)fail('terminal_unavailable');
   if(r.state.ownerEpoch!==ownerEpoch)fail('terminal_owner_changed');
   let bytes=0,sequence=requestedCursor;for(const chunk of r.chunks){if(!object(chunk)||!Number.isSafeInteger(chunk.sequence)||chunk.sequence<=sequence||chunk.sequence>r.cursor||typeof chunk.data!=='string')fail('terminal_unavailable');sequence=chunk.sequence;bytes+=Buffer.byteLength(chunk.data);if(bytes>maxBytes||bytes>MAX_READ_BYTES)fail('terminal_unavailable');}
@@ -246,8 +246,9 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
   // bounded reply, then expose one prefix page with its actual last sequence;
   // the next read retrieves the remainder without changing overflow evidence.
   const chunks=r.chunks.slice(0,MAX_READ_CHUNKS).map(chunk=>({sequence:chunk.sequence,data:chunk.data})),cursor=r.chunks.length>MAX_READ_CHUNKS?chunks.at(-1).sequence:r.cursor;
-  if(!known.has(id))fail('terminal_session_exited');
-  return {...remember(r.state,brokerFor('/sessions/'+id+'/read')),chunks,output:chunks.map(chunk=>chunk.data).join(''),cursor,dropped:r.dropped===true};
+  if(!managed&&!known.has(id))fail('terminal_session_exited');
+  const state=managed?safeState(r.state):remember(r.state,brokerFor('/sessions/'+id+'/read'));
+  return {...state,chunks,output:chunks.map(chunk=>chunk.data).join(''),cursor,dropped:r.dropped===true};
  }
  async function read(data){boundsRead(data);epoch(data.ownerEpoch);const {c,s}=await ownedHuman(data,['ownerEpoch','cursor','maxBytes','waitMs'],viewContext);const r=await api('POST','/sessions/'+s.id+'/read',{actor:'human',ownerEpoch:data.ownerEpoch,...s.outputWait===true&&data.waitMs?{waitMs:data.waitMs}:{},...data.cursor!==undefined?{cursor:data.cursor}:{},...data.maxBytes?{maxBytes:data.maxBytes}:{}});check(c);return readResult(r,s.id,data.ownerEpoch,data.cursor??0,data.maxBytes??65536);}
  async function input(data){
@@ -388,7 +389,33 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
   if(lease.reclaiming||lease.provider!==selected?.provider||lease.threadId!==selected?.threadId||lease.revision!==selectionRevision()||entry?.connectionId!==data.connectionId||entry.owner!=='agent'||entry.ownerEpoch!==lease.authorization.ownerEpoch||!resourceAllowed(id,entry.profile))fail('terminal_scope_denied');
   const {broker}=await connectionBroker({connectionId:data.connectionId});const {connectionId,...body}=data;return api('POST','/connections/'+connectionId+'/service/request',{...body,terminalOwnerEpoch:lease.authorization.ownerEpoch,terminalScope:lease.authorization.scope},broker);
  }
- const connections=Object.fromEntries(Object.entries({open:connectionOpen,list:connectionList,state:connectionState,completeLogin:connectionCompleteLogin,loginStatus:connectionLoginStatus,confirm:data=>connectionOperation(data,'confirm'),authRead:data=>connectionOperation(data,'auth/read',['cursor','maxBytes']),authInput:data=>connectionOperation(data,'auth/input',['requestId','data']),authResize:data=>connectionOperation(data,'auth/resize',['cols','rows']),openShell:connectionOpenShell,close:connectionClose,openService:connectionOpenService,serviceState:connectionServiceState,prepareServiceUpdate,serviceRequest:connectionServiceRequest,closeService:data=>connectionOperation(data,'service/stop',['serviceId']),cancelServiceStart:data=>connectionOperation(data,'service/cancel',['requestId'])}).map(([key,value])=>[key,guarded(value)]));
+ // Main-only broker operations. They deliberately do not consult the selected
+ // terminal, shared handoff grants or foreground worker.
+ async function connectionManagedShell(action,data){
+  const keys={open:[],state:[],close:[],read:['sessionId','ownerEpoch','cursor','maxBytes'],input:['sessionId','ownerEpoch','requestId','data']}[action];
+  if(!keys)fail('terminal_invalid_request');
+  typed(data,['connectionId','profileId','profileVersion','leaseId','scope',...keys]);
+  const {connectionId,sessionId,ownerEpoch,...body}=data,{record,broker}=await connectionBroker({connectionId});
+  if(!identifier(data.leaseId)||!object(data.scope))fail('terminal_invalid_request');
+  if(action!=='close'){
+   if(record.profileId!==data.profileId||record.profileVersion!==data.profileVersion)fail('terminal_saved_connection_changed');
+   readConnectionProfile(data.profileId,data.profileVersion,true);
+  }
+  const result=await api('POST','/connections/'+connectionId+'/managed-shell/'+action,body,broker);
+  if(action==='read'){
+   if(result.state?.connectionId!==connectionId||result.state?.owner!=='agent'||!equal(result.state.scope,data.scope))fail('terminal_scope_denied');
+   return readResult(result,sessionId,ownerEpoch,data.cursor??0,data.maxBytes??65536,true);
+  }
+  if(action==='input'){
+   if(result.accepted!==true||result.id!==sessionId||result.ownerEpoch!==ownerEpoch||result.requestId!==data.requestId)fail('terminal_unavailable');
+   return {accepted:true,sessionId,requestId:result.requestId,...result.duplicate?{duplicate:true}:{}};
+  }
+  if(result.leaseId!==data.leaseId)fail('terminal_unavailable');
+  if(action==='close'){if(result.closed!==true)fail('terminal_unavailable');return {closed:true};}
+  if(!identifier(result.sessionId)||!Number.isSafeInteger(result.ownerEpoch)||result.ownerEpoch<2||typeof result.alive!=='boolean'||!Number.isFinite(result.expiresAt))fail('terminal_unavailable');
+  return {sessionId:result.sessionId,ownerEpoch:result.ownerEpoch,alive:result.alive,expiresAt:result.expiresAt};
+ }
+ const connections=Object.fromEntries(Object.entries({open:connectionOpen,list:connectionList,state:connectionState,completeLogin:connectionCompleteLogin,loginStatus:connectionLoginStatus,confirm:data=>connectionOperation(data,'confirm'),authRead:data=>connectionOperation(data,'auth/read',['cursor','maxBytes']),authInput:data=>connectionOperation(data,'auth/input',['requestId','data']),authResize:data=>connectionOperation(data,'auth/resize',['cols','rows']),openShell:connectionOpenShell,close:connectionClose,openService:connectionOpenService,serviceState:connectionServiceState,prepareServiceUpdate,serviceRequest:connectionServiceRequest,privateServiceRequest:data=>connectionOperation(data,'service/private-request',['serviceId','requestId','method','target','data','mcp','timeoutMs']),managedShell:connectionManagedShell,closeService:data=>connectionOperation(data,'service/stop',['serviceId']),cancelServiceStart:data=>connectionOperation(data,'service/cancel',['requestId'])}).map(([key,value])=>[key,guarded(value)]));
  const profileEnvironmentSessions=profileId=>[...known.values()].filter(value=>value.profile?.profileId===profileId&&value.alive!==false).sort((a,b)=>a.id.localeCompare(b.id));
  const profileEnvironmentFacts=entry=>({id:entry.id,desktopSessionId:entry.desktopSessionId,kind:entry.kind,mode:entry.mode,profile:structuredClone(entry.profile),brokerId:entry.brokerId,owner:entry.owner,ownerEpoch:entry.ownerEpoch,alive:entry.alive,expired:entry.expired,expiresAt:entry.expiresAt,routeKey:entry.routeKey,baseRouteKey:entry.baseRouteKey,ownershipIntent:ownershipIntents.get(entry.id)});
  function assertProfileEnvironmentIdle(entry){

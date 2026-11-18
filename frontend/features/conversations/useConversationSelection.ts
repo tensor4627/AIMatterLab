@@ -41,7 +41,7 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
   conversationChanged(value);
  }
  async function chooseConversation(conversation:Conversation){
-  if(agentBusy||editorDirty&&!confirmReplace())return;
+  if(editorDirty&&!confirmReplace())return;
   beforeSelection();const seq=++conversationSelectionSeq.current;clearIntent();beginWorkerGate();
   try{
    await settingsReady.current;if(seq!==conversationSelectionSeq.current||!mounted.current)return;
@@ -52,9 +52,9 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
   }catch(error){if(seq===conversationSelectionSeq.current&&mounted.current)onSelectionError(error);}
  }
  async function newConversation(planning=false,initialPrompt?:string,provider?:AgentProvider){
-  if(agentBusy&&!freshSelectionPending.current?.failed||editorDirty&&!confirmReplace())return;
+  if(editorDirty&&!confirmReplace())return;
   const previous=selectedConversationRef.current;beforeSelection();const sequence=++conversationSelectionSeq.current;beginWorkerGate();clearIntent();
-  const promise=invoke('conversation.select',{new:true});freshSelectionPending.current={sequence,promise,planning,initialPrompt,provider};setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true});
+  const promise=invoke('conversation.select',{new:true,...provider?{provider}:{}});freshSelectionPending.current={sequence,promise,planning,initialPrompt,provider};setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true});
   try{
    await promise;if(sequence!==conversationSelectionSeq.current||!mounted.current)return;
    freshSelectionPending.current=null;conversationChanged(null);setPlanningMode(planning);onFreshSelected();

@@ -1,8 +1,14 @@
 import {isDeepStrictEqual as equal} from 'node:util';
+import {sameWorkerBinding} from '../../contracts/compute/task-worker-binding.mjs';
 /** Route independently granted capabilities of the explicitly selected resource. */
-export function createAgentResourceRouting({worker,terminal,resource,sharedTerminal,agents,service=()=>null}){
- const handoffHints=new Map();
- function assertHandoffComplete(provider){if(handoffHints.has(provider))throw Error('请等待当前能力交接完成；未发送或重发请求。');}
+export function createAgentResourceRouting({worker,terminal,resource,sharedTerminal,agents,service=()=>null,managed=()=>null,taskSource=()=>null}){
+ const handoffHints=new Map(),workerPins=new Map();
+ const directory=()=>typeof managed==='function'?managed():managed;
+ function assertHandoffComplete(provider,threadId,sessionId){
+  const hint=handoffHints.get(provider);
+  const caller=sessionId??(threadId?agents()?.sessionIdentity?.(provider,threadId)?.id:undefined);
+  if(hint&&(hint.sessionId&&caller?hint.sessionId===caller:!hint.threadId||!threadId||hint.threadId===threadId))throw Error('请等待当前能力交接完成；未发送或重发请求。');
+ }
  const selected=()=>resource()?.peek()||null,controller=()=>typeof service==='function'?service():service;
  const connection=()=>{const v=selected();return v?.schemaVersion===2&&v.kind==='ssh-connection'?v:null;};
  const legacy=()=>selected()?.kind==='ssh-terminal';
@@ -10,27 +16,88 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
  function readyService(){const v=connection();if(!v)return false;const s=selectedService(),i=worker?.identity,t=worker?.connectionTarget;return !!(s?.status==='connected'&&s.workflowReady===true&&worker?.connection&&i?.kind==='ssh'&&i.version===3&&i.connectionId===v.connectionId&&i.profileId===v.profileId&&i.profileVersion===v.profileVersion&&t?.connectionId===v.connectionId&&t.serviceId===s.serviceId);}
  const serviceGranted=provider=>controller()?.hasCurrentGrant?.(provider)===true;
  const shellGranted=provider=>!!(connection()&&sharedTerminal()?.hasCurrentGrant(provider));
- const workerSelected=provider=>readyService()&&(provider===undefined||serviceGranted(provider));
- function capture(){const port=resource(),ticket=port?.capture();return {selection:ticket?.selection||null,assertCurrent:()=>{if(port!==resource())throw Error('compute_resource_selection_changed');if(ticket)port.assertCurrent(ticket);}};}
+ const workerSelected=(provider,threadId)=>!(threadId&&directory())&&readyService()&&(provider===undefined||serviceGranted(provider));
+ function capture(provider,threadId){
+  if(provider&&threadId&&directory()){
+   const owned=directory().capture(provider,threadId);
+   // Model dispatch itself is resource independent. The tool gateway fences each
+   // acquired source separately, including a resource chosen during this turn.
+   return {selection:null,resources:owned.resources,assertCurrent:()=>{},assertResourcesCurrent:owned.assertCurrent};
+  }
+  const port=resource(),ticket=port?.capture();return {selection:ticket?.selection||null,assertCurrent:()=>{if(port!==resource())throw Error('compute_resource_selection_changed');if(ticket)port.assertCurrent(ticket);}};
+ }
  function prepareHandoff({provider,capability,connectionId,attemptId,sessionId}){
   if(!['codex','kimi','qwen','deepseek','compatible'].includes(provider)||!['service','terminal'].includes(capability))throw Error('compute_resource_handoff_invalid');
   const selected=connection(),state=selectedService(),ticket=capture();if(!selected||selected.connectionId!==connectionId||capability==='service'&&(!readyService()||state.attemptId!==attemptId)||capability==='terminal'&&(typeof sessionId!=='string'||!sessionId))throw Error('compute_resource_handoff_changed');
   // This is discovery routing inside a human handoff, never a usage grant.
-  const target=capability==='terminal'&&serviceGranted(provider)?'service':capability,entry={target,ticket,connectionId,serviceId:state?.serviceId,attemptId:state?.attemptId,workerConnection:worker?.connection,workerIdentity:structuredClone(worker?.identity),workerTarget:structuredClone(worker?.connectionTarget)};handoffHints.set(provider,entry);
+  const origin=agents()?.sessionIdentity?.(provider);
+  const target=capability==='terminal'&&serviceGranted(provider)?'service':capability,entry={target,ticket,connectionId,serviceId:state?.serviceId,attemptId:state?.attemptId,workerConnection:worker?.connection,workerIdentity:structuredClone(worker?.identity),workerTarget:structuredClone(worker?.connectionTarget),threadId:origin?.threadId,sessionId:origin?.id};handoffHints.set(provider,entry);
   const assertCurrent=()=>{ticket.assertCurrent();if(handoffHints.get(provider)!==entry||connection()?.connectionId!==connectionId)throw Error('compute_resource_handoff_changed');if(target==='service'){const actual=selectedService();if(!readyService()||capability==='terminal'&&!serviceGranted(provider)||actual?.serviceId!==entry.serviceId||actual.attemptId!==entry.attemptId||worker.connection!==entry.workerConnection||!equal(worker.identity,entry.workerIdentity)||!equal(worker.connectionTarget,entry.workerTarget))throw Error('compute_resource_handoff_changed');}};
   entry.assertCurrent=assertCurrent;
   return {assertCurrent,release:()=>{if(handoffHints.get(provider)===entry)handoffHints.delete(provider);}};
  }
- function providerConnection(provider){if(legacy())return undefined;if(connection()){const hint=handoffHints.get(provider);if(hint){hint.assertCurrent();return hint.target==='service'?worker.providerConnection(provider):terminal()?.providerConnection(provider);}return readyService()&&(serviceGranted(provider)||!shellGranted(provider))?worker.providerConnection(provider):terminal()?.providerConnection(provider);}return worker.providerConnection(provider)||terminal()?.providerConnection(provider);}
+ function providerConnection(provider,sessionId,context){
+  if(sessionId&&directory()){
+   const hint=handoffHints.get(provider);
+   if(hint&&(hint.sessionId?hint.sessionId===sessionId:hint.threadId===context?.threadId))hint.assertCurrent();
+   return terminal()?.providerConnection(provider,sessionId);
+  }
+  if(legacy())return undefined;
+  if(connection()){
+   const hint=handoffHints.get(provider);
+   if(hint){hint.assertCurrent();return hint.target==='service'?worker.providerConnection(provider):terminal()?.providerConnection(provider);}
+   return readyService()&&(serviceGranted(provider)||!shellGranted(provider))?worker.providerConnection(provider):terminal()?.providerConnection(provider);
+  }
+  return worker.providerConnection(provider)||terminal()?.providerConnection(provider);
+ }
+
+ function matchingPin(sessionId){
+  const pinned=workerPins.get(sessionId);
+  return pinned&&pinned.connection===worker.connection&&pinned.epoch===worker.connectionEpoch&&equal(pinned.identity,worker.identity)&&equal(pinned.target,worker.connectionTarget)?pinned:null;
+ }
+ function usesForegroundWorker(sessionId){
+  const pinned=matchingPin(sessionId);
+  return !!pinned&&!directory()?.needsExplicitResource(pinned,{readAliases:false});
+ }
+ function scopedWorkerConnection(scope){
+  if(!scope?.sessionId||scope.checkCurrent?.()!==true||directory()?.needsExplicitResource(scope))return undefined;
+  const pinned=matchingPin(scope.sessionId);
+  if(!pinned||pinned.provider!==scope.provider||pinned.threadId!==scope.threadId)return undefined;
+  const original=scope.threadId?taskSource(scope):null;
+  if(original&&!sameWorkerBinding(original.binding||original,worker))return undefined;
+  if(worker.identity?.kind==='ssh'&&(!readyService()||!controller()?.hasCurrentGrant?.(scope.provider,scope)))return undefined;
+  return worker.providerConnection(scope.provider,scope.sessionId);
+ }
+
  function bindWorkerContext(provider,context,options){
+  if(options?.sessionId&&directory()){
+   const sessionId=options.sessionId;
+   const local=terminal()?.bindProviderContext(provider,context,options);
+   worker.bindProviderContext(provider,context,options);
+   const pinned=workerPins.get(sessionId);
+   const original=context?.threadId?taskSource({provider,...context}):null;
+   if(worker.connection&&(!original||sameWorkerBinding(original.binding||original,worker))&&
+      (!pinned||pinned.threadId!==context.threadId||original)&&!worker.connecting&&!worker.restoring){
+    workerPins.set(sessionId,{provider,threadId:context.threadId,connection:worker.connection,epoch:worker.connectionEpoch,
+     identity:structuredClone(worker.identity),target:structuredClone(worker.connectionTarget)});
+   }
+   const previous=agents()?.bridgeWorkers?.get(provider),next=providerConnection(provider,sessionId,context);
+   const changed=!!previous!==!!next||previous&&(previous.url!==next?.url||previous.tokens?.mcp!==next?.tokens?.mcp);
+   return changed?{...local,rotated:true}:local;
+  }
   controller()?.reconcileContext?.();sharedTerminal()?.reconcileContext?.();
   const local=terminal()?.bindProviderContext(provider,context,options);let binding=local;
   if(!connection()&&!legacy()||readyService())binding=worker.bindProviderContext(provider,context,options)||local;
   const previous=agents()?.bridgeWorkers?.get(provider),next=providerConnection(provider),changed=!!previous!==!!next||previous&&(previous.url!==next?.url||previous.transport!==next?.transport||previous.tokens?.mcp!==next?.tokens?.mcp);
   return changed?{...binding,rotated:true}:binding;
  }
- function scope(provider,method){const ticket=capture(),route=workerSelected(provider)?'service':shellGranted(provider)?'shell':null;return {assertCurrent:()=>{ticket.assertCurrent();if(!['turn/start','turn/steer'].includes(method))return;if(handoffHints.has(provider))throw Error('请等待当前能力交接完成；未发送或重发请求。');if(ticket.selection?.kind==='ssh-terminal')throw Error('原 SSH 终端属于旧连接格式，请明确重新登录建立独立通道。');if(ticket.selection?.kind==='ssh-connection'&&(route==='service'?!workerSelected(provider):route==='shell'?!shellGranted(provider):true))throw Error('当前操作所属的 SSH 能力授权已变化；不会改用另一能力或重新登录。');}};}
- async function readiness(provider){
+ function scope(provider,method,context,sessionId){
+  if(sessionId&&directory())return {assertCurrent:()=>{if(['turn/start','turn/steer'].includes(method))assertHandoffComplete(provider,context?.threadId,sessionId);}};
+  const ticket=capture(),route=workerSelected(provider)?'service':shellGranted(provider)?'shell':null;
+  return {assertCurrent:()=>{ticket.assertCurrent();if(!['turn/start','turn/steer'].includes(method))return;assertHandoffComplete(provider);if(ticket.selection?.kind==='ssh-terminal')throw Error('原 SSH 终端属于旧连接格式，请明确重新登录建立独立通道。');if(ticket.selection?.kind==='ssh-connection'&&(route==='service'?!workerSelected(provider):route==='shell'?!shellGranted(provider):true))throw Error('当前操作所属的 SSH 能力授权已变化；不会改用另一能力或重新登录。');}};
+ }
+ async function readiness(provider,threadId){
+  if(threadId&&directory())return null;
   const ticket=capture();if(!ticket.selection)return null;
   if(legacy())return {status:'blocked',scope:'terminal-only',scientificStatus:'blocked',count:0,reason:'legacy_connection_requires_login',message:'旧连接记录不能替代本次认证，请明确重新登录。',checkedAt:Date.now()};
   if(!connection())return null;
@@ -41,6 +108,10 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
   ticket.assertCurrent();const ready=shell&&shellGranted(provider);
   return {status:ready?'ready':'blocked',scope:'terminal-only',scientificStatus:'blocked',count:ready?3:0,transport:'desktop-terminal',message:ready?'所选连接的共享终端可用；服务状态不影响此独立通道。':'请在此连接的终端点击“交给 Agent”。',reason:ready?null:'current_capability_grant_required',resource:state,checkedAt:Date.now()};
  }
- function turnContext(provider){if(!workerSelected(provider))return null;return '[Studio selected compute resource]\n'+JSON.stringify({kind:'ssh-connection',status:'authenticated',service:'connected',serviceAuthorizedForThisConversation:true,shellAuthorizedForThisConversation:shellGranted(provider),schedulerRegistration:'not_checked'})+'\nThe selected SSH connection is authenticated. The human handoff enables separately verified shell and service grants. The managed service uses its own channel. When the user explicitly selects a shared-shell service transport, ordinary input resumes after its exchange is confirmed. Connection readiness does not establish installed scientific tools, a configured environment or execution readiness. Incomplete inventory and repairable environment issues are warnings: inspect and help configure within the granted terminal and project scope. list_clusters returns saved scheduler profiles, not SSH sessions. For a requested current-host queue observation call inspect_compute_resource with probe_scheduler=true, without creating a workflow or asking the human to paste commands. A missing profile does not mean disconnected. A service failure does not by itself establish shell failure; only an independently verified and granted shell can be used. Never reconnect, upgrade, switch resources or replay unknown requests automatically.';}
- return {selected,capture,providerConnection,bindWorkerContext,scope,readiness,workerSelected,turnContext,prepareHandoff,assertHandoffComplete};
+ function turnContext(provider,threadId){
+  if(threadId&&directory())return 'Use list_compute_resources to discover currently hosted compute resources. Acquire the exact resource requested by the user with acquire_compute_resource. Ask for an exact choice when the tool returns choice_required. Reuse the scoped lease across turns. Use resource-specific tools for formal run drafts, run observations and schedules. The original source of an existing run remains authoritative.';
+  if(!workerSelected(provider))return null;return '[Studio selected compute resource]\n'+JSON.stringify({kind:'ssh-connection',status:'authenticated',service:'connected',serviceAuthorizedForThisConversation:true,shellAuthorizedForThisConversation:shellGranted(provider),schedulerRegistration:'not_checked'})+'\nThe selected SSH connection is authenticated. The human handoff enables separately verified shell and service grants. The managed service uses its own channel. When the user explicitly selects a shared-shell service transport, ordinary input resumes after its exchange is confirmed. Connection readiness does not establish installed scientific tools, a configured environment or execution readiness. Incomplete inventory and repairable environment issues are warnings: inspect and help configure within the granted terminal and project scope. list_clusters returns saved scheduler profiles, not SSH sessions. For a requested current-host queue observation call inspect_compute_resource with probe_scheduler=true, without creating a workflow or asking the human to paste commands. A missing profile does not mean disconnected. A service failure does not by itself establish shell failure; only an independently verified and granted shell can be used. Never reconnect, upgrade, switch resources or replay unknown requests automatically.';
+ }
+ return {selected,capture,providerConnection,bindWorkerContext,scope,readiness,workerSelected,turnContext,prepareHandoff,assertHandoffComplete,
+  scopedWorkerConnection,usesForegroundWorker,releaseSession:id=>workerPins.delete(id)};
 }

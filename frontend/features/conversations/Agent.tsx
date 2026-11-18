@@ -34,6 +34,7 @@ type Message=ChatMessageValue;
 type DraftSnapshot=ReturnType<ReturnType<typeof createComposerDrafts>['capture']>;
 type SendFlight={provider:AgentProvider;threadId:string|null;turnId:string|null;phase:'preparing'|'submitted';cancelled:boolean;interrupting:boolean;interruptSent:boolean;current:()=>boolean;draft:DraftSnapshot;restoreDraft?:DraftSnapshot;text:string};
 type HistoryLoad={provider:AgentProvider;threadId:string;projectId?:string;status:'loading'|'failed';error?:string};
+type SessionTurn={threadId:string;busy:boolean;turnId:string|null;requests?:RpcEvent[]};
 type CodexVersionWarning={installedVersion:string;baselineVersion:string};
 const versionNoticeStorageKey='studio.codexVersionNotice.shown';
 const versionNoticeSessions=new WeakSet<Storage>();
@@ -49,6 +50,14 @@ function claimVersionNotice(){
 function codexVersionWarning(value:any):CodexVersionWarning|null {const version=(text:unknown)=>typeof text==='string'&&text.length<=128&&/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(text);return value?.baselineMatch===false&&value?.versionWarning?.code==='STUDIO_CODEX_VERSION_DIFFERENCE'&&version(value.installedVersion)&&version(value.baselineVersion)?{installedVersion:value.installedVersion,baselineVersion:value.baselineVersion}:null;}
 function storedPreference(key:string){try{return localStorage.getItem(key);}catch{return null;}}
 function storePreference(key:string,value:string){try{localStorage.setItem(key,value);}catch{/* Storage is optional for chat. */}}
+function mergeResumedMessages(history:Message[],live:Message[]){
+ const rows=new Map(history.map(message=>[message.id,message]));
+ for(const message of live){
+  const saved=rows.get(message.id);
+  if(!saved||message.role!=='agent'||message.text.startsWith(saved.text))rows.set(message.id,message);
+ }
+ return [...rows.values()];
+}
 function sshResourceReady(resource:ComputeResourceState|null|undefined,tools:any){
  if(resource?.kind==='ssh-connection'){
   if(resource.schemaVersion!==2||resource.status!=='selected'||resource.alive!==true||resource.authentication!=='verified'||tools.status!=='ready')return false;
@@ -73,7 +82,8 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const [versionNotice,setVersionNotice]=useState<CodexVersionWarning|null>(null);
  const resourceRef=useRef(computeResource),lastResourceProp=useRef(computeResource),toolsRef=useRef(tools);
  if(lastResourceProp.current!==computeResource){resourceRef.current=computeResource;lastResourceProp.current=computeResource;}toolsRef.current=tools;
- const terminalSelected=computeResource?.kind==='ssh-terminal'||computeResource?.kind==='ssh-connection';
+ const managedCompute=tools.managedCompute===true;
+ const terminalSelected=computeResource?.kind==='ssh-terminal'||!managedCompute&&computeResource?.kind==='ssh-connection';
  const workflowResource=terminalSelected&&(computeResource.kind==='ssh-connection'?tools.scope!=='terminal-only'&&computeResource.capabilities?.service.workflowReady===true:computeResource.workflowReady===true&&computeResource.managedRuns===true)&&computeResource.authentication==='verified';
  const terminalGranted=terminalSelected&&(computeResource.kind==='ssh-connection'?(tools.scope==='terminal-only'?computeResource.capabilities?.terminal.agentReady===true:computeResource.capabilities?.service.agentReady===true):computeResource.agentReady===true),terminalReady=sshResourceReady(computeResource,tools);
  const canAcquireTerminal=computeResource?.kind==='ssh-connection'&&computeResource.canAcquireConversationTerminal===true;
@@ -90,6 +100,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<{provider:AgentProvider;seq:number;nonce:string|undefined;promise:Promise<boolean>}|null>(null),providerTouched=useRef(false),handledSelection=useRef<string|undefined>(undefined),sendOwner=useRef<symbol|null>(null);
  const handledDraftIntents=useRef(new Set<string>());
  const activeSend=useRef<SendFlight|null>(null),[stopStatus,setStopStatus]=useState<'waiting'|'stopping'|'unknown'|null>(null);
+ const observedTurn=useRef<SessionTurn|null>(null),resolvedRequests=useRef(new Set<string>());
  const [historyLoad,setHistoryLoad]=useState<HistoryLoad|null>(null);
  const [retrying,setRetrying]=useState<{threadId:string;turnId:string}|null>(null);
  const [promptProposal,setPromptProposal]=useState<{provider:string;threadId:string|null;text:string}|null>(null);
@@ -110,14 +121,23 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  function resolvePromptProposal(choice:'append'|'replace'|'cancel'){const proposal=promptProposal,owner=drafts.owner();setPromptProposal(null);if(!proposal||choice==='cancel'||proposal.provider!==owner.provider||proposal.threadId!==owner.threadId)return;updatePrompt(choice==='append'?[drafts.text(),proposal.text].filter(Boolean).join('\n\n'):proposal.text);}
  function restoreStoppedDraft(flight:SendFlight){if(flight.current()&&drafts.retain(flight.restoreDraft||flight.draft,flight.text))setPrompt(drafts.text());}
  async function interruptFlight(flight:SendFlight){
-  if(activeSend.current!==flight||!flight.current()||!flight.cancelled||flight.interrupting||flight.interruptSent||!flight.threadId||!flight.turnId)return;
-  flight.interrupting=true;setStopStatus('stopping');
-  try{await invoke('agent.rpc',{provider:flight.provider,method:'turn/interrupt',params:{threadId:flight.threadId,turnId:flight.turnId}});if(!flight.current()||activeSend.current!==flight)return;flight.interruptSent=true;setSendNotice(t('已请求停止，等待服务确认；草稿已保留。'));}
-  catch(error){if(flight.current()&&activeSend.current===flight){setStopStatus('unknown');setSendNotice(t('停止结果尚未确认，草稿已保留；可再次请求停止。'));onError(error);}}
+  if(flight.phase!=='submitted'||!flight.cancelled||flight.interrupting||flight.interruptSent||!flight.threadId||!flight.turnId)return;
+  const visible=()=>flight.current()&&activeSend.current===flight;
+  flight.interrupting=true;if(visible())setStopStatus('stopping');
+  try{await invoke('agent.rpc',{provider:flight.provider,method:'turn/interrupt',params:{threadId:flight.threadId,turnId:flight.turnId}});flight.interruptSent=true;if(visible())setSendNotice(t('已请求停止，等待服务确认；草稿已保留。'));}
+  catch(error){if(visible()){setStopStatus('unknown');setSendNotice(t('停止结果尚未确认，草稿已保留；可再次请求停止。'));onError(error);}}
   finally{flight.interrupting=false;}
  }
- function stopSend(){const flight=activeSend.current;if(!flight)return;if(!flight.current()){setSendNotice(t('请求归属已变化，未发送停止命令；请在原对话核对执行状态。'));return;}flight.cancelled=true;restoreStoppedDraft(flight);if(flight.phase==='preparing'){activeSend.current=null;sendOwner.current=null;setBusy(false);setStopStatus(null);setSendNotice(t('已取消发送准备，草稿已保留。'));return;}if(!flight.turnId){setStopStatus('waiting');setSendNotice(t('正在确认消息是否已提交，确认后停止；草稿已保留。'));return;}void interruptFlight(flight);}
- async function retryHistory(){if(!historyLoad||busy||applying||connecting)return;const target=historyLoad,seq=++selectionSeq.current,different=target.provider!==providerRef.current;setHistoryLoad({...target,status:'loading',error:undefined});if(different&&!await selectProvider(target.provider,seq)){if(seq===selectionSeq.current)setHistoryLoad({...target,status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}if((!connected||different)&&!await connect(false,seq)){if(seq===selectionSeq.current)setHistoryLoad({...target,status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}if(seq===selectionSeq.current)await resume(target.threadId,seq,target.projectId);}
+ async function stopViewedTurn(){
+  const threadId=threadRef.current,turnId=turn,selectedProvider=providerRef.current,seq=selectionSeq.current;
+  if(!threadId||!turnId)return;
+  const current=()=>seq===selectionSeq.current&&threadId===threadRef.current&&selectedProvider===providerRef.current;
+  setStopStatus('stopping');
+  try{await invoke('agent.rpc',{provider:selectedProvider,method:'turn/interrupt',params:{threadId,turnId}});}
+  catch(error){if(current()&&observedTurn.current?.busy!==false){setStopStatus('unknown');onError(error);}}
+ }
+ function stopSend(){const flight=activeSend.current;if(!flight){void stopViewedTurn();return;}if(!flight.current()){setSendNotice(t('请求归属已变化，未发送停止命令；请在原对话核对执行状态。'));return;}flight.cancelled=true;restoreStoppedDraft(flight);if(flight.phase==='preparing'){activeSend.current=null;sendOwner.current=null;setBusy(false);setStopStatus(null);setSendNotice(t('已取消发送准备，草稿已保留。'));return;}if(!flight.turnId){setStopStatus('waiting');setSendNotice(t('正在确认消息是否已提交，确认后停止；草稿已保留。'));return;}void interruptFlight(flight);}
+ async function retryHistory(){if(!historyLoad||applying||connecting)return;const target=historyLoad,seq=++selectionSeq.current,different=target.provider!==providerRef.current;setHistoryLoad({...target,status:'loading',error:undefined});if(different&&!await selectProvider(target.provider,seq)){if(seq===selectionSeq.current)setHistoryLoad({...target,status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}if(!await connect(false,seq,false,target.threadId)){if(seq===selectionSeq.current)setHistoryLoad({...target,status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}if(seq===selectionSeq.current)await resume(target.threadId,seq,target.projectId);}
  const [requests,applyRequests]=useState<RpcEvent[]>([]),[answers,setAnswers]=useState<Record<string,Record<string,string>>>({}),[responding,setResponding]=useState<Set<string>>(new Set());
  const requestsRef=useRef(requests);
  function setRequests(value:RpcEvent[]|((previous:RpcEvent[])=>RpcEvent[])){const next=typeof value==='function'?value(requestsRef.current):value;requestsRef.current=next;applyRequests(next);}
@@ -163,19 +183,27 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
     setThreads(old=>[{...c,id:c.threadId},...old.filter(row=>row.id!==p.oldThreadId&&row.id!==c.threadId)]);conversationRef.current?.(c,sessionNonceRef.current);return;
    }
    if(event.method==='studio/conversationDeleted'){setThreads(old=>old.filter(t=>t.id!==event.params.threadId));return;}
-   if(event.method==='studio/toolsStatus'){toolsRef.current=event.params;setTools(event.params);return;}
+   const viewedThread=threadRef.current||pendingResume.current;
+   if(event.method==='studio/toolsStatus'){if(event.params?.threadId&&event.params.threadId!==viewedThread)return;toolsRef.current=event.params;setTools(event.params);return;}
+   if(event.params?.threadId&&event.params.threadId!==viewedThread)return;
    if(event.method==='studio/toolsWarning'){setTools((previous:any)=>({...previous,inventoryWarning:event.params?.warnings?.length?event.params.message:null}));return;}
    if(event.method==='studio/login'&&event.params?.phase==='completed'&&!loginRef.current)void connect();
    if(event.method==='studio/accountUpdated'){if(event.params?.credentialsChanged){setupReplyRef.current?.(null);setConnected(false);setModels([]);setModel('');setNeedsAuth(false);void refreshAccount();}else void refreshAccount();}
    if(event.method==='studio/configUpdated'){const selectedProvider=providerRef.current,seq=selectionSeq.current;void invoke('agent.rpc',{provider:selectedProvider,method:'model/list'}).then(m=>{if(seq===selectionSeq.current&&selectedProvider===providerRef.current)setModels(m.data||[]);}).catch(error=>{if(seq===selectionSeq.current&&selectedProvider===providerRef.current)onError(error);});}
    if(event.method==='studio/taskUpdated'&&event.params?.task?.threadId===threadRef.current)setWorkflowId(event.params.task.id);
-   if(event.params?.threadId&&event.params.threadId!==threadRef.current)return;
    if(event.id!==undefined){requestScope(event);setRequests(prev=>[...prev.filter(r=>r.id!==event.id),event]);return;}
    const p=event.params||{};
+   if(event.method==='studio/serviceNotification'&&p.message){setMessages(old=>upsertItemMessage(old,p.message));return;}
+   if(event.method==='studio/agentTurnState'){
+    observedTurn.current=p;
+    if(p.busy||activeSend.current?.phase!=='preparing'){setBusy(p.busy);setTurn(p.turnId);}
+    if(!p.busy)setStopStatus(null);
+    return;
+   }
    if(event.method==='studio/sessionReady'&&p.threadId===threadRef.current){
     setSendNotice(t(p.status?p.message:'上一轮回复已收到原服务回执。'));
    }
-   if(event.method==='serverRequest/resolved')setRequests(prev=>prev.filter(r=>String(r.id)!==String(p.requestId)));
+   if(event.method==='serverRequest/resolved'){if(pendingResume.current)resolvedRequests.current.add(String(p.requestId));setRequests(prev=>prev.filter(r=>String(r.id)!==String(p.requestId)));}
    if(event.method==='item/agentMessage/delta'){const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId===p.turnId&&p.delta?.trim())call.output=true;}
    if(event.method==='item/agentMessage/delta')setRetrying(null);
     if(event.method==='turn/completed'||event.method==='studio/codexDisconnected')setRetrying(null);
@@ -185,8 +213,8 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    });
    if(['item/started','item/completed'].includes(event.method)&&p.item&&['mcpToolCall','commandExecution','fileChange','agentMessage'].includes(p.item.type))setMessages(prev=>upsertItemMessage(prev,{...p.item,status:p.item.status||(event.method==='item/completed'?'completed':'inProgress')}));
    if(event.method==='thread/tokenUsage/updated')setUsage(p.tokenUsage);
-   if(event.method==='turn/started'){const owner=modelCallRef.current;if(owner?.turnId&&owner.turnId!==p.turn?.id)return;const flight=activeSend.current;if(flight?.phase==='submitted'&&flight.current()&&flight.threadId===p.threadId&&typeof p.turn?.id==='string'){flight.turnId=p.turn.id;if(flight.cancelled)void interruptFlight(flight);}setBusy(true);setTurn(p.turn?.id);const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&!call.turnId&&typeof p.turn?.id==='string')call.turnId=p.turn.id;}
-   if(event.method==='turn/completed'){const call=modelCallRef.current;if(call&&(!call.turnId||call.turnId!==p.turn?.id))return;const flight=activeSend.current;if(flight&&flight.threadId===p.threadId&&flight.turnId===p.turn?.id){if(flight.cancelled)restoreStoppedDraft(flight);activeSend.current=null;setStopStatus(null);}setBusy(false);setTurn(null);if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId&&call.turnId===p.turn?.id){call.status=p.turn.status==='completed'&&!p.turn.error&&call.output?'passed':'failed';setModelCall({...call});if(call.status==='passed')setupReplyRef.current?.({provider:call.provider,model:call.model});}if(p.turn?.error)onError(p.turn.error.message||p.turn.error);}
+   if(event.method==='turn/started'){const flight=activeSend.current;if(flight?.phase==='submitted'&&flight.current()&&flight.threadId===p.threadId&&typeof p.turn?.id==='string'){flight.turnId=p.turn.id;if(flight.cancelled)void interruptFlight(flight);}setBusy(true);setTurn(p.turn?.id);const call=modelCallRef.current;if(call?.status==='in_progress'&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&!call.turnId&&typeof p.turn?.id==='string')call.turnId=p.turn.id;}
+   if(event.method==='turn/completed'){const call=modelCallRef.current;const flight=activeSend.current;if(flight&&flight.threadId===p.threadId&&flight.turnId===p.turn?.id){if(flight.cancelled)restoreStoppedDraft(flight);activeSend.current=null;}setStopStatus(null);setBusy(false);setTurn(null);setRequests([]);if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId&&call.turnId===p.turn?.id){call.status=p.turn.status==='completed'&&!p.turn.error&&call.output?'passed':'failed';setModelCall({...call});if(call.status==='passed')setupReplyRef.current?.({provider:call.provider,model:call.model});}if(p.turn?.error)onError(p.turn.error.message||p.turn.error);}
    if(event.method==='error'){if(p.willRetry===true){const call=modelCallRef.current;if(call&&call.threadId===p.threadId&&call.turnId===p.turnId)setRetrying({threadId:p.threadId,turnId:p.turnId});return;}setRetrying(null);const call=modelCallRef.current;if(call&&call.threadId===p.threadId&&call.turnId===p.turnId){call.status='failed';setModelCall({...call});}onError(p.error?.message||JSON.stringify(p));}
    if(event.method==='account/updated')void refreshAccount();
    if(event.method==='studio/codexDisconnected'){const flight=activeSend.current;if(flight?.cancelled)restoreStoppedDraft(flight);activeSend.current=null;setStopStatus(null);modelCallRef.current=null;setModelCall(null);setConnected(false);setBusy(false);const message=p.code==='STUDIO_CODEX_UNSCOPED_TOOL'?'AIMatterLab 隔离已阻止未授权工具'+(typeof p.tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(p.tool)?' · '+p.tool:'')+'；流程与草稿已保留，请显式重连并核对结果后再发送。':'Agent 连接已断开，请重新连接';setTools({status:'blocked',count:0,message});if(p.code==='STUDIO_CODEX_UNSCOPED_TOOL')onError(message);}
@@ -203,13 +231,13 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   const current=()=>request===externalSeq.current&&seq===selectionSeq.current&&selectedProvider===providerRef.current;
   try{const result=await invoke('agent.rpc',{provider:selectedProvider,method:'thread/list',params:{limit:20}});if(current())setExternalThreads(result.data||[]);}catch(error){if(current())onError(error);}finally{if(current())setImportLoading(false);}
  }
-  function connect(repairTools=false,seq=selectionSeq.current,showLogin=false):Promise<boolean>{
+  function connect(repairTools=false,seq=selectionSeq.current,showLogin=false,expectedThreadId=threadRef.current):Promise<boolean>{
   const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
   const existing=connectionOwner.current;if(existing&&existing.provider===selectedProvider&&existing.seq===seq&&existing.nonce===nonce)return existing.promise;
   const owner={provider:selectedProvider,seq,nonce,promise:Promise.resolve(false)};connectionOwner.current=owner;
   const promise=(async()=>{modelCallRef.current=null;setModelCall(null);providerTouched.current=true;setConnecting(true);setVersionWarning(null);try{
-   const connection=await invoke<AgentConnectResult>('agent.connect',{provider:selectedProvider,repairTools});if(!current())return false;
+   const connection=await invoke<AgentConnectResult>('agent.connect',{provider:selectedProvider,repairTools,...expectedThreadId?{threadId:expectedThreadId}:{}});if(!current())return false;
    if('loginRequired' in connection||'cliRequired' in connection){
     setNeedsAuth(true);setConnected(false);
     if(showLogin&&'loginRequired' in connection)openAccounts();
@@ -225,7 +253,8 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  })();owner.promise=promise;return promise;
  }
  useEffect(()=>{if(!connected)return;let active=true,checking=false;const check=async()=>{if(checking)return;checking=true;try{const result=await invoke('agent.tools',{provider:providerRef.current});if(active)setTools(result);}catch{if(active)setTools({status:'blocked',message:'科学工具连接中断，请重新连接',count:0});}finally{checking=false;}};const timer=setInterval(()=>void check(),15000);return()=>{active=false;clearInterval(timer);};},[connected,provider]);
- function resetConversation(invalidate=true){setHistoryLoad(null);setStopStatus(null);activeSend.current=null;attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setRecovery(null);pendingResume.current=null;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);selectDraft(providerRef.current,null,true);setTurn(null);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);}
+ function leaveDisplayedTurn(){activeSend.current=null;sendOwner.current=null;observedTurn.current=null;resolvedRequests.current.clear();setBusy(false);setTurn(null);setStopStatus(null);setRetrying(null);}
+ function resetConversation(invalidate=true){setHistoryLoad(null);leaveDisplayedTurn();attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setRecovery(null);pendingResume.current=null;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);selectDraft(providerRef.current,null,true);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);}
  useEffect(()=>{
   if(!setupProviderChoice)return;
   pendingSetupProvider.current=setupProviderChoice.provider;
@@ -234,11 +263,12 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  },[setupProviderChoice?.nonce]);
  async function selectProvider(value:AgentProvider,selectedSeq?:number,persist=true){
   const managed=selectedSeq!==undefined,seq=selectedSeq??++selectionSeq.current;
-  if(busy||!managed&&connecting)return false;providerTouched.current=true;
+  if(!managed&&connecting)return false;providerTouched.current=true;
   setRecovery(null);pendingResume.current=null;
-  const old=providerRef.current,current=()=>seq===selectionSeq.current;
+  const current=()=>seq===selectionSeq.current;
   setVersionWarning(null);
-  try{setNeedsAuth(false);await invoke('agent.disconnect',{provider:old});if(!current())return false;if(persist)await invoke('settings',{agentProvider:value});if(!current())return false;}catch(e){if(current())onError(e);return false;}
+  try{setNeedsAuth(false);if(!managed)await invoke('conversation.select',{new:true,provider:value});if(!current())return false;if(persist&&!managed)await invoke('settings',{agentProvider:value});if(!current())return false;}catch(e){if(current())onError(e);return false;}
+  leaveDisplayedTurn();
   pendingSetupProvider.current=null;modelCallRef.current=null;setModelCall(null);if(!managed)selectDraft(value);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);if(!managed)setHistoryLoad(null);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(storedPreference('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);return true;
  }
  async function selectModel(value:string){
@@ -250,10 +280,10 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   setApplying(true);try{const result=await invoke('agent.rpc',{provider:selectedProvider,method:'model/select',params:{model:value}});if(current()){setModel(value);setModels(result.data||[]);selectEffort(result.data||[]);}}catch(error){if(current())onError(error);}finally{if(current())setApplying(false);}
  }
  async function resume(id:string,seq=++selectionSeq.current,selectedProject=projectId,rebuild=false){
-  if(busy)return;attachmentClearRef.current?.();const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
+  attachmentClearRef.current?.();const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
   setSendNotice('');selectDraft(selectedProvider,id);setMessages([]);setWorkflowId(null);setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'loading'});
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
-  modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
+  modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;observedTurn.current=null;resolvedRequests.current.clear();setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
   try{
    const originalId=id;
    if(rebuild){if(selectedProvider!=='codex')throw Error('Unsupported conversation recovery provider');await invoke('conversation.select',{id:selectedProvider+':'+id});if(!current())return;}
@@ -267,12 +297,17 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(read.thread?.id&&read.thread.id!==id)throw Error('读取的会话与选中会话不匹配');
    const list:Message[]=replayMessages(read.thread?.turns||[]);
    const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'});if(!current())return;
-   const resumedModel=r.model||model,catalog=await selectedRpc('model/list');if(!current())return;if(!Array.isArray(catalog.data))throw Error('Invalid resumed model catalog');setModels(catalog.data);
-   setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+resumedModel)||storedPreference('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(list);setHistoryLoad(null);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation,nonce);
+   const catalog=await selectedRpc('model/list');if(!current())return;if(!Array.isArray(catalog.data))throw Error('Invalid resumed model catalog');setModels(catalog.data);
+   const resumedModel=r.model||modelRef.current||catalog.data.find((entry:any)=>entry.isDefault)?.model||catalog.data[0]?.model||'';
+   const receipt:SessionTurn|undefined=read.studioSession,latest=observedTurn.current as SessionTurn|null,active=latest?.threadId===id?latest:receipt;
+   if(active?.threadId===id){setBusy(active.busy);setTurn(active.turnId);}
+   if(receipt?.requests&&active?.busy)setRequests(current=>[...new Map([...receipt.requests!,...current].filter(request=>!resolvedRequests.current.has(String(request.id))).map(request=>[String(request.id),request])).values()]);
+   setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+resumedModel)||storedPreference('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(live=>mergeResumedMessages(list,live));setHistoryLoad(null);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation,nonce);
   }catch(e){if(current()){if(rebuild)setRecovery({threadId:pendingResume.current||id,error:e instanceof Error?e.message:String(e)});else{setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'failed',error:e instanceof Error?e.message:String(e)});onError(e);}}}finally{if(current()){pendingResume.current=null;selectionPending.current=false;setApplying(false);}}
  }
  useEffect(()=>{
-  if(!sessionSelection||busy||handledSelection.current===sessionSelection.nonce)return;handledSelection.current=sessionSelection.nonce;const seq=++selectionSeq.current;
+  if(!sessionSelection||handledSelection.current===sessionSelection.nonce)return;handledSelection.current=sessionSelection.nonce;const seq=++selectionSeq.current;
+  leaveDisplayedTurn();
   if(sessionSelection.conversation){
    const selected=sessionSelection.conversation,owner=drafts.owner();
    if(sessionSelection.adoptDraft&&owner.provider===selected.provider&&!owner.threadId)drafts.rebind(drafts.capture(),selected.threadId);
@@ -281,15 +316,14 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   selectionPending.current=true;threadRef.current=null;setThread(null);setMessages([]);setWorkflowId(null);setHistoryLoad(sessionSelection.conversation?{provider:sessionSelection.conversation.provider,threadId:sessionSelection.conversation.threadId,projectId:sessionSelection.conversation.projectId||'',status:'loading'}:null);setApplying(true);
   if(sessionSelection.pending){pendingResume.current=null;return;}
   const activate=async()=>{try{
-   if(busy)return;
-   if(sessionSelection.new){const preferred=sessionSelection.provider||pendingSetupProvider.current;if(preferred&&preferred!==providerRef.current&&!await selectProvider(preferred,seq,false))return;if(seq!==selectionSeq.current)return;pendingSetupProvider.current=null;resetConversation(false);if(sessionSelection.initialPrompt!==undefined&&seq===selectionSeq.current&&sessionSelection.nonce===sessionNonceRef.current&&!sessionPendingRef.current)updatePrompt(sessionSelection.initialPrompt);return;}
+   if(sessionSelection.new){const preferred=sessionSelection.provider||pendingSetupProvider.current;if(preferred&&preferred!==providerRef.current&&!await selectProvider(preferred,seq,false))return;if(seq!==selectionSeq.current)return;pendingSetupProvider.current=null;resetConversation(false);if(sessionSelection.initialPrompt!==undefined&&seq===selectionSeq.current&&sessionSelection.nonce===sessionNonceRef.current&&!sessionPendingRef.current)updatePrompt(sessionSelection.initialPrompt);if(connected&&(!preferred||preferred===providerRef.current))await connect(false,seq,false,null);return;}
    const selected=sessionSelection.conversation;if(!selected)return;
    const different=selected.provider!==providerRef.current;if(different&&!await selectProvider(selected.provider,seq)){if(seq===selectionSeq.current)setHistoryLoad({provider:selected.provider,threadId:selected.threadId,projectId:selected.projectId||'',status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}
    if(seq!==selectionSeq.current)return;
-   if((!connected||different)&&!await connect(false,seq)){if(seq===selectionSeq.current)setHistoryLoad({provider:selected.provider,threadId:selected.threadId,projectId:selected.projectId||'',status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}
+   if(!await connect(false,seq,false,selected.threadId)){if(seq===selectionSeq.current)setHistoryLoad({provider:selected.provider,threadId:selected.threadId,projectId:selected.projectId||'',status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}
    if(seq!==selectionSeq.current)return;await resume(selected.threadId,seq,selected.projectId||'');
   }finally{if(seq===selectionSeq.current){selectionPending.current=false;setApplying(false);}}};void activate();
- },[sessionSelection?.nonce,busy]);
+ },[sessionSelection?.nonce]);
  useEffect(()=>{
   if(!intent||intent.autoSend||handledDraftIntents.current.has(intent.id))return;
   const owner=drafts.owner();
@@ -308,7 +342,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   if(terminalSelected&&(resourceRef.current?.status!=='selected'||resourceRef.current.alive!==true)){setSendNotice(t('所选 SSH 终端不可用，请在终端核对或重新选择。'));return;}
   let acquiring=canAcquireTerminal&&!sshResourceReady(resourceRef.current,toolsRef.current);
   if(terminalSelected&&!acquiring&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
-  if(!acquiring&&(turnPlanning||workflowId||action.reviewMode)&&tools.status==='blocked'&&(!terminalSelected||workflowResource)){setSendNotice(t(tools.message||'请先修复科学工具连接'));onError(t(tools.message||'请先修复科学工具连接'));return;}
+  if(!acquiring&&(turnPlanning||workflowId||action.reviewMode)&&tools.status==='blocked'&&(!managedCompute||action.reviewMode)&&(!terminalSelected||workflowResource)){setSendNotice(t(tools.message||'请先修复科学工具连接'));onError(t(tools.message||'请先修复科学工具连接'));return;}
   const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,draft=drafts.capture(),manual=textOverride===undefined,resourceSelection=resourceRef.current?.selectionId||null,resourceWorkflow=resourceRef.current?.workflowReady===true,resourceGranted=resourceRef.current?.agentReady===true;
   let route=toolsRef.current.scope;const routeState=(resource:ComputeResourceState|null|undefined)=>resource?.kind==='ssh-connection'?JSON.stringify(route==='terminal-only'?resource.capabilities?.terminal:resource.capabilities?.service):null;let resourceRoute=routeState(resourceRef.current);
   const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current&&resourceSelection===(resourceRef.current?.selectionId||null)&&(resourceRef.current?.kind==='ssh-connection'?acquiring||route===toolsRef.current.scope&&resourceRoute===routeState(resourceRef.current):resourceWorkflow===(resourceRef.current?.workflowReady===true)&&resourceGranted===(resourceRef.current?.agentReady===true));
@@ -337,7 +371,13 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    const input:any[]=[{type:'text',text},{type:'text',text:'[Studio workspace context]\n'+context}];if(attachment&&'path' in attachment)input.push({type:'skill',name:attachment.name,path:attachment.path});
    const call:ModelCall={requestId:crypto.randomUUID(),provider:selectedProvider,model:modelRef.current,threadId:id!,turnId:null,output:false,status:'in_progress'};modelCallRef.current=call;setModelCall({...call});
    if(!preparing())return;flight.phase='submitted';
-    const r=await selectedRpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode:turnPlanning,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});acknowledged=typeof r.turn?.id==='string'&&!!r.turn.id;if(acknowledged&&modelCallRef.current===call){if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}if(!current())return;if(r.studioRecovery?.status==='required'){setRecovery({threadId:r.studioRecovery.oldThreadId});setBusy(false);retainRequest();if(modelCallRef.current===call){call.status='failed';setModelCall({...call});}return;}if(!acknowledged)throw Error('Agent did not acknowledge the submitted message');if(manual&&!flight.cancelled&&drafts.acknowledge(draft)){setPrompt(drafts.text());flight.restoreDraft=drafts.capture();}if(acknowledged){flight.turnId=r.turn.id;if(flight.cancelled){restoreStoppedDraft(flight);void interruptFlight(flight);}}if(modelCallRef.current===call){if(attachment)attachmentConsumedRef.current?.(attachment.attachmentId);if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;setTurn(r.turn.id);}
+    const r=await selectedRpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode:turnPlanning,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});acknowledged=typeof r.turn?.id==='string'&&!!r.turn.id;
+   if(acknowledged&&manual&&!flight.cancelled&&drafts.acknowledge(draft)&&current()){setPrompt(drafts.text());flight.restoreDraft=drafts.capture();}
+   if(acknowledged){flight.turnId=r.turn.id;if(flight.cancelled){restoreStoppedDraft(flight);void interruptFlight(flight);}}
+   if(!current())return;
+   if(r.studioRecovery?.status==='required'){setRecovery({threadId:r.studioRecovery.oldThreadId});setBusy(false);retainRequest();if(modelCallRef.current===call){call.status='failed';setModelCall({...call});}return;}
+   if(!acknowledged)throw Error('Agent did not acknowledge the submitted message');
+   if(modelCallRef.current===call){if(attachment)attachmentConsumedRef.current?.(attachment.attachmentId);if(call.turnId&&call.turnId!==r.turn.id)call.output=false;call.turnId=r.turn.id;if(observedTurn.current?.busy!==false)setTurn(r.turn.id);}
   }catch(e){if(!current()||activeSend.current!==flight||flight.cancelled&&flight.phase==='preparing')return;retainRequest();if(!acknowledged&&optimisticId)setMessages(prev=>prev.filter(message=>message.id!==optimisticId));const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===threadRef.current){call.status='failed';setModelCall({...call});}setBusy(false);if(activeSend.current===flight){activeSend.current=null;setStopStatus(null);}onError(e);}finally{if(sendOwner.current===owner){sendOwner.current=null;if(!acknowledged){setBusy(false);if(activeSend.current===flight){activeSend.current=null;setStopStatus(null);}}}}
  }
  async function applyOptions(){
@@ -356,7 +396,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(sessionPendingRef.current||selectionPending.current||owner.sequence!==seq||owner.nonce!==nonce||responseFlights.current.has(key)||!requestsRef.current.includes(request)||request.provider&&request.provider!==selectedProvider||request.params?.threadId&&request.params.threadId!==selectedThread)return;
    const current=()=>seq===selectionSeq.current&&nonce===sessionNonceRef.current&&selectedProvider===providerRef.current&&selectedThread===threadRef.current&&requestsRef.current.includes(request);
    responseFlights.current.add(key);setResponding(previous=>new Set(previous).add(key));
-   try{await invoke('agent.respond',{provider:selectedProvider,id:request.id,result});if(!current())return;clearAnswers(key);setRequests(prev=>prev.filter(r=>r!==request));}catch(e){if(current())onError(e);}finally{responseFlights.current.delete(key);if(seq===selectionSeq.current&&nonce===sessionNonceRef.current)setResponding(previous=>{const next=new Set(previous);next.delete(key);return next;});}
+   try{await invoke('agent.respond',{provider:selectedProvider,threadId:selectedThread,id:request.id,result});if(!current())return;clearAnswers(key);setRequests(prev=>prev.filter(r=>r!==request));}catch(e){if(current())onError(e);}finally{responseFlights.current.delete(key);if(seq===selectionSeq.current&&nonce===sessionNonceRef.current)setResponding(previous=>{const next=new Set(previous);next.delete(key);return next;});}
  }
  const providerLabel=provider==='codex'?'Codex':provider==='kimi'?'Kimi':provider==='deepseek'?'DeepSeek API':provider==='compatible'?t('自定义 API'):'Qwen';
  const optionSummary=[providerLabel,models.find(m=>m.model===model)?.displayName||model,effort].filter(Boolean).join(' · ');
@@ -408,7 +448,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   {promptProposal&&promptProposal.provider===composerOwner.provider&&promptProposal.threadId===composerOwner.threadId&&<section className="agent-prompt-proposal" data-testid="agent-prompt-proposal" role="region" aria-label={t('处理新的讨论内容')}><strong>{t('已有未发送草稿，请选择如何加入新内容。')}</strong><details open={promptProposal.text.length<=280} data-testid="agent-prompt-preview"><summary>{t('查看待加入内容')}</summary><pre tabIndex={0}>{promptProposal.text}</pre></details><div className="button-row"><button className="button primary" data-testid="agent-prompt-append" onClick={()=>resolvePromptProposal('append')}>{t('追加到草稿')}</button><button className="button" data-testid="agent-prompt-replace" onClick={()=>resolvePromptProposal('replace')}>{t('替换草稿')}</button><button className="button" data-testid="agent-prompt-cancel" onClick={()=>resolvePromptProposal('cancel')}>{t('保留原稿')}</button></div></section>}
   {sendNotice&&!composerUnbound&&<div className="agent-send-notice" role="status">{sendNotice}</div>}
   {terminalPlanning&&<div className="agent-tool-alert" role="status" data-testid="agent-planning-terminal-notice"><span>{t('任务规划已开启；当前仅有终端工具，可先讨论方案。生成可审阅流程需要连接作业服务。')}</span>{onConnectCompute&&<button className="text-button" data-testid="agent-planning-connect-worker" disabled={busy||connecting||applying} onClick={()=>void Promise.resolve().then(onConnectCompute).catch(onError)}>{t('连接作业服务')}</button>}</div>}
-  <div className="composer">{connected&&!options&&<div className="composer-model-selection" data-testid="composer-model-selection"><label>{t('模型')}<select data-testid="composer-model" aria-label={t('对话模型')} value={model} disabled={busy||applying||connecting} onChange={e=>void selectModel(e.target.value)}>{models.map(m=><option key={m.id||m.model} value={m.model} disabled={!!thread&&!!currentModel?.profileId&&m.profileId!==currentModel.profileId}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label>{t('推理等级')}<select data-testid="composer-effort" aria-label={t('对话推理等级')} value={effort} disabled={busy||applying||connecting||!efforts.length} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((entry:any)=><option key={entry.reasoningEffort} value={entry.reasoningEffort}>{entry.reasoningEffort==='off'?t('关闭思考'):entry.reasoningEffort}</option>)}</select></label></div>}<div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{(workflowId||planningMode||newWorkflow)&&<Tooltip className="agent-mode-explanation" content={t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}><span className="agent-mode-inline">{t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</span></Tooltip>}{workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}<textarea data-guide-target="composer" aria-label={t('对话草稿')} aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{t('Enter 发送 · Shift+Enter 换行')}</span>{busy?<button className="send agent-stop-action" data-testid="agent-stop" disabled={stopStatus==='waiting'||stopStatus==='stopping'} title={t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续')} aria-label={t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续')} onClick={stopSend}><Square size={13}/><span>{t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次停止':activeSend.current?.phase==='preparing'?'取消准备':'停止')}</span></button>:<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={!!recovery||applying||connecting||selectionPending.current||composerUnbound||!connected||!models.length||terminalSelected&&!terminalReady&&!canAcquireTerminal||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
+  <div className="composer">{connected&&!options&&<div className="composer-model-selection" data-testid="composer-model-selection"><label>{t('模型')}<select data-testid="composer-model" aria-label={t('对话模型')} value={model} disabled={busy||applying||connecting} onChange={e=>void selectModel(e.target.value)}>{models.map(m=><option key={m.id||m.model} value={m.model} disabled={!!thread&&!!currentModel?.profileId&&m.profileId!==currentModel.profileId}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label>{t('推理等级')}<select data-testid="composer-effort" aria-label={t('对话推理等级')} value={effort} disabled={busy||applying||connecting||!efforts.length} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((entry:any)=><option key={entry.reasoningEffort} value={entry.reasoningEffort}>{entry.reasoningEffort==='off'?t('关闭思考'):entry.reasoningEffort}</option>)}</select></label></div>}<div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{(workflowId||planningMode||newWorkflow)&&<Tooltip className="agent-mode-explanation" content={t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}><span className="agent-mode-inline">{t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</span></Tooltip>}{workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}<textarea data-guide-target="composer" aria-label={t('对话草稿')} aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><div className="composer-bottom"><span>{t('Enter 发送 · Shift+Enter 换行')}</span>{busy?<button className="send agent-stop-action" data-testid="agent-stop" disabled={stopStatus==='waiting'||stopStatus==='stopping'||!activeSend.current&&!turn} title={t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续')} aria-label={t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续')} onClick={stopSend}><Square size={13}/><span>{t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次停止':activeSend.current?.phase==='preparing'?'取消准备':'停止')}</span></button>:<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={!!recovery||applying||connecting||selectionPending.current||composerUnbound||!connected||!models.length||terminalSelected&&!terminalReady&&!canAcquireTerminal||!prompt.trim()}><ArrowUp size={17}/></button>}</div></div>
   {login&&<ProviderLogin provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{setLogin(false);void connect();}} onError={onError}/>}
  </aside>;
 }

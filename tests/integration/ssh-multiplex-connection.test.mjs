@@ -9,7 +9,7 @@ const profile={id:'fixture-profile',version:1,kind:'ssh',mode:'interactive',host
 test('gateway asset username is validated and passed as one -l value for master and slaves',()=>{const username='fixture/10.20.30.40/self',p=multiplexProfile({...profile,username});for(const args of [multiplexArgs(p,'/tmp/owned.sock',{master:true}),multiplexArgs(p,'/tmp/owned.sock',{tty:true,command:'inert command'})]){assert.equal(args[args.indexOf('-l')+1],username);assert.equal(args.filter(v=>v===username).length,1);}for(const username of ['fixture/host','fixture//self','fixture/host/self;id','fixture/host/$(id)','fixture/host/self/extra'])assert.throws(()=>multiplexProfile({...profile,username}),/requires_review/);});
 function fixture(t,{leaseMs=30000,closeWaitMs=2000}={}){
  const processes=[],sessions=new Map(),calls=[];let gate=null,broken=false,unknownStop=false,closeFails=false,cleanupFails=false,observedClosed=false,killHeld=false;
- const pty={spawn(file,args){const callbacks={},p={pid:1000+processes.length,file,args,writes:[],killed:false,onData(fn){callbacks.data=fn;},onExit(fn){callbacks.exit=fn;},write(data){this.writes.push(data);},resize(){},kill(){this.killed=true;if(!killHeld)callbacks.exit?.({exitCode:0});},data(data){callbacks.data?.(data);},exit(){callbacks.exit?.({exitCode:255});}};processes.push(p);if(file==='/fixture/master')queueMicrotask(()=>p.data('__STUDIO_MASTER_'+args[0]+'__:'+Buffer.from(JSON.stringify({pid:p.pid,start:'123',boot:'00000000-0000-0000-0000-000000000000'})).toString('base64')+'__STUDIO_MASTER_END_'+args[0]+'__\r\nPassword: '));return p;}};
+ const pty={spawn(file,args){const callbacks={},p={pid:1000+processes.length,file,args,writes:[],killed:false,onData(fn){callbacks.data=fn;},onExit(fn){callbacks.exit=fn;},write(data){this.writes.push(data);const marker=/__STUDIO_FRESH_SHELL_[a-f0-9]+__/.exec(data)?.[0];if(marker)queueMicrotask(()=>this.data(data+'\r\n'+marker+'\r\nfixture$ '));},resize(){},kill(){this.killed=true;if(!killHeld)callbacks.exit?.({exitCode:0});},data(data){callbacks.data?.(data);},exit(){callbacks.exit?.({exitCode:255});}};processes.push(p);if(file==='/fixture/master')queueMicrotask(()=>p.data('__STUDIO_MASTER_'+args[0]+'__:'+Buffer.from(JSON.stringify({pid:p.pid,start:'123',boot:'00000000-0000-0000-0000-000000000000'})).toString('base64')+'__STUDIO_MASTER_END_'+args[0]+'__\r\nPassword: '));return p;}};
  const host={async allocate(){calls.push('allocate');return {socket:'/tmp/fixture/master.sock'};},masterLaunch(_p,_proof,nonce){return {file:'/fixture/master',args:[nonce],cwd:process.cwd()};},slaveLaunch(_p,_proof,command){return {file:'/fixture/slave',args:command?[command]:[],cwd:process.cwd()};},async check(){calls.push('check');if(broken)throw new TerminalFault('ssh_master_unavailable');if(gate)await gate;},async prove(){calls.push('prove');if(broken)throw new TerminalFault('ssh_authentication_unconfirmed');if(gate)await gate;return {socketIdentity:[1,2]};},async close(){calls.push('close');if(closeFails)throw new TerminalFault('ssh_control_unavailable');return {closed:true};},async observeClosed(){calls.push('observeClosed');return {closed:observedClosed||!closeFails};},async cleanup(){calls.push('cleanup');if(cleanupFails)throw new TerminalFault('ssh_control_unavailable');}};
  function factory(options){if(options.connectionId)return createTerminalSession(options);const p=pty.spawn(options.plan.launch.file,options.plan.launch.args),marker=/__STUDIO_CHANNEL_READY_[a-f0-9]+__/.exec(options.plan.launch.args[0])[0],sid=randomUUID();let alive=true,active=false,status='idle',serviceId;const state=()=>({id:sid,kind:'ssh',mode:'interactive',owner:'human',ownerEpoch:1,alive,serviceActive:active,serviceStatus:status,...serviceId?{serviceId}:{}});const session={state,read:()=>({chunks:[{data:marker+'\r\n'}],cursor:1}),async serviceStart(){active=true;status='connected';serviceId=randomUUID();return state();},serviceState:()=>({...state(),servicePhase:active?'ready':'returning_terminal',service:active?{fixture:true}:undefined}),async serviceRequest(){return {status:200,data:{fixture:true}};},async serviceStop(){if(unknownStop){status='failed';throw new TerminalFault('service_stop_unknown');}active=false;status='disconnected';return state();},async serviceCancelStart(){active=false;status='disconnected';},dispose(){alive=false;active=false;p.kill();}};return session;}
  const manager=createSshConnections({pty,sessions,host,sessionFactory:factory,profileUpdateLeaseMs:leaseMs,closeWaitMs});t.after(()=>manager.closeAll());
@@ -44,8 +44,18 @@ test('environment-only broker transaction holds exact connection and adopts vers
 test('close invalidates a prepared environment update rather than adopting into a different connection',async t=>{
  const f=fixture(t),c=await f.ready(),next={...profile,version:2,serviceEnvironment:{python:'python3.9'}},lock=f.manager.prepareProfileUpdate({token:randomUUID(),profileId:profile.id,previousVersion:1,next});await f.manager.close({connectionId:c.connectionId});assert.throws(()=>f.manager.commitProfileUpdate({token:lock.token,profile:next}),/connection_changed/);f.manager.abortProfileUpdate({token:lock.token});
 });
-test('native Windows performs a local control capability request then reports unsupported without using WSL or logging auth',async()=>{
- const calls=[],host=createMultiplexHost({platform:'win32',run:async(file,args)=>{calls.push({file,args});return {code:-1,stdout:'',stderr:'getsockname failed'};}});await assert.rejects(host.allocate({...profile,ssh_client:'C:\\Windows\\System32\\OpenSSH\\ssh.exe'}),/multiplex_unsupported/);assert.equal(calls.length,1);assert.equal(calls[0].file,'C:\\Windows\\System32\\OpenSSH\\ssh.exe');assert.deepEqual(calls[0].args.slice(0,2),['-o','ProxyCommand=cmd /c exit 1']);assert(calls[0].args.includes('BatchMode=yes'));assert(calls[0].args.includes('check'));
+test('native OpenSSH keeps Windows keys and host verification and allocates without WSL',async()=>{
+ const host=createMultiplexHost({platform:'win32',run:()=>assert.fail('native allocation must not invoke WSL')});
+ const client='C:\\Windows\\System32\\OpenSSH\\ssh.exe',identity='C:\\test user\\existing key';
+ for(const mode of ['key','interactive']){
+  const launch=await host.allocate({...profile,mode,ssh_client:client,identity_file:identity,distribution:undefined});
+  assert.equal(launch.native,true);assert.equal(launch.file,client);assert.equal(launch.args[launch.args.indexOf('-i')+1],identity);
+  assert(launch.args.includes('StrictHostKeyChecking='+(mode==='key'?'yes':'ask')));assert(launch.args.includes('BatchMode='+(mode==='key'?'yes':'no')));
+  assert(launch.args.includes('PermitLocalCommand=no'));assert(launch.args.includes('ClearAllForwardings=yes'));
+ }
+ const mounted=await host.allocate({...profile,ssh_client:'/mnt/c/Windows/System32/OpenSSH/ssh.exe',identity_file:'/mnt/c/test/key'});assert.equal(mounted.args[mounted.args.indexOf('-i')+1],'C:\\test\\key');
+ await assert.rejects(host.allocate({...profile,ssh_client:client,identity_file:'/home/test/key'}),/native_key_path_required/);
+ await assert.rejects(host.allocate({...profile,ssh_client:'C:\\test\\unsupported.exe',identity_file:''}),/multiplex_unsupported/);
 });
 
 
@@ -55,6 +65,41 @@ test('authenticated broker HTTP exposes only human auth ports and public shell i
  assert.equal((await request('/connections',undefined,{Authorization:'Bearer '+ 'b'.repeat(64)})).status,403);assert.equal((await request('/connections',undefined,{Origin:'http://untrusted.invalid'})).status,403);
  const pending=(await request('/connections/open',{profileId:profile.id,profileVersion:1,requestId:'broker-login',profile})).data,base='/connections/'+pending.connectionId;await new Promise(r=>setImmediate(r));assert.equal((await request('/sessions')).data.sessions.length,0);assert(!JSON.stringify((await request('/connections')).data).includes('Password:'));assert((await request(base+'/auth/read',{})).data.output.includes('Password:'));assert.equal((await request(base+'/confirm',{connectionId:pending.connectionId})).status,400);assert.equal((await request(base+'/confirm',{})).data.authentication,'verified');assert.equal((await request(base+'/auth/read',{})).data.output,'');const shell=(await request(base+'/shell/open',{requestId:'broker-shell'})).data;assert.equal(shell.connectionId,pending.connectionId);
  const service=(await request(base+'/service/start',{profileId:profile.id,profileVersion:1,requestId:'broker-service',bootstrap:{fixture:true}})).data;assert.equal(service.status,'connected');assert.equal((await request('/sessions')).data.sessions.length,1);assert.equal((await request(base+'/service/stop',{serviceId:service.serviceId})).data.serviceActive,false);assert.equal((await request(base+'/state')).data.authentication,'verified');assert.equal((await request(base+'/close',{})).data.closed,true);
+});
+
+test('the real broker gives each conversation a confirmed private PTY and keeps login and service channels separate',async t=>{
+ const f=fixture(t),controlToken='a'.repeat(64);
+ const broker=await startBroker({controlToken,instanceId:randomUUID(),runtimeRoot:process.cwd(),dependencyRoot:process.cwd()},{pty:f.pty,multiplexHost:f.host,connectionSessionFactory:f.factory});
+ t.after(()=>broker.close());
+ async function request(route,body){
+  const response=await fetch(broker.ready.origin+route,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+controlToken,
+   ...body!==undefined?{'Content-Type':'application/json'}:{}},...body!==undefined?{body:JSON.stringify(body)}:{}});
+  return {status:response.status,data:await response.json()};
+ }
+ const opened=(await request('/connections/open',{profileId:profile.id,profileVersion:1,requestId:'managed-login',profile})).data;
+ const base='/connections/'+opened.connectionId,first={profileId:profile.id,profileVersion:1,leaseId:'first',scope:{provider:'codex',threadId:'chat-a'}},
+  second={...first,leaseId:'second',scope:{provider:'codex',threadId:'chat-b'}};
+ assert.equal((await request(base+'/managed-shell/open',first)).status,409);
+ assert.equal((await request(base+'/confirm',{})).data.authentication,'verified');
+ const visible=(await request(base+'/shell/open',{requestId:'human'})).data;
+ const service=(await request(base+'/service/start',{profileId:profile.id,profileVersion:1,requestId:'service',bootstrap:{fixture:true}})).data;
+ const [a,b]=await Promise.all([request(base+'/managed-shell/open',first),request(base+'/managed-shell/open',second)]);
+ assert.equal(a.status,200);assert.equal(b.status,200);assert.notEqual(a.data.sessionId,b.data.sessionId);
+ assert.deepEqual((await request(base+'/managed-shell/open',first)).data,a.data);
+ assert.deepEqual((await request('/sessions')).data.sessions.map(s=>s.id),[visible.id]);
+ assert.equal((await request('/sessions/'+a.data.sessionId+'/state')).status,404);
+ assert.equal((await request(base+'/managed-shell/read',{...first,scope:second.scope})).status,403);
+ const initial=(await request(base+'/managed-shell/read',first)).data;
+ assert.deepEqual(initial.chunks,[]);
+ assert.equal((await request(base+'/managed-shell/input',{...first,requestId:'typing',data:'fixture'})).data.accepted,true);
+ assert.deepEqual((await request(base+'/managed-shell/close',first)).data,{leaseId:first.leaseId,closed:true});
+ assert.equal((await request(base+'/managed-shell/open',first)).status,409);
+ assert.equal((await request(base+'/managed-shell/state',second)).data.alive,true);
+ assert.equal((await request(base+'/service/state')).data.channelKind,'private');
+ assert.equal((await request(base+'/service/private-request',{serviceId:service.serviceId,requestId:'read',method:'GET',target:'/api/health',mcp:false})).data.data.fixture,true);
+ assert.equal((await request(base+'/auth/read',{})).data.output,'');
+ const aProcess=f.processes.find(p=>p.writes.includes('fixture'));
+ assert.equal(aProcess.killed,true);assert.equal(f.processes[0].killed,false);assert.equal(f.processes[1].killed,false);
 });
 
 

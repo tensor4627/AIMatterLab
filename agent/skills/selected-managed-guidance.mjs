@@ -7,13 +7,14 @@ export const SELECTED_MANAGED_FUNCTION='selected.managed';
 const OWNERS=['provider','threadId','taskId','projectId','environmentId','inputRoot'];
 const fail=()=>{throw Error('Selected managed guidance is unavailable in this current conversation; explicitly select the registered delivery skill again.');};
 const documentId=(token,logical)=>token+':'+encodeURIComponent(logical);
+const ownerKey=(provider,threadId)=>JSON.stringify([provider,threadId]);
 
 /** Main-owned, turn-bound disclosure receipts. Callers provide only an advertised opaque ID. */
 export class SelectedManagedGuidance{
  constructor(){this.bindings=new Map();}
- clear(provider){this.bindings.delete(provider);}
+ clear(provider,threadId){if(threadId!==undefined)this.bindings.delete(ownerKey(provider,threadId));else for(const [id,binding]of this.bindings)if(binding.scope.provider===provider)this.bindings.delete(id);}
  current(scope){
-  const binding=this.bindings.get(scope?.provider);if(!binding)return null;
+  const binding=this.bindings.get(ownerKey(scope?.provider,scope?.threadId));if(!binding)return null;
   try{
    if(typeof scope.checkCurrent!=='function'||scope.checkCurrent()!==true||typeof binding.scope.checkCurrent!=='function'||binding.scope.checkCurrent()!==true||OWNERS.some(key=>(scope[key]??null)!==(binding.scope[key]??null)))return null;
    for(const entry of binding.entries.values()){entry.assertCurrent();if(!isDeepStrictEqual(entry.record,entry.currentRecord()))return null;}
@@ -34,7 +35,7 @@ export class SelectedManagedGuidance{
   let binding=this.current(scope);
   if(!binding)binding={scope,entries:new Map()};
   const entry={selection:structuredClone(selection),record:structuredClone(record),policy,scope,assertCurrent,currentRecord,token:randomUUID(),documents:new Map()};
-  if(!isDeepStrictEqual(entry.record,currentRecord()))fail();this.advertise(entry,context.document_ids||['SKILL.md']);const disclosed=this.decorate(context,entry);binding.entries.set(entry.token,entry);this.bindings.set(scope.provider,binding);
+  if(!isDeepStrictEqual(entry.record,currentRecord()))fail();this.advertise(entry,context.document_ids||['SKILL.md']);const disclosed=this.decorate(context,entry);binding.entries.set(entry.token,entry);this.bindings.set(ownerKey(scope.provider,scope.threadId),binding);
   return disclosed;
  }
  catalog(scope,policy){
