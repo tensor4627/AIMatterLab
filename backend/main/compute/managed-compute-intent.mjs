@@ -169,6 +169,20 @@ export function createManagedComputeIntent(catalog){
   turn.answer={proposal,choice};
   saveSelection(computeScopeKey(scope),turn,[choice]);
  }
+ function confirmQuestionChoice(scope,{offered,resourceId,custom},isCurrent){
+  const turn=current(scope);
+  if(!turn||turn.projectId!==(scope.projectId??null)||turn.taskId!==(scope.taskId??null))fail('managed_compute_turn_changed');
+  const proposal=turn.pending||{alias:null,save:false,candidates:[...turn.named,...turn.ambiguous]};
+  const message=typeof custom==='string'?text(custom):'';
+  const matches=proposal.candidates.filter(choice=>offered.includes(choice.resourceId)&&
+   (resourceId?choice.resourceId===resourceId:message&&[choice.name,choice.resourceId,choice.profileId].some(name=>exactAnswer(message,{name}))));
+  if(matches.length!==1)return null;
+  const [choice]=matches;
+  if(turn.answer&&turn.answer.choice.resourceId!==choice.resourceId||turn.excluded.some(item=>item.resourceId===choice.resourceId)||!isCurrent(choice))return null;
+  turn.answer={proposal,choice};
+  saveSelection(computeScopeKey(scope),turn,[choice]);
+  return choice.resourceId;
+ }
  function acquired(scope,resource){
   const turn=current(scope);
   if(!turn||turn.projectId!==(scope.projectId??null)||turn.taskId!==(scope.taskId??null))return;
@@ -180,6 +194,6 @@ export function createManagedComputeIntent(catalog){
   if(turn&&!turn.pending&&turn.projectId===(scope.projectId??null)&&turn.taskId===(scope.taskId??null))
    turn.discovered={alias:null,save:false,candidates};
  }
- return {recordUserTurn,current,assertTurn,propose,confirmChoice,observedChoices,acquired,
+ return {recordUserTurn,current,assertTurn,propose,confirmChoice,confirmQuestionChoice,observedChoices,acquired,
   forget(provider,threadId){const key=computeScopeKey({provider,threadId});turns.delete(key);catalog?.remove(choiceKind,key);},clear:()=>turns.clear()};
 }

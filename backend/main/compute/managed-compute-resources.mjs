@@ -49,7 +49,7 @@ const terminalTools=sharedTerminalTools.map((item,index)=>({...item,
 }));
 const tools=Object.freeze([
  tool('list_compute_resources','List resources already hosted by AIMatterLab. A listed SSH resource is authenticated. canAcquire describes conversation access; verification_pending means the worker project grant may still be checked. Acquire a lease before using its terminal or service.',{},[],true),
- tool('acquire_compute_resource','Acquire this conversation’s own terminal or service context. Use one selector: resource_id, profile_id, or the alias the human used. A request to inspect cluster queues can select the only eligible cluster; if choice_required, ask which listed name and reuse the choice. No planning mode, workflow, new SSH login or terminal handoff is needed.',{resource_id:string,profile_id:string,alias:string,access:{type:'string',enum:['terminal','service']}}),
+ tool('acquire_compute_resource','Acquire this conversation’s own terminal or service context. Use one selector: resource_id, profile_id, or the alias the human used. A request to inspect cluster queues can select the only eligible cluster. Follow a target_selected receipt. For a choice_required receipt, use the provided user_answer or ask which listed name if the choice is unanswered. No planning mode, workflow, new SSH login or terminal handoff is needed.',{resource_id:string,profile_id:string,alias:string,access:{type:'string',enum:['terminal','service']}}),
  tool('release_compute_resource','Release this conversation’s lease and its independent SSH terminal for this resource.',{resource_id:string},['resource_id']),
  ...terminalTools,
 ]);
@@ -803,6 +803,13 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   exact(data,['resourceId','alias'],['resourceId']);liveScope(scope);
   intent.confirmChoice(scope,data);
  }
+ function confirmQuestionChoice(scope,data){
+  liveScope(scope);
+  return intent.confirmQuestionChoice(scope,data,choice=>{
+   const resource=resources.get(choice.resourceId);
+   return !!resource&&resource.targetFingerprint===choice.targetFingerprint&&visible(resource);
+  });
+ }
  function capture(provider,threadId){
   const owned=[...leases.values()].filter(lease=>lease.scope.provider===provider&&lease.scope.threadId===threadId&&hasLease(lease));
   return {resources:owned.map(lease=>view(lease.resource)),assertCurrent(){
@@ -893,6 +900,6 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   return callTerminalTool(name,args,scope);
  }
  return {publish,publishWsl,configureService,snapshot,list,acquire,release,resolveLease,resolveService,inspectService,capture,needsExplicitResource,callTerminalTool,callTool,owns,tools:()=>tools,
-  terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,
+  terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,confirmQuestionChoice,
   recordUserTurn,sweep,stop,touch,forget,consoleEntries,observeConsoleLease,observeConsoleService,releaseFromConsole,detachLocalFromConsole};
 }

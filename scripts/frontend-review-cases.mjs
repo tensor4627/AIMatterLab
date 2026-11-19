@@ -144,15 +144,20 @@ export async function frontendReviewCases({check,out}){
 
  await check('review-fixes-questions-isolated-selectable-secret-and-pending',async page=>{
   await agent(page);
+  await page.setViewportSize({width:420,height:640});
   await page.evaluate(()=>{
+   document.querySelector('.agent-panel').style.width='min(100%, 360px)';
    const test=window.__test,original=window.studio.invoke;test.answerWaiters=[];
    window.studio.invoke=async(method,data)=>{if(method==='agent.respond'){test.calls.push({method,data});return new Promise(resolve=>test.answerWaiters.push(resolve));}return original(method,data);};
    test.question=id=>({provider:'codex',id,method:'item/tool/requestUserInput',params:{threadId:'fixture-thread',questions:[{id:'same-choice',header:'策略',question:'选择测试策略',isSecret:false,isOther:true,options:[{label:'只检查界面',description:'使用隔离数据检查页面交互'},{label:'检查布局',description:'只查看当前布局'}]},{id:'same-secret',header:'私密值',question:'输入测试私密值',isSecret:true,isOther:false,options:null}]}});
    test.events.forEach(fn=>fn(test.question('first-question')));
   });
-  const first=page.getByTestId('agent-question-request').filter({has:page.locator('[data-testid="agent-question-input"]')}).first();
-  await first.getByTestId('agent-question-option').filter({hasText:'只检查界面'}).click();
-  assert.equal(await first.getByTestId('agent-question-option').filter({hasText:'只检查界面'}).getAttribute('aria-pressed'),'true');
+  const first=page.locator('.composer').getByTestId('agent-question-request').first();
+  const choice=first.getByRole('radio',{name:/只检查界面/});
+  await choice.check();
+  assert.equal(await choice.isChecked(),true);
+  assert.equal(await first.getByRole('radio',{name:/检查布局/}).isChecked(),false);
+  assert.equal(await page.locator('.agent-composer-questions').evaluate(node=>node.scrollWidth<=node.clientWidth),true);
   assert.match(await first.innerText(),/使用隔离数据检查页面交互/);
   await first.locator('input[type="password"]').fill('synthetic-private-value');
   await first.getByTestId('agent-question-submit').click();

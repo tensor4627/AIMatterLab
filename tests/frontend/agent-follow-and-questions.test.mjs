@@ -37,7 +37,9 @@ test('Agent manual send resumes following after the user scrolls up',async()=>{
 test('Agent isolates concurrent same-id question answers, shows descriptions and supports option or free text',async()=>{
  const h=await setup();try{
   h.emit(request('first'));h.emit(request('second'));await h.flush();assert.equal(submit(h,'first').props.disabled,true);
-  const option=allWithin(panel(h,'first'),'agent-question-option')[0];assert.match(text(option),/Keep the existing data/);option.props.onClick();await h.flush();assert.equal(input(h,'first').props.value,'Option A');assert.equal(input(h,'second').props.value,'');assert.equal(allWithin(panel(h,'first'),'agent-question-option')[0].props['aria-pressed'],true);
+  const composer=h.find(node=>node.props?.className==='composer');assert.equal(within(composer,'agent-question-request'),panel(h,'first'));
+  const labels=visit(panel(h,'first')).filter(node=>node.props?.className==='agent-question-option');assert.match(text(labels[0]),/Keep the existing data/);
+  const option=allWithin(panel(h,'first'),'agent-question-option')[0];assert.equal(option.props.type,'radio');option.props.onChange();await h.flush();assert.equal(responses(h).length,0);assert.equal(input(h,'second').props.value,'');assert.deepEqual(allWithin(panel(h,'first'),'agent-question-option').map(node=>node.props.checked),[true,false]);
   input(h,'second').props.onChange({target:{value:'My own answer'}});await h.flush();submit(h,'first').props.onClick();await h.flush();assert.deepEqual(responses(h)[0].data.result,{answers:{same:{answers:['Option A']}}});assert.equal(input(h,'second').props.value,'My own answer');
   submit(h,'second').props.onClick();await h.flush();assert.deepEqual(responses(h)[1].data.result,{answers:{same:{answers:['My own answer']}}});h.emit(request('third'));await h.flush();assert.equal(input(h,'third').props.value,'');
  }finally{h.unmount();}
@@ -47,6 +49,21 @@ test('Agent masks secret answers and clears them after success or server resolut
  const h=await setup();try{
   h.emit(request('secret',[question('secret',{question:'Private response',isSecret:true,options:null})]));await h.flush();assert.equal(input(h,'secret').props.type,'password');assert.equal(input(h,'secret').props.autoComplete,'off');input(h,'secret').props.onChange({target:{value:'ephemeral-secret'}});await h.flush();submit(h,'secret').props.onClick();await h.flush();
   h.emit(request('secret',[question('secret',{isSecret:true})]));await h.flush();assert.equal(input(h,'secret').props.value,'');input(h,'secret').props.onChange({target:{value:'another-secret'}});await h.flush();h.emit({provider:'codex',method:'serverRequest/resolved',params:{threadId:'questions',requestId:'secret'}});await h.flush();h.emit(request('secret',[question('secret',{isSecret:true})]));await h.flush();assert.equal(input(h,'secret').props.value,'');assert(![...h.storage.values.values()].some(value=>value.includes('secret')));
+ }finally{h.unmount();}
+});
+
+test('DeepSeek displays a composer question and restores the draft after cancellation',async()=>{
+ const h=agentHarness({props:{sessionSelection:{nonce:'deepseek-questions',conversation:conversation('deepseek','questions')}}});
+ try{
+  await h.flush();h.type('Keep this draft');
+  h.emit({provider:'deepseek',method:'turn/started',params:{threadId:'questions',turn:{id:'working'}}});
+  h.emit({...request('deepseek-choice'),provider:'deepseek'});await h.flush();
+  const composer=h.find(node=>node.props?.className==='composer');
+  assert.equal(within(composer,'agent-question-request'),panel(h,'deepseek-choice'));assert(!visit(composer).some(node=>node.type==='textarea'));
+  assert.match(text(composer),/等待你的回答/);assert(within(composer,'agent-stop'));
+  input(h,'deepseek-choice').props.onChange({target:{value:'abandoned selection'}});
+  h.emit({provider:'deepseek',method:'turn/completed',params:{threadId:'questions',turn:{id:'working',status:'cancelled'}}});await h.flush();
+  assert.throws(()=>panel(h,'deepseek-choice'));assert.equal(h.find(node=>node.type==='textarea').props.value,'Keep this draft');assert.equal(responses(h).length,0);
  }finally{h.unmount();}
 });
 

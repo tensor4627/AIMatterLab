@@ -4,7 +4,7 @@ import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {createServer} from 'node:http';
 import {EventEmitter} from 'node:events';import {PassThrough} from 'node:stream';
 import {DshBridge,dshLegacyContext,dshPublicItemId,normalizeDshPublicTurns} from '../../agent/providers/dsh.mjs';
-import {dshToolAllowed,checkDshInventory} from '../../agent/providers/dsh-policy.mjs';
+import {DSH_QUESTION_TOOL,dshToolAllowed,checkDshInventory} from '../../agent/providers/dsh-policy.mjs';
 import {dshRuntime,prepareDshProfile,scopedDshWorker} from '../../desktop/platform/dsh-runtime.mjs';
 import {baseWorkspaceTool} from '../../backend/main/workspace/base-workspace.mjs';
 
@@ -107,7 +107,7 @@ function messagesStream(index,{tool,text='Official harness fixture output'}={}){
  const events=[{type:'message_start',message:{id:'fixture-message-'+index,type:'message',role:'assistant',model:'deepseek-flash',content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:12,output_tokens:0}}},{type:'content_block_start',index:0,content_block:tool?{type:'tool_use',id:'fixture-call-'+index,name:tool.name,input:{}}:{type:'text',text:''}},{type:'content_block_delta',index:0,delta:tool?{type:'input_json_delta',partial_json:JSON.stringify(tool.args||{})}:{type:'text_delta',text}},{type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:tool?'tool_use':'end_turn',stop_sequence:null},usage:{output_tokens:3}},{type:'message_stop'}];
  return events.map(e=>'event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n').join('');
 }
-async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}],toolCatalog,allowDiscovery=()=>true}={}){
+async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}],toolCatalog,allowDiscovery=()=>true,toolsConnected=true,toolCall=()=>({status:'fixture-only'}),confirmResourceChoice}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-dsh-native-')),store=catalog(),calls=[],events=[],children=[];let count=0,held;
  const server=createServer(async(req,res)=>{
   let text='';for await(const chunk of req)text+=chunk;const body=text?JSON.parse(text):{};calls.push({url:req.url,authorization:req.headers.authorization,apiKey:req.headers['x-api-key'],body});
@@ -116,7 +116,7 @@ async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_st
   if(req.url==='/providers/deepseek/mcp'){
    if(body.method==='tools/list'&&!allowDiscovery()){res.writeHead(403);res.end('private fixture response');return;}
    const tools=toolCatalog||[{name:'run_status',description:'Read fixture saved status',inputSchema:{type:'object',properties:{id:{type:'string'}}}},{name:'submit_run',description:'Forbidden submission',inputSchema:{type:'object'}},{name:'present_task',description:'Save fixture draft',inputSchema:{type:'object',properties:{task_id:{type:'string'}}}}];
-   res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.method==='tools/list'?{tools}:{content:[{type:'text',text:JSON.stringify({status:'fixture-only'})}]}}));return;
+   res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.method==='tools/list'?{tools}:{content:[{type:'text',text:JSON.stringify(await toolCall(body.params))}]}}));return;
   }
   if(req.url==='/v1/messages'){
    const response=responses[count++]||{};res.writeHead(200,{'Content-Type':'text/event-stream'});if(response.hold){held=res;res.write(': fixture waiting\n\n');return;}res.end(messagesStream(count,response));return;
@@ -124,10 +124,11 @@ async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_st
   res.writeHead(404);res.end('{}');
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
  const host={...dshRuntime,prepare:(...args)=>{const p=dshRuntime.prepare(...args);p.env.DEEPSEEK_BASE_URL=base;return p;},spawn:(...args)=>{const child=dshRuntime.spawn(...args);children.push(child);child.stderr.on('data',v=>fs.appendFileSync(path.join(root,'stderr.txt'),v));return child;}};
- const b=fixtureBridge({root,catalog:store,worker:()=>({url:base+'/providers/deepseek',tokens:{mcp:'fixture-scoped-tool-token',admin:'never-shared'},context:{}}),fetchApi:(url,opts)=>fetch(url.replace('https://api.deepseek.com',base),opts),host});b.on('event',e=>events.push(e));
+ const b=fixtureBridge({root,catalog:store,worker:()=>toolsConnected?{url:base+'/providers/deepseek',tokens:{mcp:'fixture-scoped-tool-token',admin:'never-shared'},context:{}}:null,fetchApi:(url,opts)=>fetch(url.replace('https://api.deepseek.com',base),opts),host,confirmResourceChoice});b.on('event',e=>events.push(e));
  t.after(async()=>{b.close();held?.destroy();await Promise.all(children.map(child=>child.exitCode!==null||child.signalCode!==null?Promise.resolve():new Promise(r=>child.once('close',r))));server.closeAllConnections();await new Promise(r=>server.close(r));fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});});return {b,root,store,calls,events,children,get count(){return count;}};
 }
-function completion(b){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Fixture turn did not finish')),20000);const listener=e=>{if(e.method==='turn/completed'){clearTimeout(timer);b.off('event',listener);resolve(e.params.turn);}};b.on('event',listener);});}
+function nextEvent(b,method){return new Promise((resolve,reject)=>{const listener=event=>{if(event.method===method){clearTimeout(timer);b.off('event',listener);resolve(event);}};const timer=setTimeout(()=>{b.off('event',listener);reject(Error('Missing fixture event '+method));},15000);b.on('event',listener);});}
+const completion=b=>nextEvent(b,'turn/completed').then(event=>event.params.turn);
 
 test('a rejected tool list fails DSH startup with the HTTP status and permits an explicit reconnect',async t=>{
  let allowed=false;
@@ -156,7 +157,7 @@ test('real official SDK two-turn attempt reuse keeps the first final intact in l
 
 test('Real official DSH loop uses scoped tools, rejects forged native tools, reports real efforts and resumes exact state',{timeout:60000},async t=>{
  const f=await nativeFixture(t,{responses:[{tool:{name:'bash',args:{command:'must never execute'}}},{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}]});
- const info=await f.b.start();assert.equal(info.agentInfo.version,'0.2.2-rc.1');assert.deepEqual(info.studioIsolation.tools,['mcp__gpusampling__run_status']);
+ const info=await f.b.start();assert.equal(info.agentInfo.version,'0.2.2-rc.1');assert.deepEqual(info.studioIsolation.tools,[DSH_QUESTION_TOOL,'mcp__gpusampling__run_status']);
  const models=await f.b.request('model/list');assert.deepEqual(models.data[0].supportedReasoningEfforts.map(v=>v.reasoningEffort),['none','low','high','max']);assert.equal(models.data[0].defaultReasoningEffort,'none');
  const thread=await f.b.request('thread/start'),done=completion(f.b);await f.b.request('turn/start',{threadId:thread.thread.id,effort:'none',input:[{type:'text',text:'Read the fixture saved status'}]});assert.equal((await done).status,'completed');
  const api=f.calls.filter(c=>c.url==='/v1/messages'),tools=f.calls.filter(c=>c.body.method==='tools/call');assert.equal(api.length,3);assert.equal(tools.length,1);assert.equal(tools[0].body.params.name,'run_status');assert.equal(tools[0].authorization,'Bearer fixture-scoped-tool-token');assert(api.every(c=>c.apiKey===credential.apiKey));assert(api.every(c=>JSON.stringify(c.body.tools).includes('mcp__gpusampling__run_status')&&!JSON.stringify(c.body.tools).includes('submit_run')));assert.equal(api[0].body.thinking.type,'disabled');
@@ -179,7 +180,7 @@ test('actual official DSH chat runtime registers project skills and base workspa
  const tools=[...new ProjectSkills({root:'.',current:()=>null}).tools(),baseWorkspaceTool];
  const f=await nativeFixture(t,{toolCatalog:tools,responses:[{tool:{name:'mcp__gpusampling__read_project_skill',args:{name:'local-analysis'}}},{tool:{name:'mcp__gpusampling__setup_base_workspace',args:{action:'ensure'}}},{}]});
  const info=await f.b.start();
- assert.deepEqual([...info.studioIsolation.tools].sort(),tools.map(tool=>'mcp__gpusampling__'+tool.name).sort());
+ assert.deepEqual([...info.studioIsolation.tools].sort(),[DSH_QUESTION_TOOL,...tools.map(tool=>'mcp__gpusampling__'+tool.name)].sort());
  const thread=await f.b.request('thread/start'),done=completion(f.b);
  await f.b.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Read the project skill'}]});
  assert.equal((await done).status,'completed');
@@ -188,4 +189,55 @@ test('actual official DSH chat runtime registers project skills and base workspa
  assert(request.tools.some(tool=>tool.name==='mcp__gpusampling__write_project_skill'));
  assert.equal(f.calls.find(call=>call.body.method==='tools/call').body.params.name,'read_project_skill');
  assert(f.calls.some(call=>call.body.method==='tools/call'&&call.body.params.name==='setup_base_workspace'&&call.body.params.arguments.action==='ensure'));
+});
+
+test('official DeepSeek SDK waits for a listed choice or a custom answer with no scientific tool connection',{timeout:60000},async t=>{
+ const ask={tool:{name:DSH_QUESTION_TOOL,args:{question:'Which approach should we use?',options:[{label:'Read the queue',description:'Inspect only'},{label:'Plan a draft'}]}}};
+ const f=await nativeFixture(t,{responses:[ask,{text:'Continuing after listed choice'},ask,{text:'Continuing after custom answer'},ask],toolsConnected:false});
+ const info=await f.b.start();assert.deepEqual(info.studioIsolation.tools,[DSH_QUESTION_TOOL]);
+ const {thread}=await f.b.request('thread/start');
+ for(const [index,answer]of ['Read the queue','My own bounded next step'].entries()){
+  const question=nextEvent(f.b,'item/tool/requestUserInput'),done=completion(f.b);
+  const {turn}=await f.b.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'Start the same task'}]});
+  const shown=await question,id=shown.params.questions[0].id;
+  assert.equal(shown.params.turnId,turn.id);assert.equal(shown.params.threadId,thread.id);assert.equal(shown.params.questions[0].options[0].description,'Inspect only');
+  assert.equal(f.count,2*index+1);
+  assert.throws(()=>f.b.respond(shown.id,{answers:{[id]:{answers:[' ','Second choice']}}}),/Submit one answer/);
+  assert(f.b.questions.has(shown.id));
+  f.b.respond(shown.id,{answers:{[id]:{answers:[answer]}}});
+  assert.throws(()=>f.b.respond(shown.id,{answers:{[id]:{answers:[answer]}}}),/no longer active/);
+  assert.equal((await done).id,turn.id);assert.equal(f.count,2*index+2);
+  assert(f.events.some(event=>event.method==='serverRequest/resolved'&&event.params.requestId===shown.id));
+  const nextModel=f.calls.filter(call=>call.url==='/v1/messages').at(-1).body;
+  assert(JSON.stringify(nextModel.messages).includes(answer));
+ }
+ const question=nextEvent(f.b,'item/tool/requestUserInput'),done=completion(f.b);
+ const {turn}=await f.b.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'An interruptible task'}]});const shown=await question;
+ await f.b.request('turn/interrupt',{threadId:thread.id,turnId:turn.id});assert.equal((await done).status,'cancelled');assert(!f.b.questions.has(shown.id));assert.equal(f.count,5);
+ assert.equal(f.calls.filter(call=>call.body.method==='tools/call').length,0);
+});
+
+test('official DeepSeek SDK surfaces a hosted choice and continues the original acquisition after desktop confirmation',{timeout:60000},async t=>{
+ const resources=[{name:'示例甲',resourceId:'ssh:a'},{name:'示例乙',resourceId:'ssh:b'}],acquire='mcp__gpusampling__acquire_compute_resource';
+ const tool=(name,args)=>({tool:{name,args}});let confirmed=null;
+ const f=await nativeFixture(t,{
+  toolCatalog:['acquire_compute_resource','inspect_compute_service'].map(name=>({name,inputSchema:{type:'object'}})),
+  responses:[tool(acquire,{alias:'集群',access:'service'}),tool(acquire,{resource_id:'ssh:b',access:'service'}),
+   tool('mcp__gpusampling__inspect_compute_service',{resource_id:'ssh:b',probe_scheduler:true}),{text:'Fixture queue probe complete'}],
+  confirmResourceChoice:(owner,choice)=>{assert(owner.turnId);assert.deepEqual(choice.offered,['ssh:a','ssh:b']);assert.equal(choice.resourceId,'ssh:b');confirmed=choice.resourceId;return confirmed;},
+  toolCall:({name,arguments:args})=>{
+   if(args.alias)return {status:'choice_required',candidates:resources};
+   if(args.resource_id!==confirmed)return {status:'permission_required'};
+   return {status:name==='acquire_compute_resource'?'acquired':'observed',resource_id:confirmed};
+  }
+ });
+ await f.b.start();const {thread}=await f.b.request('thread/start');const question=nextEvent(f.b,'item/tool/requestUserInput'),done=completion(f.b);
+ const {turn}=await f.b.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'请探测集群队列'}]});const shown=await question;
+ const q=shown.params.questions[0];assert.deepEqual(q.options.map(option=>option.label),resources.map(resource=>resource.name));assert.equal(f.count,1);assert.equal(confirmed,null);
+ f.b.respond(shown.id,{answers:{[q.id]:{answers:['示例乙']}}});
+ assert.equal((await done).id,turn.id);assert.equal(confirmed,'ssh:b');
+ assert.deepEqual(f.calls.filter(call=>call.body.method==='tools/call').map(call=>call.body.params.arguments),[
+  {alias:'集群',access:'service'},{resource_id:'ssh:b',access:'service'},{resource_id:'ssh:b',probe_scheduler:true}
+ ]);
+ assert(JSON.stringify(f.calls.filter(call=>call.url==='/v1/messages')[1].body.messages).includes('target_selected'));
 });

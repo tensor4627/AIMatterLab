@@ -88,6 +88,25 @@ test('DeepSeek can inspect queues on the only hosted SSH target in an ordinary c
  assert.equal(f.calls.filter(call=>call==='/api/ssh-service/inspect-scheduler').length,2);
 });
 
+test('the trusted resource picker settles a current conversation choice and preserves the acquisition checks',async t=>{
+ const f=fixture(t),a=await f.host('a','示例甲'),b=await f.host('b','示例乙');
+ const acquire=args=>f.gateway.call('acquire_compute_resource',args,f.scope);
+ f.speak('探测一下实验集群');
+ const receipt=await acquire({alias:'实验集群',access:'service'});assert.equal(receipt.status,'choice_required');
+ const offered=receipt.candidates.map(resource=>resource.resourceId);assert.deepEqual(offered,[a,b]);
+ assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered:[a],resourceId:b}),null);
+ assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered,custom:'先解释两种方案'}),null);
+ assert.throws(()=>f.manager.confirmQuestionChoice({...f.scope,projectId:'different-project'},{offered,resourceId:b}),/turn_changed/);
+ assert.throws(()=>f.manager.confirmQuestionChoice({...f.scope,threadId:'other-chat'},{offered,resourceId:b}),/turn_changed/);
+ assert.equal(f.manager.capture(f.scope.provider,f.scope.threadId).resources.length,0);
+ assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered,custom:'就是示例乙'}),b);
+ assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered,resourceId:a}),null);
+ assert.deepEqual((await acquire({resource_id:a,access:'service'})).retry,{resource_id:b,access:'service'});
+ assert.equal((await acquire({resource_id:b,access:'service'})).status,'acquired');
+ assert.equal((await f.gateway.call('inspect_compute_service',{resource_id:b,probe_scheduler:true},f.scope)).scheduler.observations[0].status,'observed');
+ assert.deepEqual(f.manager.capture(f.scope.provider,f.scope.threadId).resources.map(resource=>resource.resourceId),[b]);
+});
+
 test('normal conversational affirmation resolves the exact previous resource choice without lending its terminal to another chat',async t=>{
  const f=fixture(t),resource_id=await f.host('a','示例甲');await f.host('b','示例乙');
  f.speak('帮我看看集群有哪些空闲队列');

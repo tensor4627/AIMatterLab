@@ -115,7 +115,7 @@ test('Real WorkerClient base probe and scoped proxy expose different correct inv
  const base=await worker.probeTools();assert.equal(base.count,2);const scoped=await scientificToolReadiness(deps,'codex');assert.equal(scoped.status,'ready');assert.equal(scoped.count,7);assert.equal(toolCalls,0);
 });
 
-test('Main uses only the trusted dependency adapter and has no private-mode caller argument',()=>{const source=fs.readFileSync(new URL("../../desktop/main.mjs",import.meta.url),'utf8'),body=source.slice(source.indexOf('async function scientificTools(provider){'),source.indexOf("handle('agent.connect'"));assert.match(body,/scientificToolReadiness\(\{worker,codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:\(\)=>agents\.active\},provider\)/);assert.doesNotMatch(body,/definitionOnly|present_task|mode/);});
+test('Main uses only the trusted dependency adapter and has no private-mode caller argument',()=>{const source=fs.readFileSync(new URL("../../desktop/main.mjs",import.meta.url),'utf8'),body=source.slice(source.indexOf('async function scientificTools('),source.indexOf("handle('agent.connect'"));assert.match(body,/scientificToolReadiness\(\{worker,codex:agents\.bridge\('codex'\)\|\|codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:\(\)=>agents\.active\},provider\)/);assert.doesNotMatch(body,/definitionOnly|present_task|mode/);});
 
 for(const variant of ['process','lifecycle'])test('Native bridge '+variant+' change invalidates a pending readiness result',async()=>{const f=await fixture();f.hooks.inventory=()=>{if(variant==='process')f.deps.codex.process={pid:123};else f.deps.codex.lifecycle=1;};blocked(await f.run());});
 

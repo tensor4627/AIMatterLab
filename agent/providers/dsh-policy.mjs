@@ -1,4 +1,6 @@
 // Loaded only by the official DSH CLI in AIMatterLab's isolated profile.
+import {randomUUID} from 'node:crypto';
+
 function providerToolSchema(tool){const schema=structuredClone(tool.inputSchema);if(tool.name==='present_task'){const items=schema.properties?.steps?.items,object=items?.anyOf?.find(v=>v.type==='object');if(object)schema.properties.steps.items=object;}return schema;}
 
 export const name='studio-dsh-policy';
@@ -8,9 +10,44 @@ const DRAFT=new Set(['copy_project_inputs','draft_local_environment','propose_cu
 const EXECUTE=new Set(['validate_run','submit_run','cancel_run','validate_cluster_run','submit_cluster_run','cancel_cluster_run','reconcile_run']);
 const MANAGED=new Set(['list_compute_resources','acquire_compute_resource','release_compute_resource','list_compute_terminals','read_compute_terminal','write_compute_terminal','inspect_compute_service','prepare_compute_run','read_compute_run_status','read_compute_run_log','validate_compute_run','submit_compute_run','cancel_compute_run','list_task_schedules','task_schedule_status','attach_task_schedule','stop_task_schedule']);
 const prefix='mcp__gpusampling__';
+export const DSH_QUESTION_TOOL=prefix+'ask_user_question';
+export const DSH_RESOURCE_QUESTION_PREFIX='studio-resource-';
+const questionSchema={type:'object',additionalProperties:false,required:['question','options'],properties:{
+ question:{type:'string',minLength:1,maxLength:1500,description:'Direct question in the user’s language.'},
+ options:{type:'array',minItems:2,maxItems:20,items:{type:'object',additionalProperties:false,required:['label'],properties:{
+  label:{type:'string',minLength:1,maxLength:160},description:{type:'string',maxLength:400}
+ }}}
+}};
+const questionDescription='Ask the user to choose one option in the chat input area. Give distinct labels and optional short descriptions. A custom answer is also available. Wait for the submitted answer and continue the same task. Use when their choice is needed, not when the request already determines an option. Do not request credentials or use this tool to change authorization.';
 export function dshToolAllowed(name,workflow){return READ.has(name)||MANAGED.has(name)||['setup_base_workspace','draft_local_environment','draft_cluster_setup'].includes(name)||workflow===true&&(DRAFT.has(name)||EXECUTE.has(name));}
 export function checkDshInventory(names,expected){if(!Array.isArray(names)||names.some(n=>typeof n!=='string'||!expected.has(n))||names.length!==expected.size||new Set(names).size!==expected.size)throw Error('DSH tool inventory differs from the verified AIMatterLab capability set');return names;}
 function send(method,params){process.stdout.write(JSON.stringify({jsonrpc:'2.0',method,params})+'\n');}
+const textResult=value=>({content:[{type:'text',text:JSON.stringify(value)}]});
+
+async function ask(ctx,exec,question){
+ if(!exec.agent)throw Error('A live DeepSeek conversation is required to ask the user');
+ return (await ctx.userQuestions.ask({agent:exec.agent,signal:exec.signal,questions:[question]})).answers[0];
+}
+
+function resourceChoiceReceipt(result){
+ if(result?.isError||result?.content?.length!==1||result.content[0]?.type!=='text')return null;
+ try{
+  const value=JSON.parse(result.content[0].text);
+  return value?.status==='choice_required'&&Array.isArray(value.candidates)&&value.candidates.length&&
+   value.candidates.every(v=>typeof v?.name==='string'&&v.name.trim()&&typeof v.resourceId==='string')?value:null;
+ }catch{return null;}
+}
+
+async function askResource(ctx,exec,receipt,access){
+ const duplicateNames=new Set(receipt.candidates.map(resource=>resource.name)).size!==receipt.candidates.length;
+ const options=receipt.candidates.map(resource=>({label:duplicateNames?`${resource.name} (${resource.resourceId})`:resource.name,resourceId:resource.resourceId}));
+ const id=DSH_RESOURCE_QUESTION_PREFIX+randomUUID();
+ send('studio/dshResourceQuestion',{sessionId:String(exec.agent.session.id),id,options});
+ const answer=await ask(ctx,exec,{id,question:'选择本次操作的计算资源',options:options.map(({label})=>({label}))});
+ const choice=options.find(option=>option.label===answer.selected[0]);
+ if(!choice)return textResult({...receipt,user_answer:answer.custom});
+ return textResult({status:'target_selected',resource:receipt.candidates.find(v=>v.resourceId===choice.resourceId),retry:{resource_id:choice.resourceId,...access?{access}:{}}});
+}
 
 export async function apply(ctx,config){
  try{
@@ -32,9 +69,19 @@ async function installPolicy(ctx,config){
   if(!response.ok)throw Object.assign(Error('AIMatterLab tool service HTTP '+response.status),{httpStatus:response.status});
   const value=await response.json();if(value.error)throw Error('AIMatterLab tool service rejected the request');return value.result;
  };
- if(config.workerUrl){
+ if(config.workerUrl||config.interactiveQuestions){
   const [{createMcpToolDefinition},{validateJsonSchemaValue}]=await Promise.all([import(config.mcpModule),import(config.toolsModule)]);
-  const result=await rpc('tools/list',{});
+  if(config.interactiveQuestions){
+   expected.add(DSH_QUESTION_TOOL);
+   ctx.tools.register(createMcpToolDefinition(ctx,{name:DSH_QUESTION_TOOL,rawName:'ask_user_question',description:questionDescription,inputSchema:questionSchema,call:async(args,exec)=>{
+    const violations=validateJsonSchemaValue(questionSchema,args,'arguments');if(violations.length)throw Error(violations.join('; '));
+    const options=args.options.map(({label,description})=>({label:label.trim(),description}));
+    if(!args.question.trim()||options.some(option=>!option.label)||new Set(options.map(option=>option.label)).size!==options.length)throw Error('Provide a question with distinct, nonempty option labels');
+    const answer=await ask(ctx,exec,{id:'answer',question:args.question.trim(),options});
+    return textResult({answer:answer.selected[0]??answer.custom});
+   }}));
+  }
+  const result=config.workerUrl?await rpc('tools/list',{}):{tools:[]};
   if(!Array.isArray(result?.tools))throw Error('AIMatterLab tool inventory is unavailable');
   for(const tool of result.tools){
    if(!dshToolAllowed(tool.name,config.workflow))continue;
@@ -44,13 +91,16 @@ async function installPolicy(ctx,config){
     const violations=validateJsonSchemaValue(schema,args,'arguments');if(violations.length)throw Error(violations.join('; '));
     if(!dshToolAllowed(tool.name,config.workflow))throw Error('This operation is unavailable in the current AIMatterLab conversation');
     if(tool.name==='present_task'&&args.task_id!==config.taskId)throw Error('The proposal belongs to another workflow');
-    return rpc('tools/call',{name:tool.name,arguments:args},exec.signal);
+    const response=await rpc('tools/call',{name:tool.name,arguments:args},exec.signal);
+    const choice=config.interactiveQuestions&&tool.name==='acquire_compute_resource'&&resourceChoiceReceipt(response);
+    return choice?askResource(ctx,exec,choice,args.access):response;
    }}));
   }
  }
  const inventory=(scope,toolSet)=>checkDshInventory(ctx.tools.schemas(scope,toolSet).map(t=>t.name),expected);
  ctx.tools.guard(exec=>expected.has(exec.name??exec.tool?.name)?undefined:'Only the verified AIMatterLab tools are available');
- ctx.systemPrompt.section({name:'studio:instructions',order:0,text:config.instructions,interpolate:false,complete:true});
+ const instructions=config.interactiveQuestions?config.instructions+'\n\nUse '+DSH_QUESTION_TOOL+' for a choice between plausible queues, approaches, or other next steps when the user’s preference is needed. For an ambiguous hosted compute resource, call acquire_compute_resource to obtain its candidate list. Its choice_required result opens the resource picker while the tool waits. A target_selected receipt identifies the user’s choice. Use its retry fields immediately to continue the original request. If the user writes a custom answer without selecting an offered resource, use that text to guide the next action and avoid repeating the same question. No queue or project permissions are granted by a choice.':config.instructions;
+ ctx.systemPrompt.section({name:'studio:instructions',order:0,text:instructions,interpolate:false,complete:true});
  ctx.on('system-prompt/assemble',async(assembly,context,next)=>{inventory(context.scope,context.toolSet);return next();});
  ctx.on('agent/assistant-stream',({agent,frame})=>{
   if(frame.type==='chunk'&&frame.chunk?.type==='text-delta')send('studio/dshText',{sessionId:String(agent.session.id),attemptId:frame.attemptId,text:frame.chunk.text});

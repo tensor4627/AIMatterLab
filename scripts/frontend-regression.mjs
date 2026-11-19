@@ -21,6 +21,7 @@ import {frontendContinuousWorkCases} from './frontend-continuous-work-cases.mjs'
 import {frontendSshReloginCases} from './frontend-ssh-relogin-cases.mjs';
 import {frontendSelectedServiceRecordCases} from './frontend-selected-service-record-cases.mjs';
 import {frontendDshHistoryCases} from './frontend-dsh-history-cases.mjs';
+import {frontendManagedToolCases} from './frontend-managed-tool-cases.mjs';
 import {frontendTerminalReadObservationCases} from './frontend-terminal-read-observation-cases.mjs';
 import {frontendWorkerUpgradeCases} from './frontend-worker-upgrade-cases.mjs';
 let playwright;
@@ -180,6 +181,7 @@ try{
  await frontendWorkerUpgradeCases({check,out});
  await frontendTerminalReadObservationCases({check,out});
  await frontendDshHistoryCases({check,out});
+ await frontendManagedToolCases({check,out});
  await frontendSelectedServiceRecordCases({check,out});
  await frontendSshReloginCases({check,out});
  await frontendContinuousWorkCases({check,out});

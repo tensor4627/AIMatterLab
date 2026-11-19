@@ -57,13 +57,18 @@
 .agent-send-notice{padding:6px 14px;color:var(--muted);flex-shrink:0;overflow-wrap:anywhere}
 .agent-new-messages{display:flex;justify-content:center;padding:5px 12px;flex-shrink:0}
 .agent-new-messages .button{white-space:normal;background:var(--raised);color:var(--accent)}
-.agent-question{border:0;border-top:1px solid var(--line);padding:12px 0;margin:12px 0;min-width:0}
-.agent-question legend{padding:0 4px 0 0;line-height:1.6;overflow-wrap:anywhere}
-.agent-question input{width:100%}
-.agent-question-options{display:grid;gap:7px;margin:7px 0 10px}
-.agent-question-options .agent-question-option{display:grid;gap:4px;text-align:left;justify-content:stretch;white-space:normal;overflow-wrap:anywhere}
-.agent-question-option[aria-pressed=true]{border-color:var(--accent);background:var(--accent-bg)}
-.agent-question-option span{color:var(--muted);font-size:.95em;line-height:1.6}
+.agent-composer-questions{max-height:min(45dvh,25em);overflow:auto;display:grid;gap:10px;padding:3px}
+.approval.agent-composer-question{margin:0;padding:9px;border-color:var(--line);background:transparent;color:var(--text)}
+.agent-question{display:grid;gap:6px;border:0;padding:0;margin:0 0 10px;min-width:0}
+.agent-question legend{font-weight:650;font-size:max(var(--chat-font-size,14px),var(--ui-min-font,12px));padding:0 0 8px;line-height:1.55;max-width:100%;overflow-wrap:anywhere}
+.agent-composer-question .agent-question-option{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:8px;padding:6px 8px;margin:0;border:1px solid var(--line);border-radius:6px;cursor:pointer}
+.agent-question-option[data-selected=true]{border-color:var(--accent);background:var(--accent-bg)}
+.agent-question-option:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+.agent-question-option span{display:grid;gap:2px;min-width:0;color:var(--text);overflow-wrap:anywhere;line-height:1.45}
+.agent-question-option small{color:var(--muted);font-size:inherit}
+.agent-composer-question .agent-question-option input{width:auto;margin:3px 0 0;accent-color:var(--accent)}
+.agent-composer-question .agent-question-other{display:block;margin:0;color:var(--muted)}
+.agent-composer-question .agent-question-other input{width:100%;min-width:0;box-sizing:border-box}
 .agent-history-state{padding:24px 16px;line-height:1.7;color:var(--muted);overflow-wrap:anywhere}
 .agent-history-state details{margin:8px 0 14px}
 .agent-history-state summary,.agent-prompt-proposal summary{cursor:pointer;color:var(--muted)}

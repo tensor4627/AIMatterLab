@@ -65,6 +65,11 @@ export class ConversationAgentHub extends EventEmitter{
   const hub=this.createHub({...opts,codex:provider==='codex'?this.createCodex():inertCodex,sessionProfileId:id,
    worker:p=>p===provider?opts.worker?.(p,id,context()):null,releaseWorker:p=>{if(p===provider)opts.releaseWorker?.(p,id);},
    bindWorkerContext:(p,value,binding)=>opts.bindWorkerContext?.(p,value,{...binding,sessionId:id}),
+   confirmResourceChoice:({threadId,turnId},choice)=>{
+    const owner=context(),checkCurrent=()=>!entry.closed&&entry.threadId===threadId&&entry.turnId===turnId&&owner.threadId===threadId&&context()===owner;
+    if(!checkCurrent())throw Error('The resource choice no longer belongs to the active conversation');
+    return opts.confirmResourceChoice?.({...owner,provider,threadId,sessionId:id,checkCurrent},choice);
+   },
    resourceScope:(p,method)=>opts.resourceScope?.(p,method,context(),id)});
   hub.active=provider;
   hub.on('event',event=>this.receive(entry,event));
@@ -187,6 +192,7 @@ export class ConversationAgentHub extends EventEmitter{
  }
 
  bridge(provider,threadId){return (threadId!==undefined?this.byThread.get(key(provider,threadId)):this.scope.getStore()||this.foreground)?.hub.bridge(provider);}
+ toolConnection(provider,threadId){return (threadId!==undefined?this.byThread.get(key(provider,threadId)):this.scope.getStore()||this.foreground)?.hub.bridgeWorkers.get(provider);}
  preferences(provider){return this.auth.preferences(provider);}
  path(provider){return this.auth.path(provider);}
  threads(provider){return this.auth.threads(provider);}

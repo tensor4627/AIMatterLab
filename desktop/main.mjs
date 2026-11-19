@@ -58,7 +58,7 @@ import {consumerReviewDialog} from "./platform/dialogs/consumer-review-dialog.mj
 
 import {resumeConversationContext} from "../agent/sessions/conversation-recovery.mjs";
 import {definitionReply} from '../agent/tools/definition-scope.mjs';
-import {scientificToolReadiness} from "../agent/tools/scientific-tool-readiness.mjs";
+import {managedToolReadiness,scientificToolReadiness} from "../agent/tools/scientific-tool-readiness.mjs";
 import {createParallelAgentWorkflowContext} from '../agent/sessions/workflow-context.mjs';
 
 import {createPrivateCvAccess,composeToolGuards} from "../agent/tools/private-cv-access.mjs";
@@ -263,6 +263,7 @@ if(projectSkills.overlapsBundle(projectSkills.root)){
 }
 agents=new ConversationAgentHub({authCodex:codex,createCodex,initialProvider:settings.agentProvider||'codex',
  runSession:(identity,run)=>workflowContext.runInSession(identity,run),dropSession:id=>{resourceRouting.releaseSession(id);workflowContext?.dropSession(id);},instructions:workspaceAgentInstructions(workspace,projectSkills.personalDirectory),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,
+ confirmResourceChoice:(scope,answer)=>workflowContext.runForScope(scope,()=>managedResources.confirmQuestionChoice(scope,answer)),
  worker:(provider,sessionId)=>resourceRouting.sessionConnection(provider,sessionId,workflowContext),
  releaseWorker:(provider,sessionId)=>{worker.revokeProvider(provider,sessionId);terminalMcp?.revokeProvider(provider,sessionId);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method,context,sessionId)=>resourceRouting.scope(provider,method,context,sessionId)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
@@ -619,21 +620,34 @@ handle('codex.configure',async({preferences={},threadId,model}) => {
 handle('codex.rpc',value=>agentRpc({...value,provider:'codex'}));
 registerWorkflowPlanRoutes({handle,catalog});
 async function scientificTools(provider,threadId){
- const available=state=>managedResources?{...state,managedCompute:true}:state;
- const selected=await resourceRouting.readiness(provider,threadId);if(selected)return available(selected);
- const terminalReady=()=>sharedTerminal?.hasCurrentGrant(provider)?{status:'ready',scope:'terminal-only',scientificStatus:'blocked',count:3,transport:'desktop-terminal',message:'共享终端可用',checkedAt:Date.now()}:null;
- if(!worker.providerConnection(provider)&&terminalReady())return available(terminalReady());
- const result=await scientificToolReadiness({worker,codex:agents.bridge('codex')||codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:()=>agents.active},provider);
- return available(result.status==='blocked'?terminalReady()||result:result);
+ const session=managedResources?agents.sessionIdentity(provider,threadId):null;
+ const task=session?.threadId?taskRecords.bound(provider,session.threadId):null;
+ const workflowBound=!!task&&!!(task.customCv?.id||taskWorkerSource(task));
+ const localReadiness=async()=>{
+  const selected=await resourceRouting.readiness(provider,threadId);if(selected&&!workflowBound)return selected;
+  const terminalReady=()=>!workflowBound&&sharedTerminal?.hasCurrentGrant(provider)?{status:'ready',scope:'terminal-only',scientificStatus:'blocked',count:3,transport:'desktop-terminal',message:'共享终端可用',checkedAt:Date.now()}:null;
+  if(!worker.providerConnection(provider)&&terminalReady())return terminalReady();
+  const result=await scientificToolReadiness({worker,codex:agents.bridge('codex')||codex,workflowContext,records:taskRecords,privateAccess,selectedProvider:()=>agents.active},provider);
+  return result.status==='blocked'?terminalReady()||result:result;
+ };
+ if(!managedResources)return localReadiness();
+ const [local,managedTools]=await Promise.all([localReadiness(),managedToolReadiness({agents,terminalMcp},provider,threadId)]);
+ const owner=agents.sessionIdentity(provider,threadId);
+ if(owner?.id!==session?.id||owner?.threadId!==session?.threadId)throw Error('Agent selection changed during the tool check');
+ return {...local,managedCompute:true,managedTools,workflowBound,...owner?.threadId?{threadId:owner.threadId}:{}};
 }
 handle('agent.connect',async({provider,repairTools=false,threadId})=>{
- providerId(provider);if(typeof repairTools!=='boolean')throw Error('Invalid repair request');if(threadId!==undefined&&(typeof threadId!=='string'||!threadId.trim()||threadId.length>200))throw Error('Invalid connection conversation');
+ providerId(provider);if(typeof repairTools!=='boolean'&&repairTools!=='managed')throw Error('Invalid repair request');if(threadId!==undefined&&(typeof threadId!=='string'||!threadId.trim()||threadId.length>200))throw Error('Invalid connection conversation');
  if(repairTools&&threadId!==undefined){const owner=workflowContext.current();if(owner?.provider!==provider||owner?.threadId!==threadId)throw Error('请先选择要修复工具连接的原对话。');}
+ if(repairTools==='managed'){
+  const owner=agents.sessionIdentity(provider);
+  if(!managedResources||!owner||owner.threadId!==(threadId??null))throw Error('请先选择要修复工具连接的原对话。');
+ }
  const key=JSON.stringify([provider,threadId||null]),connectionTicket=Symbol();agentConnectAttempts.set(key,connectionTicket);
  const current=()=>agentConnectAttempts.get(key)===connectionTicket;
  try{
  const resource=resourceRouting.capture(provider,threadId);
- if(repairTools&&['ssh-terminal','ssh-connection'].includes(resource.selection?.kind)){if(agents.isBusy(provider,threadId))throw Error('Conversation in progress');agents.disconnect(provider,threadId);}
+ if(repairTools==='managed'||repairTools&&['ssh-terminal','ssh-connection'].includes(resource.selection?.kind)){if(agents.isBusy(provider,threadId))throw Error('Conversation in progress');agents.disconnect(provider,threadId);}
  else if(repairTools){
   if(agents.isBusy(provider,threadId))throw Error('Conversation in progress');const revision=workflowContext.revision(),owner=workflowContext.current(),connection=worker.connection,epoch=worker.connectionEpoch;
   const task=owner?.taskId?taskRecords.read(owner.taskId):null;let source,target;try{source=taskWorkerSource(task);target=task?taskWorkerTarget(task,settings,catalog):settings;}catch{throw Error('请先通过“连接计算资源”核对原服务来源和端口，再修复工具连接。');}
@@ -656,7 +670,11 @@ handle('agent.connect',async({provider,repairTools=false,threadId})=>{
  return {...info,tools,...defaults?{nativeCodexDefaults:defaults}:{}};
  }finally{if(current())agentConnectAttempts.delete(key);}
 });
-handle('agent.tools',async({provider,threadId})=>{providerId(provider);return scientificTools(provider,threadId);});
+handle('agent.tools',async({provider,threadId})=>{
+ providerId(provider);
+ if(threadId!==undefined&&(typeof threadId!=='string'||!threadId.trim()||threadId.length>200||agents.sessionIdentity(provider)?.threadId!==threadId))throw Error('Select the conversation before checking its tools');
+ return scientificTools(provider,threadId);
+});
 handle('agent.disconnect',({provider})=>{providerId(provider);workflowContext.clear(provider);agents.disconnect(provider);return {};});
 registerModelProfileRoutes({handle,agents,assertIdle:()=>{assertIdleAgent();agents.assertContextIdle();},emit:event=>emit('studio:event',event),fetchApi:(...args)=>net.fetch(...args)});
 handle('agent.account',({provider})=>{providerId(provider);return agents.account(provider);});

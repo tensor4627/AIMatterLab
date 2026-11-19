@@ -2,6 +2,7 @@ import {EventEmitter} from 'node:events';
 import {createHash,randomUUID} from 'node:crypto';
 import {dshRuntime} from '../../desktop/platform/dsh-runtime.mjs';
 import {createJsonlFramer} from './jsonl-frames.mjs';
+import {DSH_QUESTION_TOOL,DSH_RESOURCE_QUESTION_PREFIX} from './dsh-policy.mjs';
 import {DEEPSEEK_URL} from './deepseek.mjs';
 import {redact} from './contracts.mjs';
 import {STUDIO_INSTRUCTIONS} from '../context/agent-settings.mjs';
@@ -40,10 +41,10 @@ export function dshLegacyContext(turns){
 
 /** AIMatterLab protocol adapter. The official DSH subprocess owns every model/tool loop. */
 export class DshBridge extends EventEmitter{
- constructor({root,catalog,credential,worker,executable,instructions=STUDIO_INSTRUCTIONS,fetchApi=fetch,host=dshRuntime,sessionProfileId}={}){
-  super();Object.assign(this,{root,catalog,getCredential:credential,getWorker:worker,executable,instructions,fetchApi,host,sessionProfileId});this.provider='deepseek';this.pending=new Map();this.activeTurns=new Map();this.unconfirmedTurns=new Map();this.sessions=new Map();this.loaded=new Set();this.models=[];this.next=0;this.lifecycle=0;this.current=null;
+ constructor({root,catalog,credential,worker,executable,instructions=STUDIO_INSTRUCTIONS,fetchApi=fetch,host=dshRuntime,sessionProfileId,confirmResourceChoice}={}){
+  super();Object.assign(this,{root,catalog,getCredential:credential,getWorker:worker,executable,instructions,fetchApi,host,sessionProfileId,confirmResourceChoice});this.provider='deepseek';this.pending=new Map();this.questions=new Map();this.activeTurns=new Map();this.unconfirmedTurns=new Map();this.sessions=new Map();this.loaded=new Set();this.models=[];this.next=0;this.lifecycle=0;this.current=null;
  }
- event(method,params){this.emit('event',this.cleanProtocol({provider:'deepseek',method,params}));}
+ event(method,params,id){this.emit('event',this.cleanProtocol({provider:'deepseek',method,params,...id===undefined?{}:{id}}));}
  cleanValue(value){return sanitizeTranscript(value,[this.getCredential()?.apiKey,this.getWorker()?.tokens?.mcp]);}
  cleanProtocol(value,options){return sanitizeProtocolTranscript(value,[this.getCredential()?.apiKey,this.getWorker()?.tokens?.mcp],options);}
  clean(value){return redact(String(value),[this.getCredential()?.apiKey,this.getWorker()?.tokens?.mcp]);}
@@ -84,26 +85,31 @@ export class DshBridge extends EventEmitter{
   const timer=setTimeout(()=>readyReject(Error('DeepSeek Harness isolation readiness timed out')),30000);
   try{
    // Install the readiness rejection handler before initialization can fail.
-   const [info,isolation]=await Promise.all([this.raw('initialize',{cwd:profile.cwd,provider:'deepseek-official',model,reasoningEffort:effort,maxTokens:effort==='off'?8192:32768,approvalRequests:true}),ready]);
+   const [info,isolation]=await Promise.all([this.raw('initialize',{cwd:profile.cwd,provider:'deepseek-official',model,reasoningEffort:effort,maxTokens:effort==='off'?8192:32768,approvalRequests:true,capabilities:{userQuestions:true}}),ready]);
    if(info?.serverInfo?.name!=='deepseek-harness-sdk-runtime'||generation!==this.lifecycle||this.process!==child||isolation?.status!=='verified')throw Error('DeepSeek Harness 未通过运行组件与隔离检查');
    this.model=model;this.effort=effort;this.modelInfos=isolation.models||[];this.info={transport:'dsh-sdk-jsonl',agentInfo:{name:'DeepSeek Harness',version:runtime.version},studioIsolation:isolation};return this.info;
   }catch(error){if(this.process===child)this.stop({notify:false});throw Error(this.clean(error.message));}finally{clearTimeout(timer);if(this.isolationWaiter===isolationWaiter)this.isolationWaiter=null;}
  }
  send(value){if(!this.process||this.process.stdin.destroyed)throw Error('请先连接 DeepSeek Harness');this.process.stdin.write(JSON.stringify({jsonrpc:'2.0',...value})+'\n');}
- raw(method,params={},timeout=45000,onLateResponse){
+ raw(method,params={},timeout=45000,onLateResponse,waitingForUser){
   const id=++this.next;
   return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>{
+   const expire=()=>{
+    if(waitingForUser?.()){this.pending.get(id).timer=setTimeout(expire,timeout);return;}
     if(onLateResponse)this.pending.get(id).timedOut=true;else this.pending.delete(id);
     reject(Object.assign(Error('DeepSeek Harness '+method+' timed out'),{code:'DSH_TIMEOUT'}));
-   },timeout);
+   };
+   const timer=setTimeout(expire,timeout);
    this.pending.set(id,{resolve,reject,timer,onLateResponse});
    try{this.send({id,method,params});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}
   });
  }
  receive(message){
   if(!message||typeof message!=='object'||Array.isArray(message))throw Error('Invalid DSH envelope');
-  if(message.id!==undefined&&message.method){this.send({id:message.id,...message.method==='approval/request'?{result:{outcome:'rejected'}}:{error:{code:-32601,message:'AIMatterLab does not expose native client capabilities'}}});return;}
+  if(message.id!==undefined&&message.method){
+   if(message.method==='user-question/ask'){this.requestUserChoice(message);return;}
+   this.send({id:message.id,...message.method==='approval/request'?{result:{outcome:'rejected'}}:{error:{code:-32601,message:'AIMatterLab does not expose native client capabilities'}}});return;
+  }
   if(message.id!==undefined){const pending=this.pending.get(message.id);if(!pending)return;clearTimeout(pending.timer);this.pending.delete(message.id);if(pending.timedOut){pending.onLateResponse(message);return;}if(message.error){const error=Error(this.clean(message.error.message||'DeepSeek Harness request failed'));error.rpcResponse=true;pending.reject(error);}else pending.resolve(message.result);return;}
   if(message.method==='studio/dshIsolation'){
    const value=message.params;
@@ -116,11 +122,41 @@ export class DshBridge extends EventEmitter{
    if(value?.status!=='verified'||value.nativeTools!==0||!Array.isArray(value.tools)||value.tools.some(n=>typeof n!=='string'||!n.startsWith(prefix)))throw Error('Invalid DSH isolation receipt');this.isolationWaiter?.resolve(value);return;
   }
   if(message.method==='subagent.started'||message.method==='subagent.finished')throw Error('Native DSH subagents are unavailable in AIMatterLab');
+  if(message.method==='studio/dshResourceQuestion'){
+   const p=message.params,s=this.byNative(p?.sessionId),active=s&&this.activeTurns.get(s.id);
+   if(active&&safeId(p.id)&&p.id.startsWith(DSH_RESOURCE_QUESTION_PREFIX)&&Array.isArray(p.options)&&p.options.every(o=>typeof o?.label==='string'&&typeof o.resourceId==='string')){
+    active.resourceQuestions??=new Map();active.resourceQuestions.set(p.id,p.options);
+   }
+   return;
+  }
+  if(message.method==='user-question.cancelled'){
+   const p=message.params,request=this.questions.get(p?.requestId);
+   if(request&&request.sessionId===p.sessionId)this.resolveUserChoice(p.requestId,request);
+   return;
+  }
   if(message.method==='studio/dshText'){
    const p=message.params,s=this.byNative(p?.sessionId),active=s&&this.activeTurns.get(s.id);if(!active||typeof p.text!=='string')return;
    const turn=active.turn,id=dshPublicItemId(s.id,turn.id,'agentMessage',p.attemptId??'assistant');active.streams??=new Map();let stream=active.streams.get(id);if(!stream){stream=createTranscriptStream(()=>[this.getCredential()?.apiKey,this.getWorker()?.tokens?.mcp]);active.streams.set(id,stream);}const delta=stream.push(p.text);if(!delta)return;let item=turn.items.find(i=>i.id===id);if(!item){item={id,type:'agentMessage',text:''};turn.items.push(item);}item.text+=delta;this.event('item/agentMessage/delta',{threadId:s.id,turnId:turn.id,itemId:id,delta});return;
   }
   if(message.method==='session.event')this.sessionEvent(message.params);
+ }
+ requestUserChoice({id:rpcId,params}){
+  const {requestId,sessionId,questions} = params||{},s=this.byNative(sessionId),active=s&&this.activeTurns.get(s.id);
+  const q=Array.isArray(questions)&&questions.length===1?questions[0]:null;
+  const options=q?.options,resourceOptions=active?.resourceQuestions?.get(q?.id);
+  active?.resourceQuestions?.delete(q?.id);
+  const invalid=!active||!safeId(requestId)||this.questions.has(requestId)||!safeId(q?.id)||typeof q.question!=='string'||!q.question.trim()||q.multiSelect||q.intent||
+   !Array.isArray(options)||!options.length||!options.every(o=>typeof o?.label==='string'&&o.label.trim()&&(o.description===undefined||typeof o.description==='string'))||
+   (q.id.startsWith(DSH_RESOURCE_QUESTION_PREFIX)?(!resourceOptions||resourceOptions.length!==options.length||options.some((o,i)=>o.label!==resourceOptions[i].label)):q.id!=='answer');
+  if(invalid){this.send({id:rpcId,error:{code:-32602,message:'Invalid AIMatterLab user choice'}});return;}
+  const displayed=this.cleanValue({id:q.id,question:q.question,isOther:true,options});
+  if(new Set(displayed.options.map(o=>o.label)).size!==options.length){this.send({id:rpcId,error:{code:-32602,message:'Ambiguous AIMatterLab options'}});return;}
+  this.questions.set(requestId,{rpcId,sessionId,threadId:s.id,turn:active.turn,question:displayed,options,resourceOptions});
+  this.event('item/tool/requestUserInput',{threadId:s.id,turnId:active.turn.id,questions:[displayed]},requestId);
+ }
+ resolveUserChoice(id,request){
+  this.questions.delete(id);
+  this.event('serverRequest/resolved',{threadId:request.threadId,requestId:id});
  }
  byNative(id){return [...this.sessions.values()].find(s=>s.nativeId===id);}
  sessionEvent({sessionId,event}={}){
@@ -139,7 +175,7 @@ export class DshBridge extends EventEmitter{
    if(!item){item={id:dshPublicItemId(s.id,turn.id,'agentMessage',message.id||randomUUID()),type:'agentMessage',text};turn.items.push(item);}else item.text=text;
    active.streams?.delete(item.id);item.completed=true;if(text.trim())active.output=true;this.event('item/completed',{threadId:s.id,turnId:turn.id,item});
    for(const block of message.content||[])if(block.type==='tool-call'){
-    const name=block.name||block.toolName;if(typeof name!=='string'||!name.startsWith(prefix))continue;
+    const name=block.name||block.toolName;if(typeof name!=='string'||!name.startsWith(prefix)||name===DSH_QUESTION_TOOL)continue;
     const tool={id:dshPublicItemId(s.id,turn.id,'mcpToolCall',block.id),type:'mcpToolCall',server:'gpusampling',tool:name.slice(prefix.length),arguments:block.arguments,status:'inProgress'};turn.items.push(tool);this.event('item/started',{threadId:s.id,turnId:turn.id,item:tool});
    }
   }
@@ -223,7 +259,7 @@ export class DshBridge extends EventEmitter{
    else if(reason==='completed')this.settleTurn(s,active,'completed');
    else this.settleTurn(s,active,reason==='aborted'?'cancelled':'failed',active.terminal?.error?.message||'DeepSeek Harness 未报告完整回复：'+(reason||'missing terminal receipt'));
   };
-  this.raw('session/wait',{sessionId:s.nativeId},30*60*1000,complete).then(()=>complete(),error=>this.turnRequestError(s,active,error));
+  this.raw('session/wait',{sessionId:s.nativeId},30*60*1000,complete,()=>[...this.questions.values()].some(request=>request.turn===active.turn)).then(()=>complete(),error=>this.turnRequestError(s,active,error));
  }
  settleTurn(s,active,status,message){
   if(this.unconfirmedTurns.get(s.id)!==active){this.finish(s,active,status,message);return;}
@@ -239,13 +275,31 @@ export class DshBridge extends EventEmitter{
   const turn=active.turn;
   for(const [id,stream]of active.streams||[]){const delta=stream.push('',{final:true}),item=turn.items.find(i=>i.id===id);if(delta&&item){item.text+=delta;this.event('item/agentMessage/delta',{threadId:s.id,turnId:turn.id,itemId:id,delta});}}
   active.streams?.clear();this.activeTurns.delete(s.id);turn.status=status;
+  for(const [id,request]of this.questions)if(request.turn===turn)this.resolveUserChoice(id,request);
   if(message)turn.error={message:this.clean(message)};
   if(status!=='completed')for(const item of markUnconfirmedTools(turn))this.event('item/completed',{threadId:s.id,turnId:turn.id,item});
   s.updatedAt=Date.now();this.save(s);
   this.event('studio/sessionInfo',{thread:this.publicThread(s)});
   this.event('turn/completed',{threadId:s.id,turn:{id:turn.id,status,stopReason:status==='completed'?'end_turn':status,modelOutputReceived:status==='completed'&&active.output,...turn.operationState?{operationState:turn.operationState}:{},...turn.error?{error:turn.error}:{}}});
  }
- respond(){throw Error('Native DSH approval requests are unavailable in AIMatterLab');}
+ respond(id,result){
+  const request=this.questions.get(id);
+  if(!request||this.activeTurns.get(request.threadId)?.turn!==request.turn)throw Error('DeepSeek question is no longer active');
+  const q=request.question,answer=result?.answers?.[q.id]?.answers;
+  if(!Array.isArray(answer)||answer.length!==1||typeof answer[0]!=='string'||!answer[0].trim()||answer[0].length>32768)throw Error('Submit one answer to the current DeepSeek question');
+  const value=this.clean(answer[0]),index=q.options.findIndex(o=>o.label===value),option=request.options[index];
+  let selected=option?[option.label]:[];
+  if(request.resourceOptions){
+   const resourceId=this.confirmResourceChoice({threadId:request.threadId,turnId:request.turn.id},{
+    offered:request.resourceOptions.map(o=>o.resourceId),resourceId:request.resourceOptions[index]?.resourceId,custom:option?undefined:value
+   });
+   const confirmed=request.resourceOptions.find(o=>o.resourceId===resourceId);
+   selected=confirmed?[confirmed.label]:[];
+  }
+  this.send({id:request.rpcId,result:{answers:[{id:q.id,selected,...selected.length?{}:{custom:value}}]}});
+  this.resolveUserChoice(id,request);
+  return {};
+ }
  stop({reason='closed',notify=true,preserveStart=false}={}){
   if(!preserveStart){this.connectController?.abort();this.connectController=null;this.starting=null;}
   ++this.lifecycle;const child=this.process;this.process=null;this.contextKey=null;this.info=null;this.loaded.clear();this.unconfirmedTurns.clear();this.framer?.reset();this.framer=null;

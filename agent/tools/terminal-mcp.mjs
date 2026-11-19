@@ -22,6 +22,14 @@ export class TerminalMcp {
   this.scopes.bind(this.base);
  }
  providerConnection(provider,sessionId){return this.base?this.scopes.connection(provider,this.base,sessionId):undefined;}
+ async observeToolNames(provider,connection){
+  if(!this.base||!connection||connection.url!==this.base.url+'/providers/'+provider||connection.transport!==this.base.transport||!connection.tokens?.mcp)throw Error('The conversation has no desktop MCP connection');
+  const response=await fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}}),signal:AbortSignal.timeout(12000),redirect:'error'});
+  if(!response.ok)throw Error('The desktop MCP inventory is unavailable');
+  const value=await response.json(),tools=value.result?.tools;
+  if(value.jsonrpc!=='2.0'||value.id!==1||value.error||!Array.isArray(tools)||tools.some(tool=>typeof tool?.name!=='string'))throw Error('The desktop MCP inventory was not confirmed');
+  return tools.map(tool=>tool.name);
+ }
  legacyVisible(scope){
   return !this.desktopTools||!!scope.sessionId&&!!scope.threadId&&this.terminal.hasCurrentGrant?.(scope.provider,undefined,{reconcile:false})===true;
  }

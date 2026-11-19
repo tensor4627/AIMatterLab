@@ -16,6 +16,7 @@ import {createAgentRequests} from '../../agent/sessions/requests.mjs';
 import {createAgentWorkflowContext} from '../../agent/sessions/workflow-context.mjs';
 import {TaskRecords} from '../../agent/sessions/task-records.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
+import {managedToolReadiness} from '../../agent/tools/scientific-tool-readiness.mjs';
 import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools.mjs';
 import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
 
@@ -357,4 +358,10 @@ for(const correctTarget of [true,false])test(
  assert.equal(probe.scheduler.status,'observed');
  assert.deepEqual(observations,[resource_id]);
  assert(JSON.stringify(packets.at(-1)).includes('isolated-fixture'));
+
+ const connection=endpoint.providerConnection(provider,sessionId);
+ const status=await managedToolReadiness({terminalMcp:endpoint,agents:{sessionIdentity:(p,id)=>p===provider&&id===threadId?{id:sessionId,threadId}:null,
+  bridge:()=>bridge,toolConnection:()=>connection}},provider,threadId);
+ assert.deepEqual(status,{status:'ready',count:3});
+ assert.deepEqual(observations,[resource_id], 'Checking the tool channel must not send another scheduler probe');
 });

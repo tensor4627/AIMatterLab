@@ -103,8 +103,9 @@ export function prepareDshProfile(root,runtime,worker,instructions,selection={})
  fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]\n');
  fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'studio-deepseek-profile',private:true,type:'module',dsh:{profile:{bundles:[]}}},null,2));
  const entries=kernel.map(([id,name,config])=>({id,name:name.startsWith('@')?name:'@deepseek-ai/'+name,...config?{config}:{}}));
+ entries.push({id:'user-questions',name:'@deepseek-ai/dsh-user-questions'});
  entries.push({id:'sessions',name:'@deepseek-ai/dsh-session-persistence-jsonl',config:{root:sessions,compression:'none'}});
- entries.push({id:'studio-policy',name:runtime.policyPath||sourcePolicyPath,inject:['tools','systemPrompt','appReady','llm'],config:{mcpModule:runtime.mcpModule,toolsModule:runtime.toolsModule,workerUrl:scoped?.url||null,workflow:!!scoped?.context.taskId,taskId:scoped?.context.taskId||null,projectId:scoped?.context.projectId||null,models:selection.models||[],instructions}});
+ entries.push({id:'studio-policy',name:runtime.policyPath||sourcePolicyPath,inject:['tools','systemPrompt','appReady','llm','userQuestions'],config:{mcpModule:runtime.mcpModule,toolsModule:runtime.toolsModule,workerUrl:scoped?.url||null,workflow:!!scoped?.context.taskId,taskId:scoped?.context.taskId||null,projectId:scoped?.context.projectId||null,models:selection.models||[],instructions,interactiveQuestions:true}});
  fs.writeFileSync(path.join(profile,'cordis.patch.yml'),JSON.stringify([{insert:entries}],null,2));
  const env=agentEnvironment('deepseek',{overrides:{DSH_HOME:home,DEEPSEEK_API_KEY:'',DEEPSEEK_BASE_URL:'https://api.deepseek.com/anthropic',GSS_MCP_TOKEN:scoped?.token||'',ELECTRON_RUN_AS_NODE:'1'}});
  return {home,cwd,args:['--profile','studio'],env};

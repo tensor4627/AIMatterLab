@@ -40,7 +40,7 @@ export function appConversationRecorder(storage){
  return {onConversation,selectedConversationRef,selections,rows};
 }
 export function agentHarness({storage=memoryStorage(),props={},override}={}){
- const hooks=[],pending=[],events=[],calls=[],errors=[],conversations=[];let cursor=0,dirty=false,tree,currentProps,disposed=false;
+ const hooks=[],pending=[],events=[],calls=[],errors=[],conversations=[],intervals=new Map();let cursor=0,dirty=false,tree,currentProps,disposed=false,nextInterval=0;
  const useState=initial=>{const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{const value=typeof next==='function'?next(hooks[index].value):next;if(!Object.is(value,hooks[index].value)){hooks[index].value=value;dirty=true;}}];};
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
  const useEffect=(fn,deps)=>{const index=cursor++,previous=hooks[index];if(!previous||!deps||deps.some((value,i)=>!Object.is(value,previous.deps?.[i]))){const record={deps,cleanup:previous?.cleanup};hooks[index]=record;pending.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
@@ -50,6 +50,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
   if(method==='agent.connect')return {tools:{status:'ready',count:1}};
   if(method==='agent.account')return {account:{type:'chatgpt'},credentialStored:true};
   if(method==='conversation.list')return [];
+  if(method==='conversation.select'&&data.new===true)return {fresh:true};
   if(method==='conversation.remember')return conversation(data.provider,data.threadId);
   if(method==='agent.rpc'){
    if(data.method==='model/list')return {data:[{model:'fixture-model',isDefault:true,supportedReasoningEfforts:[]}]};
@@ -86,7 +87,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
   return {default:name};
  };
  const module={exports:{}};
- new Function('require','module','exports','localStorage','window','crypto','setInterval','clearInterval',compiled)(require,module,module.exports,storage,{studio:{onEvent:fn=>{events.push(fn);return()=>events.splice(events.indexOf(fn),1);}}},{randomUUID},()=>1,()=>{});
+ new Function('require','module','exports','localStorage','window','crypto','setInterval','clearInterval',compiled)(require,module,module.exports,storage,{studio:{onEvent:fn=>{events.push(fn);return()=>events.splice(events.indexOf(fn),1);}}},{randomUUID},fn=>{const id=++nextInterval;intervals.set(id,fn);return id;},id=>intervals.delete(id));
  currentProps={planningMode:false,onPlanningModeChange:()=>{},context:'{}',onError:error=>errors.push(String(error)),onConversation:value=>{conversations.push(value);if(value)storage.setItem('studio.conversation',value.id);else storage.removeItem('studio.conversation');},...props};
  function render(changes={}){currentProps={...currentProps,...changes};cursor=0;dirty=false;tree=module.exports.default(currentProps);return tree;}
  async function flush(){for(let i=0;i<18;i++){while(pending.length)pending.shift()();await new Promise(resolve=>setImmediate(resolve));if(dirty&&!disposed)render();}}
@@ -97,6 +98,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
  function click(testId){find(node=>node.props?.['data-testid']===testId).props.onClick();}
  function send(){find(node=>node.type==='button'&&node.props?.['aria-label']==='发送').props.onClick();}
  function emit(event){for(const listener of [...events])listener(event);}
+ function tick(){for(const callback of [...intervals.values()])callback();}
  function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}
- render();return {render,flush,type,click,send,emit,unmount,find,textarea,storage,calls,errors,conversations};
+ render();return {render,flush,type,click,send,emit,tick,unmount,find,textarea,storage,calls,errors,conversations};
 }

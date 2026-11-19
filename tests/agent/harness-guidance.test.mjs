@@ -101,10 +101,11 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  assert.match(entry.text,/terminal_unavailable.*leaseStatus/);
  assert.match(entry.text,/service lease grants no shell/);
  assert.match(entry.text,/short follow-up.*resource_id/);
- assert.match(entry.text,/choice_required.*show the candidates and ask here/);
+ assert.match(entry.text,/DeepSeek presents eligible `choice_required` candidates in the chat input area/);
+ assert.match(entry.text,/unanswered `choice_required` candidates, ask which one in this chat/);
  assert.match(entry.text,/requires no desktop panel binding/);
- assert.match(entry.text,/duplicate display names include.*resource_id.*profile_id/);
- assert.match(entry.text,/target_selected.*follow its.*retry.*user already chose/);
+ assert.match(entry.text,/Include.*resource_id.*profile_id.*for duplicate display names/);
+ assert.match(entry.text,/target_selected.*follow its.*retry.*continue the current task/);
  assert.match(entry.text,/use the current tools when old chat messages/i);
  assert.match(entry.text,/live SSH terminal restores the same verified channel/);
  assert.match(entry.text,/original sign-in is pending, continue that attempt/);
