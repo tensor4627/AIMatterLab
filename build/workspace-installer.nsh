@@ -8,10 +8,40 @@ LangString WorkspaceError 2052 "无法使用此工作区"
 LangString WorkspaceError 1033 "Cannot use this workspace"
 LangString WorkspaceBusy 2052 "请先关闭从这个工作区启动的 AIMatterLab，再重新运行安装或卸载。"
 LangString WorkspaceBusy 1033 "Close the copy of AIMatterLab running from this workspace and retry."
-LangString WorkspaceApplying 2052 "正在更新 AIMatterLab，完成后将重新打开工作区。"
-LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reopen when installation finishes."
+LangString WorkspaceValidate 2052 "正在核对原工作区和程序文件清单…"
+LangString WorkspaceValidate 1033 "Checking the workspace and program file list…"
+LangString WorkspaceWait 2052 "正在等待 AIMatterLab 退出…"
+LangString WorkspaceWait 1033 "Waiting for AIMatterLab to close…"
+LangString WorkspaceCheckRunning 2052 "正在检查应用文件是否仍在使用…"
+LangString WorkspaceCheckRunning 1033 "Checking whether application files are in use…"
+LangString WorkspaceFiles 2052 "正在替换旧版程序，解压并写入应用文件…"
+LangString WorkspaceFiles 1033 "Replacing the program and extracting application files…"
+LangString WorkspaceRegister 2052 "正在登记 Windows 应用和快捷方式…"
+LangString WorkspaceRegister 1033 "Registering the Windows application and shortcuts…"
+LangString WorkspaceGuide 2052 "正在核对工作区指南…"
+LangString WorkspaceGuide 1033 "Checking the workspace guide…"
+LangString WorkspaceCache 2052 "正在保存下次增量更新所需的安装包…"
+LangString WorkspaceCache 1033 "Saving the installer for future differential updates…"
+LangString WorkspaceCleanup 2052 "正在核对并清理重复的安装缓存…"
+LangString WorkspaceCleanup 1033 "Checking for and cleaning duplicate installer cache files…"
+LangString WorkspaceReopen 2052 "正在重新打开 AIMatterLab…"
+LangString WorkspaceReopen 1033 "Reopening AIMatterLab…"
+
+!ifndef BUILD_UNINSTALLER
+  Var workspaceRestartDir
+!endif
+
+!macro customHeader
+  !ifndef BUILD_UNINSTALLER
+    ShowInstDetails show
+  !endif
+!macroend
 
 !macro customCheckAppRunning
+  !ifndef BUILD_UNINSTALLER
+    SetDetailsPrint both
+    DetailPrint "$(WorkspaceCheckRunning)"
+  !endif
   IfFileExists "$INSTDIR\AIMatterLab.exe" 0 +7
   System::Call 'kernel32::CreateFileW(w "$INSTDIR\AIMatterLab.exe", i 0x40000000, i 0, p 0, i 3, i 0, p 0)p.r0'
   StrCmp $0 -1 0 +4
@@ -19,6 +49,9 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
     SetErrorLevel 1
     Abort
   System::Call 'kernel32::CloseHandle(p r0)'
+  !ifndef BUILD_UNINSTALLER
+    DetailPrint "$(WorkspaceFiles)"
+  !endif
 !macroend
 
 !macro customInstallMode
@@ -40,7 +73,6 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
 !macroend
 
 !macro customInit
-  Var /GLOBAL workspaceUpdateBanner
   ${If} ${Silent}
     ${GetParameters} $R0
     ClearErrors
@@ -63,17 +95,21 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
         ${EndIf}
       ${EndIf}
       ; workspaceFiles uses scratch registers. Save the parent PID across this call.
+      StrCpy $workspaceRestartDir "$INSTDIR"
+      Banner::show /NOUNLOAD /set 76 "AIMatterLab ${VERSION}" "$(WorkspaceValidate)"
       Push $R1
       !insertmacro workspaceFiles Install
       Pop $R1
+      Banner::getWindow /NOUNLOAD
+      Pop $R2
+      GetDlgItem $R2 $R2 1030
+      SendMessage $R2 ${WM_SETTEXT} 0 "STR:$(WorkspaceWait)"
       System::Call 'kernel32::CreateFileW(w "$EXEDIR\restart.ready", i 0x40000000, i 0, p 0, i 1, i 0x80, p 0)p.r0'
       ${If} $0 == -1
         SetErrorLevel 1
         Abort
       ${EndIf}
       System::Call 'kernel32::CloseHandle(p r0)'
-      Banner::show /NOUNLOAD "$(WorkspaceApplying)"
-      StrCpy $workspaceUpdateBanner "1"
       ; Let the originating desktop finish its normal terminal and agent cleanup.
       StrCpy $2 $R1
       System::Call 'kernel32::OpenProcess(i 0x100000, i 0, i r2)p.r0'
@@ -85,6 +121,11 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
           Abort
         ${EndIf}
       ${EndIf}
+      Banner::destroy
+      ; Only the validated desktop handoff bypasses the directory and finish pages.
+      ; All installs share the real NSIS file-progress page and its detail history.
+      SetSilent normal
+      SetAutoClose true
     ${Else}
       !insertmacro workspaceFiles Install
     ${EndIf}
@@ -95,14 +136,46 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
   !define MUI_PAGE_HEADER_TEXT "$(WorkspaceTitle)"
   !define MUI_PAGE_HEADER_SUBTEXT "$(WorkspaceSubtitle)"
   !define MUI_DIRECTORYPAGE_TEXT_TOP "$(WorkspaceBody)"
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE WorkspaceDirectoryPre
   !define MUI_PAGE_CUSTOMFUNCTION_LEAVE WorkspaceSelected
   !insertmacro MUI_PAGE_DIRECTORY
+  Function WorkspaceDirectoryPre
+    ${If} $workspaceRestartDir != ""
+      StrCpy $INSTDIR "$workspaceRestartDir"
+      Abort
+    ${EndIf}
+  FunctionEnd
   Function WorkspaceSelected
     !insertmacro workspaceFiles Install
   FunctionEnd
 !macroend
 
+!macro customFinishPage
+  Function WorkspaceStartApp
+    ${If} ${isUpdated}
+      StrCpy $1 "--updated"
+    ${Else}
+      StrCpy $1 ""
+    ${EndIf}
+    ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+  FunctionEnd
+  Function WorkspaceFinishPre
+    ${If} $workspaceRestartDir != ""
+      Abort
+    ${EndIf}
+  FunctionEnd
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE WorkspaceFinishPre
+  !define MUI_FINISHPAGE_RUN
+  !define MUI_FINISHPAGE_RUN_FUNCTION WorkspaceStartApp
+  !insertmacro MUI_PAGE_FINISH
+!macroend
+
+!macro customFiles_x64
+  DetailPrint "$(WorkspaceRegister)"
+!macroend
+
 !macro customInstall
+  DetailPrint "$(WorkspaceGuide)"
   File /oname=$PLUGINSDIR\workspace-guide.md "${PROJECT_DIR}\agent\context\AGENTS.md"
   ; Seed new workspaces and update only the unchanged guide shipped in 0.1.9.
   System::Call 'kernel32::CopyFileW(w "$PLUGINSDIR\workspace-guide.md", w "$INSTDIR\AGENTS.md", i 1)i.r0'
@@ -122,6 +195,7 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
     ${EndIf}
   ${EndIf}
   ; Seed a fresh base even for an offline/manual installation. Replace atomically.
+  DetailPrint "$(WorkspaceCache)"
   GetTempFileName $R3 "$INSTDIR\user-cache\updates"
   StrCpy $2 $R3
   System::Call 'kernel32::CopyFileW(w "$EXEPATH", w r2, i 0)i.r0'
@@ -130,6 +204,7 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
   ${EndIf}
   Delete "$R3"
   ; Drop only the upstream duplicate after comparing it with the running setup.
+  DetailPrint "$(WorkspaceCleanup)"
   GetFullPathName $R4 "$LOCALAPPDATA\${APP_INSTALLER_STORE_FILE}"
   ${If} ${FileExists} "$R4"
   ${AndIf} $R4 != $EXEPATH
@@ -143,8 +218,9 @@ LangString WorkspaceApplying 1033 "Updating AIMatterLab. Your workspace will reo
       RMDir "$R7"
     ${EndIf}
   ${EndIf}
-  ${If} $workspaceUpdateBanner == "1"
-    Banner::destroy
+  ${If} $workspaceRestartDir != ""
+    DetailPrint "$(WorkspaceReopen)"
+    Call WorkspaceStartApp
   ${EndIf}
 !macroend
 

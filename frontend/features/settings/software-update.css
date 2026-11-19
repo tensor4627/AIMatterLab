@@ -4,3 +4,29 @@
 .software-update small{overflow-wrap:anywhere}
 .brand button.version{appearance:none;background:none;color:var(--muted);border:0;cursor:pointer;-webkit-app-region:no-drag}
 .brand button.version:hover,.brand button.version:focus-visible,.brand button.version.has-update{color:var(--accent)}
+.workspace-shell .sidebar-tools .update-trigger,.workspace-shell .rail-settings-actions .update-trigger{
+  background:color-mix(in srgb,var(--sidebar),var(--text) 9%);color:var(--text);border:1px solid var(--line);border-radius:6px;
+}
+.workspace-shell .sidebar-tools .update-trigger{padding:4px 8px;gap:5px;min-width:0;line-height:1.2}
+.workspace-shell .update-trigger svg{flex:none}
+.workspace-shell .sidebar-tools .update-trigger[data-highlight],.workspace-shell .rail-settings-actions .update-trigger[data-highlight]{
+  background:var(--accent);color:var(--bg);border-color:transparent;font-weight:600;
+}
+.workspace-shell .update-trigger:hover{filter:brightness(1.12)}
+.workspace-shell .sidebar-tools .update-trigger+button{margin-left:auto}
+.workspace-shell .rail-settings-actions{display:flex;align-items:center;gap:2px}
+.workspace-shell .rail-settings-actions button{width:25px;height:34px;padding:0;display:grid;place-items:center}
+@container sidebar (max-width:195px){.sidebar-tools .sidebar-settings span{display:none}}
+@container sidebar (max-width:290px){
+  .sidebar-tools:lang(en) .sidebar-settings span,.sidebar-tools:lang(en) .update-trigger svg{display:none}
+}
+.sidebar-tools .update-trigger span{min-width:0;text-wrap:balance}
+.update-progress{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 10px;width:min(100%,360px);font-variant-numeric:tabular-nums}
+.update-progress progress{width:100%}
+.update-progress small{grid-column:1/-1;color:var(--muted)}
+.software-update p[role=status] small{color:var(--muted);white-space:nowrap}
+.software-update ul{margin:0;padding-inline-start:20px;color:var(--muted)}
+.release-access{width:100%;border-top:1px solid var(--line);padding-top:10px}
+.release-access summary{cursor:pointer;color:var(--muted)}
+.release-access label{display:grid;gap:4px;margin:10px 0 4px}
+.release-access select,.release-access input{width:100%}

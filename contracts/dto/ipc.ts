@@ -1,6 +1,6 @@
 import type {ManagedResource,ManagedSnapshot,ManagedSchedule} from './managed-compute';
 import type {Conversation} from './agent';
-import type {UpdateState} from './update';
+import type {UpdateAccess,UpdateSource,UpdateState} from './update';
 import type {Project,ComputeResourceActivation,ComputeResourceState,BaseWorkspaceRequest,BaseWorkspaceResult} from './compute';
 import type {Run,ClusterRun} from './runs';
 import type {TaskEditRequest,TaskExecuteRequest,TaskInputReadRequest,TaskInputReadResult,TaskLinkRunRequest} from './workspace';
@@ -32,6 +32,9 @@ export interface StudioIpcMap {
  'updates.check':Route<Record<string,never>,UpdateState>;
  'updates.download':Route<Record<string,never>,UpdateState>;
  'updates.install':Route<Record<string,never>,UpdateState>;
+ 'updates.run':Route<Record<string,never>,UpdateState>;
+ 'updates.accessStatus':Route<Record<string,never>,UpdateAccess>;
+ 'updates.setAccess':Route<{source:UpdateSource;token:string|null},UpdateAccess>;
  'task.roadmap.preview':Route<{taskId:string;environments:Record<string,string>},RoadmapPreview>;
  'task.roadmap.confirm':Route<{taskId:string;snapshotSha256:string;environments:Record<string,string>},RoadmapExecution|null>;
  'task.roadmap.list':Route<{taskId:string},RoadmapExecution[]>;

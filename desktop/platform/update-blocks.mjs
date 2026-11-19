@@ -66,6 +66,7 @@ export async function assembleInstaller({operations, source, destination, fetchA
         if (!bytesRead) throw Error('Incomplete base installer');
         await writeAll(destination, buffer.subarray(0,bytesRead));
         copied += bytesRead;
+        progress(0,bytesRead);
       }
       continue;
     }
@@ -80,7 +81,7 @@ export async function assembleInstaller({operations, source, destination, fetchA
       received += bytes.length;
       if (received > length) throw Error('Unexpected extra installer bytes');
       await writeAll(destination, bytes);
-      progress(bytes.length);
+      progress(bytes.length,bytes.length);
     }
     if (received !== length) throw Error('Incomplete installer download');
   }

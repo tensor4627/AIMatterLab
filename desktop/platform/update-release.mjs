@@ -4,9 +4,7 @@ import {createReadStream, readFileSync} from 'node:fs';
 const publisher = new X509Certificate(readFileSync(new URL('../../contracts/update-publisher.pem', import.meta.url)));
 const stable = /^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/;
 const digest = /^[A-Za-z0-9+/]{86}==$/;
-export const releaseFeed = 'https://github.com/tensor4627/AIMatterLab/releases/';
 export const setupName = version => `AIMatterLab-${version}-win-x64-setup.exe`;
-export const versionAsset = (version, name) => new URL(`download/v${version}/${name}`, releaseFeed).href;
 export const maxBlockmap = 8 * 1024 * 1024;
 export const publisherThumbprint = publisher.fingerprint.replaceAll(':','');
 

@@ -1,7 +1,7 @@
 {
   "name": "aimatterlab",
   "productName": "AIMatterLab",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
@@ -63,7 +63,7 @@
     "beforeBuild": "scripts/package-runtime.mjs",
     "afterPack": "scripts/workspace-installer-files.mjs",
     "directories": {
-      "output": "release/v0.1.15"
+      "output": "release/v0.1.16"
     },
     "files": [
       "dist/**",

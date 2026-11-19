@@ -7,7 +7,7 @@ for(const name of [
  'compute.managed.snapshot','compute.managed.refresh','compute.managed.publish','compute.managed.configureService','compute.managed.projectAccess','compute.managed.scheduleDetails','compute.managed.stopSchedule','compute.managed.acknowledgeNotice','compute.managed.observeOnce',
  'onboarding.progress','onboarding.openDirectory',
  'compute.workspace.setup',
- 'updates.status','updates.check','updates.download','updates.install',
+ 'updates.status','updates.check','updates.download','updates.install','updates.run','updates.accessStatus','updates.setAccess',
  'agent.cli.inspect','agent.cli.choose','agent.cli.install','agent.cli.cancel',
  'models.profiles.list','models.profiles.save','models.profiles.remove','models.profiles.discover','models.profiles.test',
  'diagnostics.performance',

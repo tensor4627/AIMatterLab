@@ -6,6 +6,8 @@ import {createConversationActivity} from '../backend/main/compute/conversation-a
 import {managedProjectAccess} from '../backend/main/compute/managed-project-access.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
 import {createWorkspaceUpdater,launchWorkspaceUpdate} from './platform/workspace-updater.mjs';
+import {createUpdateAccess,validateUpdateSource} from './platform/update-feeds.mjs';
+import {electronUpdateFetch} from './platform/update-http.mjs';
 import {createCliRuntimeManager,migrateBundledCliPaths} from './platform/cli-runtimes.mjs';
 import {cliRuntimeRequest} from '../contracts/agent/cli-runtime.mjs';
 import {createPerformanceTimeline} from './platform/performance.mjs';
@@ -155,8 +157,9 @@ let managedWorkbench,managedResources,managedSchedules,resourceActivity,projectT
 let shuttingDown=false,desktopShutdown;
 const attentionBalloons=new Set();
 const agentConnectAttempts=new Map();
+const updateAccess=createUpdateAccess(new CredentialVault(path.join(app.getPath('userData'),'update-access'),safeStorage,validateUpdateSource));
 const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&process.arch==='x64'?workspace:null,currentVersion:app.getVersion(),
-  fetchApi:(url,options)=>net.fetch(url,options),install:launchWorkspaceUpdate,quit:()=>app.quit(),
+  fetchApi:(url,options)=>electronUpdateFetch(net,url,options),tokenFor:updateAccess.token,install:launchWorkspaceUpdate,quit:()=>app.quit(),
   publish:params=>emit('studio:event',{method:'studio/update',params})});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
 let activeAuthoringTasks;
@@ -200,6 +203,9 @@ handle('updates.status',updateAction(updater.snapshot));
 handle('updates.check',updateAction(updater.check));
 handle('updates.download',updateAction(updater.download));
 handle('updates.install',updateAction(updater.apply));
+handle('updates.run',updateAction(updater.update));
+handle('updates.accessStatus',updateAction(updateAccess.status));
+handle('updates.setAccess',input=>updateAccess.save(input));
 function openUrl(url) {
   const parsed = new URL(url);
   if(parsed.protocol !== 'https:' || !['chatgpt.com','auth.openai.com','login.openai.com'].includes(parsed.hostname))
