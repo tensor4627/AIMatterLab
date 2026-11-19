@@ -107,13 +107,14 @@ function messagesStream(index,{tool,text='Official harness fixture output'}={}){
  const events=[{type:'message_start',message:{id:'fixture-message-'+index,type:'message',role:'assistant',model:'deepseek-flash',content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:12,output_tokens:0}}},{type:'content_block_start',index:0,content_block:tool?{type:'tool_use',id:'fixture-call-'+index,name:tool.name,input:{}}:{type:'text',text:''}},{type:'content_block_delta',index:0,delta:tool?{type:'input_json_delta',partial_json:JSON.stringify(tool.args||{})}:{type:'text_delta',text}},{type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:tool?'tool_use':'end_turn',stop_sequence:null},usage:{output_tokens:3}},{type:'message_stop'}];
  return events.map(e=>'event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n').join('');
 }
-async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}],toolCatalog}={}){
+async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}],toolCatalog,allowDiscovery=()=>true}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-dsh-native-')),store=catalog(),calls=[],events=[],children=[];let count=0,held;
  const server=createServer(async(req,res)=>{
   let text='';for await(const chunk of req)text+=chunk;const body=text?JSON.parse(text):{};calls.push({url:req.url,authorization:req.headers.authorization,apiKey:req.headers['x-api-key'],body});
   res.setHeader('Content-Type','application/json');
   if(req.url==='/models'){res.end(JSON.stringify({data:[{id:'deepseek-flash'}]}));return;}
   if(req.url==='/providers/deepseek/mcp'){
+   if(body.method==='tools/list'&&!allowDiscovery()){res.writeHead(403);res.end('private fixture response');return;}
    const tools=toolCatalog||[{name:'run_status',description:'Read fixture saved status',inputSchema:{type:'object',properties:{id:{type:'string'}}}},{name:'submit_run',description:'Forbidden submission',inputSchema:{type:'object'}},{name:'present_task',description:'Save fixture draft',inputSchema:{type:'object',properties:{task_id:{type:'string'}}}}];
    res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.method==='tools/list'?{tools}:{content:[{type:'text',text:JSON.stringify({status:'fixture-only'})}]}}));return;
   }
@@ -127,6 +128,20 @@ async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_st
  t.after(async()=>{b.close();held?.destroy();await Promise.all(children.map(child=>child.exitCode!==null||child.signalCode!==null?Promise.resolve():new Promise(r=>child.once('close',r))));server.closeAllConnections();await new Promise(r=>server.close(r));fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});});return {b,root,store,calls,events,children,get count(){return count;}};
 }
 function completion(b){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Fixture turn did not finish')),20000);const listener=e=>{if(e.method==='turn/completed'){clearTimeout(timer);b.off('event',listener);resolve(e.params.turn);}};b.on('event',listener);});}
+
+test('a rejected tool list fails DSH startup with the HTTP status and permits an explicit reconnect',async t=>{
+ let allowed=false;
+ const f=await nativeFixture(t,{allowDiscovery:()=>allowed});
+ await assert.rejects(f.b.start(),{message:'科研助手无法加载当前对话的工具清单（HTTP 403），请重新连接此对话。'});
+ assert.equal(f.b.process,null);
+ assert.equal(f.b.pending.size,0);
+ assert.equal(f.calls.filter(call=>call.body.method==='tools/list').length,1);
+ allowed=true;
+ const {studioIsolation}=await f.b.start();
+ assert.equal(studioIsolation.status,'verified');
+ assert.equal(studioIsolation.nativeTools,0);
+ assert.equal(f.count,0);
+});
 
 test('real official SDK two-turn attempt reuse keeps the first final intact in live events and saved replay',{timeout:60000},async t=>{
  const f=await nativeFixture(t,{responses:[{text:'First official SDK complete reply'},{text:'Second official SDK complete reply'}]});await f.b.start();const thread=await f.b.request('thread/start');

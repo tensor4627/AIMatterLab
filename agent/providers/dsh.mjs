@@ -106,7 +106,14 @@ export class DshBridge extends EventEmitter{
   if(message.id!==undefined&&message.method){this.send({id:message.id,...message.method==='approval/request'?{result:{outcome:'rejected'}}:{error:{code:-32601,message:'AIMatterLab does not expose native client capabilities'}}});return;}
   if(message.id!==undefined){const pending=this.pending.get(message.id);if(!pending)return;clearTimeout(pending.timer);this.pending.delete(message.id);if(pending.timedOut){pending.onLateResponse(message);return;}if(message.error){const error=Error(this.clean(message.error.message||'DeepSeek Harness request failed'));error.rpcResponse=true;pending.reject(error);}else pending.resolve(message.result);return;}
   if(message.method==='studio/dshIsolation'){
-   const value=message.params;if(value?.status!=='verified'||value.nativeTools!==0||!Array.isArray(value.tools)||value.tools.some(n=>typeof n!=='string'||!n.startsWith(prefix)))throw Error('Invalid DSH isolation receipt');this.isolationWaiter?.resolve(value);return;
+   const value=message.params;
+   if(value?.status==='failed'&&this.isolationWaiter){
+    const status=value.httpStatus;
+    const http=Number.isInteger(status)&&status>=400&&status<=599?'（HTTP '+status+'）':'';
+    const reason=value.stage==='tool_setup'?'科研助手无法加载当前对话的工具清单'+http+'，请重新连接此对话。':'模型运行组件隔离检查失败';
+    this.isolationWaiter.reject(Error(reason));return;
+   }
+   if(value?.status!=='verified'||value.nativeTools!==0||!Array.isArray(value.tools)||value.tools.some(n=>typeof n!=='string'||!n.startsWith(prefix)))throw Error('Invalid DSH isolation receipt');this.isolationWaiter?.resolve(value);return;
   }
   if(message.method==='subagent.started'||message.method==='subagent.finished')throw Error('Native DSH subagents are unavailable in AIMatterLab');
   if(message.method==='studio/dshText'){

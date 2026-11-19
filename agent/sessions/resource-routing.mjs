@@ -1,5 +1,6 @@
 import {isDeepStrictEqual as equal} from 'node:util';
 import {sameWorkerBinding} from '../../contracts/compute/task-worker-binding.mjs';
+import {MCP_CONTEXT_KEYS} from '../tools/provider-scope.mjs';
 const managedInstructions=[
  'Use list_compute_resources to discover currently hosted compute resources. Call acquire_compute_resource on the exact named resource the user requests. Ask for a choice when the tool returns choice_required. Reuse the conversation lease and release it when the user requests release.',
  'Use the acquired terminal for interactive checks. Inspect the registered workflow targets with inspect_compute_service and prepare a draft with prepare_compute_run. Use validate_compute_run, submit_compute_run, and cancel_compute_run for the corresponding user-requested action on an exact linked run. Keep its original service and the workflow review gates. Inspect the original receipt when a result is unconfirmed.',
@@ -75,11 +76,24 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
   return worker.providerConnection(scope.provider,scope.sessionId);
  }
 
+ function bindSessionTools(provider,context,options){
+  const local=terminal()?.bindProviderContext(provider,context,options);
+  worker.bindProviderContext(provider,context,options);
+  return local;
+ }
+ function sessionConnection(provider,sessionId,workflow){
+  const owner=workflow.current();
+  if(!sessionId||workflow.sessionId()!==sessionId||owner?.provider!==provider)throw Error('The tool connection no longer belongs to this conversation');
+  const context=Object.fromEntries(MCP_CONTEXT_KEYS.map(key=>[key,owner[key]]));
+  // Discovery starts before thread/resume. A cold or revoked lease must already
+  // identify this workflow when the harness asks for its tools.
+  if(directory())bindSessionTools(provider,context,{sessionId});
+  return providerConnection(provider,sessionId,context);
+ }
  function bindWorkerContext(provider,context,options){
   if(options?.sessionId&&directory()){
    const sessionId=options.sessionId;
-   const local=terminal()?.bindProviderContext(provider,context,options);
-   worker.bindProviderContext(provider,context,options);
+   const local=bindSessionTools(provider,context,options);
    const pinned=workerPins.get(sessionId);
    const original=context?.threadId?taskSource({provider,...context}):null;
    if(worker.connection&&(!original||sameWorkerBinding(original.binding||original,worker))&&
@@ -118,6 +132,6 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
   if(threadId&&directory())return managedInstructions;
   if(!workerSelected(provider))return null;return '[Studio selected compute resource]\n'+JSON.stringify({kind:'ssh-connection',status:'authenticated',service:'connected',serviceAuthorizedForThisConversation:true,shellAuthorizedForThisConversation:shellGranted(provider),schedulerRegistration:'not_checked'})+'\nThe selected SSH connection is authenticated. The human handoff enables separately verified shell and service grants. The managed service uses its own channel. When the user explicitly selects a shared-shell service transport, ordinary input resumes after its exchange is confirmed. Connection readiness does not establish installed scientific tools, a configured environment or execution readiness. Incomplete inventory and repairable environment issues are warnings: inspect and help configure within the granted terminal and project scope. list_clusters returns saved scheduler profiles, not SSH sessions. For a requested current-host queue observation call inspect_compute_resource with probe_scheduler=true, without creating a workflow or asking the human to paste commands. A missing profile does not mean disconnected. A service failure does not by itself establish shell failure; only an independently verified and granted shell can be used. Never reconnect, upgrade, switch resources or replay unknown requests automatically.';
  }
- return {selected,capture,providerConnection,bindWorkerContext,scope,readiness,workerSelected,turnContext,prepareHandoff,assertHandoffComplete,
+ return {selected,capture,providerConnection,sessionConnection,bindWorkerContext,scope,readiness,workerSelected,turnContext,prepareHandoff,assertHandoffComplete,
   scopedWorkerConnection,usesForegroundWorker,releaseSession:id=>workerPins.delete(id)};
 }

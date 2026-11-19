@@ -40,7 +40,7 @@ export class ApiModelBridge extends DshBridge{
    this.modelInfos=isolation.models||[];this.launchIdentity=identity;this.launchProfileId=selected.profile.id;this.effort=effort;this.info={transport:'dsh-sdk-jsonl',agentInfo:{name:'DeepSeek Harness · API',version:runtime.version},studioIsolation:isolation};return this.info;
   }catch(error){if(this.process===child)this.stop({notify:false});throw Error(this.cleanValue(error.message));}finally{clearTimeout(timer);if(this.isolationWaiter===waiter)this.isolationWaiter=null;}
  }
- receive(message){if(message?.method==='studio/dshIsolation'&&message.params?.status==='failed'){this.isolationWaiter?.reject(Error(message.params.message||'模型运行组件隔离检查失败'));return;}return super.receive(message);}
+ receive(message){if(message?.method==='studio/dshIsolation'&&message.params?.status==='failed'&&typeof message.params.message==='string'&&this.isolationWaiter){this.isolationWaiter.reject(Error(this.cleanValue(message.params.message)));return;}return super.receive(message);}
  save(session){this.catalog.put(KIND,session.id,this.cleanProtocol(session));}
  publicThread(session){return {...super.publicThread(session),provider:this.provider};}
  session(id){

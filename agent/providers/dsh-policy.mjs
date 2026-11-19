@@ -13,11 +13,23 @@ export function checkDshInventory(names,expected){if(!Array.isArray(names)||name
 function send(method,params){process.stdout.write(JSON.stringify({jsonrpc:'2.0',method,params})+'\n');}
 
 export async function apply(ctx,config){
+ try{
+  await installPolicy(ctx,config);
+ }catch(error){
+  // Cordis can keep serving initialize after a plugin fails to activate.
+  // Report the failure before rethrowing, without forwarding private diagnostics.
+  const status=error?.httpStatus;
+  send('studio/dshIsolation',{status:'failed',stage:'tool_setup',...Number.isInteger(status)?{httpStatus:status}:{}});
+  throw error;
+ }
+}
+
+async function installPolicy(ctx,config){
  const expected=new Set();let next=0;
  const rpc=async(method,params,signal)=>{
   if(!config.workerUrl)throw Error('Scientific tools are unavailable');
   const response=await fetch(config.workerUrl,{method:'POST',headers:{Authorization:'Bearer '+process.env.GSS_MCP_TOKEN,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:++next,method,params}),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(240000)]):AbortSignal.timeout(20000),redirect:'error'});
-  if(!response.ok)throw Error('AIMatterLab tool service HTTP '+response.status);
+  if(!response.ok)throw Object.assign(Error('AIMatterLab tool service HTTP '+response.status),{httpStatus:response.status});
   const value=await response.json();if(value.error)throw Error('AIMatterLab tool service rejected the request');return value.result;
  };
  if(config.workerUrl){

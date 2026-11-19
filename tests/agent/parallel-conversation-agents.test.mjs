@@ -7,6 +7,8 @@ import {createParallelAgentWorkflowContext} from '../../agent/sessions/workflow-
 import {selectConversation} from '../../agent/sessions/conversation-selection.mjs';
 import {createAgentWakeDelivery,serviceHistory} from '../../agent/sessions/wake-delivery.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
+import {WorkerClient} from '../../agent/tools/worker-client.mjs';
+import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 import {createAgentRequests} from '../../agent/sessions/requests.mjs';
 import {workspaceAgentInstructions} from '../../agent/context/agent-settings.mjs';
 
@@ -48,12 +50,14 @@ function fixture({terminalGateway}={}){
  }
  const records={deleted:()=>false,conversation:(provider,id)=>catalog.get('conversation',provider+':'+id),bound:(provider,id)=>catalog.get('agent-task',records.conversation(provider,id)?.taskId),read:id=>catalog.get('agent-task',id),failedTurn:()=>{},prepareTurnState(_provider,value){const {planningMode,reviewMode,studioTaskId,...params}=value;return {params,interaction:{planningMode,reviewMode,workflow:{private:'unverified workflow metadata'}}};}};
  const context=createParallelAgentWorkflowContext({records,selectedProvider:()=>agents.foregroundProvider});
+ const worker=new WorkerClient();
+ const routing=createAgentResourceRouting({worker,terminal:()=>terminalGateway,managed:()=>({}),agents:()=>agents});
  const scopes=new McpProviderScopes(),base={url:'http://127.0.0.1:41411',tokens:{mcp:'test-root-bearer'}};scopes.bind(base);
  const agents=new ConversationAgentHub({authCodex:new FakeBridge('codex-auth'),createCodex:()=>new FakeBridge('codex'),root:'.',catalog,vault:{get:()=>null},settings:()=>({codexPath:'test'}),
   apiBridgeFactories:{deepseek:options=>{const bridge=new FakeBridge('deepseek');bridge.start=()=>FakeBridge.prototype.start.call(bridge,null,options.worker());return bridge;}},
-  worker:(provider,sessionId)=>terminalGateway?terminalGateway.providerConnection(provider,sessionId):scopes.connection(provider,base,sessionId),
-  releaseWorker:(provider,sessionId)=>terminalGateway?terminalGateway.revokeProvider(provider,sessionId):scopes.revoke(provider,sessionId),
-  bindWorkerContext:(provider,value,options)=>terminalGateway?terminalGateway.bindProviderContext(provider,value,options):scopes.bindContext(provider,value,options),
+  worker:(provider,sessionId)=>terminalGateway?routing.sessionConnection(provider,sessionId,context):scopes.connection(provider,base,sessionId),
+  releaseWorker:(provider,sessionId)=>{if(terminalGateway){worker.revokeProvider(provider,sessionId);terminalGateway.revokeProvider(provider,sessionId);}else scopes.revoke(provider,sessionId);},
+  bindWorkerContext:(provider,value,options)=>terminalGateway?routing.bindWorkerContext(provider,value,options):scopes.bindContext(provider,value,options),
   runSession:(identity,run)=>context.runInSession(identity,run),dropSession:id=>context.dropSession(id)
  });
  const events=[];agents.on('event',event=>events.push(event));
@@ -147,6 +151,41 @@ test('same-provider and cross-provider turns keep independent processes, scope, 
  assert.equal(f.agents.isBusy('codex','alpha'),false);assert.equal(f.agents.isBusy('codex','beta'),true);assert.equal(f.agents.isBusy('deepseek','gamma'),true);
  assert.equal(c.calls.some(call=>call[0]==='turn/interrupt'),false);
  assert.equal(f.events.findLast(event=>event.method==='turn/completed').params.threadId,'alpha');
+});
+
+test('tool discovery binds the saved conversation on a cold connect and explicit reconnect',async t=>{
+ let f;
+ const scopes=[];
+ const terminal=new TerminalMcp({
+  terminal:{tools:()=>[]},captureScope:scope=>f.agents.captureToolScope(scope),
+  runScope:(scope,run)=>f.agents.runForScope(scope,()=>f.context.runForScope(scope,()=>{
+   scopes.push([scope.threadId,scope.taskId,scope.projectId,f.context.current().threadId]);
+   return run();
+  }))
+ });
+ await terminal.start();t.after(()=>terminal.close());
+ f=fixture({terminalGateway:terminal});t.after(()=>f.agents.close());
+ async function list(connection){
+  const response=await fetch(connection.url+'/mcp',{method:'POST',
+   headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},
+   body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})
+  });
+  await response.text();return response.status;
+ }
+ await f.select('deepseek','gamma');
+ await f.agents.connect('deepseek',{threadId:'gamma'});
+ const bridge=f.agents.bridge('deepseek','gamma'),original=bridge.worker;
+ assert.equal(await list(original),200);
+ await f.select('codex','beta');
+ f.agents.disconnect('deepseek','gamma');
+ assert.equal(await list(original),403);
+ await f.agents.connect('deepseek',{threadId:'gamma'});
+ assert.equal(await list(bridge.worker),200);
+ assert.equal(await list(original),403);
+ const expected=['gamma','task-gamma','project-gamma','gamma'];
+ assert.deepEqual(scopes,[expected,expected]);
+ assert.equal(f.context.current().threadId,'beta');
+ assert.deepEqual(bridge.calls,[]);
 });
 
 test('parallel loopback calls hold exact same-provider leases when the visible chat changes',async t=>{
