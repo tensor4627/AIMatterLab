@@ -10,6 +10,7 @@ function fixture(){
  let shell={...identity(),name:'Original shell',owner:'agent',alive:true},sessions=[shell];const globalErrors=[];
  const h=sshUiHarness(file,{props:{visible:true,request:{nonce:'request',profileId:'profile',version:1,connectionId:'connection'},provider:'deepseek',canShare:true,onError:e=>globalErrors.push(e)},invoke:async(method,data)=>{
   if(method==='compute.sshConnection.list')return {connections:[connection]};
+  if(method==='compute.sshConnection.loginStatus')return {connection,login:{status:'complete'},...shell.alive===true?{shell}:{}};
   if(method==='compute.sshService.status')return {schemaVersion:2,status:'connected',connectionId:'connection',workflowReady:true,operator:'agent'};
   if(method==='sharedTerminal.list')return {sessions};
   if(method==='compute.resource.activate')return {...data,schemaVersion:2,status:'selected'};

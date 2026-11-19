@@ -77,6 +77,20 @@ test('hosted shell recovery text applies to an acquisition error with preserved 
  assert.notEqual(failure('ssh_channel_unavailable',{toolName:'read_shared_terminal'}).code,'terminal_channel_unavailable');
 });
 
+test('SSH recovery receipts preserve a pending login and require verified loss before explicit sign-in',()=>{
+ const failure=(message,dispatched=false)=>JSON.parse(toolFailure(Error(message),{toolName:'acquire_compute_resource',dispatched}).content[0].text);
+ const pending=failure('ssh_control_timeout');
+ assert.equal(pending.code,'connection_unconfirmed');
+ assert.match(pending.next_step,/Resume a pending login.*private terminal/);
+ assert.doesNotMatch(pending.next_step,/sign in again/);
+ const lost=failure('ssh_master_unavailable',true);
+ assert.equal(lost.operation_state,'unconfirmed');
+ assert.equal(lost.automatic_retry,false);
+ assert.match(lost.next_step,/loss is confirmed.*user can explicitly sign in again on that profile/);
+ assert.match(lost.next_step,/Reconcile unknown operations by their original identity/);
+ assert.match(failure('managed_compute_resource_unavailable').next_step,/missing entry alone leaves the reason unconfirmed/);
+});
+
 test('missing resource selection is resolved in the same chat using the listed ID',()=>{
  const error=Object.assign(Error('managed_compute_user_instruction_required'),{operationNotStarted:true});
  const reply=JSON.parse(toolFailure(error,{toolName:'acquire_compute_resource',dispatched:true}).content[0].text);

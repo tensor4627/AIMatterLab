@@ -8,7 +8,7 @@ const compile=source=>ts.transpileModule(source,{compilerOptions:{target:ts.Scri
 const source=fs.readFileSync(new URL('../../frontend/features/terminal/SshConnectionPanel.tsx',import.meta.url),'utf8');
 const types={exports:{}};
 new Function('module','exports',compile(fs.readFileSync(new URL('../../frontend/features/compute/ssh-connection-types.ts',import.meta.url),'utf8')))(types,types.exports);
-const connection={connectionId:'connection',status:'authenticated'},shell={sessionId:'shell',owner:'human',ownerEpoch:1,alive:true};
+const connection={connectionId:'connection',status:'authenticated'},shell={sessionId:'shell',connectionId:'connection',owner:'human',ownerEpoch:1,alive:true};
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 
 // Execute the actual child component and its effects; no duplicated read loop.
@@ -39,7 +39,7 @@ function fixture(t,invoke,initial={}){
 
 for(const code of ['terminal_context_changed','terminal_owner_changed'])test('handoff suspends polling and discards an old '+code+' before the owner response',async t=>{
  let rejectOld,reads=0;
- const f=fixture(t,async(method)=>{if(method==='sharedTerminal.resize')return {};if(++reads===1)return new Promise((_r,reject)=>rejectOld=reject);return {...shell,output:'fresh output',cursor:2};});
+ const f=fixture(t,async(method,data)=>{if(method==='sharedTerminal.resize')return {};if(++reads===1)return new Promise((_r,reject)=>rejectOld=reject);return {...shell,ownerEpoch:data.ownerEpoch,output:'fresh output',cursor:2};});
  f.lock();await f.tick();assert.equal(reads,1);rejectOld(Error(code));await flush();assert.deepEqual(f.errors,[]);assert.deepEqual(f.states,[]);
  f.unlock();f.render({shell:{...shell,owner:'agent',ownerEpoch:2}});await f.tick();assert.equal(reads,2);assert.deepEqual(f.writes,['fresh output']);
 });
@@ -86,7 +86,46 @@ test('immediate cleanup detaches and stops channel input before queued xterm ini
 
 test('actual reader binds local errors to its request epoch and reports recovery only for a matching live channel',async t=>{
  const failures=[],recovered=[];let mode='error';
- const f=fixture(t,async(method,data)=>{if(method==='sharedTerminal.resize')return {};if(mode==='error')throw Error('terminal_owner_changed');return {...shell,connectionId:mode==='foreign'?'foreign':'connection',ownerEpoch:data.ownerEpoch,alive:mode==='unknown'?null:true,output:'',cursor:0};},{onReadError:(error,identity)=>failures.push({error,identity}),onReadSuccess:identity=>recovered.push(identity)});
+ const f=fixture(t,async(method,data)=>{if(method==='sharedTerminal.resize')return {};if(mode==='error')throw Error('terminal_owner_changed');return {...shell,connectionId:mode==='foreign'?'foreign':'connection',ownerEpoch:data.ownerEpoch,alive:mode==='unknown'?null:true,output:mode==='foreign'?'foreign output':'',cursor:mode==='foreign'?17:0};},{onReadError:(error,identity)=>failures.push({error,identity}),onReadSuccess:identity=>recovered.push(identity)});
  await flush();assert.equal(f.errors.length,0);assert.equal(failures[0].error.code,'terminal_owner_changed');assert.deepEqual(failures[0].identity,{connectionId:'connection',sessionId:'shell',ownerEpoch:1});
- mode='foreign';await f.tick();mode='unknown';await f.tick();assert.deepEqual(recovered,[]);mode='current';f.render({shell:{...shell,ownerEpoch:2}});await f.tick();assert.deepEqual(recovered,[{connectionId:'connection',sessionId:'shell',ownerEpoch:2}]);
+ mode='foreign';await f.tick();assert.deepEqual(f.writes,[]);mode='unknown';await f.tick();assert.deepEqual(recovered,[]);mode='current';f.render({shell:{...shell,ownerEpoch:2}});await f.tick();assert.deepEqual(recovered,[{connectionId:'connection',sessionId:'shell',ownerEpoch:2}]);
+ assert(f.calls.filter(call=>call.method==='sharedTerminal.read').every(call=>call.data.cursor===0));
+});
+
+test('showing the same terminal replays from the last accepted cursor after an obsolete hidden read',async t=>{
+ let finishOld;let reads=0;
+ const f=fixture(t,async(method,data)=>{
+  if(method==='sharedTerminal.resize')return {};
+  if(++reads===1)return {...shell,output:'first page',cursor:1};
+  if(reads===2)return new Promise(resolve=>finishOld=resolve);
+  assert.equal(data.cursor,1);
+  return {...shell,output:'replayed page',cursor:2};
+ });
+ await flush();await f.tick();assert(finishOld);
+ f.render({visible:false});f.render({visible:true});
+ finishOld({...shell,output:'obsolete page',cursor:19});await flush();
+ f.drainTimeouts();await flush();
+ assert.deepEqual(f.writes,['first page','replayed page']);
+ assert.equal(f.views.length,1);
+});
+
+test('unsubmitted private input queued before the authentication panel was hidden cannot be replayed',async t=>{
+ const pending={...connection,schemaVersion:2,status:'authenticating',authentication:'pending',profileId:'profile',profileVersion:1,loginRequestId:'original-login',capabilities:{multiplex:false},terminalSessionIds:[],serviceIds:[],revision:1};
+ let finishFirst;
+ const f=fixture(t,async(method)=>{
+  if(method==='compute.sshConnection.authResize')return {resized:true};
+  if(method==='compute.sshConnection.authRead')return {connectionId:pending.connectionId,state:pending,output:'',cursor:0,dropped:false};
+  if(!finishFirst)return new Promise(resolve=>finishFirst=resolve);
+  return {accepted:true};
+ },{connection:pending,shell:undefined});
+ const send=data=>f.views[0].input(data);
+ const inputCalls=()=>f.calls.filter(call=>call.method==='compute.sshConnection.authInput').map(call=>call.data.data);
+ send('synthetic sent input');await flush();
+ send('synthetic queued input');
+ f.render({visible:false});f.render({visible:true});
+ finishFirst({accepted:true});await f.inputState.pending;
+ assert.deepEqual(inputCalls(),['synthetic sent input']);
+ send('synthetic newly typed input');await f.inputState.pending;
+ assert.deepEqual(inputCalls(),['synthetic sent input','synthetic newly typed input']);
+ assert(!f.calls.some(call=>call.method==='sharedTerminal.input'));
 });

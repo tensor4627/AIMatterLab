@@ -19,6 +19,16 @@ test('captured shell request cannot silently become a service request after shel
 test('a legacy terminal record cannot become authenticated by inference or borrowed grants',async()=>{const f=fixture();f.grant(true);f.shellGrant(true);f.legacy();assert.equal(f.routing.providerConnection('codex'),undefined);assert.equal((await f.routing.readiness('codex')).reason,'legacy_connection_requires_login');assert.throws(()=>f.routing.scope('codex','turn/start').assertCurrent());});
 test('another connection or service identity cannot supply the selected scientific route',async()=>{const f=fixture();f.grant(true);f.worker.connectionTarget.serviceId='other';assert.equal(f.routing.workerSelected('codex'),false);assert.equal((await f.routing.readiness('codex')).status,'blocked');assert.equal(f.routing.turnContext('codex'),null);});
 test('resource context explains progressive setup and serialized terminal access without leaking credentials',()=>{const f=fixture();f.grant(true);const text=f.routing.turnContext('codex');assert.match(text,/managed service uses its own channel/);assert.match(text,/explicitly selects a shared-shell service transport, ordinary input resumes after its exchange is confirmed/);assert.match(text,/Incomplete inventory.*warnings/);assert.match(text,/inspect_compute_resource/);assert.doesNotMatch(text,/shellIndependent|reserved_for_service_protocol|service-token|shell-token|30001/);assert.equal(f.routing.turnContext('deepseek'),null);});
+test('a restored hosted chat gets original SSH recovery guidance without a current lease',()=>{
+ const routing=createAgentResourceRouting({managed:()=>({})});
+ const context=routing.turnContext('deepseek','restored-chat');
+ assert.match(context,/retain the original live terminal or pending login/);
+ assert.match(context,/prompts in that attempt’s private terminal/);
+ assert.match(context,/waiting or timed-out check leaves authentication unconfirmed/);
+ assert.match(context,/confirmed lost.*explicitly sign in again on that profile/);
+ assert.match(context,/After verified hosting.*acquire the requested capability for this chat/);
+ assert.match(context,/unknown jobs using their original IDs and receipts/);
+});
 test('incomplete tool inventory keeps the authorized service route with an explicit setup warning',async()=>{const f=fixture();f.grant(true);f.worker.probeTools=async()=>({status:'warning',count:3,message:'Configure the existing environment'});const v=await f.routing.readiness('codex');assert.equal(v.status,'ready');assert.equal(v.scope,'workflow');assert.equal(v.warning,true);assert.equal(v.scientificStatus,'warning');assert.equal(v.count,3);assert.equal(f.routing.providerConnection('codex'),f.endpoint);f.routing.scope('codex','turn/start').assertCurrent();});
 test('fresh stale or unauthenticated resource status blocks cached service and shell grants together',async()=>{for(const patch of [{status:'stale',reason:'profile_changed'},{authentication:'lost'},{connectionStatus:'unavailable'},{connectionId:'other'},{profileVersion:2}]){const f=fixture();f.grant(true);f.shellGrant(true);const status=f.resource.status;f.resource.status=async()=>({...await status(),...patch});assert.equal((await f.routing.readiness('codex')).status,'blocked');assert.equal(f.probes(),0);}});
 

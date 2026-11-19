@@ -14,9 +14,9 @@ const publishCalls=h=>h.calls.filter(call=>call.method==='compute.managed.publis
 const shellChannel=h=>h.find(n=>n.type?.name==='ChannelTerminal'&&n.props.shell);
 const authorizationCalls=h=>h.calls.filter(call=>['compute.resource.activate','sharedTerminal.owner','compute.sshService.owner','compute.sshService.connect','agent.rpc'].includes(call.method));
 
-function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
+function deferred(){let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};}
 function fixture(options={}){
- let state=null,sessions=[],status={connection:pending,login:{status:'waiting_authentication'}},posts=0;const errors=[],resources=[];
+ let state=options.initial??null,sessions=[],status={connection:pending,login:{status:'waiting_authentication'}},posts=0;const errors=[],resources=[];
  const h=sshUiHarness(file,{props:{visible:true,request:{nonce:'request',profileId:'profile',version:1},resourceScope:'scope-A',provider:'codex',canShare:true,onError:e=>errors.push(e),onResourceChange:value=>resources.push(value),...options.props},invoke:async(method,data)=>{
   if(method==='compute.sshConnection.list')return {connections:state?[state]:[]};
   if(method==='compute.sshConnection.open'){state=pending;return state;}
@@ -36,6 +36,63 @@ test('an unknown completion is observed read-only and its late exact shell is ad
 test('slow checks keep authentication input unlocked and checking responses never cause another POST',async()=>{
  const held=deferred(),f=fixture({complete:()=>held.promise}),{h}=f;
  try{await h.flush();await h.tick(700);await h.tick(700);assert.equal(f.postCount(),1);const auth=h.find(n=>n.type?.name==='ChannelTerminal');assert.equal(auth.props.inputState.locked,false);held.resolve({connection:pending,login:{status:'checking',phase:'checking_authentication'}});await h.flush();f.setStatus({connection:pending,login:{status:'checking',phase:'opening_shell'}});await h.tick(700);await h.tick(700);assert.equal(f.postCount(),1);assert(h.calls.some(c=>c.method==='compute.sshConnection.loginStatus'));assert(!h.find(n=>n.props?.['data-testid']==='ssh-login-continue'));f.setStatus(complete);await h.tick(700);assert.equal(shellChannel(h).props.shell.sessionId,shell.sessionId);assert(h.id('ssh-publish-resource'));assert.equal(f.postCount(),1);}finally{h.unmount();}
+});
+
+test('a read-only login receipt can restore the shell before the original completion transport resolves',async()=>{
+ const held=deferred(),f=fixture({complete:()=>held.promise}),{h}=f;
+ try{
+  await h.flush();assert.equal(f.postCount(),1);
+  h.render({visible:false});await h.flush();await h.tick(700);
+  assert(!h.calls.some(call=>call.method==='compute.sshConnection.loginStatus'));
+  f.setStatus(complete);
+  h.render({visible:true,request:{nonce:'reopened-view',profileId:'profile',version:1}});
+  await h.flush();await h.tick(700);
+  assert.equal(shellChannel(h).props.shell.sessionId,shell.sessionId);
+  assert.equal(h.id('ssh-publish-resource').props.disabled,false);
+  held.reject(Error('terminal_login_unknown'));await h.flush();
+  assert(!h.find(node=>node.props?.['data-testid']==='ssh-login-error'));
+  assert.equal(f.postCount(),1);
+  assert.equal(h.calls.filter(call=>call.method==='compute.sshConnection.open').length,1);
+ }finally{held.resolve(complete);h.unmount();}
+});
+
+test('an already-issued unknown result remains read-only when the same login is reopened',async()=>{
+ const held=deferred(),f=fixture({complete:({posts})=>posts===1?held.promise:complete}),{h}=f;
+ try{
+  await h.flush();
+  h.render({request:{nonce:'reopened-view',profileId:'profile',version:1}});await h.flush();
+  held.reject(Error('terminal_login_unknown'));await h.flush();
+  await h.tick(700);await h.tick(700);
+  assert.equal(f.postCount(),1);
+  assert(h.calls.filter(call=>call.method==='compute.sshConnection.loginStatus').every(call=>call.data.requestId==='request'));
+  h.click('ssh-login-continue');await h.flush();
+  assert.equal(f.postCount(),2);
+  assert.equal(shellChannel(h).props.shell.sessionId,shell.sessionId);
+  assert.equal(h.calls.filter(call=>call.method==='compute.sshConnection.open').length,1);
+ }finally{held.resolve(complete);h.unmount();}
+});
+
+test('temporary login status read failure still permits continuing after the exact waiting receipt returns',async()=>{
+ let reads=0;
+ const f=fixture({initial:pending,status:()=>{if(++reads===1)throw Error('terminal_unavailable');return {connection:pending,login:{status:'waiting_authentication'}};},complete:()=>complete}),{h}=f;
+ try{
+  await h.flush();assert.equal(f.postCount(),0);assert.equal(h.id('ssh-error-code').props.children,'terminal_unavailable');
+  await h.tick(700);assert.equal(f.postCount(),0);
+  await h.tick(700);assert.equal(f.postCount(),1);
+  assert.equal(shellChannel(h).props.shell.sessionId,shell.sessionId);
+  assert(!h.find(node=>node.props?.['data-testid']==='ssh-login-error'));
+  assert(!h.calls.some(call=>call.method==='compute.sshConnection.open'));
+ }finally{h.unmount();}
+});
+
+test('recovery ignores a late receipt for a different exact shell under a stale request nonce',async()=>{
+ const held=deferred(),f=fixture({initial:connected,status:()=>held.promise,props:{request:{nonce:'exact-view',profileId:'profile',version:1,connectionId:'connection',sessionId:'shell',exact:true}}}),{h}=f;
+ try{
+  await h.flush();assert(h.calls.some(call=>call.method==='compute.sshConnection.loginStatus'));
+  h.render({request:{nonce:'exact-view',profileId:'profile',version:1,connectionId:'connection',sessionId:'another-shell',exact:true}});await h.flush();
+  held.resolve(complete);await h.flush();
+  assert(!shellChannel(h));assert.equal(f.postCount(),0);assert.deepEqual(f.errors,[]);
+ }finally{held.resolve(complete);h.unmount();}
 });
 test('only a human continue action retries a failed or waiting original login with the same request id',async()=>{
  const f=fixture({complete:({posts})=>{if(posts===1)throw Error('terminal_login_unknown');return complete;}}),{h}=f;

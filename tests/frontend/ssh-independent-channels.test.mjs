@@ -91,10 +91,108 @@ test('one ordinary terminal login automatically becomes a shell using the origin
  const h=fixture({override:(method)=>{if(method==='compute.sshConnection.list')return {connections:opened?[completed?connection:pending]:[]};if(method==='compute.sshConnection.open'){opened=true;return pending;}if(method==='compute.sshConnection.completeLogin')return completed?{connection,shell}:{connection:pending};if(method==='sharedTerminal.list')return {sessions:completed?[shell]:[]};}});
  try{await h.flush();assert.equal(h.calls.filter(c=>c.method==='compute.sshConnection.open').length,1);assert(!h.find(n=>n.props?.['data-testid']==='ssh-auth-confirm'));assert(!channel(h)?.props.shell);const auth=h.find(n=>n.type?.name==='ChannelTerminal');assert.equal(auth.props.inputState.locked,false);await h.tick(700);completed=true;await h.tick(700);assert.equal(channel(h).props.shell.sessionId,shell.sessionId);assert.equal(managedCalls(h).length,0);assert(h.id('ssh-publish-resource'));assert(h.calls.filter(c=>c.method==='compute.sshConnection.completeLogin').length>=2);for(const call of h.calls.filter(c=>['compute.sshConnection.open','compute.sshConnection.completeLogin'].includes(c.method)))assert.equal(call.data.requestId,'request');assert(!h.calls.some(c=>['compute.sshConnection.confirm','compute.sshConnection.openShell','compute.sshService.connect'].includes(c.method)));}finally{h.unmount();}
 });
-test('reopening a pending view reads its original login status without another SSH POST',async()=>{
- const pending={...connection,status:'authenticating',authentication:'pending',loginRequestId:'original-request',terminalSessionIds:[],serviceIds:[]};const h=fixture({override:method=>method==='compute.sshConnection.list'?{connections:[pending]}:method==='compute.sshConnection.loginStatus'?{connection:pending,login:{status:'waiting_authentication'}}:undefined});
- try{await h.flush();await h.tick(700);assert(!h.calls.some(c=>c.method==='compute.sshConnection.open'));assert(!h.calls.some(c=>c.method==='compute.sshConnection.completeLogin'));assert(h.calls.some(c=>c.method==='compute.sshConnection.loginStatus'));assert(h.calls.filter(c=>c.method==='compute.sshConnection.loginStatus').every(c=>c.data.requestId==='original-request'));}finally{h.unmount();}
+test('reopening an ordinary pending view observes its original request before continuing the same login',async()=>{
+ const pending={...connection,status:'authenticating',authentication:'pending',loginRequestId:'original-request',terminalSessionIds:[],serviceIds:[]};
+ const waiting={connection:pending,login:{status:'waiting_authentication'}};
+ let finishStatus,completed=false;
+ const h=fixture({override:method=>{
+  if(method==='compute.sshConnection.list')return {connections:[completed?connection:pending]};
+  if(method==='compute.sshConnection.loginStatus')return new Promise(resolve=>finishStatus=resolve);
+  if(method==='compute.sshConnection.completeLogin'){completed=true;return {connection,shell,login:{status:'complete'}};}
+ }});
+ try{
+  await h.flush();await h.tick(700);
+  assert(!h.calls.some(c=>c.method==='compute.sshConnection.completeLogin'));
+  finishStatus(waiting);await h.flush();await h.tick(700);
+  assert.equal(channel(h).props.shell.sessionId,shell.sessionId);
+  assert(!h.calls.some(c=>c.method==='compute.sshConnection.open'));
+  assert.deepEqual(h.calls.filter(c=>['compute.sshConnection.loginStatus','compute.sshConnection.completeLogin'].includes(c.method)).map(c=>[c.method,c.data.requestId]),[
+   ['compute.sshConnection.loginStatus','original-request'],['compute.sshConnection.completeLogin','original-request'],
+  ]);
+ }finally{h.unmount();}
 });
+
+test('an expired ordinary connection hint does not open another login when the same saved version has one live connection',async()=>{
+ const h=await selected({props:{request:{nonce:'ordinary-view',profileId:'profile',version:1,connectionId:'expired'}}});
+ try{
+  assert.equal(channel(h).props.connection.connectionId,connection.connectionId);
+  assert.equal(channel(h).props.shell.sessionId,shell.sessionId);
+  assert(!h.calls.some(call=>call.method==='compute.sshConnection.open'));
+ }finally{h.unmount();}
+});
+
+test('an exact connection does not follow its requested shell into another connection',async()=>{
+ const h=await selected({props:{request:{nonce:'exact-view',profileId:'profile',version:1,connectionId:'expired',sessionId:shell.sessionId,exact:true}}});
+ try{
+  assert(!channel(h));
+  assert(h.find(node=>node.props?.children==='原终端当前不可用，请核对连接。'));
+  assert(!h.calls.some(call=>['compute.sshConnection.open','compute.sshConnection.loginStatus','compute.sshConnection.completeLogin'].includes(call.method)));
+ }finally{h.unmount();}
+});
+
+test('exact shell restoration waits for a live inventory row independently of the service status request',async()=>{
+ let liveness=null,finishService;
+ const h=await selected({props:{request:{nonce:'exact-view',profileId:'profile',version:1,connectionId:connection.connectionId,sessionId:shell.sessionId,exact:true}},override:method=>{
+  if(method==='compute.sshService.status')return new Promise(resolve=>finishService=resolve);
+  if(method==='sharedTerminal.list')return {sessions:[{...shell,alive:liveness}]};
+ }});
+ try{
+  assert(finishService);assert(!channel(h));
+  assert(h.find(node=>node.props?.children==='正在打开终端…'));
+  liveness=true;await h.tick(2000);
+  assert.equal(channel(h).props.shell.sessionId,shell.sessionId);
+  assert.equal(h.calls.filter(call=>call.method==='compute.sshService.status').length,1);
+  assert(!h.calls.some(call=>['compute.sshConnection.open','compute.sshConnection.openShell'].includes(call.method)));
+ }finally{finishService?.(service);h.unmount();}
+});
+
+test('an authenticated login receipt cannot attach another conversation shell before scoped inventory',async()=>{
+ const agentShell={...shell,owner:'agent'};
+ const restored={...connection,loginRequestId:'original-request'};
+ let finishList;
+ const h=await selected({override:method=>{
+  if(method==='compute.sshConnection.list')return {connections:[restored]};
+  if(method==='compute.sshConnection.loginStatus')return {connection:restored,login:{status:'complete'},shell:agentShell};
+  if(method==='sharedTerminal.list')return new Promise(resolve=>finishList=resolve);
+ }});
+ try{
+  assert(finishList);assert(!channel(h));
+  finishList({sessions:[{...agentShell,conversationTerminal:true,currentConversation:false}]});await h.flush();
+  assert(!channel(h));assert(!h.calls.some(call=>call.method==='compute.sshConnection.openShell'));
+ }finally{finishList?.({sessions:[]});h.unmount();}
+});
+
+test('a late original shell receipt preserves a deliberately chosen shell in the same connection',async()=>{
+ const other={...shell,sessionId:'other-shell'};
+ const restored={...connection,loginRequestId:'original-request',terminalSessionIds:[shell.sessionId,other.sessionId]};
+ let finishStatus;
+ const h=await selected({override:method=>{
+  if(method==='compute.sshConnection.list')return {connections:[restored]};
+  if(method==='compute.sshConnection.loginStatus')return new Promise(resolve=>finishStatus=resolve);
+  if(method==='sharedTerminal.list')return {sessions:[shell,other]};
+ }});
+ try{
+  h.id('ssh-shell-actions').props.children[1].props.onClick();await h.flush();
+  assert.equal(channel(h).props.shell.sessionId,other.sessionId);
+  finishStatus({connection:restored,login:{status:'complete'},shell});await h.flush();
+  assert.equal(channel(h).props.shell.sessionId,other.sessionId);
+ }finally{finishStatus?.({connection:restored,login:{status:'complete'}});h.unmount();}
+});
+
+test('a slow connection inventory can complete across periodic refresh ticks',async()=>{
+ let finishList,holding=true;
+ const h=fixture({override:method=>{
+  if(method==='compute.sshConnection.list'&&holding)return new Promise(resolve=>finishList=resolve);
+ }});
+ try{
+  await h.flush();await h.tick(2000);await h.tick(2000);
+  assert.equal(h.calls.filter(call=>call.method==='compute.sshConnection.list').length,1);
+  holding=false;finishList({connections:[connection]});await h.flush();
+  assert.equal(channel(h).props.shell.sessionId,shell.sessionId);
+  assert(!h.calls.some(call=>call.method==='compute.sshConnection.open'));
+ }finally{finishList?.({connections:[connection]});h.unmount();}
+});
+
 test('an authenticated view with no remaining shell never recreates a user-closed shell',async()=>{
  const h=await selected({override:method=>method==='sharedTerminal.list'?{sessions:[]}:undefined});try{await h.tick(700);assert(!channel(h)?.props.shell);assert(!h.calls.some(c=>['compute.sshConnection.open','compute.sshConnection.completeLogin','compute.sshConnection.openShell'].includes(c.method)));assert.equal(h.id('ssh-open-shell').props.disabled,false);}finally{h.unmount();}
 });

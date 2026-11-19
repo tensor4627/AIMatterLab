@@ -10,7 +10,7 @@ Choose the requested operation. A live queue question delegates a bounded read-o
 
 For local WSL, use an actually installed distribution and a user-selected dedicated Linux-filesystem worker directory. Check the selected local endpoint, keep worker identity with the project and do not replace another service because its version differs. Starting an AIMatterLab worker is separate from installing scientific engines. A window close does not stop submitted jobs.
 
-For SSH, import a user-selected existing connection or use the manual editor. Preserve explicit username, known-host checks and credential references. An existing client's default key or agent is valid when no key file is specified. Passwords, one-time codes and key material stay out of templates and chats. Two-factor authentication is a human handoff; a tunnel is proposed and reviewed as a connection recipe, not created by copying credentials or weakening host checks. Do not install an Agent CLI on a cluster to make SSH work.
+For SSH, import a user-selected existing connection or use the manual editor. Preserve explicit username, known-host checks and credential references. An existing client's default key or agent is valid when no key file is specified. The user handles host checks and two-factor prompts in the connection's private terminal. Keep passwords, one-time codes and key material out of templates and chats. For an interrupted view or a lost connection, use the original saved profile and follow `compute.queue` recovery. Propose and review any needed tunnel as a connection recipe with the existing host checks and credential references. Do not install an Agent CLI on a cluster to make SSH work.
 
 ## Template-first scheduler adaptation plan
 

@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
-import {createTerminalSession,drainOwnedConpty,TerminalFault,exact} from './session.mjs';
+import {createTerminalSession,drainOwnedConpty,terminalOutputChunks,TerminalFault,exact} from './session.mjs';
 import {MANAGED_SSH_SHELL_CAPACITY,managedSshShells} from './managed-ssh-shells.mjs';
 
 const fail=(code,status=409)=>{throw new TerminalFault(code,status);};
@@ -36,7 +36,17 @@ function execute(file,args,{timeout=10000,limit=262144}={}){return new Promise((
 // The wrapper reports the Linux process identity before exec; the control socket
 // must later prove this exact process, client executable, argv and start time.
 const MASTER_WRAPPER='import os,sys,json,base64; a=json.loads(sys.argv[2]); p=os.getpid(); s=open("/proc/self/stat").read().rsplit(")",1)[1].split()[19]; b=open("/proc/sys/kernel/random/boot_id").read().strip(); v={"pid":p,"start":s,"boot":b}; print("__STUDIO_MASTER_"+sys.argv[1]+"__:"+base64.b64encode(json.dumps(v,separators=(",",":")).encode()).decode()+"__STUDIO_MASTER_END_"+sys.argv[1]+"__",flush=True); os.execv(a[0],a)';
-const startupText=value=>value.replace(/\x1b\](?:0|2);[^\x00-\x1f\x7f]{0,512}(?:\x07|\x1b\\)/g,'').replace(/\x1b\[[0-9;?]*[A-Za-z]/g,'');
+const startupLimit=4096;
+const startupFraming=/\x1b\](?:0|2);[^\x00-\x1f\x7f]{0,512}(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]|[\r\n]/g;
+const masterHeader=/__STUDIO_MASTER_([a-f0-9]{48})__:/;
+const startupText=value=>value.replace(startupFraming,'');
+function startupOffset(value,offset){
+ for(const match of value.matchAll(startupFraming)){
+  if(match.index>=offset)break;
+  offset+=match[0].length;
+ }
+ return offset;
+}
 
 /** Local helper output contains proof only; never authentication bytes. */
 export function createMultiplexHost({platform=process.platform,cwd=process.cwd(),env=process.env,run=execute,knownHostsFile}={}){
@@ -79,7 +89,7 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
  function lost(r,code='ssh_master_unavailable'){if(r.status==='closed')return;if(r.profileUpdate){profileUpdates.get(r.profileUpdate)?.invalid?.();r.profileUpdate=null;}r.generation++;r.status='unavailable';r.authentication='lost';r.error=code;r.revision++;r.ring=[];r.bytes=0;for(const id of r.shells)sessions.get(id)?.dispose();r.service?.session?.dispose();r.managedShells?.closeAll();}
   function checkTransport(r){return r.native?r.native.check():host.check(r.profile,r.proof,r.master);}
   async function verified(r,allowLocked=false){expireProfileUpdates();if(r.profileUpdate&&!allowLocked)fail('service_active',423);if(closing||r.status!=='authenticated'||r.authentication!=='verified')fail('ssh_authentication_unconfirmed');try{await checkTransport(r);}catch(error){if(r.status==='authenticated')lost(r,error.code||'ssh_master_unavailable');throw error;}if(closing||r.status!=='authenticated'||r.profileUpdate&&!allowLocked)fail('ssh_connection_changed');return r;}
- function append(r,data){if(r.status!=='authenticating'||typeof data!=='string')return;for(let at=0;at<data.length;at+=8192){const part=data.slice(at,at+8192);r.ring.push({sequence:++r.sequence,data:part});r.bytes+=Buffer.byteLength(part);while(r.bytes>65536){r.bytes-=Buffer.byteLength(r.ring.shift().data);}}}
+ function append(r,data){if(r.status!=='authenticating'||typeof data!=='string')return;for(const part of terminalOutputChunks(data)){r.ring.push({sequence:++r.sequence,data:part});r.bytes+=Buffer.byteLength(part);while(r.bytes>65536){r.bytes-=Buffer.byteLength(r.ring.shift().data);}}}
  async function open(value){exact(value,['profileId','profileVersion','requestId','profile'],['profileId','profileVersion','requestId','profile']);if(!id(value.requestId)||!id(value.profileId)||!Number.isSafeInteger(value.profileVersion)||value.profileVersion<1||value.profile?.id!==value.profileId||value.profile.version!==value.profileVersion)fail('invalid_request',400);const signature=digest(value),previous=opens.get(value.requestId);if(previous){if(previous.signature!==signature)fail('request_changed');return previous.promise;}if(closing||records.size>=64||opens.size>=128||[...records.values()].filter(r=>['authenticating','authenticated'].includes(r.status)||r.status==='unavailable'&&!!r.terminal).length>=8)fail('ssh_connection_limit');
   const r={id:randomUUID(),profile:structuredClone(value.profile),loginRequestId:value.requestId,generation:1,status:'authenticating',authentication:'pending',revision:1,ring:[],bytes:0,sequence:0,shells:new Set(),shellRequests:new Map(),inputRequests:new Map(),cancelled:new Set(),alive:true};records.set(r.id,r);
   const promise=(async()=>{try{multiplexProfile(r.profile);r.proof=await host.allocate(r.profile);if(closing||r.status!=='authenticating'){if(!r.proof.native)await host.cleanup(r.profile,r.proof).catch(()=>{});fail('ssh_connection_changed');}
@@ -91,18 +101,26 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
      return view(r);
     }
     const nonce=randomBytes(24).toString('hex'),prefix='__STUDIO_MASTER_'+nonce+'__:',suffix='__STUDIO_MASTER_END_'+nonce+'__';let initial='',marker=false,markerTail='';const launch=host.masterLaunch(r.profile,r.proof,nonce);r.terminal=pty.spawn(launch.file,launch.args,{name:'xterm-256color',cols:500,rows:30,cwd:launch.cwd,env:launch.env??DEFAULT_ENV(),...process.platform==='win32'?{useConptyDll:true}:{}});
+    function appendAfterMarker(data){
+     const observed=markerTail+data;
+     if(masterHeader.test(startupText(observed)))return lost(r,'ssh_master_identity_changed');
+     markerTail=observed.slice(-startupLimit);
+     return append(r,data);
+    }
     r.terminal.onData(data=>{
      if(!['authenticating','authenticated'].includes(r.status))return;
-     if(marker){const compact=markerTail+startupText(data).replace(/[\r\n]/g,'');if(compact.includes(prefix))return lost(r,'ssh_master_identity_changed');markerTail=compact.slice(-prefix.length);return append(r,data);}
-     initial+=data;if(initial.length>4096)return lost(r,'ssh_master_identity_changed');
+     if(marker)return appendAfterMarker(data);
+     initial+=data;
      // ConPTY inserts physical CRLFs when the auth viewport resizes, even in
-     // this local wrapper's marker. Bound the prelude and require both exact
-     // random-nonce delimiters before decoding the complete process identity.
-     const clean=startupText(initial),compact=clean.replace(/[\r\n]/g,''),start=compact.indexOf(prefix),end=start<0?-1:compact.indexOf(suffix,start+prefix.length),foreign=/__STUDIO_MASTER_([a-f0-9]{48})__:/.exec(compact);
-     if(foreign&&foreign[1]!==nonce)return lost(r,'ssh_master_identity_changed');if(start<0||end<0)return;
-     if(compact.indexOf('__STUDIO_MASTER_',start+prefix.length)!==end||compact.indexOf('__STUDIO_MASTER_',end+suffix.length)>=0)return lost(r,'ssh_master_identity_changed');
+     // this local wrapper's marker. Check only the bounded prelude. OpenSSH may
+     // already have written its banner or a complete prompt in the same chunk.
+     const prelude=initial.slice(0,startupLimit),compact=startupText(prelude),start=compact.indexOf(prefix),end=start<0?-1:compact.indexOf(suffix,start+prefix.length),foreign=masterHeader.exec(compact);
+     if(foreign&&foreign[1]!==nonce)return lost(r,'ssh_master_identity_changed');
+     if(start<0||end<0){if(initial.length>startupLimit)lost(r,'ssh_master_identity_changed');return;}
+     if(compact.indexOf('__STUDIO_MASTER_',start+prefix.length)!==end)return lost(r,'ssh_master_identity_changed');
      try{const encoded=compact.slice(start+prefix.length,end);if(!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)||Buffer.from(encoded,'base64').toString('base64')!==encoded)throw Error();r.master=JSON.parse(Buffer.from(encoded,'base64').toString());if(!Number.isSafeInteger(r.master.pid)||r.master.pid<1||typeof r.master.start!=='string'||! /^[0-9]+$/.test(r.master.start)||! /^[a-f0-9-]{36}$/.test(r.master.boot))throw Error();}catch{return lost(r,'ssh_master_identity_changed');}
-     let offset=0,logical=0;while(offset<clean.length&&logical<end+suffix.length){if(!/[\r\n]/.test(clean[offset]))logical++;offset++;}marker=true;append(r,clean.slice(offset).replace(/^\r?\n/,''));initial='';
+     const offset=startupOffset(prelude,end+suffix.length),output=initial.slice(offset).replace(/^\r?\n/,'');
+     marker=true;initial='';appendAfterMarker(output);
     });
     r.exit=new Promise(resolve=>{r.resolveExit=resolve;});r.terminal.onExit(()=>{if(process.platform==='win32')drainOwnedConpty(r.terminal);r.alive=false;r.resolveExit();if(r.closeRequested)r.revision++;else if(r.status!=='closed')lost(r,'ssh_master_unavailable');});return view(r);
    }catch(error){if(r.status==='closed')return view(r);r.status=['ssh_route_requires_review'].includes(error.code)?'requires_review':['ssh_multiplex_unsupported','ssh_linux_client_namespace_required','ssh_native_key_path_required'].includes(error.code)?'unsupported':'unavailable';r.authentication='not_observed';r.error=error.code||'ssh_control_unavailable';r.revision++;return view(r);}})();opens.set(value.requestId,{signature,promise});return promise;
@@ -149,16 +167,20 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
    return sessionFactory({pty:{spawn:()=>channel},...options,plan:{...plan,launch:{file:r.proof.file,cwd:r.proof.cwd,args:[]}},now,serviceTimeouts});
   }catch(error){channel.kill();throw error;}
  }
- async function openShell(value,{assertCurrent=()=>{}}={}){const r=ref(value,['requestId']);assertCurrent();if(!id(value.requestId))fail('invalid_request',400);if(r.shellRequests.has(value.requestId))return r.shellRequests.get(value.requestId);const promise=(async()=>{
+ async function openShell(value,{assertCurrent=()=>{}}={}){const r=ref(value,['requestId']),requestId=value.requestId;assertCurrent();if(!id(requestId))fail('invalid_request',400);if(r.shellRequests.has(requestId))return r.shellRequests.get(requestId);const promise=(async()=>{
    await verified(r);assertCurrent();
-   if(openingShells+[...sessions.values()].filter(s=>s.state().alive&&!s.state().closed).length>=4)fail('session_limit');
+    if(openingShells+[...sessions.values()].filter(s=>s.state().alive&&!s.state().closed).length>=4){
+     // No channel creation was dispatched. The same login can continue after
+     // the user frees a slot. Keep the original receipt once dispatch begins.
+     r.shellRequests.delete(requestId);fail('session_limit');
+    }
    openingShells++;let session;
    try{
     session=await channelSession(r,{connectionId:r.id});assertCurrent();
     if(r.status!=='authenticated'||closing)fail('ssh_connection_changed');
     const shell=session.state();sessions.set(shell.id,session);r.shells.add(shell.id);r.revision++;return shell;
    }catch(error){session?.dispose();throw error;}finally{openingShells--;}
-  })();r.shellRequests.set(value.requestId,promise);return promise;}
+   })();r.shellRequests.set(requestId,promise);return promise;}
  function managedShell(value,operation){
   const {connectionId,profileId,profileVersion,...request}=value,r=ref({connectionId,...operation!=='close'?{profileId,profileVersion}:{}});
   r.managedShells??=managedSshShells({now,verified:()=>verified(r),createSession:()=>channelSession(r,{connectionId:r.id})});

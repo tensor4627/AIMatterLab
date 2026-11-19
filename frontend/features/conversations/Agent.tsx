@@ -89,17 +89,18 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const attachmentConsumedRef=useRef(onAttachmentConsumed);attachmentConsumedRef.current=onAttachmentConsumed;
  const [autoSkillStatus,setAutoSkillStatus]=useState<any>(null);
  const [tools,setTools]=useState<any>({status:'not_run',count:0});
+ const [connected,setConnected]=useState(false),[connecting,setConnecting]=useState(false),[models,setModels]=useState<any[]>([]),[model,setModel]=useState('');
  const [versionWarning,setVersionWarning]=useState<CodexVersionWarning|null>(null);
  const [versionNotice,setVersionNotice]=useState<CodexVersionWarning|null>(null);
  const resourceRef=useRef(computeResource),lastResourceProp=useRef(computeResource),toolsRef=useRef(tools);
  if(lastResourceProp.current!==computeResource){resourceRef.current=computeResource;lastResourceProp.current=computeResource;}toolsRef.current=tools;
  const managedCompute=tools.managedCompute===true;
- const terminalSelected=computeResource?.kind==='ssh-terminal'||!managedCompute&&computeResource?.kind==='ssh-connection';
+ const terminalSelected=computeResource?.kind==='ssh-terminal'||connected&&!managedCompute&&computeResource?.kind==='ssh-connection';
  const workflowResource=terminalSelected&&(computeResource.kind==='ssh-connection'?tools.scope!=='terminal-only'&&computeResource.capabilities?.service.workflowReady===true:computeResource.workflowReady===true&&computeResource.managedRuns===true)&&computeResource.authentication==='verified';
  const terminalGranted=terminalSelected&&(computeResource.kind==='ssh-connection'?(tools.scope==='terminal-only'?computeResource.capabilities?.terminal.agentReady===true:computeResource.capabilities?.service.agentReady===true):computeResource.agentReady===true),terminalReady=sshResourceReady(computeResource,tools);
  const canAcquireTerminal=terminalSelected&&computeResource.kind==='ssh-connection'&&computeResource.canAcquireConversationTerminal===true;
  const terminalPlanning=planningMode&&!workflowResource&&(terminalSelected||tools.scope==='terminal-only');
- const terminalNotice=computeResource?.kind==='ssh-connection'?computeResource.authentication!=='verified'?'请先在终端完成 SSH 登录，成功后会自动进入终端。':!terminalGranted?'请在终端点击“交给 Agent”，再发送当前消息。':'当前对话的工具尚未就绪，请核对终端或作业服务状态。':computeResource?.status!=='selected'||computeResource.alive!==true?'所选 SSH 终端不可用，请在终端核对或重新选择。':!terminalGranted?workflowResource?computeResource.operator==='agent'?'当前对话尚无此作业服务权限。请在终端接管后，再交给 Agent。':'SSH 作业服务已连接，请在终端点击“交给 Agent”，授权当前对话使用。':computeResource.operator==='agent'?'当前对话尚无此终端权限，请先接管，再交给 Agent。':'请在终端点击“交给 Agent”，再发送当前消息。':workflowResource?'SSH 作业服务已连接，请重新连接服务商以使用工作流工具。':'SSH 终端已交接，请连接或重新连接当前服务商。';
+ const terminalNotice=computeResource?.kind==='ssh-connection'?computeResource.authentication!=='verified'?'此会话原先选择的 SSH 连接尚未就绪。':!terminalGranted?'当前会话尚未取得此连接的终端或作业服务通道。':'当前对话的工具尚未就绪，请核对终端或作业服务状态。':computeResource?.status!=='selected'||computeResource.alive!==true?'所选 SSH 终端不可用，请在终端核对或重新选择。':!terminalGranted?workflowResource?computeResource.operator==='agent'?'当前对话尚无此作业服务权限。请在终端接管后，再交给 Agent。':'SSH 作业服务已连接，请在终端点击“交给 Agent”，授权当前对话使用。':computeResource.operator==='agent'?'当前对话尚无此终端权限，请先接管，再交给 Agent。':'请在终端点击“交给 Agent”，再发送当前消息。':workflowResource?'SSH 作业服务已连接，请重新连接服务商以使用工作流工具。':'SSH 终端已交接，请连接或重新连接当前服务商。';
  const [provider,setProvider]=useState<AgentProvider>(drafts.owner().provider as AgentProvider),[login,setLogin]=useState(false);
  useEffect(()=>{if(!versionNotice)return;const timer=setTimeout(()=>setVersionNotice(null),8000);return()=>clearTimeout(timer);},[versionNotice]);
  useEffect(()=>{providerChangeRef.current?.(provider);},[provider]);
@@ -117,7 +118,6 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const providerRef=useRef<AgentProvider>(provider);providerRef.current=provider;
  const projectSeen=useRef(''),accountSeq=useRef(0),externalSeq=useRef(0);
  const [externalThreads,setExternalThreads]=useState<any[]>([]),[importOpen,setImportOpen]=useState(false),[importLoading,setImportLoading]=useState(false);
- const [connected,setConnected]=useState(false),[connecting,setConnecting]=useState(false),[models,setModels]=useState<any[]>([]),[model,setModel]=useState('');
  useEffect(()=>{
   if(hidden||provider!=='codex'||!connected){setVersionNotice(null);return;}
   if(versionWarning&&claimVersionNotice())setVersionNotice(versionWarning);
@@ -454,7 +454,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    </div>}
    </div>
     {!connected&&<button className="button wide" data-testid="agent-connect" onClick={()=>void connect(false,selectionSeq.current,true)} disabled={connecting}>{connecting?<LoadingFeedback busy inline label={t('正在连接服务商')+' · '+providerLabel}/>:<><Sparkles size={15}/>{t("连接")} {providerLabel}</>}</button>}
-   {terminalSelected&&!terminalReady&&!canAcquireTerminal?<div className="agent-tool-alert" role="status" data-testid="agent-ssh-resource-notice"><span>{t(terminalNotice)}</span>{terminalGranted&&computeResource.status==='selected'&&computeResource.alive===true&&connected&&<button className="text-button" data-testid="agent-ssh-reconnect" disabled={busy||connecting||applying} onClick={()=>void connect()}>{t('重新连接服务商')}</button>}</div>:!terminalSelected&&(tools.status==='blocked'||computeConnected===false&&tools.scope!=='terminal-only')&&<div className="agent-tool-alert" role="status"><span>{t(tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}</span><button className="text-button" data-testid="agent-tool-repair" disabled={busy||connecting} onClick={()=>{if(computeConnected===false&&onConnectCompute)void Promise.resolve().then(onConnectCompute).catch(onError);else void connect(true);}}>{t(computeConnected===false?'连接计算资源':'修复工具连接')}</button></div>}
+   {terminalSelected&&!terminalReady&&!canAcquireTerminal&&(connected||computeResource.kind==='ssh-terminal')?<div className="agent-tool-alert" role="status" data-testid="agent-ssh-resource-notice"><span>{t(terminalNotice)}</span>{terminalGranted&&computeResource.status==='selected'&&computeResource.alive===true&&connected&&<button className="text-button" data-testid="agent-ssh-reconnect" disabled={busy||connecting||applying} onClick={()=>void connect()}>{t('重新连接服务商')}</button>}</div>:!terminalSelected&&(connected||computeResource?.kind!=='ssh-connection')&&(tools.status==='blocked'||computeConnected===false&&!managedCompute&&tools.scope!=='terminal-only')&&<div className="agent-tool-alert" role="status"><span>{t(tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}</span><button className="text-button" data-testid="agent-tool-repair" disabled={busy||connecting} onClick={()=>{if(computeConnected===false&&onConnectCompute)void Promise.resolve().then(onConnectCompute).catch(onError);else void connect(true);}}>{t(computeConnected===false?'连接计算资源':'修复工具连接')}</button></div>}
   </div>
   {connected&&(tools.warning||tools.inventoryWarning)&&<Notice severity="warning" className="agent-tool-alert" data-testid="agent-tools-warning">{t(tools.inventoryWarning||tools.message||'工具清单待核对，可继续讨论并由 Agent 协助配置环境。')}</Notice>}
   {provider==='codex'&&!hidden&&connected&&versionNotice&&<Notice severity="warning" className="codex-version-notice" data-testid="codex-version-warning" action={<button className="text-button" aria-label={t('关闭版本提示')} onClick={()=>setVersionNotice(null)}>{t('关闭')}</button>}>

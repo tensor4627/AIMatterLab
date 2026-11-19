@@ -84,6 +84,27 @@ test('App footer reflects selected SSH Agent ownership, unknown state and exit w
  for(const [selected,expected]of [[serviceGranted(),/作业服务.*已连接/],[resource({connectionStatus:'unavailable',authentication:'lost',alive:false}),/SSH.*不可用/],[resource({connectionStatus:'closed',authentication:'lost',alive:false}),/SSH.*已关闭/]]){const h=appWorkerHarness({override:(method,data,standard)=>method==='compute.resource.status'?selected:['worker.status','worker.restore'].includes(method)?{status:'disconnected',checkedAt:1}:standard(method,data)});await h.flush();assert.match(h.text(h.find(n=>n.type==='footer')),expected);assert.equal(h.find(n=>n.type==='./Agent').props.computeConnected,false);h.unmount();}
 });
 
+test('reopening a saved SSH profile displays its hosted replacement while run records keep their original identity',async()=>{
+ const previous=resource({status:'unavailable',connectionStatus:undefined,authentication:'not_observed',alive:null});
+ const hosted={kind:'ssh',profileId:previous.profileId,profileVersion:3,connectionId:'current-desktop',name:'Campus',serviceStatus:'idle'};
+ const profile={id:hosted.profileId,version:3,name:'Campus',kind:'ssh',mode:'interactive'};
+ for(const rows of [[hosted],[{...hosted,profileId:'other',name:'Other'}],[]]){
+  const h=appWorkerHarness({managedResources:rows,override:(method,data,standard)=>method==='compute.resource.status'?previous:standard(method,data)});
+  try{
+   await h.flush();
+   h.find(node=>node.props?.['data-testid']==='unified-compute-entry').props.onClick();await h.flush();
+   h.find(node=>node.type==='./ComputeConnectionChooser').props.onSsh(profile);await h.flush();
+   const request=h.find(node=>node.type==='./SharedTerminalPanel').props.request;
+   assert.equal(request.connectionId,rows.some(row=>row.profileId===profile.id)?hosted.connectionId:undefined);
+   const footer=h.text(h.find(node=>node.props?.['data-testid']==='current-compute-resource-status'));
+   if(rows.length)assert(footer.includes(rows[0].name)&&footer.includes('已托管'));
+   else assert.match(footer,/上次选择的 SSH 连接已不可用/);
+   assert.equal(h.find(node=>node.type==='./Agent').props.computeResource.connectionId,previous.connectionId);
+   assert(!h.calls.some(call=>['compute.resource.activate','compute.resource.clear','compute.sshConnection.open'].includes(call.method)));
+  }finally{h.unmount();}
+ }
+});
+
 test('late readonly resource response cannot overwrite a newer explicitly activated terminal',async()=>{
  const gate=deferred(),h=appWorkerHarness({override:(method,data,standard)=>method==='compute.resource.status'?gate.promise:standard(method,data)});await h.flush();await openTerminalTab(h);h.find(n=>n.type==='./SharedTerminalPanel').props.onResourceChange(resource(),'Saved SSH resource');await h.flush();gate.resolve({schemaVersion:1,selectionId:null,kind:null,status:'none'});await h.flush();assert.equal(h.find(n=>n.type==='./Agent').props.computeResource.connectionId,'connection-A');assert.match(h.text(h.find(n=>n.props?.['data-testid']==='active-ssh-resource')),/SSH.*已连接/);h.unmount();
 });

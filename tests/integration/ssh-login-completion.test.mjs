@@ -48,6 +48,22 @@ for(const width of [10,56,80,120])test('ConPTY '+width+' column startup wrapping
  f.authenticate(connection.connectionId);const completed=await f.manager.completeLogin(ref);assert.equal(completed.connection.authentication,'verified');assert.equal(completed.shell.owner,'human');assert.equal(f.processes.length,2);assert.equal(count(f,'allocate'),1);
 });
 
+test('a long authentication screen batched with the local frame is replayed with its terminal controls',async t=>{
+ const screen='\x1b[2J\x1b[H'+('认证网关说明🙂\r\n'.repeat(1050))+'\x1b[1mPassword: \x1b[0m';
+ const f=fixture(t,{frame:value=>[value.split('\r\n',1)[0]+'\r\n'+screen]}),connection=await f.open(),ref={connectionId:connection.connectionId,requestId:'login'};
+ assert.equal(f.manager.loginStatus(ref).connection.status,'authenticating');
+ assert.equal((await f.manager.completeLogin(ref)).login.status,'waiting_authentication');
+ assert.equal(f.manager.authRead({connectionId:ref.connectionId}).output,screen);
+ let cursor=0,replayed='';while(replayed.length<screen.length){
+  const part=f.manager.authRead({connectionId:ref.connectionId,cursor,maxBytes:16384});
+  assert(part.cursor>cursor);assert.equal(part.dropped,false);assert(Buffer.byteLength(part.output)<=16384);
+  replayed+=part.output;cursor=part.cursor;
+ }
+ assert.equal(replayed,screen);assert.equal(count(f,'check'),0);assert.equal(f.processes.length,1);
+ f.authenticate(ref.connectionId);assert.equal((await f.manager.completeLogin(ref)).connection.authentication,'verified');
+ assert.equal(f.manager.authRead({connectionId:ref.connectionId}).output,'');
+});
+
 for(const variant of ['foreign nonce','malformed identity','duplicate frame','incomplete frame','oversized prelude'])test('startup '+variant+' cannot authenticate or launch a slave',async t=>{
  const f=fixture(t,{frame:value=>{const end=value.indexOf('\r\n'),frame=value.slice(0,end);if(variant==='foreign nonce')return [value.replaceAll(/(?<=__STUDIO_MASTER_(?:END_)?)[a-f0-9]{48}/g,'0'.repeat(48))];if(variant==='malformed identity')return [value.replace(/:[A-Za-z0-9+/=]+__STUDIO_MASTER_END_/,':bm90LWpzb24=__STUDIO_MASTER_END_')];if(variant==='duplicate frame')return [frame+'\r\n'+value];if(variant==='oversized prelude')return ['x'.repeat(4097),value];return [value.slice(0,value.indexOf('__STUDIO_MASTER_END_'))];}}),connection=await f.open(),ref={connectionId:connection.connectionId,requestId:'login'},observed=await f.manager.completeLogin(ref);
  assert.equal(observed.shell,undefined);assert.equal(observed.connection.authentication,variant==='incomplete frame'?'pending':'lost');assert.equal(observed.login.status,variant==='incomplete frame'?'waiting_authentication':'failed');assert.equal(count(f,'ready'),0);assert.equal(count(f,'check'),0);assert.equal(f.processes.length,1);
@@ -58,8 +74,32 @@ test('a second local nonce frame in a later chunk revokes the original master wi
  const result=await f.manager.completeLogin({connectionId:connection.connectionId,requestId:'login'});assert.equal(result.login.code,'ssh_master_identity_changed');assert.equal(result.shell,undefined);assert.equal(count(f,'check'),0);assert.equal(f.processes.length,1);
 });
 
+for(const split of [false,true])test('a second foreign identity frame after an owned frame is rejected'+(split?' across chunks':''),async t=>{
+ const f=fixture(t,{frame:value=>{
+  const match=value.match(/__STUDIO_MASTER_([a-f0-9]{48})__:/),nonce=match[1],other=(nonce[0]==='0'?'1':'0').repeat(48),foreign=value.replaceAll(nonce,other);
+  return split?[value+foreign.slice(0,21)+'\x1b[', 'K\r\n'+foreign.slice(21)]:[value+foreign];
+ }}),connection=await f.open();
+ const observed=f.manager.loginStatus({connectionId:connection.connectionId,requestId:'login'});
+ assert.equal(observed.login.code,'ssh_master_identity_changed');assert.equal(observed.shell,undefined);
+ assert.equal(f.manager.authRead({connectionId:connection.connectionId}).output,'');assert.equal(count(f,'check'),0);assert.equal(f.processes.length,1);
+});
+
 test('completion shares an already pending explicit confirmation instead of repeating local confirmation or opening another shell',async t=>{
  const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},held=gate();f.authenticate(connection.connectionId);f.proofGate(held.promise);const explicit=f.manager.confirm({connectionId:connection.connectionId});while(!count(f,'check'))await tick();const completion=f.manager.completeLogin(value);while(!count(f,'ready'))await tick();held.release();assert.equal((await explicit).authentication,'verified');const ready=await completion;assert.equal(ready.shell.owner,'human');assert.equal(count(f,'prove'),0);assert.equal(count(f,'allocate'),1);assert.equal(f.processes.length,2);
+});
+
+test('continuing exact login after a terminal slot opens launches one human shell',async t=>{
+ const f=fixture(t),connection=await f.open(),target={connectionId:connection.connectionId},ref={...target,requestId:connection.loginRequestId};
+ f.authenticate(target.connectionId);await f.manager.confirm(target);
+ const existing=await Promise.all(Array.from({length:4},(_,i)=>f.manager.openShell({...target,requestId:'occupied-slot-'+i})));
+ await assert.rejects(f.manager.completeLogin(ref),/session_limit/);
+ assert.equal(f.manager.loginStatus(ref).login.code,'terminal_session_limit');assert.equal(f.processes.length,5);
+ f.sessions.get(existing[0].id).close({actor:'human',ownerEpoch:existing[0].ownerEpoch});
+ assert.equal(f.manager.loginStatus(ref).shell,undefined);assert.equal(f.processes.length,5);
+ const [first,second]=await Promise.all([f.manager.completeLogin(ref),f.manager.completeLogin(ref)]);
+ assert.equal(first.connection.connectionId,target.connectionId);assert.equal(first.connection.loginRequestId,ref.requestId);
+ assert.equal(first.shell.owner,'human');assert.equal(second.shell.id,first.shell.id);
+ assert.equal(f.manager.loginStatus(ref).shell.id,first.shell.id);assert.equal(f.processes.length,6);assert.equal(count(f,'allocate'),1);
 });
 
 test('completion rejects changed request identity, wrong connection and arbitrary fields without probing',async t=>{

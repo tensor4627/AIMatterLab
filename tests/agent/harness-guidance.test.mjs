@@ -25,6 +25,7 @@ test('ACP profiles deliver the same bounded AIMatterLab core and progressive ski
   assert.match(document,/access="service" for queues or access="terminal" for shell work/);
   assert.match(document,/a short follow-up.*listed resource ID/);
   assert.match(document,/Current receipts supersede old handoff advice/);
+  assert.match(document,/Recover the original live SSH session first/);
   const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
   const routes=[...document.matchAll(/`([a-z]+\.[a-z.-]+)`/g)].map(match=>match[1]);
   assert(routes.length>=12);assert(routes.every(id=>map.functions.some(route=>route.id===id)));
@@ -105,6 +106,11 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  assert.match(entry.text,/duplicate display names include.*resource_id.*profile_id/);
  assert.match(entry.text,/target_selected.*follow its.*retry.*user already chose/);
  assert.match(entry.text,/use the current tools when old chat messages/i);
+ assert.match(entry.text,/live SSH terminal restores the same verified channel/);
+ assert.match(entry.text,/original sign-in is pending, continue that attempt/);
+ assert.match(entry.text,/enter authentication responses only in the private terminal/);
+ assert.match(entry.text,/confirmed lost.*重新登录.*same saved profile/);
+ assert.match(entry.text,/new connection has its own terminal identities and grants/);
  assert.match(entry.text,/submit an explicitly delegated independent job/);
  assert.doesNotMatch(entry.text,/交给 Agent|requires task planning/);
  const doc='studio-compute-workflow/references/compute-discovery.md';
@@ -114,6 +120,7 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  assert.match(result.text,/bounded read-only scheduler probe in ordinary chat/);
  assert.match(result.text,/same-resource service retry/);
  assert.match(result.text,/resource name in chat to its listed ID/);
+ assert.match(result.text,/two-factor prompts in the connection's private terminal/);
  const deployment=await service.call('read_scientific_skill',{function_id:'cluster.lsf-slurm-deployment'},scope);
  assert.match(deployment.text,/A visual workflow is optional for independent jobs/);
 });

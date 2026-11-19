@@ -15,13 +15,31 @@ import {verifiedSshConnection,sshConnectionCode,sshConnectionMessage,sshActionLa
 type Shell={sessionId:string;serviceGrantPending?:boolean;conversationName?:string;humanInputSequence?:number;outputWait?:boolean;awaitingConversation?:boolean;conversationTerminal?:boolean;currentConversation?:boolean;connectionId?:string;resource?:{kind:string;connectionId?:string;profileId?:string;profileVersion?:number};name:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;expired?:boolean;output?:string;cursor?:number;dropped?:boolean};
 type Props={resourceScope?:string;activeResource?:ComputeResourceState|null;visible:boolean;request:{nonce:string;profileId?:string;version?:number;profileName?:string;connectionId?:string;sessionId?:string;exact?:true};canShare:boolean;provider?:AgentProvider;onError:(error:unknown)=>void;onConversationPrepared?:(conversation:Conversation)=>void;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"})=>void;onPlainSsh?:()=>void};
 type ChannelInput={pending:Promise<void>;locked:boolean;observationEpoch:number};
-type LoginState={status:'waiting_authentication'|'checking'|'complete'|'failed';phase?:'checking_authentication'|'opening_shell';code?:string};
+type LoginState={status:'waiting_authentication'|'checking'|'complete'|'failed';phase?:'waiting_authentication'|'checking_authentication'|'opening_shell';code?:string};
 type LoginResult={connection:SshConnectionState;shell?:Shell;login?:LoginState};
+type LoginAttempt={completing:boolean;requiresContinue:boolean;completionResult:number};
+type LoginFlow={requestId:string;connectionId:string;attempt:LoginAttempt;observing:boolean;canCheck:boolean;finished:boolean;restoreShell:boolean;restoredAuthenticated?:boolean;originalShellId?:string;shellChosen?:boolean};
+type InventoryRefresh={ticket:number;read:number;id:string;scope:string;pending:boolean;servicePending:boolean};
 type Diagnostic={code:string;action:string;message:string;connectionId:string;requestId:string};
 type ShellReadIdentity={connectionId:string;sessionId:string;ownerEpoch:number};
 type ShellReadDiagnostic=ShellReadIdentity&{code:string;message:string};
 type GeometryDiagnostic={connectionId:string;sessionId?:string;ownerEpoch?:number;code:string};
 async function sshInvoke<T=unknown>(method:string,data?:unknown):Promise<T>{try{return await invoke<T>(method,data);}catch(error){const code=sshConnectionCode(error)||'terminal_operation_failed';throw Object.assign(new Error(sshConnectionMessage({code})),{code,action:method});}}
+
+function newLoginFlow(requestId:string):LoginFlow{
+ return {requestId,connectionId:'',attempt:{completing:false,requiresContinue:false,completionResult:0},observing:false,canCheck:true,finished:false,restoreShell:false};
+}
+
+function sameTerminalRequest(a:Props['request'],b:Props['request']){
+ return a.nonce===b.nonce&&a.profileId===b.profileId&&a.version===b.version&&a.connectionId===b.connectionId&&a.sessionId===b.sessionId&&a.exact===b.exact;
+}
+
+function shellForConnection(shell:Shell,connection:SshConnectionState){
+ const {connectionId,profileId,profileVersion}=connection,resource=shell.resource;
+ return (shell.connectionId===connectionId||!shell.connectionId&&resource?.kind==='ssh-connection'&&resource.connectionId===connectionId)&&
+  (!resource||resource.kind==='ssh-connection'&&resource.connectionId===connectionId&&
+   (resource.profileId===undefined||resource.profileId===profileId)&&(resource.profileVersion===undefined||resource.profileVersion===profileVersion));
+}
 
 function closeDisclosure(disclosure:HTMLDetailsElement|null,returnFocus=false){
  if(!disclosure?.open)return;
@@ -39,14 +57,28 @@ function disclosureKeyDown(event:KeyboardEvent<HTMLDetailsElement>){
 }
 
 function ChannelTerminal({connection,shell,visible,resourceScope='',onGeometry,inputState,onShell,onConnection,onError,onReadError,onReadSuccess}:{connection:SshConnectionState;shell?:Shell;visible:boolean;resourceScope?:string;onGeometry?:(value:GeometryDiagnostic|null)=>void;inputState:ChannelInput;onShell:(shell:Shell)=>void;onConnection:(connection:SshConnectionState)=>void;onError:(error:unknown)=>void;onReadError?:(error:unknown,identity:ShellReadIdentity)=>void;onReadSuccess?:(identity:ShellReadIdentity)=>void}){
- const host=useRef<HTMLDivElement>(null),view=useRef<Terminal|null>(null),syncSize=useRef<(()=>void)|null>(null),latest=useRef({connection,shell,visible,resourceScope,onGeometry});latest.current={connection,shell,visible,resourceScope,onGeometry};
+ const host=useRef<HTMLDivElement>(null),view=useRef<Terminal|null>(null),syncSize=useRef<(()=>void)|null>(null),syncRead=useRef<(()=>void)|null>(null),displayEpoch=useRef(0),latest=useRef({connection,shell,visible,resourceScope,onGeometry,onConnection});
+ if(visible!==latest.current.visible||resourceScope!==latest.current.resourceScope)displayEpoch.current++;
+ latest.current={connection,shell,visible,resourceScope,onGeometry,onConnection};
  useEffect(()=>{
   if(!host.current)return;let stopped=false,reading=false,cursor=0,inputs=Promise.resolve();const id=connection.connectionId,sessionId=shell?.sessionId;
   const writeInput=createHumanInputWriter();let followup:ReturnType<typeof setTimeout>|undefined;
   const term=new Terminal({fontSize:13,fontFamily:'Cascadia Code, Consolas, monospace',scrollback:2000,theme:{background:'#121218',foreground:'#d1d5e4'}}),fit=new FitAddon();term.loadAddon(fit);term.open(host.current);view.current=term;
   const current=()=>!stopped&&latest.current.connection.connectionId===id&&latest.current.shell?.sessionId===sessionId;
   const editable=()=>current()&&latest.current.visible&&(sessionId?latest.current.shell?.owner==='human'&&!latest.current.shell.awaitingConversation&&latest.current.shell.alive===true&&!latest.current.shell.expired:latest.current.connection.status==='authenticating');
-  const input=term.onData(data=>{if(inputState.locked||!editable())return;const epoch=latest.current.shell?.ownerEpoch;const send=async()=>{if(!editable()||sessionId&&latest.current.shell?.ownerEpoch!==epoch)return;for(const part of data.match(/[\s\S]{1,1024}/gu)||[]){if(!editable()||sessionId&&latest.current.shell?.ownerEpoch!==epoch)return;if(sessionId)await writeInput((payload:unknown)=>sshInvoke('sharedTerminal.input',payload),latest.current.shell!,crypto.randomUUID(),part);else await sshInvoke('compute.sshConnection.authInput',{connectionId:id,requestId:crypto.randomUUID(),data:part});}};inputs=inputs.then(send,send);inputState.pending=inputs;void inputs.catch(error=>{if(current())onError(error);});});
+  const input=term.onData(data=>{
+   if(inputState.locked||!editable())return;
+   const ownerEpoch=latest.current.shell?.ownerEpoch,display=displayEpoch.current;
+   const canSend=()=>editable()&&display===displayEpoch.current&&latest.current.shell?.ownerEpoch===ownerEpoch;
+   const send=async()=>{
+    for(const part of data.match(/[\s\S]{1,1024}/gu)||[]){
+     if(!canSend())return;
+     if(sessionId)await writeInput((payload:unknown)=>sshInvoke('sharedTerminal.input',payload),latest.current.shell!,crypto.randomUUID(),part);
+     else await sshInvoke('compute.sshConnection.authInput',{connectionId:id,requestId:crypto.randomUUID(),data:part});
+    }
+   };
+   inputs=inputs.then(send,send);inputState.pending=inputs;void inputs.catch(error=>{if(canSend())onError(error);});
+  });
   let sizeRequest=0;
   const resize=()=>{
    if(!current()||!latest.current.visible||!host.current?.clientWidth||!host.current.clientHeight)return;
@@ -67,28 +99,53 @@ function ChannelTerminal({connection,shell,visible,resourceScope='',onGeometry,i
   };
   syncSize.current=resize;
   const observer=new ResizeObserver(resize);observer.observe(host.current);
-  const read=async()=>{if(reading||inputState.locked||!current()||!latest.current.visible)return;reading=true;const readEpoch=latest.current.shell?.ownerEpoch,observationEpoch=inputState.observationEpoch,scope=latest.current.resourceScope,waiting=latest.current.shell?.awaitingConversation;
+  const read=async()=>{if(reading||inputState.locked||!current()||!latest.current.visible)return;reading=true;const readEpoch=latest.current.shell?.ownerEpoch,observationEpoch=inputState.observationEpoch,display=displayEpoch.current,waiting=latest.current.shell?.awaitingConversation;
    // Handoff binds a conversation before returning its new owner epoch. Reads
    // started before that transition must not publish a stale result or error.
-   const observationCurrent=()=>current()&&latest.current.visible&&scope===latest.current.resourceScope&&waiting===latest.current.shell?.awaitingConversation&&!inputState.locked&&inputState.observationEpoch===observationEpoch&&latest.current.shell?.ownerEpoch===readEpoch;
+   const observationCurrent=()=>current()&&latest.current.visible&&display===displayEpoch.current&&waiting===latest.current.shell?.awaitingConversation&&!inputState.locked&&inputState.observationEpoch===observationEpoch&&latest.current.shell?.ownerEpoch===readEpoch;
+   const replay=(output:string|undefined,end:number,dropped?:boolean)=>{
+    if(dropped)term.write('\r\n['+t('较早输出已超出回放容量')+']\r\n');
+    if(output)term.write(output);
+    const advanced=end>cursor;cursor=end;
+    if(advanced&&(output||dropped)){clearTimeout(followup);followup=setTimeout(()=>void read(),0);}
+   };
    try{
-   if(sessionId){const before=latest.current.shell!;const next=await sshInvoke<Shell>('sharedTerminal.read',{sessionId,ownerEpoch:before.ownerEpoch,cursor,maxBytes:65536,...before.outputWait?{waitMs:1000}:{}});if(!observationCurrent())return;if(next.dropped)term.write('\r\n['+t('较早输出已超出回放容量')+']\r\n');if(next.output)term.write(next.output);cursor=next.cursor??cursor;onShell(next);if(next.outputWait&&next.alive===true){clearTimeout(followup);followup=setTimeout(()=>void read(),0);}if(next.sessionId===sessionId&&(next.connectionId===id||next.resource?.kind==='ssh-connection'&&next.resource.connectionId===id)&&next.ownerEpoch===readEpoch&&next.alive===true&&!next.expired)onReadSuccess?.({connectionId:id,sessionId,ownerEpoch:before.ownerEpoch});}
-   else {const next=await sshInvoke<{connectionId:string;state:SshConnectionState;output:string;cursor:number;dropped:boolean}>('compute.sshConnection.authRead',{connectionId:id,cursor,maxBytes:65536});if(!observationCurrent()||next.connectionId!==id)return;if(typeof next.output!=='string'||!verifiedSshConnection(next.state)||next.state.connectionId!==id)throw Error('Invalid authentication observation');if(next.dropped)term.write('\r\n['+t('较早输出已超出回放容量')+']\r\n');term.write(next.output);cursor=next.cursor;onConnection(next.state);}
-  }catch(error){if(observationCurrent()&&!(waiting&&['terminal_owner_changed','terminal_context_changed'].includes(sshConnectionCode(error)))){if(sessionId&&typeof readEpoch==='number'&&onReadError)onReadError(error,{connectionId:id,sessionId,ownerEpoch:readEpoch});else onError(error);}}finally{reading=false;}};
-  void read();const timer=setInterval(()=>void read(),500);return()=>{
-   if(stopped)return;stopped=true;syncSize.current=null;clearInterval(timer);clearTimeout(followup);input.dispose();observer.disconnect();if(view.current===term)view.current=null;
+    if(sessionId){
+     const before=latest.current.shell!;
+     const next=await sshInvoke<Shell>('sharedTerminal.read',{sessionId,ownerEpoch:before.ownerEpoch,cursor,maxBytes:65536,...before.outputWait?{waitMs:1000}:{}});
+     if(!observationCurrent()||next.sessionId!==sessionId||next.ownerEpoch!==readEpoch||!shellForConnection(next,latest.current.connection))return;
+     const end=next.cursor??cursor;
+     if(!Number.isSafeInteger(end)||end<cursor)throw Error('terminal_unavailable');
+     replay(next.output,end,next.dropped);onShell(next);
+     if(next.alive===true&&!next.expired)onReadSuccess?.({connectionId:id,sessionId,ownerEpoch:before.ownerEpoch});
+    }else{
+     const next=await sshInvoke<{connectionId:string;state:SshConnectionState;output:string;cursor:number;dropped:boolean}>('compute.sshConnection.authRead',{connectionId:id,cursor,maxBytes:65536});
+     if(!observationCurrent()||next.connectionId!==id)return;
+     const expected=latest.current.connection;
+     if(typeof next.output!=='string'||!Number.isSafeInteger(next.cursor)||next.cursor<cursor||!verifiedSshConnection(next.state)||next.state.connectionId!==id||next.state.profileId!==expected.profileId||next.state.profileVersion!==expected.profileVersion||expected.loginRequestId&&next.state.loginRequestId!==expected.loginRequestId)throw Error('terminal_unavailable');
+     replay(next.output,next.cursor,next.dropped);latest.current.onConnection(next.state);
+    }
+   }catch(error){if(observationCurrent()&&!(waiting&&['terminal_owner_changed','terminal_context_changed'].includes(sshConnectionCode(error)))){if(sessionId&&typeof readEpoch==='number'&&onReadError)onReadError(error,{connectionId:id,sessionId,ownerEpoch:readEpoch});else onError(error);}}
+   finally{
+    reading=false;
+    if(current()&&latest.current.visible&&display!==displayEpoch.current){clearTimeout(followup);followup=setTimeout(()=>void read(),0);}
+   }
+  };
+  syncRead.current=()=>void read();const timer=setInterval(()=>void read(),500);return()=>{
+   if(stopped)return;stopped=true;syncSize.current=null;syncRead.current=null;clearInterval(timer);clearTimeout(followup);input.dispose();observer.disconnect();if(view.current===term)view.current=null;
    // xterm 5 queues viewport initialization during open(). Let it finish before
    // disposing its renderer, after all channel callbacks and visible DOM detach.
    term.element?.remove();setTimeout(()=>term.dispose(),0);
   };
  },[connection.connectionId,shell?.sessionId]);
- useEffect(()=>{syncSize.current?.();},[connection.connectionId,connection.status,shell?.sessionId,shell?.ownerEpoch,shell?.awaitingConversation,resourceScope,visible]);
- useEffect(()=>{if(view.current){view.current.options.disableStdin=!visible||(shell?shell.owner!=='human'||!!shell.awaitingConversation||shell.alive!==true||!!shell.expired:connection.status!=='authenticating');}},[visible,shell?.owner,shell?.awaitingConversation,shell?.ownerEpoch,shell?.alive,shell?.expired,connection.status]);
+ useEffect(()=>{syncSize.current?.();syncRead.current?.();},[connection.connectionId,connection.status,shell?.sessionId,shell?.ownerEpoch,shell?.awaitingConversation,resourceScope,visible]);
+ useEffect(()=>{if(view.current){view.current.options.disableStdin=!visible||(shell?shell.owner!=='human'||!!shell.awaitingConversation||shell.alive!==true||!!shell.expired:connection.status!=='authenticating');}},[visible,shell?.sessionId,shell?.owner,shell?.awaitingConversation,shell?.ownerEpoch,shell?.alive,shell?.expired,connection.connectionId,connection.status]);
  return <div className="shared-terminal-host" data-guide-target={shell?'ssh-shell':'ssh-terminal'} tabIndex={-1} ref={host} role="region" aria-label={t(shell?'SSH 终端':'SSH 登录终端')} onPointerDown={()=>view.current?.focus()}/>;
 }
 
 export default function SshConnectionPanel({visible,request,provider,resourceScope='',onError,onResourceChange,onConfigureSsh,onPlainSsh}:Props){
- const [connections,setConnections]=useState<SshConnectionState[]>([]),[listed,setListed]=useState(false),[selected,setSelected]=useState(''),[shells,setShells]=useState<Shell[]>([]),[shellId,setShellId]=useState(''),[service,setService]=useState<IndependentSshService|null>(null),[pendingAction,setPendingAction]=useState<'publish'|'terminal'|null>(null),[notice,setNotice]=useState(''),[diagnostic,setDiagnostic]=useState<Diagnostic|null>(null),[loginState,setLoginState]=useState<LoginState|null>(null),[loginBusy,setLoginBusy]=useState(false);
+ const [connections,setConnections]=useState<SshConnectionState[]>([]),[listedNonce,setListedNonce]=useState(''),[selected,setSelected]=useState(''),[shells,setShells]=useState<Shell[]>([]),[shellId,setShellId]=useState(''),[service,setService]=useState<IndependentSshService|null>(null),[pendingAction,setPendingAction]=useState<'publish'|'terminal'|null>(null),[notice,setNotice]=useState(''),[diagnostic,setDiagnostic]=useState<Diagnostic|null>(null),[loginState,setLoginState]=useState<LoginState|null>(null),[loginBusy,setLoginBusy]=useState(false);
+ const listed=listedNonce===request.nonce;
  const busy=pendingAction!==null;
  const [readDiagnostic,setReadDiagnostic]=useState<ShellReadDiagnostic|null>(null);
  const [geometry,setGeometry]=useState<GeometryDiagnostic|null>(null);
@@ -97,12 +154,19 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const [inventoryError,setInventoryError]=useState<{id:string;scope:string;code:string}|null>(null);
  const moreDetails=useRef<HTMLDetailsElement>(null),statusDetails=useRef<HTMLDetailsElement>(null);
  useEffect(()=>{closeDisclosure(moreDetails.current);closeDisclosure(statusDetails.current);},[visible,request.nonce]);
- const alive=useRef(true),flight=useRef(false),generation=useRef(0),operations=useRef(0),reads=useRef(0),lastError=useRef(''),startedRequest=useRef(''),authInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),shellInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),latest=useRef({selected,request,provider,resourceScope,visible});latest.current={selected,request,provider,resourceScope,visible};
- const login=useRef({nonce:request.nonce,requestId:request.nonce,connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider});
+ const alive=useRef(true),flight=useRef(false),generation=useRef(0),operations=useRef(0),reads=useRef(0),lastError=useRef(''),startedRequest=useRef(''),authInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),shellInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),latest=useRef({selected,request,resourceScope,visible});latest.current={selected,request,resourceScope,visible};
+ const login=useRef(newLoginFlow(request.nonce));
+ const loginAttempts=useRef(new Map<string,LoginAttempt>());
+ const inventory=useRef<InventoryRefresh|null>(null);
+ const viewRequest=useRef(request);
  const exactShell=useRef<string|undefined>(undefined);
+ const shellCatalogueScope=useRef(resourceScope);
  const terminalNumbers=useRef(new Map<string,number>());
  function shellLabel(item:Shell){if(!terminalNumbers.current.has(item.sessionId))terminalNumbers.current.set(item.sessionId,terminalNumbers.current.size+1);const n=terminalNumbers.current.get(item.sessionId);return item.owner==='agent'||item.awaitingConversation?'Agent · '+(item.conversationName||t(item.awaitingConversation?'等待会话接管':'终端')+' '+n):t('我的终端')+' '+n;}
- const connection=connections.find(value=>value.connectionId===selected),shell=shells.find(value=>value.sessionId===shellId),ready=!!connection&&connection.profileId===request.profileId&&connection.profileVersion===request.version&&connection.status==='authenticated'&&connection.authentication==='verified'&&connection.capabilities.multiplex;
+ const viewCurrent=sameTerminalRequest(viewRequest.current,request);
+ const connection=viewCurrent?connections.find(value=>value.connectionId===selected&&value.profileId===request.profileId&&value.profileVersion===request.version):undefined;
+ const selectableShells=shells.filter(item=>!item.conversationTerminal||item.currentConversation&&shellCatalogueScope.current===resourceScope);
+ const shell=selectableShells.find(value=>value.sessionId===shellId),ready=!!connection&&connection.status==='authenticated'&&connection.authentication==='verified'&&connection.capabilities.multiplex;
  const candidates=connections.filter(value=>value.profileId===request.profileId&&value.profileVersion===request.version&&['authenticating','authenticated'].includes(value.status));
  const observedConnection=useRef(connection);observedConnection.current=connection;
  const observedShell=useRef(shell);observedShell.current=shell;
@@ -133,46 +197,80 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   // successful read of this exact current channel can retire its old read fault.
   setReadDiagnostic(previous=>previous?.connectionId===identity.connectionId&&previous.sessionId===identity.sessionId&&previous.ownerEpoch<=identity.ownerEpoch?null:previous);
  }
+ async function refreshService(view:InventoryRefresh,current:()=>boolean){
+  if(view.servicePending)return;
+  view.servicePending=true;
+  try{
+   const state=await sshInvoke<IndependentSshService>('compute.sshService.status',{connectionId:view.id});
+   if(current()&&(state.connectionId===view.id||!state.connectionId&&state.status==='disconnected'))setService(old=>old?.connectionId===state.connectionId&&(old?.revision??-1)>(state.revision??-1)?old:state);
+  }catch{/* Shell discovery retains its own observation and can still succeed. */}
+  finally{view.servicePending=false;}
+ }
  async function refresh(){
-  const ticket=generation.current,read=++reads.current,id=latest.current.selected,scope=latest.current.resourceScope;
+  const ticket=generation.current,read=reads.current,id=latest.current.selected,scope=latest.current.resourceScope,requested=latest.current.request;
+  const previous=inventory.current;
+  const view=previous&&previous.ticket===ticket&&previous.read===read&&previous.id===id&&previous.scope===scope?previous:{ticket,read,id,scope,pending:false,servicePending:false};
+  if(view.pending)return;
+  inventory.current=view;view.pending=true;
   const observingHandoff=shellInput.current.locked;
-  const current=()=>alive.current&&ticket===generation.current&&read===reads.current&&id===latest.current.selected&&scope===latest.current.resourceScope;
+  const current=()=>alive.current&&inventory.current===view&&ticket===generation.current&&read===reads.current&&id===latest.current.selected&&scope===latest.current.resourceScope&&sameTerminalRequest(requested,latest.current.request)&&sameTerminalRequest(requested,viewRequest.current);
   try{
    const listing=await sshInvoke<{connections:SshConnectionState[]}>('compute.sshConnection.list',{});
    if(!current())return;
    if(!Array.isArray(listing.connections)||!listing.connections.every(verifiedSshConnection))throw Error('Invalid connection listing');
-   setListed(true);
+   setListedNonce(requested.nonce);
    setConnections(old=>listing.connections.map(value=>{
     const prior=old.find(item=>item.connectionId===value.connectionId);
     return prior&&prior.revision>value.revision?prior:value;
    }));
-   if(id){
-    const [state,sessions]=await Promise.all([sshInvoke<IndependentSshService>('compute.sshService.status',{connectionId:id}),sshInvoke<{sessions:Shell[]}>('sharedTerminal.list',{})]);
+   const listedConnection=listing.connections.find(value=>value.connectionId===id&&value.profileId===requested.profileId&&value.profileVersion===requested.version);
+   const known=observedConnection.current;
+   const target=listedConnection&&known?.connectionId===id&&known.revision>listedConnection.revision?known:listedConnection;
+   if(target?.status==='authenticated'&&target.authentication==='verified'){
+    void refreshService(view,current);
+    const sessions=await sshInvoke<{sessions:Shell[]}>('sharedTerminal.list',{});
     if(!current())return;
     if(!Array.isArray(sessions.sessions))throw Error('Invalid shell listing');
-    setService(old=>old?.connectionId===state.connectionId&&(old?.revision??-1)>(state.revision??-1)?old:state);
-    const local=sessions.sessions.filter(item=>item.connectionId===id||item.resource?.kind==='ssh-connection'&&item.resource.connectionId===id);
-    const visibleShells=local.filter(item=>!item.conversationTerminal||item.currentConversation);
-    const owned=visibleShells.find(item=>item.currentConversation),restoring=login.current.restoreShell;
-    login.current.restoreShell=false;
-    const requested=exactShell.current;
-    if(requested){
-     exactShell.current=undefined;
-     const original=visibleShells.find(item=>item.sessionId===requested&&item.owner==='human'&&item.alive===true&&!item.expired);
-     setShellId(original?.sessionId||'');
-     if(!original)setNotice(t('原终端当前不可用，请核对连接。'));
-    }else setShellId(previous=>visibleShells.some(item=>item.sessionId===previous)?previous:latest.current.request.exact?'':owned?.sessionId||(restoring&&visibleShells.length===1?visibleShells[0].sessionId:''));
-    setShells(old=>visibleShells.map(item=>{
-     const prior=old.find(value=>value.sessionId===item.sessionId);
-     return prior&&prior.ownerEpoch>item.ownerEpoch?prior:item;
-    }));
+    const visibleShells=sessions.sessions.filter(item=>shellForConnection(item,target)&&(!item.conversationTerminal||item.currentConversation));
+    const liveShells=visibleShells.filter(item=>item.alive===true&&!item.expired);
+    const catalogueIds=new Set(sessions.sessions.map(item=>item.sessionId));
+    const missingFromCatalogue=(sessionId:string)=>target.terminalSessionIds.includes(sessionId)&&!catalogueIds.has(sessionId);
+    shellCatalogueScope.current=scope;
+    const expected=exactShell.current;
+    if(expected){
+     const original=visibleShells.find(item=>item.sessionId===expected);
+     if(original?.owner==='human'&&original.alive===true&&!original.expired&&!original.awaitingConversation){exactShell.current=undefined;setShellId(original.sessionId);setNotice('');}
+     else if(!original&&!missingFromCatalogue(expected)||original&&(original.owner!=='human'||original.alive===false||original.expired||original.awaitingConversation))setNotice(t('原终端当前不可用，请核对连接。'));
+     else setNotice('');
+    }else{
+     const flow=login.current;
+     const restored=!flow.restoreShell?undefined:flow.originalShellId?liveShells.find(item=>item.sessionId===flow.originalShellId&&!item.awaitingConversation):liveShells.length===1?liveShells[0]:undefined;
+     const preferred=restored?.sessionId===flow.originalShellId&&!flow.shellChosen?restored?.sessionId:undefined;
+     if(restored||flow.originalShellId&&catalogueIds.has(flow.originalShellId)&&!visibleShells.some(item=>item.sessionId===flow.originalShellId))flow.restoreShell=false;
+     const owned=liveShells.find(item=>item.currentConversation);
+     const priorShell=observedShell.current;
+     setShellId(prior=>{
+      if(!requested.exact&&preferred)return preferred;
+      const keepMissing=missingFromCatalogue(prior)&&!priorShell?.conversationTerminal&&(priorShell?.sessionId===prior||flow.originalShellId===prior);
+      if(visibleShells.some(item=>item.sessionId===prior)||keepMissing)return prior;
+      return requested.exact?'':restored?.sessionId||owned?.sessionId||'';
+     });
+    }
+    setShells(old=>[
+     ...visibleShells.map(item=>{
+      const prior=old.find(value=>value.sessionId===item.sessionId);
+      return prior&&prior.ownerEpoch>item.ownerEpoch?prior:item;
+     }),
+     // The login receipt can arrive before the separate session catalogue.
+     ...old.filter(item=>!item.conversationTerminal&&missingFromCatalogue(item.sessionId)).map(item=>({...item,alive:null})),
+    ]);
    }
    setInventoryError(null);
   }catch(error){
    if(current()&&!observingHandoff&&!shellInput.current.locked)setInventoryError({id,scope,code:sshConnectionCode(error)||'terminal_unavailable'});
-  }
+  }finally{view.pending=false;}
  }
- async function action(run:(current:()=>boolean)=>Promise<void>,kind:'publish'|'terminal'='terminal'){if(flight.current)return;flight.current=true;const operation=++operations.current;reads.current++;setPendingAction(kind);setNotice('');setDiagnostic(null);lastError.current='';const ticket=generation.current,id=latest.current.selected,nonce=latest.current.request.nonce,profileId=latest.current.request.profileId,profileVersion=latest.current.request.version;const current=()=>alive.current&&ticket===generation.current&&latest.current.selected===id&&latest.current.request.nonce===nonce&&latest.current.request.profileId===profileId&&latest.current.request.version===profileVersion;try{await run(current);}catch(error){if(current())report(error);}finally{if(operation===operations.current){flight.current=false;if(alive.current){setPendingAction(null);void refresh();}}}}
+ async function action(run:(current:()=>boolean)=>Promise<void>,kind:'publish'|'terminal'='terminal'){if(flight.current||!sameTerminalRequest(viewRequest.current,latest.current.request))return;flight.current=true;const operation=++operations.current;reads.current++;setPendingAction(kind);setNotice('');setDiagnostic(null);lastError.current='';const ticket=generation.current,id=latest.current.selected,requested=latest.current.request;const current=()=>alive.current&&ticket===generation.current&&latest.current.selected===id&&sameTerminalRequest(requested,latest.current.request);try{await run(current);}catch(error){if(current())report(error);}finally{if(operation===operations.current){flight.current=false;if(alive.current){setPendingAction(null);void refresh();}}}}
  async function publishConnection(){
   if(!connection||!ready||hosted)return;
   await action(async current=>{
@@ -182,38 +280,121 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    setPublication(result);
   },'publish');
  }
- async function open(explicit=false){await action(async current=>{if(!request.profileId||!request.version)throw Error('Saved SSH profile required');if(explicit){login.current={nonce:request.nonce,requestId:crypto.randomUUID(),connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider};setLoginState(null);setLoginBusy(false);}const flow=login.current;const value=await sshInvoke<SshConnectionState>('compute.sshConnection.open',{profileId:request.profileId,profileVersion:request.version,requestId:flow.requestId});if(!current())return;if(!verifiedSshConnection(value)||value.profileId!==request.profileId||value.profileVersion!==request.version)throw Error('compute_profile_changed');flow.connectionId=value.connectionId;accept(value);setSelected(value.connectionId);setShellId('');setShells([]);});}
+ function bindLogin(flow:LoginFlow,value:SshConnectionState){
+  flow.connectionId=value.connectionId;
+  const key=value.connectionId+':'+flow.requestId;
+  const attempt=loginAttempts.current.get(key);
+  if(attempt)flow.attempt=attempt;
+  else loginAttempts.current.set(key,flow.attempt);
+ }
+ async function open(explicit=false){
+  await action(async current=>{
+   if(!request.profileId||!request.version)throw Error('Saved SSH profile required');
+   if(explicit){login.current=newLoginFlow(crypto.randomUUID());setLoginState(null);setLoginBusy(false);}
+   const flow=login.current;
+   const value=await sshInvoke<SshConnectionState>('compute.sshConnection.open',{profileId:request.profileId,profileVersion:request.version,requestId:flow.requestId});
+   if(!current())return;
+   if(!verifiedSshConnection(value)||value.profileId!==request.profileId||value.profileVersion!==request.version||value.loginRequestId!==undefined&&value.loginRequestId!==flow.requestId)throw Error('compute_profile_changed');
+   bindLogin(flow,value);accept(value);setSelected(value.connectionId);setShellId('');setShells([]);
+  });
+ }
  function resumeConnection(value:SshConnectionState){
-  login.current={nonce:request.nonce,requestId:value.loginRequestId||request.nonce,connectionId:value.connectionId,finished:value.status==='authenticated'||!value.loginRequestId,failed:value.status==='authenticating',restoreShell:value.status==='authenticated',serial:0,pending:false,scope:resourceScope,provider};
+  const flow=newLoginFlow(value.loginRequestId||request.nonce);
+  flow.finished=!value.loginRequestId;flow.canCheck=false;flow.restoreShell=true;flow.restoredAuthenticated=value.status==='authenticated';
+  bindLogin(flow,value);login.current=flow;
   setSelected(value.connectionId);
   setNotice(value.status!=='authenticated'&&!value.loginRequestId?t('原登录请求无法恢复，请查看原终端并刷新连接；不会另开登录。'):'');
  }
- useEffect(()=>{alive.current=true;generation.current++;exactShell.current=request.exact?request.sessionId:undefined;login.current={nonce:request.nonce,requestId:request.nonce,connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider};setLoginState(null);setDiagnostic(null);setNotice('');setLoginBusy(false);setListed(false);setGeometry(null);setSelected('');setShellId('');setShells([]);setService(null);void refresh();return()=>{alive.current=false;generation.current++;};},[request.nonce]);
- useEffect(()=>{if(!visible||!listed||selected||flight.current||startedRequest.current===request.nonce)return;startedRequest.current=request.nonce;const existing=request.connectionId?candidates.find(value=>value.connectionId===request.connectionId):candidates.length===1?candidates[0]:undefined;if(existing)resumeConnection(existing);else if(request.exact)setNotice(t('原终端当前不可用，请核对连接。'));else if(candidates.length<=1)void open();},[visible,listed,selected,request.nonce,busy]);
+ useEffect(()=>{alive.current=true;generation.current++;viewRequest.current=request;exactShell.current=request.exact?request.sessionId:undefined;login.current=newLoginFlow(request.nonce);setLoginState(null);setDiagnostic(null);setNotice('');setLoginBusy(false);setListedNonce('');setGeometry(null);setSelected('');setShellId('');setShells([]);setService(null);void refresh();return()=>{alive.current=false;generation.current++;};},[request.nonce]);
+ useEffect(()=>{
+  if(!visible||!viewCurrent||!listed||selected||flight.current||startedRequest.current===request.nonce)return;
+  const hinted=request.connectionId?candidates.find(value=>value.connectionId===request.connectionId):undefined;
+  const exactCandidate=request.connectionId?hinted:candidates.find(value=>request.sessionId&&value.terminalSessionIds.includes(request.sessionId));
+  const existing=request.exact?exactCandidate:hinted||(candidates.length===1?candidates[0]:undefined);
+  if(request.exact&&!existing){setNotice(t('原终端当前不可用，请核对连接。'));return;}
+  startedRequest.current=request.nonce;
+  if(existing)resumeConnection(existing);else if(candidates.length===0)void open();
+ },[visible,viewCurrent,listed,selected,request.nonce,busy,connections]);
  useEffect(()=>{if(!visible)return;void refresh();const timer=setInterval(()=>void refresh(),2000),off=window.studio?.onEvent(event=>{if(['studio/sshConnectionChanged','studio/sshServiceChanged','studio/conversationTerminalChanged'].includes(event.method))void refresh();});return()=>{clearInterval(timer);off?.();};},[visible,selected,request.nonce,resourceScope,provider]);
- function loginContext(flow:typeof login.current){const ticket=generation.current,id=flow.connectionId,nonce=request.nonce,profileId=request.profileId,version=request.version;return()=>alive.current&&ticket===generation.current&&login.current===flow&&latest.current.selected===id&&latest.current.request.nonce===nonce&&latest.current.request.profileId===profileId&&latest.current.request.version===version;}
- async function receiveLogin(result:LoginResult,flow:typeof login.current,current:()=>boolean,method:string){
-  if(!current())return;const value=result?.connection,next=result?.shell;
-  if(!verifiedSshConnection(value)||value.connectionId!==flow.connectionId||value.profileId!==request.profileId||value.profileVersion!==request.version||value.loginRequestId!==undefined&&value.loginRequestId!==flow.requestId)throw Error('ssh_connection_changed');
-  if(observedConnection.current?.connectionId===value.connectionId&&observedConnection.current.revision>value.revision){flow.failed=true;return;}
-  const state=result.login??{status:value.status==='authenticated'?'complete':'waiting_authentication'};
-  if(!['waiting_authentication','checking','complete','failed'].includes(state.status)||state.phase!==undefined&&!['checking_authentication','opening_shell'].includes(state.phase)||state.code!==undefined&&(typeof state.code!=='string'||sshConnectionCode(state.code)!==state.code)||method==='compute.sshConnection.loginStatus'&&!result.login)throw Error('terminal_unavailable');
-  if(next&&(value.status!=='authenticated'||value.authentication!=='verified'||state.status!=='complete'||!next.sessionId||next.connectionId!==flow.connectionId||next.resource!==undefined&&(next.resource.kind!=='ssh-connection'||next.resource.connectionId!==flow.connectionId||next.resource.profileId!==undefined&&next.resource.profileId!==value.profileId||next.resource.profileVersion!==undefined&&next.resource.profileVersion!==value.profileVersion)||!value.terminalSessionIds.includes(next.sessionId)||!['human','agent'].includes(next.owner)||!Number.isSafeInteger(next.ownerEpoch)||next.ownerEpoch<1))throw Error('ssh_control_identity_changed');
-  accept(value);setLoginState(state);
-  if(state.status==='checking'||state.status==='failed')flow.failed=true;
-  if(state.code)report({code:state.code},method);
-  if(next){flow.finished=true;setShells(old=>[next,...old.filter(item=>item.sessionId!==next.sessionId)]);setShellId(next.sessionId);setNotice('');setDiagnostic(null);}
-  else if(state.status==='complete')flow.finished=true;
+ function loginContext(flow:LoginFlow){const ticket=generation.current,id=flow.connectionId;return()=>alive.current&&ticket===generation.current&&login.current===flow&&latest.current.selected===id&&sameTerminalRequest(request,latest.current.request)&&sameTerminalRequest(request,viewRequest.current);}
+ function clearLoginDiagnostic(flow:LoginFlow,actions:string[]){
+  setDiagnostic(previous=>previous?.connectionId===flow.connectionId&&previous.requestId===flow.requestId&&actions.includes(previous.action)?null:previous);
  }
- async function requestLogin(flow:typeof login.current,method:'compute.sshConnection.completeLogin'|'compute.sshConnection.loginStatus',outerCurrent:()=>boolean){
-  if(flow.pending||flow.finished||!outerCurrent())return;const serial=++flow.serial,current=()=>outerCurrent()&&serial===flow.serial;flow.pending=true;setLoginBusy(true);if(method==='compute.sshConnection.completeLogin')setLoginState({status:'checking'});
-  try{const result=await sshInvoke<LoginResult>(method,{connectionId:flow.connectionId,requestId:flow.requestId});if(current())await receiveLogin(result,flow,current,method);}
-  catch(error){if(current()){flow.failed=true;report(error,method);}}
-  finally{flow.pending=false;if(alive.current&&login.current===flow)setLoginBusy(false);}
+ function acceptAuthObservation(value:SshConnectionState){
+  accept(value);
+  if(login.current.connectionId===value.connectionId)clearLoginDiagnostic(login.current,['compute.sshConnection.authRead']);
+ }
+ function receiveLogin(result:LoginResult,flow:LoginFlow,method:'compute.sshConnection.completeLogin'|'compute.sshConnection.loginStatus'){
+  const value=result?.connection,next=result?.shell;
+  if(!verifiedSshConnection(value)||value.connectionId!==flow.connectionId||value.profileId!==request.profileId||value.profileVersion!==request.version||value.loginRequestId!==undefined&&value.loginRequestId!==flow.requestId)throw Error('ssh_connection_changed');
+  if(observedConnection.current?.connectionId===value.connectionId&&observedConnection.current.revision>value.revision)return;
+  const state=result.login??{status:value.status==='authenticated'?'complete':'waiting_authentication'};
+  if(!['waiting_authentication','checking','complete','failed'].includes(state.status)||state.phase!==undefined&&!['waiting_authentication','checking_authentication','opening_shell'].includes(state.phase)||state.code!==undefined&&(typeof state.code!=='string'||sshConnectionCode(state.code)!==state.code)||method==='compute.sshConnection.loginStatus'&&!result.login)throw Error('terminal_unavailable');
+  if(state.status==='complete'&&(value.status!=='authenticated'||value.authentication!=='verified'||!value.capabilities.multiplex))throw Error('ssh_connection_changed');
+  if(next&&(value.status!=='authenticated'||value.authentication!=='verified'||state.status!=='complete'||!next.sessionId||next.connectionId!==flow.connectionId||!shellForConnection(next,value)||!value.terminalSessionIds.includes(next.sessionId)||!['human','agent'].includes(next.owner)||!Number.isSafeInteger(next.ownerEpoch)||next.ownerEpoch<1))throw Error('ssh_control_identity_changed');
+  if(method==='compute.sshConnection.loginStatus'&&flow.attempt.completing&&['waiting_authentication','failed'].includes(state.status))return;
+  accept(value);setLoginState(state);flow.canCheck=state.status==='waiting_authentication';
+  if(state.status==='failed'||state.code)flow.attempt.requiresContinue=true;
+  if(state.code)report({code:state.code},method);
+  else if(state.status==='waiting_authentication')clearLoginDiagnostic(flow,['compute.sshConnection.loginStatus']);
+  if(state.status==='complete'){
+   flow.finished=true;
+   setLoginBusy(false);
+   clearLoginDiagnostic(flow,['compute.sshConnection.completeLogin','compute.sshConnection.loginStatus','compute.sshConnection.authRead']);
+   if(next&&(!request.exact||request.sessionId===next.sessionId)){flow.originalShellId=next.sessionId;flow.restoreShell=true;}
+   // A receipt for a reattached authenticated master lacks conversation scope.
+   // Its original shell can be selected once the scoped terminal listing admits it.
+   if(next?.owner==='human'&&next.alive===true&&!next.expired&&!next.awaitingConversation&&!next.conversationTerminal&&!flow.restoredAuthenticated&&(!request.exact||request.sessionId===next.sessionId)){
+    flow.restoreShell=false;
+    if(exactShell.current===next.sessionId)exactShell.current=undefined;
+    reads.current++;
+    setShells(old=>[old.find(item=>item.sessionId===next.sessionId&&item.ownerEpoch>next.ownerEpoch)||next,...old.filter(item=>item.sessionId!==next.sessionId)]);
+    if(!flow.shellChosen)setShellId(next.sessionId);
+    setNotice('');
+   }
+   void refresh();
+  }
+ }
+ async function requestLogin(flow:LoginFlow,method:'compute.sshConnection.completeLogin'|'compute.sshConnection.loginStatus',active:()=>boolean){
+  const write=method==='compute.sshConnection.completeLogin',attempt=flow.attempt;
+  if(flow.observing||flow.finished||!active()||write&&attempt.completing)return;
+  const previousCompletion=attempt.completionResult;
+  const current=()=>active()&&!flow.finished&&(write||attempt.completionResult===previousCompletion);
+  if(write){attempt.completing=true;flow.canCheck=false;setLoginState({status:'checking'});}
+  else flow.observing=true;
+  setLoginBusy(true);
+  try{
+   const result=await sshInvoke<LoginResult>(method,{connectionId:flow.connectionId,requestId:flow.requestId});
+   if(current())receiveLogin(result,flow,method);
+   if(write){attempt.completionResult++;if(result?.login?.status==='failed'||result?.login?.code)attempt.requiresContinue=true;}
+  }catch(error){
+   if(write)attempt.requiresContinue=true;
+   if(current()&&(write||!attempt.completing)){flow.canCheck=false;report(error,method);}
+  }finally{
+   if(write)attempt.completing=false;else flow.observing=false;
+   if(active())setLoginBusy(!flow.finished&&(attempt.completing||flow.observing));
+  }
  }
  async function observeOriginalLogin(){const flow=login.current,current=loginContext(flow);if(flow.connectionId&&current())await requestLogin(flow,'compute.sshConnection.loginStatus',current);}
- async function continueLogin(){const flow=login.current;if(flow.pending||!connection||!flow.failed||!loginState||!['waiting_authentication','failed'].includes(loginState.status))return;await action(async current=>{flow.scope=latest.current.resourceScope;flow.provider=latest.current.provider;flow.failed=false;setLoginState({status:'checking',phase:'checking_authentication'});await requestLogin(flow,'compute.sshConnection.completeLogin',()=>current()&&loginContext(flow)());});}
- useEffect(()=>{if(!visible||!selected||login.current.connectionId!==selected||login.current.finished)return;let stopped=false;const flow=login.current,fresh=loginContext(flow),current=()=>!stopped&&fresh();const poll=()=>{const observed=observedConnection.current;if(!observed||['closed','unsupported','requires_review'].includes(observed.status)||!['authenticating','authenticated'].includes(observed.status)&&!flow.failed)return;if(!flight.current&&current())void requestLogin(flow,flow.failed?'compute.sshConnection.loginStatus':'compute.sshConnection.completeLogin',current);};poll();const timer=setInterval(poll,700);return()=>{stopped=true;if(flow.pending)flow.failed=true;clearInterval(timer);};},[visible,selected,request.nonce,request.profileId,request.version]);
+ async function continueLogin(){
+  const flow=login.current,current=loginContext(flow);
+  if(!current()||flight.current||flow.observing||flow.attempt.completing||!canContinue)return;
+  flow.attempt.requiresContinue=false;
+  setDiagnostic(null);lastError.current='';
+  await requestLogin(flow,'compute.sshConnection.completeLogin',current);
+ }
+ useEffect(()=>{
+  if(!visible||!selected||login.current.connectionId!==selected||login.current.finished)return;
+  const flow=login.current,current=loginContext(flow);
+  const poll=()=>{
+   if(flight.current||!current()||flow.finished)return;
+   const status=observedConnection.current?.status;
+   if(status&&['closed','unsupported','requires_review','unavailable'].includes(status))return;
+   const canWrite=!request.exact&&(status==='authenticating'||status==='authenticated')&&flow.canCheck&&!flow.attempt.requiresContinue&&!flow.attempt.completing;
+   void requestLogin(flow,canWrite?'compute.sshConnection.completeLogin':'compute.sshConnection.loginStatus',current);
+  };
+  poll();const timer=setInterval(poll,700);return()=>clearInterval(timer);
+ },[visible,selected,request.nonce,request.profileId,request.version]);
  async function openShell(){
   if(!connection||!ready)return;
   await action(async current=>{
@@ -221,7 +402,8 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    if(!current())return;
    const next='session' in value?value.session:value;
    if(!next.sessionId||(next.connectionId||next.resource?.connectionId)!==connection.connectionId)throw Error('Shell connection identity differs');
-   setShells(old=>[...old.filter(item=>item.sessionId!==next.sessionId),next]);setShellId(next.sessionId);
+    login.current.shellChosen=true;exactShell.current=undefined;
+    setShells(old=>[...old.filter(item=>item.sessionId!==next.sessionId),next]);setShellId(next.sessionId);
   });
  }
  async function closeShell(){if(!shell)return;await action(async current=>{const result=await sshInvoke<{closed:boolean}>('sharedTerminal.close',{sessionId:shell.sessionId});if(!current())return;if(result?.closed!==true)throw Error('Shell close unconfirmed');setShells(old=>old.filter(item=>item.sessionId!==shell.sessionId));setShellId('');await refreshResource(current);});}
@@ -235,7 +417,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const failureReplacesDiagnostic=failedConnectionCode&&diagnostic&&diagnostic.connectionId===connection?.connectionId&&diagnostic.requestId===login.current.requestId&&['compute.sshConnection.completeLogin','compute.sshConnection.loginStatus'].includes(diagnostic.action)&&['ssh_connection_changed','ssh_authentication_unconfirmed'].includes(diagnostic.code);
  const visibleDiagnostic=failureReplacesDiagnostic?{...diagnostic,code:failedConnectionCode,message:t(sshConnectionMessage(failedConnectionCode))}:diagnostic;
  const error=visibleDiagnostic?.code||(sameLogin?connection?.error?.code:undefined);
- const canContinue=!!connection&&!login.current.finished&&login.current.failed&&!!loginState&&['waiting_authentication','failed'].includes(loginState.status);
+ const canContinue=!request.exact&&!!connection&&['authenticating','authenticated'].includes(connection.status)&&!login.current.finished&&login.current.attempt.requiresContinue&&!!loginState&&['waiting_authentication','failed'].includes(loginState.status);
  const configure=(section?:"service")=>{const profileId=connection?.profileId||request.profileId,profileVersion=connection?.profileVersion||request.version;if(profileId&&profileVersion)onConfigureSsh?.({profileId,profileVersion,...section?{section}:{}});};
  const visibleReadDiagnostic=readDiagnostic&&readDiagnostic.connectionId===selected&&readDiagnostic.sessionId===shell?.sessionId&&login.current.connectionId===selected?readDiagnostic:null;
  const visibleGeometry=geometry&&geometry.connectionId===selected&&geometry.sessionId===shell?.sessionId&&geometry.ownerEpoch===shell?.ownerEpoch?geometry:null;
@@ -291,7 +473,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const statusLabel=t(sshStateLabel(connectionStatus))+(connection&&connection.profileVersion!==request.version?' · '+t('原版本连接'):'');
  const canRelogin=!!connection&&['unavailable','closed','requires_review','unsupported'].includes(connection.status);
  const canClose=!!connection&&connection.status!=='closed';
- const chooseConnection=!selected&&listed&&candidates.length>1;
+ const chooseConnection=!request.exact&&viewCurrent&&!selected&&listed&&candidates.length>1;
  const publishing=pendingAction==='publish';
  const publicationLabel=t(publishing?'正在托管…':'登录完成，交由 AIMatterLab 管理');
  const loginTip=loginState?.status==='failed'?t('原登录未完成，请核对提示后继续。'):loginState?.status==='checking'?t('正在检查原登录，请稍候。'):connectionStatus==='authenticating'?t('请在原终端完成密码或验证码输入。'):null;
@@ -355,15 +537,16 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   </div>:loginTip||statusMessage||serviceProgress?<div className="ssh-status-strip">
    {statusMessage?<span role="status">{statusMessage}</span>:loginTip?<span data-testid="ssh-login-progress" role="status">
     <span>{loginTip}</span>
-    {loginState?.phase&&<> · {t(sshActionLabel(loginState.phase))}</>}
+     {loginState?.phase&&loginState.phase!=='waiting_authentication'&&<> · {t(sshActionLabel(loginState.phase))}</>}
     {connectionStatus==='authenticating'&&loginState?.status!=='checking'&&<> {t('认证信息不会交给 Agent。')}</>}
    </span>:serviceProgress}
   </div>:null}
-  {ready&&shells.length>1&&<div className="ssh-shell-tabs" data-testid="ssh-shell-actions" role="group" aria-label={t('选择终端')}>
-   {shells.map(item=><button type="button" key={item.sessionId} className="button" aria-pressed={item.sessionId===shellId} disabled={busy} onClick={()=>setShellId(item.sessionId)}>{shellLabel(item)}</button>)}
+   {ready&&selectableShells.length>1&&<div className="ssh-shell-tabs" data-testid="ssh-shell-actions" role="group" aria-label={t('选择终端')}>
+    {selectableShells.map(item=><button type="button" key={item.sessionId} className="button" aria-pressed={item.sessionId===shellId} disabled={busy} onClick={()=>{login.current.shellChosen=true;exactShell.current=undefined;setShellId(item.sessionId);}}>{shellLabel(item)}</button>)}
   </div>}
-  {connection?.status==='authenticating'&&<ChannelTerminal key={'auth:'+selected} connection={connection} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={authInput.current} onConnection={accept} onShell={()=>{}} onError={report}/>}
+   {!connection&&!notice&&(!listed||busy)&&<div className="shared-terminal-empty" role="status"><p>{t('正在打开终端…')}</p></div>}
+   {connection?.status==='authenticating'&&<ChannelTerminal key={'auth:'+selected} connection={connection} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={authInput.current} onConnection={acceptAuthObservation} onShell={()=>{}} onError={report}/>}
   {ready&&(shell?<ChannelTerminal key={'shell:'+shell.sessionId} connection={connection} shell={shell} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={shellInput.current} onConnection={accept} onShell={next=>setShells(old=>old.map(item=>item.sessionId===next.sessionId&&item.ownerEpoch===next.ownerEpoch?{...item,...next}:item))} onError={report} onReadError={reportRead} onReadSuccess={confirmRead}/>:
-   <div className="shared-terminal-empty"><p>{t('当前没有打开的终端。')}</p></div>)}
+    <div className="shared-terminal-empty"><p>{t(loginState?.status==='checking'||!notice&&connection.terminalSessionIds.length>0&&login.current.restoreShell?'正在打开终端…':'当前没有打开的终端。')}</p></div>)}
  </section>;
 }

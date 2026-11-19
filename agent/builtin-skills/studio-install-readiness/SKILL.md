@@ -13,6 +13,8 @@ Discover available local runtimes, WSL distributions, explicit scientific enviro
 
 For a new desktop profile, the setup guide offers language and appearance, the selected provider, WSL or SSH, and a copper-cell workflow tour. Users can defer either connection and reopen the guide from the title bar. Authentication stays with the user. On a hosted SSH connection use `compute.queue` to acquire the current chat's own lease and inspect the selected resource. A request prepared by the guide for `worker`, `reference-md` or `pydyn-md` is an editable chat draft. Prepare the selected check using the installed fixtures and obtain its actual execution receipt before reporting its result.
 
+After upgrading, retain the saved SSH profile and use `compute.queue` to recover its original connection. Verify whether that connection is still live or the user must explicitly sign in again. Keep any live jobs bound to their original run records.
+
 In **账号与 API**, Codex supports its ChatGPT or API route, Kimi uses its local CLI and device sign-in, Qwen and Custom API use API profiles, and DeepSeek uses its platform key with the bundled DSH runtime. Check the selected provider with an actual reply. The Kimi CLI picker applies when Kimi needs its optional runtime.
 
 ## Local Agent CLI discovery and optional installation

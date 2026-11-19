@@ -1,6 +1,12 @@
+const checkSshLogin=['connection_unconfirmed','Check the original saved SSH connection. Resume a pending login and have the user handle prompts in its private terminal. Wait for verified hosting before acquiring a capability.'];
 const managedRecovery=new Map([
  ['managed_compute_user_instruction_required',['resource_selection_required','Resolve the target in this chat. If the user already named a listed resource, including in a short reply, use its resource_id with acquire_compute_resource and the requested access. Ask for a listed name only if the target is still ambiguous. If the same selection is refused again, report the actual receipt. A named hosted resource needs no desktop binding for selection. Use a receipt about project access or login before reporting those states.']],
  ['managed_compute_resource_lease_required',['resource_lease_required','List the hosted resources and acquire the resource named in this chat with the required access. Then use the returned session or service. A workflow is optional.']],
+ ['managed_compute_resource_unavailable',['connection_unconfirmed','Refresh the hosted resource list and check the original saved connection. Use its current verified resource ID and lease. A missing entry alone leaves the reason unconfirmed.']],
+ ['ssh_authentication_unconfirmed',checkSshLogin],
+ ['ssh_control_timeout',checkSshLogin],
+ ['ssh_connection_not_found',checkSshLogin],
+ ['ssh_master_unavailable',['connection_unconfirmed','Check the original saved SSH connection. If its loss is confirmed, the user can explicitly sign in again on that profile in the private terminal. After verified hosting, acquire the needed capability for this chat. Reconcile unknown operations by their original identity.']],
  ['managed_compute_invalid_request',['invalid_input','For acquisition, use one advertised selector: resource_id, profile_id, or alias. Set access to service for a read-only queue probe or terminal for private shell work.']],
  ['managed_compute_no_eligible_resource',['access_required','Read the current hosted resources and report which capability is unavailable for this request. Use any specific access or connection receipt as evidence before suggesting a change.']],
  ['managed_compute_choice_changed',['resource_selection_required','Refresh the hosted resource list and confirm the changed candidate in this chat. Keep the current requested access and use the returned resource_id after the user chooses.']],
@@ -34,7 +40,7 @@ export function toolFailure(error,{dispatched=false,toolName}={}){
  }else if(/permission|sharing|unshared|not authorized|not allowed|protected private|outside this workflow/i.test(message)){
   code='access_required';next_step='Use inputs already available to this conversation. If a specific file or resource is needed, describe it to the user; do not change access settings through tools.';
  }else if(/connect|disconnected|fetch failed|ECONN|timed? ?out|timeout/i.test(message)){
-  code='connection_unavailable';next_step='Reconnect the service, then inspect the existing workflow or run status. Do not replay a write or submit operation whose result is unknown.';
+  code='connection_unavailable';next_step='Check the original connection or service and inspect the existing workflow or run status. Reconcile a write or submission with an unknown result using its original identity.';
  }else if(/required|invalid|missing|expected|must |请选择|参数|缺少/i.test(message)){
   code='invalid_input';next_step='Read the tool schema or engine contract and fill technical fields from the current workflow. Ask the user only for unresolved scientific choices.';
  }
