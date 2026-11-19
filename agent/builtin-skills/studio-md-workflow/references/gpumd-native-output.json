@@ -37,7 +37,10 @@
       {
         "source_id": "gpumd",
         "path": "src/main_sampling/gas-opes.cu",
-        "sha256": "774d1ff70745f9ad267384b73002b50ee46d942c1a5e9d8d28a0b9bff26d806c"
+        "sha256": "5e57ffefa046e01ff4e531d4956939ed916fec7f5198336e10e259bff73785e4",
+        "bytes": 21083,
+        "observed_commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "gpumd",
@@ -69,10 +72,15 @@
         "path": "src/measure/dump_restart.cu",
         "sha256": "22d01e2ee5b3dd149acc56336887ab40b8a3378307f89d17b08de0e78dc1e2cb"
       }
-    ]
+    ],
+    "release_source": {
+      "name": "GPU-Sampling / GPUMD",
+      "commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+      "reviewed_on": "2026-11-19"
+    }
   },
   "authoring": {
-    "purpose": "Complete requested actual energy, total atomic force and runtime-cell output using native software parameters. Preserve user assets, atom selection, NVE, integration steps, time step, initial velocities/seed plan, OPES settings and existing opes_state_interval: 0. Do not replace native inputs with a gap report when source-matched grammar is available.",
+    "purpose": "Plan the energy, total atomic force and runtime-cell outputs the user requested. The bounded NVE example keeps its existing opes_state_interval: 0. Preserve the selected ensemble, actual checkpoint policy, velocities, time step, atom selection and output cadence for each new task.",
     "place_before_run": [
       "dump_thermo 1",
       "dump_exyz 1 1 1 1"

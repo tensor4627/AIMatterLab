@@ -31,7 +31,7 @@ function mutateJson(file,fn){const value=JSON.parse(fs.readFileSync(file,'utf8')
 test('Public AIMatterLab skill discloses its entry and names supporting documents without reading their bodies',async()=>{
  const f=fixture();try{
   const result=await selectedSkillContext(args(f));
-  assert.equal(result.attachments.length,1);assert(result.document_ids.some(id=>id.endsWith('scientific-gates.md')));assert(result.document_ids.some(id=>id.endsWith('profile-format.md')));assert(!result.document_ids.some(id=>id.endsWith('compute-profile.schema.json')));assert(!result.document_ids.some(id=>id.endsWith('reconcile.md')));
+  assert.equal(result.attachments.length,1);assert(result.document_ids.some(id=>id.endsWith('scientific-gates.md')));assert(result.document_ids.some(id=>id.endsWith('profile-format.md')));assert(!result.document_ids.some(id=>id.endsWith('compute-profile.schema.json')));assert(result.document_ids.includes('studio-compute-workflow/references/reconcile.md'));assert(!result.text.includes('# Observe recorded runs without resubmission'));
   assert(!result.text.includes('Scientific gates for a short sampling test'));assert(!result.text.includes('Private AIMatterLab compute overlay input'));assert.equal(result.totalBytes,Buffer.byteLength(result.text));
   const a=args(f);await assert.rejects(selectedSkillContext({...a,selection:{...a.selection,name:'other-name'}}),e=>e.code==='unregistered_selection');
   await assert.rejects(selectedSkillContext({...a,selection:{...a.selection,path:path.join(f.root,'not-registered','SKILL.md')}}),e=>e.code==='unregistered_selection');

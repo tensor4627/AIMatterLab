@@ -1,3 +1,12 @@
+check-version-skills:
+  stage: test
+  image: node:24-bookworm-slim
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$/'
+  script:
+    - node scripts/check-bundled-guidance.mjs --source
+    - node --test tests/agent/scientific-context.test.mjs tests/agent/scientific-skill-router.test.mjs
+
 mirror-main-to-github:
   stage: deploy
   image: docker.io/library/buildpack-deps:bookworm-scm@sha256:5bac6b3020afcf0358de87990605d5dc4c3f060629381912266b9b9278375af3

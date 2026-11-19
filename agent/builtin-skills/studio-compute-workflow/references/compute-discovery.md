@@ -16,7 +16,7 @@ For SSH, import a user-selected existing connection or use the manual editor. Pr
 
 This section describes a future adaptation workflow, not an implemented automatic parser or authorization to probe a live system.
 
-1. Request two or three examples that the user has successfully used, preferably a small task and a GPU task. Accept explicit local file selections or explicitly selected remote file references. Keep originals and source hashes privately; do not put site scripts or resolved values into Git.
+1. If the existing queue configuration and the user's site policy leave an unresolved site-specific setting, inspect a successful template selected by the user. Request additional examples only to resolve a concrete ambiguity. Keep the original and its hash private.
 2. Identify the scheduler family and the actual submission entry point. Separate LSF/Slurm directives from modules, environment activation, working-directory setup and the scientific command. A site wrapper or unfamiliar directive remains a review item; do not silently substitute generic `bsub` or `sbatch` behavior.
 3. Form candidates for queue/partition, account/QOS, CPU/GPU request, wall time and memory, each with its source line and uncertainty. Preserve conflicts across templates. Resolve LSF per-slot versus per-job memory and site-specific units explicitly; a script example alone does not prove a universal rule.
 4. Ask only for unresolved permitted targets, their order, payment conditions and resource limits. Names and preferences belong to a private profile. Generic examples in shared instructions use placeholders, never a developer's actual queues or nodes.

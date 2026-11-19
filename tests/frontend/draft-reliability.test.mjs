@@ -48,7 +48,12 @@ test('Restored user history hides AIMatterLab context while preserving the actua
  const {visibleUserText}=await import("../../contracts/agent/user-message.mjs");const context=JSON.stringify({environments:[],workflow:null,project:null});
  assert.equal(visibleUserText([{type:'text',text:'Run MD'},{type:'text',text:'[Studio workspace context]\n'+context},{type:'text',text:'[Studio interaction mode: planning]\nprivate instructions'}]),'Run MD');
  assert.equal(visibleUserText([{type:'text',text:'Run MD\n\n[Studio workspace context]\n'+context}]),'Run MD');
- assert.equal(visibleUserText([{type:'text',text:'Explain [Studio workspace context] in my code'}]),'Explain [Studio workspace context] in my code');
+ for (const brand of ['Studio','AIMatterLab']) {
+  const heading='['+brand+' workspace context]';
+  assert.equal(visibleUserText([{type:'text',text:'Run MD'},{type:'text',text:heading+'\n'+context}]),'Run MD');
+  assert.equal(visibleUserText([{type:'text',text:'Run MD\n\n'+heading+'\n'+context}]),'Run MD');
+  assert.equal(visibleUserText([{type:'text',text:heading+' is in my code'}]),heading+' is in my code');
+ }
 });
 
 

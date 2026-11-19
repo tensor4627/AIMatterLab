@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-const ENGINE_ROUTES={'pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
+const ENGINE_ROUTES={'trajectory.density':'analysis.number-density','pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
 export function selectScientificFunctions({text='',parameters={},hasWorkflow=false,planRoadmap=false,manualFunction}={}){
  const value=String(text),engine=parameters.engine;let id;
  const consumerIntent=/分子动力学|\bmd\b|metad|opes|增强采样/i.test(value);
@@ -12,6 +12,7 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  if(manualFunction)id=manualFunction;
  else if(/(?:基础|默认|初始化|设置|选择|创建).*工作区|工作区.*(?:灰|设置|配置|不可用)|(?:base|default|setup|initialize).*workspace/i.test(value))id='cluster.workspace-setup';
  else if(/(?:reweight|重加权)/i.test(value))id=/opes/i.test(value)?'analysis.opes':'analysis.wtmetad';
+ else if(/trajectory\.density|(?:轨迹|trajectory|frames?).*(?:原子数密度|number density)|(?:原子数密度|number density).*(?:轨迹|trajectory|frames?)/i.test(value))id='analysis.number-density';
  else if(/(?:分析轨迹|轨迹分析|analy[sz]e.*traject|trajectory.*analy)/i.test(value))id='analysis.trajectory';
  else if(/(?:monitor|监测|监控).*?(?:cv|pygas)|(?:cv|pygas).*?(?:monitor|监测)/i.test(value))id='pygas.monitor';
  else if(/(?:自定义|custom|missing|不存在).*?cv|cv.*?(?:自定义|custom|不存在)/i.test(value))id='pygas.custom-cv';
@@ -46,12 +47,12 @@ export class ScientificSkillContext{
   const managed=fallback||policy&&functions.some(id=>policy.appliesTo(this.router.routes?.get(id)||{id})),receipts=[];
   for(const id of functions){if(fallback&&id.startsWith('@execution:')){await policy.revalidate();receipts.push(policy.executionResult(id));await policy.revalidate();}else receipts.push(await this.router.read(provider,id,undefined,{scope:options.scope||{provider},policy}));}
   const blocked=receipts.filter(r=>r.status!=='passed');
-  if(blocked.length)return {status:blocked.some(r=>r.status==='permission_required')?'permission_required':'blocked',...managed?{guidanceKind:'sealed'}:{},routes:functions,attach:false,attachments:[],text:'[Studio scientific guidance unavailable]\n'+blocked.map(r=>r.function_id+': '+(r.reason||r.status)).join('\n')+'\nUse real inspection tools; do not invent software parameters or bypass pyGAS.'};
+  if(blocked.length)return {status:blocked.some(r=>r.status==='permission_required')?'permission_required':'blocked',...managed?{guidanceKind:'sealed'}:{},routes:functions,attach:false,attachments:[],text:'[AIMatterLab scientific guidance unavailable]\n'+blocked.map(r=>r.function_id+': '+(r.reason||r.status)).join('\n')+'\nUse real inspection tools; do not invent software parameters or bypass pyGAS.'};
   if(!functions.length)return {status:'not_run',routes:[],attach:false,attachments:[],text:''};
   const prior=this.accepted.get(provider+'\0'+key)||new Map(),changed=receipts.filter(r=>prior.get(r.function_id)!==r.digest),attach=changed.length>0;
   const digest=createHash('sha256').update(receipts.map(r=>r.function_id+':'+r.digest).join('\n')).digest('hex');
   const execution=receipts.some(r=>r.phase==='execution'),attachments=receipts.flatMap(r=>r.attachments);
-  return {status:attach?'passed':'already_loaded',routes:functions,digest,attach,provider,...execution?{guidanceKind:'execution'}:{},loaded:changed.map(r=>({id:r.function_id,digest:r.digest})),attachments:execution?[...new Map(attachments.map(item=>[item.name+'\0'+item.sha256,item])).values()]:attachments,text:attach?'[Studio selected scientific guidance]\n'+(execution?[...new Map(changed.map(r=>[r.digest,r.text])).values()]:changed.map(r=>r.text)).join('\n'):''};
+  return {status:attach?'passed':'already_loaded',routes:functions,digest,attach,provider,...execution?{guidanceKind:'execution'}:{},loaded:changed.map(r=>({id:r.function_id,digest:r.digest})),attachments:execution?[...new Map(attachments.map(item=>[item.name+'\0'+item.sha256,item])).values()]:attachments,text:attach?'[AIMatterLab selected scientific guidance]\n'+(execution?[...new Map(changed.map(r=>[r.digest,r.text])).values()]:changed.map(r=>r.text)).join('\n'):''};
  }
  mergeRuntime(key,provider,result,guide,selection){
   if(!guide||!selection)return result;
@@ -60,7 +61,7 @@ export class ScientificSkillContext{
   if(guide.facts)compact.facts=Object.fromEntries(fields.filter(field=>Object.hasOwn(guide.facts,field)).map(field=>[field,guide.facts[field]]));
   const digest=createHash('sha256').update(JSON.stringify(compact)).digest('hex'),id='@runtime:'+selection.environment_id+':'+selection.engine;
   if(this.accepted.get(provider+'\0'+key)?.get(id)===digest)return result;
-  return {...result,provider,status:['not_run','already_loaded'].includes(result.status)?'passed':result.status,attach:true,loaded:[...(result.loaded||[]),{id,digest}],attachments:[...(result.attachments||[]),{source:'runtime',skill:'selected-runtime',name:id,sha256:digest,scope:'Compact actual probe receipt; no installer body or file-watch list'}],text:(result.attach?result.text+'\n':'')+'[Studio runtime guide]\n'+JSON.stringify(compact)+'\nReuse only these observed selected-runtime facts with current functional guidance. For stale/not_run/blocked evidence, inspect or repair the selected engine within the current delegation and retain the actual findings; do not infer permission for unrelated reinstallation. Artifact/runtime/scientific validation and execution authorization remain separate.'};
+  return {...result,provider,status:['not_run','already_loaded'].includes(result.status)?'passed':result.status,attach:true,loaded:[...(result.loaded||[]),{id,digest}],attachments:[...(result.attachments||[]),{source:'runtime',skill:'selected-runtime',name:id,sha256:digest,scope:'Compact actual probe receipt; no installer body or file-watch list'}],text:(result.attach?result.text+'\n':'')+'[AIMatterLab runtime guide]\n'+JSON.stringify(compact)+'\nReuse only these observed selected-runtime facts with current functional guidance. For stale/not_run/blocked evidence, inspect or repair the selected engine within the current delegation and retain the actual findings; do not infer permission for unrelated reinstallation. Artifact/runtime/scientific validation and execution authorization remain separate.'};
  }
  accept(key,result){if(result.attach&&result.status==='passed'){const cacheKey=result.provider+'\0'+key,accepted=this.accepted.get(cacheKey)||new Map();for(const item of result.loaded)accepted.set(item.id,item.digest);this.accepted.set(cacheKey,accepted);}}
 }

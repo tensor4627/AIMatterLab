@@ -33,7 +33,7 @@ export default function IndependentSshServiceSettings({profile,activeResource,on
  const canStart=!!authenticated&&!loading&&!busy&&!connectionBusy&&!['connecting','connected','disconnecting','unknown'].includes(ownService?.status||'');
  const canUpdate=canStart||!!authenticated&&!loading&&!busy&&!connectionBusy&&ready&&!!ownService?.attemptId;
  return <section className="ssh-service-settings" data-testid="ssh-service-settings"><div className="compute-resource-editor-title"><button className="icon-button" aria-label={t('返回连接列表')} disabled={busy} onClick={onClose}><ChevronLeft size={18}/></button><strong>{profile.name} · {t('作业服务设置')}</strong><button className="icon-button" aria-label={t('刷新作业服务设置')} disabled={busy||loading} onClick={()=>void refresh()}><RefreshCw size={15}/></button></div>
-  <p>{t('正常使用只需登录并交给 Agent；首次部署和以后复用自动完成。这里用于环境维护和调度器设置。')}</p><div className="ssh-service-registration" data-testid="ssh-service-registration">{t('服务登记')}：{t(registration?.status==='configured'?'已登记':registration?.status==='maintenance_required'?'需要维护':registration?'未登记':'正在读取')}</div>
+  <p>{t('登录 SSH 后可将连接交由 AIMatterLab 管理。在「计算资源」中准备作业服务，再在此维护环境和调度器。')}</p><div className="ssh-service-registration" data-testid="ssh-service-registration">{t('服务登记')}：{t(registration?.status==='configured'?'已登记':registration?.status==='maintenance_required'?'需要维护':registration?'未登记':'正在读取')}</div>
   {registration?.registration&&<details data-testid="ssh-service-locations">
    <summary>{t('已登记的位置')}</summary>
    <dl>

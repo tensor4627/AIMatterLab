@@ -17,17 +17,26 @@
       {
         "source_id": "gpumd",
         "path": "src/main_sampling/gas-metad.cuh",
-        "sha256": "553e3d7f3776590e4c53f3b73134fa66e00a909689f99c50367d4930f9038c22"
+        "sha256": "3ee34d063eea2f651cbda1fa04fdc09e1d5c2c075dc6a0c66c22ed0b9920c91e",
+        "bytes": 9507,
+        "observed_commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "gpumd",
         "path": "src/main_sampling/gas-opes.cu",
-        "sha256": "774d1ff70745f9ad267384b73002b50ee46d942c1a5e9d8d28a0b9bff26d806c"
+        "sha256": "5e57ffefa046e01ff4e531d4956939ed916fec7f5198336e10e259bff73785e4",
+        "bytes": 21083,
+        "observed_commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "gpumd",
         "path": "src/main_sampling/gas-opes.cuh",
-        "sha256": "2c00e98d32996e67269ddee52e67cbf717f7e23bb23c14b780bbc6d96957160c"
+        "sha256": "6e663ba2c09c73d1bab667fdef9b9f31aa8b748ae37d358493c545ad6d436387",
+        "bytes": 2718,
+        "observed_commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "gpumd",
@@ -70,6 +79,11 @@
       "selected_executable_support": "not_run unless separately evidenced; no source/build equality inferred",
       "runtime_and_scientific_validation": "not_run",
       "execution_gates": "This reference adds no requirement to prove compiled source/build correspondence and no arbitrary compatibility precondition. Report unknown provenance as not_run; actual execution remains governed by existing target artifact/runtime, project authorization and current user delegation and required artifact/runtime checks. Unknown provenance never creates a user-internal required field or justifies leaving mechanically authorable inputs absent; no real target compatibility gate is weakened."
+    },
+    "release_source": {
+      "name": "GPU-Sampling / GPUMD",
+      "commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+      "reviewed_on": "2026-11-19"
     }
   },
   "run_in": {

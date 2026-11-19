@@ -71,3 +71,21 @@ test('GPUMD pyGAS handoff recipe is offered only by sampling and read only on fo
  const entry=await router.read('codex','sampling.gpumd');assert.equal(entry.status,'passed',entry.reason);assert(entry.document_ids.includes(document));assert(!entry.attachments.some(file=>file.name===document));assert.equal(reads,0);
  const focused=await router.read('codex','sampling.gpumd',document);assert.equal(focused.status,'passed',focused.reason);assert.deepEqual(focused.attachments.map(file=>file.name),[document]);assert.equal(reads,1);assert.equal(focused.text,await fs.readFile(recipe,'utf8'));
 });
+
+test('native NEB guidance keeps the reviewed workflow and the delegated independent-job routes reachable', async () => {
+ const map = JSON.parse(await fs.readFile(new URL('../../agent/skills/scientific-skill-map.json', import.meta.url), 'utf8'));
+ const bundled = fileURLToPath(new URL('../../agent/builtin-skills/', import.meta.url));
+ const router = new ScientificSkillRouter({map, sourceRoot: () => bundled, consent: () => false});
+ const neb = await router.read('deepseek', 'neb.gpumd');
+ assert.equal(neb.status, 'passed');
+ assert.match(neb.text, /present_task/);
+ assert.match(neb.text, /independent job in ordinary chat/i);
+ assert.match(neb.text, /cluster\.lsf-slurm-deployment/);
+ assert.doesNotMatch(neb.text, /Execute remain(?:s)? mandatory/i);
+ const jobs = await router.read('deepseek', 'cluster.lsf-slurm-deployment');
+ assert.equal(jobs.status, 'passed');
+ for (const name of ['prepare_compute_run', 'validate_compute_run', 'submit_compute_run']) {
+  assert(map.functions.find(route => route.id === jobs.function_id).tools.includes(name));
+  assert(jobs.text.includes(name));
+ }
+});

@@ -73,7 +73,7 @@ export class ScientificSkillRouter {
   }
   if(documentId!==undefined&&(typeof documentId!=='string'||!documentIds.includes(documentId)))throw Error('Choose an exact document_id advertised for this function_id');
   const setupPhase=['installation','setup','toolchain'].includes(route.phase),setupAllowed=setupPhase&&await this.setupAllowed(provider,route)===true,grantOnly=grantRead&&(policy.appliesTo(route)||setupPhase);
-  if(setupPhase&&!setupAllowed&&!grantOnly)return {status:'blocked',function_id:functionId,reason:'Setup guidance is not loaded in an ordinary calculation. Select the environment setup or explicit repair stage first.',attachments:[]};
+  if(setupPhase&&!setupAllowed&&!grantOnly)return {status:'blocked',function_id:functionId,reason:'Setup guidance is not loaded in an ordinary calculation. To request this guide, select its function under 科学资源与技能 → 用于下条消息 for the current conversation. Continue other authorized work with the available tools.',attachments:[]};
   const files=[];let bytes=0;const roots=new Map();
   const check=async()=>{
    for(const id of route.skills){const skill=this.definitions.get(id);if(!await this.allowed(provider,skill))return false;}
@@ -109,7 +109,7 @@ export class ScientificSkillRouter {
     if(Buffer.byteLength(JSON.stringify(toolValueResult(result)),'utf8')>24*1024)throw Error('Focused document exceeds the serialized MCP 24 KiB budget; document body was not delivered. Pagination is not available.');
     return result;
    }
-   return {status:'passed',function_id:functionId,document_ids:documentIds,focused_read:'Only skill entries are loaded. Read a supporting document only when needed, using this function_id and its exact advertised document_id.',phase:route.phase,capability_status:route.status,scope:'Actual bounded public instructions only; no artifact, installation, engine capability or scientific validation is implied.',digest,bytes,attachments:files.map(({content,...receipt})=>receipt),text:'[Studio scientific function: '+functionId+']\n'+(route.adaptation||'')+'\n'+files.map(file=>'['+file.name+'; SHA256 '+file.sha256+']\n'+(file.source_evidence?'Current source applicability: '+JSON.stringify(file.source_evidence)+'\n':'')+file.content).join('\n')+'\nSupporting document IDs (read only when needed): '+JSON.stringify(documentIds.filter(id=>!files.some(file=>file.name===id)))};
+   return {status:'passed',function_id:functionId,document_ids:documentIds,focused_read:'Only skill entries are loaded. Read a supporting document only when needed, using this function_id and its exact advertised document_id.',phase:route.phase,capability_status:route.status,scope:'Actual bounded public instructions only; no artifact, installation, engine capability or scientific validation is implied.',digest,bytes,attachments:files.map(({content,...receipt})=>receipt),text:'[AIMatterLab scientific function: '+functionId+']\n'+(route.adaptation||'')+'\n'+files.map(file=>'['+file.name+'; SHA256 '+file.sha256+']\n'+(file.source_evidence?'Current source applicability: '+JSON.stringify(file.source_evidence)+'\n':'')+file.content).join('\n')+'\nSupporting document IDs (read only when needed): '+JSON.stringify(documentIds.filter(id=>!files.some(file=>file.name===id)))};
   }catch(error){return {status:'blocked',function_id:functionId,reason:error.message,attachments:[]};}
  }
 }

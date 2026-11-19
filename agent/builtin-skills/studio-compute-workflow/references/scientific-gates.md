@@ -27,4 +27,4 @@ create_structure prepares ASE bulk, molecule, surface, explicit or imported stru
 
 Materials Project search/import tools use a private main-process key and the official summary endpoint. Missing key means blocked; never invent material IDs or pretend a search ran. Inspect candidate phase/symmetry before selecting. Import rejects disordered/partially occupied sites rather than silently rounding occupancy, retains database ID/origins/retrieval/hash, then uses ASE checks. No key travels to the model, worker, SSH job or reproduction bundle.
 
-Use diagnose_tools and exact-engine probe_environment to separate source/executable discovery, runtime imports and real scientific checks. TorchNEP/NEPMaker/ActiveMiao remain planned adapters until implemented; finding a checkout does not make a training/active-learning route available.
+Use diagnose_tools and exact-engine probe_environment to separate source/executable discovery, runtime imports and real scientific checks. TorchNEP has an upstream training CLI and delivery declaration. Consult the selected package for its available operations. The built-in worker has no TorchNEP, NEPMaker or ActiveMiao execution adapter.

@@ -4,7 +4,7 @@ import {pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {assertRpc} from '../../contracts/transport-policy.mjs';
 import {providerId} from '../providers/contracts.mjs';
-import {visibleUserText} from "../../contracts/agent/user-message.mjs";
+import {isWorkspaceContext,visibleUserText} from "../../contracts/agent/user-message.mjs";
 
 import {ensureTaskAuthoring} from '../../backend/main/workspace/task-authoring.mjs';
 import {toolGuidanceTarget} from '../../backend/main/compute/tool-guidance-target.mjs';
@@ -83,7 +83,7 @@ export function createAgentRequests({runtime}){
   if(managedOnly&&params.reviewMode===true)throw Error('Connect the original workflow worker before reviewing its scientific inputs');
   const authoring=definitionOnly||notification||managedOnly?null:await ensureTaskAuthoring(taskRecords,worker,{provider,threadId:params.threadId,taskId:params.studioTaskId,text,allowExplicitInputs:params.reviewMode!==true,assertCurrent:check,authorization:authoringAuthorization,baseWorkspace});check();
   if(selectedSsh&&!definitionOnly)params={...params,input:[...(params.input||[]),{type:'text',text:'For a requested base workspace on this selected job-service path, use cluster.workspace-setup. When setup_base_workspace is advertised, it can inspect or initialize the workspace from ordinary chat. Use the returned directory and preserve any existing workflow.'}]};
-  if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&c.text.startsWith('[Studio workspace context]'))),{type:'text',text:authoring.text}]};
+  if(authoring)params={...params,input:[...(params.input||[]).filter((c,i)=>!(i>0&&c.type==='text'&&isWorkspaceContext(c.text))),{type:'text',text:authoring.text}]};
   let bound=taskRecords.bound(provider,params.threadId);if(bound&&(!managedOnly||bound.customCv?.id)){definitionOnly=(await privateAccess.assertTask(bound,provider)).definitionOnly;check();}
   definitionOnlyTurn=definitionOnly;
   const privateReview=params.reviewMode===true;

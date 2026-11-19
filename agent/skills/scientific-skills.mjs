@@ -19,11 +19,11 @@ export function validateScientificConsent(value){
  for(const providers of Object.values(value))if(!Array.isArray(providers)||providers.some(p=>!['codex','kimi','qwen','deepseek','compatible'].includes(p))||new Set(providers).size!==providers.length)throw Error('Invalid scientific skill provider scope');
 }
 export class ScientificSkills{
- constructor({map,bundledRoot,sources,settings,setupAllowed,studioRoot,resolveGuidance,assertScope,registeredSources,providerConsent=()=>true}){
+ constructor({map,bundledRoot,sources,settings,setupAllowed,studioRoot,workerSource,resolveGuidance,assertScope,registeredSources,providerConsent=()=>true}){
   this.resolveGuidance=resolveGuidance;this.assertScope=assertScope;
   this.map=structuredClone(map);this.sources=sources;this.settings=settings;this.registeredSources=registeredSources;
   this.sourcesForPolicy=policy=>policy&&(policy.state!=='legacy_unconfigured'||policy.facts.archivedResources.length)?(registeredSources?.()||[]):sources();
-  this.ruleEvidence=new PublicRuleEvidence((source,{policy}={})=>source==='studio'?studioRoot:this.sourcesForPolicy(policy).find(item=>item.id===source)?.root);
+  this.ruleEvidence=new PublicRuleEvidence((source,{policy}={})=>source==='studio'?studioRoot:source==='studio-worker'?workerSource:this.sourcesForPolicy(policy).find(item=>item.id===source)?.root);
   this.router=new ScientificSkillRouter({ruleEvidence:(document,options)=>this.ruleEvidence.inspect(document,options),resolveGuidance,assertScope,map,sourceRoot:(source,{policy}={})=>source==='studio'?bundledRoot:(()=>{const item=this.sourcesForPolicy(policy).find(item=>item.id===source);return item?path.join(item.root,'agents','skills'):undefined;})(),consent:(provider,source)=>providerConsent(provider,source)&&(source==='pygas'?(settings().pygasSkillProviders||[]).includes(provider):(settings().scientificSkillProviders?.[source]||[]).includes(provider)),setupAllowed});
   this.context=new ScientificSkillContext(this.router);
   this.selectedManaged=new SelectedManagedGuidance();

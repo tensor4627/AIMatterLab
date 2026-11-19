@@ -48,20 +48,32 @@
     "rule_input_sha256": "f4a626c87674599fad92a772350005342355812eaeda682c4bf8bb24efd81979",
     "local_files": [
       {
-        "source_id": "studio",
-        "path": "worker/studio_worker/cluster.py",
-        "sha256": "e1513e165856857e6aa5696f7b0f8c507391afcac5c6a6ab452726fdb6ded2cc",
-        "bytes": 57249,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "adapter_not_actual_site_probe",
+        "source_id": "studio-worker",
+        "path": "studio_worker/compute/cluster.py",
+        "sha256": "544c51cf96e75ed97c6b4f8c2e319970dd940621cedeba9d255ec5888fbdc631",
+        "bytes": 96943,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "scheduler_resources_submission_and_observation",
         "line_ranges": [
           [
-            1,
-            952
+            418,
+            462
+          ],
+          [
+            734,
+            757
+          ],
+          [
+            1146,
+            1170
+          ],
+          [
+            1343,
+            1374
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       }
     ],
     "primary_references": [

@@ -18,28 +18,15 @@
       }
     ]
   },
-  "source_fallback": [
-    {
-      "path": "src/widgets.tsx",
-      "sha256": "79a9b90a983aa64111d28c3631eb99e7a1cbfa31c621d51120335f7f92a1f633"
-    },
-    {
-      "path": "src/RunDetail.tsx",
-      "sha256": "0d7f620bbba3aa4d3725a74d0d34599cecee12c6618be23b1fc396888e042469"
-    },
-    {
-      "path": "worker/studio_worker/scientific.py",
-      "sha256": "c229dc47d0090fd4dcd68abf6cd4cf7cbd1ebe36b5fa07c2fff323b0cee6820f"
-    }
-  ],
+  "source_fallback": [],
   "rules": {
     "zh-CN": [
       "当前为Three.js预览，尚未接入OVITO；不能把OVITO教程功能标为已支持。",
       "结构和轨迹帧由ASE有界读取；以实际入口的格式/帧限制为准。",
-      "展示真实已读帧的原子顺序、颜色、旋转与缩放；预览不代表完整分析或科学验证。"
+      "预览显示当前帧的原子顺序、元素图例和计数、晶胞边框，可旋转、缩放和重置视角。"
     ],
     "en": [
-      "Actual Three.js Structure displays element-colored atom positions, retains order, drag rotation and wheel zoom. Cell is accepted in data but no unit-cell/bond/OVITO modifier implementation is claimed.",
+      "The Three.js preview shows element-colored atoms, cell edges for a finite 3×3 cell, an element count legend, orbit controls and Reset view. Atom order follows the inspected frame.",
       "Worker ASE structure inspection accepts an explicit zero-based frame and bounds preview to 20000 atoms; actual registered ASE parser determines format support. RunDetail currently exposes preview only for xyz/traj file names; do not claim all ASE formats have a frontend entry.",
       "No whole-trajectory animation, streaming index, OVITO pipeline or automatic scientific analysis is inferred from a visual preview.",
       "OVITO official import and pipeline manuals are design references for a future integration; AIMatterLab does not ship those API capabilities."
@@ -55,52 +42,59 @@
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
     "observed_at": "2026-10-22T11:27:22.264583+00:00",
-    "rule_input_sha256": "b4c0c23cb376ee3be4bdab619525cb224008c2f6a623151ce88ccfa4372d9e83",
+    "rule_input_sha256": "e4820f500d793ceb156bcf0dda726be1e80e8aa75c21b206f5cfa4795d5b5555",
     "local_files": [
       {
         "source_id": "studio",
-        "path": "src/widgets.tsx",
-        "sha256": "79a9b90a983aa64111d28c3631eb99e7a1cbfa31c621d51120335f7f92a1f633",
-        "bytes": 9321,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "actual_Threejs_preview",
+        "path": "frontend/ui/heavy/structure.tsx",
+        "sha256": "10f0eb66295364162fcb65ad4af115a549cdc04876d62a991d7ced44c77a3543",
+        "bytes": 5880,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "three_js_atoms_cell_legend_and_view",
         "line_ranges": [
           [
-            1,
+            10,
+            53
+          ]
+        ],
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "observed_on": "2026-11-19"
+      },
+      {
+        "source_id": "studio",
+        "path": "frontend/features/runs/RunDetail.tsx",
+        "sha256": "94bbcdfea280c076fcf49ebfacf525ae1b0352296bd63e5ac145392973665480",
+        "bytes": 25454,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "available_result_files_and_frame_selection",
+        "line_ranges": [
+          [
+            101,
             104
+          ],
+          [
+            143,
+            147
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "observed_on": "2026-11-19"
       },
       {
-        "source_id": "studio",
-        "path": "src/RunDetail.tsx",
-        "sha256": "0d7f620bbba3aa4d3725a74d0d34599cecee12c6618be23b1fc396888e042469",
-        "bytes": 10718,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "actual_frontend_entry_filters",
+        "source_id": "studio-worker",
+        "path": "studio_worker/tools/scientific.py",
+        "sha256": "15a4bdca31b5f7c00daad6142779faed61ce4af501f5380b5a11afe6512f7953",
+        "bytes": 9041,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "frame_and_label_inspection",
         "line_ranges": [
           [
-            1,
-            83
+            100,
+            124
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
-      },
-      {
-        "source_id": "studio",
-        "path": "worker/studio_worker/scientific.py",
-        "sha256": "d9796ca6ae20bbac7bf9b02cda2804c068bba310777088b7b12a254e975ccff5",
-        "bytes": 9419,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "frame_and_atom_preview_bounds",
-        "line_ranges": [
-          [
-            1,
-            169
-          ]
-        ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "observed_on": "2026-11-19"
       }
     ],
     "primary_references": [],
@@ -112,7 +106,9 @@
       "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
-    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals."
+    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals.",
+    "original_rule_input_sha256": "b4c0c23cb376ee3be4bdab619525cb224008c2f6a623151ce88ccfa4372d9e83",
+    "rule_input_encoding": "UTF-8 JSON.stringify(rules), in document key order"
   },
   "parameter_emission_policy": {
     "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",

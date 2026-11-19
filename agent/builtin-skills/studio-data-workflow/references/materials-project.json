@@ -21,12 +21,12 @@
   "source_fallback": [],
   "rules": {
     "zh-CN": [
-      "API key仅由设置入口保存；未配置就明确不能查询，不伪造MP结果。",
+      "按化学式或 mp-ID 搜索候选，再将选定的相导入已授权的项目和环境。主进程使用加密保存的密钥或已有环境配置，缺少密钥时可从「设置 → 数据源」配置。",
       "记录数据库标识、来源和实际导入哈希；数据库结构仍需势模型匹配与科学条件确认。"
     ],
     "en": [
-      "Use official API/client and bounded explicit search fields exposed by current AIMatterLab tool.",
-      "No account key means blocked query, not fabricated search results; preserve key-setting entry.",
+      "Call search_materials_project with an exact formula or mp-ID. After selecting a real candidate, call import_materials_project with project_id, environment_id and material_id.",
+      "The main process reads the encrypted key or an existing MP_API_KEY / PMG_MAPI_KEY. A missing key can be configured in Settings → Data sources.",
       "Store returned material identifier/source/provenance, then inspect with ASE before simulation."
     ]
   },
@@ -40,39 +40,43 @@
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
     "observed_at": "2026-10-22T12:13:27.312726+00:00",
-    "rule_input_sha256": "27ec27fef52c5c300bd3e22f26ccef345c0a0fff7dd6daf977d6168adfbe5321",
+    "rule_input_sha256": "3273ffe8ba8d8bcf0557765653ba68fe5f2b8ed77e92e27a614c62f89185d891",
     "local_files": [
       {
-        "source_id": "studio",
-        "path": "worker/studio_worker/structure_tools.py",
-        "sha256": "dc039b996cb2b7efe3bcf529d72b40c6cd35f72a902295af74b30abbfa6eb130",
-        "bytes": 14188,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "actual_bounded_query_schema",
+        "source_id": "studio-worker",
+        "path": "studio_worker/tools/structure_tools.py",
+        "sha256": "d7761b974806a2d45c10dd68cc51aaa81597e7a4744a01ab67d21d17513c3d45",
+        "bytes": 15722,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "bounded_ase_recipes_and_geometry_checks",
         "line_ranges": [
           [
-            1,
-            167
+            6,
+            47
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "studio",
-        "path": "desktop/main.mjs",
-        "sha256": "f80e96a554d63c30f715145a419c29721b2d52cda55a06ccc0d3efabb44d12c3",
-        "bytes": 31521,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "settings_credential_boundary",
+        "path": "backend/main/tools/materials-project.mjs",
+        "sha256": "c5d286fc3f8ae747dfde3c9f71d9996f971e763f485069dfb8e9d77dd55dc51f",
+        "bytes": 8058,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "query_import_and_private_key_handling",
         "line_ranges": [
           [
-            1,
-            378
+            6,
+            24
+          ],
+          [
+            26,
+            58
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       }
     ],
     "primary_references": [
@@ -96,7 +100,9 @@
       "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
-    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals."
+    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals.",
+    "original_rule_input_sha256": "27ec27fef52c5c300bd3e22f26ccef345c0a0fff7dd6daf977d6168adfbe5321",
+    "rule_input_encoding": "UTF-8 JSON.stringify(rules), in document key order"
   },
   "parameter_emission_policy": {
     "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",

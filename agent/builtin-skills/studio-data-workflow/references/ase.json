@@ -48,35 +48,36 @@
     "rule_input_sha256": "f679aab9126d56c0942e89016975261637fb407cf82ccd06f5ce88d4ec75c435",
     "local_files": [
       {
-        "source_id": "studio",
-        "path": "worker/studio_worker/structure_tools.py",
-        "sha256": "dc039b996cb2b7efe3bcf529d72b40c6cd35f72a902295af74b30abbfa6eb130",
-        "bytes": 14188,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "supported_recipe_schema",
+        "source_id": "studio-worker",
+        "path": "studio_worker/tools/structure_tools.py",
+        "sha256": "d7761b974806a2d45c10dd68cc51aaa81597e7a4744a01ab67d21d17513c3d45",
+        "bytes": 15722,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "bounded_ase_recipes_and_geometry_checks",
         "line_ranges": [
           [
-            1,
-            167
+            6,
+            47
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       },
       {
-        "source_id": "studio",
-        "path": "worker/studio_worker/scientific.py",
-        "sha256": "d9796ca6ae20bbac7bf9b02cda2804c068bba310777088b7b12a254e975ccff5",
-        "bytes": 9419,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "supported_frame_inspection",
+        "source_id": "studio-worker",
+        "path": "studio_worker/tools/scientific.py",
+        "sha256": "15a4bdca31b5f7c00daad6142779faed61ce4af501f5380b5a11afe6512f7953",
+        "bytes": 9041,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "frame_and_label_inspection",
         "line_ranges": [
           [
-            1,
-            169
+            100,
+            124
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "observed_on": "2026-11-19"
       }
     ],
     "primary_references": [

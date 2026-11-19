@@ -1,6 +1,7 @@
 import Tooltip from "../../ui/Tooltip";
 import {providerAccountState,authenticationError} from "./provider-account.mjs";
 import {ACCOUNT_GUIDANCE} from "../../../contracts/agent/provider-account.mjs";
+import {workspaceContextHeader} from '../../../contracts/agent/user-message.mjs';
 import {isCodexVersion} from '../../../contracts/agent/codex-version.mjs';
 import {redactTranscriptText} from '../../../contracts/agent/transcript-sanitizer.mjs';
 import Notice from '../../ui/Notice';
@@ -401,7 +402,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(terminalSelected&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
    setWorkflowId(taskId||null);setNewWorkflow(false);
     followLatest();setMessages(prev=>[...prev,{id:(optimisticId=crypto.randomUUID()),role:'user',text,justSent:true}]);
-   const input:any[]=[{type:'text',text},{type:'text',text:'[Studio workspace context]\n'+context}];if(attachment&&'path' in attachment)input.push({type:'skill',name:attachment.name,path:attachment.path});
+   const input:any[]=[{type:'text',text},{type:'text',text:workspaceContextHeader+'\n'+context}];if(attachment&&'path' in attachment)input.push({type:'skill',name:attachment.name,path:attachment.path});
    const call:ModelCall={requestId:crypto.randomUUID(),provider:selectedProvider,model:modelRef.current,threadId:id!,turnId:null,output:false,status:'in_progress'};modelCallRef.current=call;setModelCall({...call});
    if(!preparing())return;flight.phase='submitted';
     const r=await selectedRpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode:turnPlanning,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:model||undefined,effort:effort||undefined});acknowledged=typeof r.turn?.id==='string'&&!!r.turn.id;

@@ -87,6 +87,6 @@ WSL 选择使用目标机器实际发行版；SSH 使用用户明确选择的来
 
 真实前端按钮验收、组件/模拟测试、直接 worker 测试与真实科学运行分别记账，不互相代替。保留首失败和修复后结果，使用隔离且 ignored 的 profile/worker 根目录。开发协调规则见 [development loop](skills/studio-development-loop/SKILL.md)。启动异常按 [Windows 启动故障记录](windows-startup-diagnostics.md) 排查，不重复启动失败上下文，不改 sandbox 或 ACL 掩盖问题。
 
-每代更新 CHANGELOG 与版本文档，记录具体功能、验证范围及 `passed / failed / blocked / not_run`。逐版核对内置技能、科学路由、系统和逐轮提示。变更路由时核对成品字节与实际工具读回。[内置指导发布检查](windows-update-release.md#核对内置指导)
+每代更新 CHANGELOG 与版本文档，记录具体功能、验证范围及 `passed / failed / blocked / not_run`。每个版本标签（含预发布）都核对内置技能、引用资料、科学路由、系统和逐轮提示，记录源码语义审查、成品字节与实际工具读回。[内置指导发布检查](windows-update-release.md#核对内置指导)
 
 提交前审阅准确的暂存字节及隐私。包核对通过后才能打本地标签，推送遵循用户授权。未完成项目在 [ROADMAP](ROADMAP.md) 跟踪。

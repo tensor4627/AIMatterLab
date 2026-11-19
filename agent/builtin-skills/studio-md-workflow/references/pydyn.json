@@ -48,69 +48,91 @@
   "source_receipt": {
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
-    "observed_at": "2026-10-22T13:15:12.470159+00:00",
     "rule_input_sha256": "481da1174be6dc5856b0ddeb8042d8e0b10a59707108d7744c1e7050471f0dab",
     "local_files": [
       {
         "source_id": "pydyn",
         "path": "docs/user_manual.md",
-        "sha256": "774606ee328c9f20239664fb703fd5d53eff65e8713c988ea5a70b82845fdb24",
-        "bytes": 38678,
-        "observed_commit": "9058ff8d13b647c9d273c8ba5d6af5139ba26bf6",
+        "sha256": "0640886ec85736640d5f42a770945a56d24cee2ae4d474e3709104f8434ba10b",
+        "bytes": 70521,
+        "observed_commit": "2ac69157856a994520eb6e8e03500e98bd3a5abc",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            820
+            14,
+            17
+          ],
+          [
+            30,
+            33
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Reviewed interface in the source revision declared by AIMatterLab. SHA-256 identifies the exact file bytes. No engine execution.",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "pydyn",
         "path": "docs/user_manual_zh.md",
-        "sha256": "fb317bf68fc506a2c8f7267f185f3b534a27825c682d9e7d86c53f8ea197bae5",
-        "bytes": 37205,
-        "observed_commit": "9058ff8d13b647c9d273c8ba5d6af5139ba26bf6",
+        "sha256": "6b32bab1f659bf956a7f07aac6af374ea36f5cacd4737c22c7c8a47701976bc0",
+        "bytes": 65251,
+        "observed_commit": "2ac69157856a994520eb6e8e03500e98bd3a5abc",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            763
+            13,
+            16
+          ],
+          [
+            85,
+            88
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Reviewed interface in the source revision declared by AIMatterLab. SHA-256 identifies the exact file bytes. No engine execution.",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "pydyn",
         "path": "pydyn/dynamics/driver.py",
-        "sha256": "db0ba627000ffbfc59d115478761ac2463adf7fa00a49e969da53b5b7cefa9d9",
-        "bytes": 19291,
-        "observed_commit": "9058ff8d13b647c9d273c8ba5d6af5139ba26bf6",
+        "sha256": "b9f1a05d51d25db9cb6009f658a40ee3920e2aa4cf3dd1b76958415f4161fc21",
+        "bytes": 19288,
+        "observed_commit": "2ac69157856a994520eb6e8e03500e98bd3a5abc",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            464
+            30,
+            33
+          ],
+          [
+            44,
+            47
+          ],
+          [
+            412,
+            415
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Reviewed interface in the source revision declared by AIMatterLab. SHA-256 identifies the exact file bytes. No engine execution.",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "studio",
-        "path": "worker/studio_worker/engine_contracts.json",
-        "sha256": "cac46aa8214d43425d1d7f4e81c9b718695ebfd42ae7e77a6a6d7eb0fc7806fc",
-        "bytes": 14041,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "local_source",
+        "path": "contracts/tools/engine-contracts.json",
+        "sha256": "3863b2b78d98dae11843429b2c3c430747378e06d2b683910d43e09cef71ceff",
+        "bytes": 16176,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "registered_engine_contracts",
         "line_ranges": [
           [
-            1,
-            525
+            73,
+            84
+          ],
+          [
+            499,
+            603
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       }
     ],
     "primary_references": [],
@@ -123,7 +145,13 @@
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
     "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals.",
-    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation"
+    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation",
+    "release_source": {
+      "name": "PyDyn",
+      "commit": "2ac69157856a994520eb6e8e03500e98bd3a5abc",
+      "reviewed_on": "2026-11-19"
+    },
+    "original_observed_at": "2026-10-22T13:15:12.470159+00:00"
   },
   "parameter_emission_policy": {
     "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",

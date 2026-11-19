@@ -4,23 +4,22 @@
   "authority": "Actual registered version/parser overrides historical observations and latest public manuals. Defaults need current-source verification.",
   "software": "torchnep",
   "rules": {
-    "execution_status": "NO_STUDIO_ADAPTER; authoring/reference guidance cannot become ready-to-submit route",
+    "execution_status": "The reviewed upstream tool package declares torchnep.train. The AIMatterLab built-in worker engine list has no TorchNEP adapter. Consult the explicitly selected package and target for the operations it actually exposes.",
     "basic": [
       "actual train and explicit validation/heldout assets",
       "NEP4 regular energy model only for reliable baseline",
-      "scratch versus model-weight restart",
+      "scratch initialization, text weight restart or a full epoch-boundary checkpoint",
       "explicit source-compatible architecture/cutoffs and target consumer",
       "bounded epoch budget"
     ],
     "readiness_hazards": [
-      "--val-fraction is reserved/unused; missing test.xyz disables validation, no promised automatic10% split",
-      "--restart loads weights, not full Adam state",
-      "generation maps default epoch count; population does not control Adam; unsupported native keys may be parsed but unused",
-      "ordinary NEP4 only; qNEP virial known failed, charge/BEC/dipole/polar training not implemented",
-      "explicit MD targets reject second hidden layer; GPU-Sampling target rejects extra invariant layouts",
-      "default target=torchnep only persistence, not native consumer validation",
-      "native and TorchNEP ZBL syntax/defaults differ; do not transfer entire nep.in unchanged",
-      "same-name PyPI/latest or older branch docs are not this pinned0.1.0 lineage"
+      "--val-fraction is reserved. Without a validation file the trainer skips validation. Keep an independent final test set.",
+      "--restart loads weights from nep.txt. --resume checkpoint.pt restores the saved model, optimizer, scheduler, history, RNG and data identity. --epochs is the total target epoch. Relocated training and validation data must match.",
+      "For fresh runs the default is CUDA float32 and cuda-graph. Selecting CPU defaults to eager. Full resume restores the recorded training settings. CUDA Graph training requires a supported regular NEP4 configuration.",
+      "The generation value in nep.in can supply the epoch count. population does not set the Adam batch size. Check actual CLI and nep.in precedence.",
+      "The upstream source describes partial qNEP support and bounded small-system derivative checks. Charge/BEC-labelled losses and real-data convergence require separate evidence. Flexible ZBL and charge modes are outside the reviewed CUDA Graph path.",
+      "Explicit MD export targets check the NEP layout. The default torchnep write target establishes model persistence. Verify the target engine separately.",
+      "The checked source belongs to the TorchNEP repository and revision in the source receipt. Inspect a different selected revision before adopting its CLI settings."
     ],
     "source_default_observations": {
       "batch": {
@@ -30,15 +29,15 @@
         "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
       },
       "device": {
-        "value": "cpu",
+        "value": "cuda",
         "actual_cli": "--device",
-        "kind": "source_default_not_execution",
+        "kind": "resolved_fresh_run_default",
         "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
       },
       "dtype": {
-        "value": "float64",
+        "value": "float32",
         "actual_cli": "--dtype",
-        "kind": "source_default_not_execution",
+        "kind": "fresh_run_default",
         "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
       },
       "seed": {
@@ -114,7 +113,7 @@
         "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
       },
       "fallback_weight_decay": {
-        "value": 1e-05,
+        "value": 0.00001,
         "actual_cli": "--weight-decay",
         "kind": "resolution_fallback_not_literal_config_key",
         "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
@@ -136,97 +135,155 @@
         "actual_cli": "--lr-scheduler",
         "kind": "resolution_fallback_not_literal_config_key",
         "emission": "Only emit the actual mapped CLI or parser key with current source verification; never emit a descriptive fallback_* key."
+      },
+      "training_backend": {
+        "value": "cuda-graph on CUDA, eager on CPU",
+        "actual_cli": "--training-backend",
+        "kind": "device_dependent_fresh_run_default"
       }
     }
   },
   "rules_zh-CN": [
-    "明确使用tensor4627/torchnep这一源码谱系，同名PyPI包不能当作相同软件安装。",
-    "当前只有规划/源码参考，没有已接入执行适配器，不能显示可直接提交。",
-    "配置中被解析但未使用的选项不可显示为有效控制；源码没有完整恢复优化器就不能声称断点等价续训。"
+    "核对实际选用的 TorchNEP 源码与版本。新训练默认 CUDA、float32 和 CUDA Graph；显式选 CPU 默认使用 eager。",
+    "文本势用 --restart 接续权重；完整 checkpoint.pt 用 --resume 恢复训练状态，--epochs 为总目标轮数。缺少验证文件会跳过验证。",
+    "上游工具交付声明 torchnep.train。用当前登记的交付和目标环境核对可用操作，内置 worker 没有同名引擎。"
   ],
   "language_scope": "AIMatterLab-authored Chinese planning rules plus original source-backed fields; official bilingual availability is recorded separately, never invented.",
   "source_receipt": {
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
-    "observed_at": "2026-10-22T13:15:12.473159+00:00",
-    "rule_input_sha256": "622ef73716c565d6d3dc8ae280fe5374252620acd683cc38bc19ca1eacf4c91c",
+    "rule_input_sha256": "8e3a6b5cb82092236b39fc2feee4312e42a51ce758c92f2a39ccefd96d14b926",
     "local_files": [
       {
         "source_id": "torchnep",
         "path": "train.py",
-        "sha256": "e230f10867682028c2d00c4b8697ca0760a21f40818c369c8c7c1e60b0f2a132",
-        "bytes": 44696,
-        "observed_commit": "fa057c8c31bdc8903e60ca55b62c40733c136e1b",
+        "sha256": "37d5a93f35076f8cfc0f6f7de740facf49b5ba3eed677a4e1e26de696aa997ea",
+        "bytes": 63270,
+        "observed_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
         "role": "CLI_dataclass_resolution",
         "line_ranges": [
           [
-            68,
-            143
+            121,
+            124
           ],
           [
-            620,
-            740
+            723,
+            726
           ],
           [
-            930,
-            1055
+            732,
+            735
+          ],
+          [
+            886,
+            889
+          ],
+          [
+            920,
+            923
+          ],
+          [
+            1014,
+            1017
+          ],
+          [
+            1200,
+            1203
+          ],
+          [
+            1224,
+            1227
+          ],
+          [
+            1234,
+            1237
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Reviewed interface in the source revision declared by AIMatterLab. SHA-256 identifies the exact file bytes. No engine execution.",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "torchnep",
         "path": "nep_descriptor.py",
-        "sha256": "807567770aad72672aae8c72ee7ed4fd0179ac6ec5bfaf189a8dd81d96440911",
-        "bytes": 84247,
-        "observed_commit": "fa057c8c31bdc8903e60ca55b62c40733c136e1b",
+        "sha256": "8fb4435c34a304ea8ec909b4bf644762f04105a8d03415af07971b6107695e39",
+        "bytes": 88888,
+        "observed_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
         "role": "consumer_constraints",
         "line_ranges": [
           [
-            110,
-            163
+            144,
+            147
           ],
           [
-            1280,
-            1294
-          ],
-          [
-            1350,
-            1395
+            159,
+            162
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Reviewed interface in the source revision declared by AIMatterLab. SHA-256 identifies the exact file bytes. No engine execution.",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "torchnep",
         "path": "README.md",
-        "sha256": "d522ef0e677cd87d54aab1233c9bdbb1ff749e357947c58ef8dde79dd8d143c5",
-        "bytes": 9989,
-        "observed_commit": "fa057c8c31bdc8903e60ca55b62c40733c136e1b",
+        "sha256": "c8368558f2e4d4c12b0042db7e8773c06ead499424b2cded42025f04e3f2d098",
+        "bytes": 14427,
+        "observed_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            234
+            3,
+            6
+          ],
+          [
+            214,
+            217
+          ],
+          [
+            277,
+            280
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Reviewed interface in the source revision declared by AIMatterLab. SHA-256 identifies the exact file bytes. No engine execution.",
+        "observed_on": "2026-11-19"
+      },
+      {
+        "source_id": "torchnep",
+        "path": "aimlab-tools/manifest.json",
+        "role": "declared_upstream_training_interface",
+        "sha256": "0c44c823f601af4a3ebd4077ad8affdc9e9bd30af4eeb85e9877b86093f4db95",
+        "bytes": 21030,
+        "observed_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
+        "observed_on": "2026-11-19",
+        "line_ranges": [
+          [
+            25,
+            28
+          ],
+          [
+            85,
+            88
+          ],
+          [
+            268,
+            271
+          ]
+        ]
       },
       {
         "source_id": "studio",
-        "path": "worker/studio_worker/engine_contracts.json",
-        "sha256": "cac46aa8214d43425d1d7f4e81c9b718695ebfd42ae7e77a6a6d7eb0fc7806fc",
-        "bytes": 14041,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "absence_of_Studio_adapter",
+        "path": "contracts/tools/engine-contracts.json",
+        "sha256": "3863b2b78d98dae11843429b2c3c430747378e06d2b683910d43e09cef71ceff",
+        "bytes": 16176,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "registered_engine_contracts",
         "line_ranges": [
           [
-            1,
-            525
+            5,
+            604
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       }
     ],
     "primary_references": [],
@@ -239,7 +296,15 @@
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
     "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals.",
-    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation"
+    "observation_scope": "Engine source revision from installation/tool-sources.json and AIMatterLab worker contract, individually identified below.",
+    "original_rule_input_sha256": "622ef73716c565d6d3dc8ae280fe5374252620acd683cc38bc19ca1eacf4c91c",
+    "rule_input_encoding": "UTF-8 JSON.stringify(rules), in document key order",
+    "release_source": {
+      "name": "TorchNEP",
+      "commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
+      "reviewed_on": "2026-11-19"
+    },
+    "original_observed_at": "2026-10-22T13:15:12.473159+00:00"
   },
   "parameter_emission_policy": {
     "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",

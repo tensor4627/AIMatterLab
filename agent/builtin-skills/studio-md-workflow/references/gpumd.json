@@ -89,35 +89,44 @@
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
       },
       {
-        "source_id": "studio",
-        "path": "worker/studio_worker/neb_checks.py",
-        "sha256": "9c8afb033863b861e42ce91cd883283c7caef3e54a97a2c27c549d92c8572652",
-        "bytes": 8015,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "local_source",
+        "source_id": "studio-worker",
+        "path": "studio_worker/tools/neb_checks.py",
+        "sha256": "db24647142a3c0a989277e5074c5c9ce1f5fb3127448a28b10ca21b1b4c7c4e1",
+        "bytes": 8025,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "native_neb_input_and_endpoint_checks",
         "line_ranges": [
           [
-            1,
+            19,
+            86
+          ],
+          [
+            88,
             118
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "studio",
-        "path": "worker/studio_worker/engine_contracts.json",
-        "sha256": "cac46aa8214d43425d1d7f4e81c9b718695ebfd42ae7e77a6a6d7eb0fc7806fc",
-        "bytes": 14041,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "local_source",
+        "path": "contracts/tools/engine-contracts.json",
+        "sha256": "3863b2b78d98dae11843429b2c3c430747378e06d2b683910d43e09cef71ceff",
+        "bytes": 16176,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "registered_engine_contracts",
         "line_ranges": [
           [
-            1,
-            525
+            10,
+            72
+          ],
+          [
+            394,
+            498
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       }
     ],
     "primary_references": [

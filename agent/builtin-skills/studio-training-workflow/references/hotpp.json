@@ -40,7 +40,7 @@
       ],
       "Train.weight": [
         0.1,
-        1.0
+        1
       ],
       "Train.Optimizer.type": "Adam",
       "Train.Optimizer.learningRate": 0.01,
@@ -181,36 +181,40 @@
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
       },
       {
-        "source_id": "studio",
-        "path": "worker/studio_worker/adapters.py",
-        "sha256": "8afe7a7598784d5f645d5324f52431bea3a8ca23d81b5ae386f83547d63c1c12",
-        "bytes": 22811,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "local_source",
+        "source_id": "studio-worker",
+        "path": "studio_worker/tools/adapters.py",
+        "sha256": "e85aefb0dd904b3b803d2ea6df751e05dad88b12a9d2e671e998106cc3382c50",
+        "bytes": 33881,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "registered_training_and_export_invocations",
         "line_ranges": [
           [
-            1,
-            329
+            8,
+            21
+          ],
+          [
+            272,
+            292
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       },
       {
         "source_id": "studio",
-        "path": "worker/studio_worker/engine_contracts.json",
-        "sha256": "cac46aa8214d43425d1d7f4e81c9b718695ebfd42ae7e77a6a6d7eb0fc7806fc",
-        "bytes": 14041,
-        "observed_commit": "90dabe50499849e5b26f7c7502b26c7150e9eb1f",
-        "role": "local_source",
+        "path": "contracts/tools/engine-contracts.json",
+        "sha256": "3863b2b78d98dae11843429b2c3c430747378e06d2b683910d43e09cef71ceff",
+        "bytes": 16176,
+        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "role": "registered_engine_contracts",
         "line_ranges": [
           [
-            1,
-            525
+            120,
+            184
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "working_tree_observation": "Current uncommitted AIMatterLab source bytes; observed_commit identifies the checkout, not a claim that these bytes are committed."
+        "observed_on": "2026-11-19"
       }
     ],
     "primary_references": [],
