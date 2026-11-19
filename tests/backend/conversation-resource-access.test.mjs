@@ -5,29 +5,44 @@ import {createManagedComputeResources} from '../../backend/main/compute/managed-
 import {managedProjectAccess} from '../../backend/main/compute/managed-project-access.mjs';
 import {resourceFingerprint} from '../../backend/main/compute/managed-compute-aliases.mjs';
 import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools.mjs';
-import {toolFailure} from '../../agent/tools/tool-failure.mjs';
+import {toolFailure,toolValueResult} from '../../agent/tools/tool-failure.mjs';
 
-function fixture(t) {
- const profiles=new Map(),states=new Map(),shells=new Map(),store=new Map(),calls=[];
+function fixture(t,{serviceReady=true}={}) {
+ const profiles=new Map(),states=new Map(),shells=new Map(),store=new Map(),calls=[],shellRequests=[],cancelled=new Set(),control={};
+ let generation=0;
  const access=managedProjectAccess({catalog:{get:(k,id)=>store.get(id),put:(k,id,row)=>store.set(id,row),list:()=>[...store.values()]}});
- const manager=createManagedComputeResources({
-  terminal:{connections:{state:async({connectionId})=>states.get(connectionId),async managedShell(op,ref) {
-   calls.push(op);
-   if(op==='open')shells.set(ref.leaseId,{sessionId:randomUUID(),alive:true,ownerEpoch:1,expiresAt:Date.now()+60000});
-   if(op==='close'){shells.delete(ref.leaseId);return {closed:true};}
-   return shells.get(ref.leaseId);
-  }}},
-  profiles:{read:({id})=>profiles.get(id)},authorizeTerminal:access.terminalDecision,
-  services:{ssh:async(resource)=>({id:'source-'+resource.profileId,binding:{},health:{},schedulerInspection:true,
+ const jobService=async resource=>{
+  if(!serviceReady)throw Error('ssh_service_registration_required');
+  const serviceGeneration='fixture-service-'+(++generation),cluster={id:'scheduler-'+resource.profileId,version:1,transport_kind:'ssh-service-local'};
+  const binding={root:'/fixture/worker',hostIdentity:{hostname:'fixture.invalid',uid:1000,machineId:'fixture'}};
+  return {id:'source-'+resource.profileId,generation:serviceGeneration,binding,health:{},schedulerInspection:true,
+   async verify(){await control.verify?.(serviceGeneration);},
    async forward(method,target,body,mcp,timeout,check){
     check?.();calls.push(target);
-    if(target==='/api/projects')return {status:200,data:[]};
+    const workerProject=control.workerProjects?.[resource.profileId];
+    if(target==='/api/projects')return {status:200,data:workerProject?[{id:workerProject,policy:{clusters:[cluster.id]}}]:[]};
+    if(target==='/api/clusters')return {status:200,data:[cluster]};
+    if(target==='/api/cluster/profile')return {status:200,data:{...cluster,service_binding:{root:binding.root,...binding.hostIdentity}}};
     assert.deepEqual([method,target,body,mcp,timeout],['POST','/api/ssh-service/inspect-scheduler',{},false,15000]);
     return {status:200,data:{status:'observed',observed_at:100,automatic_retry:false,observations:[
      {scheduler:'slurm',status:'observed',queues:[{name:'fixture-only',default:true,availability:'up',node_count:1,node_state:'idle',gres:'gpu:1'}]},
      {scheduler:'lsf',status:'not_found',queues:[]}
     ]}};
-   }})}
+   }};
+ };
+ const manager=createManagedComputeResources({
+  terminal:{connections:{state:async({connectionId})=>states.get(connectionId),async managedShell(op,ref) {
+   calls.push(op);shellRequests.push({op,ref});
+   await control.shell?.(op,ref);
+   if(op==='open'){
+    if(cancelled.has(ref.leaseId))throw Error('ssh_connection_changed');
+    shells.set(ref.leaseId,{sessionId:randomUUID(),alive:true,ownerEpoch:1,expiresAt:Date.now()+60000});
+   }
+   if(op==='close'){cancelled.add(ref.leaseId);shells.delete(ref.leaseId);return {closed:true};}
+   return shells.get(ref.leaseId);
+  }}},
+  profiles:{read:({id})=>profiles.get(id)},authorizeTerminal:access.terminalDecision,
+  services:{ssh:jobService,wsl:jobService}
  });
  t.after(()=>manager.stop());
  const scope={provider:'deepseek',threadId:'chat',taskId:null,projectId:null,checkCurrent:()=>true};
@@ -39,8 +54,17 @@ function fixture(t) {
   profiles.set(id,profile);states.set(ref.connectionId,{...ref,status:'authenticated',authentication:'verified',capabilities:{multiplex:true}});
   await manager.publish(ref);await manager.refreshService(ref);return 'ssh:'+id;
  }
+ async function local(id,name){
+  const receipt={profileId:id,profileVersion:1,distribution:'Fixture Linux',root:'/fixture/local',runtime:'/fixture/runtime',port:8767};
+  profiles.set(id,{id,name,version:1,kind:'wsl',distribution:receipt.distribution,root:receipt.root,port:receipt.port});
+  await manager.publishWsl(receipt);return 'wsl:'+id;
+ }
  const setAllowed=(project,id,allowed)=>access.set(project,{kind:'ssh',profileId:id,targetFingerprint:resourceFingerprint(profiles.get(id))},allowed);
- return {manager,gateway,scope,speak,host,calls,setAllowed};
+ return {manager,gateway,scope,speak,host,local,calls,setAllowed,shellRequests,shells,control};
+}
+
+function deferred(){
+ let resolve;const promise=new Promise(complete=>{resolve=complete;});return {promise,resolve};
 }
 
 test('DeepSeek can inspect queues on the only hosted SSH target in an ordinary chat, even with no worker project',async t=>{
@@ -103,4 +127,144 @@ test('an explicit project refusal revokes ordinary terminal use without changing
  assert.equal((await f.gateway.call('list_compute_terminals',{},other)).sessions[0].sessionId,two.sessionId);
  f.setAllowed(own.projectId,'a',true);
  assert.equal((await f.gateway.call('list_compute_terminals',{},own)).sessions[0].sessionId,one.sessionId);
+});
+
+test('a confirmed PTY failure advertises the same verified service and still requires an exact service acquisition',async t=>{
+ const f=fixture(t),resource_id=await f.host('a','示例甲');
+ f.control.shell=op=>{if(op==='open')throw Error('ssh_shell_readiness_timeout');};
+ f.speak('使用示例甲查看队列');
+ const acquire=args=>f.gateway.call('acquire_compute_resource',args,f.scope);
+ const failure=await acquire({resource_id});
+ assert.deepEqual({status:failure.status,code:failure.code,leaseStatus:failure.leaseStatus,retry:failure.retry},
+  {status:'terminal_unavailable',code:'ssh_shell_readiness_timeout',leaseStatus:'none',retry:{resource_id,access:'service'}});
+ assert.deepEqual(JSON.parse(toolValueResult(failure).content[0].text),failure);
+ assert.equal(toolValueResult(failure).isError,true);
+ assert.deepEqual(f.shellRequests.map(row=>row.op),['open','close']);
+ assert.deepEqual(f.shellRequests[0].ref,f.shellRequests[1].ref);
+ assert.equal(f.manager.snapshot()[0].terminalAvailable,4);
+ await assert.rejects(f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},f.scope),/resource_lease_required/);
+ const service=await acquire(failure.retry);
+ assert.equal(service.access,'service');assert.equal(Object.hasOwn(service,'terminal'),false);
+ assert.deepEqual(f.shellRequests.map(row=>row.op),['open','close']);
+ const probe=await f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},f.scope);
+ assert.equal(probe.project_access,'no_project');assert.equal(probe.terminal_available,false);
+ assert.equal(probe.scheduler.observations[0].queues[0].name,'fixture-only');
+ assert.equal(f.calls.includes('/api/projects'),false);
+ await assert.rejects(f.manager.resolveService(f.scope,resource_id),/project_grant_required/);
+ const foreign={...f.scope,provider:'codex'};
+ await assert.rejects(f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},foreign),/resource_lease_required/);
+ await assert.rejects(acquire({access:'service'}),/invalid_request/);
+ await assert.rejects(acquire({resource_id,access:'legacy-session'}),/invalid_request/);
+ assert.doesNotMatch(JSON.stringify({failure,service}),/connection-a|fixture\.invalid|source-a|fixture-service-/);
+});
+
+test('a service lease stays usable during a failed upgrade and a deduplicated parallel terminal upgrade',async t=>{
+ const f=fixture(t),resource_id=await f.host('a','示例甲');
+ f.speak('使用示例甲查看队列');
+ const acquire=access=>f.gateway.call('acquire_compute_resource',{resource_id,access},f.scope);
+ const inspect=()=>f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},f.scope);
+ assert.equal((await acquire('service')).access,'service');
+ const assignment=f.manager.consoleEntries().channels[0];
+ f.control.shell=op=>{if(op==='open')throw Error('ssh_shell_interaction_required');};
+ const failed=await acquire('terminal');
+ assert.equal(failed.code,'ssh_shell_interaction_required');assert.equal(failed.leaseStatus,'service_retained');
+ assert.equal((await inspect()).terminal_available,false);
+ assert.equal(f.manager.consoleEntries().channels[0].leaseId,assignment.leaseId);
+
+ const entered=deferred(),opening=deferred();
+ f.control.shell=async op=>{if(op==='open'){entered.resolve();await opening.promise;}};
+ const upgrade=acquire('terminal');await entered.promise;
+ const duplicate=acquire('terminal');
+ assert.equal((await acquire('service')).reused,true);
+ assert.equal((await inspect()).terminal_available,false);
+ const preparing=f.manager.consoleEntries().channels[0];
+ assert.equal(preparing.status,'assigned');assert.equal(preparing.terminalStatus,'preparing');assert.equal(preparing.sessionId,null);
+ assert.equal(f.manager.snapshot()[0].terminalAvailable,3);
+ opening.resolve();
+ const [first,second]=await Promise.all([upgrade,duplicate]);
+ assert.equal(first.access,'terminal');assert.equal(first.reused,false);assert.equal(second.reused,true);
+ assert.deepEqual(first.terminal,second.terminal);
+ assert.deepEqual(f.shellRequests.filter(row=>row.op==='open').map(row=>row.ref.leaseId).length,2);
+ assert.notEqual(f.shellRequests[0].ref.leaseId,f.shellRequests[2].ref.leaseId);
+ assert.equal(f.manager.consoleEntries().channels[0].leaseId,assignment.leaseId);
+ assert.equal(f.manager.consoleEntries().channels[0].serviceContext,true);
+ assert.equal((await inspect()).terminal_available,true);
+ assert.deepEqual(await f.gateway.call('release_compute_resource',{resource_id},f.scope),{status:'released',resourceId:resource_id,terminalClosed:true});
+ await assert.rejects(inspect(),/resource_lease_required/);
+ assert.equal(f.shells.size,0);
+});
+
+test('unknown terminal close preserves its capacity reservation while the independently verified service is available',async t=>{
+ const f=fixture(t),resource_id=await f.host('a','示例甲');
+ f.speak('使用示例甲查看队列');
+ f.control.shell=op=>{if(op==='open')throw Error('terminal_unavailable');if(op==='close')throw Error('terminal_unavailable');};
+ const acquire=access=>f.gateway.call('acquire_compute_resource',{resource_id,access},f.scope);
+ const failed=await acquire('terminal');
+ assert.equal(failed.leaseStatus,'unknown');assert.deepEqual(failed.retry,{resource_id,access:'service'});
+ assert.equal(f.manager.snapshot()[0].terminalAvailable,3);
+ assert.equal((await acquire('service')).access,'service');
+ assert.equal((await f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},f.scope)).scheduler.status,'observed');
+ const channel=f.manager.consoleEntries().channels[0];
+ assert.equal(channel.status,'assigned');assert.equal(channel.terminalStatus,'lost');assert.equal(channel.sessionId,null);
+ assert.equal((await acquire('terminal')).leaseStatus,'unknown');
+ assert.equal(f.shellRequests.filter(row=>row.op==='open').length,1);
+ assert.deepEqual(await f.gateway.call('release_compute_resource',{resource_id},f.scope),{status:'unconfirmed',resourceId:resource_id,terminalClosed:false});
+ await assert.rejects(f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},f.scope),/resource_lease_required/);
+ assert.equal(f.manager.snapshot()[0].terminalAvailable,3);
+ f.control.shell=undefined;await f.manager.sweep();
+ assert.deepEqual(f.manager.consoleEntries().channels,[]);
+ assert.equal(f.manager.snapshot()[0].terminalAvailable,4);
+});
+
+test('a confirmed SSH channel refusal does not announce a service recovery when no worker is ready',async t=>{
+ const f=fixture(t,{serviceReady:false}),resource_id=await f.host('a','示例甲');
+ f.speak('使用示例甲');f.control.shell=op=>{if(op==='open')throw Error('ssh_channel_refused');};
+ const failure=await f.gateway.call('acquire_compute_resource',{resource_id},f.scope);
+ assert.equal(failure.code,'ssh_channel_refused');assert.equal(failure.leaseStatus,'none');assert.equal(Object.hasOwn(failure,'retry'),false);
+ assert.equal(f.manager.snapshot()[0].terminalAvailable,4);
+ assert.equal(f.manager.consoleEntries().channels.length,0);
+});
+
+test('a project refusal prevents host-only service observation and release cancels a pending service verification',async t=>{
+ const f=fixture(t),resource_id=await f.host('a','示例甲');
+ const owner={...f.scope,projectId:'desktop-project'};
+ f.speak('使用示例甲查看队列',owner);
+ const acquire=()=>f.gateway.call('acquire_compute_resource',{resource_id,access:'service'},owner);
+ const inspect=()=>f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},owner);
+ f.setAllowed(owner.projectId,'a',false);
+ await assert.rejects(acquire(),/project_grant_required/);
+ assert.equal(f.calls.includes('/api/ssh-service/inspect-scheduler'),false);
+ f.setAllowed(owner.projectId,'a',true);await acquire();
+ f.setAllowed(owner.projectId,'a',false);
+ await assert.rejects(inspect(),/project_grant_required/);
+ await f.gateway.call('release_compute_resource',{resource_id},owner);
+ f.setAllowed(owner.projectId,'a',true);
+ const entered=deferred(),verify=deferred();
+ f.control.verify=()=>{entered.resolve();return verify.promise;};
+ const pending=acquire(),rejection=assert.rejects(pending,/resource_lease_changed/);
+ await entered.promise;
+ assert.equal((await f.gateway.call('release_compute_resource',{resource_id},owner)).status,'not_acquired');
+ verify.resolve();await rejection;
+ await assert.rejects(inspect(),/resource_lease_required/);
+ assert.equal(f.shellRequests.length,0);
+});
+
+test('choice candidates follow the requested lane across SSH and WSL, including an independent worker project grant',async t=>{
+ const f=fixture(t),allowed=await f.host('a','材料甲'),denied=await f.host('b','材料乙'),local=await f.local('c','仿真机');
+ const scope={...f.scope,projectId:'desktop-project'};
+ f.setAllowed(scope.projectId,'b',false);f.control.workerProjects={b:scope.projectId};
+ const acquire=args=>f.gateway.call('acquire_compute_resource',args,scope);
+ f.speak('使用计算机甲',scope);
+ assert.deepEqual((await acquire({alias:'计算机甲',access:'service'})).candidates.map(row=>row.resourceId),[allowed,denied,local]);
+ assert.deepEqual((await acquire({alias:'计算机甲',access:'terminal'})).candidates.map(row=>row.resourceId),[allowed]);
+ f.speak('使用仿真机',scope);
+ const unsupported=await acquire({resource_id:local,access:'terminal'});
+ assert.equal(unsupported.code,'managed_compute_terminal_not_supported');assert.deepEqual(unsupported.retry,{resource_id:local,access:'service'});
+ assert.equal((await acquire(unsupported.retry)).access,'service');
+ f.speak('使用材料乙',scope);
+ const deniedTerminal=await acquire({resource_id:denied,access:'terminal'});
+ assert.equal(deniedTerminal.code,'managed_compute_project_grant_required');
+ assert.equal((await acquire(deniedTerminal.retry)).access,'service');
+ assert.deepEqual((await f.manager.resolveService(scope,denied)).clusterIds,['scheduler-b']);
+ assert.equal(f.shellRequests.length,0);
 });

@@ -71,7 +71,8 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
     return {source,leaseId:channel.leaseId ?? channel.sessionId,provider:channel.provider,threadId:channel.threadId,
       conversationId:chat?.id ?? null,conversationName:chat?.name ?? null,
       projectId:channel.projectId ?? null,projectName:projects.get(channel.projectId)?.name ?? null,
-      sessionId:channel.sessionId,serviceOnly:channel.serviceOnly===true,busy:channel.busy,status,checkedAt};
+      sessionId:channel.sessionId,serviceOnly:channel.serviceOnly===true,serviceContext:channel.serviceContext===true,
+      terminalStatus:channel.terminalStatus??null,busy:channel.busy,status,checkedAt};
   }
 
   function snapshot({projectAccess = () => []} = {}) {
@@ -96,11 +97,13 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
         if (status === 'assigned') {
           if (channel.expired) status = 'lost';
           else if (channel.serviceOnly) {
-            status = service.status === 'online' && entry?.generation && (!master || entry.generation === master.service?.serviceId) ? 'assigned' : service.status === 'lost' ? 'lost' : 'unknown';
+            const generation = channel.serviceGeneration ?? entry?.generation;
+            const current = generation && entry?.generation === generation && (!master || master.service?.serviceId === generation);
+            status = service.status === 'online' && current ? 'assigned' : service.status === 'lost' || generation && entry?.generation !== generation ? 'lost' : 'unknown';
             checkedAt = service.checkedAt;
           } else if (!recent(brokerInventory)) status = 'unknown';
           else if (!master.verified || !online(master)) status = 'lost';
-          else if (!recent(proof)) status = 'unknown';
+          else if (!recent(proof) || proof.sessionId!==channel.sessionId) status = 'unknown';
           else { status = proof.status === 'online' ? 'assigned' : 'lost'; checkedAt = proof.checkedAt; }
         }
         return channelRow(channel,channel.kind === 'wsl' ? 'wsl' : 'managed',conversations,projects,status,checkedAt);
@@ -219,7 +222,7 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
     });
     for (const channel of channels) {
       if (channel.kind === 'ssh' && !channel.serviceOnly && channel.status === 'assigned' && !channel.expired && observed.some(row => sameRef(channel,row) && row.verified && online(row))) {
-        checks.push(observe(() => resources.observeConsoleLease(channel),shells,channel.leaseId,{}));
+        checks.push(observe(() => resources.observeConsoleLease(channel),shells,channel.leaseId,{sessionId:channel.sessionId}));
       }
     }
     const localProfiles = profiles.list().filter(row => row.kind === 'wsl');

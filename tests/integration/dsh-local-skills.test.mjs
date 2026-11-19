@@ -10,8 +10,22 @@ import {dshRuntime} from '../../desktop/platform/dsh-runtime.mjs';
 import {ProjectSkills} from '../../agent/skills/project-skills.mjs';
 import {fileURLToPath} from 'node:url';
 import {ScientificSkills} from '../../agent/skills/scientific-skills.mjs';
-import {workspaceAgentInstructions} from '../../agent/context/agent-settings.mjs';
+import {STUDIO_INSTRUCTIONS,workspaceAgentInstructions} from '../../agent/context/agent-settings.mjs';
+import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
+
+function reply(res,index,step,text){
+ const events=[
+  {type:'message_start',message:{id:'reply-'+index,type:'message',role:'assistant',model:'deepseek-flash',content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:12,output_tokens:0}}},
+  {type:'content_block_start',index:0,content_block:step?{type:'tool_use',id:'tool-'+index,name:'mcp__gpusampling__'+step[0],input:{}}:{type:'text',text:''}},
+  {type:'content_block_delta',index:0,delta:step?{type:'input_json_delta',partial_json:JSON.stringify(step[1])}:{type:'text_delta',text}},
+  {type:'content_block_stop',index:0},
+  {type:'message_delta',delta:{stop_reason:step?'tool_use':'end_turn',stop_sequence:null},usage:{output_tokens:3}},
+  {type:'message_stop'},
+ ];
+ res.writeHead(200,{'Content-Type':'text/event-stream'});
+ res.end(events.map(event=>'event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n').join(''));
+}
 
 test('official DSH creates, reads and updates a personal skill in chat without a project, shell or worker', {timeout:60000}, async t => {
  const root = fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-dsh-local-skill-'));
@@ -45,17 +59,7 @@ test('official DSH creates, reads and updates a personal skill in chat without a
   let data=''; for await (const chunk of req) data+=chunk;
   const index=packets.length;
   packets.push(JSON.parse(data));
-  const step=steps[index];
-  const events=[
-   {type:'message_start',message:{id:'reply-'+index,type:'message',role:'assistant',model:'deepseek-flash',content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:12,output_tokens:0}}},
-   {type:'content_block_start',index:0,content_block:step?{type:'tool_use',id:'skill-'+index,name:'mcp__gpusampling__'+step[0],input:{}}:{type:'text',text:''}},
-   {type:'content_block_delta',index:0,delta:step?{type:'input_json_delta',partial_json:JSON.stringify(step[1])}:{type:'text_delta',text:'Local skill checked'}},
-   {type:'content_block_stop',index:0},
-   {type:'message_delta',delta:{stop_reason:step?'tool_use':'end_turn',stop_sequence:null},usage:{output_tokens:3}},
-   {type:'message_stop'},
-  ];
-  res.writeHead(200,{'Content-Type':'text/event-stream'});
-  res.end(events.map(e=>'event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n').join(''));
+  reply(res,index,steps[index],'Local skill checked');
  });
  await new Promise(resolve=>model.listen(0,'127.0.0.1',resolve));
  const bridge=new DshBridge({
@@ -125,4 +129,95 @@ test('official DSH creates, reads and updates a personal skill in chat without a
  const refreshed=Array.isArray(latestSystem)?latestSystem.map(block=>block.text).join('\n'):latestSystem;
  assert.ok(refreshed.includes(JSON.stringify(store.personalDirectory)));
  assert.ok(!refreshed.includes(JSON.stringify(previousDirectory)));
+});
+
+test('restored official DSH conversation receives current hosted recovery and a service-only queue receipt', {timeout:60000}, async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-dsh-hosted-recovery-'));
+ const saved=new Map(),children=[],packets=[],calls=[];
+ const oldAdvice='This historical reply suggested signing in again and handing over a visible terminal.';
+ const resource_id='ssh:fixture-host',resource={resourceId:resource_id,name:'Fixture cluster',serviceStatus:'ready',canAcquire:true,terminalAvailable:4};
+ const retry={resource_id,access:'service'};
+ const steps=[null,['list_compute_resources',{}],['read_scientific_skill',{function_id:'compute.queue'}],
+  ['acquire_compute_resource',{resource_id,access:'terminal'}],['acquire_compute_resource',retry],
+  ['inspect_compute_service',{resource_id,probe_scheduler:true}]];
+ const model=createServer(async(req,res)=>{
+  let data='';for await(const bytes of req)data+=bytes;
+  const index=packets.length;packets.push(JSON.parse(data));
+  reply(res,index,steps[index],index===0?oldAdvice:'Observed the fixture queue through its service.');
+ });
+ await new Promise(resolve=>model.listen(0,'127.0.0.1',resolve));
+ const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
+ const bundledRoot=fileURLToPath(new URL('../../agent/builtin-skills/',import.meta.url));
+ const scientificSkills=new ScientificSkills({map,bundledRoot,sources:()=>[],settings:()=>({})});
+ const field={type:'string'},schema=properties=>({type:'object',properties,additionalProperties:false});
+ const definitions=[
+  {name:'list_compute_resources',inputSchema:schema({})},
+  {name:'acquire_compute_resource',inputSchema:schema({resource_id:field,access:{enum:['service','terminal']}})},
+  {name:'inspect_compute_service',inputSchema:schema({resource_id:field,probe_scheduler:{type:'boolean'}})},
+ ];
+ const desktopTools={tools:()=>definitions,owns:name=>definitions.some(tool=>tool.name===name),call(name,args){
+  calls.push([name,args]);
+  if(name==='list_compute_resources')return {resources:[resource]};
+  if(name==='acquire_compute_resource'&&args.access==='terminal')
+   return {status:'terminal_unavailable',code:'ssh_channel_unavailable',leaseStatus:'none',resource,retry};
+  if(name==='acquire_compute_resource')return {status:'acquired',access:'service',resource};
+  return {status:'observed',scheduler:'fixture-slurm',rows:1};
+ }};
+ const endpoint=new TerminalMcp({terminal:{tools:()=>[{name:'list_shared_terminals',inputSchema:schema({})}]},desktopTools,scientificSkills});
+ await endpoint.start();
+ const sessionId='hosted-recovery-fixture';
+ const bridge=new DshBridge({root,instructions:STUDIO_INSTRUCTIONS,
+  catalog:{get:(kind,id)=>saved.get(kind+':'+id),put:(kind,id,value)=>saved.set(kind+':'+id,structuredClone(value))},
+  credential:()=>({apiKey:'isolated-placeholder'}),worker:()=>endpoint.providerConnection('deepseek',sessionId),
+  fetchApi:async()=>Response.json({data:[{id:'deepseek-flash'}]}),host:{...dshRuntime,prepare(...args){
+   const profile=dshRuntime.prepare(...args);
+   profile.env.DEEPSEEK_BASE_URL='http://127.0.0.1:'+model.address().port;
+   return profile;
+  },spawn(...args){const child=dshRuntime.spawn(...args);children.push(child);return child;}}});
+ t.after(async()=>{
+  bridge.close();
+  await Promise.all(children.map(child=>child.exitCode!==null||child.signalCode!==null?null:new Promise(resolve=>child.once('close',resolve))));
+  model.closeAllConnections();await new Promise(resolve=>model.close(resolve));endpoint.close();
+  fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+ });
+ await bridge.start();
+ const {thread:{id:threadId}}=await bridge.request('thread/start');
+ endpoint.bindProviderContext('deepseek',{threadId},{sessionId,allowInitialFill:true});
+ async function send(input){
+  const completion=new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>reject(Error('DSH hosted fixture timed out')),25000);
+   const listener=event=>{if(event.method==='turn/completed'){clearTimeout(timer);bridge.off('event',listener);resolve(event.params.turn);}};
+   bridge.on('event',listener);t.after(()=>{clearTimeout(timer);bridge.off('event',listener);});
+  });
+  await bridge.request('turn/start',{threadId,input:input.map(text=>({type:'text',text}))});
+  const turn=await completion;
+  assert.equal(turn.status,'completed',turn.error?.message);
+  return turn;
+ }
+ await send(['Open the original engineering chat.']);
+ assert(bridge.session(threadId).turns[0].items.some(item=>item.type==='agentMessage'&&item.text===oldAdvice));
+ const nativeId=bridge.session(threadId).nativeId;
+ const resumed=await bridge.request('thread/resume',{threadId});
+ assert.equal(resumed.thread.id,threadId);
+ const routing=createAgentResourceRouting({managed:()=>({})});
+ await send(['Check queues on the same fixture cluster.',routing.turnContext('deepseek',threadId)]);
+ assert.equal(bridge.session(threadId).nativeId,nativeId);
+ assert.equal(bridge.session(threadId).turns.length,2);
+ assert.equal(children.length,1,'The established Harness and native conversation remain in use');
+ const fresh=JSON.stringify(packets[1]),received=JSON.stringify(packets);
+ assert(fresh.includes(oldAdvice),'Restored model packet roles: '+JSON.stringify(packets[1].messages?.map(message=>message.role)));
+ assert(fresh.includes('supersede historical tool definitions'));
+ assert(fresh.includes('Current receipts supersede old handoff advice'));
+ assert(fresh.includes('inspect_compute_service'));
+ assert(!packets[1].tools.some(tool=>tool.name.endsWith('_shared_terminals')));
+ assert(received.includes('A service lease grants no shell'));
+ assert(received.includes('terminal_unavailable')&&received.includes('leaseStatus')&&received.includes('retry'));
+ assert.deepEqual(calls,steps.slice(1).filter(step=>step[0]!=='read_scientific_skill'));
+ const [failedShell,served]=bridge.session(threadId).turns[1].items.filter(item=>item.tool==='acquire_compute_resource');
+ assert.equal(failedShell.result.isError,true);
+ assert.equal(served.result.isError,false);
+ const capability=JSON.parse(served.result.content[0].text);
+ assert.equal(capability.access,'service');
+ assert.equal(Object.hasOwn(capability,'terminal'),false);
+ assert(JSON.stringify(packets.at(-1)).includes('fixture-slurm'));
 });

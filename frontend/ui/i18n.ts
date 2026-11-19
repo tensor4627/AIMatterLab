@@ -1,4 +1,5 @@
 const english:Record<string,string> = {
+  "此操作解除该会话的服务分配并关闭它的专属 Shell。已提交作业继续运行。":"This releases this conversation's service allocation and closes its dedicated shell. Submitted jobs continue running.",
   "工作台当前 WSL 服务":"Workbench WSL service",
   "断开当前工作台连接。服务进程及已提交作业继续运行。":"Disconnect the current workbench connection. The worker process and submitted jobs continue running.",
   "独立服务连接":"Independent worker connection",

@@ -60,6 +60,15 @@ test('same-desktop descriptor reuses daemon and PTY, resets stale Agent ownershi
  const h=harness(t),s=await h.bridge.open({kind:'local',mode:'interactive'});await h.bridge.owner({sessionId:s.id,ownerEpoch:0,owner:'agent'});const second=createSharedTerminal(h.options),list=await second.list({});assert.equal(list.sessions[0].sessionId,s.id);assert.equal(list.sessions[0].owner,'human');assert.equal(h.spawns.length,1);assert.equal(h.requests.filter(x=>x.route==='/sessions/open').length,1);await assert.rejects(second.callTool('read_shared_terminal',{session_id:s.id},h.scope()),/scope_denied/);
  assert.equal((await second.open({kind:'local',mode:'interactive'})).sessionId,s.id);
 });
+test('read-only legacy grant discovery leaves another conversation’s explicit share intact',async t=>{
+ const h=harness(t),original=h.scope(),s=await h.bridge.open({kind:'local',mode:'interactive'});
+ await h.bridge.owner({sessionId:s.id,ownerEpoch:0,owner:'agent'});
+ assert.equal(h.bridge.hasCurrentGrant(original.provider,s.id,{reconcile:false}),true);
+ h.select({...original,threadId:'some-other-conversation'});
+ assert.equal(h.bridge.hasCurrentGrant(original.provider,undefined,{reconcile:false}),false);
+ h.select(original);
+ assert.equal(h.bridge.hasCurrentGrant(original.provider,s.id,{reconcile:false}),true);
+});
 test('exited and expired Agent-owned sessions do not prevent restoring other live PTYs',async t=>{
  const h=harness(t),dead=await h.bridge.open({kind:'local',mode:'interactive'});await h.bridge.owner({sessionId:dead.id,ownerEpoch:0,owner:'agent'});const actual=h.sessions.get(dead.id);actual.alive=false;actual.exitCode=7;const expired=await h.bridge.open({kind:'local',mode:'interactive'});await h.bridge.owner({sessionId:expired.id,ownerEpoch:0,owner:'agent'});h.sessions.get(expired.id).expired=true;const live=await h.bridge.open({kind:'local',mode:'key'}),original=h.options.requestApi;
  const b=createSharedTerminal({...h.options,requestApi:async(...args)=>{if([`/sessions/${dead.id}/owner`,`/sessions/${expired.id}/owner`].includes(args[2]))throw Error('Core correctly rejects ownership changes after exit/expiry');return original(...args);}}),items=(await b.list({})).sessions;assert.equal(items.find(x=>x.id===dead.id).status,'exited');assert.equal(items.find(x=>x.id===dead.id).exitCode,7);assert.equal(items.find(x=>x.id===expired.id).status,'expired');assert.equal(items.find(x=>x.id===expired.id).alive,true);assert.equal(items.find(x=>x.id===live.id).status,'running');assert.equal((await b.open({kind:'local',mode:'key'})).id,live.id);assert.equal(h.spawns.length,1);for(const id of [dead.id,expired.id])await assert.rejects(b.callTool('read_shared_terminal',{session_id:id},h.scope()),/scope_denied/);assert.match((await b.read({sessionId:dead.id,ownerEpoch:1})).output,/authentication/);

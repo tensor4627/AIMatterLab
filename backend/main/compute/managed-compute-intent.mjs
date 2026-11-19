@@ -10,12 +10,13 @@ export const genericComputeKind=value=>generic.get(value)||null;
 
 const operations=/队列|分区|节点|资源|环境|作业|集群|queue|partition|node|environment|scheduler|cluster/iu;
 const queryLead=String.raw`(?:(?:现在|请|麻烦|帮我|给我|我想|顺便|先|再|please\b|can you\b|could you\b)\s*)*(?:看(?:看|一看|一下|下)?|查(?:查|询|看|一下|一查|下)?|调取|检查|列出|获取|连接|登录|访问|配置|安装|inspect|check|show|list|query|connect to|use)\s*`;
-const negativeQuery=/不要|不必|不用|无需|禁止|先别|别查|别看|未授权|假如|如果|举例|示例|仅解释|只解释|如何|怎么|do not|don['’]t|never|instead of|without|example|how (?:do|to|can)|\bif\b/iu;
+const negativeQuery=/不要|不必|不用|无需|禁止|先别|别查|别看|未授权|假如|如果|举例|例如|仅解释|只解释|如何|怎么|do not|don['’]t|never|instead of|without|how (?:do|to|can)|\bif\b/iu;
+const exampleWording=/示例|\bexample\b/iu;
 const clauses=message=>message.split(/[，。；,;!！?？\n]+/u).map(s=>s.trim()).filter(Boolean);
 
 export function hasResourceRequest(message) {
  const command=new RegExp('^'+queryLead,'iu');
- return clauses(message).some(part=>operations.test(part)&&!negativeQuery.test(part)&&
+ return clauses(message).some(part=>operations.test(part)&&!negativeQuery.test(part)&&!exampleWording.test(part)&&
    (command.test(part)||/^(?:请|帮我|please\s+)?(?:用|使用|在|选用|use\b|run\b)/iu.test(part)));
 }
 
@@ -24,9 +25,12 @@ function requestedObservation(message,value) {
  const prefix=new RegExp('^'+queryLead+'(?:一下\\s*)?(?:the\\s+)?'+target+'(?=$|[\\s的上中有哪些里可是否还在]|集群|分区|队列|节点|资源|作业|环境)','iu');
  const namedFirst=new RegExp('^'+target+'(?:集群)?(?:上|中|里|的|\\s+).{0,48}(?:队列|分区|空闲|资源|有空|环境|作业|nodes?|queues?|partitions?)','iu');
  const suffix=new RegExp('^'+queryLead+'.{0,128}(?:\\bon\\s+|\\bof\\s+|\\bat\\s+|\\bfrom\\s+|在)'+target+'(?:集群)?\\s*$','iu');
+ // The display name itself can contain words such as "example" or "示例".
+ // Determine whether the surrounding instruction is hypothetical or negative.
+ const restricted=part=>negativeQuery.test(part)||exampleWording.test(part.replaceAll(value,' '));
  // A restriction about another clause must never be turned into a positive selection.
- if(clauses(message).some(part=>negativeQuery.test(part)&&part.includes(value)))return false;
- return clauses(message).some(part=>!negativeQuery.test(part)&&operations.test(part)&&
+ if(clauses(message).some(part=>restricted(part)&&part.includes(value)))return false;
+ return clauses(message).some(part=>!restricted(part)&&operations.test(part)&&
   (prefix.test(part)||namedFirst.test(part)||suffix.test(part)));
 }
 

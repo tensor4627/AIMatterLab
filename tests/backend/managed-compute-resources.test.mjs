@@ -6,6 +6,7 @@ import path from 'node:path';
 import {ProjectSkills} from '../../agent/skills/project-skills.mjs';
 import {createManagedComputeAliases,resourceFingerprint} from '../../backend/main/compute/managed-compute-aliases.mjs';
 import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
+import {requestsComputeName} from '../../backend/main/compute/managed-compute-intent.mjs';
 import {createManagedComputeServices,managedWorkerProject} from '../../backend/main/compute/managed-compute-services.mjs';
 import {taskForRecordIndex} from '../../backend/main/compute/worker-service-version.mjs';
 import {assertRendererWorkerRoute} from '../../contracts/transport-policy.mjs';
@@ -394,4 +395,10 @@ test('run mutations check exact source, active project grant, user intent and kn
   managed_monitor:{schemaVersion:1,sourceId:'worker-A',scope:{provider:f.owner.provider,threadId:f.owner.threadId,taskId:f.owner.taskId,projectId:f.owner.projectId,runId}}})));
  assert.deepEqual(dispatched.map(({resource,name,arguments:args})=>[resource,name,args.require_known??false]),
   [['A','validate_cluster_run',false],['A','submit_cluster_run',false],['A','cancel_cluster_run',true],['A','submit_cluster_run',false]]);
+});
+test('a saved display name containing example remains selectable in a concrete queue request',()=>{
+ assert.equal(requestsComputeName('查示例甲的队列','示例甲'),true);
+ assert.equal(requestsComputeName('不要查示例甲的队列','示例甲'),false);
+ assert.equal(requestsComputeName('如果查看示例甲的队列','示例甲'),false);
+ assert.equal(requestsComputeName('check queues on example','example'),true);
 });

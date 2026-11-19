@@ -159,10 +159,15 @@ try {
     assert.deepEqual(await localSource.request('GET','/api/projects'),[]);
     const resource_id='ssh:'+targets[0].profile.id;
     say('读取我的个人skill，看看集群有哪些自有队列空着');
-    const options=await call('acquire_compute_resource',{alias:'集群'});
+    const options=await call('acquire_compute_resource',{alias:'集群',access:'service'});
     assert.equal(options.status,'choice_required');
     say('是'+targets[0].profile.name);
-    const channel=(await call('acquire_compute_resource',{resource_id})).terminal.sessionId;
+    const serviceLease=await call('acquire_compute_resource',{resource_id,access:'service'});
+    assert.equal(serviceLease.status,'acquired');assert.equal(serviceLease.access,'service');assert.equal(serviceLease.terminal,undefined);
+    const serviceQueue=await call('inspect_compute_service',{resource_id,probe_scheduler:true});
+    assert.equal(serviceQueue.terminal_available,false);
+    assert.equal(serviceQueue.scheduler.observations[0].queues[0].name,'fixture-only');
+    const channel=(await call('acquire_compute_resource',{resource_id,access:'terminal'})).terminal.sessionId;
     assert(channel);
     await call('write_compute_terminal',{session_id:channel,request_id:randomUUID(),action:'type',data:"export AIM_FIXTURE_ENV=ordinary; printf 'CHAT_ENV_%s\\n' \"$AIM_FIXTURE_ENV\""});
     await call('write_compute_terminal',{session_id:channel,request_id:randomUUID(),action:'enter'});

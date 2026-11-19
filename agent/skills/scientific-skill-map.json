@@ -721,7 +721,7 @@
       ],
       "status": "implemented_lease_and_bounded_scheduler_probe",
       "phase": "discovery",
-      "adaptation": "For a live queue or idle-GPU question, use the current conversation's hosted lease. Limit the observation to the requested scheduler. Use run/status tools for an existing job only.",
+      "adaptation": "For live queue and idle-GPU questions use the current hosted resource's service-only lease and bounded scheduler probe. A failed private terminal can offer a safe same-resource service retry. Use actual receipts, including unavailable terminal state. Manual sharing applies only after an independent human handoff.",
       "reference_files": {
         "studio-compute-workflow": [
           "references/compute-discovery.md",

@@ -102,6 +102,38 @@ export async function frontendResourceConsoleCases({check}) {
     assert.equal(await page.locator('.agent-panel:visible').count(),0);
     await capture('compute-resource-console-dark');
 
+    const serviceLease=detail.locator('li').filter({hasText:'相变数据核验'});
+    await page.waitForFunction(()=>!document.querySelector('[data-testid="compute-console-refresh"]')?.disabled);
+    const showServiceWithTerminal=terminalStatus=>page.evaluate(status=>{
+      const f=window.__test,resource=f.consoleSnapshot.resources[0];
+      const allocation=resource.channels.find(channel=>channel.leaseId==='lease-k');
+      f.originalServiceVerification??=structuredClone(allocation);
+      if(status==='restore')Object.assign(allocation,f.originalServiceVerification,{serviceContext:false,terminalStatus:null});
+      else Object.assign(allocation,{status:'assigned',serviceOnly:true,serviceContext:true,sessionId:null,terminalStatus:status});
+      f.events.forEach(listener=>listener({method:'studio/managedActivity'}));
+    },terminalStatus);
+    await showServiceWithTerminal('preparing');
+    await serviceLease.getByText('托管 Shell · 准备中',{exact:true}).waitFor();
+    assert.match(await serviceLease.locator('.compute-console-channel-type').innerText(),/^服务上下文\s+托管 Shell · 准备中$/);
+    await serviceLease.getByText('已分配',{exact:true}).waitFor();
+    await showServiceWithTerminal('lost');
+    await serviceLease.getByText('托管 Shell · 失联',{exact:true}).waitFor();
+    await serviceLease.getByText('已分配',{exact:true}).waitFor();
+    assert.doesNotMatch(await serviceLease.innerText(),/terminal-lease-k/);
+    await capture('compute-resource-console-service-with-lost-shell');
+    await serviceLease.getByRole('button',{name:'释放',exact:true}).click();
+    const serviceConfirmation=page.getByRole('dialog',{name:'释放会话通道'});
+    await serviceConfirmation.getByText('此操作解除该会话的服务分配并关闭它的专属 Shell。已提交作业继续运行。',{exact:true}).waitFor();
+    await capture('compute-resource-console-release-service-and-shell');
+    await serviceConfirmation.getByRole('button',{name:'取消',exact:true}).click();
+    await showServiceWithTerminal(null);
+    await serviceLease.getByText('托管 Shell · 失联',{exact:true}).waitFor({state:'hidden'});
+    await serviceLease.getByRole('button',{name:'释放',exact:true}).click();
+    await serviceConfirmation.getByText('此操作解除该会话的服务分配。已提交作业继续运行。',{exact:true}).waitFor();
+    await serviceConfirmation.getByRole('button',{name:'取消',exact:true}).click();
+    await showServiceWithTerminal('restore');
+    await serviceLease.getByText('释放中',{exact:true}).waitFor();
+
     await detail.getByText('项目的 SSH 终端授权',{exact:true}).click();
     await detail.getByRole('combobox',{name:'计算项目'}).selectOption('fixture-project');
     await detail.getByRole('button',{name:'禁止终端',exact:true}).click();
