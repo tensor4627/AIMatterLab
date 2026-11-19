@@ -84,6 +84,7 @@ test('the real broker gives each conversation a confirmed private PTY and keeps 
  const visible=(await request(base+'/shell/open',{requestId:'human'})).data;
  const service=(await request(base+'/service/start',{profileId:profile.id,profileVersion:1,requestId:'service',bootstrap:{fixture:true}})).data;
  const [a,b]=await Promise.all([request(base+'/managed-shell/open',first),request(base+'/managed-shell/open',second)]);
+ assert.deepEqual((await request(base+'/state')).data.managedShellUsage,{total:4,occupied:2});
  assert.equal(a.status,200);assert.equal(b.status,200);assert.notEqual(a.data.sessionId,b.data.sessionId);
  assert.deepEqual((await request(base+'/managed-shell/open',first)).data,a.data);
  assert.deepEqual((await request('/sessions')).data.sessions.map(s=>s.id),[visible.id]);
@@ -93,6 +94,7 @@ test('the real broker gives each conversation a confirmed private PTY and keeps 
  assert.deepEqual(initial.chunks,[]);
  assert.equal((await request(base+'/managed-shell/input',{...first,requestId:'typing',data:'fixture'})).data.accepted,true);
  assert.deepEqual((await request(base+'/managed-shell/close',first)).data,{leaseId:first.leaseId,closed:true});
+ assert.deepEqual((await request(base+'/state')).data.managedShellUsage,{total:4,occupied:1});
  assert.equal((await request(base+'/managed-shell/open',first)).status,409);
  assert.equal((await request(base+'/managed-shell/state',second)).data.alive,true);
  assert.equal((await request(base+'/service/state')).data.channelKind,'private');

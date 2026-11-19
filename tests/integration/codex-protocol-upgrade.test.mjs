@@ -9,6 +9,7 @@ import {createHash} from 'node:crypto';
 import {inspect} from 'node:util';
 import {CodexBridge,PROTOCOL_VERSION,verifyProtocolVersion} from "../../agent/providers/codex.mjs";
 import {STUDIO_VERSION} from "../../desktop/platform/studio-version.mjs";
+import {codexRuntime} from '../../desktop/platform/codex-runtime.mjs';
 import {bootstrapSkills,ISOLATION_FEATURES} from "../../desktop/platform/codex-isolation.mjs";
 
 test('the bridge identifies the generated app-server protocol reference version',()=>{
@@ -26,7 +27,7 @@ test('older and newer valid CLI versions warn without blocking either isolation 
  for(const installed of ['',null,'future-version','0.166.0\nprivate-token','x'.repeat(129),'01.2.3','1.2.3-01','1.2.3-..','1.2.3+build..metadata'])for(const strictIsolation of [false,true])assert.throws(()=>verifyProtocolVersion(installed,{strictIsolation}),error=>error.code==='STUDIO_CODEX_PROTOCOL_MISMATCH'&&!error.message.includes('private-token'));
 });
 
-function launchFixture(t,{version='0.166.0-alpha.5.1',strictIsolation=true,alter=()=>{},prepareGate,replyGate,missingFeature=false,spawnError}={}){
+function launchFixture(t,{version='0.166.0-alpha.5.1',strictIsolation=true,alter=()=>{},prepareGate,replyGate,missingFeature=false,spawnError,host={}}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-protocol-compat-')),calls=[],children=[];let bridge;
  const spawnProcess=(_executable,args,options)=>{
   if(spawnError)throw spawnError;
@@ -36,22 +37,53 @@ function launchFixture(t,{version='0.166.0-alpha.5.1',strictIsolation=true,alter
    const assignment=args[++index],equals=assignment.indexOf('='),keys=assignment.slice(0,equals).split('.');let target=config;
    for(const key of keys.slice(0,-1))target=target[key]??={};target[keys.at(-1)]=JSON.parse(assignment.slice(equals+1));
   }
-  const values={initialize:{userAgent:'synthetic-cli',codexHome:path.join(root,'public-home'),platformFamily:'windows',platformOs:'windows'},'config/read':{config},'skills/list':{data:[{cwd:options.cwd,skills:[]}]},'mcpServerStatus/list':{data:[],nextCursor:null}};
+  const values={initialize:{userAgent:'synthetic-cli',codexHome:path.join(root,'public-home'),platformFamily:'windows',platformOs:'windows'},'config/read':{config},'skills/list':{data:[{cwd:options.cwd,skills:[]}]},'mcpServerStatus/list':{data:[],nextCursor:null},'account/read':{account:null,requiresOpenaiAuth:true}};
   child.stdin={destroyed:false,write:raw=>{const message=JSON.parse(raw);calls.push(message.method);if(message.id!==undefined)void(async()=>{if(replyGate&&replyGate.method===message.method){replyGate.enter();await replyGate.promise;}let result=structuredClone(values[message.method]);alter(message.method,result);child.stdout.write(JSON.stringify({id:message.id,result})+'\n');})();}};
   assert.equal(args.includes('--strict-config'),false,'external host config is not a AIMatterLab-owned schema');children.push(child);return child;
  };
- bridge=new CodexBridge({strictIsolation,isolationRoot:root,launchDependencies:{execute:async()=>({stdout:'codex-cli '+version}),spawnProcess},isolationDependencies:{execute:async(_exe,args)=>{if(prepareGate){prepareGate.enter();await prepareGate.promise;}return {stdout:args[0]==='features'?[...ISOLATION_FEATURES.filter(key=>!missingFeature||key!=='shell_tool'),'skip_host_skill_discovery'].map(key=>key+' stable true').join('\n'):'[]'};},probe:async()=>[],prepareModels:directory=>{const file=path.join(directory,'public-model-ceiling.json'),bytes=Buffer.from('{"models":[]}');fs.writeFileSync(file,bytes);return {path:file,sha256:createHash('sha256').update(bytes).digest('hex'),models:['synthetic-model']};}}});
+ bridge=new CodexBridge({strictIsolation,isolationRoot:root,host:{...codexRuntime,...host},launchDependencies:{execute:async()=>({stdout:'codex-cli '+version}),spawnProcess},isolationDependencies:{execute:async(_exe,args)=>{if(prepareGate){prepareGate.enter();await prepareGate.promise;}return {stdout:args[0]==='features'?[...ISOLATION_FEATURES.filter(key=>!missingFeature||key!=='shell_tool'),'skip_host_skill_discovery'].map(key=>key+' stable true').join('\n'):'[]'};},probe:async()=>[],prepareModels:directory=>{const file=path.join(directory,'public-model-ceiling.json'),bytes=Buffer.from('{"models":[]}');fs.writeFileSync(file,bytes);return {path:file,sha256:createHash('sha256').update(bytes).digest('hex'),models:['synthetic-model']};}}});
  t.after(()=>{bridge.close();fs.rmSync(root,{recursive:true,force:true});});return {bridge,calls,children};
 }
 function gate(method){let enter,release;return {method,entered:new Promise(resolve=>{enter=resolve;}),promise:new Promise(resolve=>{release=resolve;}),enter:()=>enter(),release:()=>release()};}
 function assertCleared(bridge){assert.equal(bridge.isolationReady,false);assert.equal(bridge.info,null);assert.equal(bridge.compatibility,null);assert.equal(bridge.isolationSummary,null);}
 
 test('a different strict CLI publishes only startup-scoped capability proof after all actual readbacks',async t=>{
- const x=launchFixture(t),events=[];x.bridge.on('event',event=>events.push(event));const info=await x.bridge.start('fixture-cli');
+ const pending=gate('mcpServerStatus/list'),x=launchFixture(t,{replyGate:pending}),events=[];x.bridge.on('event',event=>events.push(event));
+ const launched=x.bridge.start('fixture-cli');await pending.entered;assert.equal(events.some(event=>event.method==='studio/codexVersionWarning'),false);
+ pending.release();const info=await launched;
  assert.equal(info.studioCompatibility.status,'capabilities_verified');assert.equal(info.studioCompatibility.installedVersion,'0.166.0-alpha.5.1');assert.equal(info.studioCompatibility.baselineMatch,false);assert.match(info.studioCompatibility.scope,/no thread, model reply or scientific workflow verified/);
- assert.equal(info.studioCompatibility.versionWarning.severity,'warning');assert.equal(events[0].method,'studio/codexVersionWarning');assert.equal(events[0].params.status,'pending_capability_verification');
+ assert.equal(info.studioCompatibility.versionWarning.severity,'warning');assert.deepEqual(events.filter(event=>event.method==='studio/codexVersionWarning'),[{method:'studio/codexVersionWarning',params:info.studioCompatibility}]);
  assert.deepEqual(x.calls,['initialize','initialized','config/read','skills/list','mcpServerStatus/list']);assert.equal(x.bridge.isolationReady,true);
  assert.equal(x.calls.some(method=>/^(thread|turn|account)\//.test(method)),false);x.bridge.close();assertCleared(x.bridge);
+});
+test('authentication-only use reports its own status without a chat version popup',async t=>{
+ const x=launchFixture(t,{version:'0.169.1'}),events=[];x.bridge.on('event',event=>events.push(event));
+ const info=await x.bridge.start('fixture-cli',null,{}, {authenticationOnly:true});
+ assert.equal(info.studioCompatibility.status,'capabilities_verified');
+ assert.deepEqual(await x.bridge.prepareChatAccount(()=>{}),{account:null,requiresOpenaiAuth:true});
+ assert.equal(events.some(event=>event.method==='studio/codexVersionWarning'),false);
+});
+test('an actual sign-in failure retains its account stage without exposing native error contents',async t=>{
+ const secret='private-sign-in-callback-with-0.169.1',x=launchFixture(t,{host:{initializeAuth:async()=>{throw Error(secret);}}}),events=[];x.bridge.on('event',event=>events.push(event));
+ const predicate=error=>error.stage==='account'&&error.failure==='account_check_failed'&&!inspect(error).includes(secret)&&!error.message.includes(PROTOCOL_VERSION);
+ await x.bridge.start('fixture-cli',null,{}, {authenticationOnly:true});
+ await assert.rejects(x.bridge.prepareChatAccount(()=>{}),predicate);
+ await assert.rejects(x.bridge.start('fixture-cli'),predicate);
+ assert.equal(events.some(event=>event.method==='studio/codexVersionWarning'),false);
+});
+test('native account rejection and failed authorization publish only public recovery details',async()=>{
+ const bridge=new CodexBridge({strictIsolation:true}),events=[];
+ const secret='private-oauth-callback-with-authorization-code';
+ let sent;
+ bridge.process={stdin:{write:value=>{sent=JSON.parse(value);}},kill:()=>{}};
+ bridge.on('event',event=>events.push(event));
+ const read=bridge.rawRequest('account/read',{refreshToken:false});
+ bridge.receive({id:sent.id,error:{code:-32000,message:secret}});
+ await assert.rejects(read,error=>error.rpcCode===-32000&&/刷新账户状态/.test(error.message)&&!inspect(error).includes(secret));
+ bridge.receive({method:'account/login/completed',params:{loginId:'fixture-login',success:false,error:secret}});
+ assert.equal(events[0].params.error,'登录失败，请重新登录。');
+ assert(!JSON.stringify(events).includes(secret));
+ bridge.close();
 });
 for(const version of ['0.163.0-alpha.11.2','0.167.0-alpha.3.2'])test('non-isolated legacy bridge observes '+version+' with warning and no false capability proof',async t=>{
  const x=launchFixture(t,{version,strictIsolation:false}),info=await x.bridge.start('fixture-cli');
@@ -72,7 +104,9 @@ for(const problem of ['missing_feature','effective_config','native_skill','ambie
   if(method==='skills/list'&&problem==='native_skill')value.data[0].skills=[{path:path.resolve('ungranted/SKILL.md'),enabled:true}];
   if(method==='mcpServerStatus/list'&&problem==='ambient_mcp')value.data=[{name:'outside',tools:{ungranted:{}}}];
  }});
- await assert.rejects(x.bridge.start('fixture-cli'),error=>error.code==='STUDIO_CODEX_COMPATIBILITY_FAILED'&&error.stage===(problem==='missing_feature'?'isolation_prepare':'effective_isolation')&&error.installedVersion==='0.166.0-alpha.5.1');assertCleared(x.bridge);
+ const events=[];x.bridge.on('event',event=>events.push(event));
+ await assert.rejects(x.bridge.start('fixture-cli'),error=>error.code==='STUDIO_CODEX_COMPATIBILITY_FAILED'&&error.stage===(problem==='missing_feature'?'isolation_prepare':'effective_isolation')&&error.installedVersion==='0.166.0-alpha.5.1'&&!error.message.includes(PROTOCOL_VERSION));assertCleared(x.bridge);
+ assert.equal(events.some(event=>event.method==='studio/codexVersionWarning'),false);
 });
 test('cancel during preparation cannot spawn a child or publish stale compatibility',async t=>{
  const pending=gate(),x=launchFixture(t,{prepareGate:pending}),work=x.bridge.start('fixture-cli');await pending.entered;x.bridge.close();pending.release();await assert.rejects(work,error=>error.stage==='lifecycle');assert.equal(x.children.length,0);assertCleared(x.bridge);

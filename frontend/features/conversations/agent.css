@@ -6,6 +6,10 @@
 .agent-panel .agent-top-surface .agent-collapsed-summary{display:block;grid-column:1/-1;grid-row:2;order:initial;flex:initial;max-width:100%;padding-top:0;line-height:1.5}
 .agent-panel .agent-tool-alert{flex-wrap:wrap;min-width:0;line-height:1.55}
 .agent-panel .agent-tool-alert>span{min-width:0;overflow-wrap:anywhere}
+.agent-panel .agent-tool-alert.notice-surface{display:grid;margin:4px 12px 8px;color:var(--text)}
+.agent-panel .agent-recovery.notice-surface{border-color:var(--notice-edge)}
+.agent-panel .agent-history-state.notice-surface{border-color:var(--notice-edge)}
+.agent-panel .account-login-guidance.notice-surface{border-color:var(--notice-edge)}
 .agent-header-actions{display:flex;align-items:center;gap:3px}
 .agent-primary{display:grid;gap:10px;padding:10px 13px}
 .agent-primary .agent-provider{margin:0;padding:0;display:flex;align-items:end;gap:8px}

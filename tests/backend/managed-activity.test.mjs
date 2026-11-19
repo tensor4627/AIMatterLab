@@ -141,6 +141,19 @@ test('legacy keyword grants remain recorded and a fresh direction establishes on
  }
 });
 
+test('a standalone submit instruction applies to its original project and conversation',()=>{
+ const intents=createRunActionIntents(),chat={...one,taskId:null},candidates=[{sourceId:'worker',runId:'one-run'}];
+ const permits=scope=>intents.permits(scope,'submit','one-run',candidates,'Fixture');
+ intents.record({...chat,projectId:null,text:'请提交这个独立作业',turnId:'before-selection'});
+ assert.equal(permits(chat),false);
+ intents.record({...chat,text:'请提交这个独立作业',turnId:'confirmed'});
+ assert.equal(permits(chat),true);
+ assert.equal(permits({...chat,projectId:'other-project'}),false);
+ assert.equal(permits({...chat,threadId:'another-chat'}),false);
+ intents.record({...chat,text:'不要提交这个独立作业',turnId:'revoked'});
+ assert.equal(permits(chat),false);
+});
+
 test('run execution or validation requires a direct human action and retains the exact scope',()=>{
  const intents=createRunActionIntents();
  const candidates=[{sourceId:'s1',runId:'run-1'}];

@@ -1,5 +1,7 @@
 # Observe recorded runs without resubmission
 
+For an acquired worker-managed resource, prefer `read_compute_run_status` and `read_compute_run_log` with its exact returned resource and run ID. For a site-native job, observe the original scheduler ID on the same resource. The standalone script below covers recorded cluster runs on its supported worker interface.
+
 Use `scripts/cluster-reconcile.mjs` from a source checkout to inspect an existing manifest. A portable desktop distribution provides the same standalone file at `<resources>/studio-tools/cluster-reconcile.mjs`, beside the public `studio-skills` directory. Use that physical file when no checkout is present; it uses only Node built-ins. It never creates, prepares, submits, cancels or registers a run. A disconnected or unknown run keeps its recorded identity. A successful collection is a file-transfer result, not a new scientific validation.
 
 The manifest is a private JSON object with `schema_version: 1` and `runs`. Each run has its recorded `run_id`, optional pinned `job_id`, optional `names` containing exact relative output names, and optional `previews` containing the selected text results to verify independently. With explicit `names`, every requested preview must be among those names. Without `names`, the worker's bounded default output allowlist applies. No connection, account, path-to-credential, queue, token or executable fields are accepted.

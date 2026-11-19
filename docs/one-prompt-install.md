@@ -1,9 +1,9 @@
-# AIMatterLab 0.1.19 单 prompt 安装
+# AIMatterLab 0.1.20 单 prompt 安装
 
 复制下面的提示词给可以使用本机终端和 Git 的 Agent。上游项目标识为 `https://github.com/tensor4627/AIMatterLab.git`，本次使用本地仓库交付的固定标签。
 
 ```text
-请在我的 Windows 电脑安装 AIMatterLab 0.1.19。从我提供的本地仓库核对 refs/tags/v0.1.19 的完整提交，在新目录使用该版本，读取 INSTALL_AGENT.md 并核对安装清单。先发现本机可复用的 WSL、Python 和计算环境，再按我选定的服务商和短例验证。完成后给我启动文件和实际验收结果。
+请在我的 Windows 电脑安装 AIMatterLab 0.1.20。从我提供的本地仓库核对 refs/tags/v0.1.20 的完整提交，在新目录使用该版本，读取 INSTALL_AGENT.md 并核对安装清单。先发现本机可复用的 WSL、Python 和计算环境，再按我选定的服务商和短例验证。完成后给我启动文件和实际验收结果。
 ```
 
 完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)列出官方仓库、本版版本号和发布引用。需要登录仓库时由用户在本机 Git 凭据界面完成。
@@ -39,6 +39,8 @@ flowchart LR
 安装验收与日常使用必须指向生成 launcher 的同一个 worker root 和 profile。安装结束前在该实例读取 `compute_readiness` / `list_environments`，核对选中的 Python、引擎、源码来源与 CUDA 观察结果，并为实际路线保存 `probe_environment` 运行时收据。另一隔离验收实例跑通，不代表正常实例已经登记。首启/连接时默认发现现有的标准 venv、conda 索引、PATH/已绑定源码中的程序，新增独立版本登记，保留旧环境和项目授权。该搜索有明确范围；自定义前缀和非标准原生构建可由 Agent 用 `draft_local_environment` 提议，在计算环境页用表单审阅保存。GPU 发现、依赖探测与真实科学短例分别记录。
 
 询问用户是否需要集群，优先导入已有 SSH 引用。先只读核验登录用户、调度器及队列，再讨论目标队列、资源与激活路径，使用 `draft_cluster_setup` 生成可审阅设置；连接检查不提交任务。连接页显示实际检查时间，失败清除旧成功，修改配置或结果过旧后显示待复查。计算节点 GPU/模型仍需用户审阅后的短例，不把登录节点探测当成安装成功。
+
+安装后的托管 SSH 用法是在桌面完成认证，在普通聊天按名称取得对话租约，再按委托范围查看队列或配置环境。作业服务项目访问独立核对。安装验收短例继续遵循下文的 `smoke` 审阅规则。[SSH 集群管理](ssh-cluster-management.md)
 
 [连接引导实施契约](design/compute-connection-hil.md)区分本地 WSL、已有密钥或转发入口、人工二步认证。安装 Agent 收集所选来源、用户名和密钥引用等必要设置。密码、私钥和验证码由用户在对应界面处理。使用真实 SSH 站点时，分别记录登录结果、所选资源的执行授权和计算节点短例的结果。日常运行继续使用登记环境和运行时收据。
 
@@ -86,7 +88,7 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 desktop 使用独立 profile、真实 renderer/worker 和 provider 请求。需要认证时，由用户登录后重验。Windows 用户双击 `Launch-AIMatterLab.cmd` 进入验收过的同一 profile，另有兼容 PS1 启动文件。finalize 绑定当前配置和源码指纹，要求三个阶段均通过且选定的短例集合完整。
 
-本版桌面验收见 [0.1.19 发布说明](releases/aimatterlab-0.1.19.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
+本版桌面验收见 [0.1.20 发布说明](releases/aimatterlab-0.1.20.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
 同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 AIMatterLab 核对任务，或选择独立安装 root。
 
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。

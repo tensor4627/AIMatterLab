@@ -1,14 +1,26 @@
+import {redactTranscriptText} from '../../../contracts/agent/transcript-sanitizer.mjs';
+
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
 
 export function diagnosticContext(task,config,operation,runId=null,targetName=''){return {operation,taskId:task.id,provider:task.provider||null,threadId:task.threadId||null,inputParameters:structuredClone(task.parameters||{}),taskName:task.name||'',parameterRevision:task.parameterRevision??0,deploymentRevision:task.deployment?.revision??0,target:config.target,targetId:config.targetId||'',targetName,projectId:config.projectId||'',runId:runId||task.deployment?.prepared?.artifactId||null,preparedId:task.deployment?.prepared?.artifactId||null,requestId:task.deployment?.request?.id||null,configuration:canonical(config),executionBefore:canonical(task.execution||null),taskVersion:task.updatedAt??null,phase:operation==='execute'?'unconfirmed':'failed'};}
 
-export function createDiagnostic(error,context=null){return {id:crypto.randomUUID(),observedAt:Date.now(),raw:error instanceof Error?error.message:String(error),stack:error instanceof Error?error.stack||null:null,context:context?structuredClone(context):null};}
+export function createDiagnostic(error,context=null,severity='error'){
+ const raw=redactTranscriptText(error instanceof Error?error.message:String(error));
+ const stack=error instanceof Error&&error.stack?redactTranscriptText(error.stack):null;
+ return {id:crypto.randomUUID(),observedAt:Date.now(),raw,stack,context:context?structuredClone(context):null,severity};
+}
 
 function freshExecution(record,task){return task?.id===record.context?.taskId&&task.execution?.artifactId===record.context?.runId&&canonical(task.execution)!==record.context.executionBefore;}
 
 export function diagnosticPhase(record,task){if(record.resolution)return record.resolution.phase;const context=record.context;if(context?.operation==='execute'&&freshExecution(record,task))return task.execution.phase||context.phase;return context?.phase||'failed';}
 
 export const diagnosticPending=phase=>['unknown','unconfirmed','submitting','validating'].includes(phase);
+
+export function diagnosticSeverity(record,phase){
+ if(diagnosticPending(phase))return 'warning';
+ if(phase==='confirmed')return 'info';
+ return record.severity??'error';
+}
 
 export function diagnosticCurrent(record,task,config){const before=record.context;if(!before)return false;const after=diagnosticContext(task,config,before.operation);return ['taskId','parameterRevision','deploymentRevision','target','targetId','projectId','configuration','preparedId'].every(key=>before[key]===after[key]);}
 

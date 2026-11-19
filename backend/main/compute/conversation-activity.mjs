@@ -37,12 +37,12 @@ export function createConversationActivity({catalog,now=()=>Date.now()/1000}) {
     if (!history.profileIds.includes(resource.profileId)) catalog.put(HISTORY, key, {...history,profileIds:[...history.profileIds,resource.profileId]});
   }
   function recordRun({scope,sourceId,kind,runId}) {
-    if (!scope?.taskId || !scope.threadId || !scope.projectId || !sourceId || !runId || !['run','cluster-run'].includes(kind)) throw Error('managed_run_identity_invalid');
+    if (!scope?.provider || !scope.threadId || !scope.projectId || !sourceId || !runId || !['run','cluster-run'].includes(kind)) throw Error('managed_run_identity_invalid');
     const id=runKey(scope,sourceId,runId), previous=catalog.get(RUNS,id);
     if(previous&&previous.kind!==kind)throw Error('managed_run_identity_changed');
-    if(!previous)catalog.put(RUNS,id,{provider:scope.provider,threadId:scope.threadId,taskId:scope.taskId,projectId:scope.projectId,sourceId,runId,kind});
+    if(!previous)catalog.put(RUNS,id,{provider:scope.provider,threadId:scope.threadId,taskId:scope.taskId??null,projectId:scope.projectId,sourceId,runId,kind});
   }
-  function runsFor(scope){return catalog.list(RUNS).filter(r=>['provider','threadId','projectId','taskId'].every(k=>r[k]===scope[k]));}
+  function runsFor(scope){return catalog.list(RUNS).filter(r=>['provider','threadId','projectId','taskId'].every(k=>(r[k]??null)===(scope[k]??null)));}
   function runKind(scope,sourceId,runId) {
     return catalog.get(RUNS,runKey(scope,sourceId,runId))?.kind;
   }

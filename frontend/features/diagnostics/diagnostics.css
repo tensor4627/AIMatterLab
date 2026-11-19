@@ -1,8 +1,7 @@
-.diagnostic-notice{border:1px solid var(--line);border-radius:8px;padding:12px;margin:8px 0;min-width:0;overflow-wrap:anywhere}
+.diagnostic-notice{margin:8px 0}
 .diagnostic-notice p{margin:6px 0}.diagnostic-context{color:var(--muted)}
 .diagnostic-notice details>summary,.deployment-diagnostics>details>summary{cursor:pointer}
 .diagnostic-raw{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto}
-.toast .diagnostic-notice{margin:0;border:0;padding:0;max-width:min(620px,75vw)}
-.toast{align-items:flex-start;width:min(800px,calc(100vw - 32px));max-height:min(60dvh,28rem)}
-.toast .diagnostic-notice{flex:1;min-width:0;max-height:calc(min(60dvh,28rem) - 28px);overflow:auto;overscroll-behavior:contain}
-.toast>.icon-button{flex-shrink:0;align-self:flex-start}
+.toast.notice-surface{z-index:1000;display:grid;gap:4px 12px;align-items:start;margin:0;width:min(800px,calc(100vw - 32px));max-height:min(60dvh,28rem);border-color:var(--notice-edge);background:color-mix(in srgb,var(--notice-tone) 7%,var(--raised))}
+.toast.notice-surface[data-severity=info]{background:var(--raised)}
+.toast .notice-message{max-height:calc(min(60dvh,28rem) - 54px);overflow:auto;overscroll-behavior:contain}

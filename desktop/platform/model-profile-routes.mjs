@@ -1,5 +1,6 @@
 import {discoverProfileModels} from '../../agent/providers/model-discovery.mjs';
 import {apiModelKey,validateModelProfile} from '../../contracts/agent/model-profiles.mjs';
+import {redactTranscriptText} from '../../contracts/agent/transcript-sanitizer.mjs';
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 function request(value,keys){if(!object(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('Invalid typed model settings request');return value;}
 export function registerModelProfileRoutes({handle,agents,assertIdle,emit,fetchApi,checkConnection=testProfileConnection}){
@@ -26,5 +27,7 @@ export async function testProfileConnection({agents,profile,model}){
  const values=new Map(),catalog={put:(kind,id,value)=>values.set(kind+id,value),get:(kind,id)=>values.get(kind+id),list:()=>[]},credential=structuredClone(agents.modelProfiles.credential(profile.id));
  const profiles={list:()=>[credential],read:id=>id===profile.id?credential:null,identity:()=>JSON.stringify(credential),resolve:(_provider,key)=>({profile:credential,credential,model:credential.models.find(v=>apiModelKey(profile.id,v.id)===(key||apiModelKey(profile.id,model))),key:key||apiModelKey(profile.id,model)})};
  const bridge=agents.createApiBridge(profile.provider,{root:path.join(agents.root,'connection-checks',randomUUID()),catalog,profiles,worker:()=>null});let timer;
- try{bridge.model=apiModelKey(profile.id,model);await bridge.start();const thread=await bridge.request('thread/start',{model:bridge.model});const completion=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('连接测试超时；未提交计算')),60000);bridge.on('event',event=>{if(event.method==='turn/completed'){event.params.turn.status==='completed'&&event.params.turn.modelOutputReceived?resolve():reject(Error(event.params.turn.error?.message||'未收到完整模型回复'));}});});await Promise.all([completion,bridge.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Connection test. Reply exactly OK. Do not call tools.'}]})]);return {status:'passed',model,scope:'One empty-context model reply; no research content or tools'};}finally{clearTimeout(timer);bridge.close();}
+ try{bridge.model=apiModelKey(profile.id,model);await bridge.start();const thread=await bridge.request('thread/start',{model:bridge.model});const completion=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('连接测试超时；未提交计算')),60000);bridge.on('event',event=>{if(event.method==='turn/completed'){event.params.turn.status==='completed'&&event.params.turn.modelOutputReceived?resolve():reject(Error(event.params.turn.error?.message||'未收到完整模型回复'));}});});await Promise.all([completion,bridge.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Connection test. Reply exactly OK. Do not call tools.'}]})]);return {status:'passed',model,scope:'One empty-context model reply; no research content or tools'};}
+ catch(error){throw Error(redactTranscriptText(error instanceof Error?error.message:String(error),[credential.apiKey]));}
+ finally{clearTimeout(timer);bridge.close();}
 }

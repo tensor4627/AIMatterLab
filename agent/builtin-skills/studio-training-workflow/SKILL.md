@@ -9,7 +9,7 @@ Use describe_engine for the requested implemented route: nep.train, nep.eval, ne
 
 Inspect actual dataset assets, species, units and energy/force/virial labels. Record hashes and disjoint train/validation/test identities. Keep independent test data separate and honor sealed-test restrictions. Missing virial labels cannot produce a virial RMSE. Existing model or dataset inputs should be reused rather than regenerated.
 
-Prepare and save real trainer configurations and file paths using AIMatterLab authoring tools. Reuse traceable values; ask for uncertain scientific objectives or conflicting data, not technical wrapper keys the engine contract supplies. A tiny demonstrator must be labeled. Keep one workflow per conversation; continue checks, execution and repair when the current delegation includes them. Honor explicit draft-only/no-run limits.
+Prepare real trainer configurations and file paths within the authorized workspace. Reuse traceable values and derive technical wrapper keys from the engine contract. Ask about unresolved scientific objectives or conflicting data. Label a small demonstrator clearly. Preserve the workflow if one exists. Use the authorized compute route for a delegated independent job. Continue checks and repair within scope, including explicit draft-only and no-run limits.
 
 Checkpoint, full eager model and deployment export are different assets. HotPP export must match the consumer and atomic-number convention; use the actual selected export mode and then validate with that MD environment. Native NEP models retain their species order and native format. Export completion does not prove compatibility without a consumer check.
 

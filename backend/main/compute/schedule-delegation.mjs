@@ -30,6 +30,7 @@ function commandText(text) {
 }
 
 function sameScope(grant,scope) {
+  if(!grant.taskId&&!scope.taskId)return (grant.projectId??null)===(scope.projectId??null);
   return (!grant.projectId||grant.projectId===scope.projectId)&&(!grant.taskId||grant.taskId===scope.taskId);
 }
 
@@ -122,7 +123,7 @@ export function createScheduleDelegations(catalog) {
     const purposes={status:'poll',read_log:'action'};
     const purpose=operation==='stop'?'stop':args.kind==='action'?purposes[args.action?.type]:args.kind;
     const turn=evidencedTurn(grant,purpose);
-    if(!scope.taskId||!scope.projectId||!turn||!sameScope(grant,scope))throw Error('managed_schedule_task_delegation_required');
+    if(!scope.threadId||!scope.projectId||!turn||!sameScope(grant,scope))throw Error('managed_schedule_task_delegation_required');
     if(!grant.taskId||!grant.projectId)catalog.put(namespace,key,{...grant,taskId:scope.taskId,projectId:scope.projectId});
     return turn;
   }
@@ -130,7 +131,7 @@ export function createScheduleDelegations(catalog) {
 }
 
 const runCommands={
-  submit:/^(?:submit|launch|start|run)\b|^(?:(?:把|将|在|对).{1,100}?)?(?:提交|投递|启动|运行)/iu,
+  submit:/^(?:submit|enqueue|launch|start|run)\b|^(?:(?:把|将|在|对|用).{1,100}?)?(?:提交|投递|启动|运行|交(?=(?:一?[个份项]|独立|作业|任务)))/iu,
   cancel:/^(?:cancel|stop|abort|terminate)\b|^(?:(?:把|将|在|对).{1,100}?)?(?:取消|撤销|停止|终止)/iu,
   validate:/^(?:validate|verify|check)\b|^(?:(?:把|将|在|对).{1,100}?)?(?:核验|核对|验证|检查)/iu,
 };
@@ -207,7 +208,7 @@ export function createRunActionIntents() {
   function permits(scope,operation,runId,candidates,targetName) {
     const row=turns.get(keyOf(scope.provider,scope.threadId));
     if(!row||!Object.hasOwn(runCommands,operation)||typeof runId!=='string'||!runId
-      ||!scope.threadId||!scope.taskId||!scope.projectId||!sameScope(row,scope))return false;
+      ||!scope.threadId||!scope.projectId||!sameScope(row,scope))return false;
     const clauses=sentences(row.text).filter(part=>!discussion.test(part)&&!contingent.test(part))
       .flatMap(part=>part.split(/\bbut\b|但是|但|(?:[，,]|\band\b|并且?|同时)(?=\s*(?:不要|先别|不再|do not|don['’]t|never))/iu))
       .map(commandText);

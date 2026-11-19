@@ -7,6 +7,7 @@ import {ensureTaskAuthoring} from "../../backend/main/workspace/task-authoring.m
 import {workspaceController} from "../../backend/main/workspace/workspaces.mjs";
 import {bindLegacyAuthoringWorker} from "../../backend/main/compute/task-authoring-binding.mjs";
 import {restoreTaskWorker} from "../../backend/main/compute/worker-restore.mjs";
+import {taskForRecordIndex} from "../../backend/main/compute/worker-service-version.mjs";
 import {taskWorkerSource,taskWorkerSettings} from "../../contracts/compute/task-worker-binding.mjs";
 
 import {deferred} from "../helpers/agent-hooks.mjs";
@@ -20,4 +21,34 @@ for(const mode of ['prepared','active','unknown','known-run','existing-source','
 for(const mode of ['health','project','environment','connection','epoch','port','settings','selection','revision','deleted'])test('legacy proof rejects missing actual IDs or late ownership before writing binding: '+mode,async()=>{const f=fixture();f.legacy();const base=f.worker.request;f.worker.request=async(...args)=>{const value=await base(...args);if(args[1]==='/api/health'){if(mode==='health')return {...value,root:'/wrong'};if(mode==='connection')f.worker.connection={...f.worker.connection};if(mode==='epoch')f.worker.connectionEpoch++;if(mode==='port')f.worker.connectionTarget.port++;if(mode==='settings')f.setSettings({distribution:'Other',workerRoot:'/other',workerPort:9013});if(mode==='selection')f.setSelection({serial:2,provider:'codex',threadId:'other',taskId:'other'});if(mode==='revision')f.edit({parameterRevision:12});if(mode==='deleted')f.records.remove('codex:thread');}if(args[1]==='/api/projects'&&mode==='project')return [{id:'unrelated'}];if(args[1]==='/api/environments'&&mode==='environment')return [{id:'unrelated-env'}];return value;};await assert.rejects(f.bind());if(mode!=='deleted')assert(!f.records.read(f.task.id).authoring.workerBinding);assert(f.calls.every(value=>value.method==='GET'));});
 test('all task target parsers share strict priority and never select a later/global source after an invalid first source',()=>{const authoring={workerBinding:{distribution:'Authoring',root:'/authoring',port:9001}},workspace={workerBinding:{distribution:'Workspace',root:'/workspace'}},deploymentDraft={workerBinding:{distribution:'Draft',root:'/draft'}},deployment={workerBinding:{distribution:'Deployment',root:'/deployment'}};for(const [task,name] of [[{authoring},'authoring'],[{authoring,workspace},'workspace'],[{authoring,workspace,deploymentDraft},'deploymentDraft'],[{authoring,workspace,deploymentDraft,deployment},'deployment']])assert.equal(taskWorkerSource(task).source,name);assert.throws(()=>taskWorkerSettings({deployment:{workerBinding:{root:'invalid'}},authoring},{}),/来源/);});
 test('keepDraft guarded completion stores new authoring provenance and refuses stale connection results before refreshing another owner',async()=>{const f=fixture();f.edit({workspaceChoice:'pending'});let refreshes=0;const controller=workspaceController({records:f.records,worker:f.worker,selection:f.context.selection,assertIdle(){},refreshContext:async()=>{refreshes++;}});await controller.keepDraft({taskId:f.task.id});assert.equal(refreshes,1);assert.deepEqual(f.records.read(f.task.id).authoring.workerBinding,f.binding);const g=fixture();g.edit({workspaceChoice:'pending'});const base=g.worker.request;g.worker.request=async(...args)=>{const value=await base(...args);g.worker.connectionEpoch++;return value;};const old=workspaceController({records:g.records,worker:g.worker,selection:g.context.selection,assertIdle(){},refreshContext:async()=>{throw Error('Must not refresh');}});await assert.rejects(old.keepDraft({taskId:g.task.id}));assert(!g.records.read(g.task.id).authoring?.workerBinding);});
-test('actual legacy IPC registration requires trusted main-frame sender and rejects arbitrary target arguments',async()=>{const source=fs.readFileSync(new URL("../../desktop/main.mjs",import.meta.url),'utf8'),parsed=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS),functions=parsed.statements.filter(node=>ts.isFunctionDeclaration(node)&&['trusted','handle'].includes(node.name?.text)).map(node=>node.getText(parsed));let registration;const visit=node=>{if(ts.isExpressionStatement(node)&&ts.isCallExpression(node.expression)&&node.expression.expression.getText(parsed)==='handle'&&node.expression.arguments[0]?.text==='task.authoring.bindWorker')registration=node;node.forEachChild(visit);};visit(parsed);const f=fixture();f.legacy();const handlers=new Map(),window={isDestroyed:()=>false,webContents:{id:7,isDestroyed:()=>false,getURL:()=> 'file:///studio/index.html'}};new Function('ipcMain','window','shuttingDown','assertIdleAgent','bindLegacyAuthoringWorker','taskRecords','worker','settings','workflowContext',functions.join('\n')+'\n'+registration.getText(parsed))({handle:(name,fn)=>handlers.set(name,fn)},window,false,()=>{},bindLegacyAuthoringWorker,f.records,f.worker,f.context.settings(),{current:f.context.selection});const handler=handlers.get('studio:task.authoring.bindWorker'),sender={id:7,isDestroyed:()=>false};for(const event of [{sender:{...sender,id:8},senderFrame:{url:window.webContents.getURL()}},{sender,senderFrame:{url:'https://untrusted.invalid'}},{sender,senderFrame:{url:window.webContents.getURL(),parent:{}}}])await assert.rejects(handler(event,{taskId:f.task.id}),/Untrusted/);assert.deepEqual(f.calls,[]);const event={sender,senderFrame:{url:window.webContents.getURL()}};await assert.rejects(handler(event,{taskId:f.task.id,root:'/arbitrary'}),/Invalid typed/);assert.deepEqual((await handler(event,{taskId:f.task.id})).authoring.workerBinding,f.binding);});
+test('actual legacy IPC registration requires trusted main-frame sender and rejects arbitrary target arguments',async()=>{
+ const source=fs.readFileSync(new URL("../../desktop/main.mjs",import.meta.url),'utf8');
+ const parsed=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+ const functions=parsed.statements.filter(node=>ts.isFunctionDeclaration(node)&&['trusted','handle'].includes(node.name?.text)).map(node=>node.getText(parsed));
+ let registration;
+ const visit=node=>{
+  if(ts.isExpressionStatement(node)&&ts.isCallExpression(node.expression)&&node.expression.expression.getText(parsed)==='handle'&&node.expression.arguments[0]?.text==='task.authoring.bindWorker')registration=node;
+  node.forEachChild(visit);
+ };
+ visit(parsed);
+ assert.ok(registration);
+ const f=fixture();
+ f.legacy();
+ const handlers=new Map(),window={isDestroyed:()=>false,webContents:{id:7,isDestroyed:()=>false,getURL:()=> 'file:///studio/index.html'}};
+ const ports={
+  ipcMain:{handle:(name,fn)=>handlers.set(name,fn)},window,shuttingDown:false,assertIdleAgent:()=>{},
+  bindLegacyAuthoringWorker,taskForRecordIndex,taskRecords:f.records,worker:f.worker,
+  settings:f.context.settings(),workflowContext:{current:f.context.selection},
+ };
+ const register=new Function(...Object.keys(ports),functions.join('\n')+'\n'+registration.getText(parsed));
+ register(...Object.values(ports));
+ const handler=handlers.get('studio:task.authoring.bindWorker'),sender={id:7,isDestroyed:()=>false};
+ for(const event of [{sender:{...sender,id:8},senderFrame:{url:window.webContents.getURL()}},{sender,senderFrame:{url:'https://untrusted.invalid'}},{sender,senderFrame:{url:window.webContents.getURL(),parent:{}}}])
+  await assert.rejects(handler(event,{taskId:f.task.id}),/Untrusted/);
+ assert.deepEqual(f.calls,[]);
+ const event={sender,senderFrame:{url:window.webContents.getURL()}};
+ await assert.rejects(handler(event,{taskId:f.task.id,root:'/arbitrary'}),/Invalid typed/);
+ const bound=await handler(event,{taskId:f.task.id});
+ assert.deepEqual(bound.authoring.workerBinding,f.binding);
+ assert.ok(bound.workerSourceId);
+});

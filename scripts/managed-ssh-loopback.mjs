@@ -9,8 +9,9 @@ import path from 'node:path';
 import {createInterface} from 'node:readline';
 import pty from '@lydell/node-pty';
 import {createSshConnections,createMultiplexHost} from '../desktop/platform/terminal-service/ssh-connection.mjs';
-import {createManagedComputeResources} from '../backend/main/compute/managed-compute-resources.mjs';
-import {createManagedComputeServices} from '../backend/main/compute/managed-compute-services.mjs';
+import {createManagedWorkbench} from '../desktop/platform/managed-workbench.mjs';
+import {createConversationActivity} from '../backend/main/compute/conversation-activity.mjs';
+import {managedProjectAccess} from '../backend/main/compute/managed-project-access.mjs';
 import {createSshServiceRegistration} from '../backend/main/compute/ssh-service-registration.mjs';
 
 if(process.platform!=='win32')throw Error('Run this check on the Windows desktop with a WSL distribution');
@@ -104,8 +105,28 @@ try {
     const registration=createSshServiceRegistration({catalog:{get:(kind,id)=>rows.get(kind+':'+id),put:(kind,id,row)=>rows.set(kind+':'+id,row)},profiles});
     const connections=Object.fromEntries(['state','serviceState','privateServiceRequest'].map(name=>[name,value=>routes.get(value.connectionId)[name](value)]));
     connections.openService=(ref,bootstrap,context)=>routes.get(ref.connectionId).openService({...ref,bootstrap,interactiveService:context.conversationChannel===true});
-    const services=createManagedComputeServices({connections,registration,source:path.resolve('backend/worker'),transportSource:path.resolve('desktop/platform/terminal-service/python')});
-    resourceDirectory=createManagedComputeResources({terminal:{connections},profiles,services});
+    connections.managedShell=async(op,{sessionId,ownerEpoch,...ref})=>{
+      const result=await routes.get(ref.connectionId).managedShell(ref,op);
+      if(op==='input'){
+        assert.equal(result.id,sessionId);assert.equal(result.ownerEpoch,ownerEpoch);assert.equal(result.requestId,ref.requestId);
+      }else if(op==='read'){
+        assert.equal(result.state.id,sessionId);assert.equal(result.state.ownerEpoch,ownerEpoch);assert.deepEqual(result.state.scope,ref.scope);
+        return {...result,output:result.chunks.map(chunk=>chunk.data).join('')};
+      }
+      return result;
+    };
+    const data=new Map(),bucket=kind=>{if(!data.has(kind))data.set(kind,new Map());return data.get(kind);};
+    const catalog={get:(kind,id)=>bucket(kind).get(id),put:(kind,id,value)=>{bucket(kind).set(id,structuredClone(value));return value;},
+     list:kind=>[...bucket(kind).values()],remove:(kind,id)=>bucket(kind).delete(id)};
+    const scope={provider:'deepseek',threadId:'fixture-chat',taskId:null,projectId:null,checkCurrent:()=>true};
+    const bench=createManagedWorkbench({catalog,profiles,registration,terminal:{connections},projectSkills:{confirmedComputeAliases:()=>null},
+     resourceActivity:createConversationActivity({catalog}),projectAccess:managedProjectAccess({catalog}),
+     records:{bound:()=>null,tasks:()=>[],conversations:()=>[],conversation:()=>({projectId:scope.projectId})},
+     workflow:{currentFor:()=>scope,assertScope:()=>assert.fail('Chat created a workflow')},agents:{isBusy:()=>false,turnOrigin:()=>'user',turnStates:()=>[]},
+     workerSource:path.resolve('backend/worker'),sshTransportSource:path.resolve('desktop/platform/terminal-service/python'),handle(){},notify(){}});
+    const say=text=>bench.userMessage({provider:scope.provider,method:'turn/start',params:{threadId:scope.threadId,input:[{type:'text',text}]}});
+    const call=(name,args)=>bench.desktopTools.call(name,args,scope);
+    resourceDirectory=bench.resources;
     for(const target of targets){
       const reference=profileRef(target);
       const receipts=await Promise.all([resourceDirectory.publish(reference),resourceDirectory.publish(reference)]);
@@ -136,6 +157,48 @@ try {
     assert.deepEqual(observed.map(items=>items.map(project=>project.id)),[['fixture-project-0'],['fixture-project-1']]);
     const localSource=sources.find(item=>item.profileId===localProfile.id);
     assert.deepEqual(await localSource.request('GET','/api/projects'),[]);
+    const resource_id='ssh:'+targets[0].profile.id;
+    say('读取我的个人skill，看看集群有哪些自有队列空着');
+    const options=await call('acquire_compute_resource',{alias:'集群'});
+    assert.equal(options.status,'choice_required');
+    say('是'+targets[0].profile.name);
+    const channel=(await call('acquire_compute_resource',{resource_id})).terminal.sessionId;
+    assert(channel);
+    await call('write_compute_terminal',{session_id:channel,request_id:randomUUID(),action:'type',data:"export AIM_FIXTURE_ENV=ordinary; printf 'CHAT_ENV_%s\\n' \"$AIM_FIXTURE_ENV\""});
+    await call('write_compute_terminal',{session_id:channel,request_id:randomUUID(),action:'enter'});
+    let offset=0,text='';
+    for(let i=0;i<40&&!text.includes('CHAT_ENV_ordinary');i++){
+      const part=await call('read_compute_terminal',{session_id:channel,cursor:offset});
+      text+=part.output;offset=part.cursor;await delay(100);
+    }
+    assert(text.includes('CHAT_ENV_ordinary'));
+    const queue=await call('inspect_compute_service',{resource_id,probe_scheduler:true});
+    assert.equal(queue.project_access,'no_project');
+    assert.equal(queue.scheduler.observations[0].queues[0].name,'fixture-only');
+    assert.equal(queue.scheduler.observations[0].queues[0].node_state,'idle');
+    await call('release_compute_resource',{resource_id});
+    console.log('PASS ordinary DeepSeek-scoped chat: two real SSH targets, human choice, owned terminal and fixed private-service queue observation without project or workflow');
+
+    const target=targets[0],original=sources.find(item=>item.profileId===target.profile.id);
+    const cluster=await original.request('POST','/api/ssh-service/scheduler',{name:'Fixture standalone Slurm',scheduler:'slurm',queue:'fixture-only',
+     environment:{executables:{python:'/usr/bin/python3'}},limits:{cpus:2,gpus:0,memory_mb:2048},remote_root:target.home+'/jobs',read_roots:[target.home]});
+    scope.projectId='fixture-standalone';
+    await original.request('POST','/api/projects',{id:scope.projectId,name:'Independent fixture',policy:{input_roots:[target.home],engines:['pydyn.md'],clusters:[cluster.id]}});
+    say('使用 '+target.profile.name+' 准备独立作业');await call('acquire_compute_resource',{resource_id});
+    const draft=await call('prepare_compute_run',{resource_id,kind:'cluster-run',spec:{name:'Standalone fixture',engine:'pydyn.md',cluster_id:cluster.id,
+     idempotency_key:'one-standalone',max_seconds:30,inputs:{'run.py':target.home+'/run.py'},parameters:{},resources:{queue:'fixture-only',cpus:1,gpus:0,memory_mb:512}}});
+    const args={resource_id,run_id:draft.id};
+    await assert.rejects(call('submit_compute_run',args),/instruction_required/);
+    say('请提交这个独立作业');
+    assert.equal((await call('validate_compute_run',args)).status,'ready');
+    const submitted=await call('submit_compute_run',args);
+    assert.equal(submitted.job_id,'4242');
+    await assert.rejects(call('submit_compute_run',args),/unconfirmed/);
+    await command(managers[0],alpha,"printf 'FIXTURE_SUBMITS_%s\\n' \"$(wc -l < \"$HOME/submissions\")\"",'FIXTURE_SUBMITS_1');
+    const monitor=await original.request('POST','/api/managed-schedules/snapshot',{sourceId:original.id});
+    assert(monitor.schedules.some(row=>row.scope.runId===draft.id&&row.scope.threadId===scope.threadId&&row.maxRuns===48));
+    await call('release_compute_resource',{resource_id});
+    console.log('PASS ordinary chat prepared, validated and explicitly submitted exactly one independent job to the fixture scheduler and attached a finite monitor without a workflow');
     await resourceDirectory.revokeConnection({connectionId:alpha.connectionId});
     assert.equal(resourceDirectory.listSources().length,2);
     assert.equal((await localSource.request('GET','/api/health')).root,local.root);

@@ -32,8 +32,8 @@ export default function BaseWorkspaceSettings({profile,resource,busy=false}:{pro
  }
  const disabled=busy||loading||saving||!ready;
  return <section data-testid="base-workspace-settings">
-  <p>{t('首次登录并交给 Agent 后，Agent 会协助检查和初始化基础工作区。这里可以手动设置。')}</p>
-  {!ready&&<p role="status">{t('请先选择此集群连接，登录并交给 Agent。')}</p>}
+  <p>{t('连接由 AIMatterLab 管理后，可在聊天中指定此资源，请 Agent 协助设置基础工作区。也可以在这里手动设置。')}</p>
+  {!ready&&<p role="status">{t('请选中此配置，核对 SSH 登录和作业服务的就绪状态。')}</p>}
   {loading&&<p role="status">{t('正在读取基础工作区…')}</p>}
   {result?.status==='ready'&&<p role="status" data-testid="base-workspace-ready">{result.workspace.name} <code>{result.workspace.root}</code></p>}
   <label>{t('工作区名称')}<input aria-label={t('基础工作区名称')} value={name} maxLength={80} disabled={disabled} onChange={e=>setName(e.target.value)}/></label>

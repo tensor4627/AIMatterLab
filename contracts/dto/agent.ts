@@ -6,7 +6,8 @@ export interface AgentConnectRequest {provider:AgentProvider;repairTools?:boolea
 export interface AgentCliRequiredResult {cliRequired:import('./cli-runtime').CliReadiness}
 export interface AgentLoginRequiredResult {loginRequired:true;provider:'codex'}
 export interface NativeCodexDefaults {id:string;model?:string;effort?:string}
-export type AgentConnectResult=AgentCliRequiredResult|AgentLoginRequiredResult|{tools?:Record<string,unknown>;studioCompatibility?:unknown;nativeCodexDefaults?:NativeCodexDefaults};
+export interface CodexCompatibility {baselineVersion:string;installedVersion:string;baselineMatch:boolean;status:'capabilities_verified'|'version_observed';scope:string;versionWarning?:{code:'STUDIO_CODEX_VERSION_DIFFERENCE';severity:'warning'}}
+export type AgentConnectResult=AgentCliRequiredResult|AgentLoginRequiredResult|{tools?:Record<string,unknown>;studioCompatibility?:CodexCompatibility;nativeCodexDefaults?:NativeCodexDefaults};
 export type CancelProviderLoginRequest={provider:'kimi'}|{provider:'codex';loginId:string};
 
 export interface AgentRpcRequest extends AgentConnectRequest {method:string;params?:Record<string,unknown>}

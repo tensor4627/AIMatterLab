@@ -8,6 +8,7 @@ import {STUDIO_INSTRUCTIONS,workspaceAgentInstructions} from '../../agent/contex
 import {prepareProfile} from '../../desktop/platform/provider-runtime.mjs';
 import {AgentHub} from '../../agent/providers/agent-hub.mjs';
 import {ScientificSkillRouter} from '../../agent/skills/scientific-skill-router.mjs';
+import {ScientificSkills} from '../../agent/skills/scientific-skills.mjs';
 import {fileURLToPath} from 'node:url';
 
 test('ACP profiles deliver the same bounded AIMatterLab core and progressive skill routing',()=>{
@@ -19,6 +20,8 @@ test('ACP profiles deliver the same bounded AIMatterLab core and progressive ski
   assert.match(document,/first user message/);assert.match(document,/exact advertised document_id/);
   assert.match(document,/draft-only, no-build, no-run and stop/);assert.match(document,/Shell and job-service grants are separate/);
   assert.match(document,/Inspect an unknown operation without replaying it/);
+  assert.match(document,/Ordinary chat can .*independent job/);
+  assert.match(document,/acquire_compute_resource with one selector/);
   const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
   const routes=[...document.matchAll(/`([a-z]+\.[a-z.-]+)`/g)].map(match=>match[1]);
   assert(routes.length>=12);assert(routes.every(id=>map.functions.some(route=>route.id===id)));
@@ -42,6 +45,12 @@ test('the installed workspace contributes its own short index once and falls bac
  const previous=STUDIO_INSTRUCTIONS.slice(0,STUDIO_INSTRUCTIONS.lastIndexOf('\n\n'));
  fs.writeFileSync(file,previous+'\n\n'+extra);
  assert.equal(read(),STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra);
+ const installedGuide=fs.readFileSync(new URL('../../installation/workspace-guide.md',import.meta.url),'utf8').trim();
+ fs.writeFileSync(file,installedGuide.replaceAll('\n','\r\n')+'\r\n\r\n'+extra);
+ assert.equal(read(),STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra);
+ assert.match(fs.readFileSync(file,'utf8'),/# AIMatterLab 工作区/);
+ fs.writeFileSync(file,installedGuide.replace('AIMatterLab 工作区','My custom guide')+'\n\n'+extra);
+ assert.match(read(),/My custom guide/);
  assert.ok(located().includes(JSON.stringify(location)));assert.ok(located().endsWith(extra));
  fs.writeFileSync(file,'x'.repeat(8193));assert.equal(read(),STUDIO_INSTRUCTIONS);
  assert.ok(located().includes(JSON.stringify(location)));
@@ -68,6 +77,32 @@ test('public compute references advertised by selected skills have focused route
  const detail=await router.read('compatible','environment.probe','studio-compute-workflow/references/compute-discovery.md');assert.equal(detail.status,'passed');assert.equal(detail.attachments.length,1);
  const doc='studio-compute-workflow/references/job-service-connection.md';assert.equal((await router.read('deepseek','cluster.connection-setup',doc)).status,'blocked');setup=true;assert.equal((await router.read('deepseek','cluster.connection-setup',doc)).status,'passed');
  await assert.rejects(router.read('deepseek','compute.queue',doc),/exact document_id/);
+});
+
+test('compute.queue reads the current leased-resource guidance in ordinary chat',async()=>{
+ const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
+ const bundledRoot=fileURLToPath(new URL('../../agent/builtin-skills',import.meta.url));
+ const service=new ScientificSkills({map,bundledRoot,sources:()=>[],settings:()=>({})});
+ const scope={provider:'deepseek'};
+ const catalog=await service.call('scientific_skill_catalog',{},scope);
+ const queue=catalog.functions.find(route=>route.id==='compute.queue');
+ assert.equal(queue.phase,'discovery');
+ assert.deepEqual(queue.tools.slice(0,3),['list_compute_resources','acquire_compute_resource','inspect_compute_service']);
+ const args={function_id:queue.id};
+ const entry=await service.call('read_scientific_skill',args,scope);
+ assert.equal(entry.status,'passed');
+ assert.match(entry.text,/using exactly one selector/);
+ assert.match(entry.text,/probe_scheduler: true/);
+ assert.match(entry.text,/verification_pending.*worker's project access check/);
+ assert.match(entry.text,/submit an explicitly delegated independent job/);
+ assert.doesNotMatch(entry.text,/交给 Agent|requires task planning/);
+ const doc='studio-compute-workflow/references/compute-discovery.md';
+ assert(entry.document_ids.includes(doc));
+ const result=await service.call('read_scientific_skill',{...args,document_id:doc},scope);
+ assert.equal(result.status,'passed');
+ assert.match(result.text,/bounded read-only scheduler probe in ordinary chat/);
+ const deployment=await service.call('read_scientific_skill',{function_id:'cluster.lsf-slurm-deployment'},scope);
+ assert.match(deployment.text,/A visual workflow is optional for independent jobs/);
 });
 
 test('project skill guidance reaches generated Kimi/Qwen/DSH profiles and DSH chat policy',async t=>{

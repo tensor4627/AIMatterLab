@@ -1,4 +1,9 @@
 const managedRecovery=new Map([
+ ['managed_compute_user_instruction_required',['resource_selection_required','List the hosted resources and ask which resource the user means. This concerns the current conversation’s target. The listed SSH connection is already authenticated; use its published resource and acquire_compute_resource.']],
+ ['managed_compute_resource_lease_required',['resource_lease_required','List the available compute resources and acquire the intended resource for this conversation, then use the returned session or service. A workflow is optional.']],
+ ['managed_compute_invalid_request',['invalid_input','Use one advertised selector for acquisition: resource_id, profile_id, or alias. Use the identity returned by this conversation’s tools.']],
+ ['managed_compute_no_eligible_resource',['access_required','Check the published resources and their actual access in the resource manager. A missing project grant is separate from the SSH login.']],
+ ['managed_compute_project_required',['project_required','For a tracked worker job, select a project authorized on this original service. Queue inspection and authorized operations in the conversation terminal are available in ordinary chat.']],
  ['ssh_service_registration_required',['service_setup_required','Open the original resource settings and prepare its job service. Its authorized terminal can still be used.']],
  ['ssh_service_maintenance_required',['service_setup_required','Inspect the registered job service on the original resource. Updating it requires the explicit update action.']],
  ['managed_compute_worker_update_required',['capability_required','Inspect the original worker version and its advertised capabilities. Update through its resource settings to use this operation.']],

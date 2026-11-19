@@ -337,6 +337,60 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
   return {connections:rows.map(({value,broker})=>connectionView(value,broker))};
  }
 
+ // Read brokers directly. Normal terminal restoration may change terminal
+ // ownership and must stay out of the desktop inventory path.
+ async function consoleInventory(){
+  load();
+  const observed=await Promise.allSettled([...registered.values()].map(async broker=>{
+   const health=await requestApi(broker,'GET','/health');
+   if(health?.instanceId!==broker.instanceId||health.pid!==broker.pid)fail('terminal_unavailable');
+   const [catalogue,terminalList]=await Promise.allSettled([
+    requestApi(broker,'GET','/connections'),requestApi(broker,'GET','/sessions')
+   ]);
+   const complete=catalogue.status==='fulfilled'&&terminalList.status==='fulfilled';
+   const rows=catalogue.status==='fulfilled'?catalogue.value.connections:[];
+   const terminals=terminalList.status==='fulfilled'?(Array.isArray(terminalList.value)?terminalList.value:terminalList.value.sessions):[];
+   if(!Array.isArray(rows)||rows.length>64||!Array.isArray(terminals)||terminals.length>16||!terminals.every(stateValid))fail('terminal_unavailable');
+   const connections=await Promise.all(rows.map(async value=>{
+    validateConnectionView(value,broker);
+    const {connectionId,profileId,profileVersion}=value;
+    let fresh=value,verified=true;
+    if(value.status==='authenticated'||value.closed===false){
+     try{
+      fresh=await requestApi(broker,'GET','/connections/'+connectionId+'/state');
+      validateConnectionView(fresh,broker);
+      if(fresh.connectionId!==connectionId||fresh.profileId!==profileId||fresh.profileVersion!==profileVersion)fail('terminal_unavailable');
+     }catch{fresh=value;verified=false;}
+    }
+    const view=verified?connectionView(fresh,broker):value;
+    const usage=fresh.managedShellUsage;
+    const capacity=verified&&view.status==='authenticated'&&view.authentication==='verified'&&Number.isSafeInteger(usage?.total)&&usage.total>0&&usage.total<=32&&Number.isSafeInteger(usage.occupied)&&usage.occupied>=0&&usage.occupied<=usage.total?{total:usage.total,occupied:usage.occupied}:null;
+    let service=null;
+    if(verified&&view.status==='authenticated'&&view.authentication==='verified'){
+     try{
+      const result=await requestApi(broker,'POST','/connections/'+connectionId+'/service/state',{});
+      if(result?.connectionId===connectionId&&result.profileId===profileId&&result.profileVersion===profileVersion){
+       service={status:result.status,active:result.serviceActive===true,kind:['private','borrowed'].includes(result.channelKind)?result.channelKind:null,
+        serviceId:identifier(result.serviceId)?result.serviceId:null};
+      }
+     }catch{/* A failed observation provides no worker evidence. */}
+    }
+    return {connectionId,profileId,profileVersion,status:view.status,authentication:view.authentication,
+     multiplex:view.capabilities.multiplex,closed:view.closed===true,verified,capacity,service};
+   }));
+   return {connections,sessions:terminals.map(state=>({...describe(state),verified:true})),complete};
+  }));
+  assertLive();
+  const available=observed.flatMap(item=>item.status==='fulfilled'?[item.value]:[]);
+  const connections=available.flatMap(item=>item.connections),sessions=available.flatMap(item=>item.sessions);
+  const seenMasters=new Set(connections.map(item=>item.connectionId)),seenSessions=new Set(sessions.map(item=>item.sessionId));
+  for(const {connectionId,profileId,profileVersion,status,authentication,closed} of connectionKnown.values()){
+   if(!seenMasters.has(connectionId))connections.push({connectionId,profileId,profileVersion,status,authentication,closed:closed===true,verified:false,capacity:null,service:null});
+  }
+  for(const state of known.values())if(!seenSessions.has(state.id))sessions.push({...describe(state),verified:false});
+  return {connections,sessions,complete:available.length===observed.length&&available.every(item=>item.complete)};
+ }
+
  async function connectionOpen(data){typed(data,['profileId','profileVersion','requestId']);if(!identifier(data.profileId)||!identifier(data.requestId)||!Number.isSafeInteger(data.profileVersion)||data.profileVersion<1)fail('terminal_invalid_request');const signature=digest(data),old=connectionOpening.get(data.requestId);if(old){if(old.signature!==signature)fail('terminal_invalid_request');return old.promise;}const profile=readConnectionProfile(data.profileId,data.profileVersion,true),key='connection-'+data.requestId;pendingProfiles.set(key,data.profileId);const promise=(async()=>{await ensure(true,true);readConnectionProfile(data.profileId,data.profileVersion,true);const broker=daemon,value=await api('POST','/connections/open',{...data,profile},broker),view=connectionView(value,broker);const latest=profiles.read({id:data.profileId});if(latest.version!==data.profileVersion){await api('POST','/connections/'+view.connectionId+'/close',{},broker);fail('terminal_saved_connection_changed');}return view;})();connectionOpening.set(data.requestId,{signature,promise});try{return await promise;}finally{pendingProfiles.delete(key);}}
  async function connectionState(data){const {record,broker}=await connectionBroker(data);if(record.status==='authenticating'){const latest=profiles.read({id:record.profileId});if(latest.version!==record.profileVersion){await api('POST','/connections/'+record.connectionId+'/close',{},broker);connectionKnown.set(record.connectionId,{...record,status:'requires_review',authentication:'lost'});fail('terminal_saved_connection_changed');}}return connectionView(await api('GET','/connections/'+data.connectionId+'/state',undefined,broker),broker);}
  async function connectionOperation(data,operation,keys=[]){typed(data,['connectionId',...keys]);const {record,broker}=await connectionBroker({connectionId:data.connectionId});if(record.status==='authenticating'&&operation!=='close'){try{readConnectionProfile(record.profileId,record.profileVersion,true);}catch(error){const stopped=await api('POST','/connections/'+record.connectionId+'/close',{},broker);connectionView(stopped,broker);throw error;}}const {connectionId,...body}=data,result=await api('POST','/connections/'+connectionId+'/'+operation,body,broker);if(['confirm','close'].includes(operation))return connectionView(result,broker);if(operation==='auth/read'){if(typeof result?.output!=='string'||Buffer.byteLength(result.output)>65536||result.connectionId!==connectionId)fail('terminal_unavailable');return {...result,state:connectionView(result.state,broker)};}return result;}
@@ -365,7 +419,14 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
   const result=await api('GET','/connections/'+data.connectionId+'/login/status/'+data.requestId,undefined,broker);
   return acceptLoginResult(data,result,broker,proof,true);
  }
- async function connectionClose(data){const {record,broker}=await connectionBroker(data);const value=await api('POST','/connections/'+record.connectionId+'/close',{},broker),view=connectionView(value,broker);for(const id of value.closedSessionIds||[]){beginOwnership(id);grants.delete(id);known.delete(id);catalog?.remove?.('shared-terminal',id);}return {...view,closed:value.closed===true,closedSessionIds:value.closedSessionIds||[],closedServiceIds:value.closedServiceIds||[]};}
+ async function connectionClose(data,target){
+  const {record,broker}=await connectionBroker(data);
+  if(target&&(record.profileId!==target.profileId||record.profileVersion!==target.profileVersion))fail('ssh_connection_changed');
+  const identity=target?{profileId:target.profileId,profileVersion:target.profileVersion}:{};
+  const value=await api('POST','/connections/'+record.connectionId+'/close',identity,broker),view=connectionView(value,broker);
+  for(const id of value.closedSessionIds||[]){beginOwnership(id);grants.delete(id);known.delete(id);catalog?.remove?.('shared-terminal',id);}
+  return {...view,closed:value.closed===true,closedSessionIds:value.closedSessionIds||[],closedServiceIds:value.closedServiceIds||[]};
+ }
  async function connectionServiceState(data){typed(data,['connectionId','serviceId']);const {broker}=await connectionBroker({connectionId:data.connectionId});const {connectionId,...body}=data;return api('POST','/connections/'+connectionId+'/service/state',body,broker);}
  async function prepareServiceUpdate(data){
   typed(data,['connectionId','serviceId']);const captured=snapshot(true),{record,broker}=await connectionBroker({connectionId:data.connectionId}),view=await connectionServiceState(data);check(captured);
@@ -415,7 +476,7 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
   if(!identifier(result.sessionId)||!Number.isSafeInteger(result.ownerEpoch)||result.ownerEpoch<2||typeof result.alive!=='boolean'||!Number.isFinite(result.expiresAt))fail('terminal_unavailable');
   return {sessionId:result.sessionId,ownerEpoch:result.ownerEpoch,alive:result.alive,expiresAt:result.expiresAt};
  }
- const connections=Object.fromEntries(Object.entries({open:connectionOpen,list:connectionList,state:connectionState,completeLogin:connectionCompleteLogin,loginStatus:connectionLoginStatus,confirm:data=>connectionOperation(data,'confirm'),authRead:data=>connectionOperation(data,'auth/read',['cursor','maxBytes']),authInput:data=>connectionOperation(data,'auth/input',['requestId','data']),authResize:data=>connectionOperation(data,'auth/resize',['cols','rows']),openShell:connectionOpenShell,close:connectionClose,openService:connectionOpenService,serviceState:connectionServiceState,prepareServiceUpdate,serviceRequest:connectionServiceRequest,privateServiceRequest:data=>connectionOperation(data,'service/private-request',['serviceId','requestId','method','target','data','mcp','timeoutMs']),managedShell:connectionManagedShell,closeService:data=>connectionOperation(data,'service/stop',['serviceId']),cancelServiceStart:data=>connectionOperation(data,'service/cancel',['requestId'])}).map(([key,value])=>[key,guarded(value)]));
+ const connections=Object.fromEntries(Object.entries({open:connectionOpen,list:connectionList,state:connectionState,completeLogin:connectionCompleteLogin,loginStatus:connectionLoginStatus,confirm:data=>connectionOperation(data,'confirm'),authRead:data=>connectionOperation(data,'auth/read',['cursor','maxBytes']),authInput:data=>connectionOperation(data,'auth/input',['requestId','data']),authResize:data=>connectionOperation(data,'auth/resize',['cols','rows']),openShell:connectionOpenShell,close:connectionClose,closeExact:target=>connectionClose({connectionId:target.connectionId},target),openService:connectionOpenService,serviceState:connectionServiceState,prepareServiceUpdate,serviceRequest:connectionServiceRequest,privateServiceRequest:data=>connectionOperation(data,'service/private-request',['serviceId','requestId','method','target','data','mcp','timeoutMs']),managedShell:connectionManagedShell,closeService:data=>connectionOperation(data,'service/stop',['serviceId']),cancelServiceStart:data=>connectionOperation(data,'service/cancel',['requestId'])}).map(([key,value])=>[key,guarded(value)]));
  const profileEnvironmentSessions=profileId=>[...known.values()].filter(value=>value.profile?.profileId===profileId&&value.alive!==false).sort((a,b)=>a.id.localeCompare(b.id));
  const profileEnvironmentFacts=entry=>({id:entry.id,desktopSessionId:entry.desktopSessionId,kind:entry.kind,mode:entry.mode,profile:structuredClone(entry.profile),brokerId:entry.brokerId,owner:entry.owner,ownerEpoch:entry.ownerEpoch,alive:entry.alive,expired:entry.expired,expiresAt:entry.expiresAt,routeKey:entry.routeKey,baseRouteKey:entry.baseRouteKey,ownershipIntent:ownershipIntents.get(entry.id)});
  function assertProfileEnvironmentIdle(entry){
@@ -593,5 +654,5 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
   })();
   return shutdownPromise;
  }
- return {connections,prepareConversationGrant,revokeConversationGrant:id=>{if(grants.get(id)?.conversation)grants.delete(id);},closeConversationShell,discardConversationShell,reconcileContext:()=>{const selected=ownerScope(current());for(const [id,grant]of grants)if(!selected||!currentGrant(grant)||!equal(ownerScope(grant.context),selected)||grant.selectionRevision!==selectionRevision())dropForeignGrant(id,grant);},...Object.fromEntries(Object.entries({list,open,read,input,resize,owner,close,resourceState,connectService,cancelServiceStart,serviceRequest,disconnectService,serviceState,prepareProfileEnvironmentUpdate,callTool}).map(([k,v])=>[k,guarded(v)])),assertProfileEnvironmentUpdate:guardedSync(assertProfileEnvironmentUpdate),commitProfileEnvironmentUpdate:guarded(commitProfileEnvironmentUpdate),abortProfileEnvironmentUpdate:guarded(abortProfileEnvironmentUpdate),tools:()=>sharedTerminalTools,hasCurrentGrant,inUseProfileIds,ownsSession:id=>!closing&&known.has(id),shutdown,detach:()=>{}};
+ return {connections,consoleInventory:guarded(consoleInventory),prepareConversationGrant,revokeConversationGrant:id=>{if(grants.get(id)?.conversation)grants.delete(id);},closeConversationShell,discardConversationShell,reconcileContext:()=>{const selected=ownerScope(current());for(const [id,grant]of grants)if(!selected||!currentGrant(grant)||!equal(ownerScope(grant.context),selected)||grant.selectionRevision!==selectionRevision())dropForeignGrant(id,grant);},...Object.fromEntries(Object.entries({list,open,read,input,resize,owner,close,resourceState,connectService,cancelServiceStart,serviceRequest,disconnectService,serviceState,prepareProfileEnvironmentUpdate,callTool}).map(([k,v])=>[k,guarded(v)])),assertProfileEnvironmentUpdate:guardedSync(assertProfileEnvironmentUpdate),commitProfileEnvironmentUpdate:guarded(commitProfileEnvironmentUpdate),abortProfileEnvironmentUpdate:guarded(abortProfileEnvironmentUpdate),tools:()=>sharedTerminalTools,hasCurrentGrant,inUseProfileIds,ownsSession:id=>!closing&&known.has(id),shutdown,detach:()=>{}};
 }

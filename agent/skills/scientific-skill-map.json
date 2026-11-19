@@ -636,6 +636,12 @@
         "studio-compute-workflow"
       ],
       "tools": [
+        "list_compute_resources",
+        "acquire_compute_resource",
+        "inspect_compute_service",
+        "list_compute_terminals",
+        "read_compute_terminal",
+        "write_compute_terminal",
         "compute_readiness",
         "discover_local_environments",
         "draft_local_environment",
@@ -655,18 +661,26 @@
       "id": "cluster.workspace-setup",
       "engines": [],
       "skills": ["studio-compute-workflow"],
-      "tools": ["setup_base_workspace", "copy_project_inputs", "read_project_input"],
+      "tools": ["list_compute_resources", "acquire_compute_resource", "list_compute_terminals", "read_compute_terminal", "write_compute_terminal", "setup_base_workspace", "copy_project_inputs", "read_project_input"],
       "status": "implemented_selected_connection_authoring_workspace",
+      "adaptation": "Use setup_base_workspace only on its advertised selected job-service path. For a hosted SSH resource acquire the conversation terminal and perform authorized workspace setup in that lease.",
       "phase": "workspace",
       "reference_files": {"studio-compute-workflow": ["references/base-workspace.md"]}
     },
     {
       "id": "cluster.connection-setup",
+      "title": "Cluster connection and service setup",
       "engines": [],
       "skills": [
         "studio-compute-workflow"
       ],
       "tools": [
+        "list_compute_resources",
+        "acquire_compute_resource",
+        "inspect_compute_service",
+        "list_compute_terminals",
+        "read_compute_terminal",
+        "write_compute_terminal",
         "list_clusters",
         "probe_cluster",
         "read_cluster_skill",
@@ -685,32 +699,50 @@
     },
     {
       "id": "compute.queue",
+      "title": "Inspect hosted resources and live scheduler queues",
       "engines": [],
       "skills": [
         "studio-compute-workflow"
       ],
       "tools": [
+        "list_compute_resources",
+        "acquire_compute_resource",
+        "inspect_compute_service",
+        "list_compute_terminals",
+        "read_compute_terminal",
+        "write_compute_terminal",
+        "read_compute_run_status",
+        "read_compute_run_log",
         "list_runs",
         "run_status",
         "read_log",
         "cluster_run_status",
         "cluster_read_log"
       ],
-      "status": "implemented_no_autoresubmit_unknown",
-      "phase": "monitor",
+      "status": "implemented_lease_and_bounded_scheduler_probe",
+      "phase": "discovery",
+      "adaptation": "For a live queue or idle-GPU question, use the current conversation's hosted lease. Limit the observation to the requested scheduler. Use run/status tools for an existing job only.",
       "reference_files": {
         "studio-compute-workflow": [
+          "references/compute-discovery.md",
           "references/reconcile.md"
         ]
       }
     },
     {
       "id": "cluster.lsf-slurm-deployment",
+      "title": "Prepare, submit and observe authorized LSF or Slurm jobs",
       "engines": [],
       "skills": [
         "studio-compute-workflow"
       ],
       "tools": [
+        "inspect_compute_service",
+        "prepare_compute_run",
+        "validate_compute_run",
+        "submit_compute_run",
+        "read_compute_run_status",
+        "read_compute_run_log",
         "prepare_cluster_run",
         "validate_cluster_run",
         "submit_cluster_run",
@@ -718,6 +750,7 @@
       ],
       "status": "implemented_authorized_execution_validation_evidence_separate",
       "phase": "deployment",
+      "adaptation": "Use the current managed compute tools for a leased worker. A visual workflow is optional for independent jobs. The *_cluster_run tools apply to the original legacy worker interface when advertised.",
       "reference_files": {
         "studio-compute-workflow": [
           "references/lsf.json",

@@ -64,8 +64,24 @@ def fixture_server(path, authorized, server, env, cleanup):
     username = pwd.getpwuid(os.getuid()).pw_name
     home = path / "home"
     home.mkdir(mode=0o700)
+    tools = path / "fixture-bin"
+    tools.mkdir(mode=0o700)
+    commands = {
+        "sinfo": "printf '%s\\n' 'fixture-only|up|1|idle|gpu:1'",
+        "sbatch": "echo once >> \"$HOME/submissions\"; echo 4242",
+        "squeue": "exit 0", "sacct": "exit 0", "bqueues": "exit 1",
+    }
+    for name, command in commands.items():
+        program = tools / name
+        program.write_text("#!/bin/sh\n" + command + "\n")
+        program.chmod(0o700)
+    # Bash login and noninteractive worker commands both see the owned scheduler fixtures.
+    fixture_env = path / "fixture-env"
+    fixture_env.write_text("export PATH=" + str(tools) + ":$PATH\nexport HOME=" + str(home) + "\n")
+    (home / "run.py").write_text("print('standalone scheduler fixture')\n")
     shell = path / "shell"
     shell.write_text("#!/bin/sh\nexport HOME=" + str(home) + "\nexport HISTFILE=/dev/null SHELL=/bin/bash\n"
+                     "export BASH_ENV=" + str(fixture_env) + "\n. \"$BASH_ENV\"\n"
                      "cd \"$HOME\" || exit 1\nif [ -n \"$SSH_ORIGINAL_COMMAND\" ]; then exec /bin/sh -c \"$SSH_ORIGINAL_COMMAND\"; fi\n"
                      "exec /bin/bash --noprofile --norc -i\n")
     shell.chmod(0o700)
@@ -140,6 +156,9 @@ def fixture_local_worker(root, source, cleanup):
 
 def main():
     request = json.loads(sys.stdin.readline())
+    if request.get("workerSource") and subprocess.run(["/bin/bash", "-lc", "command -v sbatch || command -v bsub"],
+                                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        raise RuntimeError("Use a disposable local distribution without a system scheduler for the submission fixture")
     server = request.get("server") or shutil.which("sshd")
     if not server or not pathlib.Path(server).is_file():
         raise RuntimeError("An installed or explicitly supplied test sshd is required")

@@ -6,13 +6,27 @@ import path from 'node:path';
 import {agentEnvironment} from '../../desktop/platform/agent-environment.mjs';
 import {isolationPreparationDiagnostic} from '../../desktop/platform/codex-isolation.mjs';
 import {sanitizeTranscript,sanitizeProtocolTranscript,createTranscriptStream} from '../../contracts/agent/transcript-sanitizer.mjs';
+import {isCodexVersion} from '../../contracts/agent/codex-version.mjs';
 export const PROTOCOL_VERSION = '0.165.0-alpha.1.2';
 const unsupportedCatalogQueries=new Set(['list_mcp_resources','list_mcp_resource_templates']);
+const accountRequestMessages=Object.freeze({
+  'account/read':'账户状态读取失败，请刷新账户状态后重试。',
+  'account/login/start':'登录失败，请重新登录。',
+  'account/login/cancel':'无法确认取消结果，请刷新账户状态。',
+  'account/logout':'Codex 无法退出登录，请刷新账户状态。',
+});
+
+function reportedVersion(stdout){
+  if(typeof stdout!=='string')return;
+  const lines=stdout.replace(/\x1b\[[0-9;]*m/g,'').split(/\r?\n/).map(line=>line.trim());
+  const reports=lines.filter(line=>/^codex-cli(?:\s|$)/.test(line));
+  if(reports.length===1)return /^codex-cli[ \t]+(\S+)$/.exec(reports[0])?.[1];
+}
+
 export function verifyProtocolVersion(version){
-  const valid=typeof version==='string'&&version.length<=128&&/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version);
-  if(valid)return {baselineVersion:PROTOCOL_VERSION,installedVersion:version,baselineMatch:version===PROTOCOL_VERSION,status:'pending_capability_verification',...version!==PROTOCOL_VERSION?{versionWarning:{code:'STUDIO_CODEX_VERSION_DIFFERENCE',severity:'warning'}}:{}};
-  const error=new Error('Codex 版本信息无法识别。请检查所选 CLI 是否正常返回版本；协议生成参考版本 '+PROTOCOL_VERSION+' 不是连接版本限制。会话和计算流程仍保留。');
-  error.code='STUDIO_CODEX_PROTOCOL_MISMATCH';error.stage='version';error.expectedVersion=PROTOCOL_VERSION;error.installedVersion=valid?version:'unrecognized';throw error;
+  if(isCodexVersion(version))return {baselineVersion:PROTOCOL_VERSION,installedVersion:version,baselineMatch:version===PROTOCOL_VERSION,status:'pending_capability_verification',...version!==PROTOCOL_VERSION?{versionWarning:{code:'STUDIO_CODEX_VERSION_DIFFERENCE',severity:'warning'}}:{}};
+  const error=new Error('无法识别 Codex CLI 的版本输出。请检查所选可执行文件，再重新连接。');
+  error.code='STUDIO_CODEX_PROTOCOL_MISMATCH';error.stage='version';error.expectedVersion=PROTOCOL_VERSION;error.installedVersion='unrecognized';throw error;
 }
 function checkedInitialize(value){
   if(!value||typeof value!=='object'||Array.isArray(value)||['userAgent','codexHome','platformFamily','platformOs'].some(key=>typeof value[key]!=='string'||!value[key]||value[key].length>8192)||!path.isAbsolute(value.codexHome))throw Error('Invalid initialize response');
@@ -28,11 +42,17 @@ function versionFailure(cause){
 }
 function compatibilityFailure(cause,stage,version){
   if(cause?.code==='STUDIO_CODEX_PROTOCOL_MISMATCH')return cause;
-  const gates={version:'读取 CLI 版本',isolation_prepare:'检查必需隔离能力和模型能力上限',spawn:'启动 app-server 传输',initialize:'核对 initialize 协议响应',account:'在独立配置中复用登录',effective_isolation:'回读有效隔离配置、技能与 MCP',lifecycle:'核对当前连接生命周期'};
+  const gates={version:'读取 CLI 版本',isolation_prepare:'检查必需隔离能力和模型能力上限',spawn:'启动 app-server 传输',initialize:'核对 initialize 协议响应',account:'核对登录',account_catalog:'核对账户模型目录',effective_isolation:'回读有效隔离配置、技能与 MCP',lifecycle:'核对当前连接生命周期'};
   const failures={'Installed Codex lacks required isolation controls':'required_isolation_controls_missing','Effective Codex isolation controls do not match':'effective_isolation_mismatch','Native skills remain enabled':'native_skills_enabled','Unscoped MCP capabilities are exposed':'unscoped_mcp_capabilities','Effective model capability snapshot differs':'model_ceiling_mismatch','Invalid initialize response':'invalid_initialize_response'};
+  const stageFailures={
+    spawn:['app_server_start_failed','请检查所选 CLI 是否能启动 app-server，再明确重连'],
+    account:['account_check_failed','请在账号页核对或重新登录 Codex，再明确重连'],
+    account_catalog:['account_model_catalog_unavailable','请在官方 Codex 中刷新账户模型目录，再明确重连'],
+    lifecycle:['connection_cancelled','请确认当前会话后明确重连'],
+  };
   const preparation=isolationPreparationDiagnostic(cause);
-  const [failure,hint]=stage==='version'?versionFailure(cause):preparation?[preparation.failure,preparation.hint]:[failures[cause?.message]||'gate_failed','请检查该 CLI 是否支持所需协议和隔离控制，再明确重连'];
-  const error=new Error('Codex 兼容性检查失败（'+(gates[stage]||'建立 app-server 连接')+'，'+failure+'）：当前 '+(version||'unrecognized')+'；协议生成参考版本 '+PROTOCOL_VERSION+'（版本差异仅作提示）。'+hint+'；会话和计算流程仍保留，未自动重发消息。');
+  const [failure,hint]=stage==='version'?versionFailure(cause):preparation?[preparation.failure,preparation.hint]:stageFailures[stage]??[failures[cause?.message]||'gate_failed','请检查该 CLI 是否支持所需协议和隔离控制，再明确重连'];
+  const error=new Error('Codex 连接失败（'+(gates[stage]||'建立 app-server 连接')+'，'+failure+'）。'+hint+'。会话和计算流程仍保留，未自动重发消息。');
   error.failure=failure;
   if(preparation)error.preparationStep=preparation.step;
   error.code='STUDIO_CODEX_COMPATIBILITY_FAILED';error.stage=stage;error.installedVersion=version||'unrecognized';error.expectedVersion=PROTOCOL_VERSION;return error;
@@ -62,10 +82,9 @@ export class CodexBridge extends EventEmitter {
     try{
     if(this.host.resolveExecutable)executable=await this.host.resolveExecutable(executable);
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
-    const { stdout } = await (this.launchDependencies.execute||this.host.execute)(executable, ['--version'], { windowsHide: true, timeout: 15000, env:agentEnvironment('codex') });
-    const candidate=verifyProtocolVersion(stdout.trim().split(' ').at(-1),{strictIsolation:this.strictIsolation});version=candidate.installedVersion;
+    const { stdout } = await (this.launchDependencies.execute||this.host.execute)(executable, ['--version'], { windowsHide:true, timeout:15000, encoding:'utf8', maxBuffer:65536, env:agentEnvironment('codex') });
+    const candidate=verifyProtocolVersion(reportedVersion(stdout));version=candidate.installedVersion;
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
-    if(candidate.versionWarning)this.emit('event',{method:'studio/codexVersionWarning',params:candidate});
     if(authenticationOnly&&(!this.strictIsolation||worker))throw Error('Authentication requires an isolated connection without scientific tools');
     stage='isolation_prepare';const isolation=this.strictIsolation?await this.host.prepareIsolation(executable,this.isolationRoot,config,worker,{...this.isolationDependencies,...authenticationOnly?{authenticationOnly:true}:{}}):null;
     if(authenticationOnly&&isolation?.authenticationOnly!==true)throw Error('Authentication isolation was not established');
@@ -88,7 +107,7 @@ export class CodexBridge extends EventEmitter {
     // A closed child stdin surfaces EPIPE asynchronously; without a listener the
     // main process would die on an unhandled 'error' event.
     if(typeof child.stdin?.on==='function')child.stdin.on('error', error => {if(this.process===child)this.emit('diagnostic','Codex stdin unavailable (' + String(error?.code || error) + '); reconnect explicitly.');});
-    child.on('error', err => {if(this.process===child)this.close({reason:'transport_error',message:'Codex app-server transport failed; reconnect explicitly. The conversation is preserved.'});});
+    child.on('error', () => {if(this.process===child){if(!this.info)stage='spawn';this.close({reason:'transport_error',message:'Codex app-server transport failed; reconnect explicitly. The conversation is preserved.'});}});
     child.on('exit', (code, signal) => {
       if(this.process!==child)return;
       this.fail(new Error('Codex disconnected (' + (signal || code) + ')'));
@@ -126,6 +145,7 @@ export class CodexBridge extends EventEmitter {
       else this.compatibility={...candidate,status:'version_observed',scope:'Version metadata only; isolation capabilities have not been verified.'};
       this.executable=executable;
       this.info={...info,studioCompatibility:this.compatibility,...isolation?{studioIsolation:summary}:{}};
+      if(isolation&&!authenticationOnly&&candidate.versionWarning)this.emit('event',{method:'studio/codexVersionWarning',params:this.compatibility});
       return this.info;
     } catch (error) { if(generation===this.lifecycle&&(!child||this.process===child))this.close();throw compatibilityFailure(error,stage,version); }
   }
@@ -151,23 +171,28 @@ export class CodexBridge extends EventEmitter {
       check();
       return result;
     };
+    const verify=async(stage,read)=>{
+      try{return await read();}catch(error){check();throw compatibilityFailure(error,stage,this.compatibility?.installedVersion);}
+    };
     // Explicit Connect may reuse a subscription. Passive account reads never import it.
     check();
-    const observed=await this.host.initializeAuth?.(request,secret=>this.rememberSecret(secret));
+    const account=await verify('account',async()=>{
+      const observed=await this.host.initializeAuth?.(request,secret=>this.rememberSecret(secret));
+      return observed??await request('account/read',{refreshToken:false});
+    });
     check();
-    const account=observed??await request('account/read',{refreshToken:false});
-    if(account.account&&this.host.needsModelCatalog()){
+    if(account.account&&this.host.needsModelCatalog())await verify('account_catalog',async()=>{
       const listed=new Set();let cursor=null;
       for(let page=0;page<8;page++){
         const result=await request('model/list',{limit:100,...cursor?{cursor}:{}});
-        if(!this.host.needsModelCatalog())return account;
+        if(!this.host.needsModelCatalog())return;
         if(!Array.isArray(result.data)||result.data.length>100)throw Error('Invalid Codex model list');
         for(const row of result.data)if(typeof row.model==='string')listed.add(row.model);
         cursor=result.nextCursor;if(!cursor)break;
       }
       if(cursor)throw Error('Codex model list exceeds the supported page limit');
       await this.host.readListedCatalog(this.executable,listed,this.isolation.cwd,check);check();
-    }
+    });
     return account;
   }
   request(method,params={},timeout=120000,{assertCurrent=()=>{}}={}){
@@ -237,10 +262,16 @@ export class CodexBridge extends EventEmitter {
     const pending = this.pending.get(message.id);
     if (!pending) return;
     clearTimeout(pending.timer); this.pending.delete(message.id);
-    if (message.error) { const error=new Error(sanitizeTranscript(message.error.message || 'Codex request failed',this.transcriptSecrets));error.rpcResponse=true;error.rpcCode=message.error.code;pending.reject(error); }
+    if (message.error) {
+      const text=accountRequestMessages[pending.method]??sanitizeTranscript(message.error.message||'Codex request failed',this.transcriptSecrets);
+      const error=new Error(text);error.rpcResponse=true;if(Number.isSafeInteger(message.error.code))error.rpcCode=message.error.code;pending.reject(error);
+    }
     else pending.resolve(/^thread\/(?:start|resume|read|list)$/.test(pending.method)?sanitizeProtocolTranscript(message.result,this.transcriptSecrets):message.result);
   }
   publishTranscriptEvent(message,{final=false}={}){
+    if(message.method==='account/login/completed'&&message.params?.success!==true){
+      message={...message,params:{loginId:message.params?.loginId,success:false,error:accountRequestMessages['account/login/start']}};
+    }
     const p=message.params||{},thread=p.threadId;this.transcriptStreams??=new Map();
     if(!final&&typeof p.delta==='string'){
       const key=JSON.stringify([thread,p.turnId,p.itemId,message.method,p.contentIndex,p.summaryIndex]);let stream=this.transcriptStreams.get(key);if(!stream){stream=createTranscriptStream(()=>this.transcriptSecrets||[]);this.transcriptStreams.set(key,stream);}const delta=stream.push(p.delta);if(!delta)return;message={...message,params:{...p,delta}};

@@ -26,6 +26,8 @@ test('Windows release uses an assisted setup and a direct workspace directory se
  assert.equal(pkg.build.nsis.createDesktopShortcut,'always');assert.equal(pkg.build.nsis.deleteAppDataOnUninstall,false);
  const include=fs.readFileSync(path.join(repo,pkg.build.nsis.include),'utf8');
  assert.match(include,/MUI_PAGE_DIRECTORY/);assert.match(include,/customRemoveFiles/);assert.doesNotMatch(include,/RMDir\s+\/r/i);
+ assert.match(include,/File \/oname=\$PLUGINSDIR\\workspace-guide\.md "\$\{PROJECT_DIR\}\\installation\\workspace-guide\.md"/);
+ assert.match(include,/CopyFileW\(w "\$PLUGINSDIR\\workspace-guide.md", w "\$INSTDIR\\AGENTS.md", i 1\)/);
 });
 test('the embedded manifest cannot take ownership of a user directory or project prompt',t=>{
  const {payload}=fixture(t);

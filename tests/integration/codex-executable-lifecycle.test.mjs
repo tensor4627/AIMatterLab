@@ -14,11 +14,11 @@ import {ISOLATION_FEATURES} from '../../desktop/platform/codex-isolation.mjs';
 const evidenceRoot=process.env.STUDIO_CODEX_EXECUTABLE_ROOT?path.resolve(process.env.STUDIO_CODEX_EXECUTABLE_ROOT):os.tmpdir();
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
-function fixture(t,{resolveExecutable,versionError,version='0.167.0-alpha.3.2',missingFeature=false}={}){
+function fixture(t,{resolveExecutable,versionError,version='0.167.0-alpha.3.2',stdout='codex-cli '+version,missingFeature=false}={}){
  fs.mkdirSync(evidenceRoot,{recursive:true});
  const root=fs.mkdtempSync(path.join(evidenceRoot,'studio-codex-executable-')),calls=[],children=[];
  const host={...codexRuntime,resolveExecutable,
-  execute:async(executable,args)=>{calls.push({kind:'version',executable,args});if(versionError)throw versionError;return {stdout:'codex-cli '+version};},
+  execute:async(executable,args,options)=>{calls.push({kind:'version',executable,args});assert.equal(options.encoding,'utf8');if(versionError)throw versionError;return {stdout};},
   spawnProcess:(executable,args,options)=>{
    calls.push({kind:'spawn',executable});
    const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kills=0;child.kill=()=>{child.kills++;};
@@ -101,4 +101,17 @@ test('a successfully resolved new CLI still fails required isolation controls at
 test('unrecognized version output remains a protocol rejection and cannot establish isolation',async t=>{
  const f=fixture(t,{version:'unrecognized-'+privateSentinel});
  await assert.rejects(f.bridge.start('custom-cli'),error=>error.code==='STUDIO_CODEX_PROTOCOL_MISMATCH'&&error.installedVersion==='unrecognized'&&!inspect(error).includes(privateSentinel));assertUnverified(f);
+});
+
+test('Windows BOM, CRLF, tabs, terminal color and auxiliary CLI output preserve verified version identity',async t=>{
+ const f=fixture(t,{stdout:'\uFEFF\x1b[1mcodex-cli\x1b[0m\t0.169.1\r\nAuxiliary notice\r\n'});
+ const result=await f.bridge.start('fixture-cli');
+ assert.equal(result.studioCompatibility.installedVersion,'0.169.1');
+ assert.equal(result.studioCompatibility.status,'capabilities_verified');
+});
+
+for(const stdout of ['other-cli 0.169.1','codex-cli 0.169.1\ncodex-cli 0.169.2','not a version but ends with 0.169.1'])test('unrecognized or ambiguous CLI identity cannot reach the app-server '+JSON.stringify(stdout),async t=>{
+ const f=fixture(t,{stdout});
+ await assert.rejects(f.bridge.start('fixture-cli'),{code:'STUDIO_CODEX_PROTOCOL_MISMATCH',stage:'version'});
+ assertUnverified(f);
 });

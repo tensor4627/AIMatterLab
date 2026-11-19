@@ -1,6 +1,7 @@
 import {createManagedComputeAliases,resourceFingerprint} from '../../backend/main/compute/managed-compute-aliases.mjs';
 import {createManagedComputeServices} from '../../backend/main/compute/managed-compute-services.mjs';
 import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
+import {createManagedComputeConsole} from '../../backend/main/compute/managed-compute-console.mjs';
 import {createManagedSchedules} from '../../backend/main/compute/managed-schedules.mjs';
 import {createMonitorAttention} from '../../backend/main/compute/monitor-attention.mjs';
 import {createScheduleDelegations,createRunActionIntents,runActionTarget} from '../../backend/main/compute/schedule-delegation.mjs';
@@ -9,13 +10,15 @@ import {taskWorkerSource} from '../../contracts/compute/task-worker-binding.mjs'
 import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools.mjs';
 import {createAgentWakeDelivery} from '../../agent/sessions/wake-delivery.mjs';
 import {randomUUID} from 'node:crypto';
+import {scheduleOwnerId} from '../../contracts/compute/schedule-owner.mjs';
 
 function fields(value,expected) {
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==expected.length||
      expected.some(key=>!Object.hasOwn(value,key)))throw Error('invalid_managed_resource_request');
 }
 export function createManagedWorkbench({catalog,profiles,registration,terminal,projectSkills,resourceActivity,projectAccess,
- records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{}}) {
+ records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{},
+ worker,conversationTerminals,closeSsh,assertConnectionIdle}) {
   const delegations=createScheduleDelegations(catalog),runIntents=createRunActionIntents();
   let schedules;
   const named=notice=>({...notice,resourceName:resourceActivity.label(notice.profileId)||notice.profileId});
@@ -23,9 +26,10 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   const updated=()=>{if(schedules)attention.reconcile(schedules.snapshot().sources);notify();};
   function authorizeRun(scope,{sourceId,runId,kind}) {
     const task=records.bound(scope.provider,scope.threadId);
-    if(!task||!scope.projectId||task.id!==scope.taskId)return null;
+    if(!scope.threadId||!scope.projectId||(task?.id??null)!==(scope.taskId??null))return null;
     const recorded=resourceActivity.runKind(scope,sourceId,runId);
     if(recorded)return !kind||recorded===kind?recorded:null;
+    if(!task)return null;
     if((task.authoring?.projectId||task.projectId)!==scope.projectId||taskForRecordIndex(task).workerSourceId!==sourceId)return null;
     const artifacts=(task.artifacts||[]).filter(a=>a.id===runId&&['run','cluster-run'].includes(a.kind)&&(!kind||a.kind===kind));
     return artifacts.length===1?artifacts[0].kind:null;
@@ -38,16 +42,18 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     if(sourceId)for(const item of task.artifacts||[]){
       if(['run','cluster-run'].includes(item.kind))available.set(JSON.stringify([sourceId,item.id]),{sourceId,runId:item.id});
     }
-    return runIntents.permits(scope,action,runId,[...available.values()],runActionTarget(resources.snapshot(),resourceId));
+    const candidates=[...available.values()],target=runActionTarget(resources.snapshot(),resourceId);
+    return runIntents.permits(scope,action,runId,candidates,target)||
+      action==='validate'&&runIntents.permits(scope,'submit',runId,candidates,target);
   }
   const resources=createManagedComputeResources({terminal,profiles,aliases:createManagedComputeAliases({projectSkills}),
     services:createManagedComputeServices({connections:terminal.connections,registration,source:workerSource,transportSource:sshTransportSource}),
     taskSource:scope=>taskWorkerSource(records.bound(scope.provider,scope.threadId)),
-    authorizeTerminal:(scope,resource)=>projectAccess.includes(scope.projectId,resource),
+    authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),
     authorizeRun:(scope,args)=>!!authorizeRun(scope,args),
     authorizeRunAction:(scope,{action,runId,resourceId})=>permitsRunAction(scope,action,runId,resourceId),
     authorizeSchedule:(scope,{sourceId,scheduleId})=>!!schedules?.snapshot().sources.find(s=>s.id===sourceId)?.schedules.some(p=>
-       p.id===scheduleId&&['provider','threadId','projectId','taskId'].every(k=>p.scope[k]===scope[k])),
+       p.id===scheduleId&&p.scope.taskId===scheduleOwnerId(scope)&&['provider','threadId','projectId'].every(k=>p.scope[k]===scope[k])),
     onAcquired:(scope,resource)=>{resourceActivity.acquired(scope,resource);notify();},
     onChange:notify,busy:scope=>agents.isBusy(scope.provider,scope.threadId)});
   function authorizedWake(event) {
@@ -55,7 +61,9 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     const checkCurrent=()=>{
       const task=records.bound(scope.provider,scope.threadId);
       const row=schedules.snapshot().sources.find(s=>s.id===event.sourceId)?.schedules.find(p=>p.id===event.scheduleId);
-      return !!task&&task.id===scope.taskId&&(task.authoring?.projectId||task.projectId)===scope.projectId&&!!row&&
+      const conversation=!task&&records.conversation(scope.provider,scope.threadId);
+      const projectId=task?.authoring?.projectId||task?.projectId||conversation?.projectId;
+      return !!projectId&&projectId===scope.projectId&&scheduleOwnerId({...scope,taskId:task?.id??null})===scope.taskId&&!!row&&
         row.stopRequestedAt==null&&!row.stopNeedsConfirmation;
     };
     return checkCurrent()&&resources.eligibleForWake({...scope,checkCurrent},event.sourceId);
@@ -86,17 +94,34 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     });
     return {...resourceActivity.snapshot({resources:published,sources:schedules.snapshot().sources,turns:agents.turnStates(),tasks:records.tasks().map(taskForRecordIndex)}),notices:attention.list().map(named)};
   }
+  const consoleView=createManagedComputeConsole({profiles,terminal,resources,conversationTerminals,records,catalog,registration,worker,closeSsh,assertConnectionIdle,notify});
+  const consoleSnapshot=()=>consoleView.snapshot({projectAccess:resource=>projectAccess.decisions(descriptor(resource))});
+  handle('compute.console.snapshot',value=>{fields(value,[]);return consoleSnapshot();});
+  handle('compute.console.refresh',async value=>{fields(value,[]);await consoleView.refresh();return consoleSnapshot();});
+  handle('compute.console.release',value=>consoleView.release(value));
+  handle('compute.console.disconnectSsh',value=>consoleView.disconnectSsh(value));
+  handle('compute.console.attachLocal',value=>consoleView.attachLocal(value));
+  handle('compute.console.detachLocal',value=>consoleView.detachLocal(value));
   handle('compute.managed.snapshot',value=>{fields(value,[]);return snapshot();});
   handle('compute.managed.refresh',async value=>{fields(value,[]);await schedules.refresh();return snapshot();});
   handle('compute.managed.publish',value=>resources.publish(value));
   handle('compute.managed.configureService',value=>resources.configureService(value));
-  handle('compute.managed.projectAccess',value=>{
+  function setProjectAccess(value, ref) {
     fields(value,['resourceId','projectId','allowed']);
     if(!catalog.get('projects',value.projectId)&&!catalog.list('workspace-index').some(p=>p.id===value.projectId)&&
        !records.conversations().some(c=>c.projectId===value.projectId))throw Error('unknown_desktop_project');
     const target=resources.snapshot().find(row=>row.resourceId===value.resourceId);
-    if(!target)throw Error('managed_compute_resource_unavailable');
+    if(!target||ref&&['connectionId','profileId','profileVersion'].some(key=>ref[key]!==target[key]))throw Error('managed_compute_resource_unavailable');
     const result=projectAccess.set(value.projectId,descriptor(target),value.allowed);notify();return result;
+  }
+  handle('compute.managed.projectAccess',value=>setProjectAccess(value));
+  handle('compute.console.projectAccess',async value=>{
+    fields(value,['connectionId','profileId','profileVersion','projectId','allowed']);
+    const {connectionId,profileId,profileVersion,projectId,allowed}=value;
+    const state=await terminal.connections.state({connectionId});
+    if(state.connectionId!==connectionId||state.profileId!==profileId||state.profileVersion!==profileVersion||
+       state.status!=='authenticated'||state.authentication!=='verified'||!state.capabilities.multiplex)throw Error('managed_compute_resource_unavailable');
+    return setProjectAccess({resourceId:'ssh:'+profileId,projectId,allowed},value);
   });
   handle('compute.managed.scheduleDetails',value=>{fields(value,['sourceId','scheduleId']);return schedules.status(value);});
   handle('compute.managed.acknowledgeNotice',value=>{fields(value,['id']);const result=attention.acknowledge(value.id);notify();return result;});

@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 import {randomUUID} from 'node:crypto';
+import * as codexVersion from '../../contracts/agent/codex-version.mjs';
+import * as transcript from '../../contracts/agent/transcript-sanitizer.mjs';
 import * as accountOwner0 from "../../frontend/features/conversations/provider-account.mjs";
 import * as accountOwner1 from "../../contracts/agent/provider-account.mjs";
 const account={...accountOwner0,...accountOwner1};
@@ -64,6 +66,13 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
   if(name==='./ConversationMessages'){const view={exports:{}};new Function('require','module','exports',messagesCompiled)(require,view,view.exports);return view.exports;}
   if(name==='./ChatMessage'){const child={exports:{}};new Function('require','module','exports',chatCompiled)(require,child,child.exports);return {default:props=>({type:'./ChatMessage',props:{...props,children:child.exports.default(props)}})};}
   if(name==='lucide-react')return new Proxy({},{get:(_target,key)=>String(key)});
+  if(name==='../../ui/Notice'){
+   const notice={exports:{}},source=fs.readFileSync(new URL('../../frontend/ui/Notice.tsx',import.meta.url),'utf8');
+   const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+   new Function('require','module','exports',compiled)(require,notice,notice.exports);return notice.exports;
+  }
+  if(name==='../../../contracts/agent/codex-version.mjs')return codexVersion;
+  if(name==='../../../contracts/agent/transcript-sanitizer.mjs')return transcript;
   if(["./provider-account.mjs","../../../contracts/agent/provider-account.mjs","../conversations/provider-account.mjs"].includes(name))return account;
   if(["./composer-drafts.mjs"].includes(name))return drafts;
   if(name==='./message-mapping.mjs')return messageMapping;
@@ -73,7 +82,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
   if(["./tool-activity.mjs","../../../contracts/agent/user-message.mjs"].includes(name))return activity;
   if(["./workflow-intent.mjs","../../../contracts/workflows/task-fields.mjs","../../ui/task-fields.mjs"].includes(name))return fields;
   if(["../../api/studio","../../api/agent"].includes(name))return {invoke,recoverConversation:data=>invoke('agent.recover',data)};
-  if(name==="../../ui/i18n")return {t:value=>value,tr:value=>value};
+  if(name==="../../ui/i18n"||name==='./i18n')return {t:value=>value,tr:value=>value};
   return {default:name};
  };
  const module={exports:{}};

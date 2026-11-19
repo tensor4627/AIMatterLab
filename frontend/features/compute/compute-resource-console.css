@@ -1,0 +1,146 @@
+.compute-console {
+  container-type: inline-size;
+  max-width: 1440px;
+  margin-inline: auto;
+  color: var(--text);
+}
+.compute-console-heading,.compute-console-detail-heading,.compute-console-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.compute-console-heading { margin-bottom: 18px; }
+.compute-console h1,.compute-console h2,.compute-console h3 { margin: 0; line-height: 1.35; }
+.compute-console h1 { font-size: 1.48em; }
+.compute-console h2 { font-size: 1.15em; }
+.compute-console h3 { font-size: 1em; }
+.compute-console-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 10px; }
+.compute-console-actions .text-button,.compute-console-link .text-button,.compute-console-terminals .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.compute-console .compute-console-danger { color: var(--danger); }
+.compute-console-grid {
+  display: grid;
+  grid-template-columns: minmax(200px, 255px) minmax(0,1fr);
+  align-items: start;
+  gap: 14px;
+}
+.compute-console-resources {
+  display: grid;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--sidebar);
+}
+.compute-console-resources button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 9px;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 9px;
+  text-align: left;
+}
+.compute-console-resources button:hover { background: var(--raised); }
+.compute-console-resources button[aria-current=true] { border-color: var(--accent); background: var(--accent-bg); }
+.compute-console-resources button > span:not(.compute-console-status) {
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.compute-console-resources button > .compute-console-status { grid-area: 2 / 2; }
+.compute-console-chevron { grid-area: 1 / 3 / 3; color: var(--muted); }
+.compute-console-detail,.compute-console-empty,.compute-console-standalone {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.compute-console-detail-heading { padding: 15px 16px; }
+.compute-console-detail-heading .muted { display: block; margin-top: 4px; }
+.compute-console-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(min(158px,100%),1fr));
+  border-block: 1px solid var(--line);
+  background: var(--line);
+  gap: 1px;
+}
+.compute-console-link {
+  padding: 12px 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  background: var(--panel);
+}
+.compute-console-link > strong { margin-bottom: 2px; }
+.compute-console-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+.compute-console-status i { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; flex: 0 0 7px; }
+.compute-console-status:is([data-status=online],[data-status=assigned]) { color: var(--green); }
+.compute-console-status:is([data-status=online],[data-status=assigned]) i { background: currentColor; }
+.compute-console-status:is([data-status=preparing],[data-status=channel_ready],[data-status=requires_review],[data-status=releasing]) { color: var(--warn); }
+.compute-console-status[data-status=lost] { color: var(--danger); }
+.compute-console small,.compute-console-capacity { color: var(--muted); }
+.compute-console-checked { display: block; font-variant-numeric: tabular-nums; }
+.compute-console-standalone { margin-top: 16px; padding: 12px 15px; }
+.compute-console-foreground { margin: 0 0 14px; padding: 0; }
+.compute-console-foreground > .compute-console-link { border-radius: 9px; }
+.compute-console-terminals,.compute-console-channels ul { list-style: none; padding: 0; margin: 0; width: 100%; }
+.compute-console-terminals li {
+  display: grid;
+  grid-template-columns: auto minmax(0,1fr) auto;
+  align-items: center;
+  padding: 6px 0;
+  gap: 3px 6px;
+}
+.compute-console-terminals li > span:not(.compute-console-status) { display: grid; min-width: 0; }
+.compute-console-terminals li > button { grid-column: 2 / -1; justify-self: start; }
+.compute-console-terminals li + li,.compute-console-channels li + li { border-top: 1px solid var(--line); }
+.compute-console-section-heading { padding: 12px 15px; align-items: baseline; }
+.compute-console-channels li {
+  display: grid;
+  grid-template-columns: minmax(0,1.3fr) minmax(0,.8fr) minmax(0,.8fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+}
+.compute-console-channel-name,.compute-console-channel-type,.compute-console-channel-state { display: grid; gap: 2px; min-width: 0; }
+.compute-console-channel-empty { margin: 0; padding: 0 15px 13px; }
+.compute-console-project-access { padding: 10px 15px; border-top: 1px solid var(--line); }
+.compute-console-project-access summary { cursor: pointer; }
+.compute-console-project-access p { margin: 8px 0; }
+.compute-console-project-access label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.compute-console-project-access select { max-width: 100%; }
+.compute-console-empty { display: grid; place-items: center; gap: 8px; padding: 32px 16px; text-align: center; }
+.compute-console-confirm-target { font-weight: 650; overflow-wrap: anywhere; }
+.compute-console .is-refreshing { animation: compute-console-refresh 1.1s linear infinite; }
+@keyframes compute-console-refresh { to { transform: rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .compute-console .is-refreshing { animation: none; } }
+@container(max-width: 720px) {
+  .compute-console-grid { grid-template-columns: minmax(0,1fr); }
+  .compute-console-resources { grid-template-columns: repeat(auto-fit,minmax(min(170px,100%),1fr)); }
+}
+@container(max-width: 460px) {
+  .compute-console-channels li { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .compute-console-channels .compute-console-actions { justify-content: flex-end; }
+}

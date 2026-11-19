@@ -5,6 +5,7 @@ const methods=new Set(['diagnostics.saveWorkbenchImage','task.stage.artifacts','
 for(const name of [
  'codex.envImport.pending','codex.envImport.decide',
  'compute.managed.snapshot','compute.managed.refresh','compute.managed.publish','compute.managed.configureService','compute.managed.projectAccess','compute.managed.scheduleDetails','compute.managed.stopSchedule','compute.managed.acknowledgeNotice','compute.managed.observeOnce',
+ 'compute.console.snapshot','compute.console.refresh','compute.console.release','compute.console.disconnectSsh','compute.console.attachLocal','compute.console.detachLocal','compute.console.projectAccess',
  'onboarding.progress','onboarding.openDirectory',
  'compute.workspace.setup',
  'updates.status','updates.check','updates.download','updates.install','updates.run','updates.accessStatus','updates.setAccess',

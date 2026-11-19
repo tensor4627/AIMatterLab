@@ -10,6 +10,15 @@ test('All four authenticated providers load only their consented bounded route w
 test('Revoked permission is rechecked even after body reads and no partial source leaks',async t=>{
  const {root,map}=await fixture(t);let checks=0;const router=new ScientificSkillRouter({map,sourceRoot:()=>root,consent:()=>++checks===1});const result=await router.read('codex','cv.compose');assert.equal(result.status,'permission_required');assert.deepEqual(result.attachments,[]);assert.equal(result.text,undefined);
 });
+test('A change to the rendered route instruction invalidates guidance delivery even with identical skill bytes',async t=>{
+ const {root,map}=await fixture(t);
+ const read=()=>new ScientificSkillRouter({map,sourceRoot:()=>root,consent:()=>true}).read('codex','cv.compose');
+ const before=await read();
+ map.functions[0].adaptation='Current route instruction';
+ const after=await read();
+ assert.equal(after.status,'passed');assert.equal(after.attachments[0].sha256,before.attachments[0].sha256);
+ assert.match(after.text,/Current route instruction/);assert.notEqual(after.digest,before.digest);
+});
 test('Ordinary calculation cannot read installation text; explicit setup allows it',async t=>{
  const {root,map}=await fixture(t);let setup=false,reads=0;const router=new ScientificSkillRouter({map,sourceRoot:()=>{reads++;return root;},consent:()=>true,setupAllowed:()=>setup});assert.equal((await router.read('codex','env.install')).status,'blocked');assert.equal(reads,0);setup=true;assert.equal((await router.read('codex','env.install')).status,'passed');
 });

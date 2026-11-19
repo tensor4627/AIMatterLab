@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {agentHarness,deferred} from '../helpers/agent-hooks.mjs';
 import {appWorkerHarness,completeComputeGuide} from '../helpers/app-worker-hooks.mjs';
+import {requestsComputeName} from '../../backend/main/compute/managed-compute-intent.mjs';
 
 const resource=(values={})=>({schemaVersion:2,selectionId:'selection-A',kind:'ssh-connection',connectionId:'connection-A',profileId:'saved-ssh',profileVersion:3,sessionId:null,terminalSessionIds:[],status:'selected',connectionStatus:'authenticated',operator:'human',processStatus:'running',alive:true,agentReady:false,reason:null,authentication:'verified',managedRuns:false,workflowReady:false,capabilities:{terminal:{status:'closed',sessionIds:[],agentReady:false,operator:'human'},service:{status:'disconnected',agentReady:false,operator:'human',workflowReady:false},files:{status:'unavailable',via:null}},...values});
 const serviceGranted=()=>resource({workflowReady:true,managedRuns:true,serviceActive:true,serviceStatus:'connected',operator:'agent',agentReady:true,capabilities:{...resource().capabilities,service:{status:'connected',agentReady:true,operator:'agent',workflowReady:true}}});
@@ -23,6 +24,44 @@ test('an ungranted SSH draft waits for explicit handoff before creating a conver
  const h=agentHarness({props:{planningMode:true,computeConnected:false,computeResource:resource()},override:(method,data,standard)=>method==='agent.connect'?{tools:{status:'blocked',count:0}}:standard(method,data)});await h.flush();h.click('agent-connect');await h.flush();h.type('Keep the original terminal and plan, 310 K');h.send();await h.flush();
  assert.equal(starts(h).length,0);assert.equal(h.conversations.length,0);assert.equal(h.textarea().props.value,'Keep the original terminal and plan, 310 K');noModelOrTask(h);assert(!h.calls.some(c=>c.method.startsWith('sharedTerminal.')||c.method==='worker.connect'));assert.throws(()=>h.find(n=>n.props?.['data-testid']==='agent-tool-repair'));
  h.render({computeResource:shellGranted()});h.emit({provider:'codex',method:'studio/toolsStatus',params:{status:'ready',scope:'terminal-only',count:1}});await h.flush();h.send();await h.flush();assert.equal(starts(h).length,1);assert.equal(h.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').length,1);assert(!h.calls.some(c=>c.method==='task.create'||c.method==='worker.connect'));assert.equal(h.textarea().props.value,'');h.unmount();
+});
+
+test('managed chat sends without preparing a legacy SSH terminal when both resource controls are present',async()=>{
+ const h=agentHarness({props:{planningMode:false,computeConnected:false,computeResource:resource({canAcquireConversationTerminal:true})},
+  override:(method,data,standard)=>method==='agent.connect'?{tools:{status:'ready',scope:'chat',count:12,managedCompute:true}}:standard(method,data)});
+ await h.flush();
+ h.click('agent-connect');
+ await h.flush();
+ const before=h.calls.length;
+ h.type('请使用「测试集群」检查 Python 环境');
+ h.send();
+ await h.flush();
+ const calls=h.calls.slice(before);
+ assert(calls.some(call=>call.method==='agent.rpc'&&call.data.method==='turn/start'));
+ assert(!calls.some(call=>['compute.resource.status','sharedTerminal.owner','worker.connect','task.create'].includes(call.method)));
+ assert.throws(()=>h.find(node=>node.props?.['data-testid']==='agent-ssh-resource-notice'));
+ h.unmount();
+});
+
+test('SSH environment help drafts a recognized request for the exact saved resource without booking a terminal',async()=>{
+ const h=appWorkerHarness();
+ await h.flush();
+ h.find(node=>node.props?.['data-testid']==='unified-compute-entry').props.onClick();
+ await h.flush();
+ const profile={id:'saved-ssh',version:3,name:'测试集群',host:'private-host',username:'private-user',
+  serviceEnvironment:{python:'private-interpreter'}};
+ const before=h.calls.length;
+ h.find(node=>node.type==='./ComputeConnectionChooser').props.onServiceEnvironmentHelp(profile);
+ await h.flush();
+ const {intent}=h.find(node=>node.type==='./Agent').props;
+ assert.equal(intent.autoSend,undefined);
+ assert(requestsComputeName(intent.text.normalize('NFKC').toLowerCase(),profile.name));
+ assert.match(intent.text,/saved-ssh.*版本 3/);
+ assert.match(intent.text,/list_compute_resources.*一个选择参数.*acquire_compute_resource/);
+ assert.match(intent.text,/已有人工共享时/);
+ assert.doesNotMatch(intent.text,/交给 Agent|private-host|private-user|private-interpreter/);
+ assert(!h.calls.slice(before).some(call=>call.method==='agent.rpc'||call.method.startsWith('sharedTerminal.')));
+ h.unmount();
 });
 
 test('selected SSH overrides a connected managed worker for the UI gate without creating a managed task',async()=>{

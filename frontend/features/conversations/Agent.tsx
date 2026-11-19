@@ -1,6 +1,9 @@
 import Tooltip from "../../ui/Tooltip";
 import {providerAccountState,authenticationError} from "./provider-account.mjs";
 import {ACCOUNT_GUIDANCE} from "../../../contracts/agent/provider-account.mjs";
+import {isCodexVersion} from '../../../contracts/agent/codex-version.mjs';
+import {redactTranscriptText} from '../../../contracts/agent/transcript-sanitizer.mjs';
+import Notice from '../../ui/Notice';
 
 import './agent.css';
 import './codex-version-notice.css';
@@ -18,7 +21,7 @@ import {elicitationHasEditableInput} from './elicitation-input.mjs';
 
 import ProviderLogin from "../settings/ProviderLogin";
 import LoadingFeedback from "../../ui/LoadingFeedback";
-import type {AgentConnectResult,NativeCodexDefaults} from "../../../contracts/dto/agent";
+import type {AgentConnectResult,CodexCompatibility,NativeCodexDefaults} from "../../../contracts/dto/agent";
 import {explicitNewWorkflow} from "./workflow-intent.mjs";
 
 import {createComposerDrafts} from "./composer-drafts.mjs";
@@ -47,7 +50,12 @@ function claimVersionNotice(){
  try{storage.setItem(versionNoticeStorageKey,'1');}catch{/* A warning must never prevent connection. */}
  return true;
 }
-function codexVersionWarning(value:any):CodexVersionWarning|null {const version=(text:unknown)=>typeof text==='string'&&text.length<=128&&/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(text);return value?.baselineMatch===false&&value?.versionWarning?.code==='STUDIO_CODEX_VERSION_DIFFERENCE'&&version(value.installedVersion)&&version(value.baselineVersion)?{installedVersion:value.installedVersion,baselineVersion:value.baselineVersion}:null;}
+function codexVersionWarning(value:unknown):CodexVersionWarning|null {
+ if(!value||typeof value!=='object')return null;
+ const {installedVersion,baselineVersion,baselineMatch,status,versionWarning}=value as Partial<CodexCompatibility>;
+ if(status!=='capabilities_verified'||baselineMatch!==false||versionWarning?.code!=='STUDIO_CODEX_VERSION_DIFFERENCE'||versionWarning.severity!=='warning')return null;
+ return isCodexVersion(installedVersion)&&isCodexVersion(baselineVersion)&&installedVersion!==baselineVersion?{installedVersion,baselineVersion}:null;
+}
 function storedPreference(key:string){try{return localStorage.getItem(key);}catch{return null;}}
 function storePreference(key:string,value:string){try{localStorage.setItem(key,value);}catch{/* Storage is optional for chat. */}}
 function mergeResumedMessages(history:Message[],live:Message[]){
@@ -88,14 +96,10 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const terminalSelected=computeResource?.kind==='ssh-terminal'||!managedCompute&&computeResource?.kind==='ssh-connection';
  const workflowResource=terminalSelected&&(computeResource.kind==='ssh-connection'?tools.scope!=='terminal-only'&&computeResource.capabilities?.service.workflowReady===true:computeResource.workflowReady===true&&computeResource.managedRuns===true)&&computeResource.authentication==='verified';
  const terminalGranted=terminalSelected&&(computeResource.kind==='ssh-connection'?(tools.scope==='terminal-only'?computeResource.capabilities?.terminal.agentReady===true:computeResource.capabilities?.service.agentReady===true):computeResource.agentReady===true),terminalReady=sshResourceReady(computeResource,tools);
- const canAcquireTerminal=computeResource?.kind==='ssh-connection'&&computeResource.canAcquireConversationTerminal===true;
+ const canAcquireTerminal=terminalSelected&&computeResource.kind==='ssh-connection'&&computeResource.canAcquireConversationTerminal===true;
  const terminalPlanning=planningMode&&!workflowResource&&(terminalSelected||tools.scope==='terminal-only');
  const terminalNotice=computeResource?.kind==='ssh-connection'?computeResource.authentication!=='verified'?'请先在终端完成 SSH 登录，成功后会自动进入终端。':!terminalGranted?'请在终端点击“交给 Agent”，再发送当前消息。':'当前对话的工具尚未就绪，请核对终端或作业服务状态。':computeResource?.status!=='selected'||computeResource.alive!==true?'所选 SSH 终端不可用，请在终端核对或重新选择。':!terminalGranted?workflowResource?computeResource.operator==='agent'?'当前对话尚无此作业服务权限。请在终端接管后，再交给 Agent。':'SSH 作业服务已连接，请在终端点击“交给 Agent”，授权当前对话使用。':computeResource.operator==='agent'?'当前对话尚无此终端权限，请先接管，再交给 Agent。':'请在终端点击“交给 Agent”，再发送当前消息。':workflowResource?'SSH 作业服务已连接，请重新连接服务商以使用工作流工具。':'SSH 终端已交接，请连接或重新连接当前服务商。';
  const [provider,setProvider]=useState<AgentProvider>(drafts.owner().provider as AgentProvider),[login,setLogin]=useState(false);
- useEffect(()=>{
-  if(hidden||provider!=='codex'){setVersionNotice(null);return;}
-  if(versionWarning&&claimVersionNotice())setVersionNotice(versionWarning);
- },[versionWarning,provider,hidden]);
  useEffect(()=>{if(!versionNotice)return;const timer=setTimeout(()=>setVersionNotice(null),8000);return()=>clearTimeout(timer);},[versionNotice]);
  useEffect(()=>{providerChangeRef.current?.(provider);},[provider]);
  const [workflowId,setWorkflowId]=useState<string|null>(null),[newWorkflow,setNewWorkflow]=useState(false);
@@ -113,6 +117,10 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const projectSeen=useRef(''),accountSeq=useRef(0),externalSeq=useRef(0);
  const [externalThreads,setExternalThreads]=useState<any[]>([]),[importOpen,setImportOpen]=useState(false),[importLoading,setImportLoading]=useState(false);
  const [connected,setConnected]=useState(false),[connecting,setConnecting]=useState(false),[models,setModels]=useState<any[]>([]),[model,setModel]=useState('');
+ useEffect(()=>{
+  if(hidden||provider!=='codex'||!connected){setVersionNotice(null);return;}
+  if(versionWarning&&claimVersionNotice())setVersionNotice(versionWarning);
+ },[versionWarning,provider,hidden,connected]);
  const [thread,setThread]=useState<string|null>(null),[threads,setThreads]=useState<any[]>([]),[messages,setMessages]=useState<Message[]>([]);
  const [recovery,setRecovery]=useState<{threadId:string;error?:string}|null>(null),pendingResume=useRef<string|null>(null);
  const [modelCall,setModelCall]=useState<ModelCall|null>(null),modelCallRef=useRef<ModelCall|null>(null),modelRef=useRef(model);modelRef.current=model;
@@ -189,7 +197,6 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(event.method==='studio/conversationDeleted'){readingPositions.current?.discard(readingKey(event.params.provider||event.provider||'codex',event.params.threadId));setPrompt(drafts.discard(event.params.provider||event.provider||'codex',event.params.threadId));}
    if(event.method==='studio/conversationContextChanged'){const p=event.params;setPrompt(drafts.rekey(p.conversation.provider,p.oldThreadId,p.conversation.threadId));}
    if((event.provider||'codex')!==providerRef.current)return;
-   if(event.method==='studio/codexVersionWarning'&&providerRef.current==='codex'){setVersionWarning(codexVersionWarning(event.params));return;}
    if(event.method==='studio/skillsLoaded'){const call=modelCallRef.current,p=event.params||{};if(call&&p.requestId===call.requestId&&p.threadId===call.threadId&&p.threadId===threadRef.current&&(!p.turnId||!call.turnId||p.turnId===call.turnId))setAutoSkillStatus({...p,provider:event.provider||'codex'});return;}
    if(event.method==='studio/conversationContextChanged'){
     if(sessionPendingRef.current)return;const p=event.params,c=p.conversation;if(threadRef.current!==p.oldThreadId&&pendingResume.current!==p.oldThreadId)return;
@@ -203,6 +210,10 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    const viewedThread=threadRef.current||pendingResume.current;
    if(event.method==='studio/toolsStatus'){if(event.params?.threadId&&event.params.threadId!==viewedThread)return;toolsRef.current=event.params;setTools(event.params);return;}
    if(event.params?.threadId&&event.params.threadId!==viewedThread)return;
+   if(event.method==='studio/codexVersionWarning'){
+    if(providerRef.current==='codex'&&!connectionOwner.current){const warning=codexVersionWarning(event.params);if(warning)setVersionWarning(warning);}
+    return;
+   }
    if(event.method==='studio/toolsWarning'){setTools((previous:any)=>({...previous,inventoryWarning:event.params?.warnings?.length?event.params.message:null}));return;}
    if(event.method==='studio/login'&&event.params?.phase==='completed'&&!loginRef.current)void connect();
    if(event.method==='studio/accountUpdated'){if(event.params?.credentialsChanged){setupReplyRef.current?.(null);setConnected(false);setModels([]);setModel('');setNeedsAuth(false);void refreshAccount();}else void refreshAccount();}
@@ -234,14 +245,14 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(event.method==='turn/completed'){const call=modelCallRef.current;const flight=activeSend.current;if(flight&&flight.threadId===p.threadId&&flight.turnId===p.turn?.id){if(flight.cancelled)restoreStoppedDraft(flight);activeSend.current=null;}setStopStatus(null);setBusy(false);setTurn(null);setRequests([]);if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId&&call.turnId===p.turn?.id){call.status=p.turn.status==='completed'&&!p.turn.error&&call.output?'passed':'failed';setModelCall({...call});if(call.status==='passed')setupReplyRef.current?.({provider:call.provider,model:call.model});}if(p.turn?.error)onError(p.turn.error.message||p.turn.error);}
    if(event.method==='error'){if(p.willRetry===true){const call=modelCallRef.current;if(call&&call.threadId===p.threadId&&call.turnId===p.turnId)setRetrying({threadId:p.threadId,turnId:p.turnId});return;}setRetrying(null);const call=modelCallRef.current;if(call&&call.threadId===p.threadId&&call.turnId===p.turnId){call.status='failed';setModelCall({...call});}onError(p.error?.message||JSON.stringify(p));}
    if(event.method==='account/updated')void refreshAccount();
-   if(event.method==='studio/codexDisconnected'){const flight=activeSend.current;if(flight?.cancelled)restoreStoppedDraft(flight);activeSend.current=null;setStopStatus(null);modelCallRef.current=null;setModelCall(null);setConnected(false);setBusy(false);const message=p.code==='STUDIO_CODEX_UNSCOPED_TOOL'?'AIMatterLab 隔离已阻止未授权工具'+(typeof p.tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(p.tool)?' · '+p.tool:'')+'；流程与草稿已保留，请显式重连并核对结果后再发送。':'Agent 连接已断开，请重新连接';setTools({status:'blocked',count:0,message});if(p.code==='STUDIO_CODEX_UNSCOPED_TOOL')onError(message);}
+   if(event.method==='studio/codexDisconnected'){const flight=activeSend.current;if(flight?.cancelled)restoreStoppedDraft(flight);activeSend.current=null;setStopStatus(null);modelCallRef.current=null;setModelCall(null);setConnected(false);setVersionWarning(null);setBusy(false);const message=p.code==='STUDIO_CODEX_UNSCOPED_TOOL'?'AIMatterLab 隔离已阻止未授权工具'+(typeof p.tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(p.tool)?' · '+p.tool:'')+'；流程与草稿已保留，请显式重连并核对结果后再发送。':'Agent 连接已断开，请重新连接';setTools({status:'blocked',count:0,message});if(p.code==='STUDIO_CODEX_UNSCOPED_TOOL')onError(message);}
   });return()=>{selectionSeq.current++;unsubscribe?.();};
  },[]);
  useEffect(()=>{if(hidden||historyLoad)return;const key=readingKey(provider,thread);if(!readingReady.current||readingOwner.current!==key){readingOwner.current=key;followScroll.current=readingPositions.current!.restore(key,scroll.current);setFollowing(followScroll.current);setHasNewMessages(false);readingReady.current=true;}else if(followScroll.current)followLatest();else{readingPositions.current!.restore(key,scroll.current);if(messages.length||requests.length)setHasNewMessages(true);}},[messages,requests,hidden,historyLoad,thread,provider]);
- async function refreshAccount(selectedProvider=providerRef.current,seq=selectionSeq.current){
+ async function refreshAccount(selectedProvider=providerRef.current,seq=selectionSeq.current,requireReadback=false){
   const request=++accountSeq.current,current=()=>request===accountSeq.current&&seq===selectionSeq.current&&selectedProvider===providerRef.current;
   try{const value=await invoke('agent.account',{provider:selectedProvider});if(current()){setAccount(value);setNeedsAuth(providerAccountState(selectedProvider,value)==='missing');}return value;}
-  catch(error){if(current())setAccount({metadataUnavailable:true,modelAccess:'not_run'});return null;}
+  catch(error){if(current())setAccount({metadataUnavailable:true,modelAccess:'not_run'});if(requireReadback)throw error;return null;}
  }
  async function importExisting(){
   const selectedProvider=providerRef.current,seq=selectionSeq.current,request=++externalSeq.current;setImportOpen(true);setImportLoading(true);
@@ -253,23 +264,24 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
   const existing=connectionOwner.current;if(existing&&existing.provider===selectedProvider&&existing.seq===seq&&existing.nonce===nonce)return existing.promise;
   const owner={provider:selectedProvider,seq,nonce,promise:Promise.resolve(false)};connectionOwner.current=owner;
-  const promise=(async()=>{modelCallRef.current=null;setModelCall(null);providerTouched.current=true;setConnecting(true);setVersionWarning(null);try{
+  const promise=(async()=>{modelCallRef.current=null;setModelCall(null);providerTouched.current=true;setConnecting(true);setNeedsAuth(false);setVersionWarning(null);setVersionNotice(null);try{
    const connection=await invoke<AgentConnectResult>('agent.connect',{provider:selectedProvider,repairTools,...expectedThreadId?{threadId:expectedThreadId}:{}});if(!current())return false;
    if('loginRequired' in connection||'cliRequired' in connection){
     setNeedsAuth(true);setConnected(false);
     if(showLogin&&'loginRequired' in connection)openAccounts();
     return false;
    }
-   setTools(connection.tools||{status:'not_run',count:0});setVersionWarning(selectedProvider==='codex'?codexVersionWarning(connection.studioCompatibility):null);
+   setTools(connection.tools||{status:'not_run',count:0});
    const modelCatalog=selectedProvider==='codex'&&connection.nativeCodexDefaults
     ?readCodexDefaultsCatalog(page=>selectedRpc('model/list',page),current):selectedRpc('model/list');
-   const [a,m,conversations]=await Promise.all([refreshAccount(selectedProvider,seq),modelCatalog,invoke<Conversation[]>('conversation.list')]);if(!current())return false;
+   const [a,m,conversations]=await Promise.all([refreshAccount(selectedProvider,seq,selectedProvider==='codex'),modelCatalog,invoke<Conversation[]>('conversation.list')]);if(!current())return false;
    if(providerAccountState(selectedProvider,a)==='missing'){setNeedsAuth(true);setConnected(false);return false;}setNeedsAuth(false);
    setDefaultsReview(null);setNativeDefaults(selectedProvider==='codex'?connection.nativeCodexDefaults??null:null);
    const list=m.data||[];setModels(list);const chosen=list.find((v:any)=>v.model===storedPreference('studio.model.'+selectedProvider))||list.find((v:any)=>v.isDefault)||list[0];setModel(chosen?.model||'');setEffort(resumedEffort({provider:selectedProvider,model:chosen,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+chosen?.model)||storedPreference('studio.effort.'+selectedProvider)}}));
+   if(selectedProvider==='codex')setVersionWarning(codexVersionWarning(connection.studioCompatibility));
    setThreads(conversations.filter(value=>value.provider===selectedProvider).map(value=>({...value,id:value.threadId})));setConnected(true);
    return true;
-  }catch(e){if(current()){setConnected(false);setModels([]);if(authenticationError(e))setNeedsAuth(true);else onError(e);}return false;}finally{if(connectionOwner.current===owner){connectionOwner.current=null;setConnecting(false);}}
+  }catch(e){if(current()){setConnected(false);setModels([]);if(selectedProvider!=='codex'&&authenticationError(e))setNeedsAuth(true);else onError(e);}return false;}finally{if(connectionOwner.current===owner){connectionOwner.current=null;setConnecting(false);}}
  })();owner.promise=promise;return promise;
  }
  useEffect(()=>{if(!connected)return;let active=true,checking=false;const check=async()=>{if(checking)return;checking=true;try{const result=await invoke('agent.tools',{provider:providerRef.current});if(active)setTools(result);}catch{if(active)setTools({status:'blocked',message:'科学工具连接中断，请重新连接',count:0});}finally{checking=false;}};const timer=setInterval(()=>void check(),15000);return()=>{active=false;clearInterval(timer);};},[connected,provider]);
@@ -323,7 +335,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(active?.threadId===id){setBusy(active.busy);setTurn(active.turnId);}
    if(receipt?.requests&&active?.busy)setRequests(current=>[...new Map([...receipt.requests!,...current].filter(request=>!resolvedRequests.current.has(String(request.id))).map(request=>[String(request.id),request])).values()]);
    setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+resumedModel)||storedPreference('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(live=>mergeResumedMessages(list,live));setHistoryLoad(null);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation,nonce);
-  }catch(e){if(current()){if(rebuild)setRecovery({threadId:pendingResume.current||id,error:e instanceof Error?e.message:String(e)});else{setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'failed',error:e instanceof Error?e.message:String(e)});onError(e);}}}finally{if(current()){pendingResume.current=null;selectionPending.current=false;setApplying(false);}}
+  }catch(e){if(current()){const error=redactTranscriptText(e instanceof Error?e.message:String(e));if(rebuild)setRecovery({threadId:pendingResume.current||id,error});else setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'failed',error});}}finally{if(current()){pendingResume.current=null;selectionPending.current=false;setApplying(false);}}
  }
  useEffect(()=>{
   if(!sessionSelection||handledSelection.current===sessionSelection.nonce)return;handledSelection.current=sessionSelection.nonce;const seq=++selectionSeq.current;
@@ -443,13 +455,15 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
     {!connected&&<button className="button wide" data-testid="agent-connect" onClick={()=>void connect(false,selectionSeq.current,true)} disabled={connecting}>{connecting?<LoadingFeedback busy inline label={t('正在连接服务商')+' · '+providerLabel}/>:<><Sparkles size={15}/>{t("连接")} {providerLabel}</>}</button>}
    {terminalSelected&&!terminalReady&&!canAcquireTerminal?<div className="agent-tool-alert" role="status" data-testid="agent-ssh-resource-notice"><span>{t(terminalNotice)}</span>{terminalGranted&&computeResource.status==='selected'&&computeResource.alive===true&&connected&&<button className="text-button" data-testid="agent-ssh-reconnect" disabled={busy||connecting||applying} onClick={()=>void connect()}>{t('重新连接服务商')}</button>}</div>:!terminalSelected&&(tools.status==='blocked'||computeConnected===false&&tools.scope!=='terminal-only')&&<div className="agent-tool-alert" role="status"><span>{t(tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}</span><button className="text-button" data-testid="agent-tool-repair" disabled={busy||connecting} onClick={()=>{if(computeConnected===false&&onConnectCompute)void Promise.resolve().then(onConnectCompute).catch(onError);else void connect(true);}}>{t(computeConnected===false?'连接计算资源':'修复工具连接')}</button></div>}
   </div>
-  {connected&&(tools.warning||tools.inventoryWarning)&&<div className="agent-tool-alert" role="status" data-testid="agent-tools-warning">{t(tools.inventoryWarning||tools.message||'工具清单待核对，可继续讨论并由 Agent 协助配置环境。')}</div>}
-  {provider==='codex'&&!hidden&&versionNotice&&<div className="codex-version-notice" role="alert" data-testid="codex-version-warning"><div><strong>{t('Codex CLI 版本不同，仍可继续使用。')}</strong><small>{versionNotice.installedVersion} · {t('参考版本')} {versionNotice.baselineVersion}</small></div><button className="text-button" aria-label={t('关闭版本提示')} onClick={()=>setVersionNotice(null)}>{t('关闭')}</button></div>}
+  {connected&&(tools.warning||tools.inventoryWarning)&&<Notice severity="warning" className="agent-tool-alert" data-testid="agent-tools-warning">{t(tools.inventoryWarning||tools.message||'工具清单待核对，可继续讨论并由 Agent 协助配置环境。')}</Notice>}
+  {provider==='codex'&&!hidden&&connected&&versionNotice&&<Notice severity="warning" className="codex-version-notice" data-testid="codex-version-warning" action={<button className="text-button" aria-label={t('关闭版本提示')} onClick={()=>setVersionNotice(null)}>{t('关闭')}</button>}>
+   <strong>{t('Codex CLI 版本不同，仍可继续使用。')}</strong><small>{versionNotice.installedVersion} · {t('参考版本')} {versionNotice.baselineVersion}</small>
+  </Notice>}
   </div>
-  {recovery&&<div className="agent-recovery" data-testid="conversation-recovery" role="status"><strong>{t('对话连接需要恢复')}</strong><p>{t('旧聊天历史目前无法读取。可为同一流程建立新的空白对话连接，本地流程和作业记录保留。')}</p><button className="button" disabled={applying||connecting||!connected} onClick={()=>void resume(recovery.threadId,++selectionSeq.current,projectId,true)}>{t('重新建立对话连接')}</button>{recovery.error&&<p role="alert">{recovery.error}</p>}</div>}
+  {recovery&&<Notice className="agent-recovery" severity={recovery.error?'error':'warning'} data-testid="conversation-recovery"><strong>{t('对话连接需要恢复')}</strong><p>{t('旧聊天历史目前无法读取。可为同一流程建立新的空白对话连接，本地流程和作业记录保留。')}</p><button className="button" disabled={applying||connecting||!connected} onClick={()=>void resume(recovery.threadId,++selectionSeq.current,projectId,true)}>{t('重新建立对话连接')}</button>{recovery.error&&<p>{recovery.error}</p>}</Notice>}
    <div className="chat-scroll" ref={scroll} role="log" onScroll={observeScroll}>
    {!historyHidden&&!messages.length&&<div className="agent-welcome"><h3>{t('对话示例')}</h3><div className="prompt-hints">{['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(t=><button key={t} onClick={()=>proposePrompt(t)}>{tr(t)}<PencilLine size={14} aria-hidden="true"/></button>)}</div></div>}
-   {historyHidden&&<div className="agent-history-state" data-testid="agent-history-state" role="status">{historyLoad?.status==='failed'?<><p>{t('此会话暂时无法读取，草稿已保留。')}</p>{historyLoad.error&&<details data-testid="agent-history-error-details"><summary>{t('查看错误详情')}</summary><pre>{historyLoad.error}</pre></details>}<button className="button" data-testid="agent-history-retry" disabled={busy||applying||connecting} onClick={()=>void retryHistory()}>{t('重新读取会话')}</button></>:<p>{t('正在读取所选会话…')}</p>}</div>}
+   {historyHidden&&<Notice className="agent-history-state" data-testid="agent-history-state" severity={historyLoad?.status==='failed'?'error':'info'}>{historyLoad?.status==='failed'?<><p>{t('此会话暂时无法读取，草稿已保留。')}</p>{historyLoad.error&&<details data-testid="agent-history-error-details"><summary>{t('查看错误详情')}</summary><pre>{historyLoad.error}</pre></details>}<button className="button" data-testid="agent-history-retry" disabled={busy||applying||connecting} onClick={()=>void retryHistory()}>{t('重新读取会话')}</button></>:<p>{t('正在读取所选会话…')}</p>}</Notice>}
    {!historyHidden&&<ConversationMessages messages={messages} language={t('你')} actions={messageActions.current!} disabled={busy||connecting||applying} canOriginalRun={!!onOpenOriginalRun} canCluster={!!onOpenCluster} canCompute={!!(onReviewWorker||onConnectCompute)}/>}
    {!historyHidden&&requests.map(r=>{const scope=requestScope(r),pending=responding.has(scope);return <div key={scope} className="approval" role="alert" data-testid="agent-question-request" data-request-id={String(r.id)} aria-busy={pending}><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
     {r.params?.questions?.map((q:any)=><fieldset key={q.id} className="agent-question" disabled={pending}><legend>{q.question||q.header}</legend>{q.options?.length>0&&<div className="agent-question-options">{q.options.map((option:any)=><button key={option.label} type="button" className="button agent-question-option" data-testid="agent-question-option" aria-pressed={answer(r,q.id)===option.label} onClick={()=>editAnswer(r,q.id,option.label)}><strong>{option.label}</strong>{option.description&&<span>{option.description}</span>}</button>)}</div>}<input data-testid="agent-question-input" aria-label={q.question||q.header} type={q.isSecret?'password':'text'} autoComplete="off" placeholder={tr("填写回答，或输入选项名称")} value={answer(r,q.id)} onChange={e=>editAnswer(r,q.id,e.target.value)}/></fieldset>)}
@@ -463,7 +477,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   </div>
   {!following&&(messages.length>0||requests.length>0)&&<div className="agent-new-messages"><button type="button" className="button" data-testid="agent-new-messages" onClick={followLatest}>{hasNewMessages?t('有新消息 · 回到底部'):t('回到底部')}</button></div>}
   {autoSkillStatus&&autoSkillStatus.threadId===thread&&autoSkillStatus.provider===provider&&<details className="agent-auto-skills"><summary>{t(autoSkillStatus.status==='passed'?'本轮已载入任务指导':autoSkillStatus.status==='already_loaded'?'当前会话已有相同指导':autoSkillStatus.status==='permission_required'?'需要公开指导共享许可':autoSkillStatus.status==='prepared'?'指导已准备，等待服务接受':autoSkillStatus.status==='failed'?'指导发送未通过':autoSkillStatus.status==='unknown'?'指导接收状态未知':autoSkillStatus.status==='not_run'?'本轮未载入任务指导':'任务指导暂不可用')} · {(autoSkillStatus.names||[]).length}</summary>{(autoSkillStatus.names||[]).map((name:string)=><div key={name}>{name}</div>)}{autoSkillStatus.source&&<p>{autoSkillStatus.source}</p>}{autoSkillStatus.attachments?.map((a:any)=><p className="skill-loaded-file" key={a.name+a.sha256}>{a.name}<small>SHA256 · {a.sha256} · {a.bytes} bytes</small></p>)}{autoSkillStatus.message&&<p>{autoSkillStatus.message}</p>}</details>}
-  {needsAuth&&<div className="account-login-guidance" role="status" data-testid="agent-login-required"><p>{t(ACCOUNT_GUIDANCE)}</p><button className="button" onClick={openAccounts}>{t('打开账号与 API')}</button></div>}
+  {needsAuth&&<Notice className="account-login-guidance" severity="warning" data-testid="agent-login-required"><p>{t(ACCOUNT_GUIDANCE)}</p><button className="button" onClick={openAccounts}>{t('打开账号与 API')}</button></Notice>}
   {pendingDefaults&&defaultsReview&&nativeDefaults&&<div className="account-login-guidance" role="status" data-testid="codex-model-defaults-review">
    <p>{t(defaultsReview==='model'?'当前账号的模型目录未列出本机默认模型。':'当前模型未列出本机默认推理强度。')} <strong>{defaultsReview==='model'?nativeDefaults.model:nativeDefaults.effort}</strong></p>
    <p>{t('请在对话面板选择可用的模型和推理强度，再确认使用。')}</p>

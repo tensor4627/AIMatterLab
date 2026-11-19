@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {verifyBundledGuidance} from './check-bundled-guidance.mjs';
 
 // The uninstaller embeds this list. Workspace files are never removal inputs.
 export function workspaceManifest(appDir) {
@@ -19,8 +20,10 @@ export function workspaceManifest(appDir) {
   return entries.join('\n') + '\n';
 }
 
-export default function afterPack({electronPlatformName,appOutDir,packager}) {
+export default async function afterPack({electronPlatformName,appOutDir,packager}) {
   if (electronPlatformName !== 'win32') return;
+  const guidance = await verifyBundledGuidance({appOutDir,projectDir:packager.projectDir});
+  console.log('Verified packaged AIMatterLab guidance: '+JSON.stringify(guidance));
   const directory = path.join(packager.projectDir, '.studio', 'installer');
   fs.mkdirSync(directory,{recursive:true});
   fs.writeFileSync(path.join(directory,packager.appInfo.version+'-win.files'),workspaceManifest(appOutDir));

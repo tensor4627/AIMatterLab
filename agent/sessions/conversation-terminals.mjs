@@ -228,6 +228,24 @@ export function createConversationTerminals({terminal,service,registration,resou
   const pool=getPool(provider),scope=scopeOf(current());
   return !!(pool?.enabled&&(!scope||!pool.available?.awaitingNewConversation&&!pool.entries.has(keyOf(scope))));
  }
+ function consoleEntries(){
+  return [...parked,...pools.values()].flatMap(pool=>[...pool.entries.values()].map(entry=>({
+   connectionId:pool.connectionId,profileId:pool.profileId,profileVersion:pool.profileVersion,
+   sessionId:entry.shell?.sessionId??null,provider:entry.scope.provider,threadId:entry.scope.threadId,projectId:entry.scope.projectId,
+   status:entry.retiring?'releasing':entry.consoleCloseUnknown?'lost':!entry.shell?'preparing':parked.has(pool)?'parked':'assigned',busy:busy(entry.scope)
+  })));
+ }
+ async function releaseFromConsole(target){
+  const matches=[...parked,...pools.values()].filter(pool=>pool.connectionId===target.connectionId);
+  const owners=matches.map(pool=>({pool,entry:pool.entries.get(keyOf(target))})).filter(({entry})=>entry?.shell?.sessionId===target.leaseId);
+  if(stopped||owners.length!==1)throw Error('managed_compute_channel_changed');
+  const {pool,entry}=owners[0];
+  if(entry.pending||busy(entry.scope))throw Error('managed_compute_channel_busy');
+  try{const release=retire(pool,entry);publish();await release;return {status:'released'};}
+  catch{entry.consoleCloseUnknown=true;return {status:'unconfirmed'};}
+  finally{publish();}
+ }
  return {arm,acquire,pendingForNewConversation,canAcquire,describe,prepareAuthoringGrant,releaseShell,detachConnection,releaseConnection,serviceOwner,finishDeferredService,touch,sweep,forget,
+  consoleEntries,releaseFromConsole,
   stop(){stopped=true;pools.clear();parked.clear();}};
 }

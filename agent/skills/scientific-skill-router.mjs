@@ -49,7 +49,7 @@ export class ScientificSkillRouter {
   for(const route of this.routes.values()){
    const sources=[...new Set(route.skills.map(id=>this.definitions.get(id).source))],permissions={};
    for(const id of route.skills){const skill=this.definitions.get(id);permissions[skill.source]=await this.allowed(provider,skill);}
-   functions.push({id:route.id,phase:route.phase,engines:route.engines||[],tools:route.tools||[],status:route.status,sources,permission:sources.every(source=>permissions[source])?'allowed':'permission_required'});
+   functions.push({id:route.id,...route.title?{title:route.title}:{},phase:route.phase,engines:route.engines||[],tools:route.tools||[],status:route.status,sources,permission:sources.every(source=>permissions[source])?'allowed':'permission_required'});
   }
   return {schema_version:1,scope:'Guidance routing only; source registration is not an available or scientifically validated engine.',functions};
  }
@@ -101,7 +101,7 @@ export class ScientificSkillRouter {
    for(const [source,observed] of roots){const configured=await this.sourceRoot(source,{policy,scope});if(configured!==observed.configured||await fs.realpath(configured)!==observed.root)throw Error('Public source changed while the route was being read');}
    if(!await check())return {status:'permission_required',function_id:functionId,attachments:[]};
    await policy.revalidate();
-   const digest=sha(files.map(file=>file.name+':'+file.sha256+':'+JSON.stringify(file.source_evidence||null)).join('\n'));
+   const digest=sha(JSON.stringify([functionId,route.phase,route.status,route.adaptation,documentIds,files.map(file=>[file.name,file.sha256,file.source_evidence])]));
    if(documentId!==undefined){
     const file=files[0];if(files.length!==1)throw Error('Focused document identity is ambiguous');
     const {content,...receipt}=file;

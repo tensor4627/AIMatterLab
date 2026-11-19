@@ -10,12 +10,23 @@ export function validateSshConnectionRequest(method,value){
  return value;
 }
 export function registerSshConnectionRoutes({handle,connections,onClosing=()=>{},onClosed=()=>{},onUnknown=()=>{},onChange=()=>{}}){
- for(const method of Object.keys(schemas))handle('compute.sshConnection.'+method,async value=>{
+ async function operation(method,value){
   validateSshConnectionRequest(method,value);
   if(method==='close')onClosing(value.connectionId);
   let result;try{result=await connections[method](value);}catch(error){if(method==='close')onUnknown(value.connectionId);throw error;}
   if(method==='close'){if(result?.status==='closed'&&result.closed===true)onClosed(value.connectionId);else onUnknown(value.connectionId);}
   if(['open','confirm','openShell','close'].includes(method)||method==='completeLogin'&&result?.shell)onChange({method,connectionId:result?.connectionId||value.connectionId});
   return result;
- });
+ }
+ for(const method of Object.keys(schemas))handle('compute.sshConnection.'+method,value=>operation(method,value));
+ return {async closeExact(target){
+  const {connectionId}=target;
+  let result;
+  try{result=await connections.closeExact(target);}
+  catch(error){if(!['ssh_connection_changed','ssh_connection_not_found'].includes(error.message))onUnknown(connectionId);throw error;}
+  if(result?.status==='closed'&&result.closed===true){onClosing(connectionId);onClosed(connectionId);}
+  else onUnknown(connectionId);
+  onChange({method:'close',connectionId});
+  return result;
+ }};
 }

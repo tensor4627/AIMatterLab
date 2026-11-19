@@ -9,6 +9,15 @@ const {createDiagnostic,diagnosticContext,diagnosticCurrent,diagnosticPhase,diag
 const config={target:'local',projectId:'project-id',targetId:'target-id',gpu:0,maxSeconds:60,directoryName:'attempt',resources:{}},task={id:'task-id',name:'Silicon workflow',parameterRevision:3,updatedAt:1,deployment:{revision:2,config,prepared:{artifactId:'run-id'},request:{id:'request-id'}}};
 const raw="Error invoking remote method 'studio:task.execute': Error: Required PyDyn runtime imports failed (pydyn).\npydyn: ModuleNotFoundError: pydyn\n/registered/input/run.py:4\n保持原始诊断";
 test('transport wrapper is absent from the summary while the complete message and stack stay exact',()=>{const error=new Error(raw),record=createDiagnostic(error,diagnosticContext(task,config,'execute','run-id','Local research environment'));assert.equal(record.raw,raw);assert.equal(record.stack,error.stack);assert(!diagnosticSummary(record,'blocked').includes('Error invoking'));assert(diagnosticSummary(record,'blocked').includes('PyDyn'));});
+test('diagnostic severity follows the observed phase, with labels and no secrets in details',()=>{
+ const {default:Notice,setLanguage}=diagnosticComponents();setLanguage('en');
+ const record=createDiagnostic(new Error('Connection reply included api_key=private-sentinel'));
+ for(const [phase,severity,role,label] of [['confirmed','info','status','Information'],['unconfirmed','warning','status','Warning'],['failed','error','alert','Error']]){
+  const html=renderToStaticMarkup(React.createElement(Notice,{record,phase}));
+  assert(html.includes(`data-severity="${severity}"`));assert(html.includes(`role="${role}"`));assert(html.includes('</svg>'+label));
+  assert(!html.includes('private-sentinel'));assert(html.includes('[redacted]'));
+ }
+});
 test('unknown diagnostics use a neutral localized operation summary rather than translating arbitrary tracebacks',()=>{for(const operation of ['save','prepare','execute']){const record=createDiagnostic('English: inner Error: colon\ntrace',diagnosticContext(task,config,operation));assert(diagnosticSummary(record,'blocked').includes('诊断详情'));assert.equal(record.raw,'English: inner Error: colon\ntrace');}assert.equal(diagnosticSummary(createDiagnostic('请先保存参数'),'blocked'),'请先保存参数');});
 test('capture is immutable and target/revision changes make old diagnostic historical',()=>{const value=structuredClone(config),record=createDiagnostic(raw,diagnosticContext(task,value,'prepare'));value.targetId='new-target';assert.equal(record.context.targetId,'target-id');assert.equal(diagnosticCurrent(record,task,value),false);assert.equal(diagnosticCurrent(record,{...task,parameterRevision:4},config),false);assert.equal(diagnosticCurrent(record,task,config),true);});
 test('journal isolates tasks and preserves complete original diagnostics without clearing history',()=>{const journal=createDiagnosticJournal();journal.add(raw,diagnosticContext(task,config,'save'));journal.add('other',diagnosticContext({...task,id:'other'},config,'save'));assert.equal(journal.list('task-id')[0].raw,raw);assert.equal(journal.list('other')[0].raw,'other');assert.equal(journal.list('task-id').length,1);});

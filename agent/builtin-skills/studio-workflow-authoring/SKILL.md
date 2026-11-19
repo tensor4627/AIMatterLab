@@ -5,7 +5,7 @@ description: Detailed examples for preparing topology, engine input files and py
 
 # AIMatterLab workflow authoring
 
-Use `workflow.orchestrate` for the general authoring procedure. Read these examples when preparing topology, files or a graph for the current workflow. Ordinary chat can save a requested personal skill with `write_project_skill` and `scope="user"`. A draft-only request ends with saved inputs. An explicit execution request follows the authorized desktop workflow and its runtime checks.
+Use `workflow.orchestrate` for the general authoring procedure. Read these examples when preparing topology, files or a graph for the current workflow. Ordinary chat can save a requested personal skill with `write_project_skill` and `scope="user"`. A draft-only request ends with saved inputs. Follow the current workflow's authorized execution path when the user asks to run it. For an independent job from chat, use `cluster.lsf-slurm-deployment` and the current resource's execution checks.
 
 ## Own the authoring work
 

@@ -9,7 +9,7 @@ Resolve the requested engine from the user's task and registered capabilities: p
 
 Use inspect_asset for a supplied structure or create_structure for a user-delegated ASE recipe, then suggest_parameters with the actual structure. Preserve atom order, cell, PBC, temperature and units. Check the potential's species and intended consumer; checkpoint, eager and deployment models are distinct. HotPP consumers need a matching atomic-number convention. Never infer a scientifically meaningful CV or atom group just from a molecule name.
 
-Keep the same conversation-owned workflow. Use read_project_input and its SHA before changing existing inputs; write actual driver/config text with write_project_input and present_task with the saved paths, clear scientific parameters and provenance. Ask only about unresolved physical intent. An illustrative pilot needs an explicit label and does not establish production settings.
+When editing a workflow, keep its conversation identity. Use read_project_input and its SHA before changing existing inputs. Write actual driver/config text with write_project_input and call present_task with the saved paths, scientific parameters and provenance. For a delegated independent job, use the authorized compute route and preserve the same engine contract. Ask only about unresolved physical intent. Label illustrative pilot settings explicitly.
 
 For sampling, use the task's specialized pyGAS CV/bias/OPES skill. Preserve selected artifact format; an incompatible .pt2 must fail without fallback. The saved artifact and real target environment require independent validation before execution.
 

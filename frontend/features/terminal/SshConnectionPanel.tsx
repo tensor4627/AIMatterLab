@@ -13,7 +13,7 @@ import type {AgentProvider,Conversation} from '../../../contracts/dto/agent';
 import {verifiedSshConnection,sshConnectionCode,sshConnectionMessage,sshActionLabel,sshStateLabel,type SshConnectionState,type IndependentSshService} from '../compute/ssh-connection-types';
 
 type Shell={sessionId:string;serviceGrantPending?:boolean;conversationName?:string;humanInputSequence?:number;outputWait?:boolean;awaitingConversation?:boolean;conversationTerminal?:boolean;currentConversation?:boolean;connectionId?:string;resource?:{kind:string;connectionId?:string;profileId?:string;profileVersion?:number};name:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;expired?:boolean;output?:string;cursor?:number;dropped?:boolean};
-type Props={resourceScope?:string;activeResource?:ComputeResourceState|null;visible:boolean;request:{nonce:string;profileId?:string;version?:number;profileName?:string;connectionId?:string};canShare:boolean;provider?:AgentProvider;onError:(error:unknown)=>void;onConversationPrepared?:(conversation:Conversation)=>void;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"})=>void;onPlainSsh?:()=>void};
+type Props={resourceScope?:string;activeResource?:ComputeResourceState|null;visible:boolean;request:{nonce:string;profileId?:string;version?:number;profileName?:string;connectionId?:string;sessionId?:string;exact?:true};canShare:boolean;provider?:AgentProvider;onError:(error:unknown)=>void;onConversationPrepared?:(conversation:Conversation)=>void;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"})=>void;onPlainSsh?:()=>void};
 type ChannelInput={pending:Promise<void>;locked:boolean;observationEpoch:number};
 type LoginState={status:'waiting_authentication'|'checking'|'complete'|'failed';phase?:'checking_authentication'|'opening_shell';code?:string};
 type LoginResult={connection:SshConnectionState;shell?:Shell;login?:LoginState};
@@ -99,6 +99,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  useEffect(()=>{closeDisclosure(moreDetails.current);closeDisclosure(statusDetails.current);},[visible,request.nonce]);
  const alive=useRef(true),flight=useRef(false),generation=useRef(0),operations=useRef(0),reads=useRef(0),lastError=useRef(''),startedRequest=useRef(''),authInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),shellInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),latest=useRef({selected,request,provider,resourceScope,visible});latest.current={selected,request,provider,resourceScope,visible};
  const login=useRef({nonce:request.nonce,requestId:request.nonce,connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider});
+ const exactShell=useRef<string|undefined>(undefined);
  const terminalNumbers=useRef(new Map<string,number>());
  function shellLabel(item:Shell){if(!terminalNumbers.current.has(item.sessionId))terminalNumbers.current.set(item.sessionId,terminalNumbers.current.size+1);const n=terminalNumbers.current.get(item.sessionId);return item.owner==='agent'||item.awaitingConversation?'Agent · '+(item.conversationName||t(item.awaitingConversation?'等待会话接管':'终端')+' '+n):t('我的终端')+' '+n;}
  const connection=connections.find(value=>value.connectionId===selected),shell=shells.find(value=>value.sessionId===shellId),ready=!!connection&&connection.profileId===request.profileId&&connection.profileVersion===request.version&&connection.status==='authenticated'&&connection.authentication==='verified'&&connection.capabilities.multiplex;
@@ -154,7 +155,13 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
     const visibleShells=local.filter(item=>!item.conversationTerminal||item.currentConversation);
     const owned=visibleShells.find(item=>item.currentConversation),restoring=login.current.restoreShell;
     login.current.restoreShell=false;
-    setShellId(previous=>visibleShells.some(item=>item.sessionId===previous)?previous:owned?.sessionId||(restoring&&visibleShells.length===1?visibleShells[0].sessionId:''));
+    const requested=exactShell.current;
+    if(requested){
+     exactShell.current=undefined;
+     const original=visibleShells.find(item=>item.sessionId===requested&&item.owner==='human'&&item.alive===true&&!item.expired);
+     setShellId(original?.sessionId||'');
+     if(!original)setNotice(t('原终端当前不可用，请核对连接。'));
+    }else setShellId(previous=>visibleShells.some(item=>item.sessionId===previous)?previous:latest.current.request.exact?'':owned?.sessionId||(restoring&&visibleShells.length===1?visibleShells[0].sessionId:''));
     setShells(old=>visibleShells.map(item=>{
      const prior=old.find(value=>value.sessionId===item.sessionId);
      return prior&&prior.ownerEpoch>item.ownerEpoch?prior:item;
@@ -181,8 +188,8 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   setSelected(value.connectionId);
   setNotice(value.status!=='authenticated'&&!value.loginRequestId?t('原登录请求无法恢复，请查看原终端并刷新连接；不会另开登录。'):'');
  }
- useEffect(()=>{alive.current=true;generation.current++;login.current={nonce:request.nonce,requestId:request.nonce,connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider};setLoginState(null);setDiagnostic(null);setNotice('');setLoginBusy(false);setListed(false);setGeometry(null);setSelected('');setShellId('');setShells([]);setService(null);void refresh();return()=>{alive.current=false;generation.current++;};},[request.nonce]);
- useEffect(()=>{if(!visible||!listed||selected||flight.current||startedRequest.current===request.nonce)return;startedRequest.current=request.nonce;const existing=request.connectionId?candidates.find(value=>value.connectionId===request.connectionId):candidates.length===1?candidates[0]:undefined;if(existing)resumeConnection(existing);else if(candidates.length<=1)void open();},[visible,listed,selected,request.nonce,busy]);
+ useEffect(()=>{alive.current=true;generation.current++;exactShell.current=request.exact?request.sessionId:undefined;login.current={nonce:request.nonce,requestId:request.nonce,connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider};setLoginState(null);setDiagnostic(null);setNotice('');setLoginBusy(false);setListed(false);setGeometry(null);setSelected('');setShellId('');setShells([]);setService(null);void refresh();return()=>{alive.current=false;generation.current++;};},[request.nonce]);
+ useEffect(()=>{if(!visible||!listed||selected||flight.current||startedRequest.current===request.nonce)return;startedRequest.current=request.nonce;const existing=request.connectionId?candidates.find(value=>value.connectionId===request.connectionId):candidates.length===1?candidates[0]:undefined;if(existing)resumeConnection(existing);else if(request.exact)setNotice(t('原终端当前不可用，请核对连接。'));else if(candidates.length<=1)void open();},[visible,listed,selected,request.nonce,busy]);
  useEffect(()=>{if(!visible)return;void refresh();const timer=setInterval(()=>void refresh(),2000),off=window.studio?.onEvent(event=>{if(['studio/sshConnectionChanged','studio/sshServiceChanged','studio/conversationTerminalChanged'].includes(event.method))void refresh();});return()=>{clearInterval(timer);off?.();};},[visible,selected,request.nonce,resourceScope,provider]);
  function loginContext(flow:typeof login.current){const ticket=generation.current,id=flow.connectionId,nonce=request.nonce,profileId=request.profileId,version=request.version;return()=>alive.current&&ticket===generation.current&&login.current===flow&&latest.current.selected===id&&latest.current.request.nonce===nonce&&latest.current.request.profileId===profileId&&latest.current.request.version===version;}
  async function receiveLogin(result:LoginResult,flow:typeof login.current,current:()=>boolean,method:string){

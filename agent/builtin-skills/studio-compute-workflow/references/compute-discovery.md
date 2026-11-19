@@ -1,10 +1,10 @@
 # Compute discovery and deployment
 
-Use the registered AIMatterLab connection first. SSH is a transport from the local controller, not an instruction to install an agent CLI on the cluster. Never copy model credentials, SSH secrets, proxy settings or local private skills to a target. The desktop/worker retains connection information; the remote job needs only its scientific snapshot, selected environment recipe and the versioned minimal job helper.
+Use the selected AIMatterLab compute resource. The model and desktop credentials stay on the local controller. The worker sends the scientific snapshot, selected environment recipe and versioned job helper when needed. Keep private profiles and personal skills on the controlling machine.
 
 For a new connection, collect a host alias or hostname, **explicit remote username**, port and existing credential reference through the private connection editor. Never infer the remote username from the local OS account. Preserve host-key verification. Do not print a connection string or secret in a public report. A connection failure calls for bounded diagnostics on that connection, not discovery of unrelated hosts.
 
-Choose the requested stage before acting. Connection-only setup ends at the WSL/SSH connection; it does not automatically advance to remote discovery or submission. Scheduler adaptation starts with user-selected templates and a reviewable plan. Only a later explicitly included probe phase runs bounded, read-only checks. Do not dump the process environment or credentials. Reuse configured environments and runtime receipts instead of rereading installation skills or reinstalling software for routine planning.
+Choose the requested operation. A live queue question delegates a bounded read-only scheduler probe in ordinary chat. Follow `compute.queue` to acquire the authenticated resource with one selector, then use `inspect_compute_service` with `probe_scheduler: true` or bounded scheduler queries on its own conversation terminal. A request limited to connecting ends at the WSL/SSH connection. Reuse configured environments and applicable runtime receipts. Keep process environment and credentials out of probe output.
 
 ## Portable WSL and SSH connection setup
 
@@ -21,7 +21,7 @@ This section describes a future adaptation workflow, not an implemented automati
 3. Form candidates for queue/partition, account/QOS, CPU/GPU request, wall time and memory, each with its source line and uncertainty. Preserve conflicts across templates. Resolve LSF per-slot versus per-job memory and site-specific units explicitly; a script example alone does not prove a universal rule.
 4. Ask only for unresolved permitted targets, their order, payment conditions and resource limits. Names and preferences belong to a private profile. Generic examples in shared instructions use placeholders, never a developer's actual queues or nodes.
 5. Present a configuration proposal and exact script preview. Nothing in a template body becomes activation code or a submission command automatically. The user selects which candidates to adopt; existing project scope and immutable run identity remain authoritative.
-6. Leave environment tests, scheduler probes and bounded job verification as separate later tasks. Without their explicit scope, record them as pending and stop at the plan. Do not label template analysis, successful SSH or saved settings as a working submission chain.
+6. Continue into scheduler probes, environment tests or bounded job verification when the current delegation covers them. Record each status and evidence separately from template analysis or saved configuration.
 
 The implementation backlog includes bounded template ingestion, candidate/conflict review and versioned site-wrapper adapters. Map adopted candidates to the existing per-target environment and activation references; their configuration and immutable snapshots already exist. Site-specific submission, monitoring and retrieval still need later bounded acceptance. Only advertise a part as implemented after its own code and relevant evidence exist.
 
@@ -33,7 +33,7 @@ The implementation backlog includes bounded template ingestion, candidate/confli
 | Slurm | `sinfo`, selected `squeue` / `scontrol` / `sacct`, site-provided documentation | Partition access, GPU/GRES/TRES syntax, account/QOS if required, memory unit, time limits |
 | Local / WSL | Registered Python/engine paths and GPU availability | GPU assignment, concurrency, process supervisor and time limit |
 
-These command names are discovery hints, not a mandatory command script. Limit output and use commands the registered transport actually supports. Select the observed scheduler; do not silently translate an LSF queue into a Slurm partition or submit to both. Queue names, resource semantics and activation recipes belong to the private deployment profile, not this distributed skill.
+Use the observed scheduler and bounded output, filtering to the relevant queues or nodes. Ask the scheduler for effective GPU capacity and current allocation when available. Slurm node state or a nominal GRES string alone cannot measure free GPUs across shared nodes or reservations. LSF queue slots and node GPU availability can have different scopes. Report observation time and any fields the site did not expose. Obtain ownership, payment policy, priority and account/QOS from confirmed private sources. Protect queue names, resource policy and activation recipes in private deployment profiles.
 
 When both scheduler families are present or the selected family does not match the observation, present the discrepancy for a settings update; do not silently change the saved scheduler. A denied or timed-out command leaves that observation unknown. Discovery can propose settings, but cannot approve queue access.
 

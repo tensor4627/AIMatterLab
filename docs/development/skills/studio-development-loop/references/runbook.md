@@ -34,6 +34,8 @@ Use typed, main-process-validated IPC. Keep the renderer free of filesystem, pro
 
 Store private prompts, machine paths, connection details and raw reports only in ignored runtime roots. Public iteration notes describe behavior, coverage, passed/failed/blocked/not_run and limitations without SSH/proxy endpoints, accounts, credentials or private research inputs. Public skills contain portable reasoning and tool contracts, never developer-machine recipes. Update CHANGELOG and the version document. Verify the actual package before a local release tag; do not invent historical commits or push without authorization.
 
+On every version, B maps changed user-facing operations to their bundled skill routes, core instructions and turn prompts. C checks each affected path for current tool names, authorization and receipt semantics. Record unchanged guidance reviewed at its actual scope. When the release package is ready, check archive bytes and actual `read_scientific_skill` replies using its packaged resources. Keep versioned results with the release. [Bundled guidance release checks](../../../windows-update-release.md#核对内置指导)
+
 ## Native audit scheduling and startup diagnostics
 
 Separate application health, native control-channel health and functional acceptance. After a native failure, retain the first evidence, check the actual window and launch process, refresh the selection and retry once using the official recovery procedure. If capture fails but an exact target and focus remain observable, a bounded harmless native keyboard check may establish input separately. Do not spend repeated batches on the same failed channel or count a recovered window as a button pass.

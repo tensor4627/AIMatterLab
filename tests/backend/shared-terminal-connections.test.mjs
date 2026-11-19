@@ -24,6 +24,25 @@ function fixture(t,{unsupported=false,dropLoginAck=false,dropPrepareAck=false,dr
 test('main human ports hide master authentication from shell inventory, safe state and MCP and return exact schema2 shell metadata',async t=>{
  const f=fixture(t),pending=await f.open(),ref={connectionId:pending.connectionId};assert.equal((await f.bridge.list({})).sessions.length,0);assert((await f.bridge.connections.authRead(ref)).output.includes('PRIVATE_AUTH_PROMPT'));assert(!(JSON.stringify(await f.bridge.connections.list({}))).includes('PRIVATE_AUTH_PROMPT'));await assert.rejects(f.bridge.callTool('compute.sshConnection.authRead',ref,f.scope()),/unknown_operation/);const c=await f.bridge.connections.confirm(ref);assert.equal((await f.bridge.connections.authRead(ref)).output,'');f.select(c);const shell=await f.bridge.connections.openShell({...ref,requestId:'shell'});assert.equal(shell.connectionId,c.connectionId);assert.deepEqual(shell.resource,{kind:'ssh-connection',connectionId:c.connectionId,profileId:f.profile.id,profileVersion:1});assert.equal((await f.bridge.resourceState({sessionId:shell.id})).authentication,'verified');await f.bridge.owner({sessionId:shell.id,ownerEpoch:1,owner:'agent'});assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),true);f.worker.connection={changed:true};f.worker.connectionEpoch++;assert.equal((await f.bridge.callTool('list_shared_terminals',{},f.scope())).sessions[0].id,shell.id);await f.bridge.close({sessionId:shell.id});assert.equal((await f.bridge.connections.state(ref)).authentication,'verified');assert.equal((await f.bridge.connections.list({})).connections.length,1);
 });
+test('console reads multiple broker masters without selecting a conversation or exposing authentication, output or PID',async t=>{
+ const f=fixture(t),a=await f.ready(),b=await f.ready();f.select(b);
+ const shell=await f.bridge.connections.openShell({connectionId:a.connectionId,requestId:'original-human'});
+ await f.open('pending-authentication');f.change({provider:'deepseek',threadId:null});
+ const inventory=await f.bridge.consoleInventory();
+ assert.equal(inventory.complete,true);
+ assert.deepEqual(inventory.connections.map(row=>[row.status,row.authentication,row.verified]),[['authenticated','verified',true],['authenticated','verified',true],['authenticating','pending',true]]);
+ assert.deepEqual(inventory.connections[0].capacity,{total:4,occupied:0});
+ assert.deepEqual(inventory.sessions.map(row=>[row.connectionId,row.sessionId,row.owner,row.alive]),[[a.connectionId,shell.id,'human',true]]);
+ assert.doesNotMatch(JSON.stringify(inventory),/PRIVATE_AUTH_PROMPT|"pid"|"output"|identity_file/);
+ assert.equal(f.requests.filter(row=>row.route.includes('/owner')).length,0);
+ const original={connectionId:a.connectionId,profileId:f.profile.id,profileVersion:1};
+ await assert.rejects(f.bridge.connections.closeExact({...original,profileVersion:2}),/ssh_connection_changed/);
+ assert.equal(f.requests.filter(row=>row.route.endsWith('/close')).length,0);
+ assert.equal((await f.bridge.connections.closeExact(original)).closed,true);
+ assert.deepEqual(f.requests.find(row=>row.route.endsWith('/close')).body,{profileId:f.profile.id,profileVersion:1});
+ assert.equal((await f.bridge.connections.state({connectionId:b.connectionId})).authentication,'verified');
+});
+
 test('human terminal observation rechecks a harmless message revision without suppressing a real conversation switch',async t=>{const f=fixture(t),c=await f.ready();f.select(c);const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'shell'});let once=true;f.onState(()=>{if(once){once=false;f.change({serial:1});}});assert.equal((await f.bridge.read({sessionId:shell.id,ownerEpoch:1})).sessionId,shell.id);once=true;f.onState(()=>{if(once){once=false;f.change({threadId:'other-thread',serial:2});}});await assert.rejects(f.bridge.read({sessionId:shell.id,ownerEpoch:1}),/terminal_context_changed/);});
 
 test('listing the authenticated SSH terminals during first send survives thread creation and worker attachment',async t=>{

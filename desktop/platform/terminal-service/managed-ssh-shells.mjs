@@ -18,11 +18,14 @@ export function managedSshShells({verified, createSession, now = Date.now}) {
   if (scope.taskId !== undefined) fail('invalid_scope', 403);
   return {id:data.leaseId, scope};
  }
+ const expired = entry => {
+  const state = entry.session?.state();
+  return entry.confirmed && (!state?.alive || !entry.revoked && (state.expired || state.closed));
+ };
  function reap() {
   for (const [id, expiry] of cancelled) if (expiry <= now()) cancelled.delete(id);
   for (const [id, entry] of shells) {
-   const state = entry.session?.state();
-   if (entry.confirmed && (!state?.alive || !entry.revoked&&(state.expired || state.closed))) {
+   if (expired(entry)) {
     entry.session.dispose();
     shells.delete(id);
    }
@@ -114,5 +117,6 @@ export function managedSshShells({verified, createSession, now = Date.now}) {
  }
 
  return {open, state:data=>access(data,'state'), read:data=>access(data,'read'),
+  occupied:()=>[...shells.values()].filter(entry=>!expired(entry)).length,
   input:data=>access(data,'input'), close, closeAll};
 }

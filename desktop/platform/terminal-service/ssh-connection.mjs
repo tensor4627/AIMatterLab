@@ -7,7 +7,7 @@ import {execFile} from 'node:child_process';
 import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {createTerminalSession,drainOwnedConpty,TerminalFault,exact} from './session.mjs';
-import {managedSshShells} from './managed-ssh-shells.mjs';
+import {MANAGED_SSH_SHELL_CAPACITY,managedSshShells} from './managed-ssh-shells.mjs';
 
 const fail=(code,status=409)=>{throw new TerminalFault(code,status);};
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value);
@@ -107,7 +107,7 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
     r.exit=new Promise(resolve=>{r.resolveExit=resolve;});r.terminal.onExit(()=>{if(process.platform==='win32')drainOwnedConpty(r.terminal);r.alive=false;r.resolveExit();if(r.closeRequested)r.revision++;else if(r.status!=='closed')lost(r,'ssh_master_unavailable');});return view(r);
    }catch(error){if(r.status==='closed')return view(r);r.status=['ssh_route_requires_review'].includes(error.code)?'requires_review':['ssh_multiplex_unsupported','ssh_linux_client_namespace_required','ssh_native_key_path_required'].includes(error.code)?'unsupported':'unavailable';r.authentication='not_observed';r.error=error.code||'ssh_control_unavailable';r.revision++;return view(r);}})();opens.set(value.requestId,{signature,promise});return promise;
  }
- async function state(value){const r=ref(value);if(r.closeRequested&&!r.closeProof)await observeClose(r);if(r.status==='authenticated')try{await verified(r,true);}catch{}return view(r);}
+ async function state(value){const r=ref(value);if(r.closeRequested&&!r.closeProof)await observeClose(r);if(r.status==='authenticated')try{await verified(r,true);}catch{}return {...view(r),managedShellUsage:{total:MANAGED_SSH_SHELL_CAPACITY,occupied:r.managedShells?.occupied()??0}};}
  async function confirm(value){const r=ref(value);if(r.status==='authenticated')return state(value);if(r.status!=='authenticating'||!r.alive||!r.native&&!r.master)fail('ssh_authentication_unconfirmed');if(r.confirming)return r.confirming;const revision=r.revision;r.confirming=(async()=>{const proof=await checkTransport(r);if(closing||r.closeRequested||r.status!=='authenticating'||r.revision!==revision||!r.alive)fail('ssh_connection_changed');if(!r.native)r.proof={...r.proof,...proof};r.status='authenticated';r.authentication='verified';r.revision++;r.ring=[];r.bytes=0;r.inputRequests.clear();return view(r);})();try{return await r.confirming;}finally{r.confirming=null;}}
  const loginCodes=new Set(['ssh_connection_changed','ssh_authentication_unconfirmed','ssh_master_identity_changed','ssh_master_unavailable','ssh_control_identity_changed','ssh_control_unavailable','ssh_control_timeout','ssh_control_output_limit','ssh_channel_unavailable','ssh_client_unavailable','ssh_invalid_profile','ssh_route_requires_review','ssh_multiplex_unsupported','ssh_linux_client_namespace_required','ssh_native_key_path_required','ssh_remote_terminal_unavailable','terminal_unavailable','terminal_start_failed','terminal_session_limit','terminal_service_active']);
  const loginCode=error=>loginCodes.has(error?.code)?error.code:({session_limit:'terminal_session_limit',spawn_failed:'terminal_start_failed',service_active:'terminal_service_active'})[error?.code]||'terminal_unavailable';

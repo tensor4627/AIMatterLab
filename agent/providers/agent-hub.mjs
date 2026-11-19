@@ -37,7 +37,7 @@ export class AgentHub extends EventEmitter{
    if(event.method==='account/login/completed'){
      const loginId=event.params?.loginId,previous=this.loginStatus.codex;
      if(loginId&&previous?.loginId&&(previous.phase==='authorizing'&&previous.loginId!==loginId||previous.phase==='cancelled'&&previous.loginId===loginId))return;
-     this.loginStatus.codex={phase:event.params?.success?'completed':'failed',loginId,message:event.params?.error||'',modelAccess:'not_run'};
+     this.loginStatus.codex={phase:event.params?.success?'completed':'failed',loginId,message:event.params?.success?'':'登录失败，请重新登录。',modelAccess:'not_run'};
     this.emit('event',{method:'studio/login',provider:'codex',params:{provider:'codex',...this.loginStatus.codex}});
     this.emit('event',{method:'studio/accountUpdated',provider:'codex',params:{}});
    }
@@ -326,7 +326,9 @@ export class AgentHub extends EventEmitter{
   const values=new Map(),catalog={put:(kind,id,value)=>values.set(kind+id,value),get:(kind,id)=>values.get(kind+id),list:()=>[]};
   const profiles=provider==='compatible'?new ModelProfileStore({catalog:{...catalog,list:kind=>[...values].filter(([key])=>key.startsWith(kind)).map(([,value])=>value)},vault:{get:id=>id==='compatible'?credential:values.get('secret:'+id),put:(id,value)=>values.set('secret:'+id,value)}}):undefined;
    const bridge=this.createApiBridge(provider,{root:path.join(this.root,'connection-checks',randomUUID()),catalog,credential:()=>credential,...profiles?{profiles}:{},worker:()=>null});let timer;
-  try{await bridge.start();await bridge.request('model/list');const thread=await bridge.request('thread/start',{});const completion=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('连接测试超时；没有提交计算。')),45000);bridge.on('event',event=>{if(event.method==='turn/completed'){event.params.turn.status==='completed'&&event.params.turn.modelOutputReceived===true?resolve(event.params.turn):reject(Error(event.params.turn.error?.message||'API 测试未收到完整模型回复'));}});});await Promise.all([completion,bridge.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Connection test. Reply exactly OK. Do not call tools.'}]})]);if(!current())throw Error('API 配置已变化；请重新验证当前配置');this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{}});return {status:'passed',model:thread.model,scope:'One harness-streamed test reply; no conversation inputs or scientific files shared'};}finally{clearTimeout(timer);bridge.close();}
+  try{await bridge.start();await bridge.request('model/list');const thread=await bridge.request('thread/start',{});const completion=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('连接测试超时；没有提交计算。')),45000);bridge.on('event',event=>{if(event.method==='turn/completed'){event.params.turn.status==='completed'&&event.params.turn.modelOutputReceived===true?resolve(event.params.turn):reject(Error(event.params.turn.error?.message||'API 测试未收到完整模型回复'));}});});await Promise.all([completion,bridge.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Connection test. Reply exactly OK. Do not call tools.'}]})]);if(!current())throw Error('API 配置已变化；请重新验证当前配置');this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{}});return {status:'passed',model:thread.model,scope:'One harness-streamed test reply; no conversation inputs or scientific files shared'};}
+  catch(error){throw Error(redact(error instanceof Error?error.message:String(error),[credential.apiKey]));}
+  finally{clearTimeout(timer);bridge.close();}
  }
  async configure(provider,preferences,threadId,model){
   if(this.codex.activeTurns?.size)throw Error('Stop the current reply before changing context settings');

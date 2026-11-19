@@ -9,9 +9,11 @@ import react from '@vitejs/plugin-react';
 import {_electron} from 'playwright';
 import {requireLaunchContext,resolveDesktopBinary} from './desktop-launch.mjs';
 import {frontendManagedComputeCases} from './frontend-managed-compute-cases.mjs';
+import {frontendResourceConsoleCases} from './frontend-resource-console-cases.mjs';
 
 const root = fileURLToPath(new URL('../',import.meta.url));
-const out = path.join(root,'validation','local','managed-compute-20261119','native-renderer');
+const resourceConsole = process.argv.includes('--resource-console');
+const out = path.join(root,'validation','local','managed-compute-20261119',resourceConsole?'native-resource-console':'native-renderer');
 const mime = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
 const files = new Map();
 const checks = [];
@@ -24,7 +26,7 @@ try {
   await fs.writeFile(nativeMain,
     "const {app,BrowserWindow}=require('electron');\n" +
     "app.setPath('userData',process.env.STUDIO_MANAGED_FIXTURE_PROFILE);\n" +
-    "app.whenReady().then(()=>{const window=new BrowserWindow({show:false,width:1440,height:940,useContentSize:true," +
+    "app.whenReady().then(()=>{const window=new BrowserWindow({show:false,width:Number(process.env.STUDIO_MANAGED_FIXTURE_WIDTH),height:Number(process.env.STUDIO_MANAGED_FIXTURE_HEIGHT),useContentSize:true," +
     "webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});\n" +
     "window.webContents.setWindowOpenHandler(()=>({action:'deny'}));\n" +
     "window.webContents.session.setPermissionRequestHandler((_window,_permission,reply)=>reply(false));\n" +
@@ -49,12 +51,13 @@ try {
   await new Promise((resolve,reject) => { server.once('error',reject); server.listen(0,'127.0.0.1',resolve); });
   const origin = 'http://127.0.0.1:' + server.address().port;
   const executablePath = await resolveDesktopBinary();
-  await frontendManagedComputeCases({out,async check(name,validate) {
+  const cases = resourceConsole ? frontendResourceConsoleCases : frontendManagedComputeCases;
+  await cases({out,async check(name,validate,{width=1440,height=940} = {}) {
     let application,page;
     try {
       const profile = await fs.mkdtemp(path.join(out,'managed-profile-'));
       application = await _electron.launch({executablePath,args:[nativeMain],timeout:20000,
-        env:{...process.env,STUDIO_MANAGED_FIXTURE_PROFILE:profile}});
+        env:{...process.env,STUDIO_MANAGED_FIXTURE_PROFILE:profile,STUDIO_MANAGED_FIXTURE_WIDTH:String(width),STUDIO_MANAGED_FIXTURE_HEIGHT:String(height)}});
       page = await application.firstWindow();
       page.setDefaultTimeout(8000);
       const pageErrors = [];
@@ -63,8 +66,14 @@ try {
       await page.goto(origin + '/');
       await page.waitForFunction(() => typeof window.renderTest === 'function');
       const captureNative = async name => {
+        if(resourceConsole)await page.evaluate(()=>new Promise(resolve=>{setTimeout(resolve,160);requestAnimationFrame(()=>requestAnimationFrame(resolve));}));
         const bytes = await application.evaluate(async ({BrowserWindow}) => {
-          const image = await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
+          const contents = BrowserWindow.getAllWindows()[0].webContents;
+          const options = {stayHidden:true,stayAwake:true};
+          await contents.capturePage(undefined,options);
+          contents.invalidate();
+          await new Promise(resolve=>setTimeout(resolve,100));
+          const image = await contents.capturePage(undefined,options);
           return image.toPNG().toString('base64');
         });
         assert.ok(bytes.length > 100,'native capture contained image data');

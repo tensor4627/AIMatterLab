@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {schedulerInspectionCapability} from '../../../contracts/compute/scheduler-observation.mjs';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {validTaskWorkerSource, stableSshWorkerBinding} from '../../../contracts/compute/task-worker-binding.mjs';
 import {normalizeSshServiceHealth} from './ssh-connection-service.mjs';
@@ -76,7 +77,8 @@ export function createManagedComputeServices({connections,registration,source,tr
    if(!stableHealth(health,observed))fail('managed_compute_service_changed');
    return observed;
   }
-  return {id:sshSourceId(binding),generation:channelId,binding,health,verify,async forward(method,target,data,mcp,timeoutMs,beforeDispatch){
+  const schedulerInspection=view.service?.bridge_capabilities?.includes(schedulerInspectionCapability)===true;
+  return {id:sshSourceId(binding),generation:channelId,binding,health,verify,schedulerInspection,async forward(method,target,data,mcp,timeoutMs,beforeDispatch){
    fresh();const observed=await verify();
    beforeDispatch?.(observed);
    const result=await forward(method,target,data,mcp,timeoutMs);

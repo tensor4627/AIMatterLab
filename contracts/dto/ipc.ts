@@ -1,4 +1,4 @@
-import type {ManagedSnapshot,ManagedSchedule,PublishedSshResource} from './managed-compute';
+import type {ManagedSnapshot,ManagedSchedule,PublishedSshResource,ComputeConsoleSnapshot,ComputeConsoleRelease,ComputeConsoleSshRef,ComputeConsoleProfileRef,ComputeConsoleLocalRef} from './managed-compute';
 import type {Conversation} from './agent';
 import type {UpdateAccess,UpdateSource,UpdateState} from './update';
 import type {Project,ComputeResourceActivation,ComputeResourceState,BaseWorkspaceRequest,BaseWorkspaceResult} from './compute';
@@ -27,6 +27,13 @@ export interface StudioIpcMap {
  'compute.managed.acknowledgeNotice':Route<{id:string},{acknowledged:true}>;
  'compute.managed.observeOnce':Route<{sourceId:string;scheduleId:string;requestId:string},{sourceId:string;scheduleId:string;requestId:string;status:string;run:unknown}>;
  'compute.managed.stopSchedule':Route<{sourceId:string;scheduleId:string},unknown>;
+ 'compute.console.snapshot':Route<Record<string,never>,ComputeConsoleSnapshot>;
+ 'compute.console.refresh':Route<Record<string,never>,ComputeConsoleSnapshot>;
+ 'compute.console.release':Route<ComputeConsoleRelease,{status:'released'|'unconfirmed'}>;
+ 'compute.console.disconnectSsh':Route<ComputeConsoleSshRef,{status:'disconnected'|'unconfirmed'}>;
+ 'compute.console.attachLocal':Route<ComputeConsoleProfileRef,{status:'attached'}>;
+ 'compute.console.detachLocal':Route<ComputeConsoleLocalRef,{status:'disconnected'}>;
+ 'compute.console.projectAccess':Route<ComputeConsoleSshRef & {projectId:string;allowed:boolean},{allowed:boolean}>;
  'compute.workspace.setup':Route<BaseWorkspaceRequest,BaseWorkspaceResult>;
  'updates.status':Route<Record<string,never>,UpdateState>;
  'updates.check':Route<Record<string,never>,UpdateState>;

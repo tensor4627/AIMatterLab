@@ -13,8 +13,8 @@ import './shared-terminal.css';
 import {serviceDuration,serviceErrorMessage,servicePhaseMessage,serviceRejectedMessage,serviceTransfer,serviceVersion} from './ssh-service-presentation';
 import SshConnectionPanel from './SshConnectionPanel';
 
-export type SharedTerminalRequest={nonce:string;kind:'local'|'ssh';mode:'interactive'|'key';clusterId?:string;profileId?:string;version?:number;profileName?:string;connectionId?:string;connectionMode?:'plain'|'managed'};
-type OpenTarget=Omit<SharedTerminalRequest,'nonce'|'profileName'|'connectionMode'|'connectionId'>;
+export type SharedTerminalRequest={nonce:string;kind:'local'|'ssh';mode:'interactive'|'key';clusterId?:string;profileId?:string;version?:number;profileName?:string;connectionId?:string;connectionMode?:'plain'|'managed';sessionId?:string;exact?:true};
+type OpenTarget=Omit<SharedTerminalRequest,'nonce'|'profileName'|'connectionMode'|'connectionId'|'sessionId'|'exact'>;
 type OpenRecovery={target:OpenTarget;scope:string;nonce?:string;provider?:AgentProvider;requestId:string;message:string};
 type Session={humanInputSequence?:number;outputWait?:boolean;connectionId?:string;resource?:SshTerminalResourceReference|SshConnectionResourceReference;sessionId:string;name:string;kind:string;mode:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;status:string;expired?:boolean;sequence:number;exitCode?:number|null;serviceActive?:boolean;serviceStatus?:string};
 type ReadResult=Session&{output:string;cursor:number;dropped:boolean};
@@ -127,7 +127,21 @@ export function LegacySharedTerminalPanel({visible,request,canShare,onError,reso
  async function newConnection(){const value=recoveryRef.current;if(!value||!contextCurrent(value)||!visibleOwner.current||busyRef.current)return;await open(value.target,{newConnection:true,requestId:value.requestId});}
  async function refreshSessions(){const context={scope:resourceOwner.current,nonce:requestOwner.current,provider:providerOwner.current};await action(async()=>{await list();},()=>contextCurrent(context));}
  useEffect(()=>{if(!visible)return;void refreshResource();},[visible,resourceScope]);
- useEffect(()=>{if(!visible)return;if(request&&lastRequest.current!==request.nonce){if(busyRef.current)return;lastRequest.current=request.nonce;const {nonce,profileName,connectionMode,connectionId,...value}=request;void open(value);}else{void list().catch(report);}},[visible,request?.nonce,busy]);
+ useEffect(()=>{
+  if(!visible)return;
+  if(!request||lastRequest.current===request.nonce){void list().catch(report);return;}
+  if(busyRef.current)return;
+  lastRequest.current=request.nonce;
+  const {nonce,profileName,connectionMode,connectionId,sessionId,exact,...value}=request;
+  if(!exact){void open(value);return;}
+  const context={scope:resourceOwner.current,nonce,provider:providerOwner.current},current=()=>contextCurrent(context);
+  void action(async()=>{
+   const sessions=await list();if(!current())return;
+   const original=sessions.find(item=>item.sessionId===sessionId&&item.kind===value.kind&&(!value.profileId||item.resource?.profileId===value.profileId&&item.resource?.profileVersion===value.version));
+   if(original?.owner==='human'&&original.alive===true&&!original.expired){attach(original);return;}
+   generation.current++;activeRef.current=null;setActive(null);setNotice(t('原终端当前不可用，请核对连接。'));
+  },current);
+ },[visible,request?.nonce,busy]);
 
  useEffect(()=>{
   if(!active?.sessionId||!host.current)return;

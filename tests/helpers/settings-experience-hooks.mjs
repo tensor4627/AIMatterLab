@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 import * as modelProfiles from '../../contracts/agent/model-profiles.mjs';
+import * as transcript from '../../contracts/agent/transcript-sanitizer.mjs';
 export function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 export function experienceHarness({component,props:initial={},invoke:dispatch=async()=>({})}){
  const hooks=[],effects=[],calls=[],errors=[],configured=[],events=new Set(),modules=new Map();let cursor=0,dirty=false,disposed=false,tree;
@@ -14,10 +15,12 @@ export function experienceHarness({component,props:initial={},invoke:dispatch=as
   if(name==='react')return {useState,useRef,useEffect};
    if(name.endsWith('.css'))return {};
    if(name==='../../../contracts/agent/model-profiles.mjs')return modelProfiles;
+   if(name==='../../../contracts/agent/transcript-sanitizer.mjs')return transcript;
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
   if(name==='../../api/studio')return {invoke};
   if(name==='../../api/worker')return {api:(method,target,data)=>invoke('worker.request',{method,target,data})};
-  if(name==='../../ui/i18n')return {t:value=>value};
+  if(name==='../../ui/i18n'||name==='./i18n')return {t:value=>value};
+  if(name==='../diagnostics/DiagnosticNotice')return {InlineDiagnostic:'InlineDiagnostic'};
   if(name==='../../ui/Dialogs')return {Modal:'Modal'};
   if(name.endsWith('/LoadingFeedback'))return {default:'LoadingFeedback',LoadingFeedback:'LoadingFeedback'};
   if(name==='lucide-react')return new Proxy({},{get:(_,key)=>key});

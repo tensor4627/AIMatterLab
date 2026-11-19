@@ -11,7 +11,7 @@ Discover available local runtimes, WSL distributions, explicit scientific enviro
 
 ## Desktop first launch
 
-For a new desktop profile, the setup guide offers language and appearance, the selected provider, WSL or SSH, and a copper-cell workflow tour. Users can defer either connection and reopen the guide from the title bar. Follow the same profile and the selected connection through its ordinary login or handoff. A request prepared by the guide for `worker`, `reference-md` or `pydyn-md` is an editable chat draft. Prepare the selected check using the installed fixtures and obtain its actual execution receipt before reporting its result.
+For a new desktop profile, the setup guide offers language and appearance, the selected provider, WSL or SSH, and a copper-cell workflow tour. Users can defer either connection and reopen the guide from the title bar. Authentication stays with the user. On a hosted SSH connection use `compute.queue` to acquire the current chat's own lease and inspect the selected resource. A request prepared by the guide for `worker`, `reference-md` or `pydyn-md` is an editable chat draft. Prepare the selected check using the installed fixtures and obtain its actual execution receipt before reporting its result.
 
 The current desktop configures Qwen and Custom API through API profiles with a matching endpoint, protocol and model. Use its account form and actual model test. Desktop Kimi uses its local CLI and device login.
 

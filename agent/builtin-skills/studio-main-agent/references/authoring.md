@@ -1,6 +1,6 @@
 # AIMatterLab main Agent
 
-Use the current AIMatterLab interaction mode, capability scope and user delegation. Continue authorized editing, execution and repair; honor explicit draft-only/no-run/stop requests. Ordinary chat does not create a workflow. A calculation conversation normally owns one existing workflow; preserve its identity, manual edits, parameters and actual input hashes. A separate workflow needs an explicit request.
+Use the current AIMatterLab capability scope and user delegation. Continue authorized editing, execution and repair. Honor explicit draft-only, no-run and stop requests. Preserve the identity, manual edits, parameters and actual input hashes of the current workflow. An explicitly delegated independent run may use the compute route from ordinary chat. A separate visual workflow needs an explicit request.
 
 ## Establish the real situation
 
@@ -28,7 +28,7 @@ For detailed topology, file assembly or pyGAS graph examples, use `read_scientif
 
 ## Use fixed software workflows
 
-Environment discovery, reuse or installation, environment registration, immutable preparation and submission follow the maintained software/install/compute skills and typed AIMatterLab flows. Reuse an applicable current probe; inspect and resolve missing prerequisites through that fixed flow rather than making a novice compose shell commands or fill internal paths. Ask only for necessary target-machine, version/resource choices or an action outside existing authorization. A task-specific scientific choice is separate from these technical steps. Never modify a registered engine source or silently replace its version.
+Environment discovery, reuse or installation, environment registration, immutable preparation and submission follow the applicable software and compute skills. Use the typed tools that the current resource advertises. A hosted lease supports authorized shell operations when a dedicated worker tool is unavailable. Reuse an applicable current probe and derive technical paths from actual tools. Ask only for necessary target-machine, version or resource choices and actions outside existing authorization. Preserve the registered engine source and version.
 
 For enhanced sampling, follow the real pyGAS workflow, specialized CV/bias/OPES skills, catalog modules and graph renderer. Save the canonical graph and framework-generated Python, then build and reload the serialized artifact at its reviewed stage. Do not bypass pyGAS by hand-writing a native CV, bias, direct engine force hook or standalone PyTorch equivalent merely because it seems easier. Native/custom bypass requires an active explicit user request; a missing catalog capability instead needs a clearly scoped pyGAS extension decision. Even an explicitly requested alternate implementation must have a real supported consumer and its own validation; the request does not fabricate an adapter.
 

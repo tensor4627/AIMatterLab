@@ -8,6 +8,28 @@ const openQuote="[\"“「『‘']?",closeQuote="[\"”」』’']?";
 const generic=new Map([['集群','ssh'],['ssh','ssh'],['cluster','ssh'],['本地','wsl'],['wsl','wsl'],['local','wsl']]);
 export const genericComputeKind=value=>generic.get(value)||null;
 
+const operations=/队列|分区|节点|资源|环境|作业|集群|queue|partition|node|environment|scheduler|cluster/iu;
+const queryLead=String.raw`(?:(?:现在|请|麻烦|帮我|给我|我想|顺便|先|再|please\b|can you\b|could you\b)\s*)*(?:看(?:看|一看|一下|下)?|查(?:查|询|看|一下|一查|下)?|调取|检查|列出|获取|连接|登录|访问|配置|安装|inspect|check|show|list|query|connect to|use)\s*`;
+const negativeQuery=/不要|不必|不用|无需|禁止|先别|别查|别看|未授权|假如|如果|举例|示例|仅解释|只解释|如何|怎么|do not|don['’]t|never|instead of|without|example|how (?:do|to|can)|\bif\b/iu;
+const clauses=message=>message.split(/[，。；,;!！?？\n]+/u).map(s=>s.trim()).filter(Boolean);
+
+export function hasResourceRequest(message) {
+ const command=new RegExp('^'+queryLead,'iu');
+ return clauses(message).some(part=>operations.test(part)&&!negativeQuery.test(part)&&
+   (command.test(part)||/^(?:请|帮我|please\s+)?(?:用|使用|在|选用|use\b|run\b)/iu.test(part)));
+}
+
+function requestedObservation(message,value) {
+ const name=escaped(value),target=openQuote+name+closeQuote;
+ const prefix=new RegExp('^'+queryLead+'(?:一下\\s*)?(?:the\\s+)?'+target+'(?=$|[\\s的上中有哪些里可是否还在]|集群|分区|队列|节点|资源|作业|环境)','iu');
+ const namedFirst=new RegExp('^'+target+'(?:集群)?(?:上|中|里|的|\\s+).{0,48}(?:队列|分区|空闲|资源|有空|环境|作业|nodes?|queues?|partitions?)','iu');
+ const suffix=new RegExp('^'+queryLead+'.{0,128}(?:\\bon\\s+|\\bof\\s+|\\bat\\s+|\\bfrom\\s+|在)'+target+'(?:集群)?\\s*$','iu');
+ // A restriction about another clause must never be turned into a positive selection.
+ if(clauses(message).some(part=>negativeQuery.test(part)&&part.includes(value)))return false;
+ return clauses(message).some(part=>!negativeQuery.test(part)&&operations.test(part)&&
+  (prefix.test(part)||namedFirst.test(part)||suffix.test(part)));
+}
+
 // Keep automatic interpretation narrow. Other wordings can be resolved through
 // an exact follow-up choice, with the same authenticated transcript.
 export function requestsComputeName(message,value){
@@ -19,6 +41,7 @@ export function requestsComputeName(message,value){
  const positive=new RegExp(lead+clause+'\\s*'+openQuote+literal+boundary,'u');
  const negative=new RegExp('(?:不要|别|不能|不再|不|don[’\']t|do not|never|avoid)\\s*(?:再\\s*)?'+clause+'\\s*'+openQuote+literal+boundary,'u');
  if(negative.test(message))return false;
+ if(requestedObservation(message,value))return true;
  if(genericComputeKind(value)){
   return new RegExp(lead+clause+'\\s*'+literal+'(?=$|[\\s，。,.！!；;]|跑|算|提交|计算|运行|做|查看)','u').test(message);
  }
@@ -28,7 +51,7 @@ export function requestsComputeName(message,value){
 }
 
 function exactAnswer(message,choice){
- const name=text(choice.name),pattern='^(?:(?:选择|选用|使用|选|用|就是|choose\\s+|use\\s+)\\s*)?'+openQuote+escaped(name)+closeQuote+'[\\s。.!！]*$';
+ const name=text(choice.name),pattern='^(?:(?:对|好的|没错|确认|yes)[，,\\s]+)?(?:(?:就是|是|选择|选用|使用|就用|选|用|choose\\s+|use\\s+)\\s*)?'+openQuote+escaped(name)+closeQuote+'[\\s。.!！]*$';
  return !!name&&new RegExp(pattern,'u').test(message);
 }
 
@@ -44,8 +67,8 @@ export function createManagedComputeIntent(){
   }
   seen.set(value.turnId,message);
   if(seen.size>8)seen.delete(seen.keys().next().value);
-  const turn={id:value.turnId,message,seen,pending:null,answer:null};
-  const proposal=previous?.pending;
+  const turn={id:value.turnId,message,seen,pending:null,answer:null,projectId:value.projectId??null,taskId:value.taskId??null};
+  const proposal=previous?.projectId===turn.projectId&&previous?.taskId===turn.taskId?(previous.pending||previous.discovered):null;
   if(proposal){
    const choices=proposal.candidates.filter(choice=>exactAnswer(message,choice));
    if(choices.length===1)turn.answer={proposal,choice:choices[0]};
@@ -72,6 +95,11 @@ export function createManagedComputeIntent(){
   if(turn.answer&&turn.answer.choice!==choice)fail('managed_compute_choice_changed');
   turn.answer={proposal,choice};
  }
- return {recordUserTurn,current,assertTurn,propose,confirmChoice,
+ function observedChoices(scope,candidates) {
+  const turn=current(scope);
+  if(turn&&!turn.pending&&hasResourceRequest(turn.message)&&turn.projectId===(scope.projectId??null)&&turn.taskId===(scope.taskId??null))
+   turn.discovered={alias:null,save:false,candidates};
+ }
+ return {recordUserTurn,current,assertTurn,propose,confirmChoice,observedChoices,
   forget:(provider,threadId)=>turns.delete(computeScopeKey({provider,threadId})),clear:()=>turns.clear()};
 }

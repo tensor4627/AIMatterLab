@@ -391,7 +391,7 @@ worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  if(selected?.kind==='ssh-terminal'||worker.identity?.kind==='ssh')return selected?.kind==='ssh-terminal'&&terminalTool&&scope?.provider===provider&&sharedTerminal.hasCurrentGrant(provider,selected.sessionId)===true;
  return true;
 });
-registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,onClosing:connectionId=>{managedResources?.revokeConnection({connectionId});conversationTerminals.releaseConnection(connectionId);sshService.connectionLost(connectionId);},onClosed:connectionId=>sshService.connectionClosed(connectionId),onUnknown:connectionId=>sshService.connectionLost(connectionId),onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
+const sshConnectionRoutes=registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,onClosing:connectionId=>{managedResources?.revokeConnection({connectionId});conversationTerminals.releaseConnection(connectionId);sshService.connectionLost(connectionId);},onClosed:connectionId=>{managedResources?.confirmConnectionClosed?.(connectionId);sshService.connectionClosed(connectionId);},onUnknown:connectionId=>sshService.connectionLost(connectionId),onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
 handle('compute.sshService.registration',value=>{
  const registration=serviceRegistration.read(value);
  return {...registration,localProjectSkillsRoot:projectSkills.root};
@@ -456,6 +456,13 @@ const runToolScope=(scope,run)=>agents.runForScope(scope,()=>workflowContext.run
 worker.setToolScope(runToolScope);
 managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,registration:serviceRegistration,terminal:sharedTerminal,projectSkills,resourceActivity,
  projectAccess:projectTerminalAccess,records:taskRecords,workflow:workflowContext,agents,privateAccess,workerSource,sshTransportSource,handle,
+ worker,conversationTerminals,closeSsh:sshConnectionRoutes.closeExact,assertConnectionIdle:target=>{
+  if(!target||computeResource.peek()?.connectionId===target.connectionId||worker.identity?.connectionId===target.connectionId)assertLegacyWorkerIdle();
+  if(target&&computeResource.peek()?.connectionId===target.connectionId){
+   const scope=workflowContext.current();
+   if(scope?.threadId&&agents.isBusy(scope.provider,scope.threadId))throw Error('managed_compute_channel_busy');
+  }
+ },
  notify:()=>emit('studio:event',{method:'studio/managedActivity'}),dispatch:(...args)=>agentRequests(...args),
  announce:notice=>{
   if(shuttingDown||!window||window.isFocused()&&window.isVisible()||!Notification.isSupported())return;
