@@ -721,7 +721,7 @@
       ],
       "status": "implemented_lease_and_bounded_scheduler_probe",
       "phase": "discovery",
-      "adaptation": "For live queue and idle-GPU questions use the current hosted resource's service-only lease and bounded scheduler probe. A failed private terminal can offer a safe same-resource service retry. Use actual receipts, including unavailable terminal state. Manual sharing applies only after an independent human handoff.",
+      "adaptation": "For live queue and idle-GPU questions, match a resource named in chat to its listed ID and use a service-only lease and bounded probe. Resolve ambiguous candidates in chat. A resource selection receipt does not establish a panel binding or change in authorization. Use a same-resource service retry if the private terminal fails and the tool offers it. Manual sharing applies only after a separate human handoff.",
       "reference_files": {
         "studio-compute-workflow": [
           "references/compute-discovery.md",

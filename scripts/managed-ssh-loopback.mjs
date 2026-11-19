@@ -158,10 +158,13 @@ try {
     const localSource=sources.find(item=>item.profileId===localProfile.id);
     assert.deepEqual(await localSource.request('GET','/api/projects'),[]);
     const resource_id='ssh:'+targets[0].profile.id;
-    say('读取我的个人skill，看看集群有哪些自有队列空着');
-    const options=await call('acquire_compute_resource',{alias:'集群',access:'service'});
-    assert.equal(options.status,'choice_required');
-    say('是'+targets[0].profile.name);
+    say('探测一下集群队列，我的自有队列哪些空卡？');
+    const listed=await call('list_compute_resources',{});
+    assert.equal(listed.resources.filter(item=>item.kind==='ssh').length,2);
+    say('就是'+targets[0].profile.name);
+    const corrected=await call('acquire_compute_resource',{resource_id:'ssh:'+targets[1].profile.id,access:'service'});
+    assert.equal(corrected.status,'target_selected');
+    assert.deepEqual(corrected.retry,{resource_id,access:'service'});
     const serviceLease=await call('acquire_compute_resource',{resource_id,access:'service'});
     assert.equal(serviceLease.status,'acquired');assert.equal(serviceLease.access,'service');assert.equal(serviceLease.terminal,undefined);
     const serviceQueue=await call('inspect_compute_service',{resource_id,probe_scheduler:true});

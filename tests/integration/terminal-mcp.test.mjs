@@ -76,3 +76,15 @@ test('hosted shell recovery text applies to an acquisition error with preserved 
  assert.equal(failure('ssh_shell_readiness_timeout',{toolName:'acquire_compute_resource'}).operation_state,'not_started');
  assert.notEqual(failure('ssh_channel_unavailable',{toolName:'read_shared_terminal'}).code,'terminal_channel_unavailable');
 });
+
+test('missing resource selection is resolved in the same chat using the listed ID',()=>{
+ const error=Object.assign(Error('managed_compute_user_instruction_required'),{operationNotStarted:true});
+ const reply=JSON.parse(toolFailure(error,{toolName:'acquire_compute_resource',dispatched:true}).content[0].text);
+ assert.equal(reply.code,'resource_selection_required');
+ assert.equal(reply.operation_state,'not_started');
+ assert.match(reply.next_step,/already named a listed resource, including in a short reply/);
+ assert.match(reply.next_step,/resource_id with acquire_compute_resource/);
+ assert.match(reply.next_step,/Ask for a listed name only if the target is still ambiguous/);
+ assert.match(reply.next_step,/no desktop binding for selection/);
+ assert.match(reply.next_step,/receipt about project access or login/);
+});

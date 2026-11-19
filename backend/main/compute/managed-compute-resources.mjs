@@ -6,7 +6,7 @@ import {isDeepStrictEqual as equal} from 'node:util';
 import {terminalToolInput,sharedTerminalTools} from './shared-terminal.mjs';
 import {managedWorkerProject,originalBindingMatches} from './managed-compute-services.mjs';
 import {normalizeComputeAlias,resourceFingerprint} from './managed-compute-aliases.mjs';
-import {createManagedComputeIntent,genericComputeKind,requestsComputeName,hasResourceRequest} from './managed-compute-intent.mjs';
+import {createManagedComputeIntent,genericComputeKind,requestsComputeName,hasResourceRequest,namesInChat} from './managed-compute-intent.mjs';
 import {MANAGED_SSH_SHELL_CAPACITY} from '../../../desktop/platform/terminal-service/managed-ssh-shells.mjs';
 
 const rejectedBeforeDispatch=new Set(['managed_compute_invalid_request','managed_compute_user_instruction_required',
@@ -56,12 +56,12 @@ const tools=Object.freeze([
 
 /** App-owned active resources, independent of every renderer selection. `publish`,
  * `publishWsl`, `confirmAlias` and `recordUserTurn` are trusted desktop entry points. */
-export function createManagedComputeResources({terminal,profiles,aliases,services,taskSource=()=>null,
+export function createManagedComputeResources({terminal,profiles,aliases,services,selectionCatalog,taskSource=()=>null,
  authorizeTerminal=()=>false,authorizeSchedule,authorizeRun,authorizeRunAction, onAcquired=()=>{},onChange=()=>{},
  busy=()=>false,now=Date.now,uuid=randomUUID}){
  const resources=new Map(),leases=new Map(),publishing=new Map(),scheduledSweeps=new Map(),pendingAcquisitions=new Set();
  const activeRunActions=new Set(),dispatchedRunActions=new Set();
- const connections=terminal.connections,intent=createManagedComputeIntent();
+ const connections=terminal.connections,intent=createManagedComputeIntent(selectionCatalog);
  let stopped=false;
 
  function liveScope(scope){
@@ -88,6 +88,16 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   return resource.kind==='ssh'?{...entry,connectionId:resource.connectionId}:entry;
  }
  function snapshot(){return [...resources.values()].filter(visible).map(desktopView);}
+ function recordUserTurn(value){
+  const candidates=[...resources.values()].filter(visible).map(resource=>({...candidate(resource),targetFingerprint:resource.targetFingerprint}));
+  let namedAliases=[];
+  // Personal aliases are optional for a direct display name. Acquisition by
+  // alias still checks the actual stored mapping on the scoped tool path.
+  if(candidates.length&&aliases?.entries){
+   try{namedAliases=aliases.entries(()=>!stopped);}catch{ /* no usable alias evidence for this turn */ }
+  }
+  intent.recordUserTurn(value,candidates,namedAliases);
+ }
  async function list(scope){
   liveScope(scope);
   const entries=await Promise.all([...resources.values()].filter(visible).map(async resource=>{
@@ -255,30 +265,49 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   let resource=findResource(args,alias,saved);
   // Previously acquired exact leases survive later turns and navigation.
   const existing=resource&&leases.get(leaseKey(scope,resource.resourceId));
-  if(existing&&!existing.releasing&&(existing.service||existing.terminal?.shell)&&existing.resource===resource&&existing.projectId===projectOf(scope))return {resource};
+  const held=existing&&!existing.releasing&&(existing.service||existing.terminal?.shell)&&existing.resource===resource&&existing.projectId===projectOf(scope);
   const turn=intent.current(scope);
+  if(!turn&&held)return {resource};
   intent.assertTurn(scope,turn);
   if(turn.projectId!==projectOf(scope)||(scope.taskId??null)!==turn.taskId)fail('managed_compute_context_changed');
+  if(turn.excluded.some(item=>item.resourceId===resource?.resourceId))fail('managed_compute_user_instruction_required');
   const answer=turn.answer;
-  if(answer&&(alias===answer.proposal.alias||resource?.resourceId===answer.choice.resourceId)){
-   resource=resources.get(answer.choice.resourceId);
-   if(!resource||resource.targetFingerprint!==answer.choice.targetFingerprint)fail('managed_compute_choice_changed');
-   return {resource,turn,answer};
+  if(answer){
+   const chosen=resources.get(answer.choice.resourceId);
+   if(!chosen||chosen.targetFingerprint!==answer.choice.targetFingerprint)fail('managed_compute_choice_changed');
+   if(resource===chosen||alias&&alias===answer.proposal.alias)return {resource:chosen,turn,answer};
+   return {choice:{status:'target_selected',resource:candidate(chosen),retry:{resource_id:chosen.resourceId,...access?{access}:{}}}};
   }
+  const named=turn.named.length?turn.named:turn.retained;
+  if(named.length||turn.ambiguous.length){
+   const matching=named.find(item=>item.resourceId===resource?.resourceId);
+   if(matching){
+    if(matching.targetFingerprint!==resource.targetFingerprint)fail('managed_compute_choice_changed');
+    return {resource,turn};
+   }
+   const choices=await availableChoices(scope,undefined,access);
+   intent.assertTurn(scope,turn);
+   const offered=offeredChoices({candidates:[...named,...turn.ambiguous]},choices);
+   if(!offered.length)fail('managed_compute_choice_changed');
+   if(named.length===1&&!turn.ambiguous.length){
+    return {choice:{status:'target_selected',resource:offered[0],retry:{resource_id:offered[0].resourceId,...access?{access}:{}}}};
+   }
+   return {choice:{status:'choice_required',candidates:offered}};
+  }
+  if(held&&!turn.pending)return {resource};
   const direct=alias??normalizeComputeAlias(resource?.name);
-  const selectedByName=resource&&direct&&requestsComputeName(turn.message,direct);
-  if(selectedByName&&!genericComputeKind(direct))return {resource,turn};
+  if(saved&&resource&&direct&&namesInChat(turn.message,direct))return {resource,turn};
   if(!alias&&resource&&aliases){
    const currentScope=()=>{try{liveScope(scope);return true;}catch{return false;}};
    for(const known of aliases.list(currentScope)){
-    if(!requestsComputeName(turn.message,known))continue;
+    if(!namesInChat(turn.message,known))continue;
     const link=aliasEntry(known,scope);
     if(link?.profileId===resource.profileId&&link.targetFingerprint===resource.targetFingerprint)return {resource,turn};
    }
   }
   const genericAlias=(alias&&genericComputeKind(alias)?alias:null)||resource&&groupMatch(turn,['集群','ssh','cluster','本地','wsl','local'],resource);
   const requested=genericAlias||alias;
-  if(!requested||!requestsComputeName(turn.message,requested)){
+  if(!requested||!(genericComputeKind(requested)?requestsComputeName(turn.message,requested):namesInChat(turn.message,requested))){
    if(turn.pending||!hasResourceRequest(turn.message))fail('managed_compute_user_instruction_required');
    const alternatives=await availableChoices(scope,resource?.kind,access);
    intent.assertTurn(scope,turn);
@@ -365,10 +394,10 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   fresh();return service;
  }
  function rememberSelection(scope,lease,answer,check){
-  if(!answer?.proposal.save||!aliases)return;
-  aliases.remember(answer.proposal.alias,lease.resource,answer.proposal.previous,()=>{
+  if(answer?.proposal.save&&aliases)aliases.remember(answer.proposal.alias,lease.resource,answer.proposal.previous,()=>{
    try{assertLease(scope,lease);check();return true;}catch{return false;}
   });
+  check();intent.acquired(scope,lease.resource);
  }
  function startTerminal(scope,lease,answer,check){
   const terminal={id:uuid(),shell:null,opening:null,closing:null,dispatched:false,closeUnknown:false};
@@ -788,6 +817,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const turn=intent.current(scope);
   if(capture(scope.provider,scope.threadId).resources.length>0)return true;
   if(!turn)return false;
+  if(turn.named.length||turn.retained.length||turn.ambiguous.length)return true;
   if(readAliases){
    try{if(aliases?.list?.(()=>scope.checkCurrent?.()===true).some(alias=>requestsComputeName(turn.message,alias)))return true;}
    catch{return true;}
@@ -864,5 +894,5 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
  return {publish,publishWsl,configureService,snapshot,list,acquire,release,resolveLease,resolveService,inspectService,capture,needsExplicitResource,callTerminalTool,callTool,owns,tools:()=>tools,
   terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,
-  recordUserTurn:intent.recordUserTurn,sweep,stop,touch,forget,consoleEntries,observeConsoleLease,observeConsoleService,releaseFromConsole,detachLocalFromConsole};
+  recordUserTurn,sweep,stop,touch,forget,consoleEntries,observeConsoleLease,observeConsoleService,releaseFromConsole,detachLocalFromConsole};
 }

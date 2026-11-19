@@ -23,6 +23,7 @@ test('ACP profiles deliver the same bounded AIMatterLab core and progressive ski
   assert.match(document,/Ordinary chat can .*independent job/);
   assert.match(document,/acquire_compute_resource with one selector/);
   assert.match(document,/access="service" for queues or access="terminal" for shell work/);
+  assert.match(document,/a short follow-up.*listed resource ID/);
   assert.match(document,/Current receipts supersede old handoff advice/);
   const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
   const routes=[...document.matchAll(/`([a-z]+\.[a-z.-]+)`/g)].map(match=>match[1]);
@@ -98,6 +99,11 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  assert.match(entry.text,/access: "service".*queue probes/);
  assert.match(entry.text,/terminal_unavailable.*leaseStatus/);
  assert.match(entry.text,/service lease grants no shell/);
+ assert.match(entry.text,/short follow-up.*resource_id/);
+ assert.match(entry.text,/choice_required.*show the candidates and ask here/);
+ assert.match(entry.text,/requires no desktop panel binding/);
+ assert.match(entry.text,/duplicate display names include.*resource_id.*profile_id/);
+ assert.match(entry.text,/target_selected.*follow its.*retry.*user already chose/);
  assert.match(entry.text,/use the current tools when old chat messages/i);
  assert.match(entry.text,/submit an explicitly delegated independent job/);
  assert.doesNotMatch(entry.text,/交给 Agent|requires task planning/);
@@ -107,6 +113,7 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  assert.equal(result.status,'passed');
  assert.match(result.text,/bounded read-only scheduler probe in ordinary chat/);
  assert.match(result.text,/same-resource service retry/);
+ assert.match(result.text,/resource name in chat to its listed ID/);
  const deployment=await service.call('read_scientific_skill',{function_id:'cluster.lsf-slurm-deployment'},scope);
  assert.match(deployment.text,/A visual workflow is optional for independent jobs/);
 });
