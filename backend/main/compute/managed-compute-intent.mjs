@@ -9,13 +9,56 @@ const generic=new Map([['集群','ssh'],['ssh','ssh'],['cluster','ssh'],['本地
 export const genericComputeKind=value=>generic.get(value)||null;
 
 const operations=/队列|分区|节点|资源|环境|作业|集群|queue|partition|node|environment|scheduler|cluster/iu;
-const queryLead=String.raw`(?:(?:现在|请|麻烦|帮我|给我|我想|顺便|先|再|please\b|can you\b|could you\b)\s*)*(?:看(?:看|一看|一下|下)?|查(?:查|询|看|一下|一查|下)?|调取|检查|列出|获取|连接|登录|访问|配置|安装|inspect|check|show|list|query|connect to|use)\s*`;
-const negativeQuery=/不要|不必|不用|无需|禁止|先别|别查|别看|未授权|假如|如果|举例|示例|仅解释|只解释|如何|怎么|do not|don['’]t|never|instead of|without|example|how (?:do|to|can)|\bif\b/iu;
+const queryLead=String.raw`(?:(?:现在|请|麻烦|帮我|给我|我想|顺便|先|再|please\b|can you\b|could you\b)\s*)*(?:看(?:看|一看|一下|下)?|查(?:查|询|看|一下|一查|下)?|探测|调取|检查|列出|获取|连接|登录|访问|配置|安装|inspect|probe|check|show|list|query|connect to|use)\s*`;
+const negativeQuery=/不要|不必|不用|无需|禁止|先别|别查|别看|未授权|假如|如果|举例|例如|仅解释|只解释|(?:如何|怎么)(?:使用|用|查|连接|登录|设置|操作|申请|提交)|do not|don['’]t|never|instead of|without|how (?:do|to|can)|\bif\b/iu;
+const exampleWording=/示例|\bexample\b/iu;
 const clauses=message=>message.split(/[，。；,;!！?？\n]+/u).map(s=>s.trim()).filter(Boolean);
+const directions=message=>message.replace(/\x60{3}[\s\S]*?(?:\x60{3}|$)/gu,' ').split('\n').filter(line=>!line.trimStart().startsWith('>')).join('\n');
+const choiceKind='conversation-compute-choice';
+const freshTargetWording=/改用|换到|换成|切换|选用|指定|另外|别的|\b(?:switch|instead|another)\b/iu;
+const continuation=/^(?:(?:好(?:的)?|嗯|行|请|那就|那|麻烦|帮我|现在|再)\s*[，,]?\s*)*(?:继续|接着|接下来|重试|再试|试试|查一下|查队列|看看队列|看下队列|go ahead\b|please continue\b|continue\b|try again\b|retry\b)/iu;
+const resourceLabel=choice=>text(choice.name);
+
+// Resolve a literal resource reference in a human utterance. The operation
+// verb is the Agent's concern. Avoid matching a short name inside another
+// name, or an instruction the user only quoted in a log or explicitly denied.
+export function namesInChat(message,name) {
+ if(!name||!message.includes(name))return false;
+ const label=escaped(name);
+ const quoted=new RegExp('[「『“‘"\\x60]'+label+'[」』”’"\\x60]','u');
+ const after='(?=$|[\\s，。！？、,.!?;；:：）)\\]】]|的|上|里|那[里边]|这个|集群|连接|平台|资源|即可|就行|来查|查|看|跑|执行|提交|配置|安装|读取|和|与)';
+ const bounded=new RegExp('(?:^|[\\s,，:：、（(\\[【]|(?:就是|就用|选中|选用|指定|选择|请用|使用|用|是|在|查|看))'+label+after,'u');
+ const parts=clauses(message);
+ if(parts.some(p=>p.includes(name)&&(negativeQuery.test(p)||/不是|不选|别用|排除|except\b|excluding\b/.test(p))))return false;
+ return parts.some(part=>part.includes(name)&&!exampleWording.test(part.replaceAll(name,' '))&&
+  (exactAnswer(part,{name})||quoted.test(part)||bounded.test(part)))||requestsComputeName(message,name);
+}
+
+function namedChoices(source,candidates,aliases) {
+ const exact=candidates.filter(c=>namesInChat(source,text(c.resourceId))||exactAnswer(source,{name:c.profileId}));
+ const byLabel=new Map();
+ function register(label,choice){
+  if(!byLabel.has(label))byLabel.set(label,new Map());
+  if(choice)byLabel.get(label).set(choice.resourceId,choice);
+ }
+ for(const c of candidates)register(resourceLabel(c),c);
+ for(const a of aliases)register(a.alias,candidates.find(c=>c.profileId===a.profileId&&c.targetFingerprint===a.targetFingerprint));
+ const labels=[...byLabel.keys()].sort((a,b)=>b.length-a.length);
+ const named=new Map(),ambiguous=new Map(),excluded=[];
+ for(const [name,choices] of byLabel){
+  if(genericComputeKind(name))continue;
+  const distinct=labels.filter(other=>other!==name&&other.includes(name)).reduce((s,other)=>s.replaceAll(other,' '),source);
+  if(clauses(distinct).some(part=>part.includes(name)&&/(?:不要|不用|别用|不再|排除|取消使用|不是|do not|don't|never|avoid|exclude)/iu.test(part)))excluded.push(...choices.values());
+  if(!namesInChat(distinct,name))continue;
+  const matches=choices.size===1?named:ambiguous;
+  for(const [id,choice] of choices)matches.set(id,choice);
+ }
+ return {named:exact.length?exact:[...named.values()],ambiguous:exact.length?[]:[...ambiguous.values()],excluded};
+}
 
 export function hasResourceRequest(message) {
  const command=new RegExp('^'+queryLead,'iu');
- return clauses(message).some(part=>operations.test(part)&&!negativeQuery.test(part)&&
+ return clauses(message).some(part=>operations.test(part)&&!negativeQuery.test(part)&&!exampleWording.test(part)&&
    (command.test(part)||/^(?:请|帮我|please\s+)?(?:用|使用|在|选用|use\b|run\b)/iu.test(part)));
 }
 
@@ -24,9 +67,12 @@ function requestedObservation(message,value) {
  const prefix=new RegExp('^'+queryLead+'(?:一下\\s*)?(?:the\\s+)?'+target+'(?=$|[\\s的上中有哪些里可是否还在]|集群|分区|队列|节点|资源|作业|环境)','iu');
  const namedFirst=new RegExp('^'+target+'(?:集群)?(?:上|中|里|的|\\s+).{0,48}(?:队列|分区|空闲|资源|有空|环境|作业|nodes?|queues?|partitions?)','iu');
  const suffix=new RegExp('^'+queryLead+'.{0,128}(?:\\bon\\s+|\\bof\\s+|\\bat\\s+|\\bfrom\\s+|在)'+target+'(?:集群)?\\s*$','iu');
+ // The display name itself can contain words such as "example" or "示例".
+ // Determine whether the surrounding instruction is hypothetical or negative.
+ const restricted=part=>negativeQuery.test(part)||exampleWording.test(part.replaceAll(value,' '));
  // A restriction about another clause must never be turned into a positive selection.
- if(clauses(message).some(part=>negativeQuery.test(part)&&part.includes(value)))return false;
- return clauses(message).some(part=>!negativeQuery.test(part)&&operations.test(part)&&
+ if(clauses(message).some(part=>restricted(part)&&part.includes(value)))return false;
+ return clauses(message).some(part=>!restricted(part)&&operations.test(part)&&
   (prefix.test(part)||namedFirst.test(part)||suffix.test(part)));
 }
 
@@ -34,6 +80,7 @@ function requestedObservation(message,value) {
 // an exact follow-up choice, with the same authenticated transcript.
 export function requestsComputeName(message,value){
  if(!value)return false;
+ if(exactAnswer(message,{name:value}))return true;
  const literal=escaped(value);
  const boundary='(?=$|[^\\p{L}\\p{N}_-]|集群|运行|跑|算|计算|提交|做|读取|查看|来|上|和|与|以及|或者|分别)';
  const clause='(?:用|使用|在|选择|选用|切换到|指定|选|use\\b|run (?:on|using)\\b|choose\\b|select\\b|switch to\\b)';
@@ -55,23 +102,45 @@ function exactAnswer(message,choice){
  return !!name&&new RegExp(pattern,'u').test(message);
 }
 
-export function createManagedComputeIntent(){
+export function createManagedComputeIntent(catalog){
  const turns=new Map();
- function recordUserTurn(value){
+ function saveSelection(key,turn,selected){
+  const targets=selected.map(({resourceId,targetFingerprint})=>({resourceId,targetFingerprint}));
+  turn.selection={projectId:turn.projectId,taskId:turn.taskId,targets};
+  catalog?.put(choiceKind,key,turn.selection);
+ }
+ function recordUserTurn(value,candidates=[],aliases=[]){
   if(!value||typeof value.provider!=='string'||!value.provider||value.provider.length>80||typeof value.threadId!=='string'||!value.threadId||value.threadId.length>200||typeof value.turnId!=='string'||!value.turnId||value.turnId.length>200||typeof value.text!=='string')fail('managed_compute_invalid_turn');
-  const key=computeScopeKey(value),previous=turns.get(key),message=text(value.text.slice(0,32768));
+  const key=computeScopeKey(value),previous=turns.get(key),raw=text(value.text.slice(0,32768)),message=directions(raw);
   const seen=new Map(previous?.seen);
   if(seen.has(value.turnId)){
-   if(seen.get(value.turnId)!==message)fail('managed_compute_turn_changed');
+   if(seen.get(value.turnId)!==raw)fail('managed_compute_turn_changed');
    return;
   }
-  seen.set(value.turnId,message);
+  seen.set(value.turnId,raw);
   if(seen.size>8)seen.delete(seen.keys().next().value);
-  const turn={id:value.turnId,message,seen,pending:null,answer:null,projectId:value.projectId??null,taskId:value.taskId??null};
+  const turn={id:value.turnId,message,seen,pending:null,answer:null,projectId:value.projectId??null,taskId:value.taskId??null,
+   ...namedChoices(message,candidates,aliases),retained:[]};
   const proposal=previous?.projectId===turn.projectId&&previous?.taskId===turn.taskId?(previous.pending||previous.discovered):null;
   if(proposal){
-   const choices=proposal.candidates.filter(choice=>exactAnswer(message,choice));
+   const chosen=turn.named.length===1&&!turn.ambiguous.length&&!freshTargetWording.test(message)?turn.named[0]:null;
+   const choices=proposal.candidates.filter(choice=>exactAnswer(message,choice)||exactAnswer(message,{name:choice.resourceId})||exactAnswer(message,{name:choice.profileId})||chosen?.resourceId===choice.resourceId);
    if(choices.length===1)turn.answer={proposal,choice:choices[0]};
+  }
+  // Persist identity only. An authenticated resource and its current project
+  // policy are checked afresh on every acquisition, including after restart.
+  const prior=previous?.projectId===turn.projectId&&previous?.taskId===turn.taskId?previous.selection:catalog?.get(choiceKind,key);
+  const selected=turn.answer?[turn.answer.choice]:turn.named;
+  if(selected.length&&!turn.ambiguous.length){
+   saveSelection(key,turn,selected);
+  }else if(prior?.projectId===turn.projectId&&prior.taskId===turn.taskId&&Array.isArray(prior.targets)&&prior.targets.every(t=>t&&typeof t.resourceId==='string'&&typeof t.targetFingerprint==='string')){
+   const obsolete=turn.ambiguous.length||freshTargetWording.test(message)||/不是资源选择|取消(?:当前)?选择|forget (?:this |the )?selection/i.test(message)||turn.excluded.some(c=>prior.targets.some(t=>t.resourceId===c.resourceId))||
+    /(?:不要|别|不用|停止|撤销|取消|不再|stop|avoid|never).{0,15}(?:使用|用|连接|选择|这个资源|集群|\busing\b)/iu.test(message);
+   if(obsolete)catalog?.remove(choiceKind,key);
+   else {
+    turn.selection=prior;
+    if(continuation.test(message)&&!negativeQuery.test(message)&&!/(?:改|换|选|指定|连接到|用|\buse\b|\bon\b)/iu.test(message))turn.retained=prior.targets;
+   }
   }
   turns.delete(key);
   turns.set(key,turn);
@@ -82,6 +151,10 @@ export function createManagedComputeIntent(){
  function propose(scope,turn,proposal){
   assertTurn(scope,turn);
   if(turn.pending&&turn.pending.alias!==proposal.alias)fail('managed_compute_choice_pending');
+  if(!turn.pending&&turn.selection){
+   turn.selection=null;turn.retained=[];
+   catalog?.remove(choiceKind,computeScopeKey(scope));
+  }
   // Replays of the same unresolved tool call must not change its candidates.
   turn.pending??=proposal;
   return turn.pending;
@@ -94,12 +167,19 @@ export function createManagedComputeIntent(){
   if(!choice)fail('managed_compute_choice_changed');
   if(turn.answer&&turn.answer.choice!==choice)fail('managed_compute_choice_changed');
   turn.answer={proposal,choice};
+  saveSelection(computeScopeKey(scope),turn,[choice]);
+ }
+ function acquired(scope,resource){
+  const turn=current(scope);
+  if(!turn||turn.projectId!==(scope.projectId??null)||turn.taskId!==(scope.taskId??null))return;
+  if(turn.selection?.targets.some(t=>t.resourceId===resource.resourceId&&t.targetFingerprint===resource.targetFingerprint))return;
+  saveSelection(computeScopeKey(scope),turn,[resource]);
  }
  function observedChoices(scope,candidates) {
   const turn=current(scope);
-  if(turn&&!turn.pending&&hasResourceRequest(turn.message)&&turn.projectId===(scope.projectId??null)&&turn.taskId===(scope.taskId??null))
+  if(turn&&!turn.pending&&turn.projectId===(scope.projectId??null)&&turn.taskId===(scope.taskId??null))
    turn.discovered={alias:null,save:false,candidates};
  }
- return {recordUserTurn,current,assertTurn,propose,confirmChoice,observedChoices,
-  forget:(provider,threadId)=>turns.delete(computeScopeKey({provider,threadId})),clear:()=>turns.clear()};
+ return {recordUserTurn,current,assertTurn,propose,confirmChoice,observedChoices,acquired,
+  forget(provider,threadId){const key=computeScopeKey({provider,threadId});turns.delete(key);catalog?.remove(choiceKind,key);},clear:()=>turns.clear()};
 }

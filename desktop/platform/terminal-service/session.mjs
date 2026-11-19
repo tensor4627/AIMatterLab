@@ -27,6 +27,51 @@ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const version=value=>Array.isArray(value)&&value.length===3&&value.every(n=>Number.isInteger(n)&&n>=0&&n<=65535);
 const serviceId=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value);
 const shellQuote=value=>"'"+value.replaceAll("'","'\\''")+"'";
+
+// This is a new, private PTY. OpenSSH and ConPTY can report it open before the
+// remote shell starts reading input. Only a response from that shell grants it.
+export async function confirmFreshSshShell({read,write,assertCurrent,clock=Date.now}){
+ const prefix='__STUDIO_FRESH_SHELL_',suffix=randomBytes(12).toString('hex')+'__';
+ const marker=prefix+suffix;
+ // Separate the two arguments so even a wrapped or repainted command echo
+ // cannot contain the proof. The sole retry repeats only this harmless printf.
+ const probe="printf '\\n%s%s\\n' '"+prefix+"' '"+suffix+"'\r";
+ const started=clock(),deadline=started+15000;
+ let cursor=0,tail='',attempts=0,lastProbe=0,lastOutput=started,interactiveQuestion=false;
+ while(clock()<deadline){
+  assertCurrent();
+  const page=await read(cursor);
+  assertCurrent();
+  cursor=page.cursor;
+  const data=page.chunks.map(chunk=>chunk.data).join('');
+  if(data)lastOutput=clock();
+  const raw=tail+data;
+  // ConPTY may repaint a new screen row instead of emitting a line feed.
+  const visible=raw.replace(/\x1b\][^\x07\x1b]{0,512}(?:\x07|\x1b\\)/g,'')
+   .replace(/\x1b\[[0-9;]{0,12}[HfE]/g,'\n').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'');
+  const lines=visible.split(/[\r\n]/),lastLine=lines.at(-1).trimEnd();
+  if(/(?:^|[\r\n])(?:(?:mux_client_request_session:\s*)?session request failed: session open refused(?: by peer)?|channel \d+: open failed: administratively prohibited[^\r\n]*|pty allocation request failed on channel \d+)\s*(?=[\r\n]|$)/i.test(visible))
+   fail('ssh_channel_refused',502);
+  if(!page.state.alive||page.state.closed||page.state.expired)fail('session_exited',410);
+  if(attempts&&lines.slice(0,-1).some(line=>line.trimEnd()===marker))return;
+  const shellPrompt=/[$#%❯λ➜]$/u.test(lastLine);
+  const currentLine=lastLine||lines.findLast(line=>line.trim())?.trimEnd()||'';
+  const authQuestion=/(?:password|passphrase|passcode|verification code|one.time (?:code|password)|\botp\b|\blogin(?: as)?|username|验证码|密码|用户名|口令|是否继续连接)[^:\n：]{0,64}[:：?？]\s*$|are you sure you want to continue connecting/i.test(currentLine);
+  const menuQuestion=/请选择|请输入.*(?:序号|编号)|(?:select|choose|enter).{0,40}(?:asset|selection|choice|number)|(?:^|\s)Opt[>：:]/i.test(currentLine);
+  const menu=/目标资产列表|资产列表|(?:asset|host) selection|jumpserver/i.test(visible.slice(-1200));
+  interactiveQuestion=authQuestion||menuQuestion||menu&&!shellPrompt;
+  const time=clock();
+  if(time>=deadline)break;
+  const promptReady=shellPrompt||lastLine.length>0&&raw.includes('\x1b[?2004h');
+  const quiet=time-started>=2200&&time-lastOutput>=900;
+  const retry=attempts===1&&time-lastProbe>=3000&&(promptReady||time-lastProbe>=5000&&quiet);
+  if(!interactiveQuestion&&(attempts===0&&(promptReady||quiet)||retry)){
+   assertCurrent();write(probe);attempts++;lastProbe=time;
+  }
+  tail=raw.slice(-2048);
+ }
+ fail(interactiveQuestion?'ssh_shell_interaction_required':'ssh_shell_readiness_timeout',502);
+}
 function decode64(value,limit){if(typeof value!=='string'||value.length>Math.ceil(limit/3)*4||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))fail('service_protocol_failed',502);const bytes=Buffer.from(value,'base64');if(bytes.length>limit||bytes.toString('base64')!==value)fail('service_protocol_failed',502);return bytes;}
 function bootstrapMetadata(value){
  exact(value,['protocol','python','sqlite','capabilities'],['protocol','python','sqlite']);if(value.protocol!==2||!version(value.python)||!version(value.sqlite))fail('service_protocol_failed',502);
@@ -332,21 +377,11 @@ export function createTerminalSession({pty,plan,id=randomUUID(),now=Date.now,ser
  terminal.onExit(event=>{if(useConptyDll)drainOwnedConpty(terminal);service.dispose();alive=false;wakeReaders();exitCode=Number.isInteger(event.exitCode)?event.exitCode:null;exitSignal=Number.isInteger(event.signal)?event.signal:null;});
  return {state,
   async confirmFreshShell(assertCurrent){
-   const marker='__STUDIO_FRESH_SHELL_'+randomBytes(24).toString('hex')+'__';
    assertCurrent();available();
-   // The echoed command contains quotes. Only a complete, bare marker line
-   // proves that the private PTY's login shell has executed it.
-   this.input({actor:'human',ownerEpoch,requestId:randomUUID(),data:"printf '\\n%s\\n' '"+marker+"'\r"});
-   const deadline=Date.now()+15000;let cursor=0,carry='';
-   while(Date.now()<deadline){
-    assertCurrent();available();
-    const result=await this.waitRead({actor:'human',ownerEpoch,cursor,maxBytes:65536,waitMs:250});
-    cursor=result.cursor;
-    carry=(carry+result.chunks.map(chunk=>chunk.data).join('')).slice(-8192);
-    const visible=carry.replace(/\x1b\](?:0|2);[^\x00-\x1f\x7f]{0,512}(?:\x07|\x1b\\)/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'');
-    if(visible.split(/\r?\n/).slice(0,-1).some(line=>line.trimEnd()===marker)){assertCurrent();return;}
-   }
-   fail('ssh_channel_unavailable',502);
+   await confirmFreshSshShell({assertCurrent,
+    read:cursor=>this.waitRead({actor:'human',ownerEpoch,cursor,maxBytes:65536,waitMs:250}),
+    write:data=>this.input({actor:'human',ownerEpoch,requestId:randomUUID(),data})
+   });
   },
   async waitShellReady(assertCurrent){const deadline=Date.now()+10000;while(Date.now()<deadline){assertCurrent();available();if(!service.active()&&(shellIntegrated?shellReady:/(?:^|[\r\n])[^\r\n]{0,300}[#$%>]\s*$/.test(shellTail.replace(/\x1b\](?:0|2);[^\x00-\x1f\x7f]{0,512}\x07/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,''))))return;await new Promise(resolve=>setTimeout(resolve,20));}fail('terminal_busy',423);},
   async waitRead(request){

@@ -52,5 +52,5 @@ export function createManagedComputeAliases({projectSkills}){
    catch(error){if(error.message!=='Skill revision changed; read before saving'||attempt===2)throw error;}
   }
  }
- return {read,remember,list:checkCurrent=>load(checkCurrent).entries.map(row=>row.alias)};
+ return {read,remember,entries:checkCurrent=>load(checkCurrent).entries,list:checkCurrent=>load(checkCurrent).entries.map(row=>row.alias)};
 }

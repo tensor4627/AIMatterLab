@@ -13,7 +13,22 @@ test('Switching task stages loads only newly required function guidance, keeping
 test('An identical caller conversation key never reuses another authenticated provider delivery',async()=>{const c=new ScientificSkillContext({read:async(p,id)=>({status:'passed',function_id:id,digest:'same-public-file',attachments:[],text:'actual'})}),options={hasWorkflow:true,parameters:{engine:'pydyn.md'}};const r=await c.prepare('same-key','codex',options);c.accept('same-key',r);assert.equal((await c.prepare('same-key','codex',options)).attach,false);assert.equal((await c.prepare('same-key','deepseek',options)).attach,true);});
 test('Explicit new NEB/training stage overrides previous engine without confusing a potential mention for training',()=>{assert.deepEqual(selectScientificFunctions({text:'改为 GPUMD NEB',parameters:{engine:'pydyn.md'}}),['neb.gpumd']);assert.deepEqual(selectScientificFunctions({text:'接下来训练 HotPP',parameters:{engine:'gpumd.sampling'}}),['training.hotpp']);assert.deepEqual(selectScientificFunctions({text:'用 HotPP 势继续 MD',parameters:{engine:'pydyn.md'}}),['md.pydyn']);});
 
-test('Restored user text excludes injected public guidance without hiding the first actual user message',async()=>{const {visibleUserText}=await import("../../contracts/agent/user-message.mjs");const first='Please plan a real CV';assert.equal(visibleUserText([first,'[AIMatterLab hosted compute resources]\nUse the granted lease','[AIMatterLab selected scientific guidance]\nPublic instructions'].map(text=>({type:'text',text}))),first);assert.equal(visibleUserText([first,'[Studio selected scientific guidance]\nactual bounded source','[Studio scientific guidance unavailable]\nreason','[Selected skill: chosen]\nmanual text'].map(text=>({type:'text',text}))),first);assert.equal(visibleUserText([{type:'text',text:'[Studio selected scientific guidance] is the header I want explained'}]),'[Studio selected scientific guidance] is the header I want explained');});
+test('Restored user text excludes both generations of compute guidance and preserves literal user text', async () => {
+ const {visibleUserText}=await import('../../contracts/agent/user-message.mjs');
+ const first='Please plan a real CV';
+ const parts=[
+  first,
+  '[AIMatterLab hosted compute resources]\nUse the granted lease',
+  '[Studio managed compute resources]\nUse the hosted service',
+  '[AIMatterLab selected scientific guidance]\nPublic instructions',
+  '[Studio selected scientific guidance]\nActual bounded source',
+  '[Studio scientific guidance unavailable]\nReason',
+  '[Selected skill: chosen]\nManual text',
+ ];
+ assert.equal(visibleUserText(parts.map(text=>({type:'text',text}))),first);
+ const literal='[Studio selected scientific guidance] is the header I want explained';
+ assert.equal(visibleUserText([{type:'text',text:literal}]),literal);
+});
 
 test('CV-only authoring does not receive the unrelated bias build stack',()=>{assert.deepEqual(selectScientificFunctions({text:'pyGAS CV-only for Volume',parameters:{engine:'pygas.build'}}),['pygas.cv']);});
 

@@ -4,6 +4,7 @@ const english:Record<string,string> = {
   "在「账号与 API」配置 DeepSeek 的开放平台密钥。AIMatterLab 已附带 DSH 运行环境。":"Configure the DeepSeek platform key under Accounts and API. AIMatterLab includes the DSH runtime.",
   "登录 SSH 后可将连接交由 AIMatterLab 管理。在「计算资源」中准备作业服务，再在此维护环境和调度器。":"After SSH sign-in, allow AIMatterLab to manage the connection. Prepare the job service in Compute resources, then maintain its environment and scheduler here.",
   "轨迹原子数密度":"Trajectory atom number density",
+  "此操作解除该会话的服务分配并关闭它的专属 Shell。已提交作业继续运行。":"This releases this conversation's service allocation and closes its dedicated shell. Submitted jobs continue running.",
   "工作台当前 WSL 服务":"Workbench WSL service",
   "断开当前工作台连接。服务进程及已提交作业继续运行。":"Disconnect the current workbench connection. The worker process and submitted jobs continue running.",
   "独立服务连接":"Independent worker connection",

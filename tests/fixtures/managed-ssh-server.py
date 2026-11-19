@@ -80,10 +80,14 @@ def fixture_server(path, authorized, server, env, cleanup):
     fixture_env.write_text("export PATH=" + str(tools) + ":$PATH\nexport HOME=" + str(home) + "\n")
     (home / "run.py").write_text("print('standalone scheduler fixture')\n")
     shell = path / "shell"
+    # The second site's login startup flushes early PTY input. A multiplexed
+    # session can be open well before this shell is ready to read its first line.
+    startup = ("if [ -t 0 ]; then /usr/bin/python3 -c 'import termios,time; "
+               "time.sleep(.7); termios.tcflush(0,termios.TCIFLUSH)'; fi\n") if path.name == "b" else ""
     shell.write_text("#!/bin/sh\nexport HOME=" + str(home) + "\nexport HISTFILE=/dev/null SHELL=/bin/bash\n"
                      "export BASH_ENV=" + str(fixture_env) + "\n. \"$BASH_ENV\"\n"
                      "cd \"$HOME\" || exit 1\nif [ -n \"$SSH_ORIGINAL_COMMAND\" ]; then exec /bin/sh -c \"$SSH_ORIGINAL_COMMAND\"; fi\n"
-                     "exec /bin/bash --noprofile --norc -i\n")
+                     + startup + "exec /bin/bash --noprofile --norc -i\n")
     shell.chmod(0o700)
     config = path / "sshd_config"
     config.write_text("\n".join(["ListenAddress 127.0.0.1", f"Port {port}", f"HostKey {path}/host",

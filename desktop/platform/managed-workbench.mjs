@@ -46,7 +46,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     return runIntents.permits(scope,action,runId,candidates,target)||
       action==='validate'&&runIntents.permits(scope,'submit',runId,candidates,target);
   }
-  const resources=createManagedComputeResources({terminal,profiles,aliases:createManagedComputeAliases({projectSkills}),
+  const resources=createManagedComputeResources({terminal,profiles,selectionCatalog:catalog,aliases:createManagedComputeAliases({projectSkills}),
     services:createManagedComputeServices({connections:terminal.connections,registration,source:workerSource,transportSource:sshTransportSource}),
     taskSource:scope=>taskWorkerSource(records.bound(scope.provider,scope.threadId)),
     authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),

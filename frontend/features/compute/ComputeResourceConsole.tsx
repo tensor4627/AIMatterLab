@@ -201,7 +201,8 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,run,confirm,
     const lease = {resourceId:resource.kind+':'+resource.profileId,connectionId:resource.connectionId,source:channel.source,
       leaseId:channel.leaseId,provider:channel.provider,threadId:channel.threadId};
     confirm({title:t('释放会话通道'),target:target+' / '+channelName(channel),label:t('释放通道'),
-      text:t(channel.serviceOnly?'此操作解除该会话的服务分配。已提交作业继续运行。':'此操作关闭该会话的专属 Shell。已提交作业继续运行。'),
+      text:t(channel.serviceContext&&(!channel.serviceOnly||channel.terminalStatus)?'此操作解除该会话的服务分配并关闭它的专属 Shell。已提交作业继续运行。':
+        channel.serviceOnly?'此操作解除该会话的服务分配。已提交作业继续运行。':'此操作关闭该会话的专属 Shell。已提交作业继续运行。'),
       run:()=>typed('compute.console.release',lease)});
   }
   return <section className="compute-console-detail" data-testid="compute-console-detail">
@@ -238,7 +239,10 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,run,confirm,
         <ul>{resource.channels.map(channel=><li key={[channel.source,channel.provider,channel.threadId,channel.leaseId ?? 'pending'].join(':')}>
           <div className="compute-console-channel-name"><strong title={channel.threadId}>{channelName(channel)}</strong>
             <small>{t(providerNames[channel.provider]||channel.provider)} · {channel.projectName||channel.projectId||t('未绑定项目')}</small></div>
-          <small className="compute-console-channel-type">{t(channel.serviceOnly?'服务上下文':channel.source==='handoff'?'交接 Shell':'托管 Shell')}{channel.sessionId&&<span title={channel.sessionId}>{short(channel.sessionId)}</span>}</small>
+          <small className="compute-console-channel-type">{t(channel.serviceOnly?'服务上下文':channel.source==='handoff'?'交接 Shell':'托管 Shell')}
+            {!channel.serviceOnly&&channel.serviceContext&&<span>{t('服务上下文')}</span>}
+            {channel.terminalStatus&&<span>{t('托管 Shell')} · {t(channelLabels[channel.terminalStatus])}</span>}
+            {channel.sessionId&&<span title={channel.sessionId}>{short(channel.sessionId)}</span>}</small>
           <div className="compute-console-channel-state"><Status status={channel.status} label={channelLabels[channel.status]}/><Checked at={channel.checkedAt}/></div>
           <div className="compute-console-actions">
             {channel.conversationId && <button type="button" className="text-button" onClick={()=>onOpenConversation(channel)}>{t('打开会话')}<ArrowUpRight size={13}/></button>}

@@ -1,25 +1,31 @@
 const managedRecovery=new Map([
- ['managed_compute_user_instruction_required',['resource_selection_required','List the hosted resources and ask which resource the user means. This concerns the current conversation’s target. The listed SSH connection is already authenticated; use its published resource and acquire_compute_resource.']],
- ['managed_compute_resource_lease_required',['resource_lease_required','List the available compute resources and acquire the intended resource for this conversation, then use the returned session or service. A workflow is optional.']],
- ['managed_compute_invalid_request',['invalid_input','Use one advertised selector for acquisition: resource_id, profile_id, or alias. Use the identity returned by this conversation’s tools.']],
- ['managed_compute_no_eligible_resource',['access_required','Check the published resources and their actual access in the resource manager. A missing project grant is separate from the SSH login.']],
+ ['managed_compute_user_instruction_required',['resource_selection_required','Resolve the target in this chat. If the user already named a listed resource, including in a short reply, use its resource_id with acquire_compute_resource and the requested access. Ask for a listed name only if the target is still ambiguous. If the same selection is refused again, report the actual receipt. A named hosted resource needs no desktop binding for selection. Use a receipt about project access or login before reporting those states.']],
+ ['managed_compute_resource_lease_required',['resource_lease_required','List the hosted resources and acquire the resource named in this chat with the required access. Then use the returned session or service. A workflow is optional.']],
+ ['managed_compute_invalid_request',['invalid_input','For acquisition, use one advertised selector: resource_id, profile_id, or alias. Set access to service for a read-only queue probe or terminal for private shell work.']],
+ ['managed_compute_no_eligible_resource',['access_required','Read the current hosted resources and report which capability is unavailable for this request. Use any specific access or connection receipt as evidence before suggesting a change.']],
+ ['managed_compute_choice_changed',['resource_selection_required','Refresh the hosted resource list and confirm the changed candidate in this chat. Keep the current requested access and use the returned resource_id after the user chooses.']],
+ ['managed_compute_choice_pending',['resource_selection_required','Use the existing candidate list and ask the user which resource in this chat. After the user names one, use its listed resource_id with the requested access.']],
  ['managed_compute_project_required',['project_required','For a tracked worker job, select a project authorized on this original service. Queue inspection and authorized operations in the conversation terminal are available in ordinary chat.']],
  ['ssh_service_registration_required',['service_setup_required','Open the original resource settings and prepare its job service. Its authorized terminal can still be used.']],
  ['ssh_service_maintenance_required',['service_setup_required','Inspect the registered job service on the original resource. Updating it requires the explicit update action.']],
  ['managed_compute_worker_update_required',['capability_required','Inspect the original worker version and its advertised capabilities. Update through its resource settings to use this operation.']],
  ['managed_compute_worker_request_failed',['observation_unavailable','Read the project and service health again on the original worker before making any permission change.']],
- ['managed_compute_private_service_unavailable',['connection_unavailable','Check the job service on the original resource. Use its authorized terminal to diagnose the connection.']],
+ ['managed_compute_private_service_unavailable',['connection_unavailable','Check the current job-service receipt on the original resource. If the request can use a private terminal there, use its separately authorized terminal lease. Service unavailability alone does not establish an SSH authentication problem.']],
  ['managed_compute_project_grant_required',['access_required','Check the current project on its original worker. Project permissions can be changed only in the trusted desktop settings.']],
  ['managed_schedule_task_delegation_required',['access_required','Check the user’s requested schedule purpose in this workflow and confirm any additional action with the user.']],
+ ['shared_terminal_not_granted',['access_required','This conversation has no explicitly shared manual terminal. For a hosted SSH request, use its published resource and the matching service or terminal lease.']],
 ]);
 
 // Tool-level failures stay on the MCP channel so the Agent can correct its next
 // action. This is guidance only: no retry, resource grant or dispatch occurs here.
-export function toolFailure(error,{dispatched=false}={}){
+export function toolFailure(error,{dispatched=false,toolName}={}){
  const message=String(error?.message||error||'Tool request failed').slice(0,4000);
  if(error?.operationNotStarted===true)dispatched=false;
  let code='tool_error',next_step='Inspect the tool details and correct the request before continuing.';
- if(managedRecovery.has(message)){
+ if(toolName==='acquire_compute_resource'&&['ssh_channel_unavailable','ssh_channel_refused','ssh_shell_readiness_timeout','ssh_shell_interaction_required'].includes(message)){
+  code='terminal_channel_unavailable';
+  next_step='The private shell was not confirmed. Keep the original hosted SSH resource and inspect the actual lease state. For a queue check, use the same resource’s service-only path when the tool offers it. Preserve an unconfirmed attempt without replay. A channel failure alone calls for neither a new login nor a manual handoff. A service lease provides no shell.';
+ }else if(managedRecovery.has(message)){
   [code,next_step]=managedRecovery.get(message);
  }else if(/unknown (?:tool|project|environment)|not (?:bound|belong)|conversation-owned|active conversation|another conversation/i.test(message)){
   code='context_required';next_step='Read the current conversation workflow and its registered project/environment. Use those identities; do not create a replacement workflow or broaden access.';
@@ -36,7 +42,7 @@ export function toolFailure(error,{dispatched=false}={}){
 }
 
 export function toolValueResult(value){
- return {content:[{type:'text',text:JSON.stringify(value)??'null'}],isError:['blocked','permission_required','failed','unknown'].includes(value?.status)};
+ return {content:[{type:'text',text:JSON.stringify(value)??'null'}],isError:['blocked','permission_required','failed','unknown','terminal_unavailable'].includes(value?.status)};
 }
 
 export function validToolCall(body){

@@ -11,6 +11,7 @@ export class TerminalMcp {
   Object.assign(this,{terminal,guard,projectSkills,scientificSkills,desktopTools,workerTools,runScope,captureScope});
   this.guides=(scientificSkills?.tools()||[]).filter(tool=>tool.annotations?.readOnlyHint===true);
   this.scopes=new McpProviderScopes();
+  this.legacyVisibility=new Map();
  }
  async start(){
   if(this.base)return;
@@ -21,9 +22,24 @@ export class TerminalMcp {
   this.scopes.bind(this.base);
  }
  providerConnection(provider,sessionId){return this.base?this.scopes.connection(provider,this.base,sessionId):undefined;}
- bindProviderContext(provider,context,options){return this.scopes.bindContext(provider,context,options);}
- revokeProvider(provider,sessionId){this.scopes.revoke(provider,sessionId);}
- close(){this.scopes.revokeAll();this.base=null;this.server?.close();this.server?.closeIdleConnections();}
+ legacyVisible(scope){
+  return !this.desktopTools||!!scope.sessionId&&!!scope.threadId&&this.terminal.hasCurrentGrant?.(scope.provider,undefined,{reconcile:false})===true;
+ }
+ bindProviderContext(provider,context,options){
+  const sessionId=options?.sessionId;
+  if(!this.desktopTools||!sessionId)return this.scopes.bindContext(provider,context,options);
+  const visible=this.legacyVisible({...context,provider,sessionId});
+  const previous=this.legacyVisibility.get(sessionId);
+  const rotated=previous!==undefined&&previous!==visible;
+  // Providers cache their tool definitions. Refresh the affected conversation
+  // after a human share changes, leaving other provider sessions untouched.
+  if(rotated)this.scopes.revoke(provider,sessionId);
+  const binding=this.scopes.bindContext(provider,context,options);
+  this.legacyVisibility.set(sessionId,visible);
+  return rotated?{...binding,rotated:true}:binding;
+ }
+ revokeProvider(provider,sessionId){this.scopes.revoke(provider,sessionId);this.legacyVisibility.delete(sessionId);}
+ close(){this.scopes.revokeAll();this.legacyVisibility.clear();this.base=null;this.server?.close();this.server?.closeIdleConnections();}
  async receive(req,res){
   // Rejections that happen before the request body is consumed must not leave a
   // reusable keep-alive socket behind: Node tears the connection down after the
@@ -48,10 +64,10 @@ export class TerminalMcp {
    else if(body.method==='resources/list')result={resources:[]};
    else if(body.method==='resources/templates/list')result={resourceTemplates:[]};
    else if(body.method==='tools/list'){
-    // Discovery is required before a new conversation has a thread identity.
-    // Definitions confer no access: every call still checks the actual handoff.
+    // Managed tools can be discovered before a new thread is created.
     const worker=await this.workerTools?.list(scope),local=[...this.terminal.tools().filter(tool=>sharedTerminalToolAllowed(tool.name)),...(this.projectSkills?.tools()||[]),...this.guides,...(this.desktopTools?.tools()||[])];
-    const tools=[...new Map([...(worker?.tools||[]),...local].map(tool=>[tool.name,tool])).values()];
+    const showLegacy=this.legacyVisible(scope);
+    const tools=[...new Map([...(worker?.tools||[]),...local].filter(tool=>showLegacy||!sharedTerminalToolAllowed(tool.name)).map(tool=>[tool.name,tool])).values()];
     result={tools,...worker?._meta?{_meta:worker._meta}:{}};
    }else if(body.method==='tools/call'){
     if(!validToolCall(body))throw Error('Invalid tool call');
@@ -65,6 +81,7 @@ export class TerminalMcp {
      if(!scope.threadId)throw Error('Select a conversation before reading skill guidance');
      dispatched=true;result=toolValueResult(await this.scientificSkills.call(name,args,scope));
     }else if(sharedTerminalToolAllowed(name)){
+     if(!this.legacyVisible(scope))throw Error('shared_terminal_not_granted');
      token=await guard?.before?.(name,args,scope.provider,scope);fresh();
      dispatched=true;result=toolValueResult(await this.terminal.callTool(name,args,scope));fresh();
      await guard?.after?.(token,result);
@@ -77,7 +94,7 @@ export class TerminalMcp {
   });}catch(error){
    guard?.cancel?.(token);
    if(scope.checkCurrent()!==true||error.staleProviderScope){reject(403);return;}
-   if(body?.method==='tools/call'&&validRpcRequest(body)){reply(200,{jsonrpc:'2.0',id:body.id,result:toolFailure(error,{dispatched})});return;}
+   if(body?.method==='tools/call'&&validRpcRequest(body)){reply(200,{jsonrpc:'2.0',id:body.id,result:toolFailure(error,{dispatched,toolName:body.params?.name})});return;}
    reply(400,{error:'Invalid terminal MCP request'},body===undefined);
   }
  }
