@@ -45,6 +45,8 @@ pnpm start
 pnpm run pack
 ```
 
+`pnpm run pack` 生成本地发行文件。发布到南大 GitLab 和 GitHub 后的下载验证，以及跳过内测版本的处理，见[Windows 增量更新发布流程](docs/development/windows-update-release.md)。
+
 本地测试的分层入口、筛选方法和合并规则见 [测试库说明](tests/README.md)。默认工程测试不执行工具自带测试或科学计算。
 
 使用 PATH 中的 pnpm；安装器也支持在 desktop.pnpm 中登记可执行文件路径。
