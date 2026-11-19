@@ -28,10 +28,20 @@ export function useWorkspaceUpdate() {
 
 const labels:Record<UpdateState['phase'],string> = {
   disabled:'安装到 Windows 工作区后可检查更新。',idle:'可检查是否有新版本。',checking:'正在检查更新…',
-  current:'当前已是最新版本。',unpublished:'未找到可访问的更新清单。私有仓库可在下方设置访问令牌。',available:'有新版本可用。',
+  current:'当前已是最新版本。',unpublished:'发布源暂未提供可访问的更新清单。',available:'有新版本可用。',
   downloading:'正在下载更新…',verifying:'正在校验安装包…',ready:'更新已就绪，可在方便时重启。',
   preparing:'正在准备重启…',installing:'正在退出并安装更新…',error:'检查或安装更新失败。'
 };
+const issueHints:Partial<Record<number,string>> = {
+  401:'认证失败，请核对令牌是否有效。',
+  403:'访问被拒绝，请核对项目角色和令牌权限。',
+  404:'清单未发布或访问受限。'
+};
+function issueLabel({status,webPage}:NonNullable<UpdateState['issues']>[number]) {
+  const hint=webPage?'发布源返回了网页，可能需要浏览器验证或登录。':issueHints[status];
+  const result=status ? 'HTTP '+status : t('连接失败');
+  return hint ? result+' · '+t(hint) : result;
+}
 const mib = (value:number) => (value/(1024*1024)).toFixed(1)+' MiB';
 const sourceLabel = (source:UpdateSource) => source==='nju' ? t('南大 GitLab') : 'GitHub';
 const canCheck = (phase:UpdateState['phase']) => ['idle','current','unpublished','error'].includes(phase);
@@ -87,13 +97,16 @@ function ReleaseAccess({recheck}:{recheck:()=>Promise<void>}) {
 export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>) {
   const {phase,mode,bytes,received=0,detail} = state;
   const check = canCheck(phase), available=canUpdate(state);
+  const ahead=phase==='current' && state.version && state.version!==state.currentVersion;
   const status=phase==='checking' ? (state.step==='cache'?'正在检查本地更新缓存…':state.step==='blocks'?'正在比对新旧版本的数据块…':'正在读取发布清单…') :
-    phase==='ready'&&state.automatic?'安装包已校验。':labels[phase];
+    phase==='ready'&&state.automatic?'安装包已校验。':ahead?'本机版本高于发布源的最新版本。':labels[phase];
   const percent=state.fullBytes ? Math.min(100,Math.floor((state.assembled??0)*100/state.fullBytes)) : 0;
   return <section className="software-update" aria-label={t('软件更新')}>
-    <p>{t('当前版本')} <strong>{state.currentVersion}</strong>{state.version && <> → <strong>{state.version}</strong></>}</p>
+    <p>{t('当前版本')} <strong>{state.currentVersion}</strong>
+      {state.version && phase!=='current' && <> → <strong>{state.version}</strong></>}</p>
+    {ahead && <p>{t('发布源最新版本')} <strong>{state.version}</strong></p>}
     <p role="status">{t(status)} {state.source&&<small>{sourceLabel(state.source)}</small>}</p>
-    {state.issues&&<ul>{state.issues.map(issue=><li key={issue.source}>{sourceLabel(issue.source)} · {issue.webPage?t('返回了网页，请核对仓库访问权限。'):issue.status?'HTTP '+issue.status:t('连接失败')}</li>)}</ul>}
+    {state.issues&&<ul>{state.issues.map(issue=><li key={issue.source}>{sourceLabel(issue.source)} · {issueLabel(issue)}</li>)}</ul>}
     {phase==='available' && state.reason && <p>{t(state.reason==='base'?'本机没有差分基准，可下载完整安装包。':state.reason==='retry'?'可重新下载完整安装包。':'差分数据不可用，可下载完整安装包。')}</p>}
     {bytes!==undefined && (phase==='available'||phase==='downloading') && <p>{t(mode==='delta'?'增量下载':'完整安装包')} · {phase==='downloading'?mib(received)+' / ':''}{mib(bytes)}</p>}
     {phase==='downloading' && <div className="update-progress"><progress aria-label={t('安装包准备进度')} value={state.assembled??0} max={state.fullBytes||1}/><span>{percent}%</span>

@@ -1,12 +1,15 @@
 import {Readable} from 'node:stream';
+import {PRODUCT_NAME} from '../../contracts/product.mjs';
 
 // Electron net.fetch rejects manual redirects. ClientRequest exposes the target
 // before following it, so the feed layer can scope credentials on every hop.
-export function electronUpdateFetch(net, url, {headers, signal}) {
+export function electronUpdateFetch(net, url, {headers, signal, version}) {
   return new Promise((resolve,reject) => {
     signal.throwIfAborted();
     const request = net.request({url,method:'GET',redirect:'manual',credentials:'omit',cache:'no-store'});
     for (const [key,value] of Object.entries(headers)) request.setHeader(key,value);
+    // Identify API requests independently of Chromium's browser user agent.
+    request.setHeader('User-Agent',`${PRODUCT_NAME}/${version}`);
     let stream;
     const abort = () => {
       reject(signal.reason);

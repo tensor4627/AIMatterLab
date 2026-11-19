@@ -1,10 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
 import {createUpdateAccess,createUpdateFeeds} from '../../desktop/platform/update-feeds.mjs';
+import {electronUpdateFetch} from '../../desktop/platform/update-http.mjs';
 
 function feeds(fetchApi) {
   return createUpdateFeeds({fetchApi,tokenFor:source=>source+'-fixture',signal:new AbortController().signal});
 }
+
+test('Electron update requests send the application user agent and preserve credential options',async()=>{
+  const request=new EventEmitter(), headers={};
+  request.setHeader=(name,value)=>{headers[name]=value;};
+  request.abort=()=>request.emit('close');
+  request.end=()=>request.emit('redirect',302,'GET','https://git.nju.edu.cn/redirected');
+  const url='https://git.nju.edu.cn/api/v4/projects/42/releases/permalink/latest/downloads/latest.yml';
+  const net={request(options){
+    assert.deepEqual(options,{url,method:'GET',redirect:'manual',credentials:'omit',cache:'no-store'});
+    return request;
+  }};
+  const response=await electronUpdateFetch(net,url,{
+    headers:{'PRIVATE-TOKEN':'nju-fixture'},signal:new AbortController().signal,version:'1.2.3'
+  });
+  assert.equal(response.status,302);
+  assert.equal(response.headers.get('location'),'https://git.nju.edu.cn/redirected');
+  assert.deepEqual(headers,{'PRIVATE-TOKEN':'nju-fixture','User-Agent':'AIMatterLab/1.2.3'});
+});
 
 test('GitLab direct release paths keep the token on the original host and preserve Range on storage redirects',async()=>{
   const calls=[];

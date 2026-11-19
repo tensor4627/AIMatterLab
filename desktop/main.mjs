@@ -159,7 +159,7 @@ const attentionBalloons=new Set();
 const agentConnectAttempts=new Map();
 const updateAccess=createUpdateAccess(new CredentialVault(path.join(app.getPath('userData'),'update-access'),safeStorage,validateUpdateSource));
 const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&process.arch==='x64'?workspace:null,currentVersion:app.getVersion(),
-  fetchApi:(url,options)=>electronUpdateFetch(net,url,options),tokenFor:updateAccess.token,install:launchWorkspaceUpdate,quit:()=>app.quit(),
+  fetchApi:(url,options)=>electronUpdateFetch(net,url,{...options,version:app.getVersion()}),tokenFor:updateAccess.token,install:launchWorkspaceUpdate,quit:()=>app.quit(),
   publish:params=>emit('studio:event',{method:'studio/update',params})});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
 let activeAuthoringTasks;

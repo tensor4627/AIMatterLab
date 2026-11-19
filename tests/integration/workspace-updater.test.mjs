@@ -110,6 +110,19 @@ test('two private or unpublished channels never report up-to-date and a valid pr
   assert.equal(api.requests.length,1);
 });
 
+test('a signed release older than the installation reports its version and offers no downgrade',async t=>{
+  const {api,client}=await fixture(t);
+  const updater=client({currentVersion:'0.1.18'});
+  const state=await updater.check();
+  assert.equal(state.phase,'current');
+  assert.equal(state.source,'nju');
+  assert.equal(state.currentVersion,'0.1.18');
+  assert.equal(state.version,'0.1.8');
+  assert.equal((await updater.update()).phase,'current');
+  assert.equal(api.requests.length,1);
+  assert.equal(api.installs.length,0);
+});
+
 test('a failed installer handoff keeps a verified copy ready for another click, even offline',async t=>{
   const {api,client}=await fixture(t);let attempts=0;
   const updater=client({install:()=>{if(++attempts===1)throw Error('Workspace busy');}});

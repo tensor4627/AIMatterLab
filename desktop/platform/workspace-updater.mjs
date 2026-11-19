@@ -150,7 +150,7 @@ export function createWorkspaceUpdater({workspace, currentVersion, fetchApi, tok
       if (await restore(paths)) return;
       if (!await latest()) return;
       const info = manifest;
-      if (!newerRelease(info.version,currentVersion)) { set({phase:'current'}); return; }
+      if (!newerRelease(info.version,currentVersion)) { set({phase:'current',version:info.version}); return; }
       operations = null;
       const file = info.files[0], base = await regularFile(paths.base);
       let reason = 'base';
