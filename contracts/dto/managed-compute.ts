@@ -7,6 +7,9 @@ export interface ManagedResource {
   serviceStatus?:'idle'|'preparing'|'ready'|'configuration_required'|'unavailable';
   serviceReady?:boolean; terminalReady?:boolean; authorizedProjects?:string[];
 }
+export interface PublishedSshResource extends ManagedResource {
+  kind:'ssh'; connectionId:string; profileVersion:number;
+}
 export interface ResourceBadge {
   profileId:string; label:string; kind:string; color:number;
   status:'idle'|'running'|'queued'|'unknown'|'offline'; observedAt:number|null;

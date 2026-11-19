@@ -55,7 +55,9 @@ test('publishing leaves terminal input unlocked and coalesces repeated clicks wh
   assert.equal(h.id('ssh-publish-resource').props.disabled,true);assert.equal(input.locked,false);assert.equal(input.observationEpoch,0);
   assert.equal(managedCalls(h).length,1);assert.deepEqual(legacyCalls(h),[]);
   finish(published);await h.flush();h.render({managed:snapshot(published)});await h.flush();
-  assert.equal(h.id('ssh-publish-resource').props.disabled,true);assert.equal(h.id('ssh-publish-resource').props.children,'已由 AIMatterLab 管理');
+  assert.equal(h.id('ssh-managed-status').type,'span');
+  assert(!h.find(n=>n.props?.['data-testid']==='ssh-publish-resource'));
+  assert(!h.find(n=>n.props?.['data-testid']==='ssh-diagnostics'));
  }finally{h.unmount();}
 });
 
@@ -130,7 +132,8 @@ for(const status of ['connected','unknown'])test('incomplete service '+status+' 
 test('a published connection with an unconfirmed service remains separate from its healthy human shell',async()=>{
  const h=await selected({props:{managed:snapshot({...published,serviceReady:false})},override:method=>method==='compute.sshService.status'?{...service,status:'unknown',workflowReady:false,error:{code:'connection_unconfirmed'}}:undefined});
  try{
-  assert.equal(h.id('ssh-publish-resource').props.disabled,true);assert(h.id('ssh-worker-error'));
+  assert.equal(h.id('ssh-managed-status').type,'span');assert(h.id('ssh-worker-error'));
+  assert(!h.find(n=>n.props?.['data-testid']==='ssh-publish-resource'));
   assert(!h.find(n=>n.props?.['data-testid']==='ssh-worker-ready'));assert.equal(channel(h).props.shell.owner,'human');
   assert.deepEqual(managedCalls(h),[]);assert.deepEqual(legacyCalls(h),[]);
  }finally{h.unmount();}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 import {sshUiHarness} from '../helpers/ssh-ui-hooks.mjs';
+import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
 const file=new URL('../../frontend/features/terminal/SshConnectionPanel.tsx',import.meta.url);
 const pending={schemaVersion:2,connectionId:'connection',profileId:'profile',profileVersion:1,loginRequestId:'request',status:'authenticating',authentication:'pending',capabilities:{multiplex:true},terminalSessionIds:[],serviceIds:[],revision:1};
 const shell={sessionId:'shell',connectionId:'connection',resource:{kind:'ssh-connection',connectionId:'connection',profileId:'profile',profileVersion:1},name:'Original shell',owner:'human',ownerEpoch:1,alive:true};
@@ -68,7 +69,34 @@ test('login completion keeps the original human terminal editable while publicat
  }finally{held.resolve(null);h.unmount();}
 });
 
-for(const foreign of [{...published,connectionId:'other'},{...published,profileId:'other'},{...published,profileVersion:2}])test('publication refuses a receipt for a different connection, profile or version: '+JSON.stringify(foreign),async()=>{
+test('the publish button accepts the real desktop receipt before a resource-list refresh',async t=>{
+ const profile={id:'profile',version:1,name:'Fixture',kind:'ssh',host:'fixture.invalid',port:22,username:'fixture',ssh_client:'ssh'};
+ const manager=createManagedComputeResources({
+  terminal:{connections:{state:async ref=>{assert.equal(ref.connectionId,connected.connectionId);return connected;}}},
+  profiles:{read:({id})=>id===profile.id?profile:null},
+ });
+ const f=fixture({complete:()=>complete,publish:ref=>manager.publish(ref)}),{h}=f;
+ t.after(async()=>{h.unmount();await manager.stop();});
+ await h.flush();
+ h.click('ssh-publish-resource');
+ await h.flush();
+ assert.deepEqual(f.errors,[]);
+ assert.equal(h.id('ssh-managed-status').props.role,'status');
+ assert(!h.find(node=>node.props?.['data-testid']==='ssh-publish-resource'));
+ assert.equal(shellChannel(h).props.shell.sessionId,shell.sessionId);
+ assert.equal(shellChannel(h).props.shell.owner,'human');
+ assert.equal(f.postCount(),1);
+ assert.equal(publishCalls(h).length,1);
+ assert.deepEqual(authorizationCalls(h),[]);
+ const cached=manager.snapshot();
+ assert.equal(cached.length,1);
+ const [attempt]=publishCalls(h);
+ const duplicate=await manager.publish(attempt.data);
+ assert.deepEqual(duplicate,cached[0]);
+ assert.equal(duplicate.connectionId,connected.connectionId);
+});
+
+for(const foreign of [{...published,connectionId:undefined},{...published,connectionId:'other'},{...published,profileId:'other'},{...published,profileVersion:2}])test('publication refuses a receipt for a different connection, profile or version: '+JSON.stringify(foreign),async()=>{
  const f=fixture({complete:()=>complete,publish:()=>foreign}),{h}=f;
  try{
   await h.flush();h.click('ssh-publish-resource');await h.flush();

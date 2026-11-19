@@ -318,7 +318,7 @@ test('human first-use setup opens one private service on its published host with
  assert.equal((await manager.callTerminalTool('list_compute_terminals',{},f.owner)).sessions.length,1);
  const ref={connectionId:'conn-A',profileId:'A',profileVersion:1};
  const views=await Promise.all([manager.configureService(ref),manager.configureService(ref)]);
- assert(views.every(row=>row.serviceStatus==='ready'));
+ assert(views.every(row=>row.serviceStatus==='ready'&&row.connectionId===ref.connectionId&&row.profileVersion===ref.profileVersion));
  assert.equal(calls.filter(call=>call.ref).length,1);
  assert.equal(calls[0].ref.connectionId,'conn-A');assert.equal(calls[0].context.conversationChannel,true);
  assert.equal(calls[0].bootstrap.reuseOnly,undefined);

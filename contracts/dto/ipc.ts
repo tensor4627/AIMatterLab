@@ -1,4 +1,4 @@
-import type {ManagedResource,ManagedSnapshot,ManagedSchedule} from './managed-compute';
+import type {ManagedSnapshot,ManagedSchedule,PublishedSshResource} from './managed-compute';
 import type {Conversation} from './agent';
 import type {UpdateAccess,UpdateSource,UpdateState} from './update';
 import type {Project,ComputeResourceActivation,ComputeResourceState,BaseWorkspaceRequest,BaseWorkspaceResult} from './compute';
@@ -20,8 +20,8 @@ export interface StudioIpcMap {
  'codex.envImport.decide':Route<{requestId:string;mode:CodexEnvImportMode;useModelDefaults?:boolean;useSystemProxy?:boolean},null>;
  'compute.managed.refresh':Route<Record<string,never>,ManagedSnapshot>;
  'compute.managed.snapshot':Route<Record<string,never>,ManagedSnapshot>;
- 'compute.managed.publish':Route<{connectionId:string;profileId:string;profileVersion:number},ManagedResource>;
- 'compute.managed.configureService':Route<{connectionId:string;profileId:string;profileVersion:number},ManagedResource>;
+ 'compute.managed.publish':Route<{connectionId:string;profileId:string;profileVersion:number},PublishedSshResource>;
+ 'compute.managed.configureService':Route<{connectionId:string;profileId:string;profileVersion:number},PublishedSshResource>;
  'compute.managed.projectAccess':Route<{resourceId:string;projectId:string;allowed:boolean},{allowed:boolean}>;
  'compute.managed.scheduleDetails':Route<{sourceId:string;scheduleId:string},ManagedSchedule>;
  'compute.managed.acknowledgeNotice':Route<{id:string},{acknowledged:true}>;

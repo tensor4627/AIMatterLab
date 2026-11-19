@@ -37,6 +37,7 @@ async function fixture(t,{connectedWorker=true}={}){
   bindWorkerContext:(provider,value,options)=>routing.bindWorkerContext(provider,value,options),resourceScope:(provider,method)=>routing.scope(provider,method)});
  context.agents.isBusy=()=>context.agents.contextBusy();
  context.agents.turnStates=()=>[...context.agents.pendingTurnDispatches].map(id=>{const [provider,threadId]=id.split(':');return {provider,threadId};});
+ context.subscriptionRuntime={envImport:{settings:()=>({defaults:null})}};
  context.agents.sessionIdentity=(provider,threadId=owner.threadId)=>({id:provider+':'+threadId,provider,threadId});
  routing.usesForegroundWorker=id=>id===owner.provider+':'+owner.threadId;
  t.after(()=>{context.agents.close();worker.close();});

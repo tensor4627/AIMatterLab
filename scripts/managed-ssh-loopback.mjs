@@ -106,7 +106,18 @@ try {
     connections.openService=(ref,bootstrap,context)=>routes.get(ref.connectionId).openService({...ref,bootstrap,interactiveService:context.conversationChannel===true});
     const services=createManagedComputeServices({connections,registration,source:path.resolve('backend/worker'),transportSource:path.resolve('desktop/platform/terminal-service/python')});
     resourceDirectory=createManagedComputeResources({terminal:{connections},profiles,services});
-    await Promise.all(targets.map(target=>resourceDirectory.publish(profileRef(target))));
+    for(const target of targets){
+      const reference=profileRef(target);
+      const receipts=await Promise.all([resourceDirectory.publish(reference),resourceDirectory.publish(reference)]);
+      receipts.push(await resourceDirectory.publish(reference));
+      for(const receipt of receipts){
+        assert.equal(receipt.kind,'ssh');
+        assert.equal(receipt.connectionId,reference.connectionId);
+        assert.equal(receipt.profileId,reference.profileId);
+        assert.equal(receipt.profileVersion,reference.profileVersion);
+        assert.equal(receipt.resourceId,'ssh:'+reference.profileId);
+      }
+    }
     assert.equal((await resourceDirectory.publishWsl({profileId:localProfile.id,profileVersion:1,distribution,...local})).serviceStatus,'ready');
     const configured=await Promise.all(targets.map(target=>resourceDirectory.configureService(profileRef(target)).catch(async error=>{
       const state=await connections.serviceState({connectionId:target.connectionId}).catch(()=>null);

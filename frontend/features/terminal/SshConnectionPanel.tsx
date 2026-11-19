@@ -1,4 +1,5 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useRef,useState,type FocusEvent,type KeyboardEvent} from 'react';
+import {Check,ChevronDown,Ellipsis,RefreshCw,Server,Settings2,TriangleAlert} from 'lucide-react';
 import {useManagedResources} from '../compute/useManagedResources';
 import {Terminal} from '@xterm/xterm';
 import {createHumanInputWriter} from './human-input.mjs';
@@ -6,7 +7,7 @@ import {FitAddon} from '@xterm/addon-fit';
 import {serviceErrorMessage,serviceIdentityUnconfirmed,servicePhaseMessage,serviceTransfer} from './ssh-service-presentation';
 import {invoke} from '../../api/studio';
 import {t} from '../../ui/i18n';
-import type {ManagedResource} from '../../../contracts/dto/managed-compute';
+import type {PublishedSshResource} from '../../../contracts/dto/managed-compute';
 import type {ComputeResourceState,SharedTerminalResizeRequest} from '../../../contracts/dto/compute';
 import type {AgentProvider,Conversation} from '../../../contracts/dto/agent';
 import {verifiedSshConnection,sshConnectionCode,sshConnectionMessage,sshActionLabel,sshStateLabel,type SshConnectionState,type IndependentSshService} from '../compute/ssh-connection-types';
@@ -21,6 +22,21 @@ type ShellReadIdentity={connectionId:string;sessionId:string;ownerEpoch:number};
 type ShellReadDiagnostic=ShellReadIdentity&{code:string;message:string};
 type GeometryDiagnostic={connectionId:string;sessionId?:string;ownerEpoch?:number;code:string};
 async function sshInvoke<T=unknown>(method:string,data?:unknown):Promise<T>{try{return await invoke<T>(method,data);}catch(error){const code=sshConnectionCode(error)||'terminal_operation_failed';throw Object.assign(new Error(sshConnectionMessage({code})),{code,action:method});}}
+
+function closeDisclosure(disclosure:HTMLDetailsElement|null,returnFocus=false){
+ if(!disclosure?.open)return;
+ disclosure.open=false;
+ if(returnFocus)disclosure.querySelector('summary')?.focus();
+}
+function disclosureBlur(event:FocusEvent<HTMLDetailsElement>){
+ if(!event.currentTarget.contains(event.relatedTarget))closeDisclosure(event.currentTarget);
+}
+function disclosureKeyDown(event:KeyboardEvent<HTMLDetailsElement>){
+ if(event.key!=='Escape'||!event.currentTarget.open)return;
+ event.stopPropagation();
+ event.preventDefault();
+ closeDisclosure(event.currentTarget,true);
+}
 
 function ChannelTerminal({connection,shell,visible,resourceScope='',onGeometry,inputState,onShell,onConnection,onError,onReadError,onReadSuccess}:{connection:SshConnectionState;shell?:Shell;visible:boolean;resourceScope?:string;onGeometry?:(value:GeometryDiagnostic|null)=>void;inputState:ChannelInput;onShell:(shell:Shell)=>void;onConnection:(connection:SshConnectionState)=>void;onError:(error:unknown)=>void;onReadError?:(error:unknown,identity:ShellReadIdentity)=>void;onReadSuccess?:(identity:ShellReadIdentity)=>void}){
  const host=useRef<HTMLDivElement>(null),view=useRef<Terminal|null>(null),syncSize=useRef<(()=>void)|null>(null),latest=useRef({connection,shell,visible,resourceScope,onGeometry});latest.current={connection,shell,visible,resourceScope,onGeometry};
@@ -72,28 +88,42 @@ function ChannelTerminal({connection,shell,visible,resourceScope='',onGeometry,i
 }
 
 export default function SshConnectionPanel({visible,request,provider,resourceScope='',onError,onResourceChange,onConfigureSsh,onPlainSsh}:Props){
- const [connections,setConnections]=useState<SshConnectionState[]>([]),[listed,setListed]=useState(false),[selected,setSelected]=useState(''),[shells,setShells]=useState<Shell[]>([]),[shellId,setShellId]=useState(''),[service,setService]=useState<IndependentSshService|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[diagnostic,setDiagnostic]=useState<Diagnostic|null>(null),[loginState,setLoginState]=useState<LoginState|null>(null),[loginBusy,setLoginBusy]=useState(false);
+ const [connections,setConnections]=useState<SshConnectionState[]>([]),[listed,setListed]=useState(false),[selected,setSelected]=useState(''),[shells,setShells]=useState<Shell[]>([]),[shellId,setShellId]=useState(''),[service,setService]=useState<IndependentSshService|null>(null),[pendingAction,setPendingAction]=useState<'publish'|'terminal'|null>(null),[notice,setNotice]=useState(''),[diagnostic,setDiagnostic]=useState<Diagnostic|null>(null),[loginState,setLoginState]=useState<LoginState|null>(null),[loginBusy,setLoginBusy]=useState(false);
+ const busy=pendingAction!==null;
  const [readDiagnostic,setReadDiagnostic]=useState<ShellReadDiagnostic|null>(null);
  const [geometry,setGeometry]=useState<GeometryDiagnostic|null>(null);
  const managed=useManagedResources();
- const [publication,setPublication]=useState<ManagedResource|null>(null);
+ const [publication,setPublication]=useState<PublishedSshResource|null>(null);
  const [inventoryError,setInventoryError]=useState<{id:string;scope:string;code:string}|null>(null);
- const alive=useRef(true),flight=useRef(false),generation=useRef(0),operations=useRef(0),reads=useRef(0),lastError=useRef(''),startedRequest=useRef(''),authInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),shellInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),latest=useRef({selected,request,provider,resourceScope});latest.current={selected,request,provider,resourceScope};
+ const moreDetails=useRef<HTMLDetailsElement>(null),statusDetails=useRef<HTMLDetailsElement>(null);
+ useEffect(()=>{closeDisclosure(moreDetails.current);closeDisclosure(statusDetails.current);},[visible,request.nonce]);
+ const alive=useRef(true),flight=useRef(false),generation=useRef(0),operations=useRef(0),reads=useRef(0),lastError=useRef(''),startedRequest=useRef(''),authInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),shellInput=useRef<ChannelInput>({pending:Promise.resolve(),locked:false,observationEpoch:0}),latest=useRef({selected,request,provider,resourceScope,visible});latest.current={selected,request,provider,resourceScope,visible};
  const login=useRef({nonce:request.nonce,requestId:request.nonce,connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider});
  const terminalNumbers=useRef(new Map<string,number>());
  function shellLabel(item:Shell){if(!terminalNumbers.current.has(item.sessionId))terminalNumbers.current.set(item.sessionId,terminalNumbers.current.size+1);const n=terminalNumbers.current.get(item.sessionId);return item.owner==='agent'||item.awaitingConversation?'Agent · '+(item.conversationName||t(item.awaitingConversation?'等待会话接管':'终端')+' '+n):t('我的终端')+' '+n;}
  const connection=connections.find(value=>value.connectionId===selected),shell=shells.find(value=>value.sessionId===shellId),ready=!!connection&&connection.profileId===request.profileId&&connection.profileVersion===request.version&&connection.status==='authenticated'&&connection.authentication==='verified'&&connection.capabilities.multiplex;
+ const candidates=connections.filter(value=>value.profileId===request.profileId&&value.profileVersion===request.version&&['authenticating','authenticated'].includes(value.status));
  const observedConnection=useRef(connection);observedConnection.current=connection;
  const observedShell=useRef(shell);observedShell.current=shell;
  const ownService=service?.connectionId===selected?service:null;
  const transfer=ownService?.status==='connecting'?serviceTransfer(ownService):null;
  const servicePending=ownService?.status==='connecting'||ownService?.status==='unknown'||ownService?.status==='connected'&&!ownService.workflowReady;
  const confirmed=managed.resources.find(r=>r.connectionId===selected&&r.profileId===connection?.profileId&&r.profileVersion===connection?.profileVersion);
- const hosted=confirmed||(ready&&publication?.connectionId===selected&&publication.profileVersion===connection?.profileVersion?publication:null);
+ const hosted=confirmed||(ready&&publication?.connectionId===selected&&publication.profileId===connection.profileId&&publication.profileVersion===connection.profileVersion?publication:null);
  useEffect(()=>{if(confirmed||!ready||publication?.connectionId!==selected)setPublication(null);},[confirmed,ready,selected,publication]);
  const serviceReady=hosted?.serviceReady||ownService?.status==='connected'&&ownService.workflowReady===true;
  function accept(value:SshConnectionState){if(!verifiedSshConnection(value))throw Error('Invalid SSH connection response');setConnections(old=>{const prior=old.find(item=>item.connectionId===value.connectionId);return prior&&prior.revision>value.revision?old:[value,...old.filter(item=>item.connectionId!==value.connectionId)];});}
- const report=(error:unknown,fallbackAction='connection')=>{const code=sshConnectionCode(error)||'terminal_operation_failed',action=error&&typeof error==='object'&&'action' in error&&typeof error.action==='string'?error.action:fallbackAction,message=t(sshConnectionMessage({code})),key=action+':'+code;setNotice(message);setDiagnostic({code,action,message,connectionId:login.current.connectionId,requestId:login.current.requestId});if(lastError.current!==key){lastError.current=key;onError(Object.assign(new Error(message),{code,action,phase:action}));}};
+ function report(error:unknown,fallbackAction='connection'){
+  const code=sshConnectionCode(error)||'terminal_operation_failed';
+  const action=error&&typeof error==='object'&&'action' in error&&typeof error.action==='string'?error.action:fallbackAction;
+  const message=t(action==='compute.managed.publish'&&code==='ssh_connection_changed'?'托管回执与当前 SSH 连接不匹配。请刷新并核对原连接。':sshConnectionMessage({code}));
+  setDiagnostic({code,action,message,connectionId:login.current.connectionId,requestId:login.current.requestId});
+  const key=action+':'+code;
+  if(lastError.current!==key){
+   lastError.current=key;
+   onError(Object.assign(new Error(message),{code,action,phase:action,...latest.current.visible?{presentation:'inline'}:{}}));
+  }
+ }
  const currentRead=(identity:ShellReadIdentity)=>alive.current&&latest.current.selected===identity.connectionId&&observedConnection.current?.connectionId===identity.connectionId&&observedShell.current?.sessionId===identity.sessionId&&observedShell.current.ownerEpoch===identity.ownerEpoch;
  function reportRead(error:unknown,identity:ShellReadIdentity){if(!currentRead(identity))return;const code=sshConnectionCode(error)||'terminal_operation_failed';setReadDiagnostic({...identity,code,message:t(sshConnectionMessage({code}))});}
  function confirmRead(identity:ShellReadIdentity){
@@ -135,19 +165,24 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    if(current()&&!observingHandoff&&!shellInput.current.locked)setInventoryError({id,scope,code:sshConnectionCode(error)||'terminal_unavailable'});
   }
  }
- async function action(run:(current:()=>boolean)=>Promise<void>){if(flight.current)return;flight.current=true;const operation=++operations.current;reads.current++;setBusy(true);setNotice('');setDiagnostic(null);lastError.current='';const ticket=generation.current,id=latest.current.selected,nonce=latest.current.request.nonce,profileId=latest.current.request.profileId,profileVersion=latest.current.request.version,p=latest.current.provider,scope=latest.current.resourceScope;const current=()=>alive.current&&ticket===generation.current&&latest.current.selected===id&&latest.current.request.nonce===nonce&&latest.current.request.profileId===profileId&&latest.current.request.version===profileVersion;try{await run(current);}catch(error){if(current())report(error);}finally{if(operation===operations.current){flight.current=false;if(alive.current){setBusy(false);void refresh();}}}}
+ async function action(run:(current:()=>boolean)=>Promise<void>,kind:'publish'|'terminal'='terminal'){if(flight.current)return;flight.current=true;const operation=++operations.current;reads.current++;setPendingAction(kind);setNotice('');setDiagnostic(null);lastError.current='';const ticket=generation.current,id=latest.current.selected,nonce=latest.current.request.nonce,profileId=latest.current.request.profileId,profileVersion=latest.current.request.version;const current=()=>alive.current&&ticket===generation.current&&latest.current.selected===id&&latest.current.request.nonce===nonce&&latest.current.request.profileId===profileId&&latest.current.request.version===profileVersion;try{await run(current);}catch(error){if(current())report(error);}finally{if(operation===operations.current){flight.current=false;if(alive.current){setPendingAction(null);void refresh();}}}}
  async function publishConnection(){
   if(!connection||!ready||hosted)return;
   await action(async current=>{
-   const result=await sshInvoke<ManagedResource>('compute.managed.publish',{connectionId:connection.connectionId,profileId:connection.profileId,profileVersion:connection.profileVersion});
+   const result=await sshInvoke<PublishedSshResource>('compute.managed.publish',{connectionId:connection.connectionId,profileId:connection.profileId,profileVersion:connection.profileVersion});
    if(!current())return;
    if(result?.kind!=='ssh'||!result.resourceId||result.connectionId!==connection.connectionId||result.profileId!==connection.profileId||result.profileVersion!==connection.profileVersion)throw Object.assign(Error('ssh_connection_changed'),{action:'compute.managed.publish'});
-   setPublication(result);setNotice(t('此连接已由 AIMatterLab 管理。'));
-  });
+   setPublication(result);
+  },'publish');
  }
  async function open(explicit=false){await action(async current=>{if(!request.profileId||!request.version)throw Error('Saved SSH profile required');if(explicit){login.current={nonce:request.nonce,requestId:crypto.randomUUID(),connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider};setLoginState(null);setLoginBusy(false);}const flow=login.current;const value=await sshInvoke<SshConnectionState>('compute.sshConnection.open',{profileId:request.profileId,profileVersion:request.version,requestId:flow.requestId});if(!current())return;if(!verifiedSshConnection(value)||value.profileId!==request.profileId||value.profileVersion!==request.version)throw Error('compute_profile_changed');flow.connectionId=value.connectionId;accept(value);setSelected(value.connectionId);setShellId('');setShells([]);});}
- useEffect(()=>{alive.current=true;generation.current++;login.current={nonce:request.nonce,requestId:request.nonce,connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider};setLoginState(null);setDiagnostic(null);setLoginBusy(false);setListed(false);setGeometry(null);setSelected('');setShellId('');setShells([]);setService(null);void refresh();return()=>{alive.current=false;generation.current++;};},[request.nonce]);
- useEffect(()=>{if(!visible||!listed||selected||flight.current||startedRequest.current===request.nonce)return;startedRequest.current=request.nonce;const candidates=connections.filter(value=>value.profileId===request.profileId&&value.profileVersion===request.version&&['authenticating','authenticated'].includes(value.status));const existing=request.connectionId?candidates.find(value=>value.connectionId===request.connectionId):candidates.length===1?candidates[0]:undefined;if(existing){login.current={nonce:request.nonce,requestId:existing.loginRequestId||request.nonce,connectionId:existing.connectionId,finished:existing.status==='authenticated'||!existing.loginRequestId,failed:existing.status==='authenticating',restoreShell:existing.status==='authenticated',serial:0,pending:false,scope:resourceScope,provider};setSelected(existing.connectionId);if(existing.status!=='authenticated'&&!existing.loginRequestId)setNotice(t('原登录请求无法恢复，请查看原终端并刷新连接；不会另开登录。'));}else if(candidates.length>1){setNotice(t('此连接已有多个打开的终端，请在已打开的终端中选择要继续使用的一项。'));}else void open();},[visible,listed,selected,request.nonce,busy]);
+ function resumeConnection(value:SshConnectionState){
+  login.current={nonce:request.nonce,requestId:value.loginRequestId||request.nonce,connectionId:value.connectionId,finished:value.status==='authenticated'||!value.loginRequestId,failed:value.status==='authenticating',restoreShell:value.status==='authenticated',serial:0,pending:false,scope:resourceScope,provider};
+  setSelected(value.connectionId);
+  setNotice(value.status!=='authenticated'&&!value.loginRequestId?t('原登录请求无法恢复，请查看原终端并刷新连接；不会另开登录。'):'');
+ }
+ useEffect(()=>{alive.current=true;generation.current++;login.current={nonce:request.nonce,requestId:request.nonce,connectionId:'',finished:false,failed:false,restoreShell:false,serial:0,pending:false,scope:resourceScope,provider};setLoginState(null);setDiagnostic(null);setNotice('');setLoginBusy(false);setListed(false);setGeometry(null);setSelected('');setShellId('');setShells([]);setService(null);void refresh();return()=>{alive.current=false;generation.current++;};},[request.nonce]);
+ useEffect(()=>{if(!visible||!listed||selected||flight.current||startedRequest.current===request.nonce)return;startedRequest.current=request.nonce;const existing=request.connectionId?candidates.find(value=>value.connectionId===request.connectionId):candidates.length===1?candidates[0]:undefined;if(existing)resumeConnection(existing);else if(candidates.length<=1)void open();},[visible,listed,selected,request.nonce,busy]);
  useEffect(()=>{if(!visible)return;void refresh();const timer=setInterval(()=>void refresh(),2000),off=window.studio?.onEvent(event=>{if(['studio/sshConnectionChanged','studio/sshServiceChanged','studio/conversationTerminalChanged'].includes(event.method))void refresh();});return()=>{clearInterval(timer);off?.();};},[visible,selected,request.nonce,resourceScope,provider]);
  function loginContext(flow:typeof login.current){const ticket=generation.current,id=flow.connectionId,nonce=request.nonce,profileId=request.profileId,version=request.version;return()=>alive.current&&ticket===generation.current&&login.current===flow&&latest.current.selected===id&&latest.current.request.nonce===nonce&&latest.current.request.profileId===profileId&&latest.current.request.version===version;}
  async function receiveLogin(result:LoginResult,flow:typeof login.current,current:()=>boolean,method:string){
@@ -161,7 +196,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   if(state.status==='checking'||state.status==='failed')flow.failed=true;
   if(state.code)report({code:state.code},method);
   if(next){flow.finished=true;setShells(old=>[next,...old.filter(item=>item.sessionId!==next.sessionId)]);setShellId(next.sessionId);setNotice('');setDiagnostic(null);}
-  else if(state.status==='complete'){flow.finished=true;setNotice(t('原登录已完成；已关闭的终端不会自动重开。'));}
+  else if(state.status==='complete')flow.finished=true;
  }
  async function requestLogin(flow:typeof login.current,method:'compute.sshConnection.completeLogin'|'compute.sshConnection.loginStatus',outerCurrent:()=>boolean){
   if(flow.pending||flow.finished||!outerCurrent())return;const serial=++flow.serial,current=()=>outerCurrent()&&serial===flow.serial;flow.pending=true;setLoginBusy(true);if(method==='compute.sshConnection.completeLogin')setLoginState({status:'checking'});
@@ -182,7 +217,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    setShells(old=>[...old.filter(item=>item.sessionId!==next.sessionId),next]);setShellId(next.sessionId);
   });
  }
- async function closeShell(){if(!shell)return;await action(async current=>{const result=await sshInvoke<{closed:boolean}>('sharedTerminal.close',{sessionId:shell.sessionId});if(!current())return;if(result?.closed!==true)throw Error('Shell close unconfirmed');setShells(old=>old.filter(item=>item.sessionId!==shell.sessionId));setShellId('');setNotice(t('终端已关闭，SSH 连接和作业服务保留。'));await refreshResource(current);});}
+ async function closeShell(){if(!shell)return;await action(async current=>{const result=await sshInvoke<{closed:boolean}>('sharedTerminal.close',{sessionId:shell.sessionId});if(!current())return;if(result?.closed!==true)throw Error('Shell close unconfirmed');setShells(old=>old.filter(item=>item.sessionId!==shell.sessionId));setShellId('');await refreshResource(current);});}
  async function refreshResource(current:()=>boolean){const value=await sshInvoke<ComputeResourceState>('compute.resource.status',{});if(current())onResourceChange?.(value,t('SSH 基础连接'));}
  async function closeConnection(){if(!connection||!window.confirm(t('关闭整个 SSH 连接及其 Shell 和服务通道？远端已提交作业保留。')))return;await action(async current=>{const value=await sshInvoke<SshConnectionState&{closed?:boolean}>('compute.sshConnection.close',{connectionId:selected});if(!current())return;if(!verifiedSshConnection(value)||value.connectionId!==selected)throw Error('Connection changed');accept(value);if(value.status!=='closed'||value.closed!==true){setNotice(t('连接关闭尚未确认，请刷新原连接。'));return;}setShells([]);setShellId('');setService(null);await refreshResource(current);});}
  const sameLogin=connection?.connectionId===login.current.connectionId&&(connection.loginRequestId===undefined||connection.loginRequestId===login.current.requestId);
@@ -197,26 +232,131 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const configure=(section?:"service")=>{const profileId=connection?.profileId||request.profileId,profileVersion=connection?.profileVersion||request.version;if(profileId&&profileVersion)onConfigureSsh?.({profileId,profileVersion,...section?{section}:{}});};
  const visibleReadDiagnostic=readDiagnostic&&readDiagnostic.connectionId===selected&&readDiagnostic.sessionId===shell?.sessionId&&login.current.connectionId===selected?readDiagnostic:null;
  const visibleGeometry=geometry&&geometry.connectionId===selected&&geometry.sessionId===shell?.sessionId&&geometry.ownerEpoch===shell?.ownerEpoch?geometry:null;
- return <section className="shared-terminal-panel ssh-connection-panel" data-testid="ssh-connection-panel"><div className="shared-terminal-toolbar"><strong>{request.profileName||t('SSH 终端')}</strong><span data-testid="ssh-connection-status">{t(sshStateLabel(connection?.status||'connecting'))}{connection&&connection.profileVersion!==request.version?' · '+t('原版本连接'):''}</span><button className="button" data-testid="ssh-login-refresh" disabled={busy} onClick={()=>{void refresh();void observeOriginalLogin();}}>{t('刷新')}</button><button className="button" data-testid="ssh-edit-connection" disabled={busy} onClick={()=>configure()}>{t('连接设置')}</button>{connection&&<button className="button danger" data-testid="ssh-connection-close" disabled={busy} onClick={()=>void closeConnection()}>{t('关闭 SSH 连接')}</button>}</div>
-  {(sameLogin&&connection?.status==='unsupported'||error)&&<div role="alert" data-testid="ssh-login-error"><p>{visibleDiagnostic?.message||t(sshConnectionMessage(error||'ssh_multiplex_unsupported'))}</p>{visibleDiagnostic&&<span data-testid="ssh-error-action">{t(sshActionLabel(visibleDiagnostic.action))}</span>}{error&&<code data-testid="ssh-error-code">{sshConnectionCode(error)}</code>}<button className="button" data-testid="ssh-error-edit" data-guide-target="ssh-edit" onClick={()=>configure()}>{t('编辑此连接')}</button>{connection?.status==='unsupported'&&onPlainSsh&&<button className="button" data-testid="ssh-use-plain" onClick={onPlainSsh}>{t('打开普通 SSH 终端')}</button>}</div>}
-  {visibleReadDiagnostic&&<div className="shared-terminal-notice" role="status" data-testid="ssh-read-observation"><span>{t(sshActionLabel('sharedTerminal.read'))} · {visibleReadDiagnostic.message}</span> <code data-testid="ssh-read-error-code">{visibleReadDiagnostic.code}</code></div>}
-  {visibleGeometry&&<div className="shared-terminal-notice" role="status" data-testid="ssh-resize-observation">{t('终端显示尺寸尚未同步。')} <code>{visibleGeometry.code}</code></div>}
-  {inventoryError&&inventoryError.id===selected&&inventoryError.scope===resourceScope&&<div className="shared-terminal-notice" role="status" data-testid="ssh-inventory-observation">{t('终端列表暂未刷新。')} <code>{inventoryError.code}</code></div>}
-  {loginState&&<div className="shared-terminal-notice" data-testid="ssh-login-progress" role="status">{t(loginState.status==='waiting_authentication'?'请在原终端完成密码或验证码输入。':loginState.status==='checking'?'正在检查原登录，请稍候。':loginState.status==='complete'?'原登录已完成。':'原登录未完成，请核对提示后继续。')}{loginState.phase&&<span> · {t(sshActionLabel(loginState.phase))}</span>}</div>}
-  {canContinue&&<button className="button" data-testid="ssh-login-continue" data-guide-target="ssh-continue" disabled={busy||loginBusy} onClick={()=>void continueLogin()}>{t('继续原登录')}</button>}
-  {ready&&<button className="button primary" data-testid="ssh-publish-resource" disabled={busy||loginBusy||!!hosted} onClick={()=>void publishConnection()}>{t(!!hosted?'已由 AIMatterLab 管理':'登录完成，交由 AIMatterLab 管理')}</button>}
-  {!selected&&listed&&connections.filter(value=>value.profileId===request.profileId&&value.profileVersion===request.version&&['authenticating','authenticated'].includes(value.status)).length>1&&<details><summary>{t('已打开的终端')}</summary>{connections.filter(value=>value.profileId===request.profileId&&value.profileVersion===request.version&&['authenticating','authenticated'].includes(value.status)).map((value,index)=><button className="button" key={value.connectionId} onClick={()=>{generation.current++;login.current={nonce:request.nonce,requestId:value.loginRequestId||request.nonce,connectionId:value.connectionId,finished:value.status==='authenticated'||!value.loginRequestId,failed:value.status==='authenticating',restoreShell:value.status==='authenticated',serial:0,pending:false,scope:resourceScope,provider};setSelected(value.connectionId);}}>{t('终端')} {index+1} · {t(sshStateLabel(value.status))}</button>)}</details>}
-  {connection&&['unavailable','closed','requires_review','unsupported'].includes(connection.status)&&<button className="button" data-testid="ssh-login-retry" disabled={busy} onClick={()=>void open(true)}>{t('重新登录')}</button>}
-  {connection?.status==='authenticating'&&<><p className="shared-terminal-notice">{t('请像普通 SSH 终端一样输入密码或验证码。登录成功后会自动进入终端；认证信息不会交给 Agent。')}</p><ChannelTerminal key={'auth:'+selected} connection={connection} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={authInput.current} onConnection={accept} onShell={()=>{}} onError={report}/></>}
-  {ready&&<><div className="shared-terminal-toolbar" data-testid="ssh-shell-actions">
-   {shells.length>1&&<div className="ssh-shell-tabs" role="group" aria-label={t('选择终端')}>{shells.map(item=><button type="button" key={item.sessionId} className="button" aria-pressed={item.sessionId===shellId} disabled={busy} onClick={()=>setShellId(item.sessionId)}>{shellLabel(item)}</button>)}</div>}
-   <details><summary>{t('更多')}</summary><button className="button" data-testid="ssh-open-shell" disabled={busy} onClick={()=>void openShell()}>{t(shell?'另开终端':'打开终端')}</button>{shell&&<button className="button" data-testid="ssh-shell-close" disabled={busy} onClick={()=>void closeShell()}>{t('关闭终端')}</button>}</details>
-   {serviceReady&&<span className="muted" data-testid="ssh-worker-ready">{t(ownService?.warnings?.length?'作业服务已连接':'作业服务可用')}</span>}
-   {serviceReady&&!!ownService?.warnings?.length&&<span data-testid="ssh-worker-warning" role="status">{t('工具清单待核对，可继续由 Agent 协助配置环境。')}</span>}
-   {servicePending&&<div className="ssh-worker-preparing" data-testid="ssh-worker-preparing" role="status"><span>{t(ownService?.status==='unknown'?'作业服务接入结果待确认':ownService?.status==='connected'?'作业服务通道已连接，工具尚未就绪':'正在准备作业服务…')}{ownService?.status==='connecting'&&<> · {t(servicePhaseMessage(ownService.phase))}</>}</span>{ownService?.status==='connecting'&&<progress max={transfer?.total??1} value={transfer?.completed} aria-label={t('正在准备作业服务…')}/>}{transfer&&<span>{transfer.percent}% · {transfer.completed.toLocaleString()}/{transfer.total.toLocaleString()} B</span>}</div>}
-   {ownService?.error&&<span data-testid="ssh-worker-error" role="status">{t(serviceErrorMessage(ownService.error.code))}</span>}
-   {!serviceReady&&serviceIdentityUnconfirmed(ownService?.error?.code)&&<span data-testid="ssh-service-identity-notice" role="status">{t(shell?.alive===true?'SSH 认证有效；作业服务身份尚未核对，当前终端保留。':'SSH 认证有效；作业服务身份尚未核对。')}{onConfigureSsh&&<button className="button" data-testid="ssh-service-review" onClick={()=>configure('service')}>{t('核对作业服务')}</button>}</span>}
-  </div>{shell&&<ChannelTerminal key={'shell:'+shell.sessionId} connection={connection} shell={shell} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={shellInput.current} onConnection={accept} onShell={next=>setShells(old=>old.map(item=>item.sessionId===next.sessionId&&item.ownerEpoch===next.ownerEpoch?{...item,...next}:item))} onError={report} onReadError={reportRead} onReadSuccess={confirmRead}/>}</>}
-  {notice&&<p className="shared-terminal-notice" role="status">{failureReplacesDiagnostic&&notice===diagnostic?.message?visibleDiagnostic?.message:notice}</p>}{busy&&<p role="status">{t('正在准备此连接…')}</p>}
+ const visibleInventory=inventoryError?.id===selected&&inventoryError.scope===resourceScope?inventoryError:null;
+ const connectionIssue=error||(sameLogin&&connection?.status==='unsupported'?'ssh_multiplex_unsupported':undefined);
+ const serviceIssue=ready?ownService?.error?.code:undefined;
+ const reviewService=!serviceReady&&serviceIdentityUnconfirmed(serviceIssue);
+ const serviceWarning=ready&&serviceReady&&!!ownService?.warnings?.length;
+ const issues=[
+  connectionIssue?{
+   id:'ssh-login-error',
+   summary:t(visibleDiagnostic?.action==='compute.managed.publish'?'托管结果待核对':'SSH 连接需要核对'),
+   content:<>
+    <p>{visibleDiagnostic?.message||t(sshConnectionMessage(connectionIssue))}</p>
+    <div className="ssh-diagnostic-meta">
+     {visibleDiagnostic&&<span data-testid="ssh-error-action">{t(sshActionLabel(visibleDiagnostic.action))}</span>}
+     <code data-testid="ssh-error-code">{sshConnectionCode(connectionIssue)}</code>
+    </div>
+    <div className="ssh-diagnostic-actions">
+     {onConfigureSsh&&<button type="button" className="button" data-testid="ssh-error-edit" onClick={()=>configure()}>{t('编辑此连接')}</button>}
+     {connection?.status==='unsupported'&&onPlainSsh&&<button type="button" className="button" data-testid="ssh-use-plain" onClick={onPlainSsh}>{t('打开普通 SSH 终端')}</button>}
+    </div>
+   </>,
+  }:null,
+  visibleReadDiagnostic?{
+   id:'ssh-read-observation',
+   summary:t('终端输出读取失败'),
+   content:<><p>{visibleReadDiagnostic.message}</p><code data-testid="ssh-read-error-code">{visibleReadDiagnostic.code}</code></>,
+  }:null,
+  (serviceIssue||serviceWarning)?{
+   id:serviceIssue?'ssh-worker-error':'ssh-worker-warning',
+   summary:t(reviewService?'作业服务身份待核对':serviceIssue?'作业服务需要核对':'工具清单待核对'),
+   content:<>
+    {reviewService&&<p data-testid="ssh-service-identity-notice">{t(shell?.alive===true?'SSH 认证有效；作业服务身份尚未核对，当前终端保留。':'SSH 认证有效；作业服务身份尚未核对。')}</p>}
+    {serviceIssue&&<p>{t(serviceErrorMessage(serviceIssue))}</p>}
+    {serviceWarning&&<p>{t('工具清单待核对，可继续由 Agent 协助配置环境。')}</p>}
+    {serviceIssue&&onConfigureSsh&&<button type="button" className="button" data-testid="ssh-service-review" onClick={()=>configure('service')}>{t('核对作业服务')}</button>}
+   </>,
+  }:null,
+  visibleInventory?{
+   id:'ssh-inventory-observation',
+   summary:t('终端列表暂未刷新。'),
+   content:<code>{visibleInventory.code}</code>,
+  }:null,
+  visibleGeometry?{
+   id:'ssh-resize-observation',
+   summary:t('终端显示尺寸尚未同步。'),
+   content:<code>{visibleGeometry.code}</code>,
+  }:null,
+ ].filter(issue=>issue!==null);
+ const profileName=request.profileName||t('SSH 终端');
+ const connectionStatus=connection?.status||'connecting';
+ const statusLabel=t(sshStateLabel(connectionStatus))+(connection&&connection.profileVersion!==request.version?' · '+t('原版本连接'):'');
+ const canRelogin=!!connection&&['unavailable','closed','requires_review','unsupported'].includes(connection.status);
+ const canClose=!!connection&&connection.status!=='closed';
+ const chooseConnection=!selected&&listed&&candidates.length>1;
+ const publishing=pendingAction==='publish';
+ const publicationLabel=t(publishing?'正在托管…':'登录完成，交由 AIMatterLab 管理');
+ const loginTip=loginState?.status==='failed'?t('原登录未完成，请核对提示后继续。'):loginState?.status==='checking'?t('正在检查原登录，请稍候。'):connectionStatus==='authenticating'?t('请在原终端完成密码或验证码输入。'):null;
+ const serviceProgress=ready&&servicePending?<div className="ssh-worker-preparing" data-testid="ssh-worker-preparing" role="status">
+  <span>{t(ownService?.status==='unknown'?'作业服务接入结果待确认':ownService?.status==='connected'?'作业服务通道已连接，工具尚未就绪':servicePhaseMessage(ownService?.phase))}</span>
+  {ownService?.status==='connecting'&&<progress max={transfer?.total??1} value={transfer?.completed} aria-label={t('正在准备作业服务…')}/>}
+  {transfer&&<span title={transfer.completed.toLocaleString()+' / '+transfer.total.toLocaleString()+' B'}>{transfer.percent}%</span>}
+ </div>:null;
+ const statusMessage=notice||(chooseConnection?t('在“更多”中选择已打开的连接。'):null);
+ function menuAction(run:()=>void){
+  closeDisclosure(moreDetails.current,true);
+  run();
+ }
+ return <section className="shared-terminal-panel ssh-connection-panel" data-testid="ssh-connection-panel" onPointerDown={event=>{
+  if(!moreDetails.current?.contains(event.target as Node))closeDisclosure(moreDetails.current);
+  if(!statusDetails.current?.contains(event.target as Node))closeDisclosure(statusDetails.current);
+ }}>
+  <div className="shared-terminal-toolbar ssh-connection-toolbar" role="group" aria-label={t('SSH 连接操作')}>
+   <div className="ssh-connection-identity">
+    <strong title={profileName}>{profileName}</strong>
+    <span className="ssh-connection-state" data-state={connectionStatus} data-testid="ssh-connection-status" role="status" title={statusLabel}>{statusLabel}</span>
+   </div>
+   {ready&&(hosted?<span className="ssh-managed-status" data-testid="ssh-managed-status" role="status" title={t('已由 AIMatterLab 管理')}><Check size={16} aria-hidden="true"/>{t('已托管')}</span>:
+    <button type="button" className="button primary ssh-host-action" data-testid="ssh-publish-resource" disabled={busy||loginBusy} aria-label={publicationLabel} aria-busy={publishing} title={publicationLabel} onClick={()=>void publishConnection()}>
+     {publishing?<RefreshCw size={15} aria-hidden="true"/>:<Server size={15} aria-hidden="true"/>}
+     <span className="ssh-host-label" aria-hidden="true">{publicationLabel}</span>
+     <span className="ssh-host-short-label" aria-hidden="true">{t(publishing?'正在托管…':'托管')}</span>
+    </button>)}
+   {canContinue&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-continue" data-guide-target="ssh-continue" disabled={busy||loginBusy} onClick={()=>void continueLogin()}>{t('继续原登录')}</button>}
+   {canRelogin&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-retry" disabled={busy} onClick={()=>void open(true)}>{t('重新登录')}</button>}
+   <div className="ssh-toolbar-actions">
+    <button type="button" className="icon-button ssh-toolbar-icon" data-testid="ssh-login-refresh" disabled={busy} aria-label={t('刷新')} title={t('刷新')} onClick={()=>{void refresh();void observeOriginalLogin();}}><RefreshCw size={16} aria-hidden="true"/></button>
+    {onConfigureSsh&&<button type="button" className="icon-button ssh-toolbar-icon" data-testid="ssh-edit-connection" data-guide-target="ssh-edit" disabled={busy} aria-label={t('连接设置')} title={t('连接设置')} onClick={()=>configure()}><Settings2 size={16} aria-hidden="true"/></button>}
+    {(ready||canClose||chooseConnection)&&<details className="ssh-disclosure" ref={moreDetails} onBlur={disclosureBlur} onKeyDown={disclosureKeyDown}>
+     <summary className="icon-button ssh-toolbar-icon" data-testid="ssh-more" aria-label={t('更多')} title={t('更多')}><Ellipsis size={18} aria-hidden="true"/></summary>
+     <div className="ssh-popover ssh-action-popover">
+      {chooseConnection&&<>
+       <strong>{t('已打开的终端')}</strong>
+       {candidates.map((value,index)=><button type="button" className="button" key={value.connectionId} disabled={busy} onClick={()=>menuAction(()=>{generation.current++;resumeConnection(value);})}>{t('终端')} {index+1} · {t(sshStateLabel(value.status))}</button>)}
+      </>}
+      {ready&&<button type="button" className="button" data-testid="ssh-open-shell" disabled={busy} onClick={()=>menuAction(()=>void openShell())}>{t(shell?'另开终端':'打开终端')}</button>}
+      {ready&&shell&&<button type="button" className="button danger" data-testid="ssh-shell-close" disabled={busy} onClick={()=>menuAction(()=>void closeShell())}>{t('关闭终端')}</button>}
+      {canClose&&<button type="button" className="button danger" data-testid="ssh-connection-close" disabled={busy} onClick={()=>menuAction(()=>void closeConnection())}>{t('关闭 SSH 连接')}</button>}
+      {ready&&serviceReady&&<span className="ssh-menu-service" data-testid="ssh-worker-ready">{t(serviceWarning?'作业服务已连接':'作业服务可用')}</span>}
+     </div>
+    </details>}
+   </div>
+  </div>
+  {issues.length>0?<div className="ssh-status-strip ssh-diagnostics" data-testid="ssh-diagnostics">
+   <TriangleAlert size={15} aria-hidden="true"/>
+   <span className="ssh-diagnostic-title" role={connectionIssue?'alert':'status'} title={issues[0].summary}>{issues[0].summary}</span>
+   {issues.length>1&&<span className="ssh-diagnostic-count">+{issues.length-1}</span>}
+   <details className="ssh-disclosure" ref={statusDetails} onBlur={disclosureBlur} onKeyDown={disclosureKeyDown}>
+    <summary className="button ssh-details-toggle" data-testid="ssh-diagnostic-toggle">{t('详情')}<ChevronDown size={14} aria-hidden="true"/></summary>
+    <div className="ssh-popover ssh-diagnostic-popover">
+     {issues.map(issue=><section key={issue.id} data-testid={issue.id}><strong>{issue.summary}</strong>{issue.content}</section>)}
+     {statusMessage&&<p>{statusMessage}</p>}
+     {serviceProgress}
+    </div>
+   </details>
+  </div>:loginTip||statusMessage||serviceProgress?<div className="ssh-status-strip">
+   {statusMessage?<span role="status">{statusMessage}</span>:loginTip?<span data-testid="ssh-login-progress" role="status">
+    <span>{loginTip}</span>
+    {loginState?.phase&&<> · {t(sshActionLabel(loginState.phase))}</>}
+    {connectionStatus==='authenticating'&&loginState?.status!=='checking'&&<> {t('认证信息不会交给 Agent。')}</>}
+   </span>:serviceProgress}
+  </div>:null}
+  {ready&&shells.length>1&&<div className="ssh-shell-tabs" data-testid="ssh-shell-actions" role="group" aria-label={t('选择终端')}>
+   {shells.map(item=><button type="button" key={item.sessionId} className="button" aria-pressed={item.sessionId===shellId} disabled={busy} onClick={()=>setShellId(item.sessionId)}>{shellLabel(item)}</button>)}
+  </div>}
+  {connection?.status==='authenticating'&&<ChannelTerminal key={'auth:'+selected} connection={connection} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={authInput.current} onConnection={accept} onShell={()=>{}} onError={report}/>}
+  {ready&&(shell?<ChannelTerminal key={'shell:'+shell.sessionId} connection={connection} shell={shell} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={shellInput.current} onConnection={accept} onShell={next=>setShells(old=>old.map(item=>item.sessionId===next.sessionId&&item.ownerEpoch===next.ownerEpoch?{...item,...next}:item))} onError={report} onReadError={reportRead} onReadSuccess={confirmRead}/>:
+   <div className="shared-terminal-empty"><p>{t('当前没有打开的终端。')}</p></div>)}
  </section>;
 }

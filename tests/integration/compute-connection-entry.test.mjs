@@ -20,7 +20,7 @@ function repairFixture(){
  let callback,task={id:owner.taskId,provider:owner.provider,threadId:owner.threadId,authoring:{workerBinding:{distribution:'Original',root:'/original',port:8888}}},revision=1;
  let observe=async()=>({status:'connected'});
  const worker={identity:{distribution:'Original',root:'/original'},connection:{health:{root:'/original'}},connectionEpoch:1,connectionTarget:{port:8888},connect(){assert.fail('Provider repair cannot deploy');}};
- const context={agentConnectAttempts:new Map(),handle:(_name,fn)=>{callback=fn;},providerId:()=>{},workflowContext:{revision:()=>revision,current:()=>owner},worker,taskRecords:{read:id=>{assert.equal(id,owner.taskId);return task;}},
+ const context={subscriptionRuntime:{envImport:{settings:()=>({defaults:null})}},agentConnectAttempts:new Map(),handle:(_name,fn)=>{callback=fn;},providerId:()=>{},workflowContext:{revision:()=>revision,current:()=>owner},worker,taskRecords:{read:id=>{assert.equal(id,owner.taskId);return task;}},
   taskWorkerSource,taskWorkerSettings,sameWorkerBinding,taskWorkerTarget,validTransportPort,taskTransportScope,taskTransportReceipt,settings:{distribution:'Global Other',workerRoot:'/global-other',workerPort:9999},
   readWorkerStatus:(_worker,target)=>{calls.push(['observe',target().workerRoot,target().workerPort]);return observe();},
   agents:{isBusy:(provider,threadId)=>{calls.push(['check-busy',provider,threadId]);return false;},disconnect:(provider,threadId)=>calls.push(['provider-disconnect',provider,threadId]),

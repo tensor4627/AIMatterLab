@@ -1,8 +1,8 @@
 # AIMatterLab
 
-AIMatterLab 0.1.16 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
+AIMatterLab 0.1.17 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
 
-[更新日志](CHANGELOG.md) · [0.1.16 发布说明](docs/releases/aimatterlab-0.1.16.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
+[更新日志](CHANGELOG.md) · [0.1.17 发布说明](docs/releases/aimatterlab-0.1.17.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
 要安装 GPU-Sampling、pyGAS、PyDyn、TorchNEP、HotPP 或 HotHam，可以在「工具与资源 → 第三方工具包 → 已验证工具的源码仓库」复制克隆命令，再按工具仓库提供的说明安装。源码和桌面版都随附这份[工具仓库清单](installation/tool-sources.json)。
 
@@ -12,9 +12,9 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-本次交付的源码位于本地 Git 标签 `v0.1.16`。Windows 安装包位于 `release/v0.1.16/AIMatterLab-0.1.16-win-x64-setup.exe`。首次安装时选择一个可写目录，升级原安装时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。便携用户可以解压同目录中的 Windows ZIP。[项目提示词和用户技能](docs/project-skill-workspace.md)
+本次交付的源码位于本地 Git 标签 `v0.1.17`。Windows 安装包位于 `release/v0.1.17/AIMatterLab-0.1.17-win-x64-setup.exe`。首次安装时选择一个可写目录，升级原安装时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。便携用户可以解压同目录中的 Windows ZIP。[项目提示词和用户技能](docs/project-skill-workspace.md)
 
-从源码安装 0.1.16 时，可以把[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词交给本机 Agent。安装过程核对本地仓库标签、依赖锁和选定的计算环境。
+从源码安装 0.1.17 时，可以把[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词交给本机 Agent。安装过程核对本地仓库标签、依赖锁和选定的计算环境。
 
 Windows 工作区版可以在设置右侧点“检查更新”。发现正式新版后，点击高亮的“更新”即可下载并重启。默认先查南大 GitLab，备用源为 GitHub。私有发行页使用更新面板中的“私有仓库访问”。[分发与升级说明](docs/releases/aimatterlab-0.1.16.md)
 

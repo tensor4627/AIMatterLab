@@ -67,7 +67,12 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  const count=resource=>[...leases.values()].filter(lease=>lease.resource===resource).length;
  const view=resource=>({...candidate(resource),profileVersion:resource.profileVersion,available:resource.kind==='ssh'||resource.serviceStatus==='ready',
   serviceStatus:resource.serviceStatus,...resource.kind==='ssh'?{terminalCapacity:MANAGED_SSH_SHELL_CAPACITY,terminalAvailable:Math.max(0,MANAGED_SSH_SHELL_CAPACITY-count(resource))}:{}});
- function snapshot(){return [...resources.values()].filter(visible).map(resource=>({...view(resource),...resource.kind==='ssh'?{connectionId:resource.connectionId}:{}}));}
+ // The desktop verifies the exact authenticated connection. Agent tools use the resource ID.
+ function desktopView(resource){
+  const entry=view(resource);
+  return resource.kind==='ssh'?{...entry,connectionId:resource.connectionId}:entry;
+ }
+ function snapshot(){return [...resources.values()].filter(visible).map(desktopView);}
  async function list(scope){
   liveScope(scope);
   const entries=await Promise.all([...resources.values()].filter(visible).map(async resource=>{
@@ -124,11 +129,11 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    const profile=profiles.read({id:data.profileId});
    if(profile.kind!=='ssh'||profile.version!==data.profileVersion)fail('managed_compute_profile_changed');
    const resourceId='ssh:'+profile.id,previous=resources.get(resourceId);
-   if(previous&&saved(previous)){if(!equal(resourceRef(previous),data))fail('managed_compute_profile_already_published');return view(previous);}
+   if(previous&&saved(previous)){if(!equal(resourceRef(previous),data))fail('managed_compute_profile_already_published');return desktopView(previous);}
    if(previous)void remove(previous);
    const resource={...data,resourceId,profile,kind:'ssh',name:profile.name,targetFingerprint:resourceFingerprint(profile),serviceStatus:'idle'};
    resources.set(resourceId,resource);changed();prepareService(resource);
-   return view(resource);
+   return desktopView(resource);
   })();
   try{return await publication.result;}finally{if(publishing.get(data.connectionId)===publication)publishing.delete(data.connectionId);}
  }
@@ -174,7 +179,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   current(resource);
   if(!resource.service&&!await prepareService(resource,{configure:true}))fail(resource.serviceError||'managed_compute_private_service_unavailable');
   current(resource);
-  return view(resource);
+  return desktopView(resource);
  }
 
  async function projectGrant(scope,resource,{required=false}={}){
