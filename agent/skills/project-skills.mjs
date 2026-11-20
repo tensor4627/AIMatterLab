@@ -4,12 +4,14 @@ import {createHash, randomUUID} from 'node:crypto';
 
 const MAX_BYTES = 16384;
 const NAME = /^[a-z][a-z0-9-]{0,63}$/;
+const EXECUTION_SKILL_NAME = /^tool-[a-z][a-z0-9-]{0,39}-[a-f0-9]{12}$/;
+const LIBRARY_DIRECTORY = /^(?:user|(?:resource-)?[a-f0-9]{64})$/;
 export const COMPUTE_ALIASES_SKILL = 'compute-resource-aliases';
 const digest = value => createHash('sha256').update(value).digest('hex');
 const descriptions = {
- project_skill_catalog: 'List skills and return the absolute directory of the selected library. Use scope=user for the local workspace skill library across chats. Use scope=current for this project or private chat, including its project AGENTS.md.',
- read_project_skill: 'Read a local SKILL.md by name and return its absolute path. Use the same scope as the catalog entry.',
- write_project_skill: 'Save a local SKILL.md and return its absolute path. Explicitly set scope=user for the local workspace skill library. Use scope=current for a project- or chat-specific skill. Pass the previous SHA-256 in expected_sha256, or null to create.',
+ project_skill_catalog: 'List skills and return the absolute directory of the selected library. Use scope=user for the local workspace skill library, scope=current for project or chat skills, and scope=resource with the acquired resource_id for that resource and verified login account.',
+ read_project_skill: 'Read a local SKILL.md by name and return its absolute path. Use the same scope and resource_id as in the catalog.',
+ write_project_skill: 'Save a local SKILL.md and return its absolute path. Choose scope=user, scope=current, or scope=resource with the acquired resource_id. Use the verified tool setup route to publish its execution skill. Pass the previous SHA-256 in expected_sha256, or null to create.',
 };
 
 // Deliberately accept simple, single-line YAML fields only. Never inspect body text
@@ -72,7 +74,7 @@ export class ProjectSkills {
  ownsDirectory(directory) {
   for (const root of [this.root,...this.previousRoots]) {
    const first = path.relative(root,directory).split(path.sep)[0];
-   if (/^(?:user|[a-f0-9]{64})$/i.test(first)) return true;
+   if (LIBRARY_DIRECTORY.test(first.toLowerCase())) return true;
   }
   return false;
  }
@@ -91,7 +93,8 @@ export class ProjectSkills {
     inputSchema: {
      type: 'object',
      properties: {
-      scope: {type: 'string', enum: ['current', 'user']},
+      scope: {type: 'string', enum: ['current', 'user', 'resource']},
+      resource_id: {type:'string', minLength:1, maxLength:160},
       ...(catalog ? {} : {name: {type: 'string', pattern: NAME.source}}),
       ...(write ? {
        body: {type: 'string', maxLength: MAX_BYTES},
@@ -124,6 +127,50 @@ export class ProjectSkills {
   const target = library === 'user' ? this.personalDirectory : path.join(this.root, digest(owner.kind + ':' + owner.id));
   ensureDirectory(target);
   return {target, owner};
+ }
+
+ resourceDirectory(registration) {
+  if (!/^[a-f0-9]{64}$/.test(registration?.resourceId||'') ||
+      typeof registration?.account !== 'string' || !registration.account || /[\0\r\n]/.test(registration.account)) {
+   throw Error('Select an authenticated resource and login account');
+  }
+  if (this.overlapsBundle(this.root)) throw Error('Choose a skill cache separate from the built-in skill directory in Settings');
+  const target = path.join(this.root, 'resource-' + digest(JSON.stringify([registration.resourceId,registration.account])));
+  ensureDirectory(target);
+  return target;
+ }
+
+ saveResourceExecutionSkill(registration, skill, check) {
+  check();
+  if (!EXECUTION_SKILL_NAME.test(skill?.name||'') ||
+      typeof skill.body !== 'string' || digest(skill.body) !== skill.sha256) throw Error('Worker execution skill receipt differs');
+  const target = this.resourceDirectory(registration);
+  const folder = path.join(target, skill.name), file = path.join(folder,'SKILL.md');
+  if (fs.existsSync(folder)) assertDirectory(folder);
+  if (fs.existsSync(file)) {
+   if (this.read(file).sha256 !== skill.sha256) throw Error('A different local skill already uses the verified execution name');
+  } else {
+   this.write(target, folder, file, {name:skill.name,body:skill.body,expected_sha256:null}, check);
+  }
+  const verified = this.read(file);
+  if (verified.sha256 !== skill.sha256) throw Error('Local execution skill read-back differs');
+  check();
+  return {name:skill.name,sha256:skill.sha256,path:file,status:'saved'};
+ }
+
+ readResourceExecutionSkill(registration, skill, check) {
+  check();
+  if (!EXECUTION_SKILL_NAME.test(skill?.name||'')) throw Error('Invalid verified execution skill name');
+  const directory = path.join(this.resourceDirectory(registration),skill.name);
+  if (!fs.existsSync(directory)) return null;
+  assertDirectory(directory);
+  const file=path.join(directory,'SKILL.md');
+  if (!fs.existsSync(file)) return null;
+  const result=this.read(file);
+  if (result.sha256 !== skill.sha256) throw Error('Local execution skill differs from its recorded activation');
+  metadata(result.body,skill.name);
+  check();
+  return {name:skill.name,path:file,status:'saved',...result};
  }
 
  read(file) {
@@ -237,7 +284,7 @@ export class ProjectSkills {
   if (!fs.existsSync(this.root)) return next;
   ensureDirectory(this.root);
   const copies = [], guides = [];
-  for (const key of fs.readdirSync(this.root).filter(key => key === 'user' || /^[a-f0-9]{64}$/.test(key))) {
+  for (const key of fs.readdirSync(this.root).filter(key => LIBRARY_DIRECTORY.test(key))) {
    const from = path.join(this.root, key);
    const to = path.join(next, key);
    assertDirectory(from);
@@ -245,7 +292,7 @@ export class ProjectSkills {
    const existing = new Map(this.catalog(to).map(skill => [skill.name, skill.sha256]));
    const source = this.catalog(from);
    const guideFile=path.join(from,'AGENTS.md');
-   if (key !== 'user' && fs.existsSync(guideFile)) {
+   if (/^[a-f0-9]{64}$/.test(key) && fs.existsSync(guideFile)) {
     const guide=this.read(guideFile), destination=path.join(to,'AGENTS.md');
     if (!fs.existsSync(destination)) guides.push({guideFile,destination,sha256:guide.sha256});
     else if (this.read(destination).sha256 !== guide.sha256) throw Error('Conflicting project AGENTS.md in the chosen cache');
@@ -277,9 +324,11 @@ export class ProjectSkills {
 
  call(tool, args, scope) {
   const keys = tool === 'project_skill_catalog' ? ['scope'] : tool === 'read_project_skill' ? ['scope','name'] : ['scope','name', 'body', 'expected_sha256'];
+  if (args?.scope === 'resource') keys.push('resource_id');
   if (!this.owns(tool) || !args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(key => !keys.includes(key))) {
    throw Error('Invalid project skill arguments');
   }
+  if (args.scope === 'resource') return this.callResource(tool, args, scope);
   const {target, owner} = this.directory(scope,args.scope);
   if (tool === 'project_skill_catalog') {
    const skills = this.catalog(target);
@@ -306,5 +355,30 @@ export class ProjectSkills {
   metadata(result.body, args.name);
   this.owner(scope);
   return {name: args.name, document: 'SKILL.md', scope: owner.kind, path: file, ...result,...instructionsWarning&&{instructionsWarning}};
+ }
+
+ async callResource(tool, args, scope) {
+  this.owner(scope);
+  const observed = await this.resolveResource?.(scope, args.resource_id);
+  if (!observed) throw Error('Acquire the exact resource before opening its private skill library');
+  const check = () => { this.owner(scope); observed.check(); };
+  check();
+  const target = this.resourceDirectory(observed.registration);
+  if (tool === 'project_skill_catalog') {
+   const skills=this.catalog(target);
+   check();
+   return {scope:'resource',resource_id:args.resource_id,directory:target,skills};
+  }
+  if (typeof args.name !== 'string' || !NAME.test(args.name)) throw Error('Invalid skill name');
+  const directory=path.join(target,args.name), file=path.join(directory,'SKILL.md');
+  if (fs.existsSync(directory)) assertDirectory(directory);
+  if (tool === 'write_project_skill') {
+   if (EXECUTION_SKILL_NAME.test(args.name)) throw Error('Save the verified execution skill from its tool configuration receipt');
+   this.write(target, directory, file, args, check);
+  }
+  const result=this.read(file);
+  metadata(result.body,args.name);
+  check();
+  return {scope:'resource',resource_id:args.resource_id,name:args.name,document:'SKILL.md',path:file,...result};
  }
 }

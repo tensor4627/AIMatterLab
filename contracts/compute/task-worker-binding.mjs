@@ -4,6 +4,11 @@ const text=(value,max=4096)=>typeof value==='string'&&value.length>0&&value.leng
 function sshIdentity(value){const host=value?.hostIdentity;if(value?.kind!=='ssh'||!text(value.profileId,200)||!Number.isSafeInteger(value.profileVersion)||value.profileVersion<1||!host||!text(host.hostname,255)||!Number.isSafeInteger(host.uid)||host.uid<0||!text(host.machineId,256)||!text(value.root)||!value.root.startsWith('/')||!text(value.runtime)||!value.runtime.startsWith('/')||!text(value.runtimeId,128))return null;return {kind:'ssh',version:2,profileId:value.profileId,profileVersion:value.profileVersion,hostIdentity:{hostname:host.hostname,uid:host.uid,machineId:host.machineId},root:value.root,runtime:value.runtime,runtimeId:value.runtimeId};}
 export const isSshWorkerBinding=value=>value?.version===2&&!!sshIdentity(value);
 export function stableSshWorkerBinding(value){const binding=sshIdentity(value);if(!binding)throw Error('SSH 作业服务来源尚未核验。');return binding;}
+// Read-only receipt observation can survive a runtime update in the same saved SSH data directory.
+export function sameSshWorkerData(left,right){
+ return isSshWorkerBinding(left)&&isSshWorkerBinding(right)&&['profileId','profileVersion','root'].every(key=>left[key]===right[key])&&
+  ['hostname','uid','machineId'].every(key=>left.hostIdentity[key]===right.hostIdentity[key]);
+}
 
 export function validTaskWorkerSource(source){const value=source?.binding;if(value?.kind==='ssh')return isSshWorkerBinding(value);return !!value&&(!value.kind||value.kind==='wsl')&&typeof value.distribution==='string'&&!!value.distribution&&typeof value.root==='string'&&value.root.startsWith('/')&&!/[\r\n\0]/.test(value.root)&&(source.source!=='authoring'||Number.isInteger(value.port)&&value.port>=1024&&value.port<=65535);}
 

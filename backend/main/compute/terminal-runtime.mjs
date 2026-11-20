@@ -5,6 +5,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {fileURLToPath} from 'node:url';
 import {prepareResourcesOffThread} from './preparation-worker-client.mjs';
 export function prepareTerminalRuntimeAsync(options){return prepareResourcesOffThread('terminal',options);}
 
@@ -71,7 +72,7 @@ function packageRoot(entry,name,dependencyRoot){
  fail('terminal_runtime_invalid_source');
 }
 
-async function sourcePlan({nodeExecutable,servicePath,dependencyRoot,platform,arch}){
+async function sourcePlan({nodeExecutable,servicePath,dependencyRoot,workspaceConfinementPath,platform,arch}){
  if(platform!=='win32'||!['x64','arm64'].includes(arch))fail('terminal_runtime_platform_unsupported');
  for(const file of [nodeExecutable,servicePath])unlinked(file);
  unlinked(dependencyRoot,true);
@@ -98,7 +99,9 @@ async function sourcePlan({nodeExecutable,servicePath,dependencyRoot,platform,ar
  for(const name of ['broker.mjs','session.mjs'])await add(path.join(path.dirname(servicePath),name),'service/'+name);
  const codec=path.join(path.dirname(servicePath),'response-codec.mjs');if(fs.existsSync(codec))await add(codec,'service/response-codec.mjs');
  const launcher=path.join(path.dirname(servicePath),'service-launch.mjs');if(fs.existsSync(launcher))await add(launcher,'service/service-launch.mjs');
- for(const name of ['ssh-connection.mjs','ssh-multiplex-helper.py','native-ssh.mjs','native-ssh-stdio.mjs','native-ssh-relay.py','managed-ssh-shells.mjs','shared-shell-service.mjs','worker-delta.mjs','ssh-service-locations.mjs']){const file=path.join(path.dirname(servicePath),name);if(fs.existsSync(file))await add(file,'service/'+name);}
+ for(const name of ['ssh-connection.mjs','ssh-multiplex-helper.py','native-ssh.mjs','native-ssh-stdio.mjs','native-ssh-relay.py','managed-ssh-shells.mjs','shared-shell-service.mjs','worker-delta.mjs','ssh-service-locations.mjs','workspace-probe.mjs','workspace-command.mjs']){const file=path.join(path.dirname(servicePath),name);if(fs.existsSync(file))await add(file,'service/'+name);}
+ if(entries.some(entry=>entry.path==='service/workspace-command.mjs'))
+  await add(workspaceConfinementPath||fileURLToPath(new URL('../../worker/studio_worker/compute/workspace_confinement.py',import.meta.url)),'service/workspace-confinement.py');
  const resolver=createRequire(path.join(dependencyRoot,'runtime.cjs'));
  const wrapperEntry=resolver.resolve('@lydell/node-pty'),wrapper=packageRoot(wrapperEntry,'@lydell/node-pty',dependencyRoot);
  const nativeName='@lydell/node-pty-'+platform+'-'+arch;
@@ -144,9 +147,9 @@ export function prepareTerminalRuntime(options){
  const key=JSON.stringify(options);if(planning.has(key))return planning.get(key);
  const promise=prepareTerminalRuntimeOnce(options);planning.set(key,promise);promise.finally(()=>{if(planning.get(key)===promise)planning.delete(key);}).catch(()=>{});return promise;
 }
-async function prepareTerminalRuntimeOnce({runtimeRoot,nodeExecutable,servicePath,dependencyRoot,platform=process.platform,arch=process.arch,probeExecution=probeWindowsTerminalRuntimeExecution}){
- if(![runtimeRoot,nodeExecutable,servicePath,dependencyRoot].every(absolute))fail('terminal_runtime_invalid_source');
- const options={runtimeRoot:path.resolve(runtimeRoot),nodeExecutable:path.resolve(nodeExecutable),servicePath:path.resolve(servicePath),dependencyRoot:path.resolve(dependencyRoot),platform,arch};
+async function prepareTerminalRuntimeOnce({runtimeRoot,nodeExecutable,servicePath,dependencyRoot,workspaceConfinementPath,platform=process.platform,arch=process.arch,probeExecution=probeWindowsTerminalRuntimeExecution}){
+ if(![runtimeRoot,nodeExecutable,servicePath,dependencyRoot].every(absolute)||workspaceConfinementPath!==undefined&&!absolute(workspaceConfinementPath))fail('terminal_runtime_invalid_source');
+ const options={runtimeRoot:path.resolve(runtimeRoot),nodeExecutable:path.resolve(nodeExecutable),servicePath:path.resolve(servicePath),dependencyRoot:path.resolve(dependencyRoot),workspaceConfinementPath,platform,arch};
  for(let current=options.runtimeRoot;;current=path.dirname(current)){
   if(fs.existsSync(current)){unlinked(current,true);break;}
   if(path.dirname(current)===current)fail('terminal_runtime_invalid_source');

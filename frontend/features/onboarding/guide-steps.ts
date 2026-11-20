@@ -1,7 +1,7 @@
 import type {SetupVisit} from './SetupAssistant';
 
 export type SetupLessonLocation = {
-  destination: SetupVisit | 'ssh-login' | 'ssh-settings' | 'ssh-service';
+  destination: Exclude<SetupVisit,'resume-cluster'> | 'ssh-login' | 'ssh-settings' | 'ssh-service' | 'ssh-workspace' | 'ssh-service-observe';
   shortCase?: string;
 };
 export type GuideStep = SetupLessonLocation['destination'] | 'account' | 'wsl' | 'choose-wsl' | 'choose-ssh';
@@ -13,6 +13,9 @@ const steps: Record<GuideStep, Step> = {
     ['composer','核对输入框中的测试消息。连接所选服务商后，点击发送。','Review the test message here. Once the provider is connected, send it to check for a reply.']
   ]},
   'tour-goal': {title:['描述计算目标','Describe your goal'], targets:[
+    ['roadmap-results','打开回执中的作业，核对状态、日志与产物。','Open a job from the receipt to inspect its status, logs and outputs.'],
+    ['roadmap-confirm','先核对整图快照；准备好后由你点击确认执行。','Review the whole graph snapshot before choosing to run it.'],
+    ['roadmap-preview','补齐输入和部署目标，点击这里核对快照；缺工具时可从此处准备配置。','Fill the inputs and deployment target, then review the snapshot here. Missing tools can be set up from this page.'],
     ['composer','把铜晶胞示例改成你想观察的量，再发送给助手。','Edit the copper example here to say what you want to measure, then send it.']
   ]},
   'short-check': {title:['准备短例','Prepare a check'], targets:[
@@ -34,10 +37,23 @@ const steps: Record<GuideStep, Step> = {
     ['run-search','在这里按名称查找运行。连接原作业服务后即可打开记录。','Find a run by name here. Connect its original job service to open the record.']
   ]},
   'ssh-login': {title:['登录远程资源','Sign in over SSH'], targets:[
-    ['ssh-edit','查看登录提示，需要修正主机或账号时，从这里编辑连接。','Read the sign-in message. Use this button if you need to correct the host or account.'],
+    ['ssh-handoff','点击交接，核对实际远端账号与总工作区后确认。','Start handoff here, then review the actual remote account and workspace before confirming.'],
     ['ssh-terminal','在此终端完成登录，看到远端命令提示符后再继续。','Sign in here and wait for the remote shell prompt.'],
-    ['ssh-shell','在这里查看已打开的远端终端。','Review the open remote terminal here.'],
-    ['ssh-continue','从这里继续当前登录，按终端提示完成认证。','Resume this sign-in here and follow the terminal instructions.']
+    ['ssh-continue','从这里继续当前登录，按终端提示完成认证。','Resume this sign-in here and follow the terminal instructions.'],
+    ['ssh-shell','在这里查看原终端。已完成交接的资源沿用登记的工作区。','Review the original terminal here. A resource that has been handed off will reuse its saved workspace.'],
+    ['ssh-edit','查看登录提示，需要修正主机或账号时，从这里编辑连接。','Read the sign-in message. Use this button if you need to correct the host or account.']
+  ]},
+  'ssh-workspace': {title:['确认远端总工作区','Confirm the remote workspace'],targets:[
+    ['ssh-workspace-confirm','核对资源、账号和绝对路径。workfile 保存每次计算的文件，software 存放新工具。确认后开始准备作业服务。','Review the resource, account and absolute path. Workfile holds calculation files and software holds newly installed tools. Confirm to start preparing the job service.'],
+    ['ssh-workspace','可编辑目录并点击「核对目录」。看到绝对路径后再确认。','Edit the path and review it. Confirm after the absolute path appears.']
+  ]},
+  'ssh-service-observe': {title:['检查作业服务','Check the job service'],targets:[
+    ['ssh-service-repair','作业服务没有就绪时，可在原资源对话中准备一条环境检查草稿。','If the service is unavailable, draft an environment check for the original resource.'],
+    ['ssh-service-version','查看随包和远端的版本与摘要。需要更新时，从此处更新这条连接的服务。','Compare the bundled and remote versions and digests. Use this control to update the service on this connection.'],
+    ['ssh-use-for-workflow','作业服务就绪后，点击「用于当前流程」连接这条现有服务。','When the job service is ready, attach it with Use for this workflow.'],
+    ['ssh-service-progress','查看服务传输、Python 检查和健康核验。出现就绪回执后即可配置第一个工具。','Watch the transfer, Python check and health check. Once the service reports ready, set up your first tool.'],
+    ['ssh-handoff','保存解释器设置后，沿用这个登录终端，点击交接以重试服务。','After saving the interpreter settings, use handoff in this same terminal to retry the service.'],
+    ['ssh-shell','保留这个登录终端。在资源的作业服务设置查看错误或已登记的服务版本。','Keep this login terminal open. Check service errors or the registered version in this resource’s job service settings.']
   ]},
   'ssh-settings': {title:['配置远程连接','Configure the remote connection'], targets:[
     ['cluster-connect-worker','先连接本地作业服务，再读取已保存的集群配置。','Connect the local job service here to load saved cluster profiles.'],
@@ -46,6 +62,16 @@ const steps: Record<GuideStep, Step> = {
   ]},
   'ssh-service': {title:['准备远程作业服务','Prepare the remote job service'], targets:[
     ['composer','核对草稿中的连接信息，再请助手检查远端 Python 环境。','Review the connection in this draft, then ask the assistant to check the remote Python environment.']
+  ]},
+  'resource-tools': {title:['配置科学工具','Set up a scientific tool'],targets:[
+    ['resource-tool-receipt','核对版本、安装位置和最小测试。通过后，这个资源可调用已激活工具，并能查看执行技能。','Review the version, location and minimal test. Once it passes, the resource can use the activated tool and inspect its execution skill.'],
+    ['resource-tool-review','准备好草稿后，从这里返回同一资源的配置预览。','Once a draft is ready, return to setup on the same resource here.'],
+    ['resource-tool-setup','选择与你手头材料匹配的接入方式，再核对实际测试目标。','Choose the route that matches what you already have, then review the actual test target.'],
+    ['resource-configure-tools','在选中的资源卡打开科学工具配置。','Open tool setup in the selected resource card.']
+  ]},
+  'ssh-terminal-practice': {title:['在工作区练习终端操作','Practice terminal operations in your workspace'],targets:[
+    ['composer','编辑这条草稿，核对资源与工作区范围，再发送。区外操作会在输入区等待明确确认。','Edit the draft, check the resource and workspace scope, then send it. Operations outside the workspace ask for explicit confirmation here.'],
+    ['session-workspace','在这里核对实际会话目录并复制路径。可以在对话中问「本次计算文件在哪？」。','Check and copy the actual conversation path here. Ask where the calculation files are in chat.']
   ]},
   account: {title:['配置账号','Configure account'], targets:[
     ['login-method','选择登录方式，再按页面提示登录。','Choose a sign-in method here, then follow the instructions.'],

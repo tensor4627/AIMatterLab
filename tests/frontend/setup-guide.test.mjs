@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {appWorkerHarness} from '../helpers/app-worker-hooks.mjs';
-import {agentHarness,conversation} from '../helpers/agent-hooks.mjs';
+import {agentHarness,conversation,memoryStorage} from '../helpers/agent-hooks.mjs';
 
 const guide=h=>h.find(node=>node.type==='./SetupAssistant');
 const shell=h=>h.find(node=>node.props?.className?.startsWith?.('shell workspace-shell'));
 const help=h=>h.find(node=>node.props?.['data-testid']==='open-setup-guide');
-function fixture(page='welcome',failWrite=false){
+function fixture(page='welcome',failWrite=false,storage){
  const info={page,directory:'synthetic workspace',directoryKind:'workspace'};
- return appWorkerHarness({override:async(method,data,standard)=>{
+ return appWorkerHarness({storage,override:async(method,data,standard)=>{
   if(method==='state')return {...await standard(method,data),setupGuide:{...info}};
   if(method==='onboarding.progress'){
    if(failWrite)throw Error('write unavailable');
@@ -49,6 +49,27 @@ test('SSH authentication is handed to the existing terminal and its setup page r
   bubble.props.onReturn();await h.flush();assert.equal(guide(h).props.page,'compute');
   assert.ok(!h.calls.some(c=>c.method==='compute.sshService.connect'||c.method==='task.execute'));
  }finally{h.unmount();}
+});
+
+test('cluster walkthrough restores the chosen tool route and exact saved resource after remount',async()=>{
+ const storage=memoryStorage(),first=fixture('compute',false,storage);
+ try{
+  await first.flush();guide(first).props.onConnect('ssh');await first.flush();
+  first.find(node=>node.type==='./ComputeConnectionChooser').props.onSsh({kind:'ssh',id:'one-campus',version:2,name:'Campus',mode:'key'});await first.flush();
+  first.find(node=>node.type==='./SetupLesson').props.onReturn();await first.flush();
+  await guide(first).props.onProgress('ready');await first.flush();
+  await guide(first).props.onVisit('resource-tools','custom');await first.flush();
+  assert.equal(first.find(node=>node.type==='./ResourceToolSetup').props.initialRoute,'custom');
+  assert(!first.calls.some(call=>call.method==='tools.resource.start'||call.data?.method==='turn/start'));
+ }finally{first.unmount();}
+ const second=fixture('compute',false,storage);
+ try{
+  await second.flush();assert.equal(guide(second).props.clusterGuide.route,'custom');
+  await guide(second).props.onVisit('resume-cluster');await second.flush();
+  const setup=second.find(node=>node.type==='./ResourceToolSetup');
+  assert.deepEqual({id:setup.props.resourceId,version:setup.props.profileVersion,route:setup.props.initialRoute},{id:'ssh:one-campus',version:2,route:'custom'});
+  assert(!second.calls.some(call=>call.method==='compute.sshConnection.open'||call.method==='tools.resource.start'||call.data?.method==='turn/start'));
+ }finally{second.unmount();}
 });
 
 test('setting a new default preserves the open chat and its draft; the setup test starts in the chosen provider',async()=>{

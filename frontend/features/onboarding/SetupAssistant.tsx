@@ -10,21 +10,23 @@ import {providerAccountState,providerNames} from '../conversations/provider-acco
 import ProviderLogin from '../settings/ProviderLogin';
 import GuideSpotlight from './GuideSpotlight';
 import CopperCell from './CopperCell';
+import type {ClusterGuideProgress} from './cluster-guide-progress';
 import './setup-assistant.css';
 
 const pages: SetupPage[] = ['welcome','agent','compute','ready'];
 const providers: AgentProvider[] = ['codex','kimi','qwen','deepseek','compatible'];
-export type SetupVisit = 'assets' | 'environments' | 'extensions' | 'runs' | 'model-test' | 'tour-goal' | 'short-check';
+export type SetupVisit = 'assets' | 'environments' | 'extensions' | 'runs' | 'model-test' | 'tour-goal' | 'short-check' | 'resource-tools' | 'ssh-terminal-practice' | 'resume-cluster';
 export type SetupPreferences = Pick<Partial<Settings>, 'language' | 'theme' | 'agentProvider'>;
 export type ModelReply = {provider:AgentProvider; model:string};
 type Props = {
   info:SetupGuideInfo; page:SetupPage; settings:Settings; localConnected:boolean; resource:ComputeResourceState|null;
   agentBusy:boolean; reply:ModelReply|null; onReply:(result:ModelReply|null)=>void;
+  clusterGuide?:ClusterGuideProgress|null;
   onPreferences:(patch:SetupPreferences)=>Promise<void>; onProgress:(page:SetupProgress)=>Promise<void>;
   onConnect:(kind:'wsl'|'ssh')=>void; onVisit:(destination:SetupVisit, shortCase?:string)=>void;
 };
 
-export default function SetupAssistant({info,page,settings,localConnected,resource,agentBusy,reply,onReply,onPreferences,onProgress,onConnect,onVisit}:Props) {
+export default function SetupAssistant({info,page,settings,localConnected,resource,agentBusy,reply,onReply,onPreferences,onProgress,onConnect,onVisit,clusterGuide}:Props) {
   const english=settings.language==='en';
   const say=(zh:string,en:string)=>english?en:zh;
   const [login,setLogin]=useState(false),[tour,setTour]=useState<number|null>(null),[checks,setChecks]=useState(false);
@@ -32,8 +34,8 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
   const [shortCase,setShortCase]=useState('worker'),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [accountVisited,setAccountVisited]=useState<AgentProvider|null>(null),[connectionVisited,setConnectionVisited]=useState<'wsl'|'ssh'|null>(null);
   const routeChosen=useRef(false);
-  const [route,setRoute]=useState<'wsl'|'ssh'|'later'>(()=>resource?.kind?'ssh':localConnected?'wsl':'later');
-  useEffect(()=>{if(!routeChosen.current)setRoute(resource?.kind?'ssh':localConnected?'wsl':'later');},[resource?.kind,localConnected]);
+  const [route,setRoute]=useState<'wsl'|'ssh'|'later'>(()=>resource?.kind||clusterGuide?'ssh':localConnected?'wsl':'later');
+  useEffect(()=>{if(!routeChosen.current)setRoute(resource?.kind||clusterGuide?'ssh':localConnected?'wsl':'later');},[resource?.kind,localConnected,clusterGuide?.profileId]);
   const heading=useRef<HTMLHeadingElement>(null),pending=useRef(false),mounted=useRef(false);
   const summary=useRef<HTMLDivElement>(null);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
@@ -110,7 +112,10 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
                 ['later',Monitor,say('暂不连接','Connect later'),say('先与助手对话或浏览工作台','Start with a conversation or explore the workspace')]
               ] as const).map(([kind,Icon,label,detail])=><button key={kind} aria-pressed={route===kind} disabled={busy} onClick={()=>{routeChosen.current=true;setRoute(kind);}}><Icon size={21}/><span><strong>{label}</strong><small>{detail}</small></span><span className="setup-radio">{route===kind&&<i/>}</span></button>)}</div></fieldset>
               {route!=='later'&&!connectNext&&<div className="setup-inline-actions"><button className="setup-secondary" disabled={busy||agentBusy} onClick={openConnection}><Terminal size={16}/>{connectionAction}</button></div>}
-              {route==='ssh'&&<p className="setup-note">{say('登录后，点击「登录完成，交由 AIMatterLab 管理」。在聊天中指定此资源即可申请专属终端。','After signing in, let AIMatterLab manage the connection. Name this resource in chat to request a dedicated terminal.')}</p>}
+              {route==='ssh'&&<>
+                <p className="setup-note">{say('在原终端登录后，点击「登录完成，交由 AIMatterLab 管理」，核对账号和总工作区后确认。交接后可查看作业服务的准备进度。','Sign in in the original terminal, then let AIMatterLab manage the connection. Confirm the account and workspace path, then follow job service setup.')}</p>
+                {clusterGuide&&<button className="setup-secondary" data-testid="setup-resume-cluster" disabled={busy||agentBusy} onClick={()=>onVisit('resume-cluster')}><Terminal size={16}/>{say('继续集群实操','Resume cluster walkthrough')} · {clusterGuide.name}</button>}
+              </>}
             </>}
             {page==='ready'&&<>
               <div className="setup-statuses">{account?.provider===provider&&<span><KeyRound size={12}/>{account.state==='configured'?say('账号已配置','Account configured'):account.state==='missing'?say('账号待配置','Account not configured'):say('账号状态待核对','Account status unconfirmed')}</span>}<span><Circle size={10} data-active={!!tested}/>{names[provider]} · {tested?say('模型已回复','Model replied')+' · '+tested.model:say('模型回复待验证','Model reply unverified')}</span><span><Circle size={10} data-active={localConnected||auth}/>{connection}</span>
@@ -124,10 +129,14 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
                     <button className="setup-text" onClick={()=>setTour(null)}>{say('收起示例','Close tour')}</button>
                     <button className="setup-text" onClick={()=>tour===4?onVisit('runs'):setTour(tour+1)}>{tour===4?say('打开运行记录','Open run history'):say('下一步','Next step')}<ArrowRight size={15}/></button></div></div>}
               <div className="setup-links">
-                <button aria-expanded={toolSetup} onClick={()=>{setToolSetup(!toolSetup);setChecks(false);}}><Cpu size={16}/>{say('配置我的第一个科学工具','Set up my first scientific tool')}<ChevronRight size={15}/></button>
+                <button aria-expanded={toolSetup} data-testid="setup-first-resource-tool" onClick={()=>{setToolSetup(!toolSetup);setChecks(false);}}><Cpu size={16}/>{say('配置我的第一个科学工具','Set up my first scientific tool')}<ChevronRight size={15}/></button>
                 {toolSetup&&<div className="setup-tool-options">
+                  <button className="setup-secondary" data-testid="setup-tool-fresh" onClick={()=>onVisit('resource-tools','fresh')}>{say('安装新工具','Install a new tool')}<ExternalLink size={14}/></button>
+                  <button className="setup-secondary" data-testid="setup-tool-existing" onClick={()=>onVisit('resource-tools','existing')}>{say('我已有提交脚本','I have submission scripts')}<ExternalLink size={14}/></button>
+                  <button className="setup-secondary" data-testid="setup-tool-custom" onClick={()=>onVisit('resource-tools','custom')}>{say('接入其他软件','Connect other software')}<ExternalLink size={14}/></button>
                   <button className="setup-secondary" onClick={()=>onVisit('environments')}>{say('登记已有环境','Register an environment')}<ExternalLink size={14}/></button>
                   <button className="setup-secondary" onClick={()=>onVisit('extensions')}>{say('获取工具与安装说明','Get tools and install guides')}<ExternalLink size={14}/></button></div>}
+                <button data-testid="setup-terminal-practice" disabled={agentBusy} onClick={()=>onVisit('ssh-terminal-practice')}><Terminal size={16}/>{say('用对话练习终端操作','Practice terminal operations in chat')}<ChevronRight size={15}/></button>
                 <button aria-expanded={checks} onClick={()=>{setChecks(!checks);setToolSetup(false);}}><FlaskConical size={16}/>{say('验证计算环境','Check a compute environment')}<ChevronRight size={15}/></button>
               </div>
               {checks&&<div className="setup-checks"><label>{say('选择安装短例','Choose an installation check')}<select value={shortCase} onChange={event=>setShortCase(event.target.value)}><option value="worker">{say('作业服务','Job service')}</option><option value="reference-md">ASE · CPU MD</option><option value="pydyn-md">PyDyn · CUDA MD</option></select></label><button className="setup-secondary" disabled={agentBusy} onClick={()=>onVisit('short-check',shortCase)}><Play size={15}/>{say('在对话中准备短例','Prepare check in chat')}</button></div>}

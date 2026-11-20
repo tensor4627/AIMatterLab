@@ -1,5 +1,17 @@
 # Set up the cluster base workspace
 
+## Work in the user's SSH terminal
+
+Acquire the selected resource with terminal access, then use `write_compute_terminal` on its own lease. Ordinary chat can inspect a queue, read files, copy inputs into the confirmed workspace, write a postprocessor or submit an explicitly requested independent job. Each lease remembers its current directory after a standalone `cd` or `cd -`. Use the `cwd` returned in the command receipt.
+
+Each `enter` runs the staged batch in a fresh shell. Activate the environment and run the program in the same batch, for example `bash -c 'source ./activate-env.sh && exec ./run.sh'` using scripts prepared in the workspace. Exports, loaded modules and foreground processes are scoped to that invocation. Check the combined stdout and stderr in `output` and the `exit_code` in the `enter` receipt. Redirect large logs to a file in the workspace. `read_compute_terminal` pages through the visible terminal's own output. Use `interrupt` to clear staged SSH text while idle. An active SSH command reports command pending until its receipt is available.
+
+For work outside the confirmed root, read-only inspection uses the authenticated account's existing access. For a user-requested external write or execution, show the exact destination and command in the composer approval. Treat a denied or expired approval as the result of that attempt. Verify the destination of a copy and the source job ID for any follow-up. Keep a potentially destructive change tied to its specific reviewed paths.
+
+## Locate a workspace
+
+At the first managed SSH handoff the user reviews the remote account and absolute root. The resource remembers this choice across logins. New software goes into `software/` under it. Each conversation receives its own directory under `workfile/YYYY-MM-DD/task-N/` on its first confirmed cluster workflow. Use `read_session_workspace` for the path; use the reported source and observation time when offline. Return to that same directory across dates or after restarting the desktop. The authoring workspace below holds drafts and source inputs before confirmation.
+
 Use this reference for a requested base workspace. For an already hosted SSH resource, acquire the conversation's own lease through `compute.queue`. A user may request a directory setup or environment inspection in the leased shell. For a service-managed authoring workspace use the steps below when `setup_base_workspace` is advertised for the current selected job-service context, including the legacy shared-terminal route.
 
 1. Call `setup_base_workspace` with `action` set to `inspect`. If the result is `ready`, reuse the returned workspace and show its actual name and path. An existing workflow's authoritative authoring directory continues to identify that workflow's inputs.

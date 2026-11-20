@@ -17,6 +17,7 @@ export function assertWorkerRoute(method, path) {
   routes.POST.push('/api/workflow/tool-group/create','/api/workflow/prepare-step','/api/workflow/execute-step','/api/workflow/status','/api/workflow/read');
   routes.POST.push(...['preview','confirm','list','status','snapshot'].map(action=>'/api/workflow/roadmap/'+action));
   routes.POST.push('/api/ssh-service/scheduler');
+  routes.POST.push(...['register','session','allocate'].map(action=>'/api/resource-workspace/'+action));
   routes.POST.push('/api/cluster/observation');
   routes.POST.push(...['upsert','stop','status','list','snapshot','pump','ack','observe-once'].map(action=>'/api/managed-schedules/'+action));
   const target = new URL(path, 'http://127.0.0.1');
@@ -33,6 +34,7 @@ export function assertRendererWorkerRoute(method, path) {
   if(target.pathname.startsWith('/api/tool-'))throw Error('Use the typed human tool configuration interface');
   if(target.pathname.startsWith('/api/workflow/'))throw Error('Use the typed human tool-group workflow interface');
   if(target.pathname.startsWith('/api/ssh-service/'))throw Error('Use the typed human SSH service interface');
+  if(target.pathname.startsWith('/api/resource-workspace/'))throw Error('Use the typed resource workspace interface');
   if(target.pathname.startsWith('/api/managed-schedules/'))throw Error('Use the typed desktop managed schedule actions');
   if(target.pathname.startsWith('/api/cluster/auth/')||target.pathname.startsWith('/api/cluster/tunnel/'))throw Error('Use the private main-owned human SSH pane');
   if(target.pathname==='/api/environment-api/read')throw Error('Use the main-owned scoped target API reader');

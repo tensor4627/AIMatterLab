@@ -70,7 +70,7 @@ async exposeTools(health){
     if(independent&&req.method==='GET'){res.writeHead(405,{'Content-Type':'application/json'});res.end();return;}
     if(independent&&body?.method==='notifications/initialized'){res.writeHead(202);res.end();return;}
     const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
-    if(body?.method==='tools/call'&&projectSkill){dispatched=true;response={status:200,data:{jsonrpc:'2.0',id:body.id,result:toolValueResult(this.projectSkills.call(body.params.name,body.params.arguments||{},scope))}};}else if(independent&&['initialize','ping','resources/list','resources/templates/list'].includes(body?.method)){
+    if(body?.method==='tools/call'&&projectSkill){dispatched=true;response={status:200,data:{jsonrpc:'2.0',id:body.id,result:toolValueResult(await this.projectSkills.call(body.params.name,body.params.arguments||{},scope))}};}else if(independent&&['initialize','ping','resources/list','resources/templates/list'].includes(body?.method)){
      const result=body.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{listChanged:false}},serverInfo:{name:'aimatterlab',version:'1.0.0'}}:body.method==='resources/list'?{resources:[]}:body.method==='resources/templates/list'?{resourceTemplates:[]}:{};
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(independent&&body?.method==='tools/list'){

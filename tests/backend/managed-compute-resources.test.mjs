@@ -93,6 +93,37 @@ test('publication retains independent hosts and grants exactly one distinct PTY 
  assert.equal((await manager.callTerminalTool('list_compute_terminals',{},other)).sessions.length,1);
 });
 
+test('an authenticated terminal lease permits ordinary skill saves for that account without a job service',async t=>{
+ const registration=Object.fromEntries(['A','B'].map((id,index)=>[id,{
+  profileId:id,resourceId:String(index+1).repeat(64),workspaceId:String(index+4).repeat(64),
+  account:'same-name',hostIdentity:{hostname:id,uid:1001,machineId:id},root:'/workspace/'+id,
+ }]));
+ const f=fixture(t,{resourceWorkspace:{
+  assertHandoff:async({profileId})=>registration[profileId],
+  publicWorkspace:value=>value,
+  resolveHostedResourceWorkspace:(id,{profileId})=>registration[profileId]?.resourceId===id?registration[profileId]:null,
+ }});
+ const {manager,owner,projectSkills}=f;
+ projectSkills.resolveResource=manager.resolveSkillLibrary;
+ await Promise.all([f.publish('A'),f.publish('B')]);
+ f.turn(owner,'用材料中心');
+ await manager.acquire(owner,{resourceId:'ssh:A'});
+ const name='tool-handbook',body='---\nname: '+name+'\ndescription: Read this resource handbook.\n---\n\nNotes for this account.';
+ const args={scope:'resource',resource_id:'ssh:A',name,body,expected_sha256:null};
+ const archived=await projectSkills.call('write_project_skill',args,owner);
+ assert.match(archived.path,/resource-[a-f0-9]{64}[/\\]tool-handbook[/\\]SKILL\.md$/);
+ await assert.rejects(()=>projectSkills.call('write_project_skill',{...args,resource_id:'ssh:B'},owner),/lease_required/);
+ await assert.rejects(()=>projectSkills.call('write_project_skill',args,owner),/Skill revision changed/);
+ const changed=await projectSkills.call('write_project_skill',{...args,body:body+'\nMore notes.',expected_sha256:archived.sha256},owner);
+ assert.notEqual(changed.sha256,archived.sha256);
+ const newRoot=projectSkills.prepareRoot(path.join(path.dirname(projectSkills.root),path.basename(projectSkills.root)+'-migrated'));
+ t.after(()=>fs.rmSync(newRoot,{recursive:true,force:true}));
+ projectSkills.root=newRoot;
+ assert.equal((await projectSkills.call('read_project_skill',{scope:'resource',resource_id:'ssh:A',name},owner)).sha256,changed.sha256);
+ f.states.get('conn-A').authentication='lost';
+ await assert.rejects(()=>projectSkills.call('write_project_skill',{...args,expected_sha256:changed.sha256},owner),/unavailable/);
+});
+
 test('a user-selected alias uses the stable profile after rename and requires confirmation after the target changes',async t=>{
  const f=fixture(t),{manager,owner,aliases}=f;
  await f.publish('A');await f.publish('B');
@@ -327,6 +358,38 @@ test('human first-use setup opens one private service on its published host with
  assert.equal((await manager.callTerminalTool('list_compute_terminals',{},f.owner)).sessions.length,1);
  assert.equal(manager.owns('configureService'),false);
  await assert.rejects(manager.configureService({...ref,connectionId:'conn-B'}),/resource_unavailable/);
+});
+
+test('hosted reuse reports manifest differences before an explicit in-place service update',async t=>{
+ const f=fixture(t), ref={connectionId:'conn-A',profileId:'A',profileVersion:1}, calls=[];
+ const a='a'.repeat(64),b='b'.repeat(64),hostIdentity={hostname:'fixture',uid:1000,machineId:'fixture-id'};
+ const health=hash=>({name:'gpu-sampling-studio',execution_policy:'desktop-review-v1',root:'/fixture/data',port:34567,
+  runtime:'/fixture/data/runtimes/'+hash.slice(0,20),runtimeId:hash.slice(0,20),runtimeManifestSha256:hash,hostIdentity});
+ const channel=(hash,id)=>({...ref,serviceId:id,status:'connected',serviceActive:true,channelKind:'private',service:health(hash)});
+ let registered=health(a), observed=channel(a,'service-old');
+ const registration={validateReuse(){return registered;},read(){return {status:'configured',registration:registered};},remember(_profile,result){registered=result;}};
+ Object.assign(f.connections,{
+  serviceState:async()=>observed,
+  async closeService(data){assert.equal(data.serviceId,'service-old');calls.push('close');return observed={...ref,status:'disconnected',serviceActive:false};},
+  async openService(data,bootstrap){assert.equal(data.connectionId,ref.connectionId);assert.equal(bootstrap.payload.expected_runtime_id,b.slice(0,20));
+   calls.push('update');observed=channel(b,'service-new');},
+  async privateServiceRequest(value){return {status:200,data:value.target==='/api/health'?observed.service:{jsonrpc:'2.0',id:value.data.id,result:{tools:[{name:'fixture'}]}}};},
+ });
+ const services=createManagedComputeServices({connections:f.connections,registration,prepareResources:async(_source,options)=>({payload:{port:34567,
+  expected_runtime_id:options.expectedRuntimeId||b.slice(0,20),runtime_manifest_sha256:b}})});
+ const manager=f.make({services});t.after(()=>manager.stop());
+ await manager.publish(ref);await manager.refreshService({connectionId:ref.connectionId});
+ const check=await manager.serviceStatus(ref);
+ assert.deepEqual(check.runtimeComparison,{status:'different',remoteRuntimeId:a.slice(0,20),remoteManifestSha256:a,bundledRuntimeId:b.slice(0,20),bundledManifestSha256:b});
+ assert.deepEqual(calls,[]);
+ const request={...ref,expectedRuntimeId:a.slice(0,20),bundledRuntimeId:b.slice(0,20)};
+ await assert.rejects(manager.updateService({...request,expectedRuntimeId:'c'.repeat(20)}),/changed/);
+ assert.deepEqual(calls,[]);
+ await manager.updateService(request);
+ assert.deepEqual(calls,['close','update']);
+ const updated=await manager.serviceStatus(ref);
+ assert.equal(updated.health.root,check.health.root);
+ assert.equal(updated.runtimeComparison.status,'current');
 });
 
 test('run mutations check exact source, active project grant, user intent and known canonical state before dispatch',async t=>{

@@ -1,7 +1,7 @@
 import {invoke} from './studio';
-import type {WorkerStatus} from '../../contracts/dto/compute';
+import type {ResourceWorkspaceReference,WorkerStatus} from '../../contracts/dto/compute';
 
-export const api=<T=any>(method:string,target:string,data?:unknown)=>invoke<T>('worker.request',{method,target,data});
+export const api=<T=any>(method:string,target:string,data?:unknown,projectScope?:ResourceWorkspaceReference)=>invoke<T>('worker.request',{method,target,data,...projectScope?{projectScope}:{}});
 
 export const readWorkerStatus=()=>invoke<WorkerStatus>('worker.status');
 

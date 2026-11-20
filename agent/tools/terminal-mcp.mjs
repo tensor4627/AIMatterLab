@@ -7,8 +7,8 @@ import {sharedTerminalToolAllowed} from "./definition-scope.mjs";
 // Desktop-owned terminals do not depend on a registered WSL scientific worker.
 // Project skills and public scientific guidance use the same authenticated conversation.
 export class TerminalMcp {
- constructor({terminal,guard=()=>null,projectSkills,scientificSkills,desktopTools,workerTools,runScope=(_scope,run)=>run(),captureScope=scope=>scope}){
-  Object.assign(this,{terminal,guard,projectSkills,scientificSkills,desktopTools,workerTools,runScope,captureScope});
+ constructor({terminal,guard=()=>null,projectSkills,scientificSkills,publicDocs,desktopTools,workerTools,runScope=(_scope,run)=>run(),captureScope=scope=>scope}){
+  Object.assign(this,{terminal,guard,projectSkills,scientificSkills,publicDocs,desktopTools,workerTools,runScope,captureScope});
   this.guides=(scientificSkills?.tools()||[]).filter(tool=>tool.annotations?.readOnlyHint===true);
   this.scopes=new McpProviderScopes();
   this.legacyVisibility=new Map();
@@ -73,7 +73,7 @@ export class TerminalMcp {
    else if(body.method==='resources/templates/list')result={resourceTemplates:[]};
    else if(body.method==='tools/list'){
     // Managed tools can be discovered before a new thread is created.
-    const worker=await this.workerTools?.list(scope),local=[...this.terminal.tools().filter(tool=>sharedTerminalToolAllowed(tool.name)),...(this.projectSkills?.tools()||[]),...this.guides,...(this.desktopTools?.tools()||[])];
+    const worker=await this.workerTools?.list(scope),local=[...this.terminal.tools().filter(tool=>sharedTerminalToolAllowed(tool.name)),...(this.projectSkills?.tools()||[]),...this.guides,...(this.publicDocs?.definitions||[]),...(this.desktopTools?.tools()||[])];
     const showLegacy=this.legacyVisible(scope);
     const tools=[...new Map([...(worker?.tools||[]),...local].filter(tool=>showLegacy||!sharedTerminalToolAllowed(tool.name)).map(tool=>[tool.name,tool])).values()];
     result={tools,...worker?._meta?{_meta:worker._meta}:{}};
@@ -84,7 +84,10 @@ export class TerminalMcp {
      if(!scope.sessionId||!scope.threadId)throw Error('Select an agent conversation before using managed compute');
      dispatched=true;result=toolValueResult(await this.desktopTools.call(name,args,scope));
     }else if(this.projectSkills?.owns(name)){
-     dispatched=true;result=toolValueResult(this.projectSkills.call(name,args,scope));
+     dispatched=true;result=toolValueResult(await this.projectSkills.call(name,args,scope));
+    }else if(this.publicDocs?.definitions.some(tool=>tool.name===name)){
+     if(!scope.threadId)throw Error('Select a conversation before searching public software documentation');
+     dispatched=true;result=toolValueResult(await this.publicDocs.call(name,args));fresh();
     }else if(this.guides.some(tool=>tool.name===name)){
      if(!scope.threadId)throw Error('Select a conversation before reading skill guidance');
      dispatched=true;result=toolValueResult(await this.scientificSkills.call(name,args,scope));

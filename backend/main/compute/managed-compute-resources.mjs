@@ -8,6 +8,7 @@ import {managedWorkerProject,originalBindingMatches} from './managed-compute-ser
 import {normalizeComputeAlias,resourceFingerprint} from './managed-compute-aliases.mjs';
 import {createManagedComputeIntent,genericComputeKind,requestsComputeName,canAskForResource,namesInChat} from './managed-compute-intent.mjs';
 import {MANAGED_SSH_SHELL_CAPACITY} from '../../../desktop/platform/terminal-service/managed-ssh-shells.mjs';
+import {safeSshServiceError,safeSshServicePhase,safeSshServiceProgress} from './ssh-service-state.mjs';
 
 const rejectedBeforeDispatch=new Set(['managed_compute_invalid_request','managed_compute_user_instruction_required',
  'managed_compute_no_eligible_resource','managed_compute_resource_lease_required','managed_compute_resource_choice_required',
@@ -32,6 +33,7 @@ const runMutations=new Map([
  ['submit_run',['submit','run']],['submit_cluster_run',['submit','cluster-run']],
  ['cancel_run',['cancel','run']],['cancel_cluster_run',['cancel','cluster-run']],
 ]);
+const workerHistory='managed-ssh-runtime-history';
 
 function exact(value,keys,required=[]){
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key))||required.some(key=>!Object.hasOwn(value,key)))fail('managed_compute_invalid_request');
@@ -43,8 +45,8 @@ const terminalTools=sharedTerminalTools.map((item,index)=>({...item,
  name:['list_compute_terminals','read_compute_terminal','write_compute_terminal'][index],
  description:[
   'List SSH PTYs acquired by this conversation from published AIMatterLab compute resources.',
-  'Read the acquired conversation PTY. Use the returned sequence cursor and keep resources separate.',
-  'Write to one acquired conversation PTY for delegated operations, such as queue inspection or environment setup. Send type and enter separately and read the output. Prefer the registered worker for tracked jobs; an explicitly requested independent scheduler job may also use this terminal. Record its scheduler receipt and reconcile an uncertain submission before any retry.',
+  'Read the acquired conversation PTY using the returned sequence cursor. Scoped command output is in the write_compute_terminal enter receipt.',
+  'Run a delegated command from this conversation’s verified SSH workspace. Stage the batch with type, then send enter once. Read output and exit_code from the enter receipt. A standalone cd persists for the lease. Each batch has a fresh shell, so combine environment setup and execution. Interrupt clears staged input while idle. A protected operation displays the exact batch for desktop approval. Prefer the registered worker for tracked jobs. An explicitly requested independent scheduler job may also use this terminal. Record its scheduler receipt and reconcile an uncertain submission before retry.',
  ][index],
 }));
 const tools=Object.freeze([
@@ -58,7 +60,7 @@ const tools=Object.freeze([
  * `publishWsl`, `confirmAlias` and `recordUserTurn` are trusted desktop entry points. */
 export function createManagedComputeResources({terminal,profiles,aliases,services,selectionCatalog,taskSource=()=>null,
  authorizeTerminal=()=>false,authorizeSchedule,authorizeRun,authorizeRunAction, onAcquired=()=>{},onChange=()=>{},
- busy=()=>false,now=Date.now,uuid=randomUUID}){
+ resourceWorkspace,serviceRegistration,terminalAuthorization,busy=()=>false,now=Date.now,uuid=randomUUID}){
  const resources=new Map(),leases=new Map(),publishing=new Map(),scheduledSweeps=new Map(),pendingAcquisitions=new Set();
  const activeRunActions=new Set(),dispatchedRunActions=new Set();
  const connections=terminal.connections,intent=createManagedComputeIntent(selectionCatalog);
@@ -85,7 +87,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  // The desktop verifies the exact authenticated connection. Agent tools use the resource ID.
  function desktopView(resource){
   const entry=view(resource);
-  return resource.kind==='ssh'?{...entry,connectionId:resource.connectionId}:entry;
+  return resource.kind==='ssh'?{...entry,connectionId:resource.connectionId,
+   ...resource.workspaceRegistration?{workspace:resourceWorkspace.publicWorkspace(resource.workspaceRegistration)}:{}}:entry;
  }
  function snapshot(){return [...resources.values()].filter(visible).map(desktopView);}
  function recordUserTurn(value){
@@ -121,19 +124,25 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(!isAuthenticated(view)||view.profileId!==resource.profileId||view.profileVersion!==resource.profileVersion||view.connectionId!==resource.connectionId)fail('managed_compute_resource_unavailable');
  }
 
- function prepareService(resource,{configure=false}={}){
+ function prepareService(resource,{configure=false,upgrade}={}){
   if(!services||resource.preparing)return resource.preparing;
-  if(resource.service)return Promise.resolve(resource.service);
+  if(resource.service&&!upgrade)return Promise.resolve(resource.service);
+  const original=resource.service;
+  if(upgrade)resource.service=null;
   resource.serviceStatus='preparing';
   const fresh=()=>current(resource);
   const preparation=Promise.resolve().then(async()=>{
    try{
-    const service=await (resource.kind==='ssh'?services.ssh(resource,resource.profile,fresh,{configure}):services.wsl(resource,resource.receipt,fresh));
+    const service=await (resource.kind==='ssh'?services.ssh(resource,resource.profile,fresh,{configure,upgrade}):services.wsl(resource,resource.receipt,fresh));
     try{fresh();}catch(error){service.close?.();throw error;}
     resource.service=service;resource.serviceStatus='ready';delete resource.serviceError;
     return service;
    }catch(error){
     if(resources.get(resource.resourceId)===resource){
+     if(upgrade&&original){
+      try{await original.verify();fresh();resource.service=original;resource.serviceStatus='ready';return original;}
+      catch{/* Preserve the actual unconfirmed or failed remote state. */}
+     }
      resource.serviceStatus=['ssh_service_registration_required','ssh_service_maintenance_required'].includes(error.message)?'configuration_required':'unavailable';
      resource.serviceError=['ssh_service_registration_required','ssh_service_maintenance_required','managed_compute_service_changed','terminal_service_active','terminal_service_unknown','ssh_authentication_unconfirmed'].includes(error.message)?error.message:'managed_compute_private_service_unavailable';
     }
@@ -155,11 +164,22 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    if(stopped||publishing.get(data.connectionId)!==publication||!isAuthenticated(connection)||connection.connectionId!==data.connectionId||connection.profileId!==data.profileId||connection.profileVersion!==data.profileVersion)fail('managed_compute_authentication_required');
    const profile=profiles.read({id:data.profileId});
    if(profile.kind!=='ssh'||profile.version!==data.profileVersion)fail('managed_compute_profile_changed');
+   const checkPublication=()=>{
+    if(stopped||publishing.get(data.connectionId)!==publication||!equal(profile,profiles.read({id:profile.id})))fail('managed_compute_profile_changed');
+   };
+   const workspaceRegistration=await resourceWorkspace?.assertHandoff(data,checkPublication);
+   checkPublication();
    const resourceId='ssh:'+profile.id,previous=resources.get(resourceId);
-   if(previous&&saved(previous)){if(!equal(resourceRef(previous),data))fail('managed_compute_profile_already_published');return desktopView(previous);}
+   if(previous&&saved(previous)){
+    if(!equal(resourceRef(previous),data))fail('managed_compute_profile_already_published');
+    if(workspaceRegistration)previous.workspaceRegistration=workspaceRegistration;
+    changed();return desktopView(previous);
+   }
    if(previous)void remove(previous);
-   const resource={...data,resourceId,profile,kind:'ssh',name:profile.name,targetFingerprint:resourceFingerprint(profile),serviceStatus:'idle'};
-   resources.set(resourceId,resource);changed();prepareService(resource);
+   const resource={...data,resourceId,profile,kind:'ssh',name:profile.name,targetFingerprint:resourceFingerprint(profile),serviceStatus:'idle',workspaceRegistration};
+   const previousSetup=workspaceRegistration&&serviceRegistration?.read({profileId:profile.id,profileVersion:profile.version});
+   const configure=previousSetup?.status==='unconfigured'||previousSetup?.reason==='configuration_changed';
+   resources.set(resourceId,resource);changed();prepareService(resource,{configure});
    return desktopView(resource);
   })();
   try{return await publication.result;}finally{if(publishing.get(data.connectionId)===publication)publishing.delete(data.connectionId);}
@@ -202,10 +222,60 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const resource=resources.get('ssh:'+data.profileId);
   if(!resource||!equal(data,resourceRef(resource)))fail('managed_compute_resource_unavailable');
   await checkConnection(resource);
+  if(resourceWorkspace)resource.workspaceRegistration=await resourceWorkspace.assertHandoff(data,()=>current(resource));
   if(resource.preparing)await resource.preparing;
   current(resource);
   if(!resource.service&&!await prepareService(resource,{configure:true}))fail(resource.serviceError||'managed_compute_private_service_unavailable');
   current(resource);
+  return desktopView(resource);
+ }
+
+ async function serviceStatus(data){
+  exact(data,['connectionId','profileId','profileVersion'],['connectionId','profileId','profileVersion']);
+  const resource=resources.get('ssh:'+data.profileId);
+  if(!resource||!equal(data,resourceRef(resource)))fail('managed_compute_resource_unavailable');
+  await checkConnection(resource);
+  const observed=await connections.serviceState({connectionId:data.connectionId});
+  current(resource);
+  if(!equal(resourceRef(observed),data))fail('managed_compute_service_changed');
+  const progress=safeSshServiceProgress(observed.progress),phase=safeSshServicePhase(observed.servicePhase);
+  const ready=resource.serviceStatus==='ready'&&observed.status==='connected'&&resource.service?.generation===observed.serviceId;
+  let runtimeComparison;
+  if(ready&&services.comparison){
+   try{runtimeComparison=await services.comparison(resource.profile,resource.service.health);}catch{}
+   current(resource);
+   if(resource.service?.generation!==observed.serviceId)fail('managed_compute_service_changed');
+  }
+  const status=ready?'connected':observed.status==='unknown'?'unknown':resource.preparing?'connecting':
+   resource.serviceStatus==='unavailable'||resource.serviceStatus==='configuration_required'?'failed':
+   ['idle','failed','unknown','disconnecting','disconnected'].includes(observed.status)?observed.status:'unknown';
+  const error=observed.error||resource.serviceError;
+  return {...data,schemaVersion:2,status,operator:'human',workflowReady:ready,serviceActive:observed.serviceActive===true,
+   ...phase?{phase}:{},...progress?{progress}:{},...observed.serviceId?{serviceId:observed.serviceId}:{},
+   ...observed.attemptId?{attemptId:observed.attemptId}:{},...ready?{health:resource.service.health}:{},
+   ...error?{error:safeSshServiceError(error,phase||'preparing_local')}:{},...runtimeComparison?{runtimeComparison}:{}};
+ }
+
+ async function updateService(data){
+  const keys=['connectionId','profileId','profileVersion','expectedRuntimeId','bundledRuntimeId'];exact(data,keys,keys);
+  if(!/^[a-f0-9]{20}$/.test(data.expectedRuntimeId)||!/^[a-f0-9]{20}$/.test(data.bundledRuntimeId))fail('managed_compute_invalid_request');
+  const {expectedRuntimeId,bundledRuntimeId,...ref}=data,resource=resources.get('ssh:'+data.profileId);
+  if(!resource||!equal(ref,resourceRef(resource)))fail('managed_compute_resource_unavailable');
+  await checkConnection(resource);
+  if(resourceWorkspace)resource.workspaceRegistration=await resourceWorkspace.assertHandoff(ref,()=>current(resource));
+  const original=resource.service;
+  if(resource.preparing||!original||original.canUpdate?.()!==true||[...leases.values()].some(lease=>lease.resource===resource&&busy(lease.scope)))fail('managed_compute_channel_busy');
+  await original.verify();current(resource);
+  if(resource.service!==original||original.canUpdate()!==true)fail('managed_compute_service_changed');
+  if(resource.workspaceRegistration&&selectionCatalog?.put){
+   // The data root and account are independent of the service executable.
+   // Retain the previously verified source for this project's historical reads.
+   selectionCatalog.put(workerHistory,original.id,{sourceId:original.id,profileId:resource.profileId,
+    resourceId:resource.workspaceRegistration.resourceId,root:original.binding.root,hostIdentity:original.binding.hostIdentity});
+  }
+  const next=await prepareService(resource,{upgrade:{expectedRuntimeId,bundledRuntimeId,generation:original.generation}});
+  current(resource);
+  if(!next||next===original||next.health?.runtimeId!==bundledRuntimeId)fail(resource.serviceError||'managed_compute_service_changed');
   return desktopView(resource);
  }
 
@@ -541,6 +611,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(rows.length!==1)fail(rows.length?'managed_compute_resource_choice_required':'managed_compute_resource_lease_required');
   const lease=rows[0];
   assertLease(scope,lease);
+  if(action==='skill')action=readyShell(lease)?'terminal':'inspect';
   const service=lease.resource.service;
   if(action==='terminal'&&!readyShell(lease))fail('managed_compute_resource_lease_required');
   if(action!=='terminal'&&lease.service&&lease.service!==service)fail('managed_compute_service_changed');
@@ -552,6 +623,22 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   }else if(!await allowed(scope,lease.resource,action))fail('managed_compute_project_grant_required');
   assertLease(scope,lease);lease.touchedAt=now();
   return {lease,service,grant};
+ }
+
+ async function resolveSkillLibrary(scope,resourceId){
+  if(typeof resourceId!=='string'||!resourceId.startsWith('ssh:'))fail('managed_compute_invalid_request');
+  const {lease}=await resolveLease(scope,resourceId,'skill');
+  const {resource}=lease,original=resource.workspaceRegistration;
+  if(!original||!resourceWorkspace)fail('ssh_workspace_confirmation_required');
+  const check=()=>{
+   assertLease(scope,lease);
+   const registration=resourceWorkspace.resolveHostedResourceWorkspace(original.resourceId,
+    {profileId:resource.profileId,hostIdentity:original.hostIdentity});
+   if(!registration||registration.account!==original.account)fail('ssh_workspace_changed');
+   return registration;
+  };
+  await checkConnection(resource);
+  return {registration:check(),check};
  }
 
  async function callTerminalTool(name,args,scope){
@@ -578,6 +665,12 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const check=()=>{assertLease(scope,lease);if(lease.terminal!==terminal||readyShell(lease)!==shell)fail('managed_compute_resource_lease_changed');};
   const maxBytes=Math.max(16384,args.max_bytes??65536);
   try{
+   if(!reading&&terminalAuthorization){
+    if(!await verifyShell(lease,scope))fail('managed_compute_resource_lease_changed');
+    check();
+    return await terminalAuthorization.input({scope,ref:{...resourceRef(lease.resource),resourceName:lease.resource.name},input,
+     sessionId:shell.sessionId,ownerEpoch:shell.ownerEpoch,assertCurrent:check});
+   }
    const result=reading?await connections.managedShell('read',{...ref,...args.cursor!==undefined?{cursor:args.cursor}:{},maxBytes}):await connections.managedShell('input',{...ref,...input});
    check();
    if(reading){
@@ -660,12 +753,12 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    try{current(resource);}catch{continue;}
    const service=resource.service;
    if(!service||resource.serviceStatus!=='ready'||scheduleReady&&service.health?.managed_schedule_schema!==1)continue;
-   sources.push({id:service.id,generation:service.generation,profileId:resource.profileId,kind:resource.kind,health:structuredClone(service.health),async request(method,path,data){
+   sources.push({id:service.id,generation:service.generation,profileId:resource.profileId,kind:resource.kind,binding:structuredClone(service.binding),health:structuredClone(service.health),async request(method,path,data,{beforeDispatch,timeoutMs}={}){
     if(path==='/api/managed-schedules/observe-once'){
      const fields=['sourceId','scheduleId','requestId'];exact(data,fields,fields);
      if(method!=='POST'||data.sourceId!==service.id)fail('managed_compute_invalid_request');
     }
-    const response=await anchored(resource,service,method,path,data);
+    const response=await anchored(resource,service,method,path,data,false,timeoutMs,beforeDispatch);
     if(response.status!==200)throw Error(response.data?.error||'managed_compute_worker_request_failed');
     return response.data;
    }});
@@ -702,10 +795,20 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    ...id(scope.projectId)&&service.health?.root?.startsWith('/')?{projectInputRoot:path.posix.join(service.health.root,'projects',scope.projectId,'inputs')}:{},...grant};
  }
 
- async function assertRun(scope,resource,service,runId,kind){
+ async function assertRun(scope,resource,service,runId,kind,{readOnly=false}={}){
   if(!id(runId)||kind==='run'&&resource.kind==='ssh'||kind==='cluster-run'&&resource.kind!=='ssh')fail('managed_compute_run_source_changed');
   if(authorizeRun){
-   if(await authorizeRun(scope,{sourceId:service.id,resourceId:resource.resourceId,runId,kind})!==true)fail('managed_compute_run_source_changed');
+   const permits=(sourceId)=>authorizeRun(scope,{sourceId,resourceId:resource.resourceId,runId,kind});
+   if(await permits(service.id)===true)return;
+   if(readOnly&&resource.workspaceRegistration){
+    const history=selectionCatalog?.list?.(workerHistory)||[];
+    for(const old of history){
+     if(old.profileId!==resource.profileId||old.resourceId!==resource.workspaceRegistration.resourceId||old.root!==service.binding.root||
+        !equal(old.hostIdentity,service.binding.hostIdentity)||old.sourceId===service.id||!/^[a-f0-9]{64}$/.test(old.sourceId||''))continue;
+     if(await permits(old.sourceId)===true)return;
+    }
+   }
+   fail('managed_compute_run_source_changed');
   }else if(!originalBindingMatches(taskSource(scope),service.binding))fail('managed_compute_run_source_changed');
  }
 
@@ -778,7 +881,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
      if(!grant||spec?.project_id!==scope.projectId||remote!==(resource.kind==='ssh')||
          !(remote?grant.clusterIds.includes(spec?.cluster_id):grant.environmentIds.includes(spec?.environment_id)))fail('managed_compute_project_grant_required');
     }else if(['read_log','run_status','cluster_run_status','cluster_read_log'].includes(name)){
-     await assertRun(scope,resource,service,args?.run_id,name.startsWith('cluster_')?'cluster-run':'run');
+     await assertRun(scope,resource,service,args?.run_id,name.startsWith('cluster_')?'cluster-run':'run',{readOnly:true});
     }else fail('managed_compute_invalid_request');
    }
   }else{
@@ -905,7 +1008,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(name==='release_compute_resource'){exact(args,['resource_id'],['resource_id']);return release(scope,{resourceId:args.resource_id});}
   return callTerminalTool(name,args,scope);
  }
- return {publish,publishWsl,configureService,snapshot,list,acquire,release,resolveLease,resolveService,inspectService,capture,needsExplicitResource,callTerminalTool,callTool,owns,tools:()=>tools,
+ return {publish,publishWsl,configureService,serviceStatus,updateService,snapshot,list,acquire,release,resolveLease,resolveSkillLibrary,resolveService,inspectService,capture,needsExplicitResource,callTerminalTool,callTool,owns,tools:()=>tools,
   terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,confirmQuestionChoice,bindResourceQuestion,
   recordUserTurn,sweep,stop,touch,forget,consoleEntries,observeConsoleLease,observeConsoleService,releaseFromConsole,detachLocalFromConsole};
 }

@@ -7,6 +7,8 @@ import {type Environment} from '../../../contracts/dto/compute';
 import {validLocalGpuIds} from '../../../contracts/compute/project-policy.mjs';
 import {t} from "../../ui/i18n";
 import {projectPolicyChanges} from "./project-policy-edit.mjs";
+import {invoke} from '../../api/studio';
+import type {ResourceToolLibrary,ResourceToolScheduler} from '../../../contracts/dto/resource-tools';
 
 import type {ProjectAuthorizationSpec} from "../../../contracts/dto/compute";
 export type {ProjectAuthorizationSpec} from "../../../contracts/dto/compute";
@@ -18,21 +20,50 @@ function parseGpuIds(value:string):number[]|null {
  const ids=[...new Set(input.split(',').map(Number))];
  return validLocalGpuIds(ids)?ids:null;
 }
-export default function ProjectAuthorizationForm({environments,busy=false,suggestedInputRoot,suggestedEnvironmentId,onSubmit,initialSpec,defaults,onCancel}:{environments:Environment[];busy?:boolean;suggestedInputRoot?:string;suggestedEnvironmentId?:string;initialSpec?:ProjectAuthorizationSpec;defaults?:ProjectAuthorizationSpec;onCancel?:()=>void;onSubmit:(spec:ProjectAuthorizationSpec)=>Promise<void>}){
+export default function ProjectAuthorizationForm({environments,busy=false,suggestedInputRoot,suggestedEnvironmentId,suggestedSchedulerId,onSubmit,initialSpec,defaults,onCancel,resource}:{environments:Environment[];busy?:boolean;suggestedInputRoot?:string;suggestedEnvironmentId?:string;suggestedSchedulerId?:string;initialSpec?:ProjectAuthorizationSpec;defaults?:ProjectAuthorizationSpec;onCancel?:()=>void;resource?:{profileId:string;profileVersion:number};onSubmit:(spec:ProjectAuthorizationSpec)=>Promise<void>}){
  const seed=initialSpec||defaults;
- const engineOptions=initialSpec?.policy.engines.includes('installation.check')?[...engines,['installation.check','固定 CPU 安装检查']]:engines;
- const [draft,setDraft]=useState<ProjectAuthorizationSpec>(()=>seed?structuredClone(seed):newProjectDefaults(engines.map(([id])=>id),environments.map(environment=>environment.id),suggestedEnvironmentId,suggestedInputRoot)),[rootText,setRootText]=useState(()=>seed?seed.policy.input_roots.join('\n'):scopedSuggestedInputRoot(suggestedInputRoot)||''),[clusterText,setClusterText]=useState(seed?.policy.clusters?.join('\n')||''),[issues,setIssues]=useState<Record<string,string>>({}),[json,setJson]=useState(''),[jsonDirty,setJsonDirty]=useState(false),[toolsOpen,setToolsOpen]=useState(false),[resourcesOpen,setResourcesOpen]=useState(false);
+ const [tools,setTools]=useState<{scope:string;entries:[string,string][];schedulers:ResourceToolScheduler[];workfileRoot?:string}|null>(null);
+ const scope=resource?JSON.stringify([resource.profileId,resource.profileVersion]):'';
+ useEffect(()=>{
+  if(!resource)return;
+  let active=true;
+  void invoke<ResourceToolLibrary>('tools.resource.list',{resource_id:'ssh:'+resource.profileId,profile_version:resource.profileVersion}).then(value=>{
+   if(active)setTools({scope,entries:value.setups.filter(row=>row.status==='active').map(row=>['private.'+row.manifest.id,row.manifest.name]),schedulers:value.schedulers??[],workfileRoot:value.workfile_root});
+  }).catch(()=>{});
+  return ()=>{active=false;};
+ },[scope]);
+ const resourceData=tools?.scope===scope?tools:null,schedulers=resourceData?.schedulers??[];
+ const workfileRoot=scopedSuggestedInputRoot(resourceData?.workfileRoot);
+ const choices=new Map<string,string>(engines.map(([id,label]):[string,string]=>[id,label]));
+ if(resource||seed?.policy.engines.includes('installation.check'))choices.set('installation.check','工具安装与最小测试');
+ for(const id of seed?.policy.engines||[])if(id.startsWith('private.'))choices.set(id,id);
+ for(const [id,label] of resourceData?.entries??[])choices.set(id,label);
+ const engineOptions=[...choices];
+ const [draft,setDraft]=useState<ProjectAuthorizationSpec>(()=>seed?structuredClone(seed):newProjectDefaults(engines.map(([id])=>id),resource?[]:environments.map(environment=>environment.id),suggestedEnvironmentId,suggestedInputRoot)),[rootText,setRootText]=useState(()=>seed?seed.policy.input_roots.join('\n'):scopedSuggestedInputRoot(suggestedInputRoot)||''),[clusterText,setClusterText]=useState(seed?.policy.clusters?.join('\n')||''),[issues,setIssues]=useState<Record<string,string>>({}),[json,setJson]=useState(''),[jsonDirty,setJsonDirty]=useState(false),[toolsOpen,setToolsOpen]=useState(!!resource),[resourcesOpen,setResourcesOpen]=useState(false);
  const [gpuText,setGpuText]=useState(()=>{
   if(!seed)return '0';
   const saved=seed.policy.gpus;
   return validLocalGpuIds(saved)?saved.join(','):JSON.stringify({gpus:saved});
  });
  const gpuIds=parseGpuIds(gpuText),gpuHintId=useId(),gpuError=t('GPU 编号须为以逗号分隔的非负整数。');
- const environmentTouched=useRef(false);
- useEffect(()=>{if(initialSpec||environmentTouched.current||draft.policy.environments.length||draft.policy.clusters?.length)return;const id=suggestedProjectEnvironment(environments.map(environment=>environment.id),suggestedEnvironmentId);if(id)setDraft(old=>({...old,policy:{...old.policy,environments:[id]}}));},[initialSpec,environments,suggestedEnvironmentId]);
+ const environmentTouched=useRef(false),schedulerTouched=useRef(false);
+ useEffect(()=>{if(resource||initialSpec||environmentTouched.current||draft.policy.environments.length||draft.policy.clusters?.length)return;const id=suggestedProjectEnvironment(environments.map(environment=>environment.id),suggestedEnvironmentId);if(id)setDraft(old=>({...old,policy:{...old.policy,environments:[id]}}));},[scope,initialSpec,environments,suggestedEnvironmentId]);
+ useEffect(()=>{
+  if(initialSpec||schedulerTouched.current||!suggestedSchedulerId||!schedulers.some(item=>item.id===suggestedSchedulerId))return;
+  setClusterText(old=>old.trim()?old:suggestedSchedulerId);
+ },[initialSpec,resourceData,suggestedSchedulerId]);
  function showIssues(errors:Record<string,string>){setIssues(errors);if(errors.engines)setToolsOpen(true);if(errors.limits)setResourcesOpen(true);}
 
  function patchPolicy(key:string,value:any){setDraft(old=>({...old,policy:{...old.policy,[key]:value}}));setIssues({});}
+ function setScheduler(id:string,selected:boolean){
+  schedulerTouched.current=true;
+  setClusterText(old=>[...new Set([...list(old).filter(value=>value!==id),...selected?[id]:[]])].join('\n'));
+  setIssues({});
+ }
+ function addInputRoot(root:string){
+  setRootText(old=>[...new Set([...list(old),root])].join('\n'));
+  setIssues({});
+ }
  function validate(value:any){
   const errors:Record<string,string>={};
   if(!value||typeof value!=='object'||Object.keys(value).some(key=>!['name','policy'].includes(key)))errors.json=t('仅支持新项目名称和明确的授权策略。');
@@ -53,7 +84,7 @@ export default function ProjectAuthorizationForm({environments,busy=false,sugges
  function formJson(){return JSON.stringify(fromForm(gpuIds??gpuText),null,2);}
  useEffect(()=>{if(!jsonDirty)setJson(formJson());},[draft,gpuText,rootText,clusterText,jsonDirty]);
  function showJson(){setJson(formJson());setJsonDirty(false);setIssues(old=>{const {json,...remaining}=old;return remaining;});}
- function applyJson(){try{const next=JSON.parse(json),errors=validate(next);showIssues(errors);if(Object.keys(errors).length)return;environmentTouched.current=true;setDraft(next);setGpuText(next.policy.gpus.join(','));setRootText(next.policy.input_roots.join('\n'));setClusterText((next.policy.clusters||[]).join('\n'));setJsonDirty(false);}catch{setIssues({json:t('JSON 格式无效，请检查后再应用')});}}
+ function applyJson(){try{const next=JSON.parse(json),errors=validate(next);showIssues(errors);if(Object.keys(errors).length)return;environmentTouched.current=true;schedulerTouched.current=true;setDraft(next);setGpuText(next.policy.gpus.join(','));setRootText(next.policy.input_roots.join('\n'));setClusterText((next.policy.clusters||[]).join('\n'));setJsonDirty(false);}catch{setIssues({json:t('JSON 格式无效，请检查后再应用')});}}
  async function submit(){if(busy)return;if(jsonDirty){setIssues({json:t('请先应用或放弃高级 JSON 修改')});return;}if(gpuIds===null){showIssues({gpus:gpuError});return;}const value=fromForm(gpuIds),errors=validate(value);showIssues(errors);if(Object.keys(errors).length)return;try{await onSubmit(value);}catch(error){setIssues({form:error instanceof Error?error.message:String(error)});}}
  const changes=initialSpec&&gpuIds!==null?projectPolicyChanges(initialSpec,fromForm(gpuIds)):[];
  const display=(value:any)=>value===undefined||value===null?t('未设置'):Array.isArray(value)?value.join(', '):String(value);
@@ -67,7 +98,20 @@ export default function ProjectAuthorizationForm({environments,busy=false,sugges
    <h3 className="project-basic-heading">{t('项目基础')}</h3>
    <label>{t('项目名称')}<input aria-label={t('项目名称')} value={draft.name} onChange={e=>{setDraft({...draft,name:e.target.value});setIssues({});}}/>{error('name')}</label>
    <div className="project-basic-resources"><label>{t('计算环境')}<select aria-label={t('计算环境')} value={selectedEnvironment} onChange={e=>{environmentTouched.current=true;patchPolicy('environments',e.target.value?[e.target.value]:[]);}}><option value="" disabled={multipleEnvironments}>{multipleEnvironments?t('多个计算环境')+' · '+draft.policy.environments.length:t(environments.length?'选择环境':'尚无已登记环境')}</option>{selectedEnvironment&&!environments.some(environment=>environment.id===selectedEnvironment)&&<option value={selectedEnvironment}>{t('已保存的计算环境')} · {selectedEnvironment}</option>}{environments.map(environment=><option key={environment.id} value={environment.id}>{environment.name}</option>)}</select>{error('environments')}</label><label>{t('GPU 编号')}<input aria-label={t('GPU 编号')} aria-describedby={gpuHintId} aria-invalid={gpuIds===null||!!issues.gpus} placeholder="0,1" value={gpuText} onChange={e=>{setGpuText(e.target.value);setIssues({});}}/><small className="muted" id={gpuHintId}>{t('留空表示不授权本地 GPU。多个编号用逗号分隔。')}</small>{gpuIds===null&&!issues.gpus?<p className="field-error" role="alert">{gpuError}</p>:error('gpus')}</label></div>
-   <div className="project-input-root"><label>{t('输入目录')}<textarea aria-label={t('输入目录')} rows={2} value={rootText} onChange={e=>{setRootText(e.target.value);setIssues({});}}/>{error('roots')}</label>{scopedSuggestedInputRoot(suggestedInputRoot)&&<div className="authorization-suggestion"><button className="button" onClick={()=>{setRootText([...new Set([...list(rootText),suggestedInputRoot!])].join('\n'));setIssues({});}}>{t('使用当前流程输入目录')}</button></div>}</div>
+   <div className="project-input-root"><label>{t('输入目录')}<textarea aria-label={t('输入目录')} rows={2} value={rootText} onChange={e=>{setRootText(e.target.value);setIssues({});}}/>{error('roots')}</label>
+    {workfileRoot&&<div className="authorization-suggestion"><code>{workfileRoot}</code><button type="button" className="button" data-testid="project-resource-workfile" onClick={()=>addInputRoot(workfileRoot)}>{t('使用此资源的 workfile 目录')}</button></div>}
+    {scopedSuggestedInputRoot(suggestedInputRoot)&&suggestedInputRoot!==workfileRoot&&<div className="authorization-suggestion"><button className="button" onClick={()=>addInputRoot(suggestedInputRoot!)}>{t('使用当前流程输入目录')}</button></div>}
+   </div>
+   {resource&&<section className="project-setting-content" data-testid="project-resource-schedulers">
+    <h4>{t('授权此项目使用远端调度器')}</h4>
+    <p>{t('保存项目后，所选调度器和工具才会加入授权范围。')}</p>
+    {schedulers.length?<div className="authorization-options">{schedulers.map(item=><label key={item.id}>
+     <input type="checkbox" data-testid="project-resource-scheduler" value={item.id} checked={list(clusterText).includes(item.id)} onChange={e=>setScheduler(item.id,e.currentTarget.checked)}/>
+     <span>{item.name} · {item.scheduler.toUpperCase()}{item.queue&&' · '+item.queue}</span>
+    </label>)}</div>:resourceData&&<p className="muted">{t('此资源尚无已登记的调度器。')}</p>}
+    {schedulers.some(item=>item.queue_targets&&list(clusterText).includes(item.id))&&<p className="muted">{t('所选调度器按队列授权运行。保存项目后，在队列设置中批准允许使用的目标。')}</p>}
+    {choices.has('installation.check')&&<p className="muted">{t('要验证新工具，请在「工具与引擎」中启用「工具安装与最小测试」。')}</p>}
+   </section>}
    <p className="muted">{t('仅使用已登记的计算环境和明确的输入目录。')}</p>
    <div className="project-resource-summary" data-testid="project-resource-summary"><span>{gpuIds?.length===0?t('未授权本地 GPU'):'GPU '+gpuText}</span><span>{draft.policy.max_seconds??t('未设置')} s</span><span>{draft.policy.max_concurrent??t('未设置')} {t('个并发任务')}</span></div>
    <details className="project-setting-group" data-testid="project-tools-details" open={toolsOpen} onToggle={event=>setToolsOpen(event.currentTarget.open)}><summary>{t('工具与引擎')}<span className="setting-summary">{t('已启用')} {draft.policy.engines.length} / {engineOptions.length}</span></summary><div className="project-setting-content"><p>{t('工具可用性仍取决于所选环境，执行前会检查。')}</p><div className="authorization-options">{engineOptions.map(([id,name])=><label key={id}><input type="checkbox" checked={draft.policy.engines.includes(id)} onChange={e=>patchPolicy('engines',e.target.checked?[...draft.policy.engines,id]:draft.policy.engines.filter(value=>value!==id))}/><span>{t(name)}</span></label>)}</div>{error('engines')}</div></details>

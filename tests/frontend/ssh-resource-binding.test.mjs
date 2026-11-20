@@ -64,6 +64,24 @@ test('SSH environment help drafts a recognized request for the exact saved resou
  h.unmount();
 });
 
+test('saving a repaired Python configuration follows the verified original SSH connection and shell',async()=>{
+ const profile={kind:'ssh',id:'repair',version:2,name:'Repair fixture',mode:'key'},reads=[];
+ const h=appWorkerHarness({override:(method,data,standard)=>{
+  if(method==='compute.sshConnection.state'){reads.push(data);return {schemaVersion:2,connectionId:data.connectionId,profileId:profile.id,profileVersion:3,status:'authenticated',authentication:'verified',capabilities:{multiplex:true},terminalSessionIds:['original-shell'],serviceIds:[],revision:4};}
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();h.find(node=>node.props?.['data-testid']==='unified-compute-entry').props.onClick();await h.flush();
+  h.find(node=>node.type==='./ComputeConnectionChooser').props.onSsh(profile);await h.flush();
+  const terminal=()=>h.find(node=>node.type==='./SharedTerminalPanel').props;
+  terminal().onConfigureSsh({profileId:profile.id,profileVersion:2,section:'environment'},'original-connection','original-shell');await h.flush();
+  h.find(node=>node.type==='./ComputeConnectionChooser').props.onProfileSaved({...profile,version:3},2);await h.flush();
+  assert.deepEqual(reads,[{connectionId:'original-connection'}]);
+  assert.deepEqual({connection:terminal().request.connectionId,shell:terminal().request.sessionId,version:terminal().request.version,exact:terminal().request.exact},{connection:'original-connection',shell:'original-shell',version:3,exact:true});
+  assert(!h.calls.some(call=>['compute.sshConnection.open','compute.managed.publish','compute.managed.configureService'].includes(call.method)));
+ }finally{h.unmount();}
+});
+
 test('selected SSH overrides a connected managed worker for the UI gate without creating a managed task',async()=>{
  const h=agentHarness({props:{planningMode:true,computeConnected:true,computeResource:resource()},override:(method,data,standard)=>method==='agent.connect'?{tools:{status:'ready',scope:'workflow',count:12}}:standard(method,data)});await h.flush();h.click('agent-connect');await h.flush();h.type('selected SSH only');h.send();await h.flush();noModelOrTask(h);assert.equal(starts(h).length,0);assert.match(JSON.stringify(h.find(n=>n.props?.['data-testid']==='agent-ssh-resource-notice').props.children),/终端.*交给 Agent|作业服务/);h.unmount();
 });

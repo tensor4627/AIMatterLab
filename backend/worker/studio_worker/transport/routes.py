@@ -71,6 +71,29 @@ def cancel_options(data):
 
 
 def dispatch(service, method, path, data, admin=False):
+    if path.startswith('/api/resource-tools/'):
+        if method != 'POST' or not admin or not getattr(service, 'ssh_service_mode', False):
+            raise PermissionError('Desktop resource tool channel required')
+        from studio_worker.tools.resource_tools import ResourceTools
+        controller = ResourceTools(service)
+        action = path.removeprefix('/api/resource-tools/')
+        routes = {'list':controller.list, 'discover':controller.discover, 'plan':controller.plan,
+                  'start':controller.start, 'status':controller.status, 'skill':controller.skill,
+                  'desktop-failed':controller.desktop_failed, 'supply-remote':controller.supply_remote}
+        if action in ('upload-offset','upload-chunk','upload-finish'):
+            return controller.transfer(data, action.removeprefix('upload-'))
+        if action not in routes:
+            raise ValueError('Unknown resource tool operation')
+        return routes[action](data)
+    if path.startswith('/api/resource-workspace/'):
+        if method != 'POST' or not admin:
+            raise PermissionError('Desktop resource-workspace channel required')
+        from studio_worker.workspace import resource_workspace
+        if path.endswith('/register'):
+            return resource_workspace.register(service, data)
+        if path in ('/api/resource-workspace/allocate', '/api/resource-workspace/session'):
+            return resource_workspace.session(service, data, allocate=path.endswith('/allocate'))
+        raise ValueError('Unknown resource workspace operation')
     if path.startswith('/api/managed-schedules/'):
         if method != 'POST' or not admin:
             raise PermissionError('Desktop managed schedule channel required')
@@ -117,9 +140,9 @@ def dispatch(service, method, path, data, admin=False):
     if method == "GET":
         if path == "/api/health":
             value = {"name": "gpu-sampling-studio", "product_name": "AIMatterLab", "version": "0.18.8", "root": str(service.root), "runtime":str(WORKER_ROOT), "execution_policy":"desktop-review-v1", "tool_configuration_schema":1, "tool_workflow_schema":1, "managed_schedule_schema":1, "managed_run_action_schema":1, "managed_submit_monitor_schema":1}
-            if not getattr(service,'ssh_service_mode',False):
-                value["roadmap_execution_schema"]=1
+            value["roadmap_execution_schema"]=1
             if getattr(service, 'ssh_service_mode', False):
+                value["resource_tool_schema"] = 1
                 from studio_worker.compute.ssh_service import identity
                 host = identity(service.root)
                 value.update(hostname=host['hostname'], uid=host['uid'], machineId=host['machineId'],
@@ -159,6 +182,9 @@ def dispatch(service, method, path, data, admin=False):
         if path == "/api/events":
             return store.events(data.get("after", 0))
         if path == "/api/engines":
+            if getattr(service, 'ssh_service_mode', False):
+                from studio_worker.tools.resource_tools import registered_engines
+                return [*ENGINES, *registered_engines(service)]
             return list(ENGINES)
     if path in ("/api/projects", "/api/environments") and method == "POST":
         if not admin:

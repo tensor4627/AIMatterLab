@@ -1,10 +1,12 @@
 import {isDeepStrictEqual as equal} from 'node:util';
 import {readWorkerStatus} from './worker-status.mjs';
+import {actualAuthoringWorker} from '../../../contracts/compute/task-worker-binding.mjs';
 
 /** Observe the selected original service without restoring or changing a connection. */
-export function createVerifiedWorkerScope({worker,getSettings,current,currentTarget=()=>null,label='Configuration'}){
+export function createVerifiedWorkerScope({worker,getSettings,current,currentTarget=()=>null,label='Configuration',allowSsh=false}){
  const currentBinding=()=>{
   const identity=worker.identity,target=worker.connectionTarget;
+  if(allowSsh&&identity?.kind==='ssh')return actualAuthoringWorker(worker);
   if(!worker.connection||!identity||typeof identity.distribution!=='string'||typeof identity.root!=='string'||!Number.isInteger(target?.port))throw Error('Connect and verify the intended job service first');
   return {distribution:identity.distribution,root:identity.root,port:target.port};
  };

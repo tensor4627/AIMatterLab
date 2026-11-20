@@ -32,6 +32,7 @@ async function fixture(t,{connectedWorker=true}={}){
  // These tests cover the explicitly selected legacy terminal routing lane.
  // Managed conversation wiring has separate per-transport integration coverage.
  const routing=context.resourceRouting;
+ context.resourceToolSetups={recordUserTurn(){}};
  context.agents=new AgentHub({codex,root:process.cwd(),catalog,vault:{get:()=>null},settings:()=>context.settings,
   worker:provider=>routing.providerConnection(provider),releaseWorker:provider=>{worker.revokeProvider(provider);terminalMcp.revokeProvider(provider);},
   bindWorkerContext:(provider,value,options)=>routing.bindWorkerContext(provider,value,options),resourceScope:(provider,method)=>routing.scope(provider,method)});
@@ -42,7 +43,7 @@ async function fixture(t,{connectedWorker=true}={}){
  routing.usesForegroundWorker=id=>id===owner.provider+':'+owner.threadId;
  t.after(()=>{context.agents.close();worker.close();});
  context.computeResource=vm.runInNewContext(initializer('computeResource'),context);
- for(const name of ['trusted','handle','scientificTools','assertLegacyWorkerIdle'])vm.runInNewContext(find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name),context);
+ for(const name of ['trusted','handle','scientificTools','assertLegacyWorkerIdle','changeComputeResource'])vm.runInNewContext(find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='compute.resource.status'),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='agent.connect'),context);
  vm.runInNewContext(find(node=>ts.isForOfStatement(node)&&node.getText(ast).includes("handle('compute.resource.'+method")),context);

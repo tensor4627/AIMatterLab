@@ -112,7 +112,8 @@ export class AcpBridge extends EventEmitter{
    const call=p.toolCall||{},name=call._meta?.toolName||call._meta?.claudeCode?.toolName||call.title;
    const science=safeTool.test(String(name||''))||call._meta?.serverId==='gpusampling'&&(Object.hasOwn(SCIENTIFIC_TOOL_ACCESS,String(name||''))||sharedTerminalToolAllowed(name));
    const option=(p.options||[]).find(o=>o.kind==='allow_once');
-   if(science&&option){
+   const publicWeb=['WebSearch','SearchWeb','FetchURL','web_search','web_fetch'].includes(name)&&!call._meta?.serverId&&call.kind!=='execute';
+   if((science||publicWeb)&&option){
     this.send({id,result:{outcome:{outcome:'selected',optionId:option.optionId}}});return;
    }
    // A question is the only non-MCP permission that can be shown to the user.

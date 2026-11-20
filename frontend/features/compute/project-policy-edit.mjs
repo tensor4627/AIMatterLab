@@ -19,9 +19,8 @@ export function createProjectPolicyEditor({projectId,read,write,current,engines}
   cancel(){closed=true;},
   async save(spec){
    guard();if(!baseline)throw Error('project_edit_unavailable');if(busy)throw Error('project_edit_busy');compute(baseline,id);
-   const registeredEngines=baseline.policy.engines;
-   const editableEngines=Array.isArray(registeredEngines)&&registeredEngines.includes('installation.check')?[...engines,'installation.check']:engines;
-   validateProjectSpec(spec,editableEngines);
+   const allowInstallation=baseline.policy.engines.includes('installation.check')||Array.isArray(spec?.policy?.clusters)&&spec.policy.clusters.length>0;
+   validateProjectSpec(spec,allowInstallation?[...engines,'installation.check']:engines);
    const projected=structuredClone(spec);if(!Object.hasOwn(baseline.policy,'clusters')&&projected.policy.clusters?.length===0)delete projected.policy.clusters;
    if(!projectPolicyChanges(editableProjectSpec(baseline),projected).length)throw Error('project_edit_no_changes');
    busy=true;try{

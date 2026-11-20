@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {agentHarness,conversation,deferred} from '../helpers/agent-hooks.mjs';
 
-const question=(id='same',extra={})=>({id,header:'Choice',question:'Choose an approach',isSecret:false,options:[{label:'Option A',description:'Keep the existing data'},{label:'Option B',description:'Prepare another draft'}],...extra});
+const question=(id='same',extra={})=>({id,header:'Choice',question:'Choose an approach',isSecret:false,isOther:true,options:[{label:'Option A (Recommended)',description:'Keep the existing data'},{label:'Option B',description:'Prepare another draft'}],...extra});
 const request=(id,questions=[question()],threadId='questions')=>({provider:'codex',id,method:'item/tool/requestUserInput',params:{threadId,questions}});
 const visit=node=>Array.isArray(node)?node.flatMap(visit):node&&typeof node==='object'?[node,...visit(node.props?.children)]:[];
 const within=(node,testId)=>visit(node).find(child=>child.props?.['data-testid']===testId);
@@ -11,6 +11,9 @@ const text=node=>Array.isArray(node)?node.map(text).join(''):node==null||typeof 
 const panel=(h,id)=>h.find(node=>node.props?.['data-testid']==='agent-question-request'&&node.props['data-request-id']===String(id));
 const input=(h,id,index=0)=>allWithin(panel(h,id),'agent-question-input')[index];
 const submit=(h,id)=>within(panel(h,id),'agent-question-submit');
+const choices=(h,id)=>allWithin(panel(h,id),'agent-question-option');
+const choose=(h,id,index=0)=>choices(h,id)[index].props.onClick({detail:1});
+const keys=(h,id,key,options={})=>{let prevented=false;panel(h,id).props.onKeyDown({key,nativeEvent:{isComposing:false},target:{tagName:'BUTTON',dataset:{choiceIndex:'0'}},currentTarget:{querySelector:()=>null},preventDefault:()=>{prevented=true;},...options});return prevented;};
 const responses=h=>h.calls.filter(call=>call.method==='agent.respond');
 async function setup(override){const h=agentHarness({props:{sessionSelection:{nonce:'questions',conversation:conversation('codex','questions')}},override:(method,data,standard)=>override?.(method,data,standard)??(method==='agent.respond'?{}:standard(method,data))});await h.flush();return h;}
 
@@ -36,11 +39,11 @@ test('Agent manual send resumes following after the user scrolls up',async()=>{
 
 test('Agent isolates concurrent same-id question answers, shows descriptions and supports option or free text',async()=>{
  const h=await setup();try{
-  h.emit(request('first'));h.emit(request('second'));await h.flush();assert.equal(submit(h,'first').props.disabled,true);
+  h.emit(request('first'));h.emit(request('second'));await h.flush();assert.equal(submit(h,'first'),undefined);assert.throws(()=>panel(h,'second'));
   const composer=h.find(node=>node.props?.className==='composer');assert.equal(within(composer,'agent-question-request'),panel(h,'first'));
-  const labels=visit(panel(h,'first')).filter(node=>node.props?.className==='agent-question-option');assert.match(text(labels[0]),/Keep the existing data/);
-  const option=allWithin(panel(h,'first'),'agent-question-option')[0];assert.equal(option.props.type,'radio');option.props.onChange();await h.flush();assert.equal(responses(h).length,0);assert.equal(input(h,'second').props.value,'');assert.deepEqual(allWithin(panel(h,'first'),'agent-question-option').map(node=>node.props.checked),[true,false]);
-  input(h,'second').props.onChange({target:{value:'My own answer'}});await h.flush();submit(h,'first').props.onClick();await h.flush();assert.deepEqual(responses(h)[0].data.result,{answers:{same:{answers:['Option A']}}});assert.equal(input(h,'second').props.value,'My own answer');
+  const [option]=choices(h,'first');assert.match(text(option),/Keep the existing data/);assert.match(text(option),/推荐/);assert.equal(option.props['data-highlighted'],true);assert.equal(option.props['aria-checked'],false);
+  choose(h,'first');await h.flush();assert.deepEqual(responses(h)[0].data.result,{answers:{same:{answers:['Option A (Recommended)']}}});assert.equal(input(h,'second').props.value,'');
+  input(h,'second').props.onChange({target:{value:'My own answer'}});await h.flush();assert.equal(input(h,'second').props.value,'My own answer');
   submit(h,'second').props.onClick();await h.flush();assert.deepEqual(responses(h)[1].data.result,{answers:{same:{answers:['My own answer']}}});h.emit(request('third'));await h.flush();assert.equal(input(h,'third').props.value,'');
  }finally{h.unmount();}
 });
@@ -95,9 +98,83 @@ test('Agent cannot answer a stale displayed request during the same-render selec
 
 test('Agent requires each answer before submit and never dispatches a captured empty-answer callback',async()=>{
  const h=await setup();try{
-  h.emit(request('required',[question('one'),question('two',{question:'Second answer'})]));await h.flush();const emptyClick=submit(h,'required').props.onClick;emptyClick();await h.flush();assert.equal(responses(h).length,0);
-  input(h,'required',0).props.onChange({target:{value:'first'}});input(h,'required',1).props.onChange({target:{value:'   '}});await h.flush();assert.equal(submit(h,'required').props.disabled,true);submit(h,'required').props.onClick();await h.flush();assert.equal(responses(h).length,0);
-  input(h,'required',1).props.onChange({target:{value:'second'}});await h.flush();assert.equal(submit(h,'required').props.disabled,false);submit(h,'required').props.onClick();await h.flush();assert.deepEqual(responses(h)[0].data.result,{answers:{one:{answers:['first']},two:{answers:['second']}}});
+  h.emit(request('required',[question('one'),question('two',{question:'Second answer'})]));await h.flush();assert.equal(submit(h,'required'),undefined);
+  const firstClick=choices(h,'required')[0].props.onClick,staleEdit=input(h,'required').props.onChange;
+  input(h,'required').props.onChange({target:{value:'first'}});await h.flush();submit(h,'required').props.onClick();
+  firstClick({detail:1});staleEdit({target:{value:'stale'}});await h.flush();assert.equal(responses(h).length,0);assert.equal(input(h,'required').props.value,'');assert.equal(text(within(panel(h,'required'),'agent-question-count')),'2 / 2');
+  input(h,'required').props.onChange({target:{value:'   '}});await h.flush();assert.equal(submit(h,'required'),undefined);
+  input(h,'required').props.onChange({target:{value:'second'}});await h.flush();assert.equal(submit(h,'required').props.disabled,false);submit(h,'required').props.onClick();await h.flush();assert.deepEqual(responses(h)[0].data.result,{answers:{one:{answers:['first']},two:{answers:['second']}}});
+ }finally{h.unmount();}
+});
+
+test('Agent question keyboard supports navigation, direct answers, IME, and optional skip',async()=>{
+ const h=await setup();try{
+  h.emit(request('keys',[question('one'),question('two',{options:null,isOther:false}),question('three',{optional:true})]));await h.flush();
+  assert.equal(keys(h,'keys','ArrowDown'),true);await h.flush();assert.equal(choices(h,'keys')[1].props['data-highlighted'],true);
+  assert.equal(keys(h,'keys','Enter'),true);await h.flush();assert.equal(text(within(panel(h,'keys'),'agent-question-count')),'2 / 3');
+  input(h,'keys').props.onChange({target:{value:'普通输入'}});await h.flush();
+  assert.equal(keys(h,'keys','ArrowLeft',{target:{tagName:'INPUT'}}),false);
+  assert.equal(keys(h,'keys','Enter',{target:{tagName:'INPUT'},nativeEvent:{isComposing:true}}),false);
+  assert.equal(keys(h,'keys','Enter',{target:{tagName:'INPUT'}}),true);await h.flush();assert.equal(text(within(panel(h,'keys'),'agent-question-count')),'3 / 3');
+  assert.equal(keys(h,'keys','ArrowLeft'),true);await h.flush();assert.equal(input(h,'keys').props.value,'普通输入');
+  assert.equal(keys(h,'keys','ArrowRight'),true);await h.flush();within(panel(h,'keys'),'agent-question-skip').props.onClick();await h.flush();
+  assert.deepEqual(responses(h)[0].data.result,{answers:{one:{answers:['Option B']},two:{answers:['普通输入']}}});
+  h.emit(request('number'));await h.flush();assert.equal(keys(h,'number','1'),true);await h.flush();assert.deepEqual(responses(h).at(-1).data.result,{answers:{same:{answers:['Option A (Recommended)']}}});
+ }finally{h.unmount();}
+});
+
+test('Agent restores the active question and its prior choice from the original conversation receipt',async()=>{
+ const original=request('restore',[question('one'),question('two',{options:null})]);let observing=false;
+ const h=await setup((method,data)=>{
+  if(observing&&method==='agent.rpc'&&data.method==='thread/read'&&data.params.threadId==='questions')return {thread:{id:'questions',turns:[]},studioSession:{threadId:'questions',busy:true,turnId:'original',requests:[structuredClone(original)]}};
+ });try{
+  h.emit(original);await h.flush();choose(h,'restore',1);await h.flush();input(h,'restore').props.onChange({target:{value:'kept in memory'}});await h.flush();
+  h.render({sessionSelection:{nonce:'other',conversation:conversation('codex','other')}});await h.flush();assert.throws(()=>panel(h,'restore'));
+  observing=true;h.render({sessionSelection:{nonce:'restored',conversation:conversation('codex','questions')}});await h.flush();
+  assert.equal(input(h,'restore').props.value,'kept in memory');submit(h,'restore').props.onClick();await h.flush();assert.deepEqual(responses(h)[0].data.result,{answers:{one:{answers:['Option B']},two:{answers:['kept in memory']}}});
+ }finally{h.unmount();}
+});
+
+test('missing workflow tool appears in the composer and only dispatches the selected local action',async()=>{
+ const h=await setup(),answers=[];
+ try{
+  h.type('Preserve this editable draft');
+  const question={id:'missing-tool',provider:'codex',threadId:'questions',tool:'private.demo',onAnswer:action=>answers.push(action)};
+  h.render({missingWorkflowToolQuestion:question});await h.flush();
+  const local=h.find(node=>node.props?.['data-testid']==='agent-missing-tool-question');
+  assert.match(text(local),/private\.demo/);assert.equal(allWithin(local,'agent-question-option').length,2);assert.deepEqual(answers,[]);
+  const click=choices(h,'missing-tool')[1].props.onClick;click({detail:1});click({detail:1});
+  assert.deepEqual(answers,['later']);assert.deepEqual(responses(h),[]);
+  h.render({missingWorkflowToolQuestion:undefined});await h.flush();assert.equal(h.textarea().props.value,'Preserve this editable draft');
+  h.render({missingWorkflowToolQuestion:{...question,id:'stale-setup'}});const staleAction=choices(h,'stale-setup')[0].props.onClick;
+  h.render({sessionSelection:{nonce:'other-owner',conversation:conversation('codex','other-owner')}});staleAction({detail:1});await h.flush();
+  assert.deepEqual(answers,['later']);assert.throws(()=>panel(h,'stale-setup'));
+ }finally{h.unmount();}
+});
+
+test('acknowledged saved chat retains local workspace and tool choices while its provider is offline',async()=>{
+ const saved=conversation('kimi','offline-workflow'),answers=[];
+ let current=true;
+ const question={id:'offline-tool',provider:saved.provider,threadId:saved.threadId,tool:'private.demo',onAnswer:action=>answers.push(action)};
+ const h=agentHarness({props:{sessionSelection:{nonce:'saved',conversation:saved},selectedLocalConversation:saved,isLocalConversationCurrent:()=>current,workspaceProfileId:'saved-resource',missingWorkflowToolQuestion:question},override:(method,data,standard)=>{
+  if(method==='agent.connect')throw Error('Fixture model provider offline');
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();
+  assert.deepEqual(h.conversations,[],'failed provider recovery preserves the desktop selection');
+  const workspace=h.find(node=>node.type==='./SessionWorkspace');
+  assert.equal(workspace.props.profileId,'saved-resource');
+  assert.equal(workspace.props.isCurrent(),true);
+  assert.match(text(panel(h,question.id)),/private\.demo/);
+  const oldChoice=choices(h,question.id)[0].props.onClick;
+  current=false;oldChoice({detail:1});assert.equal(workspace.props.isCurrent(),false);assert.deepEqual(answers,[]);
+  current=true;choices(h,question.id)[1].props.onClick({detail:1});assert.deepEqual(answers,['later']);
+  h.render({selectedLocalConversation:conversation('kimi','another-workflow'),sessionSelection:{nonce:'switching',pending:true}});
+  oldChoice({detail:1});await h.flush();
+  assert.throws(()=>h.find(node=>node.type==='./SessionWorkspace'));
+  assert.throws(()=>panel(h,question.id));assert.equal(workspace.props.isCurrent(),false);assert.deepEqual(answers,['later']);
+  assert(!h.calls.some(call=>call.method==='agent.respond'||call.method==='agent.rpc'&&call.data.method==='turn/start'));
  }finally{h.unmount();}
 });
 

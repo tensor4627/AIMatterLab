@@ -1,12 +1,14 @@
 import type {ManagedSnapshot,ManagedSchedule,PublishedSshResource,ComputeConsoleSnapshot,ComputeConsoleRelease,ComputeConsoleSshRef,ComputeConsoleProfileRef,ComputeConsoleLocalRef} from './managed-compute';
 import type {Conversation} from './agent';
+import type {ResourceWorkspaceReference,ManagedSshServiceStatus,ManagedSshServiceUpdateRequest,SshServiceState} from './compute';
 import type {UpdateAccess,UpdateSource,UpdateState} from './update';
-import type {Project,ComputeResourceActivation,ComputeResourceState,BaseWorkspaceRequest,BaseWorkspaceResult} from './compute';
+import type {Project,ComputeResourceActivation,ComputeResourceState,BaseWorkspaceRequest,BaseWorkspaceResult,ResourceWorkspacePreviewRequest,ResourceWorkspaceConfirmRequest,ResourceWorkspaceReadRequest,ResourceWorkspaceReadResult,ResourceWorkspacePreview,SessionWorkspaceResult,TerminalWorkspaceApproval,TerminalWorkspaceDecision} from './compute';
 import type {Run,ClusterRun} from './runs';
 import type {TaskEditRequest,TaskExecuteRequest,TaskInputReadRequest,TaskInputReadResult,TaskLinkRunRequest} from './workspace';
 import type {DeploymentContext,DeploymentDraftRequest,DeploymentSaveRequest,DeploymentProjectRequest,TaskRecord} from './deployment';
 import type {ToolWorkflowContext,ToolWorkflowCreate,ToolWorkflowReference,ToolWorkflowPrepare,ToolWorkflowExecute,ToolWorkflowRead,ToolWorkflowIndex,ToolWorkflowLocation} from './tool-workflows';
-import type {RoadmapPreview,RoadmapExecution} from './roadmap-execution';
+import type {RoadmapPreview,RoadmapExecution,RoadmapMissingTools} from './roadmap-execution';
+import type {ResourceToolRef,ResourceToolSetupRef,ResourceToolSetup,ResourceToolPlan,ResourceToolReview,ResourceToolFileRequest,ResourceToolDiscovery,ResourceToolLibrary,ResourceToolSourcePick} from './resource-tools';
 
 type Route<Request,Response>={request:Request;response:Response};
 export type CodexEnvImportMode='none'|'proxy'|'full'|'cancel';
@@ -16,12 +18,16 @@ export interface CodexEnvImportPrompt {
 }
 /** Critical authoring/execution boundary. Authorization remains a main/worker responsibility. */
 export interface StudioIpcMap {
+ 'worker.request':Route<{method:string;target:string;data?:unknown;projectScope?:ResourceWorkspaceReference},unknown>;
  'codex.envImport.pending':Route<Record<string,never>,CodexEnvImportPrompt|null>;
  'codex.envImport.decide':Route<{requestId:string;mode:CodexEnvImportMode;useModelDefaults?:boolean;useSystemProxy?:boolean},null>;
  'compute.managed.refresh':Route<Record<string,never>,ManagedSnapshot>;
  'compute.managed.snapshot':Route<Record<string,never>,ManagedSnapshot>;
  'compute.managed.publish':Route<{connectionId:string;profileId:string;profileVersion:number},PublishedSshResource>;
  'compute.managed.configureService':Route<{connectionId:string;profileId:string;profileVersion:number},PublishedSshResource>;
+ 'compute.managed.serviceStatus':Route<ResourceWorkspaceReference,ManagedSshServiceStatus>;
+ 'compute.managed.updateService':Route<ManagedSshServiceUpdateRequest,PublishedSshResource>;
+ 'compute.managed.useForWorkflow':Route<ResourceWorkspaceReference,SshServiceState>;
  'compute.managed.projectAccess':Route<{resourceId:string;projectId:string;allowed:boolean},{allowed:boolean}>;
  'compute.managed.scheduleDetails':Route<{sourceId:string;scheduleId:string},ManagedSchedule>;
  'compute.managed.acknowledgeNotice':Route<{id:string},{acknowledged:true}>;
@@ -35,6 +41,13 @@ export interface StudioIpcMap {
  'compute.console.detachLocal':Route<ComputeConsoleLocalRef,{status:'disconnected'}>;
  'compute.console.projectAccess':Route<ComputeConsoleSshRef & {projectId:string;allowed:boolean},{allowed:boolean}>;
  'compute.workspace.setup':Route<BaseWorkspaceRequest,BaseWorkspaceResult>;
+ 'compute.resourceWorkspace.read':Route<ResourceWorkspaceReadRequest,ResourceWorkspaceReadResult>;
+ 'compute.resourceWorkspace.preview':Route<ResourceWorkspacePreviewRequest,ResourceWorkspacePreview>;
+ 'compute.resourceWorkspace.confirm':Route<ResourceWorkspaceConfirmRequest,ResourceWorkspacePreview>;
+ 'compute.resourceWorkspace.cancel':Route<ResourceWorkspaceConfirmRequest,{cancelled:boolean}>;
+ 'compute.resourceWorkspace.session':Route<{profileId?:string},SessionWorkspaceResult>;
+ 'compute.terminalApproval.pending':Route<Record<string,never>,TerminalWorkspaceApproval|null>;
+ 'compute.terminalApproval.decide':Route<TerminalWorkspaceDecision,{status:'approved'|'denied'}>;
  'updates.status':Route<Record<string,never>,UpdateState>;
  'updates.check':Route<Record<string,never>,UpdateState>;
  'updates.download':Route<Record<string,never>,UpdateState>;
@@ -42,7 +55,7 @@ export interface StudioIpcMap {
  'updates.run':Route<Record<string,never>,UpdateState>;
  'updates.accessStatus':Route<Record<string,never>,UpdateAccess>;
  'updates.setAccess':Route<{source:UpdateSource;token:string|null},UpdateAccess>;
- 'task.roadmap.preview':Route<{taskId:string;environments:Record<string,string>},RoadmapPreview>;
+ 'task.roadmap.preview':Route<{taskId:string;environments:Record<string,string>},RoadmapPreview|RoadmapMissingTools>;
  'task.roadmap.confirm':Route<{taskId:string;snapshotSha256:string;environments:Record<string,string>},RoadmapExecution|null>;
  'task.roadmap.list':Route<{taskId:string},RoadmapExecution[]>;
  'task.roadmap.snapshot':Route<{taskId:string;executionId:string},RoadmapPreview>;
@@ -66,6 +79,15 @@ export interface StudioIpcMap {
  'tools.workflows.executeStep':Route<ToolWorkflowExecute,ToolWorkflowRead>;
  'tools.workflows.status':Route<ToolWorkflowReference,ToolWorkflowRead>;
  'tools.workflows.read':Route<ToolWorkflowReference,ToolWorkflowRead>;
+ 'tools.resource.list':Route<ResourceToolRef,ResourceToolLibrary>;
+ 'tools.resource.discover':Route<ResourceToolRef & {directory:string},ResourceToolDiscovery>;
+ 'tools.resource.plan':Route<ResourceToolPlan,ResourceToolSetup>;
+ 'tools.resource.chooseSource':Route<ResourceToolRef & {kind:'program'|'manual'},ResourceToolSourcePick|null>;
+ 'tools.resource.start':Route<ResourceToolReview,ResourceToolSetup>;
+ 'tools.resource.status':Route<ResourceToolSetupRef,ResourceToolSetup>;
+ 'tools.resource.supplyFile':Route<ResourceToolFileRequest,ResourceToolSetup>;
+ 'tools.resource.supplyRemote':Route<ResourceToolFileRequest & {path:string},ResourceToolSetup>;
+ 'tools.resource.saveSkill':Route<ResourceToolSetupRef,ResourceToolSetup>;
  'compute.resource.status':Route<Record<string,never>,ComputeResourceState>;
  'compute.resource.activate':Route<ComputeResourceActivation,ComputeResourceState>;
  'compute.resource.clear':Route<{selectionId:string},ComputeResourceState>;

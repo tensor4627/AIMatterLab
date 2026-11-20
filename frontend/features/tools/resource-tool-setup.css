@@ -1,0 +1,36 @@
+.resource-tool-setup{display:grid;gap:14px;min-width:0}
+.resource-tool-setup p,.resource-tool-setup h3{margin:0;overflow-wrap:anywhere}
+.resource-tool-scope{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 10px}
+.resource-tool-scope code{color:var(--muted)}
+.resource-tool-routes,.resource-tool-grid,.resource-tool-code-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:10px}
+.resource-tool-routes .button{display:flex;align-items:flex-start;gap:8px;text-align:start;white-space:normal;padding:10px;line-height:1.4}
+.resource-tool-routes .button>svg{flex:0 0 17px;margin-top:2px}
+.resource-tool-routes .button span{display:grid;gap:4px}
+.resource-tool-routes .button[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent)}
+.resource-tool-setup small{color:var(--muted);line-height:1.45}
+.resource-tool-list{display:grid;gap:4px;margin-bottom:0;padding-left:18px}
+.resource-tool-list li>span{margin-inline-start:8px;color:var(--muted)}
+.resource-tool-list button{white-space:normal;text-align:start}
+.resource-tool-discovery,.resource-tool-form,.resource-tool-receipt{display:grid;gap:10px;min-width:0}
+.resource-tool-setup fieldset{margin:0;padding:10px;border:1px solid var(--line);border-radius:7px;min-width:0}
+.resource-tool-setup label{display:grid;gap:4px;min-width:0}
+.resource-tool-setup label,.resource-tool-setup label input,.resource-tool-setup label select,.resource-tool-setup label textarea{margin:0}
+.resource-tool-setup label input,.resource-tool-setup label select,.resource-tool-setup label textarea{box-sizing:border-box;width:100%;min-width:0}
+.resource-tool-setup label textarea{font-family:monospace;resize:vertical}
+.resource-tool-setup .resource-tool-candidate{grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:start;padding:6px;border-radius:5px}
+.resource-tool-candidate:has(input:checked){background:var(--accent-bg)}
+.resource-tool-candidate span,.resource-tool-test-receipt>code{display:grid;gap:2px}
+.resource-tool-candidate input{margin:4px 0 0}
+.resource-tool-setup pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:inherit;max-height:18em;overflow:auto}
+.resource-tool-setup code{overflow-wrap:anywhere}
+.resource-tool-receipt{padding:12px;border:1px solid var(--line);border-radius:7px}
+.resource-tool-receipt dl{display:grid;grid-template-columns:minmax(100px,auto) minmax(0,1fr);gap:5px 10px;margin:0}
+.resource-tool-receipt dd{margin:0;overflow-wrap:anywhere}
+.resource-tool-receipt ol{margin:0;padding-inline-start:20px;line-height:1.45;overflow-wrap:anywhere}
+.resource-tool-file{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.resource-tool-setup .button-row,.resource-tool-setup .notice{flex-wrap:wrap;margin:3px 0}
+.resource-tool-setup .button{white-space:normal}
+.resource-tool-discuss{display:grid;gap:8px;padding:10px;border:1px solid var(--line);border-radius:7px}
+.resource-tool-discuss button{justify-self:start}
+.resource-tool-manual summary{cursor:pointer;color:var(--muted)}
+.resource-tool-manual .resource-tool-form{margin-top:8px}

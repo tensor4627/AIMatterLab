@@ -11,6 +11,7 @@ import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools
 import {createAgentWakeDelivery} from '../../agent/sessions/wake-delivery.mjs';
 import {randomUUID} from 'node:crypto';
 import {scheduleOwnerId} from '../../contracts/compute/schedule-owner.mjs';
+import {resourceSessionWorkspaceTool} from '../../backend/main/workspace/resource-workspace.mjs';
 
 function fields(value,expected) {
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==expected.length||
@@ -18,7 +19,7 @@ function fields(value,expected) {
 }
 export function createManagedWorkbench({catalog,profiles,registration,terminal,projectSkills,resourceActivity,projectAccess,
  records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{},
- worker,conversationTerminals,closeSsh,assertConnectionIdle}) {
+ worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,hostedServiceReplaced}) {
   const delegations=createScheduleDelegations(catalog),runIntents=createRunActionIntents();
   let schedules;
   const named=notice=>({...notice,resourceName:resourceActivity.label(notice.profileId)||notice.profileId});
@@ -48,6 +49,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   }
   const resources=createManagedComputeResources({terminal,profiles,selectionCatalog:catalog,aliases:createManagedComputeAliases({projectSkills}),
     services:createManagedComputeServices({connections:terminal.connections,registration,source:workerSource,transportSource:sshTransportSource}),
+    resourceWorkspace,serviceRegistration:registration,terminalAuthorization,
     taskSource:scope=>taskWorkerSource(records.bound(scope.provider,scope.threadId)),
     authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),
     authorizeRun:(scope,args)=>!!authorizeRun(scope,args),
@@ -70,7 +72,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   }
   const wake=createAgentWakeDelivery({catalog,agents,dispatch,canWake:authorizedWake});
   schedules=createManagedSchedules({catalog,listSources:()=>resources.listSources({scheduleReady:true}),wake,onChange:updated});
-  const desktopTools=createManagedComputeTools({resources,schedules,assertWorkflow:scope=>workflow.assertScope(scope),
+  const computeTools=createManagedComputeTools({resources,schedules,assertWorkflow:scope=>workflow.assertScope(scope),
     authorizeTask:async(task,scope)=>{if(task.customCv?.id&&(await privateAccess.assertTask(task,scope.provider)).definitionOnly)throw Error('managed_compute_private_task_scope');},
     assertScheduleIntent:(scope,action,args)=>{
       if(action==='upsert'&&agents.turnOrigin(scope.provider,scope.threadId)==='service')throw Error('managed_schedule_user_renewal_required');
@@ -80,6 +82,12 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     assertRunSource:({scope,sourceId,runId,kind})=>{const actual=authorizeRun(scope,{sourceId,runId,kind});if(!actual)throw Error('managed_compute_original_run_unconfirmed');return actual;},
     onRunObserved:entry=>{resourceActivity.recordRun(entry);notify();void schedules.refresh(entry.sourceId).catch(()=>{});}
   });
+  const desktopTools=resourceWorkspace?{
+    ...computeTools,
+    tools:()=>[...computeTools.tools(),resourceSessionWorkspaceTool],
+    owns:name=>name===resourceSessionWorkspaceTool.name||computeTools.owns(name),
+    call:(name,args,scope)=>name===resourceSessionWorkspaceTool.name?resourceWorkspace.callSessionTool(args,scope):computeTools.call(name,args,scope),
+  }:computeTools;
 
   function descriptor(resource) {
     const config=profiles.read({id:resource.profileId});
@@ -106,6 +114,13 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   handle('compute.managed.refresh',async value=>{fields(value,[]);await schedules.refresh();return snapshot();});
   handle('compute.managed.publish',value=>resources.publish(value));
   handle('compute.managed.configureService',value=>resources.configureService(value));
+  handle('compute.managed.serviceStatus',value=>resources.serviceStatus(value));
+  handle('compute.managed.updateService',async value=>{
+    assertConnectionIdle?.(value);
+    const updated=await resources.updateService(value);
+    hostedServiceReplaced?.(value);
+    return updated;
+  });
   function setProjectAccess(value, ref) {
     fields(value,['resourceId','projectId','allowed']);
     if(!catalog.get('projects',value.projectId)&&!catalog.list('workspace-index').some(p=>p.id===value.projectId)&&
