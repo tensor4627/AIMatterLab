@@ -1,6 +1,8 @@
 # 版本更新与验证
 
-## 开发中
+## 0.1.26
+
+2026-11-20
 
 - 首次托管 SSH 时确认总工作区并自动准备作业服务。会话可查回自己的计算目录。
 - 可以在指定资源安装工具、复用已有脚本或接入自定义软件。最小测试通过后保留资源专属执行技能。
@@ -10,7 +12,7 @@
 - 新手引导增加集群实操。对话选择支持逐题点选、数字键和自填回答。
 - 工具配置可查公开软件资料，并使用服务商提供的联网能力。
 
-[集群工作流开发版验收记录](docs/releases/aimatterlab-cluster-workflows-unreleased.md)
+[0.1.26 验收记录](docs/releases/aimatterlab-0.1.26.md) · [集群工作流开发过程验证](docs/releases/aimatterlab-cluster-workflows-unreleased.md)
 
 ## 0.1.25
 

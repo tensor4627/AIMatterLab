@@ -1,0 +1,15 @@
+# AIMatterLab 0.1.26
+
+2026-11-20 · Windows x64 · 本机测试版 · [更新日志](../../CHANGELOG.md)
+
+## 在原会话安排计算
+
+在项目对话中讨论目标和输入后，可开启任务规划模式，让 Agent 在原项目和所选集群上建立流程。已经授权的终端和作业服务继续可用。同一会话在该资源取得的 `workfile/YYYY-MM-DD/task-N` 目录可以查回，后续流程复用它。选定实际输入、配置和资源后，用户在原会话确认整张流程图并安排执行。[开发文档](../development/cluster-resource-workflows.md#在原对话继续规划) · [软件规范](../software-specification.md)
+
+| 范围 | 结果与依据 |
+| --- | --- |
+| 规划前后对照 | `passed`。在隔离的前端与真实资源权限模块中，修复前的普通聊天已打开终端，创建流程后第一次终端操作返回 `managed_compute_project_grant_required`。修复后，同一操作成功，原终端只打开一次。切换到另一会话或项目、以及撤销项目权限后，后续操作会被拦截。 |
+| 目录和执行 | `passed`。独立 Electron 窗口保留原项目及目录。Linux worker 在临时目录验证并发分配、跨日、回执丢失后重试和只读查询。流程冻结与重复确认使用隔离作业服务验收。[开发与分层验证](aimatterlab-cluster-workflows-unreleased.md) |
+| 科学计算与外部模型 | `not_run`。权限验收使用模拟终端及本地作业数据。 |
+
+该版还包含已在开发树验收的集群工作区交接、工具配置、工作流执行与界面指引。对应功能、测试环境及限制保留在原始验收记录中。[集群工作流验收](aimatterlab-cluster-workflows-unreleased.md)
