@@ -18,6 +18,8 @@ Ordinary chat can use an authorized compute resource, inspect queues, configure 
 
 ## Recover the original SSH connection or channel
 
+When a resource lists `developerWorkspace: true`, the desktop user selected its verified workspace in Settings → Agent → Developer options. Use its exact `resource_id` for workspace tool and terminal tests. Read the actual command receipt. Writes or execution outside that workspace go through the desktop confirmation. A structured job still uses the worker’s registered project and target.
+
 A submitted option such as **Use “Lab” (ssh:profile-id)** selects that listed target for the current conversation. Continue the requested acquisition with its resource ID and access. The same rule applies to the dedicated resource picker. An answer that only requests a plan leaves the terminal unopened.
 
 If a terminal request returns `terminal_unavailable`, use the reported `code` and `leaseStatus`. Follow its `retry` with `access: "service"` on the same resource when the requested operation can use the service. A failed or unconfirmed terminal attempt provides no shell. Preserve unknown state and avoid repeating the same terminal attempt. If no safe retry or suitable granted channel remains, report the actual tool failure. A channel failure alone calls for checking the original capability. Use the current tools when old chat messages or guides describe a different route.

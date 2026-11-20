@@ -22,6 +22,6 @@
     "sampling": "fixture_required",
     "neb": "fixture_required"
   },
-  "distribution_status": "local_test",
-  "distribution_scope": "Windows x64 local test build. The validation results and package identity are recorded in docs/releases/aimatterlab-0.1.26.md."
+  "distribution_status": "passed",
+  "distribution_scope": "Windows x64 signed installer, portable ZIP, developer kit and signed update manifest. See docs/releases/aimatterlab-0.1.26.md for the validation scope and release receipts."
 }
