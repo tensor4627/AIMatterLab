@@ -30,7 +30,11 @@ export function multiplexProfile(profile){
  return result;
 }
 export function multiplexArgs(profile,socket,{master=false,control,tty=false,command}={}){
- let args;if(master){args=['-F','/dev/null','-M','-N','-S',socket,'-o','ControlMaster=yes','-o','ControlPersist=no','-o','ForkAfterAuthentication=no','-o','SessionType=none','-o','RemoteCommand=none','-o',profile.mode==='key'?'StrictHostKeyChecking=yes':'StrictHostKeyChecking=ask','-o',profile.mode==='key'?'BatchMode=yes':'BatchMode=no','-o','ConnectionAttempts=1','-o','ConnectTimeout=15','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2'];if(profile.proxy_jump.length)args.push('-J',profile.proxy_jump.join(','));if(profile.identity_file)args.push('-i',profile.identity_file);if(profile.known_hosts_file)args.push('-o','UserKnownHostsFile='+profile.known_hosts_file,'-o','GlobalKnownHostsFile=/dev/null');}
+ let args;if(master){
+  args=['-F','/dev/null','-M','-N','-S',socket,'-o','ControlMaster=yes','-o','ControlPersist=no','-o','ForkAfterAuthentication=no','-o','SessionType=none','-o','RemoteCommand=none','-o',profile.mode==='key'?'StrictHostKeyChecking=yes':'StrictHostKeyChecking=ask','-o',profile.mode==='key'?'BatchMode=yes':'BatchMode=no','-o','ConnectionAttempts=1','-o','ConnectTimeout=15','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2'];
+  if(profile.mode!=='key')args.push('-o','PreferredAuthentications=keyboard-interactive,password,publickey,gssapi-with-mic,hostbased');
+  if(profile.proxy_jump.length)args.push('-J',profile.proxy_jump.join(','));if(profile.identity_file)args.push('-i',profile.identity_file);if(profile.known_hosts_file)args.push('-o','UserKnownHostsFile='+profile.known_hosts_file,'-o','GlobalKnownHostsFile=/dev/null');
+ }
  else{args=['-o','ProxyCommand=/bin/false','-F','/dev/null','-o','ControlMaster=no','-o','ControlPersist=no','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no','-S',socket];args.push(...control?['-O',control]:[tty?'-tt':'-T']);}
  args.push('-l',profile.username,'-p',String(profile.port),profile.host);if(command!==undefined)args.push(command);return [profile.ssh_client,...args];
 }
@@ -101,12 +105,33 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
  if(!Number.isInteger(profileUpdateLeaseMs)||profileUpdateLeaseMs<1||profileUpdateLeaseMs>60000)fail('invalid_request',400);
  const records=new Map(),opens=new Map(),profileUpdates=new Map();let closing=false,openingShells=0;
  function ref(value,extra=[]){exact(value,['connectionId','profileId','profileVersion',...extra],['connectionId',...extra.filter(k=>!['cursor','maxBytes'].includes(k))]);const r=records.get(value.connectionId);if(!r)fail('ssh_connection_not_found',404);if(value.profileId!==undefined&&(value.profileId!==r.profile.id||value.profileVersion!==r.profile.version)||value.profileVersion!==undefined&&value.profileId===undefined)fail('ssh_connection_changed');return r;}
- function view(r){const terminals=[...r.shells].filter(id=>sessions.get(id)?.state().alive&&!sessions.get(id)?.state().closed),service=r.service?.shared?.view()||r.service?.session?.serviceState();return {schemaVersion:2,connectionId:r.id,loginRequestId:r.loginRequestId,profileId:r.profile.id,profileVersion:r.profile.version,status:r.status,authentication:r.authentication,capabilities:{multiplex:r.status==='authenticated'},terminalSessionIds:terminals,serviceIds:service?.serviceActive&&service.serviceId?[service.serviceId]:[],revision:r.revision,...r.closeRequested?{closed:r.closeProof===true}:{},...r.error?{error:{code:r.error}}:{}};}
- function lost(r,code='ssh_master_unavailable'){if(r.status==='closed')return;if(r.profileUpdate){profileUpdates.get(r.profileUpdate)?.invalid?.();r.profileUpdate=null;}r.generation++;r.status='unavailable';r.authentication='lost';r.error=code;r.revision++;r.ring=[];r.bytes=0;for(const id of r.shells)sessions.get(id)?.dispose();r.service?.session?.dispose();r.managedShells?.closeAll();}
-  function checkTransport(r){return r.native?r.native.check():host.check(r.profile,r.proof,r.master);}
-  async function verified(r,allowLocked=false){expireProfileUpdates();if(r.profileUpdate&&!allowLocked)fail('service_active',423);if(closing||r.status!=='authenticated'||r.authentication!=='verified')fail('ssh_authentication_unconfirmed');try{await checkTransport(r);}catch(error){if(r.status==='authenticated')lost(r,error.code||'ssh_master_unavailable');throw error;}if(closing||r.status!=='authenticated'||r.profileUpdate&&!allowLocked)fail('ssh_connection_changed');return r;}
+ function view(r){const terminals=[...r.shells].filter(id=>sessions.get(id)?.state().alive&&!sessions.get(id)?.state().closed),service=r.service?.shared?.view()||r.service?.session?.serviceState();return {schemaVersion:2,connectionId:r.id,loginRequestId:r.loginRequestId,profileId:r.profile.id,profileVersion:r.profile.version,status:r.status,authentication:r.authentication,capabilities:{multiplex:r.status==='authenticated'},terminalSessionIds:terminals,serviceIds:service?.serviceActive&&service.serviceId?[service.serviceId]:[],revision:r.revision,...r.status==='unavailable'&&r.bytes>0?{retainedAuthOutput:true}:{},...r.closeRequested?{closed:r.closeProof===true}:{},...r.error?{error:{code:r.error}}:{}};}
+ function lost(r,code='ssh_master_unavailable'){
+  if(r.status==='closed'||r.status==='unavailable')return;
+  const keepAuthOutput=r.status==='authenticating'&&['ssh_master_unavailable','ssh_remote_terminal_unavailable'].includes(code);
+  if(r.profileUpdate){profileUpdates.get(r.profileUpdate)?.invalid?.();r.profileUpdate=null;}
+  r.generation++;r.status='unavailable';r.authentication='lost';r.error=code;r.revision++;r.inputRequests.clear();
+  if(!keepAuthOutput){r.ring=[];r.bytes=0;}
+  for(const id of r.shells)sessions.get(id)?.dispose();r.service?.session?.dispose();r.managedShells?.closeAll();
+ }
+ const controlTimedOut=error=>error?.code==='ssh_control_timeout';
+ async function checkTransport(r){
+  if(r.transportCheck?.generation===r.generation)return r.transportCheck.promise;
+  const check={generation:r.generation,promise:r.native?r.native.check():host.check(r.profile,r.proof,r.master)};
+  r.transportCheck=check;
+  try{return await check.promise;}finally{if(r.transportCheck===check)r.transportCheck=null;}
+ }
+ async function verified(r,allowLocked=false){
+  expireProfileUpdates();if(r.profileUpdate&&!allowLocked)fail('service_active',423);if(closing||r.status!=='authenticated'||r.authentication!=='verified')fail('ssh_authentication_unconfirmed');
+  const generation=r.generation;
+  try{await checkTransport(r);}catch(error){
+   if(r.generation===generation&&r.status==='authenticated'&&!controlTimedOut(error))lost(r,error.code||'ssh_master_unavailable');
+   throw error;
+  }
+  if(closing||r.generation!==generation||r.status!=='authenticated'||r.profileUpdate&&!allowLocked)fail('ssh_connection_changed');return r;
+ }
  function append(r,data){if(r.status!=='authenticating'||typeof data!=='string')return;for(const part of terminalOutputChunks(data)){r.ring.push({sequence:++r.sequence,data:part});r.bytes+=Buffer.byteLength(part);while(r.bytes>65536){r.bytes-=Buffer.byteLength(r.ring.shift().data);}}}
- async function open(value){exact(value,['profileId','profileVersion','requestId','profile'],['profileId','profileVersion','requestId','profile']);if(!id(value.requestId)||!id(value.profileId)||!Number.isSafeInteger(value.profileVersion)||value.profileVersion<1||value.profile?.id!==value.profileId||value.profile.version!==value.profileVersion)fail('invalid_request',400);const signature=digest(value),previous=opens.get(value.requestId);if(previous){if(previous.signature!==signature)fail('request_changed');return previous.promise;}if(closing||records.size>=64||opens.size>=128||[...records.values()].filter(r=>['authenticating','authenticated'].includes(r.status)||r.status==='unavailable'&&!!r.terminal).length>=8)fail('ssh_connection_limit');
+ async function open(value){exact(value,['profileId','profileVersion','requestId','profile'],['profileId','profileVersion','requestId','profile']);if(!id(value.requestId)||!id(value.profileId)||!Number.isSafeInteger(value.profileVersion)||value.profileVersion<1||value.profile?.id!==value.profileId||value.profile.version!==value.profileVersion)fail('invalid_request',400);const signature=digest(value),previous=opens.get(value.requestId);if(previous){if(previous.signature!==signature)fail('request_changed');return previous.promise;}if(closing||records.size>=64||opens.size>=128||[...records.values()].filter(r=>['authenticating','authenticated'].includes(r.status)||r.status==='unavailable'&&r.alive&&!!r.terminal).length>=8)fail('ssh_connection_limit');
   const r={id:randomUUID(),profile:structuredClone(value.profile),loginRequestId:value.requestId,generation:1,status:'authenticating',authentication:'pending',revision:1,ring:[],bytes:0,sequence:0,shells:new Set(),shellRequests:new Map(),inputRequests:new Map(),cancelled:new Set(),alive:true};records.set(r.id,r);
   const promise=(async()=>{try{multiplexProfile(r.profile);r.proof=await host.allocate(r.profile);if(closing||r.status!=='authenticating'){if(!r.proof.native)await host.cleanup(r.profile,r.proof).catch(()=>{});fail('ssh_connection_changed');}
     if(r.proof.native){
@@ -141,7 +166,7 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
     r.exit=new Promise(resolve=>{r.resolveExit=resolve;});r.terminal.onExit(()=>{if(process.platform==='win32')drainOwnedConpty(r.terminal);r.alive=false;r.resolveExit();if(r.closeRequested)r.revision++;else if(r.status!=='closed')lost(r,'ssh_master_unavailable');});return view(r);
    }catch(error){if(r.status==='closed')return view(r);r.status=['ssh_route_requires_review'].includes(error.code)?'requires_review':['ssh_multiplex_unsupported','ssh_linux_client_namespace_required','ssh_native_key_path_required'].includes(error.code)?'unsupported':'unavailable';r.authentication='not_observed';r.error=error.code||'ssh_control_unavailable';r.revision++;return view(r);}})();opens.set(value.requestId,{signature,promise});return promise;
  }
- async function state(value){const r=ref(value);if(r.closeRequested&&!r.closeProof)await observeClose(r);if(r.status==='authenticated')try{await verified(r,true);}catch{}return {...view(r),managedShellUsage:{total:MANAGED_SSH_SHELL_CAPACITY,occupied:r.managedShells?.occupied()??0}};}
+ async function state(value){const r=ref(value);if(r.closeRequested&&!r.closeProof)await observeClose(r);if(r.status==='authenticated')try{await verified(r,true);}catch(error){if(r.status==='authenticated'&&controlTimedOut(error))throw error;}return {...view(r),managedShellUsage:{total:MANAGED_SSH_SHELL_CAPACITY,occupied:r.managedShells?.occupied()??0}};}
  async function confirm(value){const r=ref(value);if(r.status==='authenticated')return state(value);if(r.status!=='authenticating'||!r.alive||!r.native&&!r.master)fail('ssh_authentication_unconfirmed');if(r.confirming)return r.confirming;const revision=r.revision;r.confirming=(async()=>{const proof=await checkTransport(r);if(closing||r.closeRequested||r.status!=='authenticating'||r.revision!==revision||!r.alive)fail('ssh_connection_changed');if(!r.native)r.proof={...r.proof,...proof};r.status='authenticated';r.authentication='verified';r.revision++;r.ring=[];r.bytes=0;r.inputRequests.clear();return view(r);})();try{return await r.confirming;}finally{r.confirming=null;}}
  const loginCodes=new Set(['ssh_connection_changed','ssh_authentication_unconfirmed','ssh_master_identity_changed','ssh_master_unavailable','ssh_control_identity_changed','ssh_control_unavailable','ssh_control_timeout','ssh_control_output_limit','ssh_channel_unavailable','ssh_client_unavailable','ssh_invalid_profile','ssh_route_requires_review','ssh_multiplex_unsupported','ssh_linux_client_namespace_required','ssh_native_key_path_required','ssh_remote_terminal_unavailable','terminal_unavailable','terminal_start_failed','terminal_session_limit','terminal_service_active']);
  const loginCode=error=>loginCodes.has(error?.code)?error.code:({session_limit:'terminal_session_limit',spawn_failed:'terminal_start_failed',service_active:'terminal_service_active'})[error?.code]||'terminal_unavailable';
@@ -162,7 +187,9 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
    r.loginState={status:'checking',phase:'checking_authentication'};
    fresh();if(r.status==='authenticating'){
     if(!r.proof||!r.native&&!r.master){r.loginState={status:'waiting_authentication'};return loginView(r);}
-    let observed;try{if(!r.native&&typeof host.ready!=='function')fail('ssh_control_unavailable');observed=r.native?r.native.ready():await host.ready(r.profile,r.proof,r.master);}catch(error){fresh();lost(r,error.code||'ssh_control_unavailable');throw error;}fresh();
+    let observed;try{if(!r.native&&typeof host.ready!=='function')fail('ssh_control_unavailable');observed=r.native?r.native.ready():await host.ready(r.profile,r.proof,r.master);}catch(error){if(r.status==='unavailable'&&!r.closeRequested)return loginView(r);fresh();if(!controlTimedOut(error))lost(r,error.code||'ssh_control_unavailable');throw error;}
+    if(r.status==='unavailable'&&!r.closeRequested)return loginView(r);
+    fresh();
     if(observed?.ready===false){r.loginState={status:'waiting_authentication'};return loginView(r);}if(observed?.ready!==true)fail('ssh_control_unavailable');
     await confirm({connectionId:r.id});fresh();
    }
@@ -184,7 +211,11 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
   }catch(error){channel.kill();throw error;}
  }
  async function openShell(value,{assertCurrent=()=>{}}={}){const r=ref(value,['requestId']),requestId=value.requestId;assertCurrent();if(!id(requestId))fail('invalid_request',400);if(r.shellRequests.has(requestId))return r.shellRequests.get(requestId);const promise=(async()=>{
-   await verified(r);assertCurrent();
+   try{await verified(r);}catch(error){
+    if(controlTimedOut(error)&&r.shellRequests.get(requestId)===promise)r.shellRequests.delete(requestId);
+    throw error;
+   }
+   assertCurrent();
     if(openingShells+[...sessions.values()].filter(s=>s.state().alive&&!s.state().closed).length>=4){
      // No channel creation was dispatched. The same login can continue after
      // the user frees a slot. Keep the original receipt once dispatch begins.

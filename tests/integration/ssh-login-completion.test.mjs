@@ -119,6 +119,63 @@ test('a lost original master fails closed and completion never starts replacemen
  const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'};f.broken(true);await assert.rejects(f.manager.completeLogin(value),/identity_changed/);const failed=await f.manager.completeLogin(value);assert.equal(failed.login.status,'failed');assert.equal(failed.login.code,'ssh_master_identity_changed');assert.equal(failed.shell,undefined);assert.equal((await f.manager.state({connectionId:connection.connectionId})).status,'unavailable');assert.equal(count(f,'prove'),0);assert.equal(count(f,'allocate'),1);assert.equal(f.processes.length,1);
 });
 
+test('a local readiness timeout preserves the original password and MFA login for explicit continuation',async t=>{
+ const f=fixture(t),connection=await f.open(),ref={connectionId:connection.connectionId,requestId:'login'},ready=f.host.ready;
+ f.host.ready=async()=>{throw new TerminalFault('ssh_control_timeout');};
+ await assert.rejects(f.manager.completeLogin(ref),/ssh_control_timeout/);
+ const timedOut=f.manager.loginStatus(ref);
+ assert.equal(timedOut.connection.status,'authenticating');assert.equal(timedOut.connection.authentication,'pending');
+ assert.deepEqual(timedOut.login,{status:'failed',phase:'checking_authentication',code:'ssh_control_timeout'});
+ assert.match(f.manager.authRead({connectionId:ref.connectionId}).output,/continue connecting/);
+ assert.equal(f.processes.length,1);
+ f.authenticate(ref.connectionId);f.host.ready=ready;
+ const complete=await f.manager.completeLogin(ref);
+ assert.equal(complete.connection.connectionId,ref.connectionId);assert.equal(complete.shell.connectionId,ref.connectionId);
+ assert.equal(count(f,'allocate'),1);assert.equal(f.processes.length,2);
+});
+
+test('local proof timeouts do not dispose an existing shell or admit a channel before the same master is checked again',async t=>{
+ const f=fixture(t),connection=await f.open(),ref={connectionId:connection.connectionId,requestId:'login'},check=f.host.check;
+ f.authenticate(ref.connectionId);
+ let attempts=0;
+ f.host.check=async(...args)=>{if(++attempts===2)throw new TerminalFault('ssh_control_timeout');return check(...args);};
+ await assert.rejects(f.manager.completeLogin(ref),/ssh_control_timeout/);
+ assert.equal(f.manager.loginStatus(ref).connection.authentication,'verified');
+ assert.equal(f.processes.length,1,'opening the first shell was never dispatched');
+ const initial=await f.manager.completeLogin(ref),session=f.sessions.get(initial.shell.id);
+ let rejectCheck;
+ f.host.check=()=>{attempts++;return new Promise((_resolve,reject)=>{rejectCheck=reject;});};
+ const before=attempts,newShell={...ref,requestId:'second-shell'};
+ const [stateError,newShellError]=[assert.rejects(f.manager.state({connectionId:ref.connectionId}),/ssh_control_timeout/),assert.rejects(f.manager.openShell(newShell),/ssh_control_timeout/)];
+ assert.equal(attempts,before+1,'concurrent observations share the in-flight proof on this exact connection');
+ rejectCheck(new TerminalFault('ssh_control_timeout'));await Promise.all([stateError,newShellError]);
+ assert.equal(session.state().alive,true);assert.equal(f.processes.length,2);
+ f.host.check=check;
+ const next=await f.manager.openShell(newShell);assert.equal((await f.manager.openShell(newShell)).id,next.id);assert.equal(f.processes.length,3);
+ f.broken(true);
+ const changed=await f.manager.state({connectionId:ref.connectionId});
+ assert.equal(changed.status,'unavailable');assert.equal(changed.error.code,'ssh_master_identity_changed');
+ assert.equal(session.state().alive,false);assert.equal(f.sessions.get(next.id).state().alive,false);
+});
+
+test('authentication refusal keeps bounded human-only output and exited retries leave another live connection alone',async t=>{
+ const f=fixture(t),a=await f.open('key-a');f.authenticate(a.connectionId);
+ const original=(await f.manager.completeLogin({connectionId:a.connectionId,requestId:'key-a'})).shell;
+ for(let i=0;i<9;i++){
+  const requestId='interactive-b-'+i,b=await f.open(requestId),ref={connectionId:b.connectionId,requestId};
+  const terminal=f.processes.at(-1);
+  terminal.output('Isolated client: Permission denied (keyboard-interactive).\r\n');terminal.kill();
+  const status=await f.manager.completeLogin(ref);
+  assert.equal(status.login.code,'ssh_master_unavailable');assert.equal(status.connection.retainedAuthOutput,true);
+  assert.match(f.manager.authRead({connectionId:b.connectionId}).output,/Permission denied/);
+  assert.doesNotMatch(JSON.stringify([f.manager.list(),status]),/Permission denied|continue connecting/);
+  assert.throws(()=>f.manager.authInput({...ref,data:'blocked'}),/ssh_authentication_not_pending/);
+  assert.equal(f.sessions.get(original.id).state().alive,true);
+  if(i===8){await f.manager.close({connectionId:b.connectionId});assert.equal(f.manager.authRead({connectionId:b.connectionId}).output,'');}
+ }
+ assert.equal((await f.manager.completeLogin({connectionId:a.connectionId,requestId:'key-a'})).shell.id,original.id);
+});
+
 test('failed startup is observed with its original cause and an explicit fresh login gets a new connection',async t=>{
  const f=fixture(t),allocate=f.host.allocate;f.host.allocate=async()=>{f.calls.push('allocate');throw new TerminalFault('ssh_control_unavailable');};
  const original=await f.open('failed-login'),value={connectionId:original.connectionId,requestId:'failed-login'};

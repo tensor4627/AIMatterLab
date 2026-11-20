@@ -51,6 +51,7 @@ test('native OpenSSH keeps Windows keys and host verification and allocates with
   const launch=await host.allocate({...profile,mode,ssh_client:client,identity_file:identity,distribution:undefined});
   assert.equal(launch.native,true);assert.equal(launch.file,client);assert.equal(launch.args[launch.args.indexOf('-i')+1],identity);
   assert(launch.args.includes('StrictHostKeyChecking='+(mode==='key'?'yes':'ask')));assert(launch.args.includes('BatchMode='+(mode==='key'?'yes':'no')));
+  assert.equal(launch.args.some(value=>value==='PreferredAuthentications=keyboard-interactive,password,publickey,gssapi-with-mic,hostbased'),mode==='interactive');
   assert(launch.args.includes('PermitLocalCommand=no'));assert(launch.args.includes('ClearAllForwardings=yes'));
  }
  const mounted=await host.allocate({...profile,ssh_client:'/mnt/c/Windows/System32/OpenSSH/ssh.exe',identity_file:'/mnt/c/test/key'});assert.equal(mounted.args[mounted.args.indexOf('-i')+1],'C:\\test\\key');
@@ -127,9 +128,11 @@ test('a pending owned PTY exit and a cleanup failure cannot initially claim succ
  const g=fixture(t,{closeWaitMs:0}),other=await g.ready(),otherRef={connectionId:other.connectionId};g.cleanupFails(true);const failed=await g.manager.close(otherRef);assert.equal(failed.closed,false);assert.equal(failed.status,'unavailable');assert.equal(failed.error.code,'ssh_close_cleanup_unconfirmed');const count=g.calls.filter(x=>x==='cleanup').length;assert.equal((await g.manager.state(otherRef)).closed,true);assert.equal(g.calls.filter(x=>x==='cleanup').length,count);g.cleanupFails(false);assert.equal((await g.manager.close(otherRef)).closed,true);assert.equal(g.processes.length,1);
 });
 
-test('key login uses strict host verification and batch mode while interactive login permits a challenge',()=>{
+test('interactive login prefers password and MFA while preserving explicit key and jump arguments',()=>{
  for(const mode of ['key','interactive']){
-  const argv=multiplexArgs(multiplexProfile({...profile,mode}),'/tmp/fixture-socket',{master:true});
+  const argv=multiplexArgs(multiplexProfile({...profile,mode,proxy_jump:['jumper@jump.invalid:2222']}),'/tmp/fixture-socket',{master:true});
   assert(argv.includes('BatchMode='+(mode==='key'?'yes':'no')));assert(argv.includes('StrictHostKeyChecking='+(mode==='key'?'yes':'ask')));
+  assert.equal(argv.some(value=>value==='PreferredAuthentications=keyboard-interactive,password,publickey,gssapi-with-mic,hostbased'),mode==='interactive');
+  assert.equal(argv[argv.indexOf('-i')+1],profile.identity_file);assert.equal(argv[argv.indexOf('-J')+1],'jumper@jump.invalid:2222');
  }
 });

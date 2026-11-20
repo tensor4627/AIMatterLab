@@ -49,6 +49,7 @@ export function nativeSshPlan(profile, { cwd, env, knownHostsFile }) {
     '-o',
     'ServerAliveCountMax=2'
   ];
+  if (!batch) args.push('-o', 'PreferredAuthentications=keyboard-interactive,password,publickey,gssapi-with-mic,hostbased');
   if (knownHostsFile)
     args.push(
       '-o',
@@ -365,7 +366,9 @@ export async function openNativeSsh({ pty, plan, onPrivate, onLost, assertCurren
     async check() {
       if (closed || phase !== 'ready') throw fault('ssh_authentication_unconfirmed');
       if (!challenge) {
-        challenge = pending(5000, 'ssh_master_unavailable', () => terminate('ssh_master_unavailable'));
+        // A missing pong proves nothing about the original process. Ignore late
+        // replies by challenge ID and require a fresh proof for the next action.
+        challenge = pending(5000, 'ssh_control_timeout', () => { challenge = null; });
         challenge.id = randomUUID();
         try {
           send(['ping', challenge.id]);

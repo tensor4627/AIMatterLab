@@ -30,6 +30,18 @@ test('ongoing read failures and foreign shell/connection successes remain visibl
  const f=fixture(),{h}=f;try{await h.flush();f.readError(error('terminal_unavailable'));await h.flush();f.readSuccess(identity(2,'foreign-shell'));f.readSuccess(identity(2,'shell','foreign-connection'));await h.flush();assert.equal(h.id('ssh-read-error-code').props.children,'terminal_unavailable');f.readError(error('terminal_unavailable'));await h.flush();assert.equal(h.id('ssh-read-error-code').props.children,'terminal_unavailable');assert.equal(f.globalErrors.length,0);}finally{h.unmount();}
 });
 
+test('one SSH control timeout is shown for both reading and resizing the same shell',async()=>{
+ const f=fixture(),{h}=f;
+ try{
+  await h.flush();f.readError(error('ssh_control_timeout'));
+  f.channel().props.onGeometry({...identity(),code:'ssh_control_timeout'});h.render();await h.flush();
+  assert.equal(h.id('ssh-read-error-code').props.children,'ssh_control_timeout');
+  assert(!h.find(n=>n.props?.['data-testid']==='ssh-resize-observation'));
+  f.channel().props.onGeometry({...identity(),code:'terminal_unavailable'});h.render();await h.flush();
+  assert(h.id('ssh-resize-observation'),'an independent resize failure remains visible');
+ }finally{h.unmount();}
+});
+
 test('successful read never clears an input failure or an unknown shell state',async()=>{
  const f=fixture(),{h}=f;try{await h.flush();f.channel().props.onError(error('terminal_owner_changed','sharedTerminal.input'));h.render();f.readError(error('terminal_unavailable'));await h.flush();f.setShell({alive:null});h.click('ssh-login-refresh');await h.flush();f.readSuccess();await h.flush();assert.equal(h.id('ssh-error-code').props.children,'terminal_owner_changed');assert.equal(h.id('ssh-read-error-code').props.children,'terminal_unavailable');assert.equal(f.globalErrors.length,1);
   f.setShell({alive:true});h.click('ssh-login-refresh');await h.flush();f.readSuccess();await h.flush();assert(!h.find(n=>n.props?.['data-testid']==='ssh-read-error-code'));assert.equal(h.id('ssh-error-code').props.children,'terminal_owner_changed');assert.equal(f.globalErrors.length,1);

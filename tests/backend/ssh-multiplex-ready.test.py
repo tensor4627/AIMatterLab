@@ -29,6 +29,10 @@ class LocalReadyTests(unittest.TestCase):
             configured = dict(profile, mode=mode)
             self.assertTrue(helper.describe(configured)['targetDigest'])
             self.assertIn('StrictHostKeyChecking='+('yes' if mode=='key' else 'ask'), helper.args(configured, '/tmp/fixture', master=True))
+            preferences = [item for item in helper.args(configured, '/tmp/fixture', master=True)
+                           if item.startswith('PreferredAuthentications=')]
+            self.assertEqual(preferences, ['PreferredAuthentications=keyboard-interactive,password,publickey,gssapi-with-mic,hostbased']
+                             if mode == 'interactive' else [])
         with self.assertRaises(helper.Refused):
             helper.profile_valid(dict(profile, mode='other'))
 

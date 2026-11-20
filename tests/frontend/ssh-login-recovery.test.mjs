@@ -123,6 +123,25 @@ test('failed authentication status retains the original login terminal and a pre
  const f=fixture({complete:()=>{throw Error('terminal_login_unknown');}}),{h}=f;
  try{await h.flush();f.setStatus({connection:pending,login:{status:'failed',phase:'checking_authentication',code:'ssh_authentication_unconfirmed'}});await h.tick(700);assert(h.find(n=>n.type?.name==='ChannelTerminal'&&!n.props.shell));assert.equal(h.id('ssh-error-code').props.children,'ssh_authentication_unconfirmed');assert(h.id('ssh-login-continue'));assert.equal(f.postCount(),1);assert(!JSON.stringify(h.id('ssh-login-error')).includes('操作结果尚未确认'));}finally{h.unmount();}
 });
+test('a control timeout offers continuation on the original login while a proved exit keeps a read-only login transcript',async()=>{
+ const f=fixture({complete:({posts})=>{if(posts===1)throw Error('ssh_control_timeout');return complete;}}),{h}=f;
+ try{
+  await h.flush();f.setStatus({connection:pending,login:{status:'failed',phase:'checking_authentication',code:'ssh_control_timeout'}});await h.tick(700);
+  assert.equal(h.id('ssh-error-code').props.children,'ssh_control_timeout');assert(h.id('ssh-login-continue'));
+  assert(!h.find(node=>node.props?.['data-testid']==='ssh-login-retry'));
+  h.click('ssh-login-continue');await h.flush();assert.equal(shellChannel(h).props.shell.sessionId,shell.sessionId);
+  assert.equal(h.calls.filter(call=>call.method==='compute.sshConnection.open').length,1);
+ }finally{h.unmount();}
+ const failed={...pending,status:'unavailable',authentication:'lost',retainedAuthOutput:true,error:{code:'ssh_master_unavailable'}};
+ const rejected=fixture({open:()=>failed});
+ try{
+  await rejected.h.flush();
+  const transcript=rejected.h.find(n=>n.type?.name==='ChannelTerminal');
+  assert.equal(transcript.props.connection.status,'unavailable');assert.equal(transcript.props.connection.loginRequestId,'request');
+  assert.equal(rejected.h.id('ssh-error-code').props.children,'ssh_master_unavailable');assert(rejected.h.id('ssh-login-retry'));
+  assert(!rejected.h.find(node=>node.props?.['data-testid']==='ssh-login-continue'));
+ }finally{rejected.h.unmount();}
+});
 test('a publish failure retains the exact human shell and can be retried without repeating login',async()=>{
  let attempts=0;const f=fixture({complete:()=>complete,publish:()=>{if(++attempts===1)throw Error('compute_resource_context_changed');return published;}}),{h}=f;
  try{

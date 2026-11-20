@@ -401,7 +401,7 @@ worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  const selected=computeResource.peek(),terminalTool=['list_shared_terminals','read_shared_terminal','write_shared_terminal'].includes(toolName);
  if(selected?.kind==='ssh-connection'){
   if(scope?.provider!==provider||scope.checkCurrent?.()!==true)return false;
-  let connection;try{connection=await sharedTerminal.connections.state({connectionId:selected.connectionId});}catch{sshService.connectionLost(selected.connectionId);return false;}
+  let connection;try{connection=await sharedTerminal.connections.state({connectionId:selected.connectionId});}catch(error){if(!['ssh_control_timeout','ssh_control_unavailable'].includes(error?.message))sshService.connectionLost(selected.connectionId);return false;}
   if(JSON.stringify(selected)!==JSON.stringify(computeResource.peek())||scope.checkCurrent?.()!==true)return false;
   if(connection.status!=='authenticated'||connection.authentication!=='verified'){sshService.connectionLost(selected.connectionId);return false;}
   if(connection.connectionId!==selected.connectionId||connection.profileId!==selected.profileId||connection.profileVersion!==selected.profileVersion)return false;
