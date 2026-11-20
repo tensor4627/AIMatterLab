@@ -112,7 +112,7 @@ export class TerminalMcp {
 }
 
 /** Forward only MCP to the verified private desktop WorkerClient proxy. */
-export function workerToolBridge({connection,fetchApi=fetch}){
+export function workerToolBridge({connection,fetchApi=fetch,conversationDraft}){
  let id=0;
  async function request(scope,method,params,timeout){
   if(scope.checkCurrent()!==true)throw Error('Worker scope expired');
@@ -130,7 +130,12 @@ export function workerToolBridge({connection,fetchApi=fetch}){
   return body.result;
  }
  return {
-  async list(scope){try{return await request(scope,'tools/list',{},10000);}catch{return {_meta:{studioWarnings:['tools_unavailable']}};}},
-  async call(name,args,scope){const result=await request(scope,'tools/call',{name,arguments:args},245000);if(!result)throw Error('The current conversation has no authorized scientific worker connection');return result;}
+  async list(scope){try{return await request(scope,'tools/list',{},10000)??conversationDraft?.list(scope)??null;}catch{return {_meta:{studioWarnings:['tools_unavailable']}};}},
+  async call(name,args,scope){
+   const result=await request(scope,'tools/call',{name,arguments:args},245000);
+   if(result)return result;
+   if(name==='present_task'&&conversationDraft?.list(scope))return toolValueResult(conversationDraft.call(args,scope));
+   throw Error('The current conversation has no authorized scientific worker connection');
+  }
  };
 }

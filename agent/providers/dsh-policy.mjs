@@ -19,7 +19,7 @@ const questionSchema={type:'object',additionalProperties:false,required:['questi
  }}}
 }};
 const questionDescription='Ask the user to choose one option in the chat input area. Give distinct labels and optional short descriptions. A custom answer is also available. Wait for the submitted answer and continue the same task. Use when their choice is needed, not when the request already determines an option. Do not request credentials or use this tool to change authorization.';
-export function dshToolAllowed(name,workflow){return READ.has(name)||MANAGED.has(name)||['setup_base_workspace','draft_local_environment','draft_cluster_setup'].includes(name)||workflow===true&&(DRAFT.has(name)||EXECUTE.has(name));}
+export function dshToolAllowed(name,workflow){return READ.has(name)||MANAGED.has(name)||['read_session_workspace','setup_base_workspace','draft_local_environment','draft_cluster_setup'].includes(name)||workflow===true&&(DRAFT.has(name)||EXECUTE.has(name));}
 export function checkDshInventory(names,expected){if(!Array.isArray(names)||names.some(n=>typeof n!=='string'||!expected.has(n))||names.length!==expected.size||new Set(names).size!==expected.size)throw Error('DSH tool inventory differs from the verified AIMatterLab capability set');return names;}
 function send(method,params){process.stdout.write(JSON.stringify({jsonrpc:'2.0',method,params})+'\n');}
 const textResult=value=>({content:[{type:'text',text:JSON.stringify(value)}]});

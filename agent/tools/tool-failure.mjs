@@ -17,7 +17,7 @@ const managedRecovery=new Map([
  ['managed_compute_worker_update_required',['capability_required','Inspect the original worker version and its advertised capabilities. Update through its resource settings to use this operation.']],
  ['managed_compute_worker_request_failed',['observation_unavailable','Read the project and service health again on the original worker before making any permission change.']],
  ['managed_compute_private_service_unavailable',['connection_unavailable','Check the current job-service receipt on the original resource. If the request can use a private terminal there, use its separately authorized terminal lease. Service unavailability alone does not establish an SSH authentication problem.']],
- ['managed_compute_project_grant_required',['access_required','Check the current project on its original worker. Project permissions can be changed only in the trusted desktop settings.']],
+ ['managed_compute_project_grant_required',['access_required','Check the denied operation, current lease and project on the original resource. A planning change alone leaves existing authorization intact. Ask for a desktop permission change only when a specific required grant is missing or revoked.']],
  ['managed_schedule_task_delegation_required',['access_required','Check the user’s requested schedule purpose in this workflow and confirm any additional action with the user.']],
  ['shared_terminal_not_granted',['access_required','This conversation has no explicitly shared manual terminal. For a hosted SSH request, use its published resource and the matching service or terminal lease.']],
 ]);

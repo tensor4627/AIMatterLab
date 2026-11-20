@@ -235,16 +235,25 @@ export function createResourceWorkspace({catalog, profiles, connections, resourc
         !Number.isSafeInteger(receipt.checked_at) || receipt.checked_at <= 0) fail('ssh_workspace_unconfirmed');
     return receipt;
   }
-  async function forExecution({task, requestId}, assertCurrent = () => {}) {
-    assertCurrent();
-    if (worker.identity?.kind !== 'ssh') return null;
-    const {identity, request} = connectionContext(task, assertCurrent);
+  function executionRegistration(task, identity) {
     const active = resolveHostedResourceWorkspace(undefined, {profileId: identity.profileId, hostIdentity: identity.hostIdentity});
     if (!active) fail('ssh_workspace_confirmation_required');
     const key = hash(active.resourceId, task.provider, task.threadId);
     const prior = catalog.get(SESSION, key);
     const saved = prior ? registrationOf(prior.workspaceId) : active;
     if (!saved || active.resourceId !== saved.resourceId) fail('ssh_workspace_changed');
+    return {key, saved, prior};
+  }
+  function knownForExecution(task) {
+    if (worker.identity?.kind !== 'ssh') return null;
+    const {saved, prior} = executionRegistration(task, worker.identity);
+    return prior?.receipt ? verifiedReceipt(prior.receipt, saved, task) : null;
+  }
+  async function forExecution({task, requestId}, assertCurrent = () => {}) {
+    assertCurrent();
+    if (worker.identity?.kind !== 'ssh') return null;
+    const {identity, request} = connectionContext(task, assertCurrent);
+    const {key, saved, prior} = executionRegistration(task, identity);
     const date = prior?.date || dateOf(now());
     if (!prior) catalog.put(SESSION, key, {provider: task.provider, threadId: task.threadId, profileId: saved.profileId,
       resourceId: saved.resourceId, workspaceId: saved.workspaceId, date, requestId});
@@ -299,6 +308,6 @@ export function createResourceWorkspace({catalog, profiles, connections, resourc
     if (results.length === 1) return results[0];
     return results.length ? {status: 'multiple', workspaces: results} : {status: 'unassigned'};
   }
-  return {read, preview, confirm, cancel, assertHandoff, resolveHostedResourceWorkspace, registerWithWorker, forExecution, forSession, forTerminal,
+  return {read, preview, confirm, cancel, assertHandoff, resolveHostedResourceWorkspace, registerWithWorker, knownForExecution, forExecution, forSession, forTerminal,
     publicWorkspace, callSessionTool: (args, scope) => { exact(args, [], ['profile_id']); return forSession(args.profile_id === undefined ? {} : {profileId: args.profile_id}, scope); }};
 }

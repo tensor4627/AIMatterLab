@@ -39,6 +39,7 @@ import {copyProjectInputsTool,copyProjectInputs} from '../backend/main/workspace
 import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from "../backend/main/compute/ssh-connection.mjs";
 import {createWorkbenchImageExporter} from "./platform/workbench-image.mjs";
 import {registerWorkspaceTaskRoutes} from '../backend/main/workspace/routes.mjs';
+import {createConversationDraftTool} from '../backend/main/workspace/workflow-draft-tool.mjs';
 import {createToolPackageRegistry} from '../backend/main/tools/package-registry.mjs';
 import {createAimlabToolRegistry} from '../backend/main/tools/aimlab-source.mjs';
 import {registerAimlabToolSourceRoutes} from '../backend/main/tools/aimlab-routes.mjs';
@@ -330,10 +331,12 @@ registerToolWorkflowRoutes({handle,controller:toolWorkflows});
 const roadmapNotifications=createRoadmapNotifications({catalog,sources:()=>managedResources?.listSources()||[],english:()=>settings.language==='en',emit:event=>emit('studio:event',event)});
 const roadmapExecutions=createRoadmapController({worker,catalog,groups:toolGroups,packages:toolPackages,getSettings:()=>settings,current:()=>workflowContext.current(),getTask:id=>taskRecords.read(id),assertIdle:assertIdleAgent,completed:(task,state)=>roadmapNotifications.completed(task,state),sources:()=>managedResources?.listSources()||[],
  allocateWorkspace:(data,guard)=>resourceWorkspace.forExecution(data,guard),
+ sessionWorkspace:task=>resourceWorkspace.knownForExecution(task),
  confirm:async(review,event)=>{
   trusted(event);const {snapshot}=review,en=settings.language==='en';
   const result=await dialog.showMessageBox(window,{type:'question',buttons:en?['Cancel','Freeze and run']:['取消','冻结并执行'],defaultId:0,cancelId:0,
    message:en?'Run the reviewed workflow?':'按照已核对的流程执行？',detail:[snapshot.name,snapshot.original_request,snapshot.target.project_id+' / '+(snapshot.target.cluster_id||snapshot.target.environment_id),
+    ...snapshot.workspace?.choice==='session'?[snapshot.workspace.root]:[],
     snapshot.steps.map(node=>node.label+' ('+node.tool+')').join(' → '),...snapshot.goals.map(goal=>goal.label+' · '+(goal.requirements||[]).join(' / ')),review.snapshot_sha256].join('\n')});
   trusted(event);return result.response===1;
  }});
@@ -557,7 +560,8 @@ const desktopAgentTools={
  call:(name,args,scope)=>resourceToolSetups.owns(name)?resourceToolSetups.call(name,args,scope):managedWorkbench.desktopTools.call(name,args,scope),
 };
 terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,scientificSkills,publicDocs:{definitions:softwareDocDefinitions,call:softwareDocs},guard:()=>worker.authoringGuard,desktopTools:desktopAgentTools,
- workerTools:workerToolBridge({connection:scope=>resourceRouting.scopedWorkerConnection(scope)}),runScope:runToolScope,captureScope:scope=>agents.captureToolScope(scope)});
+ workerTools:workerToolBridge({connection:scope=>resourceRouting.scopedWorkerConnection(scope),
+  conversationDraft:createConversationDraftTool({records:taskRecords,assertScope:scope=>workflowContext.assertScope(scope)})}),runScope:runToolScope,captureScope:scope=>agents.captureToolScope(scope)});
 await terminalMcp.start();
 customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.active||settings.agentProvider||'codex',getActiveTaskId:provider=>activeAuthoringTasks.get(provider),assertProvider:context=>{workflowContext.assertScope(context);return providerId(context.provider);},assertHuman:event=>{trusted(event);return true;},access:()=>true,
  validateRuntimeReceipt:async(runtime,context)=>{const current=await worker.request('POST','/api/runtime-guide',{environment_id:context.args.environment_id,engine:'pygas.build'});return current.status==='observed'&&runtime.status==='observed'&&current.receipt===runtime.receipt_sha256;},

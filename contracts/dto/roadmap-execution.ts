@@ -9,7 +9,7 @@ export interface FrozenInvocation {
  outputs:Record<string,{name:string;resource:string;format:string}>;
 }
 export interface RoadmapPreview {
- snapshot_sha256:string;snapshot:{task_id:string;name:string;original_request:string;target:{project_id:string;environment_id?:string;cluster_id?:string;gpu:number;max_seconds:number};
+ snapshot_sha256:string;snapshot:{task_id:string;name:string;original_request:string;workspace?:{choice:string|null;id:string|null;root:string|null}|null;target:{project_id:string;environment_id?:string;cluster_id?:string;gpu:number;max_seconds:number};
  initial:Record<string,RoadmapAsset>;steps:FrozenInvocation[];goals:RoadmapResource[]};
 }
 export interface RoadmapMissingTools {

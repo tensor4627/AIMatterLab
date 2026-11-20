@@ -14,7 +14,8 @@ function fixture(){
    config:{target:'local',projectId:'project',targetId:'env',gpu:1,maxSeconds:120}}};
  const state={id:createHash('sha256').update(JSON.stringify([task.id,hash])).digest('hex'),task_id:task.id,snapshot_sha256:hash,confirmed_at:1,status:'running',goals:[]};
  const worker={identity:{distribution:'Fixture',root:'/worker'},connectionTarget:{port:8999},connectionEpoch:1,connection:{health}};
- const calls=[],index=new Map(),hooks={confirm:()=>true,states:()=>[state],preview:()=>hash,sources:()=>[]};
+ const calls=[],index=new Map(),hooks={confirm:()=>true,states:()=>[state],preview:()=>hash,sources:()=>[],
+  sessionWorkspace:()=>null,allocateWorkspace:async()=>({workspace_id:'workspace'})};
  worker.request=async(method,route,body)=>{
   calls.push({method,route,body:structuredClone(body)});
   if(route==='/api/health')return worker.connection.health;
@@ -26,7 +27,8 @@ function fixture(){
  const controller=createRoadmapController({worker,current:()=>owner,getTask:id=>id===task.id?task:null,
   getSettings:()=>({distribution:'Fixture',workerRoot:'/worker',workerPort:8999}),assertIdle:()=>{},
   catalog:{get:(_kind,id)=>index.get(id),put:(_kind,id,data)=>index.set(id,structuredClone(data))},
-  sources:()=>hooks.sources(),allocateWorkspace:async()=>({workspace_id:'workspace'}),confirm:(...args)=>hooks.confirm(...args)});
+  sources:()=>hooks.sources(),sessionWorkspace:task=>hooks.sessionWorkspace(task),
+  allocateWorkspace:(...args)=>hooks.allocateWorkspace(...args),confirm:(...args)=>hooks.confirm(...args)});
  const request={taskId:'task',environments:{md:'per-node'}};
  return {controller,worker,owner,task,request,approval:{...request,snapshotSha256:hash},state,hooks,calls,index};
 }
@@ -56,6 +58,25 @@ test('one native confirmation binds original intent, current files, revision, sc
  assert.deepEqual(await f.controller.confirm(f.approval,event),f.state);assert.equal(confirmed,1);
  assert.equal(f.index.get(f.state.id).observation.status,'running');
  assert.deepEqual(f.calls.at(-1).body,{plan:post.body,snapshot_sha256:review.snapshot_sha256});
+});
+
+test('an existing SSH session directory satisfies the draft workspace step and is frozen at approval',async()=>{
+ const f=sshFixture(),receipt={workspace_id:'original-workspace',path:'/fixture/AIMatterLab/workfile/2026-11-20/task-1'};
+ f.task.workspaceChoice='pending';
+ await assert.rejects(f.controller.preview(f.request),/选择此流程的工作区/);
+ f.hooks.sessionWorkspace=task=>{assert.equal(task.threadId,f.owner.threadId);return receipt;};
+ f.hooks.allocateWorkspace=async()=>assert.fail('Preview cannot allocate or claim a directory');
+ const review=await f.controller.preview(f.request);
+ assert.deepEqual(f.calls.at(-1).body.workspace,{choice:'session',id:receipt.workspace_id,root:receipt.path});
+ f.hooks.confirm=()=>false;
+ assert.equal(await f.controller.confirm(f.approval,{}),null);
+ f.hooks.confirm=()=>true;
+ f.hooks.allocateWorkspace=async()=>({...receipt,path:'/fixture/AIMatterLab/workfile/2026-11-21/task-1'});
+ await assert.rejects(f.controller.confirm(f.approval,{}),/ssh_workspace_changed/);
+ assert.equal(f.calls.filter(({route})=>route.endsWith('/confirm')).length,0);
+ f.hooks.allocateWorkspace=async({requestId})=>{assert.equal(requestId,review.snapshot_sha256);return receipt;};
+ assert.deepEqual(await f.controller.confirm(f.approval,{}),f.state);
+ assert.deepEqual(f.calls.at(-1).body.workspace_receipt,receipt);
 });
 for(const [label,change] of Object.entries({
  'parameter edit':f=>{f.task.parameters.files=['/input/new'];},'draft revision':f=>f.task.parameterRevision++,

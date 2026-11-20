@@ -52,6 +52,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     resourceWorkspace,serviceRegistration:registration,terminalAuthorization,
     taskSource:scope=>taskWorkerSource(records.bound(scope.provider,scope.threadId)),
     authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),
+    terminalPolicyRevision:(scope,resource)=>projectAccess.terminalRevision(scope,resource),
     authorizeRun:(scope,args)=>!!authorizeRun(scope,args),
     authorizeRunAction:(scope,{action,runId,resourceId})=>permitsRunAction(scope,action,runId,resourceId),
     authorizeSchedule:(scope,{sourceId,scheduleId})=>!!schedules?.snapshot().sources.find(s=>s.id===sourceId)?.schedules.some(p=>
@@ -147,7 +148,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     const text=params.input[0]?.type==='text'&&typeof params.input[0].text==='string'?params.input[0].text:'';
     if(!text.trim())return;
     const owner=workflow.currentFor(provider,params.threadId);
-    const value={...owner,provider,threadId:params.threadId,text,turnId:params.studioTurnRequestId||randomUUID()};
+    const value={...owner,provider,threadId:params.threadId,text,planningMode:params.planningMode===true,turnId:params.studioTurnRequestId||randomUUID()};
     resources.recordUserTurn(value);delegations.record(value);runIntents.record(value);
   }
   async function publishLocal(worker,preferredProfileId) {

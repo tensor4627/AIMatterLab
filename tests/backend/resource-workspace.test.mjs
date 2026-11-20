@@ -82,6 +82,24 @@ test('allocation starts only on execution and keeps first path and local date af
  assert.equal((await f.workspace.forSession({})).status,'last_confirmed');
 });
 
+test('drafting finds the existing session directory and a later workflow reuses it',async()=>{
+ const f=fixture(), initial=await f.workspace.preview(ref);
+ await f.workspace.confirm({...ref,confirmationId:initial.confirmationId});
+ const first=await f.workspace.forExecution({task:{...scope,id:'first-workflow'},requestId:'first'});
+ f.tomorrow();
+ const planning={...scope,taskId:'later-workflow',projectId:'existing-project'};
+ const find=await f.workspace.callSessionTool({profile_id:ref.profileId},planning);
+ assert.equal(find.path,initial.root+'/workfile/2026-11-20/task-1');
+ assert.equal(find.path,first.path);
+ assert.equal(f.workspace.knownForExecution(planning).path,first.path);
+ assert.equal(f.workspace.forTerminal(ref,planning).path,first.path);
+ assert.equal(f.calls.filter(({route})=>route?.endsWith('/allocate')).length,1);
+ await assert.rejects(f.workspace.callSessionTool({profile_id:ref.profileId},{...planning,checkCurrent:()=>false}),/workspace_changed/);
+ const next=await f.workspace.forExecution({task:{...scope,id:planning.taskId},requestId:'later'});
+ assert.equal(next.path,first.path);
+ assert.equal(next.workspace_id,first.workspace_id);
+});
+
 test('read-only preinstalled binaries and workspace effects classify by destination',()=>{
  assert.equal(classifyWorkspaceCommand('/usr/bin/squeue -u user1','/work','/work').mode,'read');
  assert.equal(classifyWorkspaceCommand('cp /project/input.xyz "results/my input.xyz"','/work','/work').mode,'copy');

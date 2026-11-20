@@ -22,7 +22,7 @@ export function registerWorkspaceTaskRoutes({
     try{
     const task=records.create(value);
     if(task.workflowVersion===2&&!task.authoring&&task.workspaceChoice===undefined){
-      const workspace=catalog.list('workspace-index').find(item=>item.id===value.projectId&&JSON.stringify(item.workerBinding)===JSON.stringify(worker.identity));
+      const workspace=catalog.list('workspace-index').find(item=>item.id===task.projectId&&JSON.stringify(item.workerBinding)===JSON.stringify(worker.identity));
       task.workspaceChoice=workspace?'workspace':'pending';
       if(workspace)task.workspace=workspace;
       return finish(records.save(task));

@@ -449,7 +449,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(terminalSelected&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
    let taskId=action.taskId||conversation.taskId;
    const fresh=newWorkflow||explicitNewWorkflow(text);
-   if((turnPlanning||fresh)&&!action.reviewMode&&(!terminalSelected||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only'){const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:selectedProvider,request:text,projectId:conversation.projectId||projectId||null});if(!preparing())return;taskId=task.id;openTaskRef.current?.(task.id);}
+   if((turnPlanning||fresh)&&!action.reviewMode&&(!terminalSelected||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only'){const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:selectedProvider,request:text,projectId:conversation.projectId??null});if(!preparing())return;taskId=task.id;openTaskRef.current?.(task.id);}
    if(terminalSelected&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
    setWorkflowId(taskId||null);setNewWorkflow(false);
     followLatest();setMessages(prev=>[...prev,{id:(optimisticId=crypto.randomUUID()),role:'user',text,justSent:true}]);

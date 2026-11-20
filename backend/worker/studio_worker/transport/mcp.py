@@ -17,7 +17,7 @@ from studio_worker.tools.adapters import Adapter, ENGINES
 from studio_worker.compute.service import Service
 from studio_worker.transport.runtime_projection import result_for_agent
 from studio_worker.tools.templates import build_bias
-from studio_worker.transport.task_schema import STEP_SCHEMA, validate_task
+from studio_worker.transport.task_schema import TASK_DRAFT_SCHEMA, validate_task
 from studio_worker.transport.roadmap_schema import ROADMAP_SCHEMA
 from studio_worker.transport.roadmap import RoadmapError
 from studio_worker.infrastructure.util import leaf, atomic_json, digest, contained
@@ -117,10 +117,8 @@ def _tool_definitions():
         if name=="describe_engine":schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name in ("probe_environment","read_runtime_guide"):schema["properties"]["engine"]={"type":"string","enum":list(ENGINES)}
         if name == "present_task":
+            schema = copy.deepcopy(TASK_DRAFT_SCHEMA)
             schema["properties"]["roadmap"]={key:value for key,value in ROADMAP_SCHEMA.items() if key!="$id"}
-            schema["properties"]["steps"]={"type":"array","items":STEP_SCHEMA}
-            schema["properties"]["missing_fields"]={"type":"array","items":{"type":"string"}}
-            schema["additionalProperties"]=False
         if name == "prepare_run":
             schema["properties"]["spec"] = {"type":"object", "required":["project_id","environment_id","engine","gpu","max_seconds","inputs","idempotency_key"],
                 "properties":{"project_id":{"type":"string"},"environment_id":{"type":"string"},"engine":{"type":"string","enum":list(ENGINES)},"gpu":{"type":"integer","minimum":0},"max_seconds":{"type":"integer","minimum":1},"inputs":{"type":"object","additionalProperties":{"type":"string"}},"idempotency_key":{"type":"string"},"parameters":{"type":"object"},"name":{"type":"string"}}}

@@ -16,6 +16,7 @@ function Snapshot({review}:{review:RoadmapPreview}){
  const {snapshot}=review;
  return <div aria-label={t('执行快照')}><p>{snapshot.original_request}</p>
   <p>{t('计算项目')} {snapshot.target.project_id} · {snapshot.target.cluster_id||snapshot.target.environment_id} · {snapshot.target.max_seconds} s</p>
+  {snapshot.workspace?.choice==='session'&&<p>{t('工作目录')} · <code dir="ltr">{snapshot.workspace.root}</code></p>}
   {snapshot.steps.map(node=><details key={node.id}><summary>{node.label} · {node.tool} · {node.version.version.slice(0,12)}</summary>
    <p>{t('工具版本')} · {node.version.version}</p>{node.registered_function&&<p>{node.registered_function.function_id} · {node.registered_function.package_version}</p>}
    <p>{t('计算环境')} · {node.environment.id} · {node.environment_sha256}</p>

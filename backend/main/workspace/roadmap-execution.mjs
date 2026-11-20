@@ -32,7 +32,7 @@ function registeredGroup(ref,groups,packages){
  return {definition_text:group.definition_text,features};
 }
 
-export function createRoadmapController({worker,current,getSettings,getTask,catalog,groups,packages,assertIdle,confirm,allocateWorkspace,completed,sources=()=>[]}){
+export function createRoadmapController({worker,current,getSettings,getTask,catalog,groups,packages,assertIdle,confirm,allocateWorkspace,sessionWorkspace=()=>null,completed,sources=()=>[]}){
  const scope=createVerifiedWorkerScope({worker,current,getSettings,label:'Roadmap',allowSsh:true});
  function owned(taskId){
   const owner=current(),task=getTask(taskId);
@@ -49,7 +49,8 @@ export function createRoadmapController({worker,current,getSettings,getTask,cata
   const config=task.deployment?.config;
   const remote=worker.identity?.kind==='ssh';
   if(!task.roadmap||config?.target!==(remote?'cluster':'local')||!task.deployment.workerBinding||!sameWorkerBinding(task.deployment.workerBinding,worker))throw Error('请先保存计算项目及目标资源，并连接此流程的原作业服务。');
-  if(task.workspaceChoice==='pending')throw Error('请先选择此流程的工作区。');
+  const existing=remote&&task.workspaceChoice==='pending'?sessionWorkspace(task):null;
+  if(task.workspaceChoice==='pending'&&!existing)throw Error('请先选择此流程的工作区。');
   let parameters=structuredClone(task.parameters);
   for(const input of task.roadmap.resources.filter(resource=>resource.field)){
    const value=parameterValue(parameters,input.field);
@@ -58,7 +59,8 @@ export function createRoadmapController({worker,current,getSettings,getTask,cata
   }
   if(!environments||typeof environments!=='object'||Array.isArray(environments)||Object.entries(environments).some(([key,id])=>!task.roadmap.steps.some(step=>step.id===key)||typeof id!=='string'||!id.length||id.length>128))throw Error('Invalid per-node environment selection');
   return {task_id:task.id,name:task.name,original_request:task.request||task.name,
-   workspace:{choice:task.workspaceChoice??null,id:task.workspace?.id??null,root:task.workspace?.root??null},
+   workspace:existing?{choice:'session',id:existing.workspace_id,root:existing.path}:{
+    choice:task.workspaceChoice??null,id:task.workspace?.id??null,root:task.workspace?.root??null},
    revision:{parameters:task.parameterRevision||0,deployment:task.deployment.revision},
    ...(task.roadmap.tool_group?{tool_group:registeredGroup(task.roadmap.tool_group,groups,packages)}:{}),node_environments:structuredClone(environments),
    roadmap:structuredClone(task.roadmap),parameters,target:{project_id:config.projectId,gpu:config.gpu??0,max_seconds:config.maxSeconds,
@@ -131,6 +133,8 @@ export function createRoadmapController({worker,current,getSettings,getTask,cata
    if(!await confirm(review,event))return null;
    guard();
    const workspace=source.target.cluster_id?await allocateWorkspace({task:deploymentOwner(value.taskId),requestId:value.snapshotSha256},guard):null;
+   if(source.workspace.choice==='session'&&(workspace?.workspace_id!==source.workspace.id||workspace?.path!==source.workspace.root))
+    throw Error('ssh_workspace_changed');
    guard();const state=await post('confirm',{plan:source,snapshot_sha256:value.snapshotSha256,...workspace?{workspace_receipt:workspace}:{}});
    ticket.assert();if(state.snapshot_sha256!==value.snapshotSha256)throw Error('Worker confirmed a different snapshot');
    note(value.taskId,ticket.binding,state);return state;
