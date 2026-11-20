@@ -20,10 +20,24 @@ const exactConnection=(resource,view)=>view?.connectionId===resource.connectionI
  * selection, global worker mutation, service update, or job replay here. */
 export function createManagedComputeServices({connections,registration,source,transportSource,
  prepareResources=prepareSshServiceResourcesAsync,newWslClient=()=>new WorkerClient(),uuid=randomUUID}){
- async function ssh(resource,profile,assertCurrent,{configure=false}={}){
+ const bundled=new Map();
+ async function comparison(profile,health){
+  let pending=bundled.get(profile.id);
+  if(!pending){
+   pending=prepareResources(source,{profileId:profile.id,transportSource,reuseOnly:true,verifiedCacheOnly:true}).then(value=>value.payload);
+   bundled.set(profile.id,pending);
+  }
+  let expected;try{expected=await pending;}catch(error){bundled.delete(profile.id);throw error;}
+  if(!/^[a-f0-9]{20}$/.test(expected?.expected_runtime_id||'')||!(/^[a-f0-9]{64}$/).test(expected?.runtime_manifest_sha256||''))fail('managed_compute_bundled_service_unavailable');
+  const remoteRuntimeId=health?.runtimeId,remoteManifestSha256=health?.runtimeManifestSha256;
+  const status=remoteRuntimeId!==expected.expected_runtime_id?'different':!remoteManifestSha256?'unconfirmed':remoteManifestSha256===expected.runtime_manifest_sha256?'current':'different';
+  return {status,remoteRuntimeId,remoteManifestSha256,bundledRuntimeId:expected.expected_runtime_id,bundledManifestSha256:expected.runtime_manifest_sha256};
+ }
+ async function ssh(resource,profile,assertCurrent,{configure=false,upgrade}={}){
   const ref={connectionId:resource.connectionId},profileRef={profileId:profile.id,profileVersion:profile.version},requestBase={...ref,...profileRef};
   const initial=configure?registration.read(profileRef):null;
   const first=!!(configure&&(initial?.status==='unconfigured'||initial?.status==='maintenance_required'&&initial.reason==='configuration_changed'));
+  const repair=first&&initial.registration&&equal(initial.registration.hostIdentity,resource.workspaceRegistration?.hostIdentity)?initial.registration:null;
   let saved=first?null:registration.validateReuse(profile);
   const fresh=()=>{
    assertCurrent();
@@ -36,16 +50,28 @@ export function createManagedComputeServices({connections,registration,source,tr
    return view;
   };
   let view=checkView(await connections.serviceState(ref));
-  const prepare=()=>prepareResources(source,{profileId:profile.id,transportSource,...saved?{
-   port:saved.port,reuseOnly:true,expectedRuntimeId:saved.runtimeId,
-   ...saved.runtimeManifestSha256?{expectedRuntimeManifestSha256:saved.runtimeManifestSha256}:{},
-  }:{}});
-  let bootstrap;
+  const pinned=repair||saved;
+  const prepare=()=>prepareResources(source,{profileId:profile.id,transportSource,...pinned&&!upgrade?{
+   port:pinned.port,reuseOnly:true,expectedRuntimeId:pinned.runtimeId,
+   ...pinned.runtimeManifestSha256?{expectedRuntimeManifestSha256:pinned.runtimeManifestSha256}:{},
+  }:upgrade?{port:saved.port}:{}});
+  let bootstrap,upgradeManifest;
+  if(upgrade){
+   const versions=await comparison(profile,saved);fresh();
+   if(!saved||versions.status!=='different'||upgrade.expectedRuntimeId!==versions.remoteRuntimeId||upgrade.bundledRuntimeId!==versions.bundledRuntimeId||
+      view.status!=='connected'||view.serviceActive!==true||view.channelKind!=='private'||view.serviceId!==upgrade.generation)fail('managed_compute_service_changed');
+   bootstrap=await prepare();fresh();
+   if(bootstrap.payload.expected_runtime_id!==versions.bundledRuntimeId)fail('managed_compute_service_changed');
+   upgradeManifest=versions.bundledManifestSha256;
+   const stopped=checkView(await connections.closeService({...ref,serviceId:view.serviceId}));
+   if(stopped.serviceActive!==false)fail('terminal_service_unknown');
+   view=stopped;
+  }
   if(view.serviceActive!==true&&['idle','failed','disconnected'].includes(view.status)){
-   bootstrap=await prepare();
+   bootstrap??=await prepare();
    fresh();
    await connections.openService({...requestBase,requestId:uuid()},
-    {...bootstrap,...saved?{reuseOnly:true,startCached:true}:{},...profile.serviceEnvironment?{serviceEnvironment:profile.serviceEnvironment}:{}},{conversationChannel:true});
+    {...bootstrap,...pinned&&!upgrade?{reuseOnly:true,startCached:true}:{},...profile.serviceEnvironment?{serviceEnvironment:profile.serviceEnvironment}:{}},{conversationChannel:true});
    view=checkView(await connections.serviceState(ref));
   }
   if(view.status!=='connected'||view.serviceActive!==true||view.channelKind!=='private'||!serviceId(view.serviceId))fail('managed_compute_private_service_unavailable');
@@ -58,7 +84,9 @@ export function createManagedComputeServices({connections,registration,source,tr
   fresh();
   if(!stableHealth(ready,live))fail('managed_compute_service_changed');
   const health={...ready,...live};
-  if(first){
+  if(upgradeManifest&&health.runtimeManifestSha256!==upgradeManifest)fail('managed_compute_service_changed');
+  if(repair&&!stableHealth(health,repair))fail('managed_compute_service_changed');
+  if(first||upgrade){
    const expected=(bootstrap??await prepare()).payload;
    fresh();
    if(expected?.expected_runtime_id!==health.runtimeId||expected?.port!==health.port||!health.runtimeManifestSha256)fail('managed_compute_service_changed');
@@ -78,11 +106,13 @@ export function createManagedComputeServices({connections,registration,source,tr
    return observed;
   }
   const schedulerInspection=view.service?.bridge_capabilities?.includes(schedulerInspectionCapability)===true;
-  return {id:sshSourceId(binding),generation:channelId,binding,health,verify,schedulerInspection,async forward(method,target,data,mcp,timeoutMs,beforeDispatch){
-   fresh();const observed=await verify();
-   beforeDispatch?.(observed);
-   const result=await forward(method,target,data,mcp,timeoutMs);
-   fresh();return result;
+  let pending=0;
+  return {id:sshSourceId(binding),generation:channelId,binding,health,verify,schedulerInspection,canUpdate:()=>pending===0,async forward(method,target,data,mcp,timeoutMs,beforeDispatch){
+   fresh();pending++;
+   try{
+    const observed=await verify();beforeDispatch?.(observed);
+    const result=await forward(method,target,data,mcp,timeoutMs);fresh();return result;
+   }finally{pending--;}
   }};
  }
 
@@ -113,7 +143,7 @@ export function createManagedComputeServices({connections,registration,source,tr
    }};
   }catch(error){client.close();throw error;}
  }
- return {ssh,wsl};
+ return {ssh,wsl,comparison};
 }
 
 export function originalBindingMatches(original,active){

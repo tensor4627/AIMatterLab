@@ -30,6 +30,79 @@ export async function frontendPlanExperienceCases({check,out}){
  }
  const nav=(page,id)=>page.locator('[data-testid="navigate-'+id+'"]:visible');
 
+ await check('planning-retains-saved-project-and-session-directory',async page=>{
+  await page.evaluate(async()=>{
+   const {default:Agent}=await import('/frontend/features/conversations/Agent.tsx');
+   const test=window.__test,invoke=window.studio.invoke,owner={id:'codex:fixture-thread',threadId:'fixture-thread',provider:'codex',name:'Saved project chat',projectId:'original-project',taskId:null,updatedAt:1};
+   const sessionSelection={nonce:'restore-original',conversation:owner};
+   test.activeProject=owner.projectId;
+   test.conversation={...owner};
+   window.studio.invoke=async(method,data)=>{
+    if(method==='conversation.remember')return test.conversation;
+    if(method==='compute.resourceWorkspace.session')return {status:'verified',profileId:'original-profile',resourceId:'original-resource',workspaceId:'original-workspace',
+     root:'/fixture/AIMatterLab',path:'/fixture/AIMatterLab/workfile/2026-11-20/task-1',date:'2026-11-20',taskNumber:1,checkedAt:1};
+    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return {model:'fixture-model',thread:{id:owner.threadId,turns:[{items:[{type:'agentMessage',id:'prior',text:'Original discussion retained'}]}]}};
+    return invoke(method,data);
+   };
+   function Host(){
+    const [planningMode,setPlanningMode]=window.React.useState(false);
+    return window.React.createElement(Agent,{sessionSelection,selectedLocalConversation:owner,workspaceProfileId:'original-profile',
+     projectId:'another-workbench-project',planningMode,onPlanningModeChange:setPlanningMode,onError:error=>{test.planningError=String(error);},context:'{}'});
+   }
+   window.testRoot.render(window.React.createElement(Host));
+  });
+  await page.getByText('Original discussion retained',{exact:true}).waitFor();
+  const workspace=page.getByTestId('agent-session-workspace');
+  await workspace.locator('summary').click();
+  const directory='/fixture/AIMatterLab/workfile/2026-11-20/task-1';
+  assert.equal(await page.getByTestId('session-workspace-path').innerText(),directory);
+  const before=await page.evaluate(()=>window.__test.calls.length);
+  await page.getByTestId('agent-planning-mode').check();
+  assert.equal(await page.evaluate(offset=>window.__test.calls.slice(offset).some(call=>call.method==='task.create'||call.method==='agent.rpc'&&call.data.method==='turn/start'),before),false);
+  await page.locator('.composer textarea').fill('继续原项目，只制定流程，暂不执行');
+  await page.locator('.composer .send').click();
+  await page.waitForFunction(()=>window.__test.calls.some(call=>call.method==='agent.rpc'&&call.data.method==='turn/start')||window.__test.planningError);
+  const observed=await page.evaluate(()=>({calls:window.__test.calls,error:window.__test.planningError,projectId:window.__test.activeProject}));
+  assert.equal(observed.error,undefined);
+  const created=observed.calls.filter(call=>call.method==='task.create').map(call=>call.data);
+  assert.equal(created.length,1);
+  assert.equal(created[0].projectId,observed.projectId);
+  assert.equal(created[0].threadId,'fixture-thread');
+  const turn=observed.calls.find(call=>call.method==='agent.rpc'&&call.data.method==='turn/start');
+  assert.equal(turn.data.params.planningMode,true);
+  assert.equal(turn.data.params.threadId,'fixture-thread');
+  assert.equal(await page.getByTestId('session-workspace-path').innerText(),directory);
+  assert.equal(observed.calls.some(call=>['task.execute','task.roadmap.confirm','compute.resource.activate'].includes(call.method)||call.method==='agent.rpc'&&call.data.method==='thread/start'),false);
+  await shot(page,'planning-retains-saved-project-and-session-directory');
+ });
+
+ await check('planning-execution-preview-shows-existing-session-directory',async page=>{
+  const directory='/fixture/AIMatterLab/workfile/2026-11-20/task-1';
+  await page.evaluate(async directory=>{
+   const {default:RoadmapExecutionPanel}=await import('/frontend/features/workflows/RoadmapExecutionPanel.tsx');
+   const test=window.__test,invoke=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>{
+    if(method==='task.roadmap.list')return [];
+    if(method==='task.roadmap.preview'){
+     test.calls.push({method,data});
+     return {snapshot_sha256:'a'.repeat(64),snapshot:{task_id:data.taskId,name:'Saved plan',original_request:'Continue the original flow',
+      workspace:{choice:'session',id:'kept-workspace',root:directory},target:{project_id:'original-project',cluster_id:'original-queue',max_seconds:120},
+      initial:{},steps:[],goals:[]}};
+    }
+    return invoke(method,data);
+   };
+   window.testRoot.render(window.React.createElement(RoadmapExecutionPanel,{taskId:'planned-task',revision:'1',connected:true,configured:true,
+    cluster:true,nodes:[],environments:[],onRun(){}}));
+  },directory);
+  await page.getByTestId('roadmap-execution').locator('summary').first().click();
+  await page.getByTestId('roadmap-preview').click();
+  await page.getByTestId('roadmap-confirm').waitFor();
+  assert.equal(await page.getByText(directory,{exact:true}).isVisible(),true);
+  const operations=await page.evaluate(()=>window.__test.calls.filter(call=>call.method.startsWith('task.roadmap.')));
+  assert.deepEqual(operations.map(call=>call.method),['task.roadmap.preview']);
+  await shot(page,'planning-execution-preview-shows-existing-session-directory');
+ });
+
  await check('plan-experience-navigation-preserves-session-draft-and-reading-position',async page=>{
   await app(page);await page.locator('.composer textarea').fill('Unsent first conversation draft');
   await page.locator('.chat-scroll').evaluate(node=>{node.scrollTop=30;node.dispatchEvent(new Event('scroll'));});

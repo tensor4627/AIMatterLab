@@ -228,6 +228,9 @@ class SchedulerMixin:
         while not self.stop_event.wait(delay):
             try:
                 self.clusters.tick()
+                if getattr(self, 'ssh_service_mode', False):
+                    from studio_worker.tools.resource_tools import ResourceTools
+                    ResourceTools(self).tick()
                 failures, delay = 0, 15
             except Exception:
                 failures += 1

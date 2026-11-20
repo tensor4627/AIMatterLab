@@ -30,7 +30,7 @@ import {conversationSelectionHarness} from './conversation-selection-hooks.mjs';
 const source=fs.readFileSync(process.env.STUDIO_AGENT_SOURCE?path.resolve(process.env.STUDIO_AGENT_SOURCE):new URL('../../frontend/features/conversations/Agent.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const compileView=name=>ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/conversations/'+name+'.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
-const chatCompiled=compileView('ChatMessage'),messagesCompiled=compileView('ConversationMessages');
+const chatCompiled=compileView('ChatMessage'),messagesCompiled=compileView('ConversationMessages'),questionsCompiled=compileView('ComposerQuestion');
 export function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 export function memoryStorage(){const values=new Map();return {values,getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key)};}
 export function conversation(provider,threadId){return {id:provider+':'+threadId,provider,threadId,name:threadId,projectId:null,taskId:null};}
@@ -65,6 +65,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
   if(name==='react')return {useState,useRef,useEffect,Fragment:'fragment',memo:component=>component};
   if(name==='react/jsx-runtime'){const jsx=(type,props)=>typeof type==='function'?type(props):({type,props});return {jsx,jsxs:jsx,Fragment:'fragment'};}
   if(name==='./ConversationMessages'){const view={exports:{}};new Function('require','module','exports',messagesCompiled)(require,view,view.exports);return view.exports;}
+  if(name==='./ComposerQuestion'){const view={exports:{}};new Function('require','module','exports',questionsCompiled)(require,view,view.exports);return view.exports;}
   if(name==='./ChatMessage'){const child={exports:{}};new Function('require','module','exports',chatCompiled)(require,child,child.exports);return {default:props=>({type:'./ChatMessage',props:{...props,children:child.exports.default(props)}})};}
   if(name==='lucide-react')return new Proxy({},{get:(_target,key)=>String(key)});
   if(name==='../../ui/Notice'){

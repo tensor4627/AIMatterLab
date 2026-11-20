@@ -54,6 +54,10 @@ function namedChoices(source,candidates,aliases) {
   const matches=choices.size===1?named:ambiguous;
   for(const [id,choice] of choices)matches.set(id,choice);
  }
+ for(const candidate of candidates){
+  if(clauses(source).some(part=>part.includes(text(candidate.resourceId))&&/(?:不要|不用|别用|不再|排除|取消使用|不是|do not|don't|never|avoid|exclude)/iu.test(part)))
+   excluded.push(candidate);
+ }
  return {named:exact.length?exact:[...named.values()],ambiguous:exact.length?[]:[...ambiguous.values()],excluded};
 }
 
@@ -119,8 +123,17 @@ function resourceOption(label,choice,allowBare){
 
 export function createManagedComputeIntent(catalog){
  const turns=new Map();
+ const sameTarget=(left,right)=>left.resourceId===right.resourceId&&left.targetFingerprint===right.targetFingerprint;
+ function savedTargets(key,turn){
+  const previous=turn.selection??catalog?.get(choiceKind,key);
+  return previous?.projectId===turn.projectId&&Array.isArray(previous.targets)?previous.targets:[];
+ }
  function saveSelection(key,turn,selected){
-  const targets=selected.map(({resourceId,targetFingerprint})=>({resourceId,targetFingerprint}));
+  const previous=savedTargets(key,turn);
+  const targets=selected.map(item=>{
+   const chatAccess=item.chatAccess??previous.find(old=>sameTarget(old,item))?.chatAccess;
+   return {resourceId:item.resourceId,targetFingerprint:item.targetFingerprint,...chatAccess?.length?{chatAccess}:{}};
+  });
   turn.selection={projectId:turn.projectId,taskId:turn.taskId,targets};
   catalog?.put(choiceKind,key,turn.selection);
  }
@@ -142,19 +155,19 @@ export function createManagedComputeIntent(catalog){
    const choices=proposal.candidates.filter(choice=>exactAnswer(message,choice)||exactAnswer(message,{name:choice.resourceId})||exactAnswer(message,{name:choice.profileId})||chosen?.resourceId===choice.resourceId);
    if(choices.length===1)turn.answer={proposal,choice:choices[0]};
   }
-  // Persist identity only. An authenticated resource and its current project
-  // policy are checked afresh on every acquisition, including after restart.
-  const prior=previous?.projectId===turn.projectId&&previous?.taskId===turn.taskId?previous.selection:catalog?.get(choiceKind,key);
+  // The choice records the requested target and previously checked capability.
+  // A new channel still verifies authentication, identity and project policy.
+  const prior=previous?.projectId===turn.projectId?previous.selection:catalog?.get(choiceKind,key);
   const selected=turn.answer?[turn.answer.choice]:turn.named;
   if(selected.length&&!turn.ambiguous.length){
    saveSelection(key,turn,selected);
-  }else if(prior?.projectId===turn.projectId&&prior.taskId===turn.taskId&&Array.isArray(prior.targets)&&prior.targets.every(t=>t&&typeof t.resourceId==='string'&&typeof t.targetFingerprint==='string')){
+  }else if(prior?.projectId===turn.projectId&&Array.isArray(prior.targets)&&prior.targets.every(t=>t&&typeof t.resourceId==='string'&&typeof t.targetFingerprint==='string')){
    const obsolete=turn.ambiguous.length||freshTargetWording.test(message)||cancelSelection.test(message)||turn.excluded.some(c=>prior.targets.some(t=>t.resourceId===c.resourceId))||
     /(?:不要|别|不用|停止|撤销|取消|不再|stop|avoid|never).{0,15}(?:使用|用|连接|选择|这个资源|集群|\busing\b)/iu.test(message);
    if(obsolete)catalog?.remove(choiceKind,key);
    else {
     turn.selection=prior;
-    if(continuation.test(message)&&!negativeQuery.test(message)&&!/(?:改|换|选|指定|连接到|用|\buse\b|\bon\b)/iu.test(message))turn.retained=prior.targets;
+    if((continuation.test(message)||value.planningMode===true)&&!negativeQuery.test(message)&&!/(?:改|换|选|指定|连接到|用|\buse\b|\bon\b)/iu.test(message))turn.retained=prior.targets;
    }
   }
   turns.delete(key);
@@ -162,6 +175,38 @@ export function createManagedComputeIntent(catalog){
   if(turns.size>1024)turns.delete(turns.keys().next().value);
  }
  const current=scope=>turns.get(computeScopeKey(scope));
+ function permitsUse(scope,resource){
+  const turn=current(scope);
+  if(!turn||turn.projectId!==(scope.projectId??null)||turn.taskId!==(scope.taskId??null))return true;
+  if(turn.excluded.some(item=>item.resourceId===resource.resourceId))return false;
+  if(!freshTargetWording.test(turn.message)||!turn.named.length&&!turn.ambiguous.length)return true;
+  const selected=turn.answer?[turn.answer.choice]:turn.named;
+  return selected.some(item=>item.resourceId===resource.resourceId&&item.targetFingerprint===resource.targetFingerprint);
+ }
+ function continuesChannel(scope,resource,access){
+  const key=computeScopeKey(scope),turn=current(scope);
+  if(turn&&(turn.projectId!==(scope.projectId??null)||turn.pending&&!turn.answer))return false;
+  const record=turn?turn.selection:catalog?.get(choiceKind,key);
+  return record?.projectId===(scope.projectId??null)&&Array.isArray(record.targets)&&record.targets.some(target=>
+   sameTarget(target,resource)&&Array.isArray(target.chatAccess)&&target.chatAccess.includes(access))===true;
+ }
+ function recordChatChannel(scope,resource,access){
+  const key=computeScopeKey(scope),turn=current(scope);
+  if(!turn||turn.taskId!==null||scope.taskId||turn.projectId!==(scope.projectId??null))return;
+  const previous=savedTargets(key,turn),old=previous.find(target=>sameTarget(target,resource));
+  if(old?.chatAccess?.includes(access))return;
+  saveSelection(key,turn,[...previous.filter(target=>!sameTarget(target,resource)),
+   {...resource,chatAccess:[...(old?.chatAccess||[]),access]}]);
+ }
+ function releaseChannel(scope,resourceId){
+  const key=computeScopeKey(scope),turn=current(scope);
+  const previous=turn?.selection??catalog?.get(choiceKind,key);
+  if(previous?.projectId!==(scope.projectId??null)||!Array.isArray(previous.targets))return;
+  const targets=previous.targets.map(target=>target.resourceId===resourceId?{...target,chatAccess:[]}:target);
+  const selection={...previous,targets};
+  if(turn?.selection===previous)turn.selection=selection;
+  catalog?.put(choiceKind,key,selection);
+ }
  function assertTurn(scope,turn){if(!turn||current(scope)!==turn)fail('managed_compute_turn_changed');}
  function propose(scope,turn,proposal){
   assertTurn(scope,turn);
@@ -229,6 +274,7 @@ export function createManagedComputeIntent(catalog){
   if(turn&&!turn.pending&&turn.projectId===(scope.projectId??null)&&turn.taskId===(scope.taskId??null))
    turn.discovered={alias:null,save:false,candidates};
  }
- return {recordUserTurn,current,assertTurn,propose,confirmChoice,confirmQuestionChoice,bindResourceQuestion,observedChoices,acquired,
+ return {recordUserTurn,current,permitsUse,continuesChannel,recordChatChannel,releaseChannel,
+  assertTurn,propose,confirmChoice,confirmQuestionChoice,bindResourceQuestion,observedChoices,acquired,
   forget(provider,threadId){const key=computeScopeKey({provider,threadId});turns.delete(key);catalog?.remove(choiceKind,key);},clear:()=>turns.clear()};
 }

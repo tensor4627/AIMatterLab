@@ -56,6 +56,47 @@ async function mountLocalAttempt(page,{preview=false}={}){
 }
 
 export async function frontendWorkerUpgradeCases({check,out}){
+ await check('worker-upgrade-experience-original-chat-opens-frozen-graph',async page=>{
+  await page.evaluate(async()=>{
+   const f=window.__test,invoke=window.studio.invoke,roadmap=(await import('/tests/fixtures/workflow-roadmap.json')).default;
+   const workerBinding={kind:'ssh',version:2,profileId:'saved-ssh',profileVersion:1,root:'/fixture/jobs',hostIdentity:{hostname:'fixture',uid:1000,machineId:'fixture-machine'},runtime:'/fixture/jobs/old-worker',runtimeId:'old-worker'};
+   const task=f.task={id:'historical-graph',name:'Saved cluster workflow',provider:'codex',threadId:'historical-graph-chat',workflowVersion:2,projectId:'project',parameters:{},parameterRevision:1,steps:[],artifacts:[],roadmap,deployment:{revision:1,workerBinding,config:{target:'cluster',projectId:'project',targetId:'slurm',maxSeconds:60,resources:{}}}};
+   const chat={id:'codex:'+task.threadId,name:task.name,provider:task.provider,threadId:task.threadId,projectId:task.projectId,taskId:task.id};
+   const state={id:'a'.repeat(64),snapshot_sha256:'b'.repeat(64),task_id:task.id,status:'passed',confirmed_at:1,nodes:{},goals:[]};
+   f.graphCalls=[];f.historyOnline=false;
+   localStorage.setItem('studio.section','agent-task:'+task.id);localStorage.setItem('studio.conversation',chat.id);
+   window.studio.invoke=async(method,data)=>{
+    if(method==='task.list')return [task];
+    if(['conversation.list','conversation.select','conversation.remember'].includes(method))return method==='conversation.list'?[chat]:chat;
+    if(method==='worker.restore')return {...data,status:'disconnected',reason:'ssh_reconnect_required',sourceKind:'ssh',checkedAt:1};
+    if(method.startsWith('task.roadmap.')){
+     f.graphCalls.push({method,data});
+     if(data.taskId!==task.id)throw Error('Wrong graph owner');
+     if(method==='task.roadmap.list'){
+      if(!f.historyOnline)throw Error('Fixture SSH service is starting');
+      return [state];
+     }
+     if(method==='task.roadmap.snapshot'&&data.executionId===state.id)return {snapshot_sha256:state.snapshot_sha256,snapshot:{task_id:task.id,original_request:'Original frozen calculation request',target:{project_id:'project',cluster_id:'slurm',max_seconds:60},steps:[],initial:{},goals:[]}};
+     throw Error('Unexpected execution request');
+    }
+    return invoke(method,data);
+   };
+   return window.renderTest('App');
+  });
+  const panel=page.getByTestId('roadmap-execution');
+  await page.getByTestId('workflow-offline').waitFor();await panel.locator(':scope > summary').click();
+  await panel.getByRole('alert').filter({hasText:'Fixture SSH service is starting'}).waitFor();
+  assert.equal(await panel.getByText('这张流程图暂无执行回执。',{exact:true}).count(),0);
+  await page.evaluate(()=>{window.__test.historyOnline=true;});
+  await panel.getByRole('button',{name:'刷新回执',exact:true}).click();
+  const receipt=panel.getByRole('region',{name:'执行回执',exact:true});
+  await receipt.getByText('通过 · aaaaaaaaaaaa',{exact:true}).waitFor();
+  await receipt.getByText('查看已冻结快照',{exact:true}).click();
+  await receipt.getByText('Original frozen calculation request',{exact:true}).waitFor();
+  assert.equal(await panel.getByTestId('roadmap-preview').isDisabled(),true);
+  assert.equal(await panel.getByTestId('roadmap-confirm').count(),0);
+  assert.deepEqual(await page.evaluate(()=>window.__test.graphCalls.map(call=>call.method)),['task.roadmap.list','task.roadmap.list','task.roadmap.snapshot']);
+ });
  await check('worker-upgrade-experience-healthy-old-warning-explicit-update-progress-result',async page=>{
   await page.setViewportSize({width:1024,height:768});await mountUpgradeApp(page);const notice=page.getByTestId('worker-service-version'),upgrade=page.getByTestId('worker-service-upgrade');await upgrade.waitFor();assert.equal(await notice.getAttribute('open'),null);await page.getByTestId('worker-service-version-summary').focus();await page.keyboard.press('Enter');assert.match(await notice.locator('p').innerText(),/当前服务可继续使用已有工具和提交获准的任务/);await page.screenshot({path:path.join(out,'worker-version-warning-details.png')});await page.keyboard.press('Enter');assert.equal(await notice.getAttribute('open'),null);assert((await notice.boundingBox()).height<90);assert.equal((await updates(page)).length,0);await page.screenshot({path:path.join(out,'worker-version-warning-upgrade-entry.png')});
   await page.locator('nav [data-testid="navigate-runs"]:visible').click();await page.waitForFunction(()=>!document.querySelector('.job-record-open')?.disabled);await page.locator('.job-record-open').first().click();await page.getByTestId('execute-reviewed').waitFor();assert.equal(await page.getByTestId('execute-reviewed').isEnabled(),true,'version warning must not disable an authorized task');await page.screenshot({path:path.join(out,'worker-old-version-authorized-task.png')});

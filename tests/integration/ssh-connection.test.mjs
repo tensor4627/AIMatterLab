@@ -62,6 +62,34 @@ test('the real main renderer bridge blocks new-mode save/test/probe on old worke
  saved={...profile,auth_mode:'key',proxy_jump:[]};await callback({method:'POST',target:'/api/clusters',data:saved});await callback({method:'POST',target:'/api/cluster/probe',data:{cluster_id:'saved'}});assert(calls.some(c=>c.target==='/api/clusters'));assert(calls.some(c=>c.target==='/api/cluster/probe'));
 });
 
+test('project permissions from resource tool setup stay on the reviewed SSH bridge and selection',async()=>{
+ const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'utf8');
+ const ast=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+ let callback;
+ function visit(node){
+  if(ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='worker.request')vm.runInNewContext(node.getText(ast),context);
+  ts.forEachChild(node,visit);
+ }
+ const projectScope={connectionId:'original-master',profileId:'fixture-resource',profileVersion:4};
+ let selection={kind:'ssh-connection',...projectScope},owner=1;
+ const approved={status:'connected',sourceKind:'ssh',...projectScope},calls=[];
+ let observe=async()=>approved;
+ const worker={connection:{},connectionEpoch:1,request:async(method,target,data)=>{calls.push({method,target,data});return {id:'reviewed-project'};}};
+ const context={handle:(_name,fn)=>{callback=fn;},URL,worker,settings:{},catalog:{put:()=>{}},assertRendererWorkerRoute,
+  readWorkerStatus:()=>observe(),workflowContext:{revision:()=>owner},computeResource:{capture:()=>({selection}),assertCurrent:hold=>{if(hold.selection!==selection)throw Error('Selection changed');}}};
+ visit(ast);
+ const apply=()=>callback({method:'POST',target:'/api/projects',data:{name:'Reviewed project'},projectScope});
+ observe=async()=>({...approved,connectionId:'unrelated-master'});await assert.rejects(apply(),/project_edit_unavailable/);
+ const pending=deferred();observe=()=>pending.promise;const old=apply();worker.connection={};worker.connectionEpoch++;pending.resolve(approved);await assert.rejects(old,/project_edit_unavailable/);
+ const pendingOwner=deferred();observe=()=>pendingOwner.promise;const oldOwner=apply();owner++;pendingOwner.resolve(approved);await assert.rejects(oldOwner,/project_edit_unavailable/);
+ const pendingSelection=deferred();observe=()=>pendingSelection.promise;const oldSelection=apply();selection={...selection,profileVersion:5};pendingSelection.resolve(approved);await assert.rejects(oldSelection,/project_edit_unavailable/);
+ assert.deepEqual(calls,[]);
+ selection={kind:'ssh-connection',...projectScope};observe=async()=>approved;
+ await assert.rejects(callback({method:'POST',target:'/api/cluster/probe',projectScope}),/Invalid scoped project request/);
+ await apply();
+ assert.deepEqual(calls,[{method:'POST',target:'/api/projects',data:{name:'Reviewed project'}}]);
+});
+
 function clusterHarness({serviceVersion='current',override,runPage=false,selectedClusterId}={}){
  const hooks=[],effects=[],calls=[],auth=[],errors=[],terminal=[],updates=[],agents=[],props={id:'prepared-run',worker:true,serviceVersion,selectedClusterId,settings:{},project:{id:'project',name:'Fixture project',policy:{clusters:['other'],input_roots:['/fixture'],max_seconds:60}},onAuthenticate:r=>auth.push(r),onOpenConnections:source=>updates.push(source),onConnectCompute:async()=>updates.push('guide'),onTerminal:id=>terminal.push(id),onError:e=>errors.push(e),onRefresh:()=>{},onAgent:text=>agents.push(text),onRun:()=>{}};
  let stored={...profile,environment:{executables:{python:'/usr/bin/python3'}},scheduler:'slurm',remote_root:'~/fixture-runs',read_roots:[],queue:'fixture',activation:'',limits:{cpus:1,gpus:0,memory_mb:1024}},cursor=0,dirty=false,tree,disposed=false;

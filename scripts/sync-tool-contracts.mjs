@@ -14,6 +14,9 @@ const resources=[
  {source:'contracts/tools/tool-package.mjs',resource:'developer/skills/studio-tool-integration/references/tool-package.mjs',text:true,validate:value=>value.includes('export function validateToolPackage(')&&value.includes("from './tool-package.schema.json'")},
  {source:'contracts/tools/aimlab-tools.mjs',resource:'developer/skills/studio-tool-integration/references/aimlab-tools.mjs',text:true,validate:value=>value.includes('export function validateAimlabTools(')&&value.includes("from './tool-package.mjs'")},
  {source:'installation/examples/worker-smoke.py',resource:'developer/skills/studio-tool-integration/assets/worker-smoke.py',text:true,validate:value=>value.trim().length>0},
+ {source:'contracts/workflows/task-draft.schema.json',resource:'backend/worker/studio_worker/transport/task_draft_schema.py',
+  validate:value=>value?.type==='object'&&value.required.includes('task_id')&&value.additionalProperties===false,
+  render:source=>Buffer.from("# Generated from contracts/workflows/task-draft.schema.json by sync-tool-contracts.mjs.\nimport json\n\nTASK_DRAFT_SCHEMA = json.loads(r'''"+source.toString('utf8').replaceAll('\r\n','\n').trimEnd()+"''')\n")},
  {source:'contracts/workflows/roadmap.schema.json',resource:'backend/worker/studio_worker/transport/roadmap_schema.py',
   validate:value=>value?.$id==='studio.workflow-roadmap/1'&&value.additionalProperties===false,
   render:source=>Buffer.from("# Generated from contracts/workflows/roadmap.schema.json by sync-tool-contracts.mjs.\nimport json\n\nROADMAP_SCHEMA = json.loads(r'''"+source.toString('utf8').replaceAll('\r\n','\n').trimEnd()+"''')\n")}

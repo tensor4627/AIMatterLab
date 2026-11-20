@@ -89,3 +89,7 @@
 .roadmap-execution p{margin:4px 0}
 .agent-task-page [data-field],.agent-task-page .workflow-requirements,.agent-task-page [id^="tool-flow-step-"]{scroll-margin-top:var(--workflow-header-height,0px)}
 @media(max-height:550px){.workflow-pinned-heading{padding:4px 0}.roadmap-canvas{max-height:clamp(68px,20vh,108px)}}
+.roadmap-execution .roadmap-missing-tools{display:block;margin-block:12px}
+.roadmap-missing-tools ul{margin:8px 0;padding-inline-start:20px}
+.roadmap-missing-tools li{overflow-wrap:anywhere}
+.roadmap-missing-tools li p{margin:3px 0 6px;color:var(--muted)}

@@ -19,6 +19,9 @@ import {resumedEffort,importedCodexSelection,readCodexDefaultsCatalog} from "./r
 import {upsertItemMessage,replayMessages} from './message-mapping.mjs';
 import {createReadingPositions,readingKey} from './reading-position.mjs';
 import {elicitationHasEditableInput} from './elicitation-input.mjs';
+import ComposerQuestion,{composerQuestionItems,initialQuestionProgress,type QuestionProgress} from './ComposerQuestion';
+import SessionWorkspace from './SessionWorkspace';
+import TerminalWorkspaceApproval from './TerminalWorkspaceApproval';
 
 import ProviderLogin from "../settings/ProviderLogin";
 import LoadingFeedback from "../../ui/LoadingFeedback";
@@ -32,14 +35,17 @@ import type {ComputeResourceState} from '../../../contracts/dto/compute';
 import {invoke} from '../../api/studio';
 import {recoverConversation} from '../../api/agent';
 import {type RpcEvent,type AgentProvider,type Conversation} from '../../../contracts/dto/agent';
-import {type AgentIntent,type SkillAttachment} from './agent-types';
+import {type AgentIntent,type SkillAttachment,type MissingWorkflowToolQuestion} from './agent-types';
 type ModelCall={requestId:string;provider:AgentProvider;model:string;threadId:string;turnId:string|null;output:boolean;status:string};
 type Message=ChatMessageValue;
 type DraftSnapshot=ReturnType<ReturnType<typeof createComposerDrafts>['capture']>;
 type SendFlight={provider:AgentProvider;threadId:string|null;turnId:string|null;phase:'preparing'|'submitted';cancelled:boolean;interrupting:boolean;interruptSent:boolean;current:()=>boolean;draft:DraftSnapshot;restoreDraft?:DraftSnapshot;text:string};
 type HistoryLoad={provider:AgentProvider;threadId:string;projectId?:string;status:'loading'|'failed';error?:string};
 type SessionTurn={threadId:string;busy:boolean;turnId:string|null;requests?:RpcEvent[]};
-const isUserInputRequest=(request:RpcEvent)=>request.method==='item/tool/requestUserInput'&&Array.isArray(request.params?.questions);
+const isUserInputRequest=(request:RpcEvent)=>composerQuestionItems(request).length>0;
+const questionKey=(request:RpcEvent)=>JSON.stringify([request.provider||'codex',request.params?.threadId||null,String(request.id)]);
+const questionStamp=(request:RpcEvent)=>JSON.stringify([request.method,request.params?.turnId,request.params?.itemId,composerQuestionItems(request)]);
+type QuestionDraft={request:RpcEvent;stamp:string;progress:QuestionProgress;pending:boolean};
 type CodexVersionWarning={installedVersion:string;baselineVersion:string};
 const versionNoticeStorageKey='studio.codexVersionNotice.shown';
 const versionNoticeSessions=new WeakSet<Storage>();
@@ -77,7 +83,7 @@ function sshResourceReady(resource:ComputeResourceState|null|undefined,tools:Age
  const workflow=resource.workflowReady===true&&resource.managedRuns===true&&resource.authentication==='verified';
  return workflow?tools.scope!=='terminal-only':tools.scope==='terminal-only';
 }
-export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,onCollapse,conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,onConversation,onBusyChange,onNewConversation,hidden,visibleWorkflowId,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onReviewWorker,onOpenCluster,onOpenOriginalRun,computeResource,onComputeResource}:{setupProviderChoice?:{provider:AgentProvider;nonce:string};onSetupReply?:(reply:{provider:AgentProvider;model:string}|null)=>void;onComputeResource?:(state:ComputeResourceState)=>void;onOpenHistory?:()=>void;onCollapse?:()=>void;computeResource?:ComputeResourceState|null;onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;onReviewWorker?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:SessionSelection;onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean;visibleWorkflowId?:string|null}){
+export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,onCollapse,conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,selectedLocalConversation,isLocalConversationCurrent,onConversation,onBusyChange,onNewConversation,hidden,visibleWorkflowId,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onReviewWorker,onOpenCluster,onOpenOriginalRun,computeResource,workspaceProfileId,onComputeResource,onReviewResourceTool,missingWorkflowToolQuestion}:{setupProviderChoice?:{provider:AgentProvider;nonce:string};onSetupReply?:(reply:{provider:AgentProvider;model:string}|null)=>void;onComputeResource?:(state:ComputeResourceState)=>void;onOpenHistory?:()=>void;onReviewResourceTool?:()=>void;missingWorkflowToolQuestion?:MissingWorkflowToolQuestion;workspaceProfileId?:string;onCollapse?:()=>void;computeResource?:ComputeResourceState|null;onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;onReviewWorker?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:SessionSelection;selectedLocalConversation?:Pick<Conversation,'provider'|'threadId'>|null;isLocalConversationCurrent?:()=>boolean;onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean;visibleWorkflowId?:string|null}){
  const draftsRef=useRef<ReturnType<typeof createComposerDrafts>|null>(null);if(!draftsRef.current){draftsRef.current=createComposerDrafts(()=>localStorage);const selected=sessionSelection?.conversation;if(selected)draftsRef.current.activate(selected.provider,selected.threadId);else if(sessionSelection?.new)draftsRef.current.activate(draftsRef.current.owner().provider,null,true);}const drafts=draftsRef.current;
  const [needsAuth,setNeedsAuth]=useState(false);
  const [nativeDefaults,setNativeDefaults]=useState<NativeCodexDefaults|null>(null);
@@ -153,10 +159,22 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  function stopSend(){const flight=activeSend.current;if(!flight){void stopViewedTurn();return;}if(!flight.current()){setSendNotice(t('请求归属已变化，未发送停止命令；请在原对话核对执行状态。'));return;}flight.cancelled=true;restoreStoppedDraft(flight);if(flight.phase==='preparing'){activeSend.current=null;sendOwner.current=null;setBusy(false);setStopStatus(null);setSendNotice(t('已取消发送准备，草稿已保留。'));return;}if(!flight.turnId){setStopStatus('waiting');setSendNotice(t('正在确认消息是否已提交，确认后停止；草稿已保留。'));return;}void interruptFlight(flight);}
  async function retryHistory(){if(!historyLoad||applying||connecting)return;const target=historyLoad,seq=++selectionSeq.current,different=target.provider!==providerRef.current;setHistoryLoad({...target,status:'loading',error:undefined});if(different&&!await selectProvider(target.provider,seq)){if(seq===selectionSeq.current)setHistoryLoad({...target,status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}if(!await connect(false,seq,false,target.threadId)){if(seq===selectionSeq.current)setHistoryLoad({...target,status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}if(seq===selectionSeq.current)await resume(target.threadId,seq,target.projectId);}
  const [requests,applyRequests]=useState<RpcEvent[]>([]),[answers,setAnswers]=useState<Record<string,Record<string,{value:string;option:boolean}>>>({}),[responding,setResponding]=useState<Set<string>>(new Set());
+ const [missingToolProgress,setMissingToolProgress]=useState<{id:string;value:QuestionProgress}|null>(null);
+ const missingToolRef=useRef(missingWorkflowToolQuestion);missingToolRef.current=missingWorkflowToolQuestion;
+ const answeredMissingTool=useRef<string|null>(null);
  const requestsRef=useRef(requests);
  const mounted=useRef(false);
  function setRequests(value:RpcEvent[]|((previous:RpcEvent[])=>RpcEvent[])){const next=typeof value==='function'?value(requestsRef.current):value;requestsRef.current=next;applyRequests(next);}
  const requestScopes=useRef(new WeakMap<RpcEvent,string>()),requestOwners=useRef(new WeakMap<RpcEvent,{sequence:number;nonce:string|undefined}>()),requestSerial=useRef(0),responseFlights=useRef(new Set<string>());
+ const questionDrafts=useRef(new Map<string,QuestionDraft>()),[,redrawQuestions]=useState(0);
+ function restoreQuestion(request:RpcEvent){
+  const key=questionKey(request),stamp=questionStamp(request),previous=questionDrafts.current.get(key);
+  if(previous?.stamp===stamp){previous.request=request;return previous;}
+  const draft={request,stamp,progress:initialQuestionProgress,pending:false};questionDrafts.current.set(key,draft);return draft;
+ }
+ function forgetQuestions(provider:AgentProvider,threadId?:string,requestId?:string){
+  for(const [key,{request}] of questionDrafts.current)if((request.provider||'codex')===provider&&(!threadId||request.params?.threadId===threadId)&&(requestId===undefined||String(request.id)===requestId))questionDrafts.current.delete(key);
+ }
  function requestScope(request:RpcEvent){let key=requestScopes.current.get(request);if(!key){key=JSON.stringify([request.provider||providerRef.current,request.params?.threadId||threadRef.current,request.id,++requestSerial.current]);requestScopes.current.set(request,key);requestOwners.current.set(request,{sequence:selectionSeq.current,nonce:sessionNonceRef.current});}return key;}
  function answer(request:RpcEvent,id:string){return answers[requestScope(request)]?.[id]?.value||'';}
  function editAnswer(request:RpcEvent,id:string,value:string,option=false){if(!requestsRef.current.includes(request))return;const key=requestScope(request);setAnswers(previous=>({...previous,[key]:{...previous[key],[id]:{value,option}}}));}
@@ -200,6 +218,12 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   const initialSeq=selectionSeq.current;void invoke('state').then(state=>{if(initialSeq!==selectionSeq.current||providerTouched.current)return;const selected=(drafts.owner().threadId||drafts.text()?drafts.owner().provider:state.settings?.agentProvider||'codex') as AgentProvider;selectDraft(selected,drafts.owner().provider===selected?drafts.owner().threadId:null);setProvider(selected);providerRef.current=selected;setThreads([]);const a=selected==='codex'?state.settings?.agent||{}:state.settings?.agentProviders?.[selected]||{};setContextWindow(a.contextWindow?.toString()||'');setCompactLimit(a.compactLimit?.toString()||'');setEffort(storedPreference('studio.effort.'+selected)||a.effort||'');}).catch(()=>{});
   mounted.current=true;
   const unsubscribe=window.studio?.onEvent(event=>{
+   const eventProvider=event.provider||'codex';
+   if(event.method==='studio/conversationDeleted')forgetQuestions(event.params.provider||eventProvider,event.params.threadId);
+   if(event.method==='studio/conversationContextChanged')forgetQuestions(eventProvider,event.params.oldThreadId);
+   if(event.method==='serverRequest/resolved')forgetQuestions(eventProvider,event.params?.threadId,String(event.params?.requestId));
+   if(event.method==='turn/completed'||event.method==='studio/codexDisconnected')forgetQuestions(eventProvider,event.params?.threadId);
+   if(event.id!==undefined)questionDrafts.current.delete(questionKey(event));
    if(event.method==='studio/conversationDeleted'){readingPositions.current?.discard(readingKey(event.params.provider||event.provider||'codex',event.params.threadId));setPrompt(drafts.discard(event.params.provider||event.provider||'codex',event.params.threadId));}
    if(event.method==='studio/conversationContextChanged'){const p=event.params;setPrompt(drafts.rekey(p.conversation.provider,p.oldThreadId,p.conversation.threadId));}
    if((event.provider||'codex')!==providerRef.current)return;
@@ -225,7 +249,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(event.method==='studio/accountUpdated'){if(event.params?.credentialsChanged){setupReplyRef.current?.(null);setConnected(false);setModels([]);setModel('');setNeedsAuth(false);void refreshAccount();}else void refreshAccount();}
    if(event.method==='studio/configUpdated'){const selectedProvider=providerRef.current,seq=selectionSeq.current;void invoke('agent.rpc',{provider:selectedProvider,method:'model/list'}).then(m=>{if(seq===selectionSeq.current&&selectedProvider===providerRef.current)setModels(m.data||[]);}).catch(error=>{if(seq===selectionSeq.current&&selectedProvider===providerRef.current)onError(error);});}
    if(event.method==='studio/taskUpdated'&&event.params?.task?.threadId===threadRef.current)setWorkflowId(event.params.task.id);
-   if(event.id!==undefined){requestScope(event);setRequests(prev=>[...prev.filter(r=>r.id!==event.id),event]);return;}
+   if(event.id!==undefined){requestScope(event);if(isUserInputRequest(event))restoreQuestion(event);setRequests(prev=>[...prev.filter(r=>String(r.id)!==String(event.id)),event]);return;}
    const p=event.params||{};
    if(event.method==='studio/serviceNotification'&&p.message){setMessages(old=>upsertItemMessage(old,p.message));return;}
    if(event.method==='studio/agentTurnState'){
@@ -245,7 +269,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
     const id=p.itemId||'agent',existing=prev.find(m=>m.id===id);
     return existing?prev.map(m=>m.id===id?{...m,text:m.text+(p.delta||'')}:m):[...prev,{id,role:'agent',text:p.delta||''}];
    });
-   if(['item/started','item/completed'].includes(event.method)&&p.item&&['mcpToolCall','commandExecution','fileChange','agentMessage'].includes(p.item.type))setMessages(prev=>upsertItemMessage(prev,{...p.item,status:p.item.status||(event.method==='item/completed'?'completed':'inProgress')}));
+   if(['item/started','item/completed'].includes(event.method)&&p.item&&['mcpToolCall','webSearch','commandExecution','fileChange','agentMessage'].includes(p.item.type))setMessages(prev=>upsertItemMessage(prev,{...p.item,status:p.item.status||(event.method==='item/completed'?'completed':'inProgress')}));
    if(event.method==='thread/tokenUsage/updated')setUsage(p.tokenUsage);
    if(event.method==='turn/started'){const flight=activeSend.current;if(flight?.phase==='submitted'&&flight.current()&&flight.threadId===p.threadId&&typeof p.turn?.id==='string'){flight.turnId=p.turn.id;if(flight.cancelled)void interruptFlight(flight);}setBusy(true);setTurn(p.turn?.id);const call=modelCallRef.current;if(call?.status==='in_progress'&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&!call.turnId&&typeof p.turn?.id==='string')call.turnId=p.turn.id;}
    if(event.method==='turn/completed'){const call=modelCallRef.current;const flight=activeSend.current;if(flight&&flight.threadId===p.threadId&&flight.turnId===p.turn?.id){if(flight.cancelled)restoreStoppedDraft(flight);activeSend.current=null;}setStopStatus(null);setBusy(false);setTurn(null);setRequests([]);if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId&&call.turnId===p.turn?.id){call.status=p.turn.status==='completed'&&!p.turn.error&&call.output?'passed':'failed';setModelCall({...call});if(call.status==='passed')setupReplyRef.current?.({provider:call.provider,model:call.model});}if(p.turn?.error)onError(p.turn.error.message||p.turn.error);}
@@ -312,7 +336,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  useEffect(()=>{
   if(!setupProviderChoice)return;
   pendingSetupProvider.current=setupProviderChoice.provider;
-  if(!threadRef.current&&!drafts.text()&&!busy&&!connecting&&!applying&&providerRef.current!==setupProviderChoice.provider)
+  if(!selectedLocalConversation&&!sessionSelection?.conversation&&!threadRef.current&&!drafts.text()&&!busy&&!connecting&&!applying&&providerRef.current!==setupProviderChoice.provider)
    void selectProvider(setupProviderChoice.provider,undefined,false);
  },[setupProviderChoice?.nonce]);
  async function selectProvider(value:AgentProvider,selectedSeq?:number,persist=true){
@@ -323,7 +347,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   setVersionWarning(null);
   try{setNeedsAuth(false);if(!managed)await invoke('conversation.select',{new:true,provider:value});if(!current())return false;if(persist&&!managed)await invoke('settings',{agentProvider:value});if(!current())return false;}catch(e){if(current())onError(e);return false;}
   leaveDisplayedTurn();
-  pendingSetupProvider.current=null;modelCallRef.current=null;setModelCall(null);if(!managed)selectDraft(value);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);if(!managed)setHistoryLoad(null);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(storedPreference('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);return true;
+  pendingSetupProvider.current=null;modelCallRef.current=null;setModelCall(null);if(!managed)selectDraft(value);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);if(!managed)setHistoryLoad(null);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(storedPreference('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);if(!managed)conversationRef.current?.(null,sessionNonceRef.current);return true;
  }
  async function selectModel(value:string){
   modelCallRef.current=null;setModelCall(null);
@@ -355,7 +379,13 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    const resumedModel=r.model||modelRef.current||catalog.data.find((entry:any)=>entry.isDefault)?.model||catalog.data[0]?.model||'';
    const receipt:SessionTurn|undefined=read.studioSession,latest=observedTurn.current as SessionTurn|null,active=latest?.threadId===id?latest:receipt;
    if(active?.threadId===id){setBusy(active.busy);setTurn(active.turnId);}
-   if(receipt?.requests&&active?.busy)setRequests(current=>[...new Map([...receipt.requests!,...current].filter(request=>!resolvedRequests.current.has(String(request.id))).map(request=>[String(request.id),request])).values()]);
+   if(receipt?.requests&&active?.busy){
+    const requests=[...new Map([...receipt.requests,...requestsRef.current].filter(request=>!resolvedRequests.current.has(String(request.id))).map(request=>[String(request.id),request])).values()];
+    const activeKeys=new Set(requests.filter(isUserInputRequest).map(questionKey));
+    for(const [key,{request}] of questionDrafts.current)if((request.provider||'codex')===selectedProvider&&request.params?.threadId===id&&!activeKeys.has(key))questionDrafts.current.delete(key);
+    for(const request of requests)if(isUserInputRequest(request))restoreQuestion(request);
+    setRequests(requests);
+   }else if(!active?.busy)forgetQuestions(selectedProvider,id);
    setThread(id);threadRef.current=id;setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+resumedModel)||storedPreference('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));setMessages(live=>mergeResumedMessages(list,live));setHistoryLoad(null);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation,nonce);
   }catch(e){if(current()){const error=redactTranscriptText(e instanceof Error?e.message:String(e));if(rebuild)setRecovery({threadId:pendingResume.current||id,error});else setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'failed',error});}}finally{if(current()){pendingResume.current=null;selectionPending.current=false;setApplying(false);}}
  }
@@ -419,7 +449,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(terminalSelected&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
    let taskId=action.taskId||conversation.taskId;
    const fresh=newWorkflow||explicitNewWorkflow(text);
-   if((turnPlanning||fresh)&&!action.reviewMode&&(!terminalSelected||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only'){const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:selectedProvider,request:text,projectId:conversation.projectId||projectId||null});if(!preparing())return;taskId=task.id;openTaskRef.current?.(task.id);}
+   if((turnPlanning||fresh)&&!action.reviewMode&&(!terminalSelected||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only'){const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:selectedProvider,request:text,projectId:conversation.projectId??null});if(!preparing())return;taskId=task.id;openTaskRef.current?.(task.id);}
    if(terminalSelected&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
    setWorkflowId(taskId||null);setNewWorkflow(false);
     followLatest();setMessages(prev=>[...prev,{id:(optimisticId=crypto.randomUUID()),role:'user',text,justSent:true}]);
@@ -446,18 +476,65 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    setUsage(null);setApplied(t('已应用；实际窗口以服务回报为准'));
   }catch(e){if(current())onError(e);}finally{if(current())setApplying(false);}
  }
+ function canRespond(request:RpcEvent){
+  const key=requestScope(request),owner=requestOwners.current.get(request)!;
+  return !sessionPendingRef.current&&!selectionPending.current&&owner.sequence===selectionSeq.current&&owner.nonce===sessionNonceRef.current&&!responseFlights.current.has(key)&&requestsRef.current.includes(request)&&(!request.provider||request.provider===providerRef.current)&&(!request.params?.threadId||request.params.threadId===threadRef.current);
+ }
+ function changeQuestion(request:RpcEvent,index:number,update:(current:QuestionProgress)=>QuestionProgress,submit=false){
+  if(!canRespond(request)||requestsRef.current.find(isUserInputRequest)!==request)return;
+  const draft=questionDrafts.current.get(questionKey(request));
+  if(draft?.request!==request||draft.pending||draft.progress.index!==index)return;
+  const next=update(draft.progress);
+  if(!submit){draft.progress=next;redrawQuestions(value=>value+1);return;}
+  const questions=composerQuestionItems(request),finished=(id:string)=>{const answer=next.answers[id];return answer&&(answer.kind==='skipped'||answer.value.trim());};
+  if(!finished(questions[index].id))return;
+  const nextIndex=index<questions.length-1?index+1:questions.findIndex(question=>!finished(question.id));
+  draft.progress=nextIndex<0?next:{...next,index:nextIndex,highlight:undefined};
+  redrawQuestions(value=>value+1);
+  if(nextIndex>=0)return;
+  if(request.method==='studio/question'){
+   const answer=next.answers[questions[0].id];void respond(request,answer.kind==='choice'?{optionId:answer.value}:{});return;
+  }
+  const answers=Object.fromEntries(questions.flatMap(({id})=>{const answer=next.answers[id];return answer.kind==='skipped'?[]:[[id,{answers:[answer.kind==='text'?answer.value.trim():answer.value]}]];}));
+  void respond(request,{answers});
+ }
  async function respond(request:RpcEvent,result:any){
-   const key=requestScope(request),owner=requestOwners.current.get(request)!,selectedProvider=providerRef.current,selectedThread=threadRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current;
-   if(sessionPendingRef.current||selectionPending.current||owner.sequence!==seq||owner.nonce!==nonce||responseFlights.current.has(key)||!requestsRef.current.includes(request)||request.provider&&request.provider!==selectedProvider||request.params?.threadId&&request.params.threadId!==selectedThread)return;
+   if(!canRespond(request))return;
+   const key=requestScope(request),selectedProvider=providerRef.current,selectedThread=threadRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current;
+   const questionId=questionKey(request),question=isUserInputRequest(request)?questionDrafts.current.get(questionId):undefined;
+   if(question?.pending)return;
+   if(question)question.pending=true;
    const current=()=>seq===selectionSeq.current&&nonce===sessionNonceRef.current&&selectedProvider===providerRef.current&&selectedThread===threadRef.current&&requestsRef.current.includes(request);
    responseFlights.current.add(key);setResponding(previous=>new Set(previous).add(key));
-   try{await invoke('agent.respond',{provider:selectedProvider,threadId:selectedThread,id:request.id,result});if(!current())return;clearAnswers(key);setRequests(prev=>prev.filter(r=>r!==request));}catch(e){if(current())onError(e);}finally{responseFlights.current.delete(key);if(seq===selectionSeq.current&&nonce===sessionNonceRef.current)setResponding(previous=>{const next=new Set(previous);next.delete(key);return next;});}
+   try{
+    await invoke('agent.respond',{provider:selectedProvider,threadId:selectedThread,id:request.id,result});
+    if(question&&questionDrafts.current.get(questionId)===question){questionDrafts.current.delete(questionId);setRequests(prev=>prev.filter(r=>r!==question.request));}
+    if(current()){clearAnswers(key);setRequests(prev=>prev.filter(r=>r!==request));}
+   }catch(e){if(current())onError(e);}finally{
+    responseFlights.current.delete(key);
+    if(question&&questionDrafts.current.get(questionId)===question){question.pending=false;redrawQuestions(value=>value+1);}
+    if(seq===selectionSeq.current&&nonce===sessionNonceRef.current)setResponding(previous=>{const next=new Set(previous);next.delete(key);return next;});
+   }
  }
  const providerLabel=provider==='codex'?'Codex':provider==='kimi'?'Kimi':provider==='deepseek'?'DeepSeek API':provider==='compatible'?t('自定义 API'):'Qwen';
  const optionSummary=[providerLabel,models.find(m=>m.model===model)?.displayName||model,effort].filter(Boolean).join(' · ');
  const composerOwner=drafts.owner(),composerUnbound=composerOwner.provider!==provider||composerOwner.threadId!==thread;
  const historyHidden=!!historyLoad||!!(sessionSelection&&handledSelection.current!==sessionSelection.nonce)||!!sessionSelection?.pending;
  const composerQuestions=historyHidden?[]:requests.filter(isUserInputRequest);
+ const composerQuestion=composerQuestions[0],questionDraft=composerQuestion?questionDrafts.current.get(questionKey(composerQuestion)):undefined;
+ const sessionWorkspaceProfile=workspaceProfileId||(computeResource?.kind==='ssh-connection'?computeResource.profileId:null);
+ const localConversation=sessionSelection?.pending?null:selectedLocalConversation===undefined?sessionSelection?.conversation||(thread?{provider,threadId:thread}:null):selectedLocalConversation;
+ const localOwner=localConversation?JSON.stringify([localConversation.provider,localConversation.threadId,sessionWorkspaceProfile,computeResource?.selectionId]):null;
+ const localOwnerRef=useRef(localOwner);localOwnerRef.current=hidden?null:localOwner;
+ const localNonce=sessionSelection?.nonce;
+ const localCurrent=()=>!!localOwner&&localOwnerRef.current===localOwner&&localNonce===sessionNonceRef.current&&!sessionPendingRef.current&&isLocalConversationCurrent?.()!==false;
+ const missingTool=!composerQuestion&&localConversation&&missingWorkflowToolQuestion?.provider===localConversation.provider&&missingWorkflowToolQuestion.threadId===localConversation.threadId?missingWorkflowToolQuestion:null;
+ const setupToolLabel=t('让 Agent 配置');
+ const missingRequest:RpcEvent|null=missingTool?{method:'item/tool/requestUserInput',id:missingTool.id,params:{questions:[{id:'action',question:t('流程缺少工具')+' · '+missingTool.tool,options:[{label:setupToolLabel},{label:t('稍后')}]}]}}:null;
+ const stopTitle=t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续');
+ const stopControl=busy?<button type="button" className="send agent-stop-action" data-testid="agent-stop" disabled={stopStatus==='waiting'||stopStatus==='stopping'||!activeSend.current&&!turn} title={stopTitle} aria-label={stopTitle} onClick={stopSend}>
+  <Square size={13}/><span>{t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次停止':activeSend.current?.phase==='preparing'?'取消准备':'停止')}</span>
+ </button>:null;
  return <aside className="agent-panel" style={{width,display:hidden?'none':undefined}}>
   <div className={"agent-top-surface"+(options?" is-expanded":"")}>
   <div className="panel-heading agent-heading"><span className="agent-heading-title"><Sparkles size={16}/>{threads.find(value=>value.id===thread)?.name||tr("科研助手")}</span>{!options&&<span className="agent-collapsed-summary" data-testid="agent-options-summary" title={optionSummary}>{optionSummary}</span>}<div className="agent-header-actions">{onOpenHistory&&<button className="icon-button" data-testid="agent-history" aria-label={t('历史会话')} title={t('历史会话')} onClick={onOpenHistory}><History size={16}/></button>}{onCollapse&&<button className="icon-button" aria-label={t('收起助手')} title={t('收起助手')} onClick={onCollapse}><PanelRightClose size={16}/></button>}<button className="icon-button" data-testid="agent-options" title={t("Agent 选项")} aria-label={t("Agent 选项")} aria-expanded={options} aria-controls="agent-options-region" onClick={()=>setOptions(!options)}><Settings2 size={16}/></button>{!onNewConversation&&<button className="icon-button" data-testid="agent-new-conversation-fallback" title={tr("新会话")} aria-label={tr("新会话")} onClick={()=>resetConversation()} disabled={busy||connecting||applying}><Plus size={17}/></button>}</div></div>
@@ -514,36 +591,29 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   {promptProposal&&promptProposal.provider===composerOwner.provider&&promptProposal.threadId===composerOwner.threadId&&<section className="agent-prompt-proposal" data-testid="agent-prompt-proposal" role="region" aria-label={t('处理新的讨论内容')}><strong>{t('已有未发送草稿，请选择如何加入新内容。')}</strong><details open={promptProposal.text.length<=280} data-testid="agent-prompt-preview"><summary>{t('查看待加入内容')}</summary><pre tabIndex={0}>{promptProposal.text}</pre></details><div className="button-row"><button className="button primary" data-testid="agent-prompt-append" onClick={()=>resolvePromptProposal('append')}>{t('追加到草稿')}</button><button className="button" data-testid="agent-prompt-replace" onClick={()=>resolvePromptProposal('replace')}>{t('替换草稿')}</button><button className="button" data-testid="agent-prompt-cancel" onClick={()=>resolvePromptProposal('cancel')}>{t('保留原稿')}</button></div></section>}
   {sendNotice&&!composerUnbound&&<div className="agent-send-notice" role="status">{sendNotice}</div>}
   {terminalPlanning&&<div className="agent-tool-alert" role="status" data-testid="agent-planning-terminal-notice"><span>{t('任务规划已开启；当前仅有终端工具，可先讨论方案。生成可审阅流程需要连接作业服务。')}</span>{onConnectCompute&&<button className="text-button" data-testid="agent-planning-connect-worker" disabled={busy||connecting||applying} onClick={()=>void Promise.resolve().then(onConnectCompute).catch(onError)}>{t('连接作业服务')}</button>}</div>}
-  <div className="composer">
-   {composerQuestions.length>0?<div className="agent-composer-questions">
-    {composerQuestions.map(r=>{
-     const scope=requestScope(r),pending=responding.has(scope)||stopStatus==='waiting'||stopStatus==='stopping';
-     const given=r.params.questions.map((q:any)=>[q.id,{answers:[answer(r,q.id)]}] as const);
-     const complete=given.every(([,value]:readonly [string,{answers:string[]}])=>value.answers[0].trim());
-     return <section key={scope} className="approval agent-composer-question" role="group" aria-label={t('需要你的决定')} data-testid="agent-question-request" data-request-id={String(r.id)} aria-busy={pending}>
-      {r.params.questions.map((q:any)=>{
-       const draft=answers[scope]?.[q.id],label=t(q.question||q.header),options=q.options||[];
-       return <fieldset key={q.id} className="agent-question" disabled={pending}>
-        <legend>{label}</legend>
-        {options.map((option:any)=>{
-         const checked=!!draft?.option&&draft.value===option.label;
-         return <label key={option.label} className="agent-question-option" data-selected={checked}>
-          <input type="radio" name={scope+q.id} checked={checked} data-testid="agent-question-option" onChange={()=>editAnswer(r,q.id,option.label,true)}/>
-          <span><strong>{option.label}</strong>{option.description&&<small>{option.description}</small>}</span>
-         </label>;
-        })}
-        <label className="agent-question-other">{options.length>0&&<span>{t('其他回答')}</span>}
-         <input data-testid="agent-question-input" aria-label={options.length?t('其他回答'):label} type={q.isSecret?'password':'text'} autoComplete="off" placeholder={t('输入自己的回答')} value={draft?.option?'':draft?.value||''} onChange={e=>editAnswer(r,q.id,e.target.value)}/>
-        </label>
-       </fieldset>;
-      })}
-      <div className="button-row"><button type="button" className="button primary" data-testid="agent-question-submit" disabled={pending||!complete} onClick={()=>{if(!pending&&complete)void respond(r,{answers:Object.fromEntries(given)});}}>{responding.has(scope)?t('提交中…'):t('提交回答')}</button></div>
-     </section>;
-    })}
+  {localOwner&&sessionWorkspaceProfile&&<SessionWorkspace key={localOwner} profileId={sessionWorkspaceProfile} owner={localOwner} active={!hidden} busy={busy} isCurrent={localCurrent}/>}
+  {!historyHidden&&onReviewResourceTool&&<div className="agent-tool-alert"><button type="button" className="button" data-testid="agent-resource-tool-review" data-guide-target="resource-tool-review" onClick={onReviewResourceTool}>{t('核对准备好的工具配置')}</button></div>}
+  <div className="composer" data-state={composerQuestion&&questionDraft||missingRequest?'question':undefined}>
+   {!historyHidden&&thread&&<TerminalWorkspaceApproval key={`${provider}:${thread}:${computeResource?.selectionId}`} provider={provider} threadId={thread} active={!hidden} selection={computeResource?.selectionId}
+    isCurrent={()=>!sessionPendingRef.current&&!selectionPending.current&&providerRef.current===provider&&threadRef.current===thread&&resourceRef.current?.selectionId===computeResource?.selectionId}/>}
+   {composerQuestion&&questionDraft?<div className="agent-composer-questions">
+    <ComposerQuestion key={requestScope(composerQuestion)} request={composerQuestion} questions={composerQuestionItems(composerQuestion)} progress={questionDraft.progress}
+     pending={questionDraft.pending||stopStatus==='waiting'||stopStatus==='stopping'} active={!hidden}
+     stopControl={stopControl}
+     onChange={(index,update)=>changeQuestion(composerQuestion,index,update)}
+     onSubmit={(index,update)=>changeQuestion(composerQuestion,index,update||((current)=>current),true)}/>
+   </div>:missingRequest&&missingTool?<div className="agent-composer-questions" data-testid="agent-missing-tool-question">
+    <ComposerQuestion key={missingTool.id} request={missingRequest} questions={composerQuestionItems(missingRequest)} progress={missingToolProgress?.id===missingTool.id?missingToolProgress.value:initialQuestionProgress} active={!hidden} pending={false} stopControl={stopControl}
+     onChange={(_index,update)=>setMissingToolProgress(current=>({id:missingTool.id,value:update(current?.id===missingTool.id?current.value:initialQuestionProgress)}))}
+     onSubmit={(_index,update)=>{
+      if(!update||!localCurrent()||missingToolRef.current?.id!==missingTool.id||answeredMissingTool.current===missingTool.id)return;
+      const answer=update(initialQuestionProgress).answers.action;
+      if(answer?.kind==='choice'){answeredMissingTool.current=missingTool.id;missingTool.onAnswer(answer.value===setupToolLabel?'setup':'later');}
+     }}/>
    </div>:<>
     {connected&&!options&&<div className="composer-model-selection" data-testid="composer-model-selection"><label>{t('模型')}<select data-testid="composer-model" aria-label={t('对话模型')} value={model} disabled={busy||applying||connecting} onChange={e=>void selectModel(e.target.value)}>{models.map(m=><option key={m.id||m.model} value={m.model} disabled={!!thread&&!!currentModel?.profileId&&m.profileId!==currentModel.profileId}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label>{t('推理等级')}<select data-testid="composer-effort" aria-label={t('对话推理等级')} value={effort} disabled={busy||applying||connecting||!efforts.length} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((entry:any)=><option key={entry.reasoningEffort} value={entry.reasoningEffort}>{entry.reasoningEffort==='off'?t('关闭思考'):entry.reasoningEffort}</option>)}</select></label></div>}<div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{(workflowId||planningMode||newWorkflow)&&<Tooltip className="agent-mode-explanation" content={t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}><span className="agent-mode-inline">{t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</span></Tooltip>}{workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}<textarea data-guide-target="composer" aria-label={t('对话草稿')} aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/>
    </>}
-   <div className="composer-bottom"><span role={composerQuestions.length?'status':undefined}>{t(composerQuestions.length?'等待你的回答':'Enter 发送 · Shift+Enter 换行')}</span>{busy?<button className="send agent-stop-action" data-testid="agent-stop" disabled={stopStatus==='waiting'||stopStatus==='stopping'||!activeSend.current&&!turn} title={t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续')} aria-label={t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续')} onClick={stopSend}><Square size={13}/><span>{t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次停止':activeSend.current?.phase==='preparing'?'取消准备':'停止')}</span></button>:!composerQuestions.length&&<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={pendingDefaults||!!recovery||applying||connecting||selectionPending.current||composerUnbound||!connected||!models.length||terminalSelected&&!terminalReady&&!canAcquireTerminal||!prompt.trim()}><ArrowUp size={17}/></button>}</div>
+   {!(composerQuestion&&questionDraft)&&!missingRequest&&<div className="composer-bottom"><span>{t('Enter 发送 · Shift+Enter 换行')}</span>{stopControl||<button className="send" aria-label={tr("发送")} onClick={()=>void send()} disabled={pendingDefaults||!!recovery||applying||connecting||selectionPending.current||composerUnbound||!connected||!models.length||terminalSelected&&!terminalReady&&!canAcquireTerminal||!prompt.trim()}><ArrowUp size={17}/></button>}</div>}
   </div>
   {login&&<ProviderLogin provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{setLogin(false);void connect();}} onError={onError}/>}
  </aside>;

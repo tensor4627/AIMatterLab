@@ -1,4 +1,5 @@
 import type {AgentProvider} from './agent';
+import type {ResourceWorkspaceLocation} from './compute';
 
 export type BadgeMotion = 'wave' | 'breathe';
 export interface ManagedResource {
@@ -6,6 +7,7 @@ export interface ManagedResource {
   connectionId?:string; profileVersion?:number; color?:number;
   serviceStatus?:'idle'|'preparing'|'ready'|'configuration_required'|'unavailable';
   serviceReady?:boolean; terminalReady?:boolean; authorizedProjects?:string[];
+  workspace?:ResourceWorkspaceLocation;
 }
 export interface PublishedSshResource extends ManagedResource {
   kind:'ssh'; connectionId:string; profileVersion:number;

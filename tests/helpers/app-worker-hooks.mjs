@@ -20,6 +20,7 @@ import {loadConversationSelection} from './conversation-selection-hooks.mjs';
 const source=fs.readFileSync(new URL('../../frontend/app/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const connectionUi={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/compute/ssh-connection-types.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(connectionUi,connectionUi.exports);
+const guideProgressCompiled=ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/onboarding/cluster-guide-progress.ts',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const reviewSource=ts.createSourceFile('RunReview.tsx',fs.readFileSync(new URL('../../frontend/features/runs/RunReview.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const taskModuleSource=reviewSource.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='taskModule').getText(reviewSource).replace(/^export /,'');
 const taskModule=new Function('t',ts.transpileModule(taskModuleSource,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'; return taskModule;')(value=>value);
@@ -46,6 +47,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
  const conversationSelection=loadConversationSelection({react:{useState,useRef,useEffect},storage});
  const loadedNavigation=new Map();
+ const guideProgress={exports:{}};new Function('module','exports','localStorage',guideProgressCompiled)(guideProgress,guideProgress.exports,storage);
  function loadNavigation(file){
   if(loadedNavigation.has(file))return loadedNavigation.get(file).exports;const module={exports:{}};loadedNavigation.set(file,module);
   new Function('require','module','exports','window','crypto',navigationModules[file])(name=>{
@@ -58,6 +60,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
  const require=name=>{
   if(name.endsWith('/SoftwareUpdate'))return {useWorkspaceUpdate:()=>({state:{phase:'disabled'}})};
   if(name==='../features/compute/ssh-connection-types')return connectionUi.exports;
+  if(name==='../features/onboarding/cluster-guide-progress')return guideProgress.exports;
   if(name==='../../contracts/compute/task-worker-binding.mjs')return taskWorkerBinding;
   if(name==='../ui/lazy-panel')return {lazyPanel:(name)=>'./'+name};
   if(name==='../features/workflows/task-drafts')return {clearTaskDrafts:id=>calls.push({method:'fixture.clearTaskDrafts',data:{id}})};

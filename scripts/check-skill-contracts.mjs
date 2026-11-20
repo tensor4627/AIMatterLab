@@ -10,6 +10,10 @@ import {baseWorkspaceTool} from '../backend/main/workspace/base-workspace.mjs';
 import {copyProjectInputsTool} from '../backend/main/workspace/copy-project-inputs.mjs';
 import {currentPairTool} from '../agent/tools/current-pair-tool.mjs';
 import {MaterialsProject} from '../backend/main/tools/materials-project.mjs';
+import {createResourceToolController} from '../backend/main/compute/resource-tools.mjs';
+import {resourceSessionWorkspaceTool} from '../backend/main/workspace/resource-workspace.mjs';
+import {ProjectSkills} from '../agent/skills/project-skills.mjs';
+import {softwareDocDefinitions} from '../backend/main/tools/public-software-docs.mjs';
 
 const documentedControls = [
   ['studio-compute-workflow/SKILL.md', 'frontend/features/terminal/SshConnectionPanel.tsx', ['登录完成，交由 AIMatterLab 管理']],
@@ -38,7 +42,7 @@ export function checkSkillContracts({projectDir, map, documents}) {
   const desktopNames = [...MaterialsProject.prototype.tools(), baseWorkspaceTool, copyProjectInputsTool, currentPairTool].map(tool => tool.name);
   for (const match of read('desktop/main.mjs').matchAll(/const\s+(?:proposalTool|privateReader)\s*=\s*\{\s*name\s*:\s*["']([^"']+)["']/g)) desktopNames.push(match[1]);
   const knownTools = new Set([...workerNames, ...desktopNames].filter(name => Object.hasOwn(SCIENTIFIC_TOOL_ACCESS, name)));
-  for (const tool of managedTools) knownTools.add(tool.name);
+  for (const tool of [...managedTools,...createResourceToolController({}).tools(),resourceSessionWorkspaceTool,...ProjectSkills.prototype.tools(),...softwareDocDefinitions]) knownTools.add(tool.name);
   const routes = new Map(map.functions.map(route => [route.id, route]));
   for (const route of routes.values()) {
     checkProductName([route.title, route.status, route.adaptation].join(' '), route.id);

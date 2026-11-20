@@ -34,6 +34,49 @@ test('multiple pipelines preserve background service channels and switching back
  const f=fixture(t);await f.connect('A');f.grant();await f.switch('B');assert.equal(f.channels.get('A').status,'connected');assert.equal(f.service.peek({connectionId:'A'}).workflowReady,false);await f.connect('B');f.grant();assert.equal(f.channels.size,2);await f.switch('A');const result=await f.connect('A','reuse','new-local-attach');assert.equal(result.workflowReady,true);assert.equal(result.attemptId,'attempt-A');assert.equal(result.operator,'human');assert.equal(f.calls.filter(v=>v.open).length,2);assert.equal(f.calls.filter(v=>v.close).length,0);assert.equal(f.preparations.length,2);assert.equal(f.channels.get('B').status,'connected');
 });
 
+test('foreground workflow reuses the exact hosted connection attempt without preparing or opening another worker',async t=>{
+ const f=fixture(t),stored={...f.health('A'),runtimeManifestSha256:'a'.repeat(64)};
+ const transport=f.connections.serviceRequest;
+ let capabilities={roadmap_execution_schema:1,resource_tool_schema:1,other_worker_schema:3};
+ f.connections.serviceRequest=async packet=>{const result=await transport(packet);return packet.target==='/api/health'?{...result,data:{...result.data,...capabilities}}:result;};
+ f.registration.remember(f.profile('A'),stored,{status:'ready',count:1});
+ f.channels.set('A',{connectionId:'A',profileId:'profile-A',profileVersion:1,status:'connected',serviceActive:true,
+  serviceId:'hosted-private-service',attemptId:'hosted-attempt',channelKind:'private',service:stored});
+ const value=await f.connect('A','reuse','use-for-workflow');
+ assert.equal(value.workflowReady,true);
+ assert.equal(value.attemptId,'hosted-attempt');
+ assert.equal(value.serviceId,'hosted-private-service');
+ assert.equal(value.operator,'human');
+ assert.equal(f.worker.identity.root,stored.root);
+ assert.equal(value.health.roadmap_execution_schema,1);
+ assert.equal(value.health.resource_tool_schema,1);
+ assert.equal(f.worker.connection.health.roadmap_execution_schema,1);
+ assert.equal(f.worker.connection.health.other_worker_schema,3);
+ assert.equal(f.preparations.length,0);
+ assert(f.calls.every(call=>!call.open&&!call.close&&call.request?.serviceId==='hosted-private-service'));
+ capabilities={roadmap_execution_schema:2};
+ const checked=await f.service.check({connectionId:'A',attemptId:'hosted-attempt'});
+ assert.equal(checked.workflowReady,true);
+ assert.equal(checked.health.roadmap_execution_schema,2);
+ assert.equal(f.worker.connection.health.resource_tool_schema,undefined);
+ await f.switch('B');await f.switch('A');
+ capabilities={roadmap_execution_schema:1};
+ const reattached=await f.connect('A','reuse','local-reattach');
+ assert.equal(reattached.health.roadmap_execution_schema,1);
+ assert.equal(f.worker.connection.health.roadmap_execution_schema,1);
+ assert.equal(f.preparations.length,0);
+});
+
+test('using a hosted resource for a workflow cannot start a missing private service',async t=>{
+ const f=fixture(t),registered=f.health('A');
+ f.registration.remember(f.profile('A'),registered,{status:'ready',count:1});
+ const value=await f.service.useHosted({connectionId:'A',profileId:'profile-A',profileVersion:1,requestId:'choose-workflow',mode:'reuse'});
+ assert.equal(value.workflowReady,false);
+ assert.equal(value.serviceActive,false);
+ assert.equal(f.preparations.length,0);
+ assert.equal(f.calls.length,0);
+});
+
 test('closing one base removes only its service and never disturbs a different selected pipeline',async t=>{
  const f=fixture(t);await f.connect('A');await f.switch('B');await f.connect('B');f.grant();const worker=f.worker.connection;f.service.connectionClosed('A');assert.equal(f.service.peek({connectionId:'A'}).status,'disconnected');assert.equal(f.service.peek().connectionId,'B');assert.equal(f.worker.connection,worker);assert.equal(f.service.hasCurrentGrant('codex'),true);
 });

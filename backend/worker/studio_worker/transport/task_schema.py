@@ -1,16 +1,11 @@
 import re
 import math
 from studio_worker.transport.roadmap import RoadmapError, validate_roadmap
+from studio_worker.transport.task_draft_schema import TASK_DRAFT_SCHEMA
 
-FIELD_TYPES = ["text", "number", "integer", "boolean", "file", "files", "list", "object", "select", "multiline"]
-FIELD_SCHEMA = {"type": "object", "required": ["key", "label", "type", "required"], "additionalProperties": False,
-    "properties": {"key": {"type": "string"}, "label": {"type": "string"}, "type": {"type": "string", "enum": FIELD_TYPES},
-    "advanced":{"type":"boolean"},"default":{"type":["string","number","boolean","null"]},"default_source":{"type":"string"},
-    "required": {"type": "boolean"}, "unit": {"type": "string"}, "description": {"type": "string"},
-    "options": {"type": "array", "items": {"type": "string"}}}}
-STEP_SCHEMA = {"anyOf": [{"type": "string"}, {"type": "object", "required": ["id", "title", "fields"], "additionalProperties": False,
-    "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"},
-    "tool": {"type": "string"}, "optional": {"type": "boolean"}, "fields": {"type": "array", "items": FIELD_SCHEMA}}}]}
+STEP_SCHEMA = TASK_DRAFT_SCHEMA["properties"]["steps"]["items"]
+FIELD_SCHEMA = STEP_SCHEMA["anyOf"][1]["properties"]["fields"]["items"]
+FIELD_TYPES = FIELD_SCHEMA["properties"]["type"]["enum"]
 
 
 def field_key(value):

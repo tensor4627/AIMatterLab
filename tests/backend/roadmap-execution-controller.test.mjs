@@ -14,10 +14,11 @@ function fixture(){
    config:{target:'local',projectId:'project',targetId:'env',gpu:1,maxSeconds:120}}};
  const state={id:createHash('sha256').update(JSON.stringify([task.id,hash])).digest('hex'),task_id:task.id,snapshot_sha256:hash,confirmed_at:1,status:'running',goals:[]};
  const worker={identity:{distribution:'Fixture',root:'/worker'},connectionTarget:{port:8999},connectionEpoch:1,connection:{health}};
- const calls=[],index=new Map(),hooks={confirm:()=>true,states:()=>[state],preview:()=>hash};
+ const calls=[],index=new Map(),hooks={confirm:()=>true,states:()=>[state],preview:()=>hash,sources:()=>[],
+  sessionWorkspace:()=>null,allocateWorkspace:async()=>({workspace_id:'workspace'})};
  worker.request=async(method,route,body)=>{
   calls.push({method,route,body:structuredClone(body)});
-  if(route==='/api/health')return health;
+  if(route==='/api/health')return worker.connection.health;
   if(route.endsWith('/preview')||route.endsWith('/snapshot'))return {snapshot_sha256:hooks.preview(),snapshot:{task_id:task.id}};
   if(route.endsWith('/list'))return hooks.states();
   if(route.endsWith('/confirm'))return structuredClone(state);
@@ -25,9 +26,27 @@ function fixture(){
  };
  const controller=createRoadmapController({worker,current:()=>owner,getTask:id=>id===task.id?task:null,
   getSettings:()=>({distribution:'Fixture',workerRoot:'/worker',workerPort:8999}),assertIdle:()=>{},
-  catalog:{put:(_kind,id,data)=>index.set(id,data)},confirm:(...args)=>hooks.confirm(...args)});
+  catalog:{get:(_kind,id)=>index.get(id),put:(_kind,id,data)=>index.set(id,structuredClone(data))},
+  sources:()=>hooks.sources(),sessionWorkspace:task=>hooks.sessionWorkspace(task),
+  allocateWorkspace:(...args)=>hooks.allocateWorkspace(...args),confirm:(...args)=>hooks.confirm(...args)});
  const request={taskId:'task',environments:{md:'per-node'}};
  return {controller,worker,owner,task,request,approval:{...request,snapshotSha256:hash},state,hooks,calls,index};
+}
+
+function sshFixture(){
+ const f=fixture(),hostIdentity={hostname:'fixture',uid:1001,machineId:'fixture-machine'};
+ const original={kind:'ssh',version:2,profileId:'saved-profile',profileVersion:3,root:'/worker',hostIdentity,runtime:'/worker/runtimes/previous',runtimeId:'previous'};
+ const upgraded={...original,runtime:'/worker/runtimes/updated',runtimeId:'updated'};
+ const health=binding=>({name:'gpu-sampling-studio',ssh_service:true,roadmap_execution_schema:1,execution_policy:'desktop-review-v1',
+  ...Object.fromEntries(['root','hostIdentity','runtime','runtimeId'].map(key=>[key,binding[key]]))});
+ const connect=binding=>{
+  const identity={...structuredClone(binding),version:3,connectionId:'authenticated-master'};
+  Object.assign(f.worker,{identity,connectionTarget:{...identity,port:8999},connection:{transport:'ssh-connection',health:health(binding)},connectionEpoch:f.worker.connectionEpoch+1});
+ };
+ f.task.deployment.workerBinding=structuredClone(original);
+ f.task.deployment.config={...f.task.deployment.config,target:'cluster',resources:{},targetId:'slurm'};
+ connect(original);
+ return {...f,original,upgraded,connect,health};
 }
 
 test('one native confirmation binds original intent, current files, revision, scoped override and a receipt',async()=>{
@@ -39,6 +58,25 @@ test('one native confirmation binds original intent, current files, revision, sc
  assert.deepEqual(await f.controller.confirm(f.approval,event),f.state);assert.equal(confirmed,1);
  assert.equal(f.index.get(f.state.id).observation.status,'running');
  assert.deepEqual(f.calls.at(-1).body,{plan:post.body,snapshot_sha256:review.snapshot_sha256});
+});
+
+test('an existing SSH session directory satisfies the draft workspace step and is frozen at approval',async()=>{
+ const f=sshFixture(),receipt={workspace_id:'original-workspace',path:'/fixture/AIMatterLab/workfile/2026-11-20/task-1'};
+ f.task.workspaceChoice='pending';
+ await assert.rejects(f.controller.preview(f.request),/选择此流程的工作区/);
+ f.hooks.sessionWorkspace=task=>{assert.equal(task.threadId,f.owner.threadId);return receipt;};
+ f.hooks.allocateWorkspace=async()=>assert.fail('Preview cannot allocate or claim a directory');
+ const review=await f.controller.preview(f.request);
+ assert.deepEqual(f.calls.at(-1).body.workspace,{choice:'session',id:receipt.workspace_id,root:receipt.path});
+ f.hooks.confirm=()=>false;
+ assert.equal(await f.controller.confirm(f.approval,{}),null);
+ f.hooks.confirm=()=>true;
+ f.hooks.allocateWorkspace=async()=>({...receipt,path:'/fixture/AIMatterLab/workfile/2026-11-21/task-1'});
+ await assert.rejects(f.controller.confirm(f.approval,{}),/ssh_workspace_changed/);
+ assert.equal(f.calls.filter(({route})=>route.endsWith('/confirm')).length,0);
+ f.hooks.allocateWorkspace=async({requestId})=>{assert.equal(requestId,review.snapshot_sha256);return receipt;};
+ assert.deepEqual(await f.controller.confirm(f.approval,{}),f.state);
+ assert.deepEqual(f.calls.at(-1).body.workspace_receipt,receipt);
 });
 for(const [label,change] of Object.entries({
  'parameter edit':f=>{f.task.parameters.files=['/input/new'];},'draft revision':f=>f.task.parameterRevision++,
@@ -65,4 +103,67 @@ test('readback is scoped to the owner and the renderer has no generic graph auth
   assert.throws(()=>assertRendererWorkerRoute('POST',route));
  }
  await assert.rejects(f.controller.confirm({...f.approval,command:['python']},{}));
+});
+
+test('updating the foreground SSH runtime preserves confirmed graph and snapshot observation in its original chat',async()=>{
+ const f=sshFixture(),ref={taskId:'task',executionId:f.state.id};
+ await f.controller.confirm(f.approval,{});
+ const stored=f.index.get(f.state.id);
+ f.connect(f.upgraded);f.calls.length=0;f.state.status='passed';
+ assert.deepEqual(await f.controller.list({taskId:'task'}),[f.state]);
+ assert.equal((await f.controller.snapshot(ref)).snapshot_sha256,f.state.snapshot_sha256);
+ assert.deepEqual(f.index.get(f.state.id),{...stored,observation:{...stored.observation,status:'passed',observed_at:f.index.get(f.state.id).observation.observed_at}});
+ assert.deepEqual(f.task.deployment.workerBinding,f.original);
+ await assert.rejects(f.controller.preview(f.request),/来源不同/);
+ await assert.rejects(f.controller.confirm(f.approval,{}),/来源不同/);
+ assert.deepEqual(f.calls.map(({route})=>route),['/api/health','/api/workflow/roadmap/list','/api/health','/api/workflow/roadmap/snapshot']);
+});
+
+test('a hosted replacement observes only the original SSH storage, even without a foreground connection',async()=>{
+ const f=sshFixture(),ref={taskId:'task',executionId:f.state.id};
+ await f.controller.confirm(f.approval,{});
+ f.worker.connection=null;f.calls.length=0;
+ const calls=[],source={kind:'ssh',binding:f.upgraded,health:f.health(f.upgraded),async request(method,route,body,{beforeDispatch}){
+  beforeDispatch(this.health);calls.push({method,route,body});
+  return route.endsWith('/list')?[f.state]:{snapshot_sha256:f.state.snapshot_sha256,snapshot:{task_id:f.task.id}};
+ }};
+ f.hooks.sources=()=>[{...source,binding:{...f.upgraded,profileVersion:f.upgraded.profileVersion+1},request:()=>assert.fail('changed saved profile')},source];
+ assert.deepEqual(await f.controller.list({taskId:'task'}),[f.state]);
+ assert.equal((await f.controller.snapshot(ref)).snapshot_sha256,f.state.snapshot_sha256);
+ assert.deepEqual(f.index.get(f.state.id).worker_binding,f.original);
+ assert.equal(f.index.get(f.state.id).confirmed_at,1);
+ assert.deepEqual(calls,[{method:'POST',route:'/api/workflow/roadmap/list',body:{task_id:'task'}},
+  {method:'POST',route:'/api/workflow/roadmap/snapshot',body:{task_id:'task',execution_id:f.state.id}}]);
+ assert.deepEqual(f.calls,[]);
+ f.hooks.sources=()=>[{...source,health:{...source.health,hostIdentity:{...source.health.hostIdentity,uid:9}}}];
+ await assert.rejects(f.controller.list({taskId:'task'}),/来源尚未核对/);
+ assert.equal(calls.length,2);
+});
+
+test('original graph readback checks original profile, host, UID and data root separately',async()=>{
+ const f=sshFixture();
+ const changes=[{profileId:'other-profile'},{profileVersion:4},{root:'/other'},
+  ...Object.entries({hostname:'other',uid:1002,machineId:'other-machine'}).map(([key,value])=>({hostIdentity:{...f.original.hostIdentity,[key]:value}}))];
+ for(const change of changes){
+  f.connect({...f.upgraded,...change});
+  await assert.rejects(f.controller.list({taskId:'task'}),/来源不同/);
+  await assert.rejects(f.controller.snapshot({taskId:'task',executionId:f.state.id}),/来源不同/);
+ }
+ assert.deepEqual(f.calls,[]);
+ assert.equal(f.index.size,0);
+});
+
+test('a selection change before hosted dispatch or during readback prevents the old response from reaching another chat',async()=>{
+ const f=sshFixture(),health=f.health(f.upgraded);f.worker.connection=null;
+ let dispatched=0,changeStage='before';
+ f.hooks.sources=()=>[{kind:'ssh',binding:f.upgraded,health,async request(method,route,body,{beforeDispatch}){
+  if(changeStage==='before')f.owner.serial++;
+  beforeDispatch(health);dispatched++;
+  if(changeStage==='after')f.owner.serial++;
+  return [f.state];
+ }}];
+ await assert.rejects(f.controller.list({taskId:'task'}),/会话或作业服务来源已变化/);assert.equal(dispatched,0);
+ changeStage='after';
+ await assert.rejects(f.controller.list({taskId:'task'}),/会话或作业服务来源已变化/);assert.equal(dispatched,1);
+ assert.equal(f.index.size,0);
 });

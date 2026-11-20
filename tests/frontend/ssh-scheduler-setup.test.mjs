@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 import {deferred} from '../helpers/agent-hooks.mjs';
+import {scopedSuggestedInputRoot} from '../../frontend/features/compute/project-setup-defaults.mjs';
 const compiled=ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/compute/SshSchedulerSetup.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
 function harness({profiles=[],save,list,readProfile,props={}}={}){const hooks=[],effects=[],calls=[];let cursor=0,dirty=false,tree,disposed=false,currentProps={connectionId:'connection',attemptId:'attempt',currentResource:true,...props};
  const useState=initial=>{const i=cursor++;hooks[i]??={value:typeof initial==='function'?initial():initial};return [hooks[i].value,next=>{hooks[i].value=typeof next==='function'?next(hooks[i].value):next;dirty=true;}];},useRef=initial=>{const i=cursor++;return hooks[i]??={current:initial};},useEffect=(fn,deps)=>{const i=cursor++;if(!hooks[i]){hooks[i]={deps};effects.push(()=>hooks[i].cleanup=fn());}};
- const module={exports:{}},jsx=(type,props)=>({type,props});new Function('require','module','exports',compiled)(name=>name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='../../api/studio'?{invoke:async(method,value)=>{assert.equal(method,'compute.sshService.scheduler');calls.push({method:'scheduler',value:value.configuration,envelope:value});return save?save(value.configuration):{...value.configuration,id:value.configuration.id||'saved',version:(value.configuration.version||0)+1,transport_kind:'ssh-service-local'};}}:name==='../../api/worker'?{api:async(method,target,data)=>{calls.push({method,target,data});if(target==='/api/cluster/profile')return readProfile?readProfile(data):profiles.find(value=>value.id===data.cluster_id);return list?list():profiles;}}:name==='../../ui/i18n'?{t:value=>value}:{Modal:'Modal'},module,module.exports);
+ const module={exports:{}},jsx=(type,props)=>({type,props});new Function('require','module','exports',compiled)(name=>name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='../../api/studio'?{invoke:async(method,value)=>{assert.equal(method,'compute.sshService.scheduler');calls.push({method:'scheduler',value:value.configuration,envelope:value});return save?save(value.configuration):{...value.configuration,id:value.configuration.id||'saved',version:(value.configuration.version||0)+1,transport_kind:'ssh-service-local'};}}:name==='../../api/worker'?{api:async(method,target,data)=>{calls.push({method,target,data});if(target==='/api/cluster/profile')return readProfile?readProfile(data):profiles.find(value=>value.id===data.cluster_id);return list?list():profiles;}}:name==='../../ui/i18n'?{t:value=>value}:name==='./project-setup-defaults.mjs'?{scopedSuggestedInputRoot}:{Modal:'Modal'},module,module.exports);
  function render(next={}){currentProps={...currentProps,...next};cursor=0;dirty=false;tree=module.exports.default(currentProps);}function all(node){return Array.isArray(node)?node.flatMap(all):node&&typeof node==='object'?[node,...all(node.props?.children)]:[];}function find(predicate){const value=all(tree).find(predicate);assert(value,'scheduler fixture node missing');return value;}const id=value=>find(node=>node.props?.['data-testid']===value),input=(name,value)=>{id(name).props.onChange({target:{value}});render();};async function flush(){for(let i=0;i<12;i++){while(effects.length)effects.shift()();await new Promise(resolve=>setImmediate(resolve));if(dirty&&!disposed)render();}}const submit=()=>id('ssh-scheduler-setup').props.onSubmit({preventDefault(){}});render();return {calls,find,id,input,submit,flush,update:render,open(){id('ssh-scheduler-open').props.onClick();render();},unmount(){disposed=true;hooks.forEach(slot=>slot.cleanup?.());}};
 }
 function fill(h){h.input('ssh-scheduler-name','Synthetic reviewed queue');h.input('ssh-scheduler-kind','slurm');h.input('ssh-scheduler-python','/opt/fixture/python');h.input('ssh-scheduler-root','/scratch/fixture/runs');}
@@ -28,5 +29,19 @@ test('pending scheduler save is single flight and an unconfirmed response never 
 test('failure to read existing scheduler configurations blocks duplicate creation',async()=>{const h=harness({list:()=>Promise.reject(Error('inert unavailable'))});await h.flush();h.open();fill(h);assert.equal(h.id('ssh-scheduler-save').props.disabled,true);h.submit();await h.flush();assert.equal(saves(h).length,0);h.unmount();});
 
 test('scheduler save names the exact connection and service attempt',async()=>{const h=harness();try{await h.flush();h.open();fill(h);h.submit();await h.flush();const {envelope,value}=saves(h)[0];assert.deepEqual(envelope,{connectionId:'connection',attemptId:'attempt',configuration:value});}finally{h.unmount();}});
+test('a confirmed workfile suggestion stays in the draft until explicit scheduler save',async()=>{
+ const receipts=[],h=harness({props:{suggestedWorkfileRoot:'/confirmed/resource/workfile',onSaved:value=>receipts.push(value)}});
+ try{
+  await h.flush();h.open();fill(h);
+  h.id('ssh-scheduler-use-workfile').props.onClick();
+  await h.flush();
+  assert.equal(h.id('ssh-scheduler-root').props.value,'/confirmed/resource/workfile');
+  assert.equal(saves(h).length,0);
+  h.submit();await h.flush();
+  assert.deepEqual(saves(h)[0].value.read_roots,['/confirmed/resource/workfile']);
+  assert.equal(h.id('ssh-scheduler-registered-id').props.children,'saved');
+  assert.deepEqual(receipts,[{id:'saved',name:'Synthetic reviewed queue'}]);
+ }finally{h.unmount();}
+});
 test('background connection settings neither read the selected proxy nor save configuration',async()=>{const h=harness({props:{currentResource:false}});try{await h.flush();h.open();assert.equal(h.calls.length,0);fill(h);h.submit();await h.flush();assert.equal(saves(h).length,0);assert.equal(h.id('ssh-scheduler-save').props.disabled,true);}finally{h.unmount();}});
 test('switching away while a list read is pending cannot enable a stale scheduler save',async()=>{const gate=deferred(),h=harness({list:()=>gate.promise});try{await h.flush();h.open();h.update({currentResource:false});gate.resolve([]);await h.flush();fill(h);h.submit();await h.flush();assert.equal(saves(h).length,0);assert.equal(h.id('ssh-scheduler-save').props.disabled,true);}finally{h.unmount();}});

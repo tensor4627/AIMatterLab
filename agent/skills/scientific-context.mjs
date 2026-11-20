@@ -7,9 +7,15 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  const excludesDynamics=/(?:不|无需|不要)(?:运行|进行|做|启动)?\s*(?:MD|分子动力学|积分)|\b(?:no|without|do not)\s+(?:run(?:ning)?\s+)?(?:MD|molecular dynamics)\b/i.test(value);
  const cvOnlyIntent=/(?:仅|只)(?:计算|生成|定义|评估)?\s*(?:CV|集体变量)|\bcv[\s_-]*only\b|\bonly\s+(?:(?:compute|calculate|evaluate)\s+)?(?:the\s+)?(?:cvs?|collective\s+variables?)\b/i.test(value);
  const primaryTraining=/(?:^|[。！!？?;\n])\s*(?:(?:请|帮我|现在|接下来|先|首先|然后|随后|please\s+|next\s+|now\s+|first\s+|then\s+)\s*)*(?:训练|导出|评估|train\b|export\b|freeze\b|eval\b)/i.test(value);
+ const resourceMention=/集群|计算资源|服务器|\b(?:cluster|compute resource|HPC)\b/i.test(value);
+ const namedInstallation=/(?:安装|从零配置|搭建)\s*(?:一下\s*)?[a-z][\w+.-]*|\b(?:install|set up)\s+[a-z][\w+.-]*/i.test(value);
+ const serviceRepair=/(?:修复|配置|安装|准备)\s*(?:远端)?作业服务|作业服务.{0,12}(?:缺少|修复|Python 环境)|\b(?:repair|configure|install)\s+(?:the\s+)?job service\b/i.test(value);
  if(manualFunction!==undefined&&typeof manualFunction!=='string')throw Error('Invalid selected scientific function');
  // Present intent takes priority over the previous run: analysis never loads the build/install stack.
  if(manualFunction)id=manualFunction;
+ else if(serviceRepair)id='cluster.connection-setup';
+ else if(resourceMention&&namedInstallation)id='cluster.resource-tools';
+ else if(/list_resource_tools|plan_resource_tool_setup|discover_resource_tool_scripts|(?:安装|配置|接入|复用|登记).{0,12}(?:集群工具|新工具|已有脚本|第三方软件|自定义工具|工具环境)|(?:工具|软件).{0,10}(?:接入|最小测试)|(?:set up|configure|install|adopt|onboard).{0,20}(?:cluster tool|resource tool|third.party software|existing scripts?)/i.test(value))id='cluster.resource-tools';
  else if(/(?:基础|默认|初始化|设置|选择|创建).*工作区|工作区.*(?:灰|设置|配置|不可用)|(?:base|default|setup|initialize).*workspace/i.test(value))id='cluster.workspace-setup';
  else if(/(?:reweight|重加权)/i.test(value))id=/opes/i.test(value)?'analysis.opes':'analysis.wtmetad';
  else if(/trajectory\.density|(?:轨迹|trajectory|frames?).*(?:原子数密度|number density)|(?:原子数密度|number density).*(?:轨迹|trajectory|frames?)/i.test(value))id='analysis.number-density';

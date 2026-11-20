@@ -1,4 +1,10 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {selectScientificFunctions,ScientificSkillContext} from "../../agent/skills/scientific-context.mjs";
+test('named cluster installations and service repairs select their own guidance',()=>{
+ for(const text of ['在这个集群上安装 GPUMD','Install CP2K on my cluster','在计算资源上从零配置 MySolver']){
+  assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['cluster.resource-tools']);
+ }
+ assert.deepEqual(selectScientificFunctions({text:'集群缺少作业服务的 Python 环境，请修复作业服务'}),['cluster.connection-setup']);
+});
 test('Every implemented engine has an explicit functional route and never selects installation',()=>{for(const engine of ['pydyn.md','gpumd.md','pydyn.sampling','gpumd.sampling','gpumd.neb','pygas.build','bias.validate','nep.train','nep.eval','nep.analyze','hotpp.train','hotpp.eval','hotpp.export','pygas.reweight','pygas.opes-reweight','trajectory.density']){const ids=selectScientificFunctions({parameters:{engine},hasWorkflow:true});assert.equal(ids.length,2);assert.equal(ids[0],'workflow.orchestrate');assert(!ids.some(id=>/install|toolchain|setup/.test(id)));}});
 test('Number density selects the built-in trajectory engine without requiring shared pyGAS guidance',()=>{
  for(const text of ['计算轨迹的原子数密度','number density from trajectory frames','trajectory.density'])assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['analysis.number-density']);

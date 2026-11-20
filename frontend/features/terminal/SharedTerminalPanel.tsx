@@ -6,14 +6,14 @@ import {FitAddon} from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import {invoke} from '../../api/studio';
 import {computeResources,sshService} from '../../api/compute-resources';
-import type {ComputeResourceState,SharedTerminalResizeRequest,SshTerminalResourceReference,SshConnectionResourceReference,SshServiceState} from '../../../contracts/dto/compute';
+import type {ComputeResourceState,ResourceWorkspaceReference,SharedTerminalResizeRequest,SshTerminalResourceReference,SshConnectionResourceReference,SshServiceState} from '../../../contracts/dto/compute';
 import type {AgentProvider,Conversation} from '../../../contracts/dto/agent';
 import {t} from "../../ui/i18n";
 import './shared-terminal.css';
 import {serviceDuration,serviceErrorMessage,servicePhaseMessage,serviceRejectedMessage,serviceTransfer,serviceVersion} from './ssh-service-presentation';
-import SshConnectionPanel from './SshConnectionPanel';
+import SshConnectionPanel,{type HandoffLessonStage,type SshEnvironmentHelpTarget} from './SshConnectionPanel';
 
-export type SharedTerminalRequest={nonce:string;kind:'local'|'ssh';mode:'interactive'|'key';clusterId?:string;profileId?:string;version?:number;profileName?:string;connectionId?:string;connectionMode?:'plain'|'managed';sessionId?:string;exact?:true};
+export type SharedTerminalRequest={nonce:string;kind:'local'|'ssh';mode:'interactive'|'key';clusterId?:string;profileId?:string;version?:number;profileName?:string;connectionId?:string;connectionMode?:'plain'|'managed';sessionId?:string;exact?:true;reviewWorkspace?:'handoff'|'change'};
 type OpenTarget=Omit<SharedTerminalRequest,'nonce'|'profileName'|'connectionMode'|'connectionId'|'sessionId'|'exact'>;
 type OpenRecovery={target:OpenTarget;scope:string;nonce?:string;provider?:AgentProvider;requestId:string;message:string};
 type Session={humanInputSequence?:number;outputWait?:boolean;connectionId?:string;resource?:SshTerminalResourceReference|SshConnectionResourceReference;sessionId:string;name:string;kind:string;mode:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;status:string;expired?:boolean;sequence:number;exitCode?:number|null;serviceActive?:boolean;serviceStatus?:string};
@@ -40,7 +40,7 @@ function terminalMessage(error:unknown){
  return t(messages[code||'']||'终端操作未完成，请刷新会话状态后重试。');
 }
 
-type PanelProps={activeResource?:ComputeResourceState|null;provider?:AgentProvider;onConversationPrepared?:(conversation:Conversation)=>void;resourceScope?:string;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;visible:boolean;request?:SharedTerminalRequest;canShare:boolean;onError:(error:unknown)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"})=>void;onPlainSsh?:()=>void};
+type PanelProps={activeResource?:ComputeResourceState|null;provider?:AgentProvider;onConversationPrepared?:(conversation:Conversation)=>void;resourceScope?:string;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;visible:boolean;request?:SharedTerminalRequest;canShare:boolean;onError:(error:unknown)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"|"environment"},connectionId?:string,sessionId?:string)=>void;onServiceEnvironmentHelp?:(target:SshEnvironmentHelpTarget)=>void;onHandoffLesson?:(stage:HandoffLessonStage,target:SshEnvironmentHelpTarget)=>void;onUseForWorkflow?:(ref:ResourceWorkspaceReference)=>Promise<unknown>;onPlainSsh?:()=>void};
 export default function SharedTerminalPanel(props:PanelProps){
  if(props.request?.kind==='ssh'&&props.request.profileId&&props.request.connectionMode!=='plain')return <SshConnectionPanel {...props} request={props.request}/>;
  return <LegacySharedTerminalPanel {...props}/>;

@@ -175,7 +175,8 @@
         "references/scientific-gates.md",
         "references/reconcile.md",
         "references/job-service-connection.md",
-        "references/base-workspace.md"
+        "references/base-workspace.md",
+        "references/resource-tools.md"
       ]
     },
     {
@@ -668,12 +669,22 @@
       }
     },
     {
+      "id": "cluster.resource-tools",
+      "title": "Install, adopt and operate resource-specific tools",
+      "engines": [],
+      "skills": ["studio-compute-workflow"],
+      "tools": ["list_resource_tools", "discover_resource_tool_scripts", "plan_resource_tool_setup", "read_resource_tool_setup", "project_skill_catalog", "read_project_skill", "write_project_skill", "search_software_docs", "read_software_docs"],
+      "status": "resource_scoped_tool_configuration",
+      "phase": "workspace",
+      "reference_files": {"studio-compute-workflow": ["references/resource-tools.md"]}
+    },
+    {
       "id": "cluster.workspace-setup",
       "engines": [],
       "skills": ["studio-compute-workflow"],
-      "tools": ["list_compute_resources", "acquire_compute_resource", "list_compute_terminals", "read_compute_terminal", "write_compute_terminal", "setup_base_workspace", "copy_project_inputs", "read_project_input"],
+      "tools": ["list_compute_resources", "acquire_compute_resource", "list_compute_terminals", "read_compute_terminal", "write_compute_terminal", "read_session_workspace", "setup_base_workspace", "copy_project_inputs", "read_project_input"],
       "status": "implemented_selected_connection_authoring_workspace",
-      "adaptation": "Use setup_base_workspace only on its advertised selected job-service path. For a hosted SSH resource acquire the conversation terminal and perform authorized workspace setup in that lease.",
+      "adaptation": "Confirm the resource root during first desktop handoff. Query the conversation's actual allocation with read_session_workspace. setup_base_workspace describes the authoring workspace on its advertised service path.",
       "phase": "workspace",
       "reference_files": {"studio-compute-workflow": ["references/base-workspace.md"]}
     },

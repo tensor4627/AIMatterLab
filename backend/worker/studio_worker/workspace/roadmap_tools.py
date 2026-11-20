@@ -174,12 +174,13 @@ def md_velocity_source(structure, controls):
     return {"source":"control","seeds":seeds}
 
 
-def consumed(run, inputs, facts):
+def consumed(run, inputs, facts, *, output_root=None):
     contract = TOOLS[run["engine"]].get("consumer_receipt")
     if not contract:
         return []
     port, filename = contract
-    _, raw = stable_file_snapshot(Path(run["directory"])/"results"/filename, include_bytes=True, max_bytes=8192)
+    root = Path(output_root) if output_root is not None else Path(run["directory"])/"results"
+    _, raw = stable_file_snapshot(root/filename, include_bytes=True, max_bytes=8192)
     result = json.loads(raw)
     asset = inputs[port]
     if (result.get("schema_version") != 1 or result.get("port") != port or result.get("sha256") != asset["sha256"]

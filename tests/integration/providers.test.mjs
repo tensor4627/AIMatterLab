@@ -30,11 +30,11 @@ test('Credentials are encrypted and never written to provider settings or comman
   vault.remove('qwen');assert.equal(vault.get('qwen'),null);assert(!redact('Bearer token '+key,[key]).includes(key));
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
-test('Private profiles preserve Kimi OAuth config while enforcing MCP-only tools',()=>{
+test('Private profiles preserve Kimi OAuth config with only the selected web, question and MCP tools',()=>{
  const root=temporary();try{
   let profile=prepareProfile(root,'kimi');const file=path.join(profile.home,'config.toml');fs.appendFileSync(file,'\n[providers.kimi]\ntype = "kimi"\n');
   profile=prepareProfile(root,'kimi');const config=fs.readFileSync(file,'utf8');
-  assert.equal((config.match(/\[tools\]/g)||[]).length,1);assert.match(config,/enabled = \["mcp__gpusampling__\*", "AskUserQuestion"\]/);assert.match(config,/\[providers.kimi\]/);assert.equal(profile.env.KIMI_CODE_HOME,profile.home);
+  assert.equal((config.match(/\[tools\]/g)||[]).length,1);assert.match(config,/enabled = \["mcp__gpusampling__\*", "AskUserQuestion", "SearchWeb", "WebSearch", "FetchURL"\]/);assert.match(config,/\[providers.kimi\]/);assert.equal(profile.env.KIMI_CODE_HOME,profile.home);
   const q=prepareProfile(root,'qwen');assert(q.args.includes('--bare'));assert(q.args.includes('--exclude-tools'));assert.equal(q.env.QWEN_HOME,q.home);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });

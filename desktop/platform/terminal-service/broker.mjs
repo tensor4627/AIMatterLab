@@ -25,7 +25,7 @@ export async function startBroker(initialization,{pty,now=Date.now,onShutdown=()
   const loginStatusRoute=/^\/connections\/([0-9a-f-]{36})\/login\/status\/([A-Za-z0-9_-]{1,100})$/.exec(request.url);
   if(loginStatusRoute){if(request.method!=='GET')failure('invalid_method',405);return send(200,connections.loginStatus({connectionId:loginStatusRoute[1],requestId:loginStatusRoute[2]}));}
   if(request.method!=='POST'&&request.method!=='GET')failure('invalid_method',405);
-  const connectionRoute=/^\/connections\/([0-9a-f-]{36})\/(state|confirm|login\/complete|auth\/read|auth\/input|auth\/resize|shell\/open|close|managed-shell\/(?:open|state|read|input|close)|service\/(?:start|state|request|private-request|stop|cancel))$/.exec(request.url),connectionOpen=request.url==='/connections/open',profileRoute=/^\/connections\/profile\/(prepare|commit|abort)$/.exec(request.url);
+  const connectionRoute=/^\/connections\/([0-9a-f-]{36})\/(state|confirm|login\/complete|auth\/read|auth\/input|auth\/resize|shell\/open|workspace(?:\/command)?|close|managed-shell\/(?:open|state|read|input|close)|service\/(?:start|state|request|private-request|stop|cancel))$/.exec(request.url),connectionOpen=request.url==='/connections/open',profileRoute=/^\/connections\/profile\/(prepare|commit|abort)$/.exec(request.url);
   if(connectionRoute||connectionOpen||profileRoute){
    if(request.method==='GET'){if(!connectionRoute||!['state','service/state'].includes(connectionRoute[2]))failure('invalid_method',405);return send(200,await connections[connectionRoute[2]==='state'?'state':'serviceState']({connectionId:connectionRoute[1]}));}
    if(request.headers['content-type']!=='application/json')failure('invalid_content_type',415);
@@ -34,7 +34,7 @@ export async function startBroker(initialization,{pty,now=Date.now,onShutdown=()
    if(profileRoute)return send(200,await connections[{prepare:'prepareProfileUpdate',commit:'commitProfileUpdate',abort:'abortProfileUpdate'}[profileRoute[1]]](value));
    if(Object.hasOwn(value,'connectionId'))failure('invalid_request');
    if(operation.startsWith('managed-shell/'))return send(200,await connections.managedShell({connectionId:connectionRoute[1],...value},operation.slice(14)));
-   const method={state:'state',confirm:'confirm','login/complete':'completeLogin','auth/read':'authRead','auth/input':'authInput','auth/resize':'authResize','shell/open':'openShell',close:'close','service/start':'openService','service/state':'serviceState','service/request':'serviceRequest','service/private-request':'privateServiceRequest','service/stop':'closeService','service/cancel':'cancelServiceStart'}[operation];
+   const method={state:'state',confirm:'confirm','login/complete':'completeLogin','auth/read':'authRead','auth/input':'authInput','auth/resize':'authResize','shell/open':'openShell',workspace:'workspace','workspace/command':'runWorkspaceCommand',close:'close','service/start':'openService','service/state':'serviceState','service/request':'serviceRequest','service/private-request':'privateServiceRequest','service/stop':'closeService','service/cancel':'cancelServiceStart'}[operation];
    return send(200,await connections[method]({connectionId:connectionRoute[1],...value}));
   }
   const sessionRoute=/^\/sessions\/([0-9a-f-]{36})\/(state|read|input|owner|resize|close|service\/(?:start|request|stop|cancel|state))$/.exec(request.url),isOpen=request.url==='/sessions/open',isShutdown=request.url==='/shutdown';

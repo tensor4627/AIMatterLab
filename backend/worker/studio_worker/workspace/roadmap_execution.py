@@ -18,6 +18,7 @@ from studio_worker.transport.task_schema import field_key
 from studio_worker.workspace.layout import directory, new_run_directory
 from studio_worker.workspace.roadmap_tools import TOOLS, FORMATS, accept_goal, consumed, file_identity, md_ports, check_md_parameters, md_velocity_source, tool_identity
 from studio_worker.workspace.roadmap_group import bind_group
+from studio_worker.workspace import roadmap_cluster
 
 
 def exact(data, keys):
@@ -88,15 +89,22 @@ def step_parameters(step, parameters):
     return value
 
 
-def compile_graph(service, data):
-    require_local_execution(service)
+def compile_graph(service, data, *, discover=False):
     exact({key:value for key,value in data.items() if key not in ("node_environments","tool_group","workspace")}, ("task_id","name","original_request","revision","roadmap","parameters","target"))
     token(data["task_id"])
     if not isinstance(data["name"],str) or not isinstance(data["original_request"],str) or not isinstance(data["parameters"],dict):
         raise ValueError("Original workflow intent and parameter binding required")
     graph, target = data["roadmap"], data["target"]
     validate_roadmap(graph,field_key)
-    exact(target,("project_id","environment_id","gpu","max_seconds"))
+    remote = 'cluster_id' in target
+    if remote:
+        exact(target,('project_id','cluster_id','resources','conversation','gpu','max_seconds'))
+        exact(target['conversation'], ('provider','thread_id'))
+        if not all(isinstance(v,str) and v and len(v)<=512 for v in target['conversation'].values()):
+            raise ValueError('A stable originating conversation is required')
+    else:
+        require_local_execution(service)
+        exact(target,("project_id","environment_id","gpu","max_seconds"))
     if type(target["gpu"]) is not int or type(target["max_seconds"]) is not int:
         raise ValueError("Explicit deployment resources required")
     if not graph["outputs"] or not graph["steps"]:
@@ -104,7 +112,7 @@ def compile_graph(service, data):
     project = service.store.get("project",token(target["project_id"]))
     if project.get("authoring_only"):
         raise PermissionError("Select a compute project; an authoring workspace cannot run this graph")
-    token(target["environment_id"])
+    token(target['cluster_id'] if remote else target['environment_id'])
     node_envs = data.get("node_environments",{})
     if not isinstance(node_envs,dict) or set(node_envs)-{s["id"] for s in graph["steps"]}:
         raise ValueError("Unknown per-node environment binding")
@@ -146,19 +154,46 @@ def compile_graph(service, data):
         trace(goal)
     if len(visited)!=len(graph["steps"]) or set(initial)-used:
         raise ValueError("Resolve steps or initial inputs disconnected from the requested deliverables")
-    steps, versions = [], {}
+    steps, versions, definitions, missing = [], {}, {}, []
+    if remote and discover:
+        # Resolve an unavailable installation before attempting any preparation or submission.
+        from studio_worker.compute.bound_cluster import private_engine
+        for source in ordered:
+            engine = source['tool']
+            if engine in TOOLS:
+                continue
+            if not private_engine(engine) or not roadmap_cluster.installation_available(service, target, engine, node_envs.get(source['id'])):
+                missing.append({'step_id':source['id'], 'tool':engine, 'reason':'tool_not_configured'})
+        if missing:
+            raise roadmap_cluster.MissingTools(missing)
     for source in ordered:
         engine = source["tool"]
-        if engine not in TOOLS:
-            raise ValueError("No registered execution adapter for "+engine)
-        tool = TOOLS[engine]
+        if remote:
+            node_target, env = roadmap_cluster.cluster_target(service, target, engine, node_envs.get(source['id']))
+            params = {**groups.get(source['id'],{}).get('parameters',{}), **step_parameters(source,data['parameters'])}
+            declared = roadmap_cluster.declared_tool(service, engine, params, env['id'], target['cluster_id'])
+        else:
+            if engine not in TOOLS:
+                raise ValueError("No registered execution adapter for "+engine)
+            node_target = {**target,"environment_id":token(node_envs.get(source["id"],target["environment_id"]))}
+            _, env = service.authorize({**node_target,"engine":engine})
+            declared = None
+        tool = declared or TOOLS.get(engine)
+        if not tool:
+            raise roadmap_cluster.MissingTools([{'step_id':source['id'],'tool':engine,'reason':'tool_not_configured'}])
+        definitions[source['id']] = tool
         if any(value!="potential" or engine!="gpumd.md" for value in source.get("runtime",{}).values()):
             raise ValueError("This workflow adapter does not bind the declared in-process component on "+source["id"])
-        node_target = {**target,"environment_id":token(node_envs.get(source["id"],target["environment_id"]))}
-        _, env = service.authorize({**node_target,"engine":engine})
         key = (engine,env["id"])
-        if key not in versions:
-            versions[key] = tool_identity(engine,env)
+        if declared:
+            versions[key] = declared['version']
+        elif key not in versions:
+            try:
+                versions[key] = tool_identity(engine,env)
+            except (ValueError, FileNotFoundError) as error:
+                if not remote:
+                    raise
+                raise roadmap_cluster.MissingTools([{'step_id':source['id'],'tool':engine,'reason':str(error)}]) from error
         ins = {p["port"]:p["resource"] for p in source["inputs"]}
         outs = {p["port"]:p["resource"] for p in source["outputs"]}
         if set(ins)!=set(tool["inputs"]) or not outs or set(outs)-set(tool["outputs"]):
@@ -167,7 +202,7 @@ def compile_graph(service, data):
         for port,rid in ins.items():
             if rid in producers:
                 parent,parent_port = producers[rid]
-                if TOOLS[parent["tool"]]["outputs"][parent_port][1] != tool["inputs"][port][1]:
+                if definitions[parent['id']]["outputs"][parent_port][1] != tool["inputs"][port][1]:
                     raise ValueError("Incompatible artifact for "+source["id"]+"."+port)
         controls = []
         initialization = {}
@@ -184,10 +219,10 @@ def compile_graph(service, data):
             if not potential_type or not re.fullmatch(rb"nep[34](?:_zbl)?|tersoff_1989|tersoff_1988",potential_type[0]):
                 raise ValueError("This adapter requires a self-contained NEP3/NEP4 or Tersoff potential")
         for port,rid in outs.items():
-            declared = resources[rid].get("format")
+            requested_format = resources[rid].get("format")
             actual = tool["outputs"][port][1]
             aliases = {"gpumd.thermo":{"text","txt"},"density.csv":{"csv"}}
-            if declared and declared!=actual and declared not in aliases.get(actual,set()):
+            if requested_format and requested_format!=actual and requested_format not in aliases.get(actual,set()):
                 raise ValueError("Declared output format differs from registered port: "+rid)
         parameters = step_parameters(source,data["parameters"])
         group_node = groups.get(source["id"],{})
@@ -197,13 +232,14 @@ def compile_graph(service, data):
         parameters = {**parameters,**bound_parameters}
         if controls:
             check_md_parameters(parameters,controls)
-        argv = Adapter(engine).prepare({"engine":engine,"parameters":parameters,"inputs":dict.fromkeys(filenames.values()),
+        argv = declared['argv'] if declared else Adapter(engine).prepare({"engine":engine,"parameters":parameters,"inputs":dict.fromkeys(filenames.values()),
                                         "studio_workflow_binding":{"schema_version":2}},env)
         if engine=="gpumd.md" and argv!=[versions[key]["executable"]]:
             raise ValueError("Registered GPUMD command differs from its native file contract")
-        process_environment = run_process_env({"engine":engine,"gpu":node_target["gpu"],"environment_snapshot":env,
+        process_environment = env.get('variables',{}) if remote else run_process_env({"engine":engine,"gpu":node_target["gpu"],"environment_snapshot":env,
                                               "studio_workflow_binding":{"schema_version":2}})
         steps.append({"id":source["id"],"label":source["label"],"tool":engine,"version":versions[key],"argv":argv,
+                      **({'activation':declared['activation']} if declared and declared.get('activation') else {}),
                       "registered_function":group_node or None,"depends_on":group_node.get("depends_on",[]),
                       "environment":env,"environment_sha256":sha(encoded(env)),"process_environment":process_environment,"target":node_target,
                       "parameters":parameters,**({"native_controls":controls,"velocity_initialization":initialization or {"source":"upstream_structure"}} if controls else {}),
@@ -303,21 +339,34 @@ class RoadmapExecutions:
         self.store = service.store
 
     def preview(self,data):
-        snapshot = compile_graph(self.service,data)
+        try:
+            snapshot = compile_graph(self.service,data,discover=True)
+        except roadmap_cluster.MissingTools as error:
+            return {'task_id':data['task_id'],'missing_tools':error.steps}
         return {"snapshot_sha256":sha(encoded(snapshot)),"snapshot":snapshot}
 
     def confirm(self,data):
-        exact(data,("plan","snapshot_sha256"))
+        remote = 'cluster_id' in data['plan']['target']
+        exact(data,("plan","snapshot_sha256","workspace_receipt") if remote else ("plan","snapshot_sha256"))
         expected = data["snapshot_sha256"]
         identifier = sha(encoded([token(data["plan"]["task_id"]),expected]))
         with self.service.tool_workflow_lock:
             if self.store.db_exists("roadmap-state",identifier):
                 return self.status({"task_id":data["plan"]["task_id"],"execution_id":identifier})
-            preview = self.preview(data["plan"])
-            if expected!=preview["snapshot_sha256"]:
+            try:
+                snapshot = compile_graph(self.service,data["plan"])
+            except roadmap_cluster.MissingTools as error:
+                raise ValueError("The reviewed graph, inputs or environment changed; review again") from error
+            if expected!=sha(encoded(snapshot)):
                 raise ValueError("The reviewed graph, inputs or environment changed; review again")
-            snapshot = preview["snapshot"]
-            root = directory(self.service.root,relative(identifier)+"/inputs")
+            receipt = None
+            if remote:
+                from studio_worker.workspace.resource_workspace import verified_session_directory
+                receipt = data['workspace_receipt']
+                base = verified_session_directory(self.service,receipt,**snapshot['target']['conversation'])
+                root = directory(base,'runs/'+identifier+'/inputs')
+            else:
+                root = directory(self.service.root,relative(identifier)+"/inputs")
             from studio_worker.workspace.private_lineage import propagate, versions_for
             propagate(self.service,[asset["path"] for asset in snapshot["initial"].values()],snapshot["target"]["project_id"])
             private_versions = {}
@@ -326,6 +375,7 @@ class RoadmapExecutions:
             for rid, asset in snapshot["initial"].items():
                 freeze_file(asset,root/rid)
             state = {"id":identifier,"task_id":snapshot["task_id"],"snapshot_sha256":expected,
+                     **({'workspace_receipt':receipt,'directory':str(root.parent)} if remote else {}),
                      "confirmed_at":time.time(),"status":"running","nodes":{n["id"]:{"status":"pending"} for n in snapshot["steps"]},
                      "initial_private_versions":{rid:v for rid,v in private_versions.items() if v},
                      "artifacts":{},"goals":[accept_goal(g,None) for g in snapshot["goals"]]}
@@ -360,11 +410,12 @@ class RoadmapExecutions:
                 if asset["producer"]!={"step_id":producer["step_id"],"port":producer["port"],"run_id":state["nodes"][producer["step_id"]]["run_id"]}:
                     raise ValueError("Cross-run or cross-port artifact substitution")
             else:
-                asset = {**snapshot["initial"][rid],"path":str(self.service.root/relative(state["id"])/"inputs"/rid)}
+                root = roadmap_cluster.execution_root(self.service,state) if state.get('workspace_receipt') else self.service.root/relative(state["id"])
+                asset = {**snapshot["initial"][rid],"path":str(root/"inputs"/rid)}
             if file_identity(asset["path"])!={key:asset[key] for key in ("size","sha256")}:
                 raise ValueError("Bound input changed: "+rid)
             inputs[port] = {**asset,"name":ref["name"]}
-        for name,path in TOOLS[node["tool"]]["files"].items():
+        for name,path in TOOLS.get(node["tool"],{}).get("files",{}).items():
             inputs["$"+name] = {"resource":"$"+name,"name":name,"path":str(path.resolve()),**file_identity(path)}
         return inputs
 
@@ -435,6 +486,9 @@ class RoadmapExecutions:
                     if parent["status"] in ("failed","blocked","cancelled"):
                         active.update(status="blocked",reason="Required artifact unavailable: "+ref["resource"])
                     return
+        if 'cluster_id' in node['target']:
+            return roadmap_cluster.advance(self,state,snapshot,node,active)
+        if active["status"]=="pending":
             run = self._start(state,snapshot,node,active,context)
         else:
             run = self.store.by_key(node["target"]["project_id"],active["spec"]["idempotency_key"])

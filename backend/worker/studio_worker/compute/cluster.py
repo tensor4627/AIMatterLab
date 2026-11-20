@@ -19,6 +19,7 @@ from pathlib import Path
 from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES
 from studio_worker.infrastructure.util import atomic_json, contained, digest, leaf
 from studio_worker.workspace.private_lineage import current_rows
+from studio_worker.compute.bound_cluster import COMPUTE_CHECK, bound_batch_body, confinement_source, invocation, job_root, private_engine
 
 
 def private_copy_rows(rows, local_paths, runs, root):
@@ -233,7 +234,7 @@ def queue_targets(value, cluster_limits, scheduler=None):
         if target.get("usage_class") not in ("owned", "paid", "unknown") or type(target.get("enabled")) is not bool:
             raise ValueError("Explicit queue target usage class and enabled flag required")
         engines = target.get("engines")
-        if not isinstance(engines, list) or not engines or any(not isinstance(engine, str) or engine not in SUPPORTED_ENGINES for engine in engines) or len(engines) != len(set(engines)):
+        if not isinstance(engines, list) or not engines or any(engine not in SUPPORTED_ENGINES and not private_engine(engine) for engine in engines) or len(engines) != len(set(engines)):
             raise ValueError("Explicit supported queue target engines required")
         target["environment"] = environment(target.get("environment"))
         if not isinstance(target.get("activation"), str) or len(target["activation"]) > 8192 or "\0" in target["activation"]:
@@ -471,7 +472,10 @@ def batch_script(run):
     exports=["export "+key+"="+shlex.quote(str(value)) for key,value in p["environment"].get("variables",{}).items()]
     paths=list(p["environment"].get("repositories",{}).values())
     if paths:exports.append("export PYTHONPATH="+shlex.quote(":".join(paths))+':'+chr(36)+'{PYTHONPATH:-}')
-    body=["set -u",'if [ "'+chr(36)+'{CUDA_VISIBLE_DEVICES+x}" = x ]; then _STUDIO_ASSIGNED_CUDA='+chr(36)+'CUDA_VISIBLE_DEVICES; _STUDIO_HAS_CUDA=1; fi',p.get("activation",""),
+    if run.get('bound_invocation'):
+        return "\n".join(header + bound_batch_body(run, python, remote_path, exports, receipt)) + "\n"
+    activation = (run.get('bound_invocation') or {}).get('activation')
+    body=["set -u",'if [ "'+chr(36)+'{CUDA_VISIBLE_DEVICES+x}" = x ]; then _STUDIO_ASSIGNED_CUDA='+chr(36)+'CUDA_VISIBLE_DEVICES; _STUDIO_HAS_CUDA=1; fi',p.get("activation",""),activation or "",
           'if [ "'+chr(36)+'{_STUDIO_HAS_CUDA:-0}" = 1 ]; then export CUDA_VISIBLE_DEVICES='+chr(36)+'_STUDIO_ASSIGNED_CUDA; fi',*exports,"cd "+remote_path+" || exit 1","start=$SECONDS",
           f"timeout --signal=TERM --kill-after=15s {r['seconds']}s {python} .studio/validate.py >validation.stdout 2>validation.stderr",
           "status=$?",f"remaining=$(({r['seconds']}-(SECONDS-start)))",
@@ -846,7 +850,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
 
     @staticmethod
     def remote_name(run):
-        root = run["cluster_snapshot"]["remote_root"].rstrip("/")
+        root = job_root(run).rstrip("/")
         name = run["remote_directory"][len(root) + 1:] if run["remote_directory"].startswith(root + "/") else ""
         if not name or "/" in name or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
             raise ValueError("Recorded remote run directory is outside its registered root")
@@ -861,8 +865,23 @@ print('__STUDIO_JSON__'+json.dumps(out))
         with self.prepare_lock:
             return self._prepare(spec)
 
-    def _prepare(self, spec):
+    def prepare_bound(self, spec, *, argv, version, inputs, output_root, owner, activation=None, writable_roots=()):
+        """Internal API. The caller has verified the workspace, operation owner and selected template."""
+        from studio_worker.compute.ssh_service import assert_binding
+        _, profile = self.allowed(spec['project_id'], spec['cluster_id'])
+        if profile.get('transport_kind') != 'ssh-service-local':
+            raise PermissionError('Use the scheduler registered on this job service')
+        assert_binding(self.service, profile)
+        bound = invocation(argv, version, inputs, output_root, owner, activation, writable_roots)
+        with self.prepare_lock:
+            return self._prepare({**spec, 'inputs':{k:v['path'] for k,v in inputs.items()}}, bound=bound)
+
+    def _prepare(self, spec, *, bound=None):
         spec = dict(spec)
+        if 'bound_invocation' in spec:
+            raise ValueError('Invocation bindings are worker-owned')
+        if bound is not None:
+            spec['bound_invocation'] = bound
         if any(key in spec for key in ("queue_target_snapshot", "queue_policy_snapshot", "queue_policy_digest", "queue_profile_version")):
             raise ValueError("Queue selection snapshots are worker-owned")
         local_inputs = spec.get("inputs", {})
@@ -883,7 +902,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
         project, p = self.allowed(spec["project_id"], spec["cluster_id"])
         if remote_inputs and not p.get("read_roots"):
             raise PermissionError("Register explicit remote read roots before importing inputs")
-        if spec["engine"] not in project["policy"]["engines"] or spec["engine"] not in SUPPORTED_ENGINES:
+        if spec["engine"] not in project["policy"]["engines"] or (spec["engine"] not in SUPPORTED_ENGINES and not (bound and private_engine(spec["engine"]))):
             raise PermissionError("Engine is not authorized")
         if type(spec.get("max_seconds")) is not int:
             raise ValueError("Integer wall-clock limit required")
@@ -907,8 +926,10 @@ print('__STUDIO_JSON__'+json.dumps(out))
             raise ValueError("Bias target validation requires a GPU allocation")
         # Adapter and compute-node gates must see the complete run filename map.
         spec["inputs"] = {**local_inputs, **remote_inputs}
-        command = PlanningAdapter(spec["engine"]).prepare(spec, p["environment"])
+        command = bound['argv'] if bound else PlanningAdapter(spec["engine"]).prepare(spec, p["environment"])
         roots = project["policy"]["input_roots"] + [str(self.service.root/"projects"/project["id"]/"inputs")]
+        if bound:
+            roots = [value['path'] for value in bound['inputs'].values()]
         parent = None
         if spec.get("revision_of"):
             parent = self.raw(spec["revision_of"])
@@ -952,7 +973,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
                    "request_hash":fingerprint, "directory":str(directory), "snapshots":snapshots, "command":command,
                    "local_inputs":local_inputs, "resources":r, "cluster_snapshot":p, "status":"draft", "validation":{"status":"not_run"},
                    "scientific_validation":{"status":"not_run"}, "nonce":secrets.token_hex(16),
-                   "remote_directory":p["remote_root"].rstrip("/")+"/"+(prefix+"-" if prefix else "")+identifier,
+                   "remote_directory":(bound['root'] if bound else p["remote_root"]).rstrip("/")+"/"+(prefix+"-" if prefix else "")+identifier,
                    "job_name":"gss-"+identifier, "job_id":None, "created_at":time.time(), "updated_at":time.time()}
             if selected_target is not None:
                 run.update(queue_target_snapshot=selected_target, queue_policy_snapshot=selected_policy,
@@ -1053,7 +1074,12 @@ print('__STUDIO_JSON__'+json.dumps(out))
         for asset in r["snapshots"]:
             if digest(Path(r["directory"])/"simulation"/asset["name"]) != asset["sha256"]:
                 raise ValueError("Input snapshot changed")
-        PlanningAdapter(r["engine"]).prepare(r,r["cluster_snapshot"]["environment"])
+        if r.get('bound_invocation'):
+            bound = r['bound_invocation']
+            if r['command'] != bound['argv'] or any(a['sha256'] != bound['inputs'][a['name']]['sha256'] for a in r['snapshots']):
+                raise ValueError('Prepared run differs from its reviewed invocation')
+        else:
+            PlanningAdapter(r["engine"]).prepare(r,r["cluster_snapshot"]["environment"])
         resources(r["resources"],r["cluster_snapshot"],r["max_seconds"])
         # A concurrent submit may reserve/dispatch while input hashing is in
         # progress. Validation must never reopen an attempted run as ready.
@@ -1068,7 +1094,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
 
     def revise(self,identifier,changes):
         parent=self.raw(identifier)
-        if parent.get("managed_child"):
+        if parent.get("managed_child") or parent.get("bound_invocation"):
             raise PermissionError("Use the owning schedule to edit this operation")
         allowed=("name","engine","max_seconds","resources","inputs","remote_inputs","directory_name","parameters")
         if any(k not in allowed for k in changes):raise ValueError("Unsupported revision field")
@@ -1126,6 +1152,8 @@ elif r['engine']=='pydyn.md':
   atomic_json('execution-check.json',{'status':'failed','required':True,'message':str(e)})
   raise
 """
+        if r.get('bound_invocation'):
+            validate = COMPUTE_CHECK + ('\n' + validate if r['engine'] in ENGINES else '')
         with tarfile.open(fileobj=buffer,mode="w:gz") as tar:
             def add(name, content):
                 b=content.encode() if isinstance(content,str) else content
@@ -1139,6 +1167,8 @@ elif r['engine']=='pydyn.md':
             payload.pop("cluster_snapshot",None);payload.pop("cluster",None)
             add(".studio/run.json",json.dumps(payload))
             add(".studio/validate.py",validate)
+            if r.get('bound_invocation'):
+                add('.studio/workspace-confinement.py', confinement_source())
             for name, data in validation_resources():
                 add(".studio/studio_worker/"+name,data)
         return buffer.getvalue()
@@ -1191,6 +1221,7 @@ root=pathlib.Path(p['root']).expanduser().resolve();root.mkdir(parents=True,exis
 d=root/p.get('directory',p['id'])
 if d.exists():raise ValueError('Run directory already exists; reconcile only')
 d.mkdir()
+(d/'simulation').mkdir()
 with tarfile.open(fileobj=io.BytesIO(sys.stdin.buffer.read()),mode='r:gz') as t:
  for member in t.getmembers():
   q=(d/member.name).resolve()
@@ -1231,7 +1262,7 @@ print('__STUDIO_JSON__'+json.dumps(record))
             else:
                 self.save(r,status="unknown",submit_attempted=True)
         try:
-            result=parse_output(self.transport(p).run(python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=data,timeout=timeout))
+            result=parse_output(self.transport(p).run(python_script(p,source,{"root":job_root(r),"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"scheduler":p["scheduler"]}),data=data,timeout=timeout))
             if result.get("nonce")!=r["nonce"] or not re.fullmatch(r"[0-9]+",result.get("job_id","")):
                 raise ValueError("Invalid scheduler receipt")
             with self.store.lock:
@@ -1306,7 +1337,7 @@ if out['job_id']:
 print('__STUDIO_JSON__'+json.dumps(out))
 """
         try:
-            script=python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"job_id":r["job_id"],"scheduler":p["scheduler"],"name":r["job_name"]})
+            script=python_script(p,source,{"root":job_root(r),"id":r["id"],"directory":self.remote_name(r),"nonce":r["nonce"],"job_id":r["job_id"],"scheduler":p["scheduler"],"name":r["job_name"]})
             transport=self.transport(p)
             result=parse_output(transport.run(script) if timeout is None else transport.run(script,timeout=timeout))
             with self.store.lock:
@@ -1406,7 +1437,7 @@ if present:
   stream.seek(max(0,int(p['offset'])));text=stream.read(p['limit']).decode('utf8','replace');offset=stream.tell()
 print('__STUDIO_JSON__'+json.dumps({'text':text,'offset':offset,'present':present}))
 """
-        script=python_script(p,source,{"root":p["remote_root"],"id":r["id"],"directory":self.remote_name(r),"name":name,"offset":offset,"limit":limit})
+        script=python_script(p,source,{"root":job_root(r),"id":r["id"],"directory":self.remote_name(r),"name":name,"offset":offset,"limit":limit})
         transport=self.transport(p)
         return parse_output(transport.run(script) if timeout is None else transport.run(script,timeout=timeout))
 

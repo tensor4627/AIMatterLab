@@ -9,6 +9,11 @@ export function messageForItem(item){
  if(item.type==='serviceMessage')return {id:item.id,role:'service',text:item.text||''};
  if(item.type==='agentMessage')return {id:item.id,role:'agent',text:item.text||''};
  if(item.type==='mcpToolCall')return {id:item.id,role:'tool',text:item.tool||'工具',toolName:item.tool,activity:toolActivity(item)};
+ if(item.type==='webSearch'){
+  const action=item.action||{},state=item.error||item.status==='failed'?'failed':item.status==='inProgress'?'running':'completed';
+  const details=[item.query,action.query,...(Array.isArray(action.queries)?action.queries:[]),action.url,action.pattern].filter(value=>typeof value==='string'&&value);
+  return {id:item.id,role:'tool',text:'网页检索',toolName:'webSearch',activity:{state,summary:'网页检索',details:[...new Set(details)].join('\n')}};
+ }
  if(item.type==='commandExecution'){
   const failed=item.status==='failed'||item.error!=null||Number.isInteger(item.exitCode)&&item.exitCode!==0;
   const state=failed?'failed':item.status==='completed'?'completed':'running';

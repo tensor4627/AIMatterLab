@@ -50,6 +50,10 @@ async function invoke(method, data) {
   calls.push({method, data});
   switch (method) {
     case 'compute.managed.snapshot': return {resources:exposeSnapshot ? manager.snapshot() : [], conversations:[], sources:[]};
+    case 'compute.resourceWorkspace.preview': {
+      const root='/fixture/AIMatterLab';
+      return {...data,root,directories:[root+'/workfile',root+'/software'],status:'confirmed',source:'confirmed',account:'fixture',hostname:'fixture-host',resourceName:profile.name,checkedAt:Date.now()};
+    }
     case 'compute.managed.publish':
       try {
         const receipt = await manager.publish(data);
@@ -79,6 +83,7 @@ async function invoke(method, data) {
       return {connection, shell, login:{status:'complete'}};
     }
     case 'compute.sshConnection.openShell': return addSession();
+    case 'compute.managed.serviceStatus':
     case 'compute.sshService.status': return {schemaVersion:2, connectionId, status:'disconnected', workflowReady:false};
     case 'sharedTerminal.list': return {sessions};
     case 'sharedTerminal.read': {

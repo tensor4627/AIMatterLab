@@ -4,10 +4,19 @@ import {X} from 'lucide-react';
 export const statusNames:Record<string,string>={draft:'草稿',validating:'验证中',ready:'就绪',queued:'排队中',running:'运行中',succeeded:'已完成',failed:'失败',cancelled:'已取消',unknown:'状态未知',passed:'通过',blocked:'环境阻塞',not_run:'未验证'};
 export function Modal({title,onClose,children,wide=false,closeDisabled=false}:{title:string;onClose:()=>void;children:ReactNode;wide?:boolean;closeDisabled?:boolean}){
  const ref=useRef<HTMLElement>(null),titleId=useId(),closeRef=useRef(onClose);closeRef.current=()=>{if(!closeDisabled)onClose();};
- function focusable(){return [...(ref.current?.querySelectorAll<HTMLElement>('a[href],button,input,select,textarea,[tabindex]')||[])].filter(el=>!el.matches(':disabled,[tabindex="-1"],[type="hidden"]')&&el.getClientRects().length>0);}
+ function focusable(){
+  const candidates=ref.current?.querySelectorAll<HTMLElement>('a[href],button,input,select,textarea,details>summary:first-of-type,[tabindex]')||[];
+  return [...candidates].filter(element=>{
+   if(element.matches(':disabled,[tabindex="-1"],[type="hidden"]')||element.closest('[hidden],[inert]')||!element.getClientRects().length)return false;
+   for(let disclosure=element.closest('details:not([open])');disclosure;disclosure=disclosure.parentElement?.closest('details:not([open])')??null){
+    if(!disclosure.querySelector(':scope > summary:first-of-type')?.contains(element))return false;
+   }
+   return true;
+  });
+ }
  useEffect(()=>{
   const previous=document.activeElement as HTMLElement|null,node=ref.current;
-  const top=()=>node===[...document.querySelectorAll('[role="dialog"]:not(dialog:not([open]))')].at(-1);
+  const top=()=>node===[...document.querySelectorAll('[role="dialog"]:not(dialog:not([open]))')].filter(dialog=>!dialog.closest('[hidden]')).at(-1);
   const focus=()=>{const items=focusable();(items.find(el=>el.closest('.modal-body'))||items[0]||node)?.focus();};
   if(node&&!node.contains(document.activeElement))focus();
   const onKey=(e:KeyboardEvent)=>{if(!top())return;if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeRef.current();}else if(e.key==='Tab')trap(e);};

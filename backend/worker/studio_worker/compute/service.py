@@ -66,6 +66,5 @@ class Service(RegistrationsMixin, RunInputsMixin, RunsMixin, SchedulerMixin, Run
             self.scheduler.start()
             self.cluster_monitor=threading.Thread(target=self.cluster_loop,daemon=True)
             self.cluster_monitor.start()
-            if not self.ssh_service_mode:
-                self.roadmap_scheduler = threading.Thread(target=self.roadmap_loop,daemon=True)
-                self.roadmap_scheduler.start()
+            self.roadmap_scheduler = threading.Thread(target=self.roadmap_loop,daemon=True)
+            self.roadmap_scheduler.start()

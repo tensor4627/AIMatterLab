@@ -54,7 +54,8 @@ class RegistrationsMixin:
             raise ValueError("Resource limits must be positive")
         policy["max_seconds"] = int(policy["max_seconds"])
         policy["max_concurrent"] = int(policy["max_concurrent"])
-        if any(e not in SUPPORTED_ENGINES for e in policy["engines"]):
+        from studio_worker.compute.bound_cluster import private_engine
+        if any(e not in SUPPORTED_ENGINES and not private_engine(e) for e in policy["engines"]):
             raise ValueError("Unsupported engine authorization")
         self.clusters.validate_project_policies(value)
         return self.store.put("project", value)

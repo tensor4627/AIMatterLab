@@ -11,7 +11,17 @@ export async function frontendSshReloginCases({check,out}){
     if(method==='compute.profiles.read')return profile;
     if(method==='compute.sshConnection.list')return {connections:f.sshConnections};
     if(method==='compute.managed.snapshot')return {resources:f.sshHosted?[f.sshHosted]:[],conversations:[],sources:[]};
+    if(method==='compute.resourceWorkspace.preview'){
+     f.calls.push({method,data});const root=data.directory||'/home/fixture/AIMatterLab';
+     return {...data,root,directories:[root+'/workfile',root+'/software'],status:'confirmation_required',source:data.directory?'custom':'suggested',confirmationId:'fixture-confirm',account:'fixture',hostname:'fixture-host',resourceName:profile.name,checkedAt:Date.now()};
+    }
+    if(method==='compute.resourceWorkspace.cancel'){f.calls.push({method,data});return {cancelled:true};}
+    if(method==='compute.resourceWorkspace.confirm'){
+     f.calls.push({method,data});const preview=f.calls.findLast(row=>row.method==='compute.resourceWorkspace.preview');
+     return {...data,root:preview.data.directory||'/home/fixture/AIMatterLab',status:'confirmed',source:'confirmed',account:'fixture',hostname:'fixture-host',resourceName:profile.name,checkedAt:Date.now()};
+    }
     if(method==='compute.managed.publish'){
+     f.calls.push({method,data});
      const current=f.sshConnections.find(c=>c.connectionId===data.connectionId&&c.status==='authenticated');
      if(!current||current.profileId!==data.profileId||current.profileVersion!==data.profileVersion)throw Error('unexpected SSH publication');
      f.sshHosted={...data,name:profile.name,kind:'ssh',resourceId:'ssh:'+profile.id,serviceStatus:'idle',terminalReady:true};
@@ -45,6 +55,17 @@ export async function frontendSshReloginCases({check,out}){
   await page.evaluate(()=>window.__test.finishSshOpen());await page.getByTestId('ssh-login-progress').getByText('请在原终端完成密码或验证码输入。',{exact:true}).waitFor();await page.getByRole('region',{name:'SSH 登录终端',exact:true}).locator('.xterm').waitFor();assert.equal(await page.getByTestId('ssh-login-error').count(),0);await page.screenshot({path:path.join(out,'ssh-relogin-fresh-authentication.png')});
   await page.evaluate(()=>window.__test.sshAuthenticated=true);await page.getByTestId('ssh-publish-resource').waitFor();await page.getByRole('region',{name:'SSH 终端',exact:true}).locator('.xterm').waitFor();assert.equal(await page.locator('.composer textarea').inputValue(),'Preserve these unsent school connection instructions');
   await page.getByTestId('ssh-publish-resource').click();
+  await page.getByTestId('resource-workspace-review').waitFor();
+  assert.match(await page.getByTestId('resource-workspace-review').innerText(),/fixture@fixture-host/);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('resource-workspace-review').waitFor({state:'hidden'});
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='compute.managed.publish'||call.method==='compute.resourceWorkspace.confirm').length),0);
+  await page.getByTestId('ssh-publish-resource').click();
+  await page.getByTestId('resource-workspace-path').fill('/project/fixture/AIMatterLab');
+  assert.equal(await page.getByTestId('resource-workspace-confirm').isDisabled(),true);
+  await page.getByTestId('resource-workspace-preview').click();
+  await page.getByTestId('resource-workspace-resolved').getByText('/project/fixture/AIMatterLab').waitFor();
+  await page.getByTestId('resource-workspace-confirm').click();
   await page.getByTestId('ssh-managed-status').waitFor();
   await page.waitForFunction(()=>document.querySelector('[data-testid="current-compute-resource-status"]')?.textContent.includes('Fixture school SSH'));
   assert.equal(await page.getByTestId('agent-ssh-resource-notice').count(),0);

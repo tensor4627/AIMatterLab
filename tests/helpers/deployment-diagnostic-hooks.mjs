@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import ts from 'typescript';
 import * as deployment from "../../contracts/compute/deployment.mjs";
 import * as taskFields from '../../contracts/workflows/task-fields.mjs';
+import * as taskWorkerBinding from '../../contracts/compute/task-worker-binding.mjs';
 
 import * as draftsOwner0 from "../../frontend/features/workflows/deployment-draft.mjs";
 import * as draftsOwner1 from "../../contracts/compute/deployment-draft.mjs";
@@ -55,6 +56,7 @@ export function deploymentHarness({initial=deploymentFixture(),override,properti
   if(name==='../../api/task-client')return {taskApi:{execute:data=>invoke('task.execute',data),linkRun:data=>invoke('task.linkRun',data)}};
   if(["../../../contracts/compute/deployment.mjs"].includes(name))return deployment;
   if(name==='../../../contracts/workflows/task-fields.mjs')return taskFields;
+  if(name==='../../../contracts/compute/task-worker-binding.mjs')return taskWorkerBinding;
   if(["./deployment-draft.mjs","../../../contracts/compute/deployment-draft.mjs"].includes(name))return drafts;
   if(["./draft-outbox.mjs"].includes(name))return scienceDrafts;
   if(["../../../contracts/compute/deployment-authorization.mjs"].includes(name))return authorization;

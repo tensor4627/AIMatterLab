@@ -13,8 +13,11 @@ import type {DeleteConversationGroupRequest,DeleteConversationGroupResult} from 
 import {sshStateLabel} from "../features/compute/ssh-connection-types";
 import {taskWorkerSource,unboundWorkflow} from '../../contracts/compute/task-worker-binding.mjs';
 import type {DiagnosticRepairRequest} from '../features/diagnostics/repair-request.mjs';
-import {computeResources} from '../api/compute-resources';
-import type {ComputeResourceState} from '../../contracts/dto/compute';
+import {computeResources,resourceWorkspaces,sshConnections} from '../api/compute-resources';
+import type {ComputeResourceState,ResourceWorkspaceReference,SshServiceState} from '../../contracts/dto/compute';
+import type {ResourceToolRoute} from '../../contracts/dto/resource-tools';
+import type {ResourceToolDiscussion} from '../features/tools/ResourceToolSetup';
+import {readClusterGuide,storeClusterGuide,type ClusterGuideProgress} from '../features/onboarding/cluster-guide-progress';
 import {useToolWorkflowNavigation} from "../features/workflows/useToolWorkflowNavigation";
 import {useConversationSelection,storedConversation,storeConversation} from "../features/conversations/useConversationSelection";
 
@@ -77,12 +80,13 @@ import RunReview,{taskModule} from "../features/runs/RunReview";
 
 import {CodeEditor} from "../ui/widgets";
 import type {SharedTerminalRequest} from "../features/terminal/SharedTerminalPanel";
+import type {HandoffLessonStage,SshEnvironmentHelpTarget} from "../features/terminal/SshConnectionPanel";
 import {Modal,Empty,Badge,statusNames} from "../ui/Dialogs";
 import {api,readWorkerStatus,restoreWorker} from '../api/worker';
 import {clearTaskDrafts} from '../features/workflows/task-drafts';
 import {invoke} from '../api/studio';
 import {engines} from '../ui/presentation/engines';
-import {type Project,type Environment,type WslComputeProfile,type SshComputeProfile} from '../../contracts/dto/compute';
+import {type Project,type Environment,type ComputeProfile,type WslComputeProfile,type SshComputeProfile} from '../../contracts/dto/compute';
 import {type Run} from '../../contracts/dto/runs';
 import {type Settings} from '../../contracts/dto/settings';
 import {type Artifact} from '../../contracts/dto/assets';
@@ -113,6 +117,7 @@ const ClusterRunPage=lazyPanel("ClusterRunPage",async()=>{const module=await imp
 const MaterialsProjectSearch=lazyPanel("MaterialsProjectSearch",async()=>{const module=await import("../features/assets/MaterialsProject");return {default:module.MaterialsProjectSearch};});
 const SshConnectionGuide=lazyPanel("SshConnectionGuide",()=>import("../features/cluster/SshConnectionGuide"));
 const ComputeResourceConsole=lazyPanel("ComputeResourceConsole",()=>import("../features/compute/ComputeResourceConsole"));
+const ResourceToolSetup=lazyPanel("ResourceToolSetup",()=>import("../features/tools/ResourceToolSetup"));
 
 const sections=[['home','工作区',Layers3],['tools','工具与资源',Layers3],['extensions','第三方工具包',BookOpen],['relations','工具关系图',GitBranch],['runs','运行记录',Activity],['bias','Bias 实验室',FlaskConical],['training','模型与训练',GraduationCap],['assets','数据资产',Database],['compute-resources','计算资源',Server],['environments','计算环境',Server],['deployment','部署与执行',Play],['ssh','SSH 集群',Terminal],['skills','技能库',BookOpen]] as const;
 const initialSettings:Settings={distribution:'Ubuntu',workerRoot:'~/.local/state/gpu-sampling-studio',workerPort:8767,codexPath:'codex',cwd:'',skillRoots:[],theme:'dark'};
@@ -138,6 +143,9 @@ function RunTable({items,selected,onOpen,canOpen,canPrepare,onPrepare}:{items:Ru
  return items.length?<div className="run-table"><div className="table-heading"><span>{tr("计算名称")}</span><span>{tr("状态")}</span><span>{tr("资源")}</span><span>{tr("创建时间")}</span></div>{items.map(r=><button key={r.id} className={'run-row '+(selected===r.id?'selected':'')} aria-current={selected===r.id?'true':undefined} disabled={!canOpen} onClick={()=>onOpen(r)}><span><span className="run-icon"><Atom size={17}/></span><span><strong>{r.name}</strong><small>{r.engine}</small></span></span><Badge status={r.status}/><span className="mono">GPU {r.gpu}</span><span className="muted">{shortTime(r.created_at)}</span></button>)}</div>:<Empty title={tr("这里将记录你的计算")} body={"准备输入并提交任务，检查结果单独保留。所有状态来自作业服务。"} action={<button className="button" onClick={onPrepare} disabled={!canPrepare}><Plus size={14}/>{tr("准备第一个计算")}</button>}/>;
 }
 type SshGuideState={request:SshAuthenticationRequest;taskId?:string;conversationId?:string;selectionSeq:number;standalone:boolean};
+type ResourceToolLocation={profileId:string;profileVersion:number;name:string;route?:ResourceToolRoute;missing?:string;taskId?:string;conversationId?:string;newPlanAfter?:string[]};
+type WorkflowToolQuestion={id:string;taskId:string;workflowRevision:string;provider:AgentProvider;threadId:string;profileId:string;profileVersion:number;tool:string};
+const toolQuestionRevision=(task:any)=>JSON.stringify([task?.parameterRevision,task?.deployment?.revision,task?.roadmap]);
 export default function App(){
  const managed=useManagedResources();
  const [focusSchedule,setFocusSchedule]=useState<{sourceId:string;scheduleId:string;nonce:string}|null>(null);
@@ -156,11 +164,17 @@ export default function App(){
  const [guideInfo,setGuideInfo]=useState<SetupGuideInfo|null>(null),[guidePage,setGuidePage]=useState<SetupPage|null>(null);
  const [dismissedLesson,setDismissedLesson]=useState<SetupLessonLocation|null>(null);
  const [lesson,setLesson]=useState<SetupLessonLocation|null>(null),[guideKind,setGuideKind]=useState<'wsl'|'ssh'>();
+ const [clusterGuide,setClusterGuide]=useState<ClusterGuideProgress|null>(readClusterGuide);
+ const [toolSetup,setToolSetup]=useState<ResourceToolLocation|null>(null),[toolSetupReview,setToolSetupReview]=useState<(ResourceToolLocation&{selectionSeq:number;provider:AgentProvider})|null>(null);
+ const [toolSetupRevision,setToolSetupRevision]=useState('');
+ const [workflowToolQuestion,setWorkflowToolQuestion]=useState<WorkflowToolQuestion|null>(null);
+ const [toolSetupReturn,setToolSetupReturn]=useState<{destination:'scheduler'|'project';owner?:string;scope:string;opener:HTMLElement|null;workerScope?:ResourceWorkspaceReference}|null>(null);
+ const [toolSetupTargetDefaults,setToolSetupTargetDefaults]=useState<{profileId:string;profileVersion:number;root?:string;schedulerId?:string}|null>(null);
  const [guideProvider,setGuideProvider]=useState<{provider:AgentProvider;nonce:string}>(),[guideReply,setGuideReply]=useState<ModelReply|null>(null);
  const guideShowing=guidePage!==null&&!lesson;
  const lessonOpener=useRef<HTMLElement|null>(null);
  const [computeChooser,setComputeChooser]=useState(false);
- const [computeChooserEdit,setComputeChooserEdit]=useState<{profileId:string;profileVersion:number;nonce:string;section?:"service"}|undefined>();
+ const [computeChooserEdit,setComputeChooserEdit]=useState<{profileId:string;profileVersion:number;nonce:string;section?:'service'|'environment';connectionId?:string;sessionId?:string}|undefined>();
  const [sshGuide,setSshGuide]=useState<SshGuideState|null>(null),[clusterSelection,setClusterSelection]=useState<string|null>(null);
  const pendingSshGuide=useRef<SshGuideState|null>(null);
  function buildSshGuide(request:SshAuthenticationRequest):SshGuideState{const conversation=selectedConversationRef.current,standalone=request.kind==='original-run'&&!request.taskId;return {request:{...request,owner:conversation?{provider:conversation.provider,threadId:conversation.threadId,taskId:conversation.taskId||null}:null},taskId:request.kind==='original-run'?request.taskId:conversation?.taskId||undefined,conversationId:conversation?.id,selectionSeq:conversationSelectionSeq.current,standalone};}
@@ -243,6 +257,8 @@ export default function App(){
  const selectedRecords=selectedRecordScope(computeResource,conversationSelectionSeq.current);
  const activeFlow=agentTasks.find(task=>task.id===selectedConversationRef.current?.taskId);
  const flowWorker=taskWorkerSource(activeFlow)?.binding;
+ const projectToolResource=flowWorker?.kind==='ssh'?{profileId:flowWorker.profileId,profileVersion:flowWorker.profileVersion}:
+  computeResource?.kind==='ssh-connection'&&computeResource.profileId&&computeResource.profileVersion?{profileId:computeResource.profileId,profileVersion:computeResource.profileVersion}:undefined;
  const sshDraftTaskId=computeResource?.kind==='ssh-connection'&&computeResource.status==='selected'&&
   computeResource.authentication==='verified'&&computeResource.workflowReady&&
   (unboundWorkflow(activeFlow)||flowWorker?.kind==='ssh'&&computeResource.profileId===flowWorker.profileId&&computeResource.profileVersion===flowWorker.profileVersion)?activeFlow.id:undefined;
@@ -257,6 +273,20 @@ export default function App(){
  },[selectedRecords?.key,computeResource?.workflowReady,computeResource?.capabilities?.service?.status]);
  useEffect(()=>{if(!selectedRecords||section!=='runs')return;const timer=setInterval(()=>void refreshSelectedRecords(),30000);return()=>clearInterval(timer);},[selectedRecords?.key,section]);
  useEffect(()=>{void refreshComputeResource();return()=>{resourceReadSequence.current++;};},[computeResourceScope]);
+ useEffect(()=>{
+  if(!toolSetupReturn)return;
+  const targetOpen=toolSetupReturn.destination==='scheduler'?computeChooser:['projects','project','project-edit'].includes(modal);
+  if(toolSetupReturn.owner!==(selectedConversationId||undefined)||toolSetupReturn.scope!==resourceScopeRef.current){
+   if(targetOpen){if(toolSetupReturn.destination==='scheduler')setComputeChooser(false);else setModal('');}
+   setToolSetup(null);setToolSetupReturn(null);return;
+  }
+  if(!targetOpen){setToolSetupReturn(null);requestAnimationFrame(()=>{
+   const opener=toolSetupReturn.opener;
+   if(toolSetupReturn.scope!==resourceScopeRef.current)return;
+   if(opener?.isConnected&&opener.getClientRects().length&&!opener.matches(':disabled'))opener.focus({preventScroll:true});
+   else document.querySelector<HTMLElement>('.resource-tool-setup [aria-pressed="true"]')?.focus({preventScroll:true});
+  });}
+ },[toolSetupReturn,computeChooser,modal,selectedConversationId,computeResourceScope]);
  const {focus:toolWorkflowFocus,open:openToolWorkflow}=useToolWorkflowNavigation({mounted,selected:selectedConversationRef,selectionSequence:conversationSelectionSeq,navigationSequence:openSeq,busy:false,conversations,chooseConversation,onError,onOpen:location=>{setPrimaryPanel('workspace');setSelected(null);setSection('agent-task:'+location.task_id);}});
  useEffect(()=>window.studio?.onEvent(event=>{
   if(event.method==='studio/openManagedAttention'&&event.params?.id&&event.params.sourceId&&event.params.scheduleId)openNoticeRef.current(event.params);
@@ -412,6 +442,15 @@ export default function App(){
   finally{if(explicitConnection.current===epoch){explicitConnection.current=null;setConnecting(false);}}
  }
  function newProject(){setModal('project');}
+ async function toolProjectRequest<T>(method:'GET'|'POST',data?:unknown){
+  const access=toolSetupReturn,expected=access?.workerScope;
+  if(expected){
+   const selected=computeResourceRef.current;
+   if(!mounted.current||access.scope!==resourceScopeRef.current||!workerReady.current||selected?.kind!=='ssh-connection'||selected.status!=='selected'||
+    selected.connectionId!==expected.connectionId||selected.profileId!==expected.profileId||selected.profileVersion!==expected.profileVersion)throw Error('project_edit_unavailable');
+  }
+  return api<T>(method,'/api/projects',data,expected);
+ }
  function policyError(value:unknown){const code=errorText(value),messages:Record<string,string>={project_edit_authoring_only:'草稿工作区不能通过此入口升级计算授权。',project_edit_unavailable:'项目、会话或计算连接已变化，请关闭后重新打开。',project_edit_record_invalid:'无法读取此计算项目的完整记录。',project_edit_conflict:'项目记录已变化，请关闭后重新打开并检查最新授权。',project_edit_invalid_fields:'授权字段无效，请检查表单。',project_edit_no_changes:'尚无变更',project_edit_busy:'保存中，请稍候。',project_edit_save_mismatch:'保存返回与原项目不一致，请重新读取实际项目状态。',project_edit_save_unconfirmed:'保存结果未能确认，可能已写入；请关闭后核对实际项目，不要假定已撤销。'};return t(messages[code]||code);}
  function closeProjectPolicy(){if(projectPolicyOwner.current.saving)return;projectPolicySeq.current++;projectPolicyEdit?.cancel();setProjectPolicyEdit(null);setProjectPolicyInitial(null);setProjectPolicyError('');setModal('');}
  async function editProjectPolicy(record:Project){
@@ -419,7 +458,7 @@ export default function App(){
   const seq=++projectPolicySeq.current,selectedProject=projectId,selection=conversationSelectionSeq.current,epoch=projectPolicyWorkerEpoch.current;
   projectPolicyEdit?.cancel();setProjectPolicyInitial(null);setProjectPolicyError('');setProjectPolicyId(record.id);setModal('project-edit');projectPolicyOwner.current={...projectPolicyOwner.current,modal:'project-edit'};
   const current=()=>{const owner=projectPolicyOwner.current;return seq===projectPolicySeq.current&&owner.worker&&owner.modal==='project-edit'&&owner.projectId===selectedProject&&owner.selection===selection&&projectPolicyWorkerEpoch.current===epoch;};
-  const editor=createProjectPolicyEditor({projectId:record.id,engines:engines.map(([id])=>id),current,read:()=>api<Project[]>('GET','/api/projects'),write:value=>api<Project>('POST','/api/projects',value)});setProjectPolicyEdit(editor);
+  const editor=createProjectPolicyEditor({projectId:record.id,engines:engines.map(([id])=>id),current,read:()=>toolProjectRequest<Project[]>('GET'),write:value=>toolProjectRequest<Project>('POST',value)});setProjectPolicyEdit(editor);
   try{const opened=await editor.open();if(current())setProjectPolicyInitial(opened.spec);}catch(error){if(seq===projectPolicySeq.current)setProjectPolicyError(policyError(error));}
  }
  async function saveProjectPolicy(spec:ProjectAuthorizationSpec){
@@ -513,7 +552,7 @@ export default function App(){
   if(patch.agentProvider){setGuideReply(null);setGuideProvider({provider:patch.agentProvider,nonce:crypto.randomUUID()});}
  }
  function openSetupGuide(){
-  setLesson(null);if(!guidePage)setGuidePage('welcome');else requestAnimationFrame(()=>{const anchor=lessonOpener.current;
+  setLesson(null);if(lesson?.destination==='resource-tools')setToolSetup(null);if(!guidePage)setGuidePage('welcome');else requestAnimationFrame(()=>{const anchor=lessonOpener.current;
    (anchor?.isConnected&&anchor.getClientRects().length?anchor:document.getElementById('setup-heading'))?.focus({preventScroll:true});lessonOpener.current=null;
   });
   const revision=settingsRevision.current;
@@ -527,6 +566,20 @@ export default function App(){
   lessonOpener.current=document.activeElement as HTMLElement|null;
   setGuideKind(kind);setComputeChooserEdit(undefined);setComputeChooser(true);
  }
+ function rememberCluster(target:Pick<ClusterGuideProgress,'profileId'|'profileVersion'|'name'>,step:ClusterGuideProgress['step'],route?:ResourceToolRoute){
+  const previous=readClusterGuide(target),value={profileId:target.profileId,profileVersion:target.profileVersion,name:target.name,step,route:route||previous?.route};
+  storeClusterGuide(value);setClusterGuide(value);return value;
+ }
+ function guideTarget(){
+  if(guidePage&&clusterGuide)return clusterGuide;
+  const selected=computeResourceRef.current;
+  if(selected?.kind==='ssh-connection'&&selected.profileId&&selected.profileVersion){
+   const resource=managed.resources.find(row=>row.profileId===selected.profileId&&row.profileVersion===selected.profileVersion);
+   return {profileId:selected.profileId,profileVersion:selected.profileVersion,name:resource?.name||selected.profileId};
+  }
+  if(terminalRequest?.kind==='ssh'&&terminalRequest.profileId&&terminalRequest.version)return {profileId:terminalRequest.profileId,profileVersion:terminalRequest.version,name:terminalRequest.profileName||terminalRequest.profileId};
+  return clusterGuide;
+ }
  async function visitFromGuide(destination:SetupVisit,shortCase?:string){
   lessonOpener.current=document.activeElement as HTMLElement|null;
   const english=settings.language==='en',provider=settingsRef.current.agentProvider||'codex';
@@ -537,9 +590,33 @@ export default function App(){
     break;
    }
    case 'tour-goal': {
+    const target=guideTarget();if(target)rememberCluster(target,'tour-goal');
     const goal=english?'I want to run a short molecular dynamics simulation of FCC copper and inspect its temperature and trajectory. List the structure, potential and compute environment I need, then draft a workflow for me to review.':
       '我想对面心立方铜做一次分子动力学短试算，观察温度和轨迹。请先列出需要的结构、势模型和计算环境，再给我一份待核对的流程草稿。';
     if(await newConversation(true,goal,provider))setLesson({destination});
+    break;
+   }
+   case 'resource-tools': {
+    const target=guideTarget(),route=['fresh','existing','custom'].includes(shortCase||'')?shortCase as ResourceToolRoute:undefined;
+    if(target){rememberCluster(target,destination,route);setLesson({destination});setToolSetup({profileId:target.profileId,profileVersion:target.profileVersion,name:target.name,route});}
+    else if(go('compute-resources'))setLesson({destination});
+    break;
+   }
+   case 'ssh-terminal-practice': {
+    const target=guideTarget();
+    if(!target){connectFromGuide('ssh');break;}
+    rememberCluster(target,destination);setLesson({destination});
+    const text=english?`Use resource ssh:${target.profileId} (${target.name}, saved version ${target.profileVersion}). Verify its registered workspace and list the workfile directory. If authorized, write a new practice note named aimatterlab-guide-${crypto.randomUUID().slice(0,8)}.txt under workfile and report its actual absolute path. Use the existing connection. Do not submit a job.`:
+     `请使用资源 ssh:${target.profileId}（${target.name}，已保存版本 ${target.profileVersion}）。核对已登记的总工作区并列出 workfile 目录。若有此权限，请在 workfile 下写一个新的练习笔记 aimatterlab-guide-${crypto.randomUUID().slice(0,8)}.txt，报告实际绝对路径。沿用原连接，不提交作业。`;
+    askAgent(text);break;
+   }
+   case 'resume-cluster': {
+    if(!clusterGuide){connectFromGuide('ssh');break;}
+    const target=clusterGuide;
+    if(target.step==='resource-tools'){setLesson({destination:target.step});setToolSetup({profileId:target.profileId,profileVersion:target.profileVersion,name:target.name,route:target.route});}
+    else if(target.step==='ssh-service'){configureTerminalSsh({profileId:target.profileId,profileVersion:target.profileVersion,section:'service'});}
+    else if(target.step==='ssh-login'){connectFromGuide('ssh');}
+    else {await visitFromGuide(target.step);}
     break;
    }
    case 'short-check': {
@@ -570,6 +647,86 @@ export default function App(){
   setPrimaryPanel('workspace');setTerminalRequest({nonce:crypto.randomUUID(),kind:terminal?.kind||'ssh',
     mode:terminal?.mode||resource?.mode||'interactive',profileId,version,profileName:resource?.name,
     connectionId:resource?.connectionId||undefined,sessionId:terminal?.sessionId,connectionMode:resource?.connectionId?'managed':'plain',exact:true});showTerminal();
+ }
+ function openConsoleWorkspace(resource:ComputeConsoleResource,mode:'handoff'|'change'){
+  if(!resource.connectionId)return;
+  const observed=resource.terminals.filter(value=>value.owner==='human'&&value.status==='online');
+  const sessionId=terminalRequest?.connectionId===resource.connectionId?terminalRequest.sessionId:observed.length===1?observed[0].sessionId:undefined;
+  setPrimaryPanel('workspace');setTerminalRequest({nonce:crypto.randomUUID(),kind:'ssh',mode:resource.mode||'interactive',profileId:resource.profileId,version:resource.profileVersion,profileName:resource.name,connectionId:resource.connectionId,sessionId,connectionMode:'managed',exact:true,reviewWorkspace:mode});showTerminal();
+ }
+ async function usePublishedWorkflow(ref:ResourceWorkspaceReference){
+  const owner=selectedConversationRef.current,sequence=conversationSelectionSeq.current,prior=taskWorkerSource(owner?.taskId?agentTasks.find(task=>task.id===owner.taskId):undefined)?.binding;
+  if(prior&&(prior.kind!=='ssh'||prior.profileId!==ref.profileId))throw Error(t('此流程已绑定其他计算资源。请打开原资源，或为此资源新建流程。'));
+  const result=await invoke<SshServiceState>('compute.managed.useForWorkflow',ref);
+  const current=()=>mounted.current&&sequence===conversationSelectionSeq.current&&selectedConversationRef.current?.id===owner?.id;
+  if(!current())return {status:'unconfirmed' as const};
+  if(result.status!=='connected'||result.workflowReady!==true||result.connectionId!==ref.connectionId||result.profileId!==ref.profileId||result.profileVersion!==ref.profileVersion)throw Error(t('作业服务接入结果待确认'));
+  const selected=await computeResources.status();
+  if(!current()||selected.status!=='selected'||selected.connectionId!==ref.connectionId||selected.profileId!==ref.profileId||selected.profileVersion!==ref.profileVersion)return {status:'unconfirmed' as const};
+  acceptComputeResource(selected);await observeWorker(owner?.taskId,true);
+  return result;
+ }
+ function openResourceTools(resource:ComputeConsoleResource){
+  if(lesson?.destination==='resource-tools')rememberCluster(resource,'resource-tools');
+  setToolSetup({profileId:resource.profileId,profileVersion:resource.profileVersion,name:resource.name});
+ }
+ function openResourceGuide(resource:ComputeConsoleResource){
+  const previous=readClusterGuide(resource);
+  rememberCluster(resource,previous?.step||(resource.service.status==='online'?'resource-tools':resource.managedId?'ssh-service':'ssh-login'));
+  setLesson(null);setGuidePage('compute');
+ }
+ function openMissingResourceTool(task:any,tool:string){
+  const binding=taskWorkerSource(task)?.binding,chat=selectedConversationRef.current;
+  if(binding?.kind!=='ssh'||!chat||chat.provider!==task.provider||chat.threadId!==task.threadId)return;
+  const resource=managed.resources.find(row=>row.profileId===binding.profileId&&row.profileVersion===binding.profileVersion);
+  setWorkflowToolQuestion(previous=>previous?.taskId===task.id?null:previous);
+  setToolSetup({profileId:binding.profileId,profileVersion:binding.profileVersion,name:resource?.name||binding.profileId,missing:tool,taskId:task.id,conversationId:chat.id});
+ }
+ function askAboutMissingWorkflowTool(task:any,tool?:string){
+  const binding=taskWorkerSource(task)?.binding,chat=selectedConversationRef.current;
+  if(binding?.kind!=='ssh'||!chat||chat.provider!==task.provider||chat.threadId!==task.threadId||chat.taskId!==task.id)return;
+  if(!tool){setWorkflowToolQuestion(previous=>previous?.taskId===task.id?null:previous);return;}
+  setWorkflowToolQuestion({id:crypto.randomUUID(),taskId:task.id,workflowRevision:toolQuestionRevision(task),provider:chat.provider,threadId:chat.threadId,profileId:binding.profileId,profileVersion:binding.profileVersion,tool});
+  setAgentVisible(true);if(singlePanel)setPrimaryPanel('agent');
+ }
+ function closeResourceTools(activated=false){
+  setToolSetup(null);
+  if(activated&&toolSetup?.taskId&&toolSetup.conversationId===selectedConversationRef.current?.id){setToolSetupRevision(crypto.randomUUID());void refresh();}
+ }
+ function configureResourceToolTarget(kind:'scheduler'|'project'){
+  if(!toolSetup)return;
+  const target=toolSetup,selected=computeResourceRef.current;
+  const original=taskWorkerSource(activeFlow)?.binding;
+  const exact={profileId:target.profileId,profileVersion:target.profileVersion};
+  const workerScope=kind==='project'&&selected?.kind==='ssh-connection'&&selected.status==='selected'&&selected.authentication==='verified'&&
+   selected.profileId===target.profileId&&selected.profileVersion===target.profileVersion&&selected.connectionId&&workerReady.current&&
+   (!original||original.kind==='ssh'&&original.profileId===target.profileId&&original.profileVersion===target.profileVersion)?{...exact,connectionId:selected.connectionId}:undefined;
+  setToolSetupReturn({destination:workerScope?'project':'scheduler',owner:selectedConversationRef.current?.id,scope:resourceScopeRef.current,opener:document.activeElement as HTMLElement|null,workerScope});
+  setToolSetupTargetDefaults(old=>old?.profileId===exact.profileId&&old.profileVersion===exact.profileVersion?old:exact);
+  void resourceWorkspaces.read(exact).then(value=>{
+   if(mounted.current&&value.status==='confirmed'&&value.profileId===exact.profileId&&value.profileVersion===exact.profileVersion)setToolSetupTargetDefaults(old=>old?.profileId===exact.profileId&&old.profileVersion===exact.profileVersion?{...old,root:value.directories[0]}:old);
+  }).catch(()=>{});
+  if(workerScope){openProjects();return;}
+  configureTerminalSsh({...exact,section:'service'});
+ }
+ function rememberToolScheduler(value:{id:string}){
+  const edit=computeChooserEdit;
+  if(edit)setToolSetupTargetDefaults(old=>old?.profileId===edit.profileId&&old.profileVersion===edit.profileVersion?{...old,schedulerId:value.id}:old);
+ }
+ function discussResourceTool({route,tool,directory,candidate,target:queue,description,source,setupIds}:ResourceToolDiscussion){
+  if(!toolSetup)return;
+  const instructions={fresh:'Prepare a pinned acquisition and minimal test for a new tool.',existing:'Use discover_resource_tool_scripts for a read-only scan and representative-script review when the directory is supplied. I will choose the script.',custom:'Prepare a private manifest for my program with its source, environment, execution interface, input/output and minimal test.'};
+  const zh={fresh:'为新工具准备指定版本的获取方案与最小测试。',existing:'在已知目录时用 discover_resource_tool_scripts 只读分类扫描已有脚本，由我核对并选择代表脚本。',custom:'为我的程序准备私有清单，涵盖来源、环境、运行接口、输入输出和最小测试。'};
+  const target=`${toolSetup.name} · ssh:${toolSetup.profileId} · v${toolSetup.profileVersion}`;
+  const details=JSON.stringify({tool,directory,candidate,queue,description,source},null,2);
+  const text=settings.language==='en'?`Use this exact compute resource: ${target}. ${instructions[route]} Read the resource tool setup guidance, use list_resource_tools for available targets, and save a reviewed draft through plan_resource_tool_setup for route ${route}. I will review it in tool setup before any installation or test.\n${details}`:
+   `使用这个计算资源 ${target}。${zh[route]}请读工具配置指导，用 list_resource_tools 核对可用的测试目标，再按 ${route} 路线用 plan_resource_tool_setup 保存待核对草稿。回到工具配置由我审阅后再安装或测试。\n${details}`;
+  setToolSetupReview({...toolSetup,route,newPlanAfter:setupIds,conversationId:selectedConversationRef.current?.id,selectionSeq:conversationSelectionSeq.current,provider:agentProvider});
+  closeResourceTools();askAgent(text,toolSetup.taskId);
+ }
+ function acceptConversationWithToolPlan(value:Conversation|null,nonce?:string){
+  acceptAgentConversation(value,nonce);
+  if(value)setToolSetupReview(previous=>previous&&!previous.conversationId&&previous.provider===value.provider&&previous.selectionSeq===conversationSelectionSeq.current?{...previous,conversationId:value.id}:previous);
  }
  async function openConsoleConversation(channel:ComputeConsoleChannel){
   const sequence=openSeq.current;
@@ -608,7 +765,7 @@ export default function App(){
  }
 
  function connectSavedSsh(profile:SshComputeProfile,options?:{plain?:boolean}){
-  if(guideShowing)setLesson({destination:'ssh-login'});
+  if(guideShowing){rememberCluster({profileId:profile.id,profileVersion:profile.version,name:profile.name},'ssh-login');setLesson({destination:'ssh-login'});}
   setGuideKind(undefined);setComputeChooser(false);setComputeChooserEdit(undefined);setPrimaryPanel('workspace');
   const hosted=managed.resources.find(row=>row.kind==='ssh'&&row.profileId===profile.id&&row.profileVersion===profile.version);
   const selected=computeResource?.kind==='ssh-connection'&&computeResource.status==='selected'&&computeResource.alive===true&&
@@ -618,7 +775,17 @@ export default function App(){
    ...(connectionId?{connectionId}:{}),connectionMode:options?.plain?'plain':'managed'});
   showTerminal();
  }
- function configureTerminalSsh(ref?:{profileId:string;profileVersion:number;section?:"service"}){setComputeChooserEdit(ref?{...ref,nonce:crypto.randomUUID()}:undefined);setComputeChooser(true);}
+ function configureTerminalSsh(ref?:{profileId:string;profileVersion:number;section?:'service'|'environment'},connectionId?:string,sessionId?:string){setComputeChooserEdit(ref?{...ref,connectionId,sessionId,nonce:crypto.randomUUID()}:undefined);setComputeChooser(true);}
+ function observeSavedSshProfile(profile:ComputeProfile,previousVersion:number){
+  const origin=terminalRequest,edit=computeChooserEdit;
+  if(profile.kind!=='ssh'||profile.version===previousVersion||edit?.profileId!==profile.id||edit.profileVersion!==previousVersion||!edit.connectionId||origin?.profileId!==profile.id||origin.version!==previousVersion)return;
+  const connectionId=edit.connectionId;
+  void sshConnections.state({connectionId}).then(value=>{
+   if(!mounted.current||value.connectionId!==connectionId||value.status!=='authenticated'||value.authentication!=='verified'||value.profileId!==profile.id||value.profileVersion!==profile.version)return;
+   const sessionId=edit.sessionId||origin.sessionId;
+   setTerminalRequest(current=>current?.nonce===origin.nonce?{...current,nonce:crypto.randomUUID(),connectionId,sessionId,version:profile.version,profileName:profile.name,reviewWorkspace:undefined,exact:true}:current);
+  }).catch(onError);
+ }
  function openCurrentServiceUpdate(expected:NonNullable<ReturnType<typeof selectedRecordScope>>){
   const value=computeResourceRef.current,observed=recordServiceRef.current;
   if(value?.kind!=='ssh-connection'||value.status!=='selected'||value.authentication!=='verified'||typeof value.profileId!=='string'||typeof value.profileVersion!=='number'||observed.phase!=='ready'||observed.serviceVersion!=='different'||observed.scopeKey!==expected.key||selectedRecordScope(value,conversationSelectionSeq.current)?.key!==expected.key)return;
@@ -691,13 +858,19 @@ export default function App(){
   }
   setPrimaryPanel('agent');setAgentVisible(true);setAgentIntent({id:crypto.randomUUID(),text});
  }
- function helpWithSshServiceEnvironment(profile:SshComputeProfile){
-  if(guideShowing)setLesson({destination:'ssh-service'});
+ function helpWithSshServiceEnvironment(profile:SshEnvironmentHelpTarget){
+  if(guidePage){rememberCluster({profileId:profile.id,profileVersion:profile.version,name:profile.name},'ssh-service');setLesson({destination:'ssh-service'});}
   setComputeChooser(false);
   const text=settings.language==='en'?
-   `Please use "${profile.name}" to inspect its AIMatterLab SSH job-service environment. The saved profile ID is ${profile.id}, version ${profile.version}. Read environment.probe. Find this authenticated profile with list_compute_resources, check its saved version, then call acquire_compute_resource with one selector for this conversation. For an existing manual share, use its already authorized terminal only if it matches this profile. Use that terminal to find an existing Conda, venv or module environment and verify Python and sqlite3. Report the interpreter path and required activation commands for me to save. If the resource or permission is unavailable, report its actual state. Do not start another SSH login, handle credentials, install software, change project permissions or submit jobs. Claim service readiness only with a verified receipt.`:
-   `请使用「${profile.name}」检查 AIMatterLab 的 SSH 作业服务环境。保存的配置 ID 为 ${profile.id}，版本 ${profile.version}。读取 environment.probe。先调用 list_compute_resources 核对已托管连接及配置版本，再用一个选择参数调用 acquire_compute_resource，为当前对话取得租约。已有人工共享时，只使用与此配置相符且已授权的终端。用可用的会话终端查找已有 Conda、venv 或 module 环境，核对 Python 和 sqlite3，给出解释器路径和所需激活命令，由我保存。资源或权限不可用时，报告实际状态。不要新建 SSH 登录、代输认证信息、安装软件、更改项目授权或提交作业。拿到服务核验回执后才能报告服务就绪。`;
+   `Please use "${profile.name}" to inspect its AIMatterLab SSH job-service environment. The saved profile ID is ${profile.id}, version ${profile.version}${profile.connectionId?`, and the open connection is ${profile.connectionId}`:''}. Read cluster.connection-setup and environment.probe. Check the exact connection with list_compute_resources and use one selector with acquire_compute_resource. If there is already a manual share, use the terminal only when it matches this connection. Reuse this authenticated connection to inspect a Conda, venv or module environment and verify Python and sqlite3. Report the interpreter path and required activation commands for me to save. If the resource or permission is unavailable, report its actual state. Do not start another SSH login, handle credentials, install software, change project permissions or submit jobs. Claim service readiness only with a verified receipt.`:
+   `请使用「${profile.name}」检查 AIMatterLab 的 SSH 作业服务环境。保存的配置 ID 为 ${profile.id}，版本 ${profile.version}${profile.connectionId?`，原连接为 ${profile.connectionId}`:''}。读取 cluster.connection-setup 和 environment.probe。用 list_compute_resources 核对原连接，再用一个选择参数调用 acquire_compute_resource。已有人工共享时，请核对共享终端与原连接相符后使用。复用这条已认证连接查找已有 Conda、venv 或 module 环境，核对 Python 和 sqlite3，给出解释器路径和所需激活命令，由我保存。资源或权限不可用时，报告实际状态。不要新建 SSH 登录、代输认证信息、安装软件、更改项目授权或提交作业。拿到服务核验回执后才能报告服务就绪。`;
   askAgent(text);
+ }
+ function moveHandoffLesson(stage:HandoffLessonStage,profile:SshEnvironmentHelpTarget){
+  if(!guidePage||!lesson||!['ssh-login','ssh-workspace','ssh-service-observe'].includes(lesson.destination))return;
+  if(clusterGuide?.profileId!==profile.id||clusterGuide.profileVersion!==profile.version)return;
+  rememberCluster({profileId:profile.id,profileVersion:profile.version,name:profile.name},stage==='ssh-service-observe'?'ssh-service':'ssh-login');
+  setLesson({destination:stage});
  }
  function tabName(id:string){if(id.startsWith('deployment:'))return t('部署与执行');if(id.startsWith('agent-task:'))return agentTasks.find(t=>t.id===id.slice(11))?.name;if(id.startsWith('cluster-run:'))return t('集群任务');return id.startsWith('tool:')?tools.find(t=>t.id===id.slice(5))?.name:id.startsWith('workflow:')?tasks.find(t=>t.id===id.slice(9))?.title:id.startsWith('plan:')?plans.find(p=>p.id===id.slice(5))?.name:undefined;}
  const entityMissing=section.startsWith('deployment:')?!agentTasks.some(t=>t.id===section.slice(11)):section.startsWith('agent-task:')?!agentTasks.some(k=>k.id===section.slice(11)):section.startsWith('plan:')?!plans.some(p=>p.id===section.slice(5)&&tasks.some(k=>k.id===p.taskId)):section.startsWith('workflow:')?!tasks.some(k=>k.id===section.slice(9)):section.startsWith('tool:')?!tools.some(k=>k.id===section.slice(5)):section.startsWith('task:')?false:section.startsWith('cluster-run:')?false:!(sections.some(s=>s[0]===section)||section==='editor');
@@ -763,6 +936,13 @@ export default function App(){
  function toggleAgent(){if(!agentVisible){showAgent();return;}if(singlePanel){setPrimaryPanel(agentPanelVisible?'workspace':'agent');return;}setAgentVisible(false);}
  const lessonControls=lesson&&guidePage&&!modal&&!command&&!computeChooser&&!computeGuide&&!sshGuide
   ? <SetupLesson lesson={lesson} english={settings.language==='en'} showFocus={dismissedLesson!==lesson} onDismiss={()=>setDismissedLesson(lesson)} onReturn={openSetupGuide}/> : null;
+ const canReviewToolSetup=toolSetupReview&&!sessionSelection?.pending&&(toolSetupReview.conversationId?selectedConversationId===toolSetupReview.conversationId:!selectedConversationId&&agentProvider===toolSetupReview.provider&&toolSetupReview.selectionSeq===conversationSelectionSeq.current);
+ const pendingWorkflowTool=workflowToolQuestion&&activeFlow?.id===workflowToolQuestion.taskId&&toolQuestionRevision(activeFlow)===workflowToolQuestion.workflowRevision&&flowWorker?.kind==='ssh'&&flowWorker.profileId===workflowToolQuestion.profileId&&flowWorker.profileVersion===workflowToolQuestion.profileVersion?workflowToolQuestion:null;
+ const selectedLocalConversation=workerRestoring?null:selectedConversationRef.current,localSelectionSeq=conversationSelectionSeq.current;
+ const localConversationProps={selectedLocalConversation,isLocalConversationCurrent:()=>!!selectedLocalConversation&&
+  mounted.current&&localSelectionSeq===conversationSelectionSeq.current&&selectedLocalConversation.id===selectedConversationRef.current?.id};
+ const toolProjectDefaults=projectToolResource&&toolSetupTargetDefaults&&toolSetupTargetDefaults.profileId===projectToolResource.profileId&&toolSetupTargetDefaults.profileVersion===projectToolResource.profileVersion?toolSetupTargetDefaults:null;
+ const toolSchedulerDefaults=computeChooserEdit&&toolSetupTargetDefaults&&toolSetupTargetDefaults.profileId===computeChooserEdit.profileId&&toolSetupTargetDefaults.profileVersion===computeChooserEdit.profileVersion?toolSetupTargetDefaults:null;
  return <div className={guideShowing?"application showing-setup":"application"}>
   <MonitorAttention notices={managed.notices||[]} onOpen={openNotice} onDismiss={acknowledgeNotice}/>
   <header className="titlebar"><div className="brand"><span className="brand-mark"><Atom size={19}/></span><strong>{product.name}</strong><button className={'version'+(updateVisible?' has-update':'')} aria-label={tr('软件更新')} title={tr('软件更新')} onClick={()=>setModal('updates')}>{updateVisible?tr('软件更新')+' '+updates.state.version:STUDIO_VERSION}</button></div><div className="title-path"><Folder size={12}/>{project?projectLabel(project):tr('科学计算工作台')}</div>{lessonControls}{guideInfo&&!guidePage&&<button className="setup-help" data-testid="open-setup-guide" disabled={!!modal||computeChooser||!!computeGuide||!!sshGuide} onClick={openSetupGuide}><CircleHelp size={15}/>{t('新手引导')}</button>}<div className="window-buttons"><button aria-label={tr('最小化')} onClick={()=>void invoke('window',{action:'minimize'}).catch(()=>{})}><Minus size={13}/></button><button aria-label={tr('最大化或还原')} title={tr('最大化或还原')} onClick={()=>void invoke('window',{action:'maximize'}).catch(()=>{})}><Square size={11}/></button><button className="close" aria-label={tr('关闭')} onClick={()=>void invoke('window',{action:'close'}).catch(()=>{})}><X size={14}/></button></div></header>
@@ -788,10 +968,10 @@ export default function App(){
      }}><summary>{t('布局')}<ChevronDown size={13} aria-hidden="true"/></summary><div><button data-testid="priority-chat" aria-pressed={settings.agentLayout==='center'} onClick={()=>switchPriority('center')}>{t('对话优先')}</button><button data-testid="priority-workflow" aria-pressed={settings.agentLayout!=='center'} onClick={()=>switchPriority('right')}>{t('流程优先')}</button></div></details><button className="icon-button" title={t('切换 Agent 面板')} aria-label={t('切换 Agent 面板')} aria-pressed={agentPanelVisible} onClick={toggleAgent}>{agentPanelVisible?<PanelRightClose size={16}/>:<PanelRightOpen size={16}/>}</button></div>
     </div><div className="workspace-panels"><main className="main-column">
     <div className="workspace-content"><LoadingFeedback busy={!!openingRun&&openingRun.sequence===openSeq.current} label={tr("正在读取运行记录…")}/>{recordsConnected&&displayedServiceVersion!=='current'&&<details className="notice service-version-notice" role="status" data-testid="worker-service-version" data-version={displayedServiceVersion}><summary data-testid="worker-service-version-summary"><span>{tr(displayedServiceVersion==='different'?'作业服务与当前软件版本不同':'作业服务实现版本尚未核对')}</span>{selectedRecords&&displayedServiceVersion==='different'&&<button className="button service-version-upgrade" data-testid="worker-service-upgrade" onClick={event=>{event.preventDefault();event.stopPropagation();openCurrentServiceUpdate(selectedRecords);}}>{t('更新作业服务…')}</button>}</summary><p>{tr(selectedRecords?displayedServiceVersion==='different'?'当前服务可继续使用已有工具和提交获准的任务。需要更新时，请在当前连接设置中选择“更新作业服务”，现有任务保留。':'当前服务已响应，实现版本尚未核对；可查看记录，工具与任务操作以实际可用接口及项目授权为准。请在当前连接设置中核对作业服务。':'历史记录可继续读取；当前软件的新工具接口尚未确认。需要更新时，请使用“连接计算资源 → 本地 WSL”明确连接，现有任务保留。')}</p></details>}<div hidden={section!=='runs'}><ViewBoundary onHome={()=>go('home')}><JobsPage managed={managed} focusSchedule={focusSchedule} local={runs} cluster={clusterRuns} observations={recordObservations} projects={projects} projectId={runProjectId} tasks={agentTasks} conversations={conversations} worker={recordsConnected} servicePhase={selectedRecords?recordService.phase:undefined} readOnly={!!selectedRecords&&!recordsExecutionAllowed} canRefresh={selectedRecords?recordService.phase!=='checking':worker} canOpen={canOpenRecord} busy={false} onRefresh={()=>void refreshSelectedRecords(true)} onOpen={job=>void openJob(job)} onConversation={conversation=>void chooseConversation(conversation)}/></ViewBoundary></div>
-    <div hidden={!retainedTask||section!=='agent-task:'+retainedTask.id}>{retainedTask&&<ViewBoundary key={retainedTask.id} onHome={()=>go('home')}><AgentTaskPage toolWorkflowFocus={toolWorkflowFocus} onBindDraft={connectAndBindDraft} onDeploy={id=>void openDeployment(id)} navigationBusy={false} key={retainedTask.id} worker={worker&&!disconnected} onReconnect={connectWorker} task={retainedTask} environments={environments} theme={settings.theme} onError={onError} onRun={id=>openWorkflowRun(id,'local',retainedTask)} onCluster={id=>openWorkflowRun(id,'cluster',retainedTask)} onSetup={id=>void api<any[]>('GET','/api/cluster-drafts').then(values=>{setClusterDraft(values.find(v=>v.id===id));setSection('ssh');}).catch(onError)} onAgent={text=>askAgent(text,retainedTask.id)} onReview={task=>void reviewWorkflow(task)} onReplace={replaceTask} onRefresh={()=>refresh()} customCvInvoke={customCvInvoke} customProvider={agentProvider} onCustomDiscussion={request=>void discussCustomCv(request)} importAsset={importCompositionAsset}/></ViewBoundary>}</div><ViewBoundary key={section} onHome={()=>go('home')}>
+    <div hidden={!retainedTask||section!=='agent-task:'+retainedTask.id}>{retainedTask&&<ViewBoundary key={retainedTask.id} onHome={()=>go('home')}><AgentTaskPage toolWorkflowFocus={toolWorkflowFocus} onBindDraft={connectAndBindDraft} onDeploy={id=>void openDeployment(id)} navigationBusy={false} key={retainedTask.id} worker={worker&&!disconnected} onReconnect={connectWorker} task={retainedTask} environments={environments} theme={settings.theme} onError={onError} onRun={id=>openWorkflowRun(id,'local',retainedTask)} onCluster={id=>openWorkflowRun(id,'cluster',retainedTask)} onSetup={id=>void api<any[]>('GET','/api/cluster-drafts').then(values=>{setClusterDraft(values.find(v=>v.id===id));setSection('ssh');}).catch(onError)} onAgent={text=>askAgent(text,retainedTask.id)} onReview={task=>void reviewWorkflow(task)} onReplace={replaceTask} onRefresh={()=>refresh()} customCvInvoke={customCvInvoke} customProvider={agentProvider} onCustomDiscussion={request=>void discussCustomCv(request)} importAsset={importCompositionAsset} onMissingTool={openMissingResourceTool} onMissingToolQuestion={askAboutMissingWorkflowTool} toolSetupRevision={toolSetupRevision}/></ViewBoundary>}</div><ViewBoundary key={section} onHome={()=>go('home')}>
      {section==='deployment'&&<div className="page"><div className="page-heading"><div><h1>{tr('部署与执行')}</h1><p>{tr('选择已定义的科学流程，再配置算力和提交方式。')}</p></div></div><div className="task-cards">{agentTasks.filter(t=>t.workflowVersion===2).map(task=><button key={task.id} className="card" onClick={()=>void openDeployment(task.id)}><strong>{task.name}</strong><p>{tr(task.review?.status==='ready'?'科学参数已复核':'等待科学参数复核')}</p></button>)}</div></div>}
      {section.startsWith('deployment:')&&agentTasks.find(t=>t.id===section.slice(11))&&<DeploymentPanel onRepair={request=>void openWorkflowDiscussion(request)} onOpenConnections={openOriginalConnection} key={section} task={agentTasks.find(t=>t.id===section.slice(11))} worker={worker&&!disconnected} restoring={workerRestoring} onAutomaticRestore={()=>observeWorker(section.slice(11))} projects={projects} environments={environments} onTask={id=>setSection('agent-task:'+id)} onRun={(id,kind)=>openWorkflowRun(id,kind==='cluster-run'?'cluster':'local',agentTasks.find(task=>task.id===section.slice(11)))} onError={onError} onRefresh={()=>refresh()} onProjectSettings={project=>void editProjectPolicy(project)} onReconnect={()=>connectWorker(section.slice(11))}/>}
-     {section.startsWith('agent-task:')&&section!=='agent-task:'+retainedTask?.id&&agentTasks.find(t=>t.id===section.slice(11))&&<AgentTaskPage toolWorkflowFocus={toolWorkflowFocus} onBindDraft={connectAndBindDraft} onDeploy={id=>void openDeployment(id)} navigationBusy={false} key={section} worker={worker&&!disconnected} onReconnect={connectWorker} task={agentTasks.find(t=>t.id===section.slice(11))} environments={environments} theme={settings.theme} onError={onError} onRun={id=>openWorkflowRun(id,'local',agentTasks.find(task=>task.id===section.slice(11)))} onCluster={id=>openWorkflowRun(id,'cluster',agentTasks.find(task=>task.id===section.slice(11)))} onSetup={id=>void api<any[]>('GET','/api/cluster-drafts').then(values=>{setClusterDraft(values.find(v=>v.id===id));setSection('ssh');}).catch(onError)} onAgent={text=>askAgent(text,section.slice(11))} onReview={task=>void reviewWorkflow(task)} onReplace={replaceTask} onRefresh={()=>refresh()} customCvInvoke={customCvInvoke} customProvider={agentProvider} onCustomDiscussion={request=>void discussCustomCv(request)} importAsset={importCompositionAsset}/>}
+     {section.startsWith('agent-task:')&&section!=='agent-task:'+retainedTask?.id&&agentTasks.find(t=>t.id===section.slice(11))&&<AgentTaskPage toolWorkflowFocus={toolWorkflowFocus} onBindDraft={connectAndBindDraft} onDeploy={id=>void openDeployment(id)} navigationBusy={false} key={section} worker={worker&&!disconnected} onReconnect={connectWorker} task={agentTasks.find(t=>t.id===section.slice(11))} environments={environments} theme={settings.theme} onError={onError} onRun={id=>openWorkflowRun(id,'local',agentTasks.find(task=>task.id===section.slice(11)))} onCluster={id=>openWorkflowRun(id,'cluster',agentTasks.find(task=>task.id===section.slice(11)))} onSetup={id=>void api<any[]>('GET','/api/cluster-drafts').then(values=>{setClusterDraft(values.find(v=>v.id===id));setSection('ssh');}).catch(onError)} onAgent={text=>askAgent(text,section.slice(11))} onReview={task=>void reviewWorkflow(task)} onReplace={replaceTask} onRefresh={()=>refresh()} customCvInvoke={customCvInvoke} customProvider={agentProvider} onCustomDiscussion={request=>void discussCustomCv(request)} importAsset={importCompositionAsset} onMissingTool={openMissingResourceTool} onMissingToolQuestion={askAboutMissingWorkflowTool} toolSetupRevision={toolSetupRevision}/>}
      {section.startsWith('cluster-run:')&&(clusterSourceReady?<ClusterRunPage readOnly={!recordsExecutionAllowed} onOpenConnections={openOriginalConnection} key={(selectedRecords?recordService.sourceId:'')+section} id={section.slice(12)} onError={onError} onAgent={askAgent}/>:<div className="page"><div className="connect-banner"><Server size={24}/><strong>{tr('连接作业服务')}</strong>{runSourceTask(section.slice(12))?<button className="button" disabled={connecting} onClick={()=>{const original=runSourceTask(section.slice(12));if(original)void connectWorker(original.id);}}>{tr('恢复原作业服务')}</button>:<p>{tr('请先明确连接保存此作业的原服务；不会改用当前聊天或默认来源。')}</p>}</div></div>)}
 
      {section.startsWith('workflow:')&&tasks.some(k=>k.id===section.slice(9))&&<WorkflowPage key={section} taskId={section.slice(9)} onSaved={(plan,options)=>{setPlans(old=>[plan,...old.filter(p=>p.id!==plan.id)]);if(options.navigate)setSection(current=>current==='workflow:'+plan.taskId?'plan:'+plan.id:current);}} onAgent={askAgent} onTool={id=>setSection('tool:'+id)} onError={onError}/>}
@@ -815,7 +995,7 @@ export default function App(){
      {section==='editor'&&<div className="editor-workspace"><div className="toolbar"><span><FileCode2 size={14}/>{editor.name}{editorDirty?' *':''}</span><input value={editor.name} aria-label={tr("文件路径")} onChange={e=>setEditor({...editor,name:e.target.value})}/><button className="button" disabled={!worker||!project||!!editorSave} onClick={()=>void saveInput().catch(onError)}><Save size={14}/>{tr("保存到项目输入")}</button><button className="button" disabled={!!editorSave} onClick={()=>void saveInput('windows').catch(onError)}>{tr("另存到 Windows")}</button><LoadingFeedback busy={!!editorSave} label={tr("正在保存输入文件…")}/></div><CodeEditor value={editor.source} onChange={v=>{if(v===editorSource.current)return;setEditor(old=>({...old,source:v}));setEditorDirty(true);}} theme={settings.theme}/><div className="editor-path">{tr(editor.path||'尚未保存')}{tr("· Python 源码不会在前端执行")}</div></div>}
      {section==='assets'&&<div className="page"><StructureBuilder projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><MaterialsProjectSearch projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><AssetInspector projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()} onError={onError}/><div className="asset-list">{assets.filter(a=>(a as any).project_id===projectId).map(a=><div className="asset-row" key={a.id}><Database size={17}/><div><strong>{a.name}</strong><small>{a.path}</small></div><span className="tag">{a.kind}</span><span className="mono">{a.sha256.slice(0,12)}</span></div>)}</div></div>}
      {section==='environments'&&<ComputeEnvironments worker={worker&&!disconnected} workerGeneration={workerHydrationEpoch.current} environments={environments} onRefresh={()=>refresh()} onConnect={openComputeResources} onManual={newEnvironment} onAgent={askAgent} onCluster={openComputeResources} onError={onError}/>}
-     {section==='compute-resources'&&<ComputeResourceConsole projectId={projectId} onConnections={openComputeResources} onConnectSsh={connectConsoleSsh} onOpenTerminal={openConsoleTerminal} onOpenConversation={channel=>void openConsoleConversation(channel)} onConfigure={(resource,section)=>configureTerminalSsh({profileId:resource.profileId,profileVersion:resource.profileVersion,section})}/>}
+     {section==='compute-resources'&&<ComputeResourceConsole projectId={projectId} onConnections={openComputeResources} onConnectSsh={connectConsoleSsh} onOpenTerminal={openConsoleTerminal} onOpenConversation={channel=>void openConsoleConversation(channel)} onWorkspace={openConsoleWorkspace} onUseForWorkflow={resource=>usePublishedWorkflow({connectionId:resource.connectionId!,profileId:resource.profileId,profileVersion:resource.profileVersion})} onTools={openResourceTools} onGuide={openResourceGuide} onConfigure={(resource,section)=>configureTerminalSsh({profileId:resource.profileId,profileVersion:resource.profileVersion,section},resource.connectionId||undefined)}/>}
      {section==='ssh'&&<ClusterPage selectedClusterId={clusterSelection||undefined} serviceVersion={serviceVersion} onAuthenticate={openSshGuide} onConnectCompute={connectWorker} worker={worker} project={project} settings={settings} draft={clusterDraft} onQueueTest={async text=>{await newConversation(true,text);}} onError={onError} onRefresh={()=>void refresh()} onAgent={askAgent} onRun={id=>setSection('cluster-run:'+id)} onTerminal={startClusterTerminal}/>}
      {section==='extensions'&&<div className="page"><ToolPackagesPanel provider={agentProvider} onSelect={selectToolSkill}/></div>}
      {section==='skills'&&<><div className="skill-navigation"><button className="button" onClick={()=>go('relations')}>{t('计算链条')}</button><button data-testid="navigate-tools" className="button" onClick={()=>go('tools')}>{t('软件功能')}</button></div><SkillsWorkbench provider={agentProvider} settings={settings} onSaved={setSettings} selected={skill} onSelect={selectToolSkill} onError={onError}/></>}
@@ -823,12 +1003,15 @@ export default function App(){
      {entityMissing&&<div className="page"><Empty title={tr('找不到该页面')} body={'内容尚未加载或已不存在。'} action={<button className="button" onClick={()=>go('home')}>{tr('返回工作台')}</button>}/></div>}
     </ViewBoundary></div>
     {bottomExpanded&&<PaneDivider className="bottom-resize" label={t('调整终端与队列高度')} orientation="horizontal" value={bottomHeight} min={90} max={380} reverse onChange={setBottomHeight}/>}
-    <div className={"bottom-panel "+(bottomExpanded?'':'is-collapsed')} data-testid="bottom-panel" style={{height:bottomExpanded?bottomHeight:undefined}}><div className="bottom-tabs"><button className={bottomTab==='queue'?'active':''} onClick={()=>{setBottomTab('queue');setBottomExpanded(true);}}><Activity size={13}/>{tr("运行队列")}<span>{statusKnown?queueItems.length:'?'}</span></button><button className={bottomTab==='terminal'?'active':''} onClick={()=>{setTerminalOpened(true);setBottomTab('terminal');setBottomExpanded(true);}}><Terminal size={13}/>{tr("终端")}</button><div/><button hidden={!bottomExpanded} onClick={()=>void startTerminal()}><Plus size={13}/>{t('本地终端')}</button><button hidden={!bottomExpanded} title={tr("打开源码")} aria-label={tr("打开源码")} onClick={()=>void invoke('file.open').then(r=>{if(r&&confirmReplace()){setEditor({...r,source:r.content});setEditorDirty(false);setSection('editor');}}).catch(onError)}><FileCode2 size={14}/></button><button className="bottom-collapse" data-testid="toggle-bottom-panel" aria-expanded={bottomExpanded} onClick={()=>setBottomExpanded(value=>!value)}>{bottomExpanded?<ChevronDown size={15}/>:<ChevronUp size={15}/>}<span>{t(bottomExpanded?'收起':'展开')}</span></button></div><div className={bottomTab==='queue'?'queue-strip':'hidden'}>{queueItems.length?queueItems.map(job=><button key={job.key} disabled={!canOpenRecord(job.location)} onClick={()=>void openJob(job)}><span className="queue-pulse"/><strong>{job.run.name}</strong><Badge status={job.run.status}/><span>{job.location==='cluster'?t('集群'):'GPU '+job.run.gpu}</span><ChevronRight size={13}/></button>):<div className="queue-empty">{statusKnown?<CheckCircle2 size={18}/>:<Activity size={18}/>}<span>{tr(statusKnown?'队列空闲':'状态未知')}</span><small>{tr(workerNotice||(disconnected?'连接中断 · 状态未知':worker?'准备并验证输入后开始计算':'连接 WSL 作业服务以读取队列'))}</small></div>}</div><div className={bottomTab==='terminal'?'terminal-holder':'hidden'}>{terminalOpened&&<SharedTerminalPanel activeResource={computeResource} visible={terminalPanelVisible} request={terminalRequest} canShare={!agentBusy&&!sessionSelection?.pending} provider={agentProvider} onConversationPrepared={terminalConversationPrepared} onConfigureSsh={configureTerminalSsh} onPlainSsh={()=>setTerminalRequest(old=>old?{...old,nonce:crypto.randomUUID(),connectionMode:"plain"}:old)} resourceScope={computeResourceScope} onResourceChange={acceptComputeResource} onError={onTerminalError}/>}</div></div>
+    <div className={"bottom-panel "+(bottomExpanded?'':'is-collapsed')} data-testid="bottom-panel" style={{height:bottomExpanded?bottomHeight:undefined}}><div className="bottom-tabs"><button className={bottomTab==='queue'?'active':''} onClick={()=>{setBottomTab('queue');setBottomExpanded(true);}}><Activity size={13}/>{tr("运行队列")}<span>{statusKnown?queueItems.length:'?'}</span></button><button className={bottomTab==='terminal'?'active':''} onClick={()=>{setTerminalOpened(true);setBottomTab('terminal');setBottomExpanded(true);}}><Terminal size={13}/>{tr("终端")}</button><div/><button hidden={!bottomExpanded} onClick={()=>void startTerminal()}><Plus size={13}/>{t('本地终端')}</button><button hidden={!bottomExpanded} title={tr("打开源码")} aria-label={tr("打开源码")} onClick={()=>void invoke('file.open').then(r=>{if(r&&confirmReplace()){setEditor({...r,source:r.content});setEditorDirty(false);setSection('editor');}}).catch(onError)}><FileCode2 size={14}/></button><button className="bottom-collapse" data-testid="toggle-bottom-panel" aria-expanded={bottomExpanded} onClick={()=>setBottomExpanded(value=>!value)}>{bottomExpanded?<ChevronDown size={15}/>:<ChevronUp size={15}/>}<span>{t(bottomExpanded?'收起':'展开')}</span></button></div><div className={bottomTab==='queue'?'queue-strip':'hidden'}>{queueItems.length?queueItems.map(job=><button key={job.key} disabled={!canOpenRecord(job.location)} onClick={()=>void openJob(job)}><span className="queue-pulse"/><strong>{job.run.name}</strong><Badge status={job.run.status}/><span>{job.location==='cluster'?t('集群'):'GPU '+job.run.gpu}</span><ChevronRight size={13}/></button>):<div className="queue-empty">{statusKnown?<CheckCircle2 size={18}/>:<Activity size={18}/>}<span>{tr(statusKnown?'队列空闲':'状态未知')}</span><small>{tr(workerNotice||(disconnected?'连接中断 · 状态未知':worker?'准备并验证输入后开始计算':'连接 WSL 作业服务以读取队列'))}</small></div>}</div><div className={bottomTab==='terminal'?'terminal-holder':'hidden'}>{terminalOpened&&<SharedTerminalPanel activeResource={computeResource} visible={terminalPanelVisible} request={terminalRequest} canShare={!agentBusy&&!sessionSelection?.pending} provider={agentProvider} onConversationPrepared={terminalConversationPrepared} onConfigureSsh={configureTerminalSsh} onServiceEnvironmentHelp={helpWithSshServiceEnvironment} onHandoffLesson={moveHandoffLesson} onUseForWorkflow={usePublishedWorkflow} onPlainSsh={()=>setTerminalRequest(old=>old?{...old,nonce:crypto.randomUUID(),connectionMode:"plain"}:old)} resourceScope={computeResourceScope} onResourceChange={acceptComputeResource} onError={onTerminalError}/>}</div></div>
     <footer className="statusbar">{refreshFeedback&&<span role="status" aria-live="polite" data-testid="manual-refresh-feedback">{tr(refreshFeedback.status==='loading'?'正在同步记录…':refreshFeedback.status==='complete'?'记录已刷新':refreshFeedback.status==='partial'?'部分记录未刷新':'记录刷新失败')}{refreshFeedback.at&&' · '+new Date(refreshFeedback.at).toLocaleTimeString()}</span>}<span data-testid="current-compute-resource-status"><i className={resourceOnline?'online':''}/>{hostedSummary|| (isSshResource(computeResource)?computeResource.kind==='ssh-connection'?sshSummary(computeResource):<>{tr(computeResource.workflowReady?'SSH 作业服务已连接':computeResource.processStatus==='exited'?'SSH 终端已退出':computeResource.processStatus==='expired'?'SSH 终端访问已过期':computeResource.processStatus==='running'&&computeResource.alive===true?'SSH 终端已打开':'SSH 终端状态未知')}{computeResource.alive===true&&' · '+tr(computeResource.operator==='human'?'由你操作':computeResource.operator==='agent'?'由 Agent 操作':'操作权限待核对')}</>:tr(workerNotice||(disconnected?'连接中断 · 状态未知':worker?(serviceVersion==='current'?'WSL 已连接':serviceVersion==='different'?'WSL 已连接 · 服务版本不同':'WSL 已连接 · 服务版本未核对'):'WSL 未连接')))}</span><span>{runProject?.authoring_only?tr('草稿工作区 · 执行需选择计算项目'):(runProject?runProject.policy.gpus.map(g=>'GPU '+g).join(', ')+' · '+tr('项目授权'):tr('尚未选择项目'))}</span><div/></footer>
    </main>
-   {<>{agentVisible&&<PaneDivider className="agent-divider" label={t('调整对话与内容比例')} value={displayAgentWidth} min={260} max={paneMax} reverse={!centerLayout} onChange={conversationWorkspace?setAgentWidth:setOverviewAgentWidth}/>} <Agent setupProviderChoice={guideProvider} onSetupReply={setGuideReply} onOpenHistory={()=>setModal('history')} onCollapse={()=>setAgentVisible(false)} visibleWorkflowId={workspacePanelVisible&&section.startsWith('agent-task:')&&agentTasks.some(task=>task.id===section.slice(11))?section.slice(11):null} onOpenOriginalRun={id=>openWorkflowRun(id,'cluster',activeFlow)} onOpenCluster={()=>{setClusterSelection(null);go('ssh');}} computeConnected={worker&&!disconnected} computeResource={computeResource} onComputeResource={acceptComputeResource} onConnectCompute={openComputeResources} onReviewWorker={connectWorker} conversationGroupId={chatGroupId} onOpenAccounts={openAccounts} onProviderChange={setAgentProvider} onAttachmentClear={()=>setSkill(undefined)} onAttachmentConsumed={id=>setSkill(current=>current?.attachmentId===id?undefined:current)} onNewConversation={retryNewConversation} hidden={!agentPanelVisible} sessionSelection={sessionSelection} onConversation={acceptAgentConversation} onBusyChange={setAgentBusy} planningMode={planningMode} onPlanningModeChange={setPlanningMode} projectId={projectId} onOpenTask={id=>{setSection('agent-task:'+id);setAgentVisible(true);}} intent={agentIntent} context={context} onError={onError} skill={skill} width={displayAgentWidth} onOpenRun={id=>openWorkflowRun(id,'local',activeFlow)}/></>}
+   {<>{agentVisible&&<PaneDivider className="agent-divider" label={t('调整对话与内容比例')} value={displayAgentWidth} min={260} max={paneMax} reverse={!centerLayout} onChange={conversationWorkspace?setAgentWidth:setOverviewAgentWidth}/>} <Agent {...localConversationProps} setupProviderChoice={guideProvider} onSetupReply={setGuideReply} onOpenHistory={()=>setModal('history')} onCollapse={()=>setAgentVisible(false)} visibleWorkflowId={workspacePanelVisible&&section.startsWith('agent-task:')&&agentTasks.some(task=>task.id===section.slice(11))?section.slice(11):null} onOpenOriginalRun={id=>openWorkflowRun(id,'cluster',activeFlow)} onOpenCluster={()=>{setClusterSelection(null);go('ssh');}} computeConnected={worker&&!disconnected} computeResource={computeResource} workspaceProfileId={flowWorker?.kind==="ssh"?flowWorker.profileId:undefined} onComputeResource={acceptComputeResource} onConnectCompute={openComputeResources} onReviewWorker={connectWorker} conversationGroupId={chatGroupId} onOpenAccounts={openAccounts} onProviderChange={setAgentProvider} onAttachmentClear={()=>setSkill(undefined)} onAttachmentConsumed={id=>setSkill(current=>current?.attachmentId===id?undefined:current)} onNewConversation={retryNewConversation} hidden={!agentPanelVisible} sessionSelection={sessionSelection} onConversation={acceptConversationWithToolPlan} onReviewResourceTool={canReviewToolSetup?()=>setToolSetup(toolSetupReview):undefined} missingWorkflowToolQuestion={pendingWorkflowTool?{...pendingWorkflowTool,onAnswer:action=>{setWorkflowToolQuestion(previous=>previous?.id===pendingWorkflowTool.id?null:previous);if(action==='setup')openMissingResourceTool(activeFlow,pendingWorkflowTool.tool);}}:undefined} onBusyChange={setAgentBusy} planningMode={planningMode} onPlanningModeChange={setPlanningMode} projectId={projectId} onOpenTask={id=>{setSection('agent-task:'+id);setAgentVisible(true);}} intent={agentIntent} context={context} onError={onError} skill={skill} width={displayAgentWidth} onOpenRun={id=>openWorkflowRun(id,'local',activeFlow)}/></>}
   </div></section></div>
-  {guidePage&&guideInfo&&<div className="setup-layer" hidden={!!lesson}><SetupAssistant info={guideInfo} page={guidePage} settings={settings} localConnected={!isSshResource(computeResource)&&worker&&!disconnected} resource={computeResource} agentBusy={agentBusy} reply={guideReply} onReply={setGuideReply} onPreferences={guidePreferences} onProgress={guideProgress} onConnect={connectFromGuide} onVisit={visitFromGuide}/></div>}
+  {guidePage&&guideInfo&&<div className="setup-layer" hidden={!!lesson}><SetupAssistant info={guideInfo} page={guidePage} settings={settings} localConnected={!isSshResource(computeResource)&&worker&&!disconnected} resource={computeResource} clusterGuide={clusterGuide} agentBusy={agentBusy} reply={guideReply} onReply={setGuideReply} onPreferences={guidePreferences} onProgress={guideProgress} onConnect={connectFromGuide} onVisit={visitFromGuide}/></div>}
+  {toolSetup&&(!toolSetup.conversationId||selectedConversationId===toolSetup.conversationId)&&<div hidden={!!toolSetupReturn}><Modal title={t('配置资源工具')} wide onClose={()=>closeResourceTools()}>
+   <ResourceToolSetup key={`${toolSetup.profileId}:${toolSetup.profileVersion}:${toolSetup.taskId||''}`} resourceId={'ssh:'+toolSetup.profileId} profileVersion={toolSetup.profileVersion} resourceName={toolSetup.name} initialRoute={toolSetup.route} missingTool={toolSetup.missing} newPlanAfter={toolSetup.newPlanAfter} suspended={!!toolSetupReturn} onClose={()=>closeResourceTools(true)} onDiscuss={discussResourceTool} onConfigureTarget={configureResourceToolTarget} onRoute={route=>{setToolSetup(old=>old?.profileId===toolSetup.profileId&&old.profileVersion===toolSetup.profileVersion?{...old,route}:old);if(guidePage&&lesson?.destination==='resource-tools')rememberCluster(toolSetup,'resource-tools',route);}}/>
+  </Modal></div>}
   {error&&<DiagnosticNotice className="toast" record={error} action={<button className="icon-button" aria-label={tr('关闭')} onClick={()=>setError(null)}><X size={16}/></button>}/>}
   {deleteTarget&&<Modal title={t('删除对话')} onClose={()=>{if(!deleting)setDeleteTarget(null);}}><p>{deleteTarget.name}</p><p>{t('删除此会话及附带流程页面。已提交作业和计算文件保留。')}</p><div className="button-row"><button className="button" disabled={deleting} onClick={()=>setDeleteTarget(null)}>{t('取消')}</button><button className="button danger" disabled={deleting||replying(deleteTarget)} onClick={()=>void deleteConversation()}>{t(deleting?'删除中…':'确认删除')}</button></div></Modal>}
   {modal==='history'&&<Modal title={t('历史会话')} onClose={()=>setModal('')}><label className="conversation-search"><Search size={16}/><input autoFocus aria-label={t('搜索历史会话')} placeholder={t('搜索会话')} value={conversationSearch} onChange={event=>setConversationSearch(event.target.value)}/></label><div className="history-conversations conversation-sidebar">{shownConversations.map(conversationRow)}{!shownConversations.length&&<p className="muted">{t('没有匹配的会话')}</p>}</div><button className="button" onClick={()=>{setModal('');newConversation();}}><Plus size={16}/>{t('新对话')}</button></Modal>}
@@ -840,15 +1023,15 @@ export default function App(){
   {modal==='accounts'&&<Modal title={t('账号与 API')} onClose={()=>setModal('')}><AccountCenter provider={accountsProvider} busy={agentBusy} onError={onError}/></Modal>}
   {renameTarget&&<Modal title={t('重命名会话')} onClose={()=>{if(!renaming)setRenameTarget(null);}}><label>{t('会话简称')}<input autoFocus data-testid="conversation-name" maxLength={60} value={conversationName} disabled={renaming} onChange={e=>setConversationName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing)void renameConversation();}}/></label><div className="button-row"><button className="button" disabled={renaming} onClick={()=>setRenameTarget(null)}>{t('取消')}</button><button className="button primary" disabled={renaming||!conversationName.trim()} onClick={()=>void renameConversation()}>{t('保存名称')}</button></div></Modal>}
   {modal==='projects'&&<Modal title={t('计算项目')} onClose={()=>setModal('')}><section data-testid="project-management"><p className="project-management-intro">{t('选择计算项目，或创建独立的计算权限范围。')}</p><div className="project-management-actions"><button className="button primary" data-testid="new-project" onClick={newProject} disabled={!worker||disconnected||busy}><Plus size={15}/>{t('新建计算项目')}</button><button className="button" data-testid="project-compute-resources" onClick={()=>{setModal('');openComputeConsole();}}><Server size={15}/>{t('计算资源')}</button></div><div className="project-management-list">{projects.map(p=><div key={p.id} className={'project-management-row '+(projectId===p.id?'current-project':'')}><button className="project-management-select" aria-label={projectLabel(p)} onClick={()=>{setSkill(undefined);setProjectId(p.id);setModal('');}}><ModuleIcon module="project"/><span><strong>{projectLabel(p)}</strong><small>{t(p.authoring_only?'草稿工作区':'计算项目')}{projectId===p.id?' · '+t('当前项目'):''}</small></span></button>{!p.authoring_only&&<button className="button" aria-label={t('计算权限设置')+' · '+p.name} disabled={!worker||disconnected||busy} onClick={()=>void editProjectPolicy(p)}><SettingsIcon size={15}/>{t('计算权限设置')}</button>}</div>)}{!projects.length&&<p className="project-management-empty">{t('尚无项目')}</p>}</div></section></Modal>}
-  {modal==='project-edit'&&<Modal title={t('计算权限设置')} wide onClose={closeProjectPolicy}><details className="project-technical-id"><summary>{t('项目标识')}</summary><code>{projectPolicyId}</code></details>{projectPolicyError?<p role="alert">{projectPolicyError}</p>:projectPolicyInitial?<ProjectAuthorizationForm key={projectPolicyId} environments={environments} busy={busy} initialSpec={projectPolicyInitial} onCancel={closeProjectPolicy} onSubmit={saveProjectPolicy}/>:<p role="status">{t('正在读取当前项目授权…')}</p>}</Modal>}
-  {modal==='project'&&<Modal title={t('新建计算项目')} wide onClose={()=>setModal('projects')}><ProjectAuthorizationForm environments={environments} busy={busy} onCancel={()=>setModal('projects')} suggestedEnvironmentId={agentTasks.find(task=>task.id===selectedConversationRef.current?.taskId)?.authoring?.environmentId} suggestedInputRoot={agentTasks.find(task=>task.id===selectedConversationRef.current?.taskId)?.authoring?.inputRoot} onSubmit={async spec=>{setBusy(true);try{const value=await api<Project>('POST','/api/projects',spec);setProjectId(value.id);setModal('');await refresh();}finally{setBusy(false);}}}/></Modal>}
+  {modal==='project-edit'&&<Modal title={t('计算权限设置')} wide onClose={closeProjectPolicy}><details className="project-technical-id"><summary>{t('项目标识')}</summary><code>{projectPolicyId}</code></details>{projectPolicyError?<p role="alert">{projectPolicyError}</p>:projectPolicyInitial?<ProjectAuthorizationForm key={projectPolicyId} resource={projectToolResource} suggestedInputRoot={toolProjectDefaults?.root} suggestedSchedulerId={toolProjectDefaults?.schedulerId} environments={environments} busy={busy} initialSpec={projectPolicyInitial} onCancel={closeProjectPolicy} onSubmit={saveProjectPolicy}/>:<p role="status">{t('正在读取当前项目授权…')}</p>}</Modal>}
+  {modal==='project'&&<Modal title={t('新建计算项目')} wide closeDisabled={busy} onClose={()=>setModal('projects')}><ProjectAuthorizationForm resource={projectToolResource} environments={environments} busy={busy} onCancel={()=>setModal('projects')} suggestedEnvironmentId={agentTasks.find(task=>task.id===selectedConversationRef.current?.taskId)?.authoring?.environmentId} suggestedInputRoot={toolProjectDefaults?.root||agentTasks.find(task=>task.id===selectedConversationRef.current?.taskId)?.authoring?.inputRoot} suggestedSchedulerId={toolProjectDefaults?.schedulerId} onSubmit={async spec=>{setBusy(true);try{const value=await toolProjectRequest<Project>('POST',spec);setProjectId(value.id);setModal('');await refresh();}catch(error){throw Error(policyError(error));}finally{setBusy(false);}}}/></Modal>}
   {modal==='environment'&&<Modal title={tr("注册独立科学环境")} wide onClose={()=>setModal('')}><p className="muted">{tr("填写 Linux 绝对路径。executables 支持 python、gpumd、gpu-sampling、nep、hotpp、pygas；repositories 支持 pydyn、pygas、hotpp。")}</p><textarea className="json-input" value={environmentDraft} onChange={e=>setEnvironmentDraft(e.target.value)}/><button className="button primary" disabled={busy} onClick={()=>{if(busy)return;let spec:any;try{spec=JSON.parse(environmentDraft);}catch(e){onError(e);return;}setBusy(true);void api('POST','/api/environments',spec).then(()=>{setModal('');void refresh();}).catch(onError).finally(()=>setBusy(false));}}>{tr("保存环境")}</button></Modal>}
   {modal==='run'&&<Modal title={tr("高级：原生计算草稿")} wide onClose={()=>setModal('')}><div className="form-row"><label>{tr("计算名称")}<input disabled={runDirty} value={runDraft.name||''} onChange={e=>setRunDraft({...runDraft,name:e.target.value})}/></label><label>{tr("引擎")}<select disabled={runDirty} value={runDraft.engine||''} onChange={e=>changeEngine(e.target.value)}>{engines.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label></div><div className="form-row"><label>{tr("计算环境")}<select disabled={runDirty} value={runDraft.environment_id||''} onChange={e=>setRunDraft({...runDraft,environment_id:e.target.value})}><option value="">{tr("选择环境")}</option>{environments.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label><label>{t('GPU 编号')}<input disabled={runDirty} type="number" min={0} value={runDraft.gpu??''} onChange={e=>setRunDraft({...runDraft,gpu:Number(e.target.value)})}/></label><label>{tr("时长上限 · s")}<input disabled={runDirty} type="number" min={1} value={runDraft.max_seconds??''} onChange={e=>setRunDraft({...runDraft,max_seconds:Number(e.target.value)})}/></label></div><label>{tr("完整任务描述 · inputs 是运行目录文件名 → 已授权源文件路径")}</label><textarea className="json-input" aria-label={tr("完整任务描述 · inputs 是运行目录文件名 → 已授权源文件路径")} value={runJson} onChange={e=>setRunJson(e.target.value)}/>{runDirty&&<div className="button-row"><button className="button" onClick={applyRunJson}>{tr('应用 JSON')}</button><span className="muted">{tr('存在未应用的 JSON 修改')}</span></div>}<p className="muted">{tr("采样任务需 bias_file、structure_file、cv_size、cutoff 和 mode。输入复制到独立目录；检查结果单独记录，可在授权范围内提交。")}</p><button className="button primary" disabled={busy||runDirty} onClick={async()=>{setBusy(true);try{const r=await api('POST','/api/runs/prepare',{spec:runDraft});void openTask(r.id);setModal('');await refresh();}catch(e){onError(e);}finally{setBusy(false);}}}>{tr("创建输入快照与草稿")}</button></Modal>}
   {modal==='updates'&&<Modal title={t('软件更新')} onClose={()=>setModal('')}><SoftwareUpdate {...updates}/></Modal>}
   {modal==='settings'&&<Modal title={t('工作台设置')} wide closeDisabled={settingsSaving} onClose={closeSettings}><SettingsPage updates={updates} onOpenComputeResources={openComputeConsole} onOpenLocalCompute={openLocalCompute} onOpenSshCompute={openSshConfiguration} onOpenProjects={openProjects} onOpenSkills={()=>{if(settingsSavingRef.current)return;closeSettings();setSection('skills');}} settings={settings} onChange={setSettings} onClose={closeSettings} onSavingChange={saving=>{settingsSavingRef.current=saving;setSettingsSaving(saving);}} onSaved={saved=>{settingsBackup.current=saved;}} onError={onError}/></Modal>}
   {guideShowing&&computeChooser&&guideKind&&<GuideSpotlight key={'choose-'+guideKind} step={guideKind==='ssh'?'choose-ssh':'choose-wsl'} english={settings.language==='en'}/>}
   {guideShowing&&computeGuide&&<GuideSpotlight key={computeGuide.id} step="wsl" english={settings.language==='en'}/>}
-  {computeChooser&&<ComputeConnectionChooser preferredKind={guideShowing?guideKind:undefined} initialEdit={computeChooserEdit} activeResource={computeResource} connectionBusy={connecting} onLocal={connectSavedLocal} onSsh={connectSavedSsh} onManageSsh={openSshConfiguration} onOpenResourceConsole={guideShowing?undefined:openComputeConsole} onServiceChange={()=>void refreshComputeResource()} onServiceEnvironmentHelp={helpWithSshServiceEnvironment} onClose={()=>{setComputeChooser(false);setComputeChooserEdit(undefined);setGuideKind(undefined);}} localConnected={worker&&!disconnected}/>}
+  {computeChooser&&<ComputeConnectionChooser preferredKind={guideShowing?guideKind:undefined} initialEdit={computeChooserEdit} suggestedWorkfileRoot={toolSchedulerDefaults?.root} onSchedulerSaved={rememberToolScheduler} activeResource={computeResource} connectionBusy={connecting} onLocal={connectSavedLocal} onSsh={connectSavedSsh} onManageSsh={openSshConfiguration} onOpenResourceConsole={guideShowing?undefined:openComputeConsole} onServiceChange={()=>void refreshComputeResource()} onProfileSaved={observeSavedSshProfile} onServiceEnvironmentHelp={helpWithSshServiceEnvironment} onClose={()=>{setComputeChooser(false);setComputeChooserEdit(undefined);setGuideKind(undefined);}} localConnected={worker&&!disconnected}/>}
   {sshGuide&&<SshConnectionGuide request={sshGuide.request} language={settings.language} onClose={()=>closeSshGuide()} onWorkerUpdate={sshGuide.standalone?undefined:()=>{if(conversationSelectionSeq.current!==sshGuide.selectionSeq||selectedConversationRef.current?.id!==sshGuide.conversationId)return;return connectWorker(sshGuide.taskId);}}/>}
   {computeGuide&&<ComputeConnectionGuide key={computeGuide.id} taskId={computeGuide.taskId} profile={computeGuide.profile} language={settings.language} onConnectStart={()=>{if(computeGuideRequest.current?.id===computeGuide.id){beginWorkerGate();setWorkerRestoring(false);}}} onClose={connected=>closeComputeGuide(computeGuide.id,connected)}/>}
 

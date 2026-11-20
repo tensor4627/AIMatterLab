@@ -8,6 +8,7 @@ import {createManagedComputeAliases,resourceFingerprint} from '../../backend/mai
 import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
 import {requestsComputeName} from '../../backend/main/compute/managed-compute-intent.mjs';
 import {createManagedComputeServices,managedWorkerProject} from '../../backend/main/compute/managed-compute-services.mjs';
+import {managedProjectAccess} from '../../backend/main/compute/managed-project-access.mjs';
 import {taskForRecordIndex} from '../../backend/main/compute/worker-service-version.mjs';
 import {assertRendererWorkerRoute} from '../../contracts/transport-policy.mjs';
 
@@ -91,6 +92,204 @@ test('publication retains independent hosts and grants exactly one distinct PTY 
  assert.equal(released.terminalClosed,true);
  assert.deepEqual((await manager.callTerminalTool('list_compute_terminals',{},owner)).sessions.map(s=>s.resourceId),['ssh:B']);
  assert.equal((await manager.callTerminalTool('list_compute_terminals',{},other)).sessions.length,1);
+});
+
+test('adding a workflow retains the original chat channel and inspection without granting a new resource or project',async t=>{
+ const entries=new Map(),revocation=new Map(),observed=[];
+ const catalog={get:(kind,id)=>entries.get(kind+id),put:(kind,id,value)=>entries.set(kind+id,value),remove:(kind,id)=>entries.delete(kind+id),list:()=>[]};
+ const policy=managedProjectAccess({catalog});
+ const services={ssh:async resource=>({
+  id:'service-'+resource.profileId,verify:async()=>({}),
+  async forward(_method,target,_payload,_mcp,_timeout,assertCurrent){
+   if(target==='/api/projects'){
+    await revocation.get(resource.profileId)?.promise;
+    assertCurrent?.();
+    return {status:200,data:[]};
+   }
+   observed.push(target);
+   throw Error('Unexpected scheduler action');
+  },
+ })};
+ const f=fixture(t,{services,selectionCatalog:catalog,authorizeTerminal:policy.terminalDecision,terminalPolicyRevision:policy.terminalRevision});
+ const {manager}=f;
+ await Promise.all([f.publish('A'),f.publish('B')]);
+ const ordinary={...f.owner,taskId:null};
+ f.turn(ordinary,'检查材料中心的队列');
+ const original=await manager.acquire(ordinary,{resourceId:'ssh:A'});
+ await manager.acquire(ordinary,{resourceId:'ssh:A',access:'service'});
+ assert.equal((await manager.inspectService(ordinary,'ssh:A')).project_access,'not_granted');
+ assert.deepEqual((await manager.callTerminalTool('list_compute_terminals',{},ordinary)).sessions,[original.terminal]);
+ const planning={...ordinary,taskId:'the-workflow'};
+ f.turn(planning,'继续制定流程，先不提交计算');
+ assert.equal((await manager.acquire(planning,{resourceId:'ssh:A'})).reused,true);
+ assert.deepEqual((await manager.callTerminalTool('list_compute_terminals',{},planning)).sessions,[original.terminal]);
+ const write={session_id:original.terminal.sessionId,request_id:'fixture-write',action:'type',data:'pwd'};
+ assert.equal((await manager.callTerminalTool('write_compute_terminal',write,planning)).accepted,true);
+ assert.equal((await manager.inspectService(planning,'ssh:A')).project_access,'not_granted');
+ await assert.rejects(manager.resolveService(planning,'ssh:A'),/project_grant_required/);
+ assert.equal(f.calls.filter(({op})=>op==='open').length,1);
+ const other={...planning,threadId:'other-chat'};
+ await assert.rejects(manager.callTerminalTool('write_compute_terminal',write,other),/lease_required/);
+ await assert.rejects(manager.inspectService({...planning,projectId:'different-project'},'ssh:A'),/lease_required/);
+ f.turn(planning,'请用图形中心');
+ await assert.rejects(manager.acquire(planning,{resourceId:'ssh:B'}),/project_grant_required/);
+ f.turn(planning,'改用图形中心');
+ await assert.rejects(manager.callTerminalTool('write_compute_terminal',write,planning),/user_instruction_required/);
+ assert.deepEqual((await manager.callTerminalTool('list_compute_terminals',{},planning)).sessions,[]);
+ assert.equal((await manager.list(planning)).resources.length,2);
+ f.turn(planning,'不要用 ssh:A');
+ await assert.rejects(manager.callTerminalTool('write_compute_terminal',write,planning),/user_instruction_required/);
+ f.turn(planning,'继续核对材料中心');
+ const pending=deferred();
+ revocation.set('A',pending);
+ const inspecting=manager.inspectService(planning,'ssh:A');
+ // The service's project read can arrive after the human withdraws the
+ // original project capability. It cannot revive that lease.
+ const a=f.stored.get('A');
+ policy.set(ordinary.projectId,{...a,profileId:a.id,targetFingerprint:resourceFingerprint(a)},false);
+ pending.resolve();
+ await assert.rejects(inspecting,/project_grant_required/);
+ await assert.rejects(manager.callTerminalTool('write_compute_terminal',write,planning),/project_grant_required/);
+ assert.equal(f.calls.filter(({op})=>op==='input').length,1);
+ assert.deepEqual(observed,[]);
+});
+
+test('a project-free chat keeps only its acquired service inspection after planning starts',async t=>{
+ const catalog={get:()=>null};
+ const services={ssh:async resource=>({id:'service-'+resource.profileId,verify:async()=>({})})};
+ const f=fixture(t,{services,authorizeTerminal:managedProjectAccess({catalog}).terminalDecision});
+ await f.publish('A');
+ const ordinary={...f.owner,taskId:null,projectId:null},planning={...ordinary,taskId:'draft'};
+ f.turn(ordinary,'检查材料中心的队列');
+ await f.manager.acquire(ordinary,{resourceId:'ssh:A',access:'service'});
+ f.turn(planning,'继续写流程');
+ const access=await f.manager.inspectService(planning,'ssh:A');
+ assert.equal(access.project_access,'no_project');
+ assert.equal(access.terminal_available,false);
+ const terminal=await f.manager.acquire(planning,{resourceId:'ssh:A',access:'terminal'});
+ assert.equal(terminal.status,'terminal_unavailable');
+ assert.equal(terminal.code,'managed_compute_project_grant_required');
+ await assert.rejects(f.manager.resolveService(planning,'ssh:A'),/project_grant_required/);
+ assert.equal(f.calls.filter(({op})=>op==='open').length,0);
+});
+
+test('an acquisition already authorized in chat reconciles a late shell under the planning turn',async t=>{
+ const f=fixture(t,{authorizeTerminal:managedProjectAccess({catalog:{get:()=>null}}).terminalDecision});
+ const {manager}=f;
+ await f.publish('A');
+ let chatCurrent=true;
+ const chat={...f.owner,taskId:null,projectId:null,checkCurrent:()=>chatCurrent};
+ const plan={...f.owner,taskId:'workflow',projectId:null};
+ f.turn(chat,'请用材料中心');
+ const pause=f.pauseOpen();
+ const first=assert.rejects(manager.acquire(chat,{resourceId:'ssh:A'}),/context_changed/);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.calls.filter(({op})=>op==='open').length,1);
+ chatCurrent=false;
+ manager.recordUserTurn({...plan,text:'请根据已经讨论的目标制定流程',turnId:'planning',planningMode:true});
+ const inventory=await manager.list(plan);
+ assert.equal(inventory.resources[0].acquired,false);
+ assert.equal(inventory.resources[0].canAcquire,true);
+ const after=manager.acquire(plan,{resourceId:'ssh:A'});
+ await new Promise(resolve=>setImmediate(resolve));
+ pause.resolve();
+ await first;
+ assert.equal((await after).status,'acquired');
+ assert.deepEqual(f.calls.filter(({op})=>['open','close'].includes(op)).map(({op})=>op),['open','close','open']);
+ assert.equal(f.shells.size,1);
+});
+
+test('reconnect verifies a recorded target and capability, unlike a discovery-only observation',async t=>{
+ const rows=new Map(),catalog={get:(kind,id)=>rows.get(kind+id),put:(kind,id,value)=>rows.set(kind+id,value),remove:(kind,id)=>rows.delete(kind+id),list:()=>[]};
+ const policy=managedProjectAccess({catalog});
+ const f=fixture(t,{selectionCatalog:catalog,authorizeTerminal:policy.terminalDecision,terminalPolicyRevision:policy.terminalRevision});
+ const chat={...f.owner,taskId:null},plan={...f.owner,taskId:'workflow'};
+ const listed={...chat,threadId:'listed-in-chat'};
+ await f.publish('A');
+ f.turn(chat,'请用材料中心');
+ await f.manager.acquire(chat,{resourceId:'ssh:A'});
+ f.turn(listed,'请用材料中心');
+ await f.manager.list(listed);
+ await f.manager.stop();
+ const restarted=f.make();
+ t.after(()=>restarted.stop());
+ f.states.get('conn-A').authentication='pending';
+ await assert.rejects(f.publish('A','conn-A',restarted),/authentication_required/);
+ f.states.get('conn-A').authentication='verified';
+ await f.publish('A','conn-A',restarted);
+ restarted.recordUserTurn({...plan,text:'请根据已有讨论制定流程',turnId:'after-restart',planningMode:true});
+ assert.deepEqual((await restarted.list(plan)).resources.map(r=>[r.acquired,r.canAcquire]),[[false,true]]);
+ assert.equal((await restarted.acquire(plan,{resourceId:'ssh:A'})).status,'acquired');
+ const listedPlan={...listed,taskId:'other-workflow'};
+ f.turn(listedPlan,'继续设计',undefined,restarted);
+ await assert.rejects(restarted.acquire(listedPlan,{resourceId:'ssh:A'}),/project_grant_required/);
+ await assert.rejects(restarted.release({...plan,projectId:'other'}, {resourceId:'ssh:A'}),/lease_required/);
+ await restarted.release(plan,{resourceId:'ssh:A'});
+ await assert.rejects(restarted.acquire(plan,{resourceId:'ssh:A'}),/project_grant_required/);
+ assert.equal(f.calls.filter(({op})=>op==='open').length,2);
+});
+
+test('an awaited terminal authorization cannot outlive explicit project revocation',async t=>{
+ const rows=new Map(),catalog={get:(kind,id)=>rows.get(kind+id),put:(kind,id,value)=>rows.set(kind+id,value)};
+ const policy=managedProjectAccess({catalog}),entered=deferred(),continuePolicy=deferred();
+ const f=fixture(t,{authorizeTerminal:async(scope,resource)=>{
+  const captured=policy.terminalDecision(scope,resource);
+  entered.resolve();await continuePolicy.promise;
+  return captured;
+ },terminalPolicyRevision:policy.terminalRevision});
+ await f.publish('A');
+ const a=f.stored.get('A'),concrete={...a,profileId:a.id,targetFingerprint:resourceFingerprint(a)};
+ policy.set(f.owner.projectId,concrete,true);
+ f.turn(f.owner,'请用材料中心');
+ const acquired=f.manager.acquire(f.owner,{resourceId:'ssh:A'});
+ await entered.promise;
+ policy.set(f.owner.projectId,concrete,false);
+ continuePolicy.resolve();
+ await assert.rejects(acquired,/project_grant_required/);
+ assert.equal(f.calls.filter(({op})=>op==='open').length,0);
+});
+
+test('an ambiguous target change still offers eligible candidates without dispatching either',async t=>{
+ const f=fixture(t);
+ f.stored.get('A').name='同名中心';
+ f.stored.get('B').name='同名中心';
+ await Promise.all([f.publish('A'),f.publish('B')]);
+ f.turn(f.owner,'改用同名中心');
+ const result=await f.manager.acquire(f.owner,{alias:'同名中心'});
+ assert.equal(result.status,'choice_required');
+ assert.deepEqual(new Set(result.candidates.map(row=>row.resourceId)),new Set(['ssh:A','ssh:B']));
+ assert.equal(f.calls.filter(({op})=>op==='open').length,0);
+});
+
+test('an authenticated terminal lease permits ordinary skill saves for that account without a job service',async t=>{
+ const registration=Object.fromEntries(['A','B'].map((id,index)=>[id,{
+  profileId:id,resourceId:String(index+1).repeat(64),workspaceId:String(index+4).repeat(64),
+  account:'same-name',hostIdentity:{hostname:id,uid:1001,machineId:id},root:'/workspace/'+id,
+ }]));
+ const f=fixture(t,{resourceWorkspace:{
+  assertHandoff:async({profileId})=>registration[profileId],
+  publicWorkspace:value=>value,
+  resolveHostedResourceWorkspace:(id,{profileId})=>registration[profileId]?.resourceId===id?registration[profileId]:null,
+ }});
+ const {manager,owner,projectSkills}=f;
+ projectSkills.resolveResource=manager.resolveSkillLibrary;
+ await Promise.all([f.publish('A'),f.publish('B')]);
+ f.turn(owner,'用材料中心');
+ await manager.acquire(owner,{resourceId:'ssh:A'});
+ const name='tool-handbook',body='---\nname: '+name+'\ndescription: Read this resource handbook.\n---\n\nNotes for this account.';
+ const args={scope:'resource',resource_id:'ssh:A',name,body,expected_sha256:null};
+ const archived=await projectSkills.call('write_project_skill',args,owner);
+ assert.match(archived.path,/resource-[a-f0-9]{64}[/\\]tool-handbook[/\\]SKILL\.md$/);
+ await assert.rejects(()=>projectSkills.call('write_project_skill',{...args,resource_id:'ssh:B'},owner),/lease_required/);
+ await assert.rejects(()=>projectSkills.call('write_project_skill',args,owner),/Skill revision changed/);
+ const changed=await projectSkills.call('write_project_skill',{...args,body:body+'\nMore notes.',expected_sha256:archived.sha256},owner);
+ assert.notEqual(changed.sha256,archived.sha256);
+ const newRoot=projectSkills.prepareRoot(path.join(path.dirname(projectSkills.root),path.basename(projectSkills.root)+'-migrated'));
+ t.after(()=>fs.rmSync(newRoot,{recursive:true,force:true}));
+ projectSkills.root=newRoot;
+ assert.equal((await projectSkills.call('read_project_skill',{scope:'resource',resource_id:'ssh:A',name},owner)).sha256,changed.sha256);
+ f.states.get('conn-A').authentication='lost';
+ await assert.rejects(()=>projectSkills.call('write_project_skill',{...args,expected_sha256:changed.sha256},owner),/unavailable/);
 });
 
 test('a user-selected alias uses the stable profile after rename and requires confirmation after the target changes',async t=>{
@@ -327,6 +526,38 @@ test('human first-use setup opens one private service on its published host with
  assert.equal((await manager.callTerminalTool('list_compute_terminals',{},f.owner)).sessions.length,1);
  assert.equal(manager.owns('configureService'),false);
  await assert.rejects(manager.configureService({...ref,connectionId:'conn-B'}),/resource_unavailable/);
+});
+
+test('hosted reuse reports manifest differences before an explicit in-place service update',async t=>{
+ const f=fixture(t), ref={connectionId:'conn-A',profileId:'A',profileVersion:1}, calls=[];
+ const a='a'.repeat(64),b='b'.repeat(64),hostIdentity={hostname:'fixture',uid:1000,machineId:'fixture-id'};
+ const health=hash=>({name:'gpu-sampling-studio',execution_policy:'desktop-review-v1',root:'/fixture/data',port:34567,
+  runtime:'/fixture/data/runtimes/'+hash.slice(0,20),runtimeId:hash.slice(0,20),runtimeManifestSha256:hash,hostIdentity});
+ const channel=(hash,id)=>({...ref,serviceId:id,status:'connected',serviceActive:true,channelKind:'private',service:health(hash)});
+ let registered=health(a), observed=channel(a,'service-old');
+ const registration={validateReuse(){return registered;},read(){return {status:'configured',registration:registered};},remember(_profile,result){registered=result;}};
+ Object.assign(f.connections,{
+  serviceState:async()=>observed,
+  async closeService(data){assert.equal(data.serviceId,'service-old');calls.push('close');return observed={...ref,status:'disconnected',serviceActive:false};},
+  async openService(data,bootstrap){assert.equal(data.connectionId,ref.connectionId);assert.equal(bootstrap.payload.expected_runtime_id,b.slice(0,20));
+   calls.push('update');observed=channel(b,'service-new');},
+  async privateServiceRequest(value){return {status:200,data:value.target==='/api/health'?observed.service:{jsonrpc:'2.0',id:value.data.id,result:{tools:[{name:'fixture'}]}}};},
+ });
+ const services=createManagedComputeServices({connections:f.connections,registration,prepareResources:async(_source,options)=>({payload:{port:34567,
+  expected_runtime_id:options.expectedRuntimeId||b.slice(0,20),runtime_manifest_sha256:b}})});
+ const manager=f.make({services});t.after(()=>manager.stop());
+ await manager.publish(ref);await manager.refreshService({connectionId:ref.connectionId});
+ const check=await manager.serviceStatus(ref);
+ assert.deepEqual(check.runtimeComparison,{status:'different',remoteRuntimeId:a.slice(0,20),remoteManifestSha256:a,bundledRuntimeId:b.slice(0,20),bundledManifestSha256:b});
+ assert.deepEqual(calls,[]);
+ const request={...ref,expectedRuntimeId:a.slice(0,20),bundledRuntimeId:b.slice(0,20)};
+ await assert.rejects(manager.updateService({...request,expectedRuntimeId:'c'.repeat(20)}),/changed/);
+ assert.deepEqual(calls,[]);
+ await manager.updateService(request);
+ assert.deepEqual(calls,['close','update']);
+ const updated=await manager.serviceStatus(ref);
+ assert.equal(updated.health.root,check.health.root);
+ assert.equal(updated.runtimeComparison.status,'current');
 });
 
 test('run mutations check exact source, active project grant, user intent and known canonical state before dispatch',async t=>{

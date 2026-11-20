@@ -7,6 +7,8 @@ import {providerId} from '../providers/contracts.mjs';
 import {isWorkspaceContext,visibleUserText} from "../../contracts/agent/user-message.mjs";
 
 import {ensureTaskAuthoring} from '../../backend/main/workspace/task-authoring.mjs';
+import {isConversationDraft} from '../../backend/main/workspace/workflow-draft-tool.mjs';
+import {formatPreparedTaskTurn} from '../context/task-turn-context.mjs';
 import {toolGuidanceTarget} from '../../backend/main/compute/tool-guidance-target.mjs';
 import {terminalOnlyTurn} from './terminal-turn.mjs';
 import {ensureDefinitionContext} from './private-conversation-context.mjs';
@@ -97,8 +99,13 @@ export function createAgentRequests({runtime}){
    const prepared=taskRecords.prepareTurnState(provider,params),first=prepared.params.input?.[0];
    if(first?.type!=='text'||typeof first.text!=='string'||!first.text.trim())throw Error('A message is required');
    bound=taskRecords.bound(provider,params.threadId);
+   const ownedDraft=isConversationDraft(bound);
    const mode=interactionModeContext({...turnFlags,scope:bound?'workflow':'chat'}),taskContext=bound?'\nstudioTaskId: '+bound.id:'';
-   params={...prepared.params,input:[first,{type:'text',text:mode+taskContext+'\nUse the authorized managed resource tools for this request. Automatic workspace data is unavailable until its original tool scope is verified.'},...(prepared.params.input||[]).filter(item=>item.type==='skill')]};
+   const input=[first,{type:'text',text:'[AIMatterLab hosted compute resources]\nUse the authorized managed resource tools for this request. Automatic workspace data is unavailable until its original tool scope is verified.'},...(prepared.params.input||[]).filter(item=>item.type==='skill')];
+   if(ownedDraft){
+    const workflow={...prepared.interaction.workflow,artifacts:[]};
+    params=formatPreparedTaskTurn({params:{...prepared.params,input},interaction:{...prepared.interaction,workflow}});
+   }else params={...prepared.params,input:[...input,{type:'text',text:mode+taskContext}]};
   }else params=taskRecords.prepareTurn(provider,params);
   check();await synchronize();
   if(definitionOnly)params=currentPrivateTurn(params,bound,{review:privateReview,planningMode:turnFlags.planningMode});

@@ -6,6 +6,7 @@ import {pathToFileURL} from 'node:url';
 import {createServer} from 'vite';
 import {requireLaunchContext} from './desktop-launch.mjs';
 import {frontendReviewCases} from './frontend-review-cases.mjs';
+import {frontendClusterOnboardingCases} from './frontend-cluster-onboarding-cases.mjs';
 import {frontendVisualizationExperienceCases} from './frontend-visualization-experience-cases.mjs';
 import {frontendSettingsExperienceCases} from './frontend-settings-experience-cases.mjs';
 import {frontendModelProviderCases} from './frontend-model-provider-cases.mjs';
@@ -188,6 +189,7 @@ try{
  await frontendUiFollowupCases({check,out});
  await frontendPlanExperienceCases({check,out});
  await frontendReviewCases({check,out});
+ await frontendClusterOnboardingCases({check,out});
  await frontendVisualizationExperienceCases({check,out});
  await frontendSettingsExperienceCases({check,out});
  await check('wsl-inventory-visible-feedback-retry',async page=>{

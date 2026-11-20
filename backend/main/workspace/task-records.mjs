@@ -66,7 +66,8 @@ export class TaskRecords{
   if(!['codex','kimi','qwen','deepseek','compatible'].includes(value.provider)||typeof value.request!=='string'||!value.request.trim()||value.request.length>100000||value.newWorkflow!==undefined&&typeof value.newWorkflow!=='boolean')throw Error('Invalid task intent');
   if(value.threadId&&this.deleted(value.provider,value.threadId))throw Error('Conversation was deleted');
   if(value.threadId&&!value.newWorkflow){const old=this.bound(value.provider,value.threadId);if(old)return old;}
-  const task={id:randomUUID(),kind:'agent-task',planningMode:true,workflowVersion:value.workflowVersion===2?2:1,name:value.request.trim().slice(0,100),request:value.request,provider:value.provider,projectId:value.projectId||null,plan:[],steps:[],parameters:{},parameterRevision:0,manualEdits:{},review:{status:'not_run'},artifacts:[],phase:'collecting',updatedAt:Date.now()};
+  const conversation=value.threadId?this.conversation(value.provider,value.threadId):null;
+  const task={id:randomUUID(),kind:'agent-task',planningMode:true,workflowVersion:value.workflowVersion===2?2:1,name:value.request.trim().slice(0,100),request:value.request,provider:value.provider,projectId:conversation?conversation.projectId??null:value.projectId||null,plan:[],steps:[],parameters:{},parameterRevision:0,manualEdits:{},review:{status:'not_run'},artifacts:[],phase:'collecting',updatedAt:Date.now()};
   if(task.workflowVersion===2){task.parameters={engine:'',files:[]};task.steps=[{id:'inputs',title:'引擎与输入',fields:[{key:'engine',label:'计算引擎',type:'select',required:true,options:['gpumd.sampling','pydyn.sampling','gpumd.neb','gpumd.md','pydyn.md','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']},{key:'files',label:'科学输入文件',type:'files',required:true}]}];}
   this.save(task,true);return value.threadId?this.attach(task.id,value.provider,value.threadId):task;
  }
@@ -133,6 +134,13 @@ export class TaskRecords{
   return this.save(task);
  }
  failedTurn(provider,threadId,error){const turn=this.turns.get(provider+':'+threadId);if(!turn?.reviewMode)return;const task=this.read(turn.taskId);task.review={status:'needs-information',summary:'Agent 复核请求失败：'+error.message};this.save(task);}
+ presentDraft(provider,threadId,value){
+  const key=provider+':'+threadId,activeId=this.active.get(key);
+  if(activeId!==value.task_id||this.turns.get(key)?.taskId!==activeId||this.bound(provider,threadId)?.id!==activeId||this.deleted(provider,threadId))throw Error('The draft must belong to this conversation');
+  const {task_id,...draft}=value;
+  this.event({method:'item/completed',provider,params:{threadId,item:{tool:'present_task',result:{id:task_id,kind:'task-parameters',...draft}}}});
+  return this.read(activeId);
+ }
  event(event){
   const p=event.params||{},provider=event.provider||'codex',key=provider+':'+p.threadId,id=this.active.get(key);if(!id)return;
   const task=this.read(id),turn=this.turns.get(key)||{revision:task.parameterRevision||0};

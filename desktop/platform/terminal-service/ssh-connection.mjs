@@ -8,6 +8,8 @@ import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {createTerminalSession,drainOwnedConpty,terminalOutputChunks,TerminalFault,exact} from './session.mjs';
 import {MANAGED_SSH_SHELL_CAPACITY,managedSshShells} from './managed-ssh-shells.mjs';
+import {workspaceProbeCommand} from './workspace-probe.mjs';
+import {workspaceCommand} from './workspace-command.mjs';
 
 const fail=(code,status=409)=>{throw new TerminalFault(code,status);};
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value);
@@ -83,6 +85,12 @@ export function createMultiplexHost({platform=process.platform,cwd=process.cwd()
   close:(profile,proof,master)=>helper('close',profile,{proof,master}),
   observeClosed:(profile,proof,master)=>helper('closed',profile,{proof,master}),
   cleanup:(profile,proof)=>helper('cleanup',profile,{proof}),
+  async workspace(profile,proof,command){
+   const argv=multiplexArgs(multiplexProfile(profile),proof.socket,{command}),t=transport(profile);
+   const result=await (t.prefix.length?run(t.file,[...t.prefix,...argv],{timeout:10000,limit:32768}):run(argv[0],argv.slice(1),{timeout:10000,limit:32768}));
+   if(result.code!==0)fail('ssh_workspace_unconfirmed');
+   return result.stdout;
+  },
   masterLaunch:(profile,proof,nonce)=>python(profile,['-I','-u','-c',MASTER_WRAPPER,nonce,JSON.stringify(multiplexArgs(localProfile(profile),proof.socket,{master:true}))]),
   slaveLaunch(profile,proof,command){const argv=multiplexArgs(multiplexProfile(profile),proof.socket,{tty:true,command}),t=transport(profile);return t.prefix.length?{file:t.file,args:[...t.prefix,...argv],cwd,env:DEFAULT_ENV()}:{file:argv[0],args:argv.slice(1),cwd,env:DEFAULT_ENV()};}
  };
@@ -194,6 +202,35 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
   r.managedShells??=managedSshShells({now,verified:()=>verified(r),createSession:()=>channelSession(r,{connectionId:r.id})});
   return r.managedShells[operation](request);
  }
+ async function runWorkspace(r,{command,decode}){
+  const generation=r.generation;
+  await verified(r);
+  if(generation!==r.generation)fail('ssh_connection_changed');
+  let output;
+  if(r.native){
+   const channel=await r.native.openChannel(command);
+   output=await new Promise((resolve,reject)=>{
+    let collected='';
+    const timer=setTimeout(()=>abort(),10000);
+    function abort(){clearTimeout(timer);try{channel.kill();}catch{}reject(new TerminalFault('ssh_workspace_unconfirmed',409));}
+    channel.onData(data=>{collected+=data;if(Buffer.byteLength(collected)>32768)abort();});
+    channel.onExit(event=>{clearTimeout(timer);if(event.exitCode===0)resolve(collected);else abort();});
+   });
+  }else output=await host.workspace(r.profile,r.proof,command);
+  await verified(r);
+  if(generation!==r.generation||r.closeRequested)fail('ssh_connection_changed');
+  return decode(output);
+ }
+ function workspace(value){
+  exact(value,['connectionId','profileId','profileVersion','mode','directory','expected'],['connectionId','profileId','profileVersion','mode']);
+  const {connectionId,profileId,profileVersion,...options}=value;
+  return runWorkspace(ref({connectionId,profileId,profileVersion}),workspaceProbeCommand(options));
+ }
+ function runWorkspaceCommand(value){
+  exact(value,['connectionId','profileId','profileVersion','root','cwd','identity','mode','args']);
+  const {connectionId,profileId,profileVersion,...options}=value;
+  return runWorkspace(ref({connectionId,profileId,profileVersion}),workspaceCommand(options));
+ }
  function serviceView(r){if(r.service?.shared)return {connectionId:r.id,profileId:r.profile.id,profileVersion:r.profile.version,attemptId:r.service.requestId,...r.service.shared.view()};const state=r.service?.session?.serviceState(),opening=r.service&&!r.service.started&&!r.service.failure;return {connectionId:r.id,profileId:r.profile.id,profileVersion:r.profile.version,status:r.service?.failure?'failed':opening?'connecting':state?.serviceStatus||'idle',serviceActive:!r.service?.failure&&(opening||state?.serviceActive===true)||false,...state?.serviceId?{serviceId:state.serviceId}:{},...r.service?{attemptId:r.service.requestId}:{},...Object.fromEntries(['service','servicePhase','progress','error'].filter(k=>state?.[k]!==undefined).map(k=>[k,state[k]])),...opening?{servicePhase:'preparing_local'}:{},...r.service?.failure?{servicePhase:'preparing_local',error:{code:r.service.failure,phase:'preparing_local'}}:{}};}
  async function openService(value){exact(value,['connectionId','profileId','profileVersion','requestId','bootstrap','terminalSessionId','terminalOwnerEpoch','terminalScope','interactiveService'],['connectionId','requestId','bootstrap']);if(value.interactiveService!==undefined&&(value.interactiveService!==true||value.terminalSessionId!==undefined))fail('invalid_request',400);const r=ref({connectionId:value.connectionId,...value.profileId?{profileId:value.profileId,profileVersion:value.profileVersion}:{}});expireProfileUpdates();if(r.profileUpdate)fail('service_active',423);if(!id(value.requestId))fail('invalid_request',400);if(r.cancelled.has(value.requestId))fail('service_start_cancelled');const signature=digest([value.bootstrap,value.interactiveService===true,value.terminalSessionId]);if(r.service){if(r.service.requestId===value.requestId){if(r.service.signature!==signature)fail('request_changed');return r.service.promise;}if(r.service.shared?r.service.shared.view().serviceActive:!r.service.failure&&(!r.service.started||r.service.session.serviceState().serviceActive))fail('service_active',423);if(!r.service.shared)r.service.session?.dispose();}const record={requestId:value.requestId,signature};r.service=record;r.revision++;
   if(value.terminalSessionId!==undefined){const session=sessions.get(value.terminalSessionId);if(!r.shells.has(value.terminalSessionId)||!session)fail('session_not_found');const authorization={ownerEpoch:value.terminalOwnerEpoch,scope:value.terminalScope};record.shared=sharedShellService({session,sessionId:value.terminalSessionId,bootstrap:value.bootstrap,requestId:value.requestId,authorization,assertCurrent:()=>{if(r.service!==record||r.status!=='authenticated'||closing)fail('service_changed');}});record.promise=(async()=>{await verified(r);await record.shared.start();return serviceView(r);})();return record.promise;}record.promise=(async()=>{try{await verified(r);if(r.service!==record||r.cancelled.has(value.requestId))fail('service_start_cancelled');const marker='__STUDIO_CHANNEL_READY_'+randomBytes(24).toString('hex')+'__';const session=record.session=await channelSession(r,{privateServiceChannel:true},value.interactiveService?undefined:"printf '%s\\n' '"+marker+"'; exec /bin/sh -i");if(r.service!==record||r.cancelled.has(value.requestId)){session.dispose();fail('service_start_cancelled');}
@@ -255,5 +292,5 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
  // Profile transactions call these only after saving an environment-only edit.
  function profileFacts(profileId){return [...records.values()].filter(r=>r.profile.id===profileId&&r.status!=='closed').map(r=>({connectionId:r.id,profileVersion:r.profile.version,revision:r.revision,status:r.status,serviceActive:!!(r.service?.shared?r.service.shared.view().serviceActive:r.service?.session?.serviceState().serviceActive),servicePending:!!r.service&&!r.service.shared&&!r.service.session}));}
  function updateProfile(value){exact(value,['connectionIds','previousVersion','profile'],['connectionIds','previousVersion','profile']);if(!Array.isArray(value.connectionIds))fail('invalid_request');const body=p=>{const {version,serviceEnvironment,...rest}=p;return rest;};const rows=value.connectionIds.map(id=>{const r=records.get(id);if(!r||r.profile.id!==value.profile.id||r.profile.version!==value.previousVersion||r.status!=='authenticated'||r.service?.session?.serviceState().serviceActive||r.service&&!r.service.session||!equal(body(r.profile),body(value.profile)))fail('ssh_connection_changed');return r;});for(const r of rows){r.profile=structuredClone(value.profile);r.generation++;r.revision++;}return {connectionIds:rows.map(r=>r.id)};}
- return {withShell(sessionId,fn){for(const r of records.values())if(r.service?.shared?.sessionId===sessionId)return r.service.shared.shell(fn);return fn();},open,list:()=>({connections:[...records.values()].map(view)}),state,confirm,completeLogin,loginStatus,authRead,authInput,authResize,openShell,managedShell,openService,serviceState,serviceRequest,privateServiceRequest,closeService,cancelServiceStart,close,profileFacts,updateProfile,prepareProfileUpdate,commitProfileUpdate,abortProfileUpdate,async closeAll(){closing=true;for(const token of profileUpdates.keys())finishProfileUpdate(token,'closed');await Promise.allSettled([...records.values()].map(r=>close({connectionId:r.id})));}};
+ return {withShell(sessionId,fn){for(const r of records.values())if(r.service?.shared?.sessionId===sessionId)return r.service.shared.shell(fn);return fn();},open,list:()=>({connections:[...records.values()].map(view)}),state,confirm,completeLogin,loginStatus,authRead,authInput,authResize,openShell,managedShell,workspace,runWorkspaceCommand,openService,serviceState,serviceRequest,privateServiceRequest,closeService,cancelServiceStart,close,profileFacts,updateProfile,prepareProfileUpdate,commitProfileUpdate,abortProfileUpdate,async closeAll(){closing=true;for(const token of profileUpdates.keys())finishProfileUpdate(token,'closed');await Promise.allSettled([...records.values()].map(r=>close({connectionId:r.id})));}};
 }
