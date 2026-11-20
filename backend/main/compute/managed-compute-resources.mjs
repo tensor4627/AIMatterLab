@@ -6,7 +6,7 @@ import {isDeepStrictEqual as equal} from 'node:util';
 import {terminalToolInput,sharedTerminalTools} from './shared-terminal.mjs';
 import {managedWorkerProject,originalBindingMatches} from './managed-compute-services.mjs';
 import {normalizeComputeAlias,resourceFingerprint} from './managed-compute-aliases.mjs';
-import {createManagedComputeIntent,genericComputeKind,requestsComputeName,hasResourceRequest,namesInChat} from './managed-compute-intent.mjs';
+import {createManagedComputeIntent,genericComputeKind,requestsComputeName,canAskForResource,namesInChat} from './managed-compute-intent.mjs';
 import {MANAGED_SSH_SHELL_CAPACITY} from '../../../desktop/platform/terminal-service/managed-ssh-shells.mjs';
 
 const rejectedBeforeDispatch=new Set(['managed_compute_invalid_request','managed_compute_user_instruction_required',
@@ -308,7 +308,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const genericAlias=(alias&&genericComputeKind(alias)?alias:null)||resource&&groupMatch(turn,['集群','ssh','cluster','本地','wsl','local'],resource);
   const requested=genericAlias||alias;
   if(!requested||!(genericComputeKind(requested)?requestsComputeName(turn.message,requested):namesInChat(turn.message,requested))){
-   if(turn.pending||!hasResourceRequest(turn.message))fail('managed_compute_user_instruction_required');
+   if(turn.pending||!canAskForResource(turn.message,turn.discovered))fail('managed_compute_user_instruction_required');
    const alternatives=await availableChoices(scope,resource?.kind,access);
    intent.assertTurn(scope,turn);
    if(!alternatives.length)fail('managed_compute_no_eligible_resource');
@@ -803,12 +803,18 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   exact(data,['resourceId','alias'],['resourceId']);liveScope(scope);
   intent.confirmChoice(scope,data);
  }
+ function currentChoice(scope,choice){
+  liveScope(scope);
+  const resource=resources.get(choice.resourceId);
+  return !!resource&&resource.targetFingerprint===choice.targetFingerprint&&visible(resource);
+ }
  function confirmQuestionChoice(scope,data){
   liveScope(scope);
-  return intent.confirmQuestionChoice(scope,data,choice=>{
-   const resource=resources.get(choice.resourceId);
-   return !!resource&&resource.targetFingerprint===choice.targetFingerprint&&visible(resource);
-  });
+  return intent.confirmQuestionChoice(scope,data,choice=>currentChoice(scope,choice));
+ }
+ function bindResourceQuestion(scope,question){
+  liveScope(scope);
+  return intent.bindResourceQuestion(scope,question,choice=>currentChoice(scope,choice));
  }
  function capture(provider,threadId){
   const owned=[...leases.values()].filter(lease=>lease.scope.provider===provider&&lease.scope.threadId===threadId&&hasLease(lease));
@@ -900,6 +906,6 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   return callTerminalTool(name,args,scope);
  }
  return {publish,publishWsl,configureService,snapshot,list,acquire,release,resolveLease,resolveService,inspectService,capture,needsExplicitResource,callTerminalTool,callTool,owns,tools:()=>tools,
-  terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,confirmQuestionChoice,
+  terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,confirmQuestionChoice,bindResourceQuestion,
   recordUserTurn,sweep,stop,touch,forget,consoleEntries,observeConsoleLease,observeConsoleService,releaseFromConsole,detachLocalFromConsole};
 }

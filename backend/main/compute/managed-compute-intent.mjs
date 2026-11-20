@@ -15,6 +15,7 @@ const exampleWording=/示例|\bexample\b/iu;
 const clauses=message=>message.split(/[，。；,;!！?？\n]+/u).map(s=>s.trim()).filter(Boolean);
 const directions=message=>message.replace(/\x60{3}[\s\S]*?(?:\x60{3}|$)/gu,' ').split('\n').filter(line=>!line.trimStart().startsWith('>')).join('\n');
 const choiceKind='conversation-compute-choice';
+const cancelSelection=/不是资源选择|取消(?:当前)?选择|forget (?:this |the )?selection/iu;
 const freshTargetWording=/改用|换到|换成|切换|选用|指定|另外|别的|\b(?:switch|instead|another)\b/iu;
 const continuation=/^(?:(?:好(?:的)?|嗯|行|请|那就|那|麻烦|帮我|现在|再)\s*[，,]?\s*)*(?:继续|接着|接下来|重试|再试|试试|查一下|查队列|看看队列|看下队列|go ahead\b|please continue\b|continue\b|try again\b|retry\b)/iu;
 const resourceLabel=choice=>text(choice.name);
@@ -56,10 +57,11 @@ function namedChoices(source,candidates,aliases) {
  return {named:exact.length?exact:[...named.values()],ambiguous:exact.length?[]:[...ambiguous.values()],excluded};
 }
 
-export function hasResourceRequest(message) {
- const command=new RegExp('^'+queryLead,'iu');
- return clauses(message).some(part=>operations.test(part)&&!negativeQuery.test(part)&&!exampleWording.test(part)&&
-   (command.test(part)||/^(?:请|帮我|please\s+)?(?:用|使用|在|选用|use\b|run\b)/iu.test(part)));
+export function canAskForResource(message,discovered) {
+ // This branch only offers eligible targets for a human decision. Opening a
+ // shell or using a service still requires a selected target and its policy.
+ return !cancelSelection.test(message)&&clauses(message).some(part=>!negativeQuery.test(part)&&!exampleWording.test(part)&&
+  (operations.test(part)||discovered&&continuation.test(part)));
 }
 
 function requestedObservation(message,value) {
@@ -102,6 +104,19 @@ function exactAnswer(message,choice){
  return !!name&&new RegExp(pattern,'u').test(message);
 }
 
+// A model may ask a general question with a positive resource option next to
+// "just show the plan". Only the label submitted by the human can name a target.
+function resourceOption(label,choice,allowBare){
+ const value=label.normalize('NFKC').trim(),suffix=/\s*\(((?:ssh|wsl):[A-Za-z0-9_-]+)\)$/u.exec(value);
+ if(suffix&&suffix[1]!==choice.resourceId)return false;
+ const body=suffix?value.slice(0,suffix.index).trim():value;
+ const action=/^(?:选择|选用|使用|就用|连接到|连接|用|选|(?:use|select|choose|connect to)\s+)/iu.exec(body);
+ if(!action&&!allowBare)return false;
+ const target=(action?body.slice(action[0].length):body).trim();
+ return new RegExp('^'+openQuote+escaped(text(choice.name))+closeQuote+'$','u').test(text(target))||
+  new RegExp('^'+openQuote+escaped(choice.resourceId)+closeQuote+'$','u').test(target);
+}
+
 export function createManagedComputeIntent(catalog){
  const turns=new Map();
  function saveSelection(key,turn,selected){
@@ -134,7 +149,7 @@ export function createManagedComputeIntent(catalog){
   if(selected.length&&!turn.ambiguous.length){
    saveSelection(key,turn,selected);
   }else if(prior?.projectId===turn.projectId&&prior.taskId===turn.taskId&&Array.isArray(prior.targets)&&prior.targets.every(t=>t&&typeof t.resourceId==='string'&&typeof t.targetFingerprint==='string')){
-   const obsolete=turn.ambiguous.length||freshTargetWording.test(message)||/不是资源选择|取消(?:当前)?选择|forget (?:this |the )?selection/i.test(message)||turn.excluded.some(c=>prior.targets.some(t=>t.resourceId===c.resourceId))||
+   const obsolete=turn.ambiguous.length||freshTargetWording.test(message)||cancelSelection.test(message)||turn.excluded.some(c=>prior.targets.some(t=>t.resourceId===c.resourceId))||
     /(?:不要|别|不用|停止|撤销|取消|不再|stop|avoid|never).{0,15}(?:使用|用|连接|选择|这个资源|集群|\busing\b)/iu.test(message);
    if(obsolete)catalog?.remove(choiceKind,key);
    else {
@@ -169,6 +184,30 @@ export function createManagedComputeIntent(catalog){
   turn.answer={proposal,choice};
   saveSelection(computeScopeKey(scope),turn,[choice]);
  }
+ function acceptQuestionChoice(scope,turn,proposal,choice,isCurrent){
+  assertTurn(scope,turn);
+  if(!choice||turn.pending&&turn.pending!==proposal||turn.answer&&turn.answer.choice.resourceId!==choice.resourceId||
+   turn.excluded.some(item=>item.resourceId===choice.resourceId)||!isCurrent(choice))return null;
+  turn.answer={proposal,choice};
+  saveSelection(computeScopeKey(scope),turn,[choice]);
+  return choice.resourceId;
+ }
+ function bindResourceQuestion(scope,{question,labels},isCurrent){
+  const turn=current(scope),proposal=turn?.pending||turn?.discovered;
+  if(!proposal||turn.projectId!==(scope.projectId??null)||turn.taskId!==(scope.taskId??null))return null;
+  const prompt=text(question);
+  if(negativeQuery.test(prompt)||/排除|不选|跳过哪|不要|不使用|exclude|avoid|skip|not\s+(?:to\s+)?(?:use|connect)/iu.test(prompt))return null;
+  const allowBare=/(?:集群|计算资源|ssh|cluster|(?:compute |computing )?resource)/iu.test(prompt)&&
+   /选择|使用|连接|哪台|哪个|哪一|choose|which|select|connect|use/iu.test(prompt);
+  const bindings=new Map();
+  for(const label of labels){
+   const matches=proposal.candidates.filter(candidate=>resourceOption(label,candidate,allowBare));
+   if(matches.length===1)bindings.set(label,matches[0]);
+  }
+  if(!bindings.size)return null;
+  return label=>bindings.has(label)&&current(scope)===turn&&scope.checkCurrent?.()!==false
+   ?acceptQuestionChoice(scope,turn,proposal,bindings.get(label),isCurrent):null;
+ }
  function confirmQuestionChoice(scope,{offered,resourceId,custom},isCurrent){
   const turn=current(scope);
   if(!turn||turn.projectId!==(scope.projectId??null)||turn.taskId!==(scope.taskId??null))fail('managed_compute_turn_changed');
@@ -177,11 +216,7 @@ export function createManagedComputeIntent(catalog){
   const matches=proposal.candidates.filter(choice=>offered.includes(choice.resourceId)&&
    (resourceId?choice.resourceId===resourceId:message&&[choice.name,choice.resourceId,choice.profileId].some(name=>exactAnswer(message,{name}))));
   if(matches.length!==1)return null;
-  const [choice]=matches;
-  if(turn.answer&&turn.answer.choice.resourceId!==choice.resourceId||turn.excluded.some(item=>item.resourceId===choice.resourceId)||!isCurrent(choice))return null;
-  turn.answer={proposal,choice};
-  saveSelection(computeScopeKey(scope),turn,[choice]);
-  return choice.resourceId;
+  return acceptQuestionChoice(scope,turn,proposal,matches[0],isCurrent);
  }
  function acquired(scope,resource){
   const turn=current(scope);
@@ -194,6 +229,6 @@ export function createManagedComputeIntent(catalog){
   if(turn&&!turn.pending&&turn.projectId===(scope.projectId??null)&&turn.taskId===(scope.taskId??null))
    turn.discovered={alias:null,save:false,candidates};
  }
- return {recordUserTurn,current,assertTurn,propose,confirmChoice,confirmQuestionChoice,observedChoices,acquired,
+ return {recordUserTurn,current,assertTurn,propose,confirmChoice,confirmQuestionChoice,bindResourceQuestion,observedChoices,acquired,
   forget(provider,threadId){const key=computeScopeKey({provider,threadId});turns.delete(key);catalog?.remove(choiceKind,key);},clear:()=>turns.clear()};
 }

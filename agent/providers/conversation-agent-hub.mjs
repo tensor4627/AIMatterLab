@@ -3,6 +3,7 @@ import {EventEmitter} from 'node:events';
 import {randomUUID} from 'node:crypto';
 import {AgentHub} from './agent-hub.mjs';
 import {providerId} from './contracts.mjs';
+import {DSH_RESOURCE_QUESTION_PREFIX} from './dsh-policy.mjs';
 import {providerContext} from '../tools/provider-scope.mjs';
 import {serviceHistory} from '../sessions/wake-delivery.mjs';
 
@@ -41,6 +42,7 @@ export class ConversationAgentHub extends EventEmitter{
  constructor({authCodex,createCodex,runSession=(_identity,run)=>run(),dropSession=()=>{},initialProvider='codex',createHub=options=>new AgentHub(options),...options}){
   super();Object.assign(this,{options,createCodex,createHub,runSession,dropSession});
   this.scope=new AsyncLocalStorage();this.entries=new Map();this.byThread=new Map();
+  this.resourceQuestions=new WeakMap();
   this.auth=createHub({...options,codex:authCodex,worker:()=>null,releaseWorker:()=>{}});
   this.auth.on('event',event=>this.emit('event',event));
   this.foreground=this.create(providerId(initialProvider),null);
@@ -66,9 +68,9 @@ export class ConversationAgentHub extends EventEmitter{
    worker:p=>p===provider?opts.worker?.(p,id,context()):null,releaseWorker:p=>{if(p===provider)opts.releaseWorker?.(p,id);},
    bindWorkerContext:(p,value,binding)=>opts.bindWorkerContext?.(p,value,{...binding,sessionId:id}),
    confirmResourceChoice:({threadId,turnId},choice)=>{
-    const owner=context(),checkCurrent=()=>!entry.closed&&entry.threadId===threadId&&entry.turnId===turnId&&owner.threadId===threadId&&context()===owner;
-    if(!checkCurrent())throw Error('The resource choice no longer belongs to the active conversation');
-    return opts.confirmResourceChoice?.({...owner,provider,threadId,sessionId:id,checkCurrent},choice);
+    const scope=this.questionScope(entry,threadId,turnId);
+    if(!scope.checkCurrent())throw Error('The resource choice no longer belongs to the active conversation');
+    return opts.confirmResourceChoice?.(scope,choice);
    },
    resourceScope:(p,method)=>opts.resourceScope?.(p,method,context(),id)});
   hub.active=provider;
@@ -83,6 +85,30 @@ export class ConversationAgentHub extends EventEmitter{
   entry.hub=hub;this.entries.set(id,entry);
   if(threadId!==null)this.byThread.set(key(provider,threadId),entry);
   return entry;
+ }
+
+ questionScope(entry,threadId,turnId){
+  const {provider}=entry,owner=entry.hub.contexts.get(provider);
+  const checkCurrent=()=>!!owner&&!entry.closed&&entry.threadId===threadId&&entry.turnId===turnId&&
+   owner.threadId===threadId&&entry.hub.contexts.get(provider)===owner;
+  return {...owner,provider,threadId,sessionId:entry.id,checkCurrent};
+ }
+ bindQuestion(entry,event){
+  const {threadId,turnId,questions}=event.params;
+  if(!turnId||!Array.isArray(questions)||!this.options.bindResourceQuestion)return;
+  const scope=this.questionScope(entry,threadId,turnId);
+  if(!scope.checkCurrent())return;
+  const bindings=[];
+  for(const q of questions){
+   // The dedicated DeepSeek resource picker confirms its typed candidate IDs in DshBridge.
+   if(!q||typeof q.id!=='string'||typeof q.question!=='string'||q.isSecret||q.multiSelect||
+    entry.provider==='deepseek'&&q.id.startsWith(DSH_RESOURCE_QUESTION_PREFIX)||!Array.isArray(q.options)||
+    !q.options.length||!q.options.every(option=>typeof option?.label==='string'))continue;
+   const confirm=this.options.bindResourceQuestion(scope,{question:q.question,labels:q.options.map(option=>option.label)});
+   if(confirm)bindings.push({id:q.id,confirm});
+  }
+  // Several independent resource selections need separate actions and scopes.
+  if(bindings.length===1)this.resourceQuestions.set(event,bindings[0]);
  }
 
  entry(provider,threadId){
@@ -186,7 +212,10 @@ export class ConversationAgentHub extends EventEmitter{
    entry.requests.clear();
   }
   if(event.method==='studio/codexDisconnected'){entry.turnId=null;entry.requests.clear();}
-  if(event.id!==undefined&&threadId)entry.requests.set(String(event.id),tagged);
+  if(event.id!==undefined&&threadId){
+   entry.requests.set(String(event.id),tagged);
+   if(event.method==='item/tool/requestUserInput')this.bindQuestion(entry,tagged);
+  }
   if(event.method==='serverRequest/resolved')entry.requests.delete(String(params.requestId));
   this.emit('event',tagged);this.publishState(entry);
  }
@@ -280,8 +309,13 @@ export class ConversationAgentHub extends EventEmitter{
  }
  respond(provider,threadId,id,result){
   const entry=this.byThread.get(key(provider,threadId));
-  if(!entry?.requests.has(String(id)))throw Error('Agent request no longer belongs to this conversation');
-  const value=entry.hub.respond(provider,id,result);entry.requests.delete(String(id));return value;
+  const request=entry?.requests.get(String(id));
+  if(!request)throw Error('Agent request no longer belongs to this conversation');
+  const binding=this.resourceQuestions.get(request),answer=binding&&result?.answers?.[binding.id]?.answers;
+  const value=entry.hub.respond(provider,id,result);
+  entry.requests.delete(String(id));
+  if(binding&&Array.isArray(answer)&&answer.length===1)binding.confirm(answer[0]);
+  return value;
  }
  account(provider){
   const entry=this.scope.getStore()||this.foreground,bridge=entry?.hub.codex;

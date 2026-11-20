@@ -12,7 +12,7 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-本次交付的源码位于本地 Git 标签 `v0.1.25`。Windows 安装包位于 `release/v0.1.25/AIMatterLab-0.1.25-win-x64-setup.exe`。首次安装时选择一个可写目录，升级原安装时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。便携用户可以解压同目录中的 Windows ZIP。[项目提示词和用户技能](docs/project-skill-workspace.md)
+原始 0.1.25 对应本地 Git 标签 `v0.1.25` 和 `release/v0.1.25/` 中的安装包。保留相同版本号的资源选择补丁安装包位于 `release/v0.1.25/dialog-target/`，可在[验收记录](docs/releases/aimatterlab-0.1.25.md#同版本资源选择补丁)核对摘要。首次安装时选择一个可写目录，升级原安装时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。便携用户可以解压同目录中的 Windows ZIP。[项目提示词和用户技能](docs/project-skill-workspace.md)
 
 从源码安装 0.1.25 时，可以把[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词交给本机 Agent。安装过程核对本地仓库标签、依赖锁和选定的计算环境。
 

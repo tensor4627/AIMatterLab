@@ -88,6 +88,61 @@ test('DeepSeek can inspect queues on the only hosted SSH target in an ordinary c
  assert.equal(f.calls.filter(call=>call==='/api/ssh-service/inspect-scheduler').length,2);
 });
 
+test('scanning a cluster directory offers a real picker, and a completed selection permits one terminal acquisition',async t=>{
+ const f=fixture(t),resource_id=await f.host('primary','实验室');
+ f.speak('扫描一下我集群 ~/workfile 文件夹下跑过的任务，整理运行环境');
+ await f.gateway.call('list_compute_resources',{},f.scope);
+ const acquire=()=>f.gateway.call('acquire_compute_resource',{resource_id,access:'terminal'},f.scope);
+ const receipt=await acquire();
+ assert.equal(receipt.status,'choice_required');assert.deepEqual(receipt.candidates.map(c=>c.resourceId),[resource_id]);
+ assert.equal(f.shellRequests.length,0);
+ assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered:[resource_id],resourceId:resource_id}),resource_id);
+ assert((await acquire()).terminal.sessionId);
+ assert.equal((await acquire()).reused,true);
+ assert.equal(f.shellRequests.filter(call=>call.op==='open').length,1);
+});
+
+test('ordinary dialog answers bind the displayed name and ID to the inventory from the same turn',async t=>{
+ const f=fixture(t),a=await f.host('primary','训练机'),b=await f.host('other','备用机');
+ const yes='使用「训练机」('+a+')',no='先不连，只看扫描方案';
+ const question={question:'扫描目录需要集群的终端，确认使用它吗？',labels:[yes,no,'使用「训练机」('+b+')','不要使用「备用机」('+b+')']};
+ const scope=f.scope;
+ f.speak('整理我的计算目录');
+ assert.equal(f.manager.bindResourceQuestion(scope,question),null);
+ await f.gateway.call('list_compute_resources',{},scope);
+ const confirm=f.manager.bindResourceQuestion(scope,question);
+ for(const label of question.labels.slice(1))assert.equal(confirm(label),null);
+ assert.equal(confirm('使用另一个资源'),null);
+ assert.equal(f.manager.bindResourceQuestion(scope,{question:'要排除哪个集群？',labels:[yes]}),null);
+ assert.equal(f.manager.capture(scope.provider,scope.threadId).resources.length,0);
+ assert.equal(confirm(yes),a);assert.equal(f.shells.size,0);
+ const lease=await f.gateway.call('acquire_compute_resource',{resource_id:a,access:'terminal'},scope);
+ assert.equal(lease.resource.resourceId,a);assert(lease.terminal.sessionId);
+ assert.equal((await f.gateway.call('acquire_compute_resource',{resource_id:b,access:'terminal'},scope)).retry.resource_id,a);
+ assert.equal(f.shells.size,1);
+});
+
+test('an ordinary dialog cannot release an excluded, replaced, revoked, ambiguous or foreign target',async t=>{
+ const f=fixture(t),id=await f.host('primary','甲');
+ const labels=['Use “甲” ('+id+')','只看方案'],question={question:'Which cluster should be used?',labels};
+ const scope={...f.scope,projectId:'project'};
+ async function offer(text='扫描我集群的目录'){
+  f.speak(text,scope);await f.gateway.call('list_compute_resources',{},scope);return f.manager.bindResourceQuestion(scope,question);
+ }
+ let confirm=await offer('不要使用甲');assert.equal(confirm(labels[0]),null);
+ confirm=await offer();f.speak('新的问题',scope);assert.equal(confirm(labels[0]),null);
+ confirm=await offer();await f.manager.revokeConnection({connectionId:'connection-primary'});await f.host('primary','甲','changed.invalid');
+ assert.equal(confirm(labels[0]),null);
+ confirm=await offer();f.setAllowed('project','primary',false);
+ assert.equal(confirm(labels[0]),id);
+ await assert.rejects(f.gateway.call('acquire_compute_resource',{resource_id:id,access:'terminal'},scope),/project_grant_required/);
+ const other={...scope,threadId:'different'};f.speak('你好',other);
+ await assert.rejects(f.gateway.call('acquire_compute_resource',{resource_id:id,access:'terminal'},other),/instruction_required/);
+ await f.host('second','甲');await offer();
+ assert.equal(f.manager.bindResourceQuestion(scope,{question:'选择哪个集群？',labels:['甲','暂不连接']}),null);
+ assert.equal(f.shellRequests.length,0);
+});
+
 test('the trusted resource picker settles a current conversation choice and preserves the acquisition checks',async t=>{
  const f=fixture(t),a=await f.host('a','示例甲'),b=await f.host('b','示例乙');
  const acquire=args=>f.gateway.call('acquire_compute_resource',args,f.scope);

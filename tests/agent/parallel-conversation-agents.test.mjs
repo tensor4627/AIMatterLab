@@ -124,6 +124,26 @@ test('a plain fresh conversation opens and prompts without a selected resource o
  assert.match(JSON.stringify(bridge.messages.get(started.thread.id)),/Use list_compute_resources/);
 });
 
+for(const [provider,threadId] of [['codex','alpha'],['deepseek','gamma']])test(provider+' composer selection is bound to the accepted question and its original turn',async t=>{
+ const f=fixture(),submitted=[];t.after(()=>f.agents.close());
+ const label='使用「测试机」(ssh:fixture)';
+ f.agents.options.bindResourceQuestion=(scope,question)=>{
+  assert.equal(scope.threadId,threadId);assert(scope.checkCurrent());assert.deepEqual(question.labels,[label,'只看方案']);
+  return value=>{if(scope.checkCurrent()&&value===label)submitted.push(value);};
+ };
+ await f.select(provider,threadId);const b=await f.activate(provider,threadId);await f.send(provider,threadId);
+ const emit=(id,turnId='turn-'+threadId)=>b.emit('event',{id,method:'item/tool/requestUserInput',params:{threadId,turnId,
+  questions:[{id:'answer',question:'使用哪个集群？',options:[{label},{label:'只看方案'}]}]}});
+ const answer={answers:{answer:{answers:[label]}}};
+ emit(100,'stale-turn');f.agents.respond(provider,threadId,100,answer);assert.deepEqual(submitted,[]);
+ emit(101);const view=await f.agents.rpc(provider,'thread/read',{threadId,includeTurns:true});
+ assert.doesNotThrow(()=>structuredClone(view.studioSession.requests));assert.deepEqual(submitted,[]);
+ const respond=b.respond;b.respond=()=>{throw Error('Provider rejected this answer');};
+ assert.throws(()=>f.agents.respond(provider,threadId,101,answer),/rejected/);assert.deepEqual(submitted,[]);
+ b.respond=respond;f.agents.respond(provider,threadId,101,answer);assert.deepEqual(submitted,[label]);
+ assert.throws(()=>f.agents.respond(provider,threadId,101,answer),/no longer belongs/);
+});
+
 test('same-provider and cross-provider turns keep independent processes, scope, questions and interrupt ownership',async t=>{
  const f=fixture();t.after(()=>f.agents.close());
  await f.select('codex','alpha');

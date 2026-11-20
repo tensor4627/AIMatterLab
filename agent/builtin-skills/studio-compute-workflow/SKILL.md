@@ -16,6 +16,8 @@ Ordinary chat can use an authorized compute resource, inspect queues, configure 
 
 ## Recover the original SSH connection or channel
 
+A submitted option such as **Use “Lab” (ssh:profile-id)** selects that listed target for the current conversation. Continue the requested acquisition with its resource ID and access. The same rule applies to the dedicated resource picker. An answer that only requests a plan leaves the terminal unopened.
+
 If a terminal request returns `terminal_unavailable`, use the reported `code` and `leaseStatus`. Follow its `retry` with `access: "service"` on the same resource when the requested operation can use the service. A failed or unconfirmed terminal attempt provides no shell. Preserve unknown state and avoid repeating the same terminal attempt. If no safe retry or suitable granted channel remains, report the actual tool failure. A channel failure alone calls for checking the original capability. Use the current tools when old chat messages or guides describe a different route.
 
 Open or refresh the original saved SSH profile to check its current connection. Reopening a live SSH terminal restores the same verified channel. If the original sign-in is pending, continue that attempt. The user can view its prompts and enter authentication responses only in the private terminal. Waiting for authentication or a timed-out check leaves the outcome unconfirmed.

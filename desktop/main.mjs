@@ -265,6 +265,10 @@ if(projectSkills.overlapsBundle(projectSkills.root)){
 agents=new ConversationAgentHub({authCodex:codex,createCodex,initialProvider:settings.agentProvider||'codex',
  runSession:(identity,run)=>workflowContext.runInSession(identity,run),dropSession:id=>{resourceRouting.releaseSession(id);workflowContext?.dropSession(id);},instructions:workspaceAgentInstructions(workspace,projectSkills.personalDirectory),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,
  confirmResourceChoice:(scope,answer)=>workflowContext.runForScope(scope,()=>managedResources.confirmQuestionChoice(scope,answer)),
+ bindResourceQuestion:(scope,question)=>{
+  const checkCurrent=()=>workflowContext.sessionScopeCurrent(scope);
+  return checkCurrent()?managedResources.bindResourceQuestion({...scope,checkCurrent},question):null;
+ },
  worker:(provider,sessionId)=>resourceRouting.sessionConnection(provider,sessionId,workflowContext),
  releaseWorker:(provider,sessionId)=>{worker.revokeProvider(provider,sessionId);terminalMcp?.revokeProvider(provider,sessionId);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method,context,sessionId)=>resourceRouting.scope(provider,method,context,sessionId)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
