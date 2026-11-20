@@ -19,7 +19,8 @@ function fields(value,expected) {
 }
 export function createManagedWorkbench({catalog,profiles,registration,terminal,projectSkills,resourceActivity,projectAccess,
  records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{},
- worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,developerCompute,hostedServiceReplaced}) {
+ worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,developerCompute,hostedServiceReplaced,
+ onConnectionLost,onConnectionReplaced}) {
   const delegations=createScheduleDelegations(catalog),runIntents=createRunActionIntents();
   let schedules;
   const named=notice=>({...notice,resourceName:resourceActivity.label(notice.profileId)||notice.profileId});
@@ -50,7 +51,11 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   }
   const resources=createManagedComputeResources({terminal,profiles,selectionCatalog:catalog,aliases:createManagedComputeAliases({projectSkills}),
     services:createManagedComputeServices({connections:terminal.connections,registration,source:workerSource,transportSource:sshTransportSource}),
-    resourceWorkspace,serviceRegistration:registration,terminalAuthorization,developerCompute,
+    resourceWorkspace,serviceRegistration:registration,terminalAuthorization,developerCompute,onConnectionLost,onConnectionReplaced,
+    restoreOwner:({provider,threadId})=>{
+      if(records.deleted(provider,threadId)||!records.conversation(provider,threadId)&&!records.bound(provider,threadId))return null;
+      return workflow.currentFor(provider,threadId);
+    },
     taskSource:scope=>taskWorkerSource(records.bound(scope.provider,scope.threadId)),
     authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),
     terminalPolicyRevision:(scope,resource)=>projectAccess.terminalRevision(scope,resource),
@@ -99,7 +104,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   function snapshot() {
     const published=resources.snapshot().map(row=>{
       const detail=descriptor(row),style=resourceActivity.style(row);
-      return {...row,color:style.color,serviceReady:row.serviceStatus==='ready',terminalReady:row.kind==='ssh',
+      return {...row,color:style.color,serviceReady:!row.verificationPending&&row.serviceStatus==='ready',terminalReady:!row.verificationPending&&row.kind==='ssh',
         authorizedProjects:projectAccess.projects(detail)};
     });
     return {...resourceActivity.snapshot({resources:published,sources:schedules.snapshot().sources,turns:agents.turnStates(),tasks:records.tasks().map(taskForRecordIndex)}),notices:attention.list().map(named)};

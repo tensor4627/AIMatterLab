@@ -412,7 +412,13 @@ worker.setResourceUseGuard?.(async(provider,scope,toolName)=>{
  if(selected?.kind==='ssh-terminal'||worker.identity?.kind==='ssh')return selected?.kind==='ssh-terminal'&&terminalTool&&scope?.provider===provider&&sharedTerminal.hasCurrentGrant(provider,selected.sessionId)===true;
  return true;
 });
-const sshConnectionRoutes=registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,onClosing:connectionId=>{managedResources?.revokeConnection({connectionId});conversationTerminals.releaseConnection(connectionId);workspaceTerminalAuthorization.revokeConnection(connectionId);sshService.connectionLost(connectionId);},onClosed:connectionId=>{managedResources?.confirmConnectionClosed?.(connectionId);sshService.connectionClosed(connectionId);},onUnknown:connectionId=>{workspaceTerminalAuthorization.revokeConnection(connectionId);sshService.connectionLost(connectionId);},onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
+const sshConnectionRoutes=registerSshConnectionRoutes({handle,connections:sharedTerminal.connections,
+ onOpening:value=>managedResources?.noteLogin(value),
+ onAuthenticated:(ref,loginRequestId)=>managedResources?.restoreHosted(ref,loginRequestId),
+ onClosing:connectionId=>{managedResources?.revokeConnection({connectionId});conversationTerminals.releaseConnection(connectionId);workspaceTerminalAuthorization.revokeConnection(connectionId);sshService.connectionLost(connectionId);},
+ onClosed:connectionId=>{managedResources?.confirmConnectionClosed?.(connectionId);sshService.connectionClosed(connectionId);},
+ onUnknown:connectionId=>{workspaceTerminalAuthorization.revokeConnection(connectionId);sshService.connectionLost(connectionId);},
+ onChange:params=>{emit('studio:event',{method:'studio/sshConnectionChanged',params});emit('studio:event',{method:'studio/computeResourceChanged'});}});
 handle('compute.sshService.registration',value=>{
  const registration=serviceRegistration.read(value);
  return {...registration,localProjectSkillsRoot:projectSkills.root};
@@ -505,6 +511,10 @@ const runToolScope=(scope,run)=>agents.runForScope(scope,()=>workflowContext.run
 worker.setToolScope(runToolScope);
 managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,registration:serviceRegistration,terminal:sharedTerminal,projectSkills,resourceActivity,
  resourceWorkspace,terminalAuthorization:workspaceTerminalAuthorization,developerCompute,
+ onConnectionLost:connectionId=>{workspaceTerminalAuthorization.revokeConnection(connectionId);sshService.connectionLost(connectionId);},
+ onConnectionReplaced:(previous,next)=>{
+  if(computeResource.replaceHostedConnection(previous,next))emit('studio:event',{method:'studio/computeResourceChanged'});
+ },
  hostedServiceReplaced:value=>{if(sshService.hostedServiceReplaced(value))emit('studio:event',{method:'studio/computeResourceChanged'});},
  projectAccess:projectTerminalAccess,records:taskRecords,workflow:workflowContext,agents,privateAccess,workerSource,sshTransportSource,handle,
  worker,conversationTerminals,closeSsh:sshConnectionRoutes.closeExact,assertConnectionIdle:target=>{
@@ -526,6 +536,7 @@ managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,regist
   try{alert.show();}catch{attentionBalloons.delete(alert);}
  }});
 managedResources=managedWorkbench.resources;managedSchedules=managedWorkbench.schedules;
+void managedResources.restorePublished();
 const resourceToolSetups=createResourceToolController({
  resources:managedResources,workspaces:resourceWorkspace,skills:projectSkills,developerCompute,current:()=>workflowContext.revision(),
  emit:params=>emit('studio:event',{method:'studio/resourceToolSetupChanged',params}),

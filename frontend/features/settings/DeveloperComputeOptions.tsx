@@ -3,7 +3,7 @@ import {t} from '../../ui/i18n';
 
 export default function DeveloperComputeOptions({value,onChange}:{value?:string|null;onChange:(id:string|null)=>void}) {
   const {resources}=useManagedResources();
-  const hosts=resources.filter(row=>row.kind==='ssh'&&row.workspace);
+  const hosts=resources.filter(row=>row.kind==='ssh'&&row.workspace&&!row.verificationPending);
   return <details className="settings-advanced" data-testid="developer-compute-options">
     <summary>{t('开发人员选项')}</summary>
     <label>{t('高权限模式')}

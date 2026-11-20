@@ -73,6 +73,7 @@ const connectionErrors:Record<string,string>={
  managed_compute_authentication_required:'托管需要已核验的 SSH 登录。请刷新并核对当前终端的登录状态。',
  managed_compute_profile_changed:'保存的连接版本已变化。请在连接设置中核对原配置。',
  managed_compute_profile_already_published:'此配置已有受托管的 SSH 连接。请从计算资源中打开已托管的连接。',
+ managed_compute_recovery_pending:'原托管连接状态尚待核对，本次 SSH 登录已保留。',
  managed_compute_invalid_request:'托管请求未通过核验。请刷新并核对当前 SSH 连接。',
 };
 export function sshConnectionCode(error:unknown){const value=error as {code?:unknown;message?:unknown}|null;for(const source of [value?.code,value?.message,String(error)]){const code=String(source??'').slice(0,4096).match(/\b(?:ssh_|terminal_|compute_profile_|compute_resource_|managed_compute_)[a-z_]{1,80}\b/)?.[0];if(code)return code;}return '';}

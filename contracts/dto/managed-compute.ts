@@ -5,6 +5,7 @@ export type BadgeMotion = 'wave' | 'breathe';
 export interface ManagedResource {
   resourceId:string; profileId:string; name:string; kind:'ssh'|'wsl'|'local';
   connectionId?:string; profileVersion?:number; color?:number;
+  verificationPending?:boolean;
   serviceStatus?:'idle'|'preparing'|'ready'|'configuration_required'|'unavailable';
   serviceReady?:boolean; terminalReady?:boolean; authorizedProjects?:string[];
   workspace?:ResourceWorkspaceLocation;

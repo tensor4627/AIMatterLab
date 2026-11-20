@@ -11,16 +11,25 @@ const body=method=>method==='open'?{profileId:'profile',profileVersion:1,request
 test('each new privileged route uses actual main sender validation and retains human-only authentication entry points',async()=>{
  const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'utf8'),tree=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS),declarations=tree.statements.filter(node=>ts.isFunctionDeclaration(node)&&['handle','trusted'].includes(node.name?.text)).map(node=>node.getText(tree));
  let registration;function visit(node){if(ts.isCallExpression(node)&&node.expression.getText(tree)==='registerSshConnectionRoutes')registration=node.getText(tree);ts.forEachChild(node,visit);}visit(tree);assert.equal(declarations.length,2);assert(registration);
- const handlers=new Map(),calls=[],events=[],service={connectionLost:id=>calls.push({method:'serviceUnknown',id}),connectionClosed:id=>calls.push({method:'serviceClosed',id})},connections=Object.fromEntries(names.map(method=>[method,async value=>{calls.push({method,value});return method==='list'?{connections:[]}:{connectionId:value.connectionId||'new-connection',...method==='close'?{status:'closed',closed:true}:{}};}]));
+ const handlers=new Map(),calls=[],events=[],service={connectionLost:id=>calls.push({method:'serviceUnknown',id}),connectionClosed:id=>calls.push({method:'serviceClosed',id})},connections=Object.fromEntries(names.map(method=>[method,async value=>{
+  calls.push({method,value});
+  if(method==='list')return {connections:[]};
+  if(method==='completeLogin')return {connection:{connectionId:value.connectionId,profileId:'profile',profileVersion:1,loginRequestId:value.requestId,
+   status:'authenticated',authentication:'verified',capabilities:{multiplex:true}}};
+  return {connectionId:value.connectionId||'new-connection',...method==='close'?{status:'closed',closed:true}:{}};
+ }]));
  const context={registerSshConnectionRoutes,ipcMain:{handle:(name,fn)=>handlers.set(name,fn)},sharedTerminal:{connections},sshService:service,
-  managedResources:{revokeConnection:({connectionId:id})=>calls.push({method:'resourceRevoked',id})},conversationTerminals:{releaseConnection:id=>calls.push({method:'releaseConversation',id})},
-  workspaceTerminalAuthorization:{revokeConnection:id=>calls.push({method:'workspaceRevoked',id})},
+  managedResources:{revokeConnection:({connectionId:id})=>calls.push({method:'resourceRevoked',id}),
+   noteLogin:value=>calls.push({method:'noteLogin',value}),restoreHosted:(value,requestId)=>calls.push({method:'restoreHosted',value,requestId})},
+  workspaceTerminalAuthorization:{revokeConnection:id=>calls.push({method:'workspaceRevoked',id})},conversationTerminals:{releaseConnection:id=>calls.push({method:'releaseConversation',id})},
   emit:(_channel,value)=>events.push(value),shuttingDown:false,window:{isDestroyed:()=>false,webContents:{id:41,isDestroyed:()=>false,getURL:()=> 'file:///studio/index.html'}}};
  vm.runInNewContext(declarations.join('\n')+'\n'+registration,context);
  const valid={sender:{id:41,isDestroyed:()=>false},senderFrame:{parent:null,url:'file:///studio/index.html'}};
  for(const method of names){const route=handlers.get('studio:compute.sshConnection.'+method);assert(route);for(const change of [{sender:{id:42,isDestroyed:()=>false}},{senderFrame:{parent:{},url:'file:///studio/index.html'}},{senderFrame:{parent:null,url:'https://foreign.invalid'}}])await assert.rejects(route({...valid,...change},body(method)),/Untrusted IPC/);}
  assert.equal(calls.length,0);
  for(const method of names)await handlers.get('studio:compute.sshConnection.'+method)(valid,body(method));
+ assert.equal(calls.filter(call=>call.method==='noteLogin').length,1);
+ assert.equal(calls.filter(call=>call.method==='restoreHosted'&&call.requestId==='shell-request'&&call.value.profileId==='profile').length,1);
  assert.equal(calls.filter(c=>c.method==='authInput').length,1);const close=calls.findIndex(c=>c.method==='close');assert.equal(calls[close-1].method,'serviceUnknown');assert.equal(calls[close+1].method,'serviceClosed');assert.equal(calls[close-4].method,'resourceRevoked');assert.deepEqual(calls[close-2],{method:'workspaceRevoked',id:'connection'});assert(events.some(e=>e.method==='studio/sshConnectionChanged'));
  for(const name of ['authInput','authRead','open','confirm','completeLogin','loginStatus'])assert.equal(Object.hasOwn(SCIENTIFIC_TOOL_ACCESS,'compute.sshConnection.'+name),false);
 });

@@ -9,13 +9,22 @@ export function validateSshConnectionRequest(method,value){
  if('profileVersion' in value&&(!Number.isSafeInteger(value.profileVersion)||value.profileVersion<1)||'cursor' in value&&(!Number.isSafeInteger(value.cursor)||value.cursor<0)||'maxBytes' in value&&(!Number.isSafeInteger(value.maxBytes)||value.maxBytes<1||value.maxBytes>65536)||'data' in value&&(typeof value.data!=='string'||!value.data||Buffer.byteLength(value.data)>8192)||'cols' in value&&(!Number.isSafeInteger(value.cols)||value.cols<10||value.cols>500)||'rows' in value&&(!Number.isSafeInteger(value.rows)||value.rows<2||value.rows>300))throw Error('ssh_connection_invalid_request');
  return value;
 }
-export function registerSshConnectionRoutes({handle,connections,onClosing=()=>{},onClosed=()=>{},onUnknown=()=>{},onChange=()=>{}}){
+export function registerSshConnectionRoutes({handle,connections,onOpening=()=>{},onAuthenticated=()=>{},onClosing=()=>{},onClosed=()=>{},onUnknown=()=>{},onChange=()=>{}}){
  async function operation(method,value){
   validateSshConnectionRequest(method,value);
+  if(method==='open')onOpening(value);
   if(method==='close')onClosing(value.connectionId);
   let result;try{result=await connections[method](value);}catch(error){if(method==='close')onUnknown(value.connectionId);throw error;}
   if(method==='close'){if(result?.status==='closed'&&result.closed===true)onClosed(value.connectionId);else onUnknown(value.connectionId);}
   if(['open','confirm','openShell','close'].includes(method)||method==='completeLogin'&&result?.shell)onChange({method,connectionId:result?.connectionId||value.connectionId});
+  if(['confirm','completeLogin','loginStatus'].includes(method)){
+   const connection=method==='confirm'?result:result?.connection;
+   if(connection?.connectionId===value.connectionId&&connection.status==='authenticated'&&connection.authentication==='verified'&&
+      connection.capabilities?.multiplex===true&&(value.requestId===undefined||connection.loginRequestId===value.requestId)){
+    const {connectionId,profileId,profileVersion,loginRequestId}=connection;
+    void Promise.resolve().then(()=>onAuthenticated({connectionId,profileId,profileVersion},loginRequestId)).catch(()=>{});
+   }
+  }
   return result;
  }
  for(const method of Object.keys(schemas))handle('compute.sshConnection.'+method,value=>operation(method,value));

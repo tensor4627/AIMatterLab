@@ -8,7 +8,7 @@ export function developerComputeAccess({workspaceId, userTurn}) {
     },
     verifyChange(previous, next, published) {
       if (previous === next || !next) return;
-      if (!published.some(item => item.kind === 'ssh' && item.workspace?.workspaceId === next)) {
+      if (!published.some(item => item.kind === 'ssh' && !item.verificationPending && item.workspace?.workspaceId === next)) {
         throw Error('Select a currently hosted SSH workspace for developer tests');
       }
     },

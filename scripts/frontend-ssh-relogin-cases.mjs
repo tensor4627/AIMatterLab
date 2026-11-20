@@ -34,8 +34,13 @@ export async function frontendSshReloginCases({check,out}){
     if(method==='compute.sshConnection.completeLogin'||method==='compute.sshConnection.loginStatus'){
      f.calls.push({method,data});let current=f.sshConnections.find(c=>c.connectionId===data.connectionId);if(current.loginRequestId!==data.requestId)throw Error('ssh_request_changed');
      if(!f.sshAuthenticated)return {connection:current,login:{status:'waiting_authentication'}};
-     f.sshSession??={sessionId:'relogin-shell',connectionId:current.connectionId,name:'Fixture exact shell',kind:'ssh',mode:'interactive',owner:'human',ownerEpoch:1,alive:true,status:'running',resource:{kind:'ssh-connection',connectionId:current.connectionId,profileId:profile.id,profileVersion:1}};
-     current={...current,status:'authenticated',authentication:'verified',terminalSessionIds:[f.sshSession.sessionId],revision:2};f.sshConnections=f.sshConnections.map(c=>c.connectionId===current.connectionId?current:c);return {connection:current,shell:f.sshSession,login:{status:'complete'}};
+     f.sshSession??={sessionId:'relogin-shell-'+current.connectionId,connectionId:current.connectionId,name:'Fixture exact shell',kind:'ssh',mode:'interactive',owner:'human',ownerEpoch:1,alive:true,status:'running',resource:{kind:'ssh-connection',connectionId:current.connectionId,profileId:profile.id,profileVersion:1}};
+     current={...current,status:'authenticated',authentication:'verified',terminalSessionIds:[f.sshSession.sessionId],revision:2};f.sshConnections=f.sshConnections.map(c=>c.connectionId===current.connectionId?current:c);
+     if(f.recoverHosted){
+      f.sshHosted={connectionId:current.connectionId,profileId:profile.id,profileVersion:1,name:profile.name,kind:'ssh',resourceId:'ssh:'+profile.id,serviceStatus:'ready',terminalReady:true};
+      for(const notify of f.events)notify({method:'studio/managedActivity'});
+     }
+     return {connection:current,shell:f.sshSession,login:{status:'complete'}};
     }
     if(method==='compute.sshConnection.authRead'){const state=f.sshConnections.find(c=>c.connectionId===data.connectionId);return {connectionId:state.connectionId,state,output:data.cursor?'':'SYNTHETIC SSH LOGIN> ',cursor:1,dropped:false};}
     if(method==='compute.sshConnection.authResize')return {resized:true};
@@ -44,7 +49,11 @@ export async function frontendSshReloginCases({check,out}){
     if(method==='sharedTerminal.read')return {...f.sshSession,output:data.cursor?'':'SYNTHETIC EXACT SHELL> ',cursor:1,dropped:false};
     if(method==='sharedTerminal.resize')return {accepted:true};
     if(method==='compute.resource.activate'){f.calls.push({method,data});return {...data,schemaVersion:2,status:'selected'};}
-    if(method==='compute.resource.status')return {schemaVersion:2,kind:'ssh-connection',selectionId:'old-selection',connectionId:'previous-desktop',profileId:profile.id,profileVersion:profile.version,status:'unavailable',alive:null,authentication:'not_observed'};
+    if(method==='compute.resource.status'){
+     const restored=f.recoverHosted&&f.sshHosted;
+     return {schemaVersion:2,kind:'ssh-connection',selectionId:'old-selection',connectionId:restored?.connectionId||'previous-desktop',profileId:profile.id,profileVersion:profile.version,
+      status:restored?'selected':'unavailable',alive:restored?true:null,authentication:restored?'verified':'not_observed'};
+    }
     return original(method,data);
    };
    const App=(await import('/frontend/app/App.tsx')).default;window.reloginApp=App;window.testRoot.render(React.createElement(React.StrictMode,null,React.createElement(App)));
@@ -79,6 +88,22 @@ export async function frontendSshReloginCases({check,out}){
   const unrelated=await page.evaluate(()=>window.__test.calls.filter(c=>['task.execute','compute.resource.activate','compute.profiles.save','compute.sshConnection.close','sharedTerminal.close','sharedTerminal.owner'].includes(c.method)||c.method==='agent.rpc'&&c.data.method==='turn/start'));
   assert.equal(unrelated.length,0);
   await page.screenshot({path:path.join(out,'ssh-relogin-reopened-exact-shell.png')});
+  await page.evaluate(()=>{
+   const f=window.__test;
+   f.sshConnections=f.sshConnections.map(connection=>connection.connectionId==='relogin-2'?{...connection,status:'unavailable',authentication:'lost',terminalSessionIds:[],revision:3}:connection);
+   f.sshHosted=null;f.sshSession=null;f.sshAuthenticated=false;f.recoverHosted=true;
+   for(const notify of f.events)notify({method:'studio/sshConnectionChanged'});
+  });
+  await page.getByTestId('ssh-login-retry').click();
+  await page.getByTestId('ssh-login-progress').getByText('请在原终端完成密码或验证码输入。',{exact:true}).waitFor();
+  await page.evaluate(()=>window.__test.sshAuthenticated=true);
+  await page.getByTestId('ssh-managed-status').waitFor();
+  assert.equal(await page.getByTestId('ssh-publish-resource').count(),0);
+  assert.equal(await page.locator('.composer textarea').inputValue(),'Preserve these unsent school connection instructions');
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='compute.managed.publish').length),1);
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='compute.resourceWorkspace.confirm').length),1);
+  assert.equal(await page.evaluate(()=>window.__test.sshHosted.connectionId),'relogin-3');
+  await page.screenshot({path:path.join(out,'ssh-relogin-restored-original-hosting.png')});
  });
 
  await check('ssh-relogin-restores-private-prompt-and-shell-while-completion-is-in-flight',async page=>{
