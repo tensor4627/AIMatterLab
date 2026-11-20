@@ -2,6 +2,7 @@ import {networkProxy,configureNetworkSession} from './platform/network-proxy.mjs
 import {PRODUCT_NAME} from '../contracts/product.mjs';
 import {consoleMessage} from './platform/verification/console-message.mjs';
 import {installManagedTray} from './platform/managed-tray.mjs';
+import {loadRecoverableWorkbench} from './platform/workbench-recovery.mjs';
 import {createConversationActivity} from '../backend/main/compute/conversation-activity.mjs';
 import {managedProjectAccess} from '../backend/main/compute/managed-project-access.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
@@ -182,7 +183,7 @@ function findCodex() {
   return findInstalledCodex();
 }
 function emit(channel,data) {
- if(!window||window.isDestroyed()||window.webContents.isDestroyed())return;
+ if(!window||window.isDestroyed()||window.webContents.isDestroyed()||window.webContents.isCrashed())return;
  if(channel==='studio:event'&&data?.method==='studio/taskUpdated'&&data.params?.task){
   data={...data,params:{...data.params,task:taskForRecordIndex(data.params.task)}};
  }
@@ -792,10 +793,25 @@ window.webContents.on('will-navigate',(event,url)=>{if(url!==window.webContents.
 // The renderer needs no web platform permissions; deny every request explicitly.
 window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
 window.webContents.session.setPermissionCheckHandler(()=>false);
-window.webContents.on('render-process-gone',(_event,details)=>{emit('studio:event',{method:'studio/diagnostic',params:{text:'Renderer process ended ('+(details?.reason||'unknown')+'); reopen the window to continue. No job state was changed.'}});});
 const development=process.env.STUDIO_DEV_URL;
 if(development && !/^http:\/\/127\.0\.0\.1:5173\/?$/.test(development)) throw new Error('Invalid development origin');
-if(development) await window.loadURL(development); else await window.loadFile(path.join(root,'dist','index.html'));
+const loaded=await loadRecoverableWorkbench({
+ window,isQuitting:()=>shuttingDown,
+ load:()=>development?window.loadURL(development):window.loadFile(path.join(root,'dist','index.html')),
+ recordExit:({reason,exitCode})=>{
+  try{fs.writeFileSync(path.join(profileDirectory,'renderer-exit.json'),JSON.stringify({at:new Date().toISOString(),version:app.getVersion(),reason,exitCode})+'\n');}
+  catch{console.error('Could not record renderer exit',reason,exitCode);}
+ },
+ askRetry:async()=>{
+  const en=settings.language==='en',options={type:'warning',title:PRODUCT_NAME,
+   message:en?'The workbench could not be displayed.':'工作台画面未能恢复。',
+   detail:en?'Reload the workbench now, or open it from the tray to try again later.':'可以立即重新加载，也可以稍后从系统托盘打开 AIMatterLab 重试。',
+   buttons:en?['Reload workbench','Later']:['重新加载工作台','稍后重试'],defaultId:0,cancelId:1,noLink:true};
+  const decision=window.isVisible()?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
+  return decision.response===0;
+ }
+});
+if(!loaded||shuttingDown)return;
 performanceTimeline.mark('window-loaded');
 if(verifying){const errors=[];window.webContents.on('console-message',(...args)=>{const {level,message}=consoleMessage(args);if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});await desktopShutdown.run();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());

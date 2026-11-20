@@ -31,6 +31,7 @@ brokerRefusals.set('service_reply_unavailable','terminal_service_unknown');
 brokerRefusals.set('terminal_busy','terminal_service_active');
 brokerRefusals.set('service_start_cancelled','terminal_service_changed');
 codes.add('terminal_login_unknown');
+codes.add('terminal_open_unknown');
 const servicePhases=new Set(['preparing_environment','waiting_python','checking_cache','transferring_transport','transferring_worker','preparing_runtime','starting_worker','checking_health','ready','stopping','returning_terminal']);
 const remoteServiceErrors=new Set(['environment_activation_failed','python_start_failed','python_response_timeout','python_unsupported','sqlite_unavailable','tty_unavailable','invalid_hello','protocol_failed','transport_hash_mismatch','transport_cache_invalid','worker_hash_mismatch','worker_cache_invalid','namespace_unsafe','permission_denied','storage_unavailable','worker_start_timeout','worker_start_failed','worker_identity_unavailable','worker_health_invalid','service_request_unconfirmed','internal_error']);
 for(const code of ['ssh_connection_not_found','ssh_connection_changed','ssh_connection_limit','ssh_authentication_unconfirmed','ssh_authentication_not_pending','ssh_multiplex_unsupported','ssh_native_key_path_required','ssh_remote_terminal_unavailable','ssh_linux_client_namespace_required','ssh_route_requires_review','ssh_master_identity_changed','ssh_master_unavailable','ssh_control_identity_changed','ssh_control_unavailable','ssh_control_timeout','ssh_control_output_limit','ssh_channel_unavailable','ssh_shell_readiness_timeout','ssh_shell_interaction_required','ssh_channel_refused','ssh_close_unconfirmed','ssh_close_cleanup_unconfirmed','ssh_invalid_profile','ssh_client_unavailable']){codes.add(code);brokerRefusals.set(code,code);}
@@ -97,11 +98,11 @@ function descriptorValid(d){
 }
 function localRequest(d,method,route,body){return new Promise((resolve,reject)=>{
  if(!descriptorValid(d)||!/^\/(?:health|shutdown|connections(?:\/open|\/profile\/(?:prepare|commit|abort)|\/[A-Za-z0-9_-]+\/(?:state|confirm|login\/(?:complete|status\/[A-Za-z0-9_-]{1,100})|auth\/(?:read|input|resize)|shell\/open|close|managed-shell\/(?:open|state|read|input|close)|service\/(?:start|state|request|private-request|stop|cancel)))?|sessions(?:\/[A-Za-z0-9_-]+(?:\/(?:state|read|input|resize|owner|close|service\/(?:start|request|stop|cancel|state)))?)?)$/.test(route))return reject(Error('terminal_unavailable'));
- const serviceRoute=route.includes('/service/'),managedRoute=route.includes('/managed-shell/'),loginRoute=route.endsWith('/login/complete'),queuedShellRoute=/^\/sessions\/[^/]+\/(?:input|resize|owner|close)$/.test(route),transportError=()=>{const error=Error(serviceRoute||queuedShellRoute?'terminal_service_unknown':loginRoute?'terminal_login_unknown':'terminal_unavailable');if(serviceRoute||loginRoute||queuedShellRoute||managedRoute)error.terminalRejected=true;return error;};
+ const openRoute=route==='/connections/open',serviceRoute=route.includes('/service/'),managedRoute=route.includes('/managed-shell/'),loginRoute=route.endsWith('/login/complete'),queuedShellRoute=/^\/sessions\/[^/]+\/(?:input|resize|owner|close)$/.test(route),transportError=()=>{const error=Error(openRoute?'terminal_open_unknown':serviceRoute||queuedShellRoute?'terminal_service_unknown':loginRoute?'terminal_login_unknown':'terminal_unavailable');if(openRoute||serviceRoute||loginRoute||queuedShellRoute||managedRoute)error.terminalRejected=true;return error;};
  const data=body===undefined?undefined:JSON.stringify(body),req=http.request(d.origin+route,{method,headers:{Authorization:'Bearer '+d.controlToken,...data?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(data)}:{}}},res=>{
   const chunks=[];let size=0;res.on('data',chunk=>{size+=chunk.length;if(size>(serviceRoute?8*1024*1024+65536:1024*1024)){res.destroy();reject(transportError());}else chunks.push(chunk);});
   res.on('error',()=>reject(transportError()));res.on('aborted',()=>reject(transportError()));res.on('end',()=>{try{const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(res.statusCode===200)return resolve(value);const code=brokerRefusals.get(value?.error);if(code&&[400,403,409,410,413,423,429,502,503].includes(res.statusCode)){const error=Error(code);error.terminalRejected=true;error.noSessionCreated=route==='/sessions/open'&&['session_limit','spawn_failed'].includes(value.error);return reject(error);}}catch{}reject(transportError());});
- });req.on('error',()=>reject(transportError()));req.setTimeout(loginRoute?60000:route.endsWith('/service/start')?630000:route.endsWith('/confirm')?20000:/\/service\/(?:private-)?request$/.test(route)||queuedShellRoute?260000:managedRoute?55000:/\/service\/(stop|cancel)$/.test(route)?15000:5000,()=>{req.destroy();reject(transportError());});if(data)req.write(data);req.end();
+ });req.on('error',()=>reject(transportError()));req.setTimeout(openRoute?45000:loginRoute?60000:route.endsWith('/service/start')?630000:route.endsWith('/confirm')?20000:/\/service\/(?:private-)?request$/.test(route)||queuedShellRoute?260000:managedRoute?55000:/\/service\/(stop|cancel)$/.test(route)?15000:5000,()=>{req.destroy();reject(transportError());});if(data)req.write(data);req.end();
 });}
 const safeState=s=>({id:s.id,sessionId:s.id,kind:s.kind,mode:s.mode,name:s.kind==='ssh'?'SSH terminal':'Local terminal',owner:s.owner,ownerEpoch:s.ownerEpoch,...Number.isSafeInteger(s.humanInputSequence)&&s.humanInputSequence>=0?{humanInputSequence:s.humanInputSequence}:{},...s.outputWait===true?{outputWait:true}:{},alive:s.alive===true,expired:s.expired===true,status:s.expired===true?'expired':s.alive===true?'running':s.alive===false?'exited':'unknown',sequence:s.sequence||0,serviceActive:s.serviceActive===true,serviceStatus:['idle','connecting','connected','disconnected','failed'].includes(s.serviceStatus)?s.serviceStatus:'idle',...Number.isInteger(s.exitCode)?{exitCode:s.exitCode}:{}});
 function stateValid(s){return object(s)&&identifier(s.id)&&['local','ssh'].includes(s.kind)&&['interactive','key'].includes(s.mode)&&['human','agent'].includes(s.owner)&&Number.isSafeInteger(s.ownerEpoch)&&s.ownerEpoch>=0&&typeof s.alive==='boolean';}
@@ -391,7 +392,42 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
   return {connections,sessions,complete:available.length===observed.length&&available.every(item=>item.complete)};
  }
 
- async function connectionOpen(data){typed(data,['profileId','profileVersion','requestId']);if(!identifier(data.profileId)||!identifier(data.requestId)||!Number.isSafeInteger(data.profileVersion)||data.profileVersion<1)fail('terminal_invalid_request');const signature=digest(data),old=connectionOpening.get(data.requestId);if(old){if(old.signature!==signature)fail('terminal_invalid_request');return old.promise;}const profile=readConnectionProfile(data.profileId,data.profileVersion,true),key='connection-'+data.requestId;pendingProfiles.set(key,data.profileId);const promise=(async()=>{await ensure(true,true);readConnectionProfile(data.profileId,data.profileVersion,true);const broker=daemon,value=await api('POST','/connections/open',{...data,profile},broker),view=connectionView(value,broker);const latest=profiles.read({id:data.profileId});if(latest.version!==data.profileVersion){await api('POST','/connections/'+view.connectionId+'/close',{},broker);fail('terminal_saved_connection_changed');}return view;})();connectionOpening.set(data.requestId,{signature,promise});try{return await promise;}finally{pendingProfiles.delete(key);}}
+ async function connectionOpen(data){
+  typed(data,['profileId','profileVersion','requestId']);
+  const {profileId,profileVersion,requestId}=data;
+  if(!identifier(profileId)||!identifier(requestId)||!Number.isSafeInteger(profileVersion)||profileVersion<1)fail('terminal_invalid_request');
+  const signature=digest(data),attempt=connectionOpening.get(requestId)||{signature,broker:null,promise:null};
+  if(attempt.signature!==signature)fail('terminal_invalid_request');
+  if(attempt.promise)return attempt.promise;
+  readConnectionProfile(profileId,profileVersion,true);
+  const key='connection-'+requestId;
+  pendingProfiles.set(key,profileId);
+  connectionOpening.set(requestId,attempt);
+  attempt.promise=(async()=>{
+   // Only the original broker can deduplicate a lost open ACK. If its owned
+   // process has actually exited, its SSH master is no longer reusable.
+   if(attempt.broker&&children.get(attempt.broker.instanceId)?.exited){
+    available.delete(attempt.broker.instanceId);
+    if(daemon===attempt.broker)daemon=null;
+    attempt.broker=null;
+   }
+   if(!attempt.broker){
+    await ensure(true,true);attempt.broker=daemon;
+   }
+   const profile=readConnectionProfile(profileId,profileVersion,true),broker=attempt.broker;
+   const value=await api('POST','/connections/open',{...data,profile},broker);
+   if(value?.profileId!==profileId||value.profileVersion!==profileVersion||value.loginRequestId!==undefined&&value.loginRequestId!==requestId)fail('ssh_connection_changed');
+   const view=connectionView(value,broker);
+   if(profiles.read({id:profileId}).version!==profileVersion){
+    await api('POST','/connections/'+view.connectionId+'/close',{},broker);
+    fail('terminal_saved_connection_changed');
+   }
+   return view;
+  })();
+  try{return await attempt.promise;}
+  catch(error){attempt.promise=null;throw error;}
+  finally{pendingProfiles.delete(key);}
+ }
  async function connectionState(data){const {record,broker}=await connectionBroker(data);if(record.status==='authenticating'){const latest=profiles.read({id:record.profileId});if(latest.version!==record.profileVersion){await api('POST','/connections/'+record.connectionId+'/close',{},broker);connectionKnown.set(record.connectionId,{...record,status:'requires_review',authentication:'lost'});fail('terminal_saved_connection_changed');}}return connectionView(await api('GET','/connections/'+data.connectionId+'/state',undefined,broker),broker);}
  async function connectionOperation(data,operation,keys=[]){typed(data,['connectionId',...keys]);const {record,broker}=await connectionBroker({connectionId:data.connectionId});if(record.status==='authenticating'&&operation!=='close'){try{readConnectionProfile(record.profileId,record.profileVersion,true);}catch(error){const stopped=await api('POST','/connections/'+record.connectionId+'/close',{},broker);connectionView(stopped,broker);throw error;}}const {connectionId,...body}=data,result=await api('POST','/connections/'+connectionId+'/'+operation,body,broker);if(['confirm','close'].includes(operation))return connectionView(result,broker);if(operation==='auth/read'){if(typeof result?.output!=='string'||Buffer.byteLength(result.output)>65536||result.connectionId!==connectionId)fail('terminal_unavailable');return {...result,state:connectionView(result.state,broker)};}return result;}
  async function connectionOpenShell(data){typed(data,['connectionId','requestId']);const {record,broker}=await connectionBroker({connectionId:data.connectionId}),profile=readConnectionProfile(record.profileId,record.profileVersion),proof={profileId:profile.id,version:profile.version,connectionId:record.connectionId,planHash:connectionProfileHash(profile)};const s=await connectionOperation(data,'shell/open',['requestId']);if(s.connectionId!==record.connectionId)fail('terminal_unavailable');remember(s,broker);known.set(s.id,{...known.get(s.id),profile:proof,source:null});catalog?.put?.('shared-terminal',s.id,known.get(s.id));return describe(s);}

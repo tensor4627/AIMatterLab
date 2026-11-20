@@ -18,7 +18,7 @@ type ChannelInput={pending:Promise<void>;locked:boolean;observationEpoch:number}
 type LoginState={status:'waiting_authentication'|'checking'|'complete'|'failed';phase?:'waiting_authentication'|'checking_authentication'|'opening_shell';code?:string};
 type LoginResult={connection:SshConnectionState;shell?:Shell;login?:LoginState};
 type LoginAttempt={completing:boolean;requiresContinue:boolean;completionResult:number};
-type LoginFlow={requestId:string;connectionId:string;attempt:LoginAttempt;observing:boolean;canCheck:boolean;finished:boolean;restoreShell:boolean;restoredAuthenticated?:boolean;originalShellId?:string;shellChosen?:boolean};
+type LoginFlow={requestId:string;connectionId:string;awaitingOpen?:boolean;attempt:LoginAttempt;observing:boolean;canCheck:boolean;finished:boolean;restoreShell:boolean;restoredAuthenticated?:boolean;originalShellId?:string;shellChosen?:boolean};
 type InventoryRefresh={ticket:number;read:number;id:string;scope:string;pending:boolean;servicePending:boolean};
 type Diagnostic={code:string;action:string;message:string;connectionId:string;requestId:string};
 type ShellReadIdentity={connectionId:string;sessionId:string;ownerEpoch:number};
@@ -223,6 +223,11 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
     const prior=old.find(item=>item.connectionId===value.connectionId);
     return prior&&prior.revision>value.revision?prior:value;
    }));
+   const opening=login.current;
+   if(opening.awaitingOpen&&!flight.current&&!requested.exact){
+    const match=listing.connections.find(value=>value.loginRequestId===opening.requestId&&value.profileId===requested.profileId&&value.profileVersion===requested.version);
+    if(match){acceptOpen(opening,match);setInventoryError(null);return;}
+   }
    const listedConnection=listing.connections.find(value=>value.connectionId===id&&value.profileId===requested.profileId&&value.profileVersion===requested.version);
    const known=observedConnection.current;
    const target=listedConnection&&known?.connectionId===id&&known.revision>listedConnection.revision?known:listedConnection;
@@ -287,15 +292,21 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   if(attempt)flow.attempt=attempt;
   else loginAttempts.current.set(key,flow.attempt);
  }
+ function acceptOpen(flow:LoginFlow,value:SshConnectionState){
+  flow.awaitingOpen=false;
+  bindLogin(flow,value);accept(value);setSelected(value.connectionId);setShellId('');setShells([]);
+  setDiagnostic(previous=>previous?.action==='compute.sshConnection.open'&&previous.requestId===flow.requestId?null:previous);
+ }
  async function open(explicit=false){
   await action(async current=>{
    if(!request.profileId||!request.version)throw Error('Saved SSH profile required');
-   if(explicit){login.current=newLoginFlow(crypto.randomUUID());setLoginState(null);setLoginBusy(false);}
+   if(explicit&&!login.current.awaitingOpen){login.current=newLoginFlow(crypto.randomUUID());setLoginState(null);setLoginBusy(false);}
    const flow=login.current;
+   flow.awaitingOpen=true;
    const value=await sshInvoke<SshConnectionState>('compute.sshConnection.open',{profileId:request.profileId,profileVersion:request.version,requestId:flow.requestId});
    if(!current())return;
-   if(!verifiedSshConnection(value)||value.profileId!==request.profileId||value.profileVersion!==request.version||value.loginRequestId!==undefined&&value.loginRequestId!==flow.requestId)throw Error('compute_profile_changed');
-   bindLogin(flow,value);accept(value);setSelected(value.connectionId);setShellId('');setShells([]);
+   if(!verifiedSshConnection(value)||value.profileId!==request.profileId||value.profileVersion!==request.version||value.loginRequestId!==undefined&&value.loginRequestId!==flow.requestId)throw Object.assign(Error('compute_profile_changed'),{action:'compute.sshConnection.open'});
+   acceptOpen(flow,value);
   });
  }
  function resumeConnection(value:SshConnectionState){
@@ -416,6 +427,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const failedConnectionCode=sameLogin&&connection&&['unavailable','requires_review','unsupported'].includes(connection.status)?connection.error?.code:undefined;
  const failureReplacesDiagnostic=failedConnectionCode&&diagnostic&&diagnostic.connectionId===connection?.connectionId&&diagnostic.requestId===login.current.requestId&&['compute.sshConnection.completeLogin','compute.sshConnection.loginStatus'].includes(diagnostic.action)&&['ssh_connection_changed','ssh_authentication_unconfirmed'].includes(diagnostic.code);
  const visibleDiagnostic=failureReplacesDiagnostic?{...diagnostic,code:failedConnectionCode,message:t(sshConnectionMessage(failedConnectionCode))}:diagnostic;
+ const openIssue=login.current.awaitingOpen&&visibleDiagnostic?.action==='compute.sshConnection.open'&&visibleDiagnostic.requestId===login.current.requestId?visibleDiagnostic:null;
  const error=visibleDiagnostic?.code||(sameLogin?connection?.error?.code:undefined);
  const canContinue=!request.exact&&!!connection&&['authenticating','authenticated'].includes(connection.status)&&!login.current.finished&&login.current.attempt.requiresContinue&&!!loginState&&['waiting_authentication','failed'].includes(loginState.status);
  const configure=(section?:"service")=>{const profileId=connection?.profileId||request.profileId,profileVersion=connection?.profileVersion||request.version;if(profileId&&profileVersion)onConfigureSsh?.({profileId,profileVersion,...section?{section}:{}});};
@@ -429,7 +441,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const issues=[
   connectionIssue?{
    id:'ssh-login-error',
-   summary:t(visibleDiagnostic?.action==='compute.managed.publish'?'托管结果待核对':'SSH 连接需要核对'),
+   summary:openIssue?openIssue.message:t(visibleDiagnostic?.action==='compute.managed.publish'?'托管结果待核对':'SSH 连接需要核对'),
    content:<>
     <p>{visibleDiagnostic?.message||t(sshConnectionMessage(connectionIssue))}</p>
     <div className="ssh-diagnostic-meta">
@@ -469,9 +481,9 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   }:null,
  ].filter(issue=>issue!==null);
  const profileName=request.profileName||t('SSH 终端');
- const connectionStatus=connection?.status||'connecting';
- const statusLabel=t(sshStateLabel(connectionStatus))+(connection&&connection.profileVersion!==request.version?' · '+t('原版本连接'):'');
- const canRelogin=!!connection&&['unavailable','closed','requires_review','unsupported'].includes(connection.status);
+ const connectionStatus=openIssue?(openIssue.code==='terminal_open_unknown'?'unknown':'failed'):connection?.status||'connecting';
+ const statusLabel=(openIssue?.code==='terminal_open_unknown'?t('等待登录回执'):t(sshStateLabel(connectionStatus)))+(connection&&connection.profileVersion!==request.version?' · '+t('原版本连接'):'');
+ const canRelogin=!!openIssue&&!request.exact||!!connection&&['unavailable','closed','requires_review','unsupported'].includes(connection.status);
  const canClose=!!connection&&connection.status!=='closed';
  const chooseConnection=!request.exact&&viewCurrent&&!selected&&listed&&candidates.length>1;
  const publishing=pendingAction==='publish';
@@ -503,7 +515,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
      <span className="ssh-host-short-label" aria-hidden="true">{t(publishing?'正在托管…':'托管')}</span>
     </button>)}
    {canContinue&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-continue" data-guide-target="ssh-continue" disabled={busy||loginBusy} onClick={()=>void continueLogin()}>{t('继续原登录')}</button>}
-   {canRelogin&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-retry" disabled={busy} onClick={()=>void open(true)}>{t('重新登录')}</button>}
+   {canRelogin&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-retry" disabled={busy} onClick={()=>void open(true)}>{t(openIssue?'重试':'重新登录')}</button>}
    <div className="ssh-toolbar-actions">
     <button type="button" className="icon-button ssh-toolbar-icon" data-testid="ssh-login-refresh" disabled={busy} aria-label={t('刷新')} title={t('刷新')} onClick={()=>{void refresh();void observeOriginalLogin();}}><RefreshCw size={16} aria-hidden="true"/></button>
     {onConfigureSsh&&<button type="button" className="icon-button ssh-toolbar-icon" data-testid="ssh-edit-connection" data-guide-target="ssh-edit" disabled={busy} aria-label={t('连接设置')} title={t('连接设置')} onClick={()=>configure()}><Settings2 size={16} aria-hidden="true"/></button>}

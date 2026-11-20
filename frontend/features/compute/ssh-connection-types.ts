@@ -6,6 +6,7 @@ export function verifiedSshService(value:unknown,connectionId:string,attemptId?:
 }
 export function verifiedSshConnection(value:unknown):value is SshConnectionState {const v=value as SshConnectionState;return !!v&&v.schemaVersion===2&&typeof v.connectionId==='string'&&!!v.connectionId&&typeof v.profileId==='string'&&Number.isSafeInteger(v.profileVersion)&&Number.isSafeInteger(v.revision)&&['authenticating','authenticated','unavailable','closed','requires_review','unsupported'].includes(v.status)&&['pending','verified','not_observed','lost'].includes(v.authentication)&&typeof v.capabilities?.multiplex==='boolean'&&Array.isArray(v.terminalSessionIds)&&v.terminalSessionIds.every(id=>typeof id==='string')&&Array.isArray(v.serviceIds)&&v.serviceIds.every(id=>typeof id==='string');}
 const connectionErrors:Record<string,string>={
+ terminal_open_unknown:'正在查找这次登录的终端。也可以点击重试，用同一次登录请求取回结果。',
  terminal_login_unknown:'登录完成请求的结果尚未确认。正在只读查看原登录状态，不会重新发送登录请求。',
  terminal_unavailable:'无法读取本机终端通道。请刷新原连接查看状态；原登录不会自动重发。',
  terminal_invalid_request:'原登录请求与当前通道不匹配。请刷新并核对原连接。',

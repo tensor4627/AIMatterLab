@@ -19,7 +19,7 @@ function fixture(options={}){
  let state=options.initial??null,sessions=[],status={connection:pending,login:{status:'waiting_authentication'}},posts=0;const errors=[],resources=[];
  const h=sshUiHarness(file,{props:{visible:true,request:{nonce:'request',profileId:'profile',version:1},resourceScope:'scope-A',provider:'codex',canShare:true,onError:e=>errors.push(e),onResourceChange:value=>resources.push(value),...options.props},invoke:async(method,data)=>{
   if(method==='compute.sshConnection.list')return {connections:state?[state]:[]};
-  if(method==='compute.sshConnection.open'){state=pending;return state;}
+  if(method==='compute.sshConnection.open'){state=options.open?await options.open(data):pending;return state;}
   if(method==='compute.sshService.status')return {schemaVersion:2,status:'disconnected'};
   if(method==='sharedTerminal.list')return {sessions};
   if(method==='compute.sshConnection.completeLogin'){posts++;const result=await (options.complete?options.complete({posts,data}):{connection:pending,login:{status:'waiting_authentication'}});state=result.connection;sessions=result.shell?[result.shell]:[];return result;}
@@ -29,6 +29,27 @@ function fixture(options={}){
  }});
  return {h,errors,resources,setStatus:value=>{status=value;state=value.connection;sessions=value.shell?[value.shell]:[];},observeStatus:value=>{status=value;},postCount:()=>posts};
 }
+test('a delayed open receipt is recovered by request and saved profile, including its private authentication terminal',async()=>{
+ const f=fixture({open:()=>{throw Error('terminal_open_unknown');}}),{h}=f;
+ try{
+  await h.flush();assert.equal(h.id('ssh-connection-status').props.children,'等待登录回执');assert(h.id('ssh-login-retry'));
+  for(const foreign of [{...pending,loginRequestId:'other'},{...pending,profileVersion:2},{...pending,profileId:'other'}]){
+   f.setStatus({connection:foreign});await h.tick(2000);assert(h.id('ssh-login-retry'));
+  }
+  f.setStatus({connection:pending});await h.tick(2000);
+  assert(h.find(n=>n.type?.name==='ChannelTerminal'&&n.props.connection.connectionId==='connection'));
+  assert(!h.find(n=>n.props?.['data-testid']==='ssh-error-code'));assert.equal(h.calls.filter(c=>c.method==='compute.sshConnection.open').length,1);
+  assert.deepEqual(authorizationCalls(h),[]);
+ }finally{h.unmount();}
+});
+test('failure before a connection ID exposes an explicit retry with the original request ID',async()=>{
+ let calls=0;const f=fixture({open:data=>{assert.equal(data.requestId,'request');if(++calls===1)throw Error('terminal_start_failed');return pending;}}),{h}=f;
+ try{
+  await h.flush();assert.equal(h.id('ssh-connection-status').props.children,'失败');assert.equal(h.id('ssh-error-code').props.children,'terminal_start_failed');
+  await h.tick(2000);assert.equal(calls,1);h.click('ssh-login-retry');await h.flush();assert.equal(calls,2);
+  assert.equal(h.id('ssh-connection-status').props.children,'正在认证');assert(!h.find(n=>n.props?.['data-testid']==='ssh-error-code'));assert.deepEqual(authorizationCalls(h),[]);
+ }finally{h.unmount();}
+});
 test('an unknown completion is observed read-only and its late exact shell is adopted without another SSH request',async()=>{
  const f=fixture({complete:()=>{throw Error('terminal_login_unknown');}}),{h}=f;
  try{await h.flush();assert.equal(f.postCount(),1);assert.equal(f.errors[0].code,'terminal_login_unknown');assert.equal(f.errors[0].action,'compute.sshConnection.completeLogin');assert.equal(h.id('ssh-error-code').props.children,'terminal_login_unknown');f.setStatus(complete);h.click('ssh-login-refresh');await h.flush();await h.tick(700);assert.equal(shellChannel(h).props.shell.sessionId,shell.sessionId);assert(h.id('ssh-publish-resource'));assert.equal(f.postCount(),1);assert.equal(f.resources.length,0);assert.deepEqual(publishCalls(h),[]);assert(!h.calls.some(c=>['compute.sshConnection.openShell','sharedTerminal.owner','compute.sshService.owner','compute.sshService.connect'].includes(c.method)));assert.equal(h.calls.filter(c=>c.method==='compute.sshConnection.open').length,1);assert(h.calls.filter(c=>c.method==='compute.sshConnection.loginStatus').every(c=>c.data.requestId==='request'));}finally{h.unmount();}

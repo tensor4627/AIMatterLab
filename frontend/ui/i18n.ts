@@ -155,6 +155,8 @@ const english:Record<string,string> = {
 "托管请求未通过核验。请刷新并核对当前 SSH 连接。":"The hosting request could not be verified. Refresh and review the current SSH connection.",
 "SSH 连接操作":"SSH connection controls",
 "SSH 连接需要核对":"SSH connection needs attention",
+"等待登录回执":"Waiting for sign-in confirmation",
+"正在查找这次登录的终端。也可以点击重试，用同一次登录请求取回结果。":"Looking for the terminal opened by this sign-in. Retry to retrieve the result with the same sign-in request.",
 "终端输出读取失败":"Could not read terminal output",
 "作业服务身份待核对":"Verify job service identity",
 "作业服务需要核对":"Job service needs attention",

@@ -32,7 +32,13 @@ export function multiplexArgs(profile,socket,{master=false,control,tty=false,com
  else{args=['-o','ProxyCommand=/bin/false','-F','/dev/null','-o','ControlMaster=no','-o','ControlPersist=no','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no','-S',socket];args.push(...control?['-O',control]:[tty?'-tt':'-T']);}
  args.push('-l',profile.username,'-p',String(profile.port),profile.host);if(command!==undefined)args.push(command);return [profile.ssh_client,...args];
 }
-function execute(file,args,{timeout=10000,limit=262144}={}){return new Promise((resolve,reject)=>execFile(file,args,{windowsHide:true,encoding:'utf8',timeout,maxBuffer:limit,env:DEFAULT_ENV()},(error,stdout,stderr)=>{if(error&&!Number.isInteger(error.code))return reject(new TerminalFault('ssh_control_unavailable'));resolve({code:error?.code??0,stdout,stderr});}));}
+function execute(file,args,{timeout=10000,limit=262144}={}){
+ return new Promise((resolve,reject)=>execFile(file,args,{windowsHide:true,encoding:'utf8',timeout,maxBuffer:limit,env:DEFAULT_ENV()},(error,stdout,stderr)=>{
+  if(error?.killed)return reject(new TerminalFault('ssh_control_timeout'));
+  if(error&&!Number.isInteger(error.code))return reject(new TerminalFault('ssh_control_unavailable'));
+  resolve({code:error?.code??0,stdout,stderr});
+ }));
+}
 // The wrapper reports the Linux process identity before exec; the control socket
 // must later prove this exact process, client executable, argv and start time.
 const MASTER_WRAPPER='import os,sys,json,base64; a=json.loads(sys.argv[2]); p=os.getpid(); s=open("/proc/self/stat").read().rsplit(")",1)[1].split()[19]; b=open("/proc/sys/kernel/random/boot_id").read().strip(); v={"pid":p,"start":s,"boot":b}; print("__STUDIO_MASTER_"+sys.argv[1]+"__:"+base64.b64encode(json.dumps(v,separators=(",",":")).encode()).decode()+"__STUDIO_MASTER_END_"+sys.argv[1]+"__",flush=True); os.execv(a[0],a)';
@@ -64,7 +70,9 @@ export function createMultiplexHost({platform=process.platform,cwd=process.cwd()
  function python(profile,args){const t=transport(profile);if(t.native)fail('ssh_multiplex_unsupported');return t.prefix.length?{file:t.file,args:[...t.prefix,'/usr/bin/python3',...args],cwd,env:DEFAULT_ENV()}:{file:t.file,args,cwd,env:DEFAULT_ENV()};}
  async function helper(operation,profile,value={}){
   const launch=python(profile,['-I',transport(profile).helper,operation,JSON.stringify({profile:localProfile(profile),...value})]);
-  const result=await run(launch.file,launch.args,{timeout:operation==='prove'?15000:10000});let decoded;try{decoded=JSON.parse(result.stdout);}catch{fail('ssh_control_unavailable');}
+  // The first WSL process may also have to boot its distribution.
+  const timeout=operation==='allocate'?30000:operation==='prove'?15000:10000;
+  const result=await run(launch.file,launch.args,{timeout});let decoded;try{decoded=JSON.parse(result.stdout);}catch{fail('ssh_control_unavailable');}
   if(!decoded?.ok||result.code!==0)fail(/^ssh_[a-z_]+$/.test(decoded?.code||'')?decoded.code:'ssh_control_unavailable');return decoded.value;
  }
  return {

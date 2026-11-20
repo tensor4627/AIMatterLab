@@ -21,6 +21,27 @@ function fixture(t,{unsupported=false,dropLoginAck=false,dropPrepareAck=false,dr
  return {bridge,profiles,profile,draft,manager,processes,sessions,requests,worker,open,ready,select,scope:()=>({...context,checkCurrent:()=>true}),context:()=>context,change:v=>{context={...context,...v};},gate:v=>confirmGate=v,onState:v=>stateHook=v,onOwner:v=>ownerHook=v};
 }
 
+for(const dispatched of [true,false])test('explicit retry of an unconfirmed open uses one broker master, dispatched='+dispatched,async t=>{
+ const f=fixture(t),open=f.manager.open;let attempts=0;
+ f.manager.open=async data=>{
+  if(++attempts===1){
+   if(dispatched)await open(data);
+   throw Object.assign(Error('terminal_open_unknown'),{terminalRejected:true});
+  }
+  return open(data);
+ };
+ const key='same-open';
+ await assert.rejects(f.open(key),/terminal_open_unknown/);
+ const before=await f.bridge.connections.list({});
+ assert.equal(before.connections.length,dispatched?1:0);
+ const [first,second]=await Promise.all([f.open(key),f.open(key)]);
+ assert.equal(first.connectionId,second.connectionId);
+ if(dispatched)assert.equal(first.connectionId,before.connections[0].connectionId);
+ assert.equal(first.loginRequestId,key);
+ assert.equal(f.processes.length,1);assert.equal(attempts,2);
+ await assert.rejects(f.bridge.connections.open({profileId:'other-profile',profileVersion:1,requestId:key}),/terminal_invalid_request/);
+});
+
 test('main human ports hide master authentication from shell inventory, safe state and MCP and return exact schema2 shell metadata',async t=>{
  const f=fixture(t),pending=await f.open(),ref={connectionId:pending.connectionId};assert.equal((await f.bridge.list({})).sessions.length,0);assert((await f.bridge.connections.authRead(ref)).output.includes('PRIVATE_AUTH_PROMPT'));assert(!(JSON.stringify(await f.bridge.connections.list({}))).includes('PRIVATE_AUTH_PROMPT'));await assert.rejects(f.bridge.callTool('compute.sshConnection.authRead',ref,f.scope()),/unknown_operation/);const c=await f.bridge.connections.confirm(ref);assert.equal((await f.bridge.connections.authRead(ref)).output,'');f.select(c);const shell=await f.bridge.connections.openShell({...ref,requestId:'shell'});assert.equal(shell.connectionId,c.connectionId);assert.deepEqual(shell.resource,{kind:'ssh-connection',connectionId:c.connectionId,profileId:f.profile.id,profileVersion:1});assert.equal((await f.bridge.resourceState({sessionId:shell.id})).authentication,'verified');await f.bridge.owner({sessionId:shell.id,ownerEpoch:1,owner:'agent'});assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),true);f.worker.connection={changed:true};f.worker.connectionEpoch++;assert.equal((await f.bridge.callTool('list_shared_terminals',{},f.scope())).sessions[0].id,shell.id);await f.bridge.close({sessionId:shell.id});assert.equal((await f.bridge.connections.state(ref)).authentication,'verified');assert.equal((await f.bridge.connections.list({})).connections.length,1);
 });
