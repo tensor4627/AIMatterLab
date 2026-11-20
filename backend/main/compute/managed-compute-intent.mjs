@@ -18,6 +18,7 @@ const choiceKind='conversation-compute-choice';
 const cancelSelection=/不是资源选择|取消(?:当前)?选择|forget (?:this |the )?selection/iu;
 const freshTargetWording=/改用|换到|换成|切换|选用|指定|另外|别的|\b(?:switch|instead|another)\b/iu;
 const continuation=/^(?:(?:好(?:的)?|嗯|行|请|那就|那|麻烦|帮我|现在|再)\s*[，,]?\s*)*(?:继续|接着|接下来|重试|再试|试试|查一下|查队列|看看队列|看下队列|go ahead\b|please continue\b|continue\b|try again\b|retry\b)/iu;
+const renewLease=/^(?:(?:请|那就|麻烦|你|帮我|现在|可以)\s*)*(?:重新申请|重新获取|恢复|续用)(?:原(?:来的)?|之前的|同一个)?(?:计算资源|终端|服务|SSH)?(?:租约|的租约)[\s。.!！]*$|^(?:please\s+)?(?:renew|reacquire|restore)\s+(?:the\s+|my\s+)?(?:original\s+|existing\s+)?(?:ssh\s+)?(?:resource\s+)?lease[\s.!]*$/iu;
 const resourceLabel=choice=>text(choice.name);
 
 // Resolve a literal resource reference in a human utterance. The operation
@@ -131,8 +132,9 @@ export function createManagedComputeIntent(catalog){
  function saveSelection(key,turn,selected){
   const previous=savedTargets(key,turn);
   const targets=selected.map(item=>{
-   const chatAccess=item.chatAccess??previous.find(old=>sameTarget(old,item))?.chatAccess;
-   return {resourceId:item.resourceId,targetFingerprint:item.targetFingerprint,...chatAccess?.length?{chatAccess}:{}};
+   const old=previous.find(target=>sameTarget(target,item));
+   const chatAccess=item.chatAccess??old?.chatAccess,workspaceId=item.workspaceId??old?.workspaceId;
+   return {resourceId:item.resourceId,targetFingerprint:item.targetFingerprint,...chatAccess?.length?{chatAccess,...workspaceId?{workspaceId}:{}}:{}};
   });
   turn.selection={projectId:turn.projectId,taskId:turn.taskId,targets};
   catalog?.put(choiceKind,key,turn.selection);
@@ -147,7 +149,7 @@ export function createManagedComputeIntent(catalog){
   }
   seen.set(value.turnId,raw);
   if(seen.size>8)seen.delete(seen.keys().next().value);
-  const turn={id:value.turnId,message,seen,pending:null,answer:null,projectId:value.projectId??null,taskId:value.taskId??null,
+  const turn={id:value.turnId,message,seen,pending:null,answer:null,renewLease:renewLease.test(message),projectId:value.projectId??null,taskId:value.taskId??null,
    ...namedChoices(message,candidates,aliases),retained:[]};
   const proposal=previous?.projectId===turn.projectId&&previous?.taskId===turn.taskId?(previous.pending||previous.discovered):null;
   if(proposal){
@@ -167,7 +169,7 @@ export function createManagedComputeIntent(catalog){
    if(obsolete)catalog?.remove(choiceKind,key);
    else {
     turn.selection=prior;
-    if((continuation.test(message)||value.planningMode===true)&&!negativeQuery.test(message)&&!/(?:改|换|选|指定|连接到|用|\buse\b|\bon\b)/iu.test(message))turn.retained=prior.targets;
+    if(turn.renewLease||(continuation.test(message)||value.planningMode===true)&&!negativeQuery.test(message)&&!/(?:改|换|选|指定|连接到|用|\buse\b|\bon\b)/iu.test(message))turn.retained=prior.targets;
    }
   }
   turns.delete(key);
@@ -187,16 +189,18 @@ export function createManagedComputeIntent(catalog){
   const key=computeScopeKey(scope),turn=current(scope);
   if(turn&&(turn.projectId!==(scope.projectId??null)||turn.pending&&!turn.answer))return false;
   const record=turn?turn.selection:catalog?.get(choiceKind,key);
+  const workspaceId=resource.workspaceRegistration?.workspaceId;
   return record?.projectId===(scope.projectId??null)&&Array.isArray(record.targets)&&record.targets.some(target=>
-   sameTarget(target,resource)&&Array.isArray(target.chatAccess)&&target.chatAccess.includes(access))===true;
+   sameTarget(target,resource)&&(!workspaceId||target.workspaceId===workspaceId)&&Array.isArray(target.chatAccess)&&target.chatAccess.includes(access))===true;
  }
  function recordChatChannel(scope,resource,access){
   const key=computeScopeKey(scope),turn=current(scope);
   if(!turn||turn.taskId!==null||scope.taskId||turn.projectId!==(scope.projectId??null))return;
   const previous=savedTargets(key,turn),old=previous.find(target=>sameTarget(target,resource));
-  if(old?.chatAccess?.includes(access))return;
+  const workspaceId=resource.workspaceRegistration?.workspaceId,oldAccess=!workspaceId||old?.workspaceId===workspaceId?old?.chatAccess:undefined;
+  if(oldAccess?.includes(access))return;
   saveSelection(key,turn,[...previous.filter(target=>!sameTarget(target,resource)),
-   {...resource,chatAccess:[...(old?.chatAccess||[]),access]}]);
+   {...resource,workspaceId,chatAccess:[...(oldAccess||[]),access]}]);
  }
  function releaseChannel(scope,resourceId){
   const key=computeScopeKey(scope),turn=current(scope);

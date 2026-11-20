@@ -19,7 +19,8 @@ function fields(value,expected) {
 }
 export function createManagedWorkbench({catalog,profiles,registration,terminal,projectSkills,resourceActivity,projectAccess,
  records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{},
- worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,hostedServiceReplaced}) {
+ worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,hostedServiceReplaced,
+ onConnectionLost,onConnectionReplaced}) {
   const delegations=createScheduleDelegations(catalog),runIntents=createRunActionIntents();
   let schedules;
   const named=notice=>({...notice,resourceName:resourceActivity.label(notice.profileId)||notice.profileId});
@@ -49,7 +50,11 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   }
   const resources=createManagedComputeResources({terminal,profiles,selectionCatalog:catalog,aliases:createManagedComputeAliases({projectSkills}),
     services:createManagedComputeServices({connections:terminal.connections,registration,source:workerSource,transportSource:sshTransportSource}),
-    resourceWorkspace,serviceRegistration:registration,terminalAuthorization,
+    resourceWorkspace,serviceRegistration:registration,terminalAuthorization,onConnectionLost,onConnectionReplaced,
+    restoreOwner:({provider,threadId})=>{
+      if(records.deleted(provider,threadId)||!records.conversation(provider,threadId)&&!records.bound(provider,threadId))return null;
+      return workflow.currentFor(provider,threadId);
+    },
     taskSource:scope=>taskWorkerSource(records.bound(scope.provider,scope.threadId)),
     authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),
     terminalPolicyRevision:(scope,resource)=>projectAccess.terminalRevision(scope,resource),

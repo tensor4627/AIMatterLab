@@ -156,6 +156,7 @@ const english:Record<string,string> = {
 "托管需要已核验的 SSH 登录。请刷新并核对当前终端的登录状态。":"Hosting requires a verified SSH sign-in. Refresh and check the current terminal sign-in.",
 "保存的连接版本已变化。请在连接设置中核对原配置。":"The saved connection version changed. Review the original profile in connection settings.",
 "此配置已有受托管的 SSH 连接。请从计算资源中打开已托管的连接。":"This profile already has a hosted SSH connection. Open the hosted connection from Compute Resources.",
+"原托管连接状态尚待核对，本次 SSH 登录已保留。":"The previous hosted connection is still being checked. Your current SSH sign-in has been kept.",
 "托管请求未通过核验。请刷新并核对当前 SSH 连接。":"The hosting request could not be verified. Refresh and review the current SSH connection.",
 "SSH 连接操作":"SSH connection controls",
 "SSH 连接需要核对":"SSH connection needs attention",

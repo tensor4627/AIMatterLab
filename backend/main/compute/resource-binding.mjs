@@ -75,6 +75,13 @@ export function createComputeResourceBinding({catalog,profiles,terminal,connecti
   if(!equal(previous,selected()))throw Error('compute_resource_selection_changed');catalog.put(KIND,KEY,value);return result;
  }
  function clear(data){exact(data,['selectionId']);if(!id(data.selectionId))throw Error('compute_resource_invalid_request');const value=selected();if(!value||value.selectionId!==data.selectionId)throw Error('compute_resource_selection_changed');intent++;catalog.remove(KIND,KEY);return empty();}
+ function replaceHostedConnection(previous,next){
+  const value=selected();
+  if(!connectionReference(value)||!['connectionId','profileId','profileVersion'].every(key=>value[key]===previous[key])||
+     next.profileId!==previous.profileId||next.profileVersion!==previous.profileVersion||next.connectionId===previous.connectionId||!id(next.connectionId))return false;
+  checkProfile(next);
+  catalog.put(KIND,KEY,{...value,connectionId:next.connectionId});intent++;return true;
+ }
  const ticket=()=>({revision:intent,selection:selected()});
  const assertCurrent=value=>{if(!object(value)||value.revision!==intent||!equal(value.selection,selected()))throw Error('compute_resource_selection_changed');};
  function prepareProfileEnvironmentUpdate({previous,next,sessionIds,connectionIds=[]}){
@@ -91,5 +98,5 @@ export function createComputeResourceBinding({catalog,profiles,terminal,connecti
   const selection=update.selection;if(selection?.profileId===saved.id){if(connectionReference(selection)?!Array.isArray(connectionIds)||!connectionIds.includes(selection.connectionId):!Array.isArray(sessionIds)||!sessionIds.includes(selection.sessionId))throw Error('compute_resource_session_mismatch');catalog.put(KIND,KEY,{...selection,profileVersion:saved.version});intent++;}
   environmentUpdates.delete(receipt);return selected();
  }
- return {activate,status,clear,peek:selected,revision:()=>intent,capture:ticket,assertCurrent,prepareProfileEnvironmentUpdate,assertProfileEnvironmentUpdate,commitProfileEnvironmentUpdate};
+ return {activate,status,clear,replaceHostedConnection,peek:selected,revision:()=>intent,capture:ticket,assertCurrent,prepareProfileEnvironmentUpdate,assertProfileEnvironmentUpdate,commitProfileEnvironmentUpdate};
 }
