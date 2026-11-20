@@ -12,7 +12,9 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-原始 0.1.25 对应本地 Git 标签 `v0.1.25` 和 `release/v0.1.25/` 中的安装包。保留相同版本号的资源选择补丁安装包位于 `release/v0.1.25/dialog-target/`，可在[验收记录](docs/releases/aimatterlab-0.1.25.md#同版本资源选择补丁)核对摘要。首次安装时选择一个可写目录，升级原安装时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。便携用户可以解压同目录中的 Windows ZIP。[项目提示词和用户技能](docs/project-skill-workspace.md)
+正式标签 `v0.1.25` 包含对话框选择集群的修复。Windows x64 发行页提供签名安装包。发布机的同一套制品位于 `release/v0.1.25/dialog-target/`，包括便携 ZIP。早期本机试装版也显示 0.1.25，可用正式版安装包手动升级。[南大 GitLab 发行页](https://git.nju.edu.cn/Tensor4627/AIMatterLab/-/releases/v0.1.25) · [GitHub 发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.1.25) · [版本与校验记录](docs/releases/aimatterlab-0.1.25.md)
+
+首次安装时选择一个可写目录，升级时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。[项目提示词和用户技能](docs/project-skill-workspace.md)
 
 从源码安装 0.1.25 时，可以把[单 prompt 安装说明](docs/one-prompt-install.md)开头的提示词交给本机 Agent。安装过程核对本地仓库标签、依赖锁和选定的计算环境。
 
