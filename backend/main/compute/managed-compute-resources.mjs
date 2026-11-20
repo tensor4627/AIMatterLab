@@ -967,7 +967,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(scheduledSweeps.has(resource))return scheduledSweeps.get(resource);
   const checked=(async()=>{
    try{if(resource.kind==='ssh')await checkConnection(resource);else current(resource);}
-   catch{await remove(resource);return;}
+   catch(error){if(!['ssh_control_timeout','ssh_control_unavailable'].includes(error?.message))await remove(resource);return;}
    const service=resource.service;
    if(service){try{await service.verify();}catch{discardService(resource,service);if(resource.kind!=='ssh')await remove(resource);}}
   })();scheduledSweeps.set(resource,checked);

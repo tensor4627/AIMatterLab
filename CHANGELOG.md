@@ -8,8 +8,11 @@
 - Agent 可在总工作区操作终端，区外写入和执行有独立的输入区确认。
 - 新手引导增加集群实操。对话选择支持逐题点选、数字键和自填回答。
 - 工具配置可查公开软件资料，并使用服务商提供的联网能力。
+- 交互式 SSH 优先显示密码和验证码提示，失败时保留原登录窗口的只读输出。本机核验超时后可继续原登录。
 
 [集群工作流开发版验收记录](docs/releases/aimatterlab-cluster-workflows-unreleased.md)
+
+[交互式 SSH 登录开发验收](docs/releases/aimatterlab-ssh-multilogin-unreleased.md)
 
 ## 0.1.25
 

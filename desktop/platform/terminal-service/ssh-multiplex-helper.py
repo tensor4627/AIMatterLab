@@ -17,6 +17,9 @@ class Refused(Exception):
     pass
 
 
+INTERACTIVE_AUTHENTICATIONS = 'keyboard-interactive,password,publickey,gssapi-with-mic,hostbased'
+
+
 def fail(code):
     raise Refused(code)
 
@@ -66,6 +69,8 @@ def args(profile, socket, master=False, control=None, tty=False):
                   '-o', 'BatchMode=yes' if profile.get('mode')=='key' else 'BatchMode=no', '-o', 'ConnectionAttempts=1', '-o', 'ConnectTimeout=15',
                   '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes', '-o', 'PermitLocalCommand=no',
                   '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2']
+        if profile.get('mode') != 'key':
+            result += ['-o', 'PreferredAuthentications=' + INTERACTIVE_AUTHENTICATIONS]
         if profile.get('proxy_jump'):
             result += ['-J', ','.join(profile['proxy_jump'])]
         if profile.get('identity_file'):
@@ -126,6 +131,8 @@ def describe(profile):
                 'clearallforwardings': {'yes', 'true'}, 'permitlocalcommand': {'no', 'false'},
                 'controlpath': {'/__studio_mux_capability__'}, 'hostname': {profile['host']},
                 'user': {profile['username']}, 'port': {str(profile['port'])}}
+    if profile.get('mode') != 'key':
+        expected['preferredauthentications'] = {INTERACTIVE_AUTHENTICATIONS}
     if any(values.get(key, [''])[0] not in allowed for key, allowed in expected.items()) or values.get('remotecommand', ['none']) != ['none'] or values.get('proxycommand', ['none']) != ['none'] or values.get('proxyjump', ['none']) != [','.join(profile.get('proxy_jump', [])) or 'none']:
         fail('ssh_multiplex_unsupported')
     return {'clientIdentity': client_identity(profile['ssh_client']), 'targetDigest': hashlib.sha256(json.dumps(profile, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}

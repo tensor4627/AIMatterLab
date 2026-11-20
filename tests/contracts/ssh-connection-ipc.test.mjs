@@ -14,13 +14,14 @@ test('each new privileged route uses actual main sender validation and retains h
  const handlers=new Map(),calls=[],events=[],service={connectionLost:id=>calls.push({method:'serviceUnknown',id}),connectionClosed:id=>calls.push({method:'serviceClosed',id})},connections=Object.fromEntries(names.map(method=>[method,async value=>{calls.push({method,value});return method==='list'?{connections:[]}:{connectionId:value.connectionId||'new-connection',...method==='close'?{status:'closed',closed:true}:{}};}]));
  const context={registerSshConnectionRoutes,ipcMain:{handle:(name,fn)=>handlers.set(name,fn)},sharedTerminal:{connections},sshService:service,
   managedResources:{revokeConnection:({connectionId:id})=>calls.push({method:'resourceRevoked',id})},conversationTerminals:{releaseConnection:id=>calls.push({method:'releaseConversation',id})},
+  workspaceTerminalAuthorization:{revokeConnection:id=>calls.push({method:'workspaceRevoked',id})},
   emit:(_channel,value)=>events.push(value),shuttingDown:false,window:{isDestroyed:()=>false,webContents:{id:41,isDestroyed:()=>false,getURL:()=> 'file:///studio/index.html'}}};
  vm.runInNewContext(declarations.join('\n')+'\n'+registration,context);
  const valid={sender:{id:41,isDestroyed:()=>false},senderFrame:{parent:null,url:'file:///studio/index.html'}};
  for(const method of names){const route=handlers.get('studio:compute.sshConnection.'+method);assert(route);for(const change of [{sender:{id:42,isDestroyed:()=>false}},{senderFrame:{parent:{},url:'file:///studio/index.html'}},{senderFrame:{parent:null,url:'https://foreign.invalid'}}])await assert.rejects(route({...valid,...change},body(method)),/Untrusted IPC/);}
  assert.equal(calls.length,0);
  for(const method of names)await handlers.get('studio:compute.sshConnection.'+method)(valid,body(method));
- assert.equal(calls.filter(c=>c.method==='authInput').length,1);const close=calls.findIndex(c=>c.method==='close');assert.equal(calls[close-1].method,'serviceUnknown');assert.equal(calls[close+1].method,'serviceClosed');assert.equal(calls[close-3].method,'resourceRevoked');assert(events.some(e=>e.method==='studio/sshConnectionChanged'));
+ assert.equal(calls.filter(c=>c.method==='authInput').length,1);const close=calls.findIndex(c=>c.method==='close');assert.equal(calls[close-1].method,'serviceUnknown');assert.equal(calls[close+1].method,'serviceClosed');assert.equal(calls[close-4].method,'resourceRevoked');assert.deepEqual(calls[close-2],{method:'workspaceRevoked',id:'connection'});assert(events.some(e=>e.method==='studio/sshConnectionChanged'));
  for(const name of ['authInput','authRead','open','confirm','completeLogin','loginStatus'])assert.equal(Object.hasOwn(SCIENTIFIC_TOOL_ACCESS,'compute.sshConnection.'+name),false);
 });
 test('connection IPC rejects extra fields, injected identities and invalid authentication bounds before dispatch',()=>{

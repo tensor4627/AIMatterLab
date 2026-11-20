@@ -471,6 +471,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const visibleGeometry=geometry&&geometry.connectionId===selected&&geometry.sessionId===shell?.sessionId&&geometry.ownerEpoch===shell?.ownerEpoch?geometry:null;
  const visibleInventory=inventoryError?.id===selected&&inventoryError.scope===resourceScope?inventoryError:null;
  const connectionIssue=error||(sameLogin&&connection?.status==='unsupported'?'ssh_multiplex_unsupported':undefined);
+ const timeoutInLogin=connectionIssue==='ssh_control_timeout';
  const serviceIssue=ready?ownService?.error?.code:undefined;
  const canRepairEnvironment=!!serviceIssue&&['python_start_failed','python_unsupported','sqlite_unavailable','environment_activation_failed','python_response_timeout'].includes(serviceIssue);
  const runtime=ownService?.runtimeComparison;
@@ -500,7 +501,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
     </div>
    </>,
   }:null,
-  visibleReadDiagnostic?{
+  visibleReadDiagnostic&&!(timeoutInLogin&&visibleReadDiagnostic.code==='ssh_control_timeout')?{
    id:'ssh-read-observation',
    summary:t('终端输出读取失败'),
    content:<><p>{visibleReadDiagnostic.message}</p><code data-testid="ssh-read-error-code">{visibleReadDiagnostic.code}</code></>,
@@ -523,7 +524,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    summary:t('终端列表暂未刷新。'),
    content:<code>{visibleInventory.code}</code>,
   }:null,
-  visibleGeometry?{
+  visibleGeometry&&!(visibleGeometry.code==='ssh_control_timeout'&&(timeoutInLogin||visibleReadDiagnostic?.code==='ssh_control_timeout'))?{
    id:'ssh-resize-observation',
    summary:t('终端显示尺寸尚未同步。'),
    content:<code>{visibleGeometry.code}</code>,
@@ -618,7 +619,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
     {selectableShells.map(item=><button type="button" key={item.sessionId} className="button" aria-pressed={item.sessionId===shellId} disabled={busy} onClick={()=>{login.current.shellChosen=true;exactShell.current=undefined;setShellId(item.sessionId);}}>{shellLabel(item)}</button>)}
   </div>}
    {!connection&&!notice&&(!listed||busy)&&<div className="shared-terminal-empty" role="status"><p>{t('正在打开终端…')}</p></div>}
-   {connection?.status==='authenticating'&&<ChannelTerminal key={'auth:'+selected} connection={connection} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={authInput.current} onConnection={acceptAuthObservation} onShell={()=>{}} onError={report}/>}
+   {connection&&(connection.status==='authenticating'||sameLogin&&connection.retainedAuthOutput)&&<ChannelTerminal key={'auth:'+selected} connection={connection} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={authInput.current} onConnection={acceptAuthObservation} onShell={()=>{}} onError={report}/>}
   {ready&&(shell?<ChannelTerminal key={'shell:'+shell.sessionId} connection={connection} shell={shell} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={shellInput.current} onConnection={accept} onShell={next=>setShells(old=>old.map(item=>item.sessionId===next.sessionId&&item.ownerEpoch===next.ownerEpoch?{...item,...next}:item))} onError={report} onReadError={reportRead} onReadSuccess={confirmRead}/>:
     <div className="shared-terminal-empty"><p>{t(loginState?.status==='checking'||!notice&&connection.terminalSessionIds.length>0&&login.current.restoreShell?'正在打开终端…':'当前没有打开的终端。')}</p></div>)}
   {ready&&runtime?.status==='different'&&<details className="ssh-runtime-difference" data-testid="ssh-service-version-difference" data-guide-target="ssh-service-version">

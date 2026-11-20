@@ -225,6 +225,22 @@ test('capacity and connection loss are isolated per host and idle retirement lea
  assert.equal(f.shells.size,0);
 });
 
+test('an uncertain SSH proof leaves a published resource and its existing lease intact',async t=>{
+ const f=fixture(t),{manager,owner}=f;
+ await Promise.all([f.publish('A'),f.publish('B')]);
+ f.turn(owner,'用材料中心');await manager.acquire(owner,{resourceId:'ssh:A'});
+ const state=f.connections.state;
+ for(const code of ['ssh_control_timeout','ssh_control_unavailable']){
+  f.connections.state=async value=>{if(value.connectionId==='conn-A')throw Error(code);return state(value);};
+  await manager.sweep({idleMs:60000});
+  assert.deepEqual(manager.snapshot().map(value=>value.resourceId),['ssh:A','ssh:B']);
+  assert.equal(f.shells.size,1);assert.equal(f.calls.filter(value=>value.op==='close').length,0);
+  await assert.rejects(f.publish('A'),new RegExp(code));
+ }
+ f.connections.state=state;
+ assert.equal((await f.publish('A')).connectionId,'conn-A');
+});
+
 test('private services verify exact registration, authorize the selected worker projects and preserve original run provenance',async t=>{
  const f=fixture(t),channels=new Map(),packets=[],starts=[];
  const health=id=>({name:'gpu-sampling-studio',execution_policy:'desktop-review-v1',root:'/owned/'+id,port:21000+id.charCodeAt(0),
