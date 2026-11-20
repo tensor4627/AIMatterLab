@@ -14,6 +14,9 @@ const base = {
 
 test('known settings keys are accepted and merged over the current settings',()=>{
  assert.deepEqual(normalizeSettings(base,{}),base);
+ assert.equal(normalizeSettings(base,{developerComputeWorkspaceId:'a'.repeat(64)}).developerComputeWorkspaceId,'a'.repeat(64));
+ assert.equal(normalizeSettings(base,{developerComputeWorkspaceId:null}).developerComputeWorkspaceId,null);
+ for(const invalid of [true,'all','/home/test'])assert.throws(()=>normalizeSettings(base,{developerComputeWorkspaceId:invalid}),/developer compute workspace/);
  assert(SETTINGS_KEYS.includes('resourceBadgeMotion'));
  for(const mode of ['wave','breathe'])assert.equal(normalizeSettings(base,{resourceBadgeMotion:mode}).resourceBadgeMotion,mode);
  assert.throws(()=>normalizeSettings(base,{resourceBadgeMotion:'unknown'}),/badge motion/);

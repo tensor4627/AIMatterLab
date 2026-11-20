@@ -1,6 +1,7 @@
 import {SoftwareUpdate,useWorkspaceUpdate} from "./SoftwareUpdate";
 import product from "../../../contracts/product.json";
 import {MaterialsProjectSettings} from "../assets/MaterialsProject";
+import DeveloperComputeOptions from './DeveloperComputeOptions';
 import {useEffect,useRef,useState} from 'react';
 import {PanelsTopLeft,Palette,Languages,Brain,Server,BookOpen,Save,RefreshCw} from 'lucide-react';
 import {invoke} from '../../api/studio';
@@ -32,6 +33,7 @@ export default function SettingsPage({updates,settings,onChange,onClose,onSaved,
  return <div className="settings-layout"><nav className="settings-nav">{categories.map(([id,label,Icon])=><button key={id} className={category===id?'active':''} aria-current={category===id?'page':undefined} onClick={()=>setCategory(id)}><Icon size={17}/>{t(label)}</button>)}</nav><div className="settings-content">
   <div className="settings-heading"><h2>{t(categories.find(c=>c[0]===category)?.[1]||'设置')}</h2>{category!=='updates'&&<p>{t('按工作习惯配置你的工作台。')}</p>}</div>
   {category==='updates'&&updates&&<SoftwareUpdate {...updates}/>}
+  {category==='agent'&&<DeveloperComputeOptions value={settings.developerComputeWorkspaceId} onChange={developerComputeWorkspaceId=>patch({developerComputeWorkspaceId})}/>}
   {category==='appearance'&&<>
    <label>{t('作业徽记动效')}<select aria-label={t('作业徽记动效')} value={settings.resourceBadgeMotion||'wave'} onChange={e=>patch({resourceBadgeMotion:e.target.value as Settings['resourceBadgeMotion']})}><option value="wave">{t('从左到右的波浪')}</option><option value="breathe">{t('呼吸式明暗')}</option></select></label>
    <label>{t('主题')}<select value={settings.theme} onChange={e=>patch({theme:e.target.value})}><option value="dark">{t('深色石墨')}</option><option value="light">{t('浅色')}</option></select></label>

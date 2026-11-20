@@ -5,6 +5,7 @@ import {installManagedTray} from './platform/managed-tray.mjs';
 import {loadRecoverableWorkbench} from './platform/workbench-recovery.mjs';
 import {createConversationActivity} from '../backend/main/compute/conversation-activity.mjs';
 import {managedProjectAccess} from '../backend/main/compute/managed-project-access.mjs';
+import {developerComputeAccess} from '../backend/main/compute/developer-compute-access.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
 import {createWorkspaceUpdater,launchWorkspaceUpdate} from './platform/workspace-updater.mjs';
 import {createUpdateAccess,validateUpdateSource} from './platform/update-feeds.mjs';
@@ -457,7 +458,9 @@ const resourceWorkspace=createResourceWorkspace({catalog,profiles:computeProfile
  emit:()=>emit('studio:event',{method:'studio/resourceWorkspaceChanged'})});
 for(const method of ['read','preview','confirm','cancel'])handle('compute.resourceWorkspace.'+method,value=>resourceWorkspace[method](value));
 handle('compute.resourceWorkspace.session',value=>resourceWorkspace.forSession(value));
-const workspaceTerminalAuthorization=createWorkspaceTerminalAuthorization({workspace:resourceWorkspace,connections:sharedTerminal.connections,
+const developerCompute=developerComputeAccess({workspaceId:()=>settings.developerComputeWorkspaceId,
+ userTurn:scope=>agents.turnOrigin(scope.provider,scope.threadId)==='human'});
+const workspaceTerminalAuthorization=createWorkspaceTerminalAuthorization({workspace:resourceWorkspace,connections:sharedTerminal.connections,developerCompute,
  current:()=>{const selected=workflowContext.selectedOwner();return {...selected.context,revision:selected.revision+':'+computeResource.revision()};},
  emit:()=>emit('studio:event',{method:'studio/terminalApprovalChanged'})});
 for(const method of ['pending','decide'])handle('compute.terminalApproval.'+method,value=>workspaceTerminalAuthorization[method](value));
@@ -501,7 +504,7 @@ worker.setProjectSkills(projectSkills);
 const runToolScope=(scope,run)=>agents.runForScope(scope,()=>workflowContext.runForScope(scope,run));
 worker.setToolScope(runToolScope);
 managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,registration:serviceRegistration,terminal:sharedTerminal,projectSkills,resourceActivity,
- resourceWorkspace,terminalAuthorization:workspaceTerminalAuthorization,
+ resourceWorkspace,terminalAuthorization:workspaceTerminalAuthorization,developerCompute,
  hostedServiceReplaced:value=>{if(sshService.hostedServiceReplaced(value))emit('studio:event',{method:'studio/computeResourceChanged'});},
  projectAccess:projectTerminalAccess,records:taskRecords,workflow:workflowContext,agents,privateAccess,workerSource,sshTransportSource,handle,
  worker,conversationTerminals,closeSsh:sshConnectionRoutes.closeExact,assertConnectionIdle:target=>{
@@ -524,7 +527,7 @@ managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,regist
  }});
 managedResources=managedWorkbench.resources;managedSchedules=managedWorkbench.schedules;
 const resourceToolSetups=createResourceToolController({
- resources:managedResources,workspaces:resourceWorkspace,skills:projectSkills,current:()=>workflowContext.revision(),
+ resources:managedResources,workspaces:resourceWorkspace,skills:projectSkills,developerCompute,current:()=>workflowContext.revision(),
  emit:params=>emit('studio:event',{method:'studio/resourceToolSetupChanged',params}),
  chooseFile:async (event,kind)=>{
   trusted(event);
@@ -633,9 +636,17 @@ handle('diagnostics.performance',value=>{
 });
 handle('settings',data=>{
  const next=normalizeSettings(settings,data);
+ const previousDeveloperWorkspace=settings.developerComputeWorkspaceId??null;
+ const nextDeveloperWorkspace=next.developerComputeWorkspaceId??null;
+ if(previousDeveloperWorkspace!==nextDeveloperWorkspace)developerCompute.verifyChange(previousDeveloperWorkspace,nextDeveloperWorkspace,managedResources.snapshot());
  next.userCacheDirectory=projectSkills.prepareRoot(next.userCacheDirectory||defaultUserCacheDirectory);
  if(projectSkills.root!==next.userCacheDirectory)rememberSkillCache();
  settings=catalog.put('settings','main',next);workbenchTray?.menu();
+ if(previousDeveloperWorkspace!==nextDeveloperWorkspace){
+  developerCompute.changed(previousDeveloperWorkspace,nextDeveloperWorkspace);
+  managedResources.endDeveloperAccess(previousDeveloperWorkspace);
+  emit('studio:event',{method:'studio/managedActivity'});
+ }
  if(projectSkills.root!==settings.userCacheDirectory){
   projectSkills.root=settings.userCacheDirectory;
   agents.updateInstructions(workspaceAgentInstructions(workspace,projectSkills.personalDirectory));

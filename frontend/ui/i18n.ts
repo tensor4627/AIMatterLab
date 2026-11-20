@@ -1,4 +1,8 @@
 const english:Record<string,string> = {
+  "开发人员选项":"Developer options",
+  "高权限模式":"Elevated compute access",
+  "等待原测试集群重新连接":"Waiting for the selected test cluster to reconnect",
+  "选择已托管的集群并保存，Agent 即可在该工作区测试工具和终端命令。工作区外的写入或执行仍需确认。":"Select a hosted cluster and save to test tools and terminal commands in its workspace. Writes or execution outside the workspace require confirmation.",
   "普通聊天可在项目授权范围内提交你明确委托的独立作业。多步工作流可在参数面板审阅和执行。":"In chat, the Agent can submit an independent job you explicitly request within project permissions. Review and run multi-step workflows in the parameter panel.",
   "Kimi 使用本地 CLI 和设备登录。当前 Qwen 使用「账号与 API」中的 API 配置。":"Kimi uses a local CLI and device sign-in. Configure Qwen through its API profile under Accounts and API.",
   "在「账号与 API」配置 DeepSeek 的开放平台密钥。AIMatterLab 已附带 DSH 运行环境。":"Configure the DeepSeek platform key under Accounts and API. AIMatterLab includes the DSH runtime.",

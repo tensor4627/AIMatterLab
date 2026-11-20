@@ -12,7 +12,7 @@ import {createProjectPolicyEditor} from '../../frontend/features/compute/project
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 
-async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>null}={}){
+async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>null,developerCompute}={}){
  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'aimlab-resource-tools-'));
  t.after(()=>fs.rm(temp,{recursive:true,force:true}));
  const scope={provider:'codex',threadId:'setup-chat',projectId:'project1',checkCurrent:()=>true};
@@ -22,7 +22,7 @@ async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>
   resourceId:String(index+1).repeat(64),workspaceId:String(index+3).repeat(64),profileId:name,account:'same-name',
   root:'/opt/'+name,hostIdentity:{hostname:name,uid:1000,machineId:name}
  }));
- const views=registry.map(({profileId})=>({resourceId:'ssh:'+profileId,profileId,profileVersion:1,kind:'ssh',name:'Lab',connectionId:profileId}));
+ const views=registry.map(({profileId,workspaceId})=>({resourceId:'ssh:'+profileId,profileId,profileVersion:1,kind:'ssh',name:'Lab',connectionId:profileId,workspace:{workspaceId}}));
  const expectedSkill={name:'tool-example-123456789abc',body:'---\nname: tool-example-123456789abc\ndescription: Run this resource tool.\n---\n\nVerified invocation.\n'};
  expectedSkill.sha256=sha(expectedSkill.body);
  const resources={
@@ -52,7 +52,7 @@ async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>
   })),
  };
  let context=1;
- const controller=createResourceToolController({resources,skills,chooseFile,withRelease,confirm,current:()=>context,
+ const controller=createResourceToolController({resources,skills,chooseFile,withRelease,confirm,developerCompute,current:()=>context,
   emit:value=>events.push(value),setTimer:value=>{timers.push(value);return {};},clearTimer:()=>{},
   workspaces:{
    resolveHostedResourceWorkspace:(id,{profileId,hostIdentity})=>registry.find(row=>row.profileId===profileId&&row.hostIdentity.machineId===hostIdentity.machineId&&(!id||id===row.resourceId)),
@@ -71,6 +71,18 @@ async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>
  return {controller:controller.controller,api:controller,scope,skills,rows,calls,views,events,timers,setup,expectedSkill,temp,
   moveContext:()=>context++,ref:(index=0)=>({resource_id:views[index].resourceId,profile_version:1})};
 }
+
+test('an unbound developer conversation can inspect activated tool interfaces in its selected workspace',async t=>{
+ const developerCompute={allows:(_scope,id)=>id==='3'.repeat(64),revision:()=>0};
+ const f=await fixture(t,{developerCompute});f.scope.projectId=null;
+ const here=f.setup('active');f.setup('active',1);
+ const previous=f.setup('active');previous.workspace_id='f'.repeat(64);
+ f.setup('planned');
+ const inventory=await f.api.call('list_resource_tools',{resource_id:'ssh:first'},f.scope);
+ assert.deepEqual(inventory.tools.map(row=>row.id),[here.manifest.id]);
+ assert.equal(JSON.stringify(inventory).includes('project1'),false);
+ await assert.rejects(f.api.call('list_resource_tools',{resource_id:'ssh:second'},f.scope),/authorized project/);
+});
 
 test('resource setup fences a changed confirmation and reserves only accepted exact reviews',async t=>{
  let f,accept=false,move=false;

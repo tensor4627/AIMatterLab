@@ -3,11 +3,41 @@ import assert from 'node:assert/strict';
 import {createResourceWorkspace} from '../../backend/main/workspace/resource-workspace.mjs';
 import {assertWorkerRoute,assertRendererWorkerRoute} from '../../contracts/transport-policy.mjs';
 import {classifyWorkspaceCommand,createWorkspaceTerminalAuthorization} from '../../backend/main/compute/workspace-terminal-authorization.mjs';
+import {developerComputeAccess} from '../../backend/main/compute/developer-compute-access.mjs';
 
 const ref={connectionId:'connection',profileId:'profile',profileVersion:1};
 const host={hostname:'login1',uid:1000,machineId:'machine'};
 const scope={provider:'codex',threadId:'conversation',checkCurrent:()=>true};
 const realDate=new Date(2026,10,20,23,59).getTime();
+
+test('developer workspace commands keep outside writes behind a human decision and stop after revocation',async()=>{
+ const workspaceId='a'.repeat(64),calls=[];
+ let chosen=workspaceId,review;
+ const developer=developerComputeAccess({workspaceId:()=>chosen,userTurn:()=>true});
+ const workspace={forTerminal:()=>({workspaceId,root:'/work',path:'/work/day/task-1',identity:{...host,account:'user1'}})};
+ const controller=createWorkspaceTerminalAuthorization({workspace,developerCompute:developer,current:()=>scope,emit:()=>review?.(),
+  connections:{async runWorkspaceCommand(value,guard){
+   guard();calls.push(value.mode);
+   if(value.mode==='confined')return {status:'result',code:0,output:'ok',confinement:'landlock'};
+   if(value.mode==='job_preview')return {status:'result',code:0,output:'/work/day/task-1/test.sh\n'+'b'.repeat(64)+'\n#!/bin/sh\n#SBATCH --time=1\necho fixture'};
+   if(value.mode==='job')return {status:'result',code:0,output:'101'};
+   assert.fail('Unexpected dispatch');
+  }}});
+ let seq=0;
+ const batch=async command=>{
+  const send=data=>controller.input({scope,ref,sessionId:'session',ownerEpoch:1,input:{requestId:String(++seq),data},assertCurrent(){}});
+  await send(command);return send('\r');
+ };
+ assert.equal((await batch('rm result.tmp')).confinement,'landlock');
+ assert.equal((await batch('sbatch test.sh')).job_id,'101');
+ const prompted=new Promise(resolve=>{review=resolve;});
+ const outside=batch('mkdir /other/tmp');await prompted;
+ const approval=controller.pending({});assert.equal(approval.reason,'outside_workspace');
+ chosen=null;developer.changed(workspaceId,null);
+ assert.throws(()=>controller.decide({approvalId:approval.approvalId,decision:'approve'}),/changed/);
+ assert.equal((await outside).execution_status,'denied');
+ assert.deepEqual(calls,['confined','job_preview','job']);
+});
 
 test('remote workspace registration and allocation use the typed desktop channel',()=>{
  for(const operation of ['register','session','allocate']){

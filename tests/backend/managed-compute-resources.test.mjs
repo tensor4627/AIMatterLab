@@ -11,11 +11,39 @@ import {createManagedComputeServices,managedWorkerProject} from '../../backend/m
 import {managedProjectAccess} from '../../backend/main/compute/managed-project-access.mjs';
 import {taskForRecordIndex} from '../../backend/main/compute/worker-service-version.mjs';
 import {assertRendererWorkerRoute} from '../../contracts/transport-policy.mjs';
+import {developerComputeAccess} from '../../backend/main/compute/developer-compute-access.mjs';
 
 const profile=(id,name)=>({id,kind:'ssh',version:1,name,host:'private-'+id+'.invalid',username:'private-user',port:22,
  ssh_client:'/usr/bin/ssh',distribution:'Private WSL',mode:'interactive',identity_file:'/secret/key',proxy_jump:[],via:[]});
 const verified=(connectionId,profile)=>({connectionId,profileId:profile.id,profileVersion:profile.version,status:'authenticated',authentication:'verified',capabilities:{multiplex:true}});
 const fixtureScope=(provider,threadId,projectId='project')=>({provider,threadId,projectId,taskId:'task-'+threadId,checkCurrent:()=>true});
+
+test('developer tests use only the selected hosted workspace, and switching it off retires the test lease',async t=>{
+ let selected=null,human=true,denied=false;
+ const ids={A:'a'.repeat(64),B:'b'.repeat(64)};
+ const access=developerComputeAccess({workspaceId:()=>selected,userTurn:()=>human});
+ const options={developerCompute:access,authorizeTerminal:()=>denied?'denied':false,
+  resourceWorkspace:{assertHandoff:async ref=>({workspaceId:ids[ref.profileId]}),publicWorkspace:value=>value},
+  terminalAuthorization:{input:async()=>({accepted:true})}};
+ const f=fixture(t,options),owner=f.owner;
+ await f.publish('A');await f.publish('B');
+ f.turn(owner,'测试当前工具');
+ assert.throws(()=>access.verifyChange(null,'c'.repeat(64),f.manager.snapshot()),/hosted SSH/);
+ access.verifyChange(null,ids.A,f.manager.snapshot());selected=ids.A;access.changed(null,selected);
+ const inventory=await f.manager.list(owner);
+ assert.deepEqual(inventory.resources.map(r=>[r.resourceId,r.canAcquire,r.developerWorkspace]),[['ssh:A',true,true],['ssh:B',false,undefined]]);
+ const lease=await f.manager.acquire(owner,{profileId:'A'});
+ assert.equal(lease.status,'acquired');
+ const input={session_id:lease.terminal.sessionId,request_id:'probe',action:'type',data:'pwd'};
+ assert.equal((await f.manager.callTerminalTool('write_compute_terminal',input,owner)).accepted,true);
+ human=false;
+ await assert.rejects(f.manager.callTerminalTool('write_compute_terminal',input,owner),/grant_required/);
+ human=true;denied=true;
+ await assert.rejects(f.manager.callTerminalTool('write_compute_terminal',input,owner),/grant_required/);
+ denied=false;const previous=selected;selected=null;access.changed(previous,null);f.manager.endDeveloperAccess(previous);
+ await assert.rejects(f.manager.callTerminalTool('write_compute_terminal',input,owner),/lease|grant/);
+ assert.equal((await f.manager.list(owner)).resources.some(row=>row.developerWorkspace),false);
+});
 
 test('an unreadable project catalog is distinct from an observed absence of authority',async()=>{
  const check=response=>managedWorkerProject({projectId:'p'},{kind:'wsl'},{forward:async()=>response},()=>{});

@@ -19,7 +19,7 @@ function fields(value,expected) {
 }
 export function createManagedWorkbench({catalog,profiles,registration,terminal,projectSkills,resourceActivity,projectAccess,
  records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{},
- worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,hostedServiceReplaced}) {
+ worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,developerCompute,hostedServiceReplaced}) {
   const delegations=createScheduleDelegations(catalog),runIntents=createRunActionIntents();
   let schedules;
   const named=notice=>({...notice,resourceName:resourceActivity.label(notice.profileId)||notice.profileId});
@@ -37,6 +37,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   }
   function permitsRunAction(scope,action,runId,resourceId) {
     if(agents.turnOrigin(scope.provider,scope.threadId)==='service')return false;
+    if(resources.isDeveloperWorkspace(scope,resourceId))return true;
     const task=records.bound(scope.provider,scope.threadId),available=new Map();
     for(const run of resourceActivity.runsFor(scope))available.set(JSON.stringify([run.sourceId,run.runId]),run);
     const sourceId=task&&taskForRecordIndex(task).workerSourceId;
@@ -49,7 +50,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   }
   const resources=createManagedComputeResources({terminal,profiles,selectionCatalog:catalog,aliases:createManagedComputeAliases({projectSkills}),
     services:createManagedComputeServices({connections:terminal.connections,registration,source:workerSource,transportSource:sshTransportSource}),
-    resourceWorkspace,serviceRegistration:registration,terminalAuthorization,
+    resourceWorkspace,serviceRegistration:registration,terminalAuthorization,developerCompute,
     taskSource:scope=>taskWorkerSource(records.bound(scope.provider,scope.threadId)),
     authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),
     terminalPolicyRevision:(scope,resource)=>projectAccess.terminalRevision(scope,resource),

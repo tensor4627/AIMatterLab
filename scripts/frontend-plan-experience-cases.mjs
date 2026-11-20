@@ -30,6 +30,33 @@ export async function frontendPlanExperienceCases({check,out}){
  }
  const nav=(page,id)=>page.locator('[data-testid="navigate-'+id+'"]:visible');
 
+ await check('settings-developer-compute-select-save-disable',async page=>{
+  await app(page);
+  await page.evaluate(()=>{
+   const original=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>method==='compute.managed.snapshot'?{resources:[{
+    resourceId:'ssh:fixture',profileId:'fixture',kind:'ssh',name:'Developer test cluster',
+    workspace:{account:'tester',hostname:'test.invalid',root:'/scratch/tester',workspaceId:'c'.repeat(64)}
+   }],conversations:[],sources:[]}:original(method,data);
+  });
+  await page.getByRole('button',{name:'设置',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'工作台设置',exact:true});
+  await dialog.getByRole('button',{name:'Agent',exact:true}).click();
+  await dialog.getByText('开发人员选项',{exact:true}).click();
+  const mode=dialog.getByTestId('developer-compute-workspace');
+  assert.equal(await mode.inputValue(),'');
+  await mode.selectOption('c'.repeat(64));
+  await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
+  await dialog.getByText('设置已保存',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').at(-1).data.developerComputeWorkspaceId),'c'.repeat(64));
+  await shot(page,'developer-compute-settings');
+  await mode.selectOption('');
+  await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
+  await dialog.getByText('设置已保存',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').at(-1).data.developerComputeWorkspaceId),null);
+  await noExecution(page);
+ });
+
  await check('planning-retains-saved-project-and-session-directory',async page=>{
   await page.evaluate(async()=>{
    const {default:Agent}=await import('/frontend/features/conversations/Agent.tsx');

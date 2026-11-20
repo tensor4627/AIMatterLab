@@ -43,6 +43,17 @@ function readPipeline(command){
   return parsed.every(allowedObservation)?parsed:null;
 }
 
+// Path-bearing directives (for example --output or -o) need the ordinary
+// review. The scheduler processes them before the workspace sandbox starts.
+function workspaceJobDirectives(script,scheduler){
+  const prefix=scheduler==='sbatch'?'#SBATCH':'#BSUB';
+  const allowed=scheduler==='sbatch'
+    ? /^(?:--(?:partition|qos|account|time|nodes|ntasks|ntasks-per-node|cpus-per-task|gpus|gres|mem|mem-per-cpu|job-name)[=\s]+|-[pAtNncJ]\s*)[a-zA-Z0-9_.:,+=-]+$/
+    : /^-(?:q|P|W|n|J|M)\s+[a-zA-Z0-9_.:,+=-]+$/;
+  return script.split(/\r?\n/).filter(line=>line.trimStart().startsWith(prefix))
+    .every(line=>allowed.test(line.trim().slice(prefix.length).trim()));
+}
+
 export function classifyWorkspaceCommand(text, root, cwd) {
   const command = text.trim(), here = /^cat\s*>\s*(.+?)\s*<<\s*'([A-Za-z_][A-Za-z0-9_]*)'\n([\s\S]*)\n\2$/.exec(command);
   const args = /[\r\n]/.test(command) ? null : words(command);
@@ -91,7 +102,7 @@ export function classifyWorkspaceCommand(text, root, cwd) {
     reason: destructive ? 'destructive' : !inside(root, cwd) || outside ? 'outside_workspace' : 'unverified_effects'};
 }
 
-export function createWorkspaceTerminalAuthorization({workspace, connections, current, emit = () => {}, now = Date.now, uuid = randomUUID}) {
+export function createWorkspaceTerminalAuthorization({workspace, connections, current, developerCompute, emit = () => {}, now = Date.now, uuid = randomUUID}) {
   const stages = new Map(), approvals = new Map();
   function settle(row, decision) {
     clearTimeout(row.timer);
@@ -152,12 +163,19 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
       return response;
     };
     let {mode, args, paths, reason, scheduler} = classifyWorkspaceCommand(command, root, cwd);
+    const initialMode=mode;
     let commands = [command], response;
+    const development=developerCompute?.allows(scope,registered.workspaceId)===true;
+    // File mutations inside the selected workspace can use the same kernel-enforced
+    // boundary as other workspace programs. Scheduler cancellations affect external state.
+    const confinedMutation=()=>development&&reason==='destructive'&&inside(root,cwd)&&
+      paths.every(item=>inside(root,item))&&/^(?:rm|rmdir|unlink|mv|truncate|chmod)\s/.test(command)&&
+      words(command)?.slice(1).filter(item=>!item.startsWith('-')).every(item=>!item.startsWith('~')&&inside(root,absolute(cwd,item)));
     if(mode==='cwd'&&args[0]==='-'){
       if(!entry.previousCwd)return {accepted:true,execution_status:'failed',exit_code:1,output:'No previous directory for this terminal.',cwd};
       args=[entry.previousCwd];
     }
-    if (reason === 'unverified_effects') {
+    if (reason === 'unverified_effects' || confinedMutation()) {
       response = await execute('confined', args);
       if (response.status === 'result' && ['landlock','bubblewrap'].includes(response.confinement)) reason = null;
       else if (response.status !== 'unavailable') fail('ssh_workspace_unconfirmed');
@@ -200,6 +218,17 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
         mode='approved';args=[command];
       }
     }
+    if(development&&reason==='destructive'&&inside(root,cwd)&&paths.every(item=>inside(root,item))&&
+       mode==='approved'&&['write','copy','copy_target'].includes(initialMode)){
+      const result=await execute('confined',[command]);
+      if(result.status==='result'&&['landlock','bubblewrap'].includes(result.confinement)){response=result;reason=null;}
+      else if(result.status!=='unavailable')fail('ssh_workspace_unconfirmed');
+    }
+    if(development&&reason==='independent_job'&&commands.length===2&&workspaceJobDirectives(commands[1],scheduler)){
+      // The remote helper reserves this exact script before submission, including in developer mode.
+      response=await execute('job',[...args,uuid()]);
+      reason=null;
+    }
     if (reason) {
       const approval=await review({...config, commands, paths, reason});
       if (approval.decision !== 'approved') return {accepted:false, execution_status:'denied', cwd};
@@ -219,9 +248,11 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
   }
   async function input({scope, ref, input, sessionId, ownerEpoch, assertCurrent}) {
     const registered = workspace.forTerminal(ref, scope);
+    const modeRevision=developerCompute?.revision(registered.workspaceId);
     const key = JSON.stringify([owning(scope), ref.connectionId, sessionId, ownerEpoch]);
     const guard = () => {
       assertCurrent();
+      if(modeRevision!==developerCompute?.revision(registered.workspaceId))fail('ssh_terminal_approval_changed');
       const fresh = workspace.forTerminal(ref, scope);
       if (fresh.workspaceId !== registered.workspaceId || fresh.path !== registered.path) fail('ssh_workspace_changed');
     };
@@ -235,7 +266,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
         }
         if (stages.size >= 128) fail('ssh_terminal_request_limit');
       }
-      entry = {workspaceId:registered.workspaceId, path:registered.path, cwd:registered.path, staged:'', requests:new Map(), running:false, assertCurrent};
+      entry = {workspaceId:registered.workspaceId, path:registered.path, cwd:registered.path, staged:'', requests:new Map(), running:false, assertCurrent,modeRevision};
       stages.set(key,entry);
     }
     const signature = JSON.stringify(input), prior = entry.requests.get(input.requestId);
@@ -244,6 +275,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
       return prior.operation;
     }
     if (entry.running) fail('ssh_terminal_command_pending');
+    if(entry.modeRevision!==modeRevision){entry.staged='';entry.modeRevision=modeRevision;}
     if (entry.requests.size >= 4096) fail('ssh_terminal_request_limit');
     entry.assertCurrent=assertCurrent;
     if (entry.workspaceId !== registered.workspaceId || entry.path !== registered.path) {

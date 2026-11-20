@@ -32,7 +32,7 @@ const definitions=[
 const names=new Set(definitions.map(tool=>tool.name));
 const terminalStates=new Set(['active','failed','needs_file','planned']);
 
-export function createResourceToolController({resources,workspaces,skills,chooseFile,confirm,emit=()=>{},
+export function createResourceToolController({resources,workspaces,skills,developerCompute,chooseFile,confirm,emit=()=>{},
  current=()=>true,withRelease=withDesktopRelease,upload=transferRelease,inspect=inspectDesktopSource,setTimer=setTimeout,clearTimer=clearTimeout}){
  const desktopDownloads=new Map(),watches=new Map(),turns=new Map(),saveFailures=new Map(),foundScripts=new Map();
  const selectedFiles=new Map(),setupFiles=new Map();
@@ -287,16 +287,19 @@ export function createResourceToolController({resources,workspaces,skills,choose
   return result;
  }
 
- async function resolveSkills(scope,id){
+ async function resolveSkills(scope,id,inventory=false){
   const captured=resources.capture(scope.provider,scope.threadId);
+  const workspaceId=developerCompute&&resources.snapshot().find(resource=>resource.resourceId===id)?.workspace?.workspaceId;
+  const development=developerCompute?.allows(scope,workspaceId)===true,revision=developerCompute?.revision(workspaceId);
   const guard=()=>{
    if(scope.checkCurrent?.()!==true)throw Error('The resource tool conversation changed');
+   if(development&&(!developerCompute.allows(scope,workspaceId)||developerCompute.revision(workspaceId)!==revision))throw Error('Developer workspace access changed');
    captured.assertCurrent();
   };
   guard();
   const ref=captured.resources.find(value=>value.resourceId===id);
   if(!ref)throw Error('Acquire this SSH resource in the current conversation');
-  await resources.resolveLease(scope,id,scope.projectId?'service':'inspect');
+  await resources.resolveLease(scope,id,scope.projectId&&!(inventory&&development)?'service':'inspect');
   guard();
   return target({resource_id:id,profile_version:ref.profileVersion},guard);
  }
@@ -311,22 +314,31 @@ export function createResourceToolController({resources,workspaces,skills,choose
 
  async function call(name,args,scope){
   if(!names.has(name)||!args||scope.checkCurrent?.()!==true)throw Error('Invalid resource tool arguments');
-  const selected=await resolveSkills(scope,args.resource_id);
+  const selected=await resolveSkills(scope,args.resource_id,name==='list_resource_tools'||name==='discover_resource_tool_scripts');
   const project_id=scope.projectId;
   const workspace_id=selected.registration.workspaceId;
+  const development=developerCompute?.allows(scope,workspace_id)===true;
   const key=ownerKey(scope),user=turns.get(key)||'';
   if(name==='discover_resource_tool_scripts'){
    fields(args,['resource_id','directory']);
-   if(typeof args.directory!=='string'||!user.includes(args.directory))throw Error('Use the script directory designated in this user turn');
+   if(typeof args.directory!=='string'||!development&&!user.includes(args.directory))throw Error('Use the script directory designated in this user turn');
    await selected.register();
    const result=await selected.call('discover',{workspace_id,directory:args.directory});
    foundScripts.set(key,{resourceId:args.resource_id,files:new Set(result.candidates.flatMap(row=>row.examples))});
    return result;
   }
+  if(development&&name==='list_resource_tools'&&!project_id){
+   fields(args,['resource_id']);await selected.register();
+   const result=await selected.call('list',{workspace_id});
+   return {resource_id:args.resource_id,workfile_root:result.workfile_root,
+    tools:result.setups.filter(row=>row.status==='active'&&row.workspace_id===workspace_id&&row.resource_id===selected.registration.resourceId).map(row=>({
+     id:row.manifest.id,name:row.manifest.name,version:row.manifest.version,inputs:row.manifest.inputs,outputs:row.manifest.outputs
+    }))};
+  }
   if(!project_id)throw Error('Select the authorized project for this resource');
   if(name==='plan_resource_tool_setup'){
    fields(args,['resource_id','manifest','route','cluster_id','environment_id'],['candidate','queue_target_id','prior_run_id']);
-   if(!/install|configur|setup|set up|adopt|register|tool|script|安装|配置|接入|登记|工具|脚本/i.test(user))throw Error('A current user request for tool setup is required before drafting');
+   if(!development&&!/install|configur|setup|set up|adopt|register|tool|script|安装|配置|接入|登记|工具|脚本/i.test(user))throw Error('A current user request for tool setup is required before drafting');
    const source=args.manifest?.source;
    const scanned=foundScripts.get(key);
    if(source?.kind==='installed'&&(!source.executable||!portablePath(selected.registration.root,source.executable)&&

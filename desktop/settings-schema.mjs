@@ -10,7 +10,7 @@ const THEMES = ['dark','light'];
 
 /** Top-level renderer settings keys; anything else is rejected instead of silently persisted. */
 export const SETTINGS_KEYS = Object.freeze([
- 'autoDiscoverCompute','scientificSkillProviders','pygasSkillProviders','projectAgents',
+ 'autoDiscoverCompute','developerComputeWorkspaceId','scientificSkillProviders','pygasSkillProviders','projectAgents',
  'agentLayout','agentProvider','kimiPath','qwenPath','agentProviders',
  'distribution','workerRoot','workerPort','codexPath','cwd','sourceRoots','sourceIds',
  'skillRoots','userCacheDirectory','theme','resourceBadgeMotion','language','fontFamily','fontSize','minimumFontSize','chatFontSize',
@@ -23,6 +23,10 @@ export function normalizeSettings(current, data = {}) {
  const unknown = Object.keys(data).filter(key => !SETTINGS_KEYS.includes(key));
  if (unknown.length) throw Error('Unknown settings: ' + unknown.slice(0, 8).join(', '));
  const next = {...current, ...data};
+ if (next.developerComputeWorkspaceId != null &&
+     (typeof next.developerComputeWorkspaceId !== 'string' || !/^[a-f0-9]{64}$/.test(next.developerComputeWorkspaceId))) {
+   throw Error('Invalid developer compute workspace');
+ }
  if(next.terminalIdleMinutes!==undefined&&(!Number.isInteger(next.terminalIdleMinutes)||next.terminalIdleMinutes<1||next.terminalIdleMinutes>1440))throw Error('Terminal idle timeout must be 1 to 1440 minutes');
  if (next.autoDiscoverCompute !== undefined && typeof next.autoDiscoverCompute !== 'boolean') throw Error('Invalid compute discovery preference');
  if (!/^[\w .-]{1,80}$/.test(next.distribution) || !Number.isInteger(next.workerPort) ||
