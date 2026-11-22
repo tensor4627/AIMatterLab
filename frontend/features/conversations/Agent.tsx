@@ -1,7 +1,14 @@
+import {ChatFiles,ChatFilePreview} from './ChatFiles';
+import {readChatFile} from './read-chat-file';
+import type {ChatAttachmentPreview,ChatAttachmentRef} from '../../../contracts/dto/chat-attachments';
+import type {ChatEvidenceSelection} from '../../../contracts/dto/chat-evidence';
+import {attachmentLimits} from '../../../contracts/agent/chat-attachments.mjs';
+import {ChevronDown,ChevronUp,Paperclip,X} from 'lucide-react';
 import Tooltip from "../../ui/Tooltip";
 import {providerAccountState,authenticationError} from "./provider-account.mjs";
 import {ACCOUNT_GUIDANCE} from "../../../contracts/agent/provider-account.mjs";
 import {workspaceContextHeader} from '../../../contracts/agent/user-message.mjs';
+import {attachmentPrompt,attachmentsAfterReplacement} from '../../../contracts/agent/chat-attachments.mjs';
 import {isCodexVersion} from '../../../contracts/agent/codex-version.mjs';
 import {redactTranscriptText} from '../../../contracts/agent/transcript-sanitizer.mjs';
 import {API_PROVIDER_GROUPS} from '../../../contracts/agent/model-profiles.mjs';
@@ -10,14 +17,16 @@ import Notice from '../../ui/Notice';
 import './agent.css';
 import './codex-version-notice.css';
 import {tr} from "../../ui/i18n";
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState,type RefObject} from 'react';
 import {ArrowUp,ListPlus,PencilLine,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2,History,PanelRightClose} from 'lucide-react';
 import {t} from "../../ui/i18n";
 import {type ChatMessageActions,type ChatMessageValue} from './ChatMessage';
 import ConversationMessages from './ConversationMessages';
+import ConversationTurnActivity from './ConversationTurnActivity';
+import type {ConversationActivity,ConversationAttentionTarget} from '../../../contracts/dto/conversation-activity';
 import {resumedEffort,importedCodexSelection,readCodexDefaultsCatalog} from "./resume-effort.mjs";
 
-import {upsertItemMessage,replayMessages} from './message-mapping.mjs';
+import {messageKey,upsertItemMessage,replayMessages} from './message-mapping.mjs';
 import {createReadingPositions,readingKey} from './reading-position.mjs';
 import {elicitationHasEditableInput} from './elicitation-input.mjs';
 import ComposerQuestion,{composerQuestionItems,initialQuestionProgress,type QuestionProgress} from './ComposerQuestion';
@@ -30,20 +39,23 @@ import type {AgentConnectRequest,AgentConnectResult,AgentSteerRequest,AgentSteer
 import {explicitNewWorkflow} from "./workflow-intent.mjs";
 
 import {createComposerDrafts} from "./composer-drafts.mjs";
-import {createFollowUpQueues,followUpKey,type QueuedFollowUp} from './follow-ups.mjs';
+import {followUpKey,readLegacyFollowUps,forgetLegacyFollowUps,readQueueAdmission,rememberQueueAdmission,forgetQueueAdmission} from './follow-ups.mjs';
+import type {AgentQueueAction,AgentQueueRequest,AgentQueueResult,AgentQueueView,QueuedMessage,QueueMessageInput} from '../../../contracts/dto/agent-queue';
 import type {SessionSelection} from './useConversationSelection';
 
 import type {ComputeResourceState} from '../../../contracts/dto/compute';
 import {invoke} from '../../api/studio';
+import {conversationHistory,hasConversationHistory} from '../../api/conversation-history';
+import type {ConversationAnchor,ConversationBranchPreview,ConversationHistoryPage,ConversationHistoryTarget} from '../../../contracts/dto/conversation-history';
+import {ConversationExcerptDialog,ConversationHistoryToolbar,OlderConversationPage} from './ConversationHistory';
 import {recoverConversation} from '../../api/agent';
 import {type RpcEvent,type AgentProvider,type Conversation} from '../../../contracts/dto/agent';
 import {type AgentIntent,type SkillAttachment,type MissingWorkflowToolQuestion} from './agent-types';
 type ModelCall={requestId:string;provider:AgentProvider;model:string;threadId:string;turnId:string|null;output:boolean;status:string};
 type Message=ChatMessageValue;
 type DraftSnapshot=ReturnType<ReturnType<typeof createComposerDrafts>['capture']>;
-type QueuedSend={item:QueuedFollowUp;current:()=>boolean;turnId?:string|null};
 type FollowUpAction='queue'|'steer';
-type SendFlight={owner:symbol;provider:AgentProvider;threadId:string|null;turnId:string|null;phase:'preparing'|'submitted';cancelled:boolean;interrupting:boolean;interruptSent:boolean;settled:boolean;draftAccepted:boolean;manual:boolean;queued:boolean;current:()=>boolean;draft:DraftSnapshot;text:string};
+type SendFlight={owner:symbol;provider:AgentProvider;threadId:string|null;turnId:string|null;phase:'preparing'|'submitted';cancelled:boolean;interrupting:boolean;interruptSent:boolean;settled:boolean;draftAccepted:boolean;manual:boolean;current:()=>boolean;draft:DraftSnapshot;text:string};
 type HistoryLoad={provider:AgentProvider;threadId:string;projectId?:string;status:'loading'|'failed';error?:string};
 type SessionTurn={threadId:string;busy:boolean;turnId:string|null;requests?:RpcEvent[]};
 const isUserInputRequest=(request:RpcEvent)=>composerQuestionItems(request).length>0;
@@ -72,13 +84,14 @@ function codexVersionWarning(value:unknown):CodexVersionWarning|null {
 function storedPreference(key:string){try{return localStorage.getItem(key);}catch{return null;}}
 function storePreference(key:string,value:string){try{localStorage.setItem(key,value);}catch{/* Storage is optional for chat. */}}
 function mergeResumedMessages(history:Message[],live:Message[]){
- const rows=new Map(history.map(message=>[message.id,message]));
+ const rows=new Map(history.map(message=>[messageKey(message),message]));
  for(const message of live){
-  const saved=rows.get(message.id);
-  if(!saved||message.role!=='agent'||message.text.startsWith(saved.text))rows.set(message.id,message);
+  const key=messageKey(message),saved=rows.get(key);
+  if(!saved||!message.deferredDetail&&(message.role!=='agent'||message.text.startsWith(saved.text)))rows.set(key,message);
  }
  return [...rows.values()];
 }
+function pageMessages(page:ConversationHistoryPage){return replayMessages(page.liveTurn?[...page.turns,page.liveTurn]:page.turns);}
 function sshResourceReady(resource:ComputeResourceState|null|undefined,tools:AgentToolsStatus){
  if(resource?.kind==='ssh-connection'){
   if(resource.schemaVersion!==2||resource.status!=='selected'||resource.alive!==true||resource.authentication!=='verified'||tools.status!=='ready')return false;
@@ -88,7 +101,7 @@ function sshResourceReady(resource:ComputeResourceState|null|undefined,tools:Age
  const workflow=resource.workflowReady===true&&resource.managedRuns===true&&resource.authentication==='verified';
  return workflow?tools.scope!=='terminal-only':tools.scope==='terminal-only';
 }
-export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,onCollapse,conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,selectedLocalConversation,isLocalConversationCurrent,onConversation,onBusyChange,onNewConversation,hidden,visibleWorkflowId,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onReviewWorker,onOpenCluster,onOpenOriginalRun,computeResource,workspaceProfileId,onComputeResource,onReviewResourceTool,missingWorkflowToolQuestion}:{setupProviderChoice?:{provider:AgentProvider;nonce:string};onSetupReply?:(reply:{provider:AgentProvider;model:string}|null)=>void;onComputeResource?:(state:ComputeResourceState)=>void;onOpenHistory?:()=>void;onReviewResourceTool?:()=>void;missingWorkflowToolQuestion?:MissingWorkflowToolQuestion;workspaceProfileId?:string;onCollapse?:()=>void;computeResource?:ComputeResourceState|null;onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;onReviewWorker?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:SessionSelection;selectedLocalConversation?:Pick<Conversation,'provider'|'threadId'>|null;isLocalConversationCurrent?:()=>boolean;onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean;visibleWorkflowId?:string|null}){
+export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation,onOpenDiscussion,activity,attentionTarget,setupProviderChoice,onSetupReply,onOpenHistory,onCollapse,conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,selectedLocalConversation,isLocalConversationCurrent,onConversation,onBusyChange,onNewConversation,hidden,visibleWorkflowId,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onReviewWorker,onOpenCluster,onOpenOriginalRun,computeResource,workspaceProfileId,onComputeResource,onReviewResourceTool,missingWorkflowToolQuestion}:{terminalDraft?:RefObject<((provider:AgentProvider)=>string|undefined)|null>;historyTarget?:ConversationHistoryTarget;onOpenHistoryLocation?:(target:ConversationAnchor)=>void;onOpenDiscussion?:(conversation:Conversation,draft?:string)=>void;activity?:ConversationActivity;attentionTarget?:ConversationAttentionTarget;setupProviderChoice?:{provider:AgentProvider;nonce:string};onSetupReply?:(reply:{provider:AgentProvider;model:string}|null)=>void;onComputeResource?:(state:ComputeResourceState)=>void;onOpenHistory?:()=>void;onReviewResourceTool?:()=>void;missingWorkflowToolQuestion?:MissingWorkflowToolQuestion;workspaceProfileId?:string;onCollapse?:()=>void;computeResource?:ComputeResourceState|null;onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;onReviewWorker?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:SessionSelection;selectedLocalConversation?:Pick<Conversation,'provider'|'threadId'>|null;isLocalConversationCurrent?:()=>boolean;onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean;visibleWorkflowId?:string|null}){
  const draftsRef=useRef<ReturnType<typeof createComposerDrafts>|null>(null);if(!draftsRef.current){draftsRef.current=createComposerDrafts(()=>localStorage);const selected=sessionSelection?.conversation;if(selected)draftsRef.current.activate(selected.provider,selected.threadId);else if(sessionSelection?.new)draftsRef.current.activate(draftsRef.current.owner().provider,null,true);}const drafts=draftsRef.current;
  const [needsAuth,setNeedsAuth]=useState(false);
  const [nativeDefaults,setNativeDefaults]=useState<NativeCodexDefaults|null>(null);
@@ -121,19 +134,63 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const [workflowId,setWorkflowId]=useState<string|null>(null),[newWorkflow,setNewWorkflow]=useState(false);
  const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<{provider:AgentProvider;seq:number;nonce:string|undefined;promise:Promise<boolean>}|null>(null),providerTouched=useRef(false),handledSelection=useRef<string|undefined>(undefined),sendOwner=useRef<symbol|null>(null);
  const handledDraftIntents=useRef(new Set<string>());
- const [followUps]=useState(()=>createFollowUpQueues(()=>localStorage));
- const [followUpVersion,setFollowUpVersion]=useState(0);
+ const [followUpQueues,setFollowUpQueues]=useState<Record<string,AgentQueueView>>({});
+ const queueAdmission=useRef(new Map<string,{draft:DraftSnapshot;id:string;pending:boolean}>());
+ const [queueEdit,setQueueEdit]=useState<{owner:string;id:string;text:string}|null>(null);
+ const queueOperations=useRef(new Set<string>());
  const [followUpEnter,setFollowUpEnter]=useState<FollowUpAction>(()=>storedPreference(followUpEnterStorageKey)==='steer'?'steer':'queue');
  const steering=useRef(new Set<string>());
- const refreshFollowUps=()=>setFollowUpVersion(version=>version+1);
+ const [,redrawFollowUps]=useState(0);
+ const refreshFollowUps=()=>redrawFollowUps(version=>version+1);
+ function acceptQueue(view:AgentQueueView){
+  if(!view||typeof view.threadId!=='string'||!Array.isArray(view.items))return;
+  const key=followUpKey(view.provider,view.threadId);
+  setFollowUpQueues(previous=>previous[key]?.revision>=view.revision?previous:{...previous,[key]:view});
+ }
  const activeSend=useRef<SendFlight|null>(null),[stopStatus,setStopStatus]=useState<'waiting'|'stopping'|'unknown'|null>(null);
  const observedTurn=useRef<SessionTurn|null>(null),resolvedRequests=useRef(new Set<string>());
  const settledTurns=useRef(new Set<string>()),viewedStop=useRef<{threadId:string;turnId:string}|null>(null);
  const [historyLoad,setHistoryLoad]=useState<HistoryLoad|null>(null);
+ const historyEnabled=hasConversationHistory();
+ const [savedHistoryPage,setSavedHistoryPage]=useState<ConversationHistoryPage|null>(null),[paging,setPaging]=useState(false);
+ const [historyJump,setHistoryJump]=useState<ConversationHistoryTarget>(),[branchPreview,setBranchPreview]=useState<ConversationBranchPreview|null>(null),[branching,setBranching]=useState(false);
+ const filePicker=useRef<HTMLInputElement|null>(null),readingFiles=useRef(new Set<unknown>()),previewRequest=useRef(0);
+ const [,redrawFiles]=useState(0),[filePreview,setFilePreview]=useState<{scope:string;value:ChatAttachmentPreview}|null>(null);
+ const refreshFiles=()=>redrawFiles(value=>value+1);
+ async function showFile(file:ChatAttachmentRef){
+  const scope=drafts.attachmentOwner(),key=JSON.stringify(scope),ticket=++previewRequest.current;
+  try{const value=await invoke<ChatAttachmentPreview>('agent.attachments.preview',{...scope,id:file.id});
+   if(mounted.current&&ticket===previewRequest.current&&key===JSON.stringify(drafts.attachmentOwner()))setFilePreview({scope:key,value});
+  }catch(error){if(mounted.current&&key===JSON.stringify(drafts.attachmentOwner()))messageCallbacks.current.onError(error);}
+ }
+ async function importFiles(selection:File[]){
+  const snapshot=drafts.capture(),scope=drafts.attachmentOwner();
+  if(!selection.length||readingFiles.current.has(snapshot.entry)||historyHidden||composerUnbound||sessionPendingRef.current)return;
+  if(selection.length+snapshot.files.length>attachmentLimits.count){setSendNotice(t('每条消息最多添加 8 个附件。'));return;}
+  readingFiles.current.add(snapshot.entry);setSendNotice('');refreshFiles();
+  try{
+   const files=[];
+   for(const file of selection)files.push(await readChatFile(file));
+   if(!mounted.current)return;
+   const refs=await invoke<ChatAttachmentRef[]>('agent.attachments.import',{...scope,files});
+   if(mounted.current&&!drafts.addToSnapshot(snapshot,refs)&&snapshot.entry===drafts.capture().entry)setSendNotice(t('对话已变化。请重新选取附件。'));
+  }catch(error){if(mounted.current&&snapshot.entry===drafts.capture().entry)setSendNotice(error instanceof Error?error.message:String(error));}
+  finally{readingFiles.current.delete(snapshot.entry);if(mounted.current)refreshFiles();}
+ }
+ const historyOperation=useRef(0),jumpRead=useRef(''),historyTargetHandled=useRef(''),historyDetails=useRef(new Set<string>()),branchInProgress=useRef(false);
+ const historyActions=useRef({quote:quoteMessage,branch:branchMessage,bookmark:bookmarkMessage,detail:loadMessageDetail});
+ historyActions.current={quote:quoteMessage,branch:branchMessage,bookmark:bookmarkMessage,detail:loadMessageDetail};
  const [retrying,setRetrying]=useState<{threadId:string;turnId:string}|null>(null);
  const [promptProposal,setPromptProposal]=useState<{provider:string;threadId:string|null;text:string}|null>(null);
  const messageCallbacks=useRef({onOpenTask,onOpenRun,onOpenOriginalRun,onOpenCluster,onReviewWorker,onConnectCompute,onError});messageCallbacks.current={onOpenTask,onOpenRun,onOpenOriginalRun,onOpenCluster,onReviewWorker,onConnectCompute,onError};
  const messageActions=useRef<ChatMessageActions|null>(null);if(!messageActions.current)messageActions.current={workflow:id=>messageCallbacks.current.onOpenTask?.(id),run:id=>messageCallbacks.current.onOpenRun?.(id),originalRun:id=>messageCallbacks.current.onOpenOriginalRun?.(id),cluster:()=>messageCallbacks.current.onOpenCluster?.(),compute:()=>{void Promise.resolve().then(()=>{const cb=messageCallbacks.current;return (cb.onReviewWorker||cb.onConnectCompute)?.();}).catch(error=>messageCallbacks.current.onError(error));}};
+ if(!messageActions.current.previewFile)messageActions.current.previewFile=showFile;
+ if(historyEnabled&&!messageActions.current.quote)Object.assign(messageActions.current,{
+  quote:(message:Message)=>historyActions.current.quote(message),
+  branch:(message:Message)=>void historyActions.current.branch(message),
+  bookmark:(message:Message,bookmarked:boolean)=>void historyActions.current.bookmark(message,bookmarked),
+  detail:(message:Message)=>void historyActions.current.detail(message),
+ });
  const loginRef=useRef(login);loginRef.current=login;
  const providerRef=useRef<AgentProvider>(provider);providerRef.current=provider;
  const projectSeen=useRef(''),accountSeq=useRef(0),externalSeq=useRef(0);
@@ -143,12 +200,19 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   if(versionWarning&&claimVersionNotice())setVersionNotice(versionWarning);
  },[versionWarning,provider,hidden,connected]);
  const [thread,setThread]=useState<string|null>(null),[threads,setThreads]=useState<any[]>([]),[messages,setMessages]=useState<Message[]>([]);
- const localApiThread=!!thread&&API_PROVIDER_GROUPS.includes(provider);
+ const localApiThread=!!thread&&(API_PROVIDER_GROUPS.includes(provider)||historyEnabled&&provider==='deepseek');
+ const historyConversationId=thread?provider+':'+thread:null;
+ const historyPage=savedHistoryPage?.conversation.id===historyConversationId?savedHistoryPage:null;
  const [recovery,setRecovery]=useState<{threadId:string;error?:string}|null>(null),pendingResume=useRef<string|null>(null);
  const resumeMetadata=useRef<Conversation|null>(null);
  const [modelCall,setModelCall]=useState<ModelCall|null>(null),modelCallRef=useRef<ModelCall|null>(null),modelRef=useRef(model);modelRef.current=model;
  const [prompt,setPrompt]=useState(()=>drafts.text()),[busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null),[sendNotice,setSendNotice]=useState('');
  function updatePrompt(text:string){providerTouched.current=true;setSendNotice('');setPrompt(drafts.edit(text));}
+ function recoverDraft(provider:AgentProvider,previous:string,threadId:string,uploadsRetained?:boolean){
+  const result=drafts.rekey(provider,previous,threadId,uploadsRetained);
+  setPrompt(result.text);refreshFiles();
+  if(result.attachmentReview)setSendNotice(t('对话已变化。请重新选取附件。'));
+ }
  function selectDraft(value:AgentProvider,id:string|null=null,fresh=false){const old=drafts.owner();if(fresh||old.provider!==value||old.threadId!==id){saveReadingPosition();readingOwner.current=readingKey(value,id);readingReady.current=false;setPromptProposal(null);}setPrompt(drafts.activate(value,id,fresh));}
  function proposePrompt(text:string){if(drafts.text()&&drafts.text()!==text)setPromptProposal({...drafts.owner(),text});else updatePrompt(text);}
  function resolvePromptProposal(choice:'append'|'replace'|'cancel'){const proposal=promptProposal,owner=drafts.owner();setPromptProposal(null);if(!proposal||choice==='cancel'||proposal.provider!==owner.provider||proposal.threadId!==owner.threadId)return;updatePrompt(choice==='append'?[drafts.text(),proposal.text].filter(Boolean).join('\n\n'):proposal.text);}
@@ -160,6 +224,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   if(flight.draftAccepted||!flight.manual||!mounted.current)return;
   flight.draftAccepted=true;
   if(drafts.acknowledge(flight.draft)&&drafts.owner().provider===flight.provider&&drafts.owner().threadId===flight.threadId)setPrompt(drafts.text());
+  if(flight.draft.files.length)refreshFiles();
  }
  function releaseSend(flight:SendFlight){
   if(activeSend.current===flight)activeSend.current=null;
@@ -193,7 +258,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   if(!flight){void stopViewedTurn();return;}
   flight.cancelled=true;
   if(flight.phase==='preparing'){
-   if(!flight.queued&&flight.current()&&drafts.retain(flight.draft,flight.text))setPrompt(drafts.text());
+   if(flight.current()&&drafts.retain(flight.draft,flight.text))setPrompt(drafts.text());
    releaseSend(flight);setBusy(false);setStopStatus(null);setSendNotice(t('已取消发送准备，草稿已保留。'));return;
   }
   if(!flight.turnId){setStopStatus('waiting');return;}
@@ -249,29 +314,136 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  useEffect(()=>{if(!projectId||sessionSelection?.conversation||busy||projectSeen.current===projectId)return;projectSeen.current=projectId;const seq=selectionSeq.current,draft=drafts.capture();void invoke('state').then(s=>{const latest=drafts.capture();if(seq!==selectionSeq.current||draft.entry!==latest.entry||draft.revision!==latest.revision)return;const preferred=s.settings.projectAgents?.[projectId];if(preferred&&preferred!==providerRef.current)void selectProvider(preferred);}).catch(onError);},[projectId,busy]);
  useEffect(()=>{if(pendingDefaults)return;if(model)storePreference('studio.model.'+provider,model);if(model&&effort&&efforts.some((value:any)=>value.reasoningEffort===effort))storePreference('studio.effort.'+provider+'.'+model,effort);},[model,effort,provider,models,pendingDefaults]);
  const scroll=useRef<HTMLDivElement>(null),threadRef=useRef<string|null>(null);threadRef.current=thread;
+ useEffect(()=>{
+  if(!terminalDraft)return;
+  terminalDraft.current=provider=>{
+   const owner=drafts.attachmentOwner();
+   if(mounted.current&&owner.provider===provider&&providerRef.current===provider&&!owner.threadId&&
+      !threadRef.current&&!selectionPending.current&&!sessionPendingRef.current&&!readingFiles.current.has(drafts.capture().entry))return owner.draftId;
+  };
+  return ()=>{terminalDraft.current=null;};
+ },[terminalDraft]);
  const readingPositions=useRef<ReturnType<typeof createReadingPositions>|null>(null);if(!readingPositions.current)readingPositions.current=createReadingPositions(()=>localStorage);
  const readingOwner=useRef(readingKey(drafts.owner().provider,drafts.owner().threadId)),readingReady=useRef(false);
  const followScroll=useRef(true),[following,setFollowing]=useState(true),[hasNewMessages,setHasNewMessages]=useState(false);
  function saveReadingPosition(){const node=scroll.current;if(readingReady.current&&node&&(typeof node.querySelector!=='function'||node.querySelector('[data-message-id]')))readingPositions.current?.save(readingOwner.current,node,followScroll.current);}
  function followLatest(){followScroll.current=true;setFollowing(true);setHasNewMessages(false);scroll.current?.scrollTo({top:scroll.current.scrollHeight,behavior:'auto'});saveReadingPosition();}
  function observeScroll(){const node=scroll.current;if(!node||!readingReady.current)return;const nearBottom=node.scrollHeight-node.clientHeight-node.scrollTop<=64;followScroll.current=nearBottom;setFollowing(nearBottom);if(nearBottom)setHasNewMessages(false);saveReadingPosition();}
+ function historyCurrent(){
+  const seq=selectionSeq.current,owner=threadRef.current,scope=providerRef.current;
+  return ()=>mounted.current&&seq===selectionSeq.current&&owner===threadRef.current&&scope===providerRef.current;
+ }
+ function historyAnchor(message:Message):Required<ConversationAnchor>|null{
+  return historyConversationId&&message.turnId&&message.itemId?{conversationId:historyConversationId,turnId:message.turnId,itemId:message.itemId}:null;
+ }
+ function quoteMessage(message:Message){
+  const excerpt=message.text.trim().slice(0,8000);
+  if(!excerpt)return;
+  updatePrompt([drafts.text(),excerpt.split('\n').map(line=>'> '+line).join('\n')].filter(Boolean).join('\n\n')+'\n\n');
+  requestAnimationFrame(()=>scroll.current?.closest('.agent-panel')?.querySelector('textarea[data-guide-target="composer"]')?.closest('textarea')?.focus());
+ }
+ async function loadMessageDetail(message:Message){
+  const anchor=historyAnchor(message),key=JSON.stringify(anchor);
+  if(!anchor||historyDetails.current.has(key))return;
+  const current=historyCurrent();
+  historyDetails.current.add(key);
+  try{
+   const item=await conversationHistory.detail(anchor);
+   if(current()&&item?.id===anchor.itemId)setMessages(previous=>upsertItemMessage(previous,item,anchor.turnId));
+  }catch(error){if(current())onError(error);}finally{historyDetails.current.delete(key);}
+ }
+ async function bookmarkMessage(message:Message,bookmarked:boolean){
+  const anchor=historyAnchor(message);if(!anchor)return;
+  const current=historyCurrent();
+  try{
+   const items=await conversationHistory.bookmark({...anchor,bookmarked});if(!current())return;
+   if(historyPage)setSavedHistoryPage(previous=>previous&&{...previous,bookmarks:items});
+   else{
+    const page=await conversationHistory.page({conversationId:anchor.conversationId});
+    if(current())setSavedHistoryPage(page);
+   }
+  }
+  catch(error){if(current())onError(error);}
+ }
+ async function createDiscussion(anchor:ConversationAnchor,revision?:string){
+  if(branchInProgress.current)return;
+  const current=historyCurrent();
+  branchInProgress.current=true;setBranching(true);
+  try{
+   const result=await conversationHistory.branch({...anchor,...revision?{revision}:{}});
+   if('conversation' in result&&result.draft)drafts.seed(result.conversation.provider,result.conversation.threadId,result.draft);
+   if(!current())return;
+   if('preview' in result){setBranchPreview(result.preview);return;}
+   setBranchPreview(null);onOpenDiscussion?.(result.conversation);
+  }catch(error){if(current())onError(error);}
+  finally{branchInProgress.current=false;if(mounted.current)setBranching(false);}
+ }
+ async function branchMessage(message:Message){
+  const anchor=historyAnchor(message);if(anchor)await createDiscussion(anchor);
+ }
+ function openHistoryLocation(anchor:ConversationAnchor){
+  if(anchor.conversationId!==historyConversationId){onOpenHistoryLocation?.(anchor);return;}
+  setHistoryJump({...anchor,nonce:crypto.randomUUID()});
+ }
+ async function loadHistoryPage(kind:'older'|'latest'|'locate',anchor?:ConversationAnchor){
+  if(!historyConversationId||kind==='older'&&!historyPage?.before)return;
+  const token=++historyOperation.current,current=historyCurrent();
+  const before=kind==='older'?historyPage?.before||undefined:undefined;
+  const liveAtStart=kind==='locate'||kind==='latest'?new Map(messages.map(message=>[messageKey(message),message])):null;
+  if(kind==='older'){followScroll.current=false;setFollowing(false);saveReadingPosition();}
+  setPaging(true);
+  try{
+   const next=anchor?await conversationHistory.locate(anchor):await conversationHistory.page({conversationId:historyConversationId,before});
+   if(!current()||token!==historyOperation.current)return;
+   if(next.conversation.id!==historyConversationId)throw Error('History belongs to a different conversation');
+   const added=pageMessages(next);
+   setMessages(previous=>mergeResumedMessages(added,liveAtStart?previous.filter(message=>liveAtStart.get(messageKey(message))!==message):previous));
+   setSavedHistoryPage(previous=>({...next,atLatest:kind==='older'?previous?.atLatest??true:next.atLatest}));
+   if(kind==='latest')followLatest();
+  }catch(error){if(current()&&token===historyOperation.current){setHistoryJump(undefined);onError(error);}}
+  finally{if(current()&&token===historyOperation.current)setPaging(false);}
+ }
+ useEffect(()=>{
+  if(!historyTarget||historyTargetHandled.current===historyTarget.nonce||historyTarget.conversationId!==historyConversationId)return;
+  historyTargetHandled.current=historyTarget.nonce;setHistoryJump(historyTarget);
+ },[historyTarget?.nonce,historyConversationId]);
+ useLayoutEffect(()=>{
+  const node=scroll.current;
+  if(!historyJump||!node||historyLoad||hidden||historyJump.conversationId!==historyConversationId)return;
+  const rows=[...node.querySelectorAll<HTMLElement>('[data-turn-id]')];
+  const row=rows.find(value=>value.dataset.turnId===historyJump.turnId&&(!historyJump.itemId||value.dataset.itemId===historyJump.itemId));
+  if(row){
+   const group=row.closest<HTMLDetailsElement>('details:not([open])');if(group)group.open=true;
+   node.querySelector('[data-located]')?.removeAttribute('data-located');row.setAttribute('data-located','true');
+   followScroll.current=false;setFollowing(false);row.scrollIntoView({block:'center',behavior:'instant'});
+   readingOwner.current=readingKey(provider,thread);readingReady.current=true;saveReadingPosition();setHistoryJump(undefined);
+   return;
+  }
+  if(jumpRead.current!==historyJump.nonce){
+   jumpRead.current=historyJump.nonce;
+   const {conversationId,turnId,itemId}=historyJump;
+   void loadHistoryPage('locate',{conversationId,turnId,...itemId?{itemId}:{}});
+  }else if(!paging){
+   setHistoryJump(undefined);onError(t('此消息已无法定位。'));
+  }
+ },[historyJump?.nonce,historyConversationId,historyLoad,hidden,messages,paging]);
  useEffect(()=>()=>saveReadingPosition(),[]);
  const rpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:providerRef.current,method,params});
  useEffect(()=>{
   const initialSeq=selectionSeq.current;void invoke('state').then(state=>{if(initialSeq!==selectionSeq.current||providerTouched.current)return;const selected=(drafts.owner().threadId||drafts.text()?drafts.owner().provider:state.settings?.agentProvider||'codex') as AgentProvider;selectDraft(selected,drafts.owner().provider===selected?drafts.owner().threadId:null);setProvider(selected);providerRef.current=selected;setThreads([]);const a=selected==='codex'?state.settings?.agent||{}:state.settings?.agentProviders?.[selected]||{};setContextWindow(a.contextWindow?.toString()||'');setCompactLimit(a.compactLimit?.toString()||'');setEffort(storedPreference('studio.effort.'+selected)||a.effort||'');}).catch(()=>{});
   mounted.current=true;
   const unsubscribe=window.studio?.onEvent(event=>{
+   if(event.method==='studio/chatEvidenceSelected'){
+    const {provider,threadId,files,comment}=(event.params||{}) as Partial<ChatEvidenceSelection>;
+    if(provider&&threadId&&Array.isArray(files)){try{const text=drafts.appendToDraft(provider,threadId,comment||'',files);setPrompt(text);refreshFiles();}catch(error){messageCallbacks.current.onError(error);}}
+    return;
+   }
    const eventProvider=event.provider||'codex';
    const eventThread=event.params?.threadId,receipt=event.params?.turn;
-   if(event.method==='turn/completed'&&typeof eventThread==='string'&&typeof receipt?.id==='string'){
-    if(followUps.settle(followUpKey(eventProvider,eventThread),receipt.id,receipt.status==='completed'&&!receipt.error))refreshFollowUps();
-   }
-   if(event.method==='studio/codexDisconnected'&&typeof eventThread==='string'&&followUps.pause(followUpKey(eventProvider,eventThread),'previous'))refreshFollowUps();
-   if(event.method==='studio/accountUpdated'&&event.params?.credentialsChanged&&followUps.pauseProvider(eventProvider,'changed'))refreshFollowUps();
-   if(event.method==='studio/conversationDeleted'&&followUps.discard(followUpKey(event.params.provider||eventProvider,eventThread)))refreshFollowUps();
-   if(event.method==='studio/conversationContextChanged'){
-    const {conversation,oldThreadId}=event.params;
-    if(followUps.rekey(followUpKey(conversation.provider,oldThreadId),followUpKey(conversation.provider,conversation.threadId)))refreshFollowUps();
+   if(event.method==='studio/agentQueueChanged'){acceptQueue(event.params);return;}
+   if(event.method==='studio/conversationDeleted'&&typeof eventThread==='string'){
+    forgetLegacyFollowUps(()=>localStorage,event.params.provider||eventProvider,eventThread);
+    forgetQueueAdmission(()=>localStorage,followUpKey(event.params.provider||eventProvider,eventThread));
    }
    if(event.method==='studio/conversationDeleted')forgetQuestions(event.params.provider||eventProvider,event.params.threadId);
    if(event.method==='studio/conversationContextChanged')forgetQuestions(eventProvider,event.params.oldThreadId);
@@ -279,7 +451,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(event.method==='studio/codexDisconnected')forgetQuestions(eventProvider,eventThread);
    if(event.method==='turn/completed'&&typeof receipt?.id==='string')forgetQuestions(eventProvider,eventThread,undefined,receipt.id);
    if(event.method==='studio/conversationDeleted'){readingPositions.current?.discard(readingKey(event.params.provider||event.provider||'codex',event.params.threadId));setPrompt(drafts.discard(event.params.provider||event.provider||'codex',event.params.threadId));}
-   if(event.method==='studio/conversationContextChanged'){const p=event.params;setPrompt(drafts.rekey(p.conversation.provider,p.oldThreadId,p.conversation.threadId));}
+   if(event.method==='studio/conversationContextChanged'){const p=event.params;recoverDraft(p.conversation.provider,p.oldThreadId,p.conversation.threadId,p.uploadsRetained===true);}
    if((event.provider||'codex')!==providerRef.current)return;
    if(event.method==='studio/skillsLoaded'){const call=modelCallRef.current,p=event.params||{};if(call&&p.requestId===call.requestId&&p.threadId===call.threadId&&p.threadId===threadRef.current&&(!p.turnId||!call.turnId||p.turnId===call.turnId))setAutoSkillStatus({...p,provider:event.provider||'codex'});return;}
    if(event.method==='studio/conversationContextChanged'){
@@ -287,7 +459,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
     if(pendingResume.current===p.oldThreadId)pendingResume.current=c.threadId;
     threadRef.current=c.threadId;setThread(c.threadId);setWorkflowId(p.taskId);setTurn(null);observedTurn.current=null;settledTurns.current.clear();viewedStop.current=null;setUsage(null);setRequests([]);setAutoSkillStatus(null);
     const flight=activeSend.current;if(flight&&flight.threadId===p.oldThreadId){flight.threadId=c.threadId;flight.turnId=null;}
-    setMessages(old=>old.filter(message=>message.role==='user').slice(-1));
+    setMessages(old=>old.filter(message=>message.role==='user').slice(-1).map(message=>({...message,files:attachmentsAfterReplacement(message.files,p.uploadsRetained===true)})));
     const call=modelCallRef.current;if(call&&call.threadId===p.oldThreadId){call.threadId=c.threadId;call.turnId=null;call.output=false;setModelCall({...call});}
     setThreads(old=>[{...c,id:c.threadId},...old.filter(row=>row.id!==p.oldThreadId&&row.id!==c.threadId)]);conversationRef.current?.(c,sessionNonceRef.current);return;
    }
@@ -301,6 +473,19 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    const viewedThread=threadRef.current||pendingResume.current;
    if(event.method==='studio/toolsStatus'){if(event.params?.threadId&&event.params.threadId!==viewedThread)return;toolsRef.current=event.params;setTools(event.params);return;}
    if(event.params?.threadId&&event.params.threadId!==viewedThread)return;
+   if(event.method==='studio/agentQueueDelivered'){
+    const {id,text,turnId,files}=event.params;
+    if(typeof id==='string'&&typeof text==='string')setMessages(previous=>previous.some(message=>message.id===id)?previous:[
+     ...previous,{id,role:'user',text,turnId,clientUserMessageId:id,justSent:true,...(Array.isArray(files)?{files}:{})},
+    ]);
+    return;
+   }
+   if(event.method==='studio/agentQueueStopUnconfirmed'){
+    if(event.params.turnId===displayedTurnId(viewedThread||'')){
+     setStopStatus('unknown');setSendNotice(t('停止结果尚未确认，可再次请求停止。'));
+    }
+    return;
+   }
    if(event.method==='studio/codexVersionWarning'){
     if(providerRef.current==='codex'&&!connectionOwner.current){const warning=codexVersionWarning(event.params);if(warning)setVersionWarning(warning);}
     return;
@@ -334,10 +519,21 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(event.method==='item/agentMessage/delta'){const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId===p.turnId&&p.delta?.trim())call.output=true;}
    if(event.method==='item/agentMessage/delta')setRetrying(null);
     if(event.method==='item/agentMessage/delta')setMessages(prev=>{
-    const id=p.itemId||'agent',existing=prev.find(m=>m.id===id);
-    return existing?prev.map(m=>m.id===id?{...m,text:m.text+(p.delta||'')}:m):[...prev,{id,role:'agent',text:p.delta||''}];
+    const id=p.itemId||'agent',turnId=p.turnId||currentTurn||undefined;
+    const existing=prev.find(message=>message.id===id&&(!turnId||!message.turnId||message.turnId===turnId));
+    return existing?prev.map(message=>message===existing?{...message,text:message.text+(p.delta||''),...turnId?{turnId,itemId:id}:{}}:message):[...prev,{id,role:'agent',text:p.delta||'',...turnId?{turnId,itemId:id}:{}}];
    });
-   if(['item/started','item/completed'].includes(event.method)&&p.item&&['mcpToolCall','webSearch','commandExecution','fileChange','agentMessage'].includes(p.item.type))setMessages(prev=>upsertItemMessage(prev,{...p.item,status:p.item.status||(event.method==='item/completed'?'completed':'inProgress')}));
+   if(event.method==='thread/compacted'&&p.turnId===currentTurn&&currentTurn){
+    const id='legacy-context-compaction:'+currentTurn;
+    setMessages(previous=>previous.some(message=>message.role==='compaction'&&message.turnId===currentTurn)
+     ?previous:upsertItemMessage(previous,{id,type:'contextCompaction'},currentTurn));
+   }
+   if(event.method==='item/completed'&&p.item?.type==='contextCompaction'){
+    const id='legacy-context-compaction:'+p.turnId;
+    setMessages(previous=>upsertItemMessage(previous.filter(message=>message.id!==id),{...p.item,turnId:p.turnId},p.turnId));
+   }
+   if(event.method==='item/completed'&&p.item?.type==='plan')setMessages(prev=>upsertItemMessage(prev,p.item,p.turnId||currentTurn||undefined));
+   if(['item/started','item/completed'].includes(event.method)&&p.item&&['mcpToolCall','webSearch','commandExecution','fileChange','agentMessage'].includes(p.item.type))setMessages(prev=>upsertItemMessage(prev,{...p.item,status:p.item.status||(event.method==='item/completed'?'completed':'inProgress')},p.turnId||currentTurn||undefined));
    if(event.method==='thread/tokenUsage/updated')setUsage(p.tokenUsage);
    if(event.method==='turn/started'){
     const id=p.turn?.id;
@@ -467,9 +663,9 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(selectedProvider==='codex'){setModel(value);selectEffort(models);return;}
   setApplying(true);try{const result=await invoke('agent.rpc',{provider:selectedProvider,method:'model/select',params:{model:value}});if(current()){setModel(value);setModels(result.data||[]);selectEffort(result.data||[]);}}catch(error){if(current())onError(error);}finally{if(current())setApplying(false);}
  }
- async function resume(id:string,seq=++selectionSeq.current,selectedProject=projectId,rebuild=false){
+ async function resume(id:string,seq=++selectionSeq.current,selectedProject=projectId,rebuild=false,readOnly=false){
   attachmentClearRef.current?.();const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
-  const localHistory=!rebuild&&API_PROVIDER_GROUPS.includes(selectedProvider);
+  const localHistory=!rebuild&&(API_PROVIDER_GROUPS.includes(selectedProvider)||historyEnabled&&(selectedProvider==='deepseek'||readOnly));
   if(localHistory){setConnected(false);setModels([]);setModel('');setEffort('');setNeedsAuth(false);setTools({status:'not_run',count:0});}
   setSendNotice('');selectDraft(selectedProvider,id);setMessages([]);setWorkflowId(null);setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'loading'});
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
@@ -477,17 +673,34 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   try{
    const originalId=id;
    if(rebuild){if(selectedProvider!=='codex')throw Error('Unsupported conversation recovery provider');await invoke('conversation.select',{id:selectedProvider+':'+id});if(!current())return;}
-   const r=localHistory?await selectedRpc('thread/read',{threadId:id,includeTurns:true}):rebuild?await recoverConversation({provider:'codex',threadId:id,...model?{model}:{}}):await selectedRpc('thread/resume',{threadId:id});if(!current())return;
-   if(r.studioRecovery?.status==='required'){setRecovery({threadId:id});setMessages([]);setHistoryLoad(null);return;}
-   if(r.studioRecovery?.status==='recovered'){
-    const c=r.studioRecovery.conversation;if(selectedProvider!=='codex'||r.studioRecovery.oldThreadId!==id||c?.provider!==selectedProvider||c?.threadId!==r.thread?.id||c?.id!==selectedProvider+':'+r.thread?.id)throw Error('恢复的会话与选中会话不匹配');setPrompt(drafts.rekey(selectedProvider,id,c.threadId));id=c.threadId;
+   const r=localHistory?(historyEnabled?null:await selectedRpc('thread/read',{threadId:id,includeTurns:true})):rebuild?await recoverConversation({provider:'codex',threadId:id,...model?{model}:{}}):await selectedRpc('thread/resume',{threadId:id,...historyEnabled&&selectedProvider==='codex'?{excludeTurns:true}:{}});if(!current())return;
+   if(r?.studioRecovery?.status==='required'){setRecovery({threadId:id});setMessages([]);setHistoryLoad(null);return;}
+   if(r?.studioRecovery?.status==='recovered'){
+    const c=r.studioRecovery.conversation;if(selectedProvider!=='codex'||r.studioRecovery.oldThreadId!==id||c?.provider!==selectedProvider||c?.threadId!==r.thread?.id||c?.id!==selectedProvider+':'+r.thread?.id)throw Error('恢复的会话与选中会话不匹配');recoverDraft(selectedProvider,id,c.threadId,r.studioRecovery.uploadsRetained===true);id=c.threadId;
    }
-   if(r.thread?.id!==id)throw Error('恢复的会话与选中会话不匹配');
-   const read=localHistory?r:await selectedRpc('thread/read',{threadId:id,includeTurns:true});if(!current())return;
-   if(read.thread?.id&&read.thread.id!==id||read.thread?.provider&&read.thread.provider!==selectedProvider)throw Error('读取的会话与选中会话不匹配');
-   const list:Message[]=replayMessages(read.thread?.turns||[]);
+   if(r&&r.thread?.id!==id)throw Error('恢复的会话与选中会话不匹配');
    const saved=sessionSelection?.conversation;
-   const remembered=localHistory&&saved?.provider===selectedProvider&&saved.threadId===id?saved:await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'});if(!current())return;
+   const conversationId=selectedProvider+':'+id;
+   let page:ConversationHistoryPage|null=null,read;
+   if(historyEnabled){
+    if(!localHistory&&r&&!r.studioRecovery&&saved?.id!==conversationId){
+     await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'});if(!current())return;
+    }
+    page=await conversationHistory.page({conversationId});if(!current())return;
+    if(page.conversation.id!==conversationId||page.conversation.provider!==selectedProvider||page.conversation.threadId!==id)throw Error('读取的会话与选中会话不匹配');
+    const position=readingPositions.current?.read(readingKey(selectedProvider,id));
+    const latest=page;
+    if(position?.turnId&&!position.follow&&!page.turns.some(turn=>turn.id===position.turnId))try{
+     const located=await conversationHistory.locate({conversationId,turnId:position.turnId});
+     if(located.conversation.id===conversationId)page={...located,studioSession:latest.studioSession,liveTurn:latest.liveTurn};
+    }catch{/* A stale reading anchor can restore to the latest retained page. */}
+    if(!current())return;
+   }else{
+    read=localHistory?r:await selectedRpc('thread/read',{threadId:id,includeTurns:true});if(!current())return;
+    if(read.thread?.id&&read.thread.id!==id||read.thread?.provider&&read.thread.provider!==selectedProvider)throw Error('读取的会话与选中会话不匹配');
+   }
+   const list:Message[]=page?pageMessages(page):replayMessages(read?.thread?.turns||[]);
+   const remembered=page?.conversation??(localHistory&&saved?.provider===selectedProvider&&saved.threadId===id?saved:await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'}));if(!current())return;
    if(!localHistory){
     const catalog=await selectedRpc('model/list');if(!current())return;if(!Array.isArray(catalog.data))throw Error('Invalid resumed model catalog');setModels(catalog.data);
     const resumedModel=r.model||modelRef.current||catalog.data.find((entry:any)=>entry.isDefault)?.model||catalog.data[0]?.model||'';
@@ -496,7 +709,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    // A background reply can rename this chat while its history or model list is loading.
    const latestRow=resumeMetadata.current as Conversation|null;
    const conversation=latestRow?.id===remembered.id?latestRow:remembered;
-   const receipt:SessionTurn|undefined=read.studioSession,latest=observedTurn.current as SessionTurn|null,active=latest?.threadId===id?latest:receipt;
+   const receipt:SessionTurn|undefined=page?.studioSession??read?.studioSession,latest=observedTurn.current as SessionTurn|null,active=latest?.threadId===id?latest:receipt;
    if(active?.threadId===id){observedTurn.current=active;setBusy(active.busy);setTurn(active.turnId);}
    if(receipt?.requests&&active?.busy){
     const requests=[...new Map([...receipt.requests,...requestsRef.current].filter(request=>!resolvedRequests.current.has(String(request.id))).map(request=>[String(request.id),request])).values()];
@@ -505,15 +718,16 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
     for(const request of requests)if(isUserInputRequest(request))restoreQuestion(request);
     setRequests(requests);
    }else if(!active?.busy)forgetQuestions(selectedProvider,id);
-   setThread(id);threadRef.current=id;setMessages(live=>mergeResumedMessages(list,live));setHistoryLoad(null);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation,nonce);
+   setThread(id);threadRef.current=id;setSavedHistoryPage(page);setMessages(live=>mergeResumedMessages(list,live));setHistoryLoad(null);setWorkflowId(conversation.taskId);setThreads(old=>[{id, name:conversation.name},...old.filter(value=>value.id!==id&&value.id!==originalId)]);setImportOpen(false);conversationRef.current?.(conversation,nonce);
   }catch(e){if(current()){const error=redactTranscriptText(e instanceof Error?e.message:String(e));if(rebuild)setRecovery({threadId:pendingResume.current||id,error});else setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'failed',error});}}finally{if(current()){pendingResume.current=null;selectionPending.current=false;setApplying(false);}}
  }
  useEffect(()=>{
   if(!sessionSelection||handledSelection.current===sessionSelection.nonce)return;handledSelection.current=sessionSelection.nonce;const seq=++selectionSeq.current;
   leaveDisplayedTurn();
+  historyOperation.current++;setSavedHistoryPage(null);setPaging(false);setHistoryJump(undefined);setBranchPreview(null);
   if(sessionSelection.conversation){
-   const selected=sessionSelection.conversation,owner=drafts.owner();
-   if(sessionSelection.adoptDraft&&owner.provider===selected.provider&&!owner.threadId)drafts.rebind(drafts.capture(),selected.threadId);
+   const selected=sessionSelection.conversation,owner=drafts.attachmentOwner();
+   if(sessionSelection.adoptedDraftId&&owner.provider===selected.provider&&!owner.threadId&&owner.draftId===sessionSelection.adoptedDraftId)drafts.rebind(drafts.capture(),selected.threadId);
    selectDraft(selected.provider,selected.threadId);
   }
   selectionPending.current=true;threadRef.current=null;setThread(null);setMessages([]);setWorkflowId(null);setHistoryLoad(sessionSelection.conversation?{provider:sessionSelection.conversation.provider,threadId:sessionSelection.conversation.threadId,projectId:sessionSelection.conversation.projectId||'',status:'loading'}:null);setApplying(true);
@@ -523,8 +737,11 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    const selected=sessionSelection.conversation;if(!selected)return;
    const different=selected.provider!==providerRef.current;if(different&&!await selectProvider(selected.provider,seq)){if(seq===selectionSeq.current)setHistoryLoad({provider:selected.provider,threadId:selected.threadId,projectId:selected.projectId||'',status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}
    if(seq!==selectionSeq.current)return;
-   if(!API_PROVIDER_GROUPS.includes(selected.provider)&&!await connect(false,seq,false,selected.threadId)){if(seq===selectionSeq.current)setHistoryLoad({provider:selected.provider,threadId:selected.threadId,projectId:selected.projectId||'',status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}
-   if(seq!==selectionSeq.current)return;await resume(selected.threadId,seq,selected.projectId||'');
+   const storedOnly=API_PROVIDER_GROUPS.includes(selected.provider)||historyEnabled&&selected.provider==='deepseek';
+   const providerConnected=storedOnly||await connect(false,seq,false,selected.threadId);
+   if(seq!==selectionSeq.current)return;
+   if(!providerConnected&&!historyEnabled){setHistoryLoad({provider:selected.provider,threadId:selected.threadId,projectId:selected.projectId||'',status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}
+   await resume(selected.threadId,seq,selected.projectId||'',false,!providerConnected);
   }finally{if(seq===selectionSeq.current){selectionPending.current=false;setApplying(false);}}};void activate();
  },[sessionSelection?.nonce]);
  useEffect(()=>{
@@ -534,14 +751,15 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   handledDraftIntents.current.add(intent.id);
   proposePrompt(intent.text);
  },[intent?.id,sessionSelection?.nonce,thread,provider,busy]);
- useEffect(()=>{if(pendingDefaults||!intent?.autoSend||consumedIntent.current===intent.id||busy||queueComposer||requestsRef.current.some(isUserInputRequest)||applying||connecting||!localApiThread&&(!connected||!models.length)||terminalSelected&&!terminalReady&&!canAcquireTerminal||(intent.threadId&&thread!==intent.threadId)||(intent.provider&&providerRef.current!==intent.provider))return;consumedIntent.current=intent.id;void send(intent.text,{reviewMode:intent.reviewMode,taskId:intent.taskId});},[intent?.id,connected,busy,applying,connecting,thread,localApiThread,models.length,terminalReady,canAcquireTerminal,pendingDefaults,requests.length,followUpVersion]);
- async function send(textOverride?:string,action:{reviewMode?:boolean;taskId?:string;queued?:QueuedSend}={}){
+ useEffect(()=>{if(pendingDefaults||!intent?.autoSend||consumedIntent.current===intent.id||busy||queueComposer||requestsRef.current.some(isUserInputRequest)||applying||connecting||!localApiThread&&(!connected||!models.length)||terminalSelected&&!terminalReady&&!canAcquireTerminal||(intent.threadId&&thread!==intent.threadId)||(intent.provider&&providerRef.current!==intent.provider))return;consumedIntent.current=intent.id;void send(intent.text,{reviewMode:intent.reviewMode,taskId:intent.taskId});},[intent?.id,connected,busy,applying,connecting,thread,localApiThread,models.length,terminalReady,canAcquireTerminal,pendingDefaults,requests.length,followUpQueues]);
+ async function send(textOverride?:string,action:{reviewMode?:boolean;taskId?:string}={}){
   if(pendingDefaults)return;
-  const queued=action.queued;
-  if(queued&&!queued.current())return;
   const reconnectHistory=localApiThread&&(!connected||!models.length);
-  const text=textOverride??prompt;if(needsAuth&&!reconnectHistory){openAccounts();return;}if(!text.trim()||busy||observedTurn.current?.busy||requestsRef.current.some(isUserInputRequest)||sendOwner.current||activeSend.current)return;
-  const turnPlanning=queued?.item.planningMode??planningRef.current;
+  const fileRefs=textOverride===undefined?drafts.files():[];
+  if(fileRefs.some(file=>file.kind==='image')&&currentModel?.inputModalities&&!currentModel.inputModalities.includes('image')){setSendNotice(t('当前模型仅支持文字，请更换模型或移除图片。'));return;}
+  if(readingFiles.current.has(drafts.capture().entry))return;
+  const text=textOverride??(prompt.trim()?prompt:attachmentPrompt(fileRefs));if(needsAuth&&!reconnectHistory){openAccounts();return;}if(!text.trim()||busy||observedTurn.current?.busy||requestsRef.current.some(isUserInputRequest)||sendOwner.current||activeSend.current)return;
+  const turnPlanning=planningRef.current;
   if(applying||connecting||selectionPending.current||historyHidden||handledSelection.current!==sessionNonceRef.current){setSendNotice(t('正在恢复会话，请稍后发送。'));return;}
   if(recovery){setSendNotice(t('请先恢复当前对话，输入草稿已保留。'));return;}
   if(!reconnectHistory&&(!connected||!models.length)){setSendNotice(t('请先连接服务商并选择模型。'));return;}
@@ -556,17 +774,17 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    return true;
   }
   if(!reconnectHistory&&!checkTurnResource())return;
-  const attachment=queued?queued.item.attachment:skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,draft=drafts.capture(),manual=textOverride===undefined,resourceSelection=resourceRef.current?.selectionId||null;
+  const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,draft=drafts.capture(),manual=textOverride===undefined,resourceSelection=resourceRef.current?.selectionId||null;
   let resourceWorkflow=resourceRef.current?.workflowReady===true,resourceGranted=resourceRef.current?.agentReady===true;
   let route=toolsRef.current.scope;const routeState=(resource:ComputeResourceState|null|undefined)=>resource?.kind==='ssh-connection'?JSON.stringify(route==='terminal-only'?resource.capabilities?.terminal:resource.capabilities?.service):null;let resourceRoute=routeState(resourceRef.current);
-  const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current&&resourceSelection===(resourceRef.current?.selectionId||null)&&(queued?.current()??true)&&(waitingForConnection||(resourceRef.current?.kind==='ssh-connection'?acquiring||route===toolsRef.current.scope&&resourceRoute===routeState(resourceRef.current):resourceWorkflow===(resourceRef.current?.workflowReady===true)&&resourceGranted===(resourceRef.current?.agentReady===true)));
+  const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current&&resourceSelection===(resourceRef.current?.selectionId||null)&&(waitingForConnection||(resourceRef.current?.kind==='ssh-connection'?acquiring||route===toolsRef.current.scope&&resourceRoute===routeState(resourceRef.current):resourceWorkflow===(resourceRef.current?.workflowReady===true)&&resourceGranted===(resourceRef.current?.agentReady===true)));
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
-  const owner=Symbol(),flight:SendFlight={owner,provider:selectedProvider,threadId:threadRef.current,turnId:null,phase:'preparing',cancelled:false,interrupting:false,interruptSent:false,settled:false,draftAccepted:false,manual,queued:!!queued,current,draft,text};
+  const owner=Symbol(),flight:SendFlight={owner,provider:selectedProvider,threadId:threadRef.current,turnId:null,phase:'preparing',cancelled:false,interrupting:false,interruptSent:false,settled:false,draftAccepted:false,manual,current,draft,text};
   sendOwner.current=owner;activeSend.current=flight;
   const preparing=()=>activeSend.current===flight&&current()&&!flight.cancelled;
   let acknowledged=false,optimisticId:string|null=null;
   setSendNotice('');setStopStatus(null);setRetrying(null);setBusy(true);
-  const retainRequest=()=>{if(!manual&&!queued&&drafts.retain(draft,text))setPrompt(drafts.text());};
+  const retainRequest=()=>{if(!manual&&drafts.retain(draft,text))setPrompt(drafts.text());};
   try{
    let id=threadRef.current;
    let turnModel=model,turnEffort=effort;
@@ -580,7 +798,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
     route=state.scope;resourceRoute=routeState(resource);resourceWorkflow=resource?.workflowReady===true;resourceGranted=resource?.agentReady===true;waitingForConnection=false;
     if(!checkTurnResource()){retainRequest();return;}
    }
-   if(!id){const r=await selectedRpc('thread/start',{model:turnModel||undefined,...(turnTerminal && projectId ? {studioInitialProjectId:projectId} : {})});if(!preparing())return;id=r.thread.id;}
+   if(!id){const r=await selectedRpc('thread/start',{model:turnModel||undefined,...fileRefs.length?{studioAttachmentDraftId:drafts.attachmentOwner().draftId}:{},...(turnTerminal && projectId ? {studioInitialProjectId:projectId} : {})});if(!preparing())return;id=r.thread.id;}
    else if(acquiring){const r=await selectedRpc('thread/resume',{threadId:id});if(!preparing())return;if(r.studioRecovery?.status==='required'){setRecovery({threadId:id});return;}id=r.thread.id;}
    flight.threadId=id;
    if(acquiring){
@@ -591,36 +809,32 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    }
    const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:projectId||null,groupId:conversationGroupId||null,intent:text});if(!preparing())return;conversationRef.current?.(conversation,nonce);drafts.rebind(draft,id!);setPrompt(drafts.text());setThread(id);threadRef.current=id;setThreads(old=>[{id,name:conversation.name},...old.filter(value=>value.id!==id)]);
    if(turnTerminal&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
-   let taskId=queued?.item.preparedTaskId||action.taskId||conversation.taskId;
-   const fresh=(queued?.item.newWorkflow??newWorkflow)||explicitNewWorkflow(text);
-   if(!queued?.item.preparedTaskId&&(turnPlanning||fresh)&&!action.reviewMode&&(!turnTerminal||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only'){
-    if(queued&&fresh)followUps.markAttempt(queued.item.id,true);
+   let taskId=action.taskId||conversation.taskId;
+   const fresh=newWorkflow||explicitNewWorkflow(text);
+   if((turnPlanning||fresh)&&!action.reviewMode&&(!turnTerminal||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only'){
     const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:selectedProvider,request:text,projectId:conversation.projectId??null});
-    if(mounted.current&&queued&&fresh&&typeof task.id==='string'&&task.id)followUps.markAttempt(queued.item.id,false,task.id);
     if(!preparing())return;taskId=task.id;openTaskRef.current?.(task.id);
    }
    if(turnTerminal&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
-   setWorkflowId(taskId||null);if(!queued)setNewWorkflow(false);
-    followLatest();setMessages(prev=>[...prev,{id:(optimisticId=crypto.randomUUID()),role:'user',text,justSent:true}]);
-   const input:any[]=[{type:'text',text},{type:'text',text:workspaceContextHeader+'\n'+(queued?.item.context??context)}];if(attachment&&'path' in attachment)input.push({type:'skill',name:attachment.name,path:attachment.path});
+   setWorkflowId(taskId||null);setNewWorkflow(false);
+    followLatest();setMessages(prev=>[...prev,{id:(optimisticId=crypto.randomUUID()),role:'user',text,...fileRefs.length?{files:fileRefs}:{},justSent:true}]);
+   const input:any[]=[{type:'text',text},{type:'text',text:workspaceContextHeader+'\n'+context}];if(attachment&&'path' in attachment)input.push({type:'skill',name:attachment.name,path:attachment.path});
    const call:ModelCall={requestId:crypto.randomUUID(),provider:selectedProvider,model:turnModel,threadId:id!,turnId:null,output:false,status:'in_progress'};modelCallRef.current=call;setModelCall({...call});
    if(!preparing())return;flight.phase='submitted';
-   if(queued)followUps.markAttempt(queued.item.id,true);
-   const r=await selectedRpc('turn/start',{studioTurnRequestId:call.requestId,...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode:turnPlanning,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:turnModel||undefined,effort:turnEffort||undefined});
-   if(mounted.current&&queued&&r.studioRecovery?.status==='required')followUps.markAttempt(queued.item.id,false);
+   const r=await selectedRpc('turn/start',{studioTurnRequestId:call.requestId,...fileRefs.length?{studioAttachments:fileRefs.map(file=>file.id)}:{},...attachment&&'functionId' in attachment?{studioSkillId:attachment.functionId}:{},planningMode:turnPlanning,reviewMode:!!action.reviewMode,...taskId?{studioTaskId:taskId}:{},threadId:id,input,model:turnModel||undefined,effort:turnEffort||undefined});
    if(typeof r.turn?.id==='string'&&r.turn.id){
     if(flight.turnId&&flight.turnId!==r.turn.id)throw Error('Agent acknowledged a different turn');
     acknowledged=true;flight.turnId=r.turn.id;acceptDraft(flight);
     if(flight.cancelled)void interruptFlight(flight);
    }
    if(!current()||activeSend.current!==flight){
-    if(acknowledged&&current()&&modelCallRef.current===call&&attachment&&!queued)attachmentConsumedRef.current?.(attachment.attachmentId);
+    if(acknowledged&&current()&&modelCallRef.current===call&&attachment)attachmentConsumedRef.current?.(attachment.attachmentId);
     return;
    }
    if(r.studioRecovery?.status==='required'){setRecovery({threadId:r.studioRecovery.oldThreadId});retainRequest();if(modelCallRef.current===call){call.status='failed';setModelCall({...call});}return;}
    if(!acknowledged)throw Error('Agent did not acknowledge the submitted message');
    if(modelCallRef.current===call){
-    if(attachment&&!queued)attachmentConsumedRef.current?.(attachment.attachmentId);
+    if(attachment)attachmentConsumedRef.current?.(attachment.attachmentId);
     call.turnId=r.turn.id;
    }
    observedTurn.current={threadId:flight.threadId!,busy:true,turnId:flight.turnId};
@@ -634,7 +848,6 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    }
    messageCallbacks.current.onError(error);
   }finally{
-   if(queued)queued.turnId=flight.turnId;
    if(sendOwner.current===owner)sendOwner.current=null;
    if(activeSend.current===flight&&!acknowledged&&!flight.turnId){releaseSend(flight);setBusy(false);setStopStatus(null);}
   }
@@ -695,7 +908,11 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const composerOwner=drafts.owner(),composerUnbound=composerOwner.provider!==provider||composerOwner.threadId!==thread;
  const historyHidden=!!historyLoad||!!(sessionSelection&&handledSelection.current!==sessionSelection.nonce)||!!sessionSelection?.pending;
  const composerQuestions=historyHidden?[]:requests.filter(isUserInputRequest);
- const composerQuestion=composerQuestions[0],questionDraft=composerQuestion?questionDrafts.current.get(questionKey(composerQuestion)):undefined;
+ const jumpRequest=attentionTarget?.provider===provider&&attentionTarget.threadId===thread&&'requestId' in attentionTarget.target
+  &&attentionTarget.target.kind==='question'?attentionTarget.target:undefined;
+ const composerQuestion=composerQuestions.find(request=>jumpRequest&&String(request.id)===jumpRequest.requestId&&
+  (!request.params?.turnId||request.params.turnId===jumpRequest.turnId))||composerQuestions[0];
+ const questionDraft=composerQuestion?questionDrafts.current.get(questionKey(composerQuestion)):undefined;
  const sessionWorkspaceProfile=workspaceProfileId||(computeResource?.kind==='ssh-connection'?computeResource.profileId:null);
  const localConversation=sessionSelection?.pending?null:selectedLocalConversation===undefined?sessionSelection?.conversation||(thread?{provider,threadId:thread}:null):selectedLocalConversation;
  const localOwner=localConversation?JSON.stringify([localConversation.provider,localConversation.threadId,sessionWorkspaceProfile,computeResource?.selectionId]):null;
@@ -706,123 +923,166 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const setupToolLabel=t('让 Agent 配置');
  const missingRequest:RpcEvent|null=missingTool?{method:'item/tool/requestUserInput',id:missingTool.id,params:{questions:[{id:'action',question:t('流程缺少工具')+' · '+missingTool.tool,options:[{label:setupToolLabel},{label:t('稍后')}]}]}}:null;
  const queueKey=thread&&localConversation?.provider===provider&&localConversation.threadId===thread?followUpKey(provider,thread):null;
- const queue=followUps.read(queueKey??''),queueComposer=busy||(!queue.pause&&queue.items.length>0);
+ const queue=queueKey?followUpQueues[queueKey]:undefined;
+ const queueItems=queue?.items??[];
+ const queueFlight=queueItems.some(item=>item.status==='preparing'||item.status==='submitting');
+ const queueComposer=busy||(!queue?.pause&&queueItems.length>0);
  const followUpCurrent=()=>mounted.current&&!!queueKey&&localCurrent()&&threadRef.current===thread&&providerRef.current===provider
   &&handledSelection.current===sessionNonceRef.current&&!selectionPending.current&&!historyHidden&&!composerUnbound;
- const followUpRoute=()=>{
-  const resource=resourceRef.current;
-  return JSON.stringify([projectId??null,sessionWorkspaceProfile??null,resource?.kind??null,resource?.selectionId??null,resource?.connectionId??null,
-   resource?.profileVersion??null,resource?.kind?toolsRef.current.scope==='terminal-only':null,resource?.kind?resource.operator:null]);
- };
- const route=followUpRoute();
  const followUpControlsReady=followUpCurrent()&&!applying&&!connecting&&!pendingDefaults&&!recovery&&!stopStatus
-  &&!requestsRef.current.some(isUserInputRequest)&&!missingRequest&&!sendOwner.current&&!steering.current.has(queueKey??'');
- const queueAllowed=followUpControlsReady&&(!!turn||queue.items.length>0);
+  &&!requestsRef.current.some(isUserInputRequest)&&!missingRequest&&!sendOwner.current&&!steering.current.has(queueKey??'')
+  &&!queueAdmission.current.get(queueKey??'')?.pending;
+ const queueAllowed=followUpControlsReady&&(!!turn||queueItems.length>0);
  const canSteer=provider!=='kimi'&&(connected||localApiThread)&&followUpControlsReady&&busy&&!!turn
-  &&!followUps.hasSettled(queueKey??'',turn)&&!queue.pending;
- const canDrain=followUpControlsReady&&!busy&&!activeSend.current&&(localApiThread||connected&&models.length>0)
-  &&(!terminalSelected||terminalReady||canAcquireTerminal);
+  &&!settledTurns.current.has(turn)&&!queueFlight;
 
- function enqueuePrompt(){
-  if(!queueKey||!queueAllowed||!followUpCurrent()||sendOwner.current||steering.current.has(queueKey))return;
+ async function queueRpc(action:AgentQueueAction){
+  if(!thread)throw Error('A saved conversation is required');
+  const request:AgentQueueRequest={provider,threadId:thread,...action};
+  const result=await invoke<AgentQueueResult>('agent.queue',request);
+  if(!result?.queue||result.queue.provider!==provider||result.queue.threadId!==thread)throw Error('Follow-up receipt belongs to another conversation');
+  if(mounted.current)acceptQueue(result.queue);
+  return result;
+ }
+ function queueError(error:unknown){
+  if(followUpCurrent())setSendNotice(redactTranscriptText(error instanceof Error?error.message:String(error)));
+ }
+ useEffect(()=>{
+  if(!queueKey||!thread||!followUpCurrent())return;
+  const legacy=readLegacyFollowUps(()=>localStorage,provider,thread);
+  const draft=drafts.capture(),fingerprint=JSON.stringify([draft.text,draft.files.map(file=>file.id)]);
+  const pendingId=readQueueAdmission(()=>localStorage,queueKey,fingerprint);
+  void (async()=>{
+   if(legacy.length){
+    await queueRpc({action:'import',items:legacy});
+    forgetLegacyFollowUps(()=>localStorage,provider,thread);
+   }
+   const result=await queueRpc({action:'read',...(pendingId?{pendingId}:{})});
+   if(pendingId&&result.admitted&&mounted.current){
+    if(drafts.acknowledge(draft)&&followUpCurrent())setPrompt(drafts.text());
+    forgetQueueAdmission(()=>localStorage,queueKey,pendingId);
+   }
+  })().catch(queueError);
+ },[queueKey,historyHidden,composerUnbound,hidden,sessionSelection?.nonce]);
+
+ async function enqueuePrompt(){
+  if(draftImageMismatch){setSendNotice(t('当前模型仅支持文字，请更换模型或移除图片。'));return;}
+  if(!queueKey||!queueAllowed||!followUpCurrent()||sendOwner.current||steering.current.has(queueKey)||queueAdmission.current.get(queueKey)?.pending)return;
   const draft=drafts.capture();
-  if(!draft.text.trim())return;
-  const item={id:crypto.randomUUID(),text:draft.text,route:followUpRoute(),context,planningMode:planningRef.current,newWorkflow,attachment:skill};
-  followUps.enqueue(queueKey,turn,item);
-  if(!drafts.acknowledge(draft)){followUps.remove(queueKey,item.id);return;}
-  setPrompt(drafts.text());setSendNotice('');setNewWorkflow(false);
-  if(skill)attachmentConsumedRef.current?.(skill.attachmentId);
-  refreshFollowUps();
+  if(readingFiles.current.has(draft.entry))return;
+  if(!draft.text.trim()&&!draft.files.length)return;
+  const prior=queueAdmission.current.get(queueKey),fingerprint=JSON.stringify([draft.text,draft.files.map(file=>file.id)]);
+  const previousId=prior&&prior.draft.entry===draft.entry&&prior.draft.revision===draft.revision?prior.id:readQueueAdmission(()=>localStorage,queueKey,fingerprint);
+  const id=previousId??crypto.randomUUID();
+  const item:QueueMessageInput={id,text:draft.text.trim()?draft.text:'',context,planningMode:planningRef.current,newWorkflow,
+   ...(modelRef.current?{model:modelRef.current}:{}),...(effortRef.current?{effort:effortRef.current}:{}),
+   ...(skill?{skill:'path' in skill?{name:skill.name,path:skill.path!}:{name:skill.name,functionId:skill.functionId}}:{}),
+   ...(draft.files.length?{files:draft.files}:{}),
+  };
+  const admission={draft,id,pending:true};
+  rememberQueueAdmission(()=>localStorage,queueKey,id,fingerprint);
+  queueAdmission.current.set(queueKey,admission);refreshFollowUps();
+  try{
+   await queueRpc({action:'enqueue',after:turn,item});
+   queueAdmission.current.delete(queueKey);
+   if(!mounted.current)return;
+   const cleared=drafts.acknowledge(draft);
+   forgetQueueAdmission(()=>localStorage,queueKey,id);
+   if(skill)attachmentConsumedRef.current?.(skill.attachmentId);
+   if(followUpCurrent()){
+    if(cleared)setPrompt(drafts.text());
+    setSendNotice('');setNewWorkflow(false);
+   }
+  }catch(error){
+   admission.pending=false;queueError(error);
+  }finally{if(mounted.current)refreshFollowUps();}
  }
 
- async function steer(item?:QueuedFollowUp){
+ async function steer(item?:QueuedMessage){
   if(provider==='kimi'||!queueKey||!thread||!followUpCurrent()||steering.current.has(queueKey))return;
   const draft=drafts.capture(),text=item?.text??draft.text;
-  if(!text.trim()||(item?item.attachment||item.newWorkflow||item.preparedTaskId||item.route!==followUpRoute():skill||newWorkflow))return;
-  if(!canSteer||!turn||followUps.hasSettled(queueKey,turn)){
+  if(!item&&readingFiles.current.has(draft.entry))return;
+  if(!text.trim()||(item?!item.steerable||item.status!=='queued':skill||newWorkflow||draft.files.length))return;
+  if(!canSteer||!turn||settledTurns.current.has(turn)){
    setSendNotice(t('当前回复无法接收引导，消息已保留。'));
    return;
   }
-  if(item&&!followUps.begin(queueKey,item.id,'steer'))return;
   const request:AgentSteerRequest={provider,method:'turn/steer',params:{threadId:thread,expectedTurnId:turn,clientUserMessageId:crypto.randomUUID(),
-   input:[{type:'text',text}],planningMode:item?.planningMode??planningRef.current}};
+   input:[{type:'text',text}],planningMode:planningRef.current}};
   steering.current.add(queueKey);refreshFollowUps();setSendNotice('');
-  let accepted=false;
   try{
-   if(item)followUps.markAttempt(item.id,true);
-   const result=await invoke<AgentSteerResult>('agent.rpc',request);
+   const result=item?await queueRpc({action:'steer',id:item.id,turnId:turn}):await invoke<AgentSteerResult>('agent.rpc',request);
    if(result?.turnId!==turn)throw Error(t('当前回复未确认引导。'));
-   accepted=true;
    if(!item&&mounted.current&&drafts.acknowledge(draft)&&followUpCurrent())setPrompt(drafts.text());
    if(followUpCurrent()){
     followLatest();
-    setMessages(previous=>[...previous,{id:request.params.clientUserMessageId,role:'user',text,justSent:true}]);
+    if(!item)setMessages(previous=>[...previous,{id:request.params.clientUserMessageId,role:'user',text,turnId:turn,
+     clientUserMessageId:request.params.clientUserMessageId,justSent:true}]);
     setSendNotice(t('引导已发送到当前回复。'));
    }
   }catch{
-   if(followUpCurrent())setSendNotice(t(followUps.hasSettled(queueKey,turn)?'当前回复已结束，引导结果待核对，消息已保留。':'引导结果待核对，消息已保留。'));
+   if(followUpCurrent())setSendNotice(t(settledTurns.current.has(turn)?'当前回复已结束，引导结果待核对，消息已保留。':'引导结果待核对，消息已保留。'));
   }finally{
    steering.current.delete(queueKey);
-   if(mounted.current){
-    if(item)followUps.finish(item.id,accepted?turn:null);
-    refreshFollowUps();
-   }
+   if(mounted.current)refreshFollowUps();
   }
  }
 
- function removeQueued(item:QueuedFollowUp,restoreText=false){
-  if(!queueKey||!followUpCurrent())return;
-  const waiting=followUps.read(queueKey);
-  if(waiting.pending===item.id||!waiting.items.some(entry=>entry.id===item.id))return;
-  if(restoreText)updatePrompt([drafts.text(),item.text].filter(Boolean).join('\n\n'));
-  if(followUps.remove(queueKey,item.id))refreshFollowUps();
+ async function queueAction(action:AgentQueueAction,id=queueKey){
+  if(!id||!followUpCurrent()||queueOperations.current.has(id))return;
+  queueOperations.current.add(id);refreshFollowUps();
+  try{return await queueRpc(action);}
+  catch(error){queueError(error);}
+  finally{queueOperations.current.delete(id);if(mounted.current)refreshFollowUps();}
  }
 
- useEffect(()=>{
-  if(!queueKey||!canDrain||!followUpCurrent()||sendOwner.current||activeSend.current||steering.current.has(queueKey)
-   ||observedTurn.current?.threadId===thread&&observedTurn.current.busy)return;
-  const next=followUps.read(queueKey),item=next.items[0];
-  if(!item||next.pause||next.after||next.pending)return;
-  if(item.route!==followUpRoute()){
-   if(followUps.pause(queueKey,'changed'))refreshFollowUps();
-   return;
+ async function removeQueued(item:QueuedMessage,restoreText=false){
+  if(!thread||!followUpCurrent()||queueOperations.current.has(item.id))return;
+  if(restoreText){
+   if(readingFiles.current.has(drafts.capture().entry))return;
+   try{
+    setPrompt(drafts.appendToDraft(provider,thread,item.text,item.files??[],{requireStorage:true}));
+    refreshFiles();
+   }catch(error){queueError(error);return;}
   }
-  if(!followUps.begin(queueKey,item.id,'next'))return;
-  const attempt:QueuedSend={
-   item,
-   current:()=>followUpCurrent()&&item.route===followUpRoute()&&!followUps.read(queueKey).pause,
-  };
-  refreshFollowUps();
-  void send(item.text,{queued:attempt}).finally(()=>{
-   if(!mounted.current)return;
-   followUps.finish(item.id,attempt.turnId);
-   refreshFollowUps();
-  });
- },[queueKey,canDrain,followUpVersion,route,busy,turn]);
+  const result=await queueAction({action:'remove',id:item.id},item.id);
+  if(restoreText&&followUpCurrent())setSendNotice(result?(item.attachmentReview?t('对话已变化。请重新选取附件。'):''):t('草稿已保留。请核对队列中的原消息。'));
+ }
+ async function saveQueueEdit(item:QueuedMessage){
+  if(!queueEdit||queueEdit.owner!==queueKey||queueEdit.id!==item.id)return;
+  const text=queueEdit.text.trim()?queueEdit.text:'';
+  if(await queueAction({action:'edit',id:item.id,text},item.id))setQueueEdit(null);
+ }
+ async function checkQueuedDelivery(item:QueuedMessage){
+  const result=await queueAction({action:'reconcile',id:item.id},item.id);
+  if(result&&followUpCurrent())setSendNotice(t(result.turnId?'已在原对话找到此消息的回执。':'未找到可核对的投递回执，消息仍保留。'));
+ }
 
- const queueNotice=queue.pause==='changed'?t('发送环境已变化，可以把消息移回草稿。'):
-  queue.pause==='unconfirmed'?t('有消息的发送结果待核对，队列已暂停。'):
-  queue.pause==='restored'?t('队列已恢复，核对后可继续发送。'):
-  queue.pause?t('队列已暂停。'):queue.pending?t('正在发送排队消息…'):
-  queue.after?t('等待当前回复完成'):t('等待发送');
- const queueCanResume=!!queue.pause&&!queue.items.some(item=>item.unconfirmed)
-  &&canDrain&&!queue.pending&&queue.items[0]?.route===route;
- const supportsDraftSteer=busy&&provider!=='kimi'&&!skill&&!newWorkflow;
+ const queueNotice=queue?.pause==='changed'?t('发送环境已变化，可以把消息移回草稿。'):
+  queue?.pause==='unconfirmed'?t('有消息的发送结果待核对，队列已暂停。'):
+  queue?.pause==='restored'?t('队列已恢复，核对后可继续发送。'):
+  queue?.pause?t('队列已暂停。'):queueFlight?t('正在发送排队消息…'):
+  queue?.after?t('等待当前回复完成'):t('等待发送');
+ const queueCanResume=!!queue?.pause&&!busy&&!queueFlight&&!queueItems.some(item=>item.status==='unconfirmed')&&followUpControlsReady;
+ const draftImageMismatch=drafts.files().some(file=>file.kind==='image')&&currentModel?.inputModalities&&!currentModel.inputModalities.includes('image');
+ const draftHasFiles=drafts.files().length>0,fileImportBusy=readingFiles.current.has(drafts.capture().entry);
+ const supportsDraftSteer=busy&&provider!=='kimi'&&!skill&&!newWorkflow&&!draftHasFiles;
  const queueHint=t(busy&&!turn?'回复开始后可以排队':!supportsDraftSteer?'Enter 排队 · Shift+Enter 换行':
   followUpEnter==='steer'?'Enter 引导 · Ctrl/Cmd+Enter 排队 · Shift+Enter 换行':'Enter 排队 · Ctrl/Cmd+Enter 引导 · Shift+Enter 换行');
- const steerDraftAllowed=canSteer&&!skill&&!newWorkflow&&!!prompt.trim();
+ const steerDraftAllowed=!fileImportBusy&&canSteer&&supportsDraftSteer&&!!prompt.trim();
  function sendFromComposer(alternate=false){
   if(!queueComposer){void send();return;}
   const action=alternate?(followUpEnter==='queue'?'steer':'queue'):followUpEnter;
   if(action==='steer'&&supportsDraftSteer)void steer();
-  else enqueuePrompt();
+  else void enqueuePrompt();
  }
  function stopWithQueue(){
-  if(queueKey&&followUpCurrent()&&followUps.pause(queueKey,'stopped'))refreshFollowUps();
-  stopSend();
+  const mainPreparing=queueFlight&&!activeSend.current&&!turn;
+  if(queueItems.length)void queueAction({action:'pause',stop:mainPreparing});
+  if(!mainPreparing)stopSend();
  }
  const stopTitle=t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续');
- const stopControl=busy?<button type="button" className="send agent-stop-action" data-testid="agent-stop" disabled={stopStatus==='waiting'||stopStatus==='stopping'||!activeSend.current&&!turn} title={stopTitle} aria-label={stopTitle} onClick={stopWithQueue}>
+ const stopControl=busy?<button type="button" className="send agent-stop-action" data-testid="agent-stop" disabled={stopStatus==='waiting'||stopStatus==='stopping'||!activeSend.current&&!turn&&!queueFlight} title={stopTitle} aria-label={stopTitle} onClick={stopWithQueue}>
   <Square size={13}/><span>{t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次停止':activeSend.current?.phase==='preparing'?'取消准备':'停止')}</span>
  </button>:null;
  return <aside className="agent-panel" style={{width,display:hidden?'none':undefined}}>
@@ -864,11 +1124,18 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   </div>
   {recovery&&<Notice className="agent-recovery" severity={recovery.error?'error':'warning'} data-testid="conversation-recovery"><strong>{t('对话连接需要恢复')}</strong><p>{t('旧聊天历史目前无法读取。可为同一流程建立新的空白对话连接，本地流程和作业记录保留。')}</p><button className="button" disabled={applying||connecting||!connected} onClick={()=>void resume(recovery.threadId,++selectionSeq.current,projectId,true)}>{t('重新建立对话连接')}</button>{recovery.error&&<p>{recovery.error}</p>}</Notice>}
   {localApiThread&&!connected&&!historyHidden&&!busy&&<Notice severity="info" className="agent-history-state" data-testid="agent-local-history">{t('正在查看本地历史。发送时会核对原 API 配置。')}</Notice>}
+  <ConversationTurnActivity activity={activity?.provider===provider&&activity.threadId===thread?activity:undefined}
+   notice={attentionTarget?.provider===provider&&attentionTarget.threadId===thread?attentionTarget:undefined}
+   scroll={scroll} rendered={messages}
+   ownerCurrent={()=>!hidden&&!historyHidden&&localCurrent()&&threadRef.current===thread&&providerRef.current===provider}
+   onJump={()=>{followScroll.current=false;setFollowing(false);saveReadingPosition();}}/>
+  {historyEnabled&&historyConversationId&&!historyHidden&&<ConversationHistoryToolbar key={historyConversationId} conversationId={historyConversationId} source={historyPage?.conversation.source} bookmarks={historyPage?.bookmarks||[]} atLatest={historyPage?.atLatest??true} loading={paging} onOpen={openHistoryLocation} onLatest={()=>void loadHistoryPage('latest')}/>}
    <div className="chat-scroll" ref={scroll} role="log" onScroll={observeScroll}>
+   {!historyHidden&&historyPage?.before&&<OlderConversationPage loading={paging} onLoad={()=>void loadHistoryPage('older')}/>}
    {!historyHidden&&!messages.length&&<div className="agent-welcome"><h3>{t('对话示例')}</h3><div className="prompt-hints">{['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(t=><button key={t} onClick={()=>proposePrompt(t)}>{tr(t)}<PencilLine size={14} aria-hidden="true"/></button>)}</div></div>}
    {historyHidden&&<Notice className="agent-history-state" data-testid="agent-history-state" severity={historyLoad?.status==='failed'?'error':'info'}>{historyLoad?.status==='failed'?<><p>{t('此会话暂时无法读取，草稿已保留。')}</p>{historyLoad.error&&<details data-testid="agent-history-error-details"><summary>{t('查看错误详情')}</summary><pre>{historyLoad.error}</pre></details>}<button className="button" data-testid="agent-history-retry" disabled={busy||applying||connecting} onClick={()=>void retryHistory()}>{t('重新读取会话')}</button></>:<p>{t('正在读取所选会话…')}</p>}</Notice>}
-   {!historyHidden&&<ConversationMessages messages={messages} language={t('你')} actions={messageActions.current!} disabled={busy||connecting||applying} canOriginalRun={!!onOpenOriginalRun} canCluster={!!onOpenCluster} canCompute={!!(onReviewWorker||onConnectCompute)}/>}
-   {!historyHidden&&requests.filter(r=>!isUserInputRequest(r)).map(r=>{const scope=requestScope(r),pending=responding.has(scope);return <div key={scope} className="approval" role="alert" data-testid="agent-question-request" data-request-id={String(r.id)} aria-busy={pending}><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
+   {!historyHidden&&<ConversationMessages messages={messages} language={t('你')} actions={messageActions.current!} disabled={busy||connecting||applying} canOriginalRun={!!onOpenOriginalRun} canCluster={!!onOpenCluster} canCompute={!!(onReviewWorker||onConnectCompute)} bookmarked={new Set(historyPage?.bookmarks.map(bookmark=>JSON.stringify([bookmark.turnId,bookmark.itemId]))||[])}/>}
+   {!historyHidden&&requests.filter(r=>!isUserInputRequest(r)).map(r=>{const scope=requestScope(r),pending=responding.has(scope);return <div key={scope} className="approval" role="alert" data-testid="agent-question-request" data-request-id={String(r.id)} data-request-turn-id={r.params?.turnId} aria-busy={pending}><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
     {r.method==='studio/question'?<div className="button-row">{r.params.questionOptions?.map((o:any)=><button className="button" disabled={pending} key={o.optionId} onClick={()=>void respond(r,{optionId:o.optionId})}>{o.name}</button>)}<button className="button" disabled={pending} onClick={()=>void respond(r,{})}>{t('取消')}</button></div>:
      r.method==='mcpServer/elicitation/request'?<>{elicitationHasEditableInput(r.params)&&<textarea data-testid="agent-approval-arguments" aria-label={t('审批参数')} placeholder="JSON content" disabled={pending} value={answer(r,'elicitation')||'{}'} onChange={e=>editAnswer(r,'elicitation',e.target.value)}/>}<div className="button-row"><button className="button primary" disabled={pending} onClick={()=>{try{void respond(r,{action:'accept',content:JSON.parse(answer(r,'elicitation')||'{}')});}catch(e){onError(e);}}}>{tr("接受")}</button><button className="button" disabled={pending} onClick={()=>void respond(r,{action:'decline',content:null})}>{tr("拒绝")}</button></div></>:
      r.method==='item/permissions/requestApproval'?<><pre>{JSON.stringify(r.params?.permissions,null,2)}</pre><div className="button-row"><button className="button primary" disabled={pending} onClick={()=>void respond(r,{permissions:r.params?.permissions,scope:"turn"})}>{tr("本轮允许所示权限")}</button><button className="button" disabled={pending} onClick={()=>void respond(r,{permissions:{},scope:"turn"})}>{tr("拒绝权限请求")}</button></div></>:
@@ -889,26 +1156,44 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   {connected&&composerUnbound&&!historyLoad&&!recovery&&!applying&&!connecting&&!sessionSelection?.pending&&<div className="agent-send-recovery" data-testid="agent-draft-unbound" role="status"><span>{t('当前对话尚未恢复，输入草稿已保留。')}</span>{composerOwner.provider===provider&&composerOwner.threadId&&<button className="button" data-testid="agent-restore-draft" disabled={busy} onClick={()=>void resume(composerOwner.threadId!)}>{t('恢复当前对话')}</button>}</div>}
   {promptProposal&&promptProposal.provider===composerOwner.provider&&promptProposal.threadId===composerOwner.threadId&&<section className="agent-prompt-proposal" data-testid="agent-prompt-proposal" role="region" aria-label={t('处理新的讨论内容')}><strong>{t('已有未发送草稿，请选择如何加入新内容。')}</strong><details open={promptProposal.text.length<=280} data-testid="agent-prompt-preview"><summary>{t('查看待加入内容')}</summary><pre tabIndex={0}>{promptProposal.text}</pre></details><div className="button-row"><button className="button primary" data-testid="agent-prompt-append" onClick={()=>resolvePromptProposal('append')}>{t('追加到草稿')}</button><button className="button" data-testid="agent-prompt-replace" onClick={()=>resolvePromptProposal('replace')}>{t('替换草稿')}</button><button className="button" data-testid="agent-prompt-cancel" onClick={()=>resolvePromptProposal('cancel')}>{t('保留原稿')}</button></div></section>}
   {sendNotice&&!composerUnbound&&<div className="agent-send-notice" role="status">{sendNotice}</div>}
-  {!historyHidden&&queue.items.length>0&&<section className="agent-follow-up-queue" data-testid="agent-follow-up-queue" aria-label={t('待发送消息')}>
-   <header><strong>{t('待发送消息')} · {queue.items.length}</strong><small role="status">{queueNotice}</small>
-    {queueCanResume&&<button className="text-button" type="button" data-testid="agent-resume-queue" onClick={()=>{if(queueKey&&followUpCurrent()&&followUps.resume(queueKey))refreshFollowUps();}}>{t('继续发送队列')}</button>}
+  {!historyHidden&&queueItems.length>0&&<section className="agent-follow-up-queue" data-testid="agent-follow-up-queue" aria-label={t('待发送消息')}>
+   <header><strong>{t('待发送消息')} · {queueItems.length}</strong><small role="status">{queueNotice}</small>
+    {queueCanResume&&<button className="text-button" type="button" data-testid="agent-resume-queue" onClick={()=>void queueAction({action:'resume'})}>{t('继续发送队列')}</button>}
    </header>
-   <ul>{queue.items.map(item=><li key={item.id} data-testid="agent-queued-message">
-    <div className="agent-queued-text" title={item.text}>{item.text}</div>
-    {item.attachment&&<small className="agent-queued-attachment">{item.attachment.name}</small>}
-    {item.unconfirmed&&<small className="agent-queued-attachment">{t('发送结果待核对')}</small>}
-    <div className="agent-queue-actions">
-     {canSteer&&!item.unconfirmed&&!item.attachment&&!item.newWorkflow&&!item.preparedTaskId&&item.route===route
-      &&<button type="button" className="text-button" data-testid="agent-queued-steer" onClick={()=>void steer(item)}>{t('引导当前回复')}</button>}
-     <button type="button" className="text-button" data-testid="agent-queued-to-draft" disabled={queue.pending===item.id} onClick={()=>removeQueued(item,true)}>{t('移回草稿')}</button>
-     <button type="button" className="text-button" data-testid="agent-queued-remove" disabled={queue.pending===item.id} onClick={()=>removeQueued(item)}>{t('取消排队')}</button>
-    </div>
-   </li>)}</ul>
+   <ul>{queueItems.map((item,index)=>{
+    const editing=item.status==='queued'&&queueEdit?.owner===queueKey&&queueEdit.id===item.id?queueEdit:null;
+    const locked=item.status==='preparing'||item.status==='submitting'||queueOperations.current.has(item.id);
+    return <li key={item.id} data-testid="agent-queued-message" data-status={item.status}>
+     {editing?<textarea autoFocus className="agent-queued-editor" data-testid="agent-queued-editor" aria-label={t('编辑排队消息')}
+      value={editing.text} onChange={event=>setQueueEdit({...editing,text:event.target.value})}/>:
+      item.text&&<div className="agent-queued-text" title={item.text}>{item.text}</div>}
+     {item.skillName&&<small className="agent-queued-attachment">{item.skillName}</small>}
+     {item.files?.map(file=><small className="agent-queued-attachment" key={file.id}>{file.name}</small>)}
+     {item.status==='unconfirmed'&&<small className="agent-queued-attachment">{t('发送结果待核对')}</small>}
+     {item.attachmentReview&&<small className="agent-queued-attachment">{t('对话已变化。请重新选取附件。')}</small>}
+     <div className="agent-queue-actions">
+      {editing?<><button type="button" className="text-button" data-testid="agent-queued-save" disabled={locked||!editing.text.trim()&&!item.files?.length} onClick={()=>void saveQueueEdit(item)}>{t('保存')}</button>
+       <button type="button" className="text-button" onClick={()=>setQueueEdit(null)}>{t('取消')}</button></>:<>
+       {canSteer&&item.status==='queued'&&item.steerable&&<button type="button" className="text-button" data-testid="agent-queued-steer" disabled={locked} onClick={()=>void steer(item)}>{t('引导当前回复')}</button>}
+       {item.status==='queued'&&<>
+        <button type="button" className="text-button queue-icon" aria-label={t('编辑排队消息')} title={t('编辑排队消息')} data-testid="agent-queued-edit" disabled={locked} onClick={()=>queueKey&&setQueueEdit({owner:queueKey,id:item.id,text:item.text})}><PencilLine size={14}/></button>
+        {queueItems[index-1]?.status==='queued'&&<button type="button" className="text-button queue-icon" aria-label={t('上移')} title={t('上移')} data-testid="agent-queued-up" disabled={locked} onClick={()=>void queueAction({action:'move',id:item.id,direction:'up'},item.id)}><ChevronUp size={15}/></button>}
+        {queueItems[index+1]?.status==='queued'&&<button type="button" className="text-button queue-icon" aria-label={t('下移')} title={t('下移')} data-testid="agent-queued-down" disabled={locked} onClick={()=>void queueAction({action:'move',id:item.id,direction:'down'},item.id)}><ChevronDown size={15}/></button>}
+       </>}
+       {item.status==='unconfirmed'&&<button type="button" className="text-button" data-testid="agent-queued-reconcile" disabled={locked} onClick={()=>void checkQueuedDelivery(item)}>{t('核对原回执')}</button>}
+       <button type="button" className="text-button" data-testid="agent-queued-to-draft" disabled={locked||fileImportBusy} onClick={()=>void removeQueued(item,true)}>{t('移回草稿')}</button>
+       <button type="button" className="text-button queue-icon" aria-label={t('取消排队')} title={t('取消排队')} data-testid="agent-queued-remove" disabled={locked} onClick={()=>void removeQueued(item)}><X size={14}/></button>
+      </>}
+     </div>
+    </li>;
+   })}</ul>
   </section>}
   {terminalPlanning&&<div className="agent-tool-alert" role="status" data-testid="agent-planning-terminal-notice"><span>{t('任务规划已开启；当前仅有终端工具，可先讨论方案。生成可审阅流程需要连接作业服务。')}</span>{onConnectCompute&&<button className="text-button" data-testid="agent-planning-connect-worker" disabled={busy||connecting||applying} onClick={()=>void Promise.resolve().then(onConnectCompute).catch(onError)}>{t('连接作业服务')}</button>}</div>}
   {localOwner&&sessionWorkspaceProfile&&<SessionWorkspace key={localOwner} profileId={sessionWorkspaceProfile} owner={localOwner} active={!hidden} busy={busy} isCurrent={localCurrent}/>}
   {!historyHidden&&onReviewResourceTool&&<div className="agent-tool-alert"><button type="button" className="button" data-testid="agent-resource-tool-review" data-guide-target="resource-tool-review" onClick={onReviewResourceTool}>{t('核对准备好的工具配置')}</button></div>}
-  <div className="composer" data-state={composerQuestion&&questionDraft||missingRequest?'question':undefined}>
+  <div className="composer" onDragOver={event=>{if(event.dataTransfer.types.includes('Files'))event.preventDefault();}} onDrop={event=>{
+   if(event.dataTransfer.files.length){event.preventDefault();if(!composerQuestion&&!missingRequest)void importFiles(Array.from(event.dataTransfer.files));}
+  }} data-state={composerQuestion&&questionDraft||missingRequest?'question':undefined}>
    {!historyHidden&&thread&&<TerminalWorkspaceApproval key={`${provider}:${thread}:${computeResource?.selectionId}`} provider={provider} threadId={thread} active={!hidden} selection={computeResource?.selectionId}
     isCurrent={()=>!sessionPendingRef.current&&!selectionPending.current&&providerRef.current===provider&&threadRef.current===thread&&resourceRef.current?.selectionId===computeResource?.selectionId}/>}
    {composerQuestion&&questionDraft?<div className="agent-composer-questions">
@@ -927,23 +1212,30 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
      }}/>
    </div>:<>
     {connected&&!options&&<div className="composer-model-selection" data-testid="composer-model-selection"><label>{t('模型')}<select data-testid="composer-model" aria-label={t('对话模型')} value={model} disabled={busy||applying||connecting} onChange={e=>void selectModel(e.target.value)}>{models.map(m=><option key={m.id||m.model} value={m.model} disabled={!!thread&&!!currentModel?.profileId&&m.profileId!==currentModel.profileId}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label>{t('推理等级')}<select data-testid="composer-effort" aria-label={t('对话推理等级')} value={effort} disabled={busy||applying||connecting||!efforts.length} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((entry:any)=><option key={entry.reasoningEffort} value={entry.reasoningEffort}>{entry.reasoningEffort==='off'?t('关闭思考'):entry.reasoningEffort}</option>)}</select></label></div>}<div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{(workflowId||planningMode||newWorkflow)&&<Tooltip className="agent-mode-explanation" content={t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}><span className="agent-mode-inline">{t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</span></Tooltip>}{workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}
-    <textarea data-guide-target="composer" aria-label={t('对话草稿')} aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{
+    {draftImageMismatch&&<small className="chat-file-capability" role="status">{t('当前模型仅支持文字，请更换模型或移除图片。')}</small>}
+    <ChatFiles files={drafts.files()} preview={showFile} remove={id=>{drafts.removeFile(id);refreshFiles();}}/>
+    <input ref={filePicker} hidden type="file" multiple data-testid="chat-file-picker" onChange={event=>{const files=Array.from(event.target.files||[]);event.target.value='';void importFiles(files);}}/>
+    <textarea onPaste={event=>{const files=Array.from(event.clipboardData.files);if(files.length){event.preventDefault();void importFiles(files);}}} data-guide-target="composer" aria-label={t('对话草稿')} aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{
      if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){
       e.preventDefault();if(!e.repeat)sendFromComposer(e.ctrlKey||e.metaKey);
      }
     }}/>
    </>}
    {!(composerQuestion&&questionDraft)&&!missingRequest&&<div className="composer-bottom">
+    <button type="button" className="icon-button chat-file-add" data-testid="chat-file-add" title={t('添加文本、PDF、Office 文档或图片，也可拖入或粘贴')} aria-label={t('添加文件或图片')} disabled={fileImportBusy||historyHidden||composerUnbound} onClick={()=>filePicker.current?.click()}><Paperclip size={17}/></button>
+    {fileImportBusy&&<small role="status">{t('正在读取附件…')}</small>}
     <span data-testid={queueComposer?'agent-follow-up-shortcuts':undefined}>{queueComposer?queueHint:t('Enter 发送 · Shift+Enter 换行')}</span>
     {queueComposer?<div className="agent-follow-up-actions">
      {provider!=='kimi'&&busy&&<button type="button" className="button" data-testid="agent-steer" disabled={!steerDraftAllowed}
-      title={t(skill?'带技能的消息将在下一轮发送':'将文字发送到当前回复')} onClick={()=>void steer()}>{t(steering.current.has(queueKey??'')?'引导中…':'引导')}</button>}
-     <button type="button" className="button primary" data-testid="agent-queue" disabled={!queueAllowed||!prompt.trim()} title={t('本对话的当前回复完成后发送')}
-      onClick={enqueuePrompt}><ListPlus size={15}/>{t('排队')}</button>
+      title={t(draftHasFiles?'带文件的消息将在下一轮发送':skill?'带技能的消息将在下一轮发送':'将文字发送到当前回复')} onClick={()=>void steer()}>{t(steering.current.has(queueKey??'')?'引导中…':'引导')}</button>}
+     <button type="button" className="button primary" data-testid="agent-queue" disabled={draftImageMismatch||fileImportBusy||!queueAllowed||!prompt.trim()&&!draftHasFiles} title={t('本对话的当前回复完成后发送')}
+      onClick={()=>void enqueuePrompt()}><ListPlus size={15}/>{t('排队')}</button>
      {stopControl}
-    </div>:<button className="send" aria-label={tr("发送")} onClick={()=>sendFromComposer()} disabled={pendingDefaults||!!recovery||applying||connecting||selectionPending.current||historyHidden||composerUnbound||!localApiThread&&(!connected||!models.length)||terminalSelected&&!terminalReady&&!canAcquireTerminal||!prompt.trim()}><ArrowUp size={17}/></button>}
+    </div>:<button className="send" aria-label={tr("发送")} onClick={()=>sendFromComposer()} disabled={pendingDefaults||!!recovery||applying||connecting||selectionPending.current||historyHidden||composerUnbound||!localApiThread&&(!connected||!models.length)||terminalSelected&&!terminalReady&&!canAcquireTerminal||draftImageMismatch||fileImportBusy||!prompt.trim()&&!draftHasFiles}><ArrowUp size={17}/></button>}
    </div>}
   </div>
+  {branchPreview&&<ConversationExcerptDialog value={branchPreview} busy={branching} onClose={()=>setBranchPreview(null)} onConfirm={()=>{const {conversationId,turnId,itemId}=branchPreview.source;void createDiscussion({conversationId,turnId,...itemId?{itemId}:{}},branchPreview.revision);}}/>}
+  {filePreview&&filePreview.scope===JSON.stringify(drafts.attachmentOwner())&&<ChatFilePreview value={filePreview.value} close={()=>setFilePreview(null)}/>}
   {login&&<ProviderLogin provider={provider} onClose={()=>setLogin(false)} onConfigured={()=>{setLogin(false);void connect();}} onError={onError}/>}
  </aside>;
 }

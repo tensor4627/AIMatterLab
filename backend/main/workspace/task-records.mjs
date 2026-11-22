@@ -23,7 +23,7 @@ export class TaskRecords{
   const conversation=this.catalog.get('conversation',id);if(!conversation)throw Error('Unknown conversation');
   const {provider,threadId}=conversation;this.conversation(provider,threadId);if(id!==provider+':'+threadId)throw Error('Invalid conversation identity');
   const taskIds=this.tasks().filter(t=>t.provider===provider&&t.threadId===threadId).map(t=>t.id);
-  this.catalog.transaction(()=>{this.catalog.put('deleted-conversation',id,{id,provider,threadId,taskIds,deletedAt:Date.now()});this.catalog.remove('conversation',id);this.catalog.remove('conversation-title-progress',id);this.catalog.remove('agent-thread',id);if(provider==='codex')this.catalog.remove('thread',threadId);if(['deepseek','compatible'].includes(provider))this.catalog.remove(provider+'-history',threadId);for(const key of taskIds)this.catalog.remove('agent-task',key);});
+  this.catalog.transaction(()=>{this.catalog.put('deleted-conversation',id,{id,provider,threadId,taskIds,deletedAt:Date.now()});this.catalog.remove('conversation',id);this.catalog.remove('conversation-title-progress',id);this.catalog.remove('conversation-bookmarks',id);this.catalog.remove('agent-thread',id);if(provider==='codex')this.catalog.remove('thread',threadId);if(['deepseek','compatible','kimi'].includes(provider))this.catalog.remove(provider+'-history',threadId);for(const key of taskIds)this.catalog.remove('agent-task',key);});
   this.active.delete(id);this.turns.delete(id);for(const key of taskIds)this.cache.delete(key);
   const result={id,provider,threadId,taskIds};this.publish({method:'studio/conversationDeleted',provider,params:result});return result;
  }

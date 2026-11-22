@@ -12,6 +12,10 @@ import {frontendSettingsExperienceCases} from './frontend-settings-experience-ca
 import {frontendModelProviderCases} from './frontend-model-provider-cases.mjs';
 import {frontendNoticeSeverityCases} from './frontend-notice-severity-cases.mjs';
 import {frontendChatExperienceCases} from './frontend-chat-experience-cases.mjs';
+import {frontendConversationHistoryCases} from './frontend-conversation-history-cases.mjs';
+import {frontendChatFileCases} from './frontend-chat-file-cases.mjs';
+import {frontendConversationActivityCases} from './frontend-conversation-activity-cases.mjs';
+import {frontendChatEvidenceCases} from './frontend-chat-evidence-cases.mjs';
 import {frontendWorkflowExperienceCases} from './frontend-workflow-experience-cases.mjs';
 import {frontendLayoutExperienceCases} from './frontend-layout-experience-cases.mjs';
 import {frontendJobsExperienceCases} from './frontend-jobs-experience-cases.mjs';
@@ -86,6 +90,7 @@ async function fixture(){
    if(['task.list','workflow.list','ssh.existing','conversation.list'].includes(method))return [];
    if(method==='conversation.remember'){test.conversation={...(test.conversation||{}),id:data.provider+':'+data.threadId,provider:data.provider,threadId:data.threadId,name:data.name||window.titleForIntent(data.intent),projectId:data.projectId,taskId:test.task?.id||null};return test.conversation;}
    if(method==='conversation.select')return test.conversation;
+   if(method==='agent.queue'&&data.action==='read')return {queue:{provider:data.provider,threadId:data.threadId,revision:0,items:[],after:null,pause:null}};
    if(method==='task.create'){if(!test.task||data.newWorkflow)test.task={id:'task-'+test.calls.length,provider:data.provider,threadId:data.threadId,parameters:{},artifacts:[],updatedAt:1};test.conversation.taskId=test.task.id;return test.task;}
    if(method==='task.pygas.read')return {taskId:data.taskId,composition:null,graph:null,assets:[],catalog:{schema_version:1,status:'passed',source:{files:{}},catalog:{cv:[],bias:[],switch:[],neighbor:[]}}};
    if(method==='task.read')return test.task;
@@ -214,6 +219,10 @@ try{
  await frontendModelProviderCases({check,out});
  await frontendNoticeSeverityCases({check,out});
  await frontendChatExperienceCases({check,out});
+ await frontendConversationHistoryCases({check,out});
+ await frontendChatFileCases({check,out});
+ await frontendConversationActivityCases({check,out});
+ await frontendChatEvidenceCases({check,out});
  await frontendWorkflowExperienceCases({check,out});
  await frontendLayoutExperienceCases({check,out});
  await frontendJobsExperienceCases({check,out});
@@ -598,15 +607,28 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
    const original=window.studio.invoke;window.__recoveryErrors=[];window.__recoveryCallbacks=[];window.__recoveryCalls=[];window.__recovered=false;
    window.__test.task={id:'same-workflow',parameters:{temperature:300},artifacts:[{id:'existing-run',kind:'run'}]};
    window.__test.conversation={id:'codex:old',provider:'codex',threadId:'old',name:'Original workflow',taskId:'same-workflow',projectId:'project'};
+   const upload={id:'90aedc46-7473-4c23-b161-7a309c3cca61',name:'notes.txt',kind:'text',mimeType:'text/plain',size:20};
+   const evidence={...upload,id:'ea25df5c-2d41-4eff-a36c-c4216556b190',name:'selected.log',source:{kind:'log',label:'selected.log',revision:'a'.repeat(64),firstLine:1,lastLine:1}};
+   localStorage.setItem('studio.composer.v1.'+JSON.stringify(['codex','thread','old']),JSON.stringify({version:1,text:'',files:[upload,evidence]}));
+   function recovered(){
+    const conversation={...window.__test.conversation,id:'codex:fresh',threadId:'fresh'};
+    window.__recovered=true;
+    window.__test.events.forEach(fn=>fn({provider:'codex',method:'studio/conversationContextChanged',params:{oldThreadId:'old',threadId:'fresh',taskId:conversation.taskId,conversation,uploadsRetained:true}}));
+    return {thread:{id:'fresh',turns:[]},studioRecovery:{status:'recovered',oldThreadId:'old',conversation,uploadsRetained:true}};
+   }
    window.studio.invoke=async(method,data)=>{
     window.__recoveryCalls.push({method,data});
     if(method==='agent.rpc'&&data.method==='thread/resume'){
      await new Promise(resolve=>window.__finishResume=resolve);
      if(mode==='explicit')return {studioRecovery:{status:'required',oldThreadId:'old'}};
-     window.__recovered=true;return {thread:{id:'fresh',turns:[]},studioRecovery:{status:'recovered',oldThreadId:'old',conversation:{...window.__test.conversation,id:'codex:fresh',threadId:'fresh'}}};
+     return recovered();
     }
-    if(method==='agent.recover'){window.__recovered=true;return {thread:{id:'fresh',turns:[]},studioRecovery:{status:'recovered',oldThreadId:'old',conversation:{...window.__test.conversation,id:'codex:fresh',threadId:'fresh'}}};}
+    if(method==='agent.recover')return recovered();
     if(method==='agent.rpc'&&data.method==='thread/read'){if(data.params.threadId!=='fresh')throw Error('Read must use the actual replacement thread');return {thread:{id:'fresh',turns:[]}};}
+    if(method==='agent.attachments.preview'){
+     if(data.provider!=='codex'||data.threadId!=='fresh'||data.id!==upload.id)throw Error('Attachment preview must use the authorized recovered owner');
+     return {file:upload,text:'Original draft notes'};
+    }
     return original(method,data);
    };
    return window.renderTest('Agent',{planningMode:false,onPlanningModeChange:()=>{},context:'{}',onError:e=>window.__recoveryErrors.push(String(e)),onConversation:c=>window.__recoveryCallbacks.push(c),sessionSelection:{nonce:'restore',conversation:window.__test.conversation}});
@@ -614,6 +636,10 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   await p.waitForFunction(()=>window.__finishResume);await p.locator('.composer textarea').fill('Keep my unsent parameter clarification');await p.evaluate(()=>window.__finishResume());
   if(mode==='explicit'){await p.getByTestId('conversation-recovery').waitFor();assert.equal(await p.getByRole('button',{name:'发送',exact:true}).isDisabled(),true);await p.locator('.composer textarea').press('Enter');assert.equal(await p.evaluate(()=>window.__recoveryCalls.some(c=>c.method==='agent.recover')),false);await p.getByRole('button',{name:'重新建立对话连接',exact:true}).click();}
   await p.waitForFunction(()=>window.__recoveryCallbacks.at(-1)?.threadId==='fresh');assert.equal(await p.locator('.composer textarea').inputValue(),'Keep my unsent parameter clarification');assert.equal(await p.getByTestId('conversation-recovery').count(),0);
+  await p.getByText('对话已变化。请重新选取附件。',{exact:true}).waitFor();
+  assert.equal(await p.getByTestId('chat-file-chip').count(),1);
+  await p.getByTestId('chat-file-chip').getByRole('button',{name:'notes.txt',exact:true}).click();
+  await p.getByTestId('chat-file-preview').getByText('Original draft notes',{exact:true}).waitFor();
   assert.deepEqual(await p.evaluate(()=>window.__recoveryErrors),[]);assert.equal(await p.evaluate(()=>window.__recoveryCallbacks.at(-1).taskId),'same-workflow');assert.equal(await p.evaluate(()=>window.__recoveryCalls.some(c=>c.method==='task.create'||c.method==='task.execute'||c.method==='agent.rpc'&&['turn/start','thread/start'].includes(c.data.method))),false);
   assert.deepEqual(await p.evaluate(()=>window.__test.task.parameters),{temperature:300});
  });

@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import {sanitizeProtocolTranscript} from '../../../contracts/agent/transcript-sanitizer.mjs';
-const transcriptKind=kind=>/^(?:(?:compatible|deepseek)(?:-native|-legacy|-dsh)?-history|compatible-codex-thread|api-dsh-history|thread|agent-thread|conversation-context-history)$/.test(kind);
+const transcriptKind=kind=>/^(?:(?:compatible|deepseek)(?:-native|-legacy|-dsh)?-history|compatible-codex-thread|api-dsh-history|kimi-history|thread|agent-thread|conversation-context-history)$/.test(kind);
 function transcriptRecord(kind,value){
  if(!transcriptKind(kind))return value;
  const {id,threadId,thread_id,provider,...content}=value;
@@ -23,6 +23,19 @@ export class Catalog {
       list:'SELECT id,data FROM records WHERE kind=?',
       preserve:'INSERT OR IGNORE INTO record_recovery VALUES(?,?,?,?,?)',
       recovery:'SELECT kind,id,error,detected_at FROM record_recovery ORDER BY detected_at',
+      historyMetadata:`SELECT
+        json_extract(data,'$.id') AS threadId,
+        json_extract(data,'$.provider') AS provider,
+        json_extract(data,'$.harness') AS harness,
+        json_extract(data,'$.schemaVersion') AS schemaVersion,
+        json_array_length(data,'$.turns') AS length
+        FROM records WHERE kind=? AND id=? AND json_valid(data) AND json_type(data,'$.turns')='array'`,
+      historyAnchor:`SELECT key AS ordinal FROM records,json_each(records.data,'$.turns') AS turn
+        WHERE records.kind=? AND records.id=? AND turn.type='object' AND json_extract(turn.value,'$.id')=?
+        LIMIT 2`,
+      historyPage:`SELECT key AS ordinal,turn.value AS value FROM records,json_each(records.data,'$.turns') AS turn
+        WHERE records.kind=? AND records.id=? AND turn.type='object' AND key>=? AND key<?
+        ORDER BY key`,
     }).map(([name,sql])=>[name,this.db.prepare(sql)]));
   }
   decode(kind,id,data) {
@@ -40,6 +53,17 @@ export class Catalog {
   get(kind, id) {
     const row = this.statements.get.get(kind,id);
     return row ? this.decode(kind,id,row.data) : null;
+  }
+  /** Wrap old blob storage with a small JS projection for the latest/older display page. */
+  historyPage(kind,id,before,limit){
+    const metadata=this.statements.historyMetadata.get(kind,id);
+    if(!metadata)return null;
+    const anchor=before?this.statements.historyAnchor.all(kind,id,before):[];
+    if(before&&anchor.length!==1)return null;
+    const end=before?anchor[0].ordinal:metadata.length,start=Math.max(0,end-limit);
+    const rows=this.statements.historyPage.all(kind,id,start,end),turns=rows.map(row=>JSON.parse(row.value));
+    if(rows.length!==end-start||turns.some(turn=>typeof turn?.id!=='string'||!turn.id)||new Set(turns.map(turn=>turn.id)).size!==turns.length)return null;
+    return {metadata,turns,hasEarlier:start>0};
   }
   put(kind,id,data) {
     const clean=transcriptRecord(kind,data);

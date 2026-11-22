@@ -118,7 +118,7 @@ test('loading and failed conversation never display previous messages; explicit 
 
 test('retry after a cross-provider local history failure reads only the selected API conversation',async()=>{
  let failed=false;const h=agentHarness({props:{sessionSelection:{nonce:'A',conversation:conversation('codex','A')}},override:(method,data,standard)=>{if(method==='agent.rpc'&&data.method==='thread/read'&&data.provider==='qwen'&&!failed){failed=true;throw Error('local record unavailable');}return standard(method,data);}});
- try{await h.flush();const before=h.calls.length;h.render({sessionSelection:{nonce:'B',conversation:conversation('qwen','B')}});await h.flush();h.click('agent-history-retry');await h.flush();assert.deepEqual(h.calls.slice(before).map(({method,data})=>[method,data.method,data.provider,data.params.threadId]),[['agent.rpc','thread/read','qwen','B'],['agent.rpc','thread/read','qwen','B']]);}finally{h.unmount();}
+ try{await h.flush();const before=h.calls.length;h.render({sessionSelection:{nonce:'B',conversation:conversation('qwen','B')}});await h.flush();h.click('agent-history-retry');await h.flush();assert.deepEqual(h.calls.slice(before).map(({method,data})=>[method,data.method||data.action,data.provider,data.params?.threadId??data.threadId]),[['agent.rpc','thread/read','qwen','B'],['agent.rpc','thread/read','qwen','B'],['agent.queue','read','qwen','B']]);}finally{h.unmount();}
 });
 
 for(const [provider,valid]of [['qwen',false],['compatible',true]])test(provider+' history is offline and Send checks the original profile before continuing',async()=>{

@@ -63,7 +63,7 @@ export default function ComposerQuestion({request,questions,progress,pending,act
    if(options[highlight]){event.preventDefault();choose(highlight);}
   }
  }
- return <section className="agent-composer-question" role="group" aria-label={label} data-testid="agent-question-request" data-request-id={String(request.id)} aria-busy={pending} onKeyDown={keyboard}>
+ return <section className="agent-composer-question" role="group" aria-label={label} data-testid="agent-question-request" data-request-id={String(request.id)} data-request-turn-id={request.params?.turnId} aria-busy={pending} onKeyDown={keyboard}>
   <header className="agent-question-header">
    <strong data-testid="agent-question-title">{label}</strong>
    {(questions.length>1||stopControl)&&<div className="agent-question-navigation">

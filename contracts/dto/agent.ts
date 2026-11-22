@@ -30,12 +30,12 @@ export interface ScientificSkillCatalog {schema_version:1;functions:ScientificSk
 
 export interface RpcEvent {provider?:AgentProvider;method:string;id?:string|number;params:any}
 
-export interface Conversation {groupId?:string|null;pinned?:boolean;id:string;provider:AgentProvider;threadId:string;name:string;projectId:string|null;taskId:string|null;updatedAt:number}
+export interface Conversation {groupId?:string|null;pinned?:boolean;archived?:boolean;source?:import('./conversation-history').ConversationSource;id:string;provider:AgentProvider;threadId:string;name:string;projectId:string|null;taskId:string|null;updatedAt:number}
 export interface ConversationGroup {id:string;name:string;createdAt?:number}
 export interface DeleteConversationGroupRequest {id:string}
 export interface DeleteConversationGroupResult {id:string;conversations:Conversation[]}
 
-export type ConversationRecovery={status:'required';oldThreadId:string}|{status:'recovered';oldThreadId:string;conversation:Conversation};
+export type ConversationRecovery={status:'required';oldThreadId:string}|{status:'recovered';oldThreadId:string;conversation:Conversation;uploadsRetained?:boolean};
 
 export type ConversationRecoveryRequest={provider:'codex';threadId:string;model?:string};
 

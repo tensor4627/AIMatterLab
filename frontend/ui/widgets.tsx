@@ -5,7 +5,7 @@ const CodeEditorImpl=lazy(()=>import('./heavy/code-editor'));
 const ChartImpl=lazy(()=>import('./heavy/chart'));
 const StructureImpl=lazy(()=>import('./heavy/structure'));
 
-export function CodeEditor(props:{value:string;onChange:(v:string)=>void;language?:string;theme?:string;height?:string;readOnly?:boolean}){
+export function CodeEditor(props:{value:string;onChange:(v:string)=>void;language?:string;theme?:string;height?:string;readOnly?:boolean;onLineSelection?:(range:{firstLine:number;lastLine:number}|null)=>void}){
  return <Suspense fallback={<div className="muted" role="status">{tr('正在加载…')}</div>}><CodeEditorImpl {...props}/></Suspense>;
 }
 export function Chart(props:{text:string;name:string;viewKey?:string}){

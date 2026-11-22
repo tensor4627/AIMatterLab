@@ -36,7 +36,7 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
    const owned=directory().capture(provider,threadId);
    // Model dispatch itself is resource independent. The tool gateway fences each
    // acquired source separately, including a resource chosen during this turn.
-   return {selection:null,resources:owned.resources,assertCurrent:()=>{},assertResourcesCurrent:owned.assertCurrent};
+   return {selection:null,resources:owned.resources,bindings:owned.bindings,assertCurrent:()=>{},assertResourcesCurrent:owned.assertCurrent};
   }
   const port=resource(),ticket=port?.capture();return {selection:ticket?.selection||null,assertCurrent:()=>{if(port!==resource())throw Error('compute_resource_selection_changed');if(ticket)port.assertCurrent(ticket);}};
  }
@@ -72,6 +72,17 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
  function usesForegroundWorker(sessionId){
   const pinned=matchingPin(sessionId);
   return !!pinned&&!directory()?.needsExplicitResource(pinned,{readAliases:false});
+ }
+ function followUpBinding(provider,threadId){
+  const ticket=capture(provider,threadId);
+  ticket.assertCurrent();ticket.assertResourcesCurrent?.();
+  const sessionId=agents()?.sessionIdentity?.(provider,threadId)?.id;
+  const pinned=sessionId?matchingPin(sessionId):null;
+  return {
+   selection:ticket.selection,
+   bindings:[...(ticket.bindings||[])].sort((left,right)=>left.id.localeCompare(right.id)),
+   worker:pinned?{identity:pinned.identity,target:pinned.target}:null,
+  };
  }
  function scopedWorkerConnection(scope){
   if(!scope?.sessionId||scope.checkCurrent?.()!==true||directory()?.needsExplicitResource(scope))return undefined;
@@ -139,6 +150,6 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
   if(threadId&&directory())return managedInstructions;
   if(!workerSelected(provider))return null;return '[AIMatterLab selected compute resource]\n'+JSON.stringify({kind:'ssh-connection',status:'authenticated',service:'connected',serviceAuthorizedForThisConversation:true,shellAuthorizedForThisConversation:shellGranted(provider),schedulerRegistration:'not_checked'})+'\nThe selected SSH connection is authenticated. The human handoff enables separately verified shell and service grants. The managed service uses its own channel. When the user explicitly selects a shared-shell service transport, ordinary input resumes after its exchange is confirmed. Connection readiness does not establish installed scientific tools, a configured environment or execution readiness. Incomplete inventory and repairable environment issues are warnings: inspect and help configure within the granted terminal and project scope. list_clusters returns saved scheduler profiles, not SSH sessions. For a requested current-host queue observation call inspect_compute_resource with probe_scheduler=true, without creating a workflow or asking the human to paste commands. A missing profile does not mean disconnected. A service failure does not by itself establish shell failure; only an independently verified and granted shell can be used. Never reconnect, upgrade, switch resources or replay unknown requests automatically.';
  }
- return {selected,capture,providerConnection,sessionConnection,bindWorkerContext,scope,readiness,workerSelected,turnContext,prepareHandoff,assertHandoffComplete,
+ return {selected,capture,followUpBinding,providerConnection,sessionConnection,bindWorkerContext,scope,readiness,workerSelected,turnContext,prepareHandoff,assertHandoffComplete,
   scopedWorkerConnection,usesForegroundWorker,releaseSession:id=>workerPins.delete(id)};
 }

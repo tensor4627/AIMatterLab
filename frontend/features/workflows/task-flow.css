@@ -29,6 +29,7 @@
 .workflow-review-note{display:flex;gap:12px;border:1px solid var(--line);padding:16px;border-radius:10px;color:var(--accent)}
 .workflow-review-note>div{display:flex;flex-direction:column;gap:6px}.workflow-review-note span{color:var(--muted);line-height:1.5}
 .flow-actions{display:flex;align-items:center;gap:12px;padding:18px 0;position:sticky;bottom:-1px;background:var(--bg);z-index:2}
+.local-input-review ~ .flow-actions{position:static}
 .flow-actions>span{flex:1;color:var(--muted)}.flow-actions>.primary{min-width:100px}
 .flow-artifacts{border-top:1px solid var(--line);padding:16px 0}.flow-artifacts>summary{cursor:pointer;color:var(--muted);margin-bottom:12px}
 .flow-run-status{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}

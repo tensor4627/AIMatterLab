@@ -1,3 +1,4 @@
+import {chatAttachmentRefs} from '../../../contracts/agent/chat-attachments.mjs';
 import {visibleUserText} from '../../../contracts/agent/user-message.mjs';
 import {titleReviewToolName} from '../../../contracts/agent/conversation-title.mjs';
 import {toolActivity} from './tool-activity.mjs';
@@ -6,8 +7,14 @@ import {toolActivity} from './tool-activity.mjs';
 // arrive without a start event, and replace the same item rather than adding it.
 export function messageForItem(item){
  if(!item||typeof item.id!=='string')return null;
- if(item.type==='userMessage')return {id:item.id,role:'user',text:visibleUserText(item.content||[])};
+ if(item.type==='userMessage'){
+  const clientUserMessageId=typeof item.clientUserMessageId==='string'?item.clientUserMessageId:undefined;
+  const files=chatAttachmentRefs(item.content||[]);
+  return {id:clientUserMessageId||item.id,role:'user',text:visibleUserText(item.content||[]),...(clientUserMessageId?{clientUserMessageId}:{}),...files.length?{files}:{}};
+ }
  if(item.type==='serviceMessage')return {id:item.id,role:'service',text:item.text||''};
+ if(item.type==='contextCompaction')return {id:item.id,role:'compaction',text:'已压缩对话上下文'};
+ if(item.type==='plan'&&typeof item.text==='string'&&item.text.trim())return {id:item.id,role:'plan',text:item.text};
  if(item.type==='agentMessage')return {id:item.id,role:'agent',text:item.text||''};
  if(item.type==='mcpToolCall'&&item.tool===titleReviewToolName)return null;
  if(item.type==='mcpToolCall')return {id:item.id,role:'tool',text:item.tool||'工具',toolName:item.tool,activity:toolActivity(item)};
@@ -29,9 +36,17 @@ export function messageForItem(item){
  return null;
 }
 
-export function upsertItemMessage(messages,item){
- const message=messageForItem(item);if(!message)return messages;
- return messages.some(value=>value.id===message.id)?messages.map(value=>value.id===message.id?message:value):[...messages,message];
+export const messageKey=message=>message.clientUserMessageId|| (message.turnId?JSON.stringify([message.turnId,message.itemId||message.id]):message.id);
+
+function located(message,turnId,item){
+ if(message&&typeof turnId==='string')return {...message,turnId,itemId:item.id,...item.studioDetail?{deferredDetail:true}:{}};
+ return message;
 }
 
-export function replayMessages(turns=[]){const messages=[],indices=new Map();for(const turn of turns)for(const item of turn.items||[]){const message=messageForItem(item);if(!message)continue;const index=indices.get(message.id);if(index===undefined){indices.set(message.id,messages.length);messages.push(message);}else messages[index]=message;}return messages;}
+export function upsertItemMessage(messages,item,turnId){
+ const message=located(messageForItem(item),turnId,item);if(!message)return messages;
+ const matches=value=>messageKey(value)===messageKey(message)||!value.turnId&&value.id===message.id;
+ return messages.some(matches)?messages.map(value=>matches(value)?message:value):[...messages,message];
+}
+
+export function replayMessages(turns=[]){const messages=[],indices=new Map();for(const turn of turns)for(const item of turn.items||[]){const message=located(messageForItem(item),turn.id,item);if(!message)continue;const key=messageKey(message),index=indices.get(key);if(index===undefined){indices.set(key,messages.length);messages.push(message);}else messages[index]=message;}return messages;}

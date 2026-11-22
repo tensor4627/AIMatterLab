@@ -1,7 +1,7 @@
 import {codexRuntime} from '../../desktop/platform/codex-runtime.mjs';
 import {createHash} from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { createJsonlFramer } from './jsonl-frames.mjs';
+import { ATTACHMENT_FRAME_BYTES, createJsonlFramer } from './jsonl-frames.mjs';
 import path from 'node:path';
 import {agentEnvironment} from '../../desktop/platform/agent-environment.mjs';
 import {isolationPreparationDiagnostic} from '../../desktop/platform/codex-isolation.mjs';
@@ -61,7 +61,7 @@ function compatibilityFailure(cause,stage,version){
 export class CodexBridge extends EventEmitter {
   constructor({strictIsolation=false,isolationRoot,isolationDependencies={},launchDependencies={},host=codexRuntime}={}) { super();Object.assign(this,{strictIsolation,isolationRoot,isolationDependencies,launchDependencies,host});this.lifecycle=0;this.isolationReady=false; this.pending = new Map(); this.requests = new Map(); this.next = 1; this.activeTurns=new Set();this.turnIds=new Map();this.settledTurns=new Set();this.threadModels=new Map(); }
   async start(executable,worker,config={},options={}) {
-    const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config,...options.authenticationOnly?['authentication-only']:[]])).digest('hex');
+    const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config,options.authenticationOnly===true,options.historyOnly===true])).digest('hex');
     if(this.starting){await this.starting;return this.start(executable,worker,config,options);}
     if(this.process&&this.contextKey===key)return this.info;
     if(this.activeTurns.size)throw Error('Stop the current reply before reconnecting scientific tools');
@@ -69,10 +69,10 @@ export class CodexBridge extends EventEmitter {
     this.starting=this.launch(executable,worker,config,options).finally(()=>{this.starting=null;});
     return this.starting;
   }
-  async launch(executable, worker, config = {}, {authenticationOnly=false}={}) {
+  async launch(executable, worker, config = {}, {authenticationOnly=false,historyOnly=false}={}) {
     this.transcriptSecrets=[worker?.tokens?.mcp];this.transcriptStreams??=new Map();
     const generation=this.lifecycle;let child,version,stage='version';this.isolationReady=false;this.info=null;this.compatibility=null;this.isolationSummary=null;this.isolation=null;
-    if(this.host.envImport){
+    if(this.host.envImport&&!historyOnly){
       const waiting=new AbortController();
       this.envImportWait=waiting;
       try {await this.host.envImport.request(waiting.signal);}
@@ -85,9 +85,10 @@ export class CodexBridge extends EventEmitter {
     const { stdout } = await (this.launchDependencies.execute||this.host.execute)(executable, ['--version'], { windowsHide:true, timeout:15000, encoding:'utf8', maxBuffer:65536, env:agentEnvironment('codex') });
     const candidate=verifyProtocolVersion(reportedVersion(stdout));version=candidate.installedVersion;
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
-    if(authenticationOnly&&(!this.strictIsolation||worker))throw Error('Authentication requires an isolated connection without scientific tools');
-    stage='isolation_prepare';const isolation=this.strictIsolation?await this.host.prepareIsolation(executable,this.isolationRoot,config,worker,{...this.isolationDependencies,...authenticationOnly?{authenticationOnly:true}:{}}):null;
-    if(authenticationOnly&&isolation?.authenticationOnly!==true)throw Error('Authentication isolation was not established');
+    if((authenticationOnly||historyOnly)&&(!this.strictIsolation||worker))throw Error('This action requires an isolated connection without scientific tools');
+    stage='isolation_prepare';const isolation=this.strictIsolation?await this.host.prepareIsolation(executable,this.isolationRoot,config,worker,{...this.isolationDependencies,...authenticationOnly||historyOnly?{authenticationOnly:true}:{}}):null;
+    if((authenticationOnly||historyOnly)&&isolation?.authenticationOnly!==true)throw Error('Worker-free isolation was not established');
+    if(historyOnly){delete isolation.authenticationOnly;isolation.historyOnly=true;}
     if(generation!==this.lifecycle){stage='lifecycle';throw Error('Codex context launch was cancelled');}
     this.isolation=isolation;
     // Validate AIMatterLab's owned overlay and effective capabilities below. External
@@ -118,7 +119,7 @@ export class CodexBridge extends EventEmitter {
     // readline buffers a whole line before any guard could run; the bounded framer
     // rejects an oversized frame without retaining more than its bound.
     const framer = createJsonlFramer({
-      maxBytes: 1048576,
+      maxBytes: ATTACHMENT_FRAME_BYTES,
       onFrame: line => {
         if(this.process!==child)return;
         let message;
@@ -127,7 +128,7 @@ export class CodexBridge extends EventEmitter {
         }
         this.receive(message);
       },
-      onOversize: bytes => {if(this.process===child)this.close({reason:'oversized_frame',message:'Codex JSONL frame exceeded 1 MiB (' + bytes + ' bytes); reconnect explicitly. The conversation is preserved.'});}
+      onOversize: bytes => {if(this.process===child)this.close({reason:'oversized_frame',message:'Codex JSONL frame exceeded the 24 MiB attachment envelope (' + bytes + ' bytes); reconnect explicitly. The conversation is preserved.'});}
     });
     this.framer = framer;
     this.process.stdout.on('data', chunk => {if(this.process===child)framer.feed(chunk);});
@@ -138,14 +139,14 @@ export class CodexBridge extends EventEmitter {
       if(generation!==this.lifecycle||this.process!==child){stage='lifecycle';throw Error('Codex context launch was cancelled');}
       if(isolation)checkedInitialize(info);
       this.send({ method: 'initialized', params: {} });
-      if(this.host.initializeAuth&&!authenticationOnly){stage='account';await this.host.initializeAuth((...args)=>this.rawRequest(...args),secret=>this.rememberSecret(secret));if(generation!==this.lifecycle||this.process!==child)throw Error('Codex context launch was cancelled');}
+      if(this.host.initializeAuth&&!authenticationOnly&&!historyOnly){stage='account';await this.host.initializeAuth((...args)=>this.rawRequest(...args),secret=>this.rememberSecret(secret));if(generation!==this.lifecycle||this.process!==child)throw Error('Codex context launch was cancelled');}
       let summary;if(isolation){stage='effective_isolation';summary=await this.host.verifyIsolation((...args)=>this.rawRequest(...args),isolation);}
       if(generation!==this.lifecycle||this.process!==child){stage='lifecycle';throw Error('Codex context launch was cancelled');}
       if(isolation){this.recordIsolationSummary(summary);this.isolationReady=true;this.compatibility={...candidate,status:'capabilities_verified',scope:authenticationOnly?'Account operations and public model metadata only; conversations, model calls and scientific tools are unavailable.':'Startup isolation configuration, skills, MCP inventory and model capability ceiling only; no thread, model reply or scientific workflow verified.'};}
       else this.compatibility={...candidate,status:'version_observed',scope:'Version metadata only; isolation capabilities have not been verified.'};
       this.executable=executable;
       this.info={...info,studioCompatibility:this.compatibility,...isolation?{studioIsolation:summary}:{}};
-      if(isolation&&!authenticationOnly&&candidate.versionWarning)this.emit('event',{method:'studio/codexVersionWarning',params:this.compatibility});
+      if(isolation&&!authenticationOnly&&!historyOnly&&candidate.versionWarning)this.emit('event',{method:'studio/codexVersionWarning',params:this.compatibility});
       return this.info;
     } catch (error) { if(generation===this.lifecycle&&(!child||this.process===child))this.close();throw compatibilityFailure(error,stage,version); }
   }
@@ -204,6 +205,12 @@ export class CodexBridge extends EventEmitter {
   async isolatedRequest(method,params,timeout,assertCurrent=()=>{}){
     if(!this.isolationReady||!this.isolation)throw Error('Codex isolation has not been verified');
     const child=this.process,generation=this.lifecycle;if(method==='turn/start'&&this.isolation.catalog)params={...params,model:params.model??this.threadModels.get(params.threadId)??this.isolation.defaultModel};const scoped=this.host.constrainedRequest(method,params,this.isolation);
+    if(method==='thread/fork'){
+      const result=await this.rawRequest(method,scoped,timeout);assertCurrent();
+      if(this.process!==child||this.lifecycle!==generation)throw Error('Codex isolation changed during the branch action');
+      this.host.assertInstructionSources(result,this.isolation);
+      return result;
+    }
     if(['thread/start','thread/resume','turn/start','turn/steer'].includes(method)){
       const summary=await this.host.verifyIsolation((...args)=>this.rawRequest(...args),this.isolation,['turn/start','turn/steer'].includes(method)?{threadId:params.threadId}:{});
       if(this.process!==child||this.lifecycle!==generation||!this.isolationReady)throw Error('Codex isolated context changed before dispatch');this.recordIsolationSummary(summary);
@@ -230,7 +237,7 @@ export class CodexBridge extends EventEmitter {
   }
   receive(message) {
     if(!validEnvelope(message)){this.close({reason:'malformed_protocol',message:'Invalid Codex RPC envelope; reconnect explicitly. The conversation is preserved.'});return;}
-    if(message.method==='account/chatgptAuthTokens/refresh'&&message.id!==undefined&&this.host.refreshAuth){
+    if(message.method==='account/chatgptAuthTokens/refresh'&&message.id!==undefined&&this.host.refreshAuth&&!this.isolation?.historyOnly){
       try{const result=this.host.refreshAuth(message.params,secret=>this.rememberSecret(secret));this.send({id:message.id,result});}catch{this.send({id:message.id,error:{code:-32000,message:'Native Codex login needs refresh; reconnect explicitly. No message was replayed.'}});}return;
     }
     if(this.strictIsolation&&message.method&&message.id!==undefined&&/^item\/(commandExecution|fileChange|permissions)/.test(message.method)){
@@ -275,7 +282,7 @@ export class CodexBridge extends EventEmitter {
       const text=accountRequestMessages[pending.method]??sanitizeTranscript(message.error.message||'Codex request failed',this.transcriptSecrets);
       const error=new Error(text);error.rpcResponse=true;if(Number.isSafeInteger(message.error.code))error.rpcCode=message.error.code;pending.reject(error);
     }
-    else pending.resolve(/^thread\/(?:start|resume|read|list)$/.test(pending.method)?sanitizeProtocolTranscript(message.result,this.transcriptSecrets):message.result);
+    else pending.resolve(/^thread\/(?:start|resume|read|list|fork|turns\/list|items\/list)$/.test(pending.method)||pending.method==='turn/start'?sanitizeProtocolTranscript(message.result,this.transcriptSecrets,{omitNativeUserImages:true}):message.result);
   }
   publishTranscriptEvent(message,{final=false}={}){
     if(message.method==='account/login/completed'&&message.params?.success!==true){
@@ -286,7 +293,7 @@ export class CodexBridge extends EventEmitter {
       const key=JSON.stringify([thread,p.turnId,p.itemId,message.method,p.contentIndex,p.summaryIndex]);let stream=this.transcriptStreams.get(key);if(!stream){stream=createTranscriptStream(()=>this.transcriptSecrets||[]);this.transcriptStreams.set(key,stream);}const delta=stream.push(p.delta);if(!delta)return;message={...message,params:{...p,delta}};
     }
     if(['item/completed','turn/completed'].includes(message.method))for(const [key,stream]of this.transcriptStreams){const [owner,turnId,itemId,method,contentIndex,summaryIndex]=JSON.parse(key);if(owner!==thread||turnId!==(p.turn?.id||p.turnId)||message.method==='item/completed'&&itemId!==p.item?.id)continue;this.transcriptStreams.delete(key);const delta=stream.push('',{final:true});if(delta&&!(message.method==='item/completed'&&p.item?.type==='agentMessage'&&method==='item/agentMessage/delta'))this.publishTranscriptEvent({method,params:{threadId:owner,turnId,itemId,delta,...contentIndex!=null?{contentIndex}:{},...summaryIndex!=null?{summaryIndex}:{}}},{final:true});}
-    this.emit('event',sanitizeProtocolTranscript(message,this.transcriptSecrets));
+    this.emit('event',sanitizeProtocolTranscript(message,this.transcriptSecrets,{omitNativeUserImages:true}));
   }
   respond(id, result) {
     const key = String(id);
@@ -300,5 +307,12 @@ export class CodexBridge extends EventEmitter {
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
     this.pending.clear(); this.requests.clear(); this.activeTurns.clear();this.turnIds.clear();this.settledTurns.clear();
   }
-  close(detail={reason:'closed'}) { this.lifecycle++;this.envImportWait?.abort();this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;const child=this.process,active=!!child;this.process=null;this.framer?.reset();this.framer=null;this.fail(new Error(detail.message||'Codex bridge closed'));child?.kill();if(active)this.emit('event',{method:'studio/codexDisconnected',params:detail}); }
+  close(detail={reason:'closed'}) {
+    this.lifecycle++;this.envImportWait?.abort();this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;
+    const child=this.process;this.process=null;this.framer?.reset();this.framer=null;
+    const error=new Error(detail.message||'Codex bridge closed');
+    if(detail.reason==='oversized_frame')error.code='STUDIO_CODEX_OVERSIZED_FRAME';
+    this.fail(error);child?.kill();
+    if(child)this.emit('event',{method:'studio/codexDisconnected',params:detail});
+  }
 }

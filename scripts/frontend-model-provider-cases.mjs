@@ -130,14 +130,37 @@ export async function frontendModelProviderCases({check,out}){
   await page.waitForFunction(()=>!!window.importAnswer);
   assert.deepEqual(await page.evaluate(()=>window.importAnswer),{requestId:'config-only',mode:'none',useModelDefaults:true,useSystemProxy:false});
  });
- await check('model-providers-keyless-local-text-only-settings',async page=>{
+ await check('model-providers-keyless-local-image-capability-settings',async page=>{
   await page.evaluate(()=>{
-   const saved={schemaVersion:1,id:'fixture-local',provider:'compatible',name:'Local fixture',baseUrl:'http://127.0.0.1:11434/v1',api:'openai-completions',preset:'custom',models:[{id:'local-model',input:['text','image']}],defaultModel:'local-model',credentialStored:false,requiresApiKey:false,revision:1};
-   window.studio.invoke=async method=>{if(method==='models.profiles.list')return [saved];throw Error('Unexpected keyless fixture action');};
+   const fixture=window.__localModelFixture={saved:{schemaVersion:1,id:'fixture-local',provider:'compatible',name:'Local fixture',baseUrl:'http://127.0.0.1:11434/v1',api:'openai-completions',preset:'custom',models:[{id:'local-model'},{id:'local-vision',input:['text','image']}],defaultModel:'local-model',credentialStored:false,requiresApiKey:false,revision:1}};
+   window.studio.invoke=async(method,data)=>{
+    if(method==='models.profiles.list')return [fixture.saved];
+    if(method==='models.profiles.save'){
+     fixture.saved={...data.profile,revision:fixture.saved.revision+1};
+     return fixture.saved;
+    }
+    throw Error('Unexpected keyless fixture action '+method);
+   };
    return window.renderTest('ProviderLogin',{provider:'compatible',embedded:true,onClose(){},onConfigured(){},onError:error=>{throw error;}});
   });
-  await page.locator('.model-provider-row small').waitFor();assert.match(await page.locator('.model-provider-row small').innerText(),/本机服务无需密钥/);await page.getByTestId('api-model-0').locator('summary').click();
-  await page.getByText('API 对话目前仅支持文本输入。',{exact:true}).waitFor();assert.equal(await page.getByLabel('支持图片输入',{exact:true}).count(),0);assert.equal(await page.getByTestId('provider-api-key').inputValue(),'');
+  await page.locator('.model-provider-row small').waitFor();
+  assert.match(await page.locator('.model-provider-row small').innerText(),/本机服务无需密钥/);
+  assert.equal(await page.getByTestId('provider-api-key').inputValue(),'');
+  const textModel=page.getByTestId('api-model-0'),visionModel=page.getByTestId('api-model-1');
+  const textToggle=textModel.getByRole('checkbox',{name:'支持图片输入',exact:true});
+  const visionToggle=visionModel.getByRole('checkbox',{name:'支持图片输入',exact:true});
+  await textModel.locator('summary').press('Enter');
+  await visionModel.locator('summary').press('Enter');
+  assert.equal(await textToggle.isChecked(),false);
+  assert.equal(await visionToggle.isChecked(),true);
+  await textToggle.press('Space');
+  await visionToggle.press('Space');
+  await page.getByTestId('save-api-provider').click();
+  await page.waitForFunction(()=>window.__localModelFixture.saved.revision===2);
+  assert.deepEqual(await page.evaluate(()=>window.__localModelFixture.saved.models.map(model=>model.input)),[['text','image'],['text']]);
+  await page.getByTestId('provider-row-fixture-local').click();
+  assert.equal(await textToggle.isChecked(),true);
+  assert.equal(await visionToggle.isChecked(),false);
  });
  await check('model-providers-codex-first-login-account-entry',async page=>{
   await page.evaluate(()=>{

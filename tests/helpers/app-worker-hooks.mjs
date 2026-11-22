@@ -68,8 +68,11 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
   if(name==='../features/runs/selected-service-records.mjs')return selectedServiceRecords;
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='../api/compute-resources')return loadNavigation('frontend/api/compute-resources.ts');
+  if(name==='../api/conversation-history')return {hasConversationHistory:()=>window.studio?.conversationHistory===true};
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
   if(name==="../features/compute/useManagedResources")return {useManagedResources:()=>({resources:managedResources,conversations:[],sources:[]})};
+  if(name==="../features/conversations/useConversationActivity")return {useConversationActivity:()=>[],nextConversationAttention:()=>undefined,activityKey:({provider,threadId})=>provider+':'+threadId};
+  if(name==='../features/conversations/EvidenceSelection')return {EvidenceConversation:{Provider:'EvidenceConversation.Provider'},EvidenceSelection:'EvidenceSelection'};
   if(name==="../features/conversations/ConversationResourceStatus")return {__esModule:true,default:'ConversationResourceStatus'};
   if(name==="../features/conversations/useConversationSelection")return conversationSelection;
   if(name==="../features/workflows/useToolWorkflowNavigation")return loadNavigation('frontend/features/workflows/useToolWorkflowNavigation.ts');

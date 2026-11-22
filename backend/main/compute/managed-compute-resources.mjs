@@ -1325,7 +1325,10 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
  function capture(provider,threadId){
   const owned=[...leases.values()].filter(lease=>lease.scope.provider===provider&&lease.scope.threadId===threadId&&hasLease(lease));
-  return {resources:owned.map(lease=>view(lease.resource)),assertCurrent(){
+  const bindings=owned.map(lease=>({id:lease.resource.resourceId,profileVersion:lease.resource.profileVersion,
+   target:lease.resource.targetFingerprint,connectionId:lease.resource.connectionId??null,
+   command:!!lease.command,service:lease.service?.id??null,terminal:readyShell(lease)?.sessionId??null}));
+  return {resources:owned.map(lease=>view(lease.resource)),bindings,assertCurrent(){
    for(const lease of owned){
     current(lease.resource);
     if(!hasLease(lease)||leases.get(lease.key)!==lease)fail('managed_compute_resource_lease_changed');

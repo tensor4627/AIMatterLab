@@ -9,22 +9,24 @@ import {AgentHub} from "../../agent/providers/agent-hub.mjs";
 import {TaskRecords} from "../../agent/sessions/task-records.mjs";
 import {createAgentWorkflowContext} from "../../agent/sessions/workflow-context.mjs";
 import {resumeConversationContext} from "../../agent/sessions/conversation-recovery.mjs";
+import {createChatAttachments} from '../../agent/sessions/chat-attachments.mjs';
 
 function fixture(t,{state='empty',withTask=true}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-conversation-recovery-')),catalog=new Catalog(root),events=[],calls=[];
  t.after(()=>{catalog.db.close();fs.rmSync(root,{recursive:true,force:true});});
  const records=new TaskRecords(catalog,event=>events.push(event));records.remember({provider:'codex',threadId:'old',projectId:'project',name:'Original workflow'});
+ const attachments=createChatAttachments({catalog,deleted:(...owner)=>records.deleted(...owner)});
  let task;if(withTask){task=records.create({provider:'codex',threadId:'old',planningMode:true,request:'Original workflow',projectId:'project'});task.parameters={temperature:300};task.artifacts=[{id:'existing-run',kind:'run'}];task.authoring={projectId:'authoring',environmentId:'env',inputRoot:'/owned/inputs'};task.review={status:'ready',revision:1};task=records.save(task);}
  catalog.put('settings','main',{preserve:'settings'});catalog.put('ssh','private',{preserve:'connection'});catalog.put('thread','old',{id:'old',turns:[],preview:'original metadata'});
  if(state)catalog.put('codex-thread-lifecycle','old',{id:'old',state});
  const codex=new EventEmitter();codex.process={};codex.activeTurns=new Set();let next=0;
  codex.close=()=>{codex.process=null;};codex.start=async()=>{codex.process={};};
- const f={catalog,records,events,calls,codex,task};
+ const f={catalog,records,events,calls,codex,task,attachments};
  codex.request=async(method,params)=>{calls.push({method,params});if(f.request)return f.request(method,params);if(method==='thread/resume')throw Error('no rollout found for thread');if(method==='thread/start')return {thread:{id:'fresh-'+(++next),turns:[]},model:'actual-model',reasoningEffort:'low'};return {};};
  const hub=new AgentHub({codex,catalog,root,settings:()=>({}),worker:()=>null,bindWorkerContext:()=>({rotated:false})});
  const workflowContext=createAgentWorkflowContext({records,activeTasks:new Map(),selectedProvider:()=> 'codex'});
  const begin=async()=>{const ticket=workflowContext.begin('codex','old');await workflowContext.synchronize(ticket,(provider,context)=>hub.selectContext(provider,context));return ticket;};
- Object.assign(f,{hub,workflowContext,begin,recover:async(extra={})=>resumeConversationContext({records,workflowContext,agents:hub,ticket:await begin(),threadId:'old',...extra})});return f;
+ Object.assign(f,{hub,workflowContext,begin,recover:async(extra={})=>resumeConversationContext({records,workflowContext,agents:hub,attachments,ticket:await begin(),threadId:'old',...extra})});return f;
 }
 
 test('verified empty recovery keeps the same workflow, scientific review, assets and protected records',async t=>{
@@ -44,6 +46,30 @@ test('explicit recovery archives unavailable history and creates only a native e
  const f=fixture(t,{state:'has_turns',withTask:false});f.catalog.put('thread','old',{id:'old',turns:[{id:'stored-local-history'}]});
  const {result}=await f.recover({explicit:true});assert.equal(result.thread.id,'fresh-1');assert.equal(f.records.conversations()[0].projectId,'project');assert.equal(f.records.tasks().length,0);assert.equal(f.catalog.get('conversation-context-history','codex:old').thread.turns[0].id,'stored-local-history');
  assert.equal(f.calls.some(c=>c.method==='turn/start'),false);assert.equal(f.catalog.get('retired-conversation-context','codex:old').reason,'explicit-missing-history-recovery');
+});
+test('same-scope recovery permits original upload IDs without rebinding historical scientific evidence',async t=>{
+ const f=fixture(t),old={provider:'codex',threadId:'old'},fresh={...old,threadId:'fresh-1'};
+ const upload={name:'notes.txt',size:14,text:'fixture notes\n',mimeType:'text/plain'};
+ const [file]=f.attachments.stage({...old,files:[upload]});
+ const [evidence]=f.attachments.stage({...old,files:[{...upload,name:'window.log'}]},
+  {kind:'log',label:'window.log',firstLine:3,lastLine:3,revision:'a'.repeat(64),runId:'run'});
+ const result=await f.recover();
+ assert.equal(result.result.studioRecovery.uploadsRetained,true);
+ assert.equal(f.events.find(event=>event.method==='studio/conversationContextChanged').params.uploadsRetained,true);
+ assert.deepEqual(f.catalog.get('retired-conversation-context','codex:old'),{
+  provider:'codex',threadId:'old',taskId:f.task.id,projectId:'project',replacementThreadId:'fresh-1',reason:'verified-empty-recovery',uploadsRetained:true,
+ });
+ assert.deepEqual(f.attachments.refsFor(fresh,[file.id]),[file]);
+ assert.equal(f.attachments.preview({...fresh,id:file.id}).text,upload.text);
+ assert.throws(()=>f.attachments.preview({...fresh,id:evidence.id}),/原对话/);
+ assert.throws(()=>f.attachments.preview({...fresh,id:file.id,threadId:'unrelated'}),/原对话/);
+ assert.throws(()=>f.attachments.preview({...fresh,id:file.id,provider:'deepseek'}),/原对话/);
+ const original=f.catalog.db.prepare('SELECT owner_key,metadata FROM chat_attachments WHERE id=?');
+ assert.equal(original.get(file.id).owner_key,'old');
+ assert.deepEqual(JSON.parse(original.get(evidence.id).metadata),evidence);
+ const reopened=createChatAttachments({catalog:f.catalog,deleted:(...owner)=>f.records.deleted(...owner)});
+ assert.deepEqual(reopened.refsFor(fresh,[file.id]),[file]);
+ assert.throws(()=>reopened.preview({...old,id:file.id}),/已删除/);
 });
 test('available real history wins over an old empty marker',async t=>{
  const f=fixture(t);f.request=async()=>({thread:{id:'old',turns:[{id:'real-turn'}]}});const r=await f.recover();assert.equal(r.result.thread.id,'old');assert.equal(r.result.studioRecovery,undefined);assert.equal(f.hub.codexThreadState('old').state,'has_turns');assert.equal(f.calls.length,1);
@@ -67,7 +93,11 @@ test('a new user selection invalidates a late native recovery without clearing t
  const f=fixture(t);f.request=async method=>{if(method==='thread/resume')throw Error('no rollout found for thread');f.workflowContext.begin('codex','newer');return {thread:{id:'fresh',turns:[]}};};await assert.rejects(f.recover(),/changed/);assert.equal(f.workflowContext.current().threadId,'newer');assert.equal(f.records.read(f.task.id).threadId,'old');
 });
 test('transaction failure rolls back both conversation and workflow ownership',async t=>{
- const f=fixture(t),put=f.catalog.put.bind(f.catalog);f.catalog.put=(kind,...args)=>{if(kind==='retired-conversation-context')throw Error('disk full');return put(kind,...args);};await assert.rejects(f.recover(),/disk full/);assert.equal(f.records.read(f.task.id).threadId,'old');assert.equal(f.records.deleted('codex','old'),false);assert.equal(f.catalog.get('conversation-context-history','codex:old'),null);
+ const f=fixture(t),owner={provider:'codex',threadId:'old'};
+ const [file]=f.attachments.stage({...owner,files:[{name:'notes.txt',size:4,text:'text',mimeType:'text/plain'}]});
+ const put=f.catalog.put.bind(f.catalog);f.catalog.put=(kind,...args)=>{if(kind==='retired-conversation-context')throw Error('disk full');return put(kind,...args);};await assert.rejects(f.recover(),/disk full/);assert.equal(f.records.read(f.task.id).threadId,'old');assert.equal(f.records.deleted('codex','old'),false);assert.equal(f.catalog.get('conversation-context-history','codex:old'),null);
+ assert.deepEqual(f.attachments.refsFor(owner,[file.id]),[file]);
+ assert.throws(()=>f.attachments.refsFor({...owner,threadId:'fresh-1'},[file.id]),/原对话/);
 });
 for(const phase of ['validating','submitting','unknown'])test('execution '+phase+' cannot be bypassed by chat recovery',async t=>{
  const f=fixture(t),task=f.records.read(f.task.id);task.execution={phase};f.records.save(task);await assert.rejects(f.recover({explicit:true}),/Reconcile/);assert.equal(f.calls.some(c=>c.method==='thread/start'),false);

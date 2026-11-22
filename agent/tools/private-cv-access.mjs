@@ -28,7 +28,7 @@ function pathsIn(value,root,depth=0,out=[]){if(depth>24||out.length>4096)throw E
 function redactRegisteredSkillPaths(value){let changed=false;const environments=Array.isArray(value)?value:value?.environments;if(Array.isArray(environments))for(const environment of environments){if(!object(environment?.skills))continue;for(const [name,file]of Object.entries(environment.skills))if(typeof file==='string'&&/\/\.codex\/skills\//.test(file)){environment.skills[name]='[registered skill path withheld; use the scoped scientific skill reader]';changed=true;}}return changed;}
 function protectedPath(file){return file.split('/').some(part=>['custom-cv-library','.ssh','.aws','.azure','.gnupg','.kube','.codex','.git'].includes(part.toLowerCase()))||/(^|\/)(credentials(?:\.[^/]*)?|id_(?:rsa|ed25519|ecdsa)(?:\.pub)?|materials-project\.bin|.*(?:credential|secret|token)[^/]*\.(?:bin|key|pem))$/i.test(file);}
 function policyValue(value){if(!object(value)||!Array.isArray(value.blocked_project_ids)||!Array.isArray(value.blocked_run_ids)||!Array.isArray(value.bindings)||!Array.isArray(value.blocked_paths)||value.blocked_paths.some(p=>!canonical(p))||value.blocked_project_ids.some(v=>typeof v!=='string'||!v)||value.blocked_run_ids.some(v=>typeof v!=='string'||!v)||value.bindings.some(b=>!object(b)||typeof b.workspace_id!=='string'||typeof b.project_id!=='string'||typeof b.allowed!=='boolean'||!Array.isArray(b.paths)||b.paths.some(p=>!canonical(p))))throw Error('Private scientific access policy is unavailable or malformed');return value;}
-function privateRoots(policy){const roots=[];for(const binding of policy.bindings.filter(b=>!b.allowed)){for(const p of binding.paths){const marker='/projects/'+binding.project_id+'/inputs',index=p.indexOf(marker);roots.push(index>=0?p.slice(0,index+marker.length):p);}}return roots;}
+function privateRoots(policy,includeAllowed=false){const roots=[];for(const binding of policy.bindings.filter(b=>includeAllowed||!b.allowed)){for(const p of binding.paths){const marker='/projects/'+binding.project_id+'/inputs',index=p.indexOf(marker);roots.push(index>=0?p.slice(0,index+marker.length):p);}}return roots;}
 function runIds(task){return new Set([...(task.artifacts||[]).filter(a=>a.kind==='run'||a.kind==='cluster-run').map(a=>a.id||a.artifactId),task.deployment?.prepared?.artifactId,task.execution?.artifactId].filter(v=>typeof v==='string'));}
 function soleMetadataResult(result){return object(result)&&Object.keys(result).sort().join(',')==='content,isError'&&result.isError===false&&Array.isArray(result.content)&&result.content.length===1&&object(result.content[0])&&Object.keys(result.content[0]).sort().join(',')==='text,type'&&result.content[0].type==='text'&&typeof result.content[0].text==='string';}
 function draftAcknowledgement(token,value,task){
@@ -87,6 +87,13 @@ export function createPrivateCvAccess({records,worker,activeTasks}){
  }
  return {
   async assertTask(task,provider){if(!providers.has(provider))throw Error('Invalid scientific provider');const value=await policy(provider);checkTask(task,provider,value);return {definitionOnly:definitionOnlyScope(task,value)};},
+  async assertEvidence(provider,{task,projectId,file,runId}){
+   if(!providers.has(provider))throw Error('Invalid scientific provider');
+   const value=await policy(provider);
+   if(task)checkTask(task,provider,value);
+   if(definitionOnlyScope(task,value)||value.blocked_project_ids.includes(projectId)||value.blocked_run_ids.includes(runId)||
+    typeof file==='string'&&(protectedPath(file)||[...privateRoots(value,true),...value.blocked_paths].some(root=>within(file,root))))throw Error('当前模型没有此项科学证据的共享许可。');
+  },
   async filterTools(tools,provider,scope){
    // Native MCP initializes before a fresh conversation receives its ID.
    // Publish classified interface schemas in that current bootstrap lease;

@@ -7,6 +7,8 @@ import {DEEPSEEK_URL} from './deepseek.mjs';
 import {redact} from './contracts.mjs';
 import {STUDIO_INSTRUCTIONS} from '../context/agent-settings.mjs';
 import {sanitizeTranscript,sanitizeProtocolTranscript,createTranscriptStream} from '../../contracts/agent/transcript-sanitizer.mjs';
+import {selectedImageInput} from '../sessions/chat-attachments.mjs';
+import {attachmentLimits} from '../../contracts/agent/chat-attachments.mjs';
 
 const KIND='deepseek-dsh-history',SCHEMA=1;
 const textOf=content=>(content||[]).filter(v=>v.type==='text'&&typeof v.text==='string').map(v=>v.text).join('\n');
@@ -64,7 +66,7 @@ export class DshBridge extends EventEmitter{
   const body=await response.json(),ids=(body.data||[]).map(v=>v.id).filter(v=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(v));
   assertCurrent();if(!ids.length)throw Error('DeepSeek 未返回可用模型');this.models=[...new Set(ids)];this.catalogCredential=createHash('sha256').update(JSON.stringify(credential)).digest('hex');if(!this.models.includes(this.model))this.model=this.models.includes('deepseek-flash')?'deepseek-flash':this.models[0];return this.modelCatalog();
  }
- modelCatalog(){return {data:this.models.map(model=>{const info=this.modelInfos?.find(v=>v.id===model),efforts=info?.reasoning?.efforts||[];return {id:model,model,displayName:info?.name||model,isDefault:model===this.model,supportedReasoningEfforts:efforts.map(v=>({reasoningEffort:v.id==='off'?'none':v.id,description:v.description||v.name||v.id})),defaultReasoningEffort:efforts.some(v=>v.id==='off')?'none':info?.reasoning?.defaultEffort};})};}
+ modelCatalog(){return {data:this.models.map(model=>{const info=this.modelInfos?.find(v=>v.id===model),efforts=info?.reasoning?.efforts||[];return {id:model,model,displayName:info?.name||model,isDefault:model===this.model,inputModalities:info?.inputModalities?.includes('image')?['text','image']:['text'],supportedReasoningEfforts:efforts.map(v=>({reasoningEffort:v.id==='off'?'none':v.id,description:v.description||v.name||v.id})),defaultReasoningEffort:efforts.some(v=>v.id==='off')?'none':info?.reasoning?.defaultEffort};})};}
  choose(model){if(model&&!this.models.includes(model))throw Error('请选择已认证 DeepSeek 模型目录中的模型');if(model)this.model=model;if(!this.model)throw Error('请先加载 DeepSeek 模型目录');return this.model;}
  async start(){
   if(this.starting)return this.starting;
@@ -199,6 +201,17 @@ export class DshBridge extends EventEmitter{
    const message=data.message||{},id=message.source?.callId||message.toolCallId,item=turn.items.find(i=>i.type==='mcpToolCall'&&i.id===dshPublicItemId(s.id,turn.id,'mcpToolCall',id));
    if(item){item.status=message.isError?'failed':'completed';item.result={content:(message.content||[]).filter(v=>v.type==='text'),isError:!!message.isError};this.event('item/completed',{threadId:s.id,turnId:turn.id,item});}
   }
+  if(event.type==='todo/write'&&Array.isArray(data.todos)){
+   const plan=data.todos.slice(0,24).flatMap(todo=>typeof todo?.content==='string'&&['pending','in_progress','completed'].includes(todo.status)
+    ?[{step:todo.content,status:todo.status==='in_progress'?'inProgress':todo.status}]:[]);
+   this.event('turn/plan/updated',{threadId:s.id,turnId:turn.id,plan});
+  }
+  if(event.type==='compaction/end'&&!data.error&&safeId(data.compactionId)){
+   const id=dshPublicItemId(s.id,turn.id,'contextCompaction',data.compactionId);
+   if(turn.items.some(item=>item.id===id))return;
+   const item={id,type:'contextCompaction'};
+   turn.items.push(item);this.event('item/completed',{threadId:s.id,turnId:turn.id,item});
+  }
   s.updatedAt=Date.now();this.save(s);
  }
  save(s){this.catalog.put(KIND,s.id,this.cleanProtocol(s));}
@@ -236,17 +249,24 @@ export class DshBridge extends EventEmitter{
   if(method==='turn/interrupt'){await this.controlTurn(params.threadId,params.turnId,'interrupt');return {};}
   if(method==='turn/start'){
    if(this.unconfirmedTurns.has(params.threadId))throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');
-   if(this.activeTurns.size)throw Error('A DeepSeek reply is already active');const s=this.session(params.threadId),input=this.textInput(params.input);
-   const model=this.choose(params.model||s.model),effort=(params.effort||s.effort)==='none'?'off':params.effort||s.effort,toolContext=params.studioToolContext||s.toolContext;await this.launch(model,effort,toolContext);assertCurrent();await this.ensureSession(s);assertCurrent();
+   if(this.activeTurns.size)throw Error('A DeepSeek reply is already active');const s=this.session(params.threadId),{input,text}=this.promptInput(params.input);
+   const model=this.choose(params.model||s.model),effort=(params.effort||s.effort)==='none'?'off':params.effort||s.effort,toolContext=params.studioToolContext||s.toolContext;await this.launch(model,effort,toolContext);assertCurrent();
+   if(input.some(item=>item.type==='image')&&!this.modelCatalog().data.find(row=>row.model===model)?.inputModalities?.includes('image'))throw Error('当前模型只接受文字。请选择支持图片的模型，或移除图片。');
+   await this.ensureSession(s);assertCurrent();
    if(this.activeTurns.size||this.unconfirmedTurns.has(s.id))throw Error('A previous reply is active or awaiting its receipt');
-   const historical=s.legacyContextPending?dshLegacyContext(s.turns):'',turn={id:randomUUID(),status:'inProgress',items:[this.cleanValue({id:randomUUID(),type:'userMessage',content:input.map(i=>({type:'text',text:i.text})),text:input.map(i=>i.text).join('\n')})]},active={turn,output:false};
-   s.turns.push(turn);s.model=model;s.effort=effort;s.toolContext=toolContext;s.legacyContextPending=false;s.nativeStarted=true;s.name||=input.map(i=>i.text).join(' ').trim().slice(0,60);s.updatedAt=Date.now();this.activeTurns.set(s.id,active);this.save(s);
+   const clientUserMessageId=params.clientUserMessageId;
+   if(clientUserMessageId!==undefined&&!safeId(clientUserMessageId))throw Error('Invalid client message identity');
+   const historical=s.legacyContextPending?dshLegacyContext(s.turns):'',turn={id:randomUUID(),status:'inProgress',items:[this.cleanValue({
+    id:randomUUID(),type:'userMessage',...(clientUserMessageId?{clientUserMessageId}:{}),
+    content:text,text:textOf(text)
+   })]},active={turn,output:false};
+   s.turns.push(turn);s.model=model;s.effort=effort;s.toolContext=toolContext;s.legacyContextPending=false;s.nativeStarted=true;s.name||=text.map(i=>i.text).join(' ').trim().slice(0,60);s.updatedAt=Date.now();this.activeTurns.set(s.id,active);this.save(s);
    const latePrompt=reply=>{
     if(this.unconfirmedTurns.get(s.id)!==active)return;
     if(reply.error)this.settleTurn(s,active,'failed',this.clean(reply.error.message));
     else{active.prompt=Promise.resolve(reply.result);this.watchTurn(s,active);}
    };
-   active.prompt=this.raw('session/prompt',{sessionId:s.nativeId,contentBlocks:[...historical?[{type:'text',text:historical}]:[],...input.map(i=>({type:'text',text:i.text}))]},undefined,latePrompt);
+   active.prompt=this.raw('session/prompt',{sessionId:s.nativeId,contentBlocks:[...historical?[{type:'text',text:historical}]:[],...input]},undefined,latePrompt);
    this.event('turn/started',{threadId:s.id,turn:{id:turn.id}});
    try{await active.prompt;}
    catch(error){this.turnRequestError(s,active,error);throw error;}
@@ -259,6 +279,22 @@ export class DshBridge extends EventEmitter{
  textInput(value){
   if(!Array.isArray(value)||!value.length||value.some(item=>item?.type!=='text'||typeof item.text!=='string')||JSON.stringify(value).length>1000000)throw Error('Invalid DeepSeek text input');
   return this.cleanValue(value.map(({text})=>({type:'text',text})));
+ }
+ promptInput(value){
+  if(!Array.isArray(value)||!value.length)throw Error('Invalid DeepSeek prompt input');
+  const text=[];
+  const input=value.map(item=>{
+   if(item?.type==='text'&&typeof item.text==='string'){
+    const block={type:'text',text:this.cleanValue(item.text)};
+    text.push(block);
+    return block;
+   }
+   const selected=item?.type==='image'&&selectedImageInput(item);
+   if(!selected)throw Error('只能发送由当前对话选取的图片附件。');
+   return selected;
+  });
+  if(text.reduce((length,item)=>length+item.text.length,0)>1000000+attachmentLimits.count*attachmentLimits.textBytes)throw Error('Invalid DeepSeek text input');
+  return {input,text};
  }
  async steerTurn({threadId,expectedTurnId,clientUserMessageId=randomUUID(),input},assertCurrent){
   const session=this.session(threadId),active=this.activeTurns.get(threadId);
@@ -275,7 +311,7 @@ export class DshBridge extends EventEmitter{
   }
   const receipt=this.controlTurn(threadId,expectedTurnId,'steer',text,assertCurrent).then(result=>{
    if(!result?.applied)throw Error('这轮回复已经结束，当前引导未发送。');
-   const item={id:itemId,type:'userMessage',content,text};
+   const item={id:itemId,type:'userMessage',clientUserMessageId,content,text};
    active.turn.items.push(item);session.updatedAt=Date.now();this.save(session);
    this.event('item/completed',{threadId,turnId:expectedTurnId,item});
    return {turnId:expectedTurnId};

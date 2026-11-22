@@ -1,4 +1,4 @@
-export type ReadingPosition={top:number;follow:boolean;anchor:string|null;offset:number};
+export type ReadingPosition={top:number;follow:boolean;anchor:string|null;turnId?:string|null;offset:number};
 export function readingKey(provider:string,threadId:string|null):string|null;
 export function createReadingPositions(storage:()=>Storage):{
  read(key:string|null):ReadingPosition|null;

@@ -1,8 +1,10 @@
 import ChatMessage,{type ChatMessageValue,type ChatMessageActions} from './ChatMessage';
 import {t} from '../../ui/i18n';
 import {toolLabel} from './tool-activity.mjs';
+import {messageKey} from './message-mapping.mjs';
+const bookmarkKey=(message:ChatMessageValue)=>JSON.stringify([message.turnId,message.itemId]);
 
-type Props={messages:ChatMessageValue[];language:string;actions:ChatMessageActions;disabled:boolean;canOriginalRun:boolean;canCluster:boolean;canCompute:boolean};
+type Props={messages:ChatMessageValue[];language:string;actions:ChatMessageActions;disabled:boolean;canOriginalRun:boolean;canCluster:boolean;canCompute:boolean;bookmarked?:ReadonlySet<string>};
 
 export default function ConversationMessages({messages,...props}:Props){
  const groups:ChatMessageValue[][]=[];
@@ -11,12 +13,12 @@ export default function ConversationMessages({messages,...props}:Props){
   // position in the transcript for later deltas, but group only visible rows.
   if(message.role==='agent'&&!message.text.trim()&&!message.diff?.trim())continue;
   const previous=groups.at(-1);
-  if(message.role==='tool'&&previous?.[0].role==='tool')previous.push(message);
+  if(message.role==='tool'&&previous?.[0].role==='tool'&&previous?.[0].turnId===message.turnId)previous.push(message);
   else groups.push([message]);
  }
  return <>{groups.map(group=>group[0].role==='tool'
-  ?<ToolGroup key={group[0].id} messages={group} {...props}/>
-  :<ChatMessage key={group[0].id} message={group[0]} {...props}/>
+  ?<ToolGroup key={messageKey(group[0])} messages={group} {...props}/>
+  :<ChatMessage key={messageKey(group[0])} message={group[0]} {...props} bookmarked={props.bookmarked?.has(bookmarkKey(group[0]))}/>
  )}</>;
 }
 
@@ -34,9 +36,9 @@ function ToolGroup({messages,...props}:Props){
  const label=messages.length===1?t(toolLabel(toolName(first))):`${t(allTerminal?'共享终端调用':'工具调用')} · ${messages.length}`;
  const status=states.filter(([state])=>counts.has(state)).map(([state,label])=>`${t(label)} ${counts.get(state)}`).join(' · ');
  return <details className="tool-group" data-testid="tool-group">
-  <summary data-message-id={`tool-group:${first.id}`} title={status}>
+  <summary data-message-id={`tool-group:${first.id}`} data-turn-id={first.turnId} title={status}>
    <span className="tool-group-label">{label}</span><span className="tool-group-status">{status}</span>
   </summary>
-  <div className="tool-group-content">{messages.map(message=><ChatMessage key={message.id} message={message} {...props}/>)}</div>
+  <div className="tool-group-content">{messages.map(message=><ChatMessage key={messageKey(message)} message={message} {...props} bookmarked={props.bookmarked?.has(bookmarkKey(message))}/>)}</div>
  </details>;
 }

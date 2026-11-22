@@ -1,11 +1,12 @@
 import {EventEmitter} from 'node:events';
-import {createJsonlFramer} from './jsonl-frames.mjs';
+import {ATTACHMENT_FRAME_BYTES,createJsonlFramer} from './jsonl-frames.mjs';
 import {randomUUID} from 'node:crypto';
 import {CLI_VERSIONS} from './contracts.mjs';
 import {providerRuntime} from '../../desktop/platform/provider-runtime.mjs';
 import {sanitizeTranscript,sanitizeProtocolTranscript,createTranscriptStream} from '../../contracts/agent/transcript-sanitizer.mjs';
 import {SCIENTIFIC_TOOL_ACCESS} from '../tools/private-cv-access.mjs';
 import {sharedTerminalToolAllowed} from '../tools/definition-scope.mjs';
+import {selectedImageInput} from '../sessions/chat-attachments.mjs';
 const safeTool=/^(?:mcp__)?gpusampling(?:__|[.:/])([a-z_]+)$/;
 export function toolName(value){const match=String(value||'').match(safeTool);return match?match[1]:String(value||'');}
 export function toolResult(update){
@@ -70,7 +71,7 @@ export class AcpBridge extends EventEmitter{
   child.on('exit',(code,signal)=>{if(this.process===child)this.disconnect(Error(this.provider+' disconnected ('+(signal||code)+')'));});
   // readline buffered a whole line before the guard; the bounded framer never
   // retains more than the configured bound while rejecting oversized frames.
-  const framer=createJsonlFramer({maxBytes:1048576,
+  const framer=createJsonlFramer({maxBytes:ATTACHMENT_FRAME_BYTES,
    onFrame:line=>{if(this.process!==child)return;try{this.receive(JSON.parse(line));}catch(error){this.disconnect(Error('Malformed '+this.provider+' ACP JSONL'));}},
    onOversize:bytes=>{if(this.process===child)this.disconnect(Error(this.provider+' ACP JSONL frame exceeded 1 MiB ('+bytes+' bytes)'));}});
   this.framer=framer;
@@ -149,6 +150,7 @@ export class AcpBridge extends EventEmitter{
   // ACP chunks have no reliable turn identity. Discard all updates from a
   // timed-out prompt until its real RPC terminal receipt has arrived.
   if(this.isolatedSessions.has(sessionId))return;
+  if(['agent_message_chunk','user_message_chunk'].includes(u.sessionUpdate)&&u.content?.type!=='text')return;
   if(!streamFinal&&['agent_message_chunk','user_message_chunk'].includes(u.sessionUpdate)&&u.content?.type==='text'){
    const key=JSON.stringify([sessionId,this.sessions.get(sessionId)?.current?.id,u.sessionUpdate,u.messageId]);this.streams??=new Map();let entry=this.streams.get(key);if(!entry){entry={sessionId,update:u,stream:createTranscriptStream(()=>this.secrets())};this.streams.set(key,entry);}const text=entry.stream.push(u.content.text);if(!text)return;u={...u,content:{type:'text',text}};
   }
@@ -217,8 +219,10 @@ export class AcpBridge extends EventEmitter{
  catalog(session){
   const option=session.configOptions?.find(o=>o.category==='model'||o.id==='model'),thought=session.configOptions?.find(o=>o.category==='thought_level');
   const values=optionsOf(option),fallback=session.models?.availableModels||[],current=option?.currentValue||session.models?.currentModelId;
-  return {data:(values.length?values.map(v=>({id:v.value,model:v.value,displayName:v.name})):fallback.map(v=>({id:v.modelId,model:v.modelId,displayName:v.name}))).map(model=>({...model,isDefault:model.model===current,supportedReasoningEfforts:model.model===current?optionsOf(thought).map(o=>({reasoningEffort:o.value,description:o.name})):[],defaultReasoningEffort:model.model===current?thought?.currentValue:undefined}))};
+  const inputModalities=this.supportsImages()?['text','image']:['text'];
+  return {data:(values.length?values.map(v=>({id:v.value,model:v.value,displayName:v.name})):fallback.map(v=>({id:v.modelId,model:v.modelId,displayName:v.name}))).map(model=>({...model,isDefault:model.model===current,inputModalities,supportedReasoningEfforts:model.model===current?optionsOf(thought).map(o=>({reasoningEffort:o.value,description:o.name})):[],defaultReasoningEffort:model.model===current?thought?.currentValue:undefined}))};
  }
+ supportsImages(){return this.info?.agentCapabilities?.promptCapabilities?.image===true;}
  async setChoice(session,category,value){
   if(!value)return;
   const option=session.configOptions?.find(o=>o.category===category||(category==='model'&&o.id==='model'));
@@ -233,7 +237,8 @@ export class AcpBridge extends EventEmitter{
   }
   throw Error('This provider/model does not support the selected '+category);
  }
- async request(method,params={}){
+ async request(method,params={},_timeout,{assertCurrent=()=>{}}={}){
+  assertCurrent();
   if(method==='account/read')return {provider:this.provider,requiresOpenaiAuth:false,authMethods:this.info.authMethods||[],account:null};
   if(method==='model/list'){
    try{return this.catalog(await this.ensure());}catch(error){if(error.code===-32000)return {data:[],authRequired:true,message:error.message};throw error;}
@@ -256,13 +261,24 @@ export class AcpBridge extends EventEmitter{
   if(method==='turn/start'){
    if(this.isolatedSessions.has(params.threadId))throw Error('The previous turn is still awaiting cancellation or its terminal receipt; use another conversation or explicitly reconnect. No message was replayed.');
    const s=this.session(params.threadId);if(this.activeTurns.has(s.id)||this.pendingStarts.has(s.id))throw Error('A turn is already active');
+   const prompt=(params.input||[]).map(item=>{
+    if(item?.type==='text'&&typeof item.text==='string')return {type:'text',text:this.clean(item.text)};
+    const selected=item?.type==='image'&&selectedImageInput(item);
+    if(!selected)throw Error('只能发送由当前对话选取的图片附件。');
+    if(!this.supportsImages())throw Error('当前 Kimi 连接只接受文字。请移除图片后重试。');
+    return {type:'image',mimeType:selected.mimeType,data:selected.data};
+   });
    const startToken={},dispatchGeneration=this.lifecycle;this.pendingStarts.set(s.id,startToken);
    try{
    await this.setChoice(s,'model',params.model);await this.setChoice(s,'thought_level',params.effort);
+   assertCurrent();
    if(this.lifecycle!==dispatchGeneration||this.sessions.get(s.id)!==s)throw Error('Provider conversation changed before prompt dispatch; no message was replayed');
    const id=randomUUID(),turn={id,status:'inProgress',items:[]};s.current=turn;s.turns.push(turn);
-   const prompt=this.clean((params.input||[]).filter(i=>i.type==='text').map(i=>({type:'text',text:i.text})));
-   turn.items.push(this.clean({id:randomUUID(),type:'userMessage',content:prompt,text:prompt.map(c=>c.text).join('\n')}));
+   const text=prompt.filter(item=>item.type==='text');
+   const clientUserMessageId=params.clientUserMessageId;
+   turn.items.push(this.clean({id:randomUUID(),type:'userMessage',
+    ...typeof clientUserMessageId==='string'&&/^[A-Za-z0-9_-]{8,128}$/.test(clientUserMessageId)?{clientUserMessageId}:{},
+    content:text,text:text.map(c=>c.text).join('\n')}));
    this.activeTurns.set(s.id,id);
    const generation=this.lifecycle,current=()=>generation===this.lifecycle&&this.sessions.get(s.id)===s;
    const releaseTurn=()=>{

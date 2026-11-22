@@ -1,7 +1,20 @@
 import type {SshLocations} from '../compute/ssh-service-locations.mjs';
+import type {AgentProvider,Conversation} from './agent';
 /** Pure cross-process contracts. Runtime and renderer state belong to their owners. */
 
 export interface SharedTerminalResizeRequest {sessionId:string;ownerEpoch:number;cols:number;rows:number}
+export type SharedTerminalOwnerRequest={sessionId:string;ownerEpoch:number} & (
+ {owner:'human';provider?:never;attachmentDraftId?:never} |
+ ({owner:'agent'} & ({provider?:AgentProvider;attachmentDraftId?:never}|{provider:AgentProvider;attachmentDraftId:string}))
+);
+export interface SharedTerminalSession {
+ sessionId:string;name:string;kind:string;mode:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;status:string;sequence:number;
+ humanInputSequence?:number;outputWait?:boolean;connectionId?:string;resource?:SshTerminalResourceReference|SshConnectionResourceReference;
+ expired?:boolean;exitCode?:number|null;serviceActive?:boolean;serviceStatus?:string;
+}
+export interface SharedTerminalOwnerResult extends SharedTerminalSession {
+ conversation?:Conversation;adoptedDraftId?:string;handoffKind?:'service'|'terminal';serviceOwner?:'human'|'agent';service?:SshServiceState;
+}
 
 export interface Project {revision?:number;authoring_only?:boolean;authoring_task_id?:string;id:string;name:string;policy:{engines:string[];gpus:number[];max_seconds:number;max_concurrent:number;input_roots:string[];environments:string[];clusters?:string[];cluster_queue_policies?:Record<string,ClusterQueuePolicy>}}
 

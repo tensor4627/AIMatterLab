@@ -42,19 +42,26 @@ for(const width of [1440,640])test('prepared terminal conversation focuses Agent
  const h=appWorkerHarness({width});try{
   await h.flush();h.find(node=>node.type==='button'&&h.text(node)==='本地终端').props.onClick();await h.flush();
   const request=terminal(h).props.request,before=h.calls.length,prepared={...conversation('codex','terminal-prepared'),groupId:'terminal-group'};
-  assert.equal(terminal(h).props.canShare,true);terminal(h).props.onConversationPrepared(prepared);await h.flush();
-  assert.equal(agent(h).props.sessionSelection.conversation.id,prepared.id);assert.equal(agent(h).props.sessionSelection.adoptDraft,true);assert.equal(shell(h).props['data-primary-panel'],'agent');assert.equal(agent(h).props.conversationGroupId,'terminal-group');
+  const draftId='75722118-f594-49e2-9e4c-ca2ba7357dc9';
+  agent(h).props.terminalDraft.current=provider=>provider==='codex'?draftId:undefined;
+  assert.equal(terminal(h).props.canShare,true);
+  assert.equal(terminal(h).props.draftForHandoff('codex'),draftId);
+  terminal(h).props.onConversationPrepared(prepared,draftId);await h.flush();
+  assert.equal(agent(h).props.sessionSelection.conversation.id,prepared.id);assert.equal(agent(h).props.sessionSelection.adoptedDraftId,draftId);assert.equal(shell(h).props['data-primary-panel'],'agent');assert.equal(agent(h).props.conversationGroupId,'terminal-group');
   assert.equal(terminal(h).props.request,request);assert.equal(terminal(h).props.visible,width===1440,'narrow handoff focuses Agent while keeping the terminal mounted');assert.equal(agent(h).props.hidden,false);
   assert(!h.calls.slice(before).some(call=>call.method==='conversation.select'||call.method==='agent.rpc'));
  }finally{h.unmount();}
 });
 
-test('terminal-created empty thread retains the existing unsent Agent draft without sending',async()=>{
- const storage=memoryStorage(),h=agentHarness({storage});try{
+for(const matches of [true,false])test('terminal-created chat transfers only the explicitly adopted blank draft, same draft='+matches,async()=>{
+ const storage=memoryStorage(),terminalDraft={current:null},h=agentHarness({storage,props:{terminalDraft}});try{
   await h.flush();h.type('Keep my unsent cluster instructions');await h.flush();
+  const draftId=terminalDraft.current('codex');assert.equal(draftId,storage.getItem('studio.composer.v1.new.codex'));
+  assert.equal(terminalDraft.current('kimi'),undefined);
   const prepared=conversation('codex','terminal-prepared');
-  h.render({sessionSelection:{nonce:'terminal-handoff',conversation:prepared,adoptDraft:true}});await h.flush();
-  assert.equal(h.textarea().props.value,'Keep my unsent cluster instructions');
+  h.render({sessionSelection:{nonce:'terminal-handoff',conversation:prepared,adoptedDraftId:matches?draftId:'different-blank-draft'}});await h.flush();
+  assert.equal(h.textarea().props.value,matches?'Keep my unsent cluster instructions':'');
+  if(!matches){const retained=storage.getItem('studio.composer.v1.'+JSON.stringify(['codex','new',draftId]));assert.equal(JSON.parse(retained).text,'Keep my unsent cluster instructions');}
   assert(!h.calls.some(call=>call.method==='agent.rpc'&&call.data.method==='turn/start'));
  }finally{h.unmount();}
 });

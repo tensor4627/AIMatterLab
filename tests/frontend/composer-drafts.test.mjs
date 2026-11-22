@@ -5,6 +5,22 @@ import {createComposerDrafts} from "../../frontend/features/conversations/compos
 
 function fixture(){const values=new Map();let next=0;const storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};return {values,storage,create:()=>createComposerDrafts(()=>storage,()=>String(++next))};}
 
+test('file selections stay with the original draft and a late receipt preserves subsequent files and text',()=>{
+ const env=fixture(),drafts=env.create();
+ const file=(last,name)=>({id:'00000000-0000-4000-8000-00000000000'+last,name,kind:'text',mimeType:'text/plain',size:8});
+ const a=file(1,'a.in'),b=file(2,'b.csv'),c=file(3,'c.log');
+ const pending=drafts.capture(),scope=drafts.attachmentOwner();drafts.activate('kimi');
+ drafts.addToSnapshot(pending,[a]);assert.deepEqual(drafts.files(),[]);
+ drafts.activate('codex');assert.deepEqual(drafts.attachmentOwner(),scope);
+ drafts.edit('Read A');const sent=drafts.capture();drafts.rebind(sent,'first');
+ drafts.edit('A new instruction');drafts.addFiles([b]);assert.equal(drafts.acknowledge(sent),false);
+ assert.deepEqual(drafts.files(),[b]);assert.equal(drafts.text(),'A new instruction');
+ drafts.appendToDraft('kimi',null,'',[c]);assert.deepEqual(drafts.files(),[b]);
+ env.storage.setItem('studio.conversation','codex:first');const restored=env.create();
+ assert.deepEqual(restored.files(),[b]);restored.activate('kimi');assert.deepEqual(restored.files(),[c]);
+ assert(![...env.values.values()].some(value=>value.includes('base64')));
+});
+
 test('provider and exact thread IDs isolate drafts and selected empty local threads restore before hydration',()=>{
  const f=fixture(),drafts=f.create();
  for(const [provider,id,text] of [['codex','same','中文未发送'],['qwen','same','other provider'],['codex','other','other thread']]){drafts.activate(provider,id);drafts.edit(text);}
@@ -33,6 +49,25 @@ test('deletion removes only the exact conversation, invalidates pending acknowle
 });
 test('a rekey never overwrites an already edited target draft and preserves the original source separately',()=>{
  const f=fixture(),drafts=f.create();drafts.activate('codex','target');drafts.edit('newer target');drafts.activate('codex','source');drafts.edit('source retained');drafts.rekey('codex','source','target');assert.equal(drafts.text(),'newer target');drafts.activate('codex','source');assert.equal(drafts.text(),'source retained');
+});
+test('an upload finishes in its original switched draft, and only plain uploads follow a verified replacement',()=>{
+ const f=fixture(),drafts=f.create();
+ const upload={id:'901ae621-2c29-426b-ad70-0e313208dffc',name:'notes.txt',kind:'text',mimeType:'text/plain',size:9};
+ const evidence={...upload,id:'0ffa63b4-5f27-4cde-b457-5b629a2a4b4a',source:{kind:'log',label:'log',revision:'a'.repeat(64),firstLine:1,lastLine:1}};
+ drafts.activate('codex','old');
+ drafts.edit('original request');
+ const pending=drafts.capture();
+ drafts.activate('codex','other');
+ assert.equal(drafts.addToSnapshot(pending,[upload,evidence]),true);
+ assert.deepEqual(drafts.files(),[]);
+ drafts.activate('codex','old');
+ assert.deepEqual(drafts.files(),[upload,evidence]);
+ assert.deepEqual(drafts.rekey('codex','old','recovered',true),{text:'original request',attachmentReview:true});
+ assert.deepEqual(drafts.files(),[upload]);
+ assert.equal(drafts.addToSnapshot(pending,[upload,evidence]),false);
+ assert.deepEqual(drafts.rekey('codex','old','recovered',true),{text:'original request',attachmentReview:false});
+ assert.deepEqual(drafts.rekey('codex','recovered','definition-only'),{text:'original request',attachmentReview:true});
+ assert.deepEqual(drafts.files(),[]);
 });
 test('unavailable storage and quota failures keep edits, blank identities and switches usable in memory',()=>{
  for(const storage of [()=>{throw Error('disabled');},()=>({getItem(){return null;},setItem(){throw Error('quota');},removeItem(){throw Error('disabled');}})]){

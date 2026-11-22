@@ -1,40 +1,9 @@
 import type {AgentProvider} from '../../../contracts/dto/agent';
-import type {SkillAttachment} from './agent-types';
+import type {LegacyQueueMessage} from '../../../contracts/dto/agent-queue';
 
-export interface QueuedFollowUp {
- readonly id: string;
- readonly text: string;
- readonly route: string;
- readonly context: string;
- readonly planningMode: boolean;
- readonly newWorkflow: boolean;
- readonly preparedTaskId?: string;
- readonly attachment?: SkillAttachment;
- readonly unconfirmed?: boolean;
-}
-
-export type FollowUpPause = 'stopped' | 'previous' | 'changed' | 'blocked' | 'unconfirmed' | 'restored';
-
-interface QueueState {
- readonly items: readonly QueuedFollowUp[];
- readonly after: string | null;
- readonly pending: string | null;
- readonly pause: FollowUpPause | null;
-}
-
-export function followUpKey(provider: AgentProvider, threadId: string): string;
-export function createFollowUpQueues(storage:()=>Pick<Storage,'getItem'|'setItem'|'removeItem'>): {
- read(key: string): QueueState;
- enqueue(key: string, turnId: string | null, item: QueuedFollowUp): void;
- settle(key: string, turnId: string, completed: boolean): boolean;
- hasSettled(key: string, turnId: string): boolean;
- pause(key: string, reason: FollowUpPause): boolean;
- pauseProvider(provider: AgentProvider, reason: FollowUpPause): boolean;
- resume(key: string): boolean;
- begin(key: string, itemId: string, mode: 'next' | 'steer'): boolean;
- markAttempt(itemId: string, attempted: boolean, preparedTaskId?: string): void;
- remove(key: string, itemId: string): boolean;
- finish(itemId: string, turnId?: string | null): boolean;
- discard(key: string): boolean;
- rekey(oldKey: string, key: string): boolean;
-};
+export function followUpKey(provider:AgentProvider, threadId:string): string;
+export function readQueueAdmission(storage:()=>Pick<Storage,'getItem'>,key:string,draft:string):string|null;
+export function rememberQueueAdmission(storage:()=>Pick<Storage,'setItem'>,key:string,id:string,draft:string):void;
+export function forgetQueueAdmission(storage:()=>Pick<Storage,'getItem'|'removeItem'>,key:string,id?:string):void;
+export function readLegacyFollowUps(storage:()=>Pick<Storage,'getItem'>,provider:AgentProvider,threadId:string): LegacyQueueMessage[];
+export function forgetLegacyFollowUps(storage:()=>Pick<Storage,'getItem'|'setItem'|'removeItem'>,provider:AgentProvider,threadId:string): void;

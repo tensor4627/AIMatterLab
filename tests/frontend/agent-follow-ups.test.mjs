@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {agentHarness,conversation,deferred,memoryStorage} from '../helpers/agent-hooks.mjs';
+import {createFollowUpQueue} from '../../agent/sessions/follow-up-queue.mjs';
+import {explicitNewWorkflow} from '../../contracts/agent/workflow-intent.mjs';
+import {attachmentPrompt} from '../../contracts/agent/chat-attachments.mjs';
 
 const find=(h,id)=>h.find(node=>node.props?.['data-testid']===id);
 const calls=(h,method)=>h.calls.filter(call=>call.method==='agent.rpc'&&call.data.method===method).map(call=>call.data);
@@ -8,24 +11,113 @@ const starts=h=>calls(h,'turn/start').map(call=>[call.provider,call.params.threa
 const complete=(h,threadId,turnId,status='completed',provider='codex')=>
  h.emit({provider,method:'turn/completed',params:{threadId,turn:{id:turnId,status}}});
 const enter=(h,options={})=>h.textarea().props.onKeyDown({key:'Enter',nativeEvent:{},preventDefault(){},...options});
+const ownerKey=({provider,threadId})=>provider+':'+threadId;
+const databases=new WeakMap();
+function queueCatalog(storage){
+ let rows=databases.get(storage);
+ if(!rows)databases.set(storage,rows=new Map());
+ return {
+  get:(kind,id)=>structuredClone(rows.get(kind+':'+id)??null),
+  put:(kind,id,value)=>rows.set(kind+':'+id,structuredClone(value)),
+  remove:(kind,id)=>rows.delete(kind+':'+id),
+  list:kind=>[...rows.entries()].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>structuredClone(value)),
+  transaction:run=>run(),
+ };
+}
 async function chooseEnter(h,action){
  h.click('agent-options');await h.flush();
  find(h,'agent-follow-up-enter-mode').props.onChange({target:{value:action}});
  await h.flush();
 }
 
-async function fixture({provider='codex',props,handle,storage,sendInitial=true}={}){
- let next=0;
- const h=agentHarness({storage,props:{sessionSelection:{nonce:'first',conversation:conversation(provider,'first')},...props},override:(method,data,standard)=>{
+async function fixture({provider='codex',props,handle,storage=memoryStorage(),sendInitial=true}={}){
+ let next=0,closed=false,project=props?.projectId,receive;
+ const active=new Map(),completed=new Set();
+ const q=createFollowUpQueue({
+  catalog:queueCatalog(storage),agents:{activeTurn:(provider,threadId)=>active.get(ownerKey({provider,threadId}))?.id??null,
+   isBusy:(provider,threadId)=>active.get(ownerKey({provider,threadId}))?.busy===true},
+  capture:owner=>({...owner,project}),publish:event=>receive?.(event),reconcile:async()=>null,
+  validateFiles:(_owner,files)=>files,
+  interrupt:async()=>({}),
+  async dispatch(owner,item,control){
+   if(control.mode==='steer'){
+    control.beforeDispatch();
+    const data={provider:owner.provider,method:'turn/steer',params:{threadId:owner.threadId,expectedTurnId:control.targetTurnId,
+     clientUserMessageId:item.id,input:[{type:'text',text:item.text}],planningMode:item.planningMode}};
+    h.calls.push({method:'agent.rpc',data});
+    return handle?.('steer',data)??{turnId:control.targetTurnId};
+   }
+   const key=ownerKey(owner);
+   active.set(key,{busy:true,id:null});
+   receive({provider:owner.provider,method:'studio/agentTurnState',params:{threadId:owner.threadId,turnId:null,busy:true}});
+   try{
+    const text=item.text.trim()?item.text:attachmentPrompt(item.files);
+    const fresh=item.newWorkflow||explicitNewWorkflow(item.text);
+    let taskId=item.preparedTaskId;
+    if((item.planningMode||fresh)&&!taskId){
+     if(fresh)control.beforeTaskCreation();
+     const data={request:text,provider:owner.provider,threadId:owner.threadId,newWorkflow:fresh};
+     h.calls.push({method:'task.create',data});
+     const task=await(handle?.('workflow',data)??{id:'prepared-task'});
+     if(fresh)control.taskPrepared(task.id);
+     taskId=task.id;
+    }
+    control.beforeDispatch();
+    const data={provider:owner.provider,method:'turn/start',params:{
+     threadId:owner.threadId,input:[{type:'text',text},{type:'text',text:item.context}],
+     planningMode:item.planningMode,studioTaskId:taskId,studioSkillId:item.skill?.functionId,studioAttachments:item.files?.map(file=>file.id),
+    }};
+    h.calls.push({method:'agent.rpc',data});
+    const turnId='turn-'+ ++next;
+    const result=await(handle?.('start',data,turnId)??{turn:{id:turnId}});
+    if(!closed&&!completed.has(key+'|'+result.turn.id))h.emit({provider:owner.provider,method:'turn/started',params:{threadId:owner.threadId,turn:result.turn}});
+    return result;
+   }catch(error){
+    if(!closed){
+     active.delete(key);
+     receive({provider:owner.provider,method:'studio/agentTurnState',params:{threadId:owner.threadId,turnId:null,busy:false}});
+    }
+    throw error;
+   }
+  },
+ });
+ q.recover();
+ const h=agentHarness({storage,props:{sessionSelection:{nonce:'first',conversation:conversation(provider,'first')},...props},override:async(method,data,standard)=>{
+  if(method==='agent.queue'){
+   if(data.action==='enqueue')await handle?.('before-admission',data);
+   const result=await q.request(data);
+   if(data.action==='enqueue')await handle?.('admission',data);
+   return result;
+  }
+  if(method==='agent.attachments.import')return handle?.('file-import',data)??[];
   if(method==='agent.rpc'&&data.method==='turn/start'){
    const turnId='turn-'+ ++next;
-   return handle?.('start',data,turnId)??{turn:{id:turnId}};
+   const result=await(handle?.('start',data,turnId)??{turn:{id:turnId}});
+   if(!closed)active.set(ownerKey({provider:data.provider,threadId:data.params.threadId}),{busy:true,id:result.turn.id});
+   return result;
   }
   if(method==='agent.rpc'&&data.method==='turn/steer')return handle?.('steer',data)??{turnId:data.params.expectedTurnId};
-  if(method==='agent.rpc'&&data.method==='turn/interrupt')return {accepted:true};
+  if(method==='agent.rpc'&&data.method==='turn/interrupt'){q.pause(data.provider,data.params.threadId);return {accepted:true};}
   if(method==='task.create')return handle?.('workflow',data)??{id:'prepared-task'};
+  if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)){
+   const result=await standard(method,data);
+   const flight=active.get(ownerKey({provider:data.provider,threadId:data.params.threadId}));
+   if(flight)return {...result,studioSession:{threadId:data.params.threadId,turnId:flight.id,busy:true}};
+   return result;
+  }
   return standard(method,data);
  }});
+ receive=h.emit;
+ h.emit=event=>{
+  const key=ownerKey({provider:event.provider,threadId:event.params?.threadId});
+  if(event.method==='turn/started')active.set(key,{busy:true,id:event.params.turn.id});
+  if(event.method==='turn/completed'&&active.get(key)?.id===event.params.turn.id){
+   active.delete(key);completed.add(key+'|'+event.params.turn.id);
+  }
+  q.observe(event);receive(event);
+ };
+ const unmount=h.unmount;h.unmount=()=>{closed=true;q.close();unmount();};
+ const render=h.render;h.render=changes=>{if(changes&&'projectId' in changes)project=changes.projectId;return render(changes);};
  await h.flush();if(sendInitial){h.type('First request');h.send();await h.flush();}
  return h;
 }
@@ -104,14 +196,104 @@ test('queued text can be steered once, removed, or moved back to a nonempty draf
  }finally{h.unmount();}
 });
 
-test('switching away hides and defers the original queue until its owner returns',async()=>{
+function fileRef(index,name='sample-'+index+'.txt'){
+ return {id:'12345678-1234-4abc-8fff-'+String(index).padStart(12,'0'),name,kind:'text',mimeType:'text/plain',size:12};
+}
+function addFixtureFiles(h,files){
+ h.emit({method:'studio/chatEvidenceSelected',params:{provider:'codex',threadId:'first',files}});
+}
+
+test('moving a file-only message to a full draft keeps the queue and restores its chip when space is made',async()=>{
+ const h=await fixture();
+ try{
+  const queued=fileRef(123,'queued-file.txt'),fill=Array.from({length:8},(_,index)=>fileRef(index));
+  addFixtureFiles(h,[queued]);await h.flush();
+  assert.equal(h.textarea().props.value,'');
+  assert.equal(find(h,'agent-queue').props.disabled,false);
+  h.click('agent-queue');await h.flush();
+  assert.equal(h.calls.find(call=>call.method==='agent.queue'&&call.data.action==='enqueue').data.item.text,'');
+  addFixtureFiles(h,fill);await h.flush();
+  h.click('agent-queued-to-draft');await h.flush();
+  assert.equal(h.calls.filter(call=>call.method==='agent.queue'&&call.data.action==='remove').length,0);
+  assert(find(h,'agent-queued-message'));
+  assert(h.find(node=>node.props?.children==='每条消息最多添加 8 个附件。'));
+  h.find(node=>node.props?.['aria-label']==='移除附件 '+fill[7].name).props.onClick();
+  await h.flush();h.click('agent-queued-to-draft');await h.flush();
+  assert.throws(()=>find(h,'agent-queued-message'));
+  assert.equal(h.textarea().props.value,'');
+  assert(h.find(node=>node.props?.title==='预览附件 · '+queued.name));
+  assert(h.find(node=>node.props?.['aria-label']==='移除附件 '+queued.name));
+  assert.match(h.storage.values.get('studio.composer.v1.'+JSON.stringify(['codex','thread','first'])),/queued-file\.txt/);
+ }finally{h.unmount();}
+});
+
+test('an unsavable draft leaves the queued item in place',async()=>{
+ const storage=memoryStorage(),setItem=storage.setItem;
+ let fail=false;
+ storage.setItem=(key,value)=>{if(fail&&key==='studio.composer.v1.'+JSON.stringify(['codex','thread','first']))throw Error('Fixture storage full');setItem(key,value);};
+ const h=await fixture({storage});
+ try{
+  h.type('Keep queued');h.click('agent-queue');await h.flush();
+  h.type('Unchanged draft');fail=true;
+  h.click('agent-queued-to-draft');await h.flush();
+  assert.equal(h.textarea().props.value,'Unchanged draft');
+  assert(find(h,'agent-queued-message'));
+  assert.equal(h.calls.filter(call=>call.method==='agent.queue'&&call.data.action==='remove').length,0);
+ }finally{h.unmount();}
+});
+
+test('busy composer keyboard and stale button handlers wait for the exact draft file import while another chat remains usable',async()=>{
+ const pending=deferred(),h=await fixture({handle:stage=>stage==='file-import'?pending.promise:undefined});
+ try{
+  h.type('Send the whole original draft once files arrive');
+  const queueClick=find(h,'agent-queue').props.onClick,steerClick=find(h,'agent-steer').props.onClick;
+  const picker=find(h,'chat-file-picker');
+  picker.props.onChange({target:{value:'fixture',files:[new File(['synthetic'], 'delayed.txt',{type:'text/plain'})]}});
+  await h.flush();
+  assert.equal(h.calls.filter(call=>call.method==='agent.attachments.import').length,1);
+  assert.equal(find(h,'agent-queue').props.disabled,true);
+  assert.equal(find(h,'agent-steer').props.disabled,true);
+  enter(h);enter(h,{ctrlKey:true});queueClick();steerClick();await h.flush();
+  assert.equal(h.calls.filter(call=>call.method==='agent.queue'&&call.data.action==='enqueue').length,0);
+  assert.equal(calls(h,'turn/steer').length,0);
+  h.render({sessionSelection:{nonce:'second',conversation:conversation('codex','second')}});await h.flush();
+  h.type('Normal prompt in the other chat');h.send();await h.flush();
+  h.type('Second chat can also queue');enter(h);await h.flush();
+  assert.equal(h.calls.filter(call=>call.method==='agent.queue'&&call.data.action==='enqueue').at(-1).data.threadId,'second');
+  pending.resolve([fileRef(400,'delayed.txt')]);await h.flush();
+  h.render({sessionSelection:{nonce:'back-to-first',conversation:conversation('codex','first')}});await h.flush();
+  assert.equal(h.textarea().props.value,'Send the whole original draft once files arrive');
+  assert(h.find(node=>node.props?.title==='预览附件 · delayed.txt'));
+  assert.equal(find(h,'agent-queue').props.disabled,false);
+  assert.equal(find(h,'agent-steer').props.disabled,true);
+ }finally{pending.resolve([]);h.unmount();}
+});
+
+test('in-place edit and reorder affect only unsent queued entries',async()=>{
+ const h=await fixture();
+ try{
+  for(const text of ['First queued','Second queued','Third queued']){
+   h.type(text);h.click('agent-queue');await h.flush();
+  }
+  h.click('agent-queued-edit');await h.flush();
+  find(h,'agent-queued-editor').props.onChange({target:{value:'Edited first'}});await h.flush();
+  h.click('agent-queued-save');await h.flush();
+  h.click('agent-queued-down');await h.flush();
+  complete(h,'first','turn-1');await h.flush();
+  complete(h,'first','turn-2');await h.flush();
+  complete(h,'first','turn-3');await h.flush();
+  assert.deepEqual(starts(h).map(start=>start[2]),['First request','Second queued','Edited first','Third queued']);
+ }finally{h.unmount();}
+});
+
+test('switching away hides the original queue while it drains in the background',async()=>{
  const h=await fixture();
  try{
   h.type('Follow up in the first chat');h.click('agent-queue');await h.flush();
   h.render({sessionSelection:{nonce:'second',conversation:conversation('codex','second')}});await h.flush();
   assert.throws(()=>find(h,'agent-follow-up-queue'));
   h.type('Unsent second draft');complete(h,'first','turn-1');await h.flush();
-  assert.equal(starts(h).length,1);
+  assert.equal(starts(h).length,2);
   assert.equal(h.textarea().props.value,'Unsent second draft');
   h.render({sessionSelection:{nonce:'first-again',conversation:conversation('codex','first')}});await h.flush();
   assert.deepEqual(starts(h).at(-1),['codex','first','Follow up in the first chat']);
@@ -153,7 +335,9 @@ test('a queued message pauses when its original send context changes',async()=>{
   complete(h,'first','turn-1');await h.flush();
   assert.equal(starts(h).length,1);
   assert.match(JSON.stringify(find(h,'agent-follow-up-queue')),/发送环境已变化/);
-  assert.throws(()=>find(h,'agent-resume-queue'));
+  h.click('agent-resume-queue');await h.flush();
+  assert.match(JSON.stringify(h.find(node=>node.props?.className==='agent-send-notice')),/Restore the original project or resource/);
+  assert.equal(starts(h).length,1);
  }finally{h.unmount();}
 });
 
@@ -259,6 +443,64 @@ test('normal queue entries survive restart only in their original chat and wait 
   complete(reopened,'first','turn-1');await reopened.flush();
   assert.deepEqual(starts(reopened).map(start=>start[2]),['Known unsent first','Known unsent second']);
   assert.equal(reopened.textarea().props.value,'Separate unsent draft');
+ }finally{reopened.unmount();}
+});
+
+test('renderer remount reconciles a lost queue-admission reply without duplicating the saved draft',async()=>{
+ const storage=memoryStorage(),gate=deferred();
+ const first=await fixture({storage,handle:stage=>stage==='admission'?gate.promise:undefined});
+ try{
+  first.type('Persisted despite losing the admission reply');first.click('agent-queue');await first.flush();
+  assert.equal(first.textarea().props.value,'Persisted despite losing the admission reply');
+  assert.match(JSON.stringify(find(first,'agent-queued-message')),/Persisted despite losing the admission reply/);
+ }finally{first.unmount();}
+ const reopened=await fixture({storage,sendInitial:false});
+ try{
+  assert.equal(reopened.textarea().props.value,'');
+  assert.match(JSON.stringify(find(reopened,'agent-queued-message')),/Persisted despite losing the admission reply/);
+  assert.equal(starts(reopened).length,0);
+  reopened.click('agent-resume-queue');await reopened.flush();
+  assert.deepEqual(starts(reopened).map(start=>start[2]),['Persisted despite losing the admission reply']);
+  gate.resolve();await reopened.flush();
+  assert.throws(()=>find(reopened,'agent-follow-up-queue'));
+ }finally{reopened.unmount();}
+});
+
+test('a rejected queue admission keeps the draft and reuses the message identity on explicit retry',async()=>{
+ let rejected=false;
+ const h=await fixture({handle:stage=>{
+  if(stage==='before-admission'&&!rejected){rejected=true;throw Error('Original queue unavailable');}
+ }});
+ try{
+  h.type('Keep this text until admitted');h.click('agent-queue');await h.flush();
+  assert.equal(h.textarea().props.value,'Keep this text until admitted');
+  assert.throws(()=>find(h,'agent-follow-up-queue'));
+  h.click('agent-queue');await h.flush();
+  const requests=h.calls.filter(call=>call.method==='agent.queue'&&call.data.action==='enqueue');
+  assert.equal(requests.length,2);assert.equal(requests[0].data.item.id,requests[1].data.item.id);
+  assert.equal(h.textarea().props.value,'');
+  assert.match(JSON.stringify(find(h,'agent-queued-message')),/Keep this text until admitted/);
+ }finally{h.unmount();}
+});
+
+test('legacy renderer queues import into the saved origin once and retain unconfirmed delivery',async()=>{
+ const storage=memoryStorage();
+ const legacy=(id,text)=>({id,text,planningMode:false,newWorkflow:false,context:''});
+ storage.setItem('studio.follow-up-queues.v1',JSON.stringify({version:1,queues:[
+  {provider:'codex',threadId:'first',items:[{...legacy('old-first-id','Old ambiguous delivery'),unconfirmed:true},legacy('old-next-id','Old pending draft')]},
+  {provider:'codex',threadId:'other',items:[legacy('old-other-id','Other origin stays in its queue')]},
+ ]}));
+ const h=await fixture({storage,sendInitial:false});
+ try{
+  assert.match(JSON.stringify(find(h,'agent-follow-up-queue')),/Old ambiguous delivery.*Old pending draft/);
+  assert.throws(()=>find(h,'agent-resume-queue'));
+  assert.equal(starts(h).length,0);
+  assert.deepEqual(JSON.parse(storage.getItem('studio.follow-up-queues.v1')).queues.map(row=>row.threadId),['other']);
+ }finally{h.unmount();}
+ const reopened=await fixture({storage,sendInitial:false});
+ try{
+  assert.match(JSON.stringify(find(reopened,'agent-follow-up-queue')),/待发送消息.*2/);
+  assert.equal(reopened.calls.some(call=>call.method==='agent.queue'&&call.data.action==='import'),false);
  }finally{reopened.unmount();}
 });
 

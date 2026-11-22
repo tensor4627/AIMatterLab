@@ -6,7 +6,7 @@ const label=id=>`[AIMatterLab scheduled service notification ${id}]`;
 const message=record=>({id:'service:'+record.id,type:'serviceMessage',text:record.text,createdAt:record.createdAt});
 
 /** Reconcile the local notification with any matching item in native history. */
-export function serviceHistory(catalog,provider,threadId,turns=[]){
+export function serviceHistory(catalog,provider,threadId,turns=[],{appendUnmatched=true}={}){
  const rows=catalog.list(namespace).filter(value=>value.provider===provider&&value.threadId===threadId);
  if(!rows.length)return turns;
  const known=new Map(rows.map(row=>[row.id,row])),remaining=new Map(known);
@@ -19,7 +19,7 @@ export function serviceHistory(catalog,provider,threadId,turns=[]){
    return remaining.delete(id)?[message(row)]:[];
   })
  }));
- for(const row of remaining.values())history.push({id:'service:'+row.id,status:'completed',items:[message(row)]});
+ if(appendUnmatched)for(const row of remaining.values())history.push({id:'service:'+row.id,status:'completed',items:[message(row)]});
  return history;
 }
 

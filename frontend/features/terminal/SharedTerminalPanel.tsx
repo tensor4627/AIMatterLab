@@ -6,8 +6,9 @@ import {FitAddon} from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import {invoke} from '../../api/studio';
 import {computeResources,sshService} from '../../api/compute-resources';
-import type {ComputeResourceState,ResourceWorkspaceReference,SharedTerminalResizeRequest,SshTerminalResourceReference,SshConnectionResourceReference,SshServiceState} from '../../../contracts/dto/compute';
+import type {ComputeResourceState,ResourceWorkspaceReference,SharedTerminalResizeRequest,SharedTerminalSession,SshServiceState} from '../../../contracts/dto/compute';
 import type {AgentProvider,Conversation} from '../../../contracts/dto/agent';
+import type {TypedInvoke} from '../../../contracts/dto/ipc';
 import {t} from "../../ui/i18n";
 import './shared-terminal.css';
 import {serviceDuration,serviceErrorMessage,servicePhaseMessage,serviceRejectedMessage,serviceTransfer,serviceVersion} from './ssh-service-presentation';
@@ -16,7 +17,8 @@ import SshConnectionPanel,{type HandoffLessonStage,type SshEnvironmentHelpTarget
 export type SharedTerminalRequest={nonce:string;kind:'local'|'ssh';mode:'interactive'|'key';clusterId?:string;profileId?:string;version?:number;profileName?:string;connectionId?:string;connectionMode?:'plain'|'managed';sessionId?:string;exact?:true;reviewWorkspace?:'handoff'|'change'};
 type OpenTarget=Omit<SharedTerminalRequest,'nonce'|'profileName'|'connectionMode'|'connectionId'|'sessionId'|'exact'>;
 type OpenRecovery={target:OpenTarget;scope:string;nonce?:string;provider?:AgentProvider;requestId:string;message:string};
-type Session={humanInputSequence?:number;outputWait?:boolean;connectionId?:string;resource?:SshTerminalResourceReference|SshConnectionResourceReference;sessionId:string;name:string;kind:string;mode:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;status:string;expired?:boolean;sequence:number;exitCode?:number|null;serviceActive?:boolean;serviceStatus?:string};
+type Session=SharedTerminalSession;
+const invokeTyped:TypedInvoke=invoke;
 type ReadResult=Session&{output:string;cursor:number;dropped:boolean};
 function terminalMessage(error:unknown){
  const code=String(error).slice(0,4096).match(/terminal_[a-z_]+/)?.[0];
@@ -40,12 +42,12 @@ function terminalMessage(error:unknown){
  return t(messages[code||'']||'终端操作未完成，请刷新会话状态后重试。');
 }
 
-type PanelProps={activeResource?:ComputeResourceState|null;provider?:AgentProvider;onConversationPrepared?:(conversation:Conversation)=>void;resourceScope?:string;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;visible:boolean;request?:SharedTerminalRequest;canShare:boolean;onError:(error:unknown)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"|"environment"},connectionId?:string,sessionId?:string)=>void;onServiceEnvironmentHelp?:(target:SshEnvironmentHelpTarget)=>void;onHandoffLesson?:(stage:HandoffLessonStage,target:SshEnvironmentHelpTarget)=>void;onUseForWorkflow?:(ref:ResourceWorkspaceReference)=>Promise<unknown>;onPlainSsh?:()=>void};
+type PanelProps={activeResource?:ComputeResourceState|null;provider?:AgentProvider;draftForHandoff?:(provider:AgentProvider)=>string|undefined;onConversationPrepared?:(conversation:Conversation,adoptedDraftId?:string)=>void;resourceScope?:string;onResourceChange?:(state:ComputeResourceState,label?:string)=>void;visible:boolean;request?:SharedTerminalRequest;canShare:boolean;onError:(error:unknown)=>void;onConfigureSsh?:(ref?:{profileId:string;profileVersion:number;section?:"service"|"environment"},connectionId?:string,sessionId?:string)=>void;onServiceEnvironmentHelp?:(target:SshEnvironmentHelpTarget)=>void;onHandoffLesson?:(stage:HandoffLessonStage,target:SshEnvironmentHelpTarget)=>void;onUseForWorkflow?:(ref:ResourceWorkspaceReference)=>Promise<unknown>;onPlainSsh?:()=>void};
 export default function SharedTerminalPanel(props:PanelProps){
  if(props.request?.kind==='ssh'&&props.request.profileId&&props.request.connectionMode!=='plain')return <SshConnectionPanel {...props} request={props.request}/>;
  return <LegacySharedTerminalPanel {...props}/>;
 }
-export function LegacySharedTerminalPanel({visible,request,canShare,onError,resourceScope='',onResourceChange,provider,onConversationPrepared}:PanelProps){
+export function LegacySharedTerminalPanel({activeResource,visible,request,canShare,onError,resourceScope='',onResourceChange,provider,draftForHandoff,onConversationPrepared}:PanelProps){
  const [busyLabel,setBusyLabel]=useState('');
  const [sessions,setSessions]=useState<Session[]>([]),[active,setActive]=useState<Session|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[recovery,setRecovery]=useState<OpenRecovery|null>(null);
  const [service,setService]=useState<SshServiceState|null>(null),serviceRef=useRef(service),[serviceIssue,setServiceIssue]=useState(''),[serviceChecking,setServiceChecking]=useState(false),[serviceNow,setServiceNow]=useState(Date.now());
@@ -175,6 +177,8 @@ export function LegacySharedTerminalPanel({visible,request,canShare,onError,reso
 
  async function ownership(){
   const value=activeRef.current,context={scope:resourceOwner.current,nonce:requestOwner.current,provider:providerOwner.current};if(!value||sessionRefreshingRef.current)return;
+  const legacyHandoff=activeResource?.kind!=='ssh-connection'&&value.resource?.kind!=='ssh-connection';
+  const draftId=context.provider&&value.owner==='human'&&legacyHandoff?draftForHandoff?.(context.provider):undefined;
   const current=()=>contextCurrent(context)&&activeRef.current?.sessionId===value.sessionId;
   await action(async()=>{
    drainingInputRef.current=true;try{await inputQueue.current;}finally{drainingInputRef.current=false;}if(!current())return;
@@ -182,11 +186,13 @@ export function LegacySharedTerminalPanel({visible,request,canShare,onError,reso
    const selected=activeRef.current!,state=serviceRef.current,serviceMode=state?.sessionId===selected.sessionId&&state.status==='connected'&&state.workflowReady===true&&state.terminalAccess!=='unknown';
    if(laneReserved(selected)&&!serviceMode){setNotice(t('作业服务通道尚未就绪，请先核对当前连接。'));return;}
    const owner=serviceMode?state.operator||'human':selected.owner,target=owner==='human'?'agent':'human';
-   const next=await invoke<Session&{conversation?:Conversation;handoffKind?:'service'|'terminal';serviceOwner?:'human'|'agent'}>('sharedTerminal.owner',{sessionId:selected.sessionId,ownerEpoch:selected.ownerEpoch,owner:target,...target==='agent'&&provider?{provider}:{}});
+   const identity={sessionId:selected.sessionId,ownerEpoch:selected.ownerEpoch};
+   const next=await invokeTyped('sharedTerminal.owner',target==='human'?{...identity,owner:'human'}:{...identity,owner:'agent',
+    ...provider?(draftId?{provider,attachmentDraftId:draftId}:{provider}):{}});
    if(!current())return;
    activeRef.current=next;setActive(next);setSessions(old=>old.map(item=>item.sessionId===next.sessionId?next:item));
    if(next.handoffKind==='service'&&next.serviceOwner&&serviceRef.current?.sessionId===next.sessionId){serviceRef.current={...serviceRef.current,operator:next.serviceOwner};setService(serviceRef.current);}
-   if(next.conversation)onConversationPrepared?.(next.conversation);
+   if(next.conversation)onConversationPrepared?.(next.conversation,next.adoptedDraftId===draftId&&next.conversation.provider===context.provider?draftId:undefined);
    await list();await refreshService();await refreshResource();
   },current,t('正在交接计算资源…'));
  }

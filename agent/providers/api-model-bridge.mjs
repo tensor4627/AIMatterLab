@@ -35,12 +35,16 @@ export class ApiModelBridge extends DshBridge{
  cleanProtocol(value,options){return sanitizeProtocolTranscript(value,[...this.boundCredentials.values(),this.getCredential()?.apiKey,this.getWorker()?.tokens?.mcp],options);}
  event(method,params){this.emit('event',this.cleanProtocol({provider:this.provider,method,params}));}
  choose(key){const selected=this.profiles.resolve(this.provider,key||this.model);if(this.selection&&this.selection.profile.id!==selected.profile.id)this.modelInfos=[];this.selection=selected;this.model=selected.key;return this.model;}
- modelCatalog(){return {data:this.profiles.list(this.provider).flatMap(profile=>profile.models.map(model=>{
-  const efforts=model.reasoningEfforts&&Object.entries(model.reasoningEfforts).map(([id])=>({reasoningEffort:id,description:id}))||[];
-  const info=profile.id===this.selection?.profile.id?this.modelInfos?.find(v=>v.id===model.id):null;
-  const available=profile.authMode==='deepseek-account'?efforts:info?.reasoning?.efforts?.map(v=>({reasoningEffort:v.id,description:v.name||v.id}))||efforts;
-  return {id:apiModelKey(profile.id,model.id),model:apiModelKey(profile.id,model.id),displayName:model.name||model.id,providerName:profile.name,profileId:profile.id,isDefault:apiModelKey(profile.id,model.id)===this.model,supportedReasoningEfforts:available,defaultReasoningEffort:available.find(v=>v.reasoningEffort==='off')?.reasoningEffort||info?.reasoning?.defaultEffort||available[0]?.reasoningEffort,...model.contextWindow?{contextWindow:model.contextWindow}:{},...model.maxTokens?{maxTokens:model.maxTokens}:{}};
- }))};}
+ modelCatalog(){return {data:this.profiles.list(this.provider).flatMap(profile=>{
+  const launched=this.process&&profile.id===this.launchProfileId&&this.launchIdentity===this.profiles.identity(profile.id);
+  return profile.models.map(model=>{
+   const key=apiModelKey(profile.id,model.id),efforts=model.reasoningEfforts&&Object.entries(model.reasoningEfforts).map(([id])=>({reasoningEffort:id,description:id}))||[];
+   const info=profile.id===this.selection?.profile.id?this.modelInfos?.find(v=>v.id===model.id):null;
+   const available=profile.authMode==='deepseek-account'?efforts:info?.reasoning?.efforts?.map(v=>({reasoningEffort:v.id,description:v.name||v.id}))||efforts;
+   const inputModalities=model.input?.includes('image')&&(!launched||info?.inputModalities?.includes('image'))?['text','image']:['text'];
+   return {id:key,model:key,displayName:model.name||model.id,providerName:profile.name,profileId:profile.id,isDefault:key===this.model,inputModalities,supportedReasoningEfforts:available,defaultReasoningEffort:available.find(v=>v.reasoningEffort==='off')?.reasoningEffort||info?.reasoning?.defaultEffort||available[0]?.reasoningEffort,...model.contextWindow?{contextWindow:model.contextWindow}:{},...model.maxTokens?{maxTokens:model.maxTokens}:{}};
+  });
+ })};}
  async start(){if(this.starting)return this.starting;if(this.process)return this.info;if(!this.profiles.list(this.provider).length)throw Error('请先保存 API Key 和服务商模型配置');this.choose(this.model);const promise=this.launch(this.model).finally(()=>{if(this.starting===promise)this.starting=null;});this.starting=promise;return promise;}
  async launch(key,effort,toolContext){
   this.choose(key);const selected=this.selection,identity=this.profiles.identity(selected.profile.id),credential=selected.credential;this.boundCredentials.set(identity,credential.apiKey);

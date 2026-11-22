@@ -2,11 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {createServer} from 'node:http';
+import {createRequire} from 'node:module';
 import {EventEmitter} from 'node:events';import {PassThrough} from 'node:stream';
 import {DshBridge,dshLegacyContext,dshPublicItemId,normalizeDshPublicTurns} from '../../agent/providers/dsh.mjs';
 import {DSH_QUESTION_TOOL,dshToolAllowed,checkDshInventory} from '../../agent/providers/dsh-policy.mjs';
 import {dshRuntime,prepareDshProfile,scopedDshWorker} from '../../desktop/platform/dsh-runtime.mjs';
 import {baseWorkspaceTool} from '../../backend/main/workspace/base-workspace.mjs';
+import {Catalog} from '../../backend/main/workspace/catalog.mjs';
+import {createChatAttachments} from '../../agent/sessions/chat-attachments.mjs';
+import {chatAttachmentRefs} from '../../contracts/agent/chat-attachments.mjs';
 
 function catalog(){const values=new Map();return {get:(k,id)=>values.get(k+':'+id),put:(k,id,v)=>values.set(k+':'+id,structuredClone(v)),values};}
 function temporary(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-dsh-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
@@ -94,6 +98,27 @@ test('repeated SDK attempt and tool-call IDs in two turns preserve both replies 
  const deltas=events.filter(event=>event.method==='item/agentMessage/delta');assert.equal(deltas.length,2);assert.notEqual(deltas[0].params.itemId,deltas[1].params.itemId);assert.equal(deltas[0].params.turnId,'turn-0');assert.equal(deltas[1].params.turnId,'turn-1');assert.equal(deltas[0].params.itemId,thread.turns[0].items.find(item=>item.type==='agentMessage').id);assert.equal(deltas[1].params.itemId,thread.turns[1].items.find(item=>item.type==='agentMessage').id);b.close();
 });
 
+test('reports SDK todo snapshots and persists only confirmed compaction for the matching native turn',()=>{
+ const bridge=fixtureBridge(),events=[],turn={id:'scoped-turn',status:'inProgress',items:[]};
+ const session={schemaVersion:1,harness:'dsh',id:'owned-dsh-thread',nativeId:'owned-native-session',turns:[turn],updatedAt:1};
+ bridge.sessions.set(session.id,session);
+ bridge.activeTurns.set(session.id,{turn});
+ bridge.on('event',event=>events.push(event));
+ const emit=(type,data)=>bridge.sessionEvent({sessionId:session.nativeId,event:{type,data}});
+ emit('turn/start',{turn:2});
+ emit('todo/write',{todos:[{content:'Read file',status:'completed'},{content:'Verify target',status:'in_progress'},{content:'Guessed',status:'unknown'}]});
+ emit('compaction/end',{turn:1,compactionId:'unrelated'});
+ emit('compaction/end',{turn:2,compactionId:'failed',error:'transport unavailable'});
+ emit('compaction/end',{turn:2,compactionId:'confirmed'});
+ emit('compaction/end',{turn:2,compactionId:'confirmed'});
+ assert.deepEqual(events.find(event=>event.method==='turn/plan/updated')?.params,{
+  threadId:session.id,turnId:turn.id,plan:[{step:'Read file',status:'completed'},{step:'Verify target',status:'inProgress'}],
+ });
+ assert.equal(events.filter(event=>event.params.item?.type==='contextCompaction').length,1);
+ assert.deepEqual(bridge.publicThread(session).turns[0].items.map(item=>item.type),['contextCompaction']);
+ bridge.close();
+});
+
 test('legacy repeated public item IDs normalize for replay without rewriting stored history or native routing IDs',()=>{
  const b=fixtureBridge(),session={id:'old-thread',nativeId:'original-sdk-session',turns:[{id:'old-turn-1',items:[{id:'assistant',type:'agentMessage',text:'Original first final'}]},{id:'old-turn-2',items:[{id:'assistant',type:'agentMessage',text:'Original second final'}]}]},before=structuredClone(session),catalogBefore=JSON.stringify([...b.catalog.values]);
  const first=b.publicThread(session),second=b.publicThread(session);assert.notEqual(first.turns[0].items[0].id,first.turns[1].items[0].id);assert.deepEqual(second,first);assert.deepEqual(session,before);assert.equal(JSON.stringify([...b.catalog.values]),catalogBefore);assert.equal(first.turns[0].items[0].text,'Original first final');assert.equal(session.nativeId,'original-sdk-session');b.close();
@@ -112,8 +137,17 @@ function messagesStream(index,{tool,text='Official harness fixture output'}={}){
 async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}],toolCatalog,allowDiscovery=()=>true,toolsConnected=true,toolCall=()=>({status:'fixture-only'}),confirmResourceChoice}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-dsh-native-')),store=catalog(),calls=[],events=[],children=[];let count=0,held;
  const server=createServer(async(req,res)=>{
-  let text='';for await(const chunk of req)text+=chunk;const body=text?JSON.parse(text):{};calls.push({url:req.url,authorization:req.headers.authorization,apiKey:req.headers['x-api-key'],body});
   res.setHeader('Content-Type','application/json');
+  const chunks=[];for await(const chunk of req)chunks.push(chunk);
+  const payload=Buffer.concat(chunks);
+  if(req.url==='/v1/files'&&req.method==='POST'){
+   const form=await new Response(payload,{headers:{'Content-Type':req.headers['content-type']}}).formData(),file=form.get('file');
+   const bytes=Buffer.from(await file.arrayBuffer());
+   calls.push({url:req.url,apiKey:req.headers['x-api-key'],body:{name:file.name,mime:file.type,expiresSeconds:form.get('expires_after[seconds]'),bytes}});
+   res.end(JSON.stringify({type:'file',id:'fixture-image-file',mime_type:file.type,size_bytes:bytes.length,created_at:new Date().toISOString(),filename:file.name}));
+   return;
+  }
+  const body=payload.length?JSON.parse(payload.toString()):{};calls.push({url:req.url,authorization:req.headers.authorization,apiKey:req.headers['x-api-key'],body});
   if(req.url==='/models'){res.end(JSON.stringify({data:[{id:'deepseek-flash'}]}));return;}
   if(req.url==='/providers/deepseek/mcp'){
    if(body.method==='tools/list'&&!allowDiscovery()){res.writeHead(403);res.end('private fixture response');return;}
@@ -131,6 +165,36 @@ async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_st
 }
 function nextEvent(b,method){return new Promise((resolve,reject)=>{const listener=event=>{if(event.method===method){clearTimeout(timer);b.off('event',listener);resolve(event);}};const timer=setTimeout(()=>{b.off('event',listener);reject(Error('Missing fixture event '+method));},15000);b.on('event',listener);});}
 const completion=b=>nextEvent(b,'turn/completed').then(event=>event.params.turn);
+
+test('the official DeepSeek vision route sends selected image bytes and a Files reference to its original endpoint',{timeout:60000},async t=>{
+ const f=await nativeFixture(t,{toolsConnected:false,responses:[{}]}),bridge=f.b;
+ await bridge.start();
+ const catalog=await bridge.request('model/list');
+ assert.deepEqual(catalog.data[0].inputModalities,['text','image']);
+ const {thread}=await bridge.request('thread/start'),owner={provider:'deepseek',threadId:thread.id};
+ const require=createRequire(dshRuntime.resolve().args[1]),sharp=createRequire(require.resolve('@deepseek-ai/dsh-attachment-local'))('sharp');
+ const png=await sharp({create:{width:3,height:2,channels:3,background:{r:58,g:108,b:187}}}).png().toBuffer();
+ const db=new Catalog(f.root),attachments=createChatAttachments({catalog:db});
+ let file,input;
+ try{
+  [file]=attachments.stage({...owner,files:[{name:'image-fixture.png',size:png.length,mimeType:'image/png',bytes:png}]});
+  input=[{type:'text',text:'Describe the original fixture.'},...attachments.inputs(owner,[file.id])];
+ }finally{db.db.close();}
+ const done=completion(bridge);done.catch(()=>{});
+ await bridge.request('turn/start',{threadId:thread.id,input});
+ assert.equal((await done).status,'completed');
+ const upload=f.calls.find(call=>call.url==='/v1/files'),model=f.calls.find(call=>call.url==='/v1/messages');
+ assert(upload,'one selected image must reach the trusted Files route');
+ assert.equal(upload.apiKey,credential.apiKey);
+ assert.equal(upload.body.expiresSeconds,'604800');
+ const {data,info}=await sharp(upload.body.bytes).removeAlpha().raw().toBuffer({resolveWithObject:true});
+ assert.deepEqual([info.width,info.height,info.channels],[3,2,3]);
+ for(let index=0;index<data.length;index++)assert(Math.abs(data[index]-[58,108,187][index%3])<=8,'uploaded color must match the selected image');
+ const blocks=model.body.messages.filter(message=>message.role==='user').flatMap(message=>message.content);
+ assert(blocks.some(block=>block.type==='text'&&block.text===input[0].text));
+ assert.deepEqual(blocks.find(block=>block.type==='image').source,{type:'file',file_id:'fixture-image-file'});
+ assert.deepEqual(chatAttachmentRefs((await bridge.request('thread/read',{threadId:thread.id})).thread.turns[0].items[0].content),[file]);
+});
 
 test('the pinned SDK consumes steering at the next step of the same turn and saves it once',{timeout:60000},async t=>{
  const entered=Promise.withResolvers(),release=Promise.withResolvers();

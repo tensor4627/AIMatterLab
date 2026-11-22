@@ -1,6 +1,6 @@
 import {useEffect,useId,useLayoutEffect,useRef,useState,type KeyboardEvent} from 'react';
 import {createPortal} from 'react-dom';
-import {ArrowLeft,Check,ChevronRight,Folder,MoreHorizontal,Pencil,Pin,Trash2} from 'lucide-react';
+import {Archive,ArchiveRestore,ArrowLeft,Check,ChevronRight,Folder,MoreHorizontal,Pencil,Pin,Trash2} from 'lucide-react';
 import type {Conversation,ConversationGroup} from '../../../contracts/dto/agent';
 import {t} from '../../ui/i18n';
 import './conversation-menu.css';
@@ -12,6 +12,7 @@ type ConversationProps={
  deleting?:boolean;
  onRename:()=>void;
  onDelete:()=>void;
+ onArchive?:()=>void;
  onOrganize:(pinned:boolean,groupId?:string|null)=>void;
 };
 type Props=ConversationProps|{group:ConversationGroup;disabled?:boolean;deleting?:boolean;onDelete:()=>void};
@@ -20,6 +21,7 @@ type Props=ConversationProps|{group:ConversationGroup;disabled?:boolean;deleting
 export default function ConversationMenu(props:Props){
  const {disabled=false,deleting=false,onDelete}=props;
  const group='group' in props?props.group:null,conversation='conversation' in props?props.conversation:null;
+ const onArchive='conversation' in props?props.onArchive:undefined;
  const groups='groups' in props?props.groups:[];
  const onRename=()=>{if('conversation' in props)props.onRename();};
  const onOrganize=(pinned:boolean,groupId?:string|null)=>{if('conversation' in props)props.onOrganize(pinned,groupId);};
@@ -84,6 +86,7 @@ export default function ConversationMenu(props:Props){
     <button type="button" role="menuitem" tabIndex={-1} disabled={disabled} aria-label={t('重命名会话')+' · '+conversation.name} onClick={()=>act(onRename)}><Pencil size={16}/><span>{t('重命名')}</span></button>
     <button type="button" role="menuitem" tabIndex={-1} disabled={disabled} onClick={()=>act(()=>onOrganize(!conversation.pinned))}><Pin size={16}/><span>{t(conversation.pinned?'取消置顶':'置顶')}</span></button>
     <button type="button" role="menuitem" tabIndex={-1} data-project-action aria-haspopup="menu" disabled={disabled} aria-label={t('移动会话到分组')+' · '+conversation.name} onClick={showProjects}><Folder size={16}/><span>{t('移动到分组')}</span><ChevronRight size={15}/></button>
+    {onArchive&&<button type="button" role="menuitem" tabIndex={-1} disabled={deleting} onClick={()=>act(onArchive)}>{conversation.archived?<ArchiveRestore size={16}/>:<Archive size={16}/>}<span>{t(conversation.archived?'恢复归档会话':'归档会话')}</span></button>}
     <div role="separator" className="conversation-popover-separator"/>
     <button type="button" role="menuitem" tabIndex={-1} disabled={disabled||deleting} className="conversation-delete" aria-label={t('删除对话')+' · '+conversation.name} onClick={()=>act(onDelete)}><Trash2 size={16}/><span>{t('删除对话')}</span></button>
    </>}

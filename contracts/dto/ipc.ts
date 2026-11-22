@@ -1,6 +1,10 @@
 import type {ManagedSnapshot,ManagedSchedule,PublishedSshResource,ComputeConsoleSnapshot,ComputeConsoleRelease,ComputeConsoleSshRef,ComputeConsoleProfileRef,ComputeConsoleLocalRef} from './managed-compute';
 import type {Conversation} from './agent';
-import type {ResourceWorkspaceReference,ManagedSshServiceStatus,ManagedSshServiceUpdateRequest,SshServiceState} from './compute';
+import type {ConversationAnchor,ConversationHistoryPage,ConversationHistoryItem,ConversationHistorySearchRequest,ConversationHistorySearchResult,ConversationBookmark,ConversationBranchResult} from './conversation-history';
+import type {AgentQueueRequest,AgentQueueResult} from './agent-queue';
+import type {ConversationActivity,ConversationReadReceipt} from './conversation-activity';
+import type {ChatEvidenceDifference,ChatEvidenceRequest,ChatEvidenceStageRequest} from './chat-evidence';
+import type {ResourceWorkspaceReference,ManagedSshServiceStatus,ManagedSshServiceUpdateRequest,SshServiceState,SharedTerminalOwnerRequest,SharedTerminalOwnerResult} from './compute';
 import type {UpdateAccess,UpdateSource,UpdateState} from './update';
 import type {Project,ComputeResourceActivation,ComputeResourceState,BaseWorkspaceRequest,BaseWorkspaceResult,ResourceWorkspacePreviewRequest,ResourceWorkspaceConfirmRequest,ResourceWorkspaceReadRequest,ResourceWorkspaceReadResult,ResourceWorkspacePreview,SessionWorkspaceResult,TerminalWorkspaceApproval,TerminalWorkspaceDecision} from './compute';
 import type {Run,ClusterRun} from './runs';
@@ -18,6 +22,22 @@ export interface CodexEnvImportPrompt {
 }
 /** Critical authoring/execution boundary. Authorization remains a main/worker responsibility. */
 export interface StudioIpcMap {
+ 'agent.attachments.import':Route<import('./chat-attachments').ChatImportRequest,import('./chat-attachments').ChatAttachmentRef[]>;
+ 'agent.attachments.preview':Route<import('./chat-attachments').ChatPreviewRequest,import('./chat-attachments').ChatAttachmentPreview>;
+ 'sharedTerminal.owner':Route<SharedTerminalOwnerRequest,SharedTerminalOwnerResult>;
+ 'conversation.history.page':Route<{conversationId:string;before?:string},ConversationHistoryPage>;
+ 'conversation.history.locate':Route<ConversationAnchor,ConversationHistoryPage>;
+ 'conversation.history.detail':Route<Required<ConversationAnchor>,ConversationHistoryItem>;
+ 'conversation.history.search':Route<ConversationHistorySearchRequest,ConversationHistorySearchResult>;
+ 'conversation.history.bookmark':Route<ConversationAnchor & {bookmarked:boolean},ConversationBookmark[]>;
+ 'conversation.history.archive':Route<{id:string;archived:boolean},Conversation>;
+ 'conversation.history.branch':Route<ConversationAnchor & {revision?:string},ConversationBranchResult>;
+ 'agent.queue':Route<AgentQueueRequest,AgentQueueResult>;
+ 'conversation.activity.list':Route<Record<string,never>,ConversationActivity[]>;
+ 'conversation.activity.markRead':Route<ConversationReadReceipt,{acknowledged:boolean}>;
+ 'chat.evidence.stage':Route<ChatEvidenceStageRequest,import('./chat-attachments').ChatAttachmentRef[]>;
+ 'chat.evidence.compare':Route<ChatEvidenceRequest,ChatEvidenceDifference|null>;
+ 'chat.evidence.remember':Route<ChatEvidenceRequest,{revision:string}>;
  'worker.request':Route<{method:string;target:string;data?:unknown;projectScope?:ResourceWorkspaceReference},unknown>;
  'codex.envImport.pending':Route<Record<string,never>,CodexEnvImportPrompt|null>;
  'codex.envImport.decide':Route<{requestId:string;mode:CodexEnvImportMode;useModelDefaults?:boolean;useSystemProxy?:boolean},null>;

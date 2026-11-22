@@ -1,3 +1,9 @@
+import {attachmentLimits} from '../../contracts/agent/chat-attachments.mjs';
+
+// Native protocols can echo an entire user turn. The bound covers a full
+// attachment budget encoded as base64, plus text and the JSON-RPC envelope.
+export const ATTACHMENT_FRAME_BYTES=attachmentLimits.totalBytes*1.5;
+
 // Bounded JSONL framing for provider child stdout.
 // `readline` buffers a line without a bound before any per-line guard can run, so
 // providers feed raw chunks here instead: a single oversized frame is rejected
@@ -5,32 +11,37 @@
 export function createJsonlFramer({onFrame, onOversize, maxBytes = 1048576} = {}) {
   if (typeof onFrame !== 'function') throw new Error('JSONL framer requires an onFrame handler');
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid JSONL frame bound');
-  let buffer = Buffer.alloc(0);
+  let pending = [], bytes = 0;
+  function reset() { pending = []; bytes = 0; }
   function emit(line) {
     let text = line.toString('utf8');
     if (text.endsWith('\r')) text = text.slice(0, -1);
     if (text) onFrame(text);
   }
   return {
-    get bufferedBytes() { return buffer.length; },
-    reset() { buffer = Buffer.alloc(0); },
+    get bufferedBytes() { return bytes; },
+    reset,
     feed(chunk) {
       if (!chunk || !chunk.length) return;
-      buffer = buffer.length ? Buffer.concat([buffer, chunk]) : Buffer.from(chunk);
-      for (;;) {
-        const newline = buffer.indexOf(10);
-        if (newline < 0) {
-          if (buffer.length > maxBytes) {
-            const oversized = buffer.length;
-            buffer = Buffer.alloc(0);
-            onOversize?.(oversized);
-          }
-          return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const newline = buffer.indexOf(10, offset);
+        const part = buffer.subarray(offset, newline < 0 ? buffer.length : newline);
+        const length = bytes + part.length;
+        if (length > maxBytes) {
+          reset();
+          onOversize?.(length);
+        } else if (newline < 0) {
+          pending.push(Buffer.from(part));
+          bytes = length;
+        } else {
+          const line = bytes ? Buffer.concat([...pending, part], length) : part;
+          reset();
+          emit(line);
         }
-        const line = buffer.subarray(0, newline);
-        buffer = buffer.subarray(newline + 1);
-        if (line.length > maxBytes) { onOversize?.(line.length); continue; }
-        emit(line);
+        if (newline < 0) return;
+        offset = newline + 1;
       }
     },
   };

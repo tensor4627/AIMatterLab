@@ -8,19 +8,22 @@ import {providerContext} from '../tools/provider-scope.mjs';
 import {serviceHistory} from '../sessions/wake-delivery.mjs';
 import {API_PROVIDER_GROUPS} from '../../contracts/agent/model-profiles.mjs';
 import {sanitizeProtocolTranscript} from '../../contracts/agent/transcript-sanitizer.mjs';
+import {readApiHistory} from './api-model-bridge.mjs';
+import {dshPublicThread,markInterruptedDshTurns} from './dsh.mjs';
 
 const inertCodex=Object.freeze({close(){}});
 const key=(provider,threadId)=>provider+':'+threadId;
 const terminalTurn=turn=>['completed','failed','interrupted','cancelled','canceled'].includes(turn?.status);
 const exactThreadId=value=>typeof value==='string'&&value.length>0&&value.length<=200&&!/[\x00-\x1f]/.test(value);
-const liveItemTypes=new Set(['userMessage','agentMessage','mcpToolCall','commandExecution','fileChange']);
+const liveItemTypes=new Set(['userMessage','agentMessage','mcpToolCall','commandExecution','fileChange','plan','contextCompaction']);
 
 function rememberLiveTurn(entry,event,params){
  const {turn,turnId,item,itemId,delta}=params,active=entry.liveTurn;
  if(event==='turn/started'&&exactThreadId(turn?.id))entry.liveTurn={...turn,items:[...(turn.items||[])]};
  else if(active&&event==='turn/completed'&&turn?.id===active.id)entry.liveTurn=mergeLiveTurn(active,turn);
  else if(active&&turnId===active.id){
-  if(['item/started','item/completed'].includes(event)&&liveItemTypes.has(item?.type)&&exactThreadId(item.id)){
+  if(['item/started','item/completed'].includes(event)&&liveItemTypes.has(item?.type)&&exactThreadId(item.id)&&
+     (event==='item/completed'||item.type!=='contextCompaction')){
    const index=active.items.findIndex(value=>value.id===item.id);
    if(index===-1)active.items.push(item);else active.items[index]={...active.items[index],...item};
   }else if(event==='item/agentMessage/delta'&&exactThreadId(itemId)&&typeof delta==='string'){
@@ -63,18 +66,18 @@ export class ConversationAgentHub extends EventEmitter{
  get loginStatus(){return this.auth.loginStatus;}
  get bridgeWorkers(){return (this.scope.getStore()||this.foreground).hub.bridgeWorkers;}
 
- create(provider,threadId){
-  const id=randomUUID(),entry={id,provider,threadId,requests:new Map(),turnId:null,settledTurns:new Set(),preparing:false,closed:false};
+ create(provider,threadId,{detached=false}={}){
+  const id=randomUUID(),entry={id,provider,threadId,requests:new Map(),turnId:null,settledTurns:new Set(),preparing:false,closed:false,detached};
   const opts=this.options,context=()=>entry.hub.contexts.get(provider)||providerContext();
   const hub=this.createHub({...opts,codex:provider==='codex'?this.createCodex():inertCodex,sessionProfileId:id,
-   worker:p=>p===provider?opts.worker?.(p,id,context()):null,releaseWorker:p=>{if(p===provider)opts.releaseWorker?.(p,id);},
+   worker:p=>p===provider&&!entry.detached?opts.worker?.(p,id,context()):null,releaseWorker:p=>{if(p===provider&&!entry.detached)opts.releaseWorker?.(p,id);},
    bindWorkerContext:(p,value,binding)=>opts.bindWorkerContext?.(p,value,{...binding,sessionId:id}),
    confirmResourceChoice:({threadId,turnId},choice)=>{
     const scope=this.questionScope(entry,threadId,turnId);
     if(!scope.checkCurrent())throw Error('The resource choice no longer belongs to the active conversation');
     return opts.confirmResourceChoice?.(scope,choice);
    },
-   resourceScope:(p,method)=>opts.resourceScope?.(p,method,context(),id)});
+   resourceScope:(p,method)=>entry.detached?null:opts.resourceScope?.(p,method,context(),id)});
   hub.active=provider;
   hub.on('event',event=>this.receive(entry,event));
   if(provider==='codex'){
@@ -186,6 +189,7 @@ export class ConversationAgentHub extends EventEmitter{
 
  busy(entry){return !!(entry?.preparing||entry?.turnId||entry?.hub.contextBusy());}
  isBusy(provider,threadId){return this.busy(this.byThread.get(key(provider,threadId)));}
+ activeTurn(provider,threadId){return this.byThread.get(key(provider,threadId))?.turnId??null;}
  turnOrigin(provider,threadId){return this.byThread.get(key(provider,threadId))?.turnOrigin;}
  contextBusy(){return [...this.entries.values()].some(entry=>this.busy(entry));}
  assertContextIdle(){
@@ -215,6 +219,10 @@ export class ConversationAgentHub extends EventEmitter{
    entry.settledTurns.add(turnId);
    entry.turnId=null;
    entry.requests.clear();
+   if(entry.provider==='kimi'){
+    const bridge=entry.hub.bridge('kimi'),session=bridge?.sessions?.get(threadId);
+    if(session)this.rememberKimiHistory(bridge.thread(session),turnId);
+   }
    tagged.params.studioTurnBusy=this.busy(entry);
   }
   if(event.method==='studio/codexDisconnected'){entry.turnId=null;entry.requests.clear();}
@@ -234,6 +242,67 @@ export class ConversationAgentHub extends EventEmitter{
  threads(provider){return this.auth.threads(provider);}
  codexThreadState(threadId){return this.auth.codexThreadState(threadId);}
  threadReady(threadId){return this.byThread.get(key('codex',threadId))?.hub.threadReady(threadId)===true;}
+
+ historySession(provider,threadId){
+  const entry=this.byThread.get(key(provider,threadId));
+  if(!entry||entry.closed)return null;
+  const {phase,provider:ignored,...state}=this.turnState(entry);
+  return {...state,turn:entry.liveTurn,requests:[...entry.requests.values()]};
+ }
+ rememberKimiHistory(thread,completedTurnId){
+  const {catalog}=this.options,threadId=thread.id;
+  if(this.auth.deleted('kimi',threadId))return;
+  const previous=catalog.get('kimi-history',threadId);
+  const latest=completedTurnId&&thread.turns?.find(turn=>turn.id===completedTurnId);
+  if(previous&&!latest)return;
+  const turns=previous?[...previous.turns.filter(turn=>turn.id!==completedTurnId),latest]:thread.turns||[];
+  catalog.put('kimi-history',threadId,{id:threadId,provider:'kimi',turns});
+ }
+ readSavedHistoryPage(provider,threadId,before,limit){
+  const {catalog}=this.options,bridge=this.bridge(provider,threadId);
+  if(bridge?.sessions?.has(threadId))return null;
+  const kind=API_PROVIDER_GROUPS.includes(provider)?'api-dsh-history':provider==='deepseek'?'deepseek-dsh-history':null;
+  if(!kind)return null;
+  const page=catalog.historyPage?.(kind,threadId,before,limit);
+  if(!page||page.metadata.threadId!==threadId||page.metadata.harness!=='dsh'||page.metadata.schemaVersion!==1||
+     page.metadata.provider!==provider&&!(provider==='deepseek'&&page.metadata.provider===null))return null;
+  const {turns}=sanitizeProtocolTranscript(dshPublicThread({id:threadId,turns:page.turns},provider));
+  markInterruptedDshTurns(turns);
+  return {turns,hasEarlier:page.hasEarlier};
+ }
+ async readLocalConversationHistory(provider,threadId){
+  const {catalog}=this.options,bridge=this.bridge(provider,threadId);
+  if(API_PROVIDER_GROUPS.includes(provider))return (bridge?.readHistory?.(threadId)??readApiHistory(catalog,provider,threadId)).thread;
+  if(provider==='deepseek'){
+   const live=bridge?.sessions?.get(threadId),native=live||catalog.get('deepseek-dsh-history',threadId);
+   if(native&&(native.schemaVersion!==1||native.harness!=='dsh'||native.id!==threadId))throw Error('Unsupported DeepSeek Harness history');
+   const saved=native||catalog.get('deepseek-history',threadId);
+   if(!saved||saved.id!==undefined&&saved.id!==threadId||saved.provider!==undefined&&saved.provider!==provider)throw Error('DeepSeek conversation history is unavailable');
+   const thread=live?bridge.publicThread(live):sanitizeProtocolTranscript(dshPublicThread({...saved,id:threadId},provider));
+   if(!live)markInterruptedDshTurns(thread.turns);
+   return thread;
+  }
+  const live=bridge?.sessions?.get(threadId),saved=catalog.get('kimi-history',threadId);
+  if(saved?.id===threadId&&saved.provider===provider)return saved;
+  if(live)return bridge.thread(live);
+  throw Error('Open this conversation once to load its provider history');
+ }
+ async startPlainDiscussion(provider){
+  const entry=this.create(provider,null,{detached:true});
+  return this.runEntry(entry,async()=>{
+   let result;
+   if(API_PROVIDER_GROUPS.includes(provider)){
+    // API conversations can allocate a local identity before any process starts.
+    result=await entry.hub.ensureBridge(provider).request('thread/start',{});
+   }else{
+    await entry.hub.connect(provider,{checkLogin:true});
+    result=await entry.hub.rpc(provider,'thread/start',{});
+   }
+   if(!result?.thread?.id)throw Error('Provider did not create a discussion');
+   this.adopt(entry,result.thread.id);entry.detached=false;
+   return result.thread;
+  });
+ }
 
  selectContext(provider,value={}){
   const context=providerContext(value),origin=this.scope.getStore(),entry=origin?.provider===provider?origin:this.entry(provider,context.threadId);
@@ -266,7 +335,7 @@ export class ConversationAgentHub extends EventEmitter{
   }
   const bridge=entry.hub.bridge(provider),thread=async()=>{
    if(bridge?.process){
-    try{const result=await bridge.request('thread/read',{threadId,includeTurns:true});if(result?.thread?.id===threadId)return result;}
+    try{const result=await bridge.request('thread/read',{threadId,includeTurns:params.excludeTurns!==true});if(result?.thread?.id===threadId)return result;}
     catch(error){if(!this.busy(entry))throw error;}
    }
    const saved=this.options.catalog.get('thread',threadId);
@@ -287,10 +356,11 @@ export class ConversationAgentHub extends EventEmitter{
   const thread=result.thread?{...result.thread,turns:history}:result.thread;
   return {...result,thread:API_PROVIDER_GROUPS.includes(entry.provider)?sanitizeProtocolTranscript(thread):thread,studioSession:{...this.turnState(entry),requests:[...entry.requests.values()]}};
  }
- rpc(provider,method,params={}){
+ rpc(provider,method,params={},{assertCurrent=()=>{}}={}){
   if(method.startsWith('account/'))return this.accountRpc(provider,method,params);
   const entry=this.entry(provider,params.threadId);
   return this.withEntry(entry,async()=>{
+   assertCurrent();
    if(entry.closed||params.threadId&&this.auth.deleted(provider,params.threadId))throw Error('Conversation was deleted');
    const hub=entry.hub;
    if(method==='thread/read'&&API_PROVIDER_GROUPS.includes(provider)){
@@ -306,10 +376,12 @@ export class ConversationAgentHub extends EventEmitter{
    if(!hub.bridge(provider)?.process&&!hub.bridge(provider)?.starting){
     if(!['thread/read','thread/resume','turn/start','model/list','thread/start'].includes(method))throw Error('Connect '+provider+' first');
     const connected=await hub.connect(provider,{checkLogin:true,threadId:entry.threadId,model:params.model});
+    assertCurrent();
     if(connected?.loginRequired||connected?.authRequired)throw Error('Provider authentication is required');
    }
-   const result=await hub.rpc(provider,method,params);
+   const result=await hub.rpc(provider,method,params,{assertCurrent});
    if(method==='thread/start'&&result.thread?.id)this.adopt(entry,result.thread.id);
+   if(provider==='kimi'&&['thread/start','thread/resume'].includes(method)&&result.thread)this.rememberKimiHistory(result.thread);
    if(method==='turn/start'&&result.turn?.id&&!entry.settledTurns.has(result.turn.id)&&!terminalTurn(result.turn)){
     entry.turnId=result.turn.id;this.publishState(entry);
    }

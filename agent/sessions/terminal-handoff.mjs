@@ -6,12 +6,14 @@ const fail=()=>{throw Error('terminal_context_changed');};
 const validId=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,200}$/.test(value);
 const providerContext=value=>Object.fromEntries(['threadId','taskId','projectId','environmentId','inputRoot'].map(key=>[key,value?.[key]??null]));
 
-export function createTerminalHandoff({terminal,workflowContext,agents,records,resourceRouting,agentRpc,assertIdle,service,beforeAgentHandoff}){
+export function createTerminalHandoff({terminal,workflowContext,agents,records,resourceRouting,agentRpc,assertIdle,service,adoptDraft,beforeAgentHandoff}){
  const intents=new Map();let serial=0;
  function begin(sessionId){const value=++serial;intents.set(sessionId,value);if(intents.size>64)intents.delete(intents.keys().next().value);return value;}
  function request(value){
-  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['sessionId','ownerEpoch','owner','provider'].includes(key))||!validId(value.sessionId)||!Number.isSafeInteger(value.ownerEpoch)||value.ownerEpoch<0||!['human','agent'].includes(value.owner))throw Error('terminal_invalid_request');
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['sessionId','ownerEpoch','owner','provider','attachmentDraftId'].includes(key))||!validId(value.sessionId)||!Number.isSafeInteger(value.ownerEpoch)||value.ownerEpoch<0||!['human','agent'].includes(value.owner))throw Error('terminal_invalid_request');
   if(value.provider!==undefined)providerId(value.provider);
+  if(value.attachmentDraftId!==undefined&&(value.owner!=='agent'||value.provider===undefined||
+   typeof value.attachmentDraftId!=='string'||!/^[\da-f-]{36}$/i.test(value.attachmentDraftId)||typeof adoptDraft!=='function'))throw Error('terminal_invalid_request');
   return {sessionId:value.sessionId,ownerEpoch:value.ownerEpoch,owner:value.owner};
  }
  async function owner(value){
@@ -58,6 +60,8 @@ export function createTerminalHandoff({terminal,workflowContext,agents,records,r
   const started=initial?.threadId?null:await agentRpc({provider,method:'thread/start',params:{}});fresh();
   const selected=structuredClone(workflowContext.current()),revision=workflowContext.revision();
   if(selected?.provider!==provider||!selected.threadId||(!initial?.threadId&&(!started?.thread?.id||selected.threadId!==started.thread.id||selected.taskId)))fail();
+  const draftId=started&&value.attachmentDraftId;
+  if(draftId&&(!Array.isArray(started.thread.turns)||started.thread.turns.length||records.conversation(provider,selected.threadId)||records.deleted(provider,selected.threadId)))fail();
   let conversation;
   if(initial?.threadId){
    const recovery=resumed?.studioRecovery,recovered=recovery?.status==='recovered';
@@ -76,7 +80,8 @@ export function createTerminalHandoff({terminal,workflowContext,agents,records,r
   if(started&&(!conversation||conversation.provider!==provider||conversation.threadId!==started.thread.id))fail();
   selectedCurrent();
   await verifySession(selectedCurrent);const result=await terminal.owner(data,{assertCurrent:selectedCurrent});selectedCurrent();
-  return {...result,...conversation?{conversation}:{}};
+  if(draftId)adoptDraft(provider,draftId,selected.threadId);
+  return {...result,...conversation?{conversation}:{},...draftId?{adoptedDraftId:draftId}:{}};
   }finally{preparation?.release();}
  }
  async function close(value){

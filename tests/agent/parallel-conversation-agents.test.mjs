@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {Catalog} from '../../backend/main/workspace/catalog.mjs';
+import {createChatAttachments} from '../../agent/sessions/chat-attachments.mjs';
 import {ConversationAgentHub} from '../../agent/providers/conversation-agent-hub.mjs';
 import {McpProviderScopes} from '../../agent/tools/provider-scope.mjs';
 import {createParallelAgentWorkflowContext} from '../../agent/sessions/workflow-context.mjs';
@@ -11,6 +16,7 @@ import {WorkerClient} from '../../agent/tools/worker-client.mjs';
 import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 import {createAgentRequests} from '../../agent/sessions/requests.mjs';
 import {workspaceAgentInstructions} from '../../agent/context/agent-settings.mjs';
+import {desktopFollowUpQueue} from '../../desktop/platform/follow-up-queue.mjs';
 
 class FakeBridge extends EventEmitter{
  constructor(provider){super();this.provider=provider;this.activeTurns=new Set();this.messages=new Map();this.calls=[];this.approvals=new Map();}
@@ -37,8 +43,8 @@ class FakeBridge extends EventEmitter{
  respond(id,result){this.approvals.set(id,result);return true;}
 }
 
-function fixture({terminalGateway}={}){
- const values=new Map(),catalog={
+function fixture({terminalGateway,catalogPort}={}){
+ const values=new Map(),catalog=catalogPort??{
   get:(kind,id)=>values.get(kind)?.get(id),list:kind=>[...values.get(kind)?.values()||[]],
   put:(kind,id,value)=>{if(!values.has(kind))values.set(kind,new Map());values.get(kind).set(id,structuredClone(value));}
  };
@@ -76,8 +82,8 @@ function fixture({terminalGateway}={}){
  return {agents,catalog,context,records,select,activate,lease,send,events};
 }
 
-function productionRequests(f,{acquire=async()=>{},recordUserTurn=()=>{}}={}){
- return createAgentRequests({runtime:()=>({
+function productionRequests(f,{acquire=async()=>{},recordUserTurn=()=>{},getAttachments}={}){
+ return createAgentRequests({getAttachments,runtime:()=>({
   agents:f.agents,catalog:f.catalog,taskRecords:f.records,workflowContext:f.context,recordUserTurn,
   privateAccess:{assertTask:()=>assert.fail('No unrelated default worker policy must be consulted')},
   worker:{},sharedTerminal:{},resourceRouting:{capture:()=>({resources:[],assertCurrent(){}}),scopedWorkerConnection:()=>null,turnContext:()=> 'Use list_compute_resources.'},
@@ -86,6 +92,79 @@ function productionRequests(f,{acquire=async()=>{},recordUserTurn=()=>{}}={}){
   skillGuidanceScope:()=>({}),emit:(_channel,event)=>f.events.push(event)
  })});
 }
+
+test('the real request factory uses the original main session and tool lease for a background queued reply',async t=>{
+ const f=fixture(),userTurns=[];
+ t.after(()=>f.agents.close());
+ const auth=productionRequests(f,{
+  acquire:async()=>assert.fail('Background follow-ups must not acquire a foreground terminal'),
+  recordUserTurn:({params})=>userTurns.push(params.threadId),
+ });
+ await f.select('codex','alpha');const a=await f.activate('codex','alpha');await f.send('codex','alpha');
+ const previous=a.request.bind(a);
+ a.request=async(method,params,timeout,options)=>{
+  if(method!=='turn/start')return previous(method,params,timeout,options);
+  options.assertCurrent();
+  assert.equal(f.context.current().threadId,'alpha');
+  assert.equal(f.lease('codex',a).threadId,'alpha');
+  assert.equal(params.clientUserMessageId,'queued-alpha-once');
+  const turn={id:'queued-alpha-reply',status:'inProgress',items:[{type:'userMessage',id:params.clientUserMessageId,content:params.input}]};
+  a.messages.set('alpha',[turn]);a.activeTurns.add('alpha');
+  a.emit('event',{method:'turn/started',params:{threadId:'alpha',turn}});
+  return {turn};
+ };
+ const queue=desktopFollowUpQueue({catalog:f.catalog,agents:f.agents,records:f.records,worker:{},workflowContext:f.context,
+  resourceRouting:{followUpBinding:()=>({selection:null})},request:auth});
+ const observe=event=>queue.observe(event);f.agents.on('event',observe);
+ t.after(()=>{queue.close();f.agents.off('event',observe);});
+ await queue.request({provider:'codex',threadId:'alpha',action:'enqueue',after:'turn-alpha',item:{
+  id:'queued-alpha-once',text:'Continue original authorized chat',planningMode:false,newWorkflow:false,
+ }});
+ await f.select('codex','beta');const b=await f.activate('codex','beta');
+ a.finish('alpha');
+ for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(userTurns,['alpha']);
+ assert.equal(f.context.current().threadId,'beta');
+ assert.equal(f.agents.activeTurn('codex','alpha'),'queued-alpha-reply');
+ assert.equal(b.calls.some(([method])=>method==='turn/start'),false);
+ assert.deepEqual((await queue.request({provider:'codex',threadId:'alpha',action:'read'})).queue.items,[]);
+});
+
+test('a queued file is resolved by the real request factory from its original conversation, with B foreground',async t=>{
+ const parent=fs.realpathSync(os.tmpdir()),root=fs.mkdtempSync(path.join(parent,'studio-queue-files-'));
+ assert.equal(path.dirname(root),parent);
+ const catalog=new Catalog(root),f=fixture({catalogPort:catalog}),attachments=createChatAttachments({catalog});
+ t.after(()=>{f.agents.close();catalog.db.close();fs.rmSync(root,{recursive:true,force:true});});
+ const file=(threadId,name,text)=>attachments.stage({provider:'codex',threadId,
+  files:[{name,text,size:Buffer.byteLength(text),mimeType:'text/plain'}]})[0];
+ const original=file('alpha','alpha-log.txt','exact original log excerpt');
+ const foreign=file('beta','beta-log.txt','foreign log excerpt');
+ const request=productionRequests(f,{getAttachments:()=>attachments});
+ await f.select('codex','alpha');const a=await f.activate('codex','alpha');await f.send('codex','alpha');
+ const prior=a.request.bind(a),wire=[];
+ a.request=async(method,params,timeout,options)=>{
+  if(method!=='turn/start')return prior(method,params,timeout,options);
+  options.assertCurrent();wire.push(params);
+  return {turn:{id:'queued-file-receipt',status:'inProgress'}};
+ };
+ const queue=desktopFollowUpQueue({catalog,agents:f.agents,records:f.records,worker:{},workflowContext:f.context,
+  resourceRouting:{followUpBinding:()=>({selection:null})},request,validateFiles:(owner,files)=>attachments.refsFor(owner,files.map(file=>file.id))});
+ const observe=event=>queue.observe(event);f.agents.on('event',observe);
+ t.after(()=>{queue.close();f.agents.off('event',observe);});
+ const enqueue=(id,file)=>queue.request({provider:'codex',threadId:'alpha',action:'enqueue',after:'turn-alpha',
+  item:{id,text:'Read the original excerpt',planningMode:false,newWorkflow:false,files:[file]}});
+ await assert.rejects(enqueue('foreign-file-request',foreign),/在原对话中找不到/);
+ await enqueue('queued-local-file',original);
+ await f.select('codex','beta');await f.activate('codex','beta');
+ a.finish('alpha');
+ for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(wire.length,1);
+ assert.equal(wire[0].threadId,'alpha');
+ assert.equal('studioAttachments' in wire[0],false);
+ assert.match(JSON.stringify(wire[0].input),/exact original log excerpt/);
+ assert.doesNotMatch(JSON.stringify(wire[0].input),/foreign log excerpt/);
+ assert.equal(f.context.current().threadId,'beta');
+});
 
 test('normal request admission overlaps same- and cross-provider preparation with no default worker and hides unverified workspace data',async t=>{
  const f=fixture();t.after(()=>f.agents.close());

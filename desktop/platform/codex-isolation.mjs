@@ -7,6 +7,7 @@ import {createInterface} from 'node:readline';
 import {promisify} from 'node:util';
 import {prepareModelCeiling,assertModelCeiling,verifiedModel}from'./codex-model-ceiling.mjs';
 import {agentEnvironment} from './agent-environment.mjs';
+import {selectedImageInput} from '../../agent/sessions/chat-attachments.mjs';
 const exec=promisify(execFile),object=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const PREPARATION_FAILURES=Object.freeze({
  isolation_preferences_invalid:['preferences','请检查 AIMatterLab 中的上下文与压缩预算，再明确重连'],
@@ -70,8 +71,30 @@ export async function prepareIsolation(executable,root,baseConfig={},worker,{exe
 function field(config,key){return key.split('.').reduce((v,k)=>v?.[k],config);}
 export function assertEffectiveConfiguration(config,isolation){if(!object(config)||ISOLATION_FEATURES.some(key=>config.features?.[key]!==false)||config.features?.skip_host_skill_discovery!==true||config.project_doc_max_bytes!==0||config.web_search!==(isolation.config?.web_search||'disabled')||config.memories?.use_memories!==false||canonical(config.model_instructions_file||'')!==canonical(isolation.instructions)||config.instructions!==''||config.developer_instructions!==''||['include_environment_context','include_permissions_instructions','include_apps_instructions','include_collaboration_mode_instructions'].some(key=>config[key]!==false)||!Array.isArray(config.notify)||config.notify.length!==0)throw Error('Effective Codex isolation controls do not match');if(isolation.catalog){assertModelCeiling(isolation.catalog);if(canonical(config.model_catalog_json||'')!==canonical(isolation.catalog.path))throw Error('Effective model capability snapshot differs');}if(!object(config.mcp_servers))throw Error('Effective MCP configuration is unavailable');for(const [name,value]of Object.entries(config.mcp_servers)){if(name==='gpusampling'&&isolation.worker){if(value.enabled!==true||value.url!==isolation.worker.url+'/mcp'||value.command||value.bearer_token_env_var!=='GSS_MCP_TOKEN')throw Error('Effective AIMatterLab MCP endpoint differs');}else if(value.enabled!==false)throw Error('An ambient MCP server is still enabled');}if(isolation.worker&&config.mcp_servers.gpusampling?.enabled!==true)throw Error('AIMatterLab MCP server missing');}
 function knownFields(params,allowed){if(!object(params)||Object.keys(params).some(key=>!allowed.includes(key)))throw Error('Unknown native request override is unavailable in AIMatterLab isolation');}
-function textInputs(input){if(!Array.isArray(input)||input.some(item=>!object(item)||item.type!=='text'||typeof item.text!=='string'||Object.keys(item).some(key=>!['type','text','text_elements'].includes(key))||item.text_elements!==undefined&&(!Array.isArray(item.text_elements)||item.text_elements.length)))throw Error('AIMatterLab isolation accepts only main-authorized text inputs');return input.map(item=>({type:'text',text:item.text,...item.text_elements!==undefined?{text_elements:[]}:{} }));}
+function turnInputs(input,allowImage){
+ const denied='AIMatterLab isolation accepts only main-authorized text inputs and images selected for this turn';
+ if(!Array.isArray(input))throw Error(denied);
+ return input.map(item=>{
+  if(allowImage&&item?.type==='image'){
+   const selected=selectedImageInput(item);
+   if(selected)return {type:'image',url:'data:'+selected.mimeType+';base64,'+selected.data};
+  }
+  if(!object(item)||item.type!=='text'||typeof item.text!=='string'||Object.keys(item).some(key=>!['type','text','text_elements'].includes(key))||item.text_elements!==undefined&&(!Array.isArray(item.text_elements)||item.text_elements.length))throw Error(denied);
+  return {type:'text',text:item.text,...item.text_elements!==undefined?{text_elements:[]}:{}};
+ });
+}
 export function constrainedRequest(method,params,isolation){
+ if(isolation.historyOnly&&!['thread/read','thread/turns/list','thread/items/list','thread/fork'].includes(method))throw Error('This connection is only available for local conversation history');
+ if(method==='thread/fork'){
+  if(!isolation.historyOnly||isolation.worker)throw Error('Branching requires a worker-free history connection');
+  knownFields(params,['threadId','lastTurnId','excludeTurns']);
+  if(typeof params.threadId!=='string'||!params.threadId||typeof params.lastTurnId!=='string'||!params.lastTurnId||params.excludeTurns!==true)throw Error('Choose a specific stored turn to branch through');
+  return {...params,cwd:isolation.cwd,sandbox:'read-only',approvalPolicy:'on-request',config:{...isolation.config}};
+ }
+ if(isolation.historyOnly){
+  const fields={'thread/read':['includeTurns'],'thread/turns/list':['limit','cursor','sortDirection','itemsView'],'thread/items/list':['turnId','limit','cursor','sortDirection']};
+  knownFields(params,['threadId',...fields[method]]);
+ }
  if(isolation.authenticationOnly&&!['account/read','account/login/start','account/login/cancel','account/logout','model/list'].includes(method))throw Error('Codex authentication connection accepts only account operations and model metadata; reconnect before chatting');
  if(['thread/start','thread/resume'].includes(method)){
   if(params.path!==undefined||params.history!==undefined||params.dynamicTools!==undefined)throw Error('Unscoped native history/tools are unavailable');
@@ -80,7 +103,7 @@ export function constrainedRequest(method,params,isolation){
  }
  if(method==='turn/start'||method==='turn/steer'){
   if(params.toolOutput!==undefined)throw Error('AIMatterLab isolation accepts only main-authorized text inputs');
-  const input=textInputs(params.input);
+  const input=turnInputs(params.input,method==='turn/start');
   knownFields(params,method==='turn/steer'?['threadId','clientUserMessageId','input','expectedTurnId']:['threadId','disabledPluginIds','clientUserMessageId','input','turnTrigger','cwd','approvalPolicy','approvalsReviewer','sandboxPolicy','model','serviceTier','serviceTierForTurn','effort','summary','personality','outputSchema']);
   return method==='turn/steer'
    ?{...params,input:input.map(item=>({...item,text_elements:[]}))}

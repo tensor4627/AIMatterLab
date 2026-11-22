@@ -122,6 +122,16 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     }
     return null;
   }
+  function activity() {
+    const owner = owning(current());
+    for (const row of approvals.values()) {
+      if (row.owner !== owner) continue;
+      try { row.guard(); } catch { continue; }
+      const {provider,threadId,approvalId,expiresAt} = row.view;
+      return {provider,threadId,approvalId,expiresAt,at:row.at};
+    }
+    return null;
+  }
   function decide(value) {
     const row = approvals.get(value?.approvalId);
     if (!value || Object.keys(value).sort().join(',') !== 'approvalId,decision' || !['approve','deny'].includes(value.decision) || row?.owner !== owning(current())) fail('ssh_terminal_approval_changed');
@@ -135,7 +145,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     const owner = owning(scope);
     if (owning(current()) !== owner) fail('ssh_terminal_approval_changed');
     if ([...approvals.values()].some(row => row.owner === owner)) fail('ssh_terminal_approval_pending');
-    const approvalId = uuid(), expiresAt = now() + 120000;
+    const approvalId = uuid(), at = now(), expiresAt = at + 120000;
     const view = {approvalId, provider:scope.provider, threadId:scope.threadId, resourceName:ref.resourceName,
       connectionId:ref.connectionId, workspaceRoot:root, cwd, commands, paths, reason, expiresAt};
     const revision = current()?.revision;
@@ -145,7 +155,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
       if (owning(fresh) !== owner || revision !== fresh?.revision || now() > expiresAt) fail('ssh_terminal_approval_changed');
     };
     return new Promise(resolve => {
-      const row = {owner, view, guard:approvalGuard, resolve};
+      const row = {owner, view, guard:approvalGuard, resolve, at};
       row.timer = setTimeout(() => settle(row, 'denied'), expiresAt - now());
       row.timer.unref?.();
       approvals.set(approvalId, row);
@@ -337,6 +347,6 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
   return {
     input:({sessionId,ownerEpoch,...params})=>operate({...params,channel:['terminal',sessionId,ownerEpoch]}),
     execute:({leaseId,requestId,command,...params})=>operate({...params,channel:['command',leaseId],input:{requestId,command}}),
-    pending, decide,
+    pending, decide, activity,
     revokeConnection(connectionId) { for (const row of approvals.values()) if (row.view.connectionId === connectionId) settle(row, 'denied'); }};
 }

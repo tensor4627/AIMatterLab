@@ -33,8 +33,10 @@
     "@xterm/addon-fit": "0.10.0",
     "@xterm/xterm": "5.5.0",
     "echarts": "5.6.0",
+    "fflate": "0.8.3",
     "lucide-react": "0.468.0",
     "monaco-editor": "0.52.2",
+    "pdfjs-dist": "6.5.438",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "three": "0.172.0"

@@ -21,6 +21,8 @@ export default defineConfig({
  cacheDir:'.studio/vite-cache',
  // Runtime profiles contain locked Chromium/SQLite files, not frontend sources.
  server:{host:'127.0.0.1',port:5173,strictPort:true,watch:{ignored:['**/.studio/**','**/.config/**']}},
- optimizeDeps:{entries:['index.html']},
+ // These ESM modules load only when a document is selected. Keep the first
+ // upload from restarting the renderer to prebundle a just-discovered module.
+ optimizeDeps:{entries:['index.html'],exclude:['pdfjs-dist','fflate']},
  build:{chunkSizeWarningLimit:4000}
 });

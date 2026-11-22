@@ -10,26 +10,28 @@ import {restoreTaskWorker} from "../compute/worker-restore.mjs";
 import {assertTaskWorker,taskWorkerSource} from "../../../contracts/compute/task-worker-binding.mjs";
 import {taskForRecordIndex} from "../compute/worker-service-version.mjs";
 
+export function createWorkflowDraft({records,catalog,worker,workflowContext,authoringAuthorization},value){
+  const selected=workflowContext.current();
+  const ticket=value?.provider===selected?.provider&&value?.threadId===selected?.threadId?authoringAuthorization?.begin?.():null;
+  try{
+    let task=records.create(value);
+    if(task.workflowVersion===2&&!task.authoring&&task.workspaceChoice===undefined){
+      const workspace=catalog.list('workspace-index').find(item=>item.id===task.projectId&&JSON.stringify(item.workerBinding)===JSON.stringify(worker.identity));
+      task.workspaceChoice=workspace?'workspace':'pending';
+      if(workspace)task.workspace=workspace;
+      task=records.save(task);
+    }
+    authoringAuthorization?.commit?.(ticket,task);
+    return task;
+  }catch(error){authoringAuthorization?.abort?.(ticket);throw error;}
+}
 
 /** Register application operations through the host's existing trusted IPC port. */
 export function registerWorkspaceTaskRoutes({
   handle,records,catalog,worker,workflowContext,agents,assertIdle,authoringAuthorization,
   getSettings,getLocalReview=()=>undefined,chooseFile,emit=()=>{},
 }){
-  handle('task.create',value=>{
-    const selected=workflowContext.current(),ticket=value?.provider===selected?.provider&&value?.threadId===selected?.threadId?authoringAuthorization?.begin?.():null;
-    const finish=task=>{authoringAuthorization?.commit?.(ticket,task);return task;};
-    try{
-    const task=records.create(value);
-    if(task.workflowVersion===2&&!task.authoring&&task.workspaceChoice===undefined){
-      const workspace=catalog.list('workspace-index').find(item=>item.id===task.projectId&&JSON.stringify(item.workerBinding)===JSON.stringify(worker.identity));
-      task.workspaceChoice=workspace?'workspace':'pending';
-      if(workspace)task.workspace=workspace;
-      return finish(records.save(task));
-    }
-    return finish(task);
-    }catch(error){authoringAuthorization?.abort?.(ticket);throw error;}
-  });
+  handle('task.create',value=>createWorkflowDraft({records,catalog,worker,workflowContext,authoringAuthorization},value));
   const workspaces=()=>workspaceController({
     records,worker,selection:()=>workflowContext.current(),assertIdle,authorization:authoringAuthorization,
     onBound:workspace=>catalog.put('workspace-index',workspace.workerBinding.distribution+':'+workspace.workerBinding.root+':'+workspace.id,{...workspace,assets:[]}),

@@ -19,7 +19,9 @@ import {createSetupGuide} from './platform/setup-guide.mjs';
 import {terminalExecutionCache} from './platform/terminal-execution-cache.mjs';
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
+import {createChatAttachments} from '../agent/sessions/chat-attachments.mjs';
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
+import {desktopFollowUpQueue} from './platform/follow-up-queue.mjs';
 import {ConversationTitleReviews,conversationTitleTool} from '../agent/sessions/conversation-title-reviews.mjs';
 import {redactTranscriptText} from '../contracts/agent/transcript-sanitizer.mjs';
 import {createTerminalHandoff} from '../agent/sessions/terminal-handoff.mjs';
@@ -108,10 +110,13 @@ import {codexRuntime} from './platform/codex-runtime.mjs';
 import {createCodexSubscriptionRuntime} from './platform/codex-subscription-runtime.mjs';
 
 import {ConversationAgentHub} from '../agent/providers/conversation-agent-hub.mjs';
+import {createConversationActivity as createChatActivity} from '../agent/sessions/conversation-activity.mjs';
+import {createChatEvidence} from '../agent/sessions/chat-evidence.mjs';
 import {createManagedWorkbench} from './platform/managed-workbench.mjs';
 import {loginUrl} from '../agent/providers/agent-hub.mjs';
 import {CredentialVault} from './platform/credential-vault.mjs';
 import {registerModelProfileRoutes} from './platform/model-profile-routes.mjs';
+import {registerConversationHistory} from './platform/conversation-history-routes.mjs';
 import {providerId} from '../agent/providers/contracts.mjs';
 import { WorkerClient } from "../agent/tools/worker-client.mjs";
 import {readWorkerStatus} from '../backend/main/compute/worker-status.mjs';
@@ -163,7 +168,7 @@ else if(verifying)app.setPath('userData',path.join(verificationRoot,'.studio',im
 else{const profile=studioProfileRoot({appRoot:root,isPackaged:app.isPackaged,portableDir:process.env.PORTABLE_EXECUTABLE_DIR,execPath:process.execPath});fs.mkdirSync(profile,{recursive:true});app.setPath('userData',profile);}
 if(workspace)app.setPath('sessionData',workspaceSessionDirectory(workspace,app.getPath('userData')));
 let window, catalog, settings, setupGuide, agents,taskRecords,materials,toolPackages,toolGroups,toolConfigurations,toolWorkflows,aimlabSources,cliRuntimes;
-let managedWorkbench,managedResources,managedSchedules,resourceActivity,projectTerminalAccess,workbenchTray;
+let managedWorkbench,managedResources,managedSchedules,resourceActivity,projectTerminalAccess,workbenchTray,followUpQueue;
 let shuttingDown=false,desktopShutdown;
 const attentionBalloons=new Set();
 const agentConnectAttempts=new Map();
@@ -192,6 +197,7 @@ function findCodex() {
   return findInstalledCodex();
 }
 function emit(channel,data) {
+ if(channel==='studio:event')try{followUpQueue?.observe(data);}catch{/* A damaged local queue must never interrupt provider or compute events. */}
  if(!window||window.isDestroyed()||window.webContents.isDestroyed()||window.webContents.isCrashed())return;
  if(channel==='studio:event'&&data?.method==='studio/taskUpdated'&&data.params?.task){
   data={...data,params:{...data.params,task:taskForRecordIndex(data.params.task)}};
@@ -228,6 +234,9 @@ performanceTimeline.mark('desktop-initialize');
 const profileDirectory=app.getPath('userData'),catalogRoot=path.join(profileDirectory,'studio');
 const existingProfile=fs.existsSync(path.join(catalogRoot,'catalog.sqlite'));
 catalog = new Catalog(catalogRoot);
+const chatAttachments=createChatAttachments({catalog,deleted:(provider,threadId)=>taskRecords.deleted(provider,threadId)});
+handle('agent.attachments.import',value=>chatAttachments.stage(value));
+handle('agent.attachments.preview',value=>chatAttachments.preview(value));
 resourceActivity=createConversationActivity({catalog});projectTerminalAccess=managedProjectAccess({catalog});
 const explicitProfile=Boolean(process.env.STUDIO_PROFILE_DIR)||verifying;
 setupGuide=createSetupGuide({catalog,existingProfile,directory:explicitProfile?profileDirectory:path.dirname(profileDirectory),directoryKind:explicitProfile?'profile':'workspace',openDirectory:directory=>shell.openPath(directory)});
@@ -480,6 +489,7 @@ const baseWorkspace=createBaseWorkspace({catalog,worker,resource:computeResource
 handle('compute.workspace.setup',value=>{assertIdleAgent();return baseWorkspace.manual(value);});
 worker.setLocalTools([...materials.tools(),...terminalTools,...computeInspection.tools()],(name,args,scope)=>name==='inspect_compute_resource'?computeInspection.call(name,args,scope):terminalToolNames.has(name)?sharedTerminal.callTool(name,args,scope):materials.call(name,args,scope));
 const terminalHandoff=createTerminalHandoff({terminal:sharedTerminal,workflowContext,agents,records:taskRecords,resourceRouting,agentRpc:value=>agentRpc(value),assertIdle:assertIdleAgent,
+ adoptDraft:(provider,id,threadId)=>chatAttachments.adopt(provider,id,threadId),
  beforeAgentHandoff:()=>{const selected=computeResource.peek();if(selected?.kind==='ssh-connection')return resourceWorkspace.assertHandoff(selected);}});
 const connectionHandoff=createSshTerminalHandoff({terminalHandoff,terminal:sharedTerminal,service:()=>sshService,registration:serviceRegistration,resourceRouting,workflowContext,agents,records:taskRecords,agentRpc:value=>agentRpc(value)});
 const serviceHandoff=createServiceHandoff({service:()=>sshService,workflowContext,agents,records:taskRecords,resourceRouting,agentRpc:value=>agentRpc(value),assertIdle:assertIdleAgent});
@@ -511,6 +521,8 @@ localReview=registerCalculationReview({handle,records:taskRecords,worker,current
 });
 
 privateAccess=createPrivateCvAccess({records:taskRecords,worker,activeTasks:activeAuthoringTasks});
+const chatEvidence=createChatEvidence({catalog,records:taskRecords,worker,selected:()=>workflowContext.selectedOwner(),attachments:chatAttachments,localReview,privateAccess,emit:event=>emit('studio:event',event)});
+for(const method of ['stage','compare','remember'])handle('chat.evidence.'+method,chatEvidence[method]);
 worker.setAuthoringGuard(composeToolGuards(privateAccess,compositionToolGuard(taskRecords,activeAuthoringTasks)));
 worker.setProjectSkills(projectSkills);
 const runToolScope=(scope,run)=>agents.runForScope(scope,()=>workflowContext.runForScope(scope,run));
@@ -594,11 +606,20 @@ customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.a
 });
 for(const action of ['read','saveSpec','approveFormula','approveCode','sharing','validate','status','attach','reuse'])handle('customCv.'+action,(value,event)=>customCv.dispatch(action,value,event));
 handle('task.pygas.importAsset',(value,event)=>{trusted(event);return importTaskAsset({records:taskRecords,worker,getProvider:()=>agents.active||'codex',assertHuman:()=>{if(shuttingDown||!window||window.isDestroyed()||event.sender.isDestroyed())return false;trusted(event);return true;},protectedRoots:[app.getPath('userData')],chooseFile:async()=>{const result=await dialog.showOpenDialog(window,referenceImportDialog(settings.language));return result.canceled?null:result.filePaths[0];}},value);});
+const chatActivity=createChatActivity({
+ catalog,exists:(provider,threadId)=>!!taskRecords.conversation(provider,threadId),
+ terminalApproval:()=>workspaceTerminalAuthorization.activity(),
+ publish:()=>emit('studio:event',{method:'studio/conversationActivityChanged'}),
+});
+const conversationHistory=registerConversationHistory({
+ handle,catalog,records:taskRecords,agents,createCodex:()=>createCodex(),restoreTitle:(provider,thread)=>titleReviews.restore(provider,thread),
+});
 agents.on('event',event=>{
+ conversationHistory.observe(event);
  const threadId=event.params?.threadId;
  if(threadId){conversationTerminals.touch(event.provider,threadId);managedResources?.touch(event.provider,threadId);}
  if(event.method==='thread/started'&&event.provider==='codex'&&event.params?.thread&&!taskRecords.deleted('codex',event.params.thread.id))catalog.put('thread',event.params.thread.id,event.params.thread);
- taskRecords.event(event);titleReviews.event(event);emit('studio:event',event);
+ taskRecords.event(event);titleReviews.event(event);emit('studio:event',event);chatActivity.event(event);
  if(threadId&&event.method==='turn/completed')setImmediate(()=>conversationTerminals.finishDeferredService(event.provider,threadId));
 });
 registerWorkspaceTaskRoutes({
@@ -607,8 +628,10 @@ registerWorkspaceTaskRoutes({
  chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},
 });
 handle('conversation.delete',({id})=>{const prior=catalog.get('conversation',id);if(prior&&agents.isBusy(prior.provider,prior.threadId))throw Error('Stop this conversation before deleting it');
- const result=taskRecords.remove(id);titleReviews.forget(id);conversationTerminals.forget(result.provider,result.threadId);managedResources?.forget?.(result.provider,result.threadId);resourceActivity.forget(result.provider,result.threadId);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
+ const result=taskRecords.remove(id);chatAttachments.removeThread(result.provider,result.threadId);chatEvidence.remove(result.provider,result.threadId);conversationHistory.forget(id);chatActivity.forget(result.provider,result.threadId);titleReviews.forget(id);conversationTerminals.forget(result.provider,result.threadId);managedResources?.forget?.(result.provider,result.threadId);resourceActivity.forget(result.provider,result.threadId);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
+handle('conversation.activity.list',value=>{if(Object.keys(value).length)throw Error('Invalid conversation activity request');return chatActivity.snapshot();});
+handle('conversation.activity.markRead',value=>chatActivity.markRead(value));
 handle('conversation.remember',value=>taskRecords.remember(value));
 handle('conversation.groups',()=>taskRecords.groups());
 handle('conversation.createGroup',value=>taskRecords.createGroup(value));
@@ -729,6 +752,10 @@ handle('worker.request',async({method,target,data,projectScope}) => {
     void readWorkerStatus(worker,()=>settings).then(status=>status.sourceId&&managedSchedules?.refresh(status.sourceId)).catch(()=>{});
   if(method==='GET' && ['/api/projects','/api/environments'].includes(target))
     for(const item of result) catalog.put(target.split('/').at(-1),item.id,item);
+  if(method==='POST'&&target==='/api/workspace/write'&&result?.path){
+    const evidenceId=chatEvidence.projectEditor(data.project_id,result.path);
+    if(evidenceId)return {...result,evidenceId};
+  }
   return result;
 });
 handle('codex.envImport.pending',input=>{
@@ -814,18 +841,31 @@ handle('agent.cli.choose',async value=>{
  if(readiness.status==='ready')settings=catalog.put('settings','main',normalizeSettings(settings,{[provider+'Path']:response.filePaths[0]}));
  return readiness;
 });
-const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,titleReviews,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,recordUserTurn:value=>{managedWorkbench.userMessage(value);resourceToolSetups.recordUserTurn(value);},authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
-async function agentRpc(value){return agentRequests(value);}
+const agentRequests=createAgentRequests({getAttachments:()=>chatAttachments,verifyEvidence:(owner,files)=>chatEvidence.verify(owner,files),runtime:()=>({agents,catalog,taskRecords,titleReviews,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,recordUserTurn:value=>{managedWorkbench.userMessage(value);resourceToolSetups.recordUserTurn(value);},authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+async function agentRpc(value){
+ if(value?.method==='turn/interrupt'&&value.params?.turnId&&agents.activeTurn(value.provider,value.params.threadId)===value.params.turnId){
+  try{followUpQueue?.pause(value.provider,value.params.threadId);}catch{/* Preserve native Stop even when the local queue is unavailable. */}
+ }
+ return agentRequests(value);
+}
+followUpQueue=desktopFollowUpQueue({catalog,agents,records:taskRecords,worker,workflowContext,resourceRouting,authoringAuthorization,
+ request:agentRequests,publish:event=>emit('studio:event',event),confirmCodexDelivery:conversationHistory.confirmDelivery,
+ validateFiles:(owner,files)=>{
+  if(!Array.isArray(files))throw Error('Invalid queued attachments');
+  return chatAttachments.refsFor(owner,files.map(file=>file?.id));
+ }});
+followUpQueue.recover();
+handle('agent.queue',value=>followUpQueue.request(value));
 managedSchedules.start();
 handle('agent.rpc',agentRpc);
 handle('agent.recover',async({provider,threadId,model})=>{
  if(provider!=='codex'||typeof threadId!=='string'||!threadId||threadId.length>200||model!==undefined&&(typeof model!=='string'||!model||model.length>200))throw Error('Invalid conversation recovery request');
  return agents.runInConversation(provider,threadId,async()=>{agents.assertContextIdle();
  const ticket=workflowContext.begin(provider,threadId);await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));
- return (await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId,model,explicit:true,publish:event=>emit('studio:event',event)})).result;
+ return (await resumeConversationContext({records:taskRecords,workflowContext,agents,attachments:chatAttachments,ticket,threadId,model,explicit:true,publish:event=>emit('studio:event',event)})).result;
  });
 });
-handle('agent.respond',({provider,threadId,id,result})=>{providerId(provider);if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');return agents.respond(provider,threadId,id,result);});
+handle('agent.respond',({provider,threadId,id,result})=>{providerId(provider);if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');const receipt=agents.respond(provider,threadId,id,result);chatActivity.resolved(provider,threadId,id);return receipt;});
 handle('agent.configure',async({provider,preferences={},threadId,model})=>{
   assertIdleAgent();
   providerId(provider);if(provider!=='codex')throw Error('Context budget changes are not supported by this ACP provider');
@@ -864,9 +904,15 @@ handle('file.open',async() => {
   const file=response.filePaths[0], stat=fs.statSync(file);
   if(stat.size>2*1024*1024) throw new Error('Text editor limit is 2 MiB');
   const id=randomUUID();
-  return { id,path:file,name:path.basename(file),content:fs.readFileSync(file,'utf8') };
+  const content=fs.readFileSync(file,'utf8');
+  chatEvidence.editorFile(id,file);
+  return { id,path:file,name:path.basename(file),content };
 });
-handle('file.save',async value=>createWindowsSaveAs({grants:new Map(),choose:options=>dialog.showSaveDialog(window,options),write:(file,content)=>fs.writeFileSync(file,content,'utf8')})(value));
+handle('file.save',async value=>{
+  const result=await createWindowsSaveAs({grants:new Map(),choose:options=>dialog.showSaveDialog(window,options),write:(file,content)=>fs.writeFileSync(file,content,'utf8')})(value);
+  if(result)chatEvidence.editorFile(result.id,result.path);
+  return result;
+});
 handle('file.choose',async({directory=false}) => {
   const response=await dialog.showOpenDialog(window,{properties:[directory?'openDirectory':'openFile']});
   return response.canceled?null:response.filePaths[0];
@@ -893,12 +939,12 @@ handle('export',async({run})=>{
 });
 let terminalClosing,managedClosing;
 desktopShutdown=installDesktopShutdown({app,begin:()=>{
- shuttingDown=true;agentConnectAttempts.clear();resourceToolSetups.close();managedSchedules?.halt();managedClosing=managedResources?.stop();updater.close();clearInterval(terminalIdleTimer);conversationTerminals.stop();
+ shuttingDown=true;followUpQueue?.close();agentConnectAttempts.clear();resourceToolSetups.close();managedSchedules?.halt();managedClosing=managedResources?.stop();updater.close();clearInterval(terminalIdleTimer);conversationTerminals.stop();
  // Fence the terminal bridge on this exact stack, before already-queued open
  // continuations can run. The asynchronous cleanup below only waits for it.
  try{terminalClosing=sharedTerminal.shutdown({timeoutMs:4000});}catch{terminalClosing=Promise.resolve({status:'unconfirmed'});}
 },cleanup:async()=>{
- for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}
+ for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>conversationHistory.close(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}
  await managedClosing;
  return await terminalClosing;
 }});

@@ -8,12 +8,12 @@ function badgeTitle(badge:ResourceBadge) {
   const observed = badge.observedAt ? ' · '+t('最近核对')+' '+new Date(badge.observedAt*1000).toLocaleString() : '';
   return badge.label+' · '+t(labels[badge.status])+observed;
 }
-export default function ConversationResourceStatus({activity,motion='wave'}:{activity?:ConversationActivity;motion?:BadgeMotion}) {
+export default function ConversationResourceStatus({activity,motion='wave',waiting=false}:{activity?:ConversationActivity;motion?:BadgeMotion;waiting?:boolean}) {
   if (!activity) return null;
   const wake = activity.nextWakeAt ? t('下次唤醒')+' · '+new Date(activity.nextWakeAt*1000).toLocaleString() : null;
   return <span className="conversation-resource-status" data-motion={motion}>
     <span className="conversation-resource-badges">{activity.badges.map(badge=><span key={badge.profileId} className="conversation-resource-badge" data-color={badge.color} data-status={badge.status} title={badgeTitle(badge)} aria-label={badgeTitle(badge)}>{badge.label}</span>)}</span>
-    {activity.replying?<span className="conversation-work-icon" role="img" aria-label={t('Agent 正在工作')} title={t('Agent 正在工作')}><LoaderCircle size={15} className="conversation-turn-spinner"/></span>
+    {activity.replying&&!waiting?<span className="conversation-work-icon" role="img" aria-label={t('Agent 正在工作')} title={t('Agent 正在工作')}><LoaderCircle size={15} className="conversation-turn-spinner"/></span>
       :wake?<span className="conversation-work-icon" role="img" aria-label={wake} title={wake}><Clock size={15}/></span>:null}
   </span>;
 }

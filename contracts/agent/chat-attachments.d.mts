@@ -1,0 +1,10 @@
+import type {ChatAttachmentRef} from '../dto/chat-attachments';
+export const attachmentHeader:string;
+export const attachmentLimits:Readonly<{count:number;textBytes:number;imageBytes:number;totalBytes:number;documentBytes:number}>;
+export function chatImageMime(bytes:Uint8Array):'image/png'|'image/jpeg'|'image/webp'|'image/gif'|null;
+export const imageTypes:readonly string[];
+export function attachmentPrompt(files?:readonly Pick<ChatAttachmentRef,'name'>[]):string;
+export function attachmentsAfterReplacement(files?:readonly ChatAttachmentRef[],uploadsRetained?:boolean):ChatAttachmentRef[];
+export function validAttachmentRef(file:unknown):file is ChatAttachmentRef;
+export function chatAttachmentRefs(content?:any[]):ChatAttachmentRef[];
+export function attachmentOffset(text:string):number;

@@ -2,6 +2,10 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
 import {ApiModelBridge} from '../../agent/providers/api-model-bridge.mjs';import {ModelProfileStore} from '../../agent/providers/model-profile-store.mjs';import {dshRuntime} from '../../desktop/platform/dsh-runtime.mjs';import {apiModelKey} from '../../contracts/agent/model-profiles.mjs';
 import {workspaceAgentInstructions} from '../../agent/context/agent-settings.mjs';
 import {providerAccountState} from '../../frontend/features/conversations/provider-account.mjs';
+import {createRequire} from 'node:module';
+import {Catalog} from '../../backend/main/workspace/catalog.mjs';
+import {createChatAttachments} from '../../agent/sessions/chat-attachments.mjs';
+import {chatAttachmentRefs} from '../../contracts/agent/chat-attachments.mjs';
 
 test('reading interrupted API history resolves orphaned tool indicators without dispatching a turn',async t=>{
  const {bridge,catalog,calls}=await fixture(t);
@@ -26,6 +30,66 @@ test('keyless loopback API completes a real DSH turn without storing a fabricate
  await f.bridge.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'Keyless loopback fixture only'}]});
  assert.equal((await done).status,'completed');assert.equal(f.calls.length,1);assert.equal(f.calls[0].authorization,'Bearer aimatterlab-local-no-auth');
  assert.equal(f.store.credential(profiles[0].id).apiKey,'');
+});
+test('pinned DSH sends actual normalized image bytes to a vision API and reloads the same native attachment after restart',{timeout:60000},async t=>{
+ const f=await fixture(t,{provider:'compatible',models:[{id:'model-a',input:['text','image'],reasoningEfforts:false},{id:'model-b',input:['text'],reasoningEfforts:false}]}),bridge=f.bridge;
+ const rows=() => bridge.request('model/list').then(result=>result.data.map(model=>model.inputModalities));
+ assert.deepEqual(await rows(),[['text','image'],['text']]);
+ bridge.sessionProfileId='fixture-vision-process-a';
+ await bridge.start();
+ assert.deepEqual(await rows(),[['text','image'],['text']]);
+ const {thread}=await bridge.request('thread/start');
+ const runtime=dshRuntime.resolve(),require=createRequire(runtime.args[1]);
+ const sharp=createRequire(require.resolve('@deepseek-ai/dsh-attachment-local'))('sharp');
+ const png=await sharp({create:{width:2,height:3,channels:3,background:{r:190,g:36,b:79}}}).png().toBuffer();
+ const catalog=new Catalog(f.root),attachments=createChatAttachments({catalog}),owner={provider:'compatible',threadId:thread.id};
+ let file,metadata,image;
+ try{
+  [file]=attachments.stage({...owner,files:[{name:'local-color.png',mimeType:'image/png',size:png.length,bytes:png}]});
+  [metadata,image]=attachments.inputs(owner,[file.id]);
+ }finally{catalog.db.close();}
+ const text={type:'text',text:'Identify this synthetic figure.'};
+ await assert.rejects(bridge.request('turn/start',{threadId:thread.id,input:[text,{...image}]}),/选取的图片/);
+ await assert.rejects(bridge.request('turn/start',{threadId:thread.id,model:apiModelKey('fixture-a','model-b'),input:[text,metadata,image]}),/只接受文字/);
+ assert.equal(f.calls.length,0);
+ const prompt=async input=>{
+  const pending=completion(bridge);pending.catch(()=>{});
+  await bridge.request('turn/start',{threadId:thread.id,input});
+  assert.equal((await pending).status,'completed');
+ };
+ await prompt([text,metadata,image]);
+ const read=async()=>{
+  const histories=(await bridge.request('thread/read',{threadId:thread.id})).thread.turns;
+  assert.deepEqual(chatAttachmentRefs(histories[0].items[0].content),[file]);
+  assert.equal(JSON.stringify(histories).includes(png.toString('base64')),false);
+ };
+ async function verifyWire(call){
+  assert.equal(call.url,'/v1/chat/completions');
+  const blocks=call.body.messages.filter(message=>message.role==='user').flatMap(message=>message.content);
+  const wire=blocks.find(block=>block.type==='image_url');
+  assert(wire,'actual provider input must contain an image, not only a text marker');
+  assert(blocks.some(block=>block.type==='text'&&block.text===text.text));
+  const matches=/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(wire.image_url.url);
+  assert(matches,'unexpected normalized vision wire format');
+  const decoded=Buffer.from(matches[2],'base64');
+  const {data,info}=await sharp(decoded).removeAlpha().raw().toBuffer({resolveWithObject:true});
+  assert.deepEqual([info.width,info.height,info.channels],[2,3,3]);
+  for(let pixel=0;pixel<data.length;pixel++)assert(Math.abs(data[pixel]-[190,36,79][pixel%3])<=8,'decoded image pixels must match the selected figure');
+  return decoded;
+ }
+ const wire=await verifyWire(f.calls[0]);
+ await read();
+ const originalSession=bridge.session(thread.id).nativeId;
+ bridge.close();
+ bridge.sessions.clear();
+ bridge.sessionProfileId='fixture-vision-process-b';
+ await bridge.start();
+ await bridge.request('thread/resume',{threadId:thread.id});
+ assert.equal(bridge.session(thread.id).nativeId,originalSession);
+ assert.equal(f.calls.length,1,'restoration cannot rerun an earlier prompt');
+ await prompt([{type:'text',text:'Consider the same figure from the first turn.'}]);
+ assert.deepEqual(await verifyWire(f.calls[1]),wire);
+ await read();
 });
 for(const provider of ['qwen','compatible'])test(provider+' sends the current personal library with a newly opened API conversation', {timeout:60000}, async t=>{
  const f=await fixture(t,{provider});

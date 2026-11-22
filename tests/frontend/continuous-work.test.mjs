@@ -74,6 +74,15 @@ test('direct draft run submits once without a passed review; superseded and work
  for(const patch of [{superseded_by:'next'},{studio_workflow_binding:{}}]){const owned=runDetailHarness({props:{run}});await owned.flush();const stale=owned.button('提交计算');owned.render({run:{...run,...patch}});await owned.flush();stale.props.onClick();await owned.flush();assert.equal(owned.calls.length,0);owned.unmount();}
 });
 
-test('targeted repair draft waits for an explicitly selected pending conversation and inserts once after its active turn ends',async()=>{
- const h=agentHarness({props:{sessionSelection:{nonce:'a',conversation:conversation('codex','a')}}});await h.flush();h.type('Original request');h.send();await h.flush();h.render({sessionSelection:{nonce:'b',conversation:conversation('codex','b')},intent:{id:'repair-b',provider:'codex',threadId:'b',text:'Diagnose the saved run failure',autoSend:false}});await h.flush();assert.doesNotMatch(h.textarea().props.value,/Diagnose/);h.emit({provider:'codex',method:'turn/completed',params:{threadId:'a',turn:{id:'accepted-turn',status:'completed'}}});await h.flush();assert.equal(h.textarea().props.value,'Diagnose the saved run failure');assert.equal(h.calls.filter(call=>call.method==='agent.rpc'&&call.data.method==='turn/start').length,1);h.type('Edited repair draft');h.render({hidden:true});await h.flush();h.render({hidden:false});await h.flush();assert.equal(h.textarea().props.value,'Edited repair draft');h.unmount();
+test('a repair draft belongs to its selected chat while another chat finishes in the background',async()=>{
+ const h=agentHarness({props:{sessionSelection:{nonce:'a',conversation:conversation('codex','a')}}});
+ await h.flush();h.type('Original request');h.send();await h.flush();
+ h.render({sessionSelection:{nonce:'b',conversation:conversation('codex','b')},intent:{id:'repair-b',provider:'codex',threadId:'b',text:'Diagnose the saved run failure',autoSend:false}});
+ await h.flush();assert.equal(h.textarea().props.value,'Diagnose the saved run failure');
+ h.type('Edited repair draft');
+ h.emit({provider:'codex',method:'turn/completed',params:{threadId:'a',turn:{id:'accepted-turn',status:'completed'}}});
+ await h.flush();assert.equal(h.textarea().props.value,'Edited repair draft');
+ assert.equal(h.calls.filter(call=>call.method==='agent.rpc'&&call.data.method==='turn/start').length,1);
+ h.render({hidden:true});await h.flush();h.render({hidden:false});await h.flush();
+ assert.equal(h.textarea().props.value,'Edited repair draft');h.unmount();
 });

@@ -13,6 +13,7 @@ import {providerId,qwenCredentials,redact,CLI_VERSIONS} from './contracts.mjs';
 import {providerRuntime} from '../../desktop/platform/provider-runtime.mjs';
 import {agentConfig,STUDIO_INSTRUCTIONS} from '../context/agent-settings.mjs';
 import {providerContext,MCP_CONTEXT_KEYS} from '../tools/provider-scope.mjs';
+import {selectedImageInput} from '../sessions/chat-attachments.mjs';
 export function loginUrl(provider,url){
  const target=new URL(url);const hosts=provider==='kimi'?['kimi.com','kimi.ai']:['chatgpt.com','auth.openai.com','login.openai.com'];
  if(target.protocol!=='https:'||target.username||target.password||!hosts.some(h=>target.hostname===h||provider==='kimi'&&target.hostname.endsWith('.'+h)))throw Error('Unsupported provider login URL');
@@ -197,7 +198,8 @@ export class AgentHub extends EventEmitter{
   const profiles=['qwen','compatible'].includes(provider)?this.modelProfiles.list(provider):null;
   return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan,...provider==='compatible'?{baseUrl:credential.baseUrl,label:credential.label,reasoningMode:credential.reasoningMode||'omit',reasoningEffort:credential.reasoningEffort||'',publicGuidesAllowed:['pygas','pydyn','gpumd','hotpp','torchnep'].every(source=>(source==='pygas'?this.getSettings().pygasSkillProviders||[]:this.getSettings().scientificSkillProviders?.[source]||[]).includes('compatible'))}:{}}:{},...profiles?{profiles,credentialStored:profiles.some(v=>v.credentialStored)}:{},modelAccess:status.modelAccess||'not_run'};
  }
- async rpc(provider,method,params={}){
+ async rpc(provider,method,params={},{assertCurrent=()=>{}}={}){
+  assertCurrent();
   providerId(provider);this.host.assertRpc(method);if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');
   const bridge=this.bridge(provider);
   const selected=this.contexts.get(provider);
@@ -207,7 +209,7 @@ export class AgentHub extends EventEmitter{
   }
   if(this.contextPending&&!['turn/interrupt','account/read'].includes(method))throw Error('Wait for conversation context selection to finish');
   const generation=this.contextGeneration,resource=this.resourceScope(provider,method);
-  const assertSelected=()=>{resource?.assertCurrent();if(provider!==this.active||this.bridge(provider)!==bridge||generation!==this.contextGeneration||selected!==this.contexts.get(provider))throw Error('Conversation context selection was superseded');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');};
+  const assertSelected=()=>{assertCurrent();resource?.assertCurrent();if(provider!==this.active||this.bridge(provider)!==bridge||generation!==this.contextGeneration||selected!==this.contexts.get(provider))throw Error('Conversation context selection was superseded');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');};
   // A spawned app-server is only a transport until initialize and isolation readbacks finish.
   if(bridge?.starting){const lifecycle=bridge.lifecycle;await bridge.starting;assertSelected();if(lifecycle!==bridge.lifecycle)throw Error('Agent context changed while connecting');}
   if(!bridge?.process)throw Error('Connect '+provider+' first');
@@ -215,7 +217,7 @@ export class AgentHub extends EventEmitter{
   if(selected?.threadId&&method==='thread/start')throw Error('Select an empty conversation context before starting a new thread');
   const resume=this.contextResume.get(provider);
   if(resume&&(provider==='codex'?['thread/read','turn/start','turn/steer'].includes(method):!['model/list','model/select','thread/start','thread/resume','thread/list','account/read','turn/interrupt'].includes(method))){
-   await this.rpc(provider,'thread/resume',{threadId:resume,model:params.model});assertSelected();
+   await this.rpc(provider,'thread/resume',{threadId:resume,model:params.model,...provider==='codex'?{excludeTurns:true}:{}});assertSelected();
   }
 
   if(provider==='codex'&&['thread/start','thread/resume'].includes(method))params={...params,cwd:this.getSettings().cwd,approvalPolicy:'on-request',sandbox:'read-only',config:{...params.config,...agentConfig(this.preferences('codex'))},developerInstructions:this.instructions};
@@ -224,7 +226,11 @@ export class AgentHub extends EventEmitter{
   if(provider!=='codex'&&method==='turn/start'){
    const input=[];
    for(const item of params.input||[]){
-    if(item.type==='text')input.push(item);
+    if(item?.type==='text')input.push(item);
+    if(['image','localImage'].includes(item?.type)){
+     if(item.type!=='image'||!selectedImageInput(item))throw Error('只能发送由当前对话选取的图片附件。');
+     input.push(item);
+    }
     // Skills are added by main after checking the registered source.
    }
    params={...params,input};
@@ -238,7 +244,7 @@ export class AgentHub extends EventEmitter{
    if(blank&&method==='thread/resume'){if(this.contextResume.get(provider)===params.threadId)this.contextResume.delete(provider);return structuredClone(blank);}
    if(blank&&method==='thread/read')return {thread:structuredClone(blank.thread)};
    if(method==='turn/start'&&!this.readyThreads.has(params.threadId)){
-    await this.rpc(provider,'thread/resume',{threadId:params.threadId,model:params.model});assertSelected();
+    await this.rpc(provider,'thread/resume',{threadId:params.threadId,model:params.model,excludeTurns:true});assertSelected();
    }
   }
   const blankStart=provider==='codex'&&method==='turn/start'&&this.blankThreads.has(params.threadId);

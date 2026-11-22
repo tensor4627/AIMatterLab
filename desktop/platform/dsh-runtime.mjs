@@ -4,6 +4,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {agentEnvironment} from './agent-environment.mjs';
+import {attachmentLimits} from '../../contracts/agent/chat-attachments.mjs';
 
 export const DSH_VERSION='0.2.2-rc.1';
 const appRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
@@ -52,7 +53,7 @@ const kernel=[
 export function prepareApiDshProfile(root,runtime,worker,instructions,selection){
  if(typeof selection?.profile?.id!=='string'||!/^[a-z][a-z0-9-]{0,63}$/.test(selection.profile.id)||!['qwen','compatible'].includes(selection.provider))throw Error('Invalid API runtime provider identity');
  const id=selection.profile.id,route=selection.profile.catalogProvider||'studio-api-'+id,base=path.join(path.resolve(root),'model-providers',id);
- const {home,profile,cwd,sessions}=dshDirectories(base,selection.sessionProfileId);
+ const {home,profile,cwd,sessions,attachments}=dshDirectories(base,selection.sessionProfileId);
  // The pinned pi-ai transport requires a nonempty key even for unauthenticated local servers.
  // This public marker is never stored as a credential and is restricted to explicit loopback routes.
  const local=['localhost','127.0.0.1','[::1]'].includes(new URL(selection.profile.baseUrl).hostname),apiKey=selection.profile.apiKey||(local?'aimatterlab-local-no-auth':'');
@@ -71,6 +72,7 @@ export function prepareApiDshProfile(root,runtime,worker,instructions,selection)
   if(selection.profile.baseUrl!=='https://api.deepseek.com/anthropic'||selection.profile.api!=='anthropic-messages'||selection.provider!=='compatible')throw Error('Invalid DeepSeek account profile');
   entries.push({id:'models',name:path.join(appRoot,'agent/providers/dsh-account-adapter.mjs'),inject:['llm'],config:{route,displayName:selection.profile.name,baseUrl:selection.profile.baseUrl,models:selection.profile.models,module:path.resolve(path.dirname(runtime.args[1]),'../../../@deepseek-ai/dsh-llm-deepseek/lib/index.js')}});
  }else entries.push({id:'models',name:adapterPath,config:{providers:{[route]:adapterProfile}}});
+ entries.push(attachments);
  entries.push({id:'sessions',name:'@deepseek-ai/dsh-session-persistence-jsonl',config:{root:sessions,compression:'none'}});
  entries.push({id:'studio-policy',name:runtime.policyPath||sourcePolicyPath,inject:['tools','systemPrompt','appReady','llm','agents'],config:{mcpModule:runtime.mcpModule,toolsModule:runtime.toolsModule,workerUrl:scoped?.url||null,workflow:!!scoped?.context.taskId,taskId:scoped?.context.taskId||null,projectId:scoped?.context.projectId||null,modelProvider:route,models:selection.profile.models.map(v=>v.id),instructions}});
  fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]\n');fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'studio-model-profile',private:true,type:'module',dsh:{profile:{bundles:[]}}}));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),JSON.stringify([{insert:entries}],null,2));
@@ -91,19 +93,25 @@ function ownedDirectory(directory){
 function dshDirectories(base,sessionProfileId){
  if(sessionProfileId!==undefined&&(typeof sessionProfileId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(sessionProfileId)))throw Error('Invalid agent runtime profile identity');
  const home=sessionProfileId?path.join(base,'processes',sessionProfileId):base;
- return {home,profile:path.join(home,'profiles','studio'),cwd:path.join(base,'workspace'),sessions:path.join(base,'sessions')};
+ // The SDK persists attachment references alongside native session history. Their
+ // store must outlive an individual bridge process, just as the session log does.
+ ownedDirectory(path.join(base,'attachments','v1'));
+ ownedDirectory(path.join(base,'cache','attachments'));
+ const attachments={id:'attachments',name:'@deepseek-ai/dsh-attachment-local',config:{dshHome:base,maxImageBytes:attachmentLimits.imageBytes,maxMessageImageBytes:attachmentLimits.totalBytes,maxImagesPerMessage:attachmentLimits.count}};
+ return {home,profile:path.join(home,'profiles','studio'),cwd:path.join(base,'workspace'),sessions:path.join(base,'sessions'),attachments};
 }
 
 /** An affirmative plugin list excludes all shell, file, skill, web and subagent producers. */
 export function prepareDshProfile(root,runtime,worker,instructions,selection={}){
  if(!object(runtime)||typeof runtime.mcpModule!=='string'||typeof runtime.toolsModule!=='string'||typeof instructions!=='string')throw Error('Invalid DSH runtime configuration');
- const scoped=scopedDshWorker(worker),{home,profile,cwd,sessions}=dshDirectories(path.join(path.resolve(root),'deepseek-dsh-v1'),selection.sessionProfileId);
+ const scoped=scopedDshWorker(worker),{home,profile,cwd,sessions,attachments}=dshDirectories(path.join(path.resolve(root),'deepseek-dsh-v1'),selection.sessionProfileId);
  for(const directory of [profile,cwd,sessions])ownedDirectory(directory);
  // The home-level overlay is owned by AIMatterLab as well. No user profile is loaded.
  fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]\n');
  fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'studio-deepseek-profile',private:true,type:'module',dsh:{profile:{bundles:[]}}},null,2));
  const entries=kernel.map(([id,name,config])=>({id,name:name.startsWith('@')?name:'@deepseek-ai/'+name,...config?{config}:{}}));
  entries.push({id:'user-questions',name:'@deepseek-ai/dsh-user-questions'});
+ entries.push(attachments);
  entries.push({id:'sessions',name:'@deepseek-ai/dsh-session-persistence-jsonl',config:{root:sessions,compression:'none'}});
  entries.push({id:'studio-policy',name:runtime.policyPath||sourcePolicyPath,inject:['tools','systemPrompt','appReady','llm','agents','userQuestions'],config:{mcpModule:runtime.mcpModule,toolsModule:runtime.toolsModule,workerUrl:scoped?.url||null,workflow:!!scoped?.context.taskId,taskId:scoped?.context.taskId||null,projectId:scoped?.context.projectId||null,models:selection.models||[],instructions,interactiveQuestions:true}});
  fs.writeFileSync(path.join(profile,'cordis.patch.yml'),JSON.stringify([{insert:entries}],null,2));

@@ -43,7 +43,7 @@ export default function TerminalWorkspaceApproval({provider,threadId,active,sele
   finally{busy.current=false;if(latest.current===scope)setPending(false);}
  }
  if(!approval||!active)return null;
- return <section className="agent-terminal-approval" data-testid="terminal-workspace-approval" role="group" aria-label={t('确认终端操作')} aria-busy={pending}>
+ return <section className="agent-terminal-approval" data-testid="terminal-workspace-approval" data-terminal-approval-id={approval.approvalId} role="group" aria-label={t('确认终端操作')} aria-busy={pending}>
   <strong><Shield size={15}/>{t(reasons[approval.reason]||'确认终端操作')}</strong>
   <dl><dt>{t('计算资源')}</dt><dd>{approval.resourceName}</dd><dt>{t('远端总工作区')}</dt><dd><code>{approval.workspaceRoot}</code></dd><dt>{t('执行目录')}</dt><dd><code>{approval.cwd}</code></dd></dl>
   {approval.paths.length>0&&<ul aria-label={t('涉及路径')}>{approval.paths.map(path=><li key={path}><code>{path}</code></li>)}</ul>}

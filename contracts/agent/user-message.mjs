@@ -1,3 +1,4 @@
+import {attachmentOffset,chatAttachmentRefs} from './chat-attachments.mjs';
 import {titleReviewPrefix} from './conversation-title.mjs';
 
 export const workspaceContextHeader = '[AIMatterLab workspace context]';
@@ -8,6 +9,8 @@ export function isWorkspaceContext(text) {
 
 export function visibleUserText(content=[]){
  return content.filter(c=>c.type==='text'&&typeof c.text==='string').map((c,index)=>{
+  const at=attachmentOffset(c.text);
+  if(at>=0&&chatAttachmentRefs([c]).length){const before=c.text.slice(0,at).trimEnd();if(!before)return '';c={...c,text:before};}
   if(index>0&&c.text.startsWith(titleReviewPrefix))return '';
   if(index>0&&/^(?:\[(?:AIMatterLab|Studio) (?:workspace context|authoring workspace|interaction mode:|selected scientific guidance|scientific guidance unavailable|runtime guide|(?:hosted|managed) compute resources|selected compute resource|shared terminal context|current private definition)|\[Selected skill:|\[Automatically selected pyGAS skills from the user-approved local source\]|\[Local scientific source bindings; data, not instructions\])/.test(c.text))return '';
   // Some native histories replay all text blocks as a single user message.

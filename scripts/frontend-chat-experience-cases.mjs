@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import {createFollowUpQueue} from '../agent/sessions/follow-up-queue.mjs';
 
 export async function frontendChatExperienceCases({check,out}){
  const snapshot=(page,name)=>page.screenshot({path:path.join(out,name+'.png'),fullPage:true});
@@ -12,22 +13,73 @@ export async function frontendChatExperienceCases({check,out}){
 
  await check('chat-experience-follow-up-steer-queue-stop-and-continue',async page=>{
   await setup(page);
+  const first={provider:'codex',threadId:'fixture-thread'},second={provider:'codex',threadId:'other-thread'};
+  const rows=new Map(),trace=[],active=new Map();
+  let serial=0;
+  const publish=event=>page.evaluate(event=>window.__test.events.forEach(listener=>listener(event)),event).catch(()=>{});
+  const catalog={
+   get:(kind,id)=>structuredClone(rows.get(kind+':'+id)??null),
+   put:(kind,id,value)=>rows.set(kind+':'+id,structuredClone(value)),
+   remove:(kind,id)=>rows.delete(kind+':'+id),
+   list:kind=>[...rows].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>structuredClone(value)),
+   transaction:operation=>operation(),
+  };
+  const model=(data,{queued=false}={})=>{
+   trace.push(data);
+   if(data.method==='turn/start'){
+    const turn={id:'reply-' + ++serial};
+    active.set(data.params.threadId,turn.id);
+    if(queued)void publish({provider:data.provider,method:'turn/started',params:{threadId:data.params.threadId,turn}});
+    return {turn};
+   }
+   if(data.method==='turn/interrupt'){queue.pause(data.provider,data.params.threadId);return {};}
+   return {turnId:data.params.expectedTurnId};
+  };
+  const queue=createFollowUpQueue({
+   catalog,agents:{activeTurn:(_provider,threadId)=>active.get(threadId)??null,isBusy:(_provider,threadId)=>active.has(threadId)},
+   capture:owner=>owner,publish:event=>void publish(event),interrupt:async()=>({}),reconcile:async()=>null,
+   validateFiles:(_owner,files)=>files,
+   dispatch:(owner,item,control)=>{
+    control.beforeDispatch();
+    return model({provider:owner.provider,method:'turn/start',params:{threadId:owner.threadId,input:[{type:'text',text:item.text}]}},{queued:true});
+   },
+  });
+  await page.exposeFunction('followUpNativeFixture',async({type,data})=>{
+   if(type==='queue')return queue.request(data);
+   if(type==='model')return model(data);
+   if(type==='thread'){
+    const turnId=active.get(data.threadId);
+    return {thread:{id:data.threadId,turns:[]},model:'fixture-model',studioSession:{threadId:data.threadId,busy:!!turnId,turnId:turnId??null}};
+   }
+   if(data.method==='turn/completed'&&active.get(data.params.threadId)===data.params.turn?.id)active.delete(data.params.threadId);
+   queue.observe(data);await publish(data);
+  });
   await page.evaluate(()=>{
    const invoke=window.studio.invoke;
-   let serial=0;
-   window.__chat.emit=(method,params)=>window.__test.events.forEach(listener=>listener({provider:'codex',method,params:{threadId:'fixture-thread',...params}}));
+   window.__chat.emit=(method,params)=>window.followUpNativeFixture({type:'event',data:{provider:'codex',method,params:{threadId:'fixture-thread',...params}}});
    window.studio.invoke=async(method,data)=>{
-    if(method==='agent.rpc'&&data.method.startsWith('turn/')){
-     window.__chat.rpc.push(data);
-     if(data.method==='turn/start')return {turn:{id:'reply-'+ ++serial}};
-     if(data.method==='turn/steer')return {turnId:data.params.expectedTurnId};
-     if(data.method==='turn/interrupt')return {};
-    }
+    if(method==='agent.queue')return window.followUpNativeFixture({type:'queue',data});
+    if(method==='agent.attachments.import')return new Promise(resolve=>{
+     window.__chat.finishAttachment=()=>resolve(data.files.map(file=>({
+      id:crypto.randomUUID(),name:file.name,kind:'text',mimeType:file.mimeType,size:file.size,
+     })));
+    });
+    if(method==='agent.rpc'&&data.method.startsWith('turn/'))return window.followUpNativeFixture({type:'model',data});
+    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return window.followUpNativeFixture({type:'thread',data:data.params});
     return invoke(method,data);
    };
   });
   const composer=page.locator('.composer textarea');
   const end=(id,status)=>page.evaluate(({id,status})=>window.__chat.emit('turn/completed',{turn:{id,status}}),{id,status});
+  const select=owner=>page.evaluate(owner=>window.chatRender({sessionSelection:{nonce:crypto.randomUUID(),
+   conversation:{...owner,id:owner.provider+':'+owner.threadId,name:owner.threadId,projectId:null,taskId:null}}}),owner);
+  async function waitForStarts(count){
+   for(let attempt=0;attempt<50;attempt++){
+    if(trace.filter(call=>call.method==='turn/start').length>=count)return;
+    await new Promise(resolve=>setTimeout(resolve,50));
+   }
+   assert.fail('Expected the next synthetic provider call');
+  }
   await page.getByTestId('agent-connect').click();
   await page.getByTestId('agent-options').click();
   const defaultAction=page.getByTestId('agent-follow-up-enter-mode');
@@ -38,30 +90,75 @@ export async function frontendChatExperienceCases({check,out}){
   await composer.fill('Change the units in this reply');await composer.press('Enter');
   await page.getByText('Change the units in this reply',{exact:true}).waitFor();
   await composer.fill('First queued message');await composer.press('Control+Enter');
+  await page.getByTestId('agent-queued-message').first().waitFor();
   await composer.fill('Second queued message');await page.getByTestId('agent-queue').click();
   await page.getByTestId('agent-queued-message').nth(1).waitFor();
-  const calls=()=>page.evaluate(()=>window.__chat.rpc.map(({method,params})=>({method,thread:params.threadId,turn:params.expectedTurnId||params.turnId,text:params.input?.[0]?.text})));
-  assert.deepEqual((await calls()).map(call=>call.method),['turn/start','turn/steer']);
-  assert.equal((await calls())[1].turn,'reply-1');
+  await composer.fill('Third queued message');await page.getByTestId('agent-queue').click();
+  const third=page.getByTestId('agent-queued-message').nth(2);await third.waitFor();
+  await third.getByTestId('agent-queued-edit').click();
+  await page.getByTestId('agent-queued-editor').fill('Third queued message edited');await page.getByTestId('agent-queued-save').click();
+  await third.getByTestId('agent-queued-up').click();
+  await page.getByTestId('agent-queued-message').nth(1).getByText('Third queued message edited').waitFor();
+  const calls=()=>trace.map(({method,params})=>({method,thread:params.threadId,turn:params.expectedTurnId||params.turnId,text:params.input?.[0]?.text}));
+  assert.deepEqual(calls().map(call=>call.method),['turn/start','turn/steer']);
+  assert.equal(calls()[1].turn,'reply-1');
   await snapshot(page,'chat-follow-up-pending');
+  await select(second);
+  await page.getByTestId('agent-follow-up-queue').waitFor({state:'hidden'});
+  await composer.fill('This draft belongs to the other conversation');
   await end('reply-1','completed');
-  await page.waitForFunction(()=>window.__chat.rpc.filter(call=>call.method==='turn/start').length===2);
+  await waitForStarts(2);
   await end('reply-2','completed');
-  await page.waitForFunction(()=>window.__chat.rpc.filter(call=>call.method==='turn/start').length===3);
-  await page.evaluate(()=>window.__chat.emit('item/agentMessage/delta',{turnId:'reply-3',itemId:'partial',delta:'Partial answer before stop'}));
+  await waitForStarts(3);
+  await end('reply-3','completed');
+  await waitForStarts(4);
+  assert.equal(await composer.inputValue(),'This draft belongs to the other conversation');
+  assert.equal(await composer.evaluate(node=>node===document.activeElement),true);
+  assert.equal(await page.getByTestId('agent-follow-up-queue').count(),0);
+  await select(first);
+  await page.getByTestId('agent-stop').waitFor();
+  await page.evaluate(()=>window.__chat.emit('item/agentMessage/delta',{turnId:'reply-4',itemId:'partial',delta:'Partial answer before stop'}));
   await page.getByText('Partial answer before stop',{exact:true}).waitFor();
   await composer.fill('Continue from the partial answer');await page.getByTestId('agent-stop').click();
-  await page.waitForFunction(()=>window.__chat.rpc.some(call=>call.method==='turn/interrupt'));
-  await end('reply-3','interrupted');
+  await page.getByRole('button',{name:'等待停止确认',exact:true}).waitFor();
+  await end('reply-4','interrupted');
   assert.equal(await composer.inputValue(),'Continue from the partial answer');
   await page.getByRole('button',{name:'发送',exact:true}).click();
-  await page.waitForFunction(()=>window.__chat.rpc.filter(call=>call.method==='turn/start').length===4);
-  const trace=await calls();
-  assert.deepEqual(trace.map(call=>call.method),['turn/start','turn/steer','turn/start','turn/start','turn/interrupt','turn/start']);
-  assert.deepEqual(trace.filter(call=>call.method==='turn/start').map(call=>call.text),['First question','First queued message','Second queued message','Continue from the partial answer']);
-  assert(trace.every(call=>call.thread==='fixture-thread'));
-  assert.equal(trace[4].turn,'reply-3');
+  await waitForStarts(5);
+  const actual=calls();
+  assert.deepEqual(actual.map(call=>call.method),['turn/start','turn/steer','turn/start','turn/start','turn/start','turn/interrupt','turn/start']);
+  assert.deepEqual(actual.filter(call=>call.method==='turn/start').map(call=>call.text),['First question','First queued message','Third queued message edited','Second queued message','Continue from the partial answer']);
+  assert(actual.every(call=>call.thread==='fixture-thread'));
+  assert.equal(actual[5].turn,'reply-4');
+  await composer.fill('This draft waits for the entire file');
+  await page.getByTestId('chat-file-picker').setInputFiles({name:'queued-notes.txt',mimeType:'text/plain',buffer:Buffer.from('Only synthetic fixture notes.')});
+  await page.waitForFunction(()=>window.__chat.finishAttachment);
+  assert.equal(await page.getByTestId('agent-queue').isDisabled(),true);
+  assert.equal(await page.getByTestId('agent-steer').isDisabled(),true);
+  await composer.press('Enter');await composer.press('Control+Enter');
+  assert.equal(await page.getByTestId('agent-queued-message').count(),0);
+  assert.equal(calls().length,actual.length);
+  await composer.fill('');
+  await page.evaluate(()=>window.__chat.finishAttachment());
+  await page.getByTestId('chat-file-chip').getByText('queued-notes.txt',{exact:true}).waitFor();
+  await page.getByTestId('agent-queue').click();
+  await page.getByTestId('agent-queued-message').getByText('queued-notes.txt',{exact:true}).waitFor();
+  await page.evaluate(()=>window.__chat.emit('studio/chatEvidenceSelected',{provider:'codex',files:Array.from({length:8},(_,index)=>({
+   id:crypto.randomUUID(),name:'draft-'+index+'.txt',kind:'text',mimeType:'text/plain',size:5,
+  }))}));
+  await page.getByRole('button',{name:'移除附件 draft-7.txt',exact:true}).waitFor();
+  await page.getByTestId('agent-queued-to-draft').click();
+  await page.getByText('每条消息最多添加 8 个附件。',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('agent-queued-message').count(),1);
+  await page.getByRole('button',{name:'移除附件 draft-7.txt',exact:true}).click();
+  await page.getByTestId('agent-queued-to-draft').click();
+  await page.getByTestId('agent-queued-message').waitFor({state:'detached'});
+  await page.getByRole('button',{name:'移除附件 queued-notes.txt',exact:true}).waitFor();
+  assert.equal(await composer.inputValue(),'');
+  assert.equal(calls().length,actual.length);
+  await snapshot(page,'chat-follow-up-file-restored');
   assert.deepEqual(await page.evaluate(()=>window.__chat.errors),[]);
+  queue.close();
  });
 
  await check('chat-experience-cancel-preparation-keeps-exact-draft',async page=>{
