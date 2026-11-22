@@ -22,7 +22,8 @@ test('ACP profiles deliver the same bounded AIMatterLab core and progressive ski
   assert.match(document,/Inspect an unknown operation without replaying it/);
   assert.match(document,/Ordinary chat can .*independent job/);
   assert.match(document,/acquire_compute_resource with one selector/);
-  assert.match(document,/access="service" for queues or access="terminal" for shell work/);
+  assert.match(document,/access="command" for short SSH work, access="service" for the worker, or access="terminal" for a shell/);
+  assert.match(document,/run_compute_command with a stable request_id/);
   assert.match(document,/a short follow-up.*listed resource ID/);
   assert.match(document,/Current receipts supersede old handoff advice/);
   assert.match(document,/Recover the original live SSH session first/);
@@ -91,15 +92,17 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  const catalog=await service.call('scientific_skill_catalog',{},scope);
  const queue=catalog.functions.find(route=>route.id==='compute.queue');
  assert.equal(queue.phase,'discovery');
- assert.deepEqual(queue.tools.slice(0,3),['list_compute_resources','acquire_compute_resource','inspect_compute_service']);
+ assert.deepEqual(queue.tools.slice(0,4),['list_compute_resources','acquire_compute_resource','run_compute_command','inspect_compute_service']);
  const args={function_id:queue.id};
  const entry=await service.call('read_scientific_skill',args,scope);
  assert.equal(entry.status,'passed');
  assert.match(entry.text,/using exactly one selector/);
  assert.match(entry.text,/probe_scheduler: true/);
- assert.match(entry.text,/access: "service".*queue probes/);
+ assert.match(entry.text,/access: "command".*short operations on a hosted SSH resource/);
+ assert.match(entry.text,/run_compute_command.*resource_id.*request_id/);
+ assert.match(entry.text,/gateway node selection.*selected node's shell.*登录完成，交由 AIMatterLab 管理/);
  assert.match(entry.text,/terminal_unavailable.*leaseStatus/);
- assert.match(entry.text,/service lease grants no shell/);
+ assert.match(entry.text,/Only an acquired terminal with its session receipt establishes a shell/);
  assert.match(entry.text,/short follow-up.*resource_id/);
  assert.match(entry.text,/DeepSeek presents eligible `choice_required` candidates in the chat input area/);
  assert.match(entry.text,/unanswered `choice_required` candidates, ask which one in this chat/);
@@ -120,6 +123,7 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  const result=await service.call('read_scientific_skill',{...args,document_id:doc},scope);
  assert.equal(result.status,'passed');
  assert.match(result.text,/bounded read-only scheduler probe in ordinary chat/);
+ assert.match(result.text,/commandAvailable.*run_compute_command.*stable.*request_id/);
  assert.match(result.text,/same-resource service retry/);
  assert.match(result.text,/resource name in chat to its listed ID/);
  assert.match(result.text,/two-factor prompts in the connection's private terminal/);

@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "product": "AIMatterLab",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "repository_url": "https://github.com/tensor4627/AIMatterLab.git",
-  "release_revision": "v0.1.27",
-  "source_ref": "refs/tags/v0.1.27",
+  "release_revision": "v0.1.28",
+  "source_ref": "refs/tags/v0.1.28",
   "tool_sources": "installation/tool-sources.json",
   "desktop_platform": "Windows + WSL",
   "entry": "INSTALL_AGENT.md",
@@ -23,5 +23,5 @@
     "neb": "fixture_required"
   },
   "distribution_status": "passed",
-  "distribution_scope": "Local Windows x64 signed installer, portable ZIP, developer kit and signed update manifest. See docs/releases/aimatterlab-0.1.27.md for the validation scope and release receipts."
+  "distribution_scope": "Local Windows x64 signed installer, portable ZIP, developer kit and signed update manifest. See docs/releases/aimatterlab-0.1.28.md for the validation scope and release receipts."
 }
