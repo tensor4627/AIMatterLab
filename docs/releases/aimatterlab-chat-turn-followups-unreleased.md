@@ -1,5 +1,7 @@
 # 会话排队、引导与中断续发
 
+以下记录对应提交 `0fbdad6`。后续实现已把队列移至主进程并增加附件，最新行为见[会话工作区验收](aimatterlab-chat-workspace-unreleased.md)。
+
 2026-11-22。基于 0.1.29 的开发分支，沿用现有包版本。
 
 回复进行时，默认按 Enter 排队，Ctrl/Cmd+Enter 引导，Shift+Enter 换行。在「Agent 选项」可以对调排队和引导的快捷键。Codex、DeepSeek、Qwen 和自定义 API 支持文字引导。Kimi 的 ACP 适配器提供排队。附带技能的消息按下一轮输入处理。

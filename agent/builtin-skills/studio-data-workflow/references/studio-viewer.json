@@ -63,22 +63,22 @@
       {
         "source_id": "studio",
         "path": "frontend/features/runs/RunDetail.tsx",
-        "sha256": "94bbcdfea280c076fcf49ebfacf525ae1b0352296bd63e5ac145392973665480",
-        "bytes": 25454,
-        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "sha256": "02b401b316a49dc243d83a0dff0931be47c26755785be846eda8eb866f2fecde",
+        "bytes": 26270,
+        "observed_commit": "86b3b5c99c74b8c97e229bb4e3f330171357c69d",
         "role": "available_result_files_and_frame_selection",
         "line_ranges": [
           [
-            101,
-            104
+            103,
+            107
           ],
           [
-            143,
-            147
+            145,
+            148
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "observed_on": "2026-11-19"
+        "observed_on": "2026-11-22"
       },
       {
         "source_id": "studio-worker",

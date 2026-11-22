@@ -1,5 +1,7 @@
 # AIMatterLab Agent 会话优化计划
 
+**实施进度**　本计划的五个阶段及后续提出的文件和图片上传已在独立开发分支实现。下文保留规划时的对照基线。当前交付、验证方法和已知边界见[实施验收表](../releases/aimatterlab-chat-workspace-unreleased.md)。
+
 2026-11-22。对照对象为 Codex 的 VS Code 扩展、Windows 桌面端和公开 App Server。AIMatterLab 以 0.1.29 加本分支会话修复 `0fbdad6` 为基线。
 
 **优先解决“我离开这段对话，它还能不能可靠地继续工作”。** 现在可以边回复边引导、排队，也可以中断后在原会话续发。例如，在 A 对话排两条消息，再去 B 对话看日志，A 的当前回复会完成，队列要等用户回到 A 才会推进。其次值得做的是从工作区选中一段输入或日志，带着准确位置提问，并能从回答回到同一份材料。[本次验证](../releases/aimatterlab-chat-turn-followups-unreleased.md) · [队列实现](../../frontend/features/conversations/follow-ups.mjs) · [聊天输入与发送](../../frontend/features/conversations/Agent.tsx)
