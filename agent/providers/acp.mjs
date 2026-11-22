@@ -108,6 +108,7 @@ export class AcpBridge extends EventEmitter{
  serverRequest(message){
   const {method,params:p={},id}=message;
   if(this.isolatedSessions.has(p.sessionId)){this.send({id,...method==='session/request_permission'?{result:{outcome:{outcome:'cancelled'}}}:{error:{code:-32000,message:'This conversation is awaiting its previous turn receipt'}}});return;}
+  const turnId=this.activeTurns.get(p.sessionId);
   if(method==='session/request_permission'){
    const call=p.toolCall||{},name=call._meta?.toolName||call._meta?.claudeCode?.toolName||call.title;
    const science=safeTool.test(String(name||''))||call._meta?.serverId==='gpusampling'&&(Object.hasOwn(SCIENTIFIC_TOOL_ACCESS,String(name||''))||sharedTerminalToolAllowed(name));
@@ -119,14 +120,14 @@ export class AcpBridge extends EventEmitter{
    // A question is the only non-MCP permission that can be shown to the user.
    if(/ask.?user.?question/i.test(String(name||''))&&call.kind!=='execute'){
     this.interactions.set(String(id),message);
-    this.event('studio/question',{threadId:p.sessionId,message:call.title,questionOptions:p.options||[],rawInput:call.rawInput},id);return;
+    this.event('studio/question',{threadId:p.sessionId,turnId,message:call.title,questionOptions:p.options||[],rawInput:call.rawInput},id);return;
    }
    this.send({id,result:{outcome:{outcome:'cancelled'}}});
    this.event('studio/policyDenied',{threadId:p.sessionId,message:'Use the current authorized AIMatterLab tools; native file and shell tools are disabled.'});return;
   }
   if(method==='elicitation/create'&&(!p.mode||p.mode==='form')){
    this.interactions.set(String(id),message);
-   this.event('mcpServer/elicitation/request',{threadId:p.sessionId,message:p.message,requestedSchema:p.requestedSchema},id);return;
+   this.event('mcpServer/elicitation/request',{threadId:p.sessionId,turnId,message:p.message,requestedSchema:p.requestedSchema},id);return;
   }
   this.send({id,error:{code:-32601,message:'AIMatterLab does not expose filesystem, terminal, or arbitrary client actions'}});
  }
@@ -262,15 +263,22 @@ export class AcpBridge extends EventEmitter{
    const id=randomUUID(),turn={id,status:'inProgress',items:[]};s.current=turn;s.turns.push(turn);
    const prompt=this.clean((params.input||[]).filter(i=>i.type==='text').map(i=>({type:'text',text:i.text})));
    turn.items.push(this.clean({id:randomUUID(),type:'userMessage',content:prompt,text:prompt.map(c=>c.text).join('\n')}));
-   this.activeTurns.set(s.id,id);this.event('turn/started',{threadId:s.id,turn:{id}});
+   this.activeTurns.set(s.id,id);
    const generation=this.lifecycle,current=()=>generation===this.lifecycle&&this.sessions.get(s.id)===s;
-   this.raw('session/prompt',{sessionId:s.id,prompt},this.promptTimeoutMs,{onTimeout:()=>{
+   const releaseTurn=()=>{
+    this.flushStreams(s.id);this.cancelInteractions(s.id);
+    if(this.activeTurns.get(s.id)===id)this.activeTurns.delete(s.id);
+    if(s.current===turn)s.current=null;
+   };
+   const operation=this.raw('session/prompt',{sessionId:s.id,prompt},this.promptTimeoutMs,{onTimeout:()=>{
     if(!current())return;this.flushStreams(s.id);this.isolatedSessions.set(s.id,{turnId:id,reason:'prompt_timeout'});this.cancelInteractions(s.id);
     try{this.notify('session/cancel',{sessionId:s.id});}catch{}
-   },onLateResponse:message=>{if(current()&&this.isolatedSessions.get(s.id)?.turnId===id){this.isolatedSessions.delete(s.id);turn.cancellationPending=false;turn.lateReceipt=this.clean(message.error?{status:'failed',error:message.error}:{stopReason:message.result?.stopReason});this.event('studio/sessionReady',{threadId:s.id,turnId:id,message:'The previous turn receipt arrived. No message or job was replayed.'});}}}).then(result=>{
-    if(!current())return;this.flushStreams(s.id);this.cancelInteractions(s.id);
+   },onLateResponse:message=>{if(current()&&this.isolatedSessions.get(s.id)?.turnId===id){this.isolatedSessions.delete(s.id);turn.cancellationPending=false;turn.lateReceipt=this.clean(message.error?{status:'failed',error:message.error}:{stopReason:message.result?.stopReason});this.event('studio/sessionReady',{threadId:s.id,turnId:id,message:'The previous turn receipt arrived. No message or job was replayed.'});}}});
+   this.event('turn/started',{threadId:s.id,turn:{id}});
+   operation.then(result=>{
+    if(!current())return;releaseTurn();
     Object.assign(turn,{status:result.stopReason==='cancelled'?'cancelled':'completed',stopReason:result.stopReason});this.event('turn/completed',{threadId:s.id,turn:{id,status:turn.status,stopReason:result.stopReason,modelOutputReceived:turn.items.some(item=>item.type==='agentMessage'&&item.text.trim())}});
-   }).catch(error=>{if(current()){this.flushStreams(s.id);this.cancelInteractions(s.id);Object.assign(turn,{status:'failed',error:{message:this.clean(error.message)},...this.isolatedSessions.has(s.id)?{operationState:'unconfirmed',cancellationPending:true}:{}});this.event('turn/completed',{threadId:s.id,turn:{...turn,items:undefined}});}}).finally(()=>{if(this.activeTurns.get(s.id)===id)this.activeTurns.delete(s.id);if(s.current===turn)s.current=null;});
+   }).catch(error=>{if(current()){releaseTurn();Object.assign(turn,{status:'failed',error:{message:this.clean(error.message)},...this.isolatedSessions.has(s.id)?{operationState:'unconfirmed',cancellationPending:true}:{}});this.event('turn/completed',{threadId:s.id,turn:{...turn,items:undefined}});}});
    return {turn:{id,status:'inProgress'}};
    }finally{if(this.pendingStarts.get(s.id)===startToken)this.pendingStarts.delete(s.id);}
   }
@@ -283,7 +291,7 @@ export class AcpBridge extends EventEmitter{
   // The process that produced these sessions is gone; stale metadata must not
   // survive an explicit reconnect.
   this.sessions.clear();this.isolatedSessions.clear();this.pendingStarts.clear();this.streams?.clear();this.current=null;
-  this.event('studio/codexDisconnected',{reason:error.message});this.activeTurns.clear();
+  this.activeTurns.clear();this.event('studio/codexDisconnected',{reason:error.message});
  }
  close(){this.disconnect(Error(this.provider+' bridge closed'));}
 }

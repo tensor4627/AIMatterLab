@@ -82,7 +82,9 @@ export function constrainedRequest(method,params,isolation){
   if(params.toolOutput!==undefined)throw Error('AIMatterLab isolation accepts only main-authorized text inputs');
   const input=textInputs(params.input);
   knownFields(params,method==='turn/steer'?['threadId','clientUserMessageId','input','expectedTurnId']:['threadId','disabledPluginIds','clientUserMessageId','input','turnTrigger','cwd','approvalPolicy','approvalsReviewer','sandboxPolicy','model','serviceTier','serviceTierForTurn','effort','summary','personality','outputSchema']);
-  return method==='turn/steer'?{...params,input}:{...params,input,...isolation.catalog?{model:verifiedModel(params.model,isolation)}:{},cwd:isolation.cwd,sandboxPolicy:{type:'readOnly',networkAccess:false}};
+  return method==='turn/steer'
+   ?{...params,input:input.map(item=>({...item,text_elements:[]}))}
+   :{...params,input,...isolation.catalog?{model:verifiedModel(params.model,isolation)}:{},cwd:isolation.cwd,sandboxPolicy:{type:'readOnly',networkAccess:false}};
  }
  if(/^(command|fs|process|config\/.*write|externalAgentConfig|skills\/config\/write|mcpServer\/tool\/call|mcpServer\/resource\/read)/.test(method))throw Error('Native privileged RPC is unavailable in AIMatterLab isolation');return params;
 }

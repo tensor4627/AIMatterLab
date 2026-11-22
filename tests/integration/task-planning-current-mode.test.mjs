@@ -141,6 +141,40 @@ test('private definition turns preserve current planning while excluding broader
  assert.deepEqual(f.workerCalls,[]);
 });
 
+test('steering the exact private definition uses text and its existing isolation, without workspace context',async()=>{
+ const f=fixture({definition:true}),task=f.create();
+ const specSha='a'.repeat(64),parametersSha='b'.repeat(64),codeSha=null;
+ task.customCv={id:'shared-entry',specSha,parametersSha,codeSha,revision:'c'.repeat(32)};
+ task.privateDefinitionContext={provider:'codex',threadId:'thread',taskId:task.id,entryId:'shared-entry',specSha,parametersSha,codeSha};
+ f.records.save(task);
+ f.runtime.resourceRouting.turnContext=()=>{assert.fail('Private steer must not read generic resource context');};
+ const send=()=>f.request({provider:'codex',method:'turn/steer',params:{threadId:'thread',expectedTurnId:'active-turn',planningMode:true,
+  input:[{type:'text',text:human},{type:'text',text:'UNSHARED_WORKSPACE_CONTEXT'}]}});
+ await send();
+ const turn=lastTurn(f),text=assertMode(turn,true);
+ assert.equal(turn.expectedTurnId,'active-turn');
+ assert.match(text,/Current capability scope: private-definition/);
+ assert.doesNotMatch(text,/UNSHARED_WORKSPACE_CONTEXT/);
+ assert.doesNotThrow(()=>constrainedRequest('turn/steer',turn,{cwd:process.cwd()}));
+ assert.deepEqual(f.workerCalls,[]);
+ task.customCv.parametersSha='d'.repeat(64);f.records.save(task);
+ await assert.rejects(send,/establish its isolated context/);
+ assert.equal(f.sent.length,1);
+});
+
+test('Kimi steering stays unavailable and ordinary resource intent updates after an exact steer receipt',async()=>{
+ const f=fixture(),records=[];
+ f.runtime.recordUserTurn=value=>records.push(value);
+ f.runtime.agents.rpc=async(_provider,_method,params)=>({turnId:params.input[0].text==='accepted'?params.expectedTurnId:'a-different-turn'});
+ const params={threadId:'thread',expectedTurnId:'active-turn',input:[{type:'text',text:'rejected'}]};
+ await assert.rejects(f.request({provider:'kimi',method:'turn/steer',params}),/queued follow-ups/);
+ await f.request({provider:'codex',method:'turn/steer',params});
+ assert.deepEqual(records,[]);
+ await f.request({provider:'codex',method:'turn/steer',params:{...params,input:[{type:'text',text:'accepted'}]}});
+ assert.equal(records.length,1);
+ assert.equal(records[0].params.input[0].text,'accepted');
+});
+
 test('invalid mode values fail before context, terminal readiness, provider or worker effects',async()=>{
  for(const terminal of [false,true])for(const method of ['turn/start','turn/steer'])for(const bad of [{planningMode:'true'},{planningMode:1},{planningMode:null},{reviewMode:'false'}]){
   const f=fixture({terminal});await assert.rejects(f.request({provider:'codex',method,params:{threadId:'thread',input:[{type:'text',text:human}],...bad}}),/Invalid interaction mode/);assert.deepEqual(f.effects,[]);assert.deepEqual(f.sent,[]);assert.deepEqual(f.workerCalls,[]);assert.equal(f.rows.size,0);

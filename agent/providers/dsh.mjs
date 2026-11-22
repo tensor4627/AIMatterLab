@@ -2,7 +2,7 @@ import {EventEmitter} from 'node:events';
 import {createHash,randomUUID} from 'node:crypto';
 import {dshRuntime} from '../../desktop/platform/dsh-runtime.mjs';
 import {createJsonlFramer} from './jsonl-frames.mjs';
-import {DSH_QUESTION_TOOL,DSH_RESOURCE_QUESTION_PREFIX} from './dsh-policy.mjs';
+import {DSH_CONTROL_METHOD,DSH_QUESTION_TOOL,DSH_RESOURCE_QUESTION_PREFIX} from './dsh-policy.mjs';
 import {DEEPSEEK_URL} from './deepseek.mjs';
 import {redact} from './contracts.mjs';
 import {STUDIO_INSTRUCTIONS} from '../context/agent-settings.mjs';
@@ -110,7 +110,13 @@ export class DshBridge extends EventEmitter{
    };
    const timer=setTimeout(expire,timeout);
    this.pending.set(id,{resolve,reject,timer,onLateResponse});
-   try{this.send({id,method,params});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}
+   const failed=error=>{if(error&&this.pending.delete(id)){clearTimeout(timer);reject(error);}};
+   try{
+    if(method===DSH_CONTROL_METHOD){
+     if(!this.process?.connected)throw Error('DeepSeek Harness turn control channel is unavailable');
+     this.process.send({id,method,params},failed);
+    }else this.send({id,method,params});
+   }catch(error){failed(error);}
   });
  }
  receive(message){
@@ -144,7 +150,7 @@ export class DshBridge extends EventEmitter{
    return;
   }
   if(message.method==='studio/dshText'){
-   const p=message.params,s=this.byNative(p?.sessionId),active=s&&this.activeTurns.get(s.id);if(!active||typeof p.text!=='string')return;
+   const p=message.params,s=this.byNative(p?.sessionId),active=s&&this.activeTurns.get(s.id);if(!active||typeof p.text!=='string'||p.turn!==undefined&&p.turn!==active.nativeTurn)return;
    const turn=active.turn,id=dshPublicItemId(s.id,turn.id,'agentMessage',p.attemptId??'assistant');active.streams??=new Map();let stream=active.streams.get(id);if(!stream){stream=createTranscriptStream(()=>[this.getCredential()?.apiKey,this.getWorker()?.tokens?.mcp]);active.streams.set(id,stream);}const delta=stream.push(p.text);if(!delta)return;let item=turn.items.find(i=>i.id===id);if(!item){item={id,type:'agentMessage',text:''};turn.items.push(item);}item.text+=delta;this.event('item/agentMessage/delta',{threadId:s.id,turnId:turn.id,itemId:id,delta});return;
   }
   if(message.method==='session.event')this.sessionEvent(message.params);
@@ -170,12 +176,13 @@ export class DshBridge extends EventEmitter{
  byNative(id){return [...this.sessions.values()].find(s=>s.nativeId===id);}
  sessionEvent({sessionId,event}={}){
   const s=this.byNative(sessionId);if(!s||!event||typeof event.type!=='string')return;
-  const active=this.activeTurns.get(s.id);
-  if(!active){
-   const original=this.unconfirmedTurns.get(s.id);
-   if(original&&event.type==='turn/end')original.terminal=this.cleanValue(event.data?.reason);
-   return;
-  }
+  const active=this.activeTurns.get(s.id),origin=active||this.unconfirmedTurns.get(s.id);
+  if(!origin)return;
+  const nativeTurn=event.data?.turn;
+  if(event.type==='turn/start'&&Number.isSafeInteger(nativeTurn)&&origin.nativeTurn===undefined)origin.nativeTurn=nativeTurn;
+  if(Number.isSafeInteger(nativeTurn)&&origin.nativeTurn!==undefined&&origin.nativeTurn!==nativeTurn)return;
+  if(event.type==='turn/end')origin.terminal=this.cleanValue(event.data?.reason);
+  if(!active)return;
   const data=this.cleanProtocol(event.data||{},{kind:'dsh-event-data'}),turn=active.turn;
   if(event.type==='assistant/message'){
    const message=data.message||{},text=textOf(message.content),streamId=data.stream?.attemptId;let item=streamId!==undefined&&turn.items.find(i=>i.id===dshPublicItemId(s.id,turn.id,'agentMessage',streamId));
@@ -192,7 +199,6 @@ export class DshBridge extends EventEmitter{
    const message=data.message||{},id=message.source?.callId||message.toolCallId,item=turn.items.find(i=>i.type==='mcpToolCall'&&i.id===dshPublicItemId(s.id,turn.id,'mcpToolCall',id));
    if(item){item.status=message.isError?'failed':'completed';item.result={content:(message.content||[]).filter(v=>v.type==='text'),isError:!!message.isError};this.event('item/completed',{threadId:s.id,turnId:turn.id,item});}
   }
-  if(event.type==='turn/end')active.terminal=data.reason;
   s.updatedAt=Date.now();this.save(s);
  }
  save(s){this.catalog.put(KIND,s.id,this.cleanProtocol(s));}
@@ -226,31 +232,75 @@ export class DshBridge extends EventEmitter{
    if(!unconfirmed){await this.launch(this.choose(params.model||s.model),s.effort,s.toolContext);assertCurrent();await this.ensureSession(s);assertCurrent();}
    this.current=s.id;return {thread:this.publicThread(s),model:unconfirmed?s.model:this.model,reasoningEffort:s.effort};
   }
-  if(method==='turn/interrupt'){
-   const active=this.activeTurns.get(params.threadId)||this.unconfirmedTurns.get(params.threadId);
-   if(active&&params.turnId&&params.turnId!==active.turn.id)throw Error('Turn no longer active');
-   if(active){if(this.activeTurns.size&&!this.activeTurns.has(params.threadId))throw Error('请先等待当前对话回复结束，再中断原服务。');this.stop({reason:'cancelled'});}
-   return {};
-  }
+  if(method==='turn/steer')return this.steerTurn(params,assertCurrent);
+  if(method==='turn/interrupt'){await this.controlTurn(params.threadId,params.turnId,'interrupt');return {};}
   if(method==='turn/start'){
    if(this.unconfirmedTurns.has(params.threadId))throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');
-   if(this.activeTurns.size)throw Error('A DeepSeek reply is already active');const s=this.session(params.threadId),input=this.cleanValue(params.input);
-   if(!Array.isArray(input)||!input.length||input.some(i=>i.type!=='text'||typeof i.text!=='string')||JSON.stringify(input).length>1000000)throw Error('Invalid DeepSeek text input');
+   if(this.activeTurns.size)throw Error('A DeepSeek reply is already active');const s=this.session(params.threadId),input=this.textInput(params.input);
    const model=this.choose(params.model||s.model),effort=(params.effort||s.effort)==='none'?'off':params.effort||s.effort,toolContext=params.studioToolContext||s.toolContext;await this.launch(model,effort,toolContext);assertCurrent();await this.ensureSession(s);assertCurrent();
    if(this.activeTurns.size||this.unconfirmedTurns.has(s.id))throw Error('A previous reply is active or awaiting its receipt');
    const historical=s.legacyContextPending?dshLegacyContext(s.turns):'',turn={id:randomUUID(),status:'inProgress',items:[this.cleanValue({id:randomUUID(),type:'userMessage',content:input.map(i=>({type:'text',text:i.text})),text:input.map(i=>i.text).join('\n')})]},active={turn,output:false};
-   s.turns.push(turn);s.model=model;s.effort=effort;s.toolContext=toolContext;s.legacyContextPending=false;s.nativeStarted=true;s.name||=input.map(i=>i.text).join(' ').trim().slice(0,60);s.updatedAt=Date.now();this.activeTurns.set(s.id,active);this.save(s);this.event('turn/started',{threadId:s.id,turn:{id:turn.id}});
+   s.turns.push(turn);s.model=model;s.effort=effort;s.toolContext=toolContext;s.legacyContextPending=false;s.nativeStarted=true;s.name||=input.map(i=>i.text).join(' ').trim().slice(0,60);s.updatedAt=Date.now();this.activeTurns.set(s.id,active);this.save(s);
    const latePrompt=reply=>{
     if(this.unconfirmedTurns.get(s.id)!==active)return;
-    if(reply.error)this.settleTurn(s,active,'failed',this.clean(reply.error.message));else this.watchTurn(s,active);
+    if(reply.error)this.settleTurn(s,active,'failed',this.clean(reply.error.message));
+    else{active.prompt=Promise.resolve(reply.result);this.watchTurn(s,active);}
    };
-   try{await this.raw('session/prompt',{sessionId:s.nativeId,contentBlocks:[...historical?[{type:'text',text:historical}]:[],...input.map(i=>({type:'text',text:i.text}))]},undefined,latePrompt);}
+   active.prompt=this.raw('session/prompt',{sessionId:s.nativeId,contentBlocks:[...historical?[{type:'text',text:historical}]:[],...input.map(i=>({type:'text',text:i.text}))]},undefined,latePrompt);
+   this.event('turn/started',{threadId:s.id,turn:{id:turn.id}});
+   try{await active.prompt;}
    catch(error){this.turnRequestError(s,active,error);throw error;}
    this.watchTurn(s,active);
    assertCurrent();
    return {turn:{id:turn.id,status:'inProgress'}};
   }
   throw Error('Unsupported DeepSeek Harness operation: '+method);
+ }
+ textInput(value){
+  if(!Array.isArray(value)||!value.length||value.some(item=>item?.type!=='text'||typeof item.text!=='string')||JSON.stringify(value).length>1000000)throw Error('Invalid DeepSeek text input');
+  return this.cleanValue(value.map(({text})=>({type:'text',text})));
+ }
+ async steerTurn({threadId,expectedTurnId,clientUserMessageId=randomUUID(),input},assertCurrent){
+  const session=this.session(threadId),active=this.activeTurns.get(threadId);
+  if(!active||active.turn.id!==expectedTurnId||active.interrupt)throw Error('这轮回复已经停止，当前引导未发送。');
+  if(!safeId(clientUserMessageId))throw Error('Invalid steering message identity');
+  const content=this.textInput(input),text=textOf(content);
+  if(!content[0].text.trim())throw Error('请输入引导内容。');
+  const itemId=dshPublicItemId(threadId,expectedTurnId,'userMessage',clientUserMessageId);
+  active.steers??=new Map();
+  const previous=active.steers.get(itemId);
+  if(previous){
+   if(previous.text!==text)throw Error('Steering message identity already belongs to different text');
+   return previous.receipt;
+  }
+  const receipt=this.controlTurn(threadId,expectedTurnId,'steer',text,assertCurrent).then(result=>{
+   if(!result?.applied)throw Error('这轮回复已经结束，当前引导未发送。');
+   const item={id:itemId,type:'userMessage',content,text};
+   active.turn.items.push(item);session.updatedAt=Date.now();this.save(session);
+   this.event('item/completed',{threadId,turnId:expectedTurnId,item});
+   return {turnId:expectedTurnId};
+  });
+  // Retain the original receipt, including an unknown outcome, for duplicate
+  // submissions while this turn is live. A lost reply must not steer twice.
+  active.steers.set(itemId,{text,receipt});
+  return receipt;
+ }
+ async controlTurn(threadId,turnId,action,text,assertCurrent=()=>{}){
+  const findTurn=()=>this.activeTurns.get(threadId)||this.unconfirmedTurns.get(threadId);
+  const active=findTurn(),child=this.process;
+  if(!active)return {applied:false};
+  if(turnId&&turnId!==active.turn.id)throw Error('Turn no longer active');
+  // The SDK acknowledges the native prompt over stdio. Its turn/start frame
+  // identifies the exact turn before the separate control pipe can reach it.
+  await active.prompt;
+  assertCurrent();
+  if(this.process!==child)throw Error('DeepSeek Harness connection changed before turn control');
+  if(active.terminal||findTurn()!==active)return {applied:false};
+  if(!Number.isSafeInteger(active.nativeTurn))throw Error('DeepSeek Harness has not identified the active turn');
+  const send=()=>this.raw(DSH_CONTROL_METHOD,{action,sessionId:this.sessions.get(threadId).nativeId,turn:active.nativeTurn,...text===undefined?{}:{text}});
+  if(action!=='interrupt')return send();
+  active.interrupt??=send();
+  try{return await active.interrupt;}catch(error){active.interrupt=null;throw error;}
  }
  turnRequestError(s,active,error){
   if(error.code!=='DSH_TIMEOUT'){this.settleTurn(s,active,'failed',this.clean(active.terminal?.error?.message||error.message));return;}
@@ -263,7 +313,8 @@ export class DshBridge extends EventEmitter{
    const reason=active.terminal?.kind;
    if(reply?.error)this.settleTurn(s,active,'failed',this.clean(reply.error.message));
    else if(reason==='completed')this.settleTurn(s,active,'completed');
-   else this.settleTurn(s,active,reason==='aborted'?'cancelled':'failed',active.terminal?.error?.message||'DeepSeek Harness 未报告完整回复：'+(reason||'missing terminal receipt'));
+   else if(reason==='aborted'||reason==='interrupted')this.settleTurn(s,active,'cancelled');
+   else this.settleTurn(s,active,'failed',active.terminal?.error?.message||'DeepSeek Harness 未报告完整回复：'+(reason||'missing terminal receipt'));
   };
   this.raw('session/wait',{sessionId:s.nativeId},30*60*1000,complete,()=>[...this.questions.values()].some(request=>request.turn===active.turn)).then(()=>complete(),error=>this.turnRequestError(s,active,error));
  }
@@ -311,7 +362,7 @@ export class DshBridge extends EventEmitter{
   ++this.lifecycle;const child=this.process;this.process=null;this.contextKey=null;this.info=null;this.loaded.clear();this.unconfirmedTurns.clear();this.framer?.reset();this.framer=null;
   const error=Error('DeepSeek Harness '+reason+'; reconnect explicitly.'),waiter=this.isolationWaiter;this.isolationWaiter=null;waiter?.reject(error);
   for(const pending of this.pending.values()){clearTimeout(pending.timer);pending.reject(error);}this.pending.clear();
-  for(const [id,active]of this.activeTurns)this.finish(this.sessions.get(id),active,reason==='cancelled'?'cancelled':'failed',error.message);
+  for(const [id,active]of this.activeTurns)this.finish(this.sessions.get(id),active,'failed',error.message);
   child?.kill();if(child&&notify)this.event('studio/codexDisconnected',{reason,message:error.message});
  }
  close(){this.stop();}

@@ -1,5 +1,10 @@
 # 版本更新与验证
 
+## 开发中
+
+- 回复进行时可以排队下一条消息，或立即引导当前回复。支持选择 Enter 默认行为、将排队内容移回草稿，以及重开后找回队列。
+- 停止回复后可以在原对话继续发送，保留已输出的文字和新草稿。用户主动停止显示为普通状态。[会话交互验证](docs/releases/aimatterlab-chat-turn-followups-unreleased.md)
+
 ## 0.1.29
 
 2026-11-22 · Windows 本地测试版。[版本与验收记录](docs/releases/aimatterlab-0.1.29.md)

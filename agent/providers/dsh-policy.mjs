@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 function providerToolSchema(tool){const schema=structuredClone(tool.inputSchema);if(tool.name==='present_task'){const items=schema.properties?.steps?.items,object=items?.anyOf?.find(v=>v.type==='object');if(object)schema.properties.steps.items=object;}return schema;}
 
 export const name='studio-dsh-policy';
-export const inject=['tools','systemPrompt','appReady','llm'];
+export const inject=['tools','systemPrompt','appReady','llm','agents'];
 const READ=new Set(['search_software_docs','read_software_docs','project_skill_catalog','read_project_skill','write_project_skill','describe_engine','inspect_compute_resource','compute_readiness','discover_local_environments','read_project_input','read_pygas_workflow','read_custom_cv','scientific_skill_catalog','read_scientific_skill','diagnose_tools','suggest_parameters','search_materials_project','list_source_projects','inspect_source_project','inspect_pygas_catalog','inspect_environment_api','collect_cluster_artifacts','read_cluster_input','read_cluster_result','read_cluster_skill','cluster_browse','list_clusters','probe_cluster','cluster_run_status','cluster_read_log','list_workflows','list_projects','list_environments','list_runs','probe_environment','read_runtime_guide','run_status','read_log','collect_artifacts','inspect_asset','read_run_input','read_artifact','list_shared_terminals','read_shared_terminal','write_shared_terminal']);
 const DRAFT=new Set(['copy_project_inputs','draft_local_environment','propose_custom_cv','import_materials_project','create_structure','render_pygas_workflow','present_task','draft_cluster_setup','prepare_cluster_run','create_workflow','prepare_run','resume_run','write_project_input']);
 const EXECUTE=new Set(['validate_run','submit_run','cancel_run','validate_cluster_run','submit_cluster_run','cancel_cluster_run','reconcile_run']);
@@ -12,6 +12,7 @@ const MANAGED=new Set(['list_compute_resources','acquire_compute_resource','rele
 const prefix='mcp__gpusampling__';
 export const DSH_QUESTION_TOOL=prefix+'ask_user_question';
 export const DSH_RESOURCE_QUESTION_PREFIX='studio-resource-';
+export const DSH_CONTROL_METHOD='studio/dshControl';
 const questionSchema={type:'object',additionalProperties:false,required:['question','options'],properties:{
  question:{type:'string',minLength:1,maxLength:1500,description:'Direct question in the user’s language.'},
  options:{type:'array',minItems:2,maxItems:20,items:{type:'object',additionalProperties:false,required:['label'],properties:{
@@ -23,6 +24,46 @@ export function dshToolAllowed(name,workflow){return READ.has(name)||MANAGED.has
 export function checkDshInventory(names,expected){if(!Array.isArray(names)||names.some(n=>typeof n!=='string'||!expected.has(n))||names.length!==expected.size||new Set(names).size!==expected.size)throw Error('DSH tool inventory differs from the verified AIMatterLab capability set');return names;}
 function send(method,params){process.stdout.write(JSON.stringify({jsonrpc:'2.0',method,params})+'\n');}
 const textResult=value=>({content:[{type:'text',text:JSON.stringify(value)}]});
+
+function steerDshAgent(agent,text){
+ if(typeof text!=='string'||!text.trim())throw Error('Steering requires text');
+ agent.steer({id:randomUUID(),role:'user',source:{kind:'user'},content:[{type:'text',text}]});
+}
+
+function installTurnControl(ctx,steer){
+ const openTurns=new WeakMap();
+ ctx.on('session/event',(session,event)=>{
+  if(event.type==='turn/start')openTurns.set(session,{turn:event.data.turn,stopping:false});
+  if(event.type==='turn/end'&&openTurns.get(session)?.turn===event.data.turn)openTurns.delete(session);
+ });
+ if(typeof process.send!=='function')return openTurns;
+ // The pinned SDK does not expose cancellation over stdio. The parent-only
+ // IPC channel can reach the existing Agent without adding a model tool.
+ const receive=request=>{
+  if(request?.method!==DSH_CONTROL_METHOD||!Number.isSafeInteger(request.id))return;
+  const {action,sessionId,turn,text}=request.params||{};
+  const response={jsonrpc:'2.0',id:request.id};
+  try{
+   if(!['interrupt','steer'].includes(action)||typeof sessionId!=='string'||!Number.isSafeInteger(turn))throw Error('Invalid turn control');
+   const agent=ctx.agents.roots().find(candidate=>String(candidate.session.id)===sessionId);
+   const active=agent&&openTurns.get(agent.session);
+   const applied=active?.turn===turn&&(action!=='steer'||!active.stopping);
+   if(applied){
+    if(action==='interrupt'){agent.cancel({kind:'user'});active.stopping=true;}
+    else steer(agent,text);
+   }
+   response.result={applied};
+  }catch{
+   response.error={code:-32000,message:'DeepSeek Harness could not apply the requested turn control'};
+  }
+  process.stdout.write(JSON.stringify(response)+'\n');
+ };
+ ctx.effect(()=>{
+  process.on('message',receive);
+  return ()=>process.off('message',receive);
+ },'studio-dsh.turn-control');
+ return openTurns;
+}
 
 async function ask(ctx,exec,question){
  if(!exec.agent)throw Error('A live DeepSeek conversation is required to ask the user');
@@ -102,8 +143,10 @@ async function installPolicy(ctx,config){
  const instructions=config.interactiveQuestions?config.instructions+'\n\nUse '+DSH_QUESTION_TOOL+' for a choice between plausible queues, approaches, or other next steps when the user’s preference is needed. For an ambiguous hosted compute resource, call acquire_compute_resource to obtain its candidate list. Its choice_required result opens the resource picker while the tool waits. Follow the retry fields of a target_selected receipt. A submitted option explicitly choosing a listed resource in a general question also identifies the target. Continue the original acquisition using its resource_id and the requested access. Use a custom answer to guide the next action. A selection requires no repeated chat message. The acquisition checks the requested capability and current project permissions.':config.instructions;
  ctx.systemPrompt.section({name:'studio:instructions',order:0,text:instructions,interpolate:false,complete:true});
  ctx.on('system-prompt/assemble',async(assembly,context,next)=>{inventory(context.scope,context.toolSet);return next();});
+ const openTurns=installTurnControl(ctx,steerDshAgent);
  ctx.on('agent/assistant-stream',({agent,frame})=>{
-  if(frame.type==='chunk'&&frame.chunk?.type==='text-delta')send('studio/dshText',{sessionId:String(agent.session.id),attemptId:frame.attemptId,text:frame.chunk.text});
+  const active=openTurns.get(agent.session);
+  if(active&&frame.type==='chunk'&&frame.chunk?.type==='text-delta')send('studio/dshText',{sessionId:String(agent.session.id),turn:active.turn,attemptId:frame.attemptId,text:frame.chunk.text});
  });
  ctx.effect(()=>ctx.appReady.onReady(async()=>{try{const tools=inventory(),models=await Promise.all((config.models||[]).map(id=>ctx.llm.resolveModelInfo(config.modelProvider||'deepseek-official',id)));send('studio/dshIsolation',{status:'verified',tools,nativeTools:0,models});}catch(error){send('studio/dshIsolation',{status:'failed',...(config.modelProvider?{message:String(error.message).replaceAll(process.env.STUDIO_MODEL_API_KEY||'\0','[REDACTED]').slice(0,500)}:{})});}}),'studio-dsh.readiness');
 }

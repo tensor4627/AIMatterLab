@@ -209,5 +209,19 @@ test('ACP diagnostic chunks redact a split configured credential before publishi
 
 test('an old ACP interrupt cannot cancel the following active turn',async()=>{
  const {bridge}=historyBridge(),sent=[];bridge.process.stdin.write=text=>sent.push(JSON.parse(text));update(bridge,'user_message_chunk',{content:{type:'text',text:'history'}});
- try{const first=await bridge.request('turn/start',{threadId:'session',input:[{type:'text',text:'one'}]}),request=sent.find(value=>value.method==='session/prompt');bridge.receive({id:request.id,result:{stopReason:'end_turn'}});await tick();const next=await bridge.request('turn/start',{threadId:'session',input:[{type:'text',text:'two'}]}),before=sent.length;await assert.rejects(bridge.request('turn/interrupt',{threadId:'session',turnId:first.turn.id}),/no longer active/);assert.equal(sent.length,before);await bridge.request('turn/interrupt',{threadId:'session',turnId:next.turn.id});assert.equal(sent.at(-1).method,'session/cancel');}finally{bridge.close();}
+ try{
+  const first=await bridge.request('turn/start',{threadId:'session',input:[{type:'text',text:'one'}]}),request=sent.find(value=>value.method==='session/prompt');
+  await bridge.request('turn/interrupt',{threadId:'session',turnId:first.turn.id});
+  assert.equal(sent.at(-1).method,'session/cancel');
+  const ended=new Promise(resolve=>bridge.on('event',event=>{
+   if(event.method==='turn/completed')resolve({turn:event.params.turn,busy:bridge.activeTurns.size,session:bridge.session('session').current});
+  }));
+  bridge.receive({id:request.id,result:{stopReason:'cancelled'}});
+  assert.deepEqual(await ended,{turn:{id:first.turn.id,status:'cancelled',stopReason:'cancelled',modelOutputReceived:false},busy:0,session:null});
+  const next=await bridge.request('turn/start',{threadId:'session',input:[{type:'text',text:'two'}]}),before=sent.length;
+  await assert.rejects(bridge.request('turn/interrupt',{threadId:'session',turnId:first.turn.id}),/no longer active/);
+  assert.equal(sent.length,before);
+  await bridge.request('turn/interrupt',{threadId:'session',turnId:next.turn.id});
+  assert.equal(sent.at(-1).method,'session/cancel');
+ }finally{bridge.close();}
 });

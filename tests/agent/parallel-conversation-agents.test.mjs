@@ -135,7 +135,7 @@ for(const [provider,threadId] of [['codex','alpha'],['deepseek','gamma']])test(p
  const emit=(id,turnId='turn-'+threadId)=>b.emit('event',{id,method:'item/tool/requestUserInput',params:{threadId,turnId,
   questions:[{id:'answer',question:'使用哪个集群？',options:[{label},{label:'只看方案'}]}]}});
  const answer={answers:{answer:{answers:[label]}}};
- emit(100,'stale-turn');f.agents.respond(provider,threadId,100,answer);assert.deepEqual(submitted,[]);
+ emit(100,'stale-turn');assert.throws(()=>f.agents.respond(provider,threadId,100,answer),/no longer belongs/);assert.deepEqual(submitted,[]);
  emit(101);const view=await f.agents.rpc(provider,'thread/read',{threadId,includeTurns:true});
  assert.doesNotThrow(()=>structuredClone(view.studioSession.requests));assert.deepEqual(submitted,[]);
  const respond=b.respond;b.respond=()=>{throw Error('Provider rejected this answer');};
@@ -171,6 +171,29 @@ test('same-provider and cross-provider turns keep independent processes, scope, 
  assert.equal(f.agents.isBusy('codex','alpha'),false);assert.equal(f.agents.isBusy('codex','beta'),true);assert.equal(f.agents.isBusy('deepseek','gamma'),true);
  assert.equal(c.calls.some(call=>call[0]==='turn/interrupt'),false);
  assert.equal(f.events.findLast(event=>event.method==='turn/completed').params.threadId,'alpha');
+});
+
+test('a completed reply cannot reopen or modify its conversation during the next reply',async t=>{
+ const f=fixture();t.after(()=>f.agents.close());
+ await f.select('codex','alpha');
+ const bridge=await f.activate('codex','alpha');
+ await f.send('codex','alpha');
+ await f.agents.rpc('codex','turn/interrupt',{threadId:'alpha',turnId:'turn-alpha'});
+ const terminal=f.events.findLast(event=>event.method==='turn/completed');
+ assert.equal(terminal.params.turn.status,'interrupted');
+ assert.equal(terminal.params.studioTurnBusy,false);
+ assert.equal(f.agents.isBusy('codex','alpha'),false);
+ const emit=(method,params)=>bridge.emit('event',{method,params:{threadId:'alpha',...params}});
+ emit('turn/started',{turn:{id:'next-turn'}});
+ const before=f.events.length;
+ emit('turn/started',{turn:{id:'turn-alpha'}});
+ emit('turn/completed',{turn:{id:'turn-alpha',status:'interrupted'}});
+ emit('item/agentMessage/delta',{turnId:'turn-alpha',itemId:'old-answer',delta:'late output'});
+ emit('error',{turnId:'turn-alpha',error:{message:'late failure'}});
+ assert.equal(f.events.length,before);
+ assert.deepEqual(f.agents.turnStates().map(state=>state.turnId),['next-turn']);
+ emit('turn/completed',{turn:{id:'next-turn',status:'completed'}});
+ assert.equal(f.agents.isBusy('codex','alpha'),false);
 });
 
 test('tool discovery binds the saved conversation on a cold connect and explicit reconnect',async t=>{

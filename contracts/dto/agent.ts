@@ -17,6 +17,13 @@ export type CancelProviderLoginRequest={provider:'kimi'}|{provider:'codex';login
 
 export interface AgentRpcRequest extends AgentConnectRequest {method:string;params?:Record<string,unknown>}
 
+export interface AgentSteerRequest {
+ provider:Exclude<AgentProvider,'kimi'>;
+ method:'turn/steer';
+ params:{threadId:string; expectedTurnId:string; clientUserMessageId:string; input:[{type:'text'; text:string}]; planningMode:boolean};
+}
+export interface AgentSteerResult {turnId:string}
+
 export interface ScientificSkillFunction {id:string;title?:string;phase:string;engines:string[];tools:string[];status:string;sources:string[];permission:'allowed'|'permission_required';source_status:'registered'|'unregistered'}
 
 export interface ScientificSkillCatalog {schema_version:1;functions:ScientificSkillFunction[];sharing:Record<string,AgentProvider[]>;source_scope:string}

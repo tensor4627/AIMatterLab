@@ -29,14 +29,77 @@ test('cancelled automatic discussion is retained as a draft and is not automatic
 test('stop before turn acknowledgement waits for exact identity and sends only one interrupt',async()=>{
  const ack=deferred(),interrupt=deferred(),h=await connected({override:(method,data,standard)=>method==='agent.rpc'&&data.method==='turn/start'?ack.promise:method==='agent.rpc'&&data.method==='turn/interrupt'?interrupt.promise:standard(method,data)});
  try{h.type('Keep while stopping');h.send();await h.flush();const click=stop(h).props.onClick;click();click();await h.flush();assert.equal(rpcCalls(h,'turn/interrupt').length,0);assert.equal(stop(h).props.disabled,true);
-  ack.resolve({turn:{id:'exact-turn'}});await h.flush();assert.deepEqual(rpcCalls(h,'turn/interrupt').map(call=>call.data.params),[{threadId:'started-thread',turnId:'exact-turn'}]);assert.equal(h.textarea().props.value,'Keep while stopping');
-  h.emit({provider:'codex',method:'turn/started',params:{threadId:'started-thread',turn:{id:'exact-turn'}}});click();await h.flush();assert.equal(rpcCalls(h,'turn/interrupt').length,1);interrupt.resolve({});await h.flush();h.emit({provider:'codex',method:'turn/completed',params:{threadId:'started-thread',turn:{id:'exact-turn',status:'interrupted'}}});await h.flush();assert.equal(rpcCalls(h,'turn/start').length,1);assert.equal(h.textarea().props.value,'Keep while stopping');
+  assert.equal(h.textarea().props.value,'Keep while stopping');
+  ack.resolve({turn:{id:'exact-turn'}});await h.flush();assert.deepEqual(rpcCalls(h,'turn/interrupt').map(call=>call.data.params),[{threadId:'started-thread',turnId:'exact-turn'}]);assert.equal(h.textarea().props.value,'');
+  h.emit({provider:'codex',method:'turn/started',params:{threadId:'started-thread',turn:{id:'exact-turn'}}});click();await h.flush();assert.equal(rpcCalls(h,'turn/interrupt').length,1);interrupt.resolve({});await h.flush();h.emit({provider:'codex',method:'turn/completed',params:{threadId:'started-thread',turn:{id:'exact-turn',status:'interrupted'}}});await h.flush();assert.equal(rpcCalls(h,'turn/start').length,1);assert.equal(h.textarea().props.value,'');
  }finally{h.unmount();}
 });
 
-for(const newer of [false,true])test('unconfirmed interrupt preserves '+(newer?'newer typing':'accepted draft')+' and retries only explicitly',async()=>{
+for(const newer of [false,true])test('unconfirmed interrupt retries explicitly '+(newer?'and preserves newer typing':'while sent text stays in history'),async()=>{
  let attempts=0;const h=await connected({override:(method,data,standard)=>{if(method==='agent.rpc'&&data.method==='turn/interrupt'){if(++attempts===1)throw Error('interrupt acknowledgement missing');return {};}return standard(method,data);}});
- try{h.type('Original accepted request');h.send();await h.flush();assert.equal(h.textarea().props.value,'');if(newer)h.type('New unsent work');stop(h).props.onClick();await h.flush();assert.equal(h.textarea().props.value,newer?'New unsent work':'Original accepted request');assert.equal(rpcCalls(h,'turn/interrupt').length,1);assert.equal(stop(h).props['aria-label'],'再次请求停止');assert.equal(rpcCalls(h,'turn/start').length,1);stop(h).props.onClick();await h.flush();assert.equal(rpcCalls(h,'turn/interrupt').length,2);assert.equal(rpcCalls(h,'turn/start').length,1);
+ try{h.type('Original accepted request');h.send();await h.flush();assert.equal(h.textarea().props.value,'');if(newer)h.type('New unsent work');stop(h).props.onClick();await h.flush();assert.equal(h.textarea().props.value,newer?'New unsent work':'');assert.equal(rpcCalls(h,'turn/interrupt').length,1);assert.equal(stop(h).props['aria-label'],'再次请求停止');assert.equal(rpcCalls(h,'turn/start').length,1);stop(h).props.onClick();await h.flush();assert.equal(rpcCalls(h,'turn/interrupt').length,2);assert.equal(rpcCalls(h,'turn/start').length,1);
+ }finally{h.unmount();}
+});
+
+test('a confirmed interrupt keeps partial output and permits a new send before the original IPC receipts arrive',async()=>{
+ const ack=deferred(),interrupt=deferred();
+ let turns=0;
+ const h=await connected({override:(method,data,standard)=>{
+  if(method==='agent.rpc'&&data.method==='turn/start')return ++turns===1?ack.promise:{turn:{id:'next-turn'}};
+  if(method==='agent.rpc'&&data.method==='turn/interrupt')return interrupt.promise;
+  return standard(method,data);
+ }});
+ const emit=(method,params)=>h.emit({provider:'codex',method,params:{threadId:'started-thread',...params}});
+ try{
+  h.type('Original submitted request');h.send();await h.flush();
+  emit('turn/started',{turn:{id:'first-turn'}});
+  emit('item/agentMessage/delta',{turnId:'first-turn',itemId:'partial',delta:'Partial reply before stop.'});
+  await h.flush();
+  h.click('agent-stop');h.type('Continue the same conversation.');
+  emit('turn/completed',{turn:{id:'first-turn',status:'interrupted',error:{message:'cancelled'}}});
+  await h.flush();
+  assert.deepEqual(h.errors,[]);
+  assert.equal(h.textarea().props.value,'Continue the same conversation.');
+  assert.equal(h.find(node=>node.props?.className==='agent-send-notice').props.children,'已停止当前回复。');
+  assert(messages(h).some(message=>message.text==='Partial reply before stop.'));
+  h.send();await h.flush();
+  assert.deepEqual(rpcCalls(h,'turn/start').map(call=>call.data.params.threadId),['started-thread','started-thread']);
+  assert.deepEqual(rpcCalls(h,'turn/interrupt').map(call=>call.data.params),[{threadId:'started-thread',turnId:'first-turn'}]);
+  ack.resolve({turn:{id:'first-turn'}});interrupt.reject(Error('Old interrupt acknowledgement lost'));
+  emit('turn/started',{turn:{id:'first-turn'}});
+  emit('studio/agentTurnState',{busy:false,turnId:null});
+  emit('turn/completed',{turn:{id:'first-turn',status:'failed',error:{message:'Late previous failure'}}});
+  emit('item/agentMessage/delta',{turnId:'first-turn',itemId:'partial',delta:' Late previous output'});
+  emit('error',{turnId:'first-turn',error:{message:'Late previous diagnostic'}});
+  await h.flush();
+  assert(stop(h));
+  assert(messages(h).some(message=>message.text==='Partial reply before stop.'));
+  assert.deepEqual(h.errors,[]);
+  emit('turn/completed',{turn:{id:'next-turn',status:'failed',error:{message:'Current model failed'}}});
+  await h.flush();
+  assert.deepEqual(h.errors,['Current model failed']);
+  assert.throws(()=>stop(h));
+ }finally{h.unmount();}
+});
+
+test('a chat with a historical cancelled provider receipt still loads and continues its original thread',async()=>{
+ const selected=conversation('deepseek','previously-cancelled');
+ const h=agentHarness({props:{sessionSelection:{nonce:'saved-cancelled',conversation:selected}},override:(method,data,standard)=>{
+  if(method==='agent.rpc'&&data.method==='thread/read')return {thread:{
+   id:selected.threadId,turns:[{id:'old-turn',status:'cancelled',error:{message:'DeepSeek Harness cancelled; reconnect explicitly.'},items:[
+    {id:'old-question',type:'userMessage',content:[{type:'text',text:'Saved question'}]},
+    {id:'old-partial',type:'agentMessage',text:'Saved partial reply'}
+   ]}]
+  }};
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();
+  assert.deepEqual(messages(h).map(message=>message.text),['Saved question','Saved partial reply']);
+  assert.deepEqual(h.errors,[]);
+  h.type('Continue from the saved partial reply');h.send();await h.flush();
+  assert.equal(rpcCalls(h,'thread/start').length,0);
+  assert.deepEqual(rpcCalls(h,'turn/start').map(call=>call.data.params.threadId),[selected.threadId]);
  }finally{h.unmount();}
 });
 

@@ -12,7 +12,7 @@ import {isConversationDraft} from '../../backend/main/workspace/workflow-draft-t
 import {formatPreparedTaskTurn} from '../context/task-turn-context.mjs';
 import {toolGuidanceTarget} from '../../backend/main/compute/tool-guidance-target.mjs';
 import {terminalOnlyTurn} from './terminal-turn.mjs';
-import {ensureDefinitionContext} from './private-conversation-context.mjs';
+import {definitionContextMatches,ensureDefinitionContext} from './private-conversation-context.mjs';
 import {resumeConversationContext} from './conversation-recovery.mjs';
 import {currentPrivateTurn} from '../context/private-task-context.mjs';
 import {interactionFlags,interactionModeContext} from '../context/interaction-mode.mjs';
@@ -57,13 +57,20 @@ export function createAgentRequests({runtime}){
  if(method==='turn/start'&&API_PROVIDER_GROUPS.includes(provider))modelCurrent=agents.prepareApiTurnModel?.(provider,params)??agents.bridge?.(provider)?.prepareTurnModel?.(params);
   if(selectedSsh&&['turn/start','turn/steer'].includes(method)){await selectedTerminalReady();terminalOnly=resourceRouting.workerSelected?.(provider,params.threadId)!==true;}
  else terminalOnly=!managed&&['turn/start','turn/steer'].includes(method)&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
- if(method==='turn/steer'&&!terminalOnly){const task=taskRecords.bound(provider,params.threadId);if(task&&(!managedOnly||task.customCv?.id)&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');check();}
  if(method==='turn/steer'&&terminalOnly)params=terminalOnlyTurn(params,{provider,resource:selectedSsh});
  if(method==='turn/steer'&&!terminalOnly){
   const task=taskRecords.bound(provider,params.threadId),{planningMode,reviewMode,studioTaskId,studioToolContext,...rest}=params;
   if(studioTaskId!==undefined&&studioTaskId!==task?.id)throw Error('Task is not bound to this conversation');
   if(turnFlags.reviewMode)throw Error('Review requires a new workflow turn');
-  params={...rest,input:[...(rest.input||[]),{type:'text',text:interactionModeContext({...turnFlags,scope:task?'workflow':'chat'})+(task?'\nstudioTaskId: '+task.id:'')}]};
+  definitionOnlyTurn=!!(task&&(!managedOnly||task.customCv?.id)&&(await privateAccess.assertTask(task,provider)).definitionOnly);
+  check();
+  if(definitionOnlyTurn){
+   if(provider!=='codex'||!definitionContextMatches(task))throw Error('Continue this private definition in a new turn to establish its isolated context');
+   const {expectedTurnId,...privateRequest}=rest;
+   params={...currentPrivateTurn(privateRequest,task,{planningMode:turnFlags.planningMode}),expectedTurnId};
+  }else{
+   params={...rest,input:[...(rest.input||[]),{type:'text',text:interactionModeContext({...turnFlags,scope:task?'workflow':'chat'})+(task?'\nstudioTaskId: '+task.id:'')}]};
+  }
  }
  if(method==='turn/start'&&!terminalOnly){
   let task=taskRecords.bound(provider,params.threadId);
@@ -151,13 +158,17 @@ export function createAgentRequests({runtime}){
   check();
   if(terminalOnly){if(selectedSsh)await selectedTerminalReady();if(!sharedTerminal.hasCurrentGrant(provider))throw Error('终端交接所属会话已变化，请在当前对话重新交接。');}
   const capability=()=>{check();if(selectedSsh&&turnFlags&&(terminalOnly?!sharedTerminal.hasCurrentGrant(provider):resourceRouting.workerSelected(provider,params.threadId)!==true))throw Error('当前请求所属的 SSH 能力授权已变化，不会改用另一通道。');};
-  const dispatch=()=>{
+  const dispatch=async()=>{
    capability();
-   if(method==='turn/steer'||params.threadId!==userParams.threadId)recordUser();
+   if(params.threadId!==userParams.threadId)recordUser();
    if(method==='turn/start'&&!notification&&titleReviews&&userParams.input?.[0]?.type==='text'&&userParams.input[0].text?.trim()){
     return titleReviews.dispatch(provider,params,next=>agents.rpc(provider,method,next),{includeCurrentName:!definitionOnlyTurn&&!terminalOnly});
    }
-   return agents.rpc(provider,method,params);
+   const receipt=await agents.rpc(provider,method,params);
+   if(method==='turn/steer'&&!definitionOnlyTurn&&receipt?.turnId===params.expectedTurnId){
+    capability();recordUser();
+   }
+   return receipt;
   };
   if(provider==='codex'&&method==='thread/resume'){
    const restored=await resumeConversationContext({records:taskRecords,workflowContext,agents,ticket,threadId:params.threadId,model:params.model,publish:event=>emit('studio:event',event)});ticket=restored.ticket;result=restored.result;
@@ -178,6 +189,7 @@ export function createAgentRequests({runtime}){
  return async function agentRpc(value,options){
   const {provider,method,params={}}=value,{agents}=runtime();
   providerId(provider);assertRpc(method);
+  if(method==='turn/steer'&&provider==='kimi')throw Error('Kimi supports queued follow-ups after the current reply');
   if(!agents?.runInConversation)return request(value,options);
   const threadId=params.threadId;
   if(method==='thread/resume'&&agents.isBusy(provider,threadId))return agents.readActive(provider,threadId,method,params);

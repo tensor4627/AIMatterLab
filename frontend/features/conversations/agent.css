@@ -114,6 +114,17 @@
 .agent-panel .composer-bottom{gap:8px;flex-wrap:wrap}
 .agent-panel .composer-bottom>span{flex:1 1 120px;min-width:0}
 .agent-panel .composer-bottom>.send{margin-left:auto;flex-shrink:0}
+.agent-follow-up-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-inline-start:auto;min-width:0}
+.agent-follow-up-actions .button{display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:5px 9px;white-space:normal}
+.agent-follow-up-preference{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.agent-follow-up-preference select{max-width:100%;min-width:100px;font:inherit}
+.agent-follow-up-queue{flex-shrink:0;margin:5px 12px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--panel);min-width:0;max-height:min(200px,28vh);overflow:auto}
+.agent-follow-up-queue header,.agent-queue-actions{display:flex;align-items:center;flex-wrap:wrap;gap:3px 9px}
+.agent-follow-up-queue header small,.agent-queued-attachment{color:var(--muted)}
+.agent-follow-up-queue ul{list-style:none;margin:4px 0 0;padding:0}
+.agent-follow-up-queue li{border-top:1px solid var(--line);padding:5px 0}
+.agent-queued-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:3em;overflow:auto}
+.agent-follow-up-queue .text-button{min-height:24px;white-space:normal;text-align:start}
 .agent-panel .send.agent-stop-action{width:auto;height:auto;min-height:32px;max-width:100%;padding:6px 9px;display:inline-flex;gap:6px;align-items:center;white-space:normal;color:#211d31}
 .agent-panel .send.agent-stop-action:hover:not(:disabled){background:#bdacef;color:#211d31}
 .agent-panel .send.agent-stop-action:disabled{opacity:.7}

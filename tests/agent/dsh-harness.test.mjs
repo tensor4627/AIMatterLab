@@ -83,7 +83,9 @@ test('repeated SDK attempt and tool-call IDs in two turns preserve both replies 
  const b=fixtureBridge(),events=[],s={schemaVersion:1,harness:'dsh',id:'owned-dsh-thread',nativeId:'owned-native-session',turns:[],updatedAt:1};b.sessions.set(s.id,s);b.on('event',event=>events.push(event));
  for(const [index,text]of ['First complete answer','Second complete answer'].entries()){
   const turn={id:'turn-'+index,status:'inProgress',items:[{id:'user-'+index,type:'userMessage',text:'Question '+index}]},active={turn,output:false};s.turns.push(turn);b.activeTurns.set(s.id,active);
-  b.receive({method:'studio/dshText',params:{sessionId:s.nativeId,attemptId:'attempt-1',text:text.slice(0,8)}});
+  b.sessionEvent({sessionId:s.nativeId,event:{type:'turn/start',data:{turn:index+1}}});
+  if(index)b.receive({method:'studio/dshText',params:{sessionId:s.nativeId,turn:index,attemptId:'attempt-1',text:'late previous output'}});
+  b.receive({method:'studio/dshText',params:{sessionId:s.nativeId,turn:index+1,attemptId:'attempt-1',text:text.slice(0,8)}});
   b.sessionEvent({sessionId:s.nativeId,event:{type:'assistant/message',data:{stream:{attemptId:'attempt-1'},message:{id:'native-message-1',content:[{type:'text',text},{type:'tool-call',id:'native-call-1',name:'mcp__gpusampling__run_status',arguments:{run_id:'run-'+index}}]}}}});
   b.sessionEvent({sessionId:s.nativeId,event:{type:'tool/result',data:{message:{source:{callId:'native-call-1'},content:[{type:'text',text:'result-'+index}],isError:false}}}});b.finish(s,active,'completed');
  }
@@ -119,7 +121,7 @@ async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_st
    res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.method==='tools/list'?{tools}:{content:[{type:'text',text:JSON.stringify(await toolCall(body.params))}]}}));return;
   }
   if(req.url==='/v1/messages'){
-   const response=responses[count++]||{};res.writeHead(200,{'Content-Type':'text/event-stream'});if(response.hold){held=res;res.write(': fixture waiting\n\n');return;}res.end(messagesStream(count,response));return;
+   const response=responses[count++]||{};res.writeHead(200,{'Content-Type':'text/event-stream'});if(response.hold){held=res;res.write(response.text?messagesStream(count,response).split('event: content_block_stop')[0]:': fixture waiting\n\n');return;}res.end(messagesStream(count,response));return;
   }
   res.writeHead(404);res.end('{}');
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
@@ -129,6 +131,33 @@ async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_st
 }
 function nextEvent(b,method){return new Promise((resolve,reject)=>{const listener=event=>{if(event.method===method){clearTimeout(timer);b.off('event',listener);resolve(event);}};const timer=setTimeout(()=>{b.off('event',listener);reject(Error('Missing fixture event '+method));},15000);b.on('event',listener);});}
 const completion=b=>nextEvent(b,'turn/completed').then(event=>event.params.turn);
+
+test('the pinned SDK consumes steering at the next step of the same turn and saves it once',{timeout:60000},async t=>{
+ const entered=Promise.withResolvers(),release=Promise.withResolvers();
+ const f=await nativeFixture(t,{toolCall:async()=>{entered.resolve();await release.promise;return {status:'fixture-only'};}});
+ await f.b.start();
+ const {thread}=await f.b.request('thread/start'),done=completion(f.b);
+ const {turn}=await f.b.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'Read the fixture status'}]});
+ const correction='Include the fixture units in the answer';
+ const params={threadId:thread.id,expectedTurnId:turn.id,clientUserMessageId:'fixture-steer',input:[{type:'text',text:correction}]};
+ try{
+  await entered.promise;
+  await assert.rejects(f.b.request('turn/steer',{...params,expectedTurnId:'old-turn'}),/未发送/);
+  const replies=await Promise.all([f.b.request('turn/steer',params),f.b.request('turn/steer',params)]);
+  assert.deepEqual(replies,[{turnId:turn.id},{turnId:turn.id}]);
+  assert.equal(f.count,1,'The in-flight tool and its model request have not been restarted');
+ }finally{release.resolve();}
+ assert.equal((await done).status,'completed');
+ const requests=f.calls.filter(call=>call.url==='/v1/messages');
+ assert.equal(requests.length,2);
+ assert(!JSON.stringify(requests[0].body.messages).includes(correction));
+ assert.equal(JSON.stringify(requests[1].body.messages).split(correction).length,2);
+ assert.equal(f.calls.filter(call=>call.body.method==='tools/call').length,1);
+ const history=(await f.b.request('thread/read',{threadId:thread.id})).thread;
+ assert.equal(history.turns.length,1);
+ assert.equal(history.turns[0].id,turn.id);
+ assert.deepEqual(history.turns[0].items.filter(item=>item.type==='userMessage').map(item=>item.text),['Read the fixture status',correction]);
+});
 
 test('a rejected tool list fails DSH startup with the HTTP status and permits an explicit reconnect',async t=>{
  let allowed=false;
@@ -170,9 +199,36 @@ test('First-task scope can expand only through a new DSH profile and an explicit
  await f.b.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Save the reviewed fixture draft'}],studioToolContext:{mode:'workflow',taskId:'owned-task',projectId:'owned-project'}});assert.equal((await done).status,'completed');assert(f.children.length>before);assert.equal(f.calls.find(c=>c.body.method==='tools/call').body.params.name,'present_task');
  assert(f.b.info.studioIsolation.tools.includes('mcp__gpusampling__present_task'));
 });
-test('Interrupting an official DSH runtime marks the existing turn cancelled and never resends it',{timeout:60000},async t=>{
- const f=await nativeFixture(t,{responses:[{hold:true}]});await f.b.start();const thread=await f.b.request('thread/start'),done=completion(f.b);await f.b.request('turn/start',{threadId:thread.thread.id,input:[{type:'text',text:'Wait in the local fixture'}]});
- for(let i=0;i<100&&!f.count;i++)await new Promise(r=>setTimeout(r,10));assert.equal(f.count,1);await f.b.request('turn/interrupt',{threadId:thread.thread.id});assert.equal((await done).status,'cancelled');assert.equal(f.b.activeTurns.size,0);assert.equal(f.b.process,null);assert.equal(f.count,1);
+test('Official DSH interrupts one turn and continues the same native session with its partial reply',{timeout:60000},async t=>{
+ const partial='Partial fixture reply.';
+ const f=await nativeFixture(t,{responses:[{hold:true,text:partial},{text:'Same fixture session continued.'}]});
+ await f.b.start();
+ const {thread}=await f.b.request('thread/start'),threadId=thread.id,nativeId=f.b.session(threadId).nativeId,process=f.b.process;
+ const first=completion(f.b),streamed=nextEvent(f.b,'item/agentMessage/delta');
+ const {turn}=await f.b.request('turn/start',{threadId,input:[{type:'text',text:'Remember the local fixture named amber.'}]});
+ assert.equal((await streamed).params.delta,partial);
+ await f.b.request('turn/interrupt',{threadId,turnId:turn.id});
+ const interrupted=await first;
+ assert.equal(interrupted.id,turn.id);
+ assert.equal(interrupted.status,'cancelled');
+ assert.equal(interrupted.error,undefined);
+ assert.equal(f.b.activeTurns.size,0);
+ assert.equal(f.b.process,process);
+ assert.equal(f.count,1);
+ assert(!f.events.some(event=>event.method==='studio/codexDisconnected'));
+ const second=completion(f.b);
+ await f.b.request('turn/start',{threadId,input:[{type:'text',text:'Continue our fixture conversation.'}]});
+ assert.equal((await second).status,'completed');
+ assert.equal(f.b.session(threadId).nativeId,nativeId);
+ assert.equal(f.b.process,process);
+ assert.equal(f.children.length,1);
+ const saved=(await f.b.request('thread/read',{threadId})).thread.turns;
+ assert.deepEqual(saved.map(turn=>turn.status),['cancelled','completed']);
+ assert.equal(saved[0].items.find(item=>item.type==='agentMessage').text,partial);
+ const model=f.calls.filter(call=>call.url==='/v1/messages');
+ assert.equal(model.length,2);
+ assert.match(JSON.stringify(model[1].body.messages),/Remember the local fixture named amber/);
+ assert.match(JSON.stringify(model[1].body.messages),/Partial fixture reply\./);
 });
 
 test('actual official DSH chat runtime registers project skills and base workspace setup and forwards model tool calls',{timeout:60000},async t=>{

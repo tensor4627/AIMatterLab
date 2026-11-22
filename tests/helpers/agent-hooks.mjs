@@ -11,6 +11,7 @@ import * as accountOwner1 from "../../contracts/agent/provider-account.mjs";
 const account={...accountOwner0,...accountOwner1};
 
 import * as drafts from "../../frontend/features/conversations/composer-drafts.mjs";
+import * as followUps from '../../frontend/features/conversations/follow-ups.mjs';
 import * as messageMapping from '../../frontend/features/conversations/message-mapping.mjs';
 import * as readingPositions from '../../frontend/features/conversations/reading-position.mjs';
 
@@ -79,6 +80,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
   if(name==='../../../contracts/agent/model-profiles.mjs')return modelProfiles;
   if(["./provider-account.mjs","../../../contracts/agent/provider-account.mjs","../conversations/provider-account.mjs"].includes(name))return account;
   if(["./composer-drafts.mjs"].includes(name))return drafts;
+  if(name==='./follow-ups.mjs')return followUps;
   if(name==='./message-mapping.mjs')return messageMapping;
   if(name==='./reading-position.mjs')return readingPositions;
   if(["./resume-effort.mjs"].includes(name))return effort;

@@ -59,7 +59,7 @@ function compatibilityFailure(cause,stage,version){
 }
 
 export class CodexBridge extends EventEmitter {
-  constructor({strictIsolation=false,isolationRoot,isolationDependencies={},launchDependencies={},host=codexRuntime}={}) { super();Object.assign(this,{strictIsolation,isolationRoot,isolationDependencies,launchDependencies,host});this.lifecycle=0;this.isolationReady=false; this.pending = new Map(); this.requests = new Map(); this.next = 1; this.activeTurns=new Set();this.threadModels=new Map(); }
+  constructor({strictIsolation=false,isolationRoot,isolationDependencies={},launchDependencies={},host=codexRuntime}={}) { super();Object.assign(this,{strictIsolation,isolationRoot,isolationDependencies,launchDependencies,host});this.lifecycle=0;this.isolationReady=false; this.pending = new Map(); this.requests = new Map(); this.next = 1; this.activeTurns=new Set();this.turnIds=new Map();this.settledTurns=new Set();this.threadModels=new Map(); }
   async start(executable,worker,config={},options={}) {
     const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config,...options.authenticationOnly?['authentication-only']:[]])).digest('hex');
     if(this.starting){await this.starting;return this.start(executable,worker,config,options);}
@@ -251,8 +251,17 @@ export class CodexBridge extends EventEmitter {
         this.close({reason:'isolation_violation',code:'STUDIO_CODEX_UNSCOPED_TOOL',activityType:item.type,...tool?{tool}:{},message:'AIMatterLab isolation blocked '+(tool||item.type)+'. The workflow and draft are preserved; reconnect explicitly and review results before sending another message.'});return;
       }
     }
-    if(message.method==='turn/started')this.activeTurns.add(message.params?.threadId);
-    if(message.method==='turn/completed')this.activeTurns.delete(message.params?.threadId);
+    const threadId=message.params?.threadId,turnId=message.params?.turn?.id;
+    if(message.method==='turn/started'){
+      if(!threadId||!turnId||this.turnIds.has(threadId)||this.settledTurns.has(turnId))return;
+      this.activeTurns.add(threadId);this.turnIds.set(threadId,turnId);
+    }
+    if(message.method==='turn/completed'){
+      if(this.settledTurns.has(turnId)||this.turnIds.has(threadId)&&this.turnIds.get(threadId)!==turnId)return;
+      this.activeTurns.delete(threadId);this.turnIds.delete(threadId);if(turnId)this.settledTurns.add(turnId);
+    }
+    if(message.params?.turnId&&this.settledTurns.has(message.params.turnId)&&
+       (message.id!==undefined||message.method?.startsWith('item/')||message.method==='error'))return;
     if (message.method) {
       if (message.id !== undefined) this.requests.set(String(message.id), message);
       if (message.method === 'serverRequest/resolved') this.requests.delete(String(message.params?.requestId));
@@ -276,7 +285,7 @@ export class CodexBridge extends EventEmitter {
     if(!final&&typeof p.delta==='string'){
       const key=JSON.stringify([thread,p.turnId,p.itemId,message.method,p.contentIndex,p.summaryIndex]);let stream=this.transcriptStreams.get(key);if(!stream){stream=createTranscriptStream(()=>this.transcriptSecrets||[]);this.transcriptStreams.set(key,stream);}const delta=stream.push(p.delta);if(!delta)return;message={...message,params:{...p,delta}};
     }
-    if(['item/completed','turn/completed'].includes(message.method))for(const [key,stream]of this.transcriptStreams){const [owner,turnId,itemId,method,contentIndex,summaryIndex]=JSON.parse(key);if(owner!==thread||message.method==='item/completed'&&itemId!==p.item?.id)continue;this.transcriptStreams.delete(key);const delta=stream.push('',{final:true});if(delta&&!(message.method==='item/completed'&&p.item?.type==='agentMessage'&&method==='item/agentMessage/delta'))this.publishTranscriptEvent({method,params:{threadId:owner,turnId,itemId,delta,...contentIndex!=null?{contentIndex}:{},...summaryIndex!=null?{summaryIndex}:{}}},{final:true});}
+    if(['item/completed','turn/completed'].includes(message.method))for(const [key,stream]of this.transcriptStreams){const [owner,turnId,itemId,method,contentIndex,summaryIndex]=JSON.parse(key);if(owner!==thread||turnId!==(p.turn?.id||p.turnId)||message.method==='item/completed'&&itemId!==p.item?.id)continue;this.transcriptStreams.delete(key);const delta=stream.push('',{final:true});if(delta&&!(message.method==='item/completed'&&p.item?.type==='agentMessage'&&method==='item/agentMessage/delta'))this.publishTranscriptEvent({method,params:{threadId:owner,turnId,itemId,delta,...contentIndex!=null?{contentIndex}:{},...summaryIndex!=null?{summaryIndex}:{}}},{final:true});}
     this.emit('event',sanitizeProtocolTranscript(message,this.transcriptSecrets));
   }
   respond(id, result) {
@@ -289,7 +298,7 @@ export class CodexBridge extends EventEmitter {
     this.transcriptStreams?.clear();
     this.isolationReady=false;this.isolationSummary=null;this.info=null;this.compatibility=null;this.threadModels.clear();
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
-    this.pending.clear(); this.requests.clear(); this.activeTurns.clear();
+    this.pending.clear(); this.requests.clear(); this.activeTurns.clear();this.turnIds.clear();this.settledTurns.clear();
   }
   close(detail={reason:'closed'}) { this.lifecycle++;this.envImportWait?.abort();this.threadModels.clear();this.isolationReady=false;this.isolationSummary=null;const child=this.process,active=!!child;this.process=null;this.framer?.reset();this.framer=null;this.fail(new Error(detail.message||'Codex bridge closed'));child?.kill();if(active)this.emit('event',{method:'studio/codexDisconnected',params:detail}); }
 }

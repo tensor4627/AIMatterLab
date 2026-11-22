@@ -94,14 +94,18 @@ export class ApiModelBridge extends DshBridge{
    this.choose(params.model);const selected=this.selection,effort=this.modelCatalog().data.find(v=>v.model===this.model)?.defaultReasoningEffort;
    const session={schemaVersion:1,harness:'dsh',provider:this.provider,id:randomUUID(),nativeId:randomUUID(),nativeStarted:false,legacyContextPending:false,name:'',model:this.model,effort,profileId:selected.profile.id,apiEndpoint:selected.profile.baseUrl,apiProtocol:selected.profile.api,...selected.profile.authMode?{authMode:selected.profile.authMode}:{},turns:[],updatedAt:Date.now()};this.sessions.set(session.id,session);this.current=session.id;this.save(session);const thread=this.publicThread(session);this.event('thread/started',{thread});return {thread,model:this.model,reasoningEffort:effort};
   }
-  if(['thread/resume','turn/start'].includes(method)){
+  if(['thread/resume','turn/start','turn/steer'].includes(method)){
    const {session,selected,assertCurrent}=this.boundModel(params);
-   if(method==='turn/start'&&this.process&&this.launchIdentity&&selected.profile.id===this.launchProfileId&&this.profiles.identity(selected.profile.id)!==this.launchIdentity)throw Error('服务商配置已变化，请重新连接后继续；不会自动发送历史');
+   const assertSelected=options.assertCurrent;options={...options,assertCurrent:()=>{assertSelected?.();assertCurrent();}};
+   if(method!=='thread/resume'&&this.process&&this.launchIdentity&&selected.profile.id===this.launchProfileId&&this.profiles.identity(selected.profile.id)!==this.launchIdentity)throw Error('服务商配置已变化，请重新连接后继续；不会自动发送历史');
+   if(method==='turn/steer'){
+    if(selected.key!==session.model||selected.key!==this.model)throw Error('当前引导所属的模型已变化。');
+    return super.request(method,params,timeout,options);
+   }
    const row=this.modelCatalog().data.find(v=>v.model===selected.key),effort=params.effort??(session.model===selected.key?session.effort:row?.defaultReasoningEffort);
    if(effort&&!row?.supportedReasoningEfforts.some(v=>v.reasoningEffort===effort))throw Error('此模型不支持所选推理等级');
    if(selected.key!==session.model)session.effort=effort;
    params={...params,model:selected.key,effort};
-   const assertSelected=options.assertCurrent;options={...options,assertCurrent:()=>{assertSelected?.();assertCurrent();}};
   }
   return super.request(method,params,timeout,options);
  }

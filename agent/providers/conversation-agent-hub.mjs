@@ -64,7 +64,7 @@ export class ConversationAgentHub extends EventEmitter{
  get bridgeWorkers(){return (this.scope.getStore()||this.foreground).hub.bridgeWorkers;}
 
  create(provider,threadId){
-  const id=randomUUID(),entry={id,provider,threadId,requests:new Map(),turnId:null,settledTurnId:null,preparing:false,closed:false};
+  const id=randomUUID(),entry={id,provider,threadId,requests:new Map(),turnId:null,settledTurns:new Set(),preparing:false,closed:false};
   const opts=this.options,context=()=>entry.hub.contexts.get(provider)||providerContext();
   const hub=this.createHub({...opts,codex:provider==='codex'?this.createCodex():inertCodex,sessionProfileId:id,
    worker:p=>p===provider?opts.worker?.(p,id,context()):null,releaseWorker:p=>{if(p===provider)opts.releaseWorker?.(p,id);},
@@ -147,7 +147,7 @@ export class ConversationAgentHub extends EventEmitter{
   if(!exactThreadId(threadId))throw Error('Invalid native conversation identity');
   const existing=this.byThread.get(key(entry.provider,threadId));
   if(existing&&existing!==entry)throw Error('Native conversation already belongs to another transport');
-  if(entry.threadId&&entry.threadId!==threadId){this.byThread.delete(key(entry.provider,entry.threadId));entry.liveTurn=null;}
+  if(entry.threadId&&entry.threadId!==threadId){this.byThread.delete(key(entry.provider,entry.threadId));entry.liveTurn=null;entry.settledTurns.clear();}
   entry.threadId=threadId;this.byThread.set(key(entry.provider,threadId),entry);this.publishState(entry);
  }
 
@@ -203,15 +203,19 @@ export class ConversationAgentHub extends EventEmitter{
   if(entry.closed)return;
   const params=event.params||{},threadId=params.threadId||params.thread?.id||entry.threadId;
   if(threadId&&entry.threadId&&threadId!==entry.threadId&&!(entry.replacing&&event.method==='thread/started'))return;
-  if(event.method==='turn/completed'&&entry.turnId&&params.turn?.id!==entry.turnId)return;
+  const started=event.method==='turn/started',completed=event.method==='turn/completed',turnId=params.turn?.id;
+  if(started&&(!exactThreadId(turnId)||entry.settledTurns.has(turnId)||entry.turnId&&entry.turnId!==turnId))return;
+  if(completed&&(!exactThreadId(turnId)||turnId!==entry.turnId))return;
+  if(params.turnId&&params.turnId!==entry.turnId&&(event.id!==undefined||event.method.startsWith('item/')||event.method==='error'))return;
   rememberLiveTurn(entry,event.method,params);
   const tagged={...event,provider:entry.provider,params:{...params,...threadId?{threadId}:{}}};
   if(event.method==='studio/accountUpdated'&&entry.hub.loginStatus[entry.provider]?.modelAccess==='passed')this.auth.loginStatus[entry.provider]={...this.auth.loginStatus[entry.provider],modelAccess:'passed'};
-  if(event.method==='turn/started'&&exactThreadId(params.turn?.id))entry.turnId=params.turn.id;
-  if(event.method==='turn/completed'&&params.turn?.id){
-   entry.settledTurnId=params.turn.id;
-   if(entry.turnId===params.turn.id)entry.turnId=null;
+  if(started)entry.turnId=turnId;
+  if(completed){
+   entry.settledTurns.add(turnId);
+   entry.turnId=null;
    entry.requests.clear();
+   tagged.params.studioTurnBusy=this.busy(entry);
   }
   if(event.method==='studio/codexDisconnected'){entry.turnId=null;entry.requests.clear();}
   if(event.id!==undefined&&threadId){
@@ -306,7 +310,7 @@ export class ConversationAgentHub extends EventEmitter{
    }
    const result=await hub.rpc(provider,method,params);
    if(method==='thread/start'&&result.thread?.id)this.adopt(entry,result.thread.id);
-   if(method==='turn/start'&&result.turn?.id&&result.turn.id!==entry.settledTurnId&&!terminalTurn(result.turn)){
+   if(method==='turn/start'&&result.turn?.id&&!entry.settledTurns.has(result.turn.id)&&!terminalTurn(result.turn)){
     entry.turnId=result.turn.id;this.publishState(entry);
    }
    if(method==='thread/read')return this.decorateRead(entry,result);

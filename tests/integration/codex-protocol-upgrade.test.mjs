@@ -157,3 +157,37 @@ test('read-state notifications cannot be mistaken for execution completion or se
  const message={method:'thread/readState/changed',params:{threadId:'other',readState:{firstUnread:null,revision:'opaque'}}};bridge.receive(message);
  assert.equal(bridge.process,process);assert.deepEqual([...bridge.activeTurns],['active']);assert.equal(bridge.requests.size,0);assert.deepEqual(events,[message]);
 });
+
+test('Codex interrupt submits the exact turn and a late completion cannot release the next native reply',async()=>{
+ const bridge=new CodexBridge(),sent=[],events=[];
+ const threadId='native-chat',input=[{type:'text',text:'Fixture message'}];
+ let turnNumber=0;
+ const notify=(method,params)=>bridge.receive({method,params:{threadId,...params}});
+ const process={kill(){},stdin:{destroyed:false,write(raw){
+  const request=JSON.parse(raw);sent.push(request);
+  const turn={id:'native-turn-'+(++turnNumber),status:'inProgress'};
+  const started=request.method==='turn/start';
+  if(started)notify('turn/started',{turn});
+  bridge.receive({id:request.id,result:started?{turn}:{}});
+ }}};
+ bridge.process=process;bridge.on('event',event=>events.push(event));
+ try{
+  const first=(await bridge.request('turn/start',{threadId,input})).turn.id;
+  await bridge.request('turn/interrupt',{threadId,turnId:first});
+  assert.deepEqual(sent.find(request=>request.method==='turn/interrupt').params,{threadId,turnId:first});
+  assert.equal(bridge.activeTurns.has(threadId),true,'an interrupt request is not a terminal receipt');
+  notify('item/agentMessage/delta',{turnId:first,itemId:'first-partial',delta:'Partial reply.'});
+  notify('turn/completed',{turn:{id:first,status:'interrupted'}});
+  assert.equal(bridge.activeTurns.size,0);
+  assert(events.some(event=>event.params?.delta==='Partial reply.'));
+  const second=(await bridge.request('turn/start',{threadId,input})).turn.id,before=events.length;
+  notify('turn/completed',{turn:{id:first,status:'interrupted'}});
+  notify('item/agentMessage/delta',{turnId:first,itemId:'first-partial',delta:'late chunk'});
+  assert.equal(bridge.activeTurns.has(threadId),true);
+  assert.equal(events.length,before);
+  notify('turn/completed',{turn:{id:second,status:'completed'}});
+  assert.equal(bridge.activeTurns.size,0);
+  assert.equal(bridge.process,process);
+  assert.deepEqual(sent.filter(request=>request.method==='turn/start').map(request=>request.params.threadId),[threadId,threadId]);
+ }finally{bridge.close();}
+});
