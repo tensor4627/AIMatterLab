@@ -22,11 +22,12 @@ test('resource context explains progressive setup and serialized terminal access
 test('a restored hosted chat gets original SSH recovery guidance without a current lease',()=>{
  const routing=createAgentResourceRouting({managed:()=>({})});
  const context=routing.turnContext('deepseek','restored-chat');
- assert.match(context,/retain the original live terminal or pending login/);
+ assert.match(context,/original saved profile.*live terminal or pending login/);
  assert.match(context,/prompts in that attempt’s private terminal/);
  assert.match(context,/waiting or timed-out check leaves authentication unconfirmed/);
- assert.match(context,/confirmed lost.*explicitly sign in again on that profile/);
- assert.match(context,/After verified hosting.*acquire the requested capability for this chat/);
+ assert.match(context,/confirmed lost.*the user can sign in again on that profile/);
+ assert.match(context,/verifies the same remote identity and workspace and restores eligible conversation leases/);
+ assert.match(context,/List the current resources and terminals before using the restored channel/);
  assert.match(context,/unknown jobs using their original IDs and receipts/);
 });
 test('incomplete tool inventory keeps the authorized service route with an explicit setup warning',async()=>{const f=fixture();f.grant(true);f.worker.probeTools=async()=>({status:'warning',count:3,message:'Configure the existing environment'});const v=await f.routing.readiness('codex');assert.equal(v.status,'ready');assert.equal(v.scope,'workflow');assert.equal(v.warning,true);assert.equal(v.scientificStatus,'warning');assert.equal(v.count,3);assert.equal(f.routing.providerConnection('codex'),f.endpoint);f.routing.scope('codex','turn/start').assertCurrent();});

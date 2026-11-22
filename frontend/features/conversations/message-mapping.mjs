@@ -1,4 +1,5 @@
 import {visibleUserText} from '../../../contracts/agent/user-message.mjs';
+import {titleReviewToolName} from '../../../contracts/agent/conversation-title.mjs';
 import {toolActivity} from './tool-activity.mjs';
 
 // Both replay and live events use the same item projection. Completion events can
@@ -8,6 +9,7 @@ export function messageForItem(item){
  if(item.type==='userMessage')return {id:item.id,role:'user',text:visibleUserText(item.content||[])};
  if(item.type==='serviceMessage')return {id:item.id,role:'service',text:item.text||''};
  if(item.type==='agentMessage')return {id:item.id,role:'agent',text:item.text||''};
+ if(item.type==='mcpToolCall'&&item.tool===titleReviewToolName)return null;
  if(item.type==='mcpToolCall')return {id:item.id,role:'tool',text:item.tool||'工具',toolName:item.tool,activity:toolActivity(item)};
  if(item.type==='webSearch'){
   const action=item.action||{},state=item.error||item.status==='failed'?'failed':item.status==='inProgress'?'running':'completed';

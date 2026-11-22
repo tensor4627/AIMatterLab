@@ -17,6 +17,7 @@ import {providerId} from "../../agent/providers/contracts.mjs";
 import {assertRpc} from "../../contracts/transport-policy.mjs";
 import {toolGuidanceTarget} from "../../backend/main/compute/tool-guidance-target.mjs";
 import {createAgentRequests} from "../../agent/sessions/requests.mjs";
+import {ConversationTitleReviews} from '../../agent/sessions/conversation-title-reviews.mjs';
 import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 
 function harness(t,{state='active',withOtherTool=false,withGuidanceSource=false}={}){
@@ -39,11 +40,12 @@ function harness(t,{state='active',withOtherTool=false,withGuidanceSource=false}
  const owner={provider:'codex',threadId:'thread',taskId:null,projectId:null,environmentId:null,inputRoot:null,serial:1},handlers=new Map(),sent=[],resolved=[],workerLeases=new Map([['codex',{epoch:1,context:{...owner}}]]),terminalLeases=new Map([['codex',{epoch:1,context:{...owner}}]]),bridgeWorkers=new Map([['codex',{transport:'worker'}]]);let scans=0,reads=0,managedQueries=0;
  const sources=[...withOtherTool?[{id:'gpumd',root:otherRoot}]:[],...withGuidanceSource?[{id:'pygas',root}]:[]],toolRecords=[];
  const foregroundSessions=new Map(),scopedTerminalLeases=new Map(),scopedWorkerLeases=new Map();
+ const taskRecords={bound:()=>null,conversation:()=>null,prepareTurn:(_provider,value)=>value};
  const context={projectSkills:new ProjectSkills({root:path.join(root,'user-cache')}),managedWorkbench:{userMessage(){}},conversationTerminals:null,path,createAgentRequests,app:{isPackaged:false},openUrl:()=>{},privateAccess:{},sharedTerminal:{hasCurrentGrant:()=>false},ScientificSkills,scientificMap:map,bundledSkillRoot:path.join(root,'bundle'),root,workerSource:path.join(root,'worker'),settings:{skillRoots:[archived],sourceRoots:[],pygasSkillProviders:['codex'],scientificSkillProviders:{gpumd:['codex']}},catalog:{list:kind=>kind==='source-binding'?sources:[]},scientificSources:()=>{if(withOtherTool)return sources;throw Error('Active main must not discover sources');},resolveSkillGuidance:async scope=>{resolved.push(scope);return facts;},
   resourceToolSetups:{recordUserTurn:({provider,params})=>{assert.equal(provider,owner.provider);assert.equal(params.threadId,owner.threadId);}},
   setupInstructions:{allowed:()=>false,prepare:async(_provider,_id,callback)=>callback()},
   workflowContext:{current:()=>owner,revision:()=>owner.serial,begin:()=>owner,assert:()=>{},synchronize:async(_ticket,bind)=>bind('codex',owner)},
-  taskRecords:{bound:()=>null,prepareTurn:(_provider,value)=>value},authoringAuthorization:null,baseWorkspace:null,
+  taskRecords,titleReviews:new ConversationTitleReviews(taskRecords),authoringAuthorization:null,baseWorkspace:null,
   worker:{providerScopes:{scopes:workerLeases,get:(_provider,id)=>scopedWorkerLeases.get(id)},providerConnection:()=>({}),connection:{},request:()=>{throw Error('No runtime probe or guide needed');}},terminalMcp:{scopes:{scopes:terminalLeases,get:(_provider,id)=>scopedTerminalLeases.get(id)}},toolPackages:{list:query=>{assert.deepEqual(Object.keys(query),[]);managedQueries++;return toolRecords.filter(value=>value.package_version===value.versions.at(-1));},read:query=>{const value=toolRecords.find(record=>record.package_id===query.package_id&&record.package_version===query.package_version);assert(value);return value;}},
   agents:{active:'codex',bridgeWorkers,sessionIdentity:(provider,threadId)=>foregroundSessions.get(provider+':'+threadId),threadReady:()=>true,selectContext:()=>{},rpc:async(_provider,_method,params)=>{sent.push(params);return {turn:{id:'acknowledged'}};}},
   ensureTaskAuthoring:async()=>null,assertIdleAgent:()=>{},visibleUserText:input=>input.filter(item=>item.type==='text').map(item=>item.text).join('\n'),providerId,assertRpc,

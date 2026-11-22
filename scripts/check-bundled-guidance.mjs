@@ -15,13 +15,13 @@ const guidanceModules = [
   prompt, mapPath,
   'agent/context/agent-settings.mjs', 'agent/context/interaction-mode.mjs',
   'agent/context/private-task-context.mjs', 'agent/context/task-turn-context.mjs',
-  'agent/providers/dsh-policy.mjs', 'agent/sessions/requests.mjs',
+  'agent/providers/dsh-policy.mjs', 'agent/sessions/requests.mjs', 'agent/sessions/conversation-title-reviews.mjs',
   'agent/sessions/resource-routing.mjs', 'agent/sessions/terminal-turn.mjs',
   'agent/skills/skill-context.mjs', 'agent/skills/scientific-context.mjs',
   'agent/skills/scientific-skill-router.mjs', 'agent/skills/scientific-skills.mjs',
   'agent/skills/explicit-setup-stage.mjs', 'agent/skills/read-policy.mjs', 'agent/skills/public-rule-evidence.mjs',
   'agent/skills/policy-io.mjs', 'agent/skills/selected-managed-guidance.mjs', 'agent/skills/managed-tool-context.mjs',
-  'agent/tools/tool-failure.mjs', 'contracts/agent/user-message.mjs', 'backend/main/workspace/task-authoring.mjs',
+  'agent/tools/tool-failure.mjs', 'contracts/agent/user-message.mjs', 'contracts/agent/conversation-title.mjs', 'backend/main/workspace/task-authoring.mjs',
 ];
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 

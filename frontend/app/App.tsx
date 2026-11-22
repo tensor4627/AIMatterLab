@@ -300,7 +300,15 @@ export default function App(){
   }
   if(event.method==='studio/conversationGroupDeleted')applyGroupDeletion(event.params);
   if(event.method==='studio/conversationDeleted')applyConversationDeletion(event.params);
-  if(event.method==='studio/conversationUpdated'){const conversation=event.params.conversation;setConversations(old=>[conversation,...old.filter(c=>c.id!==conversation.id)]);const previous=selectedConversationRef.current;if(previous&&conversation.id===previous.id){selectedConversationRef.current=conversation;setProjectId(current=>followedProjectId(current,previous.projectId,conversation.projectId));void refresh();}}
+  if(event.method==='studio/conversationUpdated'){
+   const {conversation,titleOnly}=event.params;
+   setConversations(old=>titleOnly&&old.some(c=>c.id===conversation.id)?old.map(c=>c.id===conversation.id?conversation:c):[conversation,...old.filter(c=>c.id!==conversation.id)]);
+   const previous=selectedConversationRef.current;
+   if(previous&&previous.id===conversation.id){
+    selectedConversationRef.current=conversation;
+    if(!titleOnly){setProjectId(current=>followedProjectId(current,previous.projectId,conversation.projectId));void refresh();}
+   }
+  }
   if(event.method==='studio/taskUpdated'){const task=event.params.task;setAgentTasks(old=>[task,...old.filter(t=>t.id!==task.id)]);if(event.params.showFlow&&task.threadId===selectedConversationRef.current?.threadId&&task.provider===selectedConversationRef.current?.provider)setSection('agent-task:'+task.id);}
  }),[]);
  projectPolicyOwner.current={worker:worker&&!disconnected,projectId,selection:conversationSelectionSeq.current,modal,saving:busy};

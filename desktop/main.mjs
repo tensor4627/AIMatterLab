@@ -20,6 +20,8 @@ import {terminalExecutionCache} from './platform/terminal-execution-cache.mjs';
 import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
+import {ConversationTitleReviews,conversationTitleTool} from '../agent/sessions/conversation-title-reviews.mjs';
+import {redactTranscriptText} from '../contracts/agent/transcript-sanitizer.mjs';
 import {createTerminalHandoff} from '../agent/sessions/terminal-handoff.mjs';
 import {createSshTerminalHandoff} from '../agent/sessions/ssh-terminal-handoff.mjs';
 import {createConversationTerminals} from '../agent/sessions/conversation-terminals.mjs';
@@ -310,6 +312,10 @@ handle('materials.key',({apiKey,remove=false})=>remove?materials.clear():materia
 handle('materials.search',({query})=>materials.search(query));
 handle('materials.import',value=>materials.import(value));
 taskRecords=new TaskRecords(catalog,event=>emit('studio:event',event));
+const titleReviews=new ConversationTitleReviews(taskRecords,(text,{provider,threadId})=>{
+ const bridge=agents.bridge(provider,threadId);
+ return bridge?.cleanValue?.(text)??bridge?.clean?.(text)??redactTranscriptText(text,bridge?.transcriptSecrets);
+});
 workflowContext=createParallelAgentWorkflowContext({records:taskRecords,selectedProvider:()=>agents.foregroundProvider});
 activeAuthoringTasks=workflowContext.activeTasks;
 toolPackages=createToolPackageRegistry({catalog,storeRoot:path.join(app.getPath('userData'),'tool-packages')});
@@ -569,9 +575,12 @@ const resourceToolSetups=createResourceToolController({
 projectSkills.resolveResource=resourceToolSetups.resolveSkills;
 registerResourceToolRoutes(handle,resourceToolSetups.controller);
 const desktopAgentTools={
- tools:()=>[...managedWorkbench.desktopTools.tools(),...resourceToolSetups.tools()],
- owns:name=>managedWorkbench.desktopTools.owns(name)||resourceToolSetups.owns(name),
- call:(name,args,scope)=>resourceToolSetups.owns(name)?resourceToolSetups.call(name,args,scope):managedWorkbench.desktopTools.call(name,args,scope),
+ tools:()=>[...managedWorkbench.desktopTools.tools(),...resourceToolSetups.tools(),conversationTitleTool],
+ owns:name=>name===conversationTitleTool.name||managedWorkbench.desktopTools.owns(name)||resourceToolSetups.owns(name),
+ call:(name,args,scope)=>{
+  if(name===conversationTitleTool.name)return titleReviews.propose(args,scope);
+  return resourceToolSetups.owns(name)?resourceToolSetups.call(name,args,scope):managedWorkbench.desktopTools.call(name,args,scope);
+ },
 };
 terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,scientificSkills,publicDocs:{definitions:softwareDocDefinitions,call:softwareDocs},guard:()=>worker.authoringGuard,desktopTools:desktopAgentTools,
  workerTools:workerToolBridge({connection:scope=>resourceRouting.scopedWorkerConnection(scope),
@@ -589,7 +598,7 @@ agents.on('event',event=>{
  const threadId=event.params?.threadId;
  if(threadId){conversationTerminals.touch(event.provider,threadId);managedResources?.touch(event.provider,threadId);}
  if(event.method==='thread/started'&&event.provider==='codex'&&event.params?.thread&&!taskRecords.deleted('codex',event.params.thread.id))catalog.put('thread',event.params.thread.id,event.params.thread);
- taskRecords.event(event);emit('studio:event',event);
+ taskRecords.event(event);titleReviews.event(event);emit('studio:event',event);
  if(threadId&&event.method==='turn/completed')setImmediate(()=>conversationTerminals.finishDeferredService(event.provider,threadId));
 });
 registerWorkspaceTaskRoutes({
@@ -598,7 +607,7 @@ registerWorkspaceTaskRoutes({
  chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},
 });
 handle('conversation.delete',({id})=>{const prior=catalog.get('conversation',id);if(prior&&agents.isBusy(prior.provider,prior.threadId))throw Error('Stop this conversation before deleting it');
- const result=taskRecords.remove(id);conversationTerminals.forget(result.provider,result.threadId);managedResources?.forget?.(result.provider,result.threadId);resourceActivity.forget(result.provider,result.threadId);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
+ const result=taskRecords.remove(id);titleReviews.forget(id);conversationTerminals.forget(result.provider,result.threadId);managedResources?.forget?.(result.provider,result.threadId);resourceActivity.forget(result.provider,result.threadId);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);return result;});
 handle('conversation.list',()=>taskRecords.conversations());
 handle('conversation.remember',value=>taskRecords.remember(value));
 handle('conversation.groups',()=>taskRecords.groups());
@@ -805,7 +814,7 @@ handle('agent.cli.choose',async value=>{
  if(readiness.status==='ready')settings=catalog.put('settings','main',normalizeSettings(settings,{[provider+'Path']:response.filePaths[0]}));
  return readiness;
 });
-const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,recordUserTurn:value=>{managedWorkbench.userMessage(value);resourceToolSetups.recordUserTurn(value);},authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+const agentRequests=createAgentRequests({runtime:()=>({agents,catalog,taskRecords,titleReviews,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,recordUserTurn:value=>{managedWorkbench.userMessage(value);resourceToolSetups.recordUserTurn(value);},authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){return agentRequests(value);}
 managedSchedules.start();
 handle('agent.rpc',agentRpc);

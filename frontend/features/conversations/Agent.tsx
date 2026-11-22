@@ -135,6 +135,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
  const [thread,setThread]=useState<string|null>(null),[threads,setThreads]=useState<any[]>([]),[messages,setMessages]=useState<Message[]>([]);
  const localApiThread=!!thread&&API_PROVIDER_GROUPS.includes(provider);
  const [recovery,setRecovery]=useState<{threadId:string;error?:string}|null>(null),pendingResume=useRef<string|null>(null);
+ const resumeMetadata=useRef<Conversation|null>(null);
  const [modelCall,setModelCall]=useState<ModelCall|null>(null),modelCallRef=useRef<ModelCall|null>(null),modelRef=useRef(model);modelRef.current=model;
  const [prompt,setPrompt]=useState(()=>drafts.text()),[busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null),[sendNotice,setSendNotice]=useState('');
  function updatePrompt(text:string){providerTouched.current=true;setSendNotice('');setPrompt(drafts.edit(text));}
@@ -240,6 +241,12 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
     setThreads(old=>[{...c,id:c.threadId},...old.filter(row=>row.id!==p.oldThreadId&&row.id!==c.threadId)]);conversationRef.current?.(c,sessionNonceRef.current);return;
    }
    if(event.method==='studio/conversationDeleted'){setThreads(old=>old.filter(t=>t.id!==event.params.threadId));return;}
+   if(event.method==='studio/conversationUpdated'){
+    const c=event.params.conversation;
+    if(pendingResume.current===c.threadId)resumeMetadata.current=c;
+    setThreads(old=>[{id:c.threadId,name:c.name},...old.filter(row=>row.id!==c.threadId)]);
+    return;
+   }
    const viewedThread=threadRef.current||pendingResume.current;
    if(event.method==='studio/toolsStatus'){if(event.params?.threadId&&event.params.threadId!==viewedThread)return;toolsRef.current=event.params;setTools(event.params);return;}
    if(event.params?.threadId&&event.params.threadId!==viewedThread)return;
@@ -374,7 +381,7 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
   if(localHistory){setConnected(false);setModels([]);setModel('');setEffort('');setNeedsAuth(false);setTools({status:'not_run',count:0});}
   setSendNotice('');selectDraft(selectedProvider,id);setMessages([]);setWorkflowId(null);setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'loading'});
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
-  modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;observedTurn.current=null;resolvedRequests.current.clear();setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
+  modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;resumeMetadata.current=null;observedTurn.current=null;resolvedRequests.current.clear();setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
   try{
    const originalId=id;
    if(rebuild){if(selectedProvider!=='codex')throw Error('Unsupported conversation recovery provider');await invoke('conversation.select',{id:selectedProvider+':'+id});if(!current())return;}
@@ -388,12 +395,15 @@ export default function Agent({setupProviderChoice,onSetupReply,onOpenHistory,on
    if(read.thread?.id&&read.thread.id!==id||read.thread?.provider&&read.thread.provider!==selectedProvider)throw Error('读取的会话与选中会话不匹配');
    const list:Message[]=replayMessages(read.thread?.turns||[]);
    const saved=sessionSelection?.conversation;
-   const conversation=localHistory&&saved?.provider===selectedProvider&&saved.threadId===id?saved:await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'});if(!current())return;
+   const remembered=localHistory&&saved?.provider===selectedProvider&&saved.threadId===id?saved:await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:selectedProject||null,name:r.thread.name||r.thread.preview||'对话'});if(!current())return;
    if(!localHistory){
     const catalog=await selectedRpc('model/list');if(!current())return;if(!Array.isArray(catalog.data))throw Error('Invalid resumed model catalog');setModels(catalog.data);
     const resumedModel=r.model||modelRef.current||catalog.data.find((entry:any)=>entry.isDefault)?.model||catalog.data[0]?.model||'';
     setModel(resumedModel);setEffort(resumedEffort({provider:selectedProvider,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+resumedModel)||storedPreference('studio.effort.'+selectedProvider)},model:catalog.data.find((entry:any)=>entry.model===resumedModel),serverEffort:r.reasoningEffort}));
    }
+   // A background reply can rename this chat while its history or model list is loading.
+   const latestRow=resumeMetadata.current as Conversation|null;
+   const conversation=latestRow?.id===remembered.id?latestRow:remembered;
    const receipt:SessionTurn|undefined=read.studioSession,latest=observedTurn.current as SessionTurn|null,active=latest?.threadId===id?latest:receipt;
    if(active?.threadId===id){setBusy(active.busy);setTurn(active.turnId);}
    if(receipt?.requests&&active?.busy){

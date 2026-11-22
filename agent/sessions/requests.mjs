@@ -24,9 +24,13 @@ import {managedToolSkillContext} from '../skills/managed-tool-context.mjs';
 
 export function createAgentRequests({runtime}){
  async function request({provider,method,params={}},{notification}={}){
- const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,recordUserTurn,emit,openUrl,root,app}=runtime();
+ const {agents,catalog,taskRecords,titleReviews,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,recordUserTurn,emit,openUrl,root,app}=runtime();
  providerId(provider);assertRpc(method);
- if(method==='thread/read'&&API_PROVIDER_GROUPS.includes(provider))return agents.rpc(provider,method,params);
+ function restoreTitleProgress(result){
+  if(params.includeTurns&&result.thread?.id===params.threadId)titleReviews?.restore(provider,result.thread);
+  return result;
+ }
+ if(method==='thread/read'&&API_PROVIDER_GROUPS.includes(provider))return restoreTitleProgress(await agents.rpc(provider,method,params));
  const userParams=params;
  const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(provider,params.threadId),selectedSsh=['ssh-terminal','ssh-connection'].includes(resource?.selection?.kind)?resource.selection:null;
@@ -150,6 +154,9 @@ export function createAgentRequests({runtime}){
   const dispatch=()=>{
    capability();
    if(method==='turn/steer'||params.threadId!==userParams.threadId)recordUser();
+   if(method==='turn/start'&&!notification&&titleReviews&&userParams.input?.[0]?.type==='text'&&userParams.input[0].text?.trim()){
+    return titleReviews.dispatch(provider,params,next=>agents.rpc(provider,method,next),{includeCurrentName:!definitionOnlyTurn&&!terminalOnly});
+   }
    return agents.rpc(provider,method,params);
   };
   if(provider==='codex'&&method==='thread/resume'){
@@ -164,6 +171,7 @@ export function createAgentRequests({runtime}){
   workflowContext.started(ticket,result.thread.id);await conversationTerminals?.acquire(provider,workflowContext.current(),reservedShell);check();await synchronize();
  }
  if(provider==='codex'&&['thread/start','thread/resume'].includes(method)&&result.thread)catalog.put('thread',result.thread.id,result.thread);
+ if(method==='thread/read')return restoreTitleProgress(result);
  if(provider==='codex'&&method==='account/login/start'&&result.authUrl)await openUrl(result.authUrl);
  return result;
  }

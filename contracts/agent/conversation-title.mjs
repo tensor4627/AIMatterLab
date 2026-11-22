@@ -2,6 +2,10 @@ const compact=value=>String(value||'').replace(/[\r\n\t]+/g,' ').replace(/\s+/g,
 
 const limit=value=>Array.from(compact(value)).slice(0,36).join('');
 
+export const titleReviewToolName='review_conversation_title';
+export const titleReviewHeader='[AIMatterLab conversation title review]';
+export const titleReviewPrefix=titleReviewHeader+'\nUse '+titleReviewToolName+' once for review_id ';
+
 export function conversationTitle(request,{name,engine,existing=false}={}){
  const text=compact(request),proposed=compact(name);
  if(proposed&&(existing||proposed!==text)&&Array.from(proposed).length<=36&&!/^(请|帮我|我想|我希望|please\b|can you\b)/i.test(proposed))return proposed;

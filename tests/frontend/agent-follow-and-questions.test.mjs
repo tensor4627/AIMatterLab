@@ -17,6 +17,22 @@ const keys=(h,id,key,options={})=>{let prevented=false;panel(h,id).props.onKeyDo
 const responses=h=>h.calls.filter(call=>call.method==='agent.respond');
 async function setup(override){const h=agentHarness({props:{sessionSelection:{nonce:'questions',conversation:conversation('codex','questions')}},override:(method,data,standard)=>override?.(method,data,standard)??(method==='agent.respond'?{}:standard(method,data))});await h.flush();return h;}
 
+test('a live conversation title wins over the older resume read and stays attached to its own chat',async()=>{
+ const models=deferred();let modelLists=0;
+ const h=await setup((method,data)=>{
+  if(method==='agent.rpc'&&data.method==='model/list'&&++modelLists===2)return models.promise;
+ });
+ const rename=(threadId,name)=>h.emit({method:'studio/conversationUpdated',provider:'codex',params:{conversation:{...conversation('codex',threadId),name},titleOnly:true}});
+ const heading=()=>text(h.find(node=>node.props?.className==='agent-heading-title'));
+ try{
+  assert.equal(modelLists,2);rename('questions','空位扩散');
+  models.resolve({data:[{model:'fixture-model',isDefault:true}]});await h.flush();
+  assert.equal(h.conversations.at(-1).name,'空位扩散');assert.equal(heading(),'空位扩散');
+  rename('another-chat','另一个标题');await h.flush();assert.equal(heading(),'空位扩散');
+  rename('questions','手动题目');await h.flush();assert.equal(heading(),'手动题目');
+ }finally{h.unmount();}
+});
+
 test('Agent preserves upward reading during stream updates and resumes following explicitly',async()=>{
  const h=await setup();try{
   const calls=[],host={scrollHeight:1800,clientHeight:400,scrollTop:1400,scrollTo:options=>{calls.push(options);host.scrollTop=options.top;}};
