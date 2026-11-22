@@ -799,6 +799,7 @@ handle('agent.connect',async({provider,repairTools=false,threadId})=>{
  const key=JSON.stringify([provider,threadId||null]),connectionTicket=Symbol();agentConnectAttempts.set(key,connectionTicket);
  const current=()=>agentConnectAttempts.get(key)===connectionTicket;
  try{
+ const foregroundRevision=workflowContext.selectedOwner().revision;
  const resource=resourceRouting.capture(provider,threadId);
  if(repairTools==='managed'||repairTools&&['ssh-terminal','ssh-connection'].includes(resource.selection?.kind)){if(agents.isBusy(provider,threadId))throw Error('Conversation in progress');agents.disconnect(provider,threadId);}
  else if(repairTools){
@@ -814,7 +815,20 @@ handle('agent.connect',async({provider,repairTools=false,threadId})=>{
  // Model/account recovery never registers sources or environments.
  // Compute setup owns discovery/registration; App restores its saved binding separately.
  settings=catalog.put('settings','main',{...settings,agentProvider:provider});
- let info;try{info=await agents.connect(provider,{threadId,checkLogin:true,assertCurrent:()=>{resource.assertCurrent();if(!current())throw Error('Agent connection was superseded');}});}catch(error){if(current()&&error.readiness&&['missing','incompatible','invalid'].includes(error.readiness.status)&&['kimi','qwen'].includes(provider)){resource.assertCurrent();emit('studio:event',{method:'studio/cliRuntimeRequired',provider,params:error.readiness});return {cliRequired:error.readiness};}throw error;}
+ let info,owner;
+ try{
+  const connecting=agents.connect(provider,{threadId,checkLogin:true,assertCurrent:()=>{resource.assertCurrent();if(!current())throw Error('Agent connection was superseded');}});
+  owner=agents.sessionIdentity(provider,threadId??undefined);
+  if(threadId===null&&owner?.threadId!==null)owner=null;
+  info=await connecting;
+ }catch(error){
+  // The connection keeps its own failure. Only the current foreground interaction opens the global dialog.
+  if(!current()||!['missing','incompatible','invalid'].includes(error?.readiness?.status)||!['kimi','qwen'].includes(provider)||
+     !owner?.isForeground()||workflowContext.selectedOwner().revision!==foregroundRevision)throw error;
+  resource.assertCurrent();
+  emit('studio:event',{method:'studio/cliRuntimeRequired',provider,params:error.readiness});
+  return {cliRequired:error.readiness};
+ }
  resource.assertCurrent();
  if(info?.loginRequired)return info;
  const tools=await scientificTools(provider,threadId);resource.assertCurrent();

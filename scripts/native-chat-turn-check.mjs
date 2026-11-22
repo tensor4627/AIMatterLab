@@ -1,24 +1,43 @@
 import fs from 'node:fs/promises';
+import {createReadStream} from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {createServer} from 'node:http';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {parseArgs} from 'node:util';
 import {_electron} from 'playwright';
 import {desktopRoot,requireLaunchContext,resolveDesktopBinary} from './desktop-launch.mjs';
 requireLaunchContext();
-const attachments=process.argv.includes('--attachments');
-const output=path.join(desktopRoot,'validation','local');
+const {values}=parseArgs({options:{attachments:{type:'boolean'},'packaged-exe':{type:'string'},'expected-version':{type:'string'},'startup-only':{type:'boolean'}}});
+const packaged=!!values['packaged-exe'],startupOnly=!!values['startup-only'];
+const expectedVersion=values['expected-version']??(!packaged?JSON.parse(await fs.readFile(path.join(desktopRoot,'package.json'),'utf8')).version:null);
+assert.match(expectedVersion??'',/^\d+\.\d+\.\d+(?:-[\w.]+)?$/,'Choose the expected packaged application version');
+const attachments=packaged||!!values.attachments;
+const executablePath=packaged?await fs.realpath(values['packaged-exe']):await resolveDesktopBinary();
+const packagedRoot=packaged?path.dirname(executablePath):null;
+const archive=packaged?path.join(packagedRoot,'resources','app.asar'):null;
+if(packaged)assert.equal(path.basename(executablePath).toLowerCase(),'aimatterlab.exe','Use the extracted release executable');
+const output=path.join(desktopRoot,'validation','local',...(packaged?['release-'+expectedVersion.replaceAll('.','')]:[]));
 await fs.mkdir(output,{recursive:true});
-const dir=await fs.mkdtemp(path.join(output,'chat-turn-desktop-'));
-const profile=path.join(dir,'profile'),appData=path.join(dir,'app-data'),chromium=path.join(dir,'chromium');
-await Promise.all([profile,appData,chromium].map(d=>fs.mkdir(d)));
-const nativeMain=pathToFileURL(path.join(desktopRoot,'desktop','main.mjs')).href;
-// Production main, preload and renderer run unchanged apart from keeping the test window hidden.
+const dir=await fs.mkdtemp(path.join(output,packaged?'chat-package-':'chat-turn-desktop-'));
+const profile=path.join(dir,'profile'),chromium=path.join(dir,'chromium'),home=path.join(dir,'home'),temporary=path.join(dir,'tmp');
+const appData=path.join(home,'AppData','Roaming'),localData=path.join(home,'AppData','Local');
+// Windows shell folder resolution can run before the packaged app creates its window.
+const folders=[profile,appData,chromium,localData,temporary,...['Documents','Downloads','Desktop'].map(name=>path.join(home,name))];
+await Promise.all(folders.map(directory=>fs.mkdir(directory,{recursive:true})));
 const wrapper=path.join(dir,'fixture-entry.mjs');
-await fs.writeFile(wrapper,`import {app} from 'electron';
+if(!packaged){
+ // Source checks keep the test window hidden. Package checks launch the supplied exe directly.
+ const nativeMain=pathToFileURL(path.join(desktopRoot,'desktop','main.mjs')).href;
+ await fs.writeFile(wrapper,`import {app} from 'electron';
 app.setPath('userData',${JSON.stringify(profile)});app.setPath('appData',${JSON.stringify(appData)});app.setPath('sessionData',${JSON.stringify(chromium)});
 app.on('browser-window-created',(_e,win)=>{win.show=()=>{};});
 await import(${JSON.stringify(nativeMain)});`);
+}
+function sha256(bytes){return createHash('sha256').update(bytes).digest('hex');}
+async function fileSha256(file){const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk);return hash.digest('hex');}
+function samePath(actual,expected){assert.equal(typeof actual,'string','Expected the runtime path for '+expected);assert.equal(path.relative(expected,actual),'');}
 const requests=[],held=new Map();
 const server=createServer(async(req,res)=>{
  let raw='';for await(const chunk of req)raw+=chunk;
@@ -32,15 +51,69 @@ const server=createServer(async(req,res)=>{
  if(n===1||n===3)held.set(n,finish);else finish();
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const target='http://127.0.0.1:'+server.address().port+'/v1';
-const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('STUDIO_')&&!['NODE_OPTIONS','ELECTRON_RUN_AS_NODE'].includes(key)));
-env.STUDIO_PROFILE_DIR=profile;
-let app,page,phase='launch';
-try{
- app=await _electron.launch({executablePath:await resolveDesktopBinary(),args:[wrapper],env,timeout:30000});
+const origin='http://127.0.0.1:'+server.address().port,target=origin+'/v1';
+const envKeys=new Set(['systemroot','windir','systemdrive','comspec','pathext','os','number_of_processors','processor_architecture','programfiles','programfiles(x86)','programw6432']);
+const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>envKeys.has(key.toLowerCase())));
+const system=env.SystemRoot||env.SYSTEMROOT||process.env.SystemRoot;
+Object.assign(env,{
+ PATH:system?[path.join(system,'System32'),system].join(path.delimiter):'/usr/bin:/bin',
+ HTTP_PROXY:origin,HTTPS_PROXY:origin,NO_PROXY:'127.0.0.1,localhost,::1',
+ STUDIO_PROFILE_DIR:profile,APPDATA:appData,LOCALAPPDATA:localData,USERPROFILE:home,HOME:home,CODEX_HOME:path.join(home,'.codex'),TEMP:temporary,TMP:temporary,TMPDIR:temporary,
+ XDG_CONFIG_HOME:appData,XDG_CACHE_HOME:localData,XDG_DATA_HOME:localData,
+ ...system?{HOMEDRIVE:path.parse(home).root.slice(0,-1),HOMEPATH:home.slice(path.parse(home).root.length-1)}:{},
+});
+let app,page,phase='launch',runtime,artifacts,originalFigure,wireFigure;
+const rendererErrors=[];
+async function launch(){
+ app=await _electron.launch({executablePath,cwd:packagedRoot??desktopRoot,args:packaged?[]:[wrapper],env,timeout:30000});
  page=await app.firstWindow({timeout:25000});page.setDefaultTimeout(12000);
- phase='startup';await page.locator('.composer textarea').waitFor();
- await page.getByRole('button',{name:'跳过引导'}).click();
+ page.on('pageerror',error=>rendererErrors.push(error.message));
+ await page.locator('.composer textarea').waitFor();
+ const observed=await app.evaluate(({app,BrowserWindow})=>{
+  const web=BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();
+  const archive=app.getAppPath(),fs=process.getBuiltinModule('node:fs'),path=process.getBuiltinModule('node:path'),os=process.getBuiltinModule('node:os');
+  return {version:app.getVersion(),installed:app.isPackaged,binary:process.execPath,archive,resources:process.resourcesPath,
+   profile:app.getPath('userData'),session:app.getPath('sessionData'),fixtureHome:os.homedir(),codexHome:process.env.CODEX_HOME,pid:process.pid,
+   packagedPreloadPresent:app.isPackaged?fs.existsSync(path.join(archive,'desktop','preload.cjs')):undefined,
+   sandbox:web.sandbox,contextIsolation:web.contextIsolation,nodeIntegration:web.nodeIntegration};
+ });
+ assert.equal(observed.installed,packaged);
+ samePath(observed.binary,executablePath);samePath(observed.profile,profile);
+ if(packaged){
+  assert.equal(observed.version,expectedVersion);
+  samePath(observed.archive,archive);samePath(observed.resources,path.dirname(archive));samePath(observed.fixtureHome,home);
+  samePath(observed.codexHome,path.join(home,'.codex'));
+  assert.equal(observed.packagedPreloadPresent,true);
+  assert([profile,chromium].some(root=>path.relative(root,observed.session)===''),'Chromium must start with a disposable session directory');
+  samePath(fileURLToPath(page.url()),path.join(archive,'dist','index.html'));
+  assert.equal(await page.locator('.version').innerText(),expectedVersion);
+ }
+ assert.deepEqual([observed.sandbox,observed.contextIsolation,observed.nodeIntegration],[true,true,false]);
+ assert.equal(await page.evaluate(()=>typeof window.require==='undefined'&&typeof window.process==='undefined'&&typeof window.studio?.invoke==='function'),true);
+ return observed;
+}
+async function assertPackagedHarness(){
+ const modelRoot=path.join(profile,'agents','model-providers','turn-check');
+ const processes=await fs.readdir(path.join(modelRoot,'processes'));
+ assert(processes.length,'Expected an app-owned DSH process configuration');
+ const dshDirectory=path.join(path.dirname(archive),'agent-runtimes','dsh');
+ const runtime=JSON.parse(await fs.readFile(path.join(dshDirectory,'runtime.json'),'utf8'));
+ const sdk=JSON.parse(await fs.readFile(path.join(dshDirectory,'node_modules','@deepseek-ai','dsh','package.json'),'utf8'));
+ assert.equal(sdk.version,runtime.version);
+ const adapter=path.join(dshDirectory,'node_modules','@deepseek-ai','dsh-llm-pi-ai','lib','index.js');
+ const policy=path.join(path.dirname(archive),'studio-dsh','dsh-policy.mjs');
+ for(const id of processes){
+  const config=JSON.parse(await fs.readFile(path.join(modelRoot,'processes',id,'profiles','studio','cordis.patch.yml'),'utf8'))[0].insert;
+  samePath(config.find(plugin=>plugin.id==='models').name,adapter);
+  samePath(config.find(plugin=>plugin.id==='studio-policy').name,policy);
+  samePath(config.find(plugin=>plugin.id==='attachments').config.dshHome,modelRoot);
+ }
+ return {version:runtime.version,adapterSha256:await fileSha256(adapter),policySha256:await fileSha256(policy)};
+}
+async function checkConversation(){
+ phase='startup';
+ await page.getByRole('button',{name:/^(?:跳过引导|Skip setup(?: guide)?)$/i}).click();
+ assert.deepEqual(await page.evaluate(()=>window.studio.invoke('conversation.list')),[]);
  await page.evaluate(async ({baseUrl,vision})=>{
   window.studio.onEvent(e=>{if(e.method.startsWith('turn/')||e.method==='studio/codexDisconnected'){window.fixtureEvents??=[];window.fixtureEvents.push({method:e.method,turn:e.params?.turn?.id,status:e.params?.turn?.status,thread:e.params?.threadId});}});
   await window.studio.invoke('models.profiles.save',{profile:{id:'turn-check',provider:'compatible',name:'Local turn fixture',baseUrl,api:'openai-completions',models:[{id:'local-turn-fixture',input:vision?['text','image']:['text'],reasoningEfforts:false}],defaultModel:'local-turn-fixture'},apiKey:''});
@@ -54,12 +127,19 @@ try{
  if(attachments){
   phase='select files in fresh draft';
   const image=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=3;canvas.height=2;const ctx=canvas.getContext('2d');ctx.fillStyle='rgb(180,35,70)';ctx.fillRect(0,0,3,2);return canvas.toDataURL('image/png').split(',')[1];});
+  const imageBytes=Buffer.from(image,'base64');
   await page.getByTestId('chat-file-picker').setInputFiles([
    {name:'settings.in',mimeType:'text/plain',buffer:Buffer.from('fixture_integrator npt 310 K')},
-   {name:'plane.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')},
+   {name:'plane.png',mimeType:'image/png',buffer:imageBytes},
   ]);
+  await page.locator('.composer').getByRole('button',{name:'settings.in',exact:true}).click();
+  assert.equal(await page.getByTestId('chat-file-preview').locator('pre').textContent(),'fixture_integrator npt 310 K');
+  await page.keyboard.press('Escape');
   await page.locator('.composer').getByRole('button',{name:'plane.png',exact:true}).click();
-  await page.getByTestId('chat-file-preview').locator('img').waitFor();
+  const preview=page.getByTestId('chat-file-preview').locator('img');
+  await preview.waitFor();
+  assert.equal(await preview.getAttribute('src'),'data:image/png;base64,'+image);
+  originalFigure={bytes:imageBytes.length,sha256:sha256(imageBytes)};
   await page.keyboard.press('Escape');
  }
  phase='initial reply';await composer.fill('Fixture first question');await composer.press('Enter');
@@ -71,6 +151,8 @@ try{
   assert.match(wireImage||'',/^data:image\/(png|jpeg|webp);base64,/);
   const pixel=await page.evaluate(async url=>{const img=new Image();img.src=url;await img.decode();const cv=document.createElement('canvas');cv.width=img.width;cv.height=img.height;const ctx=cv.getContext('2d');ctx.drawImage(img,0,0);return [img.width,img.height,...ctx.getImageData(0,0,1,1).data];},wireImage);
   assert.deepEqual(pixel.slice(0,2),[3,2]);assert(pixel[2]>160&&pixel[3]<55&&pixel[4]>50&&pixel[4]<90);
+  const bytes=Buffer.from(wireImage.slice(wireImage.indexOf(',')+1),'base64');
+  wireFigure={bytes:bytes.length,sha256:sha256(bytes),pixels:pixel};
  }
  phase='steering';await composer.fill('Fixture guidance for this reply');await page.getByTestId('agent-steer').click();
  await page.getByText('Fixture guidance for this reply',{exact:true}).waitFor();
@@ -122,17 +204,46 @@ try{
   assert.equal(await composer.inputValue(),'');await composer.press('Enter');
   await page.getByText('Visible fixture output 5',{exact:true}).waitFor();assert(JSON.stringify(requests[4]).includes('last line 221'));
   await page.waitForFunction(()=>window.fixtureEvents.filter(e=>e.method==='turn/completed').length===4);
-  phase='reopen attachment history';await page.reload();
+  phase='reopen attachment history';
+  if(packaged){
+   await app.close();app=null;
+   const reopened=await launch();
+   assert.notEqual(reopened.pid,runtime.pid);
+   runtime.reopenedPid=reopened.pid;
+  }else await page.reload();
   await page.locator('.message.user').getByRole('button',{name:'settings.in',exact:true}).first().click({timeout:18000});
   assert.equal(await page.getByTestId('chat-file-preview').locator('pre').textContent(),'fixture_integrator npt 310 K');
   await page.keyboard.press('Escape');
+  await page.locator('.message.user').getByRole('button',{name:'plane.png',exact:true}).first().click();
+  const reopenedImage=await page.getByTestId('chat-file-preview').locator('img').getAttribute('src');
+  assert.equal(sha256(Buffer.from(reopenedImage.split(',')[1],'base64')),originalFigure.sha256);
+  await page.keyboard.press('Escape');
+  for(const text of ['Fixture guidance for this reply','Visible fixture output 3','Visible fixture output 5'])await page.getByText(text,{exact:true}).first().waitFor();
   assert.equal(await page.locator('.message-text').filter({hasText:'user-selected attachments v1'}).count(),0);
+  assert.equal(requests.length,5,'Restart and history preview must not replay a model call');
+  if(packaged)await page.screenshot({path:path.join(dir,'reopened-history.png')});
  }
- const result={status:'passed',profile:'isolated',scope:'production Electron React/preload/main IPC, official DSH, deterministic loopback OpenAI-compatible endpoint',httpRequests:requests.length,modelThreads:1,turns:[...history.turns.map(t=>t.status),...attachments?['completed']:[]],keptPartial:true,continuedWithPriorContext:true,...attachments?{queuedInBackground:true,originalAndQueuedTextRead:true,decodedImagePixelsVerified:true,pastedFileOnly:true,reopenedHistoryPreview:true}:{}};
+ return {modelThreads:1,turns:[...history.turns.map(t=>t.status),...attachments?['completed']:[]],keptPartial:true,continuedWithPriorContext:true,
+  ...attachments?{queuedInBackground:true,originalAndQueuedTextRead:true,originalFigure,wireFigure,pastedFileOnly:true,reopenedHistoryPreview:true}:{}};
+}
+const scope=startupOnly?'desktop startup and isolation':'production Electron React/preload/main IPC, official DSH, deterministic loopback OpenAI-compatible endpoint';
+try{
+ if(packaged){
+  phase='package identity';
+  const [binarySha256,archiveSha256]=await Promise.all([fileSha256(executablePath),fileSha256(archive)]);
+  artifacts={binarySha256,archiveSha256};
+ }
+ phase='packaged or source launch';
+ runtime=await launch();
+ const conversation=startupOnly?{}:await checkConversation();
+ if(packaged&&!startupOnly){phase='bundled DSH receipts';artifacts.dsh=await assertPackagedHarness();}
+ assert.deepEqual(rendererErrors,[]);
+ const result={status:'passed',profile:'isolated',scope,runtime,artifacts,httpRequests:requests.length,...conversation};
  await fs.writeFile(path.join(dir,'result.json'),JSON.stringify(result,null,2));console.log(dir,result);
 }catch(error){
  console.error('phase',phase,dir,error.message);
- await fs.writeFile(path.join(dir,'result.json'),JSON.stringify({status:'failed',phase,httpRequests:requests.length,error:error.message},null,2));
+ if(page)await page.screenshot({path:path.join(dir,'failed.png'),timeout:5000}).catch(()=>{});
+ await fs.writeFile(path.join(dir,'result.json'),JSON.stringify({status:'failed',scope,phase,runtime,artifacts,httpRequests:requests.length,rendererErrors,error:error.message},null,2));
  process.exitCode=1;
 }finally{
  await app?.close().catch(()=>{});

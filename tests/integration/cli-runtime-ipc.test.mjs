@@ -5,6 +5,12 @@ import vm from 'node:vm';
 import path from 'node:path';
 import ts from 'typescript';
 import {cliRuntimeRequest} from '../../contracts/agent/cli-runtime.mjs';
+import {providerId} from '../../agent/providers/contracts.mjs';
+import {AgentHub} from '../../agent/providers/agent-hub.mjs';
+import {ConversationAgentHub} from '../../agent/providers/conversation-agent-hub.mjs';
+import {selectConversation} from '../../agent/sessions/conversation-selection.mjs';
+import {createParallelAgentWorkflowContext} from '../../agent/sessions/workflow-context.mjs';
+import {TaskRecords} from '../../backend/main/workspace/task-records.mjs';
 const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'utf8'),tree=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
 function nodeText(predicate){let found;function visit(node){if(predicate(node))found=node.getText(tree);ts.forEachChild(node,visit);}visit(tree);assert(found);return found;}
 const callback=route=>{const call=nodeText(node=>ts.isCallExpression(node)&&node.expression.getText(tree)==='handle'&&node.arguments[0]?.text===route);return call.slice(call.indexOf(',')+1,-1);};
@@ -34,19 +40,81 @@ test('native chooser saves only a ready native selection and never accepts a ren
   assert.deepEqual(calls[0],{method:'inspect',value:{provider:'kimi',executable:selected}});assert.equal(calls.filter(call=>call.method==='save').length,status==='ready'?1:0);if(status==='ready')assert.equal(calls[1].value.kimiPath,selected);
  }
 });
-function connectFixture(connect){const events=[],ports={providerId:value=>{if(!['kimi','qwen','codex'].includes(value))throw Error('invalid provider');},agentConnectionSerial:0,resourceRouting:{capture:()=>({selection:null,assertCurrent(){}})},settings:{},catalog:{put:(kind,id,value)=>value},agents:{connect},scientificTools:async()=>({status:'not_run'}),emit:(channel,event)=>events.push(event)};return {events,run:compile(callback('agent.connect'),ports)};}
-test('main emits CLI installation prompt only for missing/incompatible/invalid CLI providers',async()=>{
+function connectFixture(t,connect){
+ const events=[],rows=new Map(),catalog={
+  get:(kind,id)=>rows.get(kind+':'+id),
+  put:(kind,id,value)=>{rows.set(kind+':'+id,value);return value;},
+ };
+ const records=new TaskRecords(catalog,event=>events.push(event));
+ const createCodex=()=>({close(){}});
+ const agents=new ConversationAgentHub({initialProvider:'kimi',authCodex:createCodex(),createCodex,catalog,root:process.cwd(),
+  settings:()=>({}),vault:{get:()=>null},createHub:options=>{
+   const hub=new AgentHub(options);
+   hub.connect=connect;
+   return hub;
+  },runSession:(identity,run)=>workflowContext.runInSession(identity,run),dropSession:id=>workflowContext.dropSession(id)});
+ const workflowContext=createParallelAgentWorkflowContext({records,selectedProvider:()=>agents.foregroundProvider});
+ t.after(()=>agents.close());
+ const ports={providerId,workflowContext,agentConnectAttempts:new Map(),resourceRouting:{capture:()=>({selection:null,assertCurrent(){}})},
+  settings:{},catalog,agents,scientificTools:async()=>({status:'not_run'}),subscriptionRuntime:{envImport:{settings:()=>({defaults:null})}},
+  emit:(channel,event)=>{assert.equal(channel,'studio:event');events.push(event);}};
+ const select=(provider,threadId)=>{
+  if(threadId)records.remember({provider,threadId,name:threadId,projectId:null});
+  return selectConversation({catalog,records,workflowContext,agents},threadId?{id:provider+':'+threadId}:{new:true,provider});
+ };
+ return {events,agents,select,run:compile(callback('agent.connect'),ports)};
+}
+test('main emits CLI installation prompt only for a current, actionable CLI failure',async t=>{
  for(const status of ['missing','incompatible','invalid','failed']){
-  const readiness={provider:'kimi',status},f=connectFixture(async()=>{throw Object.assign(Error('fixture'),{readiness});});
-  if(status==='failed')await assert.rejects(f.run({provider:'kimi'}));else assert.deepEqual(await f.run({provider:'kimi'}),{cliRequired:readiness});
-  assert.equal(f.events.filter(event=>event.method==='studio/cliRuntimeRequired').length,status==='failed'?0:1);
+  const readiness={provider:'kimi',status},failure=Object.assign(Error('fixture'),{readiness});
+  const f=connectFixture(t,async()=>{throw failure;});
+  if(status==='failed')await assert.rejects(f.run({provider:'kimi'}),error=>error===failure);
+  else assert.deepEqual(await f.run({provider:'kimi'}),{cliRequired:readiness});
+  assert.deepEqual(f.events,status==='failed'?[]:[{method:'studio/cliRuntimeRequired',provider:'kimi',params:readiness}]);
  }
- const f=connectFixture(async()=>{throw Object.assign(Error('fixture'),{readiness:{provider:'codex',status:'missing'}});});await assert.rejects(f.run({provider:'codex'}));assert.equal(f.events.length,0);
+ const codexFailure=Object.assign(Error('fixture'),{readiness:{provider:'codex',status:'missing'}});
+ const f=connectFixture(t,async()=>{throw codexFailure;});
+ await assert.rejects(f.run({provider:'codex'}),error=>error===codexFailure);
+ assert.deepEqual(f.events,[]);
 });
-test('late old connect failure does not publish a wrong-provider global dialog',async()=>{
- let reject;const pending=new Promise((resolve,no)=>{reject=no;}),f=connectFixture(provider=>provider==='kimi'?pending:Promise.resolve({protocolVersion:1}));
- const first=f.run({provider:'kimi'}),rejected=assert.rejects(first);await f.run({provider:'qwen'});reject(Object.assign(Error('old missing'),{readiness:{provider:'kimi',status:'missing'}}));await rejected;
- assert(!f.events.some(event=>event.method==='studio/cliRuntimeRequired'));
+test('late CLI failure stays with its caller when foreground changes and other sessions remain independent',async t=>{
+ let rejectBlank;
+ const blank=new Promise((_resolve,reject)=>{rejectBlank=reject;});
+ const draft=connectFixture(t,async provider=>provider==='kimi'?blank:{protocolVersion:1});
+ const blankFailure=Object.assign(Error('old blank connection'),{readiness:{provider:'kimi',status:'missing'}});
+ const blankRejected=assert.rejects(draft.run({provider:'kimi'}),error=>error===blankFailure);
+ assert.equal((await draft.run({provider:'qwen'})).protocolVersion,1);
+ rejectBlank(blankFailure);
+ await blankRejected;
+ assert.equal(draft.agents.foregroundProvider,'qwen');
+ assert.deepEqual(draft.events,[{method:'studio/toolsStatus',provider:'qwen',params:{status:'not_run'}}]);
+ for(const returnToOriginal of [false,true]){
+  let reject;
+  const pending=new Promise((_resolve,no)=>{reject=no;}),seen=[];
+  const f=connectFixture(t,async(provider,{threadId})=>{
+   seen.push([provider,threadId]);
+   if(threadId==='original')return pending;
+   return {protocolVersion:1};
+  });
+  await f.select('kimi','original');
+  const original=f.agents.sessionIdentity('kimi','original');
+  const failure=Object.assign(Error('old missing'),{readiness:{provider:'kimi',status:'missing'}});
+  const rejected=assert.rejects(f.run({provider:'kimi',threadId:'original'}),error=>error===failure);
+  const nextProvider=returnToOriginal?'kimi':'qwen';
+  await f.select(nextProvider,'newer');
+  assert.equal((await f.run({provider:nextProvider,threadId:'newer'})).protocolVersion,1);
+  const foreground=f.agents.sessionIdentity(nextProvider);
+  assert.equal((await f.run({provider:'kimi',threadId:'background'})).protocolVersion,1);
+  assert.equal(f.agents.sessionIdentity(nextProvider).id,foreground.id);
+  if(returnToOriginal){
+   await f.select('kimi','original');
+   assert.equal(f.agents.sessionIdentity('kimi').id,original.id);
+  }
+  reject(failure);
+  await rejected;
+  assert.deepEqual(seen,[['kimi','original'],[nextProvider,'newer'],['kimi','background']]);
+  assert(!f.events.some(event=>event.method==='studio/cliRuntimeRequired'));
+ }
 });
 test('preload exposes four named runtime routes without a generic command or download surface',async()=>{
  const calls=[];let studio;vm.runInNewContext(fs.readFileSync(new URL('../../desktop/preload.cjs',import.meta.url),'utf8'),{require:name=>{assert.equal(name,'electron');return {contextBridge:{exposeInMainWorld:(name,value)=>{studio=value;}},ipcRenderer:{invoke:async(channel,data)=>{calls.push({channel,data});return {};}}};}});

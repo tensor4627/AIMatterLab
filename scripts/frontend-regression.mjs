@@ -264,37 +264,66 @@ try{
  for(const guided of [false,true])await check(guided?'interaction-experience-guided-ssh':'app-cold-start-three-pane-strict-mode-terminal-handoff',async p=>{
   await p.evaluate(async guided=>{
    const test=window.__test,original=window.studio.invoke,profile={id:'fixture-ssh',version:1,kind:'ssh',name:'Fixture SSH',host:'fixture.invalid',username:'fixture',port:22,ssh_client:'ssh',mode:'interactive'};
-   let connection=null;let session={connectionId:'fixture-connection',sessionId:'fixture-terminal',name:'Fixture SSH',kind:'ssh',mode:'interactive',owner:'human',ownerEpoch:1,alive:true,status:'running',sequence:0,resource:{kind:'ssh-connection',connectionId:'fixture-connection',profileId:profile.id,profileVersion:profile.version}};
-   test.terminalResource={schemaVersion:2,selectionId:'fixture-selection',kind:'ssh-connection',connectionId:'fixture-connection',profileId:profile.id,profileVersion:profile.version,sessionId:session.sessionId,status:'selected',operator:'human',processStatus:'running',alive:true,agentReady:false,reason:null,authentication:'not_observed',managedRuns:false};
+   const target={connectionId:'fixture-connection',profileId:profile.id,profileVersion:profile.version};
+   const session={connectionId:target.connectionId,sessionId:'fixture-terminal',name:profile.name,kind:'ssh',mode:'interactive',
+    owner:'human',ownerEpoch:1,humanInputSequence:0,alive:true,status:'running',sequence:0,resource:{kind:'ssh-connection',...target}};
+   const root='/home/fixture/AIMatterLab';
+   const preview={...target,schemaVersion:2,resourceName:profile.name,root,account:'fixture',hostname:'fixture-host',
+    directories:[root+'/workfile',root+'/software'],status:'confirmation_required',confirmationId:'fixture-review'};
+   let connection=null,publication=null,confirmed=false;
+   const matchesTarget=data=>Object.keys(target).every(key=>data[key]===target[key]);
    window.studio.invoke=async(method,data)=>{
     if(guided&&method==='state')return {...await original(method,data),setupGuide:{page:'compute',directory:'fixture',directoryKind:'profile'}};
-    if(guided&&method==='compute.sshConnection.loginStatus')return {connection,login:{status:'waiting_authentication'}};
     if(method==='compute.profiles.list')return {profiles:[profile],defaults:{distribution:'Ubuntu',root:'~/fixture',port:8767,ssh_client:'ssh'}};
     if(method==='compute.profiles.read')return profile;
     if(method==='compute.sshConnection.list')return {connections:connection?[connection]:[]};
-    if(method==='compute.sshConnection.open'){test.calls.push({method,data});connection={schemaVersion:2,connectionId:'fixture-connection',profileId:profile.id,profileVersion:profile.version,loginRequestId:data.requestId,status:'authenticating',authentication:'pending',capabilities:{multiplex:true},terminalSessionIds:[],serviceIds:[],revision:1};return connection;}
-    if(method==='compute.sshConnection.completeLogin'||method==='compute.sshConnection.loginStatus'){connection={...connection,status:'authenticated',authentication:'verified',terminalSessionIds:[session.sessionId],revision:2};return {connection,shell:session,login:{status:'complete'}};}
+    if(method==='compute.sshConnection.open'){
+     test.calls.push({method,data});
+     connection={...target,schemaVersion:2,loginRequestId:data.requestId,status:'authenticating',authentication:'pending',
+      capabilities:{multiplex:true},terminalSessionIds:[],serviceIds:[],revision:1};
+     return connection;
+    }
+    if(method==='compute.sshConnection.completeLogin'||method==='compute.sshConnection.loginStatus'){
+     test.calls.push({method,data});
+     if(data.connectionId!==connection?.connectionId||data.requestId!==connection?.loginRequestId)throw Error('ssh_request_changed');
+     if(guided)return {connection,login:{status:'waiting_authentication'}};
+     connection={...connection,status:'authenticated',authentication:'verified',terminalSessionIds:[session.sessionId],revision:2};
+     return {connection,shell:session,login:{status:'complete'}};
+    }
     if(method==='compute.sshConnection.authRead')return {connectionId:connection.connectionId,state:connection,output:'',cursor:0,dropped:false};
     if(method==='compute.sshConnection.authResize')return {resized:true};
     if(method==='compute.sshService.status')return {schemaVersion:2,status:'disconnected',workflowReady:false,serviceActive:false};
-
-    if(method==='compute.resource.status')return connection?.status==='authenticated'?test.terminalResource:{schemaVersion:2,selectionId:null,kind:null,status:'none'};
-    if(method==='compute.resource.activate')return test.terminalResource;
-    if(method.startsWith('sharedTerminal.')){
+    if(method==='compute.resource.status')return {schemaVersion:2,selectionId:null,kind:null,status:'none'};
+    if(method==='compute.managed.snapshot')return {resources:publication?[publication]:[],conversations:[],sources:[]};
+    if(method==='compute.managed.serviceStatus'){
      test.calls.push({method,data});
-     if(method==='sharedTerminal.open')return session;
-     if(method==='sharedTerminal.list')return {sessions:[session]};
-     if(method==='sharedTerminal.read')return {...session,output:data.cursor?'':'Fixture login complete\r\nLAST PROMPT> ',cursor:1,dropped:false};
-     if(method==='sharedTerminal.resize')return {accepted:true};
-     if(method==='sharedTerminal.owner'){
-      session={...session,owner:data.owner,ownerEpoch:session.ownerEpoch+1};test.terminalResource={...test.terminalResource,operator:data.owner,agentReady:data.owner==='agent'};
-      test.conversation={id:'codex:terminal-thread',provider:'codex',threadId:'terminal-thread',name:'Terminal conversation',projectId:null,taskId:null};
-      return {...session,conversation:test.conversation};
-     }
+     if(!publication||!matchesTarget(data))throw Error('managed_compute_resource_unavailable');
+     return {...target,schemaVersion:2,status:'idle',operator:'human',workflowReady:false,serviceActive:false};
     }
-    if(method==='conversation.select'&&data.new)return {fresh:true};
-    if(method==='conversation.list')return test.conversation?[test.conversation]:[];
-    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)){test.calls.push({method,data});return {thread:{id:data.params.threadId,turns:[]},model:'fixture-model'};}
+    if(['compute.resourceWorkspace.preview','compute.resourceWorkspace.confirm','compute.managed.publish'].includes(method)){
+     test.calls.push({method,data});
+     if(connection?.authentication!=='verified'||!matchesTarget(data))throw Error('ssh_connection_changed');
+     if(method==='compute.resourceWorkspace.preview')return preview;
+     if(method==='compute.resourceWorkspace.confirm'){
+      if(data.confirmationId!==preview.confirmationId)throw Error('Unexpected workspace confirmation');
+      confirmed=true;
+      return {...preview,status:'confirmed',confirmationId:undefined};
+     }
+     if(!confirmed)throw Error('Workspace confirmation is required before publication');
+     publication={...target,kind:'ssh',resourceId:'ssh:'+profile.id,name:profile.name,serviceStatus:'idle',terminalReady:true};
+     test.events.forEach(notify=>notify({method:'studio/managedActivity'}));
+     return publication;
+    }
+    if(method==='sharedTerminal.list')return {sessions:connection?.authentication==='verified'?[session]:[]};
+    if(method==='sharedTerminal.read')return {...session,output:data.cursor?'':'Fixture login complete\r\nLAST PROMPT> ',cursor:1,dropped:false};
+    if(method==='sharedTerminal.resize')return {accepted:true};
+    if(method==='sharedTerminal.input'){
+     test.calls.push({method,data});
+     if(data.sessionId!==session.sessionId||data.ownerEpoch!==session.ownerEpoch||data.inputSequence!==session.humanInputSequence+1)throw Error('ssh_control_identity_changed');
+     session.humanInputSequence=data.inputSequence;
+     return {accepted:true,inputSequence:data.inputSequence};
+    }
+    if(method==='conversation.select'&&data.new){test.calls.push({method,data});return {fresh:true};}
     return original(method,data);
    };
    const App=(await import('/frontend/app/App.tsx')).default;
@@ -320,17 +349,47 @@ try{
   await p.waitForFunction(()=>window.__test.calls.some(call=>call.method==='worker.request'&&call.data.target==='/api/runs'));
   await p.getByTestId('new-conversation').click();await p.locator('.composer textarea').fill('Keep these unsent cluster instructions');
   await p.getByTestId('unified-compute-entry').click();await p.getByTestId('saved-compute-profile').getByRole('button',{name:'交互式登录',exact:true}).click();
-  await p.locator('.shared-terminal-host .xterm-screen').waitFor();assert.equal(await p.locator('.agent-panel').isVisible(),true);assert.equal(await p.locator('.main-column').isVisible(),true);
-  await p.getByTestId('ssh-shell-owner').waitFor();
-  const host=await p.locator('.shared-terminal-host').elementHandle();
-  assert.equal(await p.getByTestId('ssh-shell-owner').isEnabled(),true);await p.getByTestId('ssh-shell-owner').click();
-  await p.getByTestId('ssh-shell-owner').filter({hasText:'我来操作'}).waitFor();
-  await p.waitForFunction(()=>window.__test.calls.some(call=>call.method==='agent.rpc'&&call.data.method==='thread/read'&&call.data.params.threadId==='terminal-thread'));
+  const terminal=p.getByRole('region',{name:'SSH 终端',exact:true});
+  await terminal.locator('.xterm-screen').waitFor();
+  assert.equal(await p.locator('.agent-panel').isVisible(),true);
+  assert.equal(await p.locator('.main-column').isVisible(),true);
+  const host=await terminal.elementHandle();
+  await p.getByTestId('ssh-publish-resource').click();
+  const review=p.getByTestId('resource-workspace-review');
+  await review.waitFor();
+  assert.match(await review.innerText(),/fixture@fixture-host/);
+  assert.equal(await review.getByTestId('resource-workspace-resolved').innerText(),'/home/fixture/AIMatterLab');
+  assert.equal(await p.evaluate(()=>window.__test.calls.some(call=>call.method==='compute.managed.publish')),false);
+  await review.getByTestId('resource-workspace-confirm').click();
+  await review.waitFor({state:'hidden'});
+  await p.getByTestId('ssh-managed-status').waitFor();
   assert.equal(await p.locator('.composer textarea').inputValue(),'Keep these unsent cluster instructions');
-  assert.equal(await host.evaluate(node=>node===document.querySelector('.shared-terminal-host')),true);
+  assert.equal(await host.evaluate(node=>node.isConnected&&node===document.querySelector('[data-guide-target="ssh-shell"]')),true);
   await chooseLayout(p,'priority-chat');assert.equal(await p.locator('.main-column').isVisible(),true);assert.equal(await p.locator('.agent-panel').isVisible(),true);
-  const calls=await p.evaluate(()=>window.__test.calls);assert.equal(calls.filter(call=>call.method==='compute.sshConnection.open').length,1);
-  assert.equal(calls.filter(call=>call.method==='agent.rpc'&&['turn/start','thread/start'].includes(call.data.method)).length,0);
+  assert.equal(await host.evaluate(node=>node.isConnected&&node===document.querySelector('[data-guide-target="ssh-shell"]')),true);
+  await terminal.locator('.xterm-helper-textarea').press('x');
+  await p.waitForFunction(()=>window.__test.calls.some(call=>call.method==='sharedTerminal.input'));
+  const calls=await p.evaluate(()=>window.__test.calls);
+  const requestId=calls.find(call=>call.method==='compute.sshConnection.open')?.data.requestId;
+  assert.equal(typeof requestId,'string');
+  const ref={connectionId:'fixture-connection',profileId:'fixture-ssh',profileVersion:1};
+  assert.deepEqual(calls.filter(call=>call.method==='compute.sshConnection.open').map(call=>call.data),[{profileId:ref.profileId,profileVersion:ref.profileVersion,requestId}]);
+  const login=calls.filter(call=>['compute.sshConnection.loginStatus','compute.sshConnection.completeLogin'].includes(call.method));
+  assert.ok(login.length>0);
+  assert.ok(login.every(call=>call.data.connectionId===ref.connectionId&&call.data.requestId===requestId));
+  assert.deepEqual(calls.filter(call=>call.method.startsWith('compute.resourceWorkspace.')||call.method==='compute.managed.publish'),[
+   {method:'compute.resourceWorkspace.preview',data:ref},
+   {method:'compute.resourceWorkspace.confirm',data:{...ref,confirmationId:'fixture-review'}},
+   {method:'compute.managed.publish',data:ref}
+  ]);
+  const input=calls.filter(call=>call.method==='sharedTerminal.input').map(call=>call.data);
+  assert.deepEqual(input.map(({requestId,...receipt})=>receipt),[{sessionId:'fixture-terminal',ownerEpoch:1,data:'x',inputSequence:1}]);
+  assert.equal(typeof input[0].requestId,'string');
+  const unwanted=['compute.resource.activate','compute.sshService.connect','compute.managed.configureService','compute.managed.updateService',
+   'compute.managed.useForWorkflow','compute.sshConnection.openShell','sharedTerminal.open','sharedTerminal.owner'];
+  assert.deepEqual(calls.filter(call=>unwanted.includes(call.method)),[]);
+  assert.deepEqual(calls.filter(call=>call.method==='agent.rpc'&&['thread/start','thread/read','thread/resume','turn/start'].includes(call.data.method)),[]);
+  assert.deepEqual(calls.filter(call=>call.method==='conversation.select').map(call=>call.data.new),[true]);
   await p.screenshot({path:path.join(out,'app-three-pane-terminal-handoff.png')});
  });
  await check('settings-save-revision-and-close-pending',async p=>{

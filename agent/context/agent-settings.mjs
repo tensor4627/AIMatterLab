@@ -27,6 +27,7 @@ const workspaceSeeds=[
  [2252,'2dd22981815c84546f4464aa328fd69ff2c2267c7b062b8d21fcba1f8d8daf45'], // 0.1.11
  [2471,'6b9dbccd9c1ea2f25afacf9ba7b601f4d93351b2549890cc0c631328b93e7a8d'], // 0.1.12–0.1.18
  [2435,'ecfec12d13a6adf95bd4a62cdc2041a4bc70360ef47bb0279b122c5322479148'], // prior hosted-resource index
+ [2384,'ed266f70e24b03d8b8637557a8d13d247c75fca7c911f80f9e70c6a446748af7'], // prior runtime guide
 ];
 
 function workspaceNotes(text) {
