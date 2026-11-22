@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useId,useRef,useState} from 'react';
 import {Plus,Trash2,ChevronDown,KeyRound} from 'lucide-react';
 import {invoke} from '../../api/studio';
 import {API_PRESETS,REASONING_LEVELS} from '../../../contracts/agent/model-profiles.mjs';
@@ -7,6 +7,7 @@ import {t} from '../../ui/i18n';
 import './model-providers.css';
 import LoadingFeedback from '../../ui/LoadingFeedback';
 import Notice,{type NoticeSeverity} from '../../ui/Notice';
+import Tooltip,{HelpTip} from '../../ui/Tooltip';
 import {redactTranscriptText} from '../../../contracts/agent/transcript-sanitizer.mjs';
 type ModelAction='discover'|'save'|'test'|'remove';
 const actionLabels:Record<ModelAction,string>={discover:'正在获取可用模型',save:'正在保存服务商配置',test:'正在验证 API 连接',remove:'正在移除服务商'};
@@ -35,17 +36,37 @@ export default function ModelProviders({provider,disabled=false,onError,onConfig
  async function test(){if(!draft||!draft.revision||revision.current>0)return;const snapshot=draft,run=epoch.current;await perform('test',async()=>{const result=await invoke<{model:string;status:string}>('models.profiles.test',{id:snapshot.id,model:snapshot.defaultModel||snapshot.models[0].id});if(!isCurrent(run))return;if(result.status!=='passed')throw Error('API 连接测试未完成。');feedback(t('测试调用成功')+' · '+result.model);onTested?.(result.model);});}
  function acceptCandidates(){if(!draft||!candidates)return;const old=draft.models.filter(v=>v.id),ids=new Set(old.map(v=>v.id));patch({models:[...old,...candidates.filter(v=>chosen.includes(v.id)&&!ids.has(v.id))]});setCandidates(null);}
  const locked=disabled||pending!==null,dirty=revision.current>0||!draft?.revision;
- return <section className="model-providers" data-testid="model-providers"><p className="muted">{provider==='qwen'?t('Token Plan、旧 Coding Plan 和按量 API 均使用 API Key；无需 OAuth 登录或 Qwen CLI。请选择与你订阅一致的地址。'):t('为每个 API 服务分别配置地址、协议和模型。密钥由主进程加密保存。')}</p>
-  {loading?<p role="status">{t('正在读取服务商配置…')}</p>:<><div className="model-provider-list">{profiles.map(profile=><button className={'model-provider-row '+(draft?.id===profile.id?'selected':'')} key={profile.id} data-guide-target="api-profile" data-testid={'provider-row-'+profile.id} onClick={()=>edit(profile)} disabled={locked}><KeyRound size={16}/><span><strong>{profile.name}</strong><small>{profile.models.length} {t('个模型')} · {profile.requiresApiKey===false&&!profile.credentialStored?t('本机服务无需密钥'):profile.credentialStored?t('已保存密钥'):t('未保存密钥')}</small></span><ChevronDown size={16}/></button>)}</div><button className="button" data-testid="add-api-provider" data-guide-target="add-api" disabled={locked} onClick={()=>edit(initialProfile(provider))}><Plus size={15}/>{t('添加服务商')}</button></>}
+ const fieldId=useId();
+ return <section className="model-providers" data-testid="model-providers">
+  {loading?<p role="status">{t('正在读取服务商配置…')}</p>:<>
+   {profiles.length>0&&<div className="model-provider-list">{profiles.map(profile=>
+    <button className={'model-provider-row '+(draft?.id===profile.id?'selected':'')} key={profile.id} data-guide-target="api-profile" data-testid={'provider-row-'+profile.id} onClick={()=>edit(profile)} disabled={locked} aria-pressed={draft?.id===profile.id}>
+     <KeyRound size={16} aria-hidden="true"/>
+     <span><strong>{profile.name}</strong><small>{profile.models.length} {t('个模型')} · {profile.requiresApiKey===false&&!profile.credentialStored?t('本机服务无需密钥'):profile.credentialStored?t('已保存密钥'):t('未保存密钥')}</small></span>
+     <ChevronDown size={16} aria-hidden="true"/>
+    </button>)}</div>}
+   <button className="button" data-testid="add-api-provider" data-guide-target="add-api" disabled={locked} onClick={()=>edit(initialProfile(provider))}><Plus size={15}/>{t('添加服务商')}</button>
+  </>}
   {draft&&<fieldset className="model-provider-editor" disabled={locked} data-testid="model-provider-editor"><legend>{t('服务商配置')}</legend>
-   <label>{t('配置预设')}<select data-testid="provider-preset" value={draft.preset} onChange={e=>{const preset=e.target.value,v=API_PRESETS[preset];patch({preset,name:v.name,baseUrl:v.baseUrl,api:v.api,authMode:'api-key',models:[blankModel()],defaultModel:''});setKey('');}}>{Object.entries(API_PRESETS).filter(([id])=>provider==='qwen'||id==='custom'||id==='token-cn').map(([id,v])=><option key={id} value={id}>{v.name}</option>)}</select></label>
-   <label>{t('服务商名称')}<input data-testid="provider-name" value={draft.name} onChange={e=>patch({name:e.target.value})}/></label>
-   <label>Base URL<input data-testid="provider-base-url" value={draft.baseUrl} onChange={e=>patch({baseUrl:e.target.value})} placeholder="https://example.com/v1"/></label>
-   <label>{t('API 协议')}<select data-testid="provider-protocol" value={draft.api} onChange={e=>{const api=e.target.value as ModelProfile['api'];patch({api,...api!=='openai-completions'?{models:draft.models.map(({thinkingFormat,supportsReasoningEffort,supportsDeveloperRole,requiresReasoningContentOnAssistantMessages,requiresThinkingAsText,...model})=>model)}:{}});}}><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
+   <div className="model-field-grid">
+    <div className="model-field">
+     <div className="model-field-label"><label htmlFor={fieldId+'-preset'}>{t('配置预设')}</label>{provider==='qwen'&&
+      <HelpTip label={t('配置预设')} content={t('Token Plan、旧 Coding Plan 和按量 API 均使用 API Key；无需 OAuth 登录或 Qwen CLI。请选择与你订阅一致的地址。')}/>}</div>
+     <select id={fieldId+'-preset'} data-testid="provider-preset" value={draft.preset} onChange={e=>{const preset=e.target.value,v=API_PRESETS[preset];patch({preset,name:v.name,baseUrl:v.baseUrl,api:v.api,authMode:'api-key',models:[blankModel()],defaultModel:''});setKey('');}}>{Object.entries(API_PRESETS).filter(([id])=>provider==='qwen'||id==='custom'||id==='token-cn').map(([id,v])=><option key={id} value={id}>{v.name}</option>)}</select>
+    </div>
+    <label>{t('服务商名称')}<input data-testid="provider-name" value={draft.name} onChange={e=>patch({name:e.target.value})}/></label>
+    <label>Base URL<input data-testid="provider-base-url" value={draft.baseUrl} onChange={e=>patch({baseUrl:e.target.value})} placeholder="https://example.com/v1"/></label>
+    <label>{t('API 协议')}<select data-testid="provider-protocol" value={draft.api} onChange={e=>{const api=e.target.value as ModelProfile['api'];patch({api,...api!=='openai-completions'?{models:draft.models.map(({thinkingFormat,supportsReasoningEffort,supportsDeveloperRole,requiresReasoningContentOnAssistantMessages,requiresThinkingAsText,...model})=>model)}:{}});}}><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
+   </div>
    {provider==='compatible'&&<label>{t('认证方式')}<select data-testid="provider-auth-mode" value={draft.authMode||'api-key'} onChange={e=>{const authMode=e.target.value as ModelProfile['authMode'];patch({authMode,...authMode==='deepseek-account'?{baseUrl:'https://api.deepseek.com/anthropic',api:'anthropic-messages',models:draft.models.map(({thinkingFormat,supportsReasoningEffort,supportsDeveloperRole,requiresReasoningContentOnAssistantMessages,requiresThinkingAsText,...model})=>model)}:{}});setKey('');}}><option value="api-key">API Key</option><option value="deepseek-account">DeepSeek Account · DSH</option></select></label>}
     {draft.authMode==='deepseek-account'&&<p className="notice">{t('账户令牌与 API Key 不同，仅发送到官方 DeepSeek 地址；过期后需重新导入。')}</p>}
-    <label>{draft.authMode==='deepseek-account'?t('DeepSeek 账户令牌'):'API Key'}<input data-testid="provider-api-key" type="password" autoComplete="new-password" value={key} onChange={e=>{mark();setKey(e.target.value);}} placeholder={draft.credentialStored?t('已保存；同一地址留空即可保留'):t('填写此服务商的密钥')}/><small>{t('更换地址或协议时需要重新输入密钥。')}</small></label>
-   <div className="model-list-heading"><h3>{t('模型列表与能力')}</h3><button className="button" data-testid="discover-api-models" type="button" onClick={()=>void discover()}>{actionLabel('discover','获取可用模型')}</button></div>
+   <div className="model-field">
+    <div className="model-field-label"><label htmlFor={fieldId+'-secret'}>{draft.authMode==='deepseek-account'?t('DeepSeek 账户令牌'):'API Key'}</label>
+     <HelpTip label={draft.authMode==='deepseek-account'?t('DeepSeek 账户令牌'):'API Key'} content={t('为每个 API 服务分别配置地址、协议和模型。密钥由主进程加密保存。')}/></div>
+    <input id={fieldId+'-secret'} aria-describedby={fieldId+'-secret-rules'} data-testid="provider-api-key" type="password" autoComplete="new-password" value={key} onChange={e=>{mark();setKey(e.target.value);}} placeholder={draft.credentialStored?t('已保存；同一地址留空即可保留'):t('填写此服务商的密钥')}/>
+    <small id={fieldId+'-secret-rules'}>{t('更换地址或协议时需要重新输入密钥。')}</small>
+   </div>
+   <div className="model-list-heading"><h3>{t('模型列表与能力')}</h3><Tooltip asChild content={t('模型发现不等于能力验证。')}><button className="button" data-testid="discover-api-models" type="button" onClick={()=>void discover()}>{actionLabel('discover','获取可用模型')}</button></Tooltip></div>
    {message&&messageAction==='discover'&&<Notice severity={message.severity} className="model-settings-message" data-testid="model-provider-feedback">{message.text}</Notice>}
    {candidates&&<div className="model-discovery-picker"><input aria-label={t('搜索发现的模型')} value={query} onChange={e=>setQuery(e.target.value)} placeholder={t('搜索模型')}/><div className="model-discovery-candidates">{candidates.filter(v=>(v.name+' '+v.id).toLowerCase().includes(query.toLowerCase())).map(v=><label className="check-label" key={v.id}><input type="checkbox" checked={chosen.includes(v.id)} onChange={e=>setChosen(old=>e.target.checked?[...old,v.id]:old.filter(id=>id!==v.id))}/>{v.name||v.id}<small>{v.id}</small></label>)}</div><button className="button" type="button" data-testid="adopt-api-models" onClick={acceptCandidates}>{t('加入所选模型')}</button><button className="button" type="button" onClick={()=>setCandidates(null)}>{t('取消')}</button></div>}
    {draft.models.map((model,index)=><div className="api-model-card" key={index} data-testid={'api-model-'+index}><div className="api-model-title"><strong>{model.name||model.id||t('新模型')}</strong><button type="button" className="button" aria-label={t('删除模型')+' '+(index+1)} disabled={locked||draft.models.length===1} onClick={()=>patch({models:draft.models.filter((_,at)=>at!==index)})}><Trash2 size={14}/></button></div>

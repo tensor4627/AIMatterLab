@@ -27,7 +27,7 @@ const taskModule=new Function('t',ts.transpileModule(taskModuleSource,{compilerO
 const navigationModules=Object.fromEntries(['frontend/features/workflows/useToolWorkflowNavigation.ts','frontend/api/tool-workflows.ts','frontend/api/compute-resources.ts','frontend/api/studio.ts'].map(file=>[file,ts.transpileModule(fs.readFileSync(new URL('../../'+file,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
 // App tests explicitly acknowledge the child guide result; no automatic completion.
 export async function completeComputeGuide(h,connected){const guide=h.find(node=>node.type==='./ComputeConnectionGuide');guide.props.onClose(connected);await h.flush();return guide.props;}
-export function appWorkerHarness({override,storage=memoryStorage(),width=1440,managedResources=[]}={}){
+export function appWorkerHarness({override,storage=memoryStorage(),width=1440,managedResources=[],managedConversations=[]}={}){
  const hooks=[],pending=[],listeners=[],calls=[],settings={distribution:'Saved Ubuntu',workerRoot:'~/saved',workerPort:8767,theme:'dark',skillRoots:[]};let cursor=0,dirty=false,tree,disposed=false;
  const useState=initial=>{const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{const value=typeof next==='function'?next(hooks[index].value):next;if(!Object.is(value,hooks[index].value)){hooks[index].value=value;dirty=true;}}];};
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
@@ -70,7 +70,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
   if(name==='../api/compute-resources')return loadNavigation('frontend/api/compute-resources.ts');
   if(name==='../api/conversation-history')return {hasConversationHistory:()=>window.studio?.conversationHistory===true};
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
-  if(name==="../features/compute/useManagedResources")return {useManagedResources:()=>({resources:managedResources,conversations:[],sources:[]})};
+  if(name==="../features/compute/useManagedResources")return {useManagedResources:()=>({resources:managedResources,conversations:managedConversations,sources:[]})};
   if(name==="../features/conversations/useConversationActivity")return {useConversationActivity:()=>[],nextConversationAttention:()=>undefined,activityKey:({provider,threadId})=>provider+':'+threadId};
   if(name==='../features/conversations/EvidenceSelection')return {EvidenceConversation:{Provider:'EvidenceConversation.Provider'},EvidenceSelection:'EvidenceSelection'};
   if(name==="../features/conversations/ConversationResourceStatus")return {__esModule:true,default:'ConversationResourceStatus'};

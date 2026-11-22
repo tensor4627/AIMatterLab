@@ -1,1 +1,8 @@
 .task-stage-editor{display:grid;gap:.65rem;min-width:0;max-width:100%}.task-stage-editor header{display:flex;align-items:center;flex-wrap:wrap;gap:.7rem;justify-content:space-between}.task-stage-editor p,.task-stage-editor code{overflow-wrap:anywhere}.task-stage-editor .stage-native-parameters{display:grid;gap:.75rem;min-width:0}.task-stage-editor button{white-space:normal;text-align:start}.task-stage-editor select{min-width:0;max-width:100%}.task-stage-editor li{margin-block:.7rem}.task-stage-editor [role=alert]{color:var(--danger,#f79797)}
+.task-stage-editor header>h3{font-size:max(1rem,var(--ui-min-font,11px));margin:0}
+.task-stage-editor .stage-native-parameters{grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:10px}
+.stage-native-parameters>:is(details,div:has(.pg-array,.parameter-matrix-wrapper)){grid-column:1/-1}
+.task-stage-editor :is(p,ul){margin-block:4px}
+.task-stage-editor details{border-block-start:1px solid var(--line);padding-block:6px}
+.task-stage-editor .stage-native-parameters>div>details{border:0;padding-block:3px;color:var(--muted)}
+.task-stage-editor>button{justify-self:start;max-width:100%}

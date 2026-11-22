@@ -1,8 +1,10 @@
 import {createPortal} from 'react-dom';
+import {Info} from 'lucide-react';
+import {t} from './i18n';
 import {cloneElement,isValidElement,useEffect,useLayoutEffect,useId,useRef,useState,type ReactNode,type ReactElement} from 'react';
 
 /** A delayed explanation for short labels; actionable warnings stay in the page. */
-export default function Tooltip({content,children,className='',asChild=false}:{content:string;children:ReactNode;className?:string;asChild?:boolean}){
+export default function Tooltip({content,children,className='',asChild=false,activate=false}:{content:string;children:ReactNode;className?:string;asChild?:boolean;activate?:boolean}){
  const anchor=useRef<HTMLSpanElement>(null),popup=useRef<HTMLSpanElement>(null),focused=useRef(false);
  const [position,setPosition]=useState<{left:number;top:number}|null>(null);
  const id=useId(),[open,setOpen]=useState(false),timer=useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -26,6 +28,34 @@ export default function Tooltip({content,children,className='',asChild=false}:{c
  },[open]);
  const explanation=open&&createPortal(<span ref={popup} id={id} role="tooltip" className="explanation-tooltip-content" style={{left:position?.left||0,top:position?.top||0,visibility:position?'visible':'hidden',maxWidth:'min(320px, calc(100vw - 16px))',maxHeight:'calc(100vh - 16px)',overflowY:'auto'}} onMouseEnter={cancel} onMouseLeave={leave}>{content}</span>,document.body);
  const trigger={ref:anchor,'aria-describedby':open?id:undefined,onMouseEnter:show,onMouseLeave:leave,onFocus:()=>{focused.current=true;show();},onBlur:()=>{focused.current=false;hide();}};
- if(asChild&&isValidElement(children)){const child=children as ReactElement<any>,merged:Record<string,unknown>={...trigger};for(const key of ['onMouseEnter','onMouseLeave','onFocus','onBlur'] as const){const own=child.props?.[key];if(typeof own==='function')merged[key]=(event:unknown)=>{own(event);(trigger as any)[key](event);};}return cloneElement(child,merged,child.props.children,explanation);}
+ if(asChild&&isValidElement(children)){
+  const child=children as ReactElement<any>;
+  const merged:Record<string,unknown>={...trigger};
+  if(child.props.ref){
+   const childRef=child.props.ref;
+   merged.ref=(node:HTMLElement|null)=>{
+    anchor.current=node;
+    if(typeof childRef==='function')return childRef(node);
+    childRef.current=node;
+   };
+  }
+  merged['aria-describedby']=[child.props['aria-describedby'],open?id:undefined].filter(Boolean).join(' ')||undefined;
+  for(const key of ['onMouseEnter','onMouseLeave','onFocus','onBlur'] as const){
+   const own=child.props[key];
+   if(own)merged[key]=(event:unknown)=>{own(event);trigger[key]();};
+  }
+  merged.onClick=(event:unknown)=>{
+   if(activate){cancel();setOpen(true);}else{hide();}
+   return child.props.onClick?.(event);
+  };
+  return <>{cloneElement(child,merged)}{explanation}</>;
+ }
  return <span {...trigger} className={'explanation-tooltip '+className} tabIndex={0}>{children}{explanation}</span>;
+}
+
+/** Use beside a field when the explanation has no suitable labeled control. */
+export function HelpTip({label,content}:{label:string;content:string}){
+ return <Tooltip asChild activate content={content}>
+  <button type="button" className="field-help" aria-label={label+' · '+t('帮助')}><Info size={15} aria-hidden="true"/></button>
+ </Tooltip>;
 }

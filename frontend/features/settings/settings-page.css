@@ -1,0 +1,123 @@
+.modal.large:has(.settings-layout) {
+  width:min(880px,94vw);
+  max-width:94vw;
+  container:settings-dialog / inline-size;
+}
+
+.settings-layout {
+  display:grid;
+  grid-template-columns:minmax(156px,.72fr) minmax(0,2fr);
+  gap:clamp(16px,3vw,34px);
+  min-height:min(425px,58vh);
+}
+
+.settings-layout .settings-nav {
+  width:auto;
+  min-width:0;
+  padding-inline-end:14px;
+  gap:2px;
+}
+
+.settings-layout .settings-nav button {
+  border-radius:0 5px 5px 0;
+  border-inline-start:2px solid transparent;
+  padding:8px 10px;
+  min-width:0;
+  line-height:1.35;
+}
+
+.settings-layout .settings-nav button svg {flex:none;}
+.settings-layout .settings-nav button span {overflow-wrap:anywhere;}
+.settings-layout .settings-nav button:hover {background:var(--raised);}
+.settings-layout .settings-nav button.active {
+  background:var(--accent-bg);
+  border-inline-start-color:var(--accent);
+}
+
+.settings-layout .settings-content {
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+}
+
+.settings-section {
+  display:grid;
+  align-content:start;
+  gap:14px;
+  flex:1;
+  min-width:0;
+}
+
+.settings-section > .button {justify-self:start;}
+.settings-section .settings-heading {border-bottom:1px solid var(--line);padding-bottom:9px;}
+.settings-section .settings-heading h2 {margin:0;font-weight:650;}
+.settings-section label {margin:0;}
+.settings-section :is(.button,.check-label) {white-space:normal;text-align:start;}
+.settings-section :is(input,select,textarea) {min-width:0;max-width:100%;}
+.settings-section select {text-overflow:ellipsis;}
+
+.settings-form-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,165px),1fr));
+  align-items:end;
+  gap:10px 14px;
+}
+.settings-form-grid label,.settings-field {display:grid;gap:5px;min-width:0;}
+.settings-field-label {display:flex;align-items:center;gap:6px;}
+.settings-field-label > label {display:block;}
+.settings-font-grid {border-top:1px solid var(--line);padding-top:14px;}
+.settings-section .font-preview {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:3px 14px;
+  margin:0;
+  padding:10px 12px;
+  line-height:1.5;
+  font-size:inherit;
+}
+.settings-section .font-preview span,.settings-note {color:var(--muted);}
+.settings-section .layout-preview {margin:0;min-width:0;}
+.settings-section .layout-preview span {min-width:0;overflow-wrap:anywhere;}
+.settings-section .input-with-button {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:6px;
+}
+.settings-action-line {display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;}
+.settings-action-line > p {flex:1 1 180px;}
+.settings-section .settings-note {margin:0;line-height:1.5;overflow-wrap:anywhere;}
+.settings-section .settings-advanced {padding:0;border-top:1px solid var(--line);margin:0;}
+.settings-section .settings-advanced > summary {padding:9px 0;overflow-wrap:anywhere;}
+.settings-section .settings-advanced[open] > summary {margin-bottom:4px;}
+.settings-section .settings-advanced > .settings-note {margin-top:8px;}
+.settings-section .settings-advanced > .settings-field,
+.settings-section .settings-advanced > .settings-advanced {margin-top:12px;}
+.settings-section .settings-advanced > .button-row {margin:0 0 10px;flex-wrap:wrap;}
+.settings-section .settings-advanced :is(p,label) {overflow-wrap:anywhere;}
+
+.settings-layout .settings-footer {
+  bottom:0;
+  padding:10px 0 2px;
+  margin-top:16px;
+  justify-content:flex-end;
+}
+.settings-layout .settings-footer > span {min-width:0;flex:1 1 100px;}
+.settings-layout .settings-footer > span:empty {display:none;}
+
+@container settings-dialog (max-width:540px) {
+  .settings-layout {grid-template-columns:minmax(0,1fr);gap:12px;}
+  .settings-layout .settings-nav {
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,130px),1fr));
+    border-right:0;
+    border-bottom:1px solid var(--line);
+    padding:0 0 6px;
+  }
+  .settings-layout .settings-nav button {padding:5px 7px;}
+}
+
+@container settings-dialog (max-width:310px) {
+  .settings-section .input-with-button {grid-template-columns:minmax(0,1fr);}
+  .settings-section .input-with-button .button {justify-self:start;}
+}

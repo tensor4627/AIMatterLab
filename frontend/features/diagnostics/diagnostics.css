@@ -1,5 +1,9 @@
 .diagnostic-notice{margin:8px 0}
 .diagnostic-notice p{margin:6px 0}.diagnostic-context{color:var(--muted)}
+.diagnostic-notice .diagnostic-facts{display:flex;gap:3px 12px;flex-wrap:wrap;align-items:baseline;margin-block:4px 8px;color:var(--muted);font-variant-numeric:tabular-nums}
+.diagnostic-notice .diagnostic-context{display:grid;min-width:0;gap:2px;margin:0;overflow-wrap:anywhere}
+.diagnostic-notice .diagnostic-facts small{margin-inline-start:auto}
+.diagnostic-notice .button{max-width:100%;white-space:normal;margin-block-start:6px}
 .diagnostic-notice details>summary,.deployment-diagnostics>details>summary{cursor:pointer}
 .diagnostic-raw{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto}
 .toast.notice-surface{z-index:1000;display:grid;gap:4px 12px;align-items:start;margin:0;width:min(800px,calc(100vw - 32px));max-height:min(60dvh,28rem);border-color:var(--notice-edge);background:color-mix(in srgb,var(--notice-tone) 7%,var(--raised))}

@@ -50,7 +50,27 @@ try{
   await page.reload();await header.waitFor();
  }
  async function scrollTo(y){await scroller.evaluate((el,top)=>el.scrollTop=top,y);await page.evaluate(()=>new Promise(requestAnimationFrame));}
+ async function capture(element,name){
+  const {x,y,width,height}=await element.boundingBox();
+  const png=await app.evaluate(async ({BrowserWindow},rect)=>{
+   const window=BrowserWindow.getAllWindows()[0];
+   return (await window.webContents.capturePage(rect,{stayHidden:true,stayAwake:true})).toPNG().toString('base64');
+  },{x:Math.round(x),y:Math.round(y),width:Math.round(width),height:Math.round(height)});
+  fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(png,'base64'));
+ }
+ async function assertVisibleBoundaries(){
+  const points=await canvas.evaluate(svg=>{
+   const viewport=svg.getBoundingClientRect();
+   return Array.from(svg.querySelectorAll('.roadmap-node:is(.input,.missing,.output)')).map(node=>{
+    const box=node.getBoundingClientRect();
+    const hit=document.elementFromPoint((box.left+box.right)/2,(box.top+box.bottom)/2);
+    return {key:node.getAttribute('data-node-key'),fits:box.left>=viewport.left&&box.right<=viewport.right&&box.top>=viewport.top&&box.bottom<=viewport.bottom,hittable:node.contains(hit)};
+   });
+  });
+  assert(points.length>0&&points.every(node=>node.fits&&node.hittable),JSON.stringify(points));
+ }
  await open(id);
+ await assertVisibleBoundaries();
  assert.equal(await drawing.locator('.roadmap-node.step').count(),4);
  assert.equal(await drawing.locator('.roadmap-edge').count(),10);
  assert.equal(await drawing.locator('.roadmap-runtime').count(),2);
@@ -73,16 +93,16 @@ try{
  assert.equal(await drawing.locator('.roadmap-port text').count(),0);
  assert.equal(await drawing.locator('.roadmap-canvas text').allTextContents().then(names=>names.some(n=>n.includes('…'))),false);
  assert.equal(await drawing.locator('.roadmap-handoff').count(),2);
- await header.locator('h1').click();await node('output:thermo').hover();
- await drawing.screenshot({path:path.join(out,'hover.png')});
+ await header.locator('h1').click();await node('output:thermo').hover();await hint.waitFor();
+ await capture(drawing,'hover');
  await header.locator('h1').click();await hint.waitFor({state:'hidden'});
  checks.push('input, tool, output, in-process module and handoff show the short label and reveal the exact full name on hover and keyboard focus');
- await header.screenshot({path:path.join(out,'expanded.png')});checks.push('four invocations, branching and joining artifact edges, internal runtime ports');
- await scroller.screenshot({path:path.join(out,'parameter-panel.png')});
+ await capture(header,'expanded');checks.push('four invocations, branching and joining artifact edges, internal runtime ports');
+ await capture(scroller,'parameter-panel');
  const execution=page.getByTestId('roadmap-execution');
  await execution.locator(':scope > summary').click();
  assert(await execution.getByRole('button',{name:'核对执行快照'}).isDisabled());
- assert(await execution.getByText('请先保存本地计算项目、环境与资源。').isVisible());
+ assert(await execution.getByText('请先保存计算项目与部署目标。').isVisible());
  assert.equal(await execution.getByLabel('执行回执').count(),0);
  await execution.locator(':scope > summary').click();await scrollTo(0);checks.push('execution panel opens and exposes missing deployment without submitting or claiming a receipt');
  const original=await header.boundingBox();await scrollTo(550);
@@ -104,7 +124,7 @@ try{
  await drawing.locator('[data-node-key="output:report"]').press('Enter');
  assert.match(await drawing.locator('.roadmap-node-detail').innerText(),/所需初始输入/);
  await page.getByRole('button',{name:'关闭节点详情'}).click();
- await drawing.locator('[data-node-key="output:thermo"]').press('Enter');
+ await node('output:thermo').click();
  assert.match(await drawing.locator('.roadmap-node-detail').innerText(),/采样间隔 0\.1 ps/);
  await page.getByRole('button',{name:'在对话中确认'}).click();
  await page.waitForFunction(owner=>localStorage.getItem('studio.conversation')===owner,'deepseek:fixture-'+id);
@@ -122,14 +142,15 @@ try{
  const reduced=await header.boundingBox();assert(reduced.height<original.height-60);
  assert((await mini.boundingBox()).x>(await header.locator('h1').boundingBox()).x);
  await scrollTo(850);assert(Math.abs((await header.boundingBox()).y-original.y)<2);
- await header.screenshot({path:path.join(out,'collapsed.png')});
+ await capture(header,'collapsed');
  await mini.press('Enter');await drawing.waitFor();checks.push('same graph in title thumbnail, space reclaimed, pinned while collapsed, keyboard restores');
  async function resize(width,height){
   await app.evaluate(({BrowserWindow},[w,h])=>{const win=BrowserWindow.getAllWindows()[0];win.setMinimumSize(800,600);win.setContentSize(w,h);},[width,height]);
   await page.waitForFunction(w=>innerWidth===w,width);
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  }
  await resize(1366,768);await scrollTo(0);
- await drawing.screenshot({path:path.join(out,'laptop.png')});
+ await assertVisibleBoundaries();await capture(drawing,'laptop');
  await resize(1024,768);
  await page.evaluate(()=>{
   document.documentElement.dataset.theme='light';
@@ -138,14 +159,20 @@ try{
   window.dispatchEvent(new Event('studio:appearance'));
  });
  const narrow=await canvas.boundingBox();assert(narrow.width>120&&narrow.height>70);
+ await assertVisibleBoundaries();
+ const fitted=await transform();
+ const zoomIn=page.getByRole('button',{name:'放大流程图',exact:true});
+ await zoomIn.focus();await page.keyboard.press('Enter');assert.notEqual(await transform(),fitted);
+ await page.getByRole('button',{name:'适应全图',exact:true}).click();assert.equal(await transform(),fitted);
  await node('output:thermo').focus();await hint.waitFor();
  const bubble=await hint.boundingBox();assert(bubble.x>=narrow.x&&bubble.x+bubble.width<=narrow.x+narrow.width+1);
- await node('output:thermo').press('Enter');await drawing.locator('.roadmap-node-detail').waitFor();
- assert.match(await drawing.locator('.roadmap-node-detail').innerText(),/采样间隔 0\.1 ps/);
+ await node('output:thermo').press('Enter');const detail=drawing.locator('.roadmap-node-detail');await detail.waitFor();
+ assert.match(await detail.innerText(),/采样间隔 0\.1 ps/);
+ assert(await detail.evaluate(node=>parseFloat(getComputedStyle(node).fontSize)>=18));
  await page.getByRole('button',{name:'关闭节点详情'}).click();
  await page.getByRole('button',{name:'适应全图',exact:true}).click();
- await drawing.screenshot({path:path.join(out,'narrow-light.png')});
- checks.push('1366 and 1024 pixel windows, light theme, large type, in-bounds hover and focused offscreen output');
+ await capture(drawing,'narrow-light');
+ checks.push('visible and hittable endpoints at launch, 1366 and 1024 pixels; large text, light theme, keyboard zoom and readable node details');
  await open(old);
  assert.equal(await drawing.locator('.roadmap-node.step').count(),1);
  assert.equal(await drawing.locator('.roadmap-node.output').count(),0);

@@ -19,11 +19,65 @@ export async function frontendContinuousWorkCases({check,out}){
  });
  await check('continuous-work-diagnostic-repair-preserves-draft-and-never-auto-sends',async page=>{
   await page.evaluate(async()=>{
-   const f=window.__test,original=window.studio.invoke;f.conversation={id:'codex:repair-owner',provider:'codex',threadId:'repair-owner',name:'Repair owner',projectId:'project',taskId:'repair-task'};f.task={id:'repair-task',name:'Repair current workflow',provider:'codex',threadId:'repair-owner',projectId:'project',workflowVersion:2,parameterRevision:3,updatedAt:1,parameters:{engine:'pydyn.md'},steps:[],artifacts:[],review:{status:'not_run'},workspaceChoice:'draft',deployment:{revision:2,config:{target:'local',projectId:'project',targetId:'env',inputSource:'local',directoryName:'repair-attempt',maxSeconds:60,gpu:0,resources:{cpus:1,gpus:1,memory_mb:1024,queue:'',account:''}}}};localStorage.setItem('studio.conversation',f.conversation.id);localStorage.setItem('studio.section','agent-task:'+f.task.id);
+   const f=window.__test,original=window.studio.invoke;f.conversation={id:'codex:repair-owner',provider:'codex',threadId:'repair-owner',name:'Repair owner',projectId:'project',taskId:'repair-task'};f.other={...f.conversation,id:'codex:other-owner',threadId:'other-owner',name:'Other conversation',taskId:null};f.task={id:'repair-task',name:'Repair current workflow',provider:'codex',threadId:'repair-owner',projectId:'project',workflowVersion:2,parameterRevision:3,updatedAt:1,parameters:{engine:'pydyn.md'},steps:[],artifacts:[],review:{status:'not_run'},workspaceChoice:'draft',deployment:{revision:2,config:{target:'local',projectId:'project',targetId:'env',inputSource:'local',directoryName:'repair-attempt',maxSeconds:60,gpu:0,resources:{cpus:1,gpus:1,memory_mb:1024,queue:'',account:''}}}};localStorage.setItem('studio.conversation',f.conversation.id);localStorage.setItem('studio.section','agent-task:'+f.task.id);
    const {deploymentDiagnosticJournal,diagnosticContext}=await import('/frontend/features/diagnostics/ui-diagnostics.mjs');deploymentDiagnosticJournal.add(Error('Synthetic actual-input failure: missing required run.py'),diagnosticContext(f.task,f.task.deployment.config,'prepare'));
-   window.studio.invoke=async(method,data)=>{if(method==='conversation.list')return [f.conversation];if(method==='conversation.select'||method==='conversation.remember')return f.conversation;if(method==='task.list')return [f.task];if(method==='compute.resource.status')return {schemaVersion:1,kind:null,status:'none',selectionId:null};if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return {model:'fixture-model',thread:{id:data.params.threadId,turns:[{items:[{id:'saved-repair',type:'agentMessage',text:'Saved repair history'}]}]}};return original(method,data);};return window.renderTest('App');
+   window.studio.invoke=async(method,data)=>{
+    if(method==='conversation.list')return [f.conversation,f.other];
+    if(method==='conversation.select'){
+     if(data.id===f.conversation.id&&f.deferRepairSelection){
+      f.deferRepairSelection=false;
+      return new Promise(resolve=>{f.releaseRepairSelection=()=>resolve(f.conversation);});
+     }
+     return data.id===f.conversation.id?f.conversation:f.other;
+    }
+    if(method==='conversation.remember')return data.threadId===f.conversation.threadId?f.conversation:f.other;
+    if(method==='task.list')return [f.task];
+    if(method==='compute.resource.status')return {schemaVersion:1,kind:null,status:'none',selectionId:null};
+    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method)){
+     const original=data.params.threadId===f.conversation.threadId;
+     return {model:'fixture-model',thread:{id:data.params.threadId,turns:[{items:[{id:'saved-repair',type:'agentMessage',text:original?'Saved repair history':'Other saved history'}]}]}};
+    }
+    return original(method,data);
+   };
+   return window.renderTest('App');
   });
-  await page.getByTestId('agent-task-page').waitFor();await page.getByTestId('open-deployment').click();await page.getByTestId('deployment-page').waitFor();await page.getByText('Saved repair history',{exact:true}).waitFor();await page.locator('.composer textarea').fill('Keep my existing unsent instructions');const before=await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='task.execute'||c.method==='agent.rpc'&&c.data?.method==='turn/start').length);await page.getByTestId('diagnostic-repair').click();await page.getByTestId('agent-prompt-proposal').waitFor();assert.equal(await page.locator('.composer textarea').inputValue(),'Keep my existing unsent instructions');await page.getByTestId('agent-prompt-append').click();const draft=await page.locator('.composer textarea').inputValue();assert.match(draft,/^Keep my existing unsent instructions/);assert.match(draft,/missing required run.py/);assert.match(draft,/"parameterRevision": 3/);assert.match(draft,/"taskId": "repair-task"/);assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='task.execute'||c.method==='agent.rpc'&&c.data?.method==='turn/start').length),before);assert.equal(await page.evaluate(()=>localStorage.getItem('studio.conversation')),'codex:repair-owner');await page.screenshot({path:path.join(out,'continuous-app-repair-draft.png')});
+  await page.getByTestId('agent-task-page').waitFor();
+  await page.getByTestId('open-deployment').click();
+  await page.getByTestId('deployment-page').waitFor();
+  await page.getByText('Saved repair history',{exact:true}).waitFor();
+  const input=page.locator('.composer textarea'),repair=page.getByTestId('diagnostic-repair');
+  const sends=()=>page.evaluate(()=>window.__test.calls.filter(c=>c.method==='task.execute'||c.method==='agent.rpc'&&c.data?.method==='turn/start').length);
+  await input.fill('Keep my existing unsent instructions');
+  const before=await sends();
+  await repair.click();
+  await page.getByTestId('agent-prompt-proposal').waitFor();
+  assert.equal(await input.inputValue(),'Keep my existing unsent instructions');
+  await page.getByTestId('agent-prompt-append').click();
+  const draft=await input.inputValue();
+  assert.match(draft,/^Keep my existing unsent instructions/);
+  assert.match(draft,/missing required run.py/);
+  assert.match(draft,/"parameterRevision": 3/);
+  assert.match(draft,/"taskId": "repair-task"/);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('studio.conversation')),'codex:repair-owner');
+  await page.screenshot({path:path.join(out,'continuous-app-repair-draft.png')});
+  await page.evaluate(()=>{window.__test.deferRepairSelection=true;});
+  await repair.click();
+  await page.waitForFunction(()=>typeof window.__test.releaseRepairSelection==='function');
+  const sidebar=page.getByTestId('conversation-sidebar');
+  await sidebar.getByRole('button',{name:'Other conversation',exact:true}).click();
+  await page.getByText('Other saved history',{exact:true}).waitFor();
+  await input.fill('Keep the other conversation draft');
+  await page.evaluate(async()=>{
+   window.__test.releaseRepairSelection();
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  });
+  assert.equal(await input.inputValue(),'Keep the other conversation draft');
+  assert.equal(await page.getByTestId('agent-prompt-proposal').count(),0);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('studio.conversation')),'codex:other-owner');
+  await sidebar.getByRole('button',{name:'Repair owner',exact:true}).click();
+  await page.getByText('Saved repair history',{exact:true}).waitFor();
+  assert.equal(await input.inputValue(),draft);
+  assert.equal(await sends(),before);
  });
  await check('continuous-work-repair-grant-purpose-and-durable-notice',async page=>{
   const record=packageRecord(),configuration=configurationRecord(record,'failed');configuration.install.status='passed';configuration.tests=configuration.tests.map(value=>({...value,status:'failed',reason:'Synthetic functional check finding'}));await page.evaluate(async({record,configuration})=>{
@@ -59,11 +113,13 @@ export async function frontendContinuousWorkCases({check,out}){
  });
  for(const theme of ['dark','light'])await check('continuous-work-history-anchor-replay-'+theme,async page=>{
   await page.evaluate(async theme=>{
-   document.documentElement.dataset.theme=theme;const root=document.getElementById('root');root.className='application';root.style.cssText='height:100vh;display:flex;justify-content:center';await import('/frontend/app/frontend-refinement.css');
+   document.documentElement.dataset.theme=theme;const root=document.getElementById('root');root.className='application';root.style.cssText='height:100vh;display:flex;flex-direction:row;justify-content:center;align-items:stretch';await import('/frontend/app/frontend-refinement.css');
    const f=window.__test,original=window.studio.invoke;f.chat=id=>({id:'codex:'+id,provider:'codex',threadId:id,name:'Saved conversation '+id,projectId:null,taskId:null});
    window.studio.invoke=async(method,data)=>{if(method==='conversation.remember')return f.chat(data.threadId);if(method==='agent.rpc'&&data.method==='thread/resume')return {thread:{id:data.params.threadId},model:'fixture-model'};if(method==='agent.rpc'&&data.method==='thread/read')return {thread:{id:data.params.threadId,turns:[{items:[...Array.from({length:50},(_,i)=>({id:data.params.threadId+'-'+i,type:'agentMessage',text:'Saved message '+i+'\n\nThe calculation inputs and observations stay available while you read earlier work.'})),{id:'command',type:'commandExecution',command:'python check_inputs.py',aggregatedOutput:'Input shape mismatch',exitCode:1,status:'completed'},{id:'change',type:'fileChange',status:'completed',changes:[{path:'input.py',diff:'-old\n+fixed',kind:{type:'update'}}]}]}]}};return original(method,data);};
    window.chatProps={width:480,planningMode:false,onPlanningModeChange(){},context:'{}',onError:error=>{throw error;},sessionSelection:{nonce:'a',conversation:f.chat('a')}};window.renderChat=value=>window.renderTest('Agent',window.chatProps={...window.chatProps,...value});return window.renderChat({});
   },theme);
+  const tools=page.getByTestId('tool-group').filter({has:page.locator('[data-message-id="change"]')});
+  await tools.locator(':scope > summary').press('Enter');
   await page.locator('[data-message-id="change"]').waitFor();assert.match(await page.locator('[data-message-id="command"]').innerText(),/命令执行失败/);assert.match(await page.locator('[data-message-id="change"]').innerText(),/文件修改完成/);
   await page.locator('.composer textarea').fill('Keep draft for A');await page.evaluate(()=>{const scroll=document.querySelector('.chat-scroll');scroll.scrollTop=540;scroll.dispatchEvent(new Event('scroll'));window.__test.readingTop=scroll.scrollTop;});
   await page.evaluate(()=>window.renderChat({sessionSelection:{nonce:'b',conversation:window.__test.chat('b')}}));await page.locator('[data-message-id="b-49"]').waitFor();await page.locator('.composer textarea').fill('Keep draft for B');await page.evaluate(()=>window.renderChat({sessionSelection:{nonce:'a-return',conversation:window.__test.chat('a')}}));await page.locator('[data-message-id="a-49"]').waitFor();

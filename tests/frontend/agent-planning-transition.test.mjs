@@ -4,8 +4,21 @@ import {agentHarness,deferred} from '../helpers/agent-hooks.mjs';
 import {TaskRecords} from '../../agent/sessions/task-records.mjs';
 
 const starts=h=>h.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start');
-async function finish(h){h.emit({provider:'codex',method:'turn/completed',params:{threadId:'started-thread',turn:{id:'accepted-turn',status:'completed'}}});await h.flush();}
-async function connect(options={}){const h=agentHarness(options);await h.flush();h.click('agent-connect');await h.flush();return h;}
+const acceptedTurnId=number=>'planning-turn-'+number;
+async function finish(h){
+ const {threadId}=starts(h).at(-1).data.params;
+ h.emit({provider:'codex',method:'turn/completed',params:{threadId,turn:{id:acceptedTurnId(starts(h).length),status:'completed'}}});
+ await h.flush();
+}
+async function connect({override,...options}={}){
+ let accepted=0;
+ const h=agentHarness({...options,override:async(method,data,standard)=>{
+  const response=await (override?override(method,data,standard):standard(method,data));
+  if(method==='agent.rpc'&&data.method==='turn/start')return {...response,turn:{...response.turn,id:acceptedTurnId(++accepted)}};
+  return response;
+ }});
+ await h.flush();h.click('agent-connect');await h.flush();return h;
+}
 function records(){
  const rows=new Map(),store={get:(kind,id)=>structuredClone(rows.get(kind+':'+id)??null),put(kind,id,value){rows.set(kind+':'+id,structuredClone(value));},list:kind=>[...rows].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>structuredClone(value))};
  return {rows,records:new TaskRecords(store,()=>{})};

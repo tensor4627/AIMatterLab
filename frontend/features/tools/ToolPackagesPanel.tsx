@@ -2,6 +2,7 @@ import type {AgentProvider} from '../../../contracts/dto/agent';
 import type {ToolPackageInspection,ToolPort,ToolParameter} from '../../../contracts/dto/tools';
 import type {SkillAttachment} from "../conversations/agent-types";
 import {t} from "../../ui/i18n";
+import Tooltip from '../../ui/Tooltip';
 import toolSources from '../../../installation/tool-sources.json';
 import {referenceConfigurationSupported,useToolPackages} from './useToolPackages';
 import './tool-packages.css';
@@ -21,7 +22,12 @@ export default function ToolPackagesPanel({provider,onSelect}:{provider:AgentPro
  const registeredCandidate=candidate&&state.packages.some(value=>value.package_id===candidate.inspection.package_id),samePackage=record&&candidate&&record.package_id===candidate.inspection.package_id;
  const canShare=context?.hasConversation&&!!context.owner_key&&context.provider===provider&&state.sharingProvider===context.provider;
  const canGrant=canShare&&(state.bound||context?.configuration_id===execution?.configuration_id&&context?.providers.includes(provider));
- return <section className="card tool-packages-panel" data-testid="tool-packages-panel"><h2>{t('工具包与执行环境')}</h2><p>{t('登记保存工具声明和源码快照。真实环境的安装与测试通过后，再生成该环境的执行技能。')}</p><div className="button-row"><button className="button" disabled={working} onClick={state.choose} data-testid="tool-package-choose">{t('选择并检查工具包')}</button><button className="button" disabled={state.loading||working} onClick={()=>void state.refresh()}>{t('刷新工具包目录')}</button></div>
+ return <section className="tool-packages-panel" data-testid="tool-packages-panel">
+  <header className="skill-section-heading">
+   <h2><Tooltip content={t('登记保存工具声明和源码快照。真实环境的安装与测试通过后，再生成该环境的执行技能。')}>{t('工具包与执行环境')}</Tooltip></h2>
+   <div className="button-row"><button className="button" disabled={working} onClick={state.choose} data-testid="tool-package-choose">{t('选择并检查工具包')}</button><button className="button" disabled={state.loading||working} onClick={()=>void state.refresh()}>{t('刷新工具包目录')}</button></div>
+  </header>
+  <label>{t('已登记工具包')}<select aria-label={t('已登记工具包')} value={state.selected} onChange={event=>state.selectPackage(event.target.value)}><option value="">{t('选择工具包')}</option>{state.packages.map(value=><option key={value.package_id} value={value.package_id}>{value.name} · {value.package_id}</option>)}</select></label>
   <details className="tool-source-list" data-testid="tool-source-list">
    <summary data-guide-target="tool-sources">{t('已验证工具的源码仓库')}</summary>
    <p>{t('复制命令拉取所列分支，再按仓库内的安装说明操作。分支版本可能与历史验收提交不同。')}</p>
@@ -32,7 +38,6 @@ export default function ToolPackagesPanel({provider,onSelect}:{provider:AgentPro
    </li>)}</ul>
   </details>
   {state.loading&&<p role="status">{t('正在读取工具包元数据…')}</p>}{state.busy&&<p role="status">{t(state.busy)}…</p>}{state.error&&<p role="alert" className="notice" data-testid="tool-package-error">{state.error}</p>}{state.notice&&<p role="status" className="notice" data-testid="tool-package-notice">{t(state.notice)}</p>}
-  <label>{t('已登记工具包')}<select aria-label={t('已登记工具包')} value={state.selected} onChange={event=>state.selectPackage(event.target.value)}><option value="">{t('选择工具包')}</option>{state.packages.map(value=><option key={value.package_id} value={value.package_id}>{value.name} · {value.package_id}</option>)}</select></label>
   {candidate&&<div className="tool-package-candidate" data-testid="tool-package-candidate"><h3>{t('检查结果')} · {candidate.inspection.manifest.name}</h3><p>{t('定义检查通过；安装与功能测试未运行。')}</p><p className="mono">{candidate.root}</p>{declaration(candidate.inspection)}<div className="button-row"><button className="button primary" disabled={working||!!registeredCandidate} onClick={()=>state.changePackage('register')}>{t('登记此工具包')}</button>{samePackage&&<><button className="button" disabled={working||candidate.inspection.package_version===record.package_version} onClick={()=>state.changePackage('update')}>{t('更新为此版本')}</button><button className="button" disabled={working||candidate.inspection.package_version!==record.package_version||candidate.root===record.package_root} onClick={()=>state.changePackage('relocate')}>{t('仅更新包位置')}</button></>}</div>{registeredCandidate&&!samePackage&&<p>{t('此工具已登记。先在上方选择同一工具，再检查新版本或新位置。')}</p>}</div>}
   {record&&<div data-testid="tool-package-record"><h3>{record.manifest.name}</h3><label>{t('已保存版本')}<select aria-label={t('已保存版本')} value={state.version} onChange={event=>state.selectPackage(record.package_id,event.target.value)}>{record.versions.map(value=><option key={value} value={value}>{short(value)}</option>)}</select></label><p>{t('登记状态')}: definition_checked · {t('安装')}: not_run · {t('定义记录中的测试')}: not_run</p><p className="mono">{record.package_root}</p><details><summary>{t('不可变快照与历史位置')}</summary><p className="mono">{record.snapshot_root}</p>{record.package_roots.map(value=><p key={value} className="mono">{value}</p>)}</details>{declaration(record)}
    <h3>{t('配置真实执行环境')}</h3>{!referenceConfigurationSupported(record)?<p className="notice" data-testid="tool-package-unsupported">{t('当前配置器仅支持固定 CPU installation.check / worker 参考；此工具的配置尚不支持。工具定义仍可登记。')}</p>:<><p>{t('作业服务会核对固定参考源码。以下工程检查不代表科学验证。')}</p><button className="button" disabled={working} onClick={state.startConfiguration} data-testid="tool-configuration-start">{t('配置此版本')}</button></>}

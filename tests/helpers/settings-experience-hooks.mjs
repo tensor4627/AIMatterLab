@@ -9,10 +9,11 @@ export function experienceHarness({component,props:initial={},invoke:dispatch=as
  let props={provider:'compatible',embedded:true,onClose(){},onConfigured:()=>configured.push(true),onError:error=>errors.push(error),projectId:'project-a',clusterId:'cluster-a',scope:'project-a:cluster-a:1',roots:['~/runs','~/inputs'],enabled:true,...initial};
  const useState=initial=>{const i=cursor++;hooks[i]??={value:typeof initial==='function'?initial():initial};return [hooks[i].value,value=>{hooks[i].value=typeof value==='function'?value(hooks[i].value):value;dirty=true;}];};
  const useRef=value=>{const i=cursor++;return hooks[i]??(hooks[i]={current:value});};
+ const useId=()=>{const i=cursor++;return 'fixture-field-'+i;};
  const useEffect=(fn,deps)=>{const i=cursor++,old=hooks[i];if(!old||deps.some((value,j)=>!Object.is(value,old.deps[j]))){hooks[i]={deps};effects.push(()=>{old?.cleanup?.();if(!disposed)hooks[i].cleanup=fn();});}};
  const invoke=(method,data)=>{calls.push({method,data});return dispatch(method,data);},window={studio:{invoke,onEvent:fn=>{events.add(fn);return()=>events.delete(fn);}}};
  function load(file){if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);const require=name=>{
-  if(name==='react')return {useState,useRef,useEffect};
+  if(name==='react')return {useState,useRef,useEffect,useId};
    if(name.endsWith('.css'))return {};
    if(name==='../../../contracts/agent/model-profiles.mjs')return modelProfiles;
    if(name==='../../../contracts/agent/transcript-sanitizer.mjs')return transcript;
@@ -21,7 +22,8 @@ export function experienceHarness({component,props:initial={},invoke:dispatch=as
   if(name==='../../api/worker')return {api:(method,target,data)=>invoke('worker.request',{method,target,data})};
   if(name==='../../ui/i18n'||name==='./i18n')return {t:value=>value};
   if(name==='../diagnostics/DiagnosticNotice')return {InlineDiagnostic:'InlineDiagnostic'};
-  if(name==='../../ui/Dialogs')return {Modal:'Modal'};
+  if(name==='../../ui/Dialogs')return {Modal:'Modal',statusNames:{not_run:'未验证'}};
+  if(name==='../../ui/Tooltip')return {default:'Tooltip',HelpTip:'HelpTip'};
   if(name.endsWith('/LoadingFeedback'))return {default:'LoadingFeedback',LoadingFeedback:'LoadingFeedback'};
   if(name==='lucide-react')return new Proxy({},{get:(_,key)=>key});
   if(name.startsWith('.')){const base=path.resolve(path.dirname(file),name),resolved=['.ts','.tsx','.mjs'].map(ext=>base+ext).find(candidate=>fs.existsSync(candidate));if(resolved)return load(resolved);}

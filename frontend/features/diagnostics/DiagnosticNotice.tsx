@@ -10,8 +10,11 @@ export default function DiagnosticNotice({record,historical=false,phase='failed'
  return <Notice className={'diagnostic-notice '+className} severity={diagnosticSeverity(record,phase)} announce={!historical||pending} action={action} data-testid="diagnostic-notice" data-historical={historical} data-pending={pending}>
   <strong>{t(pending?'待核对的原尝试':historical?'历史诊断':'操作诊断')}</strong>
   <p data-testid="diagnostic-summary">{t(summary??diagnosticSummary(record,phase))}</p>
-  {context&&<p className="diagnostic-context">{context.taskName||t('当前流程')} · {t(({save:'保存部署',prepare:'准备提交草稿',execute:'确认部署并执行'} as Record<string,string>)[context.operation]||context.operation)}<br/>{context.targetName||t('所选目标')} · {t(context.target==='cluster'?'集群':'本机')} · {t('参数版本')} {context.parameterRevision}</p>}
-  <details><summary>{t('完整原始诊断')}</summary><pre className="diagnostic-raw">{sanitizeTranscript(record.raw)}</pre>{context&&<pre className="diagnostic-raw">{JSON.stringify(sanitizeTranscript({context,resolution:record.resolution}),null,2)}</pre>}{record.stack&&record.stack!==record.raw&&<pre className="diagnostic-raw">{sanitizeTranscript(record.stack)}</pre>}<small>{record.observedAt?new Date(record.observedAt).toLocaleString():t('来自作业记录')}</small></details>
+  <div className="diagnostic-facts">
+   {context&&<p className="diagnostic-context"><span>{context.taskName||t('当前流程')} · {t(({save:'保存部署',prepare:'准备提交草稿',execute:'确认部署并执行'} as Record<string,string>)[context.operation]||context.operation)}</span><span>{context.targetName||t('所选目标')} · {t(context.target==='cluster'?'集群':'本机')} · {t('参数版本')} {context.parameterRevision}</span></p>}
+   <small>{record.observedAt?new Date(record.observedAt).toLocaleString():t('来自作业记录')}</small>
+  </div>
+  <details><summary>{t('完整原始诊断')}</summary><pre className="diagnostic-raw">{sanitizeTranscript(record.raw)}</pre>{context&&<pre className="diagnostic-raw">{JSON.stringify(sanitizeTranscript({context,resolution:record.resolution}),null,2)}</pre>}{record.stack&&record.stack!==record.raw&&<pre className="diagnostic-raw">{sanitizeTranscript(record.stack)}</pre>}</details>
   {onRepair&&<button className="button" data-testid="diagnostic-repair" onClick={onRepair}>{t('交给 Agent 修复')}</button>}
  </Notice>;
 }

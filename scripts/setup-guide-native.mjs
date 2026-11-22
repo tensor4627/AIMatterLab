@@ -26,7 +26,7 @@ async function launch(directory=profile){
 async function close(){if(application){await application.close();application=null;}}
 async function resize(width,height){
   await application.evaluate(({BrowserWindow},size)=>{
-    const win=BrowserWindow.getAllWindows()[0];win.setMinimumSize(400,440);win.setContentSize(...size);
+    const win=BrowserWindow.getAllWindows()[0];win.setContentSize(...size);
   },[width,height]);
   await page.waitForFunction(([w,h])=>window.innerWidth===w&&window.innerHeight===h,[width,height]);
 }
@@ -156,7 +156,7 @@ try {
   await guide().getByRole('combobox').selectOption('reference-md');await button('Prepare check in chat').click();
   await page.waitForFunction(()=>document.querySelector('.agent-panel .composer textarea')?.value.includes('reference-md'));
   assert.equal(await page.getByTestId('agent-provider').inputValue(),'qwen');
-  await resize(630,720);await returnFromLesson('short-check','Prepare the ASE · CPU MD check',{keyboard:true,screenshot:'lesson-check-narrow'});await heading('Explore your workspace');
+  await resize(640,720);await returnFromLesson('short-check','Prepare the ASE · CPU MD check',{keyboard:true,screenshot:'lesson-check-narrow'});await heading('Explore your workspace');
   assert.equal(await guide().getByRole('combobox').inputValue(),'reference-md');await capture('ready-narrow');
   await button('Enter workspace').click();assert.equal((await state()).setupGuide.page,'complete');
   await close();await launch();await page.getByTestId('open-setup-guide').waitFor();

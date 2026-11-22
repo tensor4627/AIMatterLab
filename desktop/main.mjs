@@ -962,7 +962,7 @@ desktopShutdown=installDesktopShutdown({app,begin:()=>{
  await managedClosing;
  return await terminalClosing;
 }});
-window=new BrowserWindow({width:1540,height:980,minWidth:1100,minHeight:720,frame:false,
+window=new BrowserWindow({width:1540,height:980,minWidth:640,minHeight:720,frame:false,
   backgroundColor:'#15151b',title:PRODUCT_NAME,show:false,
   webPreferences:{backgroundThrottling:!verifying,offscreen:improvementsVerifying,preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
 performanceTimeline.mark('window-created');

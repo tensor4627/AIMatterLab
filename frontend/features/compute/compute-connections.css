@@ -1,2 +1,103 @@
-.compute-resource-manager{min-height:220px}.compute-resource-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.compute-resource-heading p{margin:0;color:var(--muted)}.compute-resource-add{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}.compute-resource-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:9px}.compute-resource-list li{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:10px;padding:13px;background:var(--bg)}.compute-resource-symbol{display:grid;place-items:center;width:38px;height:38px;flex-shrink:0;border-radius:9px;background:var(--accent-bg);color:var(--accent)}.compute-resource-summary{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}.compute-resource-summary strong{overflow-wrap:anywhere}.compute-resource-summary span{color:var(--muted);font-size:max(12px,var(--ui-min-font,11px));display:flex;align-items:center;gap:8px;flex-wrap:wrap}.compute-resource-summary em{font-style:normal;color:var(--accent);font-size:inherit}.compute-resource-empty{padding:40px 12px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:10px}.compute-resource-editor-title{display:flex;align-items:center;gap:8px;margin-bottom:16px}.compute-resource-manager form>label,.compute-resource-manager details label{display:flex;flex-direction:column;gap:7px;margin:13px 0}.compute-resource-manager .check-label{flex-direction:row}.compute-resource-manager details>summary{cursor:pointer;color:var(--muted);padding:9px 0}.compute-resource-footer{justify-content:flex-end;margin-top:20px}.compute-resource-error{color:var(--danger,#df6f7e)}.compute-resource-advanced{margin-top:18px}.compute-service-environment{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}.compute-service-environment h4{margin:0 0 8px}.compute-service-environment label{display:flex;flex-direction:column;gap:7px;margin:13px 0}.compute-service-environment textarea{resize:vertical;min-height:76px}.compute-service-environment small{display:block;color:var(--muted)}.compute-service-environment>button{margin-top:12px}@media(max-width:600px){.compute-resource-list li{flex-wrap:wrap}.compute-resource-summary{min-width:160px}.compute-resource-list .primary{margin-left:auto}}
-.compute-service-badge{font-size:max(11px,var(--ui-min-font,11px));border:1px solid var(--line);border-radius:5px;padding:1px 5px}.ssh-service-settings>p{color:var(--muted);line-height:1.6}.ssh-service-settings .compute-resource-editor-title strong{flex:1}.ssh-service-registration{display:flex;flex-direction:column;gap:8px;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;overflow-wrap:anywhere}.ssh-service-registration>span{font-size:max(12px,var(--ui-min-font,11px));color:var(--muted)}.ssh-service-login{padding:12px 0}.ssh-service-login p{color:var(--muted);line-height:1.6}.ssh-service-login label{display:flex;flex-direction:column;gap:7px;margin-top:14px}.ssh-service-actions{flex-wrap:wrap}.ssh-service-scheduler{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.compute-resource-manager {
+  container:compute-resource-manager / inline-size;
+  min-width:0;
+  min-height:180px;
+}
+.compute-resource-manager .button {white-space:normal;text-align:start;}
+.compute-resource-manager .button-row {flex-wrap:wrap;}
+.compute-resource-manager > p {margin:10px 0 0;overflow-wrap:anywhere;}
+.compute-resource-add {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin-bottom:12px;
+  flex-wrap:wrap;
+}
+.compute-resource-refresh {margin-inline-start:auto;}
+.compute-resource-list {
+  list-style:none;
+  padding:0;
+  margin:0;
+  border-block:1px solid var(--line);
+}
+.compute-resource-list li {
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:8px 12px;
+  border-inline-start:2px solid transparent;
+  padding:9px 10px;
+  background:var(--panel);
+}
+.compute-resource-list li + li {border-top:1px solid var(--line);}
+.compute-resource-list li[data-current=true] {border-inline-start-color:var(--accent);background:var(--accent-bg);}
+.compute-resource-symbol {
+  display:grid;
+  place-items:center;
+  width:30px;
+  height:34px;
+  color:var(--muted);
+}
+.compute-resource-list li[data-current=true] .compute-resource-symbol {color:var(--accent);}
+.compute-resource-summary {min-width:0;display:grid;gap:2px;overflow-wrap:anywhere;}
+.compute-resource-summary span {color:var(--muted);display:flex;align-items:baseline;gap:3px 7px;flex-wrap:wrap;}
+.compute-resource-summary em {font-style:normal;color:var(--accent);}
+.compute-resource-item-actions {display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:4px 7px;min-width:0;}
+.compute-resource-empty {padding:16px 10px;color:var(--muted);border-top:1px solid var(--line);}
+.compute-resource-editor-title {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding-bottom:8px;
+  margin-bottom:10px;
+  border-bottom:1px solid var(--line);
+  overflow-wrap:anywhere;
+}
+.compute-resource-manager :is(form > label,details label) {display:grid;gap:5px;margin:10px 0;min-width:0;}
+.compute-resource-manager .check-label {display:flex;align-items:flex-start;}
+.compute-resource-manager :is(form input:not([type=checkbox]),form select,form textarea) {width:100%;min-width:0;}
+.compute-resource-manager details > summary {cursor:pointer;color:var(--muted);padding:7px 0;overflow-wrap:anywhere;}
+.compute-resource-manager details[open] > summary {color:var(--text);}
+.compute-resource-manager form > details {border-top:1px solid var(--line);}
+.compute-resource-manager form > details:first-of-type {margin-top:10px;}
+.compute-resource-manager form > .form-row {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,175px),1fr));margin:8px 0;gap:10px;}
+.compute-resource-manager .compute-resource-footer {justify-content:flex-end;margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);}
+.compute-resource-error {color:var(--danger);}
+.compute-resource-advanced {margin-top:9px;}
+.compute-service-environment {padding:4px 0 10px;}
+.compute-service-environment h4 {margin:0 0 8px;}
+.compute-service-environment textarea {resize:vertical;min-height:76px;}
+.compute-service-environment small {display:block;color:var(--muted);}
+.compute-service-environment > button {margin-top:9px;}
+.compute-service-badge {border:1px solid var(--line);border-radius:5px;padding:1px 5px;}
+.ssh-service-settings,.base-workspace-settings {display:grid;gap:10px;min-width:0;}
+.ssh-service-settings p,.base-workspace-settings p {margin:0;overflow-wrap:anywhere;}
+.ssh-service-settings > p {color:var(--muted);line-height:1.55;}
+.ssh-service-settings .compute-resource-editor-title {margin:0;}
+.ssh-service-settings .compute-resource-editor-title strong {flex:1;}
+.ssh-service-registration {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:4px 12px;
+  padding:8px 10px;
+  background:var(--raised);
+  border-inline-start:2px solid var(--line);
+  overflow-wrap:anywhere;
+}
+.ssh-service-registration > span {color:var(--muted);}
+.ssh-service-login {display:flex;align-items:flex-end;flex-wrap:wrap;gap:8px 12px;}
+.ssh-service-login label {display:grid;gap:5px;flex:1 1 190px;min-width:0;}
+.ssh-service-login select {width:100%;min-width:0;text-overflow:ellipsis;}
+.ssh-service-actions {margin:0;}
+.ssh-service-scheduler {margin-top:4px;padding-top:12px;border-top:1px solid var(--line);}
+.base-workspace-settings .button-row {margin:0;}
+.base-workspace-settings :is(p[role=alert],small) {margin:0;}
+.base-workspace-settings p[role=alert] {color:var(--danger);}
+@container compute-resource-manager (max-width:560px) {
+  .compute-resource-list li {grid-template-columns:auto minmax(0,1fr);}
+  .compute-resource-item-actions {grid-column:2;justify-content:flex-start;}
+}
+@container compute-resource-manager (max-width:275px) {
+  .compute-resource-item-actions {grid-column:1/-1;}
+}

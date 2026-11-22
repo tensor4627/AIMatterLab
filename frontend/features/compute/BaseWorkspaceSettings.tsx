@@ -31,13 +31,14 @@ export default function BaseWorkspaceSettings({profile,resource,busy=false}:{pro
   finally{pending.current=false;setSaving(false);}
  }
  const disabled=busy||loading||saving||!ready;
- return <section data-testid="base-workspace-settings">
-  <p>{t('连接由 AIMatterLab 管理后，可在聊天中指定此资源，请 Agent 协助设置基础工作区。也可以在这里手动设置。')}</p>
+ return <section className="base-workspace-settings" data-testid="base-workspace-settings">
   {!ready&&<p role="status">{t('请选中此配置，核对 SSH 登录和作业服务的就绪状态。')}</p>}
   {loading&&<p role="status">{t('正在读取基础工作区…')}</p>}
   {result?.status==='ready'&&<p role="status" data-testid="base-workspace-ready">{result.workspace.name} <code>{result.workspace.root}</code></p>}
-  <label>{t('工作区名称')}<input aria-label={t('基础工作区名称')} value={name} maxLength={80} disabled={disabled} onChange={e=>setName(e.target.value)}/></label>
-  <label>{t('工作区目录名')}<input aria-label={t('基础工作区目录名')} value={directory} maxLength={60} disabled={disabled} onChange={e=>setDirectory(e.target.value)}/></label>
+  <div className="form-row">
+   <label>{t('工作区名称')}<input aria-label={t('基础工作区名称')} value={name} maxLength={80} disabled={disabled} onChange={e=>setName(e.target.value)}/></label>
+   <label>{t('工作区目录名')}<input aria-label={t('基础工作区目录名')} value={directory} maxLength={60} disabled={disabled} onChange={e=>setDirectory(e.target.value)}/></label>
+  </div>
   <small>{t('目录由集群作业服务管理，保存后用于新流程。')}</small>
   <div className="button-row">
    <button type="button" className="button primary" disabled={disabled||!name.trim()||!(/^[A-Za-z0-9_-]{1,60}$/).test(directory.trim())} onClick={()=>void save()}>{t(saving?'设置中…':'设为基础工作区')}</button>

@@ -69,18 +69,54 @@ export default function ComputeEnvironments({worker,workerGeneration,environment
  const cudaFor=(env:Environment)=>{const check=checkFor(env);if(check&&!(check.saved&&check.status==='not_run'&&check.runtime_guide?.status==='not_run')){if(!passed(check,env))return undefined;const available=check.runtime_guide.facts?.cuda?.available??check.cuda_available;return typeof available==='boolean'?available:undefined;}return Object.values(observed.get(env.id)?.cuda||{}).some((item:any)=>item.available===true)?true:undefined;};
  const gpuEnvironments=environments.filter(env=>cudaFor(env)===true);
  const label=(value:string)=>t(({passed:'检查通过',failed:'检查失败',blocked:'待完善',not_run:'未检查',stale:'需要重新检查',checking:'检查中…',loading:'正在读取保存的检查…',read_error:'检查回执读取失败'} as Record<string,string>)[value]||value);
- return <div className="page compute-environments" data-testid="compute-environments"><div className="page-heading"><div><h1>{t('计算环境')}</h1><p>{t('优先使用已安装的软件。连接时自动发现并登记，本地与集群分别检查。')}</p></div><Server size={26}/></div>
+ return <div className="page compute-environments" data-testid="compute-environments">
+ <div className="page-heading"><h1>{t('计算环境')}</h1><Server size={23} aria-hidden="true"/></div>
  {!worker?<div className="notice"><p>{t('连接作业服务后检查已有环境。')}</p><button className="button primary" data-guide-target="connect-worker" onClick={onConnect}>{t('连接作业服务')}</button></div>:<>
  <LoadingFeedback busy={busy||reading&&!state} label={busy?busyLabel||t('正在发现已有环境…'):t('正在读取计算环境…')}/>
- <div className="compute-summary"><section className="card"><strong>{t('本地环境')}</strong><b>{environments.length}</b><span>{gpuEnvironments.length} {t('个环境已观察到 CUDA')}</span></section><section className="card"><strong>{t('集群连接')}</strong><b>{state?.clusters?.length??'…'}</b><span>{t('连接成功与计算节点验证分别记录')}</span></section></div>
+ <div className="compute-summary">
+  <dl>
+   <div><dt>{t('本地环境')}</dt><dd>{environments.length}</dd></div>
+   <div><dt>{t('集群连接')}</dt><dd>{state?.clusters?.length??'…'}</dd></div>
+  </dl>
+  <p>{gpuEnvironments.length} {t('个环境已观察到 CUDA')}</p>
+ </div>
  <div className="button-row"><button className="button primary" data-testid="discover-compute" data-guide-target="discover" disabled={busy} onClick={()=>void scan()}><RefreshCw size={15}/>{t(busy?'正在发现已有环境…':'重新发现并登记')}</button><button className="button" onClick={()=>onAgent('协助完善当前计算环境。读取 environment.probe，使用 compute_readiness 或 discover_local_environments 查看当前本地环境。优先复用已安装的软件和已登记源码，分别记录 CPU/CUDA、依赖探测和引擎短例。对我指定的已托管 SSH，使用 list_compute_resources 核对目标，再用一个选择参数申请当前对话的租约，按委托范围只读检查环境或调度器。若有多个可能的资源，请我选定。传统 worker 中已登记的集群使用 list_clusters 或 probe_cluster。用适用的配置工具提出可审阅设置。不要提交任务、更改项目授权或泄露连接信息。')}><Sparkles size={15}/>{t('让 Agent 协助配置')}</button></div>
  {drafts.length>0&&<section className="card"><h2>{t('Agent 环境建议')}</h2>{drafts.map(draft=><div className="compute-cluster-row" key={draft.id}><strong>{draft.proposal.name}</strong><span>{t('待审阅，尚未登记')}</span><button className="button" onClick={()=>{setDraftId(draft.id);setSpec({...draft.proposal,repositories:draft.proposal.repositories||{},variables:draft.proposal.variables||{}});setEditing(true);}}>{t('审阅配置')}</button></div>)}</section>}
  {editing&&<section className="card" data-testid="environment-setup-form"><h2>{t('登记已有计算环境')}</h2><label>{t('环境名称')}<input value={spec.name} onChange={event=>setSpec({...spec,name:event.target.value})}/></label><label>Python<input placeholder="/absolute/venv/bin/python" value={spec.executables.python||''} onChange={event=>path('executables','python',event.target.value)}/></label><details><summary>{t('引擎、源码与加载路径')}</summary>{['gpumd','gpu-sampling','nep'].map(key=><label key={key}>{key}<input value={spec.executables[key]||''} onChange={event=>path('executables',key,event.target.value)}/></label>)}{['pydyn','pygas','hotpp'].map(key=><label key={key}>{key} · {t('源码目录')}<input value={spec.repositories[key]||''} onChange={event=>path('repositories',key,event.target.value)}/></label>)}<label>LD_LIBRARY_PATH<textarea value={spec.variables.LD_LIBRARY_PATH||''} onChange={event=>path('variables','LD_LIBRARY_PATH',event.target.value)}/></label></details><div className="button-row"><button className="button primary" disabled={busy||!spec.name||!spec.executables.python} onClick={()=>void save()}>{t('保存环境')}</button><button className="button" onClick={()=>setEditing(false)}>{t('关闭')}</button></div></section>}
- {!gpuEnvironments.length&&<p className="notice" role="status">{t(busy?'正在检查解释器与 CUDA，请稍候。':'尚未观察到可用的 CUDA 环境。可重新发现、补充已有解释器，或让 Agent 定位依赖问题。')}</p>}
- <button className="button" disabled={!worker} onClick={()=>setReceiptRefresh(value=>value+1)}>{t('刷新保存的检查')}</button>
- <label className="compute-route">{t('检查路线')}<select value={engine} onChange={event=>setEngine(event.target.value)}>{engines.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
- <div className="compute-env-list">{environments.map(env=>{const facts=observed.get(env.id),cuda=cudaFor(env),check=checkFor(env);return <section className="card" key={env.id}><div className="compute-env-heading"><h3>{env.name}</h3><span className="tag">{t(cuda===true?'CUDA 已发现':cuda===false?'未观察到 CUDA':'CPU / CUDA 待检查')}{passed(check,env)?' · '+engine:''}</span></div><p className="mono">{env.executables.python}</p><p>{Object.keys(env.repositories||{}).join(' · ')||t('未绑定科学源码')}</p><div className="button-row"><button className="button" disabled={busy||check?.status==='checking'} onClick={()=>void probe(env.id)}><ShieldCheck size={14}/>{t('检查依赖与 GPU')}</button>{check&&<span role="status">{label(check.status==='checking'?'checking':check.status==='loading'?'loading':check.status==='read_error'?'read_error':passed(check,env)?'passed':check.status)}</span>}</div>{check?.runtime_guide&&<p className="muted">{t('保存的依赖观察不代表科学计算已验证')}{check.runtime_guide.facts?.observed_at?' · '+new Date(check.runtime_guide.facts.observed_at*1000).toLocaleString():''}</p>}{check&&<details><summary>{t('检查详情')}</summary><pre className="report">{JSON.stringify(check,null,2)}</pre></details>}<details><summary>{t('路径与版本详情')}</summary><pre className="report">{JSON.stringify({executables:env.executables,repositories:env.repositories,observed_at:facts?.discovery?.observed_at,scope:t('发现与登记不代表科学短例已通过')},null,2)}</pre></details></section>;})}</div>
- <section className="card"><div className="compute-env-heading"><h2>{t('集群连接')}</h2><button className="button" onClick={onCluster}>{t('管理集群连接')}</button></div>{state?.clusters?.map((cluster:any)=><div className="compute-cluster-row" key={cluster.id}><strong>{cluster.name}</strong><span>{cluster.scheduler?.toUpperCase()}</span><span>{label(cluster.connection_check?.status||'not_run')}</span>{cluster.connection_check?.observed_at&&<small>{new Date(cluster.connection_check.observed_at*1000).toLocaleString()}</small>}</div>)}<p className="muted">{t('SSH 与调度器检查只读执行；计算节点 GPU、环境与模型在独立短例或正式运行时验证。')}</p></section>
+ <div className="compute-env-toolbar">
+  <label className="compute-route">{t('检查路线')}<select value={engine} onChange={event=>setEngine(event.target.value)}>{engines.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+  <button className="button" disabled={!worker} onClick={()=>setReceiptRefresh(value=>value+1)}>{t('刷新保存的检查')}</button>
+ </div>
+ {environments.length>0&&<p className="compute-check-scope">{t('保存的依赖观察不代表科学计算已验证')}</p>}
+ <div className="compute-env-list">{environments.map(env=>{
+  const facts=observed.get(env.id),cuda=cudaFor(env),check=checkFor(env);
+  const checkStatus=check&&(['checking','loading','read_error'].includes(check.status)?check.status:passed(check,env)?'passed':check.status);
+  const checkedAt=check?.runtime_guide?.facts?.observed_at;
+  return <section className="card" key={env.id}>
+   <div className="compute-env-heading">
+    <h3>{env.name}</h3>
+    <span className="tag" data-cuda={cuda}>{t(cuda===true?'CUDA 已发现':cuda===false?'未观察到 CUDA':'CPU / CUDA 待检查')}{checkStatus==='passed'?' · '+engine:''}</span>
+   </div>
+   <div className="compute-env-identity">
+    <code>{env.executables.python}</code>
+    <span>{Object.keys(env.repositories||{}).join(' · ')||t('未绑定科学源码')}</span>
+   </div>
+   <div className="compute-env-check">
+    {check&&<span role="status" data-check={checkStatus}>{label(checkStatus)}</span>}
+    {checkedAt?<time>{new Date(checkedAt*1000).toLocaleString()}</time>:null}
+    <button className="button" disabled={busy||check?.status==='checking'} onClick={()=>void probe(env.id)}><ShieldCheck size={14}/>{t('检查依赖与 GPU')}</button>
+   </div>
+   {check&&<details><summary>{t('检查详情')}</summary><pre className="report">{JSON.stringify(check,null,2)}</pre></details>}
+   <details><summary>{t('路径与版本详情')}</summary><pre className="report">{JSON.stringify({executables:env.executables,repositories:env.repositories,observed_at:facts?.discovery?.observed_at,scope:t('发现与登记不代表科学短例已通过')},null,2)}</pre></details>
+  </section>;})}</div>
+ <section className="compute-cluster-section">
+  <div className="compute-env-heading"><h2>{t('集群连接')}</h2><button className="button" onClick={onCluster}>{t('管理集群连接')}</button></div>
+  {state?.clusters?.map((cluster:any)=><div className="compute-cluster-row" key={cluster.id}>
+   <strong>{cluster.name}</strong><span>{cluster.scheduler?.toUpperCase()}</span><span>{label(cluster.connection_check?.status||'not_run')}</span>
+   {cluster.connection_check?.observed_at&&<small>{new Date(cluster.connection_check.observed_at*1000).toLocaleString()}</small>}
+  </div>)}
+  <p className="compute-check-scope">{t('SSH 与调度器检查只读执行；计算节点 GPU、环境与模型在独立短例或正式运行时验证。')}</p>
+ </section>
  <details className="settings-advanced"><summary>{t('手动登记与诊断')}</summary><div className="button-row"><button className="button" onClick={()=>{setDraftId(null);setEditing(true);}}><Plus size={14}/>{t('手动登记已有环境')}</button><button className="button" onClick={onManual}>{t('高级 JSON 配置')}</button></div>{state?.discovery&&<details><summary>{t('发现记录')}</summary><pre className="report">{JSON.stringify(state.discovery,null,2)}</pre></details>}</details></>}
  </div>;
 }

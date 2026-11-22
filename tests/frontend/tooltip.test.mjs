@@ -6,7 +6,7 @@ const source=fs.readFileSync(new URL("../../frontend/ui/Tooltip.tsx",import.meta
 function fixture({width=1000,height=800,top=300,left=980,popupWidth=300,popupHeight=100,asChild=false}={}){
  let index=0,tree,clock=0,next=0;const hooks=[],timers=new Map(),listeners=new Map();
  let nullRef=0;const rect={left,top,bottom:top+20},popupRect={width:Math.min(popupWidth,width-16),height:Math.min(popupHeight,height-16)},window={innerWidth:width,innerHeight:height,addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:name=>listeners.delete(name)};
- const react={isValidElement:value=>!!value?.type,cloneElement:(child,props,...children)=>({...child,props:{...child.props,...props,children}}),useId:()=> 'explanation-id',useRef:value=>{const i=index++;if(hooks[i])return hooks[i];const bounds=value===null?(nullRef++===0?rect:popupRect):null;return hooks[i]={current:value===null?{getBoundingClientRect:()=>bounds}:value};},useState:value=>{const i=index++;if(!(i in hooks))hooks[i]=value;return [hooks[i],v=>{hooks[i]=v;}];},useEffect:(fn,deps)=>{const i=index++,old=hooks[i];if(!old||deps.some((v,j)=>v!==old.deps[j])){old?.cleanup?.();hooks[i]={deps,cleanup:fn()};}}};
+ const react={isValidElement:value=>!!value?.type,cloneElement:(child,props)=>({...child,props:{...child.props,...props}}),useId:()=> 'explanation-id',useRef:value=>{const i=index++;if(hooks[i])return hooks[i];const bounds=value===null?(nullRef++===0?rect:popupRect):null;return hooks[i]={current:value===null?{getBoundingClientRect:()=>bounds}:value};},useState:value=>{const i=index++;if(!(i in hooks))hooks[i]=value;return [hooks[i],v=>{hooks[i]=v;}];},useEffect:(fn,deps)=>{const i=index++,old=hooks[i];if(!old||deps.some((v,j)=>v!==old.deps[j])){old?.cleanup?.();hooks[i]={deps,cleanup:fn()};}}};
  react.useLayoutEffect=react.useEffect;
  const jsx=(type,props)=>({type,props}),module={exports:{}};
  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
@@ -16,6 +16,7 @@ function fixture({width=1000,height=800,top=300,left=980,popupWidth=300,popupHei
  function unmount(){for(const hook of hooks)hook?.cleanup?.();}
  render();return {render,advance,unmount,timers,listeners,childEvents};
 }
+function trigger(node){return node.props.children[0];}
 function popup(node){return node.props.children[1];}
 test('explanation delay, focus, Escape capture isolation and timer cleanup',()=>{
  const h=fixture();let n=h.render();assert.equal(n.props.tabIndex,0);n.props.onFocus();assert.equal(h.advance(399).props['aria-describedby'],undefined);
@@ -40,14 +41,14 @@ test('focus keeps popup on pointer leave; blur, scroll and unmount clean up',()=
 });
 
 test('interactive summary is the actual trigger with no nested or duplicate focus stop',()=>{
- const h=fixture({asChild:true});let n=h.render();assert.equal(n.type,'summary');assert.equal(n.props.tabIndex,undefined);assert.equal(n.props.onClick(),'native-summary-handler');
- n.props.onFocus();h.advance(400);n=h.render();assert.equal(n.type,'summary');assert.equal(n.props['aria-describedby'],popup(n).props.id);assert.equal(n.props.children[0],'Inputs');h.unmount();
+ const h=fixture({asChild:true});let n=trigger(h.render());assert.equal(n.type,'summary');assert.equal(n.props.tabIndex,undefined);assert.equal(n.props.onClick(),'native-summary-handler');
+ n.props.onFocus();h.advance(400);n=trigger(h.render());assert.equal(n.type,'summary');assert.equal(n.props['aria-describedby'],popup(h.render()).props.id);assert.equal(n.props.children,'Inputs');h.unmount();
 });
 
 test('asChild preserves child handlers while adding tooltip handlers',()=>{
- const h=fixture({asChild:true});const n=h.render();assert.equal(n.props.onClick(),'native-summary-handler');
+ const h=fixture({asChild:true});const n=trigger(h.render());assert.equal(n.props.onClick(),'native-summary-handler');
  n.props.onMouseEnter();n.props.onFocus();assert.deepEqual(h.childEvents,['mouseenter','focus']);
- const shown=h.advance(400);assert.equal(shown.props['aria-describedby'],'explanation-id');assert.equal(popup(shown).props.role,'tooltip');
- shown.props.onMouseLeave();shown.props.onBlur();assert.deepEqual(h.childEvents,['mouseenter','focus','mouseleave','blur']);
+ const shown=h.advance(400);assert.equal(trigger(shown).props['aria-describedby'],'explanation-id');assert.equal(popup(shown).props.role,'tooltip');
+ trigger(shown).props.onMouseLeave();trigger(shown).props.onBlur();assert.deepEqual(h.childEvents,['mouseenter','focus','mouseleave','blur']);
  h.unmount();
 });

@@ -1,3 +1,42 @@
-.skills-workbench{max-width:1120px;margin:0 auto}.skills-workbench .card{margin-bottom:16px}.skill-automatic{display:flex;gap:14px;align-items:flex-start;background:var(--accent-bg)}.skill-automatic h3{margin:0 0 7px}.skill-automatic p{margin:4px 0}.skill-automatic small,.skill-functions small{color:var(--muted);line-height:1.7}.skills-workbench summary{cursor:pointer;line-height:1.7;font-weight:500;padding:2px 0}.skills-workbench summary .tag{margin-left:10px}.skill-config>p,.skill-local>p{color:var(--muted);line-height:1.8}.skills-workbench label:not(.skill-sharing-options label):not(.source-scope-options label){display:block;margin:16px 0}.skills-workbench label>input:not([type=checkbox]),.skills-workbench label>select,.skills-workbench label>textarea{display:block;width:100%;margin-top:7px}.skill-sharing-options,.skills-workbench .source-scope-options{display:flex;flex-wrap:wrap;gap:12px 22px;padding:9px 0}.skill-sharing-options label,.skills-workbench .source-scope-options label{display:flex;align-items:center;gap:7px}.skill-config>details{margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:8px}.skill-functions>h2{font-size:max(calc(18px * var(--ui-scale,1)),var(--ui-min-font,11px));font-weight:500;margin:25px 0 10px}.skill-function{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;border-top:1px solid var(--line);padding:16px 0}.skill-function>div{min-width:0;flex:1}.skill-function p,.skill-function small,.skill-source-observations p{overflow-wrap:anywhere;line-height:1.7;color:var(--muted)}.skill-function p{margin:7px 0}.skill-function>button{flex-shrink:0;max-width:45%;white-space:normal}.skill-function>div>details{margin-top:7px}.skill-loaded-file{overflow-wrap:anywhere}.skill-loaded-file small{display:block;overflow-wrap:anywhere}.skill-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;max-width:100%}.skill-chip>span{min-width:0;overflow-wrap:anywhere}.skill-chip>button{padding:3px 7px;font-size:1.1em;line-height:1;border-radius:4px}.skill-chip>button:hover{background:var(--accent-bg)}.skills-workbench .notice{overflow-wrap:anywhere}.skill-source-observations>div{margin:12px 0}.skill-function-group>summary{padding-bottom:6px}.skills-workbench .button-row{flex-wrap:wrap}@media(max-width:1100px){.skill-function{flex-wrap:wrap}.skill-function>button{max-width:100%}}
-
-.skills-workbench small,.skills-workbench .tag,.skills-workbench summary,.skills-workbench p,.skills-workbench label,.skill-loaded-file small{font-size:max(calc(12px * var(--ui-scale,1)),var(--ui-min-font,11px))}.skill-loaded-file small{white-space:normal;line-height:1.6}
+.skills-workbench{max-width:1120px;margin-inline:auto;min-width:0}
+.skills-workbench>.page-heading{margin-block-end:10px}
+.skills-workbench>:is(section,details){margin:0;padding:14px 0;border:0;border-block-start:1px solid var(--line);border-radius:0;background:transparent;box-shadow:none;min-width:0}
+.skill-catalog-meta,.skill-automatic,.skill-section-heading{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;min-width:0}
+.skill-catalog-meta{justify-content:space-between;margin-block-end:14px;color:var(--muted)}
+.skill-automatic{gap:7px}
+.skill-automatic strong{color:var(--text)}
+.skill-section-heading{justify-content:space-between;margin-block-end:10px}
+.skill-section-heading h2{font-size:max(1.2rem,var(--ui-min-font,11px));font-weight:600;margin:0}
+.skill-section-heading input{flex:0 1 21rem;min-width:0;max-width:100%}
+.skills-workbench summary{cursor:pointer;line-height:1.5;font-weight:500;padding-block:4px;overflow-wrap:anywhere}
+.skills-workbench summary .tag{margin-inline-start:8px}
+.skill-function-group{border-block-end:1px solid var(--line)}
+.skill-function-group:last-child{border-block-end:0}
+.skill-function-group>summary{padding:9px 0}
+.skill-group-count{float:inline-end;color:var(--muted);padding-inline:10px;font-variant-numeric:tabular-nums}
+.skill-function{display:flex;gap:8px 16px;align-items:start;justify-content:space-between;flex-wrap:wrap;border-block-start:1px solid var(--line);padding:10px 0}
+.skill-function>div{min-width:0;flex:1 1 14rem;overflow-wrap:anywhere}
+.skill-function p,.skill-function small,.skill-source-observations p{overflow-wrap:anywhere;line-height:1.5;color:var(--muted)}
+.skill-function p{margin:4px 0}
+.skill-route-meta{display:flex;gap:3px 12px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.skill-route-meta .skill-permission{color:var(--warn)}
+.skill-function>button{max-width:100%;white-space:normal;margin-block-start:1px}
+.skill-function>button[data-selected=true]{color:var(--accent);border-color:var(--accent)}
+.skill-function>div>details{margin-block-start:3px;color:var(--muted)}
+.skill-function>div>details[open]{color:var(--text)}
+.skill-config>p,.skill-local>p{color:var(--muted);line-height:1.6}
+.skills-workbench label:not(.skill-sharing-options label):not(.source-scope-options label){display:block;min-width:0;margin:10px 0}
+.skills-workbench label>input:not([type=checkbox]),.skills-workbench label>select,.skills-workbench label>textarea{display:block;width:100%;min-width:0;margin-top:5px}
+.skill-sharing-options,.skills-workbench .source-scope-options{display:flex;flex-wrap:wrap;gap:8px 16px;padding-block:8px}
+.skill-sharing-options label,.skills-workbench .source-scope-options label{display:flex;align-items:center;gap:7px}
+.skill-config>details{margin:12px 0;padding:8px 0;border-block:1px solid var(--line)}
+.skill-loaded-file,.skill-loaded-file small{overflow-wrap:anywhere}
+.skill-loaded-file small{display:block;white-space:normal;line-height:1.6}
+.skill-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;max-width:100%}
+.skill-chip>span{min-width:0;overflow-wrap:anywhere}
+.skill-chip>button{padding:3px 7px;font-size:1.1em;line-height:1;border-radius:4px}
+.skill-chip>button:hover{background:var(--accent-bg)}
+.skills-workbench .notice{overflow-wrap:anywhere}
+.skill-source-observations>div{margin:10px 0}
+.skills-workbench .button-row{flex-wrap:wrap}
+.skills-workbench :is(small,.tag,summary,p,label),.skill-loaded-file small{font-size:max(calc(12px * var(--ui-scale,1)),var(--ui-min-font,11px))}

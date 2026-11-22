@@ -21,7 +21,7 @@ const compile=text=>ts.transpileModule(text,{compilerOptions:{jsx:ts.JsxEmit.Rea
 function fixture(value,type='list',manualEdits){
  const parameters={cv:{atoms:value}},before=structuredClone(parameters),field={key:'cv.atoms',label:'Atoms',type},calls=[];
  const fieldSummary=new Function('parameters','parameterValue','t',compile(summary)+';return fieldSummary;')(parameters,parameterValue,x=>x);
- const element=new Function('React','overviewFields','parameters','fieldMissing','fieldSummary','locateField','parameterDisplayLabel','task','t',compile('return ('+card+');'))(React,[{step:{id:'cv-step'},field}],parameters,fieldMissing,fieldSummary,(...args)=>calls.push(args),parameterDisplayLabel,{manualEdits},x=>x);
+ const element=new Function('React','overviewFields','parameters','fieldMissing','fieldSummary','locateField','parameterDisplayLabel','task','t','HelpTip',compile('return ('+card+');'))(React,[{step:{id:'cv-step'},field}],parameters,fieldMissing,fieldSummary,(...args)=>calls.push(args),parameterDisplayLabel,{manualEdits},x=>x,()=>null);
  return {parameters,before,field,fieldSummary,element,calls,html:renderToStaticMarkup(element)};
 }
 function buttons(node){if(!node||typeof node!=='object')return [];return [...(node.type==='button'?[node]:[]),...React.Children.toArray(node.props?.children).flatMap(buttons)];}

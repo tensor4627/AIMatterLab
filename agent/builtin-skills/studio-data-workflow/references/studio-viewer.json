@@ -23,10 +23,10 @@
     "zh-CN": [
       "当前为Three.js预览，尚未接入OVITO；不能把OVITO教程功能标为已支持。",
       "结构和轨迹帧由ASE有界读取；以实际入口的格式/帧限制为准。",
-      "预览显示当前帧的原子顺序、元素图例和计数、晶胞边框，可旋转、缩放和重置视角。"
+      "预览按所选帧的原子顺序绘制，图例显示各元素及计数，底栏显示原子总数。悬停或聚焦总数可查阅旋转与缩放手势，工具栏可重置视角。"
     ],
     "en": [
-      "The Three.js preview shows element-colored atoms, cell edges for a finite 3×3 cell, an element count legend, orbit controls and Reset view. Atom order follows the inspected frame.",
+      "The Three.js preview shows element-colored atoms in frame order, cell edges for a finite 3×3 cell, an element count legend, and the total atom count. Hover or focus the total for orbit and zoom instructions. Reset view restores the camera.",
       "Worker ASE structure inspection accepts an explicit zero-based frame and bounds preview to 20000 atoms; actual registered ASE parser determines format support. RunDetail currently exposes preview only for xyz/traj file names; do not claim all ASE formats have a frontend entry.",
       "No whole-trajectory animation, streaming index, OVITO pipeline or automatic scientific analysis is inferred from a visual preview.",
       "OVITO official import and pipeline manuals are design references for a future integration; AIMatterLab does not ship those API capabilities."
@@ -42,43 +42,51 @@
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
     "observed_at": "2026-10-22T11:27:22.264583+00:00",
-    "rule_input_sha256": "e4820f500d793ceb156bcf0dda726be1e80e8aa75c21b206f5cfa4795d5b5555",
+    "rule_input_sha256": "2fce368e506c7e75993f6492a2d5c0a18e7789cea34588be2082ec8cc111b405",
     "local_files": [
       {
         "source_id": "studio",
         "path": "frontend/ui/heavy/structure.tsx",
-        "sha256": "10f0eb66295364162fcb65ad4af115a549cdc04876d62a991d7ced44c77a3543",
-        "bytes": 5880,
-        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "sha256": "9d5f1363ec7cbb80833ba3f179663ee28406e54f74a7a05873ebe45b9d6523b9",
+        "bytes": 5956,
+        "observed_commit": "5137873517ce928045548accb32b8a44c1f73454",
         "role": "three_js_atoms_cell_legend_and_view",
         "line_ranges": [
           [
-            10,
+            12,
+            17
+          ],
+          [
+            24,
+            42
+          ],
+          [
+            49,
             53
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "observed_on": "2026-11-19"
+        "read_scope": "Working tree based on observed_commit. SHA256 identifies the reviewed file including local changes. Ranges cover the viewer controls and inspected-frame behavior.",
+        "observed_on": "2026-11-23"
       },
       {
         "source_id": "studio",
         "path": "frontend/features/runs/RunDetail.tsx",
-        "sha256": "02b401b316a49dc243d83a0dff0931be47c26755785be846eda8eb866f2fecde",
-        "bytes": 26270,
-        "observed_commit": "86b3b5c99c74b8c97e229bb4e3f330171357c69d",
+        "sha256": "31dcab6dc81a6a5a9280c43da37a4ee088167988f9bda96f771656a500dff0e7",
+        "bytes": 27179,
+        "observed_commit": "5137873517ce928045548accb32b8a44c1f73454",
         "role": "available_result_files_and_frame_selection",
         "line_ranges": [
           [
-            103,
-            107
+            104,
+            108
           ],
           [
-            145,
-            148
+            155,
+            158
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "observed_on": "2026-11-22"
+        "read_scope": "Working tree based on observed_commit. SHA256 identifies the reviewed file including local changes. Ranges cover the viewer controls and inspected-frame behavior.",
+        "observed_on": "2026-11-23"
       },
       {
         "source_id": "studio-worker",

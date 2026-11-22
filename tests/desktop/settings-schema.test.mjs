@@ -14,6 +14,7 @@ const base = {
 
 test('known settings keys are accepted and merged over the current settings',()=>{
  assert.deepEqual(normalizeSettings(base,{}),base);
+ assert.deepEqual(normalizeSettings(base,{overviewAgentLayout:'center'}),{...base,overviewAgentLayout:'center'});
  assert.equal(normalizeSettings(base,{developerComputeWorkspaceId:'a'.repeat(64)}).developerComputeWorkspaceId,'a'.repeat(64));
  assert.equal(normalizeSettings(base,{developerComputeWorkspaceId:null}).developerComputeWorkspaceId,null);
  for(const invalid of [true,'all','/home/test'])assert.throws(()=>normalizeSettings(base,{developerComputeWorkspaceId:invalid}),/developer compute workspace/);
@@ -50,6 +51,7 @@ test('invalid known settings values keep their existing validation',()=>{
   [{workerPort:80},/Invalid WSL settings/],
   [{workerRoot:'relative/root'},/Invalid WSL settings/],
   [{agentLayout:'top'},/Unsupported workspace layout/],
+  [{overviewAgentLayout:'top'},/Unsupported overview layout/],
   [{agentProvider:'unknown'},/Unsupported Agent provider/],
   [{language:'fr'},/Unsupported language/],
   [{fontSize:11},/Invalid font size/],

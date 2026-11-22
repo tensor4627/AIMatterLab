@@ -1,8 +1,8 @@
 /* Keep native focus, selection and disclosure behaviour for pointer and keyboard input. */
 :root {
-  --ui-quick: 130ms;
-  --ui-reveal: 160ms;
-  --ui-ease: cubic-bezier(.2,.75,.25,1);
+  --ui-quick: 120ms;
+  --ui-reveal: 170ms;
+  --ui-ease: cubic-bezier(.2,.8,.25,1);
 }
 
 .conversation-project > summary .group-chevron {
@@ -55,17 +55,29 @@
   to { opacity: 1; translate: 0 0; }
 }
 @keyframes workspace-appear {
-  from { opacity: .6; }
-  to { opacity: 1; }
+  from { opacity: .74; translate: 0 4px; }
+  to { opacity: 1; translate: 0 0; }
 }
 @keyframes message-sent {
   from { opacity: 0; translate: 0 5px; }
   to { opacity: 1; translate: 0 0; }
 }
+@keyframes navigation-current {
+  from { opacity: .35; scale: 1 .5; }
+  to { opacity: 1; scale: 1 1; }
+}
 
 @media (prefers-reduced-motion: no-preference) {
-  .workspace-content :is(.page,.home-page) { animation:workspace-appear var(--ui-quick) var(--ui-ease); }
-  .primary-navigation button, .prompt-hints button, .composer {
+  .workspace-content > :is(.page,.home-page),
+  .workspace-content > div:not([hidden]) > .page {
+    animation:workspace-appear var(--ui-reveal) var(--ui-ease);
+  }
+  .workspace-shell :is(.navigation-rail,.primary-navigation) button[aria-current=page]::before,
+  .workspace-shell .conversation-sidebar .selected-conversation::before {
+    animation:navigation-current var(--ui-reveal) var(--ui-ease);
+  }
+  :is(.navigation-rail,.primary-navigation,.panel-selection,.prompt-hints) button,
+  .home-page .home-row, .composer {
     transition:background-color var(--ui-quick),border-color var(--ui-quick),color var(--ui-quick);
   }
   .conversation-popover, .workspace-layout-menu[open] > div, .shared-terminal-menu[open] > div,
@@ -75,7 +87,7 @@
   :is(.composer,.agent-primary,.jobs-filters,.setup-checks) select::picker(select) {
     animation: ui-reveal var(--ui-quick) var(--ui-ease);
   }
-  .group-chevron, .workspace-layout-menu > summary svg, .agent-panel .send {
+  .group-chevron, .tool-group-chevron, .workspace-layout-menu > summary svg, .agent-panel .send {
     transition: transform var(--ui-quick) var(--ui-ease);
   }
   .agent-panel .send:active:enabled { transform: scale(.94); }

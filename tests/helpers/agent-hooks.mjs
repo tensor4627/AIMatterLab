@@ -50,6 +50,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
  const hooks=[],pending=[],events=[],calls=[],errors=[],conversations=[],intervals=new Map();let cursor=0,dirty=false,tree,currentProps,disposed=false,nextInterval=0;
  const useState=initial=>{const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{const value=typeof next==='function'?next(hooks[index].value):next;if(!Object.is(value,hooks[index].value)){hooks[index].value=value;dirty=true;}}];};
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
+ const useId=()=>`agent-fixture-${cursor++}`;
  const useEffect=(fn,deps)=>{const index=cursor++,previous=hooks[index];if(!previous||!deps||deps.some((value,i)=>!Object.is(value,previous.deps?.[i]))){const record={deps,cleanup:previous?.cleanup};hooks[index]=record;pending.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
  const standard=async(method,data)=>{
   if(method==='state')return {settings:{agentProvider:'codex'}};
@@ -70,7 +71,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
  };
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
  const require=name=>{
-  if(name==='react')return {useState,useRef,useEffect,useLayoutEffect:useEffect,Fragment:'fragment',memo:component=>component};
+  if(name==='react')return {useState,useRef,useEffect,useId,useLayoutEffect:useEffect,Fragment:'fragment',memo:component=>component};
   if(name==='react/jsx-runtime'){const jsx=(type,props)=>typeof type==='function'?type(props):({type,props});return {jsx,jsxs:jsx,Fragment:'fragment'};}
   if(name==='./ConversationMessages'){const view={exports:{}};new Function('require','module','exports',messagesCompiled)(require,view,view.exports);return view.exports;}
   if(name==='./ComposerQuestion'){const view={exports:{}};new Function('require','module','exports',questionsCompiled)(require,view,view.exports);return view.exports;}

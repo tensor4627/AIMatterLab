@@ -15,7 +15,7 @@
 .guide-focus-tip {
   position:absolute; box-sizing:border-box; width:min(310px,calc(100% - 20px)); max-height:calc(100% - 20px);
   display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; column-gap:8px; row-gap:6px;
-  padding:14px 16px; overflow:auto; overflow-wrap:anywhere; border:1px solid var(--line); border-radius:12px;
+  padding:12px 14px; overflow:auto; overflow-wrap:anywhere; border:1px solid var(--line); border-inline-start:2px solid var(--accent); border-radius:6px;
   background:var(--panel); color:var(--text); box-shadow:0 8px 28px #0004;
   font-family:var(--ui-font,system-ui); font-size:max(14px,calc(13px * var(--ui-scale,1)),var(--ui-min-font,12px)); line-height:1.45;
 }
@@ -27,7 +27,7 @@
 .guide-focus-tip button:is(:hover,:focus-visible) {background:var(--raised);color:var(--text);}
 .guide-focus-tip button:focus-visible {outline:2px solid var(--accent);outline-offset:1px;}
 .guide-focus-tip p,.guide-focus-tip small {grid-column:1/-1; margin:0;}
-.guide-focus-tip small {color:var(--muted);font-size:.87em;}
+.guide-focus-tip small {color:var(--muted);font-size:.87em;padding-top:6px;border-top:1px solid var(--line);}
 @media (prefers-reduced-motion:no-preference) {
   .guide-spotlight[open] .guide-focus-tip {animation:ui-reveal var(--ui-quick) var(--ui-ease);}
 }

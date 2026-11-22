@@ -66,7 +66,7 @@ test('partial optional paid reader fills only missing defaults and deep-clones r
 });
 test('remove and re-add draft target id cannot show deleted advanced JSON for a new environment',async()=>{
  const h=fixture();await h.flush();const walk=n=>Array.isArray(n)?n.flatMap(walk):n&&typeof n==='object'?[n,...walk(n.props?.children)]:[];
- const editor=()=>walk(h.find(n=>n.type==='fieldset'&&n.props.children?.[0]?.props?.children==='queue-5')).find(n=>n.type==='textarea'&&n.props['aria-invalid']!==undefined);
+ const editor=()=>walk(h.find(n=>n.type==='fieldset'&&n.props['aria-label']==='queue-5')).find(n=>n.type==='textarea'&&n.props['aria-invalid']!==undefined);
  h.id('queue-add').props.onClick();await h.flush();editor().props.onChange({target:{value:JSON.stringify({executables:{python:'/draft/deleted/python'}})}});await h.flush();h.id('queue-remove-4').props.onClick();await h.flush();h.id('queue-add').props.onClick();await h.flush();const fresh=h.props.profile.queue_targets.at(-1);assert.equal(fresh.id,'queue-5');assert.equal(fresh.environment.executables.python,'/registered/python');assert.equal(JSON.parse(editor().props.value).executables.python,fresh.environment.executables.python);assert.equal(h.writes().length,0);h.unmount();
 });
 

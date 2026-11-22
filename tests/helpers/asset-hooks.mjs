@@ -24,6 +24,7 @@ export function assetHarness({component='AssetInspector',override,props:initialP
    if(name==='../../ui/Tooltip')return {default:'Tooltip'};
    if(name==='../../ui/presentation/paths')return {wslPath:value=>value};
    if(name==='lucide-react')return {Folder:'Folder'};
+   if(name.endsWith('.css'))return {};
    if(name.startsWith('.'))return load(path.resolve(path.dirname(file),name+'.ts'));
    throw Error('Unexpected asset test dependency '+name);
   };

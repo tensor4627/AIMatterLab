@@ -1,3 +1,4 @@
+import Tooltip from '../Tooltip';
 import {tr} from '../i18n';
 import {useEffect,useRef} from 'react';
 import * as THREE from 'three';
@@ -48,6 +49,6 @@ function Structure({data,viewKey}:{data:StructureData;viewKey?:string}){
  },[viewKey]);
  useEffect(()=>runtime.current?.update(data),[data,viewKey]);
  const counts=new Map<string,number>();for(const symbol of data.symbols)counts.set(symbol,(counts.get(symbol)||0)+1);
- return <div className="structure-wrap"><div ref={ref} className="structure" role="img" aria-label={tr('结构预览')}/><div className="structure-toolbar"><div className="structure-legend" aria-label={tr('元素图例')}>{[...counts].map(([symbol,count])=><span key={symbol}><i style={{background:'#'+colorFor(symbol).getHexString()}}/>{symbol} · {count}</span>)}</div><button className="button" type="button" onClick={()=>runtime.current?.reset()}>{tr('重置视角')}</button></div><div className="chart-note">{data.n_atoms}{tr('atoms · 保留原子顺序 · 拖动旋转，滚轮缩放')}</div></div>;
+ return <div className="structure-wrap"><div ref={ref} className="structure" role="img" aria-label={tr('结构预览')}/><div className="structure-toolbar"><div className="structure-legend" aria-label={tr('元素图例')}>{[...counts].map(([symbol,count])=><span key={symbol}><i style={{background:'#'+colorFor(symbol).getHexString()}}/>{symbol} · {count}</span>)}</div><button className="button" type="button" onClick={()=>runtime.current?.reset()}>{tr('重置视角')}</button></div><div className="chart-note"><Tooltip content={tr('保留原子顺序。拖动旋转，滚轮缩放。')}>{tr('原子数')} · {data.n_atoms}</Tooltip></div></div>;
 }
 export default Structure;

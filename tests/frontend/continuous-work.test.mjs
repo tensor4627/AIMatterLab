@@ -74,15 +74,27 @@ test('direct draft run submits once without a passed review; superseded and work
  for(const patch of [{superseded_by:'next'},{studio_workflow_binding:{}}]){const owned=runDetailHarness({props:{run}});await owned.flush();const stale=owned.button('提交计算');owned.render({run:{...run,...patch}});await owned.flush();stale.props.onClick();await owned.flush();assert.equal(owned.calls.length,0);owned.unmount();}
 });
 
-test('a repair draft belongs to its selected chat while another chat finishes in the background',async()=>{
- const h=agentHarness({props:{sessionSelection:{nonce:'a',conversation:conversation('codex','a')}}});
- await h.flush();h.type('Original request');h.send();await h.flush();
- h.render({sessionSelection:{nonce:'b',conversation:conversation('codex','b')},intent:{id:'repair-b',provider:'codex',threadId:'b',text:'Diagnose the saved run failure',autoSend:false}});
- await h.flush();assert.equal(h.textarea().props.value,'Diagnose the saved run failure');
- h.type('Edited repair draft');
- h.emit({provider:'codex',method:'turn/completed',params:{threadId:'a',turn:{id:'accepted-turn',status:'completed'}}});
- await h.flush();assert.equal(h.textarea().props.value,'Edited repair draft');
- assert.equal(h.calls.filter(call=>call.method==='agent.rpc'&&call.data.method==='turn/start').length,1);
- h.render({hidden:true});await h.flush();h.render({hidden:false});await h.flush();
- assert.equal(h.textarea().props.value,'Edited repair draft');h.unmount();
+test('a selected repair conversation receives its draft once while another conversation replies',async()=>{
+ const first=conversation('codex','a'),target=conversation('codex','b');
+ const repair={id:'repair-b',provider:target.provider,threadId:target.threadId,text:'Diagnose the saved run failure',autoSend:false};
+ const h=agentHarness({props:{sessionSelection:{nonce:'a',conversation:first}}});
+ try{
+  await h.flush();
+  h.type('Original request');h.send();await h.flush();
+  h.find(node=>node.props?.['data-testid']==='agent-stop');
+  h.type('Keep unsent draft in A');
+  h.render({sessionSelection:{nonce:'b',conversation:target},intent:repair});await h.flush();
+  assert.equal(h.textarea().props.value,repair.text);
+  h.emit({provider:'codex',method:'turn/completed',params:{threadId:first.threadId,turn:{id:'accepted-turn',status:'completed'}}});
+  await h.flush();
+  assert.equal(h.textarea().props.value,repair.text);
+  h.type('Edited repair draft');
+  h.render({hidden:true});await h.flush();h.render({hidden:false});await h.flush();
+  assert.equal(h.textarea().props.value,'Edited repair draft');
+  h.render({sessionSelection:{nonce:'a-again',conversation:first},intent:undefined});await h.flush();
+  assert.equal(h.textarea().props.value,'Keep unsent draft in A');
+  h.render({sessionSelection:{nonce:'b-again',conversation:target},intent:repair});await h.flush();
+  assert.equal(h.textarea().props.value,'Edited repair draft');
+  assert.deepEqual(h.calls.filter(call=>call.method==='agent.rpc'&&['turn/start','turn/interrupt'].includes(call.data.method)).map(call=>[call.data.method,call.data.params.threadId]),[['turn/start',first.threadId]]);
+ }finally{h.unmount();}
 });

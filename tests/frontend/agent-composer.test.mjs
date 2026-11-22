@@ -107,7 +107,7 @@ test('Agent options collapse into a summary while connection and repair remain o
  assert.equal(region().props.hidden,false);assert.equal(h.find(n=>n.props?.['data-testid']==='agent-options').props['aria-expanded'],true);
  h.click('agent-options');await h.flush();assert.equal(region().props.hidden,true);assert.equal(h.calls.length,calls);
  h.click('agent-connect');await h.flush();
- assert.match(h.find(n=>n.props?.['data-testid']==='agent-options-summary').props.title,/Codex/);
+ assert.match(h.find(n=>n.props?.['data-testid']==='agent-options-summary').props.children,/Codex/);
  assert.equal(contains(region(),'agent-model'),true);assert.equal(contains(region(),'agent-effort'),true);
  h.find(n=>n.props?.['data-testid']==='agent-tool-repair');
  assert.equal(contains(region(),'agent-tool-repair'),false);
@@ -115,11 +115,11 @@ test('Agent options collapse into a summary while connection and repair remain o
 });
 
 
-test('planning checkbox, bound explanation and current-flow action share one composer row',async()=>{
+test('planning checkbox, contextual help and current-flow action share one composer row',async()=>{
  const h=agentHarness({props:{sessionSelection:{nonce:'bound-inline',conversation:{...conversation('codex','bound'),taskId:'owned-task'}}},override:(method,data,standard)=>method==='conversation.remember'?{...conversation(data.provider,data.threadId),taskId:'owned-task'}:standard(method,data)});await h.flush();
  const row=h.find(n=>n.props?.className==='agent-compose-context');
  const visit=n=>Array.isArray(n)?n.flatMap(visit):n&&typeof n==='object'?[n,...visit(n.props?.children)]:[];
- const nodes=visit(row);assert(nodes.some(n=>n.props?.['data-testid']==='agent-planning-mode'));assert(nodes.some(n=>n.props?.className==='agent-mode-inline'));assert(nodes.some(n=>n.props?.['data-testid']==='agent-current-workflow'));
+ const nodes=visit(row);assert(nodes.some(n=>n.props?.['data-testid']==='agent-planning-mode'));assert(nodes.some(n=>n.props?.label==='任务规划模式'&&n.props?.content==='此对话已绑定流程，可直接用自然语言调整'));assert(nodes.some(n=>n.props?.['data-testid']==='agent-current-workflow'));
  assert.equal(starts(h).length,0);h.unmount();
 });
 

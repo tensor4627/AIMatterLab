@@ -110,11 +110,11 @@ export default function RoadmapExecutionPanel({taskId,revision,connected,disable
   {missing.length>0&&<section className="notice roadmap-missing-tools" data-testid="roadmap-missing-tools"><strong>{t('流程缺少工具')}</strong><ul>{missing.map(item=><li key={item.step_id}>{nodes.find(node=>node.id===item.step_id)?.label||item.step_id} · {item.tool}<p>{item.reason==='tool_not_configured'?t('此工具尚未在当前资源上配置。'):item.reason}</p>{onMissingTool&&<button className="button" type="button" disabled={busy} data-testid="roadmap-missing-tool-setup" onClick={()=>onMissingTool(item.tool)}>{t('让 Agent 配置')}</button>}</li>)}</ul><button className="text-button" type="button" onClick={()=>{setMissing([]);onMissingToolQuestion?.();}}>{t('稍后')}</button></section>}
   {review&&<Snapshot review={review}/>}
   {historyError&&<p role="alert">{historyError}</p>}
-  {history?.map(row=><section key={row.id} aria-label={t('执行回执')} data-guide-target="roadmap-results"><h4>{stateText(row.status)} · {row.id.slice(0,12)}</h4>
-   {row.directory&&<p>{t('本次运行目录')} · <code>{row.directory}</code></p>}
+  {history?.map(row=><section className="roadmap-receipt" key={row.id} aria-label={t('执行回执')} data-guide-target="roadmap-results"><h4>{stateText(row.status)} · {row.id.slice(0,12)}</h4>
+   {row.directory&&<details><summary>{t('本次运行目录')}</summary><code>{row.directory}</code></details>}
    <FrozenSnapshot taskId={taskId} id={row.id} reload={reload}/>
-   {Object.entries(row.nodes).map(([id,node])=><div key={id}><strong>{id}</strong> · {stateText(node.status)} {node.run_id&&<button className="text-button" onClick={()=>onRun(node.run_id!)}>{node.job_id||node.run_id}</button>}
-    {node.directory&&<p><code>{node.directory}</code></p>}
+   {Object.entries(row.nodes).map(([id,node])=><div key={id} className="roadmap-step-receipt"><div className="roadmap-receipt-heading"><strong>{id}</strong><span>{stateText(node.status)}</span>{node.run_id&&<button className="text-button" onClick={()=>onRun(node.run_id!)}>{node.job_id||node.run_id}</button>}</div>
+    {node.directory&&<details><summary>{t('工作目录')}</summary><code>{node.directory}</code></details>}
     {node.reason&&<p>{node.reason}</p>}{node.consumed?.map(item=><p key={item.port}>{t('实际读取')} · {item.producer&&<>{item.producer.run_id} · {item.producer.step_id}.{item.producer.port} → </>}{id}.{item.port} · {item.bytes_read} B · {item.sha256}</p>)}</div>)}
    {row.goals.map(goal=><details key={goal.resource}><summary>{goal.label} · {stateText(goal.status)}</summary>{goal.artifact&&<p>{goal.artifact.path} · {goal.artifact.sha256}</p>}
     {goal.checks.map((check,i)=><p key={i}>{check.requirement} · {stateText(check.status)} {check.observed!==undefined&&JSON.stringify(check.observed)}</p>)}</details>)}

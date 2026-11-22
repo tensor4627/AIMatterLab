@@ -1,5 +1,7 @@
 import {parseChartData} from "../chart-data.mjs";
 import {pixelFontSize} from "../ui-font.mjs";
+import Tooltip from '../Tooltip';
+import './visualization.css';
 import {tr} from '../i18n';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import * as echarts from 'echarts/core';
@@ -31,7 +33,7 @@ function Chart({text,name,viewKey}:{text:string;name:string;viewKey?:string}){
   const chart=chartRef.current;if(!chart||!data.hasData)return;
   const neb=data.neb,ink=light?'#4a4958':'#aaaab9',grid=light?'#00000014':'#ffffff08';
   const top=Math.ceil(Math.max(36,font*2.5)),bottom=Math.ceil(Math.max(66,font*4.5)),ticks=tickCounts(chart,font),saved=restore.current;restore.current=undefined;
-  chart.setOption({backgroundColor:'transparent',color:light?['#6753bb','#147e70','#94620a','#335fa8']:['#a79aff','#5ccebe','#ecbe77','#7eafff'],
+  chart.setOption({animation:false,backgroundColor:'transparent',color:light?['#6753bb','#147e70','#94620a','#335fa8']:['#a79aff','#5ccebe','#ecbe77','#7eafff'],
    textStyle:{color:ink,fontSize:font},tooltip:{trigger:'axis',confine:true,textStyle:{fontSize:font}},legend:{top:8,left:12,right:12,textStyle:{color:ink,fontSize:font},pageTextStyle:{color:ink,fontSize:font},pageIconColor:ink,pageIconInactiveColor:light?'#aaa':'#555',type:'scroll',...(saved?{selected:saved.selected}:{})},
    grid:{left:neb?Math.ceil(font*3):12,right:Math.ceil(Math.max(36,font*2)),top,bottom,containLabel:true},dataZoom:[{type:'inside',...saved?.zoom[0]},{type:'slider',height:Math.ceil(Math.max(15,font*.8)),bottom:10,textStyle:{color:ink,fontSize:font},...saved?.zoom[1]}],
    xAxis:{axisLabel:{fontSize:font,hideOverlap:true},nameTextStyle:{fontSize:font},splitNumber:ticks.x,type:'value',scale:true,name:neb?tr('图像序号'):data.xLabel??tr('数据行序号'),nameLocation:'middle',nameGap:Math.ceil(font*1.8),splitLine:{lineStyle:{color:grid}}},
@@ -39,7 +41,7 @@ function Chart({text,name,viewKey}:{text:string;name:string;viewKey?:string}){
    series:data.series.map((series,index)=>({id:index+':'+series.name,name:neb?tr('相对目标值 (eV)'):series.name,type:'line',showSymbol:false,connectNulls:false,data:series.points.map(point=>[point.x,point.y])}))},{replaceMerge:['series']});
  },[data,source,font,light]);
  const notes=[data.cutLines&&'仅前 4000 行',data.cutColumns&&'仅前 6 条曲线'].filter(Boolean);
- return <div className="chart-wrap"><div className="chart-note">{name}{tr("· 原始列预览，单位以引擎输出定义为准")}</div>{notes.length>0&&<div className="chart-note">{tr('已截断：')}{notes.map(note=>tr(note)).join('，')}</div>}{data.ignoredColumns.length>0&&<div className="chart-note">{tr('忽略非数值列：')}{data.ignoredColumns.map(column=>column.name).join('，')}</div>}{data.skippedRows>0&&<div className="chart-note">{tr('已跳过不齐或非法行：')}{data.skippedRows}</div>}{data.missingValues>0&&<div className="chart-note">{tr('非数值单元格留空；不插值')}</div>}{data.hasData?<div ref={ref} className="chart" style={{minHeight:chartMinHeight}} role="img" aria-label={name}/>:<div className="chart-empty muted">{tr(data.structure?'结构文件请使用结构预览':'没有可绘制的数值列')}</div>}</div>;
+ return <div className="chart-wrap"><div className="chart-note"><Tooltip content={tr("单位以引擎输出定义为准。")}>{name}</Tooltip></div>{notes.length>0&&<div className="chart-note">{tr('已截断：')}{notes.map(note=>tr(note)).join('，')}</div>}{data.ignoredColumns.length>0&&<div className="chart-note">{tr('忽略非数值列：')}{data.ignoredColumns.map(column=>column.name).join('，')}</div>}{data.skippedRows>0&&<div className="chart-note">{tr('已跳过不齐或非法行：')}{data.skippedRows}</div>}{data.missingValues>0&&<div className="chart-note">{tr('非数值单元格留空；不插值')}</div>}{data.hasData?<div ref={ref} className="chart" style={{minHeight:chartMinHeight}} role="img" aria-label={name}/>:<div className="chart-empty muted">{tr(data.structure?'结构文件请使用结构预览':'没有可绘制的数值列')}</div>}</div>;
 }
 function tickCounts(chart:echarts.ECharts,font:number){const top=Math.ceil(Math.max(36,font*2.5)),bottom=Math.ceil(Math.max(66,font*4.5));return {x:Math.max(2,Math.min(5,Math.floor(chart.getWidth()/(font*8)))),y:Math.max(2,Math.min(5,Math.floor((chart.getHeight()-top-bottom-font*2)/(font*2.3))))};}
 export default Chart;

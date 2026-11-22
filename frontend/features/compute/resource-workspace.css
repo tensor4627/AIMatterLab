@@ -1,11 +1,13 @@
 .resource-workspace-review{display:grid;gap:12px;min-width:0}
-.resource-workspace-review dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 12px;margin:0}
+.resource-workspace-review dl{display:grid;grid-template-columns:minmax(0,.55fr) minmax(0,1fr);gap:5px 12px;margin:0;padding:9px 10px;background:var(--raised);border-inline-start:2px solid var(--line)}
 .resource-workspace-review dt{color:var(--muted)}
 .resource-workspace-review dd{margin:0;overflow-wrap:anywhere}
 .resource-workspace-review form{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
 .resource-workspace-review form label{display:grid;gap:5px;flex:1 1 210px;min-width:0;margin:0}
 .resource-workspace-review form input{width:100%;min-width:0;box-sizing:border-box}
-.resource-workspace-tree{padding:10px 12px;border:1px solid var(--line);border-radius:7px;overflow-wrap:anywhere}
+.resource-workspace-tree{padding:8px 10px;border-inline-start:2px solid var(--accent);background:var(--raised);overflow-wrap:anywhere}
 .resource-workspace-tree ul{margin:6px 0 0;padding-inline-start:1.4em;line-height:1.6}
 .resource-workspace-review p{margin:0;overflow-wrap:anywhere}
 .resource-workspace-review .button-row{justify-content:flex-end;flex-wrap:wrap;margin:4px 0 0}
+.resource-workspace-review :is(dt,.button){overflow-wrap:anywhere}
+.resource-workspace-review .button{white-space:normal;text-align:start}

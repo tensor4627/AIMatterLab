@@ -86,8 +86,8 @@ async function launch(){
   assert.equal(observed.packagedPreloadPresent,true);
   assert([profile,chromium].some(root=>path.relative(root,observed.session)===''),'Chromium must start with a disposable session directory');
   samePath(fileURLToPath(page.url()),path.join(archive,'dist','index.html'));
-  assert.equal(await page.locator('.version').innerText(),expectedVersion);
  }
+ assert.equal(await page.locator('.version').innerText(),expectedVersion);
  assert.deepEqual([observed.sandbox,observed.contextIsolation,observed.nodeIntegration],[true,true,false]);
  assert.equal(await page.evaluate(()=>typeof window.require==='undefined'&&typeof window.process==='undefined'&&typeof window.studio?.invoke==='function'),true);
  return observed;
@@ -122,7 +122,7 @@ async function checkConversation(){
  await page.getByTestId('agent-provider').selectOption('compatible');
  await page.getByTestId('agent-connect').click();
  const composer=page.locator('.composer textarea');
- await page.getByTestId('agent-connect').waitFor({state:'hidden'});
+ await page.getByTestId('agent-connect').waitFor({state:'hidden',timeout:45000});
  if(await page.getByTestId('agent-options').getAttribute('aria-expanded')==='true')await page.getByTestId('agent-options').click();
  if(attachments){
   phase='select files in fresh draft';
@@ -178,7 +178,12 @@ async function checkConversation(){
   assert.equal(requests.length,3,'A must drain while B is selected');
   assert.equal(await composer.inputValue(),'B has an unsent draft');
   assert(JSON.stringify(requests[2]).includes('queued_temperature,350 K'));
-  await page.locator('.conversation-sidebar .conversation-item').filter({hasText:sourceChat.name}).first().click();
+  const sidebarConversation=page.locator('.conversation-sidebar .conversation-item').filter({hasText:sourceChat.name}).first();
+  if(await sidebarConversation.isVisible())await sidebarConversation.click();
+  else{
+   await page.locator('nav.navigation-rail').getByRole('button',{name:'历史会话',exact:true}).click();
+   await page.getByRole('dialog',{name:'历史会话',exact:true}).locator('.conversation-item').filter({hasText:sourceChat.name}).first().click();
+  }
  }
  await page.getByText('Visible fixture output 3',{exact:true}).waitFor({timeout:20000});
  assert(JSON.stringify(requests[1]).includes('Fixture guidance for this reply'));

@@ -1,4 +1,5 @@
 import ChatMessage,{type ChatMessageValue,type ChatMessageActions} from './ChatMessage';
+import {ChevronRight,Wrench} from 'lucide-react';
 import {t} from '../../ui/i18n';
 import {toolLabel} from './tool-activity.mjs';
 import {messageKey} from './message-mapping.mjs';
@@ -35,9 +36,14 @@ function ToolGroup({messages,...props}:Props){
  const allTerminal=messages.every(message=>sharedTerminalTools.has(toolName(message).replace(/^mcp__gpusampling__/,'')));
  const label=messages.length===1?t(toolLabel(toolName(first))):`${t(allTerminal?'共享终端调用':'工具调用')} · ${messages.length}`;
  const status=states.filter(([state])=>counts.has(state)).map(([state,label])=>`${t(label)} ${counts.get(state)}`).join(' · ');
- return <details className="tool-group" data-testid="tool-group">
+ const severity=counts.has('failed')?'error':counts.has('unknown')||counts.has('blocked')?'warning':undefined;
+ return <details className="tool-group" data-testid="tool-group" data-severity={severity}>
   <summary data-message-id={`tool-group:${first.id}`} data-turn-id={first.turnId} title={status}>
-   <span className="tool-group-label">{label}</span><span className="tool-group-status">{status}</span>
+   <ChevronRight className="tool-group-chevron" size={14} aria-hidden="true"/>
+   <span className="tool-group-copy">
+    <span className="tool-group-label"><Wrench size={14} aria-hidden="true"/><span>{label}</span></span>
+    <span className="tool-group-status">{status}</span>
+   </span>
   </summary>
   <div className="tool-group-content">{messages.map(message=><ChatMessage key={messageKey(message)} message={message} {...props} bookmarked={props.bookmarked?.has(bookmarkKey(message))}/>)}</div>
  </details>;

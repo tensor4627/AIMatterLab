@@ -14,7 +14,7 @@ export function ParameterFields({fields,parameters,onChange,onError,onPreview,di
 export function GroupedParameterFields(props:Parameters<typeof ParameterFields>[0]&{compact?:boolean}){
  const {primary,advanced}=partitionFields(props.fields);
  const shown=props.compact?primary.slice(0,4):primary,rest=props.compact?primary.slice(4):[];
- return <><ParameterFields {...props} fields={shown}/>{rest.length>0&&<details className="flow-parameter-details"><summary>{t('更多基础参数')} · {rest.length}</summary><ParameterFields {...props} fields={rest}/></details>}{advanced.length>0&&<details className="advanced-field-group"><summary>{t('高级参数')} <span className="tag">{advanced.length}</span><small>{t('默认值与细节设置')}</small></summary><ParameterFields {...props} fields={advanced}/></details>}</>;
+ return <><ParameterFields {...props} fields={shown}/>{rest.length>0&&<details className="flow-parameter-details"><summary>{t('更多基础参数')} · {rest.length}</summary><ParameterFields {...props} fields={rest}/></details>}{advanced.length>0&&<details className="advanced-field-group"><summary>{t('高级参数')} <span className="tag">{advanced.length}</span></summary><ParameterFields {...props} fields={advanced}/></details>}</>;
 }
 function ParameterInput({field,value,missing,onChange,onError,onPreview,disabled,manualEdits}:{field:TaskField;value:any;missing:boolean;onChange:(value:any)=>void;onError:(error:unknown)=>void;onPreview?:(path:string)=>void;disabled:boolean;manualEdits?:Readonly<Record<string,number>>}){
  const [advanced,setAdvanced]=useState(''),[emptyMatrix,setEmptyMatrix]=useState(false),[manualPath,setManualPath]=useState('');

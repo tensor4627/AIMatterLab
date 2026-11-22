@@ -87,7 +87,7 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
         <div className="setup-content">
           <header className="setup-progress"><ol aria-label={say('设置进度','Setup progress')}>{pages.map((step,i)=>
             <li key={step} aria-current={step===page?'step':undefined} data-done={i<index}>
-              <span className="setup-step-mark">{i<index?<Check size={12}/>:i+1}</span>{labels[i]}</li>)}</ol>
+              {i<index&&<Check size={12} aria-hidden="true"/>}{labels[i]}</li>)}</ol>
             {page!=='ready'&&<button className="setup-text" disabled={busy} onClick={()=>move('complete')}>{say('跳过引导','Skip setup')}</button>}</header>
           <div className="setup-scroll" ref={summary}>
             <h1 id="setup-heading" ref={heading} tabIndex={-1}>{titles[index]}</h1>
@@ -107,19 +107,23 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
             </>}
             {page==='compute'&&<>
               <fieldset><legend className="setup-sr">{say('计算位置','Compute location')}</legend><div className="setup-routes">{([
-                ['wsl',Laptop,say('本机 WSL','Local WSL'),say('使用这台 Windows 电脑上的 Linux 环境','Use a Linux environment on this Windows PC')],
-                ['ssh',Server,say('远程集群','Remote cluster'),say('通过 SSH 登录实验室或计算中心','Sign in to a lab or computing centre via SSH')],
-                ['later',Monitor,say('暂不连接','Connect later'),say('先与助手对话或浏览工作台','Start with a conversation or explore the workspace')]
-              ] as const).map(([kind,Icon,label,detail])=><button key={kind} aria-pressed={route===kind} disabled={busy} onClick={()=>{routeChosen.current=true;setRoute(kind);}}><Icon size={21}/><span><strong>{label}</strong><small>{detail}</small></span><span className="setup-radio">{route===kind&&<i/>}</span></button>)}</div></fieldset>
+                ['wsl',Laptop,say('本机 WSL','Local WSL'),localConnected?say('WSL 已连接','WSL connected'):null],
+                ['ssh',Server,say('远程集群','Remote cluster'),auth?say('SSH 已登录','SSH signed in'):'SSH'],
+                ['later',Monitor,say('暂不连接','Connect later'),null]
+              ] as const).map(([kind,Icon,label,detail])=><button key={kind} aria-pressed={route===kind} disabled={busy} onClick={()=>{routeChosen.current=true;setRoute(kind);}}><Icon size={21} aria-hidden="true"/><span><strong>{label}</strong>{detail&&<small>{detail}</small>}</span><span className="setup-radio" aria-hidden="true">{route===kind&&<i/>}</span></button>)}</div></fieldset>
               {route!=='later'&&!connectNext&&<div className="setup-inline-actions"><button className="setup-secondary" disabled={busy||agentBusy} onClick={openConnection}><Terminal size={16}/>{connectionAction}</button></div>}
               {route==='ssh'&&<>
-                <p className="setup-note">{say('在私有窗口完成认证后，点击「交由 AIMatterLab 管理」，核对账号和总工作区后确认。交接后可查看作业服务的准备进度。','Sign in in the original terminal, then let AIMatterLab manage the connection. Confirm the account and workspace path, then follow job service setup.')}</p>
+                <p className="setup-note">{say('在私有窗口完成认证后，选择「交由 AIMatterLab 管理」，再核对账号和总工作区。','Sign in in the original terminal, choose to let AIMatterLab manage the connection, then confirm the account and workspace path.')}</p>
                 {clusterGuide&&<button className="setup-secondary" data-testid="setup-resume-cluster" disabled={busy||agentBusy} onClick={()=>onVisit('resume-cluster')}><Terminal size={16}/>{say('继续集群实操','Resume cluster walkthrough')} · {clusterGuide.name}</button>}
               </>}
             </>}
             {page==='ready'&&<>
-              <div className="setup-statuses">{account?.provider===provider&&<span><KeyRound size={12}/>{account.state==='configured'?say('账号已配置','Account configured'):account.state==='missing'?say('账号待配置','Account not configured'):say('账号状态待核对','Account status unconfirmed')}</span>}<span><Circle size={10} data-active={!!tested}/>{names[provider]} · {tested?say('模型已回复','Model replied')+' · '+tested.model:say('模型回复待验证','Model reply unverified')}</span><span><Circle size={10} data-active={localConnected||auth}/>{connection}</span>
-                {(ssh||localConnected)&&<span><Circle size={10} data-active={service}/>{service?say('作业服务已连接','Job service connected'):say('作业服务待连接','Job service pending')}</span>}</div>
+              <ul className="setup-statuses">
+                <li><Circle size={10} data-active={!!tested} aria-hidden="true"/><span>{names[provider]} · {tested?say('模型已回复','Model replied')+' · '+tested.model:say('模型回复待验证','Model reply unverified')}</span></li>
+                {account?.provider===provider&&<li><KeyRound size={13} data-active={account.state==='configured'} aria-hidden="true"/><span>{account.state==='configured'?say('账号已配置','Account configured'):account.state==='missing'?say('账号待配置','Account not configured'):say('账号状态待核对','Account status unconfirmed')}</span></li>}
+                <li><Circle size={10} data-active={localConnected||auth} aria-hidden="true"/><span>{connection}</span></li>
+                {(ssh||localConnected)&&<li><Circle size={10} data-active={service} aria-hidden="true"/><span>{service?say('作业服务已连接','Job service connected'):say('作业服务待连接','Job service pending')}</span></li>}
+              </ul>
               {tour===null?<button className="setup-tour-start" onClick={()=>{setTour(0);setChecks(false);}}><span className="setup-tour-icon"><BookOpen size={22}/></span><span><strong>{say('跟着示例走一遍','Take the guided tour')}</strong><small>{say('铜晶胞的分子动力学流程','A molecular dynamics workflow for copper')}</small></span><ChevronRight size={19}/></button>:
                 <div className="setup-tour"><div className="setup-tour-tabs" role="group" aria-label={say('示例操作','Tour steps')}>{tourItems.map(({icon:Icon,title},i)=><button key={title} title={title} aria-label={title} aria-pressed={tour===i} onClick={()=>setTour(i)}><Icon size={17}/></button>)}</div>
                   <div aria-live="polite"><h2>{tourItems[tour].title}</h2><p>{tourItems[tour].body}</p></div>

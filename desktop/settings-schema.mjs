@@ -11,7 +11,7 @@ const THEMES = ['dark','light'];
 /** Top-level renderer settings keys; anything else is rejected instead of silently persisted. */
 export const SETTINGS_KEYS = Object.freeze([
  'autoDiscoverCompute','developerComputeWorkspaceId','scientificSkillProviders','pygasSkillProviders','projectAgents',
- 'agentLayout','agentProvider','kimiPath','qwenPath','agentProviders',
+ 'agentLayout','overviewAgentLayout','agentProvider','kimiPath','qwenPath','agentProviders',
  'distribution','workerRoot','workerPort','codexPath','cwd','sourceRoots','sourceIds',
  'skillRoots','userCacheDirectory','theme','resourceBadgeMotion','language','fontFamily','fontSize','minimumFontSize','chatFontSize',
  'editorFontSize','terminalFontSize','terminalIdleMinutes','agent'
@@ -34,6 +34,7 @@ export function normalizeSettings(current, data = {}) {
      !/^~\/|^\//.test(next.workerRoot)) throw new Error('Invalid WSL settings');
  agentConfig(next.agent);
  if (!['right','center'].includes(next.agentLayout || 'right')) throw Error('Unsupported workspace layout');
+ if (next.overviewAgentLayout !== undefined && !['right','center'].includes(next.overviewAgentLayout)) throw Error('Unsupported overview layout');
  providerId(next.agentProvider || 'codex');
  for (const key of ['codexPath','kimiPath','qwenPath'])
   if (next[key] !== undefined && (typeof next[key] !== 'string' || /[\r\n\0]/.test(next[key]))) throw Error('Invalid CLI path');

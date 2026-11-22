@@ -3,6 +3,7 @@ import {ChevronDown,ChevronUp,CircleAlert,Maximize,Minus,Plus,X} from 'lucide-re
 import type {WorkflowRoadmap as Roadmap} from '../../../contracts/workflows/roadmap.mjs';
 import type {ToolGroupRecord} from '../../../contracts/dto/tools';
 import {t} from '../../ui/i18n';
+import Tooltip from '../../ui/Tooltip';
 import {layoutFrozenGroup,layoutRoadmap,legacyRoadmap,type GraphNode,type RoadmapDrawing} from './roadmap-layout';
 import {RoadmapGraphic,roleStyle} from './RoadmapGraphic';
 import './workflow-roadmap.css';
@@ -11,6 +12,7 @@ type Camera={scale:number;x:number;y:number};
 type Hint={text:string;x:number;top:number;bottom:number};
 type Size={width:number;height:number;font:number};
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(value,max));
+const overviewColumns=6;
 
 function NameHint({hint,size,id}:{hint:Hint;size:Size;id:string}){
  const ref=useRef<HTMLDivElement>(null);
@@ -30,7 +32,7 @@ function NodeDetail({node,graph,fields,onField,onDiscuss,close}:{node:GraphNode;
   <code>{port}</code><span>{[graph.labels.get(resource),graph.formats.get(resource),...(graph.requirements.get(resource)||[])].filter(Boolean).join(' · ')}</span></li>);
  return <aside className="roadmap-node-detail" aria-label={t('节点详情')}>
   <div className="roadmap-detail-heading"><Icon size={17}/><strong>{node.label}</strong>
-   <button type="button" className="roadmap-icon" aria-label={t('关闭节点详情')} onClick={close}><X size={16}/></button></div>
+   <Tooltip asChild content={t('关闭节点详情')}><button type="button" className="roadmap-icon" aria-label={t('关闭节点详情')} onClick={close}><X size={16}/></button></Tooltip></div>
   <div className="roadmap-detail-body">
    <p>{[node.kind==='step'?t(role):'',node.subtitle,node.key.slice(node.key.indexOf(':')+1)].filter(Boolean).join(' · ')}</p>
    {!!node.issues.length&&<p className="roadmap-detail-issues">{node.issues.join(' · ')}</p>}
@@ -62,7 +64,9 @@ function RoadmapCanvas({graph,bar,collapse,fields,onField,onDiscuss}:{graph:Road
   return ()=>{observer.disconnect();window.removeEventListener('studio:appearance',update);};
  },[]);
  const fit=Math.max(Number.EPSILON,Math.min((size.width-8)/graph.width,(size.height-8)/graph.height,1.35));
- const scale=view==='fit'?fit:Math.max(fit,size.font/22);
+ // Fit the inputs and outputs of typical plans on entry. Longer chains open at a readable scale.
+ const long=graph.nodes.some(node=>node.column>=overviewColumns);
+ const scale=view==='fit'||!long?fit:Math.max(fit,size.font/22);
  const camera=typeof view==='object'&&view?view:{
   scale,x:Math.max(4,(size.width-graph.width*scale)/2),y:Math.max(4,(size.height-graph.height*scale)/2),
  };
@@ -102,7 +106,7 @@ function RoadmapCanvas({graph,bar,collapse,fields,onField,onDiscuss}:{graph:Road
  const selected=graph.nodes.find(node=>node.key===selection);
  return <><div className="roadmap-bar">{bar}<div className="roadmap-view-tools">
   {([[Minus,'缩小流程图',()=>zoom(size.width/2,size.height/2,.78)],[Plus,'放大流程图',()=>zoom(size.width/2,size.height/2,1.28)],[Maximize,'适应全图',fitAll]] as const).map(([Icon,label,click])=>
-   <button type="button" key={label} aria-label={t(label)} title={t(label)} onClick={click}><Icon size={15}/></button>)}
+   <Tooltip key={label} asChild content={t(label)}><button type="button" aria-label={t(label)} onClick={click}><Icon size={15}/></button></Tooltip>)}
  </div>{collapse}</div>
  <div className="roadmap-surface">
   <svg ref={svg} className={'roadmap-canvas'+(active?' active':'')} style={{height:`clamp(104px, ${graph.height+14}px, min(28vh, 268px))`}} tabIndex={0}
@@ -177,11 +181,11 @@ export default function WorkflowRoadmap({taskId,name,roadmap,parameters,group,fi
    <option value="">{t('整个计算流程')}</option><option value={groupKey}>{t('冻结工具组')} · {group.name}</option></select>}
   {graph&&graph.findings.length>0&&<button type="button" className="roadmap-findings-toggle" aria-expanded={showFindings} onClick={()=>setShowFindings(!showFindings)}><CircleAlert size={14}/>{t('待明确')} {graph.findings.length}</button>}
   {!roadmap&&!showGroup&&<button type="button" className="roadmap-plan" onClick={onPlan}>{t('在对话中规划')}</button>}</>;
- const collapse=<button type="button" className="roadmap-collapse" ref={toggleRef} onClick={toggle} aria-expanded={true} aria-label={t('收起计算流程图')} title={t('收起计算流程图')}><ChevronUp size={16}/></button>;
+ const collapse=<Tooltip asChild content={t('收起计算流程图')}><button type="button" className="roadmap-collapse" ref={toggleRef} onClick={toggle} aria-expanded={true} aria-label={t('收起计算流程图')}><ChevronUp size={16}/></button></Tooltip>;
  return <header ref={header} className="workflow-pinned-heading" data-testid="workflow-pinned-heading">
   <div className="roadmap-title-row"><h1 title={name}>{name}</h1>
-   {collapsed&&<button type="button" ref={toggleRef} className="roadmap-mini" data-testid="roadmap-mini" onClick={toggle} aria-label={t('展开计算流程图')} title={t('展开计算流程图')} aria-expanded={false}>
-    {graph?.nodes.length?<svg aria-hidden="true" viewBox={`0 0 ${graph.width} ${graph.height}`}><RoadmapGraphic graph={graph} mini/></svg>:<span>{t('计算流程图')}</span>}<ChevronDown size={15}/></button>}
+   {collapsed&&<Tooltip asChild content={t('展开计算流程图')}><button type="button" ref={toggleRef} className="roadmap-mini" data-testid="roadmap-mini" onClick={toggle} aria-label={t('展开计算流程图')} aria-expanded={false}>
+    {graph?.nodes.length?<svg aria-hidden="true" viewBox={`0 0 ${graph.width} ${graph.height}`}><RoadmapGraphic graph={graph} mini/></svg>:<span>{t('计算流程图')}</span>}<ChevronDown size={15}/></button></Tooltip>}
   </div>
   {!collapsed&&<section className="workflow-roadmap" aria-label={t('计算流程图')} data-testid="workflow-roadmap">
    {graph?.nodes.length?<RoadmapCanvas key={showGroup?groupKey:'task'} graph={graph} fields={fields} bar={bar} collapse={collapse} onField={onField} onDiscuss={onDiscuss}/>:<><div className="roadmap-bar">{bar}{collapse}</div><p className="roadmap-empty">{t('待定义初始输入、工具执行和目标产物。')}</p></>}

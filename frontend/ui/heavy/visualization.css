@@ -8,3 +8,15 @@
 .structure-card>.structure-wrap,.artifact-preview>.structure-wrap{height:auto;min-height:0;flex:1}
 .artifact-preview>.structure-wrap{overflow:auto}
 .structure-wrap>.chart-note{flex-shrink:0}
+.chart-wrap > .chart-note:first-child {
+  font-weight: 600;
+  color: var(--text);
+  padding-block: 0 8px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.structure-wrap > .chart-note {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.structure-toolbar { background: var(--panel); }

@@ -4,7 +4,7 @@ import type {ChatAttachmentPreview,ChatAttachmentRef} from '../../../contracts/d
 import type {ChatEvidenceSelection} from '../../../contracts/dto/chat-evidence';
 import {attachmentLimits} from '../../../contracts/agent/chat-attachments.mjs';
 import {ChevronDown,ChevronUp,Paperclip,X} from 'lucide-react';
-import Tooltip from "../../ui/Tooltip";
+import Tooltip,{HelpTip} from "../../ui/Tooltip";
 import {providerAccountState,authenticationError} from "./provider-account.mjs";
 import {ACCOUNT_GUIDANCE} from "../../../contracts/agent/provider-account.mjs";
 import {workspaceContextHeader} from '../../../contracts/agent/user-message.mjs';
@@ -17,7 +17,7 @@ import Notice from '../../ui/Notice';
 import './agent.css';
 import './codex-version-notice.css';
 import {tr} from "../../ui/i18n";
-import {useEffect,useLayoutEffect,useRef,useState,type RefObject} from 'react';
+import {useEffect,useId,useLayoutEffect,useRef,useState,type RefObject} from 'react';
 import {ArrowUp,ListPlus,PencilLine,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2,History,PanelRightClose} from 'lucide-react';
 import {t} from "../../ui/i18n";
 import {type ChatMessageActions,type ChatMessageValue} from './ChatMessage';
@@ -323,6 +323,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   };
   return ()=>{terminalDraft.current=null;};
  },[terminalDraft]);
+ const composerInput=useRef<HTMLTextAreaElement>(null),composerShortcuts=useId();
  const readingPositions=useRef<ReturnType<typeof createReadingPositions>|null>(null);if(!readingPositions.current)readingPositions.current=createReadingPositions(()=>localStorage);
  const readingOwner=useRef(readingKey(drafts.owner().provider,drafts.owner().threadId)),readingReady=useRef(false);
  const followScroll=useRef(true),[following,setFollowing]=useState(true),[hasNewMessages,setHasNewMessages]=useState(false);
@@ -1087,7 +1088,16 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  </button>:null;
  return <aside className="agent-panel" style={{width,display:hidden?'none':undefined}}>
   <div className={"agent-top-surface"+(options?" is-expanded":"")}>
-  <div className="panel-heading agent-heading"><span className="agent-heading-title"><Sparkles size={16}/>{threads.find(value=>value.id===thread)?.name||tr("科研助手")}</span>{!options&&<span className="agent-collapsed-summary" data-testid="agent-options-summary" title={optionSummary}>{optionSummary}</span>}<div className="agent-header-actions">{onOpenHistory&&<button className="icon-button" data-testid="agent-history" aria-label={t('历史会话')} title={t('历史会话')} onClick={onOpenHistory}><History size={16}/></button>}{onCollapse&&<button className="icon-button" aria-label={t('收起助手')} title={t('收起助手')} onClick={onCollapse}><PanelRightClose size={16}/></button>}<button className="icon-button" data-testid="agent-options" title={t("Agent 选项")} aria-label={t("Agent 选项")} aria-expanded={options} aria-controls="agent-options-region" onClick={()=>setOptions(!options)}><Settings2 size={16}/></button>{!onNewConversation&&<button className="icon-button" data-testid="agent-new-conversation-fallback" title={tr("新会话")} aria-label={tr("新会话")} onClick={()=>resetConversation()} disabled={busy||connecting||applying}><Plus size={17}/></button>}</div></div>
+   <div className="panel-heading agent-heading">
+    <span className="agent-heading-title"><Sparkles size={16} aria-hidden="true"/><span>{threads.find(value=>value.id===thread)?.name||tr('科研助手')}</span></span>
+    {!options&&<Tooltip content={optionSummary} className="agent-collapsed-summary"><span data-testid="agent-options-summary">{optionSummary}</span></Tooltip>}
+    <div className="agent-header-actions">
+     {onOpenHistory&&<Tooltip asChild content={t('历史会话')}><button className="icon-button" data-testid="agent-history" aria-label={t('历史会话')} onClick={onOpenHistory}><History size={16}/></button></Tooltip>}
+     {onCollapse&&<Tooltip asChild content={t('收起助手')}><button className="icon-button" aria-label={t('收起助手')} onClick={onCollapse}><PanelRightClose size={16}/></button></Tooltip>}
+     <Tooltip asChild content={t('Agent 选项')}><button className="icon-button" data-testid="agent-options" aria-label={t('Agent 选项')} aria-expanded={options} aria-controls="agent-options-region" onClick={()=>setOptions(!options)}><Settings2 size={16}/></button></Tooltip>
+     {!onNewConversation&&<Tooltip asChild content={t('新会话')}><button className="icon-button" data-testid="agent-new-conversation-fallback" aria-label={t('新会话')} onClick={()=>resetConversation()} disabled={busy||connecting||applying}><Plus size={17}/></button></Tooltip>}
+    </div>
+   </div>
   <div className="agent-configuration" data-testid="agent-configuration" hidden={!options&&connected&&(managedToolState?!managedToolsBlocked:tools.status!=='blocked')}>
    <div id="agent-options-region" role="region" aria-label={t("Agent 选项")} hidden={!options}>
    <div className="agent-primary">
@@ -1095,7 +1105,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     {connected?<div className="agent-model-controls"><label className="agent-model-field">{t("模型")}<select data-testid="agent-model" value={model} disabled={busy||applying} onChange={e=>void selectModel(e.target.value)}>{!models.length&&<option value="">{t("登录后加载模型目录")}</option>}{models.map(m=><option key={m.id} value={m.model}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label className="agent-effort-field">{provider==='codex'?'Effort':t('思考设置')}<select data-testid="agent-effort" value={effort} disabled={!connected||busy||applying} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((e:any)=><option key={e.reasoningEffort} value={e.reasoningEffort}>{provider==='deepseek'?t(e.reasoningEffort==='none'?'快速 · 关闭思考':e.reasoningEffort==='low'?'思考 · 低':e.reasoningEffort==='high'?'思考 · 高':'思考 · 最大'):e.reasoningEffort}</option>)}</select></label></div>:null}
    </div>
    {options&&<div className="agent-options-content" id="agent-options-content" role="region" aria-label={t("Agent 选项")}>
-    <section className="agent-option-section"><div className="agent-option-heading"><h4>{t('连接与调用状态')}</h4>{connected&&<button className="text-button" disabled={busy||connecting||applying} onClick={openAccounts}>{t('管理账号')}</button>}</div>{connected?<div className="provider-account" data-testid="provider-access"><span>{t(modelCall?.status==='passed'&&modelCall.provider===provider&&modelCall.model===model&&modelCall.threadId===thread?'当前模型调用已验证':modelCall?.status==='failed'?'当前模型调用未通过':'当前模型调用尚未验证')}</span>{account?.modelAccess==='passed'&&<small>{t('此服务商曾成功回复')}</small>}<small>{t(account?.account?'账户信息可用':account?.credentialStored?'已保存凭据':'账户信息未返回')}</small><small>{t('会话已连接')}</small></div>:<p className="muted">{t('连接服务商后开始协作…')}</p>}</section>
+    {connected&&<section className="agent-option-section"><div className="agent-option-heading"><h4>{t('连接与调用状态')}</h4><button className="text-button" disabled={busy||connecting||applying} onClick={openAccounts}>{t('管理账号')}</button></div><div className="provider-account" data-testid="provider-access"><span>{t(modelCall?.status==='passed'&&modelCall.provider===provider&&modelCall.model===model&&modelCall.threadId===thread?'当前模型调用已验证':modelCall?.status==='failed'?'当前模型调用未通过':'当前模型调用尚未验证')}</span>{account?.modelAccess==='passed'&&<small>{t('此服务商曾成功回复')}</small>}<small>{t(account?.account?'账户信息可用':account?.credentialStored?'已保存凭据':'账户信息未返回')}</small><small>{t('会话已连接')}</small></div></section>}
     <section className="agent-option-section">
      <label className="agent-follow-up-preference"><span>{t('回复期间按 Enter')}</span>
       <select data-testid="agent-follow-up-enter-mode" value={followUpEnter} onChange={e=>{
@@ -1105,7 +1115,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
      </label>
     </section>
     <section className="agent-option-section"><h4>{t('上下文设置')}</h4><div className="context-usage">{usage?t("上下文")+" "+(usage.last?.totalTokens?.toLocaleString()||t("未知"))+" / "+(usage.modelContextWindow?.toLocaleString()||t("未知"))+" tokens":t("上下文用量：等待服务回报")}</div>{provider==='codex'?<div className="context-options"><label>{t('上下文预算 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={contextWindow} disabled={busy||applying} onChange={e=>{setContextWindow(e.target.value);setApplied('');}}/></label><label>{t('自动压缩阈值 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={compactLimit} disabled={busy||applying} onChange={e=>{setCompactLimit(e.target.value);setApplied('');}}/></label><small>{t('预算不会扩大模型本身的最大容量。应用后恢复当前会话，计算作业继续运行。')}</small><button className="button" data-testid="agent-context-apply" disabled={busy||applying} onClick={()=>void applyOptions()}>{tr(applying?t('应用中…'):t('应用上下文设置'))}</button>{applied&&<small role="status">{applied}</small>}</div>:<p className="muted">{t('此提供方通过协议回报上下文，暂不支持修改预算')}</p>}</section>
-    {workflowId&&<section className="agent-option-section"><h4><Tooltip content={t('此对话已绑定流程，可直接用自然语言调整')}>{t('计算流程')}</Tooltip></h4><button className="button" data-testid="agent-new-workflow" disabled={busy||applying} onClick={()=>setNewWorkflow(v=>!v)}>{t(newWorkflow?'取消新建流程':'新建流程')}</button></section>}
+    {workflowId&&<section className="agent-option-section"><div className="agent-option-heading"><h4>{t('计算流程')}</h4><HelpTip label={t('计算流程')} content={t('此对话已绑定流程，可直接用自然语言调整')}/></div><button className="button" data-testid="agent-new-workflow" disabled={busy||applying} onClick={()=>setNewWorkflow(v=>!v)}>{t(newWorkflow?'取消新建流程':'新建流程')}</button></section>}
     {connected&&<section className="agent-option-section external-session-import"><button className="text-button" data-testid="agent-import-existing" disabled={busy||applying||connecting||importLoading} onClick={()=>importOpen?setImportOpen(false):void importExisting()}>{t(importOpen?'收起会话导入':'导入已有 Agent 会话')}</button>{importOpen&&<div>{importLoading?<small>{t('读取会话目录中…')}</small>:<><small>{t('仅导入选中的会话，不修改外部记录。')}</small><select aria-label={t('选择外部会话导入')} value="" disabled={busy||applying} onChange={e=>{if(e.target.value)void resume(e.target.value);}}><option value="">{t('请选择')}</option>{externalThreads.filter(value=>!threads.some(known=>known.id===value.id)).map(value=><option key={value.id} value={value.id}>{value.name||value.preview?.slice(0,48)||value.id.slice(0,12)}</option>)}</select></>}</div>}</section>}
     <section className="agent-option-section"><h4>{t(terminalSelected?'当前计算资源':managedToolState?'托管计算工具':'科学工具连接')}</h4>
      {managedToolState?<div className="agent-tools-status" data-testid="agent-tools-status" data-status={managedToolState.status} data-scope="managed"><span><i className={'flow-dot '+(managedToolState.status==='ready'?'ready':'missing')}/>{t(managedToolState.status==='ready'?'托管计算工具通道已连接':managedToolState.status==='blocked'?'托管计算工具待修复':'托管计算工具待核对')}</span></div>:<div className="agent-tools-status" data-testid="agent-tools-status" data-status={terminalSelected&&!terminalReady?'blocked':tools.status} data-scope={tools.scope}><span><i className={'flow-dot '+((terminalSelected?terminalReady:tools.status==='ready')?'ready':'missing')}/>{t(terminalSelected?!terminalGranted?(workflowResource?'SSH 作业服务待交接':'SSH 终端待交接'):workflowResource?(terminalReady?'SSH 工作流工具已连接':'请重新连接服务商'):(terminalReady?'共享终端可用':'终端工具待连接'):tools.scope==='terminal-only'?'共享终端可用':tools.status==='ready'?'科学工具通道已连接':tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}</span>{tools.status==='blocked'&&<small>{t(tools.message||'')}</small>}</div>}
@@ -1132,7 +1142,15 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   {historyEnabled&&historyConversationId&&!historyHidden&&<ConversationHistoryToolbar key={historyConversationId} conversationId={historyConversationId} source={historyPage?.conversation.source} bookmarks={historyPage?.bookmarks||[]} atLatest={historyPage?.atLatest??true} loading={paging} onOpen={openHistoryLocation} onLatest={()=>void loadHistoryPage('latest')}/>}
    <div className="chat-scroll" ref={scroll} role="log" onScroll={observeScroll}>
    {!historyHidden&&historyPage?.before&&<OlderConversationPage loading={paging} onLoad={()=>void loadHistoryPage('older')}/>}
-   {!historyHidden&&!messages.length&&<div className="agent-welcome"><h3>{t('对话示例')}</h3><div className="prompt-hints">{['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(t=><button key={t} onClick={()=>proposePrompt(t)}>{tr(t)}<PencilLine size={14} aria-hidden="true"/></button>)}</div></div>}
+    {!historyHidden&&!busy&&!messages.length&&!requests.length&&<div className="agent-welcome">
+     <div className="prompt-hints" role="group" aria-label={t('对话示例')}>
+      {['检查我的计算环境','帮我设计一个 pyGAS bias','分析选中任务的运行日志'].map(example=><button key={example} onClick={()=>{
+       const text=tr(example),fillDraft=!drafts.text()||drafts.text()===text;
+       proposePrompt(text);
+       if(fillDraft)composerInput.current?.focus();
+      }}><span>{tr(example)}</span><PencilLine size={14} aria-hidden="true"/></button>)}
+     </div>
+    </div>}
    {historyHidden&&<Notice className="agent-history-state" data-testid="agent-history-state" severity={historyLoad?.status==='failed'?'error':'info'}>{historyLoad?.status==='failed'?<><p>{t('此会话暂时无法读取，草稿已保留。')}</p>{historyLoad.error&&<details data-testid="agent-history-error-details"><summary>{t('查看错误详情')}</summary><pre>{historyLoad.error}</pre></details>}<button className="button" data-testid="agent-history-retry" disabled={busy||applying||connecting} onClick={()=>void retryHistory()}>{t('重新读取会话')}</button></>:<p>{t('正在读取所选会话…')}</p>}</Notice>}
    {!historyHidden&&<ConversationMessages messages={messages} language={t('你')} actions={messageActions.current!} disabled={busy||connecting||applying} canOriginalRun={!!onOpenOriginalRun} canCluster={!!onOpenCluster} canCompute={!!(onReviewWorker||onConnectCompute)} bookmarked={new Set(historyPage?.bookmarks.map(bookmark=>JSON.stringify([bookmark.turnId,bookmark.itemId]))||[])}/>}
    {!historyHidden&&requests.filter(r=>!isUserInputRequest(r)).map(r=>{const scope=requestScope(r),pending=responding.has(scope);return <div key={scope} className="approval" role="alert" data-testid="agent-question-request" data-request-id={String(r.id)} data-request-turn-id={r.params?.turnId} aria-busy={pending}><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
@@ -1211,20 +1229,27 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
       if(answer?.kind==='choice'){answeredMissingTool.current=missingTool.id;missingTool.onAnswer(answer.value===setupToolLabel?'setup':'later');}
      }}/>
    </div>:<>
-    {connected&&!options&&<div className="composer-model-selection" data-testid="composer-model-selection"><label>{t('模型')}<select data-testid="composer-model" aria-label={t('对话模型')} value={model} disabled={busy||applying||connecting} onChange={e=>void selectModel(e.target.value)}>{models.map(m=><option key={m.id||m.model} value={m.model} disabled={!!thread&&!!currentModel?.profileId&&m.profileId!==currentModel.profileId}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label>{t('推理等级')}<select data-testid="composer-effort" aria-label={t('对话推理等级')} value={effort} disabled={busy||applying||connecting||!efforts.length} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((entry:any)=><option key={entry.reasoningEffort} value={entry.reasoningEffort}>{entry.reasoningEffort==='off'?t('关闭思考'):entry.reasoningEffort}</option>)}</select></label></div>}<div className="agent-compose-context"><label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>{(workflowId||planningMode||newWorkflow)&&<Tooltip className="agent-mode-explanation" content={t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}><span className="agent-mode-inline">{t(terminalPlanning?'规划已开启，可先讨论方案':newWorkflow?'下条消息将新建流程；原流程保留。':workflowId?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}</span></Tooltip>}{workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}</div>{skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}
+     {skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}
+     {newWorkflow&&<p className="composer-workflow-notice" role="status">{t('下条消息将新建流程；原流程保留。')}</p>}
     {draftImageMismatch&&<small className="chat-file-capability" role="status">{t('当前模型仅支持文字，请更换模型或移除图片。')}</small>}
     <ChatFiles files={drafts.files()} preview={showFile} remove={id=>{drafts.removeFile(id);refreshFiles();}}/>
     <input ref={filePicker} hidden type="file" multiple data-testid="chat-file-picker" onChange={event=>{const files=Array.from(event.target.files||[]);event.target.value='';void importFiles(files);}}/>
-    <textarea onPaste={event=>{const files=Array.from(event.clipboardData.files);if(files.length){event.preventDefault();void importFiles(files);}}} data-guide-target="composer" aria-label={t('对话草稿')} aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t(connected?'描述计算目标，或询问选中任务…':'连接服务商后开始协作…')} onKeyDown={e=>{
+    <textarea ref={composerInput} aria-describedby={composerShortcuts} onPaste={event=>{const files=Array.from(event.clipboardData.files);if(files.length){event.preventDefault();void importFiles(files);}}} data-guide-target="composer" aria-label={t('对话草稿')} aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t('输入消息…')} onKeyDown={e=>{
      if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){
       e.preventDefault();if(!e.repeat)sendFromComposer(e.ctrlKey||e.metaKey);
      }
     }}/>
+    {connected&&!options&&<div className="composer-model-selection" data-testid="composer-model-selection"><label>{t('模型')}<select data-testid="composer-model" aria-label={t('对话模型')} value={model} disabled={busy||applying||connecting} onChange={e=>void selectModel(e.target.value)}>{models.map(m=><option key={m.id||m.model} value={m.model} disabled={!!thread&&!!currentModel?.profileId&&m.profileId!==currentModel.profileId}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label>{t('推理等级')}<select data-testid="composer-effort" aria-label={t('对话推理等级')} value={effort} disabled={busy||applying||connecting||!efforts.length} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((entry:any)=><option key={entry.reasoningEffort} value={entry.reasoningEffort}>{entry.reasoningEffort==='off'?t('关闭思考'):entry.reasoningEffort}</option>)}</select></label></div>}
+     <div className="agent-compose-context">
+      <label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>
+      <HelpTip label={t('任务规划模式')} content={t(terminalPlanning?'规划已开启，可先讨论方案':workflowId&&!planningMode?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}/>
+      {workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}
+     </div>
    </>}
    {!(composerQuestion&&questionDraft)&&!missingRequest&&<div className="composer-bottom">
     <button type="button" className="icon-button chat-file-add" data-testid="chat-file-add" title={t('添加文本、PDF、Office 文档或图片，也可拖入或粘贴')} aria-label={t('添加文件或图片')} disabled={fileImportBusy||historyHidden||composerUnbound} onClick={()=>filePicker.current?.click()}><Paperclip size={17}/></button>
     {fileImportBusy&&<small role="status">{t('正在读取附件…')}</small>}
-    <span data-testid={queueComposer?'agent-follow-up-shortcuts':undefined}>{queueComposer?queueHint:t('Enter 发送 · Shift+Enter 换行')}</span>
+    <span id={composerShortcuts} data-testid={queueComposer?'agent-follow-up-shortcuts':undefined}>{queueComposer?queueHint:t('Enter 发送 · Shift+Enter 换行')}</span>
     {queueComposer?<div className="agent-follow-up-actions">
      {provider!=='kimi'&&busy&&<button type="button" className="button" data-testid="agent-steer" disabled={!steerDraftAllowed}
       title={t(draftHasFiles?'带文件的消息将在下一轮发送':skill?'带技能的消息将在下一轮发送':'将文字发送到当前回复')} onClick={()=>void steer()}>{t(steering.current.has(queueKey??'')?'引导中…':'引导')}</button>}

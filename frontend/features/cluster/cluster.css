@@ -1,0 +1,123 @@
+.cluster-page,.cluster-review {container:cluster-page / inline-size;min-width:0;}
+.cluster-page .page-heading {border-bottom:1px solid var(--line);padding-bottom:9px;margin-bottom:12px;}
+.cluster-page .page-heading h1 {margin:0;}
+.cluster-page .page-heading svg {flex:none;color:var(--muted);}
+.cluster-page .cluster-selection {display:grid;gap:8px;margin:0 0 12px;}
+.cluster-selection-fields {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,215px),1fr));
+  gap:8px;
+}
+.cluster-page .cluster-selection-fields select {width:100%;min-inline-size:0;text-overflow:ellipsis;}
+.cluster-selection-actions,.cluster-health-heading,.cluster-observation > div {
+  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;
+}
+.cluster-page .button {white-space:normal;text-align:start;}
+.cluster-health {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:7px 12px;
+  margin:0 0 10px;
+  padding:8px 10px;
+  background:var(--panel);
+  border-inline-start:2px solid var(--line);
+  min-width:0;
+}
+.cluster-health-heading {flex:1 1 180px;}
+.cluster-health dl {
+  display:flex;
+  flex:1 1 100%;
+  flex-wrap:wrap;
+  column-gap:14px;
+  row-gap:3px;
+  margin:0;
+}
+.cluster-health dl > div {display:flex;gap:5px;align-items:baseline;flex-wrap:wrap;}
+.cluster-health small,.cluster-health dt,.cluster-observation small {color:var(--muted);}
+.cluster-health dd {margin:0;font-variant-numeric:tabular-nums;}
+.cluster-observation {display:flex;gap:5px 14px;flex-wrap:wrap;color:var(--muted);line-height:1.5;overflow-wrap:anywhere;}
+.cluster-observation:not(:empty) {padding:4px 0 8px;}
+.cluster-observation strong {color:var(--text);}
+.cluster-page .subtabs {margin:0;gap:14px;border-top:1px solid var(--line);}
+.cluster-page .subtabs button {padding:7px 0;}
+.cluster-page > .settings-advanced {border-top:0;margin:0;padding:5px 0 8px;}
+.cluster-page > .settings-advanced[open] > summary {margin-bottom:4px;}
+.cluster-page > .settings-advanced .button-row {margin:0;flex-wrap:wrap;}
+.cluster-page .card {min-width:0;overflow-wrap:anywhere;}
+.cluster-page .cluster-connection-fields {padding:12px;margin-bottom:12px;border-radius:5px;}
+.cluster-connection-fields :is(.form-row,.cluster-auth-fields) {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));
+  align-items:end;
+  gap:8px 12px;
+}
+.cluster-connection-fields .cluster-auth-fields {grid-template-columns:minmax(0,1fr) auto;}
+.cluster-page .cluster-connection-fields label,.cluster-page .cluster-files label {margin:7px 0;min-inline-size:0;}
+.cluster-connection-fields .cluster-auth-fields .button {margin-bottom:7px;}
+.cluster-connection-fields details > summary {padding:8px 0;cursor:pointer;color:var(--muted);}
+.cluster-connection-fields details[open] > summary {color:var(--text);}
+.cluster-connection-fields details p {margin:6px 0;line-height:1.5;}
+.cluster-page .cluster-footer {
+  justify-content:flex-end;
+  position:static;
+  border:0;
+  border-top:1px solid var(--line);
+  border-radius:0;
+  padding:8px 10px;
+}
+.cluster-page .cluster-footer > .button {flex:0 1 auto;}
+.cluster-page .cluster-footer > span {flex:1 1 160px;min-inline-size:0;}
+.cluster-files .form-row {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,185px),1fr));
+  gap:5px 12px;
+}
+.cluster-files select {width:100%;text-overflow:ellipsis;}
+.cluster-files .button-row {flex-wrap:wrap;margin:4px 0 12px;}
+.cluster-files .cluster-run-row,.cluster-page .cluster-run-row {
+  align-items:baseline;
+  gap:6px 12px;
+  flex-wrap:wrap;
+  padding:8px 4px;
+  overflow-wrap:anywhere;
+}
+.cluster-files .cluster-run-row:hover:not(:disabled),.cluster-page .cluster-run-row:hover:not(:disabled) {background:var(--raised);}
+.cluster-files .cluster-run-row > span {flex:1 1 105px;min-width:0;}
+.cluster-files .cluster-run-row small {margin:0;}
+.cluster-file-preview {border-top:1px solid var(--line);padding-top:10px;margin-top:10px;min-width:0;}
+.cluster-file-header {display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;}
+.cluster-file-heading {display:grid;flex:1 1 175px;gap:2px;min-width:0;}
+.cluster-file-heading :is(code,span) {overflow-wrap:anywhere;}
+.cluster-file-heading span {color:var(--muted);}
+.cluster-file-preview pre.report {margin:8px 0 0;min-width:0;}
+.cluster-results .cluster-result-heading {display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;}
+.cluster-results .cluster-result-heading h3 {margin:0;}
+.cluster-results .cluster-result-heading p {margin:5px 0 0;overflow-wrap:anywhere;}
+.cluster-result-list {display:grid;border-top:1px solid var(--line);}
+.cluster-result-list .cluster-run-row {padding:8px 3px;min-width:0;}
+.cluster-result-list .cluster-run-row strong {display:block;}
+.cluster-result-list .cluster-run-row > span {min-width:0;overflow-wrap:anywhere;}
+.cluster-queue-settings .queue-settings-heading h3 {margin:0;}
+.cluster-queue-settings .queue-target-disclosure {padding:8px 0;}
+.cluster-queue-settings .queue-target-disclosure:first-of-type {margin-top:8px;}
+.cluster-queue-settings .queue-target-disclosure > summary {font-weight:600;}
+.cluster-queue-settings .queue-target-disclosure > summary span {font-weight:400;color:var(--muted);margin-inline-start:8px;}
+.cluster-queue-settings .queue-target {padding:5px 0;}
+.cluster-queue-settings .queue-target label {margin:7px 0;}
+.cluster-queue-settings .queue-project-policy {
+  padding:10px 12px;
+  border-inline-start:2px solid var(--line);
+  background:var(--raised);
+}
+.cluster-queue-settings .queue-project-policy h4 {margin:0 0 6px;}
+.queue-policy-note {color:var(--muted);line-height:1.5;margin:0 0 8px;}
+.queue-project-policy summary {cursor:pointer;padding-block:7px;}
+.queue-project-policy li {padding:4px 0;}
+.queue-project-policy li > span {overflow-wrap:anywhere;}
+.queue-project-policy li button {color:var(--muted);}
+.queue-project-policy li button:hover:not(:disabled) {color:var(--accent);}
+@container cluster-page (max-width:450px) {
+  .cluster-connection-fields .cluster-auth-fields {grid-template-columns:minmax(0,1fr);}
+  .cluster-connection-fields .cluster-auth-fields .button {justify-self:start;margin:0;}
+}

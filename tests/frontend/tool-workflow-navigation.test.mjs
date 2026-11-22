@@ -21,7 +21,7 @@ function harness({selected=other,rows=[original,other,third],locate=async id=>lo
  const apiModule={exports:{}};new Function('require','module','exports',apiCompiled)(name=>{assert.equal(name,'./studio');return {invoke:async(method,value)=>{transportCalls.push({method,value});assert.equal(method,'tools.workflows.locateRun');return locate(value.run_id);}};},apiModule,apiModule.exports);
  const module={exports:{}};new Function('require','module','exports','crypto',compiled)(name=>name==='react'?react:name==='../../api/tool-workflows'?apiModule.exports:(()=>{throw Error('Unexpected navigation dependency '+name);})(),module,module.exports,{randomUUID});
  const choose=async value=>{chooseCalls.push(value);const promise=selection.current().chooseConversation(value);selection.render();render();await promise;selection.render();render();};
- function render(changes={}){overrides={...overrides,...changes};cursor=0;dirty=false;navigation=module.exports.useToolWorkflowNavigation({mounted:selection.mounted,selected:selection.current().selectedConversationRef,selectionSequence:selection.current().conversationSelectionSeq,navigationSequence,busy:selection.current().agentBusy,conversations:selection.current().conversations,chooseConversation:choose,onOpen:value=>opened.push(value),onError:error=>errors.push(error),...overrides});return navigation;}
+ function render(changes={}){overrides={...overrides,...changes};cursor=0;dirty=false;navigation=module.exports.useToolWorkflowNavigation({mounted:selection.mounted,selected:selection.current().selectedConversationRef,selectionSequence:selection.current().conversationSelectionSeq,navigationSequence,busy:false,conversations:selection.current().conversations,chooseConversation:choose,onOpen:value=>opened.push(value),onError:error=>errors.push(error),...overrides});return navigation;}
  async function flush(){for(let i=0;i<8;i++){await new Promise(done=>setImmediate(done));if(dirty)render();}}
  render();return {selection,navigationSequence,opened,errors,selectedErrors,chooseCalls,transportCalls,render,flush,current:()=>navigation,open:id=>navigation.open(id),rows:value=>{selection.current().setConversations(value);selection.render();render();},unmount:()=>{selection.unmount();},externalChoose:async value=>{await selection.current().chooseConversation(value);selection.render();render();}};
 }
@@ -30,12 +30,23 @@ test('same-conversation location uses the real typed readonly client, avoids cho
  const h=harness({selected:original});await h.open('run');await h.flush();assert.deepEqual(h.transportCalls,[{method:'tools.workflows.locateRun',value:{run_id:'run'}}]);assert.equal(h.chooseCalls.length,0);assert.equal(h.opened.length,1);assert.deepEqual({...h.current().focus,nonce:'nonce'},{task_id:'original-task',execution_id:'execution',step_id:'first',nonce:'nonce'});const nonce=h.current().focus.nonce;await h.open('run');await h.flush();assert.notEqual(h.current().focus.nonce,nonce);assert.equal(h.chooseCalls.length,0);
 });
 
-test('another conversation cannot focus before the actual conversation.select ACK',async()=>{
- const ack=deferred(),entered=deferred(),h=harness({select:async()=>{entered.resolve();return ack.promise;}}),pending=h.open('run');await entered.promise;assert.equal(h.opened.length,0);assert.equal(h.current().focus,undefined);assert.equal(h.selection.current().conversationSelectionSeq.current,1);assert.equal(h.navigationSequence.current,2);ack.resolve(original);await pending;await h.flush();assert.equal(h.opened.length,1);assert.equal(h.selection.current().selectedConversationRef.current.id,original.id);assert.equal(h.current().focus.task_id,original.taskId);
+for(const agentBusy of [false,true])test('another conversation waits for the actual selection ACK '+(agentBusy?'during a reply':'while idle'),async()=>{
+ const ack=deferred(),entered=deferred(),h=harness({select:async()=>{entered.resolve();return ack.promise;}});
+ h.selection.current().setAgentBusy(agentBusy);h.selection.render();h.render();
+ const pending=h.open('run');await entered.promise;assert.equal(h.opened.length,0);assert.equal(h.current().focus,undefined);assert.equal(h.selection.current().conversationSelectionSeq.current,1);assert.equal(h.navigationSequence.current,2);ack.resolve(original);await pending;await h.flush();assert.equal(h.opened.length,1);assert.equal(h.selection.current().selectedConversationRef.current.id,original.id);assert.equal(h.current().focus.task_id,original.taskId);
 });
 
-test('actual editor cancellation, selector busy and rejected selection do not treat promise resolution as ACK',async()=>{
- for(const mode of ['cancel','busy','failed']){const h=harness({select:async()=>{throw Error('Select failed');}});if(mode==='cancel')h.selection.render({editorDirty:true,confirmReplace:()=>false});if(mode==='busy'){h.selection.current().setAgentBusy(true);h.selection.render();}h.render({busy:false});await h.open('run');await h.flush();assert.equal(h.opened.length,0);assert.equal(h.current().focus,undefined);assert.equal(h.selection.current().selectedConversationRef.current.id,other.id);assert.equal(h.chooseCalls.length,1);assert.equal(h.transportCalls.filter(call=>call.method==='conversation.select').length,mode==='failed'?1:0);if(mode==='failed')assert.equal(h.selectedErrors.length,1);assert.equal(h.errors.length,0);}
+for(const mode of ['cancel','failed'])test('actual '+(mode==='cancel'?'editor cancellation':'rejected selection')+' preserves the current workflow view',async()=>{
+ const failure=Error('Select failed'),h=harness({select:async()=>{throw failure;}});
+ if(mode==='cancel')h.selection.render({editorDirty:true,confirmReplace:()=>false});
+ await h.open('run');await h.flush();
+ assert.equal(h.opened.length,0);
+ assert.equal(h.current().focus,undefined);
+ assert.equal(h.selection.current().selectedConversationRef.current.id,other.id);
+ assert.equal(h.chooseCalls.length,1);
+ assert.equal(h.transportCalls.filter(call=>call.method==='conversation.select').length,mode==='failed'?1:0);
+ assert.deepEqual(h.selectedErrors,mode==='failed'?[failure]:[]);
+ assert.deepEqual(h.errors,[]);
 });
 
 test('missing or changed original task/provider/thread binding never falls back to another conversation',async()=>{

@@ -35,7 +35,7 @@ const retiredProductLabel=value=>['GPU Sampling Studio','GPU-Sampling-Studio','S
 test('actual renderer product-label slots use the canonical name without scanning unrelated prose',()=>{
  const app=read('frontend/app/App.tsx');
  assert.match(app,/<strong>\{product.name\}<\/strong>/);
- assert.match(app,/className="sidebar-title"><button className="quick-search"/);
+ assert.match(app,/className="sidebar-title">\s*<Tooltip[^>]+>\s*<button className="quick-search" aria-label=/);
  assert.match(read('frontend/features/settings/SettingsPage.tsx'),/className="font-preview">[^\n]*\{product.name\}/);
  assert.match(read('frontend/features/conversations/ChatMessage.tsx'),/className="message-role">\{tr\(m.role==='user'\?'你':m.role==='service'\?'服务通知':m.role==='plan'\?'本轮计划':product\.name\)\}/);
  assert.equal(retiredProductLabel(PRODUCT_NAME),false);

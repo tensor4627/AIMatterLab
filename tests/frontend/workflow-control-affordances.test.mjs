@@ -8,6 +8,40 @@ const icon=()=>React.createElement('svg',{'aria-hidden':true});function evalNode
 const i18n={exports:{}};new Function('module','exports','localStorage',ts.transpileModule(fs.readFileSync(new URL("../../frontend/ui/i18n.ts",import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(i18n,i18n.exports,{getItem:()=>null,setItem:()=>{}});
 const all=n=>Array.isArray(n)?n.flatMap(all):React.isValidElement(n)?[n,...all(n.props.children)]:[];
 for(const language of ['zh-CN','en']){
- test(language+' mixed artifact records retain order/history without fake action, real routes unchanged',()=>{i18n.exports.setLanguage(language);const values=[{id:'w',kind:'workflow',name:'Saved workflow record'},{id:'r',kind:'run',name:'Local run'},{id:'u',kind:'future-kind',name:'Future record'},{id:'c',kind:'cluster-run',name:'Cluster run'},{id:'s',kind:'cluster-setup',name:'Cluster setup'},{id:'f',kind:'unknown'}],before=structuredClone(values),calls=[];const element=evalNode(artifacts,{t:i18n.exports.t,task:{artifacts:values},onCluster:id=>calls.push(['cluster',id]),onSetup:id=>calls.push(['setup',id]),onRun:id=>calls.push(['run',id]),ArrowUpRight:icon}),nodes=all(element),buttons=nodes.filter(n=>n.type==='button'),records=nodes.filter(n=>n.props.className==='tool-card artifact-record');assert.equal(buttons.length,3);assert.equal(records.length,3);assert(records.every(n=>!n.props.onClick&&!n.props.tabIndex&&!n.props.role));assert.deepEqual(nodes.filter(n=>['tool-card','tool-card artifact-record'].includes(n.props.className)).map(n=>n.key),values.map(n=>n.id));for(const b of buttons)b.props.onClick();assert.deepEqual(calls,[['run','r'],['cluster','c'],['setup','s']]);assert.deepEqual(values,before);const html=render(element);for(const value of values)assert(html.includes(value.name||value.kind));assert.equal((html.match(/<button/g)||[]).length,3);assert.equal((html.match(/<svg/g)||[]).length,3);});
+ test(language+' artifact history preserves order and routes only actionable records',()=>{
+  i18n.exports.setLanguage(language);
+  const values=[
+   {id:'w',kind:'workflow',name:'Saved workflow record'},
+   {id:'shared-run',kind:'run',name:'Local run'},
+   {id:'u',kind:'future-kind',name:'Future record'},
+   {id:'shared-run',kind:'cluster-run',name:'Cluster run'},
+   {id:'s',kind:'cluster-setup',name:'Cluster setup'},
+   {id:'f',kind:'unknown'},
+  ];
+  const before=structuredClone(values),calls=[];
+  const element=evalNode(artifacts,{
+   t:i18n.exports.t,task:{artifacts:values},ArrowUpRight:icon,
+   onRun:id=>calls.push(['run',id]),onCluster:id=>calls.push(['cluster',id]),onSetup:id=>calls.push(['setup',id]),
+  });
+  const rows=all(element).filter(node=>['tool-card','tool-card artifact-record'].includes(node.props.className));
+  const label=node=>React.Children.toArray(node.props.children).filter(child=>typeof child==='string').join('');
+  assert.deepEqual(rows.map(label),values.map(value=>value.name||value.kind));
+  assert.equal(new Set(rows.map(node=>node.key)).size,values.length);
+
+  const buttons=rows.filter(node=>node.type==='button');
+  assert.deepEqual(buttons.map(label),['Local run','Cluster run','Cluster setup']);
+  const records=rows.filter(node=>node.props.className==='tool-card artifact-record');
+  assert.deepEqual(records.map(label),['Saved workflow record','Future record','unknown']);
+  assert(records.every(node=>node.type==='div'&&node.props.onClick===undefined&&node.props.onKeyDown===undefined&&node.props.tabIndex===undefined&&node.props.role===undefined));
+  for(const button of buttons)button.props.onClick();
+  assert.deepEqual(calls,[['run','shared-run'],['cluster','shared-run'],['setup','s']]);
+  assert.deepEqual(values,before);
+
+  const html=render(element);
+  assert(html.includes(i18n.exports.t('模块草稿与输入记录')));
+  for(const value of values)assert(html.includes(value.name||value.kind));
+  assert.equal((html.match(/<button/g)||[]).length,3);
+  assert.equal((html.match(/<svg/g)||[]).length,3);
+ });
  for(const missing of [false,true])test(language+' '+(missing?'missing locator stays actionable':'complete status is noninteractive accessible')+' and heading still expands',()=>{i18n.exports.setLanguage(language);let located=[],expanded;const element=evalNode(header,{parameterDisplayLabel,task:{manualEdits:{}},t:i18n.exports.t,absent:missing?[{label:'Temperature'}]:[],step:{id:'step',title:'参数',fields:[],tool:null},index:0,expanded:false,grouped:{primary:[]},fieldSummary:()=>'',locateMissing:id=>located.push(id),setOpen:fn=>{expanded=fn({});},ChevronDown:icon}),nodes=all(element),status=nodes.find(n=>n.props.className?.startsWith('step-status')),heading=nodes.find(n=>n.props.className==='visual-step-heading');assert(status.props['aria-label'].includes(i18n.exports.t(missing?'定位模块缺项':'模块参数齐全')));assert.equal(status.props.title,i18n.exports.t(missing?'点击定位第一个缺项':'参数齐全'));if(missing){assert.equal(status.type,'button');status.props.onClick();assert.deepEqual(located,['step']);assert.equal(status.props.disabled,undefined);}else{assert.equal(status.type,'span');assert.equal(status.props.role,'img');assert.equal(status.props.onClick,undefined);assert.equal(status.props.tabIndex,undefined);assert.equal(status.props.disabled,undefined);assert.equal(nodes.find(n=>n.props.className==='flow-dot ready').props['aria-hidden'],'true');}heading.props.onClick();assert.deepEqual(expanded,{step:true});const html=render(element);assert.equal((html.match(/<button/g)||[]).length,missing?2:1);assert(html.includes(missing?'flow-dot missing':'role="img"'));});
 }

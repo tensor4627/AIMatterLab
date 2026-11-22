@@ -102,11 +102,11 @@ export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>
     phase==='ready'&&state.automatic?'安装包已校验。':ahead?'本机版本高于发布源的最新版本。':labels[phase];
   const percent=state.fullBytes ? Math.min(100,Math.floor((state.assembled??0)*100/state.fullBytes)) : 0;
   return <section className="software-update" aria-label={t('软件更新')}>
-    <p>{t('当前版本')} <strong>{state.currentVersion}</strong>
-      {state.version && phase!=='current' && <> → <strong>{state.version}</strong></>}</p>
-    {ahead && <p>{t('发布源最新版本')} <strong>{state.version}</strong></p>}
-    <p role="status">{t(status)} {state.source&&<small>{sourceLabel(state.source)}</small>}</p>
-    {state.issues&&<ul>{state.issues.map(issue=><li key={issue.source}>{sourceLabel(issue.source)} · {issueLabel(issue)}</li>)}</ul>}
+    <dl className="update-versions">
+      <div><dt>{t('当前版本')}</dt><dd>{state.currentVersion}</dd></div>
+      {state.version&&(phase!=='current'||ahead)&&<div><dt>{t('发布源最新版本')}</dt><dd>{state.version}</dd></div>}
+    </dl>
+    <p className="update-state" role="status"><strong>{t(status)}</strong>{state.source&&<small>{sourceLabel(state.source)}</small>}</p>
     {phase==='available' && state.reason && <p>{t(state.reason==='base'?'本机没有差分基准，可下载完整安装包。':state.reason==='retry'?'可重新下载完整安装包。':'差分数据不可用，可下载完整安装包。')}</p>}
     {bytes!==undefined && (phase==='available'||phase==='downloading') && <p>{t(mode==='delta'?'增量下载':'完整安装包')} · {phase==='downloading'?mib(received)+' / ':''}{mib(bytes)}</p>}
     {phase==='downloading' && <div className="update-progress"><progress aria-label={t('安装包准备进度')} value={state.assembled??0} max={state.fullBytes||1}/><span>{percent}%</span>
@@ -114,6 +114,7 @@ export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>
       {state.reason==='delta'&&<small>{t('差分下载未完成，正在获取完整包。')}</small>}</div>}
     {(phase==='checking'||phase==='verifying'||phase==='preparing'||phase==='installing') && <progress aria-label={t(labels[phase])}/>}
     {detail && <small role="alert">{detail}</small>}
+    {state.issues&&<ul>{state.issues.map(issue=><li key={issue.source}>{sourceLabel(issue.source)} · {issueLabel(issue)}</li>)}</ul>}
     {check && <button className="button" onClick={()=>void act('updates.check')}><RefreshCw size={15}/>{t('检查更新')}</button>}
     {available&&<button className="button primary" onClick={()=>void act('updates.run')}><Download size={15}/>{t(phase==='ready'?'重启更新':'下载并重启安装')}</button>}
     {(check||phase==='available')&&!state.automatic&&<ReleaseAccess recheck={()=>act('updates.check')}/>}

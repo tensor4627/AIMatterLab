@@ -92,11 +92,11 @@ export async function frontendReviewCases({check,out}){
   await page.waitForFunction(()=>window.__test.inspectWaiters.length===2);
   await page.evaluate(()=>window.__test.inspectWaiters[1].resolve(window.__test.structure(3)));
   await page.getByTestId('asset-preview-result').waitFor();
-  await page.waitForFunction(()=>document.querySelector('[data-testid="asset-preview-result"] .chart-note')?.textContent.startsWith('3'));
+  await page.waitForFunction(()=>/\b3\b/.test(document.querySelector('[data-testid="asset-preview-result"] .chart-note')?.textContent||''));
   await page.evaluate(()=>window.__test.inspectWaiters[0].resolve(window.__test.structure(1)));
   await page.waitForTimeout(100);
   assert.match(await page.getByTestId('asset-preview-result').innerText(),/latest\.xyz/);
-  assert.match(await page.locator('[data-testid="asset-preview-result"] .chart-note').innerText(),/^3/);
+  assert.match(await page.locator('[data-testid="asset-preview-result"] .chart-note').innerText(),/\b3\b/);
   await snapshot(page,'review-fixes-current-asset-preview');
   await page.getByTestId('asset-frame').fill('3');
   assert.equal(await page.getByTestId('asset-preview-result').count(),0);

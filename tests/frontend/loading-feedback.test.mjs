@@ -20,7 +20,7 @@ function mount(file,initial,dispatch=async()=>{}){
  const nodes=node=>Array.isArray(node)?node.flatMap(nodes):node&&typeof node==='object'?[node,...nodes(node.props?.children)]:[];
  const text=node=>Array.isArray(node)?node.map(text).join(''):node&&typeof node==='object'?text(node.props?.children):node==null||typeof node==='boolean'?'':String(node);
  const find=predicate=>{const value=nodes(tree).find(predicate);assert(value,'component node exists');return value;};
- const button=label=>find(node=>node.type==='button'&&text(node)===label);
+ const button=label=>find(node=>node.type==='button'&&(typeof label==='string'?text(node)===label:label.test(text(node))));
  function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}
  render();return {render,flush,find,button,calls,errors,timers,text:()=>text(tree),nodes:()=>nodes(tree),advance:async ms=>{now+=ms;for(const fn of timers.values())fn();await flush();},unmount};
 }
@@ -51,8 +51,8 @@ test('result collection gives immediate feedback and blocks repeated clicks befo
 
 for(const outcome of ['success','failure'])test('a superseded result preview '+outcome+' cannot replace the selected file or report an old error',async()=>{
  const a=deferred(),b=deferred(),h=mount('features/cluster/ClusterResults.tsx',{run:{id:'run-a',status:'succeeded'}},(target,data)=>target.endsWith('/collect')?Promise.resolve(collection):data.name==='a.txt'?a.promise:b.promise);
- try{await h.flush();h.button('回收结果').props.onClick();await h.flush();const inspectA=h.find(node=>node.type==='button'&&h.text()&&node.props.className==='tool-card'&&node.props.children[1].props.children==='a.txt').props.onClick;inspectA();inspectA();await h.flush();assert.equal(h.calls.filter(call=>call.target.endsWith('/result')).length,1);
-  h.find(node=>node.type==='button'&&node.props.className==='tool-card'&&node.props.children[1].props.children==='b.txt').props.onClick();await h.flush();assert(h.find(node=>node.type==='LoadingFeedback'&&node.props.label==='正在读取结果预览…').props.busy);
+ try{await h.flush();h.button('回收结果').props.onClick();await h.flush();const inspectA=h.button(/^a\.txt/).props.onClick;inspectA();inspectA();await h.flush();assert.equal(h.calls.filter(call=>call.target.endsWith('/result')).length,1);
+  h.button(/^b\.txt/).props.onClick();await h.flush();assert(h.find(node=>node.type==='LoadingFeedback'&&node.props.label==='正在读取结果预览…').props.busy);
   b.resolve({name:'b.txt',text:'CURRENT PREVIEW'});await h.flush();if(outcome==='success')a.resolve({name:'a.txt',text:'STALE PREVIEW'});else a.reject(Error('STALE ERROR'));await h.flush();assert.match(h.text(),/CURRENT PREVIEW/);assert.doesNotMatch(h.text(),/STALE/);assert.deepEqual(h.errors,[]);
  }finally{h.unmount();}
 });

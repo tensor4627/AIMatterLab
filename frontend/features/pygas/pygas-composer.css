@@ -9,3 +9,48 @@
 
 /* Respond to the actual task pane, including the centered Agent layout. */
 @container pygas-composer (max-width:700px){.pg-layout{grid-template-columns:minmax(0,1fr)}.pg-library{max-height:430px;overflow:auto}.pg-heading{flex-wrap:wrap}.pg-heading>details{max-width:100%;min-width:0}}
+
+.pg-composer{--pg-accent:var(--accent,#a69af0);padding:14px;border-radius:8px}
+.pg-composer .pg-heading{gap:6px 14px;align-items:baseline;padding-block-end:9px;margin-block-end:10px;overflow-wrap:anywhere}
+.pg-composer .pg-heading h2{margin:0;font-size:max(1.32rem,var(--ui-min-font,11px));font-weight:600}
+.pg-mode{color:var(--pg-muted)}
+.pg-composer .pg-settings{border:0;border-block-end:1px solid var(--pg-border);margin-block-end:12px;padding:0 0 10px;border-radius:0}
+.pg-composer .pg-settings-basic{grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr));gap:8px 13px}
+.pg-composer .pg-setting{padding-block-start:7px}
+.pg-composer .pg-layout{gap:12px;grid-template-columns:minmax(185px,.85fr) minmax(0,2fr)}
+.pg-composer .pg-library{max-height:none;overflow:visible;padding:10px;border-radius:6px}
+.pg-library-list{max-height:22rem;overflow-y:auto;scrollbar-gutter:stable;overscroll-behavior-block:contain}
+.pg-library>label input{margin:4px 0 8px}
+.pg-library .pg-kinds{margin-block-end:6px}
+.pg-composer .pg-library-entry{padding-block:6px}
+.pg-composer .pg-custom{margin-block-start:8px}
+.pg-composer .pg-legend{gap:5px 13px;margin-block-end:6px}
+.pg-legend>span,.pg-legend-entry{display:inline-flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap}
+.pg-legend i,.pg-dot{flex-shrink:0}
+.pg-composer .pg-dot.missing{background:var(--danger,#e68782)}
+.pg-composer .pg-dot.complete{background:var(--green,#86b397)}
+.pg-composer .pg-node{margin:0;border:0;border-block-start:1px solid var(--pg-border);border-radius:0;background:transparent}
+.pg-composer .pg-node.selected{border-color:var(--pg-border);background:var(--pg-panel);box-shadow:inset 2px 0 var(--pg-accent)}
+.pg-composer .pg-node-heading{gap:2px;padding:4px 6px}
+.pg-composer .pg-node-heading .pg-status-button{padding-inline:7px;border-color:transparent;background:transparent}
+.pg-composer .pg-node-toggle{display:grid;grid-template-columns:1.2em minmax(0,1fr) auto;gap:3px 8px;padding:4px 2px;background:transparent}
+.pg-node-index,.pg-node-status{font-variant-numeric:tabular-nums}
+.pg-node-index{color:var(--pg-muted)}
+.pg-node-name{display:flex;align-items:baseline;flex-wrap:wrap;min-width:0;gap:2px 7px}
+.pg-node-status{max-width:10rem;white-space:normal;overflow-wrap:anywhere}
+.pg-composer .pg-node-body{padding:6px 12px 10px}
+.pg-composer .pg-param{padding-block-start:7px;margin:8px 0}
+.pg-composer .pg-param-heading{gap:4px 7px;margin-block-end:5px;overflow-wrap:anywhere}
+.pg-composer .pg-param-missing .pg-param-heading label{color:var(--danger,#e9a09b)}
+.pg-composer .pg-parameter-technical{margin-block-start:4px;color:var(--pg-muted)}
+.pg-composer .pg-parameter-technical[open]{color:inherit}
+.pg-composer .pg-footer{padding-block-start:10px;margin-block-start:10px;gap:6px 11px}
+.pg-composer .pg-footer>div{flex:1 1 12rem;overflow-wrap:anywhere}
+.pg-composer .pg-footer .pg-button{background:var(--accent-bg,var(--pg-panel))}
+.composition-toolbar>.button,.composition-toolbar>div>.button{white-space:normal;max-width:100%}
+@container pygas-composer (max-width:40rem){
+ .pg-composer .pg-layout{grid-template-columns:minmax(0,1fr)}
+ .pg-library-list{max-height:13rem}
+ .pg-composer .pg-node-heading{gap:3px}
+ .pg-node-status{max-width:7rem}
+}
