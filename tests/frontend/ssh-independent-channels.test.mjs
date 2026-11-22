@@ -11,6 +11,37 @@ const managedCalls=h=>h.calls.filter(c=>c.method==='compute.managed.publish');
 const legacyCalls=h=>h.calls.filter(c=>['compute.resource.activate','sharedTerminal.owner','compute.sshService.owner','compute.sshService.connect','agent.rpc'].includes(c.method));
 const snapshot=resource=>({resources:[resource],conversations:[],sources:[]});
 
+test('native login waits for human handoff and a workspace failure stays within workspace review',async()=>{
+ const pending={...connection,status:'authenticating',authentication:'pending',terminalSessionIds:[],serviceIds:[],
+  loginRequestId:'exact-login',capabilities:{multiplex:false,manualHandoff:true}};
+ const verified={...connection,terminalSessionIds:[],serviceIds:[],loginRequestId:pending.loginRequestId};
+ let state=pending;
+ const h=await selected({props:{workspacePreviewError:Error('ssh_workspace_unconfirmed')},override(method,ref){
+  if(method==='compute.sshConnection.list')return {connections:[state]};
+  if(method==='compute.sshConnection.loginStatus')return {connection:state,login:{status:state===pending?'waiting_authentication':'complete'}};
+  if(method==='compute.sshConnection.completeLogin'){
+   assert.deepEqual(ref,{connectionId:pending.connectionId,requestId:pending.loginRequestId,userConfirmed:true});
+   state=verified;return {connection:verified,login:{status:'complete'}};
+  }
+  if(method==='sharedTerminal.list')return {sessions:[]};
+ }});
+ try{
+  await h.tick(700);await h.tick(2000);
+  assert.match(h.id('ssh-publish-resource').props['aria-label'],/登录完成，交由 AIMatterLab 管理/);
+  const writes=()=>h.calls.filter(c=>/completeLogin|resourceWorkspace\.preview|openShell|managed\.publish/.test(c.method)).map(c=>c.method);
+  assert.deepEqual(writes(),[]);
+  h.click('ssh-publish-resource');await h.flush();
+  assert.deepEqual(writes(),['compute.sshConnection.completeLogin','compute.resourceWorkspace.preview']);
+  const review=h.find(node=>node.type==='ResourceWorkspaceReview');
+  assert.match(review.props.initialError,/未返回有效的工作区回执/);
+  assert.equal(review.props.target.connectionId,verified.connectionId);
+  assert.equal(review.props.initial,undefined);
+  assert(!h.find(node=>node.props?.['data-testid']==='ssh-login-error'));
+  assert.equal(h.id('ssh-connection-status').props['data-state'],'authenticated');
+  assert.equal(h.id('ssh-open-shell').props.disabled,false);
+ }finally{h.unmount();}
+});
+
 test('a failed inventory refresh stays in the terminal panel and a successful read clears it',async()=>{
  let fail=false;const errors=[];
  const h=await selected({props:{onError:error=>errors.push(error)},override:method=>{

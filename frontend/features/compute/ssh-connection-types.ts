@@ -55,14 +55,15 @@ const connectionErrors:Record<string,string>={
  ssh_workspace_invalid:'请填写有效的远端工作目录，再核对路径。',
  ssh_workspace_confirmation_required:'工作区预览需重新核对。请核对目录后再次确认。',
  ssh_workspace_changed:'远端账号、连接或目录已变化。请核对原连接和实际工作区。',
- ssh_workspace_unconfirmed:'远端尚未确认所选路径。请核对目录和写入权限。',
+ ssh_workspace_unconfirmed:'远端未返回有效的工作区回执。可在原 SSH 连接上核对目录，或换一个工作区路径。',
+ ssh_exec_unavailable:'该 SSH 入口拒绝独立命令。可查看原终端或核对站点支持的连接方式。',
  ssh_workspace_record_invalid:'保存的工作区登记无法核对。请查看原资源。',
  ssh_remote_terminal_unavailable:'远端登录 Shell 未能启动终端通道。请核对远端 Python 3，或打开普通 SSH 终端。',
  ssh_linux_client_namespace_required:'请编辑此连接，核对 SSH 客户端、发行版和密钥所在的同一环境。',
  terminal_client_namespace_required:'请编辑此连接，核对 SSH 客户端、发行版和密钥所在的同一环境。',
  ssh_multiplex_unsupported:'所选客户端无法建立受管连接。请使用 Windows OpenSSH 或 WSL/Linux OpenSSH，也可打开普通 SSH 终端。',
  ssh_route_requires_review:'此连接的登录路由需要核对。请编辑原连接并保存后再登录。',
- ssh_authentication_pending:'请在下方终端完成密码或验证码输入，登录完成后会自动进入终端。',
+ ssh_authentication_pending:'请在下方完成密码或验证码输入。认证完成后可托管连接或按需打开终端。',
  ssh_connection_limit:'打开的 SSH 连接已达上限。请先核对并关闭不再使用的连接。',
  terminal_runtime_unavailable:'本机终端运行文件不可用。请重新打开软件后核对此连接。',
  terminal_runtime_low_integrity:'本机终端缓存受到低权限目录限制，登录程序无法启动。连接设置已保留；请正常启动修复版后重试。',
@@ -78,5 +79,5 @@ const connectionErrors:Record<string,string>={
 };
 export function sshConnectionCode(error:unknown){const value=error as {code?:unknown;message?:unknown}|null;for(const source of [value?.code,value?.message,String(error)]){const code=String(source??'').slice(0,4096).match(/\b(?:ssh_|terminal_|compute_profile_|compute_resource_|managed_compute_)[a-z_]{1,80}\b/)?.[0];if(code)return code;}return '';}
 export function sshConnectionMessage(error:unknown){return connectionErrors[sshConnectionCode(error)]||'操作结果尚未确认，请刷新原连接；不会自动重连或重发。';}
-export function sshActionLabel(action?:string){return ({'compute.sshConnection.open':'打开登录终端','compute.sshConnection.completeLogin':'完成原登录','compute.sshConnection.loginStatus':'查看原登录状态','compute.resource.activate':'选择计算资源','compute.managed.publish':'托管 SSH 连接','compute.sshConnection.authInput':'输入登录信息','compute.sshConnection.authRead':'读取登录终端','compute.sshConnection.authResize':'调整登录终端','sharedTerminal.input':'输入终端','sharedTerminal.read':'读取终端','sharedTerminal.resize':'调整终端','sharedTerminal.owner':'交接终端','compute.sshService.connect':'连接作业服务','compute.sshService.owner':'交接作业服务','compute.sshService.check':'核对服务','compute.sshService.disconnect':'停止作业服务','checking_authentication':'检查登录状态','opening_shell':'打开终端'} as Record<string,string>)[action||'']||'连接操作';}
+export function sshActionLabel(action?:string){return ({'compute.sshConnection.open':'打开登录终端','compute.sshConnection.openShell':'打开终端','compute.sshConnection.completeLogin':'完成原登录','compute.sshConnection.loginStatus':'查看原登录状态','compute.resource.activate':'选择计算资源','compute.managed.publish':'托管 SSH 连接','compute.sshConnection.authInput':'输入登录信息','compute.sshConnection.authRead':'读取登录终端','compute.sshConnection.authResize':'调整登录终端','sharedTerminal.input':'输入终端','sharedTerminal.read':'读取终端','sharedTerminal.resize':'调整终端','sharedTerminal.owner':'交接终端','compute.sshService.connect':'连接作业服务','compute.sshService.owner':'交接作业服务','compute.sshService.check':'核对服务','compute.sshService.disconnect':'停止作业服务','checking_authentication':'检查登录状态','opening_shell':'打开终端'} as Record<string,string>)[action||'']||'连接操作';}
 export function sshStateLabel(value?:string){return ({authenticating:'正在认证',authenticated:'已连接',unavailable:'不可用',closed:'已关闭',requires_review:'需要核对',unsupported:'不支持',pending:'等待认证',verified:'已核验',not_observed:'尚未核验',lost:'认证已失效',connected:'已连接',connecting:'连接中',disconnected:'未连接',disconnecting:'停止中',failed:'失败',unknown:'状态未知',idle:'未连接',ready:'可用'} as Record<string,string>)[value||'unknown']||'状态未知';}

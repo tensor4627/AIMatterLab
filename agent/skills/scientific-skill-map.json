@@ -649,6 +649,7 @@
       "tools": [
         "list_compute_resources",
         "acquire_compute_resource",
+        "run_compute_command",
         "inspect_compute_service",
         "list_compute_terminals",
         "read_compute_terminal",
@@ -682,7 +683,7 @@
       "id": "cluster.workspace-setup",
       "engines": [],
       "skills": ["studio-compute-workflow"],
-      "tools": ["list_compute_resources", "acquire_compute_resource", "list_compute_terminals", "read_compute_terminal", "write_compute_terminal", "read_session_workspace", "setup_base_workspace", "copy_project_inputs", "read_project_input"],
+      "tools": ["list_compute_resources", "acquire_compute_resource", "run_compute_command", "list_compute_terminals", "read_compute_terminal", "write_compute_terminal", "read_session_workspace", "setup_base_workspace", "copy_project_inputs", "read_project_input"],
       "status": "implemented_selected_connection_authoring_workspace",
       "adaptation": "Confirm the resource root during first desktop handoff. Query the conversation's actual allocation with read_session_workspace. setup_base_workspace describes the authoring workspace on its advertised service path.",
       "phase": "workspace",
@@ -698,6 +699,7 @@
       "tools": [
         "list_compute_resources",
         "acquire_compute_resource",
+        "run_compute_command",
         "inspect_compute_service",
         "list_compute_terminals",
         "read_compute_terminal",
@@ -728,6 +730,7 @@
       "tools": [
         "list_compute_resources",
         "acquire_compute_resource",
+        "run_compute_command",
         "inspect_compute_service",
         "list_compute_terminals",
         "read_compute_terminal",
@@ -742,7 +745,7 @@
       ],
       "status": "implemented_lease_and_bounded_scheduler_probe",
       "phase": "discovery",
-      "adaptation": "For live queue and idle-GPU questions, match a resource named in chat to its listed ID and use a service-only lease and bounded probe. Call acquire_compute_resource for an ambiguous target and reuse the user's choice in the same chat. DeepSeek presents the eligible candidates in the chat input area. Other providers can ask about unanswered candidates in chat. A resource selection receipt preserves the current authorization and needs no panel binding. Use a same-resource service retry if the private terminal fails and the tool offers it. Manual sharing applies only after a separate human handoff.",
+      "adaptation": "For live queue and idle-GPU questions, match the resource named in chat to its listed ID. For a hosted SSH resource with command access, acquire a command lease and run a bounded scheduler probe. For a registered worker, use a service lease and its advertised inspection tool. Call acquire_compute_resource for an ambiguous target and reuse the user's choice in the same chat. DeepSeek presents the eligible candidates in the chat input area. Other providers can ask about unanswered candidates in chat. The selection receipt preserves the current authorization. Manual sharing applies after a separate human handoff.",
       "reference_files": {
         "studio-compute-workflow": [
           "references/compute-discovery.md",

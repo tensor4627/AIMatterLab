@@ -26,7 +26,8 @@ function validGrant(access){return accessKinds.has(access?.authority)&&nullableI
 function validLease(row){
  return id(row?.id)&&scopeId(row.provider)&&scopeId(row.threadId)&&nullableId(row.projectId)&&
   (row.terminal===undefined||validGrant(row.terminal)&&id(row.terminal.connectionId)&&id(row.terminal.channelLeaseId))&&
-  (row.service===undefined||validGrant(row.service)&&hash(row.service.sourceId))&&!!(row.terminal||row.service);
+  (row.command===undefined||validGrant(row.command))&&
+  (row.service===undefined||validGrant(row.service)&&hash(row.service.sourceId))&&!!(row.terminal||row.command||row.service);
 }
 function validRecord(row){
  return row?.schemaVersion===1&&id(row.profileId)&&id(row.connectionId)&&Number.isSafeInteger(row.profileVersion)&&row.profileVersion>0&&

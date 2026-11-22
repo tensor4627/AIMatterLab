@@ -14,6 +14,7 @@ export function sshUiHarness(file,{props={},invoke}={}){
  const require=name=>{
   if(name.endsWith('ResourceWorkspaceReview'))return {default:'ResourceWorkspaceReview',sameWorkspaceTarget:(a,b)=>['connectionId','profileId','profileVersion'].every(key=>a[key]===b[key]),previewResourceWorkspace:async({connectionId,profileId,profileVersion})=>{
     const ref={connectionId,profileId,profileVersion};calls.push({method:'compute.resourceWorkspace.preview',data:ref});
+    if(currentProps.workspacePreviewError)throw currentProps.workspacePreviewError;
     return currentProps.workspacePreview||{...ref,status:'confirmed',account:'worker',hostname:'fixture',root:'/fixture/AIMatterLab'};
   }};
   if(name==='../../api/compute-resources')return {managedSshServices:{status:async data=>{

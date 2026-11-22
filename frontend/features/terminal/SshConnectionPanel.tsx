@@ -22,7 +22,7 @@ type ChannelInput={pending:Promise<void>;locked:boolean;observationEpoch:number}
 type LoginState={status:'waiting_authentication'|'checking'|'complete'|'failed';phase?:'waiting_authentication'|'checking_authentication'|'opening_shell';code?:string};
 type LoginResult={connection:SshConnectionState;shell?:Shell;login?:LoginState};
 type LoginAttempt={completing:boolean;requiresContinue:boolean;completionResult:number};
-type LoginFlow={requestId:string;connectionId:string;awaitingOpen?:boolean;attempt:LoginAttempt;observing:boolean;canCheck:boolean;finished:boolean;restoreShell:boolean;restoredAuthenticated?:boolean;originalShellId?:string;shellChosen?:boolean};
+type LoginFlow={requestId:string;connectionId:string;awaitingOpen?:boolean;handoffScope?:string;attempt:LoginAttempt;observing:boolean;canCheck:boolean;finished:boolean;restoreShell:boolean;restoredAuthenticated?:boolean;originalShellId?:string;shellChosen?:boolean};
 type InventoryRefresh={ticket:number;read:number;id:string;scope:string;pending:boolean;servicePending:boolean};
 type Diagnostic={code:string;action:string;message:string;connectionId:string;requestId:string};
 type ShellReadIdentity={connectionId:string;sessionId:string;ownerEpoch:number};
@@ -156,7 +156,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const [geometry,setGeometry]=useState<GeometryDiagnostic|null>(null);
  const managed=useManagedResources();
  const [publication,setPublication]=useState<PublishedSshResource|null>(null);
- const [workspaceReview,setWorkspaceReview]=useState<{preview:WorkspacePreview;scope:string;nonce:string;changing?:true}|null>(null);
+ const [workspaceReview,setWorkspaceReview]=useState<{target:ResourceWorkspaceReference;preview?:WorkspacePreview;initialError?:string;scope:string;nonce:string;changing:boolean}|null>(null);
  const workspaceGuideOpened=useRef('');
  const [inventoryError,setInventoryError]=useState<{id:string;scope:string;code:string}|null>(null);
  const moreDetails=useRef<HTMLDetailsElement>(null),statusDetails=useRef<HTMLDetailsElement>(null);
@@ -293,7 +293,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  async function action(run:(current:()=>boolean)=>Promise<void>,kind:'publish'|'terminal'='terminal'){if(flight.current||!sameTerminalRequest(viewRequest.current,latest.current.request))return;flight.current=true;const operation=++operations.current;reads.current++;setPendingAction(kind);setNotice('');setDiagnostic(null);lastError.current='';const ticket=generation.current,id=latest.current.selected,requested=latest.current.request;const current=()=>alive.current&&ticket===generation.current&&latest.current.selected===id&&sameTerminalRequest(requested,latest.current.request);try{await run(current);}catch(error){if(current())report(error);}finally{if(operation===operations.current){flight.current=false;if(alive.current){setPendingAction(null);void refresh();}}}}
  function currentWorkspaceReview(review:NonNullable<typeof workspaceReview>){
   const observed=observedConnection.current,target=latest.current;
-  return alive.current&&target.visible&&target.resourceScope===review.scope&&target.request.nonce===review.nonce&&!!observed&&observed.status==='authenticated'&&observed.authentication==='verified'&&sameWorkspaceTarget(observed,review.preview);
+  return alive.current&&target.visible&&target.resourceScope===review.scope&&target.request.nonce===review.nonce&&!!observed&&observed.status==='authenticated'&&observed.authentication==='verified'&&sameWorkspaceTarget(observed,review.target);
  }
  async function publish(current:()=>boolean){
    if(!connection||!current())return;
@@ -305,21 +305,39 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  }
  async function publishConnection(changing=false){
   if(!connection||!ready||!changing&&hosted)return;
-  const scope=resourceScope,nonce=request.nonce;
+  const review={target:connection,scope:resourceScope,nonce:request.nonce,changing};
   await action(async current=>{
-   const preview=await previewResourceWorkspace(connection);
-   const review={preview,scope,nonce,...changing?{changing:true as const}:{}};
-   if(!current()||!currentWorkspaceReview(review))return;
-   if(!sameWorkspaceTarget(preview,connection))throw Error('ssh_connection_changed');
-   if(!changing&&preview.status==='confirmed'&&!preview.conflict){await publish(()=>current()&&currentWorkspaceReview(review));return;}
-   setWorkspaceReview(review);
+   const live=()=>current()&&currentWorkspaceReview(review);
+   let preview:WorkspacePreview|undefined;
+   try{
+    preview=await previewResourceWorkspace(connection);
+    if(!live())return;
+    if(!sameWorkspaceTarget(preview,connection))throw Error('ssh_workspace_changed');
+    if(!changing&&preview.status==='confirmed'&&!preview.conflict){await publish(live);return;}
+    setWorkspaceReview({...review,preview});
+   }catch(error){
+    if(!live())return;
+    const code=sshConnectionCode(error);
+    if(preview&&!code.startsWith('ssh_workspace_')&&!['ssh_exec_unavailable','ssh_channel_refused','ssh_remote_terminal_unavailable','ssh_control_timeout'].includes(code))throw error;
+    const initialError=code==='ssh_control_timeout'?t('工作区核对超时。可在原 SSH 连接上重试目录检查。'):t(sshConnectionMessage(error));
+    setWorkspaceReview({...review,...preview&&sameWorkspaceTarget(preview,connection)?{preview}:{},initialError});
+   }
    if(!changing&&lessonTarget)onHandoffLesson?.('ssh-workspace',lessonTarget);
   },'publish');
  }
  useEffect(()=>{
-  if(!request.reviewWorkspace||!visible||!ready||busy||workspaceGuideOpened.current===request.nonce)return;
+  const flow=login.current;
+  if(flow.handoffScope!==undefined&&flow.handoffScope!==resourceScope)flow.handoffScope=undefined;
+  if(!visible||!ready||busy)return;
+  if(flow.connectionId===selected&&flow.handoffScope!==undefined){
+   flow.handoffScope=undefined;
+   workspaceGuideOpened.current=request.nonce;
+   void publishConnection();
+   return;
+  }
+  if(!request.reviewWorkspace||workspaceGuideOpened.current===request.nonce)return;
   workspaceGuideOpened.current=request.nonce;void publishConnection(request.reviewWorkspace==='change');
- },[request.nonce,request.reviewWorkspace,visible,ready,busy,hosted]);
+ },[request.nonce,request.reviewWorkspace,visible,ready,busy,hosted,selected,resourceScope]);
  useEffect(()=>{if(workspaceReview&&!currentWorkspaceReview(workspaceReview))setWorkspaceReview(null);},[visible,request.nonce,resourceScope,connection?.connectionId,connection?.status]);
  function bindLogin(flow:LoginFlow,value:SshConnectionState){
   flow.connectionId=value.connectionId;
@@ -402,7 +420,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    void refresh();
   }
  }
- async function requestLogin(flow:LoginFlow,method:'compute.sshConnection.completeLogin'|'compute.sshConnection.loginStatus',active:()=>boolean){
+ async function requestLogin(flow:LoginFlow,method:'compute.sshConnection.completeLogin'|'compute.sshConnection.loginStatus',active:()=>boolean,userConfirmed=false){
   const write=method==='compute.sshConnection.completeLogin',attempt=flow.attempt;
   if(flow.observing||flow.finished||!active()||write&&attempt.completing)return;
   const previousCompletion=attempt.completionResult;
@@ -411,7 +429,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   else flow.observing=true;
   setLoginBusy(true);
   try{
-   const result=await sshInvoke<LoginResult>(method,{connectionId:flow.connectionId,requestId:flow.requestId});
+   const result=await sshInvoke<LoginResult>(method,{connectionId:flow.connectionId,requestId:flow.requestId,...userConfirmed?{userConfirmed:true}:{}});
    if(current())receiveLogin(result,flow,method);
    if(write){attempt.completionResult++;if(result?.login?.status==='failed'||result?.login?.code)attempt.requiresContinue=true;}
   }catch(error){
@@ -423,6 +441,19 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   }
  }
  async function observeOriginalLogin(){const flow=login.current,current=loginContext(flow);if(flow.connectionId&&current())await requestLogin(flow,'compute.sshConnection.loginStatus',current);}
+ async function confirmHandoff(){
+  const flow=login.current,active=loginContext(flow),input=authInput.current;
+  if(!active()||flight.current||input.locked||flow.observing||flow.attempt.completing)return;
+  flow.handoffScope=latest.current.resourceScope;
+  flow.attempt.requiresContinue=false;
+  input.locked=true;
+  try{
+   await input.pending.catch(()=>{});
+   if(active())await requestLogin(flow,'compute.sshConnection.completeLogin',active,true);
+  }finally{
+   input.locked=false;
+  }
+ }
  async function continueLogin(){
   const flow=login.current,current=loginContext(flow);
   if(!current()||flight.current||flow.observing||flow.attempt.completing||!canContinue)return;
@@ -435,9 +466,10 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
   const flow=login.current,current=loginContext(flow);
   const poll=()=>{
    if(flight.current||!current()||flow.finished)return;
-   const status=observedConnection.current?.status;
+   const value=observedConnection.current,status=value?.status,manual=value?.capabilities.manualHandoff;
    if(status&&['closed','unsupported','requires_review','unavailable'].includes(status))return;
-   const canWrite=!request.exact&&(status==='authenticating'||status==='authenticated')&&flow.canCheck&&!flow.attempt.requiresContinue&&!flow.attempt.completing;
+   if(manual&&(flow.handoffScope===undefined||flow.attempt.completing))return;
+   const canWrite=!manual&&!request.exact&&(status==='authenticating'||status==='authenticated')&&flow.canCheck&&!flow.attempt.requiresContinue&&!flow.attempt.completing;
    void requestLogin(flow,canWrite?'compute.sshConnection.completeLogin':'compute.sshConnection.loginStatus',current);
   };
   poll();const timer=setInterval(poll,700);return()=>clearInterval(timer);
@@ -465,7 +497,8 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const visibleDiagnostic=failureReplacesDiagnostic?{...diagnostic,code:failedConnectionCode,message:t(sshConnectionMessage(failedConnectionCode))}:diagnostic;
  const openIssue=login.current.awaitingOpen&&visibleDiagnostic?.action==='compute.sshConnection.open'&&visibleDiagnostic.requestId===login.current.requestId?visibleDiagnostic:null;
  const error=visibleDiagnostic?.code||(sameLogin?connection?.error?.code:undefined);
- const canContinue=!request.exact&&!!connection&&['authenticating','authenticated'].includes(connection.status)&&!login.current.finished&&login.current.attempt.requiresContinue&&!!loginState&&['waiting_authentication','failed'].includes(loginState.status);
+ const manualHandoff=!request.exact&&connection?.status==='authenticating'&&connection.capabilities.manualHandoff===true;
+ const canContinue=!manualHandoff&&!request.exact&&!!connection&&['authenticating','authenticated'].includes(connection.status)&&!login.current.finished&&login.current.attempt.requiresContinue&&!!loginState&&['waiting_authentication','failed'].includes(loginState.status);
  const configure=(section?:'service'|'environment')=>{const profileId=connection?.profileId||request.profileId,profileVersion=connection?.profileVersion||request.version;if(profileId&&profileVersion)onConfigureSsh?.({profileId,profileVersion,...section?{section}:{}},connection?.connectionId,shell?.sessionId);};
  const visibleReadDiagnostic=readDiagnostic&&readDiagnostic.connectionId===selected&&readDiagnostic.sessionId===shell?.sessionId&&login.current.connectionId===selected?readDiagnostic:null;
  const visibleGeometry=geometry&&geometry.connectionId===selected&&geometry.sessionId===shell?.sessionId&&geometry.ownerEpoch===shell?.ownerEpoch?geometry:null;
@@ -488,7 +521,8 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const issues=[
   connectionIssue?{
    id:'ssh-login-error',
-   summary:openIssue?openIssue.message:t(visibleDiagnostic?.action==='compute.managed.publish'?'托管结果待核对':'SSH 连接需要核对'),
+   summary:openIssue?openIssue.message:t(visibleDiagnostic?.action==='compute.managed.publish'?'托管结果待核对':
+    visibleDiagnostic?.action==='compute.sshConnection.openShell'?'终端通道需要核对':'SSH 连接需要核对'),
    content:<>
     <p>{visibleDiagnostic?.message||t(sshConnectionMessage(connectionIssue))}</p>
     <div className="ssh-diagnostic-meta">
@@ -537,8 +571,10 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const canClose=!!connection&&connection.status!=='closed';
  const chooseConnection=!request.exact&&viewCurrent&&!selected&&listed&&candidates.length>1;
  const publishing=pendingAction==='publish';
- const publicationLabel=t(publishing?'正在托管…':'登录完成，交由 AIMatterLab 管理');
- const loginTip=loginState?.status==='failed'?t('原登录未完成，请核对提示后继续。'):loginState?.status==='checking'?t('正在检查原登录，请稍候。'):connectionStatus==='authenticating'?t('请在原终端完成密码或验证码输入。'):null;
+ const publicationLabel=t(publishing?'正在托管…':manualHandoff?'登录完成，交由 AIMatterLab 管理':'交由 AIMatterLab 管理');
+ const loginTip=loginState?.status==='failed'?t('原登录未完成，请核对提示后继续。'):loginState?.status==='checking'?t('正在检查原登录，请稍候。'):
+  manualHandoff?t('请在原终端输入密码和验证码，并按站点提示选择登录节点。完成后点击交接。'):
+  connectionStatus==='authenticating'?t('请在原终端完成密码或验证码输入。'):null;
  const serviceProgress=ready&&servicePending?<div className="ssh-worker-preparing" data-testid="ssh-worker-preparing" data-guide-target="ssh-service-progress" role="status">
   <span>{t(ownService?.status==='unknown'?'作业服务接入结果待确认':ownService?.status==='connected'?'作业服务通道已连接，工具尚未就绪':servicePhaseMessage(ownService?.phase))}</span>
   {ownService?.status==='connecting'&&<progress max={transfer?.total??1} value={transfer?.completed} aria-label={t('正在准备作业服务…')}/>}
@@ -565,11 +601,11 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
     <strong title={profileName}>{profileName}</strong>
     <span className="ssh-connection-state" data-state={connectionStatus} data-testid="ssh-connection-status" role="status" title={statusLabel}>{statusLabel}</span>
    </div>
-   {ready&&(hosted?<span className="ssh-managed-status" data-testid="ssh-managed-status" role="status" title={t('已由 AIMatterLab 管理')}><Check size={16} aria-hidden="true"/>{t('已托管')}</span>:
-    <button type="button" className="button primary ssh-host-action" data-testid="ssh-publish-resource" data-guide-target="ssh-handoff" disabled={busy||loginBusy} aria-label={publicationLabel} aria-busy={publishing} title={publicationLabel} onClick={()=>void publishConnection()}>
+    {(ready||manualHandoff)&&(hosted?<span className="ssh-managed-status" data-testid="ssh-managed-status" role="status" title={t('已由 AIMatterLab 管理')}><Check size={16} aria-hidden="true"/>{t('已托管')}</span>:
+     <button type="button" className="button primary ssh-host-action" data-testid="ssh-publish-resource" data-guide-target="ssh-handoff" disabled={busy||loginBusy} aria-label={publicationLabel} aria-busy={publishing} title={publicationLabel} onClick={()=>manualHandoff?void confirmHandoff():void publishConnection()}>
      {publishing?<RefreshCw size={15} aria-hidden="true"/>:<Server size={15} aria-hidden="true"/>}
      <span className="ssh-host-label" aria-hidden="true">{publicationLabel}</span>
-     <span className="ssh-host-short-label" aria-hidden="true">{t(publishing?'正在托管…':'托管')}</span>
+      <span className="ssh-host-short-label" aria-hidden="true">{t(publishing?'正在托管…':manualHandoff?'交接':'托管')}</span>
     </button>)}
    {canContinue&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-continue" data-guide-target="ssh-continue" disabled={busy||loginBusy} onClick={()=>void continueLogin()}>{t('继续原登录')}</button>}
    {canRelogin&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-retry" disabled={busy} onClick={()=>void open(true)}>{t(openIssue?'重试':'重新登录')}</button>}
@@ -583,7 +619,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
        <strong>{t('已打开的终端')}</strong>
        {candidates.map((value,index)=><button type="button" className="button" key={value.connectionId} disabled={busy} onClick={()=>menuAction(()=>{generation.current++;resumeConnection(value);})}>{t('终端')} {index+1} · {t(sshStateLabel(value.status))}</button>)}
       </>}
-      {ready&&<button type="button" className="button" data-testid="ssh-open-shell" disabled={busy} onClick={()=>menuAction(()=>void openShell())}>{t(shell?'另开终端':'打开终端')}</button>}
+     {ready&&shell&&<button type="button" className="button" data-testid="ssh-open-shell" disabled={busy} onClick={()=>menuAction(()=>void openShell())}>{t('另开终端')}</button>}
       {ready&&shell&&<button type="button" className="button danger" data-testid="ssh-shell-close" disabled={busy} onClick={()=>menuAction(()=>void closeShell())}>{t('关闭终端')}</button>}
       {ready&&hosted&&<button type="button" className="button" data-testid="ssh-workspace-change" disabled={busy} onClick={()=>menuAction(()=>void publishConnection(true))}>{t('更换远端总工作区')}</button>}
       {canClose&&<button type="button" className="button danger" data-testid="ssh-connection-close" disabled={busy} onClick={()=>menuAction(()=>void closeConnection())}>{t('关闭 SSH 连接')}</button>}
@@ -621,14 +657,15 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    {!connection&&!notice&&(!listed||busy)&&<div className="shared-terminal-empty" role="status"><p>{t('正在打开终端…')}</p></div>}
    {connection&&(connection.status==='authenticating'||sameLogin&&connection.retainedAuthOutput)&&<ChannelTerminal key={'auth:'+selected} connection={connection} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={authInput.current} onConnection={acceptAuthObservation} onShell={()=>{}} onError={report}/>}
   {ready&&(shell?<ChannelTerminal key={'shell:'+shell.sessionId} connection={connection} shell={shell} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={shellInput.current} onConnection={accept} onShell={next=>setShells(old=>old.map(item=>item.sessionId===next.sessionId&&item.ownerEpoch===next.ownerEpoch?{...item,...next}:item))} onError={report} onReadError={reportRead} onReadSuccess={confirmRead}/>:
-    <div className="shared-terminal-empty"><p>{t(loginState?.status==='checking'||!notice&&connection.terminalSessionIds.length>0&&login.current.restoreShell?'正在打开终端…':'当前没有打开的终端。')}</p></div>)}
+     <div className="shared-terminal-empty"><p>{t(connection.terminalSessionIds.length>0&&login.current.restoreShell?'正在打开终端…':'SSH 已登录。')}</p>
+      <button type="button" className="button" data-testid="ssh-open-shell" disabled={busy||loginBusy} onClick={()=>void openShell()}>{t('打开终端')}</button></div>)}
   {ready&&runtime?.status==='different'&&<details className="ssh-runtime-difference" data-testid="ssh-service-version-difference" data-guide-target="ssh-service-version">
    <summary>{t('作业服务版本不同')}</summary>
    <p>{t('远端版本')} · <code>{runtime.remoteRuntimeId}</code>{runtime.remoteManifestSha256&&<> · <code>{runtime.remoteManifestSha256}</code></>}</p>
    <p>{t('随包版本')} · <code>{runtime.bundledRuntimeId}</code>{runtime.bundledManifestSha256&&<> · <code>{runtime.bundledManifestSha256}</code></>}</p>
    <button type="button" className="button" data-testid="ssh-managed-service-update" disabled={busy||servicePending||!runtime.remoteRuntimeId} onClick={()=>void maintainService(true)}>{t('更新此连接的作业服务')}</button>
   </details>}
-  {workspaceReview&&currentWorkspaceReview(workspaceReview)&&<ResourceWorkspaceReview key={workspaceReview.nonce+workspaceReview.preview.connectionId} initial={workspaceReview.preview} changing={workspaceReview.changing}
+   {workspaceReview&&currentWorkspaceReview(workspaceReview)&&<ResourceWorkspaceReview key={workspaceReview.nonce+workspaceReview.target.connectionId} target={workspaceReview.target} resourceName={profileName} initial={workspaceReview.preview} initialError={workspaceReview.initialError} changing={workspaceReview.changing}
    isCurrent={()=>currentWorkspaceReview(workspaceReview)} onClose={()=>{setWorkspaceReview(null);if(!workspaceReview.changing&&lessonTarget)onHandoffLesson?.('ssh-login',lessonTarget);}} onConfirmed={async receipt=>{
     if(!workspaceReview.changing)await publish(()=>currentWorkspaceReview(workspaceReview));
     if(currentWorkspaceReview(workspaceReview)){setWorkspaceReview(null);setNotice(t('远端总工作区')+' · '+receipt.root);void refresh();}

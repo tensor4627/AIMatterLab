@@ -15,7 +15,7 @@ import {sshSourceId} from './worker-service-version.mjs';
 
 const rejectedBeforeDispatch=new Set(['managed_compute_invalid_request','managed_compute_user_instruction_required',
  'managed_compute_no_eligible_resource','managed_compute_resource_lease_required','managed_compute_resource_choice_required',
- 'managed_compute_project_grant_required','managed_compute_terminal_not_supported']);
+ 'managed_compute_project_grant_required','managed_compute_terminal_not_supported','managed_compute_command_not_supported']);
 const fail=code=>{throw Object.assign(Error(code),rejectedBeforeDispatch.has(code)?{operationNotStarted:true}:{});};
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value);
 const string={type:'string',minLength:1,maxLength:128};
@@ -30,6 +30,7 @@ const terminalFailureCodes=new Set(['managed_compute_project_grant_required','ma
  'terminal_saved_connection_changed','terminal_service_active','terminal_service_unknown']);
 const isAuthenticated=value=>value?.status==='authenticated'&&value.authentication==='verified'&&value.capabilities?.multiplex===true;
 const resourceRef=resource=>({connectionId:resource.connectionId,profileId:resource.profileId,profileVersion:resource.profileVersion});
+const shellAccess=access=>access==='terminal'||access==='command';
 const candidate=resource=>({resourceId:resource.resourceId,profileId:resource.profileId,kind:resource.kind,name:resource.name});
 const runMutations=new Map([
  ['validate_run',['validate','run']],['validate_cluster_run',['validate','cluster-run']],
@@ -53,9 +54,12 @@ const terminalTools=sharedTerminalTools.map((item,index)=>({...item,
  ][index],
 }));
 const tools=Object.freeze([
- tool('list_compute_resources','List resources already hosted by AIMatterLab. A listed SSH resource is authenticated. canAcquire describes conversation access; verification_pending means the worker project grant may still be checked. Acquire a lease before using its terminal or service.',{},[],true),
- tool('acquire_compute_resource','Acquire this conversation’s own terminal or service context. Use one selector: resource_id, profile_id, or the alias the human used. A request to inspect cluster queues can select the only eligible cluster. Follow a target_selected receipt. For a choice_required receipt, use the provided user_answer or ask which listed name if the choice is unanswered. No planning mode, workflow, new SSH login or terminal handoff is needed.',{resource_id:string,profile_id:string,alias:string,access:{type:'string',enum:['terminal','service']}}),
- tool('release_compute_resource','Release this conversation’s lease and its independent SSH terminal for this resource.',{resource_id:string},['resource_id']),
+ tool('list_compute_resources','List resources hosted by AIMatterLab. A listed SSH resource is authenticated. commandAvailable describes its scoped command entry; canAcquire describes conversation access. Acquire the needed capability before using the resource.',{},[],true),
+ tool('acquire_compute_resource','Acquire the requested capability for this conversation. Use one selector: resource_id, profile_id, or the alias the human used. For SSH, command is the default where available, terminal opens an interactive channel, and service uses the registered worker. Follow target_selected and choice_required receipts. An ordinary chat can acquire access with the user’s delegation.',{resource_id:string,profile_id:string,alias:string,access:{type:'string',enum:['command','terminal','service']}}),
+ tool('run_compute_command','Run one delegated command or batch on the acquired SSH command lease. Returns output, exit_code, cwd, and job_id when observed. Use an unchanged request_id when checking or retrying the same command. Reconcile an unconfirmed operation before sending a new request. A standalone cd updates only this conversation’s command directory. Environment changes apply to the current batch. Protected operations use desktop review. Prefer the worker for tracked workflows and jobs.',{
+  resource_id:string,request_id:string,command:{type:'string',minLength:1,maxLength:8192}
+ },['resource_id','request_id','command']),
+ tool('release_compute_resource','Release this conversation’s command, terminal and service lease on this resource.',{resource_id:string},['resource_id']),
  ...terminalTools,
 ]);
 
@@ -82,14 +86,17 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
  const saved=(resource,options)=>{try{current(resource,options);return true;}catch{return false;}};
  const visible=resource=>saved(resource)&&(resource.kind==='ssh'||resource.serviceStatus==='ready');
+ const commandAvailable=resource=>resource.kind==='ssh'&&!!resource.workspaceRegistration&&typeof terminalAuthorization?.execute==='function';
+ const defaultAccess=resource=>resource.kind==='ssh'?(commandAvailable(resource)?'command':'terminal'):'service';
  const readyShell=lease=>{
   const terminal=lease?.terminal;
   return terminal?.shell&&!terminal.closing&&!terminal.observationUnknown&&terminal.shell.expiresAt>now()?terminal.shell:null;
  };
- const hasLease=lease=>!!(lease&&!lease.releasing&&saved(lease.resource)&&(lease.service&&lease.service===lease.resource.service||readyShell(lease)));
+ const hasLease=lease=>!!(lease&&!lease.releasing&&saved(lease.resource)&&(lease.command||lease.service&&lease.service===lease.resource.service||readyShell(lease)));
  const count=resource=>[...leases.values()].filter(lease=>lease.resource===resource&&lease.terminal).length;
  const view=resource=>({...candidate(resource),profileVersion:resource.profileVersion,available:resource.kind==='ssh'||resource.serviceStatus==='ready',
-  serviceStatus:resource.serviceStatus,...resource.kind==='ssh'?{terminalCapacity:MANAGED_SSH_SHELL_CAPACITY,terminalAvailable:Math.max(0,MANAGED_SSH_SHELL_CAPACITY-count(resource))}:{}});
+  serviceStatus:resource.serviceStatus,...commandAvailable(resource)?{commandAvailable:true}:{},
+  ...resource.kind==='ssh'?{terminalCapacity:MANAGED_SSH_SHELL_CAPACITY,terminalAvailable:Math.max(0,MANAGED_SSH_SHELL_CAPACITY-count(resource))}:{}});
  // The desktop verifies the exact authenticated connection. Agent tools use the resource ID.
  function desktopView(resource){
   const entry=view(resource);
@@ -118,8 +125,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    const acquired=hasLease(lease);
    const retained=retainedLease(scope,resource);
    const continues=grant=>grant?.authority==='conversation'&&grantScopeMatches(scope,grant);
-   const continued=continues(retained?.terminal)||continues(retained?.service)&&retained.service.sourceId===resource.service?.id||
-    intent.continuesChannel(scope,resource,'terminal')||!!resource.service&&intent.continuesChannel(scope,resource,'service')||
+   const continued=continues(retained?.terminal)||continues(retained?.command)||continues(retained?.service)&&retained.service.sourceId===resource.service?.id||
+    intent.continuesChannel(scope,resource,'terminal')||intent.continuesChannel(scope,resource,'command')||!!resource.service&&intent.continuesChannel(scope,resource,'service')||
     legacyRenewal(scope,resource);
    const developer=terminalPolicy!=='denied'&&developerAccess(scope,resource);
    const canAcquire=terminalPolicy===true||developer||terminalPolicy!=='denied'&&(continued||resource.service&&!scope.taskId)?true:resource.service&&scope.projectId?'verification_pending':false;
@@ -428,6 +435,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   for(const lease of leases.values()){
    if(lease.developerWorkspaceId===workspaceId){void retire(lease,{preserve:true});continue;}
    if(lease.developerServiceWorkspace===workspaceId){lease.service=null;delete lease.developerServiceWorkspace;}
+   if(lease.developerCommandWorkspace===workspaceId){lease.command=false;delete lease.developerCommandWorkspace;}
    if(lease.terminal?.developerWorkspaceId===workspaceId)void closeTerminal(lease,lease.terminal);
    removeUnused(lease);
   }
@@ -440,18 +448,20 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(!choosing)assertResourceIntent(scope,resource);
   const policyCurrent=terminalPolicyGuard(scope,resource);
   const terminal=resource.kind==='ssh'?await authorizeTerminal(scope,resource):false;
-  const terminalRequest=action==='terminal';
+  const terminalRequest=shellAccess(action);
   if(terminalRequest&&resource.kind!=='ssh')return null;
+  if(action==='command'&&!commandAvailable(resource))return null;
   const retained=!choosing&&retainedLease(scope,resource);
-  let savedGrant=terminalRequest?retained?.terminal:action==='service'?retained?.service:
-   retained?.service??(readyShell(conversationLease(scope,resource))?retained?.terminal:null);
+  const lease=conversationLease(scope,resource);
+  let savedGrant=action==='inspect'?retained?.service??(lease?.command?retained?.command:readyShell(lease)?retained?.terminal:null):retained?.[action];
   if(acquiring&&savedGrant?.sourceId&&savedGrant.sourceId!==resource.service?.id)savedGrant=null;
   const priorTerminal=intent.continuesChannel(scope,resource,'terminal');
+  const priorCommand=intent.continuesChannel(scope,resource,'command');
   const priorService=intent.continuesChannel(scope,resource,'service');
-  const existingInspection=action==='inspect'&&(priorService||priorTerminal&&!!readyShell(conversationLease(scope,resource)));
-  const chatAccess=terminal!=='denied'&&(terminalRequest?resource.kind==='ssh'&&priorTerminal:
+  const existingInspection=action==='inspect'&&(priorService||priorCommand&&lease?.command||priorTerminal&&!!readyShell(lease));
+  const chatAccess=terminal!=='denied'&&(terminalRequest?priorTerminal||action==='command'&&priorCommand:
    existingInspection||!!resource.service&&(!scope.taskId||priorService));
-  const canCheckProject=terminalRequest?resource.kind==='ssh'&&terminal!=='denied':!!resource.service;
+  const canCheckProject=terminalRequest?terminal!=='denied':!!resource.service;
   let authority=null;
   if(savedGrant){
    if(grantScopeMatches(scope,savedGrant)&&(!savedGrant.sourceId||savedGrant.sourceId===resource.service?.id)){
@@ -473,7 +483,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  function rememberChannel(scope,lease,access,authority){
   const {resource}=lease,record=resource.hosting;
   if(!record||authority==='developer'||lease.developerWorkspaceId||
-     (access==='terminal'?lease.terminal?.developerWorkspaceId:lease.developerServiceWorkspace))return;
+     (access==='terminal'?lease.terminal?.developerWorkspaceId:access==='command'?lease.developerCommandWorkspace:lease.developerServiceWorkspace))return;
   const previous=retainedLease(scope,resource);
   const proof={authority,taskId:previous?.[access]?previous[access].taskId:(scope.taskId??null)};
   if(access==='service')proof.sourceId=lease.service?.id;
@@ -490,8 +500,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
 
  async function availableChoices(scope,kind,access){
   const tested=await Promise.all([...resources.values()].filter(resource=>(!kind||resource.kind===kind)&&visible(resource)).map(async resource=>{
-   const requested=access??(resource.kind==='ssh'?'terminal':'service');
-   if(requested==='service'&&!resource.service||requested==='terminal'&&resource.kind!=='ssh')return null;
+   const requested=access??defaultAccess(resource);
+   if(requested==='service'&&!resource.service||shellAccess(requested)&&resource.kind!=='ssh'||requested==='command'&&!commandAvailable(resource))return null;
    try{return await allowed(scope,resource,requested,{choosing:true})?resource:null;}catch(error){if(error.message==='managed_compute_context_changed')throw error;return null;}
   }));
   liveScope(scope);
@@ -520,7 +530,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const saved=alias&&!genericComputeKind(alias)?aliasEntry(alias,scope):null;
   let resource=findResource(args,alias,saved);
   // Previously acquired exact leases survive later turns and navigation.
-  const retained=resource&&retainedLease(scope,resource)?.[access??(resource.kind==='ssh'?'terminal':'service')];
+  const retained=resource&&retainedLease(scope,resource)?.[access??defaultAccess(resource)];
   const held=resource&&(hasLease(conversationLease(scope,resource))||retained&&grantScopeMatches(scope,retained));
   const turn=intent.current(scope);
   if(!turn&&held)return {resource};
@@ -598,7 +608,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   ...access==='terminal'?{terminal:shellView(lease,readyShell(lease))}:{}});
 
  function removeUnused(lease){
-  if(!lease.service&&!lease.terminal&&leases.get(lease.key)===lease)leases.delete(lease.key);
+  if(!lease.service&&!lease.terminal&&!lease.command&&leases.get(lease.key)===lease)leases.delete(lease.key);
  }
  function closeTerminal(lease,terminal,{retry=false}={}){
   if(terminal.closing&&!(retry&&terminal.closeUnknown))return terminal.closing;
@@ -665,7 +675,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
  function createLease(scope,resource,id=uuid()){
   const key=leaseKey(scope,resource.resourceId);
-  const lease={id,key,scope:ownerOf(scope),projectId:projectOf(scope),resource,touchedAt:now(),service:null,terminal:null,releasing:null};
+   const lease={id,key,scope:ownerOf(scope),projectId:projectOf(scope),resource,touchedAt:now(),service:null,terminal:null,command:false,releasing:null};
   leases.set(key,lease);return lease;
  }
  function startTerminal(scope,lease,answer,check,{restore=false}={}){
@@ -720,12 +730,12 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
     const owner=restoreOwner?.(row);
     if(!owner||!equal(ownerOf(owner),ownerOf(row))||projectOf(owner)!==row.projectId)return;
     const expected=access=>row[access]&&grantScopeMatches(owner,row[access]);
-    if(!expected('terminal')&&!expected('service'))return;
+    if(!expected('terminal')&&!expected('service')&&!expected('command'))return;
     const check=()=>{
      current(resource);
      const retained=record.leases[hostedLeaseKey(row)];
      if(hosting.get(record.profileId)!==record||retained?.id!==row.id||retained.projectId!==row.projectId||
-        ['terminal','service'].some(access=>row[access]&&(row[access].authority!==retained[access]?.authority||
+        ['terminal','service','command'].some(access=>row[access]&&(row[access].authority!==retained[access]?.authority||
          row[access].taskId!==retained[access]?.taskId||row[access].sourceId!==retained[access]?.sourceId))||
         !equal(restoreOwner?.(row),owner))fail('managed_compute_context_changed');
      const active=resourceWorkspace.resolveHostedResourceWorkspace?.(record.workspace.resourceId,
@@ -741,6 +751,12 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
      await use(previous,()=>leases.get(key)??createLease(scope,resource,row.id));
     };
     await Promise.allSettled([
+     channels('command',async(previous,allocate)=>{
+      if(previous?.command||!await allowed(scope,resource,'command'))return;
+      check();
+      const lease=allocate();
+      assertLease(scope,lease);lease.command=true;lease.touchedAt=now();changed();
+     }),
      channels('terminal',async(previous,allocate)=>{
       if(previous?.terminal||!await allowed(scope,resource,'terminal'))return;
       check();
@@ -760,7 +776,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    await Promise.allSettled(Object.values(record.leases).map(restore));
    const pending=Object.values(record.leases).some(row=>{
     const lease=leases.get(leaseKey(row,resource.resourceId));
-    return row.terminal&&!readyShell(lease)||row.service&&(!lease?.service||lease.service!==resource.service);
+    return row.command&&!lease?.command||row.terminal&&!readyShell(lease)||row.service&&(!lease?.service||lease.service!==resource.service);
    });
    resource.pendingRecovery=pending;
   }).finally(()=>{if(resource.recovering===recovery)resource.recovering=null;});
@@ -787,7 +803,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   exact(args,['resourceId','profileId','alias','access']);
   if(args.alias===undefined&&args.resourceId===undefined&&args.profileId===undefined||
      args.resourceId!==undefined&&(typeof args.resourceId!=='string'||! /^(?:ssh|wsl):[A-Za-z0-9_-]{1,100}$/.test(args.resourceId))||
-     args.profileId!==undefined&&!id(args.profileId)||args.access!==undefined&&!['terminal','service'].includes(args.access))fail('managed_compute_invalid_request');
+      args.profileId!==undefined&&!id(args.profileId)||args.access!==undefined&&!['command','terminal','service'].includes(args.access))fail('managed_compute_invalid_request');
   liveScope(scope);
   const request={scope:ownerOf(scope),cancelled:new Set(),forgotten:false};
   pendingAcquisitions.add(request);
@@ -813,7 +829,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
     if(!previous&&developerAccess(scope,resource))lease.developerWorkspaceId=resource.workspaceRegistration.workspaceId;
     return lease;
    };
-   const access=args.access??(resource.kind==='ssh'?'terminal':'service');
+    const access=args.access??defaultAccess(resource);
    check();
    if(access==='service'){
     const {service,authority}=await verifiedService(scope,resource,check,{acquiring:true});
@@ -828,6 +844,24 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
     if(!reused){if(!lease.developerServiceWorkspace)onAcquired(scope,view(resource));changed();}
     return acquired(lease,access,reused);
    }
+    if(access==='command'){
+     if(!commandAvailable(resource))fail('managed_compute_command_not_supported');
+     const policyCurrent=terminalPolicyGuard(scope,resource);
+     const authority=await authorization(scope,resource,'command',{acquiring:true});
+     if(!authority)fail('managed_compute_project_grant_required');
+     check();await checkConnection(resource);check();policyCurrent();
+     const lease=selectedLease()??openLease(),reused=lease.command;
+     try{
+      if(!reused&&authority==='developer')lease.developerCommandWorkspace=resource.workspaceRegistration.workspaceId;
+      rememberSelection(scope,lease,answer,check);
+      if(!developerAccess(scope,resource))intent.recordChatChannel(scope,resource,'command');
+      lease.command=true;
+      rememberChannel(scope,lease,access,authority);
+     }catch(error){lease.command=reused;if(!reused)delete lease.developerCommandWorkspace;removeUnused(lease);throw error;}
+     lease.touchedAt=now();
+     if(!reused){if(!lease.developerCommandWorkspace)onAcquired(scope,view(resource));changed();}
+     return acquired(lease,access,reused);
+    }
    try{
     if(resource.kind!=='ssh')fail('managed_compute_terminal_not_supported');
    const policyCurrent=terminalPolicyGuard(scope,resource);
@@ -926,11 +960,13 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   assertLease(scope,lease);
   const policyCurrent=terminalPolicyGuard(scope,lease.resource);
   assertResourceIntent(scope,lease.resource);
-  if(action==='skill')action=readyShell(lease)?'terminal':'inspect';
-  if((action==='terminal'?lease.terminal?.developerWorkspaceId:lease.developerServiceWorkspace)&&!developerAccess(scope,lease.resource))fail('managed_compute_project_grant_required');
+  if(action==='skill')action=lease.command?'command':readyShell(lease)?'terminal':'inspect';
+  const developerWorkspace=action==='terminal'?lease.terminal?.developerWorkspaceId:action==='command'?lease.developerCommandWorkspace:lease.developerServiceWorkspace;
+  if(developerWorkspace&&!developerAccess(scope,lease.resource))fail('managed_compute_project_grant_required');
   const service=lease.resource.service;
   if(action==='terminal'&&!readyShell(lease))fail('managed_compute_resource_lease_required');
-  if(action!=='terminal'&&lease.service&&lease.service!==service)fail('managed_compute_service_changed');
+  if(action==='command'&&!lease.command)fail('managed_compute_resource_lease_required');
+  if(!shellAccess(action)&&lease.service&&lease.service!==service)fail('managed_compute_service_changed');
   let grant;
   if(action==='service'){
    if(retainedLease(scope,lease.resource)?.service&&!await allowed(scope,lease.resource,'service'))fail('managed_compute_project_grant_required');
@@ -940,6 +976,22 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   }else if(!await allowed(scope,lease.resource,action))fail('managed_compute_project_grant_required');
   assertLease(scope,lease);lease.touchedAt=now();
   return {lease,service,grant,policyCurrent};
+ }
+
+ async function runCommand(scope,args){
+  exact(args,['resource_id','request_id','command'],['resource_id','request_id','command']);
+  const {resource_id:resourceId,request_id:requestId,command}=args;
+  if(typeof resourceId!=='string'||!/^ssh:[A-Za-z0-9_-]{1,100}$/.test(resourceId)||!id(requestId)||
+     typeof command!=='string'||!command.trim()||Buffer.byteLength(command)>8192||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(command))fail('managed_compute_invalid_request');
+  const {lease,policyCurrent}=await resolveLease(scope,resourceId,'command');
+  const {resource}=lease;
+  const check=()=>{
+   assertLease(scope,lease);assertResourceIntent(scope,resource);policyCurrent();
+   if(!lease.command)fail('managed_compute_resource_lease_changed');
+  };
+  check();await checkConnection(resource);check();
+  return terminalAuthorization.execute({scope,ref:{...resourceRef(resource),resourceId,resourceName:resource.name},leaseId:lease.id,
+   requestId,command:command.replaceAll('\r\n','\n').replaceAll('\r','\n'),assertCurrent:check});
  }
 
  async function resolveSkillLibrary(scope,resourceId){
@@ -1008,10 +1060,10 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const channels=[...leases.values()].map(lease=>{
    const terminal=lease.terminal,shell=readyShell(lease),serviceOnly=!!lease.service&&!shell;
    const terminalStatus=!terminal||shell?null:terminal.closeUnknown||terminal.observationUnknown||terminal.shell?.expiresAt<=now()?'lost':terminal.closing?'releasing':'preparing';
-   const status=lease.releaseUnknown?'lost':lease.releasing?'releasing':shell||lease.service?'assigned':terminalStatus??'preparing';
+   const status=lease.releaseUnknown?'lost':lease.releasing?'releasing':lease.resource.unconfirmed?'unknown':shell||lease.service||lease.command?'assigned':terminalStatus??'preparing';
    return {leaseId:lease.id,...lease.scope,projectId:lease.projectId,...desktopView(lease.resource),sessionId:shell?.sessionId??null,
-    serviceOnly,serviceContext:!!lease.service,serviceGeneration:lease.service?.generation??null,terminalStatus:serviceOnly?terminalStatus:null,status,busy:busy(lease.scope),
-    expired:!serviceOnly&&!!terminal?.shell&&terminal.shell.expiresAt<=now()};
+    serviceOnly,serviceContext:!!lease.service,commandContext:lease.command,serviceGeneration:lease.service?.generation??null,terminalStatus:serviceOnly||lease.command?terminalStatus:null,status,busy:busy(lease.scope),
+    expired:!lease.command&&!serviceOnly&&!!terminal?.shell&&terminal.shell.expiresAt<=now()};
   });
   const entries=[...resources.values()].filter(resource=>{try{current(resource,{observe:true});return true;}catch{return false;}})
    .map(resource=>({...desktopView(resource),generation:resource.service?.generation??null}));
@@ -1025,7 +1077,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    for(const row of Object.values(record.leases)){
     if(channels.some(channel=>channel.resourceId===resourceId&&channel.leaseId===row.id))continue;
     channels.push({...resource,leaseId:row.id,...ownerOf(row),projectId:row.projectId,sessionId:null,
-     serviceOnly:!row.terminal,serviceContext:!!row.service,serviceGeneration:null,terminalStatus:null,status:'lost',busy:busy(row),expired:false});
+     serviceOnly:!!row.service&&!row.terminal,serviceContext:!!row.service,commandContext:!!row.command,serviceGeneration:null,terminalStatus:null,status:'lost',busy:busy(row),expired:false});
    }
   }
   return {entries,channels};
@@ -1390,6 +1442,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    return acquire(scope,Object.fromEntries(Object.entries(args).map(([key,value])=>[{resource_id:'resourceId',profile_id:'profileId'}[key]??key,value])));
   }
   if(name==='release_compute_resource'){exact(args,['resource_id'],['resource_id']);return release(scope,{resourceId:args.resource_id});}
+  if(name==='run_compute_command')return runCommand(scope,args);
   return callTerminalTool(name,args,scope);
  }
  return {publish,publishWsl,noteLogin,restoreHosted,restorePublished,configureService,serviceStatus,updateService,snapshot,list,acquire,release,resolveLease,resolveSkillLibrary,resolveService,inspectService,capture,needsExplicitResource,callTerminalTool,callTool,owns,tools:()=>tools,

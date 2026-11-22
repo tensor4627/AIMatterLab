@@ -472,7 +472,7 @@ for(const method of ['read','preview','confirm','cancel'])handle('compute.resour
 handle('compute.resourceWorkspace.session',value=>resourceWorkspace.forSession(value));
 const developerCompute=developerComputeAccess({workspaceId:()=>settings.developerComputeWorkspaceId,
  userTurn:scope=>agents.turnOrigin(scope.provider,scope.threadId)==='human'});
-const workspaceTerminalAuthorization=createWorkspaceTerminalAuthorization({workspace:resourceWorkspace,connections:sharedTerminal.connections,developerCompute,
+const workspaceTerminalAuthorization=createWorkspaceTerminalAuthorization({workspace:resourceWorkspace,connections:sharedTerminal.connections,developerCompute,catalog,
  current:()=>{const selected=workflowContext.selectedOwner();return {...selected.context,revision:selected.revision+':'+computeResource.revision()};},
  emit:()=>emit('studio:event',{method:'studio/terminalApprovalChanged'})});
 for(const method of ['pending','decide'])handle('compute.terminalApproval.'+method,value=>workspaceTerminalAuthorization[method](value));

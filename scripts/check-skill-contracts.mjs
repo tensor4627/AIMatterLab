@@ -16,7 +16,7 @@ import {ProjectSkills} from '../agent/skills/project-skills.mjs';
 import {softwareDocDefinitions} from '../backend/main/tools/public-software-docs.mjs';
 
 const documentedControls = [
-  ['studio-compute-workflow/SKILL.md', 'frontend/features/terminal/SshConnectionPanel.tsx', ['登录完成，交由 AIMatterLab 管理']],
+  ['studio-compute-workflow/SKILL.md', 'frontend/features/terminal/SshConnectionPanel.tsx', ['交由 AIMatterLab 管理']],
   ['studio-compute-workflow/references/base-workspace.md', 'frontend/features/compute/ComputeConnectionChooser.tsx', ['编辑连接', '高级：基础工作区']],
   ['studio-compute-workflow/references/job-service-connection.md', 'frontend/features/compute/ComputeConnectionChooser.tsx', ['高级：Python 环境']],
   ['studio-workflow-roadmap/SKILL.md', 'frontend/features/workflows/RoadmapExecutionPanel.tsx', ['按流程图执行', '核对执行快照', '确认并执行整张图']],

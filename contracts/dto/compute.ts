@@ -47,7 +47,7 @@ export interface ComputeResourceCapabilities {
 }
 export interface ComputeResourceState {canAcquireConversationTerminal?:boolean;schemaVersion:1|2;selectionId:string|null;kind:'ssh-terminal'|'ssh-connection'|null;connectionId?:string|null;profileId:string|null;profileVersion:number|null;sessionId:string|null;terminalSessionIds?:string[];connectionStatus?:SshConnectionStatus;capabilities?:ComputeResourceCapabilities;status:'selected'|'stale'|'unavailable'|'none';operator:'human'|'agent'|'unknown';processStatus:'running'|'exited'|'expired'|'unknown';alive:boolean|null;agentReady:boolean;reason:string|null;authentication:'not_observed'|'verified'|'pending'|'lost';managedRuns:boolean;workflowReady?:boolean;serviceActive?:boolean;serviceStatus?:'idle'|'disconnected'|'connecting'|'connected'|'disconnecting'|'failed'|'unknown'}
 export type SshConnectionStatus='authenticating'|'authenticated'|'unavailable'|'closed'|'requires_review'|'unsupported';
-export interface SshConnectionState {schemaVersion:2;connectionId:string;loginRequestId?:string;profileId:string;profileVersion:number;status:SshConnectionStatus;authentication:'pending'|'verified'|'not_observed'|'lost';capabilities:{multiplex:boolean};terminalSessionIds:string[];serviceIds:string[];revision:number;closed?:boolean;retainedAuthOutput?:true;error?:{code:string}}
+export interface SshConnectionState {schemaVersion:2;connectionId:string;loginRequestId?:string;profileId:string;profileVersion:number;status:SshConnectionStatus;authentication:'pending'|'verified'|'not_observed'|'lost';capabilities:{multiplex:boolean;manualHandoff?:true};terminalSessionIds:string[];serviceIds:string[];revision:number;closed?:boolean;retainedAuthOutput?:true;error?:{code:string}}
 export interface SshConnectionOpenRequest {profileId:string;profileVersion:number;requestId:string}
 export interface SshConnectionRequest {connectionId:string}
 export type ResourceWorkspaceReference=Omit<SshConnectionResourceReference,'kind'>;
@@ -65,10 +65,10 @@ export interface SshConnectionAuthReadRequest extends SshConnectionRequest {curs
 export interface SshConnectionAuthInputRequest extends SshConnectionRequest {requestId:string;data:string}
 export interface SshConnectionAuthResizeRequest extends SshConnectionRequest {cols:number;rows:number}
 export interface SshConnectionOpenShellRequest extends SshConnectionRequest {requestId:string}
-export interface SshConnectionCompleteLoginRequest extends SshConnectionRequest {requestId:string}
+export interface SshConnectionCompleteLoginRequest extends SshConnectionRequest {requestId:string;userConfirmed?:true}
 export interface SshLoginCompletionState {status:'waiting_authentication'|'checking'|'complete'|'failed';phase?:'waiting_authentication'|'checking_authentication'|'opening_shell';code?:string}
 export interface SshConnectionCompleteLoginResult {connection:SshConnectionState;shell?:SshShellSessionState;login?:SshLoginCompletionState}
-export type SshConnectionLoginStatusRequest=SshConnectionCompleteLoginRequest;
+export type SshConnectionLoginStatusRequest=Omit<SshConnectionCompleteLoginRequest,'userConfirmed'>;
 export interface SshConnectionLoginStatusResult extends SshConnectionCompleteLoginResult {login:SshLoginCompletionState}
 export interface SshConnectionAuthReadResult {connectionId:string;output:string;cursor:number;dropped:boolean;state:SshConnectionState}
 export interface SshShellSessionState {id:string;sessionId:string;connectionId:string;kind:'ssh';mode:'interactive'|'key';name:string;owner:'human'|'agent';ownerEpoch:number;alive:boolean|null;status:'running'|'exited'|'unknown';expired?:boolean;sequence:number;exitCode?:number|null;resource:SshConnectionResourceReference}

@@ -18,23 +18,35 @@ function fixture(t,{marker=true,frame=value=>[value]}={}){
 }
 const count=(f,name)=>f.calls.filter(value=>value===name).length;
 test('gateway exec rejection is definite before Python; opening polls stay connecting and preserve the handed-off shell',async t=>{
- const f=fixture(t),pending=await f.open();f.authenticate(pending.connectionId);const completed=await f.manager.completeLogin({connectionId:pending.connectionId,requestId:'login'}),session=f.sessions.get(completed.shell.id);session.owner({owner:'agent',ownerEpoch:session.state().ownerEpoch,scope:{provider:'codex',threadId:'fixture-thread'}});
+ const f=fixture(t),pending=await f.open();f.authenticate(pending.connectionId);
+ await f.manager.completeLogin({connectionId:pending.connectionId,requestId:'login'});
+ const shell=await f.manager.openShell({connectionId:pending.connectionId,requestId:'human-shell'}),session=f.sessions.get(shell.id);
+ session.owner({owner:'agent',ownerEpoch:session.state().ownerEpoch,scope:{provider:'codex',threadId:'fixture-thread'}});
  const started=f.manager.openService({connectionId:pending.connectionId,profileId:profile.id,profileVersion:1,requestId:'denied-service',bootstrap:{source:'never-executed',payload:{}}});await tick();const opening=await f.manager.serviceState({connectionId:pending.connectionId});assert.equal(opening.status,'connecting');assert.equal(opening.serviceActive,true);
  const servicePty=f.processes.at(-1);servicePty.output('exec request failed, try username/server/account as login name.\r\n');servicePty.kill();const result=await started;assert.equal(result.status,'failed');assert.equal(result.serviceActive,false);assert.equal(result.error.code,'exec_unavailable');assert.equal(result.serviceId,undefined);assert.deepEqual(servicePty.writes,[]);assert.equal(session.state().alive,true);assert.equal(session.state().owner,'agent');assert.equal((await f.manager.serviceState({connectionId:pending.connectionId})).error.code,'exec_unavailable');assert.equal(count(f,'allocate'),1);
  assert.deepEqual(await f.manager.openService({connectionId:pending.connectionId,profileId:profile.id,profileVersion:1,requestId:'denied-service',bootstrap:{source:'never-executed',payload:{}}}),result);assert.equal(f.processes.length,3,'same attempt cannot open another channel');
 });
 const gate=()=>{let release;return {promise:new Promise(r=>release=r),release:()=>release()};};
 
-test('human trust, password and MFA stay private; completion waits for owned local control proof and opens one normal shell without remote exec',async t=>{
+test('human trust, password and MFA stay private; a verified login opens a shell only on request',async t=>{
  const f=fixture(t),pending=await f.open(),value={connectionId:pending.connectionId,requestId:'login'};assert.equal(pending.loginRequestId,'login');assert.equal(f.manager.list().connections[0].loginRequestId,'login');
  for(const [requestId,data,expected]of [['trust','yes\r','password'],['password','INERT_PASSWORD\r','otp'],['otp','123456\r','ready']]){
   const before=await f.manager.completeLogin(value);assert.equal(before.connection.authentication,'pending');assert.equal(before.shell,undefined);assert.equal(count(f,'prove'),0);assert.equal(f.processes.length,1);
   f.manager.authInput({connectionId:pending.connectionId,requestId,data});assert.equal(f.phase(),expected);
  }
- const results=await Promise.all(Array.from({length:8},()=>f.manager.completeLogin(value))),first=results[0];assert.equal(first.connection.status,'authenticated');assert.equal(first.connection.authentication,'verified');assert.equal(first.shell.connectionId,pending.connectionId);assert.equal(first.shell.owner,'human');assert(first.shell.alive);assert(results.every(result=>result.shell.id===first.shell.id));assert.equal(count(f,'prove'),0);assert.equal(f.processes.length,2);assert.equal(f.sessions.size,1);assert.equal(count(f,'allocate'),1);
- assert.equal(f.manager.authRead({connectionId:pending.connectionId}).output,'');assert(!/INERT_PASSWORD|123456|Password:|Verification code/.test(JSON.stringify(results)));assert.equal((await f.manager.completeLogin(value)).shell.id,first.shell.id);assert.equal(count(f,'prove'),0);assert.equal(f.processes.length,2);
- f.processes[1].output('PUBLIC SHELL\r\n');const session=f.sessions.get(first.shell.id),read=session.read({actor:'human',ownerEpoch:first.shell.ownerEpoch,cursor:0,maxBytes:16384});assert.equal(read.chunks.map(value=>value.data).join(''),'PUBLIC SHELL\r\n');session.input({actor:'human',ownerEpoch:first.shell.ownerEpoch,requestId:'normal-shell',data:'inert normal input\r'});assert.deepEqual(f.processes[1].writes,['inert normal input\r']);
- session.close({actor:'human',ownerEpoch:first.shell.ownerEpoch});assert.equal((await f.manager.completeLogin(value)).shell,undefined,'Explicitly closed initial shell is never reopened by login completion');assert.equal(f.processes.length,2);assert.equal(count(f,'prove'),0);
+ const results=await Promise.all(Array.from({length:8},()=>f.manager.completeLogin(value)));
+ assert(results.every(result=>result.connection.authentication==='verified'&&result.login.status==='complete'&&!result.shell));
+ assert.equal(count(f,'prove'),0);assert.equal(f.processes.length,1);assert.equal(f.sessions.size,0);assert.equal(count(f,'allocate'),1);
+ assert.equal(f.manager.authRead({connectionId:pending.connectionId}).output,'');
+ assert(!/INERT_PASSWORD|123456|Password:|Verification code/.test(JSON.stringify(results)));
+ const shell=await f.manager.openShell({connectionId:pending.connectionId,requestId:'human-shell'});
+ assert.equal(shell.owner,'human');assert(shell.alive);
+ f.processes[1].output('PUBLIC SHELL\r\n');const session=f.sessions.get(shell.id),read=session.read({actor:'human',ownerEpoch:shell.ownerEpoch,cursor:0,maxBytes:16384});
+ assert.equal(read.chunks.map(value=>value.data).join(''),'PUBLIC SHELL\r\n');
+ session.input({actor:'human',ownerEpoch:shell.ownerEpoch,requestId:'normal-shell',data:'inert normal input\r'});
+ assert.deepEqual(f.processes[1].writes,['inert normal input\r']);
+ session.close({actor:'human',ownerEpoch:shell.ownerEpoch});
+ assert.equal((await f.manager.completeLogin(value)).shell,undefined);assert.equal(f.processes.length,2);assert.equal(count(f,'prove'),0);
 });
 
 test('a not-yet-observed master marker remains pending without any local helper, remote proof or extra SSH launch',async t=>{
@@ -45,7 +57,8 @@ for(const width of [10,56,80,120])test('ConPTY '+width+' column startup wrapping
  const f=fixture(t,{frame:value=>{const end=value.indexOf('\r\n'),identity=value.slice(0,end),wrapped=identity.match(new RegExp('.{1,'+width+'}','g')).join('\r\n')+'\x1b[K\r\n'+value.slice(end+2);return ['wsl: inert local startup notice\r\n',...wrapped.match(/.{1,7}/gs)];}}),connection=await f.open(),ref={connectionId:connection.connectionId,requestId:'login'};
  assert.equal((await f.manager.state({connectionId:connection.connectionId})).status,'authenticating');assert.equal((await f.manager.completeLogin(ref)).login.status,'waiting_authentication');assert.equal(f.processes.length,1);assert.equal(count(f,'check'),0);
  const output=f.manager.authRead({connectionId:connection.connectionId}).output;assert(output.endsWith('Are you sure you want to continue connecting? '));assert(!/STUDIO_MASTER|startup notice/.test(output));
- f.authenticate(connection.connectionId);const completed=await f.manager.completeLogin(ref);assert.equal(completed.connection.authentication,'verified');assert.equal(completed.shell.owner,'human');assert.equal(f.processes.length,2);assert.equal(count(f,'allocate'),1);
+ f.authenticate(connection.connectionId);const completed=await f.manager.completeLogin(ref);assert.equal(completed.connection.authentication,'verified');assert.equal(completed.shell,undefined);assert.equal(f.processes.length,1);
+ const shell=await f.manager.openShell({connectionId:ref.connectionId,requestId:'terminal'});assert.equal(shell.owner,'human');assert.equal(f.processes.length,2);assert.equal(count(f,'allocate'),1);
 });
 
 test('a long authentication screen batched with the local frame is replayed with its terminal controls',async t=>{
@@ -85,21 +98,21 @@ for(const split of [false,true])test('a second foreign identity frame after an o
 });
 
 test('completion shares an already pending explicit confirmation instead of repeating local confirmation or opening another shell',async t=>{
- const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},held=gate();f.authenticate(connection.connectionId);f.proofGate(held.promise);const explicit=f.manager.confirm({connectionId:connection.connectionId});while(!count(f,'check'))await tick();const completion=f.manager.completeLogin(value);while(!count(f,'ready'))await tick();held.release();assert.equal((await explicit).authentication,'verified');const ready=await completion;assert.equal(ready.shell.owner,'human');assert.equal(count(f,'prove'),0);assert.equal(count(f,'allocate'),1);assert.equal(f.processes.length,2);
+ const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},held=gate();f.authenticate(connection.connectionId);f.proofGate(held.promise);const explicit=f.manager.confirm({connectionId:connection.connectionId});while(!count(f,'check'))await tick();const completion=f.manager.completeLogin(value);while(!count(f,'ready'))await tick();held.release();assert.equal((await explicit).authentication,'verified');const ready=await completion;assert.equal(ready.login.status,'complete');assert.equal(ready.shell,undefined);assert.equal(count(f,'prove'),0);assert.equal(count(f,'allocate'),1);assert.equal(f.processes.length,1);
 });
 
-test('continuing exact login after a terminal slot opens launches one human shell',async t=>{
+test('a full terminal pool preserves login success; the operator can use an available slot later',async t=>{
  const f=fixture(t),connection=await f.open(),target={connectionId:connection.connectionId},ref={...target,requestId:connection.loginRequestId};
  f.authenticate(target.connectionId);await f.manager.confirm(target);
  const existing=await Promise.all(Array.from({length:4},(_,i)=>f.manager.openShell({...target,requestId:'occupied-slot-'+i})));
- await assert.rejects(f.manager.completeLogin(ref),/session_limit/);
- assert.equal(f.manager.loginStatus(ref).login.code,'terminal_session_limit');assert.equal(f.processes.length,5);
+ assert.equal((await f.manager.completeLogin(ref)).login.status,'complete');
+ await assert.rejects(f.manager.openShell({...target,requestId:'new-shell'}),/session_limit/);
+ assert.equal(f.manager.loginStatus(ref).login.status,'complete');assert.equal(f.processes.length,5);
  f.sessions.get(existing[0].id).close({actor:'human',ownerEpoch:existing[0].ownerEpoch});
  assert.equal(f.manager.loginStatus(ref).shell,undefined);assert.equal(f.processes.length,5);
- const [first,second]=await Promise.all([f.manager.completeLogin(ref),f.manager.completeLogin(ref)]);
- assert.equal(first.connection.connectionId,target.connectionId);assert.equal(first.connection.loginRequestId,ref.requestId);
- assert.equal(first.shell.owner,'human');assert.equal(second.shell.id,first.shell.id);
- assert.equal(f.manager.loginStatus(ref).shell.id,first.shell.id);assert.equal(f.processes.length,6);assert.equal(count(f,'allocate'),1);
+ const [first,second]=await Promise.all(Array.from({length:2},()=>f.manager.openShell({...target,requestId:'retry-shell'})));
+ assert.equal(first.connectionId,target.connectionId);assert.equal(first.owner,'human');assert.equal(second.id,first.id);
+ assert.equal(f.manager.loginStatus(ref).shell,undefined);assert.equal(f.processes.length,6);assert.equal(count(f,'allocate'),1);
 });
 
 test('completion rejects changed request identity, wrong connection and arbitrary fields without probing',async t=>{
@@ -108,11 +121,24 @@ test('completion rejects changed request identity, wrong connection and arbitrar
 });
 
 for(const stage of ['ready','proof','shell'])test('closing the exact connection during awaited '+stage+' observation cannot publish readiness or open a shell',async t=>{
- const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},held=gate();f.authenticate(connection.connectionId);if(stage==='ready')f.readyGate(held.promise);else if(stage==='proof')f.proofGate(held.promise);else f.checkGate(held.promise);const pending=f.manager.completeLogin(value),rejected=assert.rejects(pending,/connection_changed/);while(stage==='shell'?count(f,'check')<2:!count(f,stage==='proof'?'check':'ready'))await tick();await f.manager.close({connectionId:connection.connectionId});held.release();await rejected;assert.equal(f.sessions.size,0);assert.equal(f.processes.length,1);assert.equal(count(f,'allocate'),1);assert.equal((await f.manager.state({connectionId:connection.connectionId})).status,'closed');
+ const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},held=gate();
+ f.authenticate(connection.connectionId);
+ if(stage==='ready')f.readyGate(held.promise);
+ else if(stage==='proof')f.proofGate(held.promise);
+ else {await f.manager.completeLogin(value);f.checkGate(held.promise);}
+ const pending=stage==='shell'?f.manager.openShell({...value,requestId:'human-shell'}):f.manager.completeLogin(value);
+ const rejected=assert.rejects(pending,/connection_changed/);
+ while(stage==='shell'?count(f,'check')<2:!count(f,stage==='proof'?'check':'ready'))await tick();
+ await f.manager.close({connectionId:connection.connectionId});held.release();await rejected;
+ assert.equal(f.sessions.size,0);assert.equal(f.processes.length,1);assert.equal(count(f,'allocate'),1);assert.equal((await f.manager.state({connectionId:connection.connectionId})).status,'closed');
 });
 
 test('environment profile generation changed while shell verification waits refuses the stale shell creation',async t=>{
- const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},held=gate();f.authenticate(connection.connectionId);f.checkGate(held.promise);const pending=f.manager.completeLogin(value),rejected=assert.rejects(pending,/connection_changed/);while(count(f,'check')<2)await tick();f.manager.updateProfile({connectionIds:[connection.connectionId],previousVersion:1,profile:{...profile,version:2,serviceEnvironment:{python:'python3.9'}}});held.release();await rejected;assert.equal(f.sessions.size,0);assert.equal(f.processes.length,1);assert.equal(count(f,'prove'),0);
+ const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},held=gate();f.authenticate(connection.connectionId);
+ await f.manager.completeLogin(value);f.checkGate(held.promise);
+ const pending=f.manager.openShell({...value,requestId:'human-shell'}),rejected=assert.rejects(pending,/connection_changed/);
+ while(count(f,'check')<2)await tick();f.manager.updateProfile({connectionIds:[connection.connectionId],previousVersion:1,profile:{...profile,version:2,serviceEnvironment:{python:'python3.9'}}});
+ held.release();await rejected;assert.equal(f.sessions.size,0);assert.equal(f.processes.length,1);assert.equal(count(f,'prove'),0);
 });
 
 test('a lost original master fails closed and completion never starts replacement authentication',async t=>{
@@ -130,8 +156,8 @@ test('a local readiness timeout preserves the original password and MFA login fo
  assert.equal(f.processes.length,1);
  f.authenticate(ref.connectionId);f.host.ready=ready;
  const complete=await f.manager.completeLogin(ref);
- assert.equal(complete.connection.connectionId,ref.connectionId);assert.equal(complete.shell.connectionId,ref.connectionId);
- assert.equal(count(f,'allocate'),1);assert.equal(f.processes.length,2);
+ assert.equal(complete.connection.connectionId,ref.connectionId);assert.equal(complete.connection.authentication,'verified');
+ assert.equal(complete.shell,undefined);assert.equal(count(f,'allocate'),1);assert.equal(f.processes.length,1);
 });
 
 test('local proof timeouts do not dispose an existing shell or admit a channel before the same master is checked again',async t=>{
@@ -139,10 +165,11 @@ test('local proof timeouts do not dispose an existing shell or admit a channel b
  f.authenticate(ref.connectionId);
  let attempts=0;
  f.host.check=async(...args)=>{if(++attempts===2)throw new TerminalFault('ssh_control_timeout');return check(...args);};
- await assert.rejects(f.manager.completeLogin(ref),/ssh_control_timeout/);
+ await f.manager.completeLogin(ref);
+ await assert.rejects(f.manager.openShell({...ref,requestId:'timed-out-shell'}),/ssh_control_timeout/);
  assert.equal(f.manager.loginStatus(ref).connection.authentication,'verified');
  assert.equal(f.processes.length,1,'opening the first shell was never dispatched');
- const initial=await f.manager.completeLogin(ref),session=f.sessions.get(initial.shell.id);
+ const initial=await f.manager.openShell({...ref,requestId:'first-shell'}),session=f.sessions.get(initial.id);
  let rejectCheck;
  f.host.check=()=>{attempts++;return new Promise((_resolve,reject)=>{rejectCheck=reject;});};
  const before=attempts,newShell={...ref,requestId:'second-shell'};
@@ -160,7 +187,8 @@ test('local proof timeouts do not dispose an existing shell or admit a channel b
 
 test('authentication refusal keeps bounded human-only output and exited retries leave another live connection alone',async t=>{
  const f=fixture(t),a=await f.open('key-a');f.authenticate(a.connectionId);
- const original=(await f.manager.completeLogin({connectionId:a.connectionId,requestId:'key-a'})).shell;
+ await f.manager.completeLogin({connectionId:a.connectionId,requestId:'key-a'});
+ const original=await f.manager.openShell({connectionId:a.connectionId,requestId:'key-a-shell'});
  for(let i=0;i<9;i++){
   const requestId='interactive-b-'+i,b=await f.open(requestId),ref={connectionId:b.connectionId,requestId};
   const terminal=f.processes.at(-1);
@@ -173,7 +201,7 @@ test('authentication refusal keeps bounded human-only output and exited retries 
   assert.equal(f.sessions.get(original.id).state().alive,true);
   if(i===8){await f.manager.close({connectionId:b.connectionId});assert.equal(f.manager.authRead({connectionId:b.connectionId}).output,'');}
  }
- assert.equal((await f.manager.completeLogin({connectionId:a.connectionId,requestId:'key-a'})).shell.id,original.id);
+ assert((await f.manager.completeLogin({connectionId:a.connectionId,requestId:'key-a'})).connection.terminalSessionIds.includes(original.id));
 });
 
 test('failed startup is observed with its original cause and an explicit fresh login gets a new connection',async t=>{
@@ -191,24 +219,30 @@ test('broker completion route is human-control only, typed and idempotent across
  const request=async(route,data,authorization='Bearer '+token)=>{const response=await fetch(broker.ready.origin+route,{method:'POST',headers:{Authorization:authorization,'Content-Type':'application/json'},body:JSON.stringify(data)});return {status:response.status,value:await response.json()};};
  const connection=(await request('/connections/open',{profileId:profile.id,profileVersion:1,requestId:'broker-login',profile})).value,base='/connections/'+connection.connectionId;await tick();assert.equal((await request(base+'/login/complete',{requestId:'broker-login'},'Bearer '+ 'b'.repeat(64))).status,403);assert.equal((await request(base+'/login/complete',{requestId:'broker-login',connectionId:connection.connectionId})).status,400);assert.equal((await request(base+'/login/complete',{requestId:'broker-login'})).value.connection.authentication,'pending');assert.equal(count(f,'prove'),0);
  for(const [requestId,data]of [['trust','yes\r'],['password','INERT_PASSWORD\r'],['otp','123456\r']])assert.equal((await request(base+'/auth/input',{requestId,data})).status,200);
- const ready=await request(base+'/login/complete',{requestId:'broker-login'});assert.equal(ready.status,200);assert.equal(ready.value.connection.authentication,'verified');const repeat=await request(base+'/login/complete',{requestId:'broker-login'});assert.equal(repeat.value.shell.id,ready.value.shell.id);assert.equal(count(f,'prove'),0);assert.equal(f.processes.length,2);assert(!/INERT_PASSWORD|123456|Password:/.test(JSON.stringify(ready)));
+ const ready=await request(base+'/login/complete',{requestId:'broker-login',userConfirmed:true});assert.equal(ready.status,200);assert.equal(ready.value.connection.authentication,'verified');
+ const repeat=await request(base+'/login/complete',{requestId:'broker-login'});assert.equal(repeat.value.login.status,'complete');assert.equal(repeat.value.shell,undefined);
+ assert.equal(count(f,'prove'),0);assert.equal(f.processes.length,1);assert(!/INERT_PASSWORD|123456|Password:/.test(JSON.stringify(ready)));
 });
 
 test('login status reads original progress and late completion without checking, input replay or another shell',async t=>{
- const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},auth=gate(),shell=gate();
+ const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'},auth=gate(),proof=gate();
  const before=[...f.calls];assert.deepEqual(f.manager.loginStatus(value).login,{status:'waiting_authentication'});assert.deepEqual(f.calls,before);
- f.authenticate(connection.connectionId);f.readyGate(auth.promise);f.checkGate(shell.promise);const completion=f.manager.completeLogin(value);while(!count(f,'ready'))await tick();
+ f.authenticate(connection.connectionId);f.readyGate(auth.promise);f.proofGate(proof.promise);const completion=f.manager.completeLogin(value);while(!count(f,'ready'))await tick();
  for(let i=0;i<3;i++){const calls=[...f.calls];assert.deepEqual(f.manager.loginStatus(value).login,{status:'checking',phase:'checking_authentication'});assert.deepEqual(f.calls,calls);}
- auth.release();while(count(f,'check')<2)await tick();assert.deepEqual(f.manager.loginStatus(value).login,{status:'checking',phase:'opening_shell'});assert.equal(f.processes.length,1);
- shell.release();await completion;const calls=[...f.calls],ready=f.manager.loginStatus(value);assert.deepEqual(ready.login,{status:'complete'});assert(ready.shell?.alive);assert.equal(ready.shell.connectionId,connection.connectionId);
- for(let i=0;i<3;i++)assert.equal(f.manager.loginStatus(value).shell.id,ready.shell.id);assert.deepEqual(f.calls,calls);assert.equal(f.processes.length,2);assert.equal(count(f,'prove'),0);
+ auth.release();while(!count(f,'check'))await tick();assert.deepEqual(f.manager.loginStatus(value).login,{status:'checking',phase:'checking_authentication'});assert.equal(f.processes.length,1);
+ proof.release();await completion;const calls=[...f.calls],ready=f.manager.loginStatus(value);assert.deepEqual(ready.login,{status:'complete'});assert.equal(ready.connection.connectionId,connection.connectionId);
+ for(let i=0;i<3;i++)assert.equal(f.manager.loginStatus(value).shell,undefined);
+ assert.deepEqual(f.calls,calls);assert.equal(f.processes.length,1);assert.equal(count(f,'prove'),0);
  assert.throws(()=>f.manager.loginStatus({...value,requestId:'other'}),/request_changed/);assert.throws(()=>f.manager.loginStatus({...value,input:'secret'}),/invalid_request/);
  await f.manager.close({connectionId:connection.connectionId});assert.equal(f.manager.loginStatus(value).login.status,'failed');assert.equal(f.manager.loginStatus(value).shell,undefined);
 });
 
 test('canonical account names, shell banners and exec-disabled servers do not add a remote command prerequisite',async t=>{
  const f=fixture(t),connection=await f.open(),value={connectionId:connection.connectionId,requestId:'login'};f.host.prove=()=>assert.fail('Server forbids exec channels; ordinary login must not request one');f.authenticate(connection.connectionId);
- const ready=await f.manager.completeLogin(value);f.processes[1].output('Welcome\r\ncanonical-account$ ');const shell=f.sessions.get(ready.shell.id),read=shell.read({actor:'human',ownerEpoch:ready.shell.ownerEpoch,cursor:0,maxBytes:16384});assert.equal(read.chunks.map(part=>part.data).join(''),'Welcome\r\ncanonical-account$ ');assert.equal(f.manager.loginStatus(value).login.status,'complete');assert.equal(count(f,'prove'),0);assert.equal(count(f,'allocate'),1);
+ const ready=await f.manager.completeLogin(value);assert.equal(ready.login.status,'complete');assert.equal(ready.shell,undefined);
+ const human=await f.manager.openShell({...value,requestId:'human-shell'});f.processes[1].output('Welcome\r\ncanonical-account$ ');
+ const shell=f.sessions.get(human.id),read=shell.read({actor:'human',ownerEpoch:human.ownerEpoch,cursor:0,maxBytes:16384});
+ assert.equal(read.chunks.map(part=>part.data).join(''),'Welcome\r\ncanonical-account$ ');assert.equal(f.manager.loginStatus(value).login.status,'complete');assert.equal(count(f,'prove'),0);assert.equal(count(f,'allocate'),1);
 });
 
 test('failed local ownership observation remains a safe read-only outcome without retrying SSH',async t=>{

@@ -1,5 +1,5 @@
 /** Scope and review agent SSH commands before any input reaches a remote shell. */
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {posix} from 'node:path';
 import {allowedObservation} from '../../../desktop/platform/terminal-service/workspace-command.mjs';
 import {absoluteWorkspace} from '../../../desktop/platform/terminal-service/workspace-probe.mjs';
@@ -9,6 +9,8 @@ const owning = value => JSON.stringify([value?.provider, value?.threadId]);
 const inside = (root, directory) => directory === root || directory.startsWith(root + '/');
 const absolute = (cwd, value) => posix.resolve(cwd, value);
 const canonicalDirectory = value => value==='/'||absoluteWorkspace(value);
+const commandDigest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const observations = new Set(['read','read_pipeline','cwd','job_preview','copy_target']);
 
 function words(text) {
   const tokens = /\s+|'[^']*'|"[^"$`\\]*"|\\[()]|[A-Za-z0-9_.\/\-,:+@%*=~?!]+/gy;
@@ -102,7 +104,7 @@ export function classifyWorkspaceCommand(text, root, cwd) {
     reason: destructive ? 'destructive' : !inside(root, cwd) || outside ? 'outside_workspace' : 'unverified_effects'};
 }
 
-export function createWorkspaceTerminalAuthorization({workspace, connections, current, developerCompute, emit = () => {}, now = Date.now, uuid = randomUUID}) {
+export function createWorkspaceTerminalAuthorization({workspace, connections, current, developerCompute, catalog, emit = () => {}, now = Date.now, uuid = randomUUID}) {
   const stages = new Map(), approvals = new Map();
   function settle(row, decision) {
     clearTimeout(row.timer);
@@ -150,12 +152,13 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
       emit();
     });
   }
-  async function run({scope, ref, guard, entry, registered, command}) {
+  async function run({scope, ref, guard, entry, registered, command, beforeMutation}) {
     const {root, identity} = registered;
     const cwd = entry.cwd;
     const config = {scope, ref, guard, root, cwd};
     const execute = async (mode, args, dispatchGuard=guard) => {
       dispatchGuard();
+      if (!observations.has(mode)) beforeMutation?.();
       const response = await connections.runWorkspaceCommand({connectionId:ref.connectionId, profileId:ref.profileId, profileVersion:ref.profileVersion, root, cwd, identity, mode, args}, dispatchGuard);
       dispatchGuard();
       if (!response || !['result','outside','destructive','changed','unavailable','submission_unconfirmed'].includes(response.status) || !Number.isInteger(response.code) || typeof response.output !== 'string') throw Error('ssh_workspace_unconfirmed');
@@ -246,10 +249,10 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     return {accepted:true, execution_status:response.status==='submission_unconfirmed'?'submission_unconfirmed':response.code !== 0 ? 'failed' : mode==='job' ? job?'submitted':'submission_unconfirmed' : 'completed',
       exit_code:response.code, output:response.output, cwd:entry.cwd,...job?{job_id:job}:{},...response.confinement?{confinement:response.confinement}:{}};
   }
-  async function input({scope, ref, input, sessionId, ownerEpoch, assertCurrent}) {
+  async function operate({scope, ref, input, channel, assertCurrent}) {
     const registered = workspace.forTerminal(ref, scope);
     const modeRevision=developerCompute?.revision(registered.workspaceId);
-    const key = JSON.stringify([owning(scope), ref.connectionId, sessionId, ownerEpoch]);
+    const key = JSON.stringify([owning(scope), ref.connectionId, channel]);
     const guard = () => {
       assertCurrent();
       if(modeRevision!==developerCompute?.revision(registered.workspaceId))fail('ssh_terminal_approval_changed');
@@ -281,7 +284,40 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     if (entry.workspaceId !== registered.workspaceId || entry.path !== registered.path) {
       Object.assign(entry,{workspaceId:registered.workspaceId,path:registered.path,cwd:registered.path,previousCwd:undefined,staged:''});
     }
-    const operation = (async () => {
+    const operation = Promise.resolve().then(async () => {
+      guard();
+      if (input.command !== undefined) {
+        const receiptId = commandDigest([owning(scope),ref.resourceId,input.requestId]);
+        const digest = commandDigest([scope.projectId??null,registered.workspaceId,input.command]);
+        const previous = catalog?.get('ssh-command-receipt',receiptId);
+        if (previous) {
+          if (previous.digest!==digest) fail('terminal_invalid_request');
+          return {...(previous.receipt??{accepted:true,execution_status:'unconfirmed'}),cwd:entry.cwd,replayed:true};
+        }
+        let claimed = false;
+        const beforeMutation = () => {
+          if (!catalog || claimed) return;
+          // Record the dispatch before it can have a remote effect. A lost
+          // reply leaves this receipt unresolved across logins and restarts.
+          const save = () => {
+            if (catalog.get('ssh-command-receipt',receiptId)) throw Error('ssh_command_outcome_unconfirmed');
+            catalog.put('ssh-command-receipt',receiptId,{digest});
+          };
+          if (catalog.transaction) catalog.transaction(save); else save();
+          claimed = true;
+        };
+        const result = await run({scope,ref,guard,entry,registered,command:input.command,beforeMutation});
+        if (claimed) {
+          const {accepted,execution_status,exit_code,job_id} = result;
+          try {
+            catalog.put('ssh-command-receipt',receiptId,{digest,receipt:{accepted,execution_status,
+              ...exit_code!==undefined?{exit_code}:{},...job_id?{job_id}:{}}});
+          } catch {
+            // Keep the original dispatch record when a completed receipt cannot be saved.
+          }
+        }
+        return result;
+      }
       if (input.data === '\x03') { entry.staged = ''; return {accepted:true, execution_status:'cleared', cwd:entry.cwd}; }
       if (input.data !== '\r') {
         const staged = entry.staged + input.data;
@@ -292,12 +328,15 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
       const command = entry.staged.replaceAll('\r\n','\n').replaceAll('\r','\n');
       entry.staged = '';
       if (!command.trim()) return {accepted:true, execution_status:'empty', cwd:entry.cwd};
-      entry.running = true;
-      try { return await run({scope, ref, guard, entry, registered, command}); } finally { entry.running = false; }
-    })();
+      return run({scope,ref,guard,entry,registered,command});
+    }).finally(() => {entry.running = false;});
+    entry.running = true;
     entry.requests.set(input.requestId, {signature, operation});
     return operation;
   }
-  return {input, pending, decide,
+  return {
+    input:({sessionId,ownerEpoch,...params})=>operate({...params,channel:['terminal',sessionId,ownerEpoch]}),
+    execute:({leaseId,requestId,command,...params})=>operate({...params,channel:['command',leaseId],input:{requestId,command}}),
+    pending, decide,
     revokeConnection(connectionId) { for (const row of approvals.values()) if (row.view.connectionId === connectionId) settle(row, 'denied'); }};
 }

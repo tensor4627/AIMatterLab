@@ -72,6 +72,7 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
       conversationId:chat?.id ?? null,conversationName:chat?.name ?? null,
       projectId:channel.projectId ?? null,projectName:projects.get(channel.projectId)?.name ?? null,
       sessionId:channel.sessionId,serviceOnly:channel.serviceOnly===true,serviceContext:channel.serviceContext===true,
+      ...channel.commandContext?{commandContext:true}:{},
       terminalStatus:channel.terminalStatus??null,busy:channel.busy,status,checkedAt};
   }
 
@@ -96,7 +97,10 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
         let status = channel.status, checkedAt = null;
         if (status === 'assigned') {
           if (channel.expired) status = 'lost';
-          else if (channel.serviceOnly) {
+          else if (channel.commandContext&&!channel.sessionId) {
+            status = !recent(brokerInventory)||!master?.verified ? 'unknown' : online(master) ? 'assigned' : 'lost';
+            checkedAt = brokerInventory?.checkedAt ?? null;
+          } else if (channel.serviceOnly) {
             const generation = channel.serviceGeneration ?? entry?.generation;
             const current = generation && entry?.generation === generation && (!master || master.service?.serviceId === generation);
             status = service.status === 'online' && current ? 'assigned' : service.status === 'lost' || generation && entry?.generation !== generation ? 'lost' : 'unknown';
@@ -221,7 +225,7 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
       return observe(() => entry ? resources.observeConsoleService(entry) : inspectUnmanagedSsh(row),services,row.connectionId,{generation});
     });
     for (const channel of channels) {
-      if (channel.kind === 'ssh' && !channel.serviceOnly && channel.status === 'assigned' && !channel.expired && observed.some(row => sameRef(channel,row) && row.verified && online(row))) {
+      if (channel.kind === 'ssh' && channel.sessionId && !channel.serviceOnly && channel.status === 'assigned' && !channel.expired && observed.some(row => sameRef(channel,row) && row.verified && online(row))) {
         checks.push(observe(() => resources.observeConsoleLease(channel),shells,channel.leaseId,{sessionId:channel.sessionId}));
       }
     }

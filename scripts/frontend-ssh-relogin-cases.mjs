@@ -2,6 +2,76 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 export async function frontendSshReloginCases({check,out}){
+ await check('ssh-manual-handoff-experience-retries-workspace-on-the-selected-node',async page=>{
+  await page.evaluate(async()=>{
+   const f=window.__test,original=window.studio.invoke;
+   const ref={connectionId:'fixture-connection',profileId:'fixture-gateway',profileVersion:1};
+   const pending={...ref,schemaVersion:2,loginRequestId:'fixture-login',status:'authenticating',authentication:'pending',
+    capabilities:{multiplex:false,manualHandoff:true},terminalSessionIds:[],serviceIds:[],revision:1};
+   const verified={...pending,status:'authenticated',authentication:'verified',capabilities:{multiplex:true},revision:2};
+   const root='/fixture/node-two/workspace';
+   const preview={...ref,schemaVersion:2,resourceName:'Fixture gateway',root,account:'fixture',hostname:'node-two',
+    directories:[root+'/workfile',root+'/software'],status:'confirmation_required',confirmationId:'fixture-review'};
+   f.handoffCalls=[];f.gatewaySelection='';f.manualVerified=false;f.pathConfirmed=false;
+   window.studio.invoke=async(method,data)=>{
+    const state=f.manualVerified?verified:pending;
+    if(method==='compute.sshConnection.list')return {connections:[state]};
+    if(method==='compute.managed.snapshot')return {resources:[],conversations:[],sources:[]};
+    if(method==='sharedTerminal.list')return {sessions:[]};
+    if(method==='compute.sshService.status'||method==='compute.managed.serviceStatus')return {schemaVersion:2,...ref,status:'idle',serviceActive:false,workflowReady:false};
+    if(method==='compute.sshConnection.authResize')return {resized:true};
+    if(method==='compute.sshConnection.authRead'){
+     const selected=f.gatewaySelection==='2\r',cursor=selected?2:1;
+     return {...ref,state,cursor,dropped:false,output:data.cursor>=cursor?'':selected?'\r\nnode-two$ ':'Select login node [1/2]: '};
+    }
+    if(method==='compute.sshConnection.authInput'){f.gatewaySelection+=data.data;return {accepted:true};}
+    if(method==='compute.sshConnection.loginStatus')return {connection:state,login:{status:f.manualVerified?'complete':'waiting_authentication'}};
+    if(/completeLogin|openShell|sshConnection\.open|resourceWorkspace\.|managed\.publish/.test(method))f.handoffCalls.push({method,data});
+    if(method==='compute.sshConnection.completeLogin'){
+     if(data.userConfirmed!==true||f.gatewaySelection!=='2\r')throw Error('Inexact fixture handoff');
+     f.manualVerified=true;return {connection:verified,login:{status:'complete'}};
+    }
+    if(method==='compute.resourceWorkspace.preview'){
+     if(!data.directory)throw Error('ssh_workspace_unconfirmed');
+     if(data.directory!==root)throw Error('Wrong fixture directory');
+     return preview;
+    }
+    if(method==='compute.resourceWorkspace.confirm'){f.pathConfirmed=true;return {...preview,status:'confirmed',confirmationId:undefined};}
+    if(method==='compute.managed.publish'){
+     if(!f.pathConfirmed)throw Error('Unconfirmed fixture work area');
+     return {...ref,resourceId:'ssh:'+ref.profileId,kind:'ssh',name:'Fixture gateway'};
+    }
+    return original(method,data);
+   };
+   const Panel=(await import('/frontend/features/terminal/SshConnectionPanel.tsx')).default;
+   window.testRoot.render(React.createElement(Panel,{visible:true,request:{nonce:'fixture-request',profileId:ref.profileId,
+    version:ref.profileVersion,profileName:'Fixture gateway'},provider:'codex',resourceScope:'fixture-chat',
+    onError:error=>{window.__test.loginError=String(error);}}));
+  });
+  const auth=page.getByRole('region',{name:'SSH 登录终端',exact:true});
+  await auth.locator('.xterm-rows').getByText('Select login node [1/2]:',{exact:false}).waitFor();
+  await auth.locator('.xterm-helper-textarea').focus();
+  await page.keyboard.press('Digit2');await page.keyboard.press('Enter');
+  await auth.locator('.xterm-rows').getByText('node-two$',{exact:false}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.__test.handoffCalls),[]);
+  await page.getByRole('button',{name:'登录完成，交由 AIMatterLab 管理',exact:true}).click();
+  const review=page.getByTestId('resource-workspace-review');
+  await review.getByRole('alert').getByText('远端工作区需要核对',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('ssh-login-error').count(),0);
+  assert.equal(await review.getByTestId('resource-workspace-confirm').isDisabled(),true);
+  await review.getByTestId('resource-workspace-path').fill('/fixture/node-two/workspace');
+  await review.getByTestId('resource-workspace-preview').click();
+  await review.getByText('fixture@node-two',{exact:true}).waitFor();
+  await review.getByTestId('resource-workspace-confirm').click();
+  await page.getByTestId('ssh-managed-status').waitFor();
+  await page.getByTestId('ssh-open-shell').waitFor();
+  const calls=await page.evaluate(()=>window.__test.handoffCalls);
+  assert.deepEqual(calls.map(call=>call.method),['compute.sshConnection.completeLogin','compute.resourceWorkspace.preview',
+   'compute.resourceWorkspace.preview','compute.resourceWorkspace.confirm','compute.managed.publish']);
+  assert(calls.every(call=>call.data.connectionId==='fixture-connection'));
+  assert.equal(await page.evaluate(()=>window.__test.loginError),undefined);
+ });
+
  await check('ssh-relogin-experience-fresh-request-reopens-exact-terminal',async page=>{
   await page.evaluate(async()=>{
    const f=window.__test,original=window.studio.invoke,profile={id:'relogin-profile',version:1,kind:'ssh',name:'Fixture school SSH',host:'fixture.invalid',username:'fixture',port:22,ssh_client:'ssh',mode:'interactive'};

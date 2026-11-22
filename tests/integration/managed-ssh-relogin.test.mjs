@@ -13,6 +13,7 @@ import {registerSshConnectionRoutes} from '../../backend/main/compute/ssh-connec
 import {createSshServiceRegistration} from '../../backend/main/compute/ssh-service-registration.mjs';
 import {createManagedWorkbench} from '../../desktop/platform/managed-workbench.mjs';
 import {developerComputeAccess} from '../../backend/main/compute/developer-compute-access.mjs';
+import {createWorkspaceTerminalAuthorization} from '../../backend/main/compute/workspace-terminal-authorization.mjs';
 
 const root='/scratch/fixture-workspace';
 const profile=id=>({id,kind:'ssh',version:1,name:'材料中心',host:id+'.invalid',port:22,username:'fixture-user',mode:'interactive',ssh_client:'/usr/bin/ssh'});
@@ -24,7 +25,7 @@ const ref=({connectionId,profileId,profileVersion})=>({connectionId,profileId,pr
 const ownerKey=({provider,threadId})=>JSON.stringify([provider,threadId]);
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
 
-function fixture(t,{developerCompute}={}){
+function fixture(t,{developerCompute,commandResult}={}){
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-ssh-relogin-'));
  const catalog=new Catalog(directory);
  const policies=managedProjectAccess({catalog}),activity=createConversationActivity({catalog});
@@ -77,6 +78,11 @@ function fixture(t,{developerCompute}={}){
    if(entry.mode!=='authenticated')throw Error('ssh_workspace_unconfirmed');
    return {root:value.directory||root,identity:{...entry.hostIdentity,account:entry.account},ready:true};
   },
+  async runWorkspaceCommand(value,check){
+   check();
+   calls.push({operation:'command',...value});
+   return commandResult(value);
+  },
   async managedShell(operation,value){
    calls.push({operation,...value});
    const key=JSON.stringify([value.connectionId,value.leaseId]);
@@ -120,8 +126,10 @@ function fixture(t,{developerCompute}={}){
   const workflow={currentFor:(provider,threadId)=>owners.get(ownerKey({provider,threadId}))};
   const records={deleted:()=>false,bound:()=>null,conversation:(provider,threadId)=>workflow.currentFor(provider,threadId),
    conversations:()=>[...owners.values()],tasks:()=>[]};
+  const terminalAuthorization=commandResult?createWorkspaceTerminalAuthorization({workspace,connections,catalog,current:()=>selected}):
+   developerCompute?{input:async()=>({accepted:true})}:undefined;
   const app=createManagedWorkbench({catalog,profiles,registration,terminal:{connections},resourceWorkspace:workspace,projectAccess:policies,
-   developerCompute,...developerCompute?{terminalAuthorization:{input:async()=>({accepted:true})}}:{},
+   developerCompute,terminalAuthorization,
    resourceActivity:activity,records,workflow,agents:{isBusy:()=>false,turnStates:()=>[],turnOrigin:()=>null},
    handle,notify:()=>{},dispatch:()=>{},onConnectionReplaced:(before,next)=>resource.replaceHostedConnection(before,next)});
   registerSshConnectionRoutes({handle,connections,onOpening:app.resources.noteLogin,
@@ -166,6 +174,46 @@ function fixture(t,{developerCompute}={}){
  return {app,start,catalog,resource,workspace,phases,profiles,policies,workerProjects,activity,calls,open,login,publish,owner,message,talk,lose,opens,
   failNextOpen(predicate){dropNextOpen=predicate;}};
 }
+
+test('command leases isolate directories and recover on the original target without opening a PTY or replaying a lost mutation',async t=>{
+ const f=fixture(t,{commandResult:({mode,cwd,args})=>{
+  if(mode==='mkdir'){
+   if(args[0]==='partial')throw Error('ssh_workspace_unconfirmed');
+   return {status:'result',code:0,output:''};
+  }
+  return {status:'result',code:0,output:mode==='cwd'?String(args[0]):cwd};
+ }});
+ const chat=f.owner('codex','same-thread'),other=f.owner('deepseek','same-thread','project','workflow');
+ const prior=await f.open('main');await f.login(prior);await f.publish(prior);
+ const grant={kind:'ssh',profileId:'main',targetFingerprint:resourceFingerprint(f.profiles.read({id:'main'}))};
+ f.policies.set('project',grant,true);
+ f.message(chat,'用 ssh:main');f.message(other,'用 ssh:main');
+ const acquire=scope=>f.talk(scope,'acquire_compute_resource',{resource_id:'ssh:main'});
+ const acquired=await Promise.all([acquire(chat),acquire(other)]);
+ assert(acquired.every(value=>value.status==='acquired'&&value.access==='command'&&!value.terminal));
+ assert(f.app.desktopTools.tools().some(definition=>definition.name==='run_compute_command'));
+ const run=(scope,request_id,command,app=f.app)=>app.desktopTools.call('run_compute_command',{resource_id:'ssh:main',request_id,command},scope);
+ const unleased=f.owner('codex','unleased');
+ await assert.rejects(run(unleased,'read','pwd'),/lease_required/);
+ await Promise.all([run(chat,'nav','cd '+root+'/a'),run(other,'nav','cd '+root+'/b')]);
+ const pair=await Promise.all([run(chat,'read','pwd'),run(other,'read','pwd')]);
+ assert.deepEqual(pair.map(({output})=>output),[root+'/a',root+'/b']);
+ assert.deepEqual(await f.talk(chat,'list_compute_terminals'),{sessions:[]});
+ assert.equal(f.opens(prior).length,0);
+ await assert.rejects(run(chat,'write-lost','mkdir partial'),/workspace_unconfirmed/);
+ assert.equal((await run(chat,'write-ok','mkdir complete')).execution_status,'completed');
+ f.policies.set('project',grant,false);
+ await assert.rejects(run(other,'blocked','pwd'),/grant_required/);
+ f.lose(prior);await f.app.settle();
+ const restarted=f.start(),next=await f.open('main',restarted);await f.login(next,restarted);await restarted.settle();
+ assert.equal((await run(chat,'write-lost','mkdir partial',restarted)).execution_status,'unconfirmed');
+ assert.equal((await run(chat,'write-ok','mkdir complete',restarted)).replayed,true);
+ await assert.rejects(run(chat,'write-ok','mkdir another',restarted),/invalid_request/);
+ assert.equal((await run(chat,'after-login','pwd',restarted)).output,root);
+ assert.equal(f.calls.filter(row=>row.operation==='command'&&row.mode==='mkdir').length,2);
+ assert.equal(f.opens(next).length,0);
+ await assert.rejects(run(other,'after-login','pwd',restarted),/lease_required|grant_required/);
+});
 
 test('a temporary developer terminal is not restored as an ordinary session grant after relogin',async t=>{
  let selected=null;

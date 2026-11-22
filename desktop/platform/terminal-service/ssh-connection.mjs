@@ -92,6 +92,8 @@ export function createMultiplexHost({platform=process.platform,cwd=process.cwd()
   async workspace(profile,proof,command){
    const argv=multiplexArgs(multiplexProfile(profile),proof.socket,{command}),t=transport(profile);
    const result=await (t.prefix.length?run(t.file,[...t.prefix,...argv],{timeout:10000,limit:32768}):run(argv[0],argv.slice(1),{timeout:10000,limit:32768}));
+   if(result.code!==0&&/exec request (?:failed|refused)|exec request[^\r\n]*(?:denied|not allowed)/i.test(result.stderr))fail('ssh_exec_unavailable');
+   if(result.code!==0&&/session (?:open|request) (?:failed|refused)|administratively prohibited/i.test(result.stderr))fail('ssh_channel_refused');
    if(result.code!==0)fail('ssh_workspace_unconfirmed');
    return result.stdout;
   },
@@ -105,7 +107,7 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
  if(!Number.isInteger(profileUpdateLeaseMs)||profileUpdateLeaseMs<1||profileUpdateLeaseMs>60000)fail('invalid_request',400);
  const records=new Map(),opens=new Map(),profileUpdates=new Map();let closing=false,openingShells=0;
  function ref(value,extra=[]){exact(value,['connectionId','profileId','profileVersion',...extra],['connectionId',...extra.filter(k=>!['cursor','maxBytes'].includes(k))]);const r=records.get(value.connectionId);if(!r)fail('ssh_connection_not_found',404);if(value.profileId!==undefined&&(value.profileId!==r.profile.id||value.profileVersion!==r.profile.version)||value.profileVersion!==undefined&&value.profileId===undefined)fail('ssh_connection_changed');return r;}
- function view(r){const terminals=[...r.shells].filter(id=>sessions.get(id)?.state().alive&&!sessions.get(id)?.state().closed),service=r.service?.shared?.view()||r.service?.session?.serviceState();return {schemaVersion:2,connectionId:r.id,loginRequestId:r.loginRequestId,profileId:r.profile.id,profileVersion:r.profile.version,status:r.status,authentication:r.authentication,capabilities:{multiplex:r.status==='authenticated'},terminalSessionIds:terminals,serviceIds:service?.serviceActive&&service.serviceId?[service.serviceId]:[],revision:r.revision,...r.status==='unavailable'&&r.bytes>0?{retainedAuthOutput:true}:{},...r.closeRequested?{closed:r.closeProof===true}:{},...r.error?{error:{code:r.error}}:{}};}
+ function view(r){const terminals=[...r.shells].filter(id=>sessions.get(id)?.state().alive&&!sessions.get(id)?.state().closed),service=r.service?.shared?.view()||r.service?.session?.serviceState();return {schemaVersion:2,connectionId:r.id,loginRequestId:r.loginRequestId,profileId:r.profile.id,profileVersion:r.profile.version,status:r.status,authentication:r.authentication,capabilities:{multiplex:r.status==='authenticated',...r.native&&r.status==='authenticating'?{manualHandoff:true}:{}},terminalSessionIds:terminals,serviceIds:service?.serviceActive&&service.serviceId?[service.serviceId]:[],revision:r.revision,...r.status==='unavailable'&&r.bytes>0?{retainedAuthOutput:true}:{},...r.closeRequested?{closed:r.closeProof===true}:{},...r.error?{error:{code:r.error}}:{}};}
  function lost(r,code='ssh_master_unavailable'){
   if(r.status==='closed'||r.status==='unavailable')return;
   const keepAuthOutput=r.status==='authenticating'&&['ssh_master_unavailable','ssh_remote_terminal_unavailable'].includes(code);
@@ -170,14 +172,17 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
  async function confirm(value){const r=ref(value);if(r.status==='authenticated')return state(value);if(r.status!=='authenticating'||!r.alive||!r.native&&!r.master)fail('ssh_authentication_unconfirmed');if(r.confirming)return r.confirming;const revision=r.revision;r.confirming=(async()=>{const proof=await checkTransport(r);if(closing||r.closeRequested||r.status!=='authenticating'||r.revision!==revision||!r.alive)fail('ssh_connection_changed');if(!r.native)r.proof={...r.proof,...proof};r.status='authenticated';r.authentication='verified';r.revision++;r.ring=[];r.bytes=0;r.inputRequests.clear();return view(r);})();try{return await r.confirming;}finally{r.confirming=null;}}
  const loginCodes=new Set(['ssh_connection_changed','ssh_authentication_unconfirmed','ssh_master_identity_changed','ssh_master_unavailable','ssh_control_identity_changed','ssh_control_unavailable','ssh_control_timeout','ssh_control_output_limit','ssh_channel_unavailable','ssh_client_unavailable','ssh_invalid_profile','ssh_route_requires_review','ssh_multiplex_unsupported','ssh_linux_client_namespace_required','ssh_native_key_path_required','ssh_remote_terminal_unavailable','terminal_unavailable','terminal_start_failed','terminal_session_limit','terminal_service_active']);
  const loginCode=error=>loginCodes.has(error?.code)?error.code:({session_limit:'terminal_session_limit',spawn_failed:'terminal_start_failed',service_active:'terminal_service_active'})[error?.code]||'terminal_unavailable';
- function loginView(r){const active=['authenticating','authenticated'].includes(r.status)&&!r.closeRequested,login=active?r.loginState||{status:'waiting_authentication'}:{status:'failed',code:r.closeRequested||r.status==='closed'?'ssh_connection_changed':loginCode({code:r.error})},shell=r.loginShellId&&sessions.get(r.loginShellId)?.state();return {connection:view(r),...active&&login.status==='complete'&&shell?.alive&&!shell.closed?{shell}:{},login:{...login}};}
+ function loginView(r){const active=['authenticating','authenticated'].includes(r.status)&&!r.closeRequested,login=active?r.loginState||{status:'waiting_authentication'}:{status:'failed',code:r.closeRequested||r.status==='closed'?'ssh_connection_changed':loginCode({code:r.error})};return {connection:view(r),login:{...login}};}
  // Pure observation of the original transaction, including a late ACK outcome.
  // It never proves a master, creates a channel or repeats login completion.
  function loginStatus(value){exact(value,['connectionId','requestId']);const r=ref({connectionId:value.connectionId});if(!id(value.requestId))fail('invalid_request',400);if(value.requestId!==r.loginRequestId)fail('request_changed');return loginView(r);}
  // Human login completion observes only this existing local master. Until its
  // control socket is ready, no slave channel may be launched.
  async function completeLogin(value){
-  exact(value,['connectionId','requestId']);const r=ref({connectionId:value.connectionId});if(!id(value.requestId))fail('invalid_request',400);if(value.requestId!==r.loginRequestId)fail('request_changed');
+  exact(value,['connectionId','requestId','userConfirmed'],['connectionId','requestId']);
+  const r=ref({connectionId:value.connectionId});
+  if(!id(value.requestId)||value.userConfirmed!==undefined&&value.userConfirmed!==true)fail('invalid_request',400);
+  if(value.requestId!==r.loginRequestId)fail('request_changed');
   // A failed original transaction can still be observed. Do not replace its
   // actual startup/master error with an identity error or restart SSH here.
   if(!closing&&!r.closeRequested&&!r.profileUpdate&&['unavailable','unsupported','requires_review'].includes(r.status))return loginView(r);
@@ -187,15 +192,20 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
    r.loginState={status:'checking',phase:'checking_authentication'};
    fresh();if(r.status==='authenticating'){
     if(!r.proof||!r.native&&!r.master){r.loginState={status:'waiting_authentication'};return loginView(r);}
-    let observed;try{if(!r.native&&typeof host.ready!=='function')fail('ssh_control_unavailable');observed=r.native?r.native.ready():await host.ready(r.profile,r.proof,r.master);}catch(error){if(r.status==='unavailable'&&!r.closeRequested)return loginView(r);fresh();if(!controlTimedOut(error))lost(r,error.code||'ssh_control_unavailable');throw error;}
+    let observed;
+    try{
+     if(r.native)observed=value.userConfirmed?{ready:await r.native.confirmHandoff()}:r.native.ready();
+     else{
+      if(typeof host.ready!=='function')fail('ssh_control_unavailable');
+      observed=await host.ready(r.profile,r.proof,r.master);
+     }
+    }catch(error){if(r.status==='unavailable'&&!r.closeRequested)return loginView(r);fresh();if(!controlTimedOut(error))lost(r,error.code||'ssh_control_unavailable');throw error;}
     if(r.status==='unavailable'&&!r.closeRequested)return loginView(r);
     fresh();
     if(observed?.ready===false){r.loginState={status:'waiting_authentication'};return loginView(r);}if(observed?.ready!==true)fail('ssh_control_unavailable');
-    await confirm({connectionId:r.id});fresh();
-   }
-   r.loginState={status:'checking',phase:'opening_shell'};
-   if(r.loginShellId){await verified(r);fresh();r.loginState={status:'complete'};return loginView(r);}
-   const shell=await openShell({connectionId:r.id,requestId:'login-shell-'+r.id},{assertCurrent:fresh});fresh();r.loginShellId=shell.id;r.loginState={status:'complete'};return loginView(r);
+    await confirm({connectionId:r.id});
+   }else await verified(r);
+   fresh();r.loginState={status:'complete'};return loginView(r);
   })();try{return await record.promise;}catch(error){if(r.loginCompletion===record)r.loginState={status:'failed',phase:r.loginState?.phase||'checking_authentication',code:loginCode(error)};throw error;}finally{if(r.loginCompletion===record)r.loginCompletion=null;}
  }
  function authRead(value){const r=ref({connectionId:value.connectionId,...value.profileId?{profileId:value.profileId,profileVersion:value.profileVersion}:{}});exact(value,['connectionId','profileId','profileVersion','cursor','maxBytes'],['connectionId']);const cursor=value.cursor??0,max=value.maxBytes??65536;if(!Number.isSafeInteger(cursor)||cursor<0||cursor>r.sequence||!Number.isInteger(max)||max<16384||max>65536)fail('invalid_cursor',400);const first=r.ring[0]?.sequence??r.sequence+1;let bytes=0,output='',end=Math.max(cursor,first-1);for(const part of r.ring){if(part.sequence<=cursor)continue;const size=Buffer.byteLength(part.data);if(bytes+size>max)break;output+=part.data;bytes+=size;end=part.sequence;}return {connectionId:r.id,output,cursor:end,dropped:cursor<first-1,state:view(r)};}
@@ -235,11 +245,12 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
  }
  async function runWorkspace(r,{command,decode}){
   const generation=r.generation;
+  const check=()=>{if(closing||generation!==r.generation||r.closeRequested||r.status!=='authenticated'||r.profileUpdate)fail('ssh_connection_changed');};
   await verified(r);
-  if(generation!==r.generation)fail('ssh_connection_changed');
+  check();
   let output;
   if(r.native){
-   const channel=await r.native.openChannel(command);
+   const channel=await r.native.openChannel(command,{pty:false,check});
    output=await new Promise((resolve,reject)=>{
     let collected='';
     const timer=setTimeout(()=>abort(),10000);
@@ -249,7 +260,7 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
    });
   }else output=await host.workspace(r.profile,r.proof,command);
   await verified(r);
-  if(generation!==r.generation||r.closeRequested)fail('ssh_connection_changed');
+  check();
   return decode(output);
  }
  function workspace(value){

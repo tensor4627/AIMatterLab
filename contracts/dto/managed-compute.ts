@@ -7,7 +7,7 @@ export interface ManagedResource {
   connectionId?:string; profileVersion?:number; color?:number;
   verificationPending?:boolean;
   serviceStatus?:'idle'|'preparing'|'ready'|'configuration_required'|'unavailable';
-  serviceReady?:boolean; terminalReady?:boolean; authorizedProjects?:string[];
+  serviceReady?:boolean; terminalReady?:boolean; commandAvailable?:boolean; authorizedProjects?:string[];
   workspace?:ResourceWorkspaceLocation;
 }
 export interface PublishedSshResource extends ManagedResource {
@@ -23,7 +23,7 @@ export type ComputeConsoleChannelSource = 'managed'|'handoff'|'wsl';
 export interface ComputeConsoleChannel {
   source:ComputeConsoleChannelSource; leaseId:string|null; sessionId:string|null; provider:AgentProvider; threadId:string;
   conversationId:string|null; conversationName:string|null; projectId:string|null; projectName:string|null; serviceOnly:boolean; busy:boolean;
-  serviceContext?:boolean; terminalStatus?:'preparing'|'releasing'|'lost'|null;
+  serviceContext?:boolean; commandContext?:boolean; terminalStatus?:'preparing'|'releasing'|'lost'|null;
   status:'preparing'|'assigned'|'releasing'|'lost'|'unknown'|'parked'; checkedAt:number|null;
 }
 export interface ComputeConsoleProfileRef { profileId:string; profileVersion:number }

@@ -1,4 +1,4 @@
-"""Serve PTYs on stdio of one authenticated Linux login. No listener or files."""
+"""Serve PTYs and short commands on stdio of one authenticated Linux login."""
 import base64
 import errno
 import fcntl
@@ -17,7 +17,6 @@ def serve(nonce):
     selector = selectors.DefaultSelector()
     channels = {}
     children = {}
-    exit_status = {}
     incoming = bytearray()
 
     def send(*message):
@@ -34,26 +33,42 @@ def serve(nonce):
             child, status = os.waitpid(pid, os.WNOHANG)
             if child:
                 del children[pid]
-                if channel in channels:
-                    exit_status[channel] = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -os.WTERMSIG(status)
+                row = channels.get(channel)
+                if row is not None:
+                    row['code'] = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -os.WTERMSIG(status)
+                    finish(channel, row)
 
-    def close(channel):
-        reap()
-        pid, fd, _ = channels.pop(channel)
-        selector.unregister(fd)
-        os.close(fd)  # Closing the PTY sends SIGHUP to its foreground group.
+    def finish(channel, row):
+        if row['output_done'] and row['code'] is not None:
+            del channels[channel]
+            os.close(row['fd'])
+            send('exit', channel, row['code'])
+
+    def end_output(row):
+        if not row['output_done']:
+            selector.unregister(row['fd'])
+            row['output_done'] = True
+
+    def stop(channel, report=True):
+        row = channels.pop(channel, None)
+        if row is None:
+            return
+        end_output(row)
+        os.close(row['fd'])
+        pid = row['pid']
         if pid in children:
             try:
-                os.kill(pid, signal.SIGHUP)
+                os.killpg(pid, signal.SIGHUP)
             except ProcessLookupError:
-                pass
+                # Cancellation can arrive before a newly forked child runs setsid.
+                try:
+                    os.kill(pid, signal.SIGHUP)
+                except ProcessLookupError:
+                    pass
+        if report:
+            send('exit', channel, row['code'])
 
-        return exit_status.pop(channel, None)
-
-    def open_channel(channel, cols, rows, command):
-        reap()
-        if channel in channels or len(channels) >= 16 or len(children) >= 16:
-            raise ValueError('channel limit')
+    def start_pty(cols, rows, command):
         pid, fd = pty.fork()
         if pid == 0:
             try:
@@ -64,9 +79,44 @@ def serve(nonce):
                 os.execl('/bin/sh', 'sh', '-c', command)
             finally:
                 os._exit(127)
+        return pid, fd
+
+    def start_command(command):
+        read_fd, write_fd = os.pipe()
+        try:
+            pid = os.fork()
+        except OSError:
+            os.close(read_fd)
+            os.close(write_fd)
+            raise
+        if pid == 0:
+            try:
+                os.close(read_fd)
+                os.setsid()
+                with open(os.devnull, 'rb') as no_input:
+                    os.dup2(no_input.fileno(), 0)
+                os.dup2(write_fd, 1)
+                os.dup2(write_fd, 2)
+                os.close(write_fd)
+                os.execl('/bin/sh', 'sh', '-c', command)
+            finally:
+                os._exit(127)
+        os.close(write_fd)
+        return pid, read_fd
+
+    def open_channel(op, channel, args):
+        reap()
+        if channel in channels or len(channels) >= 16 or len(children) >= 16:
+            send('error', channel, 'ssh_channel_refused')
+            return
+        try:
+            pid, fd = start_pty(*args) if op == 'open' else start_command(*args)
+        except OSError:
+            send('error', channel, 'ssh_channel_refused')
+            return
         children[pid] = channel
         os.set_blocking(fd, False)
-        channels[channel] = (pid, fd, bytearray())
+        channels[channel] = {'pid': pid, 'fd': fd, 'code': None, 'pty': op == 'open', 'pending': bytearray(), 'output_done': False}
         selector.register(fd, selectors.EVENT_READ, channel)
         send('opened', channel, pid)
 
@@ -74,10 +124,16 @@ def serve(nonce):
         op, channel, *args = json.loads(packet)
         if op == 'ping':
             send('pong', channel)
-        elif op == 'open':
-            open_channel(channel, *args)
+        elif op in ('open', 'exec'):
+            open_channel(op, channel, args)
         elif channel in channels:
-            _, fd, pending = channels[channel]
+            if op == 'close':
+                stop(channel)
+                return
+            row = channels[channel]
+            fd, pending = row['fd'], row['pending']
+            if row['output_done'] or not row['pty']:
+                return
             if op == 'write':
                 pending.extend(base64.b64decode(args[0], validate=True))
                 if len(pending) > 2 * 1024 * 1024:
@@ -85,8 +141,6 @@ def serve(nonce):
                 selector.modify(fd, selectors.EVENT_READ | selectors.EVENT_WRITE, channel)
             elif op == 'resize':
                 resize(fd, *args)
-            elif op == 'close':
-                send('exit', channel, close(channel))
 
     if os.isatty(0):
         tty.setraw(0)
@@ -95,7 +149,10 @@ def serve(nonce):
     try:
         while True:
             reap()
-            for key, events in selector.select():
+            # A PTY can report EOF before waitpid reports the child's exit. Keep
+            # waiting for that receipt without sending a signal to the child.
+            timeout = 0.05 if any(row['output_done'] for row in channels.values()) else None
+            for key, events in selector.select(timeout):
                 if key.fd == 0:
                     data = os.read(0, 32768)
                     if not data:
@@ -113,7 +170,10 @@ def serve(nonce):
                 channel = key.data
                 if channel not in channels:
                     continue
-                _, fd, pending = channels[channel]
+                row = channels[channel]
+                fd, pending = row['fd'], row['pending']
+                if fd != key.fd or row['output_done']:
+                    continue
                 try:
                     if events & selectors.EVENT_WRITE:
                         del pending[:os.write(fd, pending)]
@@ -124,16 +184,18 @@ def serve(nonce):
                         if output:
                             send('data', channel, base64.b64encode(output).decode('ascii'))
                         else:
-                            send('exit', channel, close(channel))
+                            end_output(row)
+                            finish(channel, row)
                 except BlockingIOError:
                     pass
                 except OSError as exc:
                     if exc.errno != errno.EIO:
                         raise
-                    send('exit', channel, close(channel))
+                    end_output(row)
+                    finish(channel, row)
     finally:
         for channel in list(channels):
-            close(channel)
+            stop(channel, report=False)
         selector.close()
 
 

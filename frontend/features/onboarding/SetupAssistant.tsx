@@ -113,7 +113,7 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
               ] as const).map(([kind,Icon,label,detail])=><button key={kind} aria-pressed={route===kind} disabled={busy} onClick={()=>{routeChosen.current=true;setRoute(kind);}}><Icon size={21}/><span><strong>{label}</strong><small>{detail}</small></span><span className="setup-radio">{route===kind&&<i/>}</span></button>)}</div></fieldset>
               {route!=='later'&&!connectNext&&<div className="setup-inline-actions"><button className="setup-secondary" disabled={busy||agentBusy} onClick={openConnection}><Terminal size={16}/>{connectionAction}</button></div>}
               {route==='ssh'&&<>
-                <p className="setup-note">{say('在原终端登录后，点击「登录完成，交由 AIMatterLab 管理」，核对账号和总工作区后确认。交接后可查看作业服务的准备进度。','Sign in in the original terminal, then let AIMatterLab manage the connection. Confirm the account and workspace path, then follow job service setup.')}</p>
+                <p className="setup-note">{say('在私有窗口完成认证后，点击「交由 AIMatterLab 管理」，核对账号和总工作区后确认。交接后可查看作业服务的准备进度。','Sign in in the original terminal, then let AIMatterLab manage the connection. Confirm the account and workspace path, then follow job service setup.')}</p>
                 {clusterGuide&&<button className="setup-secondary" data-testid="setup-resume-cluster" disabled={busy||agentBusy} onClick={()=>onVisit('resume-cluster')}><Terminal size={16}/>{say('继续集群实操','Resume cluster walkthrough')} · {clusterGuide.name}</button>}
               </>}
             </>}

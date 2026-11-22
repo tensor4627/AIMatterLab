@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 import { openNativeSsh } from '../../desktop/platform/terminal-service/native-ssh.mjs';
 
 test(
-  'native login requires a remote shell proof, separates authentication, multiplexes channels and fences loss',
+  'native login keeps MFA and the gateway menu private until handoff, then opens channels on the selected shell',
   { skip: process.platform !== 'win32', timeout: 12000 },
   async (t) => {
     const auth = [],
@@ -62,11 +62,23 @@ test(
     });
     t.after(() => link.kill());
     await wait(() => peer.readyState === 'open');
+    events.emit('data', 'Password: ');
+    link.write('fixture-password\r');
     events.emit('data', 'Verification code: ');
     link.write('fixture-response\r');
-    assert.deepEqual(consoleInput, ['fixture-response\r']);
+    assert.deepEqual(consoleInput, ['fixture-password\r','fixture-response\r']);
     assert(!received.join('').includes('fixture-response'));
-    peer.write('user@fixture:~$ ');
+    peer.write('Choose the login node\r\n1) node-a\r\n2) node-b\r\nSelection > ');
+    await wait(() => auth.join('').includes('Selection > '));
+    assert.equal(received.length,0,'the application does not type in the gateway menu');
+    link.write('2\r');
+    await wait(() => received.length===1);
+    assert.deepEqual(received,['2\r']);
+    peer.write('\r\nuser@node-b:~$ ');
+    await wait(() => auth.join('').includes('user@node-b'));
+    assert.equal(link.ready().ready,false);
+    assert.equal(received.length,1,'shell-looking output alone does not send a command');
+    const handoff=link.confirmHandoff();
     await wait(() => received.join('').includes('__AIM_SHELL_'));
     nonce = received.join('').match(/'([a-f0-9]{48})__'/)[1];
     proof = '__AIM_SHELL_' + nonce + '__';
@@ -75,24 +87,33 @@ test(
     assert.equal(link.ready().ready, false);
     assert(!received.join('').includes('exec /bin/sh'));
     peer.write('\r\n' + proof + '\r\n');
-    await wait(() => received.join('').includes('exec /bin/sh'));
+    assert.equal(await handoff,true);
+    assert.equal(link.ready().ready,true);
+    await link.check();
+    assert(!received.join('').includes('/bin/sh -c'),'handoff proves the selected shell without starting a relay');
+    assert.throws(() => link.write('late input'), /authentication_not_pending/);
+    const missing=assert.rejects(link.openChannel('printf retry',{pty:false}),/ssh_remote_terminal_unavailable/);
+    await wait(() => received.join('').includes('/bin/sh -c'));
+    peer.write('__AIM_RELAY_EXIT_'+nonce+'__\n');
+    await missing;
+    assert.equal(link.ready().ready,true,'a failed relay leaves the authenticated shell available');
+    const first = link.openChannel('printf A',{pty:false}),
+      second = link.openChannel();
+    await wait(() => received.filter(line=>line.includes('/bin/sh -c')).length===2);
     peer.write('["ready","other"]\n');
     await new Promise((r) => setTimeout(r, 15));
-    assert.equal(link.ready().ready, false);
+    assert(!received.join('').includes('["exec",'));
     peer.write('\x1b[?2004l\r' + JSON.stringify(['ready', nonce]) + '\n');
-    await wait(() => link.ready().ready);
-    assert.throws(() => link.write('late input'), /authentication_not_pending/);
+    await wait(() => received.join('').includes('["open",2,'));
+    assert(received.some(line=>line==='["exec",1,"printf A"]\n'));
+    peer.write('["opened",1,111]\n["opened",2,222]\n');
+    const [a, b] = await Promise.all([first, second]);
+    assert.notEqual(a.pid,b.pid);
     const verified = link.check();
     await wait(() => received.join('').includes('["ping",'));
     const token = received.join('').match(/\["ping","([a-f0-9-]+)"\]/)[1];
     peer.write(JSON.stringify(['pong', token]) + '\n');
     await verified;
-    const first = link.openChannel(),
-      second = link.openChannel();
-    await wait(() => received.join('').includes('["open",2,'));
-    peer.write('["opened",1,111]\n["opened",2,222]\n');
-    const [a, b] = await Promise.all([first, second]);
-    assert.notEqual(a.pid, b.pid);
     const texts = [[], []];
     a.onData((s) => texts[0].push(s));
     b.onData((s) => texts[1].push(s));
@@ -122,6 +143,6 @@ test(
     peer.destroy();
     await assert.rejects(pending, /master_unavailable/);
     assert.deepEqual(lost, ['ssh_master_unavailable']);
-    await assert.rejects(link.openChannel(), /channel_unavailable/);
+    await assert.rejects(link.openChannel(), /ssh_authentication_unconfirmed/);
   }
 );
