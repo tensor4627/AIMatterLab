@@ -1,11 +1,43 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {selectScientificFunctions,ScientificSkillContext} from "../../agent/skills/scientific-context.mjs";
+import {engineContracts} from '../../contracts/tools/engine-contracts.mjs';
+import skillMap from '../../agent/skills/scientific-skill-map.json' with {type:'json'};
 test('named cluster installations and service repairs select their own guidance',()=>{
  for(const text of ['在这个集群上安装 GPUMD','Install CP2K on my cluster','在计算资源上从零配置 MySolver']){
   assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['cluster.resource-tools']);
  }
  assert.deepEqual(selectScientificFunctions({text:'集群缺少作业服务的 Python 环境，请修复作业服务'}),['cluster.connection-setup']);
 });
-test('Every implemented engine has an explicit functional route and never selects installation',()=>{for(const engine of ['pydyn.md','gpumd.md','pydyn.sampling','gpumd.sampling','gpumd.neb','pygas.build','bias.validate','nep.train','nep.eval','nep.analyze','hotpp.train','hotpp.eval','hotpp.export','pygas.reweight','pygas.opes-reweight','trajectory.density']){const ids=selectScientificFunctions({parameters:{engine},hasWorkflow:true});assert.equal(ids.length,2);assert.equal(ids[0],'workflow.orchestrate');assert(!ids.some(id=>/install|toolchain|setup/.test(id)));}});
+test('Every contracted scientific engine has an explicit functional route and never selects installation',()=>{
+ for(const engine of Object.keys(engineContracts.engines)){
+  const ids=selectScientificFunctions({parameters:{engine},hasWorkflow:true});
+  assert.equal(ids.length,2,engine);
+  assert.equal(ids[0],'workflow.orchestrate');
+  assert(skillMap.functions.find(route=>route.id===ids[1])?.engines?.includes(engine),engine+' selected '+ids[1]);
+  assert(!ids.some(id=>/install|toolchain|setup/.test(id)),engine);
+ }
+});
+
+test('Requested structure imports and creation keep their guidance when a workflow already has an engine',()=>{
+ for(const [text,route] of [
+  ['请从 Materials Project 导入 mp-30','structure.materials-project'],
+  ['Search Materials Project for copper','structure.materials-project'],
+  ['在这个 GPUMD MD 工作流中，先从 Materials Project 导入 mp-30','structure.materials-project'],
+  ['用 ASE 生成铜结构','structure.ase'],
+  ['Build a copper unit cell using ASE','structure.ase'],
+  ['先用 ASE 创建晶胞，供后续 GPUMD 分子动力学使用','structure.ase'],
+ ]){
+  assert.deepEqual(selectScientificFunctions({text}),[route],text);
+  const workflow={text,parameters:{engine:'gpumd.md'},hasWorkflow:true};
+  assert.deepEqual(selectScientificFunctions(workflow),['workflow.orchestrate',route],text);
+  assert.deepEqual(selectScientificFunctions({...workflow,manualFunction:'md.pydyn'}),['workflow.orchestrate','md.pydyn'],text);
+ }
+});
+
+test('Mentioning an existing input keeps the current engine guidance',()=>{
+ for(const text of ['继续用 mp-30 作为初始结构','Use the previously imported Materials Project structure','沿用已有的 ASE 晶胞继续当前任务','沿用 ASE 已生成的晶胞','用 ASE 生成的铜结构跑 GPUMD MD','无需导入 mp-30，继续已有任务','用 GPUMD 生成分子动力学轨迹']){
+  assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['md.gpumd'],text);
+ }
+});
 test('Number density selects the built-in trajectory engine without requiring shared pyGAS guidance',()=>{
  for(const text of ['计算轨迹的原子数密度','number density from trajectory frames','trajectory.density'])assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['analysis.number-density']);
  assert.deepEqual(selectScientificFunctions({text:'GPUMD MD with a specified mass density'}),['md.gpumd']);

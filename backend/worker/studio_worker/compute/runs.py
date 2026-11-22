@@ -341,7 +341,7 @@ class RunsMixin:
         self.authorize(run)
         if run["status"] == "unknown":
             self.reconcile_run(run)
-        with self.store.lock:
+        with self.store.database_access():
             try:
                 # Shared with the supervisor's final check AND child creation.
                 # Once committed terminal, any late supervisor is fenced out.

@@ -47,6 +47,23 @@ class ClusterLifecycle(unittest.TestCase):
         submitted=dispatch(self.service,'POST','/api/cluster/submit',{'run_id':run['id']},False)
         self.assertEqual(submitted['status'],'queued')
 
+    def test_only_desktop_revision_can_set_parent_ancestry(self):
+        prepare, revise = '/api/cluster/prepare', '/api/cluster/revise'
+        original = dispatch(self.service, 'POST', prepare, {'spec':self.spec()}, False)
+        identifier = original['id']
+        self.assertEqual(original['status'], 'draft')
+        for admin in (False, True):
+            with self.subTest(admin=admin), self.assertRaisesRegex(ValueError, 'Revision identity is worker-owned'):
+                dispatch(self.service, 'POST', prepare, {'spec':self.spec(revision_of=identifier, idempotency_key='forged')}, admin)
+        with self.assertRaisesRegex(ValueError, 'Unsupported revision field'):
+            dispatch(self.service, 'POST', revise, {'run_id':identifier, 'changes':{'revision_of':'forged-parent'}}, True)
+        self.assertNotIn('superseded_by', self.cluster.raw(identifier))
+        self.assertEqual([run['id'] for run in self.cluster.store.list('cluster-run')], [identifier])
+        revised = dispatch(self.service, 'POST', revise, {'run_id':identifier, 'changes':{'name':'Reviewed draft'}}, True)
+        self.assertEqual(revised['revision_of'], identifier)
+        self.assertEqual(self.cluster.raw(identifier)['superseded_by'], revised['id'])
+        self.assertFalse(FakeSSH.calls)
+
     def test_private_auth_and_tunnel_endpoints_are_admin_only_not_mcp_tools(self):
         from studio_worker.server import TOOL_ROUTES
         for group, operations in (('auth', ('plan','start','read','input','resize','finish')),

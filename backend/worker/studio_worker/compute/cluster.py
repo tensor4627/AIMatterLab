@@ -38,6 +38,7 @@ TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+-]+$")
 LSF_QUEUE_TOKEN = re.compile(r"^[A-Za-z0-9_.@:/+!-]+$")
 MARKER = "__STUDIO_JSON__"
 TERMINAL = ("succeeded", "failed", "cancelled")
+_SUBMISSION_REPLY_UNAVAILABLE = "Submission reply unavailable; reconcile only, never resubmit"
 
 TRANSFER_CHUNK = 2 * 1024 * 1024
 TRANSFER_TOTAL = 128 * 1024 * 1024
@@ -567,7 +568,21 @@ class Clusters:
         skill_root.mkdir(parents=True,exist_ok=True)
         skill_fields={k:p.get(k) for k in ("id","name","version","scheduler","queue","limits","lsf_memory_scope","environment")}
         if "queue_targets" in p:skill_fields["queue_targets"]=p["queue_targets"]
-        source="# Cluster submission skill\n\n"+json.dumps(skill_fields,indent=2)+"\n\nUse only registered cluster IDs; never put SSH addresses, ports, keys or model proxy credentials in prompts or scripts. Probe the login node, then confirm queue/resource semantics with the user. Queue visibility never grants permission. For opt-in queue targets use the saved project cluster_queue_policies and exact profile version; order applies to new submissions only. Within explicitly approved paid conditions and limits, reuse project authorization without a repeated paid permission prompt. Unknown or changed conditions require review. Use present_task to show workflow and parameters. Within existing project authorization and user delegation, prepare immutable inputs, submit intentional new attempts, inspect results and repair failures; scientific review remains optional evidence. Scientific validation executes on allocated compute nodes before the engine; never treat login-node discovery as science validation. Do not change project authorization. Never resubmit an unknown run; reconcile receipts and scheduler job identity. Read bounded logs and assets through cluster tools.\n\n"+str(p.get("notes",""))
+        source = (
+            "# Cluster submission skill\n\n" + json.dumps(skill_fields, indent=2) + "\n\n"
+            "Use only registered cluster IDs. Keep SSH addresses, ports, keys and model proxy credentials out of prompts and scripts. "
+            "Probe the login node for connection and scheduler observations. Confirm queue and resource semantics with the user. "
+            "Queue visibility never grants permission. For opt-in queue targets use the saved project cluster_queue_policies and exact "
+            "profile version. Order applies to new submissions only. Within explicitly approved paid conditions and limits, reuse project "
+            "authorization without a repeated paid permission prompt. Unknown or changed conditions require review. "
+            "Use present_task to record workflow and parameters when this conversation owns the workflow and the tool is advertised. "
+            "In ordinary chat, use the available compute tools for a clearly delegated independent job under current project and resource grants. "
+            "Prepare immutable inputs, submit intentional new attempts, inspect results and repair failures within that delegation. "
+            "Before launch, the compute node enforces frozen input identity and applicable bound-tool, required import and serialized-bias "
+            "compatibility checks. Advisory scientific findings are recorded for review. Do not change project authorization. "
+            "For an unknown run, reconcile receipts and scheduler job identity without resubmitting. Read bounded logs and assets through "
+            "cluster tools.\n\n" + str(p.get("notes", ""))
+        )
         (skill_root/"SKILL.md").write_text(source,encoding="utf8")
         self.store.put("cluster-version",{**p,"id":p["id"]+"-v"+str(p["version"])})
         self.store.put("cluster", p)
@@ -876,12 +891,40 @@ print('__STUDIO_JSON__'+json.dumps(out))
         with self.prepare_lock:
             return self._prepare({**spec, 'inputs':{k:v['path'] for k,v in inputs.items()}}, bound=bound)
 
-    def _prepare(self, spec, *, bound=None):
+    @staticmethod
+    def _revision_input_maps(run):
+        remote = {asset["name"]: asset["source"] for asset in run["snapshots"]
+                  if asset.get("source_kind") == "remote"}
+        remote.update(run.get("remote_inputs", {}))
+        local = run.get("local_inputs", {name: source for name, source in run["inputs"].items() if name not in remote})
+        return local, remote
+
+    @staticmethod
+    def _copy_input(source, target, budget, expected=None):
+        if not source.is_file():
+            raise ValueError("Immutable input snapshot unavailable" if expected is not None else "Input unavailable")
+        size = source.stat().st_size
+        if size > budget:
+            raise ValueError("Input total exceeds transfer bound")
+        before = digest(source)
+        if expected is not None and (before != expected["sha256"] or size != expected.get("size", size)):
+            raise ValueError("Immutable input snapshot changed")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        if target.stat().st_size != size or digest(target) != before or source.stat().st_size != size or digest(source) != before:
+            raise ValueError("Local input changed while creating snapshot")
+        return before, size
+
+    def _prepare(self, spec, *, bound=None, parent=None):
         spec = dict(spec)
         if 'bound_invocation' in spec:
             raise ValueError('Invocation bindings are worker-owned')
         if bound is not None:
             spec['bound_invocation'] = bound
+        if "revision_of" in spec:
+            raise ValueError("Revision identity is worker-owned; use the desktop revision route")
+        if parent is not None:
+            spec["revision_of"] = parent["id"]
         if any(key in spec for key in ("queue_target_snapshot", "queue_policy_snapshot", "queue_policy_digest", "queue_profile_version")):
             raise ValueError("Queue selection snapshots are worker-owned")
         local_inputs = spec.get("inputs", {})
@@ -924,22 +967,41 @@ print('__STUDIO_JSON__'+json.dumps(out))
         p, r, selected_target, selected_policy = self.select_queue_target(project, p, spec)
         if (spec["engine"].endswith("sampling") or spec["engine"] == "bias.validate") and r["gpus"] < 1:
             raise ValueError("Bias target validation requires a GPU allocation")
-        # Adapter and compute-node gates must see the complete run filename map.
-        spec["inputs"] = {**local_inputs, **remote_inputs}
-        command = bound['argv'] if bound else PlanningAdapter(spec["engine"]).prepare(spec, p["environment"])
         roots = project["policy"]["input_roots"] + [str(self.service.root/"projects"/project["id"]/"inputs")]
         if bound:
             roots = [value['path'] for value in bound['inputs'].values()]
-        parent = None
-        if spec.get("revision_of"):
-            parent = self.raw(spec["revision_of"])
+        inherited = {}
+        if parent is not None:
             if parent["project_id"] != project["id"] or parent["status"] not in ("draft", "ready") or parent.get('managed_child'):
                 raise PermissionError("Only an unsubmitted run in the same project may be revised")
+            if parent.get("superseded_by"):
+                raise PermissionError("The revision parent changed or was submitted; reload its current run")
             roots.append(parent["directory"])
+            parent_local, parent_remote = self._revision_input_maps(parent)
+            simulation = Path(parent["directory"]) / "simulation"
+            same_target = parent["cluster_id"] == p["id"] and parent["cluster_snapshot"]["version"] == p["version"]
+            for asset in parent["snapshots"]:
+                name = asset["name"]
+                source = simulation / name
+                if name in local_inputs and name in parent_local and local_inputs[name] in (
+                        parent_local[name], asset["source"], str(source), f"{parent['directory']}/simulation/{name}"):
+                    local_inputs[name] = parent_local[name]
+                elif not (same_target and name in remote_inputs and name in parent_remote and remote_inputs[name] == parent_remote[name]):
+                    continue
+                if source.is_symlink():
+                    raise ValueError("Immutable input snapshot changed")
+                inherited[name] = (contained(source, [simulation]), asset)
+        # Adapter and compute-node gates must see the complete run filename map.
+        spec["inputs"] = {**local_inputs, **remote_inputs}
+        command = bound['argv'] if bound else PlanningAdapter(spec["engine"]).prepare(spec, p["environment"])
         # Private custom primitives are local-only in this generation. Reject
         # before any archive, local snapshot or SSH upload; do not imply a remote
         # private execution/access contract has been verified.
-        local_paths=[contained(src,roots)for src in local_inputs.values()]
+        local_sources = {name: contained(src, roots) for name, src in local_inputs.items() if name not in inherited}
+        local_paths = list(local_sources.values())
+        for name in local_inputs.keys() & inherited.keys():
+            source, asset = inherited[name]
+            local_paths.extend((source, Path(asset["source"])))
         if private_copy_rows(current_rows(self.service),local_paths,self.store.runs(),self.service.root):raise ValueError('Private custom CV source cannot be copied to a remote task before a remote access contract is implemented')
         identifier = secrets.token_hex(12)
         directory = self.service.root / "cluster-runs" / identifier
@@ -947,28 +1009,23 @@ print('__STUDIO_JSON__'+json.dumps(out))
         snapshots, total = [], 0
         persisted = False
         try:
-            for name, src in local_inputs.items():
-                source = contained(src, roots)
-                if not source.is_file():
-                    raise ValueError("Input unavailable")
-                size = source.stat().st_size
-                if size > TRANSFER_TOTAL - total:
-                    raise ValueError("Input total exceeds transfer bound")
-                before = digest(source)
-                dst = directory/"simulation"/name
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, dst)
-                if dst.stat().st_size != size or digest(dst) != before or source.stat().st_size != size or digest(source) != before:
-                    raise ValueError("Local input changed while creating snapshot")
-                dst.chmod(0o444)
-                total += size
-                snapshots.append({"name":name, "source":str(source), "source_kind":"local", "sha256":before, "size":size})
-            for name, source in remote_inputs.items():
-                dst = directory/"simulation"/name
-                meta = self._download(p, source, p["read_roots"], dst, TRANSFER_TOTAL-total)
-                dst.chmod(0o444); total += meta["size"]
-                snapshots.append({"name":name, "source":source, "source_kind":"remote", "cluster_id":p["id"],
-                                  "sha256":meta["sha256"], "size":meta["size"], "remote_identity":meta["identity"]})
+            for name in (*local_inputs, *remote_inputs):
+                dst = directory / "simulation" / name
+                if name in inherited:
+                    source, asset = inherited[name]
+                    _, size = self._copy_input(source, dst, TRANSFER_TOTAL - total, asset)
+                    snapshot = {**asset, "size":size, "source_kind":"remote" if name in remote_inputs else "local"}
+                elif name in local_sources:
+                    source = local_sources[name]
+                    sha256, size = self._copy_input(source, dst, TRANSFER_TOTAL - total)
+                    snapshot = {"name":name, "source":str(source), "source_kind":"local", "sha256":sha256, "size":size}
+                else:
+                    source = remote_inputs[name]
+                    meta = self._download(p, source, p["read_roots"], dst, TRANSFER_TOTAL - total)
+                    snapshot = {"name":name, "source":source, "source_kind":"remote", "cluster_id":p["id"],
+                                "sha256":meta["sha256"], "size":meta["size"], "remote_identity":meta["identity"]}
+                total += snapshot["size"]
+                snapshots.append(snapshot)
             run = {**spec, "id":identifier, "kind":"cluster-run", "name":spec.get("name",spec["engine"]),
                    "request_hash":fingerprint, "directory":str(directory), "snapshots":snapshots, "command":command,
                    "local_inputs":local_inputs, "resources":r, "cluster_snapshot":p, "status":"draft", "validation":{"status":"not_run"},
@@ -990,6 +1047,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
                             current_parent.get("nonce") != parent.get("nonce") or current_parent["snapshots"] != parent["snapshots"]):
                         raise PermissionError("The revision parent changed or was submitted; reload its current run")
                     parent = current_parent
+                for snapshot in snapshots:
+                    (directory / "simulation" / snapshot["name"]).chmod(0o444)
                 atomic_json(directory/"run.json", run)
                 if parent:
                     parent = {**parent, "superseded_by": identifier, "updated_at": time.time()}
@@ -1092,17 +1151,19 @@ print('__STUDIO_JSON__'+json.dumps(out))
             self.save(current,status="ready",validation={"status":"passed","scope":"local immutable inputs and scheduler resource contract only; scientific checks run on execution node"})
         return self.run(identifier)
 
-    def revise(self,identifier,changes):
-        parent=self.raw(identifier)
-        if parent.get("managed_child") or parent.get("bound_invocation"):
-            raise PermissionError("Use the owning schedule to edit this operation")
-        allowed=("name","engine","max_seconds","resources","inputs","remote_inputs","directory_name","parameters")
-        if any(k not in allowed for k in changes):raise ValueError("Unsupported revision field")
-        spec={k:parent[k] for k in ("project_id","cluster_id",*allowed) if k in parent}
-        spec["inputs"] = dict(parent.get("local_inputs", {k:v for k,v in parent["inputs"].items() if k not in parent.get("remote_inputs", {})}))
-        spec.update(changes)
-        spec.update(revision_of=identifier,idempotency_key=secrets.token_hex(16))
-        return self.prepare(spec)
+    def revise(self, identifier, changes):
+        with self.prepare_lock:
+            parent = self.raw(identifier)
+            if parent.get("managed_child") or parent.get("bound_invocation"):
+                raise PermissionError("Use the owning schedule to edit this operation")
+            allowed = ("name", "engine", "max_seconds", "resources", "inputs", "remote_inputs", "directory_name", "parameters")
+            if any(key not in allowed for key in changes):
+                raise ValueError("Unsupported revision field")
+            spec = {key:parent[key] for key in ("project_id", "cluster_id", *allowed) if key in parent}
+            spec["inputs"], spec["remote_inputs"] = self._revision_input_maps(parent)
+            spec.update(changes)
+            spec["idempotency_key"] = secrets.token_hex(16)
+            return self._prepare(spec, parent=parent)
 
     def archive(self, r):
         if r.get("managed_child"):
@@ -1278,7 +1339,7 @@ print('__STUDIO_JSON__'+json.dumps(record))
                 # A monitor may already have reconciled the scheduler receipt
                 # while the submission reply was delayed or lost.
                 if current["status"]=="unknown" and not current.get("job_id") and not current.get("exit"):
-                    self.save(current,error="Submission reply unavailable; reconcile only, never resubmit")
+                    self.save(current,error=_SUBMISSION_REPLY_UNAVAILABLE)
         return self.run(identifier)
 
     def poll(self, identifier, *, managed=None, timeout=None):
@@ -1354,7 +1415,11 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 if (state=="CANCELLED" or result.get("cancelled_by_owner") is True) and (receipt or {}).get("exit_code")!=0:
                     status="cancelled"
                 verified = result.get("identity_verified") is True
-                self.save(current,status=status,job_id=result.get("job_id") or current["job_id"],scheduler_state=state,connection_action=None,
+                job_id = result.get("job_id") or current["job_id"]
+                # Recovering the original ID confirms submission even if its queue state is unknown.
+                if job_id and current.get("error") == _SUBMISSION_REPLY_UNAVAILABLE:
+                    current.pop("error")
+                self.save(current,status=status,job_id=job_id,scheduler_state=state,connection_action=None,
                           scientific_validation=validation,execution_check=result.get('execution_check',current.get('execution_check')),exit=receipt,identity_verified=verified,
                           observed_at=time.time() if verified or receipt else current.get('observed_at'))
         except Exception as error:
@@ -1368,7 +1433,9 @@ print('__STUDIO_JSON__'+json.dumps(out))
                     if isinstance(error, AuthError):
                         changes['connection_action'] = {'kind': 'authenticate_original_run',
                                                         'code': 'needs_human_auth', 'runId': r['id']}
-                self.save(current,status="unknown",error="SSH or scheduler state unavailable; no resubmission",**changes)
+                if current.get("error") != _SUBMISSION_REPLY_UNAVAILABLE:
+                    changes["error"] = "SSH or scheduler state unavailable; no resubmission"
+                self.save(current,status="unknown",**changes)
         return self.run(identifier)
 
     def cancel(self, identifier, *, managed=None, timeout=None, require_known=False):

@@ -20,10 +20,14 @@
 这项回归适用于每个版本标签，包括开发版和内测版。准备标签的维护者在本版 `docs/releases/` 记录中填写以下三项结果。
 
 1. **核对当前操作。** 沿每份内置 SKILL.md 及其引用，检查科学功能目录、系统提示和逐轮提示。涉及按钮时从当前窗口入口走到对应操作，写明何时出现。涉及工具时对照实际名称、参数、返回字段和授权范围。检查普通聊天、已有工作流与显式共享终端各自的入口，也检查恢复旧对话后的新提示。源码版本有变的科学参考需核对相应解析器或声明，记录适用版本。把有变化的指引和已复核可继续使用的指引分别记入版本记录。
-2. **运行源码回归。** 在准备打标签的源码上运行下面的命令。检查覆盖产品称呼、已登记引擎和工具、代表性界面控件、产品自有源码引用的路径和摘要，以及所有内置文档能否通过对应路由读取。版本标签的 GitLab 流水线会独立重跑源码检查和路由测试。外部工具及个人技能按实际登记和共享范围处理。
+2. **运行源码回归。** 在准备打标签的源码上运行下面的命令。`python3` 表示 Python 3 解释器，Windows 上也可使用 `py -3`。检查覆盖契约副本、开发者分发 ZIP、文档链接、引擎与技能路由、代表性界面控件、产品源码引用摘要及内置文档实际读回。GitLab 在版本标签、相关合并请求及默认分支的相关推送上运行这些检查。外部工具及个人技能按实际登记和共享范围处理。
 
    ```powershell
+   node scripts/sync-tool-contracts.mjs --check
+   python3 scripts/package-developer-kit.py --check
+   node scripts/check-doc-links.mjs
    node scripts/check-bundled-guidance.mjs --source
+   node --test tests/agent/scientific-context.test.mjs tests/agent/scientific-skill-router.test.mjs tests/agent/skill-context.test.mjs tests/agent/harness-guidance.test.mjs tests/contracts/engine-enum-consistency.test.mjs
    ```
 
 3. **复核待发布成品。** Windows 打包的 `afterPack` 会运行以下检查。再对本版安装器和便携 ZIP 分别隔离提取，在每份包含 `resources/` 的应用目录运行同一命令。若按需提取，须包含 `app.asar`、`app.asar.unpacked/worker/`、`studio-skills/`、`studio-dsh/dsh-policy.mjs` 以及 `studio-tools/localize-skill.mjs`，并保留它们在 `resources/` 下的相对位置。保留版本、程序资源和技能文件摘要、路由数、覆盖文档数。检查从该包 ASAR 提取并加载实际读取模块，核对外置技能目录、DeepSeek 策略和本地化脚本。混合路由先验证未共享时的结果，再用隔离的上游公开技能样本验证内置正文和引用。若要验证实际第三方技能内容，另用明确登记的源码核对，并记录范围。

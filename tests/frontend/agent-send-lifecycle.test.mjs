@@ -53,9 +53,55 @@ test('loading and failed conversation never display previous messages; explicit 
  try{await h.flush();assert.deepEqual(messages(h).map(message=>message.text),['History A']);h.type('A exact draft');h.render({sessionSelection:{nonce:'B',conversation:conversation('codex','B')}});assert.equal(messages(h).length,0,'even the pre-effect render must hide the previous owner');await h.flush();h.type('B exact draft');assert.equal(messages(h).length,0);assert(h.find(node=>node.props?.['data-testid']==='agent-history-state'));failed=true;gate.reject(Error('selected history unavailable'));await h.flush();assert.equal(messages(h).length,0);assert.equal(h.textarea().props.value,'B exact draft');h.click('agent-history-retry');await h.flush();assert.deepEqual(messages(h).map(message=>message.text),['History B']);assert.equal(h.textarea().props.value,'B exact draft');h.render({sessionSelection:{nonce:'A-return',conversation:conversation('codex','A')}});await h.flush();assert.equal(h.textarea().props.value,'A exact draft');assert.equal(rpcCalls(h,'turn/start').length,0);}finally{h.unmount();}
 });
 
-test('retry after provider-switch failure selects the intended provider before reading its history',async()=>{
- let failed=false;const h=agentHarness({props:{sessionSelection:{nonce:'A',conversation:conversation('codex','A')}},override:(method,data,standard)=>{if(method==='agent.connect'&&data.provider==='qwen'&&!failed){failed=true;throw Error('switch acknowledgement missing');}return standard(method,data);}});
- try{await h.flush();h.render({sessionSelection:{nonce:'B',conversation:conversation('qwen','B')}});await h.flush();assert(h.find(node=>node.props?.['data-testid']==='agent-history-retry'));h.click('agent-history-retry');await h.flush();assert.equal(rpcCalls(h,'thread/read').at(-1).data.provider,'qwen');assert.equal(rpcCalls(h,'thread/read').at(-1).data.params.threadId,'B');assert.equal(rpcCalls(h,'turn/start').length,0);}finally{h.unmount();}
+test('retry after a cross-provider local history failure reads only the selected API conversation',async()=>{
+ let failed=false;const h=agentHarness({props:{sessionSelection:{nonce:'A',conversation:conversation('codex','A')}},override:(method,data,standard)=>{if(method==='agent.rpc'&&data.method==='thread/read'&&data.provider==='qwen'&&!failed){failed=true;throw Error('local record unavailable');}return standard(method,data);}});
+ try{await h.flush();const before=h.calls.length;h.render({sessionSelection:{nonce:'B',conversation:conversation('qwen','B')}});await h.flush();h.click('agent-history-retry');await h.flush();assert.deepEqual(h.calls.slice(before).map(({method,data})=>[method,data.method,data.provider,data.params.threadId]),[['agent.rpc','thread/read','qwen','B'],['agent.rpc','thread/read','qwen','B']]);}finally{h.unmount();}
+});
+
+for(const [provider,valid]of [['qwen',false],['compatible',true]])test(provider+' history is offline and Send checks the original profile before continuing',async()=>{
+ const saved=conversation(provider,'historic'),original='api:original:fixture',other='api:other:fixture',storage=memoryStorage();
+ storage.setItem('studio.model.'+provider,other);
+ const h=agentHarness({storage,props:{sessionSelection:{nonce:'historic',conversation:saved}},override:(method,data,standard)=>{
+  if(method==='agent.connect'&&!valid)throw Error('服务商配置不存在或已移除');
+  if(method==='agent.rpc'&&data.method==='thread/read')return {thread:{id:'historic',provider,turns:[{items:[{id:'answer',type:'agentMessage',text:'Saved answer [redacted]'}]}]}};
+  if(method==='agent.rpc'&&data.method==='thread/resume')return {thread:{id:'historic'},model:original};
+  if(method==='agent.rpc'&&data.method==='model/list')return {data:[{model:other,profileId:'other',isDefault:true},{model:original,profileId:'original'}]};
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();assert.deepEqual(messages(h).map(v=>v.text),['Saved answer [redacted]']);
+  assert(h.find(node=>node.props?.['data-testid']==='agent-local-history'));
+  assert(!h.calls.some(call=>['agent.connect','agent.account'].includes(call.method)||call.method==='agent.rpc'&&call.data.method!=='thread/read'));
+  h.type('Continue the same conversation');assert.equal(sendButton(h).props.disabled,false);h.send();await h.flush();
+  assert.deepEqual(h.calls.filter(call=>call.method==='agent.connect').map(call=>call.data),[{provider,repairTools:false,threadId:'historic'}]);
+  if(valid){assert.deepEqual(starts(h).map(call=>[call.data.params.threadId,call.data.params.model]),[['historic',original]]);assert.equal(h.textarea().props.value,'');}
+  else{assert.equal(starts(h).length,0);assert.equal(h.textarea().props.value,'Continue the same conversation');assert.match(JSON.stringify(h.find(node=>node.props?.className==='agent-send-notice')),/配置不存在或已移除/);}
+  assert.equal(messages(h)[0].text,'Saved answer [redacted]');assert.deepEqual(h.errors,[]);
+ }finally{h.unmount();}
+});
+
+test('a late local API history read cannot replace a different selected provider or its draft',async()=>{
+ const original=deferred(),h=agentHarness({props:{sessionSelection:{nonce:'qwen',conversation:conversation('qwen','same-id')}},override:(method,data,standard)=>{
+  if(method==='agent.rpc'&&data.method==='thread/read')return data.provider==='qwen'?original.promise:{thread:{id:'same-id',provider:'compatible',turns:[{items:[{id:'second',type:'agentMessage',text:'Second provider history'}]}]}};
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();h.render({sessionSelection:{nonce:'compatible',conversation:conversation('compatible','same-id')}});await h.flush();h.type('Second provider draft');
+  original.resolve({thread:{id:'same-id',provider:'qwen',turns:[{items:[{id:'first',type:'agentMessage',text:'Stale provider history'}]}]}});await h.flush();
+  assert.deepEqual(messages(h).map(v=>v.text),['Second provider history']);assert.equal(h.textarea().props.value,'Second provider draft');assert.equal(starts(h).length,0);
+ }finally{h.unmount();}
+});
+
+test('switching chats during on-demand API connection preserves the draft and cancels the pending send',async()=>{
+ const connection=deferred(),first=conversation('qwen','first'),second=conversation('qwen','second');
+ const h=agentHarness({props:{sessionSelection:{nonce:'first',conversation:first}},override:(method,data,standard)=>method==='agent.connect'?connection.promise:standard(method,data)});
+ try{
+  await h.flush();h.type('Original draft');h.send();await h.flush();
+  h.render({sessionSelection:{nonce:'second',conversation:second}});await h.flush();h.type('Second draft');
+  connection.resolve({tools:{status:'ready',count:0}});await h.flush();assert.equal(h.textarea().props.value,'Second draft');
+  h.render({sessionSelection:{nonce:'first-return',conversation:first}});await h.flush();assert.equal(h.textarea().props.value,'Original draft');
+  assert.equal(rpcCalls(h,'thread/resume').length,0);assert.equal(starts(h).length,0);
+ }finally{h.unmount();}
 });
 
 test('long discussion begins collapsed with an explicit primary append action',async()=>{

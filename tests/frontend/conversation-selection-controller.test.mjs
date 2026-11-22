@@ -23,6 +23,14 @@ test('saved selection waits for settings, main ownership and worker observation 
  assert.deepEqual(h.calls.map(call=>call[0]),['beforeSelection','clearIntent','beginWorkerGate','onSelected']);
 });
 
+test('an acknowledged local API selection makes history available while compute is offline',async()=>{
+ const metadata={...conversation('qwen','offline'),taskId:'saved-workflow'},worker=deferred();
+ const h=conversationSelectionHarness({ports:{invoke:async()=>metadata,observeWorker:()=>worker.promise}});
+ const pending=h.current().chooseConversation(metadata);
+ await new Promise(resolve=>setImmediate(resolve));h.render();assert.equal(h.current().sessionSelection.conversation,metadata);
+ worker.resolve(false);await pending;h.render();assert.equal(h.current().sessionSelection.conversation,metadata);
+});
+
 test('navigation or unmount while settings are pending prevents a main-process selection',async()=>{
  for(const invalidate of [h=>h.current().conversationSelectionSeq.current++,h=>h.unmount()]){
   const ready=deferred(),h=conversationSelectionHarness({ports:{settingsReady:{current:ready.promise}}});

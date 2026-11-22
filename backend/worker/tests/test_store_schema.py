@@ -1,10 +1,17 @@
+import json
+import os
+import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
-import json
+from contextlib import contextmanager
 from pathlib import Path
+from select import select
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from studio_worker.infrastructure import store as store_module
 from studio_worker.infrastructure.store import SCHEMA_VERSION, Store
 
 
@@ -27,6 +34,99 @@ class StoreSchemaTest(unittest.TestCase):
         self.addCleanup(reopened.db.close)
         self.assertEqual(reopened.schema_version, SCHEMA_VERSION)
         self.assertEqual(reopened.run("run-a")["status"], "draft")
+
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux flock")
+    def test_wsl1_reopens_clean_wal_and_preserves_legacy_state(self):
+        root = Path(self.tmp.name) / "service"
+        with patch.object(store_module, "_uses_wsl1_database_lock", return_value=False):
+            legacy = Store(root)
+        try:
+            self.assertEqual(legacy.db.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+            project = legacy.put("project", {"id": "project", "policy": {"engines": ["pydyn.md"]}})
+            run = legacy.add_run({**_run(), "status": "queued"})
+            claimed = legacy.claim_launch(run, {"token": "original-owner"})
+            events = legacy.events()
+            wal_files = [root / filename for filename in ("worker.sqlite-wal", "worker.sqlite-shm")]
+            legacy.db.execute("BEGIN IMMEDIATE")
+            original = [path.read_bytes() for path in wal_files]
+            with patch.object(store_module, "_uses_wsl1_database_lock", return_value=True):
+                with self.assertRaisesRegex(sqlite3.OperationalError, "live or unrecovered WAL"):
+                    Store(root)
+            self.assertEqual([path.read_bytes() for path in wal_files], original)
+            legacy.db.rollback()
+        finally:
+            legacy.db.close()
+        with patch.object(store_module, "_uses_wsl1_database_lock", return_value=True):
+            reopened = Store(root)
+        self.addCleanup(reopened.db.close)
+        with reopened.database_access():
+            self.assertEqual(reopened.db.execute("PRAGMA journal_mode").fetchone()[0], "delete")
+            self.assertEqual(reopened.db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(reopened.schema_version, SCHEMA_VERSION)
+        self.assertEqual(reopened.get("project", "project"), project)
+        self.assertEqual(reopened.run("run-a"), claimed)
+        self.assertEqual(reopened.events(), events)
+
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux flock")
+    def test_wsl1_serializes_worker_and_supervisor_access_and_recovers_after_exit(self):
+        root = Path(self.tmp.name) / "service"
+        with patch.object(store_module, "_uses_wsl1_database_lock", return_value=True):
+            store = Store(root)
+        self.addCleanup(store.db.close)
+        environment = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+        writer_script = r"""
+import os
+import sqlite3
+import sys
+from studio_worker.infrastructure import store
+
+store._uses_wsl1_database_lock = lambda: True
+print("ready", flush=True)
+if sys.stdin.readline() != "write\n":
+    sys.exit(1)
+
+try:
+    with store.supervisor_connection(sys.argv[1], timeout=.2) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("INSERT INTO events(run,time,data) VALUES ('supervisor',1,'{}')")
+        if sys.argv[2] == "crash":
+            os._exit(23)
+except sqlite3.OperationalError as exc:
+    print(str(exc))
+    sys.exit(2)
+"""
+
+        @contextmanager
+        def start_writer(mode):
+            command = [sys.executable, "-S", "-c", writer_script, str(root), mode]
+            with subprocess.Popen(command, env=environment, text=True, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                try:
+                    self.assertTrue(select([process.stdout], [], [], 10)[0], "SQLite writer startup timed out")
+                    ready = process.stdout.readline()
+                    if ready != "ready\n":
+                        stdout, stderr = process.communicate(timeout=5)
+                        self.fail(f"SQLite writer failed to initialize: {ready + stdout!r}, {stderr!r}")
+                    yield process
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+
+        def run_writer(process, expected_code, expected_stdout=""):
+            stdout, stderr = process.communicate("write\n", timeout=5)
+            self.assertEqual((process.returncode, stdout.strip()), (expected_code, expected_stdout), stderr)
+
+        # The guard also covers the interval between SQLite transactions.
+        with start_writer("commit") as process, store.database_access():
+            run_writer(process, 2, "database is locked")
+            store.event("worker", {"state": "retained"})
+
+        with start_writer("crash") as process:
+            run_writer(process, 23)
+        self.assertEqual([event["run"] for event in store.events()], ["worker"])
+        with start_writer("commit") as process:
+            run_writer(process, 0)
+        self.assertEqual([event["run"] for event in store.events()], ["worker", "supervisor"])
 
     def test_add_run_writes_state_event_in_the_same_transaction(self):
         store = Store(Path(self.tmp.name) / "service")

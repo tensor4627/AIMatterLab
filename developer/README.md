@@ -31,6 +31,8 @@ node scripts/tool-configuration-integration.mjs --repo-root "$PWD" \
 
 它用于开发者的软件接入工作，与 AIMatterLab 中用于日常计算规划和执行的科学 skill 分开存放。可直接分发整个 skill 目录或 [ZIP](skills/studio-tool-integration.zip)；完整 schema、纯声明校验器、注册约束、引擎契约副本和小型 CPU 工程示例均在目录内，不需要访问 AIMatterLab 仓库才能理解交付格式与内部声明契约。
 
+仓库维护者在更新接入契约后，先运行 `node scripts/sync-tool-contracts.mjs` 同步源文件，再用 Python 3 运行 `scripts/package-developer-kit.py` 生成 ZIP。CI 使用 `--check` 只读核对 ZIP 与源文件。[生成脚本](../scripts/package-developer-kit.py)
+
 真实支持跨工具接口时，按 [联用接口与运行环境交付](skills/studio-tool-integration/references/runtime-composition.md) 提供接口、加载模式、依赖与最小联合用例，重点包括力场—MD 和增强采样—MD。开发者交付事实和使用指导；AIMatterLab 为用户所选完整组配置兼容环境并验收，三方组合不能由两个配对测试推定。当前使用既有 `guidance.configuration` 和测试映射承载联用材料，不新增 v1 机器字段；自动解析和配置科学工具组仍待实现。
 
 ## 内部工具（AimLab Tools）声明

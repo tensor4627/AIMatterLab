@@ -1,5 +1,6 @@
 import {useRef,useState,type MutableRefObject} from 'react';
 import type {AgentProvider,Conversation} from '../../../contracts/dto/agent';
+import {API_PROVIDER_GROUPS} from '../../../contracts/agent/model-profiles.mjs';
 import type {invoke as Invoke} from '../../api/studio';
 import {storedConversation,storeConversation} from './selection-preference';
 export {storedConversation,storeConversation} from './selection-preference';
@@ -45,10 +46,12 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
   beforeSelection();const seq=++conversationSelectionSeq.current;clearIntent();beginWorkerGate();
   try{
    await settingsReady.current;if(seq!==conversationSelectionSeq.current||!mounted.current)return;
-   const selected=await invoke<Conversation>('conversation.select',{id:conversation.id});if(seq!==conversationSelectionSeq.current)return;
+   const selected=await invoke<Conversation>('conversation.select',{id:conversation.id});if(seq!==conversationSelectionSeq.current||!mounted.current)return;
    conversationChanged(selected);onSelected(selected);
+   const localHistory=API_PROVIDER_GROUPS.includes(selected.provider);
+   if(localHistory)setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});
    if(!await observeWorker(selected.taskId)||selectedConversationRef.current?.id!==selected.id||!mounted.current)return;
-   setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});
+   if(!localHistory)setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});
   }catch(error){if(seq===conversationSelectionSeq.current&&mounted.current)onSelectionError(error);}
  }
  async function newConversation(planning=false,initialPrompt?:string,provider?:AgentProvider){

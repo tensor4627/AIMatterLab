@@ -40,6 +40,7 @@ function harness(t,{state='active',withOtherTool=false,withGuidanceSource=false}
  const sources=[...withOtherTool?[{id:'gpumd',root:otherRoot}]:[],...withGuidanceSource?[{id:'pygas',root}]:[]],toolRecords=[];
  const foregroundSessions=new Map(),scopedTerminalLeases=new Map(),scopedWorkerLeases=new Map();
  const context={projectSkills:new ProjectSkills({root:path.join(root,'user-cache')}),managedWorkbench:{userMessage(){}},conversationTerminals:null,path,createAgentRequests,app:{isPackaged:false},openUrl:()=>{},privateAccess:{},sharedTerminal:{hasCurrentGrant:()=>false},ScientificSkills,scientificMap:map,bundledSkillRoot:path.join(root,'bundle'),root,workerSource:path.join(root,'worker'),settings:{skillRoots:[archived],sourceRoots:[],pygasSkillProviders:['codex'],scientificSkillProviders:{gpumd:['codex']}},catalog:{list:kind=>kind==='source-binding'?sources:[]},scientificSources:()=>{if(withOtherTool)return sources;throw Error('Active main must not discover sources');},resolveSkillGuidance:async scope=>{resolved.push(scope);return facts;},
+  resourceToolSetups:{recordUserTurn:({provider,params})=>{assert.equal(provider,owner.provider);assert.equal(params.threadId,owner.threadId);}},
   setupInstructions:{allowed:()=>false,prepare:async(_provider,_id,callback)=>callback()},
   workflowContext:{current:()=>owner,revision:()=>owner.serial,begin:()=>owner,assert:()=>{},synchronize:async(_ticket,bind)=>bind('codex',owner)},
   taskRecords:{bound:()=>null,prepareTurn:(_provider,value)=>value},authoringAuthorization:null,baseWorkspace:null,

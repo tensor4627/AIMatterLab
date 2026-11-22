@@ -1,6 +1,6 @@
 # AIMatterLab 开发者文档
 
-当前产品版本由根目录 `package.json` 给出。功能及验证证据见 [AIMatterLab 0.1.4](../releases/aimatterlab-0.1.4.md) 和[变更记录](../../CHANGELOG.md)。后续计划见[路线图](ROADMAP.md)。
+当前产品版本由根目录 `package.json` 给出。各版本的功能和验证记录见[更新日志](../../CHANGELOG.md)。后续计划见[路线图](ROADMAP.md)。
 
 产品职责与工具契约见[软件规范](../software-specification.md)，第三方作者的交付格式、示例和测试入口见[开发者接入指南](../../developer/README.md)。原 GPU Sampling Studio 的仓库结构沿革见[重组记录](../v1.0.md)。
 
@@ -44,7 +44,7 @@ flowchart LR
 | 模块 | 已实现 | 仍需独立完成或确认 |
 | --- | --- | --- |
 | 工作台 | 会话及项目分组、置顶、搜索、单页工作区、可调面板、深浅主题、字体字号、中英文、Agent 居中布局 | 本轮受影响布局及控件已实际复验；条件分支和完整离线聊天等见后续清单 |
-| Agent | Codex app server、Kimi/Qwen ACP、DeepSeek 与 OpenAI 兼容 Chat Completions；全局账户入口、模型与 effort、自定义模型名/推理选项、会话恢复 | 新账户认证和各服务商的实际模型访问必须分别验证；兼容 API 不代表任意原生协议 |
+| Agent | Codex app-server、Kimi ACP、DeepSeek Harness，以及通过 API 配置接入的 Qwen 和兼容服务。支持模型选择、推理选项、历史查看与会话恢复 | 新账户认证、各模型推理和工具调用需分别验证，兼容服务按配置的协议核对 |
 | 科学流程 | 会话绑定、原流程续填、分层参数/文件、缺项定位、版本及迟到响应保护、审阅与部署分离 | 模型声称参数齐全不能代替实际文件检查或科学验证 |
 | 传统 MD | `pydyn.md`、`gpumd.md`，日志、结果、取消及支持范围内的续算 | 环境显式登记；重启能力由引擎和输入决定 |
 | 增强采样 | `pydyn.sampling`、`gpumd.sampling`，实际 pyGAS 来源绑定、构建/验证入口、CV/Bias 图与资产 | 有历史状态的方法须遵守各自恢复契约；显式 AOTI 不兼容时失败且不降级 |
@@ -54,7 +54,7 @@ flowchart LR
 | 主动学习 | 工具关系与计划入口 | NEPMaker、ActiveMiao 和外部 DFT 的执行闭环待接入 |
 | 资产与 Viewer | 工作区复制/软链接导入、来源/哈希、文件预览、ASE 结构处理、Materials Project 密钥入口、Three.js 分帧预览 | MP 实际查询需要用户密钥；OVITO 集成、高级拼接/编辑和完整 DFT 请求流转待开发 |
 | 计算资源 | 本地 WSL 独立 worker、原来源恢复、环境注册/发现、手动 SSH 用户名、已有连接导入、密钥或客户端默认认证、人工交互认证/可选转发 | 实际 MFA/隧道等按具体入口独立验收；连接成功不证明 GPU 或科学环境可用 |
-| 调度器 | 通用 LSF/Slurm 配置、提交、监控、状态核对和结果回收代码；独立软件契约测试 | 本轮仅保留 SSH 连接方案；站点模板学习、具体队列/环境及真实提交验收已推迟，禁止继续实际探测 |
+| 调度器 | 托管 SSH 的 Slurm/LSF 单作业与整图执行、监控、状态核对和结果回收。[隔离夹具与验收范围](../releases/aimatterlab-cluster-workflows-unreleased.md) | 真实站点的队列策略、环境和科学作业需单独验收 |
 | 安装与启动 | one-prompt 安装文档、显式配置、独立环境/profile、安装收据和验收门；Windows 共用启动前置检查 | 线上仓库下载、全新机器/签名安装及所有科学模块自动安装不能宣称完成 |
 
 ## 运行状态与证据

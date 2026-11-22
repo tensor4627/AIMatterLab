@@ -6,6 +6,8 @@ import {providerId} from './contracts.mjs';
 import {DSH_RESOURCE_QUESTION_PREFIX} from './dsh-policy.mjs';
 import {providerContext} from '../tools/provider-scope.mjs';
 import {serviceHistory} from '../sessions/wake-delivery.mjs';
+import {API_PROVIDER_GROUPS} from '../../contracts/agent/model-profiles.mjs';
+import {sanitizeProtocolTranscript} from '../../contracts/agent/transcript-sanitizer.mjs';
 
 const inertCodex=Object.freeze({close(){}});
 const key=(provider,threadId)=>provider+':'+threadId;
@@ -221,6 +223,7 @@ export class ConversationAgentHub extends EventEmitter{
  }
 
  bridge(provider,threadId){return (threadId!==undefined?this.byThread.get(key(provider,threadId)):this.scope.getStore()||this.foreground)?.hub.bridge(provider);}
+ prepareApiTurnModel(provider,params){return this.entry(provider,params.threadId).hub.ensureBridge(provider).prepareTurnModel(params);}
  toolConnection(provider,threadId){return (threadId!==undefined?this.byThread.get(key(provider,threadId)):this.scope.getStore()||this.foreground)?.hub.bridgeWorkers.get(provider);}
  preferences(provider){return this.auth.preferences(provider);}
  path(provider){return this.auth.path(provider);}
@@ -245,13 +248,18 @@ export class ConversationAgentHub extends EventEmitter{
   const entry=this.entry(provider,threadId);
   return this.withEntry(entry,async()=>{
    const bridge=entry.hub.bridge(provider);
-   if(this.busy(entry)&&bridge?.process){options.assertCurrent?.();return bridge.starting||bridge.info;}
-   return entry.hub.connect(provider,options);
+   if(this.busy(entry)&&bridge?.process){if(entry.threadId&&API_PROVIDER_GROUPS.includes(provider))bridge.boundModel({threadId:entry.threadId});options.assertCurrent?.();return bridge.starting||bridge.info;}
+   return entry.hub.connect(provider,{...options,threadId:entry.threadId});
   });
  }
  async readActive(provider,threadId,method,params){
   const entry=this.byThread.get(key(provider,threadId));
   if(!entry||entry.closed)throw Error('Conversation transport is unavailable');
+  if(this.auth.deleted(provider,threadId))throw Error('Conversation was deleted');
+  if(method==='thread/resume'&&API_PROVIDER_GROUPS.includes(provider)){
+   const bridge=entry.hub.ensureBridge(provider),{session}=bridge.boundModel(params);
+   return {...bridge.readHistory(threadId),model:session.model,reasoningEffort:session.effort};
+  }
   const bridge=entry.hub.bridge(provider),thread=async()=>{
    if(bridge?.process){
     try{const result=await bridge.request('thread/read',{threadId,includeTurns:true});if(result?.thread?.id===threadId)return result;}
@@ -272,7 +280,8 @@ export class ConversationAgentHub extends EventEmitter{
   const native=result.thread?.turns||[],live=entry.liveTurn,index=live?native.findIndex(turn=>turn.id===live.id):-1;
   const turns=live&&index>=0?native.map((turn,item)=>item===index?mergeLiveTurn(live,turn):turn):live?[...native,live]:native;
   const history=serviceHistory(this.options.catalog,entry.provider,entry.threadId,turns);
-  return {...result,thread:result.thread?{...result.thread,turns:history}:result.thread,studioSession:{...this.turnState(entry),requests:[...entry.requests.values()]}};
+  const thread=result.thread?{...result.thread,turns:history}:result.thread;
+  return {...result,thread:API_PROVIDER_GROUPS.includes(entry.provider)?sanitizeProtocolTranscript(thread):thread,studioSession:{...this.turnState(entry),requests:[...entry.requests.values()]}};
  }
  rpc(provider,method,params={}){
   if(method.startsWith('account/'))return this.accountRpc(provider,method,params);
@@ -280,6 +289,11 @@ export class ConversationAgentHub extends EventEmitter{
   return this.withEntry(entry,async()=>{
    if(entry.closed||params.threadId&&this.auth.deleted(provider,params.threadId))throw Error('Conversation was deleted');
    const hub=entry.hub;
+   if(method==='thread/read'&&API_PROVIDER_GROUPS.includes(provider)){
+    const result=await hub.rpc(provider,method,params);
+    if(entry.closed||this.auth.deleted(provider,params.threadId))throw Error('Conversation was deleted');
+    return this.decorateRead(entry,result);
+   }
    if(method==='turn/interrupt'||method==='turn/steer'){
     const turnId=method==='turn/interrupt'?params.turnId:params.expectedTurnId;
     if(!turnId||turnId!==entry.turnId)throw Error('The specified reply is no longer active in this conversation');
@@ -287,7 +301,7 @@ export class ConversationAgentHub extends EventEmitter{
    if(['thread/read','thread/resume'].includes(method)&&this.busy(entry)&&params.threadId)return this.readActive(provider,params.threadId,method,params);
    if(!hub.bridge(provider)?.process&&!hub.bridge(provider)?.starting){
     if(!['thread/read','thread/resume','turn/start','model/list','thread/start'].includes(method))throw Error('Connect '+provider+' first');
-    const connected=await hub.connect(provider,{checkLogin:true});
+    const connected=await hub.connect(provider,{checkLogin:true,threadId:entry.threadId,model:params.model});
     if(connected?.loginRequired||connected?.authRequired)throw Error('Provider authentication is required');
    }
    const result=await hub.rpc(provider,method,params);

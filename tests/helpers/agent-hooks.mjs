@@ -5,6 +5,7 @@ import ts from 'typescript';
 import {randomUUID} from 'node:crypto';
 import * as codexVersion from '../../contracts/agent/codex-version.mjs';
 import * as transcript from '../../contracts/agent/transcript-sanitizer.mjs';
+import * as modelProfiles from '../../contracts/agent/model-profiles.mjs';
 import * as accountOwner0 from "../../frontend/features/conversations/provider-account.mjs";
 import * as accountOwner1 from "../../contracts/agent/provider-account.mjs";
 const account={...accountOwner0,...accountOwner1};
@@ -75,6 +76,7 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
   }
   if(name==='../../../contracts/agent/codex-version.mjs')return codexVersion;
   if(name==='../../../contracts/agent/transcript-sanitizer.mjs')return transcript;
+  if(name==='../../../contracts/agent/model-profiles.mjs')return modelProfiles;
   if(["./provider-account.mjs","../../../contracts/agent/provider-account.mjs","../conversations/provider-account.mjs"].includes(name))return account;
   if(["./composer-drafts.mjs"].includes(name))return drafts;
   if(name==='./message-mapping.mjs')return messageMapping;

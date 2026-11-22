@@ -5,7 +5,8 @@ import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {deepseekCredentials} from './deepseek.mjs';
 import {DshBridge} from './dsh.mjs';
-import {ApiModelBridge} from './api-model-bridge.mjs';
+import {ApiModelBridge,readApiHistory} from './api-model-bridge.mjs';
+import {API_PROVIDER_GROUPS} from '../../contracts/agent/model-profiles.mjs';
 import {ModelProfileStore} from './model-profile-store.mjs';
 import {AcpBridge} from './acp.mjs';
 import {providerId,qwenCredentials,redact,CLI_VERSIONS} from './contracts.mjs';
@@ -88,13 +89,13 @@ export class AgentHub extends EventEmitter{
     const bridge=this.bridge(provider),models=['deepseek','compatible','qwen'].includes(provider)?{models:[...(bridge.models||[])],model:bridge.model}:null;
     this.closeForContext(provider); // close may revoke; only mint the new process lease after close.
     binding=this.bindWorkerContext(provider,context,{allowInitialFill:false});
-    try{await this.connect(provider);}catch(error){if(current()){this.contextResume.delete(provider);this.emit('event',{provider,method:'studio/codexDisconnected',params:{reason:'Conversation context reconnection failed',message:error.message}});}throw error;}
+    try{await this.connect(provider,{threadId:context.threadId});}catch(error){if(current()){this.contextResume.delete(provider);this.emit('event',{provider,method:'studio/codexDisconnected',params:{reason:'Conversation context reconnection failed',message:error.message}});}throw error;}
     if(!current()){this.closeForContext(provider);throw Error('Conversation context selection was superseded');}
     if(models){bridge.models=models.models;bridge.model=models.model;}
     if(context.threadId)this.contextResume.set(provider,context.threadId);else this.contextResume.delete(provider);
    }else if(wasConnected&&!this.bridge(provider)?.process){
     binding=this.bindWorkerContext(provider,context,{allowInitialFill:false});
-    try{await this.connect(provider);}catch(error){if(current()){this.contextResume.delete(provider);this.emit('event',{provider,method:'studio/codexDisconnected',params:{reason:'Conversation context reconnection failed',message:error.message}});}throw error;}
+    try{await this.connect(provider,{threadId:context.threadId});}catch(error){if(current()){this.contextResume.delete(provider);this.emit('event',{provider,method:'studio/codexDisconnected',params:{reason:'Conversation context reconnection failed',message:error.message}});}throw error;}
     if(!current()){this.closeForContext(provider);throw Error('Conversation context selection was superseded');}
     if(context.threadId)this.contextResume.set(provider,context.threadId);
    }else if(changed&&!initialFill){
@@ -133,7 +134,21 @@ export class AgentHub extends EventEmitter{
  codexThreadState(id){return this.catalog.get?.('codex-thread-lifecycle',id)||this.codexThreadStates?.get(id)||null;}
  recordCodexThread(id,state,metadata={}){if(typeof id!=='string'||!id)return;const previous=this.codexThreadState(id);if(previous?.state==='has_turns'&&state!=='has_turns')return;const value={...previous,...metadata,id,state,updatedAt:Date.now()};(this.codexThreadStates??=new Map()).set(id,value);this.catalog.put?.('codex-thread-lifecycle',id,value);}
  threadReady(id){return this.threadProcess===this.codex.process&&this.readyThreads?.has(id)&&this.contextResume.get('codex')!==id;}
- async connect(provider,{checkLogin=false,assertCurrent=()=>{}}={}){
+ ensureBridge(provider){
+  let bridge=this.bridges.get(provider);
+  if(!bridge){
+   bridge=['deepseek',...API_PROVIDER_GROUPS].includes(provider)?this.createApiBridge(provider):new AcpBridge(provider,{host:this.host});
+   bridge.on('event',event=>{
+    if(event.method==='studio/codexDisconnected'){this.release(provider);if(this.isContextTransition(provider))return;}
+    if(event.method==='thread/started'||event.method==='studio/sessionInfo')this.remember(provider,event.params.thread);
+    if(event.method==='turn/completed'&&event.params.turn?.status==='completed'&&event.params.turn?.stopReason==='end_turn'&&event.params.turn?.modelOutputReceived){this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{provider}});}
+    this.emit('event',event);
+   });
+   bridge.on('diagnostic',text=>this.emit('event',{method:'studio/diagnostic',provider,params:{provider,text}}));this.bridges.set(provider,bridge);
+  }
+  return bridge;
+ }
+ async connect(provider,{checkLogin=false,assertCurrent=()=>{},threadId,model}={}){
   providerId(provider);
   const generation=this.contextGeneration,connectEpoch=this.connectEpoch||0;this.connectIntentProvider=provider;
   if(provider!=='kimi')this.cliLoginGeneration=(this.cliLoginGeneration||0)+1;
@@ -152,18 +167,13 @@ export class AgentHub extends EventEmitter{
    }
    return this.startCodex();
   }
-  let bridge=this.bridges.get(provider);
-  if(!bridge){
-   bridge=['deepseek','compatible','qwen'].includes(provider)?this.createApiBridge(provider):new AcpBridge(provider,{host:this.host});
-   bridge.on('event',event=>{
-    if(event.method==='studio/codexDisconnected'){this.release(provider);if(this.isContextTransition(provider))return;}
-    if(event.method==='thread/started'||event.method==='studio/sessionInfo')this.remember(provider,event.params.thread);
-    if(event.method==='turn/completed'&&event.params.turn?.status==='completed'&&event.params.turn?.stopReason==='end_turn'&&event.params.turn?.modelOutputReceived){this.loginStatus[provider]={...this.loginStatus[provider],modelAccess:'passed'};this.emit('event',{method:'studio/accountUpdated',provider,params:{provider}});}
-    this.emit('event',event);
-   });
-   bridge.on('diagnostic',text=>this.emit('event',{method:'studio/diagnostic',provider,params:{provider,text}}));this.bridges.set(provider,bridge);
+  const bridge=this.ensureBridge(provider);
+  if(['deepseek',...API_PROVIDER_GROUPS].includes(provider)){
+   const bound=threadId&&API_PROVIDER_GROUPS.includes(provider)?bridge.boundModel({threadId,model}):null;
+   if(bound)bridge.choose(bound.selected.key);
+   assertCurrent();this.workerFor(provider);
+   try{const result=await bridge.start();assertCurrent();bound?.assertCurrent();return result;}catch(error){this.release(provider);throw error;}
   }
-  if(['deepseek','compatible','qwen'].includes(provider)){this.workerFor(provider);try{return await bridge.start();}catch(error){this.release(provider);throw error;}}
   const credential=['qwen','deepseek','compatible'].includes(provider)?this.vault.get(provider):null;
   const profile=this.host.prepareProfile(this.root,provider,credential,this.instructions);
   const previous=this.bridgeWorkers.get(provider);let scoped=this.workerFor(provider);
@@ -188,9 +198,15 @@ export class AgentHub extends EventEmitter{
   return {provider,login:provider==='codex'?'chatgpt':provider==='kimi'?'device':'api-key',...status,...credential?{credentialStored:true,model:credential.model,plan:credential.plan,...provider==='compatible'?{baseUrl:credential.baseUrl,label:credential.label,reasoningMode:credential.reasoningMode||'omit',reasoningEffort:credential.reasoningEffort||'',publicGuidesAllowed:['pygas','pydyn','gpumd','hotpp','torchnep'].every(source=>(source==='pygas'?this.getSettings().pygasSkillProviders||[]:this.getSettings().scientificSkillProviders?.[source]||[]).includes('compatible'))}:{}}:{},...profiles?{profiles,credentialStored:profiles.some(v=>v.credentialStored)}:{},modelAccess:status.modelAccess||'not_run'};
  }
  async rpc(provider,method,params={}){
-  providerId(provider);this.host.assertRpc(method);if(this.contextPending&&!['turn/interrupt','account/read'].includes(method))throw Error('Wait for conversation context selection to finish');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');
+  providerId(provider);this.host.assertRpc(method);if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');if(provider!==this.active)throw Error('Connect the selected provider first');
   const bridge=this.bridge(provider);
-  const generation=this.contextGeneration,selected=this.contexts.get(provider),resource=this.resourceScope(provider,method);
+  const selected=this.contexts.get(provider);
+  if(method==='thread/read'&&API_PROVIDER_GROUPS.includes(provider)){
+   if(selected&&params.threadId&&selected.threadId!==params.threadId)throw Error('Select the trusted conversation context first');
+   return bridge?.readHistory?.(params.threadId)??readApiHistory(this.catalog,provider,params.threadId);
+  }
+  if(this.contextPending&&!['turn/interrupt','account/read'].includes(method))throw Error('Wait for conversation context selection to finish');
+  const generation=this.contextGeneration,resource=this.resourceScope(provider,method);
   const assertSelected=()=>{resource?.assertCurrent();if(provider!==this.active||this.bridge(provider)!==bridge||generation!==this.contextGeneration||selected!==this.contexts.get(provider))throw Error('Conversation context selection was superseded');if(params.threadId&&this.deleted(provider,params.threadId))throw Error('Conversation was deleted');};
   // A spawned app-server is only a transport until initialize and isolation readbacks finish.
   if(bridge?.starting){const lifecycle=bridge.lifecycle;await bridge.starting;assertSelected();if(lifecycle!==bridge.lifecycle)throw Error('Agent context changed while connecting');}

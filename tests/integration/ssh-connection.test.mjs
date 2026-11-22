@@ -111,6 +111,39 @@ test('free text mentioning authentication never creates an automatic Agent hando
 test('private authentication compares original click ownership and rejects a wrong workflow worker before reading its cluster profile',async()=>{const f=fixture(),owner=f.owner();f.switch();await assert.rejects(f.api.plan({clusterId:'saved',version:1,expected:sshConnectionReview(profile),owner},f.event),/workflow changed/);assert.equal(f.calls.length,0);assert(!f.api.privacy().active);const g=fixture();g.worker.identity={distribution:'Other',root:'/wrong-global'};const p=await g.plan();assert.equal(p.reason,'needs_original_worker');assert.equal(g.calls.length,0);});
 test('a changed saved task source invalidates late private output even when worker and conversation are unchanged',async()=>{const f=fixture(),p=await f.plan(),wait=deferred();f.setOverride((_m,path)=>path.endsWith('/auth/read')?wait.promise:undefined);const pending=f.api.read({...f.request(p),cursor:0},f.event);f.setSource({binding:{distribution:'Fixture',root:'/other-source',port:9999}});wait.resolve({status:'verified',authenticated:true,privateOutput:'c2VjcmV0',cursor:6});const value=await pending;assert.equal(value.reason,'source_changed');assert(!value.privateOutput);assert.equal(f.calls.findLast(c=>c.path?.endsWith('/finish')).data.retain,false);});
 test('ClusterRunPage missing lease is an inline navigation action, retains the ready artifact and never retries submit',async()=>{const h=clusterHarness({runPage:true,override:(_m,target)=>{if(target==='/api/cluster/submit')throw Error('needs_human_auth');}});await h.flush();h.button('审阅完成，提交到集群').props.onClick();await h.flush();assert.equal(h.errors.length,0);assert(h.text(h.find(node=>node.props?.className==='notice')).includes('需要人工认证'));h.button('核对原作业连接').props.onClick();await h.flush();assert.deepEqual(h.updates,[{runId:'prepared-run'}]);assert.equal(h.calls.filter(call=>call.target==='/api/cluster/submit').length,1);assert.equal(h.props.id,'prepared-run');assert(!h.calls.some(call=>call.method?.startsWith('ssh.auth.')||call.target==='/api/projects'||call.target==='/api/clusters'));h.unmount();});
+test('ClusterRunPage revises mixed snapshots without treating remote sources as local inputs',async()=>{
+ const original={id:'prepared-run',kind:'cluster-run',status:'ready',name:'Mixed inputs',engine:'pydyn.md',project_id:'project',cluster_id:'saved',max_seconds:60,
+  directory:'/fixture-run',validation:{status:'passed'},scientific_validation:{status:'not_run'},cluster:{scheduler:'slurm'},resources:{cpus:1,gpus:0,memory_mb:256},job_id:null,script:'# original',parameters:{},
+  inputs:{'run.py':'/fixture-original/run.py','assets/model.xyz':'/registered/inputs/model.xyz'},remote_inputs:{'assets/model.xyz':'/registered/inputs/model.xyz'},
+  snapshots:[{name:'run.py',source:'/fixture-original/run.py',sha256:'a'.repeat(64),size:11},
+   {name:'assets/model.xyz',source:'/registered/inputs/model.xyz',sha256:'b'.repeat(64),size:14,source_kind:'remote'}]};
+ let observed=original;
+ const h=clusterHarness({runPage:true,override:(_method,target,data)=>{
+  if(target==='/api/cluster/observation'&&data.run_id===observed.id)return structuredClone(observed);
+  if(target==='/api/cluster/revise'){
+   observed={...observed,...data.changes,id:'revised-run',directory:'/revised-run',status:'draft',script:'# revised'};
+   return structuredClone(observed);
+  }
+ }});
+ try{
+  await h.flush();
+  h.find(n=>n.type==='input'&&n.props.type==='checkbox').props.onChange({target:{checked:true}});await h.flush();
+  const editor=h.find(n=>n.type==='textarea'&&n.props['aria-label']==='运行参数');
+  const displayed=JSON.parse(editor.props.value);
+  assert.deepEqual(displayed.inputs,{'run.py':'/fixture-run/simulation/run.py'});
+  assert.deepEqual(displayed.remote_inputs,original.remote_inputs);
+  assert.match(h.text(h.find(n=>n.props?.className==='page-heading')),/科学检查结果供参考.*执行检查须在计算节点通过/);
+  editor.props.onChange({target:{value:JSON.stringify({...displayed,name:'Revised inputs',max_seconds:45})}});await h.flush();
+  h.button('保存修订并预览脚本').props.onClick();await h.flush();
+  assert.deepEqual(h.calls.filter(c=>c.target==='/api/cluster/revise').map(c=>c.data),[{run_id:original.id,changes:{name:'Revised inputs',engine:original.engine,
+   max_seconds:45,resources:original.resources,parameters:{},inputs:displayed.inputs,remote_inputs:original.remote_inputs}}]);
+  assert(h.calls.some(c=>c.target==='/api/cluster/observation'&&c.data.run_id==='revised-run'));
+  assert.match(h.text(h.find(n=>n.type==='h1')),/Revised inputs/);
+  assert.equal(h.text(h.find(n=>n.props?.className==='batch-script')),'# revised');
+  assert(!h.calls.some(c=>c.target==='/api/cluster/submit'));
+  assert.deepEqual(h.errors,[]);
+ }finally{h.unmount();}
+});
 test('controlled jump form rejects an incomplete hop inline without saving or authenticating',async()=>{const h=clusterHarness();await h.flush();const jump=h.find(node=>node.type==='textarea'&&node.props.value==='');jump.props.onChange({target:{value:'bare-jump.invalid'}});await h.flush();h.button('保存连接').props.onClick();h.button('打开私有认证').props.onClick();await h.flush();assert.equal(h.auth.length,0);assert(!h.calls.some(call=>call.target==='/api/clusters'&&call.method==='POST'));assert(h.text(h.find(node=>node.props?.className==='cluster-footer')).includes('用户@主机:端口'));h.unmount();});
 
 const runReceipt={runId:'prepared-run',nonce:'PRIVATE_NONCE_SENTINEL',projectId:'project',clusterId:'saved',version:1,snapshotDigest:'b'.repeat(64)};

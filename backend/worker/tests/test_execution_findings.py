@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from studio_worker.service import Service
+from studio_worker.server import dispatch
 from studio_worker.tools.adapters import Adapter, allocated_gpu, run_process_env
 from studio_worker.infrastructure import util
 
@@ -70,11 +71,18 @@ class ExecutionFindings(unittest.TestCase):
 
     def test_bias_compatibility_can_pass_while_scientific_finding_stays_failed(self):
         run=self.prepare();self.service.store.update(run,engine='pydyn.sampling',validation={'status':'failed','message':'FD advisory'})
-        with patch.object(Adapter,'validate',return_value={'status':'passed','artifact_status':'passed','scientific_status':'not_run'}):
+        report = {'status':'passed', 'artifact_status':'passed', 'scientific_status':'not_run', 'scope':'fixture serialized artifact and target checks',
+                  'native_runtime':{'status':'not_run', 'scope':'No native ELF loader check for this route'}}
+        with patch.object(Adapter,'validate',return_value=report):
             submitted=self.service.submit(run['id'])
         self.assertEqual(submitted['status'],'queued')
         self.assertEqual(submitted['validation']['status'],'failed')
         self.assertEqual(submitted['execution_check']['status'],'passed')
+        bundle = dispatch(self.service, 'POST', '/api/run/export', {'run_id':run['id']}, True)
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle['base64']))) as archive:
+            manifest = json.loads(archive.read('reproduction.json'))
+            self.assertEqual(manifest['execution']['execution_check']['report'], report)
+            self.assertEqual(manifest['validation']['status'], 'failed')
 
     def test_actual_snapshot_mutation_is_not_advisory(self):
         run=self.prepare();path=Path(run['directory'])/'simulation/run.py';path.chmod(0o644);path.write_text('changed')
@@ -175,6 +183,84 @@ class ExecutionFindings(unittest.TestCase):
             self.assertEqual(archive.read('results/output.json'),b'{"actual":true}')
             for item in manifest['included_files']:
                 self.assertEqual(util.hashlib.sha256(archive.read(item['path'])).hexdigest(),item['sha256'])
+
+    def test_export_uses_persisted_probe_and_execution_check_separately_from_logs(self):
+        run = self.prepare(); root = Path(run['directory'])
+        modules = {name:{'status':'passed','version':'observed-import','file':f'/fixture/runtime/{name}.py'}
+                   for name in ('torch', 'cupy', 'ase', 'pydyn')}
+        observed = {'scope':{'engine':'pydyn.md','modules':list(modules)}, 'executable':sys.executable,
+                    'modules':modules,'pygas_upstream':{'commit':'a'*40,'version':'1.0','token':'SYNTHETIC_UPSTREAM_SECRET'},
+                    'repositories':{'pydyn':{'path':'/fixture/source','commit':'b'*40,'dirty':False,'status':'passed'}},
+                    'process_limits':{'stack':[-1,-1]},'variables':{'PRIVATE_VALUE':'SYNTHETIC_ENV_SECRET'}}
+        submit_probe = {**observed, 'modules':{**modules, 'pydyn':{**modules['pydyn'], 'version':'checked-at-submission'}}}
+        request = {'run_id':run['id']}
+        with patch.object(Adapter, 'probe', side_effect=[observed, submit_probe]) as probe:
+            validated = dispatch(self.service, 'POST', '/api/run/validate', request, True)
+            submitted = dispatch(self.service, 'POST', '/api/run/submit', request, True)
+        self.assertEqual(probe.call_count, 2)
+        self.assertEqual(validated['validation']['status'], 'passed')
+        self.assertEqual(submitted['status'], 'queued')
+        (root/'execution-check.json').write_text('{"status":"failed","fixture":"stale file"}', encoding='utf-8')
+        bundle = dispatch(self.service, 'POST', '/api/run/export', request, True)
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle['base64']))) as archive:
+            manifest_bytes = archive.read('reproduction.json')
+            manifest = json.loads(manifest_bytes)
+            execution = manifest['execution']
+            self.assertEqual(execution['provenance']['modules'], observed['modules'])
+            self.assertEqual(execution['provenance']['repositories'], observed['repositories'])
+            self.assertEqual(execution['provenance']['process_limits'], observed['process_limits'])
+            check = execution['execution_check']
+            self.assertEqual(check['status'], 'passed')
+            self.assertTrue(check['required'])
+            self.assertEqual(check['checked_at'], submitted['execution_check']['checked_at'])
+            self.assertEqual(check['report']['modules'], list(modules))
+            self.assertEqual(check['report']['provenance']['modules']['pydyn']['version'], 'checked-at-submission')
+            self.assertEqual(manifest['validation']['scientific_status'], 'not_run')
+            self.assertNotIn(b'SYNTHETIC_UPSTREAM_SECRET', manifest_bytes)
+            self.assertNotIn(b'SYNTHETIC_ENV_SECRET', manifest_bytes)
+            log = next(item for item in manifest['included_files'] if item['path']=='execution-check.json')
+            self.assertEqual(log['sha256'], util.hashlib.sha256(archive.read(log['path'])).hexdigest())
+            self.assertEqual(json.loads(archive.read(log['path']))['status'], 'failed')
+
+    def test_export_preserves_failed_check_and_blocked_probe_with_bounded_diagnostics(self):
+        run = self.prepare(); request = {'run_id':run['id']}
+        detail = 'fixture import did not load; Authorization: Bearer SYNTHETIC_HEADER_SECRET '
+        with patch.object(Adapter, 'probe', side_effect=[ValueError('fixture import did not load ' + 'x' * 13000), ValueError(detail)]):
+            dispatch(self.service, 'POST', '/api/run/validate', request, True)
+            with self.assertRaisesRegex(ValueError, 'fixture import did not load'):
+                dispatch(self.service, 'POST', '/api/run/submit', request, True)
+        saved_check = self.service.store.run(run['id'])['execution_check']
+        bundle = dispatch(self.service, 'POST', '/api/run/export', request, True)
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle['base64']))) as archive:
+            manifest = json.loads(archive.read('reproduction.json'))
+            execution = manifest['execution']
+            self.assertEqual(execution['status'], 'draft')
+            self.assertEqual(execution['provenance']['status'], 'blocked')
+            self.assertTrue(execution['provenance']['error'].endswith('[truncated]'))
+            check = execution['execution_check']
+            self.assertEqual(check['status'], 'failed')
+            self.assertEqual(check['checked_at'], saved_check['checked_at'])
+            self.assertTrue(check['required'])
+            self.assertIn('fixture import did not load', check['message'])
+            self.assertIn('[redacted]', check['message'])
+            self.assertNotIn('SYNTHETIC_HEADER_SECRET', json.dumps(manifest))
+            self.assertNotIn('report', check)
+            self.assertIn('execution-check.json', {item['path'] for item in manifest['omitted_outputs']})
+
+    def test_export_distinguishes_unrecorded_evidence_from_a_recorded_not_run_check(self):
+        _, run = self.native_run(); request = {'run_id':run['id']}
+        legacy = dispatch(self.service, 'POST', '/api/run/export', request, True)
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(legacy['base64']))) as archive:
+            execution = json.loads(archive.read('reproduction.json'))['execution']
+            self.assertNotIn('execution_check', execution)
+            self.assertNotIn('provenance', execution)
+        submitted = dispatch(self.service, 'POST', '/api/run/submit', request, True)
+        self.assertEqual(submitted['execution_check']['status'], 'not_run')
+        observed = dispatch(self.service, 'POST', '/api/run/export', request, True)
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(observed['base64']))) as archive:
+            execution = json.loads(archive.read('reproduction.json'))['execution']
+            self.assertEqual(execution['execution_check'], submitted['execution_check'])
+            self.assertNotIn('provenance', execution)
 
     def test_export_identifies_missing_inputs_and_still_refuses_modified_immutable_inputs(self):
         run=self.prepare();snapshot=run['snapshots'][0]

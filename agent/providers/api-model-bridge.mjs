@@ -1,10 +1,33 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {DshBridge} from './dsh.mjs';
+import {DshBridge,dshPublicThread,markInterruptedDshTurns} from './dsh.mjs';
 import {prepareApiDshProfile} from '../../desktop/platform/dsh-runtime.mjs';
 import {apiModelKey} from '../../contracts/agent/model-profiles.mjs';
 import {createJsonlFramer} from './jsonl-frames.mjs';
 import {sanitizeTranscript,sanitizeProtocolTranscript} from '../../contracts/agent/transcript-sanitizer.mjs';
 const KIND='api-dsh-history';
+function checkThreadId(id){
+ if(typeof id!=='string'||!id||id.length>200||/[\x00-\x1f]/.test(id))throw Error('Invalid API conversation');
+}
+function storedSession(catalog,provider,id){
+ const session=catalog.get(KIND,id);
+ if(session&&(session.id!==id||session.schemaVersion!==1||session.harness!=='dsh'||session.provider!==provider))throw Error('Unsupported API conversation record');
+ return session;
+}
+function legacySession(catalog,provider,id){
+ if(provider!=='compatible')throw Error('旧 Qwen CLI 会话不能在 API 模式恢复；请新建 API 对话，原会话数据和计算记录保留');
+ const binding=catalog.get('compatible-codex-thread',id),legacy=binding||catalog.get('compatible-history',id);
+ if(!legacy)throw Error('Unknown API conversation');
+ if(legacy.id!==undefined&&legacy.id!==id||legacy.provider!==undefined&&legacy.provider!==provider)throw Error('Unsupported API conversation record');
+ return {...legacy,id,turns:binding?[...(binding.legacyTurns||[]),...(binding.nativeTurns||[])]:legacy.turns||[]};
+}
+/** A display projection of saved history needs neither a live provider nor its credentials. */
+export function readApiHistory(catalog,provider,id,{liveSession,secrets=[]}={}){
+ checkThreadId(id);
+ const session=liveSession||storedSession(catalog,provider,id)||legacySession(catalog,provider,id);
+ const thread=sanitizeProtocolTranscript(dshPublicThread(session,provider),secrets);
+ if(!liveSession)markInterruptedDshTurns(thread.turns);
+ return {thread};
+}
 /** DSH owns protocol adaptation, reasoning dispatch and the native tool loop. */
 export class ApiModelBridge extends DshBridge{
  constructor({provider,profiles,...options}){super(options);this.provider=provider;this.profiles=profiles;this.selection=null;this.boundCredentials=new Map();}
@@ -42,38 +65,43 @@ export class ApiModelBridge extends DshBridge{
  }
  receive(message){if(message?.method==='studio/dshIsolation'&&message.params?.status==='failed'&&typeof message.params.message==='string'&&this.isolationWaiter){this.isolationWaiter.reject(Error(this.cleanValue(message.params.message)));return;}return super.receive(message);}
  save(session){this.catalog.put(KIND,session.id,this.cleanProtocol(session));}
- publicThread(session){return {...super.publicThread(session),provider:this.provider};}
+ readHistory(id){return readApiHistory(this.catalog,this.provider,id,{liveSession:this.sessions.get(id),secrets:[...this.boundCredentials.values()]});}
  session(id){
-  if(typeof id!=='string'||!id||id.length>200||/[\x00-\x1f]/.test(id))throw Error('Invalid API conversation');
+  checkThreadId(id);
   let session=this.sessions.get(id);if(session){this.assertBinding(session);return session;}
-  session=this.catalog.get(KIND,id);if(session){if(session.id!==id||session.schemaVersion!==1||session.harness!=='dsh'||session.provider!==this.provider)throw Error('Unsupported API conversation record');this.assertBinding(session);return this.restoreSession(session);}
-  if(this.provider!=='compatible')throw Error('旧 Qwen CLI 会话不能在 API 模式恢复；请新建 API 对话，原会话数据和计算记录保留');
-  const binding=this.catalog.get('compatible-codex-thread',id),legacy=binding||this.catalog.get('compatible-history',id);if(!legacy)throw Error('Unknown API conversation');
+  session=storedSession(this.catalog,this.provider,id);if(session){this.assertBinding(session);return this.restoreSession(session);}
+  const legacy=legacySession(this.catalog,this.provider,id);
   const profile=this.profiles.list(this.provider).find(p=>p.baseUrl===legacy.apiEndpoint&&p.api==='openai-completions'&&p.models.some(v=>v.id===legacy.model));if(!profile)throw Error('请恢复旧对话的原 API 地址；不会将历史发送到新服务');
-  const turns=binding?[...(binding.legacyTurns||[]),...(binding.nativeTurns||[])]:legacy.turns||[];
-  session={schemaVersion:1,harness:'dsh',provider:this.provider,id,nativeId:randomUUID(),nativeStarted:false,legacyContextPending:true,name:legacy.name||'',model:apiModelKey(profile.id,legacy.model),profileId:profile.id,apiEndpoint:profile.baseUrl,apiProtocol:profile.api,turns:structuredClone(turns),updatedAt:legacy.updatedAt||Date.now()};return this.restoreSession(session);
+  session={schemaVersion:1,harness:'dsh',provider:this.provider,id,nativeId:randomUUID(),nativeStarted:false,legacyContextPending:true,name:legacy.name||'',model:apiModelKey(profile.id,legacy.model),profileId:profile.id,apiEndpoint:profile.baseUrl,apiProtocol:profile.api,turns:legacy.turns,updatedAt:legacy.updatedAt||Date.now()};return this.restoreSession(session);
  }
  assertBinding(session){const profile=this.profiles.read(session.profileId);if(profile.provider!==this.provider||profile.baseUrl!==session.apiEndpoint||profile.api!==session.apiProtocol||(profile.authMode||'api-key')!==(session.authMode||'api-key'))throw Error('此对话绑定的 API 地址或协议已变化；请恢复原配置或新建对话，不会发送旧历史');}
- prepareTurnModel(params){
+ boundModel(params){
   const session=this.session(params.threadId),selected=this.profiles.resolve(this.provider,params.model||session.model);
   if(selected.profile.id!==session.profileId)throw Error('不能在现有对话中切换 API 服务商；请新建对话，防止历史被发送到其他服务');
-  this.choose(selected.key);const identity=this.profiles.identity(selected.profile.id);
-  return ()=>{this.assertBinding(session);if(this.model!==selected.key||this.profiles.identity(selected.profile.id)!==identity)throw Error('服务商或模型配置已变化，请重新发送；本次内容未发送');};
+  if(selected.profile.requiresApiKey&&!selected.credential.apiKey)throw Error('请填写此服务商的 API Key');
+  const identity=this.profiles.identity(selected.profile.id);
+  const assertCurrent=()=>{this.assertBinding(session);if(this.profiles.identity(selected.profile.id)!==identity)throw Error('服务商配置已变化，请重新连接');};
+  return {session,selected,assertCurrent};
+ }
+ prepareTurnModel(params){
+  const {selected,assertCurrent}=this.boundModel(params);this.choose(selected.key);
+  return ()=>{assertCurrent();if(this.model!==selected.key)throw Error('模型配置已变化，请重新发送；本次内容未发送');};
  }
  async request(method,params={},timeout,options={}){
   options.assertCurrent?.();if(method==='model/list')return this.modelCatalog();if(method==='model/select'){if(this.activeTurns.size)throw Error('请先停止当前回复再切换模型');this.choose(params.model);return this.modelCatalog();}
+  if(method==='thread/read')return this.readHistory(params.threadId);
   if(method==='thread/start'){
    this.choose(params.model);const selected=this.selection,effort=this.modelCatalog().data.find(v=>v.model===this.model)?.defaultReasoningEffort;
    const session={schemaVersion:1,harness:'dsh',provider:this.provider,id:randomUUID(),nativeId:randomUUID(),nativeStarted:false,legacyContextPending:false,name:'',model:this.model,effort,profileId:selected.profile.id,apiEndpoint:selected.profile.baseUrl,apiProtocol:selected.profile.api,...selected.profile.authMode?{authMode:selected.profile.authMode}:{},turns:[],updatedAt:Date.now()};this.sessions.set(session.id,session);this.current=session.id;this.save(session);const thread=this.publicThread(session);this.event('thread/started',{thread});return {thread,model:this.model,reasoningEffort:effort};
   }
   if(['thread/resume','turn/start'].includes(method)){
-   const session=this.session(params.threadId),selected=this.profiles.resolve(this.provider,params.model||session.model);
-   if(selected.profile.id!==session.profileId)throw Error('不能在现有对话中切换 API 服务商；请新建对话，防止历史被发送到其他服务');
+   const {session,selected,assertCurrent}=this.boundModel(params);
    if(method==='turn/start'&&this.process&&this.launchIdentity&&selected.profile.id===this.launchProfileId&&this.profiles.identity(selected.profile.id)!==this.launchIdentity)throw Error('服务商配置已变化，请重新连接后继续；不会自动发送历史');
    const row=this.modelCatalog().data.find(v=>v.model===selected.key),effort=params.effort??(session.model===selected.key?session.effort:row?.defaultReasoningEffort);
    if(effort&&!row?.supportedReasoningEfforts.some(v=>v.reasoningEffort===effort))throw Error('此模型不支持所选推理等级');
    if(selected.key!==session.model)session.effort=effort;
    params={...params,model:selected.key,effort};
+   const assertSelected=options.assertCurrent;options={...options,assertCurrent:()=>{assertSelected?.();assertCurrent();}};
   }
   return super.request(method,params,timeout,options);
  }

@@ -1,4 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {createHash} from 'node:crypto';import {ScientificSkillRouter} from "../../agent/skills/scientific-skill-router.mjs";import {PublicRuleEvidence} from "../../agent/skills/public-rule-evidence.mjs";
+import {PROVIDERS} from '../../agent/providers/contracts.mjs';
 const reference='references/gpumd-native-output.json',skillId='studio-md-workflow',sha=data=>createHash('sha256').update(data).digest('hex');
 const map=JSON.parse(await fs.readFile(new URL("../../agent/skills/scientific-skill-map.json",import.meta.url),'utf8')),document=JSON.parse(await fs.readFile(new URL("../../agent/builtin-skills/studio-md-workflow/"+reference,import.meta.url),'utf8'));
 async function fixture(t){
@@ -14,8 +15,8 @@ const documentId=skillId+'/'+reference;
 test('output companion is attached only to sampling.gpumd, never changes input reference route',()=>{
  assert.deepEqual(map.functions.filter(f=>(f.reference_files?.[skillId]||[]).includes(reference)).map(f=>f.id),['sampling.gpumd']);assert(map.functions.find(f=>f.id==='sampling.gpumd').reference_files[skillId].includes('references/gpumd-native-input.json'));
 });
-test('four providers receive complete output contract through real MCP serialization with one body and receipt',async t=>{
- const f=await fixture(t);for(const provider of ['codex','kimi','qwen','deepseek']){const result=await f.router.read(provider,'sampling.gpumd',documentId),wire=JSON.stringify(toolValueResult(result)),decoded=JSON.parse(JSON.parse(wire).content[0].text);assert.equal(decoded.status,'passed');assert.deepEqual(JSON.parse(decoded.text),f.doc);assert.equal(decoded.attachments.length,1);assert.equal(decoded.attachments[0].sha256,sha(decoded.text));assert.equal(decoded.attachments[0].source_evidence.status,'source_matched_reference');assert(Buffer.byteLength(wire)<=24*1024);assert(!wire.includes('RAW_SOURCE_MUST_NOT_BE_SHARED'));assert(!wire.includes(f.root));}
+test('each provider receives the complete output contract through real MCP serialization with one body and receipt',async t=>{
+ const f=await fixture(t);for(const provider of PROVIDERS){const result=await f.router.read(provider,'sampling.gpumd',documentId),wire=JSON.stringify(toolValueResult(result)),decoded=JSON.parse(JSON.parse(wire).content[0].text);assert.equal(decoded.status,'passed');assert.deepEqual(JSON.parse(decoded.text),f.doc);assert.equal(decoded.attachments.length,1);assert.equal(decoded.attachments[0].sha256,sha(decoded.text));assert.equal(decoded.attachments[0].source_evidence.status,'source_matched_reference');assert(Buffer.byteLength(wire)<=24*1024);assert(!wire.includes('RAW_SOURCE_MUST_NOT_BE_SHARED'));assert(!wire.includes(f.root));}
  await assert.rejects(f.router.read('codex','md.gpumd',documentId),/exact document_id/);f.revoke();const denied=await f.router.read('codex','sampling.gpumd',documentId);assert.equal(denied.status,'permission_required');assert.equal(denied.text,undefined);
 });
 test('source mismatch or missing source preserves reference_only without claiming target capability',async t=>{

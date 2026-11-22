@@ -211,7 +211,7 @@ def session(service, data, *, allocate=False):
     _data(data, fields + (' workspace_id date' if allocate else ''))
     session_id = _session_id(data['resource_id'], data['provider'], data['thread_id'])
     if not allocate:
-        with service.store.lock:
+        with service.store.database_access():
             claim = _stored(service.store, session_id)
         if not claim or not claim.get('task_number'):
             return None
@@ -221,14 +221,14 @@ def session(service, data, *, allocate=False):
     store = service.store
     # Commit the claim identity and first local date before the filesystem
     # side effect. A lost response or worker restart therefore retains them.
-    with store.lock, store.db:
+    with store.database_access(), store.db:
         store.db.execute('BEGIN IMMEDIATE')
         claim = _stored(store, session_id)
         if claim is None:
             workspace = verified_workspace(service, data['resource_id'], data['workspace_id'])
             claim = {**data, 'date': _date(data['date']), 'id': session_id, 'token': uuid4().hex}
             _put(store, claim)
-    with store.lock, store.db:
+    with store.database_access(), store.db:
         store.db.execute('BEGIN IMMEDIATE')
         claim = _stored(store, session_id)
         workspace = verified_workspace(service, claim['resource_id'], claim['workspace_id'])

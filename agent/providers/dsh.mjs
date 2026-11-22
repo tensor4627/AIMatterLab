@@ -33,6 +33,15 @@ export function normalizeDshPublicTurns(threadId,turns){
  }
  return copy;
 }
+export function dshPublicThread(session,provider){
+ return {id:session.id,provider,name:session.name||'',preview:session.name||'',turns:normalizeDshPublicTurns(session.id,session.turns),updatedAt:session.updatedAt};
+}
+export function markInterruptedDshTurns(turns){
+ for(const turn of turns||[]){
+  if(turn.status==='inProgress'){turn.status='failed';turn.error={message:'Previous reply was interrupted; it was not automatically replayed.'};}
+  if(turn.status==='failed'||turn.status==='cancelled')markUnconfirmedTools(turn);
+ }
+}
 export function dshLegacyContext(turns){
  const rows=[];
  for(const turn of turns||[])for(const item of turn.items||[])if(['userMessage','agentMessage'].includes(item.type))rows.push({role:item.type==='userMessage'?'user':'assistant',text:(typeof item.text==='string'?item.text:textOf(item.content)).slice(0,100000)});
@@ -187,7 +196,7 @@ export class DshBridge extends EventEmitter{
   s.updatedAt=Date.now();this.save(s);
  }
  save(s){this.catalog.put(KIND,s.id,this.cleanProtocol(s));}
- publicThread(s){return this.cleanProtocol({id:s.id,provider:'deepseek',name:s.name||'',preview:s.name||'',turns:normalizeDshPublicTurns(s.id,s.turns),updatedAt:s.updatedAt});}
+ publicThread(s){return this.cleanProtocol(dshPublicThread(s,this.provider));}
  session(id){
   if(!safeId(id))throw Error('Invalid DeepSeek conversation');let s=this.sessions.get(id);if(s)return s;
   s=this.catalog.get(KIND,id);
@@ -200,10 +209,7 @@ export class DshBridge extends EventEmitter{
  }
  restoreSession(value){
   const session=this.cleanProtocol(value);
-  for(const turn of session.turns||[]){
-   if(turn.status==='inProgress'){turn.status='failed';turn.error={message:'Previous reply was interrupted; it was not automatically replayed.'};}
-   if(turn.status==='failed'||turn.status==='cancelled')markUnconfirmedTools(turn);
-  }
+  markInterruptedDshTurns(session.turns);
   this.sessions.set(session.id,session);this.save(session);return session;
  }
  async ensureSession(s){if(this.loaded.has(s.id))return;if(s.nativeStarted)await this.raw('session/resume',{sessionId:s.nativeId});this.loaded.add(s.id);}

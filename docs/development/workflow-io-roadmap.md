@@ -37,4 +37,6 @@
 
 本地 GPUMD 原生 MD 与 CPU 逐帧原子数密度分析已接通，可以为两个节点选择项目内不同的登记环境。其他工具组可复用图调度、输入快照、产物交接和逐项验收。选用已保存的组时，定义版本、步骤、包版本、实际命令和端口绑定都须吻合。重复调用和纯先后约束各自保留。
 
-接入下一种工具时，在适配器登记实际命令、完整输入集合、输入输出格式、可观察指标和消费证明。严格实时耦合属于同一个节点。SSH/Slurm 的整图执行和新的科学工具仍需接入。此路线锁定实际执行文件与登记环境，物理模型的准确性和长时间模拟收敛性需要独立评价。[图执行器](../../backend/worker/studio_worker/workspace/roadmap_execution.py) · [工具与读取契约](../../backend/worker/studio_worker/workspace/roadmap_tools.py) · [真实流程验证脚本](../../scripts/verify-roadmap-md.py)
+托管 SSH 整图执行绑定原作业服务、项目和所选 Slurm/LSF 队列。确认后，各节点使用冻结的调用和输入，在已分配的会话目录执行。已激活的资源私有工具可通过 `private.<id>` 参与。作业被队列接受时记录提交回执，计算完成后另有退出回执。隔离调度命令测试已覆盖两种队列的成功、计算失败和提交答复丢失后恢复。真实站点的队列策略、计算节点环境和科学结果需在目标资源上独立验证。[集群图执行器](../../backend/worker/studio_worker/workspace/roadmap_cluster.py) · [原验收范围](../releases/aimatterlab-cluster-workflows-unreleased.md) · [本次复核](../releases/aimatterlab-workflow-repairs-unreleased.md)
+
+接入下一种工具时，在适配器登记实际命令、完整输入集合、输入输出格式、可观察指标和消费证明。严格实时耦合属于同一个节点。物理模型的准确性和长时间模拟收敛性需要独立评价。[图执行器](../../backend/worker/studio_worker/workspace/roadmap_execution.py) · [工具与读取契约](../../backend/worker/studio_worker/workspace/roadmap_tools.py) · [真实流程验证脚本](../../scripts/verify-roadmap-md.py)

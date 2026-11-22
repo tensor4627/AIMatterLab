@@ -215,8 +215,10 @@ test('restored official DSH conversation receives current hosted recovery and a 
  assert(fresh.includes('supersede historical tool definitions'));
  assert(fresh.includes('Current receipts supersede old handoff advice'));
  assert(fresh.includes('inspect_compute_service'));
- assert(fresh.includes('retain the original live terminal or pending login'));
- assert(fresh.includes('confirmed lost, the user can explicitly sign in again on that profile'));
+ assert.match(fresh,/original saved profile.*live terminal or pending login/);
+ assert.match(fresh,/confirmed lost.*sign in again on that profile/);
+ assert.match(fresh,/verifies the same remote identity and workspace.*restores eligible conversation leases/);
+ assert.match(fresh,/unknown jobs using their original IDs and receipts/);
  assert(!packets[1].tools.some(tool=>tool.name.endsWith('_shared_terminals')));
  assert(received.includes('A service lease grants no shell'));
  assert(received.includes('live SSH terminal restores the same verified channel'));

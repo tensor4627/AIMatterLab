@@ -13,6 +13,8 @@ test('reading interrupted API history resolves orphaned tool indicators without 
  const restored=(await bridge.request('thread/read',{threadId:thread.id})).thread.turns[0];
  assert.equal(restored.status,'failed');assert.equal(restored.items[0].status,'failed');
  assert.match(restored.items[0].result.content[0].text,/Unconfirmed/);
+ assert.equal(catalog.get('api-dsh-history',thread.id).turns[0].items[0].status,'inProgress');assert(!bridge.sessions.has(thread.id));
+ await bridge.request('thread/resume',{threadId:thread.id});
  assert.equal(catalog.get('api-dsh-history',thread.id).turns[0].items[0].status,'failed');assert.equal(calls.length,before);
 });
 

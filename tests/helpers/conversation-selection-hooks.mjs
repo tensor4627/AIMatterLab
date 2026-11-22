@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import ts from 'typescript';
 import {randomUUID} from 'node:crypto';
+import * as modelProfiles from '../../contracts/agent/model-profiles.mjs';
 
 const sources=new Map(['useConversationSelection','selection-preference'].map(name=>[name,ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/conversations/'+name+'.ts',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
 export function loadConversationSelection({react,storage,crypto={randomUUID}}){
@@ -10,7 +11,7 @@ export function loadConversationSelection({react,storage,crypto={randomUUID}}){
   if(modules.has(name))return modules.get(name).exports;
   if(!sources.has(name))throw Error('Unexpected conversation hook dependency '+name);
   const module={exports:{}};modules.set(name,module);
-  const require=specifier=>specifier==='react'?react:load(specifier.replace(/^\.\//,''));
+  const require=specifier=>specifier==='react'?react:specifier==='../../../contracts/agent/model-profiles.mjs'?modelProfiles:load(specifier.replace(/^\.\//,''));
   new Function('require','module','exports','localStorage','crypto',sources.get(name))(require,module,module.exports,storage,crypto);
   return module.exports;
  }

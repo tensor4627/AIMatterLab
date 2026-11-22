@@ -111,7 +111,8 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  assert.match(entry.text,/original sign-in is pending, continue that attempt/);
  assert.match(entry.text,/enter authentication responses only in the private terminal/);
  assert.match(entry.text,/confirmed lost.*重新登录.*same saved profile/);
- assert.match(entry.text,/new connection has its own terminal identities and grants/);
+ assert.match(entry.text,/verifies the remote host, account and workspace/);
+ assert.match(entry.text,/restores eligible leases for their original conversations/);
  assert.match(entry.text,/submit an explicitly delegated independent job/);
  assert.doesNotMatch(entry.text,/交给 Agent|requires task planning/);
  const doc='studio-compute-workflow/references/compute-discovery.md';

@@ -9,6 +9,9 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  const primaryTraining=/(?:^|[。！!？?;\n])\s*(?:(?:请|帮我|现在|接下来|先|首先|然后|随后|please\s+|next\s+|now\s+|first\s+|then\s+)\s*)*(?:训练|导出|评估|train\b|export\b|freeze\b|eval\b)/i.test(value);
  const resourceMention=/集群|计算资源|服务器|\b(?:cluster|compute resource|HPC)\b/i.test(value);
  const namedInstallation=/(?:安装|从零配置|搭建)\s*(?:一下\s*)?[a-z][\w+.-]*|\b(?:install|set up)\s+[a-z][\w+.-]*/i.test(value);
+ const materialsSource=/materials[ -]?project|\bmp-[0-9]+\b/i.test(value);
+ const requestsLookup=/(?<!已|已经|不|不要|无需|不用)(?:导入|搜索|查询|查找|检索|获取|下载)(?!的|过)|\b(?:import|search|find|fetch|retrieve|download|query|look up)\b/i.test(value);
+ const requestsStructure=/(?<!已|已经|不|不要|无需|不用)(?:生成|构建|创建)(?!的|过)[^，。！？\n]{0,32}(?:结构|晶胞|超胞|晶体|分子(?!动力学)|表面)|\b(?:build|create|generate|make)\b[^.!?,;\n]{0,64}\b(?:structures?|cells?|crystals?|supercells?|surfaces?|slabs?|molecules?)\b/i.test(value);
  const serviceRepair=/(?:修复|配置|安装|准备)\s*(?:远端)?作业服务|作业服务.{0,12}(?:缺少|修复|Python 环境)|\b(?:repair|configure|install)\s+(?:the\s+)?job service\b/i.test(value);
  if(manualFunction!==undefined&&typeof manualFunction!=='string')throw Error('Invalid selected scientific function');
  // Present intent takes priority over the previous run: analysis never loads the build/install stack.
@@ -26,6 +29,8 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  else if((/(?:训练|train|导出|export|freeze)/i.test(value)||/(?:测试|eval|评估)/i.test(value)&&!/(?:分子动力学|\bmd\b|metad|opes|增强采样)/i.test(value))&&(!consumerIntent||primaryTraining)&&/hotpp|torchnep|nepmaker|activemiao|\bnep\b/i.test(value))id=/torchnep/i.test(value)?'training.torchnep':/nepmaker/i.test(value)?'learning.nepmaker':/activemiao/i.test(value)?'learning.activemiao':/hotpp/i.test(value)?'training.hotpp':'training.nep';
  else if(cvOnlyIntent&&(!dynamicsIntent||excludesDynamics))id='pygas.cv';
  else if(/metad|opes|umbrella|增强采样|偏置模拟/i.test(value))id=/pydyn/i.test(value)?'sampling.pydyn':/gpumd|gpu.?sampling/i.test(value)?'sampling.gpumd':String(engine).startsWith('pydyn.')?'sampling.pydyn':String(engine).startsWith('gpumd.')?'sampling.gpumd':'pygas.bias';
+ else if(materialsSource&&requestsLookup)id='structure.materials-project';
+ else if(requestsStructure)id='structure.ase';
  else if(/分子动力学|\bmd\b/i.test(value)&&/gpumd|pydyn/i.test(value))id=/gpumd/i.test(value)?'md.gpumd':'md.pydyn';
  else if(ENGINE_ROUTES[engine])id=ENGINE_ROUTES[engine];
  else if(/\bneb\b|最小能量路径/i.test(value))id=/pydyn/i.test(value)?'neb.pydyn':'neb.gpumd';
@@ -37,7 +42,7 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  else if(/pygas|metad|opes|umbrella|增强采样|偏置|\bcvs?\b/i.test(value))id=/pydyn/i.test(value)?'sampling.pydyn':/gpumd|gpu.?sampling/i.test(value)?'sampling.gpumd':'pygas.bias';
  else if(/pydyn/i.test(value))id='md.pydyn';
  else if(/gpumd/i.test(value))id='md.gpumd';
- else if(/materials.?project|\bmp-[0-9]+/i.test(value))id='structure.materials-project';
+ else if(materialsSource)id='structure.materials-project';
  else if(/\base\b|生成.*结构|构建.*结构/i.test(value))id='structure.ase';
  const roadmap=hasWorkflow&&!manualFunction&&(planRoadmap||/流程图|输入输出规划|流程总览|计算路线图|workflow (?:roadmap|diagram)|artifact handoffs/i.test(value));
  return [...new Set([...(hasWorkflow?['workflow.orchestrate']:[]),...(roadmap?['workflow.roadmap']:[]),...id?[id]:[]])];

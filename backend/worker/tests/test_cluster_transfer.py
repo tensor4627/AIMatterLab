@@ -17,6 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from studio_worker.service import Service
 from studio_worker.cluster import Clusters, TRANSFER_CHUNK, parse_output
+from studio_worker.server import dispatch
 
 
 def payload(script):
@@ -160,6 +161,86 @@ class ClusterTransfer(unittest.TestCase):
             saved = json.load(archive.extractfile('.studio/run.json'))
             self.assertIn('assets/large.dat', saved['inputs'])
             self.assertEqual(archive.extractfile('simulation/assets/large.dat').read(), source.read_bytes())
+
+    def test_desktop_metadata_revision_reuses_verified_mixed_snapshots(self):
+        remote = self.remote_file('model.xyz', b'original remote fixture')
+        original = dispatch(self.service, 'POST', '/api/cluster/prepare', {'spec':self.spec(remote_inputs={'assets/model.xyz':str(remote)})}, True)
+        identifier = original['id']
+        observed = dispatch(self.service, 'POST', '/api/cluster/observation', {'run_id':identifier}, True)
+        frozen = {item['name']:(Path(original['directory'])/'simulation'/item['name']).read_bytes() for item in original['snapshots']}
+        remote.unlink()
+        (self.inputs/'run.py').write_text('changed original fixture')
+        changes = {**{key:observed[key] for key in ('engine', 'resources', 'parameters', 'remote_inputs')},
+            'name':'Revised fixture', 'max_seconds':45, 'inputs':{'run.py':observed['directory']+'/simulation/run.py'}}
+        request = {'run_id':identifier, 'changes':changes}
+        calls = list(LocalTransferWire.calls)
+        with self.assertRaisesRegex(PermissionError, 'Desktop revision required'):
+            dispatch(self.service, 'POST', '/api/cluster/revise', request, False)
+        revised = dispatch(self.service, 'POST', '/api/cluster/revise', request, True)
+        self.assertEqual(LocalTransferWire.calls, calls)
+        self.assertEqual((revised['name'], revised['max_seconds']), ('Revised fixture', 45))
+        self.assertEqual(revised['revision_of'], identifier)
+        self.assertNotEqual(revised['id'], identifier)
+        self.assertNotEqual(revised['nonce'], original['nonce'])
+        self.assertNotEqual(revised['remote_directory'], original['remote_directory'])
+        self.assertEqual(revised['snapshots'], original['snapshots'])
+        self.assertEqual(revised['inputs'], original['inputs'])
+        self.assertEqual(revised['local_inputs'], original['local_inputs'])
+        self.assertEqual(revised['remote_inputs'], original['remote_inputs'])
+        self.assertEqual(revised['scientific_validation'], {'status':'not_run'})
+        self.assertIsNone(revised['job_id'])
+        for name, content in frozen.items():
+            snapshot = Path(revised['directory'])/'simulation'/name
+            self.assertEqual(snapshot.read_bytes(), content)
+            self.assertFalse(snapshot.samefile(Path(original['directory'])/'simulation'/name))
+        parent = self.clusters.raw(identifier)
+        self.assertEqual(parent['superseded_by'], revised['id'])
+        self.assertEqual(parent['status'], 'draft')
+        verified = dispatch(self.service, 'POST', '/api/cluster/validate', {'run_id':revised['id']}, True)
+        self.assertEqual(verified['validation']['status'], 'passed')
+
+    def test_desktop_revision_preserves_explicit_replacements_and_rejects_collisions(self):
+        old = self.remote_file('old.dat', b'old fixture')
+        new = self.remote_file('new.dat', b'new fixture')
+        outside = self.root/'outside.dat'; outside.write_text('out of scope')
+        replacement = self.inputs/'replacement.py'; replacement.write_text("print('replacement fixture')\n")
+        original = self.clusters.prepare(self.spec(remote_inputs={'asset.dat':str(old)}))
+        route = '/api/cluster/revise'
+        before = list(LocalTransferWire.calls)
+        with self.assertRaisesRegex(ValueError, 'same run filename'):
+            dispatch(self.service, 'POST', route, {'run_id':original['id'], 'changes':{'inputs':{'asset.dat':str(replacement)}}}, True)
+        self.assertEqual(LocalTransferWire.calls, before)
+        with self.assertRaises(ValueError):
+            dispatch(self.service, 'POST', route, {'run_id':original['id'], 'changes':{'remote_inputs':{'asset.dat':str(outside)}}}, True)
+        self.assertNotIn('superseded_by', self.clusters.raw(original['id']))
+        revised = dispatch(self.service, 'POST', route, {'run_id':original['id'], 'changes':
+            {'inputs':{'run.py':str(replacement)}, 'remote_inputs':{'asset.dat':str(new)}}}, True)
+        local, remote = revised['snapshots']
+        self.assertEqual((local['source'], local['source_kind']), (str(replacement), 'local'))
+        self.assertEqual((remote['source'], remote['source_kind']), (str(new), 'remote'))
+        self.assertNotEqual(remote['remote_identity'], original['snapshots'][1]['remote_identity'])
+        self.assertEqual((Path(revised['directory'])/'simulation'/'asset.dat').read_bytes(), new.read_bytes())
+
+    def test_desktop_revision_recovers_legacy_source_maps_and_rejects_mutated_snapshot(self):
+        remote = self.remote_file('asset.dat', b'original fixture')
+        original = self.clusters.prepare(self.spec(remote_inputs={'asset.dat':str(remote)}))
+        row = self.clusters.raw(original['id'])
+        row.pop('local_inputs'); row.pop('remote_inputs')
+        row['snapshots'][0].pop('source_kind')
+        self.clusters.store.put('cluster-run', row)
+        snapshot = Path(row['directory'])/'simulation'/'asset.dat'
+        snapshot.chmod(0o644); snapshot.write_bytes(b'changed immutable snapshot')
+        calls = list(LocalTransferWire.calls)
+        request = {'run_id':row['id'], 'changes':{'name':'Legacy revision'}}
+        with self.assertRaisesRegex(ValueError, 'Immutable input snapshot changed'):
+            dispatch(self.service, 'POST', '/api/cluster/revise', request, True)
+        self.assertEqual(LocalTransferWire.calls, calls)
+        self.assertEqual([run['id'] for run in self.clusters.store.list('cluster-run')], [row['id']])
+        self.assertEqual(list((self.service.root/'cluster-runs').iterdir()), [Path(row['directory'])])
+        snapshot.write_bytes(b'original fixture'); snapshot.chmod(0o444)
+        revised = dispatch(self.service, 'POST', '/api/cluster/revise', request, True)
+        self.assertEqual(LocalTransferWire.calls, calls)
+        self.assertEqual(revised['snapshots'], original['snapshots'])
 
     def test_simultaneous_prepare_retries_share_one_remote_snapshot(self):
         from concurrent.futures import ThreadPoolExecutor

@@ -4,6 +4,7 @@ import {pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {assertRpc} from '../../contracts/transport-policy.mjs';
 import {providerId} from '../providers/contracts.mjs';
+import {API_PROVIDER_GROUPS} from '../../contracts/agent/model-profiles.mjs';
 import {isWorkspaceContext,visibleUserText} from "../../contracts/agent/user-message.mjs";
 
 import {ensureTaskAuthoring} from '../../backend/main/workspace/task-authoring.mjs';
@@ -25,6 +26,7 @@ export function createAgentRequests({runtime}){
  async function request({provider,method,params={}},{notification}={}){
  const {agents,catalog,taskRecords,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,recordUserTurn,emit,openUrl,root,app}=runtime();
  providerId(provider);assertRpc(method);
+ if(method==='thread/read'&&API_PROVIDER_GROUPS.includes(provider))return agents.rpc(provider,method,params);
  const userParams=params;
  const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(provider,params.threadId),selectedSsh=['ssh-terminal','ssh-connection'].includes(resource?.selection?.kind)?resource.selection:null;
@@ -48,7 +50,7 @@ export function createAgentRequests({runtime}){
  }
  const managed=Array.isArray(resource?.resources);
  const managedOnly=managed&&turnFlags&&!resourceRouting.scopedWorkerConnection?.({...workflowContext.current(),sessionId:workflowContext.sessionId?.(),checkCurrent:()=>{try{check();return true;}catch{return false;}}});
- if(method==='turn/start'&&['qwen','compatible'].includes(provider))modelCurrent=agents.bridge?.(provider)?.prepareTurnModel?.(params);
+ if(method==='turn/start'&&API_PROVIDER_GROUPS.includes(provider))modelCurrent=agents.prepareApiTurnModel?.(provider,params)??agents.bridge?.(provider)?.prepareTurnModel?.(params);
   if(selectedSsh&&['turn/start','turn/steer'].includes(method)){await selectedTerminalReady();terminalOnly=resourceRouting.workerSelected?.(provider,params.threadId)!==true;}
  else terminalOnly=!managed&&['turn/start','turn/steer'].includes(method)&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
  if(method==='turn/steer'&&!terminalOnly){const task=taskRecords.bound(provider,params.threadId);if(task&&(!managedOnly||task.customCv?.id)&&(await privateAccess.assertTask(task,provider)).definitionOnly)throw Error('Send a new definition-only message after the current reply completes; private steering does not accept automatic workspace context');check();}

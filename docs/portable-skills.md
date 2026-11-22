@@ -18,7 +18,9 @@ node scripts/localize-skill.mjs --profile <private-profile.json> --repo <checkou
 
 脚本核对目标为精确 Git 根目录、目标文件真实受 ignore 规则保护且未被跟踪，并拒绝目录链接/junction 越界。在临时子目录写完整后重命名，输出 `profile.json`、`SKILL.md` 和 `provenance.json`。已有同 ID overlay 不覆盖；修改时用新 ID 保存，确认后再在 AIMatterLab 中选择新版本。输出状态始终是 `validation_status=not_run`，没有真实探测或运行时不得改称通过。
 
-在 AIMatterLab 的额外技能根目录登记生成的私有目录，或其父目录 `.studio/local-skills`。源 checkout 默认发现 `agent/builtin-skills`，便携包默认发现物理目录 `resources/studio-skills`；这一根目录同时用于技能库和所选技能的注册校验。选定技能后，Codex 使用真实文件路径；Kimi、Qwen、DeepSeek API 由主进程校验后组装受限附件：AIMatterLab 公共入口及关联 references；生成的私有 overlay 还包含经 schema 和 provenance 核对的同目录元数据。父入口固定映射到已登记 bundled 根，不按任意相对路径读取。每项文件和总内容有大小及数量上限，拒绝链接/越界/缺失/过期附件；不读取 local_skill_refs 全文。其他已登记 skill 保持仅入口注入。renderer 不直接读文件，原有显式额外目录保持有效。
+在额外技能根目录登记生成的私有目录，或其父目录 `.studio/local-skills`。源码默认发现 `agent/builtin-skills`，便携包默认发现 `resources/studio-skills`。主进程根据登记的根目录、所选入口和读取权限解析内容。Codex、Kimi、Qwen、DeepSeek 和兼容 API 收到经核验的文本。普通登记技能只附带所选入口正文。
+
+对公共计算技能，首轮附带入口正文及可按需读取的参考文档 ID。模型需要某份资料时，通过对应功能的 `read_scientific_skill(function_id, document_id)` 读取。选择生成的私有 overlay 还会附带固定公共父入口，以及通过 schema 和来源校验的 `profile.json`、`provenance.json`。其中的 `local_skill_refs` 只作为路径引用。主进程限制附件数量、单项与总字节数，并核验路径、链接、来源及读取时的文件身份。[所选技能组装](../agent/skills/skill-context.mjs) · [逐轮投递](../agent/sessions/requests.mjs)
 
 打包规则仅将 `agent/builtin-skills/**` 复制为 `resources/studio-skills`，并将通用 localizer 和作业核对脚本复制为 `resources/studio-tools/localize-skill.mjs`、`resources/studio-tools/cluster-reconcile.mjs`。不会将 `.studio/local-skills`、profile JSON、用户级 skill 或本机特化目录作为资源源路径。localizer 要求显式指定用户选择的完整 Git checkout；即使从便携包执行工具，输出也写该 checkout 的忽略目录，不能写 Electron 的资源目录。新用户安装时用其本机登记重新生成 overlay，不能拷贝开发者 `.studio`。
 
@@ -28,7 +30,7 @@ node scripts/localize-skill.mjs --profile <private-profile.json> --repo <checkou
 
 `node --test tests/integration/skill-portability.test.mjs` 使用独立 Git 仓库验证可迁移父 skill 引用、精确元数据保存、不读取私有 skill、无越界写入、ignore 例外/已跟踪文件拒绝、已有 overlay 不覆盖及 CLI 日志脱敏。公开模板还检查机器路径、IP 端点及密钥材料未进入通用 skill。
 
-软件内服务商支持 Codex / Kimi / Qwen / DeepSeek API；DeepSeek Key 由用户在 Agent 登录窗口输入并加密保存，不属于 profile schema 或可迁移模板。选择服务商、存在凭据或读取模型目录都不能算作模型推理验证，需要对应账户的一次真实回复。
+模型凭据由用户在服务商设置中输入，保存在本机凭据存储中。可迁移模板只记录计算配置引用。模型推理验证须有对应账户的一次真实回复。
 
 这些是软件与隐私边界测试，不证明 SSH 可用、引擎可以计算或科学结果有效。实际集群短例必须另有对应 worker Run、调度任务、compute-node 验证、退出收据和本地回收文件；证据留在忽略运行目录，公开版本报告只保留脱敏范围与 passed / failed / blocked / not_run。
 

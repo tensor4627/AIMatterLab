@@ -1,14 +1,45 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import {ScientificSkillRouter} from "../../agent/skills/scientific-skill-router.mjs";
+import {ScientificSkillContext} from '../../agent/skills/scientific-context.mjs';
+import {PROVIDERS} from '../../agent/providers/contracts.mjs';
 import {fileURLToPath} from 'node:url';
 async function fixture(t){const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-route-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));await fs.mkdir(path.join(root,'public-cv'));await fs.writeFile(path.join(root,'public-cv','SKILL.md'),'actual public CV instructions');const map={schema_version:1,skills:[{id:'cv',source:'pygas',folder:'public-cv',files:['SKILL.md']}],functions:[{id:'cv.compose',phase:'authoring',skills:['cv'],engines:['pygas.build'],status:'source_guidance'},{id:'env.install',phase:'installation',skills:['cv'],status:'setup_only'}]};return {root,map};}
-test('All four authenticated providers load only their consented bounded route with hash receipts',async t=>{
- const {root,map}=await fixture(t),router=new ScientificSkillRouter({map,sourceRoot:()=>root,consent:(provider,source)=>provider==='codex'&&source==='pygas'});
- for(const provider of ['codex','kimi','qwen','deepseek']){const result=await router.read(provider,'cv.compose');assert.equal(result.status,provider==='codex'?'passed':'permission_required');if(provider==='codex'){assert.match(result.text,/actual public CV/);assert.equal(result.attachments.length,1);assert.match(result.attachments[0].sha256,/^[a-f0-9]{64}$/);}else assert.deepEqual(result.attachments,[]);}
+test('Each authenticated provider needs its own consent before receiving bounded text and a hash receipt',async t=>{
+ const {root,map}=await fixture(t);
+ let granted;
+ const router=new ScientificSkillRouter({map,sourceRoot:()=>root,consent:(provider,source)=>provider===granted&&source==='pygas'});
+ for(const provider of PROVIDERS){
+  granted=provider;
+  const result=await router.read(provider,'cv.compose');
+  assert.equal(result.status,'passed');assert.match(result.text,/actual public CV/);
+  assert.equal(result.attachments.length,1);assert.match(result.attachments[0].sha256,/^[a-f0-9]{64}$/);
+  granted=undefined;
+  const denied=await router.read(provider,'cv.compose');
+  assert.equal(denied.status,'permission_required');assert.deepEqual(denied.attachments,[]);assert.equal(denied.text,undefined);
+ }
  assert.equal((await router.catalog('kimi')).functions[0].permission,'permission_required');await assert.rejects(router.read('other','cv.compose'),/authenticated/);await assert.rejects(router.read('codex','../../private'),/listed/);
 });
 test('Revoked permission is rechecked even after body reads and no partial source leaks',async t=>{
  const {root,map}=await fixture(t);let checks=0;const router=new ScientificSkillRouter({map,sourceRoot:()=>root,consent:()=>++checks===1});const result=await router.read('codex','cv.compose');assert.equal(result.status,'permission_required');assert.deepEqual(result.attachments,[]);assert.equal(result.text,undefined);
+});
+test('A bound workflow delivers the requested structure guide and offers only its focused reference',async()=>{
+ const map=JSON.parse(await fs.readFile(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
+ const root=fileURLToPath(new URL('../../agent/builtin-skills/',import.meta.url));
+ const router=new ScientificSkillRouter({map,sourceRoot:()=>root,consent:()=>false});
+ const context=new ScientificSkillContext(router);
+ for(const [prompt,route,reference] of [
+  ['从 Materials Project 导入 mp-30','structure.materials-project','materials-project.json'],
+  ['用 ASE 生成一个铜晶胞','structure.ase','ase.json'],
+ ]){
+  const entry=await context.prepare('workflow','compatible',{text:prompt,hasWorkflow:true,parameters:{engine:'gpumd.md'}});
+  assert.equal(entry.status,'passed');assert.deepEqual(entry.routes,['workflow.orchestrate',route]);
+  const document='studio-data-workflow/references/'+reference;
+  assert.deepEqual(router.documentIds(route).filter(name=>name.includes('/references/')),[document]);
+  assert(!entry.attachments.some(file=>file.name===document));
+  const focused=await router.read('compatible',route,document);
+  assert.equal(focused.status,'passed');assert.equal(focused.text,await fs.readFile(path.join(root,document),'utf8'));
+  context.accept('workflow',entry);
+ }
 });
 test('A change to the rendered route instruction invalidates guidance delivery even with identical skill bytes',async t=>{
  const {root,map}=await fixture(t);

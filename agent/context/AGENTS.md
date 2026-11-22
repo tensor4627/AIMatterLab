@@ -10,7 +10,7 @@ Match the first user message and current intent. Check the project index for sub
 - Use `scientific_skill_catalog` and `read_scientific_skill` for the matching function and exact advertised document_id. To select a setup guide use 科学资源与技能 → 用于下条消息.
   - Resources and jobs — `compute.queue`, `environment.probe`, `cluster.lsf-slurm-deployment`, `cluster.connection-setup`, `cluster.workspace-setup`, `installation.readiness`.
   - New, existing or custom tools — `cluster.resource-tools`. After the target test, save and reread the execution skill with `scope="resource"` and the resource ID. Reuse it on that resource. Find the chat's work directory with `read_session_workspace`.
-  - Assets and workflows — `structure.ase`, `assets.inspect-register`, `viewer.structure-trajectory`, `workflow.roadmap`.
+  - Assets and workflows — `structure.materials-project`, `structure.ase`, `assets.inspect-register`, `viewer.structure-trajectory`, `workflow.roadmap`.
   - Engine routes — for example `md.pydyn`, `sampling.gpumd`, `pygas.cv`, `analysis.number-density`, `analysis.trajectory`, `training.nep`.
 
 ## Operating scope

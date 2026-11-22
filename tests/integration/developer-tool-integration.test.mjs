@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {spawnSync,execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {Catalog} from "../../backend/main/workspace/catalog.mjs";
@@ -13,13 +13,16 @@ import {managedToolSkillContext} from "../../agent/skills/managed-tool-context.m
 import {createReadPolicy,legacyGuidanceFacts} from "../../agent/skills/read-policy.mjs";
 
 const skill=fileURLToPath(new URL("../../developer/skills/studio-tool-integration",import.meta.url)),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
-function fixture(t){
+const python=process.env.STUDIO_TEST_PYTHON||(process.platform==='win32'?'python':'python3');
+function fixture(t,{fromZip=false}={}){
  let catalog;const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-developer-kit-'));t.after(()=>{
   catalog?.db.close();
   const relative=path.relative(os.tmpdir(),root);assert(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative));
   function unlock(directory){fs.chmodSync(directory,0o755);for(const entry of fs.readdirSync(directory,{withFileTypes:true})){const file=path.join(directory,entry.name);if(entry.isSymbolicLink())continue;if(entry.isDirectory())unlock(file);else fs.chmodSync(file,0o644);}}unlock(root);fs.rmSync(root,{recursive:true,force:true,maxRetries:3});
  });
- const copied=path.join(root,'external','studio-tool-integration'),cwd=path.join(root,'unrelated-cwd');fs.mkdirSync(cwd);fs.cpSync(skill,copied,{recursive:true});
+ const copied=path.join(root,'external','studio-tool-integration'),cwd=path.join(root,'unrelated-cwd');fs.mkdirSync(cwd);
+ if(fromZip)execFileSync(python,['-m','zipfile','-e',skill+'.zip',path.dirname(copied)],{windowsHide:true});
+ else fs.cpSync(skill,copied,{recursive:true});
  const output=path.join(root,'author-workspace','cpu-worker-reference-package');
  const run=(script,...args)=>spawnSync(process.execPath,[path.join(copied,'scripts',script),...args],{cwd,encoding:'utf8',windowsHide:true,env:{...process.env,NODE_OPTIONS:''}});
  const create=()=>{const result=run('create-cpu-reference.mjs','--output',output);assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout);};
@@ -31,8 +34,12 @@ test('the portable schema, pure validator and fixed reference asset match their 
  for(const [copy,canonical]of [['references/tool-package.schema.json','contracts/tools/tool-package.schema.json'],['references/tool-package.mjs','contracts/tools/tool-package.mjs'],['assets/worker-smoke.py','installation/examples/worker-smoke.py']])assert.equal(sha(fs.readFileSync(path.join(skill,copy))),sha(fs.readFileSync(new URL("../../"+canonical,import.meta.url))));
 });
 
-test('an external copied skill creates a real Git delivery package and validates it without AIMatterLab source access',t=>{
- const h=fixture(t),generated=h.create();assert.equal(generated.scope,'generated_only');assert.equal(generated.installation.status,'not_run');assert.equal(generated.tests.status,'not_run');
+test('the downloaded skill creates and validates a Git delivery package outside the AIMatterLab checkout',async t=>{
+ const h=fixture(t,{fromZip:true});
+ const {normalizeInlineSchema}=await import(pathToFileURL(path.join(h.copied,'references/tool-package.mjs')).href);
+ assert.equal(typeof normalizeInlineSchema,'function');
+ assert(Object.hasOwn(JSON.parse(fs.readFileSync(path.join(h.copied,'references/engine-contracts.json'),'utf8')).engines,'trajectory.density'));
+ const generated=h.create();assert.equal(generated.scope,'generated_only');assert.equal(generated.installation.status,'not_run');assert.equal(generated.tests.status,'not_run');
  const generatedInstall=fs.readFileSync(path.join(h.output,'install.md'),'utf8');assert.match(generatedInstall,/\n\nAIMatterLab currently supports/);assert.doesNotMatch(generatedInstall,/\n\nStudio currently supports/);
  const checked=h.run('check-manifest.mjs',path.join(h.output,'tool.json'));assert.equal(checked.status,0,checked.stderr);const declaration=JSON.parse(checked.stdout);assert.equal(declaration.scope,'schema_checked');assert.equal(declaration.tests.status,'not_run');assert.equal(declaration.manifest.environment.parallelism.threads,1);assert.equal(declaration.manifest.environment.parallelism.gpus,0);
  const repo=path.join(h.output,'reference-source'),config=sha(fs.readFileSync(path.join(repo,'.git/config'))),index=sha(fs.readFileSync(path.join(repo,'.git/index'))),inspected=h.registry.inspect({package_root:h.output});assert.equal(inspected.scope,'definition_checked');assert.equal(inspected.installation.status,'not_run');assert.equal(inspected.tests.status,'not_run');assert.equal(inspected.source_commit,generated.source_commit);assert.equal(inspected.manifest.repository.commit,generated.source_commit);assert.equal(inspected.delivery_skill.name,'cpu-worker-reference-delivery');
@@ -75,6 +82,7 @@ test('generated delivery Markdown links connect the registered snapshot to compl
 });
 
 test('the published zip includes every current skill file with identical bytes',()=>{
- const program="import hashlib,json,pathlib,sys,zipfile\nroot=pathlib.Path(sys.argv[1]); archive=pathlib.Path(sys.argv[2])\nexpected={root.name+'/'+str(p.relative_to(root)).replace('\\\\','/'):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob('*') if p.is_file()}\nwith zipfile.ZipFile(archive) as z:\n actual={p.filename:hashlib.sha256(z.read(p)).hexdigest() for p in z.infolist() if not p.is_dir()}\nassert actual==expected, json.dumps({'missing':sorted(set(expected)-set(actual)),'extra':sorted(set(actual)-set(expected)),'different':[k for k in expected if k in actual and expected[k]!=actual[k]]})\nprint(json.dumps({'files':len(actual),'status':'passed'}))";
- const result=spawnSync('python',['-X','utf8','-c',program,skill,skill+'.zip'],{encoding:'utf8',windowsHide:true});assert.equal(result.status,0,result.stderr);assert(JSON.parse(result.stdout).files>=8);
+ const script=fileURLToPath(new URL('../../scripts/package-developer-kit.py',import.meta.url));
+ const result=spawnSync(python,['-X','utf8',script,'--check'],{encoding:'utf8',windowsHide:true});
+ assert.ifError(result.error);assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout).status,'checked');
 });

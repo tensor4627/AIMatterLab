@@ -834,6 +834,43 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   await p.clock.install();await p.evaluate(async()=>{const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:'run',onError:()=>{},onAgent:()=>{}}));});
   const text=p.locator('.cluster-review textarea');await text.waitFor();await p.locator('.cluster-review input[type=checkbox]').check();await text.fill('{"temperature":345}');await p.clock.runFor(10050);assert.equal(await text.inputValue(),'{"temperature":345}');
  });
+ await check('cluster-mixed-inputs-review-revision',async p=>{
+  await p.evaluate(async()=>{
+   const f=window.__test,remote='/remote-fixture/assets/model.xyz';
+   let clusterRun={...f.run,id:'mixed-draft',name:'Mixed cluster fixture',kind:'cluster-run',cluster_id:'fixture-cluster',cluster:{scheduler:'slurm'},
+    resources:{cpus:1,gpus:0,memory_mb:1024},job_id:null,scientific_validation:{status:'not_run'},script:'# original fixture',
+    inputs:{...f.run.inputs,'assets/model.xyz':remote},remote_inputs:{'assets/model.xyz':remote},snapshots:[
+     {name:'run.py',source:'/fixture/run.py',source_kind:'local',sha256:'a'.repeat(64),size:13},
+     {name:'assets/model.xyz',source:remote,source_kind:'remote',sha256:'b'.repeat(64),size:17}]};
+   f.responses={
+    '/api/cluster/observation':({data})=>{if(data.run_id!==clusterRun.id)throw Error('Unexpected observed run');return clusterRun;},
+    '/api/cluster/revise':({data})=>{if(data.run_id!==clusterRun.id)throw Error('Unexpected revision parent');
+     clusterRun={...clusterRun,...data.changes,id:'mixed-revision',directory:'/fixture/mixed-revision',script:'# revised fixture'};return clusterRun;},
+   };
+   const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');
+   window.testRoot.render(window.React.createElement(ClusterRunPage,{id:clusterRun.id,onError:error=>{throw error;},onAgent(){}}));
+  });
+  const panel=p.getByTestId('cluster-review');
+  await panel.getByRole('heading',{name:'Mixed cluster fixture',exact:true}).waitFor();
+  await panel.getByRole('checkbox',{name:'修改参数并创建新快照',exact:true}).check();
+  const editor=panel.getByRole('textbox',{name:'运行参数',exact:true});
+  const draft=JSON.parse(await editor.inputValue());
+  assert.deepEqual(draft.inputs,{'run.py':'/fixture/run/simulation/run.py'});
+  assert.deepEqual(draft.remote_inputs,{'assets/model.xyz':'/remote-fixture/assets/model.xyz'});
+  assert.match(await panel.locator('.page-heading p').innerText(),/科学检查结果供参考.*执行检查须在计算节点通过/);
+  await editor.fill(JSON.stringify({...draft,name:'Mixed cluster revision',max_seconds:45}));
+  await panel.getByRole('button',{name:'保存修订并预览脚本',exact:true}).click();
+  await panel.getByRole('heading',{name:'Mixed cluster revision',exact:true}).waitFor();
+  await p.waitForFunction(()=>window.__test.calls.some(call=>call.data?.target==='/api/cluster/observation'&&call.data.data.run_id==='mixed-revision'));
+  assert.equal(await panel.locator('.batch-script').innerText(),'# revised fixture');
+  const requests=await p.evaluate(()=>window.__test.calls.filter(call=>call.data?.target==='/api/cluster/revise').map(call=>call.data.data));
+  assert.equal(requests.length,1);
+  assert.equal(requests[0].run_id,'mixed-draft');
+  assert.equal(requests[0].changes.max_seconds,45);
+  assert.deepEqual(requests[0].changes.inputs,draft.inputs);
+  assert.deepEqual(requests[0].changes.remote_inputs,draft.remote_inputs);
+  assert.equal(await p.evaluate(()=>window.__test.calls.some(call=>call.data?.target==='/api/cluster/submit')),false);
+ });
  await check('task-edits-survive-update',async p=>{
   await p.evaluate(async()=>{window.props={worker:true,task:{id:'task',name:'Fixture task',updatedAt:1,parameters:{temperature:300},artifacts:[]},environments:[],theme:'dark',onError:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onAgent:()=>{},onReview:()=>{},onReplace:()=>{},onRefresh:()=>{}};window.__test.task=window.props.task;await window.renderTest('AgentTaskPage',window.props);});
   await p.locator('.visual-step-heading').click();const input=p.locator('[data-field="temperature"] input');await input.fill('345');await p.waitForFunction(()=>window.__test.task.parameters.temperature===345);await p.evaluate(()=>window.renderTest('AgentTaskPage',{...window.props,task:{...window.__test.task,updatedAt:3,artifacts:[{kind:'workflow',id:'fixture'}]}}));assert.equal(await input.inputValue(),'345');
@@ -850,7 +887,7 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   const prompt=p.locator('.composer textarea');await prompt.fill('准备 MD');await p.locator('.composer .send').click();await p.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='turn/start'));const first=await p.evaluate(()=>window.__test.task.id);await p.evaluate(()=>window.__test.events.forEach(fn=>fn({provider:'codex',method:'turn/completed',params:{threadId:'fixture-thread',turn:{id:'fixture-turn',status:'completed'}}})));await p.getByTestId('agent-planning-mode').uncheck();await prompt.fill('温度改成345 K');await p.locator('.composer .send').click();await p.waitForFunction(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').length===2);assert.equal(await p.evaluate(()=>window.__test.task.id),first);assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='task.create').length),1);assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').at(-1).data.params.studioTaskId),first);
  });
  await check('unreviewed-direct-cluster-run-submits-without-optional-validation-prerequisite',async p=>{
-  await p.evaluate(async()=>{const f=window.__test;f.clusterRun={...f.run,id:'cluster-advisory',kind:'cluster-run',status:'draft',cluster:{scheduler:'slurm'},resources:{queue:'fixture',cpus:1,gpus:1,memory_mb:1024},snapshots:[],script:'# synthetic fixture',scientific_validation:{status:'failed',message:'Recorded optional check'},validation:{status:'failed',scope:'Recorded optional check'}};f.clusterSubmitted=[];f.responses={'/api/cluster/status':()=>f.clusterRun,'/api/cluster/log':()=>({offset:0,text:''}),'/api/cluster/submit':request=>{f.clusterSubmitted.push(request.data.run_id);f.clusterRun={...f.clusterRun,status:'queued'};return f.clusterRun;}};const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:f.clusterRun.id,onAgent(){},onError:error=>{throw error;}}));});
+  await p.evaluate(async()=>{const f=window.__test;f.clusterRun={...f.run,id:'cluster-advisory',kind:'cluster-run',status:'draft',cluster:{scheduler:'slurm'},resources:{queue:'fixture',cpus:1,gpus:1,memory_mb:1024},snapshots:[],script:'# synthetic fixture',scientific_validation:{status:'failed',message:'Recorded optional check'},validation:{status:'not_run'}};f.clusterSubmitted=[];f.responses={'/api/cluster/observation':()=>f.clusterRun,'/api/cluster/submit':request=>{f.clusterSubmitted.push(request.data.run_id);f.clusterRun={...f.clusterRun,status:'queued'};return f.clusterRun;}};const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:f.clusterRun.id,onAgent(){},onError:error=>{throw error;}}));});
   await p.getByTestId('cluster-review').waitFor();await p.getByRole('button',{name:'审阅完成，提交到集群',exact:true}).click();await p.waitForFunction(()=>window.__test.clusterRun.status==='queued');assert.deepEqual(await p.evaluate(()=>window.__test.clusterSubmitted),['cluster-advisory']);assert.equal(await p.evaluate(()=>window.__test.calls.filter(call=>call.data?.target==='/api/cluster/validate').length),0);assert.equal(await p.evaluate(()=>window.__test.clusterRun.scientific_validation.status),'failed');
  });
  await check('unreviewed-direct-run-submit-uses-actual-input-gates-without-review-prerequisite',async p=>{

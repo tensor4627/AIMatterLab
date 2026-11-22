@@ -1,11 +1,30 @@
 check-version-skills:
   stage: test
-  image: node:24-bookworm-slim
+  image: node:24-bookworm
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$/'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)'
+      changes:
+        - .gitlab-ci.yml
+        - package.json
+        - pnpm-lock.yaml
+        - agent/**/*
+        - backend/**/*
+        - contracts/**/*
+        - desktop/**/*
+        - developer/**/*
+        - docs/**/*
+        - frontend/**/*
+        - installation/**/*
+        - scripts/**/*
+        - tests/**/*
+        - "*.md"
   script:
+    - node scripts/sync-tool-contracts.mjs --check
+    - python3 scripts/package-developer-kit.py --check
+    - node scripts/check-doc-links.mjs
     - node scripts/check-bundled-guidance.mjs --source
-    - node --test tests/agent/scientific-context.test.mjs tests/agent/scientific-skill-router.test.mjs
+    - node --test tests/agent/scientific-context.test.mjs tests/agent/scientific-skill-router.test.mjs tests/agent/skill-context.test.mjs tests/agent/harness-guidance.test.mjs tests/contracts/engine-enum-consistency.test.mjs
 
 mirror-main-to-github:
   stage: deploy

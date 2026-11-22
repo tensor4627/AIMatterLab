@@ -4,15 +4,83 @@ import io
 import zipfile
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 from studio_worker.tools.adapters import Adapter
 from studio_worker.infrastructure.util import contained, stable_file_snapshot
 
 
+_PRIVATE_DIAGNOSTIC = re.compile(
+    r'''(\bBearer\s+)[^\s"'<>]+|((?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|'''
+    r'''client[_-]?secret|private[_-]?key)["']?\s*[=:]\s*)(?:(?:Bearer|Basic)\s+)?(?:"[^"]*"|'[^']*'|[^\s,"'<>}]+)|\bsk-[A-Za-z0-9_-]+''',
+    re.IGNORECASE,
+)
+_NATIVE_RUNTIME_FIELDS = ("status", "executable", "sha256", "scope")
+
+
+def _evidence_text(value):
+    value = _PRIVATE_DIAGNOSTIC.sub(lambda match: (match[1] or match[2] or "") + "[redacted]", value)
+    return value if len(value) <= 12000 else value[:12000] + " [truncated]"
+
+
+def _evidence_fields(record, fields):
+    return {key: _evidence_text(value) if isinstance(value, str) else value
+            for key, value in record.items() if key in fields and (value is None or type(value) in (str, int, float, bool))}
+
+
+def _module_names(evidence, record):
+    names = record.get("modules")
+    if isinstance(names, list):
+        evidence["modules"] = [_evidence_text(name) for name in names if isinstance(name, str)]
+
+
+def _export_provenance(record):
+    evidence = _evidence_fields(record, ("status", "error", "observed_at", "platform", "python", "executable", "scope",
+        "cuda", "cuda_available", "gpu", "pydyn_sampling", "pydyn_sampling_origin", "sampling_error",
+        "pydyn_sampling_status", "process_limits_status"))
+    for key, fields in (
+        ("scope", ("engine",)),
+        ("native_runtime", _NATIVE_RUNTIME_FIELDS),
+        ("pygas_upstream", ("commit", "version")),
+        ("pygas_capabilities", ("CVOnlyProcedure", "MetaDProcedure", "WTMetaDProcedure", "OPESProcedure", "export_model_bundle")),
+    ):
+        if isinstance(record.get(key), dict):
+            evidence[key] = _evidence_fields(record[key], fields)
+    if isinstance(record.get("scope"), dict):
+        _module_names(evidence["scope"], record["scope"])
+    for key, fields in (
+        ("modules", ("version", "file", "status", "error", "registration_match", "source_sha256", "source_hash_status")),
+        ("repositories", ("path", "commit", "dirty", "status", "reason")),
+    ):
+        if isinstance(record.get(key), dict):
+            evidence[key] = {name: _evidence_fields(section, fields) for name, section in record[key].items() if isinstance(section, dict)}
+    if isinstance(record.get("process_limits"), dict):
+        evidence["process_limits"] = {name: limits for name, limits in record["process_limits"].items()
+            if name in ("address_space", "data", "rss", "stack") and isinstance(limits, list)
+            and len(limits) == 2 and all(type(value) is int for value in limits)}
+    return evidence
+
+
+def _export_execution_check(record):
+    evidence = _evidence_fields(record, ("status", "required", "checked_at", "message", "scope"))
+    report = record.get("report")
+    if isinstance(report, dict):
+        details = _evidence_fields(report, ("status", "artifact_status", "scientific_status", "scope"))
+        _module_names(details, report)
+        if isinstance(report.get("native_runtime"), dict):
+            details["native_runtime"] = _evidence_fields(report["native_runtime"], _NATIVE_RUNTIME_FIELDS)
+        if isinstance(report.get("provenance"), dict):
+            details["provenance"] = _export_provenance(report["provenance"])
+        evidence["report"] = details
+    return evidence
+
+
 class RunArtifactsMixin:
     def collect(self, identifier, names=None):
-        run = self.store.run(identifier)
+        return self._collect_run_artifacts(self.store.run(identifier), names)
+
+    def _collect_run_artifacts(self, run, names=None):
         return {"run": run["id"], "artifacts": Adapter(run["engine"]).collect(
                 Path(run["directory"]) / "results", names), "validation": run["validation"], "observation":"live_metadata" if names is None else "selected_hash_snapshots", "observed_at":time.time()}
 
@@ -47,7 +115,7 @@ class RunArtifactsMixin:
 
     def export(self, identifier):
         run = self.store.run(identifier)
-        collected = self.collect(identifier)
+        collected = self._collect_run_artifacts(run)
         buffer = io.BytesIO()
         included, omitted, budget = [], [], 32 * 1024 * 1024
         files, omitted_outputs = [], []
@@ -98,10 +166,16 @@ class RunArtifactsMixin:
                          "request_hash","studio_workflow_binding","parent_run","status") if key in run}
             environment = run.get("environment_snapshot") or {}
             execution["environment"] = {key:environment[key] for key in ("id","name","provider","version","executables","repositories") if key in environment}
+            # These are worker-owned SQLite observations. A log may be absent or
+            # stale; it stays a separately hashed file and cannot supply these fields.
+            if isinstance(run.get("provenance"), dict):
+                execution["provenance"] = _export_provenance(run["provenance"])
+            if isinstance(run.get("execution_check"), dict):
+                execution["execution_check"] = _export_execution_check(run["execution_check"])
             archive.writestr("reproduction.json", json.dumps({**collected, "execution":execution,
                 "exported_at":time.time(), "included_inputs":included, "omitted_inputs":omitted,
                 "included_files":files,"omitted_outputs":omitted_outputs,
                 "scope":"Hashes describe included stable file bytes only. Live artifact metadata is an observation; scientific validity is separate."}, indent=2))
-            archive.writestr("README.txt", "Inputs are immutable copies. reproduction.json lists every included input, output and log with its snapshot hash, plus omitted files and reasons. Large inputs are listed by source and SHA256. Other artifact metadata is a live observation without a hash. Scientific validity is separate from process completion.")
+            archive.writestr("README.txt", "Inputs are immutable copies. reproduction.json lists every included input, output and log with its snapshot hash, plus omitted files and reasons. Large inputs are listed by source and SHA256. Other artifact metadata is a live observation without a hash. The execution record includes available worker-recorded runtime provenance and execution checks, with allowlisted fields and bounded diagnostics. Scientific validity is separate from process completion.")
         bundle = buffer.getvalue()
         return {"base64":base64.b64encode(bundle).decode(), "sha256":hashlib.sha256(bundle).hexdigest(), "omitted_inputs":omitted}

@@ -6,7 +6,7 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from studio_worker.infrastructure.store import encoded
+from studio_worker.infrastructure.store import encoded, supervisor_connection
 
 
 LAUNCH_SCHEMA = "studio-local-launch-v1"
@@ -132,8 +132,7 @@ def child_launch_gate(directory, launch):
     if not uses_launch_protocol(launch):
         yield None
         return
-    connection = sqlite3.connect(Path(launch["store_root"]) / "worker.sqlite", timeout=10)
-    try:
+    with supervisor_connection(launch["store_root"], timeout=10) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         run = read_claimed_run(connection, directory, launch)
         if run["status"] not in ("running", "unknown") or run.get("cancel_requested"):
@@ -160,22 +159,13 @@ def child_launch_gate(directory, launch):
                 try: os.fsync(descriptor)
                 finally: os.close(descriptor)
         yield connection
-        connection.commit()
-    except BaseException:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
 
 def cancellation_requested(directory, launch):
     if not uses_launch_protocol(launch):
         return False
-    connection = sqlite3.connect(Path(launch["store_root"]) / "worker.sqlite", timeout=.1)
-    try:
+    with supervisor_connection(launch["store_root"], timeout=.1) as connection:
         run = read_claimed_run(connection, directory, launch)
-    finally:
-        connection.close()
     return run.get("cancel_requested", False) or run["status"] not in ("running", "unknown")
 
 

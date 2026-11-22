@@ -19,6 +19,8 @@ When defining a workflow or changing its deliverables, producers or input source
 
 Select only the functional route for the present stage through `scientific_skill_catalog`. Its first read supplies skill entries; fetch only needed supporting documents with `read_scientific_skill(function_id, document_id)` using advertised IDs. Do not preload downstream build, installation, sampling and analysis guidance. Reuse acknowledged unchanged guidance and current selected-runtime receipts.
 
+If the user asks to search or import a material from Materials Project, use `structure.materials-project`. Use `structure.ase` for an explicit structure creation request. Keep the workflow and its chosen engine when preparing these inputs for a later run.
+
 For scientific input preparation or changes, read [the authoring procedure](references/authoring.md) as `studio-main-agent/references/authoring.md` on `workflow.orchestrate`. It covers evidence-driven questions, versioned environment/API reads, pyGAS composition, parameter forms, real file handoff and stage boundaries. Status-only inspection does not need this procedure. Installation guidance belongs only to an explicit setup/repair stage.
 
 Use AIMatterLab tools to save real, reviewable inputs in the same workflow. A future build artifact is an output of its actual build stage. Report actual saved inputs, remaining scientific choices and checks still `not_run`. Continue within the current user delegation through checks, execution and repair; honor explicit draft-only/no-run/stop requests. This skill, tool access and planning mode cannot grant project/resource authorization. Never automatically resubmit unknown work.

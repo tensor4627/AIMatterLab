@@ -1,19 +1,20 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {createHash} from 'node:crypto';import {spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
 import {ScientificSkills} from "../../agent/skills/scientific-skills.mjs";import {toolValueResult} from "../../agent/tools/tool-failure.mjs";
+import {PROVIDERS} from '../../agent/providers/contracts.mjs';
 const skillId='studio-opes-analysis',reference='references/cli-contract.json',documentId=skillId+'/'+reference,sha=value=>createHash('sha256').update(value).digest('hex');
 const map=JSON.parse(await fs.readFile(new URL("../../agent/skills/scientific-skill-map.json",import.meta.url),'utf8')),documentBody=await fs.readFile(new URL("../../agent/builtin-skills/"+documentId,import.meta.url),'utf8'),document=JSON.parse(documentBody);
 async function fixture(t){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-opes-public-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));const registered=path.join(root,'registered','pygas'),studio=path.join(root,'public','studio'),doc=structuredClone(document);let granted=true;
  for(const item of doc.source_receipt.local_files){const target=path.join(registered,item.path),body='PRIVATE_SOURCE_BODY_MUST_NOT_BE_DELIVERED '+item.path;await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,body);item.sha256=sha(body);}
  let verbatimBody=documentBody;for(let i=0;i<doc.source_receipt.local_files.length;i++)verbatimBody=verbatimBody.replace(document.source_receipt.local_files[i].sha256,doc.source_receipt.local_files[i].sha256);const route=map.functions.find(row=>row.id==='analysis.opes');for(const id of route.skills){const def=map.skills.find(row=>row.id===id),base=def.source==='studio'?studio:path.join(registered,'agents','skills');for(const file of [...def.files,...route.reference_files?.[id]||[]]){const target=path.join(base,def.folder,file);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,id===skillId&&file===reference?verbatimBody:'# Public guidance fixture '+id);}}
- const service=new ScientificSkills({map,bundledRoot:studio,studioRoot:root,sources:()=>[{id:'pygas',root:registered}],settings:()=>({pygasSkillProviders:granted?['codex','kimi','qwen','deepseek']:[]})});return{root,registered,studio,doc,service,revoke:()=>{granted=false;}};
+ const service=new ScientificSkills({map,bundledRoot:studio,studioRoot:root,sources:()=>[{id:'pygas',root:registered}],settings:()=>({pygasSkillProviders:granted?PROVIDERS:[]})});return{root,registered,studio,doc,service,revoke:()=>{granted=false;}};
 }
 const read=(f,provider='codex')=>f.service.call('read_scientific_skill',{function_id:'analysis.opes',document_id:documentId},{provider});
 test('only OPES analysis adds this companion; legacy pyGAS source/consent and all other routes remain',()=>{
  const route=map.functions.find(row=>row.id==='analysis.opes');assert(route.skills.includes('pygas-opes'));assert.deepEqual(map.functions.filter(row=>row.skills.includes(skillId)).map(row=>row.id),['analysis.opes']);assert.deepEqual(route.reference_files[skillId],[reference]);assert.deepEqual(map.skills.find(row=>row.id==='pygas-opes').files,['SKILL.md','references/opes-contract.md']);
 });
-test('real scientific skill facade advertises and returns one full source-matched body <=16KiB for four providers',async t=>{
- const f=await fixture(t);for(const provider of ['codex','kimi','qwen','deepseek']){
+test('real scientific skill facade advertises and returns one full source-matched body <=16KiB for each provider',async t=>{
+ const f=await fixture(t);for(const provider of PROVIDERS){
   const full=await f.service.call('read_scientific_skill',{function_id:'analysis.opes'},{provider});assert.equal(full.status,'passed');assert(full.document_ids.includes(documentId));
   const result=await read(f,provider),wire=JSON.stringify(toolValueResult(result)),decoded=JSON.parse(JSON.parse(wire).content[0].text);assert.equal(decoded.status,'passed');assert.equal(decoded.document_id,documentId);assert.deepEqual(JSON.parse(decoded.text),f.doc);assert.equal(decoded.attachments.length,1);assert.equal(decoded.attachments[0].sha256,sha(decoded.text));assert.equal(decoded.attachments[0].source_evidence.status,'source_matched_reference');assert(Buffer.byteLength(wire)<=16*1024,`focused wire ${Buffer.byteLength(wire)} exceeds16KiB`);t.diagnostic(provider+' complete focused serialized bytes='+Buffer.byteLength(wire));assert(!wire.includes(f.root));assert(!wire.includes('PRIVATE_SOURCE_BODY_MUST_NOT_BE_DELIVERED'));assert.equal((decoded.text.match(/"contract": "studio-pygas-opes-analysis-cli-v1"/g)||[]).length,1);
  }
@@ -38,10 +39,20 @@ test('public document declares complete keys, illustrative YAML, native weight/s
 const sourceRoot=process.env.STUDIO_TEST_PYGAS_SOURCE;
 test('actual declared public CLI mapping/parser, native weighting expression and prefix/empty-bin contract',{skip:!sourceRoot,timeout:10000},t=>{
  const script=String.raw`
-import ast,argparse,json,pathlib,sys,types,math,hashlib,contextlib,io
+import ast,argparse,json,pathlib,sys,types,math,hashlib,contextlib,io,subprocess
 root=pathlib.Path(sys.argv[1]);doc=json.loads(sys.argv[2]);cli=(root/'entrypoints/cli.py').read_text(encoding='utf8');analysis=(root/'base/opes_analysis.py').read_text(encoding='utf8');opes=(root/'base/opes.py').read_text(encoding='utf8')
-for item in doc['source_receipt']['local_files']:
- assert hashlib.sha256((root/item['path']).read_bytes()).hexdigest()==item['sha256']
+receipt=doc['source_receipt']
+files={item['path']:(root/item['path']).read_bytes() for item in receipt['local_files']}
+def digest(data): return hashlib.sha256(data).hexdigest()
+identity='registered_raw'
+if not all(digest(files[item['path']])==item['sha256'] for item in receipt['local_files']):
+ # A public checkout can use different line endings from the recorded site.
+ # Prove the declared public revision separately from a raw site receipt.
+ revision=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
+ assert revision==receipt['public_revision'], 'Unrecognized public revision'
+ canonical={item['path']:item['sha256'] for item in receipt['canonical_lf_files']}
+ assert {name:digest(data.replace(b'\r\n',b'\n')) for name,data in files.items()}==canonical
+ identity='pinned_public_revision_lf'
 tree=ast.parse(cli);func=next(x for x in tree.body if isinstance(x,ast.FunctionDef) and x.name=='_run_opes_reweight');parser=next(x for x in tree.body if isinstance(x,ast.FunctionDef) and x.name=='build_parser')
 required=set();optional={}
 for n in ast.walk(func):
@@ -119,7 +130,7 @@ assert ae['prepare'](owner,{'inputs':inputs,'parameters':{}},{})==doc['studio_bi
 for name in inputs:
  try:ae['prepare'](owner,{'inputs':{k:v for k,v in inputs.items() if k!=name},'parameters':{}},{});raise AssertionError('missing input accepted')
  except ValueError:pass
-print(json.dumps({'actual_cli':'passed','source_files':3,'normalised_native_weights':'equivalent','blocks2_prefix_stop_for_N8':4,'scope':'stdlib AST/CLI spies only; no numerical analysis run'}))
+print(json.dumps({'actual_cli':'passed','source_identity':identity,'source_files':len(files),'normalised_native_weights':'equivalent','blocks2_prefix_stop_for_N8':4,'scope':'stdlib AST/CLI spies only; no numerical analysis run'}))
 `;
  const result=spawnSync(process.env.PYTHON||'python',['-c',script,sourceRoot,JSON.stringify(document),fileURLToPath(new URL("../../backend/worker/studio_worker/",import.meta.url))],{encoding:'utf8',timeout:8000,windowsHide:true});assert.equal(result.status,0,result.stderr||result.stdout);const proof=JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));assert.equal(proof.actual_cli,'passed');assert.equal(proof.normalised_native_weights,'equivalent');t.diagnostic(JSON.stringify(proof));
 });

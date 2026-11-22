@@ -25,7 +25,8 @@ function temporary(t){
 }
 function put(root,name,bytes){const target=path.join(root,name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);return target;}
 function python(args){
- const result=spawnSync(process.env.STUDIO_TEST_PYTHON||'python',['-B','-X','utf8',...args],{encoding:'utf8',windowsHide:true,timeout:20000,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});
+ const executable=process.env.STUDIO_TEST_PYTHON||(process.platform==='win32'?'python':'python3');
+ const result=spawnSync(executable,['-B','-X','utf8',...args],{encoding:'utf8',windowsHide:true,timeout:20000,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});
  if(result.error)throw result.error;
  return result;
 }
@@ -48,7 +49,9 @@ test('build synchronizes resources and distributable files include canonical and
  for(const included of ['contracts/**'])assert(manifest.build.files.includes(included),included);
  assert.deepEqual(manifest.build.files.find(value=>value?.from==='backend/worker'),{from:'backend/worker',to:'worker',filter:['**/*','!tests/**','!**/__pycache__/**']});
  // electron-builder applies unpack filters to original source files, before FileSet.to.
- const {getFileMatchers}=createRequire(import.meta.url)('app-builder-lib/out/fileMatcher.js');
+ const require=createRequire(import.meta.url),electronBuilderRequire=createRequire(require.resolve('electron-builder/package.json'));
+ const builderRequire=createRequire(electronBuilderRequire.resolve('app-builder-lib/package.json'));
+ const {getFileMatchers}=builderRequire('./out/fileMatcher.js');
  const [matcher]=getFileMatchers(manifest.build,'asarUnpack',path.join(checkout,'release','test-unpack'),{defaultSrc:checkout,globalOutDir:path.resolve(checkout,manifest.build.directories.output),macroExpander:value=>value,customBuildOptions:{}});
  const unpack=matcher.createFilter(),source=path.join(checkout,'backend','worker');let checked=0;
  function verify(directory){for(const item of fs.readdirSync(directory,{withFileTypes:true})){
@@ -61,7 +64,10 @@ test('build synchronizes resources and distributable files include canonical and
 test('synchronization preserves canonical bytes and check refuses stale output without writing',t=>{
  const root=temporary(t),source=put(root,'contracts/tools/engine-contracts.json',canonical);
  put(root,'contracts/tools/tool-package.schema.json',packageSchema);
- put(root,'contracts/workflows/roadmap.schema.json',fs.readFileSync(new URL('../../contracts/workflows/roadmap.schema.json',import.meta.url)));
+ for(const name of ['task-draft','roadmap']){
+  const sourceName='contracts/workflows/'+name+'.schema.json';
+  put(root,sourceName,fs.readFileSync(path.join(checkout,sourceName)));
+ }
  put(root,'contracts/tools/tool-package.mjs',packageValidator);put(root,'contracts/tools/aimlab-tools.mjs',aimlabToolsContract);put(root,'installation/examples/worker-smoke.py',workerReference);
  assert.throws(()=>syncToolContracts({root,check:true}),/stale/);
  assert(!fs.existsSync(path.join(root,'backend/worker/studio_worker/engine_contracts.json')));

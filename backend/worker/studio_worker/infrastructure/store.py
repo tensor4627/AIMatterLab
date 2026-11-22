@@ -1,9 +1,13 @@
 import json
 import math
+import os
 import sqlite3
+import sys
 import threading
 import time
+from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
+from time import monotonic, sleep
 
 SCHEMA_VERSION = 2
 
@@ -23,30 +27,107 @@ def encoded(value, *, sort_keys=False):
     return json.dumps(finite_json(value), allow_nan=False, sort_keys=sort_keys)
 
 
+def _uses_wsl1_database_lock():
+    if sys.platform != "linux":
+        return False
+    release = os.uname().release.lower()
+    return release.startswith("4.4.") and release.endswith("-microsoft")
+
+
+@contextmanager
+def _database_file_lock(root, timeout):
+    # WSL 1 can fail to enforce SQLite's POSIX byte-range locks. Its flock
+    # locks exclude independent processes and are released when a process dies.
+    import fcntl
+
+    with (Path(root) / "worker.sqlite.flock").open("ab") as handle:
+        deadline = monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise sqlite3.OperationalError("database is locked") from exc
+                sleep(min(.02, remaining))
+        yield
+
+
+def _connect_worker_database(root, *, wsl1, timeout=5, check_same_thread=True):
+    path = Path(root) / "worker.sqlite"
+    if wsl1 and any(path.with_name(path.name + suffix).exists() for suffix in ("-wal", "-shm")):
+        # Legacy clients do not take our flock. Retain their live or unrecovered
+        # WAL files and leave the mode change to a clean reopen.
+        raise sqlite3.OperationalError(
+            "Worker database has live or unrecovered WAL files. Close the original worker and its supervisors "
+            "and recover any remaining WAL before reopening on WSL 1."
+        )
+    connection = sqlite3.connect(path, timeout=timeout, check_same_thread=check_same_thread)
+    if wsl1:
+        try:
+            if connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0] != "delete":
+                raise sqlite3.OperationalError("Could not open the WSL 1 worker database in rollback journal mode")
+        except BaseException:
+            connection.close()
+            raise
+    return connection
+
+
+@contextmanager
+def supervisor_connection(root, *, timeout):
+    wsl1 = _uses_wsl1_database_lock()
+    lock = _database_file_lock(root, timeout) if wsl1 else nullcontext()
+    with lock, closing(_connect_worker_database(root, wsl1=wsl1, timeout=timeout)) as connection:
+        yield connection
+
+
 class Store:
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
-        self.db = sqlite3.connect(self.root / "worker.sqlite", check_same_thread=False)
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.executescript("""
-          CREATE TABLE IF NOT EXISTS objects (
-            kind TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL,
-            PRIMARY KEY(kind,id));
-          CREATE TABLE IF NOT EXISTS runs (
-            id TEXT PRIMARY KEY, project TEXT NOT NULL, key TEXT NOT NULL,
-            request_hash TEXT NOT NULL, data TEXT NOT NULL,
-            UNIQUE(project,key));
-          CREATE TABLE IF NOT EXISTS events (
-            seq INTEGER PRIMARY KEY AUTOINCREMENT, run TEXT, time REAL, data TEXT);
-        """)
-        self.db.commit()
-        self._migrate()
+        self._wsl1 = _uses_wsl1_database_lock()
+        self._file_lock_held = False
+        with self.database_access():
+            self.db = _connect_worker_database(self.root, wsl1=self._wsl1, check_same_thread=False)
+            try:
+                if not self._wsl1:
+                    self.db.execute("PRAGMA journal_mode=WAL")
+                self.db.executescript("""
+                  CREATE TABLE IF NOT EXISTS objects (
+                    kind TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL,
+                    PRIMARY KEY(kind,id));
+                  CREATE TABLE IF NOT EXISTS runs (
+                    id TEXT PRIMARY KEY, project TEXT NOT NULL, key TEXT NOT NULL,
+                    request_hash TEXT NOT NULL, data TEXT NOT NULL,
+                    UNIQUE(project,key));
+                  CREATE TABLE IF NOT EXISTS events (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT, run TEXT, time REAL, data TEXT);
+                """)
+                self.db.commit()
+                self._migrate()
+            except BaseException:
+                self.db.close()
+                raise
+
+    @contextmanager
+    def database_access(self):
+        """Protect SQLite operations without extending the file lock to unrelated I/O."""
+        with self.lock:
+            if not self._wsl1 or self._file_lock_held:
+                yield
+                return
+            with _database_file_lock(self.root, timeout=5):
+                self._file_lock_held = True
+                try:
+                    yield
+                finally:
+                    self._file_lock_held = False
 
     def _migrate(self):
         """Versioned schema upgrades. Existing pre-version stores become version 1."""
-        with self.lock:
+        with self.database_access():
             current = self.db.execute("PRAGMA user_version").fetchone()[0]
             if current > SCHEMA_VERSION:
                 raise RuntimeError(f"Worker store schema {current} is newer than supported {SCHEMA_VERSION}")
@@ -63,16 +144,15 @@ class Store:
 
     @property
     def schema_version(self):
-        with self.lock:
+        with self.database_access():
             return self.db.execute("PRAGMA user_version").fetchone()[0]
 
     def put(self, kind, value):
         if kind == "project":
             return self.put_project(value)
-        with self.lock:
+        with self.database_access(), self.db:
             self.db.execute("INSERT OR REPLACE INTO objects VALUES(?,?,?)",
                             (kind, value["id"], encoded(value)))
-            self.db.commit()
         return value
 
     def put_project(self, value):
@@ -81,7 +161,7 @@ class Store:
         expected = value.pop("revision", 0)
         if type(expected) is not int or expected < 0:
             raise ValueError("project_edit_conflict: Invalid project revision")
-        with self.lock:
+        with self.database_access():
             try:
                 self.db.execute("BEGIN IMMEDIATE")
                 row = self.db.execute("SELECT data FROM objects WHERE kind='project' AND id=?", (value["id"],)).fetchone()
@@ -103,7 +183,7 @@ class Store:
     def put_task_parameters(self, value):
         # Legacy clients replace the form without sending a roadmap. Merge just that
         # omitted column of the JSON object in the same SQLite write as the form.
-        with self.lock, self.db:
+        with self.database_access(), self.db:
             self.db.execute("""
                 INSERT INTO objects(kind,id,data) VALUES ('task-parameters',?,?)
                 ON CONFLICT(kind,id) DO UPDATE SET data=CASE
@@ -114,7 +194,7 @@ class Store:
         return value
 
     def get(self, kind, identifier):
-        with self.lock:
+        with self.database_access():
             row = self.db.execute("SELECT data FROM objects WHERE kind=? AND id=?",
                                   (kind, identifier)).fetchone()
         if not row:
@@ -127,7 +207,7 @@ class Store:
         """Commit related desktop setup records together."""
         if any(kind == "project" for kind, _ in records):
             raise ValueError("Project updates require revision comparison through put_project")
-        with self.lock:
+        with self.database_access():
             try:
                 self.db.executemany('INSERT OR REPLACE INTO objects VALUES(?,?,?)',
                                     [(kind,value['id'],encoded(value)) for kind,value in records])
@@ -137,7 +217,7 @@ class Store:
                 raise
 
     def list(self, kind):
-        with self.lock:
+        with self.database_access():
             rows = self.db.execute("SELECT data FROM objects WHERE kind=?", (kind,)).fetchall()
         values = [json.loads(row[0]) for row in rows]
         if kind == "project":
@@ -145,7 +225,7 @@ class Store:
         return values
 
     def db_exists(self, kind, identifier):
-        with self.lock:
+        with self.database_access():
             return self.db.execute("SELECT 1 FROM objects WHERE kind=? AND id=?", (kind,identifier)).fetchone() is not None
 
     def roadmap_ids(self, *, task_id=None, active=False):
@@ -154,29 +234,29 @@ class Store:
             query += " AND json_extract(data,'$.status') IN ('running','unknown')"
         else:
             query += " AND json_extract(data,'$.task_id')=? ORDER BY json_extract(data,'$.confirmed_at') DESC"
-        with self.lock:
+        with self.database_access():
             return [row[0] for row in self.db.execute(query,() if active else (task_id,))]
 
     def run(self, identifier):
-        with self.lock:
+        with self.database_access():
             row = self.db.execute("SELECT data FROM runs WHERE id=?", (identifier,)).fetchone()
         if not row:
             raise ValueError("Unknown run")
         return json.loads(row[0])
 
     def by_key(self, project, key):
-        with self.lock:
+        with self.database_access():
             row = self.db.execute("SELECT data FROM runs WHERE project=? AND key=?",
                                   (project, key)).fetchone()
         return json.loads(row[0]) if row else None
 
     def runs(self):
-        with self.lock:
+        with self.database_access():
             rows = self.db.execute("SELECT data FROM runs ORDER BY rowid DESC").fetchall()
         return [json.loads(row[0]) for row in rows]
 
     def add_run(self, run):
-        with self.lock:
+        with self.database_access():
             try:
                 self.db.execute("INSERT INTO runs VALUES(?,?,?,?,?)",
                                 (run["id"], run["project_id"], run["idempotency_key"],
@@ -196,7 +276,7 @@ class Store:
         a caller's previously read dictionary must never replace that evidence.
         State/claim changes still require the caller's observed ownership.
         """
-        with self.lock:
+        with self.database_access():
             try:
                 if not self.db.in_transaction:
                     self.db.execute("BEGIN IMMEDIATE")
@@ -233,7 +313,7 @@ class Store:
         """
         if run.get("status") != "queued" or run.get("launch_claim"):
             return None
-        with self.lock:
+        with self.database_access():
             updated = {**run, "status": "unknown", "launch_claim": claim,
                        "launch_error": "Supervisor launch has not yet been confirmed", "updated_at": time.time()}
             try:
@@ -253,7 +333,7 @@ class Store:
 
     def compare_update(self, run, **changes):
         """Update only the exact observed run, without stealing another claim."""
-        with self.lock:
+        with self.database_access():
             updated = {**run, **changes, "updated_at": time.time()}
             try:
                 changed = self.db.execute("UPDATE runs SET data=? WHERE id=? AND data=?",
@@ -271,24 +351,22 @@ class Store:
                 raise
 
     def event(self, run, value):
-        with self.lock:
+        with self.database_access(), self.db:
             self.db.execute("INSERT INTO events(run,time,data) VALUES(?,?,?)",
                             (run, time.time(), encoded(value)))
-            self.db.commit()
 
     def prune_events(self, keep=200000):
         """Bound the event log without touching runs or objects."""
         if type(keep) is not int or keep < 0:
             raise ValueError("Event retention must be a nonnegative integer")
-        with self.lock:
+        with self.database_access(), self.db:
             cursor = self.db.execute(
                 "DELETE FROM events WHERE seq <= (SELECT COALESCE(MAX(seq),0)-? FROM events)",
                 (keep,))
-            self.db.commit()
             return cursor.rowcount
 
     def events(self, after=0):
-        with self.lock:
+        with self.database_access():
             rows = self.db.execute("SELECT seq,run,time,data FROM events WHERE seq>? ORDER BY seq LIMIT 500",
                                   (int(after),)).fetchall()
         return [{"seq": s, "run": r, "time": t, **json.loads(d)} for s, r, t, d in rows]
