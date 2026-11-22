@@ -132,7 +132,7 @@ test('execution probe exposes only a fixed integrity receipt and strips injected
 import {pathToFileURL} from 'node:url';
 test('published real session can load delta and location helpers after the owned source copy is removed',async t=>{
  const f=fixture(t),directory=new URL('../../desktop/platform/terminal-service/',import.meta.url);
- for(const name of ['session.mjs','response-codec.mjs','service-launch.mjs','worker-delta.mjs','ssh-service-locations.mjs','ssh-connection.mjs','shared-shell-service.mjs','native-ssh.mjs','native-ssh-stdio.mjs','native-ssh-relay.py','managed-ssh-shells.mjs','workspace-probe.mjs','workspace-command.mjs'])f.write('resources/terminal-service/'+name,fs.readFileSync(new URL(name,directory),'utf8'));
+ for(const name of ['session.mjs','response-codec.mjs','service-launch.mjs','worker-delta.mjs','ssh-service-locations.mjs','ssh-connection.mjs','shared-shell-service.mjs','native-ssh.mjs','native-ssh-relay.py','managed-ssh-shells.mjs','workspace-probe.mjs','workspace-command.mjs'])f.write('resources/terminal-service/'+name,fs.readFileSync(new URL(name,directory),'utf8'));
  const canonical=fs.readFileSync(new URL('../../backend/worker/studio_worker/compute/workspace_confinement.py',import.meta.url));
  f.options.workspaceConfinementPath=f.write('resources/app.asar.unpacked/worker/workspace_confinement.py',canonical.toString('utf8'));
  const runtime=await f.prepare();for(const name of ['worker-delta.mjs','ssh-service-locations.mjs','native-ssh-relay.py','managed-ssh-shells.mjs'])assert(fs.existsSync(path.join(path.dirname(runtime.servicePath),name)));

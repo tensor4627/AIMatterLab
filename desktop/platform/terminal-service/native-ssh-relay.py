@@ -18,9 +18,25 @@ def serve(nonce):
     channels = {}
     children = {}
     incoming = bytearray()
+    prefix = ('__AIM_RELAY_' + nonce + '__:').encode('ascii')
+    sequence = 0
+
+    def frame(*message):
+        nonlocal sequence
+        sequence += 1
+        return prefix + json.dumps((sequence, *message), separators=(',', ':')).encode('ascii') + b':__AIM_END__\r\n'
 
     def send(*message):
-        sys.stdout.buffer.write(json.dumps(message, separators=(',', ':')).encode() + b'\n')
+        sys.stdout.buffer.write(frame(*message))
+        sys.stdout.buffer.flush()
+
+    def send_output(channel, output):
+        # Keep receipts shorter than the Windows console's carrier width.
+        chunk_size = 256
+        sys.stdout.buffer.write(b''.join(
+            frame('data', channel, base64.b64encode(output[start:start + chunk_size]).decode('ascii'))
+            for start in range(0, len(output), chunk_size)
+        ))
         sys.stdout.buffer.flush()
 
     def resize(fd, cols, rows):
@@ -142,11 +158,13 @@ def serve(nonce):
             elif op == 'resize':
                 resize(fd, *args)
 
-    if os.isatty(0):
-        tty.setraw(0)
-    selector.register(0, selectors.EVENT_READ)
-    send('ready', nonce)
+    settings = termios.tcgetattr(0) if os.isatty(0) else None
     try:
+        if settings is not None:
+            tty.setraw(0)
+        selector.register(0, selectors.EVENT_READ)
+        sys.stdout.buffer.write(b'\r\n')
+        send('ready', nonce)
         while True:
             reap()
             # A PTY can report EOF before waitpid reports the child's exit. Keep
@@ -182,7 +200,7 @@ def serve(nonce):
                     if events & selectors.EVENT_READ:
                         output = os.read(fd, 8192)
                         if output:
-                            send('data', channel, base64.b64encode(output).decode('ascii'))
+                            send_output(channel, output)
                         else:
                             end_output(row)
                             finish(channel, row)
@@ -197,6 +215,8 @@ def serve(nonce):
         for channel in list(channels):
             stop(channel, report=False)
         selector.close()
+        if settings is not None:
+            termios.tcsetattr(0, termios.TCSANOW, settings)
 
 
 serve(sys.argv[1])

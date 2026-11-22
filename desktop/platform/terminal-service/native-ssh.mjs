@@ -1,22 +1,21 @@
 /** A Windows OpenSSH login with private console authentication and remote PTYs. */
-import net from 'node:net';
 import path from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
 import { StringDecoder } from 'node:string_decoder';
-import { fileURLToPath } from 'node:url';
 import { drainOwnedConpty, TerminalFault } from './session.mjs';
 
 const fault = (code) => new TerminalFault(code, 409);
 const toWindows = (value) =>
   /^\/mnt\/[a-z]\//i.test(value) ? value[5].toUpperCase() + ':\\' + value.slice(7).replaceAll('/', '\\') : value;
 const absoluteWindows = (value) => /^(?:[a-z]:[\\/]|\\\\[^\\])/i.test(value);
-const launcher = fileURLToPath(new URL('./native-ssh-stdio.mjs', import.meta.url));
 const relayFile = new URL('./native-ssh-relay.py', import.meta.url);
 const unstyle = (value) => value.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g, '');
 const shellQuote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
-const limit = 2 * 1024 * 1024;
+const terminalType = 'xterm';
+const relayColumns = 500;
+const frameEnd = ':__AIM_END__';
 
 export function nativeSshPlan(profile, { cwd, env, knownHostsFile }) {
   const file = toWindows(profile.ssh_client);
@@ -87,130 +86,95 @@ function pending(ms, code, onTimeout) {
 }
 
 export async function openNativeSsh({ pty, plan, onPrivate, onLost, assertCurrent = () => {} }) {
-  if (!statSync(plan.file, { throwIfNoEntry: false })?.isFile()) throw fault('ssh_client_unavailable');
-  const pipe = '\\\\.\\pipe\\aimatterlab-ssh-' + randomUUID(),
-    token = randomBytes(32).toString('hex'),
-    nonce = randomBytes(24).toString('hex');
+  if (!statSync(plan.file, { throwIfNoEntry: false })?.isFile()) throw fault('ssh_windows_client_unavailable');
+  const nonce = randomBytes(24).toString('hex');
   const proof = '__AIM_SHELL_' + nonce + '__',
-    channels = new Map(),
-    clients = new Set();
+    channels = new Map();
   const program = deflateSync(readFileSync(relayFile)).toString('base64');
   const python =
     "import base64,zlib;exec(compile(zlib.decompress(base64.b64decode('" + program + "')),'<ssh-pty>','exec'))";
   const bootstrap =
-    'p=$(command -v python3 || command -v python) && exec "$p" -u -c ' + shellQuote(python) + ' ' + nonce;
-  const relayExit = '__AIM_RELAY_EXIT_' + nonce + '__';
-  const launchRelay = '/bin/sh -c ' + shellQuote(bootstrap) +
-    "; printf '\\n%s%s\\n' '__AIM_RELAY_EXIT_' " + shellQuote(nonce + '__') + '\r';
+    'p=$(command -v python3 || command -v python) && exec "$p" -u -c ' + shellQuote(python);
   // Keep the echoed probe distinct from the answer. Never enqueue a deployment
   // script at an SSH password prompt or a gateway menu.
   const probe = "printf '\\n%s%s\\n' '__AIM_SHELL_' '" + nonce + "__'\r";
   let term,
-    socket,
     phase = 'prompt',
     tail = '',
-    buffer = '',
     probeSent = false,
     handoff,
     closed = false,
     challenge = null,
     serial = 0,
-    relayStart,
+    relay,
     exitEvent;
   const exits = new Set();
-  let childExited = false,
-    disposed = false,
-    exitTail = '',
-    forceTimer;
-  const exitReceipt = '\n__AIM_LOCAL_EXIT_' + token + '__\n';
-  const server = net.createServer({ allowHalfOpen: true }, accept);
-  function disposeConsole() {
-    clearTimeout(forceTimer);
-    if (disposed || !term || exitEvent) return;
-    disposed = true;
-    try {
-      term.kill();
-    } catch {}
-  }
   function send(message) {
-    if (!socket || closed || socket.writableLength > limit) throw fault('ssh_channel_unavailable');
-    writeRemote(JSON.stringify(message) + '\n');
-  }
-  function writeRemote(data) {
-    socket.write(JSON.stringify(data) + '\n');
+    const frame = JSON.stringify(message) + '\n';
+    if (closed || Buffer.byteLength(frame) > 65536) throw fault('ssh_channel_unavailable');
+    term.write(frame);
   }
   function terminate(code) {
     if (closed) return;
     closed = true;
     const error = fault(code);
     handoff?.reject(error);
-    relayStart?.reject(error);
+    relay?.start?.reject(error);
     challenge?.reject(error);
     challenge = null;
     for (const channel of [...channels.values()]) channel.end({ exitCode: null, signal: null }, error);
-    for (const stream of clients) if (stream !== socket) stream.destroy();
-    if (socket && !socket.destroyed && !childExited) {
-      socket.write('null\n');
-      forceTimer = setTimeout(disposeConsole, 1500);
-    } else disposeConsole();
-    if (server.listening) server.close();
+    if (!exitEvent) try { term?.kill(); } catch {}
     if (code !== 'ssh_connection_changed') onLost(code);
   }
-  function accept(stream) {
-    if (closed || socket || clients.size >= 8) {
-      stream.destroy();
-      return;
-    }
-    clients.add(stream);
-    let header = Buffer.alloc(0);
-    const timer = setTimeout(() => stream.destroy(), 3000);
-    stream.on('error', () => stream.destroy());
-    stream.on('close', () => {
-      clearTimeout(timer);
-      clients.delete(stream);
-      if (socket === stream)
-        terminate(phase === 'starting' ? 'ssh_remote_terminal_unavailable' : 'ssh_master_unavailable');
-    });
-    function authenticate(bytes) {
-      header = Buffer.concat([header, bytes]);
-      const end = header.indexOf(10);
-      if (end < 0 && header.length <= token.length) return;
-      if (socket || end !== token.length || header.subarray(0, end).toString() !== token) {
-        stream.destroy();
+  function relayExited() {
+    const error = fault('ssh_remote_terminal_unavailable');
+    relay.start?.reject(error);
+    relay = null;
+    phase = 'authenticated';
+    challenge?.reject(fault('ssh_control_timeout'));
+    challenge = null;
+    for (const channel of channels.values()) channel.end({exitCode:null,signal:null}, error);
+  }
+  function receiveRelay(data) {
+    const active = relay;
+    let buffer = unstyle(active.tail + data);
+    for (;;) {
+      const start = buffer.indexOf(active.prefix);
+      const exit = buffer.indexOf(active.exitMarker);
+      if (exit >= 0 && (start < 0 || exit < start)) return relayExited();
+      if (start < 0) {
+        active.tail = buffer.slice(-active.exitMarker.length);
         return;
       }
-      clearTimeout(timer);
-      stream.off('data', authenticate);
-      socket = stream;
-      server.close();
-      stream.write(token + '\n');
-      const decoder = new StringDecoder('utf8');
-      const read = (chunk) => {
-        try {
-          receive(decoder.write(chunk));
-        } catch {
-          terminate('ssh_control_unavailable');
-        }
-      };
-      stream.on('data', read);
-      if (header.length > end + 1) read(header.subarray(end + 1));
+      const payload = start + active.prefix.length;
+      const end = buffer.indexOf(frameEnd, payload);
+      if (end < 0) {
+        if (buffer.length - start > 4096) throw fault('ssh_control_output_limit');
+        active.tail = buffer.slice(start);
+        return;
+      }
+      if (end - payload > 512) throw fault('ssh_control_output_limit');
+      const [number, ...message] = JSON.parse(buffer.slice(payload, end).replace(/[\r\n]/g, ''));
+      buffer = buffer.slice(end + frameEnd.length);
+      if (!Number.isSafeInteger(number) || number < 1) throw fault('ssh_control_unavailable');
+      // Screen repaint may repeat a frame. A gap leaves its output unconfirmed.
+      if (number <= active.sequence) continue;
+      if (number !== active.sequence + 1) throw fault('ssh_control_unavailable');
+      active.sequence = number;
+      if (phase === 'starting') {
+        if (message.length !== 2 || message[0] !== 'ready' || message[1] !== active.nonce) throw fault('ssh_control_unavailable');
+        phase = 'ready';
+        active.start.resolve();
+        active.start = null;
+      } else dispatch(message);
     }
-    stream.on('data', authenticate);
   }
   function receive(data) {
-    exitTail = (exitTail + data).slice(-exitReceipt.length);
-    if (exitTail === exitReceipt) {
-      childExited = true;
-      socket.end();
-      terminate(phase === 'starting' ? 'ssh_remote_terminal_unavailable' : 'ssh_master_unavailable');
-      disposeConsole();
-      return;
-    }
     if (closed) return;
     if (phase === 'prompt') {
       onPrivate(data);
-      tail = unstyle((tail + data).slice(-8192));
-      if (probeSent && tail.split(/\r?\n/).some((line) => line.trim() === proof)) {
+      tail = (tail + data).slice(-8192);
+      if (probeSent && unstyle(tail).replace(/[\r\n]/g, '').includes(proof)) {
         // The human may need to select a node after MFA on this same stream.
         // Only a human handoff request sends the proof to that remote shell.
         phase = 'authenticated';
@@ -220,39 +184,10 @@ export async function openNativeSsh({ pty, plan, onPrivate, onLost, assertCurren
       }
       return;
     }
-    if (phase === 'authenticated') return;
-    buffer += data;
-    let end;
-    while ((end = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, end).trim();
-      buffer = buffer.slice(end + 1);
-      if (line.length > 65536) throw fault('ssh_control_output_limit');
-      const terminalLine = unstyle(line).split('\r').at(-1).trim();
-      if (terminalLine === relayExit) {
-        const error = fault('ssh_remote_terminal_unavailable');
-        relayStart?.reject(error);
-        relayStart = null;
-        phase = 'authenticated';
-        buffer = '';
-        challenge?.reject(fault('ssh_control_timeout'));
-        challenge = null;
-        for (const channel of channels.values()) channel.end({exitCode:null,signal:null}, error);
-        return;
-      }
-      if (phase === 'starting') {
-        if (terminalLine === JSON.stringify(['ready', nonce])) {
-          phase = 'ready';
-          relayStart.resolve();
-          relayStart = null;
-        }
-      } else if (line) {
-        dispatch(JSON.parse(line));
-      }
-    }
-    if (buffer.length > 65536) throw fault('ssh_control_output_limit');
+    if (relay) receiveRelay(data);
   }
   async function confirmHandoff() {
-    if (closed || !socket || socket.destroyed || childExited) return false;
+    if (closed || exitEvent) return false;
     if (phase !== 'prompt') return true;
     if (handoff) return handoff.promise;
     const attempt = pending(5000, 'ssh_authentication_unconfirmed', () => {
@@ -260,7 +195,7 @@ export async function openNativeSsh({ pty, plan, onPrivate, onLost, assertCurren
     });
     handoff = attempt;
     probeSent = true;
-    try { writeRemote(probe); }
+    try { term.write(probe); }
     catch (error) {handoff = null;attempt.reject(error);}
     try { return await attempt.promise; }
     catch (error) {if(error.code==='ssh_authentication_unconfirmed')return false;throw error;}
@@ -292,15 +227,21 @@ export async function openNativeSsh({ pty, plan, onPrivate, onLost, assertCurren
   async function ensureRelay() {
     if (closed || phase === 'prompt') throw fault('ssh_authentication_unconfirmed');
     if (phase === 'ready') return;
-    if (relayStart) return relayStart.promise;
-    relayStart = pending(15000, 'ssh_remote_terminal_unavailable');
-    const launch = relayStart;
+    if (relay) return relay.start.promise;
+    const relayNonce = randomBytes(24).toString('hex');
+    const launch = pending(15000, 'ssh_remote_terminal_unavailable');
+    relay = {nonce:relayNonce, prefix:'__AIM_RELAY_' + relayNonce + '__:',
+      exitMarker:'__AIM_RELAY_EXIT_' + relayNonce + '__', sequence:0, tail:'', start:launch};
     phase = 'starting';
+    const launchRelay = '/bin/sh -c ' + shellQuote(bootstrap + ' ' + relayNonce) +
+      "; printf '\\n%s%s\\n' '__AIM_RELAY_EXIT_' " + shellQuote(relayNonce + '__') + '\r';
     try {
-      if (!socket || socket.destroyed) throw fault('ssh_master_unavailable');
-      writeRemote(launchRelay);
+      // The human login terminal is already handed off. Keep each framed
+      // receipt on one line regardless of the size of the retired viewport.
+      term.resize(relayColumns, 30);
+      term.write(launchRelay);
     } catch (error) {
-      relayStart = null;
+      relay = null;
       phase = 'authenticated';
       launch.reject(error);
     }
@@ -375,42 +316,28 @@ export async function openNativeSsh({ pty, plan, onPrivate, onLost, assertCurren
     }
     return opened.promise;
   }
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(pipe, resolve);
-  });
   try {
     assertCurrent();
-    const consoleHost = path.win32.join(plan.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
-    // Electron is a GUI executable. Keep a console process attached to ConPTY for
-    // its entire lifetime, including while ssh.exe is asking for credentials.
-    // Only these two trusted runtime paths reach cmd. SSH arguments stay in the pipe helper.
-    const launch = '/d /q /v:off /s /c "start "" /b /wait "%STUDIO_SSH_NODE_EXE%" "%STUDIO_SSH_LAUNCHER%""';
-    const env = {
-      ...plan.env,
-      ELECTRON_RUN_AS_NODE: '1',
-      STUDIO_SSH_NODE_EXE: process.execPath,
-      STUDIO_SSH_LAUNCHER: launcher,
-      STUDIO_NATIVE_SSH: JSON.stringify({ pipe, token, file: plan.file, args: plan.args })
-    };
-    term = pty.spawn(consoleHost, launch, {
-      name: 'xterm-256color',
+    // OpenSSH needs both console handles to report the viewport to the gateway.
+    term = pty.spawn(plan.file, plan.args, {
+      name: terminalType,
       cols: 100,
       rows: 30,
       cwd: plan.cwd,
-      env,
+      env: {...plan.env, TERM: terminalType},
       useConptyDll: true
     });
     term.onData((data) => {
-      if (!closed && phase !== 'ready') onPrivate(data);
+      try { receive(data); }
+      catch (error) { terminate(error instanceof TerminalFault ? error.code : 'ssh_control_unavailable'); }
     });
     term.onExit((event) => {
       exitEvent = event;
-      clearTimeout(forceTimer);
       drainOwnedConpty(term);
       const error = phase === 'starting' ? 'ssh_remote_terminal_unavailable' : 'ssh_master_unavailable';
       terminate(error);
       for (const cb of exits) cb(event);
+      exits.clear();
     });
   } catch (error) {
     const code = error.code === 'ssh_connection_changed' ? error.code : 'ssh_client_unavailable';
@@ -419,10 +346,10 @@ export async function openNativeSsh({ pty, plan, onPrivate, onLost, assertCurren
   }
   return {
     openChannel,confirmHandoff,
-    transportClosed: () => !socket || childExited,
-    ready: () => ({ ready: phase !== 'prompt' && !closed && !!socket && !socket.destroyed && !childExited }),
+    transportClosed: () => !!exitEvent,
+    ready: () => ({ ready: phase !== 'prompt' && !closed && !exitEvent }),
     async check() {
-      if (closed || phase === 'prompt' || !socket || socket.destroyed || childExited) throw fault('ssh_authentication_unconfirmed');
+      if (closed || phase === 'prompt' || exitEvent) throw fault('ssh_authentication_unconfirmed');
       if (phase !== 'ready') return;
       if (!challenge) {
         // A missing pong proves nothing about the original process. Ignore late
@@ -442,11 +369,9 @@ export async function openNativeSsh({ pty, plan, onPrivate, onLost, assertCurren
     },
     write(data) {
       if (closed || phase !== 'prompt') throw fault('ssh_authentication_not_pending');
-      if (tail && socket) {
-        writeRemote(data);
-      } else term.write(data);
+      term.write(data);
     },
-    resize: (cols, rows) => term.resize(cols, rows),
+    resize: (cols, rows) => { if (!closed && phase === 'prompt') term.resize(cols, rows); },
     kill: () => terminate('ssh_connection_changed'),
     onExit: (fn) => {
       if (exitEvent) fn(exitEvent);

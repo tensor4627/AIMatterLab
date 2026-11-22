@@ -573,7 +573,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const publishing=pendingAction==='publish';
  const publicationLabel=t(publishing?'正在托管…':manualHandoff?'登录完成，交由 AIMatterLab 管理':'交由 AIMatterLab 管理');
  const loginTip=loginState?.status==='failed'?t('原登录未完成，请核对提示后继续。'):loginState?.status==='checking'?t('正在检查原登录，请稍候。'):
-  manualHandoff?t('请在原终端输入密码和验证码，并按站点提示选择登录节点。完成后点击交接。'):
+  manualHandoff?t('请在私有终端完成验证，按网关提示选择资产和登录节点。看到节点的命令提示符后再交接。'):
   connectionStatus==='authenticating'?t('请在原终端完成密码或验证码输入。'):null;
  const serviceProgress=ready&&servicePending?<div className="ssh-worker-preparing" data-testid="ssh-worker-preparing" data-guide-target="ssh-service-progress" role="status">
   <span>{t(ownService?.status==='unknown'?'作业服务接入结果待确认':ownService?.status==='connected'?'作业服务通道已连接，工具尚未就绪':servicePhaseMessage(ownService?.phase))}</span>

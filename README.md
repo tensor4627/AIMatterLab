@@ -1,8 +1,8 @@
 # AIMatterLab
 
-AIMatterLab 0.1.28 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
+AIMatterLab 0.1.29 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
 
-[更新日志](CHANGELOG.md) · [0.1.28 本地测试版](docs/releases/aimatterlab-0.1.28.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
+[更新日志](CHANGELOG.md) · [0.1.29 本地测试版](docs/releases/aimatterlab-0.1.29.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
 要安装 GPU-Sampling、pyGAS、PyDyn、TorchNEP、HotPP 或 HotHam，可以在「工具与资源 → 第三方工具包 → 已验证工具的源码仓库」复制克隆命令，再按工具仓库提供的说明安装。源码和桌面版都随附这份[工具仓库清单](installation/tool-sources.json)。
 
@@ -12,13 +12,13 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-本地测试版 `v0.1.28` 提供 Windows x64 安装包和便携 ZIP，位于 `release/v0.1.28/`。本版支持在 Windows SSH 私有终端手选登录节点后交接，并改进工作区核对和会话命令通道。[试用与验收记录](docs/releases/aimatterlab-0.1.28.md)
+本地测试版 `v0.1.29` 提供 Windows x64 安装包和便携 ZIP，位于 `release/v0.1.29/`。Windows OpenSSH 可直接连接远端集群，无需在本机安装 WSL。登录时会向网关报告实际终端尺寸。用户在私有终端完成验证并手选资产和登录节点，进入节点后再交接。[试用与验收记录](docs/releases/aimatterlab-0.1.29.md)
 
 正式版 `v0.1.26` 可从两个发行页下载。[南大 GitLab 发行页](https://git.nju.edu.cn/Tensor4627/AIMatterLab/-/releases/v0.1.26) · [GitHub 发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.1.26)
 
 首次安装时选择一个可写目录，升级时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。[项目提示词和用户技能](docs/project-skill-workspace.md)
 
-从源码安装 0.1.28 时，可让本机 Agent 按安装说明核对本地仓库标签、依赖锁和选定的计算环境。[单 prompt 安装说明](docs/one-prompt-install.md)
+从源码安装 0.1.29 时，可让本机 Agent 按安装说明核对本地仓库标签、依赖锁和选定的计算环境。[单 prompt 安装说明](docs/one-prompt-install.md)
 
 Windows 工作区版可以在设置右侧点“检查更新”。发现正式新版后，点击高亮的“更新”即可下载并重启。默认先查南大 GitLab，备用源为 GitHub。私有发行页使用更新面板中的“私有仓库访问”。[分发与升级说明](docs/releases/aimatterlab-0.1.16.md)
 

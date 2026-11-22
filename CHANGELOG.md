@@ -1,5 +1,12 @@
 # 版本更新与验证
 
+## 0.1.29
+
+2026-11-22 · Windows 本地测试版。[版本与验收记录](docs/releases/aimatterlab-0.1.29.md)
+
+- 修复 Windows OpenSSH 登录时向集群网关报告 `0×0` 终端的问题。使用兼容的 `xterm`，并在手选资产和登录节点时同步窗口尺寸。
+- 保存的 SSH 连接显示所用客户端。Windows OpenSSH 可直接远程登录，有可用的 `ssh.exe` 即可，无需安装 WSL。缺少 OpenSSH 时提供 Windows 安装入口提示。
+
 ## 0.1.28
 
 2026-11-22 · Windows 本地测试版。[版本与验收记录](docs/releases/aimatterlab-0.1.28.md)

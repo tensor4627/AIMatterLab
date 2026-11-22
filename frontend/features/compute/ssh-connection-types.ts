@@ -48,6 +48,7 @@ const connectionErrors:Record<string,string>={
  ssh_control_unavailable:'本机 SSH 状态检查未能完成。请查看原终端，并核对此连接的客户端及所在环境。',
  ssh_control_timeout:'本机 SSH 登录检查超时。请查看终端并刷新原连接；不会自动重新登录。',
  ssh_client_unavailable:'找不到此连接保存的 SSH 客户端。请编辑此连接并核对客户端路径。',
+ ssh_windows_client_unavailable:'找不到 Windows OpenSSH。请在 Windows 可选功能中安装 OpenSSH 客户端，或为此连接选择已安装的 ssh.exe。',
  ssh_master_unavailable:'此 SSH 登录已中断或无法访问。请查看终端输出，再明确重新登录。',
  ssh_master_identity_changed:'SSH 连接身份已变化，已停止使用。请核对原连接后重新登录。',
  ssh_control_identity_changed:'SSH 连接身份已变化，已停止使用。请核对原连接后重新登录。',

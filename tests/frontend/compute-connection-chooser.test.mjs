@@ -29,6 +29,27 @@ function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
 }
 const row=(h,id)=>h.find(n=>n.props?.['data-profile-id']===id);
 
+test('Windows OpenSSH is identified and can save and open a new connection without WSL discovery',async()=>{
+ const h=harness({profiles:[],override(method,data,standard){
+  assert.notEqual(method,'compute.profiles.inventory','Windows SSH should not discover WSL');
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();
+  h.clickId('compute-choice-ssh');
+  assert.match(h.id('compute-profile-windows-ssh-note').props.children,/无需本机 WSL/);
+  h.input('compute-profile-name','Windows gateway');
+  h.input('compute-profile-host','fixture.invalid');
+  h.input('compute-profile-username','fixture');
+  h.clickId('compute-save-login');await h.flush();
+  assert.equal(h.connected.length,1);
+  assert.equal(h.connected[0][0],'ssh');
+  assert.equal(h.connected[0][1].ssh_client,ssh.ssh_client);
+  assert(!Object.hasOwn(h.connected[0][1],'distribution'));
+  assert.match(JSON.stringify(row(h,'new-fixture')),/Windows OpenSSH/);
+ }finally{h.unmount();}
+});
+
 test('WSL inventory shows failure, retries once clicked and preserves manual input',async()=>{
  const first=deferred(),second=deferred();let count=0;
  const h=harness({override:(m,d,s)=>m==='compute.profiles.inventory'?(++count===1?first:second).promise:s(m,d)});
