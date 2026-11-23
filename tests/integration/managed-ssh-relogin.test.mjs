@@ -14,6 +14,7 @@ import {createSshServiceRegistration} from '../../backend/main/compute/ssh-servi
 import {createManagedWorkbench} from '../../desktop/platform/managed-workbench.mjs';
 import {developerComputeAccess} from '../../backend/main/compute/developer-compute-access.mjs';
 import {createWorkspaceTerminalAuthorization} from '../../backend/main/compute/workspace-terminal-authorization.mjs';
+import {toolFailure} from '../../agent/tools/tool-failure.mjs';
 
 const root='/scratch/fixture-workspace';
 const profile=id=>({id,kind:'ssh',version:1,name:'材料中心',host:id+'.invalid',port:22,username:'fixture-user',mode:'interactive',ssh_client:'/usr/bin/ssh'});
@@ -206,13 +207,55 @@ test('command leases isolate directories and recover on the original target with
  await assert.rejects(run(other,'blocked','pwd'),/grant_required/);
  f.lose(prior);await f.app.settle();
  const restarted=f.start(),next=await f.open('main',restarted);await f.login(next,restarted);await restarted.settle();
+ f.lose(next,'timeout');
  assert.equal((await run(chat,'write-lost','mkdir partial',restarted)).execution_status,'unconfirmed');
  assert.equal((await run(chat,'write-ok','mkdir complete',restarted)).replayed,true);
  await assert.rejects(run(chat,'write-ok','mkdir another',restarted),/invalid_request/);
+ f.lose(next,'authenticated');
  assert.equal((await run(chat,'after-login','pwd',restarted)).output,root);
  assert.equal(f.calls.filter(row=>row.operation==='command'&&row.mode==='mkdir').length,2);
  assert.equal(f.opens(next).length,0);
  await assert.rejects(run(other,'after-login','pwd',restarted),/lease_required|grant_required/);
+});
+
+test('short commands distinguish a timed-out connection check from a lost dispatch receipt',async t=>{
+ const f=fixture(t,{commandResult:({args})=>{
+  if(args[0]==='lost-reply')throw Error('ssh_control_timeout');
+  return {status:'result',code:0,output:''};
+ }});
+ const chat=f.owner('codex','command-receipts');
+ const login=await f.open('main');await f.login(login);await f.publish(login);
+ f.message(chat,'用 ssh:main');
+ assert.equal((await f.talk(chat,'acquire_compute_resource',{resource_id:'ssh:main',access:'command'})).status,'acquired');
+ const run=(request_id,command)=>f.app.desktopTools.call('run_compute_command',{resource_id:'ssh:main',request_id,command},chat);
+ const receipt=error=>JSON.parse(toolFailure(error,{toolName:'run_compute_command',dispatched:true}).content[0].text);
+ const count=()=>f.calls.filter(row=>row.operation==='command').length;
+ f.lose(login,'timeout');
+ await assert.rejects(run('first','mkdir first'),error=>{
+  const reply=receipt(error);
+  assert.equal(reply.message,'ssh_control_timeout');
+  assert.equal(reply.status,'blocked');
+  assert.equal(reply.operation_state,'not_started');
+  assert.equal(reply.automatic_retry,false);
+  assert.match(reply.next_step,/before this command reached the remote executor/);
+  return true;
+ });
+ assert.equal(count(),0);
+ f.lose(login,'authenticated');
+ assert.equal((await run('first','mkdir first')).execution_status,'completed');
+ await assert.rejects(run('second','mkdir lost-reply'),error=>{
+  const reply=receipt(error);
+  assert.equal(reply.operation_state,'unconfirmed');
+  assert.equal(reply.automatic_retry,false);
+  assert.match(reply.next_step,/original command receipt/);
+  return true;
+ });
+ assert.equal(count(),2);
+ f.lose(login,'timeout');
+ assert.equal((await run('first','mkdir first')).execution_status,'completed');
+ await assert.rejects(run('second','mkdir lost-reply'),error=>receipt(error).operation_state==='unconfirmed');
+ await assert.rejects(run('first','mkdir another'),/invalid_request/);
+ assert.equal(count(),2);
 });
 
 test('a temporary developer terminal is not restored as an ordinary session grant after relogin',async t=>{

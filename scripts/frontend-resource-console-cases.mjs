@@ -50,6 +50,16 @@ async function mount(page,{theme='dark',language='zh-CN'}={}) {
         return {...humanB,output:data.cursor?'':'original-fixture-terminal\r\n',cursor:1,dropped:false};
       }
       if (method==='sharedTerminal.resize') return {accepted:true};
+      if (method==='compute.resourceWorkspace.preview'||method==='compute.resourceWorkspace.confirm') {
+        if (data.profileId!==b.profileId||data.profileVersion!==b.profileVersion||data.connectionId!==b.connectionId) throw Error('Unexpected workspace target');
+        const root='/fixture/workbench';
+        const preview={schemaVersion:2,profileId:b.profileId,profileVersion:b.profileVersion,connectionId:b.connectionId,resourceName:b.name,
+          root,account:'fixture',hostname:'graphics',directories:[root+'/workfile',root+'/software']};
+        if (method==='compute.resourceWorkspace.preview') return {...preview,status:'confirmation_required',confirmationId:'fixture-handoff'};
+        if (data.confirmationId!=='fixture-handoff') throw Error('Unexpected workspace confirmation');
+        f.workspaceConfirmed=true;
+        return {...preview,status:'confirmed'};
+      }
       if (method==='compute.console.release') {
         const row=f.consoleSnapshot.resources.find(row=>row.kind+':'+row.profileId===data.resourceId&&row.connectionId===data.connectionId);
         const exact=row?.channels.find(channel=>channel.leaseId===data.leaseId&&channel.provider===data.provider&&channel.threadId===data.threadId&&channel.source===data.source);
@@ -74,8 +84,10 @@ async function mount(page,{theme='dark',language='zh-CN'}={}) {
       }
       if (method==='compute.managed.publish'||method==='compute.managed.configureService') {
         if(data.connectionId!=='connection-b'||data.profileId!=='profile-b'||data.profileVersion!==7)throw Error('Native fixture refused a different SSH host');
+        if(!f.workspaceConfirmed)throw Error('Native fixture requires a confirmed workspace');
         b.managedId='ssh:profile-b';
         if(method==='compute.managed.configureService')b.service={kind:'private',...status('online')};
+        f.events.forEach(listener=>listener({method:'studio/managedActivity'}));
         return {kind:'ssh',resourceId:b.managedId,name:b.name,...data};
       }
       if (method==='compute.console.projectAccess') {
@@ -90,6 +102,33 @@ async function mount(page,{theme='dark',language='zh-CN'}={}) {
 }
 
 export async function frontendResourceConsoleCases({check}) {
+  await check('hosted-ssh-verification-pending',async page=>{
+    await mount(page);
+    await page.evaluate(()=>{
+      const original=window.studio.invoke;
+      window.__test.verificationPending=true;
+      window.studio.invoke=(method,data)=>{
+        if(method==='compute.managed.snapshot'){
+          const verificationPending=window.__test.verificationPending;
+          return Promise.resolve({resources:[{kind:'ssh',resourceId:'ssh:fixture',profileId:'fixture',profileVersion:1,connectionId:'connection-fixture',
+            name:'Fixture SSH',serviceStatus:'ready',serviceReady:!verificationPending,verificationPending}],conversations:[],sources:[]});
+        }
+        return original(method,data);
+      };
+      window.dispatchEvent(new Event('focus'));
+    });
+    const footer=page.getByTestId('current-compute-resource-status');
+    await footer.getByText(/Fixture SSH.*作业服务 待核对/).waitFor();
+    assert.equal(await footer.locator('i.online').count(),0);
+    await page.locator('nav [data-testid="navigate-compute-resources"]:visible').click();
+    await page.getByTestId('compute-resource-console').waitFor();
+    await page.evaluate(()=>{
+      window.__test.verificationPending=false;
+      window.dispatchEvent(new Event('focus'));
+    });
+    await footer.getByText(/Fixture SSH.*作业服务 可用/).waitFor();
+    assert.equal(await footer.locator('i.online').count(),1);
+  });
   await check('resource-console-desktop',async(page,capture)=>{
     await mount(page);
     const console=page.getByTestId('compute-resource-console');
@@ -165,6 +204,7 @@ export async function frontendResourceConsoleCases({check}) {
     await detail.getByText('未配置',{exact:true}).waitFor();
     await capture('compute-resource-console-human-terminals');
     await detail.getByRole('button',{name:'交给工作台管理',exact:true}).click();
+    await page.getByTestId('resource-workspace-confirm').click();
     await detail.getByText('工作台托管中',{exact:true}).waitFor();
     await detail.getByRole('button',{name:'准备作业服务',exact:true}).click();
     await detail.getByText('在线',{exact:true}).nth(3).waitFor();
@@ -204,10 +244,10 @@ export async function frontendResourceConsoleCases({check}) {
     await console.locator('[data-resource-key="connection-a"]').click();
     await detail.getByText('在线',{exact:true}).first().waitFor();
 
-    await page.getByTestId('unified-compute-entry').click();
+    await console.getByRole('button',{name:'添加或配置连接',exact:true}).click();
     await page.getByTestId('open-compute-resource-console').click();
     await console.getByRole('heading',{name:'计算资源',exact:true}).waitFor();
-    await page.locator('.sidebar:visible').getByRole('button',{name:'设置',exact:true}).click();
+    await page.locator('nav:visible').getByRole('button',{name:'设置',exact:true}).click();
     await page.getByRole('dialog',{name:'工作台设置'}).getByRole('button',{name:'计算连接',exact:true}).click();
     await page.getByTestId('settings-connect-resources').click();
     await page.getByRole('dialog',{name:'工作台设置'}).waitFor({state:'hidden'});

@@ -80,9 +80,13 @@ def landlock(roots, devices):
     rules = Ruleset(handled, 0, 3 if abi >= 6 else 0)
     fd = linux_call(syscall, 444, C.byref(rules), C.sizeof(rules) if abi >= 6 else 8, 0)
 
-    def allow(path, flags, mask):
+    def allow(path, flags, mask, expected_device=None):
         parent = os.open(path, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW | flags)
         try:
+            if expected_device is not None:
+                info = os.fstat(parent)
+                if not stat.S_ISCHR(info.st_mode) or info.st_rdev != expected_device:
+                    raise OSError('Expected character device is unavailable')
             linux_call(syscall, 445, fd, 1, C.byref(PathRule(mask, parent)), 0)
         finally:
             os.close(parent)
@@ -93,7 +97,7 @@ def landlock(roots, devices):
         for root in roots:
             allow(root, os.O_DIRECTORY, writes & ~((1 << 6) | (1 << 11)))
         if os.path.exists('/dev/null'):
-            allow('/dev/null', 0, 1 << 1)
+            allow('/dev/null', 0, 1 << 1, expected_device=os.makedev(1, 3))
         for device in devices:
             allow(device, 0, (1 << 1) | (1 << 15 if abi >= 5 else 0))
         linux_call(libc.prctl, 38, 1, 0, 0, 0)  # PR_SET_NO_NEW_PRIVS

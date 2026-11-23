@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import {AgentHub} from "../../agent/providers/agent-hub.mjs";import {McpProviderScopes} from "../../agent/tools/provider-scope.mjs";
 import {apiModelKey} from '../../contracts/agent/model-profiles.mjs';
+import {verifiedModel} from '../../desktop/platform/codex-model-ceiling.mjs';
 const context=(threadId=null,taskId=null,extra={})=>({threadId,taskId,projectId:taskId?'project-a':null,environmentId:taskId?'env-a':null,inputRoot:taskId?'/owned/'+taskId:null,...extra});
 class Bridge extends EventEmitter{
  constructor(){super();this.activeTurns=new Set();this.starts=[];this.calls=[];this.next=0;}
@@ -21,6 +22,24 @@ async function setup(t){
  const auth=c=>scopes.authenticate({pathname:new URL(c.url).pathname+'/mcp',authorization:'Bearer '+c.tokens.mcp,host:'127.0.0.1:32123'});return {hub,codex,scopes,base,auth};
 }
 async function fresh(f){await f.hub.connect('codex');await f.hub.selectContext('codex',context());const response=await f.hub.rpc('codex','thread/start');await f.hub.selectContext('codex',context(response.thread.id));return response.thread.id;}
+test('cold Codex history restores its own observed model through the current capability catalog',async t=>{
+ const f=await setup(t),threadId='stored-history',request=f.codex.request.bind(f.codex);
+ const ceiling={defaultModel:null,catalog:{models:['original-model','next-model']}};
+ f.hub.catalog.put('agent-thread','codex:'+threadId,{id:threadId,provider:'codex',model:'original-model'});
+ f.codex.request=async(method,params,...rest)=>{
+  if(method==='thread/resume')verifiedModel(params.model,ceiling);
+  return request(method,params,...rest);
+ };
+ await f.hub.selectContext('codex',context(threadId));await f.hub.connect('codex');
+ await f.hub.rpc('codex','thread/resume',{threadId});
+ assert.equal(f.codex.calls.at(-1).params.model,'original-model');
+ await f.hub.rpc('codex','turn/start',{threadId,model:'next-model',input:[]});
+ f.hub.disconnect('codex');await f.hub.connect('codex');
+ await f.hub.rpc('codex','thread/resume',{threadId});
+ assert.equal(f.codex.calls.at(-1).params.model,'next-model');
+ await assert.rejects(f.hub.rpc('codex','thread/resume',{threadId,model:'removed-model'}),/verified AIMatterLab capability catalog/);
+ assert.equal(f.codex.calls.filter(c=>c.method==='turn/start').length,1);
+});
 test('Kimi loads a relocated personal library at the next idle context without closing an in-flight session on save',async t=>{
  const {hub}=await setup(t),kimi=new EventEmitter();
  kimi.start=async(executable,profile)=>{kimi.executable=executable;kimi.profile=profile;kimi.process={};return {};};

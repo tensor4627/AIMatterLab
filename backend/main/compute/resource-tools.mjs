@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {visibleUserText} from '../../../contracts/agent/user-message.mjs';
 import {inspectDesktopSource,transferRelease,withDesktopRelease} from './resource-release-transfer.mjs';
 
 const selection=/^ssh:[A-Za-z0-9_-]{1,100}$/;
@@ -14,18 +15,65 @@ const portablePath=(root,child)=>{
  return path.posix.isAbsolute(child)&&!path.posix.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('../');
 };
 const ownerKey=({provider,threadId})=>JSON.stringify([provider,threadId]);
+const setupRequest=/install|configur|setup|set up|adopt|register|tool|script|安装|配置|接入|登记|工具|脚本|\b(?:save|prepare|update)\b[^.!?\r\n]{0,48}\bdraft\b|(?:保存|准备|起草|更新)[^。！？\r\n]{0,24}草稿/i;
+const hasDirectory=text=>/(?:~\/|(?<![A-Za-z0-9_.:/])\/[^\s/])/.test(text)||namesDirectory(text,'~');
+function namesDirectory(text,value){
+ if(!value)return false;
+ for(let at=text.indexOf(value);at>=0;at=text.indexOf(value,at+1)){
+  const after=text.slice(at+value.length);
+  if((!at||!/[A-Za-z0-9_.:/~-]/.test(text[at-1]))&&
+   (!after||/^[\s'"\x60),;:!?，。；：、！？）]/.test(after)||/^[./](?:\s|$)/.test(after)))return true;
+ }
+ return false;
+}
+const directoryRequired=()=>Object.assign(Error('Use the script directory designated by the user for this resource'),{operationNotStarted:true});
 const input=(name,description,properties,required=Object.keys(properties),readOnlyHint=true)=>({
  name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint}
 });
 const resource_id={type:'string',pattern:selection.source};
 const setup_id={type:'string',pattern:sha256.source};
 const text={type:'string',minLength:1,maxLength:2048};
+const string={type:'string'};
+const integer={type:'integer'};
+const strings={type:'array',items:string};
+const object=(properties,required=Object.keys(properties))=>({type:'object',properties,required,additionalProperties:false});
+const record=additionalProperties=>({type:'object',additionalProperties});
+const port=object({filename:string,format:string});
+const artifact=object({kind:{enum:['archive','binary']},url:string,sha256:setup_id,filename:string,executable:string},
+ ['kind','sha256','filename','executable']);
+const parameters=record({type:['string','number','boolean']});
+const testInputs=record({anyOf:[object({path:{type:'string',description:'Absolute path on the selected resource, within an authorized input root.'}}),object({text:string})]});
+const manifest={
+ ...object({
+  id:{type:'string',description:'Lowercase identifier using letters, digits and hyphens, beginning with a letter.'},
+  name:string,version:string,description:string,
+  source:{anyOf:[
+   object({kind:{enum:['installed']},executable:{type:'string',description:'Absolute path of the program or reviewed script to execute on the selected resource.'},sha256:setup_id},['kind','executable']),
+   object({kind:{enum:['git']},url:string,commit:string,executable:string}),
+   artifact,
+  ]},
+  interpreter:{enum:['bash','python']},
+  argv:{...strings,description:'Arguments after the executable. Use individual strings and optional {input:port}, {output:port} or {param:name} references. Use [] when there are no arguments. No shell operators or scheduler command.'},
+  dependencies:strings,support_files:strings,parameters,
+  citations:{type:'array',items:object({url:string,title:string,version:string},['url'])},
+  build:object({steps:{type:'array',items:object({command:string,args:strings,cwd:string},['command','args'])},max_seconds:integer}),
+  inputs:record(port),outputs:record(port),
+  test:object({
+   inputs:{...testInputs,description:'Supply one fixture per declared input port using {path} or {text}.'},
+   outputs:record(object({sha256:setup_id,contains:string,json_keys:strings,min_bytes:integer},[])),
+   parameters,max_seconds:{type:'integer',minimum:1,maximum:600},
+   resources:object({cpus:integer,gpus:integer,memory_mb:integer,qos:string},[]),
+  },['inputs','max_seconds']),
+  git_bootstrap:{...artifact,properties:{...artifact.properties,kind:{enum:['archive']}}},
+ },['id','name','version','source','argv','inputs','outputs','test']),
+ description:'Tool definition and bounded test for desktop review. Supply inputs and outputs as maps keyed by port name.',
+};
 const definitions=[
  input('list_resource_tools','List tool setup progress and scheduler targets for the acquired SSH resource and current project. Active entries include their exact environment, execution skill, and minimal test job.',{resource_id}),
  input('discover_resource_tool_scripts','Scan a user-designated directory on the acquired SSH resource. Report script groups and representative file hashes for the user to select.',{resource_id,directory:text}),
- input('plan_resource_tool_setup','Prepare an editable resource tool setup from the current user request. Start installation and the allocation test through the desktop review. Use exact resource and scheduler IDs from list_resource_tools and read the bundled setup guide for the manifest.',{
+ input('plan_resource_tool_setup','Save an editable resource tool setup for desktop review. The desktop starts installation or the allocation test after review. Use exact resource and scheduler IDs from list_resource_tools and read the bundled setup guide.',{
   resource_id,route:{enum:['fresh','existing','custom']},cluster_id:text,environment_id:text,queue_target_id:text,prior_run_id:{type:'string',pattern:'^[a-f0-9]{24}$'},
-  manifest:{type:'object'},candidate:{type:'object',properties:{path:text,sha256:setup_id},required:['path','sha256'],additionalProperties:false}
+  manifest,candidate:{...object({path:text,sha256:setup_id}),description:'For the existing route, use the reviewed script path as manifest.source.executable and supply the digest of that same file.'}
  },['resource_id','route','cluster_id','environment_id','manifest'],false),
  input('read_resource_tool_setup','Read one verified tool setup for the acquired resource and project. Recover transfer and test progress here. Read the saved execution skill using read_project_skill with scope=resource.',{resource_id,setup_id}),
 ];
@@ -34,7 +82,7 @@ const terminalStates=new Set(['active','failed','needs_file','planned']);
 
 export function createResourceToolController({resources,workspaces,skills,developerCompute,chooseFile,confirm,emit=()=>{},
  current=()=>true,withRelease=withDesktopRelease,upload=transferRelease,inspect=inspectDesktopSource,setTimer=setTimeout,clearTimer=clearTimeout}){
- const desktopDownloads=new Map(),watches=new Map(),turns=new Map(),saveFailures=new Map(),foundScripts=new Map();
+ const desktopDownloads=new Map(),watches=new Map(),turns=new Map(),saveFailures=new Map();
  const selectedFiles=new Map(),setupFiles=new Map();
  let closed=false;
 
@@ -62,7 +110,7 @@ export function createResourceToolController({resources,workspaces,skills,develo
   };
   const call=(operation,data={},timeoutMs)=>request('POST','/api/resource-tools/'+operation,{...data,resource_id:registration.resourceId},timeoutMs);
   const register=async()=>{check();await workspaces.registerWithWorker(registration,request);check();};
-  return {ref,selected,origin,registration,check,call,register};
+  return {ref,selected,origin,registration,check,call,register,request};
  }
 
  function receipt(value, selected, id){
@@ -189,8 +237,7 @@ export function createResourceToolController({resources,workspaces,skills,develo
   },
   async discover(ref){
    fields(ref,['resource_id','directory'],['profile_version']);
-   const selected=target(ref);await selected.register();
-   return selected.call('discover',{workspace_id:selected.registration.workspaceId,directory:ref.directory});
+   return discoverScripts(target(ref),ref.directory);
   },
   async plan(ref){
    fields(ref,['resource_id',...planFields],['profile_version','candidate','queue_target_id','prior_run_id','local_source']);
@@ -287,12 +334,37 @@ export function createResourceToolController({resources,workspaces,skills,develo
   return result;
  }
 
- async function resolveSkills(scope,id,inventory=false){
+ async function discoverScripts(selected,directory,instruction){
+  if(typeof directory!=='string'||!directory)throw directoryRequired();
+  const abbreviated=directory==='~'||directory.startsWith('~/');
+  const designated=instruction===undefined||namesDirectory(instruction,directory);
+  if(!designated&&!abbreviated&&!(directory.startsWith('/')&&(instruction.includes('~/')||namesDirectory(instruction,'~'))))throw directoryRequired();
+  if(abbreviated||!designated){
+   const health=await selected.request('GET','/api/health');
+   const home=health?.home;
+   if(typeof home!=='string'||!path.posix.isAbsolute(home)||path.posix.normalize(home)!==home||/[\\\x00-\x1f\x7f]/.test(home)){
+    throw Error('The selected SSH service did not report its home directory. Use an absolute script directory.');
+   }
+   // Preserve the user's path components for validation by the remote worker.
+   const prefix=home.replace(/\/$/,'');
+   if(abbreviated){
+    directory=prefix+(directory.slice(1)||'/');
+    if(!designated&&!namesDirectory(instruction,directory))throw directoryRequired();
+   }else{
+    const homeNotation=directory===home?'~':directory.startsWith(prefix+'/')?'~'+directory.slice(prefix.length):null;
+    if(!namesDirectory(instruction,homeNotation))throw directoryRequired();
+   }
+  }
+  await selected.register();
+  return selected.call('discover',{workspace_id:selected.registration.workspaceId,directory});
+ }
+
+ async function resolveSkills(scope,id,inventory=false,draftTurn){
   const captured=resources.capture(scope.provider,scope.threadId);
   const workspaceId=developerCompute&&resources.snapshot().find(resource=>resource.resourceId===id)?.workspace?.workspaceId;
   const development=developerCompute?.allows(scope,workspaceId)===true,revision=developerCompute?.revision(workspaceId);
   const guard=()=>{
-   if(scope.checkCurrent?.()!==true)throw Error('The resource tool conversation changed');
+   if(scope.checkCurrent?.()!==true||draftTurn&&turns.get(ownerKey(scope))!==draftTurn)throw Error('The resource tool conversation changed');
    if(development&&(!developerCompute.allows(scope,workspaceId)||developerCompute.revision(workspaceId)!==revision))throw Error('Developer workspace access changed');
    captured.assertCurrent();
   };
@@ -304,27 +376,60 @@ export function createResourceToolController({resources,workspaces,skills,develo
   return target({resource_id:id,profile_version:ref.profileVersion},guard);
  }
 
- function recordUserTurn({provider,method,params={}}){
-  if(!['turn/start','turn/steer'].includes(method)||typeof params.threadId!=='string')return;
-  const input=Array.isArray(params.input)?params.input.filter(part=>part.type==='text').map(part=>part.text).join('\n'):'';
-  const key=ownerKey({provider,threadId:params.threadId});
+ function rememberTurn(key,user,directoryInstruction){
+  const previous=turns.get(key);
+  // A later turn can select a hashed representative. Other example paths belong to the original scan turn.
+  const turn={user,scan:previous?.scan?.representatives?previous.scan:null,examples:null,
+   directoryInstruction:hasDirectory(user)?directoryInstruction:previous?.directoryInstruction};
+  turns.delete(key);
   if(turns.size>=128)turns.delete(turns.keys().next().value);
-  turns.set(key,input.slice(0,16000));foundScripts.delete(key);
+  turns.set(key,turn);
+  return turn;
+ }
+
+ function scanContext({selected,registration,origin},projectId){
+  return JSON.stringify([projectId,selected.resourceId,selected.profileVersion,selected.connectionId,
+   registration.resourceId,registration.workspaceId,registration.account,origin.id,origin.generation]);
+ }
+
+ function recordUserTurn({provider,method,projectId=null,params={}}){
+  if(!['turn/start','turn/steer'].includes(method)||typeof params.threadId!=='string')return;
+  const input=Array.isArray(params.input)?visibleUserText(params.input).slice(0,16000):'';
+  const key=ownerKey({provider,threadId:params.threadId});
+  let directoryInstruction;
+  if(hasDirectory(input)){
+   const owned=resources.capture(provider,params.threadId).resources.filter(row=>row.kind==='ssh');
+   const candidates=owned.length?owned:resources.snapshot().filter(row=>row.kind==='ssh'&&!row.verificationPending);
+   if(candidates.length===1){
+    try{
+     const selected=target({resource_id:candidates[0].resourceId});
+     directoryInstruction={text:input,context:scanContext(selected,projectId)};
+    }catch{/* A directory can be named again once this resource has a verified workspace. */}
+   }
+  }
+  rememberTurn(key,input,directoryInstruction);
  }
 
  async function call(name,args,scope){
   if(!names.has(name)||!args||scope.checkCurrent?.()!==true)throw Error('Invalid resource tool arguments');
-  const selected=await resolveSkills(scope,args.resource_id,name==='list_resource_tools'||name==='discover_resource_tool_scripts');
+  const key=ownerKey(scope),turn=turns.get(key)??rememberTurn(key,'');
+  const selected=await resolveSkills(scope,args.resource_id,name==='list_resource_tools'||name==='discover_resource_tool_scripts',
+   name==='plan_resource_tool_setup'?turn:undefined);
   const project_id=scope.projectId;
   const workspace_id=selected.registration.workspaceId;
   const development=developerCompute?.allows(scope,workspace_id)===true;
-  const key=ownerKey(scope),user=turns.get(key)||'';
+  const user=turn.user;
   if(name==='discover_resource_tool_scripts'){
    fields(args,['resource_id','directory']);
-   if(typeof args.directory!=='string'||!development&&!user.includes(args.directory))throw Error('Use the script directory designated in this user turn');
-   await selected.register();
-   const result=await selected.call('discover',{workspace_id,directory:args.directory});
-   foundScripts.set(key,{resourceId:args.resource_id,files:new Set(result.candidates.flatMap(row=>row.examples))});
+   const scan={context:scanContext(selected,project_id??null),representatives:null};
+   const remembered=turn.directoryInstruction;
+   const instruction=remembered?.context===scan.context?remembered.text:user;
+   turn.scan=scan;turn.examples=null;
+   const result=await discoverScripts(selected,args.directory,development?undefined:instruction);
+   if(turns.get(key)===turn&&turn.scan===scan){
+    scan.representatives=new Map(result.candidates.filter(row=>sha256.test(row.sha256)).map(row=>[row.path,row.sha256]));
+    turn.examples=new Set(result.candidates.flatMap(row=>row.examples));
+   }
    return result;
   }
   if(development&&name==='list_resource_tools'&&!project_id){
@@ -338,11 +443,14 @@ export function createResourceToolController({resources,workspaces,skills,develo
   if(!project_id)throw Error('Select the authorized project for this resource');
   if(name==='plan_resource_tool_setup'){
    fields(args,['resource_id','manifest','route','cluster_id','environment_id'],['candidate','queue_target_id','prior_run_id']);
-   if(!development&&!/install|configur|setup|set up|adopt|register|tool|script|安装|配置|接入|登记|工具|脚本/i.test(user))throw Error('A current user request for tool setup is required before drafting');
+   if(!development&&!setupRequest.test(user))throw Object.assign(Error('A current user request for tool setup is required before drafting'),{operationNotStarted:true});
    const source=args.manifest?.source;
-   const scanned=foundScripts.get(key);
+   const scan=turn.scan;
+   const reviewed=scan?.context===scanContext(selected,project_id)&&(turn.examples?.has(source?.executable)||
+    args.route==='existing'&&args.candidate?.path===source?.executable&&sha256.test(args.candidate?.sha256)&&
+    scan.representatives?.get(source?.executable)===args.candidate.sha256);
    if(source?.kind==='installed'&&(!source.executable||!portablePath(selected.registration.root,source.executable)&&
-      !user.includes(source.executable)&&!(scanned?.resourceId===args.resource_id&&scanned.files.has(source.executable)))){
+      !user.includes(source.executable)&&!reviewed)){
     throw Error('Use a script from the reviewed scan or an installed path designated by the user');
    }
    await selected.register();
@@ -370,7 +478,7 @@ export function createResourceToolController({resources,workspaces,skills,develo
  }
 
  return {controller,tools:()=>definitions,owns:name=>names.has(name),call,resolveSkills:(scope,id)=>resources.resolveSkillLibrary(scope,id),recordUserTurn,
-  close(){closed=true;for(const watch of watches.values())clearTimer(watch.timer);watches.clear();selectedFiles.clear();setupFiles.clear();}};
+  close(){closed=true;for(const watch of watches.values())clearTimer(watch.timer);watches.clear();turns.clear();selectedFiles.clear();setupFiles.clear();}};
 }
 
 export function registerResourceToolRoutes(handle,controller){

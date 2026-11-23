@@ -81,7 +81,9 @@ test('SSH recovery receipts preserve a pending login and require verified loss b
  const failure=(message,dispatched=false)=>JSON.parse(toolFailure(Error(message),{toolName:'acquire_compute_resource',dispatched}).content[0].text);
  const pending=failure('ssh_control_timeout');
  assert.equal(pending.code,'connection_unconfirmed');
- assert.match(pending.next_step,/Resume a pending login.*private terminal/);
+ assert.match(pending.next_step,/verified login, retry the read on that connection/);
+ assert.match(pending.next_step,/Resume a pending login only when its private terminal shows an authentication prompt/);
+ assert.match(pending.next_step,/unconfirmed write.*original setup or job/);
  assert.doesNotMatch(pending.next_step,/sign in again/);
  const lost=failure('ssh_master_unavailable',true);
  assert.equal(lost.operation_state,'unconfirmed');
@@ -101,4 +103,13 @@ test('missing resource selection is resolved in the same chat using the listed I
  assert.match(reply.next_step,/current resource_id.*requested access/i);
  assert.match(reply.next_step,/ambiguous.*picker/i);
  assert.match(reply.next_step,/project or login refusal only when its own receipt/i);
+});
+
+test('an earlier project channel asks for targeted release with the SSH login intact',()=>{
+ const error=Object.assign(Error('managed_compute_resource_project_changed'),{operationNotStarted:true});
+ const receipt=JSON.parse(toolFailure(error,{toolName:'acquire_compute_resource',dispatched:true}).content[0].text);
+ assert.equal(receipt.code,'resource_lease_project_changed');
+ assert.equal(receipt.operation_state,'not_started');
+ assert.match(receipt.next_step,/release that conversation channel in Computing Resources/);
+ assert.match(receipt.next_step,/Keep the saved SSH login and job service/);
 });

@@ -1,4 +1,12 @@
+import {sanitizeTranscript} from '../../../contracts/agent/transcript-sanitizer.mjs';
+
 const object=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
+
+export function elicitationToolArguments(params){
+ const meta=params?._meta;
+ if(meta?.codex_approval_kind!=='mcp_tool_call'||!object(meta.tool_params))return null;
+ return JSON.stringify(sanitizeTranscript(meta.tool_params),null,2);
+}
 
 /** Only a proven zero-control form is a confirmation without editable content. */
 export function elicitationHasEditableInput(params){

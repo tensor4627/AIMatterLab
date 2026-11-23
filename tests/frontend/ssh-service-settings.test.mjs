@@ -28,6 +28,19 @@ test('unknown stop acknowledgement is retained without claiming service shutdown
 for(const mode of ['reuse','check'])test('a background connected service can explicitly '+mode+' its existing channel without setup or update',async()=>{const h=harness({service:{...connected,workflowReady:false}});try{await h.flush();assert.equal(h.id('ssh-service-'+mode).props.disabled,false);assert.equal(h.id('ssh-service-update').props.disabled,true);h.click('ssh-service-'+mode);await h.flush();assert.deepEqual(starts(h).map(call=>call.data.mode),[mode]);assert.equal(starts(h)[0].data.connectionId,'connection');assert(!h.calls.some(call=>call.method==='compute.sshConnection.open'||call.method.startsWith('sharedTerminal.')));}finally{h.unmount();}});
 test('an unknown background service cannot attach, update or implicitly start another channel',async()=>{const h=harness({service:{...connected,status:'unknown',workflowReady:false}});try{await h.flush();for(const mode of ['reuse','check','update']){assert.equal(h.id('ssh-service-'+mode).props.disabled,true);h.click('ssh-service-'+mode);await h.flush();}assert.deepEqual(starts(h),[]);}finally{h.unmount();}});
 
+test('an explicit check of a previously ready current service targets only its original attempt',async()=>{
+ const lost={...connected,status:'unknown',workflowReady:false,serviceActive:true,phase:'ready',profileId:profile.id,profileVersion:profile.version};
+ const activeResource={kind:'ssh-connection',status:'selected',authentication:'verified',connectionId:'connection',profileId:profile.id,profileVersion:profile.version};
+ const h=harness({service:lost,props:{activeResource},override:(method,data,standard)=>method==='compute.sshService.check'?connected:standard(method,data)});
+ try{
+  await h.flush();assert.equal(h.id('ssh-service-check').props.disabled,false);
+  assert.equal(h.id('ssh-service-reuse').props.disabled,true);assert.equal(h.id('ssh-service-update').props.disabled,true);
+  h.click('ssh-service-check');await h.flush();
+  assert.deepEqual(h.calls.filter(c=>c.method==='compute.sshService.check').map(c=>c.data),[{connectionId:'connection',attemptId:'attempt'}]);
+  assert.deepEqual(mutates(h),[]);
+ }finally{h.unmount();}
+});
+
 test('unknown service health keeps authentication evidence and allows a read-only refresh without starting update',async()=>{const h=harness({service:{...connected,status:'unknown',workflowReady:false,error:{code:'worker_health_invalid',phase:'checking_health'}}});try{await h.flush();assert.equal(h.id('ssh-service-update').props.disabled,true);assert.equal(h.id('ssh-service-login').props.disabled,false);const before=h.calls.length;h.find(n=>n.type==='button'&&n.props?.['aria-label']==='刷新作业服务设置').props.onClick();await h.flush();assert(h.calls.slice(before).some(c=>c.method==='compute.sshService.status'));assert.deepEqual(mutates(h),[]);}finally{h.unmount();}});
 
 for(const state of [{status:'connecting',workflowReady:false},{status:'connecting',workflowReady:true},{status:'connected',workflowReady:false},{status:'unknown',workflowReady:false}])test('service operator is not presented as available before connected readiness '+JSON.stringify(state),async()=>{const h=harness({service:{...connected,...state,operator:'agent'}});try{await h.flush();const statuses=h.all().filter(n=>n.props?.role==='status');assert(!JSON.stringify(statuses).includes('Agent 使用服务'));assert.deepEqual(mutates(h),[]);}finally{h.unmount();}});

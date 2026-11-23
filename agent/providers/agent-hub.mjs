@@ -220,6 +220,11 @@ export class AgentHub extends EventEmitter{
    await this.rpc(provider,'thread/resume',{threadId:resume,model:params.model,...provider==='codex'?{excludeTurns:true}:{}});assertSelected();
   }
 
+  if(provider==='codex'&&method==='thread/resume'&&params.model==null){
+   const state=this.codexThreadState(params.threadId);
+   const model=state?.lastTurnModel||this.catalog.get?.('agent-thread','codex:'+params.threadId)?.model||state?.model;
+   if(model)params={...params,model};
+  }
   if(provider==='codex'&&['thread/start','thread/resume'].includes(method))params={...params,cwd:this.getSettings().cwd,approvalPolicy:'on-request',sandbox:'read-only',config:{...params.config,...agentConfig(this.preferences('codex'))},developerInstructions:this.instructions};
   if(provider!=='codex'&&method==='account/read')return {...await this.account(provider),transportConnected:true};
   if(provider!=='codex'&&method==='thread/list')return {data:this.threads(provider)};
@@ -267,7 +272,7 @@ export class AgentHub extends EventEmitter{
    if(imported?.modelIds?.length){const data=result.data.filter(model=>imported.modelIds.includes(model.model));if(data.length)result={...result,data:data.map(model=>{const saved=imported.models?.find(entry=>entry.id===model.model),efforts=saved?.reasoning?.efforts,actual=model.supportedReasoningEfforts||[],supported=efforts?actual.filter(value=>efforts.some(entry=>entry.id===value.reasoningEffort)):actual;return {...model,displayName:saved?.name||model.displayName,supportedReasoningEfforts:supported,defaultReasoningEffort:supported.some(value=>value.reasoningEffort===saved?.reasoning?.defaultEffort)?saved.reasoning.defaultEffort:model.defaultReasoningEffort};})};}
   }
   if(provider==='codex'&&method==='turn/start'){this.pendingBlankTurns.delete(params.threadId);this.blankThreads.delete(params.threadId);}
-  if(provider==='codex'&&method==='turn/start')this.recordCodexThread(params.threadId,'has_turns');
+  if(provider==='codex'&&method==='turn/start')this.recordCodexThread(params.threadId,'has_turns',params.model?{lastTurnModel:params.model}:{});
   if(provider==='codex'&&method==='thread/start'&&result.thread&&Array.isArray(result.thread.turns)&&result.thread.turns.length===0)this.recordCodexThread(result.thread.id,'empty',{model:result.model||null});
   if(provider==='codex'&&['thread/read','thread/resume'].includes(method)&&result.thread?.turns?.length)this.recordCodexThread(result.thread.id,'has_turns');
   if(provider==='codex'&&method==='thread/start'&&result.thread&&!result.thread.turns?.length)this.blankThreads.set(result.thread.id,structuredClone(result));

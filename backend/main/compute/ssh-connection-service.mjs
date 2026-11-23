@@ -3,7 +3,7 @@ import {checkedSshLocations} from '../../../contracts/compute/ssh-service-locati
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {posix} from 'node:path';
-import {prepareSshServiceResourcesAsync} from './ssh-service-resources.mjs';
+import {prepareSshServiceResourcesAsync,shippedSshServiceManifest} from './ssh-service-resources.mjs';
 import {safeSshServiceError,safeSshServicePhase,safeSshServiceProgress} from './ssh-service-state.mjs';
 import {assertTaskWorker} from '../../../contracts/compute/task-worker-binding.mjs';
 const object=v=>!!v&&typeof v==='object'&&!Array.isArray(v),id=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,200}$/.test(v);
@@ -27,7 +27,7 @@ function verifiedLiveHealth(ready,value){
   ...ready.runtimeSourceScope?{runtimeSourceScope:ready.runtimeSourceScope}:{},...ready.locations?{locations:ready.locations}:{}};
 }
 function createConnectionService({worker,connections,profiles,resource,source,transportSource,registration,preferredRuntimeId=()=>undefined,current=()=>null,assertIdle=()=>{},publish=()=>{},remember=()=>{},onRuntimeUpdated,prepareResources=prepareSshServiceResourcesAsync}){
- let record=null,connecting=null,stopping=null,updating=null,updatingGrant=null,serial=0,revision=0,grant=null,grantIntent=0;
+ let record=null,connecting=null,stopping=null,updating=null,updatingGrant=null,reattaching=null,serial=0,revision=0,grant=null,grantIntent=0;
  const updates=new Map(),updateOrigins=new WeakSet();
  const authoringGrants=new WeakMap(),scope=v=>v&&typeof v.provider==='string'&&typeof v.threadId==='string'&&v.threadId?{provider:v.provider,threadId:v.threadId,...v.taskId?{taskId:v.taskId}:{}}:null;
  const contextScope=v=>{const owner=scope(v);return owner?{...owner,...Object.fromEntries(['projectId','environmentId','inputRoot'].map(k=>[k,v[k]??null]))}:null;};
@@ -39,7 +39,17 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
  function phase(owned,value){if(record!==owned)return;const next=safeSshServicePhase(value,owned.phase);if(next===owned.phase)return;owned.phase=next;owned.phaseStartedAt=Date.now();delete owned.progress;changed(owned);}
  function maintenance(profile,code){try{registration?.markMaintenance?.(profile,code);}catch{}}
  function unknown(owned,error){if(record!==owned)return;const before=JSON.stringify([owned.status,owned.active,owned.error,!!grant]);revokeGrant();owned.status='unknown';owned.active=true;owned.error=safeSshServiceError(error?.message||error,owned.phase);if(before!==JSON.stringify([owned.status,owned.active,owned.error,!!grant]))changed(owned);}
- const viewMatches=(owned,v)=>v?.connectionId===owned.connectionId&&v.profileId===owned.profileId&&v.profileVersion===owned.profileVersion&&v.attemptId===owned.attemptId&&(!owned.serviceId||v.serviceId===owned.serviceId);
+ const sameResource=(owned,v)=>v?.connectionId===owned.connectionId&&v.profileId===owned.profileId&&v.profileVersion===owned.profileVersion;
+ const viewMatches=(owned,v)=>sameResource(owned,v)&&v.attemptId===owned.attemptId&&(!owned.serviceId||v.serviceId===owned.serviceId);
+ const livePrivate=(owned,v)=>sameResource(owned,v)&&v.status==='connected'&&v.serviceActive===true&&v.channelKind==='private'&&id(v.attemptId)&&id(v.serviceId);
+ function startupCancelled(owned,v){
+  if(!sameResource(owned,v)||v.cancelled!==true||v.cancelledAttemptId!==owned.attemptId)return false;
+  if(viewMatches(owned,v))return v.serviceActive===false;
+  // The broker fences the requested start before returning its current channel.
+  // An unrelated generation is allowed to remain live on the same master.
+  return !owned.serviceId&&!owned.connection&&(id(v.attemptId)&&v.attemptId!==owned.attemptId||
+   !v.attemptId&&v.status==='idle'&&v.serviceActive===false);
+ }
  function applyView(owned,v){
   if(record!==owned||!viewMatches(owned,v))fail('ssh_service_context_changed');
   const before=JSON.stringify([owned.serviceId,owned.active,owned.progress,owned.error,owned.phase]),next=safeSshServicePhase(v.phase||v.servicePhase,owned.phase);
@@ -53,14 +63,33 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
  function exactAttempt(data,extra=[],required=[]){exact(data,['connectionId','attemptId',...extra],['connectionId','attemptId',...required]);if(!id(data.connectionId)||!id(data.attemptId)||record?.connectionId!==data.connectionId||record?.attemptId!==data.attemptId)fail('ssh_service_context_changed');return record;}
  async function checkedTools(owned){const failed=owned.failedTraffic||0;let tools;try{tools=await worker.probeTools();}catch{tools={status:'warning',count:0};}if((owned.failedTraffic||0)!==failed)fail('ssh_service_unavailable');const ready=tools?.status==='ready'&&Number.isSafeInteger(tools.count)&&tools.count>0;owned.warnings=ready?[]:['tools_unavailable'];return {status:ready?'ready':'warning',count:Number.isSafeInteger(tools?.count)&&tools.count>=0?tools.count:0,...ready?{}:{warnings:owned.warnings}};}
  async function attach(owned,fresh){
-  const request=async p=>{if(record!==owned||!['connected','connecting','unknown'].includes(owned.status)||!selectedRecord(owned))fail('ssh_service_context_changed');if(owned.status==='unknown'&&!(p.method==='GET'&&p.path==='/api/health'||p.mcp&&p.data?.method==='tools/list'))fail('ssh_service_unavailable');profiles.read({id:owned.profileId,version:owned.profileVersion});owned.pendingRequests=(owned.pendingRequests||0)+1;try{const response=await connections.serviceRequest({connectionId:owned.connectionId,serviceId:owned.serviceId,requestId:randomUUID(),method:p.method,target:p.path,data:p.data,mcp:p.mcp,timeoutMs:p.timeoutMs});owned.trafficRevision=(owned.trafficRevision||0)+1;return response;}catch(error){if(!['terminal_service_active','terminal_scope_denied','terminal_context_changed'].includes(error?.message)){owned.failedTraffic=(owned.failedTraffic||0)+1;unknown(owned,error);}throw error;}finally{owned.pendingRequests--;}};
+  const request=async p=>{
+   if(record!==owned||!['connected','connecting','unknown'].includes(owned.status)||!selectedRecord(owned))fail('ssh_service_context_changed');
+   if(owned.status==='unknown'&&!(p.method==='GET'&&p.path==='/api/health'||p.mcp&&p.data?.method==='tools/list'))fail('ssh_service_unavailable');
+   profiles.read({id:owned.profileId,version:owned.profileVersion});
+   owned.pendingRequests=(owned.pendingRequests||0)+1;
+   try{
+    const response=await connections.serviceRequest({connectionId:owned.connectionId,serviceId:owned.serviceId,requestId:randomUUID(),method:p.method,target:p.path,data:p.data,mcp:p.mcp,timeoutMs:p.timeoutMs});
+    owned.trafficRevision=(owned.trafficRevision||0)+1;
+    return response;
+   }catch(error){
+    // The broker checks the SSH master before forwarding the worker request.
+    if(!['ssh_control_timeout','terminal_service_active','terminal_scope_denied','terminal_context_changed'].includes(error?.message)){
+     owned.failedTraffic=(owned.failedTraffic||0)+1;
+     unknown(owned,error);
+    }
+    throw error;
+   }finally{owned.pendingRequests--;}
+  };
   fresh();
   const reply=await request({method:'GET',path:'/api/health',mcp:false,timeoutMs:10000});fresh();
   if(reply.status!==200)fail('ssh_service_identity_changed');
   const health=verifiedLiveHealth(owned.health,reply.data);
   const identity={kind:'ssh',version:3,connectionId:owned.connectionId,profileId:owned.profileId,profileVersion:owned.profileVersion,hostIdentity:health.hostIdentity,root:health.root,runtime:health.runtime,runtimeId:health.runtimeId};
-  await worker.attachServiceTransport({health,identity,target:{...identity,serviceId:owned.serviceId,port:health.port},source,request,detach:()=>{}});
-  fresh();owned.connection=worker.connection;owned.health=health;return identity;
+  const install=worker.attachServiceTransport({health,identity,target:{...identity,serviceId:owned.serviceId,port:health.port},source,request,detach:()=>{}});
+  const installed=worker.connection;
+  try{await install;fresh(installed);}catch(error){if(installed&&worker.connection===installed)worker.close();throw error;}
+  owned.connection=worker.connection;owned.health=health;return identity;
  }
  async function update(data){
   const signature=JSON.stringify(data),previous=updates.get(data.requestId);if(previous){if(previous.signature!==signature)fail('ssh_service_invalid_request');resource.assertCurrent(previous.ticket);if(!equal(previous.owner,current()))fail('ssh_service_context_changed');await previous.promise;resource.assertCurrent(previous.ticket);if(!equal(previous.owner,current()))fail('ssh_service_context_changed');return safe();}
@@ -85,10 +114,25 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
   if(data.mode==='update'&&!updateOrigin){if(updates.has(data.requestId))return update(data);if(record?.status==='connected'){if(data.expectedAttemptId===undefined)fail('ssh_service_channel_in_use');return update(data);}if(data.expectedAttemptId!==undefined)fail('ssh_service_context_changed');}if(updateOrigin&&!updateOrigins.has(updateOrigin))fail('ssh_service_invalid_request');if(updating&&!updateOrigin)fail('ssh_service_busy');
   assertIdle();if(stopping)fail('ssh_service_busy');const profile=profiles.read({id:data.profileId,version:data.profileVersion});if(profile.kind!=='ssh'||!selectedRecord(data))fail('ssh_service_selection_changed');
   const key=JSON.stringify([data,startCached,terminalSessionId,conversationChannel,existingOnly]);if(connecting){if(connecting.key===key)return connecting.promise;fail('ssh_service_busy');}
+  if(existingOnly&&record?.status==='unknown'&&record.phase==='ready'&&sameResource(record,data)&&worker.connection===record.connection){
+   return check({connectionId:record.connectionId,attemptId:record.attemptId},{privateOnly:true});
+  }
   if(record?.status==='connected'&&record.connectionId===data.connectionId){
    if(safe().workflowReady){if(!['reuse','check'].includes(data.mode)&&data.requestId!==record.attemptId)fail('ssh_service_channel_in_use');return check({connectionId:record.connectionId,attemptId:record.attemptId});}if(!['reuse','check'].includes(data.mode))fail('ssh_service_channel_in_use');
    const owned=record,ticket=resource.capture(),owner=structuredClone(current()),fresh=()=>{resource.assertCurrent(ticket);if(record!==owned||owned.status!=='connected'||!selectedRecord(owned)||!conversationChannel&&!equal(owner,current()))fail('ssh_service_context_changed');};
    revokeGrant();try{await authenticated(owned);fresh();const view=await connections.serviceState({connectionId:owned.connectionId,serviceId:owned.serviceId});fresh();if(!viewMatches(owned,view)||view.status!=='connected'||view.serviceActive!==true)fail('ssh_service_unavailable');await attach(owned,fresh);const tools=await checkedTools(owned);fresh();changed();return {...safe(),tools};}catch(error){unknown(owned,error);return safe();}
+  }
+  let replacement;
+  if(existingOnly&&record?.status==='unknown'&&(record.mode??'setup')==='setup'&&record.dispatched&&!record.observedActive&&!record.serviceId&&!record.connection&&sameResource(record,data)){
+   const old=record,guard=resource.capture(),owner=structuredClone(current()),version=serial;
+   const stillCurrent=()=>{resource.assertCurrent(guard);if(record!==old||serial!==version||stopping||connecting||old.status!=='unknown'||old.serviceId||old.connection||!equal(owner,current()))fail('ssh_service_context_changed');};
+   const live=await connections.serviceState({connectionId:old.connectionId});stillCurrent();
+   if(livePrivate(old,live)&&live.attemptId!==old.attemptId){
+    const cancelled=await connections.cancelServiceStart({connectionId:old.connectionId,requestId:old.attemptId,supersededBy:live.attemptId});stillCurrent();
+    if(!startupCancelled(old,cancelled)||cancelled.attemptId!==live.attemptId||cancelled.serviceId!==live.serviceId||
+     cancelled.status!=='connected'||cancelled.serviceActive!==true)fail('ssh_service_context_changed');
+    replacement=live;revokeGrant();record=null;changed();
+   }
   }
   if(record?.status==='failed'&&record.active===false)record=null;if(record)fail('ssh_service_channel_in_use');
   const ticket=resource.capture(),owner=structuredClone(current()),intent=++serial,startedAt=Date.now(),attempt={...data,attemptId:data.requestId,status:'connecting',active:false,dispatched:false,phase:'preparing_local',startedAt,phaseStartedAt:startedAt};
@@ -102,6 +146,7 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
     // connection. Bind its already started private service without opening,
     // restarting, borrowing or staging a second channel.
     const observed=await connections.serviceState({connectionId:attempt.connectionId});fresh();
+    if(replacement&&(!livePrivate(attempt,observed)||observed.attemptId!==replacement.attemptId||observed.serviceId!==replacement.serviceId))fail('ssh_service_context_changed');
     if(observed?.serviceActive===true||observed?.status==='unknown'){
      if(observed.connectionId!==attempt.connectionId||observed.profileId!==attempt.profileId||observed.profileVersion!==attempt.profileVersion||!id(observed.attemptId))fail('ssh_service_context_changed');
      attempt.attemptId=observed.attemptId;attempt.active=true;attempt.observedActive=true;
@@ -128,7 +173,18 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
    };
    const open=async bootstrap=>{const launch={...bootstrap,...profile.serviceEnvironment?{serviceEnvironment:structuredClone(profile.serviceEnvironment)}:{},...reuse?{reuseOnly:true,...reconciling||healthMaintenance?{startCached:false}:startCached?{startCached:true}:{}}:{}};phase(attempt,launch.serviceEnvironment?'preparing_environment':'waiting_python');attempt.dispatched=true;attempt.active=true;
     const value=await connections.openService({connectionId:data.connectionId,profileId:data.profileId,profileVersion:data.profileVersion,requestId:attempt.attemptId},launch,conversationChannel?{conversationChannel:true}:terminalSessionId?{sessionId:terminalSessionId}:undefined);fresh();applyView(attempt,value);return value;};
-   let bootstrap=await prepare(),result=await open(bootstrap);
+   let bootstrap=await prepare(),result;
+   if(mode==='setup'&&!terminalSessionId&&!conversationChannel){
+    const live=await connections.serviceState({connectionId:attempt.connectionId});fresh();
+    if(live?.status==='connected'&&live.serviceActive===true&&live.attemptId!==attempt.attemptId){
+     if(!livePrivate(attempt,live))fail('terminal_service_active');
+     const health=normalizeSshServiceHealth(live),expected=bootstrap.payload;
+     if(health.runtimeId!==expected.expected_runtime_id||health.port!==expected.port||!Array.isArray(expected.files)||!expected.files.length||
+      health.runtimeManifestSha256!==shippedSshServiceManifest(expected.files))fail('ssh_service_identity_changed');
+     attempt.attemptId=live.attemptId;attempt.observedActive=true;applyView(attempt,live);result=live;
+    }
+   }
+   result??=await open(bootstrap);
    // Reconcile only a completed identity refusal. A timeout, unknown result or
    // active bridge never permits another dispatch. This second bridge can only
    // observe the exact shipped runtime already present and serving this port.
@@ -147,25 +203,46 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
   }catch(error){if(record!==attempt||intent!==serial)throw error;if(!attempt.observedActive&&(!attempt.dispatched||error?.serviceNotStarted===true)){attempt.dispatched=false;attempt.status='failed';attempt.active=false;if(error?.serviceNotStarted===true)phase(attempt,'preparing_local');attempt.error=safeSshServiceError(error?.message,attempt.phase);changed();}else unknown(attempt,error);if(['reuse','check'].includes(data.mode)&&!['ssh_service_registration_changed','ssh_service_maintenance_required'].includes(error?.message))maintenance(profile,attempt.error.code);return safe();}})();connecting={key,promise,attempt};try{return await promise;}finally{if(connecting?.promise===promise)connecting=null;}
  }
  async function disconnect(data={}){if(!record){exact(data,[]);return safe();}const owned=exactAttempt(data);if(stopping)return stopping;serial++;revokeGrant();owned.status='disconnecting';phase(owned,'stopping');const finish=()=>{if(record!==owned)return safe();record=null;if(worker.connection===owned.connection)worker.close();changed();return {schemaVersion:2,status:'disconnected',workflowReady:false,serviceActive:false,operator:'human',revision,connectionId:owned.connectionId,attemptId:owned.attemptId,profileId:owned.profileId,profileVersion:owned.profileVersion};};
-  const pending=(async()=>{if(!owned.dispatched||owned.active===false)return finish();if(connecting?.attempt===owned||!owned.serviceId){const v=await connections.cancelServiceStart({connectionId:owned.connectionId,requestId:owned.attemptId});if(record!==owned)return safe();if(!viewMatches(owned,v)||v.cancelled!==true||v.cancelledAttemptId!==owned.attemptId||v.serviceActive!==false)fail('service_stop_unknown');return finish();}const v=await connections.closeService({connectionId:owned.connectionId,serviceId:owned.serviceId});if(record!==owned)return safe();if(!viewMatches(owned,v)||v.serviceActive!==false||v.status!=='disconnected')fail('service_stop_unknown');return finish();})();stopping=pending;try{return await pending;}catch(error){unknown(owned,error?.message==='service_stop_unknown'?'stop_timeout':error);return safe();}finally{if(stopping===pending)stopping=null;}}
+  const pending=(async()=>{if(!owned.dispatched||owned.active===false)return finish();if(connecting?.attempt===owned||!owned.serviceId){const v=await connections.cancelServiceStart({connectionId:owned.connectionId,requestId:owned.attemptId});if(record!==owned)return safe();if(!startupCancelled(owned,v))fail('service_stop_unknown');return finish();}const v=await connections.closeService({connectionId:owned.connectionId,serviceId:owned.serviceId});if(record!==owned)return safe();if(!viewMatches(owned,v)||v.serviceActive!==false||v.status!=='disconnected')fail('service_stop_unknown');return finish();})();stopping=pending;try{return await pending;}catch(error){unknown(owned,error?.message==='service_stop_unknown'?'stop_timeout':error);return safe();}finally{if(stopping===pending)stopping=null;}}
  async function status(data={}){exact(data,[]);const owned=record;if(!owned||!owned.dispatched||!owned.active)return safe();const observingContext=structuredClone(current()),observed=revision,traffic=owned.trafficRevision||0,readId=owned.readId=(owned.readId||0)+1;try{const v=await connections.serviceState({connectionId:owned.connectionId,...owned.serviceId?{serviceId:owned.serviceId}:{}});if(record===owned&&revision===observed&&owned.readId===readId){if(owned.status==='connecting'&&v.status==='idle'&&v.serviceActive===false&&!v.attemptId)return safe();if(!viewMatches(owned,v))fail('ssh_service_context_changed');applyView(owned,v);if(v.status!=='connected'&&owned.status==='connected'||v.serviceActive===false)unknown(owned,v.error||'connection_unconfirmed');}}catch(error){if(error?.message==='terminal_context_changed'&&!equal(observingContext,current()))return safe();const transient=error?.message==='terminal_service_unknown'||error?.message==='terminal_unavailable';if(record===owned&&revision===observed&&owned.readId===readId&&!(transient&&(owned.pendingRequests>0||(owned.trafficRevision||0)!==traffic)))unknown(owned,error);}return safe();}
- async function check(data){
+ async function check(data,{privateOnly=false}={}){
   const owned=exactAttempt(data);assertIdle();
-  if(!['connected','unknown'].includes(owned.status)||!owned.connection||worker.connection!==owned.connection)fail('ssh_service_context_changed');
-  const ticket=resource.capture(),owner=structuredClone(current()),connection=worker.connection;
-  const fresh=()=>{resource.assertCurrent(ticket);if(record!==owned||worker.connection!==connection||!equal(owner,current())||!selectedRecord(owned))fail('ssh_service_context_changed');};
+  if(reattaching)fail('ssh_service_busy');
+  const detached=owned.status==='unknown'&&owned.phase==='ready'&&owned.active===true&&!!owned.health&&id(owned.serviceId)&&!owned.connection&&!worker.connection;
+  if(!detached&&(!['connected','unknown'].includes(owned.status)||!owned.connection||worker.connection!==owned.connection))fail('ssh_service_context_changed');
+  const ticket=resource.capture(),owner=structuredClone(current()),generation=serial;
+  const reference={profileId:owned.profileId,profileVersion:owned.profileVersion};
+  let connection=worker.connection;
+  const sameTarget=()=>record===owned&&serial===generation&&equal(owner,current())&&selectedRecord(owned);
+  const fresh=(expected=connection)=>{resource.assertCurrent(ticket);if(!sameTarget()||worker.connection!==expected)fail('ssh_service_context_changed');};
+  if(detached)reattaching=owned;
   try{
-   await authenticated(owned);fresh();
+   const saved=detached&&registration?registration.read(reference).registration:undefined;
+   if(detached&&registration&&(!saved||!sameHealth(owned.health,saved)))fail('ssh_service_registration_changed');
+   fresh();await authenticated(owned);fresh();
    const view=await connections.serviceState({connectionId:owned.connectionId,serviceId:owned.serviceId});fresh();
-   if(!viewMatches(owned,view)||view.status!=='connected'||view.serviceActive!==true)fail('ssh_service_unavailable');
-   const health=verifiedLiveHealth(owned.health,await worker.request('GET','/api/health'));fresh();
+   if(!viewMatches(owned,view)||view.status!=='connected'||view.serviceActive!==true||(privateOnly||detached)&&view.channelKind!=='private')fail('ssh_service_unavailable');
+   let health;
+   if(detached){
+    await attach(owned,fresh);connection=owned.connection;health=owned.health;
+   }else{
+    health=verifiedLiveHealth(owned.health,await worker.request('GET','/api/health'));fresh();
+   }
    const tools=await checkedTools(owned);fresh();
+   if(saved&&!equal(saved,registration.read(reference).registration))fail('ssh_service_registration_changed');
    registration?.remember(profiles.read({id:owned.profileId,version:owned.profileVersion}),health,tools);
    const updated=owned.status!=='connected'||!equal(owned.health,health);
    owned.health=health;connection.health=structuredClone(health);owned.status='connected';delete owned.error;
    if(updated&&owned.phase==='ready')changed(owned);else phase(owned,'ready');
    return {...safe(),tools};
-  }catch(error){unknown(owned,error);maintenance({id:owned.profileId,version:owned.profileVersion,kind:'ssh'},safe().error?.code);return safe();}
+  }catch(error){
+   if(detached&&connection&&owned.connection===connection&&worker.connection===connection){owned.connection=null;worker.close();}
+   if(!sameTarget())return safe();
+   if(error?.message==='ssh_control_timeout')throw error;
+   unknown(owned,error);
+   if(error?.message!=='ssh_service_registration_changed')maintenance({id:owned.profileId,version:owned.profileVersion,kind:'ssh'},safe().error?.code);
+   return safe();
+  }finally{if(detached&&reattaching===owned)reattaching=null;}
  }
  async function scheduler(data){const owned=exactAttempt(data,['configuration'],['configuration']);assertIdle();if(!object(data.configuration)||!safe().workflowReady||!selectedRecord(owned))fail('ssh_service_unavailable');const ticket=resource.capture(),connection=worker.connection,identity=structuredClone(worker.identity);const fresh=()=>{resource.assertCurrent(ticket);if(record!==owned||owned.status!=='connected'||worker.connection!==connection||!equal(worker.identity,identity)||!selectedRecord(owned))fail('ssh_service_context_changed');};fresh();const value=await worker.request('POST','/api/ssh-service/scheduler',data.configuration);fresh();return value;}
  function owner(data){const owned=exactAttempt(data,['owner','scope'],['owner']);if(!['human','agent'].includes(data.owner)||owned.status!=='connected'||!safe().workflowReady||!selectedRecord(owned))fail('ssh_service_context_changed');if(data.owner==='agent')assertIdle();const selected=scope(current());if(data.owner==='agent'&&(!selected||!equal(scope(data.scope),selected)))fail('ssh_service_context_changed');grantIntent++;revokeGrant();if(data.owner==='agent')grant={provider:selected.provider,scope:contextScope(current()),connectionId:owned.connectionId,serviceId:owned.serviceId,attemptId:owned.attemptId,identity:structuredClone(worker.identity)};changed();return {...safe(),handoffKind:'service'};}

@@ -2,6 +2,74 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 export async function frontendSshReloginCases({check,out}){
+ await check('ssh-service-original-check-reopens-scheduler-settings',async page=>{
+  await page.evaluate(async()=>{
+   const {default:Settings}=await import('/frontend/features/compute/IndependentSshServiceSettings.tsx');
+   const profile={kind:'ssh',id:'fixture-profile',version:1,name:'Fixture SSH'};
+   const ref={connectionId:'fixture-connection',profileId:profile.id,profileVersion:profile.version};
+   const connection={...ref,schemaVersion:2,status:'authenticated',authentication:'verified',revision:1,capabilities:{multiplex:true},terminalSessionIds:[],serviceIds:['fixture-service']};
+   const service={...ref,schemaVersion:2,status:'unknown',serviceActive:true,workflowReady:false,phase:'ready',serviceId:'fixture-service',attemptId:'original-attempt',operator:'human'};
+   const fixture=window.__test.originalService={calls:[]};
+   window.studio.invoke=async(method,data)=>{
+    fixture.calls.push({method,data});
+    if(method==='compute.sshConnection.list')return {connections:[connection]};
+    if(method==='compute.sshConnection.state')return connection;
+    if(method==='compute.sshService.registration')return {...ref,status:'configured',registration:{checkedAt:1}};
+    if(method==='compute.sshService.status')return {...service};
+    if(method==='compute.sshService.check')return {...Object.assign(service,{status:'connected',workflowReady:true})};
+    if(method==='worker.request'&&data.method==='GET'&&data.target==='/api/clusters')return [];
+    throw Error('Unexpected service-settings call '+method);
+   };
+   function render(){window.testRoot.render(window.React.createElement(Settings,{profile,activeResource:{...ref,kind:'ssh-connection',status:'selected',authentication:'verified',capabilities:{service:{workflowReady:service.workflowReady}}},onChanged:render,onClose(){},onLogin(){throw Error('Unexpected new login');}}));}
+   render();
+  });
+  const before=page.getByTestId('ssh-service-check');await before.waitFor();
+  await page.waitForFunction(()=>!document.querySelector('[data-testid="ssh-service-check"]').disabled);
+  assert.equal(await page.getByTestId('ssh-service-update').isDisabled(),true);
+  await before.click();await page.getByTestId('ssh-scheduler-open').click();
+  assert(await page.getByTestId('ssh-scheduler-setup').getByRole('heading',{name:'当前作业服务的调度器与科学环境'}).isVisible());
+  const calls=await page.evaluate(()=>window.__test.originalService.calls);
+  assert.deepEqual(calls.filter(c=>c.method==='compute.sshService.check').map(c=>c.data),[{connectionId:'fixture-connection',attemptId:'original-attempt'}]);
+  assert(!calls.some(c=>['compute.resource.activate','compute.sshConnection.open','compute.sshService.connect','compute.sshService.disconnect'].includes(c.method)));
+ });
+ await check('ssh-workflow-attachment-error-and-explicit-retry',async page=>{
+  await page.evaluate(async()=>{
+   const f=window.__test,original=window.studio.invoke;
+   const ref={connectionId:'test-master',profileId:'test-profile',profileVersion:1};
+   const connection={...ref,schemaVersion:2,status:'authenticated',authentication:'verified',revision:1,
+    capabilities:{multiplex:true},terminalSessionIds:[],serviceIds:['test-service']};
+   const hosted={...ref,kind:'ssh',resourceId:'ssh:'+ref.profileId,name:'Test SSH',serviceReady:true,serviceStatus:'ready'};
+   const service={...ref,schemaVersion:2,serviceId:'test-service',attemptId:'current',operator:'human',status:'connected',serviceActive:true,workflowReady:true};
+   window.studio.invoke=async(method,data)=>{
+    if(method==='compute.sshConnection.list')return {connections:[connection]};
+    if(method==='sharedTerminal.list')return {sessions:[]};
+    if(method==='compute.managed.snapshot')return {resources:[hosted],conversations:[],sources:[]};
+    if(method==='compute.managed.serviceStatus'||method==='compute.sshService.status')return service;
+    return original(method,data);
+   };
+   f.bindingAttempts=0;
+   const Panel=(await import('/frontend/features/terminal/SshConnectionPanel.tsx')).default;
+   const props={visible:true,resourceScope:'chat',request:{nonce:'view',profileId:ref.profileId,version:1,connectionId:ref.connectionId,exact:true},
+    onError:e=>{f.bindingError={code:e.code,action:e.action};},onUseForWorkflow:async()=>{
+     if(++f.bindingAttempts===1)throw Error('ssh_service_channel_in_use');
+     window.testRoot.render(React.createElement(Panel,{...props,activeResource:{...ref,capabilities:{service}}}));
+     return service;
+    }};
+   window.testRoot.render(React.createElement(Panel,props));
+  });
+  const button=page.getByTestId('ssh-use-for-workflow');
+  await button.click();
+  await page.getByText('当前流程的作业服务待接入',{exact:true}).first().waitFor();
+  assert.equal(await page.getByTestId('ssh-connection-status').getAttribute('data-state'),'authenticated');
+  assert.equal(await page.getByTestId('ssh-worker-ready').innerText(),'作业服务可用');
+  assert.equal(await page.getByTestId('ssh-login-error').count(),0);
+  await page.getByTestId('ssh-diagnostic-toggle').click();
+  await page.getByTestId('ssh-workflow-error').getByText('ssh_service_channel_in_use',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.__test.bindingError),{code:'ssh_service_channel_in_use',action:'compute.managed.useForWorkflow'});
+  await page.keyboard.press('Escape');await button.click();
+  await page.getByTestId('ssh-workflow-error').waitFor({state:'detached'});await button.waitFor({state:'detached'});
+  assert.equal(await page.evaluate(()=>window.__test.bindingAttempts),2);
+ });
  await check('ssh-manual-handoff-experience-retries-workspace-on-the-selected-node',async page=>{
   await page.evaluate(async()=>{
    const f=window.__test,original=window.studio.invoke;

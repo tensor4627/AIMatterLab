@@ -32,7 +32,10 @@ function fixture(worker) {
     current.calls.push(['inventory']);if(current.failBroker)throw Error('terminal_unavailable');return structuredClone(current.broker);
   },connections:{state:async({connectionId})=>structuredClone(current.broker.connections.find(row=>row.connectionId===connectionId))}},
     resources:{consoleEntries:()=>structuredClone(model),observeConsoleLease:async row=>current.shellHealth.has(row.leaseId),
-      observeConsoleService:async row=>current.resourceHealth.has(row.generation),async releaseFromConsole(target){
+      observeConsoleService:async row=>{
+        if (row.kind==='ssh' && current.sshServiceError) throw Error(current.sshServiceError);
+        return current.resourceHealth.has(row.generation);
+      },async releaseFromConsole(target){
         current.calls.push(['release',target]);model.channels=model.channels.filter(row=>row.leaseId!==target.leaseId);return {status:'released'};
       },async publishWsl(target){current.calls.push(['attach',target]);model.entries.push(independent);},async detachLocalFromConsole(target){current.calls.push(['detach',target]);model.entries=model.entries.filter(row=>row.resourceId!==target.resourceId);}},
     conversationTerminals:{consoleEntries:()=>structuredClone(current.handoff),async releaseFromConsole(target){current.calls.push(['handoff',target]);current.handoff=[];return {status:'released'};}},
@@ -82,7 +85,7 @@ test('failed or expired observation does not promote cached transport, channel o
   current.failBroker=true;
   await api.refresh();
   assert.equal(api.snapshot().observation,'partial');
-  assert.equal(resource('A').master.status,'lost');
+  assert.equal(resource('A').master.status,'unknown');
   assert.equal(resource('A').canDisconnect,false);
   assert.equal(resource('A').terminals[0].status,'unknown');
   current.failBroker=false;await api.refresh();
@@ -90,6 +93,47 @@ test('failed or expired observation does not promote cached transport, channel o
   assert.equal(resource('A').master.status,'unknown');
   assert.equal(resource('A').service.status,'unknown');
   assert.equal(resource('A').capacity,null);
+});
+
+test('a listed SSH master awaiting a control reply keeps dependent observations unconfirmed',async()=>{
+  const {api,current,resource}=fixture();
+  await api.refresh();
+  current.broker.connections[0].verified=false;
+  current.broker.connections[0].verificationPending=true;
+  await api.refresh();
+  const waiting=resource('A');
+  assert.equal(waiting.master.status,'unknown');
+  assert.equal(waiting.service.status,'unknown');
+  assert.equal(waiting.terminals[0].status,'unknown');
+  assert(waiting.channels.every(row=>row.status==='unknown'));
+  assert.equal(waiting.canDisconnect,false);
+  current.broker.connections[0].verified=true;
+  delete current.broker.connections[0].verificationPending;
+  await api.refresh();
+  assert.equal(resource('A').master.status,'online');
+  assert.equal(resource('A').terminals[0].status,'online');
+  current.broker.connections.shift();
+  await api.refresh();
+  assert.equal(resource('A').master.status,'lost');
+});
+
+test('a control failure while checking the SSH service is inconclusive even when the master is online',async()=>{
+  const {api,current,resource}=fixture();
+  await api.refresh();
+  assert.equal(resource('A').service.status,'online');
+  for (const code of ['ssh_control_timeout','ssh_control_unavailable']) {
+    current.sshServiceError=code;
+    await api.refresh();
+    const observed=resource('A');
+    assert.equal(observed.master.status,'online');
+    assert.equal(observed.service.status,'unknown');
+    assert.equal(observed.channels.find(row=>row.serviceOnly).status,'unknown');
+    assert.equal(observed.terminals[0].status,'online');
+  }
+  current.sshServiceError=null;
+  await api.refresh();
+  assert.equal(resource('A').service.status,'online');
+  assert.equal(resource('A').channels.find(row=>row.serviceOnly).status,'assigned');
 });
 
 test('release is fenced by exact provider and lease, and refuses closing a master with another busy conversation',async()=>{

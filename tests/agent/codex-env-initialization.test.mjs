@@ -204,6 +204,16 @@ test('an active subscription comes from its own transport and an explicit new lo
  const chat={codex:{process:{},isolationReady:true,isolation:{}},account:async()=>({account:{type:'chatgpt'}})};
  const hub={foreground:{provider:'codex',hub:chat},scope:{getStore:()=>null},auth:{loginStatus:{},account:async()=>({account:null})}};
  assert.equal((await ConversationAgentHub.prototype.account.call(hub,'codex')).account.type,'chatgpt');
+ chat.codex.host={usingNativeLogin:()=>true};
+ for(const phase of ['cancelled','failed']){
+  hub.auth.loginStatus.codex={phase};
+  assert.equal((await ConversationAgentHub.prototype.account.call(hub,'codex')).account.type,'chatgpt');
+ }
  hub.auth.loginStatus.codex={phase:'authorizing'};
+ assert.equal((await ConversationAgentHub.prototype.account.call(hub,'codex')).account,null);
+ hub.auth.loginStatus.codex={phase:'signed_out'};
+ assert.equal((await ConversationAgentHub.prototype.account.call(hub,'codex')).account,null);
+ chat.codex.host.usingNativeLogin=()=>false;
+ hub.auth.loginStatus.codex={phase:'cancelled'};
  assert.equal((await ConversationAgentHub.prototype.account.call(hub,'codex')).account,null);
 });

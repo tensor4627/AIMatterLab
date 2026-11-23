@@ -8,6 +8,9 @@ const EXECUTION_SKILL_NAME = /^tool-[a-z][a-z0-9-]{0,39}-[a-f0-9]{12}$/;
 const LIBRARY_DIRECTORY = /^(?:user|(?:resource-)?[a-f0-9]{64})$/;
 export const COMPUTE_ALIASES_SKILL = 'compute-resource-aliases';
 const digest = value => createHash('sha256').update(value).digest('hex');
+function assertSkillName(value) {
+ if (typeof value !== 'string' || !NAME.test(value)) throw Object.assign(Error('Invalid skill name'), {operationNotStarted:true});
+}
 const descriptions = {
  project_skill_catalog: 'List skills and return the absolute directory of the selected library. Use scope=user for the local workspace skill library, scope=current for project or chat skills, and scope=resource with the acquired resource_id for that resource and verified login account.',
  read_project_skill: 'Read a local SKILL.md by name and return its absolute path. Use the same scope and resource_id as in the catalog.',
@@ -95,7 +98,7 @@ export class ProjectSkills {
      properties: {
       scope: {type: 'string', enum: ['current', 'user', 'resource']},
       resource_id: {type:'string', minLength:1, maxLength:160},
-      ...(catalog ? {} : {name: {type: 'string', pattern: NAME.source}}),
+      ...(catalog ? {} : {name: {type: 'string', pattern: NAME.source, description:'Use 1 to 64 lowercase ASCII letters, digits or hyphens, beginning with a letter. Use this exact name in the skill front matter.'}}),
       ...(write ? {
        body: {type: 'string', maxLength: MAX_BYTES},
        expected_sha256: {oneOf: [{type: 'string'}, {type: 'null'}]},
@@ -336,7 +339,7 @@ export class ProjectSkills {
    this.owner(scope);
    return {scope: owner.kind, directory: target, skills,...instructions&&{instructions}};
   }
-  if (typeof args.name !== 'string' || !NAME.test(args.name)) throw Error('Invalid skill name');
+  assertSkillName(args.name);
   const directory = path.join(target, args.name);
   if (fs.existsSync(directory)) assertDirectory(directory);
   const file = path.join(directory, 'SKILL.md');
@@ -369,7 +372,7 @@ export class ProjectSkills {
    check();
    return {scope:'resource',resource_id:args.resource_id,directory:target,skills};
   }
-  if (typeof args.name !== 'string' || !NAME.test(args.name)) throw Error('Invalid skill name');
+  assertSkillName(args.name);
   const directory=path.join(target,args.name), file=path.join(directory,'SKILL.md');
   if (fs.existsSync(directory)) assertDirectory(directory);
   if (tool === 'write_project_skill') {

@@ -62,6 +62,22 @@ test('the manual shared-terminal Agent route enters the workspace boundary and f
  await assert.rejects(f.bridge.callTool('write_shared_terminal',{session_id:shell.id,request_id:'2',action:'enter'},f.scope()),/scope_denied/);
  assert.equal(requests.length,1);
 });
+test('a listed master with a timed-out state read is identified separately from a missing master',async t=>{
+ const f=fixture(t),a=await f.ready();
+ const readState=f.manager.state.bind(f.manager);
+ f.manager.state=async()=>{throw Error('ssh_control_timeout');};
+ const waiting=await f.bridge.consoleInventory();
+ assert.equal(waiting.complete,true);
+ assert.equal(waiting.connections[0].connectionId,a.connectionId);
+ assert.equal(waiting.connections[0].verified,false);
+ assert.equal(waiting.connections[0].verificationPending,true);
+ assert.equal(waiting.connections[0].service,null);
+ f.manager.state=readState;
+ const restored=await f.bridge.consoleInventory();
+ assert.equal(restored.connections[0].verified,true);
+ assert.equal(restored.connections[0].verificationPending,undefined);
+});
+
 test('console reads multiple broker masters without selecting a conversation or exposing authentication, output or PID',async t=>{
  const f=fixture(t),a=await f.ready(),b=await f.ready();f.select(b);
  const shell=await f.bridge.connections.openShell({connectionId:a.connectionId,requestId:'original-human'});
@@ -252,7 +268,9 @@ test('confirmed private maintenance channel clears only the previous borrowed tr
  await f.bridge.connections.openService({...base,requestId:'private-maintenance'},{source:'inert'});await f.bridge.connections.serviceRequest({connectionId:connection.connectionId,serviceId:'private-maintenance',requestId:'after-private',method:'GET',target:'/api/health',mcp:false});assert.equal(packet.terminalScope,undefined);assert.equal(packet.terminalOwnerEpoch,undefined);assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),true);assert.equal((await f.bridge.resourceState({sessionId:shell.id})).operator,'agent');
 });
 test('viewport resize after Agent handoff keeps its owner and grant and cannot write terminal input',async t=>{
- const f=fixture(t),c=await f.open('resize-login'),result=await f.bridge.connections.completeLogin({connectionId:c.connectionId,requestId:'resize-login'}),shell=result.shell;f.select(c);
+ const f=fixture(t),c=await f.open('resize-login');
+ await f.bridge.connections.completeLogin({connectionId:c.connectionId,requestId:'resize-login'});f.select(c);
+ const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'resize-shell'});
  await f.bridge.owner({sessionId:shell.sessionId,ownerEpoch:shell.ownerEpoch,owner:'agent'});
  assert.equal((await f.bridge.resize({sessionId:shell.sessionId,cols:120,rows:36})).accepted,true);
  assert.equal(f.bridge.hasCurrentGrant('codex',shell.sessionId),true);
@@ -261,12 +279,15 @@ test('viewport resize after Agent handoff keeps its owner and grant and cannot w
  assert.equal(f.processes.length,2);
 });
 
-test('human login completion records one exact shell and does not grant it to any Agent',async t=>{
+test('human login completion leaves the exact shell for an explicit open and does not grant it to any Agent',async t=>{
  const f=fixture(t),requestId='one-human-login',c=await f.open(requestId),ref={connectionId:c.connectionId,requestId};
  const completed=await f.bridge.connections.completeLogin(ref);
- assert.equal(completed.connection.authentication,'verified');assert.equal(completed.shell.connectionId,c.connectionId);assert.equal(completed.shell.owner,'human');
- const repeated=await f.bridge.connections.completeLogin(ref);assert.equal(repeated.shell.sessionId,completed.shell.sessionId);assert.equal(f.processes.length,2);
- assert.equal((await f.bridge.list({})).sessions.length,1);assert.equal(f.bridge.hasCurrentGrant('codex',completed.shell.sessionId),false);
+ assert.equal(completed.connection.authentication,'verified');assert.equal(completed.shell,undefined);
+ const repeated=await f.bridge.connections.completeLogin(ref);assert.equal(repeated.shell,undefined);assert.equal(f.processes.length,1);
+ const shellRequest={connectionId:c.connectionId,requestId:'human-shell'};
+ const shell=await f.bridge.connections.openShell(shellRequest);assert.equal(shell.connectionId,c.connectionId);assert.equal(shell.owner,'human');
+ assert.equal((await f.bridge.connections.openShell(shellRequest)).sessionId,shell.sessionId);assert.equal(f.processes.length,2);
+ assert.equal((await f.bridge.list({})).sessions.length,1);assert.equal(f.bridge.hasCurrentGrant('codex',shell.sessionId),false);
  await assert.rejects(f.bridge.connections.completeLogin({...ref,requestId:'foreign-login'}),/terminal_unavailable/);assert.equal(f.processes.length,2);assert.equal((await f.bridge.connections.state({connectionId:c.connectionId})).authentication,'verified');
  await assert.rejects(f.bridge.callTool('compute.sshConnection.completeLogin',ref,f.scope()),/unknown_operation/);
 });
@@ -278,8 +299,8 @@ test('a delayed connection observation keeps the newest exact broker state witho
  const captured=new Promise(resolve=>{observed=resolve;}),pending=f.bridge.connections.state(ref);await captured;
  const completed=await f.bridge.connections.completeLogin({...ref,requestId:'ordered-login'});assert.equal(completed.connection.status,'authenticated');
  release();const delayed=await pending;
- assert.equal(delayed.connectionId,connection.connectionId);assert.equal(delayed.revision,completed.connection.revision);assert.equal(delayed.status,'authenticated');assert.deepEqual(delayed.terminalSessionIds,[completed.shell.sessionId]);
- assert.equal(f.processes.length,2);assert.equal(f.requests.filter(value=>value.route==='/connections/open').length,1);
+ assert.equal(delayed.connectionId,connection.connectionId);assert.equal(delayed.revision,completed.connection.revision);assert.equal(delayed.status,'authenticated');assert.deepEqual(delayed.terminalSessionIds,[]);
+ assert.equal(f.processes.length,1);assert.equal(f.requests.filter(value=>value.route==='/connections/open').length,1);
 });
 
 test('a delayed observation cannot restore authentication after the exact original master was closed',async t=>{
@@ -299,16 +320,18 @@ test('a lost completion receipt is recovered by GET status without replaying log
  await assert.rejects(f.bridge.connections.completeLogin(ref),/terminal_login_unknown/);
  const before=f.requests.filter(value=>value.method==='POST'&&value.route.endsWith('/login/complete')).length;
  const recovered=await f.bridge.connections.loginStatus(ref);
- assert.equal(recovered.login.status,'complete');assert.equal(recovered.connection.authentication,'verified');assert.equal(recovered.shell.connectionId,c.connectionId);assert.equal(recovered.shell.owner,'human');
- assert.equal(f.requests.filter(value=>value.method==='POST'&&value.route.endsWith('/login/complete')).length,before);assert.equal(f.processes.length,2);
- assert.equal(f.bridge.hasCurrentGrant('codex',recovered.shell.sessionId),false);assert.equal((await f.bridge.list({})).sessions.length,1);
- await assert.rejects(f.bridge.connections.loginStatus({...ref,requestId:'wrong-attempt'}),/terminal_invalid_request|terminal_unavailable/);assert.equal(f.processes.length,2);
+ assert.equal(recovered.login.status,'complete');assert.equal(recovered.connection.authentication,'verified');assert.equal(recovered.shell,undefined);
+ assert.equal(f.requests.filter(value=>value.method==='POST'&&value.route.endsWith('/login/complete')).length,before);assert.equal(f.processes.length,1);
+ assert.equal(f.bridge.hasCurrentGrant('codex'),false);assert.equal((await f.bridge.list({})).sessions.length,0);
+ await assert.rejects(f.bridge.connections.loginStatus({...ref,requestId:'wrong-attempt'}),/terminal_invalid_request|terminal_unavailable/);assert.equal(f.processes.length,1);
  await assert.rejects(f.bridge.callTool('compute.sshConnection.loginStatus',ref,f.scope()),/unknown_operation/);
 });
 test('observing a pending login creates no shell and a closed login shell is never reopened by observation',async t=>{
  const f=fixture(t),requestId='observe-only',c=await f.open(requestId),ref={connectionId:c.connectionId,requestId};
  const pending=await f.bridge.connections.loginStatus(ref);assert.equal(pending.login.status,'waiting_authentication');assert.equal(pending.shell,undefined);assert.equal(f.processes.length,1);
- const completed=await f.bridge.connections.completeLogin(ref);await f.bridge.close({sessionId:completed.shell.sessionId});
+ await f.bridge.connections.completeLogin(ref);
+ const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'close-after-login'});
+ await f.bridge.close({sessionId:shell.sessionId});
  const after=await f.bridge.connections.loginStatus(ref);assert.equal(after.login.status,'complete');assert.equal(after.shell,undefined);assert.equal(f.processes.length,2);
 });
 test('current project/environment/input-root changes permanently revoke shell grant even when same chat and task return',async t=>{

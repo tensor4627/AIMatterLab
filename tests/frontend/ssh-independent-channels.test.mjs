@@ -244,6 +244,26 @@ test('publishing exposes the service summary without transferring human shell ow
  }finally{h.unmount();}
 });
 
+test('workflow binding errors keep the authenticated SSH and managed service available for an explicit retry',async()=>{
+ const errors=[];let attempts=0;
+ const h=await selected({props:{managed:snapshot(published),onError:e=>errors.push(e),onUseForWorkflow:async()=>{
+  if(++attempts===1)throw Error('ssh_service_channel_in_use');
+  return {status:'connected',workflowReady:true};
+ }}});
+ try{
+  h.click('ssh-use-for-workflow');await h.flush();
+  assert.equal(h.id('ssh-connection-status').props['data-state'],'authenticated');
+  assert.ok(h.id('ssh-worker-ready'));assert.ok(h.id('ssh-workflow-error'));
+  assert.ok(!h.find(n=>n.props?.['data-testid']==='ssh-login-error'));
+  assert.equal(errors[0].action,'compute.managed.useForWorkflow');
+  assert.equal(errors[0].code,'ssh_service_channel_in_use');
+  await h.tick(2000);assert.equal(attempts,1);
+  h.click('ssh-use-for-workflow');await h.flush();assert.equal(attempts,2);
+  assert.ok(!h.find(n=>n.props?.['data-testid']==='ssh-workflow-error'));
+  assert.equal(legacyCalls(h).length,0);
+ }finally{h.unmount();}
+});
+
 test('an unavailable service keeps its own error and the published connection retains the human terminal',async()=>{
  const unavailable={...published,serviceReady:false},h=await selected({override:method=>method==='compute.sshService.status'?{...service,status:'failed',workflowReady:false,error:{code:'python_unsupported'}}:method==='compute.managed.publish'?unavailable:undefined});
  try{

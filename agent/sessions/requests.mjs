@@ -24,7 +24,7 @@ import {managedToolSkillContext} from '../skills/managed-tool-context.mjs';
 
 export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
  async function request({provider,method,params={}},{notification,queued}={}){
- const {agents,catalog,taskRecords,titleReviews,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,recordUserTurn,emit,openUrl,root,app}=runtime();
+ const {agents,catalog,taskRecords,titleReviews,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,conversationDraft,authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,recordUserTurn,emit,openUrl,root,app}=runtime();
  providerId(provider);assertRpc(method);
  function restoreTitleProgress(result){
   if(params.includeTurns&&result.thread?.id===params.threadId)titleReviews?.restore(provider,result.thread);
@@ -35,7 +35,8 @@ export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
  const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(provider,params.threadId),selectedSsh=['ssh-terminal','ssh-connection'].includes(resource?.selection?.kind)?resource.selection:null;
  if(turnFlags)resourceRouting?.assertHandoffComplete?.(provider,params.threadId);
- const {studioSkillId,studioTurnRequestId,studioInitialProjectId,studioAttachmentDraftId,studioAttachments,...protocolParams}=params;params=protocolParams;
+ const {studioSkillId,studioTurnRequestId,studioInitialProjectId,studioPlanningThread,studioAttachmentDraftId,studioAttachments,...protocolParams}=params;params=protocolParams;
+ if(studioPlanningThread!==undefined&&(method!=='thread/start'||typeof studioPlanningThread!=='boolean'))throw Error('Planning thread intent belongs to a new conversation');
  if(studioAttachmentDraftId!==undefined&&(method!=='thread/start'||typeof studioAttachmentDraftId!=='string'||!/^[\da-f-]{36}$/i.test(studioAttachmentDraftId)))throw Error('附件草稿与新对话不匹配。');
  if(studioAttachments!==undefined&&(method!=='turn/start'||!Array.isArray(studioAttachments)))throw Error('附件仅可随新一轮消息发送。');
  const attachmentOwner={provider,threadId:params.threadId};
@@ -207,6 +208,8 @@ export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
   };
   if(provider==='codex'&&method==='thread/resume'){
    const restored=await resumeCodex();ticket=restored.ticket;result=restored.result;
+  }else if(provider==='codex'&&method==='thread/start'&&studioPlanningThread&&conversationDraft){
+   result=await conversationDraft.withPlanningThreadStart(agents.sessionIdentity(provider),dispatch);
   }else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch,emit:event=>emit('studio:event',event)}):await dispatch();
   check();
  }

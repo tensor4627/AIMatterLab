@@ -410,8 +410,9 @@ export class ConversationAgentHub extends EventEmitter{
  account(provider){
   const entry=this.scope.getStore()||this.foreground,bridge=entry?.hub.codex;
   // A reused ChatGPT subscription can be held in the conversation process only.
-  if(provider==='codex'&&entry.provider==='codex'&&bridge?.process&&bridge.isolationReady&&
-     !bridge.isolation?.authenticationOnly&&!this.auth.loginStatus?.codex?.phase)return entry.hub.account(provider);
+  const phase=this.auth.loginStatus?.codex?.phase;
+  if(provider==='codex'&&entry?.provider==='codex'&&bridge?.process&&bridge.isolationReady&&!bridge.isolation?.authenticationOnly&&
+     (!phase||(['cancelled','failed'].includes(phase)&&bridge.host?.usingNativeLogin?.())))return entry.hub.account(provider);
   return this.auth.account(provider);
  }
  async login(provider,value){

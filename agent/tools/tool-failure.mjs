@@ -1,10 +1,15 @@
 const checkSshLogin=['connection_unconfirmed','Check the original saved SSH connection. Resume a pending login and have the user handle prompts in its private terminal. Wait for verified hosting before acquiring a capability.'];
+const checkSshControl=['connection_unconfirmed','The control check did not complete. Refresh the original saved SSH resource and job service. If the resource shows a verified login, retry the read on that connection. Resume a pending login only when its private terminal shows an authentication prompt. For an unconfirmed write, reconcile the original setup or job first.'];
 const managedRecovery=new Map([
+ ['Use the script directory designated by the user for this resource',['directory_selection_required','Use the directory the user named on this resource. If the directory is unclear, ask them to identify it in this chat.']],
+ ['Invalid skill name',['invalid_input','Supply name as 1 to 64 lowercase ASCII letters, digits or hyphens, beginning with a letter. For writes, match the name in the SKILL.md front matter and supply body and expected_sha256. Use null to create a new skill.']],
  ['managed_compute_user_instruction_required',['resource_selection_required','Resolve the target in this chat. A submitted resource option and a directly named target both identify the resource. Use its current resource_id and the requested access. If a target remains ambiguous, use the offered picker. Report a project or login refusal only when its own receipt identifies that cause.']],
  ['managed_compute_resource_lease_required',['resource_lease_required','List the hosted resources and acquire the resource named in this chat with the required access. Then use the corresponding command tool, returned terminal or service. A workflow is optional.']],
+ ['managed_compute_resource_project_changed',['resource_lease_project_changed','The existing conversation channel belongs to the earlier project context. Ask the user to release that conversation channel in Computing Resources, then reacquire the original resource for the selected project. Keep the saved SSH login and job service.']],
  ['managed_compute_resource_unavailable',['connection_unconfirmed','Refresh the hosted resource list and check the original saved connection. Use its current verified resource ID and lease. A missing entry alone leaves the reason unconfirmed.']],
  ['ssh_authentication_unconfirmed',checkSshLogin],
- ['ssh_control_timeout',checkSshLogin],
+ ['ssh_control_timeout',checkSshControl],
+ ['ssh_control_unavailable',checkSshControl],
  ['ssh_connection_not_found',checkSshLogin],
  ['ssh_workspace_unconfirmed',['workspace_unconfirmed','Check the original workspace and its command receipt on the same login. Reconcile a write or submission before sending another request.']],
  ['ssh_exec_unavailable',['command_channel_unavailable','The SSH endpoint refused the short command. Use a suitable capability already granted on the same resource or report the actual restriction.']],
@@ -35,6 +40,11 @@ export function toolFailure(error,{dispatched=false,toolName}={}){
  if(toolName==='acquire_compute_resource'&&['ssh_channel_unavailable','ssh_channel_refused','ssh_shell_readiness_timeout','ssh_shell_interaction_required'].includes(message)){
   code='terminal_channel_unavailable';
   next_step='The private shell was not confirmed. Keep the original hosted SSH resource and inspect the actual lease state. For a queue check, use the same resource’s service-only path when the tool offers it. Preserve an unconfirmed attempt without replay. A channel failure alone calls for neither a new login nor a manual handoff. A service lease provides no shell.';
+ }else if(toolName==='run_compute_command'&&['ssh_control_timeout','ssh_control_unavailable'].includes(message)){
+  code='connection_unconfirmed';
+  next_step=dispatched
+   ?'Check the original command receipt and any remote effects using its request ID before considering another command.'
+   :'The connection check ended before this command reached the remote executor. Refresh the original hosted SSH connection and check its current state.';
  }else if(managedRecovery.has(message)){
   [code,next_step]=managedRecovery.get(message);
  }else if(/unknown (?:tool|project|environment)|not (?:bound|belong)|conversation-owned|active conversation|another conversation/i.test(message)){

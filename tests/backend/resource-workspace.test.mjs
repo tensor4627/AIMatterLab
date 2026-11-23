@@ -193,13 +193,15 @@ test('both terminal callers can wait for exact protected approval, denying or re
  assert.equal(pending.reason,'destructive');
  assert.deepEqual(pending.commands,['rm external.dat']);
  assert.deepEqual(controller.decide({approvalId:pending.approvalId,decision:'deny'}),{status:'denied'});
- assert.equal((await enter).execution_status,'denied');assert.equal(calls.length,0);
+ const declined=await enter;
+ assert.equal(declined.execution_status,'denied');assert.equal(declined.approval_status,'denied');assert.equal(calls.length,0);
 
  await send('mkdir /elsewhere','type2');
  const second=requests(),queued=send('\r','enter2');await second;
  const changed=controller.pending({});valid=false;revision++;
  assert.throws(()=>controller.decide({approvalId:changed.approvalId,decision:'approve'}),/changed/);
- assert.equal((await queued).execution_status,'denied');assert.equal(calls.length,0);
+ const invalidated=await queued;
+ assert.equal(invalidated.execution_status,'denied');assert.equal(invalidated.approval_status,'changed');assert.equal(calls.length,0);
 
  valid=true;
  await send('mkdir /elsewhere','type3');
@@ -208,6 +210,40 @@ test('both terminal callers can wait for exact protected approval, denying or re
  assert.equal((await approved).execution_status,'completed');
  assert.equal((await send('\r','enter3')).execution_status,'completed');
  assert.equal(calls.length,1);assert.equal(calls[0].cwd,'/work/day/task-1');
+});
+
+test('discarding diagnostics uses confinement; a timed-out review preserves the original outcome',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout']});
+ const command='for file in ./one ./two; do wc -c "$file" 2>/dev/null; done';
+ assert.equal(classifyWorkspaceCommand(command,'/work','/work').reason,'unverified_effects');
+ const workspace={forTerminal:()=>({workspaceId:'w',root:'/work',path:'/work',identity:{...host,account:'user1'}})};
+ const stored=new Map(), calls=[];
+ const catalog={get:(kind,id)=>stored.get(kind+id),put:(kind,id,row)=>stored.set(kind+id,row)};
+ let supported=true, notify;
+ const create=()=>createWorkspaceTerminalAuthorization({workspace,catalog,current:()=>scope,emit:()=>notify?.(),
+  connections:{async runWorkspaceCommand(value){
+   calls.push(value.mode);assert.equal(value.mode,'confined');
+   return supported?{status:'result',code:0,output:'sizes',confinement:'landlock'}:{status:'unavailable',code:125,output:''};
+  }}});
+ const request=(requestId)=>({scope,ref:{...ref,resourceId:'remote',resourceName:'Cluster'},leaseId:'lease',requestId,command,assertCurrent(){}});
+ const controller=create(),first=await controller.execute(request('read'));
+ assert.equal(first.execution_status,'completed');assert.equal(first.output,'sizes');
+ assert.equal(controller.pending({}),null);
+ for(const redirect of ['2>/elsewhere/errors','2>/dev/null.log','2>/dev/null > /elsewhere/report']){
+  assert.equal(classifyWorkspaceCommand('wc -c ./one '+redirect,'/work','/work').reason,'outside_workspace');
+ }
+ assert.equal(classifyWorkspaceCommand('cd /dev/null && pwd','/work','/work').reason,'outside_workspace');
+ supported=false;
+ const shown=new Promise(resolve=>{notify=resolve});
+ const pending=controller.execute(request('review'));await shown;
+ const card=controller.pending({});assert.equal(card.reason,'unverified_effects');
+ t.mock.timers.tick(card.expiresAt-Date.now());
+ const timedOut=await pending;
+ assert.equal(timedOut.accepted,false);assert.equal(timedOut.execution_status,'denied');assert.equal(timedOut.approval_status,'expired');
+ assert.equal(controller.pending({}),null);
+ const original=await create().execute(request('review'));
+ assert.equal(original.replayed,true);assert.equal(original.approval_status,'expired');
+ assert.deepEqual(calls,['confined','confined']);
 });
 
 test('one review freezes all opaque steps on a host without a sandbox; usable confinement runs without prompting',async()=>{

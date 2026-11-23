@@ -86,7 +86,9 @@ export function createToolConfigurationController({catalog,packages,worker,getSe
   return {schemaVersion:1,revision:digest([state,reference.configuration_id,value,archived,currentTarget()]),state,package:{id:reference.package_id,version:reference.package_version,manifestSha256:value?.manifest_sha256||record.manifest_sha256,sourceCommit:value?.source_commit||record.source_commit},workerBinding:reference.worker_binding,target:{kind:'local',projectId:reference.project_id,environmentId:reference.environment_id,fingerprint:value?.environment_sha256||'unavailable'},archivedResources:archived,applicableFunctions:[],engines:(value?.functions||record.manifest.functions).map(feature=>feature.engine).filter(Boolean)};
  }
  async function refreshMetadata(){
-  if(!worker.connection)return;
+  // Desktop package installations belong to WSL. A hosted SSH resource owns its
+  // tool configurations and execution skills through the resource tool API.
+  if(!worker.connection||worker.identity?.kind==='ssh')return;
   // Old services keep their existing routes and jobs; capability absence is not an upgrade request.
   if(worker.connection.health?.tool_configuration_schema!==1)return;
   const ticket=capture(),value=await worker.request('POST','/api/tool-guidance/state',{});ticket.assert();

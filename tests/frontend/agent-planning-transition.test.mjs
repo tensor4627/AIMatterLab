@@ -5,6 +5,7 @@ import {TaskRecords} from '../../agent/sessions/task-records.mjs';
 
 const starts=h=>h.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start');
 const acceptedTurnId=number=>'planning-turn-'+number;
+const newThread=h=>h.calls.find(call=>call.method==='agent.rpc'&&call.data.method==='thread/start')?.data.params;
 async function finish(h){
  const {threadId}=starts(h).at(-1).data.params;
  h.emit({provider:'codex',method:'turn/completed',params:{threadId,turn:{id:acceptedTurnId(starts(h).length),status:'completed'}}});
@@ -57,5 +58,5 @@ test('send preparation keeps the mode chosen at submit time despite later parent
   if(m==='task.create')return f.records.create(d);
   return s(m,d);
  }});
- try{h.type('准备当前模式');h.send();await h.flush();h.render({planningMode:false});pending.resolve();await h.flush();assert.equal(starts(h).length,1);assert.equal(starts(h)[0].data.params.planningMode,true);assert.equal(f.records.tasks().length,1);assert.deepEqual(h.errors,[]);}finally{h.unmount();}
+ try{h.type('准备当前模式');h.send();await h.flush();assert.equal(newThread(h).studioPlanningThread,true);h.render({planningMode:false});pending.resolve();await h.flush();assert.equal(starts(h).length,1);assert.equal(starts(h)[0].data.params.planningMode,true);assert.equal(f.records.tasks().length,1);assert.deepEqual(h.errors,[]);}finally{h.unmount();}
 });

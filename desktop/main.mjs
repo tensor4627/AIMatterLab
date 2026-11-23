@@ -440,7 +440,7 @@ handle('compute.sshService.registration',value=>{
 });
 handle('compute.sshService.check',value=>sshService.check(value));
 async function connectSelectedSshService(value,useHosted=false){
- assertIdleAgent();agents.assertContextIdle();const result=await (useHosted?sshService.useHosted(value):sshService.connect(value));if(result.workflowReady)await managedResources?.refreshService({connectionId:value.connectionId});
+ assertIdleAgent();agents.assertContextIdle();const result=await (useHosted?sshService.useHosted(value):sshService.connect(value));if(result.workflowReady)await managedResources?.refreshService({connectionId:value.connectionId,existingOnly:useHosted});
  if(result.status==='connected')emit('studio:event',{method:'studio/workerConnected',params:{sourceKind:'ssh'}});
  emit('studio:event',{method:'studio/computeResourceChanged',params:await computeResource.status({})});return result;
 }
@@ -464,7 +464,8 @@ handle('compute.managed.useForWorkflow',async value=>{
  const keys=['connectionId','profileId','profileVersion'];
  if(Object.keys(value).sort().join(',')!==keys.join(','))throw Error('managed_compute_invalid_request');
  assertIdleAgent();agents.assertContextIdle();
- const live=managedResources?.snapshot().find(row=>row.kind==='ssh'&&row.serviceStatus==='ready'&&keys.every(key=>row[key]===value[key]));
+ // The foreground attachment verifies the registered worker on the exact SSH login.
+ const live=managedResources?.snapshot().find(row=>row.kind==='ssh'&&keys.every(key=>row[key]===value[key]));
  if(!live)throw Error('managed_compute_private_service_unavailable');
  await changeComputeResource('activate',{kind:'ssh-connection',...value});
  const guard=computeResource.capture();
@@ -594,9 +595,10 @@ const desktopAgentTools={
   return resourceToolSetups.owns(name)?resourceToolSetups.call(name,args,scope):managedWorkbench.desktopTools.call(name,args,scope);
  },
 };
+const conversationDraft=createConversationDraftTool({records:taskRecords,assertScope:scope=>workflowContext.assertScope(scope)});
 terminalMcp=new TerminalMcp({terminal:sharedTerminal,projectSkills,scientificSkills,publicDocs:{definitions:softwareDocDefinitions,call:softwareDocs},guard:()=>worker.authoringGuard,desktopTools:desktopAgentTools,
  workerTools:workerToolBridge({connection:scope=>resourceRouting.scopedWorkerConnection(scope),
-  conversationDraft:createConversationDraftTool({records:taskRecords,assertScope:scope=>workflowContext.assertScope(scope)})}),runScope:runToolScope,captureScope:scope=>agents.captureToolScope(scope)});
+  conversationDraft}),runScope:runToolScope,captureScope:scope=>agents.captureToolScope(scope)});
 await terminalMcp.start();
 customCv=createTaskCustomCv({records:taskRecords,worker,getProvider:()=>agents.active||settings.agentProvider||'codex',getActiveTaskId:provider=>activeAuthoringTasks.get(provider),assertProvider:context=>{workflowContext.assertScope(context);return providerId(context.provider);},assertHuman:event=>{trusted(event);return true;},access:()=>true,
  validateRuntimeReceipt:async(runtime,context)=>{const current=await worker.request('POST','/api/runtime-guide',{environment_id:context.args.environment_id,engine:'pygas.build'});return current.status==='observed'&&runtime.status==='observed'&&current.receipt===runtime.receipt_sha256;},
@@ -855,7 +857,11 @@ handle('agent.cli.choose',async value=>{
  if(readiness.status==='ready')settings=catalog.put('settings','main',normalizeSettings(settings,{[provider+'Path']:response.filePaths[0]}));
  return readiness;
 });
-const agentRequests=createAgentRequests({getAttachments:()=>chatAttachments,verifyEvidence:(owner,files)=>chatEvidence.verify(owner,files),runtime:()=>({agents,catalog,taskRecords,titleReviews,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,recordUserTurn:value=>{managedWorkbench.userMessage(value);resourceToolSetups.recordUserTurn(value);},authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
+const agentRequests=createAgentRequests({getAttachments:()=>chatAttachments,verifyEvidence:(owner,files)=>chatEvidence.verify(owner,files),runtime:()=>({agents,catalog,taskRecords,titleReviews,workflowContext,privateAccess,worker,sharedTerminal,resourceRouting,conversationTerminals,conversationDraft,recordUserTurn:value=>{
+ managedWorkbench.userMessage(value);
+ const {projectId}=workflowContext.currentFor(value.provider,value.params.threadId);
+ resourceToolSetups.recordUserTurn({...value,projectId});
+},authoringAuthorization,baseWorkspace,scientificSkills,setupInstructions,projectSkills,bundledSkillRoot,studioSkillRoots,managedSkillRoots,managedSkillEntries,managedSkillRecords,skillGuidanceScope,assertIdleAgent,emit,openUrl,root,app})});
 async function agentRpc(value){
  if(value?.method==='turn/interrupt'&&value.params?.turnId&&agents.activeTurn(value.provider,value.params.threadId)===value.params.turnId){
   try{followUpQueue?.pause(value.provider,value.params.threadId);}catch{/* Preserve native Stop even when the local queue is unavailable. */}

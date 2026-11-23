@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {ProjectSkills} from '../../agent/skills/project-skills.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
+import {toolFailure} from '../../agent/tools/tool-failure.mjs';
 import {localSkills} from '../../agent/skills/skills.mjs';
 const body='---\nname: local-analysis\ndescription: User project analysis instructions\n---\nUse the selected project data only.\n';
 
@@ -14,6 +15,12 @@ test('manual skill discovery keeps bundled names separate from personal, project
  const bundle=path.join(root,'public'),cache=path.join(root,'cache');
  const scope={provider:'deepseek',threadId:'one',projectId:'project-a',checkCurrent:()=>true};
  const store=new ProjectSkills({root:cache,bundledRoot:bundle,current:()=>scope});
+ for(const name of [undefined,'analysis_note']){
+  assert.throws(()=>store.call('write_project_skill',{scope:'user',name,body,expected_sha256:null},scope),error=>{
+   const receipt=JSON.parse(toolFailure(error,{dispatched:true,toolName:'write_project_skill'}).content[0].text);
+   return receipt.code==='invalid_input'&&receipt.operation_state==='not_started'&&receipt.next_step.includes('hyphens');
+  });
+ }
  const same='local-analysis',entry=path.join(bundle,same,'SKILL.md');
  fs.mkdirSync(path.dirname(entry),{recursive:true});
  fs.writeFileSync(entry,body+'Bundled edition.');

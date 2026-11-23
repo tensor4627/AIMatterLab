@@ -9,6 +9,12 @@ export function prepareSshServiceResourcesAsync(source,settings={}){return prepa
 const jsonFiles=new Set(['studio_worker/engine_contracts.json','studio_worker/pygas-editor-hints.json','studio_worker/tool_package.schema.json']);
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const same=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
+// The prepared file list is in the canonical byte order used by the remote installer.
+export function shippedSshServiceManifest(files){
+ const digest=createHash('sha256');
+ for(const row of files){digest.update(row.path);digest.update(Buffer.from(row.base64,'base64'));}
+ return digest.digest('hex');
+}
 function regular(file,directory=false){
  for(let current=path.resolve(file);;current=path.dirname(current)){
   const stat=fs.lstatSync(current);if(stat.isSymbolicLink()||(current!==file||directory)&&!stat.isDirectory())throw Error('ssh_service_resources_invalid');
@@ -39,7 +45,7 @@ export function prepareSshServiceResources(source,{profileId,port,transportSourc
  }
  walk();files.sort((a,b)=>Buffer.compare(Buffer.from(a.path),Buffer.from(b.path)));
  for(const required of ['bootstrap.py','install.py','runtime_resources.py','ssh_service_bootstrap.py','ssh_service_bridge.py','studio_worker/server.py',...jsonFiles])if(!files.some(row=>row.path===required))throw Error('ssh_service_resources_incomplete');
- const manifest=()=>{const digest=createHash('sha256');for(const row of files){digest.update(row.path);digest.update(Buffer.from(row.base64,'base64'));}return digest.digest('hex');},identity=()=>manifest().slice(0,20);
+ const manifest=()=>shippedSshServiceManifest(files),identity=()=>manifest().slice(0,20);
  let runtimeId=identity();if(bundledWorkerRuntimeId(source)!==runtimeId)throw Error('ssh_service_resources_changed');
  if(expectedRuntimeManifestSha256!==undefined&&(!/^[a-f0-9]{64}$/.test(expectedRuntimeManifestSha256)||expectedRuntimeManifestSha256.slice(0,20)!==expectedRuntimeId))throw Error('ssh_service_resources_invalid');
  const cachedRuntime=reuseOnly&&(expectedRuntimeId!==undefined||verifiedCacheOnly);

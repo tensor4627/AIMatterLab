@@ -51,6 +51,30 @@ test('actual request path changes chat to planning to existing workflow without 
  assert.equal(f.records.read(task.id).execution,undefined);assert.equal(f.records.read(task.id).artifacts.length,0);
 });
 
+test('only an explicitly starting planning conversation indexes its draft schema before the native ID exists',async t=>{
+ const f=fixture({managed:true}),id='planning-session',other='ordinary-session';
+ const draft=createConversationDraftTool({records:f.records,assertScope:f.runtime.workflowContext.assertScope});
+ const endpoint=new TerminalMcp({terminal:{tools:()=>[]},workerTools:workerToolBridge({connection:()=>null,conversationDraft:draft})});
+ await endpoint.start();t.after(()=>endpoint.close());
+ const connection=endpoint.providerConnection('codex',id),unrelated=endpoint.providerConnection('codex',other);
+ const names=c=>endpoint.observeToolNames('codex',c);
+ f.runtime.conversationDraft=draft;
+ f.runtime.agents.sessionIdentity=()=>({id,provider:'codex',threadId:null});
+ let expected=[],rejectStart=false;
+ f.runtime.agents.rpc=async(_provider,method,params)=>{
+  assert.equal(method,'thread/start');assert.equal(Object.hasOwn(params,'studioPlanningThread'),false);
+  assert.deepEqual(await names(connection),expected);assert.deepEqual(await names(unrelated),[]);
+  const response=await fetch(connection.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'present_task',arguments:{task_id:'unowned'}}})});
+  assert((await response.json()).result.isError);assert.deepEqual(f.records.tasks(),[]);
+  if(rejectStart)throw Error('Thread start interrupted');
+  return {thread:{id:'new-thread',turns:[]}};
+ };
+ const start=params=>f.request({provider:'codex',method:'thread/start',params});
+ await start({});expected=['present_task'];await start({studioPlanningThread:true});assert.deepEqual(await names(connection),[]);
+ rejectStart=true;await assert.rejects(start({studioPlanningThread:true}),/interrupted/);assert.deepEqual(await names(connection),[]);
+ await assert.rejects(start({studioPlanningThread:'yes'}),/Planning thread intent/);
+});
+
 test('the managed desktop MCP saves a real workflow in the original project conversation before any run',async t=>{
  const f=fixture({managed:true}),sessionId='planning-session';
  f.records.remember({provider:'codex',threadId:'thread',projectId:'original-project'});

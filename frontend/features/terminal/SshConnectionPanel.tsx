@@ -24,7 +24,8 @@ type LoginResult={connection:SshConnectionState;shell?:Shell;login?:LoginState};
 type LoginAttempt={completing:boolean;requiresContinue:boolean;completionResult:number};
 type LoginFlow={requestId:string;connectionId:string;awaitingOpen?:boolean;handoffScope?:string;attempt:LoginAttempt;observing:boolean;canCheck:boolean;finished:boolean;restoreShell:boolean;restoredAuthenticated?:boolean;originalShellId?:string;shellChosen?:boolean};
 type InventoryRefresh={ticket:number;read:number;id:string;scope:string;pending:boolean;servicePending:boolean};
-type Diagnostic={code:string;action:string;message:string;connectionId:string;requestId:string};
+type Diagnostic={code:string;action:string;message:string;connectionId:string;requestId:string;workflowScope?:string};
+const workflowAction='compute.managed.useForWorkflow';
 type ShellReadIdentity={connectionId:string;sessionId:string;ownerEpoch:number};
 type ShellReadDiagnostic=ShellReadIdentity&{code:string;message:string};
 type GeometryDiagnostic={connectionId:string;sessionId?:string;ownerEpoch?:number;code:string};
@@ -186,14 +187,18 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  const servicePending=hosted?.serviceStatus==='preparing'||ownService?.status==='connecting'||ownService?.status==='unknown'||ownService?.status==='connected'&&!ownService.workflowReady;
  useEffect(()=>{if(confirmed||!ready||publication?.connectionId!==selected)setPublication(null);},[confirmed,ready,selected,publication]);
  const serviceReady=hosted?.serviceReady||ownService?.status==='connected'&&ownService.workflowReady===true;
- const canUseForWorkflow=!!(onUseForWorkflow&&ready&&hosted?.serviceReady&&connection&&!(activeResource?.connectionId===connection.connectionId&&activeResource.capabilities?.service.workflowReady));
+ const workflowBound=!!(connection&&activeResource?.connectionId===connection.connectionId&&activeResource.capabilities?.service.workflowReady);
+ const canUseForWorkflow=!!(onUseForWorkflow&&ready&&hosted?.serviceReady&&connection&&!workflowBound);
+ useEffect(()=>{
+  setDiagnostic(previous=>previous?.action===workflowAction&&(previous.workflowScope!==resourceScope||previous.connectionId!==selected||workflowBound)?null:previous);
+ },[resourceScope,selected,workflowBound]);
  const lessonTarget=connection?{id:connection.profileId,version:connection.profileVersion,name:request.profileName||connection.profileId,connectionId:connection.connectionId}:null;
  function accept(value:SshConnectionState){if(!verifiedSshConnection(value))throw Error('Invalid SSH connection response');setConnections(old=>{const prior=old.find(item=>item.connectionId===value.connectionId);return prior&&prior.revision>value.revision?old:[value,...old.filter(item=>item.connectionId!==value.connectionId)];});}
  function report(error:unknown,fallbackAction='connection'){
-  const code=sshConnectionCode(error)||'terminal_operation_failed';
   const action=error&&typeof error==='object'&&'action' in error&&typeof error.action==='string'?error.action:fallbackAction;
+  const code=sshConnectionCode(error)||(action===workflowAction?'ssh_service_workflow_unconfirmed':'terminal_operation_failed');
   const message=t(action==='compute.managed.publish'&&code==='ssh_connection_changed'?'托管回执与当前 SSH 连接不匹配。请刷新并核对原连接。':sshConnectionMessage({code}));
-  setDiagnostic({code,action,message,connectionId:login.current.connectionId,requestId:login.current.requestId});
+  setDiagnostic({code,action,message,connectionId:login.current.connectionId,requestId:login.current.requestId,...action===workflowAction?{workflowScope:latest.current.resourceScope}:{}});
   const key=action+':'+code;
   if(lastError.current!==key){
    lastError.current=key;
@@ -494,7 +499,8 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  // "connection changed" diagnostic; a foreign response still fails identity checks.
  const failedConnectionCode=sameLogin&&connection&&['unavailable','requires_review','unsupported'].includes(connection.status)?connection.error?.code:undefined;
  const failureReplacesDiagnostic=failedConnectionCode&&diagnostic&&diagnostic.connectionId===connection?.connectionId&&diagnostic.requestId===login.current.requestId&&['compute.sshConnection.completeLogin','compute.sshConnection.loginStatus'].includes(diagnostic.action)&&['ssh_connection_changed','ssh_authentication_unconfirmed'].includes(diagnostic.code);
- const visibleDiagnostic=failureReplacesDiagnostic?{...diagnostic,code:failedConnectionCode,message:t(sshConnectionMessage(failedConnectionCode))}:diagnostic;
+ const workflowIssue=diagnostic?.action===workflowAction&&diagnostic.workflowScope===resourceScope&&diagnostic.connectionId===selected&&!workflowBound?diagnostic:null;
+ const visibleDiagnostic=diagnostic?.action===workflowAction?null:failureReplacesDiagnostic?{...diagnostic,code:failedConnectionCode,message:t(sshConnectionMessage(failedConnectionCode))}:diagnostic;
  const openIssue=login.current.awaitingOpen&&visibleDiagnostic?.action==='compute.sshConnection.open'&&visibleDiagnostic.requestId===login.current.requestId?visibleDiagnostic:null;
  const error=visibleDiagnostic?.code||(sameLogin?connection?.error?.code:undefined);
  const manualHandoff=!request.exact&&connection?.status==='authenticating'&&connection.capabilities.manualHandoff===true;
@@ -534,6 +540,10 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
      {connection?.status==='unsupported'&&onPlainSsh&&<button type="button" className="button" data-testid="ssh-use-plain" onClick={onPlainSsh}>{t('打开普通 SSH 终端')}</button>}
     </div>
    </>,
+  }:null,
+  workflowIssue?{
+   id:'ssh-workflow-error',summary:t('当前流程的作业服务待接入'),
+   content:<><p>{workflowIssue.message}</p><div className="ssh-diagnostic-meta"><span>{t('用于当前流程')}</span><code>{workflowIssue.code}</code></div></>,
   }:null,
   visibleReadDiagnostic&&!(timeoutInLogin&&visibleReadDiagnostic.code==='ssh_control_timeout')?{
    id:'ssh-read-observation',
@@ -587,9 +597,13 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  }
  const useForWorkflow=()=>{
   if(!canUseForWorkflow||!onUseForWorkflow||!connection)return;
+  const scope=resourceScope;
   void action(async current=>{
    if(!current()||latest.current.selected!==connection.connectionId)return;
-   await onUseForWorkflow({connectionId:connection.connectionId,profileId:connection.profileId,profileVersion:connection.profileVersion});
+   try{
+    const receipt=await onUseForWorkflow({connectionId:connection.connectionId,profileId:connection.profileId,profileVersion:connection.profileVersion});
+    if(receipt&&typeof receipt==='object'&&'status' in receipt&&receipt.status==='unconfirmed')throw Error('ssh_service_workflow_unconfirmed');
+   }catch(error){if(current()&&latest.current.resourceScope===scope)report(error,workflowAction);}
   });
  };
  return <section className="shared-terminal-panel ssh-connection-panel" data-testid="ssh-connection-panel" onPointerDown={event=>{
@@ -632,6 +646,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    <span className="ssh-diagnostic-title" role={connectionIssue?'alert':'status'} title={issues[0].summary}>{issues[0].summary}</span>
    {issues.length>1&&<span className="ssh-diagnostic-count">+{issues.length-1}</span>}
    {ready&&serviceReady&&<span data-testid="ssh-worker-ready" className="ssh-diagnostic-title" role="status">{t(serviceWarning?'作业服务已连接':'作业服务可用')}</span>}
+   {workflowIssue&&canUseForWorkflow&&<button type="button" className="button ssh-details-toggle" data-testid="ssh-use-for-workflow" disabled={busy} onClick={useForWorkflow}>{t('用于当前流程')}</button>}
    {canRepairEnvironment&&onServiceEnvironmentHelp&&lessonTarget&&<button type="button" className="button ssh-details-toggle" data-testid="ssh-service-agent-help" data-guide-target="ssh-service-repair" onClick={()=>onServiceEnvironmentHelp(lessonTarget)}>{t('让 Agent 配置')}</button>}
    <details className="ssh-disclosure" ref={statusDetails} onBlur={disclosureBlur} onKeyDown={disclosureKeyDown}>
     <summary className="button ssh-details-toggle" data-testid="ssh-diagnostic-toggle">{t('详情')}<ChevronDown size={14} aria-hidden="true"/></summary>

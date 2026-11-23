@@ -33,7 +33,7 @@ export function createManagedComputeServices({connections,registration,source,tr
   const status=remoteRuntimeId!==expected.expected_runtime_id?'different':!remoteManifestSha256?'unconfirmed':remoteManifestSha256===expected.runtime_manifest_sha256?'current':'different';
   return {status,remoteRuntimeId,remoteManifestSha256,bundledRuntimeId:expected.expected_runtime_id,bundledManifestSha256:expected.runtime_manifest_sha256};
  }
- async function ssh(resource,profile,assertCurrent,{configure=false,upgrade}={}){
+ async function ssh(resource,profile,assertCurrent,{configure=false,upgrade,existingOnly=false}={}){
   const ref={connectionId:resource.connectionId},profileRef={profileId:profile.id,profileVersion:profile.version},requestBase={...ref,...profileRef};
   const initial=configure?registration.read(profileRef):null;
   const first=!!(configure&&(initial?.status==='unconfigured'||initial?.status==='maintenance_required'&&initial.reason==='configuration_changed'));
@@ -67,7 +67,7 @@ export function createManagedComputeServices({connections,registration,source,tr
    if(stopped.serviceActive!==false)fail('terminal_service_unknown');
    view=stopped;
   }
-  if(view.serviceActive!==true&&['idle','failed','disconnected'].includes(view.status)){
+  if(!existingOnly&&view.serviceActive!==true&&['idle','failed','disconnected'].includes(view.status)){
    bootstrap??=await prepare();
    fresh();
    await connections.openService({...requestBase,requestId:uuid()},

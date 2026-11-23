@@ -99,7 +99,11 @@ export function classifyWorkspaceCommand(text, root, cwd) {
   const destructive = /(?:^|[;|&\s])(?:\/[\w/-]+\/)?(?:rm|rmdir|unlink|mv|truncate|dd|scancel|bkill|chmod|chown)(?=\s|$)/.test(command)||
     /(?:^|[;&|\s])(?:\/[^\s]+\/)?find\s[^\n]*\s-(?:delete|fprint0?|fprintf|fls)(?=\s|$)/.test(command);
   const changesDirectory = /(?:^|[;&|\n])\s*cd\s+['"]?(\/[^'"\s;|&]+)|(?:^|[\s\d])>>?\s*['"]?(\/[^'"\s;|&]+)/g;
-  const outside = [...command.matchAll(changesDirectory)].some(match => !inside(root, posix.normalize(match[1] || match[2])));
+  const outside = [...command.matchAll(changesDirectory)].some(([, directory, redirect]) => {
+    // The confinement backend provides the null device. The entire batch still runs inside that boundary.
+    if (redirect === '/dev/null') return false;
+    return !inside(root, posix.normalize(directory || redirect));
+  });
   return {mode:'approved', args:[command], paths:[...new Set(literal)],
     reason: destructive ? 'destructive' : !inside(root, cwd) || outside ? 'outside_workspace' : 'unverified_effects'};
 }
@@ -109,6 +113,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
   function settle(row, decision) {
     clearTimeout(row.timer);
     approvals.delete(row.view.approvalId);
+    if (decision === 'changed' && now() >= row.view.expiresAt) decision = 'expired';
     row.resolve({decision, guard:row.guard, approvalId:row.view.approvalId});
     emit();
   }
@@ -117,7 +122,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     const owner = owning(current());
     for (const row of approvals.values()) {
       if (row.owner !== owner) continue;
-      try { row.guard(); } catch { settle(row, 'denied'); continue; }
+      try { row.guard(); } catch { settle(row, 'changed'); continue; }
       return structuredClone(row.view);
     }
     return null;
@@ -135,7 +140,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
   function decide(value) {
     const row = approvals.get(value?.approvalId);
     if (!value || Object.keys(value).sort().join(',') !== 'approvalId,decision' || !['approve','deny'].includes(value.decision) || row?.owner !== owning(current())) fail('ssh_terminal_approval_changed');
-    try { row.guard(); } catch { settle(row, 'denied'); fail('ssh_terminal_approval_changed'); }
+    try { row.guard(); } catch { settle(row, 'changed'); fail('ssh_terminal_approval_changed'); }
     const status = value.decision === 'approve' ? 'approved' : 'denied';
     settle(row, status);
     return {status};
@@ -152,11 +157,11 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     const approvalGuard = () => {
       guard();
       const fresh = current();
-      if (owning(fresh) !== owner || revision !== fresh?.revision || now() > expiresAt) fail('ssh_terminal_approval_changed');
+      if (owning(fresh) !== owner || revision !== fresh?.revision || now() >= expiresAt) fail('ssh_terminal_approval_changed');
     };
     return new Promise(resolve => {
       const row = {owner, view, guard:approvalGuard, resolve, at};
-      row.timer = setTimeout(() => settle(row, 'denied'), expiresAt - now());
+      row.timer = setTimeout(() => settle(row, 'expired'), expiresAt - now());
       row.timer.unref?.();
       approvals.set(approvalId, row);
       emit();
@@ -244,7 +249,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     }
     if (reason) {
       const approval=await review({...config, commands, paths, reason});
-      if (approval.decision !== 'approved') return {accepted:false, execution_status:'denied', cwd};
+      if (approval.decision !== 'approved') return {accepted:false, execution_status:'denied', approval_status:approval.decision, cwd};
       if(mode==='job')args=[...args,approval.approvalId];
       response = await execute(mode, args, approval.guard);
     }
@@ -259,7 +264,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     return {accepted:true, execution_status:response.status==='submission_unconfirmed'?'submission_unconfirmed':response.code !== 0 ? 'failed' : mode==='job' ? job?'submitted':'submission_unconfirmed' : 'completed',
       exit_code:response.code, output:response.output, cwd:entry.cwd,...job?{job_id:job}:{},...response.confinement?{confinement:response.confinement}:{}};
   }
-  async function operate({scope, ref, input, channel, assertCurrent}) {
+  async function operate({scope, ref, input, channel, assertCurrent, verifyConnection}) {
     const registered = workspace.forTerminal(ref, scope);
     const modeRevision=developerCompute?.revision(registered.workspaceId);
     const key = JSON.stringify([owning(scope), ref.connectionId, channel]);
@@ -304,6 +309,15 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
           if (previous.digest!==digest) fail('terminal_invalid_request');
           return {...(previous.receipt??{accepted:true,execution_status:'unconfirmed'}),cwd:entry.cwd,replayed:true};
         }
+        // A cached receipt belongs to the original dispatch. Only a new command
+        // needs a live connection check, and no command has been sent at this point.
+        try {
+          await verifyConnection?.();
+          guard();
+        } catch (error) {
+          entry.requests.delete(input.requestId);
+          throw Object.assign(error, {operationNotStarted:true});
+        }
         let claimed = false;
         const beforeMutation = () => {
           if (!catalog || claimed) return;
@@ -318,10 +332,10 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
         };
         const result = await run({scope,ref,guard,entry,registered,command:input.command,beforeMutation});
         if (claimed) {
-          const {accepted,execution_status,exit_code,job_id} = result;
+          const {accepted,execution_status,exit_code,job_id,approval_status} = result;
           try {
             catalog.put('ssh-command-receipt',receiptId,{digest,receipt:{accepted,execution_status,
-              ...exit_code!==undefined?{exit_code}:{},...job_id?{job_id}:{}}});
+              ...exit_code!==undefined?{exit_code}:{},...job_id?{job_id}:{},...approval_status?{approval_status}:{}}});
           } catch {
             // Keep the original dispatch record when a completed receipt cannot be saved.
           }
@@ -348,5 +362,5 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     input:({sessionId,ownerEpoch,...params})=>operate({...params,channel:['terminal',sessionId,ownerEpoch]}),
     execute:({leaseId,requestId,command,...params})=>operate({...params,channel:['command',leaseId],input:{requestId,command}}),
     pending, decide, activity,
-    revokeConnection(connectionId) { for (const row of approvals.values()) if (row.view.connectionId === connectionId) settle(row, 'denied'); }};
+    revokeConnection(connectionId) { for (const row of approvals.values()) if (row.view.connectionId === connectionId) settle(row, 'changed'); }};
 }

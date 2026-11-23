@@ -125,6 +125,31 @@ export async function frontendReviewCases({check,out}){
   await noExecution(page);await snapshot(page,'review-fixes-stale-registration');
  });
 
+ await check('review-fixes-tool-approval-arguments',async page=>{
+  await agent(page);
+  await page.evaluate(()=>{
+   const test=window.__test,original=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>{
+    if(method==='agent.respond'){test.calls.push({method,data});return {};}
+    return original(method,data);
+   };
+   test.events.forEach(fn=>fn({provider:'codex',id:'review-tool-call',method:'mcpServer/elicitation/request',
+    params:{threadId:'fixture-thread',mode:'form',serverName:'gpusampling',message:'Allow acquire_compute_resource?',
+     requestedSchema:{type:'object',properties:{}},_meta:{codex_approval_kind:'mcp_tool_call',
+      tool_params:{resource_id:'ssh:fixture-east',access:'service'}}}}));
+  });
+  const card=page.locator('[data-testid="agent-question-request"][data-request-id="review-tool-call"]');
+  const args=card.getByTestId('approval-tool-input');
+  await args.waitFor();
+  assert.deepEqual(JSON.parse(await args.innerText()),{resource_id:'ssh:fixture-east',access:'service'});
+  assert.equal(await card.locator('textarea').count(),0);
+  await snapshot(page,'review-fixes-tool-approval-arguments');
+  await card.getByRole('button',{name:'拒绝',exact:true}).click();
+  await card.waitFor({state:'hidden'});
+  const responses=await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='agent.respond'));
+  assert.deepEqual(responses.map(call=>call.data.result),[{action:'decline',content:null}]);
+ });
+
  await check('review-fixes-chat-stream-preserves-reading-position',async page=>{
   await agent(page);
   await page.evaluate(()=>{for(let i=0;i<45;i++)window.__test.events.forEach(fn=>fn({provider:'codex',method:'item/agentMessage/delta',params:{threadId:'fixture-thread',itemId:'history-'+i,delta:'Synthetic history '+i+'\n'+('Readable historical text. '.repeat(15))}}));});

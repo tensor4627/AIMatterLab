@@ -254,6 +254,25 @@ test('a project appearing after the GET snapshot reaches only the atomic create 
  await assert.rejects(f.controller.createProject({environment_id:'environment',name:'CPU check',request_id:'project-request-001'}),/preserved/);assert.deepEqual(service.entries(),[protectedProject]);assert.equal(service.requests.length,0);assert(!f.calls.some(call=>call.method==='POST'&&call.route==='/api/projects'));const call=f.calls.find(call=>call.route==='/api/tool-configuration/project/create');assert.deepEqual(Object.keys(call.args).sort(),['environment_id','name','project_id']);
 });
 
+test('SSH chat keeps local tool guidance sealed without asking the remote service for WSL configuration state',async()=>{
+ const f=fixture();
+ const active=await f.active();
+ await f.controller.bind({configuration_id:active.configuration_id,providers:['codex']});
+ const local=await f.controller.resolveGuidance(f.scope());
+ const archivedPath=local.archivedResources[0].paths[0];
+ f.worker.identity={kind:'ssh',version:3,profileId:'remote-fixture',connectionId:'remote-session',root:'/remote'};
+ f.worker.connection={health:{ssh_service:true,root:'/remote',tool_configuration_schema:1,resource_tool_schema:1}};
+ f.calls.length=0;
+ const unbound=await f.controller.resolveGuidance({...f.scope(),threadId:'new-chat'});
+ assert.equal(unbound.state,'legacy_unconfigured');
+ assert.equal(createReadPolicy(unbound).allowsPath(archivedPath),false);
+ const bound=await f.controller.resolveGuidance(f.scope());
+ assert.equal(bound.state,'stale');
+ assert.equal(bound.executionSkill,undefined);
+ assert.equal(createReadPolicy(bound).allowsPath(archivedPath),false);
+ assert.deepEqual(f.calls,[]);
+});
+
 test('old services without the configuration capability keep legacy reads and cached archive restrictions without an upgrade',async()=>{
  const fresh=fixture();delete fresh.worker.connection.health.tool_configuration_schema;const legacy=await fresh.controller.resolveGuidance(fresh.scope());assert.equal(legacy.state,'legacy_unconfigured');assert.equal(fresh.calls.length,0);
  const existing=fixture();await existing.active();delete existing.worker.connection.health.tool_configuration_schema;existing.calls.length=0;const cached=await existing.controller.resolveGuidance(existing.scope());assert.equal(cached.state,'legacy_unconfigured');assert(cached.archivedResources.length>0);assert.equal(existing.calls.length,0);

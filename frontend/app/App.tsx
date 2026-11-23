@@ -133,16 +133,16 @@ const initialSettings:Settings={distribution:'Ubuntu',workerRoot:'~/.local/state
 function isSshResource(value:ComputeResourceState|null|undefined):value is ComputeResourceState{return value?.kind==='ssh-terminal'||value?.kind==='ssh-connection';}
 function sshSummary(value:ComputeResourceState){
  if(!value.connectionStatus&&value.status==='unavailable')return t('上次选择的 SSH 连接已不可用');
- return 'SSH: '+t(sshStateLabel(value.connectionStatus||value.status))+' · '+t('终端')+': '+t(sshStateLabel(value.capabilities?.terminal.status))+' · '+t('作业服务')+': '+t(sshStateLabel(value.capabilities?.service.status));
+ return 'SSH: '+t(sshStateLabel(value.connectionStatus||value.status))+' · '+t('终端')+': '+t(sshStateLabel(value.capabilities?.terminal.status))+' · '+t('当前流程作业服务')+': '+t(sshStateLabel(value.capabilities?.service.status));
 }
 function hostedSshSummary(resources:ManagedResource[]){
  if(!resources.length)return '';
- const names=resources.map(resource=>resource.name).join(' · ');
+ const names=resources.map(resource=>resources.length>1&&resource.verificationPending?resource.name+' ('+t('待核对')+')':resource.name).join(' · ');
  const summary='SSH · '+t('已托管')+' · '+names;
  if(resources.length>1)return summary;
  const labels={ready:'可用',idle:'未连接',preparing:'准备中',configuration_required:'未配置',unavailable:'不可用'} as const;
- const status=resources[0].serviceStatus;
- return summary+' · '+t('作业服务')+' '+t(status?labels[status]:'状态未知');
+ const {verificationPending,serviceStatus}=resources[0];
+ return summary+' · '+t('作业服务')+' '+t(verificationPending?'待核对':serviceStatus?labels[serviceStatus]:'状态未知');
 }
 function shortTime(value:number){return new Date(value*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function errorText(e:unknown){return e instanceof Error?e.message:String(e);}
@@ -720,7 +720,7 @@ export default function App(){
  }
  async function usePublishedWorkflow(ref:ResourceWorkspaceReference){
   const owner=selectedConversationRef.current,sequence=conversationSelectionSeq.current,prior=taskWorkerSource(owner?.taskId?agentTasks.find(task=>task.id===owner.taskId):undefined)?.binding;
-  if(prior&&(prior.kind!=='ssh'||prior.profileId!==ref.profileId))throw Error(t('此流程已绑定其他计算资源。请打开原资源，或为此资源新建流程。'));
+  if(prior&&(prior.kind!=='ssh'||prior.profileId!==ref.profileId))throw Object.assign(Error(t('此流程已绑定其他计算资源。请打开原资源，或为此资源新建流程。')),{code:'ssh_service_workflow_target_changed'});
   const result=await invoke<SshServiceState>('compute.managed.useForWorkflow',ref);
   const current=()=>mounted.current&&sequence===conversationSelectionSeq.current&&selectedConversationRef.current?.id===owner?.id;
   if(!current())return {status:'unconfirmed' as const};
@@ -992,8 +992,9 @@ export default function App(){
  const showHosted=computeResource?.kind==='ssh-connection'
   ?computeResource.status!=='selected'||computeResource.alive!==true
   :!isSshResource(computeResource)&&(!worker||disconnected);
- const hostedSummary=showHosted?hostedSshSummary(managed.resources.filter(row=>row.kind==='ssh'&&row.connectionId)):'';
- const resourceOnline=Boolean(hostedSummary)||(isSshResource(computeResource)?computeResource.alive===true:statusKnown);
+ const hostedResources=showHosted?managed.resources.filter(row=>row.kind==='ssh'&&row.connectionId):[];
+ const hostedSummary=hostedSshSummary(hostedResources);
+ const resourceOnline=hostedResources.length?hostedResources.some(row=>!row.verificationPending):isSshResource(computeResource)?computeResource.alive===true:statusKnown;
  function onTerminalError(error:unknown) {
   if(terminalPanelVisible&&error instanceof Error&&'presentation' in error&&error.presentation==='inline')return;
   onError(error);

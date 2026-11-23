@@ -22,9 +22,21 @@ export function isConversationDraft(task) {
 }
 
 export function createConversationDraftTool({records, assertScope}) {
+  const starting = new Map();
   return {
+    async withPlanningThreadStart(session, start) {
+      if (!session?.id || session.threadId !== null) return start();
+      starting.set(session.id, session);
+      try { return await start(); }
+      finally { if (starting.get(session.id) === session) starting.delete(session.id); }
+    },
     list(scope) {
-      if (!scope.sessionId || !scope.threadId || !scope.taskId) return null;
+      if (!scope.sessionId) return null;
+      // Codex indexes tool schemas while creating the native thread, before it
+      // returns the ID used to bind a task. Calls still require the saved owner.
+      if (!scope.threadId && !scope.taskId && starting.get(scope.sessionId)?.provider === scope.provider)
+        return {tools:[conversationDraftTool]};
+      if (!scope.threadId || !scope.taskId) return null;
       const task = records.bound(scope.provider, scope.threadId);
       return task?.id === scope.taskId && isConversationDraft(task) ? {tools:[conversationDraftTool]} : null;
     },

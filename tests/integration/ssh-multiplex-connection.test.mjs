@@ -22,6 +22,19 @@ test('slave command fixes false proxy first, batch mode, no config and exact mas
  const p=multiplexProfile(profile),argv=multiplexArgs(p,'/tmp/private/master.sock',{tty:true});assert.deepEqual(argv.slice(0,5),['/usr/bin/ssh','-o','ProxyCommand=/bin/false','-F','/dev/null']);assert(argv.includes('BatchMode=yes'));assert(argv.includes('ControlMaster=no'));assert(argv.includes('-tt'));assert.equal(argv[argv.indexOf('-S')+1],'/tmp/private/master.sock');assert(!argv.includes('-i'));assert(!argv.includes('-J'));assert(!argv.some(v=>v.includes('StrictHostKeyChecking=no')));
  assert.throws(()=>multiplexProfile({...profile,via:['old-hop']}),/requires_review/);assert.throws(()=>multiplexProfile({...profile,proxy_jump:['hop;bad']}),/requires_review/);assert.throws(()=>multiplexProfile({...profile,host:'-oProxyCommand=evil'}),/requires_review/);
 });
+test('fencing an abandoned start requires the observed replacement to still own the same connection',async t=>{
+ const f=fixture(t),c=await f.ready(),ref={connectionId:c.connectionId};
+ const live=await f.manager.openService({...ref,requestId:'existing',bootstrap:{fixture:true}});
+ await assert.rejects(f.manager.cancelServiceStart({...ref,requestId:'existing',supersededBy:'stale'}),/service_changed/);
+ await assert.rejects(f.manager.cancelServiceStart({...ref,requestId:'existing',supersededBy:'existing'}),/service_changed/);
+ const receipt=await f.manager.cancelServiceStart({...ref,requestId:'abandoned',supersededBy:'existing'});
+ assert.equal(receipt.cancelledAttemptId,'abandoned');
+ assert.equal(receipt.attemptId,'existing');
+ assert.equal(receipt.serviceId,live.serviceId);
+ assert.equal(receipt.serviceActive,true);
+ assert.equal((await f.manager.serviceState(ref)).status,'connected');
+ await assert.rejects(f.manager.openService({...ref,requestId:'abandoned',bootstrap:{fixture:true}}),/service_start_cancelled/);
+});
 test('alive authentication PTY is private, explicit proof gates all slave channels, and confirmation clears auth bytes',async t=>{
  const f=fixture(t),c=await f.open(),ref={connectionId:c.connectionId};assert.equal(c.authentication,'pending');assert.equal(f.sessions.size,0);assert(f.manager.authRead(ref).output.includes('Password:'));assert(!JSON.stringify(f.manager.list()).includes('Password:'));
  await assert.rejects(f.manager.openShell({...ref,requestId:'before'}),/unconfirmed/);f.broken(true);await assert.rejects(f.manager.confirm(ref),/master_unavailable/);f.broken(false);f.manager.authInput({...ref,requestId:'pass',data:'SENSITIVE\r'});assert.equal(f.manager.authInput({...ref,requestId:'pass',data:'SENSITIVE\r'}).duplicate,true);assert.throws(()=>f.manager.authInput({...ref,requestId:'pass',data:'changed\r'}),/request_changed/);const ready=await f.manager.confirm(ref);assert.equal(ready.status,'authenticated');assert.equal(ready.authentication,'verified');assert.equal(f.manager.authRead(ref).output,'');assert.throws(()=>f.manager.authInput({...ref,requestId:'post',data:'x'}),/not_pending/);assert(!JSON.stringify(ready).includes('SENSITIVE'));

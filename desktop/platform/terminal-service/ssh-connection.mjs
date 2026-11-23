@@ -297,7 +297,25 @@ export function createSshConnections({pty,sessions,now=Date.now,host=createMulti
   if(r.service!==record||r.status!=='authenticated')fail('service_changed');return result;
  }
  async function closeService(value){exact(value,['connectionId','serviceId']);const r=ref({connectionId:value.connectionId}),record=r.service;if(record?.shared){if(value.serviceId!==record.shared.view().serviceId)fail('service_changed');await record.shared.close();return serviceView(r);}if(!record?.session||record.session.serviceState().serviceId!==value.serviceId)fail('service_changed');await record.session.serviceStop({serviceId:value.serviceId});if(r.service!==record)fail('service_changed');const result=serviceView(r);if(!result.serviceActive){record.session.dispose();r.revision++;}return result;}
- async function cancelServiceStart(value){const r=ref(value,['requestId']);if(r.profileUpdate){profileUpdates.get(r.profileUpdate)?.invalid?.();r.profileUpdate=null;}if(!id(value.requestId))fail('invalid_request');if(!r.cancelled.has(value.requestId)&&r.cancelled.size>=64)fail('request_limit',429);r.cancelled.add(value.requestId);const record=r.service;if(record?.requestId===value.requestId){if(record.shared){await record.shared.cancel();}else if(record.session){await record.session.serviceCancelStart({requestId:value.requestId});if(!record.session.serviceState().serviceActive)record.session.dispose();}else r.service=null;r.revision++;}return {...serviceView(r),cancelled:true,cancelledAttemptId:value.requestId};}
+ async function cancelServiceStart(value){
+  const {supersededBy,...request}=value,r=ref(request,['requestId']),record=r.service;
+  if(!id(request.requestId))fail('invalid_request',400);
+  if(supersededBy!==undefined){
+   // Only fence the abandoned request while the observed replacement still owns the channel.
+   if(!id(supersededBy)||supersededBy===request.requestId||record?.requestId!==supersededBy)fail('service_changed');
+  }else if(r.profileUpdate){profileUpdates.get(r.profileUpdate)?.invalid?.();r.profileUpdate=null;}
+  if(!r.cancelled.has(request.requestId)&&r.cancelled.size>=64)fail('request_limit',429);
+  r.cancelled.add(request.requestId);
+  if(record?.requestId===request.requestId){
+   if(record.shared)await record.shared.cancel();
+   else if(record.session){
+    await record.session.serviceCancelStart({requestId:request.requestId});
+    if(!record.session.serviceState().serviceActive)record.session.dispose();
+   }else r.service=null;
+   r.revision++;
+  }
+  return {...serviceView(r),cancelled:true,cancelledAttemptId:request.requestId};
+ }
  async function observeClose(r){
   if(!r.closeRequested||r.closeProof||r.alive&&r.terminal)return r.closeProof===true;
   let proved=!r.terminal;try{if(r.native)proved=!r.alive&&r.native.transportClosed();else if(r.proof&&typeof host.observeClosed==='function')proved=(await host.observeClosed(r.profile,r.proof,r.master)).closed===true;else if(r.closeExitProven)proved=true;}catch{proved=false;}

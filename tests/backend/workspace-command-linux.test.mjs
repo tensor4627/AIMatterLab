@@ -52,6 +52,8 @@ test('real Linux workspace probe, shell boundary, and the actual script delivere
  }
  assert.ok(['landlock','bubblewrap'].includes(canRun.confinement));
  assert.equal(canRun.code,0);
+ const discarded=run('confined',['printf visible; printf discarded 2>/dev/null >/dev/null']);
+ assert.equal(discarded.code,0);assert.equal(discarded.output.trim(),'visible');
  assert.equal(shell('cat -- "$1"',root+'/inside.txt'),'installed');
  assert.notEqual(run('confined',['echo write > ../outside.txt']).code,0);
  assert.notEqual(run('confined',['python3 -c "from pathlib import Path; Path(\'external-link\').write_text(\'bad\')"']).code,0);

@@ -17,6 +17,7 @@ export function createCodexSubscriptionRuntime({root,runtime,onEnvPrompt,sharedE
  const home=ownedHome(root);
  const envImport=sharedEnvImport??createCodexEnvImport({home,sourceHome,notify:onEnvPrompt});
  const disabled=path.join(home,'native-login-disabled');let importedAccount=null;
+ const reuseDisabled=()=>fs.existsSync(disabled)&&fs.readFileSync(disabled,'utf8')==='disabled\n';
  const catalogPath=()=>fs.existsSync(path.join(home,'models_cache.json'))?path.join(home,'models_cache.json'):path.join(sourceHome,'models_cache.json');
  let listedCatalog=null;
  const environment=options=>({...options,env:{...options?.env,CODEX_HOME:home}});
@@ -35,6 +36,7 @@ export function createCodexSubscriptionRuntime({root,runtime,onEnvPrompt,sharedE
   return {accessToken,chatgptAccountId,chatgptPlanType:null};
  }
  return {...runtime,execute,spawnProcess,envImport,
+  usingNativeLogin:()=>importedAccount!==null&&!reuseDisabled(),
   needsModelCatalog:()=>!fs.existsSync(catalogPath()),
   async readListedCatalog(file,listed,cwd,assertCurrent){
    // API-key sign-in can list models without writing a native models_cache.json.
@@ -53,7 +55,7 @@ export function createCodexSubscriptionRuntime({root,runtime,onEnvPrompt,sharedE
   prepareIsolation:(file,isolationRoot,config,worker,dependencies={})=>prepareIsolation(file,isolationRoot,config,worker,{...dependencies,execute,probe:dependencies.probe||((exe,args,cwd)=>bootstrapSkills(exe,args,cwd,{spawnProcess})),prepareModels:(directory,instructions)=>prepareModelCeiling(directory,instructions,{cachePath:catalogPath(),missingCatalog:listedCatalog?.file===file?listedCatalog.bytes:undefined})}),
   async initializeAuth(request,rememberSecret){
    importedAccount=null;
-   if(fs.existsSync(disabled)&&fs.readFileSync(disabled,'utf8')==='disabled\n')return;
+   if(reuseDisabled())return;
    // An explicit AIMatterLab login owns its own native credential store.
    const observed=await request('account/read',{refreshToken:false});
    if(observed.account)return observed;

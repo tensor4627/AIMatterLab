@@ -119,6 +119,7 @@
 }
 .agent-panel .approval .button-row { flex-wrap:wrap; }
 .agent-panel .approval .button { white-space:normal; }
+.approval-tool-input pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:16rem; overflow:auto; }
 
 .composer-model-selection {
  display:grid;

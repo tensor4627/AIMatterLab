@@ -13,6 +13,31 @@ const action=(h,id,label)=>visit(panel(h,id)).find(node=>node.type==='button'&&n
 const responses=h=>h.calls.filter(call=>call.method==='agent.respond');
 async function setup(override){const h=agentHarness({props:{sessionSelection:{nonce:'approvals',conversation:conversation('codex','approvals')}},override:(method,data,standard)=>method==='agent.respond'?(override?.(data)??{}):standard(method,data)});await h.flush();return h;}
 
+test('tool approvals show their own read-only invocation arguments before a decision',async()=>{
+ const h=await setup();
+ try {
+  const invoke=(id,args)=>event(id,zero,{command:undefined,message:'Allow the MCP server to run this tool?',
+   _meta:{codex_approval_kind:'mcp_tool_call',tool_params:args}});
+  h.emit(invoke('east',{resource_id:'ssh:fixture-east',access:'command'}));
+  h.emit(invoke('west',{alias:'fixture-west',access:'service',password:'PRIVATE_FIXTURE'}));
+  h.emit(event('ordinary',zero,{_meta:{tool_params:{alias:'unrelated-metadata'}}}));
+  await h.flush();
+  const shown=id=>text(panel(h,id));
+  assert.match(shown('east'),/ssh:fixture-east/);
+  assert.match(shown('east'),/"access": "command"/);
+  assert.doesNotMatch(shown('east'),/fixture-west/);
+  assert.match(shown('west'),/fixture-west/);
+  assert.match(shown('west'),/\[redacted\]/);
+  assert.doesNotMatch(shown('west'),/PRIVATE_FIXTURE/);
+  assert.doesNotMatch(shown('ordinary'),/unrelated-metadata/);
+  assert.equal(editors(h,'east').length,0);
+  assert.equal(responses(h).length,0);
+  action(h,'east','接受').props.onClick();
+  await h.flush();
+  assert.deepEqual(responses(h).map(call=>call.data.result),[{action:'accept',content:{}}]);
+ } finally {h.unmount();}
+});
+
 test('zero-field MCP forms hide only the empty argument editor while preserving tool/command context and explicit decisions',async()=>{
  const h=await setup();try{h.emit(event('zero'));await h.flush();assert.equal(editors(h,'zero').length,0);assert.match(text(panel(h,'zero')),/write_shared_terminal/);assert.match(text(panel(h,'zero')),/printf PUBLIC_APPROVAL_FIXTURE/);assert(action(h,'zero','接受'));assert(action(h,'zero','拒绝'));assert.equal(responses(h).length,0);action(h,'zero','接受').props.onClick();await h.flush();assert.deepEqual(responses(h)[0].data,{provider:'codex',threadId:'approvals',id:'zero',result:{action:'accept',content:{}}});assert.throws(()=>panel(h,'zero'));}finally{h.unmount();}
 });

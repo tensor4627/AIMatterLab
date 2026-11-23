@@ -102,6 +102,22 @@ test('App footer reflects selected SSH Agent ownership, unknown state and exit w
  for(const [selected,expected]of [[serviceGranted(),/作业服务.*已连接/],[resource({connectionStatus:'unavailable',authentication:'lost',alive:false}),/SSH.*不可用/],[resource({connectionStatus:'closed',authentication:'lost',alive:false}),/SSH.*已关闭/]]){const h=appWorkerHarness({override:(method,data,standard)=>method==='compute.resource.status'?selected:['worker.status','worker.restore'].includes(method)?{status:'disconnected',checkedAt:1}:standard(method,data)});await h.flush();assert.match(h.text(h.find(n=>n.type==='footer')),expected);assert.equal(h.find(n=>n.type==='./Agent').props.computeConnected,false);h.unmount();}
 });
 
+test('the hosted SSH footer reports a pending verification instead of cached service availability',async()=>{
+ const pending={kind:'ssh',resourceId:'ssh:pending',connectionId:'connection-pending',name:'Research',verificationPending:true,serviceStatus:'ready',serviceReady:false};
+ const other={kind:'ssh',resourceId:'ssh:other',connectionId:'connection-other',name:'Reference',serviceStatus:'ready',serviceReady:true};
+ const previous=resource({status:'unavailable',connectionStatus:undefined,authentication:'not_observed',alive:null});
+ for(const rows of [[pending],[pending,other]]){
+  const h=appWorkerHarness({managedResources:rows,override:(method,data,standard)=>method==='compute.resource.status'?previous:standard(method,data)});
+  try{
+   await h.flush();
+   const footer=h.text(h.find(node=>node.props?.['data-testid']==='current-compute-resource-status'));
+   assert.match(footer,/Research.*待核对/);
+   assert.doesNotMatch(footer,/作业服务\s*可用/);
+   if(rows.length===2)assert(footer.includes('Reference'));
+  }finally{h.unmount();}
+ }
+});
+
 test('reopening a saved SSH profile displays its hosted replacement while run records keep their original identity',async()=>{
  const previous=resource({status:'unavailable',connectionStatus:undefined,authentication:'not_observed',alive:null});
  const hosted={kind:'ssh',profileId:previous.profileId,profileVersion:3,connectionId:'current-desktop',name:'Campus',serviceStatus:'idle'};

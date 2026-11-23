@@ -59,12 +59,12 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
     }
     return projects;
   }
-  function terminalRow(shell) {
+  function terminalRow(shell,masterStatus='online') {
     const profile = shell.resource?.profileId && checkedProfile(shell.resource);
     return {sessionId:shell.sessionId,mode:shell.mode,kind:shell.kind,owner:shell.owner,
       ...shell.resource?.profileId ? {profileId:shell.resource.profileId,profileVersion:shell.resource.profileVersion} : {},
       ...profile ? {profileName:profile.name} : {},
-      ...result(!shell.verified || !recent(brokerInventory) ? 'unknown' : shell.expired || !shell.alive ? 'closed' : 'online',brokerInventory.checkedAt)};
+      ...result(!shell.verified || !recent(brokerInventory) ? 'unknown' : shell.expired || !shell.alive ? 'closed' : masterStatus==='online' ? 'online' : 'unknown',brokerInventory.checkedAt)};
   }
   function channelRow(channel,source,conversations,projects,status,checkedAt) {
     const chat = conversations.get(ownerKey(channel));
@@ -91,13 +91,16 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
       if (item.connectionId && !masters.has(item.connectionId) && !observed.some(row => row.connectionId === item.connectionId && row.closed)) masters.set(item.connectionId,{...sshRef(item),verified:false});
     }
     const list = [];
-    function scopedChannels(entry,master,service) {
+    function scopedChannels(entry,master,service,masterStatus) {
       const managed = channels.filter(channel => master ? sameRef(channel,master) : sameRef(channel,entry)).map(channel => {
         const proof = shells.get(channel.leaseId);
         let status = channel.status, checkedAt = null;
         if (status === 'assigned') {
           if (channel.expired) status = 'lost';
-          else if (channel.commandContext&&!channel.sessionId) {
+          else if (master && masterStatus !== 'online') {
+            status = masterStatus === 'lost' ? 'lost' : 'unknown';
+            checkedAt = brokerInventory?.checkedAt ?? null;
+          } else if (channel.commandContext&&!channel.sessionId) {
             status = !recent(brokerInventory)||!master?.verified ? 'unknown' : online(master) ? 'assigned' : 'lost';
             checkedAt = brokerInventory?.checkedAt ?? null;
           } else if (channel.serviceOnly) {
@@ -116,8 +119,8 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
         const shell = terminalList.find(row => row.sessionId === channel.sessionId && row.connectionId === master.connectionId);
         let status = channel.status;
         if (status === 'assigned' || status === 'parked') {
-          if (!recent(brokerInventory)) status = 'unknown';
-          else if (!master.verified || !online(master) || !shell?.verified || shell.owner !== 'agent' || !shell.alive || shell.expired) status = 'lost';
+          if (masterStatus !== 'online') status = masterStatus === 'lost' ? 'lost' : 'unknown';
+          else if (!shell?.verified || shell.owner !== 'agent' || !shell.alive || shell.expired) status = 'lost';
         }
         return channelRow(channel,'handoff',conversations,projects,status,brokerInventory?.checkedAt ?? null);
       }) : [];
@@ -129,7 +132,8 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
       const managed = entries.find(entry => sameRef(entry,master));
       const proof = services.get(master.connectionId);
       const check = brokerInventory?.checkedAt ?? null;
-      const masterStatus = !master.verified ? check == null ? 'unknown' : 'lost' : !recent(brokerInventory) ? 'unknown' :
+      const masterStatus = !recent(brokerInventory) ? 'unknown' : !master.verified ?
+        brokerInventory.complete && !master.verificationPending ? 'lost' : 'unknown' :
         online(master) ? 'online' : master.status === 'authenticating' ? 'preparing' : master.status === 'requires_review' || master.status === 'unsupported' ? 'requires_review' : 'lost';
       const channel = master.service;
       let status = masterStatus === 'lost' ? 'lost' : 'unknown', checkedAt = check;
@@ -148,13 +152,13 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
         }
       }
       const service = {...result(status,checkedAt),kind:channel?.kind ?? 'private'};
-      const leases = scopedChannels(managed,master,service);
+      const leases = scopedChannels(managed,master,service,masterStatus);
       const assigned = new Set(leases.map(lease => lease.sessionId));
       const terminals = terminalList.filter(row => row.connectionId === master.connectionId && !assigned.has(row.sessionId) && (row.alive || !row.verified));
       list.push({key:master.connectionId,kind:'ssh',name:profile?.name ?? byProfile.get(master.profileId)?.name ?? master.profileId,...sshRef(master),current,
         target:profile?.kind === 'ssh' ? profile.host + ':' + profile.port : null, mode:profile?.mode ?? 'interactive',
         master:result(masterStatus,check),canDisconnect:master.verified&&recent(brokerInventory)&&['authenticated','authenticating','unavailable'].includes(master.status),capacity:masterStatus === 'online' ? master.capacity : null,
-        service,channels:leases,terminals:terminals.map(terminalRow),managedId:managed?.resourceId ?? null,
+        service,channels:leases,terminals:terminals.map(shell=>terminalRow(shell,masterStatus)),managedId:managed?.resourceId ?? null,
         projectPolicies:managed ? projectAccess(managed) : []});
     }
     for (const profile of saved) {
@@ -179,7 +183,7 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
         managedId:managed?.resourceId ?? null,localGeneration:managed?.generation ?? null,foregroundEpoch:front?.epoch ?? null,
         service:{status:service.status,checkedAt:service.checkedAt,kind:'wsl'},channels:scopedChannels(managed ?? {kind:'wsl',...profileRef},null,service)});
     }
-    const standalone = terminalList.filter(shell => !shell.connectionId && (shell.alive || !shell.verified)).map(terminalRow);
+    const standalone = terminalList.filter(shell => !shell.connectionId && (shell.alive || !shell.verified)).map(shell=>terminalRow(shell));
     const foregroundLocal = foreground && !foreground.profile ? {distribution:foreground.distribution,port:foreground.port,foregroundEpoch:foreground.epoch,
       service:foregroundCheck?.epoch===foreground.epoch ? observable(foregroundCheck) : result('unknown')} : null;
     return {checkedAt:latestCheck,observation:!brokerInventory ? 'unverified' : brokerInventory.complete ? 'complete' : 'partial',resources:list,standalone,foregroundLocal,projects:[...projects.values()]};
@@ -210,9 +214,12 @@ export function createManagedComputeConsole({profiles, terminal, resources, conv
       brokerInventory.sessions = brokerInventory.sessions.map(row => ({...row,verified:false}));
     });
     const observe = async (probe, map, key, extra) => {
-      let verified;
-      try { verified = await probe(); } catch { verified = false; }
-      map.set(key,{...extra,...result(verified ? 'online' : 'lost',now())});
+      let status;
+      try { status = await probe() ? 'online' : 'lost'; }
+      catch (error) {
+        status = ['ssh_control_timeout','ssh_control_unavailable'].includes(error?.message) ? 'unknown' : 'lost';
+      }
+      map.set(key,{...extra,...result(status,now())});
     };
     await brokerRead;
     const {entries,channels} = resources.consoleEntries(), observed = brokerInventory.connections;

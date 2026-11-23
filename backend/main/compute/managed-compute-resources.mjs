@@ -15,6 +15,7 @@ import {sshSourceId} from './worker-service-version.mjs';
 
 const rejectedBeforeDispatch=new Set(['managed_compute_invalid_request','managed_compute_user_instruction_required',
  'managed_compute_no_eligible_resource','managed_compute_resource_lease_required','managed_compute_resource_choice_required',
+ 'managed_compute_resource_project_changed',
  'managed_compute_project_grant_required','managed_compute_terminal_not_supported','managed_compute_command_not_supported']);
 const fail=code=>{throw Object.assign(Error(code),rejectedBeforeDispatch.has(code)?{operationNotStarted:true}:{});};
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value);
@@ -56,7 +57,7 @@ const terminalTools=sharedTerminalTools.map((item,index)=>({...item,
 const tools=Object.freeze([
  tool('list_compute_resources','List resources hosted by AIMatterLab. A listed SSH resource is authenticated. commandAvailable describes its scoped command entry; canAcquire describes conversation access. Acquire the needed capability before using the resource.',{},[],true),
  tool('acquire_compute_resource','Acquire the requested capability for this conversation. Use one selector: resource_id, profile_id, or the alias the human used. For SSH, command is the default where available, terminal opens an interactive channel, and service uses the registered worker. Follow target_selected and choice_required receipts. An ordinary chat can acquire access with the user’s delegation.',{resource_id:string,profile_id:string,alias:string,access:{type:'string',enum:['command','terminal','service']}}),
- tool('run_compute_command','Run one delegated command or batch on the acquired SSH command lease. Returns output, exit_code, cwd, and job_id when observed. Use an unchanged request_id when checking or retrying the same command. Reconcile an unconfirmed operation before sending a new request. A standalone cd updates only this conversation’s command directory. Environment changes apply to the current batch. Protected operations use desktop review. Prefer the worker for tracked workflows and jobs.',{
+ tool('run_compute_command','Run one delegated command or batch on the acquired SSH command lease. Returns output, exit_code, cwd, and job_id when observed. Use an unchanged request_id when checking or retrying the same command. Reconcile an unconfirmed operation before sending a new request. A standalone cd updates only this conversation’s command directory. Environment changes apply to the current batch. Protected operations use desktop review. When present, approval_status distinguishes an explicit denial (denied), an expired review (expired), and a changed review context (changed). Prefer the worker for tracked workflows and jobs.',{
   resource_id:string,request_id:string,command:{type:'string',minLength:1,maxLength:8192}
  },['resource_id','request_id','command']),
  tool('release_compute_resource','Release this conversation’s command, terminal and service lease on this resource.',{resource_id:string},['resource_id']),
@@ -157,7 +158,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(state!=='authenticated')fail('managed_compute_resource_unavailable');
  }
 
- function prepareService(resource,{configure=false,upgrade}={}){
+ function prepareService(resource,{configure=false,upgrade,existingOnly=false}={}){
   if(!services||resource.preparing)return resource.preparing;
   if(resource.service&&!upgrade)return Promise.resolve(resource.service);
   const original=resource.service;
@@ -166,7 +167,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const fresh=()=>current(resource);
   const preparation=Promise.resolve().then(async()=>{
    try{
-    const service=await (resource.kind==='ssh'?services.ssh(resource,resource.profile,fresh,{configure,upgrade}):services.wsl(resource,resource.receipt,fresh));
+    const service=await (resource.kind==='ssh'?services.ssh(resource,resource.profile,fresh,{configure,upgrade,existingOnly}):services.wsl(resource,resource.receipt,fresh));
     try{fresh();}catch(error){service.close?.();throw error;}
     resource.service=service;resource.serviceStatus='ready';delete resource.serviceError;
     return service;
@@ -306,15 +307,18 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   return view(resource);
  }
 
- async function refreshService({connectionId}){
+ async function refreshService({connectionId,existingOnly=false}){
   const resource=[...resources.values()].find(item=>item.connectionId===connectionId);
   if(!resource||stopped||!saved(resource))return null;
   const existing=resource.service;
   if(existing){
    try{await existing.verify();return existing;}
-   catch{discardService(resource,existing);}
+   catch(error){
+    if(resource.kind==='ssh'&&error?.message==='ssh_control_timeout')return null;
+    discardService(resource,existing);
+   }
   }
-  return prepareService(resource);
+  return prepareService(resource,{existingOnly});
  }
 
  async function configureService(data){
@@ -820,7 +824,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    };
    const selectedLease=()=>{
     const lease=leases.get(key);
-    if(lease&&(lease.resource!==resource||lease.projectId!==projectOf(scope)||lease.releasing))fail('managed_compute_resource_lease_changed');
+    if(lease&&lease.projectId!==projectOf(scope))fail('managed_compute_resource_project_changed');
+    if(lease&&(lease.resource!==resource||lease.releasing))fail('managed_compute_resource_lease_changed');
     return lease;
    };
    const openLease=()=>{
@@ -831,6 +836,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    };
     const access=args.access??defaultAccess(resource);
    check();
+   selectedLease();
    if(access==='service'){
     const {service,authority}=await verifiedService(scope,resource,check,{acquiring:true});
     check();if(resource.service!==service)fail('managed_compute_service_changed');
@@ -989,9 +995,9 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    assertLease(scope,lease);assertResourceIntent(scope,resource);policyCurrent();
    if(!lease.command)fail('managed_compute_resource_lease_changed');
   };
-  check();await checkConnection(resource);check();
+  check();
   return terminalAuthorization.execute({scope,ref:{...resourceRef(resource),resourceId,resourceName:resource.name},leaseId:lease.id,
-   requestId,command:command.replaceAll('\r\n','\n').replaceAll('\r','\n'),assertCurrent:check});
+   requestId,command:command.replaceAll('\r\n','\n').replaceAll('\r','\n'),assertCurrent:check,verifyConnection:()=>checkConnection(resource)});
  }
 
  async function resolveSkillLibrary(scope,resourceId){
@@ -1101,10 +1107,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  async function observeConsoleService({resourceId,generation}){
   const resource=resources.get(resourceId),service=resource?.service;
   if(!service||service.generation!==generation)return false;
-  try{
-   current(resource);await service.verify();current(resource);
-   return resource.service===service;
-  }catch{return false;}
+  current(resource);await service.verify();current(resource);
+  return resource.service===service;
  }
  async function releaseFromConsole(target){
   const lease=leases.get(leaseKey(target,target.resourceId));
@@ -1397,7 +1401,16 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
     if(unconfirmed)return;
    }
    const service=resource.service;
-   if(service){try{await service.verify();}catch{discardService(resource,service);if(resource.kind!=='ssh')await remove(resource);}}
+   if(service){
+    try{await service.verify();}
+    catch(error){
+     // The broker timed out before forwarding the health request. Keep the
+     // verified source so the next operation can check the same channel again.
+     if(resource.kind==='ssh'&&error?.message==='ssh_control_timeout')return;
+     discardService(resource,service);
+     if(resource.kind!=='ssh')await remove(resource);
+    }
+   }
    if(resource.pendingRecovery)await recoverLeases(resource);
   })();scheduledSweeps.set(resource,checked);
   try{await checked;}finally{scheduledSweeps.delete(resource);}

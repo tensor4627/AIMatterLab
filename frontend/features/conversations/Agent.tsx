@@ -28,7 +28,7 @@ import {resumedEffort,importedCodexSelection,readCodexDefaultsCatalog} from "./r
 
 import {messageKey,upsertItemMessage,replayMessages} from './message-mapping.mjs';
 import {createReadingPositions,readingKey} from './reading-position.mjs';
-import {elicitationHasEditableInput} from './elicitation-input.mjs';
+import {elicitationHasEditableInput,elicitationToolArguments} from './elicitation-input.mjs';
 import ComposerQuestion,{composerQuestionItems,initialQuestionProgress,type QuestionProgress} from './ComposerQuestion';
 import SessionWorkspace from './SessionWorkspace';
 import TerminalWorkspaceApproval from './TerminalWorkspaceApproval';
@@ -799,7 +799,9 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     route=state.scope;resourceRoute=routeState(resource);resourceWorkflow=resource?.workflowReady===true;resourceGranted=resource?.agentReady===true;waitingForConnection=false;
     if(!checkTurnResource()){retainRequest();return;}
    }
-   if(!id){const r=await selectedRpc('thread/start',{model:turnModel||undefined,...fileRefs.length?{studioAttachmentDraftId:drafts.attachmentOwner().draftId}:{},...(turnTerminal && projectId ? {studioInitialProjectId:projectId} : {})});if(!preparing())return;id=r.thread.id;}
+   const fresh=newWorkflow||explicitNewWorkflow(text);
+   const shouldCreateWorkflow=()=>(turnPlanning||fresh)&&!action.reviewMode&&(!turnTerminal||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only';
+   if(!id){const r=await selectedRpc('thread/start',{model:turnModel||undefined,...shouldCreateWorkflow()?{studioPlanningThread:true}:{},...fileRefs.length?{studioAttachmentDraftId:drafts.attachmentOwner().draftId}:{},...(turnTerminal && projectId ? {studioInitialProjectId:projectId} : {})});if(!preparing())return;id=r.thread.id;}
    else if(acquiring){const r=await selectedRpc('thread/resume',{threadId:id});if(!preparing())return;if(r.studioRecovery?.status==='required'){setRecovery({threadId:id});return;}id=r.thread.id;}
    flight.threadId=id;
    if(acquiring){
@@ -811,8 +813,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:projectId||null,groupId:conversationGroupId||null,intent:text});if(!preparing())return;conversationRef.current?.(conversation,nonce);drafts.rebind(draft,id!);setPrompt(drafts.text());setThread(id);threadRef.current=id;setThreads(old=>[{id,name:conversation.name},...old.filter(value=>value.id!==id)]);
    if(turnTerminal&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
    let taskId=action.taskId||conversation.taskId;
-   const fresh=newWorkflow||explicitNewWorkflow(text);
-   if((turnPlanning||fresh)&&!action.reviewMode&&(!turnTerminal||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only'){
+   if(shouldCreateWorkflow()){
     const task=await invoke('task.create',{workflowVersion:2,planningMode:true,newWorkflow:fresh,threadId:id,provider:selectedProvider,request:text,projectId:conversation.projectId??null});
     if(!preparing())return;taskId=task.id;openTaskRef.current?.(task.id);
    }
@@ -1153,7 +1154,10 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     </div>}
    {historyHidden&&<Notice className="agent-history-state" data-testid="agent-history-state" severity={historyLoad?.status==='failed'?'error':'info'}>{historyLoad?.status==='failed'?<><p>{t('此会话暂时无法读取，草稿已保留。')}</p>{historyLoad.error&&<details data-testid="agent-history-error-details"><summary>{t('查看错误详情')}</summary><pre>{historyLoad.error}</pre></details>}<button className="button" data-testid="agent-history-retry" disabled={busy||applying||connecting} onClick={()=>void retryHistory()}>{t('重新读取会话')}</button></>:<p>{t('正在读取所选会话…')}</p>}</Notice>}
    {!historyHidden&&<ConversationMessages messages={messages} language={t('你')} actions={messageActions.current!} disabled={busy||connecting||applying} canOriginalRun={!!onOpenOriginalRun} canCluster={!!onOpenCluster} canCompute={!!(onReviewWorker||onConnectCompute)} bookmarked={new Set(historyPage?.bookmarks.map(bookmark=>JSON.stringify([bookmark.turnId,bookmark.itemId]))||[])}/>}
-   {!historyHidden&&requests.filter(r=>!isUserInputRequest(r)).map(r=>{const scope=requestScope(r),pending=responding.has(scope);return <div key={scope} className="approval" role="alert" data-testid="agent-question-request" data-request-id={String(r.id)} data-request-turn-id={r.params?.turnId} aria-busy={pending}><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
+   {!historyHidden&&requests.filter(r=>!isUserInputRequest(r)).map(r=>{const scope=requestScope(r),pending=responding.has(scope);
+    const toolArguments=r.method==='mcpServer/elicitation/request'?elicitationToolArguments(r.params):null;
+    return <div key={scope} className="approval" role="alert" data-testid="agent-question-request" data-request-id={String(r.id)} data-request-turn-id={r.params?.turnId} aria-busy={pending}><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
+    {toolArguments&&<div className="approval-tool-input"><strong>{t('本次调用参数')}</strong><pre data-testid="approval-tool-input">{toolArguments}</pre></div>}
     {r.method==='studio/question'?<div className="button-row">{r.params.questionOptions?.map((o:any)=><button className="button" disabled={pending} key={o.optionId} onClick={()=>void respond(r,{optionId:o.optionId})}>{o.name}</button>)}<button className="button" disabled={pending} onClick={()=>void respond(r,{})}>{t('取消')}</button></div>:
      r.method==='mcpServer/elicitation/request'?<>{elicitationHasEditableInput(r.params)&&<textarea data-testid="agent-approval-arguments" aria-label={t('审批参数')} placeholder="JSON content" disabled={pending} value={answer(r,'elicitation')||'{}'} onChange={e=>editAnswer(r,'elicitation',e.target.value)}/>}<div className="button-row"><button className="button primary" disabled={pending} onClick={()=>{try{void respond(r,{action:'accept',content:JSON.parse(answer(r,'elicitation')||'{}')});}catch(e){onError(e);}}}>{tr("接受")}</button><button className="button" disabled={pending} onClick={()=>void respond(r,{action:'decline',content:null})}>{tr("拒绝")}</button></div></>:
      r.method==='item/permissions/requestApproval'?<><pre>{JSON.stringify(r.params?.permissions,null,2)}</pre><div className="button-row"><button className="button primary" disabled={pending} onClick={()=>void respond(r,{permissions:r.params?.permissions,scope:"turn"})}>{tr("本轮允许所示权限")}</button><button className="button" disabled={pending} onClick={()=>void respond(r,{permissions:{},scope:"turn"})}>{tr("拒绝权限请求")}</button></div></>:

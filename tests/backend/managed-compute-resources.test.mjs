@@ -201,6 +201,29 @@ test('a project-free chat keeps only its acquired service inspection after plann
  assert.equal(f.calls.filter(({op})=>op==='open').length,0);
 });
 
+test('a project change identifies the old conversation channel and leaves the SSH resource available after releasing it',async t=>{
+ const f=fixture(t,{services:{ssh:async resource=>({id:'service-'+resource.profileId,verify:async()=>({})})}});
+ const {manager,owner}=f;
+ const ordinary={...owner,taskId:null,projectId:null};
+ await f.publish('A');
+ f.turn(ordinary,'检查材料中心');
+ assert.equal((await manager.acquire(ordinary,{resourceId:'ssh:A',access:'service'})).status,'acquired');
+ f.turn(owner,'请用「材料中心」核对当前项目');
+ await assert.rejects(manager.acquire(owner,{resourceId:'ssh:A',access:'service'}),{
+  message:'managed_compute_resource_project_changed',operationNotStarted:true,
+ });
+ const [old]=manager.consoleEntries().channels;
+ assert.equal(old.projectId,null);
+ assert.equal((await manager.releaseFromConsole(old)).status,'released');
+ f.turn(owner,'请用「材料中心」继续核对当前项目');
+ const replacement=await manager.acquire(owner,{resourceId:'ssh:A',access:'service'});
+ assert.equal(replacement.status,'acquired');
+ const [current]=manager.consoleEntries().channels;
+ assert.equal(current.projectId,owner.projectId);
+ assert.equal(current.connectionId,old.connectionId);
+ assert.notEqual(current.leaseId,old.leaseId);
+});
+
 test('an acquisition already authorized in chat reconciles a late shell under the planning turn',async t=>{
  const f=fixture(t,{authorizeTerminal:managedProjectAccess({catalog:{get:()=>null}}).terminalDecision});
  const {manager}=f;
@@ -437,6 +460,52 @@ test('an uncertain SSH proof leaves a published resource and its existing lease 
  assert.equal((await f.publish('A')).connectionId,'conn-A');
 });
 
+test('a private service control timeout keeps the original source for the next verified request',async t=>{
+ let verificationError=null,attachments=0,forwarded=0,closed=0;
+ const health={resource_tool_schema:1};
+ async function verify(){
+  if(verificationError)throw Error(verificationError);
+  return health;
+ }
+ const services={ssh:async()=>{
+  attachments++;
+  return {id:'original',generation:'original-channel',health,verify,
+   close(){closed++;},
+   async forward(_method,_target,_data,_mcp,_timeout,beforeDispatch){
+    const observed=await verify();
+    beforeDispatch?.(observed);
+    forwarded++;
+    return {status:200,data:{targets:[]}};
+   }};
+ }};
+ const {manager,publish}=fixture(t,{services});
+ await publish('A');
+ assert.equal((await manager.refreshService({connectionId:'conn-A'})).id,'original');
+ const [source]=manager.listSources();
+ const listTools=()=>source.request('POST','/api/resource-tools/list',{});
+
+ verificationError='ssh_control_timeout';
+ await assert.rejects(listTools(),/ssh_control_timeout/);
+ await assert.rejects(manager.observeConsoleService({resourceId:'ssh:A',generation:source.generation}),/ssh_control_timeout/);
+ await manager.sweep({idleMs:60000});
+ assert.equal(manager.listSources()[0]?.generation,source.generation);
+ assert.equal(await manager.refreshService({connectionId:'conn-A'}),null);
+ assert.equal(manager.listSources()[0]?.generation,source.generation);
+ assert.equal(attachments,1);
+ assert.equal(forwarded,0);
+ assert.equal(closed,0);
+
+ verificationError=null;
+ assert.equal(await manager.observeConsoleService({resourceId:'ssh:A',generation:source.generation}),true);
+ assert.deepEqual(await listTools(),{targets:[]});
+ assert.equal(forwarded,1);
+
+ verificationError='managed_compute_service_changed';
+ await manager.sweep({idleMs:60000});
+ assert.equal(manager.listSources().length,0);
+ assert.equal(closed,1);
+});
+
 test('private services verify exact registration, authorize the selected worker projects and preserve original run provenance',async t=>{
  const f=fixture(t),channels=new Map(),packets=[],starts=[];
  const health=id=>({name:'gpu-sampling-studio',execution_policy:'desktop-review-v1',root:'/owned/'+id,port:21000+id.charCodeAt(0),
@@ -464,6 +533,9 @@ test('private services verify exact registration, authorize the selected worker 
  });
  const services=createManagedComputeServices({connections:f.connections,registration,source:'fixture',transportSource:'fixture',
   prepareResources:async(_source,value)=>value});
+ const originalRef={connectionId:'conn-A',profileId:'A',profileVersion:1};
+ await assert.rejects(services.ssh(originalRef,f.stored.get('A'),()=>{},{existingOnly:true}),/managed_compute_private_service_unavailable/);
+ assert.deepEqual(starts,[]);
  const manager=f.make({services,authorizeTerminal:()=>false,authorizeRun:(_scope,run)=>run.resourceId==='ssh:A'&&run.runId==='run-on-A'});
  t.after(()=>manager.stop());
  await f.publish('A','conn-A',manager);await f.publish('B','conn-B',manager);
