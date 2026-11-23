@@ -9,6 +9,7 @@ import {frontendReviewCases} from './frontend-review-cases.mjs';
 import {frontendDesignCases} from './frontend-design-cases.mjs';
 import {frontendClusterOnboardingCases} from './frontend-cluster-onboarding-cases.mjs';
 import {frontendVisualizationExperienceCases} from './frontend-visualization-experience-cases.mjs';
+import {frontendPygasConnectionCases} from './frontend-pygas-connection-cases.mjs';
 import {frontendSettingsExperienceCases} from './frontend-settings-experience-cases.mjs';
 import {frontendModelProviderCases} from './frontend-model-provider-cases.mjs';
 import {frontendNoticeSeverityCases} from './frontend-notice-severity-cases.mjs';
@@ -29,6 +30,8 @@ import {frontendSelectedServiceRecordCases} from './frontend-selected-service-re
 import {frontendDshHistoryCases} from './frontend-dsh-history-cases.mjs';
 import {frontendManagedToolCases} from './frontend-managed-tool-cases.mjs';
 import {frontendTerminalReadObservationCases} from './frontend-terminal-read-observation-cases.mjs';
+import {frontendClusterObservationCases} from './frontend-cluster-observation-cases.mjs';
+import {frontendClusterEnvironmentCases} from './frontend-cluster-environment-cases.mjs';
 import {frontendWorkerUpgradeCases} from './frontend-worker-upgrade-cases.mjs';
 let playwright;
 try{playwright=await import('playwright');}
@@ -199,6 +202,8 @@ try{
  });
  await frontendWorkerUpgradeCases({check,out});
  await frontendTerminalReadObservationCases({check,out});
+ await frontendClusterObservationCases({check,out});
+ await frontendClusterEnvironmentCases({check,out});
  await frontendDshHistoryCases({check,out});
  await frontendManagedToolCases({check,out});
  await frontendSelectedServiceRecordCases({check,out});
@@ -210,6 +215,7 @@ try{
  await frontendReviewCases({check,out});
  await frontendClusterOnboardingCases({check,out});
  await frontendVisualizationExperienceCases({check,out});
+ await frontendPygasConnectionCases({check,out});
  await frontendSettingsExperienceCases({check,out});
  await check('wsl-inventory-visible-feedback-retry',async page=>{
   await page.evaluate(()=>{
@@ -735,8 +741,8 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
  });
  await check('workflow-remount-joins-existing-save-and-keeps-newer-parameter',async p=>{
   await p.evaluate(()=>{window.__test.task={id:'shared-outbox-ui',name:'Same task',parameters:{temperature:300},steps:[],artifacts:[],updatedAt:1};const original=window.studio.invoke;window.__saveReleases=[];window.studio.invoke=async(method,data)=>{if(method==='task.edit'){await new Promise(resolve=>window.__saveReleases.push(resolve));}return original(method,data);};window.__props={worker:false,task:window.__test.task,onError:()=>{},onRefresh:()=>{}};return window.renderTest('AgentTaskPage',window.__props);});
-  await p.getByTestId('workflow-key-parameters').getByRole('button').click();await p.locator('[data-field=temperature] input').fill('320');await p.waitForFunction(()=>window.__saveReleases.length===1);
-  await p.evaluate(()=>window.testRoot.render(null));await p.getByTestId('agent-task-page').waitFor({state:'detached'});await p.evaluate(()=>window.renderTest('AgentTaskPage',window.__props));await p.getByTestId('workflow-key-parameters').getByRole('button').click();const input=p.locator('[data-field=temperature] input');assert.equal(await input.inputValue(),'320');await input.fill('350');await p.evaluate(()=>window.__saveReleases[0]());await p.waitForFunction(()=>window.__saveReleases.length===2);assert.equal(await input.inputValue(),'350');assert.equal(await p.evaluate(()=>JSON.parse(localStorage.getItem('studio.pending.shared-outbox-ui')).temperature.value),350);
+  await p.getByTestId('workflow-key-parameters').locator('.workflow-summary-grid > button').click();await p.locator('[data-field=temperature] input').fill('320');await p.waitForFunction(()=>window.__saveReleases.length===1);
+  await p.evaluate(()=>window.testRoot.render(null));await p.getByTestId('agent-task-page').waitFor({state:'detached'});await p.evaluate(()=>window.renderTest('AgentTaskPage',window.__props));await p.getByTestId('workflow-key-parameters').locator('.workflow-summary-grid > button').click();const input=p.locator('[data-field=temperature] input');assert.equal(await input.inputValue(),'320');await input.fill('350');await p.evaluate(()=>window.__saveReleases[0]());await p.waitForFunction(()=>window.__saveReleases.length===2);assert.equal(await input.inputValue(),'350');assert.equal(await p.evaluate(()=>JSON.parse(localStorage.getItem('studio.pending.shared-outbox-ui')).temperature.value),350);
   await p.evaluate(()=>window.__saveReleases[1]());await p.waitForFunction(()=>window.__test.task.parameters.temperature===350&&localStorage.getItem('studio.pending.shared-outbox-ui')===null);await p.waitForFunction(()=>!document.querySelector('[role=alert]'));assert.equal(await input.inputValue(),'350');assert.match(await p.locator('.flow-actions').innerText(),/参数已保存/);
  });
  await check('workflow-offline-key-parameters-edit-current-draft-without-compute',async p=>{
@@ -938,7 +944,7 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   await p.clock.install();await p.evaluate(async()=>{window.pendingRuns=[];window.__test.responses={'/api/runs':()=>new Promise(resolve=>window.pendingRuns.push(resolve))};await window.renderTest('App');});await revealWorkspace(p);await connectWorker(p);await p.waitForFunction(()=>window.pendingRuns.length>0);const before=await p.evaluate(()=>window.pendingRuns.length);await p.clock.runFor(15000);assert.equal(await p.evaluate(()=>window.pendingRuns.length),before);await p.evaluate(()=>window.pendingRuns.forEach(resolve=>resolve([window.__test.run])));await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent?.includes('已连接'));
  });
  await check('cluster-edits-survive-poll',async p=>{
-  await p.clock.install();await p.evaluate(async()=>{const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:'run',onError:()=>{},onAgent:()=>{}}));});
+  await p.clock.install();await p.evaluate(async()=>{const f=window.__test;f.responses={'/api/cluster/observation':()=>({...f.run,kind:'cluster-run',cluster_id:'fixture-cluster',cluster:{scheduler:'slurm'},resources:{cpus:1},job_id:null,snapshots:[],script:'# Fixture',scientific_validation:{status:'not_run'}})};const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:'run',onError:()=>{},onAgent:()=>{}}));});
   const text=p.locator('.cluster-review textarea');await text.waitFor();await p.locator('.cluster-review input[type=checkbox]').check();await text.fill('{"temperature":345}');await p.clock.runFor(10050);assert.equal(await text.inputValue(),'{"temperature":345}');
  });
  await check('cluster-mixed-inputs-review-revision',async p=>{
@@ -1044,15 +1050,60 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   const button=p.locator('.run-actions button').filter({hasText:'续算'});await button.waitFor();assert.equal(await button.isDisabled(),true);assert.equal(await p.getByRole('dialog').count(),0);assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').length),0);assert.equal(await p.evaluate(()=>JSON.parse(localStorage.getItem('studio.resume.run')).key),'unconfirmed-fixture');
  });
  await check('resume-retry-retains-request',async p=>{
-  await p.evaluate(()=>{let count=0;window.__test.responses={'/api/run/resume':async()=>{if(++count===1)throw Error('Fixture response lost');return {...window.__test.run,id:'continuation'};}};return window.renderTest('RunDetail',{run:{...window.__test.run,status:'failed'},onRefresh:async()=>{},onError:()=>{}});});
-  const open=p.locator('.run-actions button').filter({hasText:'续算'});await open.click();await p.getByRole('dialog').locator('textarea').fill('{"checkpoint_files":["fixture.xyz"]}');await p.getByRole('dialog').getByRole('button',{name:'创建续算草稿',exact:true}).click();await p.waitForFunction(()=>window.__test.calls.some(c=>c.data?.target==='/api/run/resume'));assert.equal(await p.getByRole('dialog').locator('textarea').isDisabled(),true);await p.keyboard.press('Escape');await open.click();await p.getByRole('dialog').getByRole('button',{name:'重试同一续算请求',exact:true}).click();await p.getByRole('dialog').waitFor({state:'detached'});const requests=await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').map(c=>c.data.data));assert.equal(requests.length,2);assert.deepEqual(requests[0],requests[1]);
+  await p.evaluate(()=>{let count=0;window.__test.resumeErrors=[];window.__test.responses={'/api/run/resume':async()=>{if(++count===1)throw Error('Fixture response lost');return {...window.__test.run,id:'continuation'};}};return window.renderTest('RunDetail',{run:{...window.__test.run,status:'failed'},onRefresh:async()=>{},onError:error=>window.__test.resumeErrors.push(error.message)});});
+  const open=p.locator('.run-actions button').filter({hasText:'续算'}),dialog=p.getByRole('dialog');await open.click();
+  const checkpoint=dialog.getByRole('textbox',{name:'Checkpoint 文件 1',exact:true}),script=dialog.getByRole('textbox',{name:'续算脚本路径',exact:true}),create=dialog.getByRole('button',{name:'创建续算草稿',exact:true});
+  assert.equal(await checkpoint.inputValue(),'');assert.equal(await script.inputValue(),'');await create.click();
+  assert.equal(await p.evaluate(()=>localStorage.getItem('studio.resume.run')),null);assert.match(await p.evaluate(()=>window.__test.resumeErrors[0]),/checkpoint_files/);
+  await checkpoint.fill('state/fixture.xyz');await dialog.getByRole('button',{name:'添加 checkpoint 文件',exact:true}).click();await dialog.getByRole('textbox',{name:'Checkpoint 文件 2',exact:true}).fill('state/additional.xyz');
+  await script.fill('/fixture/continuation.py');await p.screenshot({path:path.join(out,'resume-structured-form.png')});await create.click();
+  await p.waitForFunction(()=>window.__test.calls.some(c=>c.data?.target==='/api/run/resume'));assert.equal(await checkpoint.isDisabled(),true);assert.equal(await dialog.locator('textarea').isDisabled(),true);
+  await p.keyboard.press('Escape');await open.click();await dialog.getByRole('button',{name:'重试同一续算请求',exact:true}).click();await dialog.waitFor({state:'detached'});
+  const requests=await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').map(c=>c.data.data));assert.equal(requests.length,2);assert.deepEqual(requests[0],requests[1]);
+  const {idempotency_key:key,...parameters}=requests[0].parameters;assert(key);assert.deepEqual(parameters,{checkpoint_files:['state/fixture.xyz','state/additional.xyz'],continuation_script:'/fixture/continuation.py'});
  });
  await check('resume-identity-survives-remount',async p=>{
   await p.evaluate(()=>{let count=0;window.__test.responses={'/api/run/resume':async()=>{if(++count===1)throw Error('Fixture response lost');return {...window.__test.run,id:'continuation'};}};window.resumeProps={run:{...window.__test.run,status:'failed'},onRefresh:async()=>{},onError:()=>{}};return window.renderTest('RunDetail',window.resumeProps);});
-  await p.locator('.run-actions button').filter({hasText:'续算'}).click();await p.getByRole('dialog').locator('textarea').fill('{"checkpoint_files":["fixture.xyz"]}');await p.getByRole('dialog').getByRole('button',{name:'创建续算草稿',exact:true}).click();await p.waitForFunction(()=>localStorage.getItem('studio.resume.run'));await p.evaluate(()=>window.testRoot.render(window.React.createElement('div',null,'Unmounted')));await p.locator('.run-detail').waitFor({state:'detached'});await p.evaluate(()=>window.renderTest('RunDetail',window.resumeProps));await p.locator('.run-actions button').filter({hasText:'续算'}).click();assert.equal(await p.getByRole('dialog').locator('textarea').isDisabled(),true);await p.getByRole('dialog').getByRole('button',{name:'重试同一续算请求',exact:true}).click();await p.getByRole('dialog').waitFor({state:'detached'});const requests=await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').map(c=>c.data.data));assert.deepEqual(requests[0],requests[1]);assert.equal(await p.evaluate(()=>localStorage.getItem('studio.resume.run')),null);
+  const open=p.locator('.run-actions button').filter({hasText:'续算'}),dialog=p.getByRole('dialog');await open.click();
+  await dialog.getByText('高级 JSON 配置',{exact:true}).click();const textarea=dialog.getByRole('textbox',{name:'续算参数 JSON',exact:true});
+  const json='{"checkpoint_files" : ["fixture.xyz"], "continuation_script":"/fixture/continuation.py", "custom" : { "temperature": 325, "active": false }}';
+  await textarea.fill(json);await dialog.getByRole('textbox',{name:'Checkpoint 文件 1',exact:true}).fill('state/fixture.xyz');
+  assert.equal(await textarea.inputValue(),json.replace('fixture.xyz','state/fixture.xyz'));
+  await dialog.getByRole('button',{name:'创建续算草稿',exact:true}).click();await p.waitForFunction(()=>localStorage.getItem('studio.resume.run'));
+  await p.evaluate(()=>window.testRoot.render(window.React.createElement('div',null,'Unmounted')));await p.locator('.run-detail').waitFor({state:'detached'});
+  await p.evaluate(()=>window.renderTest('RunDetail',window.resumeProps));await open.click();assert.equal(await dialog.locator('textarea').isDisabled(),true);
+  await dialog.getByRole('button',{name:'重试同一续算请求',exact:true}).click();await dialog.waitFor({state:'detached'});
+  const requests=await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').map(c=>c.data.data));assert.deepEqual(requests[0],requests[1]);
+  assert.deepEqual(requests[0].parameters.custom,{temperature:325,active:false});assert.equal(await p.evaluate(()=>localStorage.getItem('studio.resume.run')),null);
  });
  await check('resume-rejects-array-json',async p=>{
-  await p.evaluate(()=>window.renderTest('RunDetail',{run:{...window.__test.run,status:'failed'},onRefresh:async()=>{},onError:()=>{}}));await p.locator('.run-actions button').filter({hasText:'续算'}).click();await p.getByRole('dialog').locator('textarea').fill('[]');await p.getByRole('dialog').getByRole('button',{name:'创建续算草稿',exact:true}).click();assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').length),0);
+  await p.evaluate(()=>window.renderTest('RunDetail',{run:{...window.__test.run,status:'failed'},onRefresh:async()=>{},onError:()=>{}}));await p.locator('.run-actions button').filter({hasText:'续算'}).click();
+  const dialog=p.getByRole('dialog');await dialog.getByText('高级 JSON 配置',{exact:true}).click();await dialog.getByRole('textbox',{name:'续算参数 JSON',exact:true}).fill('[]');
+  assert.match(await dialog.getByRole('alert').innerText(),/续算参数必须是 JSON 对象/);
+  await dialog.getByRole('button',{name:'创建续算草稿',exact:true}).click();assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').length),0);
+ });
+ await check('resume-advanced-lossless-edits-and-send-guard',async p=>{
+  await p.evaluate(()=>{
+   const f=window.__test;f.resumeErrors=[];f.responses={'/api/run/resume':()=>({...f.run,id:'continuation'})};
+   return window.renderTest('RunDetail',{run:{...f.run,status:'failed'},onRefresh:()=>{},onError:error=>f.resumeErrors.push(error.message)});
+  });
+  await p.locator('.run-actions').getByRole('button',{name:'续算',exact:true}).click();
+  const dialog=p.getByRole('dialog');await dialog.getByText('高级 JSON 配置',{exact:true}).click();
+  const raw=dialog.getByRole('textbox',{name:'续算参数 JSON',exact:true}),create=dialog.getByRole('button',{name:'创建续算草稿',exact:true});
+  const duplicate=String.raw`{"checkpoint_files":["unused.xyz"], "checkpoint_\u0066iles":["active.xyz"], "continuation_script":"/fixture/continue.py", "custom":{"large":9007199254740993}}`;
+  await raw.fill(duplicate);const checkpoint=dialog.getByRole('textbox',{name:'Checkpoint 文件 1',exact:true});
+  assert.equal(await checkpoint.inputValue(),'active.xyz');await checkpoint.fill('state/changed.xyz');
+  const edited=duplicate.replace('active.xyz','state/changed.xyz');assert.equal(await raw.inputValue(),edited);
+  for(const [source,issue] of [[edited,'重复键'],[edited.replace('"checkpoint_files":["unused.xyz"], ',''),'精度'],['{"checkpoint_files":["state/changed.xyz"],"continuation_script":"/fixture/continue.py","custom":{"large":-0e1}}','精度']]){
+   await raw.fill(source);assert.match(await dialog.getByRole('alert').innerText(),new RegExp(issue));await create.click();
+   assert.equal(await raw.inputValue(),source);assert.equal(await raw.isEnabled(),true);
+   assert.equal(await p.evaluate(()=>localStorage.getItem('studio.resume.run')),null);
+   assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').length),0);
+  }
+  await raw.fill('{"checkpoint_files":["state/changed.xyz"],"continuation_script":"/fixture/continue.py","custom":{"large":6.02e23}}');
+  await create.click();await dialog.waitFor({state:'detached'});
+  const requests=await p.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume'));
+  assert.equal(requests.length,1);assert.deepEqual(requests[0].data.data.parameters.custom,{large:6.02e23});
  });
  await check('settings-cancel-restores-preview',async p=>{
   await p.evaluate(()=>window.renderTest('App'));await p.getByRole('button',{name:'设置',exact:true}).filter({visible:true}).click();await p.getByRole('dialog').locator('select').first().selectOption('light');await p.waitForFunction(()=>document.documentElement.dataset.theme==='light');await p.keyboard.press('Escape');await p.getByRole('dialog').waitFor({state:'detached'});assert.equal(await p.evaluate(()=>document.documentElement.dataset.theme),'dark');

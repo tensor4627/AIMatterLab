@@ -185,6 +185,38 @@ export async function frontendChatExperienceCases({check,out}){
   await page.getByText('Only history for A',{exact:true}).waitFor();await page.locator('.composer textarea').fill('Draft A');await page.evaluate(()=>window.chatRender({sessionSelection:{nonce:'B',conversation:window.__chat.conversation('B')}}));await page.getByTestId('agent-history-state').waitFor();assert.equal(await page.getByText('Only history for A',{exact:true}).count(),0);await page.locator('.composer textarea').fill('Draft B while loading');await page.waitForFunction(()=>window.__chat.failHistory);await page.evaluate(()=>window.__chat.failHistory());await page.getByTestId('agent-history-retry').waitFor();assert.equal(await page.locator('.message').count(),0);await snapshot(page,'chat-history-failed');await page.evaluate(()=>{window.__chat.retryReady=true;});await page.getByTestId('agent-history-retry').click();await page.getByText('Only history for B',{exact:true}).waitFor();assert.equal(await page.locator('.composer textarea').inputValue(),'Draft B while loading');assert.equal((await starts(page)).length,0);
  });
 
+ await check('chat-experience-draft-edits-do-not-regroup-an-unchanged-transcript',async page=>{
+  await page.evaluate(async()=>{
+   const {default:Messages}=await import('/frontend/features/conversations/ConversationMessages.tsx');
+   const {createElement:h,useState}=window.React;
+   const rows=Array.from({length:120},(_,i)=>({id:'row-'+i,itemId:'row-'+i,turnId:String(i),role:'user',text:'Message '+i}));
+   let traversals=0;
+   const messages=new Proxy(rows,{get(target,property,receiver){
+    if(property===Symbol.iterator)traversals++;
+    return Reflect.get(target,property,receiver);
+   }});
+   const actions={bookmark(){}};
+   window.__test.transcriptTraversals=()=>traversals;
+   function Fixture(){
+    const [draft,setDraft]=useState(''),[bookmarks,setBookmarks]=useState([]);
+    return h('section',null,
+     h('input',{'aria-label':'Draft',value:draft,onChange:event=>setDraft(event.target.value)}),
+     h('button',{onClick:()=>setBookmarks([{turnId:'0',itemId:'row-0'}])},'Bookmark first'),
+     h(Messages,{messages,language:'zh-CN',actions,disabled:false,canOriginalRun:false,canCluster:false,canCompute:false,bookmarks}));
+   }
+   window.testRoot.render(h(Fixture));
+  });
+  const first=page.locator('[data-message-id="row-0"]');
+  await first.waitFor();
+  const initial=await page.evaluate(()=>window.__test.transcriptTraversals());
+  assert(initial>0);
+  await page.getByRole('textbox',{name:'Draft'}).pressSequentially('new draft');
+  assert.equal(await page.evaluate(()=>window.__test.transcriptTraversals()),initial);
+  await page.getByRole('button',{name:'Bookmark first'}).click();
+  await first.getByRole('button',{name:'移除书签'}).waitFor();
+  assert((await page.evaluate(()=>window.__test.transcriptTraversals()))>initial);
+ });
+
  await check('chat-experience-long-history-preserves-selection-and-completed-dom',async page=>{
   await setup(page);await page.getByTestId('agent-connect').click();await page.locator('.composer textarea').fill('Synthetic history rendering check');await page.getByRole('button',{name:'发送',exact:true}).click();await page.waitForFunction(()=>window.__test.calls.some(call=>call.method==='agent.rpc'&&call.data.method==='turn/start'));
   await page.evaluate(()=>{for(let i=0;i<250;i++)window.__test.events.forEach(fn=>fn({provider:'codex',method:'item/agentMessage/delta',params:{threadId:'fixture-thread',itemId:'history-'+i,delta:'History '+i+' — **stable selected text** and `code`.'}}));});await page.locator('[data-message-id="history-249"]').waitFor();

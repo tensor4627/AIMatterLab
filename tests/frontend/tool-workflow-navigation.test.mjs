@@ -54,6 +54,12 @@ test('missing or changed original task/provider/thread binding never falls back 
  const h=harness({select:async()=>({...original,taskId:'changed-after-select'})});await h.open('run');await h.flush();assert.equal(h.opened.length,0);assert.equal(h.current().focus,undefined);assert.equal(h.chooseCalls.length,1);
 });
 
+test('a locator receipt for another run cannot select a conversation or focus a step',async()=>{
+ const h=harness({locate:async()=>location('other-run')});await h.open('run');await h.flush();
+ assert.equal(h.opened.length,0);assert.equal(h.current().focus,undefined);assert.equal(h.chooseCalls.length,0);
+ assert.match(String(h.errors[0]),/does not match the requested run/);
+});
+
 for(const transition of ['selection','navigation','unmount','busy'])test('a '+transition+' transition during locate suppresses late focus/error',async()=>{
  const gate=deferred(),h=harness({locate:()=>gate.promise}),pending=h.open('run');if(transition==='selection')await h.externalChoose(third);if(transition==='navigation')h.navigationSequence.current++;if(transition==='unmount')h.unmount();if(transition==='busy')h.render({busy:true});gate.resolve(location());await pending;await h.flush();assert.equal(h.opened.length,0);assert.equal(h.current().focus,undefined);assert.equal(h.errors.length,0);
 });

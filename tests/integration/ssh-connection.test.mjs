@@ -11,6 +11,8 @@ import {assertRendererWorkerRoute,assertWorkerRoute} from "../../contracts/trans
 import {agentHarness} from "../helpers/agent-hooks.mjs";
 import {appWorkerHarness} from "../helpers/app-worker-hooks.mjs";
 import {memoryStorage} from "../helpers/agent-hooks.mjs";
+import {ObservedRead} from '../../frontend/api/observed-read.mjs';
+import * as environmentDraft from '../../frontend/features/cluster/cluster-environment-draft.ts';
 
 const deferred=()=>{let resolve,reject;return {promise:new Promise((done,fail)=>{resolve=done;reject=fail;}),resolve:value=>resolve(value),reject:error=>reject(error)};};
 const profile={id:'saved',version:1,name:'Fixture',host:'fixture.invalid',username:'fixture',port:2201,ssh_client:'/usr/bin/ssh',identity_file:'/fixture/reference',proxy_jump:[],via:[],auth_mode:'interactive'};
@@ -90,15 +92,17 @@ test('project permissions from resource tool setup stay on the reviewed SSH brid
  assert.deepEqual(calls,[{method:'POST',target:'/api/projects',data:{name:'Reviewed project'}}]);
 });
 
-function clusterHarness({serviceVersion='current',override,runPage=false,selectedClusterId}={}){
- const hooks=[],effects=[],calls=[],auth=[],errors=[],terminal=[],updates=[],agents=[],props={id:'prepared-run',worker:true,serviceVersion,selectedClusterId,settings:{},project:{id:'project',name:'Fixture project',policy:{clusters:['other'],input_roots:['/fixture'],max_seconds:60}},onAuthenticate:r=>auth.push(r),onOpenConnections:source=>updates.push(source),onConnectCompute:async()=>updates.push('guide'),onTerminal:id=>terminal.push(id),onError:e=>errors.push(e),onRefresh:()=>{},onAgent:text=>agents.push(text),onRun:()=>{}};
+function clusterHarness({serviceVersion='current',override,runPage=false,selectedClusterId,sourceId}={}){
+ const hooks=[],effects=[],calls=[],auth=[],errors=[],terminal=[],updates=[],agents=[],props={id:'prepared-run',worker:true,serviceVersion,selectedClusterId,sourceId,settings:{},project:{id:'project',name:'Fixture project',policy:{clusters:['other'],input_roots:['/fixture'],max_seconds:60}},onAuthenticate:r=>auth.push(r),onOpenConnections:source=>updates.push(source),onConnectCompute:async()=>updates.push('guide'),onTerminal:id=>terminal.push(id),onError:e=>errors.push(e),onRefresh:()=>{},onAgent:text=>agents.push(text),onRun:()=>{}};
  let stored={...profile,environment:{executables:{python:'/usr/bin/python3'}},scheduler:'slurm',remote_root:'~/fixture-runs',read_roots:[],queue:'fixture',activation:'',limits:{cpus:1,gpus:0,memory_mb:1024}},cursor=0,dirty=false,tree,disposed=false;
  const useState=initial=>{const i=cursor++;if(!hooks[i])hooks[i]={value:typeof initial==='function'?initial():initial};return [hooks[i].value,value=>{hooks[i].value=typeof value==='function'?value(hooks[i].value):value;dirty=true;}];},useRef=value=>{const i=cursor++;return hooks[i]??(hooks[i]={current:value});},useEffect=(fn,deps)=>{const i=cursor++,previous=hooks[i];if(!previous||deps.some((v,k)=>v!==previous.deps[k])){hooks[i]={deps,cleanup:previous?.cleanup};effects.push(()=>{hooks[i].cleanup?.();hooks[i].cleanup=fn();});}};
  const readyRun={kind:'cluster-run',id:'prepared-run',name:'Fixture run',engine:'pydyn.md',project_id:'project',cluster_id:'saved',status:'ready',snapshots:[],inputs:{},parameters:{},directory:'/fixture-run',resources:{},max_seconds:60,validation:{status:'passed'},scientific_validation:{status:'not_run'},cluster:{scheduler:'slurm'},job_id:null,script:'# fixture'};
+ const timers=new Map();let nextTimer=0;
+ class ManualObservedRead extends ObservedRead{constructor(read,publish,options){super(read,publish,{...options,schedule:callback=>{const number=++nextTimer;timers.set(number,callback);return number;},unschedule:number=>timers.delete(number)});}}
  const api=async(method,target,data)=>{calls.push({method,target,data});if(override){const result=override(method,target,data);if(result!==undefined)return await result;}if(['/api/cluster/observation','/api/cluster/status','/api/cluster/validate'].includes(target))return structuredClone(readyRun);if(target==='/api/clusters'&&method==='GET')return [{id:stored.id,name:stored.name,version:stored.version,auth_mode:stored.auth_mode}];if(target==='/api/cluster-runs')return [];if(target==='/api/cluster/profile')return structuredClone(stored);if(target==='/api/clusters'&&method==='POST'){stored={...structuredClone(data),version:stored.version+1};return {id:stored.id,version:stored.version};}if(target==='/api/projects')return method==='GET'?[props.project]:data;if(target==='/api/cluster/probe')return {status:'passed',ssh_status:'passed',scheduler_status:'passed',observed_at:123};if(target==='/api/cluster/test')return {status:'passed'};throw Error('Unexpected cluster fixture route '+target);};
- const jsx=(type,props)=>({type,props}),require=name=>name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:["../../api/worker","../../api/studio"].includes(name)?{api,invoke:async(method,data)=>{calls.push({method,data});const result=override?.('IPC',method,data);if(result!==undefined)return await result;if(method==='ssh.existing')return [];throw Error('No privileged shortcut');}}:name==="../../ui/i18n"?{t:value=>value}:new Proxy({},{get:(_t,key)=>String(key)});
+ const jsx=(type,props)=>({type,props}),require=name=>name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:["../../api/worker","../../api/studio"].includes(name)?{api,invoke:async(method,data)=>{calls.push({method,data});const result=override?.('IPC',method,data);if(result!==undefined)return await result;if(method==='ssh.existing')return [];throw Error('No privileged shortcut');}}:name==='./ClusterEnvironmentEditor'?{__esModule:true,default:'ClusterEnvironmentEditor'}:name==='./cluster-environment-draft'?environmentDraft:name==='../../api/observed-read.mjs'?{ObservedRead:ManualObservedRead}:name==="../../ui/i18n"?{t:value=>value}:new Proxy({},{get:(_t,key)=>String(key)});
  const compiled=ts.transpileModule(fs.readFileSync(new URL("../../frontend/features/cluster/ClusterPage.tsx",import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,module={exports:{}};new Function('require','module','exports','setInterval','clearInterval',compiled)(require,module,module.exports,()=>1,()=>{});
- function render(){cursor=0;dirty=false;tree=(runPage?module.exports.ClusterRunPage:module.exports.default)(props);}const all=node=>Array.isArray(node)?node.flatMap(all):node&&typeof node==='object'?[node,...all(node.props?.children)]:[],text=node=>Array.isArray(node)?node.map(text).join(''):node&&typeof node==='object'?text(node.props?.children):node==null||typeof node==='boolean'?'':String(node);function find(predicate){const value=all(tree).find(predicate);assert(value,'Cluster source node missing');return value;}const button=label=>find(node=>node.type==='button'&&text(node)===label);async function flush(){for(let i=0;i<22;i++){while(effects.length)effects.shift()();await new Promise(resolve=>setImmediate(resolve));if(dirty&&!disposed)render();}}function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}render();return {calls,auth,errors,terminal,updates,agents,props,find,text,button,flush,unmount,render};
+ function render(){cursor=0;dirty=false;tree=(runPage?module.exports.ClusterRunPage:module.exports.default)(props);}const all=node=>Array.isArray(node)?node.flatMap(all):node&&typeof node==='object'?[node,...all(node.props?.children)]:[],text=node=>Array.isArray(node)?node.map(text).join(''):node&&typeof node==='object'?text(node.props?.children):node==null||typeof node==='boolean'?'':String(node);function find(predicate){const value=all(tree).find(predicate);assert(value,'Cluster source node missing');return value;}const button=label=>find(node=>node.type==='button'&&text(node)===label);async function flush(){for(let i=0;i<22;i++){while(effects.length)effects.shift()();await new Promise(resolve=>setImmediate(resolve));if(dirty&&!disposed)render();}}function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}render();return {readyRun,timers,async poll(){const entries=[...timers];for(const [number,callback] of entries){timers.delete(number);callback();}await flush();},calls,auth,errors,terminal,updates,agents,props,find,text,button,flush,unmount,render};
 }
 test('actual ClusterPage refuses dirty authentication, restores saved identity, and does not save or grant to authenticate',async()=>{const h=clusterHarness();await h.flush();h.button('打开私有认证').props.onClick();assert.equal(h.auth.length,1);assert.deepEqual(h.auth[0].expected,sshConnectionReview(profile));h.find(node=>node.props?.['data-testid']==='ssh-host').props.onChange({target:{value:'edited.invalid'}});await h.flush();h.button('打开私有认证').props.onClick();await h.flush();assert.equal(h.auth.length,1);assert(h.text(h.find(node=>node.props?.className==='cluster-footer')).includes('未保存'));h.button('恢复已保存配置').props.onClick();await h.flush();h.button('打开私有认证').props.onClick();assert.equal(h.auth.length,2);assert.equal(h.auth[1].expected.host,profile.host);assert(!h.calls.some(c=>c.target==='/api/clusters'&&c.method==='POST'||c.target==='/api/projects'));assert.equal(h.terminal.length,0);h.unmount();});
 test('actual ClusterPage Save and Grant are separate explicit actions and preserve the full existing policy',async()=>{const h=clusterHarness();await h.flush();h.button('保存连接').props.onClick();await h.flush();assert.equal(h.calls.filter(c=>c.target==='/api/clusters'&&c.method==='POST').length,1);assert(!h.calls.some(c=>c.target==='/api/projects'));h.button('允许当前项目使用此连接').props.onClick();await h.flush();const granted=h.calls.find(c=>c.target==='/api/projects'&&c.method==='POST');assert(granted);assert.equal(granted.data.policy.max_seconds,60);assert.deepEqual(granted.data.policy.input_roots,['/fixture']);assert.deepEqual(granted.data.policy.clusters,['other','saved']);assert.equal(h.errors.length,0);h.unmount();});
@@ -158,6 +162,19 @@ test('main task resolver scopes only explicit original task artifacts and standa
 test('ClusterRunPage unknown record without job ID retains original-run authentication action without replay',async()=>{const h=clusterHarness({runPage:true,override:(_m,target)=>target==='/api/cluster/observation'?{id:'prepared-run',status:'unknown',job_id:null,submit_attempted:true,snapshots:[],cluster:{scheduler:'slurm'},validation:{status:'passed'},scientific_validation:{status:'not_run'},connection_action:{kind:'authenticate_original_run',code:'needs_human_auth',runId:'prepared-run'}}:undefined});await h.flush();h.button('核对原作业连接').props.onClick();assert.deepEqual(h.updates,[{runId:'prepared-run'}]);assert(!h.calls.some(c=>c.target==='/api/cluster/submit'||c.target==='/api/cluster/profile'));assert.equal(h.errors.length,0);h.unmount();});
 test('ClusterRunPage first status auth rejection still gives direct original-run review instead of endless loading',async()=>{const h=clusterHarness({runPage:true,override:(_m,target)=>{if(target==='/api/cluster/observation')throw Error('needs_human_auth');}});await h.flush();h.button('核对原作业连接').props.onClick();assert.deepEqual(h.updates,[{runId:'prepared-run'}]);assert.equal(h.errors.length,0);assert(!h.calls.some(c=>c.target==='/api/cluster/submit'));h.unmount();});
 test('ClusterPage requested source selects exact second profile and never substitutes first when missing',async()=>{for(const wanted of ['saved','missing']){const h=clusterHarness({selectedClusterId:wanted,override:(_m,target)=>target==='/api/clusters'?[{id:'other',name:'Other'},{id:'saved',name:'Saved'}]:undefined});await h.flush();const loads=h.calls.filter(c=>c.target==='/api/cluster/profile');if(wanted==='saved'){assert(loads.length>0);assert(loads.every(c=>c.data.cluster_id==='saved'));h.button('打开私有认证').props.onClick();assert.equal(h.auth[0].clusterId,'saved');}else{assert.equal(loads.length,0);assert.equal(h.auth.length,0);}h.unmount();}});
+test('late discovery of a saved connection does not replace an unsaved environment draft',async()=>{
+ const pending=deferred(),h=clusterHarness({override:(_method,target)=>target==='/api/clusters'?pending.promise:undefined});
+ try{
+  await h.flush();h.button('环境探测').props.onClick();await h.flush();
+  const editor=()=>h.find(node=>node.type==='ClusterEnvironmentEditor');
+  const incomplete='{"executables":{"python":"/fixture';
+  editor().props.onText(incomplete);await h.flush();
+  pending.resolve([{id:'saved',name:'Saved profile'}]);await h.flush();
+  assert.equal(editor().props.draft.text,incomplete);
+  assert.equal(editor().props.draft.rawIssue,'syntax');
+  assert(!h.calls.some(call=>call.target==='/api/cluster/profile'));
+ }finally{h.unmount();}
+});
 test('Agent original-run action navigates exact run, keeps draft, and never opens authentication implicitly',async()=>{const actions=[],h=agentHarness({props:{onOpenOriginalRun:id=>actions.push(id),onOpenCluster:()=>actions.push('wrong-generic')}});await h.flush();h.type('Unsent original scientific question');h.emit({method:'item/completed',params:{item:{id:'original-monitor',type:'mcpToolCall',tool:'read_cluster_run',status:'completed',result:{content:[{type:'text',text:JSON.stringify({status:'unknown',job_id:null,connection_action:{kind:'authenticate_original_run',code:'needs_human_auth',runId:'prepared-run'}})}]}}}});await h.flush();h.click('agent-open-original-run');assert.deepEqual(actions,['prepared-run']);assert.equal(h.textarea().props.value,'Unsent original scientific question');assert(!h.calls.some(c=>c.method.startsWith('ssh.auth.')||c.method==='worker.connect'||c.method==='agent.rpc'&&c.data.method==='turn/start'));h.unmount();});
 test('actual App standalone run review captures current owner but never enables guessed worker update or rebinding',async()=>{const storage=memoryStorage();storage.setItem('studio.section','cluster-run:prepared-run');const h=appWorkerHarness({storage});await h.flush();const run=h.find(n=>n.type==='./ClusterRunPage'&&n.props.id==='prepared-run');run.props.onOpenConnections({runId:'prepared-run'});await h.flush();const guide=h.find(n=>n.type==='./SshConnectionGuide');assert.deepEqual(guide.props.request,{kind:'original-run',runId:'prepared-run',owner:null});assert.equal(guide.props.onWorkerUpdate,undefined);assert(!h.calls.some(c=>c.method==='worker.connect'||c.method==='conversation.select'||c.method==='task.bind'));h.unmount();});
 
@@ -229,4 +246,144 @@ test('key-mode ClusterPage uses compact default-auth label and reserves 2FA expl
 
 test('read-only ClusterRunPage preserves status and rejects stale submit or edit callbacks',async()=>{
  const h=clusterHarness({runPage:true});try{await h.flush();const submit=h.button('审阅完成，提交到集群').props.onClick;h.props.readOnly=true;h.render();await h.flush();assert.equal(h.button('审阅完成，提交到集群').props.disabled,true);submit();h.find(n=>n.type==='input'&&n.props.type==='checkbox').props.onChange({target:{checked:true}});await h.flush();assert(!h.calls.some(c=>['/api/cluster/submit','/api/cluster/revise'].includes(c.target)));assert.equal(h.find(n=>n.type==='textarea').props.readOnly,true);assert(h.calls.some(c=>c.target==='/api/cluster/observation'));assert(!h.calls.some(c=>c.target==='/api/cluster/status'));assert(h.text(h.find(n=>n.props?.['data-testid']==='run-readonly-observation')).includes('提交、续算'));}finally{h.unmount();}
+});
+
+for(const status of ['succeeded','failed','cancelled'])test('an observed '+status+' cluster run stops periodic reads but allows a manual check with logs',async()=>{
+ const h=clusterHarness({runPage:true,override:(_method,path)=>{
+  if(['/api/cluster/observation','/api/cluster/status'].includes(path))return {...h.readyRun,status,job_id:'1'};
+  if(path==='/api/cluster/log')return {text:'Synthetic log'};
+ }});
+ try{
+  await h.flush();await h.poll();
+  assert.equal(h.calls.filter(call=>call.target==='/api/cluster/observation').length,1);
+  assert.equal(h.timers.size,0);
+  h.button('核对作业与日志').props.onClick();await h.flush();
+  assert.equal(h.calls.filter(call=>call.target==='/api/cluster/status').length,1);
+  assert.equal(h.calls.filter(call=>call.target==='/api/cluster/log').length,1);
+  assert.equal(h.timers.size,0);
+ }finally{h.unmount();}
+});
+
+test('a cancellation request and unknown job remain observable until the worker confirms cancellation',async()=>{
+ let reads=0;
+ const h=clusterHarness({runPage:true,override:(_method,path)=>path==='/api/cluster/observation'?{
+  ...h.readyRun,job_id:'2',status:reads++?'cancelled':'unknown',cancellation:{status:'requested',signal_sent:true}
+ }:undefined});
+ try{
+  await h.flush();
+  assert.match(h.text(h.find(node=>node.props?.['data-testid']==='cluster-cancellation-receipt')),/等待作业的最终状态/);
+  assert.equal(h.timers.size,1);
+  await h.poll();
+  assert.equal(h.timers.size,0);
+  assert.equal(h.text(h.find(node=>node.props?.className==='tag')),'cancelled');
+  assert(!h.calls.some(call=>call.target==='/api/cluster/submit'||call.target==='/api/cluster/cancel'));
+ }finally{h.unmount();}
+});
+
+test('cluster monitor finds new runs after all earlier runs complete, pauses when hidden, and rejects a former source failure',async()=>{
+ const old=deferred();let reads=0;
+ const h=clusterHarness({sourceId:'service-a',override:(_method,path)=>{
+  if(path==='/api/cluster-runs'){
+   const terminal={...h.readyRun,status:'succeeded'};
+   switch(++reads){
+    case 1:return [terminal];
+    case 2:return [terminal,{...terminal,id:'added',name:'New fixture',status:'running'}];
+    case 3:return old.promise;
+    default:return [{...terminal,name:'Current source fixture'}];
+   }
+  }
+ }});
+ try{
+  await h.flush();
+  assert.equal(reads,0);
+  h.button('作业监视').props.onClick();await h.flush();
+  assert.equal(reads,1);
+  await h.poll();
+  assert.equal(reads,2);
+  assert.match(h.text(h.find(node=>node.props?.className==='cluster-run-row'&&h.text(node).includes('New fixture'))),/New fixture/);
+  await h.poll();assert.equal(reads,3);
+  h.props.visible=false;h.render();await h.flush();
+  assert.equal(h.timers.size,0);
+  h.props.sourceId='service-b';h.props.visible=true;h.render();await h.flush();
+  old.reject(Error('expired fixture read'));await h.flush();
+  assert.equal(reads,4);
+  assert.equal(h.calls.filter(call=>call.target==='/api/clusters').length,2);
+  assert.match(h.text(h.find(node=>node.props?.className==='cluster-run-row')),/Current source fixture/);
+  assert.equal(h.find(node=>node.type?.name==='ClusterObservationStatus').props.error,false);
+ }finally{h.unmount();}
+});
+
+test('same-source disconnect retains the last run and fences read failures, and a source switch retires both the run and its diagnostics',async()=>{
+ const old=deferred(),replacement=deferred();let reads=0;
+ const h=clusterHarness({runPage:true,sourceId:'service-a',override:(_method,path)=>{
+  if(path!=='/api/cluster/observation')return;
+  if(++reads===1)return {...h.readyRun,status:'running'};
+  return reads===2?old.promise:replacement.promise;
+ }});
+ try{
+  await h.flush();await h.poll();
+  h.props.connected=false;h.render();await h.flush();
+  assert.equal(h.text(h.find(node=>node.type==='h1')),'Fixture run');
+  assert.equal(h.button('核对作业与日志').props.disabled,true);
+  assert.equal(h.find(node=>node.type?.name==='ClusterObservationStatus').props.connected,false);
+  h.props.sourceId='service-b';h.props.connected=true;h.render();await h.flush();
+  assert.throws(()=>h.find(node=>node.type==='h1'));
+  replacement.resolve({...h.readyRun,name:'Other source',status:'succeeded'});
+  old.reject(Error('needs_human_auth'));
+  await h.flush();
+  assert.equal(h.text(h.find(node=>node.type==='h1')),'Other source');
+  assert.throws(()=>h.button('核对原作业连接'));
+  assert.deepEqual(h.errors,[]);
+ }finally{h.unmount();}
+});
+
+test('an older worker uses its local job list, while a late unsupported-route error cannot target the replacement worker',async()=>{
+ const rejectedOld=deferred();let queries=0;
+ const h=clusterHarness({runPage:true,sourceId:'service-a',override:(_method,path)=>{
+  if(path==='/api/cluster/observation'){
+   if(++queries===1)return Promise.reject(Error('unknown route'));
+   if(queries===2)return rejectedOld.promise;
+   return {...h.readyRun,name:'Replacement source',status:'succeeded'};
+  }
+  if(path==='/api/cluster-runs')return [{...h.readyRun,name:'Older worker record',status:'running'}];
+ }});
+ try{
+  await h.flush();assert.equal(h.text(h.find(node=>node.type==='h1')),'Older worker record');
+  await h.poll();assert.equal(queries,2);
+  h.props.sourceId='service-b';h.render();await h.flush();
+  rejectedOld.reject(Error('unknown route'));await h.flush();
+  assert.equal(h.text(h.find(node=>node.type==='h1')),'Replacement source');
+  assert.equal(h.calls.filter(call=>call.target==='/api/cluster-runs').length,1);
+  assert(!h.calls.some(call=>call.target==='/api/cluster/status'));
+ }finally{h.unmount();}
+});
+
+for(const startsOnline of [false,true])test('App preserves original worker restoration '+(startsOnline?'with a retained cluster record':'before the first cluster read'),async()=>{
+ const storage=memoryStorage();let online=startsOnline;
+ const chat={id:'codex:cluster-owner',provider:'codex',threadId:'cluster-owner',taskId:'original-flow',projectId:'project'};
+ const task={id:chat.taskId,provider:chat.provider,threadId:chat.threadId,artifacts:[{kind:'cluster-run',id:'prepared-run'}],deployment:{workerBinding:{distribution:'Fixture',root:'/original',port:8767}}};
+ const sourceId='a'.repeat(64);
+ storage.setItem('studio.conversation',chat.id);storage.setItem('studio.section','cluster-run:prepared-run');
+ const h=appWorkerHarness({storage,override:(method,data,standard)=>{
+  if(method==='conversation.list')return [chat];
+  if(method==='conversation.select')return chat;
+  if(method==='task.list')return [task];
+  if(method==='worker.status'||method==='worker.restore')return online?{status:'connected',taskId:task.id,conversationId:chat.id,sourceId,checkedAt:1}:{status:'disconnected',taskId:task.id,checkedAt:2};
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();
+  h.find(node=>node.type==='./Agent').props.onOpenOriginalRun('prepared-run');
+  await h.flush();
+  if(startsOnline){
+   assert.equal(h.find(node=>node.type==='./ClusterRunPage').props.connected,true);
+   online=false;h.emit({method:'studio/workerConnected'});await h.flush();
+   const retained=h.find(node=>node.type==='./ClusterRunPage');
+   assert.equal(retained.props.connected,false);assert.equal(retained.props.sourceId,sourceId);
+  }else assert.throws(()=>h.find(node=>node.type==='./ClusterRunPage'));
+  h.find(node=>node.type==='button'&&h.text(node)==='恢复原作业服务').props.onClick();
+  await h.flush();
+  assert.equal(h.find(node=>node.type==='./ComputeConnectionGuide').props.taskId,task.id);
+  assert(!h.calls.some(call=>call.method==='worker.connect'||/\/(submit|cancel)$/.test(call.data?.target||'')));
+ }finally{h.unmount();}
 });

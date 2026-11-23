@@ -63,6 +63,22 @@ test('old-run collection cannot replace a new run or clear its pending feedback'
  }finally{h.unmount();}
 });
 
+test('result collection from an earlier connection cannot publish after reconnecting to the same run id',async()=>{
+ const old=deferred(),current=deferred();let collections=0;
+ const h=mount('features/cluster/ClusterResults.tsx',{run:{id:'same-run',status:'succeeded'},connected:true,workerGeneration:1},()=>++collections===1?old.promise:current.promise);
+ try{
+  await h.flush();h.button('回收结果').props.onClick();await h.flush();
+  h.render({connected:false});await h.flush();
+  const offline=h.button('回收结果');assert.equal(offline.props.disabled,true);offline.props.onClick();
+  assert.equal(h.calls.length,1);
+  h.render({connected:true,workerGeneration:2});await h.flush();h.button('回收结果').props.onClick();await h.flush();
+  old.resolve(collection);await h.flush();
+  assert.equal(h.button('回收中…').props.disabled,true);assert.doesNotMatch(h.text(),/回收完成/);
+  current.resolve({...collection,files:[]});await h.flush();
+  assert.match(h.text(),/回收完成/);assert.equal(h.errors.length,0);
+ }finally{h.unmount();}
+});
+
 test('unmounted result requests never report late errors',async()=>{
  const gate=deferred(),h=mount('features/cluster/ClusterResults.tsx',{run:{id:'run-a',status:'succeeded'}},()=>gate.promise);await h.flush();h.button('回收结果').props.onClick();await h.flush();h.unmount();gate.reject(Error('LATE ERROR'));await h.flush();assert.deepEqual(h.errors,[]);
 });

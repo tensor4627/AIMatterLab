@@ -19,15 +19,28 @@ function Chart({text,name,viewKey}:{text:string;name:string;viewKey?:string}){
  const [font,setFont]=useState(13),[light,setLight]=useState(document.documentElement.dataset.theme==='light');
  useEffect(()=>{const update=()=>{setFont(pixelFontSize(12,parseFloat(document.documentElement.style.getPropertyValue('--ui-min-font'))||12,parseFloat(document.documentElement.style.getPropertyValue('--ui-scale'))||1));setLight(document.documentElement.dataset.theme==='light');};update();window.addEventListener('studio:appearance',update);return()=>window.removeEventListener('studio:appearance',update);},[]);
  const ref=useRef<HTMLDivElement>(null),chartRef=useRef<echarts.ECharts|null>(null),chartMinHeight=Math.ceil(Math.max(260,font*20)),fontRef=useRef(font);fontRef.current=font;
+ const axisTicks=useRef<ReturnType<typeof tickCounts>|undefined>(undefined);
  const source=viewKey||name,restore=useRef<ChartView|undefined>(undefined);
  const data=useMemo(()=>parseChartData(text,name),[text,name]);
  useEffect(()=>{
   if(!ref.current||!data.hasData)return;
-  const chart=echarts.init(ref.current);chartRef.current=chart;restore.current=views.get(source);
+  const chart=echarts.init(ref.current);chartRef.current=chart;restore.current=views.get(source);axisTicks.current=undefined;
   const remember=()=>{const option=chart.getOption() as any;if(!option)return;views.set(source,{zoom:(option.dataZoom||[]).map((zoom:any)=>({start:zoom.start,end:zoom.end})),selected:{...option.legend?.[0]?.selected}});};
   chart.on('datazoom',remember);chart.on('legendselectchanged',remember);
-  const observer=new ResizeObserver(()=>{chart.resize();if(chart.getOption()?.xAxis){const ticks=tickCounts(chart,fontRef.current);chart.setOption({xAxis:{splitNumber:ticks.x},yAxis:{splitNumber:ticks.y}});}});observer.observe(ref.current);
-  return()=>{remember();observer.disconnect();chart.dispose();chartRef.current=null;};
+  let resizeFrame:number|null=null;
+  const observer=new ResizeObserver(()=>{
+   if(resizeFrame!==null||chart.isDisposed())return;
+   resizeFrame=requestAnimationFrame(()=>{
+    resizeFrame=null;
+    chart.resize();
+    const previous=axisTicks.current,ticks=tickCounts(chart,fontRef.current);
+    if(!previous||previous.x===ticks.x&&previous.y===ticks.y)return;
+    chart.setOption({xAxis:{splitNumber:ticks.x},yAxis:{splitNumber:ticks.y}});
+    axisTicks.current=ticks;
+   });
+  });
+  observer.observe(ref.current);
+  return()=>{observer.disconnect();if(resizeFrame!==null)cancelAnimationFrame(resizeFrame);remember();chart.dispose();chartRef.current=null;};
  },[data.hasData,source]);
  useEffect(()=>{
   const chart=chartRef.current;if(!chart||!data.hasData)return;
@@ -39,6 +52,7 @@ function Chart({text,name,viewKey}:{text:string;name:string;viewKey?:string}){
    xAxis:{axisLabel:{fontSize:font,hideOverlap:true},nameTextStyle:{fontSize:font},splitNumber:ticks.x,type:'value',scale:true,name:neb?tr('图像序号'):data.xLabel??tr('数据行序号'),nameLocation:'middle',nameGap:Math.ceil(font*1.8),splitLine:{lineStyle:{color:grid}}},
    yAxis:{name:neb?tr('相对目标值 (eV)'):undefined,nameLocation:'middle',nameGap:Math.ceil(font*2.8),nameTextStyle:{fontSize:font},axisLabel:{fontSize:font,hideOverlap:true},splitNumber:ticks.y,type:'value',scale:true,splitLine:{lineStyle:{color:grid}}},
    series:data.series.map((series,index)=>({id:index+':'+series.name,name:neb?tr('相对目标值 (eV)'):series.name,type:'line',showSymbol:false,connectNulls:false,data:series.points.map(point=>[point.x,point.y])}))},{replaceMerge:['series']});
+  axisTicks.current=ticks;
  },[data,source,font,light]);
  const notes=[data.cutLines&&'仅前 4000 行',data.cutColumns&&'仅前 6 条曲线'].filter(Boolean);
  return <div className="chart-wrap"><div className="chart-note"><Tooltip content={tr("单位以引擎输出定义为准。")}>{name}</Tooltip></div>{notes.length>0&&<div className="chart-note">{tr('已截断：')}{notes.map(note=>tr(note)).join('，')}</div>}{data.ignoredColumns.length>0&&<div className="chart-note">{tr('忽略非数值列：')}{data.ignoredColumns.map(column=>column.name).join('，')}</div>}{data.skippedRows>0&&<div className="chart-note">{tr('已跳过不齐或非法行：')}{data.skippedRows}</div>}{data.missingValues>0&&<div className="chart-note">{tr('非数值单元格留空；不插值')}</div>}{data.hasData?<div ref={ref} className="chart" style={{minHeight:chartMinHeight}} role="img" aria-label={name}/>:<div className="chart-empty muted">{tr(data.structure?'结构文件请使用结构预览':'没有可绘制的数值列')}</div>}</div>;

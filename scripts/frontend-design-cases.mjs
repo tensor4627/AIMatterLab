@@ -15,6 +15,7 @@ export async function frontendDesignCases({check,out}) {
       await page.getByTestId('priority-'+mode).click();
     }
     async function expectSplit(chatFirst){
+      await page.waitForFunction(()=>Array.from(document.querySelectorAll('.workspace-panels>.main-column,.workspace-panels>.agent-panel')).filter(pane=>pane.getClientRects().length).length===2);
       const a=await agent.boundingBox(),w=await workspace.boundingBox();
       assert(a&&w);
       assert.equal(a.x<w.x,chatFirst);
@@ -61,6 +62,20 @@ export async function frontendDesignCases({check,out}) {
       assert.equal(await help.getAttribute('aria-describedby'),await popup.getAttribute('id'));
       const rect=await popup.boundingBox();
       assert(rect && rect.x>=0 && rect.x+rect.width<=width && rect.y>=0 && rect.y+rect.height<=768);
+      const aboveNotifications=await popup.evaluate(tip=>{
+        const notification=document.createElement('div');
+        const box=tip.getBoundingClientRect();
+        Object.assign(notification.style,{position:'fixed',left:box.left+'px',top:box.top+'px',right:'auto',bottom:'auto',
+          width:box.width+'px',height:box.height+'px',transform:'none'});
+        document.body.append(notification);
+        try{
+          return ['toast notice-surface','codex-version-notice'].every(classes=>{
+            notification.className=classes;
+            return document.elementFromPoint(box.left+box.width/2,box.top+box.height/2)===tip;
+          });
+        }finally{notification.remove();}
+      });
+      assert.equal(aboveNotifications,true,'help remains readable when a later notification overlaps');
       await page.screenshot({path:path.join(out,'settings-help-'+theme+'.png')});
       await page.keyboard.press('Escape');
       await popup.waitFor({state:'hidden'});

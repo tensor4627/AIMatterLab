@@ -20,6 +20,9 @@ import {loadConversationSelection} from './conversation-selection-hooks.mjs';
 const source=fs.readFileSync(new URL('../../frontend/app/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const connectionUi={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/compute/ssh-connection-types.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(connectionUi,connectionUi.exports);
+const compileRenderer=file=>ts.transpileModule(fs.readFileSync(new URL('../../frontend/'+file,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+const preferencesCompiled=compileRenderer('ui/preference-storage.ts');
+const layoutCompiled=compileRenderer('app/useWorkspaceLayout.ts');
 const guideProgressCompiled=ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/onboarding/cluster-guide-progress.ts',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const reviewSource=ts.createSourceFile('RunReview.tsx',fs.readFileSync(new URL('../../frontend/features/runs/RunReview.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const taskModuleSource=reviewSource.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='taskModule').getText(reviewSource).replace(/^export /,'');
@@ -48,6 +51,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
  const conversationSelection=loadConversationSelection({react:{useState,useRef,useEffect},storage});
  const loadedNavigation=new Map();
  const guideProgress={exports:{}};new Function('module','exports','localStorage',guideProgressCompiled)(guideProgress,guideProgress.exports,storage);
+ const preferences={exports:{}};new Function('exports','localStorage',preferencesCompiled)(preferences.exports,storage);
  function loadNavigation(file){
   if(loadedNavigation.has(file))return loadedNavigation.get(file).exports;const module={exports:{}};loadedNavigation.set(file,module);
   new Function('require','module','exports','window','crypto',navigationModules[file])(name=>{
@@ -58,6 +62,8 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
   },module,module.exports,window,{randomUUID});return module.exports;
  }
  const require=name=>{
+  if(name==='../ui/preference-storage')return preferences.exports;
+  if(name==='./useWorkspaceLayout')return layout.exports;
   if(name.endsWith('/SoftwareUpdate'))return {useWorkspaceUpdate:()=>({state:{phase:'disabled'}})};
   if(name==='../features/compute/ssh-connection-types')return connectionUi.exports;
   if(name==='../features/onboarding/cluster-guide-progress')return guideProgress.exports;
@@ -85,11 +91,12 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
   if(["../features/compute/compute-connection-command.mjs"].includes(name))return computeCommand;
   if(name==="../../package.json")return {version:'source-fixture'};
   if(["../api/worker","../api/studio","../ui/presentation/paths","../ui/presentation/engines","../../api/worker"].includes(name))return {invoke,api:(method,target,data)=>invoke('worker.request',{method,target,data}),readWorkerStatus:()=>invoke('worker.status'),restoreWorker:owner=>invoke('worker.restore',typeof owner==='string'?{taskId:owner}:owner),engines:[],wslPath:value=>value};
-  if(["../ui/i18n","../../ui/i18n"].includes(name))return {t:value=>value,tr:value=>value,setLanguage:()=>{}};
+  if(["../ui/i18n","../../ui/i18n"].includes(name))return {t:value=>value,tr:value=>value,getLanguage:()=>'zh-CN',setLanguage:()=>{}};
   return new Proxy({default:'./'+name.split('/').pop()},{get:(target,key)=>target[key]??String(key)});
  };
  const module={exports:{}},document={documentElement:{dataset:{},style:{setProperty(){}}},addEventListener(){},removeEventListener(){},querySelector(){return null;}};
  const window={innerWidth:width,dispatchEvent(){},addEventListener(){},removeEventListener(){},studio:{invoke,onEvent:fn=>{listeners.push(fn);return()=>listeners.splice(listeners.indexOf(fn),1);}}};
+ const layout={exports:{}};new Function('require','exports','window',layoutCompiled)(require,layout.exports,window);
  new Function('require','module','exports','localStorage','window','document','crypto','setInterval','clearInterval','requestAnimationFrame','cancelAnimationFrame',compiled)(require,module,module.exports,storage,window,document,{randomUUID},()=>1,()=>{},()=>1,()=>{});
  function render(){cursor=0;dirty=false;tree=module.exports.default();}
  async function flush(){for(let i=0;i<20;i++){while(pending.length)pending.shift()();await new Promise(resolve=>setImmediate(resolve));if(dirty&&!disposed)render();}}

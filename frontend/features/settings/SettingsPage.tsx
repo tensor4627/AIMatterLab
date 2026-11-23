@@ -12,7 +12,7 @@ import './settings-page.css';
 const categories=[['appearance','外观',Palette],['layout','工作区布局',PanelsTopLeft],['language','语言',Languages],['agent','Agent',Brain],['connections','计算连接',Server],['permissions','计算权限',Server],['science','科学资源与技能',BookOpen],['data','数据源',Server],['updates','软件更新',RefreshCw]] as const;
 const num=(value:string)=>value===''?undefined:Number(value);
 // Keep the raw edit text until blur so clearing does not reinsert a display default.
-function FontNumberInput({value,min,max,onChange,testId,id}:{value:number;min:number;max:number;onChange:(value:number|undefined)=>void;testId?:string;id?:string}){
+function NumberSettingInput({value,min,max,onChange,testId,id}:{value:number;min:number;max:number;onChange:(value:number|undefined)=>void;testId?:string;id?:string}){
  const [draft,setDraft]=useState<string|null>(null);
  return <input id={id} data-testid={testId} type="number" min={min} max={max} value={draft??value} onFocus={()=>setDraft(String(value))} onChange={event=>{setDraft(event.target.value);onChange(num(event.target.value));}} onBlur={()=>setDraft(null)}/>;
 }
@@ -28,7 +28,7 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
  function patch(changes:Partial<Settings>){revision.current++;if(changes.language)setLanguage(changes.language);onChange({...settings,...changes});setSaved('');}
  async function save(){
   if(savingRef.current)return;
-  if(!Number.isInteger(settings.workerPort)||settings.workerPort<1024||settings.workerPort>65535){onError(new Error('workerPort must be an integer from 1024 to 65535'));return;}
+  if(!Number.isInteger(settings.workerPort)||settings.workerPort<1024||settings.workerPort>65535){onError(new Error(t('作业服务端口须为 1024 到 65535 的整数。')));return;}
   if(settings.terminalIdleMinutes!==undefined&&(!Number.isInteger(settings.terminalIdleMinutes)||settings.terminalIdleMinutes<1||settings.terminalIdleMinutes>1440)){onError(new Error(t('终端空闲时长须为 1 到 1440 分钟。')));return;}
   const next:Settings={...settings,fontSize:fit(settings.fontSize,12,24),editorFontSize:fit(settings.editorFontSize,10,28),terminalFontSize:fit(settings.terminalFontSize,10,24),minimumFontSize:fit(settings.minimumFontSize,11,18),chatFontSize:fit(settings.chatFontSize,12,28)};
   const sequence=++saveSequence.current,submittedRevision=revision.current,submittedSettings=settings;
@@ -50,14 +50,14 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
       <label>{t('作业徽记动效')}<select aria-label={t('作业徽记动效')} value={settings.resourceBadgeMotion||'wave'} onChange={e=>patch({resourceBadgeMotion:e.target.value as Settings['resourceBadgeMotion']})}><option value="wave">{t('从左到右的波浪')}</option><option value="breathe">{t('呼吸式明暗')}</option></select></label>
      </div>
      <div className="settings-form-grid settings-font-grid">
-      <label>{t('界面字号')}<FontNumberInput min={12} max={24} value={settings.fontSize??18} onChange={value=>patch({fontSize:value})}/></label>
-      <label>{t('代码字号')}<FontNumberInput min={10} max={28} value={settings.editorFontSize??18} onChange={value=>patch({editorFontSize:value})}/></label>
-      <label>{t('终端字号')}<FontNumberInput min={10} max={24} value={settings.terminalFontSize??17} onChange={value=>patch({terminalFontSize:value})}/></label>
+      <label>{t('界面字号')}<NumberSettingInput min={12} max={24} value={settings.fontSize??18} onChange={value=>patch({fontSize:value})}/></label>
+      <label>{t('代码字号')}<NumberSettingInput min={10} max={28} value={settings.editorFontSize??18} onChange={value=>patch({editorFontSize:value})}/></label>
+      <label>{t('终端字号')}<NumberSettingInput min={10} max={24} value={settings.terminalFontSize??17} onChange={value=>patch({terminalFontSize:value})}/></label>
       <div className="settings-field">
        <div className="settings-field-label"><label htmlFor="settings-minimum-font">{t('最小文字字号')}</label><HelpTip label={t('最小文字字号')} content={t('界面、代码、终端与图表文字均遵守此下限')}/></div>
-       <FontNumberInput id="settings-minimum-font" testId="minimum-font" min={11} max={18} value={settings.minimumFontSize??17} onChange={value=>patch({minimumFontSize:value})}/>
+       <NumberSettingInput id="settings-minimum-font" testId="minimum-font" min={11} max={18} value={settings.minimumFontSize??17} onChange={value=>patch({minimumFontSize:value})}/>
       </div>
-      <label>{t('Agent 对话字号')}<FontNumberInput min={12} max={28} value={settings.chatFontSize??settings.fontSize??18} onChange={value=>patch({chatFontSize:value})}/></label>
+      <label>{t('Agent 对话字号')}<NumberSettingInput min={12} max={28} value={settings.chatFontSize??settings.fontSize??18} onChange={value=>patch({chatFontSize:value})}/></label>
      </div>
      <div className="font-preview"><span>{t('字体预览')}</span><strong>{product.name} · α · CV · Å · 300 K</strong></div>
      {dirty&&<p className="settings-note">{t('外观修改立即预览；取消将恢复上次保存的设置。')}</p>}
@@ -92,7 +92,7 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
     </div>}
     {category==='connections'&&<>
      <button className="button" data-testid="settings-connect-resources" disabled={saving||!onOpenComputeResources} onClick={onOpenComputeResources}>{t('管理计算资源')}</button>
-     <label className="settings-field">{t('会话终端空闲时长（分钟）')}<input data-testid="terminal-idle-minutes" type="number" min={1} max={1440} step={1} value={settings.terminalIdleMinutes??60} onChange={e=>patch({terminalIdleMinutes:e.target.valueAsNumber})}/></label>
+     <label className="settings-field">{t('会话终端空闲时长（分钟）')}<NumberSettingInput testId="terminal-idle-minutes" min={1} max={1440} value={settings.terminalIdleMinutes??60} onChange={value=>patch({terminalIdleMinutes:value})}/></label>
      <details className="settings-advanced"><summary>{t('默认本地服务与已有集群')}</summary>
       <div className="button-row">
        <button className="button" data-testid="settings-connect-local" disabled={saving||!onOpenLocalCompute} onClick={onOpenLocalCompute}>{t('本地 WSL')}</button>

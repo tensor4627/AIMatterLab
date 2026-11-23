@@ -34,3 +34,10 @@
 .resource-tool-discuss button{justify-self:start}
 .resource-tool-manual summary{cursor:pointer;color:var(--muted)}
 .resource-tool-manual .resource-tool-form{margin-top:8px}
+.resource-tool-interface,.resource-tool-arguments,.resource-tool-ports,.resource-tool-test-fields{display:grid;gap:8px;min-width:0}
+.resource-tool-interface{gap:14px}
+.resource-tool-port-groups:not([hidden]){display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr));gap:12px;align-items:start}
+.resource-tool-argument{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
+.resource-tool-arguments>.button,.resource-tool-ports .text-button{justify-self:start}
+.resource-tool-advanced>.resource-tool-code-grid{margin-top:8px}
+.resource-tool-advanced>[hidden]{display:none}

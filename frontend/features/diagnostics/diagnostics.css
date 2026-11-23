@@ -6,6 +6,6 @@
 .diagnostic-notice .button{max-width:100%;white-space:normal;margin-block-start:6px}
 .diagnostic-notice details>summary,.deployment-diagnostics>details>summary{cursor:pointer}
 .diagnostic-raw{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto}
-.toast.notice-surface{z-index:1000;display:grid;gap:4px 12px;align-items:start;margin:0;width:min(800px,calc(100vw - 32px));max-height:min(60dvh,28rem);border-color:var(--notice-edge);background:color-mix(in srgb,var(--notice-tone) 7%,var(--raised))}
+.toast.notice-surface{display:grid;gap:4px 12px;align-items:start;margin:0;width:min(800px,calc(100vw - 32px));max-height:min(60dvh,28rem);border-color:var(--notice-edge);background:color-mix(in srgb,var(--notice-tone) 7%,var(--raised))}
 .toast.notice-surface[data-severity=info]{background:var(--raised)}
 .toast .notice-message{max-height:calc(min(60dvh,28rem) - 54px);overflow:auto;overscroll-behavior:contain}

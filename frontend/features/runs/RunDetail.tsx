@@ -1,6 +1,8 @@
 import LoadingFeedback from '../../ui/LoadingFeedback';
 import Tooltip from "../../ui/Tooltip";
 import {runContinuation} from "./run-continuation.mjs";
+import {missingResumeInput,parseResumeParameters} from './resume-parameters.mjs';
+import ResumeParametersEditor from './ResumeParametersEditor';
 
 import {tr} from "../../ui/i18n";
 import {ObservedRead,type ReadObservation} from "../../api/observed-read.mjs";
@@ -16,8 +18,11 @@ import {Chart,Structure,CodeEditor} from "../../ui/widgets";
 import {EvidenceSelection,evidencePreSelection,type EvidenceLineRange} from '../conversations/EvidenceSelection';
 import './jobs-experience.css';
 const terminal=(status:string)=>['succeeded','failed','cancelled'].includes(status);
-export default function RunDetail({run,connected=true,readOnly=false,onRefresh,onError,onOpenRun,onOpenWorkflow}:{run:Run;connected?:boolean;readOnly?:boolean;onRefresh:()=>void|Promise<void>;onError:(e:unknown)=>void;onOpenRun?:(id:string)=>void;onOpenWorkflow?:(runId:string)=>void}){
+const initialResumeParameters='{}';
+type ResumeDiscard={identity:string;raw:string};
+export default function RunDetail({run,connected=true,readOnly=false,viewActive=true,onRefresh,onError,onOpenRun,onOpenWorkflow}:{run:Run;connected?:boolean;readOnly?:boolean;viewActive?:boolean;onRefresh:()=>void|Promise<void>;onError:(e:unknown)=>void;onOpenRun?:(id:string)=>void;onOpenWorkflow?:(runId:string)=>void}){
  const readOnlyRef=useRef(readOnly);readOnlyRef.current=readOnly;
+  const viewActiveRef=useRef(viewActive);viewActiveRef.current=viewActive;
  const workingRef=useRef<symbol|null>(null),auxiliaryRef=useRef(false),mounted=useRef(false),fileFlight=useRef<{key:string;sequence:number}|null>(null),previewFlight=useRef<{key:string;sequence:number}|null>(null);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;workingRef.current=null;};},[]);
  const [workingLabel,setWorkingLabel]=useState(''),[auxiliary,setAuxiliary]=useState<{identity:string;label:string}|null>(null),[previewLoading,setPreviewLoading]=useState<{identity:string;sequence:number}|null>(null);
@@ -25,13 +30,19 @@ export default function RunDetail({run,connected=true,readOnly=false,onRefresh,o
  const [logObservation,setLogObservation]=useState<ReadObservation<{offset:number;text:string}>|null>(null),logReader=useRef<ObservedRead<{offset:number;text:string}>|null>(null),connectedRef=useRef(connected);connectedRef.current=connected;
  const [image,setImage]=useState(''),[analysis,setAnalysis]=useState<any>(null);
  const [logEvidenceRange,setLogEvidenceRange]=useState<EvidenceLineRange|null>(null),[fileEvidenceRange,setFileEvidenceRange]=useState<EvidenceLineRange|null>(null);
- const [resume,setResume]=useState(false),[resumeParameters,setResumeParameters]=useState('{"checkpoint_files":["restart.xyz"]}'),[resumeKey,setResumeKey]=useState(''),[working,setWorking]=useState(false);
- const [lock,setLock]=useState(''),[loadingFile,setLoadingFile]=useState(false),[fileError,setFileError]=useState(''),[fileRange,setFileRange]=useState<{offset:number;size:number}|null>(null),[actionMessage,setActionMessage]=useState(''),[resumeCache,setResumeCache]=useState<string|null>(null);
- const fileSeq=useRef(0),previewSeq=useRef(0),resumeAttempt=useRef<{key:string;parameters:Record<string,unknown>}|null>(null);
+  const [resume,setResume]=useState<string|null>(null),[resumeParameters,setResumeParameters]=useState(initialResumeParameters),[working,setWorking]=useState(false);
+  const [lock,setLock]=useState(''),[loadingFile,setLoadingFile]=useState(false),[fileError,setFileError]=useState(''),[fileRange,setFileRange]=useState<{offset:number;size:number}|null>(null),[actionMessage,setActionMessage]=useState('');
+ const fileSeq=useRef(0),previewSeq=useRef(0),resumeAttempt=useRef<{key:string;parameters:Record<string,unknown>}|null>(null),cachedResume=useRef<string|null>(null);
  const workflowBound=run.studio_workflow_binding!==undefined,workflowRunRef=useRef({bound:workflowBound,id:run.id,status:run.status,superseded:!!run.superseded_by});workflowRunRef.current={bound:workflowBound,id:run.id,status:run.status,superseded:!!run.superseded_by};
- const [resumePending,setResumePending]=useState(false),[resumeStorageError,setResumeStorageError]=useState(false);
+  const [resumePending,setResumePending]=useState(false),[resumeIssue,setResumeIssue]=useState<{identity:string;raw:string|null}|null>(null);
+  const [discardResume,setDiscardResume]=useState<ResumeDiscard|null>(null),discardResumeRef=useRef<ResumeDiscard|null>(null);
  const continuation=runContinuation(run.engine,run.parameters?.mode),continuationRef=useRef(continuation);continuationRef.current=continuation;
  const identity=JSON.stringify([run.id,run.project_id,run.environment_id,run.directory]);
+  const resumeStorageKey='studio.resume.'+run.id;
+  const unreadableResume=resumeIssue?.identity===identity?resumeIssue:null;
+  const resumeStorageError=unreadableResume!==null;
+  const corruptResume=unreadableResume?.raw;
+  const discardConfirmation=viewActive&&!readOnly&&!workflowBound&&discardResume?.identity===identity?discardResume:null;
  const collection=useRef({identity,connected,epoch:0,sequence:0,loaded:false,pending:false});
  const collectionStatus=useRef({identity,status:run.status}),terminalLogRead=useRef(false);
  const [collectionState,setCollectionState]=useState('idle'),[collectionError,setCollectionError]=useState('');
@@ -41,14 +52,32 @@ export default function RunDetail({run,connected=true,readOnly=false,onRefresh,o
  useEffect(()=>{setCollectionState(previous=>previous==='idle'?'idle':'stale');setCollectionError('');},[connected]);
  useEffect(()=>{const previous=collectionStatus.current;collectionStatus.current={identity,status:run.status};if(previous.identity!==identity||previous.status===run.status)return;collection.current.epoch++;collection.current.pending=false;collection.current.loaded=false;setCollectionState('stale');if(terminal(run.status)&&tab==='产物'&&connectedRef.current)void collect(false);},[identity,run.status]);
  // Existing main-process notification means a verified connection was replaced/restored.
- // It invalidates observations only; it never triggers a collect/hash operation.
- useEffect(()=>window.studio?.onEvent(event=>{if(event.method==='studio/workerConnected'){collection.current.epoch++;collection.current.sequence++;collection.current.loaded=false;collection.current.pending=false;clearArtifactPreview();setFiles([]);setCollectionState('idle');setCollectionError('');}}),[]);
+  // Invalidate the previous connection's preview and confirmation without reading or mutating the worker.
+  useEffect(()=>window.studio?.onEvent(event=>{if(event.method==='studio/workerConnected'){collection.current.epoch++;collection.current.sequence++;collection.current.loaded=false;collection.current.pending=false;clearArtifactPreview();closeResumeDiscard();setFiles([]);setCollectionState('idle');setCollectionError('');}}),[]);
+
+  function readResumeRecord(){
+   resumeAttempt.current=null;cachedResume.current=null;
+   setResumePending(false);setResumeParameters(initialResumeParameters);setResumeIssue(null);
+   if(workflowBound||readOnly)return false;
+   let raw:string|null=null;
+   try{
+    raw=localStorage.getItem(resumeStorageKey);cachedResume.current=raw;
+    if(raw===null)return true;
+    const attempt=JSON.parse(raw);
+    if(!attempt||typeof attempt.key!=='string'||!attempt.key||!attempt.parameters||typeof attempt.parameters!=='object'||Array.isArray(attempt.parameters))throw Error('续算请求记录无效，请先人工核对已有草稿');
+    resumeAttempt.current=attempt;
+    setResumePending(true);setResumeParameters(JSON.stringify(attempt.parameters,null,2));
+    return true;
+   }catch(error){setResumeIssue({identity,raw});onError(error);return false;}
+  }
+  function closeResumeDiscard(){discardResumeRef.current=null;setDiscardResume(null);}
+  useEffect(()=>{setResume(null);closeResumeDiscard();readResumeRecord();},[identity,workflowBound,readOnly]);
+  useEffect(()=>{if(!viewActive){setResume(null);closeResumeDiscard();}},[viewActive]);
 
  useEffect(()=>{
   fileSeq.current++;previewSeq.current++;workingRef.current=null;setWorking(false);
-  setLogState({chunks:[],truncated:false});setFiles([]);setSelected('');setStructure(null);setText('');setImage('');setAnalysis(null);setLoadingFile(false);setFileError('');setResume(false);setTab('日志');resumeAttempt.current=null;setResumePending(false);setResumeKey('');setResumeStorageError(false);
-  setFileRange(null);setActionMessage('');setResumeCache(null);setLogEvidenceRange(null);terminalLogRead.current=false;
-  if(!workflowBound)try{const cached=localStorage.getItem('studio.resume.'+run.id);setResumeCache(cached);if(cached){const attempt=JSON.parse(cached);if(!attempt||typeof attempt.key!=='string'||!attempt.key||!attempt.parameters||typeof attempt.parameters!=='object'||Array.isArray(attempt.parameters))throw Error('续算请求记录无效，请先人工核对已有草稿');resumeAttempt.current=attempt;setResumePending(true);setResumeKey(attempt.key);setResumeParameters(JSON.stringify(attempt.parameters,null,2));}}catch(e){setResumeStorageError(true);onError(e);}
+   setLogState({chunks:[],truncated:false});setFiles([]);setSelected('');setStructure(null);setText('');setImage('');setAnalysis(null);setLoadingFile(false);setFileError('');setTab('日志');
+   setFileRange(null);setActionMessage('');setLogEvidenceRange(null);terminalLogRead.current=false;
   setLogObservation(null);let disposed=false,offset=0,applied:{offset:number;text:string}|null=null;
   const reader=new ObservedRead(async()=>{
    let next=offset,text='',eof=false;
@@ -106,16 +135,54 @@ export default function RunDetail({run,connected=true,readOnly=false,onRefresh,o
   const seq=++previewSeq.current,name=selected,flight={key,sequence:seq};previewFlight.current=flight;setPreviewLoading({identity,sequence:seq});
   try{const value=await api('POST','/api/inspect',{project_id:run.project_id,environment_id:run.environment_id,path:run.directory+'/results/'+name,kind:'structure',frame});if(seq!==previewSeq.current)return;setStructure(value);setTab('结构');}catch(e){if(seq===previewSeq.current)onError(e);}finally{if(previewFlight.current===flight)previewFlight.current=null;if(seq===previewSeq.current)setPreviewLoading(null);}
  }
+ function openContinuation(){
+  if(readOnlyRef.current||workflowRunRef.current.bound||!viewActiveRef.current||collection.current.identity!==identity)return;
+  try{
+   if(localStorage.getItem(resumeStorageKey)!==cachedResume.current&&!readResumeRecord())return;
+   setResume(identity);
+  }catch(error){onError(error);}
+ }
  async function createResume(){
-  if(readOnlyRef.current||!mounted.current||workflowRunRef.current.bound||!connectedRef.current||collection.current.identity!==identity||workingRef.current||resumeStorageError)return;
+   if(readOnlyRef.current||!viewActiveRef.current||!mounted.current||workflowRunRef.current.bound||!connectedRef.current||collection.current.identity!==identity||workingRef.current||resumeStorageError)return;
   if(!continuationRef.current.allowed){onError(Error(tr(continuationRef.current.reason!)));return;}
   const flight=Symbol();workingRef.current=flight;setWorkingLabel(tr('正在创建续算草稿…'));setWorking(true);
-  try{if(!resumeAttempt.current){const parameters=JSON.parse(resumeParameters);if(!parameters||typeof parameters!=='object'||Array.isArray(parameters))throw Error('续算参数必须是 JSON 对象');resumeAttempt.current={key:resumeKey||crypto.randomUUID(),parameters};}const attempt=resumeAttempt.current;localStorage.setItem('studio.resume.'+run.id,JSON.stringify(attempt));setResumePending(true);const created=await api<Run>('POST','/api/run/resume',{run_id:run.id,parameters:{...attempt.parameters,idempotency_key:attempt.key}});localStorage.removeItem('studio.resume.'+run.id);if(!mounted.current||workingRef.current!==flight||collection.current.identity!==identity)return;resumeAttempt.current=null;setResumePending(false);setResume(false);onOpenRun?.(created.id);await onRefresh();}catch(e){if(mounted.current&&workingRef.current===flight&&collection.current.identity===identity)onError(e);}finally{if(workingRef.current===flight){workingRef.current=null;if(workflowRunRef.current.id===run.id)setWorking(false);}}
+  try{
+   if(localStorage.getItem(resumeStorageKey)!==cachedResume.current){
+    if(readResumeRecord())onError(Error(tr('本地续算记录已变化，请重新打开续算。')));
+    setResume(null);return;
+   }
+   let attempt=resumeAttempt.current;
+   if(!attempt){
+    const parameters=parseResumeParameters(resumeParameters,{forSubmission:true,translate:tr}),missing=missingResumeInput(run.engine,parameters);
+    if(missing)throw Error(tr(missing));
+    attempt={key:crypto.randomUUID(),parameters};
+   }
+   const cached=JSON.stringify(attempt);
+   localStorage.setItem(resumeStorageKey,cached);
+   cachedResume.current=cached;resumeAttempt.current=attempt;setResumePending(true);
+   const created=await api<Run>('POST','/api/run/resume',{run_id:run.id,parameters:{...attempt.parameters,idempotency_key:attempt.key}});
+   const latestCache=localStorage.getItem(resumeStorageKey);
+   if(latestCache===cached)localStorage.removeItem(resumeStorageKey);
+   if(!mounted.current||workingRef.current!==flight||collection.current.identity!==identity)return;
+   if(latestCache!==null&&latestCache!==cached)readResumeRecord();
+   else{cachedResume.current=null;resumeAttempt.current=null;setResumePending(false);}
+   setResume(null);if(viewActiveRef.current)onOpenRun?.(created.id);await onRefresh();
+  }catch(error){if(mounted.current&&workingRef.current===flight&&collection.current.identity===identity)onError(error);}
+  finally{if(workingRef.current===flight){workingRef.current=null;if(workflowRunRef.current.id===run.id)setWorking(false);}}
  }
  async function auxiliaryAction(label:string,read:()=>Promise<void>){if(!mounted.current||!connectedRef.current||auxiliaryRef.current)return;auxiliaryRef.current=true;setAuxiliary({identity,label});try{await read();}catch(error){if(mounted.current&&collection.current.identity===identity)onError(error);}finally{auxiliaryRef.current=false;if(mounted.current&&collection.current.identity===identity)setAuxiliary(null);}}
- function discardCorruptResume(){
-  if(!window.confirm(tr('我已核对现有作业和草稿；清除损坏的本地续算记录后，需要重新填写并人工创建请求。继续？')))return;
-  try{localStorage.removeItem('studio.resume.'+run.id);resumeAttempt.current=null;setResumePending(false);setResumeKey('');setResumeStorageError(false);setResumeCache(null);}catch(e){onError(e);}
+  function canDiscardResume(){return mounted.current&&viewActiveRef.current&&!readOnlyRef.current&&!workflowRunRef.current.bound&&collection.current.identity===identity&&!workingRef.current;}
+  function openResumeDiscard(raw:string){
+   if(!canDiscardResume())return;
+   const request={identity,raw};discardResumeRef.current=request;setDiscardResume(request);
+  }
+  function discardCorruptResume(request:ResumeDiscard){
+   if(discardResumeRef.current!==request||!canDiscardResume())return;
+   closeResumeDiscard();
+   try{
+    if(localStorage.getItem(resumeStorageKey)===request.raw)localStorage.removeItem(resumeStorageKey);
+    readResumeRecord();
+   }catch(error){onError(error);}
  }
  const resultTab=['产物','曲线','结构','评估'].includes(tab),primaryTab=resultTab?'结果':tab==='验证'?'概览':tab;
  const partialFile=fileRange&&fileRange.offset<fileRange.size?<p className="notice" role="status" data-testid="artifact-partial-preview">{tr('部分预览：仅显示文件前缀，曲线不代表完整结果。')} {fileRange.offset.toLocaleString()} / {fileRange.size.toLocaleString()} bytes</p>:null;
@@ -124,7 +191,9 @@ export default function RunDetail({run,connected=true,readOnly=false,onRefresh,o
   {workflowBound&&<div className="notice" data-testid="tool-workflow-run-readonly"><span>{tr('此运行由工具组步骤管理；审阅与执行请返回所属步骤。')}</span>{onOpenWorkflow&&<button className="button" data-testid="open-tool-workflow-step" onClick={()=>onOpenWorkflow(run.id)}>{tr('返回所属工具组步骤')}</button>}</div>}
   {!workflowBound&&run.superseded_by&&<div className="notice">{tr('此草稿已被审阅版本替换')}<button className="button" onClick={()=>onOpenRun?.(run.superseded_by!)}>{tr('打开审阅版本')}</button></div>}
   {readOnly&&<p className="notice" role="status" data-testid="run-readonly-observation">{tr('运行记录可查看；提交、续算等操作需匹配原服务与权限。')}</p>}
-  {resumeStorageError&&<div className="notice" role="alert">{tr('续算请求记录无法读取；先核对已有草稿，禁止自动创建新请求。')}{resumeCache!==null&&<details><summary>{tr('查看本地续算记录')}</summary><pre>{resumeCache}</pre></details>}<button className="button" disabled={working} onClick={discardCorruptResume}>{tr('已核对，清除损坏记录')}</button></div>}
+  {!readOnly&&!workflowBound&&unreadableResume&&<div className="notice" role="alert">{tr('续算请求记录无法读取；先核对已有草稿，禁止自动创建新请求。')}
+   {typeof corruptResume==='string'&&<><details><summary>{tr('查看本地续算记录')}</summary><pre>{corruptResume}</pre></details><button className="button" disabled={working||!viewActive} onClick={()=>openResumeDiscard(corruptResume)}>{tr('已核对，清除损坏记录')}</button></>}
+  </div>}
   {actionMessage&&<div className="notice" role="status">{actionMessage}</div>}
   <LoadingFeedback busy={working||collectionState==='loading'||loadingFile||previewLoading?.identity===identity&&previewLoading.sequence===previewSeq.current||auxiliary?.identity===identity} label={working?workingLabel:auxiliary?.identity===identity?auxiliary.label:loadingFile?tr('正在读取文件…'):previewLoading?.identity===identity&&previewLoading.sequence===previewSeq.current?tr('正在读取结构预览…'):tr('正在读取产物列表…')}/>
   <div className="run-actions">
@@ -134,7 +203,7 @@ export default function RunDetail({run,connected=true,readOnly=false,onRefresh,o
    {(workflowBound?['queued','running']:['queued','running','unknown']).includes(run.status)&&<button className="button" disabled={readOnly||!connected||working||!['queued','running','unknown'].includes(run.status)} onClick={()=>void action('cancel')}><Square size={13}/>{tr("取消")}</button>}
    {!workflowBound&&run.status==='unknown'&&<button className="button" disabled={readOnly||!connected||working} onClick={()=>void action('reconcile')}>{tr('核对停止状态')}</button>}
    <button className="button" disabled={!connected||collectionState==='loading'} onClick={()=>void collect()}><Files size={14}/>{tr("收集产物")}</button>
-   {!workflowBound&&<button className="button" title={continuation.reason?tr(continuation.reason):undefined} disabled={readOnly||!connected||!continuation.allowed||working||resumeStorageError||!!run.superseded_by||!['succeeded','failed','cancelled'].includes(run.status)} onClick={()=>{if(readOnlyRef.current||workflowRunRef.current.bound)return;if(!resumeAttempt.current)setResumeKey(crypto.randomUUID());setResume(true);}}><RotateCw size={14}/>{tr("续算")}</button>}
+   {!workflowBound&&<button className="button" title={continuation.reason?tr(continuation.reason):undefined} disabled={readOnly||!connected||!continuation.allowed||working||resumeStorageError||!!run.superseded_by||!['succeeded','failed','cancelled'].includes(run.status)} onClick={openContinuation}><RotateCw size={14}/>{tr("续算")}</button>}
    <button className="icon-button" title={tr("导出不可变输入与复现记录 ZIP")} disabled={!connected} aria-label={tr("导出不可变输入与复现记录 ZIP")} onClick={()=>void auxiliaryAction(tr('正在导出运行记录…'),async()=>{await invoke('export',{run});})}><Download size={16}/></button>
   </div>
   <div className="detail-meta"><span>{tr('GPU 编号')} {run.gpu}</span><span>{tr("上限")}{run.max_seconds}s</span><span>{tr("输入已快照")}</span><span>{new Date(run.created_at*1000).toLocaleString()}</span></div>
@@ -158,6 +227,15 @@ export default function RunDetail({run,connected=true,readOnly=false,onRefresh,o
   </div></div></>}
   {tab==='评估'&&<pre className="report">{JSON.stringify(analysis,null,2)}</pre>}
   {tab==='曲线'&&<><button className="button back" onClick={()=>setTab('产物')}>{tr("返回产物")}</button>{partialFile}<Chart text={text} name={selected} viewKey={JSON.stringify([identity,selected])}/></>}
-  {!workflowBound&&resume&&<Modal title={tr("从实际 checkpoint 创建续算")} onClose={()=>setResume(false)}><p className="muted">{tr("GPUMD 填写 checkpoint_files 与 continuation_run_in；HotPP 填写 checkpoint_files、checkpoint 和 continuation_config。PyDyn 填写 continuation_script，采样另填 paired_manifest。续算输入必须保持原物理参数与状态。")}</p><textarea className="json-input" disabled={readOnly||!connected||working||resumePending} value={resumeParameters} onChange={e=>setResumeParameters(e.target.value)}/><button className="button primary" disabled={readOnly||!connected||working||!continuation.allowed} onClick={()=>void createResume()}>{tr(resumePending?'重试同一续算请求':'创建续算草稿')}</button>{resumePending&&<p role="status">{tr('响应未确认；保留原参数与幂等键，重试只核对同一草稿，不提交计算。')}</p>}</Modal>}
+   {viewActive&&!readOnly&&!workflowBound&&resume===identity&&<Modal title={tr("从实际 checkpoint 创建续算")} onClose={()=>setResume(null)}>
+    <ResumeParametersEditor engine={run.engine} value={resumeParameters} onChange={setResumeParameters} disabled={!connected||working||resumePending}/>
+    <button className="button primary" disabled={!connected||working||!continuation.allowed} onClick={()=>void createResume()}>{tr(resumePending?'重试同一续算请求':'创建续算草稿')}</button>
+    {resumePending&&<p role="status">{tr('响应未确认；保留原参数与幂等键，重试只核对同一草稿，不提交计算。')}</p>}
+   </Modal>}
+   {discardConfirmation&&<Modal title="清除损坏的本地续算记录" onClose={closeResumeDiscard}>
+    <p><strong>{run.name}</strong> · <code>{run.id}</code></p>
+    <p>{tr('我已核对现有作业和草稿；清除损坏的本地续算记录后，需要重新填写并人工创建请求。继续？')}</p>
+    <div className="button-row"><button className="button" onClick={closeResumeDiscard}>{tr('取消')}</button><button className="button danger" disabled={working} onClick={()=>discardCorruptResume(discardConfirmation)}>{tr('已核对，清除损坏记录')}</button></div>
+   </Modal>}
  </div>;
 }

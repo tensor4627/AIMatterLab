@@ -17,7 +17,7 @@ export function workflowExperienceEnvironment(invoke=async()=>{throw Error('Unex
  function load(file){const filename=path.resolve(file);if(modules.has(filename))return modules.get(filename).exports;const module={exports:{}};modules.set(filename,module);const compiled=ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const require=name=>{
    if(name==='react')return react;if(name==='react/jsx-runtime')return jsx;if(name==='lucide-react')return new Proxy({},{get:(_target,key)=>key});
-   if(name.endsWith('/studio'))return {invoke};if(name.endsWith('/i18n'))return {t:value=>value};if(name.endsWith('workflow-catalog.mjs'))return catalog;
+   if(name.endsWith('/studio'))return {invoke};if(name.endsWith('/i18n'))return {t:value=>value,getLanguage:()=>'zh-CN'};if(name.endsWith('workflow-catalog.mjs'))return catalog;
    if(name.endsWith('contracts/workflows/task-fields.mjs'))return fields;if(name.endsWith('ui/task-fields.mjs'))return groups;
    if(name.endsWith('useLocalReviewStatus'))return {useLocalReviewStatus:()=>({phase:'resolved',value:null}),currentLocalReview:()=>false,localReviewNotice:()=>null};
    if(name.endsWith('PygasTaskComposer'))return load(path.resolve(path.dirname(filename),name+'.tsx'));

@@ -7,3 +7,6 @@
   .showing-setup .title-path {display:none;}
   .showing-setup .brand {margin-right:auto;}
 }
+.pinned-tool-links{display:grid;gap:2px;margin-bottom:10px}
+.pinned-tool-links .text-button{text-align:left;padding:5px 10px;overflow-wrap:anywhere}
+.tool-page .page-heading button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}

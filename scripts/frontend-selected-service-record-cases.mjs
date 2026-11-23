@@ -18,7 +18,7 @@ async function selectedServiceApp(page,{unavailable=false}={}){
    if(method==='compute.sshConnection.list')return {connections:[]};
    if(method==='sharedTerminal.list')return {sessions:[]};
    if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return {model:'fixture-model',thread:{id:data.params.threadId,turns:[{items:[{id:'saved-history',type:'agentMessage',text:'Preserved Agent history'}]}]}};
-   if(method==='worker.request'&&['/api/runs','/api/cluster-runs','/api/run/status','/api/cluster/status'].includes(data.target)){
+   if(method==='worker.request'&&['/api/runs','/api/cluster-runs','/api/run/status','/api/cluster/status','/api/cluster/observation'].includes(data.target)){
     f.calls.push({method,data});const id=f.recordSource,hold=f.recordHolds[id];if(hold&&['/api/runs','/api/cluster-runs'].includes(data.target))await new Promise(resolve=>hold.push(resolve));
     if(data.target==='/api/runs'){if(f.recordIndexUnavailable)throw Error('Synthetic index read unavailable');return [f.history(id)];}if(data.target==='/api/cluster-runs')return [f.clusterHistory(id)];if(data.target==='/api/run/status')return f.history(id);return f.clusterHistory(id);
    }

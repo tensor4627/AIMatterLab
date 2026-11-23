@@ -1,9 +1,11 @@
-import {useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {FileText,FolderOpen,FolderSearch,PackagePlus,Plug,ScrollText} from 'lucide-react';
 import type {TypedInvoke} from '../../../contracts/dto/ipc';
 import type {ResourceToolDiscovery,ResourceToolLibrary,ResourceToolManifest,ResourceToolRoute,ResourceToolSetup,ResourceToolSource,ResourceToolSourcePick,ResourceToolTarget} from '../../../contracts/dto/resource-tools';
 import {invoke} from '../../api/studio';
 import {t} from '../../ui/i18n';
+import {editJsonDraft,inspectJsonDraft,isJsonObject,jsonDraftIssue} from '../../ui/json-draft.mjs';
+import ResourceToolInterfaceEditor,{interfaceJsonLabels} from './ResourceToolInterfaceEditor';
 import './resource-tool-setup.css';
 
 const request:TypedInvoke=invoke;
@@ -14,6 +16,26 @@ const statuses:Record<ResourceToolSetup['status'],string>={planned:'待确认测
 const activeStatus=(value:ResourceToolSetup['status'])=>['acquiring','desktop_fallback','testing','unknown'].includes(value);
 const targetKey=(target:ResourceToolTarget)=>JSON.stringify([target.project_id,target.cluster_id,target.environment_id,target.queue_target_id]);
 const errorText=(error:unknown)=>error instanceof Error?error.message:String(error);
+function parseJson(value:string,label:string):unknown{
+ const document=inspectJsonDraft(value);
+ if(!document)throw Error(`${t(label)} · ${t('JSON 语法有误。')}`);
+ const issue=jsonDraftIssue(document);
+ if(issue)throw Error(`${t(label)} · ${t(issue==='duplicate'?'JSON 对象中有重复键。':'JSON 数值超出可保存的精度。')}`);
+ return document.value;
+}
+function parseObject<T>(value:string,label:string):T{
+ const result=parseJson(value,label);
+ if(!isJsonObject(result))throw Error(`${t(label)} · ${t('请填写 JSON 对象。')}`);
+ return result as T;
+}
+function latestReceipt(previous:ResourceToolSetup|undefined,row:ResourceToolSetup){
+ if(!previous)return row;
+ if(previous.revision>row.revision)return previous;
+ if(previous.revision===row.revision&&previous.skill?.body&&row.skill?.sha256===previous.skill.sha256&&!row.skill.body){
+  return {...row,skill:{...row.skill,body:previous.skill.body}};
+ }
+ return row;
+}
 
 type Form={id:string;name:string;version:string;sourceKind:ResourceToolSource['kind'];url:string;pin:string;filename:string;executable:string;interpreter:''|'bash'|'python';argv:string;io:string;test:string;priorRun:string};
 function startForm(route:ResourceToolRoute,tool?:string):Form{
@@ -25,81 +47,135 @@ function assemble(form:Form):ResourceToolManifest{
  const source:ResourceToolSource=form.sourceKind==='installed'?{kind:'installed',executable,...pin?{sha256:pin}:{}}:
   form.sourceKind==='git'?{kind:'git',url,commit:pin,executable}:
   {kind:form.sourceKind,...url?{url}:{},sha256:pin,filename:form.filename.trim(),executable};
- const args=JSON.parse(form.argv),spec=JSON.parse(form.io),test=JSON.parse(form.test);
- if(!Array.isArray(args)||!args.every(value=>typeof value==='string'))throw Error(t('运行参数必须是 JSON 字符串列表。'));
- const {inputs,outputs,parameters,dependencies,support_files,build,git_bootstrap}=spec;
- return {id:form.id.trim(),name:form.name.trim(),version:form.version.trim(),source,...url?{citations:[{url,version:form.version.trim()}]}:{},...form.interpreter?{interpreter:form.interpreter}:{},argv:args,inputs,outputs,parameters,dependencies,support_files,build,git_bootstrap,test};
+ const args=parseJson(form.argv,interfaceJsonLabels.argv);
+ if(!Array.isArray(args)||!args.every(value=>typeof value==='string'))throw Error(`${t(interfaceJsonLabels.argv)} · ${t('运行参数必须是 JSON 字符串列表。')}`);
+ const io=parseObject<Pick<ResourceToolManifest,'inputs'|'outputs'>>(form.io,interfaceJsonLabels.io);
+ const conflicts=['id','name','version','source','interpreter','argv','test'].filter(key=>Object.hasOwn(io,key));
+ if(conflicts.length)throw Error(`${t(interfaceJsonLabels.io)} · ${t('请在对应字段编辑这些配置。')} ${conflicts.join(', ')}`);
+ const test=parseObject<ResourceToolManifest['test']>(form.test,interfaceJsonLabels.test);
+ return {...url?{citations:[{url,version:form.version.trim()}]}:{},...io,id:form.id.trim(),name:form.name.trim(),version:form.version.trim(),source,...form.interpreter?{interpreter:form.interpreter}:{},argv:args,test};
 }
 
 type SelectedSource=ResourceToolSourcePick;
 export type ResourceToolDiscussion={route:ResourceToolRoute;tool?:string;directory?:string;candidate?:{path:string;sha256:string};target?:ResourceToolTarget;description?:string;source?:Omit<SelectedSource,'local_source'>;setupIds:string[]};
 type Props={resourceId:string;profileVersion:number;resourceName:string;initialRoute?:ResourceToolRoute;missingTool?:string;newPlanAfter?:string[];suspended?:boolean;onDiscuss?:(scope:ResourceToolDiscussion)=>void;onConfigureTarget?:(kind:'scheduler'|'project')=>void;onClose:()=>void;onRoute?:(route:ResourceToolRoute)=>void};
-export default function ResourceToolSetup({resourceId,profileVersion,resourceName,initialRoute,missingTool,newPlanAfter,suspended=false,onDiscuss,onConfigureTarget,onClose,onRoute}:Props){
+type SetupLifetime={busy:boolean;actionVersion:number;listRequest:symbol|null;refreshAfterAction:boolean;suspended:boolean};
+export default function ResourceToolSetup(props:Props){
+ // Drafts, file selections and receipts belong to one saved resource version.
+ return <ResourceToolSetupPanel key={JSON.stringify([props.resourceId,props.profileVersion])} {...props}/>;
+}
+function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialRoute,missingTool,newPlanAfter,suspended=false,onDiscuss,onConfigureTarget,onClose,onRoute}:Props){
  const [route,setRoute]=useState(initialRoute),[form,setForm]=useState(()=>startForm(initialRoute||'fresh',missingTool));
  const [library,setLibrary]=useState<ResourceToolLibrary|null>(null),[selected,setSelected]=useState(''),[target,setTarget]=useState('');
  const [directory,setDirectory]=useState(''),[discovery,setDiscovery]=useState<ResourceToolDiscovery|null>(null),[candidateId,setCandidateId]=useState(''),[remote,setRemote]=useState('');
  const [description,setDescription]=useState('');
  const [localSource,setLocalSource]=useState<SelectedSource|null>(null),[manual,setManual]=useState<SelectedSource|null>(null);
- const [pending,setPending]=useState(''),[error,setError]=useState('');
- const alive=useRef(false),flight=useRef(false),planIdentity=useRef<{stamp:string;id:string}|null>(null);
- const selectedOwner=useRef(selected);selectedOwner.current=selected;
+ const [action,setAction]=useState(''),[reading,setReading]=useState(false),[error,setError]=useState('');
+ const pending=action||(reading?'正在读取资源工具…':'');
+ const lifetime=useRef<SetupLifetime|null>(null),planIdentity=useRef<{stamp:string;id:string}|null>(null);
+ const selectedOwner=useRef(''),reviewedPlan=useRef<string[]|undefined>(undefined);
  const setups=library?.setups||[],receipt=setups.find(row=>row.id===selected),candidate=discovery?.candidates.find(row=>row.id===candidateId);
- const targets=library?.targets||[],picked=targets.find(item=>targetKey(item)===target)||(targets.length===1?targets[0]:undefined);
+ const targets=library?.targets||[],picked=target?targets.find(item=>targetKey(item)===target):targets.length===1?targets[0]:undefined;
  const base={resource_id:resourceId,profile_version:profileVersion};
- async function updateLibrary(){
-  const result=await request('tools.resource.list',base);
-  if(!alive.current)return;
-  setLibrary(previous=>({...result,setups:result.setups.map(row=>previous?.setups.find(old=>old.id===row.id&&(old.revision>row.revision||old.revision===row.revision&&old.skill?.body))||row)}));
-  if(!selectedOwner.current&&newPlanAfter){
-   const recent=result.setups.filter(row=>row.route===initialRoute&&!newPlanAfter.includes(row.id)&&row.status==='planned');
-   if(recent.length===1)setSelected(recent[0].id);
+ const selectSetup=useCallback((id:string)=>{selectedOwner.current=id;setSelected(id);},[]);
+ const updateLibrary=useCallback(async(showProgress=false)=>{
+  const owner=lifetime.current;
+  if(!owner||owner.suspended)return;
+  if(owner.busy){owner.refreshAfterAction=true;return;}
+  const read=Symbol();owner.listRequest=read;
+  const current=()=>lifetime.current===owner&&owner.listRequest===read;
+  if(showProgress){setReading(true);setError('');}
+  try{
+   const result=await request('tools.resource.list',{resource_id:resourceId,profile_version:profileVersion});
+   if(!current())return;
+   if(result.setups.some(row=>row.resource_id!==resourceId))throw Error(t('配置回执与当前资源不一致。'));
+   setLibrary(previous=>{
+    const old=new Map(previous?.setups.map(row=>[row.id,row]));
+    return {...result,setups:result.setups.map(row=>latestReceipt(old.get(row.id),row))};
+   });
+  }catch(error){if(current())setError(errorText(error));}
+  finally{if(current()){owner.listRequest=null;setReading(false);}}
+ },[resourceId,profileVersion]);
+ const accept=useCallback((row:ResourceToolSetup)=>{
+  if(row.resource_id!==resourceId)throw Error(t('配置回执与当前资源不一致。'));
+  setLibrary(previous=>({...previous,targets:previous?.targets||[],setups:[latestReceipt(previous?.setups.find(old=>old.id===row.id),row),...(previous?.setups||[]).filter(old=>old.id!==row.id)]}));
+ },[resourceId]);
+ async function act(label:string,work:(current:()=>boolean)=>Promise<void>){
+  const owner=lifetime.current;
+  if(!owner||owner.busy||owner.suspended)return;
+  if(owner.listRequest){
+   // This snapshot may precede the action's receipt. Refresh once the action settles.
+   owner.listRequest=null;owner.refreshAfterAction=true;setReading(false);
+  }
+  owner.busy=true;owner.actionVersion++;setAction(label);setError('');
+  const current=()=>lifetime.current===owner;
+  try{await work(current);}
+  catch(error){if(current())setError(errorText(error));}
+  finally{
+   if(current()){
+    owner.busy=false;setAction('');
+    if(owner.refreshAfterAction){owner.refreshAfterAction=false;void updateLibrary();}
+   }
   }
  }
- function accept(row:ResourceToolSetup){
-  if(!alive.current)return;
-  if(row.resource_id!==resourceId)throw Error(t('配置回执与当前资源不一致。'));
-  setSelected(row.id);setLibrary(previous=>({...previous,targets:previous?.targets||[],setups:[row,...(previous?.setups||[]).filter(old=>old.id!==row.id)]}));
- }
- async function act(label:string,work:()=>Promise<void>){
-  if(flight.current)return;
-  flight.current=true;setPending(label);setError('');
-  try{await work();}catch(error){if(alive.current)setError(errorText(error));}
-  finally{flight.current=false;if(alive.current)setPending('');}
- }
- useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- useEffect(()=>{if(!suspended)void act('正在读取资源工具…',updateLibrary);},[suspended]);
- useEffect(()=>window.studio?.onEvent(event=>{
-  if(event.method==='studio/resourceToolSetupChanged'&&event.params?.resource_id===resourceId&&!flight.current)void updateLibrary().catch(error=>{if(alive.current)setError(errorText(error));});
- }),[resourceId,selected]);
+ useLayoutEffect(()=>{
+  lifetime.current={busy:false,actionVersion:0,listRequest:null,refreshAfterAction:false,suspended:false};
+  return()=>{lifetime.current=null;};
+ },[]);
+ useLayoutEffect(()=>{
+  const owner=lifetime.current!;
+  owner.suspended=suspended;
+  if(suspended){owner.listRequest=null;setReading(false);}
+ },[suspended]);
  useEffect(()=>{
-  if(!receipt||!activeStatus(receipt.status))return;
+  if(suspended)return;
+  const unsubscribe=window.studio?.onEvent(event=>{
+   if(event.method==='studio/resourceToolSetupChanged'&&event.params?.resource_id===resourceId)void updateLibrary();
+  });
+  void updateLibrary(true);
+  return unsubscribe;
+ },[suspended,resourceId,updateLibrary]);
+ useEffect(()=>{
+  if(suspended||selectedOwner.current||!newPlanAfter||reviewedPlan.current===newPlanAfter)return;
+  const recent=library?.setups.filter(row=>row.route===initialRoute&&!newPlanAfter.includes(row.id)&&row.status==='planned');
+  if(recent?.length===1){reviewedPlan.current=newPlanAfter;selectSetup(recent[0].id);}
+ },[suspended,library,newPlanAfter,initialRoute,selectSetup]);
+ const receiptId=receipt?.id,receiptStatus=receipt?.status;
+ useEffect(()=>{
+  const owner=lifetime.current;
+  if(!owner||suspended||!receiptId||!receiptStatus||!activeStatus(receiptStatus))return;
   let cancelled=false,timer:ReturnType<typeof setTimeout>;
+  const current=()=>!cancelled&&lifetime.current===owner&&!owner.suspended&&selectedOwner.current===receiptId;
   const read=async()=>{
-   if(!flight.current){
-    try{const row=await request('tools.resource.status',{...base,setup_id:receipt.id});if(cancelled||selectedOwner.current!==receipt.id)return;accept(row);if(!activeStatus(row.status))return;}
-    catch(error){if(!cancelled)setError(errorText(error));return;}
+   if(!current())return;
+   if(!owner.busy){
+    const version=owner.actionVersion;
+    try{
+     const row=await request('tools.resource.status',{resource_id:resourceId,profile_version:profileVersion,setup_id:receiptId});
+     if(current()&&owner.actionVersion===version)accept(row);
+    }catch(error){if(current()&&owner.actionVersion===version){setError(errorText(error));return;}}
    }
-   if(!cancelled)timer=setTimeout(read,2000);
+   if(current())timer=setTimeout(read,2000);
   };
   timer=setTimeout(read,1500);return()=>{cancelled=true;clearTimeout(timer);};
- },[receipt?.id,receipt?.status]);
+ },[suspended,resourceId,profileVersion,receiptId,receiptStatus,accept]);
  function switchRoute(next:ResourceToolRoute){
   if(!receipt&&route===next)return;
-  selectedOwner.current='';setRoute(next);setForm(startForm(next,missingTool));setSelected('');setError('');setCandidateId('');setDiscovery(null);setDescription('');setLocalSource(null);setManual(null);onRoute?.(next);
+  reviewedPlan.current=newPlanAfter;selectSetup('');setRoute(next);setForm(startForm(next,missingTool));setError('');setCandidateId('');setDiscovery(null);setDescription('');setLocalSource(null);setManual(null);onRoute?.(next);
  }
  function patch<K extends keyof Form>(key:K,value:Form[K]){setForm(previous=>({...previous,[key]:value}));}
- async function discover(){
+ async function discover(current:()=>boolean){
   const observed=await request('tools.resource.discover',{...base,directory:directory.trim()});
-  if(alive.current){setDiscovery(observed);setCandidateId('');}
+  if(current()){setDiscovery(observed);setCandidateId('');}
  }
  function chooseCandidate(id:string){
   setCandidateId(id);
   const row=discovery?.candidates.find(item=>item.id===id);
   if(row)setForm(previous=>({...previous,id:previous.id||row.tool.toLowerCase().replace(/[^a-z0-9_-]/g,'-'),name:previous.name||row.tool,sourceKind:'installed',executable:row.path,interpreter:'bash',pin:row.sha256}));
  }
- async function chooseSource(kind:SelectedSource['kind']){
+ async function chooseSource(kind:SelectedSource['kind'],current:()=>boolean){
   const selected=await request('tools.resource.chooseSource',{...base,kind});
-  if(!selected||!alive.current||selected.kind!==kind)return;
+  if(!selected||!current()||selected.kind!==kind)return;
   if(kind==='manual'){setManual(selected);return;}
   setLocalSource(selected);
   const sourceKind=/\.(?:zip|tar|tgz|tar\.gz|tar\.xz|tar\.bz2)$/i.test(selected.name)?'archive':'binary';
@@ -111,23 +187,24 @@ export default function ResourceToolSetup({resourceId,profileVersion,resourceNam
   const notes=[description.trim(),manual?`${t('本机手册')} · ${manual.name} · SHA-256 ${manual.sha256}${manual.text?`\n${manual.text}`:''}`:null].filter(Boolean).join('\n\n');
   onDiscuss({route,tool:missingTool||form.name.trim()||undefined,directory:directory.trim()||undefined,candidate:candidate?{path:candidate.path,sha256:candidate.sha256}:undefined,target:picked,description:notes||undefined,source:source||undefined,setupIds:setups.map(row=>row.id)});
  }
- async function plan(){
+ async function plan(current:()=>boolean){
   if(!route||!picked)return;
   const manifest=assemble(form),source=manifest.source;
   const selectedSource=localSource?.local_source&&(source.kind==='binary'||source.kind==='archive')&&source.sha256===localSource.sha256&&source.filename===localSource.name?localSource.local_source:null;
   const args={...base,route,manifest,project_id:picked.project_id,environment_id:picked.environment_id,cluster_id:picked.cluster_id,...picked.queue_target_id?{queue_target_id:picked.queue_target_id}:{},...candidate?{candidate:{path:candidate.path,sha256:candidate.sha256}}:{},...form.priorRun.trim()?{prior_run_id:form.priorRun.trim()}:{},...selectedSource?{local_source:selectedSource}:{} };
   const stamp=JSON.stringify(args);
   if(planIdentity.current?.stamp!==stamp)planIdentity.current={stamp,id:crypto.randomUUID()};
-  accept(await request('tools.resource.plan',{...args,request_id:planIdentity.current.id}));
+  const row=await request('tools.resource.plan',{...args,request_id:planIdentity.current.id});
+  if(current()){accept(row);selectSetup(row.id);}
  }
  function apply(action:'start'|'status'|'file'|'remote'|'skill'){
   if(!receipt)return;
   const ref={...base,setup_id:receipt.id},revision={...ref,revision:receipt.revision};
-  void act('正在核对配置…',async()=>{
+  void act('正在核对配置…',async current=>{
    const next=action==='start'?await request('tools.resource.start',{...revision,plan_sha256:receipt.plan_sha256}):
     action==='file'?await request('tools.resource.supplyFile',revision):action==='remote'?await request('tools.resource.supplyRemote',{...revision,path:remote.trim()}):
     action==='skill'?await request('tools.resource.saveSkill',ref):await request('tools.resource.status',ref);
-   if(!next.cancelled)accept(next);
+   if(current()&&!next.cancelled)accept(next);
   });
  }
  const field=(key:keyof Form,label:string,required=false,placeholder?:string)=><label>{t(label)}<input value={form[key]} required={required} placeholder={placeholder} onChange={event=>patch(key,event.currentTarget.value)}/></label>;
@@ -137,7 +214,7 @@ export default function ResourceToolSetup({resourceId,profileVersion,resourceNam
    {routes.map(([key,Icon])=><button type="button" className="button" aria-pressed={route===key} disabled={!!pending} data-testid={'resource-tool-'+key} key={key} onClick={()=>switchRoute(key)}><Icon size={17}/><span><strong>{t(routeLabels[key])}</strong><small>{t(routeDetails[key])}</small></span></button>)}
   </div>
   {setups.length>0&&<details open={!route&&!receipt}><summary>{t('此资源的工具与配置记录')}</summary><ul className="resource-tool-list">{setups.map(row=><li key={row.id}>
-   <button type="button" className="text-button" disabled={!!pending} onClick={()=>{selectedOwner.current=row.id;setSelected(row.id);setRoute(row.route);setError('');}}>{row.manifest.name} · {row.manifest.version}</button><span>{t(statuses[row.status])}</span></li>)}</ul></details>}
+   <button type="button" className="text-button" disabled={!!pending} onClick={()=>{selectSetup(row.id);setRoute(row.route);setError('');}}>{row.manifest.name} · {row.manifest.version}</button><span>{t(statuses[row.status])}</span></li>)}</ul></details>}
   {route&&!receipt&&<>
    {!targets.length&&library&&<section className="notice" role="status"><p>{t('没有可用的测试目标。请先在该资源登记调度器、计算环境和项目授权。')}</p>{onConfigureTarget&&<div className="button-row">
     <button className="button" data-testid="resource-tool-configure-scheduler" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('scheduler')}>{t('打开此资源的调度器设置')}</button>
@@ -160,15 +237,15 @@ export default function ResourceToolSetup({resourceId,profileVersion,resourceNam
     <option value="">{t('请选择')}</option>{targets.map(value=><option key={targetKey(value)} value={targetKey(value)}>{value.environment_id} · {value.scheduler} {value.queue} · {value.project_id}</option>)}
    </select></label>}
    {route==='custom'&&<div className="resource-tool-source-picker">
-    <div className="button-row"><button type="button" className="button" data-testid="resource-tool-choose-program" disabled={!!pending} onClick={()=>void act('正在核对本机文件…',()=>chooseSource('program'))}><FolderOpen size={16}/>{t('选择本机程序或脚本')}</button>
-     <button type="button" className="button" data-testid="resource-tool-choose-manual" disabled={!!pending} onClick={()=>void act('正在核对本机文件…',()=>chooseSource('manual'))}><FileText size={16}/>{t('选择本机手册')}</button></div>
+    <div className="button-row"><button type="button" className="button" data-testid="resource-tool-choose-program" disabled={!!pending} onClick={()=>void act('正在核对本机文件…',current=>chooseSource('program',current))}><FolderOpen size={16}/>{t('选择本机程序或脚本')}</button>
+     <button type="button" className="button" data-testid="resource-tool-choose-manual" disabled={!!pending} onClick={()=>void act('正在核对本机文件…',current=>chooseSource('manual',current))}><FileText size={16}/>{t('选择本机手册')}</button></div>
     {[localSource,manual].map(file=>file&&<details key={file.kind}><summary>{file.name} · {file.size.toLocaleString()} B</summary><p>SHA-256 · <code>{file.sha256}</code></p>{file.text&&<pre>{file.text}</pre>}</details>)}
    </div>}
    {onDiscuss&&<div className="resource-tool-discuss" data-guide-target="resource-tool-discuss">
     <label>{t('告诉助手手头有什么')}<textarea data-testid="resource-tool-description" rows={2} value={description} onChange={event=>setDescription(event.currentTarget.value)} placeholder={t(route==='fresh'?'工具名称、版本或公开来源':route==='existing'?'已用脚本的用途或已有测试结果':'程序、脚本或手册的位置，以及想得到的输出')}/></label>
     <button type="button" className="button primary" data-testid="resource-tool-discuss" disabled={!!pending} onClick={discuss}>{t('让 Agent 帮我配置')}</button>
    </div>}
-   <details className="resource-tool-manual" data-testid="resource-tool-manual"><summary>{t('手动填写高级配置')}</summary>
+   <details className="resource-tool-manual" data-testid="resource-tool-manual"><summary>{t('手动填写工具配置')}</summary>
    <form className="resource-tool-form" onSubmit={event=>{event.preventDefault();void act('正在准备配置预览…',plan);}}>
     <fieldset disabled={!!pending}><legend>{t('工具与版本')}</legend><div className="resource-tool-grid">
      {field('name','工具名称',true)}{field('id','工具 ID',true,'my-tool')}{field('version','工具版本',true,'1.0.0')}
@@ -183,12 +260,9 @@ export default function ResourceToolSetup({resourceId,profileVersion,resourceNam
      {field('executable',form.sourceKind==='installed'?'远端程序绝对路径':'程序包内执行入口',true)}
      <label>{t('解释器')}<select value={form.interpreter} onChange={event=>patch('interpreter',event.currentTarget.value as Form['interpreter'])}><option value="">{t('直接执行')}</option><option value="bash">Bash</option><option value="python">Python</option></select></label>
     </div></fieldset>
-    <fieldset disabled={!!pending}><legend>{t('运行接口与最小测试')}</legend><div className="resource-tool-code-grid">
-     <label>{t('命令参数（JSON）')}<textarea data-testid="resource-tool-argv" spellCheck={false} rows={2} value={form.argv} onChange={event=>patch('argv',event.currentTarget.value)}/><small>{t('可引用 {input:名称}、{output:名称} 和 {param:名称}。')}</small></label>
-     <label>{t('输入输出（JSON）')}<textarea data-testid="resource-tool-io" spellCheck={false} rows={4} value={form.io} onChange={event=>patch('io',event.currentTarget.value)}/><small>{t('每个端口填写 filename 和 format。可选 parameters 和 dependencies。')}</small></label>
-     <small className="muted">{t('缺少 Git 时，可在输入输出 JSON 中添加 git_bootstrap。填写 kind 为 archive，并提供 filename、executable 和 sha256。url 可省略，确认后再选本机归档或填写集群路径。')}</small>
-     <label>{t('测试输入与资源（JSON）')}<textarea data-testid="resource-tool-test" spellCheck={false} rows={4} value={form.test} onChange={event=>patch('test',event.currentTarget.value)}/><small>{t('测试输入可给 path 或 text。max_seconds 设置时间上限。')}</small></label>
-    </div></fieldset>
+    <fieldset disabled={!!pending}><legend>{t('运行接口与最小测试')}</legend>
+     <ResourceToolInterfaceEditor key={route} values={form} onRaw={patch} onEdit={(field,path,value)=>setForm(previous=>({...previous,[field]:editJsonDraft(previous[field],path,value)}))}/>
+    </fieldset>
     {route==='existing'&&field('priorRun','原测试运行 ID（如有）')}
     <div className="button-row"><button type="submit" className="button primary" data-testid="resource-tool-plan" disabled={!!pending||!picked}>{t('核对配置与最小测试')}</button></div>
    </form></details>
@@ -224,6 +298,6 @@ export default function ResourceToolSetup({resourceId,profileVersion,resourceNam
     <button type="button" className="button" data-testid="resource-tool-refresh" disabled={!!pending} onClick={()=>apply('status')}>{t('核对原配置回执')}</button>
    </div>
   </section>}
-  {pending&&<p role="status">{t(pending)}</p>}{error&&<p className="notice" role="alert">{error}<button type="button" className="text-button" disabled={!!pending} onClick={()=>void act('正在读取资源工具…',updateLibrary)}>{t('刷新状态')}</button></p>}
+  {pending&&<p role="status">{t(pending)}</p>}{error&&<p className="notice" role="alert">{error}<button type="button" className="text-button" disabled={!!pending} onClick={()=>void updateLibrary(true)}>{t('刷新状态')}</button></p>}
  </section>;
 }

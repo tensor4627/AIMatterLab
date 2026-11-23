@@ -1,0 +1,9 @@
+.resume-parameters{display:grid;gap:12px;margin-bottom:14px}
+.resume-parameters p{margin:0}
+.resume-checkpoints{display:grid;min-width:0;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px}
+.resume-checkpoints>button{justify-self:start}
+.resume-checkpoint-row{display:flex;gap:8px;align-items:center}
+.resume-checkpoint-row input{flex:1;min-width:0}
+.resume-parameter-field{display:grid;gap:6px;min-width:0}
+.resume-json>summary{cursor:pointer}
+.resume-json textarea{margin-top:8px}

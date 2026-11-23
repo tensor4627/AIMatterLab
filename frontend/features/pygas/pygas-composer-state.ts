@@ -34,8 +34,12 @@ export function editorFor(entry:CatalogEntry,param:ParamDefinition,value:unknown
 }
 export function effectiveValue(node:GraphNode,param:ParamDefinition,derived?:DerivedStructure):unknown{if(['n_atoms','numbers','atomic_types'].includes(param.name))return derived?.values[param.name as keyof DerivedStructure['values']];return node.params?.[param.name];}
 export function fitsEditor(value:unknown,editor:ParameterEditor|undefined):boolean{if(!editor)return hasData(value);if(editor.type==='enum')return !!editor.options?.some(option=>option.value===value);if(editor.type==='asset')return typeof value==='string'&&!!value;if(editor.type==='integer')return typeof value==='number'&&Number.isInteger(value);if(editor.type==='boolean')return typeof value==='boolean';if(editor.type==='number')return typeof value==='number'&&Number.isFinite(value);const walk=(item:unknown,level:number):boolean=>{if(editor.shape&&level<editor.shape.length)return Array.isArray(item)&&(editor.shape[level]===null||item.length===editor.shape[level])&&item.length>0&&item.every(child=>walk(child,level+1));if(Array.isArray(item))return item.length>0&&item.every(child=>walk(child,level+1));return editor.itemType==='integer'?typeof item==='number'&&Number.isInteger(item):editor.itemType==='boolean'?typeof item==='boolean':typeof item==='number'&&Number.isFinite(item);};return Array.isArray(value)&&walk(value,0);}
+export function cvOutputRank(entry?:CatalogEntry){
+ const semantics=entry?.semantics,rank=semantics?.output_rank;
+ return entry&&semantics?.source===entry.source.name&&semantics.sha256===entry.source.sha256&&typeof rank==='number'&&Number.isInteger(rank)&&rank>=0?rank:undefined;
+}
 export function collectorScalarSources(node:GraphNode,graph:CanonicalGraph,catalog?:CatalogResponse){
- if(node.kind!=='collect'||!catalog)return [];return graph.edges.filter(edge=>edge.target.node===node.id&&edge.target.port==='value').flatMap(edge=>{const source=graph.nodes.find(item=>item.id===edge.source.node);const entry=source?.kind==='cv'?entryFor(catalog,source):undefined;return entry&&entry.semantics?.source===entry.source.name&&entry.semantics.sha256===entry.source.sha256&&entry.semantics.output_rank===0?[{node:source!.id,className:entry.name,sha256:entry.source.sha256}]:[];});
+ if(node.kind!=='collect'||!catalog)return [];return graph.edges.filter(edge=>edge.target.node===node.id&&edge.target.port==='value').flatMap(edge=>{const source=graph.nodes.find(item=>item.id===edge.source.node);const entry=source?.kind==='cv'?entryFor(catalog,source):undefined;return entry&&cvOutputRank(entry)===0?[{node:source!.id,className:entry.name,sha256:entry.source.sha256}]:[];});
 }
 export function nodeMissing(node:GraphNode,entry:CatalogEntry|undefined,graph:CanonicalGraph,derived?:DerivedStructure,contract?:GraphContract,catalog?:CatalogResponse,metadata?:EditorMetadata){
  const missing:string[]=collectorScalarSources(node,graph,catalog).length?['value']:[];if(entry&&entry.semantics?.source===entry.source.name&&entry.semantics.sha256===entry.source.sha256&&entry.semantics.graph_support==='blocked')missing.push('graph_support');if(node.kind==='reduce'&&(!contract?.reductions.some(item=>item.id===node.params?.operation)))missing.push('operation');if(kinds.includes(node.kind as any)&&!entry)missing.push('class_name');
@@ -48,7 +52,15 @@ export function connectInput(graph:CanonicalGraph,nodeId:string,port:string,sour
 export function appendInput(graph:CanonicalGraph,nodeId:string,port:string,source:{node:string;port:string}):CanonicalGraph{if(graph.edges.some(edge=>edge.target.node===nodeId&&edge.target.port===port&&edge.source.node===source.node&&edge.source.port===source.port))return graph;return {...graph,edges:[...graph.edges,{source,target:{node:nodeId,port}}]};}
 export function removeInputEdge(graph:CanonicalGraph,edge:GraphEdge):CanonicalGraph{return {...graph,edges:graph.edges.filter(item=>item!==edge)};}
 export function compatibleSources(graph:CanonicalGraph,node:GraphNode,port:string,contract:GraphContract,catalog:CatalogResponse){const type=portsFor(node,contract,catalog)?.inputs[port];return graph.nodes.flatMap(source=>source.id===node.id?[]:Object.entries(portsFor(source,contract,catalog)?.outputs||{}).filter(([,value])=>value===type||contract.compatible_pairs.some(([a,b])=>a===value&&b===type)).map(([sourcePort])=>({node:source.id,port:sourcePort})));}
-export function moveCollectorEdge(graph:CanonicalGraph,edge:GraphEdge,delta:number):CanonicalGraph{const indices=graph.edges.map((item,index)=>item.target.node===edge.target.node&&item.target.port===edge.target.port?index:-1).filter(i=>i>=0),position=indices.findIndex(i=>graph.edges[i]===edge),other=position+delta;if(position<0||other<0||other>=indices.length)return graph;const edges=[...graph.edges];[edges[indices[position]],edges[indices[other]]]=[edges[indices[other]],edges[indices[position]]];return {...graph,edges};}
+export function moveCollectorEdge(graph:CanonicalGraph,edge:GraphEdge,delta:number):CanonicalGraph{
+ const indices=graph.edges.map((item,index)=>item.target.node===edge.target.node&&item.target.port===edge.target.port?index:-1).filter(i=>i>=0);
+ const position=indices.findIndex(i=>graph.edges[i]===edge),other=position+delta;
+ if(!delta||position<0||other<0||other>=indices.length)return graph;
+ const edges=[...graph.edges],ordered=indices.map(index=>edges[index]);
+ ordered.splice(position,1);ordered.splice(other,0,edge);
+ indices.forEach((index,position)=>{edges[index]=ordered[position];});
+ return {...graph,edges};
+}
 
 /** Source-matched compiler choices only. These helpers never select scientific parameters or connect nodes. */
 export const frameworkNodeKinds=['input','collect','output','reduce'] as const;

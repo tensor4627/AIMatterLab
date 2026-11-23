@@ -6,6 +6,7 @@ import ts from 'typescript';
 
 const compile=source=>ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const source=fs.readFileSync(new URL('../../frontend/features/terminal/SshConnectionPanel.tsx',import.meta.url),'utf8');
+const appearanceSource=compile(fs.readFileSync(new URL('../../frontend/features/terminal/terminal-appearance.ts',import.meta.url),'utf8'));
 const types={exports:{}};
 new Function('module','exports',compile(fs.readFileSync(new URL('../../frontend/features/compute/ssh-connection-types.ts',import.meta.url),'utf8')))(types,types.exports);
 const connection={connectionId:'connection',status:'authenticated'},shell={sessionId:'shell',connectionId:'connection',owner:'human',ownerEpoch:1,alive:true};
@@ -13,14 +14,18 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 
 // Execute the actual child component and its effects; no duplicated read loop.
 function fixture(t,invoke,initial={}){
- const hooks=[],effects=[],timers=new Set(),timeouts=[],views=[],calls=[],errors=[],states=[],writes=[];let cursor=0,props,resize;
+ const hooks=[],effects=[],timers=new Set(),timeouts=[],views=[],calls=[],errors=[],states=[],writes=[],listeners=new Map();let cursor=0,props,resize;
+ const appearance={font:'13',minimum:'11px'},root={dataset:{theme:'dark'}},appearanceModule={exports:{}};
+ new Function('module','exports','document','getComputedStyle',appearanceSource)(appearanceModule,appearanceModule.exports,{documentElement:root},()=>({getPropertyValue:key=>key==='--ui-min-font'?appearance.minimum:key==='--terminal-font-size'?appearance.font:''}));
+ const window={addEventListener:(name,listener)=>listeners.set(name,listener),removeEventListener:name=>listeners.delete(name)};
  const inputState={pending:Promise.resolve(),locked:false,observationEpoch:0};
  const useRef=value=>hooks[cursor++]??=( {current:value} );
  const useEffect=(fn,deps)=>{const id=cursor++,old=hooks[id];if(!old||deps.some((v,i)=>!Object.is(v,old.deps[i]))){hooks[id]={deps,cleanup:old?.cleanup};effects.push(()=>{hooks[id].cleanup?.();hooks[id].cleanup=fn();});}};
- class Terminal{cols=80;rows=24;options={};element={remove:()=>{this.detached=true;}};constructor(){views.push(this);}loadAddon(addon){this.addon=addon;}open(){timeouts.push(()=>assert(!this.disposed,'Queued xterm viewport initialization requires a live renderer'));}onData(fn){this.input=fn;return {dispose(){}};}write(data){writes.push(data);}dispose(){this.disposed=true;this.addon?.dispose?.();}}
+ class Terminal{cols=80;rows=24;element={remove:()=>{this.detached=true;}};constructor(options){this.options=options;views.push(this);}loadAddon(addon){this.addon=addon;}open(){timeouts.push(()=>assert(!this.disposed,'Queued xterm viewport initialization requires a live renderer'));}onData(fn){this.input=fn;return {dispose(){}};}write(data){writes.push(data);}dispose(){this.disposed=true;this.addon?.dispose?.();}}
  class ResizeObserver{constructor(fn){resize=fn;}observe(){}disconnect(){}}
  const jsx=(type,props)=>({type,props}),module={exports:{}},require=name=>{
   if(name==='./human-input.mjs')return humanInput;
+  if(name==='./terminal-appearance')return appearanceModule.exports;
   if(name==='react')return {useRef,useEffect};
   if(name==='react/jsx-runtime')return {jsx,jsxs:jsx};
   if(name==='@xterm/xterm')return {Terminal};
@@ -30,12 +35,31 @@ function fixture(t,invoke,initial={}){
   if(name==='../../ui/i18n')return {t:value=>value};
   return {};
  };
- new Function('require','module','exports','ResizeObserver','setInterval','clearInterval','setTimeout',compile(source+'\nexport {ChannelTerminal};'))(require,module,module.exports,ResizeObserver,fn=>{timers.add(fn);return fn;},fn=>timers.delete(fn),fn=>timeouts.push(fn));
+ new Function('require','module','exports','window','ResizeObserver','setInterval','clearInterval','setTimeout',compile(source+'\nexport {ChannelTerminal};'))(require,module,module.exports,window,ResizeObserver,fn=>{timers.add(fn);return fn;},fn=>timers.delete(fn),fn=>timeouts.push(fn));
  function render(next={}){props={connection,shell,visible:true,inputState,onShell:s=>states.push(s),onConnection(){},onError:e=>errors.push(e),...initial,...props,...next};cursor=0;const tree=module.exports.ChannelTerminal(props);tree.props.ref.current={clientWidth:700,clientHeight:500};while(effects.length)effects.shift()();}
  const drainTimeouts=()=>{while(timeouts.length)timeouts.shift()();};
  render();t.after(()=>{for(const hook of hooks)hook?.cleanup?.();drainTimeouts();});
- return {inputState,calls,errors,states,writes,views,render,drainTimeouts,unmount(){for(const hook of hooks)hook?.cleanup?.();},resize:()=>resize(),lock(){inputState.locked=true;inputState.observationEpoch++;},unlock(){inputState.locked=false;},async tick(){for(const fn of timers)fn();await flush();}};
+ return {inputState,calls,errors,states,writes,views,render,drainTimeouts,unmount(){for(const hook of hooks)hook?.cleanup?.();},resize:()=>resize(),changeAppearance(next){Object.assign(appearance,next);root.dataset.theme=next.theme;listeners.get('studio:appearance')?.();},lock(){inputState.locked=true;inputState.observationEpoch++;},unlock(){inputState.locked=false;},async tick(){for(const fn of timers)fn();await flush();}};
 }
+
+for(const privateLogin of [false,true])test('appearance updates the open '+(privateLogin?'private login':'SSH shell')+' without changing the channel',async t=>{
+ const f=fixture(t,async(method)=>method.endsWith('Resize')||method.endsWith('.resize')?{}:{...shell,output:'',cursor:0},privateLogin?{connection:{...connection,status:'authenticating'},shell:undefined}:{});
+ const view=f.views[0],resizeMethod=privateLogin?'compute.sshConnection.authResize':'sharedTerminal.resize';
+ const before=f.calls.filter(call=>call.method===resizeMethod).length;
+ assert.equal(view.options.fontSize,13);
+ f.changeAppearance({font:'10',minimum:'18px',theme:'light'});
+ assert.equal(view.options.fontSize,18);
+ assert.equal(view.options.theme.background,'#f8f7fa');
+ assert.equal(view.options.theme.foreground,'#292633');
+ assert.equal(f.calls.filter(call=>call.method===resizeMethod).length,before+1);
+ f.changeAppearance({font:'24px',minimum:'11px',theme:'dark'});
+ assert.equal(view.options.fontSize,24);
+ assert.equal(view.options.theme.background,'#17171b');
+ assert.equal(f.views.length,1);
+ assert(!f.calls.some(call=>call.method.includes('Input')||call.method==='sharedTerminal.input'));
+ f.unmount();f.changeAppearance({font:'12',minimum:'11px',theme:'light'});
+ assert.equal(view.options.fontSize,24);
+});
 
 for(const code of ['terminal_context_changed','terminal_owner_changed'])test('handoff suspends polling and discards an old '+code+' before the owner response',async t=>{
  let rejectOld,reads=0;

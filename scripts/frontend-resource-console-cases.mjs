@@ -102,6 +102,48 @@ async function mount(page,{theme='dark',language='zh-CN'}={}) {
 }
 
 export async function frontendResourceConsoleCases({check}) {
+  await check('resource-console-failed-read-preserves-selected-snapshot',async(page,capture)=>{
+    await mount(page);
+    await page.locator('nav [data-testid="navigate-compute-resources"]:visible').click();
+    const console=page.getByTestId('compute-resource-console'),refresh=console.getByTestId('compute-console-refresh');
+    const local=console.locator('[data-resource-key="wsl:profile-local:3"]');
+    await local.waitFor();
+    await page.waitForFunction(()=>!document.querySelector('[data-testid="compute-console-refresh"]').disabled);
+    await page.evaluate(()=>{
+      const f=window.__test,standard=window.studio.invoke,local=f.consoleSnapshot.resources[2];
+      local.localGeneration=null;local.service.status='offline';
+      window.studio.invoke=async(method,data)=>{
+        if(f.failConsoleRead&&['compute.console.snapshot','compute.console.refresh'].includes(method))throw Error('Synthetic status failure');
+        return standard(method,data);
+      };
+    });
+    await refresh.click();await local.click();
+    const attach=console.getByRole('button',{name:'连接现有服务',exact:true});
+    await attach.waitFor();
+    assert.equal(await attach.isEnabled(),true);
+    const timestamp=await console.locator('.compute-console-heading time').getAttribute('datetime');
+    await page.evaluate(()=>{window.__test.failConsoleRead=true;});
+    await refresh.click();
+    const error=console.getByTestId('compute-console-read-error');
+    await error.waitFor();
+    assert.match(await error.innerText(),/暂时无法获取最新状态；保留最近观测。/);
+    assert.equal(await console.getAttribute('data-observation'),'stale');
+    assert.equal(await local.getAttribute('aria-current'),'true');
+    assert.equal(await console.locator('.compute-console-heading time').getAttribute('datetime'),timestamp);
+    assert.equal(await attach.isDisabled(),true);
+    await capture('compute-resource-console-stale-read');
+    await page.evaluate(()=>{
+      const f=window.__test;f.failConsoleRead=false;f.consoleSnapshot.checkedAt+=1000;
+    });
+    await error.getByRole('button',{name:'重试',exact:true}).click();
+    await error.waitFor({state:'detached'});
+    assert.equal(await console.getAttribute('data-observation'),'complete');
+    assert.equal(await local.getAttribute('aria-current'),'true');
+    assert.notEqual(await console.locator('.compute-console-heading time').getAttribute('datetime'),timestamp);
+    assert.equal(await attach.isEnabled(),true);
+    assert.equal(await page.evaluate(()=>window.__test.consoleCalls.filter(call=>call.method==='compute.console.attachLocal').length),0);
+  });
+
   await check('hosted-ssh-verification-pending',async page=>{
     await mount(page);
     await page.evaluate(()=>{

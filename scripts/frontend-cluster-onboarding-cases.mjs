@@ -180,7 +180,18 @@ export async function frontendClusterOnboardingCases({check,out}){
   const projectList=page.getByTestId('project-management');await projectList.getByTestId('new-project').click();
   const form=page.getByTestId('project-authorization');
   await form.getByRole('textbox',{name:'项目名称',exact:true}).fill('Scoped fixture project');
-  await form.getByTestId('project-resource-workfile').click();
+  const workfile=form.getByTestId('project-resource-workfile');await workfile.waitFor();
+  const body=page.getByRole('dialog',{name:'新建计算项目',exact:true}).locator('.modal-body');
+  const bodyBox=await body.boundingBox();assert.ok(bodyBox);
+  await page.mouse.move(bodyBox.x+bodyBox.width-24,bodyBox.y+bodyBox.height*.5);
+  await page.mouse.wheel(0,Math.round(bodyBox.height*.55));
+  await page.waitForFunction(()=>{
+   const button=document.querySelector('[data-testid="project-resource-workfile"]');
+   if(!button)return false;
+   const box=button.getBoundingClientRect();
+   return button.contains(document.elementFromPoint(box.x+box.width/2,box.y+box.height/2));
+  },undefined,{polling:25});
+  await workfile.click();
   await form.getByTestId('project-resource-scheduler').check();
   await form.getByRole('checkbox',{name:'工具安装与最小测试',exact:true}).check();
   const save=form.getByTestId('save-project-authorization');

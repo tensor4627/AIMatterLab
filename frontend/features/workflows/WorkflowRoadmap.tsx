@@ -3,6 +3,7 @@ import {ChevronDown,ChevronUp,CircleAlert,Maximize,Minus,Plus,X} from 'lucide-re
 import type {WorkflowRoadmap as Roadmap} from '../../../contracts/workflows/roadmap.mjs';
 import type {ToolGroupRecord} from '../../../contracts/dto/tools';
 import {t} from '../../ui/i18n';
+import {readPreference,writePreference} from '../../ui/preference-storage';
 import Tooltip from '../../ui/Tooltip';
 import {layoutFrozenGroup,layoutRoadmap,legacyRoadmap,type GraphNode,type RoadmapDrawing} from './roadmap-layout';
 import {RoadmapGraphic,roleStyle} from './RoadmapGraphic';
@@ -153,7 +154,7 @@ function RoadmapCanvas({graph,bar,collapse,fields,onField,onDiscuss}:{graph:Road
 }
 
 export default function WorkflowRoadmap({taskId,name,roadmap,parameters,group,fields,onField,onPlan,onDiscuss}:{taskId:string;name:string;roadmap?:Roadmap;parameters:Record<string,unknown>;group?:ToolGroupRecord;fields:string[];onField:(field:string)=>void;onPlan:()=>void;onDiscuss:(text:string)=>void}){
- const [collapsed,setCollapsed]=useState(()=>sessionStorage.getItem('studio.roadmap.collapsed.'+taskId)==='1');
+ const [collapsed,setCollapsed]=useState(()=>readPreference('studio.roadmap.collapsed.'+taskId,true)==='1');
  const [showFindings,setShowFindings]=useState(false);
  const [source,setSource]=useState('');
  const groupKey=group?.version?group.id+'@'+group.version:'',showGroup=!!groupKey&&source===groupKey;
@@ -169,7 +170,7 @@ export default function WorkflowRoadmap({taskId,name,roadmap,parameters,group,fi
  },[]);
  useLayoutEffect(()=>{if(restoreFocus.current){toggleRef.current?.focus({preventScroll:true});restoreFocus.current=false;}},[collapsed]);
  function toggle(){
-  sessionStorage.setItem('studio.roadmap.collapsed.'+taskId,collapsed?'0':'1');restoreFocus.current=true;setCollapsed(!collapsed);setShowFindings(false);
+  writePreference('studio.roadmap.collapsed.'+taskId,collapsed?'0':'1',true);restoreFocus.current=true;setCollapsed(!collapsed);setShowFindings(false);
  }
  const bar=<><h2>{t('计算流程图')}</h2>
   {graph&&graph.nodes.length>0&&<ul className="roadmap-legend" aria-label={t('节点类型')}>

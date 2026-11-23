@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {packageRecord,configurationRecord} from '../tests/helpers/tool-packages-components.mjs';
+import {workflowRead} from '../tests/helpers/tool-workflows-components.mjs';
 
 export async function frontendContinuousWorkCases({check,out}){
  await check('continuous-work-current-wording-app-advanced-inputs-are-advisory',async page=>{
@@ -97,19 +98,108 @@ export async function frontendContinuousWorkCases({check,out}){
   await page.getByLabel('已登记工具包',{exact:true}).selectOption(record.package_id);await page.getByLabel('已登记配置',{exact:true}).selectOption(configuration.configuration_id);await page.getByTestId('tool-configuration-activate').click();await page.getByTestId('tool-package-notice').getByText(/执行技能已生成/).waitFor();await page.getByRole('button',{name:'查看执行技能与指导范围',exact:true}).click();await page.getByTestId('tool-environment-findings').waitFor();await page.getByLabel('执行技能服务商',{exact:true}).selectOption('codex');await page.getByTestId('tool-execution-bind').click();await page.getByTestId('tool-package-notice').getByText(/已授权当前对话引用执行技能/).waitFor();await page.getByText('配置、修复或升级的指导授权',{exact:true}).click();await page.locator('.tool-guidance-resource input').check();assert.match(await page.getByTestId('tool-guidance-grant').innerText(),/本次委托/);await page.getByTestId('tool-guidance-grant').click();await page.getByTestId('tool-package-notice').getByText(/重启后保留/).waitFor();assert.match(await page.getByTestId('tool-package-notice').innerText(),/撤销/);await page.getByLabel('前置指导读取用途',{exact:true}).selectOption('update');assert.match(await page.getByTestId('tool-guidance-grant').innerText(),/限时/);await page.getByTestId('tool-guidance-grant').click();await page.getByTestId('tool-package-notice').getByText(/限时授权至/).waitFor();assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='tools.configurations.grant').length),2);assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='tools.configurations.execute'||call.method==='task.execute').length),0);
  });
  await check('continuous-work-app-run-details-retains-chat-until-associated-action',async page=>{
-  await page.evaluate(()=>{
-   const f=window.__test,original=window.studio.invoke;f.conversations=['current','owner'].map(id=>({id:'codex:'+id,provider:'codex',threadId:id,name:'Conversation '+id,projectId:'project',taskId:id==='owner'?'owner-task':null}));f.task={id:'owner-task',provider:'codex',threadId:'owner',name:'Associated workflow',workflowVersion:2,parameters:{engine:'pydyn.md'},steps:[],artifacts:[],workspaceChoice:'draft'};
-   f.run={...f.run,status:'succeeded',studio_workflow_binding:{schema_version:1,workflow_id:'workflow',execution_id:'attempt',step_id:'step',snapshot_sha256:'a'.repeat(64),group_id:'group',group_version:'b'.repeat(64),configuration_id:'configuration',execution_skill_id:'skill',execution_skill_sha256:'c'.repeat(64)}};localStorage.setItem('studio.conversation','codex:current');
+  const bundle=workflowRead({id:'attempt',taskId:'owner-task',workspaceId:'project'});
+  await page.evaluate(bundle=>{
+   const f=window.__test,original=window.studio.invoke,workerBinding={distribution:'Ubuntu',root:'/synthetic-worker',port:8767};
+   const {workflow,execution}=bundle,step=execution.steps.at(-1);
+   step.run_id=f.run.id;step.status='completed';step.run_status='succeeded';execution.status='completed';
+   f.conversations=['current','owner'].map(id=>({id:'codex:'+id,provider:'codex',threadId:id,name:'Conversation '+id,projectId:'project',taskId:id==='owner'?'owner-task':null}));
+   f.task={id:'owner-task',provider:'codex',threadId:'owner',name:'Associated workflow',workflowVersion:2,parameters:{engine:'pydyn.md'},steps:[],artifacts:[{kind:'run',id:f.run.id}],workspaceChoice:'workspace',workspace:{id:'project',root:'/fixture',workerBinding}};
+   f.run={...f.run,status:'succeeded',studio_workflow_binding:{schema_version:1,workflow_id:workflow.id,execution_id:execution.id,step_id:step.id,snapshot_sha256:execution.snapshot_sha256,group_id:execution.group.id,group_version:execution.group.version,configuration_id:step.configuration_id,execution_skill_id:step.execution_skill_id,execution_skill_sha256:'c'.repeat(64)}};localStorage.setItem('studio.conversation','codex:current');
    window.studio.invoke=async(method,data)=>{
     if(method==='conversation.list')return f.conversations;if(method==='task.list')return [f.task];if(method==='compute.resource.status')return {schemaVersion:1,kind:null,status:'none',selectionId:null};
     if(method==='conversation.select'){f.calls.push({method,data});return f.conversations.find(value=>value.id===data.id);}if(method==='conversation.remember')return f.conversations.find(value=>value.threadId===data.threadId);
     if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return {model:'fixture-model',thread:{id:data.params.threadId,turns:[{items:[{id:'saved-'+data.params.threadId,type:'agentMessage',text:'History for '+data.params.threadId}]}]}};
-    if(method==='tools.workflows.locateRun'){f.calls.push({method,data});return {task_id:'owner-task',provider:'codex',thread_id:'owner',conversation_id:'codex:owner',workspace_id:'project',workflow_id:'workflow',execution_id:'attempt',step_id:'step',run_id:f.run.id};}
+    if(method==='tools.workflows.locateRun'){
+     f.calls.push({method,data});if(f.missingWorkflowLocation)throw Error('Fixture workflow reference unavailable');
+     return {task_id:'owner-task',provider:'codex',thread_id:'owner',conversation_id:'codex:owner',workspace_id:'project',workflow_id:workflow.id,execution_id:execution.id,step_id:step.id,run_id:f.run.id};
+    }
+    if(method==='tools.workflows.context')return {task_id:data.task_id,owner_key:'fixture-owner',workspace_id:'project',worker_binding:workerBinding,groups:[],configurations:[],creations:[],workflows:[{task_id:f.task.id,workspace_id:'project',execution_id:execution.id,group_id:execution.group.id,group_version:execution.group.version,name:workflow.name}]};
+    if(method==='tools.workflows.read'){f.calls.push({method,data});return structuredClone(bundle);}
     return original(method,data);
    };return window.renderTest('App');
-  });
+  },bundle);
   await page.getByText('History for current',{exact:true}).waitFor();await page.locator('.composer textarea').fill('Keep current unsent draft');await page.locator('[data-testid="navigate-runs"]:visible').click();await page.locator('.job-record-open').first().click();await page.getByTestId('tool-workflow-run-readonly').waitFor();assert.equal(await page.locator('.composer textarea').inputValue(),'Keep current unsent draft');assert.equal(await page.evaluate(()=>localStorage.getItem('studio.conversation')),'codex:current');assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='tools.workflows.locateRun').length),0);await page.screenshot({path:path.join(out,'continuous-app-run-details.png')});
-  await page.getByTestId('open-tool-workflow-step').click();await page.getByText('History for owner',{exact:true}).waitFor();await page.getByTestId('agent-task-page').waitFor();assert.equal(await page.evaluate(()=>localStorage.getItem('studio.conversation')),'codex:owner');assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='task.execute').length),0);
+  await page.getByTestId('open-tool-workflow-step').click();await page.getByText('History for owner',{exact:true}).waitFor();
+  const workflowPage=page.getByTestId('agent-task-page'),returnToStep=workflowPage.getByTestId('open-tool-workflow-step');
+  const step=page.locator('[data-testid="tool-workflow-step-step-2"][data-focused="true"]');await step.waitFor();
+  assert.equal(await step.evaluate(element=>document.activeElement===element),true);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('studio.conversation')),'codex:owner');
+  await returnToStep.click();await page.waitForFunction(()=>window.__test.calls.filter(c=>c.method==='tools.workflows.read').length===2);
+  await page.waitForFunction(()=>document.activeElement?.id==='tool-flow-step-attempt-step-2');
+  assert.equal(await page.evaluate(()=>localStorage.getItem('studio.section')),'agent-task:owner-task');
+  await page.evaluate(()=>{window.__test.missingWorkflowLocation=true;});await returnToStep.click();
+  await page.getByTestId('diagnostic-notice').filter({hasText:'Fixture workflow reference unavailable'}).waitFor();
+  const calls=await page.evaluate(()=>window.__test.calls);
+  assert.deepEqual(calls.filter(c=>c.method==='tools.workflows.locateRun').map(c=>c.data),[{run_id:'run'},{run_id:'run'},{run_id:'run'}]);
+  assert.deepEqual(calls.filter(c=>c.method==='tools.workflows.read').map(c=>c.data),[{task_id:'owner-task',execution_id:'attempt'},{task_id:'owner-task',execution_id:'attempt'}]);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('studio.section')),'agent-task:owner-task');
+  assert(!calls.some(c=>c.method==='task.execute'||c.method==='worker.request'&&/\/(?:submit|resume|cancel)$/.test(c.data.target)));
+ });
+ for(const theme of ['dark','light'])await check('continuous-work-resume-repair-modal-'+theme,async page=>{
+  let nativeDialogs=0;page.on('dialog',async dialog=>{nativeDialogs++;await dialog.dismiss();});
+  await page.evaluate(theme=>{
+   document.documentElement.dataset.theme=theme;
+   localStorage.setItem('studio.resume.run','{malformed');localStorage.setItem('studio.resume.other','keep this record');
+   return window.renderTest('RunDetail',{run:{...window.__test.run,status:'failed'},onRefresh:()=>{},onError:()=>{}});
+  },theme);
+  const clearLabel='已核对，清除损坏记录',open=page.getByRole('button',{name:clearLabel,exact:true});
+  const dialog=page.getByRole('dialog',{name:'清除损坏的本地续算记录'});
+  await open.click();await dialog.waitFor();
+  assert.match(await dialog.innerText(),/Fixture run · run/);assert.equal(await dialog.evaluate(node=>node.closest('html').dataset.theme),theme);
+  await page.waitForFunction(()=>document.activeElement?.textContent==='取消');
+  await page.screenshot({path:path.join(out,'continuation-repair-'+theme+'.png')});
+  await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});
+  assert.equal(await open.evaluate(node=>document.activeElement===node),true);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('studio.resume.run')),'{malformed');
+  await open.click();await dialog.getByRole('button',{name:clearLabel,exact:true}).click();await dialog.waitFor({state:'detached'});
+  assert.deepEqual(await page.evaluate(()=>[localStorage.getItem('studio.resume.run'),localStorage.getItem('studio.resume.other')]),[null,'keep this record']);
+  assert.equal(await page.getByRole('button',{name:'续算',exact:true}).isEnabled(),true);
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').length),0);assert.equal(nativeDialogs,0);
+ });
+  await check('continuous-work-resume-repair-closes-when-narrow-layout-hides-workspace',async page=>{
+   await page.setViewportSize({width:640,height:800});
+   await page.evaluate(()=>{
+    window.__test.run={...window.__test.run,status:'failed'};
+    localStorage.setItem('studio.section','runs');
+    localStorage.setItem('studio.resume.run','{malformed');
+    return window.renderTest('App');
+   });
+   await page.locator('[data-job-key="local:run"] .job-record-open').click();
+   const open=page.getByRole('button',{name:'已核对，清除损坏记录',exact:true});
+   await open.waitFor();
+   await page.getByTestId('show-agent').click();
+   const composer=page.locator('.agent-panel .composer textarea');
+   await composer.waitFor();
+   await open.waitFor({state:'hidden'});
+   await page.setViewportSize({width:1100,height:800});
+   await open.click();
+   const dialog=page.locator('.run-detail [role="dialog"]');
+   await dialog.waitFor();
+   assert.match(await dialog.innerText(),/Fixture run · run/);
+   await page.setViewportSize({width:640,height:800});
+   await dialog.waitFor({state:'detached'});
+   await composer.focus();
+   assert.equal(await composer.evaluate(node=>document.activeElement===node),true);
+   await page.keyboard.type('Keep this conversation draft');
+   assert.equal(await composer.inputValue(),'Keep this conversation draft');
+   await page.screenshot({path:path.join(out,'continuation-repair-narrow-conversation.png')});
+   await page.setViewportSize({width:1100,height:800});
+   await open.waitFor();
+   assert.equal(await dialog.count(),0);
+   assert.equal(await page.evaluate(()=>localStorage.getItem('studio.resume.run')),'{malformed');
+   assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').length),0);
+  });
+ await check('continuous-work-embedded-run-without-workflow-navigator',async page=>{
+  await page.evaluate(()=>{
+   const f=window.__test;f.run={...f.run,status:'succeeded',studio_workflow_binding:{schema_version:1}};f.openedRuns=[];
+   const task={id:'standalone-legacy-task',name:'Retained run',steps:[],parameters:{},artifacts:[{kind:'run',id:f.run.id,name:'Open retained computation'}]};
+   return window.renderTest('AgentTaskPage',{task,worker:true,environments:[f.environment],onRun:id=>f.openedRuns.push(id),onError:()=>{},onRefresh:()=>{}});
+  });
+  const history=page.getByTestId('workflow-run-history');await history.getByTestId('tool-workflow-run-readonly').waitFor();
+  assert.equal(await history.getByTestId('open-tool-workflow-step').count(),0);
+  await page.getByText('模块草稿与输入记录',{exact:false}).click();await page.getByRole('button',{name:'Open retained computation'}).click();
+  assert.deepEqual(await page.evaluate(()=>window.__test.openedRuns),['run']);
  });
  for(const theme of ['dark','light'])await check('continuous-work-history-anchor-replay-'+theme,async page=>{
   await page.evaluate(async theme=>{

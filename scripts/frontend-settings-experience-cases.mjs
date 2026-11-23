@@ -4,6 +4,72 @@ import path from 'node:path';
 
 export async function frontendSettingsExperienceCases({check,out}){
  const snapshot=(page,name)=>page.screenshot({path:path.join(out,name+'.png'),fullPage:true});
+ await check('experience-settings-cluster-distinguishes-empty-limit-from-zero',async page=>{
+  await page.evaluate(()=>{
+   const test=window.__test;
+   window.studio.invoke=async(method,data)=>{
+    if(method==='ssh.existing')return [];
+    if(method==='worker.request'&&data.target==='/api/clusters'){
+     if(data.method==='POST')test.savedCluster={...data.data,id:'limit-fixture',version:1};
+     return data.method==='POST'?test.savedCluster:test.savedCluster?[test.savedCluster]:[];
+    }
+    if(method==='worker.request'&&data.target==='/api/cluster/profile')return test.savedCluster;
+    throw Error('Unexpected cluster limit fixture request: '+method);
+   };
+   return window.renderTest('ClusterPage',{worker:true,serviceVersion:'current',settings:{},onError:e=>{throw e;},onRefresh(){}});
+  });
+  await page.getByTestId('ssh-host').fill('fixture.invalid');
+  await page.getByTestId('ssh-username').fill('fixture');
+  await page.locator('.settings-advanced>summary').filter({hasText:/^更多/}).click();
+  await page.getByRole('button',{name:'提交 Skill',exact:true}).click();
+  const limit=page.getByRole('spinbutton',{name:'gpus',exact:true});
+  await limit.fill('');
+  assert.equal(await limit.inputValue(),'');
+  await page.getByRole('button',{name:'保存连接',exact:true}).click();
+  await page.getByText('请填写资源上限。 · gpus',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>!!window.__test.savedCluster),false);
+  await limit.fill('0');
+  await page.getByRole('button',{name:'保存连接',exact:true}).click();
+  await page.getByText('连接已保存；项目授权未改变。',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.__test.savedCluster.limits),{cpus:64,gpus:0,memory_mb:262144});
+ });
+ await check('experience-settings-storage-denied-language-preview-and-cancel',async page=>{
+  await page.evaluate(()=>{
+   window.__test.workerStatus={status:'disconnected',checkedAt:1};
+   Object.defineProperty(window,'localStorage',{get(){throw new DOMException('Fixture: storage disabled','SecurityError');}});
+   return window.renderTest('App');
+  });
+  const settings=page.getByRole('button',{name:'设置',exact:true}).filter({visible:true});
+  await settings.click();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByRole('button',{name:'语言',exact:true}).click();
+  await dialog.locator('#settings-language').selectOption('en');
+  await dialog.getByRole('button',{name:'Cancel',exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>document.documentElement.lang),'en');
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({state:'detached'});
+  await settings.waitFor();
+  assert.equal(await page.evaluate(()=>document.documentElement.lang),'zh-CN');
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').length),0);
+ });
+ await check('experience-settings-idle-edit-and-save-when-preference-writes-fail',async page=>{
+  const warnings=[];
+  page.on('console',msg=>{if(/NaN/.test(msg.text()))warnings.push(msg.text());});
+  await page.evaluate(()=>{
+   Storage.prototype.setItem=()=>{throw new DOMException('Fixture: quota exhausted','QuotaExceededError');};
+   return window.renderTest('App');
+  });
+  await page.getByRole('button',{name:'设置',exact:true}).filter({visible:true}).click();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByRole('button',{name:'计算连接',exact:true}).click();
+  const idle=page.getByTestId('terminal-idle-minutes');
+  await idle.fill('');
+  assert.equal(await idle.inputValue(),'');
+  await idle.pressSequentially('30');
+  await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
+  await page.waitForFunction(()=>window.__test.settings.terminalIdleMinutes===30);
+  assert.deepEqual(warnings,[]);
+ });
  async function account(page){await page.evaluate(()=>{
   const f=window.__settingsFixture={calls:[],errors:[],saved:{schemaVersion:1,id:'fixture-api',provider:'compatible',credentialStored:true,revision:1,preset:'custom',api:'openai-completions',baseUrl:'https://fixture.invalid/v1',models:[{id:'fixture-model-a'}],defaultModel:'fixture-model-a',name:'Fixture API'}};
   window.studio.invoke=async(method,data)=>{f.calls.push({method,data});if(method==='models.profiles.list')return [f.saved];if(method==='models.profiles.save'){f.saved={...data.profile,revision:f.saved.revision+1,credentialStored:true,defaultModel:data.profile.models[0].id};return f.saved;}if(method==='models.profiles.test')return new Promise((resolve,reject)=>{f.finishTest=()=>{f.saved={...f.saved,modelAccess:'passed'};resolve({status:'passed',model:f.saved.defaultModel});};f.failTest=()=>reject(Error('Synthetic API unavailable'));});throw Error('Unexpected synthetic account action '+method);};

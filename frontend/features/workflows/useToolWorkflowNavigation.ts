@@ -26,6 +26,7 @@ export function useToolWorkflowNavigation(ports:NavigationPorts){
   let selected=selection,opened=navigation;
   try{
    const location=await (start.locateRun||toolWorkflows.locateRun)(runId);if(!current(selection,navigation))return;
+   if(location.run_id!==runId)throw Error('The workflow location does not match the requested run');
    const conversation=latest.current.conversations.find(value=>value.id===location.conversation_id&&value.provider===location.provider&&value.threadId===location.thread_id&&value.taskId===location.task_id);if(!conversation)throw Error('The original workflow conversation is no longer available; retain the run and restore its original binding');
    if(latest.current.selected.current?.id!==conversation.id){selected++;opened++;await latest.current.chooseConversation(conversation);}
    if(!current(selected,opened))return;const acknowledged=latest.current.selected.current;

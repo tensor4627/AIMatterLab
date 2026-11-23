@@ -4,6 +4,7 @@ import {useManagedResources} from '../compute/useManagedResources';
 import {Terminal} from '@xterm/xterm';
 import {createHumanInputWriter} from './human-input.mjs';
 import {FitAddon} from '@xterm/addon-fit';
+import {readTerminalAppearance} from './terminal-appearance';
 import {serviceErrorMessage,serviceIdentityUnconfirmed,servicePhaseMessage,serviceTransfer} from './ssh-service-presentation';
 import {invoke} from '../../api/studio';
 import {managedSshServices} from '../../api/compute-resources';
@@ -69,7 +70,7 @@ function ChannelTerminal({connection,shell,visible,resourceScope='',onGeometry,i
  useEffect(()=>{
   if(!host.current)return;let stopped=false,reading=false,cursor=0,inputs=Promise.resolve();const id=connection.connectionId,sessionId=shell?.sessionId;
   const writeInput=createHumanInputWriter();let followup:ReturnType<typeof setTimeout>|undefined;
-  const term=new Terminal({fontSize:13,fontFamily:'Cascadia Code, Consolas, monospace',scrollback:2000,theme:{background:'#121218',foreground:'#d1d5e4'}}),fit=new FitAddon();term.loadAddon(fit);term.open(host.current);view.current=term;
+  const term=new Terminal({...readTerminalAppearance(),fontFamily:'Cascadia Code, Consolas, monospace',scrollback:2000}),fit=new FitAddon();term.loadAddon(fit);term.open(host.current);view.current=term;
   const current=()=>!stopped&&latest.current.connection.connectionId===id&&latest.current.shell?.sessionId===sessionId;
   const editable=()=>current()&&latest.current.visible&&(sessionId?latest.current.shell?.owner==='human'&&!latest.current.shell.awaitingConversation&&latest.current.shell.alive===true&&!latest.current.shell.expired:latest.current.connection.status==='authenticating');
   const input=term.onData(data=>{
@@ -104,7 +105,14 @@ function ChannelTerminal({connection,shell,visible,resourceScope='',onGeometry,i
    });
   };
   syncSize.current=resize;
+  const appearance=()=>{
+   if(!current())return;
+   const next=readTerminalAppearance(),fontChanged=term.options.fontSize!==next.fontSize;
+   term.options.theme=next.theme;
+   if(fontChanged){term.options.fontSize=next.fontSize;resize();}
+  };
   const observer=new ResizeObserver(resize);observer.observe(host.current);
+  window.addEventListener('studio:appearance',appearance);
   const read=async()=>{if(reading||inputState.locked||!current()||!latest.current.visible)return;reading=true;const readEpoch=latest.current.shell?.ownerEpoch,observationEpoch=inputState.observationEpoch,display=displayEpoch.current,waiting=latest.current.shell?.awaitingConversation;
    // Handoff binds a conversation before returning its new owner epoch. Reads
    // started before that transition must not publish a stale result or error.
@@ -138,7 +146,7 @@ function ChannelTerminal({connection,shell,visible,resourceScope='',onGeometry,i
    }
   };
   syncRead.current=()=>void read();const timer=setInterval(()=>void read(),500);return()=>{
-   if(stopped)return;stopped=true;syncSize.current=null;syncRead.current=null;clearInterval(timer);clearTimeout(followup);input.dispose();observer.disconnect();if(view.current===term)view.current=null;
+   if(stopped)return;stopped=true;syncSize.current=null;syncRead.current=null;clearInterval(timer);clearTimeout(followup);input.dispose();observer.disconnect();window.removeEventListener('studio:appearance',appearance);if(view.current===term)view.current=null;
    // xterm 5 queues viewport initialization during open(). Let it finish before
    // disposing its renderer, after all channel callbacks and visible DOM detach.
    term.element?.remove();setTimeout(()=>term.dispose(),0);

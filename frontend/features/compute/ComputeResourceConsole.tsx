@@ -39,8 +39,8 @@ const channelName = (channel:ComputeConsoleChannel) => channel.conversationName 
 function Status({status,label}:{status:string;label:string}) {
   return <span className="compute-console-status" data-status={status}><i aria-hidden="true"/>{t(label)}</span>;
 }
-function Checked({at}:{at?:number|null}) {
-  return at == null ? null : <small className="compute-console-checked" title={new Date(at).toLocaleString()}>{t('最近核对')} <time dateTime={new Date(at).toISOString()}>{time(at)}</time></small>;
+function Checked({at,label='最近核对'}:{at?:number|null;label?:string}) {
+  return at == null ? null : <small className="compute-console-checked" title={new Date(at).toLocaleString()}>{t(label)} <time dateTime={new Date(at).toISOString()}>{time(at)}</time></small>;
 }
 function LinkCard({title,observation,children}:{title:string;observation:{status:ComputeLinkStatus;checkedAt?:number|null};children?:ReactNode}) {
   return <div className="compute-console-link">
@@ -62,7 +62,8 @@ function TerminalList({terminals,onOpen}:{terminals:ComputeConsoleTerminal[];onO
 }
 
 export default function ComputeResourceConsole({projectId,onConnections,onConnectSsh,onOpenTerminal,onOpenConversation,onConfigure,onWorkspace,onTools,onGuide,onUseForWorkflow}:Props) {
-  const [snapshot,setSnapshot] = useState<ComputeConsoleSnapshot|null>(null);
+  const [receipt,setReceipt] = useState<{snapshot:ComputeConsoleSnapshot;readAt:number}|null>(null);
+  const snapshot=receipt?.snapshot;
   const [selection,setSelection] = useState<Pick<ComputeConsoleResource,'key'|'profileId'|'profileVersion'>|null>(null);
   const [probing,setProbing] = useState(false), [running,setRunning] = useState(false);
   const [error,setError] = useState(''), [feedback,setFeedback] = useState('');
@@ -75,10 +76,10 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
     const request = async () => {
       try {
         const next = await typed(refresh ? 'compute.console.refresh' : 'compute.console.snapshot',{});
-        if (!Array.isArray(next?.resources)) throw Error('invalid_compute_console_snapshot');
-        if (mounted.current && ticket === readTicket.current) { setSnapshot(next);setError(''); }
+        if (!Array.isArray(next?.resources)||!Array.isArray(next.standalone)||!Array.isArray(next.projects)) throw Error('invalid_compute_console_snapshot');
+        if (mounted.current && ticket === readTicket.current) { setReceipt({snapshot:next,readAt:Date.now()});setError(''); }
       } catch {
-        if (mounted.current && ticket === readTicket.current) { setSnapshot(null);setError(t('无法读取计算资源状态。')); }
+        if (mounted.current && ticket === readTicket.current) setError('无法读取计算资源状态。');
       }
     };
     if (!refresh) { await request();return; }
@@ -88,8 +89,9 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
     finally { if(probe.current===pending){probe.current=null;if(mounted.current)setProbing(false);} }
   }
   useEffect(() => {
+    let active=true;
     mounted.current = true;
-    void load(false).then(()=>{if(mounted.current)void load(true);});
+    void load(false).then(()=>{if(active)void load(true);});
     const focus = () => {if (!probe.current) void load(true);};
     const interval = window.setInterval(focus,18000);
     const unsubscribe = window.studio?.onEvent(event => {
@@ -97,7 +99,7 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
         'studio/conversationTerminalChanged','studio/workerConnected','studio/agentTurnState'].includes(event.method) && !probe.current) void load(false);
     });
     window.addEventListener('focus',focus);
-    return () => { mounted.current=false;readTicket.current++;window.clearInterval(interval);unsubscribe?.();window.removeEventListener('focus',focus); };
+    return () => { active=false;mounted.current=false;readTicket.current++;window.clearInterval(interval);unsubscribe?.();window.removeEventListener('focus',focus); };
   },[]);
 
   async function run(work:()=>Promise<unknown>,done:string) {
@@ -120,22 +122,26 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
   }
 
   const rows = snapshot?.resources ?? [];
+  const stale = !!snapshot && !!error;
   const foreground = snapshot?.foregroundLocal;
   const selected = rows.find(row=>row.key===selection?.key) ?? rows.find(row=>!row.connectionId&&row.profileId===selection?.profileId&&row.profileVersion===selection.profileVersion) ??
     rows.find(row=>(row.master ?? row.service).status==='online') ?? rows[0];
   useEffect(()=>{
-    if(selected&&selected.key!==selection?.key)setSelection({key:selected.key,profileId:selected.profileId,profileVersion:selected.profileVersion});
-  },[selected?.key]);
-  return <main className="page compute-console" data-testid="compute-resource-console">
+    if(selected&&(selected.key!==selection?.key||selected.profileId!==selection.profileId||selected.profileVersion!==selection.profileVersion))setSelection({key:selected.key,profileId:selected.profileId,profileVersion:selected.profileVersion});
+  },[selected?.key,selected?.profileId,selected?.profileVersion]);
+  return <main className="page compute-console" data-testid="compute-resource-console" data-observation={stale?'stale':snapshot?.observation}>
     <header className="compute-console-heading">
-      <div><h1>{t('计算资源')}</h1><Checked at={snapshot?.checkedAt}/></div>
+      <div><h1>{t('计算资源')}</h1><Checked at={snapshot?.checkedAt??receipt?.readAt} label={snapshot?.checkedAt==null?'最近读取':undefined}/></div>
       <div className="compute-console-actions">
         <button type="button" className="button" data-testid="compute-console-refresh" disabled={probing} onClick={()=>void load(true)}><RefreshCw size={15} className={probing?'is-refreshing':undefined}/>{t(probing?'正在核对':'刷新状态')}</button>
         <button type="button" className="button primary" onClick={onConnections}><Plus size={16}/>{t('添加或配置连接')}</button>
       </div>
     </header>
-    {error && <p className="notice" role="alert">{error}</p>}
-    {snapshot?.observation==='partial' && <p className="notice" role="status">{t('部分终端状态暂时无法核对。')}</p>}
+    {error && <p className="notice" role={stale?'status':'alert'} data-testid="compute-console-read-error">
+      {t(stale?'暂时无法获取最新状态；保留最近观测。':error)}{' '}
+      <button type="button" className="text-button" disabled={probing} onClick={()=>void load(true)}>{t('重试')}</button>
+    </p>}
+    {!stale && snapshot?.observation==='partial' && <p className="notice" role="status">{t('部分终端状态暂时无法核对。')}</p>}
     {feedback && <p className="notice" role="status">{feedback}</p>}
     {!snapshot && !error && <p className="muted" role="status">{t('正在读取计算资源…')}</p>}
     {foreground && <section className="compute-console-standalone compute-console-foreground">
@@ -161,7 +167,7 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
           </button>;
         })}
       </nav>
-      <ResourceDetail key={selected.key} resource={selected} snapshot={snapshot!} initialProjectId={projectId} running={running} run={run} confirm={setConfirm}
+      <ResourceDetail key={JSON.stringify([selected.key,selected.profileId,selected.profileVersion])} resource={selected} snapshot={snapshot!} initialProjectId={projectId} running={running} stale={stale} run={run} confirm={setConfirm}
         onOpenTerminal={terminal=>onOpenTerminal(selected,terminal)} onConnectSsh={()=>onConnectSsh(selected)} onConfigure={section=>onConfigure(selected,section)}
         onWorkspace={onWorkspace?mode=>onWorkspace(selected,mode):undefined} onTools={onTools?()=>onTools(selected):undefined} onGuide={onGuide?()=>onGuide(selected):undefined}
         onUseForWorkflow={onUseForWorkflow?()=>onUseForWorkflow(selected):undefined}
@@ -177,14 +183,14 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
 }
 
 interface DetailProps {
-  resource:ComputeConsoleResource; snapshot:ComputeConsoleSnapshot; initialProjectId?:string; running:boolean;
+  resource:ComputeConsoleResource; snapshot:ComputeConsoleSnapshot; initialProjectId?:string; running:boolean; stale:boolean;
   run:(work:()=>Promise<unknown>,done:string)=>Promise<void>;confirm:(value:Confirmation)=>void;
   onOpenTerminal:(terminal?:ComputeConsoleTerminal)=>void;onConnectSsh:()=>void;onConfigure:(section?:'service')=>void;
   onOpenConversation:(channel:ComputeConsoleChannel)=>void;
   onWorkspace?:(mode:'handoff'|'change')=>void;onTools?:()=>void;onGuide?:()=>void;
   onUseForWorkflow?:()=>Promise<unknown>;
 }
-function ResourceDetail({resource,snapshot,initialProjectId,running,run,confirm,onOpenTerminal,onConnectSsh,onConfigure,onOpenConversation,onWorkspace,onTools,onGuide,onUseForWorkflow}:DetailProps) {
+function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,confirm,onOpenTerminal,onConnectSsh,onConfigure,onOpenConversation,onWorkspace,onTools,onGuide,onUseForWorkflow}:DetailProps) {
   const [projectId,setProjectId] = useState(initialProjectId || '');
   const [workspace,setWorkspace]=useState<ResourceWorkspaceReadResult|null>(null);
   const [installed,setInstalled]=useState<ResourceToolSetup[]>([]);
@@ -241,7 +247,7 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,run,confirm,
       <div className="compute-console-actions">
         {resource.kind==='ssh' && resource.current && !active && resource.master?.status!=='preparing' && (!ssh||resource.master?.status==='lost') && <button type="button" className="button primary" onClick={onConnectSsh}><PlugZap size={15}/>{t('连接 SSH')}</button>}
         {resource.kind==='ssh' && ssh && (active || resource.master?.status==='preparing') && <button type="button" className="button" onClick={()=>onOpenTerminal()}><Terminal size={15}/>{t(active?'查看 SSH 连接':'打开认证终端')}</button>}
-        {resource.kind==='wsl' && !resource.localGeneration && <button type="button" className="button primary" disabled={running||preparing} onClick={()=>void run(()=>typed('compute.console.attachLocal',profile),'已连接现有作业服务')}><PlugZap size={15}/>{t('连接现有服务')}</button>}
+        {resource.kind==='wsl' && !resource.localGeneration && <button type="button" className="button primary" disabled={running||preparing||stale} onClick={()=>void run(()=>typed('compute.console.attachLocal',profile),'已连接现有作业服务')}><PlugZap size={15}/>{t('连接现有服务')}</button>}
         {resource.current && <button type="button" className="text-button" onClick={()=>onConfigure()}>{t('编辑连接')}</button>}
         {resource.kind==='ssh'&&resource.current&&onGuide&&<button type="button" className="text-button" data-testid="resource-open-guide" onClick={onGuide}>{t('集群实操引导')}</button>}
       </div>

@@ -3,6 +3,30 @@ import path from 'node:path';
 
 export async function frontendWorkflowExperienceCases({check,out}){
  const snapshot=(page,name)=>page.screenshot({path:path.join(out,name+'.png'),fullPage:true});
+ await check('workflow-experience-entry-summary-direct-field-and-review-links',async page=>{
+  await page.evaluate(async()=>{
+   const {default:roadmap}=await import('/tests/fixtures/workflow-roadmap.json');
+   const task={id:'workflow-overview-fixture',name:'Saved sampling plan',artifacts:[],updatedAt:1,roadmap,
+    parameters:{engine:'gpumd.md',structure:{file:'/fixture/snapshot.xyz',elements:['Cu','Ni'],atom_count:128},potential_file:'/fixture/nep.txt',dynamics:{temperature_K:310}},
+    steps:[{id:'run-setup',title:'计算输入',fields:[{key:'control_file',label:'控制文件',type:'file',required:true},{key:'native.options',label:'原生控制选项',type:'object',required:true,advanced:true}]}],
+    missingFields:['核对拟用的计算队列。']};
+   return window.renderTest('AgentTaskPage',{worker:false,task,environments:[],onError:()=>{},onRefresh:()=>{}});
+  });
+  const summary=page.getByTestId('workflow-entry-summary'),parameters=page.getByTestId('workflow-key-parameters');
+  assert.match(await summary.innerText(),/分子动力学原子轨迹/);assert.match(await summary.innerText(),/热力学时间序列 · 待确认/);
+  assert.match(await parameters.innerText(),/snapshot\.xyz[\s\S]*Cu, Ni[\s\S]*128[\s\S]*nep\.txt[\s\S]*310/);
+  assert.equal(await summary.evaluate(element=>element.previousElementSibling?.getAttribute('data-testid')),'workflow-pinned-heading');
+  await snapshot(page,'workflow-entry-summary');
+  await page.getByLabel('只看缺项').check();await page.getByLabel('搜索流程参数').fill('hidden by query');assert.equal(await page.locator('.visual-flow-step').count(),0);
+  const blocker=summary.getByRole('button',{name:'原生控制选项',exact:true});await blocker.focus();await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>document.activeElement?.closest('[data-field]')?.getAttribute('data-field')==='native.options');
+  assert.equal(await page.locator('[data-field="native.options"] textarea').isVisible(),true);
+  assert.equal(await page.getByLabel('搜索流程参数').inputValue(),'');assert.equal(await page.getByLabel('只看缺项').isChecked(),false);
+  await summary.getByRole('button',{name:'待确认事项 · 1',exact:true}).click();
+  await page.waitForFunction(()=>document.activeElement?.getAttribute('data-testid')==='workflow-requirements');
+  assert.match(await page.getByTestId('workflow-requirements').innerText(),/核对拟用的计算队列/);
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['task.edit','task.execute'].includes(c.method)).length),0);
+ });
  await check('workflow-experience-hamiltonian-directory-opens-planned-tool',async page=>{
   await page.evaluate(()=>window.renderTest('App'));
   await page.locator('nav').getByTestId('navigate-tools').click();
@@ -16,7 +40,7 @@ export async function frontendWorkflowExperienceCases({check,out}){
   for(const label of ['数据准备','模型训练','独立评估','哈密顿量重构','能带分析']){
    await detail.locator('.tool-capabilities').getByText(label,{exact:true}).waitFor();
   }
-  assert.equal(await detail.getByRole('button').count(),0);
+  assert.deepEqual(await detail.getByRole('button').evaluateAll(buttons=>buttons.map(button=>button.dataset.testid)),['pin-tool']);
   await snapshot(page,'hamiltonian-tool');
   await page.locator('nav').getByTestId('navigate-tools').click();
   await page.getByTestId('open-tool-training').waitFor();

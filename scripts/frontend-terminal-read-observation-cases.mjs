@@ -21,6 +21,7 @@ async function openObservedTerminal(page,human=false){
    if(method==='compute.profiles.list')return {profiles:[profile],defaults:{distribution:'Ubuntu',root:'~/fixture',port:8767,ssh_client:'ssh'}};
    if(method==='compute.profiles.read')return profile;
    if(method==='compute.sshConnection.list')return {connections:[connection]};
+   if(method==='compute.sshConnection.loginStatus')return {connection,login:{status:'complete'}};
    if(method==='compute.sshService.status')return {schemaVersion:2,connectionId:connection.connectionId,status:'connected',workflowReady:true,operator:'agent'};
    if(method==='compute.resource.status'||method==='compute.resource.activate')return resource;
    if(method==='sharedTerminal.list')return {sessions:[f.observedShell(f.listEpoch)]};
@@ -40,6 +41,30 @@ async function openObservedTerminal(page,human=false){
 }
 
 export async function frontendTerminalReadObservationCases({check,out}){
+ await check('terminal-read-observation-appearance-refits-and-keeps-original-shell',async page=>{
+  await openObservedTerminal(page);
+  const region=page.getByRole('region',{name:'SSH 终端',exact:true});
+  await page.evaluate(()=>{window.__test.listEpoch=window.__test.actualEpoch;});
+  await page.getByTestId('ssh-login-refresh').click();
+  await page.waitForFunction(()=>document.querySelector('.xterm-rows')?.textContent.includes('RECOVERED ORIGINAL SHELL'));
+  await page.evaluate(()=>{
+   const f=window.__test,root=document.documentElement;
+   f.originalRows=document.querySelector('.xterm-rows');
+   f.previousResizes=f.calls.filter(call=>call.method==='sharedTerminal.resize').length;
+   root.dataset.theme='light';root.style.setProperty('--terminal-font-size','12');root.style.setProperty('--ui-min-font','18px');
+   window.dispatchEvent(new Event('studio:appearance'));
+  });
+  await page.waitForFunction(()=>{
+   const f=window.__test,rows=document.querySelector('.xterm-rows');
+   return rows===f.originalRows&&getComputedStyle(rows).fontSize==='18px'&&f.calls.filter(call=>call.method==='sharedTerminal.resize').length>f.previousResizes;
+  });
+  assert.equal(await region.locator('.xterm-viewport').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(248, 247, 250)');
+  await region.locator('.xterm-rows').getByText('RECOVERED ORIGINAL SHELL>',{exact:false}).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(),'Keep these unsent terminal instructions');
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['compute.sshConnection.open','compute.sshConnection.authInput','sharedTerminal.owner','sharedTerminal.input'].includes(c.method)).length),0);
+  await page.screenshot({path:path.join(out,'terminal-v2-light-18px.png')});
+ });
+
  await check('terminal-resize-stays-local-through-reply-and-recovers-on-the-current-epoch',async page=>{
   await openObservedTerminal(page);
   await page.evaluate(()=>{const f=window.__test;f.listEpoch=f.actualEpoch;f.geometryFailure=true;});
@@ -58,7 +83,8 @@ export async function frontendTerminalReadObservationCases({check,out}){
   await openObservedTerminal(page);await openDetails(page);
   await page.getByTestId('ssh-read-error-code').filter({hasText:'terminal_owner_changed'}).waitFor();assert.equal(await page.locator('.toast').count(),0);
   await page.evaluate(()=>{window.__test.listEpoch=3;window.__test.readFailure=true;});await page.getByTestId('ssh-login-refresh').click();
-  const visibleDiagnosis=page.getByTestId('ssh-diagnostics').getByRole('status');
+  const visibleDiagnosis=page.getByTestId('ssh-diagnostics').getByRole('status').filter({hasText:'终端输出读取失败'});
+  await visibleDiagnosis.waitFor();
   assert.equal(await visibleDiagnosis.innerText(),'终端输出读取失败');
   assert.equal(await visibleDiagnosis.evaluate(node=>{const notice=node.getBoundingClientRect(),panel=node.closest('[data-testid="bottom-panel"]').getBoundingClientRect();return notice.top>=panel.top&&notice.bottom<=panel.bottom;}),true,'the current read fault summary must be visible before details are opened');
   await openDetails(page);

@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import QueueChoices from "../compute/QueueChoices";
 import {api} from '../../api/worker';
 import {type Project,type Environment,type ClusterQueueTarget,type ClusterQueuePolicy,type ClusterQueueProfile,type ClusterSchedulerObservation} from '../../../contracts/dto/compute';
-import {t} from "../../ui/i18n";
+import {getLanguage,t} from "../../ui/i18n";
 import './cluster.css';
 
 export function queuePolicy(profile:ClusterQueueProfile,project?:Project):ClusterQueuePolicy{
@@ -14,7 +14,7 @@ export function queueTestPrompt(profileId:string,target:ClusterQueueTarget){
  const limits={cpus:1,gpus:Math.min(1,target.limits.gpus),memory_mb:Math.min(4096,target.limits.memory_mb),max_seconds:Math.min(60,target.limits.max_seconds)};
  return '为当前项目准备队列环境的有界测试草稿。cluster_id='+profileId+'，queue_target_id='+target.id+'，engine候选='+target.engines.join(',')+'，资源上限='+JSON.stringify(limits)+'。先确认与科学目标相符的输入，只准备流程和不可变草稿，等待人工复核与点击执行。不得自动提交、安装、改变队列或付费授权；登录节点探测不是计算节点 GPU 验证。';
 }
-export default function ClusterQueueSettings({profile,project,worker,busy,profileDirty,visible,canCancelOptIn=false,environmentText,probe,onTargets,onValidity,onRefresh,onError,onQueueTest}:{profile:ClusterQueueProfile;project?:Project;worker:boolean;busy:boolean;profileDirty:boolean;visible:boolean;canCancelOptIn?:boolean;environmentText:string;probe?:ClusterSchedulerObservation|null;onTargets:(targets:ClusterQueueTarget[]|undefined)=>void;onValidity:(valid:boolean)=>void;onRefresh:()=>void;onError:(error:unknown)=>void;onQueueTest?:(text:string)=>void|Promise<void>}){
+export default function ClusterQueueSettings({profile,project,worker,busy,profileDirty,visible,canCancelOptIn=false,environmentText,probe,onTargets,onValidity,onRefresh,onError,onQueueTest}:{profile:ClusterQueueProfile;project?:Project;worker:boolean;busy:boolean;profileDirty:boolean;visible:boolean;canCancelOptIn?:boolean;environmentText:string|null;probe?:ClusterSchedulerObservation|null;onTargets:(targets:ClusterQueueTarget[]|undefined)=>void;onValidity:(valid:boolean)=>void;onRefresh:()=>void;onError:(error:unknown)=>void;onQueueTest?:(text:string)=>void|Promise<void>}){
  const [policy,setPolicy]=useState(()=>queuePolicy(profile,project)),[approving,setApproving]=useState(false),[notice,setNotice]=useState(''),[environments,setEnvironments]=useState<Environment[]>([]),[engines,setEngines]=useState<string[]>([]),[jsonDrafts,setJsonDrafts]=useState<Record<string,string>>({}),[invalid,setInvalid]=useState<Record<string,boolean>>({});
  const approvalPending=useRef(false);
  const mounted=useRef(false),sequence=useRef(0),scope=useRef('');scope.current=JSON.stringify([profile.id,profile.version,project?.id,profileDirty,busy,worker]);
@@ -26,7 +26,7 @@ export default function ClusterQueueSettings({profile,project,worker,busy,profil
  function update(id:string,changes:Partial<ClusterQueueTarget>){onTargets(targets.map(target=>{if(target.id!==id)return target;const next={...target,...changes};if(next.account==='')delete next.account;return next;}));}
  function add(queue=''){
   if(disabled)return;
-  try{const environment=JSON.parse(environmentText);if(!environment?.executables)throw Error(t('请先填写有效环境。'));
+  try{const environment=environmentText===null?null:JSON.parse(environmentText);if(!environment?.executables)throw Error(t('请先填写有效环境。'));
    let n=targets.length+1;while(targets.some(target=>target.id==='queue-'+n))n++;
    onTargets([...targets,{id:'queue-'+n,queue,usage_class:'unknown',enabled:true,engines:[],environment:structuredClone(environment),activation:profile.activation||'',limits:{cpus:profile.limits.cpus||1,gpus:profile.limits.gpus||0,memory_mb:profile.limits.memory_mb||1024,max_seconds:profile.limits.max_seconds||600}}]);setNotice('');
   }catch(error){setNotice(String(error));}
@@ -55,7 +55,7 @@ export default function ClusterQueueSettings({profile,project,worker,busy,profil
  function boundedTest(target:ClusterQueueTarget){if(!onQueueTest)return;const saved=queuePolicy(profile,project);if(profileDirty||!profile.id||!saved||saved.profile_version!==profile.version||!saved.allowed_target_ids.includes(target.id)||!target.enabled||target.usage_class==='unknown'||target.usage_class==='paid'&&(!saved.paid.permitted||!saved.paid.conditions_known))return;const engines=target.engines.filter(engine=>project!.policy.engines.includes(engine));if(!engines.length)return;const paid=target.usage_class==='paid'?saved.paid.limits:undefined;const limits={...target.limits,max_seconds:Math.min(target.limits.max_seconds,project!.policy.max_seconds)};if(paid)for(const key of ['cpus','gpus','memory_mb','max_seconds'] as const)limits[key]=Math.min(limits[key],paid[key]);void Promise.resolve(onQueueTest(queueTestPrompt(profile.id,{...target,engines,limits}))).catch(onError);}
  return <section className="card cluster-queue-settings" data-testid="cluster-queue-settings">
   <div className="queue-settings-heading"><h3>{t('队列与环境')}</h3><button className="button" data-testid="queue-add" disabled={disabled} onClick={()=>add()}>{t('添加队列目标')}</button></div>
-  {!disabled&&<QueueChoices queues={probe?.queues} value="" language={localStorage.getItem('studio.language')==='en'?'en':'zh-CN'} onChange={queue=>add(queue)}/>}
+  {!disabled&&<QueueChoices queues={probe?.queues} value="" language={getLanguage()} onChange={queue=>add(queue)}/>}
   {profile.queue_targets===undefined?<p>{t('沿用单队列 Skill')}</p>:canCancelOptIn&&<button className="text-button" disabled={disabled} onClick={()=>{onTargets(undefined);setJsonDrafts({});setInvalid({});reset();}}>{t('取消新队列配置')}</button>}
   {profile.queue_targets!==undefined&&!targets.length&&<p role="status">{t('尚无队列目标，新任务不可提交。')}</p>}
   {targets.map((target,index)=>{const accepted=queuePolicy(profile,project),testAllowed=!!onQueueTest&&target.engines.some(engine=>project?.policy.engines.includes(engine))&&!profileDirty&&!!accepted&&accepted.profile_version===profile.version&&accepted.allowed_target_ids.includes(target.id)&&target.enabled&&target.usage_class!=='unknown'&&(target.usage_class!=='paid'||accepted.paid.permitted&&accepted.paid.conditions_known);return <details key={index} className="queue-target-disclosure" open={targets.length===1}><summary>{target.queue||t('队列 / 分区')}<span>{target.id} · {t(target.usage_class==='owned'?'自有':target.usage_class==='paid'?'付费':'未知')}</span></summary><fieldset className="queue-target" aria-label={target.id} disabled={disabled}>

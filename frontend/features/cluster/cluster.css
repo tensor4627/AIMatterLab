@@ -3,8 +3,11 @@
 .cluster-page .page-heading h1 {margin:0;}
 .cluster-page .page-heading svg {flex:none;color:var(--muted);}
 .cluster-page .cluster-selection {display:grid;gap:8px;margin:0 0 12px;}
+.cluster-selection-header {display:flex;align-items:flex-start;gap:8px;}
 .cluster-selection-fields {
   display:grid;
+  flex:1;
+  min-inline-size:0;
   grid-template-columns:repeat(auto-fit,minmax(min(100%,215px),1fr));
   gap:8px;
 }
@@ -58,6 +61,18 @@
 .cluster-connection-fields details > summary {padding:8px 0;cursor:pointer;color:var(--muted);}
 .cluster-connection-fields details[open] > summary {color:var(--text);}
 .cluster-connection-fields details p {margin:6px 0;line-height:1.5;}
+.cluster-environment-editor fieldset {min-inline-size:0;border:0;border-top:1px solid var(--line);margin:12px 0;padding:8px 0;}
+.cluster-environment-editor legend {padding:0 8px 0 0;font-weight:600;}
+.cluster-environment-editor .parameter-json {width:100%;min-inline-size:0;}
+.cluster-environment-editor summary {color:var(--muted);cursor:pointer;}
+.cluster-environment-entry {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;align-items:end;gap:5px 8px;margin:0 0 8px;}
+.cluster-page .cluster-environment-entry label {min-inline-size:0;margin:0;}
+.cluster-environment-entry > .button {justify-self:start;}
+.cluster-environment-issue {grid-column:1 / -1;color:var(--warn);}
+.cluster-environment-editor input[aria-invalid=true],.cluster-environment-editor textarea[aria-invalid=true] {border-color:var(--warn);}
+@container cluster-page (max-width:520px){
+ .cluster-environment-entry {grid-template-columns:minmax(0,1fr);gap:5px;margin-bottom:12px;}
+}
 .cluster-page .cluster-footer {
   justify-content:flex-end;
   position:static;

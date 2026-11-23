@@ -1,13 +1,16 @@
 import ChatMessage,{type ChatMessageValue,type ChatMessageActions} from './ChatMessage';
+import {memo} from 'react';
+import type {ConversationBookmark} from '../../../contracts/dto/conversation-history';
 import {ChevronRight,Wrench} from 'lucide-react';
 import {t} from '../../ui/i18n';
 import {toolLabel} from './tool-activity.mjs';
 import {messageKey} from './message-mapping.mjs';
-const bookmarkKey=(message:ChatMessageValue)=>JSON.stringify([message.turnId,message.itemId]);
+const bookmarkKey=(message:{turnId?:string;itemId?:string})=>JSON.stringify([message.turnId,message.itemId]);
 
 type Props={messages:ChatMessageValue[];language:string;actions:ChatMessageActions;disabled:boolean;canOriginalRun:boolean;canCluster:boolean;canCompute:boolean;bookmarked?:ReadonlySet<string>};
 
-export default function ConversationMessages({messages,...props}:Props){
+export default memo(function ConversationMessages({messages,bookmarks,...props}:Omit<Props,'bookmarked'>&{bookmarks?:ConversationBookmark[]}){
+ const bookmarked=bookmarks&&new Set(bookmarks.map(bookmarkKey));
  const groups:ChatMessageValue[][]=[];
  for(const message of messages){
   // Tool-only provider responses can include an empty assistant item. Keep its
@@ -18,10 +21,10 @@ export default function ConversationMessages({messages,...props}:Props){
   else groups.push([message]);
  }
  return <>{groups.map(group=>group[0].role==='tool'
-  ?<ToolGroup key={messageKey(group[0])} messages={group} {...props}/>
-  :<ChatMessage key={messageKey(group[0])} message={group[0]} {...props} bookmarked={props.bookmarked?.has(bookmarkKey(group[0]))}/>
+  ?<ToolGroup key={messageKey(group[0])} messages={group} {...props} bookmarked={bookmarked}/>
+  :<ChatMessage key={messageKey(group[0])} message={group[0]} {...props} bookmarked={bookmarked?.has(bookmarkKey(group[0]))}/>
  )}</>;
-}
+});
 
 const sharedTerminalTools=new Set(['list_shared_terminals','read_shared_terminal','write_shared_terminal']);
 const states=[['running','处理中'],['failed','失败'],['unknown','待核对'],['blocked','待补充'],['completed','已完成']];

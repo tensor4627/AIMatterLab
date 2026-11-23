@@ -13,7 +13,8 @@ import {frontendResourceConsoleCases} from './frontend-resource-console-cases.mj
 
 const root = fileURLToPath(new URL('../',import.meta.url));
 const resourceConsole = process.argv.includes('--resource-console');
-const out = path.join(root,'validation','local','managed-compute-20261119',resourceConsole?'native-resource-console':'native-renderer');
+const out = path.resolve(root,process.env.STUDIO_MANAGED_COMPUTE_OUTPUT||path.join('validation','local','managed-compute-20261119',resourceConsole?'native-resource-console':'native-renderer'));
+const filter = process.env.STUDIO_MANAGED_COMPUTE_FILTER ? new RegExp(process.env.STUDIO_MANAGED_COMPUTE_FILTER) : null;
 const mime = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
 const files = new Map();
 const checks = [];
@@ -53,6 +54,7 @@ try {
   const executablePath = await resolveDesktopBinary();
   const cases = resourceConsole ? frontendResourceConsoleCases : frontendManagedComputeCases;
   await cases({out,async check(name,validate,{width=1440,height=940} = {}) {
+    if(filter&&!filter.test(name))return;
     let application,page;
     try {
       const profile = await fs.mkdtemp(path.join(out,'managed-profile-'));
