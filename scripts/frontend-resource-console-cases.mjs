@@ -23,6 +23,11 @@ async function mount(page,{theme='dark',language='zh-CN'}={}) {
       master:status('online'),canDisconnect:true,service:{kind:'private',...status('unconfigured')},managedId:null,
       capacity:{total:4,occupied:1},terminals:[humanA,humanB].map(shell=>({sessionId:shell.id,kind:'ssh',mode:'interactive',owner:'human',...status('online')})),
       channels:[session('deepseek','GPU 队列筛选','lease-b','preparing')]};
+    const root='/home/fixture/AIMatterLab';
+    const workspace={profileId:b.profileId,profileVersion:b.profileVersion,resourceName:b.name,root,
+      directories:[root+'/workfile',root+'/software'],account:'fixture',hostname:'graphics.invalid',checkedAt:now};
+    const confirmedWorkspace={...workspace,status:'confirmed',source:'confirmed',resourceId:'ssh:profile-b',workspaceId:'fixture-workspace'};
+    let workspaceConfirmed=false;
     const local={...base,key:'wsl:profile-local:3',name:'本地 WSL',kind:'wsl',profileId:'profile-local',profileVersion:3,connectionId:null,target:'Fixture WSL · :8790',
       master:null,service:{kind:'wsl',...status('online')},managedId:'wsl:profile-local',localGeneration:'wsl-generation',foregroundEpoch:null,
       channels:[session('qwen','局部构型复核','lease-local','assigned',true)]};
@@ -41,6 +46,16 @@ async function mount(page,{theme='dark',language='zh-CN'}={}) {
       if (method==='worker.restore') return {status:'disconnected',checkedAt:now,...data};
       if (method==='compute.profiles.list') return {profiles:profileList,defaults:{distribution:'Fixture WSL',root:'/fixture',port:8790,ssh_client:'/usr/bin/ssh'}};
       if (method==='compute.resource.status') return {schemaVersion:2,selectionId:null,kind:null,status:'none'};
+      if (method==='compute.resourceWorkspace.read'&&data.profileId===b.profileId&&data.profileVersion===b.profileVersion) {
+        return workspaceConfirmed?confirmedWorkspace:{profileId:b.profileId,profileVersion:b.profileVersion,resourceName:b.name,status:'unconfigured'};
+      }
+      if (method==='compute.resourceWorkspace.preview'||method==='compute.resourceWorkspace.confirm') {
+        if (data.connectionId!==b.connectionId||data.profileId!==b.profileId||data.profileVersion!==b.profileVersion) throw Error('Native fixture refused a different workspace target');
+        if (method==='compute.resourceWorkspace.preview') return {...workspace,connectionId:b.connectionId,status:'confirmation_required',source:'suggested',confirmationId:'fixture-review'};
+        if (data.confirmationId!=='fixture-review') throw Error('Native fixture refused a different workspace confirmation');
+        workspaceConfirmed=true;
+        return {...confirmedWorkspace,connectionId:b.connectionId};
+      }
       if (method==='compute.sshConnection.list') return {connections:[a,b].filter(row=>row.connectionId).map(row=>({schemaVersion:2,connectionId:row.connectionId,profileId:row.profileId,
         profileVersion:row.profileVersion,authentication:'verified',status:'authenticated',capabilities:{multiplex:true},terminalSessionIds:row.terminals.map(shell=>shell.sessionId),serviceIds:[],revision:1}))};
       if (method==='compute.sshService.status') return {schemaVersion:2,connectionId:data.connectionId,profileId:'profile-b',profileVersion:7,status:'idle',workflowReady:false,serviceActive:false,operator:'human',revision:1};
@@ -74,8 +89,10 @@ async function mount(page,{theme='dark',language='zh-CN'}={}) {
       }
       if (method==='compute.managed.publish'||method==='compute.managed.configureService') {
         if(data.connectionId!=='connection-b'||data.profileId!=='profile-b'||data.profileVersion!==7)throw Error('Native fixture refused a different SSH host');
+        if(!workspaceConfirmed)throw Error('Native fixture requires a confirmed workspace for handoff');
         b.managedId='ssh:profile-b';
         if(method==='compute.managed.configureService')b.service={kind:'private',...status('online')};
+        else f.events.forEach(listener=>listener({method:'studio/managedActivity'}));
         return {kind:'ssh',resourceId:b.managedId,name:b.name,...data};
       }
       if (method==='compute.console.projectAccess') {
@@ -165,7 +182,14 @@ export async function frontendResourceConsoleCases({check}) {
     await detail.getByText('未配置',{exact:true}).waitFor();
     await capture('compute-resource-console-human-terminals');
     await detail.getByRole('button',{name:'交给工作台管理',exact:true}).click();
+    const review=page.getByTestId('resource-workspace-review');
+    await review.getByText('fixture@graphics.invalid',{exact:true}).waitFor();
+    assert.equal(await review.getByTestId('resource-workspace-resolved').innerText(),'/home/fixture/AIMatterLab');
+    assert.equal(await page.evaluate(()=>window.__test.consoleCalls.some(row=>row.method==='compute.managed.publish')),false);
+    await review.getByRole('button',{name:'确认并交接',exact:true}).click();
+    await review.waitFor({state:'hidden'});
     await detail.getByText('工作台托管中',{exact:true}).waitFor();
+    await detail.getByTestId('resource-workspace-root').waitFor();
     await detail.getByRole('button',{name:'准备作业服务',exact:true}).click();
     await detail.getByText('在线',{exact:true}).nth(3).waitFor();
 
@@ -214,13 +238,15 @@ export async function frontendResourceConsoleCases({check}) {
     await console.getByRole('heading',{name:'计算资源',exact:true}).waitFor();
     await detail.locator('li').filter({hasText:'相变数据核验'}).getByRole('button',{name:'打开会话',exact:true}).click();
     await page.waitForFunction(()=>window.__test.consoleCalls.some(row=>row.method==='conversation.select'&&row.data.id==='kimi:kimi-thread'));
-    const writes=await page.evaluate(()=>window.__test.consoleCalls.filter(row=>['compute.console.release','compute.console.disconnectSsh','compute.console.projectAccess','compute.console.attachLocal','compute.console.detachLocal','compute.managed.publish','compute.managed.configureService','conversation.select'].includes(row.method)));
+    const writes=await page.evaluate(()=>window.__test.consoleCalls.filter(row=>['compute.console.release','compute.console.disconnectSsh','compute.console.projectAccess','compute.console.attachLocal','compute.console.detachLocal','compute.resourceWorkspace.preview','compute.resourceWorkspace.confirm','compute.managed.publish','compute.managed.configureService','conversation.select'].includes(row.method)));
     assert.deepEqual(writes,[
       {method:'compute.console.projectAccess',data:{profileId:'profile-a',profileVersion:2,connectionId:'connection-a',projectId:'fixture-project',allowed:false}},
       {method:'compute.console.projectAccess',data:{profileId:'profile-a',profileVersion:2,connectionId:'connection-a',projectId:'fixture-project',allowed:true}},
       {method:'compute.console.release',data:{resourceId:'ssh:profile-a',connectionId:'connection-a',source:'managed',leaseId:'lease-a',provider:'codex',threadId:'codex-thread'}},
       {method:'compute.console.detachLocal',data:{profileId:'profile-local',profileVersion:3,generation:'wsl-generation',foregroundEpoch:null}},
       {method:'compute.console.attachLocal',data:{profileId:'profile-local',profileVersion:3}},
+      {method:'compute.resourceWorkspace.preview',data:{profileId:'profile-b',profileVersion:7,connectionId:'connection-b'}},
+      {method:'compute.resourceWorkspace.confirm',data:{profileId:'profile-b',profileVersion:7,connectionId:'connection-b',confirmationId:'fixture-review'}},
       {method:'compute.managed.publish',data:{profileId:'profile-b',profileVersion:7,connectionId:'connection-b'}},
       {method:'compute.managed.configureService',data:{profileId:'profile-b',profileVersion:7,connectionId:'connection-b'}},
       {method:'compute.console.disconnectSsh',data:{profileId:'profile-b',profileVersion:7,connectionId:'connection-b'}},
@@ -231,22 +257,52 @@ export async function frontendResourceConsoleCases({check}) {
   await check('resource-console-compact',async(page,capture)=>{
     await mount(page,{theme:'light',language:'en'});
     const console=page.getByTestId('compute-resource-console');
+    const detail=page.getByTestId('compute-console-detail');
+    const original=console.locator('[data-resource-key="connection-a"]');
+    const originalShell=detail.locator('li').filter({hasText:'材料结构分析'});
+    const connect=detail.getByRole('button',{name:'Connect SSH',exact:true});
+    const partial=console.getByText('Some terminal states could not be verified.',{exact:true});
+
+    async function refreshConnection(status) {
+      await page.evaluate(value=>{
+        const {consoleSnapshot}=window.__test;
+        const resource=consoleSnapshot.resources.find(row=>row.connectionId==='connection-a');
+        consoleSnapshot.observation=value==='unknown'?'partial':'complete';
+        resource.master.status=value;
+        resource.service.status=value;
+        resource.capacity=value==='online'?{total:4,occupied:2}:null;
+        resource.canDisconnect=value!=='unknown';
+        resource.channels[0].status=value==='online'?'assigned':value;
+      },status);
+      await console.getByTestId('compute-console-refresh').click();
+    }
+
     await page.locator('.navigation-rail:visible').getByRole('button',{name:'Compute resources',exact:true}).click();
     await console.getByRole('heading',{name:'Compute resources',exact:true}).waitFor();
     await console.getByText('Managed shell capacity',{exact:false}).waitFor();
     assert.equal(await console.evaluate(element=>element.scrollWidth<=element.clientWidth+1),true);
     await page.mouse.move(700,20);
     await capture('compute-resource-console-light-compact');
-    await page.evaluate(()=>{
-      const f=window.__test;
-      f.consoleSnapshot.observation='partial';
-      const a=f.consoleSnapshot.resources[0];a.master.status='lost';a.service.status='lost';a.capacity=null;a.channels[0].status='lost';
-    });
-    await console.getByTestId('compute-console-refresh').click();
-    await console.getByText('Some terminal states could not be verified.',{exact:true}).waitFor();
-    const detail=page.getByTestId('compute-console-detail');
-    assert.equal(await console.locator('[data-resource-key="connection-a"]').getAttribute('aria-current'),'true');
+
+    await refreshConnection('unknown');
+    await partial.waitFor();
+    assert.equal(await original.getAttribute('aria-current'),'true');
     await detail.getByRole('heading',{name:'材料中心',exact:true}).waitFor();
+    assert.equal(await detail.getByText('Unconfirmed',{exact:true}).count(),3);
+    assert.equal(await detail.getByText('Connection lost',{exact:true}).count(),0);
+    assert.equal(await connect.count(),0);
+    await originalShell.locator('[title="terminal-lease-a"]').waitFor();
+
+    await refreshConnection('online');
+    await partial.waitFor({state:'hidden'});
+    await originalShell.getByText('Assigned',{exact:true}).waitFor();
+    assert.equal(await original.getAttribute('aria-current'),'true');
+    assert.equal(await detail.getByText('Online',{exact:true}).count(),2);
+    await originalShell.locator('[title="terminal-lease-a"]').waitFor();
+
+    await refreshConnection('lost');
+    await connect.waitFor();
+    assert.equal(await original.getAttribute('aria-current'),'true');
     assert.equal(await detail.getByText('Online',{exact:true}).count(),0);
     assert.equal(await detail.getByText('Connection lost',{exact:true}).count(),3);
     await page.mouse.move(700,20);

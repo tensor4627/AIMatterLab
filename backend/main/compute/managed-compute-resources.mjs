@@ -1059,8 +1059,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  function consoleEntries(){
   const channels=[...leases.values()].map(lease=>{
    const terminal=lease.terminal,shell=readyShell(lease),serviceOnly=!!lease.service&&!shell;
-   const terminalStatus=!terminal||shell?null:terminal.closeUnknown||terminal.observationUnknown||terminal.shell?.expiresAt<=now()?'lost':terminal.closing?'releasing':'preparing';
-   const status=lease.releaseUnknown?'lost':lease.releasing?'releasing':lease.resource.unconfirmed?'unknown':shell||lease.service||lease.command?'assigned':terminalStatus??'preparing';
+   const terminalStatus=!terminal||shell?null:terminal.shell?.expiresAt<=now()?'lost':terminal.closeUnknown||terminal.observationUnknown?'unknown':terminal.closing?'releasing':'preparing';
+   const status=lease.releaseUnknown?'unknown':lease.releasing?'releasing':lease.resource.unconfirmed?'unknown':shell||lease.service||lease.command?'assigned':terminalStatus??'preparing';
    return {leaseId:lease.id,...lease.scope,projectId:lease.projectId,...desktopView(lease.resource),sessionId:shell?.sessionId??null,
     serviceOnly,serviceContext:!!lease.service,commandContext:lease.command,serviceGeneration:lease.service?.generation??null,terminalStatus:serviceOnly||lease.command?terminalStatus:null,status,busy:busy(lease.scope),
     expired:!lease.command&&!serviceOnly&&!!terminal?.shell&&terminal.shell.expiresAt<=now()};
@@ -1077,7 +1077,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    for(const row of Object.values(record.leases)){
     if(channels.some(channel=>channel.resourceId===resourceId&&channel.leaseId===row.id))continue;
     channels.push({...resource,leaseId:row.id,...ownerOf(row),projectId:row.projectId,sessionId:null,
-     serviceOnly:!!row.service&&!row.terminal,serviceContext:!!row.service,commandContext:!!row.command,serviceGeneration:null,terminalStatus:null,status:'lost',busy:busy(row),expired:false});
+     serviceOnly:!!row.service&&!row.terminal,serviceContext:!!row.service,commandContext:!!row.command,serviceGeneration:null,terminalStatus:null,status:'unknown',busy:busy(row),expired:false});
    }
   }
   return {entries,channels};
@@ -1096,7 +1096,10 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    const state=await connections.managedShell('state',shellRef(lease,terminal));
    current(lease.resource);
    return consoleLease(target)===lease&&!lease.releasing&&lease.terminal===terminal&&readyShell(lease)===shell&&state.alive&&state.sessionId===shell.sessionId&&state.ownerEpoch===shell.ownerEpoch;
-  }catch{return false;}
+  }catch(error){
+   if(error.message==='terminal_session_exited'||error.message==='terminal_owner_changed')return false;
+   throw error;
+  }
  }
  async function observeConsoleService({resourceId,generation}){
   const resource=resources.get(resourceId),service=resource?.service;
@@ -1104,7 +1107,10 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   try{
    current(resource);await service.verify();current(resource);
    return resource.service===service;
-  }catch{return false;}
+  }catch(error){
+   if(error.message==='managed_compute_service_changed')return false;
+   throw error;
+  }
  }
  async function releaseFromConsole(target){
   const lease=leases.get(leaseKey(target,target.resourceId));

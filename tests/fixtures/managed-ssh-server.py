@@ -87,7 +87,7 @@ def fixture_server(path, authorized, server, env, cleanup):
     shell.write_text("#!/bin/sh\nexport HOME=" + str(home) + "\nexport HISTFILE=/dev/null SHELL=/bin/bash\n"
                      "export BASH_ENV=" + str(fixture_env) + "\n. \"$BASH_ENV\"\n"
                      "cd \"$HOME\" || exit 1\nif [ -n \"$SSH_ORIGINAL_COMMAND\" ]; then exec /bin/sh -c \"$SSH_ORIGINAL_COMMAND\"; fi\n"
-                     + startup + "exec /bin/bash --noprofile --norc -i\n")
+                     + startup + "printf '%s\\n' AIMATTER_LOOPBACK_SHELL_READY\nexec /bin/bash --noprofile --norc -i\n")
     shell.chmod(0o700)
     config = path / "sshd_config"
     config.write_text("\n".join(["ListenAddress 127.0.0.1", f"Port {port}", f"HostKey {path}/host",

@@ -22,7 +22,7 @@ function fixture(worker) {
         {sessionId:'handoff-A',kind:'ssh',mode:'key',owner:'agent',connectionId:'conn-A',alive:true,verified:true}]},
     handoff:[{...ref('A'),provider:'kimi',threadId:'same-thread',projectId:null,sessionId:'handoff-A',status:'assigned',busy:false}],
     resourceHealth:new Set(['private-1','local-generation']),shellHealth:new Set(['codex-A','codex-B']),
-    failBroker:false,calls:[]};
+    failBroker:false,failServiceHealth:false,calls:[]};
   const profileRegistry={list:()=>structuredClone(current.profiles),read({id,version}){
     const match=current.profiles.find(row=>row.id===id&&(version===undefined||version===row.version));
     if (!match) throw Error('compute_profile_unavailable');
@@ -32,7 +32,10 @@ function fixture(worker) {
     current.calls.push(['inventory']);if(current.failBroker)throw Error('terminal_unavailable');return structuredClone(current.broker);
   },connections:{state:async({connectionId})=>structuredClone(current.broker.connections.find(row=>row.connectionId===connectionId))}},
     resources:{consoleEntries:()=>structuredClone(model),observeConsoleLease:async row=>current.shellHealth.has(row.leaseId),
-      observeConsoleService:async row=>current.resourceHealth.has(row.generation),async releaseFromConsole(target){
+      async observeConsoleService(row){
+        if(current.failServiceHealth && row.generation==='private-1') throw Error('terminal_service_unknown');
+        return current.resourceHealth.has(row.generation);
+      },async releaseFromConsole(target){
         current.calls.push(['release',target]);model.channels=model.channels.filter(row=>row.leaseId!==target.leaseId);return {status:'released'};
       },async publishWsl(target){current.calls.push(['attach',target]);model.entries.push(independent);},async detachLocalFromConsole(target){current.calls.push(['detach',target]);model.entries=model.entries.filter(row=>row.resourceId!==target.resourceId);}},
     conversationTerminals:{consoleEntries:()=>structuredClone(current.handoff),async releaseFromConsole(target){current.calls.push(['handoff',target]);current.handoff=[];return {status:'released'};}},
@@ -68,7 +71,7 @@ test('console projects current SSH proofs, named exclusive channels, broker capa
   assert.doesNotMatch(JSON.stringify(api.snapshot()),/worker\/|runtime\/|"pid"|token/i);
 });
 
-test('failed or expired observation does not promote cached transport, channel or worker status',async()=>{
+test('negative or expired evidence does not promote cached transport, channel or worker status',async()=>{
   const {api,current,model,resource}=fixture();
   await api.refresh();
   current.shellHealth.delete('codex-A');
@@ -79,17 +82,90 @@ test('failed or expired observation does not promote cached transport, channel o
   assert.deepEqual(resource('A').channels.slice(0,2).map(row=>row.status),['lost','lost']);
   model.channels.find(row=>row.leaseId==='codex-A').status='releasing';
   assert.equal(resource('A').channels[0].status,'releasing');
-  current.failBroker=true;
+  current.resourceHealth.add('private-1');
   await api.refresh();
-  assert.equal(api.snapshot().observation,'partial');
-  assert.equal(resource('A').master.status,'lost');
-  assert.equal(resource('A').canDisconnect,false);
-  assert.equal(resource('A').terminals[0].status,'unknown');
-  current.failBroker=false;await api.refresh();
+  assert.equal(resource('A').service.status,'online');
   current.now+=46000;
   assert.equal(resource('A').master.status,'unknown');
   assert.equal(resource('A').service.status,'unknown');
   assert.equal(resource('A').capacity,null);
+});
+
+test('unconfirmed SSH inventory leaves dependent channels unknown until the original connection is verified',async()=>{
+  const {api,current,model,resource}=fixture();
+  const inventory=current.broker, [connected,other]=inventory.connections;
+  const unavailable={...connected,status:'unavailable',authentication:'lost',multiplex:false,capacity:null,service:null};
+  model.channels.push(channel('A','qwen',{commandContext:true,sessionId:null}));
+  await api.refresh();
+  assert.deepEqual(resource('A').channels.map(row=>row.status),['assigned','assigned','assigned','assigned']);
+
+  for(const [scenario,broker,failBroker=false,canDisconnect=false] of [
+    ['failed inventory',inventory,true],
+    ['partial inventory missing the connection',{...inventory,complete:false,connections:[other]}],
+    ['complete inventory with an unverified row',{...inventory,connections:[{...connected,verified:false,capacity:null,service:null},other]}],
+    ['verified row with unconfirmed close',{...inventory,connections:[{...unavailable,closeUnconfirmed:true},other]},false,true]
+  ]){
+    current.broker=broker;
+    current.failBroker=failBroker;
+    await api.refresh();
+    const uncertain=resource('A');
+    assert.deepEqual([uncertain.connectionId,uncertain.master.status,uncertain.service.status,uncertain.canDisconnect],
+      ['conn-A','unknown','unknown',canDisconnect],scenario);
+    assert.deepEqual(uncertain.channels.map(row=>row.status),['unknown','unknown','unknown','unknown'],scenario);
+    if(!failBroker) assert.equal(resource('B').master.status,'online');
+    else {
+      assert.equal(api.snapshot().observation,'partial');
+      assert.equal(uncertain.terminals[0].status,'unknown');
+    }
+
+    current.broker=inventory;
+    current.failBroker=false;
+    await api.refresh();
+    const restored=resource('A');
+    assert.deepEqual([restored.connectionId,restored.master.status,restored.service.status],['conn-A','online','online'],scenario);
+    assert.deepEqual(restored.channels.map(row=>row.status),['assigned','assigned','assigned','assigned'],scenario);
+  }
+
+  for(const [scenario,connections] of [
+    ['verified exit',[unavailable,other]],
+    ['cached row confirmed missing by its broker',[{...connected,verified:false,missing:true,capacity:null,service:null},other]],
+    ['complete inventory omitting the tracked connection',[other]]
+  ]){
+    current.broker={...inventory,connections};
+    await api.refresh();
+    const exited=resource('A');
+    assert.deepEqual([exited.connectionId,exited.master.status,exited.service.status],['conn-A','lost','lost'],scenario);
+    assert.deepEqual(exited.channels.map(row=>row.status),['lost','lost','lost','lost'],scenario);
+  }
+});
+
+test('a private SSH service health timeout only makes that service and its dependent channel unknown',async()=>{
+  const {api,current,model,resource}=fixture();
+  const lease=model.channels.find(row=>row.provider==='deepseek');
+  lease.serviceGeneration='private-1';
+  await api.refresh();
+  assert.equal(resource('A').service.status,'online');
+
+  current.failServiceHealth=true;
+  await api.refresh();
+  const uncertain=resource('A');
+  assert.equal(uncertain.master.status,'online');
+  assert.equal(uncertain.service.status,'unknown');
+  assert.deepEqual(uncertain.channels.map(row=>[row.provider,row.status]),[
+    ['codex','assigned'],['deepseek','unknown'],['kimi','assigned']
+  ]);
+
+  current.failServiceHealth=false;
+  await api.refresh();
+  assert.equal(resource('A').service.status,'online');
+  const leaseStatus=()=>resource('A').channels.find(row=>row.leaseId===lease.leaseId).status;
+  assert.equal(leaseStatus(),'assigned');
+
+  const entry=model.entries.find(row=>row.connectionId==='conn-A');
+  entry.generation=null;
+  assert.equal(leaseStatus(),'unknown');
+  entry.generation='replacement';
+  assert.equal(leaseStatus(),'lost');
 });
 
 test('release is fenced by exact provider and lease, and refuses closing a master with another busy conversation',async()=>{
