@@ -3,7 +3,7 @@ import {readBytes} from './update-blocks.mjs';
 const gitlab = 'https://git.nju.edu.cn/api/v4/projects/Tensor4627%2FAIMatterLab/releases/';
 const github = 'https://api.github.com/repos/tensor4627/AIMatterLab/releases/';
 const githubPublic = 'https://github.com/tensor4627/AIMatterLab/releases/';
-export const updateSources = ['nju','github'];
+export const updateSources = ['github','nju'];
 export const sourceName = source => source === 'nju' ? 'NJU GitLab' : 'GitHub';
 
 export function validateUpdateSource(source) {

@@ -1,6 +1,6 @@
 # 发布 Windows 工作区增量更新
 
-南大 GitLab 是主发布源，GitHub 是备用源。每个正式版本在两站分发同一次构建、验收通过的签名附件。日常开发将源码合入南大 `main`，GitLab CI 的 `mirror-main-to-github` 作业负责镜像该分支。版本标签和 Release 附件由维护者在正式发版时单独发布。[源码镜像配置](../../.gitlab-ci.yml)
+GitHub 是源码和正式发行的主仓库。日常开发在 GitHub 提交 Pull Request，合入 `main`；本地 `origin` 指向 GitHub，`nju` 可用于南大 GitLab 备用站。每个正式版本在两站分发同一次构建、验收通过的签名附件。维护者在正式发版时发布版本标签和 Release 附件。
 
 ## 准备签名附件
 
@@ -20,7 +20,7 @@
 这项回归适用于每个版本标签，包括开发版和内测版。准备标签的维护者在本版 `docs/releases/` 记录中填写以下三项结果。
 
 1. **核对当前操作。** 沿每份内置 SKILL.md 及其引用，检查科学功能目录、系统提示和逐轮提示。涉及按钮时从当前窗口入口走到对应操作，写明何时出现。涉及工具时对照实际名称、参数、返回字段和授权范围。检查普通聊天、已有工作流与显式共享终端各自的入口，也检查恢复旧对话后的新提示。源码版本有变的科学参考需核对相应解析器或声明，记录适用版本。把有变化的指引和已复核可继续使用的指引分别记入版本记录。
-2. **运行源码回归。** 在准备打标签的源码上运行下面的命令。`python3` 表示 Python 3 解释器，Windows 上也可使用 `py -3`。检查覆盖契约副本、开发者分发 ZIP、文档链接、引擎与技能路由、代表性界面控件、产品源码引用摘要及内置文档实际读回。GitLab 在版本标签、相关合并请求及默认分支的相关推送上运行这些检查。外部工具及个人技能按实际登记和共享范围处理。
+2. **运行源码回归。** 在准备打标签的源码上运行下面的命令。`python3` 表示 Python 3 解释器，Windows 上也可使用 `py -3`。检查覆盖契约副本、开发者分发 ZIP、文档链接、引擎与技能路由、代表性界面控件、产品源码引用摘要及内置文档实际读回。主仓库在版本标签、Pull Request 和默认分支推送时运行源码检查。外部工具及个人技能按实际登记和共享范围处理。[GitHub Actions 配置](../../.github/workflows/check-source.yml)
 
    ```powershell
    node scripts/sync-tool-contracts.mjs --check
@@ -40,15 +40,17 @@
 
 ## 推送到两站
 
-1. 确认本版「核对内置指导」三项回归通过，并核对成品版本、安装包签名者、签名清单中安装包和块索引的摘要后，在构建提交上创建 `vX.Y.Z` 标签。获得发布授权后，同步南大 `main` 并向两站推送本次标签。下面以 `v0.1.22` 为例。完成后核对源码镜像结果，并确认两站标签都指向构建提交。
+1. 确认本版「核对内置指导」三项回归通过，并核对成品版本、安装包签名者、签名清单中安装包和块索引的摘要后，在 GitHub 已收录的构建提交上创建 `vX.Y.Z` 标签。获得发布授权后，向 GitHub 和备用站推送本次标签，并确认两站标签都指向同一构建提交。下面以 `v0.1.22` 为例。
 
    ```powershell
-   git -c push.followTags=false push nju refs/tags/v0.1.22
    git -c push.followTags=false push origin refs/tags/v0.1.22
+   git -c push.followTags=false push nju refs/tags/v0.1.22
    ```
 
-2. 在**南大 GitLab** 上传三个文件，例如存入项目的 Generic Package Registry。为 `vX.Y.Z` 创建正式 Release，一次挂上三个资产链接，每个链接的 `direct_asset_path` 都设为 `/<原文件名>`。客户端从项目 API 的 `releases/permalink/latest/downloads/latest.yml` 取清单，从 `releases/vX.Y.Z/downloads/<原文件名>` 取附件。GitLab 默认按 `released_at` 选择最新 Release。[GitLab Release API](https://docs.gitlab.com/api/releases/)
-3. 在 **GitHub** 为同一标签创建草稿 Release，从同一个本地输出目录上传三个文件，再发布为最新正式版。公开清单位于仓库的 `releases/latest/download/latest.yml`，私有附件通过 Release Assets API 读取。客户端以南大返回的有效清单为准，即便 GitHub 已经发布了更高版本。主站无法提供清单时客户端会查询 GitHub，收到签名无效的清单则停止并报错。[发布源实现](../../desktop/platform/update-feeds.mjs) · [更新器实现](../../desktop/platform/workspace-updater.mjs)
+2. 在 **GitHub** 为该标签创建草稿 Release，上传三个文件，再发布为最新正式版。公开清单位于仓库的 `releases/latest/download/latest.yml`，私有附件通过 Release Assets API 读取。
+3. 在**南大 GitLab** 上传同一构建的三个文件，例如存入项目的 Generic Package Registry。为 `vX.Y.Z` 创建正式 Release，挂上三个资产链接，每个链接的 `direct_asset_path` 都设为 `/<原文件名>`。客户端从项目 API 的 `releases/permalink/latest/downloads/latest.yml` 取清单，从 `releases/vX.Y.Z/downloads/<原文件名>` 取附件。GitLab 默认按 `released_at` 选择最新 Release。[GitLab Release API](https://docs.gitlab.com/api/releases/)
+
+0.2.1 源码中的桌面更新器优先采用 GitHub 的有效签名清单。GitHub 清单不可用时查询南大，清单签名无效时停止并报错。已分发的旧客户端仍按其原有顺序查找更新。[发布源实现](../../desktop/platform/update-feeds.mjs) · [更新器实现](../../desktop/platform/workspace-updater.mjs)
 
 ## 跳过一个内测版本
 

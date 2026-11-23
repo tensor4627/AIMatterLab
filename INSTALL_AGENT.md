@@ -4,10 +4,10 @@
 
 ## 获取可信源码
 
-在准备存放源码的父目录运行以下命令。0.2.1 的源码从南大 GitLab 的 `main` 获取。GitHub 镜像地址为 `https://github.com/tensor4627/AIMatterLab.git`。发布标签可用时按 `refs/tags/v0.2.1` 固定版本。源码交付阶段，可在 `$approvedSourceCommit` 填写要安装的完整提交 ID。也可把 `$releaseSource` 设为持有同一提交和 `main` 历史的镜像或本地仓库。
+在准备存放源码的父目录运行以下命令。0.2.1 的源码从 GitHub 主仓库的 `main` 获取，地址为 `https://github.com/tensor4627/AIMatterLab.git`。发布标签可用时按 `refs/tags/v0.2.1` 固定版本。源码交付阶段，可在 `$approvedSourceCommit` 填写要安装的完整提交 ID。也可把 `$releaseSource` 设为持有同一提交和 `main` 历史的镜像或本地仓库。
 
 ```powershell
-$releaseSource = 'https://git.nju.edu.cn/Tensor4627/AIMatterLab.git'
+$releaseSource = 'https://github.com/tensor4627/AIMatterLab.git'
 $approvedSourceCommit = ''
 git clone --no-checkout -- "$releaseSource" AIMatterLab-0.2.1
 if ($LASTEXITCODE -ne 0) { throw '请核对仓库读取权限和新目录位置' }

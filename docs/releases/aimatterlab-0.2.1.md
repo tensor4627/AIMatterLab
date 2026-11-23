@@ -1,6 +1,6 @@
 # AIMatterLab 0.2.1 源码合并与验收
 
-2026-11-23 · 南大 GitLab `main` 源码版本。
+2026-11-23 · GitHub 主仓库 `main` 源码版本。提交 `61d77bf` 最初推送到南大 GitLab。
 
 0.2.1 包含本地前端与交互改进 `c507e2e`，并通过双父提交 `13492b2` 合入南大合并请求 !6 的原提交 `c5a08ae`。资源台区分未取得回执和已确认退出。主连接、人工终端及托管作业服务分别依据原来源的状态更新；已登记连接、已有 Shell 和会话租约可在同一次连接核对恢复后继续使用。[南大合并请求 !6](https://git.nju.edu.cn/Tensor4627/AIMatterLab/-/merge_requests/6)
 
@@ -17,3 +17,9 @@
 | 签名发行与版本标签 | not_run | 本次交付为源码提交。安装说明保留固定完整提交的入口，签名安装器及对应发行标签按既有发布流程另行验收。 |
 
 本地原始回执保存在忽略目录 `validation/local/aimatterlab-021-integration/`。前端优化基于 0.2.0 开发源码完成，当时的 589 项 Node 检查及去重后的 72 项 Electron 用例沿用其原运行记录。[交互评估与取舍](../development/architecture-review-0.2.0.md) · [原开发验收记录](aimatterlab-0.2.0.md)
+
+## 切换 GitHub 主仓库
+
+GitHub `main` 收录了提交 `61d77bf` 及南大 !6 的原始历史。后续代码、Pull Request 和正式发行以 GitHub 为主，安装说明从 GitHub 获取源码。桌面更新默认优先读取 GitHub 的签名清单，来源不可用时可查询南大。两站的只读凭据各自保存。
+
+更新源、安装入口与打包工具的 40 项定向测试及 TypeScript 检查通过。隔离 Electron 从「软件更新 → 私有仓库访问」验证默认 GitHub、显式切换南大和凭据按站点保存，1 项通过。GitHub Actions 使用只读权限执行原有五条源码检查，五条命令本地均通过。[主仓库源码检查](../../.github/workflows/check-source.yml)

@@ -4,6 +4,40 @@ import path from 'node:path';
 
 export async function frontendSettingsExperienceCases({check,out}){
  const snapshot=(page,name)=>page.screenshot({path:path.join(out,name+'.png'),fullPage:true});
+ await check('experience-settings-github-first-update-access',async page=>{
+  await page.evaluate(()=>{
+   const original=window.studio.invoke;
+   const access={nju:true,github:false};
+   const state={phase:'idle',currentVersion:'1.2.3',sequence:1};
+   window.__test.updateWrites=[];
+   window.studio.invoke=async(method,data)=>{
+    if(method==='updates.status'||method==='updates.check')return state;
+    if(method==='updates.accessStatus')return {...access};
+    if(method==='updates.setAccess'){
+     window.__test.updateWrites.push(data);
+     access[data.source]=data.token!==null;
+     return {...access};
+    }
+    return original(method,data);
+   };
+   return window.renderTest('App');
+  });
+  await page.getByRole('button',{name:'软件更新',exact:true}).click();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByText('私有仓库访问',{exact:true}).click();
+  const source=dialog.getByRole('combobox',{name:/发布源/}),token=dialog.getByLabel('只读访问令牌');
+  assert.equal(await source.inputValue(),'github');
+  await token.fill('unsaved-github-fixture');
+  await source.selectOption('nju');
+  assert.equal(await token.inputValue(),'');
+  await dialog.getByRole('button',{name:'移除令牌'}).waitFor();
+  await token.fill('nju-fixture');
+  await dialog.getByRole('button',{name:'保存并检查'}).click();
+  await source.selectOption('github');
+  assert.equal(await token.inputValue(),'');
+  assert.equal(await dialog.getByRole('button',{name:'移除令牌'}).count(),0);
+  assert.deepEqual(await page.evaluate(()=>window.__test.updateWrites),[{source:'nju',token:'nju-fixture'}]);
+ });
  await check('experience-settings-cluster-distinguishes-empty-limit-from-zero',async page=>{
   await page.evaluate(()=>{
    const test=window.__test;

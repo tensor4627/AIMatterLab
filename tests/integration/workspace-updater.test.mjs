@@ -58,10 +58,10 @@ test('a signed stable release reconstructs from just the changed range, survives
   assert.deepEqual(api.installs,[[path.join(cache,'pending.exe'),workspace.directory]]);assert.equal(api.quits,1);
 });
 
-test('NJU is checked first; a single user action downloads, verifies and starts exactly one installer',async t=>{
+test('GitHub is checked first; a single user action downloads, verifies and starts exactly one installer',async t=>{
   const {api,client,bytes}=await fixture(t),updater=client();
-  assert.equal((await updater.check()).source,'nju');
-  assert.ok(api.requests.every(({url})=>new URL(url).host==='git.nju.edu.cn'));
+  assert.equal((await updater.check()).source,'github');
+  assert.ok(api.requests.every(({url})=>new URL(url).host==='github.com'));
   assert.equal(api.installs.length,0);
   const [first,second]=await Promise.all([updater.update(),updater.update()]);
   assert.equal(first.phase,'installing');assert.equal(second.phase,'installing');
@@ -71,13 +71,13 @@ test('NJU is checked first; a single user action downloads, verifies and starts 
   assert.ok(verified.automatic);
 });
 
-test('an unavailable primary feed or installer can use the GitHub mirror',async t=>{
+test('an unavailable GitHub feed or installer can use the NJU mirror',async t=>{
   for(const fail of ['latest.yml','.exe']) {
     const {api,client}=await fixture(t),updater=client();
-    api.response=url=>url.hostname==='git.nju.edu.cn'&&url.pathname.endsWith(fail)?new Response(null,{status:503}):null;
+    api.response=url=>url.hostname==='github.com'&&url.pathname.endsWith(fail)?new Response(null,{status:503}):null;
     const state=await updater.check();
-    assert.equal(state.source,fail==='latest.yml'?'github':'nju');
-    assert.equal((await updater.update()).source,'github');
+    assert.equal(state.source,fail==='latest.yml'?'nju':'github');
+    assert.equal((await updater.update()).source,'nju');
     assert.equal(api.installs.length,1);assert.equal(api.quits,1);
   }
 });
@@ -100,11 +100,11 @@ test('two private or unpublished channels never report up-to-date and a valid pr
   api.response=()=>new Response(null,{status:404});
   const missing=await client().check();
   assert.equal(missing.phase,'unpublished');
-  assert.deepEqual(missing.issues.map(i=>i.source),['nju','github']);
+  assert.deepEqual(missing.issues.map(i=>i.source),['github','nju']);
   api.response=()=>new Response(null,{status:401});
   assert.equal((await client().check()).phase,'error');
   api.response=url=>url.hostname==='git.nju.edu.cn' ? new Response('<html></html>',{headers:{'content-type':'text/html'}}) : new Response(null,{status:404});
-  assert.deepEqual((await client().check()).issues,[{source:'nju',status:200,webPage:true},{source:'github',status:404}]);
+  assert.deepEqual((await client().check()).issues,[{source:'github',status:404},{source:'nju',status:200,webPage:true}]);
   api.response=null;api.requests.length=0;
   assert.equal((await client({currentVersion:'0.1.8'}).check()).phase,'current');
   assert.equal(api.requests.length,1);
@@ -115,7 +115,7 @@ test('a signed release older than the installation reports its version and offer
   const updater=client({currentVersion:'0.1.18'});
   const state=await updater.check();
   assert.equal(state.phase,'current');
-  assert.equal(state.source,'nju');
+  assert.equal(state.source,'github');
   assert.equal(state.currentVersion,'0.1.18');
   assert.equal(state.version,'0.1.8');
   assert.equal((await updater.update()).phase,'current');

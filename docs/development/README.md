@@ -4,7 +4,7 @@
 
 产品职责与工具契约见[软件规范](../software-specification.md)，第三方作者的交付格式、示例和测试入口见[开发者接入指南](../../developer/README.md)。原 GPU Sampling Studio 的仓库结构沿革见[重组记录](../v1.0.md)。
 
-桌面维护者可按[Windows 工作区增量更新发布流程](windows-update-release.md)构建签名附件、同步南大 GitLab 和 GitHub，并验证从旧版或内测版直接升级。
+桌面维护者可按[Windows 工作区增量更新发布流程](windows-update-release.md)构建签名附件、发布到 GitHub 并同步南大 GitLab 备用发行源，并验证从旧版或内测版直接升级。
 
 ## 产品与交互规则
 

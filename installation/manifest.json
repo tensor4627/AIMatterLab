@@ -23,5 +23,5 @@
     "neb": "fixture_required"
   },
   "distribution_status": "blocked",
-  "distribution_scope": "0.2.1 source delivery on NJU GitLab main. Windows x64 signed installer and release tag require the existing project signing key and packaged verification. See docs/releases/aimatterlab-0.2.1.md."
+  "distribution_scope": "0.2.1 source delivery on GitHub main. Windows x64 signed installer and release tag require the existing project signing key and packaged verification. See docs/releases/aimatterlab-0.2.1.md."
 }

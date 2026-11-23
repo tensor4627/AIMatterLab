@@ -12,15 +12,15 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-0.2.1 源码改进流程缺项定位、资源工具与续算表单、PyGAS 端口连线和长日志显示。SSH 核对超时时保留原连接、终端和作业服务状态的核对入口。[本轮实测与验证范围](docs/releases/aimatterlab-0.2.1.md)
+从 [GitHub 主仓库](https://github.com/tensor4627/AIMatterLab) 获取源码并提交 Pull Request。0.2.1 源码改进流程缺项定位、资源工具与续算表单、PyGAS 端口连线和长日志显示。SSH 核对超时时保留原连接、终端和作业服务状态的核对入口。[本轮实测与验证范围](docs/releases/aimatterlab-0.2.1.md)
 
-当前签名安装包为 0.1.30 Windows x64。[南大 GitLab 发行页](https://git.nju.edu.cn/Tensor4627/AIMatterLab/-/releases/v0.1.30) · [GitHub 发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.1.30)
+当前签名安装包为 0.1.30 Windows x64。[GitHub 发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.1.30) · [南大 GitLab 备用发行页](https://git.nju.edu.cn/Tensor4627/AIMatterLab/-/releases/v0.1.30)
 
 首次安装时选择一个可写目录，升级时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。[项目提示词和用户技能](docs/project-skill-workspace.md)
 
 从源码安装时，可让本机 Agent 按安装说明核对提交、依赖锁和选定的计算环境。[单 prompt 安装说明](docs/one-prompt-install.md)
 
-Windows 工作区版可以在设置右侧点“检查更新”。发现正式新版后，点击高亮的“更新”即可下载并重启。默认先查南大 GitLab，备用源为 GitHub。私有发行页使用更新面板中的“私有仓库访问”。[分发与升级说明](docs/releases/aimatterlab-0.1.16.md)
+Windows 工作区版可以在设置右侧点“检查更新”。发现正式新版后，点击高亮的“更新”即可下载并重启。0.2.1 源码默认先查 GitHub，备用源为南大 GitLab。私有发行页使用更新面板中的“私有仓库访问”。[分发与升级说明](docs/releases/aimatterlab-0.1.16.md)
 
 1. 普通对话可直接连接服务商；进行本地科学计算时从「连接计算资源 → 本地 WSL」选择已安装的发行版，默认 Ubuntu。
 2. 在「工具 → 算力与管理 → 计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。
@@ -49,7 +49,7 @@ pnpm start
 pnpm run pack
 ```
 
-`pnpm run pack` 生成本地发行文件。发布到南大 GitLab 和 GitHub 后的下载验证，以及跳过内测版本的处理，见[Windows 增量更新发布流程](docs/development/windows-update-release.md)。
+`pnpm run pack` 生成本地发行文件。发布到 GitHub 和南大 GitLab 后的下载验证，以及跳过内测版本的处理，见[Windows 增量更新发布流程](docs/development/windows-update-release.md)。
 
 本地测试的分层入口、筛选方法和合并规则见 [测试库说明](tests/README.md)。默认工程测试不执行工具自带测试或科学计算。
 

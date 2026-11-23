@@ -63,7 +63,7 @@ export function UpdateButton({state,act,open,compact=false}:ReturnType<typeof us
 }
 
 function ReleaseAccess({recheck}:{recheck:()=>Promise<void>}) {
-  const [source,setSource]=useState<UpdateSource>('nju'),[token,setToken]=useState('');
+  const [source,setSource]=useState<UpdateSource>('github'),[token,setToken]=useState('');
   const [saved,setSaved]=useState<UpdateAccess|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   useEffect(()=>{
     let mounted=true;
@@ -83,7 +83,7 @@ function ReleaseAccess({recheck}:{recheck:()=>Promise<void>}) {
   return <details className="release-access" onToggle={event=>{if(!event.currentTarget.open)setToken('');}}>
     <summary>{t('私有仓库访问')}</summary>
     <label>{t('发布源')}<select value={source} disabled={busy} onChange={event=>{setSource(event.target.value as UpdateSource);setToken('');setError('');}}>
-      <option value="nju">{sourceLabel('nju')}</option><option value="github">GitHub</option>
+      <option value="github">GitHub</option><option value="nju">{sourceLabel('nju')}</option>
     </select></label>
     <label>{t('只读访问令牌')}<input type="password" value={token} autoComplete="off" spellCheck={false} maxLength={512}
       placeholder={saved?.[source]?t('已保存令牌，可输入新令牌替换'):undefined} disabled={busy} onChange={event=>setToken(event.target.value)}/></label>

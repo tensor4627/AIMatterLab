@@ -1,9 +1,9 @@
 # AIMatterLab 0.2.1 单 prompt 安装
 
-复制下面的提示词给可以使用本机终端和 Git 的 Agent。0.2.1 源码从南大 GitLab 的 `main` 获取，克隆地址为 `https://git.nju.edu.cn/Tensor4627/AIMatterLab.git`。GitHub 镜像为 `https://github.com/tensor4627/AIMatterLab.git`。
+复制下面的提示词给可以使用本机终端和 Git 的 Agent。0.2.1 源码从 GitHub 主仓库的 `main` 获取，克隆地址为 `https://github.com/tensor4627/AIMatterLab.git`。
 
 ```text
-请在我的 Windows 电脑安装 AIMatterLab 0.2.1。从南大 GitLab 或我指定的仓库核对 refs/tags/v0.2.1 或我提供的完整提交 ID，在新目录使用该版本，读取 INSTALL_AGENT.md 并核对安装清单。按我选定的连接路线发现所需程序和可复用的计算环境，再按选定的服务商和短例验证。完成后给我启动文件和实际验收结果。
+请在我的 Windows 电脑安装 AIMatterLab 0.2.1。从 GitHub 或我指定的仓库核对 refs/tags/v0.2.1 或我提供的完整提交 ID，在新目录使用该版本，读取 INSTALL_AGENT.md 并核对安装清单。按我选定的连接路线发现所需程序和可复用的计算环境，再按选定的服务商和短例验证。完成后给我启动文件和实际验收结果。
 ```
 
 完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)列出官方仓库、本版版本号和发布引用。需要登录仓库时由用户在本机 Git 凭据界面完成。
