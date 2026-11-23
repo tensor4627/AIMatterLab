@@ -340,7 +340,7 @@ test('unknown terminal close preserves its capacity reservation while the indepe
  assert.equal((await acquire('service')).access,'service');
  assert.equal((await f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},f.scope)).scheduler.status,'observed');
  const channel=f.manager.consoleEntries().channels[0];
- assert.equal(channel.status,'assigned');assert.equal(channel.terminalStatus,'lost');assert.equal(channel.sessionId,null);
+ assert.equal(channel.status,'assigned');assert.equal(channel.terminalStatus,'unknown');assert.equal(channel.sessionId,null);
  assert.equal((await acquire('terminal')).leaseStatus,'unknown');
  assert.equal(f.shellRequests.filter(row=>row.op==='open').length,1);
  assert.deepEqual(await f.gateway.call('release_compute_resource',{resource_id},f.scope),{status:'unconfirmed',resourceId:resource_id,terminalClosed:false});

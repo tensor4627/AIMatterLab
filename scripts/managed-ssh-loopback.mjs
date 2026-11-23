@@ -22,7 +22,7 @@ const temp=await mkdtemp(path.join(os.tmpdir(),'aimatter-managed-'));
 const windowsKey=path.join(temp,'client'),nativeHosts=path.join(temp,'known_hosts');
 const programs=path.join(process.env.SystemRoot,'System32','OpenSSH');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-let fixture,reader,lines,resourceDirectory;
+let fixture,reader,lines,resourceDirectory,nativeTerminal;
 const managers=[];
 try {
   execFileSync(path.join(programs,'ssh-keygen.exe'),['-q','-t','ed25519','-N','','-f',windowsKey],{windowsHide:true});
@@ -46,7 +46,8 @@ try {
   assert.equal(reachable,true,'Windows localhost did not receive the isolated WSL SSH banner');
   for(const [index,target] of targets.entries()){
     const native=index===0,host=createMultiplexHost({knownHostsFile:native?nativeHosts:known});
-    const manager=createSshConnections({pty,sessions:new Map(),host});managers.push(manager);
+    const terminalFactory=native?{spawn(...args){nativeTerminal=pty.spawn(...args);return nativeTerminal;}}:pty;
+    const manager=createSshConnections({pty:terminalFactory,sessions:new Map(),host});managers.push(manager);
     const requestId=randomUUID(),id=randomUUID();
     const profile={id,version:1,kind:'ssh',name:native?'Fixture native':'Fixture WSL',mode:'key',ssh_client:native?path.join(programs,'ssh.exe'):'/usr/bin/ssh',
       distribution,username:target.username,port:target.port,host:'127.0.0.1',identity_file:native?windowsKey:identity,proxy_jump:[],via:[]};
@@ -55,7 +56,8 @@ try {
     for(let attempt=0;attempt<100;attempt++){
       const auth=manager.authRead({connectionId:opened.connectionId,cursor:authCursor});
       authCursor=auth.cursor;diagnostic=(diagnostic+auth.output).slice(-4000);
-      result=await manager.completeLogin({connectionId:opened.connectionId,requestId});
+      const shellReady=native&&diagnostic.includes('AIMATTER_LOOPBACK_SHELL_READY');
+      result=await manager.completeLogin({connectionId:opened.connectionId,requestId,...shellReady?{userConfirmed:true}:{}});
       if(result.login.status==='complete'||result.login.status==='failed')break;
       await delay(200);
     }
@@ -87,6 +89,21 @@ try {
     command(managers[0],beta,"printf 'B_%s_%s\\n' untouched \"\${AIMTEST:-empty}\"",'B_untouched_empty'),
     command(managers[1],other,"printf 'C_%s_%s\\n' independent \"\${AIMTEST:-empty}\"",'C_independent_empty')
   ]);
+  // Hold the native PTY's output so the relay pong arrives after the real
+  // health-check deadline, without interrupting either SSH transport.
+  const nativeRef={connectionId:alpha.connectionId};
+  nativeTerminal.pause();
+  try {
+    await assert.rejects(managers[0].state(nativeRef),error=>error.code==='ssh_control_timeout');
+  } finally {
+    nativeTerminal.resume();
+  }
+  const recovered=await managers[0].state(nativeRef);
+  assert.equal(recovered.connectionId,alpha.connectionId);
+  assert.equal(recovered.authentication,'verified');
+  assert.equal((await managers[0].managedShell(alpha,'state')).sessionId,a.sessionId);
+  await command(managers[0],alpha,`printf 'RECOVERED_%s\\n' "$AIMTEST"`,'RECOVERED_'+markup);
+  console.log('PASS native SSH proof timed out and the original connection and shell recovered with their state intact');
   await assert.rejects(()=>managers[0].managedShell({...alpha,scope:beta.scope},'read'));
   const extra=[session(0,'capacity-first'),session(0,'capacity-second')];
   await Promise.all(extra.map(ref=>managers[0].managedShell(ref,'open')));
@@ -212,7 +229,9 @@ try {
     assert.equal((await localSource.request('GET','/api/health')).root,local.root);
     console.log('PASS two isolated first-use private SSH workers and one verified local WSL worker, independent project registries and local survival');
   }
-  await managers[0].close({connectionId:alpha.connectionId});
+  const closed=await managers[0].close({connectionId:alpha.connectionId});
+  assert.equal(closed.closed,true);
+  assert.equal((await managers[0].state(nativeRef)).status,'closed');
   await command(managers[1],other,"printf 'SURVIVE_%s\\n' ok",'SURVIVE_ok');
   for(const manager of managers)await manager.closeAll();
   fixture.stdin.end('stop\n');

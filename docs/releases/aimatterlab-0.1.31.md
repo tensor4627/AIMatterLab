@@ -8,6 +8,10 @@
 
 | 检查 | 结果 | 范围 |
 | --- | --- | --- |
+| SSH 资源页状态核验 | passed | 40 项定向 Node 测试及 TypeScript 检查通过。模拟连接覆盖状态查询超时、清单不完整、原连接恢复和已确认退出。结果见 `validation/local/ssh-console-status-tests.txt` 与 `validation/local/ssh-console-inventory-tests.txt`。 |
+| SSH 资源页原生窗口 | passed | 隔离 Electron 窗口的桌面和紧凑布局两项均通过。用本地模拟回执点击「刷新状态」，核对待核对期间保留选中连接和终端、恢复在线，以及确认失联后出现重连入口。结果见 `validation/local/managed-compute-20261119/native-resource-console/results.json`。 |
+| SSH 登录、终端和会话恢复 | passed | 桥接测试 48/48，重连集成测试 9/9。原有 5 个失败用例已按需调用 `openShell`，覆盖登录回执丢失、重复查询、终端所有权和关闭后查询。记录见 `validation/local/ssh-console-bridge-tests.txt` 与 `validation/local/ssh-console-relogin-tests.txt`。 |
+| 本机 OpenSSH 核验超时与关闭 | passed | Windows 和 WSL 客户端分别登录本机临时 sshd，每台仅认证一次。暂停 Windows PTY 输出使真实状态探测超时，恢复读取后核对原连接 ID、Shell ID 和会话变量；明确关闭该连接后，另一条 WSL 连接仍能执行命令。记录见 `validation/local/ssh-console-loopback.txt`。 |
 | 合并后的前端 Node 回归 | passed | `frontend-031-final.txt` 中 1,132 项全部通过。修复了合并首轮出现的规划控件重复、终端草稿传递、重复轮次 ID 夹具及翻译遗漏。 |
 | Agent、IPC 与技能定向回归 | passed | `contracts-agent-031.txt` 中 100 项全部通过，覆盖草稿归属、队列、证据权限、历史、设置持久化契约和技能读取。 |
 | 布局、提示与 SSH 交接 | passed | `layout-031/results.json` 中 7 个原生 Electron 用例通过。另用实际桌面检查 13 个布局操作，包括 640 像素窗口、设置取消、保存和重启恢复，见 `priority-xKnQl1/result.json`。SSH 用例使用本地模拟回执。 |

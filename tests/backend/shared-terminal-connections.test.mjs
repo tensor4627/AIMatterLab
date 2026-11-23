@@ -5,10 +5,10 @@ import {createComputeProfiles} from '../../backend/main/compute/compute-profiles
 import {createSshConnections} from '../../desktop/platform/terminal-service/ssh-connection.mjs';
 import {mockTerminalRuntime} from '../helpers/terminal-runtime-fixture.mjs';
 
-function fixture(t,{unsupported=false,dropLoginAck=false,dropPrepareAck=false,dropAbort='none',leaseMs=30000,workspaceCommands=()=>null}={}){
+function fixture(t,{unsupported=false,dropLoginAck=false,dropPrepareAck=false,dropAbort='none',leaseMs=30000,closeConfirmed=true,workspaceCommands=()=>null}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-connection-bridge-')),rows=new Map(),catalog={list:k=>[...rows].filter(([key])=>key.startsWith(k+':')).map(([,v])=>structuredClone(v)),get:(k,id)=>structuredClone(rows.get(k+':'+id)||null),put:(k,id,v)=>rows.set(k+':'+id,structuredClone({...v,id})),remove:(k,id)=>rows.delete(k+':'+id)},profiles=createComputeProfiles({catalog}),draft={kind:'ssh',name:'Fixture',host:'fixture.invalid',username:'fixture',port:2222,mode:'interactive',ssh_client:'/usr/bin/ssh',distribution:'Fixture Linux'},profile=profiles.save({expectedVersion:0,...draft}),sessions=new Map(),processes=[],requests=[];let config,resource=null,resourceRevision=0,context={provider:'codex',threadId:'owned-thread',taskId:'owned-task',projectId:'owned-project',environmentId:'owned-environment',inputRoot:'owned-input'},confirmGate,stateHook,ownerHook;
  const pty={spawn(file,args){let data,exit;const process={pid:1000+processes.length,writes:[],onData:fn=>data=fn,onExit:fn=>exit=fn,write(value){this.writes.push(value);},resize(){},kill(){exit?.({exitCode:0});},emit:value=>data?.(value)};processes.push(process);if(file==='/fixture/master')queueMicrotask(()=>data?.('\x1b[2J\x1b]0;owned title\x07__STUDIO_MASTER_'+args[0]+'__:'+Buffer.from(JSON.stringify({pid:process.pid,start:'123',boot:'00000000-0000-0000-0000-000000000000'})).toString('base64')+'__STUDIO_MASTER_END_'+args[0]+'__\r\nPRIVATE_AUTH_PROMPT'));return process;}};
- const host={allocate:async()=>{if(unsupported)throw Object.assign(Error('ssh_multiplex_unsupported'),{code:'ssh_multiplex_unsupported'});return {socket:'/tmp/fixture/master.sock'};},masterLaunch:(_p,_proof,nonce)=>({file:'/fixture/master',args:[nonce],cwd:root}),slaveLaunch:()=>({file:'/fixture/slave',args:[],cwd:root}),check:async()=>{if(confirmGate)await confirmGate;return {socketIdentity:[1,2]};},ready:async()=>({ready:true}),prove:async()=>{if(confirmGate)await confirmGate;return {socketIdentity:[1,2]};},close:async()=>{},cleanup:async()=>{}};
+ const host={allocate:async()=>{if(unsupported)throw Object.assign(Error('ssh_multiplex_unsupported'),{code:'ssh_multiplex_unsupported'});return {socket:'/tmp/fixture/master.sock'};},masterLaunch:(_p,_proof,nonce)=>({file:'/fixture/master',args:[nonce],cwd:root}),slaveLaunch:()=>({file:'/fixture/slave',args:[],cwd:root}),check:async()=>{if(confirmGate)await confirmGate;return {socketIdentity:[1,2]};},ready:async()=>({ready:true}),prove:async()=>{if(confirmGate)await confirmGate;return {socketIdentity:[1,2]};},close:async()=>({closed:closeConfirmed}),cleanup:async()=>{}};
  const manager=createSshConnections({pty,sessions,host,profileUpdateLeaseMs:leaseMs});
  const rawRequestApi=async(_broker,method,route,body)=>{requests.push({method,route,body:structuredClone(body)});if(route==='/health')return {instanceId:config.instanceId,pid:12345};if(route==='/connections')return manager.list();if(route==='/connections/open')return manager.open(body);if(route==='/sessions')return {sessions:[...sessions.values()].map(s=>s.state())};if(route.startsWith('/connections/profile/')){const operation=route.split('/').at(-1);if(operation==='abort'&&dropAbort==='before')throw Error('lost_abort_request');const result=manager[{prepare:'prepareProfileUpdate',commit:'commitProfileUpdate',abort:'abortProfileUpdate'}[operation]](body);if(operation==='prepare'&&dropPrepareAck||operation==='abort'&&dropAbort==='after')throw Error('lost_transaction_receipt');return result;}const connection=/^\/connections\/([^/]+)\/(.+)$/.exec(route);if(connection){if(connection[2].startsWith('login/status/'))return manager.loginStatus({connectionId:connection[1],requestId:connection[2].slice(13)});if(connection[2]==='login/complete'){const result=await manager.completeLogin({connectionId:connection[1],...body});if(dropLoginAck)throw Object.assign(Error('terminal_login_unknown'),{terminalRejected:true});return result;}const name={state:'state',confirm:'confirm','login/complete':'completeLogin','auth/read':'authRead','auth/input':'authInput','auth/resize':'authResize','shell/open':'openShell',close:'close'}[connection[2]];return manager[name]({connectionId:connection[1],...body});}const session=/^\/sessions\/([^/]+)\/(.+)$/.exec(route);assert(session,route);const s=sessions.get(session[1]);assert(s);if(session[2]==='state'){const value=s.state();if(stateHook)await stateHook();return value;}if(session[2]==='service/state')return s.serviceState();const result=s[session[2]](body);if(session[2]==='owner'&&ownerHook)await ownerHook();if(session[2]==='close')sessions.delete(session[1]);return result;};
  const requestApi=async(...args)=>{try{const service=/^\/connections\/([^/]+)\/service\/(start|state|request)$/.exec(args[2]);if(service)return await manager[{start:'openService',state:'serviceState',request:'serviceRequest'}[service[2]]]({connectionId:service[1],...args[3]});return await rawRequestApi(...args);}catch(error){if(error.code){const e=Error(error.code==='service_active'?'terminal_service_active':error.code);e.terminalRejected=true;throw e;}throw error;}};
@@ -95,6 +95,49 @@ test('console reads multiple broker masters without selecting a conversation or 
  assert.equal((await f.bridge.connections.closeExact(original)).closed,true);
  assert.deepEqual(f.requests.find(row=>row.route.endsWith('/close')).body,{profileId:f.profile.id,profileVersion:1});
  assert.equal((await f.bridge.connections.state({connectionId:b.connectionId})).authentication,'verified');
+});
+
+test('console distinguishes confirmed absence from failed inventory and connection state reads',async t=>{
+ const f=fixture(t,{closeConfirmed:false}),omitted=await f.ready(),listed=await f.ready();
+ const shell=await f.bridge.connections.openShell({connectionId:listed.connectionId,requestId:'inventory-shell'});
+ const session=f.sessions.get(shell.id),state=session.state;
+ const readConnections=f.manager.list,readConnection=f.manager.state;
+ const connections=f.manager.list().connections.filter(row=>row.connectionId===listed.connectionId);
+ f.manager.list=()=>({connections});
+ f.manager.state=()=>{throw Error('connection state unavailable');};
+ f.sessions.delete(shell.id);
+
+ const complete=await f.bridge.consoleInventory();
+ assert.equal(complete.complete,true);
+ const listedRow=complete.connections.find(row=>row.connectionId===listed.connectionId);
+ assert.equal(listedRow.verified,false);
+ assert.notEqual(listedRow.missing,true);
+ assert.equal(complete.connections.find(row=>row.connectionId===omitted.connectionId).missing,true);
+ assert.equal(complete.sessions.find(row=>row.sessionId===shell.id).missing,true);
+
+ f.manager.list=()=>({connections:[null]});
+ const withoutConnections=await f.bridge.consoleInventory();
+ assert.equal(withoutConnections.complete,false);
+ assert.notEqual(withoutConnections.connections.find(row=>row.connectionId===omitted.connectionId).missing,true);
+ assert.equal(withoutConnections.sessions.find(row=>row.sessionId===shell.id).missing,true);
+
+ f.manager.list=()=>({connections});
+ f.sessions.set(shell.id,session);
+ session.state=()=>{throw Error('session inventory unavailable');};
+ const withoutSessions=await f.bridge.consoleInventory();
+ session.state=state;
+ assert.equal(withoutSessions.complete,false);
+ assert.equal(withoutSessions.connections.find(row=>row.connectionId===omitted.connectionId).missing,true);
+ assert.notEqual(withoutSessions.sessions.find(row=>row.sessionId===shell.id).missing,true);
+
+ f.manager.list=readConnections;
+ f.manager.state=readConnection;
+ const target={connectionId:listed.connectionId,profileId:f.profile.id,profileVersion:f.profile.version};
+ assert.equal((await f.bridge.connections.closeExact(target)).closed,false);
+ const closing=(await f.bridge.consoleInventory()).connections.find(row=>row.connectionId===listed.connectionId);
+ assert.equal(closing.verified,true);
+ assert.equal(closing.closeUnconfirmed,true);
+ assert.doesNotMatch(JSON.stringify(closing),/ssh_close_unconfirmed/);
 });
 
 test('human terminal observation rechecks a harmless message revision without suppressing a real conversation switch',async t=>{const f=fixture(t),c=await f.ready();f.select(c);const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'shell'});let once=true;f.onState(()=>{if(once){once=false;f.change({serial:1});}});assert.equal((await f.bridge.read({sessionId:shell.id,ownerEpoch:1})).sessionId,shell.id);once=true;f.onState(()=>{if(once){once=false;f.change({threadId:'other-thread',serial:2});}});await assert.rejects(f.bridge.read({sessionId:shell.id,ownerEpoch:1}),/terminal_context_changed/);});
@@ -270,25 +313,39 @@ test('confirmed private maintenance channel clears only the previous borrowed tr
 test('viewport resize after Agent handoff keeps its owner and grant and cannot write terminal input',async t=>{
  const f=fixture(t),c=await f.open('resize-login');
  await f.bridge.connections.completeLogin({connectionId:c.connectionId,requestId:'resize-login'});f.select(c);
- const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'resize-shell'});
- await f.bridge.owner({sessionId:shell.sessionId,ownerEpoch:shell.ownerEpoch,owner:'agent'});
- assert.equal((await f.bridge.resize({sessionId:shell.sessionId,cols:120,rows:36})).accepted,true);
- assert.equal(f.bridge.hasCurrentGrant('codex',shell.sessionId),true);
- const state=(await f.bridge.list({})).sessions.find(s=>s.sessionId===shell.sessionId);assert.equal(state.owner,'agent');
- await assert.rejects(f.bridge.input({sessionId:shell.sessionId,ownerEpoch:state.ownerEpoch,requestId:'blocked-human',data:'must-not-run\r'}),/human_owned/);
+ const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'resize-shell'}),sessionId=shell.sessionId;
+ const owned=await f.bridge.owner({sessionId,ownerEpoch:shell.ownerEpoch,owner:'agent'});
+ const terminal=f.processes.at(-1),writes=[...terminal.writes];
+ assert.equal((await f.bridge.resize({sessionId,cols:120,rows:36})).accepted,true);
+ assert.equal(f.bridge.hasCurrentGrant('codex',sessionId),true);
+ const state=(await f.bridge.list({})).sessions.find(s=>s.sessionId===sessionId);
+ assert.equal(state.owner,'agent');assert.equal(state.ownerEpoch,owned.ownerEpoch);
+ await assert.rejects(f.bridge.input({sessionId,ownerEpoch:state.ownerEpoch,requestId:'blocked-human',data:'must-not-run\r'}),/human_owned/);
+ assert.deepEqual(terminal.writes,writes);
  assert.equal(f.processes.length,2);
 });
 
-test('human login completion leaves the exact shell for an explicit open and does not grant it to any Agent',async t=>{
+test('human login completion verifies the original master and a separately opened shell stays human-owned',async t=>{
  const f=fixture(t),requestId='one-human-login',c=await f.open(requestId),ref={connectionId:c.connectionId,requestId};
  const completed=await f.bridge.connections.completeLogin(ref);
- assert.equal(completed.connection.authentication,'verified');assert.equal(completed.shell,undefined);
- const repeated=await f.bridge.connections.completeLogin(ref);assert.equal(repeated.shell,undefined);assert.equal(f.processes.length,1);
+ assert.equal(completed.login.status,'complete');
+ assert.equal(completed.connection.authentication,'verified');
+ assert.equal(completed.connection.connectionId,c.connectionId);
+ assert.equal(completed.shell,undefined);
+ const repeated=await f.bridge.connections.completeLogin(ref);
+ assert.equal(repeated.login.status,'complete');assert.equal(repeated.connection.connectionId,c.connectionId);assert.equal(repeated.shell,undefined);
+ await assert.rejects(f.bridge.connections.completeLogin({...ref,requestId:'foreign-login'}),/terminal_unavailable/);
+ assert.equal((await f.bridge.connections.state({connectionId:c.connectionId})).authentication,'verified');
+ assert.equal(f.processes.length,1);assert.deepEqual((await f.bridge.list({})).sessions,[]);
  const shellRequest={connectionId:c.connectionId,requestId:'human-shell'};
- const shell=await f.bridge.connections.openShell(shellRequest);assert.equal(shell.connectionId,c.connectionId);assert.equal(shell.owner,'human');
- assert.equal((await f.bridge.connections.openShell(shellRequest)).sessionId,shell.sessionId);assert.equal(f.processes.length,2);
- assert.equal((await f.bridge.list({})).sessions.length,1);assert.equal(f.bridge.hasCurrentGrant('codex',shell.sessionId),false);
- await assert.rejects(f.bridge.connections.completeLogin({...ref,requestId:'foreign-login'}),/terminal_unavailable/);assert.equal(f.processes.length,2);assert.equal((await f.bridge.connections.state({connectionId:c.connectionId})).authentication,'verified');
+ const shell=await f.bridge.connections.openShell(shellRequest);
+ assert.equal(shell.connectionId,c.connectionId);assert.equal(shell.owner,'human');
+ assert.equal((await f.bridge.connections.openShell(shellRequest)).sessionId,shell.sessionId);
+ assert.deepEqual((await f.bridge.list({})).sessions.map(session=>session.sessionId),[shell.sessionId]);
+ assert.equal(f.bridge.hasCurrentGrant('codex',shell.sessionId),false);
+ assert.equal(f.processes.length,2);
+ await assert.rejects(f.bridge.connections.completeLogin({...ref,requestId:'foreign-login'}),/terminal_unavailable/);
+ assert.equal(f.processes.length,2);assert.equal((await f.bridge.connections.state({connectionId:c.connectionId})).authentication,'verified');
  await assert.rejects(f.bridge.callTool('compute.sshConnection.completeLogin',ref,f.scope()),/unknown_operation/);
 });
 
@@ -315,24 +372,30 @@ test('a profile edit while completing human login cannot create or attach a stal
  const f=fixture(t),requestId='stale-login',c=await f.open(requestId);f.profiles.save({id:f.profile.id,expectedVersion:1,...f.draft,host:'new.invalid'});
  await assert.rejects(f.bridge.connections.completeLogin({connectionId:c.connectionId,requestId}),/saved_connection_changed/);assert.equal((await f.bridge.list({})).sessions.length,0);
 });
-test('a lost completion receipt is recovered by GET status without replaying login or granting Agent use',async t=>{
+test('a lost completion receipt is recovered by GET status without replaying login or opening a shell',async t=>{
  const f=fixture(t,{dropLoginAck:true}),requestId='lost-completion',c=await f.open(requestId),ref={connectionId:c.connectionId,requestId};
  await assert.rejects(f.bridge.connections.completeLogin(ref),/terminal_login_unknown/);
  const before=f.requests.filter(value=>value.method==='POST'&&value.route.endsWith('/login/complete')).length;
  const recovered=await f.bridge.connections.loginStatus(ref);
- assert.equal(recovered.login.status,'complete');assert.equal(recovered.connection.authentication,'verified');assert.equal(recovered.shell,undefined);
- assert.equal(f.requests.filter(value=>value.method==='POST'&&value.route.endsWith('/login/complete')).length,before);assert.equal(f.processes.length,1);
- assert.equal(f.bridge.hasCurrentGrant('codex'),false);assert.equal((await f.bridge.list({})).sessions.length,0);
- await assert.rejects(f.bridge.connections.loginStatus({...ref,requestId:'wrong-attempt'}),/terminal_invalid_request|terminal_unavailable/);assert.equal(f.processes.length,1);
+ assert.equal(recovered.login.status,'complete');assert.equal(recovered.connection.authentication,'verified');
+ assert.equal(recovered.connection.connectionId,c.connectionId);assert.equal(recovered.shell,undefined);
+ assert(f.requests.some(value=>value.method==='GET'&&value.route===`/connections/${c.connectionId}/login/status/${requestId}`));
+ assert.equal(f.requests.filter(value=>value.method==='POST'&&value.route.endsWith('/login/complete')).length,before);
+ assert.equal(f.bridge.hasCurrentGrant('codex'),false);
+ assert.deepEqual((await f.bridge.list({})).sessions,[]);
+ await assert.rejects(f.bridge.connections.loginStatus({...ref,requestId:'wrong-attempt'}),/terminal_invalid_request|terminal_unavailable/);
+ assert.equal(f.processes.length,1);
  await assert.rejects(f.bridge.callTool('compute.sshConnection.loginStatus',ref,f.scope()),/unknown_operation/);
 });
-test('observing a pending login creates no shell and a closed login shell is never reopened by observation',async t=>{
+test('login observation leaves the shell inventory empty before authentication and after an explicitly opened shell closes',async t=>{
  const f=fixture(t),requestId='observe-only',c=await f.open(requestId),ref={connectionId:c.connectionId,requestId};
  const pending=await f.bridge.connections.loginStatus(ref);assert.equal(pending.login.status,'waiting_authentication');assert.equal(pending.shell,undefined);assert.equal(f.processes.length,1);
  await f.bridge.connections.completeLogin(ref);
- const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'close-after-login'});
+ const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'observe-shell'});
  await f.bridge.close({sessionId:shell.sessionId});
- const after=await f.bridge.connections.loginStatus(ref);assert.equal(after.login.status,'complete');assert.equal(after.shell,undefined);assert.equal(f.processes.length,2);
+ const after=await f.bridge.connections.loginStatus(ref);
+ assert.equal(after.login.status,'complete');assert.equal(after.shell,undefined);assert.deepEqual(after.connection.terminalSessionIds,[]);
+ assert.deepEqual((await f.bridge.list({})).sessions,[]);assert.equal(f.processes.length,2);
 });
 test('current project/environment/input-root changes permanently revoke shell grant even when same chat and task return',async t=>{
  const f=fixture(t),c=await f.ready();f.select(c);const shell=await f.bridge.connections.openShell({connectionId:c.connectionId,requestId:'shell'});await f.bridge.owner({sessionId:shell.id,ownerEpoch:1,owner:'agent'});const before=f.context();f.change({environmentId:'other-env'});f.bridge.reconcileContext();f.change(before);assert.equal(f.bridge.hasCurrentGrant('codex',shell.id),false);await assert.rejects(f.bridge.callTool('read_shared_terminal',{session_id:shell.id},f.scope()),/scope_denied/);

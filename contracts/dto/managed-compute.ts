@@ -23,7 +23,7 @@ export type ComputeConsoleChannelSource = 'managed'|'handoff'|'wsl';
 export interface ComputeConsoleChannel {
   source:ComputeConsoleChannelSource; leaseId:string|null; sessionId:string|null; provider:AgentProvider; threadId:string;
   conversationId:string|null; conversationName:string|null; projectId:string|null; projectName:string|null; serviceOnly:boolean; busy:boolean;
-  serviceContext?:boolean; commandContext?:boolean; terminalStatus?:'preparing'|'releasing'|'lost'|null;
+  serviceContext?:boolean; commandContext?:boolean; terminalStatus?:'preparing'|'releasing'|'lost'|'unknown'|null;
   status:'preparing'|'assigned'|'releasing'|'lost'|'unknown'|'parked'; checkedAt:number|null;
 }
 export interface ComputeConsoleProfileRef { profileId:string; profileVersion:number }

@@ -345,18 +345,27 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
  // ownership and must stay out of the desktop inventory path.
  async function consoleInventory(){
   load();
+  const priorMasters=new Map(connectionKnown),priorSessions=new Map(known);
   const observed=await Promise.allSettled([...registered.values()].map(async broker=>{
    const health=await requestApi(broker,'GET','/health');
    if(health?.instanceId!==broker.instanceId||health.pid!==broker.pid)fail('terminal_unavailable');
    const [catalogue,terminalList]=await Promise.allSettled([
-    requestApi(broker,'GET','/connections'),requestApi(broker,'GET','/sessions')
+    requestApi(broker,'GET','/connections').then(response=>{
+     const rows=response?.connections;
+     if(!Array.isArray(rows)||rows.length>64)fail('terminal_unavailable');
+     for(const value of rows)validateConnectionView(value,broker);
+     return rows;
+    }),
+    requestApi(broker,'GET','/sessions').then(response=>{
+     const terminals=Array.isArray(response)?response:response?.sessions;
+     if(!Array.isArray(terminals)||terminals.length>16||!terminals.every(stateValid))fail('terminal_unavailable');
+     return terminals;
+    })
    ]);
-   const complete=catalogue.status==='fulfilled'&&terminalList.status==='fulfilled';
-   const rows=catalogue.status==='fulfilled'?catalogue.value.connections:[];
-   const terminals=terminalList.status==='fulfilled'?(Array.isArray(terminalList.value)?terminalList.value:terminalList.value.sessions):[];
-   if(!Array.isArray(rows)||rows.length>64||!Array.isArray(terminals)||terminals.length>16||!terminals.every(stateValid))fail('terminal_unavailable');
+   const connectionsListed=catalogue.status==='fulfilled',sessionsListed=terminalList.status==='fulfilled';
+   const rows=connectionsListed?catalogue.value:[];
+   const terminals=sessionsListed?terminalList.value:[];
    const connections=await Promise.all(rows.map(async value=>{
-    validateConnectionView(value,broker);
     const {connectionId,profileId,profileVersion}=value;
     let fresh=value,verified=true;
     if(value.status==='authenticated'||value.closed===false){
@@ -380,19 +389,28 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
      }catch{/* A failed observation provides no worker evidence. */}
     }
     return {connectionId,profileId,profileVersion,status:view.status,authentication:view.authentication,
-     multiplex:view.capabilities.multiplex,closed:view.closed===true,verified,...!verified?{verificationPending:true}:{},capacity,service};
+     multiplex:view.capabilities.multiplex,closed:view.closed===true,verified,capacity,service,
+     ...view.closed===false?{closeUnconfirmed:true}:{},...!verified?{verificationPending:true}:{}};
    }));
-   return {connections,sessions:terminals.map(state=>({...describe(state),verified:true})),complete};
+   return {brokerId:broker.instanceId,connections,sessions:terminals.map(state=>({...describe(state),verified:true})),connectionsListed,sessionsListed};
   }));
   assertLive();
-  const available=observed.flatMap(item=>item.status==='fulfilled'?[item.value]:[]);
-  const connections=available.flatMap(item=>item.connections),sessions=available.flatMap(item=>item.sessions);
+  const inventories=observed.flatMap(item=>item.status==='fulfilled'?[item.value]:[]);
+  const connections=inventories.flatMap(item=>item.connections),sessions=inventories.flatMap(item=>item.sessions);
+  const mastersListed=new Set(inventories.filter(item=>item.connectionsListed).map(item=>item.brokerId));
+  const sessionsListed=new Set(inventories.filter(item=>item.sessionsListed).map(item=>item.brokerId));
   const seenMasters=new Set(connections.map(item=>item.connectionId)),seenSessions=new Set(sessions.map(item=>item.sessionId));
-  for(const {connectionId,profileId,profileVersion,status,authentication,closed} of connectionKnown.values()){
-   if(!seenMasters.has(connectionId))connections.push({connectionId,profileId,profileVersion,status,authentication,closed:closed===true,verified:false,capacity:null,service:null});
+  // Only a valid list from the original broker can establish absence for a
+  // record that has not changed since this inventory read began.
+  for(const record of connectionKnown.values()){
+   const {connectionId,profileId,profileVersion,status,authentication,closed,brokerId}=record;
+   if(!seenMasters.has(connectionId))connections.push({connectionId,profileId,profileVersion,status,authentication,closed:closed===true,verified:false,capacity:null,service:null,
+    ...closed===false?{closeUnconfirmed:true}:{},
+    ...priorMasters.get(connectionId)===record&&mastersListed.has(brokerId)?{missing:true}:{}});
   }
-  for(const state of known.values())if(!seenSessions.has(state.id))sessions.push({...describe(state),verified:false});
-  return {connections,sessions,complete:available.length===observed.length&&available.every(item=>item.complete)};
+  for(const state of known.values())if(!seenSessions.has(state.id))sessions.push({...describe(state),verified:false,
+   ...priorSessions.get(state.id)===state&&sessionsListed.has(state.brokerId)?{missing:true}:{}});
+  return {connections,sessions,complete:inventories.length===observed.length&&inventories.every(item=>item.connectionsListed&&item.sessionsListed)};
  }
 
  async function connectionOpen(data){

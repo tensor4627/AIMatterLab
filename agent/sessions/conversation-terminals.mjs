@@ -232,7 +232,7 @@ export function createConversationTerminals({terminal,service,registration,resou
   return [...parked,...pools.values()].flatMap(pool=>[...pool.entries.values()].map(entry=>({
    connectionId:pool.connectionId,profileId:pool.profileId,profileVersion:pool.profileVersion,
    sessionId:entry.shell?.sessionId??null,provider:entry.scope.provider,threadId:entry.scope.threadId,projectId:entry.scope.projectId,
-   status:entry.retiring?'releasing':entry.consoleCloseUnknown?'lost':!entry.shell?'preparing':parked.has(pool)?'parked':'assigned',busy:busy(entry.scope)
+   status:entry.retiring?'releasing':entry.consoleCloseUnknown?'unknown':!entry.shell?'preparing':parked.has(pool)?'parked':'assigned',busy:busy(entry.scope)
   })));
  }
  async function releaseFromConsole(target){
