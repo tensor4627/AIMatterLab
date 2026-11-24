@@ -77,7 +77,7 @@
         "path": "frontend/features/runs/RunDetail.tsx",
         "sha256": "9b94a4d903cd07edf8faa8c9ea3bcb7098a6282ccb7b784f5501532147c87109",
         "bytes": 29959,
-        "observed_commit": "b5719b82de48078b136c1cc342cf5c6760d82258",
+        "observed_commit": "58d928e38f0e6d3db9fba3f77f83c987dac31ea2",
         "role": "available_result_files_and_frame_selection",
         "line_ranges": [
           [

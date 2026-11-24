@@ -28,7 +28,15 @@ export async function frontendLayoutExperienceCases({check,out}){
  });
  await check('review-narrow-panels-restore-focus-caret-and-scroll',async page=>{
   await page.setViewportSize({width:640,height:600});
-  await page.evaluate(()=>window.renderTest('App'));
+  await page.evaluate(()=>{
+   const invoke=window.studio.invoke;
+   window.studio.invoke=async(method,data)=>{
+    if(method==='sharedTerminal.list')return {sessions:[]};
+    if(method==='compute.resource.status')return {schemaVersion:2,selectionId:null,kind:null,status:'none'};
+    return invoke(method,data);
+   };
+   return window.renderTest('App');
+  });
   await page.getByTestId('navigate-tools').click();
   const field=page.getByTestId('open-tool-hamiltonian');
   await field.focus();

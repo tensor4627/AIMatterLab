@@ -2,7 +2,7 @@
 
 AIMatterLab 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
 
-[更新日志](CHANGELOG.md) · [0.2.3 变更与验证记录](docs/releases/aimatterlab-0.2.3.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
+[更新日志](CHANGELOG.md) · [0.2.4 变更与验证记录](docs/releases/aimatterlab-0.2.4.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
 要安装 GPU-Sampling、pyGAS、PyDyn、TorchNEP、HotPP 或 HotHam，可以在「工具与资源 → 第三方工具包 → 已验证工具的源码仓库」复制克隆命令，再按工具仓库提供的说明安装。源码和桌面版都随附这份[工具仓库清单](installation/tool-sources.json)。
 
@@ -12,7 +12,7 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-从 [GitHub 主仓库](https://github.com/tensor4627/AIMatterLab) 获取源码并提交 Pull Request。0.2.3 源码版本完成软件规范统一、Worker 活跃状态索引优化、全服务商私有定义隔离与恢复、ACP 能力优先握手、工作流增量上下文、面板渲染隔离及零引用旧代码清理。[本轮实测与验证范围](docs/releases/aimatterlab-0.2.3.md)
+从 [GitHub 主仓库](https://github.com/tensor4627/AIMatterLab) 获取源码并提交 Pull Request。0.2.4 源码版本完成软件规范统一、Worker 活跃状态索引优化、全服务商私有定义隔离与恢复、ACP 能力优先握手、工作流增量上下文、面板渲染隔离及零引用旧代码清理。[本轮实测与验证范围](docs/releases/aimatterlab-0.2.4.md)
 
 当前签名安装包为 0.1.30 Windows x64。[GitHub 发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.1.30) · [南大 GitLab 备用发行页](https://git.nju.edu.cn/Tensor4627/AIMatterLab/-/releases/v0.1.30)
 
