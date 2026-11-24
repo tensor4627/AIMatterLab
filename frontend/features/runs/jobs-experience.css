@@ -19,26 +19,28 @@
 .jobs-more-filters>summary{width:fit-content;max-width:100%;padding:6px 0;color:var(--muted);cursor:pointer}
 .jobs-more-filters>summary:hover,.jobs-more-filters[open]>summary{color:var(--text)}
 .jobs-more-filters>.jobs-filters{margin-top:6px}
-.monitor-attention{position:fixed;z-index:70;inset-block-start:48px;inset-inline-end:16px;width:min(420px,calc(100vw - 32px));border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);box-shadow:0 4px 18px #0003;padding:12px 16px}
+.monitor-attention{position:fixed;z-index:70;inset-block-start:48px;inset-inline-end:16px;width:min(420px,calc(100vw - 32px));border:1px solid var(--hairline-strong,var(--line));border-radius:var(--radius-md,12px);background:var(--surface-glass-strong,var(--panel));backdrop-filter:var(--glass-blur,blur(20px) saturate(180%));color:var(--text);box-shadow:var(--shadow-md,0 12px 32px rgba(0,0,0,.32));padding:13px 16px}
 .monitor-attention strong,.monitor-attention>div{display:flex;align-items:center;gap:8px}
 .monitor-attention p,.managed-manual-followup p{margin:6px 0;overflow-wrap:anywhere}
-.managed-manual-followup{padding:8px 12px;border-inline-start:3px solid var(--accent);background:var(--accent-bg)}
+.managed-manual-followup{padding:9px 12px;border-inline-start:3px solid var(--accent);border-radius:0 var(--radius-xs,7px) var(--radius-xs,7px) 0;background:var(--fill-active,var(--accent-bg))}
 
 .jobs-page{container-type:inline-size;container-name:jobs-page;min-width:0}
-.jobs-page .jobs-overview{gap:1px;background:var(--line);border-block:1px solid var(--line)}
-.jobs-page .jobs-overview button{background:var(--panel);border:0;border-radius:0;text-align:start;font-variant-numeric:tabular-nums}
-.jobs-page .jobs-overview button:hover{background:var(--raised)}
+.jobs-page .jobs-overview{gap:9px;background:transparent;border-block:0;margin:10px 0 8px}
+.jobs-page .jobs-overview button{background:var(--panel);border:1px solid var(--hairline,var(--line));border-radius:var(--radius-md,12px);padding:9px 12px;text-align:start;font-variant-numeric:tabular-nums;box-shadow:var(--shadow-xs,none)}
+.jobs-page .jobs-overview button:hover{background:var(--fill-hover,var(--raised));border-color:var(--hairline-strong,var(--line))}
+.jobs-page .jobs-overview button[aria-pressed=true]{border-color:color-mix(in srgb,var(--accent) 55%,var(--hairline,var(--line)));background:var(--fill-active,var(--accent-bg))}
 .jobs-page .jobs-overview button:focus-visible{position:relative;z-index:1}
-.jobs-page .jobs-list{gap:0;border-block-end:1px solid var(--line)}
-.jobs-page .job-record{border:0;border-block-start:1px solid var(--line);border-radius:0;background:transparent;overflow:visible}
-.jobs-page .job-record-open{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px 10px;padding:9px 4px;border-radius:3px}
+.jobs-page .jobs-list{gap:0;border:1px solid var(--hairline,var(--line));border-radius:var(--radius-md,12px);background:var(--panel);box-shadow:var(--shadow-xs,none);overflow:hidden}
+.jobs-page .job-record{border:0;border-block-start:1px solid var(--hairline,var(--line));border-radius:0;background:transparent;overflow:visible}
+.jobs-page .job-record:first-child{border-block-start:0}
+.jobs-page .job-record-open{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px 10px;padding:9px 12px;border-radius:0}
 .jobs-page .job-record-open>span:first-of-type{min-width:0}
 .jobs-page .job-record-open>.badge{white-space:normal;max-width:min(34cqi,9rem);justify-self:end}
 .jobs-page .job-record-open>svg{color:var(--muted)}
-.jobs-page .job-record-open:hover:enabled{background:var(--raised)}
+.jobs-page .job-record-open:hover:enabled{background:var(--fill-hover,var(--raised))}
 .jobs-page .job-record-open:hover:enabled>svg:last-child{color:var(--accent)}
-.jobs-page .job-record-open small{margin-block-start:3px}
-.jobs-page .job-record-meta{border:0;padding:0 4px 9px 32px;gap:4px 12px;font-variant-numeric:tabular-nums}
+.jobs-page .job-record-open small{margin-block-start:3px;font-size:var(--ui-meta-font,inherit)}
+.jobs-page .job-record-meta{border:0;padding:0 14px 11px 38px;gap:4px 12px;font-variant-numeric:tabular-nums;font-size:var(--ui-caption-font,inherit)}
 .jobs-page .job-record-meta .job-stale{color:var(--warn)}
 .jobs-page .job-record-meta .text-button svg{flex-shrink:0}
 .jobs-page .jobs-sources .job-observations{gap:0}

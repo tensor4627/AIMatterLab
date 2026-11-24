@@ -399,7 +399,11 @@ export default function App(){
  useEffect(()=>{
   document.documentElement.dataset.theme=settings.theme;
   document.documentElement.lang=settings.language||'zh-CN';
-  const fonts:Record<string,string>={system:'"Segoe UI", "Microsoft YaHei", sans-serif',sans:'"Segoe UI", "Microsoft YaHei", sans-serif',serif:'Georgia, "SimSun", serif'};
+  const fonts:Record<string,string>={
+   system:'-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif',
+   sans:'"Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif',
+   serif:'Georgia, "Songti SC", "SimSun", serif',
+  };
   const fontSize=bounded(settings.fontSize,12,24,18);
   document.documentElement.style.setProperty('--ui-font',fonts[settings.fontFamily||'system']||fonts.system);
   document.documentElement.style.setProperty('--ui-min-font',bounded(settings.minimumFontSize,11,18,17)+'px');

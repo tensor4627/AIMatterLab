@@ -2,7 +2,7 @@
 .shell.workspace-shell .sidebar{width:clamp(240px,19vw,300px);min-height:0;overflow:hidden;padding-top:12px}
 .workspace-shell .workspace-switch{padding-bottom:10px}
 .workspace-shell .quick-search{margin-bottom:9px}
-.workspace-shell .sidebar-new-conversation{display:flex;justify-content:flex-start;width:100%;padding:10px 12px;margin:0 0 10px;gap:9px;min-height:38px;background:var(--accent-bg);color:var(--accent);border:1px solid var(--line);border-radius:7px;flex-shrink:0}
+.workspace-shell .sidebar-new-conversation{display:flex;justify-content:flex-start;width:100%;padding:10px 12px;margin:0 0 10px;gap:9px;min-height:38px;background:var(--fill-active,var(--accent-bg));color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 26%,var(--hairline,var(--line)));border-radius:var(--radius-sm,9px);flex-shrink:0}
 .workspace-shell .primary-navigation{flex-shrink:0;margin-bottom:9px}
 .workspace-shell .primary-navigation .nav-item{min-height:35px;margin-bottom:2px}
 .workspace-shell .conversation-search{display:flex;align-items:center;gap:7px;border-top:1px solid var(--line);padding:11px 4px 8px;color:var(--muted);flex-shrink:0}
@@ -48,7 +48,7 @@
 .tool-directory-group{margin:25px 0}
 .tool-directory-group h2{font-size:1.05rem;font-weight:550;color:var(--muted);margin:0 0 12px}
 .tool-directory-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:10px}
-.tool-directory-grid>button{display:flex;text-align:left;align-items:flex-start;gap:13px;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:18px;min-width:0}
+.tool-directory-grid>button{display:flex;text-align:left;align-items:flex-start;gap:13px;border:1px solid var(--hairline,var(--line));background:var(--panel);border-radius:var(--radius-md,12px);box-shadow:var(--shadow-xs,none);padding:18px;min-width:0}
 .tool-directory-grid>button>span{flex:1;min-width:0}
 .tool-directory-grid strong,.tool-directory-grid small{display:block;overflow-wrap:anywhere}
 .tool-directory-grid small{margin-top:8px;color:var(--muted);line-height:1.8;font-size:max(calc(11px * var(--ui-scale,1)),var(--ui-min-font,12px))}
@@ -62,7 +62,7 @@
 .jobs-search>span{display:flex;align-items:center;gap:6px}
 .jobs-scope{color:var(--muted);line-height:1.8;margin:14px 0;font-size:max(calc(11px * var(--ui-scale,1)),var(--ui-min-font,12px))}
 .jobs-list{display:flex;flex-direction:column;gap:10px}
-.job-record{border:1px solid var(--line);border-radius:8px;background:var(--panel);min-width:0;overflow:hidden}
+.job-record{border:1px solid var(--hairline,var(--line));border-radius:var(--radius-md,12px);background:var(--panel);box-shadow:var(--shadow-xs,none);min-width:0;overflow:hidden}
 .job-record-open{display:flex;align-items:center;text-align:left;gap:12px;width:100%;padding:16px;flex-wrap:wrap}
 .job-record-open>span:first-of-type{flex:1;min-width:min(160px,100%)}
 .job-record-open strong,.job-record-open small{display:block;overflow-wrap:anywhere}

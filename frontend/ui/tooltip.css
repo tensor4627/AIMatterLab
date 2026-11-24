@@ -4,10 +4,11 @@
   width: max(24px, 1.6em);
   height: max(24px, 1.6em);
   padding: 2px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill, 999px);
   color: var(--muted);
   vertical-align: middle;
   cursor: help;
+  transition: color var(--ui-quick, 150ms) var(--ease-apple, ease), background-color var(--ui-quick, 150ms) var(--ease-apple, ease);
 }
 .field-help:is(:hover, :focus-visible, [aria-describedby]) {
   color: var(--accent);

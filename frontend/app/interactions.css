@@ -1,8 +1,8 @@
 /* Keep native focus, selection and disclosure behaviour for pointer and keyboard input. */
 :root {
-  --ui-quick: 120ms;
-  --ui-reveal: 170ms;
-  --ui-ease: cubic-bezier(.2,.8,.25,1);
+  --ui-quick: 150ms;
+  --ui-reveal: 220ms;
+  --ui-ease: var(--ease-apple, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
 .conversation-project > summary .group-chevron {
@@ -15,10 +15,11 @@
 .workspace-shell .workspace-layout-menu > div { z-index: 8; }
 .workspace-shell :where(.quick-search,.prompt-hints button,.sidebar-accounts):hover {
   color: var(--text);
-  background: var(--raised);
+  background: var(--fill-hover, var(--raised));
 }
 .agent-panel .composer:focus-within {
-  border-color: color-mix(in srgb,var(--accent) 65%,var(--line));
+  border-color: color-mix(in srgb, var(--accent) 62%, transparent);
+  box-shadow: var(--focus-ring, 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent)), var(--shadow-sm, none);
 }
 
 @supports (appearance: base-select) {
@@ -29,69 +30,120 @@
   :is(.composer,.agent-primary,.jobs-filters,.setup-checks) ::picker(select) {
     max-block-size: min(21rem,55dvh);
     max-inline-size: calc(100vw - 18px);
-    padding: 4px;
-    margin-block: 4px;
+    padding: 5px;
+    margin-block: 5px;
     overflow: auto;
     overscroll-behavior: contain;
-    border: 1px solid var(--line);
-    border-radius: 8px;
+    border: 1px solid var(--hairline-strong, var(--line));
+    border-radius: var(--radius-md, 12px);
     color: var(--text);
-    background: var(--panel);
-    box-shadow: 0 6px 20px #0003;
+    background: var(--surface-glass-strong, var(--panel));
+    backdrop-filter: var(--glass-blur, blur(20px) saturate(180%));
+    box-shadow: var(--shadow-md, 0 10px 28px rgba(0, 0, 0, 0.3));
   }
   :is(.composer,.agent-primary,.jobs-filters,.setup-checks) option {
     padding: 6px 9px;
-    border-radius: 5px;
+    border-radius: var(--radius-xs, 7px);
     overflow-wrap: anywhere;
   }
   :is(.composer,.agent-primary,.jobs-filters,.setup-checks) option:is(:checked,:focus-visible) {
     color: var(--accent);
-    background: var(--accent-bg);
+    background: var(--fill-active, var(--accent-bg));
   }
 }
 
 @keyframes ui-reveal {
-  from { opacity: 0; translate: 0 -3px; }
-  to { opacity: 1; translate: 0 0; }
+  from { opacity: 0; translate: 0 -4px; scale: .965; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
+}
+@keyframes modal-enter {
+  from { opacity: 0; translate: 0 10px; scale: .965; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
+}
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes toast-enter {
+  from { opacity: .94; translate: 0 -8px; scale: .98; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
 }
 @keyframes workspace-appear {
-  from { opacity: .74; translate: 0 4px; }
+  from { opacity: .65; translate: 0 5px; }
   to { opacity: 1; translate: 0 0; }
 }
 @keyframes message-sent {
-  from { opacity: 0; translate: 0 5px; }
-  to { opacity: 1; translate: 0 0; }
+  from { opacity: 0; translate: 0 8px; scale: .97; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
 }
 @keyframes navigation-current {
-  from { opacity: .35; scale: 1 .5; }
+  from { opacity: .25; scale: 1 .45; }
   to { opacity: 1; scale: 1 1; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .workspace-content > :is(.page,.home-page),
   .workspace-content > div:not([hidden]) > .page {
-    animation:workspace-appear var(--ui-reveal) var(--ui-ease);
+    animation: workspace-appear var(--ui-reveal) var(--ease-spring-gentle, var(--ui-ease));
   }
   .workspace-shell :is(.navigation-rail,.primary-navigation) button[aria-current=page]::before,
   .workspace-shell .conversation-sidebar .selected-conversation::before {
-    animation:navigation-current var(--ui-reveal) var(--ui-ease);
+    animation: navigation-current var(--motion-snappy-dur, 210ms) var(--ease-spring-snappy, var(--ui-ease));
   }
-  :is(.navigation-rail,.primary-navigation,.panel-selection,.prompt-hints) button,
-  .home-page .home-row, .composer {
-    transition:background-color var(--ui-quick),border-color var(--ui-quick),color var(--ui-quick);
+  :is(.navigation-rail,.primary-navigation,.panel-selection,.prompt-hints,.jobs-overview,.settings-nav) button,
+  .home-page .home-row,
+  .job-record-open,
+  .capability,
+  .task-card,
+  .button,
+  .icon-button,
+  .composer,
+  input,
+  select,
+  textarea {
+    transition:
+      background-color var(--ui-quick) var(--ui-ease),
+      border-color var(--ui-quick) var(--ui-ease),
+      color var(--ui-quick) var(--ui-ease),
+      box-shadow var(--ui-quick) var(--ui-ease),
+      transform var(--motion-snappy-dur, 210ms) var(--ease-spring-snappy, var(--ui-ease)),
+      opacity var(--ui-quick) var(--ui-ease);
+  }
+  .modal-overlay {
+    animation: overlay-fade 200ms var(--ui-ease);
+  }
+  .modal {
+    animation: modal-enter var(--motion-gentle-dur, 340ms) var(--ease-spring-smooth, var(--ui-ease));
+  }
+  .toast {
+    animation: toast-enter var(--motion-smooth-dur, 260ms) var(--ease-spring-snappy, var(--ui-ease));
   }
   .conversation-popover, .workspace-layout-menu[open] > div, .shared-terminal-menu[open] > div,
-  .setup-tool-options, .setup-checks, .setup-tour, .agent-options-content, .modal {
-    animation: ui-reveal var(--ui-quick) var(--ui-ease);
+  .setup-tool-options, .setup-checks, .setup-tour, .agent-options-content,
+  .roadmap-findings, .roadmap-node-detail, .explanation-tooltip-content {
+    animation: ui-reveal var(--motion-snappy-dur, 210ms) var(--ease-spring-snappy, var(--ui-ease));
   }
   :is(.composer,.agent-primary,.jobs-filters,.setup-checks) select::picker(select) {
-    animation: ui-reveal var(--ui-quick) var(--ui-ease);
+    animation: ui-reveal var(--motion-snappy-dur, 210ms) var(--ease-spring-snappy, var(--ui-ease));
   }
   .group-chevron, .tool-group-chevron, .workspace-layout-menu > summary svg, .agent-panel .send {
-    transition: transform var(--ui-quick) var(--ui-ease);
+    transition:
+      transform var(--motion-snappy-dur, 210ms) var(--ease-spring-snappy, var(--ui-ease)),
+      background-color var(--ui-quick) var(--ui-ease),
+      box-shadow var(--ui-quick) var(--ui-ease);
   }
-  .agent-panel .send:active:enabled { transform: scale(.94); }
-  .message[data-just-sent] { animation: message-sent var(--ui-reveal) var(--ui-ease); }
+  .capability:hover, .task-card:hover, .jobs-overview button:hover {
+    transform: translateY(-1px);
+  }
+  :is(.button,.icon-button,.panel-selection button,.capability,.task-card,.jobs-overview button,.navigation-rail button):active:not(:disabled) {
+    transform: scale(0.975);
+  }
+  .agent-panel .send:active:enabled {
+    transform: scale(0.93);
+  }
+  .message[data-just-sent] {
+    animation: message-sent var(--motion-smooth-dur, 280ms) var(--ease-spring-smooth, var(--ui-ease));
+  }
   @supports (interpolate-size: allow-keywords) and selector(details::details-content) {
     :is(.conversation-project,.home-disclosure,.tool-group,.jobs-more-filters)::details-content {
       interpolate-size: allow-keywords;
@@ -100,5 +152,28 @@
       transition: block-size var(--ui-reveal) var(--ui-ease), content-visibility var(--ui-reveal) allow-discrete;
     }
     :is(.conversation-project,.home-disclosure,.tool-group,.jobs-more-filters)[open]::details-content { block-size: auto; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  .modal,
+  .toast,
+  .conversation-popover,
+  .workspace-layout-menu[open] > div,
+  .shared-terminal-menu[open] > div,
+  .setup-tool-options,
+  .setup-checks,
+  .setup-tour,
+  .agent-options-content,
+  .roadmap-findings,
+  .roadmap-node-detail,
+  .explanation-tooltip-content,
+  :is(.composer,.agent-primary,.jobs-filters,.setup-checks) select::picker(select),
+  .message[data-just-sent] {
+    animation: none !important;
+  }
+  :is(.conversation-project,.home-disclosure,.tool-group,.jobs-more-filters)::details-content {
+    transition: none !important;
   }
 }
