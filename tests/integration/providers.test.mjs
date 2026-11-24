@@ -160,3 +160,27 @@ test('ACP version probe timeout kills the probe, drains late errors and removes 
  assert.doesNotThrow(()=>probe.emit('error',Error('late probe error after kill')));
  probe.emit('close');assert.equal(probe.listenerCount('error'),0,'settle-safe error listener is removed once the process closes');
 });
+
+test('ACP capability-first connection accepts a compatible newer CLI version with a non-blocking warning while rejecting invalid version or protocol',async()=>{
+ const {PassThrough}=await import('node:stream');
+ function makeHost(cliVersion,initReply){
+  return {version:'fixture',spawnCli:(_executable,args)=>{
+   const child=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>{};child.stdin=new PassThrough();
+   if(args[0]==='--version'){child.stdout=new EventEmitter();process.nextTick(()=>{child.stdout.emit('data',Buffer.from('kimi '+cliVersion));child.emit('exit',0);});return child;}
+   child.stdout=new PassThrough();
+   child.stdin.on('data',chunk=>{const message=JSON.parse(String(chunk));child.stdout.write(JSON.stringify({jsonrpc:'2.0',id:message.id,result:initReply})+'\n');});
+   return child;
+  }};
+ }
+ const newer=new AcpBridge('kimi',{host:makeHost('2.3.0',{protocolVersion:1,agentInfo:{version:'2.3.0'}})});
+ const info=await newer.start('kimi',{args:['acp'],cwd:process.cwd(),env:{}},undefined);
+ assert.equal(info.protocolVersion,1);
+ assert.equal(newer.compatibility.baselineMatch,false);
+ assert.equal(newer.compatibility.installedVersion,'2.3.0');
+ assert.equal(newer.compatibility.versionWarning.code,'STUDIO_CLI_VERSION_DIFFERENCE');
+ newer.close();
+ const invalidVersion=new AcpBridge('kimi',{host:makeHost('not-a-semver',{protocolVersion:1})});
+ await assert.rejects(()=>invalidVersion.start('kimi',{args:['acp'],cwd:process.cwd(),env:{}},undefined),/version output was not recognized/);
+ const badProtocol=new AcpBridge('kimi',{host:makeHost('2.3.0',{protocolVersion:2})});
+ await assert.rejects(()=>badProtocol.start('kimi',{args:['acp'],cwd:process.cwd(),env:{}},undefined),/Unsupported ACP protocol/);
+});

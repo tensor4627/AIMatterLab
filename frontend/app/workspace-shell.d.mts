@@ -10,3 +10,4 @@ export function jobKey(job:Run|ClusterJob):string;
 export function unifiedJobs(local:Run[],cluster:ClusterJob[]):Job[];
 export function filterJobs(jobs:Job[],options?:{location?:string;status?:string;since?:number;projectId?:string;query?:string}):Job[];
 export function boundJobConversation(job:Job,tasks:any[],conversations:Conversation[],sourceId?:string):Conversation|null;
+export function createJobConversationLookup(tasks:any[],conversations:Conversation[]):(job:Job,sourceId?:string)=>Conversation|null;

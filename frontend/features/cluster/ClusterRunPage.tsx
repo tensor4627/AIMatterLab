@@ -215,7 +215,7 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
  {edit&&<button className="button primary" disabled={!canWrite||busy} onClick={revise}>{t('保存修订并预览脚本')}</button>}
  <ClusterResults key={scope} run={run} connected={connected} workerGeneration={workerGeneration} onError={onError}/>
  <div className="review-execute">
-  <button className="button" onClick={()=>onAgent('检查集群任务 '+run.id+' 的已记录参数和日志。只读监控，不重提 unknown 任务。')}><Sparkles size={15}/>{t('让 Agent 分析')}</button>
+  <button className="button" onClick={()=>onAgent(t('检查集群任务 {id} 的已记录参数和日志。只读监控，不重提 unknown 任务。').replace('{id}',run.id))}><Sparkles size={15}/>{t('让 Agent 分析')}</button>
   {['draft','ready'].includes(run.status)?<button className="button primary" disabled={!canWrite||busy||edit} onClick={()=>void perform(t('正在提交到集群…'),()=>api<ClusterRun>('POST','/api/cluster/submit',{run_id:activeId}))}><Play size={15}/>{t('审阅完成，提交到集群')}</button>
    :['queued','running','unknown'].includes(run.status)?<button className="button" disabled={!canWrite||busy} onClick={()=>void perform(t('正在取消并核对作业…'),()=>api<ClusterRun>('POST','/api/cluster/cancel',{run_id:activeId}))}>{t('取消已核实作业')}</button>:null}
  </div>

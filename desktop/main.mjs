@@ -766,12 +766,6 @@ handle('codex.envImport.pending',input=>{
 });
 handle('codex.envImport.decide',input=>{subscriptionRuntime.envImport.decide(input);return null;});
 handle('codex.connect',async() => agents.connect('codex',{checkLogin:true}));
-handle('codex.configure',async({preferences={},threadId,model}) => {
-  assertIdleAgent();
-  agentConfig(preferences);
-  settings=catalog.put('settings','main',{...settings,agent:preferences});
-  return agents.configure('codex',preferences,threadId,model);
-});
 handle('codex.rpc',value=>agentRpc({...value,provider:'codex'}));
 registerWorkflowPlanRoutes({handle,catalog});
 async function scientificTools(provider,threadId){
@@ -879,10 +873,11 @@ handle('agent.queue',value=>followUpQueue.request(value));
 managedSchedules.start();
 handle('agent.rpc',agentRpc);
 handle('agent.recover',async({provider,threadId,model})=>{
- if(provider!=='codex'||typeof threadId!=='string'||!threadId||threadId.length>200||model!==undefined&&(typeof model!=='string'||!model||model.length>200))throw Error('Invalid conversation recovery request');
+ providerId(provider);
+ if(typeof threadId!=='string'||!threadId||threadId.length>200||model!==undefined&&(typeof model!=='string'||!model||model.length>200))throw Error('Invalid conversation recovery request');
  return agents.runInConversation(provider,threadId,async()=>{agents.assertContextIdle();
  const ticket=workflowContext.begin(provider,threadId);await workflowContext.synchronize(ticket,(p,context)=>agents.selectContext(p,context));
- return (await resumeConversationContext({records:taskRecords,workflowContext,agents,attachments:chatAttachments,ticket,threadId,model,explicit:true,publish:event=>emit('studio:event',event)})).result;
+ return (await resumeConversationContext({records:taskRecords,workflowContext,agents,attachments:chatAttachments,ticket,provider,threadId,model,explicit:true,publish:event=>emit('studio:event',event)})).result;
  });
 });
 handle('agent.respond',({provider,threadId,id,result})=>{providerId(provider);if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');const receipt=agents.respond(provider,threadId,id,result);chatActivity.resolved(provider,threadId,id);return receipt;});

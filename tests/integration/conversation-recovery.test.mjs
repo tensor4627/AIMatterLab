@@ -127,3 +127,30 @@ test('observed turn-started prevents an error response from restoring empty evid
 test('model catalog is readable even when the selected old thread has no rollout',async t=>{
  const f=fixture(t);await f.begin();f.codex.process={};f.hub.contextResume.set('codex','old');f.request=async method=>{assert.equal(method,'model/list');return {data:[{model:'actual'}]};};assert.equal((await f.hub.rpc('codex','model/list')).data.length,1);assert.deepEqual(f.calls.map(c=>c.method),['model/list']);
 });
+
+for(const provider of ['deepseek','kimi'])test('explicit recovery supports '+provider+' while non-explicit resume never silently replaces it',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-recovery-provider-')),catalog=new Catalog(root),events=[],calls=[];
+ t.after(()=>{catalog.db.close();fs.rmSync(root,{recursive:true,force:true});});
+ const records=new TaskRecords(catalog,event=>events.push(event));
+ records.remember({provider,threadId:'old',projectId:'project',name:'Cross-provider workflow'});
+ let task=records.create({provider,threadId:'old',planningMode:true,request:'Cross-provider workflow',projectId:'project'});
+ task.parameters={temperature:320};task=records.save(task);
+ const attachments=createChatAttachments({catalog,deleted:(...owner)=>records.deleted(...owner)});
+ const [file]=attachments.stage({provider,threadId:'old',files:[{name:'notes.txt',size:5,text:'notes',mimeType:'text/plain'}]});
+ const workflowContext=createAgentWorkflowContext({records,activeTasks:new Map(),selectedProvider:()=>provider});
+ const agents={
+  assertContextIdle(){},selectContext:async()=>{},forget(){},codexThreadState(){return null;},
+  rpc:async(p,method,params)=>{calls.push({provider:p,method,params});if(method==='thread/resume')throw Error('Session load failed');if(method==='thread/start')return {thread:{id:'fresh-'+p,turns:[]}};return {};},
+ };
+ const begin=()=>workflowContext.begin(provider,'old');
+ await assert.rejects(resumeConversationContext({records,workflowContext,agents,attachments,ticket:begin(),provider,threadId:'old',explicit:false}),/Session load failed/);
+ assert.equal(records.deleted(provider,'old'),false);
+ const {result}=await resumeConversationContext({records,workflowContext,agents,attachments,ticket:begin(),provider,threadId:'old',model:'provider-model',explicit:true});
+ assert.equal(result.thread.id,'fresh-'+provider);
+ assert.equal(result.studioRecovery.status,'recovered');
+ assert.equal(records.read(task.id).threadId,'fresh-'+provider);
+ assert.equal(records.read(task.id).parameters.temperature,320);
+ assert.deepEqual(attachments.refsFor({provider,threadId:'fresh-'+provider},[file.id]),[file]);
+ assert.equal(calls.some(call=>call.method==='turn/start'),false);
+ assert.equal(events.some(event=>event.method==='studio/conversationContextChanged'&&event.provider===provider),true);
+});

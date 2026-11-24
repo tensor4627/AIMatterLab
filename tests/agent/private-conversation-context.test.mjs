@@ -31,3 +31,21 @@ test('transaction failure keeps original conversation and task intact',()=>{cons
 
 test('an old preflight ticket cannot reclaim a newer selection after a delayed privacy check',async()=>{const f=fixture(),old=f.workflowContext.begin('codex','old');f.workflowContext.begin('codex','newer');await assert.rejects(ensureDefinitionContext({records:f.records,workflowContext:f.workflowContext,agents:f.agents,task:f.task,ticket:old}),/changed/);assert.equal(f.contexts.length,0);assert.equal(f.calls.length,0);assert.equal(f.workflowContext.current().threadId,'newer');});
 test('caller receives the actual replacement ticket and a later selection invalidates it',async()=>{const f=fixture(),ticket=f.workflowContext.begin('codex','old'),result=await ensureDefinitionContext({records:f.records,workflowContext:f.workflowContext,agents:f.agents,task:f.task,ticket});assert.notEqual(result.ticket.serial,ticket.serial);f.workflowContext.assert(result.ticket);f.workflowContext.begin('codex','newer');assert.throws(()=>f.workflowContext.assert(result.ticket),/changed/);});
+
+for(const provider of ['deepseek','kimi'])test('private definition isolation creates an isolated context on '+provider+' without touching codex legacy history',async()=>{
+ const rows=new Map(),events=[],catalog={get:(k,id)=>structuredClone(rows.get(k+':'+id)||null),put:(k,id,v)=>{rows.set(k+':'+id,structuredClone(v));return v;},remove:(k,id)=>rows.delete(k+':'+id),list:k=>[...rows].filter(([key])=>key.startsWith(k+':')).map(([,v])=>structuredClone(v)),transaction:work=>{const old=structuredClone(rows);try{return work();}catch(error){rows.clear();for(const [k,v]of old)rows.set(k,v);throw error;}}};
+ const records=new TaskRecords(catalog,event=>events.push(event));
+ let task=records.create({planningMode:true,provider,threadId:'old',request:'Private CV',projectId:'project'});
+ task.customCv={id:'entry',specSha:'a'.repeat(64),codeSha:'b'.repeat(64),parametersSha:'c'.repeat(64),revision:'d'.repeat(32),numericalStatus:'passed'};
+ task=records.save(task);
+ catalog.put('thread','old',{id:'old',turns:[{text:'unrelated codex thread'}]});
+ const workflowContext=createAgentWorkflowContext({records,activeTasks:new Map(),selectedProvider:()=>provider}),calls=[];
+ const agents={selectContext:async()=>{},rpc:async(p,method,params)=>{calls.push({provider:p,method,params});return {thread:{id:'fresh-'+p,turns:[]}};},forget:()=>{}};
+ const ticket=workflowContext.begin(provider,'old');
+ const {task:after}=await ensureDefinitionContext({records,workflowContext,agents,task,ticket,model:'provider-model'});
+ assert.equal(after.threadId,'fresh-'+provider);
+ assert.equal(definitionContextMatches(after),true);
+ assert.equal(records.deleted(provider,'old'),true);
+ assert.deepEqual(catalog.get('thread','old'),{id:'old',turns:[{text:'unrelated codex thread'}]});
+ assert.deepEqual(calls[0],{provider,method:'thread/start',params:{model:'provider-model',...(provider==='kimi'?{excludeThreadId:'old'}:{})}});
+});

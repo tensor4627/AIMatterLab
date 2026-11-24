@@ -6,7 +6,7 @@ export interface AgentConnectRequest {provider:AgentProvider;repairTools?:boolea
 export interface AgentCliRequiredResult {cliRequired:import('./cli-runtime').CliReadiness}
 export interface AgentLoginRequiredResult {loginRequired:true;provider:'codex'}
 export interface NativeCodexDefaults {id:string;model?:string;effort?:string}
-export interface CodexCompatibility {baselineVersion:string;installedVersion:string;baselineMatch:boolean;status:'capabilities_verified'|'version_observed';scope:string;versionWarning?:{code:'STUDIO_CODEX_VERSION_DIFFERENCE';severity:'warning'}}
+export interface CodexCompatibility {provider?:AgentProvider;baselineVersion:string;installedVersion:string;baselineMatch:boolean;status:'capabilities_verified'|'version_observed';scope:string;versionWarning?:{code:'STUDIO_CODEX_VERSION_DIFFERENCE'|'STUDIO_CLI_VERSION_DIFFERENCE';severity:'warning'}}
 export interface ManagedToolReadiness {status:'not_run'|'ready'|'blocked';count:number;message?:string}
 export interface AgentToolsStatus {
  status:'not_run'|'ready'|'blocked'|'warning';count:number;scope?:'chat'|'workflow'|'terminal-only'|'definition-only';threadId?:string;
@@ -37,6 +37,6 @@ export interface DeleteConversationGroupResult {id:string;conversations:Conversa
 
 export type ConversationRecovery={status:'required';oldThreadId:string}|{status:'recovered';oldThreadId:string;conversation:Conversation;uploadsRetained?:boolean};
 
-export type ConversationRecoveryRequest={provider:'codex';threadId:string;model?:string};
+export type ConversationRecoveryRequest={provider:AgentProvider;threadId:string;model?:string};
 
 export interface ConversationResumeResult {thread?:{id:string;turns?:unknown[]};studioRecovery?:ConversationRecovery}

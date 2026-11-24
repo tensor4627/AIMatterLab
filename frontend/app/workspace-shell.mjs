@@ -37,3 +37,34 @@ export function boundJobConversation(job,tasks,conversations,sourceId){
  const matches=conversations.filter(conversation=>owners.some(task=>task.id===conversation.taskId&&task.provider===conversation.provider&&task.threadId===conversation.threadId));
  return matches.length===1?matches[0]:null;
 }
+export function createJobConversationLookup(tasks,conversations){
+ const conversationsByKey=new Map();
+ for(const conversation of conversations){
+  if(!conversation.taskId)continue;
+  const key=JSON.stringify([conversation.taskId,conversation.provider,conversation.threadId]);
+  const list=conversationsByKey.get(key);
+  if(list)list.push(conversation);else conversationsByKey.set(key,[conversation]);
+ }
+ const ownersByArtifact=new Map();
+ for(const task of tasks){
+  if(!Array.isArray(task.artifacts))continue;
+  const sourceKey=task.workerSourceId===undefined?'':String(task.workerSourceId);
+  for(const artifact of task.artifacts){
+   if(!artifact||typeof artifact.id!=='string'||typeof artifact.kind!=='string')continue;
+   const key=JSON.stringify([sourceKey,artifact.kind,artifact.id]);
+   const list=ownersByArtifact.get(key);
+   if(list)list.push(task);else ownersByArtifact.set(key,[task]);
+  }
+ }
+ return (job,sourceId)=>{
+  const kind=job.location==='cluster'?'cluster-run':'run';
+  const owners=ownersByArtifact.get(JSON.stringify([sourceId?String(sourceId):'',kind,job.run.id]));
+  if(!owners?.length)return null;
+  const matched=new Set();
+  for(const task of owners){
+   const list=conversationsByKey.get(JSON.stringify([task.id,task.provider,task.threadId]));
+   if(list)for(const conversation of list){matched.add(conversation);if(matched.size>1)return null;}
+  }
+  return matched.size===1?[...matched][0]:null;
+ };
+}

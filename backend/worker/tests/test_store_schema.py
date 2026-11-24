@@ -256,5 +256,35 @@ except sqlite3.OperationalError as exc:
         with self.assertRaisesRegex(ValueError, "claim changed"):
             store.update(stale, error="stale dispatch error")
         self.assertNotIn("error", store.run(run["id"]))
+
+    def test_active_status_and_schedule_queries_use_expression_indexes(self):
+        store = Store(Path(self.tmp.name) / "service")
+        self.addCleanup(store.db.close)
+        for index in range(50):
+            done = _run(f"done-{index}")
+            done["status"] = "succeeded"
+            store.add_run(done)
+        queued_a = _run("queued-a"); queued_a["status"] = "queued"; store.add_run(queued_a)
+        queued_b = _run("queued-b"); queued_b["status"] = "queued"; store.add_run(queued_b)
+        active = _run("running-a"); active["status"] = "running"; store.add_run(active)
+        self.assertEqual([item["id"] for item in store.runs_by_status("queued", ascending=True)], ["queued-a", "queued-b"])
+        self.assertEqual([item["id"] for item in store.runs_by_status("running", "unknown")], ["running-a"])
+        plan = " ".join(str(row) for row in store.db.execute(
+            "EXPLAIN QUERY PLAN SELECT data FROM runs WHERE json_extract(data,'$.status') IN ('running','unknown')"
+        ).fetchall())
+        self.assertIn("idx_runs_status", plan)
+
+        store.put("cluster-run", {"id": "c-done", "status": "succeeded", "project_id": "project"})
+        store.put("cluster-run", {"id": "c-live", "status": "running", "project_id": "project"})
+        self.assertEqual([item["id"] for item in store.objects_by_status("cluster-run", "queued", "running", "unknown")], ["c-live"])
+
+        store.put("managed-schedule", {"id": "s1", "sourceId": "src-a"})
+        store.put("managed-schedule", {"id": "s2", "sourceId": "src-b"})
+        self.assertEqual([item["id"] for item in store.objects_by_source("managed-schedule", "src-a")], ["s1"])
+        for occ in range(1, 20):
+            store.put("managed-schedule-round", {"id": f"r-{occ}", "scheduleId": "s1", "occurrence": occ})
+        store.put("managed-schedule-round", {"id": "other-1", "scheduleId": "s2", "occurrence": 99})
+        rounds = store.schedule_rounds("s1", limit=12)
+        self.assertEqual([item["occurrence"] for item in rounds], list(range(19, 7, -1)))
 if __name__ == "__main__":
     unittest.main()

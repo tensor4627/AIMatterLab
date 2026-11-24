@@ -119,3 +119,39 @@ test('Fact preparation rejects invalid ownership or modes before changing stored
  assert.deepEqual(rows,beforeRows);
  assert.deepEqual(events,beforeEvents);
 });
+
+test('Incremental workflow turn context omits repeated JSON when unchanged and resends full authority on edit, review, compaction or failure',()=>{
+ const {records}=fixture(),task=workflow(records);
+ const first=records.prepareTurnState('codex',{threadId:'owned-thread',planningMode:false,input:[{type:'text',text:'First question'}]});
+ assert.equal(first.interaction.contextBaseline,undefined);
+ const firstText=formatPreparedTaskTurn(first).input.at(-1).text;
+ assert(firstText.includes('Manual current parameters and revision:'));
+ records.confirmTurnContext('codex','owned-thread');
+
+ const second=records.prepareTurnState('codex',{threadId:'owned-thread',planningMode:false,input:[{type:'text',text:'Follow-up question'}]});
+ assert.equal(second.interaction.contextBaseline?.unchanged,true);
+ const secondText=formatPreparedTaskTurn(second).input.at(-1).text;
+ assert(secondText.includes('Workflow state is unchanged since the previous confirmed turn'));
+ assert(!secondText.includes('Manual current parameters and revision:'));
+ assert(secondText.length<firstText.length);
+
+ const review=records.prepareTurnState('codex',{threadId:'owned-thread',reviewMode:true,input:[{type:'text',text:'Review'}]});
+ assert.equal(review.interaction.contextBaseline,undefined);
+ assert(formatPreparedTaskTurn(review).input.at(-1).text.includes('Manual current parameters and revision:'));
+
+ records.confirmTurnContext('codex','owned-thread');
+ records.edit({id:task.id,changes:{'bias.temp':350}});
+ const afterEdit=records.prepareTurnState('codex',{threadId:'owned-thread',planningMode:false,input:[{type:'text',text:'After edit'}]});
+ assert.equal(afterEdit.interaction.contextBaseline,undefined);
+ assert(formatPreparedTaskTurn(afterEdit).input.at(-1).text.includes('"temp":350'));
+
+ records.confirmTurnContext('codex','owned-thread');
+ records.event({provider:'codex',method:'thread/compacted',params:{threadId:'owned-thread'}});
+ const afterCompact=records.prepareTurnState('codex',{threadId:'owned-thread',planningMode:false,input:[{type:'text',text:'After compact'}]});
+ assert.equal(afterCompact.interaction.contextBaseline,undefined);
+
+ records.confirmTurnContext('codex','owned-thread');
+ records.failedTurn('codex','owned-thread',Error('network error'));
+ const afterFail=records.prepareTurnState('codex',{threadId:'owned-thread',planningMode:false,input:[{type:'text',text:'After fail'}]});
+ assert.equal(afterFail.interaction.contextBaseline,undefined);
+});

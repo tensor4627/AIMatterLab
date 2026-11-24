@@ -25,10 +25,16 @@ export function useWorkspaceLayout() {
  const [bottomExpanded,setBottomExpanded]=useLayoutPreference('studio.bottomExpanded',()=>initialBottomExpanded(readPreference));
  const [windowWidth,setWindowWidth]=useState(()=>window.innerWidth);
  useEffect(()=>{
-  const resize=()=>setWindowWidth(window.innerWidth);
+  let frame:number|null=null;
+  const apply=()=>setWindowWidth(window.innerWidth);
+  const resize=()=>{
+   if(typeof requestAnimationFrame!=='function'){apply();return;}
+   if(frame!==null)return;
+   frame=requestAnimationFrame(()=>{frame=null;apply();});
+  };
   window.addEventListener('resize',resize);
-  resize();
-  return ()=>window.removeEventListener('resize',resize);
+  apply();
+  return ()=>{window.removeEventListener('resize',resize);if(frame!==null&&typeof cancelAnimationFrame==='function')cancelAnimationFrame(frame);};
  },[]);
  return {sidebarVisible,setSidebarVisible,sidebarWidth,setSidebarWidth,agentVisible,setAgentVisible,
   agentWidth,setAgentWidth,overviewAgentWidth,setOverviewAgentWidth,bottomHeight,setBottomHeight,

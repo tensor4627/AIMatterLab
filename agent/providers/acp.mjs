@@ -2,6 +2,7 @@ import {EventEmitter} from 'node:events';
 import {ATTACHMENT_FRAME_BYTES,createJsonlFramer} from './jsonl-frames.mjs';
 import {randomUUID} from 'node:crypto';
 import {CLI_VERSIONS} from './contracts.mjs';
+import {isCodexVersion} from '../../contracts/agent/codex-version.mjs';
 import {providerRuntime} from '../../desktop/platform/provider-runtime.mjs';
 import {sanitizeTranscript,sanitizeProtocolTranscript,createTranscriptStream} from '../../contracts/agent/transcript-sanitizer.mjs';
 import {SCIENTIFIC_TOOL_ACCESS} from '../tools/private-cv-access.mjs';
@@ -28,7 +29,7 @@ export function toolResult(update){
 function optionsOf(option){return (option?.options||[]).flatMap(value=>Array.isArray(value.options)?value.options:[value]);}
 function currentTurn(session){if(!session.current){session.current={id:'history',items:[]};session.turns.push(session.current);}return session.current;}
 export class AcpBridge extends EventEmitter{
- constructor(provider,{host=providerRuntime,probeTimeoutMs=15000,promptTimeoutMs=30*60*1000}={}){super();this.host=host;this.provider=provider;this.probeTimeoutMs=probeTimeoutMs;this.promptTimeoutMs=promptTimeoutMs;this.pending=new Map();this.interactions=new Map();this.sessions=new Map();this.isolatedSessions=new Map();this.pendingStarts=new Map();this.next=1;this.activeTurns=new Map();this.lifecycle=0;this.cancelProbe=null;}
+ constructor(provider,{host=providerRuntime,probeTimeoutMs=15000,promptTimeoutMs=30*60*1000,strictVersion=false}={}){super();this.host=host;this.provider=provider;this.probeTimeoutMs=probeTimeoutMs;this.promptTimeoutMs=promptTimeoutMs;this.strictVersion=strictVersion;this.compatibility=null;this.pending=new Map();this.interactions=new Map();this.sessions=new Map();this.isolatedSessions=new Map();this.pendingStarts=new Map();this.next=1;this.activeTurns=new Map();this.lifecycle=0;this.cancelProbe=null;}
  secrets(){return [this.profile?.env?.OPENAI_API_KEY,this.profile?.env?.DASHSCOPE_API_KEY,this.worker?.tokens?.mcp];}
  clean(value){return sanitizeTranscript(value,this.secrets());}
  event(method,params,id){this.emit('event',sanitizeProtocolTranscript({method,params:{...params,provider:this.provider},provider:this.provider,...id!==undefined?{id}: {}},this.secrets()));}
@@ -58,7 +59,9 @@ export class AcpBridge extends EventEmitter{
    probe.stdout.on('data',onData);probe.on('error',onError);probe.on('exit',onExit);probe.once('close',onClose);
   });
   assertCurrent();
-  if(version!==CLI_VERSIONS[this.provider])throw Error(this.provider+' CLI version mismatch: expected '+CLI_VERSIONS[this.provider]+', got '+version);
+  const baselineVersion=CLI_VERSIONS[this.provider];
+  if(this.strictVersion&&version!==baselineVersion)throw Error(this.provider+' CLI version mismatch: expected '+baselineVersion+', got '+version);
+  if(!isCodexVersion(version))throw Error(this.provider+' CLI version output was not recognized: '+String(version||'empty'));
   this.executable=executable;this.profile=profile;this.worker=worker;
   const child=this.host.spawnCli(executable,profile.args,{provider:this.provider,cwd:profile.cwd,env:profile.env});this.process=child;
   // A closed child stdin surfaces EPIPE asynchronously; without a listener the
@@ -80,9 +83,16 @@ export class AcpBridge extends EventEmitter{
    const info=await this.raw('initialize',{protocolVersion:1,clientInfo:{name:'aimatterlab',version:this.host.version},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false,elicitation:{form:{}},session:{configOptions:{boolean:{}}}}},30000);
    assertCurrent();if(this.process!==child)throw Error(this.provider+' startup was cancelled');
    if(info.protocolVersion!==1)throw Error('Unsupported ACP protocol version');
-   const version=info.agentInfo?.version;
+   const agentVersion=info.agentInfo?.version;
    // Kimi advertises product version; Qwen may advertise a separate kernel version.
-   if(this.provider==='kimi'&&version&&version!==CLI_VERSIONS.kimi)throw Error('Kimi CLI version mismatch: expected '+CLI_VERSIONS.kimi+', got '+version);
+   if(this.strictVersion&&this.provider==='kimi'&&agentVersion&&agentVersion!==CLI_VERSIONS.kimi)throw Error('Kimi CLI version mismatch: expected '+CLI_VERSIONS.kimi+', got '+agentVersion);
+   const installedVersion=this.provider==='kimi'&&isCodexVersion(agentVersion)?agentVersion:version;
+   const baselineMatch=installedVersion===baselineVersion;
+   this.compatibility={
+    provider:this.provider,baselineVersion,installedVersion,baselineMatch,status:'capabilities_verified',
+    scope:'Verified ACP protocol v1 capability handshake',
+    ...baselineMatch?{}:{versionWarning:{code:'STUDIO_CLI_VERSION_DIFFERENCE',severity:'warning'}},
+   };
    this.info=info;return info;
   }catch(error){if(this.lifecycle===generation&&this.process===child)this.close();throw error;}
  }
@@ -246,7 +256,8 @@ export class AcpBridge extends EventEmitter{
   if(method==='model/select'){const s=await this.ensure();await this.setChoice(s,'model',params.model);return this.catalog(s);}
   if(method==='thread/list')return {data:[...this.sessions.values()].map(s=>this.thread(s))};
   if(method==='thread/start'){
-   const s=this.current&&this.session(this.current).turns.length===0?this.session(this.current):await this.create();
+   const reusable=this.current&&this.current!==params.excludeThreadId&&this.session(this.current).turns.length===0;
+   const s=reusable?this.session(this.current):await this.create();
    await this.setChoice(s,'model',params.model);this.current=s.id;
    return {thread:this.thread(s),model:this.catalog(s).data.find(m=>m.isDefault)?.model,reasoningEffort:s.configOptions?.find(o=>o.category==='thought_level')?.currentValue};
   }

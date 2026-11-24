@@ -75,9 +75,9 @@
       {
         "source_id": "studio",
         "path": "frontend/features/runs/RunDetail.tsx",
-        "sha256": "fa6c30f624dd9d1fb856c3d6c76b812d4b7b786ad1696080e31b5f7a06c8eda7",
-        "bytes": 29914,
-        "observed_commit": "13492b250565b8332238dbf593703bdb686c109e",
+        "sha256": "9b94a4d903cd07edf8faa8c9ea3bcb7098a6282ccb7b784f5501532147c87109",
+        "bytes": 29959,
+        "observed_commit": "b5719b82de48078b136c1cc342cf5c6760d82258",
         "role": "available_result_files_and_frame_selection",
         "line_ranges": [
           [
@@ -94,7 +94,7 @@
           ]
         ],
         "read_scope": "Reviewed the Results tab, file suffix filter, frame input, bound inspection request and view identity.",
-        "observed_on": "2026-11-23"
+        "observed_on": "2026-11-24"
       },
       {
         "source_id": "studio-worker",

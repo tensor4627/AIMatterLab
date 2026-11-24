@@ -325,10 +325,26 @@
 .agent-panel .agent-question-navigation .agent-stop-action:hover:not(:disabled){background:var(--raised);color:var(--text)}
 
 /* One native disclosure per consecutive tool sequence. */
-.tool-group {
+.tool-group-block {
  min-width:0;
  align-self:stretch;
  margin:2px 0;
+}
+.tool-group-actions {
+ display:flex;
+ flex-wrap:wrap;
+ gap:6px;
+ padding:5px 0 3px 20px;
+}
+.tool-group-actions .button {
+ padding:4px 9px;
+ font-size:max(calc(11px * var(--ui-scale,1)),var(--ui-min-font,12px));
+ white-space:normal;
+}
+.tool-group {
+ min-width:0;
+ align-self:stretch;
+ margin:0;
  border-block:1px solid var(--line);
 }
 .tool-group>summary {

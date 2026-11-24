@@ -179,7 +179,7 @@ export class AgentHub extends EventEmitter{
   const profile=this.host.prepareProfile(this.root,provider,credential,this.instructions);
   const previous=this.bridgeWorkers.get(provider);let scoped=this.workerFor(provider);
   if(bridge.process&&(bridge.executable!==executable||previous?.url!==scoped?.url||previous?.tokens?.mcp!==scoped?.tokens?.mcp)){this.disconnect(provider,{preserveConnectIntent:true});scoped=this.workerFor(provider);}
-  try{return await bridge.start(executable,profile,scoped);}catch(error){this.release(provider);throw error;}
+  try{const info=await bridge.start(executable,profile,scoped);return bridge.compatibility?{...info,studioCompatibility:bridge.compatibility}:info;}catch(error){this.release(provider);throw error;}
  }
  async account(provider){
   providerId(provider);

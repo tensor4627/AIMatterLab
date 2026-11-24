@@ -1,4 +1,5 @@
 import {isDeepStrictEqual} from 'node:util';
+import {PROVIDERS} from '../providers/contracts.mjs';
 const hashes=['specSha','parametersSha','codeSha'];
 const snapshot=task=>{const value=structuredClone(task);delete value.updatedAt;return value;};
 export function definitionContextMatches(task){
@@ -13,7 +14,7 @@ function assertAnchor(records,expected){
 /** Retain the scientific task and local historical records; retire only the old model context. */
 export function rebindDefinitionContext(records,expected,threadId){
  const task=assertAnchor(records,expected),provider=task.provider,oldThreadId=task.threadId;
- if(provider!=='codex'||!task.customCv?.id||typeof threadId!=='string'||!threadId||threadId.length>200||threadId===oldThreadId||records.deleted(provider,threadId)||records.bound(provider,threadId))throw Error('A fresh native Codex context is required');
+ if(!PROVIDERS.includes(provider)||!task.customCv?.id||typeof threadId!=='string'||!threadId||threadId.length>200||threadId===oldThreadId||records.deleted(provider,threadId)||records.bound(provider,threadId))throw Error('A fresh native model context is required');
  if(['validating','submitting','unknown'].includes(task.execution?.phase))throw Error('Reconcile the existing execution request before changing model context');
  if(records.tasks().some(other=>other.id!==task.id&&other.provider===provider&&other.threadId===oldThreadId))throw Error('Multiple workflows need an explicit context migration');
  const catalog=records.catalog,oldId=provider+':'+oldThreadId,id=provider+':'+threadId,oldConversation=records.conversation(provider,oldThreadId);
@@ -21,12 +22,12 @@ export function rebindDefinitionContext(records,expected,threadId){
  task.threadId=threadId;task.privateDefinitionContext={provider,threadId,taskId:task.id,entryId:task.customCv.id,...Object.fromEntries(hashes.map(key=>[key,task.customCv[key]]))};task.updatedAt=Math.max(Date.now(),expected.updatedAt+1||0);
  catalog.transaction(()=>{
   assertAnchor(records,expected);
-  catalog.put('conversation-context-history',oldId,{provider,threadId:oldThreadId,taskId:task.id,conversation:oldConversation,thread:catalog.get('thread',oldThreadId),agentThread:catalog.get('agent-thread',oldId),retiredAt:Date.now()});
+  catalog.put('conversation-context-history',oldId,{provider,threadId:oldThreadId,taskId:task.id,conversation:oldConversation,thread:provider==='codex'?catalog.get('thread',oldThreadId):null,agentThread:catalog.get('agent-thread',oldId),retiredAt:Date.now()});
   catalog.put('retired-conversation-context',oldId,{provider,threadId:oldThreadId,taskId:task.id,replacementThreadId:threadId});
-  catalog.remove('conversation',oldId);catalog.remove('agent-thread',oldId);catalog.remove('thread',oldThreadId);
+  catalog.remove('conversation',oldId);catalog.remove('agent-thread',oldId);if(provider==='codex')catalog.remove('thread',oldThreadId);
   catalog.put('conversation',id,conversation);catalog.put('agent-task',task.id,task);
  });
- records.active.delete(oldId);records.turns.delete(oldId);records.cache.set(task.id,task);
+ records.active.delete(oldId);records.turns.delete(oldId);records.deliveredWorkflowSnapshots?.delete(oldId);records.pendingSnapshots?.delete(oldId);records.cache.set(task.id,task);
  return {task,conversation,oldThreadId};
 }
 /** Called only by trusted main, before preparing the model turn. No model turn is retried. */
@@ -38,7 +39,8 @@ export async function ensureDefinitionContext({records,workflowContext,agents,ta
  let rebound=false;
  try{
   await sync();workflowContext.assert(ticket);assertAnchor(records,expected);
-  const result=await agents.rpc(task.provider,'thread/start',{...(model?{model}:{})});workflowContext.assert(ticket);
+  const startParams={...(model?{model}:{}),...(['kimi','qwen'].includes(task.provider)?{excludeThreadId:task.threadId}:{})};
+  const result=await agents.rpc(task.provider,'thread/start',startParams);workflowContext.assert(ticket);
   if(!result?.thread?.id||!Array.isArray(result.thread.turns)||result.thread.turns.length)throw Error('A verified empty native model context is required');
   const change=rebindDefinitionContext(records,expected,result.thread.id);rebound=true;
   workflowContext.started(ticket,result.thread.id);await sync();

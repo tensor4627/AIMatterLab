@@ -104,6 +104,14 @@ class Store:
                     UNIQUE(project,key));
                   CREATE TABLE IF NOT EXISTS events (
                     seq INTEGER PRIMARY KEY AUTOINCREMENT, run TEXT, time REAL, data TEXT);
+                  CREATE INDEX IF NOT EXISTS idx_runs_status
+                    ON runs(json_extract(data, '$.status'));
+                  CREATE INDEX IF NOT EXISTS idx_objects_kind_status
+                    ON objects(kind, json_extract(data, '$.status'));
+                  CREATE INDEX IF NOT EXISTS idx_objects_kind_source
+                    ON objects(kind, json_extract(data, '$.sourceId'));
+                  CREATE INDEX IF NOT EXISTS idx_objects_kind_schedule
+                    ON objects(kind, json_extract(data, '$.scheduleId'));
                 """)
                 self.db.commit()
                 self._migrate()
@@ -253,6 +261,46 @@ class Store:
     def runs(self):
         with self.database_access():
             rows = self.db.execute("SELECT data FROM runs ORDER BY rowid DESC").fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def runs_by_status(self, *statuses, ascending=False):
+        if not statuses:
+            return []
+        placeholders = ",".join("?" for _ in statuses)
+        order = "ASC" if ascending else "DESC"
+        with self.database_access():
+            rows = self.db.execute(
+                f"SELECT data FROM runs WHERE json_extract(data,'$.status') IN ({placeholders}) ORDER BY rowid {order}",
+                statuses,
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def objects_by_status(self, kind, *statuses):
+        if not statuses:
+            return []
+        placeholders = ",".join("?" for _ in statuses)
+        with self.database_access():
+            rows = self.db.execute(
+                f"SELECT data FROM objects WHERE kind=? AND json_extract(data,'$.status') IN ({placeholders})",
+                (kind, *statuses),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def objects_by_source(self, kind, source_id):
+        with self.database_access():
+            rows = self.db.execute(
+                "SELECT data FROM objects WHERE kind=? AND json_extract(data,'$.sourceId')=?",
+                (kind, source_id),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def schedule_rounds(self, schedule_id, limit=12):
+        with self.database_access():
+            rows = self.db.execute(
+                "SELECT data FROM objects WHERE kind='managed-schedule-round' AND json_extract(data,'$.scheduleId')=?"
+                " ORDER BY json_extract(data,'$.occurrence') DESC LIMIT ?",
+                (schedule_id, int(limit)),
+            ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
     def add_run(self, run):

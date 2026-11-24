@@ -71,7 +71,7 @@ export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
   definitionOnlyTurn=!!(task&&(!managedOnly||task.customCv?.id)&&(await privateAccess.assertTask(task,provider)).definitionOnly);
   check();
   if(definitionOnlyTurn){
-   if(provider!=='codex'||!definitionContextMatches(task))throw Error('Continue this private definition in a new turn to establish its isolated context');
+   if(!definitionContextMatches(task))throw Error('Continue this private definition in a new turn to establish its isolated context');
    const {expectedTurnId,...privateRequest}=rest;
    params={...currentPrivateTurn(privateRequest,task,{planningMode:turnFlags.planningMode}),expectedTurnId};
   }else{
@@ -84,7 +84,7 @@ export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
    if(files.length)throw Error('当前会话只共享私有定义，请在允许分享文件的会话发送附件。');
    if(params.reviewMode===true)throw Error('Current sharing covers only this private definition; full workflow review needs separately selected input-file permission');
    const {planningMode,studioTaskId,reviewMode,...privateParams}=params;currentPrivateTurn(privateParams,task,{planningMode:turnFlags.planningMode});
-   if(provider!=='codex'||notification||queued&&!definitionContextMatches(task))throw Error('Definition-only sharing requires an isolated Codex context explicitly opened for the private definition');
+   if(notification||queued&&!definitionContextMatches(task))throw Error('Definition-only sharing requires an isolated model context explicitly opened for the private definition');
    const clean=await ensureDefinitionContext({records:taskRecords,workflowContext,agents,task,ticket,model:params.model,publish:event=>emit('studio:event',event)});ticket=clean.ticket;check();params={...params,threadId:clean.task.threadId};definitionOnlyTurn=true;
   }}
  }
@@ -212,6 +212,7 @@ export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
    result=await conversationDraft.withPlanningThreadStart(agents.sessionIdentity(provider),dispatch);
   }else result=method==='turn/start'?await deliverScientificTurn({provider,key:skillKey,threadId:params.threadId,requestId:studioTurnRequestId||randomUUID(),context:skillContext,manager:scientificSkills.context,dispatch,emit:event=>emit('studio:event',event)}):await dispatch();
   check();
+  if(method==='turn/start'&&!definitionOnlyTurn&&!terminalOnly)taskRecords.confirmTurnContext?.(provider,params.threadId);
  }
  catch(error){if(method==='turn/start'){setupInstructions?.clear?.(provider,params.threadId);scientificSkills.clearManagedSelection?.(provider,params.threadId);try{check();taskRecords.failedTurn(provider,params.threadId,error);}catch{}}throw error;}
  if(method==='thread/start'){

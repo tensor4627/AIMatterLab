@@ -63,24 +63,27 @@ const isUserInputRequest=(request:RpcEvent)=>composerQuestionItems(request).leng
 const questionKey=(request:RpcEvent)=>JSON.stringify([request.provider||'codex',request.params?.threadId||null,String(request.id)]);
 const questionStamp=(request:RpcEvent)=>JSON.stringify([request.method,request.params?.turnId,request.params?.itemId,composerQuestionItems(request)]);
 type QuestionDraft={request:RpcEvent;stamp:string;progress:QuestionProgress;pending:boolean};
-type CodexVersionWarning={installedVersion:string;baselineVersion:string};
-const versionNoticeStorageKey='studio.codexVersionNotice.shown';
+type CodexVersionWarning={provider:AgentProvider;installedVersion:string;baselineVersion:string};
+const versionNoticeStorageKey=(provider:AgentProvider)=>provider==='codex'?'studio.codexVersionNotice.shown':`studio.${provider}VersionNotice.shown`;
 const followUpEnterStorageKey='studio.follow-up-enter';
-const versionNoticeSessions=new WeakSet<Storage>();
-let inaccessibleStorageNoticeShown=false;
-function claimVersionNotice(){
- let storage:Storage;try{storage=localStorage;}catch{if(inaccessibleStorageNoticeShown)return false;inaccessibleStorageNoticeShown=true;return true;}
- if(versionNoticeSessions.has(storage))return false;
- try{if(storage.getItem(versionNoticeStorageKey)==='1')return false;}catch{/* Keep the notice once per renderer when storage is unavailable. */}
- versionNoticeSessions.add(storage);
- try{storage.setItem(versionNoticeStorageKey,'1');}catch{/* A warning must never prevent connection. */}
+const versionNoticeSessions=new WeakMap<Storage,Set<AgentProvider>>();
+const inaccessibleStorageNotices=new Set<AgentProvider>();
+function claimVersionNotice(provider:AgentProvider){
+ let storage:Storage;try{storage=localStorage;}catch{if(inaccessibleStorageNotices.has(provider))return false;inaccessibleStorageNotices.add(provider);return true;}
+ const seen=versionNoticeSessions.get(storage);
+ if(seen?.has(provider))return false;
+ const key=versionNoticeStorageKey(provider);
+ try{if(storage.getItem(key)==='1')return false;}catch{/* Keep the notice once per renderer when storage is unavailable. */}
+ if(seen)seen.add(provider);else versionNoticeSessions.set(storage,new Set([provider]));
+ try{storage.setItem(key,'1');}catch{/* A warning must never prevent connection. */}
  return true;
 }
-function codexVersionWarning(value:unknown):CodexVersionWarning|null {
+function cliVersionWarning(provider:AgentProvider,value:unknown):CodexVersionWarning|null {
  if(!value||typeof value!=='object')return null;
  const {installedVersion,baselineVersion,baselineMatch,status,versionWarning}=value as Partial<CodexCompatibility>;
- if(status!=='capabilities_verified'||baselineMatch!==false||versionWarning?.code!=='STUDIO_CODEX_VERSION_DIFFERENCE'||versionWarning.severity!=='warning')return null;
- return isCodexVersion(installedVersion)&&isCodexVersion(baselineVersion)&&installedVersion!==baselineVersion?{installedVersion,baselineVersion}:null;
+ const expectedCode=provider==='codex'?'STUDIO_CODEX_VERSION_DIFFERENCE':'STUDIO_CLI_VERSION_DIFFERENCE';
+ if(status!=='capabilities_verified'||baselineMatch!==false||versionWarning?.code!==expectedCode||versionWarning.severity!=='warning')return null;
+ return isCodexVersion(installedVersion)&&isCodexVersion(baselineVersion)&&installedVersion!==baselineVersion?{provider,installedVersion,baselineVersion}:null;
 }
 function storedPreference(key:string){try{return localStorage.getItem(key);}catch{return null;}}
 function storePreference(key:string,value:string){try{localStorage.setItem(key,value);}catch{/* Storage is optional for chat. */}}
@@ -197,8 +200,8 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  const projectSeen=useRef(''),accountSeq=useRef(0),externalSeq=useRef(0);
  const [externalThreads,setExternalThreads]=useState<any[]>([]),[importOpen,setImportOpen]=useState(false),[importLoading,setImportLoading]=useState(false);
  useEffect(()=>{
-  if(hidden||provider!=='codex'||!connected){setVersionNotice(null);return;}
-  if(versionWarning&&claimVersionNotice())setVersionNotice(versionWarning);
+  if(hidden||!connected||!['codex','kimi','qwen'].includes(provider)){setVersionNotice(null);return;}
+  if(versionWarning&&versionWarning.provider===provider&&claimVersionNotice(provider))setVersionNotice(versionWarning);
  },[versionWarning,provider,hidden,connected]);
  const [thread,setThread]=useState<string|null>(null),[threads,setThreads]=useState<any[]>([]),[messages,setMessages]=useState<Message[]>([]);
  const localApiThread=!!thread&&(API_PROVIDER_GROUPS.includes(provider)||historyEnabled&&provider==='deepseek');
@@ -328,6 +331,32 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   return ()=>{terminalDraft.current=null;};
  },[terminalDraft]);
  const composerInput=useRef<HTMLTextAreaElement>(null);
+ const pendingDeltas=useRef<Array<{id:string;turnId?:string;delta:string}>>([]),deltaFrame=useRef<number|null>(null);
+ const [toolGroupOpen,setToolGroupOpen]=useState<Record<string,boolean>>({});
+ function clearPendingDeltas(){
+  pendingDeltas.current.length=0;
+  if(deltaFrame.current!==null&&typeof cancelAnimationFrame==='function'){cancelAnimationFrame(deltaFrame.current);deltaFrame.current=null;}
+ }
+ function flushPendingDeltas(){
+  if(deltaFrame.current!==null&&typeof cancelAnimationFrame==='function'){cancelAnimationFrame(deltaFrame.current);deltaFrame.current=null;}
+  if(!pendingDeltas.current.length)return;
+  const batch=pendingDeltas.current.splice(0);
+  setMessages(prev=>{
+   let next=prev;
+   for(const entry of batch){
+    const existing=next.find(message=>message.id===entry.id&&(!entry.turnId||!message.turnId||message.turnId===entry.turnId));
+    next=existing?next.map(message=>message===existing?{...message,text:message.text+entry.delta,...entry.turnId?{turnId:entry.turnId,itemId:entry.id}:{}}:message):[...next,{id:entry.id,role:'agent',text:entry.delta,...entry.turnId?{turnId:entry.turnId,itemId:entry.id}:{}}];
+   }
+   return next;
+  });
+ }
+ function queueAgentDelta(id:string,turnId:string|undefined,delta:string){
+  const last=pendingDeltas.current.at(-1);
+  if(last&&last.id===id&&last.turnId===turnId)last.delta+=delta;
+  else pendingDeltas.current.push({id,turnId,delta});
+  if(typeof requestAnimationFrame!=='function'){flushPendingDeltas();return;}
+  if(deltaFrame.current===null)deltaFrame.current=requestAnimationFrame(()=>{deltaFrame.current=null;flushPendingDeltas();});
+ }
  const readingPositions=useRef<ReturnType<typeof createReadingPositions>|null>(null);if(!readingPositions.current)readingPositions.current=createReadingPositions(()=>localStorage);
  const readingOwner=useRef(readingKey(drafts.owner().provider,drafts.owner().threadId)),readingReady=useRef(false);
  const followScroll=useRef(true),[following,setFollowing]=useState(true),[hasNewMessages,setHasNewMessages]=useState(false);
@@ -492,7 +521,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     return;
    }
    if(event.method==='studio/codexVersionWarning'){
-    if(providerRef.current==='codex'&&!connectionOwner.current){const warning=codexVersionWarning(event.params);if(warning)setVersionWarning(warning);}
+    if(providerRef.current==='codex'&&!connectionOwner.current){const warning=cliVersionWarning('codex',event.params);if(warning)setVersionWarning(warning);}
     return;
    }
    if(event.method==='studio/toolsWarning'){setTools(previous=>({...previous,inventoryWarning:event.params?.warnings?.length?event.params.message:null}));return;}
@@ -523,11 +552,8 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    if(event.method==='serverRequest/resolved'){if(pendingResume.current)resolvedRequests.current.add(String(p.requestId));setRequests(prev=>prev.filter(r=>String(r.id)!==String(p.requestId)));}
    if(event.method==='item/agentMessage/delta'){const call=modelCallRef.current;if(call&&call.provider===providerRef.current&&call.model===modelRef.current&&call.threadId===p.threadId&&call.turnId===p.turnId&&p.delta?.trim())call.output=true;}
    if(event.method==='item/agentMessage/delta')setRetrying(null);
-    if(event.method==='item/agentMessage/delta')setMessages(prev=>{
-    const id=p.itemId||'agent',turnId=p.turnId||currentTurn||undefined;
-    const existing=prev.find(message=>message.id===id&&(!turnId||!message.turnId||message.turnId===turnId));
-    return existing?prev.map(message=>message===existing?{...message,text:message.text+(p.delta||''),...turnId?{turnId,itemId:id}:{}}:message):[...prev,{id,role:'agent',text:p.delta||'',...turnId?{turnId,itemId:id}:{}}];
-   });
+   if(event.method==='item/agentMessage/delta'){queueAgentDelta(p.itemId||'agent',p.turnId||currentTurn||undefined,p.delta||'');return;}
+   if(pendingDeltas.current.length&&['item/started','item/completed','turn/started','turn/completed','studio/codexDisconnected','error'].includes(event.method))flushPendingDeltas();
    if(event.method==='thread/compacted'&&p.turnId===currentTurn&&currentTurn){
     const id='legacy-context-compaction:'+currentTurn;
     setMessages(previous=>previous.some(message=>message.role==='compaction'&&message.turnId===currentTurn)
@@ -579,7 +605,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    if(event.method==='error'){if(p.willRetry===true){const call=modelCallRef.current;if(call&&call.threadId===p.threadId&&call.turnId===p.turnId)setRetrying({threadId:p.threadId,turnId:p.turnId});return;}setRetrying(null);const call=modelCallRef.current;if(call&&call.threadId===p.threadId&&call.turnId===p.turnId){call.status='failed';setModelCall({...call});}onError(p.error?.message||JSON.stringify(p));}
    if(event.method==='account/updated')void refreshAccount();
    if(event.method==='studio/codexDisconnected'){leaveDisplayedTurn();setRequests([]);modelCallRef.current=null;setModelCall(null);setConnected(false);setVersionWarning(null);const message=p.code==='STUDIO_CODEX_UNSCOPED_TOOL'?'AIMatterLab 隔离已阻止未授权工具'+(typeof p.tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(p.tool)?' · '+p.tool:'')+'；流程与草稿已保留，请显式重连并核对结果后再发送。':'Agent 连接已断开，请重新连接';setTools(previous=>({status:'blocked',count:0,message,...previous.managedTools?{managedCompute:true,managedTools:{status:'not_run',count:0}}:{}}));if(p.code==='STUDIO_CODEX_UNSCOPED_TOOL')messageCallbacks.current.onError(message);}
-  });return()=>{mounted.current=false;selectionSeq.current++;unsubscribe?.();};
+  });return()=>{mounted.current=false;clearPendingDeltas();selectionSeq.current++;unsubscribe?.();};
  },[]);
  useEffect(()=>{if(hidden||historyLoad)return;const key=readingKey(provider,thread);if(!readingReady.current||readingOwner.current!==key){readingOwner.current=key;followScroll.current=readingPositions.current!.restore(key,scroll.current);setFollowing(followScroll.current);setHasNewMessages(false);readingReady.current=true;}else if(followScroll.current)followLatest();else{readingPositions.current!.restore(key,scroll.current);if(messages.length||requests.length)setHasNewMessages(true);}},[messages,requests,hidden,historyLoad,thread,provider]);
  async function refreshAccount(selectedProvider=providerRef.current,seq=selectionSeq.current,requireReadback=false){
@@ -619,7 +645,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    if(resumed&&!chosen)throw Error('请选择此服务商已配置的模型');
    setModels(list);modelRef.current=chosen?.model||'';setModel(modelRef.current);
    effortRef.current=resumedEffort({provider:selectedProvider,model:chosen,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+chosen?.model)||storedPreference('studio.effort.'+selectedProvider)},serverEffort:resumed?.reasoningEffort});setEffort(effortRef.current);
-   if(selectedProvider==='codex')setVersionWarning(codexVersionWarning(connection.studioCompatibility));
+   if(['codex','kimi','qwen'].includes(selectedProvider))setVersionWarning(cliVersionWarning(selectedProvider,connection.studioCompatibility));
    setThreads(conversations.filter(value=>value.provider===selectedProvider).map(value=>({...value,id:value.threadId})));setConnected(true);if(apiThread)setSendNotice('');
    return true;
   }catch(e){if(current()){setConnected(false);setModels([]);if(apiThread)setSendNotice(redactTranscriptText(e instanceof Error?e.message:String(e)));else if(selectedProvider!=='codex'&&authenticationError(e))setNeedsAuth(true);else onError(e);}return false;}finally{if(connectionOwner.current===owner){connectionOwner.current=null;setConnecting(false);}}
@@ -642,8 +668,8 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   const timer=setInterval(()=>void check(),15000);
   return()=>{active=false;clearInterval(timer);};
  },[connected,provider]);
- function leaveDisplayedTurn(){activeSend.current=null;sendOwner.current=null;observedTurn.current=null;settledTurns.current.clear();viewedStop.current=null;resolvedRequests.current.clear();setBusy(false);setTurn(null);setStopStatus(null);setRetrying(null);}
- function resetConversation(invalidate=true){setHistoryLoad(null);leaveDisplayedTurn();attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setRecovery(null);pendingResume.current=null;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);selectDraft(providerRef.current,null,true);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);}
+ function leaveDisplayedTurn(){clearPendingDeltas();activeSend.current=null;sendOwner.current=null;observedTurn.current=null;settledTurns.current.clear();viewedStop.current=null;resolvedRequests.current.clear();setBusy(false);setTurn(null);setStopStatus(null);setRetrying(null);}
+ function resetConversation(invalidate=true){clearPendingDeltas();setToolGroupOpen({});setHistoryLoad(null);leaveDisplayedTurn();attachmentClearRef.current?.();modelCallRef.current=null;setModelCall(null);if(invalidate)selectionSeq.current++;setRecovery(null);pendingResume.current=null;setImportOpen(false);setImportLoading(false);externalSeq.current++;selectionPending.current=false;setAutoSkillStatus(null);selectDraft(providerRef.current,null,true);setAnswers({});setThread(null);threadRef.current=null;setMessages([]);setRequests([]);setUsage(null);setWorkflowId(null);setNewWorkflow(false);conversationRef.current?.(null,sessionNonceRef.current);}
  useEffect(()=>{
   if(!setupProviderChoice)return;
   pendingSetupProvider.current=setupProviderChoice.provider;
@@ -677,11 +703,11 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;resumeMetadata.current=null;observedTurn.current=null;resolvedRequests.current.clear();setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
   try{
    const originalId=id;
-   if(rebuild){if(selectedProvider!=='codex')throw Error('Unsupported conversation recovery provider');await invoke('conversation.select',{id:selectedProvider+':'+id});if(!current())return;}
-   const r=localHistory?(historyEnabled?null:await selectedRpc('thread/read',{threadId:id,includeTurns:true})):rebuild?await recoverConversation({provider:'codex',threadId:id,...model?{model}:{}}):await selectedRpc('thread/resume',{threadId:id,...historyEnabled&&selectedProvider==='codex'?{excludeTurns:true}:{}});if(!current())return;
+   if(rebuild){await invoke('conversation.select',{id:selectedProvider+':'+id});if(!current())return;}
+   const r=localHistory?(historyEnabled?null:await selectedRpc('thread/read',{threadId:id,includeTurns:true})):rebuild?await recoverConversation({provider:selectedProvider,threadId:id,...model?{model}:{}}):await selectedRpc('thread/resume',{threadId:id,...historyEnabled&&selectedProvider==='codex'?{excludeTurns:true}:{}});if(!current())return;
    if(r?.studioRecovery?.status==='required'){setRecovery({threadId:id});setMessages([]);setHistoryLoad(null);return;}
    if(r?.studioRecovery?.status==='recovered'){
-    const c=r.studioRecovery.conversation;if(selectedProvider!=='codex'||r.studioRecovery.oldThreadId!==id||c?.provider!==selectedProvider||c?.threadId!==r.thread?.id||c?.id!==selectedProvider+':'+r.thread?.id)throw Error('恢复的会话与选中会话不匹配');recoverDraft(selectedProvider,id,c.threadId,r.studioRecovery.uploadsRetained===true);id=c.threadId;
+    const c=r.studioRecovery.conversation;if(r.studioRecovery.oldThreadId!==id||c?.provider!==selectedProvider||c?.threadId!==r.thread?.id||c?.id!==selectedProvider+':'+r.thread?.id)throw Error('恢复的会话与选中会话不匹配');recoverDraft(selectedProvider,id,c.threadId,r.studioRecovery.uploadsRetained===true);id=c.threadId;
    }
    if(r&&r.thread?.id!==id)throw Error('恢复的会话与选中会话不匹配');
    const saved=sessionSelection?.conversation;
@@ -1133,8 +1159,8 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    {managedToolsBlocked&&<div className="agent-tool-alert" role="status" data-testid="agent-managed-tools-notice"><span>{t(managedToolState.message||'托管计算工具待修复')}</span><button className="text-button" data-testid="agent-managed-tools-repair" disabled={busy||connecting||applying} onClick={()=>void connect('managed')}>{t('修复工具连接')}</button></div>}
   </div>
   {connected&&(tools.inventoryWarning||tools.warning&&(!managedToolState||tools.workflowBound))&&<Notice severity="warning" className="agent-tool-alert" data-testid="agent-tools-warning">{t(tools.inventoryWarning||tools.message||'工具清单待核对，可继续讨论并由 Agent 协助配置环境。')}</Notice>}
-  {provider==='codex'&&!hidden&&connected&&versionNotice&&<Notice severity="warning" className="codex-version-notice" data-testid="codex-version-warning" action={<button className="text-button" aria-label={t('关闭版本提示')} onClick={()=>setVersionNotice(null)}>{t('关闭')}</button>}>
-   <strong>{t('Codex CLI 版本不同，仍可继续使用。')}</strong><small>{versionNotice.installedVersion} · {t('参考版本')} {versionNotice.baselineVersion}</small>
+  {!hidden&&connected&&versionNotice&&versionNotice.provider===provider&&<Notice severity="warning" className="codex-version-notice" data-testid="codex-version-warning" action={<button className="text-button" aria-label={t('关闭版本提示')} onClick={()=>setVersionNotice(null)}>{t('关闭')}</button>}>
+   <strong>{t(provider==='codex'?'Codex CLI 版本不同，仍可继续使用。':'CLI 版本与参考版本不同，仍可继续使用。')}</strong><small>{versionNotice.installedVersion} · {t('参考版本')} {versionNotice.baselineVersion}</small>
   </Notice>}
   </div>
   {recovery&&<Notice className="agent-recovery" severity={recovery.error?'error':'warning'} data-testid="conversation-recovery"><strong>{t('对话连接需要恢复')}</strong><p>{t('旧聊天历史目前无法读取。可为同一流程建立新的空白对话连接，本地流程和作业记录保留。')}</p><button className="button" disabled={applying||connecting||!connected} onClick={()=>void resume(recovery.threadId,++selectionSeq.current,projectId,true)}>{t('重新建立对话连接')}</button>{recovery.error&&<p>{recovery.error}</p>}</Notice>}
@@ -1157,7 +1183,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
      </div>
     </div>}
    {historyHidden&&<Notice className="agent-history-state" data-testid="agent-history-state" severity={historyLoad?.status==='failed'?'error':'info'}>{historyLoad?.status==='failed'?<><p>{t('此会话暂时无法读取，草稿已保留。')}</p>{historyLoad.error&&<details data-testid="agent-history-error-details"><summary>{t('查看错误详情')}</summary><pre>{historyLoad.error}</pre></details>}<button className="button" data-testid="agent-history-retry" disabled={busy||applying||connecting} onClick={()=>void retryHistory()}>{t('重新读取会话')}</button></>:<p>{t('正在读取所选会话…')}</p>}</Notice>}
-   {!historyHidden&&<ConversationMessages messages={messages} language={t('你')} actions={messageActions.current!} disabled={busy||connecting||applying} canOriginalRun={!!onOpenOriginalRun} canCluster={!!onOpenCluster} canCompute={!!(onReviewWorker||onConnectCompute)} bookmarks={historyPage?.bookmarks}/>}
+   {!historyHidden&&<ConversationMessages messages={messages} language={t('你')} actions={messageActions.current!} disabled={busy||connecting||applying} canOriginalRun={!!onOpenOriginalRun} canCluster={!!onOpenCluster} canCompute={!!(onReviewWorker||onConnectCompute)} bookmarks={historyPage?.bookmarks} toolGroupOpen={toolGroupOpen} onToolGroupToggle={(key,open)=>setToolGroupOpen(previous=>previous[key]===open?previous:{...previous,[key]:open})}/>}
    {!historyHidden&&requests.filter(r=>!isUserInputRequest(r)).map(r=>{const scope=requestScope(r),pending=responding.has(scope);
     const toolArguments=r.method==='mcpServer/elicitation/request'?elicitationToolArguments(r.params):null;
     return <div key={scope} className="approval" role="alert" data-testid="agent-question-request" data-request-id={String(r.id)} data-request-turn-id={r.params?.turnId} aria-busy={pending}><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}

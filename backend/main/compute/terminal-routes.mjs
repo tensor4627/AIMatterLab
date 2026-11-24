@@ -5,21 +5,8 @@ import {createInterface} from 'node:readline';
 import {sshEndpoint} from './ssh-endpoint.mjs';
 import {sshAlias,quoteShell,linuxPath} from '../../../contracts/transport-policy.mjs';
 import {computeRuntime} from '../../../desktop/platform/compute-runtime.mjs';
-export function registerLegacyTerminalRoutes({handle,worker,catalog,terminals,getSettings,workerSource,emit,host=computeRuntime}){
- const exec=host.execute,spawn=host.spawnProcess;
-handle('ssh.save',({alias,name}) => {
-  alias=sshAlias(alias); return catalog.put('ssh',alias,{alias,name:name||alias});
-});
-handle('ssh.browse',async({alias,directory='.',file}) => {
-  alias=sshAlias(alias);
-  const script=file ?
-    'import pathlib,json,sys;p=pathlib.Path(sys.argv[1]).expanduser();s=p.stat();assert s.st_size<=262144;print(json.dumps({"path":str(p),"content":p.read_text()}))' :
-    'import pathlib,json,sys;p=pathlib.Path(sys.argv[1]).expanduser().resolve();print(json.dumps({"path":str(p),"entries":[{"name":x.name,"directory":x.is_dir(),"size":x.stat().st_size} for x in list(p.iterdir())[:1000]]}))';
-  const command='python3 -c '+quoteShell(script)+' '+quoteShell(file||directory);
-  const {stdout}=await exec('ssh.exe',['-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
-    '-o','ConnectTimeout=10',alias,command],{windowsHide:true,timeout:20000,maxBuffer:1024*1024});
-  return JSON.parse(stdout);
-});
+export function registerLegacyTerminalRoutes({handle,worker,terminals,getSettings,workerSource,emit,host=computeRuntime}){
+ const spawn=host.spawnProcess;
 handle('terminal.start',async({kind,alias,clusterId}) => {
   if(terminals.size>=4) throw new Error('Close an existing terminal before opening another');
   const id=randomUUID();

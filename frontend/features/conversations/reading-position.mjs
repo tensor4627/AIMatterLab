@@ -6,9 +6,18 @@ export function createReadingPositions(storage){
  function read(key){if(!key)return null;if(values.has(key))return values.get(key);try{const value=JSON.parse(storage().getItem(prefix+key)||'null');if(value&&Number.isFinite(value.top)&&typeof value.follow==='boolean'){values.set(key,value);return value;}}catch{}return null;}
  function save(key,node,follow){
   if(!key||!node)return null;
-  const top=Math.max(0,node.scrollTop),bounds=node.getBoundingClientRect?.(),items=node.querySelectorAll?.('[data-message-id]')||[];
-  let anchor=null,turnId=null,offset=0;for(const item of items){if(collapsedSummary(item)||item.getClientRects&&!item.getClientRects().length)continue;const rect=item.getBoundingClientRect();if(rect.bottom>(bounds?.top??0)){anchor=item.dataset.messageId;turnId=item.dataset.turnId||null;offset=rect.top-(bounds?.top??0);break;}}
-  const value={top,follow,anchor,turnId,offset};values.set(key,value);try{storage().setItem(prefix+key,JSON.stringify(value));}catch{}return value;
+  const top=Math.max(0,node.scrollTop);
+  let anchor=null,turnId=null,offset=0;
+  if(!follow){
+   const bounds=node.getBoundingClientRect?.(),items=node.querySelectorAll?.('[data-message-id]')||[];
+   for(const item of items){if(collapsedSummary(item)||item.getClientRects&&!item.getClientRects().length)continue;const rect=item.getBoundingClientRect();if(rect.bottom>(bounds?.top??0)){anchor=item.dataset.messageId;turnId=item.dataset.turnId||null;offset=rect.top-(bounds?.top??0);break;}}
+  }
+  const previous=values.get(key);
+  const value={top,follow,anchor,turnId,offset};
+  values.set(key,value);
+  const skipPersist=follow&&previous?.follow===true||!follow&&previous&&!previous.follow&&previous.top===top&&previous.anchor===anchor&&previous.turnId===turnId&&previous.offset===offset;
+  if(!skipPersist){try{storage().setItem(prefix+key,JSON.stringify(value));}catch{}}
+  return value;
  }
  function restore(key,node){
   const value=read(key);if(!node)return value?.follow??true;

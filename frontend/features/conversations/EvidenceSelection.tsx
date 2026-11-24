@@ -29,27 +29,34 @@ export function evidencePreSelection(pre:HTMLElement,selection=window.getSelecti
  return {firstLine,lastLine:Math.max(firstLine,breaks(end)+( /[\r\n]$/.test(end)?0:1))};
 }
 
-export function EvidenceSelection({source,text,range,comparable=false}:{source:ChatEvidenceLocator;text:string;range?:EvidenceLineRange|null;comparable?:boolean}){
+export function EvidenceSelection({source,text,getText,hasContent,range,comparable=false}:{source:ChatEvidenceLocator;text?:string;getText?:()=>string;hasContent?:boolean;range?:EvidenceLineRange|null;comparable?:boolean}){
  const conversation=useContext(EvidenceConversation);
  const sourceKey=JSON.stringify([conversation?.provider,conversation?.threadId,source]);
  const revisionKey=useRef(sourceKey);revisionKey.current=sourceKey;
- const lines=useMemo(()=>evidenceLines(text).length,[text]);
+ const [open,setOpen]=useState(false);
+ const resolvedText=open?(text??getText?.()??''):(text??'');
+ const lines=useMemo(()=>(open&&resolvedText?evidenceLines(resolvedText).length:0),[open,resolvedText]);
  const [selection,setSelection]=useState<EvidenceLineRange>({firstLine:1,lastLine:1});
  const [comment,setComment]=useState(''),[busy,setBusy]=useState(false),[status,setStatus]=useState(''),[error,setError]=useState(''),[diff,setDiff]=useState<ChatEvidenceDifference|null>(null);
- useEffect(()=>{setSelection({firstLine:1,lastLine:1});setComment('');setStatus('');setError('');setDiff(null);setBusy(false);},[sourceKey]);
+ useEffect(()=>{setOpen(false);setSelection({firstLine:1,lastLine:1});setComment('');setStatus('');setError('');setDiff(null);setBusy(false);},[sourceKey]);
  useEffect(()=>{if(range)setSelection(range);},[range?.firstLine,range?.lastLine,sourceKey]);
- if(!conversation||!lines||text.length>2*1024*1024||text.includes('\0'))return null;
+ if(!conversation)return null;
+ if(text!==undefined){if(!text.length||text.length>2*1024*1024||text.includes('\0'))return null;}
+ else if(hasContent===false)return null;
+ else if(open&&(!resolvedText.length||resolvedText.length>2*1024*1024||resolvedText.includes('\0')))return null;
  const owner=conversation;
- const valid=Number.isSafeInteger(selection.firstLine)&&Number.isSafeInteger(selection.lastLine)&&selection.firstLine>0&&selection.lastLine>=selection.firstLine&&selection.lastLine<=lines;
+ const valid=lines>0&&Number.isSafeInteger(selection.firstLine)&&Number.isSafeInteger(selection.lastLine)&&selection.firstLine>0&&selection.lastLine>=selection.firstLine&&selection.lastLine<=lines;
  async function act(action:'stage'|'remember'|'compare',comparison=false){
   if(busy)return;
+  const activeText=text??getText?.()??'';
+  if(!activeText.length||activeText.length>2*1024*1024||activeText.includes('\0'))return;
   const origin=sourceKey;
   setBusy(true);setStatus('');setError('');
   try{
-   const bytes=new TextEncoder().encode(text);
+   const bytes=new TextEncoder().encode(activeText);
    const sha256=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),byte=>byte.toString(16).padStart(2,'0')).join('');
    if(revisionKey.current!==origin)return;
-   const value:ChatEvidenceRequest={provider:owner.provider,threadId:owner.threadId,source,sha256,textLength:text.length};
+   const value:ChatEvidenceRequest={provider:owner.provider,threadId:owner.threadId,source,sha256,textLength:activeText.length};
    if(action==='stage'){
     const pick:ChatEvidenceStageRequest['selection']=comparison&&diff?{beforeRevision:diff.beforeRevision}:source.kind==='parameter'?{firstLine:1,lastLine:lines}:selection;
     await request('chat.evidence.stage',{...value,selection:pick,...comment.trim()?{comment:comment.trim()}:{}});
@@ -75,9 +82,9 @@ export function EvidenceSelection({source,text,range,comparable=false}:{source:C
   <strong>{t(title)} · {revisionLabel(revision)}{unit?' · '+unit:''}</strong>
   {part.lastLine>=part.firstLine?<><small>{t('证据行')} {part.firstLine}–{part.lastLine}</small><pre tabIndex={0}>{part.text}</pre></>:<small>{t('此版本在此处没有文本')}</small>}
  </section>;
- return <details className="chat-evidence" data-testid="chat-evidence" data-source-kind={source.kind}>
+ return <details className="chat-evidence" data-testid="chat-evidence" data-source-kind={source.kind} open={open} onToggle={event=>setOpen(event.currentTarget.open)}>
   <summary>{t('选取证据加入对话')}</summary>
-  <div className="chat-evidence-body" aria-busy={busy}>
+  {open&&<div className="chat-evidence-body" aria-busy={busy}>
    <small>{t('对话')} · {owner.name}</small>
    {source.kind!=='parameter'&&<div className="chat-evidence-lines">{field('firstLine','起始行')}{field('lastLine','结束行')}<small>{t('可选行')} 1–{lines}</small></div>}
    <label>{t('批注（可选）')}<textarea rows={2} maxLength={2000} value={comment} onChange={event=>setComment(event.target.value)} placeholder={t('说明想让 Agent 看哪处修改')}/></label>
@@ -89,7 +96,7 @@ export function EvidenceSelection({source,text,range,comparable=false}:{source:C
     {side('修改前',diff.beforeRevision,diff.beforeUnit,diff.before)}{side('修改后',diff.afterRevision,diff.afterUnit,diff.after)}
    </div><button className="button" type="button" disabled={busy} onClick={()=>void act('stage',true)}>{t('把带批注的差异加入草稿')}</button></>}
    {status&&<small role="status">{status}</small>}{error&&<small role="alert">{error}</small>}
-  </div>
+  </div>}
  </details>;
 }
 

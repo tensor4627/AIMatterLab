@@ -43,7 +43,7 @@ class ManagedSchedules:
         return row
 
     def _rows(self, source):
-        return [row for row in self.store.list(SCHEDULE) if row['sourceId'] == source]
+        return self.store.objects_by_source(SCHEDULE, source)
 
     def _public(self, row):
         internal = ('script', 'wakeText', 'parent', 'action')
@@ -179,8 +179,7 @@ class ManagedSchedules:
         fields(data, ('sourceId', 'scheduleId'), ('sourceId', 'scheduleId'))
         with self.store.lock:
             row = self._read(identifier(data['sourceId']), data['scheduleId'])
-            history = sorted((item for item in self.store.list(ROUND) if item['scheduleId'] == row['id']),
-                             key=lambda item: item['occurrence'], reverse=True)[:12]
+            history = self.store.schedule_rounds(row['id'], limit=12)
             detail = {**self._public(row), 'history': history}
             if row['kind'] == 'script':
                 detail['script'] = row['script']

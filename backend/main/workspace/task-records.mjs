@@ -1,7 +1,7 @@
 import {graphAuthorityFacts,protectGraphMirrors} from './composition-authority.mjs';
 import {scienceOnly,scientificSpec,deploymentField,inputControlParameters} from "../../../contracts/compute/deployment.mjs";
 
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {conversationTitle,validConversationName} from "../../../contracts/agent/conversation-title.mjs";
 
 import {isDeepStrictEqual} from 'node:util';
@@ -11,8 +11,11 @@ import {analyzeRoadmap,validateRoadmap} from "../../../contracts/workflows/roadm
 export function structuredResult(value){
  const found=[];function walk(v,depth=0){if(depth>8||v==null)return;if(typeof v==='string'){try{walk(JSON.parse(v),depth+1);}catch{}return;}if(Array.isArray(v)){for(const item of v)walk(item,depth+1);return;}if(typeof v!=='object')return;if(v.id&&(v.engine||Array.isArray(v.steps)||v.kind==='cluster-setup'||v.kind==='task-parameters'))found.push(v);for(const k of ['content','structuredContent','result','output','data','text'])if(k in v)walk(v[k],depth+1);}walk(value);return found;
 }
+function workflowSnapshotDigest(workflow){
+ return createHash('sha256').update(JSON.stringify(workflow)).digest('hex');
+}
 export class TaskRecords{
- constructor(catalog,publish){this.catalog=catalog;this.publish=publish;this.active=new Map();this.turns=new Map();this.cache=new Map();}
+ constructor(catalog,publish){this.catalog=catalog;this.publish=publish;this.active=new Map();this.turns=new Map();this.cache=new Map();this.deliveredWorkflowSnapshots=new Map();this.pendingSnapshots=new Map();}
  tasks(){return this.catalog.list?.('agent-task')||[...this.cache.values()];}
  read(id){if(typeof id!=='string'||!id||id.length>200)throw Error('Invalid task ID');const value=this.catalog.get('agent-task',id);if(!value)throw Error('Unknown task');return structuredClone(value);}
  conversation(provider,threadId){if(!['codex','kimi','qwen','deepseek','compatible'].includes(provider)||typeof threadId!=='string'||!threadId||threadId.length>200)throw Error('Invalid conversation');return this.catalog.get('conversation',provider+':'+threadId);}
@@ -24,7 +27,7 @@ export class TaskRecords{
   const {provider,threadId}=conversation;this.conversation(provider,threadId);if(id!==provider+':'+threadId)throw Error('Invalid conversation identity');
   const taskIds=this.tasks().filter(t=>t.provider===provider&&t.threadId===threadId).map(t=>t.id);
   this.catalog.transaction(()=>{this.catalog.put('deleted-conversation',id,{id,provider,threadId,taskIds,deletedAt:Date.now()});this.catalog.remove('conversation',id);this.catalog.remove('conversation-title-progress',id);this.catalog.remove('conversation-bookmarks',id);this.catalog.remove('agent-thread',id);if(provider==='codex')this.catalog.remove('thread',threadId);if(['deepseek','compatible','kimi'].includes(provider))this.catalog.remove(provider+'-history',threadId);for(const key of taskIds)this.catalog.remove('agent-task',key);});
-  this.active.delete(id);this.turns.delete(id);for(const key of taskIds)this.cache.delete(key);
+  this.active.delete(id);this.turns.delete(id);this.deliveredWorkflowSnapshots.delete(id);this.pendingSnapshots.delete(id);for(const key of taskIds)this.cache.delete(key);
   const result={id,provider,threadId,taskIds};this.publish({method:'studio/conversationDeleted',provider,params:result});return result;
  }
  conversations(){
@@ -110,7 +113,25 @@ export class TaskRecords{
    ...(task.inputBinding?{inputBinding:{parameters:inputControlParameters(task.inputBinding.parameters)}}:{}),
    graphAuthority:graphAuthorityFacts(task)
   }:null;
-  return {params,interaction:structuredClone({planningMode,reviewMode,workflow})};
+  let contextBaseline;
+  if(workflow){
+   const digest=workflowSnapshotDigest(workflow),previous=this.deliveredWorkflowSnapshots.get(key);
+   this.pendingSnapshots.set(key,{taskId:workflow.id,workflowVersion:workflow.workflowVersion,parameterRevision:workflow.parameterRevision,digest});
+   if(!reviewMode&&previous&&previous.taskId===workflow.id&&previous.workflowVersion===workflow.workflowVersion&&previous.digest===digest){
+    contextBaseline={unchanged:true,parameterRevision:workflow.parameterRevision,digest:digest.slice(0,12)};
+   }
+  }else{
+   this.pendingSnapshots.delete(key);this.deliveredWorkflowSnapshots.delete(key);
+  }
+  return {params,interaction:structuredClone({planningMode,reviewMode,workflow,...(contextBaseline?{contextBaseline}:{})})};
+ }
+ confirmTurnContext(provider,threadId){
+  const key=provider+':'+threadId,pending=this.pendingSnapshots.get(key);
+  if(pending){this.deliveredWorkflowSnapshots.set(key,pending);this.pendingSnapshots.delete(key);}
+ }
+ resetTurnContext(provider,threadId){
+  const key=provider+':'+threadId;
+  this.deliveredWorkflowSnapshots.delete(key);this.pendingSnapshots.delete(key);
  }
  save(task,showFlow=false){if(task.threadId&&this.deleted(task.provider,task.threadId))return task;const previous=this.catalog.get('agent-task',task.id);task.updatedAt=Math.max(Date.now(),(previous?.updatedAt||0)+1);this.catalog.put('agent-task',task.id,task);this.cache.set(task.id,task);this.publish({method:'studio/taskUpdated',provider:task.provider,params:{task,showFlow}});return task;}
  linkRun(id,run,expectedPrepared){
@@ -133,7 +154,7 @@ export class TaskRecords{
   if(task.execution?.artifactId===run.id&&sameAttempt)task.execution={...task.execution,phase:run.status==='unknown'?'unknown':run.status==='validating'?'validating':'confirmed',status:run.status};
   return this.save(task);
  }
- failedTurn(provider,threadId,error){const turn=this.turns.get(provider+':'+threadId);if(!turn?.reviewMode)return;const task=this.read(turn.taskId);task.review={status:'needs-information',summary:'Agent 复核请求失败：'+error.message};this.save(task);}
+ failedTurn(provider,threadId,error){const key=provider+':'+threadId;this.pendingSnapshots.delete(key);this.deliveredWorkflowSnapshots.delete(key);const turn=this.turns.get(key);if(!turn?.reviewMode)return;const task=this.read(turn.taskId);task.review={status:'needs-information',summary:'Agent 复核请求失败：'+error.message};this.save(task);}
  presentDraft(provider,threadId,value){
   const key=provider+':'+threadId,activeId=this.active.get(key);
   if(activeId!==value.task_id||this.turns.get(key)?.taskId!==activeId||this.bound(provider,threadId)?.id!==activeId||this.deleted(provider,threadId))throw Error('The draft must belong to this conversation');
@@ -142,7 +163,13 @@ export class TaskRecords{
   return this.read(activeId);
  }
  event(event){
-  const p=event.params||{},provider=event.provider||'codex',key=provider+':'+p.threadId,id=this.active.get(key);if(!id)return;
+  const p=event.params||{},provider=event.provider||'codex',key=provider+':'+p.threadId;
+  if(event.method==='thread/compacted'||event.method==='item/completed'&&p.item?.type==='contextCompaction'){this.deliveredWorkflowSnapshots.delete(key);this.pendingSnapshots.delete(key);}
+  if(event.method==='turn/completed'){
+   if(p.turn?.error||['failed','interrupted','cancelled','canceled'].includes(p.turn?.status)){this.deliveredWorkflowSnapshots.delete(key);this.pendingSnapshots.delete(key);}
+   else this.confirmTurnContext(provider,p.threadId);
+  }
+  const id=this.active.get(key);if(!id)return;
   const task=this.read(id),turn=this.turns.get(key)||{revision:task.parameterRevision||0};
   if(event.method==='turn/plan/updated'&&!task.steps?.length&&!Object.keys(task.parameters||{}).length){task.plan=(p.plan||[]).map(s=>({step:s.step,assistantStatus:s.status}));task.explanation=p.explanation||'';this.save(task);}
   if(event.method==='item/completed'){

@@ -177,7 +177,7 @@ export function createCliRuntimeManager({root,settings=()=>({}),fetchApi=globalT
   const owned=[];
   const interfaceSpawn=(...args)=>{const child=spawnCli(...args),closed=new Promise(resolve=>child.once('close',resolve));owned.push(closed);return child;};
   if(typeof createBridge!=='function')throw Error('CLI interface probe adapter is unavailable');
-  const profile=prepareProfile(profileRoot,provider),bridge=createBridge(provider,{host:{...providerRuntime,spawnCli:interfaceSpawn},probeTimeoutMs});
+  const profile=prepareProfile(profileRoot,provider),bridge=createBridge(provider,{host:{...providerRuntime,spawnCli:interfaceSpawn},probeTimeoutMs,strictVersion:true});
   let timer,rejectCancelled;
   const interrupted=new Promise((resolve,reject)=>{rejectCancelled=reject;timer=setTimeout(()=>{reject(Error('CLI ACP initialization timed out'));bridge.close();},interfaceTimeoutMs);});
   const abort=()=>{rejectCancelled(cancelled());bridge.close();};signal.addEventListener('abort',abort,{once:true});

@@ -154,7 +154,9 @@ function RoadmapCanvas({graph,bar,collapse,fields,onField,onDiscuss}:{graph:Road
 }
 
 export default function WorkflowRoadmap({taskId,name,roadmap,parameters,group,fields,onField,onPlan,onDiscuss}:{taskId:string;name:string;roadmap?:Roadmap;parameters:Record<string,unknown>;group?:ToolGroupRecord;fields:string[];onField:(field:string)=>void;onPlan:()=>void;onDiscuss:(text:string)=>void}){
- const [collapsed,setCollapsed]=useState(()=>readPreference('studio.roadmap.collapsed.'+taskId,true)==='1');
+ const savedPreference=readPreference('studio.roadmap.collapsed.'+taskId,true);
+ const manualCollapse=useRef(savedPreference==='0'||savedPreference==='1');
+ const [collapsed,setCollapsed]=useState(()=>savedPreference==='1');
  const [showFindings,setShowFindings]=useState(false);
  const [source,setSource]=useState('');
  const groupKey=group?.version?group.id+'@'+group.version:'',showGroup=!!groupKey&&source===groupKey;
@@ -168,9 +170,23 @@ export default function WorkflowRoadmap({taskId,name,roadmap,parameters,group,fi
   const update=()=>parent.style.setProperty('--workflow-header-height',element.offsetHeight+'px');update();
   const observer=new ResizeObserver(update);observer.observe(element);return ()=>observer.disconnect();
  },[]);
+ useLayoutEffect(()=>{
+  if(manualCollapse.current||typeof ResizeObserver!=='function')return;
+  const container=header.current?.closest?.('.workspace-content')||header.current?.parentElement;
+  if(!container)return;
+  const adapt=()=>{
+   if(manualCollapse.current)return;
+   const height=container.clientHeight;
+   if(height>0&&height<460)setCollapsed(true);
+   else if(height>=520)setCollapsed(false);
+  };
+  adapt();
+  const observer=new ResizeObserver(adapt);observer.observe(container);
+  return ()=>observer.disconnect();
+ },[taskId]);
  useLayoutEffect(()=>{if(restoreFocus.current){toggleRef.current?.focus({preventScroll:true});restoreFocus.current=false;}},[collapsed]);
  function toggle(){
-  writePreference('studio.roadmap.collapsed.'+taskId,collapsed?'0':'1',true);restoreFocus.current=true;setCollapsed(!collapsed);setShowFindings(false);
+  manualCollapse.current=true;writePreference('studio.roadmap.collapsed.'+taskId,collapsed?'0':'1',true);restoreFocus.current=true;setCollapsed(!collapsed);setShowFindings(false);
  }
  const bar=<><h2>{t('计算流程图')}</h2>
   {graph&&graph.nodes.length>0&&<ul className="roadmap-legend" aria-label={t('节点类型')}>

@@ -2683,6 +2683,17 @@ const english:Record<string,string> = {
  '引导课节':'Guide lesson','关闭提示':'Dismiss hint','重新高亮':'Highlight again','返回引导':'Back to guide',
  '设置 {current}/{total}':'Setup {current}/{total}','示例 {current}/{total}':'Tour {current}/{total}',
  '目标暂不可见。展开相应区域或滚动到该控件后，即可看到高亮。':'The control is out of view. Expand the relevant section or scroll to the control to highlight it.',
+ 'Agent 对话面板暂时无法显示':'The Agent conversation panel could not be displayed',
+ '共享终端面板暂时无法显示':'The shared terminal panel could not be displayed',
+ '复核当前计算流程 {id} 的手工参数与文件。请直接读取本轮提供的最新流程，检查科学条件和执行所需输入，更新同一流程并准备匹配当前参数的实际模块草稿。不要执行计算；请明确指出仍缺的信息。':'Review the manual parameters and files for workflow {id}. Read the latest workflow provided in this turn, check scientific conditions and execution inputs, update the same workflow, and prepare an actual module draft matching the current parameters. Do not execute any calculation; clearly state what information is still missing.',
+ '请在当前流程中讨论这个 CV 的物理适用性，以及如何选择稳态相或独立参考验证。区分公式数值一致性、物理判别力和实际引擎验证；先给我可审阅方案，不执行计算。':'In the current workflow, discuss the physical suitability of this CV and how to choose stable phases or independent reference validation. Distinguish numerical formula consistency, physical discrimination, and real engine validation; provide a reviewable plan first without running calculations.',
+ '请先查当前 pyGAS CV/Bias 类库和可核对的官方示例，优先用已有组合表达我的需求。确实缺少等价定义时，先讨论并展示公式、符号、单位、定义域、奇点和参数，再保存到本会话的自定义 CV 草稿供我审阅；不要直接生成代码或执行。':'First check the current pyGAS CV/Bias catalog and verifiable official examples, preferring existing combinations. Only when no equivalent definition exists, discuss and present the formula, symbols, units, domain, singularities, and parameters before saving a custom CV draft in this session for my review; do not generate code or execute directly.',
+ ' 已共享的私有定义请按页面中明确选择的本服务商共享范围读取。':' Read shared private definitions only within the sharing scope explicitly selected on this page for the current provider.',
+ ' 私有库内容尚未授权共享时不要读取或附加正文。':' Do not read or attach private library contents unless sharing is explicitly authorized.',
+ '为当前项目 {project} 准备集群计算任务，cluster_id={cluster}，scheduler={scheduler}。先 present_task 展示流程和科学参数，询问缺失输入文件和引擎条件；prepare_cluster_run 只准备本机快照与批处理脚本，停下等待我审阅提交。':'Prepare a cluster calculation for project {project} (cluster_id={cluster}, scheduler={scheduler}). First call present_task to show the workflow and scientific parameters and ask for missing input files and engine conditions; prepare_cluster_run should only prepare the local snapshot and batch script, then stop for my review before submission.',
+ '协助配置集群 {id}。结合用户确认的队列和登记环境准备配置草稿，不提交作业或修改授权。探测能力摘要：{summary}':'Help configure cluster {id}. Prepare a configuration draft based on user-confirmed queues and registered environments without submitting jobs or changing authorization. Probe capability summary: {summary}',
+ '检查集群任务 {id} 的已记录参数和日志。只读监控，不重提 unknown 任务。':'Inspect the recorded parameters and logs for cluster run {id}. Read-only monitoring only; never resubmit an unknown run.',
+ 'CLI 版本与参考版本不同，仍可继续使用。':'CLI version differs from the reference version, and can still be used.',
 };
 type Language='zh-CN'|'en';
 let language:Language='zh-CN';

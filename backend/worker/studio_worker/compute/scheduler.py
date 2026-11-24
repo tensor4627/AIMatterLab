@@ -50,7 +50,7 @@ class SchedulerMixin:
 
     def reconcile(self):
         with self.store.lock:
-            runs = self.store.runs()
+            runs = self.store.runs_by_status("queued", "running", "unknown")
         for run in runs:
             if run["status"] == "queued" and has_launch_evidence(run):
                 # Older workers could crash after Popen while the row was still
@@ -73,10 +73,9 @@ class SchedulerMixin:
         if getattr(self, 'ssh_service_mode', False):
             return  # Reconnecting must never dispatch old local runs on a login host.
         with self.store.lock:
-            runs = self.store.runs()
-            busy = [r for r in runs if r["status"] in ("running", "unknown")]
-            candidates = [r for r in reversed(runs) if r["status"] == "queued"]
-            cluster_runs = self.store.list("cluster-run")
+            busy = self.store.runs_by_status("running", "unknown")
+            candidates = self.store.runs_by_status("queued", ascending=True)
+            cluster_runs = self.store.objects_by_status("cluster-run", "queued", "running", "unknown") if candidates else []
         for run in candidates:
             claimed = False
             baseline = deepcopy(run)
@@ -121,11 +120,11 @@ class SchedulerMixin:
                     current_project = self.store.get("project", current["project_id"])
                     if current_project.get("revision", 0) != project.get("revision", 0):
                         continue
-                    current_busy = [value for value in self.store.runs() if value["status"] in ("running", "unknown")]
+                    current_busy = self.store.runs_by_status("running", "unknown")
                     if ((allocated_gpu(current) is not None and any(allocated_gpu(value) == allocated_gpu(current) for value in current_busy)) or
                             sum(value["project_id"] == current["project_id"] for value in current_busy) + sum(
-                                value.get("project_id") == current["project_id"] and value.get("status") in ("queued", "running", "unknown")
-                                for value in self.store.list("cluster-run")) >= project["policy"]["max_concurrent"]):
+                                value.get("project_id") == current["project_id"]
+                                for value in self.store.objects_by_status("cluster-run", "queued", "running", "unknown")) >= project["policy"]["max_concurrent"]):
                         continue
                     # This commit precedes every possible process creation. A
                     # crash at any later point cannot make this run dispatchable.
