@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 root=Path(__file__).resolve().parents[2];worker_source=root/'backend'/'worker';sys.path.insert(0,str(worker_source))
-from studio_worker.store import Store
+from studio_worker.infrastructure.store import Store
 from studio_worker.service import Service
 from studio_worker.server import dispatch
 with tempfile.TemporaryDirectory()as directory:

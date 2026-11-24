@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from studio_worker.service import Service
 from studio_worker.server import dispatch,tools
-from studio_worker.pygas_composition import save,response,resolve_input,assets
+from studio_worker.workspace.pygas_composition import save,response,resolve_input,assets
 from unittest.mock import patch
 
 class CompositionService(unittest.TestCase):
@@ -39,7 +39,7 @@ class CompositionService(unittest.TestCase):
   root=self.service.root/'projects/owned/inputs';root.mkdir(parents=True);target=root/'large-trajectory.xyz'
   with target.open('wb') as stream:stream.truncate(64*1024*1024)
   self.service.store.put('artifact',{'id':'trajectory','project_id':'owned','name':target.name,'path':str(target),'kind':'structure','sha256':'a'*64})
-  with patch('studio_worker.pygas_composition.digest',side_effect=AssertionError('Unselected files must not be read')):
+  with patch('studio_worker.workspace.pygas_composition.digest',side_effect=AssertionError('Unselected files must not be read')):
    result=assets(self.service,self.project,root)
   self.assertEqual(len(result),1);self.assertEqual(result[0]['sha256'],'a'*64);self.assertIn('recorded_metadata',result[0]['hash_status'])
  def test_catalog_reader_is_public_bounded_and_legacy_generator_retired(self):
@@ -55,15 +55,15 @@ class EmptyCompositionInitialization(unittest.TestCase):
   current=response(self.service,self.data)
   return {**self.data,'expected':{'journal_sha256':None,'files':{}},'catalog_files':current['catalog']['source']['files'],'files':[],**changes}
  def test_empty_init_is_create_only_cvonly_draft_without_code_render_or_run(self):
-  from studio_worker.pygas_composition import initialize
+  from studio_worker.workspace.pygas_composition import initialize
   request=self.request()
-  with patch('studio_worker.pygas_composition.run_json',side_effect=AssertionError('No source renderer or engine may run')):
+  with patch('studio_worker.workspace.pygas_composition.run_json',side_effect=AssertionError('No source renderer or engine may run')):
    result=initialize(self.service,request)
   self.assertEqual(result['composition']['status'],'draft');self.assertTrue(result['render_blocked']);self.assertEqual(result['graph']['mode'],'cvonly');self.assertEqual(result['graph']['nodes'],[]);self.assertEqual(result['graph']['edges'],[]);self.assertIsNone(result['composition']['source_sha256']);self.assertFalse(Path(result['composition']['sourcePath']).exists());self.assertEqual(self.service.store.runs(),[])
   with self.assertRaisesRegex(ValueError,'already exist'):initialize(self.service,request)
   self.assertEqual(response(self.service,self.data)['composition']['expected'],result['composition']['expected'])
  def test_mcp_and_extra_caller_data_cannot_initialize(self):
-  from studio_worker.pygas_composition import initialize
+  from studio_worker.workspace.pygas_composition import initialize
   request=self.request()
   with self.assertRaises(PermissionError):dispatch(self.service,'POST','/api/pygas/composition/initialize',request,admin=False)
   self.assertNotIn('initialize_composition',{t['name']for t in tools()})
@@ -71,7 +71,7 @@ class EmptyCompositionInitialization(unittest.TestCase):
    with self.assertRaises(ValueError):initialize(self.service,{**request,**extra})
   self.assertIsNone(response(self.service,self.data)['graph'])
  def test_existing_unindexed_partial_hidden_and_empty_directories_are_never_overwritten(self):
-  from studio_worker.pygas_composition import initialize
+  from studio_worker.workspace.pygas_composition import initialize
   request=self.request();root=self.service.root/'projects/owned/inputs'
   for i,name in enumerate(('workflow.json','build_bias.py','.studio-composition.json','unknown-input.txt',None)):
    workspace='occupied'+str(i);directory=root/('cv-'+workspace);directory.mkdir()
@@ -79,7 +79,7 @@ class EmptyCompositionInitialization(unittest.TestCase):
    with self.assertRaises((ValueError,KeyError,json.JSONDecodeError)):initialize(self.service,{**request,'workspace_id':workspace})
    if name:self.assertEqual((directory/name).read_text(encoding='utf8'),'preserve these bytes')
  def test_unique_exact_selected_structure_is_retained_without_scientific_defaults(self):
-  from studio_worker.pygas_composition import initialize
+  from studio_worker.workspace.pygas_composition import initialize
   from studio_worker.util import digest
   request=self.request();target=self.service.root/'projects/owned/inputs/selected.xyz';target.write_text('1\n\nCu 0 0 0\n',encoding='utf8')
   self.service.store.put('artifact',{'id':'structure','project_id':'owned','name':target.name,'path':str(target),'kind':'structure','sha256':digest(target)})
@@ -88,7 +88,7 @@ class EmptyCompositionInitialization(unittest.TestCase):
   for field in ('sigma','temperature','temp','weight','pt_path'):self.assertNotIn(field,result['graph']['settings'])
   self.assertEqual(result['graph']['nodes'],[])
  def test_ambiguous_or_changed_structure_cannot_be_silently_selected(self):
-  from studio_worker.pygas_composition import initialize
+  from studio_worker.workspace.pygas_composition import initialize
   from studio_worker.util import digest
   request=self.request();paths=[]
   for i in range(2):
@@ -97,9 +97,9 @@ class EmptyCompositionInitialization(unittest.TestCase):
   Path(paths[0]).write_text('changed bytes',encoding='utf8')
   with self.assertRaisesRegex(ValueError,'registered hash'):initialize(self.service,{**request,'files':[paths[0]]})
  def test_failure_after_exclusive_creation_is_visible_and_cannot_be_reinitialized(self):
-  from studio_worker.pygas_composition import initialize
+  from studio_worker.workspace.pygas_composition import initialize
   request=self.request()
-  with patch('studio_worker.pygas_composition.save',side_effect=OSError('interrupted save')):
+  with patch('studio_worker.workspace.pygas_composition.save',side_effect=OSError('interrupted save')):
    with self.assertRaisesRegex(OSError,'interrupted save'):initialize(self.service,request)
   with self.assertRaisesRegex(ValueError,'already exist'):initialize(self.service,request)
 
@@ -107,21 +107,21 @@ class IncompleteReductionDraft(unittest.TestCase):
  setUp=CompositionService.setUp
  close=CompositionService.close
  def test_blank_reduction_draft_saves_without_choosing_a_reducer_or_rendering(self):
-  from studio_worker.pygas_values import compiler_graph
+  from studio_worker.tools.pygas_values import compiler_graph
   for i,values in enumerate(({}, {'operation':None}, {'operation':''})):
    graph={**self.graph,'nodes':[{'id':'manual-reduce','kind':'reduce','params':values}]}
-   with patch('studio_worker.pygas_composition.run_json',side_effect=AssertionError('An incomplete reducer cannot render')):result=save(self.service,{**self.data,'workspace_id':'reduction-'+str(i),'graph':graph})
+   with patch('studio_worker.workspace.pygas_composition.run_json',side_effect=AssertionError('An incomplete reducer cannot render')):result=save(self.service,{**self.data,'workspace_id':'reduction-'+str(i),'graph':graph})
    self.assertIn('manual-reduce.operation',result['missing_fields']);self.assertEqual(result['graph']['nodes'][0]['params'],values);self.assertEqual(result['composition']['status'],'draft');self.assertFalse(Path(result['composition']['sourcePath']).exists())
    with self.assertRaisesRegex(ValueError,'Explicit reduction operation'):compiler_graph(graph,result['catalog']['catalog'],require_complete=True)
  def test_unknown_reducer_keys_and_operations_remain_rejected_even_as_drafts(self):
-  from studio_worker.pygas_values import compiler_graph
+  from studio_worker.tools.pygas_values import compiler_graph
   for values in ({'hidden':'mean'},{'operation':'automatic'},{'operation':'mean','extra':1}):
    with self.assertRaises(ValueError):compiler_graph({**self.graph,'nodes':[{'id':'r','kind':'reduce','params':values}]},{},require_complete=False)
 
 class SavedCompositionReadGuard(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
-  from studio_worker.pygas_catalog import catalog
+  from studio_worker.tools.pygas_catalog import catalog
   cls.source={'id':'pygas','root':str(Path(__file__).resolve().parents[4]/'pygas')}
   if not (Path(cls.source['root'])/'tools/cv_bias_gui_server.py').is_file():raise unittest.SkipTest('Registered sibling source unavailable; actual catalog read not_run')
   cls.receipt=catalog(cls.source)
@@ -135,7 +135,7 @@ class SavedCompositionReadGuard(unittest.TestCase):
   header={'root':self.source['root'],'files':self.receipt['source']['files'],'catalog_files':self.receipt['source']['files'],'composition':{'schema':'studio.composition/1','graph_sha256':hashlib.sha256(encoded(graph)).hexdigest(),'body_sha256':hashlib.sha256(body.encode()).hexdigest(),'inputs':{}}}
   return graph,{'source':'# studio-pygas-source: '+json.dumps(header)+'\n'+body},header,body
  def check(self,graph,state,directory):
-  from studio_worker.pygas_composition import readonly_render_checks
+  from studio_worker.workspace.pygas_composition import readonly_render_checks
   return readonly_render_checks(graph,state,self.receipt,{},self.source,Path(directory))
  def test_old_rendered_direct_scalar_is_rejected_without_execution_or_rewrite(self):
   graph,state,_,_=self.fixture(False)

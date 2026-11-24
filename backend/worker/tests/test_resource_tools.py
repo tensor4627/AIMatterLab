@@ -47,6 +47,11 @@ class ResourceToolsTest(unittest.TestCase):
             substitute.start()
             self.addCleanup(substitute.stop)
         self.scheduler = IsolatedSchedulerTransport(self.root,'slurm')
+        self.scheduler.install_command('sbatch', f'''[ "$#" -eq 2 ] && [ "$1" = --parsable ] && [ "$2" = job.sh ] || exit 2
+printf '%s\\t%s\\n' "$$" "$PWD" >> {shlex.quote(str(self.scheduler.calls))}
+/bin/bash -- "$2" >/dev/null 2>&1 || true
+printf '%s;fixture\\n' "$$"
+''')
         service.clusters.transport=lambda profile:self.scheduler
         workspace = self.root/'confirmed space'
         for name in ('software','workfile'):

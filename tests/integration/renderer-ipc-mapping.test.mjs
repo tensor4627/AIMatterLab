@@ -16,7 +16,7 @@ import ts from 'typescript';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const files=[...new Set(execSync('git ls-files --cached --others --exclude-standard',{cwd:root,encoding:'utf8'}).split('\n'))]
- .filter(name=>/\.(?:mjs|cjs)$/.test(name)&&/^(?:desktop|backend\/main)\//.test(name));
+ .filter(name=>/\.(?:mjs|cjs)$/.test(name)&&/^(?:desktop|backend\/main)\//.test(name)&&fs.existsSync(path.join(root,name)));
 
 function preloadMethods(){
  const text=fs.readFileSync(path.join(root,'desktop/preload.cjs'),'utf8');

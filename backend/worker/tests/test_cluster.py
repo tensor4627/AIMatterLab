@@ -99,7 +99,7 @@ class ClusterLifecycle(unittest.TestCase):
         self.assertFalse(FakeSSH.calls)
 
     def test_missing_lease_agent_error_has_safe_human_action_and_never_tty_details(self):
-        from studio_worker.ssh_auth import AuthError
+        from studio_worker.compute.ssh_auth import AuthError
         from studio_worker.server import mcp_tool_call
         class MissingLease:
             def __init__(self,_p):pass
@@ -234,7 +234,7 @@ class ClusterLifecycle(unittest.TestCase):
                 self.assertNotIn('private-',str(failure.exception))
 
     def test_poll_missing_auth_surfaces_safe_original_run_action_even_without_job_id_and_never_resubmits(self):
-        from studio_worker.ssh_auth import AuthError
+        from studio_worker.compute.ssh_auth import AuthError
         run=self.submitted();raw=self.cluster.raw(run['id']);self.cluster.save(raw,status='unknown',job_id=None,submit_attempted=True)
         calls=[]
         class Missing:
@@ -256,7 +256,7 @@ class ClusterLifecycle(unittest.TestCase):
         self.assertIsNone(fresh['job_id']);self.assertTrue(fresh['submit_attempted'])
 
     def test_poll_auth_hint_retains_original_scheduler_identity_and_snapshot_after_current_profile_edit(self):
-        from studio_worker.ssh_auth import AuthError
+        from studio_worker.compute.ssh_auth import AuthError
         run=self.submitted();raw=self.cluster.raw(run['id']);snapshot=raw['cluster_snapshot'];seen=[]
         current=self.cluster.store.get('cluster',self.profile['id']);self.cluster.register({**current,'host':'latest.example.invalid'})
         class Missing:
@@ -273,7 +273,7 @@ class ClusterLifecycle(unittest.TestCase):
         return run
 
     def test_missing_interactive_lease_is_ready_zero_dispatch_not_unknown_submission(self):
-        from studio_worker.ssh_auth import AuthError
+        from studio_worker.compute.ssh_auth import AuthError
         run=self.interactive_ready();calls=[];store=self.cluster.store
         class Missing:
             def resolve(self,p):
@@ -287,7 +287,7 @@ class ClusterLifecycle(unittest.TestCase):
         self.assertFalse(actual.get('submit_attempted'));self.assertEqual(len(calls),1);self.assertFalse(FakeSSH.calls)
 
     def test_master_loss_after_successful_auth_preflight_remains_unknown_and_never_replays(self):
-        from studio_worker.ssh_auth import AuthError
+        from studio_worker.compute.ssh_auth import AuthError
         run=self.interactive_ready();calls=[];store=self.cluster.store;self_case=self
         class Lost:
             def resolve(self,p):self_case.assertFalse(store.lock._is_owned());calls.append('preflight');return {}
@@ -301,7 +301,7 @@ class ClusterLifecycle(unittest.TestCase):
 
     def test_submit_auth_preflight_releases_store_lock_for_concurrent_private_profile_read(self):
         import threading
-        from studio_worker.ssh_auth import AuthError
+        from studio_worker.compute.ssh_auth import AuthError
         run=self.interactive_ready();entered=threading.Event();release=threading.Event();read_done=threading.Event();errors=[];auth_lock=threading.RLock();store=self.cluster.store
         class Waiting:
             def resolve(self,p):entered.set();release.wait(2);return {}
@@ -333,7 +333,7 @@ class ClusterLifecycle(unittest.TestCase):
         import threading,time
         from unittest.mock import patch
         from studio_worker.cluster import Clusters
-        import studio_worker.ssh_auth as auth
+        import studio_worker.compute.ssh_auth as auth
         created=[];results=[]
         class Manager:
             def __init__(self,service):created.append(service);time.sleep(.02)

@@ -15,7 +15,7 @@ import {WorkerClient as ComputeWorkerClient} from "../../backend/main/compute/wo
 
 const entries=[
   ['agent-hub','agent/providers/agent-hub'],['codex','agent/providers/codex'],
-  ['acp','agent/providers/acp'],['deepseek','agent/providers/deepseek'],
+  ['acp','agent/providers/acp'],['dsh','agent/providers/dsh'],
   ['compatible-api','agent/providers/compatible-api'],['agent-settings','agent/context/agent-settings'],
   ['agent-workflow-context','agent/sessions/workflow-context'],['mcp-provider-scope','agent/tools/provider-scope'],
   ['private-definition-scope','agent/tools/definition-scope'],
@@ -39,8 +39,8 @@ async function actualMainImports(){
 test('actual main imports resolve the new Agent and vault owners and can operate the imported protocol bridge',async()=>{
   const bindings=await actualMainImports();
   for(const [name,owner]of [
-    ['AgentHub','agent/providers/agent-hub'],['CodexBridge','agent/providers/codex'],
-    ['createAgentWorkflowContext','agent/sessions/workflow-context'],['agentConfig','agent/context/agent-settings'],
+    ['ConversationAgentHub','agent/providers/conversation-agent-hub'],['CodexBridge','agent/providers/codex'],
+    ['createParallelAgentWorkflowContext','agent/sessions/workflow-context'],['agentConfig','agent/context/agent-settings'],
     ['definitionReply','agent/tools/definition-scope'],['providerId','agent/providers/contracts'],
     ['CredentialVault','desktop/platform/credential-vault'],
   ])assert.equal(bindings.get(name),(await import('../../'+owner+'.mjs'))[name],name);
@@ -80,14 +80,14 @@ test('AgentHub supplies its host to ACP profile creation, version probe, process
   const host={...providerRuntime,version:'synthetic-host-version',prepareProfile:(...args)=>{calls.push(['profile',...args]);return profile;},spawnCli:(executable,args,options)=>{
     calls.push(['spawn',executable,args,options]);
     if(args[0]==='--version'){
-      const probe=childProcess(()=>({}));queueMicrotask(()=>{probe.stdout.write('qwen '+CLI_VERSIONS.qwen);probe.emit('exit',0);});return probe;
+      const probe=childProcess(()=>({}));queueMicrotask(()=>{probe.stdout.write('kimi '+CLI_VERSIONS.kimi);probe.emit('exit',0);});return probe;
     }
     return childProcess(message=>{assert.equal(message.method,'initialize');assert.equal(message.params.clientInfo.version,'synthetic-host-version');return {protocolVersion:1};});
   },assertRpc:method=>{calls.push(['rpc',method]);throw Error('host policy rejected');}};
-  const hub=new AgentHub({codex,root:'/synthetic/profiles',catalog:{get:()=>null,list:()=>[]},vault:{get:()=>null},settings:()=>({qwenPath:'host-qwen'}),worker:()=>null,host});
+  const hub=new AgentHub({codex,root:'/synthetic/profiles',catalog:{get:()=>null,list:()=>[]},vault:{get:()=>null},settings:()=>({kimiPath:'host-kimi'}),worker:()=>null,host});
   try{
-    assert.equal((await hub.connect('qwen')).protocolVersion,1);assert.equal(hub.bridge('qwen').host,host);
-    assert.deepEqual(calls[0],['profile','/synthetic/profiles','qwen',null]);assert.equal(calls.filter(call=>call[0]==='spawn').length,2);
-    await assert.rejects(hub.rpc('qwen','account/read'),/host policy rejected/);assert.deepEqual(calls.at(-1),['rpc','account/read']);
+    assert.equal((await hub.connect('kimi')).protocolVersion,1);assert.equal(hub.bridge('kimi').host,host);
+    assert.deepEqual(calls[0],['profile','/synthetic/profiles','kimi',null,hub.instructions]);assert.equal(calls.filter(call=>call[0]==='spawn').length,2);
+    await assert.rejects(hub.rpc('kimi','account/read'),/host policy rejected/);assert.deepEqual(calls.at(-1),['rpc','account/read']);
   }finally{hub.close();}
 });

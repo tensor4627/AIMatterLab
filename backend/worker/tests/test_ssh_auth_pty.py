@@ -15,7 +15,7 @@ WORKER = Path(__file__).resolve().parents[1]
 RUNTIME = WORKER.parent / '.studio/v0189/button-audit/c/compute-connection-hil/phase2/pty/runtime'
 if os.name == 'posix':
     sys.path.insert(0, str(WORKER))
-    from studio_worker.ssh_auth_pty import process_identity
+    from studio_worker.compute.ssh_auth_pty import process_identity
 
 
 class Fixture:
@@ -27,10 +27,10 @@ class Fixture:
         env = dict(os.environ, PYTHONPATH=str(WORKER), PYTHONDONTWRITEBYTECODE='1')
         argv = [sys.executable, '-u', '-c', code] if code is not None else None
         if owner:
-            launch = "import json,subprocess,sys,time; p=subprocess.Popen([sys.executable,'-u','-m','studio_worker.ssh_auth_pty'],stdin=subprocess.PIPE); p.stdin.write((json.dumps({'argv':"+repr(argv)+"})+'\\n').encode()); p.stdin.flush(); print(json.dumps({'type':'owner','helperPid':p.pid}),flush=True); time.sleep(30)"
+            launch = "import json,subprocess,sys,time; p=subprocess.Popen([sys.executable,'-u','-m','studio_worker.compute.ssh_auth_pty'],stdin=subprocess.PIPE); p.stdin.write((json.dumps({'argv':"+repr(argv)+"})+'\\n').encode()); p.stdin.flush(); print(json.dumps({'type':'owner','helperPid':p.pid}),flush=True); time.sleep(30)"
             command = [sys.executable, '-u', '-c', launch]
         else:
-            command = [sys.executable, '-u', '-m', 'studio_worker.ssh_auth_pty']
+            command = [sys.executable, '-u', '-m', 'studio_worker.compute.ssh_auth_pty']
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, cwd=self.directory.name, env=env)
         case.addCleanup(self.close)

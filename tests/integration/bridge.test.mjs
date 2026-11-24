@@ -53,12 +53,13 @@ test('desktop SQLite catalog survives reopening',()=>{
 });
 
 test('Agent context settings are scoped and validated',async()=>{
- const {agentConfig,STUDIO_INSTRUCTIONS}=await import("../../agent/context/agent-settings.mjs");
+ const {agentConfig,STUDIO_INSTRUCTIONS,AUTHORIZED_ITERATION_INSTRUCTIONS}=await import("../../agent/context/agent-settings.mjs");
  assert.deepEqual(agentConfig({contextWindow:131072,compactLimit:98304}),{
   'features.shell_tool':false,'features.unified_exec':false,model_context_window:131072,model_auto_compact_token_limit:98304});
  assert.throws(()=>agentConfig({contextWindow:8192,compactLimit:8192}));
  assert.throws(()=>agentConfig({contextWindow:'131072'}));
- assert.match(STUDIO_INSTRUCTIONS,/current user-delegated goal/);
+ assert.match(STUDIO_INSTRUCTIONS,/explicitly delegated/);
+ assert.match(AUTHORIZED_ITERATION_INSTRUCTIONS,/current user-delegated goal/);
  assertWorkerRoute('POST','/api/run/revise');
  assertWorkerRoute('POST','/api/run/input');
 });
@@ -71,7 +72,7 @@ test('Account-first connections rebind tools and coalesce concurrent starts with
  const worker={url:'http://127.0.0.1:1',tokens:{mcp:'private-test-token'}};
  const first=bridge.start('fixture',worker),second=bridge.start('fixture',worker);release();await Promise.all([first,second]);
  assert.equal(launches,2);assert.equal(kills,1);
- bridge.receive({method:'turn/started',params:{threadId:'t'}});
+ bridge.receive({method:'turn/started',params:{threadId:'t',turn:{id:'turn-1'}}});
  await assert.rejects(bridge.start('fixture',{...worker,url:'http://127.0.0.1:2'}),/Stop/);assert.equal(kills,1);
- bridge.receive({method:'turn/completed',params:{threadId:'t'}});const changed=bridge.start('fixture',{...worker,url:'http://127.0.0.1:2'});release();await changed;assert.equal(launches,3);bridge.close();
+ bridge.receive({method:'turn/completed',params:{threadId:'t',turn:{id:'turn-1'}}});const changed=bridge.start('fixture',{...worker,url:'http://127.0.0.1:2'});release();await changed;assert.equal(launches,3);bridge.close();
 });

@@ -385,7 +385,7 @@ class SSHAuth:
                 s.update(directory=folder, directoryIdentity=(st.st_dev, st.st_ino), socket=str(folder / 's'),
                          state='awaiting_auth', activity=self.clock(), started=self.clock())
                 try:
-                    child = self.spawn([sys.executable, '-m', 'studio_worker.ssh_auth_pty'], stdin=subprocess.PIPE,
+                    child = self.spawn([sys.executable, '-m', 'studio_worker.compute.ssh_auth_pty'], stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True, bufsize=0)
                     s['helper'], s['helperIdentity'] = child, process_identity(child.pid)
                     self._queue(s, {'argv': master_args(s['profile'], s['socket'])}, startup=True)

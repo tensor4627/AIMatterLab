@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {schedulerInspectionPath,schedulerObservation} from '../../../contracts/compute/scheduler-observation.mjs';
-import {scheduleOwnerId} from '../../../contracts/compute/schedule-owner.mjs';
+import {scheduleOwnerId} from '../../../desktop/platform/schedule-owner.mjs';
 import path from 'node:path';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {terminalToolInput,sharedTerminalTools} from './shared-terminal.mjs';

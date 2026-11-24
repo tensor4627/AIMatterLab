@@ -1,7 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {DeepSeekBridge} from "../../agent/providers/deepseek.mjs";import {sharedTerminalTools} from "../../backend/main/compute/shared-terminal.mjs";import {McpProviderScopes} from "../../agent/tools/provider-scope.mjs";import {compositionToolGuard} from "../../backend/main/workspace/task-pygas.mjs";import {CodexBridge} from "../../agent/providers/codex.mjs";
+import {apply as applyDshPolicy,dshToolAllowed} from "../../agent/providers/dsh-policy.mjs";import {sharedTerminalTools} from "../../backend/main/compute/shared-terminal.mjs";import {McpProviderScopes} from "../../agent/tools/provider-scope.mjs";import {compositionToolGuard} from "../../backend/main/workspace/task-pygas.mjs";import {CodexBridge} from "../../agent/providers/codex.mjs";
 
-test('API provider inventory exposes only explicit shared-terminal tools in chat without enabling scientific writes',async()=>{const fake={getWorker:()=>({}),mcp:async()=>({tools:[...sharedTerminalTools,{name:'present_task'},{name:'unknown_fixture_tool'}]})};const tools=await DeepSeekBridge.prototype.tools.call(fake,'chat');assert.deepEqual(tools.map(t=>t.name).sort(),sharedTerminalTools.map(t=>t.name).sort());assert(!tools.some(t=>t.name==='present_task'||t.name==='unknown_fixture_tool'));});
+test('DSH provider policy exposes only explicit shared-terminal tools in chat without enabling scientific writes',()=>{
+ const candidates=[...sharedTerminalTools,{name:'present_task'},{name:'unknown_fixture_tool'}];
+ const allowed=candidates.filter(t=>dshToolAllowed(t.name,false));
+ assert.deepEqual(allowed.map(t=>t.name).sort(),sharedTerminalTools.map(t=>t.name).sort());
+ assert(!allowed.some(t=>t.name==='present_task'||t.name==='unknown_fixture_tool'));
+});
 test('compatible provider lease URL authenticates its exact provider without exposing another provider',()=>{const scopes=new McpProviderScopes(),base={url:'http://127.0.0.1:31001',tokens:{mcp:'SYNTHETIC_BASE_ONLY'}};scopes.bind(base);scopes.bindContext('compatible',{threadId:'fixture-thread'});const connection=scopes.connection('compatible',base),auth=scopes.authenticate({pathname:new URL(connection.url).pathname+'/mcp',authorization:'Bearer '+connection.tokens.mcp,host:'127.0.0.1:31001'});assert(auth,'saved compatible provider URL must have an authenticatable lease');assert.equal(auth.provider,'compatible');assert(auth.checkCurrent());assert.equal(scopes.authenticate({pathname:'/providers/codex/mcp',authorization:'Bearer '+connection.tokens.mcp,host:'127.0.0.1:31001'}),null);});
 test('composition guard and Codex strict isolation do not independently reject registered gpusampling terminal tool names',()=>{const guard=compositionToolGuard({},{get:()=>null}),bridge=new CodexBridge({strictIsolation:true});let closed=0;bridge.close=()=>{closed++;};for(const tool of sharedTerminalTools){assert.equal(guard.before(tool.name,{},'codex'),null);bridge.receive({method:'item/started',params:{item:{type:'mcpToolCall',server:'gpusampling',tool:tool.name}}});}assert.equal(closed,0);});
 
@@ -11,7 +16,28 @@ test('ordinary chat describes resource leases and independent jobs without creat
  const delegated=terminalOnlyTurn({input:original}).input.at(-1).text;
  assert(delegated.includes(SHARED_TERMINAL_CHAT_INSTRUCTIONS));for(const tool of sharedTerminalTools)assert(delegated.includes(tool.name));
  assert.match(delegated,/Worker tools and hosted resource leases have their own grants/);assert.match(delegated,/authentication secrets/);});
-function fixtureStream(value){return new Response('data: '+JSON.stringify({choices:[{delta:value,finish_reason:value.tool_calls?'tool_calls':'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});}
-function runFixture(tools){const api=[],calls=[],fixture={provider:'deepseek',getCredential:()=>null,tools:async()=>tools,clean:v=>v,save(){},event(){},mcp:async(method,params)=>{calls.push({method,params});return {content:[{type:'text',text:'PUBLIC FIXTURE OUTPUT'}]};},api:async(route,options)=>{api.push(JSON.parse(options.body));return api.length===1?fixtureStream({tool_calls:[{index:0,id:'fixture-call',function:{name:'read_shared_terminal',arguments:JSON.stringify({session_id:'fixture-session'})}}]}):fixtureStream({content:'Public fixture completed'});}},session={id:'fixture-thread',model:'fixture-model',messages:[]},turn={items:[]},active={controller:new AbortController()};return {api,calls,fixture,session,turn,active};}
-test('terminal-only workflow inventory permits an actual bounded API tool round without present_task',async()=>{const f=runFixture(sharedTerminalTools);await DeepSeekBridge.prototype.run.call(f.fixture,f.session,f.turn,f.active,{mode:'workflow',taskId:'fixture-task'},false);assert.equal(f.turn.status,'completed');assert.equal(f.api.length,2);assert.deepEqual(f.calls,[{method:'tools/call',params:{name:'read_shared_terminal',arguments:{session_id:'fixture-session'}}}]);assert.deepEqual(f.api[0].tools.map(t=>t.function.name).sort(),sharedTerminalTools.map(t=>t.name).sort());});
-test('nonterminal or mixed workflow inventory still requires present_task before API or tool dispatch',async()=>{for(const tools of [[],[{name:'compute_readiness'}],[...sharedTerminalTools,{name:'compute_readiness'}]]){const f=runFixture(tools);await assert.rejects(DeepSeekBridge.prototype.run.call(f.fixture,f.session,f.turn,f.active,{mode:'workflow',taskId:'fixture-task'},false),/present_task/);assert.deepEqual(f.api,[]);assert.deepEqual(f.calls,[]);}});
+const mcpModule='data:text/javascript,'+encodeURIComponent('export function createMcpToolDefinition(_ctx,def){return def;}');
+const toolsModule='data:text/javascript,'+encodeURIComponent('export function validateJsonSchemaValue(){return [];}');
+test('DSH policy registers terminal-only MCP inventory cleanly and rejects unapproved tools',async()=>{
+ const registered=[],calls=[];let guard;
+ const originalFetch=globalThis.fetch,previousToken=process.env.GSS_MCP_TOKEN;
+ process.env.GSS_MCP_TOKEN='synthetic-token';
+ globalThis.fetch=async(_url,options)=>{
+  const body=JSON.parse(options.body);calls.push(body);
+  if(body.method==='tools/list')return Response.json({result:{tools:sharedTerminalTools}});
+  return Response.json({result:{content:[{type:'text',text:'PUBLIC FIXTURE OUTPUT'}]}});
+ };
+ try{
+  await applyDshPolicy({tools:{register:def=>registered.push(def),guard:fn=>{guard=fn;},schemas:()=>registered},systemPrompt:{section(){}},on(){},effect(){},appReady:{onReady(){}},llm:{},agents:{}},{workerUrl:'http://127.0.0.1:8767/mcp',mcpModule,toolsModule,workflow:true,instructions:'Fixture',models:[]});
+  assert.deepEqual(registered.map(t=>t.rawName).sort(),sharedTerminalTools.map(t=>t.name).sort());
+  const readDef=registered.find(t=>t.rawName==='read_shared_terminal');
+  assert.equal(guard({name:readDef.name}),undefined);
+  assert.equal(guard({name:'mcp__gpusampling__unknown_fixture_tool'}),'Only the verified AIMatterLab tools are available');
+  const reply=await readDef.call({session_id:'fixture-session'},{signal:new AbortController().signal});
+  assert.equal(reply.content[0].text,'PUBLIC FIXTURE OUTPUT');
+  assert.deepEqual(calls.map(c=>c.method),['tools/list','tools/call']);
+ }finally{
+  globalThis.fetch=originalFetch;
+  if(previousToken===undefined)delete process.env.GSS_MCP_TOKEN;else process.env.GSS_MCP_TOKEN=previousToken;
+ }
+});

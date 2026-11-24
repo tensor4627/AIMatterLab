@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 repository_root=Path(__file__).resolve().parents[3];sys.path.insert(0,str(repository_root/'backend/worker'))
-from studio_worker.store import Store
+from studio_worker.infrastructure.store import Store
 from studio_worker.service import Service
 spec=importlib.util.spec_from_file_location('studio_worker.workspace.materialize_candidate',repository_root/'backend/worker/studio_worker/workspace/workspace_materialize.py');module=importlib.util.module_from_spec(spec);sys.modules[spec.name]=module;spec.loader.exec_module(module)
 class CreateOrIdentical(unittest.TestCase):

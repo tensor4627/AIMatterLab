@@ -101,7 +101,7 @@ test('official DSH creates, reads and updates a personal skill in chat without a
  assert(system.includes(instructions),'First DeepSeek system packet must carry the packaged core and the workspace index');
  assert.match(system,/写到本机工作区.*scope="user"/);
  assert.ok(system.includes(JSON.stringify(store.personalDirectory)));
- assert.match(system,/If steps conflict, name both skills and the difference, ask which to follow and wait/);
+ assert.match(system,/For conflicting steps, name both skills and ask the user to choose/);
  const tools=first.tools.map(tool=>tool.name.replace(/^mcp__gpusampling__/, ''));
  for(const name of ['project_skill_catalog','read_project_skill','write_project_skill','scientific_skill_catalog','read_scientific_skill'])assert(tools.includes(name),name);
  assert(!tools.includes('submit_run'));
@@ -220,7 +220,7 @@ test('restored official DSH conversation receives current hosted recovery and a 
  assert.match(fresh,/verifies the same remote identity and workspace.*restores eligible conversation leases/);
  assert.match(fresh,/unknown jobs using their original IDs and receipts/);
  assert(!packets[1].tools.some(tool=>tool.name.endsWith('_shared_terminals')));
- assert(received.includes('A service lease grants no shell'));
+ assert(received.includes('Only an acquired terminal with its session receipt establishes a shell'));
  assert(received.includes('live SSH terminal restores the same verified channel'));
  assert(received.includes('enter authentication responses only in the private terminal'));
  assert(received.includes('terminal_unavailable')&&received.includes('leaseStatus')&&received.includes('retry'));

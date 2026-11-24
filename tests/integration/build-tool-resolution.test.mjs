@@ -14,7 +14,12 @@ const typescriptRoot=path.dirname(require.resolve('typescript/package.json'));
 
 function fixture(t,layout){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimatterlab-build-resolution-'));
- t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const junctions=[];
+ function linkDir(target,location){fs.symlinkSync(target,location,'junction');junctions.push(location);}
+ t.after(()=>{
+  for(const location of junctions.reverse())try{fs.unlinkSync(location);}catch{try{fs.rmdirSync(location);}catch{}}
+  fs.rmSync(root,{recursive:true,force:true});
+ });
  function write(name,value){const file=path.join(root,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);return file;}
  function pkg(directory,name){
   write(path.join(directory,'package.json'),JSON.stringify({name,version:'1.0.0',main:'index.cjs'}));
@@ -34,11 +39,11 @@ function fixture(t,layout){
  const builder=pkg(layout==='isolated'?'node_modules/.pnpm/electron-builder-fixture/node_modules/electron-builder':'node_modules/electron-builder','electron-builder');
  const app=pkg(layout==='isolated'?'node_modules/.pnpm/app-builder-lib-fixture/node_modules/app-builder-lib':'node_modules/app-builder-lib','app-builder-lib');
  if(layout==='isolated'){
-  fs.symlinkSync(builder,path.join(modules,'electron-builder'),'junction');
-  fs.symlinkSync(app,path.join(path.dirname(builder),'app-builder-lib'),'junction');
+  linkDir(builder,path.join(modules,'electron-builder'));
+  linkDir(app,path.join(path.dirname(builder),'app-builder-lib'));
  }
- fs.symlinkSync(semverRoot,path.join(path.dirname(app),'semver'),'junction');
- fs.symlinkSync(typescriptRoot,path.join(modules,'typescript'),'junction');
+ linkDir(semverRoot,path.join(path.dirname(app),'semver'));
+ linkDir(typescriptRoot,path.join(modules,'typescript'));
  return root;
 }
 

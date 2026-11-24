@@ -5,8 +5,15 @@ import path from 'node:path';
 import os from 'node:os';
 import {stageCoreRuntimes} from '../../scripts/stage-agents.mjs';
 
+function unlinkJunction(p){try{fs.unlinkSync(p);}catch{fs.rmdirSync(p);}}
+function cleanupTree(dir){
+ if(!fs.existsSync(dir))return;
+ const walk=p=>{let s;try{s=fs.lstatSync(p);}catch{return;}if(s.isSymbolicLink()){unlinkJunction(p);return;}if(s.isDirectory())for(const n of fs.readdirSync(p))walk(path.join(p,n));};
+ walk(dir);
+ fs.rmSync(dir,{recursive:true,force:true});
+}
 function fixture(t){
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-pty-stage-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-pty-stage-'));t.after(()=>cleanupTree(root));
  fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({name:'gpu-sampling-studio'}));
  const native='@lydell/node-pty-win32-x64',wrapperRoot=path.join(root,'node_modules/.pnpm/wrapper/node_modules/@lydell/node-pty'),nativeRoot=path.join(root,'node_modules/.pnpm/native/node_modules',native);
  const pkg=(directory,value,entry)=>{fs.mkdirSync(path.dirname(path.join(directory,entry)),{recursive:true});fs.writeFileSync(path.join(directory,'package.json'),JSON.stringify(value));fs.writeFileSync(path.join(directory,entry),'inert staging fixture; never executed');};
@@ -28,7 +35,7 @@ test('standalone pnpm layout stages the wrapper-scoped native dependency without
 
 test('staging refuses a dependency resolved outside its checkout instead of silently borrowing an ancestor',t=>{
  const f=fixture(t),external=fs.mkdtempSync(path.join(os.tmpdir(),'studio-external-pty-'));t.after(()=>fs.rmSync(external,{recursive:true,force:true}));
- fs.cpSync(f.nativeRoot,external,{recursive:true});fs.rmSync(path.join(f.wrapperRoot,'..','node-pty-win32-x64'));f.link(external,path.join(f.wrapperRoot,'..','node-pty-win32-x64'));
+ fs.cpSync(f.nativeRoot,external,{recursive:true});unlinkJunction(path.join(f.wrapperRoot,'..','node-pty-win32-x64'));f.link(external,path.join(f.wrapperRoot,'..','node-pty-win32-x64'));
  assert.throws(()=>stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64'}),/inside this checkout/);
 });
 

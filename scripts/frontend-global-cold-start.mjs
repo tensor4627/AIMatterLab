@@ -19,7 +19,7 @@ async function fixture(options={}){
   localStorage.setItem('studio.section','task:'+run.id);if(cfg.owner)localStorage.setItem('studio.conversation',conversation.id);else localStorage.removeItem('studio.conversation');
   localStorage.setItem('studio.composer.v1.'+JSON.stringify(['codex','new','fixture-new']),JSON.stringify({version:1,text:'Unsent global browsing draft'}));
   const stateWaiters=[];test.releaseState=()=>{test.stateReady=true;for(const resolve of stateWaiters)resolve({settings:test.settings,threads:[],ssh:[]});};
-  window.studio={onEvent:fn=>{test.events.push(fn);return()=>{test.events=test.events.filter(f=>f!==fn);};},onTerminal:()=>()=>{},invoke:async(method,data)=>{
+  window.studio={onEvent:fn=>{test.events.push(fn);return()=>{test.events=test.events.filter(f=>f!==fn);};},invoke:async(method,data)=>{
    test.trace.push({method,data,ready:test.bridgeReady});
    if(method==='state')return test.stateReady?{settings:test.settings,threads:[],ssh:[]}:new Promise(resolve=>stateWaiters.push(resolve));
    if(method==='conversation.list')return cfg.owner?[conversation]:[];if(method==='conversation.select')return conversation;if(method==='conversation.groups'||method==='workflow.list')return [];

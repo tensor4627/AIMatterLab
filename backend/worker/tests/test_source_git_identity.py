@@ -4,13 +4,13 @@ from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[3];CANDIDATE=ROOT/'backend/worker/studio_worker'
 sys.path.insert(0,str(ROOT/'backend/worker'))
-from studio_worker import runtime_guides
+from studio_worker.compute import runtime_guides
 
 def load(name,path):
  spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec);sys.modules[name]=module;spec.loader.exec_module(module);
  if '.'in name:setattr(sys.modules[name.rsplit('.',1)[0]],name.rsplit('.',1)[1],module)
  return module
-from studio_worker import source_git_identity as helper,scientific,environment_api as api
+from studio_worker.tools import source_git_identity as helper,scientific,environment_api as api
 
 def git(root,*args):
  return subprocess.check_output(['git','-c','user.name=Synthetic','-c','user.email=synthetic@example.test','-C',str(root),*args],text=True,stderr=subprocess.PIPE).strip()

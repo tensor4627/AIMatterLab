@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from studio_worker.server import dispatch,tools
 from studio_worker.service import Service
-from studio_worker.source_projects import inspect_source
+from studio_worker.tools.source_projects import inspect_source
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'studio_worker'))
 from structure_tools import create,suggest
 

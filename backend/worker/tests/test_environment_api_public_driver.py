@@ -2,7 +2,8 @@
 import ast, builtins, copy, hashlib, json, shutil, textwrap, unittest
 from pathlib import Path
 from unittest.mock import patch
-from studio_worker import environment_api as api, runtime_guides as guides
+from studio_worker.tools import environment_api as api
+from studio_worker.compute import runtime_guides as guides
 import test_environment_api as fixtures
 
 NEW_IDS = (

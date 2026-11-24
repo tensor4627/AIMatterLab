@@ -10,6 +10,12 @@ import {localizeSkill,validateProfile} from "../../scripts/localize-skill.mjs";
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../..");
 const command=path.join(repo,'scripts','localize-skill.mjs');
 function run(exe,args){return spawnSync(exe,args,{encoding:'utf8',windowsHide:true});}
+function cleanupTree(dir){
+ if(!fs.existsSync(dir))return;
+ const walk=p=>{let s;try{s=fs.lstatSync(p);}catch{return;}if(s.isSymbolicLink()){try{fs.unlinkSync(p);}catch{fs.rmdirSync(p);}return;}if(s.isDirectory()){try{fs.chmodSync(p,0o777);}catch{}for(const n of fs.readdirSync(p))walk(path.join(p,n));}else{try{fs.chmodSync(p,0o666);}catch{}}};
+ walk(dir);
+ fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:50});
+}
 function fixture(ignore='.studio/\n'){
  fs.mkdirSync(path.join(repo,'.studio'),{recursive:true});
  const root=fs.mkdtempSync(path.join(repo,'.studio','test-skill-portability-'));
@@ -17,7 +23,7 @@ function fixture(ignore='.studio/\n'){
  fs.writeFileSync(path.join(root,'.gitignore'),ignore);
  const dest=path.join(root,'agent','builtin-skills','studio-compute-workflow');fs.mkdirSync(dest,{recursive:true});
  fs.copyFileSync(path.join(repo,'agent','builtin-skills','studio-compute-workflow','SKILL.md'),path.join(dest,'SKILL.md'));
- return {root,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};
+ return {root,cleanup:()=>cleanupTree(root)};
 }
 function profile(id='selected-compute'){
  return {schema_version:1,id,name:'Private deployment',transport:'ssh',connection_ref:'registered-connection',scheduler:'lsf',queue:'selected-queue',run_root:'/opt/private-runs',lsf_memory_scope:'per_job',

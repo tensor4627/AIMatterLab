@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 if os.name == 'posix':
-    import studio_worker.ssh_auth as auth
+    import studio_worker.compute.ssh_auth as auth
 
 OWNER = 'a'*48
 HELPER_PID, MASTER_PID = 990000001, 990000002

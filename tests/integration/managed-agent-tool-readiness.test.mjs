@@ -49,7 +49,7 @@ async function mainFixture(t){
  const worker={connection:null,providerConnection:()=>null,probeTools:()=>assert.fail('No foreground worker check'),connect:()=>assert.fail('No worker setup')};
  const context={providerId:value=>assert.equal(value,provider),managedResources:{},resourceRouting:{readiness:async()=>null,capture:()=>({selection:null,assertCurrent(){}})},managedToolReadiness,scientificToolReadiness,terminalMcp,agents,taskWorkerSource,worker,codex:null,
   privateAccess:{assertTask:()=>assert.fail('An unrelated or offline worker cannot supply workflow authorization')},sharedTerminal:null,
-  workflowContext:{current:owner},taskRecords:{bound:()=>task,deleted:()=>false,read:()=>task},
+  workflowContext:{current:owner,selectedOwner:()=>({...owner(),revision:1})},taskRecords:{bound:()=>task,deleted:()=>false,read:()=>task},
   agentConnectAttempts:new Map(),settings:{},catalog:{put:(_kind,_id,value)=>value},
   readWorkerStatus:()=>assert.fail('Hosted tool repair cannot check or start a foreground worker'),
   emit:(_channel,event)=>calls.push(event),handle:(name,handler)=>handlers.set(name,handler),

@@ -6,7 +6,8 @@ const MAX_BYTES = 16384;
 const NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const EXECUTION_SKILL_NAME = /^tool-[a-z][a-z0-9-]{0,39}-[a-f0-9]{12}$/;
 const LIBRARY_DIRECTORY = /^(?:user|(?:resource-)?[a-f0-9]{64})$/;
-export const COMPUTE_ALIASES_SKILL = 'compute-resource-aliases';
+import {COMPUTE_ALIASES_SKILL} from '../../contracts/compute/compute-aliases.mjs';
+export {COMPUTE_ALIASES_SKILL};
 const digest = value => createHash('sha256').update(value).digest('hex');
 function assertSkillName(value) {
  if (typeof value !== 'string' || !NAME.test(value)) throw Object.assign(Error('Invalid skill name'), {operationNotStarted:true});

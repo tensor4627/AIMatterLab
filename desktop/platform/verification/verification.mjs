@@ -24,8 +24,8 @@ export async function verifyDesktop(window,root,errors,hooks={}) {
   await pause(200);
   fs.writeFileSync(path.join(out,'light.png'),(await window.webContents.capturePage()).toPNG());
   await js("document.querySelector('[title=\"切换主题\"]').click()");
-  report.checks.pty=await js(`(async()=>{let text='';const unsub=window.studio.onTerminal(e=>text+=e.data||'');const t=await window.studio.invoke('terminal.start',{kind:'wsl'});await window.studio.invoke('terminal.input',{id:t.id,data:"printf 'STUDIO_PTY_OK\\n'\\r"});await new Promise(r=>setTimeout(r,1500));await window.studio.invoke('terminal.close',{id:t.id});unsub();return text.includes('STUDIO_PTY_OK')})()`);
-  if(!report.checks.pty)throw Error('PTY smoke failed');
+  report.checks.sharedTerminal=await js("window.studio.invoke('sharedTerminal.list').then(r=>Array.isArray(r?.sessions))");
+  if(!report.checks.sharedTerminal)throw Error('Shared terminal IPC check failed');
   await js("[...document.querySelectorAll('.nav-item')].find(e=>e.textContent.includes('计算任务')).click()");
   await pause(300);
   await js("document.querySelector('.run-row')?.click()");

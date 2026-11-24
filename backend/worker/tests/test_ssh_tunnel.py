@@ -8,9 +8,9 @@ import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 if os.name=='posix':
-    import studio_worker.ssh_auth as auth
+    import studio_worker.compute.ssh_auth as auth
     import test_ssh_auth as fixture_auth
-    from studio_worker.ssh_tunnel import SSHTunnels
+    from studio_worker.compute.ssh_tunnel import SSHTunnels
     from test_ssh_auth import AuthFixture,OWNER,PROFILE,MASTER_PID
 
 

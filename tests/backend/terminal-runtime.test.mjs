@@ -8,7 +8,11 @@ import {prepareTerminalRuntime,probeWindowsTerminalRuntimeExecution} from '../..
 
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-terminal-runtime-'));
- t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ t.after(()=>{
+  function stripLinks(dir){try{for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isSymbolicLink()){try{fs.unlinkSync(p);}catch{try{fs.rmdirSync(p);}catch{}}}else if(e.isDirectory())stripLinks(p);}}catch{}}
+  stripLinks(root);
+  fs.rmSync(root,{recursive:true,force:true});
+ });
  const source=path.join(root,'source'),runtimeRoot=path.join(root,'owned','runtimes'),dependencyRoot=path.join(source,'resources','agent-runtimes'),native='@lydell/node-pty-win32-x64';
  const write=(relative,text)=>{const file=path.join(source,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,typeof text==='string'?text:JSON.stringify(text));return file;};
  const nodeExecutable=write('AIMatterLab.exe','inert executable fixture; never launched');
@@ -98,7 +102,7 @@ test('linked source inputs, package contents and destination ancestors are refus
  const external=path.join(f.root,'external');fs.mkdirSync(external);
  fs.symlinkSync(external,path.join(f.options.dependencyRoot,'node_modules',f.native,'linked'),process.platform==='win32'?'junction':'dir');
  await assert.rejects(f.prepare,/terminal_runtime_invalid_source/);
- fs.rmSync(path.join(f.options.dependencyRoot,'node_modules',f.native,'linked'));
+  try{fs.unlinkSync(path.join(f.options.dependencyRoot,'node_modules',f.native,'linked'));}catch{fs.rmdirSync(path.join(f.options.dependencyRoot,'node_modules',f.native,'linked'));}
  const destination=path.join(f.root,'linked-destination');fs.symlinkSync(external,destination,process.platform==='win32'?'junction':'dir');
  await assert.rejects(()=>prepareTerminalRuntime({...f.options,runtimeRoot:path.join(destination,'not-created')}),/terminal_runtime_invalid_source/);
  assert.equal(fs.existsSync(path.join(external,'not-created')),false);

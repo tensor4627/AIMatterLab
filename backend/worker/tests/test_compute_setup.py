@@ -5,7 +5,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from studio_worker.service import Service
 from studio_worker.server import dispatch,tools
-from studio_worker.compute_setup import discover,adopt,readiness,draft,signature
+from studio_worker.compute.compute_setup import discover,adopt,readiness,draft,signature
 from studio_worker.cluster import public
 
 class ComputeSetup(unittest.TestCase):
@@ -36,7 +36,7 @@ class ComputeSetup(unittest.TestCase):
   self.assertEqual(adopted['environments'][0],original);self.assertEqual(self.service.store.get('environment','manual'),original)
   self.assertTrue(readiness(self.service)['environments'][0]['cuda']['torch']['available'])
  def test_failed_discovery_is_explicit_no_environment_is_registered(self):
-  with patch('studio_worker.compute_setup.candidates',return_value=[str(self.python)]),patch('studio_worker.compute_setup.native_paths',return_value={}),patch('studio_worker.compute_setup.subprocess.run',side_effect=OSError('fixture')):
+  with patch('studio_worker.compute.compute_setup.candidates',return_value=[str(self.python)]),patch('studio_worker.compute.compute_setup.native_paths',return_value={}),patch('studio_worker.compute.compute_setup.subprocess.run',side_effect=OSError('fixture')):
    result=discover(self.service,force=True)
   self.assertEqual(result['entries'][0]['status'],'blocked');self.assertFalse(self.service.store.list('environment'))
  def test_private_connection_details_never_appear_in_readiness(self):

@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from studio_worker.runtime_service import RuntimeServiceMixin
-from studio_worker.runtime_guides import fingerprint
-from studio_worker.store import Store
+from studio_worker.compute.runtime_service import RuntimeServiceMixin
+from studio_worker.compute.runtime_guides import fingerprint
+from studio_worker.infrastructure.store import Store
 
 
 class RuntimeHarness(RuntimeServiceMixin):
@@ -29,7 +29,7 @@ class RuntimeServiceTests(unittest.TestCase):
         self.selection={'environment_id':'selected','engine':'pydyn.md'}
         self.report={'scope':{'engine':'pydyn.md'},'python':'fixture3','executable':str(self.python),'modules':{'ase':{'status':'passed','version':'fixture-version','file':str(self.module),'source_sha256':hashlib.sha256(self.module.read_bytes()).hexdigest()}},'repositories':{},'native_runtime':{'status':'not_run'}}
     def adapter(self, effect=None):
-        mock=patch('studio_worker.runtime_service.Adapter');factory=mock.start();self.addCleanup(mock.stop)
+        mock=patch('studio_worker.compute.runtime_service.Adapter');factory=mock.start();self.addCleanup(mock.stop)
         if effect is None:factory.return_value.probe.return_value=copy.deepcopy(self.report)
         else:factory.return_value.probe.side_effect=effect
         return factory

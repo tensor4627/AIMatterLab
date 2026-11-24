@@ -1,6 +1,6 @@
 import type {RpcEvent} from '../../contracts/dto/agent';
 
-export interface Studio {conversationHistory?:true;invoke<T=any>(method:string,data?:unknown):Promise<T>;onEvent(callback:(event:RpcEvent)=>void):()=>void;onTerminal(callback:(event:{id:string;data?:string;closed?:boolean})=>void):()=>void}
+export interface Studio {conversationHistory?:true;invoke<T=any>(method:string,data?:unknown):Promise<T>;onEvent(callback:(event:RpcEvent)=>void):()=>void}
 
 declare global {interface Window {studio?:Studio}}
 

@@ -2,7 +2,9 @@
 import copy,json,tempfile,types,unittest
 from pathlib import Path
 from unittest.mock import patch
-from studio_worker import environment_api as api,runtime_guides as guides,server
+from studio_worker.tools import environment_api as api
+from studio_worker.compute import runtime_guides as guides
+from studio_worker import server
 # Independent fixed fixture map: expanding product file scope requires reviewing fixtures too.
 FIXTURE_METHODS={
 'pydyn/dynamics/driver.py':{'Simulation':('__init__','run','prepare','attach','finalize','_initialize','_step')},
@@ -162,21 +164,21 @@ class Tests(unittest.TestCase):
 
 class GraphContractTests(unittest.TestCase):
  def test_derived_constructor_value_is_rejected_without_mutation(self):
-  from studio_worker import pygas_values as values
+  from studio_worker.tools import pygas_values as values
   graph={'nodes':[{'id':'cv','kind':'cv','class_name':'Example','params':{'n_atoms':32}}]};before=copy.deepcopy(graph)
   with self.assertRaisesRegex(ValueError,r'nodes\[0\].*n_atoms.*omit'):values.normalize_graph(graph,{'cv':[{'name':'Example','params':[{'name':'n_atoms','required':True,'type_hint':'int'}]}]})
   self.assertEqual(graph,before)
  def test_reducer_error_names_correct_storage_path_and_preserves_value(self):
-  from studio_worker import pygas_values as values
+  from studio_worker.tools import pygas_values as values
   graph={'nodes':[{'id':'mean','kind':'reduce','operation':'mean'}]};before=copy.deepcopy(graph)
   with self.assertRaisesRegex(ValueError,r'nodes\[0\].*operation.*params.operation'):values.normalize_graph(graph,{})
   self.assertEqual(graph,before);graph['nodes'][0].pop('operation');graph['nodes'][0]['params']={'operation':'mean'};self.assertEqual(values.normalize_graph(graph,{},require_complete=True)['nodes'][0]['params']['operation'],'mean')
  def test_contract_tracks_actual_validator_bytes_and_constants(self):
   import hashlib
-  from studio_worker import pygas_values as values
+  from studio_worker.tools import pygas_values as values
   contract=values.studio_graph_input_contract();self.assertEqual(contract['source']['sha256'],hashlib.sha256(Path(values.__file__).read_bytes()).hexdigest());self.assertEqual(set(contract['allowed_properties']['node']),values.NODE_KEYS);self.assertEqual(contract['reduce']['parameter_path'],'params.operation');self.assertEqual(set(contract['structure_derived']['parameter_names']),values.STRUCTURE_DERIVED_PARAMS)
  def test_unknown_fields_do_not_echo_value_or_unsafe_id(self):
-  from studio_worker import pygas_values as values
+  from studio_worker.tools import pygas_values as values
   graph={'nodes':[{'id':'unsafe\nlabel','kind':'reduce','unknown_key':'DO_NOT_ECHO','params':{'operation':'mean'}}]}
   with self.assertRaises(ValueError)as cm:values.normalize_graph(graph,{})
   self.assertIn('unknown_key',str(cm.exception));self.assertNotIn('DO_NOT_ECHO',str(cm.exception));self.assertNotIn('unsafe\nlabel',str(cm.exception))

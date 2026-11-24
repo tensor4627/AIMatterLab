@@ -76,7 +76,7 @@ test('a stale same-source index remains a warning and fresh exact-run observatio
 });
 
 test('verified older service exposes the existing exact service settings upgrade entry without starting an operation',async()=>{
- const f=fixture(),{h}=f;try{await h.flush();const button=h.find(n=>n.props?.['data-testid']==='worker-service-upgrade');let prevented=0;button.props.onClick({preventDefault(){prevented++;},stopPropagation(){prevented++;}});await h.flush();assert.equal(prevented,2);assert.deepEqual({...h.find(n=>n.type==='./ComputeConnectionChooser').props.initialEdit,nonce:'nonce'},{profileId:'profile-A',profileVersion:1,section:'service',nonce:'nonce'});assert.equal(f.jobs().worker,true);noExecutionMutations(h);}finally{h.unmount();}
+ const f=fixture(),{h}=f;try{await h.flush();const button=h.find(n=>n.props?.['data-testid']==='worker-service-upgrade');let prevented=0;button.props.onClick({preventDefault(){prevented++;},stopPropagation(){prevented++;}});await h.flush();assert.equal(prevented,2);assert.deepEqual({...h.find(n=>n.type==='./ComputeConnectionChooser').props.initialEdit,nonce:'nonce'},{connectionId:undefined,profileId:'profile-A',profileVersion:1,section:'service',sessionId:undefined,nonce:'nonce'});assert.equal(f.jobs().worker,true);noExecutionMutations(h);}finally{h.unmount();}
 });
 
 test('an upgrade entry captured on A cannot silently open settings for newly selected B',async()=>{

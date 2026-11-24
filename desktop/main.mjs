@@ -17,7 +17,6 @@ import {clusterDownloadRequest} from '../contracts/compute/cluster-download.mjs'
 import {installedWorkspace,studioProfileRoot,workspaceSessionDirectory} from './platform/studio-profile.mjs';
 import {createSetupGuide} from './platform/setup-guide.mjs';
 import {terminalExecutionCache} from './platform/terminal-execution-cache.mjs';
-import {registerLegacyTerminalRoutes} from '../backend/main/compute/terminal-routes.mjs';
 import {registerWorkflowPlanRoutes} from '../backend/main/workspace/workflow-plans.mjs';
 import {createChatAttachments} from '../agent/sessions/chat-attachments.mjs';
 import {createAgentRequests} from '../agent/sessions/requests.mjs';
@@ -183,7 +182,7 @@ const subscriptionRuntime=createCodexSubscriptionRuntime({root:codexRoot,runtime
  onEnvPrompt:prompt=>emit('studio:event',{method:'studio/codexEnvImport',params:{prompt}})});
 const createCodex=(host=createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime,sharedEnvImport:subscriptionRuntime.envImport}))=>
  new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host});
-const codex=createCodex(subscriptionRuntime), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource}), terminals = new Map();
+const codex=createCodex(subscriptionRuntime), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource});
 bindBundledWorkerRuntimeId(worker,workerSource);
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService,managed:()=>managedResources,taskSource:scope=>taskWorkerSource(taskRecords?.bound(scope.provider,scope.threadId))});
 const previousSkillRoot=path.join(app.getPath('userData'),'project-skills');
@@ -765,8 +764,6 @@ handle('codex.envImport.pending',input=>{
  return subscriptionRuntime.envImport.current();
 });
 handle('codex.envImport.decide',input=>{subscriptionRuntime.envImport.decide(input);return null;});
-handle('codex.connect',async() => agents.connect('codex',{checkLogin:true}));
-handle('codex.rpc',value=>agentRpc({...value,provider:'codex'}));
 registerWorkflowPlanRoutes({handle,catalog});
 async function scientificTools(provider,threadId){
  const session=managedResources?agents.sessionIdentity(provider,threadId):null;
@@ -912,7 +909,6 @@ handle('agent.login.open',async({provider})=>{
 });
 handle('skills.catalog',async()=>{const policy=await scientificSkills.resolvePolicy(skillGuidanceScope(agents.active));const result=[...localSkills(studioSkillRoots(),{policy,projectSkills,bundledRoot:bundledSkillRoot}),...managedSkillEntries(policy)];await policy.revalidate();return result;});
 handle('scientific.skills',({provider})=>{providerId(provider);return scientificSkills.catalog(provider,skillGuidanceScope(provider));});
-handle('codex.respond',({threadId,id,result})=>{if(!(typeof id==='string'&&id.length>0&&id.length<=200)&&!Number.isSafeInteger(id))throw Error('Invalid agent response identity');if(!result||typeof result!=='object'||Array.isArray(result))throw Error('Invalid agent response');if(agents.active!=='codex')throw Error('Provider switched');return codex.respond(id,result);});
 handle('file.open',async() => {
   const response=await dialog.showOpenDialog(window,{properties:['openFile']});
   if(response.canceled) return null;
@@ -932,7 +928,6 @@ handle('file.choose',async({directory=false}) => {
   const response=await dialog.showOpenDialog(window,{properties:[directory?'openDirectory':'openFile']});
   return response.canceled?null:response.filePaths[0];
 });
-registerLegacyTerminalRoutes({handle,worker,catalog,terminals,getSettings:()=>settings,workerSource,emit,host:computeRuntime});
 handle('window',({action})=>{
   if(action==='minimize') window.minimize();
   if(action==='maximize') window.isMaximized()?window.unmaximize():window.maximize();
@@ -959,7 +954,7 @@ desktopShutdown=installDesktopShutdown({app,begin:()=>{
  // continuations can run. The asynchronous cleanup below only waits for it.
  try{terminalClosing=sharedTerminal.shutdown({timeoutMs:4000});}catch{terminalClosing=Promise.resolve({status:'unconfirmed'});}
 },cleanup:async()=>{
- for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>conversationHistory.close(),()=>agents.close(),()=>worker.close(),()=>{for(const t of terminals.values())t.child.kill();}])try{cleanup();}catch{}
+ for(const cleanup of [()=>terminalMcp?.close(),()=>sshConnection.shutdown(),()=>conversationHistory.close(),()=>agents.close(),()=>worker.close()])try{cleanup();}catch{}
  await managedClosing;
  return await terminalClosing;
 }});

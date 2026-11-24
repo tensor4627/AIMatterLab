@@ -10,7 +10,7 @@ import {taskWorkerSource} from '../../contracts/compute/task-worker-binding.mjs'
 import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools.mjs';
 import {createAgentWakeDelivery} from '../../agent/sessions/wake-delivery.mjs';
 import {randomUUID} from 'node:crypto';
-import {scheduleOwnerId} from '../../contracts/compute/schedule-owner.mjs';
+import {scheduleOwnerId} from './schedule-owner.mjs';
 import {resourceSessionWorkspaceTool} from '../../backend/main/workspace/resource-workspace.mjs';
 
 function fields(value,expected) {

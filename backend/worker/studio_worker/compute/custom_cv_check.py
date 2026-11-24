@@ -45,7 +45,7 @@ class CustomCvCheckMixin:
     payload.update(cv_reference=reference['cv'],reference_provenance=reference['provenance'])
    raw=stable(payload);(snapshot/'payload.json').write_bytes(raw)
    env=process_env(ctx['environment']);worker_root=str(WORKER_ROOT);env['PYTHONPATH']=worker_root+os.pathsep+env.get('PYTHONPATH','');env['CUDA_VISIBLE_DEVICES']=''
-   launch={'command':[scope['python'],'-m','studio_worker.custom_cv_command',str(snapshot/'payload.json'),hashlib.sha256(raw).hexdigest()],'environment':env,'max_seconds':60};atomic_json(directory/'launch.json',launch)
+   launch={'command':[scope['python'],'-m','studio_worker.tools.custom_cv_command',str(snapshot/'payload.json'),hashlib.sha256(raw).hexdigest()],'environment':env,'max_seconds':60};atomic_json(directory/'launch.json',launch)
    record={'id':attempt_id,'entry_id':item['id'],'workspace_id':ctx['workspace'],'project_id':ctx['project']['id'],'environment_id':ctx['environment']['id'],'scope_sha256':scope['sha256'],'scope':scope,'consent_sha256':consent['sha256'],'status':'launching','directory':str(directory),'expected':item['expected'],'created_at':time.time()}
    self.service.store.put('custom-cv-attempt',record)
    try:

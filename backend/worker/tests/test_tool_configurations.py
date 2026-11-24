@@ -285,9 +285,9 @@ class ToolConfigurationContract(unittest.TestCase):
         with patch.object(Path, 'read_bytes', guarded), patch.object(Path, 'read_text', side_effect=AssertionError('Execution snapshot must not read guide text')):
             again = self.api.read({'configuration_id': record['id']})
         self.assertEqual(again['execution_skill']['body'], body)
-        from studio_worker.workspace_io import read_input
+        from studio_worker.workspace.workspace_io import read_input
         from studio_worker.tools.archive_guard import guidance_read_allowed
-        from studio_worker.source_projects import inspect_source
+        from studio_worker.tools.source_projects import inspect_source
         archived |= {origin / name for name in ('SKILL.md', 'install.md', 'configure.md')}
         original_stat, original_open = Path.stat, Path.open
         original_os_stat, original_os_lstat = os.stat, os.lstat
@@ -308,7 +308,7 @@ class ToolConfigurationContract(unittest.TestCase):
             for path in archived:
                 with self.assertRaises(PermissionError): read_input(self.service, {'project_id': 'project', 'name': str(path)})
             with self.assertRaises(PermissionError): read_input(self.service, {'project_id': 'project', 'name': str(indirect)})
-            with patch('studio_worker.source_projects.ALLOWED', {'pygas': ('SKILL.md', 'validate_model.py')}):
+            with patch('studio_worker.tools.source_projects.ALLOWED', {'pygas': ('SKILL.md', 'validate_model.py')}):
                 source = inspect_source({'id': 'pygas', 'root': str(origin)}, read_guard=lambda path: guidance_read_allowed(self.service, path))
             self.assertEqual(source['files'][0]['status'], 'archived'); self.assertNotIn('sha256', source['files'][0])
             self.assertEqual(source['files'][1]['name'], 'validate_model.py')

@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
-import {COMPUTE_ALIASES_SKILL} from '../../../agent/skills/project-skills.mjs';
+import {COMPUTE_ALIASES_SKILL} from '../../../contracts/compute/compute-aliases.mjs';
 
 const START='<!-- AIMatterLab resource aliases -->', END='<!-- End AIMatterLab resource aliases -->';
 const EMPTY=`---\nname: ${COMPUTE_ALIASES_SKILL}\ndescription: User-confirmed names for saved AIMatterLab compute resources.\n---\n\n# Compute resource aliases\n\nThese aliases resolve to stable saved profile IDs. Acquire the available resource through AIMatterLab in the current conversation.\n`;

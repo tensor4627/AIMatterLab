@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import path from 'node:path';
-import {scheduleOwnerId} from '../../contracts/compute/schedule-owner.mjs';
+import {scheduleOwnerId} from '../../desktop/platform/schedule-owner.mjs';
 
 const id={type:'string',minLength:1,maxLength:200};
 const finiteInteger=(minimum,maximum)=>({type:'integer',minimum,maximum});

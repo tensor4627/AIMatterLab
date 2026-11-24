@@ -37,17 +37,28 @@ class DomainDistributionTests(unittest.TestCase):
                 service.close()
                 service.store.db.close()
 
-    def test_legacy_module_aliases_share_patchable_owner_namespace(self):
+    def test_kept_entrypoints_and_retired_shims_follow_domain_layout(self):
         for domain, names in {
-            'compute': ('cluster', 'compute_setup', 'runtime_guides', 'runner', 'ssh_auth', 'service'),
-            'workspace': ('authoring_workspace', 'composition_store', 'workspace_io', 'workspace_materialize', 'custom_cv_service'),
-            'tools': ('scientific', 'structure_tools', 'source_projects', 'source_git_identity', 'pygas_catalog'),
-            'infrastructure': ('store', 'util'),
-            'transport': ('server', 'runtime_projection', 'task_schema'),
+            'compute': ('cluster', 'runner', 'service'),
+            'workspace': ('composition_store',),
+            'tools': ('adapters', 'derivative_selection', 'derivatives', 'engine_contracts', 'neb_checks', 'science_checks', 'scientific', 'source_git_identity', 'structure_tools', 'templates'),
+            'infrastructure': ('util',),
+            'transport': ('server',),
         }.items():
             for name in names:
-                with self.subTest(module=name):
+                with self.subTest(kept_module=name):
                     self.assertIs(importlib.import_module('studio_worker.' + name), importlib.import_module('studio_worker.' + domain + '.' + name))
+        for domain, names in {
+            'compute': ('compute_setup', 'run_environment_identity', 'runtime_guides', 'runtime_service', 'ssh_auth', 'ssh_auth_pty', 'ssh_tunnel'),
+            'workspace': ('authoring_workspace', 'custom_cv_graph', 'custom_cv_registry', 'custom_cv_service', 'private_lineage', 'pygas_composition', 'workspace_io', 'workspace_materialize'),
+            'tools': ('cell_derivative_contract', 'custom_cv_catalog', 'custom_cv_command', 'custom_cv_numerics', 'custom_formula', 'environment_api', 'pygas_catalog', 'pygas_dimensions', 'pygas_order', 'pygas_settings', 'pygas_values', 'software_contracts', 'source_projects'),
+            'infrastructure': ('store',),
+            'transport': ('runtime_projection', 'task_schema'),
+        }.items():
+            for name in names:
+                with self.subTest(retired_module=name):
+                    self.assertTrue((WORKER / 'studio_worker' / domain / f'{name}.py').is_file())
+                    self.assertFalse((WORKER / 'studio_worker' / f'{name}.py').exists())
         from studio_worker import server
         with patch('studio_worker.server.dispatch', return_value={'id': 'existing', 'status': 'failed'}) as observed:
             result = server.mcp_tool_call(object(), {'name': 'run_status', 'arguments': {'run_id': 'existing'}})

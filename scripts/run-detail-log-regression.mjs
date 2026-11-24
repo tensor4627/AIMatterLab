@@ -26,7 +26,7 @@ async function fixture(){
   const project={id:'project',name:'Fixture project',policy:{engines:['pydyn.md'],gpus:[0],max_seconds:3600,max_concurrent:1,input_roots:['/fixture'],environments:['env']}};
   const run={id:'run',name:'Fixture run',engine:'pydyn.md',project_id:'project',environment_id:'env',status:'draft',gpu:0,max_seconds:60,directory:'/fixture/run',validation:{status:'not_run'},created_at:1,updated_at:1,command:[],parameters:{temperature:300},inputs:{'run.py':'/fixture/run.py'}};
   const test=window.__test={settings,environment,project,run,events:[],calls:[],offline:false};
-  window.studio={onEvent:fn=>{test.events.push(fn);return()=>{test.events=test.events.filter(x=>x!==fn);};},onTerminal:()=>()=>{},invoke:async(method,data)=>{
+  window.studio={onEvent:fn=>{test.events.push(fn);return()=>{test.events=test.events.filter(x=>x!==fn);};},invoke:async(method,data)=>{
    test.calls.push({method,data});
    if(method==='scientific.skills')return {schema_version:1,functions:[{id:'md.pydyn',title:'PyDyn MD',phase:'authoring',engines:['pydyn.md'],tools:[],status:'implemented_adapter_missing_project_skill',sources:['studio'],permission:'allowed',source_status:'registered'},{id:'analysis.wtmetad',title:'WTMetaD',phase:'analysis',engines:['pygas.reweight'],tools:[],status:'implemented',sources:['pygas'],permission:(test.settings.pygasSkillProviders||[]).includes(data.provider)?'allowed':'permission_required',source_status:'registered'}],sharing:{...test.settings.scientificSkillProviders||{},pygas:test.settings.pygasSkillProviders||[]},source_scope:'Only public allowlisted skills'};
     if(method==='skills.catalog')return [{name:'Fixture public skill',path:'/fixture/skills/public/SKILL.md',description:'Synthetic explicitly selected public skill'}];
@@ -34,7 +34,6 @@ async function fixture(){
    if(method==='conversation.list')return test.conversations||[];if(method==='task.list')return test.task?[test.task]:[];if(['workflow.list','ssh.existing'].includes(method))return [];
    if(method==='conversation.remember'){test.conversation={...(test.conversation||{}),id:data.provider+':'+data.threadId,provider:data.provider,threadId:data.threadId,name:data.name,projectId:data.projectId,taskId:test.task?.id||null};return test.conversation;}
    if(method==='conversation.select')return test.conversations.find(value=>value.id===data.id);
-   if(method==='terminal.start')return {id:'terminal'};if(['terminal.resize','terminal.input','terminal.close'].includes(method))return {};
    if(method==='task.edit'&&test.deferEdit)return new Promise(resolve=>test.finishEdit=()=>resolve({...test.task,parameters:{...test.task.parameters,...data.changes}}));
    if(method==='task.create'){if(!test.task||data.newWorkflow)test.task={id:'task-'+test.calls.length,provider:data.provider,threadId:data.threadId,parameters:{},artifacts:[],updatedAt:1};test.conversation.taskId=test.task.id;return test.task;}
    if(method==='task.pygas.read')return {taskId:data.taskId,composition:null,graph:null,assets:[],catalog:{schema_version:1,status:'passed',source:{files:{}},catalog:{cv:[],bias:[],switch:[],neighbor:[]}}};

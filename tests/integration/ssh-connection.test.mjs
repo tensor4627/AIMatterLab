@@ -5,7 +5,6 @@ import vm from 'node:vm';
 import {EventEmitter} from 'node:events';
 import ts from 'typescript';
 import {inspect} from 'node:util';
-import {registerLegacyTerminalRoutes} from "../../backend/main/compute/terminal-routes.mjs";
 import {createSshConnection,sshConnectionReview,sshOwner,installSshPrivacyLifecycle,requireCurrentSshWorker,requiresCurrentSshWorker,sshTaskSource,assertSshSource} from "../../backend/main/compute/ssh-connection.mjs";
 import {assertRendererWorkerRoute,assertWorkerRoute} from "../../contracts/transport-policy.mjs";
 import {agentHarness} from "../helpers/agent-hooks.mjs";
@@ -37,8 +36,13 @@ test('closed acknowledgement requires finish and cannot release a newer pane',as
 test('pane destruction releases privacy only for an actually destroyed owning surface',async()=>{const f=fixture();await f.plan();f.api.destroyed(f.event.sender);assert(f.api.privacy().active);f.event.sender.isDestroyed=()=>true;f.api.destroyed(f.event.sender);assert(!f.api.privacy().active);});
 test('managed tunnel identity is main-owned and listener readiness never asserts destination authentication',async()=>{const f=fixture(),p=await f.plan(),ref=f.request(p),planned=await f.api.tunnelPlan({...ref,clusterId:'saved',version:1,localPort:2202,destinationHost:'target.invalid',destinationPort:22},f.event);assert.equal(planned.tunnel.tunnelId,'owned-forward');const result=await f.api.tunnelStart({...ref,tunnelId:'owned-forward',requestId:'forward'},f.event);assert.equal(result.tunnel.status,'listener_ready');assert.equal(result.tunnel.destinationVerification,'not_run');assert.equal(result.tunnel.sshAuthenticated,false);const before=f.calls.length,foreign=await f.api.tunnelClose({...ref,tunnelId:'external-unknown'},f.event);assert.equal(f.calls.length,before);assert.equal(foreign.reason,'private_ssh_operation_failed');});
 test('private auth and tunnel routes are internal admin channels, unavailable to generic renderer workers',()=>{for(const route of ['/api/cluster/auth/plan','/api/cluster/auth/start','/api/cluster/auth/read','/api/cluster/auth/input','/api/cluster/auth/resize','/api/cluster/auth/finish','/api/cluster/tunnel/plan','/api/cluster/tunnel/start','/api/cluster/tunnel/status','/api/cluster/tunnel/close']){assert.doesNotThrow(()=>assertWorkerRoute('POST',route));assert.throws(()=>assertRendererWorkerRoute('POST',route),/private/);}});
-test('the real legacy cluster terminal rejects interactive profiles before any process creation',async()=>{
- const source=fs.readFileSync(new URL("../../desktop/main.mjs",import.meta.url),'utf8'),ast=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);let registration,callback,spawns=0;function visit(node){if(ts.isCallExpression(node)&&node.expression.getText(ast)==='registerLegacyTerminalRoutes')registration=node.getText(ast);ts.forEachChild(node,visit);}visit(ast);assert(registration);vm.runInNewContext(registration,{registerLegacyTerminalRoutes,handle:(name,fn)=>{if(name==='terminal.start')callback=fn;},terminals:new Map(),worker:{request:async()=>({...profile})},catalog:{},settings:{},workerSource:'/fixture/worker',emit:()=>{},computeRuntime:{spawnProcess:()=>{spawns++;throw Error('No child permitted');}}});await assert.rejects(callback({kind:'cluster',clusterId:'saved'}),/私有认证/);assert.equal(spawns,0);
+test('legacy terminal and codex IPC routes remain retired from main and preload',()=>{
+ const preload=fs.readFileSync(new URL("../../desktop/preload.cjs",import.meta.url),'utf8'),main=fs.readFileSync(new URL("../../desktop/main.mjs",import.meta.url),'utf8');
+ for(const removed of ['terminal.start','terminal.input','terminal.close','studio:terminal','onTerminal','codex.connect','codex.rpc','codex.respond','terminal-routes.mjs']){
+  const pattern=new RegExp('\\b'+removed.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b');
+  assert.equal(pattern.test(preload),false,removed+' must not appear in preload');
+  assert.equal(pattern.test(main),false,removed+' must not appear in main');
+ }
 });
 
 test('only verified current workers may plan new authentication; old implementations get an inline update state',async()=>{for(const version of ['different','unconfirmed']){const f=fixture();f.setVersion(version);const p=await f.plan();assert.equal(p.status,'blocked');assert.equal(p.reason,'needs_worker_update');assert.equal(f.calls.length,0);assert(f.api.privacy().active);}});

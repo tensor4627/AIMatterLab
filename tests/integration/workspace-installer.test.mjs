@@ -49,11 +49,12 @@ test('install, update and uninstall preserve unknown files, profiles, cache, sou
 });
 test('unrelated conflicting packages and linked program folders cannot claim a workspace',{skip:process.platform!=='win32'},t=>{
  const {workspace,payload,run}=fixture(t);
+ const readRawFile=file=>{const prev=process.noAsar;process.noAsar=true;try{return fs.readFileSync(file,'utf8');}finally{process.noAsar=prev;}};
  const conflict=create(workspace,'resources/app.asar','other product');assert.notEqual(run('Install').status,0);
- assert.equal(fs.readFileSync(conflict,'utf8'),'other product');fs.rmSync(path.dirname(conflict),{recursive:true});
+ assert.equal(readRawFile(conflict),'other product');fs.rmSync(path.dirname(conflict),{recursive:true});
  fs.symlinkSync(path.join(payload,'resources'),path.join(workspace,'resources'),'junction');
  assert.notEqual(run('Install').status,0);assert.notEqual(run('Remove').status,0);
- assert.equal(fs.readFileSync(path.join(payload,'resources/app.asar'),'utf8'),'fixture');
+ assert.equal(readRawFile(path.join(payload,'resources/app.asar')),'fixture');
 });
 test('installer-selected workspace overrides a surrounding checkout and uses its own source directory',t=>{
  const {workspace}=fixture(t), options={isPackaged:true,execPath:path.join(workspace,'AIMatterLab.exe')};

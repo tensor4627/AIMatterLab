@@ -1,6 +1,11 @@
 export const PROVIDERS=['codex','kimi','qwen','deepseek','compatible'];
+export const DEEPSEEK_URL='https://api.deepseek.com';
 export const CLI_VERSIONS={kimi:'2.1.1',qwen:'0.24.7'};
 export function providerId(id){if(!PROVIDERS.includes(id))throw Error('Unsupported Agent provider');return id;}
+export function deepseekCredentials(value){
+ if(typeof value.apiKey!=='string'||!/^sk-[A-Za-z0-9_-]{8,250}$/.test(value.apiKey))throw Error('Enter a valid DeepSeek API key');
+ return {apiKey:value.apiKey,baseUrl:DEEPSEEK_URL};
+}
 export {redactTranscriptText as redact} from '../../contracts/agent/transcript-sanitizer.mjs';
 export const QWEN_ENDPOINTS={
  'coding-cn':'https://coding.dashscope.aliyuncs.com/v1',

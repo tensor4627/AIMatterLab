@@ -3,7 +3,7 @@ const settings={distribution:'TEST ONLY',workerRoot:'/fixture/worker',workerPort
 const conversation={id:'codex:fixture-missing-thread',provider:'codex',threadId:'fixture-missing-thread',name:'TEST ONLY · 缺失流程会话',projectId:null,taskId:'fixture-missing'};
 const calls:unknown[]=[];const record=(method:string,data?:unknown)=>{calls.push({at:new Date().toISOString(),method,data});sessionStorage.setItem('app-fixture-calls',JSON.stringify(calls));};
 // No bridge/preload: this object is a bounded in-memory adapter for the actual App.
-window.studio={onEvent:()=>()=>{},onTerminal:()=>()=>{},invoke:async(method:string,data:any)=>{record(method,data);
+window.studio={onEvent:()=>()=>{},invoke:async(method:string,data:any)=>{record(method,data);
  if(method==='state')return{settings,threads:[],ssh:[]};
  if(method==='conversation.list')return[conversation];
  if(['conversation.groups','task.list','workflow.list','skills.catalog','ssh.existing'].includes(method))return[];

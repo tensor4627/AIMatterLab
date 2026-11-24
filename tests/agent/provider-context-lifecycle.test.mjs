@@ -1,4 +1,3 @@
-import {legacyApiBridgeFactories} from '../helpers/legacy-api-bridge.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
@@ -7,6 +6,21 @@ import fs from 'node:fs/promises';import os from 'node:os';import path from 'nod
 import {AgentHub} from "../../agent/providers/agent-hub.mjs";import {McpProviderScopes} from "../../agent/tools/provider-scope.mjs";
 import {apiModelKey} from '../../contracts/agent/model-profiles.mjs';
 import {verifiedModel} from '../../desktop/platform/codex-model-ceiling.mjs';
+function fakeApiBridge(options){
+ const bridge=new EventEmitter();
+ Object.assign(bridge,{
+  provider:options.provider,models:[],model:null,current:null,sessions:new Map(),getWorker:options.worker,
+  start:async()=>{bridge.process={};return {};},
+  close:()=>{bridge.process=null;bridge.current=null;},
+  request:async(method,params={})=>{
+   if(method==='thread/start'){const id='ds-'+Date.now()+'-'+bridge.sessions.size;bridge.current=id;bridge.sessions.set(id,{id,turns:[]});return {thread:{id,turns:[]},model:params.model||bridge.model};}
+   if(method==='thread/resume'||method==='thread/read'){const s=bridge.sessions.get(params.threadId);if(!s)throw Error('Unknown conversation');bridge.current=s.id;return {thread:{id:s.id,turns:s.turns},model:bridge.model};}
+   if(method==='turn/start'){if(!Array.isArray(params.input)||!params.input.length)throw Error('Invalid text input');return {turn:{id:'ds-turn'}};}
+   return {};
+  }
+ });
+ return bridge;
+}
 const context=(threadId=null,taskId=null,extra={})=>({threadId,taskId,projectId:taskId?'project-a':null,environmentId:taskId?'env-a':null,inputRoot:taskId?'/owned/'+taskId:null,...extra});
 class Bridge extends EventEmitter{
  constructor(){super();this.activeTurns=new Set();this.starts=[];this.calls=[];this.next=0;}
@@ -18,7 +32,7 @@ async function setup(t){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-context-lifecycle-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const scopes=new McpProviderScopes(),base={url:'http://127.0.0.1:32123',tokens:{mcp:'base',admin:'not-shared'}};scopes.bind(base);const stored=new Map(),vault=new Map(),codex=new Bridge();
  const catalog={list:kind=>[...stored].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>value),get:(kind,id)=>stored.get(kind+':'+id),put:(kind,id,v)=>stored.set(kind+':'+id,v)};
- const hub=new AgentHub({apiBridgeFactories:legacyApiBridgeFactories,codex,root,catalog,vault:{get:id=>vault.get(id),put:(id,value)=>vault.set(id,value),remove:id=>vault.delete(id)},settings:()=>({codexPath:'fixture-codex',kimiPath:'fixture-kimi',agent:{}}),worker:p=>scopes.connection(p,base),releaseWorker:p=>scopes.revoke(p),bindWorkerContext:(p,c,o)=>{scopes.bind(base);return scopes.bindContext(p,c,o);}});t.after(()=>hub.close());
+ const hub=new AgentHub({apiBridgeFactories:{deepseek:fakeApiBridge},codex,root,catalog,vault:{get:id=>vault.get(id),put:(id,value)=>vault.set(id,value),remove:id=>vault.delete(id)},settings:()=>({codexPath:'fixture-codex',kimiPath:'fixture-kimi',agent:{}}),worker:p=>scopes.connection(p,base),releaseWorker:p=>scopes.revoke(p),bindWorkerContext:(p,c,o)=>{scopes.bind(base);return scopes.bindContext(p,c,o);}});t.after(()=>hub.close());
  const auth=c=>scopes.authenticate({pathname:new URL(c.url).pathname+'/mcp',authorization:'Bearer '+c.tokens.mcp,host:'127.0.0.1:32123'});return {hub,codex,scopes,base,auth};
 }
 async function fresh(f){await f.hub.connect('codex');await f.hub.selectContext('codex',context());const response=await f.hub.rpc('codex','thread/start');await f.hub.selectContext('codex',context(response.thread.id));return response.thread.id;}
@@ -72,7 +86,7 @@ test('Superseding a pending reconnect with the same target still produces a live
  const f=await setup(t);await fresh(f);let release;f.codex.startGate=new Promise(r=>release=r);const a=f.hub.selectContext('codex',context('a','task-a'));await new Promise(r=>setImmediate(r));const b=f.hub.selectContext('codex',context('a','task-a'));f.codex.startGate=null;release();await assert.rejects(a,/superseded/);await b;assert.equal(f.auth(f.codex.worker).threadId,'a');assert(f.codex.process);
 });
 test('DeepSeek exact-context reconnect keeps authenticated models and restores existing session',async t=>{
- const f=await setup(t);await f.hub.connect('deepseek');const b=f.hub.bridge('deepseek');b.models=['catalog-model'];b.model='catalog-model';await f.hub.selectContext('deepseek',context());const started=await f.hub.rpc('deepseek','thread/start',{model:'catalog-model'});await f.hub.selectContext('deepseek',context(started.thread.id));await assert.rejects(f.hub.rpc('deepseek','turn/start',{threadId:started.thread.id,input:[]}),/Invalid DeepSeek text input/);const old=b.getWorker();await f.hub.selectContext('deepseek',context(started.thread.id,'task-a'));assert.equal(f.auth(old),null);assert.deepEqual(b.models,['catalog-model']);assert.equal(b.model,'catalog-model');const read=await f.hub.rpc('deepseek','thread/read',{threadId:started.thread.id});assert.equal(read.thread.id,started.thread.id);assert.equal(b.current,started.thread.id);
+ const f=await setup(t);await f.hub.connect('deepseek');const b=f.hub.bridge('deepseek');b.models=['catalog-model'];b.model='catalog-model';await f.hub.selectContext('deepseek',context());const started=await f.hub.rpc('deepseek','thread/start',{model:'catalog-model'});await f.hub.selectContext('deepseek',context(started.thread.id));await assert.rejects(f.hub.rpc('deepseek','turn/start',{threadId:started.thread.id,input:[]}),/Invalid text input/);const old=b.getWorker();await f.hub.selectContext('deepseek',context(started.thread.id,'task-a'));assert.equal(f.auth(old),null);assert.deepEqual(b.models,['catalog-model']);assert.equal(b.model,'catalog-model');const read=await f.hub.rpc('deepseek','thread/read',{threadId:started.thread.id});assert.equal(read.thread.id,started.thread.id);assert.equal(b.current,started.thread.id);
 });
 test('kimi reconnect uses real thread/resume contract and preserves unsupported errors',async t=>{
  const provider='kimi';

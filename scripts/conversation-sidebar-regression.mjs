@@ -18,7 +18,7 @@ const conversation=(id,name,groupId=null,pinned=false)=>({id:'codex:'+id,provide
 const f=window.fixture={calls:[],events:[],errors:[],settings:{distribution:'Ubuntu',workerRoot:'synthetic',workerPort:8767,codexPath:'codex',cwd:'/synthetic',skillRoots:[],theme,language:'zh-CN',agentProvider:'codex',...(large?{fontSize:24,minimumFontSize:18}:{})},groups:[{id:'research',name:long?'模拟项目名称很长'.repeat(15):'模拟研究'},{id:'analysis',name:'结果分析'}],conversations:[conversation('pinned','置顶记录',null,true),conversation('project','项目内的会话','research'),conversation('second','第二个项目会话','research'),conversation('loose',long?'很长的无项目会话名称'.repeat(20):'无项目会话'),conversation('other','另一个无项目会话')]};
 if(many){for(let i=0;i<32;i++)f.groups.push({id:'group-'+i,name:'额外项目 '+i+' 长项目名称'});for(let i=0;i<24;i++)f.conversations.push(conversation('loose-'+i,'滚动会话 '+i));}
 const changed=(id,patch)=>{const c=f.conversations.find(c=>c.id===id);if(!c)throw Error('Unknown synthetic conversation '+id);Object.assign(c,patch);return structuredClone(c);};
-window.studio={onEvent:fn=>{f.events.push(fn);return()=>{f.events=f.events.filter(v=>v!==fn);};},onTerminal:()=>()=>{},invoke:async(method,data)=>{
+window.studio={onEvent:fn=>{f.events.push(fn);return()=>{f.events=f.events.filter(v=>v!==fn);};},invoke:async(method,data)=>{
  f.calls.push({method,data});
  if(method==='state')return {settings:structuredClone(f.settings),threads:[],ssh:[]};
  if(method==='settings'){Object.assign(f.settings,data);return structuredClone(f.settings);}

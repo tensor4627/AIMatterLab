@@ -57,7 +57,17 @@ function write(root, name, text) {
 
 export function createAimlabToolFixture(t, {manifest = aimlabManifest()} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aimlab-tools-fixture-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  t.after(() => {
+    function unlock(p) {
+      try {
+        const st = fs.lstatSync(p);
+        if (st.isDirectory()) { for (const e of fs.readdirSync(p)) unlock(path.join(p, e)); fs.chmodSync(p, 0o700); }
+        else if (!st.isSymbolicLink()) fs.chmodSync(p, 0o600);
+      } catch {}
+    }
+    unlock(root);
+    fs.rmSync(root, {recursive: true, force: true, maxRetries: 5, retryDelay: 50});
+  });
   write(root, 'tool.py', 'print("ok")\n');
   write(root, 'aimlab-tools/SKILL.md', '---\nname: demo-tool-delivery\ndescription: Operate the demo tool.\n---\n\n# Demo tool\n\nRun tool.py with the selected Python 3 interpreter.\n');
   write(root, 'aimlab-tools/manual.md', '# Demo tool\n\nRun the program and keep its receipt.\n');

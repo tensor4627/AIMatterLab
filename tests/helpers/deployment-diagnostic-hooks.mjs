@@ -65,7 +65,7 @@ export function deploymentHarness({initial=deploymentFixture(),override,properti
   if(name==='./useLocalReviewStatus'){const module={exports:{}};new Function('require','module','exports',reviewCompiled)(dependency=>{if(dependency==='react')return {useState,useRef,useEffect};if(dependency==="../../api/local-review-client")return {readLocalReviewStatus:args=>invoke('task.localReview.status',args)};throw Error('Unexpected local review dependency '+dependency);},module,module.exports);return module.exports;}
   if(name==='./useConsumerTargetStatus')return {useConsumerTargetStatus:()=>false};
   if(name==="../pygas/pygas-local-draft")return {useTaskPygasDirty:()=>false,isTaskPygasDirty:()=>false};
-  if(name==="../../ui/i18n")return {t:value=>value};
+  if(name==="../../ui/i18n")return {t:value=>value,getLanguage:()=>'zh-CN'};
   return new Proxy({},{get:(_target,key)=>String(key)});
  };
  const module={exports:{}};new Function('require','module','exports','localStorage',compiled)(require,module,module.exports,storage);

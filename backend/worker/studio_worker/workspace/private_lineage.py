@@ -65,7 +65,7 @@ def check_producer(service,spec):
  candidates=[row for row in rows if row['entry_id']in {b.get('id')for b in bindings}and row.get('attachment_binding')in bindings]
  own=next((row for row in candidates if (service.root/'projects'/row['project_id']/'inputs'/('cv-'+row['workspace_id'])/'workflow.json').is_file()),None)
  if not own:raise ValueError('Private build has no authoritative owned composition provenance')
- library=__import__('studio_worker.custom_cv_graph',fromlist=['controller']).controller(service).library
+ library=__import__('studio_worker.workspace.custom_cv_graph',fromlist=['controller']).controller(service).library
  environment_id=spec['environment_id']
  selected=approved(service,graph,own['project_id'],own['workspace_id'],environment_id)
  original=service.root/'projects'/own['project_id']/'inputs'/('cv-'+own['workspace_id'])

@@ -12,7 +12,6 @@ window.studio = {
     fixture.events.push(callback);
     return () => { fixture.events = fixture.events.filter(item => item !== callback); };
   },
-  onTerminal: () => () => {},
   async invoke(method, data) {
     fixture.calls.push({method,data});
     if (method === 'state') return {settings:fixture.settings, threads:[], ssh:[]};

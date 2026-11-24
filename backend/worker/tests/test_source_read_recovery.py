@@ -8,7 +8,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from studio_worker import server, software_contracts, workspace_io
+from studio_worker import server
+from studio_worker.tools import software_contracts
+from studio_worker.workspace import workspace_io
 from studio_worker.service import Service
 
 

@@ -33,7 +33,7 @@ async function active(h){await selected(h);h.change('已登记配置','configura
 
 test('production SkillsWorkbench composes the tool package panel and panel startup is metadata-only',async()=>{
  const source=fs.readFileSync(new URL("../../frontend/features/tools/SkillsWorkbench.tsx",import.meta.url),'utf8');assert.match(source,/import ToolPackagesPanel from ["']\.\/ToolPackagesPanel["']/);assert.match(source,/<ToolPackagesPanel provider=\{provider\} onSelect=\{onSelect\}/);
- const h=toolPackagesHarness();await h.flush();assert.deepEqual(h.calls.map(call=>call.method).sort(),['tools.configurations.context','tools.configurations.list','tools.packages.list']);assert.equal(h.attachments.length,0);assert.equal(h.timers.size,0);assert.match(h.text(h.tree()),/真实环境的安装与测试通过后/);h.unmount();
+ const h=toolPackagesHarness();await h.flush();assert.deepEqual(h.calls.map(call=>call.method).sort(),['tools.configurations.context','tools.configurations.list','tools.packages.list']);assert.equal(h.attachments.length,0);assert.equal(h.timers.size,0);assert(h.all().some(n=>typeof n.props?.content==='string'&&/真实环境的安装与测试通过后/.test(n.props.content)));h.unmount();
 });
 
 test('native choose cancellation has no inspection or registration side effect',async()=>{

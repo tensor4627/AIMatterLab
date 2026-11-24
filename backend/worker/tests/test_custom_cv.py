@@ -2,8 +2,8 @@ import copy,json,tempfile,unittest
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from studio_worker.custom_formula import schema,module_source,parameter_values
-from studio_worker.custom_cv_registry import Registry
+from studio_worker.tools.custom_formula import schema,module_source,parameter_values
+from studio_worker.workspace.custom_cv_registry import Registry
 SPEC={'name':'Selected MIC distance','formula':'s=||MIC(r_j-r_i; H)||','expression':'norm(mic(pos[atom_j]-pos[atom_i], cell))','symbols':[{'name':'r_i,r_j','meaning':'ordered selected atom coordinates','units':'Angstrom','domain':'actual structure coordinates'}],'units':'Angstrom','domain':'nonsingular row cell; away from MIC ties and zero distance','pbc':'row_mic','atom_selection':[0,1],'output_size':1,'parameters':[{'name':'atom_i','type':'integer','units':'zero-based index','description':'First ordered atom','required':True,'min':0},{'name':'atom_j','type':'integer','units':'zero-based index','description':'Second ordered atom','required':True,'min':0}],'invariances':['translation','periodic_translation'],'singularities':['zero distance; minimum-image switching boundaries']}
 class FormulaData(unittest.TestCase):
  def test_actual_generator_is_deterministic_and_no_arbitrary_calls(self):
@@ -51,7 +51,7 @@ class ImmutableBoundary(unittest.TestCase):
    with self.assertRaisesRegex(ValueError,'actual Git directory'):Registry(linked)
    self.assertEqual(external.git('rev-parse','HEAD'),before)
  def test_changed_approval_object_and_code_cannot_be_reused(self):
-  from studio_worker.custom_formula import sha
+  from studio_worker.tools.custom_formula import sha
   for target in ('approval','source'):
    with self.subTest(target=target),tempfile.TemporaryDirectory()as tmp:
     r=Registry(Path(tmp)/'private-cv');item=r.propose(SPEC,{'atom_i':0,'atom_j':1},workspace_id='current',project_id='owned');item=r.approve_formula(item['id'],item['expected'])
@@ -72,7 +72,7 @@ class ImmutableBoundary(unittest.TestCase):
 
 class BoundedFormula(unittest.TestCase):
  def test_dispersed_fd_scope_covers_the_same_declared_atoms(self):
-  from studio_worker.custom_formula import fd_atoms,referenced_atoms
+  from studio_worker.tools.custom_formula import fd_atoms,referenced_atoms
   for count in (2,8,9,16,256):
    spec={**SPEC,'expression':'mean(pos[:,0])','atom_selection':list(range(count)),'parameters':[]}
    group=referenced_atoms(spec,{},count);coverage=fd_atoms(group)
