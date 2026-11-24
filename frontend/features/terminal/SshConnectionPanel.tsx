@@ -624,7 +624,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
     <span className="ssh-connection-state" data-state={connectionStatus} data-testid="ssh-connection-status" role="status" title={statusLabel}>{statusLabel}</span>
    </div>
     {(ready||manualHandoff)&&(hosted?<span className="ssh-managed-status" data-testid="ssh-managed-status" role="status" title={t('已由 AIMatterLab 管理')}><Check size={16} aria-hidden="true"/>{t('已托管')}</span>:
-     <button type="button" className="button primary ssh-host-action" data-testid="ssh-publish-resource" data-guide-target="ssh-handoff" disabled={busy||loginBusy} aria-label={publicationLabel} aria-busy={publishing} title={publicationLabel} onClick={()=>manualHandoff?void confirmHandoff():void publishConnection()}>
+     <button type="button" className="button primary ssh-host-action" data-testid="ssh-publish-resource" data-guide-target={ready?'ssh-handoff':undefined} disabled={busy||loginBusy} aria-label={publicationLabel} aria-busy={publishing} title={publicationLabel} onClick={()=>manualHandoff?void confirmHandoff():void publishConnection()}>
      {publishing?<RefreshCw size={15} aria-hidden="true"/>:<Server size={15} aria-hidden="true"/>}
      <span className="ssh-host-label" aria-hidden="true">{publicationLabel}</span>
       <span className="ssh-host-short-label" aria-hidden="true">{t(publishing?'正在托管…':manualHandoff?'交接':'托管')}</span>

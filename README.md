@@ -2,7 +2,7 @@
 
 AIMatterLab 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
 
-[更新日志](CHANGELOG.md) · [0.2.1 开发与验收记录](docs/releases/aimatterlab-0.2.1.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
+[更新日志](CHANGELOG.md) · [0.2.2 源码与验收记录](docs/releases/aimatterlab-0.2.2.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
 要安装 GPU-Sampling、pyGAS、PyDyn、TorchNEP、HotPP 或 HotHam，可以在「工具与资源 → 第三方工具包 → 已验证工具的源码仓库」复制克隆命令，再按工具仓库提供的说明安装。源码和桌面版都随附这份[工具仓库清单](installation/tool-sources.json)。
 
@@ -12,7 +12,7 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-从 [GitHub 主仓库](https://github.com/tensor4627/AIMatterLab) 获取源码并提交 Pull Request。0.2.1 源码改进流程缺项定位、资源工具与续算表单、PyGAS 端口连线和长日志显示。SSH 核对超时时保留原连接、终端和作业服务状态的核对入口。[本轮实测与验证范围](docs/releases/aimatterlab-0.2.1.md)
+从 [GitHub 主仓库](https://github.com/tensor4627/AIMatterLab) 获取源码并提交 Pull Request。0.2.2 源码标签为 `v0.2.2`。本版改进新手引导和账号配置、对话输入与面板拖动，并细化集群就绪状态及隐私字段显示。[本轮实测与验证范围](docs/releases/aimatterlab-0.2.2.md)
 
 当前签名安装包为 0.1.30 Windows x64。[GitHub 发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.1.30) · [南大 GitLab 备用发行页](https://git.nju.edu.cn/Tensor4627/AIMatterLab/-/releases/v0.1.30)
 
@@ -20,7 +20,7 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 从源码安装时，可让本机 Agent 按安装说明核对提交、依赖锁和选定的计算环境。[单 prompt 安装说明](docs/one-prompt-install.md)
 
-Windows 工作区版可以在设置右侧点“检查更新”。发现正式新版后，点击高亮的“更新”即可下载并重启。0.2.1 源码默认先查 GitHub，备用源为南大 GitLab。私有发行页使用更新面板中的“私有仓库访问”。[分发与升级说明](docs/releases/aimatterlab-0.1.16.md)
+Windows 工作区版可以在设置右侧点“检查更新”。发现正式新版后，点击高亮的“更新”即可下载并重启。从 0.2.1 起，源码版默认先查 GitHub，备用源为南大 GitLab。私有发行页使用更新面板中的“私有仓库访问”。[分发与升级说明](docs/releases/aimatterlab-0.1.16.md)
 
 1. 普通对话可直接连接服务商；进行本地科学计算时从「连接计算资源 → 本地 WSL」选择已安装的发行版，默认 Ubuntu。
 2. 在「工具 → 算力与管理 → 计算环境」登记 Linux 绝对路径的 Python、GPUMD、NEP、HotPP 等可执行文件及源码目录，点击探测。Python 必须指向对应虚拟环境的 **bin/python**；保留符号链接路径。

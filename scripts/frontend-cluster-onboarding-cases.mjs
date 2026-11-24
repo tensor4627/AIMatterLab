@@ -72,6 +72,25 @@ async function noDispatch(page){
 }
 
 export async function frontendClusterOnboardingCases({check,out}){
+ await check('setup-spotlight-preserves-modal-close',async page=>{
+  await page.setViewportSize({width:1024,height:768});
+  await mountGuide(page,{language:'en',font:20,start:'ready'});
+  const guide=page.getByTestId('setup-assistant');
+  await guide.getByTestId('setup-first-resource-tool').click();
+  await guide.getByTestId('setup-tool-fresh').click();
+  const dialog=page.getByRole('dialog',{name:'Set up resource tools',exact:true});
+  await dialog.getByTestId('resource-tool-target').waitFor();
+  const spotlight=page.locator('.guide-spotlight[data-ready="true"][data-target="resource-tool-setup"][data-docked="true"]');
+  await spotlight.waitFor();
+  const close=dialog.getByRole('button',{name:'Close',exact:true});
+  assert.equal(await close.evaluate(element=>{
+   const {x,y,width,height}=element.getBoundingClientRect();
+   return element.contains(document.elementFromPoint(x+width/2,y+height/2));
+  }),true);
+  await close.click();
+  await dialog.waitFor({state:'detached'});
+  await noDispatch(page);
+ });
  const dimensions=[{width:1366,height:768,font:18,route:'fresh'},{width:1024,height:768,font:24,route:'existing'},{width:630,height:720,font:18,route:'custom'}];
  for(const {width,height,font,route} of dimensions)for(const language of ['zh-CN','en'])for(const theme of ['dark','light']){
   const name=`cluster-novice-experience-${width}x${height}-${language}-${theme}`;
@@ -97,12 +116,12 @@ export async function frontendClusterOnboardingCases({check,out}){
    const opener=guide.getByTestId('setup-tool-'+route);
    await visibleInWindow(opener);await opener.press('Enter');
 
-   const spotlight=page.locator('dialog.guide-spotlight[open]'),dismiss=spotlight.getByRole('button',{name:labels.dismiss,exact:true});
+   const spotlight=page.getByTestId('guide-spotlight'),dismiss=spotlight.getByRole('button',{name:labels.dismiss,exact:true});
+   const dialog=page.getByRole('dialog',{name:labels.setup,exact:true});
    await dismiss.waitFor();await visibleInWindow(spotlight.locator('.guide-focus-tip'));
    await dismiss.focus();await page.keyboard.press('Tab');
-   assert.equal(await dismiss.evaluate(el=>el===document.activeElement),true);
+   assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)&&!document.activeElement?.closest('.guide-spotlight')),true);
    await page.keyboard.press('Escape');await spotlight.waitFor({state:'hidden'});
-   const dialog=page.getByRole('dialog',{name:labels.setup,exact:true});
    await dialog.getByTestId('resource-tool-target').waitFor();
    assert.equal(await dialog.getByTestId('resource-tool-'+route).getAttribute('aria-pressed'),'true');
    assert.match(await dialog.innerText(),/Fixture research cluster/);
@@ -126,7 +145,7 @@ export async function frontendClusterOnboardingCases({check,out}){
   await page.setViewportSize({width:630,height:720});
   await mountGuide(page,{start:'ready',empty:true,fail:true});
   await page.getByTestId('setup-first-resource-tool').click();await page.getByTestId('setup-tool-existing').click();
-  const spotlight=page.locator('dialog.guide-spotlight[open]');
+  const spotlight=page.getByTestId('guide-spotlight');
   await spotlight.getByRole('button',{name:'关闭提示',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'配置资源工具',exact:true}),failure=dialog.getByRole('alert');
   await failure.getByText('Fixture tool library temporarily unavailable').waitFor();
@@ -173,7 +192,7 @@ export async function frontendClusterOnboardingCases({check,out}){
   await mountGuide(page,{start:'ready',font:24,empty:true,readySsh:true});
   await page.waitForFunction(()=>window.__test.calls.some(c=>c.method==='worker.request'&&c.data.method==='GET'&&c.data.target==='/api/projects'));
   await page.getByTestId('setup-first-resource-tool').click();await page.getByTestId('setup-tool-fresh').click();
-  await page.locator('dialog.guide-spotlight[open]').getByRole('button',{name:'关闭提示',exact:true}).click();
+  await page.getByTestId('guide-spotlight').getByRole('button',{name:'关闭提示',exact:true}).click();
   const tools=page.getByRole('dialog',{name:'配置资源工具',exact:true});
   await tools.getByTestId('resource-tool-description').fill('Install the reviewed fixture program.');
   await tools.getByTestId('resource-tool-configure-project').click();
@@ -245,5 +264,58 @@ export async function frontendClusterOnboardingCases({check,out}){
   await workspace.getByText(/已复制工作目录/).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.__test.copied),['/home/fixture/AIMatterLab/workfile/2026-11-20/task-0001']);
   await noDispatch(page);
+ });
+
+ await check('setup-experience-workspace-guide-targets-the-directory-input',async page=>{
+  await page.evaluate(async()=>{
+   const {default:Review}=await import('/frontend/features/compute/ResourceWorkspaceReview.tsx');
+   const {default:Lesson}=await import('/frontend/features/onboarding/SetupLesson.tsx');
+   const {createElement:h,Fragment}=window.React,prior=window.studio.invoke;
+   const owner={connectionId:'fixture-login',profileId:'fixture-profile',profileVersion:3};
+   const receipt=root=>({...owner,schemaVersion:2,root,account:'fixture',hostname:'fixture-host',
+    directories:[root+'/workfile',root+'/software'],status:'confirmation_required',confirmationId:'reviewed'});
+   const observed=window.__workspaceInput={calls:[],confirmed:null};
+   window.studio.invoke=async(method,data)=>{
+    if(!method.startsWith('compute.resourceWorkspace.'))return prior(method,data);
+    observed.calls.push({method,data});
+    if(method==='compute.resourceWorkspace.preview')return receipt('/home/fixture/custom');
+    if(method==='compute.resourceWorkspace.confirm')return {...receipt('/home/fixture/custom'),status:'confirmed',confirmationId:undefined};
+    throw Error('Unexpected workspace mutation');
+   };
+   window.testRoot.render(h(Fragment,null,h(Lesson,{lesson:{destination:'ssh-workspace'},page:'compute',english:false,
+    showFocus:true,onDismiss(){},onRehighlight(){},onReturn(){}}),h(Review,{
+    target:owner,resourceName:'Fixture',initial:receipt('/home/fixture/default'),isCurrent:()=>true,
+    onClose:()=>window.testRoot.render(null),onConfirmed:value=>{observed.confirmed=value.root;}
+   })));
+  });
+  const input=page.getByTestId('resource-workspace-path'),confirm=page.getByTestId('resource-workspace-confirm'),preview=page.getByTestId('resource-workspace-preview');
+  const spotlight=page.getByTestId('guide-spotlight');
+  const highlighted=target=>page.waitForFunction(target=>document.querySelector('.guide-spotlight[data-ready="true"]')?.dataset.target===target,target);
+  await highlighted('ssh-workspace-path');
+  assert.equal(await confirm.isEnabled(),true);
+  assert.deepEqual(await page.evaluate(()=>window.__workspaceInput.calls),[]);
+  await input.click();
+  assert.equal(await input.evaluate(element=>element===document.activeElement),true);
+  await input.fill('~/custom');
+  assert.equal(await confirm.isDisabled(),true);
+  assert.equal(await confirm.getAttribute('data-guide-target'),null);
+  await preview.click();
+  await page.getByText('/home/fixture/custom',{exact:true}).waitFor();
+  await highlighted('ssh-workspace-confirm');
+  assert.equal(await input.getAttribute('data-guide-target'),null);
+  assert.equal(await preview.getAttribute('data-guide-target'),null);
+  await input.fill('~/another');
+  await highlighted('ssh-workspace-path');
+  assert.equal(await confirm.isDisabled(),true);
+  assert.equal(await confirm.getAttribute('data-guide-target'),null);
+  await input.fill('~/custom');
+  await preview.click();
+  await highlighted('ssh-workspace-confirm');
+  await confirm.click();
+  await spotlight.waitFor({state:'detached'});
+  await page.waitForFunction(()=>window.__workspaceInput.confirmed==='/home/fixture/custom');
+  const calls=await page.evaluate(()=>window.__workspaceInput.calls);
+  assert.deepEqual(calls.map(call=>call.method),['compute.resourceWorkspace.preview','compute.resourceWorkspace.preview','compute.resourceWorkspace.confirm']);
+  assert.equal(calls[0].data.directory,'~/custom');assert.equal(calls[2].data.confirmationId,'reviewed');
  });
 }

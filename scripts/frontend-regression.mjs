@@ -58,7 +58,17 @@ window.renderTest=async(name,props={})=>{const m=await import(/* @vite-ignore */
 </script></body></html>`);
 // A regression session renders one revision. Watching the repository also walks
 // large package stores and desktop profiles while the first window is opening.
-const server=await createServer({cacheDir:path.join(out,'vite-cache'),optimizeDeps:{entries:[path.resolve(out,'harness.html')]},server:{port:0,strictPort:false,host:'127.0.0.1',watch:{ignored:()=>true},hmr:false}});await server.listen();
+// Opt-in trace for the divider measurement. The normal renderer and production bundle load App unchanged.
+const traceAppRender={
+ name:'fixture-count-app-renders',enforce:'pre',
+ transform(source,id){
+  if(!id.endsWith('/frontend/app/App.tsx?count-app-renders'))return;
+  const entry='export default function App(){';
+  assert(source.includes(entry),'App render counter needs the current component entry');
+  return source.replace(entry,entry+'window.__test.appRenders++;window.__test.lastAppRender=performance.now();');
+ }
+};
+const server=await createServer({plugins:[traceAppRender],cacheDir:path.join(out,'vite-cache'),optimizeDeps:{entries:[path.resolve(out,'harness.html')]},server:{port:0,strictPort:false,host:'127.0.0.1',watch:{ignored:()=>true},hmr:false}});await server.listen();
 const base=`http://127.0.0.1:${server.httpServer.address().port}`;
 const nativeApplications=new Set();
 let browser;try{browser=native?{newContext:async()=>{
@@ -302,7 +312,7 @@ try{
     if(method==='compute.sshConnection.open'){
      test.calls.push({method,data});
      connection={...target,schemaVersion:2,loginRequestId:data.requestId,status:'authenticating',authentication:'pending',
-      capabilities:{multiplex:true},terminalSessionIds:[],serviceIds:[],revision:1};
+      capabilities:{multiplex:true,...guided?{manualHandoff:true}:{}},terminalSessionIds:[],serviceIds:[],revision:1};
      return connection;
     }
     if(method==='compute.sshConnection.completeLogin'||method==='compute.sshConnection.loginStatus'){
@@ -353,14 +363,16 @@ try{
    window.testRoot.render(React.createElement(React.StrictMode,null,React.createElement(App)));
   },guided);
   if(guided){
-   const guide=p.getByTestId('setup-assistant'),spot=p.locator('dialog.guide-spotlight[open]');
+   const guide=p.getByTestId('setup-assistant'),spot=p.getByTestId('guide-spotlight');
    await guide.getByRole('button',{name:/远程集群/}).click();
    await guide.getByRole('button',{name:'配置 SSH 连接',exact:true}).click();
-   await p.waitForFunction(()=>document.querySelector('dialog.guide-spotlight[open]')?.dataset.target==='saved-ssh');
+   await p.waitForFunction(()=>document.querySelector('.guide-spotlight[data-ready="true"]')?.dataset.target==='saved-ssh');
    await p.keyboard.press('Escape');
    await p.getByTestId('saved-compute-profile').getByRole('button',{name:'交互式登录',exact:true}).click();
-   await p.waitForFunction(()=>document.querySelector('dialog.guide-spotlight[open]')?.dataset.target==='ssh-terminal');
+   await p.waitForFunction(()=>document.querySelector('.guide-spotlight[data-ready="true"]')?.dataset.target==='ssh-terminal');
    assert.equal(await spot.getAttribute('data-step'),'ssh-login');
+   assert.equal(await p.getByTestId('ssh-publish-resource').isEnabled(),true);
+   assert.equal(await p.getByTestId('ssh-publish-resource').getAttribute('data-guide-target'),null);
    await spot.getByRole('button',{name:'关闭提示'}).click();
    await p.getByTestId('setup-lesson').click();await guide.waitFor();
    const calls=await p.evaluate(()=>window.__test.calls);
@@ -381,6 +393,7 @@ try{
   assert.equal(await p.locator('.agent-panel').isVisible(),true);
   assert.equal(await p.locator('.main-column').isVisible(),true);
   const host=await terminal.elementHandle();
+  assert.equal(await p.getByTestId('ssh-publish-resource').getAttribute('data-guide-target'),'ssh-handoff');
   await p.getByTestId('ssh-publish-resource').click();
   const review=p.getByTestId('resource-workspace-review');
   await review.waitFor();
@@ -944,7 +957,7 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   await p.clock.install();await p.evaluate(async()=>{window.pendingRuns=[];window.__test.responses={'/api/runs':()=>new Promise(resolve=>window.pendingRuns.push(resolve))};await window.renderTest('App');});await revealWorkspace(p);await connectWorker(p);await p.waitForFunction(()=>window.pendingRuns.length>0);const before=await p.evaluate(()=>window.pendingRuns.length);await p.clock.runFor(15000);assert.equal(await p.evaluate(()=>window.pendingRuns.length),before);await p.evaluate(()=>window.pendingRuns.forEach(resolve=>resolve([window.__test.run])));await p.waitForFunction(()=>document.querySelector('.statusbar')?.textContent?.includes('已连接'));
  });
  await check('cluster-edits-survive-poll',async p=>{
-  await p.clock.install();await p.evaluate(async()=>{const f=window.__test;f.responses={'/api/cluster/observation':()=>({...f.run,kind:'cluster-run',cluster_id:'fixture-cluster',cluster:{scheduler:'slurm'},resources:{cpus:1},job_id:null,snapshots:[],script:'# Fixture',scientific_validation:{status:'not_run'}})};const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:'run',onError:()=>{},onAgent:()=>{}}));});
+  await p.clock.install();await p.evaluate(async()=>{const f=window.__test;f.responses={'/api/cluster/observation':()=>({...f.run,kind:'cluster-run',cluster_id:'fixture-cluster',cluster:{scheduler:'slurm'},resources:{cpus:1},job_id:null,snapshots:[],script:'# Fixture',scientific_validation:{status:'not_run'}})};const {default:ClusterRunPage}=await import('/frontend/features/cluster/ClusterRunPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:'run',onError:()=>{},onAgent:()=>{}}));});
   const text=p.locator('.cluster-review textarea');await text.waitFor();await p.locator('.cluster-review input[type=checkbox]').check();await text.fill('{"temperature":345}');await p.clock.runFor(10050);assert.equal(await text.inputValue(),'{"temperature":345}');
  });
  await check('cluster-mixed-inputs-review-revision',async p=>{
@@ -960,7 +973,7 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
     '/api/cluster/revise':({data})=>{if(data.run_id!==clusterRun.id)throw Error('Unexpected revision parent');
      clusterRun={...clusterRun,...data.changes,id:'mixed-revision',directory:'/fixture/mixed-revision',script:'# revised fixture'};return clusterRun;},
    };
-   const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');
+   const {default:ClusterRunPage}=await import('/frontend/features/cluster/ClusterRunPage.tsx');
    window.testRoot.render(window.React.createElement(ClusterRunPage,{id:clusterRun.id,onError:error=>{throw error;},onAgent(){}}));
   });
   const panel=p.getByTestId('cluster-review');
@@ -1000,7 +1013,7 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   const prompt=p.locator('.composer textarea');await prompt.fill('准备 MD');await p.locator('.composer .send').click();await p.waitForFunction(()=>window.__test.calls.some(c=>c.method==='agent.rpc'&&c.data.method==='turn/start'));const first=await p.evaluate(()=>window.__test.task.id);await p.evaluate(()=>window.__test.events.forEach(fn=>fn({provider:'codex',method:'turn/completed',params:{threadId:'fixture-thread',turn:{id:'fixture-turn',status:'completed'}}})));await p.getByTestId('agent-planning-mode').uncheck();await prompt.fill('温度改成345 K');await p.locator('.composer .send').click();await p.waitForFunction(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').length===2);assert.equal(await p.evaluate(()=>window.__test.task.id),first);assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='task.create').length),1);assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.method==='agent.rpc'&&c.data.method==='turn/start').at(-1).data.params.studioTaskId),first);
  });
  await check('unreviewed-direct-cluster-run-submits-without-optional-validation-prerequisite',async p=>{
-  await p.evaluate(async()=>{const f=window.__test;f.clusterRun={...f.run,id:'cluster-advisory',kind:'cluster-run',status:'draft',cluster:{scheduler:'slurm'},resources:{queue:'fixture',cpus:1,gpus:1,memory_mb:1024},snapshots:[],script:'# synthetic fixture',scientific_validation:{status:'failed',message:'Recorded optional check'},validation:{status:'not_run'}};f.clusterSubmitted=[];f.responses={'/api/cluster/observation':()=>f.clusterRun,'/api/cluster/submit':request=>{f.clusterSubmitted.push(request.data.run_id);f.clusterRun={...f.clusterRun,status:'queued'};return f.clusterRun;}};const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:f.clusterRun.id,onAgent(){},onError:error=>{throw error;}}));});
+  await p.evaluate(async()=>{const f=window.__test;f.clusterRun={...f.run,id:'cluster-advisory',kind:'cluster-run',status:'draft',cluster:{scheduler:'slurm'},resources:{queue:'fixture',cpus:1,gpus:1,memory_mb:1024},snapshots:[],script:'# synthetic fixture',scientific_validation:{status:'failed',message:'Recorded optional check'},validation:{status:'not_run'}};f.clusterSubmitted=[];f.responses={'/api/cluster/observation':()=>f.clusterRun,'/api/cluster/submit':request=>{f.clusterSubmitted.push(request.data.run_id);f.clusterRun={...f.clusterRun,status:'queued'};return f.clusterRun;}};const {default:ClusterRunPage}=await import('/frontend/features/cluster/ClusterRunPage.tsx');window.testRoot.render(window.React.createElement(ClusterRunPage,{id:f.clusterRun.id,onAgent(){},onError:error=>{throw error;}}));});
   await p.getByTestId('cluster-review').waitFor();await p.getByRole('button',{name:'审阅完成，提交到集群',exact:true}).click();await p.waitForFunction(()=>window.__test.clusterRun.status==='queued');assert.deepEqual(await p.evaluate(()=>window.__test.clusterSubmitted),['cluster-advisory']);assert.equal(await p.evaluate(()=>window.__test.calls.filter(call=>call.data?.target==='/api/cluster/validate').length),0);assert.equal(await p.evaluate(()=>window.__test.clusterRun.scientific_validation.status),'failed');
  });
  await check('unreviewed-direct-run-submit-uses-actual-input-gates-without-review-prerequisite',async p=>{
@@ -1135,9 +1148,9 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   await p.evaluate(()=>{window.__test.task={id:'red-dot',provider:'codex',threadId:'fixture-thread',name:'Missing detail',parameters:{metad:{sigma:.1}},steps:[{id:'m',title:'MetaD setup',fields:[{key:'metad.sigma',label:'Width',type:'number',required:true},{key:'metad.stride',label:'Hill interval',type:'integer',required:true,advanced:true}]}],artifacts:[],updatedAt:1};return window.renderTest('AgentTaskPage',{worker:false,task:window.__test.task,onError:e=>{throw e;},onReview:()=>{},onRefresh:()=>{}});});
   await p.locator('.visual-step-heading').waitFor();if(await p.locator('.visual-step-heading').getAttribute('aria-expanded')==='true')await p.locator('.visual-step-heading').click();await p.getByRole('button',{name:'定位模块缺项 · MetaD setup',exact:true}).click();await p.waitForFunction(()=>document.activeElement?.closest('[data-field]')?.getAttribute('data-field')==='metad.stride');assert.equal(await p.locator('.advanced-field-group').evaluate(e=>e.open),true);await p.locator('[data-field="metad.stride"] input').fill('100');await p.getByRole('img',{name:'模块参数齐全 · MetaD setup',exact:true}).waitFor();assert.equal(await p.locator('.step-status-complete').count(),1);
  });
- await check('delete-conversation-cleans-owned-pages-and-local-drafts',async p=>{
+ for(const denied of [false,true])await check('delete-conversation-cleans-owned-pages-and-local-drafts'+(denied?'-storage-denied':''),async p=>{
   await p.evaluate(()=>{const original=window.studio.invoke;window.__test.task={id:'delete-flow',provider:'codex',threadId:'delete-thread',name:'Delete flow',parameters:{},steps:[],missingFields:[],parameterRevision:0,review:{status:'not_run'},artifacts:[],updatedAt:1};window.__test.conversation={id:'codex:delete-thread',provider:'codex',threadId:'delete-thread',name:'Disposable conversation',projectId:'project',taskId:'delete-flow'};localStorage.setItem('studio.conversation','codex:delete-thread');localStorage.setItem('studio.pending.delete-flow',JSON.stringify({temperature:{seq:1,value:300}}));window.studio.invoke=async(method,data)=>{if(method==='conversation.remember')return window.__test.conversation;if(method==='conversation.list')return window.__test.deleted?[]:[window.__test.conversation];if(method==='task.list')return window.__test.deleted?[]:[window.__test.task];if(method==='agent.rpc'&&data.method==='thread/resume')return {thread:{id:'delete-thread'}};if(method==='agent.rpc'&&data.method==='thread/read')return {thread:{id:'delete-thread',turns:[]}};if(method==='conversation.delete'){window.__test.deleted=true;const result={id:'codex:delete-thread',provider:'codex',threadId:'delete-thread',taskIds:['delete-flow']};window.__test.events.forEach(fn=>fn({method:'studio/conversationDeleted',provider:'codex',params:result}));return result;}return original(method,data);};return window.renderTest('App');});
-  await p.getByRole('button',{name:'会话菜单 · Disposable conversation',exact:true}).click();const remove=p.getByRole('menuitem',{name:'删除对话 · Disposable conversation',exact:true});await remove.waitFor();await p.waitForFunction(()=>!document.querySelector('.conversation-delete')?.disabled);await remove.click();await p.getByRole('button',{name:'确认删除',exact:true}).click();await p.waitForFunction(()=>!document.querySelector('.conversation-item'));assert.equal(await p.evaluate(()=>localStorage.getItem('studio.conversation')),null);assert.equal(await p.evaluate(()=>localStorage.getItem('studio.pending.delete-flow')),null);assert.equal(await p.getByTestId('agent-task-page').count(),0);assert.equal(await p.locator('.workspace-tab').filter({hasText:'Delete flow'}).count(),0);await p.screenshot({path:path.join(out,'conversation-deleted.png')});
+  await p.getByRole('button',{name:'会话菜单 · Disposable conversation',exact:true}).click();const remove=p.getByRole('menuitem',{name:'删除对话 · Disposable conversation',exact:true});await remove.waitFor();await p.waitForFunction(()=>!document.querySelector('.conversation-delete')?.disabled);await remove.click();if(denied)await p.evaluate(()=>{Object.defineProperty(window,'localStorage',{get(){throw new DOMException('Storage disabled','SecurityError');},configurable:true});});await p.getByRole('button',{name:'确认删除',exact:true}).click();await p.waitForFunction(()=>!document.querySelector('.conversation-item'));await p.getByRole('button',{name:'确认删除',exact:true}).waitFor({state:'detached'});if(!denied){assert.equal(await p.evaluate(()=>localStorage.getItem('studio.conversation')),null);assert.equal(await p.evaluate(()=>localStorage.getItem('studio.pending.delete-flow')),null);}assert.equal(await p.getByTestId('agent-task-page').count(),0);assert.equal(await p.locator('.workspace-tab').filter({hasText:'Delete flow'}).count(),0);await p.screenshot({path:path.join(out,'conversation-deleted'+(denied?'-storage-denied':'')+'.png')});
  });
  await check('chart-partial-preview-notice',async p=>{
   await p.evaluate(async()=>{const {Chart}=await import('/frontend/ui/widgets.tsx');window.testRoot.render(window.React.createElement(Chart,{text:Array.from({length:4001},(_,i)=>`${i} ${i+1}`).join('\n'),name:'fixture.out'}));});await p.locator('.chart-note').first().waitFor();assert.match(await p.locator('.chart-wrap').innerText(),/4000/);await p.evaluate(()=>{document.documentElement.dataset.theme='light';window.dispatchEvent(new Event('studio:appearance'));});await p.screenshot({path:path.join(out,'chart-light.png')});

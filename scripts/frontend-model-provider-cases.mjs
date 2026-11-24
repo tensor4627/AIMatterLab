@@ -1,5 +1,6 @@
 // Actual DOM interactions with synthetic model profiles and IPC, never a live key.
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 export async function frontendModelProviderCases({check,out}){
  for(const scenario of ['matched','missing-model','missing-effort']){
@@ -209,6 +210,131 @@ export async function frontendModelProviderCases({check,out}){
  await check('model-providers-deepseek-account-native-credential-mode',async page=>{
   await editor(page);await page.evaluate(()=>{window.__modelProfiles.saved.provider='compatible';return window.renderTest('ProviderLogin',{provider:'compatible',embedded:true,onClose(){},onConfigured(){},onError:error=>window.__modelProfiles.errors.push(String(error))});});await page.getByTestId('provider-auth-mode').waitFor();await page.getByTestId('provider-api-key').fill('synthetic-unsaved-key');await page.getByTestId('provider-auth-mode').selectOption('deepseek-account');assert.equal(await page.getByTestId('provider-base-url').inputValue(),'https://api.deepseek.com/anthropic');assert.equal(await page.getByTestId('provider-protocol').inputValue(),'anthropic-messages');assert.equal(await page.getByTestId('provider-api-key').inputValue(),'');await page.getByText('账户令牌与 API Key 不同，仅发送到官方 DeepSeek 地址；过期后需重新导入。',{exact:true}).waitFor();await page.getByTestId('save-api-provider').click();await page.waitForFunction(()=>window.__modelProfiles.saved.authMode==='deepseek-account');assert.equal(await page.getByTestId('provider-public-guides').isChecked(),false);await page.screenshot({path:path.join(out,'deepseek-account-profile.png'),fullPage:true});
  });
+ async function accountDialogs(page){
+  await page.evaluate(()=>{
+   const prior=window.studio.invoke;
+   const fixture=window.__accountDialogs={stored:{},calls:[],configured:0,tested:0,page:'agent'};
+   const guide=()=>({page:fixture.page,directory:'fixture profile',directoryKind:'profile'});
+   const profile=provider=>({schemaVersion:1,id:'saved-'+provider,provider,name:'Saved '+provider,
+    baseUrl:'https://fixture.invalid/v1',api:'openai-completions',preset:provider==='qwen'?'token-cn':'custom',
+    models:[{id:'fixture-model'}],defaultModel:'fixture-model',revision:1,credentialStored:true});
+   window.studio.invoke=async(method,data)=>{
+    if(method==='state')return {...await prior(method,data),setupGuide:guide()};
+    if(method==='onboarding.progress'){fixture.page=data.page;return guide();}
+    if(/^(models\.profiles\.|agent\.(?:account|login|logout|testConnection|connect|rpc))/.test(method))fixture.calls.push([method,data?.provider??data?.profile?.provider]);
+    if(method==='agent.account'){
+     const saved=fixture.stored[data.provider];
+     if(data.provider==='codex')return {modelAccess:'not_run',requiresOpenaiAuth:true,account:saved?{type:'apiKey'}:null};
+     if(data.provider==='kimi')return {modelAccess:'not_run',phase:saved?'completed':'signed_out'};
+     return {modelAccess:'not_run',credentialStored:!!saved};
+    }
+    if(method==='models.profiles.list')return fixture.stored[data.provider]?[profile(data.provider)]:[];
+    if(method==='models.profiles.save'){
+     fixture.stored[data.profile.provider]=true;
+     return {...data.profile,revision:1,credentialStored:true,modelAccess:'not_run'};
+    }
+    return prior(method,data);
+   };
+  });
+ }
+ const exitButton=page=>page.getByTestId('provider-dialog-exit');
+ const accountCalls=page=>page.evaluate(()=>window.__accountDialogs.calls);
+ const frames=page=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ const guideTarget=(page,target)=>page.waitForFunction(target=>document.querySelector('.guide-spotlight[data-ready="true"]')?.dataset.target===target,target);
+ async function leaveAccount(page,label){
+  const exit=exitButton(page);
+  await exit.and(page.getByRole('button',{name:label,exact:true})).waitFor();
+  assert.equal(await exit.evaluate(element=>element.classList.contains('primary')),label==='完成');
+  const calls=await accountCalls(page);
+  await exit.click();
+  await exit.waitFor({state:'detached'});
+  await frames(page);
+  assert.deepEqual(await accountCalls(page),calls,'manual exit must send no account requests');
+ }
+
+ await check('model-providers-guide-experience-inputs-and-explicit-exit',async page=>{
+  await accountDialogs(page);
+  await page.evaluate(()=>window.renderTest('App'));
+  const assistant=page.getByTestId('setup-assistant');
+  const open=()=>assistant.getByRole('button',{name:'配置账号',exact:true}).click();
+  const observed=[];
+  for(const [provider,name,initial,target] of [
+   ['codex',/Codex/,'login-method','codex-api-key'],['kimi',/Kimi/,'login-region','login-region'],
+   ['deepseek',/DeepSeek API/,'api-key','api-key'],['qwen',/Qwen/,'add-api','api-endpoint'],
+   ['compatible',/自定义 API/,'add-api','api-endpoint']
+  ]){
+   const select=assistant.locator('.setup-providers').getByRole('button',{name});
+   await select.click();
+   await select.and(assistant.locator('[aria-pressed="true"]')).waitFor();
+   await open();await guideTarget(page,initial);
+   const dialog=page.getByRole('dialog').filter({has:exitButton(page)});
+   await exitButton(page).and(page.getByRole('button',{name:'稍后配置',exact:true})).waitFor();
+   if(provider==='codex')await dialog.getByLabel('登录方式').selectOption('apiKey');
+   if(initial==='add-api')await dialog.getByTestId('add-api-provider').click();
+   await guideTarget(page,target);
+   const input=dialog.locator(`[data-guide-target="${target}"]`).first();
+   if(provider==='kimi')await input.selectOption('global');
+   else await input.fill(target==='api-endpoint'?'https://unsaved.invalid/v1':'synthetic-unsaved');
+   await leaveAccount(page,'放弃修改并关闭');
+
+   await page.evaluate(provider=>{window.__accountDialogs.stored[provider]=true;},provider);
+   await open();
+   await guideTarget(page,initial==='add-api'?'api-endpoint':initial);
+   if(initial==='add-api')assert.equal(await dialog.getByTestId('provider-api-key').inputValue(),'');
+   if(provider==='deepseek')assert.equal(await dialog.getByTestId('deepseek-api-key').inputValue(),'');
+   await leaveAccount(page,'完成');
+   observed.push({provider,first:initial,input:target,discardsUnsaved:true,closesSaved:true,exitRequests:0});
+  }
+  assert((await accountCalls(page)).every(([method])=>['agent.account','models.profiles.list'].includes(method)));
+  await fs.writeFile(path.join(out,'setup-account-exits.json'),JSON.stringify(observed,null,2)+'\n');
+ });
+
+ await check('model-providers-dialog-experience-saved-credentials-do-not-verify-models',async page=>{
+  await accountDialogs(page);
+  await page.evaluate(()=>{
+   const fixture=window.__accountDialogs;
+   return window.renderTest('ProviderLogin',{provider:'compatible',onClose:()=>window.testRoot.render(null),
+    onConfigured:()=>fixture.configured++,onTested:()=>fixture.tested++,onError:()=>{}});
+  });
+  const dialog=page.getByRole('dialog').filter({has:exitButton(page)});
+  await dialog.getByTestId('add-api-provider').click();
+  await dialog.getByTestId('provider-base-url').fill('https://fixture.invalid/v1');
+  await dialog.getByTestId('provider-api-key').fill('synthetic-key');
+  await dialog.getByTestId('api-model-id-0').fill('fixture-model');
+  await dialog.getByTestId('save-api-provider').click();
+  await exitButton(page).and(page.getByRole('button',{name:'完成',exact:true})).waitFor();
+  assert.equal(await dialog.getByTestId('provider-api-key').inputValue(),'');
+  assert.equal(await dialog.getByText(/测试调用成功/).count(),0);
+  assert.deepEqual(await accountCalls(page),[['models.profiles.list','compatible'],['models.profiles.save','compatible']]);
+  const samples=[];
+  for(const theme of ['dark','light']){
+   await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;},theme);
+   const colors=await exitButton(page).evaluate(button=>{
+    const {color,backgroundColor}=getComputedStyle(button);
+    const luminance=value=>value.match(/\d+/g).slice(0,3).map(Number).map(channel=>channel/255)
+     .map(channel=>channel<=0.04045?channel/12.92:((channel+0.055)/1.055)**2.4)
+     .reduce((sum,channel,index)=>sum+channel*[0.2126,0.7152,0.0722][index],0);
+    const [low,high]=[luminance(color),luminance(backgroundColor)].sort((a,b)=>a-b);
+    const box=button.getBoundingClientRect(),hit=document.elementFromPoint(box.x+box.width/2,box.y+box.height/2);
+    return {color,backgroundColor,contrast:(high+0.05)/(low+0.05),visible:button.contains(hit)};
+   });
+   assert(colors.contrast>=4.5);
+   assert.equal(colors.visible,true,'the completion action is visible while the form can scroll');
+   samples.push({theme,...colors});
+   await dialog.screenshot({path:path.join(out,'account-dialog-done-'+theme+'.png')});
+  }
+  await fs.writeFile(path.join(out,'account-dialog-done-contrast.json'),JSON.stringify(samples,null,2)+'\n');
+  await dialog.getByTestId('provider-base-url').fill('https://unsaved.invalid/v1');
+  await leaveAccount(page,'放弃修改并关闭');
+  assert.deepEqual(await page.evaluate(()=>({configured:window.__accountDialogs.configured,tested:window.__accountDialogs.tested})),{configured:1,tested:0});
+
+  await page.evaluate(()=>window.renderTest('AccountCenter',{provider:'compatible',busy:false,onError:()=>{}}));
+  await page.getByTestId('account-center').getByTestId('provider-api-key').waitFor();
+  assert.equal(await exitButton(page).count(),0);
+  assert.equal(await page.locator('.account-dialog-scroll').count(),0);
+  assert.equal(await page.getByTestId('provider-base-url').inputValue(),'https://fixture.invalid/v1');
+ });
+
  await check('model-providers-composer-model-and-reasoning-selection',async page=>{
   await page.evaluate(()=>{const original=window.studio.invoke;window.__modelTurns=[];window.studio.invoke=async(method,data)=>{if(method==='agent.rpc'&&data.method==='model/list'||method==='agent.rpc'&&data.method==='model/select')return {data:[{id:'api:a:model-a',model:'api:a:model-a',displayName:'Model A',providerName:'Provider A',profileId:'a',isDefault:true,supportedReasoningEfforts:[{reasoningEffort:'off'},{reasoningEffort:'high'}],defaultReasoningEffort:'off'},{id:'api:a:model-b',model:'api:a:model-b',displayName:'Model B',providerName:'Provider A',profileId:'a',supportedReasoningEfforts:[]},{id:'api:b:model-c',model:'api:b:model-c',displayName:'Model C',providerName:'Provider B',profileId:'b',supportedReasoningEfforts:[]}]};if(method==='agent.rpc'&&data.method==='turn/start')window.__modelTurns.push(data.params);return original(method,data);};return window.renderTest('Agent',{planningMode:false,onPlanningModeChange(){},context:'{}',onError:error=>window.__test.modelError=String(error)});});await page.getByTestId('agent-options').click();await page.getByTestId('agent-provider').selectOption('qwen');await page.getByTestId('agent-connect').click();await page.waitForFunction(()=>document.querySelector('[data-testid=agent-model]')||document.querySelector('[data-testid=composer-model]'));if(await page.getByTestId('agent-options').getAttribute('aria-expanded')==='true')await page.getByTestId('agent-options').click();await page.getByTestId('composer-model').waitFor();await page.getByTestId('composer-effort').selectOption('high');await page.getByTestId('composer-model').selectOption('api:a:model-b');await page.waitForFunction(()=>document.querySelector('[data-testid=composer-effort]')?.disabled);await page.getByTestId('composer-model').selectOption('api:a:model-a');await page.getByTestId('composer-effort').selectOption('high');await page.locator('.composer textarea').fill('Synthetic model selection question');await page.getByRole('button',{name:'发送',exact:true}).click();await page.waitForFunction(()=>window.__modelTurns.length===1);const turn=await page.evaluate(()=>window.__modelTurns[0]);assert.equal(turn.model,'api:a:model-a');assert.equal(turn.effort,'high');await page.evaluate(()=>window.__test.events.forEach(fn=>fn({provider:'qwen',method:'turn/completed',params:{threadId:'fixture-thread',turn:{id:'fixture-turn',status:'completed'}}})));await page.waitForFunction(()=>!document.querySelector('[data-testid=composer-model]').disabled);assert.equal(await page.locator('[data-testid=composer-model] option[value="api:b:model-c"]').isDisabled(),true);await page.screenshot({path:path.join(out,'composer-model-effort.png')});
  });

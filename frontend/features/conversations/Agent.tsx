@@ -1,9 +1,9 @@
-import {ChatFiles,ChatFilePreview} from './ChatFiles';
+import {ChatFilePreview} from './ChatFiles';
 import {readChatFile} from './read-chat-file';
 import type {ChatAttachmentPreview,ChatAttachmentRef} from '../../../contracts/dto/chat-attachments';
 import type {ChatEvidenceSelection} from '../../../contracts/dto/chat-evidence';
 import {attachmentLimits} from '../../../contracts/agent/chat-attachments.mjs';
-import {ChevronDown,ChevronUp,Paperclip,X} from 'lucide-react';
+import {ChevronDown,ChevronUp,X} from 'lucide-react';
 import Tooltip,{HelpTip} from "../../ui/Tooltip";
 import {providerAccountState,authenticationError} from "./provider-account.mjs";
 import {ACCOUNT_GUIDANCE} from "../../../contracts/agent/provider-account.mjs";
@@ -17,8 +17,8 @@ import Notice from '../../ui/Notice';
 import './agent.css';
 import './codex-version-notice.css';
 import {tr} from "../../ui/i18n";
-import {useEffect,useId,useLayoutEffect,useRef,useState,type RefObject} from 'react';
-import {ArrowUp,ListPlus,PencilLine,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2,History,PanelRightClose} from 'lucide-react';
+import {useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type RefObject} from 'react';
+import {PencilLine,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2,History,PanelRightClose} from 'lucide-react';
 import {t} from "../../ui/i18n";
 import {type ChatMessageActions,type ChatMessageValue} from './ChatMessage';
 import ConversationMessages from './ConversationMessages';
@@ -29,6 +29,7 @@ import {resumedEffort,importedCodexSelection,readCodexDefaultsCatalog} from "./r
 import {messageKey,upsertItemMessage,replayMessages} from './message-mapping.mjs';
 import {createReadingPositions,readingKey} from './reading-position.mjs';
 import {elicitationHasEditableInput,elicitationToolArguments} from './elicitation-input.mjs';
+import Composer,{ComposerNotice} from './Composer';
 import ComposerQuestion,{composerQuestionItems,initialQuestionProgress,type QuestionProgress} from './ComposerQuestion';
 import SessionWorkspace from './SessionWorkspace';
 import TerminalWorkspaceApproval from './TerminalWorkspaceApproval';
@@ -154,7 +155,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  const historyEnabled=hasConversationHistory();
  const [savedHistoryPage,setSavedHistoryPage]=useState<ConversationHistoryPage|null>(null),[paging,setPaging]=useState(false);
  const [historyJump,setHistoryJump]=useState<ConversationHistoryTarget>(),[branchPreview,setBranchPreview]=useState<ConversationBranchPreview|null>(null),[branching,setBranching]=useState(false);
- const filePicker=useRef<HTMLInputElement|null>(null),readingFiles=useRef(new Set<unknown>()),previewRequest=useRef(0);
+ const readingFiles=useRef(new Set<unknown>()),previewRequest=useRef(0);
  const [,redrawFiles]=useState(0),[filePreview,setFilePreview]=useState<{scope:string;value:ChatAttachmentPreview}|null>(null);
  const refreshFiles=()=>redrawFiles(value=>value+1);
  async function showFile(file:ChatAttachmentRef){
@@ -206,14 +207,16 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  const [recovery,setRecovery]=useState<{threadId:string;error?:string}|null>(null),pendingResume=useRef<string|null>(null);
  const resumeMetadata=useRef<Conversation|null>(null);
  const [modelCall,setModelCall]=useState<ModelCall|null>(null),modelCallRef=useRef<ModelCall|null>(null),modelRef=useRef(model);modelRef.current=model;
- const [prompt,setPrompt]=useState(()=>drafts.text()),[busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null),[sendNotice,setSendNotice]=useState('');
- function updatePrompt(text:string){providerTouched.current=true;setSendNotice('');setPrompt(drafts.edit(text));}
+ const [busy,setBusy]=useState(false),[turn,setTurn]=useState<string|null>(null),[account,setAccount]=useState<any>(null);
+ const sendNotice=useRef<((notice:string)=>void)|null>(null);
+ function setSendNotice(notice:string){sendNotice.current?.(notice);}
+ function updatePrompt(text:string){providerTouched.current=true;setSendNotice('');drafts.edit(text);}
  function recoverDraft(provider:AgentProvider,previous:string,threadId:string,uploadsRetained?:boolean){
   const result=drafts.rekey(provider,previous,threadId,uploadsRetained);
-  setPrompt(result.text);refreshFiles();
+  refreshFiles();
   if(result.attachmentReview)setSendNotice(t('对话已变化。请重新选取附件。'));
  }
- function selectDraft(value:AgentProvider,id:string|null=null,fresh=false){const old=drafts.owner();if(fresh||old.provider!==value||old.threadId!==id){saveReadingPosition();readingOwner.current=readingKey(value,id);readingReady.current=false;setPromptProposal(null);}setPrompt(drafts.activate(value,id,fresh));}
+ function selectDraft(value:AgentProvider,id:string|null=null,fresh=false){const old=drafts.owner();if(fresh||old.provider!==value||old.threadId!==id){saveReadingPosition();readingOwner.current=readingKey(value,id);readingReady.current=false;setPromptProposal(null);}drafts.activate(value,id,fresh);}
  function proposePrompt(text:string){if(drafts.text()&&drafts.text()!==text)setPromptProposal({...drafts.owner(),text});else updatePrompt(text);}
  function resolvePromptProposal(choice:'append'|'replace'|'cancel'){const proposal=promptProposal,owner=drafts.owner();setPromptProposal(null);if(!proposal||choice==='cancel'||proposal.provider!==owner.provider||proposal.threadId!==owner.threadId)return;updatePrompt(choice==='append'?[drafts.text(),proposal.text].filter(Boolean).join('\n\n'):proposal.text);}
  function displayedTurnId(threadId:string){
@@ -223,7 +226,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  function acceptDraft(flight:SendFlight){
   if(flight.draftAccepted||!flight.manual||!mounted.current)return;
   flight.draftAccepted=true;
-  if(drafts.acknowledge(flight.draft)&&drafts.owner().provider===flight.provider&&drafts.owner().threadId===flight.threadId)setPrompt(drafts.text());
+  drafts.acknowledge(flight.draft);
   if(flight.draft.files.length)refreshFiles();
  }
  function releaseSend(flight:SendFlight){
@@ -258,7 +261,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   if(!flight){void stopViewedTurn();return;}
   flight.cancelled=true;
   if(flight.phase==='preparing'){
-   if(flight.current()&&drafts.retain(flight.draft,flight.text))setPrompt(drafts.text());
+   if(flight.current())drafts.retain(flight.draft,flight.text);
    releaseSend(flight);setBusy(false);setStopStatus(null);setSendNotice(t('已取消发送准备，草稿已保留。'));return;
   }
   if(!flight.turnId){setStopStatus('waiting');return;}
@@ -294,6 +297,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  const openTaskRef=useRef(onOpenTask);openTaskRef.current=onOpenTask;
  const openRunRef=useRef(onOpenRun);openRunRef.current=onOpenRun;
  const currentModel=models.find(m=>m.model===model),efforts=currentModel?.supportedReasoningEfforts||[];
+ const modelRejectsImages=!!currentModel?.inputModalities&&!currentModel.inputModalities.includes('image');
  const pendingDefaults=provider==='codex'&&connected&&!thread&&!sessionSelection?.conversation&&!!nativeDefaults&&storedPreference('studio.codex.appliedDefaults')!==nativeDefaults.id;
  function acceptDefaults(value:string,level:string){
   if(!nativeDefaults||!value)return;
@@ -323,7 +327,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   };
   return ()=>{terminalDraft.current=null;};
  },[terminalDraft]);
- const composerInput=useRef<HTMLTextAreaElement>(null),composerShortcuts=useId();
+ const composerInput=useRef<HTMLTextAreaElement>(null);
  const readingPositions=useRef<ReturnType<typeof createReadingPositions>|null>(null);if(!readingPositions.current)readingPositions.current=createReadingPositions(()=>localStorage);
  const readingOwner=useRef(readingKey(drafts.owner().provider,drafts.owner().threadId)),readingReady=useRef(false);
  const followScroll=useRef(true),[following,setFollowing]=useState(true),[hasNewMessages,setHasNewMessages]=useState(false);
@@ -436,7 +440,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   const unsubscribe=window.studio?.onEvent(event=>{
    if(event.method==='studio/chatEvidenceSelected'){
     const {provider,threadId,files,comment}=(event.params||{}) as Partial<ChatEvidenceSelection>;
-    if(provider&&threadId&&Array.isArray(files)){try{const text=drafts.appendToDraft(provider,threadId,comment||'',files);setPrompt(text);refreshFiles();}catch(error){messageCallbacks.current.onError(error);}}
+    if(provider&&threadId&&Array.isArray(files)){try{drafts.appendToDraft(provider,threadId,comment||'',files);refreshFiles();}catch(error){messageCallbacks.current.onError(error);}}
     return;
    }
    const eventProvider=event.provider||'codex';
@@ -451,7 +455,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    if(event.method==='serverRequest/resolved')forgetQuestions(eventProvider,event.params?.threadId,String(event.params?.requestId));
    if(event.method==='studio/codexDisconnected')forgetQuestions(eventProvider,eventThread);
    if(event.method==='turn/completed'&&typeof receipt?.id==='string')forgetQuestions(eventProvider,eventThread,undefined,receipt.id);
-   if(event.method==='studio/conversationDeleted'){readingPositions.current?.discard(readingKey(event.params.provider||event.provider||'codex',event.params.threadId));setPrompt(drafts.discard(event.params.provider||event.provider||'codex',event.params.threadId));}
+   if(event.method==='studio/conversationDeleted'){readingPositions.current?.discard(readingKey(event.params.provider||event.provider||'codex',event.params.threadId));drafts.discard(event.params.provider||event.provider||'codex',event.params.threadId);}
    if(event.method==='studio/conversationContextChanged'){const p=event.params;recoverDraft(p.conversation.provider,p.oldThreadId,p.conversation.threadId,p.uploadsRetained===true);}
    if((event.provider||'codex')!==providerRef.current)return;
    if(event.method==='studio/skillsLoaded'){const call=modelCallRef.current,p=event.params||{};if(call&&p.requestId===call.requestId&&p.threadId===call.threadId&&p.threadId===threadRef.current&&(!p.turnId||!call.turnId||p.turnId===call.turnId))setAutoSkillStatus({...p,provider:event.provider||'codex'});return;}
@@ -756,10 +760,10 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  async function send(textOverride?:string,action:{reviewMode?:boolean;taskId?:string}={}){
   if(pendingDefaults)return;
   const reconnectHistory=localApiThread&&(!connected||!models.length);
-  const fileRefs=textOverride===undefined?drafts.files():[];
-  if(fileRefs.some(file=>file.kind==='image')&&currentModel?.inputModalities&&!currentModel.inputModalities.includes('image')){setSendNotice(t('当前模型仅支持文字，请更换模型或移除图片。'));return;}
-  if(readingFiles.current.has(drafts.capture().entry))return;
-  const text=textOverride??(prompt.trim()?prompt:attachmentPrompt(fileRefs));if(needsAuth&&!reconnectHistory){openAccounts();return;}if(!text.trim()||busy||observedTurn.current?.busy||requestsRef.current.some(isUserInputRequest)||sendOwner.current||activeSend.current)return;
+  const draft=drafts.capture(),manual=textOverride===undefined,fileRefs=manual?draft.files:[];
+  if(modelRejectsImages&&fileRefs.some(file=>file.kind==='image')){setSendNotice(t('当前模型仅支持文字，请更换模型或移除图片。'));return;}
+  if(readingFiles.current.has(draft.entry))return;
+  const text=textOverride??(draft.text.trim()?draft.text:attachmentPrompt(fileRefs));if(needsAuth&&!reconnectHistory){openAccounts();return;}if(!text.trim()||busy||observedTurn.current?.busy||requestsRef.current.some(isUserInputRequest)||sendOwner.current||activeSend.current)return;
   const turnPlanning=planningRef.current;
   if(applying||connecting||selectionPending.current||historyHidden||handledSelection.current!==sessionNonceRef.current){setSendNotice(t('正在恢复会话，请稍后发送。'));return;}
   if(recovery){setSendNotice(t('请先恢复当前对话，输入草稿已保留。'));return;}
@@ -775,7 +779,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    return true;
   }
   if(!reconnectHistory&&!checkTurnResource())return;
-  const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,draft=drafts.capture(),manual=textOverride===undefined,resourceSelection=resourceRef.current?.selectionId||null;
+  const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,resourceSelection=resourceRef.current?.selectionId||null;
   let resourceWorkflow=resourceRef.current?.workflowReady===true,resourceGranted=resourceRef.current?.agentReady===true;
   let route=toolsRef.current.scope;const routeState=(resource:ComputeResourceState|null|undefined)=>resource?.kind==='ssh-connection'?JSON.stringify(route==='terminal-only'?resource.capabilities?.terminal:resource.capabilities?.service):null;let resourceRoute=routeState(resourceRef.current);
   const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current&&resourceSelection===(resourceRef.current?.selectionId||null)&&(waitingForConnection||(resourceRef.current?.kind==='ssh-connection'?acquiring||route===toolsRef.current.scope&&resourceRoute===routeState(resourceRef.current):resourceWorkflow===(resourceRef.current?.workflowReady===true)&&resourceGranted===(resourceRef.current?.agentReady===true)));
@@ -785,7 +789,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   const preparing=()=>activeSend.current===flight&&current()&&!flight.cancelled;
   let acknowledged=false,optimisticId:string|null=null;
   setSendNotice('');setStopStatus(null);setRetrying(null);setBusy(true);
-  const retainRequest=()=>{if(!manual&&drafts.retain(draft,text))setPrompt(drafts.text());};
+  const retainRequest=()=>{if(!manual)drafts.retain(draft,text);};
   try{
    let id=threadRef.current;
    let turnModel=model,turnEffort=effort;
@@ -810,7 +814,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     if(!sshResourceReady(state,toolsState)){setSendNotice(t(terminalNotice));return;}
     resourceRef.current=state;onComputeResource?.(state);toolsRef.current=toolsState;route=toolsState.scope;resourceRoute=routeState(state);acquiring=false;setTools(toolsState);
    }
-   const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:projectId||null,groupId:conversationGroupId||null,intent:text});if(!preparing())return;conversationRef.current?.(conversation,nonce);drafts.rebind(draft,id!);setPrompt(drafts.text());setThread(id);threadRef.current=id;setThreads(old=>[{id,name:conversation.name},...old.filter(value=>value.id!==id)]);
+   const conversation=await invoke<Conversation>('conversation.remember',{provider:selectedProvider,threadId:id,projectId:projectId||null,groupId:conversationGroupId||null,intent:text});if(!preparing())return;conversationRef.current?.(conversation,nonce);drafts.rebind(draft,id!);setThread(id);threadRef.current=id;setThreads(old=>[{id,name:conversation.name},...old.filter(value=>value.id!==id)]);
    if(turnTerminal&&!sshResourceReady(resourceRef.current,toolsRef.current)){setSendNotice(t(terminalNotice));return;}
    let taskId=action.taskId||conversation.taskId;
    if(shouldCreateWorkflow()){
@@ -859,7 +863,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   modelCallRef.current=null;setModelCall(null);
   setApplying(true);try{
    const preferences={contextWindow:contextWindow?Number(contextWindow):undefined,compactLimit:compactLimit?Number(compactLimit):undefined,effort};
-   if(connected){const result=await invoke('agent.configure',{provider:selectedProvider,preferences,threadId:thread,model:model||undefined});if(!current())return;if(result.studioRecovery?.status==='required'){setRecovery({threadId:result.studioRecovery.oldThreadId});return;}if(result.thread){drafts.rebind(draft,result.thread.id);setPrompt(drafts.text());setThread(result.thread.id);threadRef.current=result.thread.id;}setConnected(true);}
+   if(connected){const result=await invoke('agent.configure',{provider:selectedProvider,preferences,threadId:thread,model:model||undefined});if(!current())return;if(result.studioRecovery?.status==='required'){setRecovery({threadId:result.studioRecovery.oldThreadId});return;}if(result.thread){drafts.rebind(draft,result.thread.id);setThread(result.thread.id);threadRef.current=result.thread.id;}setConnected(true);}
    else await invoke('settings',{agent:preferences});
    if(!current())return;
    setUsage(null);setApplied(t('已应用；实际窗口以服务回报为准'));
@@ -907,7 +911,8 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  }
  const providerLabel=provider==='codex'?'Codex':provider==='kimi'?'Kimi':provider==='deepseek'?'DeepSeek API':provider==='compatible'?t('自定义 API'):'Qwen';
  const optionSummary=[providerLabel,models.find(m=>m.model===model)?.displayName||model,effort].filter(Boolean).join(' · ');
- const composerOwner=drafts.owner(),composerUnbound=composerOwner.provider!==provider||composerOwner.threadId!==thread;
+ const composerOwner=useSyncExternalStore(drafts.subscribe,drafts.attachmentOwner);
+ const composerUnbound=composerOwner.provider!==provider||composerOwner.threadId!==thread;
  const historyHidden=!!historyLoad||!!(sessionSelection&&handledSelection.current!==sessionSelection.nonce)||!!sessionSelection?.pending;
  const composerQuestions=historyHidden?[]:requests.filter(isUserInputRequest);
  const jumpRequest=attentionTarget?.provider===provider&&attentionTarget.threadId===thread&&'requestId' in attentionTarget.target
@@ -961,16 +966,16 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    }
    const result=await queueRpc({action:'read',...(pendingId?{pendingId}:{})});
    if(pendingId&&result.admitted&&mounted.current){
-    if(drafts.acknowledge(draft)&&followUpCurrent())setPrompt(drafts.text());
+    drafts.acknowledge(draft);
     forgetQueueAdmission(()=>localStorage,queueKey,pendingId);
    }
   })().catch(queueError);
  },[queueKey,historyHidden,composerUnbound,hidden,sessionSelection?.nonce]);
 
  async function enqueuePrompt(){
-  if(draftImageMismatch){setSendNotice(t('当前模型仅支持文字，请更换模型或移除图片。'));return;}
-  if(!queueKey||!queueAllowed||!followUpCurrent()||sendOwner.current||steering.current.has(queueKey)||queueAdmission.current.get(queueKey)?.pending)return;
   const draft=drafts.capture();
+  if(modelRejectsImages&&draft.files.some(file=>file.kind==='image')){setSendNotice(t('当前模型仅支持文字，请更换模型或移除图片。'));return;}
+  if(!queueKey||!queueAllowed||!followUpCurrent()||sendOwner.current||steering.current.has(queueKey)||queueAdmission.current.get(queueKey)?.pending)return;
   if(readingFiles.current.has(draft.entry))return;
   if(!draft.text.trim()&&!draft.files.length)return;
   const prior=queueAdmission.current.get(queueKey),fingerprint=JSON.stringify([draft.text,draft.files.map(file=>file.id)]);
@@ -988,11 +993,10 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    await queueRpc({action:'enqueue',after:turn,item});
    queueAdmission.current.delete(queueKey);
    if(!mounted.current)return;
-   const cleared=drafts.acknowledge(draft);
+   drafts.acknowledge(draft);
    forgetQueueAdmission(()=>localStorage,queueKey,id);
    if(skill)attachmentConsumedRef.current?.(skill.attachmentId);
    if(followUpCurrent()){
-    if(cleared)setPrompt(drafts.text());
     setSendNotice('');setNewWorkflow(false);
    }
   }catch(error){
@@ -1015,7 +1019,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   try{
    const result=item?await queueRpc({action:'steer',id:item.id,turnId:turn}):await invoke<AgentSteerResult>('agent.rpc',request);
    if(result?.turnId!==turn)throw Error(t('当前回复未确认引导。'));
-   if(!item&&mounted.current&&drafts.acknowledge(draft)&&followUpCurrent())setPrompt(drafts.text());
+   if(!item&&mounted.current)drafts.acknowledge(draft);
    if(followUpCurrent()){
     followLatest();
     if(!item)setMessages(previous=>[...previous,{id:request.params.clientUserMessageId,role:'user',text,turnId:turn,
@@ -1043,7 +1047,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   if(restoreText){
    if(readingFiles.current.has(drafts.capture().entry))return;
    try{
-    setPrompt(drafts.appendToDraft(provider,thread,item.text,item.files??[],{requireStorage:true}));
+    drafts.appendToDraft(provider,thread,item.text,item.files??[],{requireStorage:true});
     refreshFiles();
    }catch(error){queueError(error);return;}
   }
@@ -1066,16 +1070,16 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   queue?.pause?t('队列已暂停。'):queueFlight?t('正在发送排队消息…'):
   queue?.after?t('等待当前回复完成'):t('等待发送');
  const queueCanResume=!!queue?.pause&&!busy&&!queueFlight&&!queueItems.some(item=>item.status==='unconfirmed')&&followUpControlsReady;
- const draftImageMismatch=drafts.files().some(file=>file.kind==='image')&&currentModel?.inputModalities&&!currentModel.inputModalities.includes('image');
- const draftHasFiles=drafts.files().length>0,fileImportBusy=readingFiles.current.has(drafts.capture().entry);
- const supportsDraftSteer=busy&&provider!=='kimi'&&!skill&&!newWorkflow&&!draftHasFiles;
+ const draftFiles=drafts.files(),draftHasFiles=draftFiles.length>0,fileImportBusy=readingFiles.current.has(drafts.capture().entry);
+ const draftImageMismatch=modelRejectsImages&&draftFiles.some(file=>file.kind==='image');
+ const canSteerTextDraft=busy&&provider!=='kimi'&&!skill&&!newWorkflow;
+ const supportsDraftSteer=canSteerTextDraft&&!draftHasFiles;
  const queueHint=t(busy&&!turn?'回复开始后可以排队':!supportsDraftSteer?'Enter 排队 · Shift+Enter 换行':
   followUpEnter==='steer'?'Enter 引导 · Ctrl/Cmd+Enter 排队 · Shift+Enter 换行':'Enter 排队 · Ctrl/Cmd+Enter 引导 · Shift+Enter 换行');
- const steerDraftAllowed=!fileImportBusy&&canSteer&&supportsDraftSteer&&!!prompt.trim();
  function sendFromComposer(alternate=false){
   if(!queueComposer){void send();return;}
   const action=alternate?(followUpEnter==='queue'?'steer':'queue'):followUpEnter;
-  if(action==='steer'&&supportsDraftSteer)void steer();
+  if(action==='steer'&&canSteerTextDraft&&!drafts.files().length)void steer();
   else void enqueuePrompt();
  }
  function stopWithQueue(){
@@ -1177,7 +1181,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   {sessionSelection?.pending&&sessionSelection.error&&<div className="notice" role="alert"><span>{sessionSelection.error}</span><button className="button" onClick={()=>onNewConversation?.()}>{t("重试")}</button></div>}
   {connected&&composerUnbound&&!historyLoad&&!recovery&&!applying&&!connecting&&!sessionSelection?.pending&&<div className="agent-send-recovery" data-testid="agent-draft-unbound" role="status"><span>{t('当前对话尚未恢复，输入草稿已保留。')}</span>{composerOwner.provider===provider&&composerOwner.threadId&&<button className="button" data-testid="agent-restore-draft" disabled={busy} onClick={()=>void resume(composerOwner.threadId!)}>{t('恢复当前对话')}</button>}</div>}
   {promptProposal&&promptProposal.provider===composerOwner.provider&&promptProposal.threadId===composerOwner.threadId&&<section className="agent-prompt-proposal" data-testid="agent-prompt-proposal" role="region" aria-label={t('处理新的讨论内容')}><strong>{t('已有未发送草稿，请选择如何加入新内容。')}</strong><details open={promptProposal.text.length<=280} data-testid="agent-prompt-preview"><summary>{t('查看待加入内容')}</summary><pre tabIndex={0}>{promptProposal.text}</pre></details><div className="button-row"><button className="button primary" data-testid="agent-prompt-append" onClick={()=>resolvePromptProposal('append')}>{t('追加到草稿')}</button><button className="button" data-testid="agent-prompt-replace" onClick={()=>resolvePromptProposal('replace')}>{t('替换草稿')}</button><button className="button" data-testid="agent-prompt-cancel" onClick={()=>resolvePromptProposal('cancel')}>{t('保留原稿')}</button></div></section>}
-  {sendNotice&&!composerUnbound&&<div className="agent-send-notice" role="status">{sendNotice}</div>}
+  <ComposerNotice visible={!composerUnbound} handle={sendNotice}/>
   {!historyHidden&&queueItems.length>0&&<section className="agent-follow-up-queue" data-testid="agent-follow-up-queue" aria-label={t('待发送消息')}>
    <header><strong>{t('待发送消息')} · {queueItems.length}</strong><small role="status">{queueNotice}</small>
     {queueCanResume&&<button className="text-button" type="button" data-testid="agent-resume-queue" onClick={()=>void queueAction({action:'resume'})}>{t('继续发送队列')}</button>}
@@ -1232,36 +1236,21 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
       const answer=update(initialQuestionProgress).answers.action;
       if(answer?.kind==='choice'){answeredMissingTool.current=missingTool.id;missingTool.onAnswer(answer.value===setupToolLabel?'setup':'later');}
      }}/>
-   </div>:<>
-     {skill&&<div className="skill-chip"><span>{t('仅下条消息')} · {skill.name}</span><button type="button" aria-label={t('移除本条消息技能')} onClick={()=>attachmentClearRef.current?.()}>×</button></div>}
-     {newWorkflow&&<p className="composer-workflow-notice" role="status">{t('下条消息将新建流程；原流程保留。')}</p>}
-    {draftImageMismatch&&<small className="chat-file-capability" role="status">{t('当前模型仅支持文字，请更换模型或移除图片。')}</small>}
-    <ChatFiles files={drafts.files()} preview={showFile} remove={id=>{drafts.removeFile(id);refreshFiles();}}/>
-    <input ref={filePicker} hidden type="file" multiple data-testid="chat-file-picker" onChange={event=>{const files=Array.from(event.target.files||[]);event.target.value='';void importFiles(files);}}/>
-    <textarea ref={composerInput} aria-describedby={composerShortcuts} onPaste={event=>{const files=Array.from(event.clipboardData.files);if(files.length){event.preventDefault();void importFiles(files);}}} data-guide-target="composer" aria-label={t('对话草稿')} aria-busy={applying||connecting} value={prompt} onChange={e=>updatePrompt(e.target.value)} placeholder={t('输入消息…')} onKeyDown={e=>{
-     if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){
-      e.preventDefault();if(!e.repeat)sendFromComposer(e.ctrlKey||e.metaKey);
-     }
-    }}/>
+   </div>:<Composer drafts={drafts} inputRef={composerInput} working={applying||connecting} onEdit={updatePrompt} onSend={sendFromComposer}
+    sendDisabled={pendingDefaults||!!recovery||applying||connecting||selectionPending.current||historyHidden||composerUnbound||!localApiThread&&(!connected||!models.length)||terminalSelected&&!terminalReady&&!canAcquireTerminal}
+    skillName={skill?.name} onClearSkill={()=>attachmentClearRef.current?.()} newWorkflow={newWorkflow}
+    attachments={{pickDisabled:historyHidden||composerUnbound,busy:fileImportBusy,imageMismatch:draftImageMismatch,
+     onImport:files=>void importFiles(files),onPreview:showFile,onRemove:id=>{drafts.removeFile(id);refreshFiles();}}}
+    followUp={queueComposer?{hint:queueHint,queueAllowed,onQueue:()=>void enqueuePrompt(),stopControl,
+     steer:provider!=='kimi'&&busy?{allowed:!fileImportBusy&&canSteer&&supportsDraftSteer,busy:steering.current.has(queueKey??''),
+      title:t(draftHasFiles?'带文件的消息将在下一轮发送':skill?'带技能的消息将在下一轮发送':'将文字发送到当前回复'),onSteer:()=>void steer()}:undefined}:undefined}>
     {connected&&!options&&<div className="composer-model-selection" data-testid="composer-model-selection"><label>{t('模型')}<select data-testid="composer-model" aria-label={t('对话模型')} value={model} disabled={busy||applying||connecting} onChange={e=>void selectModel(e.target.value)}>{models.map(m=><option key={m.id||m.model} value={m.model} disabled={!!thread&&!!currentModel?.profileId&&m.profileId!==currentModel.profileId}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label>{t('推理等级')}<select data-testid="composer-effort" aria-label={t('对话推理等级')} value={effort} disabled={busy||applying||connecting||!efforts.length} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((entry:any)=><option key={entry.reasoningEffort} value={entry.reasoningEffort}>{entry.reasoningEffort==='off'?t('关闭思考'):entry.reasoningEffort}</option>)}</select></label></div>}
      <div className="agent-compose-context">
       <label className="agent-mode-toggle"><input data-testid="agent-planning-mode" type="checkbox" checked={planningMode} disabled={busy||connecting||applying} onChange={e=>onPlanningModeChange(e.target.checked)}/>{t('任务规划模式')}</label>
       <HelpTip label={t('任务规划模式')} content={t(terminalPlanning?'规划已开启，可先讨论方案':workflowId&&!planningMode?'此对话已绑定流程，可直接用自然语言调整':'生成计算流程和参数，等待审阅执行')}/>
       {workflowId&&workflowId!==visibleWorkflowId&&<button className="text-button" data-testid="agent-current-workflow" disabled={busy||applying} onClick={()=>openTaskRef.current?.(workflowId)}>{t('打开当前流程')}</button>}
      </div>
-   </>}
-   {!(composerQuestion&&questionDraft)&&!missingRequest&&<div className="composer-bottom">
-    <button type="button" className="icon-button chat-file-add" data-testid="chat-file-add" title={t('添加文本、PDF、Office 文档或图片，也可拖入或粘贴')} aria-label={t('添加文件或图片')} disabled={fileImportBusy||historyHidden||composerUnbound} onClick={()=>filePicker.current?.click()}><Paperclip size={17}/></button>
-    {fileImportBusy&&<small role="status">{t('正在读取附件…')}</small>}
-    <span id={composerShortcuts} data-testid={queueComposer?'agent-follow-up-shortcuts':undefined}>{queueComposer?queueHint:t('Enter 发送 · Shift+Enter 换行')}</span>
-    {queueComposer?<div className="agent-follow-up-actions">
-     {provider!=='kimi'&&busy&&<button type="button" className="button" data-testid="agent-steer" disabled={!steerDraftAllowed}
-      title={t(draftHasFiles?'带文件的消息将在下一轮发送':skill?'带技能的消息将在下一轮发送':'将文字发送到当前回复')} onClick={()=>void steer()}>{t(steering.current.has(queueKey??'')?'引导中…':'引导')}</button>}
-     <button type="button" className="button primary" data-testid="agent-queue" disabled={draftImageMismatch||fileImportBusy||!queueAllowed||!prompt.trim()&&!draftHasFiles} title={t('本对话的当前回复完成后发送')}
-      onClick={()=>void enqueuePrompt()}><ListPlus size={15}/>{t('排队')}</button>
-     {stopControl}
-    </div>:<button className="send" aria-label={tr("发送")} onClick={()=>sendFromComposer()} disabled={pendingDefaults||!!recovery||applying||connecting||selectionPending.current||historyHidden||composerUnbound||!localApiThread&&(!connected||!models.length)||terminalSelected&&!terminalReady&&!canAcquireTerminal||draftImageMismatch||fileImportBusy||!prompt.trim()&&!draftHasFiles}><ArrowUp size={17}/></button>}
-   </div>}
+   </Composer>}
   </div>
   {branchPreview&&<ConversationExcerptDialog value={branchPreview} busy={branching} onClose={()=>setBranchPreview(null)} onConfirm={()=>{const {conversationId,turnId,itemId}=branchPreview.source;void createDiscussion({conversationId,turnId,...itemId?{itemId}:{}},branchPreview.revision);}}/>}
   {filePreview&&filePreview.scope===JSON.stringify(drafts.attachmentOwner())&&<ChatFilePreview value={filePreview.value} close={()=>setFilePreview(null)}/>}

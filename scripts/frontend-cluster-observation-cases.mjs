@@ -24,7 +24,7 @@ export async function frontendClusterObservationCases({check,out}){
  await check('cluster-observation-terminal-stops-and-manual-logs',async page=>{
   await configureFixture(page);
   await page.evaluate(async()=>{
-   const {ClusterRunPage}=await import('/frontend/features/cluster/ClusterPage.tsx');
+   const {default:ClusterRunPage}=await import('/frontend/features/cluster/ClusterRunPage.tsx');
    window.testRoot.render(window.React.createElement(ClusterRunPage,{id:window.__test.job.id,onAgent:()=>{},onError:error=>{throw error;}}));
   });
   const panel=page.getByTestId('cluster-review');

@@ -58,6 +58,7 @@ export function deploymentHarness({initial=deploymentFixture(),override,properti
   if(name==='../../../contracts/workflows/task-fields.mjs')return taskFields;
   if(name==='../../../contracts/compute/task-worker-binding.mjs')return taskWorkerBinding;
   if(["./deployment-draft.mjs","../../../contracts/compute/deployment-draft.mjs"].includes(name))return drafts;
+  if(name==="./task-draft-storage")return {taskDraftStorage:storage};
   if(["./draft-outbox.mjs"].includes(name))return scienceDrafts;
   if(["../../../contracts/compute/deployment-authorization.mjs"].includes(name))return authorization;
   if(name==="../compute/project-setup-defaults.mjs")return setup;

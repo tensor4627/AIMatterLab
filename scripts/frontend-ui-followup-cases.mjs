@@ -10,6 +10,81 @@ export async function frontendUiFollowupCases({check,out}){
    if(method==='compute.resource.status')return {schemaVersion:1,kind:null,status:'none',selectionId:null};return original(method,data);
   };return window.renderTest('App');
  },{custom,empty});await page.locator('.primary-navigation').waitFor({state:'attached'});}
+ await check('setup-spotlight-visible-target-geometry',async page=>{
+  await page.setViewportSize({width:1024,height:768});
+  await page.evaluate(async()=>{
+   const {default:GuideSpotlight}=await import('/frontend/features/onboarding/GuideSpotlight.tsx');
+   const {Modal}=await import('/frontend/ui/Dialogs.tsx');
+   const {createElement:h,useState}=window.React;
+   function Fixture(){
+    const [variant,setVariant]=useState('no-secondary'),[otherModal,setOtherModal]=useState(false);
+    return h('div',{className:'application'},
+      h('header',{className:'titlebar',style:{height:73}},
+        h('button',{onClick:()=>setVariant('clipped')},'Mount secondary control'),
+        h('button',{onClick:()=>setVariant('large')},'Mount full-size control'),
+        h('button',{onClick:()=>setOtherModal(true)},'Open separate dialog')),
+      variant==='large'?h('button',{'data-guide-target':'discover',style:{position:'fixed',inset:'77px 0 0'}},'Full-size control'):
+        h('details',{style:{position:'fixed',left:20,top:180}},h('summary',null,'Expand primary control'),
+          h('button',{'data-guide-target':'discover'},'Primary control')),
+      variant==='clipped'&&h('div',{'data-testid':'spotlight-clip',style:{position:'fixed',left:20,top:82,width:145,height:28,overflow:'hidden'}},
+        h('button',{'data-guide-target':'connect-worker',style:{margin:'-12px 0 0 -7px',width:180,height:50}},'Secondary control')),
+      h(GuideSpotlight,{step:'environments',english:true}),
+      otherModal&&h(Modal,{title:'Separate dialog',onClose:()=>setOtherModal(false)},h('input',{'aria-label':'Dialog input'})));
+   }
+   window.testRoot.render(h(Fixture));
+  });
+  const spot=page.getByTestId('guide-spotlight'),hint=spot.locator('p');
+  await spot.getByRole('status').getByText('The control is out of view.',{exact:false}).waitFor();
+  assert.equal(await spot.locator('.guide-focus-ring').count(),0);
+
+  await page.evaluate(()=>{
+   window.spotlightFrames=[];
+   function sample(){
+    const visible=document.querySelector('.guide-spotlight[data-ready="true"][data-target="connect-worker"]');
+    if(visible){
+     const card=visible.querySelector('aside');
+     window.spotlightFrames.push({hint:card.querySelector('p').textContent,top:card.getBoundingClientRect().top});
+    }
+    if(window.spotlightFrames.length<2)requestAnimationFrame(sample);
+   }
+   requestAnimationFrame(sample);
+  });
+  await page.getByRole('button',{name:'Mount secondary control'}).click();
+  await page.waitForFunction(()=>window.spotlightFrames.length===2);
+  const frames=await page.evaluate(()=>window.spotlightFrames);
+  assert.deepEqual(frames,[0,1].map(()=>({hint:'Connect the job service here first. Discovery becomes available on this page once connected.',top:frames[0].top})));
+  const geometry=await spot.evaluate(layer=>{
+   const ring=layer.querySelector('.guide-focus-ring').getBoundingClientRect();
+   const clip=document.querySelector('[data-testid="spotlight-clip"]').getBoundingClientRect();
+   const titlebar=document.querySelector('.titlebar').getBoundingClientRect(),card=layer.querySelector('aside').getBoundingClientRect();
+   const caret=getComputedStyle(layer.querySelector('.guide-tip-position'),'::before');
+   return {visibleClip:['top','left','right','bottom'].every(key=>ring[key]===clip[key]),
+    safe:card.top>=titlebar.bottom+9.99&&card.bottom<=innerHeight&&card.right<=innerWidth,
+    avoids:card.left>=ring.right||card.right<=ring.left||card.top>=ring.bottom||card.bottom<=ring.top,
+    arrow:parseFloat(caret.width)>0&&parseFloat(caret.height)>0};
+  });
+  assert.deepEqual(geometry,{visibleClip:true,safe:true,avoids:true,arrow:true});
+  await page.screenshot({path:path.join(out,'spotlight-clipped-secondary.png')});
+  await page.getByText('Expand primary control',{exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.guide-spotlight[data-ready="true"]')?.dataset.target==='discover');
+  assert.match(await hint.innerText(),/Use this button to discover/);
+
+  await page.getByRole('button',{name:'Open separate dialog'}).click();
+  const dialog=page.getByRole('dialog',{name:'Separate dialog'});
+  await dialog.waitFor();await spot.waitFor({state:'detached'});
+  await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});await spot.waitFor();
+
+  await page.getByRole('button',{name:'Mount full-size control'}).click();
+  await page.waitForFunction(()=>document.querySelector('.guide-spotlight[data-ready="true"][data-docked="true"]'));
+  assert.match(await spot.getAttribute('data-side'),/^(top|bottom)$/);
+  assert.equal(await spot.evaluate(layer=>{
+   const card=layer.querySelector('aside').getBoundingClientRect(),title=layer.ownerDocument.querySelector('.titlebar').getBoundingClientRect();
+   const control=layer.ownerDocument.querySelector('[data-guide-target="discover"]');
+   return card.top>=title.bottom&&card.bottom<=innerHeight&&control===document.elementFromPoint(innerWidth/2,innerHeight/2)&&
+    (Math.abs(card.top-title.bottom-10)<1||Math.abs(card.bottom-innerHeight+10)<1);
+  }),true);
+  await page.screenshot({path:path.join(out,'spotlight-full-size-docked.png')});
+ });
  await check('interaction-experience-guided-connected-pages',async page=>{
   await page.evaluate(()=>{
    const original=window.studio.invoke;
@@ -25,14 +100,14 @@ export async function frontendUiFollowupCases({check,out}){
   await page.waitForFunction(()=>window.__test.calls.some(c=>c.method==='worker.request'&&c.data.target==='/api/runs'));
   await guide.getByRole('button',{name:'配置我的第一个科学工具'}).click();
   await guide.getByRole('button',{name:'登记已有环境'}).click();
-  await page.waitForFunction(()=>document.querySelector('dialog[open]')?.dataset.target==='discover');
-  await page.keyboard.press('Space');await spot.waitFor({state:'detached'});
+  await page.waitForFunction(()=>document.querySelector('.guide-spotlight[data-ready="true"]')?.dataset.target==='discover');
+  await spot.getByRole('button').press('Space');await spot.waitFor({state:'detached'});
   assert.equal(await page.getByTestId('discover-compute').evaluate(el=>el===document.activeElement),true);
   await page.getByTestId('setup-lesson').click();
   await guide.getByRole('button',{name:/跟着示例走一遍/}).click();
   await guide.getByRole('button',{name:'查看结果',exact:true}).click();
   await guide.getByRole('button',{name:'打开运行记录'}).click();
-  await page.waitForFunction(()=>document.querySelector('dialog[open]')?.dataset.target==='run-record');
+  await page.waitForFunction(()=>document.querySelector('.guide-spotlight[data-ready="true"]')?.dataset.target==='run-record');
   await spot.getByRole('button').click();
   assert.equal(await page.locator('.job-record-open').first().evaluate(el=>el===document.activeElement),true);
   const calls=await page.evaluate(()=>window.__test.calls);

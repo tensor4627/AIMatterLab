@@ -217,12 +217,116 @@ export async function frontendChatExperienceCases({check,out}){
   assert((await page.evaluate(()=>window.__test.transcriptTraversals()))>initial);
  });
 
+ await check('chat-experience-composer-isolates-agent-parent-and-sends-latest-draft',async page=>{
+  await setup(page);
+  await page.evaluate(()=>{
+   window.__chat.agentRenders=0;
+   // Agent reads activity.provider in its render, even for activity from a different provider.
+   return window.chatRender({activity:{get provider(){window.__chat.agentRenders++;return 'kimi';}}});
+  });
+  const composer=page.getByRole('textbox',{name:'对话草稿'});
+  const send=page.getByRole('button',{name:'发送',exact:true});
+  const notice=page.locator('.agent-send-notice');
+  const renderCount=()=>page.evaluate(()=>window.__chat.agentRenders);
+  const measured=[];
+  async function measure(edit,perform){
+   const before=await renderCount();
+   await perform();
+   measured.push({edit,agentRenders:await renderCount()-before});
+  }
+  await composer.fill('Draft before connecting');
+  await composer.press('Enter');
+  await notice.waitFor();
+  await measure('clear notice and type',async()=>{
+   await composer.press('End');
+   await composer.pressSequentially(' still here');
+   await notice.waitFor({state:'hidden'});
+  });
+  await page.getByTestId('agent-connect').click();
+  await page.getByTestId('composer-model').waitFor();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  await measure('replace with whitespace',async()=>{
+   await composer.fill(' ');
+   assert.equal(await send.isDisabled(),true);
+  });
+  await measure('type and insert a new line',async()=>{
+   await composer.pressSequentially('First line');
+   await composer.press('Shift+Enter');
+   await composer.pressSequentially('Second line');
+   assert.equal(await composer.inputValue(),' First line\nSecond line');
+   assert.equal(await send.isEnabled(),true);
+  });
+  assert.equal((await starts(page)).length,0);
+  const beforeExternal=await renderCount();
+  await page.evaluate(()=>window.chatRender({intent:{id:'external-proposal',text:'Text supplied by a workflow'}}));
+  await page.getByTestId('agent-prompt-append').click();
+  assert.equal(await composer.inputValue(),' First line\nSecond line\n\nText supplied by a workflow');
+  const externalRenders=await renderCount()-beforeExternal;
+  await composer.fill('Submit this latest draft');
+  await composer.press('Enter');
+  await page.waitForFunction(()=>window.__test.calls.some(call=>call.method==='agent.rpc'&&call.data.method==='turn/start'));
+  const calls=await starts(page);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].data.params.input[0].text,'Submit this latest draft');
+  await page.waitForFunction(()=>document.querySelector('textarea[data-guide-target="composer"]').value==='');
+  await fs.writeFile(path.join(out,'composer-render-counts.json'),JSON.stringify({measured,externalRenders},null,2)+'\n');
+  assert(externalRenders>0);
+  assert.deepEqual(measured.map(row=>row.agentRenders),[0,0,0]);
+ });
+
+ await check('chat-experience-composer-ime-commits-before-send',async page=>{
+  await setup(page);
+  await page.getByTestId('agent-connect').click();
+  const composer=page.getByRole('textbox',{name:'对话草稿'});
+  await composer.focus();
+  await composer.evaluate(input=>{
+   window.__chat.imeEvents=[];
+   for(const type of ['compositionstart','compositionend','keydown'])input.addEventListener(type,event=>{
+    window.__chat.imeEvents.push({type,key:event.key,isComposing:event.isComposing,keyCode:event.keyCode});
+   });
+  });
+  const session=await page.context().newCDPSession(page);
+  await session.send('Input.imeSetComposition',{text:'ni',selectionStart:2,selectionEnd:2});
+  // An IME handles the confirm key before it can become a textarea newline.
+  const confirm={key:'Enter',code:'Enter',windowsVirtualKeyCode:229,nativeVirtualKeyCode:229};
+  await session.send('Input.dispatchKeyEvent',{type:'rawKeyDown',...confirm});
+  await session.send('Input.dispatchKeyEvent',{type:'keyUp',...confirm});
+  assert.equal((await starts(page)).length,0);
+  await session.send('Input.insertText',{text:'拟合'});
+  assert.equal(await composer.inputValue(),'拟合');
+  await composer.press('Enter');
+  await page.waitForFunction(()=>window.__test.calls.some(call=>call.method==='agent.rpc'&&call.data.method==='turn/start'));
+  const calls=await starts(page),events=await page.evaluate(()=>window.__chat.imeEvents);
+  await fs.writeFile(path.join(out,'composer-ime.json'),JSON.stringify({events,submissions:calls.length},null,2)+'\n');
+  assert(events.some(event=>event.type==='compositionstart'));
+  assert(events.some(event=>event.type==='compositionend'));
+  assert(events.some(event=>event.key==='Enter'&&(event.isComposing||event.keyCode===229)));
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].data.params.input[0].text,'拟合');
+ });
+
  await check('chat-experience-long-history-preserves-selection-and-completed-dom',async page=>{
   await setup(page);await page.getByTestId('agent-connect').click();await page.locator('.composer textarea').fill('Synthetic history rendering check');await page.getByRole('button',{name:'发送',exact:true}).click();await page.waitForFunction(()=>window.__test.calls.some(call=>call.method==='agent.rpc'&&call.data.method==='turn/start'));
   await page.evaluate(()=>{for(let i=0;i<250;i++)window.__test.events.forEach(fn=>fn({provider:'codex',method:'item/agentMessage/delta',params:{threadId:'fixture-thread',itemId:'history-'+i,delta:'History '+i+' — **stable selected text** and `code`.'}}));});await page.locator('[data-message-id="history-249"]').waitFor();
   await page.evaluate(()=>{const scroll=document.querySelector('.chat-scroll'),message=document.querySelector('[data-message-id="history-5"]'),text=message.querySelector('p').firstChild;scroll.scrollTop=message.offsetTop-scroll.offsetTop;scroll.dispatchEvent(new Event('scroll'));const selection=window.getSelection(),range=document.createRange();range.setStart(text,0);range.setEnd(text,Math.min(text.textContent.length,9));selection.removeAllRanges();selection.addRange(range);window.__chat.anchor=text;window.__chat.selected=selection.toString();window.__chat.scrollTop=scroll.scrollTop;window.__chat.mutations=0;window.__chat.observer=new MutationObserver(records=>window.__chat.mutations+=records.length);window.__chat.observer.observe(message,{subtree:true,childList:true,characterData:true});});
   for(let i=0;i<12;i++)await page.evaluate(()=>{window.__test.events.forEach(fn=>fn({provider:'codex',method:'item/agentMessage/delta',params:{threadId:'fixture-thread',itemId:'history-249',delta:' latest'}}));return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
   const state=await page.evaluate(()=>({sameAnchor:window.getSelection().anchorNode===window.__chat.anchor,selection:window.getSelection().toString(),expected:window.__chat.selected,position:document.querySelector('.chat-scroll').scrollTop,expectedPosition:window.__chat.scrollTop,mutations:window.__chat.mutations}));assert.equal(state.sameAnchor,true);assert.equal(state.selection,state.expected);assert.equal(state.mutations,0);assert(Math.abs(state.position-state.expectedPosition)<=1);await page.getByTestId('agent-new-messages').waitFor();await snapshot(page,'chat-stable-long-history');
+  await page.evaluate(()=>window.__test.events.forEach(fn=>fn({provider:'codex',method:'turn/completed',params:{threadId:'fixture-thread',turn:{id:'fixture-turn',status:'completed'}}})));
+  await page.getByRole('button',{name:'发送',exact:true}).waitFor();
+  const history=await page.evaluate(()=>{
+   const selection=window.getSelection();selection.removeAllRanges();
+   const found=window.find('History 5 —',false,false,true);
+   const foundText=selection.toString();
+   const textNode=id=>document.querySelector('[data-message-id="history-'+id+'"] p').firstChild;
+   const range=document.createRange(),start=textNode(5),end=textNode(175);
+   range.setStart(start,0);range.setEnd(end,end.textContent.length);
+   selection.removeAllRanges();selection.addRange(range);
+   const text=selection.toString();
+   return {rows:document.querySelectorAll('[data-message-id^="history-"]').length,found,foundText,
+    startsAtOldRow:text.startsWith('History 5 —'),hasMiddleRow:text.includes('History 150 —'),endsAtNewerRow:text.endsWith('History 175 — ')};
+  });
+  await fs.writeFile(path.join(out,'composer-long-history.json'),JSON.stringify({streaming:state,completed:history},null,2)+'\n');
+  assert.deepEqual(history,{rows:250,found:true,foundText:'History 5 —',startsAtOldRow:true,hasMiddleRow:true,endsAtNewerRow:true});
  });
 
  await check('chat-experience-round2-narrow-large-font-proposal-keyboard',async page=>{

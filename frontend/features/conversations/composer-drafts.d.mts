@@ -11,9 +11,10 @@ export interface ComposerDraftStore {
  rebind(snapshot:ComposerDraftSnapshot,threadId:string):void;
  rekey(provider:string,oldThreadId:string,newThreadId:string,uploadsRetained?:boolean):{text:string;attachmentReview:boolean};
  discard(provider:string,threadId:string):string;
+ subscribe(listener:()=>void):()=>void;
  text():string;
  owner():{provider:string;threadId:string|null};
- attachmentOwner():ChatAttachmentOwner;
+ attachmentOwner():Readonly<ChatAttachmentOwner>;
  files():ChatAttachmentRef[];
  addToSnapshot(snapshot:ComposerDraftSnapshot,files:readonly ChatAttachmentRef[]):boolean;
  addFiles(files:readonly ChatAttachmentRef[]):void;

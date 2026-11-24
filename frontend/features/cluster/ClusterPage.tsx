@@ -5,9 +5,8 @@ import ClusterEnvironmentEditor from './ClusterEnvironmentEditor';
 import {editEnvironmentRow,makeEnvironmentDraft,readEnvironmentText,writableEnvironment,type ClusterEnvironmentDraft} from './cluster-environment-draft';
 import type {SshAuthenticationRequest} from './SshConnectionGuide';
 import QueueChoices from "../compute/QueueChoices";
-import ClusterResults from './ClusterResults';
 import {useEffect,useRef,useState} from 'react';
-import {Server,ShieldCheck,Save,Sparkles,RefreshCw,Plus,Eye,EyeOff,Play,Terminal} from 'lucide-react';
+import {Server,Save,Sparkles,RefreshCw,Eye,EyeOff,Terminal} from 'lucide-react';
 import {api} from '../../api/worker';
 import {ObservedRead,type ReadObservation} from '../../api/observed-read.mjs';
 import {invoke} from '../../api/studio';
@@ -16,36 +15,10 @@ import {type Settings} from '../../../contracts/dto/settings';
 import {type ClusterRun} from '../../../contracts/dto/runs';
 import {t} from "../../ui/i18n";
 import Tooltip from "../../ui/Tooltip";
-import {CodeEditor} from "../../ui/widgets";
 import {Badge,statusNames} from "../../ui/Dialogs";
+import {ClusterObservationStatus,observationDelay,usePageVisibility} from './cluster-observation';
+import {clusterObservationTime,clusterReadiness,latestClusterObservation,type ClusterConnectionCheck,type ClusterProbe,type ClusterSshTest} from './cluster-readiness';
 import './cluster.css';
-import {EvidenceSelection,evidencePreSelection,type EvidenceLineRange} from '../conversations/EvidenceSelection';
-type ClusterConnectionObservation=ClusterRun&{connection_action?:{kind:'authenticate_original_run';code:'needs_human_auth';runId:string}|null};
-const observationDelay=10000;
-const terminalStatuses:readonly ClusterRun['status'][]=['succeeded','failed','cancelled'];
-
-function usePageVisibility(){
- const visible=()=>typeof document==='undefined'||document.visibilityState!=='hidden';
- const [shown,setShown]=useState(visible);
- useEffect(()=>{
-  if(typeof document==='undefined')return;
-  const update=()=>setShown(visible());
-  document.addEventListener('visibilitychange',update);
-  return()=>document.removeEventListener('visibilitychange',update);
- },[]);
- return shown;
-}
-
-function ClusterObservationStatus({connected,observedAt,error,paused=false,awaitingCurrent=false}:{connected:boolean;observedAt?:number|null;error?:boolean;paused?:boolean;awaitingCurrent?:boolean}){
- const retained=observedAt!=null;
- const message=!connected?'作业服务暂不可用。':error?(retained?'记录读取失败 · 保留上次记录':'读取作业记录失败。'):awaitingCurrent?'上次记录':null;
- if(!message&&!retained)return null;
- return <p className={message?'notice':'muted'} role={message?'status':undefined} data-testid="cluster-observation-status" data-stale={!!message&&retained}>
-  {message&&t(message)}{message&&retained?' · ':null}
-  {retained&&<>{t('最近读取')} <time dateTime={new Date(observedAt).toISOString()}>{new Date(observedAt).toLocaleString()}</time></>}
-  {paused&&connected&&<small> · {t('自动同步已暂停')}</small>}
- </p>;
-}
 
 function useClusterMonitor(source:string,generation:number,enabled:boolean){
  const [last,setLast]=useState<{source:string;state:ReadObservation<ClusterRun[]>}|null>(null);
@@ -81,35 +54,81 @@ function connectionScopeKey(value:any,via:string,projectId:string|undefined,work
 function safeProbeSummary(probe:any){const status=(v:unknown)=>['passed','failed','not_run','blocked','mismatch','unavailable','unknown','needs_human_auth'].includes(String(v))?v:'not_run',scheduler=(v:unknown)=>['lsf','slurm'].includes(String(v))?v:null;return {selected_scheduler:scheduler(probe?.selected_scheduler),detected_schedulers:Array.isArray(probe?.detected_schedulers)?probe.detected_schedulers.filter((v:unknown)=>scheduler(v)):[],ssh_status:status(probe?.ssh_status),scheduler_status:status(probe?.scheduler_status),queue_status:status(probe?.queue_status),visible_queue_count:Array.isArray(probe?.queues)?new Set(probe.queues.filter((v:unknown)=>typeof v==='string')).size:null};}
 const needsHumanAuth=(error:unknown)=>String(error).includes('needs_human_auth');
 const resourceLimits=['cpus','gpus','memory_mb'] as const;
+const readinessLinks=[
+ ['ssh','connection','SSH 认证'],['scheduler','environment','调度器探测'],
+ ['queues','queues','队列策略'],['science','science','科学环境']
+] as const;
+const readinessLabels={unknown:'未知',configured:'已配置',verified:'已验证',stale:'需要重新检查',expired:'已过期',failed:'检查失败'} as const;
 const blank={auth_mode:'key',proxy_jump:[] as string[],name:'SSH 集群',scheduler:'lsf',host:'',username:'',target:'',port:22,identity_file:'',ssh_client:'/mnt/c/Windows/System32/OpenSSH/ssh.exe',via:[],remote_root:'~/.gpu-sampling-studio/runs',queue:'',activation:'',environment:{executables:{python:'/usr/bin/python3'},repositories:{},variables:{}},limits:{cpus:64,gpus:8,memory_mb:262144}};
 export default function ClusterPage({worker,workerGeneration=0,sourceId='',visible=true,project,settings,onError,onRefresh,onAgent,onRun,onTerminal,onConnectCompute,onAuthenticate,serviceVersion,selectedClusterId,draft,onQueueTest}:{onQueueTest?:(text:string)=>void|Promise<void>;selectedClusterId?:string;serviceVersion?:'current'|'different'|'unconfirmed';onAuthenticate:(request:SshAuthenticationRequest)=>void;onConnectCompute:()=>Promise<unknown>;onTerminal:(id:string,mode:'interactive'|'key',version:number)=>void;worker:boolean;workerGeneration?:number;sourceId?:string;visible?:boolean;project?:Project;settings:Settings;onError:(e:unknown)=>void;onRefresh:()=>void;onAgent:(text:string)=>void;onRun:(id:string)=>void;draft?:any}){
  const [readRoots,setReadRoots]=useState('');
  const operation=useRef(false),[busyLabel,setBusyLabel]=useState('');
  function beginOperation(label:string){if(operation.current)return false;operation.current=true;setBusyLabel(label);setBusy(true);return true;}
  function finishOperation(){operation.current=false;if(mounted.current)setBusy(false);}
- const [profiles,setProfiles]=useState<any[]>([]),[existing,setExisting]=useState<ExistingSshReference[]>([]),[value,setValue]=useState<any>(blank),[environment,setEnvironment]=useState(()=>makeEnvironmentDraft(blank.environment)),[via,setVia]=useState(''),[show,setShow]=useState(false),[busy,setBusy]=useState(false),[probe,setProbe]=useState<any>(null),[tab,setTab]=useState('connection'),[notice,setNotice]=useState(''),[skillSource,setSkillSource]=useState('');
+ const [profiles,setProfiles]=useState<any[]>([]),[existing,setExisting]=useState<ExistingSshReference[]>([]),[value,setValue]=useState<any>(blank),[environment,setEnvironment]=useState(()=>makeEnvironmentDraft(blank.environment)),[via,setVia]=useState(''),[revealed,setRevealed]=useState<string|null>(null),[busy,setBusy]=useState(false),[probe,setProbe]=useState<ClusterProbe|null>(null),[tab,setTab]=useState('connection'),[notice,setNotice]=useState(''),[skillSource,setSkillSource]=useState('');
  const [queuesVisited,setQueuesVisited]=useState(false),[queueValid,setQueueValid]=useState(true),[savedQueueOptIn,setSavedQueueOptIn]=useState(false);
  const environmentEdited=useRef(false);
  const mounted=useRef(false);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;profileRequest.current++;};},[]);
- const [savedForm,setSavedForm]=useState(''),[loadingProfile,setLoadingProfile]=useState(false);const profileRequest=useRef(0),profilePending=useRef(false);
+ const [savedForm,setSavedForm]=useState(''),[loadingProfile,setLoadingProfile]=useState(false);const profileRequest=useRef(0),profilePending=useRef(false),savedProfileSource=useRef('');
  const source=sourceId||`generation:${workerGeneration}`;
  const workerContext=useRef({source,worker,workerGeneration});
  if(workerContext.current.source!==source||workerContext.current.worker!==worker||workerContext.current.workerGeneration!==workerGeneration)workerContext.current={source,worker,workerGeneration};
+ const listedWorker=useRef<typeof workerContext.current|null>(null);
  const shown=usePageVisibility(),monitor=useClusterMonitor(source,workerGeneration,worker&&visible&&shown&&tab==='monitor');
  const profileListRequest=useRef(0),initialSelection=useRef(false),pendingSelection=useRef(selectedClusterId);
  pendingSelection.current=selectedClusterId;
  const currentScope=useRef({projectId:project?.id,clusterId:value.id,version:value.version});currentScope.current={projectId:project?.id,clusterId:value.id,version:value.version};
  const observationRequest=useRef(0),connectionEpoch=useRef(0),connectionScope=useRef(''),probeScope=useRef('');const currentConnectionScope=(profile:any,route:string)=>JSON.stringify([source,workerGeneration,connectionScopeKey(profile,route,project?.id,worker,serviceVersion)]);const scopeKey=currentConnectionScope(value,via);if(connectionScope.current!==scopeKey){connectionScope.current=scopeKey;connectionEpoch.current++;}
- const [sshTest,setSshTest]=useState<{scope:string;status:string;observedAt:number}|null>(null);const currentTest=sshTest?.scope===scopeKey?sshTest:null,currentProbe=probeScope.current===scopeKey?probe:null;
+ const receiptOwner=JSON.stringify([source,value.id,value.version]);
+ const privateContext=JSON.stringify([receiptOwner,workerGeneration]);
+ const show=visible&&tab==='connection'&&revealed===privateContext;
+ const [sshTest,setSshTest]=useState<ClusterSshTest|null>(null);
+ const [unconfirmedProbe,setUnconfirmedProbe]=useState<{scope:string;startedAt:number;baseline:number}|null>(null);
+ const listedProfile=listedWorker.current===workerContext.current?profiles.find(profile=>profile.id===value.id):undefined;
+ const savedCurrent=worker&&!loadingProfile&&savedProfileSource.current===source&&!!listedProfile&&listedProfile.version===value.version;
+ const listedReceipt=savedCurrent?listedProfile:undefined;
  const environmentValue=writableEnvironment(environment);
  const formScope=useRef('');formScope.current=JSON.stringify([formSnapshot(value,environment.text,via,readRoots),environment.rowIssue?environment.rows:null]);
  const importBlocked=!!value.import_review?.requires_review;
  const needsWorkerUpdate=(value.auth_mode==='interactive'||value.proxy_jump?.length>0||value.queue_targets!==undefined)&&serviceVersion!=='current';
  const formDirty=!value.id||!environmentValue||formSnapshot(value,environmentValue,via,readRoots)!==savedForm;
- const savedCheckCurrent=worker&&!formDirty&&!loadingProfile&&value.connection_check?.version===value.version;
+ const savedCheck=latestClusterObservation<ClusterConnectionCheck>(value.connection_check,listedReceipt?.connection_check);
+ const recentProbe=latestClusterObservation<ClusterProbe>(probe,listedReceipt?.probe);
+ const checkTime=clusterObservationTime(savedCheck),probeTime=clusterObservationTime(recentProbe);
+ const checkMatches=savedCurrent&&!formDirty&&savedCheck?.version===value.version;
+ const probeMatches=savedCurrent&&!formDirty&&(recentProbe!==probe||probeScope.current===scopeKey);
+ const failedAt=checkMatches&&savedCheck?.status==='failed'&&(!probeMatches||(probeTime??0)<=(checkTime??0))?checkTime:undefined;
+ const recordedProbeRemoved=listedReceipt?.probe===null&&(clusterObservationTime(listedReceipt.connection_check)??0)>(probeTime??0);
+ const attempt=unconfirmedProbe?.scope===scopeKey&&!formDirty?unconfirmedProbe:null;
+ const probeUnconfirmed=!!attempt&&Math.max(failedAt??0,probeMatches?probeTime??0:0)<=attempt.baseline;
+ const currentProbe=probeMatches&&!probeUnconfirmed&&!failedAt&&!recordedProbeRemoved?recentProbe:null;
+ const testMatches=sshTest?.scope===scopeKey&&!loadingProfile&&sshTest.observedAt>=(failedAt??0)&&
+  (!probeUnconfirmed||sshTest.observedAt>attempt.startedAt);
+ const now=Date.now();
+ const [,setReadinessTime]=useState(0);
+ const scienceEditor=useRef<HTMLDivElement>(null);
+ const scienceTab=tab==='environment'||tab==='science';
+ const configuredPython=(environmentValue?.executables as {python?:unknown}|undefined)?.python;
+ const readiness=clusterReadiness({profile:value,project,savedCurrent,formDirty,sshTest:sshTest?.owner===receiptOwner?sshTest:null,
+  sshTestCurrent:testMatches,probe:recentProbe,probeCurrent:!!currentProbe,
+  check:savedCheck,checkCurrent:checkMatches&&(!probeUnconfirmed||(checkTime??0)>attempt.baseline),
+  environmentConfigured:typeof configuredPython==='string'&&!!configuredPython.trim()&&(!!value.id||environmentEdited.current||configuredPython!==blank.environment.executables.python),now});
+ const expiry=Math.min(readiness.ssh.expiresAt??Infinity,readiness.scheduler.expiresAt??Infinity);
+ useEffect(()=>{
+  if(!visible||!Number.isFinite(expiry))return;
+  const timer=setTimeout(()=>setReadinessTime(Date.now()),Math.max(0,Math.ceil(expiry-Date.now())));
+  return()=>clearTimeout(timer);
+ },[expiry,visible]);
+ useEffect(()=>{if(tab==='science')scienceEditor.current?.focus();},[tab]);
+ function selectTab(next:string){
+  if(next==='queues')setQueuesVisited(true);
+  if(next!=='connection')setRevealed(null);
+  if(next==='science'&&tab===next)scienceEditor.current?.focus();
+  setTab(next);
+ }
  function authenticate(){if(importBlocked)return;if(!controlledJumpsValid(value)){setNotice(t('受控交互跳板须逐跳填写 用户@主机:端口；IPv6 主机使用方括号。历史密钥别名保持原语义。'));return;}if(needsWorkerUpdate){setNotice(t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。'));return;}if(profilePending.current||formDirty){setNotice(t('连接有未保存修改；请先保存连接或恢复已保存配置。'));return;}onAuthenticate({owner:null,clusterId:value.id,version:value.version,expected:connectionFields(value)});}
  function connectionError(error:unknown){if(String(error).includes('needs_worker_update')){setNotice(t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。'));}else if(needsHumanAuth(error)){setNotice(t('需要人工认证；请打开私有认证界面，现有作业不会重提。'));}else onError(error);}
- function newProfile(){profileRequest.current++;profilePending.current=false;setLoadingProfile(false);setQueueValid(true);setSavedQueueOptIn(false);setValue(blank);setEnvironment(makeEnvironmentDraft(blank.environment));setVia('');setReadRoots('');setProbe(null);setNotice('');setSkillSource('');}
+ function newProfile(){profileRequest.current++;profilePending.current=false;environmentEdited.current=false;setRevealed(null);setSshTest(null);setLoadingProfile(false);setQueueValid(true);setSavedQueueOptIn(false);setValue(blank);setEnvironment(makeEnvironmentDraft(blank.environment));setVia('');setReadRoots('');setProbe(null);setNotice('');setSkillSource('');}
  function patch(v:any){setValue((old:any)=>({...old,...v}));setNotice('');}
  function editEnvironment(edit:(previous:ClusterEnvironmentDraft)=>ClusterEnvironmentDraft){
   if(operation.current||profilePending.current)return;
@@ -117,15 +136,15 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
   setEnvironment(edit);
   setNotice('');
  }
- async function refreshProfiles(selectInitial=false){
+ async function refreshProfiles(selectInitial=false,relevant=()=>true,report=onError){
   const expected=workerContext.current,sequence=++profileListRequest.current,profileTicket=profileRequest.current;
   if(!expected.worker)return;
-  const current=()=>mounted.current&&workerContext.current===expected&&profileListRequest.current===sequence;
+  const current=()=>mounted.current&&workerContext.current===expected&&profileListRequest.current===sequence&&relevant();
   try{
    const rows=await api<any[]>('GET','/api/clusters');
    if(!current())return;
    if(!Array.isArray(rows))throw Error('invalid_cluster_profile_list');
-   setProfiles(rows);
+   listedWorker.current=expected;setProfiles(rows);
    if(!selectInitial||initialSelection.current||profileRequest.current!==profileTicket)return;
    initialSelection.current=true;
    const wanted=pendingSelection.current||rows[0]?.id;
@@ -133,22 +152,39 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
     if(rows.some(item=>item.id===wanted))void load(wanted);
     else setNotice(t('原集群连接不在当前服务中；不会改选其它连接。'));
    }
-  }catch(error){if(current())onError(error);}
+  }catch(error){if(current())report(error);}
  }
  useEffect(()=>{let active=true;void invoke<ExistingSshReference[]>('ssh.existing').then(value=>{if(active)setExisting(value);}).catch(error=>{if(active)onError(error);});return()=>{active=false;};},[]);
  useEffect(()=>{
-  profileRequest.current++;profilePending.current=false;setLoadingProfile(false);
+  profileRequest.current++;profilePending.current=false;setLoadingProfile(false);setRevealed(null);
   if(worker)void refreshProfiles(true);
  },[worker,source,workerGeneration]);
  useEffect(()=>{if(!selectedClusterId||!worker||!initialSelection.current)return;void load(selectedClusterId);},[selectedClusterId]);
- useEffect(()=>{if(!draft||!worker)return;const expected=workerContext.current,ticket=++profileRequest.current,current=()=>mounted.current&&workerContext.current===expected&&ticket===profileRequest.current;void api('POST','/api/cluster/profile',{cluster_id:draft.cluster_id}).then(p=>{if(!current())return;if(p?.id!==draft.cluster_id)throw Error('invalid_cluster_profile');const v={...p,...draft.proposal,environment:draft.proposal.environment||p.environment};setValue(fields(v));setEnvironment(makeEnvironmentDraft(v.environment));setVia((v.via||[]).join('\n'));setTab('skill');setNotice(t('Agent 已提出配置草稿；保存后才生效'));}).catch(error=>{if(current())onError(error);});},[draft?.id,worker,source,workerGeneration]);
+ useEffect(()=>{if(!draft||!worker)return;const expected=workerContext.current,ticket=++profileRequest.current,current=()=>mounted.current&&workerContext.current===expected&&ticket===profileRequest.current;void api('POST','/api/cluster/profile',{cluster_id:draft.cluster_id}).then(p=>{if(!current())return;if(p?.id!==draft.cluster_id)throw Error('invalid_cluster_profile');const v={...p,...draft.proposal,environment:draft.proposal.environment||p.environment};setValue(fields(v));setEnvironment(makeEnvironmentDraft(v.environment));setVia((v.via||[]).join('\n'));setProbe(null);selectTab('skill');setNotice(t('Agent 已提出配置草稿；保存后才生效'));}).catch(error=>{if(current())onError(error);});},[draft?.id,worker,source,workerGeneration]);
  function fields(p:any){const parts=(p.target||'').split('@');return {...p,auth_mode:p.auth_mode||'key',proxy_jump:p.proxy_jump||[],identity_file:p.identity_file||'',read_roots:p.read_roots||[],host:p.host||parts.at(-1)||'',username:p.username??(parts.length===2?parts[0]:'')};}
- async function load(id:string){const expected=workerContext.current;if(!expected.worker)return;const ticket=++profileRequest.current,current=()=>mounted.current&&expected===workerContext.current&&ticket===profileRequest.current;profilePending.current=true;setLoadingProfile(true);try{const p=await api('POST','/api/cluster/profile',{cluster_id:id});if(!current())return;if(p?.id!==id)throw Error('invalid_cluster_profile');const v=fields(p);setQueueValid(true);setSavedQueueOptIn(Object.hasOwn(p,'queue_targets'));setSavedForm(formSnapshot(v,p.environment,(p.via||[]).join('\n'),(p.read_roots||[]).join('\n')));setValue(v);setEnvironment(makeEnvironmentDraft(p.environment));setVia((p.via||[]).join('\n'));setReadRoots((p.read_roots||[]).join('\n'));setProbe(p.probe);probeScope.current=currentConnectionScope(v,(p.via||[]).join('\n'));setNotice('');}catch(e){if(current())onError(e);}finally{if(current()){profilePending.current=false;setLoadingProfile(false);}}}
- async function importExisting(ref:string){const ticket=++profileRequest.current;profilePending.current=true;setLoadingProfile(true);try{const p=await invoke('ssh.import',{ref});if(!mounted.current||ticket!==profileRequest.current||p?.cancelled)return;setQueueValid(true);setSavedQueueOptIn(false);setValue(fields(p));setEnvironment(makeEnvironmentDraft(p.environment));setVia((p.via||[]).join('\n'));setReadRoots('');setProbe(null);setSkillSource('');setTab('connection');setNotice(t('连接仅填入表单，尚未保存或授权'));}catch(e){if(mounted.current&&ticket===profileRequest.current)onError(e);}finally{if(mounted.current&&ticket===profileRequest.current){profilePending.current=false;setLoadingProfile(false);}}}
+ async function load(id:string){
+  const expected=workerContext.current;
+  if(!expected.worker)return;
+  const ticket=++profileRequest.current,current=()=>mounted.current&&expected===workerContext.current&&ticket===profileRequest.current;
+  profilePending.current=true;setLoadingProfile(true);setRevealed(null);
+  try{
+   const p=await api('POST','/api/cluster/profile',{cluster_id:id});
+   if(!current())return;
+   if(p?.id!==id)throw Error('invalid_cluster_profile');
+   const v=fields(p),route=(p.via||[]).join('\n'),roots=(p.read_roots||[]).join('\n');
+   savedProfileSource.current=expected.source;
+   environmentEdited.current=false;
+   setQueueValid(true);setSavedQueueOptIn(Object.hasOwn(p,'queue_targets'));
+   setSavedForm(formSnapshot(v,p.environment,route,roots));setValue(v);setEnvironment(makeEnvironmentDraft(p.environment));setVia(route);setReadRoots(roots);
+   setProbe(p.probe??null);probeScope.current=currentConnectionScope(v,route);setNotice('');
+  }catch(e){if(current())onError(e);}
+  finally{if(current()){profilePending.current=false;setLoadingProfile(false);}}
+ }
+ async function importExisting(ref:string){const ticket=++profileRequest.current;profilePending.current=true;setLoadingProfile(true);try{const p=await invoke('ssh.import',{ref});if(!mounted.current||ticket!==profileRequest.current||p?.cancelled)return;environmentEdited.current=true;setRevealed(null);setSshTest(null);setQueueValid(true);setSavedQueueOptIn(false);setValue(fields(p));setEnvironment(makeEnvironmentDraft(p.environment));setVia((p.via||[]).join('\n'));setReadRoots('');setProbe(null);setSkillSource('');selectTab('connection');setNotice(t('连接仅填入表单，尚未保存或授权'));}catch(e){if(mounted.current&&ticket===profileRequest.current)onError(e);}finally{if(mounted.current&&ticket===profileRequest.current){profilePending.current=false;setLoadingProfile(false);}}}
  async function save(){
   if(operation.current||!queueValid||importBlocked)return;
   const missingLimit=resourceLimits.find(key=>value.limits[key]==null);
-  if(missingLimit){setTab('skill');setNotice(t('请填写资源上限。')+' · '+missingLimit);return;}
+  if(missingLimit){selectTab('skill');setNotice(t('请填写资源上限。')+' · '+missingLimit);return;}
   if(!environmentValue){setNotice(t('修正科学环境草稿后再保存。'));return;}
   if(!controlledJumpsValid(value)){setNotice(t('受控交互跳板须逐跳填写 用户@主机:端口；IPv6 主机使用方括号。历史密钥别名保持原语义。'));return;}if(needsWorkerUpdate){setNotice(t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。'));return;}const expected=workerContext.current,ticket=profileRequest.current,wanted=JSON.stringify(currentScope.current),current=()=>mounted.current&&expected===workerContext.current&&ticket===profileRequest.current&&wanted===JSON.stringify(currentScope.current);if(!beginOperation(t('正在保存连接…')))return;try{const saved=await api('POST','/api/clusters',{...value,port:Number(value.port),environment:environmentValue,read_roots:readRoots.split('\n').map(v=>v.trim()).filter(Boolean),via:via.split('\n').map(v=>v.trim()).filter(Boolean)});if(!current())return;const loadingTicket=profileRequest.current+1;await load(saved.id);if(!mounted.current||expected!==workerContext.current||profileRequest.current!==loadingTicket)return;setNotice(t('连接已保存；项目授权未改变。'));onRefresh();await refreshProfiles();}catch(e){if(current())onError(e);}finally{finishOperation();}}
  async function grant(){if(operation.current||!project||!value.id||formDirty)return;const ticket=profileRequest.current,wanted={projectId:project.id,clusterId:value.id,version:value.version};if(!beginOperation(t('正在保存项目授权…')))return;try{const current=(await api<Project[]>('GET','/api/projects')).find(p=>p.id===wanted.projectId);if(ticket!==profileRequest.current||profilePending.current||!current||currentScope.current.projectId!==wanted.projectId||currentScope.current.clusterId!==wanted.clusterId||currentScope.current.version!==wanted.version||!mounted.current)return;await api('POST','/api/projects',{...current,policy:{...current.policy,clusters:[...new Set([...(current.policy.clusters||[]),wanted.clusterId])]}});setNotice(t('当前项目已获准使用此连接；其它授权保持原样。'));onRefresh();}catch(e){onError(String(e).includes('project_edit_conflict')?new Error(t('项目记录已变化，请关闭后重新打开并检查最新授权。')):e);}finally{finishOperation();}}
@@ -158,18 +194,49 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
   if(value.auth_mode==='interactive'&&formDirty){setNotice(t('连接有未保存修改；请先保存连接或恢复已保存配置。'));return;}
   const request=++observationRequest.current,ticket=profileRequest.current,epoch=connectionEpoch.current,wanted=connectionScope.current;
   const current=()=>mounted.current&&request===observationRequest.current&&ticket===profileRequest.current&&epoch===connectionEpoch.current&&wanted===connectionScope.current;
-  if(!beginOperation(t('正在测试 SSH 连接…')))return;try{const result=await api('POST','/api/cluster/test',{connection:{...value,port:Number(value.port),via:via.split('\n').map(v=>v.trim()).filter(Boolean)}});if(!current())return;const passed=result.status==='passed'&&result.username_matches!==false;setSshTest({scope:wanted,status:passed?'passed':'failed',observedAt:Date.now()});setNotice(t(passed?'SSH 连接验证通过，远程用户匹配':'SSH 连接验证未通过'));}catch(e){if(current())connectionError(e);}finally{finishOperation();}
+  if(!beginOperation(t('正在测试 SSH 连接…')))return;
+  try{
+   const result=await api('POST','/api/cluster/test',{connection:{...value,port:Number(value.port),via:via.split('\n').map(v=>v.trim()).filter(Boolean)}});
+   if(!current())return;
+   const passed=result.status==='passed'&&result.username_matches!==false;
+   setSshTest({owner:receiptOwner,scope:wanted,status:passed?'passed':'failed',observedAt:Date.now()});
+   setNotice(t(passed?'SSH 连接验证通过，远程用户匹配':'SSH 连接验证未通过'));
+  }catch(e){
+   if(current()){
+    setSshTest({owner:receiptOwner,scope:wanted,status:needsHumanAuth(e)?'failed':'unknown',observedAt:Date.now()});
+    connectionError(e);
+   }
+  }finally{finishOperation();}
  }
- async function detect(){if(operation.current||importBlocked)return;if(needsWorkerUpdate){setNotice(t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。'));return;}if(loadingProfile||formDirty){setNotice(t('连接有未保存修改；请先保存连接或恢复已保存配置。'));return;}const request=++observationRequest.current,ticket=profileRequest.current,epoch=connectionEpoch.current,wanted=connectionScope.current,form=formScope.current,current=()=>mounted.current&&request===observationRequest.current&&ticket===profileRequest.current&&epoch===connectionEpoch.current&&wanted===connectionScope.current&&form===formScope.current;if(!beginOperation(t('正在检查连接与调度器…')))return;try{const result=await api('POST','/api/cluster/probe',{cluster_id:value.id});if(!current())return;setProbe(result);probeScope.current=wanted;setValue((old:any)=>({...old,connection_check:{status:result.status,ssh_status:result.ssh_status,scheduler_status:result.scheduler_status,observed_at:result.observed_at,version:old.version}}));await refreshProfiles();if(current())setNotice(t('探测来自登录节点；计算节点验证在作业中执行'));}catch(e){if(current())connectionError(e);}finally{finishOperation();}}
+ async function detect(){
+  if(operation.current||importBlocked)return;
+  if(needsWorkerUpdate){setNotice(t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。'));return;}
+  if(loadingProfile||formDirty){setNotice(t('连接有未保存修改；请先保存连接或恢复已保存配置。'));return;}
+  const request=++observationRequest.current,ticket=profileRequest.current,epoch=connectionEpoch.current,wanted=connectionScope.current,form=formScope.current;
+  const current=()=>mounted.current&&request===observationRequest.current&&ticket===profileRequest.current&&epoch===connectionEpoch.current&&wanted===connectionScope.current&&form===formScope.current;
+  const startedAt=Date.now(),baseline=Math.max(checkTime??0,probeTime??0);
+  if(!beginOperation(t('正在检查连接与调度器…')))return;
+  try{
+   const result=await api<ClusterProbe>('POST','/api/cluster/probe',{cluster_id:value.id});
+   if(!current())return;
+   await refreshProfiles(false,current);
+   if(!current())return;
+   setProbe(result);probeScope.current=wanted;setUnconfirmedProbe(null);
+   setNotice(t('探测来自登录节点；计算节点验证在作业中执行'));
+  }catch(e){
+   if(!current())return;
+   setUnconfirmedProbe({scope:wanted,startedAt,baseline});
+   void refreshProfiles(false,current,()=>{});
+   connectionError(e);
+  }
+  finally{finishOperation();}
+ }
 
- const savedCheck=value.connection_check;
- const savedStatus=!savedCheckCurrent?'需要重新检查':savedCheck?.status==='failed'?'检查失败':
-  savedCheck?.status==='passed'&&savedCheck?.version===value.version&&Date.now()/1000-(savedCheck?.observed_at||0)<900?'检查通过':
-  savedCheck?.observed_at?'需要重新检查':'未检查';
  const observationLabel=(status='not_run')=>t(statusNames[status]||status);
  const environmentEditor=<ClusterEnvironmentEditor draft={environment} disabled={busy||loadingProfile}
   onRow={(section,edit)=>editEnvironment(previous=>editEnvironmentRow(previous,section,edit))}
   onText={text=>editEnvironment(previous=>readEnvironmentText(previous,text))}/>;
+ const masked=<span className="cluster-private-mask"><span aria-hidden="true">••••••</span><small>{t('已隐藏')}</small></span>;
  return <div className="page cluster-page" data-testid="cluster-settings">
  <div className="page-heading"><h1>{t('集群连接与托管')}</h1><Server size={23} aria-hidden="true"/></div>
  <LoadingFeedback busy={busy||loadingProfile} label={loadingProfile?t('正在读取连接配置…'):busyLabel}/>
@@ -188,38 +255,58 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
    {project&&<button className="button" onClick={()=>onAgent('为当前项目 '+project.id+' 准备集群计算任务，cluster_id='+value.id+'，scheduler='+value.scheduler+'。先 present_task 展示流程和科学参数，询问缺失输入文件和引擎条件；prepare_cluster_run 只准备本机快照与批处理脚本，停下等待我审阅提交。')}><Sparkles size={15}/>{t('让 Agent 准备集群任务')}</button>}
   </div>}
  </div>
- {value.id&&<section className="cluster-health" data-testid="cluster-connection-health">
-  <div className="cluster-health-heading">
-   <strong>{t('连接状态')} · {t(savedStatus)}</strong>
-   {savedCheck?.observed_at&&<small>{t('最近检查')} · {new Date(savedCheck.observed_at*1000).toLocaleString()}</small>}
-  </div>
-  <dl>
-   <div><dt>SSH</dt><dd>{observationLabel(savedCheckCurrent?savedCheck?.ssh_status||savedCheck?.username_matches&&'passed'||undefined:undefined)}</dd></div>
-   <div><dt>{t('调度器')}</dt><dd>{observationLabel(savedCheckCurrent?savedCheck?.scheduler_status:undefined)}</dd></div>
-   <div><dt>{t('计算节点')}</dt><dd>{observationLabel()}</dd></div>
-  </dl>
-  {tab!=='environment'&&<button className="button" disabled={busy||loadingProfile||!worker} onClick={()=>void detect()}><RefreshCw size={15}/>{t('检查连接与调度器')}</button>}
- </section>}
+ <nav className="cluster-readiness" aria-label={t('集群就绪状态')} data-testid="cluster-connection-health">
+  {readinessLinks.map(([key,destination,label])=>{
+   const {state,scope,observedAt}=readiness[key],time=observedAt==null?null:new Date(observedAt);
+   return <button key={key} type="button" data-testid={'cluster-ready-'+key} data-state={state} aria-current={tab===destination?'location':undefined} onClick={()=>selectTab(destination)}>
+    <span className="cluster-readiness-title">{t(label)}</span>
+    <strong>{t(key==='queues'&&state==='verified'?'已批准':readinessLabels[state])}</strong>
+    <small>{t(scope)}{key==='queues'&&savedCurrent&&project&&value.queue_targets!==undefined&&value.version?' v'+value.version:null}</small>
+    {time&&<time dateTime={time.toISOString()}>{time.toLocaleString()}</time>}
+   </button>;
+  })}
+ </nav>
+ {failedAt&&<p className="notice" role="status" data-testid="cluster-saved-check-failed">{t('最近保存的集群连接检查失败。')}{' '}
+  <time dateTime={new Date(failedAt).toISOString()}>{new Date(failedAt).toLocaleString()}</time></p>}
+ {probeUnconfirmed&&<p className="notice" role="status" data-testid="cluster-probe-unconfirmed">{t('本次集群探测结果未确认。上次观测保留供参考。')}</p>}
  {importBlocked&&<p className="notice" role="status">{t('导入来源包含尚未支持的路由或认证引用；请手动核对连接，暂不能测试或保存。')}</p>}
  <section className="cluster-observation" data-testid="cluster-current-observation">
-  {(currentTest||formDirty)&&<div><strong>{t('SSH 测试')} · {t(currentTest?.status==='passed'?'检查通过':currentTest?.status==='failed'?'检查失败':sshTest?'需要重新检查':'未检查')}</strong>{currentTest&&<small>{new Date(currentTest.observedAt).toLocaleString()}</small>}</div>}
   {tab==='connection'&&<div>{value.identity_file?t('使用显式密钥引用'):<Tooltip content={t('使用 SSH 客户端已有默认认证；未指定密钥不代表没有密钥。')}>{t('使用默认认证')}</Tooltip>}</div>}
-  {currentProbe&&<div>{t('调度器')} · {currentProbe.selected_scheduler||value.scheduler} · {observationLabel(currentProbe.scheduler_status)} · {t('队列观察')} · {observationLabel(currentProbe.queue_status)} · {Array.isArray(currentProbe.queues)?currentProbe.queues.length:'?'}{currentProbe.observed_at?' · '+new Date(currentProbe.observed_at*1000).toLocaleString():''}</div>}
+  {scienceTab&&currentProbe&&<div>{t('队列观察')} · {observationLabel(currentProbe.queue_status)} · {Array.isArray(currentProbe.queues)?currentProbe.queues.length:'?'}{currentProbe.observed_at?' · '+new Date(currentProbe.observed_at*1000).toLocaleString():''}</div>}
+  {value.id&&!scienceTab&&<button className="button" disabled={busy||loadingProfile||!worker} onClick={()=>void detect()}><RefreshCw size={15}/>{t('检查连接与调度器')}</button>}
  </section>
- <div className="subtabs" aria-label={t('集群配置步骤')}>{[['connection','SSH 连接'],['environment','环境探测'],['queues','队列与环境']].map(([id,name])=><button key={id} className={tab===id?'active':''} aria-current={tab===id?'step':undefined} onClick={()=>{setTab(id);if(id==='queues')setQueuesVisited(true);}}>{t(name)}</button>)}</div><details className="settings-advanced"><summary>{t('更多')}{['skill','files','monitor'].includes(tab)?' · '+t(({skill:'提交 Skill',files:'远程文件',monitor:'作业监视'} as Record<string,string>)[tab]):''}</summary><div className="button-row">{[['skill','提交 Skill'],['files','远程文件'],['monitor','作业监视']].map(([id,name])=><button className="button" key={id} aria-pressed={tab===id} onClick={()=>setTab(id)}>{t(name)}</button>)}</div></details>
+ <div className="subtabs" aria-label={t('集群配置步骤')}>{[['connection','SSH 连接'],['environment','环境探测'],['queues','队列与环境']].map(([id,name])=>{
+  const active=tab===id||id==='environment'&&scienceTab;
+  return <button key={id} className={active?'active':''} aria-current={active?'step':undefined} onClick={()=>selectTab(id)}>{t(name)}</button>;
+ })}</div><details className="settings-advanced"><summary>{t('更多')}{['skill','files','monitor'].includes(tab)?' · '+t(({skill:'提交 Skill',files:'远程文件',monitor:'作业监视'} as Record<string,string>)[tab]):''}</summary><div className="button-row">{[['skill','提交 Skill'],['files','远程文件'],['monitor','作业监视']].map(([id,name])=><button className="button" key={id} aria-pressed={tab===id} onClick={()=>selectTab(id)}>{t(name)}</button>)}</div></details>
  {tab==='connection'&&<section className="card cluster-connection-fields"><div className="form-row"><label>{t('连接名称')}<input value={value.name} onChange={e=>patch({name:e.target.value})}/></label><label>{t('调度系统')}<select value={value.scheduler} onChange={e=>patch({scheduler:e.target.value})}><option value="lsf">LSF</option><option value="slurm">Slurm</option></select></label></div>
  <div className="cluster-auth-fields">
   <label>{t('认证方式')}<select value={value.auth_mode||'key'} onChange={e=>patch({auth_mode:e.target.value})}><option value="key">{t('已有密钥 / SSH agent')}</option><option value="interactive">{t('WSL 私有交互认证（含二步验证）')}</option></select></label>
-  <button className="button" onClick={()=>setShow(!show)}>{show?<EyeOff size={15}/>:<Eye size={15}/>} {t(show?'隐藏私有连接字段':'显示私有连接字段')}</button>
+  <button type="button" className="button" data-guide-target={show?undefined:'cluster-host'} aria-expanded={show}
+   onClick={()=>setRevealed(show?null:privateContext)}>{show?<EyeOff size={15}/>:<Eye size={15}/>} {t(show?'隐藏私有连接字段':'显示私有连接字段')}</button>
  </div>
 
- <div className="form-row"><label>{t('SSH 主机')}<input data-testid="ssh-host" data-guide-target="cluster-host" type={show?'text':'password'} autoComplete="off" value={value.host} onChange={e=>patch({host:e.target.value})}/></label><label>{t('SSH 用户名')}<input data-testid="ssh-username" type={show?'text':'password'} autoComplete="off" value={value.username} onChange={e=>patch({username:e.target.value})}/></label></div><details><summary>{t('高级连接设置：客户端、密钥、端口与路由')}</summary><div className="form-row"><label>{t('端口')}<input type={show?'text':'password'} autoComplete="off" data-testid="ssh-port" value={value.port} onChange={e=>patch({port:e.target.value})}/></label></div>
- <label>{t('密钥引用路径（不读取密钥内容）')}<div className="input-with-button"><input type={show?'text':'password'} value={value.identity_file} onChange={e=>patch({identity_file:e.target.value})}/><button className="button" onClick={()=>void invoke('file.choose').then(path=>path&&patch({identity_file:path})).catch(onError)}>{t('选择')}</button></div></label>
+ <div className="form-row">
+  <label>{t('SSH 主机')}{show?<input data-testid="ssh-host" data-guide-target="cluster-host" type="text" autoComplete="off" spellCheck={false}
+   value={value.host} onChange={e=>patch({host:e.target.value})}/>:masked}</label>
+  <label>{t('SSH 用户名')}{show?<input data-testid="ssh-username" type="text" autoComplete="off" spellCheck={false}
+   value={value.username} onChange={e=>patch({username:e.target.value})}/>:masked}</label>
+ </div>
+ <details><summary>{t('高级连接设置：客户端、密钥、端口与路由')}</summary>
+ <div className="form-row"><label>{t('端口')}{show?<input data-testid="ssh-port" type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
+  value={value.port} onChange={e=>patch({port:e.target.value})}/>:masked}</label></div>
+ <div className="cluster-private-key">
+  <label>{t('密钥引用路径（不读取密钥内容）')}{show?<input type="text" autoComplete="off" spellCheck={false} value={value.identity_file}
+   onChange={e=>patch({identity_file:e.target.value})}/>:masked}</label>
+  <button className="button" onClick={()=>void invoke('file.choose').then(path=>path&&patch({identity_file:path})).catch(onError)}>{t('选择')}</button>
+ </div>
  <p>{t('必须显式填写远程用户名，不使用本机 Windows 用户名。旧连接会拆分 user@host，修改后保存新版本。')}</p>
  <label>{t('SSH 客户端路径')}<input value={value.ssh_client} onChange={e=>patch({ssh_client:e.target.value})}/></label>
  <label>{t('本地 ProxyJump · 每行一个跳板')}<textarea rows={2} value={(value.proxy_jump||[]).join('\n')} onChange={e=>patch({proxy_jump:e.target.value.split('\n').map(v=>v.trim()).filter(Boolean)})}/></label><small>{t('受控交互跳板须逐跳填写 用户@主机:端口；IPv6 主机使用方括号。历史密钥别名保持原语义。')}</small><label>{t('集群内部跳转 · 每行一个 Host')}<textarea rows={2} value={via} onChange={e=>setVia(e.target.value)} placeholder="login2"/></label><small>{t('历史密钥 / via 路由沿用现有客户端配置；AIMatterLab 不额外启用 agent forwarding，也不复制密钥。受控交互模式明确禁用 agent forwarding。')}</small>
  <label>{t('额外只读数据根目录 · 每行一个')}<textarea rows={2} value={readRoots} onChange={e=>setReadRoots(e.target.value)}/></label><label>{t('远程作业根目录')}<input value={value.remote_root} onChange={e=>patch({remote_root:e.target.value})}/></label></details><button data-testid="ssh-test" className="button primary" disabled={busy||loadingProfile||importBlocked||!worker||!value.host||!value.username||!queueValid} onClick={()=>void testSsh()}>{t('测试 SSH 连接')}</button>{value.auth_mode==='interactive'&&<details><summary>{t('私有认证与转发')}</summary><p>{t('二步验证使用已核对的 WSL OpenSSH 和私有终端；不会复制 Windows 私钥，也不会替换已有转发入口。')}</p><div className="notice"><p>{t('人工认证需要所选 WSL 内的原生 OpenSSH。当前客户端：')} <code>{value.ssh_client}</code></p><button className="button" disabled={busy||loadingProfile||value.ssh_client==='/usr/bin/ssh'} onClick={()=>patch({ssh_client:'/usr/bin/ssh'})}>{t('选择 WSL OpenSSH（/usr/bin/ssh）')}</button><p>{t('仅在你点击后修改表单，保存连接后生效；自定义客户端可在高级设置中填写。密钥引用必须属于所选 WSL，不会转换路径或复制 Windows 私钥。')}</p></div><button className="button" disabled={busy||loadingProfile||!worker||!value.id||formDirty||importBlocked} onClick={authenticate}>{t('打开私有认证')}</button></details>}{formDirty&&value.id&&<p className="notice">{t('连接有未保存修改；请先保存连接或恢复已保存配置。')} <button className="button" disabled={busy} onClick={()=>void load(value.id)}>{t('恢复已保存配置')}</button></p>}</section>}
- {tab==='environment'&&<section className="card"><div className="button-row"><button className="button primary" disabled={busy||!value.id} onClick={()=>void detect()}><RefreshCw size={15}/>{t('只读探测')}</button><button className="button" disabled={!value.id} onClick={()=>onAgent('协助配置集群 '+value.id+'。结合用户确认的队列和登记环境准备配置草稿，不提交作业或修改授权。探测能力摘要：'+JSON.stringify(safeProbeSummary(currentProbe)))}><Sparkles size={15}/>{t('让 Agent 协助配置')}</button></div><p>{t('登录节点观察不代表计算节点 GPU、模型或 Bias 已通过验证。')}</p>{currentProbe?.selected_scheduler_match===false&&<div className="notice" role="status"><span>{t('所选调度器与探测结果不同')}</span>{(currentProbe.detected_schedulers||[]).filter((scheduler:string)=>['lsf','slurm'].includes(scheduler)&&scheduler!==value.scheduler).map((scheduler:string)=><button className="button" key={scheduler} data-testid={'scheduler-draft-'+scheduler} disabled={busy||loadingProfile} onClick={()=>patch({scheduler})}>{t('改用探测到的调度器草稿')} · {scheduler}</button>)}</div>}{currentProbe&&<details><summary>{t('探测详情')}</summary><pre className="report">{JSON.stringify(currentProbe,null,2)}</pre></details>}{environmentEditor}</section>}
+ {scienceTab&&<section className="card"><div className="button-row"><button className="button primary" disabled={busy||!value.id} onClick={()=>void detect()}><RefreshCw size={15}/>{t('只读探测')}</button><button className="button" disabled={!value.id} onClick={()=>onAgent('协助配置集群 '+value.id+'。结合用户确认的队列和登记环境准备配置草稿，不提交作业或修改授权。探测能力摘要：'+JSON.stringify(safeProbeSummary(currentProbe)))}><Sparkles size={15}/>{t('让 Agent 协助配置')}</button></div><p>{t('登录节点观察不代表计算节点 GPU、模型或 Bias 已通过验证。')}</p>{currentProbe?.selected_scheduler_match===false&&<div className="notice" role="status"><span>{t('所选调度器与探测结果不同')}</span>{(currentProbe.detected_schedulers||[]).filter((scheduler:string)=>['lsf','slurm'].includes(scheduler)&&scheduler!==value.scheduler).map((scheduler:string)=><button className="button" key={scheduler} data-testid={'scheduler-draft-'+scheduler} disabled={busy||loadingProfile} onClick={()=>patch({scheduler})}>{t('改用探测到的调度器草稿')} · {scheduler}</button>)}</div>}{currentProbe&&<details><summary>{t('探测详情')}</summary><pre className="report">{JSON.stringify(currentProbe,null,2)}</pre></details>}
+  <div className="cluster-science-environment" role="region" aria-label={t('科学环境')} ref={scienceEditor} tabIndex={-1}>{environmentEditor}</div>
+ </section>}
  {queuesVisited&&<div hidden={tab!=='queues'}>{serviceVersion!=='current'&&!needsWorkerUpdate&&<div className="notice" role="status"><span>{t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。')}</span><button className="button" disabled={busy||loadingProfile} onClick={()=>void onConnectCompute().catch(onError)}>{t('按原来源更新作业服务')}</button></div>}<ClusterQueueSettings key={[value.id,value.version,project?.id].join(':')} profile={value} project={project} worker={worker&&serviceVersion==='current'} busy={busy||loadingProfile} profileDirty={formDirty} visible={tab==='queues'} canCancelOptIn={!savedQueueOptIn} environmentText={environmentValue?environment.text:null} probe={currentProbe} onTargets={targets=>{setValue((old:any)=>{const {queue_targets,...rest}=old;return targets===undefined?rest:{...old,queue_targets:targets};});}} onValidity={setQueueValid} onRefresh={onRefresh} onError={onError} onQueueTest={onQueueTest}/></div>}
  {tab==='skill'&&<section className="card"><h3>{t('版本化集群提交 Skill')}</h3>{value.id&&project&&<button className="button" onClick={()=>void api('POST','/api/cluster/skill',{project_id:project.id,cluster_id:value.id}).then(r=>setSkillSource(r.source)).catch(onError)}>{t('查看注册的 SKILL.md')}</button>}{skillSource&&<pre className="report">{skillSource}</pre>}<p>{t('Agent 可以提出修改；连接、授权及提交 Skill 必须在此审阅保存。作业绑定保存时的版本。')}</p><div className="form-row"><div className="queue-field"><label>{t('队列 / 分区')}<input aria-label={t('队列 / 分区')} value={value.queue||''} onChange={e=>patch({queue:e.target.value})}/></label><QueueChoices queues={currentProbe?.queues} value={value.queue||''} language={settings.language||'zh-CN'} onChange={queue=>patch({queue})}/></div>{resourceLimits.map(key=><label key={key}>{key}<input type="number" min={key==='gpus'?0:1} value={value.limits[key]??''} onChange={e=>patch({limits:{...value.limits,[key]:e.target.value===''?undefined:e.target.valueAsNumber}})}/></label>)}</div><label>{t('LSF 内存预留语义 · memory_mb 为合计')}<select value={value.lsf_memory_scope||'per_slot'} onChange={e=>patch({lsf_memory_scope:e.target.value})}><option value="per_slot">{t('按 CPU slot 预留（自动均分合计内存）')}</option><option value="per_job">{t('按整个作业预留')}</option></select></label><label>{t('Modules / 虚拟环境初始化 · Bash')}<textarea className="skill-script" rows={9} value={value.activation} onChange={e=>patch({activation:e.target.value})} placeholder="module load …"/></label><label>{t('提交 Skill 补充约定')}<textarea rows={4} value={value.notes||''} onChange={e=>patch({notes:e.target.value})}/></label>{environmentEditor}</section>}
  {tab==='files'&&<ClusterFiles key={[project?.id,value.id,value.version].join(':')} projectId={project?.id} clusterId={value.id} scope={JSON.stringify([project?.id,value.id,value.version,worker,serviceVersion,value.remote_root,readRoots])} roots={[value.remote_root,...readRoots.split('\n').filter(Boolean)]} enabled={worker&&!formDirty&&!loadingProfile&&!importBlocked} onError={onError}/>}
@@ -231,213 +318,5 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
   {monitor.state?.value?.filter(run=>!project||run.project_id===project.id).map(run=><button className="cluster-run-row" key={run.id} onClick={()=>{if(mounted.current&&workerContext.current.source===source)onRun(run.id);}}><span>{run.name}<small>{run.engine} · {run.cluster.scheduler}</small></span><Badge status={run.status}/><span>{run.job_id||t('未提交')}</span></button>)}
  </section>}
  <div className="cluster-footer"><span role="status">{notice}</span>{project&&<button className="button" disabled={busy||loadingProfile||!worker||!value.id||formDirty} onClick={()=>void grant()}>{t('允许当前项目使用此连接')}</button>}<button className="button primary" disabled={busy||loadingProfile||importBlocked||!worker||!value.host||!value.username} onClick={()=>void save()}><Save size={15}/>{t('保存连接')}</button></div>
- </div>;
-}
-function clusterReviewSpec(run:ClusterRun){
- const remote_inputs={...Object.fromEntries(run.snapshots.filter(asset=>asset.source_kind==='remote').map(asset=>[asset.name,asset.source])),...run.remote_inputs};
- const inputs=Object.fromEntries(run.snapshots.filter(asset=>!Object.hasOwn(remote_inputs,asset.name)).map(asset=>[asset.name,run.directory+'/simulation/'+asset.name]));
- return {name:run.name,engine:run.engine,project_id:run.project_id,cluster_id:run.cluster_id,max_seconds:run.max_seconds,resources:run.resources,parameters:run.parameters||{},inputs,remote_inputs};
-}
-type RunConnectionAction='auth'|'update';
-type RunObservationTarget={scope:string;workerGeneration:number;connected:boolean};
-function runConnectionAction(error:unknown):RunConnectionAction|null{
- const detail=String(error);
- if(detail.includes('needs_worker_update'))return 'update';
- if(detail.includes('needs_human_auth'))return 'auth';
- return null;
-}
-
-async function readClusterRun(id:string,current:()=>boolean,inspect=false){
- if(!current())throw Error('cluster_source_changed');
- const result=inspect
-  ? await api<ClusterConnectionObservation>('POST','/api/cluster/status',{run_id:id})
-  : await api<ClusterConnectionObservation>('POST','/api/cluster/observation',{run_id:id}).catch(async error=>{
-   if(!current()||!/unknown route|not found|404|unsupported.*route/i.test(String(error)))throw error;
-   const rows=await api<ClusterConnectionObservation[]>('GET','/api/cluster-runs');
-   const prior=rows.find(row=>row.id===id);
-   if(!prior)throw error;
-   return prior;
-  });
- if(result?.id!==id)throw Error(t('作业服务返回的记录与所选作业不一致。'));
- return result;
-}
-
-export function ClusterRunPage({id,sourceId='',workerGeneration=0,connected=true,visible=true,readOnly=false,onError,onAgent,onOpenConnections}:{
- id:string;sourceId?:string;workerGeneration?:number;connected?:boolean;visible?:boolean;readOnly?:boolean;
- onError:(e:unknown)=>void;onAgent:(text:string)=>void;onOpenConnections?:(source:{runId:string})=>void;
-}){
- const source=sourceId||`generation:${workerGeneration}`;
- const scopeFor=(runId:string)=>JSON.stringify([source,runId]);
- const origin=scopeFor(id);
- const [revision,setRevision]=useState<{origin:string;id:string}|null>(null);
- const activeId=revision?.origin===origin?revision.id:id,scope=scopeFor(activeId);
- const [record,setRecord]=useState<{scope:string;target:RunObservationTarget;value:ClusterRun;at:number}|null>(null);
- const [failedRead,setFailedRead]=useState<{scope:string;paused:boolean}|null>(null);
- const [connection,setConnection]=useState<{scope:string;action:RunConnectionAction|null}|null>(null);
- const [output,setOutput]=useState<{scope:string;text:string}|null>(null);
- const [failedLog,setFailedLog]=useState('');
- const [editor,setEditor]=useState<{scope:string;text:string;editing:boolean}|null>(null);
- const [logEvidenceRange,setLogEvidenceRange]=useState<EvidenceLineRange|null>(null);
-
- const currentRecord=record?.scope===scope?record:null,run=currentRecord?.value;
- const failure=failedRead?.scope===scope?failedRead:null;
- const connectionAction=connection?.scope===scope?connection.action:null;
- const log=output?.scope===scope?output.text:'';
- const revised=editor?.scope===scope?editor.text:'',edit=editor?.scope===scope&&editor.editing;
- const canWrite=connected&&!readOnly;
- const writable=useRef(canWrite);writable.current=canWrite;
- const owner=useRef<RunObservationTarget>({scope,workerGeneration,connected}),mounted=useRef(false);
- if(owner.current.scope!==scope||owner.current.workerGeneration!==workerGeneration||owner.current.connected!==connected)owner.current={scope,workerGeneration,connected};
- const target=owner.current;
- const awaitingCurrent=!!currentRecord&&currentRecord.target!==target;
- const current=()=>mounted.current&&owner.current===target&&connected;
- const shown=usePageVisibility(),watching=visible&&shown,watch=useRef({watching});
- if(watch.current.watching!==watching)watch.current={watching};
- const inspection=useRef<typeof target|null>(null),operation=useRef<typeof target|null>(null);
- const [checking,setChecking]=useState<typeof target|null>(null);
- const [operationLabel,setOperationLabel]=useState<{target:typeof target;text:string}|null>(null);
- const readEpoch=useRef(0),[readCycle,setReadCycle]=useState(0);
- const inspecting=checking===target,busy=operationLabel?.target===target;
- function prioritizeExplicitRead(){setReadCycle(++readEpoch.current);}
-
- function accept(next:ClusterConnectionObservation,forScope=scope){
-  setRecord({scope:forScope,target,value:next,at:Date.now()});
-  setFailedRead(null);
-  if(next.connection_action?.kind==='authenticate_original_run'&&next.connection_action.code==='needs_human_auth'&&next.connection_action.runId===next.id){
-   setConnection({scope:forScope,action:'auth'});
-  }else if(next.connection_action===null){
-   setConnection({scope:forScope,action:null});
-  }
-  setEditor(previous=>previous?.scope===forScope?previous:{scope:forScope,text:JSON.stringify(clusterReviewSpec(next),null,2),editing:false});
- }
- function reportReadFailure(error:unknown,paused=false){
-  setFailedRead({scope,paused});
-  const action=runConnectionAction(error);
-  if(action)setConnection({scope,action});
- }
- function reportActionError(error:unknown){
-  const action=runConnectionAction(error);
-  if(action)setConnection({scope,action});
-  else onError(error);
- }
-
- useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;inspection.current=null;operation.current=null;};},[]);
- useEffect(()=>{setLogEvidenceRange(null);},[scope]);
- useEffect(()=>{
-  if(!connected||!watching||busy||inspecting||!awaitingCurrent&&run&&terminalStatuses.includes(run.status))return;
-  const visibility=watch.current,epoch=readEpoch.current;
-  const active=()=>current()&&watch.current===visibility&&readEpoch.current===epoch&&inspection.current!==target&&operation.current!==target;
-  let accepted:ClusterConnectionObservation|null=null,seenFailures=0;
-  const reader=new ObservedRead(()=>readClusterRun(activeId,active),state=>{
-   if(!active())return;
-   if(state.value&&state.value!==accepted){
-    accepted=state.value;
-    seenFailures=0;
-    accept(state.value);
-    if(terminalStatuses.includes(state.value.status))reader.setConnected(false);
-   }
-   if(state.error&&state.failures>seenFailures){
-    seenFailures=state.failures;
-    reportReadFailure(state.error,state.paused);
-   }
-  },{delay:observationDelay});
-  reader.setConnected(true);
-  return()=>reader.dispose();
- },[scope,workerGeneration,connected,watching,busy,inspecting,readCycle]);
-
- async function inspect(withLogs:boolean){
-  if(!current()||inspection.current===target||operation.current===target)return;
-  prioritizeExplicitRead();
-  inspection.current=target;
-  setChecking(target);
-  const active=()=>current()&&inspection.current===target;
-  try{
-   const next=await readClusterRun(activeId,active,withLogs);
-   if(!active())return;
-   accept(next);
-   if(withLogs&&next.job_id){
-    try{
-     const data=await api<{text:string}>('POST','/api/cluster/log',{run_id:activeId});
-     if(!active())return;
-     if(typeof data?.text!=='string')throw Error('invalid_cluster_log');
-     setOutput({scope,text:data.text});
-     setFailedLog('');
-    }catch(error){
-     if(!active())return;
-     setFailedLog(scope);
-     const action=runConnectionAction(error);
-     if(action)setConnection({scope,action});
-    }
-   }
-  }catch(error){if(active())reportReadFailure(error);}
-  finally{if(inspection.current===target){inspection.current=null;setChecking(null);}}
- }
-
- async function perform(label:string,action:()=>Promise<ClusterRun>,revising=false){
-  if(!current()||!writable.current||operation.current===target)return;
-  prioritizeExplicitRead();
-  inspection.current=null;
-  setChecking(null);
-  operation.current=target;
-  setOperationLabel({target,text:label});
-  if(!revising)setConnection({scope,action:null});
-  try{
-   const next=await action();
-   if(!current())return;
-   if(!next?.id||!revising&&next.id!==activeId)throw Error(t('作业服务返回的记录与所选作业不一致。'));
-   if(revising)setRevision({origin,id:next.id});
-   accept(next,scopeFor(next.id));
-  }catch(error){if(current())reportActionError(error);}
-  finally{if(operation.current===target){operation.current=null;setOperationLabel(null);}}
- }
- function revise(){
-  void perform(t('正在保存修订…'),async()=>{
-   const value=JSON.parse(revised);
-   const changes=Object.fromEntries(['name','engine','max_seconds','resources','inputs','remote_inputs','parameters'].filter(key=>Object.hasOwn(value,key)).map(key=>[key,value[key]]));
-   return api<ClusterRun>('POST','/api/cluster/revise',{run_id:activeId,changes});
-  },true);
- }
-
- const observed=<ClusterObservationStatus connected={connected} observedAt={currentRecord?.at} error={!!failure} paused={failure?.paused} awaitingCurrent={awaitingCurrent}/>;
- const recovery=connectionAction&&<section className="notice" role="status">
-  <p>{t(connectionAction==='update'?'此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。':run?'需要人工认证；请打开私有认证界面，现有作业不会重提。':'需要核对原作业连接；作业状态仍未确认，不会重新提交。')}</p>
-  {onOpenConnections&&<button className="button" onClick={()=>onOpenConnections({runId:activeId})}>{t('核对原作业连接')}</button>}
- </section>;
- if(!run)return <div className="page">
-  {observed}
-  <LoadingFeedback busy={connected&&!failure&&!connectionAction} label={t('读取任务中…')}/>
-  {connected&&failure&&<button className="button" disabled={inspecting} onClick={()=>void inspect(false)}>{t('重试')}</button>}
-  {recovery}
- </div>;
- return <div className="page cluster-review" data-testid="cluster-review"><div className="page-heading"><div><span className="eyebrow">{run.cluster.scheduler} · {run.engine}</span><h1>{run.name}</h1><p>{t('审阅运行参数与完整提交脚本。科学检查结果供参考。适用的执行检查须在计算节点通过，作业才会启动引擎。')}</p></div><span className="tag">{run.status}</span></div>
- {observed}
- {recovery}
- {run.cancellation&&['running','queued','unknown'].includes(run.status)&&<p className="notice" role="status" data-testid="cluster-cancellation-receipt">
-  {t(run.cancellation.signal_sent===true?'撤销命令已送达，正在等待作业的最终状态。':run.cancellation.status==='requested'?'已记录撤销请求，正在核对原作业。':run.cancellation.signal_sent===false?'原作业身份尚未核实，本次撤销命令未发出。':'撤销命令的送达情况未知，请核对原作业。')}
- </p>}
- {readOnly&&<p className="notice" role="status" data-testid="run-readonly-observation">{t('运行记录可查看；提交、续算等操作需匹配原服务与权限。')}</p>}
- <LoadingFeedback busy={busy} label={operationLabel?.text||''}/>
- <ol className="run-flow">{['输入快照','审阅与资源检查','SSH 上传与提交','执行节点科学验证','计算与结果监控'].map(v=><li key={v}>{t(v)}</li>)}</ol>
- {run.queue_target_snapshot&&<section className="card resolved-queue-target" data-testid="resolved-queue-target"><strong>{run.queue_target_snapshot.queue} · {run.queue_target_snapshot.id}</strong><span>{t(run.queue_target_snapshot.usage_class==='owned'?'自有':run.queue_target_snapshot.usage_class==='paid'?'付费':'未知')} · {run.cluster_id} · v{run.queue_profile_version}</span><small>{t('环境')} · {Object.entries(run.queue_target_snapshot.environment.executables).map(([name,path])=>name+' '+path).join(' · ')}</small></section>}
- <section className="card">
-  <h3>{t('运行参数')}</h3>
-  {['draft','ready'].includes(run.status)&&<label className="check-label"><input type="checkbox" disabled={!canWrite} checked={edit} onChange={e=>{if(current()&&writable.current)setEditor({scope,text:revised,editing:e.target.checked});}}/>{t('修改参数并创建新快照')}</label>}
-  <textarea rows={12} className="parameter-json" aria-label={t('运行参数')} readOnly={!canWrite||!edit||busy} value={revised} onChange={e=>setEditor({scope,text:e.target.value,editing:edit})}/>
- </section>
- <section className="card"><h3>{t('将执行的提交脚本')}</h3><pre className="batch-script">{run.script}</pre></section>
- <section className="card">
-  <h3>{t('验证与监控')}</h3>
-  <button className="button" disabled={!connected||inspecting||busy} onClick={()=>void inspect(true)}>{t('核对作业与日志')}</button>
-  <p>{t('输入验证')} · {run.validation.status} · {run.validation.scope}</p><p>{t('科学验证')} · {run.scientific_validation.status}</p><p>Job ID · {run.job_id||t('未提交')}</p>
-  {failedLog===scope&&<p className="notice" role="status">{t('日志连接暂不可用')}{log&&' · '+t('上次记录')}</p>}
-  <pre className="console" onMouseUp={e=>setLogEvidenceRange(evidencePreSelection(e.currentTarget))}>{log||t('暂无运行日志')}</pre>{log&&<EvidenceSelection source={{kind:'log',runId:run.id,target:'cluster'}} text={log} range={logEvidenceRange}/>}
- </section>
- {edit&&<button className="button primary" disabled={!canWrite||busy} onClick={revise}>{t('保存修订并预览脚本')}</button>}
- <ClusterResults key={scope} run={run} connected={connected} workerGeneration={workerGeneration} onError={onError}/>
- <div className="review-execute">
-  <button className="button" onClick={()=>onAgent('检查集群任务 '+run.id+' 的已记录参数和日志。只读监控，不重提 unknown 任务。')}><Sparkles size={15}/>{t('让 Agent 分析')}</button>
-  {['draft','ready'].includes(run.status)?<button className="button primary" disabled={!canWrite||busy||edit} onClick={()=>void perform(t('正在提交到集群…'),()=>api<ClusterRun>('POST','/api/cluster/submit',{run_id:activeId}))}><Play size={15}/>{t('审阅完成，提交到集群')}</button>
-   :['queued','running','unknown'].includes(run.status)?<button className="button" disabled={!canWrite||busy} onClick={()=>void perform(t('正在取消并核对作业…'),()=>api<ClusterRun>('POST','/api/cluster/cancel',{run_id:activeId}))}>{t('取消已核实作业')}</button>:null}
- </div>
  </div>;
 }

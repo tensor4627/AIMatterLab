@@ -33,7 +33,7 @@ import {conversationSelectionHarness} from './conversation-selection-hooks.mjs';
 const source=fs.readFileSync(process.env.STUDIO_AGENT_SOURCE?path.resolve(process.env.STUDIO_AGENT_SOURCE):new URL('../../frontend/features/conversations/Agent.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const compileView=name=>ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/conversations/'+name+'.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
-const chatCompiled=compileView('ChatMessage'),messagesCompiled=compileView('ConversationMessages'),questionsCompiled=compileView('ComposerQuestion');
+const chatCompiled=compileView('ChatMessage'),messagesCompiled=compileView('ConversationMessages'),composerCompiled=compileView('Composer'),questionsCompiled=compileView('ComposerQuestion');
 const fileModules=Object.fromEntries(['read-chat-file.ts','chat-file-text.ts','ChatFiles.tsx'].map(file=>[
  './'+file.replace(/\.tsx?$/,''),ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/conversations/'+file,import.meta.url),'utf8'),
   {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,
@@ -52,6 +52,12 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
  const useId=()=>`agent-fixture-${cursor++}`;
  const useEffect=(fn,deps)=>{const index=cursor++,previous=hooks[index];if(!previous||!deps||deps.some((value,i)=>!Object.is(value,previous.deps?.[i]))){const record={deps,cleanup:previous?.cleanup};hooks[index]=record;pending.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
+ const useSyncExternalStore=(subscribe,snapshot)=>{
+  const value=snapshot(),rendered=useRef(value);rendered.current=value;
+  useEffect(()=>subscribe(()=>{if(!Object.is(rendered.current,snapshot()))dirty=true;}),[subscribe,snapshot]);
+  return value;
+ };
+ const useImperativeHandle=(ref,create,deps)=>useEffect(()=>{ref.current=create();return()=>{ref.current=null;};},deps);
  const standard=async(method,data)=>{
   if(method==='state')return {settings:{agentProvider:'codex'}};
   if(['settings','agent.disconnect'].includes(method))return {};
@@ -71,9 +77,10 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
  };
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
  const require=name=>{
-  if(name==='react')return {useState,useRef,useEffect,useId,useLayoutEffect:useEffect,Fragment:'fragment',memo:component=>component};
+  if(name==='react')return {useState,useRef,useEffect,useId,useLayoutEffect:useEffect,useSyncExternalStore,useImperativeHandle,Fragment:'fragment',memo:component=>component};
   if(name==='react/jsx-runtime'){const jsx=(type,props)=>typeof type==='function'?type(props):({type,props});return {jsx,jsxs:jsx,Fragment:'fragment'};}
   if(name==='./ConversationMessages'){const view={exports:{}};new Function('require','module','exports',messagesCompiled)(require,view,view.exports);return view.exports;}
+  if(name==='./Composer'){const view={exports:{}};new Function('require','module','exports',composerCompiled)(require,view,view.exports);return view.exports;}
   if(name==='./ComposerQuestion'){const view={exports:{}};new Function('require','module','exports',questionsCompiled)(require,view,view.exports);return view.exports;}
   if(name==='./ChatMessage'){const child={exports:{}};new Function('require','module','exports',chatCompiled)(require,child,child.exports);return {default:props=>({type:'./ChatMessage',props:{...props,children:child.exports.default(props)}})};}
   if(Object.hasOwn(fileModules,name)){const child={exports:{}};new Function('require','module','exports',fileModules[name])(require,child,child.exports);return child.exports;}

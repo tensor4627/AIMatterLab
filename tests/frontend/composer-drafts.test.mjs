@@ -5,6 +5,31 @@ import {createComposerDrafts} from "../../frontend/features/conversations/compos
 
 function fixture(){const values=new Map();let next=0;const storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};return {values,storage,create:()=>createComposerDrafts(()=>storage,()=>String(++next))};}
 
+test('draft subscribers see visible text and scope changes with a stable scope while editing',()=>{
+ const drafts=fixture().create(),notifications=[];
+ const blank=drafts.attachmentOwner();
+ const unsubscribe=drafts.subscribe(()=>notifications.push([drafts.attachmentOwner(),drafts.text()]));
+ drafts.edit('first');
+ drafts.seed('qwen','target','first');
+ assert.deepEqual(notifications,[[blank,'first']]);
+ assert.equal(drafts.attachmentOwner(),blank);
+
+ drafts.activate('qwen','target');
+ const initial=drafts.attachmentOwner(),sent=drafts.capture();
+ assert.notEqual(initial,blank);
+ drafts.rekey('qwen','target','recovered');
+ const recovered=drafts.attachmentOwner();
+ drafts.appendToDraft('qwen','recovered','external edit');
+ assert.equal(drafts.acknowledge(sent),false);
+ assert.equal(drafts.acknowledge(drafts.capture()),true);
+ assert.deepEqual(notifications,[[blank,'first'],[initial,'first'],[recovered,'first'],[recovered,'first\n\nexternal edit'],[recovered,'']]);
+
+ unsubscribe();
+ drafts.discard('qwen','recovered');
+ assert.equal(drafts.attachmentOwner().threadId,null);
+ assert.equal(notifications.length,5);
+});
+
 test('file selections stay with the original draft and a late receipt preserves subsequent files and text',()=>{
  const env=fixture(),drafts=env.create();
  const file=(last,name)=>({id:'00000000-0000-4000-8000-00000000000'+last,name,kind:'text',mimeType:'text/plain',size:8});

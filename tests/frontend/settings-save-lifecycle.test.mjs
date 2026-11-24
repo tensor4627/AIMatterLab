@@ -7,7 +7,7 @@ for(const field of ['theme','workerPort'])test('old settings acknowledgement pre
  const h=harness();try{
   await h.flush();h.save();await h.flush();
   if(field==='theme')h.find(node=>node.type==='select'&&node.props.value==='dark').props.onChange({target:{value:'light'}});
-  else{h.find(node=>node.type==='button'&&h.text(node).includes('计算连接')).props.onClick();await h.flush();h.find(node=>node.type==='input'&&node.props.type==='number'&&node.props.value===8767).props.onChange({target:{value:'8768'}});}
+  else{h.find(node=>node.type==='button'&&h.text(node).includes('计算连接')).props.onClick();await h.flush();h.find(node=>node.props.testId==='worker-port').props.onChange(8768);}
   await h.flush();const newer=h.settings[field];h.gate.resolve(h.calls[0].data);await h.flush();
   assert.equal(h.settings[field],newer);assert.equal(h.saved.length,1,'acknowledges the persisted baseline for Cancel');
   assert(h.text(h.find(node=>node.props?.className==='settings-footer')).includes('未保存修改'));assert.deepEqual(h.errors,[]);

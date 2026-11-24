@@ -138,23 +138,24 @@ export async function frontendContinuousWorkCases({check,out}){
  });
  for(const theme of ['dark','light'])await check('continuous-work-resume-repair-modal-'+theme,async page=>{
   let nativeDialogs=0;page.on('dialog',async dialog=>{nativeDialogs++;await dialog.dismiss();});
-  await page.evaluate(theme=>{
+  await page.evaluate(async theme=>{
+   const {setLanguage}=await import('/frontend/ui/i18n.ts');setLanguage(theme==='light'?'en':'zh-CN');
    document.documentElement.dataset.theme=theme;
    localStorage.setItem('studio.resume.run','{malformed');localStorage.setItem('studio.resume.other','keep this record');
    return window.renderTest('RunDetail',{run:{...window.__test.run,status:'failed'},onRefresh:()=>{},onError:()=>{}});
   },theme);
-  const clearLabel='已核对，清除损坏记录',open=page.getByRole('button',{name:clearLabel,exact:true});
-  const dialog=page.getByRole('dialog',{name:'清除损坏的本地续算记录'});
+  const english=theme==='light',clearLabel=english?'Checked; clear damaged record':'已核对，清除损坏记录',open=page.getByRole('button',{name:clearLabel,exact:true});
+  const dialog=page.getByRole('dialog',{name:english?'Clear damaged local continuation record':'清除损坏的本地续算记录'});
   await open.click();await dialog.waitFor();
   assert.match(await dialog.innerText(),/Fixture run · run/);assert.equal(await dialog.evaluate(node=>node.closest('html').dataset.theme),theme);
-  await page.waitForFunction(()=>document.activeElement?.textContent==='取消');
+  await page.waitForFunction(expected=>document.activeElement?.textContent===expected,english?'Cancel':'取消');
   await page.screenshot({path:path.join(out,'continuation-repair-'+theme+'.png')});
   await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});
   assert.equal(await open.evaluate(node=>document.activeElement===node),true);
   assert.equal(await page.evaluate(()=>localStorage.getItem('studio.resume.run')),'{malformed');
   await open.click();await dialog.getByRole('button',{name:clearLabel,exact:true}).click();await dialog.waitFor({state:'detached'});
   assert.deepEqual(await page.evaluate(()=>[localStorage.getItem('studio.resume.run'),localStorage.getItem('studio.resume.other')]),[null,'keep this record']);
-  assert.equal(await page.getByRole('button',{name:'续算',exact:true}).isEnabled(),true);
+  assert.equal(await page.getByRole('button',{name:english?'Continue':'续算',exact:true}).isEnabled(),true);
   assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.data?.target==='/api/run/resume').length),0);assert.equal(nativeDialogs,0);
  });
   await check('continuous-work-resume-repair-closes-when-narrow-layout-hides-workspace',async page=>{

@@ -47,17 +47,33 @@ test('global width changes retain editor text, terminal identity and unchanged A
   assert.equal(editor().props.value,'Owned unsaved editor text');assert.equal(terminal().props.request,request);assert.equal(terminal().props.visible,true);assert.deepEqual({agentKey:agent(h).props.key,terminalKey:terminal().props.key,editorKey:editor().props.key},before);assert(!shell(h).props.className.includes('agent-center'));assert(!h.calls.some(call=>call.method==='sharedTerminal.open'));
  }finally{h.unmount();}
 });
-test('actual PaneDivider keyboard and pointer variants use effective right-side orientation and bounds',()=>{
- const code=ts.transpileModule(fs.readFileSync(new URL("../../frontend/ui/PaneDivider.tsx",import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;const module={exports:{}};new Function('require','module','exports',code)(n=>n==='./i18n'?{t:x=>x}:{jsx:(type,props)=>({type,props})},module,module.exports);const values=[],handlers=new Map(),node={setPointerCapture(){},addEventListener:(n,fn)=>handlers.set(n,fn),removeEventListener:n=>handlers.delete(n)};const divider=module.exports.default({label:'Resize',value:340,min:260,max:600,reverse:true,onChange:v=>values.push(v)});divider.props.onKeyDown({key:'ArrowRight',preventDefault(){}});divider.props.onKeyDown({key:'End',preventDefault(){}});divider.props.onPointerDown({clientX:100,pointerId:1,currentTarget:node,preventDefault(){}});handlers.get('pointermove')({clientX:80});handlers.get('pointermove')({clientX:1000});handlers.get('pointerup')();assert.deepEqual(values,[308,600,360,260]);assert.equal(handlers.size,0);
+function dividerFixture(props){
+ const code=ts.transpileModule(fs.readFileSync(new URL('../../frontend/ui/PaneDivider.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+ const module={exports:{}},values=[],handlers=new Map(),preview=new Map();let cleanup;
+ const react={useRef:current=>({current}),useLayoutEffect:fn=>{cleanup=fn();}};
+ new Function('require','module','exports',code)(name=>name==='react'?react:name==='./i18n'?{t:x=>x}:{jsx:(type,props)=>({type,props})},module,module.exports);
+ const node={dataset:{},setAttribute(){},setPointerCapture(){},hasPointerCapture:()=>false,closest:()=>({style:{setProperty:(k,v)=>preview.set(k,v),removeProperty:k=>preview.delete(k)}}),addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name)};
+ const {props:events}=module.exports.default({...props,onChange:x=>values.push(x)});
+ const pointer=(type,x,y=0,pointerId=1)=>({type,clientX:x,clientY:y,pointerId,currentTarget:node,isPrimary:true,button:0,preventDefault(){}});
+ return {values,preview,handlers,events,down:(x,y)=>events.onPointerDown(pointer('pointerdown',x,y)),fire:(type,x,y,id)=>handlers.get(type)(pointer(type,x,y,id)),unmount:()=>cleanup()};
+}
+
+test('divider previews moves, ignores other pointers and commits the final clamped position once',()=>{
+ const f=dividerFixture({label:'Resize',pane:'agent',value:340,min:260,max:600,reverse:true});
+ for(const key of ['ArrowRight','End'])f.events.onKeyDown({key,preventDefault(){}});
+ f.down(100);f.fire('pointermove',80);assert.equal(f.preview.get('--drag-agent'),'360px');
+ f.fire('pointerup',200,0,2);assert.equal(f.handlers.size,4);
+ f.fire('pointermove',1000);assert.equal(f.preview.get('--drag-agent'),'260px');assert.deepEqual(f.values,[308,600]);
+ f.fire('pointerup',95);assert.deepEqual(f.values,[308,600,345]);assert.equal(f.handlers.size,0);assert.equal(f.preview.size,0);
 });
 
-test('horizontal divider adjusts height with vertical keys and stops tracking on pointer cancellation',()=>{
- const code=ts.transpileModule(fs.readFileSync(new URL('../../frontend/ui/PaneDivider.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,module={exports:{}};
- new Function('require','module','exports',code)(name=>name==='./i18n'?{t:x=>x}:{jsx:(type,props)=>({type,props})},module,module.exports);
- const values=[],handlers=new Map(),node={setPointerCapture(){},addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name)};
- const divider=module.exports.default({label:'Height',orientation:'horizontal',value:190,min:90,max:380,reverse:true,onChange:value=>values.push(value)});
- assert.equal(divider.props['aria-orientation'],'horizontal');
- for(const [key,shiftKey] of [['ArrowUp',false],['ArrowDown',true],['Home',false],['End',false],['ArrowRight',false]])divider.props.onKeyDown({key,shiftKey,preventDefault(){}});
- divider.props.onPointerDown({clientX:100,clientY:200,pointerId:1,currentTarget:node,preventDefault(){}});handlers.get('pointermove')({clientX:999,clientY:150});handlers.get('pointercancel')();
- assert.deepEqual(values,[222,189,90,380,240]);assert.equal(handlers.size,0);
+test('horizontal divider keeps keyboard controls and cancels previews on interruption or unmount',()=>{
+ const f=dividerFixture({label:'Height',pane:'bottom',orientation:'horizontal',value:190,min:90,max:380,reverse:true});
+ for(const [key,shiftKey] of [['ArrowUp',false],['ArrowDown',true],['Home',false],['End',false],['ArrowRight',false]])f.events.onKeyDown({key,shiftKey,preventDefault(){}});
+ for(const end of ['pointercancel','lostpointercapture','unmount']){
+  f.down(100,200);f.fire('pointermove',999,150);assert.equal(f.preview.get('--drag-bottom'),'240px');
+  if(end==='unmount')f.unmount();else f.fire(end,999,150);
+  assert.equal(f.handlers.size,0);assert.equal(f.preview.size,0);
+ }
+ assert.deepEqual(f.values,[222,189,90,380]);
 });

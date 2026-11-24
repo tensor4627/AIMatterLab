@@ -1,9 +1,9 @@
-# AIMatterLab 0.2.1 单 prompt 安装
+# AIMatterLab 0.2.2 单 prompt 安装
 
-复制下面的提示词给可以使用本机终端和 Git 的 Agent。0.2.1 源码从 GitHub 主仓库的 `main` 获取，克隆地址为 `https://github.com/tensor4627/AIMatterLab.git`。
+复制下面的提示词给可以使用本机终端和 Git 的 Agent。0.2.2 源码从 GitHub 主仓库的 `main` 获取，克隆地址为 `https://github.com/tensor4627/AIMatterLab.git`。
 
 ```text
-请在我的 Windows 电脑安装 AIMatterLab 0.2.1。从 GitHub 或我指定的仓库核对 refs/tags/v0.2.1 或我提供的完整提交 ID，在新目录使用该版本，读取 INSTALL_AGENT.md 并核对安装清单。按我选定的连接路线发现所需程序和可复用的计算环境，再按选定的服务商和短例验证。完成后给我启动文件和实际验收结果。
+请在我的 Windows 电脑安装 AIMatterLab 0.2.2。从 GitHub 或我指定的仓库核对 refs/tags/v0.2.2 或我提供的完整提交 ID，在新目录使用该版本，读取 INSTALL_AGENT.md 并核对安装清单。按我选定的连接路线发现所需程序和可复用的计算环境，再按选定的服务商和短例验证。完成后给我启动文件和实际验收结果。
 ```
 
 完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)列出官方仓库、本版版本号和发布引用。需要登录仓库时由用户在本机 Git 凭据界面完成。
@@ -88,7 +88,7 @@ SSH compute 配置增加 connection 与 resources。connection 包括 host、use
 
 desktop 使用独立 profile、真实 renderer/worker 和 provider 请求。需要认证时，由用户登录后重验。Windows 用户双击 `Launch-AIMatterLab.cmd` 进入验收过的同一 profile，另有兼容 PS1 启动文件。finalize 绑定当前配置和源码指纹，要求三个阶段均通过且选定的短例集合完整。
 
-本版开发与验收见 [0.2.1 开发日志](releases/aimatterlab-0.2.1.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
+本版开发与验收见 [0.2.2 开发日志](releases/aimatterlab-0.2.2.md)。开发者工具包与 CPU 适配器的既有验收见 [0.1.0 发布说明](releases/aimatterlab-0.1.0.md)。第三方工具从「工具与资源 → 第三方工具包」单独登记，示例的使用步骤见[开发者快速开始](../developer/README.md)。
 同一配置/源码已通过的 smoke 可复用明确标注的旧收据。修改配置后若旧安装任务未解决，阻止创建新请求。已有 worker 正在托管时不抢占权威锁、不杀服务；通过 AIMatterLab 核对任务，或选择独立安装 root。
 
 Agent 需要为独立 worker 选择空闲本机端口；端口冲突应修改私有配置后重做 probe/smoke，不抢占其他安装的服务。

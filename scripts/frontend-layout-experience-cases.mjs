@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 export async function frontendLayoutExperienceCases({check,out}){
@@ -69,6 +70,43 @@ export async function frontendLayoutExperienceCases({check,out}){
   assert.deepEqual(observed,{exact:true,lines:20000,spans:1,selection:'step 19998\nstep 19999'});
  });
  async function app(page){await page.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>method==='compute.resource.status'?{schemaVersion:1,kind:'none',selectionId:null}:method==='compute.profiles.list'?{profiles:[],defaults:{}}:method==='sharedTerminal.list'?{sessions:[]}:original(method,data);localStorage.setItem('studio.bottomExpanded','true');localStorage.setItem('studio.bottom','190');return window.renderTest('App');});await page.getByTestId('toggle-bottom-panel').waitFor();if(await page.locator('.sidebar').isVisible())await page.locator('.sidebar-title').getByRole('button',{name:/^(收起导航|Collapse navigation)$/}).click();}
+ await check('third-layout-pointer-preview-and-single-commit',async page=>{
+  await page.setViewportSize({width:1440,height:900});
+  await page.evaluate(async()=>{
+   localStorage.setItem('studio.sidebarVisible','true');localStorage.setItem('studio.bottomExpanded','true');localStorage.setItem('studio.section','runs');
+   // Keep real layout events independent of synthetic worker polling.
+   const original=window.studio.invoke;
+   window.studio.invoke=(method,data)=>method==='worker.restore'||method==='worker.status'?Promise.resolve({status:'disconnected',checkedAt:1}):original(method,data);
+   window.__test.appRenders=0;
+   const {default:App}=await import('/frontend/app/App.tsx?count-app-renders');
+   window.testRoot.render(window.React.createElement(App));
+  });
+  const cases=[
+   {name:'调整会话列表宽度',target:'.workspace-shell .sidebar',key:'studio.sidebarWidth',axis:'width',delta:34},
+   {name:'调整对话与内容比例',target:'.workspace-panels>.agent-panel',key:'studio.overviewAgentWidth',axis:'width',delta:-34},
+   {name:'调整终端与队列高度',target:'[data-testid="bottom-panel"]',key:'studio.bottom',axis:'height',delta:-30},
+  ];
+  await page.getByRole('separator',{name:cases[0].name}).waitFor();
+  await page.evaluate(()=>{const set=Storage.prototype.setItem;window.__test.layoutWrites=[];Storage.prototype.setItem=function(k,v){window.__test.layoutWrites.push([k,v]);return set.call(this,k,v);};});
+  const measurements=[];
+  for(const {name,target,key,axis,delta} of cases){
+   const bar=page.getByRole('separator',{name,exact:true}),panel=page.locator(target);const box=await bar.boundingBox(),before=(await panel.boundingBox())[axis];
+   const x=box.x+box.width/2,y=box.y+box.height/2;
+   const writes=()=>page.evaluate(key=>window.__test.layoutWrites.filter(([k])=>k===key),key);
+   await page.mouse.move(x,y);await page.waitForFunction(()=>performance.now()-window.__test.lastAppRender>350);
+   const commits=await page.evaluate(()=>window.__test.appRenders);assert(commits>0);await page.mouse.down();
+   await page.mouse.move(x+(axis==='width'?delta:0),y+(axis==='height'?delta:0),{steps:8});
+   const during=(await panel.boundingBox())[axis];assert(Math.abs(during-before)>20,name+' changes visually while dragging');
+   const intermediateAppRenders=await page.evaluate(()=>window.__test.appRenders)-commits;
+   assert.equal(intermediateAppRenders,0,name+' does not rerender App during drag');
+   assert.deepEqual(await writes(),[],name+' has no intermediate writes');
+   await page.mouse.up();await page.waitForFunction(key=>window.__test.layoutWrites.some(([k])=>k===key),key);
+   assert.equal((await writes()).length,1);assert.equal((await panel.boundingBox())[axis],during);
+   assert.equal(await bar.getAttribute('data-dragging'),null);
+   measurements.push({key,from:before,to:during,steps:8,intermediateAppRenders,preferenceWrites:(await writes()).length});
+  }
+  await fs.writeFile(path.join(out,'pane-drag-measurements.json'),JSON.stringify(measurements,null,2));
+ });
  await check('experience-round2-layout-navigation-labels-and-keyboard-height',async page=>{
   await app(page);
   for(const [id,label] of [['navigate-home','工作区'],['navigate-tools','工具与资源'],['navigate-runs','运行记录']]){await page.getByTestId(id).focus();await page.getByRole('tooltip').filter({hasText:label}).waitFor();assert.equal(await page.getByTestId(id).getAttribute('aria-label'),label);await page.keyboard.press('Escape');assert.equal(await page.getByRole('tooltip').count(),0);}

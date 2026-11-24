@@ -14,8 +14,10 @@ export function previewResourceWorkspace(target:Target,directory?:string){return
 export default function ResourceWorkspaceReview({target,resourceName,initial,initialError,isCurrent,onClose,onConfirmed,changing=false}:{target:Target;resourceName:string;initial?:WorkspacePreview;initialError?:string;isCurrent:()=>boolean;onClose:()=>void;onConfirmed:(receipt:WorkspacePreview)=>void|Promise<void>;changing?:boolean}){
  const [preview,setPreview]=useState(initial),[directory,setDirectory]=useState(initial?.root??''),[reviewedInput,setReviewedInput]=useState(initialError?null:initial?.root??null);
  const [pending,setPending]=useState(false),[error,setError]=useState(initialError??'');
+ const [reviewedExplicitly,setReviewedExplicitly]=useState(false);
  const flight=useRef(false);
  const ready=!!preview&&directory===reviewedInput&&!preview.conflict&&(preview.status==='confirmed'||!!preview.confirmationId);
+ const confirmHint=ready&&reviewedExplicitly;
  async function act(confirm:boolean){
   if(flight.current||!isCurrent()||confirm&&(!ready||!preview))return;
   flight.current=true;setPending(true);setError('');
@@ -25,7 +27,7 @@ export default function ResourceWorkspaceReview({target,resourceName,initial,ini
     const next=await previewResourceWorkspace(target,directory.trim()||undefined);
     if(!isCurrent())return;
     if(!sameWorkspaceTarget(next,target)||preview&&(next.account!==preview.account||next.hostname!==preview.hostname))throw Error(t('当前资源已变化，请重新核对。'));
-    setPreview(next);setReviewedInput(next.root);setDirectory(next.root);
+    setPreview(next);setReviewedInput(next.root);setDirectory(next.root);setReviewedExplicitly(true);
    }else{
     const next=preview.status==='confirmed'?preview:await resourceWorkspaces.confirm({
      connectionId:target.connectionId,profileId:target.profileId,profileVersion:target.profileVersion,confirmationId:preview.confirmationId!
@@ -45,11 +47,11 @@ export default function ResourceWorkspaceReview({target,resourceName,initial,ini
   onClose();
  }
  return <Modal title={changing?t('更换远端总工作区'):t('交接前确认远端总工作区')} onClose={dismiss} closeDisabled={pending}>
-  <section className="resource-workspace-review" data-testid="resource-workspace-review" data-guide-target="ssh-workspace">
+  <section className="resource-workspace-review" data-testid="resource-workspace-review">
    <dl><dt>{t('计算资源')}</dt><dd>{preview?.resourceName??resourceName}</dd>{preview&&<><dt>{t('远端账号')}</dt><dd><code>{preview.account}@{preview.hostname}</code></dd></>}</dl>
    <form onSubmit={event=>{event.preventDefault();void act(false);}}>
-    <label>{t('远端总工作区')}<input data-testid="resource-workspace-path" placeholder="~/AIMatterLab" value={directory} onChange={event=>{setDirectory(event.currentTarget.value);setError('');}} disabled={pending}/></label>
-    <button type="submit" className="button" data-testid="resource-workspace-preview" disabled={pending}>{t('核对目录')}</button>
+    <label>{t('远端总工作区')}<input data-testid="resource-workspace-path" data-guide-target={confirmHint?undefined:'ssh-workspace-path'} placeholder="~/AIMatterLab" value={directory} onChange={event=>{setDirectory(event.currentTarget.value);setError('');}} disabled={pending}/></label>
+    <button type="submit" className="button" data-testid="resource-workspace-preview" data-guide-target={confirmHint?undefined:'ssh-workspace-preview'} disabled={pending}>{t('核对目录')}</button>
    </form>
    {preview&&directory===reviewedInput?<>
     <div className="resource-workspace-tree"><code dir="ltr" data-testid="resource-workspace-resolved">{preview.root}</code>
@@ -60,7 +62,7 @@ export default function ResourceWorkspaceReview({target,resourceName,initial,ini
    </>:<p role="status" className="muted">{t('先核对这个路径及远端解析结果。')}</p>}
    {error&&<div role="alert" className="notice"><strong>{t('远端工作区需要核对')}</strong><p>{error}</p></div>}
    <div className="button-row"><button type="button" className="button" disabled={pending} onClick={dismiss}>{t(changing?'取消':'稍后交接')}</button>
-    <button type="button" className="button primary" data-testid="resource-workspace-confirm" data-guide-target="ssh-workspace-confirm" disabled={pending||!ready} onClick={()=>void act(true)}>{t(pending?'正在核对…':changing?'确认更换工作区':'确认并交接')}</button></div>
+    <button type="button" className="button primary" data-testid="resource-workspace-confirm" data-guide-target={confirmHint?'ssh-workspace-confirm':undefined} disabled={pending||!ready} onClick={()=>void act(true)}>{t(pending?'正在核对…':changing?'确认更换工作区':'确认并交接')}</button></div>
   </section>
  </Modal>;
 }

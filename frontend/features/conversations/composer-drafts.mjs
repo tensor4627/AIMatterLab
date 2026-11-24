@@ -22,6 +22,16 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
  const selectedProvider=separator>0?selected.slice(0,separator):null;
  const provider=providers.has(selectedProvider)?selectedProvider:providers.has(read(prefix+'provider'))?read(prefix+'provider'):'codex';
  let active=load(provider,providers.has(selectedProvider)&&separator<selected.length-1?selected.slice(separator+1):null);
+ const listeners=new Set();
+ const scope=()=>Object.freeze({provider:active.provider,threadId:active.threadId,...active.threadId?{}:{draftId:active.blankId}});
+ let activeScope=scope(),publishedKey=active.key,publishedText=active.text;
+ function subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);}
+ function publish(){
+  if(publishedKey===active.key&&publishedText===active.text)return;
+  if(publishedKey!==active.key)activeScope=scope();
+  publishedKey=active.key;publishedText=active.text;
+  for(const listener of listeners)listener();
+ }
  function save(entry){
   if(entry.deleted)return false;
   const data={version:1,text:entry.text,...entry.files.length?{files:entry.files}:{}};
@@ -29,12 +39,12 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
   for(const key of entry.backups){if(saved&&remove(key))entry.backups.delete(key);else write(key,JSON.stringify({...data,migratedTo:entry.threadId}));}
   return saved;
  }
- function activate(provider,threadId=null,fresh=false){active=load(provider,threadId,fresh);write(prefix+'provider',provider);return active.text;}
- function edit(text){active.text=text;active.revision++;save(active);return text;}
+ function activate(provider,threadId=null,fresh=false){active=load(provider,threadId,fresh);write(prefix+'provider',provider);publish();return active.text;}
+ function edit(text){active.text=text;active.revision++;save(active);publish();return text;}
  function seed(provider,threadId,text){
   const entry=load(provider,threadId);
   if(entry.deleted||entry.text||entry.revision)return false;
-  entry.text=text;entry.revision++;save(entry);return true;
+  entry.text=text;entry.revision++;save(entry);publish();return true;
  }
  function capture(){return {entry:active,key:active.key,revision:active.revision,text:active.text,files:[...active.files]};}
  function acknowledge(snapshot){
@@ -42,7 +52,7 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
   const match=entry.revision===snapshot.revision&&entry.text===snapshot.text;
   const sent=new Set((snapshot.files||[]).map(file=>file.id)),files=entry.files.filter(file=>!sent.has(file.id));
   if(!match&&files.length===entry.files.length)return false;
-  entry.files=files;if(match){entry.text='';entry.revision++;}save(entry);return match;
+  entry.files=files;if(match){entry.text='';entry.revision++;}save(entry);publish();return match;
  }
  function appendFiles(entry,files){
   const merged=new Map(entry.files.map(file=>[file.id,file]));
@@ -62,16 +72,18 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
   appendFiles(entry,files);
   if(text){entry.text=[entry.text,text].filter(Boolean).join('\n\n');entry.revision++;}
   if(!save(entry)&&requireStorage){Object.assign(entry,previous);throw Error('无法保存草稿，消息仍在队列中。');}
+  publish();
   return active.text;
  }
- function retain(snapshot,text){const entry=snapshot.entry;if(snapshot.text||entry.deleted||entry.revision!==snapshot.revision||entry.text!==snapshot.text)return false;entry.text=text;entry.revision++;save(entry);return true;}
+ function retain(snapshot,text){const entry=snapshot.entry;if(snapshot.text||entry.deleted||entry.revision!==snapshot.revision||entry.text!==snapshot.text)return false;entry.text=text;entry.revision++;save(entry);publish();return true;}
  function rebind(snapshot,threadId,files=snapshot.entry.files){
   const entry=snapshot.entry;if(entry.deleted||entry.threadId===threadId)return;
   const next=load(entry.provider,threadId);
   // A target already edited in this renderer wins. Preserve the source separately.
-  if(next!==entry&&(next.revision>0||next.text||next.files.length)){if(active===entry)active=next;return;}
+  if(next!==entry&&(next.revision>0||next.text||next.files.length)){if(active===entry){active=next;publish();}return;}
   const previous=entry.key,wasNew=!entry.threadId;entry.backups.add(previous);entry.key=next.key;entry.threadId=threadId;entry.files=files;entries.set(entry.key,entry);save(entry);
   if(wasNew){entries.delete(previous);const id=createId();newIds.set(entry.provider,id);write(prefix+'new.'+entry.provider,id);}
+  publish();
  }
  function rekey(provider,oldThreadId,newThreadId,uploadsRetained){
   const old=load(provider,oldThreadId);
@@ -86,6 +98,6 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
   if(active===entry)activate(provider,null,true);
   return active.text;
  }
- return {activate,edit,seed,capture,acknowledge,retain,rebind,rekey,discard,addFiles,addToSnapshot,removeFile,appendToDraft,files:()=>active.files,text:()=>active.text,owner:()=>({provider:active.provider,threadId:active.threadId}),
-  attachmentOwner:()=>({provider:active.provider,threadId:active.threadId,...active.threadId?{}:{draftId:active.blankId}})};
+ return {activate,edit,seed,capture,acknowledge,retain,rebind,rekey,discard,addFiles,addToSnapshot,removeFile,appendToDraft,subscribe,
+  files:()=>active.files,text:()=>active.text,owner:()=>({provider:active.provider,threadId:active.threadId}),attachmentOwner:()=>activeScope};
 }

@@ -1320,10 +1320,30 @@ const english:Record<string,string> = {
 "调度器":"Scheduler",
 "计算节点":"Compute node",
 "检查连接与调度器":"Check connection and scheduler",
+"集群就绪状态":"Cluster readiness",
+"SSH 认证":"SSH authentication",
+"调度器探测":"Scheduler probe",
+"队列策略":"Queue policy",
+"已配置":"Configured",
+"已批准":"Approved",
+"登录认证与远程用户名":"Sign-in and remote username",
+"当前草稿 · 登录认证与远程用户名":"Current draft · sign-in and remote username",
+"登录节点":"Login node",
+"登录节点 · LSF":"Login node · LSF",
+"登录节点 · Slurm":"Login node · Slurm",
+"当前项目 · 连接版本":"Current project · connection version",
+"选择项目以查看授权":"Select a project to view authorization",
+"手动队列 · 项目已授权连接":"Manual queue · project authorized",
+"手动队列 · 项目未授权":"Manual queue · project unapproved",
+"手动队列配置":"Manual queue configuration",
+"环境草稿 · 计算节点待验证":"Environment draft · compute node pending",
+"连接环境 · 计算节点待验证":"Connection environment · compute node pending",
 "需要重新检查":"Check again",
 "未检查":"Not checked",
 "检查通过":"Check passed",
 "检查失败":"Check failed",
+"最近保存的集群连接检查失败。":"The latest saved cluster connection check failed.",
+"本次集群探测结果未确认。上次观测保留供参考。":"The latest cluster probe could not be confirmed. The previous observation is available for reference.",
 "检查中…":"Checking…",
 "待完善":"Setup needed",
 "Agent 环境建议":"Agent environment suggestions",
@@ -1623,6 +1643,7 @@ const english:Record<string,string> = {
 "调度系统":"Scheduler",
 "显示私有连接字段":"Show Private Connection Fields",
 "隐藏私有连接字段":"Hide Private Connection Fields",
+"已隐藏":"Hidden",
 "端口":"Port",
 "密钥引用路径（不读取密钥内容）":"Key Reference Path (Key Contents Are Not Read)",
 "选择":"Choose",
@@ -2560,6 +2581,9 @@ const english:Record<string,string> = {
 "对话推理等级":"Conversation reasoning level",
 "关闭思考":"Thinking off",
 "配置已保存，密钥不会回显。":"Configuration saved. The stored key is never displayed.",
+"完成":"Done",
+"稍后配置":"Set up later",
+"放弃修改并关闭":"Discard changes and close",
 "请先保存配置，再验证 API 连接。":"Save the configuration before testing the API connection.",
 "选择要加入的模型；已有模型的能力设置会保留。":"Select models to add. Existing capability settings are preserved.",
 "接口未返回模型；仍可手动添加。":"No models were returned. You can still add them manually.",
@@ -2656,6 +2680,9 @@ const english:Record<string,string> = {
  '缺少 Git 时，可在输入输出 JSON 中添加 git_bootstrap。填写 kind 为 archive，并提供 filename、executable 和 sha256。url 可省略，确认后再选本机归档或填写集群路径。':'If Git is missing, add git_bootstrap to the inputs and outputs JSON. Use archive as kind and supply filename, executable, and sha256. You can omit url and choose a local archive or enter its cluster path after review.',
  '当前流程已连接此作业服务':'The current workflow is connected to this job service',
  '此流程已绑定其他计算资源。请打开原资源，或为此资源新建流程。':'This workflow is assigned to a different resource. Open its original resource or start a new workflow here.',
+ '引导课节':'Guide lesson','关闭提示':'Dismiss hint','重新高亮':'Highlight again','返回引导':'Back to guide',
+ '设置 {current}/{total}':'Setup {current}/{total}','示例 {current}/{total}':'Tour {current}/{total}',
+ '目标暂不可见。展开相应区域或滚动到该控件后，即可看到高亮。':'The control is out of view. Expand the relevant section or scroll to the control to highlight it.',
 };
 type Language='zh-CN'|'en';
 let language:Language='zh-CN';
@@ -2667,5 +2694,6 @@ export function setLanguage(value:Language){
  try { localStorage.setItem('studio.language',value); }
  catch { /* Preview and cancellation still work when the cache is unavailable. */ }
 }
+export function languageText(inEnglish:boolean,value:string,translation=english[value]??value){return inEnglish?translation:value;}
 export function t<T>(value:T):T {return (language==='en'&&typeof value==='string'?(english[value.trim()]??(value.match(/^请先补齐 (\d+) 项参数或待确认事项$/)?.[1]?('Complete '+value.match(/^请先补齐 (\d+) 项参数或待确认事项$/)![1]+' missing inputs or requirements.'):value)):value) as T;}
 export const tr=t;

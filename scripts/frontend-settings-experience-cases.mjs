@@ -52,6 +52,7 @@ export async function frontendSettingsExperienceCases({check,out}){
    };
    return window.renderTest('ClusterPage',{worker:true,serviceVersion:'current',settings:{},onError:e=>{throw e;},onRefresh(){}});
   });
+  await page.getByRole('button',{name:'显示私有连接字段',exact:true}).click();
   await page.getByTestId('ssh-host').fill('fixture.invalid');
   await page.getByTestId('ssh-username').fill('fixture');
   await page.locator('.settings-advanced>summary').filter({hasText:/^更多/}).click();
@@ -66,6 +67,20 @@ export async function frontendSettingsExperienceCases({check,out}){
   await page.getByRole('button',{name:'保存连接',exact:true}).click();
   await page.getByText('连接已保存；项目授权未改变。',{exact:true}).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.__test.savedCluster.limits),{cpus:64,gpus:0,memory_mb:262144});
+ });
+ await check('third-settings-empty-port-stays-blank-until-valid-save',async page=>{
+  await page.evaluate(()=>window.renderTest('App'));
+  await page.getByRole('button',{name:'设置',exact:true}).filter({visible:true}).click();
+  const dialog=page.getByRole('dialog'),connections=dialog.getByRole('button',{name:'计算连接',exact:true}),port=dialog.getByTestId('worker-port');
+  async function openPort(){await connections.click();for(const title of ['默认本地服务与已有集群','作业服务高级配置']){const summary=dialog.locator('summary').filter({hasText:title});if(!await summary.evaluate(el=>el.parentElement.open))await summary.click();}}
+  await openPort();await port.fill('');await port.press('Tab');assert.equal(await port.inputValue(),'');
+  await dialog.getByRole('button',{name:'外观',exact:true}).click();await openPort();assert.equal(await port.inputValue(),'');
+  await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').length),0);
+  await dialog.getByRole('alert').filter({hasText:'作业服务端口须为'}).waitFor();assert.equal(await port.getAttribute('aria-invalid'),'true');
+  await port.fill('19191');await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
+  await page.waitForFunction(()=>window.__test.settings.workerPort===19191);
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').length),1);
  });
  await check('experience-settings-storage-denied-language-preview-and-cancel',async page=>{
   await page.evaluate(()=>{

@@ -12,36 +12,37 @@
   gap:8px;
 }
 .cluster-page .cluster-selection-fields select {width:100%;min-inline-size:0;text-overflow:ellipsis;}
-.cluster-selection-actions,.cluster-health-heading,.cluster-observation > div {
+.cluster-selection-actions,.cluster-observation,.cluster-observation > div {
   display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;
 }
 .cluster-page .button {white-space:normal;text-align:start;}
-.cluster-health {
-  display:flex;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:7px 12px;
-  margin:0 0 10px;
-  padding:8px 10px;
-  background:var(--panel);
-  border-inline-start:2px solid var(--line);
+.cluster-readiness {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:7px;
+  margin:0 0 6px;
+}
+.cluster-readiness button {
+  display:grid;
+  align-content:start;
+  gap:3px;
   min-width:0;
+  padding:7px 9px;
+  text-align:start;
+  overflow-wrap:anywhere;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:6px;
 }
-.cluster-health-heading {flex:1 1 180px;}
-.cluster-health dl {
-  display:flex;
-  flex:1 1 100%;
-  flex-wrap:wrap;
-  column-gap:14px;
-  row-gap:3px;
-  margin:0;
-}
-.cluster-health dl > div {display:flex;gap:5px;align-items:baseline;flex-wrap:wrap;}
-.cluster-health small,.cluster-health dt,.cluster-observation small {color:var(--muted);}
-.cluster-health dd {margin:0;font-variant-numeric:tabular-nums;}
-.cluster-observation {display:flex;gap:5px 14px;flex-wrap:wrap;color:var(--muted);line-height:1.5;overflow-wrap:anywhere;}
+.cluster-readiness button:is(:hover,[aria-current]) {background:var(--accent-bg);border-color:var(--accent);}
+.cluster-readiness-title {color:var(--text);}
+.cluster-readiness :is(small,time) {color:var(--muted);font-size:max(.875em,var(--ui-min-font,11px));line-height:1.35;}
+.cluster-readiness strong {color:var(--muted);}
+.cluster-readiness [data-state=verified] strong {color:var(--green);}
+.cluster-readiness :is([data-state=stale],[data-state=expired],[data-state=failed]) strong {color:var(--warn);}
+.cluster-observation {align-items:center;color:var(--muted);line-height:1.5;overflow-wrap:anywhere;}
 .cluster-observation:not(:empty) {padding:4px 0 8px;}
-.cluster-observation strong {color:var(--text);}
+.cluster-observation > .button {margin-inline-start:auto;}
 .cluster-page .subtabs {margin:0;gap:14px;border-top:1px solid var(--line);}
 .cluster-page .subtabs button {padding:7px 0;}
 .cluster-page > .settings-advanced {border-top:0;margin:0;padding:5px 0 8px;}
@@ -58,6 +59,19 @@
 .cluster-connection-fields .cluster-auth-fields {grid-template-columns:minmax(0,1fr) auto;}
 .cluster-page .cluster-connection-fields label,.cluster-page .cluster-files label {margin:7px 0;min-inline-size:0;}
 .cluster-connection-fields .cluster-auth-fields .button {margin-bottom:7px;}
+.cluster-private-mask {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:9px 11px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:var(--bg);
+  color:var(--muted);
+}
+.cluster-private-key {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;}
+.cluster-private-key > button {align-self:end;margin-bottom:7px;}
+.cluster-science-environment:focus-visible {outline:1px solid var(--accent);outline-offset:3px;}
 .cluster-connection-fields details > summary {padding:8px 0;cursor:pointer;color:var(--muted);}
 .cluster-connection-fields details[open] > summary {color:var(--text);}
 .cluster-connection-fields details p {margin:6px 0;line-height:1.5;}
@@ -71,7 +85,11 @@
 .cluster-environment-issue {grid-column:1 / -1;color:var(--warn);}
 .cluster-environment-editor input[aria-invalid=true],.cluster-environment-editor textarea[aria-invalid=true] {border-color:var(--warn);}
 @container cluster-page (max-width:520px){
+ .cluster-readiness {grid-template-columns:repeat(2,minmax(0,1fr));}
  .cluster-environment-entry {grid-template-columns:minmax(0,1fr);gap:5px;margin-bottom:12px;}
+}
+@container cluster-page (max-width:270px){
+ .cluster-readiness {grid-template-columns:minmax(0,1fr);}
 }
 .cluster-page .cluster-footer {
   justify-content:flex-end;

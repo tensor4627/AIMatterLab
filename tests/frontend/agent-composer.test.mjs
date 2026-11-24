@@ -12,6 +12,17 @@ test('Agent initially renders the selected provider/thread draft and restores ac
  h.render({sessionSelection:{nonce:'restore',conversation:conversation('qwen','empty-local')}});await h.flush();hydration.resolve({settings:{agentProvider:'codex'}});await h.flush();assert.equal(h.textarea().props.value,'未发送的界面恢复测试草稿');assert.equal(starts(h).length,0);h.unmount();
  const reload=agentHarness({storage});assert.equal(reload.textarea().props.value,'未发送的界面恢复测试草稿');await reload.flush();assert.equal(starts(reload).length,0);reload.unmount();
 });
+test('Agent send reads an edit made since the last owner render',async()=>{
+ const h=agentHarness();
+ try{
+  await h.flush();h.click('agent-connect');await h.flush();
+  h.type('Earlier text at render');
+  h.textarea().props.onChange({target:{value:'Latest text at send'}});
+  h.send();await h.flush();
+  assert.deepEqual(starts(h).map(call=>call.data.params.input[0].text),['Latest text at send']);
+  assert.equal(h.textarea().props.value,'');
+ }finally{h.unmount();}
+});
 test('Agent edits during slow initial and project-provider hydration stay with their current owner',async()=>{
  const hydration=deferred(),h=agentHarness({props:{projectId:'project'},override:(method,data,standard)=>method==='state'?hydration.promise:standard(method,data)});await h.flush();h.type('typed before preference response');hydration.resolve({settings:{agentProvider:'qwen',projectAgents:{project:'qwen'}}});await h.flush();assert.equal(h.textarea().props.value,'typed before preference response');assert.equal(h.find(node=>node.props?.['data-testid']==='agent-provider').props.value,'codex');assert.equal(starts(h).length,0);h.unmount();
 });

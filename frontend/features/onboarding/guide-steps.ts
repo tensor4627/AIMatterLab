@@ -1,8 +1,14 @@
 import type {SetupVisit} from './SetupAssistant';
+import type {SetupPage} from '../../../contracts/dto/setup-guide';
+
+export const setupPages = ['welcome','agent','compute','ready'] as const satisfies readonly SetupPage[];
+export const setupTour = ['assets','tour-goal','review-workflow','preview-deployment','runs'] as const;
+export type SetupTourStep = typeof setupTour[number];
 
 export type SetupLessonLocation = {
   destination: Exclude<SetupVisit,'resume-cluster'> | 'ssh-login' | 'ssh-settings' | 'ssh-service' | 'ssh-workspace' | 'ssh-service-observe';
   shortCase?: string;
+  source?: 'tour';
 };
 export type GuideStep = SetupLessonLocation['destination'] | 'account' | 'wsl' | 'choose-wsl' | 'choose-ssh';
 type Target = readonly [id: string, zh: string, en: string];
@@ -44,8 +50,9 @@ const steps: Record<GuideStep, Step> = {
     ['ssh-edit','查看登录提示，需要修正主机或账号时，从这里编辑连接。','Read the sign-in message. Use this button if you need to correct the host or account.']
   ]},
   'ssh-workspace': {title:['确认远端总工作区','Confirm the remote workspace'],targets:[
-    ['ssh-workspace-confirm','核对资源、账号和绝对路径。workfile 保存每次计算的文件，software 存放新工具。确认后开始准备作业服务。','Review the resource, account and absolute path. Workfile holds calculation files and software holds newly installed tools. Confirm to start preparing the job service.'],
-    ['ssh-workspace','可编辑目录并点击「核对目录」。看到绝对路径后再确认。','Edit the path and review it. Confirm after the absolute path appears.']
+    ['ssh-workspace-path','在这里核对或修改目录。点击「核对目录」查看远端解析的绝对路径。','Review or edit the directory here. Use Review path to see the resolved remote path.'],
+    ['ssh-workspace-preview','先核对目录，让远端解析路径并检查目录项。','Review the directory to resolve the remote path and check its entries.'],
+    ['ssh-workspace-confirm','核对资源、账号和绝对路径。workfile 保存每次计算的文件，software 存放新工具。确认后开始准备作业服务。','Review the resource, account and absolute path. Workfile holds calculation files and software holds newly installed tools. Confirm to start preparing the job service.']
   ]},
   'ssh-service-observe': {title:['检查作业服务','Check the job service'],targets:[
     ['ssh-service-repair','作业服务没有就绪时，可在原资源对话中准备一条环境检查草稿。','If the service is unavailable, draft an environment check for the original resource.'],
@@ -58,7 +65,7 @@ const steps: Record<GuideStep, Step> = {
   'ssh-settings': {title:['配置远程连接','Configure the remote connection'], targets:[
     ['cluster-connect-worker','先连接本地作业服务，再读取已保存的集群配置。','Connect the local job service here to load saved cluster profiles.'],
     ['cluster-profile','选择要使用的集群配置，核对主机和登录信息。','Choose the cluster profile here and check its host and sign-in details.'],
-    ['cluster-host','在这里填写新连接的 SSH 主机，再填写用户名。','Enter the SSH host for your new connection here, then enter the username.']
+    ['cluster-host','点击「显示私有连接字段」后，填写 SSH 主机与用户名。','Show the private connection fields, then enter the SSH host and username.']
   ]},
   'ssh-service': {title:['准备远程作业服务','Prepare the remote job service'], targets:[
     ['composer','核对草稿中的连接信息，再请助手检查远端 Python 环境。','Review the connection in this draft, then ask the assistant to check the remote Python environment.']
@@ -74,9 +81,12 @@ const steps: Record<GuideStep, Step> = {
     ['session-workspace','在这里核对实际会话目录并复制路径。可以在对话中问「本次计算文件在哪？」。','Check and copy the actual conversation path here. Ask where the calculation files are in chat.']
   ]},
   account: {title:['配置账号','Configure account'], targets:[
+    ['codex-api-key','填写 OpenAI API Key，然后点击「开始登录」。','Enter your OpenAI API key, then choose Start sign-in.'],
+    ['api-endpoint','核对服务商的接口地址，再按页面提示配置密钥和模型。','Review the provider endpoint, then follow the form to set up its key and model.'],
+    ['api-key','新增或更换密钥时在这里填写，再保存配置。','Enter a new or replacement API key here, then save the configuration.'],
+    ['api-model','填写要使用的模型 ID。保存配置后可单独验证 API 连接。','Enter the model ID here. Save the configuration to run a separate connection test.'],
     ['login-method','选择登录方式，再按页面提示登录。','Choose a sign-in method here, then follow the instructions.'],
     ['login-region','选择账号所在地区，再开始设备授权登录。','Choose the region of your account before starting device sign-in.'],
-    ['api-key','在此输入服务商的 API Key，再保存配置。','Enter the provider’s API key here, then save the configuration.'],
     ['api-profile','打开已保存的服务商配置，核对地址和模型。','Open the saved provider to review its endpoint and model.'],
     ['add-api','从这里添加服务商，选择与你的订阅相符的配置。','Add a provider here, then choose the preset for your subscription.']
   ]},
@@ -102,4 +112,10 @@ export function guideStep(step: GuideStep, english: boolean, shortCase?: string)
     heading=english?`Prepare the ${name} check`:`准备 ${name} 短例`;
   }
   return {heading,targets:targets.map(([id,zh,en])=>({id,hint:english?en:zh}))};
+}
+
+export function setupLessonProgress(lesson:SetupLessonLocation,page:SetupPage) {
+  const tourIndex=lesson.source==='tour'?setupTour.findIndex(step=>step===lesson.destination):-1;
+  return tourIndex>=0?{kind:'tour',current:tourIndex+1,total:setupTour.length}:
+    {kind:'setup',current:setupPages.indexOf(page)+1,total:setupPages.length};
 }

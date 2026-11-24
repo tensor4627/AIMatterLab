@@ -12,23 +12,31 @@ import './settings-page.css';
 const categories=[['appearance','外观',Palette],['layout','工作区布局',PanelsTopLeft],['language','语言',Languages],['agent','Agent',Brain],['connections','计算连接',Server],['permissions','计算权限',Server],['science','科学资源与技能',BookOpen],['data','数据源',Server],['updates','软件更新',RefreshCw]] as const;
 const num=(value:string)=>value===''?undefined:Number(value);
 // Keep the raw edit text until blur so clearing does not reinsert a display default.
-function NumberSettingInput({value,min,max,onChange,testId,id}:{value:number;min:number;max:number;onChange:(value:number|undefined)=>void;testId?:string;id?:string}){
+function NumberSettingInput({value,min,max,onChange,testId,id,errorId}:{errorId?:string;value:number|undefined;min:number;max:number;onChange:(value:number|undefined)=>void;testId?:string;id?:string}){
  const [draft,setDraft]=useState<string|null>(null);
- return <input id={id} data-testid={testId} type="number" min={min} max={max} value={draft??value} onFocus={()=>setDraft(String(value))} onChange={event=>{setDraft(event.target.value);onChange(num(event.target.value));}} onBlur={()=>setDraft(null)}/>;
+ return <input id={id} aria-invalid={errorId?true:undefined} aria-describedby={errorId} data-testid={testId} type="number" min={min} max={max} value={draft??value??''} onFocus={()=>setDraft(value===undefined?'':String(value))} onChange={event=>{setDraft(event.target.value);onChange(num(event.target.value));}} onBlur={()=>setDraft(null)}/>;
 }
+function validPort(value:number){return Number.isInteger(value)&&value>=1024&&value<=65535;}
 function fit(value:number|undefined,min:number,max:number){return typeof value==='number'&&Number.isFinite(value)?Math.min(max,Math.max(min,value)):undefined;}
 export default function SettingsPage({updates,settings,layoutKey='agentLayout',onChange,onClose,onSaved,onSavingChange,onError,onOpenSkills,onOpenComputeResources,onOpenLocalCompute,onOpenSshCompute,onOpenProjects}:{layoutKey?:'agentLayout'|'overviewAgentLayout';updates?:ReturnType<typeof useWorkspaceUpdate>;onOpenComputeResources?:()=>void;onOpenLocalCompute?:()=>void;onOpenSshCompute?:()=>void;onOpenProjects?:()=>void;onOpenSkills?:()=>void;settings:Settings;onChange:(s:Settings)=>void;onClose:()=>void;onSaved?:(s:Settings)=>void;onSavingChange?:(saving:boolean)=>void;onError:(e:unknown)=>void}){
  const chatCentered=settings[layoutKey]==='center';
  const layoutLabel=t(layoutKey==='agentLayout'?'会话与计算流程':'工具、资源与运行记录');
  const [category,setCategory]=useState('appearance'),[saving,setSaving]=useState(false),[saved,setSaved]=useState('');
+ const [portDraft,setPortDraft]=useState<number|''|null>(null),[portInvalid,setPortInvalid]=useState(false);
  const savedSettings=useRef(settings);
- const dirty=JSON.stringify(settings)!==JSON.stringify(savedSettings.current);
+ const port=portDraft===''?undefined:portDraft??settings.workerPort;
+ const dirty=portDraft!==null||JSON.stringify(settings)!==JSON.stringify(savedSettings.current);
  const mounted=useRef(false),saveSequence=useRef(0),savingRef=useRef(false),revision=useRef(0),settingsRef=useRef(settings);settingsRef.current=settings;
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;saveSequence.current++;};},[]);
  function patch(changes:Partial<Settings>){revision.current++;if(changes.language)setLanguage(changes.language);onChange({...settings,...changes});setSaved('');}
+ function editPort(value:number|undefined){
+  setPortInvalid(false);
+  if(value!==undefined&&validPort(value)){setPortDraft(null);patch({workerPort:value});return;}
+  setPortDraft(value??'');revision.current++;setSaved('');
+ }
  async function save(){
   if(savingRef.current)return;
-  if(!Number.isInteger(settings.workerPort)||settings.workerPort<1024||settings.workerPort>65535){onError(new Error(t('作业服务端口须为 1024 到 65535 的整数。')));return;}
+  if(port===undefined||!validPort(port)){setPortInvalid(true);return;}
   if(settings.terminalIdleMinutes!==undefined&&(!Number.isInteger(settings.terminalIdleMinutes)||settings.terminalIdleMinutes<1||settings.terminalIdleMinutes>1440)){onError(new Error(t('终端空闲时长须为 1 到 1440 分钟。')));return;}
   const next:Settings={...settings,fontSize:fit(settings.fontSize,12,24),editorFontSize:fit(settings.editorFontSize,10,28),terminalFontSize:fit(settings.terminalFontSize,10,24),minimumFontSize:fit(settings.minimumFontSize,11,18),chatFontSize:fit(settings.chatFontSize,12,28)};
   const sequence=++saveSequence.current,submittedRevision=revision.current,submittedSettings=settings;
@@ -104,7 +112,7 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
       <details className="settings-advanced"><summary>{t('作业服务高级配置')}</summary>
        <div className="settings-form-grid">
         <label>{t('作业服务目录')}<input value={settings.workerRoot} onChange={e=>patch({workerRoot:e.target.value})}/></label>
-        <label>{t('作业服务端口')}<input type="number" min={1024} max={65535} value={settings.workerPort} onChange={e=>patch({workerPort:Number(e.target.value)})}/></label>
+        <label>{t('作业服务端口')}<NumberSettingInput testId="worker-port" errorId={portInvalid?'settings-port-error':undefined} min={1024} max={65535} value={port} onChange={editPort}/></label>
        </div>
        <p className="settings-note">{t('保存后重新连接 WSL 以应用设置。引擎路径在计算环境中登记。')}</p>
       </details>
@@ -124,7 +132,7 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
     </>}
    </div>
    <div className="settings-footer">
-    <span role="status">{saved||t(dirty?'未保存修改':'')}</span>
+    {portInvalid?<span id="settings-port-error" role="alert">{t('作业服务端口须为 1024 到 65535 的整数。')}</span>:<span role="status">{saved||t(dirty?'未保存修改':'')}</span>}
     <button className="button" disabled={saving} onClick={onClose}>{t('取消')}</button>
     <button className="button primary" disabled={saving} onClick={()=>void save()}><Save size={15}/>{saving?t('保存中…'):t('保存设置')}</button>
    </div>

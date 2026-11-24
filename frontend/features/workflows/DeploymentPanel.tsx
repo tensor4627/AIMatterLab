@@ -1,3 +1,4 @@
+import {taskDraftStorage} from './task-draft-storage';
 import LoadingFeedback from '../../ui/LoadingFeedback';
 import {useDeploymentContext} from "./useDeploymentContext";
 import ConsumerTargetReview from './ConsumerTargetReview';
@@ -45,8 +46,8 @@ export default function DeploymentPanel({task,worker:connected,restoring=false,p
  const [diagnostics,setDiagnostics]=useState(()=>deploymentDiagnosticJournal.list(task.id));
  useEffect(()=>{setDiagnostics(deploymentDiagnosticJournal.list(task.id));},[task.id]);
  useEffect(()=>{setDiagnostics(deploymentDiagnosticJournal.reconcile(task));},[task.id,task.updatedAt,JSON.stringify(task.execution)]);
- const outbox=useMemo(()=>deploymentOutbox(task.id,localStorage),[task.id]);
- const scienceDraft=useMemo(()=>{try{return workflowOutbox(task.id,localStorage);}catch{return {pendingCount:1,activeSave:null};}},[task.id]);
+ const outbox=useMemo(()=>deploymentOutbox(task.id,taskDraftStorage),[task.id]);
+ const scienceDraft=useMemo(()=>{try{return workflowOutbox(task.id,taskDraftStorage);}catch{return {pendingCount:1,activeSave:null};}},[task.id]);
  const [,scienceChanged]=useState(0);
  useEffect(()=>{const pending=scienceDraft.activeSave;if(!pending)return;let current=true;void pending.finally(()=>{if(current){scienceChanged(n=>n+1);void onRefresh();}}).catch(()=>{});return()=>{current=false;};},[task.id,task.parameterRevision,scienceDraft.activeSave]);
  const [config,setConfig]=useState<any>(()=>outbox.current(task)),configRef=useRef(config);configRef.current=config;

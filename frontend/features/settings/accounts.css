@@ -29,6 +29,11 @@
 }
 .account-provider-content,.account-login-fields {min-width:0;}
 .account-login-fields {border:0;padding:0;margin:0;}
+.modal-body:has(> .account-dialog-content) {display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0;}
+.modal-body:has(> .account-dialog-content) > .setup-error {margin:12px 21px 0;}
+.account-dialog-content {display:flex;flex-direction:column;min-height:0;}
+.account-dialog-scroll {min-height:0;overflow:auto;padding:21px;}
+.account-dialog-exit.button-row {flex:none;justify-content:flex-end;margin:0;padding:12px 21px;border-top:1px solid var(--line);}
 .account-login-fields .provider-login {display:grid;gap:12px;min-width:0;}
 .account-login-fields .provider-login > .button {justify-self:start;}
 .account-login-fields .provider-login .button {white-space:normal;text-align:start;}

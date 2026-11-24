@@ -1,3 +1,4 @@
+import {taskDraftStorage} from './task-draft-storage';
 import {parameterDisplayLabel} from "../../ui/parameter-label.mjs";
 
 import Tooltip,{HelpTip} from "../../ui/Tooltip";
@@ -63,7 +64,7 @@ export default function AgentTaskPage({worker,task,environments,onReconnect,onBi
  const localBuildReview=localBuildReviewEligibility(task.parameters?.engine,composition.owner===compositionOwner?composition.savedGraphMode:undefined,task.parameters);
  const compositionBlocked=compositionUnsaved||hasComposition&&composition.renderBlocked;
  const buildStageEditable=task.workflowVersion===2&&['','pygas.build','bias.validate','gpumd.sampling'].includes(task.parameters?.engine||'')&&!!task.threadId&&!!task.authoring?.projectId&&!!task.authoring.environmentId&&!!task.authoring.inputRoot&&composition.owner===compositionOwner&&!composition.loading&&['metad','cvonly'].includes(composition.savedGraphMode||'')&&task.composition?.status==='rendered'&&!!task.composition.graphPath&&!!task.composition.sourcePath&&/^[a-f0-9]{64}$/.test(task.composition.graph_sha256||'')&&/^[a-f0-9]{64}$/.test(task.composition.source_sha256||''),consumerStageEditable=task.workflowVersion===2&&!!task.customCv?.id,retainedConsumer=stageDrafts.some(engine=>engine!=='pygas.build');
- const [outbox]=useState(()=>workflowOutbox(task.id,localStorage));
+ const [outbox]=useState(()=>workflowOutbox(task.id,taskDraftStorage));
  const [query,setQuery]=useState(''),[onlyMissing,setOnlyMissing]=useState(false);
  const [frozenGroup,setFrozenGroup]=useState<FrozenGroupView|null>(null);
  const [reconnecting,setReconnecting]=useState(false);

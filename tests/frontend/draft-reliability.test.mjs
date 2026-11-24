@@ -1,3 +1,4 @@
+import {deploymentOutbox,deleteDeploymentOutbox,deploymentConfig} from '../../frontend/features/workflows/deployment-draft.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {DraftOutbox,workflowOutbox,deleteWorkflowOutbox} from "../../frontend/features/workflows/draft-outbox.mjs";
 import {reviewState} from "../../frontend/features/workflows/review-state.mjs";
@@ -65,4 +66,22 @@ test('Current draft stage is independent of the previous completed run',()=>{
  const current={...reviewed,artifact:{id:'new',preparedRevision:3},run:{id:'new',status:'running'}};assert.equal(reviewState(current).stage,4);assert.match(reviewState(current).reason,/running/);
  assert.equal(reviewState({...current,artifact:{id:'historical'}}).runRevision,null);assert.equal(reviewState({...current,artifact:{id:'historical'}}).stage,3);
  assert.equal(reviewState({...base,task:{...base.task,execution:{phase:'unknown'}}}).locked,false);
+});
+
+test('confirmed deletion works with unreadable storage and fences fresh, mounted and in-flight deployment drafts',async()=>{
+ const local=storage(),id='pending',task={id},first=deploymentOutbox(id,local),kept=deploymentOutbox('other',local);
+ const snapshot=deploymentConfig(task);
+ first.stage(snapshot,task);kept.stage(snapshot,{id:'other'});
+ let acknowledge;let calls=0;
+ const flight=first.flush(request=>{calls++;return new Promise(resolve=>{acknowledge=()=>resolve({id,deploymentDraft:{lastMutationId:request.mutationId,revision:1,config:request.value}});});});
+ first.stage({...snapshot,maxSeconds:90},task);
+ const writes=[],get=local.getItem;local.getItem=()=>{throw Error('Access denied');};local.removeItem=key=>{writes.push(key);throw Error('Access denied');};
+ for(const deleted of [id,'never-opened']){deleteWorkflowOutbox(deleted,local);deleteDeploymentOutbox(deleted,local);}
+ acknowledge();await flight;
+ assert.equal(calls,1);assert.equal(first.pending,null);assert(kept.pending);assert(get('studio.deployment.pending.other'));
+ for(const deleted of [id,'never-opened']){
+  assert.throws(()=>deploymentOutbox(deleted,local).stage(snapshot,{id:deleted}),/deleted/);
+  assert.throws(()=>workflowOutbox(deleted,local).stage('temperature',310),/deleted/);
+ }
+ assert(!writes.some(key=>key.includes('other')));
 });
