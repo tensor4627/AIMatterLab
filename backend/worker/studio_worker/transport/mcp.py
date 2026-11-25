@@ -196,6 +196,10 @@ def mcp_tool_call(service, params, *, dispatch):
         return {"content":[{"type":"text","text":json.dumps(failure)}], "isError":True}
     except Exception as exc:
         from studio_worker.compute.ssh_auth import AuthError
+        from studio_worker.compute.run_rejection import rejection_receipt
+        rejected = rejection_receipt(exc)
+        if rejected:
+            return {"content": [{"type": "text", "text": json.dumps(rejected, ensure_ascii=False)}], "isError": True}
         if isinstance(exc, AuthError):
             failure = {'status': 'needs_human_auth', 'code': 'needs_human_auth',
                        'message': 'Open private authentication in the desktop cluster connection page.',

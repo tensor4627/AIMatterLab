@@ -36,18 +36,18 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     const artifacts=(task.artifacts||[]).filter(a=>a.id===runId&&['run','cluster-run'].includes(a.kind)&&(!kind||a.kind===kind));
     return artifacts.length===1?artifacts[0].kind:null;
   }
-  function permitsRunAction(scope,action,runId,resourceId) {
-    if(agents.turnOrigin(scope.provider,scope.threadId)==='service')return false;
-    if(resources.isDeveloperWorkspace(scope,resourceId))return true;
+  const liveHumanTurn=scope=>agents.turnOrigin(scope.provider,scope.threadId)==='human'&&agents.isBusy(scope.provider,scope.threadId);
+  function permitsRunAction(scope,action,runId,resourceId,sourceId) {
+    if(!liveHumanTurn(scope))return false;
     const task=records.bound(scope.provider,scope.threadId),available=new Map();
     for(const run of resourceActivity.runsFor(scope))available.set(JSON.stringify([run.sourceId,run.runId]),run);
-    const sourceId=task&&taskForRecordIndex(task).workerSourceId;
-    if(sourceId)for(const item of task.artifacts||[]){
-      if(['run','cluster-run'].includes(item.kind))available.set(JSON.stringify([sourceId,item.id]),{sourceId,runId:item.id});
+    const taskSourceId=task&&taskForRecordIndex(task).workerSourceId;
+    if(taskSourceId)for(const item of task.artifacts||[]){
+      if(['run','cluster-run'].includes(item.kind))available.set(JSON.stringify([taskSourceId,item.id]),{sourceId:taskSourceId,runId:item.id});
     }
     const candidates=[...available.values()],target=runActionTarget(resources.snapshot(),resourceId);
-    return runIntents.permits(scope,action,runId,candidates,target)||
-      action==='validate'&&runIntents.permits(scope,'submit',runId,candidates,target);
+    return runIntents.permits(scope,action,runId,candidates,target,{sourceId,resourceId})||
+      action==='validate'&&runIntents.permits(scope,'submit',runId,candidates,target,{sourceId,resourceId});
   }
   const resources=createManagedComputeResources({terminal,profiles,selectionCatalog:catalog,aliases:createManagedComputeAliases({projectSkills}),
     services:createManagedComputeServices({connections:terminal.connections,registration,source:workerSource,transportSource:sshTransportSource}),
@@ -60,7 +60,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),
     terminalPolicyRevision:(scope,resource)=>projectAccess.terminalRevision(scope,resource),
     authorizeRun:(scope,args)=>!!authorizeRun(scope,args),
-    authorizeRunAction:(scope,{action,runId,resourceId})=>permitsRunAction(scope,action,runId,resourceId),
+    authorizeRunAction:(scope,{action,runId,resourceId,sourceId})=>permitsRunAction(scope,action,runId,resourceId,sourceId),
     authorizeSchedule:(scope,{sourceId,scheduleId})=>!!schedules?.snapshot().sources.find(s=>s.id===sourceId)?.schedules.some(p=>
        p.id===scheduleId&&p.scope.taskId===scheduleOwnerId(scope)&&['provider','threadId','projectId'].every(k=>p.scope[k]===scope[k])),
     onAcquired:(scope,resource)=>{resourceActivity.acquired(scope,resource);notify();},
@@ -85,9 +85,15 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
       if(action==='upsert'&&agents.turnOrigin(scope.provider,scope.threadId)==='service')throw Error('managed_schedule_user_renewal_required');
       return delegations.assert(scope,action,args);
     },
-    assertRunIntent:(scope,action,args)=>{if(!permitsRunAction(scope,action,args.run_id,args.resource_id))throw Error('managed_run_user_instruction_required');},
+    assertRunIntent:(scope,action,args,sourceId)=>{if(!permitsRunAction(scope,action,args.run_id,args.resource_id,sourceId))throw Error('managed_run_user_instruction_required');},
     assertRunSource:({scope,sourceId,runId,kind})=>{const actual=authorizeRun(scope,{sourceId,runId,kind});if(!actual)throw Error('managed_compute_original_run_unconfirmed');return actual;},
-    onRunObserved:entry=>{resourceActivity.recordRun(entry);notify();void schedules.refresh(entry.sourceId).catch(()=>{});}
+    captureRunPreparation:scope=>liveHumanTurn(scope)?runIntents.capturePreparation(scope):undefined,
+    onRunObserved:entry=>{
+      const wasLinked=entry.operation==='prepare'&&!!authorizeRun(entry.scope,{sourceId:entry.sourceId,runId:entry.runId});
+      resourceActivity.recordRun(entry);
+      notify();void schedules.refresh(entry.sourceId).catch(()=>{});
+      return !wasLinked;
+    }
   });
   const desktopTools=resourceWorkspace?{
     ...computeTools,
@@ -152,10 +158,10 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   function userMessage({provider,method,params={}}) {
     if(!['turn/start','turn/steer'].includes(method)||typeof params.threadId!=='string'||!Array.isArray(params.input))return;
     const text=params.input[0]?.type==='text'&&typeof params.input[0].text==='string'?params.input[0].text:'';
-    if(!text.trim())return;
     const owner=workflow.currentFor(provider,params.threadId);
     const value={...owner,provider,threadId:params.threadId,text,planningMode:params.planningMode===true,turnId:params.studioTurnRequestId||randomUUID()};
-    resources.recordUserTurn(value);delegations.record(value);runIntents.record(value);
+    if(text.trim()){resources.recordUserTurn(value);delegations.record(value);}
+    runIntents.record(value);
   }
   async function publishLocal(worker,preferredProfileId) {
     if(!worker.connection||worker.identity?.kind==='ssh'||!worker.connectionTarget)return;

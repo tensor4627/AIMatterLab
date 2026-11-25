@@ -1,34 +1,40 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import type {ManagedSnapshot} from '../../../contracts/dto/managed-compute';
 import {invoke} from '../../api/studio';
 
 const empty:ManagedSnapshot = {resources:[],conversations:[],sources:[]};
+type ManagedObservation = {snapshot:ManagedSnapshot; status:'loading'|'current'|'pending'};
 
 export function useManagedResources() {
-  const [state,setState] = useState<ManagedSnapshot>(empty);
+  const [state,setState] = useState<ManagedObservation>({snapshot:empty,status:'loading'});
+  const refreshRef = useRef<()=>void>(()=>{});
   useEffect(() => {
     let alive = true, pending = false, dirty = false;
     async function refresh() {
+      if (!alive) return;
       if (pending) { dirty = true; return; }
       pending = true;
       try {
         do {
           dirty = false;
-          const next = await invoke<ManagedSnapshot>('compute.managed.snapshot',{});
-          if (alive && !dirty && Array.isArray(next?.conversations) && Array.isArray(next.resources) && Array.isArray(next.sources)) setState(next);
+          try {
+            const snapshot = await invoke<ManagedSnapshot>('compute.managed.snapshot',{});
+            if (!Array.isArray(snapshot?.conversations) || !Array.isArray(snapshot.resources) || !Array.isArray(snapshot.sources)) throw Error('invalid_managed_compute_snapshot');
+            if (alive && !dirty) setState({snapshot,status:'current'});
+          } catch {
+            if (alive && !dirty) setState(previous => previous.status==='pending' ? previous : {...previous,status:'pending'});
+          }
         } while (alive && dirty);
-      } catch {
-        if (alive) setState(previous => ({...previous,resources:[],sources:previous.sources.map(s=>({...s,connected:false})),
-          conversations:previous.conversations.map(c=>({...c,replying:false,nextWakeAt:null,badges:c.badges.map(b=>({...b,status:'offline'}))}))}));
       } finally { pending = false; }
     }
     const unsubscribe = window.studio?.onEvent(event => {
       if (['studio/managedActivity','studio/agentTurnState','studio/workerConnected','studio/computeResourceChanged'].includes(event.method)) void refresh();
     });
     const focused = () => { void refresh(); };
+    refreshRef.current = focused;
     window.addEventListener('focus', focused);
     void refresh();
     return () => { alive = false; unsubscribe?.(); window.removeEventListener('focus',focused); };
   },[]);
-  return state;
+  return {...state.snapshot,observation:state.status,retry:()=>refreshRef.current()};
 }

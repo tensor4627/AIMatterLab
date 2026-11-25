@@ -44,19 +44,39 @@ export async function frontendSshReloginCases({check,out}){
     if(method==='compute.sshConnection.list')return {connections:[connection]};
     if(method==='sharedTerminal.list')return {sessions:[]};
     if(method==='compute.managed.snapshot')return {resources:[hosted],conversations:[],sources:[]};
-    if(method==='compute.managed.serviceStatus'||method==='compute.sshService.status')return service;
+    if(method==='compute.managed.serviceStatus'||method==='compute.sshService.status'){
+     if(f.serviceReadRejected)throw Error('IPC refused read: worker_health_invalid');
+     return service;
+    }
     return original(method,data);
    };
    f.bindingAttempts=0;
    const Panel=(await import('/frontend/features/terminal/SshConnectionPanel.tsx')).default;
    const props={visible:true,resourceScope:'chat',request:{nonce:'view',profileId:ref.profileId,version:1,connectionId:ref.connectionId,exact:true},
     onError:e=>{f.bindingError={code:e.code,action:e.action};},onUseForWorkflow:async()=>{
-     if(++f.bindingAttempts===1)throw Error('ssh_service_channel_in_use');
+     if(++f.bindingAttempts===1)throw Error('worker_health_invalid');
      window.testRoot.render(React.createElement(Panel,{...props,activeResource:{...ref,capabilities:{service}}}));
      return service;
     }};
    window.testRoot.render(React.createElement(Panel,props));
   });
+  await page.getByTestId('ssh-worker-ready').waitFor();
+  await page.evaluate(()=>{
+   const f=window.__test;f.serviceReadRejected=true;
+   f.events.forEach(listener=>listener({method:'studio/sshServiceChanged'}));
+  });
+  const readRetry=page.getByTestId('ssh-service-status-retry');
+  await readRetry.waitFor();
+  assert.equal(await page.getByTestId('ssh-worker-ready').count(),0);
+  assert.equal(await page.getByTestId('ssh-connection-status').getAttribute('data-state'),'authenticated');
+  await page.getByTestId('ssh-diagnostic-toggle').click();
+  assert.equal(await page.getByTestId('ssh-service-status-error-code').innerText(),'worker_health_invalid');
+  await page.keyboard.press('Escape');
+  await page.evaluate(()=>document.querySelector('[data-testid="ssh-service-status-retry"]').addEventListener('click',()=>{window.__test.serviceReadRejected=false;},{once:true}));
+  await readRetry.click();
+  await readRetry.waitFor({state:'detached'});
+  await page.getByTestId('ssh-worker-ready').waitFor();
+  assert.equal(await page.evaluate(()=>window.__test.bindingAttempts),0);
   const button=page.getByTestId('ssh-use-for-workflow');
   await button.click();
   await page.getByText('当前流程的作业服务待接入',{exact:true}).first().waitFor();
@@ -64,8 +84,8 @@ export async function frontendSshReloginCases({check,out}){
   assert.equal(await page.getByTestId('ssh-worker-ready').innerText(),'作业服务可用');
   assert.equal(await page.getByTestId('ssh-login-error').count(),0);
   await page.getByTestId('ssh-diagnostic-toggle').click();
-  await page.getByTestId('ssh-workflow-error').getByText('ssh_service_channel_in_use',{exact:true}).waitFor();
-  assert.deepEqual(await page.evaluate(()=>window.__test.bindingError),{code:'ssh_service_channel_in_use',action:'compute.managed.useForWorkflow'});
+  await page.getByTestId('ssh-workflow-error').getByText('worker_health_invalid',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.__test.bindingError),{code:'worker_health_invalid',action:'compute.managed.useForWorkflow'});
   await page.keyboard.press('Escape');await button.click();
   await page.getByTestId('ssh-workflow-error').waitFor({state:'detached'});await button.waitFor({state:'detached'});
   assert.equal(await page.evaluate(()=>window.__test.bindingAttempts),2);
@@ -183,6 +203,7 @@ export async function frontendSshReloginCases({check,out}){
     if(method==='compute.sshConnection.authRead'){const state=f.sshConnections.find(c=>c.connectionId===data.connectionId);return {connectionId:state.connectionId,state,output:data.cursor?'':'SYNTHETIC SSH LOGIN> ',cursor:1,dropped:false};}
     if(method==='compute.sshConnection.authResize')return {resized:true};
     if(method==='compute.sshService.status')return {schemaVersion:2,status:'disconnected',workflowReady:false,serviceActive:false};
+    if(method==='compute.managed.serviceStatus')return {...data,schemaVersion:2,status:'idle',workflowReady:false,serviceActive:false,operator:'human'};
     if(method==='sharedTerminal.list')return {sessions:f.sshSession?[f.sshSession]:[]};
     if(method==='sharedTerminal.read')return {...f.sshSession,output:data.cursor?'':'SYNTHETIC EXACT SHELL> ',cursor:1,dropped:false};
     if(method==='sharedTerminal.resize')return {accepted:true};
@@ -197,8 +218,8 @@ export async function frontendSshReloginCases({check,out}){
    const App=(await import('/frontend/app/App.tsx')).default;window.reloginApp=App;window.testRoot.render(React.createElement(React.StrictMode,null,React.createElement(App)));
   });
   await page.getByTestId('new-conversation').click();await page.locator('.composer textarea').fill('Preserve these unsent school connection instructions');
-  const openSaved=async()=>{await page.getByTestId('unified-compute-entry').click();await page.getByTestId('saved-compute-profile').getByRole('button',{name:'交互式登录',exact:true}).click();};
-  await openSaved();await page.getByTestId('ssh-login-retry').waitFor();await page.getByTestId('ssh-diagnostic-toggle').click();assert.equal(await page.getByTestId('ssh-error-code').innerText(),'terminal_start_failed');await page.getByTestId('ssh-login-retry').click();await page.waitForFunction(()=>typeof window.__test.finishSshOpen==='function');assert.equal(await page.getByTestId('ssh-login-error').count(),0);assert.equal(await page.getByTestId('ssh-login-progress').count(),0);
+  const openSaved=async name=>{await page.getByTestId('unified-compute-entry').click();await page.getByTestId('saved-compute-profile').getByRole('button',{name,exact:true}).click();};
+  await openSaved('恢复 SSH 连接');await page.getByTestId('ssh-login-retry').waitFor();await page.getByTestId('ssh-diagnostic-toggle').click();assert.equal(await page.getByTestId('ssh-error-code').innerText(),'terminal_start_failed');await page.getByTestId('ssh-login-retry').click();await page.waitForFunction(()=>typeof window.__test.finishSshOpen==='function');assert.equal(await page.getByTestId('ssh-login-error').count(),0);assert.equal(await page.getByTestId('ssh-login-progress').count(),0);
   await page.evaluate(()=>window.__test.finishSshOpen());await page.getByTestId('ssh-login-progress').getByText('请在原终端完成密码或验证码输入。',{exact:true}).waitFor();await page.getByRole('region',{name:'SSH 登录终端',exact:true}).locator('.xterm').waitFor();assert.equal(await page.getByTestId('ssh-login-error').count(),0);await page.screenshot({path:path.join(out,'ssh-relogin-fresh-authentication.png')});
   await page.evaluate(()=>window.__test.sshAuthenticated=true);await page.getByTestId('ssh-publish-resource').waitFor();await page.getByRole('region',{name:'SSH 终端',exact:true}).locator('.xterm').waitFor();assert.equal(await page.locator('.composer textarea').inputValue(),'Preserve these unsent school connection instructions');
   await page.getByTestId('ssh-publish-resource').click();
@@ -216,7 +237,7 @@ export async function frontendSshReloginCases({check,out}){
   await page.getByTestId('ssh-managed-status').waitFor();
   await page.waitForFunction(()=>document.querySelector('[data-testid="current-compute-resource-status"]')?.textContent.includes('Fixture school SSH'));
   assert.equal(await page.getByTestId('agent-ssh-resource-notice').count(),0);
-  await openSaved();
+  await openSaved('继续原连接');
   await page.waitForFunction(()=>document.querySelector('.shared-terminal-host .xterm-rows')?.textContent.replace(/\s+/g,' ').includes('SYNTHETIC EXACT SHELL>'));
   assert.equal(await page.evaluate(()=>window.__test.sshOpenCount),2);
   const opened=await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='compute.sshConnection.open'));

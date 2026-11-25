@@ -274,6 +274,8 @@ class ClusterLifecycle(unittest.TestCase):
 
     def test_missing_interactive_lease_is_ready_zero_dispatch_not_unknown_submission(self):
         from studio_worker.compute.ssh_auth import AuthError
+        from studio_worker.transport.http_handler import error_result
+        from studio_worker.transport.mcp import mcp_tool_call
         run=self.interactive_ready();calls=[];store=self.cluster.store
         class Missing:
             def resolve(self,p):
@@ -282,9 +284,13 @@ class ClusterLifecycle(unittest.TestCase):
             def execute(self,*args,**kwargs):raise AssertionError('No dispatch')
             def close(self):pass
         self_case=self;self.cluster._auth=Missing()
-        with self.assertRaisesRegex(AuthError,'needs_human_auth'):self.cluster.submit(run['id'])
+        with self.assertRaisesRegex(AuthError,'needs_human_auth') as rejected:self.cluster.submit(run['id'])
+        self.assertEqual(error_result(rejected.exception)['operation_state'],'not_started')
+        response=mcp_tool_call(self.service,{'name':'submit_cluster_run','arguments':{'run_id':run['id']}},dispatch=dispatch)
+        receipt=json.loads(response['content'][0]['text']);self.assertTrue(response['isError'])
+        self.assertEqual((receipt['status'],receipt['operation_state'],receipt['automatic_retry']),('needs_human_auth','not_started',False))
         actual=self.cluster.raw(run['id']);self.assertEqual(actual['status'],'ready')
-        self.assertFalse(actual.get('submit_attempted'));self.assertEqual(len(calls),1);self.assertFalse(FakeSSH.calls)
+        self.assertFalse(actual.get('submit_attempted'));self.assertEqual(len(calls),2);self.assertFalse(FakeSSH.calls)
 
     def test_master_loss_after_successful_auth_preflight_remains_unknown_and_never_replays(self):
         from studio_worker.compute.ssh_auth import AuthError

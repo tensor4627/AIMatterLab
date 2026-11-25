@@ -20,6 +20,12 @@ test('repair draft separates original diagnostic, new input revision and exact m
  assert(exact.text.includes('a'.repeat(64)));assert(exact.text.includes('不重复提交'));
 });
 
+test('repair for a definite preflight rejection uses the workflow and available draft',()=>{
+ const diagnostic=createDiagnostic(Error('execution_not_started: Review the saved input revision'),diagnosticContext(task,task.deployment.config,'execute','run'));
+ const request=diagnosticRepairRequest(diagnostic,task);
+ assert.match(request.text,/本次执行未提交作业/);assert.doesNotMatch(request.text,/读取原作业|查询原作业/);
+});
+
 test('repair cannot cross workflow or conversation ownership, and retained diagnostic parameters do not mutate',()=>{
  const original=record();const changed=structuredClone(task);changed.parameters.inputs.script='new.py';
  assert.equal(original.context.inputParameters.inputs.script,'input/run.py');

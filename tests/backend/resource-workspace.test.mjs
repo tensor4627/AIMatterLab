@@ -34,9 +34,76 @@ test('developer workspace commands keep outside writes behind a human decision a
  const outside=batch('mkdir /other/tmp');await prompted;
  const approval=controller.pending({});assert.equal(approval.reason,'outside_workspace');
  chosen=null;developer.changed(workspaceId,null);
+ controller.revalidatePending();
+ assert.equal(controller.pending({}),null);
  assert.throws(()=>controller.decide({approvalId:approval.approvalId,decision:'approve'}),/changed/);
  assert.equal((await outside).execution_status,'denied');
  assert.deepEqual(calls,['confined','job_preview','job']);
+});
+
+test('automatic approval replaces an exact workspace file but reviews destructive commands and independent jobs',async()=>{
+ const files={root:'/work',path:'/work',workspaceId:'workspace',identity:{...host,account:'user1'}};
+ const calls=[];
+ let opened;
+ const controller=createWorkspaceTerminalAuthorization({workspace:{forTerminal:()=>files},current:()=>scope,
+  developerCompute:{approvalMode:()=> 'auto',revision:()=>0},emit:()=>opened?.(),
+  connections:{async runWorkspaceCommand(value,guard){
+   guard();calls.push([value.mode,value.args]);
+   if(value.mode==='write')return {status:'destructive',code:1,output:'/work/draft*\n'};
+   if(value.mode==='confined_overwrite')return {status:'result',code:0,output:'',confinement:'landlock'};
+   if(value.mode==='job_preview')return {status:'result',code:0,output:'/work/job.sh\n'+'b'.repeat(64)+'\n#!/bin/sh\necho fixture'};
+   assert.fail('Unexpected dispatch');
+  }}});
+ const run=(requestId,command)=>controller.execute({scope,ref:{...ref,resourceId:'remote'},leaseId:'lease',requestId,command,assertCurrent(){}});
+ const content="value with 'quotes' and $variable";
+ assert.equal((await run('write',"cat > 'draft*' <<'EOF'\n"+content+'\nEOF')).confinement,'landlock');
+ assert.equal(controller.pending({}),null);
+ assert.deepEqual(calls,[['write',['draft*',content+'\n']],['confined_overwrite',['/work/draft*','write',content+'\n']]]);
+
+ for(const [requestId,command,reason] of [['remove','rm draft','destructive'],['submit','sbatch job.sh','independent_job']]){
+  const shown=new Promise(resolve=>{opened=resolve;});
+  const pending=run(requestId,command);
+  await shown;
+  const card=controller.pending({});
+  assert.equal(card.reason,reason);
+  controller.decide({approvalId:card.approvalId,decision:'deny'});
+  assert.equal((await pending).execution_status,'denied');
+ }
+ assert.deepEqual(calls.map(([mode])=>mode),['write','confined_overwrite','job_preview']);
+});
+
+test('a lost SSH write receipt stays unknown and a verified pre-dispatch refusal clears its reservation',async()=>{
+ const rows=new Map(),guard=()=>{},files={root:'/work',path:'/work',workspaceId:'workspace',identity:{...host,account:'user1'}};
+ const catalog={get:(_kind,id)=>rows.get(id),put:(_kind,id,value)=>rows.set(id,value),remove:(_kind,id)=>rows.delete(id)};
+ let calls=0,dispatched=false;
+ const controller=createWorkspaceTerminalAuthorization({workspace:{forTerminal:()=>files},current:()=>scope,catalog,
+  connections:{async runWorkspaceCommand(){calls++;throw Object.assign(Error('ssh_control_timeout'),{operationDispatched:dispatched});}}});
+ const execute=commands=>commands.execute({scope,ref:{...ref,resourceId:'remote'},leaseId:'lease',requestId:'request',command:'mkdir result',assertCurrent:guard});
+ await assert.rejects(execute(controller),{operationDispatched:false});
+ assert.equal(rows.size,0);
+ dispatched=true;
+ await assert.rejects(execute(controller),{operationDispatched:true});
+ assert.equal(rows.size,1);
+ const reopened=createWorkspaceTerminalAuthorization({workspace:{forTerminal:()=>files},current:()=>scope,catalog,
+  connections:{async runWorkspaceCommand(){assert.fail('unconfirmed command was replayed');}}});
+ assert.equal((await execute(reopened)).execution_status,'unconfirmed');
+ assert.equal(calls,2);
+});
+
+test('an automatic overwrite or submission cannot dispatch after the human turn ends',async()=>{
+ const files={root:'/work',path:'/work',workspaceId:'workspace',identity:{...host,account:'user1'}};
+ for(const [mode,command,probe] of [['auto',"cat > draft <<'EOF'\nnew\nEOF",'write'],['full','sbatch job.sh','job_preview']]){
+  let live=true;
+  const controller=createWorkspaceTerminalAuthorization({workspace:{forTerminal:()=>files},current:()=>scope,
+   developerCompute:{approvalMode:()=>live?mode:'manual',revision:()=>0},
+   connections:{async runWorkspaceCommand(value){
+    assert.equal(value.mode,probe);
+    live=false;
+    return probe==='write'?{status:'destructive',code:1,output:'/work/draft\n'}:
+     {status:'result',code:0,output:'/work/job.sh\n'+'b'.repeat(64)+'\n#!/bin/sh\necho fixture'};
+   }}});
+  await assert.rejects(controller.execute({scope,ref:{...ref,resourceId:'remote'},leaseId:'lease',requestId:'request',command,assertCurrent(){}}),error=>error.message==='ssh_terminal_approval_changed'&&error.operationNotStarted===true);
+ }
 });
 
 test('remote workspace registration and allocation use the typed desktop channel',()=>{

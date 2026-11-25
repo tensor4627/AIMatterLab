@@ -27,6 +27,11 @@
  scrollbar-width:none;
 }
 .workspace-shell .navigation-rail button { width:40px; height:38px; flex:none; border-radius:var(--radius-sm,9px); }
+.workspace-shell .navigation-rail .rail-new-computation {
+ background:var(--fill-active,var(--accent-bg));
+ color:var(--accent);
+}
+.workspace-shell .navigation-rail .rail-new-computation:hover { background:var(--accent-bg); }
 .rail-destinations {
  display:grid;
  gap:4px;
@@ -180,6 +185,18 @@
  z-index:5;
 }
 .workspace-shell .workspace-current-title { display:flex; align-items:center; gap:8px; flex:1; min-width:0; }
+.workspace-shell .workspace-project-trigger {
+ display:flex;
+ align-items:center;
+ gap:7px;
+ max-width:100%;
+ min-width:0;
+ min-height:32px;
+ padding:4px 8px;
+ border-radius:var(--radius-sm,9px);
+ text-align:start;
+}
+.workspace-shell .workspace-project-trigger:hover { background:var(--fill-hover,var(--raised)); }
 .workspace-shell .workspace-current-title strong {
  font-size:max(calc(13px * var(--ui-scale,1)),var(--ui-min-font,12px));
  font-weight:600;

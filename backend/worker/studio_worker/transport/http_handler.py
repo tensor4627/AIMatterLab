@@ -3,6 +3,11 @@ import hmac
 import json
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+from studio_worker.compute.run_rejection import rejection_receipt
+
+
+def error_result(error):
+    return {"error": str(error), **(rejection_receipt(error) or {})}
 
 def handler_factory(service, tokens, *, dispatch, mcp_tool_call, tools):
     class Handler(BaseHTTPRequestHandler):
@@ -69,10 +74,10 @@ def handler_factory(service, tokens, *, dispatch, mcp_tool_call, tools):
                     return self.respond(403, {"error": "MCP credential is restricted to /mcp"})
                 self.respond(200, dispatch(service, method, parsed.path, data, admin=admin))
             except PermissionError as exc:
-                self.respond(403, {"error": str(exc)})
+                self.respond(403, error_result(exc))
             except (ValueError, KeyError, TypeError) as exc:
-                self.respond(400, {"error": str(exc)})
+                self.respond(400, error_result(exc))
             except Exception as exc:
-                self.respond(500, {"error": str(exc)})
+                self.respond(500, error_result(exc))
 
     return Handler

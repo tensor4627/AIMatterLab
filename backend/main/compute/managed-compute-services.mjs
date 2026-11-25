@@ -181,10 +181,12 @@ export async function managedWorkerProject(scope,resource,service,assertCurrent)
  const query=async(method,target,data)=>{
   const response=await service.forward(method,target,data,false,10000,assertCurrent);
   assertCurrent();
-  if(response?.status===403)return null;
-  const rows=unwrap(response);
+  if(response?.status===401||response?.status===403&&response.data?.error==='MCP credential is restricted to /mcp')
+   fail('managed_compute_project_authentication_failed');
+  if(response?.status!==200)fail('managed_compute_project_observation_failed');
+  const rows=response.data;
   const valid=target==='/api/cluster/profile'?rows&&typeof rows==='object'&&!Array.isArray(rows):Array.isArray(rows);
-  if(!valid)fail('managed_compute_worker_request_failed');
+  if(!valid)fail('managed_compute_project_receipt_invalid');
   return rows;
  };
  const projects=await query('GET','/api/projects');

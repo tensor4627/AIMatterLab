@@ -44,6 +44,12 @@ test('Local tools reporting blocked do not become successful activity cards',asy
  const {w,call}=await setup(t);w.setLocalTools([{name:'search_materials_project'}],async()=>({status:'blocked',message:'No API key',candidates:[]}));
  const result=(await(await call(w.providerConnection('codex'),toolBody('search_materials_project'))).json()).result;assert.equal(result.isError,true);assert.equal(JSON.parse(result.content[0].text).status,'blocked');
 });
+test('Entering a local handler does not make a validation rejection unconfirmed',async t=>{
+ const {w,call,calls}=await setup(t);
+ w.setLocalTools([{name:'fixture_local'}],async()=>{throw Error('Invalid local tool request');});
+ const result=(await(await call(w.providerConnection('codex'),toolBody('fixture_local'))).json()).result;
+ const failure=JSON.parse(result.content[0].text);assert.equal(failure.status,'blocked');assert.equal(failure.operation_state,'not_started');assert.equal(calls.length,0);
+});
 test('A failure after dispatch is unconfirmed and the completed operation is never replayed',async t=>{
  const {w,call}=await setup(t);let writes=0;w.setScopedTools([{name:'read_skill_route'}],async()=>{writes++;return {saved:true};});w.setAuthoringGuard({before:()=>({}),after(){throw Error('Result identity changed before acknowledgement');},cancel(){}});
  const result=(await(await call(w.providerConnection('codex'),toolBody('read_skill_route'))).json()).result,failure=JSON.parse(result.content[0].text);assert.equal(result.isError,true);assert.equal(failure.status,'unknown');assert.equal(failure.operation_state,'unconfirmed');assert.equal(failure.automatic_retry,false);assert.equal(writes,1);

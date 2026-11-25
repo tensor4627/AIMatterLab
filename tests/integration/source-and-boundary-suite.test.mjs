@@ -138,16 +138,25 @@ test('proposal schema exposes only formula data and exact worker parameter vocab
  for(const forbidden of ['id','expected','provider','approved','code','execute','share'])assert.equal(schema.properties[forbidden],undefined);
 });
 test('scoped execution tools use the same permission path, while custom approval and sharing remain human',async()=>{
- let argumentsSeen;
- const bridge=new CodexBridge({launchDependencies:{execute:async()=>({stdout:'codex-cli '+PROTOCOL_VERSION}),spawnProcess:(_executable,args)=>{
+  let argumentsSeen, approvalMode='manual';
+  const connection={url:'http://127.0.0.1:1/providers/codex',tokens:{mcp:'synthetic-token'}};
+  const bridge=new CodexBridge({approvalMode:()=>approvalMode,launchDependencies:{execute:async()=>({stdout:'codex-cli '+PROTOCOL_VERSION}),spawnProcess:(_executable,args)=>{
   argumentsSeen=args;const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{};
   child.stdin={destroyed:false,write:raw=>{const message=JSON.parse(raw);if(message.id!==undefined)queueMicrotask(()=>child.stdout.write(JSON.stringify({id:message.id,result:{}})+'\n'));}};return child;
  }}});
  try{
-  await bridge.start('synthetic-cli',{url:'http://127.0.0.1:1/providers/codex',tokens:{mcp:'synthetic-token'}});
-  const approved=argumentsSeen.filter(value=>/^mcp_servers\.gpusampling\.tools\.[a-z_]+\.approval_mode="approve"$/.test(value)).map(value=>value.split('.')[3]);
+   const approvals=()=>argumentsSeen.filter(value=>/^mcp_servers\.gpusampling\.tools\.[a-z_]+\.approval_mode="approve"$/.test(value)).map(value=>value.split('.')[3]);
+   await bridge.start('synthetic-cli',connection);
+   const approved=approvals();
   assert(approved.includes('propose_custom_cv'));for(const name of ['validate_run','submit_run','cancel_run','validate_cluster_run','submit_cluster_run','cancel_cluster_run'])assert(approved.includes(name));
-  for(const forbidden of ['approve_formula','approve_code','customCv.validate','customCv.sharing'])assert(!approved.includes(forbidden));
+   assert(!approved.includes('run_compute_command'));
+   approvalMode='auto';
+   await bridge.start('synthetic-cli',connection);
+   for(const name of ['acquire_compute_resource','run_compute_command','submit_compute_run','cancel_compute_run'])assert(approvals().includes(name));
+   for(const forbidden of ['approve_formula','approve_code','customCv.validate','customCv.sharing','attach_task_schedule'])assert(!approvals().includes(forbidden));
+   approvalMode='manual';
+   await bridge.start('synthetic-cli',connection);
+   assert.deepEqual(approvals(),approved);
  }finally{bridge.close();}
  const main=fs.readFileSync(new URL("../../desktop/main.mjs",import.meta.url),'utf8');assert(main.includes('custom-cv-tool-schema.json'));assert(main.includes('annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false}'));
 });

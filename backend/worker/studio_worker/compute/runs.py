@@ -18,6 +18,7 @@ from pathlib import Path
 from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env
 from studio_worker.infrastructure.store import Store
 from studio_worker.compute.runtime_service import RuntimeServiceMixin
+from studio_worker.compute.run_rejection import run_preflight
 from studio_worker.infrastructure.util import alive, atomic_json, contained, digest, identity, leaf, run_json
 
 TERMINAL = ("succeeded", "failed", "cancelled")
@@ -218,15 +219,16 @@ class RunsMixin:
 
     def validate(self, identifier, *, _workflow_context=None):
         from studio_worker.compute.ssh_service import require_local_execution
-        require_local_execution(self)
         with self.store.lock:
-            run = self.store.run(identifier)
-            if run.get('studio_workflow_binding'):
-                from studio_worker.workspace.tool_workflows import assert_bound_run
-                assert_bound_run(self, run, _workflow_context, 'validating')
-            if run["status"] not in ("draft", "ready"):
-                raise ValueError("Only an unsubmitted run can be validated")
-            self.authorize(run)
+            with run_preflight():
+                require_local_execution(self)
+                run = self.store.run(identifier)
+                if run.get('studio_workflow_binding'):
+                    from studio_worker.workspace.tool_workflows import assert_bound_run
+                    assert_bound_run(self, run, _workflow_context, 'validating')
+                if run["status"] not in ("draft", "ready"):
+                    raise ValueError("Only an unsubmitted run can be validated")
+                self.authorize(run)
             self.store.update(run, status="validating")
         try:
             self.verify_snapshot(run)
@@ -261,8 +263,8 @@ class RunsMixin:
 
     def submit(self, identifier, *, _workflow_context=None):
         from studio_worker.compute.ssh_service import require_local_execution
-        require_local_execution(self)
-        with self.store.lock:
+        with run_preflight(), self.store.lock:
+            require_local_execution(self)
             run = self.store.run(identifier)
             if run["status"] in ("queued", "running", "unknown", *TERMINAL):
                 return run
@@ -292,33 +294,36 @@ class RunsMixin:
                         raise ValueError("Serialized artifact/target check did not confirm compatibility")
                 check = {"status":"passed", "required":True, "checked_at":time.time(), "report":report}
             except Exception as exc:
-                with self.store.lock:
+                with run_preflight(), self.store.lock:
                     self.store.update(self.store.run(identifier), execution_check={"status":"failed", "required":True, "message":str(exc), "checked_at":time.time()})
-                raise
+                    raise
         with self.store.lock:
-            current = self.store.run(identifier)
-            if current["status"] in ("queued", "running", "unknown", *TERMINAL):
-                return current
-            if current["status"] not in ("draft", "ready"):
-                raise ValueError("Run changed during execution checks")
-            if current.get('studio_workflow_binding'):
-                assert_bound_run(self, current, _workflow_context, 'submitting')
-            self.authorize(current)
-            self.verify_snapshot(current)
+            with run_preflight():
+                current = self.store.run(identifier)
+                if current["status"] in ("queued", "running", "unknown", *TERMINAL):
+                    return current
+                if current["status"] not in ("draft", "ready"):
+                    raise ValueError("Run changed during execution checks")
+                if current.get('studio_workflow_binding'):
+                    assert_bound_run(self, current, _workflow_context, 'submitting')
+                self.authorize(current)
+                self.verify_snapshot(current)
             return self.store.update(current, status="queued", execution_check=check)
 
     def cancel(self, identifier, *, require_known=False):
         with self.store.lock:
-            run = self.store.run(identifier)
-            self.authorize(run)
-            if require_known and (run['status'] not in ('queued', 'running') or run.get('cancel_requested')):
-                raise ValueError('Original run status does not confirm a cancellable job')
-            from studio_worker.compute.launch_protocol import has_launch_evidence
-            if run["status"] == "queued" and not has_launch_evidence(run):
+            with run_preflight():
+                run = self.store.run(identifier)
+                self.authorize(run)
+                if require_known and (run['status'] not in ('queued', 'running') or run.get('cancel_requested')):
+                    raise ValueError('Original run status does not confirm a cancellable job')
+                from studio_worker.compute.launch_protocol import has_launch_evidence
+                launched = run["status"] == "queued" and has_launch_evidence(run)
+                if launched and require_known:
+                    raise ValueError('Queued run launch evidence requires reconciliation')
+            if run["status"] == "queued" and not launched:
                 return self.store.update(run, status="cancelled")
             if run["status"] == "queued":
-                if require_known:
-                    raise ValueError('Queued run launch evidence requires reconciliation')
                 run = self.store.update(run, status="unknown")
             if run["status"] not in ("running", "unknown"):
                 return run

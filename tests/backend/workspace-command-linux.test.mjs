@@ -61,6 +61,20 @@ test('real Linux workspace probe, shell boundary, and the actual script delivere
  assert.notEqual(run('confined',['chmod 000 ../outside.txt']).code,0);
  assert.equal(shell('cat -- "$1"',outside),'original');
 
+ const replace=root+'/workfile/literal* target';
+ shell('chmod 700 "$1"; ln -- "$1" "$2"',outside,replace);
+ const replacement="updated with 'quotes', $variable and a newline\n";
+ const rewritten=run('confined_overwrite',[replace,'write',replacement]);
+ assert.equal(rewritten.code,0,rewritten.output);
+ assert.ok(['landlock','bubblewrap'].includes(rewritten.confinement));
+ assert.equal(shell('cat -- "$1"',replace),replacement);
+ assert.equal(shell('stat -c %a -- "$1"',replace).trim(),'700');
+ assert.equal(shell('cat -- "$1"',outside),'original');
+ assert.equal(run('confined_overwrite',[replace,'copy',outside]).code,0);
+ assert.equal(shell('cat -- "$1"',replace),'original');
+ assert.equal(run('confined_overwrite',[root+'/external-link','write','bad']).status,'changed');
+ assert.equal(shell('cat -- "$1"',outside),'original');
+
  const bin=fixture+'/bin';
  const schedule=`#!/bin/sh
 set -eu

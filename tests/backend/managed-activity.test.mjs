@@ -154,6 +154,32 @@ test('a standalone submit instruction applies to its original project and conver
  assert.equal(permits(chat),false);
 });
 
+test('a new independent job authorizes one current-turn draft and preserves older run identities',()=>{
+ const intents=createRunActionIntents(),chat={...one,taskId:null,checkCurrent:()=>true};
+ const fresh={sourceId:'worker-a',resourceId:'ssh:a',runId:'run-new'},old={...fresh,runId:'run-old'};
+ const other={...fresh,sourceId:'worker-b',resourceId:'ssh:b'};
+ const candidates=[old,fresh,other];
+ const permits=ref=>intents.permits(chat,'submit',ref.runId,candidates,'Center A',ref);
+ for(const [turn,text] of ['请提交一个 GPUMD 短测','用现有环境帮我跑一个 GPUMD 短测','Submit one test and show me its queue status.','Use the current environment and run a GPUMD short test.'].entries()){
+  intents.record({...chat,text,turnId:'turn-'+turn});
+  assert.equal(permits(old),false,text);assert.equal(permits(fresh),false,text);
+  const capture=intents.capturePreparation(chat);assert.equal(capture.turnId,'turn-'+turn);
+  capture.record(fresh);capture.record(old);
+  assert.equal(permits(fresh),true,text);assert.equal(permits(old),false,text);assert.equal(permits(other),false,text);
+  intents.record({...chat,text:'请提交一个 GPUMD 短测',turnId:'next-'+turn});
+  capture.record(fresh);assert.equal(permits(fresh),false);
+ }
+ for(const text of ['Run a read-only queue check on cluster-a.','Start the environment setup.',
+  'Run a queue query to list all jobs on cluster-a.','Start by checking the status of existing jobs on cluster-a.',
+  '提交一次短测。请不要在我确认之前实际提交。','请只准备一个 GPUMD 短测草稿','运行一次测试，但先别实际运行',
+  'Submit a GPUMD test. Wait for my approval.','Run through the submission example.','Show me how to submit a GPUMD job.',
+  'Review this example.\n```text\nSubmit a GPUMD test\n```','提交一次测试。暂不实际提交。']){
+  intents.record({...chat,text,turnId:'not-a-submit'});
+  assert.equal(intents.capturePreparation(chat),undefined,text);
+  assert.equal(intents.permits(chat,'submit',old.runId,[old],'Center A',old),false,text);
+ }
+});
+
 test('run execution or validation requires a direct human action and retains the exact scope',()=>{
  const intents=createRunActionIntents();
  const candidates=[{sourceId:'s1',runId:'run-1'}];

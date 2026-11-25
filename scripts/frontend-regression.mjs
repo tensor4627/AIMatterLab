@@ -579,6 +579,35 @@ try{
  await check('navigation-rail-new-computation-and-single-preview',async p=>{
   await p.evaluate(()=>window.renderTest('App'));await p.getByTestId('new-computation').click();assert.equal(await p.getByTestId('agent-planning-mode').isChecked(),true);await p.getByTestId('new-conversation').click();assert.equal(await p.getByTestId('agent-planning-mode').isChecked(),false);await openSkills(p);await openSkills(p);await p.locator('nav').getByTestId('navigate-tools').click();await p.getByTestId('navigate-runs').click();await p.getByTestId('jobs-page').waitFor();assert.equal(await p.locator('.workspace-current-title').count(),1);assert.equal(await p.getByTestId('navigate-runs').getAttribute('aria-current'),'page');await p.getByTestId('navigate-home').click();assert.equal(await p.getByTestId('new-conversation').isVisible(),true);
  });
+ await check('navigation-quick-calculation-and-project-selector-from-runs',async p=>{
+  await p.evaluate(()=>window.renderTest('App'));
+  await p.getByTestId('navigate-runs').click();
+  await p.getByTestId('jobs-page').waitFor();
+  const create=p.getByTestId('new-computation');
+  assert.equal(await create.count(),1);
+  await p.getByRole('button',{name:'收起导航',exact:true}).click();
+  await p.locator('.navigation-rail').getByTestId('new-computation').waitFor();
+  assert.equal(await create.count(),1);
+  await p.getByRole('button',{name:'展开导航',exact:true}).click();
+  await p.setViewportSize({width:800,height:800});
+  await p.locator('.navigation-rail').getByTestId('new-computation').waitFor();
+  assert.equal(await create.count(),1);
+
+  await p.getByTestId('open-project-selector').press('Enter');
+  const projectPicker=p.getByRole('dialog',{name:'计算项目',exact:true});
+  await projectPicker.getByTestId('project-management').waitFor();
+  await projectPicker.press('Escape');
+  await projectPicker.waitFor({state:'detached'});
+  const history=p.locator('.navigation-rail').getByRole('button',{name:'历史会话',exact:true});
+  await history.hover();
+  const tooltip=p.getByRole('tooltip',{name:'历史会话',exact:true});
+  await tooltip.waitFor();
+  assert((await tooltip.boundingBox()).x>=(await history.boundingBox()).x+(await history.boundingBox()).width);
+  await create.click();
+  await p.getByTestId('agent-planning-mode').waitFor();
+  assert.equal(await p.getByTestId('agent-planning-mode').isChecked(),true);
+  assert(!await p.evaluate(()=>window.__test.calls.some(call=>call.method==='task.execute'||call.method==='agent.rpc'&&call.data.method==='turn/start')));
+ });
  await check('pane-dividers-wide-both-layouts-and-sidebar',async p=>{
   await p.evaluate(()=>window.renderTest('App'));await openSkills(p);assert.equal(await p.getByTestId('workspace-modebar').count(),1);const divider=p.getByRole('separator',{name:'调整对话与内容比例',exact:true});await divider.press('End');const maximum=Number(await divider.getAttribute('aria-valuemax'));await p.waitForFunction(maximum=>Math.abs(document.querySelector('.agent-panel').getBoundingClientRect().width-maximum)<=1,maximum);assert((await p.locator('.main-column').boundingBox()).width>=280);await p.getByTestId('navigate-home').click();const sidebar=p.getByRole('separator',{name:'调整会话列表宽度',exact:true});await sidebar.press('End');assert.equal(await p.evaluate(()=>Math.round(document.querySelector('.sidebar').getBoundingClientRect().width)),420);await sidebar.press('Home');assert.equal(await p.evaluate(()=>Math.round(document.querySelector('.sidebar').getBoundingClientRect().width)),170);await p.screenshot({path:path.join(out,'navigation-wide-layout.png')});
  });

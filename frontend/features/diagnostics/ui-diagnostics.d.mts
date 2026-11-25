@@ -6,6 +6,8 @@ export interface UiDiagnostic {id:string;observedAt:number;raw:string;stack:stri
 
 export function diagnosticContext(task:any,config:any,operation:string,runId?:string|null,targetName?:string):DiagnosticContext;
 
+export function executionNotStarted(error:unknown):boolean;
+
 export function createDiagnostic(error:unknown,context?:DiagnosticContext|null,severity?:NoticeSeverity):UiDiagnostic;
 
 export function diagnosticPhase(record:UiDiagnostic,task?:any):string;

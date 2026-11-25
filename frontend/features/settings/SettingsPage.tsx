@@ -23,6 +23,8 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
  const layoutLabel=t(layoutKey==='agentLayout'?'会话与计算流程':'工具、资源与运行记录');
  const [category,setCategory]=useState('appearance'),[saving,setSaving]=useState(false),[saved,setSaved]=useState('');
  const [portDraft,setPortDraft]=useState<number|''|null>(null),[portInvalid,setPortInvalid]=useState(false);
+ const [approvalTargetInvalid,setApprovalTargetInvalid]=useState(false);
+ const approvalMode=settings.agentApprovalMode??(settings.developerComputeWorkspaceId?'full':'manual');
  const savedSettings=useRef(settings);
  const port=portDraft===''?undefined:portDraft??settings.workerPort;
  const dirty=portDraft!==null||JSON.stringify(settings)!==JSON.stringify(savedSettings.current);
@@ -37,6 +39,7 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
  async function save(){
   if(savingRef.current)return;
   if(port===undefined||!validPort(port)){setPortInvalid(true);return;}
+  if(approvalMode==='full'&&!settings.developerComputeWorkspaceId){setApprovalTargetInvalid(true);setCategory('agent');return;}
   if(settings.terminalIdleMinutes!==undefined&&(!Number.isInteger(settings.terminalIdleMinutes)||settings.terminalIdleMinutes<1||settings.terminalIdleMinutes>1440)){onError(new Error(t('终端空闲时长须为 1 到 1440 分钟。')));return;}
   const next:Settings={...settings,fontSize:fit(settings.fontSize,12,24),editorFontSize:fit(settings.editorFontSize,10,28),terminalFontSize:fit(settings.terminalFontSize,10,24),minimumFontSize:fit(settings.minimumFontSize,11,18),chatFontSize:fit(settings.chatFontSize,12,28)};
   const sequence=++saveSequence.current,submittedRevision=revision.current,submittedSettings=settings;
@@ -82,6 +85,9 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
      <select id="settings-language" value={settings.language||'zh-CN'} onChange={e=>patch({language:e.target.value as Settings['language']})}><option value="zh-CN">简体中文</option><option value="en">English</option></select>
     </div>}
     {category==='agent'&&<>
+     <DeveloperComputeOptions mode={approvalMode} workspaceId={settings.developerComputeWorkspaceId} invalid={approvalTargetInvalid} disabled={saving}
+      onModeChange={agentApprovalMode=>{setApprovalTargetInvalid(false);patch({agentApprovalMode,developerComputeWorkspaceId:agentApprovalMode==='full'?settings.developerComputeWorkspaceId:null});}}
+      onWorkspaceChange={developerComputeWorkspaceId=>{setApprovalTargetInvalid(false);patch({developerComputeWorkspaceId});}}/>
      <div className="notice">{t('普通聊天可在项目授权范围内提交你明确委托的独立作业。多步工作流可在参数面板审阅和执行。')}</div>
      <details className="settings-advanced"><summary>{t('服务商高级配置')}</summary>
       <div className="settings-form-grid">
@@ -92,7 +98,6 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
       </div>
       <p className="settings-note">{t('Kimi 使用本地 CLI 和设备登录。当前 Qwen 使用「账号与 API」中的 API 配置。')}</p>
      </details>
-     <DeveloperComputeOptions value={settings.developerComputeWorkspaceId} onChange={developerComputeWorkspaceId=>patch({developerComputeWorkspaceId})}/>
     </>}
     {category==='permissions'&&<div className="settings-action-line">
      <p className="settings-note">{t('管理计算项目可用的资源与运行限额。')}</p>

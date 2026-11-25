@@ -154,11 +154,12 @@ export async function frontendResourceConsoleCases({check}) {
     await page.evaluate(()=>{
       const original=window.studio.invoke;
       window.__test.verificationPending=true;
-      window.studio.invoke=(method,data)=>{
+      window.studio.invoke=async(method,data)=>{
         if(method==='compute.managed.snapshot'){
+          if(window.__test.failManagedObservation)throw Error('Synthetic managed SSH status read failure');
           const verificationPending=window.__test.verificationPending;
-          return Promise.resolve({resources:[{kind:'ssh',resourceId:'ssh:fixture',profileId:'fixture',profileVersion:1,connectionId:'connection-fixture',
-            name:'Fixture SSH',serviceStatus:'ready',serviceReady:!verificationPending,verificationPending}],conversations:[],sources:[]});
+          return {resources:[{kind:'ssh',resourceId:'ssh:profile-a',profileId:'profile-a',profileVersion:2,connectionId:'connection-a',
+            name:'Fixture SSH',serviceStatus:'ready',serviceReady:!verificationPending,verificationPending}],conversations:[],sources:[]};
         }
         return original(method,data);
       };
@@ -175,6 +176,27 @@ export async function frontendResourceConsoleCases({check}) {
     });
     await footer.getByText(/Fixture SSH.*作业服务 可用/).waitFor();
     assert.equal(await footer.locator('i.online').count(),1);
+    await page.evaluate(()=>{
+      window.__test.failManagedObservation=true;
+      window.dispatchEvent(new Event('focus'));
+    });
+    const pending=page.getByTestId('managed-resources-pending');
+    await pending.waitFor();
+    await footer.getByText(/Fixture SSH.*状态待核对/).waitFor();
+    assert.equal(await footer.locator('i.online').count(),0);
+    const configure=page.getByTestId('compute-resource-console').getByRole('button',{name:'添加或配置连接',exact:true});
+    await configure.click();
+    const saved=page.locator('[data-testid="saved-compute-profile"][data-profile-id="profile-a"]');
+    const choice=saved.getByRole('button',{name:'核对原连接',exact:true});
+    await choice.waitFor();
+    assert.equal(await choice.getAttribute('title'),'connection-a');
+    await page.keyboard.press('Escape');
+    await page.evaluate(()=>{window.__test.failManagedObservation=false;});
+    await pending.getByRole('button',{name:'重试',exact:true}).click();
+    await pending.waitFor({state:'detached'});
+    await footer.getByText(/Fixture SSH.*作业服务 可用/).waitFor();
+    await configure.click();
+    await saved.getByRole('button',{name:'继续原连接',exact:true}).waitFor();
   });
   await check('resource-console-desktop',async(page,capture)=>{
     await mount(page);

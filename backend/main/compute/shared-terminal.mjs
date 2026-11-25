@@ -203,7 +203,7 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
  async function ensure(create=false,fresh=false){assertLive();if(daemon&&(!fresh||durable(daemon)))return true;if(booting){await booting;assertLive();if(daemon&&(!fresh||durable(daemon)))return true;}booting=(async()=>{if(await restore()&&(!fresh||durable(daemon)))return true;return create?start():false;})();try{return await booting;}finally{booting=null;}}
  async function api(method,route,body,broker=brokerFor(route)){assertLive();try{const value=await rpc(method,route,body,broker);assertLive();return value;}catch(error){assertLive();if(error.terminalRejected)throw error;if(broker){available.delete(broker.instanceId);if(daemon===broker)daemon=null;for(const [id,value]of known)if(value.brokerId===broker.instanceId){known.set(id,{...value,alive:undefined});grants.delete(id);}}fail('terminal_unavailable');}}
  async function state(id){const entry=known.get(id);if(entry?.connectionId){const parent=await connectionState({connectionId:entry.connectionId});if(parent.status!=='authenticated'||parent.authentication!=='verified')fail('ssh_authentication_unconfirmed');}if(!identifier(id)||!await ensure())fail('terminal_unavailable');const wanted=known.get(id)?.brokerId;if(wanted&&!available.has(wanted))await restore();const route='/sessions/'+id+'/state',broker=brokerFor(route),s=await api('GET',route,undefined,broker);if(entry&&!known.has(id))fail('terminal_session_exited');remember(s,broker);return s;}
- const guarded=fn=>async(...args)=>{try{assertLive();return await fn(...args);}catch(e){const error=Error(safe(e));if(serviceNotStartedErrors.has(e))error.serviceNotStarted=true;if(codes.has(e.message)&&e.operationNotStarted===true)error.operationNotStarted=true;throw error;}};
+ const guarded=fn=>async(...args)=>{try{assertLive();return await fn(...args);}catch(e){const error=Error(safe(e));if(serviceNotStartedErrors.has(e))error.serviceNotStarted=true;if(codes.has(e.message)&&e.operationNotStarted===true)error.operationNotStarted=true;if(typeof e.operationDispatched==='boolean')error.operationDispatched=e.operationDispatched;throw error;}};
  const guardedSync=fn=>(...args)=>{try{assertLive();return fn(...args);}catch(error){throw Error(safe(error));}};
  async function list(data={}){
   typed(data,[]);const c=snapshot(getSelectedResource()?.kind==='ssh-connection');
@@ -454,15 +454,22 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
  async function connectionOpenShell(data){typed(data,['connectionId','requestId']);const {record,broker}=await connectionBroker({connectionId:data.connectionId}),profile=readConnectionProfile(record.profileId,record.profileVersion),proof={profileId:profile.id,version:profile.version,connectionId:record.connectionId,planHash:connectionProfileHash(profile)};const s=await connectionOperation(data,'shell/open',['requestId']);if(s.connectionId!==record.connectionId)fail('terminal_unavailable');remember(s,broker);known.set(s.id,{...known.get(s.id),profile:proof,source:null});catalog?.put?.('shared-terminal',s.id,known.get(s.id));return describe(s);}
  async function connectionWorkspace(data,operation='workspace',assertCurrent=()=>{}){
   if(typeof operation==='function'){assertCurrent=operation;operation='workspace';}
-  typed(data,operation==='workspace'?['connectionId','profileId','profileVersion','mode','directory','expected']:['connectionId','profileId','profileVersion','root','cwd','identity','mode','args']);
-  const {connectionId,profileId,profileVersion,...options}=data,{record,broker}=await connectionBroker({connectionId});
-  if(record.profileId!==profileId||record.profileVersion!==profileVersion||record.status!=='authenticated'||record.authentication!=='verified')fail('terminal_saved_connection_changed');
-  readConnectionProfile(profileId,profileVersion);
-  assertCurrent();
-  const result=await api('POST','/connections/'+connectionId+'/'+operation,{profileId,profileVersion,...options},broker);
-  readConnectionProfile(profileId,profileVersion);
-  assertCurrent();
-  return result;
+  let dispatched=false;
+  try{
+   typed(data,operation==='workspace'?['connectionId','profileId','profileVersion','mode','directory','expected']:['connectionId','profileId','profileVersion','root','cwd','identity','mode','args']);
+   const {connectionId,profileId,profileVersion,...options}=data,{record,broker}=await connectionBroker({connectionId});
+   if(record.profileId!==profileId||record.profileVersion!==profileVersion||record.status!=='authenticated'||record.authentication!=='verified')fail('terminal_saved_connection_changed');
+   readConnectionProfile(profileId,profileVersion);
+   assertCurrent();
+   dispatched=true;
+   const result=await api('POST','/connections/'+connectionId+'/'+operation,{profileId,profileVersion,...options},broker);
+   readConnectionProfile(profileId,profileVersion);
+   assertCurrent();
+   return result;
+  }catch(error){
+   if(operation==='workspace/command')error.operationDispatched=dispatched;
+   throw error;
+  }
  }
  function acceptLoginResult(data,result,broker,proof,requireStatus=false){
   if(result?.connection?.connectionId!==data.connectionId)fail('ssh_connection_changed');
@@ -687,7 +694,9 @@ export function createSharedTerminal({worker={},profiles,encryption,root,catalog
    if(!observed.alive||observed.expired||observed.owner!=='agent'||observed.ownerEpoch!==grant.ownerEpoch)fail('terminal_scope_denied');
    return boundary.input({scope,ref:{connectionId,profileId,profileVersion,resourceName:profile.name},input:v,sessionId:id,ownerEpoch:grant.ownerEpoch,assertCurrent});
   }
-  await api('POST','/sessions/'+id+'/input',{actor:'agent',scope:grant.scope,ownerEpoch:grant.ownerEpoch,...v});check(c);if(agent(scope,id)!==grant)fail('terminal_scope_denied');return {accepted:true,sessionId:id,action:args.action??'type',execution_status:'not_observed',next_step:'Read terminal output to determine what happened. Input acceptance and echo are not execution or success.'};
+  try{await api('POST','/sessions/'+id+'/input',{actor:'agent',scope:grant.scope,ownerEpoch:grant.ownerEpoch,...v});check(c);if(agent(scope,id)!==grant)fail('terminal_scope_denied');}
+  catch(error){if(error.operationNotStarted!==true)error.operationDispatched=true;throw error;}
+  return {accepted:true,sessionId:id,action:args.action??'type',execution_status:'not_observed',next_step:'Read terminal output to determine what happened. Input acceptance and echo are not execution or success.'};
  }
  // Discovery can check the cached grant without reconciling a different conversation.
  function hasCurrentGrant(provider,sessionId,{reconcile=true}={}){try{if(closing)return false;const selected=ownerScope(current());if(!selected||selected.provider!==provider)return false;for(const [id,grant]of grants){if(!currentGrant(grant)){if(reconcile)dropForeignGrant(id,grant);continue;}if(sessionId!==undefined&&sessionId!==id||grant.selectionRevision!==selectionRevision()||!resourceAllowed(id,grant.profile))continue;const s=known.get(id);if(equal(ownerScope(grant.context),selected)&&s?.owner==='agent'&&s.ownerEpoch===grant.ownerEpoch&&s.alive===true&&!s.expired&&(!Number.isFinite(s.expiresAt)||s.expiresAt>Date.now())&&(!grant.source||grant.source===sourceStamp()))return true;}return false;}catch{return false;}}

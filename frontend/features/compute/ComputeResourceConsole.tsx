@@ -9,6 +9,7 @@ import type {ResourceToolSetup} from '../../../contracts/dto/resource-tools';
 import {Modal} from '../../ui/Dialogs';
 import {t} from '../../ui/i18n';
 import {providerNames} from '../conversations/provider-account.mjs';
+import {serviceErrorMessage,serviceRejectedCode} from '../terminal/ssh-service-presentation';
 import './compute-resource-console.css';
 
 interface Props {
@@ -111,10 +112,11 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
       if (mounted.current) setFeedback(t(receipt && typeof receipt==='object' && 'status' in receipt && receipt.status==='unconfirmed' ? '操作结果待核对，请刷新原连接。' : done));
     } catch (reason) {
       const detail=String(reason);
+      const serviceCode=serviceRejectedCode(reason);
       const message=detail.includes('managed_compute_channel_busy')||detail.includes('active conversation') ? '该通道正在被会话使用。' :
         detail.includes('managed_compute_channel_changed') || detail.includes('managed_compute_profile_changed') ? '资源或会话已变化，请刷新后重试。' :
         detail.includes('managed_compute_private_service_unavailable') ? '作业服务未能通过核对，请检查对应连接。' : '操作未完成，请核对原资源状态。';
-      if (mounted.current) setFeedback(t(message));
+      if (mounted.current) setFeedback(serviceCode?t(serviceErrorMessage(serviceCode))+' · '+serviceCode:t(message));
     } finally {
       if (mounted.current) { setConfirm(null);await load(true); }
       operation.current=false;if(mounted.current)setRunning(false);
@@ -245,7 +247,7 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,co
     <header className="compute-console-detail-heading"><div><h2>{resource.name}</h2>
       <span className="muted">{resource.target || (resource.kind==='ssh'?'SSH':'WSL')}{ssh && <> · <span title={ssh.connectionId}>{short(ssh.connectionId)}</span></>}{!resource.current && <> · {t('旧保存版本')} {resource.profileVersion}</>}</span></div>
       <div className="compute-console-actions">
-        {resource.kind==='ssh' && resource.current && !active && resource.master?.status!=='preparing' && (!ssh||resource.master?.status==='lost') && <button type="button" className="button primary" onClick={onConnectSsh}><PlugZap size={15}/>{t('连接 SSH')}</button>}
+        {resource.kind==='ssh' && resource.current && !active && resource.master?.status!=='preparing' && (!ssh||resource.master?.status==='lost') && <button type="button" className="button primary" onClick={onConnectSsh}><PlugZap size={15}/>{t(ssh?'恢复 SSH 连接':'连接 SSH')}</button>}
         {resource.kind==='ssh' && ssh && (active || resource.master?.status==='preparing') && <button type="button" className="button" onClick={()=>onOpenTerminal()}><Terminal size={15}/>{t(active?'查看 SSH 连接':'打开认证终端')}</button>}
         {resource.kind==='wsl' && !resource.localGeneration && <button type="button" className="button primary" disabled={running||preparing||stale} onClick={()=>void run(()=>typed('compute.console.attachLocal',profile),'已连接现有作业服务')}><PlugZap size={15}/>{t('连接现有服务')}</button>}
         {resource.current && <button type="button" className="text-button" onClick={()=>onConfigure()}>{t('编辑连接')}</button>}

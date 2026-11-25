@@ -24,7 +24,14 @@ const managedRecovery=new Map([
  ['ssh_service_registration_required',['service_setup_required','Open the original resource settings and prepare its job service. Its authorized terminal can still be used.']],
  ['ssh_service_maintenance_required',['service_setup_required','Inspect the registered job service on the original resource. Updating it requires the explicit update action.']],
  ['managed_compute_worker_update_required',['capability_required','Inspect the original worker version and its advertised capabilities. Update through its resource settings to use this operation.']],
+ ['managed_run_user_instruction_required',['access_required','Use the exact original draft and current human instruction. For an independent new job, submit the exact draft prepared for that turn.']],
+ ['managed_compute_run_intent_required',['access_required','Use the exact original draft and current human instruction.']],
+ ['managed_compute_run_action_unconfirmed',['operation_unconfirmed','Check the recorded result on the exact original run before any further action.']],
+ ['managed_compute_run_state_unconfirmed',['operation_unconfirmed','Check the actual status of the exact original run before continuing.']],
  ['managed_compute_worker_request_failed',['observation_unavailable','Read the project and service health again on the original worker before making any permission change.']],
+ ['managed_compute_project_authentication_failed',['connection_unconfirmed','Re-verify the original job service connection before reading its project authorization.']],
+ ['managed_compute_project_observation_failed',['observation_unavailable','Read project authorization again on the original verified service.']],
+ ['managed_compute_project_receipt_invalid',['observation_unavailable','Inspect the project authorization response from the original worker before taking another action.']],
  ['managed_compute_private_service_unavailable',['connection_unavailable','Check the current job-service receipt on the original resource. If the request can use a private terminal there, use its separately authorized terminal lease. Service unavailability alone does not establish an SSH authentication problem.']],
  ['managed_compute_project_grant_required',['access_required','Check the denied operation, current lease and project on the original resource. A planning change alone leaves existing authorization intact. Ask for a desktop permission change only when a specific required grant is missing or revoked.']],
  ['managed_schedule_task_delegation_required',['access_required','Check the user’s requested schedule purpose in this workflow and confirm any additional action with the user.']],
@@ -35,7 +42,19 @@ const managedRecovery=new Map([
 // action. This is guidance only: no retry, resource grant or dispatch occurs here.
 export function toolFailure(error,{dispatched=false,toolName}={}){
  const message=String(error?.message||error||'Tool request failed').slice(0,4000);
- if(error?.operationNotStarted===true)dispatched=false;
+ if(typeof error?.operationDispatched==='boolean')dispatched=error.operationDispatched;
+ else if(error?.operationNotStarted===true)dispatched=false;
+ else if(error?.terminalCleanup==='unconfirmed'||message==='ssh_command_outcome_unconfirmed')dispatched=true;
+ const readOnly=error?.readOnlyOperation===true;
+ const original=typeof error?.originalRunId==='string'?{run_id:error.originalRunId}:{};
+ if(error?.workerFailure){
+  const value=error.workerFailure;
+  const observationFailed=readOnly&&value.operation_state==='unconfirmed';
+  const connection=value.status==='needs_human_auth'&&error.originalRunKind==='cluster-run'&&original.run_id?
+   {connection_action:{kind:'authenticate_original_run',code:'needs_human_auth',runId:original.run_id}}:{};
+  return toolValueResult({...value,...original,...connection,...observationFailed?{operation_state:'read_started',status:value.status==='unknown'?'blocked':value.status,
+   next_step:value.status==='needs_human_auth'?value.next_step:'Read the exact original run on its authorized service again when available.'}:{}});
+ }
  let code='tool_error',next_step='Inspect the tool details and correct the request before continuing.';
  if(toolName==='acquire_compute_resource'&&['ssh_channel_unavailable','ssh_channel_refused','ssh_shell_readiness_timeout','ssh_shell_interaction_required'].includes(message)){
   code='terminal_channel_unavailable';
@@ -58,11 +77,13 @@ export function toolFailure(error,{dispatched=false,toolName}={}){
  }else if(/required|invalid|missing|expected|must |请选择|参数|缺少/i.test(message)){
   code='invalid_input';next_step='Read the tool schema or engine contract and fill technical fields from the current workflow. Ask the user only for unresolved scientific choices.';
  }
- return {content:[{type:'text',text:JSON.stringify({status:dispatched?'unknown':code==='tool_error'?'failed':'blocked',code,message,next_step,operation_state:dispatched?'unconfirmed':'not_started',automatic_retry:false})}],isError:true};
+ if(dispatched&&readOnly)next_step='Check the original authorized source and retry this read when available.';
+ if(dispatched&&!readOnly&&original.run_id)next_step='Read the status of the exact original run before another write.';
+ return {content:[{type:'text',text:JSON.stringify({status:dispatched&&!readOnly?'unknown':code==='tool_error'?'failed':'blocked',code,message,next_step,...original,operation_state:dispatched?(readOnly?'read_started':'unconfirmed'):'not_started',automatic_retry:false})}],isError:true};
 }
 
 export function toolValueResult(value){
- return {content:[{type:'text',text:JSON.stringify(value)??'null'}],isError:['blocked','permission_required','failed','unknown','terminal_unavailable'].includes(value?.status)};
+ return {content:[{type:'text',text:JSON.stringify(value)??'null'}],isError:['blocked','permission_required','failed','unknown','terminal_unavailable','needs_auth','needs_human_auth','needs_worker_update'].includes(value?.status)};
 }
 
 export function validToolCall(body){

@@ -12,7 +12,7 @@ import {type Run} from '../../../contracts/dto/runs';
 import './jobs-experience.css';
 export type RecordObservation={at:number|null;stale:boolean;loaded:boolean;paused?:boolean;workerEpoch?:number;sourceId?:string;sourceChanged?:boolean};
 function time(value:number|undefined|null){return typeof value==='number'&&Number.isFinite(value)&&value>0?new Date(value*1000).toLocaleString():t('尚无记录');}
-export default function JobsPage({managed,focusSchedule,local,cluster,observations,projects,projectId,tasks,conversations,worker,busy,canRefresh=worker,canOpen,servicePhase,readOnly=false,onRefresh,onOpen,onConversation}:{managed?:ManagedSnapshot;focusSchedule?:{sourceId:string;scheduleId:string;nonce:string}|null;local:Run[];cluster:ClusterJob[];observations:{local:RecordObservation;cluster:RecordObservation};projects:Project[];projectId:string;tasks:any[];conversations:Conversation[];worker:boolean;busy:boolean;canRefresh?:boolean;canOpen?:(location:Job['location'])=>boolean;servicePhase?:'checking'|'ready'|'unavailable';readOnly?:boolean;onRefresh:()=>void;onOpen:(job:Job)=>void;onConversation:(conversation:Conversation)=>void}){
+export default function JobsPage({managed,managedPending=false,focusSchedule,local,cluster,observations,projects,projectId,tasks,conversations,worker,busy,canRefresh=worker,canOpen,servicePhase,readOnly=false,onRefresh,onOpen,onConversation}:{managed?:ManagedSnapshot;managedPending?:boolean;focusSchedule?:{sourceId:string;scheduleId:string;nonce:string}|null;local:Run[];cluster:ClusterJob[];observations:{local:RecordObservation;cluster:RecordObservation};projects:Project[];projectId:string;tasks:any[];conversations:Conversation[];worker:boolean;busy:boolean;canRefresh?:boolean;canOpen?:(location:Job['location'])=>boolean;servicePhase?:'checking'|'ready'|'unavailable';readOnly?:boolean;onRefresh:()=>void;onOpen:(job:Job)=>void;onConversation:(conversation:Conversation)=>void}){
  const [location,setLocation]=useState('all'),[status,setStatus]=useState('all'),[period,setPeriod]=useState('all'),[query,setQuery]=useState(''),[allProjects,setAllProjects]=useState(true),[planningExpanded,setPlanningExpanded]=useState<boolean|null>(null);
  const observedJobs=unifiedJobs(local,cluster),planning=tasks.filter(task=>!task.execution?.runId&&!task.execution?.artifactId);
  const conversationByTaskId=new Map<string,Conversation>();
@@ -54,6 +54,7 @@ export default function JobsPage({managed,focusSchedule,local,cluster,observatio
    </select></label>
   </div></details>
   <div className="jobs-filter-summary" data-testid="jobs-filter-summary"><div role="status"><strong>{t('显示记录')} · {jobs.length} / {observedJobs.length}</strong><span>{activeFilters.length?activeFilters.join(' · '):t('未设置筛选')}</span></div>{!!jobs.length&&!!activeFilters.length&&<button className="button" onClick={clearFilters}>{t('清除筛选')}</button>}</div>
+  {managedPending&&<p className="notice" role="status">{t('托管资源状态待核对，显示上次记录。')}</p>}
   {managed&&<ManagedScheduleRecords focus={focusSchedule} notices={managed.notices||[]} sources={managed.sources} resources={managed.resources} projectId={projectOnly?projectId:undefined}/>}
   <div className="jobs-list" id="jobs-records">{jobs.map(job=>{
    const run=job.run,observed=observations[job.location];

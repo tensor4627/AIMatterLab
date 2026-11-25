@@ -4,7 +4,7 @@ import {t} from './i18n';
 import {cloneElement,isValidElement,useEffect,useLayoutEffect,useId,useRef,useState,type ReactNode,type ReactElement} from 'react';
 
 /** A delayed explanation for short labels; actionable warnings stay in the page. */
-export default function Tooltip({content,children,className='',asChild=false,activate=false}:{content:string;children:ReactNode;className?:string;asChild?:boolean;activate?:boolean}){
+export default function Tooltip({content,children,className='',asChild=false,activate=false,placement='vertical'}:{content:string;children:ReactNode;className?:string;asChild?:boolean;activate?:boolean;placement?:'vertical'|'right'}){
  const anchor=useRef<HTMLSpanElement>(null),popup=useRef<HTMLSpanElement>(null),focused=useRef(false);
  const [position,setPosition]=useState<{left:number;top:number}|null>(null);
  const id=useId(),[open,setOpen]=useState(false),timer=useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -16,9 +16,14 @@ export default function Tooltip({content,children,className='',asChild=false,act
  useLayoutEffect(()=>{
   if(!open)return;const a=anchor.current?.getBoundingClientRect(),p=popup.current?.getBoundingClientRect();if(!a||!p)return;
   const margin=8,gap=7,w=window.innerWidth,h=window.innerHeight;
+  const right=a.right+gap;
+  if(placement==='right'&&right+p.width<=w-margin){
+   const center=a.top+(a.height-p.height)/2;
+   setPosition({left:right,top:Math.max(margin,Math.min(center,h-p.height-margin))});return;
+  }
   const above=a.top-gap-p.height,preferred=above>=margin?above:a.bottom+gap;
   setPosition({left:Math.max(margin,Math.min(a.left,w-p.width-margin)),top:Math.max(margin,Math.min(preferred,h-p.height-margin))});
- },[open,content]);
+ },[open,content,placement]);
  useEffect(()=>{
   if(!open)return;
   function escape(event:KeyboardEvent){if(event.key==='Escape'){event.preventDefault();event.stopPropagation();hide();}}

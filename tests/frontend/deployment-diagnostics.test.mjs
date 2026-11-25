@@ -43,6 +43,16 @@ function clusterContext(value){return {...value,projects:value.projects.map(proj
 const authBanner=h=>h.find(node=>node.props?.['data-testid']==='deployment-auth-action');
 function clickConnectionAction(h,label){const node=h.find(node=>node.type==='button'&&h.text(node)===label);assert.equal(node.props.disabled,false);node.props.onClick();}
 const unauthorizedAutomaticCalls=h=>h.calls.filter(call=>['task.create','task.deployment.createProject','worker.connect','ssh.auth.start','ssh.auth.input','ssh.auth.plan','conversation.create','agent.rpc'].includes(call.method)||call.method==='worker.request'&&['/api/projects','/api/clusters','/api/cluster/submit','/api/cluster/auth/start'].includes(call.data?.target));
+test('a preflight execute rejection shows a nonpending diagnostic without a fabricated original job',async()=>{
+ const initial=deploymentFixture(),raw="Error invoking remote method 'studio:task.execute': Error: execution_not_started: The confirmed input revision changed";
+ const h=deploymentHarness({initial,override:async(method,data,standard)=>{if(method==='task.execute')throw Error(raw);return standard(method,data);}});
+ try{
+  await h.flush();h.review();h.click('execute-deployment');await h.flush();
+  const notice=html(h);
+  assert.match(notice,/data-pending="false"/);assert.match(notice,/本次执行未提交/);assert.doesNotMatch(notice,/待核对的原尝试|请核对原作业/);
+  const [record]=h.journal.list(initial.task.id);assert.equal(record.raw,raw);assert.equal(record.context.phase,'blocked');assert.equal(executions(h).length,1);
+ }finally{h.unmount();}
+});
 for(const code of ['needs_human_auth','needs_worker_update'])test('recognized execute '+code+' retains full diagnostic and offers navigation only without retry',async()=>{
  const initial=clusterDeploymentFixture(),rawAuth="Error invoking remote method 'studio:task.execute': Error: "+code,counters={connections:0,reconnect:0,sources:[]};const h=deploymentHarness({initial,properties:{onOpenConnections:source=>{counters.connections++;counters.sources.push(source);},onReconnect:async()=>{counters.reconnect++;}},override:async(method,data,standard)=>{
   if(method==='task.deployment.context')return clusterContext(await standard(method,data));

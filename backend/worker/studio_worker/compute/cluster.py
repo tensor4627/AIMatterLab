@@ -20,6 +20,7 @@ from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES
 from studio_worker.infrastructure.util import atomic_json, contained, digest, leaf
 from studio_worker.workspace.private_lineage import current_rows
 from studio_worker.compute.bound_cluster import COMPUTE_CHECK, bound_batch_body, confinement_source, invocation, job_root, private_engine
+from studio_worker.compute.run_rejection import run_preflight
 
 
 def private_copy_rows(rows, local_paths, runs, root):
@@ -1261,21 +1262,22 @@ elif r['engine']=='pydyn.md':
                 raise PermissionError("Project concurrency limit reached")
             return r,p
 
-        with self.store.lock:
-            r,p=reviewed()
-            if r is None:return self.run(identifier)
-            interactive=self.transport==self._transport and r['cluster_snapshot'].get('auth_mode','key')=='interactive'
-            snapshot=dict(r['cluster_snapshot']) if interactive else None
-        if interactive:
-            # Auth methods may acquire auth -> Store locks. Never invert that
-            # ordering by checking authentication while holding Store.lock.
-            self.auth.resolve(snapshot)
+        with run_preflight():
             with self.store.lock:
                 r,p=reviewed()
                 if r is None:return self.run(identifier)
-                if r['cluster_snapshot']!=snapshot:
-                    raise ValueError('Reviewed cluster snapshot changed before submission')
-                p=r['cluster_snapshot']
+                interactive=self.transport==self._transport and r['cluster_snapshot'].get('auth_mode','key')=='interactive'
+                snapshot=dict(r['cluster_snapshot']) if interactive else None
+            if interactive:
+                # Auth methods may acquire auth -> Store locks. Never invert that
+                # ordering by checking authentication while holding Store.lock.
+                self.auth.resolve(snapshot)
+                with self.store.lock:
+                    r,p=reviewed()
+                    if r is None:return self.run(identifier)
+                    if r['cluster_snapshot']!=snapshot:
+                        raise ValueError('Reviewed cluster snapshot changed before submission')
+                    p=r['cluster_snapshot']
         source="""
 import pathlib,tarfile,sys,io,subprocess,os
 root=pathlib.Path(p['root']).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
@@ -1303,21 +1305,24 @@ print('__STUDIO_JSON__'+json.dumps(record))
         # Local archive construction makes no scheduler call. A failure here leaves
         # the reviewed draft ready, so the human can retry instead of reconciling an
         # "unknown" attempt that was never dispatched.
-        data=self.archive(r)
+        with run_preflight():
+            data=self.archive(r)
         with self.store.lock:
             # Archive/authentication may overlap another cluster submission, a
             # local dispatch or a policy edit. Recheck and reserve under the same
             # Store lock used by the local scheduler's final concurrency check.
-            r,p=reviewed()
-            if r is None:return self.run(identifier)
-            if interactive:
-                if r['cluster_snapshot']!=snapshot:
-                    raise ValueError('Reviewed cluster snapshot changed before submission')
-                p=r['cluster_snapshot']
+            with run_preflight():
+                r,p=reviewed()
+                if r is None:return self.run(identifier)
+                if interactive:
+                    if r['cluster_snapshot']!=snapshot:
+                        raise ValueError('Reviewed cluster snapshot changed before submission')
+                    p=r['cluster_snapshot']
+                if monitor is not None:
+                    enrollment, related = scheduler.enrollment(scheduler.submit_monitor_owner(r, monitor))
             # This durable reservation is visible to both schedulers before any
             # remote side effect. Unknown attempts are never automatically replayed.
             if monitor is not None:
-                enrollment, related = scheduler.enrollment(scheduler.submit_monitor_owner(r, monitor))
                 self.save(r, related=related, status="unknown", submit_attempted=True, managed_schedule_parent=True,
                           managed_submit_monitor=enrollment)
             else:
@@ -1442,18 +1447,19 @@ print('__STUDIO_JSON__'+json.dumps(out))
         # Record the user's intent before even the status query can lose its
         # acknowledgement. Polling never proves the cancellation was delivered.
         with self.store.lock:
-            before=self.raw(identifier)
-            self.allowed(before['project_id'],before['cluster_id'])
-            if require_known and (before['status'] not in ('queued', 'running') or before.get('cancel_requested')):
-                raise ValueError('Original run status does not confirm a cancellable scheduler job')
-            scheduler = getattr(self.service, 'managed_schedules', None)
-            if before.get("managed_child") and (scheduler is None or not scheduler.can_cancel_child(before, managed)):
-                raise PermissionError("Stop the owning schedule to cancel its verified child")
-            if before.get("managed_schedule_parent") and not before.get("managed_child") and scheduler is not None:
-                # The explicit run-cancel action is independent of stopping a schedule.
-                managed = scheduler.explicit_parent_cancel
-            if before['status'] in TERMINAL or identifier in self._cancelling:return self.run(identifier)
-            requested={"status":"requested", "requested_at":(before.get('cancellation') or {}).get('requested_at') or time.time(), "signal_sent":False}
+            with run_preflight():
+                before=self.raw(identifier)
+                self.allowed(before['project_id'],before['cluster_id'])
+                if require_known and (before['status'] not in ('queued', 'running') or before.get('cancel_requested')):
+                    raise ValueError('Original run status does not confirm a cancellable scheduler job')
+                scheduler = getattr(self.service, 'managed_schedules', None)
+                if before.get("managed_child") and (scheduler is None or not scheduler.can_cancel_child(before, managed)):
+                    raise PermissionError("Stop the owning schedule to cancel its verified child")
+                if before.get("managed_schedule_parent") and not before.get("managed_child") and scheduler is not None:
+                    # The explicit run-cancel action is independent of stopping a schedule.
+                    managed = scheduler.explicit_parent_cancel
+                if before['status'] in TERMINAL or identifier in self._cancelling:return self.run(identifier)
+                requested={"status":"requested", "requested_at":(before.get('cancellation') or {}).get('requested_at') or time.time(), "signal_sent":False}
             self.save(before,cancel_requested=True,cancellation=requested)
             self._cancelling.add(identifier)
         try:

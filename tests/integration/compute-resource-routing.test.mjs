@@ -1,5 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import ts from 'typescript';import {EventEmitter} from 'node:events';
 import {createComputeResourceBinding} from '../../backend/main/compute/resource-binding.mjs';
+import {createSshService} from '../../backend/main/compute/ssh-connection-service.mjs';
+import {createSshServiceRegistration} from '../../backend/main/compute/ssh-service-registration.mjs';
 import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 import {createAgentRequests} from '../../agent/sessions/requests.mjs';
 import {createParallelAgentWorkflowContext} from '../../agent/sessions/workflow-context.mjs';
@@ -43,7 +45,7 @@ async function fixture(t,{connectedWorker=true,projectId=null}={}){
  routing.usesForegroundWorker=id=>id===owner.provider+':'+owner.threadId;
  t.after(()=>{context.agents.close();worker.close();});
  context.computeResource=vm.runInNewContext(initializer('computeResource'),context);
- for(const name of ['trusted','handle','scientificTools','assertLegacyWorkerIdle','changeComputeResource','connectSelectedSshService'])vm.runInNewContext(find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name),context);
+ for(const name of ['trusted','handle','scientificTools','assertLegacyWorkerIdle','publishComputeResourceChange','changeComputeResource','connectSelectedSshService'])vm.runInNewContext(find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='compute.resource.status'),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='agent.connect'),context);
  vm.runInNewContext(find(node=>ts.isCallExpression(node)&&node.expression.getText(ast)==='handle'&&node.arguments[0]?.text==='compute.managed.useForWorkflow'),context);
@@ -60,14 +62,88 @@ test('workflow attachment checks the exact hosted SSH even when its local servic
  f.context.randomUUID=()=> 'workflow-request';
  f.context.managedResources={snapshot:()=>[{...reference,kind:'ssh',serviceStatus:'unavailable'}],
   async refreshService(options){observed.push(clone(options));}};
- f.context.sshService.useHosted=async request=>{
+ f.context.sshService.useHosted=async (request,activation)=>{
   observed.push(clone(request));
+  activation.commit();
   return {...reference,status:'connected',workflowReady:true};
  };
  await assert.rejects(f.invoke('compute.managed.useForWorkflow',{...reference,connectionId:'foreign'}),/managed_compute_private_service_unavailable/);
  assert.deepEqual(observed,[]);
  assert.equal((await f.invoke('compute.managed.useForWorkflow',reference)).workflowReady,true);
  assert.deepEqual(observed,[{...reference,requestId:'workflow-request',mode:'reuse'},{connectionId:'session',existingOnly:true}]);
+});
+
+async function hostedWorkflowFixture(t){
+ const f=await fixture(t),{computeProfiles,catalog,computeResource,workflowContext}=f.context;
+ const reference=connectionId=>({connectionId,profileId:'profile',profileVersion:1});
+ const original=reference('session'),target=reference('second');
+ const health={name:'gpu-sampling-studio',root:'/fixture/worker',runtime:'/fixture/worker/runtimes/'+'a'.repeat(20),runtimeId:'a'.repeat(20),port:25000,execution_policy:'desktop-review-v1',ssh_service:true,hostIdentity:{hostname:'fixture',uid:1000,machineId:'fixture'}};
+ computeProfiles.list=()=>[computeProfiles.read({id:original.profileId,version:1})];
+ const registration=createSshServiceRegistration({catalog,profiles:computeProfiles});
+ registration.remember(computeProfiles.list()[0],health,{status:'ready',count:1});
+ const live=ref=>({...ref,status:'connected',channelKind:'private',serviceActive:true,serviceId:'service-'+ref.connectionId,attemptId:'attempt-'+ref.connectionId,service:health});
+ const views=new Map([[original.connectionId,live(original)],[target.connectionId,live(target)]]);
+ const probes=[],refreshed=[],detached=[],connections=f.shared.connections;
+ Object.assign(connections,{serviceState:async({connectionId})=>clone(views.get(connectionId)),serviceRequest:async packet=>{
+  probes.push(clone(packet));assert.equal(packet.serviceId,views.get(packet.connectionId).serviceId);
+  return {status:200,data:packet.target==='/api/health'?health:{jsonrpc:'2.0',id:packet.data.id,result:{tools:[{name:'present_task'}]}}};
+ },openService:()=>assert.fail('Hosted workflow attachment cannot start a worker'),closeService:()=>assert.fail('Hosted workflow attachment cannot stop a worker')});
+ connections.privateServiceRequest=(...args)=>connections.serviceRequest(...args);
+ const service=createSshService({worker:f.worker,connections,profiles:computeProfiles,resource:computeResource,registration,current:()=>workflowContext.current()});
+ f.context.sshService=service;f.context.randomUUID=()=> 'workflow-request';
+ f.context.conversationTerminals.detachConnection=value=>detached.push(value);
+ f.context.managedResources={snapshot:()=>[{...target,kind:'ssh',serviceStatus:'ready'}],refreshService:async value=>{refreshed.push(clone(value));}};
+ const use=()=>f.invoke('compute.managed.useForWorkflow',target);
+ const selectOriginal=async()=>{
+  await f.activate();const attached=await service.connect({...original,requestId:'original',mode:'reuse'});assert.equal(attached.workflowReady,true);
+  const owner=service.owner({connectionId:original.connectionId,attemptId:attached.attemptId,owner:'agent',scope:f.owner});assert.equal(owner.operator,'agent');
+ };
+ return {...f,original,target,views,service,use,selectOriginal,probes,refreshed,detached,connections};
+}
+
+test('known target health rejection preserves the original SSH selection, owner and MCP lease through the real main route',async t=>{
+ const f=await hostedWorkflowFixture(t);await f.selectOriginal();
+ const before=f.context.computeResource.capture(),proxy=f.worker.connection,token=f.worker.providerConnection('codex').tokens.mcp,count=f.revokes.length;
+ const view=f.views.get(f.target.connectionId);
+ Object.assign(view,{status:'failed',serviceActive:false,error:{code:'worker_health_invalid',phase:'checking_health'}});
+ const result=await f.use();
+ assert.equal(result.status,'failed');assert.deepEqual(clone(result.error),view.error);
+ f.context.computeResource.assertCurrent(before);assert.equal(f.worker.connection,proxy);assert(f.service.hasCurrentGrant('codex'));
+ assert.equal(f.worker.providerConnection('codex').tokens.mcp,token);assert.equal(f.revokes.length,count);
+ assert.deepEqual(f.detached,[]);assert.deepEqual(f.refreshed,[]);
+ delete view.error;Object.assign(view,{status:'connected',serviceActive:true});
+ const retry=await f.use();assert.equal(retry.workflowReady,true);assert.equal(retry.connectionId,f.target.connectionId);
+ assert.equal(f.context.computeResource.peek().connectionId,f.target.connectionId);assert.equal(f.worker.identity.connectionId,f.target.connectionId);
+ assert.equal(f.service.hasCurrentGrant('codex'),false);assert.notEqual(f.worker.connection,proxy);
+ assert.deepEqual(f.detached,[f.original.connectionId]);assert.deepEqual(f.refreshed,[{connectionId:f.target.connectionId,existingOnly:true}]);
+ assert.equal(f.views.get(f.original.connectionId).status,'connected');
+ await f.selectOriginal();
+ const reselected=await f.use();assert.equal(reselected.workflowReady,true);assert.equal(reselected.attemptId,retry.attemptId);assert.equal(reselected.serviceId,retry.serviceId);
+});
+
+test('a late hosted health refusal keeps the original WSL route and leaves no new SSH selection',async t=>{
+ const f=await hostedWorkflowFixture(t),proxy=f.worker.connection,identity=f.worker.identity,previous=f.connections.serviceRequest;
+ let healthReads=0;
+ f.connections.serviceRequest=async packet=>{
+  if(packet.target==='/api/health'&&++healthReads===2)throw Error('worker_health_invalid');
+  return previous(packet);
+ };
+ const result=await f.use();assert.equal(result.error.code,'worker_health_invalid');assert.equal(healthReads,2);
+ assert.equal(f.context.computeResource.peek(),null);assert.equal(f.worker.connection,proxy);assert.equal(f.worker.identity,identity);
+ assert.deepEqual(f.detached,[]);assert.deepEqual(f.refreshed,[]);
+});
+
+test('a pending hosted check fences an explicit changed selection without replacing it',async t=>{
+ const f=await hostedWorkflowFixture(t);await f.selectOriginal();
+ const entered=deferred(),release=deferred(),previous=f.connections.serviceRequest;
+ f.connections.serviceRequest=async packet=>{entered.resolve();await release.promise;return previous(packet);};
+ const before=f.context.computeResource.capture(),proxy=f.worker.connection;
+ const pending=f.use();await entered.promise;
+ f.context.computeResource.assertCurrent(before);assert.equal(f.worker.connection,proxy);assert(f.service.hasCurrentGrant('codex'));
+ await f.activate('different');release.resolve();
+ const result=await pending;assert.equal(result.workflowReady,false);
+ assert.equal(f.context.computeResource.peek().connectionId,'different');assert.deepEqual(f.detached,[f.original.connectionId]);
+ assert.deepEqual(f.refreshed,[]);
 });
 
 test('actual main routes select SSH with an existing WSL worker, require exact grant and leave worker facts untouched',async t=>{

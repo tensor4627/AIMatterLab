@@ -5,7 +5,7 @@ import {installManagedTray} from './platform/managed-tray.mjs';
 import {loadRecoverableWorkbench} from './platform/workbench-recovery.mjs';
 import {createConversationActivity} from '../backend/main/compute/conversation-activity.mjs';
 import {managedProjectAccess} from '../backend/main/compute/managed-project-access.mjs';
-import {developerComputeAccess} from '../backend/main/compute/developer-compute-access.mjs';
+import {agentApprovalMode,developerComputeAccess} from '../backend/main/compute/developer-compute-access.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
 import {createWorkspaceUpdater,launchWorkspaceUpdate} from './platform/workspace-updater.mjs';
 import {createUpdateAccess,validateUpdateSource} from './platform/update-feeds.mjs';
@@ -181,7 +181,7 @@ const codexRoot=path.join(app.getPath('userData'),'provider-contexts','codex');
 const subscriptionRuntime=createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime,
  onEnvPrompt:prompt=>emit('studio:event',{method:'studio/codexEnvImport',params:{prompt}})});
 const createCodex=(host=createCodexSubscriptionRuntime({root:codexRoot,runtime:codexRuntime,sharedEnvImport:subscriptionRuntime.envImport}))=>
- new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host});
+  new CodexBridge({strictIsolation:true,isolationRoot:codexRoot,host,approvalMode:()=>agentApprovalMode(settings)});
 const codex=createCodex(subscriptionRuntime), worker = new WorkerClient({host:computeRuntime,resourceSource:workerSource});
 bindBundledWorkerRuntimeId(worker,workerSource);
 const resourceRouting=createAgentResourceRouting({worker,terminal:()=>terminalMcp,resource:()=>computeResource,sharedTerminal:()=>sharedTerminal,agents:()=>agents,service:()=>sshService,managed:()=>managedResources,taskSource:scope=>taskWorkerSource(taskRecords?.bound(scope.provider,scope.threadId))});
@@ -451,27 +451,48 @@ handle('compute.sshService.status',value=>sshService.status(value));
 handle('compute.sshService.scheduler',async value=>{const result=await sshService.scheduler(value);emit('studio:event',{method:'studio/sshSchedulerChanged',params:{profileId:result.id,version:result.version}});return result;});
 handle('compute.sshService.disconnect',async value=>{conversationTerminals.serviceOwner(value.connectionId,'human');const result=await sshService.disconnect(value);emit('studio:event',{method:'studio/computeResourceChanged',params:await computeResource.status({})});return result;});
 handle('compute.resource.status',async value=>{const result=await computeResource.status(value);return result.kind==='ssh-connection'&&result.authentication==='verified'?{...result,canAcquireConversationTerminal:conversationTerminals.canAcquire(agents.active)}:result;});
-async function changeComputeResource(method,value){
- assertLegacyWorkerIdle();const before=computeResource.capture(),result=await computeResource[method](value),after=computeResource.capture();
+async function publishComputeResourceChange(before,result,preservedConnectionId){
+ const after=computeResource.capture();
  if(before.revision!==after.revision||JSON.stringify(before.selection)!==JSON.stringify(after.selection)){
   if(before.selection?.connectionId)conversationTerminals.detachConnection(before.selection.connectionId);
-  await sshService.resourceChanged();
+  await sshService.resourceChanged(preservedConnectionId);
   for(const provider of ['codex','kimi','qwen','deepseek','compatible']){worker.revokeProvider(provider);terminalMcp?.revokeProvider(provider);}
  }
  emit('studio:event',{method:'studio/computeResourceChanged',params:result});
  const provider=agents.active;void scientificTools(provider).then(params=>emit('studio:event',{method:'studio/toolsStatus',provider,params})).catch(()=>{});return result;
 }
+async function changeComputeResource(method,value){
+ assertLegacyWorkerIdle();const before=computeResource.capture(),result=await computeResource[method](value);
+ return publishComputeResourceChange(before,result);
+}
 for(const method of ['activate','clear'])handle('compute.resource.'+method,value=>changeComputeResource(method,value));
 handle('compute.managed.useForWorkflow',async value=>{
  const keys=['connectionId','profileId','profileVersion'];
  if(Object.keys(value).sort().join(',')!==keys.join(','))throw Error('managed_compute_invalid_request');
- assertIdleAgent();agents.assertContextIdle();
- // The foreground attachment verifies the registered worker on the exact SSH login.
- const live=managedResources?.snapshot().find(row=>row.kind==='ssh'&&keys.every(key=>row[key]===value[key]));
- if(!live)throw Error('managed_compute_private_service_unavailable');
- await changeComputeResource('activate',{kind:'ssh-connection',...value});
+ const assertIdle=()=>{assertLegacyWorkerIdle();assertIdleAgent();agents.assertContextIdle();};
+ const assertHosted=()=>{if(!managedResources?.snapshot().some(row=>row.kind==='ssh'&&keys.every(key=>row[key]===value[key])))throw Error('managed_compute_private_service_unavailable');};
+ assertIdle();assertHosted();
+ const before=computeResource.capture(),request={...value,requestId:randomUUID(),mode:'reuse'};
+ if(before.selection?.kind==='ssh-connection'&&keys.every(key=>before.selection[key]===value[key])){
+  const result=await connectSelectedSshService(request,true);
+  computeResource.assertCurrent(before);
+  return result;
+ }
+ const originalWorker=worker.connection,workerEpoch=worker.connectionEpoch,workerIntent=worker.bindingIntent;
+ const activation=await computeResource.prepareConnectionActivation({kind:'ssh-connection',...value});
+ const assertCurrent=()=>{
+  activation.assertCurrent();
+  if(worker.connection!==originalWorker||worker.connectionEpoch!==workerEpoch||worker.bindingIntent!==workerIntent)throw Error('ssh_service_context_changed');
+ };
+ let selected;
+ const result=await sshService.useHosted(request,{assertCurrent,commit:beforeSave=>{
+  assertCurrent();assertIdle();assertHosted();selected=activation.commit(beforeSave);
+ }});
+ if(!selected)return result;
  const guard=computeResource.capture();
- const result=await connectSelectedSshService({...value,requestId:randomUUID(),mode:'reuse'},true);
+ await publishComputeResourceChange(before,selected,value.connectionId);
+ emit('studio:event',{method:'studio/workerConnected',params:{sourceKind:'ssh'}});
+ await managedResources?.refreshService({connectionId:value.connectionId,existingOnly:true}).catch(()=>{});
  computeResource.assertCurrent(guard);
  return result;
 });
@@ -482,8 +503,8 @@ const resourceWorkspace=createResourceWorkspace({catalog,profiles:computeProfile
  emit:()=>emit('studio:event',{method:'studio/resourceWorkspaceChanged'})});
 for(const method of ['read','preview','confirm','cancel'])handle('compute.resourceWorkspace.'+method,value=>resourceWorkspace[method](value));
 handle('compute.resourceWorkspace.session',value=>resourceWorkspace.forSession(value));
-const developerCompute=developerComputeAccess({workspaceId:()=>settings.developerComputeWorkspaceId,
- userTurn:scope=>agents.turnOrigin(scope.provider,scope.threadId)==='human'});
+ const developerCompute=developerComputeAccess({workspaceId:()=>settings.developerComputeWorkspaceId,mode:()=>agentApprovalMode(settings),
+  userTurn:scope=>agents.turnOrigin(scope.provider,scope.threadId)==='human'&&agents.isBusy(scope.provider,scope.threadId)});
 const workspaceTerminalAuthorization=createWorkspaceTerminalAuthorization({workspace:resourceWorkspace,connections:sharedTerminal.connections,developerCompute,catalog,
  current:()=>{const selected=workflowContext.selectedOwner();return {...selected.context,revision:selected.revision+':'+computeResource.revision()};},
  emit:()=>emit('studio:event',{method:'studio/terminalApprovalChanged'})});
@@ -684,15 +705,17 @@ handle('diagnostics.performance',value=>{
 });
 handle('settings',data=>{
  const next=normalizeSettings(settings,data);
- const previousDeveloperWorkspace=settings.developerComputeWorkspaceId??null;
- const nextDeveloperWorkspace=next.developerComputeWorkspaceId??null;
+  const previousApprovalMode=agentApprovalMode(settings),nextApprovalMode=agentApprovalMode(next);
+  const previousDeveloperWorkspace=previousApprovalMode==='full'?settings.developerComputeWorkspaceId??null:null;
+  const nextDeveloperWorkspace=nextApprovalMode==='full'?next.developerComputeWorkspaceId??null:null;
  if(previousDeveloperWorkspace!==nextDeveloperWorkspace)developerCompute.verifyChange(previousDeveloperWorkspace,nextDeveloperWorkspace,managedResources.snapshot());
  next.userCacheDirectory=projectSkills.prepareRoot(next.userCacheDirectory||defaultUserCacheDirectory);
  if(projectSkills.root!==next.userCacheDirectory)rememberSkillCache();
  settings=catalog.put('settings','main',next);workbenchTray?.menu();
- if(previousDeveloperWorkspace!==nextDeveloperWorkspace){
-  developerCompute.changed(previousDeveloperWorkspace,nextDeveloperWorkspace);
-  managedResources.endDeveloperAccess(previousDeveloperWorkspace);
+  if(previousApprovalMode!==nextApprovalMode||previousDeveloperWorkspace!==nextDeveloperWorkspace){
+   developerCompute.changed(previousDeveloperWorkspace,nextDeveloperWorkspace,{modeChanged:previousApprovalMode!==nextApprovalMode});
+   workspaceTerminalAuthorization.revalidatePending();
+   if(previousDeveloperWorkspace!==nextDeveloperWorkspace)managedResources.endDeveloperAccess(previousDeveloperWorkspace);
   emit('studio:event',{method:'studio/managedActivity'});
  }
  if(projectSkills.root!==settings.userCacheDirectory){

@@ -171,12 +171,12 @@ function consumer(task,importAsset,stageDrafts=[]){return renderToStaticMarkup(n
 test('public workflows keep one generic input import without impossible closed-private consumer forms',()=>{const task={id:'public',workflowVersion:2,parameters:{engine:'pygas.build'}};const html=consumer(task,async()=>{});assert.doesNotMatch(html,/List closed producer|Inspect closed consumer|导入消费端势模型/);assert.equal((html.match(/<button/g)||[]).length,1);assert.match(html,/补充输入文件/);assert.equal(consumer(task,undefined),'');const recovery=consumer(task,undefined,['bias.validate']);assert.match(recovery,/Inspect closed consumer/);assert.doesNotMatch(recovery,/List closed producer/);const supported=consumer({...task,customCv:{id:'private'}},async()=>{});assert.match(supported,/List closed producer/);assert.match(supported,/Inspect closed consumer/);assert.match(supported,/导入消费端势模型或验证历史/);});
 for(const width of[1800,600])test('App forwards actual visible workflow identity, preserving shortcuts on other pages at width '+width,async()=>{const storage=memoryStorage(),bound={...conversation('codex','cleanup-app'),taskId:'task1'},task={id:'task1',name:'Owned',provider:'codex',threadId:'cleanup-app',parameters:{},steps:[],artifacts:[]};storage.setItem('studio.conversation',bound.id);storage.setItem('studio.section','agent-task:task1');const h=appWorkerHarness({width,storage,override:(m,d,standard)=>m==='conversation.list'?[bound]:m==='conversation.select'?bound:m==='task.list'?[task]:standard(m,d)});await h.flush();const agent=()=>h.find(n=>n.type==='./Agent');assert.equal(agent().props.visibleWorkflowId,'task1');if(width===600){h.find(n=>n.props?.['data-testid']==='show-agent').props.onClick();await h.flush();assert.equal(agent().props.visibleWorkflowId,null);}h.find(n=>n.props?.['data-testid']==='navigate-runs').props.onClick();await h.flush();assert.equal(agent().props.visibleWorkflowId,null);h.find(n=>n.props?.['aria-label']==='关闭');assert.throws(()=>h.find(n=>n.props?.className==='tab-close'),/not found/);h.unmount();});
 
-test('current singleton workspace tab is a noninteractive title while global navigation and toolbar stay reachable',async()=>{
+test('toolbar project selector opens existing project management while global navigation stays reachable',async()=>{
  const h=appWorkerHarness();await h.flush();
- const tab=h.find(n=>n.props?.className==='workspace-current-title');
- const children=Array.isArray(tab.props.children)?tab.props.children:[tab.props.children];
- assert(children.some(n=>n?.type==='strong'));
- assert(!children.some(n=>n?.type==='button'));
+ const trigger=h.find(n=>n.props?.['data-testid']==='open-project-selector');
+ assert.equal(trigger.props['aria-haspopup'],'dialog');
+ trigger.props.onClick();await h.flush();
+ h.find(n=>n.props?.['data-testid']==='project-management');
  h.find(n=>n.props?.['data-testid']==='navigate-home');h.find(n=>n.props?.['aria-label']==='切换 Agent 面板');h.unmount();
 });
 

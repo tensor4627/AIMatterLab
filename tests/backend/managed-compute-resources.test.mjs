@@ -47,11 +47,12 @@ test('developer tests use only the selected hosted workspace, and switching it o
 
 test('an unreadable project catalog is distinct from an observed absence of authority',async()=>{
  const check=response=>managedWorkerProject({projectId:'p'},{kind:'wsl'},{forward:async()=>response},()=>{});
- assert.equal(await check({status:403}),null);
  assert.equal(await check({status:200,data:[]}),null);
- for(const response of [{status:500},{status:200,data:{}}]){
-  await assert.rejects(check(response),/managed_compute_worker_request_failed/);
- }
+ for(const response of [{status:401},{status:403,data:{error:'MCP credential is restricted to /mcp'}}])
+  await assert.rejects(check(response),/managed_compute_project_authentication_failed/);
+ for(const response of [{status:403},{status:500}])
+  await assert.rejects(check(response),/managed_compute_project_observation_failed/);
+ await assert.rejects(check({status:200,data:{}}),/managed_compute_project_receipt_invalid/);
 });
 function deferred(){let resolve;const promise=new Promise(ack=>resolve=ack);return {promise,resolve};}
 
@@ -678,7 +679,7 @@ test('hosted reuse reports manifest differences before an explicit in-place serv
 
 test('run mutations check exact source, active project grant, user intent and known canonical state before dispatch',async t=>{
  const dispatched=[],runStates=new Map(),f=fixture(t),held=deferred(),entered=deferred();
- let authorized=false,monitorAvailable=true;
+ let authorized=false,monitorAvailable=true,authenticated=false;
  const workerBinding={kind:'ssh',root:'/fixture/worker',hostIdentity:{hostname:'fixture',uid:100,machineId:'fixture'}};
  const services={async ssh(resource){
   const id=resource.profileId,clusterId='cluster-'+id,cluster={id:clusterId,version:1,transport_kind:'ssh-service-local'};
@@ -694,7 +695,8 @@ test('run mutations check exact source, active project grant, user intent and kn
     if(target==='/api/cluster/submit'){
      assert.equal(method,'POST');assert.equal(mcp,false);
      dispatched.push({resource:id,name:'submit_cluster_run',arguments:data});
-     if(data.run_id==='run-confirmed-A')return {status:200,data:{...runStates.get(data.run_id),status:'queued',job_id:'456'}};
+     if(data.run_id==='run-auth-A'&&!authenticated)return {status:500,data:{status:'needs_human_auth',code:'needs_human_auth',message:'Private authentication required',operation_state:'not_started'}};
+     if(['run-confirmed-A','run-auth-A'].includes(data.run_id))return {status:200,data:{...runStates.get(data.run_id),status:'queued',job_id:'456'}};
      entered.resolve();await held.promise;return {status:502,data:{fixture:'lost acknowledgement'}};
     }
     if(target==='/mcp'){
@@ -738,10 +740,14 @@ test('run mutations check exact source, active project grant, user intent and kn
  runStates.set('run-confirmed-A',{id:'run-confirmed-A',project_id:'project',cluster_id:'cluster-A',status:'ready'});
  const confirmed=await mutation('A','submit_cluster_run','run-confirmed-A');
  assert.deepEqual(confirmed,{status:200,data:{jsonrpc:'2.0',id:'fixture',result:{isError:false,content:[{type:'text',text:JSON.stringify({...runStates.get('run-confirmed-A'),status:'queued',job_id:'456'})}]}}});
- assert.deepEqual(dispatched.filter(item=>item.name==='submit_cluster_run').map(item=>item.arguments),['run-A','run-confirmed-A'].map(runId=>({run_id:runId,
+ runStates.set('run-auth-A',{id:'run-auth-A',project_id:'project',cluster_id:'cluster-A',status:'ready'});
+ assert.equal((await mutation('A','submit_cluster_run','run-auth-A')).data.operation_state,'not_started');
+ assert.equal(runStates.get('run-auth-A').status,'ready');
+ authenticated=true;assert.equal((await mutation('A','submit_cluster_run','run-auth-A')).status,200);
+ assert.deepEqual(dispatched.filter(item=>item.name==='submit_cluster_run').map(item=>item.arguments),['run-A','run-confirmed-A','run-auth-A','run-auth-A'].map(runId=>({run_id:runId,
   managed_monitor:{schemaVersion:1,sourceId:'worker-A',scope:{provider:f.owner.provider,threadId:f.owner.threadId,taskId:f.owner.taskId,projectId:f.owner.projectId,runId}}})));
  assert.deepEqual(dispatched.map(({resource,name,arguments:args})=>[resource,name,args.require_known??false]),
-  [['A','validate_cluster_run',false],['A','submit_cluster_run',false],['A','cancel_cluster_run',true],['A','submit_cluster_run',false]]);
+  [['A','validate_cluster_run',false],['A','submit_cluster_run',false],['A','cancel_cluster_run',true],['A','submit_cluster_run',false],['A','submit_cluster_run',false],['A','submit_cluster_run',false]]);
 });
 test('a saved display name containing example remains selectable in a concrete queue request',()=>{
  assert.equal(requestsComputeName('查示例甲的队列','示例甲'),true);

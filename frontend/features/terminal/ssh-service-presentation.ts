@@ -66,7 +66,15 @@ export function servicePhaseMessage(phase:unknown){return typeof phase==='string
 export function serviceErrorMessage(code:unknown){return typeof code==='string'&&Object.hasOwn(errorMessages,code)?errorMessages[code]:'未收到完整的接入结果。请重新核对状态，不会自动重连或重发请求。';}
 export function serviceIdentityUnconfirmed(code:unknown){return typeof code==='string'&&['worker_health_invalid','worker_identity_unavailable','identity_unconfirmed','ssh_service_identity_unavailable','ssh_service_runtime_changed'].includes(code);}
 /** Electron may wrap a rejected error. Only a known code selects a fixed message. */
-export function serviceRejectedMessage(error:unknown){const code=String(error).slice(0,4096).match(/\b(?:ssh_service|terminal)_[a-z_]+\b/)?.[0];return serviceErrorMessage(code);}
+export function serviceRejectedCode(error:unknown){
+ const value=error as {code?:unknown;message?:unknown}|null;
+ for(const source of [value?.code,value?.message,String(error)]){
+  const code=String(source??'').slice(0,4096).match(/\b[a-z]+(?:_[a-z]+)+\b/g)?.find(code=>Object.hasOwn(errorMessages,code));
+  if(code)return code;
+ }
+ return '';
+}
+export function serviceRejectedMessage(error:unknown){return serviceErrorMessage(serviceRejectedCode(error));}
 export function serviceTransfer(state:SshServiceState|null){
  const value=state?.progress;
  if(!state||!['transferring_transport','transferring_worker'].includes(state.phase||'')||value?.kind!=='transfer'||!Number.isSafeInteger(value.completedBytes)||!Number.isSafeInteger(value.totalBytes)||value.totalBytes<=0||value.completedBytes<0||value.completedBytes>value.totalBytes)return null;

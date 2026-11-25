@@ -30,7 +30,7 @@ export async function frontendPlanExperienceCases({check,out}){
  }
  const nav=(page,id)=>page.locator('[data-testid="navigate-'+id+'"]:visible');
 
- await check('settings-developer-compute-select-save-disable',async page=>{
+ await check('settings-agent-approval-modes',async page=>{
   await app(page);
   await page.evaluate(()=>{
    const original=window.studio.invoke;
@@ -42,18 +42,48 @@ export async function frontendPlanExperienceCases({check,out}){
   await page.getByRole('button',{name:'设置',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'工作台设置',exact:true});
   await dialog.getByRole('button',{name:'Agent',exact:true}).click();
-  await dialog.getByText('开发人员选项',{exact:true}).click();
-  const mode=dialog.getByTestId('developer-compute-workspace');
-  assert.equal(await mode.inputValue(),'');
-  await mode.selectOption('c'.repeat(64));
+  const mode=dialog.getByTestId('agent-approval-mode'),workspace=dialog.getByTestId('developer-compute-workspace');
+  const save=dialog.getByRole('button',{name:'保存设置',exact:true});
+  const saved=dialog.getByText('设置已保存',{exact:true});
+  const writes=()=>page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').map(c=>[c.data.agentApprovalMode,c.data.developerComputeWorkspaceId]));
+  assert.equal(await mode.inputValue(),'manual');
+  assert.equal(await workspace.count(),0);
+  await mode.selectOption('auto');
+  await save.click();
+  await saved.waitFor();
+  assert.deepEqual((await writes()).at(-1),['auto',null]);
+
+  await mode.selectOption('full');
+  const before=(await writes()).length;
+  await save.click();
+  await dialog.getByText('请为完全权限选择一个已验证的 SSH 工作区。',{exact:true}).waitFor();
+  assert.equal((await writes()).length,before);
+  await workspace.selectOption('c'.repeat(64));
+  await save.click();
+  await saved.waitFor();
+  assert.deepEqual((await writes()).at(-1),['full','c'.repeat(64)]);
+  await shot(page,'agent-approval-settings');
+
+  await mode.selectOption('manual');
+  assert.equal(await workspace.count(),0);
+  await save.click();
+  await saved.waitFor();
+  assert.deepEqual((await writes()).at(-1),['manual',null]);
+  await noExecution(page);
+ });
+
+ await check('settings-agent-approval-legacy-workspace',async page=>{
+  await page.evaluate(()=>{window.__test.settings.developerComputeWorkspaceId='c'.repeat(64);});
+  await app(page);
+  await page.getByRole('button',{name:'设置',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'工作台设置',exact:true});
+  await dialog.getByRole('button',{name:'Agent',exact:true}).click();
+  assert.equal(await dialog.getByTestId('agent-approval-mode').inputValue(),'full');
+  assert.equal(await dialog.getByTestId('developer-compute-workspace').inputValue(),'c'.repeat(64));
+  await dialog.getByText('等待选定的 SSH 工作区重新连接',{exact:true}).waitFor({state:'attached'});
   await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
   await dialog.getByText('设置已保存',{exact:true}).waitFor();
-  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').at(-1).data.developerComputeWorkspaceId),'c'.repeat(64));
-  await shot(page,'developer-compute-settings');
-  await mode.selectOption('');
-  await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
-  await dialog.getByText('设置已保存',{exact:true}).waitFor();
-  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').at(-1).data.developerComputeWorkspaceId),null);
+  assert.equal(await page.evaluate(()=>window.__test.settings.developerComputeWorkspaceId),'c'.repeat(64));
   await noExecution(page);
  });
 

@@ -40,11 +40,12 @@ async discoverTools(id,{refresh=false}={}){
   }
   return {status:200,data:{jsonrpc:'2.0',id,result:{tools:structuredClone(catalog.tools),...(catalog.warnings.length?{_meta:{studioWarnings:catalog.warnings}}:{})}}};
  }
-async exposeTools(health){
-  this.proxy=http.createServer(async(req,res)=>{
+async prepareToolProxy(connection){
+  const proxy=http.createServer(async(req,res)=>{
    // Early rejects must close the connection: the request body is still unread,
    // and a keep-alive client reusing this socket would otherwise get ECONNRESET.
    const reject=(status,value)=>{req.resume();res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','Connection':'close'});res.end(value===undefined?'':JSON.stringify(value));};
+   if(this.connection!==connection){reject(403);return;}
    const scope=this.providerScopes.authenticate({pathname:req.url,authorization:req.headers.authorization,origin:req.headers.origin,host:req.headers.host});
    if(!scope){reject(403);return;}
    if(!['GET','POST'].includes(req.method)){reject(405);return;}
@@ -70,20 +71,27 @@ async exposeTools(health){
     if(independent&&req.method==='GET'){res.writeHead(405,{'Content-Type':'application/json'});res.end();return;}
     if(independent&&body?.method==='notifications/initialized'){res.writeHead(202);res.end();return;}
     const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
-    if(body?.method==='tools/call'&&projectSkill){dispatched=true;response={status:200,data:{jsonrpc:'2.0',id:body.id,result:toolValueResult(await this.projectSkills.call(body.params.name,body.params.arguments||{},scope))}};}else if(independent&&['initialize','ping','resources/list','resources/templates/list'].includes(body?.method)){
+    const localCall=async handler=>{
+     fresh();
+     const value=await handler(body.params.name,body.params.arguments||{},scope);
+     dispatched=true;
+     return toolValueResult(value);
+    };
+    const failure=e=>body.params.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched,toolName:body.params.name});
+    if(body?.method==='tools/call'&&projectSkill){response={status:200,data:{jsonrpc:'2.0',id:body.id,result:await localCall(this.projectSkills.call.bind(this.projectSkills))}};}else if(independent&&['initialize','ping','resources/list','resources/templates/list'].includes(body?.method)){
      const result=body.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{listChanged:false}},serverInfo:{name:'aimatterlab',version:'1.0.0'}}:body.method==='resources/list'?{resources:[]}:body.method==='resources/templates/list'?{resourceTemplates:[]}:{};
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(independent&&body?.method==='tools/list'){
      response=await this.discoverTools(body.id,{refresh:scope.provider===null&&req.headers['x-studio-refresh-tools']==='1'});
     }else if(body?.method==='tools/call'&&scopedTool){
      if(!scope.localReaders){res.writeHead(403);res.end();return;}
-     let result;try{fresh();dispatched=true;const value=await this.scopedHandler(body.params.name,body.params.arguments||{},scope);result=toolValueResult(value);}catch(e){result=body.params.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched});}
+     let result;try{result=await localCall(this.scopedHandler.bind(this));}catch(e){result=failure(e);}
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
     }else if(body?.method==='tools/call'&&(this.localDefinitions||[]).some(t=>t.name===body.params?.name)){
-     let result;try{fresh();dispatched=true;result=toolValueResult(await this.localHandler(body.params.name,body.params.arguments||{},scope));}catch(e){result=toolFailure(e,{dispatched});}
+     let result;try{result=await localCall(this.localHandler.bind(this));}catch(e){result=failure(e);}
      response={status:200,data:{jsonrpc:'2.0',id:body.id,result}};
-    }else if(this.relay){fresh();dispatched=true;response=await this.forward(req.method,'/mcp',body,true);}
-    else{fresh();dispatched=true;const upstream=await fetch(this.upstream+'/mcp',{method:req.method,headers:{Authorization:'Bearer '+this.connection.tokens.mcp,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(245000)});const text=await upstream.text();response={status:upstream.status,data:text?JSON.parse(text):null};}
+    }else if(this.relay){fresh();response=await this.forward(req.method,'/mcp',body,true,245000,()=>{dispatched=true;});dispatched=true;}
+    else{fresh();const payload=body?JSON.stringify(body):undefined;dispatched=true;const upstream=await fetch(this.upstream+'/mcp',{method:req.method,headers:{Authorization:'Bearer '+this.connection.tokens.mcp,'Content-Type':'application/json'},body:payload,signal:AbortSignal.timeout(245000)});const text=await upstream.text();response={status:upstream.status,data:text?JSON.parse(text):null};}
     fresh();
     if(body?.method==='tools/call'&&(response.status!==200||!validToolResponse(response.data,body.id)))throw Error('Tool service returned an unconfirmed response; inspect the existing workflow before continuing');
     if(body?.method==='tools/call'&&!projectSkill)await this.authoringGuard?.after(authoringToken,response.data?.result);
@@ -91,12 +99,17 @@ async exposeTools(health){
     if(body?.method==='tools/list'&&scope.localReaders&&response.data?.result?.tools)response.data.result.tools.push(...(this.projectSkills?.tools()||[]));
     fresh();
     res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(response.data===null?'':JSON.stringify(response.data));
-   });}catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){reject(403);}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched})}));}else{reject(502,{error:e.message});}}
+   });}catch(e){this.authoringGuard?.cancel?.(authoringToken);if(e.staleProviderScope||scope.checkCurrent()!==true){reject(403);}else if(body?.method==='tools/call'&&body.id!==undefined){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.params?.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched,toolName:body.params?.name})}));}else{reject(502,{error:e.message});}}
   });
-  await new Promise((resolve,reject)=>{this.proxy.once('error',reject);this.proxy.listen(0,'127.0.0.1',resolve);});
-  this.connection.url='http://127.0.0.1:'+this.proxy.address().port;
-  this.providerScopes.bind(this.connection);
-  return {...health,transport:this.connection.transport};
+  await new Promise((resolve,reject)=>{proxy.once('error',reject);proxy.listen(0,'127.0.0.1',resolve);});
+  connection.url='http://127.0.0.1:'+proxy.address().port;
+  return proxy;
+ }
+async exposeTools(health){
+  const connection=this.connection,proxy=await this.prepareToolProxy(connection);
+  if(this.connection!==connection){proxy.close();throw Error('Worker connection was superseded');}
+  this.proxy=proxy;this.providerScopes.bind(connection);
+  return {...health,transport:connection.transport};
  }
 async probeTools(){
   if(!this.connection)return {status:'blocked',message:'请先连接 WSL 作业服务',count:0};

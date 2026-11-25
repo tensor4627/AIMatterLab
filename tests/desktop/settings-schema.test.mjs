@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {normalizeSettings,SETTINGS_KEYS} from '../../desktop/settings-schema.mjs';
+import {agentApprovalMode,developerComputeAccess} from '../../backend/main/compute/developer-compute-access.mjs';
 
 const base = {
  distribution:'Ubuntu', workerRoot:'~/.local/state/gpu-sampling-studio', workerPort:8767,
@@ -43,6 +44,27 @@ test('unknown settings keys are rejected instead of being persisted',()=>{
  }
  assert.throws(()=>normalizeSettings(base,'light'),/Invalid settings update/);
  assert.throws(()=>normalizeSettings(null,{theme:'light'}),/Invalid current settings/);
+});
+
+test('Agent approval preferences preserve legacy scope and require an exact hosted workspace for full permissions',()=>{
+ const workspace='a'.repeat(64), other='b'.repeat(64), scope={provider:'codex',threadId:'chat'};
+ let settings=normalizeSettings(base,{developerComputeWorkspaceId:workspace}),human=true;
+ const access=developerComputeAccess({workspaceId:()=>settings.developerComputeWorkspaceId,mode:()=>agentApprovalMode(settings),userTurn:()=>human});
+ assert.equal(agentApprovalMode(base),'manual');
+ assert.equal(access.approvalMode(scope,workspace),'full');
+ assert.equal(access.approvalMode(scope,other),'manual');
+ assert.throws(()=>normalizeSettings(base,{agentApprovalMode:'full'}),/hosted SSH workspace/);
+ assert.throws(()=>normalizeSettings(base,{agentApprovalMode:'always'}),/approval mode/);
+ assert.throws(()=>access.verifyChange(workspace,other,[{kind:'ssh',verificationPending:true,workspace:{workspaceId:other}}]),/currently hosted/);
+ const revision=access.revision(other);
+ settings=normalizeSettings(settings,{agentApprovalMode:'auto',developerComputeWorkspaceId:null});
+ access.changed(workspace,null,{modeChanged:true});
+ assert.equal(access.approvalMode(scope,other),'auto');
+ assert.equal(access.allows(scope,other),false);
+ assert.notEqual(access.revision(other),revision);
+ assert.equal(access.approvalMode(scope,undefined),'manual');
+ human=false;
+ assert.equal(access.approvalMode(scope,other),'manual');
 });
 
 test('invalid known settings values keep their existing validation',()=>{

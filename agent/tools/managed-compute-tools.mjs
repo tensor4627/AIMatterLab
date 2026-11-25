@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {scheduleOwnerId} from '../../desktop/platform/schedule-owner.mjs';
+import {workerRunOperationFailure} from '../../contracts/compute/run-operation-receipt.mjs';
 
 const id={type:'string',minLength:1,maxLength:200};
 const finiteInteger=(minimum,maximum)=>({type:'integer',minimum,maximum});
@@ -27,7 +28,7 @@ const definitions=[
  tool('read_compute_run_status','Observe one run linked to this conversation or its workflow on the acquired service.',schema(runRef,['resource_id','run_id']),true),
  tool('read_compute_run_log','Read a bounded log from one run linked to this conversation or its workflow on the acquired service.',schema({...runRef,name:{enum:['console.log','queue.out','queue.err']},offset:finiteInteger(0,Number.MAX_SAFE_INTEGER)},['resource_id','run_id','name']),true),
  tool('validate_compute_run','Validate one linked immutable run on its original acquired service when the user explicitly requests a check.',schema(runRef,['resource_id','run_id'])),
- tool('submit_compute_run','Submit one linked draft on its original acquired service when the user explicitly requests execution. Observe the original run after an uncertain response.',schema(runRef,['resource_id','run_id'])),
+ tool('submit_compute_run','Submit one linked draft on its original acquired service when the user explicitly requests execution. For a new independent job, use the exact draft prepared for this user turn. Observe the original run after an uncertain response.',schema(runRef,['resource_id','run_id'])),
  {...tool('cancel_compute_run','Request cancellation of one linked run on its original acquired service when the user explicitly requests cancellation. Read status to confirm the result.',schema(runRef,['resource_id','run_id'])),annotations:{readOnlyHint:false,destructiveHint:true}},
  tool('list_task_schedules','List schedules owned by this conversation or its workflow on the acquired service.',schema({resource_id:id},['resource_id']),true),
  tool('task_schedule_status','Read the status of one schedule owned by this conversation or its workflow.',schema(scheduleRef,['resource_id','schedule_id']),true),
@@ -41,6 +42,7 @@ const definitions=[
 ];
 export const MANAGED_SERVICE_TOOL_NAMES=Object.freeze(definitions.map(value=>value.name));
 const byName=new Map(definitions.map(value=>[value.name,value.inputSchema]));
+const readOnlyTools=new Set(definitions.filter(tool=>tool.annotations.readOnlyHint).map(tool=>tool.name));
 const record=value=>value&&typeof value==='object'&&!Array.isArray(value);
 function valid(value,rules){
  if(rules.enum)return rules.enum.includes(value);
@@ -61,18 +63,21 @@ function observedRun(value,{kind,runId,projectId}){
  if(!record(value)||value.id!==runId||value.project_id!==projectId||typeof value.status!=='string'||!value.status||value.status.length>64)throw Error('The observed run does not match this project and original service');
  if(kind==='cluster-run'&&value.kind!==undefined&&value.kind!=='cluster-run'||kind==='run'&&value.kind==='cluster-run')throw Error('The worker returned a different run kind');
  const bounded=value=>typeof value==='string'&&value.length>0&&value.length<=128?value:null;
+ const connection=value.connection_action;
  return {id:value.id,kind,status:value.status,job_id:bounded(value.job_id),
   ...(record(value.validation)?{validation:{status:bounded(value.validation.status)}}:{}),
   ...(record(value.execution_check)?{execution_check:{status:bounded(value.execution_check.status),required:value.execution_check.required===true}}:{}),
   ...(record(value.cancellation)?{cancellation:{status:bounded(value.cancellation.status)}}:{}),
-  ...(typeof value.cancel_requested==='boolean'?{cancel_requested:value.cancel_requested}:{})};
+  ...(typeof value.cancel_requested==='boolean'?{cancel_requested:value.cancel_requested}:{}),
+  ...(kind==='cluster-run'&&connection?.kind==='authenticate_original_run'&&connection.code==='needs_human_auth'&&connection.runId===runId
+    ?{connection_action:{kind:connection.kind,code:connection.code,runId}}:{})};
 }
 function requiresWorkflowReview(task,runId){
  return !!(task.customCv?.id||task.composition||task.inputBinding||task.consumerArtifact||task.consumerStage||task.roadmap||task.deployment?.prepared?.artifactId===runId);
 }
 
 /** The model selects an acquired resource and operation. Main supplies every owner and worker identity. */
-export function createManagedComputeTools({resources,schedules,assertWorkflow,authorizeTask=async()=>{},assertScheduleIntent,assertRunIntent,assertRunSource,onRunObserved=()=>{}}){
+export function createManagedComputeTools({resources,schedules,assertWorkflow,authorizeTask=async()=>{},assertScheduleIntent,assertRunIntent,assertRunSource,captureRunPreparation,onRunObserved=()=>{}}){
  function scheduleIntent(scope,operation,args){
   try{
    const delegation=assertScheduleIntent?.(scope,operation,args);
@@ -115,19 +120,29 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
   if(!Object.entries(inputs).every(([name,file])=>relative(name)&&relative(file)&&selected.has(file)))throw Error('Run inputs must be selected or generated for this exact workflow');
   return inputs;
  }
- async function callWorker(scope,resourceId,assertCurrent,name,args){
+ async function callWorker(scope,resourceId,assertCurrent,name,args,dispatch){
   const rpcId='managed-run-operation',data={jsonrpc:'2.0',id:rpcId,method:'tools/call',params:{name,arguments:args}};
-  const response=await resources.serviceRequest(scope,{resourceId,method:'POST',target:'/mcp',mcp:true,data,timeoutMs:20000,checkCurrent:assertCurrent});
+  const response=await resources.serviceRequest(scope,{resourceId,method:'POST',target:'/mcp',mcp:true,data,timeoutMs:20000,checkCurrent:assertCurrent,onDispatch:dispatch});
   assertCurrent();
-  if(response?.status!==200||response.data?.id!==rpcId||response.data.error||response.data.result?.isError)throw Error('The original worker did not confirm the requested run operation');
+  const failure=workerRunOperationFailure(response,rpcId);
+  if(failure)throw Object.assign(Error(failure.message),{workerFailure:failure});
+  if(response?.status!==200||response.data?.jsonrpc!=='2.0'||response.data.id!==rpcId||response.data.error||response.data.result?.isError)throw Error('The original worker did not confirm the requested run operation');
   const blocks=response.data.result?.content,text=Array.isArray(blocks)&&blocks.length===1&&blocks[0].type==='text'&&blocks[0].text;
   if(typeof text!=='string'||Buffer.byteLength(text)>256*1024)throw Error('The worker reply exceeds the run tool limit');
   try{return JSON.parse(text);}catch{throw Error('The worker returned an invalid run receipt');}
  }
  async function call(name,args,scope){
   if(resources.owns(name))return resources.callTool(name,args,scope);
+  const operation={dispatched:false,readOnly:readOnlyTools.has(name),run:null};
+  try{return await perform(name,args,scope,operation);}catch(error){
+   throw Object.assign(error,{operationDispatched:operation.dispatched,readOnlyOperation:operation.readOnly,...operation.run});
+  }
+ }
+ async function perform(name,args,scope,operation){
   const shape=byName.get(name);
   if(!shape||!valid(args,shape))throw deny('Invalid managed compute tool arguments');
+  const dispatch=()=>{operation.dispatched=true;};
+  const preparation=name==='prepare_compute_run'?captureRunPreparation?.(scope):undefined;
   if(name==='inspect_compute_service'){
    const {assertCurrent}=await checkedOwner(scope,args.resource_id);
    const result=await resources.inspectService(scope,args.resource_id,{probeScheduler:args.probe_scheduler===true});
@@ -143,15 +158,21 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
    const {kind,spec}=args,cluster=kind==='cluster-run';
    if(cluster?!(service.clusterIds||[]).includes(spec.cluster_id)||spec.environment_id!==undefined||spec.gpu!==undefined:!(service.environmentIds||[]).includes(spec.environment_id)||spec.gpu===undefined||spec.cluster_id!==undefined||spec.resources!==undefined)throw Error('Choose the matching authorized environment or cluster and its required run parameters');
    const inputs=runInputs(task,scope,spec.inputs,service);
-   const idempotency_key=createHash('sha256').update(JSON.stringify([scope.provider,scope.threadId,scope.taskId,scope.projectId,sourceId,spec.idempotency_key])).digest('hex');
-   const value=await callWorker(scope,resourceId,assertCurrent,cluster?'prepare_cluster_run':'prepare_run',{spec:{...spec,inputs,project_id:scope.projectId,idempotency_key}});
-   if(!record(value)||typeof value.id!=='string'||value.project_id!==scope.projectId||!['prepared','draft','needs_auth','needs_human_auth'].includes(value.status))throw Error('The original worker did not return an exact prepared draft receipt');
-   if(['prepared','draft'].includes(value.status))await onRunObserved({scope,task,sourceId,resourceId,kind,runId:value.id,observation:observedRun(value,{kind,runId:value.id,projectId:scope.projectId})});
+   const idempotency_key=createHash('sha256').update(JSON.stringify([scope.provider,scope.threadId,scope.taskId,scope.projectId,sourceId,spec.idempotency_key,...preparation?[preparation.turnId]:[]])).digest('hex');
+   const value=await callWorker(scope,resourceId,assertCurrent,cluster?'prepare_cluster_run':'prepare_run',{spec:{...spec,inputs,project_id:scope.projectId,idempotency_key}},dispatch);
+   if(!record(value)||typeof value.id!=='string'||value.project_id!==scope.projectId||!['prepared','draft','ready','needs_auth','needs_human_auth'].includes(value.status))throw Error('The original worker did not return an exact prepared draft receipt');
+   if(['prepared','draft','ready'].includes(value.status)){
+    const entry={scope,task,sourceId,resourceId,kind,runId:value.id,operation:'prepare',observation:observedRun(value,{kind,runId:value.id,projectId:scope.projectId})};
+    const newlyLinked=await onRunObserved(entry);
+    assertCurrent();
+    if(newlyLinked!==false)preparation?.record(entry);
+   }
    assertCurrent();return {id:value.id,kind,status:value.status};
   }
   if(name==='read_compute_run_status'||name==='read_compute_run_log'){
    const kind=anchor(runId),readLog=name==='read_compute_run_log';
-   const value=await callWorker(scope,resourceId,assertCurrent,(readLog?logTools:statusTools)[kind],{run_id:runId,...readLog?{name:args.name,offset:args.offset??0}:{}});
+   operation.run={originalRunId:runId,originalRunKind:kind};
+   const value=await callWorker(scope,resourceId,assertCurrent,(readLog?logTools:statusTools)[kind],{run_id:runId,...readLog?{name:args.name,offset:args.offset??0}:{}},dispatch);
    anchor(runId);
    if(readLog)return value;
    const observation=observedRun(value,{kind,runId,projectId:scope.projectId});
@@ -160,23 +181,25 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
   const runAction=runActions.get(name);
   if(runAction){
    const kind=anchor(runId);
+   operation.run={originalRunId:runId,originalRunKind:kind};
    const checkOperation=()=>{
     assertCurrent();anchor(runId);
     if(typeof assertRunIntent!=='function')throw deny('Explicit authorized human run intent is required');
     if(task&&runAction!=='cancel'&&requiresWorkflowReview(assertWorkflow(scope),runId))throw deny('Use the reviewed workflow execution path for this run');
-    if(assertRunIntent(scope,runAction,args)===false)throw deny('This run operation needs a current instruction from the user');
+    if(assertRunIntent(scope,runAction,args,sourceId)===false)throw deny('This run operation needs a current instruction from the user');
    };
    checkOperation();
    let value;
    try{
-    value=await callWorker(scope,resourceId,checkOperation,runAction+(kind==='cluster-run'?'_cluster_run':'_run'),{run_id:runId});
+    value=await callWorker(scope,resourceId,checkOperation,runAction+(kind==='cluster-run'?'_cluster_run':'_run'),{run_id:runId},dispatch);
    }catch(error){
     if(runAction==='submit'&&kind==='cluster-run')void schedules.refresh?.(sourceId).catch(()=>{});
     throw error;
    }
    const observation=observedRun(value,{kind,runId,projectId:scope.projectId});
    await onRunObserved({scope,task,sourceId,resourceId,kind,runId,operation:runAction,observation});
-   assertCurrent();return observation;
+   assertCurrent();return observation.status==='unknown'?{...observation,operation_state:'unconfirmed',automatic_retry:false,
+    next_step:'Read the status of this exact original run before another write.'}:observation;
   }
   const owner={provider:scope.provider,threadId:scope.threadId,taskId:scheduleOwnerId(scope),projectId:scope.projectId};
   const current=()=>schedules.snapshot().sources.find(source=>source.id===sourceId)?.schedules.filter(item=>scheduleOwner(item,sourceId,owner))||[];
@@ -184,7 +207,7 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
    assertCurrent();
    const observed=await resources.resolveService(scope,resourceId);
    if(observed?.sourceId!==sourceId)throw deny('The acquired resource changed its original service identity');
-   const result=await resources.serviceRequest(scope,{resourceId,method,target,data,checkCurrent:assertCurrent,beforeScheduleDispatch});
+   const result=await resources.serviceRequest(scope,{resourceId,method,target,data,checkCurrent:assertCurrent,beforeScheduleDispatch,onDispatch:dispatch});
    assertCurrent();
    if(result?.status!==200)throw Error('The original service did not confirm the schedule request');
    return result.data;

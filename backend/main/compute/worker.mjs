@@ -7,21 +7,52 @@ import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {defaultWorkerResourceSource} from './worker-resources.mjs';
 import { linuxPath, assertWorkerRoute } from "../../../contracts/transport-policy.mjs";
+import {runOperationFailure} from '../../../contracts/compute/run-operation-receipt.mjs';
+const requestRejected=message=>Object.assign(Error(message),{operationNotStarted:true});
+function workerRequestError(value){
+ const receipt=runOperationFailure(value),error=Error(value?.error||receipt?.message||'Worker request failed');
+ if(receipt?.operation_state==='not_started')error.operationNotStarted=true;
+ if(receipt)error.workerFailure=receipt;
+ return error;
+}
+function serviceAttachment({health,identity,target,request,detach,source}){
+ if(health?.name!=='gpu-sampling-studio'||health.execution_policy!=='desktop-review-v1'||identity?.kind!=='ssh'||typeof identity.root!=='string'||health.root!==identity.root||typeof request!=='function'||!identity.hostIdentity||!Number.isSafeInteger(identity.hostIdentity.uid)||!identity.hostIdentity.hostname||!identity.hostIdentity.machineId)throw Error('ssh_service_identity_unavailable');
+ // The credential is confined to the desktop proxy. The SSH channel carries no worker tokens.
+ const connection={url:'http://127.0.0.1',tokens:{mcp:randomBytes(32).toString('hex')},health:structuredClone(health),transport:identity.version===3&&identity.connectionId?'ssh-connection':'ssh-terminal'};
+ return {connection,identity:structuredClone(identity),connectionTarget:structuredClone(target),connectedSource:source,serviceTransport:{request,detach},relay:{kill:()=>{try{detach?.();}catch{}}}};
+}
+function checkedServiceHealth(observed,health,identity){
+ const actual=observed?.data,host=actual?.hostIdentity;
+ if(observed?.status!==200||actual?.name!==health.name||['root','runtime','execution_policy','port'].some(key=>actual?.[key]!==health[key])||(actual?.runtime_id||actual?.runtimeId)!==identity.runtimeId||['hostname','uid','machineId'].some(key=>host?.[key]!==identity.hostIdentity[key]))throw Error('ssh_service_identity_changed');
+ return actual;
+}
 export class WorkerClient {
  constructor({host=computeRuntime,resourceSource=defaultWorkerResourceSource,providerScopes,readExisting=settings=>readExistingWorker(settings,{execute:host.execute}),launchRelay=host.spawnProcess}={}){Object.defineProperty(this,'resourceSource',{value:resourceSource});this.pending=new Map();this.next=1;this.host=host;this.providerScopes=providerScopes||{revokeAll(){}};this.connectionEpoch=0;this.bindingIntent=0;this.readExisting=readExisting;this.launchExistingRelay=launchRelay;}
  async exposeTools(health){return {...health,transport:this.connection.transport};}
- async attachServiceTransport({health,identity,target,request,detach,source}){
-  if(health?.name!=='gpu-sampling-studio'||health.execution_policy!=='desktop-review-v1'||identity?.kind!=='ssh'||typeof identity.root!=='string'||health.root!==identity.root||typeof request!=='function'||!identity.hostIdentity||!Number.isSafeInteger(identity.hostIdentity.uid)||!identity.hostIdentity.hostname||!identity.hostIdentity.machineId)throw Error('ssh_service_identity_unavailable');
+ async attachServiceTransport(options){
+  const {health,identity}=options,attachment=serviceAttachment(options),{serviceTransport:transport}=attachment;
   this.close();const epoch=this.connectionEpoch;
-  const transport={request,detach};this.serviceTransport=transport;
-  // These capabilities protect the local provider proxy only. Remote worker
-  // admin/MCP credentials never cross the authenticated SSH machine channel.
-  this.connection={url:'http://127.0.0.1',tokens:{mcp:randomBytes(32).toString('hex')},health:structuredClone(health),transport:identity.version===3&&identity.connectionId?'ssh-connection':'ssh-terminal'};
-  this.identity=structuredClone(identity);this.connectionTarget=structuredClone(target);this.connectedSource=source;
-  this.relay={kill:()=>{try{detach?.();}catch{}}};
+  Object.assign(this,attachment);
   const check=()=>{if(this.serviceTransport!==transport||this.connectionEpoch!==epoch)throw Error('ssh_service_context_changed');};
-   try{const observed=await this.forward('GET','/api/health',undefined,false,10000);check();const actual=observed.data,host=actual?.hostIdentity;if(observed.status!==200||actual?.name!==health.name||['root','runtime','execution_policy','port'].some(key=>actual?.[key]!==health[key])||(actual?.runtime_id||actual?.runtimeId)!==identity.runtimeId||['hostname','uid','machineId'].some(key=>host?.[key]!==identity.hostIdentity[key]))throw Error('ssh_service_identity_changed');const exposed=await this.exposeTools({...actual,transport:this.connection.transport});check();return exposed;}
+   try{const observed=await this.forward('GET','/api/health',undefined,false,10000);check();const actual=checkedServiceHealth(observed,health,identity);const exposed=await this.exposeTools({...actual,transport:this.connection.transport});check();return exposed;}
   catch(error){if(this.serviceTransport===transport)this.close();throw error;}
+ }
+ async prepareServiceTransport(options){
+  const attachment=serviceAttachment(options),{connection}=attachment,epoch=this.connectionEpoch,intent=this.bindingIntent,previous=this.connection;
+  let prepared=true,proxy;
+  const assertCurrent=()=>{if(!prepared||this.connectionEpoch!==epoch||this.bindingIntent!==intent||this.connection!==previous)throw Error('ssh_service_context_changed');};
+  const dispose=()=>{if(prepared){prepared=false;proxy?.close();}};
+  try{
+   const observed=await options.request({method:'GET',path:'/api/health',mcp:false,timeoutMs:10000});
+   assertCurrent();checkedServiceHealth(observed,options.health,options.identity);
+   proxy=await this.prepareToolProxy?.(connection);
+   assertCurrent();
+   return {dispose,commit:select=>{
+    assertCurrent();select();
+    this.close();Object.assign(this,attachment);this.proxy=proxy;this.providerScopes.bind?.(connection);
+    prepared=false;return connection;
+   }};
+  }catch(error){dispose();throw error;}
  }
  async connect(settings,source){
   const key=JSON.stringify([settings.distribution,settings.workerRoot,settings.workerPort,!!settings.forceRelay,source]);
@@ -103,35 +134,41 @@ export class WorkerClient {
   })().finally(()=>{if(this.restoring===pending)this.restoring=null;});this.restoring=pending;return pending;
  }
  matchesTarget(settings){return this.identity?.distribution===settings.distribution&&(this.identity.root===settings.workerRoot||this.connectionTarget?.requestedRoot===settings.workerRoot)&&this.connectionTarget?.port===settings.workerPort;}
- forward(method,target,data,mcp=false,timeout=245000){
+ forward(method,target,data,mcp=false,timeout=245000,onDispatch){
   if(this.serviceTransport){
    const transport=this.serviceTransport,epoch=this.connectionEpoch;
    const check=()=>{if(this.serviceTransport!==transport||this.connectionEpoch!==epoch)throw Error('ssh_service_context_changed');};
-   return Promise.resolve().then(()=>{check();return transport.request({method,path:target,data,mcp,timeoutMs:timeout});}).then(value=>{
+   return Promise.resolve().then(()=>{check();onDispatch?.();return transport.request({method,path:target,data,mcp,timeoutMs:timeout});}).then(value=>{
     check();if(!Number.isInteger(value?.status)||value.status<100||value.status>599)throw Error('ssh_service_invalid_response');return value;
    });
   }
   return new Promise((resolve,reject)=>{
-   const id=this.next++,timer=setTimeout(()=>{this.pending.delete(id);reject(Error('Worker request timed out'));},timeout);
+   const relay=this.relay;
+   if(!relay?.stdin||relay.stdin.destroyed){reject(requestRejected('Verified WSL relay is unavailable'));return;}
+   const id=this.next++,payload=JSON.stringify({id,method,target,data,mcp})+'\n';
+   const timer=setTimeout(()=>{this.pending.delete(id);reject(Error('Worker request timed out'));},timeout);
    this.pending.set(id,{resolve,reject,timer});
-   try{this.relay.stdin.write(JSON.stringify({id,method,target,data,mcp})+'\n');}catch(e){clearTimeout(timer);this.pending.delete(id);reject(e);}
+   try{onDispatch?.();relay.stdin.write(payload);}catch(e){clearTimeout(timer);this.pending.delete(id);reject(e);}
   });
  }
  async request(method, target, data) {
-  assertWorkerRoute(method, target);
-  if (!this.connection) throw new Error('Connect the WSL worker first');
+  try{assertWorkerRoute(method,target);}catch(error){throw requestRejected(error.message);}
+  if (!this.connection) throw requestRejected('Connect the WSL worker first');
   if(this.relay){
-   const result=await this.forward(method,target,data,false,method==='GET'?12000:245000);
-   if(result.status!==200)throw Error(result.data?.error||'Worker request failed');
+   let dispatched=false,result;
+   try{result=await this.forward(method,target,data,false,method==='GET'?12000:245000,()=>{dispatched=true;});}
+   catch(error){if(!dispatched)error.operationNotStarted=true;else if(error.operationNotStarted!==true)error.operationDispatched=true;throw error;}
+   if(result.status!==200)throw workerRequestError(result.data);
    return result.data;
   }
-  const response = await fetch(this.upstream + target, {
-    method, headers: { Authorization: 'Bearer ' + this.connection.tokens.admin,'Content-Type':'application/json' },
-    body: method === 'POST' ? JSON.stringify(data ?? {}) : undefined,signal: AbortSignal.timeout(method==='GET'?12000:240000)
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'Worker request failed');
-  return result;
+  const payload=method==='POST'?JSON.stringify(data??{}):undefined;
+  try{
+   const response=await fetch(this.upstream+target,{method,headers:{Authorization:'Bearer '+this.connection.tokens.admin,'Content-Type':'application/json'},
+    body:payload,signal:AbortSignal.timeout(method==='GET'?12000:240000)});
+   const result=await response.json();
+   if(!response.ok)throw workerRequestError(result);
+   return result;
+  }catch(error){if(error.operationNotStarted!==true)error.operationDispatched=true;throw error;}
  }
  reject(error){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(error);}this.pending.clear();}
  close(error){

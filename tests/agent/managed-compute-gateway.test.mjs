@@ -13,14 +13,14 @@ function fixture({runIntent,protectedTask=false,supportsManagedSchedules=true}={
   owns:()=>false,tools:()=>[],
   resolveService:async(_scope,id)=>({sourceId:id==='ssh:target-b'?'source-b':'source-a',environmentIds:['env'],clusterIds:['cluster'],supportsManagedSchedules}),
   serviceRequest:async(_scope,request)=>{
-   request.checkCurrent();serviceCalls.push(request);
+   request.checkCurrent();request.onDispatch?.();serviceCalls.push(request);
    const {id,params}=request.data;
    const result={id:params.arguments.run_id||'new-draft',project_id:'project-a',status:'running'};
    if(params.name.startsWith('prepare'))result.status='draft';
    if(params.name.startsWith('validate'))Object.assign(result,{status:'ready',validation:{status:'passed',paths:['/unrelated']}});
    if(params.name.startsWith('submit'))Object.assign(result,{status:'queued',job_id:'90017'});
    if(params.name.startsWith('cancel'))Object.assign(result,{cancel_requested:true,cancellation:{status:'requested'}});
-   return {status:200,data:{id,result:{isError:false,content:[{type:'text',text:JSON.stringify(result)}]}}};
+   return {status:200,data:{jsonrpc:'2.0',id,result:{isError:false,content:[{type:'text',text:JSON.stringify(result)}]}}};
   }
  };
  const original={id:'schedule-b',kind:'poll',sourceId:'source-b',revision:3,scope:owner,key:'poll',delegationId:delegation};

@@ -54,7 +54,7 @@ export class AgentHub extends EventEmitter{
  workerFor(provider){const worker=this.getWorker(provider);if(worker)this.bridgeWorkers.set(provider,worker);else this.bridgeWorkers.delete(provider);return worker;}
  async startCodex(config=agentConfig(this.preferences('codex'))){
   const executable=this.path('codex');let worker=this.workerFor('codex');
-  const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config])).digest('hex');
+   const key=this.codex.connectionKey?.(executable,worker,config)??createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config])).digest('hex');
   if(this.codex.process&&this.codex.contextKey&&this.codex.contextKey!==key){this.disconnect('codex',{preserveConnectIntent:true});worker=this.workerFor('codex');}
   try{return await this.codex.start(executable,worker,config);}catch(error){this.release('codex');throw error;}
  }
@@ -85,7 +85,9 @@ export class AgentHub extends EventEmitter{
    let binding=first;
    const kimiProfile=provider==='kimi'&&this.bridge(provider)?.profile;
    const promptChanged=kimiProfile?.instructions!==undefined&&kimiProfile.instructions!==this.instructions;
-   if((first.rotated||promptChanged)&&wasConnected){
+    const codexApprovalChanged=provider==='codex'&&this.bridgeWorkers.has(provider)&&!this.blankThreads.has(context.threadId)&&
+     typeof this.codex.managedApprovalEnabled==='function'&&this.codex.managedApprovalAttached!==this.codex.managedApprovalEnabled();
+    if((first.rotated||promptChanged||codexApprovalChanged)&&wasConnected){
     const bridge=this.bridge(provider),models=['deepseek','compatible','qwen'].includes(provider)?{models:[...(bridge.models||[])],model:bridge.model}:null;
     this.closeForContext(provider); // close may revoke; only mint the new process lease after close.
     binding=this.bindWorkerContext(provider,context,{allowInitialFill:false});

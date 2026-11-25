@@ -93,14 +93,14 @@ test('closing the visible shell during service startup does not invalidate that 
 test('closing the whole connection during startup fences its late acknowledgement without changing another pipeline',async t=>{const f=fixture(t),gate=deferred(),entered=deferred(),open=f.connections.openService;f.connections.openService=async(...args)=>{entered.resolve();await gate.promise;return open(...args);};const pending=f.connect();await entered.promise;f.service.connectionClosed('A');gate.resolve();await assert.rejects(pending,/context_changed/);assert.equal(f.service.peek().status,'disconnected');assert.equal(f.worker.connection??null,null);});
 
 function resourceHandler(method,calls){
- const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'utf8'),tree=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);let callback,idleGuard,changeResource;
- function visit(node){if(ts.isFunctionDeclaration(node)&&node.name?.text==='assertLegacyWorkerIdle')idleGuard=node.getText(tree);if(ts.isFunctionDeclaration(node)&&node.name?.text==='changeComputeResource')changeResource=node.getText(tree);if(ts.isCallExpression(node)&&ts.isIdentifier(node.expression)&&node.expression.text==='handle'){const route=node.arguments[0];if(route&&ts.isBinaryExpression(route)&&ts.isStringLiteral(route.left)&&route.left.text==='compute.resource.'&&ts.isIdentifier(route.right)&&route.right.text==='method')callback=node.arguments[1].getText(tree);}ts.forEachChild(node,visit);}visit(tree);assert(callback);assert(idleGuard);assert(changeResource);
+ const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'utf8'),tree=ts.createSourceFile('main.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);let callback,idleGuard,changeResource,publishResource;
+ function visit(node){if(ts.isFunctionDeclaration(node)&&node.name?.text==='assertLegacyWorkerIdle')idleGuard=node.getText(tree);if(ts.isFunctionDeclaration(node)&&node.name?.text==='changeComputeResource')changeResource=node.getText(tree);if(ts.isFunctionDeclaration(node)&&node.name?.text==='publishComputeResourceChange')publishResource=node.getText(tree);if(ts.isCallExpression(node)&&ts.isIdentifier(node.expression)&&node.expression.text==='handle'){const route=node.arguments[0];if(route&&ts.isBinaryExpression(route)&&ts.isStringLiteral(route.left)&&route.left.text==='compute.resource.'&&ts.isIdentifier(route.right)&&route.right.text==='method')callback=node.arguments[1].getText(tree);}ts.forEachChild(node,visit);}visit(tree);assert(callback);assert(idleGuard);assert(changeResource);assert(publishResource);
  let revision=0,selection={schemaVersion:2,kind:'ssh-connection',connectionId:'A',profileId:'profile-A',profileVersion:1};
  const computeResource={capture:()=>({revision,selection}),activate:async v=>{calls.push(['activate',v]);selection=v;revision++;return v;},clear:async v=>{calls.push(['clear',v]);selection=null;revision++;return v;}},sshService={resourceChanged:async()=>calls.push(['detach-local-only']),disconnect:()=>assert.fail('Resource selection cannot disconnect remote service')};
  const ports={method,agents:{turnStates:()=>[],active:'codex'},sshService,computeResource,
   conversationTerminals:{detachConnection:id=>calls.push(['detach-legacy-shells',id])},worker:{revokeProvider:p=>calls.push(['revoke-service',p])},
   terminalMcp:{revokeProvider:p=>calls.push(['revoke-shell-scope',p])},emit:()=>{},scientificTools:async()=>({})};
- return new Function(...Object.keys(ports),idleGuard+'\n'+changeResource+'\nreturn ('+callback+');')(...Object.values(ports));
+ return new Function(...Object.keys(ports),idleGuard+'\n'+publishResource+'\n'+changeResource+'\nreturn ('+callback+');')(...Object.values(ports));
 }
 for(const method of ['activate','clear'])test('actual main '+method+' revokes only local usage without a remote stop prerequisite',async()=>{const calls=[];await resourceHandler(method,calls)(method==='activate'?{schemaVersion:2,kind:'ssh-connection',connectionId:'B',profileId:'profile-B',profileVersion:1}:{selectionId:'selection'});assert.equal(calls[0][0],method);assert.deepEqual(calls.filter(v=>v[0]==='detach-legacy-shells'),[['detach-legacy-shells','A']]);assert.equal(calls.filter(v=>v[0]==='detach-local-only').length,1);assert.equal(calls.filter(v=>v[0]==='revoke-service').length,5);});
 });
@@ -123,12 +123,13 @@ function findIdleGuard(node){
  if(ts.isFunctionDeclaration(node)&&node.name?.text==='assertLegacyWorkerIdle')return node;
  return ts.forEachChild(node,findIdleGuard);
 }
-function findChangeComputeResource(node){
- if(ts.isFunctionDeclaration(node)&&node.name?.text==='changeComputeResource')return node;
- return ts.forEachChild(node,findChangeComputeResource);
+function findFunction(node,name){
+ if(ts.isFunctionDeclaration(node)&&node.name?.text===name)return node;
+ return ts.forEachChild(node,child=>findFunction(child,name));
 }
 const idleGuard=findIdleGuard(tree);assert(idleGuard,'actual workbench worker idle guard');
-const changeResourceFn=findChangeComputeResource(tree);assert(changeResourceFn,'actual compute resource switch function');
+const publishResourceFn=findFunction(tree,'publishComputeResourceChange');assert(publishResourceFn,'actual compute resource change publisher');
+const changeResourceFn=findFunction(tree,'changeComputeResource');assert(changeResourceFn,'actual compute resource switch function');
 function mount(route,{selected,resourceStatus,service,worker,serviceStatus='connected',usesLegacyWorker=false}={}){
  const calls=[],handlers=new Map();let selection=selected,revision=1;
  const peer={provider:'kimi',threadId:'parallel-chat',busy:true,sessionId:'peer-session'};
@@ -153,7 +154,7 @@ function mount(route,{selected,resourceStatus,service,worker,serviceStatus='conn
   emit:()=>calls.push('emit'),handle:(name,handler)=>handlers.set(name,handler)
  };
  if(worker){worker.connect=async()=>{calls.push('connect-worker');return 'worker';};}
- const run=new Function(...Object.keys(ports),idleGuard.getText(tree)+'\n'+changeResourceFn.getText(tree)+'\n'+resourceRegistrations()+'\nreturn ('+callback(route)+');')(...Object.values(ports));
+ const run=new Function(...Object.keys(ports),idleGuard.getText(tree)+'\n'+publishResourceFn.getText(tree)+'\n'+changeResourceFn.getText(tree)+'\n'+resourceRegistrations()+'\nreturn ('+callback(route)+');')(...Object.values(ports));
  return {calls,run,peerScope,selection:()=>selection,clear:()=>handlers.get('compute.resource.clear')({selectionId:selection.selectionId})};
 }
 for(const route of ['compute.connection.connect','worker.connect'])for(const state of ['connected','unknown','legacy'])test('actual '+route+' requires explicit resource clear for selected '+state+' SSH and never stops it',async()=>{

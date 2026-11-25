@@ -173,28 +173,49 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     const config = {scope, ref, guard, root, cwd};
     const execute = async (mode, args, dispatchGuard=guard) => {
       dispatchGuard();
-      if (!observations.has(mode)) beforeMutation?.();
-      const response = await connections.runWorkspaceCommand({connectionId:ref.connectionId, profileId:ref.profileId, profileVersion:ref.profileVersion, root, cwd, identity, mode, args}, dispatchGuard);
-      dispatchGuard();
-      if (!response || !['result','outside','destructive','changed','unavailable','submission_unconfirmed'].includes(response.status) || !Number.isInteger(response.code) || typeof response.output !== 'string') throw Error('ssh_workspace_unconfirmed');
-      if (response.status === 'changed') throw Error('ssh_workspace_changed');
-      return response;
+      const mutates=!observations.has(mode);
+      if (mutates) beforeMutation?.();
+      let received=false;
+      try {
+        const response = await connections.runWorkspaceCommand({connectionId:ref.connectionId, profileId:ref.profileId, profileVersion:ref.profileVersion, root, cwd, identity, mode, args}, dispatchGuard);
+        received=true;
+        dispatchGuard();
+        if (!response || !['result','outside','destructive','changed','unavailable','submission_unconfirmed'].includes(response.status) || !Number.isInteger(response.code) || typeof response.output !== 'string') throw Error('ssh_workspace_unconfirmed');
+        if (response.status === 'changed') throw Object.assign(Error('ssh_workspace_changed'),{operationDispatched:false});
+        return response;
+      } catch(error) {
+        error.operationDispatched=mutates&&(error.operationDispatched??(received||!error.operationNotStarted));
+        throw error;
+      }
     };
     let {mode, args, paths, reason, scheduler} = classifyWorkspaceCommand(command, root, cwd);
-    const initialMode=mode;
-    let commands = [command], response;
-    const development=developerCompute?.allows(scope,registered.workspaceId)===true;
+    const commands = [command];
+    let response, replacement;
+    const approvalMode=developerCompute?.approvalMode(scope,registered.workspaceId)??'manual';
+    const full=approvalMode==='full';
+    const automaticGuard=()=>{
+      guard();
+      if(developerCompute?.approvalMode(scope,registered.workspaceId)!==approvalMode)fail('ssh_terminal_approval_changed');
+    };
+    const replacementArgs=(result,mode,args)=>{
+      if (!(approvalMode==='auto'||full)||!inside(root,cwd)||result.status!=='destructive') return;
+      const destination=result.output.replace(/\r?\n$/,'');
+      if (!absoluteWorkspace(destination)||!inside(root,destination)) return;
+      if (mode==='write') return [destination,'write',args[1]];
+      if (mode==='copy'||mode==='copy_target') return [destination,'copy',args[0]];
+    };
     // File mutations inside the selected workspace can use the same kernel-enforced
     // boundary as other workspace programs. Scheduler cancellations affect external state.
-    const confinedMutation=()=>development&&reason==='destructive'&&inside(root,cwd)&&
+    const confinedMutation=()=>full&&reason==='destructive'&&inside(root,cwd)&&
       paths.every(item=>inside(root,item))&&/^(?:rm|rmdir|unlink|mv|truncate|chmod)\s/.test(command)&&
       words(command)?.slice(1).filter(item=>!item.startsWith('-')).every(item=>!item.startsWith('~')&&inside(root,absolute(cwd,item)));
     if(mode==='cwd'&&args[0]==='-'){
       if(!entry.previousCwd)return {accepted:true,execution_status:'failed',exit_code:1,output:'No previous directory for this terminal.',cwd};
       args=[entry.previousCwd];
     }
-    if (reason === 'unverified_effects' || confinedMutation()) {
-      response = await execute('confined', args);
+    const fullMutation=confinedMutation();
+    if (reason === 'unverified_effects' || fullMutation) {
+      response = await execute('confined', args,fullMutation?automaticGuard:guard);
       if (response.status === 'result' && ['landlock','bubblewrap'].includes(response.confinement)) reason = null;
       else if (response.status !== 'unavailable') fail('ssh_workspace_unconfirmed');
     }
@@ -224,6 +245,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
         // copy lane canonicalizes again, checks containment and never clobbers.
         mode='copy';args=[source,destination];paths=[destination];
       }else if(['outside','destructive'].includes(observation.status)){
+        replacement=replacementArgs(observation,mode,args);
         reason=observation.status==='outside'?'outside_workspace':'destructive';
         paths=[...new Set([...paths,observation.output.trim()])];mode='approved';args=[command];
       }else return {accepted:true,execution_status:'failed',exit_code:observation.code,output:observation.output,cwd};
@@ -231,20 +253,20 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     if (!reason && !response) {
       response = await execute(mode, args);
       if (['outside','destructive'].includes(response.status)) {
+        replacement=replacementArgs(response,mode,args);
         reason = response.status === 'outside' ? 'outside_workspace' : 'destructive';
         paths = [...new Set([...paths, response.output.trim()])];
         mode='approved';args=[command];
       }
     }
-    if(development&&reason==='destructive'&&inside(root,cwd)&&paths.every(item=>inside(root,item))&&
-       mode==='approved'&&['write','copy','copy_target'].includes(initialMode)){
-      const result=await execute('confined',[command]);
+    if (replacement) {
+      const result=await execute('confined_overwrite',replacement,automaticGuard);
       if(result.status==='result'&&['landlock','bubblewrap'].includes(result.confinement)){response=result;reason=null;}
       else if(result.status!=='unavailable')fail('ssh_workspace_unconfirmed');
     }
-    if(development&&reason==='independent_job'&&commands.length===2&&workspaceJobDirectives(commands[1],scheduler)){
-      // The remote helper reserves this exact script before submission, including in developer mode.
-      response=await execute('job',[...args,uuid()]);
+    if(full&&reason==='independent_job'&&commands.length===2&&workspaceJobDirectives(commands[1],scheduler)){
+      // The remote helper reserves this exact script before submission, including in full mode.
+      response=await execute('job',[...args,uuid()],automaticGuard);
       reason=null;
     }
     if (reason) {
@@ -330,7 +352,17 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
           if (catalog.transaction) catalog.transaction(save); else save();
           claimed = true;
         };
-        const result = await run({scope,ref,guard,entry,registered,command:input.command,beforeMutation});
+        let result;
+        try {
+          result = await run({scope,ref,guard,entry,registered,command:input.command,beforeMutation});
+        } catch(error) {
+          if (claimed&&(error.operationDispatched===false||error.operationDispatched!==true&&error.operationNotStarted===true)) {
+            try {
+              if(catalog.remove){catalog.remove('ssh-command-receipt',receiptId);entry.requests.delete(input.requestId);}
+            } catch { /* Keep the reservation if the local store cannot clear it. */ }
+          }
+          throw error;
+        }
         if (claimed) {
           const {accepted,execution_status,exit_code,job_id,approval_status} = result;
           try {
@@ -362,6 +394,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     input:({sessionId,ownerEpoch,...params})=>operate({...params,channel:['terminal',sessionId,ownerEpoch]}),
     execute:({leaseId,requestId,command,...params})=>operate({...params,channel:['command',leaseId],input:{requestId,command}}),
     pending, decide, activity,
+    revalidatePending() { for (const row of [...approvals.values()]) try { row.guard(); } catch { settle(row, 'changed'); } },
     revokeConnection(connectionId) { for (const row of [...approvals.values()]) if (row.view.connectionId === connectionId) settle(row, 'changed'); },
     forget(provider, threadId) {
       const target = owning({provider, threadId});

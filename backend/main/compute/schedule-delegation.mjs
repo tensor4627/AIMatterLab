@@ -131,10 +131,15 @@ export function createScheduleDelegations(catalog) {
 }
 
 const runCommands={
-  submit:/^(?:submit|enqueue|launch|start|run)\b|^(?:(?:把|将|在|对|用).{1,100}?)?(?:提交|投递|启动|运行|交(?=(?:一?[个份项]|独立|作业|任务)))/iu,
+  submit:/^(?:(?:use|using)\s+.{1,100}?(?:\s+and|,)\s+)?(?:submit|enqueue|launch|start|run)\b|^(?:(?:把|将|在|对|用|使用).{1,100}?)?(?:提交|投递|启动|运行|跑|交(?=(?:一?[个份项]|独立|作业|任务)))/iu,
   cancel:/^(?:cancel|stop|abort|terminate)\b|^(?:(?:把|将|在|对).{1,100}?)?(?:取消|撤销|停止|终止)/iu,
   validate:/^(?:validate|verify|check)\b|^(?:(?:把|将|在|对).{1,100}?)?(?:核验|核对|验证|检查)/iu,
 };
+const noRun=/\b(?:do not|don['’]t|never|without|avoid|no)\s+(?:(?:actually|yet|automatically|really|directly)\s+|(?:before|until)\s+[^,;.!?]{0,48}\s+)*(?:submit(?:ting)?|submission|enqueue|launch(?:ing)?|start(?:ing)?|run(?:ning)?|execut(?:e|ing|ion))\b|(?:不|不要|先别|不再|请勿|不必|不需要|不准|禁止|不用|无需|暂不|暂缓|别)\s*(?:(?:在[^，,。；;!?]{0,36}(?:之前|以前|前)|再|实际|真的|自动|直接|现在|立刻|立即)\s*)*(?:提交|投递|启动|运行|执行|跑)/iu;
+const humanHold=/\b(?:wait|hold off)\b[^.!?;]{0,48}\b(?:i |we |my |our |user )?(?:approve|approval|confirm|confirmation)\b|\b(?:until|unless)\s+(?:i|we|the user)\s+(?:approve|confirm)\b|(?:等|待|收到|在)\s*(?:我|我们|用户|人工|人类)(?:的|亲自|明确)?\s*(?:确认|批准|同意).{0,18}(?:后|再|之前)/iu;
+const draftOnly=/\b(?:only|just)\s+(?:prepare|draft|stage|show|generate|preview)\b|\b(?:prepare|stage|draft)\b[^.!?]{0,60}\bonly\s*$|(?:只|仅|暂且)(?:先|需|需要)?\s*(?:准备|生成|写|拟|预览|给出)|(?:草稿|方案|步骤|命令)(?:就好|即可|就行)/iu;
+const nonExecutionObject=/^(?:through\b|by\s+(?:check|read|list|observ|inspect)\w*\b|dry[ -]?run\b|examples?\b|流程演示|模拟提交|模拟运行|演示|示例|步骤|命令|方案|说明)|\bread[ -]only\b|\b(?:queue|environment|worker|service|connection|dependency|installation|version)\s+(?:check|status|query|list|setup|verification|inspection|configuration|probe|observation)\b|只读|查队列|队列(?:检查|查询|状态)|环境(?:配置|检查|设置)|版本检查/iu;
+const runObject=/\b(?:jobs?|runs?|workloads?|simulations?|benchmarks?|tests?|calculations?|drafts?|gpumd|pydyn|hotpp|pygas|torchnep)\b|(?:作业|任务|短测|测试|模拟|基准|计算|草稿)/iu;
 
 function runCommand(text,operation) {
   const match=runCommands[operation].exec(text);
@@ -143,7 +148,8 @@ function runCommand(text,operation) {
   if(operation==='cancel'&&(monitorCommand.test(object)||scriptCommand.test(object)||scriptSubject.test(object)))return false;
   if(operation==='submit'&&(
     /^(?:(?:launch|start|run)\b\s*(?:(?:the|this|a|an)\s+)?(?:monitoring|polling|scheduled?|watching)\b|(?:启动|运行)(?:定时|巡检|轮询|监控))/iu.test(text)
-    ||scriptCommand.test(text)
+    ||scriptCommand.test(text)||nonExecutionObject.test(object)||noRun.test(text)
+    ||!runObject.test(object)&&!explicitRunSelectors(text,operation).length
   ))return false;
   return operation!=='validate'||!readStatus.test(text);
 }
@@ -160,6 +166,14 @@ function explicitRunSelectors(text,operation) {
   if(id&&(/^(?:(?:run|job)[_-][a-z0-9]|[a-f0-9]{16,}$|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$)/iu.test(id)
     ||object!==subject&&/^\d+$/u.test(id)))selectors.push(id);
   return selectors;
+}
+
+function requestsFreshRun(text) {
+  if(explicitRunSelectors(text,'submit').length)return false;
+  const verb=runCommands.submit.exec(text);
+  const object=text.slice(verb[0].length).trim();
+  return /^(?:one|a|an|another|new|fresh|independent)\s+\S/iu.test(object)||
+    /^(?:一个|一次|一项|一条|一份|另一个|另一次|新的?|独立)\s*\S/u.test(object);
 }
 
 function mentionsRun(text,id) {
@@ -202,25 +216,42 @@ export function createRunActionIntents() {
   const turns=new Map();
   function record({provider,threadId,projectId,taskId,text,turnId}) {
     if(!threadId)return;
-    // Retain the latest real user wording in memory only, for disambiguating exact run ids.
-    turns.set(keyOf(provider,threadId),{projectId,taskId,text:text.slice(0,12000),turnId});
+    const wording=typeof text==='string'?text.slice(0,12000).replace(/```[\s\S]*?(?:```|$)/gu,'').replace(/^\s*>[^\n]*/gmu,''):'';
+    const parts=sentences(wording);
+    const clauses=parts.filter(part=>!contingent.test(part))
+      .flatMap(part=>part.split(/\bbut\b|但是|但|(?:[，,]|\band\b|并且?|同时)(?=\s*(?:不要|先别|不再|请勿|do not|don['’]t|never|show me|tell me|report\b|check\b|read\b|查看|告诉我|报告|检查|读取))/iu))
+      .map(commandText).filter(part=>!discussion.test(part));
+    const submit=clauses.filter(part=>runCommand(part,'submit'));
+    const submitDenied=parts.some(part=>noRun.test(part)||humanHold.test(part)||draftOnly.test(commandText(part)));
+    // Keep the current human instruction and at most one exact new draft in memory.
+    turns.set(keyOf(provider,threadId),{projectId,taskId,turnId:turnId||randomUUID(),clauses,submitDenied,fresh:!submitDenied&&submit.some(requestsFreshRun)});
   }
-  function permits(scope,operation,runId,candidates,targetName) {
+  function capturePreparation(scope) {
+    const key=keyOf(scope.provider,scope.threadId),row=turns.get(key);
+    if(!row?.fresh||!scope.projectId||row.projectId!==scope.projectId||(row.taskId??null)!==(scope.taskId??null))return;
+    return {turnId:row.turnId,record:({sourceId,resourceId,runId})=>{
+      if(turns.get(key)===row&&!row.prepared&&scope.checkCurrent?.()===true&&sourceId&&resourceId&&runId)row.prepared={sourceId,resourceId,runId};
+    }};
+  }
+  function permits(scope,operation,runId,candidates,targetName,{sourceId,resourceId}={}) {
     const row=turns.get(keyOf(scope.provider,scope.threadId));
     if(!row||!Object.hasOwn(runCommands,operation)||typeof runId!=='string'||!runId
       ||!scope.threadId||!scope.projectId||!sameScope(row,scope))return false;
-    const clauses=sentences(row.text).filter(part=>!discussion.test(part)&&!contingent.test(part))
-      .flatMap(part=>part.split(/\bbut\b|但是|但|(?:[，,]|\band\b|并且?|同时)(?=\s*(?:不要|先别|不再|do not|don['’]t|never))/iu))
-      .map(commandText);
+    const {clauses}=row;
+    if(operation==='submit'&&row.submitDenied)return false;
+    const matches=candidates.filter(c=>c.runId===runId);
+    if(!matches.some(candidate=>sourceId===undefined||candidate.sourceId===sourceId))return false;
+    if(operation==='submit'&&row.fresh){
+      const prepared=row.prepared;
+      return !!prepared&&prepared.runId===runId&&prepared.sourceId===sourceId&&prepared.resourceId===resourceId;
+    }
     const explicit=clauses.filter(part=>runCommand(part,operation));
     if(!explicit.length||clauses.some(part=>{
       const negative=restriction.exec(part);
       return negative&&runCommand(part.slice(negative[0].length),operation);
     }))return false;
-    const matches=candidates.filter(c=>c.runId===runId);
-    if(!matches.length)return false;
     if(candidates.length===1)return explicit.some(part=>explicitRunSelectors(part,operation).every(id=>id===runId));
     return explicit.some(part=>mentionsRun(part,runId)&&(matches.length===1||mentionsTarget(part,targetName)));
   }
-  return {record,permits,forget:(provider,threadId)=>turns.delete(keyOf(provider,threadId))};
+  return {record,capturePreparation,permits,forget:(provider,threadId)=>turns.delete(keyOf(provider,threadId))};
 }

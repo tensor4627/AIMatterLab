@@ -45,10 +45,16 @@ class ExecutionFindings(unittest.TestCase):
         self.assertEqual(submitted['execution_check']['status'],'passed')
 
     def test_existing_project_authorization_is_still_required(self):
+        from studio_worker.transport.http_handler import error_result
+        from studio_worker.transport.mcp import mcp_tool_call
         run = self.prepare()
         project=self.service.store.get('project',run['project_id']);project['policy']['engines']=[]
         self.service.store.put('project',project)
-        with self.assertRaises(PermissionError): self.service.submit(run['id'])
+        with self.assertRaises(PermissionError) as rejected: self.service.submit(run['id'])
+        self.assertEqual(error_result(rejected.exception)['operation_state'],'not_started')
+        response=mcp_tool_call(self.service,{'name':'submit_run','arguments':{'run_id':run['id']}},dispatch=dispatch)
+        reply=json.loads(response['content'][0]['text']);self.assertTrue(response['isError'])
+        self.assertEqual((reply['status'],reply['code'],reply['operation_state']),('blocked','access_required','not_started'))
         self.assertEqual(self.service.store.run(run['id'])['status'],'draft')
 
     def test_unknown_attempt_is_never_queued_again(self):

@@ -18,7 +18,8 @@ export function sshUiHarness(file,{props={},invoke}={}){
     return currentProps.workspacePreview||{...ref,status:'confirmed',account:'worker',hostname:'fixture',root:'/fixture/AIMatterLab'};
   }};
   if(name==='../../api/compute-resources')return {managedSshServices:{status:async data=>{
-    calls.push({method:'compute.managed.serviceStatus',data});return currentProps.managedService||invoke('compute.sshService.status',{connectionId:data.connectionId});
+    calls.push({method:'compute.managed.serviceStatus',data});
+    return currentProps.managedService||{...data,...await invoke('compute.sshService.status',{connectionId:data.connectionId})};
   }}};
   return name.endsWith('useManagedResources')?{useManagedResources:()=>currentProps.managed||{resources:[],conversations:[],sources:[]}}:name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='../../api/studio'?{invoke:call}:name.endsWith('ssh-connection-types')?helper.exports:name.endsWith('ssh-service-presentation')?presentation.exports:name==='../../ui/i18n'?{t:value=>value}:new Proxy({},{get:(_target,key)=>String(key)});
  };

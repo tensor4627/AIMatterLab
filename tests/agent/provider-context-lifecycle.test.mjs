@@ -70,6 +70,26 @@ test('Selecting a context before connection never starts login or network',async
 test('Real zero-turn thread and pristine first task bind without restarting or changing MCP token',async t=>{
  const f=await setup(t);await f.hub.connect('codex');const first=f.codex.worker,thread=await fresh(f);assert.equal(f.codex.starts.length,1);assert.equal(f.auth(first).threadId,thread);await f.hub.selectContext('codex',context(thread,'task-a'));assert.equal(f.codex.starts.length,1);assert.equal(f.auth(first).taskId,'task-a');await f.hub.rpc('codex','turn/start',{threadId:thread,input:[]});await f.hub.selectContext('codex',context(thread,'task-a'));assert.equal(f.codex.starts.length,1);assert.equal(f.codex.calls.filter(x=>x.method==='thread/resume').length,0);
 });
+test('changing Codex tool approvals refreshes one established idle conversation without replaying its turn',async t=>{
+ const f=await setup(t),start=f.codex.start.bind(f.codex);
+ let enabled=false;
+ f.codex.managedApprovalEnabled=()=>enabled;
+ f.codex.start=async(...args)=>{f.codex.managedApprovalAttached=enabled;return start(...args);};
+ const threadId='approval-mode-history',selected=context(threadId,'task-a');
+ await f.hub.selectContext('codex',selected);
+ await f.hub.connect('codex');
+ await f.hub.rpc('codex','thread/resume',{threadId});
+ const oldLease=f.codex.worker;
+ enabled=true;
+ await f.hub.selectContext('codex',selected);
+ await f.hub.selectContext('codex',selected);
+ assert.equal(f.codex.starts.length,2);
+ assert.equal(f.auth(oldLease),null);
+ assert.equal(f.auth(f.codex.worker).threadId,threadId);
+ assert.equal(f.codex.calls.filter(call=>call.method==='turn/start').length,0);
+ await f.hub.rpc('codex','turn/start',{threadId,input:[{type:'text',text:'A new request'}]});
+ assert.deepEqual(f.codex.calls.slice(-2).map(call=>call.method),['thread/resume','turn/start']);
+});
 test('A failed attempted ordinary chat prevents later first-task privilege inheritance',async t=>{
  const f=await setup(t),thread=await fresh(f),old=f.codex.worker;f.codex.rejectTurn=true;await assert.rejects(f.hub.rpc('codex','turn/start',{threadId:thread,input:[]}),/Rejected/);await f.hub.selectContext('codex',context(thread,'task-a'));assert.equal(f.auth(old),null);assert.equal(f.codex.starts.length,2);assert.equal(f.auth(f.codex.worker).taskId,'task-a');f.codex.rejectTurn=false;await f.hub.rpc('codex','turn/start',{threadId:thread,input:[]});assert.equal(f.codex.calls.filter(x=>x.method==='thread/resume').length,1);
 });

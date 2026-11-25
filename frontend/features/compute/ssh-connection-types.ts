@@ -1,6 +1,15 @@
 export type {SshConnectionState} from '../../../contracts/dto/compute';
-import type {SshConnectionState} from '../../../contracts/dto/compute';
+import type {ComputeResourceState,SshConnectionState,SshComputeProfile} from '../../../contracts/dto/compute';
+import type {ManagedResource} from '../../../contracts/dto/managed-compute';
 export type IndependentSshService=import('../../../contracts/dto/compute').SshServiceState&{conversation?:import('../../../contracts/dto/agent').Conversation};
+export function savedSshChoice(profile:SshComputeProfile,activeResource?:ComputeResourceState|null,resources:ManagedResource[]=[],pending=false){
+ const hosted=resources.find(row=>row.kind==='ssh'&&row.profileId===profile.id&&row.profileVersion===profile.version&&row.connectionId);
+ if(hosted)return {connectionId:hosted.connectionId,label:pending||hosted.verificationPending?'核对原连接':'继续原连接'};
+ const matches=activeResource?.kind==='ssh-connection'&&activeResource.profileId===profile.id&&activeResource.profileVersion===profile.version;
+ if(matches&&activeResource.status==='selected'&&activeResource.alive===true&&activeResource.connectionId)return {connectionId:activeResource.connectionId,label:'继续原连接'};
+ if(matches)return {connectionId:undefined,label:'恢复 SSH 连接'};
+ return {connectionId:undefined,label:profile.mode==='interactive'?'交互式登录':'密钥自动登录'};
+}
 export function verifiedSshService(value:unknown,connectionId:string,attemptId?:string):value is IndependentSshService {
  const v=value as IndependentSshService;
  return !!v&&v.schemaVersion===2&&['idle','connecting','connected','disconnecting','disconnected','failed','unknown'].includes(v.status)&&(v.connectionId===connectionId||!v.connectionId&&v.status==='disconnected'&&!attemptId)&&(!attemptId||v.attemptId===attemptId);

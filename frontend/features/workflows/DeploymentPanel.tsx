@@ -30,7 +30,7 @@ import {sameDeploymentConfig} from "../../../contracts/compute/deployment-draft.
 
 import {workflowOutbox} from "./draft-outbox.mjs";
 
-import {diagnosticContext,diagnosticCurrent,deploymentDiagnosticJournal,type DiagnosticContext} from "../diagnostics/ui-diagnostics.mjs";
+import {diagnosticContext,diagnosticCurrent,deploymentDiagnosticJournal,executionNotStarted,type DiagnosticContext} from "../diagnostics/ui-diagnostics.mjs";
 
 import type {DiagnosticRepairRequest} from '../diagnostics/repair-request.mjs';
 import {DeploymentDiagnostics,InlineDiagnostic} from "../diagnostics/DiagnosticNotice";
@@ -40,7 +40,7 @@ export default function DeploymentPanel({task,worker:connected,restoring=false,p
  const [connectionAction,setConnectionAction]=useState('');
  const [busyLabel,setBusyLabel]=useState(''),[previewPending,setPreviewPending]=useState<{scope:string;name:string;sequence:number}|null>(null),[runPending,setRunPending]=useState<{scope:string;sequence:number}|null>(null);
  const previewFlight=useRef<{scope:string;name:string;sequence:number}|null>(null),runFlight=useRef<{scope:string;sequence:number}|null>(null);
- const authAction=(error:unknown)=>String(error).includes('needs_worker_update')?'update':String(error).includes('needs_human_auth')?'auth':'';
+ const authAction=(error:unknown)=>String(error).includes('needs_worker_update')?'update':String(error).includes('needs_human_auth')?(executionNotStarted(error)?'auth_draft':'auth'):'';
  const [busy,setBusy]=useState(false),[saved,setSaved]=useState(false),[run,setRun]=useState<Run|ClusterRun|null>(null),[reviewedReceipt,setReviewedReceipt]=useState<string|null>(null),[preview,setPreview]=useState<any>(null);
  const [creating,setCreating]=useState(false),[createdProject,setCreatedProject]=useState<Project|null>(null),[draftSaving,setDraftSaving]=useState(false),[draftError,setDraftError]=useState('');
  const [diagnostics,setDiagnostics]=useState(()=>deploymentDiagnosticJournal.list(task.id));
@@ -83,7 +83,7 @@ export default function DeploymentPanel({task,worker:connected,restoring=false,p
  const prepared=!!(saved&&deploymentCurrent(task,localReady?localStatus.value?.authority:undefined)&&run&&run.id===task.deployment?.prepared?.artifactId&&['draft','ready'].includes(run.status));
  async function execute(){
   if(isTaskPygasDirty(task.id)||busyRef.current||!ready||!contextReady||projectIssue||targetMissing||configIssue||queueIssue||activeAttempt||outbox.error||draftError||reconcileRunId&&!run)return;
-  const sequence=++mutationSequence.current;let context=errorContext('execute',run?.id);setConnectionAction('');invalidate();busyRef.current=true;setBusyLabel(t('正在保存部署…'));setBusy(true);
+  const sequence=++mutationSequence.current;let context={...errorContext('execute',run?.id),phase:'blocked'};setConnectionAction('');invalidate();busyRef.current=true;setBusyLabel(t('正在保存部署…'));setBusy(true);
   try{
    let attempt=run;
    if(!prepared||outbox.pending||outbox.error){
@@ -91,7 +91,7 @@ export default function DeploymentPanel({task,worker:connected,restoring=false,p
    }
    if(!attempt)return;if(!['draft','ready'].includes(attempt.status))throw Error(t('此输入版本已有运行记录；请核对原记录或修改下一版输入。'));const identity=snapshotIdentity(latestTask.current,attempt);if(!identity)throw Error(t('当前输入快照身份不完整，请重新准备。'));
    context=errorContext('execute',attempt.id);setBusyLabel(t('正在核对输入并提交…'));
-   const result=await taskApi.execute({taskId:task.id,artifactId:attempt.id,inputReceipt:identity});if(!owner(sequence))return;setRun(result);await onRefresh();if(owner(sequence))onRun(result.id,'kind' in result?'cluster-run':'run');
+   const result=await taskApi.execute({taskId:task.id,artifactId:attempt.id,inputReceipt:identity});if(!owner(sequence))return;context={...context,phase:result.status==='unknown'?'unknown':'confirmed'};setRun(result);await onRefresh();if(owner(sequence))onRun(result.id,'kind' in result?'cluster-run':'run');
   }catch(error){reportError(error,context);}finally{if(owner(sequence)){busyRef.current=false;setBusy(false);}}
  }
  const reconcileRunId=task.deployment?.prepared?.artifactId,reconcileAvailable=!!reconcileRunId&&worker&&config.target===task.deployment?.config?.target;
@@ -138,7 +138,7 @@ export default function DeploymentPanel({task,worker:connected,restoring=false,p
  {!ready&&(scienceDraft.pendingCount||task.workspaceChoice==='pending')&&<div className="notice" role="alert">{t(scienceDraft.pendingCount?'科学参数仍有未保存的修改，请返回流程保存后复核。':'请先选择工作区或沿用草稿目录。')}</div>}
  {localNotice&&(localStatus.phase==='error'||!aiReady)&&<details className="deployment-check-details"><summary>{t('输入检查详情（可选）')}</summary><div className="notice" role={localNotice.role} data-testid="local-review-status">{t(localNotice.message)}{localNotice.error&&<p>{t(localNotice.error)}</p>}</div></details>}
  {!aiReady&&<p className="deployment-check-summary" role="status" data-testid="deployment-review-advisory">{t(task.review?.status==='ready'?'旧复核对应其他参数版本；可运行当前已保存输入。':'当前版本尚未复核；可直接运行，也可返回流程让 Agent 检查。')}</p>}{!!missing.length&&<p className="notice" role="status">{t('流程检查提示')} · {missing.length}</p>}{activeAttempt&&<p className="deployment-check-summary" role="status" data-testid="deployment-active-attempt">{t('原作业仍在运行或待核对；可以编辑下一版草稿，核对原作业后再提交。')}</p>}
- {connectionAction&&<section className="notice" role="status" data-testid="deployment-auth-action"><p>{t(connectionAction==='update'?'此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。':'需要人工认证；请打开私有认证界面，现有作业不会重提。')}</p>{connectionAction==='auth'&&onOpenConnections&&<button className="button" disabled={busy} onClick={()=>onOpenConnections({taskId:task.id,...task.deployment?.prepared?.artifactId?{runId:task.deployment.prepared.artifactId}:{},clusterId:config.targetId})}>{t(task.deployment?.prepared?.artifactId?'核对原作业连接':'打开集群连接')}</button>}{connectionAction==='update'&&onReconnect&&<button className="button" disabled={busy||reconnecting} onClick={()=>void reconnect().catch(onError)}>{t('按原来源更新作业服务')}</button>}</section>}
+ {connectionAction&&<section className="notice" role="status" data-testid="deployment-auth-action"><p>{t(connectionAction==='update'?'此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。':connectionAction==='auth_draft'?'请完成原连接的私有认证，再提交此草稿。':'需要人工认证；请打开私有认证界面，现有作业不会重提。')}</p>{['auth','auth_draft'].includes(connectionAction)&&onOpenConnections&&<button className="button" disabled={busy} onClick={()=>onOpenConnections({taskId:task.id,...task.deployment?.prepared?.artifactId?{runId:task.deployment.prepared.artifactId}:{},clusterId:config.targetId})}>{t(connectionAction==='auth_draft'||!task.deployment?.prepared?.artifactId?'打开集群连接':'核对原作业连接')}</button>}{connectionAction==='update'&&onReconnect&&<button className="button" disabled={busy||reconnecting} onClick={()=>void reconnect().catch(onError)}>{t('按原来源更新作业服务')}</button>}</section>}
  {!contextReady&&<section className="notice" role="status" data-testid="deployment-context-state"><strong>{t(catalog.status==='loading'?'正在恢复此流程的计算项目…':catalog.status==='error'?'暂时无法读取此流程的计算环境':restoring?'正在核对此流程的已有计算服务…':'尚未确认此流程的计算连接，已保存的项目绑定仍保留。')}</strong>{catalog.error&&<InlineDiagnostic error={catalog.error}/>}<div className="button-row">{onReconnect&&<button className="button" disabled={reconnecting||restoring} onClick={()=>void reconnect().catch(onError)}>{t(reconnecting?'正在连接…':'恢复此流程的连接')}</button>}{worker&&<button className="button" onClick={()=>void readContext()}>{t('重新读取')}</button>}</div></section>}
  <section className="deployment-binding" data-testid="deployment-binding"><span>{t('此流程的计算项目')}</span><strong>{project?.name||t(contextReady?'尚未绑定计算项目':'等待恢复已保存的计算项目')}</strong></section>
  <fieldset className="card deployment-settings" disabled={busy||!contextReady}><legend>{t('计算目标与工作目录')}</legend><div className="form-row"><label>{t('计算位置')}<select aria-label={t('计算位置')} value={config.target} onChange={e=>{patch({target:e.target.value,targetId:'',inputSource:'local',queueSelection:undefined,resources:clusterDeploymentChoice(config.resources,null).resources});}}><option value="cluster">SSH {t('集群')}</option><option value="local">{sshSource?t('当前 SSH 服务器'):'WSL '+t('本机')}</option></select></label><label>{t('计算环境')}<select aria-label={t('部署环境')} value={config.targetId} onChange={e=>{const target=targets.find(v=>v.id===e.target.value);patch({targetId:e.target.value,...clusterDeploymentChoice(config.resources,config.target==='cluster'?target:null)});}}><option value="">{t('请选择')}</option>{targets.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label></div>

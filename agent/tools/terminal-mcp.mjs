@@ -82,23 +82,23 @@ export class TerminalMcp {
     const {name,arguments:args={}}=body.params;
     if(this.desktopTools?.owns(name)){
      if(!scope.sessionId||!scope.threadId)throw Error('Select an agent conversation before using managed compute');
-     dispatched=true;result=toolValueResult(await this.desktopTools.call(name,args,scope));
+     result=toolValueResult(await this.desktopTools.call(name,args,scope));
     }else if(this.projectSkills?.owns(name)){
-     dispatched=true;result=toolValueResult(await this.projectSkills.call(name,args,scope));
+     result=toolValueResult(await this.projectSkills.call(name,args,scope));
     }else if(this.publicDocs?.definitions.some(tool=>tool.name===name)){
      if(!scope.threadId)throw Error('Select a conversation before searching public software documentation');
-     dispatched=true;result=toolValueResult(await this.publicDocs.call(name,args));fresh();
+     result=toolValueResult(await this.publicDocs.call(name,args));fresh();
     }else if(this.guides.some(tool=>tool.name===name)){
      if(!scope.threadId)throw Error('Select a conversation before reading skill guidance');
-     dispatched=true;result=toolValueResult(await this.scientificSkills.call(name,args,scope));
+     result=toolValueResult(await this.scientificSkills.call(name,args,scope));
     }else if(sharedTerminalToolAllowed(name)){
      if(!this.legacyVisible(scope))throw Error('shared_terminal_not_granted');
      token=await guard?.before?.(name,args,scope.provider,scope);fresh();
-     dispatched=true;result=toolValueResult(await this.terminal.callTool(name,args,scope));fresh();
+     result=toolValueResult(await this.terminal.callTool(name,args,scope));dispatched=name==='write_shared_terminal';fresh();
      await guard?.after?.(token,result);
     }else{
      if(!this.workerTools)throw Error('Unknown shared terminal tool');
-     dispatched=true;result=await this.workerTools.call(name,args,scope);
+     result=await this.workerTools.call(name,args,scope);
     }
    }else{reply(200,{jsonrpc:'2.0',id:body.id,error:{code:-32601,message:'Method not found'}});return;}
    fresh();reply(200,{jsonrpc:'2.0',id:body.id,result});
@@ -121,13 +121,16 @@ export function workerToolBridge({connection,fetchApi=fetch,conversationDraft}){
   const url=new URL(worker.url);
   if(url.origin!==`http://127.0.0.1:${url.port}`||url.pathname!=='/providers/'+scope.provider||worker.url!==url.origin+url.pathname||typeof worker.tokens?.mcp!=='string'||!worker.tokens.mcp)throw Error('Invalid desktop worker MCP transport');
   if(scope.checkCurrent()!==true)throw Error('Worker scope expired');
-  const requestId=++id,response=await fetchApi(worker.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+worker.tokens.mcp,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:requestId,method,params}),signal:AbortSignal.timeout(timeout),redirect:'error'});
-  if(scope.checkCurrent()!==true)throw Error('Worker scope expired');
-  if(!response.ok)throw Error('The authorized worker did not confirm the tool request');
-  const body=await response.json();
-  if(body.jsonrpc!=='2.0'||body.id!==requestId||body.error)throw Error('The authorized worker did not confirm the tool request');
-  if(method==='tools/call'&&!validToolResponse(body,requestId))throw Error('The authorized worker returned an invalid tool result');
-  return body.result;
+  const requestId=++id,bodyText=JSON.stringify({jsonrpc:'2.0',id:requestId,method,params});
+  try{
+   const response=await fetchApi(worker.url+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+worker.tokens.mcp,'Content-Type':'application/json'},body:bodyText,signal:AbortSignal.timeout(timeout),redirect:'error'});
+   if(scope.checkCurrent()!==true)throw Error('Worker scope expired');
+   if(!response.ok)throw Error('The authorized worker did not confirm the tool request');
+   const body=await response.json();
+   if(body.jsonrpc!=='2.0'||body.id!==requestId||body.error)throw Error('The authorized worker did not confirm the tool request');
+   if(method==='tools/call'&&!validToolResponse(body,requestId))throw Error('The authorized worker returned an invalid tool result');
+   return body.result;
+  }catch(error){throw Object.assign(error,{operationDispatched:true});}
  }
  return {
   async list(scope){try{return await request(scope,'tools/list',{},10000)??conversationDraft?.list(scope)??null;}catch{return {_meta:{studioWarnings:['tools_unavailable']}};}},

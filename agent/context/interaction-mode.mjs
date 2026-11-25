@@ -16,5 +16,6 @@ export function interactionModeContext({planningMode=false,reviewMode=false,scop
   'private-definition':'Only the explicitly shared current private definition is available. The checkbox does not expand that sharing to workflow files or other private data.',
   workflow:'Continue the existing workflow within its current authoring scope, even when the checkbox is off. When asked to plan and arrange execution, save the roadmap and real input references, prepare the authorized target and continue to the applicable execution review or submission step. The current request controls whether any calculation may be run. Create a separate workflow only at the user’s request.',
  };
- return current+guidance[scope]+'\n'+boundary;
+ const progress='For an action request, take the next available authorized step before reporting status. If a step is blocked, continue independent work, such as inspecting the original target or preparing the remaining inputs. Report the latest observed change or receipt and any exact decision needed to continue. Follow the tool receipt to distinguish a rejected step from a dispatched action awaiting confirmation.';
+ return current+guidance[scope]+'\n'+boundary+'\n'+progress;
 }

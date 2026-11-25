@@ -55,7 +55,21 @@ test('known terminal attempts can be intentionally retried with new immutable ru
 test('unknown submission keeps drafts editable and prevents replacement preparation',async()=>{
  const f=fixture(),run=await f.prepare();f.hooks.submit=()=>{throw Error('response lost');};
  await assert.rejects(f.execute(run),/response lost/);const original=structuredClone(f.records.read(f.task.id).execution);f.records.edit({id:f.task.id,changes:{temperature:315}});
+ f.records.linkRun(f.task.id,run);assert.deepEqual(f.records.read(f.task.id).execution,original);
  await assert.rejects(f.prepare(),/原提交/);await assert.rejects(f.execute(run),/current input revision|pending/);assert.equal(f.calls.filter(route=>route.endsWith('/submit')).length,1);assert.equal(f.keys.length,1);assert.deepEqual(f.records.read(f.task.id).execution,original);
+});
+test('execution rejected before the worker request identifies no submitted job',async()=>{
+ const f=fixture(),run=await f.prepare(),calls=f.calls.length;
+ await assert.rejects(executeTask(f.records,f.worker,{taskId:f.task.id,artifactId:run.id,inputReceipt:'stale'}),/execution_not_started: Review the actual input snapshots/);
+ assert.equal(f.calls.length,calls);assert.equal(f.records.read(f.task.id).execution,undefined);
+});
+test('a confirmed worker preflight rejection leaves the same draft available for an explicit retry',async()=>{
+ const f=fixture(),run=await f.prepare();
+ f.hooks.submit=()=>{throw Object.assign(Error('Required runtime unavailable'),{operationNotStarted:true});};
+ await assert.rejects(f.execute(run),/execution_not_started: Required runtime unavailable/);
+ const saved=f.records.read(f.task.id).execution;assert.equal(saved.phase,'blocked');assert.equal(saved.notSubmitted,true);assert.equal(saved.artifactId,run.id);
+ assert.equal(f.runs.get(run.id).status,'draft');assert.equal(f.calls.filter(route=>route.endsWith('/submit')).length,1);
+ f.hooks.submit=null;const result=await f.execute(run);assert.equal(result.id,run.id);assert.equal(result.status,'queued');assert.equal(f.calls.filter(route=>route.endsWith('/submit')).length,2);
 });
 test('corrupt catalog rows are isolated and their original bytes remain recoverable',t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-catalog-')),catalog=new Catalog(root);t.after(()=>{catalog.db.close();fs.rmSync(root,{recursive:true,force:true});});

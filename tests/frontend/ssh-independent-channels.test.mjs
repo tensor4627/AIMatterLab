@@ -264,6 +264,27 @@ test('workflow binding errors keep the authenticated SSH and managed service ava
  }finally{h.unmount();}
 });
 
+for(const hosted of [false,true])test('a failed '+(hosted?'hosted':'foreground')+' service read preserves the exact shell and offers a read-only retry',async()=>{
+ const method=hosted?'compute.managed.serviceStatus':'compute.sshService.status';
+ let reject=false;
+ const h=await selected({props:hosted?{managed:snapshot(published)}:undefined,override:action=>{
+  if(action==='compute.sshService.status'&&reject)return Promise.reject(Error('Error invoking remote method '+method+': Error: worker_health_invalid'));
+ }});
+ try{
+  assert(h.id('ssh-worker-ready'));const original=channel(h).props.shell;
+  reject=true;await h.tick(2000);
+  assert.equal(h.id('ssh-service-status-error-code').props.children,'worker_health_invalid');
+  assert(!h.find(n=>n.props?.['data-testid']==='ssh-worker-ready'));
+  assert.equal(h.id('ssh-connection-status').props['data-state'],'authenticated');
+  assert.deepEqual(channel(h).props.shell,original);
+  const before=h.calls.length;reject=false;h.click('ssh-service-status-retry');await h.flush();
+  const calls=h.calls.slice(before);
+  assert(calls.some(call=>call.method===method&&call.data.connectionId===original.connectionId));
+  assert(calls.every(call=>['compute.sshConnection.list','sharedTerminal.list',method].includes(call.method)));
+  assert(h.id('ssh-worker-ready'));assert(!h.find(n=>n.props?.['data-testid']==='ssh-service-status-pending'));
+ }finally{h.unmount();}
+});
+
 test('an unavailable service keeps its own error and the published connection retains the human terminal',async()=>{
  const unavailable={...published,serviceReady:false},h=await selected({override:method=>method==='compute.sshService.status'?{...service,status:'failed',workflowReady:false,error:{code:'python_unsupported'}}:method==='compute.managed.publish'?unavailable:undefined});
  try{

@@ -10,7 +10,7 @@ const THEMES = ['dark','light'];
 
 /** Top-level renderer settings keys; anything else is rejected instead of silently persisted. */
 export const SETTINGS_KEYS = Object.freeze([
- 'autoDiscoverCompute','developerComputeWorkspaceId','scientificSkillProviders','pygasSkillProviders','projectAgents',
+ 'autoDiscoverCompute','agentApprovalMode','developerComputeWorkspaceId','scientificSkillProviders','pygasSkillProviders','projectAgents',
  'agentLayout','overviewAgentLayout','agentProvider','kimiPath','qwenPath','agentProviders',
  'distribution','workerRoot','workerPort','codexPath','cwd','sourceRoots','sourceIds',
  'skillRoots','userCacheDirectory','theme','resourceBadgeMotion','language','fontFamily','fontSize','minimumFontSize','chatFontSize',
@@ -26,6 +26,12 @@ export function normalizeSettings(current, data = {}) {
  if (next.developerComputeWorkspaceId != null &&
      (typeof next.developerComputeWorkspaceId !== 'string' || !/^[a-f0-9]{64}$/.test(next.developerComputeWorkspaceId))) {
    throw Error('Invalid developer compute workspace');
+ }
+ if (next.agentApprovalMode !== undefined && !['manual','auto','full'].includes(next.agentApprovalMode)) {
+   throw Error('Invalid Agent approval mode');
+ }
+ if (next.agentApprovalMode === 'full' && !next.developerComputeWorkspaceId) {
+   throw Error('Choose a hosted SSH workspace for full permissions');
  }
  if(next.terminalIdleMinutes!==undefined&&(!Number.isInteger(next.terminalIdleMinutes)||next.terminalIdleMinutes<1||next.terminalIdleMinutes>1440))throw Error('Terminal idle timeout must be 1 to 1440 minutes');
  if (next.autoDiscoverCompute !== undefined && typeof next.autoDiscoverCompute !== 'boolean') throw Error('Invalid compute discovery preference');

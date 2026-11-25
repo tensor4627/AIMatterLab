@@ -56,17 +56,34 @@ export function createComputeResourceBinding({catalog,profiles,terminal,connecti
    catch(error){if(attempt||error.message!=='compute_resource_context_changed'||context.intent!==intent||!equal(value,selected()))throw error;}
   }
  }
+ function validateConnection(data){
+  exact(data,['kind','connectionId','profileId','profileVersion']);
+  if(data.kind!=='ssh-connection'||!id(data.connectionId)||!id(data.profileId)||!Number.isSafeInteger(data.profileVersion)||data.profileVersion<1)throw Error('compute_resource_invalid_request');
+ }
+ async function prepareConnectionActivation(data,{reserve=false}={}){
+  validateConnection(data);
+  const previous=selected(),context=capture(),value={schemaVersion:2,selectionId:uuid(),...data};
+  if(reserve)context.intent=++intent;
+  const assertCurrent=()=>{fresh(context);if(!equal(previous,selected()))throw Error('compute_resource_selection_changed');checkProfile(value);};
+  const result=await observeConnection(value,context);
+  if(result.status!=='selected'||result.authentication!=='verified')throw Error('compute_resource_not_available');
+  assertCurrent();
+  return {assertCurrent,commit(beforeSave=()=>{}){
+   assertCurrent();
+   const persist=()=>{beforeSave();if(previous)catalog.put('compute-resource-selection-history',previous.selectionId,{schemaVersion:1,fromSchemaVersion:previous.schemaVersion,toSchemaVersion:2,reason:'explicit_connection_selected',previous,at:Date.now()});catalog.put(KIND,KEY,value);};
+   if(typeof catalog.transaction==='function')catalog.transaction(persist);else persist();
+   if(!reserve)intent++;
+   return result;
+  }};
+ }
  async function activate(data){
   if(data?.kind==='ssh-connection'){
-   exact(data,['kind','connectionId','profileId','profileVersion']);if(!id(data.connectionId)||!id(data.profileId)||!Number.isSafeInteger(data.profileVersion)||data.profileVersion<1)throw Error('compute_resource_invalid_request');
+   validateConnection(data);
    const previous=selected(),same=connectionReference(previous)&&['kind','connectionId','profileId','profileVersion'].every(key=>previous[key]===data[key]);
    // Reattaching the current terminal is an observation of the same resource.
    // Keep active message tickets and grants while rechecking its real state.
    if(same){const result=await status();if(result.status!=='selected'||result.authentication!=='verified')throw Error('compute_resource_not_available');return result;}
-   const context={...capture(),intent:++intent},value={schemaVersion:2,selectionId:uuid(),...data};
-   const result=await observeConnection(value,context);fresh(context);if(result.status!=='selected'||result.authentication!=='verified')throw Error('compute_resource_not_available');if(!equal(previous,selected()))throw Error('compute_resource_selection_changed');
-   const persist=()=>{if(previous&&!same)catalog.put('compute-resource-selection-history',previous.selectionId,{schemaVersion:1,fromSchemaVersion:previous.schemaVersion,toSchemaVersion:2,reason:'explicit_connection_selected',previous,at:Date.now()});catalog.put(KIND,KEY,value);};
-   if(typeof catalog.transaction==='function')catalog.transaction(persist);else persist();return result;
+   return (await prepareConnectionActivation(data,{reserve:true})).commit();
   }
   exact(data,['kind','profileId','profileVersion','sessionId']);if(data.kind!=='ssh-terminal'||!id(data.profileId)||!Number.isSafeInteger(data.profileVersion)||data.profileVersion<1||!id(data.sessionId))throw Error('compute_resource_invalid_request');
   const context={...capture(),intent:++intent},previous=selected(),same=previous&&['kind','profileId','profileVersion','sessionId'].every(key=>previous[key]===data[key]);
@@ -117,5 +134,5 @@ export function createComputeResourceBinding({catalog,profiles,terminal,connecti
   const selection=update.selection;if(selection?.profileId===saved.id){if(connectionReference(selection)?!Array.isArray(connectionIds)||!connectionIds.includes(selection.connectionId):!Array.isArray(sessionIds)||!sessionIds.includes(selection.sessionId))throw Error('compute_resource_session_mismatch');catalog.put(KIND,KEY,{...selection,profileVersion:saved.version});intent++;}
   environmentUpdates.delete(receipt);return selected();
  }
- return {activate,status,clear,clearConnection,clearProfile,clearLegacyTerminal,replaceHostedConnection,peek:selected,revision:()=>intent,capture:ticket,assertCurrent,prepareProfileEnvironmentUpdate,assertProfileEnvironmentUpdate,commitProfileEnvironmentUpdate};
+ return {activate,prepareConnectionActivation,status,clear,clearConnection,clearProfile,clearLegacyTerminal,replaceHostedConnection,peek:selected,revision:()=>intent,capture:ticket,assertCurrent,prepareProfileEnvironmentUpdate,assertProfileEnvironmentUpdate,commitProfileEnvironmentUpdate};
 }

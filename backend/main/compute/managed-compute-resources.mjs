@@ -12,6 +12,7 @@ import {safeSshServiceError,safeSshServicePhase,safeSshServiceProgress} from './
 import {createManagedSshHosting,hostedLeaseKey,sameHostedTarget} from './managed-ssh-hosting.mjs';
 import {stableSshWorkerBinding} from '../../../contracts/compute/task-worker-binding.mjs';
 import {sshSourceId} from './worker-service-version.mjs';
+import {workerRunOperationFailure} from '../../../contracts/compute/run-operation-receipt.mjs';
 
 const rejectedBeforeDispatch=new Set(['managed_compute_invalid_request','managed_compute_user_instruction_required',
  'managed_compute_no_eligible_resource','managed_compute_resource_lease_required','managed_compute_resource_choice_required',
@@ -24,6 +25,7 @@ const leaseKey=(scope,resourceId)=>JSON.stringify([scope.provider,scope.threadId
 const ownerOf=scope=>({provider:scope.provider,threadId:scope.threadId});
 const projectOf=scope=>scope.projectId??null;
 const sourceFailure=code=>['managed_compute_service_changed','ssh_authentication_unconfirmed','ssh_connection_changed','ssh_connection_not_found','terminal_unavailable','terminal_service_changed','terminal_service_unknown','terminal_service_unavailable','terminal_service_failed'].includes(code);
+const projectObservationFailure=code=>['managed_compute_project_authentication_failed','managed_compute_project_observation_failed','managed_compute_project_receipt_invalid'].includes(code);
 const terminalGone=code=>['terminal_session_exited','terminal_saved_connection_changed','ssh_authentication_unconfirmed','ssh_connection_changed','ssh_connection_not_found'].includes(code);
 const terminalFailureCodes=new Set(['managed_compute_project_grant_required','managed_compute_terminal_not_supported','terminal_session_limit',
  'terminal_session_exited','terminal_unavailable','terminal_start_failed','ssh_channel_unavailable','ssh_shell_readiness_timeout',
@@ -400,11 +402,11 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   try{return await managedWorkerProject(scope,resource,expected,assertCurrent);}
   catch(error){
    if(sourceFailure(error.message))discardService(resource,expected);
-   if(!required&&(sourceFailure(error.message)||error.message==='managed_compute_worker_request_failed'))return null;
+   if(!required&&(sourceFailure(error.message)||projectObservationFailure(error.message)))return null;
    throw error;
   }
  }
- const eligibleProject=async(scope,resource)=>!!await projectGrant(scope,resource);
+ const eligibleProject=async(scope,resource,options)=>!!await projectGrant(scope,resource,options);
  function retainedLease(scope,resource){
   const lease=resource.hosting?.leases[hostedLeaseKey(scope)];
   return lease?.projectId===projectOf(scope)?lease:null;
@@ -475,17 +477,18 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const chatAccess=terminal!=='denied'&&(terminalRequest?priorTerminal||action==='command'&&priorCommand:
    existingInspection||!!resource.service&&(!scope.taskId||priorService));
   const canCheckProject=terminalRequest?terminal!=='denied':!!resource.service;
+  const projectObservation={required:!choosing&&!!resource.service};
   let authority=null;
   if(savedGrant){
    if(grantScopeMatches(scope,savedGrant)&&(!savedGrant.sourceId||savedGrant.sourceId===resource.service?.id)){
     const mode=savedGrant.authority;
     if(mode==='conversation'&&terminal!=='denied'||mode==='desktop-project'&&terminal===true||
-       mode==='worker-project'&&canCheckProject&&await eligibleProject(scope,resource))authority=mode;
+       mode==='worker-project'&&canCheckProject&&await eligibleProject(scope,resource,projectObservation))authority=mode;
    }
   }else if(chatAccess||terminal!=='denied'&&legacyRenewal(scope,resource)||terminal===true&&!scope.taskId)authority='conversation';
   else if(terminal===true)authority='desktop-project';
   else if(terminal!=='denied'&&developerAccess(scope,resource))authority='developer';
-  else if(canCheckProject&&await eligibleProject(scope,resource))authority='worker-project';
+  else if(canCheckProject&&await eligibleProject(scope,resource,projectObservation))authority='worker-project';
   liveScope(scope);current(resource);
   policyCurrent();
   if(!choosing)assertResourceIntent(scope,resource);
@@ -1272,6 +1275,11 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
     // The worker has its own durable reservation under its Store lock. This
     // app also suppresses uncertain duplicate actions before they reach it.
     if(action!=='validate')dispatchedRunActions.add(attemptKey);
+    data.onDispatch?.();
+   };
+   const confirmedRejection=response=>{
+    if(workerRunOperationFailure(response,data.data.id)?.operation_state==='not_started')dispatchedRunActions.delete(attemptKey);
+    return response;
    };
    if(monitoredSubmit){
     // The worker reserves its bounded observation schedule in the same durable
@@ -1280,18 +1288,18 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
      scope:{provider:scope.provider,threadId:scope.threadId,taskId:scheduleOwnerId(scope),projectId:scope.projectId,runId}};
     const response=await anchored(resource,service,'POST','/api/cluster/submit',{run_id:runId,managed_monitor},false,data.timeoutMs,beforeDispatch);
     check();
-    if(response.status!==200)return response;
+    if(response.status!==200)return confirmedRejection(response);
     return {status:200,data:{jsonrpc:'2.0',id:data.data.id,result:{isError:false,content:[{type:'text',text:JSON.stringify(response.data)}]}}};
    }
    const payload=action==='cancel'?{...data.data,params:{...data.data.params,arguments:{run_id:runId,require_known:true}}}:data.data;
    const response=await anchored(resource,service,'POST','/mcp',payload,true,data.timeoutMs,beforeDispatch);
    check();
-   return response;
+   return confirmedRejection(response);
   }finally{activeRunActions.delete(runKey);}
  }
 
  async function serviceRequest(scope,data){
-  exact(data,['resourceId','method','target','data','mcp','timeoutMs','checkCurrent','beforeScheduleDispatch'],['resourceId','method','target']);
+  exact(data,['resourceId','method','target','data','mcp','timeoutMs','checkCurrent','beforeScheduleDispatch','onDispatch'],['resourceId','method','target']);
   const {lease,service,grant}=await resolveLease(scope,data.resourceId,'service'),resource=lease.resource;
   const check=()=>{assertLease(scope,lease);assertResourceIntent(scope,resource);data.checkCurrent?.();};
   const payload=data.data;
@@ -1322,6 +1330,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    check();
    if(data.mcp!==true&&health?.managed_schedule_schema!==1)fail('managed_compute_worker_update_required');
    if(data.mcp!==true)data.beforeScheduleDispatch?.();
+    data.onDispatch?.();
   };
   const response=await anchored(resource,service,data.method,data.target,payload,data.mcp===true,data.timeoutMs,beforeDispatch);
   check();return response;

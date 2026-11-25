@@ -151,7 +151,9 @@ export class TaskRecords{
   if(task.workflowVersion!==2)task.review={status:'not_run',summary:'运行状态从作业服务读取'};
   const attemptKind=task.execution?.artifactKind||deployedKind;
   const sameAttempt=attemptKind?attemptKind===kind:!task.artifacts.some(row=>row.id===run.id&&row.kind!==kind);
-  if(task.execution?.artifactId===run.id&&sameAttempt)task.execution={...task.execution,phase:run.status==='unknown'?'unknown':run.status==='validating'?'validating':'confirmed',status:run.status};
+  // A draft observed while a submit reply is unresolved does not settle that request.
+  const unsettledDraft=['draft','ready'].includes(run.status)&&['validating','submitting','unknown','blocked'].includes(task.execution?.phase);
+  if(task.execution?.artifactId===run.id&&sameAttempt&&!unsettledDraft)task.execution={...task.execution,phase:run.status==='unknown'?'unknown':run.status==='validating'?'validating':'confirmed',status:run.status};
   return this.save(task);
  }
  failedTurn(provider,threadId,error){const key=provider+':'+threadId;this.pendingSnapshots.delete(key);this.deliveredWorkflowSnapshots.delete(key);const turn=this.turns.get(key);if(!turn?.reviewMode)return;const task=this.read(turn.taskId);task.review={status:'needs-information',summary:'Agent 复核请求失败：'+error.message};this.save(task);}

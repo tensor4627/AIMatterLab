@@ -9,6 +9,11 @@ import {sanitizeTranscript,sanitizeProtocolTranscript,createTranscriptStream} fr
 import {isCodexVersion} from '../../contracts/agent/codex-version.mjs';
 export const PROTOCOL_VERSION = '0.165.0-alpha.1.2';
 const unsupportedCatalogQueries=new Set(['list_mcp_resources','list_mcp_resource_templates']);
+const managedToolApprovals=[
+  'list_compute_resources','acquire_compute_resource','release_compute_resource','run_compute_command',
+  'list_compute_terminals','read_compute_terminal','write_compute_terminal','inspect_compute_service',
+  'prepare_compute_run','read_compute_run_status','read_compute_run_log','validate_compute_run','submit_compute_run','cancel_compute_run',
+];
 const accountRequestMessages=Object.freeze({
   'account/read':'账户状态读取失败，请刷新账户状态后重试。',
   'account/login/start':'登录失败，请重新登录。',
@@ -59,13 +64,18 @@ function compatibilityFailure(cause,stage,version){
 }
 
 export class CodexBridge extends EventEmitter {
-  constructor({strictIsolation=false,isolationRoot,isolationDependencies={},launchDependencies={},host=codexRuntime}={}) { super();Object.assign(this,{strictIsolation,isolationRoot,isolationDependencies,launchDependencies,host});this.lifecycle=0;this.isolationReady=false; this.pending = new Map(); this.requests = new Map(); this.next = 1; this.activeTurns=new Set();this.turnIds=new Map();this.settledTurns=new Set();this.threadModels=new Map(); }
+  constructor({strictIsolation=false,isolationRoot,isolationDependencies={},launchDependencies={},host=codexRuntime,approvalMode=()=> 'manual'}={}) { super();Object.assign(this,{strictIsolation,isolationRoot,isolationDependencies,launchDependencies,host,approvalMode});this.lifecycle=0;this.isolationReady=false; this.pending = new Map(); this.requests = new Map(); this.next = 1; this.activeTurns=new Set();this.turnIds=new Map();this.settledTurns=new Set();this.threadModels=new Map(); }
+  managedApprovalEnabled(){return ['auto','full'].includes(this.approvalMode());}
+  connectionKey(executable,worker,config,options={}){
+    return createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config,options.authenticationOnly===true,options.historyOnly===true,!!worker&&this.managedApprovalEnabled()])).digest('hex');
+  }
   async start(executable,worker,config={},options={}) {
-    const key=createHash('sha256').update(JSON.stringify([executable,worker?.url,worker?.tokens?.mcp,config,options.authenticationOnly===true,options.historyOnly===true])).digest('hex');
+    const key=this.connectionKey(executable,worker,config,options);
     if(this.starting){await this.starting;return this.start(executable,worker,config,options);}
     if(this.process&&this.contextKey===key)return this.info;
     if(this.activeTurns.size)throw Error('Stop the current reply before reconnecting scientific tools');
     if(this.process)this.close();this.contextKey=key;
+    this.managedApprovalAttached=!!worker&&this.managedApprovalEnabled();
     this.starting=this.launch(executable,worker,config,options).finally(()=>{this.starting=null;});
     return this.starting;
   }
@@ -100,6 +110,9 @@ export class CodexBridge extends EventEmitter {
       if(!isolation)args.push('-c', 'mcp_servers.gpusampling.url=' + JSON.stringify(worker.url + '/mcp'),
         '-c', 'mcp_servers.gpusampling.bearer_token_env_var="GSS_MCP_TOKEN"');
       for(const tool of ['write_shared_terminal','scientific_skill_catalog','read_scientific_skill','inspect_pygas_catalog','read_runtime_guide','read_custom_cv','import_materials_project','create_structure','render_pygas_workflow','propose_custom_cv','present_task','draft_cluster_setup','prepare_cluster_run','prepare_run','resume_run','write_project_input','create_workflow','validate_run','submit_run','cancel_run','reconcile_run','validate_cluster_run','submit_cluster_run','cancel_cluster_run'])
+        args.push('-c','mcp_servers.gpusampling.tools.'+tool+'.approval_mode="approve"');
+      // These are transport prompts. The main-owned tool still verifies the lease and operation.
+      if(this.managedApprovalAttached)for(const tool of managedToolApprovals)
         args.push('-c','mcp_servers.gpusampling.tools.'+tool+'.approval_mode="approve"');
       env.GSS_MCP_TOKEN = worker.tokens.mcp;
     }

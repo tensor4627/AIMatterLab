@@ -37,7 +37,7 @@ async function openObservedTerminal(page,human=false){
    return original(method,data);
   };return window.renderTest('App');
  },human);
- await page.getByText('Preserved terminal history',{exact:true}).waitFor();await page.locator('.composer textarea').fill('Keep these unsent terminal instructions');await page.getByTestId('unified-compute-entry').click();await page.getByTestId('saved-compute-profile').getByRole('button',{name:'交互式登录',exact:true}).click();await page.getByRole('region',{name:'SSH 终端',exact:true}).locator('.xterm').waitFor();
+ await page.getByText('Preserved terminal history',{exact:true}).waitFor();await page.locator('.composer textarea').fill('Keep these unsent terminal instructions');await page.getByTestId('unified-compute-entry').click();await page.getByTestId('saved-compute-profile').getByRole('button',{name:'继续原连接',exact:true}).click();await page.getByRole('region',{name:'SSH 终端',exact:true}).locator('.xterm').waitFor();
 }
 
 export async function frontendTerminalReadObservationCases({check,out}){
