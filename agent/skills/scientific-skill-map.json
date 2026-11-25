@@ -123,7 +123,8 @@
       "id": "studio-tool-onboarding",
       "source": "studio",
       "folder": "studio-tool-onboarding",
-      "files": ["SKILL.md"]
+      "files": ["SKILL.md"],
+      "reference_files": ["references/local-onboarding-template.md"]
     },
     {
       "id": "studio-md-workflow",
@@ -147,7 +148,7 @@
       "files": [
         "SKILL.md"
       ],
-      "reference_files": ["references/native-input.md"]
+      "reference_files": ["references/neb.json", "references/native-input.md"]
     },
     {
       "id": "studio-training-workflow",
@@ -267,7 +268,8 @@
       "skills": ["studio-tool-onboarding"],
       "tools": ["search_software_docs", "read_software_docs"],
       "status": "bundled_tool_definition_and_configuration_guidance",
-      "phase": "discovery"
+      "phase": "discovery",
+      "reference_files": {"studio-tool-onboarding": ["references/local-onboarding-template.md"]}
     },
     {
       "id": "product.workbench",
@@ -375,7 +377,7 @@
       "status": "implemented_native_adapter_with_bundled_guidance",
       "phase": "authoring",
       "reference_files": {
-        "studio-neb-workflow": ["references/native-input.md"]
+        "studio-neb-workflow": ["references/neb.json", "references/native-input.md"]
       }
     },
     {
@@ -673,7 +675,8 @@
       "phase": "results",
       "reference_files": {
         "studio-compute-workflow": [
-          "references/reconcile.md"
+          "references/reconcile.md",
+          "references/connection-recovery.md"
         ]
       }
     },
@@ -725,7 +728,8 @@
       "phase": "discovery",
       "reference_files": {
         "studio-compute-workflow": [
-          "references/compute-discovery.md"
+          "references/compute-discovery.md",
+          "references/connection-recovery.md"
         ]
       }
     },
@@ -737,7 +741,7 @@
       "tools": ["list_resource_tools", "discover_resource_tool_scripts", "plan_resource_tool_setup", "read_resource_tool_setup", "project_skill_catalog", "read_project_skill", "write_project_skill", "search_software_docs", "read_software_docs"],
       "status": "resource_scoped_tool_configuration",
       "phase": "workspace",
-      "reference_files": {"studio-compute-workflow": ["references/resource-tools.md"]}
+      "reference_files": {"studio-compute-workflow": ["references/resource-tools.md", "references/connection-recovery.md"]}
     },
     {
       "id": "cluster.workspace-setup",
@@ -747,7 +751,7 @@
       "status": "implemented_selected_connection_authoring_workspace",
       "adaptation": "Confirm the resource root during first desktop handoff. Query the conversation's actual allocation with read_session_workspace. setup_base_workspace describes the authoring workspace on its advertised service path.",
       "phase": "workspace",
-      "reference_files": {"studio-compute-workflow": ["references/base-workspace.md"]}
+      "reference_files": {"studio-compute-workflow": ["references/base-workspace.md", "references/connection-recovery.md"]}
     },
     {
       "id": "cluster.connection-setup",
@@ -847,7 +851,8 @@
           "references/compute-profile.schema.json",
           "references/scientific-gates.md",
           "references/reconcile.md",
-          "references/execution.md"
+          "references/execution.md",
+          "references/connection-recovery.md"
         ]
       }
     },
@@ -890,7 +895,8 @@
       ],
       "status": "read_only_compatibility_guidance_builds_are_separate_reviewed_stage",
       "phase": "toolchain",
-      "adaptation": "Do not auto-attach to ordinary MD or require benchmarks for routine use; never invoke an unrequested build or fallback from selected AOTI."
+      "adaptation": "Do not auto-attach to ordinary MD or require benchmarks for routine use; never invoke an unrequested build or fallback from selected AOTI.",
+      "reference_files": {"studio-compute-workflow": ["references/connection-recovery.md"]}
     },
     {
       "id": "workflow.roadmap",

@@ -9,7 +9,7 @@ For native NEB use `describe_engine` with `gpumd.neb`. `neb.pydyn` provides plan
 
 Preserve the user's endpoint paths, optimizer controls and cell mode. Resolve fixed/variable cell, pressure, interpolation, images, climbing choice, force tolerance and step limit from actual intent or source-backed input. Label delegated demonstration settings. Use the exact current contract and a real run.in; driver paths belong to file references, not unknown executable-control fields.
 
-For native input assembly, read [the native input review and tested syntax example](references/native-input.md) by its advertised document ID on `neb.gpumd`.
+For a bound and activated custom or resource tool, read its resource execution skill first. For native `gpumd.neb`, use `describe_engine` and read [the NEB parameter contract](references/neb.json) and [the native input review and tested syntax example](references/native-input.md) by their advertised document IDs on `neb.gpumd`.
 
 For a saved workflow, write the real inputs in its authoring directory, use the current SHA before replacing a file, and update the same task with `present_task`. Reuse supplied structures, potential and path. For an explicitly delegated independent job in ordinary chat, follow `cluster.lsf-slurm-deployment` on the acquired resource. Use the returned preparation and validation receipts for that run. A draft-only request ends at saved inputs. A reviewed workflow uses its own snapshot and execution controls.
 

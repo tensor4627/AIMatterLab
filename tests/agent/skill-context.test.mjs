@@ -107,6 +107,25 @@ test('The reviewed compact compute guide preserves prior overlays without accept
  }finally{f.cleanup();}
 });
 
+test('A v0.2.5 overlay loads with the v0.2.7 parent and preserves its provenance bytes',async()=>{
+ const f=fixture();try{
+  const privateRoot=overlay(f),selection=localSkills([privateRoot])[0];
+  const provenance=path.join(privateRoot,'provenance.json'),parent=path.join(f.bundle,'studio-compute-workflow','SKILL.md');
+  const previousParent='871c06a6fabcb7f424fff7b9eff01672bb3e3b3e000aaeb441099cf5c35fb122';
+  mutateJson(provenance,value=>{value.portable_skill_sha256=previousParent;});
+  const original=fs.readFileSync(provenance);
+  const result=await selectedSkillContext(args(f,selection,{privateRoot}));
+  assert.equal(result.attachments.length,4);
+  assert(result.text.includes(previousParent));
+  assert.deepEqual(fs.readFileSync(provenance),original);
+  mutateJson(provenance,value=>{value.portable_skill_sha256='b'.repeat(64);});
+  await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),error=>error.code==='invalid_or_stale_provenance');
+  fs.writeFileSync(provenance,original);
+  fs.appendFileSync(parent,'\nA different future revision.\n');
+  await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),error=>error.code==='invalid_or_stale_provenance');
+ }finally{f.cleanup();}
+});
+
 test('Generic unrelated registered skills remain entry-only and never invoke a profile validator',async()=>{
  const f=fixture();try{
   const generic=path.join(f.root,'generic');fs.mkdirSync(generic);const entry='---\nname: unrelated-skill\ndescription: Fixture\n---\nRead [private](private.json).\n';fs.writeFileSync(path.join(generic,'SKILL.md'),entry);fs.writeFileSync(path.join(generic,'private.json'),'PRIVATE_NOT_SELECTED');

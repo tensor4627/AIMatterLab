@@ -17,7 +17,7 @@ from studio_worker.infrastructure.util import atomic_json, contained, stable_fil
 from studio_worker.tools import resource_tool_git as git_ops
 from studio_worker.tools import resource_tool_build as builder
 from studio_worker.tools.resource_tool_manifest import (
-    SHA256, SLUG, absolute_path, args_for, fields, file_receipt, fingerprint, manifest, match, numeric, relative_path,
+    SHA256, SLUG, absolute_path, args_for, fields, file_receipt, fingerprint, manifest, match, numeric, parameter_specs_map, relative_path,
 )
 from studio_worker.tools.resource_tool_sources import CHUNK, MAX_PACKAGE, copy_release, discover, download, extract_archive
 
@@ -100,11 +100,31 @@ def _closure(source, executable, files, interpreter, profile, dependencies):
     }
 
 
+GIT_OBJECT = re.compile(r'[a-f0-9]{40}|[a-f0-9]{64}')
+
+
+def function_tool_id(package_id, function_id):
+    slug = function_id.replace('.', '-')
+    candidate = package_id + '--' + slug
+    if len(candidate) <= 63:
+        return candidate
+    digest = hashlib.sha256((package_id + '\0' + function_id).encode('utf-8')).hexdigest()[:10]
+    prefix = package_id[:24].rstrip('-')
+    tail = slug[:max(0, 63 - len(prefix) - 13)].strip('-')
+    return (prefix + '--' + tail + '-' + digest) if tail else (prefix + '--' + digest)
+
+
 def _verify_files(version):
     for name, expected in {**version['files'], version['executable']:version['executable_sha256']}.items():
         observed = file_receipt(name)
         if observed['path'] != version.get('resolved_files', {}).get(name,name) or observed['sha256'] != expected:
             raise ValueError('The tested executable or supporting file changed: ' + name)
+    if version.get('install_tree_sha256'):
+        install_root = Path(version.get('install_root', ''))
+        if not install_root.is_absolute() or install_root.resolve(strict=True) != install_root or not install_root.is_dir():
+            raise ValueError('The tested tool directory changed: ' + str(install_root))
+        if builder.source_tree(install_root) != version['install_tree_sha256']:
+            raise ValueError('The tested executable or supporting file changed: ' + str(install_root))
 
 
 def resolve_invocation(service, tool_id, parameters, *, environment_id=None, cluster_id=None, activation_id=None):
@@ -112,6 +132,7 @@ def resolve_invocation(service, tool_id, parameters, *, environment_id=None, clu
     if not isinstance(tool_id, str) or not tool_id.startswith('private.') or not SLUG.fullmatch(tool_id[8:]):
         return None
     rows = sorted(service.store.list(ACTIVE), key=lambda row: row['activated_at'], reverse=True)
+    matched = []
     for row in rows:
         target = row['target']
         if (row['engine'] != tool_id or environment_id is not None and target['environment_id'] != environment_id or
@@ -127,13 +148,24 @@ def resolve_invocation(service, tool_id, parameters, *, environment_id=None, clu
                               if queue['id'] == target['queue_target_id'] and queue['enabled']), None)
         if not effective or environment_hash(effective) != row['environment_sha256']:
             continue
-        _verify_files(row['version'])
-        definition = row['manifest']
-        return {'activationId':row['id'], 'catalogueSha256':row['catalogue_sha256'],
-                'inputs':{key:(item['filename'],item['format']) for key,item in definition['inputs'].items()},
-                'outputs':{key:(item['filename'],item['format']) for key,item in definition['outputs'].items()},
-                'argv':row['command_prefix'] + args_for(definition, parameters), 'version':row['version']}
-    return None
+        matched.append(row)
+    if not matched:
+        return None
+    if activation_id is None and len(matched) > 1:
+        identities = {
+            (candidate['version']['onboarding']['package_id'], candidate['version']['onboarding']['function_id'])
+            for candidate in matched if candidate['version'].get('onboarding')
+        }
+        if len(identities) > 1:
+            raise ValueError('Multiple functions share engine ' + tool_id + '; configure distinct function-scoped tool IDs or specify an activation')
+    row = matched[0]
+    _verify_files(row['version'])
+    definition = row['manifest']
+    argv = None if parameters is None else row['command_prefix'] + args_for(definition, parameters)
+    return {'activationId':row['id'], 'catalogueSha256':row['catalogue_sha256'],
+            'inputs':{key:(item['filename'],item['format']) for key,item in definition['inputs'].items()},
+            'outputs':{key:(item['filename'],item['format']) for key,item in definition['outputs'].items()},
+            'argv':argv, 'version':row['version']}
 
 
 def registered_engines(service):
@@ -297,6 +329,27 @@ class ResourceTools:
                 if previous['plan_sha256'] != plan_sha256:
                     raise ValueError('This request ID already has a different reviewed plan')
                 return self._public(previous)
+            if onboarding is not None:
+                wanted = (onboarding['package_id'], onboarding['function_id'])
+                for existing_row in self.store.list(SETUP):
+                    if (existing_row['id'] == identifier or existing_row['resource_id'] != data['resource_id'] or
+                            existing_row['workspace_id'] != data['workspace_id'] or
+                            existing_row['manifest']['id'] != definition['id'] or
+                            existing_row['status'] == 'failed'):
+                        continue
+                    other = existing_row.get('onboarding')
+                    if other and (other['package_id'], other['function_id']) != wanted:
+                        raise ValueError('This tool ID is already assigned to another function; use ' +
+                                         function_tool_id(onboarding['package_id'], onboarding['function_id']))
+                for active_row in self.store.list(ACTIVE):
+                    if (active_row['resource_id'] != data['resource_id'] or
+                            active_row['workspace_id'] != data['workspace_id'] or
+                            active_row['engine'] != 'private.' + definition['id']):
+                        continue
+                    other = active_row.get('version', {}).get('onboarding')
+                    if other and (other['package_id'], other['function_id']) != wanted:
+                        raise ValueError('This tool ID is already assigned to another function; use ' +
+                                         function_tool_id(onboarding['package_id'], onboarding['function_id']))
             row = self.store.put(SETUP, {**preview, 'schema_version':1, 'plan_sha256':plan_sha256, 'revision':1,
                                          'status':'planned', 'stage':'review', 'activity':[]})
             return self._public(row)
@@ -399,6 +452,8 @@ class ResourceTools:
             expected = row['build']['program']['sha256'] if 'build' in definition else recorded['executable_sha256']
             if not Path(result['path']).is_relative_to(destination) or result['sha256'] != expected:
                 raise ValueError('Installed executable differs; configure a new version or restore the original bytes')
+            if 'build' not in definition and recorded.get('source_tree_sha256') and builder.source_tree(destination) != recorded['source_tree_sha256']:
+                raise ValueError('Installed tool directory differs; configure a new version or restore the original bytes')
             return result
 
         if destination.exists():
@@ -438,7 +493,7 @@ class ResourceTools:
                 if not executable.is_relative_to(root) or not executable.is_file():
                     raise ValueError('Release does not contain the reviewed executable path')
                 executable.chmod(0o700)
-                metadata = {'executable_sha256':file_receipt(executable)['sha256']}
+                metadata = {'executable_sha256':file_receipt(executable)['sha256'], 'source_tree_sha256':builder.source_tree(root)}
             atomic_json(marker, {'source':source, **metadata})
             with self.service._resource_tool_install:
                 if not destination.exists():
@@ -547,6 +602,7 @@ class ResourceTools:
             prior_version = binding.get('version', {})
             if (run['command'] == argv and binding.get('files') == expected and dependencies == version['dependencies'] and
                     prior_version.get('version') == version['version'] and prior_version.get('resolved_files') == version['resolved_files'] and
+                    prior_version.get('install_tree_sha256') == version.get('install_tree_sha256') and
                     prior_version.get('onboarding') == version.get('onboarding') and
                     run['project_id'] == target['project_id'] and run['cluster_id'] == target['cluster_id'] and
                     run.get('queue_target_snapshot', {}).get('id') == target.get('queue_target_id') and
@@ -640,11 +696,26 @@ class ResourceTools:
                 raise ValueError('A supporting file points outside its reviewed installation')
             files[str(base/name)] = observed
         onboarding = row.get('onboarding')
-        if onboarding and (executable['sha256'] != onboarding['entrypoint'] or
-                           any(files[str(base/name)]['sha256'] != digest for name,digest in onboarding['support'].items())):
-            raise ValueError('The entrypoint or supporting files differ from the selected tool package')
+        if onboarding:
+            if source['kind'] == 'git' and onboarding.get('entrypoint_git_object'):
+                blobs = git_ops.blob_objects(git, Path(row['install_root']), source['commit'])
+                support_blobs = onboarding.get('support_git_objects')
+                support_mismatch = (
+                    any(blobs.get(name) != oid for name, oid in support_blobs.items())
+                    if support_blobs is not None else
+                    any(files[str(base/name)]['sha256'] != digest for name, digest in onboarding['support'].items())
+                )
+                if blobs.get(source['executable']) != onboarding['entrypoint_git_object'] or support_mismatch:
+                    raise ValueError('The entrypoint or supporting files differ from the selected tool package')
+            elif (executable['sha256'] != onboarding['entrypoint'] or
+                  any(files[str(base/name)]['sha256'] != digest for name, digest in onboarding['support'].items())):
+                raise ValueError('The entrypoint or supporting files differ from the selected tool package')
         prefix, version = _closure(command, executable, files, definition.get('interpreter'), effective, definition.get('dependencies', []))
         version['version'] = definition['version']
+        if source['kind'] != 'installed':
+            install_root = str(Path(row['install_root']).resolve(strict=True))
+            version['install_root'] = install_root
+            version['install_tree_sha256'] = builder.source_tree(Path(install_root))
         if onboarding:
             version['onboarding'] = onboarding
         inputs = self._test_inputs(row, workspace, staging, project)
@@ -718,7 +789,7 @@ class ResourceTools:
             test['onboarding'] = row['onboarding']
         summary = {key:row[key] for key in ('resource_id','workspace_id','target','environment_sha256')}
         metadata = {'tool':{key:definition[key] for key in ('id','name','version','source','argv','inputs','outputs',
-                    'interpreter','dependencies','parameters','support_files') if key in definition},
+                    'interpreter','dependencies','parameters','parameter_specs','support_files') if key in definition},
                     'target':row['target'], 'environment_sha256':row['environment_sha256'],
                     'version':row['version'], 'git':row['git'], 'source_documents':definition.get('citations', []),
                     'test':{'fixtures':row['fixtures'], 'run_id':run['id'], 'job_id':run['job_id'], 'outputs':outputs,
@@ -880,14 +951,15 @@ class ResourceTools:
 
 def tool_onboarding(value, definition):
     fields(value, ('package_id','package_version','manifest_sha256','source_commit','function_id',
-                   'reference_test_case_id','entrypoint','support'))
-    if value['package_id'] != definition['id']:
-        raise ValueError('The tool package and setup IDs differ')
+                   'reference_test_case_id','entrypoint','support'),
+           ('entrypoint_git_object','support_git_objects','parameter_specs'))
     for key in ('package_version','manifest_sha256','entrypoint'):
         match(value[key], SHA256, 'Expected the exact registered package and entrypoint digests')
-    match(value['source_commit'], re.compile(r'[a-f0-9]{40}|[a-f0-9]{64}'), 'Expected the registered commit')
+    match(value['source_commit'], GIT_OBJECT, 'Expected the registered commit')
     for key in ('function_id','reference_test_case_id'):
         match(value[key], re.compile(r'(?=.{1,96}$)[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*'), 'Expected a declared function or reference case')
+    if definition['id'] not in (value['package_id'], function_tool_id(value['package_id'], value['function_id'])):
+        raise ValueError('The tool package and setup IDs differ')
     source = definition['source']
     if (source['kind'] == 'git' and source['commit'] != value['source_commit'] or
         source['kind'] == 'installed' and source.get('sha256') != value['entrypoint'] or
@@ -898,6 +970,20 @@ def tool_onboarding(value, definition):
     for name, digest in value['support'].items():
         relative_path(name)
         match(digest, SHA256, 'Expected the registered support file digest')
+    if 'entrypoint_git_object' in value:
+        if source['kind'] != 'git':
+            raise ValueError('Git blob digests apply only to Git tool sources')
+        match(value['entrypoint_git_object'], GIT_OBJECT, 'Expected the registered Git entrypoint blob digest')
+    if 'support_git_objects' in value:
+        if source['kind'] != 'git' or not isinstance(value['support_git_objects'], dict) or set(value['support_git_objects']) != set(definition.get('support_files', [])):
+            raise ValueError('Pin every reviewed package support Git blob digest')
+        for name, oid in value['support_git_objects'].items():
+            relative_path(name)
+            match(oid, GIT_OBJECT, 'Expected the registered support Git blob digest')
+    if 'parameter_specs' in value:
+        parameter_specs_map(value['parameter_specs'])
+        if definition.get('parameter_specs') != value['parameter_specs']:
+            raise ValueError('Manifest parameter_specs must match the selected package function')
     return deepcopy(value)
 
 
@@ -917,11 +1003,28 @@ def execution_skill(definition, target, version, test, activation_id):
         template = 'Read the complete frozen argument and port definitions in the active resource tool configuration.\n'
         ports = 'Inputs: ' + ', '.join(definition['inputs']) + '\nOutputs: ' + ', '.join(definition['outputs'])
     onboarding = version.get('onboarding')
-    delivery = ('Registered delivery ' + code(onboarding['package_id']+'@'+onboarding['package_version']) +
-                ', source commit ' + code(onboarding['source_commit']) + ', declaration SHA-256 ' +
-                code(onboarding['manifest_sha256']) + '. Function ' + code(onboarding['function_id']) +
-                ' uses reference case ' + code(onboarding['reference_test_case_id']) +
-                '. Below is the outcome of the reviewed target test.\n\n') if onboarding else ''
+    source = definition.get('source') or {}
+    source_kind = source.get('kind')
+    if onboarding:
+        delivery = ('Registered delivery ' + code(onboarding['package_id']+'@'+onboarding['package_version']) +
+                    ', source commit ' + code(onboarding['source_commit']) + ', declaration SHA-256 ' +
+                    code(onboarding['manifest_sha256']) + '. Function ' + code(onboarding['function_id']) +
+                    ' uses reference case ' + code(onboarding['reference_test_case_id']) +
+                    '. Below is the outcome of the reviewed target test.\n\n')
+    elif source_kind == 'git' and source.get('url') and source.get('commit'):
+        delivery = ('Source provenance: git ' + code(source['url']) + ' at commit ' +
+                    code(source['commit']) + '. Below is the outcome of the reviewed target test.\n\n')
+    elif source_kind == 'installed' and source.get('executable'):
+        digest_note = ' (SHA-256 ' + code(source['sha256']) + ')' if source.get('sha256') else ''
+        delivery = ('Source provenance: installed executable ' + code(source['executable']) + digest_note +
+                    '. Below is the outcome of the reviewed target test.\n\n')
+    elif source_kind:
+        url_note = ' ' + code(source['url']) if source.get('url') else ''
+        digest_note = ' with SHA-256 ' + code(source['sha256']) if source.get('sha256') else ''
+        delivery = ('Source provenance: ' + code(source_kind) + url_note + digest_note +
+                    '. Below is the outcome of the reviewed target test.\n\n')
+    else:
+        delivery = ''
     body = ('---\nname: ' + name + '\ndescription: ' + description + '\n---\n\n'
             '# ' + definition['name'] + ' ' + definition['version'] + '\n\n'
             'Use ' + code('private.' + definition['id']) + ' in a confirmed workflow on this resource. '

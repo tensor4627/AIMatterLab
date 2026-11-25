@@ -42,6 +42,36 @@ test('a selected delivery only creates a reviewed draft on an acquired resource 
  assert(!f.calls.some(row=>row.route.endsWith('/start')));
 });
 
+test('plan_resource_tool_setup propagates declared parameter_specs and enforces function-scoped IDs for multi-function packages',async t=>{
+ const entryA=sha('fn-a'),entryB=sha('fn-b'),packageVersion=sha('multi-ver'),commit='b'.repeat(40);
+ const record={immutable:true,package_id:'multi',package_version:packageVersion,source_commit:commit,manifest_sha256:sha('manifest'),
+  files:[{path:'repo/a.py',kind:'file',sha256:entryA,git_object:'1'.repeat(40)},{path:'repo/b.py',kind:'file',sha256:entryB,git_object:'2'.repeat(40)}],
+  manifest:{repository:{path:'repo'},functions:[
+   {id:'calc.a',entrypoint:'repo/a.py',tests:['case-a'],inputs:[],outputs:[{id:'output',type:'file',format:'json'}],
+    parameters:[{id:'steps',type:'integer',required:true},{id:'temp',type:'number',required:false,default:300}],
+    operation:{command:['{python}','{entrypoint}','{steps}','{temp}','{output}']}},
+   {id:'calc.b',entrypoint:'repo/b.py',tests:['case-b'],inputs:[],outputs:[{id:'output',type:'file',format:'json'}],
+    parameters:[],operation:{command:['{python}','{entrypoint}','{output}']}},
+  ],tests:{cases:[
+   {id:'case-a',function_id:'calc.a',expected_outputs:[{path:'out.json',format:'json'}]},
+   {id:'case-b',function_id:'calc.b',expected_outputs:[{path:'out.json',format:'json'}]},
+  ]}}};
+ const f=await fixture(t,{ownedResources:['ssh:first'],async resolveSelectedDefinition(){return {record,check(){}};}});
+ f.api.recordUserTurn({provider:'codex',method:'turn/start',projectId:'project1',params:{threadId:'setup-chat',
+  input:[{type:'text',text:'Configure multi-function package on the first resource.'}]}});
+ const base={resource_id:'ssh:first',route:'fresh',cluster_id:'cluster',environment_id:'env',
+  selected_definition:{package_ref:'turn-ref',function_id:'calc.a',test_case_id:'case-a'},
+  manifest:{id:'multi--calc-a',name:'Multi A',version:'1',source:{kind:'git',url:'https://github.com/example/multi.git',commit,executable:'a.py'},
+   interpreter:'python',argv:['{param:steps}','{param:temp}','{output:output}'],inputs:{},outputs:{output:{filename:'out.json',format:'json'}},
+   test:{inputs:{},parameters:{steps:10,temp:500},max_seconds:5,outputs:{output:{json_keys:['ok']}}}}};
+ await assert.rejects(f.api.call('plan_resource_tool_setup',{...base,manifest:{...base.manifest,id:'multi'}},f.scope),/function-scoped tool ID/);
+ const draft=await f.api.call('plan_resource_tool_setup',base,f.scope);
+ const planCall=f.calls.find(row=>row.route.endsWith('/plan'));
+ assert.deepEqual(planCall.data.manifest.parameter_specs,{steps:{type:'integer',required:true},temp:{type:'number',required:false,default:300}});
+ assert.deepEqual(draft.onboarding.parameter_specs,planCall.data.manifest.parameter_specs);
+ assert.equal(draft.onboarding.entrypoint_git_object,'1'.repeat(40));
+});
+
 async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>null,developerCompute,reportedHome,discover=()=>[],
  resolveSelectedDefinition,ownedResources}={}){
  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'aimlab-resource-tools-'));

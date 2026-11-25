@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "engine": "gpumd.neb",
+  "aimlab_tool_id": "gpu-sampling",
+  "required_inputs": [
+    "run.in"
+  ],
+  "parameter_groups": {
+    "neb": {
+      "allowed_keys": [
+        "optimizer",
+        "force_tolerance",
+        "max_steps",
+        "interpolate",
+        "cell_mode",
+        "pressure_gpa",
+        "pressure_components_gpa",
+        "climb",
+        "ina",
+        "need_relax",
+        "match_cell_to_initial",
+        "potential_files",
+        "structure_files",
+        "trajectory_input",
+        "initial_file",
+        "final_file",
+        "potential_file"
+      ],
+      "choices": {
+        "optimizer": [
+          "fire"
+        ],
+        "cell_mode": [
+          "fixed",
+          "variable"
+        ]
+      },
+      "scope": "Exact declared controls accepted by neb_checks.contract; values must match the immutable run.in. Declared file fields are normalized only when they exactly identify a files entry; the worker still compares snapshotted names, ordering and all controls. Driver paths, review notes and provenance belong to files/step descriptions, never inside neb. No unit conversion or optimizer convergence claim.",
+      "input_file_parameters": [
+        "initial_file",
+        "final_file",
+        "potential_file"
+      ],
+      "input_file_list_parameters": [
+        "structure_files",
+        "potential_files"
+      ]
+    }
+  },
+  "rules": {
+    "zh-CN": [
+      "先通过 describe_engine 核对 gpumd.neb。parameters.neb 仅接受 parameter_groups.neb 声明的字段。驱动路径、审阅记录和来源写入文件字段或步骤描述。",
+      "声明值和文件顺序须与不可变 run.in 及其输入快照完全一致。使用恰好一条 neb_run fire，容差为有限正数，步数上限为正整数。",
+      "核对端点或路径各图像的非零原子数、逐原子元素顺序、PBC 和有限且非奇异的晶胞。固定晶胞要求晶胞一致或显式映射。核对势覆盖的元素。",
+      "neb.pydyn 仅提供规划指导。",
+      "运行后检查图像几何、能量、能量基准及优化器日志，区分达到容差和耗尽步数。仅凭有限路径或短程优化无法确认鞍点或物理能垒。"
+    ],
+    "en": [
+      "Check gpumd.neb with describe_engine. Use only the keys declared in parameter_groups.neb inside parameters.neb. Put driver paths, review notes and provenance in file fields or step descriptions.",
+      "Match declared values and file order to the immutable run.in and input snapshot. Use exactly one neb_run fire with a positive finite tolerance and a positive integer step limit.",
+      "Check nonzero atom counts, per-atom element order, PBC and finite nonsingular cells across the supplied endpoints or path. Fixed-cell inputs require matching cells or explicit cell mapping. Check potential species coverage.",
+      "neb.pydyn provides planning guidance only.",
+      "After execution, check image geometry, energies, the energy reference and the optimizer log. Distinguish reaching tolerance from exhausting the step limit. A finite path or short optimization alone cannot establish a saddle point or physical barrier."
+    ]
+  },
+  "source_receipt": {
+    "schema_version": 1,
+    "status": "source_observed_not_runtime_validated",
+    "observed_at": "2026-11-25T19:36:53+08:00",
+    "rule_input_encoding": "UTF-8 JSON.stringify(rules), in document key order",
+    "rule_input_sha256": "07598802db10ef67602e8710c42315ff56b03415653298cffeb423f7593904d1",
+    "local_files": [
+      {
+        "source_id": "studio",
+        "path": "contracts/tools/engine-contracts.json",
+        "sha256": "3863b2b78d98dae11843429b2c3c430747378e06d2b683910d43e09cef71ceff",
+        "bytes": 16176,
+        "observed_commit": "4b0fee2b2c85741e307dd330806dd57aa0334570",
+        "role": "registered_gpumd_neb_engine_contract",
+        "line_ranges": [
+          [10, 61]
+        ]
+      },
+      {
+        "source_id": "studio-worker",
+        "path": "studio_worker/tools/neb_checks.py",
+        "sha256": "db24647142a3c0a989277e5074c5c9ce1f5fb3127448a28b10ca21b1b4c7c4e1",
+        "bytes": 8025,
+        "observed_commit": "4b0fee2b2c85741e307dd330806dd57aa0334570",
+        "role": "native_neb_input_and_geometry_audit",
+        "line_ranges": [
+          [5, 86],
+          [88, 118]
+        ]
+      }
+    ]
+  }
+}

@@ -32,6 +32,13 @@ def invocation(argv, version, inputs, output_root, owner, activation, writable_r
     for name, expected in files.items():
         if not Path(name).is_absolute() or source_digest(name) != expected:
             raise ValueError('The reviewed tool file changed: ' + name)
+    if version.get('install_tree_sha256'):
+        from studio_worker.tools import resource_tool_build as builder
+        install_root = Path(version.get('install_root', ''))
+        if not install_root.is_absolute() or install_root.resolve(strict=True) != install_root or not install_root.is_dir():
+            raise ValueError('The reviewed tool directory changed: ' + str(install_root))
+        if builder.source_tree(install_root) != version['install_tree_sha256']:
+            raise ValueError('The reviewed tool directory changed: ' + str(install_root))
     for item in inputs.values():
         observed = stable_file_snapshot(item['path'])
         if any(observed[k] != item[k] for k in ('sha256', 'size')):
@@ -71,7 +78,7 @@ def bound_batch_body(run, python, remote, exports, receipt):
                'if [ "${_STUDIO_HAS_CUDA:-0}" = 1 ]; then export CUDA_VISIBLE_DEVICES=$_STUDIO_ASSIGNED_CUDA; fi',
                *exports, 'cd -P -- "$_STUDIO_COMPUTE_CWD" && [ "$(pwd -P)" = "$_STUDIO_COMPUTE_CWD" ] || exit 76',
                'mkdir -p -- .aimatterlab-tmp .aimatterlab-cache || exit 76',
-               'export TMPDIR="$PWD/.aimatterlab-tmp" XDG_CACHE_HOME="$PWD/.aimatterlab-cache"']
+               'export TMPDIR="$PWD/.aimatterlab-tmp" XDG_CACHE_HOME="$PWD/.aimatterlab-cache" PYTHONDONTWRITEBYTECODE=1']
     trusted = '.studio/workspace-confinement.py'
     expected = sha256(confinement_source()).hexdigest()
     gpu = ' --gpu' if resources.get('gpus', 0) > 0 else ''
@@ -111,6 +118,39 @@ for name, expected in r['bound_invocation']['files'].items():
     if resolved and str(Path(name).resolve(strict=True)) != resolved:
         raise ValueError('Frozen link resolves to a different compute-node file: ' + name)
     check(name, expected)
+install_tree = r['bound_invocation']['version'].get('install_tree_sha256')
+if install_tree:
+    root = Path(r['bound_invocation']['version'].get('install_root', ''))
+    if not root.is_absolute() or root.resolve(strict=True) != root or not root.is_dir():
+        raise ValueError('Frozen tool directory changed in compute-node environment: ' + str(root))
+    entries = []
+    for current, dirs, names in os.walk(root, followlinks=False):
+        current = Path(current)
+        for name in dirs:
+            p = current / name
+            if name == '.git' or not p.is_symlink():
+                continue
+            if not p.resolve(strict=True).is_relative_to(root):
+                raise ValueError('Tool directory link leaves reviewed tree')
+            entries.append((p.relative_to(root).as_posix(), 'directory-link', os.readlink(p)))
+        dirs[:] = sorted(name for name in dirs if name != '.git' and not (current / name).is_symlink())
+        for name in sorted(names):
+            p = current / name
+            if p == root / '.aimatterlab-source.json':
+                continue
+            rel = p.relative_to(root).as_posix()
+            if p.is_symlink() and not p.resolve(strict=True).is_relative_to(root):
+                raise ValueError('Tool file link leaves reviewed tree: ' + rel)
+            if not p.is_file():
+                raise ValueError('Unexpected non-file in tool directory: ' + rel)
+            st = p.stat()
+            d = hashlib.sha256()
+            with open(p, 'rb') as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    d.update(block)
+            entries.append((rel, d.hexdigest(), os.readlink(p) if p.is_symlink() else bool(st.st_mode & 0o111)))
+    if hashlib.sha256(json.dumps(sorted(entries), separators=(',', ':')).encode()).hexdigest() != install_tree:
+        raise ValueError('Frozen tool directory differs in compute-node environment: ' + str(root))
 for item in r['snapshots']:
     check(Path('simulation') / item['name'], item['sha256'])
 if not os.access(r['command'][0], os.X_OK):

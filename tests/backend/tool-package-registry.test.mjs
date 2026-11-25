@@ -12,7 +12,7 @@ import {packageIdentityText} from "../../contracts/tools/tool-package.mjs";
 import {SelectedManagedGuidance} from "../../agent/skills/selected-managed-guidance.mjs";
 import {resolveReadPolicy} from "../../agent/skills/read-policy.mjs";
 import {managedToolSkillContext} from "../../agent/skills/managed-tool-context.mjs";
-import {bindResourceToolDefinition} from "../../backend/main/compute/resource-tool-definition.mjs";
+import {bindResourceToolDefinition,functionToolId} from "../../backend/main/compute/resource-tool-definition.mjs";
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),nullFile=process.platform==='win32'?'NUL':'/dev/null';
 const env={...Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('GIT_')&&key!=='NODE_OPTIONS')),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:nullFile,GIT_TERMINAL_PROMPT:'0'};
@@ -66,6 +66,7 @@ test('a selected immutable package advertises its exact command and can bind a c
  assert.equal(attached.package_version,record.package_version);
  assert.equal(attached.manifest_sha256,record.manifest_sha256);
  assert.equal(attached.entrypoint,sha(fs.readFileSync(path.join(h.repo,'src/main.py'))));
+ assert.equal(attached.entrypoint_git_object,git(h.repo,['rev-parse','HEAD:src/main.py']).trim());
  assert.equal(attached.reference_test_case_id,'minimal');
  assert.throws(()=>bindResourceToolDefinition(binding.record,selectedDefinition,{...draft,id:'unrelated'}),/selected package ID/);
  assert.throws(()=>bindResourceToolDefinition(binding.record,selectedDefinition,{...draft,argv:[]}),/target arguments differ/);
@@ -74,6 +75,72 @@ test('a selected immutable package advertises its exact command and can bind a c
  assert.throws(()=>bindResourceToolDefinition(binding.record,selectedDefinition,{...draft,source:{...draft.source,commit:'f'.repeat(40)}}),/exact Git commit/);
  guidance.clear(scope.provider,scope.threadId);
  assert.throws(binding.check,/current conversation/);
+}));
+
+test('multi-function packages require distinct function-scoped IDs, preserve parameter contracts, and emit cross-platform Git blob OIDs',()=>fixture(async h=>{
+ write(path.join(h.repo,'src/other.py'),'# second function\n');
+ write(path.join(h.repo,'src/helper.py'),'# shared helper\n');
+ h.commit();
+ const display={priority:100,advanced:false,reason:'Required'};
+ h.manifest.functions=[
+  {id:'run.primary',name:'Primary',description:'Primary function',entrypoint:'upstream-layout/src/main.py',inputs:[],
+   outputs:[{id:'result',type:'file',format:'json',description:'Result',required:true,display}],
+   parameters:[
+    {id:'steps',type:'integer',description:'Steps',required:true,display},
+    {id:'temperature',type:'number',description:'Temperature',required:false,default:300,default_behavior:'Room temperature',default_source:'package',display},
+   ],
+   operation:{command:['{python}','{entrypoint}','--steps','{steps}','--temp','{temperature}','{result}'],failure_handling:'Fail closed'},
+   tests:['minimal']},
+  {id:'run.secondary',name:'Secondary',description:'Secondary function',entrypoint:'upstream-layout/src/other.py',inputs:[],
+   outputs:[{id:'result',type:'file',format:'json',description:'Result',required:true,display}],
+   parameters:[],
+   operation:{command:['{python}','{entrypoint}','{result}'],failure_handling:'Fail closed'},
+   tests:['minimal-secondary']},
+ ];
+ h.manifest.tests.cases=[
+  {...h.manifest.tests.cases[0],function_id:'run.primary'},
+  {...h.manifest.tests.cases[0],id:'minimal-secondary',function_id:'run.secondary'},
+ ];
+ h.save();
+ const record=h.registry.register({package_root:h.packageRoot});
+ const primaryId=functionToolId('atlas','run.primary');
+ assert.equal(primaryId,'atlas--run-primary');
+ const baseDraft={
+  id:primaryId,
+  source:{kind:'git',commit:record.source_commit,executable:'src/main.py'},
+  interpreter:'python',
+  support_files:['src/helper.py'],
+  argv:['--steps','{param:steps}','--temp','{param:temperature}','{output:result}'],
+  inputs:{},outputs:{result:{filename:'smoke-result.json',format:'json'}},
+  test:{parameters:{steps:10,temperature:500},outputs:{result:{json_keys:['result']}}},
+ };
+ const sel={package_ref:'turn-ref',function_id:'run.primary',test_case_id:'minimal'};
+ assert.throws(()=>bindResourceToolDefinition(record,sel,{...baseDraft,id:'atlas'}),/function-scoped tool ID/);
+ assert.throws(()=>bindResourceToolDefinition(record,sel,{...baseDraft,parameters:{steps:10}}),/Required function parameters/);
+ assert.throws(()=>bindResourceToolDefinition(record,sel,{...baseDraft,parameters:{temperature:500}}),/Optional parameter defaults must match/);
+ assert.throws(()=>bindResourceToolDefinition(record,sel,{...baseDraft,test:{...baseDraft.test,parameters:{temperature:500}}}),/Supply required parameter/);
+ assert.throws(()=>bindResourceToolDefinition(record,sel,{...baseDraft,test:{...baseDraft.test,parameters:{steps:1.5}}}),/Test parameter type differs/);
+ const bound=bindResourceToolDefinition(record,sel,baseDraft);
+ assert.deepEqual(bound.parameter_specs,{steps:{type:'integer',required:true},temperature:{type:'number',required:false,default:300}});
+ assert.equal(bound.entrypoint_git_object,git(h.repo,['rev-parse','HEAD:src/main.py']).trim());
+ assert.deepEqual(bound.support_git_objects,{'src/helper.py':git(h.repo,['rev-parse','HEAD:src/helper.py']).trim()});
+
+ // CRLF checkout of the identical commit yields the exact same Git blob OID even though working-tree bytes differ.
+ const crlfPackage=path.join(h.root,'crlf-copy','atlas-package');
+ fs.cpSync(h.packageRoot,crlfPackage,{recursive:true});
+ const crlfRepo=path.join(crlfPackage,'upstream-layout');
+ git(crlfRepo,['config','core.autocrlf','true']);
+ fs.unlinkSync(path.join(crlfRepo,'src/main.py'));
+ fs.unlinkSync(path.join(crlfRepo,'src/helper.py'));
+ git(crlfRepo,['checkout','--','src/main.py','src/helper.py']);
+ const crlfMain=fs.readFileSync(path.join(crlfRepo,'src/main.py'));
+ assert.ok(crlfMain.includes('\r\n'));
+ assert.notEqual(sha(crlfMain),bound.entrypoint);
+ const crlfInspected=h.registry.inspect({package_root:crlfPackage});
+ const crlfRecord={...crlfInspected,immutable:true};
+ const crlfBound=bindResourceToolDefinition(crlfRecord,sel,baseDraft);
+ assert.equal(crlfBound.entrypoint_git_object,bound.entrypoint_git_object);
+ assert.deepEqual(crlfBound.support_git_objects,bound.support_git_objects);
 }));
 
 test('registration retains an independent complete Git snapshot, portable layout and protected Catalog namespaces',()=>fixture(h=>{

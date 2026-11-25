@@ -44,6 +44,11 @@ const port=object({filename:string,format:string});
 const artifact=object({kind:{enum:['archive','binary']},url:string,sha256:setup_id,filename:string,executable:string},
  ['kind','sha256','filename','executable']);
 const parameters=record({type:['string','number','boolean']});
+const parameter_specs=record(object({
+ type:{enum:['string','boolean','integer','number']},
+ required:{type:'boolean'},
+ default:{type:['string','number','boolean']},
+},['type','required']));
 const selected_definition=object({
  package_ref:{type:'string',description:'Opaque package_ref from scientific_skill_catalog.selected_skill.definitions in this turn.'},
  function_id:text,test_case_id:text
@@ -60,7 +65,7 @@ const manifest={
   ]},
   interpreter:{enum:['bash','python']},
   argv:{...strings,description:'Arguments after the executable. Use individual strings and optional {input:port}, {output:port} or {param:name} references. Use [] when there are no arguments. No shell operators or scheduler command.'},
-  dependencies:strings,support_files:strings,parameters,
+  dependencies:strings,support_files:strings,parameters,parameter_specs,
   citations:{type:'array',items:object({url:string,title:string,version:string},['url'])},
   build:object({steps:{type:'array',items:object({command:string,args:strings,cwd:string},['command','args'])},max_seconds:integer}),
   inputs:record(port),outputs:record(port),
@@ -460,17 +465,18 @@ export function createResourceToolController({resources,workspaces,skills,develo
       !user.includes(source.executable)&&!reviewed)){
     throw Error('Use a script from the reviewed scan or an installed path designated by the user');
    }
-   let binding,onboarding;
+   let binding,onboarding,setupManifest=args.manifest;
    if(args.selected_definition!==undefined){
     if(selected.origin.health.resource_tool_definition_schema!==1)throw Error('This job service needs the registered tool definition setup capability');
     fields(args.selected_definition,['package_ref','function_id','test_case_id']);
     if(typeof resolveSelectedDefinition!=='function')throw Error('Select a registered delivery package for this turn');
     binding=await resolveSelectedDefinition(args.selected_definition.package_ref,scope);
     onboarding=bindResourceToolDefinition(binding.record,args.selected_definition,args.manifest);
+    if(onboarding.parameter_specs)setupManifest={...args.manifest,parameter_specs:onboarding.parameter_specs};
    }
    await selected.register();
    binding?.check();
-   return plan(selected,{...args,request_id:randomUUID(),project_id},onboarding);
+   return plan(selected,{...args,manifest:setupManifest,request_id:randomUUID(),project_id},onboarding);
   }
   if(name==='read_resource_tool_setup'){
    fields(args,['resource_id','setup_id']);

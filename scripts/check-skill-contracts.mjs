@@ -24,6 +24,9 @@ const documentedControls = [
   ['studio-main-agent/references/workbench.md', 'frontend/features/tools/ToolPackagesPanel.tsx', ['随版本收录的源码仓库','选择并检查工具包','登记此工具包']],
   ['studio-main-agent/references/workbench.md', 'frontend/features/tools/ResourceToolSetup.tsx', ['查看执行技能','补写执行技能']],
   ['studio-main-agent/references/workbench.md', 'frontend/features/compute/ComputeResourceConsole.tsx', ['配置此资源的科学工具','远端总工作区']],
+  ['studio-tool-onboarding/SKILL.md', 'frontend/app/App.tsx', ['第三方工具包', '配置资源工具']],
+  ['studio-tool-onboarding/SKILL.md', 'frontend/features/tools/ToolPackagesPanel.tsx', ['选择并检查工具包', '登记此工具包']],
+  ['studio-tool-onboarding/SKILL.md', 'frontend/features/tools/SkillsWorkbench.tsx', ['高级：手动附加本地技能']],
 ];
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
@@ -95,22 +98,30 @@ export function checkSkillContracts({projectDir, map, documents}) {
   }
 
   const entries = new Set(map.skills.filter(skill => skill.source === 'studio').map(skill => skill.folder + '/SKILL.md'));
-  const entryByteBudget = 6 * 1024;
+  const entryByteBudget = 5 * 1024;
   let largestEntryBytes = 0;
   for (const name of entries) {
     assert(documents.has(name), 'Missing bundled skill entry ' + name);
     const entry = documents.get(name);
     assert.equal(/^name: (.+)$/m.exec(entry.text)?.[1].trim(), name.split('/')[0], 'Wrong skill identity in ' + name);
-    assert(entry.bytes <= entryByteBudget, name + ': keep the entry within 6 KiB and move mode-specific detail to references');
+    assert(entry.bytes <= entryByteBudget, name + ': keep the entry within 5 KiB and move mode-specific detail to references');
     largestEntryBytes = Math.max(largestEntryBytes, entry.bytes);
   }
   const releaseSources = JSON.parse(read('installation/tool-sources.json'));
   checkReleaseSources(releaseSources, routes);
+  const nebReference = 'studio-neb-workflow/references/neb.json';
+  assert(documents.has(nebReference), 'Missing bundled NEB reference ' + nebReference);
   let sourceReceipts = 0;
   for (const [name, document] of documents) {
     checkProductName(document.text, name);
+    if (name.endsWith('.md')) checkSourceAnchors(projectDir, name, document.text);
     if (!name.endsWith('.json')) continue;
     const reference = JSON.parse(document.text);
+    if (name === nebReference) {
+      const contract = engines['gpumd.neb'];
+      assert.deepEqual(reference.required_inputs, contract.required_inputs, name + ': required_inputs differs from the gpumd.neb engine contract');
+      assert.deepEqual(reference.parameter_groups?.neb, contract.parameter_groups.neb, name + ': parameter_groups.neb differs from the gpumd.neb engine contract');
+    }
     const receipt = reference.source_receipt;
     if (receipt?.release_source) {
       const baseline = releaseSources.find(source => source.name === receipt.release_source.name);
@@ -137,9 +148,6 @@ export function checkSkillContracts({projectDir, map, documents}) {
   checkProductName(startup, promptPath);
   assert(startupBytes <= 5 * 1024, promptPath + ': move detail to a focused reference to preserve the startup budget');
   checkSourceAnchors(projectDir, promptPath, startup);
-  for (const name of ['studio-main-agent/references/source-navigation.md','studio-main-agent/references/workbench.md']) {
-    checkSourceAnchors(projectDir, name, documents.get(name).text);
-  }
   for (const [name, component, labels] of documentedControls) {
     const ui = read(component);
     for (const label of labels) {

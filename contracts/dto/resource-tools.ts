@@ -15,6 +15,11 @@ export type ResourceToolSource = ResourceToolPackage |
 export interface ResourceToolResources {cpus?:number;gpus?:number;memory_mb?:number;qos?:string}
 export interface ResourceToolOutputCheck {sha256?:string;contains?:string;json_keys?:string[];min_bytes?:number}
 export interface ResourceToolBuild {steps:{command:string;args:string[];cwd?:string}[];max_seconds:number}
+export interface ResourceToolParameterSpec {
+ type:'string'|'boolean'|'integer'|'number';
+ required:boolean;
+ default?:string|number|boolean;
+}
 export interface ResourceToolManifest {
  id:string;
  name:string;
@@ -28,6 +33,7 @@ export interface ResourceToolManifest {
  support_files?:string[];
  build?:ResourceToolBuild;
  parameters?:Record<string,string|number|boolean>;
+ parameter_specs?:Record<string,ResourceToolParameterSpec>;
  inputs:Record<string,ResourceToolPort>;
  outputs:Record<string,ResourceToolPort>;
  test:{inputs:Record<string,{path:string}|{text:string}>;outputs?:Record<string,ResourceToolOutputCheck>;parameters?:Record<string,string|number|boolean>;max_seconds:number;resources?:ResourceToolResources};
@@ -79,6 +85,9 @@ export interface ResourceToolOnboarding {
  reference_test_case_id:string;
  entrypoint:string;
  support:Record<string,string>;
+ entrypoint_git_object?:string;
+ support_git_objects?:Record<string,string>;
+ parameter_specs?:Record<string,ResourceToolParameterSpec>;
 }
 export interface ResourceToolSetup {
  id:string;

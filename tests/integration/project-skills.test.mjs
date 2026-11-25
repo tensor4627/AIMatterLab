@@ -52,6 +52,7 @@ test('editable project prompts link personal and project skills without crossing
  const catalog=()=>store.call('project_skill_catalog',{},lease());
  const first=catalog().instructions;
  assert.equal(first.document,'AGENTS.md');assert.ok(first.body.includes('alpha'));
+ assert.ok(first.body.includes('scope="resource"'));
  assert.equal(path.resolve(store.root,first.relativePath),path.join(store.directory(lease()).target,'AGENTS.md'));
  const file=path.join(store.directory(lease()).target,'AGENTS.md');
  fs.writeFileSync(file,'# My own project instructions\n');
@@ -186,6 +187,45 @@ test('metadata comes only from opening frontmatter and target name must agree',t
  assert.deepEqual(store.call('project_skill_catalog',{},scope).skills,[]);
  store.call('write_project_skill',{name:'local-analysis',body:body+'description: BODY SPOOF\n',expected_sha256:null},scope);
  assert.equal(store.call('project_skill_catalog',{},scope).skills[0].description,'User project analysis instructions');
+});
+
+test('user tool definition round-trips with structured metadata in the Markdown body',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-onboarded-tool-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const scope={provider:'codex',threadId:'chat',projectId:'project',checkCurrent:()=>true};
+ const store=new ProjectSkills({root,current:()=>scope});
+ const name='onboarded-tool-demo';
+ const description='Definition for the example structure analysis tool';
+ const definition=[
+  '---',
+  'name: '+name,
+  'description: '+description,
+  '---',
+  '',
+  '# Example structure analysis tool',
+  '',
+  '```yaml',
+  'tool_id: demo',
+  'io_contract:',
+  '  inputs: {structure: xyz}',
+  '  outputs: {report: json}',
+  'runtime_requirements: {interpreter: Python 3.11}',
+  'minimal_test_ref: tests/cases/example.json',
+  'source_ref: https://example.com/demo-analysis.git@'+'a'.repeat(40),
+  'package_id: demo',
+  'package_version: 1.0.0',
+  'manifest_sha256: '+'b'.repeat(64),
+  'status: definition_only_not_target_tested',
+  '```',
+  '',
+ ].join('\n');
+ const saved=store.call('write_project_skill',{scope:'user',name,body:definition,expected_sha256:null},scope);
+ const read=store.call('read_project_skill',{scope:'user',name},scope);
+ assert.equal(read.scope,'user');
+ assert.equal(read.path,path.join(root,'user',name,'SKILL.md'));
+ assert.equal(read.body,definition);
+ assert.equal(read.sha256,saved.sha256);
+ assert.deepEqual(store.call('project_skill_catalog',{scope:'user'},scope).skills,[{name,description,sha256:saved.sha256}]);
 });
 
 test('all five providers can discover and read project skills in ordinary chat without worker or shell',async t=>{

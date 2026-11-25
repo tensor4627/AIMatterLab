@@ -32,6 +32,17 @@ class ResourceGit:
         command = ['/bin/bash', '-lc', 'module load git >/dev/null 2>&1 && exec "$@"', 'aimatterlab-git', *git] if self.method == 'site-module' else git
         return _run(command, cwd=cwd, env=env, timeout=timeout)
 
+    def run_bytes(self, *argv, timeout=18, cwd=None):
+        env = {key:value for key,value in os.environ.items() if not key.startswith('GIT_')}
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM='1', GIT_TERMINAL_PROMPT='0', LESS='FRX')
+        if self.helpers:
+            env['GIT_EXEC_PATH'] = self.helpers
+        git = [self.executable, '-c', 'core.hooksPath=/dev/null', '-c', 'protocol.ext.allow=never',
+               '-c', 'credential.helper=', '-c', 'core.askPass=', '-c', 'http.followRedirects=false', *argv]
+        command = ['/bin/bash', '-lc', 'module load git >/dev/null 2>&1 && exec "$@"', 'aimatterlab-git', *git] if self.method == 'site-module' else git
+        return subprocess.run(command, cwd=cwd, env=env, timeout=timeout, check=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
+
     def observe(self):
         version = self.run('--version')
         if not re.fullmatch(r'git version [0-9].*', version):
@@ -170,6 +181,25 @@ def checkout(git, source, staging, bundle=None):
     if git.run('rev-parse','HEAD',cwd=staging) != commit:
         raise ValueError('Source checkout did not reproduce the pinned commit')
     git.run('remote','add','origin',url,cwd=staging)
+
+
+def blob_objects(git, repo, commit):
+    if git.run('rev-parse', '--verify', 'HEAD', cwd=repo) != commit:
+        raise ValueError('Checked-out Git commit differs from the reviewed source')
+    status = git.run_bytes('-c', 'core.filemode=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':!.aimatterlab-source.json', cwd=repo)
+    if status:
+        raise ValueError('Checked-out Git repository has unexpected local changes')
+    raw = git.run_bytes('ls-tree', '-r', '-z', '--full-tree', commit, cwd=repo).decode('utf-8')
+    blobs = {}
+    for entry in raw.split('\0'):
+        if not entry:
+            continue
+        match = re.fullmatch(r'(100644|100755|120000) blob ([a-f0-9]{40}|[a-f0-9]{64})\t(.+)', entry)
+        if not match:
+            raise ValueError('Unsupported entry in reviewed Git source tree')
+        if match[1] != '120000':
+            blobs[match[3]] = match[2]
+    return blobs
 
 
 def record_tool(git, software, configuration_id, metadata):

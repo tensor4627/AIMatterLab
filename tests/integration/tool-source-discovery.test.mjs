@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,rmdir,unlink,writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {mkdtemp,readdir,readFile,rmdir,unlink,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -9,26 +10,30 @@ import {ScientificSkills} from '../../agent/skills/scientific-skills.mjs';
 import {softwareDocs,softwareDocDefinitions} from '../../backend/main/tools/public-software-docs.mjs';
 import {readReleaseToolSources,releaseToolNames} from '../../contracts/tools/release-tool-sources.mjs';
 import {tools as workflowCatalog} from '../../frontend/features/workflows/workflow-catalog.mjs';
-import {checkReleaseSources} from '../../scripts/check-skill-contracts.mjs';
+import {checkReleaseSources,checkSkillContracts} from '../../scripts/check-skill-contracts.mjs';
 
 const sources=JSON.parse(await readFile(new URL('../../installation/tool-sources.json',import.meta.url),'utf8'));
 const map=JSON.parse(await readFile(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
 const synthetic={id:'zircon-scope',name:'ZirconScope',aliases:['Zr Scope'],integration_status:'source_only',guidance_functions:['software.catalog'],
  url:'https://github.com/example/zircon-scope.git',branch:'main',guide:'README.md',validated_commit:'a'.repeat(40)};
 
-test('a conversation without a worker can discover the shipped tool catalog and read the HotHam guide by commit',async t=>{
- const recordedSources=[...sources,synthetic];
- const directory=await mkdtemp(path.join(os.tmpdir(),'aimlab-release-catalog-'));
- const sourceFile=path.join(directory,'tool-sources.json');
- t.after(async()=>{await unlink(sourceFile);await rmdir(directory);});
- await writeFile(sourceFile,JSON.stringify(recordedSources));
- const remoteReads=[];
- const read=async(url,{accept})=>{
-  remoteReads.push(String(url));
-  assert.equal(accept,'application/vnd.github.raw+json');
-  return {url:String(url),type:accept+'; charset=utf-8',text:'Fixture delivery guide'};
- };
- const endpoint=new TerminalMcp({terminal:{tools:()=>[]},publicDocs:{definitions:softwareDocDefinitions,call:(name,args)=>softwareDocs(name,args,read,sourceFile)}});
+async function skillContractFixture(documentId,changeText){
+ const projectDir=fileURLToPath(new URL('../../',import.meta.url));
+ const bundledRoot=path.join(projectDir,'agent/builtin-skills');
+ const entries=await readdir(bundledRoot,{recursive:true,withFileTypes:true});
+ const documents=new Map(await Promise.all(entries.filter(entry=>entry.isFile()).map(async entry=>{
+  const filename=path.join(entry.parentPath,entry.name);
+  const name=path.relative(bundledRoot,filename).split(path.sep).join('/');
+  const original=await readFile(filename,'utf8');
+  const text=name===documentId?changeText(original):original;
+  return [name,{text,bytes:Buffer.byteLength(text),sha256:createHash('sha256').update(text).digest('hex')}];
+ })));
+ assert.ok(documents.has(documentId));
+ return {projectDir,map,documents};
+}
+
+async function startConversationMcp(t,options){
+ const endpoint=new TerminalMcp({terminal:{tools:()=>[]},...options});
  await endpoint.start();
  t.after(()=>endpoint.close());
  endpoint.bindProviderContext('deepseek',{threadId:'chat'});
@@ -42,6 +47,22 @@ test('a conversation without a worker can discover the shipped tool catalog and 
   return result;
  };
  const call=async(name,args)=>JSON.parse((await request('tools/call',{name,arguments:args})).content[0].text);
+ return {request,call};
+}
+
+test('a conversation without a worker can discover the shipped tool catalog and read the HotHam guide by commit',async t=>{
+ const recordedSources=[...sources,synthetic];
+ const directory=await mkdtemp(path.join(os.tmpdir(),'aimlab-release-catalog-'));
+ const sourceFile=path.join(directory,'tool-sources.json');
+ t.after(async()=>{await unlink(sourceFile);await rmdir(directory);});
+ await writeFile(sourceFile,JSON.stringify(recordedSources));
+ const remoteReads=[];
+ const read=async(url,{accept})=>{
+  remoteReads.push(String(url));
+  assert.equal(accept,'application/vnd.github.raw+json');
+  return {url:String(url),type:accept+'; charset=utf-8',text:'Fixture delivery guide'};
+ };
+ const {request,call}=await startConversationMcp(t,{publicDocs:{definitions:softwareDocDefinitions,call:(name,args)=>softwareDocs(name,args,read,sourceFile)}});
  const search=(await request('tools/list',{})).tools.find(tool=>tool.name==='search_software_docs');
  assert.deepEqual(search.inputSchema.required,[]);
  const catalog=await call(search.name,{});
@@ -81,6 +102,30 @@ test('a conversation without a worker can discover the shipped tool catalog and 
  assert.ok(install.source.includes('/'+hot.validated_commit+'/'));
 });
 
+test('a conversation without a worker can discover and read the bundled GPUMD NEB JSON reference',async t=>{
+ const bundledRoot=new URL('../../agent/builtin-skills/',import.meta.url);
+ const scientificSkills=new ScientificSkills({map,sources:()=>[],settings:()=>({}),bundledRoot:fileURLToPath(bundledRoot)});
+ const {request,call}=await startConversationMcp(t,{scientificSkills});
+ const functionId='neb.gpumd';
+ const documentId='studio-neb-workflow/references/neb.json';
+
+ const reader=(await request('tools/list',{})).tools.find(tool=>tool.name==='read_scientific_skill');
+ assert.ok(reader?.inputSchema.properties.function_id.enum.includes(functionId));
+ const route=await call(reader.name,{function_id:functionId});
+ assert.equal(route.status,'passed',route.reason);
+ assert.ok(route.document_ids.includes(documentId));
+ assert.deepEqual(route.attachments.map(attachment=>attachment.name),['studio-neb-workflow/SKILL.md']);
+
+ const focused=await call(reader.name,{function_id:functionId,document_id:documentId});
+ assert.equal(focused.status,'passed',focused.reason);
+ assert.equal(focused.document_id,documentId);
+ const body=await readFile(new URL(documentId,bundledRoot),'utf8');
+ assert.equal(focused.text,body);
+ assert.equal(focused.attachments.length,1);
+ assert.equal(focused.attachments[0].name,documentId);
+ assert.equal(focused.attachments[0].sha256,createHash('sha256').update(body).digest('hex'));
+});
+
 test('version requests keep unmatched catalog revisions and external evidence distinct',async()=>{
  const calls=[];
  const result=await softwareDocs('search_software_docs',{software:'HotHam',version:'other-release'},async url=>{
@@ -100,6 +145,31 @@ test('source catalog CI permits an additional source-only tool while rejecting u
  assert.throws(()=>checkReleaseSources([...sources,{...synthetic,integration_status:undefined}],routes),/declare release integration status/);
  assert.throws(()=>checkReleaseSources([...sources,{...synthetic,guidance_functions:['fictional.native']}],routes),/assign known runtime guidance functions/);
  assert.throws(()=>checkReleaseSources([...sources,{...synthetic,integration_status:'native_adapter'}],routes),/disagree on built-in adapters/);
+});
+
+test('bundled skill CI rejects an entry one byte over 5 KiB',async()=>{
+ const fixture=await skillContractFixture('studio-opes-analysis/SKILL.md',text=>{
+  const padding=5*1024-Buffer.byteLength(text);
+  return text+'\n'+' '.repeat(padding);
+ });
+ assert.throws(()=>checkSkillContracts(fixture),/studio-opes-analysis\/SKILL\.md: keep the entry within 5 KiB/);
+});
+
+test('bundled skill CI rejects stale source anchors in focused Markdown references',async()=>{
+ const fixture=await skillContractFixture('studio-neb-workflow/references/native-input.md',
+  text=>text+'\nSee `contracts/tools/nonexistent-neb-engine-contract.json`.\n');
+ assert.throws(()=>checkSkillContracts(fixture),
+  /studio-neb-workflow\/references\/native-input\.md: stale source anchor contracts\/tools\/nonexistent-neb-engine-contract\.json/);
+});
+
+test('bundled skill CI rejects GPUMD NEB keys absent from the engine contract',async()=>{
+ const fixture=await skillContractFixture('studio-neb-workflow/references/neb.json',text=>{
+  const reference=JSON.parse(text);
+  reference.parameter_groups.neb.allowed_keys.push('unsupported_fixture_key');
+  return JSON.stringify(reference);
+ });
+ assert.throws(()=>checkSkillContracts(fixture),
+  /studio-neb-workflow\/references\/neb\.json: parameter_groups\.neb differs from the gpumd\.neb engine contract/);
 });
 
 test('the HotHam source and guide do not imply a native Hamiltonian runner',()=>{

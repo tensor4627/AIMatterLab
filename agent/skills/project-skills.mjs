@@ -61,7 +61,7 @@ function containsDirectory(parent, child) {
  return !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..' + path.sep);
 }
 
-const PROJECT_GUIDE = '# 项目提示词\n\n根据本项目的任务选择下方引用的技能。个人技能来自[用户技能库](../user/)，项目技能位于本目录。可在这里添加项目约定和技能链接。\n';
+const PROJECT_GUIDE = '# 项目提示词\n\n根据本项目的任务选择下方引用的技能。个人技能来自[用户技能库](../user/)，项目技能位于本目录。在本项目的 AGENTS.md 中记录科学选择、产物引用和指向个人技能的相对链接。机器相关的 conda 环境路径、module 设置、解释器路径和调度设置放在资源技能库（`scope="resource"`）。\n';
 
 export class ProjectSkills {
  constructor({root, current, bundledRoot, previousRoots=[]}) {

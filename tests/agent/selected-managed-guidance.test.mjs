@@ -9,13 +9,45 @@ import {ScientificSkills} from '../../agent/skills/scientific-skills.mjs';
 import {managedToolSkillContext} from '../../agent/skills/managed-tool-context.mjs';
 import {legacyGuidanceFacts} from '../../agent/skills/read-policy.mjs';
 import {createAgentRequests} from '../../agent/sessions/requests.mjs';
+import {toolValueResult} from '../../agent/tools/tool-failure.mjs';
+import {toolPackageResources,validateToolPackage} from '../../contracts/tools/tool-package.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
-async function fixture(t,{large=false}={}){
+const assertBudget=result=>assert(Buffer.byteLength(JSON.stringify(toolValueResult(result)))<=24*1024);
+
+function toolManifest(count=1){
+ const id='selected-fixture',directory=id+'-tests';
+ const display={priority:100,advanced:false,reason:'Used in the reference test case'};
+ const port=(id,description)=>({id,type:'file',format:'json',description,required:true,display});
+ const functions=Array.from({length:count},(_,index)=>({
+  id:'smoke-'+index,name:'Smoke function '+index,description:'Read fixture input and write the reference result.',entrypoint:'src/run.py',
+  inputs:[port('structure','Input structure to inspect')],outputs:[port('result','Checked reference output')],
+  parameters:[{id:'steps',type:'integer',description:'Iteration count',required:false,default:index+1,
+   default_behavior:'Use the declared iteration count.',default_source:'Reference test case',display}],
+  operation:{command:['{python}','{entrypoint}','--structure','{structure}','--steps','{steps}','--output','{result}'],failure_handling:'Record the failure and its exit status.'},
+  tests:['case-'+index]
+ }));
+ const cases=functions.map(item=>{
+  const caseDirectory=directory+'/'+item.tests[0];
+  return {id:item.tests[0],function_id:item.id,directory:caseDirectory,instructions:caseDirectory+'/README.md',entrypoint:'src/case.py',
+   resources:['src/input.json'],expected_outputs:[{path:'result.json',format:'json',description:'Reference measurement'}],
+   pass_criteria:['The output contains a finite measurement.']};
+ });
+ return {schema_version:1,id,name:'Selected package fixture',repository:{path:'src',commit:'a'.repeat(40)},manual:'docs/guide.md',
+  guidance:{delivery:'SKILL.md'},environment:{hardware:'cpu',requirements:['Python'],parallelism:{supported:['serial']}},
+  functions,tests:{directory,introduction:directory+'/README.md',cases}};
+}
+
+async function fixture(t,{large=false,manifest}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-selected-managed-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const texts={'SKILL.md':'---\nname: selected-managed-fixture\ndescription: Selected delivery fixture.\n---\nRead [Guide](docs/guide.md) only when needed.\n','docs/guide.md':'GUIDE BODY\n[Deep](deep.md)\n[Values](../values.json)\n'+(large?'x'.repeat(30*1024):''),'docs/deep.md':'DEEP BODY\n','values.json':'{"measured":7}\n','unrelated.md':'UNSELECTED BODY\n','program.py':'MUST NOT EXECUTE\n'};
+ const registeredManifest=manifest&&validateToolPackage(manifest);
+ if(registeredManifest){
+  for(const resource of toolPackageResources(registeredManifest))texts[resource]??='Fixture resource\n';
+  texts['tool.json']=JSON.stringify(manifest,null,2)+'\n';
+ }
  for(const [name,text]of Object.entries(texts)){const file=path.join(root,...name.split('/'));fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text);}
- const record={package_id:'selected-fixture',package_version:'fixture-v1',manifest_sha256:sha('manifest'),source_commit:sha('source'),snapshot_root:root,delivery_skill:{name:'selected-managed-fixture',path:'SKILL.md',sha256:sha(texts['SKILL.md'])},files:Object.entries(texts).map(([name,text])=>({path:name,kind:'file',target:null,size:Buffer.byteLength(text),sha256:sha(text)}))};
+ const record={package_id:'selected-fixture',package_version:'fixture-v1',manifest_sha256:sha(texts['tool.json']??'manifest'),source_commit:manifest?.repository.commit??sha('source'),snapshot_root:root,delivery_skill:{name:'selected-managed-fixture',path:'SKILL.md',sha256:sha(texts['SKILL.md'])},files:Object.entries(texts).map(([name,text])=>({path:name,kind:'file',target:null,size:Buffer.byteLength(text),sha256:sha(text)})),...registeredManifest&&{immutable:true,manifest:registeredManifest}};
  let current=true,serial=1,currentRecord=structuredClone(record),facts=legacyGuidanceFacts();
  const scope={provider:'compatible',threadId:'selected-thread',taskId:null,projectId:'project',environmentId:null,inputRoot:null,serial:1,checkCurrent:()=>current};
  const skills=new ScientificSkills({map:{schema_version:1,skills:[],functions:[]},bundledRoot:root,studioRoot:root,sources:()=>[],settings:()=>({}),resolveGuidance:async()=>facts,assertScope:value=>{if(value.checkCurrent?.()!==true)throw Error('scope changed');return value;}});
@@ -60,4 +92,102 @@ test('policy authority and registered version revocation prevent selected docume
 test('selected source tampering and oversized MCP documents return no body or new disclosure authority',async t=>{
  const changed=await fixture(t),document=changed.idFor(changed.bound.document_ids,'docs/guide.md');fs.writeFileSync(path.join(changed.root,'docs/guide.md'),changed.texts['docs/guide.md'].replace('GUIDE BODY','WRONG BODY'));await assert.rejects(changed.read(document),/registered_hash_changed/);
  const large=await fixture(t,{large:true}),largeId=large.idFor(large.bound.document_ids,'docs/guide.md');await assert.rejects(large.read(largeId),/24 KiB/);const catalog=await large.skills.catalog('compatible',large.scope);assert(!catalog.selected_skill.document_ids.some(id=>id.endsWith(':'+encodeURIComponent('docs/deep.md'))));
+});
+
+test('small tool.json reads keep the original manifest body and receipt',async t=>{
+ const f=await fixture(t,{manifest:toolManifest()});
+ const catalog=await f.skills.call('scientific_skill_catalog',{},f.scope);
+ const result=await f.read(catalog.selected_skill.definitions[0].document_id);
+ assertBudget(result);
+ const body='[Selected skill document: '+f.record.delivery_skill.name+'; tool.json]\n'+f.texts['tool.json'];
+ assert(result.text.startsWith(body+'\n\nSupporting document IDs'));
+ assert.deepEqual(result.attachments,[{label:'tool.json',kind:'reference-data',sha256:f.record.manifest_sha256,bytes:Buffer.byteLength(f.texts['tool.json'])}]);
+});
+
+test('large tool.json reads advertise an index and focused views of the exact registered definition',async t=>{
+ const manifest=toolManifest(16),f=await fixture(t,{manifest});
+ const bytes=Buffer.byteLength(f.texts['tool.json']);
+ assert(bytes>=34*1024&&bytes<=40*1024,'Fixture manifest size: '+bytes);
+ const catalog=await f.skills.call('scientific_skill_catalog',{},f.scope);
+ const [definition]=catalog.selected_skill.definitions;
+ const unadvertised=definition.package_ref+':'+encodeURIComponent('tool.json#function/'+manifest.functions[0].id);
+ const before=f.opens.length;
+ await assert.rejects(f.read(unadvertised),/exact document_id/);
+ assert.equal(f.opens.length,before);
+
+ const result=await f.read(definition.document_id),index=JSON.parse(result.text);
+ assertBudget(result);
+ assert.equal(index.manifest_view,'index');
+ assert.equal(index.id,manifest.id);
+ assert.equal(index.name,manifest.name);
+ assert.equal(index.version,f.record.package_version);
+ for(const key of ['repository','environment','manual','guidance'])assert.deepEqual(index[key],manifest[key]);
+ assert.equal(index.functions.length,manifest.functions.length);
+ assert.equal(index.tests.directory,manifest.tests.directory);
+ assert.equal(index.tests.introduction,manifest.tests.introduction);
+ assert.equal(index.tests.cases.length,manifest.tests.cases.length);
+ const [{id,name,entrypoint,tests}]=manifest.functions;
+ const [functionRow]=index.functions,[testRow]=index.tests.cases;
+ assert.deepEqual(functionRow,{id,name,entrypoint,tests,document_id:unadvertised});
+ assert.deepEqual(testRow,{id:manifest.tests.cases[0].id,function_id:id,document_id:f.idFor(result.document_ids,'tool.json#test/'+tests[0])});
+
+ const functionResult=await f.read(functionRow.document_id),testResult=await f.read(testRow.document_id);
+ assert.deepEqual(JSON.parse(functionResult.text),manifest.functions[0]);
+ assert.deepEqual(JSON.parse(testResult.text),manifest.tests.cases[0]);
+ for(const read of [result,functionResult,testResult]){
+  assertBudget(read);
+  assert.deepEqual(read.attachments,[{label:'tool.json',kind:'reference-data',sha256:f.record.manifest_sha256,bytes}]);
+ }
+ fs.writeFileSync(path.join(f.root,'tool.json'),f.texts['tool.json'].replace('Selected package fixture','Tampered package fixture'));
+ for(const document of [definition.document_id,functionRow.document_id,testRow.document_id]){
+  await assert.rejects(f.read(document),/registered_hash_changed/);
+ }
+});
+
+test('a many-function manifest can advertise focused views and chunk oversized functions and test cases',async t=>{
+ const manifest=toolManifest(50);
+ const escaped='Quoted \\" argument with Unicode 😀 '.repeat(90);
+ manifest.functions[0].operation.command.push(...Array(7).fill(escaped));
+ manifest.tests.cases[0].pass_criteria=Array(7).fill(escaped);
+ const f=await fixture(t,{manifest});
+ const catalog=await f.skills.call('scientific_skill_catalog',{},f.scope);
+ const result=await f.read(catalog.selected_skill.definitions[0].document_id),index=JSON.parse(result.text);
+ assertBudget(result);
+ assert.equal(index.functions.length,50);
+ assert.equal(index.tests.cases.length,50);
+ for(const [row,original] of [[index.functions[0],manifest.functions[0]],[index.tests.cases[0],manifest.tests.cases[0]]]){
+  const result=await f.read(row.document_id),view=JSON.parse(result.text);
+  assertBudget(result);
+  assert.equal(view.manifest_view,'chunks');
+  assert(view.chunks.length>1);
+  const reads=await Promise.all(view.chunks.map(({document_id})=>f.read(document_id)));
+  for(const [index,chunk] of reads.entries()){
+   assertBudget(chunk);
+   assert.equal(chunk.manifest_view,'chunk');
+   assert.equal(chunk.chunk_index,index);
+   assert.deepEqual(chunk.attachments,result.attachments);
+  }
+  assert.deepEqual(JSON.parse(reads.map(chunk=>chunk.text).join('')),original);
+ }
+});
+
+test('an oversized manifest index links to bounded chunks of the original tool.json',async t=>{
+ const manifest=toolManifest();
+ manifest.environment.requirements=Array(10).fill('Fixed runtime prerequisite 😀 '.repeat(120));
+ const f=await fixture(t,{manifest});
+ const catalog=await f.skills.call('scientific_skill_catalog',{},f.scope);
+ const [definition]=catalog.selected_skill.definitions;
+ const result=await f.read(definition.document_id),index=JSON.parse(result.text);
+ assertBudget(result);
+ assert.equal(index.manifest_view,'index');
+ assert.equal(index.id,manifest.id);
+ assert(index.chunks.length>1);
+ const before=f.opens.length;
+ await assert.rejects(f.read(definition.package_ref+':'+encodeURIComponent('tool.json#function/'+manifest.functions[0].id)),/exact document_id/);
+ assert.equal(f.opens.length,before);
+ const reads=await Promise.all(index.chunks.map(({document_id})=>f.read(document_id)));
+ for(const chunk of reads)assertBudget(chunk);
+ assert.equal(reads.map(chunk=>chunk.text).join(''),f.texts['tool.json']);
+ fs.writeFileSync(path.join(f.root,'tool.json'),f.texts['tool.json'].replace('Selected package fixture','Tampered package fixture'));
+ await assert.rejects(f.read(index.chunks[0].document_id),/registered_hash_changed/);
 });

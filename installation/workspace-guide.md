@@ -1,5 +1,7 @@
 # AIMatterLab 工作区
 
+这份 `AGENTS.md` 用作工作区目录指南，可按需添加个人备注。AIMatterLab 启动时会自动加载随版本发布的内置运行指令，请勿在此粘贴这些指令或硬编码 `user-cache/skills/user/` 的绝对路径。额外内容会附加到 `## Local workspace AGENTS.md` 下，重复或过时的指令可能与当前版本冲突。
+
 从本目录的 `AIMatterLab.exe` 或桌面快捷方式启动。科学软件源码放在 [sources](sources/) 下，例如 `sources/PyDyn`。在「科学资源与技能」选择需要的源码，在计算资源中登记实际运行环境。
 
 个人技能的默认位置是 [user-cache/skills/user](user-cache/skills/user/)。每个技能使用一个目录，以 `SKILL.md` 为入口。项目级提示词位于 `user-cache/skills/<项目摘要>/AGENTS.md`，可在文档内用相对链接指向该项目使用的个人技能。在设置中选用其他技能缓存目录后，项目提示词与技能位于所选目录中。

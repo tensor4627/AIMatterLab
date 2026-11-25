@@ -52,7 +52,7 @@ def installation_available(service, target, engine, selected):
     if 'queue_targets' not in profile:
         environment_id = 'cluster:' + profile['id']
     try:
-        return declared_tool(service,engine,{},environment_id,profile['id']) is not None
+        return declared_tool(service,engine,None,environment_id,profile['id']) is not None
     except (FileNotFoundError, ValueError):
         return False
 

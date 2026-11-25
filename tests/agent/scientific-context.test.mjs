@@ -9,9 +9,45 @@ test('release tool lookup is available in ordinary chat and overrides the previo
  assert.deepEqual(selectScientificFunctions({text:'查一下GPUMD轨迹的原子数密度'}),['analysis.number-density']);
  assert.deepEqual(selectScientificFunctions({text:'查一下HotHam',manualFunction:'workflow.roadmap'}),['workflow.roadmap']);
 });
+test('tool lookup with setup or verification selects the software catalog',()=>{
+ for(const text of [
+  '查一下 HotHam 并帮我安装验证',
+  '帮我安装验证 HotHam',
+  'HotHam 的安装与验证',
+  '查一下 TorchNEP 并帮我安装验证',
+  'install and verify HotHam',
+  'install and verify TorchNEP',
+ ]){
+  assert.deepEqual(selectScientificFunctions({text}),['software.catalog'],text);
+ }
+});
+test('release version lookups select the software catalog',()=>{
+ for(const text of ['查一下 pyGAS 最近的版本','HotHam 最新版本是什么','查询 pyGAS 的版本','查询最新的 pyGAS 版本','What version of pyGAS?','What is the latest version of GPUMD?']){
+  assert.deepEqual(selectScientificFunctions({text}),['software.catalog'],text);
+ }
+});
+test('cluster installations and ordinary calculations retain their own guidance',()=>{
+ for(const [text,route] of [
+  ['在集群上安装 HotHam','cluster.resource-tools'],
+  ['在集群上安装验证 HotHam','cluster.resource-tools'],
+  ['用 pyGAS 构建 CV 和偏置','pygas.bias'],
+  ['用新版 GPUMD 跑 300 K MD','md.gpumd'],
+  ['用 GPUMD 最新版本跑 300 K MD','md.gpumd'],
+  ['Run 300 K MD using the latest version of GPUMD','md.gpumd'],
+  ['用 GPUMD 做 MD 并验证能量守恒','md.gpumd'],
+  ['训练并测试 TorchNEP 模型','training.torchnep'],
+  ['评估 HotPP 势函数','training.hotpp'],
+  ['用 PyDyn 跑 NVT','md.pydyn'],
+ ]){
+  assert.deepEqual(selectScientificFunctions({text}),[route],text);
+ }
+});
 test('named cluster installations and service repairs select their own guidance',()=>{
- for(const text of ['在这个集群上安装 GPUMD','Install CP2K on my cluster','在计算资源上从零配置 MySolver']){
-  assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['cluster.resource-tools']);
+ for(const text of ['在这个集群上安装 GPUMD','Install CP2K on my cluster','在计算资源上从零配置 MySolver','怎么在集群配置 HotHam？','HotHam 怎么在集群上部署？','Configure CP2K on my cluster']){
+  assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['cluster.resource-tools'],text);
+ }
+ for(const text of ['在集群上配置 Slurm 队列','Configure the Slurm queue on my cluster']){
+  assert(!selectScientificFunctions({text}).includes('cluster.resource-tools'),text);
  }
  assert.deepEqual(selectScientificFunctions({text:'集群缺少作业服务的 Python 环境，请修复作业服务'}),['cluster.connection-setup']);
 });

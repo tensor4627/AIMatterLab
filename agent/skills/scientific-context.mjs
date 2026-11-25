@@ -16,9 +16,15 @@ function requestsSoftwareCatalog(text,releaseTool){
  // Match a lookup about the tool itself. A question about a simulation's inputs
  // or results still belongs to the workflow that produced them.
  const subject=releaseTool.text;
- const directLookup=/(?:查一下|查查|查找|查阅|查询|介绍|了解|看看|搜一下|检索)\s*@\s*[。？！?！.]?$|(?:what is|look up|tell me about|find the (?:docs|manual) for)\s+@\s*[?!.]?$|@\s*(?:是什么|有什么用途|能做什么)/i;
- const sourceOrSetup=/(?:安装|配置|搭建|接入|登记|where to find|how to install|install|set up)\s*(?:一下|好|the )?\s*@|@\s*(?:的|怎么|如何|安装与)?\s*(?:安装|源码|官方文档|仓库|手册|工具包|文档入口|repository|source code|documentation|installation guide)/i;
- return directLookup.test(subject)||sourceOrSetup.test(subject);
+ const directLookup=/(?:查一下|查查|查找|查阅|查询|介绍|了解|看看|搜一下|检索)\s*@\s*(?:[。？！?！.]?$|(?:并|再|然后|顺便).{0,10}(?:安装|配置|搭建|验证|接入|登记))/.test(subject)
+  || /(?:what is|look up|tell me about|find the (?:docs|manual) for)\s+@\s*[?!.]?$|@\s*(?:是什么|有什么用途|能做什么)/i.test(subject);
+ const sourceOrSetup=/(?:安装|配置|搭建|接入|登记)(?:并|与|和)?(?:验证|测试)?\s*(?:一下|好)?\s*@/.test(subject)
+  || /(?:where to find|how to install|install|set up)(?:\s+and\s+(?:verify|test))?\s+(?:the\s+)?@/i.test(subject)
+  || /@\s*(?:的|怎么|如何)?\s*(?:安装(?:与验证|和验证|并验证)?|源码|官方文档|仓库|手册|工具包|文档入口|repository|source code|documentation|installation guide)/i.test(subject);
+ const versionLookup=/(?:^\s*(?:请问\s*)?|(?:查(?:一下|查|找|看|阅|询)?|了解|看看|搜一下|检索)\s*(?:(?:最新|最近|当前|稳定)的?\s*)?)@\s*(?:的\s*)?(?:(?:最新|最近|当前|稳定)的?\s*)?版本(?:号)?\s*(?:是(?:什么|多少|哪个)|多少)?\s*[。？！?！.]?$/.test(subject)
+  || /(?:^\s*|\b(?:what(?: is|'s)?|which|check|look up|find|query)\s+(?:the\s+)?)(?:(?:latest|current|stable)\s+)?(?:release|version)\s+(?:of|for)\s+@\s*[?!.]?$/i.test(subject)
+  || /\b(?:check|look up|find)\s+@(?:'s)?\s+(?:(?:latest|current|stable)\s+)?(?:release|version)\s*[?!.]?$/i.test(subject);
+ return directLookup||sourceOrSetup||versionLookup;
 }
 const localToolMention=/(?:本地|本机|自研|自己的|我的|用户提供).{0,14}(?:工具|脚本|程序)|\b(?:local|own|custom|user-provided|third-party)\s+(?:tool|script|program)\b/i;
 function requestsToolOnboarding(text){
@@ -34,8 +40,11 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  const cvOnlyIntent=/(?:仅|只)(?:计算|生成|定义|评估)?\s*(?:CV|集体变量)|\bcv[\s_-]*only\b|\bonly\s+(?:(?:compute|calculate|evaluate)\s+)?(?:the\s+)?(?:cvs?|collective\s+variables?)\b/i.test(value);
  const primaryTraining=/(?:^|[。！!？?;\n])\s*(?:(?:请|帮我|现在|接下来|先|首先|然后|随后|please\s+|next\s+|now\s+|first\s+|then\s+)\s*)*(?:训练|导出|评估|train\b|export\b|freeze\b|eval\b)/i.test(value);
  const resourceMention=/集群|计算资源|服务器|\b(?:cluster|compute resource|HPC)\b/i.test(value);
- const namedInstallation=/(?:安装|从零配置|搭建)\s*(?:一下\s*)?[a-z][\w+.-]*|\b(?:install|set up)\s+[a-z][\w+.-]*/i.test(value);
- const targetToolSetup=resourceMention&&(namedInstallation||localToolMention.test(value)&&/安装|配置|采用|最小测试|\b(?:install|configure|set up|adopt|smoke test)\b/i.test(value));
+ const namedInstallation=[...value.matchAll(/(?:(?:安装|配置|搭建|部署)(?:(?:并|与|和)?(?:验证|测试))?\s*(?:一下\s*)?|\b(?:install|configure|set up|deploy)(?:\s+and\s+(?:verify|test))?\s+(?:(?:the|an?)\s+)?)([a-z][\w+.-]*)/gi)]
+  .some(([,name])=>!/^(?:ssh|slurm|lsf|pbs|sge|gpus?|cpus?|queues?|clusters?)(?:$|[_.+-])/i.test(name));
+ const localTool=localToolMention.test(value);
+ const setupIntent=/安装|配置|搭建|部署|接入|最小测试|\b(?:install|configure|set up|deploy|adopt|smoke test)\b/i.test(value);
+ const targetToolSetup=resourceMention&&(namedInstallation||(releaseTool||localTool)&&setupIntent||localTool&&/采用/.test(value));
  const materialsSource=/materials[ -]?project|\bmp-[0-9]+\b/i.test(value);
  const requestsLookup=/(?<!已|已经|不|不要|无需|不用)(?:导入|搜索|查询|查找|检索|获取|下载)(?!的|过)|\b(?:import|search|find|fetch|retrieve|download|query|look up)\b/i.test(value);
  const requestsStructure=/(?<!已|已经|不|不要|无需|不用)(?:生成|构建|创建)(?!的|过)[^，。！？\n]{0,32}(?:结构|晶胞|超胞|晶体|分子(?!动力学)|表面)|\b(?:build|create|generate|make)\b[^.!?,;\n]{0,64}\b(?:structures?|cells?|crystals?|supercells?|surfaces?|slabs?|molecules?)\b/i.test(value);

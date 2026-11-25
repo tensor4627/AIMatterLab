@@ -23,7 +23,8 @@ export const STUDIO_INSTRUCTIONS = fs.readFileSync(new URL('./AGENTS.md',import.
 // Previously shipped workspace seeds, after LF/trim normalization. Match the
 // full prefix at a line boundary so an edited guide remains the user's content.
 const workspaceSeeds=[
- [963,'2e893fac5ce0011b86799cb31245fe742dd53c064257426534b4164ddb675816'], // installation/workspace-guide.md
+ [1140,'e51690c8498db0f3234675e0d452236b29de57d756f9bca8cb22b62c373dacac'], // installation/workspace-guide.md
+ [963,'2e893fac5ce0011b86799cb31245fe742dd53c064257426534b4164ddb675816'], // 0.2.7 workspace guide
  [825,'f151de04342ea8a8ec8bc54b53c5251bcdaadb041bf6b07bf8a204f2315b83a6'], // previous installer index
  [518,'79cf4fd11157e5c24a26c59a0738f0e4635ce2d597e7d205986703c86038b1f8'], // original installer index
  [2252,'2dd22981815c84546f4464aa328fd69ff2c2267c7b062b8d21fcba1f8d8daf45'], // 0.1.11
@@ -32,6 +33,7 @@ const workspaceSeeds=[
  [2384,'ed266f70e24b03d8b8637557a8d13d247c75fca7c911f80f9e70c6a446748af7'], // prior runtime guide
  [2388,'fafd3f727fcd16d4b54905e5f4aa602e4d4db17e9d360df2bdc2fc900556244d'], // runtime guide through 0.2.6
  [4243,'9aa99d6041e56fa4ea64f1522aa331e67f5095469930562d0e0115f95d0cfa59'], // prior progressive runtime guide
+ [4434,'d497eb23543edbd0b981f9bd4d0951185acf93c519bad1e481deeeeb92202dc1'], // 0.2.7 runtime guide
 ];
 
 function workspaceNotes(text) {

@@ -102,6 +102,21 @@ def port_map(value):
     return value
 
 
+def _matches_scalar(value, kind):
+    if kind == 'string':
+        if type(value) is not str:
+            return False
+        bounded_arg(value, 1024)
+        return True
+    if kind == 'boolean':
+        return type(value) is bool
+    if kind == 'integer':
+        return type(value) is int
+    if kind == 'number':
+        return type(value) in (int, float) and math.isfinite(value)
+    return False
+
+
 def parameter_map(value):
     if not isinstance(value, dict) or len(value) > 32:
         raise ValueError('Use a bounded set of scalar parameters')
@@ -114,13 +129,55 @@ def parameter_map(value):
     return value
 
 
+def parameter_specs_map(value):
+    if not isinstance(value, dict) or len(value) > 32:
+        raise ValueError('Use a bounded set of scalar parameter specifications')
+    for key, item in value.items():
+        match(key, PORT, 'Invalid parameter identity')
+        fields(item, ('type', 'required'), ('default',))
+        kind = item['type']
+        if kind not in ('string', 'boolean', 'integer', 'number') or type(item['required']) is not bool:
+            raise ValueError('Invalid parameter specification: ' + key)
+        if item['required']:
+            if 'default' in item:
+                raise ValueError('Required parameter cannot declare a default: ' + key)
+        else:
+            if 'default' not in item or not _matches_scalar(item['default'], kind):
+                raise ValueError('Optional parameter requires a typed scalar default: ' + key)
+    return value
+
+
 def args_for(manifest, parameters):
-    defaults = manifest.get('parameters', {})
     parameter_map(parameters)
-    for name, value in parameters.items():
-        if name not in defaults or type(value) is not type(defaults[name]) and not (type(value) in (int, float) and type(defaults[name]) in (int, float)):
-            raise ValueError('Unknown or incompatible parameter: ' + name)
-    values = {**defaults, **parameters}
+    specs = manifest.get('parameter_specs')
+    if specs is not None:
+        values = {}
+        for name in parameters:
+            if name not in specs:
+                raise ValueError('Unknown or incompatible parameter: ' + name)
+        for name, spec in specs.items():
+            if name in parameters:
+                value = parameters[name]
+                if not _matches_scalar(value, spec['type']):
+                    raise ValueError('Unknown or incompatible parameter: ' + name)
+                values[name] = value
+            elif spec['required']:
+                raise ValueError('Missing required parameter: ' + name)
+            else:
+                values[name] = spec['default']
+    else:
+        defaults = manifest.get('parameters', {})
+        for name, value in parameters.items():
+            if name not in defaults:
+                raise ValueError('Unknown or incompatible parameter: ' + name)
+            expected = type(defaults[name])
+            if expected is float:
+                compatible = type(value) in (int, float) and math.isfinite(value)
+            else:
+                compatible = type(value) is expected
+            if not compatible:
+                raise ValueError('Unknown or incompatible parameter: ' + name)
+        values = {**defaults, **parameters}
     bindings = {'input': {key: item['filename'] for key, item in manifest['inputs'].items()},
                 'output': {key: item['filename'] for key, item in manifest['outputs'].items()}, 'param': values}
 
@@ -136,7 +193,8 @@ def args_for(manifest, parameters):
 
 def manifest(value, route):
     fields(value, ('id', 'name', 'version', 'source', 'argv', 'inputs', 'outputs', 'test'),
-           ('description', 'citations', 'interpreter', 'dependencies', 'parameters', 'support_files', 'git_bootstrap', 'build'))
+           ('description', 'citations', 'interpreter', 'dependencies', 'parameters', 'parameter_specs',
+            'support_files', 'git_bootstrap', 'build'))
     match(value['id'], SLUG, 'Tool ID must be a lowercase name using letters, digits, and hyphens')
     string(value['name'], 100)
     match(value['version'], re.compile(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,63}'), 'Use a concrete tool version')
@@ -243,6 +301,20 @@ def manifest(value, route):
             numeric(resources[key], 0 if key == 'gpus' else 1, 2147483647, key)
     if 'qos' in resources:
         match(resources['qos'], re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}'), 'Invalid scheduler quality of service')
+    if 'parameters' in value:
+        parameter_map(value['parameters'])
+    if 'parameter_specs' in value:
+        specs = parameter_specs_map(value['parameter_specs'])
+        for key, item in value.get('parameters', {}).items():
+            if key not in specs:
+                raise ValueError('Setup parameter is not declared in parameter_specs: ' + key)
+            spec = specs[key]
+            if spec['required']:
+                raise ValueError('Required parameter cannot declare a setup default: ' + key)
+            if (not _matches_scalar(item, spec['type']) or
+                    (type(item) is bool) != (type(spec['default']) is bool) or
+                    item != spec['default']):
+                raise ValueError('Setup default differs from declared parameter default: ' + key)
     args_for(value, test.get('parameters', {}))
     if len(json.dumps(value, ensure_ascii=False).encode()) > 192 * 1024:
         raise ValueError('Tool configuration exceeds the review budget')

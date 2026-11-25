@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from studio_worker.compute.service import Service
 from studio_worker.compute.ssh_service import scheduler_profile
-from studio_worker.tools.resource_tools import SETUP, resolve_invocation
+from studio_worker.tools.resource_tools import SETUP, execution_skill, resolve_invocation
 from studio_worker.tools import resource_tool_git
 from studio_worker.tools.resource_tool_manifest import file_receipt
 from studio_worker.transport.routes import dispatch
@@ -394,3 +394,231 @@ printf '%s;fixture\\n' "$$"
         self.assertEqual(frames['sha256'],sha(fixture.encode()))
         self.assertTrue(Path(frames['path']).is_relative_to(Path(workspace['path'])))
         self.assertEqual(self.submission_count(),4)
+
+    def test_multi_function_isolation_and_strict_parameter_specs(self):
+        from studio_worker.tools.resource_tools import ACTIVE, function_tool_id
+        from studio_worker.workspace.roadmap_cluster import installation_available
+        from studio_worker.workspace.roadmap_execution import RoadmapExecutions
+        script_a = self.root / 'fn_a.py'
+        script_b = self.root / 'fn_b.py'
+        script_a.write_text(
+            'import json, sys\nfrom pathlib import Path\n'
+            'Path(sys.argv[3]).write_text(json.dumps({"fn":"a","steps":int(sys.argv[1]),"temp":float(sys.argv[2])}))\n'
+        )
+        script_b.write_text(
+            'import json, sys\nfrom pathlib import Path\n'
+            'Path(sys.argv[1]).write_text(json.dumps({"fn":"b"}))\n'
+        )
+        specs = {
+            'steps': {'type': 'integer', 'required': True},
+            'temperature': {'type': 'number', 'required': False, 'default': 300},
+        }
+        id_a = function_tool_id('suite', 'calc.a')
+        id_b = function_tool_id('suite', 'calc.b')
+        self.assertEqual(id_a, 'suite--calc-a')
+        self.assertEqual(id_b, 'suite--calc-b')
+        def_a = {
+            'id': id_a, 'name': 'Suite A', 'version': '1',
+            'source': {'kind': 'installed', 'executable': str(script_a), 'sha256': file_receipt(script_a)['sha256']},
+            'interpreter': 'python',
+            'argv': ['{param:steps}', '{param:temperature}', '{output:report}'],
+            'parameter_specs': specs,
+            'inputs': {}, 'outputs': {'report': {'filename': 'report.json', 'format': 'json'}},
+            'test': {'inputs': {}, 'parameters': {'steps': 10, 'temperature': 500}, 'max_seconds': 10,
+                     'outputs': {'report': {'json_keys': ['fn', 'steps', 'temp']}}},
+        }
+        ob_a = {
+            'package_id': 'suite', 'package_version': sha(b'suite-v1'), 'manifest_sha256': sha(b'suite-manifest'),
+            'source_commit': 'a' * 40, 'function_id': 'calc.a', 'reference_test_case_id': 'case-a',
+            'entrypoint': def_a['source']['sha256'], 'support': {}, 'parameter_specs': specs,
+        }
+        def_b = {
+            'id': id_b, 'name': 'Suite B', 'version': '1',
+            'source': {'kind': 'installed', 'executable': str(script_b), 'sha256': file_receipt(script_b)['sha256']},
+            'interpreter': 'python', 'argv': ['{output:report}'],
+            'inputs': {}, 'outputs': {'report': {'filename': 'report.json', 'format': 'json'}},
+            'test': {'inputs': {}, 'max_seconds': 10, 'outputs': {'report': {'json_keys': ['fn']}}},
+        }
+        ob_b = {
+            'package_id': 'suite', 'package_version': sha(b'suite-v1'), 'manifest_sha256': sha(b'suite-manifest'),
+            'source_commit': 'a' * 40, 'function_id': 'calc.b', 'reference_test_case_id': 'case-b',
+            'entrypoint': def_b['source']['sha256'], 'support': {},
+        }
+        # Cannot override declared optional default or invent required defaults in setup parameters.
+        with self.assertRaisesRegex(ValueError, 'Setup default differs'):
+            self.plan('custom', {**def_a, 'parameters': {'temperature': 500}}, 'bad-default-01', onboarding=ob_a)
+        with self.assertRaisesRegex(ValueError, 'Required parameter cannot declare a setup default'):
+            self.plan('custom', {**def_a, 'parameters': {'steps': 10}}, 'bad-required-01', onboarding=ob_a)
+
+        setup_a = self.plan('custom', def_a, 'suite-a-setup-01', onboarding=ob_a)
+        self.start(setup_a)
+        active_a = self.wait(setup_a, ('active', 'failed'))
+        self.assertEqual(active_a['status'], 'active', active_a)
+
+        # Cannot plan calc.b under calc.a's function-scoped ID (tool_onboarding blocks mismatch).
+        with self.assertRaisesRegex(ValueError, 'package and setup IDs differ'):
+            self.plan('custom', {**def_b, 'id': id_a}, 'suite-b-wrong-id', onboarding=ob_b)
+        # Cannot plan two distinct functions under the same bare package ID either.
+        bare_a = self.plan('custom', {**def_a, 'id': 'suite'}, 'suite-bare-a-01', onboarding=ob_a)
+        self.assertEqual(bare_a['status'], 'planned')
+        with self.assertRaisesRegex(ValueError, 'already assigned to another function'):
+            self.plan('custom', {**def_b, 'id': 'suite'}, 'suite-bare-b-01', onboarding=ob_b)
+
+        setup_b = self.plan('custom', def_b, 'suite-b-setup-01', onboarding=ob_b)
+        self.start(setup_b)
+        active_b = self.wait(setup_b, ('active', 'failed'))
+        self.assertEqual(active_b['status'], 'active', active_b)
+
+        # Availability discovery succeeds even though calc.a has a required parameter.
+        project = self.service.store.get('project', 'research')
+        project['policy']['engines'] += ['private.' + id_a, 'private.' + id_b]
+        self.service.register_project(project)
+        target = {'project_id': 'research', 'cluster_id': 'slurm1', 'resources': {'cpus': 1, 'gpus': 0, 'memory_mb': 32}}
+        self.assertTrue(installation_available(self.service, target, 'private.' + id_a, None))
+
+        # Formal invocation enforces required params, declared default (300, NOT test 500), and strict integer type.
+        with self.assertRaisesRegex(ValueError, 'Missing required parameter: steps'):
+            resolve_invocation(self.service, 'private.' + id_a, {}, environment_id='cluster:slurm1')
+        with self.assertRaisesRegex(ValueError, 'Unknown or incompatible parameter: steps'):
+            resolve_invocation(self.service, 'private.' + id_a, {'steps': 1.5}, environment_id='cluster:slurm1')
+        with self.assertRaisesRegex(ValueError, 'Unknown or incompatible parameter: steps'):
+            resolve_invocation(self.service, 'private.' + id_a, {'steps': True}, environment_id='cluster:slurm1')
+        inv_a = resolve_invocation(self.service, 'private.' + id_a, {'steps': 4}, environment_id='cluster:slurm1')
+        self.assertEqual(inv_a['argv'][-3:], ['4', '300', 'report.json'])
+        inv_b = resolve_invocation(self.service, 'private.' + id_b, {}, environment_id='cluster:slurm1')
+        self.assertEqual(inv_b['activationId'], active_b['activation_id'])
+
+        # Legacy flat integer defaults also reject floats like 1.5.
+        from studio_worker.tools.resource_tool_manifest import args_for
+        legacy_manifest = {
+            'inputs': {}, 'outputs': {'out': {'filename': 'out.txt', 'format': 'text'}},
+            'parameters': {'steps': 10}, 'argv': ['{param:steps}', '{output:out}'],
+        }
+        with self.assertRaisesRegex(ValueError, 'Unknown or incompatible parameter: steps'):
+            args_for(legacy_manifest, {'steps': 1.5})
+
+        # Legacy DB with two functions sharing one engine ID fails closed instead of running the newest function.
+        colliding = deepcopy(self.service.store.get(ACTIVE, active_b['activation_id']))
+        colliding['id'] = sha(b'legacy-collision')
+        colliding['engine'] = 'private.' + id_a
+        colliding['activated_at'] = time.time() + 10
+        self.service.store.put(ACTIVE, colliding)
+        with self.assertRaisesRegex(ValueError, 'Multiple functions share engine'):
+            resolve_invocation(self.service, 'private.' + id_a, {'steps': 4}, environment_id='cluster:slurm1')
+        # An explicit frozen activation_id still resolves cleanly.
+        frozen = resolve_invocation(self.service, 'private.' + id_a, {'steps': 4}, environment_id='cluster:slurm1', activation_id=active_a['activation_id'])
+        self.assertEqual(frozen['activationId'], active_a['activation_id'])
+
+    def test_git_blob_cross_platform_crlf_and_undeclared_helper_tampering(self):
+        git = shutil.which('git')
+        self.assertTrue(git)
+        repo = self.root / 'git-tool-src'
+        repo.mkdir()
+        subprocess.run([git, 'init', '--quiet', '-b', 'main'], cwd=repo, check=True)
+        subprocess.run([git, 'config', 'user.name', 'Test'], cwd=repo, check=True)
+        subprocess.run([git, 'config', 'user.email', 'test@example.invalid'], cwd=repo, check=True)
+        main_lf = b'import json, sys\nfrom pathlib import Path\nimport helper\nPath(sys.argv[1]).write_text(json.dumps({"value": helper.VALUE}))\n'
+        helper_lf = b'VALUE = 42\n'
+        (repo / 'run.py').write_bytes(main_lf)
+        (repo / 'helper.py').write_bytes(helper_lf)
+        subprocess.run([git, 'add', 'run.py', 'helper.py'], cwd=repo, check=True)
+        subprocess.run([git, 'commit', '--quiet', '-m', 'Initial'], cwd=repo, check=True)
+        commit = subprocess.check_output([git, 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+        entry_blob = subprocess.check_output([git, 'rev-parse', 'HEAD:run.py'], cwd=repo, text=True).strip()
+        bundle = self.root / 'tool.bundle'
+        subprocess.run([git, 'bundle', 'create', str(bundle), 'HEAD'], cwd=repo, check=True)
+        # Simulate Windows CRLF working-tree SHA-256 while supplying the cross-platform Git blob OID.
+        crlf_digest = sha(main_lf.replace(b'\n', b'\r\n'))
+        self.assertNotEqual(crlf_digest, sha(main_lf))
+        definition = {
+            'id': 'helper-tool', 'name': 'Helper Tool', 'version': '1',
+            'source': {'kind': 'git', 'url': 'https://github.com/example/helper-tool.git', 'commit': commit, 'executable': 'run.py'},
+            'interpreter': 'python', 'argv': ['{output:report}'],
+            'inputs': {}, 'outputs': {'report': {'filename': 'report.json', 'format': 'json'}},
+            'test': {'inputs': {}, 'max_seconds': 10, 'outputs': {'report': {'contains': '42', 'json_keys': ['value']}}},
+        }
+        onboarding = {
+            'package_id': 'helper-tool', 'package_version': sha(b'helper-pkg'), 'manifest_sha256': sha(b'helper-manifest'),
+            'source_commit': commit, 'function_id': 'run', 'reference_test_case_id': 'smoke',
+            'entrypoint': crlf_digest, 'entrypoint_git_object': entry_blob, 'support': {}, 'support_git_objects': {},
+        }
+        setup = self.plan('fresh', definition, 'git-helper-setup-01', onboarding=onboarding)
+        staging = self.workspace / 'software' / '.aimatterlab' / 'setups' / setup['id']
+        staging.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(bundle, staging / 'package.release')
+        self.start(setup)
+        active = self.wait(setup, ('active', 'failed'))
+        self.assertEqual(active['status'], 'active', active)
+
+        # Clean invocation resolves while helper.py is untouched.
+        resolved = resolve_invocation(self.service, 'private.helper-tool', {}, environment_id='cluster:slurm1')
+        self.assertIsNotNone(resolved)
+        self.assertTrue(resolved['version'].get('install_tree_sha256'))
+
+        # Modifying the undeclared sibling helper.py must invalidate activation immediately.
+        install_root = Path(active['install_root'])
+        (install_root / 'helper.py').write_bytes(b'VALUE = 999\n')
+        with self.assertRaisesRegex(ValueError, 'supporting file changed'):
+            resolve_invocation(self.service, 'private.helper-tool', {}, environment_id='cluster:slurm1')
+
+
+class ExecutionSkillProvenanceTest(unittest.TestCase):
+    def _fixture(self, source):
+        return {
+            'id': 'hotham',
+            'name': 'HotHam',
+            'version': '0.1.0',
+            'source': source,
+            'argv': ['--config', '{input:cfg}'],
+            'inputs': {'cfg': {'filename': 'cfg.yaml', 'format': 'yaml'}},
+            'outputs': {'log': {'filename': 'out.log', 'format': 'text'}},
+        }
+
+    def test_execution_skill_records_source_provenance_without_onboarding(self):
+        target = {'environment_id': 'cluster:slurm1', 'cluster_id': 'slurm1'}
+        version = {'tool_executable': '/opt/hotham/bin/hotham'}
+        test_receipt = {'job_id': 'job-1'}
+        git_skill = execution_skill(
+            self._fixture({'kind': 'git', 'url': 'https://github.com/example/hotham.git', 'commit': 'b' * 40}),
+            target, version, test_receipt, 'act123456789000',
+        )
+        self.assertIn('Source provenance: git `https://github.com/example/hotham.git` at commit `' + 'b' * 40 + '`.', git_skill['body'])
+        self.assertNotIn('Registered delivery', git_skill['body'])
+        self.assertEqual(git_skill['sha256'], sha(git_skill['body'].encode()))
+        self.assertLessEqual(len(git_skill['body'].encode()), 16384)
+
+        archive_digest = 'c' * 64
+        archive_skill = execution_skill(
+            self._fixture({'kind': 'archive', 'url': 'https://example.com/tool.tar.gz', 'sha256': archive_digest}),
+            target, version, test_receipt, 'act123456789000',
+        )
+        self.assertIn('Source provenance: `archive` `https://example.com/tool.tar.gz` with SHA-256 `' + archive_digest + '`.', archive_skill['body'])
+
+        installed_digest = 'd' * 64
+        installed_skill = execution_skill(
+            self._fixture({'kind': 'installed', 'executable': '/usr/local/bin/tool', 'sha256': installed_digest}),
+            target, version, test_receipt, 'act123456789000',
+        )
+        self.assertIn('Source provenance: installed executable `/usr/local/bin/tool` (SHA-256 `' + installed_digest + '`).', installed_skill['body'])
+
+    def test_execution_skill_preserves_registered_delivery_with_onboarding(self):
+        target = {'environment_id': 'cluster:slurm1', 'cluster_id': 'slurm1'}
+        version = {
+            'tool_executable': '/opt/hotham/bin/hotham',
+            'onboarding': {
+                'package_id': 'hotham',
+                'package_version': '1.0.0',
+                'source_commit': 'a' * 40,
+                'manifest_sha256': 'e' * 64,
+                'function_id': 'hamiltonian.infer',
+                'reference_test_case_id': 'smoke',
+            },
+        }
+        skill = execution_skill(
+            self._fixture({'kind': 'git', 'url': 'https://github.com/example/hotham.git', 'commit': 'a' * 40}),
+            target, version, {'job_id': 'job-2'}, 'act123456789000',
+        )
+        self.assertIn('Registered delivery `hotham@1.0.0`, source commit `' + 'a' * 40 + '`', skill['body'])
+        self.assertNotIn('Source provenance:', skill['body'])
+        self.assertEqual(skill['sha256'], sha(skill['body'].encode()))
+

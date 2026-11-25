@@ -125,7 +125,7 @@ function inspectPackage(packageRoot){
   const row=entries.get(name);if(item.mode==='120000'&&row?.kind!=='symlink'||item.mode!=='120000'&&row?.kind!=='file')fail('working_tree_type_changed');
  }
  const final=repository(root,repositoryPath,manifest.repository.commit);if(final.head!==source.head)fail('source_changed');
- const files=[...entries.values()].sort(compare),manifestSha256=hash(rawManifest),packageVersion=hash(Buffer.from(packageIdentityText({id:manifest.id,commit:source.head,manifestSha256,files}),'utf8'));
+ const files=[...entries.values()].map(row=>row.kind==='file'&&source.tracked.has(row.path)?{...row,git_object:source.tracked.get(row.path).object}:row).sort(compare),manifestSha256=hash(rawManifest),packageVersion=hash(Buffer.from(packageIdentityText({id:manifest.id,commit:source.head,manifestSha256,files}),'utf8'));
  const observedContent=name=>entries.get(path.relative(root,resolve(name)).replaceAll('\\','/'))?.sha256;
  const delivery=deliverySkill(resolve(manifest.guidance.delivery));if(delivery.sha256!==observedContent(manifest.guidance.delivery)||manifestSha256!==observedContent('tool.json'))fail('source_changed');
  const guidance=toolGuidanceResources(manifest).map(item=>{const sha256=fileHash(resolve(item.path)).sha256;if(sha256!==observedContent(item.path))fail('source_changed');return {...item,sha256};});

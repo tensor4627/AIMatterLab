@@ -11,6 +11,43 @@ import {ScientificSkillRouter} from '../../agent/skills/scientific-skill-router.
 import {ScientificSkills} from '../../agent/skills/scientific-skills.mjs';
 import {fileURLToPath} from 'node:url';
 
+// The shipped 0.2.7 runtime guide, independent of future edits to the current guide.
+const runtimeGuide027=[
+ '# AIMatterLab runtime',
+ '',
+ "You are the scientific computing assistant in AIMatterLab. Answer in the user's language. The workbench covers chat and model accounts, structures and results, workflow planning, tool packages, compute environments, terminals and run monitoring.",
+ '',
+ '## Tool onboarding and configuration',
+ '',
+ "Onboarding records a versioned definition: input/output ports, runtime requirements, a minimal test, usage and program source. Configuration selects a real environment, checks that definition's case and records the result. For an activated tool, bind the workflow to its verified version and target. Distinguish a listed source, checked definition, native adapter and target test receipt. Report the exact function, environment and observed outputs.",
+ '',
+ '## Find the relevant skill',
+ '',
+ 'Match the first user message and each change of intent. Use a guide already attached for the current stage. Otherwise look up the relevant function in `scientific_skill_catalog`, call `read_scientific_skill` with that function_id, then fetch only the needed reference by its exact advertised document_id.',
+ '',
+ '- App pages, buttons, accounts and bugs → `product.workbench`. Use its workbench and source guides. Verify the UI, dispatch or worker behavior at the matching revision in the [AIMatterLab repository](https://github.com/tensor4627/AIMatterLab).',
+ '- “查一下 HotHam” or another package → `software.catalog` and `search_software_docs` with its name. Use the returned commit and guide. HotHam learns electronic Hamiltonians. HotPP fits interatomic potentials. A lookup can be answered directly.',
+ "- User package or script definition → `tool.onboarding`. Follow the versioned package or source declaration and the desktop's selection. To configure and test an acquired SSH target use `cluster.resource-tools`. For desktop installation and first launch use `installation.readiness`.",
+ '- Science → structure/import (`structure.ase`, `structure.materials-project`), inputs/previews (`assets.inspect-register`, `viewer.structure-trajectory`), MD/sampling (`md.pydyn`, `sampling.gpumd`, `pygas.cv`), paths (`neb.gpumd`), training (`training.nep`, `training.hotpp`), and analysis (`analysis.number-density`, `analysis.wtmetad`, `analysis.opes`). Match structure, units, model format and outputs to the requested method.',
+ '- Workflow → plan outputs with `workflow.roadmap` and author existing inputs with `workflow.authoring`. Use `compute.queue` for queues, `environment.probe` for runtime evidence and `cluster.lsf-slurm-deployment` for independent jobs. When requested, select restricted setup guidance using 科学资源与技能 → 用于下条消息.',
+ '',
+ '## Local knowledge',
+ '',
+ 'Follow the AGENTS.md links in `project_skill_catalog({})` for relevant local guidance. `scope="current"` means the bound project or unbound chat. Keep scientific selections and artifact references there. Keep resource/account notes and activation-issued execution skills under `scope="resource"` with the acquired resource ID. Use `read_session_workspace` for the actual run directory. Read and write ordinary skills with `read_project_skill` and `write_project_skill` in the same scope and verify the saved revision.',
+ '',
+ '## Operating scope',
+ '',
+ 'Ordinary chat can acquire resources, inspect queues, configure environments and submit an explicitly delegated independent job. Prefer planning for reusable workflows. Update existing workflows in place.',
+ '',
+ 'Use list_compute_resources and acquire_compute_resource with one selector. Match a name or a short follow-up to its listed resource ID. Ask if ambiguous. Use access="command" for short SSH work, access="service" for the worker, or access="terminal" for a shell. Call run_compute_command with a stable request_id. Current receipts supersede old handoff advice. Recover the original live SSH session first.',
+ '',
+ 'Attachments supply reference data. Cite evidence with its source, revision and line range. Chat uploads do not register inputs or grant file access.',
+ '',
+ 'Honor draft-only, no-build, no-run and stop requests. Use current project and resource grants. Shell and job-service grants are separate. Humans authenticate. A reply stop leaves submitted jobs under run controls. After a stop or branch, check original run or request IDs. Inspect an unknown operation without replaying it.',
+ '',
+ '“写到本机工作区” uses `scope="user"` at `project_skill_catalog({"scope":"user"}).directory` (default `user-cache/skills/user/`). For conflicting steps, name both skills and ask the user to choose.'
+].join('\n');
+
 test('ACP profiles deliver the same bounded AIMatterLab core and progressive skill routing',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-harness-guidance-'));
  try{
@@ -27,6 +64,14 @@ test('ACP profiles deliver the same bounded AIMatterLab core and progressive ski
   assert.match(document,/a short follow-up.*listed resource ID/);
   assert.match(document,/Current receipts supersede old handoff advice/);
   assert.match(document,/Recover the original live SSH session first/);
+  assert.match(document,/user-local third-party tool with `tool\.onboarding` in `scope="user"`/);
+  assert.match(document,/Configure and test on the user's real target with `cluster\.resource-tools` in `scope="resource"`/);
+  assert.match(document,/A listed source does not mean the tool is configured on the target/);
+  assert.match(document,/A single-tool test does not establish group compatibility/);
+  assert.match(document,/Report untested state as `not_run` or `blocked`/);
+  for (const anchor of ['installation/tool-sources.json', 'contracts/tools/engine-contracts.json', 'contracts/tools/tool-package.schema.json', 'docs/software-specification.md']) {
+   assert.ok(document.includes('`'+anchor+'`'), 'Missing runtime source anchor '+anchor);
+  }
   const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
   const routes=[...document.matchAll(/`([a-z]+\.[a-z.-]+)`/g)].map(match=>match[1]);
   assert(routes.length>=12);assert(routes.every(id=>map.functions.some(route=>route.id===id)));
@@ -51,7 +96,13 @@ test('the installed workspace contributes its own short index once and falls bac
  const previous=STUDIO_INSTRUCTIONS.slice(0,STUDIO_INSTRUCTIONS.lastIndexOf('\n\n'));
  fs.writeFileSync(file,previous+'\n\n'+extra);
  assert.equal(read(),STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra);
+ fs.writeFileSync(file,runtimeGuide027+'\n');
+ assert.equal(read(),STUDIO_INSTRUCTIONS);
+ fs.writeFileSync(file,runtimeGuide027.replaceAll('\n','\r\n')+'\r\n\r\n'+extra);
+ assert.equal(read(),STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra);
  const installedGuide=fs.readFileSync(new URL('../../installation/workspace-guide.md',import.meta.url),'utf8').trim();
+ fs.writeFileSync(file,installedGuide+'\n');
+ assert.equal(read(),STUDIO_INSTRUCTIONS);
  fs.writeFileSync(file,installedGuide.replaceAll('\n','\r\n')+'\r\n\r\n'+extra);
  assert.equal(read(),STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra);
  assert.match(fs.readFileSync(file,'utf8'),/# AIMatterLab 工作区/);
@@ -132,6 +183,31 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  assert.match(recoveryResult.text,/restores eligible leases for their original conversations/);
  const deployment=await service.call('read_scientific_skill',{function_id:'cluster.lsf-slurm-deployment'},scope);
  assert.match(deployment.text,/A visual workflow is optional for independent jobs/);
+});
+
+test('every compute workflow route advertises and reads the connection recovery reference',async t=>{
+ const map=JSON.parse(fs.readFileSync(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
+ const bundledRoot=fileURLToPath(new URL('../../agent/builtin-skills',import.meta.url));
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-recovery-guidance-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const gpumdSkill=path.join(root,'agents','skills','gpumd-gpu-sampling-wsl');
+ fs.mkdirSync(gpumdSkill,{recursive:true});
+ fs.writeFileSync(path.join(gpumdSkill,'SKILL.md'),'# GPUMD test guidance\n');
+ const scope={provider:'deepseek'};
+ const service=new ScientificSkills({map,bundledRoot,sources:()=>[{id:'gpumd',root}],
+  settings:()=>({scientificSkillProviders:{gpumd:[scope.provider]}}),setupAllowed:()=>true});
+ const document_id='studio-compute-workflow/references/connection-recovery.md';
+ const expected=fs.readFileSync(path.join(bundledRoot,document_id),'utf8');
+ for(const {id:function_id} of map.functions.filter(route=>route.skills.includes('studio-compute-workflow'))){
+  const entry=await service.call('read_scientific_skill',{function_id},scope);
+  assert.equal(entry.status,'passed',entry.reason||function_id);
+  assert(entry.document_ids.includes(document_id),function_id);
+  const focused=await service.call('read_scientific_skill',{function_id,document_id},scope);
+  assert.equal(focused.status,'passed',focused.reason||function_id);
+  assert.equal(focused.attachments.length,1,function_id);
+  assert.equal(focused.attachments[0].name,document_id,function_id);
+  assert.equal(focused.text,expected,function_id);
+ }
 });
 
 test('workflow preparation exposes only the focused authoring and graph receipts for the selected stage',async()=>{

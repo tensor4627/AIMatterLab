@@ -17,7 +17,11 @@ const PARENT_NEWLINES={from:'d5ab63b2c2a514ffaaa60191d12ffd064f6a8f00610bfa8ec80
 // Exact reviewed migration to the compact entry. Its operational details are
 // still available in the bundled guide references. Later revisions must opt in.
 const COMPACT_PARENT={
- from:'7803cde8eab91146c9c4f9970a2bc97cc52c27200e0ecc6e2934d63cb39b8bf1',
+ from:[
+  '871c06a6fabcb7f424fff7b9eff01672bb3e3b3e000aaeb441099cf5c35fb122', // v0.2.0–v0.2.5
+  '7803cde8eab91146c9c4f9970a2bc97cc52c27200e0ecc6e2934d63cb39b8bf1', // v0.2.6
+  PARENT_NEWLINES.to,
+ ],
  to:'83373c3322ef4dcd35456e4112e6a5ac42a0beb92d4950f98be7574c160b498c',
 };
 const PROVENANCE_SCOPE='private guidance only; no environment probe, registration, submission or execution performed';
@@ -43,7 +47,7 @@ function checkProvenance(value,publicHash,legacyParent=false){
  const allowed=['schema_version','portable_skill_sha256','created_at','validation_status','scope'];
  const digest=value?.portable_skill_sha256;
  const legacyNewlines=legacyParent&&digest===PARENT_NEWLINES.from;
- const compactUpgrade=publicHash===COMPACT_PARENT.to&&[COMPACT_PARENT.from,PARENT_NEWLINES.to].includes(digest);
+ const compactUpgrade=publicHash===COMPACT_PARENT.to&&COMPACT_PARENT.from.includes(digest);
  const matching=digest===publicHash||compactUpgrade||legacyNewlines&&[PARENT_NEWLINES.to,COMPACT_PARENT.to].includes(publicHash);
  if(!plain(value)||Object.keys(value).length!==allowed.length||Object.keys(value).some(k=>!allowed.includes(k))||value.schema_version!==1||value.validation_status!=='not_run'||value.scope!==PROVENANCE_SCOPE||typeof value.created_at!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.created_at)||!Number.isFinite(Date.parse(value.created_at))||!matching)fail('invalid_or_stale_provenance');
  return value;
