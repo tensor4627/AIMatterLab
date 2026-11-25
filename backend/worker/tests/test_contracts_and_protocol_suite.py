@@ -440,6 +440,18 @@ class NativeNEB(unittest.TestCase):
         self.write('potential nep.txt\nneb_set no_vc interpolate 3\nneb_run fire 0.02 5\n')
         self.assertEqual(contract(self.root, self.inputs)['cell_mode'], 'fixed')
 
+    def test_bundled_native_input_example_matches_the_worker_contract(self):
+        import re
+        guide = Path(__file__).resolve().parents[3] / 'agent/builtin-skills/studio-neb-workflow/references/native-input.md'
+        text = guide.read_text(encoding='utf-8')
+        self.write(re.search(r'```text\n(.*?)\n```', text, re.S)[1] + '\n')
+        declared = json.loads(re.search(r'```json\n(.*?)\n```', text, re.S)[1])
+        allowed = describe('gpumd.neb')['parameter_groups']['neb']['allowed_keys']
+        self.assertLessEqual(set(declared), set(allowed))
+        actual = contract(self.root, self.inputs, declared)
+        self.assertEqual({key: actual[key] for key in declared}, declared)
+        self.assertEqual(actual['structure_files'], ['is.xyz', 'fs.xyz'])
+
     def test_duplicate_native_run_and_md_mix_rejected(self):
         original = (self.root / 'run.in').read_text()
         for extra in ['run 5\n', 'minimize fire 0.1 5\n', 'neb_run fire 0.01 10\n']:

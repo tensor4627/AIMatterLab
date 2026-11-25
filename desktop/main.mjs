@@ -54,7 +54,8 @@ import {createResourceToolController,registerResourceToolRoutes} from '../backen
 import {createToolWorkflowController,registerToolWorkflowRoutes} from '../backend/main/workspace/tool-workflows.mjs';
 import {createRoadmapController} from '../backend/main/workspace/roadmap-execution.mjs';
 import {createRoadmapNotifications} from '../backend/main/workspace/roadmap-notifications.mjs';
-import {softwareDocDefinitions,softwareDocs} from '../backend/main/tools/public-software-docs.mjs';
+import {softwareDocDefinitions,softwareDocs as lookupSoftwareDocs} from '../backend/main/tools/public-software-docs.mjs';
+import {readReleaseToolSources} from '../contracts/tools/release-tool-sources.mjs';
 import {toolGuidanceTarget} from '../backend/main/compute/tool-guidance-target.mjs';
 import {explicitSetupStage} from '../agent/skills/explicit-setup-stage.mjs';
 import {createComputeOnboarding} from "../backend/main/compute/compute-onboarding.mjs";
@@ -133,6 +134,10 @@ import {assertRendererWorkerRoute,linuxPath} from "../contracts/transport-policy
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here,'..');
+const toolSourceCatalog=app.isPackaged?path.join(process.resourcesPath,'tool-sources.json'):path.join(root,'installation','tool-sources.json');
+const softwareDocs=(name,args)=>lookupSoftwareDocs(name,args,undefined,toolSourceCatalog);
+let releaseToolSources=[];
+try{releaseToolSources=readReleaseToolSources(toolSourceCatalog);}catch{ /* The public catalog reports an unavailable release file. */ }
 if(process.platform==='win32'&&app.isPackaged)app.setAppUserModelId('science.gpusampling.studio');
 const performanceTimeline=createPerformanceTimeline();
 const workerSource = app.isPackaged ? path.join(process.resourcesPath,'app.asar.unpacked','worker') : path.join(root,'backend','worker');
@@ -290,7 +295,7 @@ agents=new ConversationAgentHub({authCodex:codex,createCodex,initialProvider:set
  releaseWorker:(provider,sessionId)=>{worker.revokeProvider(provider,sessionId);terminalMcp?.revokeProvider(provider,sessionId);},bindWorkerContext:(provider,context,options)=>resourceRouting.bindWorkerContext(provider,context,options),resourceScope:(provider,method,context,sessionId)=>resourceRouting.scope(provider,method,context,sessionId)});
 const scientificMap=JSON.parse(fs.readFileSync(path.join(root,'agent','skills','scientific-skill-map.json'),'utf8'));
 const setupInstructions=explicitSetupStage({routes:new Map(scientificMap.functions.map(route=>[route.id,route])),current:()=>workflowContext?.current()});
-scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compatible'].includes(provider)||agents.bridge(provider)?.selection?.profile.sharePublicGuides===true,map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,workerSource,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
+scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compatible'].includes(provider)||agents.bridge(provider)?.selection?.profile.sharePublicGuides===true,map:scientificMap,bundledRoot:bundledSkillRoot,studioRoot:root,workerSource,sources:scientificSources,registeredSources:()=>catalog.list('source-binding'),releaseToolSources,settings:()=>settings,setupAllowed:(provider,route)=>setupInstructions.allowed(provider,route),resolveGuidance:scope=>resolveSkillGuidance(scope),assertScope:assertSkillGuidanceScope});
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(root,'agent','tools','custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
@@ -582,6 +587,7 @@ try{computeResource.clearLegacyTerminal?.();}catch{}
 void managedResources.restorePublished();
 const resourceToolSetups=createResourceToolController({
  resources:managedResources,workspaces:resourceWorkspace,skills:projectSkills,developerCompute,current:()=>workflowContext.revision(),
+ resolveSelectedDefinition:(ref,scope)=>scientificSkills.selectedManaged.resolveDefinition(ref,scope),
  emit:params=>emit('studio:event',{method:'studio/resourceToolSetupChanged',params}),
  chooseFile:async (event,kind)=>{
   trusted(event);
@@ -597,6 +603,8 @@ const resourceToolSetups=createResourceToolController({
   const scope=[
    resource.name+' / '+workspace.account+' · '+workspace.hostIdentity.hostname,workspace.root,
    row.manifest.name+' '+row.manifest.version,row.install_root,reviewedSource,
+   ...row.onboarding?[row.onboarding.package_id+' @ '+row.onboarding.package_version,
+     row.onboarding.function_id+' / '+row.onboarding.reference_test_case_id]:[],
    [target.project_id,target.cluster_id,target.environment_id,target.scheduler,target.queue].join(' / '),
    ...row.manifest.build?[(en?'Build limit ':'构建时限 ')+row.manifest.build.max_seconds+(en?' seconds':' 秒'),
      JSON.stringify(row.manifest.build.steps).slice(0,3200)]:[],

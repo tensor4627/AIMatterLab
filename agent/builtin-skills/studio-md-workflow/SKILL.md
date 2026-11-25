@@ -5,6 +5,8 @@ description: Prepare and review PyDyn or GPUMD molecular dynamics from existing 
 
 # Molecular dynamics in AIMatterLab
 
+For a user tool configured on a hosted resource, use its activated version and matching resource receipt. Use `cluster.resource-tools` if the requested execution still needs target setup.
+
 Resolve the requested engine from the user's task and registered capabilities: pydyn.md, gpumd.md, pydyn.sampling or gpumd.sampling. Use describe_engine for its current input and parameter contract. Source registration supplies authoring information; inspect the selected compute environment for that engine and retain actual probe findings; diagnostic differences can be repaired within the current delegation. Never switch an engine checkout or choose a different registered version silently.
 
 Use inspect_asset for a supplied structure or create_structure for a user-delegated ASE recipe, then suggest_parameters with the actual structure. Preserve atom order, cell, PBC, temperature and units. Check the potential's species and intended consumer; checkpoint, eager and deployment models are distinct. HotPP consumers need a matching atomic-number convention. Never infer a scientifically meaningful CV or atom group just from a molecule name.

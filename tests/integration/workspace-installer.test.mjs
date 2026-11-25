@@ -29,9 +29,9 @@ test('Windows release uses an assisted setup and a direct workspace directory se
  assert.match(include,/File \/oname=\$PLUGINSDIR\\workspace-guide\.md "\$\{PROJECT_DIR\}\\installation\\workspace-guide\.md"/);
  assert.match(include,/CopyFileW\(w "\$PLUGINSDIR\\workspace-guide.md", w "\$INSTDIR\\AGENTS.md", i 1\)/);
 });
-test('the embedded manifest cannot take ownership of a user directory or project prompt',t=>{
+test('the embedded manifest refuses user files and local Electron diagnostics',t=>{
  const {payload}=fixture(t);
- for(const name of ['AGENTS.md','user-cache/data','sources/engine','projects/research','.config/catalog','.aimatterlab-workspace']){
+ for(const name of ['AGENTS.md','user-cache/data','sources/engine','projects/research','.config/catalog','.aimatterlab-workspace','debug.log']){
   const file=create(payload,name);assert.throws(()=>workspaceManifest(payload),/Unexpected installer payload/);
   fs.rmSync(name.includes('/')?path.dirname(file):file,{recursive:true});
  }

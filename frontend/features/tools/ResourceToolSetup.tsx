@@ -271,6 +271,12 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
    <h3>{receipt.manifest.name} · {receipt.manifest.version}</h3><p role="status" data-testid="resource-tool-status">{t(statuses[receipt.status])}</p>
    <dl><dt>{t('安装位置')}</dt><dd><code>{receipt.install_root}</code></dd><dt>{t('计算环境与测试队列')}</dt><dd>{receipt.target.environment_id} · {receipt.target.scheduler} {receipt.target.queue}</dd>
     <dt>{t('程序来源与运行入口')}</dt><dd>{receipt.manifest.source.kind} · <code>{'url' in receipt.manifest.source&&receipt.manifest.source.url?receipt.manifest.source.url+' · ':''}{receipt.manifest.source.executable}</code></dd></dl>
+   {receipt.onboarding&&<details data-testid="resource-tool-onboarding"><summary>{t('工具包来源')} · {receipt.onboarding.package_id} · {receipt.onboarding.function_id}</summary>
+    <dl><dt>{t('包版本')}</dt><dd><code>{receipt.onboarding.package_version}</code></dd>
+     <dt>{t('源码提交')}</dt><dd><code>{receipt.onboarding.source_commit}</code></dd>
+     <dt>{t('声明摘要')}</dt><dd><code>{receipt.onboarding.manifest_sha256}</code></dd>
+     <dt>{t('参考测试用例')}</dt><dd><code>{receipt.onboarding.reference_test_case_id}</code></dd></dl>
+   </details>}
    {receipt.status==='planned'&&<>
     {receipt.manifest.build&&<details><summary>{t('构建步骤')} · {receipt.manifest.build.max_seconds} s</summary><ol>{receipt.manifest.build.steps.map((step,index)=><li key={index}><code>{step.cwd&&`[${step.cwd}] `}{JSON.stringify([step.command,...step.args])}</code></li>)}</ol></details>}
     <p>{t('最小测试')} · {receipt.manifest.test.max_seconds} s{receipt.manifest.test.resources&&<> · {Object.entries(receipt.manifest.test.resources).map(([name,value])=>`${name} ${value}`).join(' · ')}</>}</p>

@@ -1,11 +1,25 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {selectScientificFunctions,ScientificSkillContext} from "../../agent/skills/scientific-context.mjs";
 import {engineContracts} from '../../contracts/tools/engine-contracts.mjs';
 import skillMap from '../../agent/skills/scientific-skill-map.json' with {type:'json'};
+test('release tool lookup is available in ordinary chat and overrides the previous engine when requested',()=>{
+ for(const text of ['查一下hotham','Hot-Ham 是什么？','How do I install Hot Ham?','验证 HotHam 的 LCAO 训练','查一下GPUMD','软件支持哪些科学工具？','TorchNEP 的安装手册在哪里？']){
+  assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['software.catalog'],text);
+ }
+ assert.deepEqual(selectScientificFunctions({text:'在集群上安装 HotHam'}),['cluster.resource-tools']);
+ assert.deepEqual(selectScientificFunctions({text:'查一下GPUMD轨迹的原子数密度'}),['analysis.number-density']);
+ assert.deepEqual(selectScientificFunctions({text:'查一下HotHam',manualFunction:'workflow.roadmap'}),['workflow.roadmap']);
+});
 test('named cluster installations and service repairs select their own guidance',()=>{
  for(const text of ['在这个集群上安装 GPUMD','Install CP2K on my cluster','在计算资源上从零配置 MySolver']){
   assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['cluster.resource-tools']);
  }
  assert.deepEqual(selectScientificFunctions({text:'集群缺少作业服务的 Python 环境，请修复作业服务'}),['cluster.connection-setup']);
+});
+test('local tool definition requests can start onboarding without installing or binding a resource',()=>{
+ for(const text of ['把我本地的脚本打包接入 AIMatterLab','请帮我登记本地第三方工具包','Draft a tool.json for my local script']){
+  assert.deepEqual(selectScientificFunctions({text}),['tool.onboarding'],text);
+ }
+ assert.deepEqual(selectScientificFunctions({text:'在集群上安装我本地的工具 MySolver'}),['cluster.resource-tools']);
 });
 test('Every contracted scientific engine has an explicit functional route and never selects installation',()=>{
  for(const engine of Object.keys(engineContracts.engines)){

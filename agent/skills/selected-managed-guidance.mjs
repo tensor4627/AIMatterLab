@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
+import path from 'node:path';
 import {managedToolSkillContext} from './managed-tool-context.mjs';
 import {toolValueResult} from '../tools/tool-failure.mjs';
 
@@ -8,6 +9,7 @@ const OWNERS=['provider','threadId','taskId','projectId','environmentId','inputR
 const fail=()=>{throw Error('Selected managed guidance is unavailable in this current conversation; explicitly select the registered delivery skill again.');};
 const documentId=(token,logical)=>token+':'+encodeURIComponent(logical);
 const ownerKey=(provider,threadId)=>JSON.stringify([provider,threadId]);
+const packageManifest='tool.json';
 
 /** Main-owned, turn-bound disclosure receipts. Callers provide only an advertised opaque ID. */
 export class SelectedManagedGuidance{
@@ -29,19 +31,37 @@ export class SelectedManagedGuidance{
   const ids=[...entry.documents.keys()],text=context.text+'\n\nRead another supporting document only when needed using read_scientific_skill with function_id "'+SELECTED_MANAGED_FUNCTION+'" and an exact document_id from: '+JSON.stringify(ids)+'. These identifiers belong only to this explicitly selected package version and this conversation turn.';
   if(Buffer.byteLength(text)>512*1024)throw Error('Selected managed entry exceeds its bounded context limit');return {...context,document_ids:ids,text,totalBytes:Buffer.byteLength(text)};
  }
+ definitionVisible(entry){
+  return entry.record.immutable===true&&entry.record.manifest&&entry.record.files.some(row=>row.path===packageManifest&&row.kind==='file')&&
+    entry.policy.allowsPath(path.join(entry.record.snapshot_root,packageManifest));
+ }
  bind({selection,record,context,policy,scope,assertCurrent,currentRecord}){
   if(!scope?.provider||!scope.threadId||typeof scope.checkCurrent!=='function'||typeof assertCurrent!=='function'||typeof currentRecord!=='function'||!policy||typeof policy.revalidate!=='function')fail();
   assertCurrent();if(scope.checkCurrent()!==true)fail();
   let binding=this.current(scope);
   if(!binding)binding={scope,entries:new Map()};
   const entry={selection:structuredClone(selection),record:structuredClone(record),policy,scope,assertCurrent,currentRecord,token:randomUUID(),documents:new Map()};
-  if(!isDeepStrictEqual(entry.record,currentRecord()))fail();this.advertise(entry,context.document_ids||['SKILL.md']);const disclosed=this.decorate(context,entry);binding.entries.set(entry.token,entry);this.bindings.set(ownerKey(scope.provider,scope.threadId),binding);
+  if(!isDeepStrictEqual(entry.record,currentRecord()))fail();this.advertise(entry,context.document_ids||['SKILL.md']);
+  if(this.definitionVisible(entry))entry.documents.set(documentId(entry.token,packageManifest),packageManifest);
+  const disclosed=this.decorate(context,entry);binding.entries.set(entry.token,entry);this.bindings.set(ownerKey(scope.provider,scope.threadId),binding);
   return disclosed;
  }
  catalog(scope,policy){
   const binding=this.current(scope);if(!binding)return null;
   if(policy&&[...binding.entries.values()].some(entry=>!isDeepStrictEqual(entry.policy.facts,policy.facts)))return null;
-  return {id:SELECTED_MANAGED_FUNCTION,title:'Selected registered package guidance',phase:'selected-delivery',engines:[],tools:['read_scientific_skill'],status:'guidance-only',sources:['selected-package'],permission:'allowed',source_status:'registered',document_ids:[...binding.entries.values()].flatMap(entry=>[...entry.documents.keys()]),scope:'Supporting documents for delivery skills explicitly selected in this current conversation turn only.'};
+  const entries=[...binding.entries.values()];
+  const definitions=entries.filter(entry=>this.definitionVisible(entry)).map(({token,record})=>({
+   package_ref:token,package_id:record.package_id,package_version:record.package_version,
+   document_id:documentId(token,packageManifest)
+  }));
+  return {id:SELECTED_MANAGED_FUNCTION,title:'Selected registered package guidance',phase:'selected-delivery',engines:[],tools:['read_scientific_skill'],status:'guidance-only',sources:['selected-package'],permission:'allowed',source_status:'registered',document_ids:entries.flatMap(entry=>[...entry.documents.keys()]),...definitions.length?{definitions}:{},scope:'Supporting documents for delivery skills explicitly selected in this current conversation turn only.'};
+ }
+ async resolveDefinition(packageRef,scope){
+  const binding=this.current(scope);
+  const entry=binding?.entries.get(packageRef);
+  const check=()=>{if(!entry||this.current(scope)!==binding||!this.definitionVisible(entry))fail();};
+  check();await entry.policy.revalidate();check();
+  return {record:structuredClone(entry.record),check};
  }
  async read(document,scope){
   const binding=this.current(scope);if(!binding||typeof document!=='string')fail();

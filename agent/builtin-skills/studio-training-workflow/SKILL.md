@@ -5,6 +5,10 @@ description: Prepare NEP or HotPP training, independent evaluation and model exp
 
 # Training and evaluation in AIMatterLab
 
+For a registered external trainer, use the exact activated function and environment. If the user asks to configure its hosted target, use `cluster.resource-tools`.
+
+HotPP fits interatomic potentials for atomistic simulation. For HotHam or Hot-Ham, which learns electronic Hamiltonians, use `software.catalog` and its focused HotHam reference.
+
 Use `describe_engine` for `nep.train`, `nep.eval`, `nep.analyze`, `hotpp.train`, `hotpp.eval` or `hotpp.export`. For a requested run reuse the current registered environment and check the selected route. `training.torchnep`, `learning.nepmaker` and `learning.activemiao` provide planning references. Their source or CLI guidance can inform a draft. The built-in worker has no corresponding training or orchestration adapter.
 
 Inspect actual dataset assets, species, units and energy/force/virial labels. Record hashes and disjoint train/validation/test identities. Keep independent test data separate and honor sealed-test restrictions. Missing virial labels cannot produce a virial RMSE. Existing model or dataset inputs should be reused rather than regenerated.

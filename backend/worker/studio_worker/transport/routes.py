@@ -143,6 +143,7 @@ def dispatch(service, method, path, data, admin=False):
             value["roadmap_execution_schema"]=1
             if getattr(service, 'ssh_service_mode', False):
                 value["resource_tool_schema"] = 1
+                value["resource_tool_definition_schema"] = 1
                 from studio_worker.compute.ssh_service import identity
                 host = identity(service.root)
                 value.update(hostname=host['hostname'], uid=host['uid'], machineId=host['machineId'],

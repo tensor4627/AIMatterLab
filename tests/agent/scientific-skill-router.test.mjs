@@ -22,6 +22,23 @@ test('Each authenticated provider needs its own consent before receiving bounded
 test('Revoked permission is rechecked even after body reads and no partial source leaks',async t=>{
  const {root,map}=await fixture(t);let checks=0;const router=new ScientificSkillRouter({map,sourceRoot:()=>root,consent:()=>++checks===1});const result=await router.read('codex','cv.compose');assert.equal(result.status,'permission_required');assert.deepEqual(result.attachments,[]);assert.equal(result.text,undefined);
 });
+test('a plain HotHam question can reach the bundled scientific reference with no setup selection or external skill grant',async()=>{
+ const map=JSON.parse(await fs.readFile(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
+ const root=fileURLToPath(new URL('../../agent/builtin-skills/',import.meta.url));
+ const router=new ScientificSkillRouter({map,sourceRoot:source=>source==='studio'?root:undefined,consent:()=>false});
+ for(const provider of PROVIDERS){
+  const context=new ScientificSkillContext(router);
+  const entry=await context.prepare('ordinary-chat',provider,{text:'查一下hotham'});
+  assert.deepEqual(entry.routes,['software.catalog']);
+  assert.equal(entry.status,'passed');
+  assert.deepEqual(entry.attachments.map(file=>file.name),['studio-tool-discovery/SKILL.md']);
+  const id=router.documentIds('software.catalog').find(name=>name.endsWith('/references/hotham.md'));
+  assert(entry.text.includes(id));
+  const focused=await router.read(provider,'software.catalog',id);
+  assert.equal(focused.status,'passed');
+  assert.equal(focused.text,await fs.readFile(path.join(root,id),'utf8'));
+ }
+});
 test('A bound workflow delivers the requested structure guide and offers only its focused reference',async()=>{
  const map=JSON.parse(await fs.readFile(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
  const root=fileURLToPath(new URL('../../agent/builtin-skills/',import.meta.url));

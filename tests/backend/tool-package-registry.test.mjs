@@ -9,6 +9,10 @@ import {createHash} from 'node:crypto';
 import {Catalog} from "../../backend/main/workspace/catalog.mjs";
 import {createToolPackageRegistry} from "../../backend/main/tools/package-registry.mjs";
 import {packageIdentityText} from "../../contracts/tools/tool-package.mjs";
+import {SelectedManagedGuidance} from "../../agent/skills/selected-managed-guidance.mjs";
+import {resolveReadPolicy} from "../../agent/skills/read-policy.mjs";
+import {managedToolSkillContext} from "../../agent/skills/managed-tool-context.mjs";
+import {bindResourceToolDefinition} from "../../backend/main/compute/resource-tool-definition.mjs";
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),nullFile=process.platform==='win32'?'NUL':'/dev/null';
 const env={...Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('GIT_')&&key!=='NODE_OPTIONS')),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:nullFile,GIT_TERMINAL_PROMPT:'0'};
@@ -38,6 +42,38 @@ test('inspection validates actual HEAD, defaults and the whole declared closure 
  const head=git(h.repo,['rev-parse','HEAD']).trim(),before={config:sha(fs.readFileSync(path.join(h.repo,'.git/config'))),index:sha(fs.readFileSync(path.join(h.repo,'.git/index')))};
  const value=h.registry.inspect({package_root:h.packageRoot});assert.equal(value.source_commit,head);assert.equal(value.manifest.environment.parallelism.threads,1);assert.equal(value.manifest.environment.parallelism.gpus,0);assert.equal(value.scope,'definition_checked');assert.equal(value.installation.status,'not_run');assert.equal(value.tests.status,'not_run');assert(value.files.some(file=>file.path==='atlas-tests/extra.md'));assert(value.files.some(file=>file.path==='upstream-layout/qa/README.md'));assert.equal(h.registry.list().length,0);assert(!fs.existsSync(h.storeRoot));
  assert.equal(value.package_version,sha(Buffer.from(packageIdentityText({id:'atlas',commit:head,manifestSha256:value.manifest_sha256,files:value.files}))));assert.equal(value.delivery_skill.name,'atlas-delivery');assert.equal(value.delivery_skill.description,'Portable Atlas operations and test guidance.');assert.equal(value.delivery_skill.sha256,sha(fs.readFileSync(path.join(h.packageRoot,'SKILL.md'))));assert.equal(sha(fs.readFileSync(path.join(h.repo,'.git/config'))),before.config);assert.equal(sha(fs.readFileSync(path.join(h.repo,'.git/index'))),before.index);
+}));
+
+test('a selected immutable package advertises its exact command and can bind a compatible resource draft',()=>fixture(async h=>{
+ h.manifest.functions[0].operation.command.push('{result}');
+ h.save();
+ const record=h.registry.register({package_root:h.packageRoot}),scope={provider:'codex',threadId:'atlas-setup',projectId:'research',checkCurrent:()=>true};
+ const selection={name:record.delivery_skill.name,path:path.join(record.snapshot_root,record.delivery_skill.path)};
+ const guidance=new SelectedManagedGuidance(),policy=await resolveReadPolicy({},scope);
+ const context=await managedToolSkillContext({selection,record,policy,scope});
+ guidance.bind({selection,record,policy,scope,context,assertCurrent:()=>{},currentRecord:()=>h.registry.read({package_id:record.package_id,package_version:record.package_version})});
+ const [selected]=guidance.catalog(scope,policy).definitions;
+ const selectedDefinition={package_ref:selected.package_ref,function_id:'smoke',test_case_id:'minimal'};
+ const rejectedScope={...scope,threadId:'another-chat'};
+ await assert.rejects(guidance.resolveDefinition(selected.package_ref,rejectedScope),/current conversation/);
+ await assert.rejects(guidance.resolveDefinition(selected.package_ref,{...scope,projectId:'another-project'}),/current conversation/);
+ const document=await guidance.read(selected.document_id,scope);
+ assert.match(document.text,/"command"/);
+ const binding=await guidance.resolveDefinition(selected.package_ref,scope);
+ const draft={id:'atlas',source:{kind:'git',commit:record.source_commit,executable:'src/main.py'},interpreter:'python',argv:['{output:result}'],
+  inputs:{},outputs:{result:{filename:'smoke-result.json',format:'json'}},test:{outputs:{result:{json_keys:['result']}}}};
+ const attached=bindResourceToolDefinition(binding.record,selectedDefinition,draft);
+ assert.equal(attached.package_version,record.package_version);
+ assert.equal(attached.manifest_sha256,record.manifest_sha256);
+ assert.equal(attached.entrypoint,sha(fs.readFileSync(path.join(h.repo,'src/main.py'))));
+ assert.equal(attached.reference_test_case_id,'minimal');
+ assert.throws(()=>bindResourceToolDefinition(binding.record,selectedDefinition,{...draft,id:'unrelated'}),/selected package ID/);
+ assert.throws(()=>bindResourceToolDefinition(binding.record,selectedDefinition,{...draft,argv:[]}),/target arguments differ/);
+ assert.throws(()=>bindResourceToolDefinition(binding.record,selectedDefinition,{...draft,test:{outputs:{result:{min_bytes:1}}}}),/explicit target output assertion/);
+ assert.throws(()=>bindResourceToolDefinition(binding.record,{...selectedDefinition,test_case_id:'no-such-case'},draft),/belonging to/);
+ assert.throws(()=>bindResourceToolDefinition(binding.record,selectedDefinition,{...draft,source:{...draft.source,commit:'f'.repeat(40)}}),/exact Git commit/);
+ guidance.clear(scope.provider,scope.threadId);
+ assert.throws(binding.check,/current conversation/);
 }));
 
 test('registration retains an independent complete Git snapshot, portable layout and protected Catalog namespaces',()=>fixture(h=>{

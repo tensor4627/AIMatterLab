@@ -2,6 +2,8 @@
 
 Use the connection selected by the user. Read its tool catalogue with `list_resource_tools`. For an installed tool, read the execution skill returned by `project_skill_catalog` and `read_project_skill` with `scope="resource"` and that resource ID. Recheck its environment, function and version before using it in a new workflow.
 
+For a named release tool, use `search_software_docs` with its public name in `software` and read the pinned `guide_url` from the result. `software.catalog` includes a focused reference for HotHam dataset preparation, Hamiltonian training and LCAO inference. Select a declared function and its case when translating a delivery declaration into a resource setup manifest.
+
 ## Select the installation path
 
 - **New installation.** Read the tool's delivery instructions. Inspect the target's architecture, registered runtime and modules. Pin the requested version, source commit or release digest. Put the new version in the resource workspace's `software/<tool>/` directory. Reuse site Git or the private resource Git under `software/git/`. Describe the actual installation, source entry or executable and the commands and files needed by this tool.

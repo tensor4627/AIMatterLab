@@ -1,0 +1,14 @@
+# Review a graph and verify its receipts
+
+For a reproducible native MD run, bind initial velocities in the structure or set an explicit velocity seed before integration. A native in-process potential can be identified by the registered runtime component ID `potential`.
+
+Preserve each original delivery requirement in its resource. For each measurable condition add a `checks` entry with the exact `requirement`, observed `fact`, comparison `op` (`eq`, `ge`, `le`, `contains`) and `value`. Surface an unmapped condition for human review. Bind a step-specific parameters object using `parameter_field`, especially when a tool is invoked twice. A saved group uses `tool_group: {id, version}` with its exact registered version, input and step IDs, functions, ports and dependencies.
+
+| Registered local tool | Inputs | Outputs and observed facts |
+| --- | --- | --- |
+| `gpumd.md` | `structure`, `potential`, `control`. Bind a saved structure, a self-contained NEP3/4 or Tersoff potential, and native `run.in`. | `trajectory` reports `samples`, `atoms`, `fields`, `first_time_fs`, `last_time_fs` and, for regularly spaced frames, `interval_fs`. `thermodynamics` reports `samples`, `columns` and known `fields` such as `temperature_K`. Enable the requested dumps in the control file. |
+| `trajectory.density` | Bind `trajectory` to the resource produced at the MD trajectory port. Requires timestamped extended XYZ and periodic 3D cells. | `density` (CSV) contains time, atom count, cell volume in cubic angstroms and atom number density in inverse cubic angstroms. The analysis also records a digest of the bytes it parsed. |
+
+To add number density to the example, append a resource `number-density` and a `trajectory.density` step with input `{port:"trajectory",resource:"frames"}` and output `{port:"density",resource:"number-density"}`. Include the analysis and any requested original MD data in final outputs. For an explicit expectation of ten trajectory samples, attach `{"requirement":"10 frames","fact":"samples","op":"eq","value":10}` and include “10 frames” in the trajectory requirements.
+
+When the user asks to arrange execution of a supported local or SSH scheduler graph, open **按流程图执行**, choose **核对执行快照**, then have the user **确认并执行整张图**. A draft-only request ends after saving the plan and reporting open items. If the review identifies a missing tool, use the offered configuration action on this resource and return to this draft. Each node uses its frozen version, environment, allocation, arguments and inputs. A downstream step resolves the frozen producer step and port after completion. Inspect its run ID and SHA-256 alongside the consumer's input snapshot and any consumption receipt. Report the observed result for each goal and the actual conversation directory. Reconcile an unknown submission using the existing run. Independent jobs in ordinary chat use the resource's execution tools.

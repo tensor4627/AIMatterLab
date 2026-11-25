@@ -70,6 +70,16 @@ export interface ResourceToolTarget {
  queue:string;
  scheduler:'slurm'|'lsf';
 }
+export interface ResourceToolOnboarding {
+ package_id:string;
+ package_version:string;
+ manifest_sha256:string;
+ source_commit:string;
+ function_id:string;
+ reference_test_case_id:string;
+ entrypoint:string;
+ support:Record<string,string>;
+}
 export interface ResourceToolSetup {
  id:string;
  resource_id:string;
@@ -80,11 +90,12 @@ export interface ResourceToolSetup {
  revision:number;
  plan_sha256:string;
  manifest:ResourceToolManifest;
+ onboarding?:ResourceToolOnboarding;
  target:ResourceToolTarget;
  install_root:string;
  activity:{stage:string;status:'passed'|'failed'|'pending'|'reused';message:string}[];
  build?:{run_id:string;job_id?:string;status:string;directory?:string};
- test?:{run_id:string;job_id?:string;status:string;directory?:string;reused?:boolean;outputs?:Record<string,{sha256:string;size:number;checks:Record<string,'passed'|'failed'>}>};
+ test?:{run_id:string;job_id?:string;status:string;directory?:string;reused?:boolean;onboarding?:ResourceToolOnboarding;outputs?:Record<string,{sha256:string;size:number;checks:Record<string,'passed'|'failed'>}>};
  activation_id?:string;
  skill?:{name:string;sha256:string;path?:string;body?:string;status:'saved'|'available';error?:string};
  supply?:'package'|'git';

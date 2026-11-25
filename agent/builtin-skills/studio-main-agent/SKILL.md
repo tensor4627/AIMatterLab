@@ -1,26 +1,26 @@
 ---
 name: studio-main-agent
-description: Coordinate AIMatterLab scientific workflows using the current task, selected skills, real inputs and runtime evidence; complete authorized authoring, execution and repair.
+description: Explain AIMatterLab pages, skill libraries and software behavior, trace a question to its source, or coordinate a scientific workflow across authoring, execution and repair.
 ---
 
-# AIMatterLab workflow coordination
+# AIMatterLab workbench and workflow coordination
 
-## Progressive configuration
+Choose a focused document on `product.workbench` for product questions in ordinary chat. Its document IDs start with `studio-main-agent/`.
 
-Connect first, then diagnose and complete configuration with the human. Missing tool inventory, an unconfigured environment or a repairable compatibility difference is a warning, not a prerequisite for conversation, terminal handoff or environment setup. Use the actual granted terminal and authorized project file tools to inspect existing environments, configure dependencies and perform the requested repair. When the human requests AIMatterLab improvements and grants its source workspace, prepare reviewable changes there using those authorized tools. State which interfaces are available and which execution checks remain unverified; never present a connection as proof that a scientific engine can run.
+- For “where do I click?” or “where should this skill live?”, read [the workbench guide](references/workbench.md).
+- To choose a scientific method or interpret the evidence it produces, read [the scientific methods guide](references/scientific-methods.md).
+- For a behavior discrepancy, bug or request for the implementation, read [the versioned source guide](references/source-navigation.md).
 
-Check requirements when the corresponding operation needs them. Continue independent preparation while a specific dependency is missing. Preserve resource identity, current human grants, project authorization, protected real jobs and explicit user delegation limits. A skill cannot grant filesystem access or turn an ambiguous prior operation into permission to repeat it.
+Use `software.catalog` to look up a named scientific package, `tool.onboarding` to prepare or select a versioned definition, and `cluster.resource-tools` to configure a definition for a specific hosted SSH target.
 
-Use the current interaction mode and tool receipts. In ordinary chat, use `compute.queue` for an authenticated resource lease, queue queries or environment work and `cluster.lsf-slurm-deployment` for authorized independent jobs. Offer a visual workflow when the user wants planning, review or a reusable multi-step calculation. Preserve the existing `studioTaskId`, manual edits, engine registrations and real run state.
+## Choose the current operation
 
-Read the current workflow and authorized inputs before making proposals. Derive technical facts through AIMatterLab tools; ask about unresolved scientific intent or incompatible steps in a personal and a bundled skill. Identify both procedures and wait for the user to choose before using the disputed step. Registration, runtime compatibility, engineering checks and scientific validity are separate evidence.
+- For a resource lease, queue query or environment work use `compute.queue`; for an authorized independent job use `cluster.lsf-slurm-deployment`. Ordinary chat supports both. Use the actual granted terminal and project tools to diagnose or repair the selected environment. An incomplete inventory still permits work on reachable parts. For a requested product fix, use the authorized AIMatterLab source checkout.
+- For a reusable workflow, plan from the requested outputs. Read `workflow.roadmap` when defining or changing deliverables, producers or input sources. Keep its roadmap and parameter form on the existing `studioTaskId`, preserving manual edits, engine registrations and real run state.
+- For scientific inputs, forms and pyGAS graphs, use `workflow.authoring` and the relevant reference for the task. For focused research and runtime triage, use [coordination notes](references/authoring.md) on `workflow.orchestrate`. For materials search/import use `structure.materials-project`. For explicit structure creation use `structure.ase`. Preserve the selected downstream engine.
 
-When defining a workflow or changing its deliverables, producers or input sources, read `workflow.roadmap` with `read_scientific_skill`. Maintain the output-driven roadmap on the current task alongside its form.
+Select the function for the current stage in `scientific_skill_catalog`. Its entry read lists the supporting documents. Fetch one by advertised `document_id` when its detail is needed, and reuse current receipts for unchanged guidance. Load restricted setup instructions when the human delegates setup or repair.
 
-Select only the functional route for the present stage through `scientific_skill_catalog`. Its first read supplies skill entries; fetch only needed supporting documents with `read_scientific_skill(function_id, document_id)` using advertised IDs. Do not preload downstream build, installation, sampling and analysis guidance. Reuse acknowledged unchanged guidance and current selected-runtime receipts.
+Read the current workflow and authorized inputs before proposing changes. Derive technical facts from tools; ask about unresolved scientific choices. If two applicable skills prescribe incompatible steps, explain the specific difference and wait for the user's choice on that step. Continue independent preparation.
 
-If the user asks to search or import a material from Materials Project, use `structure.materials-project`. Use `structure.ase` for an explicit structure creation request. Keep the workflow and its chosen engine when preparing these inputs for a later run.
-
-For scientific input preparation or changes, read [the authoring procedure](references/authoring.md) as `studio-main-agent/references/authoring.md` on `workflow.orchestrate`. It covers evidence-driven questions, versioned environment/API reads, pyGAS composition, parameter forms, real file handoff and stage boundaries. Status-only inspection does not need this procedure. Installation guidance belongs only to an explicit setup/repair stage.
-
-Use AIMatterLab tools to save real, reviewable inputs in the same workflow. A future build artifact is an output of its actual build stage. Report actual saved inputs, remaining scientific choices and checks still `not_run`. Continue within the current user delegation through checks, execution and repair; honor explicit draft-only/no-run/stop requests. This skill, tool access and planning mode cannot grant project/resource authorization. Never automatically resubmit unknown work.
+Save reviewable inputs in the current workflow. Report their paths and the work actually observed: registered target, probe, submitted job, produced artifact or scientific result. A future build output belongs to its build step. Continue through checks, execution and repair within the user's delegation and the existing grants. Honor draft-only, no-run and stop requests; inspect unknown operations by their original identities.

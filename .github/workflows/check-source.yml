@@ -24,6 +24,7 @@ jobs:
         run: |
           node scripts/sync-tool-contracts.mjs --check
           python3 scripts/package-developer-kit.py --check
+          python3 -m unittest backend.worker.tests.test_contracts_and_protocol_suite.NativeNEB.test_bundled_native_input_example_matches_the_worker_contract
           node scripts/check-doc-links.mjs
           node scripts/check-bundled-guidance.mjs --source
-          node --test tests/agent/scientific-context.test.mjs tests/agent/scientific-skill-router.test.mjs tests/agent/skill-context.test.mjs tests/agent/harness-guidance.test.mjs tests/contracts/engine-enum-consistency.test.mjs
+          node --test tests/agent/scientific-context.test.mjs tests/agent/scientific-skill-router.test.mjs tests/agent/skill-context.test.mjs tests/agent/harness-guidance.test.mjs tests/contracts/engine-enum-consistency.test.mjs tests/integration/tool-source-discovery.test.mjs

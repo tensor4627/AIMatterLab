@@ -20,10 +20,13 @@ test('an empty tool catalog shows the same source commands and upstream guides s
  try{
   await h.flush();
   const list=h.text(node(h,'tool-source-list'));
+  assert.ok(list.includes('随版本收录的源码仓库'));
   for(const tool of sources){
    assert.match(tool.validated_commit,/^[a-f0-9]{40}$/);
    assert.ok(list.includes('git clone --branch '+tool.branch+' '+tool.url));
    assert.ok(list.includes(tool.guide));
+   assert.ok(list.includes(tool.validated_commit.slice(0,12)));
+   assert.ok(list.includes(tool.integration_status==='source_only'?'源码与指南':'有内置适配'));
   }
  }finally{h.unmount();}
 });

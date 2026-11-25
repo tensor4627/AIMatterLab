@@ -85,6 +85,28 @@ test('Packaged physical layout resolves logical generated parent to exact regist
  }finally{f.cleanup();}
 });
 
+test('The reviewed compact compute guide preserves prior overlays without accepting unknown parent revisions',async()=>{
+ const f=fixture();try{
+  const privateRoot=overlay(f),entry=path.join(privateRoot,'SKILL.md'),selection=localSkills([privateRoot])[0];
+  const provenance=path.join(privateRoot,'provenance.json'),parent=path.join(f.bundle,'studio-compute-workflow','SKILL.md');
+  const previousParent='7803cde8eab91146c9c4f9970a2bc97cc52c27200e0ecc6e2934d63cb39b8bf1';
+  mutateJson(provenance,value=>{value.portable_skill_sha256=previousParent;});
+  const result=await selectedSkillContext(args(f,selection,{privateRoot}));
+  assert.equal(result.attachments.length,4);
+  assert(result.document_ids.includes('studio-compute-workflow/references/connection-recovery.md'));
+  assert.equal(JSON.parse(fs.readFileSync(provenance,'utf8')).portable_skill_sha256,previousParent);
+  mutateJson(provenance,value=>{value.portable_skill_sha256='a'.repeat(64);});
+  await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),error=>error.code==='invalid_or_stale_provenance');
+  const oldWindowsDigest='d5ab63b2c2a514ffaaa60191d12ffd064f6a8f00610bfa8ec802d06322021550';
+  mutateJson(provenance,value=>{value.portable_skill_sha256=oldWindowsDigest;});
+  await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),error=>error.code==='invalid_or_stale_provenance');
+  fs.writeFileSync(entry,fs.readFileSync(entry,'utf8').replaceAll('../../../agent/builtin-skills/','../../../agents/skills/'));
+  assert.equal((await selectedSkillContext(args(f,selection,{privateRoot}))).attachments.length,4);
+  fs.appendFileSync(parent,'\nA different future revision.\n');
+  await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),error=>error.code==='invalid_or_stale_provenance');
+ }finally{f.cleanup();}
+});
+
 test('Generic unrelated registered skills remain entry-only and never invoke a profile validator',async()=>{
  const f=fixture();try{
   const generic=path.join(f.root,'generic');fs.mkdirSync(generic);const entry='---\nname: unrelated-skill\ndescription: Fixture\n---\nRead [private](private.json).\n';fs.writeFileSync(path.join(generic,'SKILL.md'),entry);fs.writeFileSync(path.join(generic,'private.json'),'PRIVATE_NOT_SELECTED');

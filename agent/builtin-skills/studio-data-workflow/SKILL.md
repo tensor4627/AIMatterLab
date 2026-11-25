@@ -5,6 +5,8 @@ description: Manage AIMatterLab structure, trajectory, dataset, potential and bi
 
 # Assets and structure inspection in AIMatterLab
 
+If the requested data-processing step uses a registered external tool, check its ports against the selected definition. For execution use the target activation receipt or configure the selected hosted resource via `cluster.resource-tools`.
+
 Use actual registered assets and supplied paths. inspect_asset checks structures/datasets; read_project_input reads bounded text or binary metadata without deserializing a model. create_structure supports bounded ASE bulk, molecule, surface, explicit or authorized import recipes. suggest_parameters derives facts from the resulting real structure, preserving user intent. Read the saved structure back and check composition, atom order, cell and PBC before using a preview as input evidence.
 
 Keep generated inputs in the conversation-owned authoring root. Existing updates need read-back SHA; metadata and a displayed path do not prove a file was generated. Missing future artifacts remain missing. A preview is not a relaxation or scientific validation. The current viewer is a lightweight structure/trajectory preview; do not claim OVITO integration or unsupported editing.

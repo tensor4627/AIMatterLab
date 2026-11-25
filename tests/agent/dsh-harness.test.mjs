@@ -64,6 +64,10 @@ test('DSH inventory rejects native tools, duplicates and missing tools; setup ex
  for(const list of [['bash'],['mcp__gpusampling__run_status'],['mcp__gpusampling__run_status','mcp__gpusampling__run_status']])assert.throws(()=>checkDshInventory(list,names));
  assert.deepEqual(checkDshInventory([...names],names),[...names]);assert(dshToolAllowed('describe_engine',false));assert(dshToolAllowed('draft_cluster_setup',false));assert(dshToolAllowed('draft_local_environment',false));assert(!dshToolAllowed('present_task',false));assert(dshToolAllowed('present_task',true));
  for(const name of ['submit_run','validate_run','cancel_run','validate_cluster_run','submit_cluster_run','cancel_cluster_run','reconcile_run']){assert(dshToolAllowed(name,true));assert(!dshToolAllowed(name,false));}
+ for(const name of ['list_resource_tools','discover_resource_tool_scripts','plan_resource_tool_setup','read_resource_tool_setup']){
+  assert(dshToolAllowed(name,false));assert(dshToolAllowed(name,true));
+ }
+ assert(!dshToolAllowed('start_resource_tool_setup',true));
  for(const name of ['bash','run_shell_command','spawn_agent'])assert(!dshToolAllowed(name,true));
 });
 for(const action of ['close','replace'])test('A pending DSH model catalog cannot launch or mutate state after '+action,async()=>{

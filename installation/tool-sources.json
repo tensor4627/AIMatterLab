@@ -1,41 +1,60 @@
 [
   {
+    "id": "gpumd",
     "name": "GPU-Sampling / GPUMD",
+    "integration_status": "native_adapter",
+    "guidance_functions": ["md.gpumd", "sampling.gpumd", "neb.gpumd", "training.nep"],
     "url": "https://github.com/bigd4/GPUMD.git",
     "branch": "GPU-Sampling",
     "guide": "README.md",
     "validated_commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1"
   },
   {
+    "id": "pygas",
     "name": "pyGAS",
+    "integration_status": "native_adapter",
+    "guidance_functions": ["pygas.cv", "pygas.bias", "analysis.wtmetad", "analysis.opes"],
     "url": "https://gitlab.com/tensor4627/pygas.git",
     "branch": "main",
     "guide": "GPU-MetaD_Manual_CN.md",
     "validated_commit": "ba5787380181304a0e4c75578c2ecff736737e18"
   },
   {
+    "id": "pydyn",
     "name": "PyDyn",
+    "integration_status": "native_adapter",
+    "guidance_functions": ["md.pydyn", "sampling.pydyn", "neb.pydyn"],
     "url": "https://gitlab.com/bigd4/pydyn.git",
     "branch": "main",
     "guide": "README.md",
     "validated_commit": "2ac69157856a994520eb6e8e03500e98bd3a5abc"
   },
   {
+    "id": "torchnep",
     "name": "TorchNEP",
+    "integration_status": "source_only",
+    "guidance_functions": ["training.torchnep"],
     "url": "https://gitlab.com/tensor4627/torchnep.git",
     "branch": "nep-zbl",
     "guide": "README.md",
     "validated_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd"
   },
   {
+    "id": "hotpp",
     "name": "HotPP",
+    "integration_status": "native_adapter",
+    "guidance_functions": ["training.hotpp"],
     "url": "https://gitlab.com/bigd4/hotpp.git",
     "branch": "master",
     "guide": "docs/source/install.rst",
     "validated_commit": "fa4b33a844080871dd998165926a089822a51b41"
   },
   {
+    "id": "hotham",
     "name": "HotHam",
+    "aliases": ["Hot-Ham"],
+    "integration_status": "source_only",
+    "guidance_functions": ["software.catalog"],
     "url": "https://github.com/liangzhixin-202169/Hot-Ham.git",
     "branch": "master",
     "guide": "aimlab-tools/SKILL.md",

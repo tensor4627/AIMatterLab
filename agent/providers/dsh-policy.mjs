@@ -9,6 +9,9 @@ const READ=new Set(['search_software_docs','read_software_docs','project_skill_c
 const DRAFT=new Set(['copy_project_inputs','draft_local_environment','propose_custom_cv','import_materials_project','create_structure','render_pygas_workflow','present_task','draft_cluster_setup','prepare_cluster_run','create_workflow','prepare_run','resume_run','write_project_input']);
 const EXECUTE=new Set(['validate_run','submit_run','cancel_run','validate_cluster_run','submit_cluster_run','cancel_cluster_run','reconcile_run']);
 const MANAGED=new Set(['list_compute_resources','acquire_compute_resource','release_compute_resource','run_compute_command','list_compute_terminals','read_compute_terminal','write_compute_terminal','inspect_compute_service','prepare_compute_run','read_compute_run_status','read_compute_run_log','validate_compute_run','submit_compute_run','cancel_compute_run','list_task_schedules','task_schedule_status','attach_task_schedule','stop_task_schedule']);
+// The desktop resource controller checks the acquired resource and current project.
+// Planning a tool creates a reviewable draft. Starting it is a human-only action.
+for(const tool of ['list_resource_tools','discover_resource_tool_scripts','plan_resource_tool_setup','read_resource_tool_setup'])MANAGED.add(tool);
 const prefix='mcp__gpusampling__';
 export const DSH_QUESTION_TOOL=prefix+'ask_user_question';
 export const DSH_RESOURCE_QUESTION_PREFIX='studio-resource-';

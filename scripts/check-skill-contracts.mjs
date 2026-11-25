@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {selectScientificFunctions} from '../agent/skills/scientific-context.mjs';
+import {releaseToolNameKey, releaseToolNames} from '../contracts/tools/release-tool-sources.mjs';
 import {SCIENTIFIC_TOOL_ACCESS} from '../agent/tools/private-cv-access.mjs';
 import {createManagedComputeResources} from '../backend/main/compute/managed-compute-resources.mjs';
 import {createManagedComputeTools} from '../agent/tools/managed-compute-tools.mjs';
@@ -20,6 +21,9 @@ const documentedControls = [
   ['studio-compute-workflow/references/base-workspace.md', 'frontend/features/compute/ComputeConnectionChooser.tsx', ['编辑连接', '高级：基础工作区']],
   ['studio-compute-workflow/references/job-service-connection.md', 'frontend/features/compute/ComputeConnectionChooser.tsx', ['高级：Python 环境']],
   ['studio-workflow-roadmap/SKILL.md', 'frontend/features/workflows/RoadmapExecutionPanel.tsx', ['按流程图执行', '核对执行快照', '确认并执行整张图']],
+  ['studio-main-agent/references/workbench.md', 'frontend/features/tools/ToolPackagesPanel.tsx', ['随版本收录的源码仓库','选择并检查工具包','登记此工具包']],
+  ['studio-main-agent/references/workbench.md', 'frontend/features/tools/ResourceToolSetup.tsx', ['查看执行技能','补写执行技能']],
+  ['studio-main-agent/references/workbench.md', 'frontend/features/compute/ComputeResourceConsole.tsx', ['配置此资源的科学工具','远端总工作区']],
 ];
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
@@ -27,6 +31,42 @@ export function checkProductName(text, document) {
   // Keep persisted IDs, paths, environment variables and upstream proper names intact.
   const obsolete = /(?<!Visual )(?<![A-Za-z0-9])Studio(?![A-Za-z0-9])|(?:NO_STUDIO_ADAPTER|_STUDIO_ADAPTER)\b/;
   assert.doesNotMatch(text, obsolete, 'Obsolete product name in ' + document);
+}
+
+export function checkReleaseSources(sources, routes) {
+  assert(Array.isArray(sources) && sources.length, 'Missing release tool source catalog');
+  assert(routes.has('software.catalog'), 'Missing runtime route for release source lookup');
+  const ids = new Set(), names = new Map();
+  for (const source of sources) {
+    const {id, name, url, branch, guide, validated_commit, integration_status, guidance_functions, aliases} = source;
+    assert(/^[a-z][a-z0-9-]*$/.test(id) && !ids.has(id), 'Invalid or duplicate release tool ID: ' + id);
+    ids.add(id);
+    assert(typeof name === 'string' && name.trim(), id + ': invalid display name');
+    assert(aliases === undefined || Array.isArray(aliases) && aliases.every(value => typeof value === 'string' && value.trim()), id + ': invalid alias');
+    for (const label of releaseToolNames(source)) {
+      const key = releaseToolNameKey(label);
+      assert(key && (!names.has(key) || names.get(key) === id), id + ': ambiguous release tool name ' + label);
+      names.set(key, id);
+    }
+    const repository = new URL(url);
+    assert.equal(repository.protocol, 'https:', id + ': repository must use HTTPS');
+    assert(!repository.username && !repository.password && !repository.search && !repository.hash, id + ': repository must be a public location');
+    assert(typeof branch === 'string' && branch.trim(), id + ': missing branch');
+    assert(/^[a-f0-9]{40}$/.test(validated_commit), id + ': missing reviewed commit');
+    assert(typeof guide === 'string' && guide.split('/').every(part => /^[\w.-]+$/.test(part) && part !== '.' && part !== '..'), id + ': expected a repository-relative guide');
+    assert(['native_adapter', 'source_only'].includes(integration_status), id + ': declare release integration status');
+    assert(Array.isArray(guidance_functions) && guidance_functions.length && new Set(guidance_functions).size === guidance_functions.length &&
+      guidance_functions.every(route => routes.has(route)), id + ': assign known runtime guidance functions');
+    const describesAdapter = guidance_functions.some(route => routes.get(route).engines.length);
+    assert.equal(describesAdapter, integration_status === 'native_adapter', id + ': release status and linked guidance disagree on built-in adapters');
+  }
+}
+
+function checkSourceAnchors(projectDir, document, text) {
+  const repositoryPath = /`((?:agent|backend|contracts|desktop|developer|docs|frontend|installation|scripts|tests)\/[a-zA-Z0-9_./-]+)`/g;
+  for (const [, anchor] of text.matchAll(repositoryPath)) {
+    assert(!anchor.split('/').includes('..') && fs.existsSync(path.join(projectDir, anchor)), document + ': stale source anchor ' + anchor);
+  }
 }
 
 export function checkSkillContracts({projectDir, map, documents}) {
@@ -55,11 +95,17 @@ export function checkSkillContracts({projectDir, map, documents}) {
   }
 
   const entries = new Set(map.skills.filter(skill => skill.source === 'studio').map(skill => skill.folder + '/SKILL.md'));
+  const entryByteBudget = 6 * 1024;
+  let largestEntryBytes = 0;
   for (const name of entries) {
     assert(documents.has(name), 'Missing bundled skill entry ' + name);
-    assert.equal(/^name: (.+)$/m.exec(documents.get(name).text)?.[1].trim(), name.split('/')[0], 'Wrong skill identity in ' + name);
+    const entry = documents.get(name);
+    assert.equal(/^name: (.+)$/m.exec(entry.text)?.[1].trim(), name.split('/')[0], 'Wrong skill identity in ' + name);
+    assert(entry.bytes <= entryByteBudget, name + ': keep the entry within 6 KiB and move mode-specific detail to references');
+    largestEntryBytes = Math.max(largestEntryBytes, entry.bytes);
   }
   const releaseSources = JSON.parse(read('installation/tool-sources.json'));
+  checkReleaseSources(releaseSources, routes);
   let sourceReceipts = 0;
   for (const [name, document] of documents) {
     checkProductName(document.text, name);
@@ -85,7 +131,15 @@ export function checkSkillContracts({projectDir, map, documents}) {
       sourceReceipts++;
     }
   }
-  checkProductName(read('agent/context/AGENTS.md'), 'agent/context/AGENTS.md');
+  const promptPath = 'agent/context/AGENTS.md';
+  const startup = read(promptPath);
+  const startupBytes = Buffer.byteLength(startup.replaceAll('\r\n', '\n'));
+  checkProductName(startup, promptPath);
+  assert(startupBytes <= 5 * 1024, promptPath + ': move detail to a focused reference to preserve the startup budget');
+  checkSourceAnchors(projectDir, promptPath, startup);
+  for (const name of ['studio-main-agent/references/source-navigation.md','studio-main-agent/references/workbench.md']) {
+    checkSourceAnchors(projectDir, name, documents.get(name).text);
+  }
   for (const [name, component, labels] of documentedControls) {
     const ui = read(component);
     for (const label of labels) {
@@ -99,5 +153,6 @@ export function checkSkillContracts({projectDir, map, documents}) {
     assert(materials.tools.includes(tool.name) && guide.includes(tool.name), 'Missing Materials Project operation ' + tool.name);
     for (const arg of tool.inputSchema.required) assert(guide.includes('`' + arg + '`'), 'Missing Materials Project argument ' + arg);
   }
-  return {skills: entries.size, catalogRoutes: routes.size, engines: Object.keys(engines).length, productSourceReceipts: sourceReceipts};
+  return {skills: entries.size, catalogRoutes: routes.size, engines: Object.keys(engines).length, productSourceReceipts: sourceReceipts,
+    releaseSources: releaseSources.length, startupBytes, largestEntryBytes};
 }

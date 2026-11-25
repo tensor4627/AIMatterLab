@@ -12,7 +12,38 @@ import {createProjectPolicyEditor} from '../../frontend/features/compute/project
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 
-async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>null,developerCompute,reportedHome,discover=()=>[]}={}){
+test('a selected delivery only creates a reviewed draft on an acquired resource and stores its pinned definition',async t=>{
+ const entrypoint=sha('entrypoint'),packageVersion=sha('selected version'),commit='a'.repeat(40);
+ const record={immutable:true,package_id:'fixture',package_version:packageVersion,source_commit:commit,manifest_sha256:sha('manifest'),
+  files:[{path:'repo/run.py',kind:'file',sha256:entrypoint}],
+  manifest:{repository:{path:'repo'},functions:[{id:'extract',entrypoint:'repo/run.py',tests:['small'],inputs:[],
+   outputs:[{id:'output',type:'file',format:'json'}],parameters:[],operation:{command:['{python}','{entrypoint}','{output}']}}],
+   tests:{cases:[{id:'small',function_id:'extract',expected_outputs:[{path:'result.json',format:'json'}]}]}}};
+ const f=await fixture(t,{ownedResources:['ssh:first'],async resolveSelectedDefinition(ref,scope){
+  if(ref!=='advertised-in-this-turn'||scope.threadId!=='setup-chat')throw Error('No definition selected in this turn');
+  return {record,check(){}};
+ }});
+ f.api.recordUserTurn({provider:'codex',method:'turn/start',projectId:'project1',params:{threadId:'setup-chat',
+  input:[{type:'text',text:'Configure the selected portable tool on the first resource.'}]}});
+ const args={resource_id:'ssh:first',route:'custom',cluster_id:'cluster',environment_id:'env',
+  selected_definition:{package_ref:'advertised-in-this-turn',function_id:'extract',test_case_id:'small'},
+  manifest:{id:'fixture',version:'1',source:{kind:'installed',executable:'/opt/first/run.py',sha256:entrypoint},
+   interpreter:'python',argv:['{output:output}'],inputs:{},outputs:{output:{filename:'result.json',format:'json'}},
+   test:{inputs:{},max_seconds:5,outputs:{output:{json_keys:['result']}}}}};
+ await assert.rejects(f.api.call('plan_resource_tool_setup',{...args,resource_id:'ssh:second'},f.scope),/Acquire this SSH resource/);
+ await assert.rejects(f.api.call('plan_resource_tool_setup',{...args,selected_definition:{...args.selected_definition,package_ref:'copied-token'}},f.scope),/No definition selected/);
+ const draft=await f.api.call('plan_resource_tool_setup',args,f.scope);
+ assert.equal(draft.status,'planned');
+ assert.equal(draft.onboarding.package_version,packageVersion);
+ const plans=f.calls.filter(row=>row.route.endsWith('/plan'));
+ assert.equal(plans.length,1);
+ assert.equal(plans[0].data.onboarding.entrypoint,entrypoint);
+ assert(!Object.hasOwn(plans[0].data,'selected_definition'));
+ assert(!f.calls.some(row=>row.route.endsWith('/start')));
+});
+
+async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>null,developerCompute,reportedHome,discover=()=>[],
+ resolveSelectedDefinition,ownedResources}={}){
  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'aimlab-resource-tools-'));
  t.after(()=>fs.rm(temp,{recursive:true,force:true}));
  const scope={provider:'codex',threadId:'setup-chat',projectId:'project1',checkCurrent:()=>true};
@@ -27,7 +58,7 @@ async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>
  expectedSkill.sha256=sha(expectedSkill.body);
  const resources={
   snapshot:()=>views,
-  capture:()=>({resources:views,assertCurrent(){}}),
+  capture:()=>({resources:ownedResources?views.filter(row=>ownedResources.includes(row.resourceId)):views,assertCurrent(){}}),
   async resolveLease(_scope,id){if(!views.find(row=>row.resourceId===id))throw Error('unknown lease');},
   async resolveSkillLibrary(scope,id){
    const index=views.findIndex(row=>row.resourceId===id);
@@ -36,7 +67,7 @@ async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>
   },
   listSources:()=>registry.map((registration,index)=>({
    profileId:registration.profileId,kind:'ssh',id:'service-'+index,generation:'generation-'+index,
-   health:{hostIdentity:registration.hostIdentity,resource_tool_schema:1},
+   health:{hostIdentity:registration.hostIdentity,resource_tool_schema:1,resource_tool_definition_schema:1},
    async request(method,route,data,options){
     options.beforeDispatch?.();
     calls.push({method,route,data});
@@ -47,7 +78,8 @@ async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>
      if(!path.posix.isAbsolute(data.directory))throw Error('Use an absolute path on the selected SSH resource');
      return {directory:data.directory,candidates:await discover(data.directory),truncated:false};
     }
-    if(route==='/api/resource-tools/plan')return Object.assign(setup('planned',index),{manifest:data.manifest,target:{project_id:data.project_id}});
+    if(route==='/api/resource-tools/plan')return Object.assign(setup('planned',index),{manifest:data.manifest,target:{project_id:data.project_id},
+     ...data.onboarding?{onboarding:data.onboarding}:{}});
     if(route.endsWith('/list'))return {setups:rows.filter(row=>row.resource_id===data.resource_id),targets:[]};
     if(route.endsWith('/status')&&match)return match;
     if(route.endsWith('/skill')&&match)return expectedSkill;
@@ -58,7 +90,7 @@ async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>
   })),
  };
  let context=1;
- const controller=createResourceToolController({resources,skills,chooseFile,withRelease,confirm,developerCompute,current:()=>context,
+ const controller=createResourceToolController({resources,skills,chooseFile,withRelease,confirm,developerCompute,resolveSelectedDefinition,current:()=>context,
   emit:value=>events.push(value),setTimer:value=>{timers.push(value);return {};},clearTimer:()=>{},
   workspaces:{
    resolveHostedResourceWorkspace:(id,{profileId,hostIdentity})=>registry.find(row=>row.profileId===profileId&&row.hostIdentity.machineId===hostIdentity.machineId&&(!id||id===row.resourceId)),

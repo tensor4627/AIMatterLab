@@ -1,7 +1,33 @@
 import {createHash} from 'node:crypto';
+import {createReleaseToolMatcher,readReleaseToolSources} from '../../contracts/tools/release-tool-sources.mjs';
 const ENGINE_ROUTES={'trajectory.density':'analysis.number-density','pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
-export function selectScientificFunctions({text='',parameters={},hasWorkflow=false,planRoadmap=false,manualFunction}={}){
+let fallbackReleaseToolMatcher;
+function defaultReleaseToolMatcher(){
+ if(!fallbackReleaseToolMatcher){
+  try{fallbackReleaseToolMatcher=createReleaseToolMatcher(readReleaseToolSources());}
+  catch{fallbackReleaseToolMatcher=createReleaseToolMatcher([]);}
+ }
+ return fallbackReleaseToolMatcher;
+}
+function requestsSoftwareCatalog(text,releaseTool){
+ const inventory=/(?:支持|接入|有哪些|哪些|列出|查看).{0,12}(?:科学工具|工具包|工具目录)|(?:科学工具|工具包|软件)目录|(?:available|supported|list|catalog of) (?:scientific tools|software packages)/i;
+ if(inventory.test(text))return true;
+ if(!releaseTool)return false;
+ // Match a lookup about the tool itself. A question about a simulation's inputs
+ // or results still belongs to the workflow that produced them.
+ const subject=releaseTool.text;
+ const directLookup=/(?:查一下|查查|查找|查阅|查询|介绍|了解|看看|搜一下|检索)\s*@\s*[。？！?！.]?$|(?:what is|look up|tell me about|find the (?:docs|manual) for)\s+@\s*[?!.]?$|@\s*(?:是什么|有什么用途|能做什么)/i;
+ const sourceOrSetup=/(?:安装|配置|搭建|接入|登记|where to find|how to install|install|set up)\s*(?:一下|好|the )?\s*@|@\s*(?:的|怎么|如何|安装与)?\s*(?:安装|源码|官方文档|仓库|手册|工具包|文档入口|repository|source code|documentation|installation guide)/i;
+ return directLookup.test(subject)||sourceOrSetup.test(subject);
+}
+const localToolMention=/(?:本地|本机|自研|自己的|我的|用户提供).{0,14}(?:工具|脚本|程序)|\b(?:local|own|custom|user-provided|third-party)\s+(?:tool|script|program)\b/i;
+function requestsToolOnboarding(text){
+ const define=/(?:打包|接入|登记|注册|起草|编写|制作|生成)|\b(?:register|onboard|package|draft|define)\b/i;
+ return define.test(text)&&(localToolMention.test(text)||/\btool\.json\b|(?:登记|注册|打包|起草|制作|生成)(?:一个|这个|现有|第三方|本地|新的)*工具包/.test(text));
+}
+export function selectScientificFunctions({text='',parameters={},hasWorkflow=false,planRoadmap=false,manualFunction,matchReleaseTool=defaultReleaseToolMatcher()}={}){
  const value=String(text),engine=parameters.engine;let id;
+ const releaseTool=matchReleaseTool(value);
  const consumerIntent=/分子动力学|\bmd\b|metad|opes|增强采样/i.test(value);
  const dynamicsIntent=/\b(?:md|nve|nvt|npt|metad|opes)\b|wtmetad|分子动力学|增强采样|偏置模拟|积分|沉积/i.test(value);
  const excludesDynamics=/(?:不|无需|不要)(?:运行|进行|做|启动)?\s*(?:MD|分子动力学|积分)|\b(?:no|without|do not)\s+(?:run(?:ning)?\s+)?(?:MD|molecular dynamics)\b/i.test(value);
@@ -9,6 +35,7 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  const primaryTraining=/(?:^|[。！!？?;\n])\s*(?:(?:请|帮我|现在|接下来|先|首先|然后|随后|please\s+|next\s+|now\s+|first\s+|then\s+)\s*)*(?:训练|导出|评估|train\b|export\b|freeze\b|eval\b)/i.test(value);
  const resourceMention=/集群|计算资源|服务器|\b(?:cluster|compute resource|HPC)\b/i.test(value);
  const namedInstallation=/(?:安装|从零配置|搭建)\s*(?:一下\s*)?[a-z][\w+.-]*|\b(?:install|set up)\s+[a-z][\w+.-]*/i.test(value);
+ const targetToolSetup=resourceMention&&(namedInstallation||localToolMention.test(value)&&/安装|配置|采用|最小测试|\b(?:install|configure|set up|adopt|smoke test)\b/i.test(value));
  const materialsSource=/materials[ -]?project|\bmp-[0-9]+\b/i.test(value);
  const requestsLookup=/(?<!已|已经|不|不要|无需|不用)(?:导入|搜索|查询|查找|检索|获取|下载)(?!的|过)|\b(?:import|search|find|fetch|retrieve|download|query|look up)\b/i.test(value);
  const requestsStructure=/(?<!已|已经|不|不要|无需|不用)(?:生成|构建|创建)(?!的|过)[^，。！？\n]{0,32}(?:结构|晶胞|超胞|晶体|分子(?!动力学)|表面)|\b(?:build|create|generate|make)\b[^.!?,;\n]{0,64}\b(?:structures?|cells?|crystals?|supercells?|surfaces?|slabs?|molecules?)\b/i.test(value);
@@ -17,8 +44,10 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  // Present intent takes priority over the previous run: analysis never loads the build/install stack.
  if(manualFunction)id=manualFunction;
  else if(serviceRepair)id='cluster.connection-setup';
- else if(resourceMention&&namedInstallation)id='cluster.resource-tools';
+ else if(targetToolSetup)id='cluster.resource-tools';
+ else if(requestsToolOnboarding(value))id='tool.onboarding';
  else if(/list_resource_tools|plan_resource_tool_setup|discover_resource_tool_scripts|(?:安装|配置|接入|复用|登记).{0,12}(?:集群工具|新工具|已有脚本|第三方软件|自定义工具|工具环境)|(?:工具|软件).{0,10}(?:接入|最小测试)|(?:set up|configure|install|adopt|onboard).{0,20}(?:cluster tool|resource tool|third.party software|existing scripts?)/i.test(value))id='cluster.resource-tools';
+ else if(requestsSoftwareCatalog(value,releaseTool))id='software.catalog';
  else if(/(?:基础|默认|初始化|设置|选择|创建).*工作区|工作区.*(?:灰|设置|配置|不可用)|(?:base|default|setup|initialize).*workspace/i.test(value))id='cluster.workspace-setup';
  else if(/(?:reweight|重加权)/i.test(value))id=/opes/i.test(value)?'analysis.opes':'analysis.wtmetad';
  else if(/trajectory\.density|(?:轨迹|trajectory|frames?).*(?:原子数密度|number density)|(?:原子数密度|number density).*(?:轨迹|trajectory|frames?)/i.test(value))id='analysis.number-density';
@@ -32,6 +61,7 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  else if(materialsSource&&requestsLookup)id='structure.materials-project';
  else if(requestsStructure)id='structure.ase';
  else if(/分子动力学|\bmd\b/i.test(value)&&/gpumd|pydyn/i.test(value))id=/gpumd/i.test(value)?'md.gpumd':'md.pydyn';
+ else if(releaseTool?.source?.integration_status==='source_only'&&releaseTool.source.guidance_functions?.[0]==='software.catalog')id='software.catalog';
  else if(ENGINE_ROUTES[engine])id=ENGINE_ROUTES[engine];
  else if(/\bneb\b|最小能量路径/i.test(value))id=/pydyn/i.test(value)?'neb.pydyn':'neb.gpumd';
  else if(/hotpp/i.test(value))id='training.hotpp';
@@ -48,10 +78,13 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  return [...new Set([...(hasWorkflow?['workflow.orchestrate']:[]),...(roadmap?['workflow.roadmap']:[]),...id?[id]:[]])];
 }
 export class ScientificSkillContext{
- constructor(router){this.router=router;this.accepted=new Map();}
+ constructor(router,releaseToolSources){
+  this.router=router;this.accepted=new Map();
+  this.matchReleaseTool=releaseToolSources===undefined?defaultReleaseToolMatcher():createReleaseToolMatcher(releaseToolSources);
+ }
  forget(key){for(const cached of this.accepted.keys())if(cached.endsWith('\0'+key))this.accepted.delete(cached);}
  async prepare(key,provider,options){
-  let functions=selectScientificFunctions(options);const policy=options.policy,fallback=policy&&policy.state!=='legacy_unconfigured'&&policy.facts?.package&&options.manualFunction===undefined&&!policy.hasReadGrant()&&functions.every(id=>id==='workflow.orchestrate'||id==='workflow.roadmap');
+  let functions=selectScientificFunctions({...options,matchReleaseTool:this.matchReleaseTool});const policy=options.policy,fallback=policy&&policy.state!=='legacy_unconfigured'&&policy.facts?.package&&options.manualFunction===undefined&&!policy.hasReadGrant()&&functions.every(id=>id==='workflow.orchestrate'||id==='workflow.roadmap');
   // Non-legacy authority is supplied only for an actually bound configuration, including ordinary chats.
   // With no domain intent, its self-contained receipt replaces the optional generic workflow guide.
   if(fallback)functions=['@execution:'+policy.facts.package.id,...functions.filter(id=>id==='workflow.roadmap')];

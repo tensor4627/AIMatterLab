@@ -1,0 +1,15 @@
+# Provider and network setup
+
+## Local Agent CLI discovery and optional installation
+
+Use optional CLI discovery for Kimi or an explicitly selected legacy ACP installation that exposes it. Preserve a valid explicit CLI path, check the corresponding environment override and local Windows `PATH`/`PATHEXT`, then reuse a verified AIMatterLab-managed installation. Check the observed version and real ACP initialization. Resolve supported npm/pnpm shims to their declared JavaScript entry. For a compatible version difference follow the actual capability check and warning.
+
+When the selected CLI is missing or incompatible, use AIMatterLab's login/connection entry in the same profile as the generated launcher. It presents **Recheck**, **Choose local CLI**, **Download compatible version**, and **Cancel**. Only the user's download choice starts the pinned official npm downloads. The main process verifies integrity, extracts without installation scripts, installs into the profile's own versioned cache, and reports real download/verification/installation/interface-check progress. Preserve valid manual paths, existing usable generations, credentials and local CLI configuration. Cancellation or failure is not successful installation; CLI readiness does not establish login or model access. The user completes authentication and the normal provider check separately. Do not install Agent CLIs on the cluster.
+
+## First Codex connection
+
+Let the user make the first-use choice in the desktop. A new user can continue with an independent profile and sign in with ChatGPT. Existing users can import proxy settings, explicitly copy a local Codex `.env` or opt into the global model and reasoning defaults. Confirm supported settings using the signed-in account's model list. Consult `docs/source-desktop.md` in the selected checkout for the source and scope of each option.
+
+## Proxy and Electron download diagnosis
+
+Read the selected checkout’s `docs/network-and-electron-install.md`. System Proxy, Rule/Global routing, and TUN are distinct. Startup now reuses explicit proxy variables first, otherwise reads enabled Windows static system HTTP/mixed proxy settings. Source Launch and the Python desktop installer prepare this environment before dependency/Electron downloads. Desktop Chromium and Agent children use the selected proxy, with loopback always bypassed. No system settings or credentials are persisted. PAC-only system discovery is reported explicitly; Chromium can handle PAC, while CLI/install subprocesses need an explicit HTTP/mixed proxy. For the locked @electron/get 5.1.0, enable ELECTRON_GET_USE_PROXY with HTTP_PROXY/HTTPS_PROXY and preserve loopback NO_PROXY. Discover the actual local HTTP/mixed port; never assume one, alter global proxy settings, expose credentials, or disable TLS/checksums. Verify the selected Electron version and effective mirror overrides before diagnosing the URL. A successful developer-node HEAD request does not validate the user machine, a complete download, or model access.

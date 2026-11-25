@@ -106,8 +106,24 @@
         "SKILL.md"
       ],
       "reference_files": [
-        "references/authoring.md"
+        "references/authoring.md",
+        "references/workbench.md",
+        "references/source-navigation.md",
+        "references/scientific-methods.md"
       ]
+    },
+    {
+      "id": "studio-tool-discovery",
+      "source": "studio",
+      "folder": "studio-tool-discovery",
+      "files": ["SKILL.md"],
+      "reference_files": ["references/hotham.md"]
+    },
+    {
+      "id": "studio-tool-onboarding",
+      "source": "studio",
+      "folder": "studio-tool-onboarding",
+      "files": ["SKILL.md"]
     },
     {
       "id": "studio-md-workflow",
@@ -130,7 +146,8 @@
       "folder": "studio-neb-workflow",
       "files": [
         "SKILL.md"
-      ]
+      ],
+      "reference_files": ["references/native-input.md"]
     },
     {
       "id": "studio-training-workflow",
@@ -176,7 +193,9 @@
         "references/reconcile.md",
         "references/job-service-connection.md",
         "references/base-workspace.md",
-        "references/resource-tools.md"
+        "references/resource-tools.md",
+        "references/connection-recovery.md",
+        "references/execution.md"
       ]
     },
     {
@@ -185,13 +204,15 @@
       "folder": "studio-install-readiness",
       "files": [
         "SKILL.md"
-      ]
+      ],
+      "reference_files": ["references/installation-audit.md", "references/provider-network.md"]
     },
     {
       "id": "studio-workflow-roadmap",
       "source": "studio",
       "folder": "studio-workflow-roadmap",
-      "files": ["SKILL.md"]
+      "files": ["SKILL.md"],
+      "reference_files": ["references/roadmap-contract.md", "references/execution-receipts.md"]
     },
     {
       "id": "studio-workflow-authoring",
@@ -199,7 +220,8 @@
       "folder": "studio-workflow-authoring",
       "files": [
         "SKILL.md"
-      ]
+      ],
+      "reference_files": ["references/input-files.md", "references/review-form.md", "references/pygas-graphs.md"]
     },
     {
       "id": "studio-cv-bias-planning",
@@ -210,7 +232,9 @@
       ],
       "reference_files": [
         "references/plumed.json",
-        "references/pygas.json"
+        "references/pygas.json",
+        "references/custom-review.md",
+        "references/composition-details.md"
       ]
     },
     {
@@ -226,6 +250,34 @@
     }
   ],
   "functions": [
+    {
+      "id": "software.catalog",
+      "title": "科学工具目录、源码、安装与验证路径（含 HotHam）",
+      "engines": [],
+      "skills": ["studio-tool-discovery"],
+      "tools": ["search_software_docs", "read_software_docs"],
+      "status": "bundled_release_source_discovery",
+      "phase": "discovery",
+      "reference_files": {"studio-tool-discovery": ["references/hotham.md"]}
+    },
+    {
+      "id": "tool.onboarding",
+      "title": "用户工具接入、版本化定义与资源配置交接",
+      "engines": [],
+      "skills": ["studio-tool-onboarding"],
+      "tools": ["search_software_docs", "read_software_docs"],
+      "status": "bundled_tool_definition_and_configuration_guidance",
+      "phase": "discovery"
+    },
+    {
+      "id": "product.workbench",
+      "title": "工作台功能、技能分层与源码排查",
+      "engines": [],
+      "skills": ["studio-main-agent"],
+      "status": "bundled_product_guidance",
+      "phase": "discovery",
+      "reference_files": {"studio-main-agent": ["references/workbench.md", "references/source-navigation.md", "references/scientific-methods.md"]}
+    },
     {
       "id": "md.pydyn",
       "engines": [
@@ -278,7 +330,8 @@
         ],
         "studio-cv-bias-planning": [
           "references/pygas.json",
-          "references/plumed.json"
+          "references/plumed.json",
+          "references/composition-details.md"
         ]
       }
     },
@@ -306,7 +359,8 @@
         ],
         "studio-cv-bias-planning": [
           "references/pygas.json",
-          "references/plumed.json"
+          "references/plumed.json",
+          "references/composition-details.md"
         ]
       }
     },
@@ -319,7 +373,10 @@
         "studio-neb-workflow"
       ],
       "status": "implemented_native_adapter_with_bundled_guidance",
-      "phase": "authoring"
+      "phase": "authoring",
+      "reference_files": {
+        "studio-neb-workflow": ["references/native-input.md"]
+      }
     },
     {
       "id": "pygas.cv",
@@ -335,7 +392,8 @@
       "reference_files": {
         "studio-cv-bias-planning": [
           "references/pygas.json",
-          "references/plumed.json"
+          "references/plumed.json",
+          "references/composition-details.md"
         ]
       }
     },
@@ -355,7 +413,8 @@
       "reference_files": {
         "studio-cv-bias-planning": [
           "references/pygas.json",
-          "references/plumed.json"
+          "references/plumed.json",
+          "references/composition-details.md"
         ]
       }
     },
@@ -393,7 +452,8 @@
       "phase": "authoring",
       "reference_files": {
         "studio-cv-bias-planning": [
-          "references/pygas.json"
+          "references/pygas.json",
+          "references/composition-details.md"
         ]
       }
     },
@@ -716,7 +776,8 @@
           "references/compute-discovery.md",
           "references/profile-format.md",
           "references/compute-profile.schema.json",
-          "references/job-service-connection.md"
+          "references/job-service-connection.md",
+          "references/connection-recovery.md"
         ]
       }
     },
@@ -749,7 +810,8 @@
       "reference_files": {
         "studio-compute-workflow": [
           "references/compute-discovery.md",
-          "references/reconcile.md"
+          "references/reconcile.md",
+          "references/connection-recovery.md"
         ]
       }
     },
@@ -784,7 +846,8 @@
           "references/profile-format.md",
           "references/compute-profile.schema.json",
           "references/scientific-gates.md",
-          "references/reconcile.md"
+          "references/reconcile.md",
+          "references/execution.md"
         ]
       }
     },
@@ -795,7 +858,8 @@
         "studio-install-readiness"
       ],
       "status": "implemented_reuse_readiness_distinct_fresh_install",
-      "phase": "installation"
+      "phase": "installation",
+      "reference_files": {"studio-install-readiness": ["references/installation-audit.md", "references/provider-network.md"]}
     },
     {
       "id": "workspace.bundle-handoff",
@@ -835,7 +899,10 @@
       "skills": ["studio-workflow-roadmap"],
       "tools": ["present_task", "describe_engine"],
       "phase": "orchestration",
-      "status": "implemented_bundled_planning"
+      "status": "implemented_bundled_planning",
+      "reference_files": {
+        "studio-workflow-roadmap": ["references/roadmap-contract.md", "references/execution-receipts.md"]
+      }
     },
     {
       "id": "workflow.authoring",
@@ -843,7 +910,10 @@
       "engines": [],
       "skills": ["studio-workflow-authoring"],
       "phase": "authoring",
-      "status": "implemented_bundled_authoring"
+      "status": "implemented_bundled_authoring",
+      "reference_files": {
+        "studio-workflow-authoring": ["references/input-files.md", "references/review-form.md", "references/pygas-graphs.md"]
+      }
     },
     {
       "id": "workflow.orchestrate",
@@ -877,7 +947,8 @@
       "adaptation": "Inspect the real pyGAS library first. If no equivalent composition exists, discuss the mathematical definition, then propose only typed formula/parameter DATA in the current conversation. The human separately confirms the formula, generated code and one exact bounded CPU check in the task workbench. read_custom_cv requires explicit current-version sharing with this provider; no old definitions, runs or other projects are authorized. Registry or numerical-gate implementation is not a passed numerical report, artifact, target-engine validation or physical suitability. Build, target reload and execution use the selected workflow and its actual review and authorization requirements. Private OPES, mixed, AOTI and remote paths require their own reviewed contract and are not enabled by this guidance route. For concrete CV/bias composition or PLUMED equivalence, load pygas.cv or pygas.bias explicitly; this discussion route omits the long PLUMED index and does not bypass semantic comparison.",
       "reference_files": {
         "studio-cv-bias-planning": [
-          "references/pygas.json"
+          "references/pygas.json",
+          "references/custom-review.md"
         ]
       }
     }

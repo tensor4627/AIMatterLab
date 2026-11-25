@@ -15,6 +15,8 @@ const guidanceModules = [
   prompt, mapPath,
   'agent/context/agent-settings.mjs', 'agent/context/interaction-mode.mjs',
   'agent/context/private-task-context.mjs', 'agent/context/task-turn-context.mjs',
+  'backend/main/tools/public-software-docs.mjs',
+  'contracts/tools/release-tool-sources.mjs',
   'agent/providers/dsh-policy.mjs', 'agent/sessions/requests.mjs', 'agent/sessions/conversation-title-reviews.mjs',
   'agent/sessions/resource-routing.mjs', 'agent/sessions/terminal-turn.mjs',
   'agent/skills/skill-context.mjs', 'agent/skills/scientific-context.mjs',
@@ -58,7 +60,7 @@ async function isolatedCheck(check) {
   }
 }
 
-async function readBundledRoutes({Service, map, documents, bundledRoot, studioRoot, workerSource, temporary, packaged = false}) {
+async function readBundledRoutes({Service, map, documents, bundledRoot, studioRoot, workerSource, temporary, releaseToolSources, packaged = false}) {
   // Mixed routes require a registered upstream skill and provider sharing, even
   // for a focused read of an AIMatterLab document. Use only public test entries.
   const bundled = new Set(map.skills.filter(skill => skill.source === 'studio').map(skill => skill.id));
@@ -75,7 +77,7 @@ async function readBundledRoutes({Service, map, documents, bundledRoot, studioRo
   const provider = 'deepseek', scope = {provider};
   const settings = {};
   const service = new Service({map, bundledRoot, studioRoot, workerSource, sources: () => [...sources.values()],
-    settings: () => settings, setupAllowed: () => true});
+    releaseToolSources, settings: () => settings, setupAllowed: () => true});
   const read = (id, document_id) => service.call('read_scientific_skill', {function_id: id, ...(document_id && {document_id})}, scope);
   const mixed = routes.filter(route => route.skills.some(id => externalIds.has(id)));
   for (const route of mixed) {
@@ -147,7 +149,7 @@ export async function verifyBundledGuidance({projectDir = projectRoot, appOutDir
   for (const [name, item] of source) assert.equal(documents.get(name).sha256, item.sha256, 'Different packaged skill: ' + name);
   const map = JSON.parse(readAsar(mapPath));
   const contracts = checkSkillContracts({projectDir, map, documents});
-  for (const [file, shipped] of [['agent/providers/dsh-policy.mjs', 'studio-dsh/dsh-policy.mjs'], ['scripts/localize-skill.mjs', 'studio-tools/localize-skill.mjs']]) {
+  for (const [file, shipped] of [['installation/tool-sources.json', 'tool-sources.json'], ['agent/providers/dsh-policy.mjs', 'studio-dsh/dsh-policy.mjs'], ['scripts/localize-skill.mjs', 'studio-tools/localize-skill.mjs']]) {
     assert(fs.readFileSync(path.join(projectDir, file)).equals(fs.readFileSync(path.join(resources, shipped))), 'Different packaged file: ' + shipped);
   }
   return isolatedCheck(async temporary => {
@@ -163,8 +165,16 @@ export async function verifyBundledGuidance({projectDir = projectRoot, appOutDir
       fs.writeFileSync(target, bytes);
     }
     const {ScientificSkills: Service} = await import(pathToFileURL(path.join(studioRoot, 'agent/skills/scientific-skills.mjs')).href);
+    const {softwareDocs} = await import(pathToFileURL(path.join(studioRoot, 'backend/main/tools/public-software-docs.mjs')).href);
+    const toolSourceFile = path.join(resources, 'tool-sources.json');
+    const releaseToolSources = JSON.parse(fs.readFileSync(toolSourceFile, 'utf8'));
+    const noNetwork = async () => { throw Error('Bundled tool source lookup must work offline'); };
+    const catalog = await softwareDocs('search_software_docs', {}, noNetwork, toolSourceFile);
+    assert.deepEqual(catalog.results.map(source => [source.id, source.integration_status, source.validated_commit]),
+      releaseToolSources.map(source => [source.id, source.integration_status, source.validated_commit]), 'Packaged tool sources unavailable to ordinary chat');
     const receipts = await readBundledRoutes({Service, map, documents, bundledRoot, studioRoot,
-      workerSource: path.join(resources, 'app.asar.unpacked/worker'), temporary, packaged: true});
+      workerSource: path.join(resources, 'app.asar.unpacked/worker'), temporary, packaged: true,
+      releaseToolSources});
     return {version, promptSha256: sha256(readAsar(prompt)), guidanceFiles: guidanceModules.length, skillFiles: documents.size, ...contracts, ...receipts};
   });
 }

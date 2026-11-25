@@ -1,7 +1,9 @@
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {visibleUserText} from '../../../contracts/agent/user-message.mjs';
 import {inspectDesktopSource,transferRelease,withDesktopRelease} from './resource-release-transfer.mjs';
+import {bindResourceToolDefinition} from './resource-tool-definition.mjs';
 
 const selection=/^ssh:[A-Za-z0-9_-]{1,100}$/;
 const sha256=/^[a-f0-9]{64}$/;
@@ -42,6 +44,10 @@ const port=object({filename:string,format:string});
 const artifact=object({kind:{enum:['archive','binary']},url:string,sha256:setup_id,filename:string,executable:string},
  ['kind','sha256','filename','executable']);
 const parameters=record({type:['string','number','boolean']});
+const selected_definition=object({
+ package_ref:{type:'string',description:'Opaque package_ref from scientific_skill_catalog.selected_skill.definitions in this turn.'},
+ function_id:text,test_case_id:text
+});
 const testInputs=record({anyOf:[object({path:{type:'string',description:'Absolute path on the selected resource, within an authorized input root.'}}),object({text:string})]});
 const manifest={
  ...object({
@@ -73,14 +79,14 @@ const definitions=[
  input('discover_resource_tool_scripts','Scan a user-designated directory on the acquired SSH resource. Report script groups and representative file hashes for the user to select.',{resource_id,directory:text}),
  input('plan_resource_tool_setup','Save an editable resource tool setup for desktop review. The desktop starts installation or the allocation test after review. Use exact resource and scheduler IDs from list_resource_tools and read the bundled setup guide.',{
   resource_id,route:{enum:['fresh','existing','custom']},cluster_id:text,environment_id:text,queue_target_id:text,prior_run_id:{type:'string',pattern:'^[a-f0-9]{24}$'},
-  manifest,candidate:{...object({path:text,sha256:setup_id}),description:'For the existing route, use the reviewed script path as manifest.source.executable and supply the digest of that same file.'}
+  manifest,selected_definition,candidate:{...object({path:text,sha256:setup_id}),description:'For the existing route, use the reviewed script path as manifest.source.executable and supply the digest of that same file.'}
  },['resource_id','route','cluster_id','environment_id','manifest'],false),
  input('read_resource_tool_setup','Read one verified tool setup for the acquired resource and project. Recover transfer and test progress here. Read the saved execution skill using read_project_skill with scope=resource.',{resource_id,setup_id}),
 ];
 const names=new Set(definitions.map(tool=>tool.name));
 const terminalStates=new Set(['active','failed','needs_file','planned']);
 
-export function createResourceToolController({resources,workspaces,skills,developerCompute,chooseFile,confirm,emit=()=>{},
+export function createResourceToolController({resources,workspaces,skills,developerCompute,chooseFile,confirm,resolveSelectedDefinition,emit=()=>{},
  current=()=>true,withRelease=withDesktopRelease,upload=transferRelease,inspect=inspectDesktopSource,setTimer=setTimeout,clearTimer=clearTimeout}){
  const desktopDownloads=new Map(),watches=new Map(),turns=new Map(),saveFailures=new Map();
  const selectedFiles=new Map(),setupFiles=new Map();
@@ -327,9 +333,10 @@ export function createResourceToolController({resources,workspaces,skills,develo
    ['archive','binary'].includes(source?.kind)&&!source.url&&file.sha256===source.sha256;
  }
 
- async function plan(selected,value){
+ async function plan(selected,value,onboarding){
   const payload=Object.fromEntries([...planFields,'candidate','queue_target_id','prior_run_id'].filter(key=>value[key]!==undefined).map(key=>[key,value[key]]));
-  const result=receipt(await selected.call('plan',{...payload,workspace_id:selected.registration.workspaceId}),selected);
+  const result=receipt(await selected.call('plan',{...payload,workspace_id:selected.registration.workspaceId,...onboarding?{onboarding}:{}}),selected);
+  if(!isDeepStrictEqual(result.onboarding,onboarding))throw Error('The target setup receipt differs from the selected package version');
   emit({resource_id:selected.ref.resource_id,setup_id:result.id});
   return result;
  }
@@ -442,7 +449,7 @@ export function createResourceToolController({resources,workspaces,skills,develo
   }
   if(!project_id)throw Error('Select the authorized project for this resource');
   if(name==='plan_resource_tool_setup'){
-   fields(args,['resource_id','manifest','route','cluster_id','environment_id'],['candidate','queue_target_id','prior_run_id']);
+   fields(args,['resource_id','manifest','route','cluster_id','environment_id'],['candidate','queue_target_id','prior_run_id','selected_definition']);
    if(!development&&!setupRequest.test(user))throw Object.assign(Error('A current user request for tool setup is required before drafting'),{operationNotStarted:true});
    const source=args.manifest?.source;
    const scan=turn.scan;
@@ -453,8 +460,17 @@ export function createResourceToolController({resources,workspaces,skills,develo
       !user.includes(source.executable)&&!reviewed)){
     throw Error('Use a script from the reviewed scan or an installed path designated by the user');
    }
+   let binding,onboarding;
+   if(args.selected_definition!==undefined){
+    if(selected.origin.health.resource_tool_definition_schema!==1)throw Error('This job service needs the registered tool definition setup capability');
+    fields(args.selected_definition,['package_ref','function_id','test_case_id']);
+    if(typeof resolveSelectedDefinition!=='function')throw Error('Select a registered delivery package for this turn');
+    binding=await resolveSelectedDefinition(args.selected_definition.package_ref,scope);
+    onboarding=bindResourceToolDefinition(binding.record,args.selected_definition,args.manifest);
+   }
    await selected.register();
-   return plan(selected,{...args,request_id:randomUUID(),project_id});
+   binding?.check();
+   return plan(selected,{...args,request_id:randomUUID(),project_id},onboarding);
   }
   if(name==='read_resource_tool_setup'){
    fields(args,['resource_id','setup_id']);

@@ -17,7 +17,7 @@ from studio_worker.infrastructure.util import atomic_json, contained, stable_fil
 from studio_worker.tools import resource_tool_git as git_ops
 from studio_worker.tools import resource_tool_build as builder
 from studio_worker.tools.resource_tool_manifest import (
-    SHA256, SLUG, absolute_path, args_for, fields, file_receipt, fingerprint, manifest, match, numeric,
+    SHA256, SLUG, absolute_path, args_for, fields, file_receipt, fingerprint, manifest, match, numeric, relative_path,
 )
 from studio_worker.tools.resource_tool_sources import CHUNK, MAX_PACKAGE, copy_release, discover, download, extract_archive
 
@@ -169,7 +169,8 @@ class ResourceTools:
 
     def _public(self, row):
         keys = ('id', 'resource_id', 'workspace_id', 'route', 'status', 'stage', 'revision', 'plan_sha256',
-                'manifest', 'target', 'install_root', 'activity', 'build', 'test', 'activation_id', 'skill', 'supply', 'message')
+                'manifest', 'target', 'install_root', 'activity', 'build', 'test', 'activation_id', 'skill', 'supply', 'message',
+                'onboarding')
         return {key:deepcopy(row[key]) for key in keys if key in row}
 
     def _save(self, row, **updates):
@@ -246,12 +247,13 @@ class ResourceTools:
 
     def plan(self, data):
         fields(data, ('resource_id','workspace_id','request_id','route','manifest','project_id','cluster_id','environment_id'),
-               ('queue_target_id','candidate','prior_run_id'))
+               ('queue_target_id','candidate','prior_run_id','onboarding'))
         workspace = self._workspace(data)
         request = match(data['request_id'], REQUEST_ID, 'Use a stable setup request identity')
         if data['route'] not in ROUTES:
             raise ValueError('Select a tool configuration route')
         definition = manifest(data['manifest'], data['route'])
+        onboarding = tool_onboarding(data['onboarding'], definition) if 'onboarding' in data else None
         target, project, profile, effective, allocation = _target(
             self.service, data['project_id'], data['cluster_id'], data.get('queue_target_id'),
             duration(definition), definition['test'].get('resources', {}))
@@ -286,6 +288,8 @@ class ResourceTools:
                    'allocation':allocation, 'project_revision':project['revision'], 'profile_version':profile['version'],
                    'environment_sha256':environment_hash(effective), 'fixtures':fixtures, 'installed_source':installed,
                    'prior_run_id':prior}
+        if onboarding is not None:
+            preview['onboarding'] = onboarding
         plan_sha256 = fingerprint(preview)
         with self.store.lock:
             if self.store.db_exists(SETUP, identifier):
@@ -543,6 +547,7 @@ class ResourceTools:
             prior_version = binding.get('version', {})
             if (run['command'] == argv and binding.get('files') == expected and dependencies == version['dependencies'] and
                     prior_version.get('version') == version['version'] and prior_version.get('resolved_files') == version['resolved_files'] and
+                    prior_version.get('onboarding') == version.get('onboarding') and
                     run['project_id'] == target['project_id'] and run['cluster_id'] == target['cluster_id'] and
                     run.get('queue_target_snapshot', {}).get('id') == target.get('queue_target_id') and
                     environment_hash(profile) == row['environment_sha256'] and observed == wanted):
@@ -634,8 +639,14 @@ class ResourceTools:
             if not Path(observed['path']).is_relative_to(base):
                 raise ValueError('A supporting file points outside its reviewed installation')
             files[str(base/name)] = observed
+        onboarding = row.get('onboarding')
+        if onboarding and (executable['sha256'] != onboarding['entrypoint'] or
+                           any(files[str(base/name)]['sha256'] != digest for name,digest in onboarding['support'].items())):
+            raise ValueError('The entrypoint or supporting files differ from the selected tool package')
         prefix, version = _closure(command, executable, files, definition.get('interpreter'), effective, definition.get('dependencies', []))
         version['version'] = definition['version']
+        if onboarding:
+            version['onboarding'] = onboarding
         inputs = self._test_inputs(row, workspace, staging, project)
         parameters = definition['test'].get('parameters', {})
         argv = prefix + args_for(definition, parameters)
@@ -703,6 +714,8 @@ class ResourceTools:
         definition = row['manifest']
         identifier = fingerprint([row['id'], row['test_key'], run['id'], outputs])
         test = self._test_summary(run, status='passed', reused=reused, outputs=outputs)
+        if row.get('onboarding'):
+            test['onboarding'] = row['onboarding']
         summary = {key:row[key] for key in ('resource_id','workspace_id','target','environment_sha256')}
         metadata = {'tool':{key:definition[key] for key in ('id','name','version','source','argv','inputs','outputs',
                     'interpreter','dependencies','parameters','support_files') if key in definition},
@@ -713,6 +726,8 @@ class ResourceTools:
                                       if key in definition['test']}}}
         if 'build' in row:
             metadata['build'] = {'recipe':definition['build'],'receipt':row['build']}
+        if row.get('onboarding'):
+            metadata['onboarding'] = row['onboarding']
         software, _staging = self._staging(row)
         with self.service._resource_tool_install:
             git, receipt = git_ops.find_git(software)
@@ -863,6 +878,29 @@ class ResourceTools:
         return {'offset':offset+len(block)}
 
 
+def tool_onboarding(value, definition):
+    fields(value, ('package_id','package_version','manifest_sha256','source_commit','function_id',
+                   'reference_test_case_id','entrypoint','support'))
+    if value['package_id'] != definition['id']:
+        raise ValueError('The tool package and setup IDs differ')
+    for key in ('package_version','manifest_sha256','entrypoint'):
+        match(value[key], SHA256, 'Expected the exact registered package and entrypoint digests')
+    match(value['source_commit'], re.compile(r'[a-f0-9]{40}|[a-f0-9]{64}'), 'Expected the registered commit')
+    for key in ('function_id','reference_test_case_id'):
+        match(value[key], re.compile(r'(?=.{1,96}$)[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*'), 'Expected a declared function or reference case')
+    source = definition['source']
+    if (source['kind'] == 'git' and source['commit'] != value['source_commit'] or
+        source['kind'] == 'installed' and source.get('sha256') != value['entrypoint'] or
+        source['kind'] not in ('git','installed')):
+        raise ValueError('Use the exact checked-out source or installed entrypoint from the selected tool package')
+    if not isinstance(value['support'], dict) or set(value['support']) != set(definition.get('support_files', [])):
+        raise ValueError('Pin every reviewed package support file')
+    for name, digest in value['support'].items():
+        relative_path(name)
+        match(digest, SHA256, 'Expected the registered support file digest')
+    return deepcopy(value)
+
+
 def execution_skill(definition, target, version, test, activation_id):
     name = 'tool-' + definition['id'][:40] + '-' + activation_id[:12]
     description = 'Run ' + definition['id'] + ' on the resource and environment verified by its minimal scheduler test.'
@@ -878,11 +916,17 @@ def execution_skill(definition, target, version, test, activation_id):
     if len((template + ports).encode()) > 10500:
         template = 'Read the complete frozen argument and port definitions in the active resource tool configuration.\n'
         ports = 'Inputs: ' + ', '.join(definition['inputs']) + '\nOutputs: ' + ', '.join(definition['outputs'])
+    onboarding = version.get('onboarding')
+    delivery = ('Registered delivery ' + code(onboarding['package_id']+'@'+onboarding['package_version']) +
+                ', source commit ' + code(onboarding['source_commit']) + ', declaration SHA-256 ' +
+                code(onboarding['manifest_sha256']) + '. Function ' + code(onboarding['function_id']) +
+                ' uses reference case ' + code(onboarding['reference_test_case_id']) +
+                '. Below is the outcome of the reviewed target test.\n\n') if onboarding else ''
     body = ('---\nname: ' + name + '\ndescription: ' + description + '\n---\n\n'
             '# ' + definition['name'] + ' ' + definition['version'] + '\n\n'
             'Use ' + code('private.' + definition['id']) + ' in a confirmed workflow on this resource. '
-            'Use the registered allocation and environment ' + code(target['environment_id']) + ' on ' + code(target['cluster_id']) + '.\n\n'
-            'The executable entry is ' + code(version['tool_executable']) + '.\n\n## Arguments\n\n' + template +
+            'Use the registered allocation and environment ' + code(target['environment_id']) + ' on ' + code(target['cluster_id']) + '.\n\n' +
+            delivery + 'The executable entry is ' + code(version['tool_executable']) + '.\n\n## Arguments\n\n' + template +
             '\n' + ports +
             '\n\nUse ' + code('read_session_workspace') + ' to find the conversation work directory. '
             'Open the workflow run receipt for the precise scheduler job, outputs, and job logs. '

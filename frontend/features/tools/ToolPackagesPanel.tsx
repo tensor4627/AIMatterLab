@@ -29,10 +29,11 @@ export default function ToolPackagesPanel({provider,onSelect}:{provider:AgentPro
   </header>
   <label>{t('已登记工具包')}<select aria-label={t('已登记工具包')} value={state.selected} onChange={event=>state.selectPackage(event.target.value)}><option value="">{t('选择工具包')}</option>{state.packages.map(value=><option key={value.package_id} value={value.package_id}>{value.name} · {value.package_id}</option>)}</select></label>
   <details className="tool-source-list" data-testid="tool-source-list">
-   <summary data-guide-target="tool-sources">{t('已验证工具的源码仓库')}</summary>
+   <summary data-guide-target="tool-sources">{t('随版本收录的源码仓库')}</summary>
    <p>{t('复制命令拉取所列分支，再按仓库内的安装说明操作。分支版本可能与历史验收提交不同。')}</p>
    <ul>{toolSources.map(tool=><li key={tool.url}>
     <strong>{tool.name}</strong>
+    <span>{t(tool.integration_status==='source_only'?'源码与指南':'有内置适配')} · <code title={tool.validated_commit}>{short(tool.validated_commit)}</code></span>
     <code className="tool-source-command" dir="ltr">git clone --branch {tool.branch} {tool.url}</code>
     <span>{t('安装说明')} · <code>{tool.guide}</code></span>
    </li>)}</ul>

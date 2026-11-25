@@ -5,7 +5,7 @@ import {verifyBundledGuidance} from './check-bundled-guidance.mjs';
 // The uninstaller embeds this list. Workspace files are never removal inputs.
 export function workspaceManifest(appDir) {
   const entries = [];
-  const reserved = new Set(['.config', 'user-cache', 'sources', 'projects', 'agents.md', '.aimatterlab-workspace']);
+  const reserved = new Set(['.config', 'user-cache', 'sources', 'projects', 'agents.md', '.aimatterlab-workspace', 'debug.log']);
   function visit(relative) {
     for (const entry of fs.readdirSync(path.join(appDir, relative), {withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name,'en'))) {
       const name = path.join(relative, entry.name);
@@ -22,6 +22,8 @@ export function workspaceManifest(appDir) {
 
 export default async function afterPack({electronPlatformName,appOutDir,packager}) {
   if (electronPlatformName !== 'win32') return;
+  // The local Electron distribution may have a log from a previous launch.
+  fs.rmSync(path.join(appOutDir, 'debug.log'), {force:true});
   const guidance = await verifyBundledGuidance({appOutDir,projectDir:packager.projectDir});
   console.log('Verified packaged AIMatterLab guidance: '+JSON.stringify(guidance));
   const directory = path.join(packager.projectDir, '.studio', 'installer');

@@ -299,7 +299,7 @@ printf '%s;fixture\\n' "$$"
         program=self.root/'xyz.py'
         program.write_text('from pathlib import Path\nimport sys\nPath(sys.argv[1]).write_text(' + repr(fixture) + ')\n')
         definition={'id':'write-frames','name':'Private frame writer','version':'1',
-                    'source':{'kind':'installed','executable':str(program)},'interpreter':'python',
+                    'source':{'kind':'installed','executable':str(program),'sha256':file_receipt(program)['sha256']},'interpreter':'python',
                     'argv':['{output:frames}'],'inputs':{},'outputs':{'frames':{'filename':'frames.xyz','format':'extxyz'}},
                     'test':{'inputs':{},'max_seconds':10,'outputs':{'frames':{'sha256':sha(fixture.encode())}}}}
         owner={'provider':'codex','thread_id':'two-steps'}
@@ -321,10 +321,24 @@ printf '%s;fixture\\n' "$$"
         self.assertIn('installation.check',initial_engines)
         self.assertNotIn('private.write-frames',initial_engines)
 
-        setup=self.plan('custom',definition)
+        onboarding={'package_id':'write-frames','package_version':sha(b'frame-writer-package'),
+                    'manifest_sha256':sha(b'registered definition'),'source_commit':'a'*40,
+                    'function_id':'structure.fixture','reference_test_case_id':'write-one-frame',
+                    'entrypoint':definition['source']['sha256'],'support':{}}
+        with self.assertRaisesRegex(ValueError,'exact checked-out source or installed entrypoint'):
+            self.plan('custom',definition,onboarding={**onboarding,'entrypoint':'f'*64})
+        setup=self.plan('custom',definition,onboarding=onboarding)
+        self.assertEqual(setup['onboarding'],onboarding)
+        self.assertEqual(self.submission_count(),0)
+        with self.assertRaisesRegex(ValueError,'already has a different reviewed plan'):
+            self.plan('custom',definition,onboarding={**onboarding,'package_version':'e'*64})
         self.start(setup)
         active=self.wait(setup,('active','failed'))
         self.assertEqual(active['status'],'active',active)
+        self.assertEqual(active['test']['onboarding'],onboarding)
+        self.assertIn(onboarding['package_version'],self.call('skill',self.ref(active))['body'])
+        test_run=self.service.clusters.raw(active['test']['run_id'])
+        self.assertEqual(test_run['bound_invocation']['version']['onboarding'],onboarding)
         self.assertIn('private.write-frames',dispatch(self.service,'GET','/api/engines',{},admin=True))
         with self.assertRaises(PermissionError):
             executor.preview(plan)
@@ -350,6 +364,7 @@ printf '%s;fixture\\n' "$$"
         write_id=state['nodes']['write']['run_id']
         write=self.service.clusters.raw(write_id)
         self.assertEqual(write['bound_invocation']['version']['activation_id'],active['activation_id'])
+        self.assertEqual(write['bound_invocation']['version']['onboarding'],onboarding)
         self.assertEqual(self.service.clusters.poll(write_id)['status'],'succeeded')
 
         # Only the worker database and the original scheduler survive.
