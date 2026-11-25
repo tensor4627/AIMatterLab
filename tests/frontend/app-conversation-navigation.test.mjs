@@ -88,3 +88,22 @@ test('an ongoing reply permits a fresh queue chat and a failed first selection c
   assert.equal(attempts,2);assert(!h.calls.some(c=>c.method==='task.create'||c.method==='task.execute'));
  }finally{h.unmount();}
 });
+
+test('deleting a conversation clears active rename modal state for that conversation',async()=>{
+ const doomed={...conversation('codex','doomed'),name:'Doomed chat'};
+ const h=appWorkerHarness({override:(m,d,standard)=>{
+  if(m==='conversation.list')return [doomed];
+  if(m==='conversation.select')return doomed;
+  if(m==='conversation.delete')return {id:doomed.id,taskIds:[]};
+  return standard(m,d);
+ }});
+ try{
+  await h.flush();
+  h.find(n=>typeof n.props?.onRename==='function'&&n.props?.conversation?.id===doomed.id).props.onRename();
+  await h.flush();
+  assert(h.find(n=>n.props?.['data-testid']==='conversation-name'));
+  h.emit({method:'studio/conversationDeleted',params:{id:doomed.id,taskIds:[]}});
+  await h.flush();
+  assert.throws(()=>h.find(n=>n.props?.['data-testid']==='conversation-name'));
+ }finally{h.unmount();}
+});

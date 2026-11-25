@@ -271,3 +271,20 @@ test('one review freezes all opaque steps on a host without a sandbox; usable co
  assert.equal((await send('\r','execute2')).confinement,'landlock');
  assert.equal(controller.pending({}),null);
 });
+
+test('forget clears staged terminal input and settles any pending workspace approval for that conversation',async()=>{
+ let opened;
+ const controller=createWorkspaceTerminalAuthorization({workspace:{forTerminal:()=>({workspaceId:'w',root:'/work',path:'/work',identity:{...host,account:'user1'}})},
+  connections:{async runWorkspaceCommand(){return {status:'unavailable',code:125,output:'host'};}},current:()=>scope,emit:()=>opened?.()});
+ const send=(data,requestId)=>controller.input({scope,ref:{...ref,resourceName:'Cluster'},sessionId:'shell',ownerEpoch:1,input:{data,requestId},assertCurrent:()=>{}});
+ await send('python3 dangerous.py','stage-1');
+ const review=new Promise(resolve=>{opened=resolve;});
+ const pendingCommand=send('\r','exec-1');
+ await review;
+ assert.notEqual(controller.pending({}),null);
+ controller.forget(scope.provider,scope.threadId);
+ const settled=await pendingCommand;
+ assert.equal(settled.accepted,false);
+ assert.equal(settled.approval_status,'changed');
+ assert.equal(controller.pending({}),null);
+});

@@ -286,5 +286,91 @@ except sqlite3.OperationalError as exc:
         store.put("managed-schedule-round", {"id": "other-1", "scheduleId": "s2", "occurrence": 99})
         rounds = store.schedule_rounds("s1", limit=12)
         self.assertEqual([item["occurrence"] for item in rounds], list(range(19, 7, -1)))
+
+    def test_store_startup_tolerates_index_creation_failure(self):
+        root = Path(self.tmp.name) / "no-index-store"
+        original_connect = store_module._connect_worker_database
+
+        class _NoExprIndexConnection:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def execute(self, sql, *args, **kwargs):
+                if "CREATE INDEX" in sql and "json_extract" in sql:
+                    raise sqlite3.OperationalError("non-deterministic functions prohibited in index expressions")
+                return self._inner.execute(sql, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        def connect_without_expr_indexes(*args, **kwargs):
+            return _NoExprIndexConnection(original_connect(*args, **kwargs))
+
+        with patch.object(store_module, "_connect_worker_database", side_effect=connect_without_expr_indexes):
+            store = Store(root)
+        self.addCleanup(store.db.close)
+        run = _run("run-idx-fallback")
+        run["status"] = "queued"
+        store.add_run(run)
+        self.assertEqual([item["id"] for item in store.runs_by_status("queued")], ["run-idx-fallback"])
+        indexes = {row[0] for row in store.db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+        self.assertNotIn("idx_runs_status", indexes)
+
+    def test_store_falls_back_without_json1_functions(self):
+        root = Path(self.tmp.name) / "no-json1-store"
+        with patch.object(Store, "_probe_json_extract", return_value=False):
+            store = Store(root)
+        self.addCleanup(store.db.close)
+        self.assertFalse(store._json_extract_supported)
+        indexes = {row[0] for row in store.db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+        for name in ("idx_runs_status", "idx_objects_kind_status", "idx_objects_kind_source", "idx_objects_kind_schedule"):
+            self.assertNotIn(name, indexes)
+
+        # Fail any accidental use of json_extract/json_type/json_set after startup.
+        def blocked_json(*_args):
+            raise sqlite3.OperationalError("no such function: json_extract")
+        store.db.create_function("json_extract", -1, blocked_json)
+        store.db.create_function("json_type", -1, blocked_json)
+        store.db.create_function("json_set", -1, blocked_json)
+
+        for status, ident in (("succeeded", "r-done"), ("queued", "r-q1"), ("queued", "r-q2"), ("running", "r-run")):
+            item = _run(ident)
+            item["status"] = status
+            store.add_run(item)
+        self.assertEqual(store.runs_by_status(), [])
+        self.assertEqual([r["id"] for r in store.runs_by_status("queued", ascending=True)], ["r-q1", "r-q2"])
+        self.assertEqual([r["id"] for r in store.runs_by_status("queued", ascending=False)], ["r-q2", "r-q1"])
+        self.assertEqual([r["id"] for r in store.runs_by_status("running", "unknown")], ["r-run"])
+
+        store.put("cluster-run", {"id": "cr-done", "status": "succeeded"})
+        store.put("cluster-run", {"id": "cr-run", "status": "running"})
+        self.assertEqual(store.objects_by_status("cluster-run"), [])
+        self.assertEqual([o["id"] for o in store.objects_by_status("cluster-run", "queued", "running")], ["cr-run"])
+
+        store.put("managed-schedule", {"id": "sched-a", "sourceId": "src-1"})
+        store.put("managed-schedule", {"id": "sched-b", "sourceId": "src-2"})
+        self.assertEqual([o["id"] for o in store.objects_by_source("managed-schedule", "src-1")], ["sched-a"])
+
+        for occ in (1, 3, 2, 10, None):
+            store.put("managed-schedule-round", {"id": f"rnd-{occ}", "scheduleId": "sched-a", "occurrence": occ})
+        store.put("managed-schedule-round", {"id": "rnd-other", "scheduleId": "sched-b", "occurrence": 999})
+        rounds = store.schedule_rounds("sched-a", limit=4)
+        self.assertEqual([item["id"] for item in rounds], ["rnd-10", "rnd-3", "rnd-2", "rnd-1"])
+
+        store.put("roadmap-state", {"id": "rm-active", "task_id": "t-1", "status": "running", "confirmed_at": 10})
+        store.put("roadmap-state", {"id": "rm-older", "task_id": "t-1", "status": "succeeded", "confirmed_at": 5})
+        store.put("roadmap-state", {"id": "rm-newer", "task_id": "t-1", "status": "succeeded", "confirmed_at": 20})
+        store.put("roadmap-state", {"id": "rm-none", "task_id": "t-1", "status": "draft"})
+        self.assertEqual(store.roadmap_ids(active=True), ["rm-active"])
+        self.assertEqual(store.roadmap_ids(task_id="t-1"), ["rm-newer", "rm-active", "rm-older", "rm-none"])
+
+        # Legacy task-parameters save without roadmap preserves stored roadmap; explicit roadmap replaces it.
+        roadmap = {"steps": [{"id": "s1"}]}
+        store.put_task_parameters({"id": "tp-1", "parameters": {"temp": 300}, "roadmap": roadmap})
+        store.put_task_parameters({"id": "tp-1", "parameters": {"temp": 310}})
+        self.assertEqual(store.get("task-parameters", "tp-1"), {"id": "tp-1", "parameters": {"temp": 310}, "roadmap": roadmap})
+        updated_roadmap = {"steps": [{"id": "s2"}]}
+        store.put_task_parameters({"id": "tp-1", "parameters": {"temp": 320}, "roadmap": updated_roadmap})
+        self.assertEqual(store.get("task-parameters", "tp-1"), {"id": "tp-1", "parameters": {"temp": 320}, "roadmap": updated_roadmap})
 if __name__ == "__main__":
     unittest.main()

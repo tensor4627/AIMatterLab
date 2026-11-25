@@ -27,6 +27,17 @@ def encoded(value, *, sort_keys=False):
     return json.dumps(finite_json(value), allow_nan=False, sort_keys=sort_keys)
 
 
+def _sqlite_sort_key(value):
+    """Order JSON scalar fields consistently with SQLite storage classes."""
+    if value is None:
+        return (0, 0.0, "")
+    if isinstance(value, bool):
+        return (1, float(int(value)), "")
+    if isinstance(value, (int, float)):
+        return (1, float(value), "")
+    return (2, 0.0, str(value))
+
+
 def _uses_wsl1_database_lock():
     if sys.platform != "linux":
         return False
@@ -104,20 +115,39 @@ class Store:
                     UNIQUE(project,key));
                   CREATE TABLE IF NOT EXISTS events (
                     seq INTEGER PRIMARY KEY AUTOINCREMENT, run TEXT, time REAL, data TEXT);
-                  CREATE INDEX IF NOT EXISTS idx_runs_status
-                    ON runs(json_extract(data, '$.status'));
-                  CREATE INDEX IF NOT EXISTS idx_objects_kind_status
-                    ON objects(kind, json_extract(data, '$.status'));
-                  CREATE INDEX IF NOT EXISTS idx_objects_kind_source
-                    ON objects(kind, json_extract(data, '$.sourceId'));
-                  CREATE INDEX IF NOT EXISTS idx_objects_kind_schedule
-                    ON objects(kind, json_extract(data, '$.scheduleId'));
                 """)
+                self._json_extract_supported = self._probe_json_extract()
+                self._ensure_json_indexes()
                 self.db.commit()
                 self._migrate()
             except BaseException:
                 self.db.close()
                 raise
+
+    def _probe_json_extract(self):
+        try:
+            row = self.db.execute(
+                "SELECT json_extract('{\"ok\":1}','$.ok'), json_type('{\"ok\":1}','$.ok'), json_set('{}','$.ok',1)"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        return bool(row and row[0] == 1 and row[1] == "integer")
+
+    def _ensure_json_indexes(self):
+        if not self._json_extract_supported:
+            return
+        statements = (
+            "CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(json_extract(data, '$.status'))",
+            "CREATE INDEX IF NOT EXISTS idx_objects_kind_status ON objects(kind, json_extract(data, '$.status'))",
+            "CREATE INDEX IF NOT EXISTS idx_objects_kind_source ON objects(kind, json_extract(data, '$.sourceId'))",
+            "CREATE INDEX IF NOT EXISTS idx_objects_kind_schedule ON objects(kind, json_extract(data, '$.scheduleId'))",
+        )
+        for statement in statements:
+            try:
+                self.db.execute(statement)
+            except sqlite3.OperationalError:
+                # Older SQLite builds may disallow expression indexes or lack deterministic JSON1 flags.
+                break
 
     @contextmanager
     def database_access(self):
@@ -191,6 +221,30 @@ class Store:
     def put_task_parameters(self, value):
         # Legacy clients replace the form without sending a roadmap. Merge just that
         # omitted column of the JSON object in the same SQLite write as the form.
+        if not self._json_extract_supported:
+            payload = dict(value)
+            with self.database_access():
+                try:
+                    if not self.db.in_transaction:
+                        self.db.execute("BEGIN IMMEDIATE")
+                    if "roadmap" not in payload:
+                        row = self.db.execute(
+                            "SELECT data FROM objects WHERE kind='task-parameters' AND id=?",
+                            (value["id"],),
+                        ).fetchone()
+                        if row:
+                            previous = json.loads(row[0])
+                            if isinstance(previous.get("roadmap"), dict):
+                                payload["roadmap"] = previous["roadmap"]
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO objects VALUES('task-parameters',?,?)",
+                        (value["id"], encoded(payload)),
+                    )
+                    self.db.commit()
+                except Exception:
+                    self.db.rollback()
+                    raise
+            return value
         with self.database_access(), self.db:
             self.db.execute("""
                 INSERT INTO objects(kind,id,data) VALUES ('task-parameters',?,?)
@@ -237,6 +291,15 @@ class Store:
             return self.db.execute("SELECT 1 FROM objects WHERE kind=? AND id=?", (kind,identifier)).fetchone() is not None
 
     def roadmap_ids(self, *, task_id=None, active=False):
+        if not self._json_extract_supported:
+            with self.database_access():
+                rows = self.db.execute("SELECT id, data FROM objects WHERE kind='roadmap-state'").fetchall()
+            items = [(identifier, json.loads(raw)) for identifier, raw in rows]
+            if active:
+                return [identifier for identifier, data in items if data.get("status") in ("running", "unknown")]
+            matched = [(identifier, data) for identifier, data in items if data.get("task_id") == task_id]
+            matched.sort(key=lambda pair: _sqlite_sort_key(pair[1].get("confirmed_at")), reverse=True)
+            return [identifier for identifier, _ in matched]
         query = "SELECT id FROM objects WHERE kind='roadmap-state'"
         if active:
             query += " AND json_extract(data,'$.status') IN ('running','unknown')"
@@ -266,8 +329,13 @@ class Store:
     def runs_by_status(self, *statuses, ascending=False):
         if not statuses:
             return []
-        placeholders = ",".join("?" for _ in statuses)
         order = "ASC" if ascending else "DESC"
+        if not self._json_extract_supported:
+            wanted = set(statuses)
+            with self.database_access():
+                rows = self.db.execute(f"SELECT data FROM runs ORDER BY rowid {order}").fetchall()
+            return [item for item in (json.loads(row[0]) for row in rows) if item.get("status") in wanted]
+        placeholders = ",".join("?" for _ in statuses)
         with self.database_access():
             rows = self.db.execute(
                 f"SELECT data FROM runs WHERE json_extract(data,'$.status') IN ({placeholders}) ORDER BY rowid {order}",
@@ -278,6 +346,9 @@ class Store:
     def objects_by_status(self, kind, *statuses):
         if not statuses:
             return []
+        if not self._json_extract_supported:
+            wanted = set(statuses)
+            return [item for item in self.list(kind) if item.get("status") in wanted]
         placeholders = ",".join("?" for _ in statuses)
         with self.database_access():
             rows = self.db.execute(
@@ -287,6 +358,8 @@ class Store:
         return [json.loads(row[0]) for row in rows]
 
     def objects_by_source(self, kind, source_id):
+        if not self._json_extract_supported:
+            return [item for item in self.list(kind) if item.get("sourceId") == source_id]
         with self.database_access():
             rows = self.db.execute(
                 "SELECT data FROM objects WHERE kind=? AND json_extract(data,'$.sourceId')=?",
@@ -295,11 +368,18 @@ class Store:
         return [json.loads(row[0]) for row in rows]
 
     def schedule_rounds(self, schedule_id, limit=12):
+        limit = int(limit)
+        if limit <= 0:
+            return []
+        if not self._json_extract_supported:
+            matched = [item for item in self.list("managed-schedule-round") if item.get("scheduleId") == schedule_id]
+            matched.sort(key=lambda item: _sqlite_sort_key(item.get("occurrence")), reverse=True)
+            return matched[:limit]
         with self.database_access():
             rows = self.db.execute(
                 "SELECT data FROM objects WHERE kind='managed-schedule-round' AND json_extract(data,'$.scheduleId')=?"
                 " ORDER BY json_extract(data,'$.occurrence') DESC LIMIT ?",
-                (schedule_id, int(limit)),
+                (schedule_id, limit),
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 

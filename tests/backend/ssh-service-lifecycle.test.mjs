@@ -129,14 +129,14 @@ function findChangeComputeResource(node){
 }
 const idleGuard=findIdleGuard(tree);assert(idleGuard,'actual workbench worker idle guard');
 const changeResourceFn=findChangeComputeResource(tree);assert(changeResourceFn,'actual compute resource switch function');
-function mount(route,{selected,service,worker,serviceStatus='connected',usesLegacyWorker=false}={}){
+function mount(route,{selected,resourceStatus,service,worker,serviceStatus='connected',usesLegacyWorker=false}={}){
  const calls=[],handlers=new Map();let selection=selected,revision=1;
  const peer={provider:'kimi',threadId:'parallel-chat',busy:true,sessionId:'peer-session'};
  const scopes=new McpProviderScopes(),gateway={url:'http://127.0.0.1:43210',tokens:{mcp:'synthetic-gateway'},transport:'desktop-terminal'};
  scopes.bind(gateway);scopes.bindContext(peer.provider,{threadId:peer.threadId},{sessionId:peer.sessionId});
  const lease=scopes.connection(peer.provider,gateway,peer.sessionId);
  const peerScope=()=>scopes.authenticate({pathname:new URL(lease.url).pathname+'/mcp',host:new URL(lease.url).host,authorization:'Bearer '+lease.tokens.mcp});
- const computeResource={peek:()=>selection,capture:()=>({revision,selection:structuredClone(selection)}),clear:({selectionId})=>{assert.equal(selectionId,selection.selectionId);calls.push('explicit-clear');selection=null;revision++;return {status:'none'};}};
+ const computeResource={peek:()=>selection,...resourceStatus?{status:async()=>resourceStatus}:{},capture:()=>({revision,selection:structuredClone(selection)}),clear:({selectionId})=>{assert.equal(selectionId,selection.selectionId);calls.push('explicit-clear');selection=null;revision++;return {status:'none'};}};
  const ports={
   computeResource,
   sshService:service||{peek:()=>({status:serviceStatus}),resourceChanged:async()=>calls.push('resource-changed'),disconnect:()=>assert.fail('Resource selection cannot stop SSH')},
@@ -166,6 +166,17 @@ for(const route of ['compute.connection.connect','worker.connect'])test('actual 
  assert.deepEqual(f.calls.filter(Array.isArray),[['detach','A']]);
  assert.equal(await f.run({}),route==='worker.connect'?'worker':'profile');assert.equal(calls.length,2);assert(f.calls.includes(route==='worker.connect'?'connect-worker':'connect-profile'));assert.equal(remote.calls.filter(v=>v.open).length,1);assert.equal(remote.calls.filter(v=>v.close).length,0);assert.equal(remote.channels.get('A').status,'connected');
  assert.equal(peer.checkCurrent(),true);assert.equal(f.peerScope().sessionId,peer.sessionId);
+});
+
+for(const route of ['compute.connection.connect','worker.connect'])test('actual '+route+' clears a dead/unavailable SSH selection and connects local WSL cleanly',async()=>{
+ const selected={schemaVersion:2,kind:'ssh-connection',connectionId:'dead-conn',selectionId:'dead-ssh',profileId:'profile',profileVersion:1};
+ const resourceStatus={...selected,status:'unavailable',alive:false,authentication:'lost'};
+ const f=mount(route,{selected,resourceStatus});
+ const result=await f.run({});
+ assert.equal(result,route==='worker.connect'?'worker':'profile');
+ assert.equal(f.selection(),null);
+ assert(f.calls.includes('explicit-clear'));
+ assert(f.calls.includes('emit'));
 });
 
 test('the actual switch guard refuses to detach a worker while its pinned conversation is busy',async()=>{

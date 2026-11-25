@@ -51,6 +51,28 @@ for(const selected of [true,false])test('terminal-only planning checkbox is sent
   h.click('agent-planning-connect-worker');await h.flush();assert.equal(choices,1);assert.equal(starts(h).length,2);h.render({planningMode:false});assert.throws(()=>h.find(n=>n.props?.['data-testid']==='agent-planning-terminal-notice'));h.type('回到普通讨论');h.send();await h.flush();assert.equal(starts(h)[2].data.params.planningMode,false);assert.deepEqual(h.errors,[]);
  }finally{h.unmount();}
 });
+const sshConnection={schemaVersion:2,kind:'ssh-connection',selectionId:'sel-managed',connectionId:'conn-managed',profileId:'saved-profile',profileVersion:1,sessionId:null,terminalSessionIds:[],status:'selected',connectionStatus:'authenticated',alive:true,agentReady:false,operator:'human',authentication:'verified',managedRuns:false,workflowReady:false,capabilities:{terminal:{status:'closed',sessionIds:[],agentReady:false,operator:'human'},service:{status:'disconnected',agentReady:false,operator:'human',workflowReady:false},files:{status:'unavailable',via:null}}};
+test('managed compute planning never shows terminal-only notice or blocks workflow creation',async()=>{
+ const f=records();
+ const h=await connect({
+  props:{planningMode:true,computeConnected:false,computeResource:sshConnection},
+  override:(m,d,s)=>{
+   if(m==='agent.connect')return {tools:{status:'ready',scope:'terminal-only',count:0,managedCompute:true,managedTools:{status:'ready',count:3}}};
+   if(m==='conversation.remember')return f.records.remember(d);
+   if(m==='task.create')return f.records.create(d);
+   return s(m,d);
+  }
+ });
+ try{
+  assert.throws(()=>h.find(n=>n.props?.['data-testid']==='agent-planning-terminal-notice'));
+  h.type('请创建托管规划流程');h.send();await h.flush();
+  assert.equal(newThread(h).studioPlanningThread,true);
+  assert.equal(f.records.tasks().length,1);
+  assert.equal(starts(h).length,1);
+  assert.equal(starts(h)[0].data.params.planningMode,true);
+  assert.deepEqual(h.errors,[]);
+ }finally{h.unmount();}
+});
 test('send preparation keeps the mode chosen at submit time despite later parent state changes',async()=>{
  const pending=deferred(),f=records();
  const h=await connect({props:{planningMode:true},override:(m,d,s)=>{
@@ -59,4 +81,16 @@ test('send preparation keeps the mode chosen at submit time despite later parent
   return s(m,d);
  }});
  try{h.type('准备当前模式');h.send();await h.flush();assert.equal(newThread(h).studioPlanningThread,true);h.render({planningMode:false});pending.resolve();await h.flush();assert.equal(starts(h).length,1);assert.equal(starts(h)[0].data.params.planningMode,true);assert.equal(f.records.tasks().length,1);assert.deepEqual(h.errors,[]);}finally{h.unmount();}
+});
+
+test('managedCompute mode ignores leftover legacy ssh-terminal binding when starting planning turns',async()=>{
+ const f=records(),legacy={schemaVersion:1,selectionId:'legacy-ssh',kind:'ssh-terminal',profileId:'profile',profileVersion:1,sessionId:'legacy-shell',status:'selected',alive:true,authentication:'verified',operator:'human'};
+ const h=await connect({props:{planningMode:true,computeResource:legacy},override:(m,d,s)=>m==='agent.connect'?{tools:{status:'ready',count:1,managedCompute:true}}:m==='conversation.remember'?f.records.remember(d):m==='task.create'?f.records.create(d):s(m,d)});
+ try{
+  h.type('请核对任务参数');h.send();await h.flush();
+  assert.equal(starts(h).length,1);
+  assert.equal(starts(h)[0].data.params.planningMode,true);
+  assert.equal(f.records.tasks().length,1);
+  assert.deepEqual(h.errors,[]);
+ }finally{h.unmount();}
 });

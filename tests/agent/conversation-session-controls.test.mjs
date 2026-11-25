@@ -1,6 +1,6 @@
 import __node_test, {describe as __describe} from 'node:test';
 import assert from "node:assert/strict";
-import {createAgentWorkflowContext} from "../../agent/sessions/workflow-context.mjs";
+import {createAgentWorkflowContext,createParallelAgentWorkflowContext} from "../../agent/sessions/workflow-context.mjs";
 import {selectConversation} from "../../agent/sessions/conversation-selection.mjs";
 import {TaskRecords} from "../../agent/sessions/task-records.mjs";
 import {conversationTitle} from "../../contracts/agent/conversation-title.mjs";
@@ -52,6 +52,65 @@ test('A late preparation cannot reselect an older conversation after an awaited 
 test('Ownership and runtime rebinding during await fail without replacing the active map',async()=>{const f=fixture(),ticket=f.api.begin('codex','a');await assert.rejects(f.api.synchronize(ticket,async()=>{f.tasks.get('task-a').authoring.environmentId='changed';}),/ownership changed/);assert.equal(f.activeTasks.has('codex'),false);});
 test('A first real thread identity binds once without inventing a workflow',async()=>{const f=fixture(),ticket=f.api.begin('codex',null);const context=await f.api.synchronize(ticket,bind);assert.equal(context.threadId,null);assert.throws(()=>f.api.assertScope(lease(context)),/selected conversation/);const actual=f.api.started(ticket,'fresh');assert.equal(actual.threadId,'fresh');assert.equal(actual.taskId,null);await f.api.synchronize(ticket,bind);assert.throws(()=>f.api.started(ticket,'another'),/Only a newly started/);});
 test('Deletion, foreign provider, stale active mapping and changed owner are denied',async()=>{const f=fixture(),ticket=f.api.begin('codex','a'),context=await f.api.synchronize(ticket,bind);f.setProvider('deepseek');assert.throws(()=>f.api.assertScope(lease(context)),/selected conversation/);f.setProvider('codex');f.activeTasks.set('codex','task-b');assert.throws(()=>f.api.assertScope(lease(context)),/another workflow/);f.api.clear('codex');assert.throws(()=>f.api.assert(ticket),/Selected conversation changed/);assert.equal(f.activeTasks.has('codex'),false);f.tasks.get('task-a').provider='qwen';assert.throws(()=>f.api.begin('codex','a'),/another conversation/);});
+test('forget clears only the deleted foreground conversation without throwing Conversation was deleted and allows a fresh chat',async()=>{
+ const deleted=new Set(),f=fixture();
+ f.records.deleted=(provider,threadId)=>deleted.has(provider+':'+threadId);
+ const ticketA=f.api.begin('codex','a');
+ await f.api.synchronize(ticketA,bind);
+ const beforeOwner=f.api.selectedOwner(),beforeSerial=f.api.revision();
+ assert.equal(f.api.forget('codex','b'),false);
+ assert.equal(f.api.forget('deepseek','a'),false);
+ assert.equal(f.api.forget('codex',null),false);
+ assert.deepEqual(f.api.selectedOwner(),beforeOwner);
+ deleted.add('codex:a');
+ assert.equal(f.api.forget('codex','a'),true);
+ assert.equal(f.api.current(),null);
+ const clearedOwner=f.api.selectedOwner();
+ assert.equal(clearedOwner.context,null);
+ assert.equal(clearedOwner.revision,beforeOwner.revision+1);
+ assert(f.api.revision()>beforeSerial);
+ assert.equal(f.activeTasks.has('codex'),false);
+ assert.throws(()=>f.api.assert(ticketA),/Selected conversation changed/);
+ assert.throws(()=>f.api.owner('codex','a'),/Conversation was deleted/);
+ assert.throws(()=>f.api.begin('codex','a'),/Conversation was deleted/);
+ const draft=f.api.begin('codex',null);
+ assert.equal(f.api.forget('codex',null),false);
+ assert.equal(f.api.current().threadId,null);
+ f.api.started(draft,'fresh-after-delete');
+ const fresh=await f.api.synchronize(draft,bind);
+ assert.equal(fresh.threadId,'fresh-after-delete');
+ f.api.beginReplacement('codex','b');
+ deleted.add('codex:b');
+ assert.equal(f.api.forget('codex','b'),true);
+ assert.equal(f.api.current(),null);
+ assert.equal(f.api.selectedOwner().context,null);
+});
+test('parallel workflow context forget clears foreground only when matched and prunes adopted background sessions',async()=>{
+ const deleted=new Set(),tasks=new Map([['task-alpha',{id:'task-alpha',provider:'codex',threadId:'alpha',projectId:'project-alpha',authoring:{projectId:'project-alpha',environmentId:null,inputRoot:null}}]]),conversations=new Map([['codex:alpha',{taskId:'task-alpha',projectId:'project-alpha'}]]);
+ const records={deleted:(p,id)=>deleted.has(p+':'+id),conversation:(p,id)=>conversations.get(p+':'+id),bound:(p,id)=>{const c=conversations.get(p+':'+id);return c?.taskId?tasks.get(c.taskId):null;},read:id=>structuredClone(tasks.get(id))};
+ const parallel=createParallelAgentWorkflowContext({records,selectedProvider:()=> 'codex'});
+ const fgTicket=parallel.begin('codex','alpha');
+ await parallel.synchronize(fgTicket,bind);
+ const bgIdentity={id:'bg-session',provider:'codex',threadId:null,isForeground:()=>false};
+ await parallel.runInSession(bgIdentity,async()=>{
+  const t=parallel.begin('codex',null);
+  parallel.started(t,'beta-adopted');
+  await parallel.synchronize(t,bind);
+  assert.equal(parallel.current().threadId,'beta-adopted');
+ });
+ deleted.add('codex:beta-adopted');
+ assert.equal(parallel.forget('codex','beta-adopted'),false);
+ assert.equal(parallel.current().threadId,'alpha');
+ assert.equal(parallel.selectedOwner().context.threadId,'alpha');
+ const recreated=await parallel.runInSession(bgIdentity,()=>parallel.current());
+ assert.equal(recreated.threadId,null);
+ deleted.add('codex:alpha');
+ assert.equal(parallel.forget('codex','alpha'),true);
+ assert.equal(parallel.current(),null);
+ assert.deepEqual(parallel.selectedOwner().context,null);
+ assert.throws(()=>parallel.currentFor('codex','alpha'),/Conversation was deleted/);
+ assert.throws(()=>parallel.begin('codex','alpha'),/Conversation was deleted/);
+});
 });
 
 await __describe("conversation-fresh-selection", async () => {

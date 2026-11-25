@@ -532,11 +532,15 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
  }
  const reviewService=!serviceReady&&serviceIdentityUnconfirmed(serviceIssue);
  const serviceWarning=ready&&serviceReady&&!!ownService?.warnings?.length;
+ const serviceActionDiagnostic=visibleDiagnostic?.action==='compute.managed.configureService'||visibleDiagnostic?.action==='compute.managed.updateService';
+ const canPrepareService=!!(ready&&hosted&&!serviceReady&&!servicePending&&!serviceIssue&&ownService?.status!=='unknown');
+ const showConnectionIssue=!!connectionIssue&&!(serviceActionDiagnostic&&serviceIssue&&connectionIssue===serviceIssue);
  const issues=[
-  connectionIssue?{
+  showConnectionIssue?{
    id:'ssh-login-error',
    summary:openIssue?openIssue.message:t(visibleDiagnostic?.action==='compute.managed.publish'?'托管结果待核对':
-    visibleDiagnostic?.action==='compute.sshConnection.openShell'?'终端通道需要核对':'SSH 连接需要核对'),
+    visibleDiagnostic?.action==='compute.sshConnection.openShell'?'终端通道需要核对':
+    serviceActionDiagnostic?'作业服务需要核对':'SSH 连接需要核对'),
    content:<>
     <p>{visibleDiagnostic?.message||t(sshConnectionMessage(connectionIssue))}</p>
     <div className="ssh-diagnostic-meta">
@@ -664,7 +668,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
      {serviceProgress}
     </div>
    </details>
-  </div>:loginTip||statusMessage||serviceProgress||serviceReady?<div className="ssh-status-strip" data-guide-target={serviceReady?'ssh-service-progress':undefined}>
+  </div>:loginTip||statusMessage||serviceProgress||serviceReady||canPrepareService?<div className="ssh-status-strip" data-guide-target={serviceReady?'ssh-service-progress':undefined}>
    {statusMessage?<span role="status">{statusMessage}</span>:loginTip?<span data-testid="ssh-login-progress" role="status">
     <span>{loginTip}</span>
      {loginState?.phase&&loginState.phase!=='waiting_authentication'&&<> · {t(sshActionLabel(loginState.phase))}</>}
@@ -672,6 +676,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    </span>:null}
    {serviceProgress}
    {ready&&serviceReady&&<span data-testid="ssh-worker-ready" role="status">{t(serviceWarning?'作业服务已连接':'作业服务可用')}</span>}
+   {canPrepareService&&<button type="button" className="button ssh-details-toggle" data-testid="ssh-service-prepare" disabled={busy} onClick={()=>void maintainService()}>{t('准备作业服务')}</button>}
    {canUseForWorkflow&&<button type="button" className="button ssh-details-toggle" data-testid="ssh-use-for-workflow" data-guide-target="ssh-use-for-workflow" disabled={busy} onClick={useForWorkflow}>{t('用于当前流程')}</button>}
   </div>:null}
    {ready&&selectableShells.length>1&&<div className="ssh-shell-tabs" data-testid="ssh-shell-actions" role="group" aria-label={t('选择终端')}>

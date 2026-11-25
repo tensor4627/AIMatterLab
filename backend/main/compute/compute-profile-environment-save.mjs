@@ -4,7 +4,7 @@ import {previewComputeProfileUpdate} from './compute-profiles.mjs';
 
 const fail=()=>{throw Error('compute_profile_environment_in_use');};
 function withoutEnvironment(profile){const {version,serviceEnvironment,...body}=profile;return body;}
-export async function saveComputeProfileWithEnvironment({profiles,terminal,resource,sshService,assertIdle=()=>{}},request){
+export async function saveComputeProfileWithEnvironment({profiles,terminal,resource,sshService,managedResources,assertIdle=()=>{}},request){
  assertIdle();
  if(request?.id===undefined||request?.kind!=='ssh')return profiles.save(request);
  const previous=profiles.read({id:request.id}),next=previewComputeProfileUpdate(previous,request);
@@ -17,6 +17,7 @@ export async function saveComputeProfileWithEnvironment({profiles,terminal,resou
   const service=sshService?.peek();
   if(service?.profileId===previous.id&&service.status!=='disconnected'&&!(service.status==='failed'&&(service.schemaVersion===2?service.serviceActive===false:service.terminalAccess==='available')))fail();
   sshService?.assertProfileEnvironmentUpdate?.(previous,next);
+  managedResources?.assertProfileEnvironmentUpdate?.(previous,next);
  };
  guardService();
  let terminalReceipt;
@@ -33,7 +34,8 @@ export async function saveComputeProfileWithEnvironment({profiles,terminal,resou
   const saved=profiles.save(request),adopted=await terminal.commitProfileEnvironmentUpdate(terminalReceipt,saved);
   assertIdle();resource.assertProfileEnvironmentUpdate(resourceReceipt);
   resource.commitProfileEnvironmentUpdate(resourceReceipt,saved,adopted);
-  sshService?.profileEnvironmentUpdated?.(previous,saved);committed=true;
+  sshService?.profileEnvironmentUpdated?.(previous,saved);
+  managedResources?.profileEnvironmentUpdated?.(previous,saved,adopted);committed=true;
   return saved;
  }finally{if(!committed)try{await terminal.abortProfileEnvironmentUpdate?.(terminalReceipt);}catch{}}
 }

@@ -306,3 +306,12 @@ test('a first SSH project can grant a test and later add an activated private en
  assert.deepEqual(result.policy.engines,['installation.check','private.example']);
  assert.deepEqual(result.policy.clusters,['cluster-a']);
 });
+
+test('forget resets active setup turn tracking for a deleted conversation without touching setups',async t=>{
+ const f=await fixture(t);
+ assert.equal(typeof f.api.forget,'function');
+ f.api.recordUserTurn({...f.scope,turnId:'turn-1',text:'请用 example 工具'});
+ f.api.forget(f.scope.provider,f.scope.threadId);
+ // After forget, requesting a plan without a new turn referencing a resource requires a fresh user turn or succeeds cleanly on turn-independent calls
+ assert.deepEqual(f.rows,[]);
+});

@@ -10,6 +10,7 @@ import {createComputeProfiles, previewComputeProfileUpdate} from "../../backend/
 import {createComputeResourceBinding} from "../../backend/main/compute/resource-binding.mjs";
 import {saveComputeProfileWithEnvironment} from "../../backend/main/compute/compute-profile-environment-save.mjs";
 import {existingConnections, existingProfile, rememberXshellSession} from "../../backend/main/compute/existing-ssh.mjs";
+import {createManagedComputeResources} from "../../backend/main/compute/managed-compute-resources.mjs";
 
 await __describe("compute-onboarding", async () => {
 const test = __node_test;
@@ -130,6 +131,37 @@ test('live environment adoption rejects simultaneous host/client metadata change
 
 test('normalized update preview is side-effect free and preserves an unchanged version',async t=>{
  const f=await fixture(t),next=previewComputeProfileUpdate(f.profile,f.request);assert.equal(next.version,2);assert.deepEqual(next.serviceEnvironment,f.request.serviceEnvironment);assert.equal(f.registry.read({id:f.profile.id}).version,1);assert.equal(previewComputeProfileUpdate(f.profile,{id:f.profile.id,expectedVersion:1,...content}).version,1);assert.throws(()=>previewComputeProfileUpdate(f.profile,{...f.request,expectedVersion:2}),/profile_changed/);assert.throws(()=>previewComputeProfileUpdate(f.profile,{...f.request,serviceEnvironment:{python:'python;id',activation:''}}),/invalid_request/);
+});
+
+test('saving SSH Python environment preserves managed SSH hosting on the updated version without probing',async t=>{
+ const f=await fixture(t),calls=[];
+ let openRequests=0,failPrepare=true,readyService={id:'service-active',generation:'gen-active',health:{},verify:async()=>({})};
+ const terminal={
+  connections:{
+   state:async({connectionId})=>connectionId===f.sessionId?{connectionId:f.sessionId,profileId:f.profile.id,profileVersion:f.profiles.read({id:f.profile.id}).version,status:'authenticated',authentication:'verified',capabilities:{multiplex:true}}:null,
+   managedShell:async()=>{openRequests++;return {sessionId:'shell-1'};},
+  },
+ };
+ const services={ssh:async()=>{calls.push('prepare');if(failPrepare)throw Error('ssh_service_registration_required');return readyService;}};
+ const workspace={assertHandoff:async()=>({workspaceId:'2'.repeat(64),resourceId:'1'.repeat(64),root:'/fixture/work',account:'user',hostIdentity:{hostname:'cluster.example',uid:1001,machineId:'machine-1'}}),publicWorkspace:row=>({workspaceId:row.workspaceId,root:row.root})};
+ const managedResources=createManagedComputeResources({profiles:f.profiles,terminal,resourceWorkspace:workspace,services,selectionCatalog:f.catalog,authorizeTerminal:()=>true,terminalPolicyRevision:()=>1});
+ t.after(()=>managedResources.stop());
+ const resource=await managedResources.publish({connectionId:f.sessionId,profileId:f.profile.id,profileVersion:1});
+ assert.equal(resource.profileVersion,1);
+ for(let i=0;i<10&&managedResources.snapshot().find(item=>item.profileId===f.profile.id)?.serviceStatus==='preparing';i++)await new Promise(resolve=>setImmediate(resolve));
+ calls.length=0;
+ const result=await saveComputeProfileWithEnvironment({profiles:f.profiles,terminal:f.terminal,resource:f.binding,managedResources,assertIdle:()=>{}},f.request);
+ assert.equal(result.version,2);
+ const updated=managedResources.snapshot().find(item=>item.profileId===f.profile.id);
+ assert.equal(updated.profileVersion,2);
+ assert.equal(updated.serviceStatus,'configuration_required');
+ assert.equal(f.catalog.get('managed-ssh-hosting',f.profile.id).profileVersion,2);
+ assert.deepEqual(calls,[]);
+ assert.equal(openRequests,0);
+
+ failPrepare=false;
+ await managedResources.configureService({connectionId:f.sessionId,profileId:f.profile.id,profileVersion:2});
+ assert.throws(()=>managedResources.assertProfileEnvironmentUpdate(result),/compute_profile_environment_in_use/);
 });
 });
 

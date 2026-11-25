@@ -61,6 +61,29 @@ test('explicit schema2 selection archives a schema1 reference without transferri
  const f=fixture(),old={schemaVersion:1,selectionId:'legacy-selection',kind:'ssh-terminal',profileId:'profile',profileVersion:1,sessionId:'legacy-shell'};f.catalog.put('compute-resource-selection','active',old);assert.deepEqual(f.api.peek(),old);const value=await f.api.activate(f.choice);assert.equal(value.agentReady,false);const history=f.catalog.get('compute-resource-selection-history',old.selectionId);assert.equal(history.fromSchemaVersion,1);assert.equal(history.toSchemaVersion,2);assert.deepEqual(history.previous,old);assert.equal(f.api.peek().kind,'ssh-connection');
 });
 
+test('clearConnection, clearProfile, and clearLegacyTerminal purge matching bindings and archive schema1 terminal rows',async()=>{
+ const f=fixture();
+ await f.api.activate(f.choice);
+ assert.equal(f.api.peek().connectionId,f.choice.connectionId);
+ f.api.clearConnection('other-connection');
+ assert.equal(f.api.peek().connectionId,f.choice.connectionId);
+ f.api.clearConnection(f.choice.connectionId);
+ assert.equal(f.api.peek(),null);
+
+ await f.api.activate(f.choice);
+ f.api.clearProfile('other-profile');
+ assert.equal(f.api.peek().profileId,f.choice.profileId);
+ f.api.clearProfile(f.choice.profileId);
+ assert.equal(f.api.peek(),null);
+
+ const old={schemaVersion:1,selectionId:'legacy-cleanup',kind:'ssh-terminal',profileId:'profile',profileVersion:1,sessionId:'legacy-shell'};
+ f.catalog.put('compute-resource-selection','active',old);
+ assert.equal(f.api.clearLegacyTerminal(),true);
+ assert.equal(f.api.clearLegacyTerminal(),false);
+ assert.equal(f.api.peek(),null);
+ assert.equal(f.catalog.get('compute-resource-selection-history',old.selectionId).previous.selectionId,'legacy-cleanup');
+});
+
 test('immutable profile migration retains only real saved versions and survives catalog reopening',t=>{
  const base=path.resolve('.studio/compute-connection-profile-tests');fs.mkdirSync(base,{recursive:true});const root=fs.mkdtempSync(path.join(base,'history-'));let catalog=new Catalog(root);
  const original={id:'00000000-0000-4000-8000-000000000001',version:7,kind:'ssh',name:'Existing saved route',host:'fixture.invalid',username:'fixture',port:22,ssh_client:'/usr/bin/ssh',mode:'interactive'};catalog.put('compute-profile',original.id,original);catalog.put('real-run','keep',{id:'keep',status:'unknown'});

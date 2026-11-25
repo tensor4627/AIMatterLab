@@ -302,3 +302,28 @@ test('an observed Agent shell stays separate across refresh and selecting its re
   assert.deepEqual(managedCalls(h),[]);assert.deepEqual(legacyCalls(h),[]);assert(!h.calls.some(c=>c.method==='compute.sshConnection.openShell'));
  }finally{h.unmount();}
 });
+
+test('hosted idle SSH connection offers a prepare-service action and suppresses duplicate login alert on matching service failure',async()=>{
+ let serviceState={...service,status:'idle',workflowReady:false,serviceActive:false};
+ const h=await selected({
+  props:{
+   managed:snapshot({...published,serviceReady:false,serviceStatus:'configuration_required'}),
+  },
+  override:(method)=>{
+   if(method==='compute.sshService.status')return serviceState;
+   if(method==='compute.managed.configureService')return Promise.reject(Object.assign(Error('ssh_service_maintenance_required'),{code:'ssh_service_maintenance_required'}));
+  },
+ });
+ try{
+  const button=h.id('ssh-service-prepare');
+  assert.match(JSON.stringify(button),/准备作业服务/);
+  button.props.onClick();
+  await h.flush();
+  assert(h.calls.some(c=>c.method==='compute.managed.configureService'));
+  assert.match(JSON.stringify(h.id('ssh-login-error')),/作业服务需要核对/);
+  serviceState={...service,status:'failed',workflowReady:false,serviceActive:false,error:{code:'ssh_service_maintenance_required'}};
+  await h.tick(2000);
+  assert(!h.find(n=>n.props?.['data-testid']==='ssh-login-error'));
+  assert(h.id('ssh-worker-error'));
+ }finally{h.unmount();}
+});

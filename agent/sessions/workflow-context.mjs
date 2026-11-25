@@ -43,6 +43,10 @@ export function createAgentWorkflowContext({records,activeTasks,selectedProvider
    return records.read(context.taskId);
   },
   clear(provider){if(current&&(!provider||provider===current.provider)){current=null;serial++;selectionRevision++;}if(provider)activeTasks.delete(provider);else activeTasks.clear();},
+  forget(provider,threadId){
+   if(!threadId||!current||current.provider!==provider||current.threadId!==threadId&&current.replacement?.threadId!==threadId)return false;
+   current=null;serial++;selectionRevision++;activeTasks.delete(provider);return true;
+  },
   // A message renews its operation ticket. The desktop view follows the selected
   // owner and must still notice a switch away and back to the same conversation.
   selectedOwner(){return {revision:selectionRevision,context:current?{provider:current.provider,...ownedState(current)}:null};},
@@ -101,6 +105,14 @@ export function createParallelAgentWorkflowContext({records,selectedProvider}){
   },
   synchronize,
   assertScope:scope=>runForScope(scope,()=>selected().assertScope(scope)),
-  clear:provider=>selected().clear(provider)
+  clear:provider=>selected().clear(provider),
+  forget(provider,threadId){
+   const cleared=foreground.forget(provider,threadId);
+   for(const [id,entry] of sessions){
+    if(entry.identity.provider!==provider)continue;
+    if(entry.context.forget(provider,threadId)||entry.identity.threadId===threadId)sessions.delete(id);
+   }
+   return cleared;
+  }
  };
 }

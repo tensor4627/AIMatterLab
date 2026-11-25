@@ -59,11 +59,18 @@ export function createManagedSshHosting(catalog){
   if(!record||records.get(record.profileId)!==record)return;
   catalog?.remove?.(kind,record.profileId);records.delete(record.profileId);
  }
+ function updateProfileVersion(profileId,previousVersion,nextVersion,targetFingerprint,connectionIds=[]){
+  const record=records.get(profileId);
+  if(!record||record.profileVersion!==previousVersion||record.targetFingerprint!==targetFingerprint)return false;
+  if(connectionIds.length&&!connectionIds.includes(record.connectionId))return false;
+  const next={...record,profileVersion:nextVersion};
+  save(next);records.set(profileId,next);return true;
+ }
  function setLease(record,owner,value){
   if(!record||records.get(record.profileId)!==record)return;
   const key=hostedLeaseKey(owner),leases={...record.leases};
   if(value&&validLease(value))leases[key]=value;else delete leases[key];
   save({...record,leases});record.leases=leases;
  }
- return {get:profileId=>records.get(profileId),list:()=>[...records.values()],replace,forget,setLease};
+ return {get:profileId=>records.get(profileId),list:()=>[...records.values()],replace,updateProfileVersion,forget,setLease};
 }

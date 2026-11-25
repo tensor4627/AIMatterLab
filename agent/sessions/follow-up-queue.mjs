@@ -165,7 +165,14 @@ export function createFollowUpQueue({
   }
   if (!provider || !identifier(threadId)) return;
   const key = ownerKey(provider, threadId);
-  if (method === 'studio/conversationDeleted') { catalog.remove(namespace, key); completed.delete(key); return; }
+  if (method === 'studio/conversationDeleted') {
+   const running = active.get(key);
+   if (running) running.cancelled = true;
+   scheduled.delete(key);
+   catalog.remove(namespace, key);
+   completed.delete(key);
+   return;
+  }
   if (method === 'studio/conversationContextChanged') {
    if (!identifier(params.oldThreadId) || params.oldThreadId === threadId) return;
    replaceQueue(read(provider, params.oldThreadId), threadId, params.uploadsRetained);
@@ -397,5 +404,5 @@ export function createFollowUpQueue({
   return {queue: view(record)};
  }
 
- return {request, observe, recover, pause, close: () => { stopping = true; }};
+ return {request, observe, recover, pause, isBusy: (provider, threadId) => active.has(ownerKey(provider, threadId)), close: () => { stopping = true; }};
 }

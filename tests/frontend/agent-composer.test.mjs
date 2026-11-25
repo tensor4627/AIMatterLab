@@ -141,3 +141,44 @@ for(const phase of ['resume','remember'])test('nonce-bound queue seed survives l
 });
 
 test('current-flow shortcut is hidden only for the same actually visible workflow, without clearing draft or owner',async()=>{const opens=[],bound={...conversation('codex','cleanup-bound'),taskId:'owned-task'};const h=agentHarness({props:{sessionSelection:{nonce:'cleanup-bound',conversation:bound},visibleWorkflowId:'owned-task',onOpenTask:id=>opens.push(id)},override:(method,data,standard)=>method==='conversation.remember'?bound:standard(method,data)});await h.flush();h.type('Preserve unsent draft');assert.throws(()=>h.find(n=>n.props?.['data-testid']==='agent-current-workflow'),/not found/);for(const visibleWorkflowId of [null,'other-task']){h.render({visibleWorkflowId});await h.flush();h.click('agent-current-workflow');assert.equal(h.textarea().props.value,'Preserve unsent draft');}assert.deepEqual(opens,['owned-task','owned-task']);h.render({visibleWorkflowId:'owned-task'});await h.flush();assert.throws(()=>h.find(n=>n.props?.['data-testid']==='agent-current-workflow'),/not found/);assert.equal(starts(h).length,0);h.unmount();});
+
+test('switching to a new chat after viewing local API history reconnects the API provider automatically',async()=>{
+ const qwenChat={...conversation('qwen','local-1'),name:'Local Qwen'};
+ const h=agentHarness({
+  props:{sessionSelection:{nonce:'qwen-history',conversation:qwenChat}},
+  override:(method,data,standard)=>{
+   if(method==='state')return {settings:{agentProvider:'qwen'}};
+   if(method==='agent.account')return {account:{type:'apiKey'},credentialStored:true};
+   if(method==='conversation.remember')return qwenChat;
+   if(method==='agent.rpc'&&data.method==='thread/resume')return {thread:{id:'local-1',turns:[{id:'t1',status:'completed',items:[{type:'userMessage',content:[{type:'text',text:'hi'}]}]}]},model:'qwen-plus',localApiStored:true};
+   return standard(method,data);
+  },
+ });
+ try{
+  await h.flush();
+  const connectsBefore=h.calls.filter(c=>c.method==='agent.connect').length;
+  h.render({sessionSelection:{nonce:'qwen-fresh',new:true}});
+  await h.flush();
+  const connectsAfter=h.calls.filter(c=>c.method==='agent.connect'&&c.data?.provider==='qwen').length;
+  assert.equal(connectsAfter,connectsBefore+1);
+ }finally{h.unmount();}
+});
+
+test('studio/conversationDeleted clears queued follow-up UI state immediately',async()=>{
+ const chat=conversation('codex','queued-chat');
+ const h=agentHarness({
+  props:{sessionSelection:{nonce:'queued-chat',conversation:chat}},
+  override:(method,data,standard)=>{
+   if(method==='conversation.remember')return chat;
+   if(method==='agent.queue'&&data.action==='read')return {queue:{provider:'codex',threadId:'queued-chat',revision:1,pause:null,after:'turn-1',items:[{id:'q1',text:'queued follow-up',status:'queued'}]}};
+   return standard(method,data);
+  },
+ });
+ try{
+  await h.flush();
+  assert.match(JSON.stringify(h.find(n=>true)),/queued follow-up/);
+  h.emit({method:'studio/conversationDeleted',params:{provider:'codex',threadId:'queued-chat'}});
+  await h.flush();
+  assert(!JSON.stringify(h.find(n=>true)).includes('queued follow-up'));
+ }finally{h.unmount();}
+});

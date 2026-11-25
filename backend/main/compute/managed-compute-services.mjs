@@ -15,6 +15,8 @@ const stableHealth=(verified,observed)=>['root','runtime','runtimeId','port'].ev
  equal(verified.hostIdentity,observed.hostIdentity)&&
  (!observed.runtimeManifestSha256||verified.runtimeManifestSha256===observed.runtimeManifestSha256);
 const exactConnection=(resource,view)=>view?.connectionId===resource.connectionId&&view.profileId===resource.profileId&&view.profileVersion===resource.profileVersion;
+const sameRepairTarget=(a,b)=>a.root===b.root&&a.port===b.port&&equal(a.hostIdentity,b.hostIdentity);
+const repairableFailureCodes=new Set(['maintenance_required','worker_cache_invalid','worker_hash_mismatch','transport_cache_invalid','transport_hash_mismatch','worker_start_failed','worker_health_invalid','sqlite_unavailable']);
 
 /** Attach private service clients to verified original workers. There is no
  * selection, global worker mutation, service update, or job replay here. */
@@ -33,11 +35,15 @@ export function createManagedComputeServices({connections,registration,source,tr
   const status=remoteRuntimeId!==expected.expected_runtime_id?'different':!remoteManifestSha256?'unconfirmed':remoteManifestSha256===expected.runtime_manifest_sha256?'current':'different';
   return {status,remoteRuntimeId,remoteManifestSha256,bundledRuntimeId:expected.expected_runtime_id,bundledManifestSha256:expected.runtime_manifest_sha256};
  }
- async function ssh(resource,profile,assertCurrent,{configure=false,upgrade,existingOnly=false}={}){
+ async function ssh(resource,profile,assertCurrent,{configure=false,repairMaintenance=false,upgrade,existingOnly=false}={}){
   const ref={connectionId:resource.connectionId},profileRef={profileId:profile.id,profileVersion:profile.version},requestBase={...ref,...profileRef};
   const initial=configure?registration.read(profileRef):null;
-  const first=!!(configure&&(initial?.status==='unconfigured'||initial?.status==='maintenance_required'&&initial.reason==='configuration_changed'));
-  const repair=first&&initial.registration&&equal(initial.registration.hostIdentity,resource.workspaceRegistration?.hostIdentity)?initial.registration:null;
+  const maintenance=initial?.status==='maintenance_required';
+  const sameWorkspaceHost=!!(initial?.registration&&equal(initial.registration.hostIdentity,resource.workspaceRegistration?.hostIdentity));
+  const repairableMaintenance=maintenance&&(initial.reason==='configuration_changed'||repairMaintenance&&(sameWorkspaceHost||initial.reason==='registration_invalid'&&!initial.registration));
+  if(configure&&repairMaintenance&&maintenance&&!repairableMaintenance)fail('ssh_service_registration_identity_changed');
+  const first=!!(configure&&(initial?.status==='unconfigured'||repairableMaintenance));
+  const repair=first&&sameWorkspaceHost?initial.registration:null;
   let saved=first?null:registration.validateReuse(profile);
   const fresh=()=>{
    assertCurrent();
@@ -50,12 +56,9 @@ export function createManagedComputeServices({connections,registration,source,tr
    return view;
   };
   let view=checkView(await connections.serviceState(ref));
-  const pinned=repair||saved;
-  const prepare=()=>prepareResources(source,{profileId:profile.id,transportSource,...pinned&&!upgrade?{
-   port:pinned.port,reuseOnly:true,expectedRuntimeId:pinned.runtimeId,
-   ...pinned.runtimeManifestSha256?{expectedRuntimeManifestSha256:pinned.runtimeManifestSha256}:{},
-  }:upgrade?{port:saved.port}:{}});
-  let bootstrap,upgradeManifest;
+  const prepareBundled=port=>prepareResources(source,{profileId:profile.id,transportSource,...port!==undefined?{port}:{}});
+  const prepare=()=>saved&&!upgrade?prepareResources(source,{profileId:profile.id,transportSource,port:saved.port,reuseOnly:true,expectedRuntimeId:saved.runtimeId,...saved.runtimeManifestSha256?{expectedRuntimeManifestSha256:saved.runtimeManifestSha256}:{}}):prepareBundled((repair||saved)?.port);
+  let bootstrap,upgradeManifest,repairedConfigured=false;
   if(upgrade){
    const versions=await comparison(profile,saved);fresh();
    if(!saved||versions.status!=='different'||upgrade.expectedRuntimeId!==versions.remoteRuntimeId||upgrade.bundledRuntimeId!==versions.bundledRuntimeId||
@@ -70,9 +73,24 @@ export function createManagedComputeServices({connections,registration,source,tr
   if(!existingOnly&&view.serviceActive!==true&&['idle','failed','disconnected'].includes(view.status)){
    bootstrap??=await prepare();
    fresh();
-   await connections.openService({...requestBase,requestId:uuid()},
-    {...bootstrap,...pinned&&!upgrade?{reuseOnly:true,startCached:true}:{},...profile.serviceEnvironment?{serviceEnvironment:profile.serviceEnvironment}:{}},{conversationChannel:true});
+   let openError=null;
+   try{
+    await connections.openService({...requestBase,requestId:uuid()},
+     {...bootstrap,...saved&&!upgrade?{reuseOnly:true,startCached:true}:{},...profile.serviceEnvironment?{serviceEnvironment:profile.serviceEnvironment}:{}},{conversationChannel:true});
+   }catch(error){
+    if(!(!upgrade&&saved&&repairMaintenance&&repairableFailureCodes.has(error?.message)&&equal(saved.hostIdentity,resource.workspaceRegistration?.hostIdentity)))throw error;
+    openError=error;
+   }
    view=checkView(await connections.serviceState(ref));
+   if(!upgrade&&saved&&repairMaintenance&&view.serviceActive!==true&&equal(saved.hostIdentity,resource.workspaceRegistration?.hostIdentity)&&
+      (openError||view.status==='failed'&&repairableFailureCodes.has(view.error?.code))){
+    bootstrap=await prepareBundled(saved.port);
+    fresh();
+    await connections.openService({...requestBase,requestId:uuid()},
+     {...bootstrap,...profile.serviceEnvironment?{serviceEnvironment:profile.serviceEnvironment}:{}},{conversationChannel:true});
+    view=checkView(await connections.serviceState(ref));
+    repairedConfigured=true;
+   }
   }
   if(view.status!=='connected'||view.serviceActive!==true||view.channelKind!=='private'||!serviceId(view.serviceId))fail('managed_compute_private_service_unavailable');
   const channelId=view.serviceId;
@@ -85,8 +103,9 @@ export function createManagedComputeServices({connections,registration,source,tr
   if(!stableHealth(ready,live))fail('managed_compute_service_changed');
   const health={...ready,...live};
   if(upgradeManifest&&health.runtimeManifestSha256!==upgradeManifest)fail('managed_compute_service_changed');
-  if(repair&&!stableHealth(health,repair))fail('managed_compute_service_changed');
-  if(first||upgrade){
+  if(repair&&!sameRepairTarget(health,repair))fail('managed_compute_service_changed');
+  if(repairedConfigured&&!sameRepairTarget(health,saved))fail('managed_compute_service_changed');
+  if(first||upgrade||repairedConfigured){
    const expected=(bootstrap??await prepare()).payload;
    fresh();
    if(expected?.expected_runtime_id!==health.runtimeId||expected?.port!==health.port||!health.runtimeManifestSha256)fail('managed_compute_service_changed');

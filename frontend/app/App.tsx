@@ -133,6 +133,7 @@ const sections=[['home','工作区',Layers3],['tools','工具与资源',Layers3]
 const mainDestinations=[['home','工作区',Home],['runs','运行记录',Clock],['tools','工具与资源',Layers3],['compute-resources','计算资源',Server]] as const;
 const initialSettings:Settings={distribution:'Ubuntu',workerRoot:'~/.local/state/gpu-sampling-studio',workerPort:8767,codexPath:'codex',cwd:'',skillRoots:[],theme:'dark'};
 function isSshResource(value:ComputeResourceState|null|undefined):value is ComputeResourceState{return value?.kind==='ssh-terminal'||value?.kind==='ssh-connection';}
+function isActiveSshResource(value:ComputeResourceState|null|undefined):boolean{return isSshResource(value)&&value.status==='selected'&&value.alive===true;}
 function sshSummary(value:ComputeResourceState){
  if(!value.connectionStatus&&value.status==='unavailable')return t('上次选择的 SSH 连接已不可用');
  return 'SSH: '+t(sshStateLabel(value.connectionStatus||value.status))+' · '+t('终端')+': '+t(sshStateLabel(value.capabilities?.terminal.status))+' · '+t('当前流程作业服务')+': '+t(sshStateLabel(value.capabilities?.service.status));
@@ -504,7 +505,7 @@ export default function App(){
  useEffect(()=>{if(!worker)return;void refresh(false);const timer=setInterval(()=>void refresh(false),2500);return()=>clearInterval(timer);},[worker,projectId,section]);
  function openComputeGuide(taskId=selectedConversationRef.current?.taskId,profile?:{id:string;version:number}):Promise<boolean>{if(computeGuideRequest.current)return computeGuideRequest.current.promise;const id=crypto.randomUUID();let resolve!:(connected:boolean)=>void;const promise=new Promise<boolean>(done=>{resolve=done;});computeGuideRequest.current={id,promise,resolve};setConnecting(true);setComputeGuide({id,...profile?{profile}:taskId?{taskId}:{}});return promise;}
  function closeComputeGuide(id:string,connected:boolean){if(computeGuideRequest.current?.id!==id)return;const request=computeGuideRequest.current;computeGuideRequest.current=null;setComputeGuide(null);setConnecting(false);request.resolve(connected);}
- async function connectWorker(taskId=selectedConversationRef.current?.taskId){const binding=taskWorkerSource(agentTasks.find(task=>task.id===taskId))?.binding,resource=computeResourceRef.current;if(binding?.kind==='ssh'||!binding&&isSshResource(resource)){setWorkerNotice('请恢复此流程原有的 SSH 连接，登录后接入作业服务。');setPrimaryPanel('workspace');showTerminal();if(isSshResource(resource)&&resource.alive===true&&(!binding||resource.profileId===binding.profileId&&resource.profileVersion===binding.profileVersion)){/* Reuse the already-open terminal; never open another authentication process. */}else setComputeChooser(true);return;}const sequence=conversationSelectionSeq.current,conversation=selectedConversationRef.current,current=()=>mounted.current&&sequence===conversationSelectionSeq.current&&conversation?.id===selectedConversationRef.current?.id;try{const pending=freshSelectionPending.current;if(pending?.sequence===sequence){await pending.promise;if(!current())return;taskId=selectedConversationRef.current?.taskId;}const connected=await openComputeGuide(taskId);if(!connected||!current())return;const state=await invoke<{settings:Settings}>('state');if(!current())return;setSettings(state.settings);settingsKnown.current=true;await observeWorker(taskId,true);}catch(error){if(current())onError(error);}}
+ async function connectWorker(taskId=selectedConversationRef.current?.taskId){const binding=taskWorkerSource(agentTasks.find(task=>task.id===taskId))?.binding,resource=computeResourceRef.current;if(binding?.kind==='ssh'||!binding&&isActiveSshResource(resource)){setWorkerNotice('请恢复此流程原有的 SSH 连接，登录后接入作业服务。');setPrimaryPanel('workspace');showTerminal();if(isActiveSshResource(resource)&&(!binding||resource?.profileId===binding.profileId&&resource?.profileVersion===binding.profileVersion)){/* Reuse the already-open terminal; never open another authentication process. */}else setComputeChooser(true);return;}const sequence=conversationSelectionSeq.current,conversation=selectedConversationRef.current,current=()=>mounted.current&&sequence===conversationSelectionSeq.current&&conversation?.id===selectedConversationRef.current?.id;try{const pending=freshSelectionPending.current;if(pending?.sequence===sequence){await pending.promise;if(!current())return;taskId=selectedConversationRef.current?.taskId;}if(!binding&&resource?.selectionId&&!isActiveSshResource(resource)){await computeResources.clear(resource.selectionId).then(cleared=>{if(current())acceptComputeResource(cleared);}).catch(()=>{});if(!current())return;}const connected=await openComputeGuide(taskId);if(!connected||!current())return;const state=await invoke<{settings:Settings}>('state');if(!current())return;setSettings(state.settings);settingsKnown.current=true;await observeWorker(taskId,true);}catch(error){if(current())onError(error);}}
  async function connectAndBindDraft(taskId:string){
   const conversation=selectedConversationRef.current;if(agentBusy||conversation?.taskId!==taskId)return;
   const sequence=conversationSelectionSeq.current,epoch=beginWorkerGate();explicitConnection.current=epoch;setConnecting(true);
@@ -638,7 +639,7 @@ export default function App(){
   }).catch(onError);
  }
  function connectFromGuide(kind:'wsl'|'ssh'){
-  if(kind==='wsl'&&!isSshResource(computeResource)&&!selectedConversationRef.current?.taskId){openLocalCompute();return;}
+  if(kind==='wsl'&&!isActiveSshResource(computeResource)&&!selectedConversationRef.current?.taskId){openLocalCompute();return;}
   lessonOpener.current=document.activeElement as HTMLElement|null;
   setGuideKind(kind);setComputeChooserEdit(undefined);setComputeChooser(true);
  }
@@ -882,6 +883,16 @@ export default function App(){
   for(const id of deleted)clearTaskDrafts(id);
   const removed=(id:string)=>(id.startsWith('agent-task:')&&deleted.has(id.slice(11)))||(id.startsWith('deployment:')&&deleted.has(id.slice(11)));
   setSection(old=>removed(old)?'home':old);
+  setAttentionTarget(old=>old&&old.provider+':'+old.threadId===value.id?undefined:old);
+  setHistoryTarget(old=>old?.conversationId===value.id?undefined:old);
+  setToolSetupReview(old=>old&&(old.conversationId===value.id||old.taskId&&deleted.has(old.taskId))?null:old);
+  setWorkflowToolQuestion(old=>old&&(old.provider+':'+old.threadId===value.id||deleted.has(old.taskId))?null:old);
+  setToolSetup(old=>old&&(old.conversationId===value.id||old.taskId&&deleted.has(old.taskId))?null:old);
+  setRenameTarget(old=>old?.id===value.id?null:old);
+  setDeleteTarget(old=>old?.id===value.id?null:old);
+  if(pendingSshGuide.current&&(pendingSshGuide.current.conversationId===value.id||pendingSshGuide.current.taskId&&deleted.has(pendingSshGuide.current.taskId)))pendingSshGuide.current=null;
+  setSshGuide(old=>old&&(old.conversationId===value.id||old.taskId&&deleted.has(old.taskId))?null:old);
+  if(deploymentOpening.current&&deleted.has(deploymentOpening.current.taskId))deploymentOpening.current=null;
   if(selectedConversationRef.current?.id===value.id){conversationSelectionSeq.current++;beginWorkerGate();setSkill(undefined);conversationChanged(null);setAgentIntent(undefined);setPlanningMode(false);setSessionSelection({nonce:crypto.randomUUID(),new:true});void observeWorker();}
  }
  async function deleteConversation(){if(!deleteTarget||deleting||replying(deleteTarget))return;setDeleting(true);try{const result=await invoke<{id:string;taskIds:string[]}>('conversation.delete',{id:deleteTarget.id});applyConversationDeletion(result);setDeleteTarget(null);}catch(e){onError(e);}finally{setDeleting(false);}}

@@ -124,18 +124,19 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  const resourceRef=useRef(computeResource),lastResourceProp=useRef(computeResource),toolsRef=useRef(tools);
  if(lastResourceProp.current!==computeResource){resourceRef.current=computeResource;lastResourceProp.current=computeResource;}toolsRef.current=tools;
  const managedCompute=tools.managedCompute===true;
- const terminalSelected=computeResource?.kind==='ssh-terminal'||connected&&!managedCompute&&computeResource?.kind==='ssh-connection';
+ const terminalSelected=!managedCompute&&(computeResource?.kind==='ssh-terminal'||connected&&computeResource?.kind==='ssh-connection');
  const managedToolState=terminalSelected?undefined:tools.managedTools;
  const managedToolsBlocked=connected&&managedToolState?.status==='blocked';
  const workflowResource=terminalSelected&&(computeResource.kind==='ssh-connection'?tools.scope!=='terminal-only'&&computeResource.capabilities?.service.workflowReady===true:computeResource.workflowReady===true&&computeResource.managedRuns===true)&&computeResource.authentication==='verified';
  const terminalGranted=terminalSelected&&(computeResource.kind==='ssh-connection'?(tools.scope==='terminal-only'?computeResource.capabilities?.terminal.agentReady===true:computeResource.capabilities?.service.agentReady===true):computeResource.agentReady===true),terminalReady=sshResourceReady(computeResource,tools);
  const canAcquireTerminal=terminalSelected&&computeResource.kind==='ssh-connection'&&computeResource.canAcquireConversationTerminal===true;
- const terminalPlanning=planningMode&&!workflowResource&&(terminalSelected||tools.scope==='terminal-only');
+ const terminalPlanning=planningMode&&!workflowResource&&(terminalSelected||!managedCompute&&tools.scope==='terminal-only');
  const terminalNotice=computeResource?.kind==='ssh-connection'?computeResource.authentication!=='verified'?'此会话原先选择的 SSH 连接尚未就绪。':!terminalGranted?'当前会话尚未取得此连接的终端或作业服务通道。':'当前对话的工具尚未就绪，请核对终端或作业服务状态。':computeResource?.status!=='selected'||computeResource.alive!==true?'所选 SSH 终端不可用，请在终端核对或重新选择。':!terminalGranted?workflowResource?computeResource.operator==='agent'?'当前对话尚无此作业服务权限。请在终端接管后，再交给 Agent。':'SSH 作业服务已连接，请在终端点击“交给 Agent”，授权当前对话使用。':computeResource.operator==='agent'?'当前对话尚无此终端权限，请先接管，再交给 Agent。':'请在终端点击“交给 Agent”，再发送当前消息。':workflowResource?'SSH 作业服务已连接，请重新连接服务商以使用工作流工具。':'SSH 终端已交接，请连接或重新连接当前服务商。';
  const [provider,setProvider]=useState<AgentProvider>(drafts.owner().provider as AgentProvider),[login,setLogin]=useState(false);
  useEffect(()=>{if(!versionNotice)return;const timer=setTimeout(()=>setVersionNotice(null),8000);return()=>clearTimeout(timer);},[versionNotice]);
  useEffect(()=>{providerChangeRef.current?.(provider);},[provider]);
  const [workflowId,setWorkflowId]=useState<string|null>(null),[newWorkflow,setNewWorkflow]=useState(false);
+ const autoReconnectOnNew=useRef(false);
  const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<{provider:AgentProvider;seq:number;nonce:string|undefined;promise:Promise<boolean>}|null>(null),providerTouched=useRef(false),handledSelection=useRef<string|undefined>(undefined),sendOwner=useRef<symbol|null>(null);
  const handledDraftIntents=useRef(new Set<string>());
  const [followUpQueues,setFollowUpQueues]=useState<Record<string,AgentQueueView>>({});
@@ -476,8 +477,14 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    const eventThread=event.params?.threadId,receipt=event.params?.turn;
    if(event.method==='studio/agentQueueChanged'){acceptQueue(event.params);return;}
    if(event.method==='studio/conversationDeleted'&&typeof eventThread==='string'){
-    forgetLegacyFollowUps(()=>localStorage,event.params.provider||eventProvider,eventThread);
-    forgetQueueAdmission(()=>localStorage,followUpKey(event.params.provider||eventProvider,eventThread));
+    const deletedProvider=event.params.provider||eventProvider;
+    const deletedKey=followUpKey(deletedProvider,eventThread);
+    forgetLegacyFollowUps(()=>localStorage,deletedProvider,eventThread);
+    forgetQueueAdmission(()=>localStorage,deletedKey);
+    queueAdmission.current.delete(deletedKey);
+    steering.current.delete(deletedKey);
+    setFollowUpQueues(previous=>{if(!(deletedKey in previous))return previous;const next={...previous};delete next[deletedKey];return next;});
+    setQueueEdit(previous=>previous?.owner===deletedKey?null:previous);
    }
    if(event.method==='studio/conversationDeleted')forgetQuestions(event.params.provider||eventProvider,event.params.threadId);
    if(event.method==='studio/conversationContextChanged')forgetQuestions(eventProvider,event.params.oldThreadId);
@@ -526,7 +533,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    }
    if(event.method==='studio/toolsWarning'){setTools(previous=>({...previous,inventoryWarning:event.params?.warnings?.length?event.params.message:null}));return;}
    if(event.method==='studio/login'&&event.params?.phase==='completed'&&!loginRef.current)void connect();
-   if(event.method==='studio/accountUpdated'){if(event.params?.credentialsChanged){setupReplyRef.current?.(null);setConnected(false);setModels([]);setModel('');setNeedsAuth(false);void refreshAccount();}else void refreshAccount();}
+   if(event.method==='studio/accountUpdated'){if(event.params?.credentialsChanged){autoReconnectOnNew.current=false;setupReplyRef.current?.(null);setConnected(false);setModels([]);setModel('');setNeedsAuth(false);void refreshAccount();}else void refreshAccount();}
    if(event.method==='studio/configUpdated'){const selectedProvider=providerRef.current,seq=selectionSeq.current;void invoke('agent.rpc',{provider:selectedProvider,method:'model/list'}).then(m=>{if(seq===selectionSeq.current&&selectedProvider===providerRef.current)setModels(m.data||[]);}).catch(error=>{if(seq===selectionSeq.current&&selectedProvider===providerRef.current)onError(error);});}
    if(event.method==='studio/taskUpdated'&&event.params?.task?.threadId===threadRef.current)setWorkflowId(event.params.task.id);
    const p=event.params||{};
@@ -627,6 +634,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   const promise=(async()=>{modelCallRef.current=null;setModelCall(null);providerTouched.current=true;setConnecting(true);setNeedsAuth(false);setVersionWarning(null);setVersionNotice(null);try{
    const connection=await invoke<AgentConnectResult>('agent.connect',{provider:selectedProvider,repairTools,...expectedThreadId?{threadId:expectedThreadId}:{}});if(!current())return false;
    if('loginRequired' in connection||'cliRequired' in connection){
+    autoReconnectOnNew.current=false;
     setNeedsAuth(true);setConnected(false);
     if(showLogin&&'loginRequired' in connection)openAccounts();
     return false;
@@ -638,7 +646,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    const modelCatalog=selectedProvider==='codex'&&connection.nativeCodexDefaults
     ?readCodexDefaultsCatalog(page=>selectedRpc('model/list',page),current):selectedRpc('model/list');
    const [a,m,conversations]=await Promise.all([refreshAccount(selectedProvider,seq,selectedProvider==='codex'),modelCatalog,invoke<Conversation[]>('conversation.list')]);if(!current())return false;
-   if(providerAccountState(selectedProvider,a)==='missing'){setNeedsAuth(true);setConnected(false);return false;}setNeedsAuth(false);
+   if(providerAccountState(selectedProvider,a)==='missing'){autoReconnectOnNew.current=false;setNeedsAuth(true);setConnected(false);return false;}setNeedsAuth(false);
    setDefaultsReview(null);setNativeDefaults(selectedProvider==='codex'?connection.nativeCodexDefaults??null:null);
    const list=m.data||[];
    const chosen=resumed?list.find((v:any)=>v.model===resumed.model):list.find((v:any)=>v.model===storedPreference('studio.model.'+selectedProvider))||list.find((v:any)=>v.isDefault)||list[0];
@@ -646,9 +654,9 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    setModels(list);modelRef.current=chosen?.model||'';setModel(modelRef.current);
    effortRef.current=resumedEffort({provider:selectedProvider,model:chosen,preferences:{[selectedProvider]:storedPreference('studio.effort.'+selectedProvider+'.'+chosen?.model)||storedPreference('studio.effort.'+selectedProvider)},serverEffort:resumed?.reasoningEffort});setEffort(effortRef.current);
    if(['codex','kimi','qwen'].includes(selectedProvider))setVersionWarning(cliVersionWarning(selectedProvider,connection.studioCompatibility));
-   setThreads(conversations.filter(value=>value.provider===selectedProvider).map(value=>({...value,id:value.threadId})));setConnected(true);if(apiThread)setSendNotice('');
+   setThreads(conversations.filter(value=>value.provider===selectedProvider).map(value=>({...value,id:value.threadId})));autoReconnectOnNew.current=true;setConnected(true);if(apiThread)setSendNotice('');
    return true;
-  }catch(e){if(current()){setConnected(false);setModels([]);if(apiThread)setSendNotice(redactTranscriptText(e instanceof Error?e.message:String(e)));else if(selectedProvider!=='codex'&&authenticationError(e))setNeedsAuth(true);else onError(e);}return false;}finally{if(connectionOwner.current===owner){connectionOwner.current=null;setConnecting(false);}}
+  }catch(e){if(current()){autoReconnectOnNew.current=false;setConnected(false);setModels([]);if(apiThread)setSendNotice(redactTranscriptText(e instanceof Error?e.message:String(e)));else if(selectedProvider!=='codex'&&authenticationError(e))setNeedsAuth(true);else onError(e);}return false;}finally{if(connectionOwner.current===owner){connectionOwner.current=null;setConnecting(false);}}
  })();owner.promise=promise;return promise;
  }
  useEffect(()=>{
@@ -684,7 +692,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   setVersionWarning(null);
   try{setNeedsAuth(false);if(!managed)await invoke('conversation.select',{new:true,provider:value});if(!current())return false;if(persist&&!managed)await invoke('settings',{agentProvider:value});if(!current())return false;}catch(e){if(current())onError(e);return false;}
   leaveDisplayedTurn();
-  pendingSetupProvider.current=null;modelCallRef.current=null;setModelCall(null);if(!managed)selectDraft(value);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);if(!managed)setHistoryLoad(null);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(storedPreference('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);if(!managed)conversationRef.current?.(null,sessionNonceRef.current);return true;
+  autoReconnectOnNew.current=false;pendingSetupProvider.current=null;modelCallRef.current=null;setModelCall(null);if(!managed)selectDraft(value);providerRef.current=value;setProvider(value);attachmentClearRef.current?.();setAutoSkillStatus(null);setTurn(null);setAnswers({});setTools({status:'not_run',count:0});setConnected(false);setModels([]);setModel('');setThread(null);threadRef.current=null;setThreads([]);setMessages([]);if(!managed)setHistoryLoad(null);setRequests([]);setUsage(null);setAccount(null);setImportOpen(false);setExternalThreads([]);setImportLoading(false);externalSeq.current++;setOptions(false);setLogin(false);setEffort(storedPreference('studio.effort.'+value)||'');setWorkflowId(null);setNewWorkflow(false);if(!managed)conversationRef.current?.(null,sessionNonceRef.current);return true;
  }
  async function selectModel(value:string){
   modelCallRef.current=null;setModelCall(null);
@@ -696,8 +704,9 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  }
  async function resume(id:string,seq=++selectionSeq.current,selectedProject=projectId,rebuild=false,readOnly=false){
   attachmentClearRef.current?.();const selectedProvider=providerRef.current,nonce=sessionNonceRef.current,current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current;
-  const localHistory=!rebuild&&(API_PROVIDER_GROUPS.includes(selectedProvider)||historyEnabled&&(selectedProvider==='deepseek'||readOnly));
-  if(localHistory){setConnected(false);setModels([]);setModel('');setEffort('');setNeedsAuth(false);setTools({status:'not_run',count:0});}
+  const localApiStored=!rebuild&&(API_PROVIDER_GROUPS.includes(selectedProvider)||historyEnabled&&selectedProvider==='deepseek');
+  const localHistory=localApiStored||!rebuild&&historyEnabled&&readOnly;
+  if(localHistory){if(localApiStored)autoReconnectOnNew.current=true;setConnected(false);setModels([]);setModel('');setEffort('');setNeedsAuth(false);setTools({status:'not_run',count:0});}
   setSendNotice('');selectDraft(selectedProvider,id);setMessages([]);setWorkflowId(null);setHistoryLoad({provider:selectedProvider,threadId:id,projectId:selectedProject,status:'loading'});
   const selectedRpc=(method:string,params?:any)=>invoke<any>('agent.rpc',{provider:selectedProvider,method,params});
   modelCallRef.current=null;setModelCall(null);selectionPending.current=true;pendingResume.current=id;resumeMetadata.current=null;observedTurn.current=null;resolvedRequests.current.clear();setRecovery(null);threadRef.current=null;setThread(null);setApplying(true);setRequests([]);setAnswers({});setUsage(null);setAutoSkillStatus(null);setNewWorkflow(false);setTurn(null);
@@ -764,7 +773,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   selectionPending.current=true;threadRef.current=null;setThread(null);setMessages([]);setWorkflowId(null);setHistoryLoad(sessionSelection.conversation?{provider:sessionSelection.conversation.provider,threadId:sessionSelection.conversation.threadId,projectId:sessionSelection.conversation.projectId||'',status:'loading'}:null);setApplying(true);
   if(sessionSelection.pending){pendingResume.current=null;return;}
   const activate=async()=>{try{
-   if(sessionSelection.new){const preferred=sessionSelection.provider||pendingSetupProvider.current;if(preferred&&preferred!==providerRef.current&&!await selectProvider(preferred,seq,false))return;if(seq!==selectionSeq.current)return;pendingSetupProvider.current=null;resetConversation(false);if(sessionSelection.initialPrompt!==undefined&&seq===selectionSeq.current&&sessionSelection.nonce===sessionNonceRef.current&&!sessionPendingRef.current)updatePrompt(sessionSelection.initialPrompt);if(connected&&(!preferred||preferred===providerRef.current))await connect(false,seq,false,null);return;}
+   if(sessionSelection.new){const preferred=sessionSelection.provider||pendingSetupProvider.current;if(preferred&&preferred!==providerRef.current&&!await selectProvider(preferred,seq,false))return;if(seq!==selectionSeq.current)return;pendingSetupProvider.current=null;resetConversation(false);if(sessionSelection.initialPrompt!==undefined&&seq===selectionSeq.current&&sessionSelection.nonce===sessionNonceRef.current&&!sessionPendingRef.current)updatePrompt(sessionSelection.initialPrompt);if((connected||autoReconnectOnNew.current)&&(!preferred||preferred===providerRef.current))await connect(false,seq,false,null);return;}
    const selected=sessionSelection.conversation;if(!selected)return;
    const different=selected.provider!==providerRef.current;if(different&&!await selectProvider(selected.provider,seq)){if(seq===selectionSeq.current)setHistoryLoad({provider:selected.provider,threadId:selected.threadId,projectId:selected.projectId||'',status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}
    if(seq!==selectionSeq.current)return;
@@ -824,13 +833,13 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     if(!ready){retainRequest();return;}
     turnModel=modelRef.current;turnEffort=effortRef.current;
     const resource=resourceRef.current,state=toolsRef.current;
-    turnTerminal=resource?.kind==='ssh-terminal'||state.managedCompute!==true&&resource?.kind==='ssh-connection';
+    turnTerminal=state.managedCompute!==true&&(resource?.kind==='ssh-terminal'||resource?.kind==='ssh-connection');
     turnWorkflowResource=turnTerminal&&resource?.authentication==='verified'&&(resource.kind==='ssh-connection'?state.scope!=='terminal-only'&&resource.capabilities?.service.workflowReady===true:resource.workflowReady===true&&resource.managedRuns===true);
     route=state.scope;resourceRoute=routeState(resource);resourceWorkflow=resource?.workflowReady===true;resourceGranted=resource?.agentReady===true;waitingForConnection=false;
     if(!checkTurnResource()){retainRequest();return;}
    }
    const fresh=newWorkflow||explicitNewWorkflow(text);
-   const shouldCreateWorkflow=()=>(turnPlanning||fresh)&&!action.reviewMode&&(!turnTerminal||resourceRef.current?.workflowReady)&&toolsRef.current.scope!=='terminal-only';
+   const shouldCreateWorkflow=()=>(turnPlanning||fresh)&&!action.reviewMode&&(!turnTerminal||resourceRef.current?.workflowReady)&&(toolsRef.current.managedCompute===true||toolsRef.current.scope!=='terminal-only');
    if(!id){const r=await selectedRpc('thread/start',{model:turnModel||undefined,...shouldCreateWorkflow()?{studioPlanningThread:true}:{},...fileRefs.length?{studioAttachmentDraftId:drafts.attachmentOwner().draftId}:{},...(turnTerminal && projectId ? {studioInitialProjectId:projectId} : {})});if(!preparing())return;id=r.thread.id;}
    else if(acquiring){const r=await selectedRpc('thread/resume',{threadId:id});if(!preparing())return;if(r.studioRecovery?.status==='required'){setRecovery({threadId:id});return;}id=r.thread.id;}
    flight.threadId=id;

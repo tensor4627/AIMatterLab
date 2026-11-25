@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
+import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 import {managedToolReadiness,scientificToolReadiness} from '../../agent/tools/scientific-tool-readiness.mjs';
 import {taskWorkerSource} from '../../contracts/compute/task-worker-binding.mjs';
 import {agentHarness,conversation,deferred} from '../helpers/agent-hooks.mjs';
@@ -103,6 +104,59 @@ test('a hosted tool receipt does not verify a workflow against an unrelated fore
  assert.equal(status.workflowBound,true);
  assert.equal(status.status,'blocked');
  assert.match(status.message,/恢复原服务/);
+});
+
+test('a blank new conversation in managed compute never leaks terminal-only scope from selected SSH or legacy grants',async t=>{
+ const terminalMcp=new TerminalMcp({terminal:{tools:()=>[]},desktopTools:{tools:()=>[],call:()=>{}}});
+ await terminalMcp.start();t.after(()=>terminalMcp.close());
+ const selection={schemaVersion:2,selectionId:'sel-blank',kind:'ssh-connection',connectionId:'conn-blank',profileId:'prof-blank',profileVersion:1};
+ const resourcePort={
+  peek:()=>selection,
+  capture:()=>({selection,assertCurrent(){}}),
+  assertCurrent(){},
+  status:async()=>assert.fail('Managed new conversation must not probe legacy ssh-connection readiness')
+ };
+ const resourceRouting=createAgentResourceRouting({
+  worker:{connection:null,providerConnection:()=>null},
+  terminal:()=>terminalMcp,
+  resource:()=>resourcePort,
+  sharedTerminal:()=>({hasCurrentGrant:()=>true}),
+  managed:()=>({})
+ });
+ const handlers=new Map(),events=[];
+ const context={
+  providerId:value=>assert.equal(value,provider),
+  managedResources:{},
+  resourceRouting,
+  managedToolReadiness,
+  scientificToolReadiness,
+  terminalMcp,
+  agents:{active:provider,sessionIdentity:()=>null,bridge:()=>null,toolConnection:()=>null,isBusy:()=>false,disconnect(){},connect:async()=>({})},
+  taskWorkerSource,
+  worker:{connection:null,providerConnection:()=>null,probeTools:()=>assert.fail('No foreground worker check'),connect:()=>assert.fail('No worker setup')},
+  codex:null,
+  privateAccess:{assertTask:()=>assert.fail('No workflow bound')},
+  sharedTerminal:{hasCurrentGrant:()=>true},
+  workflowContext:{current:()=>null,selectedOwner:()=>({provider,threadId:null,taskId:null,serial:1,revision:1})},
+  taskRecords:{bound:()=>null,deleted:()=>false,read:()=>null},
+  agentConnectAttempts:new Map(),
+  settings:{},
+  catalog:{put:(_kind,_id,value)=>value},
+  readWorkerStatus:()=>assert.fail('No foreground worker check'),
+  emit:(_channel,event)=>events.push(event),
+  handle:(name,handler)=>handlers.set(name,handler),
+ };
+ for(const registration of registrations)vm.runInNewContext(registration,context);
+ assert.equal(await resourceRouting.readiness(provider,undefined),null);
+ const connected=await handlers.get('agent.connect')({provider,repairTools:false});
+ assert.equal(connected.tools.managedCompute,true);
+ assert.notEqual(connected.tools.scope,'terminal-only');
+ assert.equal(connected.tools.workflowBound,false);
+ const polled=await handlers.get('agent.tools')({provider});
+ assert.equal(polled.managedCompute,true);
+ assert.notEqual(polled.scope,'terminal-only');
+ assert.equal(events.at(-1).params.managedCompute,true);
+ assert.notEqual(events.at(-1).params.scope,'terminal-only');
 });
 
 async function restoredAgent(t,tools,override){

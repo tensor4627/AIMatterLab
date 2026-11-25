@@ -749,3 +749,98 @@ test('a saved display name containing example remains selectable in a concrete q
  assert.equal(requestsComputeName('如果查看示例甲的队列','示例甲'),false);
  assert.equal(requestsComputeName('check queues on example','example'),true);
 });
+
+test('configureService repairs maintenance_required or broken cache on matching host and refuses host mismatch',async t=>{
+ const entries=new Map();
+ const catalog={
+  get:(kind,id)=>entries.get(kind+'\0'+id),
+  put:(kind,id,value)=>entries.set(kind+'\0'+id,structuredClone(value)),
+  remove:(kind,id)=>entries.delete(kind+'\0'+id),
+  list:kind=>[...entries.entries()].filter(([key])=>key.startsWith(kind+'\0')).map(([,value])=>structuredClone(value)),
+  transaction:fn=>fn(),
+ };
+ const hostIdentity={hostname:'remote-A',uid:1001,machineId:'machine-A'};
+ const oldRuntimeId='a'.repeat(20),repairedRuntimeId='b'.repeat(20),cacheRepairedRuntimeId='c'.repeat(20);
+ const manifestFor=runtimeId=>runtimeId+'0'.repeat(44);
+ const base={name:'gpu-sampling-studio',execution_policy:'desktop-review-v1',root:'/owned/A',port:21065,runtime:'/owned/A/runtimes/'+oldRuntimeId,runtimeId:oldRuntimeId,runtimeManifestSha256:manifestFor(oldRuntimeId),hostIdentity,managed_schedule_schema:1};
+ let setup={status:'maintenance_required',reason:'runtime_missing',registration:{...base,hostIdentity:{hostname:'other-host',uid:1001,machineId:'machine-other'}}};
+ let nextBundledId=repairedRuntimeId,failReuseError=null,healthBroken=false;
+ let state={connectionId:'conn-A',profileId:'A',profileVersion:1,status:'idle',serviceActive:false};
+ const opens=[];
+ const registration={
+  read:()=>structuredClone(setup),
+  validateReuse(_profile,observed){
+   if(setup.status==='maintenance_required')throw Error('ssh_service_maintenance_required');
+   if(observed&&observed.runtimeId!==setup.registration.runtimeId)throw Error('managed_compute_service_changed');
+   return structuredClone(setup.registration);
+  },
+  remember(profile,health){
+   setup={status:'configured',registration:{...health,configuredAtProfileVersion:profile.version}};
+  },
+ };
+ const f=fixture(t,{selectionCatalog:catalog});
+ const account=f.stored.get('A').username;
+ const resourceWorkspace={
+  assertHandoff:async()=>({workspaceId:'2'.repeat(64),resourceId:'1'.repeat(64),root:'/owned/A',account,hostIdentity}),
+  publicWorkspace:row=>({workspaceId:row.workspaceId,root:row.root}),
+ };
+ Object.assign(f.connections,{
+  serviceState:async()=>state,
+  async openService(ref,data){
+   opens.push({ref,reuseOnly:Boolean(data.reuseOnly),port:data.port});
+   if(data.reuseOnly){
+    const code=failReuseError||'worker_start_failed';
+    throw Error(code);
+   }
+   const runtimeId=nextBundledId;
+   const service={...base,runtime:'/owned/A/runtimes/'+runtimeId,runtimeId,runtimeManifestSha256:manifestFor(runtimeId),port:data.port||base.port};
+   healthBroken=false;
+   state={connectionId:ref.connectionId,profileId:ref.profileId,profileVersion:ref.profileVersion,serviceId:'service-'+runtimeId.slice(0,4),status:'connected',serviceActive:true,channelKind:'private',service};
+   return state;
+  },
+  async privateServiceRequest(packet){
+   if(packet.target==='/api/health'){
+    if(healthBroken)throw Error('worker_cache_invalid');
+    return {status:200,data:state.service};
+   }
+   if(packet.target==='/mcp')return {status:200,data:{id:packet.data.id,result:{tools:[{name:'list_runs'}]}}};
+   if(packet.target==='/api/projects')return {status:200,data:[]};
+   return {status:200,data:[]};
+  },
+ });
+ const services=createManagedComputeServices({connections:f.connections,registration,source:'fixture',transportSource:'fixture',
+  prepareResources:async(_source,value)=>({payload:{expected_runtime_id:nextBundledId,port:value?.port??base.port,runtime_manifest_sha256:manifestFor(nextBundledId)}})});
+ const manager=f.make({services,serviceRegistration:registration,resourceWorkspace});
+ t.after(()=>manager.stop());
+
+ await f.publish('A','conn-A',manager);
+ for(let i=0;i<10&&manager.snapshot()[0]?.serviceStatus==='preparing';i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(manager.snapshot()[0].serviceStatus,'configuration_required');
+ await assert.rejects(manager.configureService({connectionId:'conn-A',profileId:'A',profileVersion:1}),/ssh_service_registration_identity_changed/);
+ assert.equal(manager.snapshot()[0].serviceStatus,'configuration_required');
+
+ setup={status:'maintenance_required',reason:'runtime_missing',registration:structuredClone(base)};
+ const repaired=await manager.configureService({connectionId:'conn-A',profileId:'A',profileVersion:1});
+ assert.equal(repaired.serviceStatus,'ready');
+ assert.equal(opens.at(-1).reuseOnly,false);
+ assert(catalog.list('managed-ssh-runtime-history').some(row=>row.profileId==='A'));
+
+ nextBundledId=cacheRepairedRuntimeId;
+ failReuseError='worker_cache_invalid';
+ healthBroken=true;
+ state={connectionId:'conn-A',profileId:'A',profileVersion:1,status:'failed',serviceActive:false,error:{code:'worker_cache_invalid'}};
+ assert.equal(await manager.refreshService({connectionId:'conn-A'}),null);
+ assert.equal(manager.snapshot()[0].serviceStatus,'unavailable');
+ const repairedCache=await manager.configureService({connectionId:'conn-A',profileId:'A',profileVersion:1});
+ assert.equal(repairedCache.serviceStatus,'ready');
+ assert.equal(opens.at(-1).reuseOnly,false);
+
+ assert.notEqual(catalog.get('managed-ssh-hosting','A'),undefined);
+ Object.assign(f.states.get('conn-A'),{status:'closed',authentication:'lost',closed:true});
+ await manager.sweep();
+ assert.equal(manager.snapshot().some(item=>item.profileId==='A'),false);
+ assert.notEqual(catalog.get('managed-ssh-hosting','A'),undefined);
+ manager.forgetProfile('A');
+ assert.equal(catalog.get('managed-ssh-hosting','A'),undefined);
+ assert.equal(manager.consoleEntries().entries.some(item=>item.profileId==='A'),false);
+});

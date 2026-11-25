@@ -436,3 +436,22 @@ test('default chat honors a real historical target when the user renews the leas
  assert.equal(f.opens(sameName).length,0);
  await assert.rejects(f.app.resources.resolveService(planned,'ssh:main'),/project_grant_required/);
 });
+
+test('desktop main wiring orders agent.disconnect cleanly, clears stale bindings, and unblocks local WSL over dead SSH',()=>{
+ const source=fs.readFileSync(new URL('../../desktop/main.mjs',import.meta.url),'utf8');
+ const disconnectBlock=source.match(/handle\('agent\.disconnect',\s*\(\{provider\}\)=>\{[\s\S]*?\}\);/);
+ assert(disconnectBlock,'expected agent.disconnect handler in desktop/main.mjs');
+ const block=disconnectBlock[0];
+ assert(block.indexOf('agents.disconnect(provider)')<block.indexOf('workflowContext.clear(provider)'));
+ assert.match(block,/sharedTerminal\?\.reconcileContext\?\.\(\)/);
+ assert.match(block,/sshService\?\.reconcileContext\?\.\(\)/);
+ assert.match(source,/onClosed:\s*connectionId=>\{[\s\S]*?computeResource\.clearConnection\?\.\(connectionId\)/);
+ assert.match(source,/handle\('compute\.profiles\.remove'[\s\S]*?managedResources\?\.forgetProfile[\s\S]*?computeResource\.clearProfile/);
+ assert.match(source,/computeResource\.clearLegacyTerminal\?\.\(\)/);
+ for(const route of ['compute\\.connection\\.connect','worker\\.connect']){
+  const match=source.match(new RegExp(`handle\\('${route}'[\\s\\S]*?\\}\\);`));
+  assert(match,`expected ${route} handler`);
+  assert.match(match[0],/state\.status!=='unavailable'&&state\.alive!==false/);
+  assert.match(match[0],/computeResource\.clear\(\{selectionId:state\.selectionId\}\)/);
+ }
+});

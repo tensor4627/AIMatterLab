@@ -135,7 +135,7 @@ export function createAgentResourceRouting({worker,terminal,resource,sharedTermi
   return {assertCurrent:()=>{ticket.assertCurrent();if(!['turn/start','turn/steer'].includes(method))return;assertHandoffComplete(provider);if(ticket.selection?.kind==='ssh-terminal')throw Error('原 SSH 终端属于旧连接格式，请明确重新登录建立独立通道。');if(ticket.selection?.kind==='ssh-connection'&&(route==='service'?!workerSelected(provider):route==='shell'?!shellGranted(provider):true))throw Error('当前操作所属的 SSH 能力授权已变化；不会改用另一能力或重新登录。');}};
  }
  async function readiness(provider,threadId){
-  if(threadId&&directory())return null;
+  if(directory())return null;
   const ticket=capture();if(!ticket.selection)return null;
   if(legacy())return {status:'blocked',scope:'terminal-only',scientificStatus:'blocked',count:0,reason:'legacy_connection_requires_login',message:'旧连接记录不能替代本次认证，请明确重新登录。',checkedAt:Date.now()};
   if(!connection())return null;

@@ -166,3 +166,16 @@ test('late initial status cannot clear a newer explicitly selected SSH connectio
 test('refused or malformed clear acknowledgement does not open a local guide or close a background channel',async()=>{
  for(const response of ['reject','malformed']){const h=appWorkerHarness({override:(method,data,standard)=>method==='compute.resource.status'?resource():method==='compute.resource.clear'?(response==='reject'?Promise.reject(Error('inert CAS conflict')):resource()):standard(method,data)});try{await h.flush();const {work}=await chooseLocal(h);await work;await h.flush();assert.throws(()=>h.find(n=>n.type==='./ComputeConnectionGuide'));assert(!h.calls.some(c=>['sharedTerminal.close','compute.sshConnection.close','compute.sshService.disconnect'].includes(c.method)));}finally{h.unmount();}}
 });
+
+test('dead or unavailable SSH resource selection is cleared cleanly before opening the local WSL connection guide',async()=>{
+ const deadSsh={schemaVersion:2,selectionId:'dead-ssh',kind:'ssh-connection',connectionId:'dead-conn',profileId:'profile',profileVersion:1,status:'selected',alive:false,authentication:'lost',agentReady:false};
+ const cleared={schemaVersion:1,selectionId:null,kind:null,profileId:null,profileVersion:null,sessionId:null,status:'none',operator:'unknown',processStatus:'unknown',alive:null,agentReady:false,reason:null,authentication:'not_observed',managedRuns:false};
+ const h=appWorkerHarness({override:(method,data,standard)=>method==='compute.resource.status'?deadSsh:method==='compute.resource.clear'?cleared:standard(method,data)});
+ try{
+  await h.flush();
+  h.connect();
+  await h.flush();
+  assert(h.calls.some(c=>c.method==='compute.resource.clear'&&c.data?.selectionId==='dead-ssh'));
+  assert(h.find(n=>n.type==='./ComputeConnectionGuide'));
+ }finally{h.unmount();}
+});

@@ -158,17 +158,26 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(state!=='authenticated')fail('managed_compute_resource_unavailable');
  }
 
- function prepareService(resource,{configure=false,upgrade,existingOnly=false}={}){
+ function prepareService(resource,{configure=false,repairMaintenance=false,upgrade,existingOnly=false}={}){
   if(!services||resource.preparing)return resource.preparing;
   if(resource.service&&!upgrade)return Promise.resolve(resource.service);
   const original=resource.service;
+  const priorSetup=resource.kind==='ssh'&&(configure||repairMaintenance)?serviceRegistration?.read({profileId:resource.profileId,profileVersion:resource.profileVersion}):null;
   if(upgrade)resource.service=null;
   resource.serviceStatus='preparing';
   const fresh=()=>current(resource);
   const preparation=Promise.resolve().then(async()=>{
    try{
-    const service=await (resource.kind==='ssh'?services.ssh(resource,resource.profile,fresh,{configure,upgrade,existingOnly}):services.wsl(resource,resource.receipt,fresh));
+    const service=await (resource.kind==='ssh'?services.ssh(resource,resource.profile,fresh,{configure,repairMaintenance,upgrade,existingOnly}):services.wsl(resource,resource.receipt,fresh));
     try{fresh();}catch(error){service.close?.();throw error;}
+    if(resource.kind==='ssh'&&priorSetup?.registration&&resource.workspaceRegistration&&selectionCatalog?.put&&priorSetup.registration.runtimeId!==service.health?.runtimeId){
+     try{
+      const priorBinding=stableSshWorkerBinding({kind:'ssh',profileId:resource.profileId,profileVersion:resource.profileVersion,...priorSetup.registration});
+      const priorId=sshSourceId(priorBinding);
+      selectionCatalog.put(workerHistory,priorId,{sourceId:priorId,profileId:resource.profileId,
+       resourceId:resource.workspaceRegistration.resourceId,root:priorBinding.root,hostIdentity:priorBinding.hostIdentity});
+     }catch{}
+    }
     resource.service=service;resource.serviceStatus='ready';delete resource.serviceError;
     return service;
    }catch(error){
@@ -177,8 +186,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
       try{await original.verify();fresh();resource.service=original;resource.serviceStatus='ready';return original;}
       catch{/* Preserve the actual unconfirmed or failed remote state. */}
      }
-     resource.serviceStatus=['ssh_service_registration_required','ssh_service_maintenance_required'].includes(error.message)?'configuration_required':'unavailable';
-     resource.serviceError=['ssh_service_registration_required','ssh_service_maintenance_required','managed_compute_service_changed','terminal_service_active','terminal_service_unknown','ssh_authentication_unconfirmed'].includes(error.message)?error.message:'managed_compute_private_service_unavailable';
+     resource.serviceStatus=['ssh_service_registration_required','ssh_service_maintenance_required','ssh_service_registration_identity_changed'].includes(error.message)?'configuration_required':'unavailable';
+     resource.serviceError=['ssh_service_registration_required','ssh_service_maintenance_required','ssh_service_registration_identity_changed','managed_compute_service_changed','terminal_service_active','terminal_service_unknown','ssh_authentication_unconfirmed'].includes(error.message)?error.message:'managed_compute_private_service_unavailable';
     }
     return null;
    }finally{
@@ -329,7 +338,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(resourceWorkspace)resource.workspaceRegistration=await resourceWorkspace.assertHandoff(data,()=>current(resource));
   if(resource.preparing)await resource.preparing;
   current(resource);
-  if(!resource.service&&!await prepareService(resource,{configure:true}))fail(resource.serviceError||'managed_compute_private_service_unavailable');
+  if(!resource.service&&!await prepareService(resource,{configure:true,repairMaintenance:true}))fail(resource.serviceError||'managed_compute_private_service_unavailable');
   current(resource);
   return desktopView(resource);
  }
@@ -1426,6 +1435,41 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  function touch(provider,threadId){
   for(const lease of leases.values())if(lease.scope.provider===provider&&lease.scope.threadId===threadId&&!lease.releasing)lease.touchedAt=now();
  }
+ function assertProfileEnvironmentUpdate(previous){
+  const resource=resources.get('ssh:'+previous.id);
+  if(resource&&(resource.service||resource.preparing))fail('compute_profile_environment_in_use');
+ }
+ function profileEnvironmentUpdated(previous,saved,adopted){
+  assertProfileEnvironmentUpdate(previous);
+  const ids=Array.isArray(adopted?.connectionIds)?adopted.connectionIds:[];
+  const fingerprint=resourceFingerprint(saved);
+  let updated=hosting.updateProfileVersion(saved.id,previous.version,saved.version,fingerprint,ids);
+  const resource=resources.get('ssh:'+saved.id);
+  if(resource&&resource.profileVersion===previous.version&&resource.targetFingerprint===fingerprint&&(!ids.length||ids.includes(resource.connectionId))){
+   resource.profileVersion=saved.version;
+   resource.profile=structuredClone(saved);
+   resource.name=saved.name;
+   resource.serviceStatus='configuration_required';
+   delete resource.serviceError;
+   const hosted=hosting.get(saved.id);
+   if(hosted)resource.hosting=hosted;
+   updated=true;
+  }
+  for(const [connectionId,candidate] of recoveryCandidates){
+   if(candidate.data?.profileId!==saved.id||candidate.data.profileVersion!==previous.version||ids.length&&!ids.includes(connectionId))continue;
+   candidate.data.profileVersion=saved.version;
+   candidate.record=hosting.get(saved.id)||candidate.record;
+  }
+  if(updated)changed();
+ }
+ function forgetProfile(profileId){
+  const record=hosting.get(profileId);
+  if(record)hosting.forget(record);
+  for(const [connectionId,candidate] of recoveryCandidates){
+   if(candidate.data?.profileId===profileId)recoveryCandidates.delete(connectionId);
+  }
+  changed();
+ }
  function forget(provider,threadId){
   intent.forget(provider,threadId);
   cancelAcquisitions({provider,threadId});
@@ -1471,5 +1515,5 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
  return {publish,publishWsl,noteLogin,restoreHosted,restorePublished,configureService,serviceStatus,updateService,snapshot,list,acquire,release,resolveLease,resolveSkillLibrary,resolveService,inspectService,capture,needsExplicitResource,callTerminalTool,callTool,owns,tools:()=>tools,
   terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,confirmQuestionChoice,bindResourceQuestion,endDeveloperAccess,isDeveloperWorkspace,
-  recordUserTurn,sweep,stop,touch,forget,consoleEntries,observeConsoleLease,observeConsoleService,releaseFromConsole,detachLocalFromConsole};
+  recordUserTurn,sweep,stop,touch,forget,forgetProfile,assertProfileEnvironmentUpdate,profileEnvironmentUpdated,consoleEntries,observeConsoleLease,observeConsoleService,releaseFromConsole,detachLocalFromConsole};
 }

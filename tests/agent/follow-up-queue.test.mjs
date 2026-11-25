@@ -235,3 +235,55 @@ test('a file-only queue item stays blank through editing and materializes its pr
  assert.deepEqual(f.calls[0].params.studioAttachments,[ref.id]);
  assert.equal(f.calls[0].params.input[0].text,'请查看附件：only-file.png');
 });
+
+test('studio/conversationDeleted cancels active in-flight queue delivery, clears isBusy, and purges stored queue',async t=>{
+ const parent=fs.realpathSync(os.tmpdir()),root=fs.mkdtempSync(path.join(parent,'studio-queue-del-'));
+ const catalog=new Catalog(root);
+ t.after(()=>{catalog.db.close();fs.rmSync(root,{recursive:true,force:true});});
+ const gate=deferred(),events=[];
+ catalog.put('conversation','codex:A',{id:'codex:A',provider:'codex',threadId:'A',projectId:null});
+ const busyProviders=new Set();
+ let activeTurnId='original';
+ const queue=desktopFollowUpQueue({
+  catalog,
+  agents:{
+   activeTurn:(provider,threadId)=>provider==='codex'&&threadId==='A'?activeTurnId:null,
+   isBusy:(provider,threadId)=>busyProviders.has(key(provider,threadId)),
+   runInConversation:(_provider,_threadId,operation)=>operation(),
+  },
+  records:{
+   conversation:(provider,threadId)=>catalog.get('conversation',key(provider,threadId)),
+   deleted:(provider,threadId)=>!!catalog.get('retired-conversation-context',key(provider,threadId)),
+  },
+  worker:{},
+  workflowContext:{current:()=>({provider:'codex',threadId:'A'})},
+  resourceRouting:{followUpBinding:()=>({selection:null,binding:null})},
+  publish:event=>events.push(event),
+  validateFiles:(_owner,files)=>structuredClone(files),
+  request:async(request,{queued}={})=>{
+   if(request.method==='thread/read')return {thread:{id:request.params.threadId,turns:[]}};
+   queued.beforeDispatch();
+   busyProviders.add('codex:A');
+   await gate.promise;
+   queued.accepted('turn-after-delete');
+   return {turn:{id:'turn-after-delete'}};
+  },
+ });
+ t.after(()=>queue.close());
+ queue.recover();
+ busyProviders.add('codex:A');
+ await queue.request({provider:'codex',threadId:'A',action:'enqueue',item:text('one','first'),after:'original'});
+ await queue.request({provider:'codex',threadId:'A',action:'enqueue',item:text('two','second'),after:'original'});
+ activeTurnId=null;
+ busyProviders.delete('codex:A');
+ queue.observe({provider:'codex',method:'turn/completed',params:{threadId:'A',turn:{id:'original',status:'completed'}}});
+ await tick();
+ assert.equal(queue.isBusy('codex','A'),true);
+ events.length=0;
+ queue.observe({provider:'codex',method:'studio/conversationDeleted',params:{threadId:'A'}});
+ assert.equal(catalog.get('conversation-follow-up-queue','codex:A'),null);
+ gate.resolve();
+ await tick();
+ assert.equal(queue.isBusy('codex','A'),false);
+ assert.deepEqual(events.filter(event=>event.method==='studio/followUpQueue'&&event.params.threadId==='A'&&event.params.items?.length>0),[]);
+});

@@ -75,6 +75,25 @@ export function createComputeResourceBinding({catalog,profiles,terminal,connecti
   if(!equal(previous,selected()))throw Error('compute_resource_selection_changed');catalog.put(KIND,KEY,value);return result;
  }
  function clear(data){exact(data,['selectionId']);if(!id(data.selectionId))throw Error('compute_resource_invalid_request');const value=selected();if(!value||value.selectionId!==data.selectionId)throw Error('compute_resource_selection_changed');intent++;catalog.remove(KIND,KEY);return empty();}
+ function clearConnection(connectionId){
+  if(!id(connectionId))return false;
+  const value=selected();
+  if(!connectionReference(value)||value.connectionId!==connectionId)return false;
+  intent++;catalog.remove(KIND,KEY);return true;
+ }
+ function clearProfile(profileId){
+  if(!id(profileId))return false;
+  const value=selected();
+  if(!value||value.profileId!==profileId)return false;
+  intent++;catalog.remove(KIND,KEY);return true;
+ }
+ function clearLegacyTerminal(){
+  const value=selected();
+  if(!reference(value))return false;
+  const persist=()=>{catalog.put('compute-resource-selection-history',value.selectionId,{schemaVersion:1,fromSchemaVersion:1,toSchemaVersion:2,reason:'legacy_terminal_cleared',previous:value,at:Date.now()});catalog.remove(KIND,KEY);};
+  if(typeof catalog.transaction==='function')catalog.transaction(persist);else persist();
+  intent++;return true;
+ }
  function replaceHostedConnection(previous,next){
   const value=selected();
   if(!connectionReference(value)||!['connectionId','profileId','profileVersion'].every(key=>value[key]===previous[key])||
@@ -98,5 +117,5 @@ export function createComputeResourceBinding({catalog,profiles,terminal,connecti
   const selection=update.selection;if(selection?.profileId===saved.id){if(connectionReference(selection)?!Array.isArray(connectionIds)||!connectionIds.includes(selection.connectionId):!Array.isArray(sessionIds)||!sessionIds.includes(selection.sessionId))throw Error('compute_resource_session_mismatch');catalog.put(KIND,KEY,{...selection,profileVersion:saved.version});intent++;}
   environmentUpdates.delete(receipt);return selected();
  }
- return {activate,status,clear,replaceHostedConnection,peek:selected,revision:()=>intent,capture:ticket,assertCurrent,prepareProfileEnvironmentUpdate,assertProfileEnvironmentUpdate,commitProfileEnvironmentUpdate};
+ return {activate,status,clear,clearConnection,clearProfile,clearLegacyTerminal,replaceHostedConnection,peek:selected,revision:()=>intent,capture:ticket,assertCurrent,prepareProfileEnvironmentUpdate,assertProfileEnvironmentUpdate,commitProfileEnvironmentUpdate};
 }

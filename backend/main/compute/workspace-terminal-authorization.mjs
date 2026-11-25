@@ -284,7 +284,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
         }
         if (stages.size >= 128) fail('ssh_terminal_request_limit');
       }
-      entry = {workspaceId:registered.workspaceId, path:registered.path, cwd:registered.path, staged:'', requests:new Map(), running:false, assertCurrent,modeRevision};
+      entry = {owner: owning(scope), workspaceId:registered.workspaceId, path:registered.path, cwd:registered.path, staged:'', requests:new Map(), running:false, assertCurrent,modeRevision};
       stages.set(key,entry);
     }
     const signature = JSON.stringify(input), prior = entry.requests.get(input.requestId);
@@ -362,5 +362,10 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     input:({sessionId,ownerEpoch,...params})=>operate({...params,channel:['terminal',sessionId,ownerEpoch]}),
     execute:({leaseId,requestId,command,...params})=>operate({...params,channel:['command',leaseId],input:{requestId,command}}),
     pending, decide, activity,
-    revokeConnection(connectionId) { for (const row of approvals.values()) if (row.view.connectionId === connectionId) settle(row, 'changed'); }};
+    revokeConnection(connectionId) { for (const row of [...approvals.values()]) if (row.view.connectionId === connectionId) settle(row, 'changed'); },
+    forget(provider, threadId) {
+      const target = owning({provider, threadId});
+      for (const row of [...approvals.values()]) if (row.view.provider === provider && row.view.threadId === threadId) settle(row, 'changed');
+      for (const [id, state] of stages) if (state.owner === target) stages.delete(id);
+    }};
 }

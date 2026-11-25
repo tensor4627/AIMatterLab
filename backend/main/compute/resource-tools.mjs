@@ -478,6 +478,7 @@ export function createResourceToolController({resources,workspaces,skills,develo
  }
 
  return {controller,tools:()=>definitions,owns:name=>names.has(name),call,resolveSkills:(scope,id)=>resources.resolveSkillLibrary(scope,id),recordUserTurn,
+  forget(provider,threadId){turns.delete(ownerKey({provider,threadId}));},
   close(){closed=true;for(const watch of watches.values())clearTimer(watch.timer);watches.clear();turns.clear();selectedFiles.clear();setupFiles.clear();}};
 }
 
