@@ -1,3 +1,4 @@
+import {fixtureControlModule,fixtureNotice,loadFrontendI18n} from '../helpers/frontend-component-loader.mjs';
 import {frontendSource} from "../helpers/frontend-source-paths.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,12 +57,12 @@ function harness(file,{task,language='zh-CN',api}={}){
  const useState=initial=>{const i=cursor++;if(!hooks[i])hooks[i]={value:typeof initial==='function'?initial():initial};return [hooks[i].value,next=>{const value=typeof next==='function'?next(hooks[i].value):next;if(!Object.is(value,hooks[i].value)){hooks[i].value=value;dirty=true;}}];};
  const useRef=initial=>{const i=cursor++;return hooks[i]??(hooks[i]={current:initial});};
  const useEffect=(fn,deps)=>{const i=cursor++,old=hooks[i];if(!old||!deps||deps.some((value,k)=>!Object.is(value,old.deps?.[k]))){const h={deps,cleanup:old?.cleanup};hooks[i]=h;effects.push(()=>{h.cleanup?.();h.cleanup=fn();});}};
- const jsx=(type,props)=>({type,props});
- const i18n={exports:{}};new Function('module','exports','localStorage',compile(source('i18n.ts')))(i18n,i18n.exports,storage);
+ const jsx=(type,props)=>type===fixtureNotice?type(props):({type,props});
+ const i18n={exports:loadFrontendI18n(storage)};
  const invoke=async(method,data)=>{calls.push({method,data});if(method==='task.read')return structuredClone(props.task);throw Error('Unexpected component IPC '+method);};
  const imports={'react':{useState,useRef,useEffect},'react/jsx-runtime':{jsx,jsxs:jsx,Fragment:'fragment'},'lucide-react':new Proxy({},{get:(_t,key)=>String(key)}),"../../api/studio":{invoke,api:()=>{throw Error('Unexpected worker API');}},"../../api/worker":{invoke,api:()=>{throw Error('Unexpected worker API');}},"../../ui/i18n":i18n.exports,"../pygas/PygasTaskComposer":{default:'PygasTaskComposer',taskHasComposition:actualTaskHasComposition},"../pygas/pygas-local-draft":{useTaskPygasDirty:()=>false},"./pygas-local-draft":{useTaskPygasDirty:()=>false},'./task-draft-storage':{taskDraftStorage:storage},'./stage-editor-draft':{useTaskStageDrafts:()=>[]},'./LocalInputReview':{LocalInputReview:'LocalInputReview'},'./useLocalReviewStatus':{useLocalReviewStatus:()=>({phase:'resolved',value:null}),currentLocalReview:()=>false,localReviewNotice:()=>null}};
  imports['../../api/task-client']={taskApi:{read:id=>invoke('task.read',{id})}};
- const module={exports:{}};new Function('require','module','exports','localStorage','window',compile(source(file)))(name=>shared.get(name)??(["./local-build-review-eligibility.mjs"].includes(name)?eligibilityModule:imports[name]??{default:name}),module,module.exports,storage,{studio:{onEvent:()=>()=>{}}});
+ const module={exports:{}};new Function('require','module','exports','localStorage','window',compile(source(file)))(name=>name==='../../ui/Notice'?{default:fixtureNotice}:fixtureControlModule(name)??shared.get(name)??(["./local-build-review-eligibility.mjs"].includes(name)?eligibilityModule:imports[name]??{default:name}),module,module.exports,storage,{studio:{onEvent:()=>()=>{}}});
  props=file==='AgentTaskPage.tsx'?{task,worker:true,environments:[],theme:'dark',onError:error=>{throw error;},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onReview:value=>reviews.push(value),onRefresh:async()=>{},onAgent:()=>{},onReplace:()=>{}}:{taskId:'same',workerReady:true,api,onConfirmed:async()=>{},onClose:()=>{},onShowGraph:()=>{}};
  function render(){cursor=0;dirty=false;tree=(module.exports.default||module.exports.LocalInputReview)(props);}
  async function flush(){for(let i=0;i<16;i++){while(effects.length)effects.shift()();await new Promise(resolve=>setImmediate(resolve));if(dirty&&alive)render();if(!effects.length&&!dirty)return;}throw Error('Component did not settle');}

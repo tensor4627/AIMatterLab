@@ -261,7 +261,7 @@ export async function frontendClusterOnboardingCases({check,out}){
   await page.evaluate(()=>window.__test.openWorkspaceOwner('saved','restored'));
   await page.waitForFunction(()=>document.querySelector('[data-testid="agent-session-workspace"]')?.open===false);
   await summary.click();await workspace.getByTestId('session-workspace-copy').click();
-  await workspace.getByText(/已复制工作目录/).waitFor();
+  await page.getByTestId('toast-region').getByText(/已复制工作目录/).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.__test.copied),['/home/fixture/AIMatterLab/workfile/2026-11-20/task-0001']);
   await noDispatch(page);
  });

@@ -1,3 +1,4 @@
+import Notice from '../../ui/Notice';
 import {useRef,useState} from 'react';
 import {resourceWorkspaces} from '../../api/compute-resources';
 import type {ResourceWorkspacePreview,ResourceWorkspaceReference} from '../../../contracts/dto/compute';
@@ -58,9 +59,9 @@ export default function ResourceWorkspaceReview({target,resourceName,initial,ini
      <ul><li><code>workfile/</code> · {t('按日期保管会话的计算输入与结果')}</li><li><code>software/</code> · {t('存放从零配置的工具和版本记录')}</li></ul>
     </div>
     <p className="muted">{t(changing?'已绑定的会话继续使用原工作目录。':'可以使用已有目录，原有内容会保留。')}</p>
-    {preview.conflict&&<p role="alert">{t('目录项冲突')} · <code>{preview.conflict}</code></p>}
-   </>:<p role="status" className="muted">{t('先核对这个路径及远端解析结果。')}</p>}
-   {error&&<div role="alert" className="notice"><strong>{t('远端工作区需要核对')}</strong><p>{error}</p></div>}
+    {preview.conflict&&<Notice severity="error" compact>{t('目录项冲突')} · <code>{preview.conflict}</code></Notice>}
+   </>:<Notice compact>{t('先核对这个路径及远端解析结果。')}</Notice>}
+   {error&&<Notice severity="error"><strong>{t('远端工作区需要核对')}</strong><p>{error}</p></Notice>}
    <div className="button-row"><button type="button" className="button" disabled={pending} onClick={dismiss}>{t(changing?'取消':'稍后交接')}</button>
     <button type="button" className="button primary" data-testid="resource-workspace-confirm" data-guide-target={confirmHint?'ssh-workspace-confirm':undefined} disabled={pending||!ready} onClick={()=>void act(true)}>{t(pending?'正在核对…':changing?'确认更换工作区':'确认并交接')}</button></div>
   </section>

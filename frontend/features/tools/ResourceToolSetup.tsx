@@ -1,3 +1,6 @@
+import Button from '../../ui/Button';
+import Disclosure from '../../ui/Disclosure';
+import Notice from '../../ui/Notice';
 import {useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {FileText,FolderOpen,FolderSearch,PackagePlus,Plug,ScrollText} from 'lucide-react';
 import type {TypedInvoke} from '../../../contracts/dto/ipc';
@@ -211,18 +214,18 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
  return <section className="resource-tool-setup" data-testid="resource-tool-setup" data-guide-target="resource-tool-setup">
   <p className="resource-tool-scope"><strong>{resourceName}</strong><code title={resourceId}>{resourceId}</code>{missingTool&&<span>{t('流程缺少工具')} · {missingTool}</span>}</p>
   <div className="resource-tool-routes" role="group" aria-label={t('工具接入方式')}>
-   {routes.map(([key,Icon])=><button type="button" className="button" aria-pressed={route===key} disabled={!!pending} data-testid={'resource-tool-'+key} key={key} onClick={()=>switchRoute(key)}><Icon size={17}/><span><strong>{t(routeLabels[key])}</strong><small>{t(routeDetails[key])}</small></span></button>)}
+   {routes.map(([key,Icon])=><Button type="button"  aria-pressed={route===key} disabled={!!pending} data-testid={'resource-tool-'+key} key={key} onClick={()=>switchRoute(key)}><Icon size={17}/><span><strong>{t(routeLabels[key])}</strong><small>{t(routeDetails[key])}</small></span></Button>)}
   </div>
-  {setups.length>0&&<details open={!route&&!receipt}><summary>{t('此资源的工具与配置记录')}</summary><ul className="resource-tool-list">{setups.map(row=><li key={row.id}>
-   <button type="button" className="text-button" disabled={!!pending} onClick={()=>{selectSetup(row.id);setRoute(row.route);setError('');}}>{row.manifest.name} · {row.manifest.version}</button><span>{t(statuses[row.status])}</span></li>)}</ul></details>}
+  {setups.length>0&&<Disclosure open={!route&&!receipt} summary={<>{t('此资源的工具与配置记录')}</>}><ul className="resource-tool-list">{setups.map(row=><li key={row.id}>
+   <button type="button" className="text-button" disabled={!!pending} onClick={()=>{selectSetup(row.id);setRoute(row.route);setError('');}}>{row.manifest.name} · {row.manifest.version}</button><span>{t(statuses[row.status])}</span></li>)}</ul></Disclosure>}
   {route&&!receipt&&<>
-   {!targets.length&&library&&<section className="notice" role="status"><p>{t('没有可用的测试目标。请先在该资源登记调度器、计算环境和项目授权。')}</p>{onConfigureTarget&&<div className="button-row">
-    <button className="button" data-testid="resource-tool-configure-scheduler" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('scheduler')}>{t('打开此资源的调度器设置')}</button>
-    <button className="button" data-testid="resource-tool-configure-project" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('project')}>{t('设置项目授权')}</button>
-   </div>}</section>}
+   {!targets.length&&library&&<Notice compact severity="warning"><p>{t('没有可用的测试目标。请先在该资源登记调度器、计算环境和项目授权。')}</p>{onConfigureTarget&&<div className="button-row">
+    <Button  data-testid="resource-tool-configure-scheduler" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('scheduler')}>{t('打开此资源的调度器设置')}</Button>
+    <Button  data-testid="resource-tool-configure-project" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('project')}>{t('设置项目授权')}</Button>
+   </div>}</Notice>}
    {route==='existing'&&<section className="resource-tool-discovery" data-guide-target="resource-tool-discover" aria-label={t('查找已有脚本')}>
     <label>{t('远端脚本目录')}<input data-testid="resource-tool-scan-path" value={directory} onChange={event=>{setDirectory(event.currentTarget.value);setDiscovery(null);setCandidateId('');}} disabled={!!pending}/></label>
-    <button type="button" className="button" data-testid="resource-tool-scan" disabled={!!pending||!directory.trim()} onClick={()=>void act('正在只读扫描…',discover)}><FolderSearch size={16}/>{t('扫描脚本')}</button>
+    <Button type="button"  data-testid="resource-tool-scan" disabled={!!pending||!directory.trim()} onClick={()=>void act('正在只读扫描…',discover)}><FolderSearch size={16}/>{t('扫描脚本')}</Button>
     {discovery&&<fieldset disabled={!!pending}><legend>{t('选择代表脚本')}</legend>
      {!discovery.candidates.length&&<p>{t('在此目录中没有找到可登记的脚本。')}</p>}
      {discovery.candidates.map(row=><label className="resource-tool-candidate" key={row.id}>
@@ -237,15 +240,15 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
     <option value="">{t('请选择')}</option>{targets.map(value=><option key={targetKey(value)} value={targetKey(value)}>{value.environment_id} · {value.scheduler} {value.queue} · {value.project_id}</option>)}
    </select></label>}
    {route==='custom'&&<div className="resource-tool-source-picker">
-    <div className="button-row"><button type="button" className="button" data-testid="resource-tool-choose-program" disabled={!!pending} onClick={()=>void act('正在核对本机文件…',current=>chooseSource('program',current))}><FolderOpen size={16}/>{t('选择本机程序或脚本')}</button>
-     <button type="button" className="button" data-testid="resource-tool-choose-manual" disabled={!!pending} onClick={()=>void act('正在核对本机文件…',current=>chooseSource('manual',current))}><FileText size={16}/>{t('选择本机手册')}</button></div>
-    {[localSource,manual].map(file=>file&&<details key={file.kind}><summary>{file.name} · {file.size.toLocaleString()} B</summary><p>SHA-256 · <code>{file.sha256}</code></p>{file.text&&<pre>{file.text}</pre>}</details>)}
+    <div className="button-row"><Button type="button"  data-testid="resource-tool-choose-program" disabled={!!pending} onClick={()=>void act('正在核对本机文件…',current=>chooseSource('program',current))}><FolderOpen size={16}/>{t('选择本机程序或脚本')}</Button>
+     <Button type="button"  data-testid="resource-tool-choose-manual" disabled={!!pending} onClick={()=>void act('正在核对本机文件…',current=>chooseSource('manual',current))}><FileText size={16}/>{t('选择本机手册')}</Button></div>
+    {[localSource,manual].map(file=>file&&<Disclosure key={file.kind} summary={<>{file.name} · {file.size.toLocaleString()} B</>}><p>SHA-256 · <code>{file.sha256}</code></p>{file.text&&<pre>{file.text}</pre>}</Disclosure>)}
    </div>}
    {onDiscuss&&<div className="resource-tool-discuss" data-guide-target="resource-tool-discuss">
     <label>{t('告诉助手手头有什么')}<textarea data-testid="resource-tool-description" rows={2} value={description} onChange={event=>setDescription(event.currentTarget.value)} placeholder={t(route==='fresh'?'工具名称、版本或公开来源':route==='existing'?'已用脚本的用途或已有测试结果':'程序、脚本或手册的位置，以及想得到的输出')}/></label>
-    <button type="button" className="button primary" data-testid="resource-tool-discuss" disabled={!!pending} onClick={discuss}>{t('让 Agent 帮我配置')}</button>
+    <Button variant="primary" type="button"  data-testid="resource-tool-discuss" disabled={!!pending} onClick={discuss}>{t('让 Agent 帮我配置')}</Button>
    </div>}
-   <details className="resource-tool-manual" data-testid="resource-tool-manual"><summary>{t('手动填写工具配置')}</summary>
+   <Disclosure className="resource-tool-manual" data-testid="resource-tool-manual" summary={<>{t('手动填写工具配置')}</>}>
    <form className="resource-tool-form" onSubmit={event=>{event.preventDefault();void act('正在准备配置预览…',plan);}}>
     <fieldset disabled={!!pending}><legend>{t('工具与版本')}</legend><div className="resource-tool-grid">
      {field('name','工具名称',true)}{field('id','工具 ID',true,'my-tool')}{field('version','工具版本',true,'1.0.0')}
@@ -264,26 +267,26 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
      <ResourceToolInterfaceEditor key={route} values={form} onRaw={patch} onEdit={(field,path,value)=>setForm(previous=>({...previous,[field]:editJsonDraft(previous[field],path,value)}))}/>
     </fieldset>
     {route==='existing'&&field('priorRun','原测试运行 ID（如有）')}
-    <div className="button-row"><button type="submit" className="button primary" data-testid="resource-tool-plan" disabled={!!pending||!picked}>{t('核对配置与最小测试')}</button></div>
-   </form></details>
+    <div className="button-row"><Button type="submit" data-testid="resource-tool-plan" disabled={!!pending||!picked}>{t('核对配置与最小测试')}</Button></div>
+   </form></Disclosure>
   </>}
   {receipt&&<section className="resource-tool-receipt" data-testid="resource-tool-receipt" data-guide-target="resource-tool-receipt">
-   <h3>{receipt.manifest.name} · {receipt.manifest.version}</h3><p role="status" data-testid="resource-tool-status">{t(statuses[receipt.status])}</p>
+   <h3>{receipt.manifest.name} · {receipt.manifest.version}</h3><Notice compact  data-testid="resource-tool-status">{t(statuses[receipt.status])}</Notice>
    <dl><dt>{t('安装位置')}</dt><dd><code>{receipt.install_root}</code></dd><dt>{t('计算环境与测试队列')}</dt><dd>{receipt.target.environment_id} · {receipt.target.scheduler} {receipt.target.queue}</dd>
     <dt>{t('程序来源与运行入口')}</dt><dd>{receipt.manifest.source.kind} · <code>{'url' in receipt.manifest.source&&receipt.manifest.source.url?receipt.manifest.source.url+' · ':''}{receipt.manifest.source.executable}</code></dd></dl>
-   {receipt.onboarding&&<details data-testid="resource-tool-onboarding"><summary>{t('工具包来源')} · {receipt.onboarding.package_id} · {receipt.onboarding.function_id}</summary>
+   {receipt.onboarding&&<Disclosure data-testid="resource-tool-onboarding" summary={<>{t('工具包来源')} · {receipt.onboarding.package_id} · {receipt.onboarding.function_id}</>}>
     <dl><dt>{t('包版本')}</dt><dd><code>{receipt.onboarding.package_version}</code></dd>
      <dt>{t('源码提交')}</dt><dd><code>{receipt.onboarding.source_commit}</code></dd>
      <dt>{t('声明摘要')}</dt><dd><code>{receipt.onboarding.manifest_sha256}</code></dd>
      <dt>{t('参考测试用例')}</dt><dd><code>{receipt.onboarding.reference_test_case_id}</code></dd></dl>
-   </details>}
+   </Disclosure>}
    {receipt.status==='planned'&&<>
-    {receipt.manifest.build&&<details><summary>{t('构建步骤')} · {receipt.manifest.build.max_seconds} s</summary><ol>{receipt.manifest.build.steps.map((step,index)=><li key={index}><code>{step.cwd&&`[${step.cwd}] `}{JSON.stringify([step.command,...step.args])}</code></li>)}</ol></details>}
+    {receipt.manifest.build&&<Disclosure summary={<>{t('构建步骤')} · {receipt.manifest.build.max_seconds} s</>}><ol>{receipt.manifest.build.steps.map((step,index)=><li key={index}><code>{step.cwd&&`[${step.cwd}] `}{JSON.stringify([step.command,...step.args])}</code></li>)}</ol></Disclosure>}
     <p>{t('最小测试')} · {receipt.manifest.test.max_seconds} s{receipt.manifest.test.resources&&<> · {Object.entries(receipt.manifest.test.resources).map(([name,value])=>`${name} ${value}`).join(' · ')}</>}</p>
     <dl><dt>{t('测试输入')}</dt><dd>{Object.entries(receipt.manifest.test.inputs).map(([port,value])=><div key={port}>{port} · {'path' in value?<code>{value.path}</code>:t('随配置提供的内容')}</div>)}</dd>
      <dt>{t('预期产物')}</dt><dd>{Object.entries(receipt.manifest.outputs).map(([port,value])=><div key={port}>{port} · <code>{value.filename}</code> · {value.format}</div>)}</dd>
     </dl>
-    <details><summary>{t('查看命令、输入输出和测试定义')}</summary><pre>{JSON.stringify(receipt.manifest,null,2)}</pre></details>
+    <Disclosure summary={<>{t('查看命令、输入输出和测试定义')}</>}><pre>{JSON.stringify(receipt.manifest,null,2)}</pre></Disclosure>
    </>}
    {receipt.activity.length>0&&<ol>{receipt.activity.map((item,index)=><li key={`${index}:${item.stage}`}><span>{t(({passed:'通过',failed:'失败',pending:'等待',reused:'沿用'})[item.status])}</span> · {item.message}</li>)}</ol>}
    {receipt.message&&<p>{receipt.message}</p>}
@@ -291,19 +294,19 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
    {receipt.test&&<div className="resource-tool-test-receipt" data-testid="resource-tool-test-receipt"><strong>{t('最小测试')}</strong> · {receipt.test.status} · {receipt.test.job_id||receipt.test.run_id}{receipt.test.reused&&<> · {t('沿用已核对的原测试')}</>}{receipt.test.directory&&<code>{receipt.test.directory}</code>}{receipt.test.outputs&&<ul>{Object.entries(receipt.test.outputs).map(([id,output])=><li key={id}>{id} · {output.size} B · <code>{output.sha256}</code>{Object.entries(output.checks||{}).map(([name,state])=><small key={name}> · {name} {t(state==='passed'?'通过':'失败')}</small>)}</li>)}</ul>}</div>}
    {receipt.activation_id&&<p>{t('已激活功能')} · <code>private.{receipt.manifest.id}</code></p>}
    {receipt.skill&&<p data-testid="resource-tool-skill">{t('执行技能')} · {receipt.skill.name} · {t(receipt.skill.status==='saved'?'已保存并核对':'待写入用户技能库')}{receipt.skill.error&&<span> · {receipt.skill.error}</span>}</p>}
-   {receipt.skill&&'body' in receipt.skill&&typeof receipt.skill.body==='string'&&<details data-testid="resource-tool-skill-content"><summary>{t('查看执行技能')}</summary><pre>{receipt.skill.body}</pre><p>SHA-256 · <code>{receipt.skill.sha256}</code></p></details>}
-   {receipt.status==='needs_file'&&<div className="resource-tool-file"><button type="button" className="button" data-testid="resource-tool-local-file" disabled={!!pending} onClick={()=>apply('file')}>{t('选择本机文件')}</button>
+   {receipt.skill&&'body' in receipt.skill&&typeof receipt.skill.body==='string'&&<Disclosure data-testid="resource-tool-skill-content" summary={<>{t('查看执行技能')}</>}><pre>{receipt.skill.body}</pre><p>SHA-256 · <code>{receipt.skill.sha256}</code></p></Disclosure>}
+   {receipt.status==='needs_file'&&<div className="resource-tool-file"><Button type="button"  data-testid="resource-tool-local-file" disabled={!!pending} onClick={()=>apply('file')}>{t('选择本机文件')}</Button>
     <label>{t('或输入集群上的源文件路径')}<input data-testid="resource-tool-remote-file" value={remote} onChange={event=>setRemote(event.currentTarget.value)} disabled={!!pending}/></label>
-    <button type="button" className="button" disabled={!!pending||!remote.trim()} onClick={()=>apply('remote')}>{t('核对源文件')}</button></div>}
+    <Button type="button"  disabled={!!pending||!remote.trim()} onClick={()=>apply('remote')}>{t('核对源文件')}</Button></div>}
    <div className="button-row">
-    {receipt.status==='planned'&&<button type="button" className="button primary" data-testid="resource-tool-start" disabled={!!pending} onClick={()=>apply('start')}>{t(receipt.route==='fresh'?'确认安装并运行最小测试':'确认配置并核对最小测试')}</button>}
-    {receipt.status==='active'&&receipt.skill?.status!=='saved'&&<button type="button" className="button" data-testid="resource-tool-save-skill" disabled={!!pending} onClick={()=>apply('skill')}>{t('补写执行技能')}</button>}
-    {receipt.status==='active'&&missingTool&&onConfigureTarget&&<button type="button" className="button" disabled={!!pending} onClick={()=>onConfigureTarget('project')}>{t('核对原流程的项目授权')}</button>}
-    {receipt.status==='active'&&<button type="button" className="button primary" disabled={!!pending} data-testid="resource-tool-return" onClick={onClose}>{t('返回原工作页')}</button>}
-    {receipt.skill?.status==='saved'&&(!('body' in receipt.skill)||!receipt.skill.body)&&<button type="button" className="button" disabled={!!pending} onClick={()=>apply('status')}>{t('查看执行技能')}</button>}
-    <button type="button" className="button" data-testid="resource-tool-refresh" disabled={!!pending} onClick={()=>apply('status')}>{t('核对原配置回执')}</button>
+    {receipt.status==='planned'&&<Button variant="primary" type="button"  data-testid="resource-tool-start" disabled={!!pending} onClick={()=>apply('start')}>{t(receipt.route==='fresh'?'确认安装并运行最小测试':'确认配置并核对最小测试')}</Button>}
+    {receipt.status==='active'&&receipt.skill?.status!=='saved'&&<Button type="button"  data-testid="resource-tool-save-skill" disabled={!!pending} onClick={()=>apply('skill')}>{t('补写执行技能')}</Button>}
+    {receipt.status==='active'&&missingTool&&onConfigureTarget&&<Button type="button"  disabled={!!pending} onClick={()=>onConfigureTarget('project')}>{t('核对原流程的项目授权')}</Button>}
+    {receipt.status==='active'&&<Button type="button" disabled={!!pending} data-testid="resource-tool-return" onClick={onClose}>{t('返回原工作页')}</Button>}
+    {receipt.skill?.status==='saved'&&(!('body' in receipt.skill)||!receipt.skill.body)&&<Button type="button"  disabled={!!pending} onClick={()=>apply('status')}>{t('查看执行技能')}</Button>}
+    <Button type="button"  data-testid="resource-tool-refresh" disabled={!!pending} onClick={()=>apply('status')}>{t('核对原配置回执')}</Button>
    </div>
   </section>}
-  {pending&&<p role="status">{t(pending)}</p>}{error&&<p className="notice" role="alert">{error}<button type="button" className="text-button" disabled={!!pending} onClick={()=>void updateLibrary(true)}>{t('刷新状态')}</button></p>}
+  {pending&&<Notice compact >{t(pending)}</Notice>}{error&&<Notice compact severity="error"  >{error}<button type="button" className="text-button" disabled={!!pending} onClick={()=>void updateLibrary(true)}>{t('刷新状态')}</button></Notice>}
  </section>;
 }

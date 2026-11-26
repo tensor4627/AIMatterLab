@@ -1,3 +1,4 @@
+import {fixtureControlModule} from '../helpers/frontend-component-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,7 +16,7 @@ function fixture({override,approved=false,legacy=false,missingPaid=false,paidOve
  const useState=initial=>{const i=index++;if(!(i in hooks))hooks[i]={value:typeof initial==='function'?initial():initial};return [hooks[i].value,v=>{hooks[i].value=typeof v==='function'?v(hooks[i].value):v;dirty=true;}];},useRef=initial=>{const i=index++;return hooks[i]??(hooks[i]={current:initial});},useEffect=(fn,deps)=>{const i=index++,old=hooks[i];if(!old||deps.some((v,j)=>v!==old.deps[j])){hooks[i]={deps,cleanup:old?.cleanup};effects.push(()=>{hooks[i].cleanup?.();hooks[i].cleanup=fn();});}};
  const api=async(method,path,data)=>{calls.push({method,path,data:structuredClone(data)});const intercepted=override?.(method,path,data);if(intercepted!==undefined)return intercepted;if(path==='/api/environments')return [{id:'env',name:'Registered environment',...target('a').environment}];if(path==='/api/engines')return ['pydyn.md','gpumd.md'];if(path==='/api/projects'&&method==='GET')return structuredClone([latest]);if(path==='/api/cluster/profile')return structuredClone(profile);if(path==='/api/projects'&&method==='POST'){latest=structuredClone(data);return latest;}throw Error('Unexpected route '+path);};
  const jsx=(type,props)=>({type,props}),module={exports:{}};
- new Function('require','module','exports','localStorage',ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>n==='react'?{useState,useRef,useEffect}:n==='react/jsx-runtime'?{jsx,jsxs:jsx}:n==="../../api/worker"?{api}:n==="../../ui/i18n"?{t:v=>v,getLanguage:()=>'zh-CN'}:{default:n},module,module.exports,{getItem:()=>null});
+ new Function('require','module','exports','localStorage',ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>fixtureControlModule(n)??(n==='react'?{useState,useRef,useEffect}:n==='react/jsx-runtime'?{jsx,jsxs:jsx}:n==="../../api/worker"?{api}:n==="../../ui/i18n"?{t:v=>v,getLanguage:()=>'zh-CN'}:{default:n}),module,module.exports,{getItem:()=>null});
  props={profile,project,worker:true,busy:false,profileDirty:false,visible:true,environmentText:JSON.stringify(profile.environment),probe:{queues:['detected-only']},onTargets:targets=>{props={...props,profile:{...props.profile,queue_targets:targets},profileDirty:true};dirty=true;},onValidity:v=>validity.push(v),onRefresh:()=>{},onError:e=>errors.push(String(e)),onQueueTest:text=>agents.push(text)};
  function render(changes={}){props={...props,...changes};index=0;dirty=false;tree=module.exports.default(props);return tree;}
  const all=n=>Array.isArray(n)?n.flatMap(all):n&&typeof n==='object'?[n,...all(n.props?.children)]:[];
@@ -35,7 +36,7 @@ test('a pending environment edit cannot clone a previous environment into a queu
   await h.flush();h.render({environmentText:null});
   h.id('queue-add').props.onClick();await h.flush();
   assert.equal(h.props.profile.queue_targets,undefined);
-  assert(h.find(node=>node.props?.role==='status'&&String(node.props.children).includes('请先填写有效环境。')));
+  assert(h.find(node=>node.props?.compact&&String(node.props.children).includes('请先填写有效环境。')));
   assert.equal(h.writes().length,0);
  }finally{h.unmount();}
 });

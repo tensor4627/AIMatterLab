@@ -1,0 +1,122 @@
+@layer base {
+  :root {
+    font-family: var(--font-ui);
+    font-size: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  button, input, select, textarea {
+    font: inherit;
+  }
+
+  button {
+    border: 0;
+    background: none;
+    cursor: pointer;
+    color: inherit;
+  }
+
+  button:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+  }
+
+  button:hover {
+    color: var(--accent);
+  }
+
+  input, select, textarea {
+    background: var(--bg);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-xs);
+    box-shadow: var(--shadow-field);
+    color: var(--text);
+    padding: var(--space-3) var(--space-4);
+    min-width: 0;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: var(--muted);
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  :where(button, input, select, textarea, a, summary, [tabindex]):focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: 2px;
+  }
+
+  :where(input, select, textarea):focus-visible {
+    border-color: var(--focus);
+  }
+
+  a {
+    color: var(--accent);
+  }
+
+  strong {
+    font-weight: 600;
+  }
+
+  pre, .mono, .skill-script, .batch-script {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: var(--font-body);
+    line-height: 1.75;
+    color: var(--muted);
+  }
+
+  .muted {
+    color: var(--muted);
+  }
+
+  .hidden, [hidden]:not([hidden=until-found]) {
+    display: none !important;
+  }
+
+  .wide {
+    width: 100%;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted) 28%, transparent);
+    border-radius: var(--radius-pill);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--muted) 46%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      scroll-behavior: auto !important;
+    }
+  }
+}

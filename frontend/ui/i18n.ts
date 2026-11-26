@@ -1,4 +1,55 @@
+import {workflowEnglish} from './workflow-i18n';
+
 const english:Record<string,string> = {
+ '请输入消息或添加附件。':'Enter a message or add an attachment.',
+ '请输入消息后引导。':'Enter a message to steer the current reply.',
+ '请先连接作业服务。':'Connect the job service first.',
+ '请填写主机和用户名。':'Enter the host and username.',
+ '私有 CV 记录暂不可用':'Private CV record unavailable',
+ '对话、代码编辑器与终端使用各自的字号设置。':'Chat, the code editor and the terminal use their own font settings.',
+ '使用推荐值':'Use recommended size',
+ '下限越高，标题与说明的字号差越小。':'A higher minimum narrows the size difference between headings and supporting text.',
+ '字段说明':'Field description',
+ '时间与计数':'Timestamps and counts',
+ '键盘快捷键':'Keyboard shortcuts',
+ '切换会话侧栏':'Toggle conversation sidebar',
+ '切换底部任务与终端面板':'Toggle jobs and terminal panel',
+ '关闭当前浮层':'Close the current overlay',
+ '并排显示':'Show side by side',
+ '替换编辑器内容':'Replace editor contents',
+ '离开编辑器':'Leave the editor',
+ '未保存的源码':'Unsaved source file',
+ '打开另一个文件会替换编辑器中未保存的内容。':'Opening another file will replace the unsaved contents of the editor.',
+ '离开前的修改尚未写入文件。':'Your latest edits have yet to be saved to the file.',
+ '替换内容':'Replace contents',
+ '离开':'Leave editor',
+ '关闭通知':'Dismiss notification',
+ '放弃连接修改':'Discard connection changes',
+ '放弃修改':'Discard changes',
+ '此连接在表单中的未保存修改将丢失。':'Unsaved changes in this connection form will be lost.',
+ '此连接上的 Shell 和服务通道将关闭。远端已提交作业继续运行。':'Shells and service channels on this connection will close. Submitted remote jobs will continue running.',
+ 'SSH 连接已关闭':'SSH connection closed',
+ '更换来源路径':'Change source path',
+ '该文件的本地编辑将被丢弃。':'Local edits to this file will be discarded.',
+ '已丢弃本地草稿':'Local draft discarded',
+ '已清理其他本地审阅草稿':'Other local review drafts cleared',
+ '已恢复本地草稿':'Local draft restored',
+ '已恢复部分草稿。':'Some drafts were restored.',
+ '此草稿未能恢复。':'This draft could not be restored.',
+ '草稿已恢复到当前会话，本地保存仍不可用。':'The draft was restored for this session. Local storage is still unavailable.',
+ '撤销':'Undo',
+ '核对原记录':'Check original record',
+ '提交后，作业服务将使用当前输入快照，并按此记录的资源设置运行。':'The job service will use the current input snapshot and run with the resources in this record.',
+ '作业服务将上传输入快照并把此脚本提交给集群调度器。':'The job service will upload the input snapshot and submit this script to the cluster scheduler.',
+ '提交到集群':'Submit to cluster',
+ '提交作业':'Submit job',
+ '取消本地作业':'Cancel local job',
+ '取消集群作业':'Cancel cluster job',
+ '取消作业':'Cancel job',
+ '作业服务将核对原记录并尝试停止作业。已写入的产物保留。':'The job service will check the original record and attempt to stop the job. Existing artifacts are kept.',
+ '作业服务将核对原作业身份，再尝试向集群调度器发送取消请求。已写入的产物保留。':'The job service will verify the original job before attempting to cancel it through the cluster scheduler. Existing artifacts are kept.',
+ '更多说明':'More information',
+ '收起说明':'Show less',
  '科学环境':'Scientific environment',
  '可执行文件':'Executables',
  '代码仓库':'Repositories',
@@ -2730,6 +2781,19 @@ export function setLanguage(value:Language){
  try { localStorage.setItem('studio.language',value); }
  catch { /* Preview and cancellation still work when the cache is unavailable. */ }
 }
-export function languageText(inEnglish:boolean,value:string,translation=english[value]??value){return inEnglish?translation:value;}
-export function t<T>(value:T):T {return (language==='en'&&typeof value==='string'?(english[value.trim()]??(value.match(/^请先补齐 (\d+) 项参数或待确认事项$/)?.[1]?('Complete '+value.match(/^请先补齐 (\d+) 项参数或待确认事项$/)![1]+' missing inputs or requirements.'):value)):value) as T;}
+function translated(value:string){
+ if(Object.hasOwn(english,value))return english[value];
+ if(Object.hasOwn(workflowEnglish,value))return workflowEnglish[value];
+}
+export function languageText(inEnglish:boolean,value:string,translation=translated(value)??value){return inEnglish?translation:value;}
+export function t<T>(value:T,options?:{language?:Language;values?:Record<string,string|number>}):T {
+ if(typeof value!=='string')return value;
+ let message:string=value;
+ if((options?.language??language)==='en'){
+  const missingCount=value.match(/^请先补齐 (\d+) 项参数或待确认事项$/)?.[1];
+  message=translated(value.trim())??(missingCount?'Complete '+missingCount+' missing inputs or requirements.':value);
+ }
+ const values=options?.values;
+ return (values?message.replace(/\{(\w+)\}/g,(token,key)=>Object.hasOwn(values,key)?String(values[key]):token):message) as T;
+}
 export const tr=t;

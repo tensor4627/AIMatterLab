@@ -36,7 +36,7 @@ export async function frontendWorkflowExperienceCases({check,out}){
   await computeGroup.getByTestId('open-tool-hamiltonian').click();
   const detail = page.locator('.tool-page');
   await detail.getByRole('heading',{name:'机器学习哈密顿量',exact:true}).waitFor();
-  assert.match(await detail.locator('.notice').innerText(),/后端待接入/);
+  assert.match(await detail.locator('[data-severity]').innerText(),/后端待接入/);
   for(const label of ['数据准备','模型训练','独立评估','哈密顿量重构','能带分析']){
    await detail.locator('.tool-capabilities').getByText(label,{exact:true}).waitFor();
   }
@@ -47,9 +47,10 @@ export async function frontendWorkflowExperienceCases({check,out}){
  });
  async function setup(page){await page.evaluate(async()=>{window.workflowFixtures=await import('/tests/fixtures/frontend-workflow-experience.mjs');window.workflowEvents=[];window.workflowErrors=[];document.getElementById('root').style.cssText='padding:24px;max-width:1000px;margin:auto;background:var(--bg);color:var(--text)';});}
  async function plan(page){await setup(page);await page.evaluate(async()=>{
-  const {WorkflowPage}=await import('/frontend/features/workflows/Workflows.tsx');window.planSaved=[];window.planAgent=[];window.planPending=[];
+  const {WorkflowPage}=await import('/frontend/features/workflows/Workflows.tsx');
+  const {ToastProvider}=await import('/frontend/ui/Toast.tsx');window.planSaved=[];window.planAgent=[];window.planPending=[];
   window.studio.invoke=(method,value)=>{if(method!=='workflow.save')throw Error('Unexpected fixture call '+method);return new Promise(resolve=>window.planPending.push({value:structuredClone(value),resolve}));};
-  window.mountPlan=initial=>window.testRoot.render(React.createElement(WorkflowPage,{key:initial?.id||'new',initial,taskId:'sampling',onSaved:(value,options)=>window.planSaved.push({value,options}),onAgent:value=>window.planAgent.push(value),onTool:()=>{},onError:error=>window.workflowErrors.push(String(error))}));window.mountPlan();
+  window.mountPlan=initial=>window.testRoot.render(React.createElement(ToastProvider,null,React.createElement(WorkflowPage,{key:initial?.id||'new',initial,taskId:'sampling',onSaved:(value,options)=>window.planSaved.push({value,options}),onAgent:value=>window.planAgent.push(value),onTool:()=>{},onError:error=>window.workflowErrors.push(String(error))})));window.mountPlan();
  });await page.getByTestId('workflow-plan').waitFor();}
  async function stage(page,consumer=false){await setup(page);await page.evaluate(async consumer=>{
   const Component=(await import(consumer?'/frontend/features/workflows/ConsumerStageEditor.tsx':'/frontend/features/workflows/TaskStageEditor.tsx')).default;
@@ -72,6 +73,21 @@ export async function frontendWorkflowExperienceCases({check,out}){
  await check('workflow-experience-plan-late-save-does-not-navigate-or-send',async page=>{
   await plan(page);await page.getByLabel('任务名称',{exact:true}).fill('Save before visiting another page');await page.getByRole('button',{name:'交给 Agent 准备',exact:true}).click();await page.evaluate(()=>window.testRoot.render(React.createElement('p',{'data-testid':'other-page'},'Other page')));await page.getByTestId('other-page').waitFor();
   await page.evaluate(()=>{const request=window.planPending[0];request.resolve({...request.value,id:'plan-B'});});await page.waitForFunction(()=>window.planSaved.length===1);assert.equal(await page.evaluate(()=>window.planSaved[0].options.navigate),false);assert.deepEqual(await page.evaluate(()=>window.planAgent),[]);assert.equal(await page.getByTestId('other-page').isVisible(),true);
+ });
+ await check('workflow-experience-plan-undo-restores-draft-and-protects-new-edits',async page=>{
+  await plan(page);
+  const name=page.getByLabel('任务名称',{exact:true}),notes=page.getByLabel('补充目标与约束',{exact:true});
+  const baseline=await name.inputValue(),discard=page.getByTestId('plan-discard'),toast=page.getByTestId('workflow-plan-discarded');
+  await name.fill('Local sampling plan');await notes.fill('Keep this draft note');
+  await discard.click();await toast.waitFor();
+  assert.equal(await name.inputValue(),baseline);
+  await toast.getByRole('button',{name:'撤销',exact:true}).focus();await page.keyboard.press('Enter');
+  await toast.waitFor({state:'hidden'});
+  assert.equal(await name.inputValue(),'Local sampling plan');assert.equal(await notes.inputValue(),'Keep this draft note');
+  await discard.click();await toast.waitFor();
+  await name.fill('Newer local name');await toast.waitFor({state:'hidden'});
+  assert.equal(await name.inputValue(),'Newer local name');
+  assert.deepEqual(await page.evaluate(()=>[window.planPending.length,window.planAgent.length,window.workflowErrors]),[0,0,[]]);
  });
  await check('workflow-experience-build-draft-survives-offline-source-update-and-navigation',async page=>{
   await stage(page);await page.getByTestId('stage-inspect').click();await page.locator('[data-field="cutoff"] input').fill('4.5');await page.evaluate(()=>window.mountStage({workerReady:false}));assert.equal(await page.locator('[data-field="cutoff"] input').inputValue(),'4.5');assert.equal(await page.getByTestId('stage-save').isDisabled(),true);

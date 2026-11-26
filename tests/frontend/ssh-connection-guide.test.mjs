@@ -1,3 +1,4 @@
+import {fixtureControlModule} from '../helpers/frontend-component-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,6 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {deferred} from "../helpers/agent-hooks.mjs";
 
 const compiled=ts.transpileModule(fs.readFileSync(new URL("../../frontend/features/cluster/SshConnectionGuide.tsx",import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+const appearance={readTerminalAppearance:()=>({fontSize:17,theme:{}})};
 const request={owner:null,clusterId:'fixture',version:3,expected:{host:'fixture.test',username:'fixture',port:22,identity_file:'/fixture/key-reference',ssh_client:'/usr/bin/ssh',auth_mode:'interactive',proxy_jump:[],via:[]}};
 const reviewed=()=>({paneId:'private-pane',paneEpoch:7,status:'review',authMode:'interactive',newForwardAllowed:true,origin:{kind:'saved-profile',clusterId:'fixture',version:3},clusterId:'fixture',version:3,name:'Fixture connection',authenticated:false,leaseSeconds:1800,review:{name:'Fixture connection',host:'fixture.test',username:'fixture',port:22,identity_file:'/fixture/key-reference',ssh_client:'/usr/bin/ssh',proxy_jump:[]},clientRoute:'none',tunnels:[]});
 const awaiting=()=>({...reviewed(),status:'awaiting_auth'}),verified=()=>({...reviewed(),status:'verified',authenticated:true});
@@ -32,7 +34,7 @@ function harness({plan=reviewed(),override,language='en',autoUnmount=true,onWork
   throw Error('Unexpected fixture IPC');
  };
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
- const require=name=>name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:name==="../../api/studio"?{invoke}:name==="../../ui/Dialogs"?{Modal:'Modal'}:name==='@xterm/xterm'?{Terminal}:name==='@xterm/addon-fit'?{FitAddon:class{fit(){events.push('fit');}}}:{};
+ const require=name=>fixtureControlModule(name)??(name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:name==="../../api/studio"?{invoke}:name==="../../ui/Dialogs"?{Modal:'Modal'}:name==='../terminal/terminal-appearance'?appearance:name==='@xterm/xterm'?{Terminal}:name==='@xterm/addon-fit'?{FitAddon:class{fit(){events.push('fit');}}}:{});
  const module={exports:{}},document={documentElement:{}},window={addEventListener:()=>{},removeEventListener:()=>{}};
  new Function('require','module','exports','crypto','requestAnimationFrame','cancelAnimationFrame','setInterval','clearInterval','getComputedStyle','ResizeObserver','document','window',compiled)(require,module,module.exports,{randomUUID},fn=>{frames.set(++frame,fn);return frame;},id=>frames.delete(id),fn=>{intervals.set(++frame,fn);return frame;},id=>intervals.delete(id),()=>({getPropertyValue:()=>''}),class{constructor(fn){this.fn=fn;}observe(){this.fn();}disconnect(){}},document,window);
  function render(){cursor=0;dirty=false;tree=module.exports.default({request:requestValue,language,onWorkerUpdate,onClose:()=>{closed.push(true);events.push('onClose');if(autoUnmount)unmount();}});}

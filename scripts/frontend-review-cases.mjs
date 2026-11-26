@@ -58,7 +58,8 @@ export async function frontendReviewCases({check,out}){
  await check('review-fixes-run-draft-worker-scope-and-discard',async page=>{
   await page.evaluate(async()=>{
    const Review=(await import('/frontend/features/runs/RunReview.tsx')).default;
-   window.renderReview=scope=>window.testRoot.render(React.createElement(Review,{key:scope,run:window.__test.run,draftScope:scope,environments:[window.__test.environment],theme:'dark',onRefresh:()=>{},onError:error=>{throw error;},onReplace:()=>{}}));
+   const {ConfirmProvider}=await import('/frontend/ui/ConfirmDialog.tsx'),{ToastProvider}=await import('/frontend/ui/Toast.tsx');
+   window.renderReview=scope=>window.testRoot.render(React.createElement(ToastProvider,null,React.createElement(ConfirmProvider,null,React.createElement(Review,{key:scope,run:window.__test.run,draftScope:scope,environments:[window.__test.environment],theme:'dark',onRefresh:()=>{},onError:error=>{throw error;},onReplace:()=>{}}))));
    window.renderReview('synthetic-worker-a');
   });
   await page.getByLabel('计算名称',{exact:true}).fill('Only worker A');
@@ -66,10 +67,91 @@ export async function frontendReviewCases({check,out}){
   await page.waitForFunction(()=>document.querySelector('[data-testid="task-review"] input')?.value==='Fixture run');
   await page.evaluate(()=>window.renderReview('synthetic-worker-a'));
   await page.waitForFunction(()=>document.querySelector('[data-testid="task-review"] input')?.value==='Only worker A');
-  page.once('dialog',dialog=>dialog.accept());
   await page.getByRole('button',{name:/丢弃本地草稿/}).click();
   assert.equal(await page.getByLabel('计算名称',{exact:true}).inputValue(),'Fixture run');
+  const toast=page.getByTestId('toast-region');
+  await toast.getByRole('status').filter({hasText:'已丢弃本地草稿'}).waitFor();
+  await page.evaluate(()=>window.renderReview('synthetic-worker-b'));
+  await toast.getByRole('button',{name:'撤销',exact:true}).click();
+  await page.evaluate(()=>window.renderReview('synthetic-worker-a'));
+  await page.waitForFunction(()=>document.querySelector('[data-testid="task-review"] input')?.value==='Only worker A');
   await noExecution(page);
+ });
+
+ await check('review-fixes-confirmation-focus-and-cancellation',async page=>{
+  await page.evaluate(async()=>{
+   const {ConfirmProvider,useConfirm}=await import('/frontend/ui/ConfirmDialog.tsx');
+   const {Modal}=await import('/frontend/ui/Dialogs.tsx');
+   window.confirmAnswers=[];
+   function Fixture(){
+    const confirm=useConfirm();
+    const [open,setOpen]=React.useState(false);
+    return React.createElement(React.Fragment,null,React.createElement('button',{onClick:()=>setOpen(true)},'Open original'),
+     open&&React.createElement(Modal,{title:'Original dialog',onClose:()=>setOpen(false)},
+      React.createElement('input',{autoFocus:true,'aria-label':'Original search'}),
+      React.createElement('button',{onClick:async()=>window.confirmAnswers.push(await confirm({title:'Release channel',target:'Fixture resource',consequence:'The linked shell will close.',confirmLabel:'Release',tone:'danger'}))},'Ask')));
+   }
+   window.testRoot.render(React.createElement(ConfirmProvider,null,React.createElement(Fixture)));
+  });
+  const opener=page.getByRole('button',{name:'Open original',exact:true});
+  await opener.click();
+  assert.equal(await page.getByRole('textbox',{name:'Original search'}).evaluate(element=>element===document.activeElement),true);
+  const ask=page.getByRole('button',{name:'Ask',exact:true}),confirmation=page.getByRole('dialog',{name:'Release channel',exact:true});
+  await ask.click();await confirmation.waitFor();
+  assert.equal(await confirmation.getByRole('button',{name:'取消',exact:true}).evaluate(element=>element===document.activeElement),true);
+  assert.match(await confirmation.innerText(),/Fixture resource[\s\S]*linked shell/);
+  await page.keyboard.press('Escape');await confirmation.waitFor({state:'detached'});
+  assert.equal(await ask.evaluate(element=>element===document.activeElement),true);
+  await ask.click();await confirmation.waitFor();await page.mouse.click(12,80);await confirmation.waitFor({state:'detached'});
+  await ask.click();await page.keyboard.press('Tab');await page.keyboard.press('Enter');await confirmation.waitFor({state:'detached'});
+  assert.deepEqual(await page.evaluate(()=>window.confirmAnswers),[false,false,true]);
+  await page.keyboard.press('Escape');await page.getByRole('dialog',{name:'Original dialog',exact:true}).waitFor({state:'detached'});
+  assert.equal(await opener.evaluate(element=>element===document.activeElement),true);
+ });
+
+ await check('review-fixes-local-cancel-confirms-original-record',async page=>{
+  await page.evaluate(()=>{
+   const f=window.__test;
+   const run={...f.run,id:'local-cancel-fixture',name:'Original local job',status:'unknown'};
+   f.responses={'/api/run/cancel':()=>({...run,cancellation:{status:'unconfirmed',signal_sent:false,message:'Original process identity is unconfirmed.'}})};
+   return window.renderTest('RunDetail',{run,onRefresh(){},onError:error=>{throw error;}});
+  });
+  const cancel=page.locator('.run-actions').getByRole('button',{name:'取消',exact:true});
+  const dialog=page.getByRole('dialog',{name:'取消本地作业',exact:true});
+  const cancellations=()=>page.evaluate(()=>window.__test.calls.filter(call=>call.data?.target==='/api/run/cancel').map(call=>call.data.data));
+  await cancel.click();await dialog.getByText(/Original local job · /).waitFor();
+  await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert.deepEqual(await cancellations(),[]);
+  await cancel.click();await page.getByTestId('confirm-local-run-cancel').click();
+  await page.getByText('Original process identity is unconfirmed.',{exact:true}).waitFor();
+  assert.deepEqual(await cancellations(),[{run_id:'local-cancel-fixture'}]);
+  await page.getByRole('button',{name:'核对停止状态',exact:true}).waitFor();
+ });
+
+ await check('review-fixes-toast-stack-timeout-and-pausing',async page=>{
+  await page.clock.install();
+  await page.evaluate(async()=>{
+   const {ToastProvider,useToast}=await import('/frontend/ui/Toast.tsx');
+   function Fixture(){
+    const toast=useToast();
+    return React.createElement('button',{onClick:()=>{
+     toast.show({message:'Persistent error',severity:'error'});
+     toast.show({message:'First result',action:{label:'Undo',onClick:()=>{}}});
+     toast.show({message:'Second result'});
+     toast.show({message:'Queued result'});
+    }},'Show notifications');
+   }
+   window.testRoot.render(React.createElement(ToastProvider,null,React.createElement(Fixture)));
+  });
+  await page.getByRole('button',{name:'Show notifications',exact:true}).click();
+  const region=page.getByTestId('toast-region'),undo=region.getByRole('button',{name:'Undo',exact:true});
+  await undo.focus();assert.equal(await region.locator('.app-toast').count(),3);
+  assert.equal(await region.getByText('Queued result',{exact:true}).count(),0);
+  await page.clock.runFor(5100);
+  await region.getByText('Queued result',{exact:true}).waitFor();
+  assert.equal(await undo.count(),1);await undo.evaluate(element=>element.blur());
+  await page.clock.runFor(5100);
+  assert.equal(await undo.count(),0);assert.equal(await region.getByRole('alert').innerText(),'Persistent error');
+  await region.getByRole('button',{name:'关闭通知',exact:true}).click();await region.waitFor({state:'detached'});
  });
 
  await check('review-fixes-assets-late-preview-and-input-invalidation',async page=>{

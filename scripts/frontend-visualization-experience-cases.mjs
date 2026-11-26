@@ -212,17 +212,23 @@ export async function frontendVisualizationExperienceCases({check,out}){
    dark:node.classList.contains('vs-dark'),light:node.classList.contains('vs'),
    font:getComputedStyle(node.querySelector('.view-lines')).fontSize,
    background:getComputedStyle(node.querySelector('.monaco-editor-background')).backgroundColor,
-   lineNumber:getComputedStyle(node.querySelector('.line-numbers')).color,
+   lineNumber:getComputedStyle(node.querySelector('.line-numbers:not(.active-line-number)')).color,
    text:node.querySelector('.view-lines').textContent,
   }));
-  const start=await snapshot();assert.equal(start.dark,true);assert.equal(start.font,'12px');
+  const start=await snapshot();assert.equal(start.dark,true);assert.equal(start.font,'10px');
   await editor.evaluate(node=>window.__test.originalEditor=node);
   await page.evaluate(()=>window.__test.editorAppearance('light',24,18));
   const light=await snapshot();assert.equal(light.light,true);assert.equal(light.font,'24px');
-  assert.equal(light.background,'rgb(248, 247, 250)');assert.match(light.lineNumber,/rgb\((41, 38, 51|91, 88, 104)\)/);
+  const colors=await editor.evaluate(node=>{
+   const probe=document.createElement('span');node.append(probe);
+   probe.style.background='var(--surface-sunken)';probe.style.color='var(--text-subtle)';
+   const style=getComputedStyle(probe),result={background:style.backgroundColor,lineNumber:style.color};
+   probe.remove();return result;
+  });
+  assert.equal(light.background,colors.background);assert.equal(light.lineNumber,colors.lineNumber);
   assert.equal(light.text,start.text);assert.equal(await editor.evaluate(node=>window.__test.originalEditor===node),true);
   await page.evaluate(()=>window.__test.editorAppearance('dark',17,18));
-  const dark=await snapshot();assert.equal(dark.dark,true);assert.equal(dark.font,'18px');assert.equal(dark.background,start.background);
+  const dark=await snapshot();assert.equal(dark.dark,true);assert.equal(dark.font,'17px');assert.equal(dark.background,start.background);
  });
 
  await check('experience-run-log-retains-tail-and-evidence-boundary-after-overflow',async page=>{
@@ -239,7 +245,7 @@ export async function frontendVisualizationExperienceCases({check,out}){
     if(!text)probe.emptyReads++;
     return {offset,text};
    }};
-   window.testRoot.render(h(EvidenceConversation.Provider,{value:{provider:'codex',threadId:'synthetic-log-owner',name:'Synthetic log conversation'}},
+   window.renderWithProviders(h(EvidenceConversation.Provider,{value:{provider:'codex',threadId:'synthetic-log-owner',name:'Synthetic log conversation'}},
     h(RunDetail,{run:{...f.run,status:'running'},connected:true,onRefresh:()=>{},onError:cause=>{throw cause;}})));
   });
   const log=page.locator('pre.console'),evidence=page.getByTestId('chat-evidence');

@@ -1,3 +1,4 @@
+import Button from '../../ui/Button';
 import {useId,useMemo,useRef,useState} from 'react';
 import {t} from '../../ui/i18n';
 import {inspectJsonDraft,isJsonObject,jsonDraftValueSource,type JsonDraft} from '../../ui/json-draft.mjs';
@@ -27,7 +28,7 @@ function ArgumentsEditor({values,edit}:{values:string[];edit:Edit}){
    <label>{t('参数')} {index+1}<textarea data-testid="resource-tool-argument" rows={1} spellCheck={false} value={value} onChange={event=>edit([index],JSON.stringify(event.currentTarget.value))}/></label>
    <button className="text-button" type="button" aria-label={t('移除参数')+' '+(index+1)} onClick={()=>edit([index])}>{t('移除')}</button>
   </div>)}
-  <button className="button" type="button" data-testid="resource-tool-add-argument" onClick={()=>edit([values.length],'""')}>{t('添加命令参数')}</button>
+  <Button  type="button" data-testid="resource-tool-add-argument" onClick={()=>edit([values.length],'""')}>{t('添加命令参数')}</Button>
  </section>;
 }
 
@@ -63,7 +64,7 @@ function PortsEditor({direction,ports,edit}:{direction:'inputs'|'outputs';ports:
      node?.setCustomValidity(name?t('请添加端口或清空尚未应用的名称。'):'');
     }} data-testid={'resource-tool-'+mode+'-name'} placeholder={input?'input':'result'} value={name} onChange={event=>setName(event.currentTarget.value)}
      onKeyDown={event=>{if(event.key==='Enter'&&!event.nativeEvent.isComposing){event.preventDefault();add();}}}/></label>
-    <button className="button" type="button" data-testid={'resource-tool-'+mode+'-port-add'} disabled={!ready} onClick={add}>{t(input?'添加输入端口':'添加输出端口')}</button>
+    <Button  type="button" data-testid={'resource-tool-'+mode+'-port-add'} disabled={!ready} onClick={add}>{t(input?'添加输入端口':'添加输出端口')}</Button>
    </div>
    {name&&!ready&&<small>{t(duplicate?'同一组内的名称必须唯一。':'端口名称须以英文字母开头，可含字母、数字、连字符和下划线，最多 63 字符。')}</small>}
   </>}
@@ -129,7 +130,7 @@ export default function ResourceToolInterfaceEditor({values,onRaw,onEdit}:Props)
   {!ports&&<p>{t(interfaceJsonLabels.io)} · <AdvancedField/></p>}
   {recipe&&test?<TestEditor document={test} recipe={recipe} inputPorts={ports?.inputs} edit={(...args)=>onEdit('test',...args)}/>:<p>{t(interfaceJsonLabels.test)} · <AdvancedField/></p>}
   <section className="resource-tool-advanced">
-   <button className="button" type="button" data-testid="resource-tool-advanced-json" aria-expanded={advanced} aria-controls={advancedId} onClick={()=>setAdvanced(previous=>!previous)}>{t('高级 JSON 配置')}</button>
+   <Button  type="button" data-testid="resource-tool-advanced-json" aria-expanded={advanced} aria-controls={advancedId} onClick={()=>setAdvanced(previous=>!previous)}>{t('高级 JSON 配置')}</Button>
    <div id={advancedId} className="resource-tool-code-grid" hidden={!advanced}>
     {(['argv','io','test'] as const).map(field=><label key={field}>{t(interfaceJsonLabels[field])}<textarea data-testid={'resource-tool-'+field} spellCheck={false} rows={4} value={values[field]} onChange={event=>onRaw(field,event.currentTarget.value)}/></label>)}
     <small>{t('每个端口填写 filename 和 format。可选 parameters 和 dependencies。')}</small>

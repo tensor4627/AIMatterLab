@@ -51,18 +51,41 @@ export async function frontendTerminalReadObservationCases({check,out}){
    const f=window.__test,root=document.documentElement;
    f.originalRows=document.querySelector('.xterm-rows');
    f.previousResizes=f.calls.filter(call=>call.method==='sharedTerminal.resize').length;
-   root.dataset.theme='light';root.style.setProperty('--terminal-font-size','12');root.style.setProperty('--ui-min-font','18px');
+   f.originalFont=getComputedStyle(f.originalRows).fontSize;
+   root.dataset.theme='light';root.style.setProperty('--ui-min-font','18px');
+   window.dispatchEvent(new Event('studio:appearance'));
+  });
+  assert.equal(await region.locator('.xterm-rows').evaluate(rows=>getComputedStyle(rows).fontSize),await page.evaluate(()=>window.__test.originalFont));
+  await page.evaluate(()=>{
+   document.documentElement.style.setProperty('--terminal-font-size','18');
    window.dispatchEvent(new Event('studio:appearance'));
   });
   await page.waitForFunction(()=>{
    const f=window.__test,rows=document.querySelector('.xterm-rows');
    return rows===f.originalRows&&getComputedStyle(rows).fontSize==='18px'&&f.calls.filter(call=>call.method==='sharedTerminal.resize').length>f.previousResizes;
   });
-  assert.equal(await region.locator('.xterm-viewport').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(248, 247, 250)');
+  assert.equal(await region.locator('.xterm-viewport').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(18, 18, 24)');
   await region.locator('.xterm-rows').getByText('RECOVERED ORIGINAL SHELL>',{exact:false}).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(),'Keep these unsent terminal instructions');
   assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['compute.sshConnection.open','compute.sshConnection.authInput','sharedTerminal.owner','sharedTerminal.input'].includes(c.method)).length),0);
   await page.screenshot({path:path.join(out,'terminal-v2-light-18px.png')});
+  const terminalInput=region.locator('.xterm-helper-textarea');
+  await terminalInput.focus();
+  for(const key of ['n','b','j',',','/']){
+   const reached=await terminalInput.evaluate((node,key)=>{
+    let reached=false;
+    node.addEventListener('keydown',event=>{reached=!event.defaultPrevented;event.stopImmediatePropagation();},{capture:true,once:true});
+    node.dispatchEvent(new KeyboardEvent('keydown',{key,ctrlKey:true,bubbles:true,cancelable:true}));
+    return reached;
+   },key);
+   assert.equal(reached,true,`Ctrl+${key} remains available to the focused terminal`);
+  }
+  await terminalInput.press('Control+k');
+  const palette=page.getByRole('dialog',{name:'搜索与命令'});
+  await palette.waitFor();
+  await page.keyboard.press('Escape');
+  await palette.waitFor({state:'hidden'});
+  assert.equal(await terminalInput.evaluate(node=>node===document.activeElement),true);
  });
 
  await check('terminal-resize-stays-local-through-reply-and-recovers-on-the-current-epoch',async page=>{
@@ -71,7 +94,7 @@ export async function frontendTerminalReadObservationCases({check,out}){
   await page.getByTestId('ssh-login-refresh').click();
   await openDetails(page);
   await page.getByTestId('ssh-resize-observation').filter({hasText:'terminal_context_changed'}).waitFor();
-  assert.equal(await page.getByTestId('ssh-login-error').count(),0);assert.equal(await page.locator('.toast').count(),0);
+  assert.equal(await page.getByTestId('ssh-login-error').count(),0);assert.equal(await page.getByTestId('global-diagnostic-toast').count(),0);
   await page.evaluate(()=>{const f=window.__test;f.geometryFailure=false;f.listEpoch=++f.actualEpoch;});
   await page.getByTestId('ssh-login-refresh').click();
   await page.waitForFunction(()=>window.__test.calls.some(c=>c.method==='sharedTerminal.resize'&&c.data.ownerEpoch===window.__test.actualEpoch));
@@ -81,16 +104,16 @@ export async function frontendTerminalReadObservationCases({check,out}){
  });
  await check('terminal-read-observation-experience-stale-epoch-refresh-current-read-clears-local-only',async page=>{
   await openObservedTerminal(page);await openDetails(page);
-  await page.getByTestId('ssh-read-error-code').filter({hasText:'terminal_owner_changed'}).waitFor();assert.equal(await page.locator('.toast').count(),0);
+  await page.getByTestId('ssh-read-error-code').filter({hasText:'terminal_owner_changed'}).waitFor();assert.equal(await page.getByTestId('global-diagnostic-toast').count(),0);
   await page.evaluate(()=>{window.__test.listEpoch=3;window.__test.readFailure=true;});await page.getByTestId('ssh-login-refresh').click();
   const visibleDiagnosis=page.getByTestId('ssh-diagnostics').getByRole('status').filter({hasText:'终端输出读取失败'});
   await visibleDiagnosis.waitFor();
   assert.equal(await visibleDiagnosis.innerText(),'终端输出读取失败');
   assert.equal(await visibleDiagnosis.evaluate(node=>{const notice=node.getBoundingClientRect(),panel=node.closest('[data-testid="bottom-panel"]').getBoundingClientRect();return notice.top>=panel.top&&notice.bottom<=panel.bottom;}),true,'the current read fault summary must be visible before details are opened');
   await openDetails(page);
-  await page.getByTestId('ssh-read-error-code').filter({hasText:'terminal_unavailable'}).waitFor();assert.equal(await page.locator('.toast').count(),0);
+  await page.getByTestId('ssh-read-error-code').filter({hasText:'terminal_unavailable'}).waitFor();assert.equal(await page.getByTestId('global-diagnostic-toast').count(),0);
   await page.screenshot({path:path.join(out,'terminal-current-read-failure-remains-visible.png')});
-  await page.evaluate(()=>window.__test.readFailure=false);await page.waitForFunction(()=>window.__test.readSuccesses>0);await page.getByTestId('ssh-read-observation').waitFor({state:'detached'});assert.equal(await page.getByTestId('ssh-login-error').count(),0);assert.equal(await page.locator('.toast').count(),0);assert.equal(await page.locator('.composer textarea').inputValue(),'Keep these unsent terminal instructions');assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['compute.sshConnection.open','compute.sshConnection.completeLogin','sharedTerminal.owner','sharedTerminal.input','sharedTerminal.close','compute.profiles.save','task.execute'].includes(c.method)).length),0);await page.screenshot({path:path.join(out,'terminal-same-shell-new-epoch-recovered.png')});
+  await page.evaluate(()=>window.__test.readFailure=false);await page.waitForFunction(()=>window.__test.readSuccesses>0);await page.getByTestId('ssh-read-observation').waitFor({state:'detached'});assert.equal(await page.getByTestId('ssh-login-error').count(),0);assert.equal(await page.getByTestId('global-diagnostic-toast').count(),0);assert.equal(await page.locator('.composer textarea').inputValue(),'Keep these unsent terminal instructions');assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['compute.sshConnection.open','compute.sshConnection.completeLogin','sharedTerminal.owner','sharedTerminal.input','sharedTerminal.close','compute.profiles.save','task.execute'].includes(c.method)).length),0);await page.screenshot({path:path.join(out,'terminal-same-shell-new-epoch-recovered.png')});
  });
  await check('terminal-read-observation-experience-read-recovery-retains-real-input-failure',async page=>{
   await openObservedTerminal(page,true);await openDetails(page);
@@ -98,7 +121,7 @@ export async function frontendTerminalReadObservationCases({check,out}){
   await page.getByTestId('ssh-diagnostic-toggle').press('Escape');
   await page.getByRole('region',{name:'SSH 终端',exact:true}).click();await page.keyboard.type('X');await page.waitForFunction(()=>window.__test.inputCount===1);
   await openDetails(page);
-  await page.getByTestId('ssh-error-code').filter({hasText:'terminal_owner_changed'}).waitFor();assert.equal(await page.locator('.toast').count(),0);
-  await page.evaluate(()=>window.__test.readFailure=false);await page.waitForFunction(()=>window.__test.readSuccesses>0);await page.getByTestId('ssh-read-observation').waitFor({state:'detached'});assert.equal(await page.getByTestId('ssh-error-code').innerText(),'terminal_owner_changed');assert.equal(await page.locator('.toast').count(),0);assert.equal(await page.evaluate(()=>window.__test.inputCount),1);assert.equal(await page.locator('.composer textarea').inputValue(),'Keep these unsent terminal instructions');assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['compute.sshConnection.open','compute.sshConnection.completeLogin','sharedTerminal.owner','sharedTerminal.close','compute.profiles.save','task.execute'].includes(c.method)).length),0);await page.screenshot({path:path.join(out,'terminal-read-recovered-input-failure-retained.png')});
+  await page.getByTestId('ssh-error-code').filter({hasText:'terminal_owner_changed'}).waitFor();assert.equal(await page.getByTestId('global-diagnostic-toast').count(),0);
+  await page.evaluate(()=>window.__test.readFailure=false);await page.waitForFunction(()=>window.__test.readSuccesses>0);await page.getByTestId('ssh-read-observation').waitFor({state:'detached'});assert.equal(await page.getByTestId('ssh-error-code').innerText(),'terminal_owner_changed');assert.equal(await page.getByTestId('global-diagnostic-toast').count(),0);assert.equal(await page.evaluate(()=>window.__test.inputCount),1);assert.equal(await page.locator('.composer textarea').inputValue(),'Keep these unsent terminal instructions');assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['compute.sshConnection.open','compute.sshConnection.completeLogin','sharedTerminal.owner','sharedTerminal.close','compute.profiles.save','task.execute'].includes(c.method)).length),0);await page.screenshot({path:path.join(out,'terminal-read-recovered-input-failure-retained.png')});
  });
 }

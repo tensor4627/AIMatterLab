@@ -1,1 +1,29 @@
-.pg-framework{min-width:0;border-top:1px solid var(--pg-border);border-bottom:1px solid var(--pg-border);padding:11px 0;margin:0 0 12px}.pg-framework>summary{font-weight:600}.pg-framework label{display:block;margin:10px 0}.pg-framework-buttons{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.pg-framework p{overflow-wrap:anywhere}
+@layer features {
+  .pg-framework {
+    min-width: 0;
+    border-top: 1px solid var(--pg-border);
+    border-bottom: 1px solid var(--pg-border);
+    padding: var(--space-4) 0;
+    margin: 0 0 var(--space-4);
+  }
+
+  .pg-framework>summary {
+    font-weight: 600;
+  }
+
+  .pg-framework label {
+    display: block;
+    margin: var(--space-4) 0;
+  }
+
+  .pg-framework-buttons {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin: var(--space-4) 0;
+  }
+
+  .pg-framework p {
+    overflow-wrap: anywhere;
+  }
+}

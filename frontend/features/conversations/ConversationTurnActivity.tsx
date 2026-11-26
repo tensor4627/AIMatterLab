@@ -1,3 +1,4 @@
+import Disclosure from '../../ui/Disclosure';
 import {useEffect,useRef,type RefObject} from 'react';
 import type {ConversationActivity,ConversationAttentionTarget,ConversationResultReceipt} from '../../../contracts/dto/conversation-activity';
 import {invoke} from '../../api/studio';
@@ -81,10 +82,9 @@ export default function ConversationTurnActivity({activity,notice,scroll,ownerCu
  if(!activity||activity.phase==='idle'||!plan&&!tool&&!pending)return null;
  const step=plan?.steps.find(item=>item.status==='inProgress');
  const summary=pending?t(pending.kind==='question'?'等你回答':'等你审批'):step?.text||(!plan&&tool?t(toolStatus[tool.state])+' · '+t(toolLabel(tool.name)):t('本轮计划'));
- return <details className="agent-turn-activity" data-testid="agent-turn-activity">
-  <summary><span>{t('本轮进度')}</span><strong>{summary}</strong></summary>
+ return <Disclosure className="agent-turn-activity" data-testid="agent-turn-activity" summary={<><span>{t('本轮进度')}</span><strong>{summary}</strong></>}>
   {plan?.explanation&&<p>{plan.explanation}</p>}
   {!!plan?.steps.length&&<ol>{plan.steps.map((item,index)=><li key={index} data-status={item.status}><small>{t(planStatus[item.status])}</small><span>{item.text}</span></li>)}</ol>}
   {tool&&<p>{t(toolStatus[tool.state])} · {t(toolLabel(tool.name))}</p>}
- </details>;
+ </Disclosure>;
 }

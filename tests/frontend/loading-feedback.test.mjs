@@ -1,3 +1,4 @@
+import {fixtureControlModule} from '../helpers/frontend-component-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,7 +12,7 @@ function mount(file,initial,dispatch=async()=>{}){
  const useEffect=(fn,deps)=>{const i=cursor++,old=hooks[i];if(!old||deps.some((value,j)=>!Object.is(value,old.deps[j]))){hooks[i]={deps,cleanup:old?.cleanup};effects.push(()=>{hooks[i].cleanup?.();hooks[i].cleanup=fn();});}};
  const jsx=(type,props)=>({type,props});
  const api=(method,target,data)=>{calls.push({method,target,data});return dispatch(target,data);};
- const require=name=>name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='lucide-react'?new Proxy({},{get:(_,key)=>key}):name.endsWith('/i18n')||name==='./i18n'?{t:value=>value}:name.endsWith('/worker')?{api}:name.endsWith('/LoadingFeedback')?{default:'LoadingFeedback'}:{};
+ const require=name=>fixtureControlModule(name)??(name==='react'?{useState,useRef,useEffect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='lucide-react'?new Proxy({},{get:(_,key)=>key}):name.endsWith('/i18n')||name==='./i18n'?{t:value=>value}:name.endsWith('/worker')?{api}:name.endsWith('/LoadingFeedback')?{default:'LoadingFeedback'}:{});
  const compiled=ts.transpileModule(fs.readFileSync(new URL('../../frontend/'+file,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,module={exports:{}};
  const FakeDate=new Proxy(Date,{get:(target,key)=>key==='now'?()=>now:Reflect.get(target,key)});
  new Function('require','module','exports','Date','setInterval','clearInterval',compiled)(require,module,module.exports,FakeDate,fn=>{timers.set(++timerId,fn);return timerId;},id=>timers.delete(id));

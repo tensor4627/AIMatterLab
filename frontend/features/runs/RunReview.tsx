@@ -6,12 +6,19 @@ import {api} from '../../api/worker';
 import {type Run} from '../../../contracts/dto/runs';
 import {type Environment} from '../../../contracts/dto/compute';
 import {CodeEditor} from "../../ui/widgets";
+import {useConfirm} from '../../ui/ConfirmDialog';
+import {UNDO_TOAST_DURATION,useToast} from '../../ui/Toast';
+import Notice from '../../ui/Notice';
+import ActionBar from '../../ui/ActionBar';
+import Button from '../../ui/Button';
 import RunDetail from './RunDetail';
 import {flattenParameters,setParameter} from "../../../contracts/workflows/task-fields.mjs";
 
 import {ParameterFields} from "../../ui/ParameterFields";
 import {t} from "../../ui/i18n";
-import {RunReviewDraft,reviewDraftIdentity,reviewValues,type ReviewValues} from './run-review-draft.mjs';
+import {RunReviewDraft,reviewDraftIdentity,reviewDraftKey,reviewValues,type DraftRemoval,type ReviewValues} from './run-review-draft.mjs';
+
+const draftRestored='studio:run-review-draft-restored';
 
 export function taskModule(engine:string){
  if(engine.endsWith('.sampling'))return t('增强采样');
@@ -22,6 +29,7 @@ export function taskModule(engine:string){
  return t('分子动力学');
 }
 export default function RunReview({run,draftScope,legacyDraftScopes=[],connected=true,viewActive=true,environments,onRefresh,onError,onReplace,onOpenWorkflow,theme}:{run:Run;draftScope:string;legacyDraftScopes?:string[];connected?:boolean;viewActive?:boolean;environments:Environment[];onRefresh:()=>void|Promise<void>;onError:(e:unknown)=>void;onReplace:(r:Run)=>void;onOpenWorkflow?:(runId:string)=>void;theme:string}){
+ const confirm=useConfirm(),toast=useToast(),askingPath=useRef(false),activeView=useRef(viewActive);activeView.current=viewActive;
  const draftRef=useRef<RunReviewDraft|null>(null),[,redraw]=useState(0),identity=reviewDraftIdentity(draftScope,run),baseline=JSON.stringify(reviewValues(run));
  if(!draftRef.current||draftRef.current.identity!==identity||draftRef.current.fingerprint!==baseline||draftRef.current.inputHashes!==JSON.stringify(run.inputs))draftRef.current=new RunReviewDraft(draftScope,run,()=>window.localStorage,legacyDraftScopes);
  const draft=draftRef.current,{name,environment,gpu,seconds,inputs,parameters,edits}=draft.values;
@@ -38,6 +46,55 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
   return()=>{openSeq.current++;};
  },[identity,baseline]);
  useEffect(()=>{const beforeUnload=(event:BeforeUnloadEvent)=>{if(draft.error&&(draft.dirty||draft.conflict)){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',beforeUnload);return()=>window.removeEventListener('beforeunload',beforeUnload);},[draft]);
+ useEffect(()=>{
+  const restore=(event:Event)=>{
+   const restored=event as CustomEvent<string[]>;
+   if(!restored.detail.includes(draft.key)&&!legacyDraftScopes.some(scope=>restored.detail.includes(reviewDraftKey(scope,run))))return;
+   if(draftRef.current!==draft||draft.dirty||draft.conflict||executing.current)return;
+   draftRef.current=new RunReviewDraft(draftScope,run,()=>window.localStorage,legacyDraftScopes);
+   resetInput();redraw(value=>value+1);
+  };
+  window.addEventListener(draftRestored,restore);
+  return()=>window.removeEventListener(draftRestored,restore);
+ },[draft]);
+ function resetInput(){openSeq.current++;setSelected('');setSource('');setEditable(false);setInputInfo(null);}
+ function offerUndo(removal:DraftRemoval,message:string){
+  toast.show({message,duration:UNDO_TOAST_DURATION,onDismiss:removal.release,action:{label:t('撤销'),onClick:()=>{
+   const {restored,skipped,memoryOnly}=removal.restore();
+   if(restored.length)window.dispatchEvent(new CustomEvent(draftRestored,{detail:restored}));
+   if(skipped||memoryOnly){
+    toast.show({message:t(skipped?(restored.length?'已恢复部分草稿。':'此草稿未能恢复。'):'草稿已恢复到当前会话，本地保存仍不可用。'),severity:'info'});
+   }else toast.show({message:t('已恢复本地草稿')});
+  }}});
+ }
+ function discardDraft(){
+  if(!activeView.current||executing.current||askingPath.current||draftRef.current!==draft)return;
+  const removal=draft.discardWithUndo();
+  if(removal){resetInput();if(removal.count)offerUndo(removal,t('已丢弃本地草稿'));}
+  redraw(value=>value+1);
+ }
+ function clearOtherDrafts(){
+  if(!activeView.current||executing.current||askingPath.current||draftRef.current!==draft||!draft.error||draft.conflict)return;
+  const removal=draft.clearOtherDraftsWithUndo();
+  if(!removal){redraw(value=>value+1);return;}
+  patch({});
+  if(removal.count)offerUndo(removal,t('已清理其他本地审阅草稿'));
+ }
+ async function changeSource(file:string,path:string){
+  if(!activeView.current||executing.current||askingPath.current||draftRef.current!==draft||draft.conflict)return;
+  const values=draft.values;
+  if(path===values.inputs[file])return;
+  if(file in values.edits){
+   askingPath.current=true;
+   try{
+    if(!await confirm({title:t('更换来源路径'),target:file,consequence:t('该文件的本地编辑将被丢弃。'),confirmLabel:t('更换来源路径')}))return;
+   }finally{askingPath.current=false;}
+   if(!mounted.current||!activeView.current||workflowBoundRef.current||executing.current||draftRef.current!==draft||draft.values!==values)return;
+  }
+  const next={...values.edits};delete next[file];
+  patch({inputs:{...values.inputs,[file]:path},edits:next});
+  if(selected===file)resetInput();
+ }
  async function open(name:string){
   const seq=++openSeq.current;setOpening({identity,sequence:seq});
   setSelected(name);setEditable(false);setSource('');setInputInfo(null);
@@ -45,7 +102,7 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
   catch(e){if(seq!==openSeq.current)return;setInputInfo({reason:e instanceof Error?e.message:String(e)});onError(e);}finally{if(seq===openSeq.current)setOpening(null);}
  }
  async function execute(){
-  if(workflowBoundRef.current||executing.current||draft.conflict||draftRef.current!==draft||!connected)return;const transaction={};executing.current=transaction;setWorking(true);
+  if(workflowBoundRef.current||executing.current||askingPath.current||draft.conflict||draftRef.current!==draft||!connected)return;const transaction={};executing.current=transaction;setWorking(true);
   const current=()=>mounted.current&&draftRef.current===draft&&!workflowBoundRef.current;
   let revision:Run|null=null;
   try{
@@ -67,24 +124,30 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
   }catch(e){if(current()){if(revision)setPendingRun(revision);onError(e);await onRefresh();}}finally{if(executing.current===transaction)executing.current=null;if(current()){setWorking(false);setStep('');}}
  }
  if(workflowBound)return <RunDetail connected={connected} viewActive={viewActive} run={run} onRefresh={onRefresh} onError={onError} onOpenWorkflow={onOpenWorkflow} onOpenRun={id=>void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError)}/>;
- if(pendingRun)return <><div className="notice" role="status">{t('执行反馈中断；保留原修订任务，核对状态后再操作。')}<button className="button" disabled={!connected} onClick={()=>void api<Run>('POST','/api/run/status',{run_id:pendingRun.id}).then(setPendingRun).catch(onError)}>{t('核对状态')}</button></div><RunDetail connected={connected} viewActive={viewActive} run={pendingRun} onRefresh={async()=>{setPendingRun(await api<Run>('POST','/api/run/status',{run_id:pendingRun.id}));await onRefresh();}} onError={onError} onOpenWorkflow={onOpenWorkflow} onOpenRun={id=>void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError)}/></>;
+ if(pendingRun)return <><Notice severity="warning" action={<Button disabled={!connected} onClick={()=>void api<Run>('POST','/api/run/status',{run_id:pendingRun.id}).then(setPendingRun).catch(onError)}>{t('核对原记录')}</Button>}>{t('执行反馈中断；保留原修订任务，核对状态后再操作。')}</Notice><RunDetail connected={connected} viewActive={viewActive} run={pendingRun} onRefresh={async()=>{setPendingRun(await api<Run>('POST','/api/run/status',{run_id:pendingRun.id}));await onRefresh();}} onError={onError} onOpenWorkflow={onOpenWorkflow} onOpenRun={id=>void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError)}/></>;
  if(!working&&!['draft','ready'].includes(run.status))return <RunDetail connected={connected} viewActive={viewActive} run={run} onRefresh={onRefresh} onError={onError} onOpenWorkflow={onOpenWorkflow} onOpenRun={id=>{void api<Run>('POST','/api/run/status',{run_id:id}).then(onReplace).catch(onError);}}/>;
  return <div className="task-review page" data-testid="task-review">
   <div className="page-heading"><div><h1>{t('审阅计算参数')}</h1><p>{t(taskModule(run.engine))} · <code>{run.engine}</code></p></div><span className="tag">{t('待你审阅')}</span></div>
   <LoadingFeedback busy={working||opening?.identity===identity&&opening.sequence===openSeq.current} label={working?step||t('处理中…'):t('读取输入中…')}/>
-  {(draft.dirty||draft.conflict||draft.error)&&<div className="notice" role="status" data-testid="run-review-draft"><div>{t(draft.conflict?'原始记录已变化或本地草稿无法读取；旧草稿保留，未自动套用。':draft.error?'本地持久化失败；修改仅保留在当前界面会话，关闭界面前请重试保存。':'本地编辑草稿已保留，尚未提交；切换页面后可继续编辑。')}{draft.conflict&&draft.saved&&<details><summary>{t('查看原草稿')}</summary><pre>{JSON.stringify(draft.saved.values,null,2)}</pre></details>}</div><button className="button" disabled={working} data-testid="discard-run-review-draft" onClick={()=>{if(!window.confirm(t('丢弃本地编辑并恢复当前运行记录？')))return;if(draft.discard()){setSelected('');setSource('');setEditable(false);setInputInfo(null);openSeq.current++;}redraw(value=>value+1);}}>{t('丢弃本地草稿')}</button>{draft.error&&!draft.conflict&&<><button className="button" onClick={()=>patch({})}>{t('重试保存草稿')}</button><button className="button" disabled={working} onClick={()=>{if(window.confirm(t('将丢弃其他运行的本地未提交编辑；此操作不修改运行记录。继续？'))&&draft.clearOtherDrafts())patch({});}}>{t('清理其他本地审阅草稿')}</button></>}</div>}
+  {(draft.dirty||draft.conflict||draft.error)&&<Notice severity={draft.conflict||draft.error?'warning':'info'} data-testid="run-review-draft" action={<>
+   <button className="button" disabled={working} data-testid="discard-run-review-draft" onClick={discardDraft}>{t('丢弃本地草稿')}</button>
+   {draft.error&&!draft.conflict&&<><button className="button" disabled={working} onClick={()=>patch({})}>{t('重试保存草稿')}</button><button className="button" disabled={working} onClick={clearOtherDrafts}>{t('清理其他本地审阅草稿')}</button></>}
+  </>}>
+   {t(draft.conflict?'原始记录已变化或本地草稿无法读取；旧草稿保留，未自动套用。':draft.error?'本地持久化失败；修改仅保留在当前界面会话，关闭界面前请重试保存。':'本地编辑草稿已保留，尚未提交；切换页面后可继续编辑。')}
+   {draft.conflict&&draft.saved&&<details><summary>{t('查看原草稿')}</summary><pre>{JSON.stringify(draft.saved.values,null,2)}</pre></details>}
+  </Notice>}
   <section className="card"><h3><Tooltip content={t('任务草稿已准备。检查输入后，点击执行才会开始验证与计算。')}>{t('任务与资源')}</Tooltip></h3>
    <div className="form-row"><label>{t('计算名称')}<input disabled={working||draft.conflict} value={name} onChange={e=>patch({name:e.target.value})}/></label><label>{t('计算环境')}<select disabled={working||draft.conflict} value={environment} onChange={e=>patch({environment:e.target.value})}>{environments.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label></div>
    <div className="form-row"><label>GPU<input disabled={working||draft.conflict} type="number" min={0} value={gpu} onChange={e=>patch({gpu:Number(e.target.value)})}/></label><label>{t('时长上限 · s')}<input disabled={working||draft.conflict} type="number" min={1} value={seconds} onChange={e=>patch({seconds:Number(e.target.value)})}/></label></div>
    <h4>{t('科学参数')} {run.continuation_metadata?.parameter_scope==='inherited_unverified'&&<Tooltip content={t('这些值继承自父作业，需按当前实际输入复核；checkpoint 速度尚未检查。参数仍可编辑。')}><span className="tag">{t('继承值')}</span></Tooltip>}</h4><ParameterFields fields={flattenParameters(JSON.parse(parameters))} parameters={JSON.parse(parameters)} disabled={working||draft.conflict} onError={onError} onChange={(key,value)=>patch({parameters:JSON.stringify(setParameter(JSON.parse(parameters),key,value))})}/>
   </section>
   <section className="card"><h3><FileCode2 size={15}/><Tooltip content={t('默认使用草稿的不可变快照。可替换来源路径，或打开文本文件直接修改。')}>{t('实际输入文件')}</Tooltip></h3>
-   {Object.entries(inputs).map(([file,path])=><div className="review-input" key={file}><button className="button" disabled={working||path!==run.directory+'/simulation/'+file} onClick={()=>void open(file)}>{file}{file in edits?' *':''}</button><input disabled={working||draft.conflict} value={path} aria-label={file} onChange={e=>{if(file in edits&&!window.confirm(t('修改来源路径将丢弃该文件已编辑的内容，是否继续？')))return;const next={...edits};delete next[file];patch({inputs:{...inputs,[file]:e.target.value},edits:next});if(selected===file){openSeq.current++;setSelected('');setSource('');}}}/></div>)}
+   {Object.entries(inputs).map(([file,path])=><div className="review-input" key={file}><button className="button" disabled={working||path!==run.directory+'/simulation/'+file} onClick={()=>void open(file)}>{file}{file in edits?' *':''}</button><input disabled={working||draft.conflict} value={path} aria-label={file} onChange={e=>void changeSource(file,e.target.value)}/></div>)}
    {selected&&<div className="review-source"><div className="toolbar"><span>{selected}</span><small className="mono">{inputInfo?.sha256?.slice(0,16)}</small></div>
     {editable?<CodeEditor value={source} readOnly={working||draft.conflict} onChange={value=>{if(!working&&!draft.conflict){setSource(value);patch({edits:{...edits,[selected]:value}});}}} language={/\.py$/.test(selected)?'python':/\.ya?ml$/.test(selected)?'yaml':'plaintext'} theme={theme}/>:<p className="muted">{inputInfo?.reason||t('读取输入中…')}</p>}
    </div>}
   </section>
-  <div className="review-execute"><div><ShieldCheck size={17}/><span>{t('修改会生成新的输入快照；提交时检查实际输入和目标环境。')}</span></div><button className="button primary" data-testid="execute-reviewed" disabled={working||draft.conflict||!connected||!environment||!(seconds>=1)||!(gpu>=0)} onClick={()=>void execute()}><Play size={15}/>{working?step:t('确认并执行')}</button></div>
-  {run.validation.status==='failed'&&<pre className="report" role="alert">{run.validation.message}</pre>}
+  <ActionBar className="review-execute" status={<><ShieldCheck size={17}/><span>{t('修改会生成新的输入快照；提交时检查实际输入和目标环境。')}</span></>}><Button variant="primary" data-testid="execute-reviewed" disabled={working||draft.conflict||!connected||!environment||!(seconds>=1)||!(gpu>=0)} onClick={()=>void execute()}><Play size={15}/>{working?step:t('确认并执行')}</Button></ActionBar>
+  {run.validation.status==='failed'&&<Notice severity="error"><pre className="report">{run.validation.message}</pre></Notice>}
  </div>;
 }

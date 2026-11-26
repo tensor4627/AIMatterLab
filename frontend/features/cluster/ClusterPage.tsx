@@ -1,3 +1,6 @@
+import Button from '../../ui/Button';
+import Notice from '../../ui/Notice';
+import Disclosure from '../../ui/Disclosure';
 import LoadingFeedback from '../../ui/LoadingFeedback';
 import ClusterFiles from './ClusterFiles';
 import ClusterQueueSettings from './ClusterQueueSettings';
@@ -15,7 +18,8 @@ import {type Settings} from '../../../contracts/dto/settings';
 import {type ClusterRun} from '../../../contracts/dto/runs';
 import {t} from "../../ui/i18n";
 import Tooltip from "../../ui/Tooltip";
-import {Badge,statusNames} from "../../ui/Dialogs";
+import {StatusBadge,statusLabel} from "../../ui/StatusBadge";
+import ActionBar from '../../ui/ActionBar';
 import {ClusterObservationStatus,observationDelay,usePageVisibility} from './cluster-observation';
 import {clusterObservationTime,clusterReadiness,latestClusterObservation,type ClusterConnectionCheck,type ClusterProbe,type ClusterSshTest} from './cluster-readiness';
 import './cluster.css';
@@ -232,7 +236,7 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
   finally{finishOperation();}
  }
 
- const observationLabel=(status='not_run')=>t(statusNames[status]||status);
+ const observationLabel=(status='not_run')=>statusLabel(status);
  const environmentEditor=<ClusterEnvironmentEditor draft={environment} disabled={busy||loadingProfile}
   onRow={(section,edit)=>editEnvironment(previous=>editEnvironmentRow(previous,section,edit))}
   onText={text=>editEnvironment(previous=>readEnvironmentText(previous,text))}/>;
@@ -240,19 +244,19 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
  return <div className="page cluster-page" data-testid="cluster-settings">
  <div className="page-heading"><h1>{t('集群连接与托管')}</h1><Server size={23} aria-hidden="true"/></div>
  <LoadingFeedback busy={busy||loadingProfile} label={loadingProfile?t('正在读取连接配置…'):busyLabel}/>
- {!worker&&<button className="button primary" data-guide-target="cluster-connect-worker" onClick={()=>void onConnectCompute().catch(onError)}>{t('连接 WSL 作业服务')}</button>}
- {needsWorkerUpdate&&<section className="notice" role="status"><p>{t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。')}</p><button className="button" disabled={busy||loadingProfile} onClick={()=>void onConnectCompute().catch(onError)}>{t('按原来源更新作业服务')}</button></section>}
+ {!worker&&<Button variant="primary"  data-guide-target="cluster-connect-worker" onClick={()=>void onConnectCompute().catch(onError)}>{t('连接 WSL 作业服务')}</Button>}
+ {needsWorkerUpdate&&<Notice compact severity="warning"><p>{t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。')}</p><Button  disabled={busy||loadingProfile} onClick={()=>void onConnectCompute().catch(onError)}>{t('按原来源更新作业服务')}</Button></Notice>}
  <div className="cluster-selection">
   <div className="cluster-selection-header"><div className="cluster-selection-fields">
    <select data-guide-target={profiles.length?'cluster-profile':undefined} aria-label={t('集群配置')} value={value.id||''} onChange={e=>e.target.value?void load(e.target.value):newProfile()}><option value="">{t('新连接')}</option>{profiles.map(p=><option key={p.id} value={p.id}>{p.name} · {p.scheduler} · v{p.version}</option>)}</select>
    <select aria-label={t('导入本机已有连接')} value="" onChange={e=>{if(e.target.value)void importExisting(e.target.value);}}><option value="">{t('导入本机已有连接')}</option>{existing.map(e=><option key={e.ref} value={e.ref}>{e.source?e.source+' · ':''}{e.label}</option>)}</select>
   </div>
-  <button type="button" className="icon-button" aria-label={t('刷新连接列表')} title={t('刷新连接列表')} disabled={!worker||loadingProfile} onClick={()=>void refreshProfiles(true)}><RefreshCw size={16} aria-hidden="true"/></button>
+  <Button variant="icon" size="sm" tooltip={t('刷新连接列表')} type="button"  aria-label={t('刷新连接列表')}  disabled={!worker||loadingProfile} onClick={()=>void refreshProfiles(true)}><RefreshCw size={16} aria-hidden="true"/></Button>
   </div>
   {value.id&&<div className="cluster-selection-actions">
-   <button className="button" data-testid="shared-ssh-interactive" disabled={loadingProfile||busy||formDirty||importBlocked||!worker} onClick={()=>onTerminal(value.id,'interactive',value.version)}><Terminal size={15}/>{t('交互式登录')}</button>
-   <button className="button" data-testid="shared-ssh-key" disabled={loadingProfile||busy||formDirty||importBlocked||!worker} onClick={()=>onTerminal(value.id,'key',value.version)}>{t('密钥自动登录')}</button>
-   {project&&<button className="button" onClick={()=>onAgent(t('为当前项目 {project} 准备集群计算任务，cluster_id={cluster}，scheduler={scheduler}。先 present_task 展示流程和科学参数，询问缺失输入文件和引擎条件；prepare_cluster_run 只准备本机快照与批处理脚本，停下等待我审阅提交。').replace('{project}',project.id).replace('{cluster}',value.id).replace('{scheduler}',value.scheduler))}><Sparkles size={15}/>{t('让 Agent 准备集群任务')}</button>}
+   <Button  data-testid="shared-ssh-interactive" disabled={loadingProfile||busy||formDirty||importBlocked||!worker} onClick={()=>onTerminal(value.id,'interactive',value.version)}><Terminal size={15}/>{t('交互式登录')}</Button>
+   <Button  data-testid="shared-ssh-key" disabled={loadingProfile||busy||formDirty||importBlocked||!worker} onClick={()=>onTerminal(value.id,'key',value.version)}>{t('密钥自动登录')}</Button>
+   {project&&<Button  onClick={()=>onAgent(t('为当前项目 {project} 准备集群计算任务，cluster_id={cluster}，scheduler={scheduler}。先 present_task 展示流程和科学参数，询问缺失输入文件和引擎条件；prepare_cluster_run 只准备本机快照与批处理脚本，停下等待我审阅提交。').replace('{project}',project.id).replace('{cluster}',value.id).replace('{scheduler}',value.scheduler))}><Sparkles size={15}/>{t('让 Agent 准备集群任务')}</Button>}
   </div>}
  </div>
  <nav className="cluster-readiness" aria-label={t('集群就绪状态')} data-testid="cluster-connection-health">
@@ -266,24 +270,24 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
    </button>;
   })}
  </nav>
- {failedAt&&<p className="notice" role="status" data-testid="cluster-saved-check-failed">{t('最近保存的集群连接检查失败。')}{' '}
-  <time dateTime={new Date(failedAt).toISOString()}>{new Date(failedAt).toLocaleString()}</time></p>}
- {probeUnconfirmed&&<p className="notice" role="status" data-testid="cluster-probe-unconfirmed">{t('本次集群探测结果未确认。上次观测保留供参考。')}</p>}
- {importBlocked&&<p className="notice" role="status">{t('导入来源包含尚未支持的路由或认证引用；请手动核对连接，暂不能测试或保存。')}</p>}
+ {failedAt&&<Notice compact   data-testid="cluster-saved-check-failed">{t('最近保存的集群连接检查失败。')}{' '}
+  <time dateTime={new Date(failedAt).toISOString()}>{new Date(failedAt).toLocaleString()}</time></Notice>}
+ {probeUnconfirmed&&<Notice compact   data-testid="cluster-probe-unconfirmed">{t('本次集群探测结果未确认。上次观测保留供参考。')}</Notice>}
+ {importBlocked&&<Notice compact  >{t('导入来源包含尚未支持的路由或认证引用；请手动核对连接，暂不能测试或保存。')}</Notice>}
  <section className="cluster-observation" data-testid="cluster-current-observation">
   {tab==='connection'&&<div>{value.identity_file?t('使用显式密钥引用'):<Tooltip content={t('使用 SSH 客户端已有默认认证；未指定密钥不代表没有密钥。')}>{t('使用默认认证')}</Tooltip>}</div>}
   {scienceTab&&currentProbe&&<div>{t('队列观察')} · {observationLabel(currentProbe.queue_status)} · {Array.isArray(currentProbe.queues)?currentProbe.queues.length:'?'}{currentProbe.observed_at?' · '+new Date(currentProbe.observed_at*1000).toLocaleString():''}</div>}
-  {value.id&&!scienceTab&&<button className="button" disabled={busy||loadingProfile||!worker} onClick={()=>void detect()}><RefreshCw size={15}/>{t('检查连接与调度器')}</button>}
+  {value.id&&!scienceTab&&<Button  disabled={busy||loadingProfile||!worker} onClick={()=>void detect()}><RefreshCw size={15}/>{t('检查连接与调度器')}</Button>}
  </section>
  <div className="subtabs" aria-label={t('集群配置步骤')}>{[['connection','SSH 连接'],['environment','环境探测'],['queues','队列与环境']].map(([id,name])=>{
   const active=tab===id||id==='environment'&&scienceTab;
   return <button key={id} className={active?'active':''} aria-current={active?'step':undefined} onClick={()=>selectTab(id)}>{t(name)}</button>;
- })}</div><details className="settings-advanced"><summary>{t('更多')}{['skill','files','monitor'].includes(tab)?' · '+t(({skill:'提交 Skill',files:'远程文件',monitor:'作业监视'} as Record<string,string>)[tab]):''}</summary><div className="button-row">{[['skill','提交 Skill'],['files','远程文件'],['monitor','作业监视']].map(([id,name])=><button className="button" key={id} aria-pressed={tab===id} onClick={()=>selectTab(id)}>{t(name)}</button>)}</div></details>
+ })}</div><Disclosure className="settings-advanced" summary={<>{t('更多')}{['skill','files','monitor'].includes(tab)?' · '+t(({skill:'提交 Skill',files:'远程文件',monitor:'作业监视'} as Record<string,string>)[tab]):''}</>}><div className="button-row">{[['skill','提交 Skill'],['files','远程文件'],['monitor','作业监视']].map(([id,name])=><Button  key={id} aria-pressed={tab===id} onClick={()=>selectTab(id)}>{t(name)}</Button>)}</div></Disclosure>
  {tab==='connection'&&<section className="card cluster-connection-fields"><div className="form-row"><label>{t('连接名称')}<input value={value.name} onChange={e=>patch({name:e.target.value})}/></label><label>{t('调度系统')}<select value={value.scheduler} onChange={e=>patch({scheduler:e.target.value})}><option value="lsf">LSF</option><option value="slurm">Slurm</option></select></label></div>
  <div className="cluster-auth-fields">
   <label>{t('认证方式')}<select value={value.auth_mode||'key'} onChange={e=>patch({auth_mode:e.target.value})}><option value="key">{t('已有密钥 / SSH agent')}</option><option value="interactive">{t('WSL 私有交互认证（含二步验证）')}</option></select></label>
-  <button type="button" className="button" data-guide-target={show?undefined:'cluster-host'} aria-expanded={show}
-   onClick={()=>setRevealed(show?null:privateContext)}>{show?<EyeOff size={15}/>:<Eye size={15}/>} {t(show?'隐藏私有连接字段':'显示私有连接字段')}</button>
+  <Button type="button"  data-guide-target={show?undefined:'cluster-host'} aria-expanded={show}
+   onClick={()=>setRevealed(show?null:privateContext)}>{show?<EyeOff size={15}/>:<Eye size={15}/>} {t(show?'隐藏私有连接字段':'显示私有连接字段')}</Button>
  </div>
 
  <div className="form-row">
@@ -292,31 +296,36 @@ export default function ClusterPage({worker,workerGeneration=0,sourceId='',visib
   <label>{t('SSH 用户名')}{show?<input data-testid="ssh-username" type="text" autoComplete="off" spellCheck={false}
    value={value.username} onChange={e=>patch({username:e.target.value})}/>:masked}</label>
  </div>
- <details><summary>{t('高级连接设置：客户端、密钥、端口与路由')}</summary>
+ <Disclosure summary={<>{t('高级连接设置：客户端、密钥、端口与路由')}</>}>
  <div className="form-row"><label>{t('端口')}{show?<input data-testid="ssh-port" type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
   value={value.port} onChange={e=>patch({port:e.target.value})}/>:masked}</label></div>
  <div className="cluster-private-key">
   <label>{t('密钥引用路径（不读取密钥内容）')}{show?<input type="text" autoComplete="off" spellCheck={false} value={value.identity_file}
    onChange={e=>patch({identity_file:e.target.value})}/>:masked}</label>
-  <button className="button" onClick={()=>void invoke('file.choose').then(path=>path&&patch({identity_file:path})).catch(onError)}>{t('选择')}</button>
+  <Button  onClick={()=>void invoke('file.choose').then(path=>path&&patch({identity_file:path})).catch(onError)}>{t('选择')}</Button>
  </div>
  <p>{t('必须显式填写远程用户名，不使用本机 Windows 用户名。旧连接会拆分 user@host，修改后保存新版本。')}</p>
  <label>{t('SSH 客户端路径')}<input value={value.ssh_client} onChange={e=>patch({ssh_client:e.target.value})}/></label>
  <label>{t('本地 ProxyJump · 每行一个跳板')}<textarea rows={2} value={(value.proxy_jump||[]).join('\n')} onChange={e=>patch({proxy_jump:e.target.value.split('\n').map(v=>v.trim()).filter(Boolean)})}/></label><small>{t('受控交互跳板须逐跳填写 用户@主机:端口；IPv6 主机使用方括号。历史密钥别名保持原语义。')}</small><label>{t('集群内部跳转 · 每行一个 Host')}<textarea rows={2} value={via} onChange={e=>setVia(e.target.value)} placeholder="login2"/></label><small>{t('历史密钥 / via 路由沿用现有客户端配置；AIMatterLab 不额外启用 agent forwarding，也不复制密钥。受控交互模式明确禁用 agent forwarding。')}</small>
- <label>{t('额外只读数据根目录 · 每行一个')}<textarea rows={2} value={readRoots} onChange={e=>setReadRoots(e.target.value)}/></label><label>{t('远程作业根目录')}<input value={value.remote_root} onChange={e=>patch({remote_root:e.target.value})}/></label></details><button data-testid="ssh-test" className="button primary" disabled={busy||loadingProfile||importBlocked||!worker||!value.host||!value.username||!queueValid} onClick={()=>void testSsh()}>{t('测试 SSH 连接')}</button>{value.auth_mode==='interactive'&&<details><summary>{t('私有认证与转发')}</summary><p>{t('二步验证使用已核对的 WSL OpenSSH 和私有终端；不会复制 Windows 私钥，也不会替换已有转发入口。')}</p><div className="notice"><p>{t('人工认证需要所选 WSL 内的原生 OpenSSH。当前客户端：')} <code>{value.ssh_client}</code></p><button className="button" disabled={busy||loadingProfile||value.ssh_client==='/usr/bin/ssh'} onClick={()=>patch({ssh_client:'/usr/bin/ssh'})}>{t('选择 WSL OpenSSH（/usr/bin/ssh）')}</button><p>{t('仅在你点击后修改表单，保存连接后生效；自定义客户端可在高级设置中填写。密钥引用必须属于所选 WSL，不会转换路径或复制 Windows 私钥。')}</p></div><button className="button" disabled={busy||loadingProfile||!worker||!value.id||formDirty||importBlocked} onClick={authenticate}>{t('打开私有认证')}</button></details>}{formDirty&&value.id&&<p className="notice">{t('连接有未保存修改；请先保存连接或恢复已保存配置。')} <button className="button" disabled={busy} onClick={()=>void load(value.id)}>{t('恢复已保存配置')}</button></p>}</section>}
- {scienceTab&&<section className="card"><div className="button-row"><button className="button primary" disabled={busy||!value.id} onClick={()=>void detect()}><RefreshCw size={15}/>{t('只读探测')}</button><button className="button" disabled={!value.id} onClick={()=>onAgent(t('协助配置集群 {id}。结合用户确认的队列和登记环境准备配置草稿，不提交作业或修改授权。探测能力摘要：{summary}').replace('{id}',value.id).replace('{summary}',JSON.stringify(safeProbeSummary(currentProbe))))}><Sparkles size={15}/>{t('让 Agent 协助配置')}</button></div><p>{t('登录节点观察不代表计算节点 GPU、模型或 Bias 已通过验证。')}</p>{currentProbe?.selected_scheduler_match===false&&<div className="notice" role="status"><span>{t('所选调度器与探测结果不同')}</span>{(currentProbe.detected_schedulers||[]).filter((scheduler:string)=>['lsf','slurm'].includes(scheduler)&&scheduler!==value.scheduler).map((scheduler:string)=><button className="button" key={scheduler} data-testid={'scheduler-draft-'+scheduler} disabled={busy||loadingProfile} onClick={()=>patch({scheduler})}>{t('改用探测到的调度器草稿')} · {scheduler}</button>)}</div>}{currentProbe&&<details><summary>{t('探测详情')}</summary><pre className="report">{JSON.stringify(currentProbe,null,2)}</pre></details>}
+ <label>{t('额外只读数据根目录 · 每行一个')}<textarea rows={2} value={readRoots} onChange={e=>setReadRoots(e.target.value)}/></label><label>{t('远程作业根目录')}<input value={value.remote_root} onChange={e=>patch({remote_root:e.target.value})}/></label></Disclosure><Button variant="primary" data-testid="ssh-test"  disabled={busy||loadingProfile||importBlocked||!worker||!value.host||!value.username||!queueValid} onClick={()=>void testSsh()}>{t('测试 SSH 连接')}</Button>{value.auth_mode==='interactive'&&<Disclosure summary={<>{t('私有认证与转发')}</>}><p>{t('二步验证使用已核对的 WSL OpenSSH 和私有终端；不会复制 Windows 私钥，也不会替换已有转发入口。')}</p><Notice compact announce={false} ><p>{t('人工认证需要所选 WSL 内的原生 OpenSSH。当前客户端：')} <code>{value.ssh_client}</code></p><Button  disabled={busy||loadingProfile||value.ssh_client==='/usr/bin/ssh'} onClick={()=>patch({ssh_client:'/usr/bin/ssh'})}>{t('选择 WSL OpenSSH（/usr/bin/ssh）')}</Button><p>{t('仅在你点击后修改表单，保存连接后生效；自定义客户端可在高级设置中填写。密钥引用必须属于所选 WSL，不会转换路径或复制 Windows 私钥。')}</p></Notice><Button  disabled={busy||loadingProfile||!worker||!value.id||formDirty||importBlocked} onClick={authenticate}>{t('打开私有认证')}</Button></Disclosure>}{formDirty&&value.id&&<Notice compact announce={false} >{t('连接有未保存修改；请先保存连接或恢复已保存配置。')} <Button  disabled={busy} onClick={()=>void load(value.id)}>{t('恢复已保存配置')}</Button></Notice>}</section>}
+ {scienceTab&&<section className="card"><div className="button-row"><Button variant="primary"  disabled={busy||!value.id} onClick={()=>void detect()}><RefreshCw size={15}/>{t('只读探测')}</Button><Button  disabled={!value.id} onClick={()=>onAgent(t('协助配置集群 {id}。结合用户确认的队列和登记环境准备配置草稿，不提交作业或修改授权。探测能力摘要：{summary}').replace('{id}',value.id).replace('{summary}',JSON.stringify(safeProbeSummary(currentProbe))))}><Sparkles size={15}/>{t('让 Agent 协助配置')}</Button></div><p>{t('登录节点观察不代表计算节点 GPU、模型或 Bias 已通过验证。')}</p>{currentProbe?.selected_scheduler_match===false&&<Notice compact  ><span>{t('所选调度器与探测结果不同')}</span>{(currentProbe.detected_schedulers||[]).filter((scheduler:string)=>['lsf','slurm'].includes(scheduler)&&scheduler!==value.scheduler).map((scheduler:string)=><Button  key={scheduler} data-testid={'scheduler-draft-'+scheduler} disabled={busy||loadingProfile} onClick={()=>patch({scheduler})}>{t('改用探测到的调度器草稿')} · {scheduler}</Button>)}</Notice>}{currentProbe&&<Disclosure summary={<>{t('探测详情')}</>}><pre className="report">{JSON.stringify(currentProbe,null,2)}</pre></Disclosure>}
   <div className="cluster-science-environment" role="region" aria-label={t('科学环境')} ref={scienceEditor} tabIndex={-1}>{environmentEditor}</div>
  </section>}
- {queuesVisited&&<div hidden={tab!=='queues'}>{serviceVersion!=='current'&&!needsWorkerUpdate&&<div className="notice" role="status"><span>{t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。')}</span><button className="button" disabled={busy||loadingProfile} onClick={()=>void onConnectCompute().catch(onError)}>{t('按原来源更新作业服务')}</button></div>}<ClusterQueueSettings key={[value.id,value.version,project?.id].join(':')} profile={value} project={project} worker={worker&&serviceVersion==='current'} busy={busy||loadingProfile} profileDirty={formDirty} visible={tab==='queues'} canCancelOptIn={!savedQueueOptIn} environmentText={environmentValue?environment.text:null} probe={currentProbe} onTargets={targets=>{setValue((old:any)=>{const {queue_targets,...rest}=old;return targets===undefined?rest:{...old,queue_targets:targets};});}} onValidity={setQueueValid} onRefresh={onRefresh} onError={onError} onQueueTest={onQueueTest}/></div>}
- {tab==='skill'&&<section className="card"><h3>{t('版本化集群提交 Skill')}</h3>{value.id&&project&&<button className="button" onClick={()=>void api('POST','/api/cluster/skill',{project_id:project.id,cluster_id:value.id}).then(r=>setSkillSource(r.source)).catch(onError)}>{t('查看注册的 SKILL.md')}</button>}{skillSource&&<pre className="report">{skillSource}</pre>}<p>{t('Agent 可以提出修改；连接、授权及提交 Skill 必须在此审阅保存。作业绑定保存时的版本。')}</p><div className="form-row"><div className="queue-field"><label>{t('队列 / 分区')}<input aria-label={t('队列 / 分区')} value={value.queue||''} onChange={e=>patch({queue:e.target.value})}/></label><QueueChoices queues={currentProbe?.queues} value={value.queue||''} language={settings.language||'zh-CN'} onChange={queue=>patch({queue})}/></div>{resourceLimits.map(key=><label key={key}>{key}<input type="number" min={key==='gpus'?0:1} value={value.limits[key]??''} onChange={e=>patch({limits:{...value.limits,[key]:e.target.value===''?undefined:e.target.valueAsNumber}})}/></label>)}</div><label>{t('LSF 内存预留语义 · memory_mb 为合计')}<select value={value.lsf_memory_scope||'per_slot'} onChange={e=>patch({lsf_memory_scope:e.target.value})}><option value="per_slot">{t('按 CPU slot 预留（自动均分合计内存）')}</option><option value="per_job">{t('按整个作业预留')}</option></select></label><label>{t('Modules / 虚拟环境初始化 · Bash')}<textarea className="skill-script" rows={9} value={value.activation} onChange={e=>patch({activation:e.target.value})} placeholder="module load …"/></label><label>{t('提交 Skill 补充约定')}<textarea rows={4} value={value.notes||''} onChange={e=>patch({notes:e.target.value})}/></label>{environmentEditor}</section>}
+ {queuesVisited&&<div hidden={tab!=='queues'}>{serviceVersion!=='current'&&!needsWorkerUpdate&&<Notice compact  ><span>{t('此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。')}</span><Button  disabled={busy||loadingProfile} onClick={()=>void onConnectCompute().catch(onError)}>{t('按原来源更新作业服务')}</Button></Notice>}<ClusterQueueSettings key={[value.id,value.version,project?.id].join(':')} profile={value} project={project} worker={worker&&serviceVersion==='current'} busy={busy||loadingProfile} profileDirty={formDirty} visible={tab==='queues'} canCancelOptIn={!savedQueueOptIn} environmentText={environmentValue?environment.text:null} probe={currentProbe} onTargets={targets=>{setValue((old:any)=>{const {queue_targets,...rest}=old;return targets===undefined?rest:{...old,queue_targets:targets};});}} onValidity={setQueueValid} onRefresh={onRefresh} onError={onError} onQueueTest={onQueueTest}/></div>}
+ {tab==='skill'&&<section className="card"><h3>{t('版本化集群提交 Skill')}</h3>{value.id&&project&&<Button  onClick={()=>void api('POST','/api/cluster/skill',{project_id:project.id,cluster_id:value.id}).then(r=>setSkillSource(r.source)).catch(onError)}>{t('查看注册的 SKILL.md')}</Button>}{skillSource&&<pre className="report">{skillSource}</pre>}<p>{t('Agent 可以提出修改；连接、授权及提交 Skill 必须在此审阅保存。作业绑定保存时的版本。')}</p><div className="form-row"><div className="queue-field"><label>{t('队列 / 分区')}<input aria-label={t('队列 / 分区')} value={value.queue||''} onChange={e=>patch({queue:e.target.value})}/></label><QueueChoices queues={currentProbe?.queues} value={value.queue||''} language={settings.language||'zh-CN'} onChange={queue=>patch({queue})}/></div>{resourceLimits.map(key=><label key={key}>{key}<input type="number" min={key==='gpus'?0:1} value={value.limits[key]??''} onChange={e=>patch({limits:{...value.limits,[key]:e.target.value===''?undefined:e.target.valueAsNumber}})}/></label>)}</div><label>{t('LSF 内存预留语义 · memory_mb 为合计')}<select value={value.lsf_memory_scope||'per_slot'} onChange={e=>patch({lsf_memory_scope:e.target.value})}><option value="per_slot">{t('按 CPU slot 预留（自动均分合计内存）')}</option><option value="per_job">{t('按整个作业预留')}</option></select></label><label>{t('Modules / 虚拟环境初始化 · Bash')}<textarea className="skill-script" rows={9} value={value.activation} onChange={e=>patch({activation:e.target.value})} placeholder="module load …"/></label><label>{t('提交 Skill 补充约定')}<textarea rows={4} value={value.notes||''} onChange={e=>patch({notes:e.target.value})}/></label>{environmentEditor}</section>}
  {tab==='files'&&<ClusterFiles key={[project?.id,value.id,value.version].join(':')} projectId={project?.id} clusterId={value.id} scope={JSON.stringify([project?.id,value.id,value.version,worker,serviceVersion,value.remote_root,readRoots])} roots={[value.remote_root,...readRoots.split('\n').filter(Boolean)]} enabled={worker&&!formDirty&&!loadingProfile&&!importBlocked} onError={onError}/>}
  {tab==='monitor'&&<section className="card" data-testid="cluster-monitor">
   <p>{t('提交后由集群调度器托管；关闭桌面不会停止作业。失联显示 unknown，重新连接核对作业身份，不重复提交。')}</p>
-  <button type="button" className="button" disabled={!worker||monitor.state?.pending===true} onClick={()=>void monitor.refresh()}><RefreshCw size={15}/>{t('同步记录')}</button>
+  <Button type="button"  disabled={!worker||monitor.state?.pending===true} onClick={()=>void monitor.refresh()}><RefreshCw size={15}/>{t('同步记录')}</Button>
   <ClusterObservationStatus connected={worker} observedAt={monitor.state?.observedAt} error={!!monitor.state?.error} paused={monitor.state?.paused}/>
   <LoadingFeedback busy={worker&&!monitor.state?.value&&!monitor.state?.error} label={t('正在同步记录…')}/>
-  {monitor.state?.value?.filter(run=>!project||run.project_id===project.id).map(run=><button className="cluster-run-row" key={run.id} onClick={()=>{if(mounted.current&&workerContext.current.source===source)onRun(run.id);}}><span>{run.name}<small>{run.engine} · {run.cluster.scheduler}</small></span><Badge status={run.status}/><span>{run.job_id||t('未提交')}</span></button>)}
+  {monitor.state?.value?.filter(run=>!project||run.project_id===project.id).map(run=><button className="cluster-run-row" key={run.id} onClick={()=>{if(mounted.current&&workerContext.current.source===source)onRun(run.id);}}><span>{run.name}<small>{run.engine} · {run.cluster.scheduler}</small></span><StatusBadge status={run.status}/><span>{run.job_id||t('未提交')}</span></button>)}
  </section>}
- <div className="cluster-footer"><span role="status">{notice}</span>{project&&<button className="button" disabled={busy||loadingProfile||!worker||!value.id||formDirty} onClick={()=>void grant()}>{t('允许当前项目使用此连接')}</button>}<button className="button primary" disabled={busy||loadingProfile||importBlocked||!worker||!value.host||!value.username} onClick={()=>void save()}><Save size={15}/>{t('保存连接')}</button></div>
+ <ActionBar status={<span role="status">{notice}</span>}>
+  {project&&<Button disabled={busy||loadingProfile||!worker||!value.id||formDirty} onClick={()=>void grant()}>{t('允许当前项目使用此连接')}</Button>}
+  <Button variant="primary" disabled={busy||loadingProfile||importBlocked||!worker||!value.host||!value.username} loading={busy}
+   disabledReason={!worker?t('请先连接作业服务。'):!value.host||!value.username?t('请填写主机和用户名。'):undefined}
+   onClick={()=>void save()}><Save size={15}/>{t('保存连接')}</Button>
+ </ActionBar>
  </div>;
 }

@@ -1,3 +1,24 @@
-.codex-version-notice{position:fixed;top:56px;right:20px;z-index:var(--z-version-notice);max-width:min(420px,calc(100vw - 40px));box-shadow:0 8px 28px #0003}
-.codex-version-notice strong{display:block;font-weight:600;line-height:1.5}
-.codex-version-notice small{display:block;margin-top:4px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
+@layer features {
+  .codex-version-notice {
+    position: fixed;
+    top: 56px;
+    right: 20px;
+    z-index: var(--z-version-notice);
+    max-width: min(420px,calc(100vw - 40px));
+    box-shadow: var(--shadow-sm);
+  }
+
+  .codex-version-notice strong {
+    display: block;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .codex-version-notice small {
+    display: block;
+    margin-top: var(--space-2);
+    color: var(--muted);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+}

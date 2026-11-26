@@ -1,0 +1,73 @@
+@layer components {
+  .aml-button {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    min-block-size: 34px;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-xs);
+    background: var(--raised);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--font-body);
+    line-height: 1.25;
+    text-align: center;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    transition: background-color var(--motion-snappy-dur), border-color var(--motion-snappy-dur);
+  }
+  .aml-button > svg { flex: none; }
+  .aml-button[data-size=sm] {
+    min-block-size: 28px;
+    padding-inline: var(--space-3);
+    font-size: var(--font-meta);
+  }
+  .aml-button[data-variant=primary] {
+    border-color: transparent;
+    background: var(--accent-fill);
+    color: var(--on-accent);
+  }
+  .aml-button[data-variant=danger] {
+    border-color: transparent;
+    background: var(--danger-fill);
+    color: var(--on-danger);
+  }
+  .aml-button:is([data-variant=ghost], [data-variant=icon]) {
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+  }
+  .aml-button[data-variant=icon] { min-inline-size: 34px; padding: var(--space-2); }
+  .aml-button[data-variant=icon][data-size=sm] { min-inline-size: 28px; }
+  .aml-button:enabled:not([aria-disabled=true]):hover { background: var(--fill-hover); color: var(--text); }
+  .aml-button:enabled:not([aria-disabled=true]):active { background: var(--fill-active); }
+  .aml-button[data-variant=primary]:enabled:not([aria-disabled=true]):hover { background: var(--accent-hover); color: var(--on-accent); }
+  .aml-button[data-variant=primary]:enabled:not([aria-disabled=true]):active { background: var(--accent-pressed); color: var(--on-accent); }
+  .aml-button[data-variant=danger]:enabled:not([aria-disabled=true]):hover { background: var(--danger-hover); color: var(--on-danger); }
+  .aml-button[data-variant=danger]:enabled:not([aria-disabled=true]):active { background: var(--danger-pressed); color: var(--on-danger); }
+  .aml-button:is(:disabled, [aria-disabled=true]) { opacity: 0.55; cursor: default; }
+  .aml-button[aria-busy=true] { cursor: progress; }
+  .aml-button:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    box-shadow: var(--focus-ring);
+  }
+  .aml-button[data-loading-slot]:not([data-variant=icon]) { padding-inline-start: calc(var(--space-4) + 16px); }
+  .aml-button-spinner {
+    position: absolute;
+    inset-inline-start: var(--space-3);
+    animation: aml-button-spin calc(var(--motion-gentle-dur) * 3) linear infinite;
+  }
+  .aml-button[data-variant=icon] .aml-button-spinner { inset-inline-start: auto; }
+  .aml-button-icon-pending { visibility: hidden; }
+  @keyframes aml-button-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .aml-button-spinner { animation: none; }
+  }
+}

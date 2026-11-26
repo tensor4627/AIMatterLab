@@ -1,0 +1,354 @@
+@layer features {
+  .compute-resource-entry {
+    width: 100%;
+    text-align: left;
+  }
+
+  .compute-resource-entry>span {
+    min-width: 0;
+  }
+
+  .compute-resource-entry small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .compute-resource-entry>svg {
+    flex-shrink: 0;
+  }
+
+  .compute-connection-choices {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .compute-connection-choices>.button {
+    flex: 1;
+    min-height: 64px;
+  }
+
+  .project-management-intro {
+    color: var(--muted);
+  }
+
+  .project-management-actions {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin: 0 0 var(--space-6);
+  }
+
+  .project-management-list {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .project-management-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
+    padding: var(--space-4) var(--space-4);
+    background: var(--panel);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .project-management-row.current-project {
+    border-color: color-mix(in srgb,var(--accent) 48%,var(--hairline));
+  }
+
+  .project-management-select {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    min-width: 0;
+    flex: 1;
+    text-align: left;
+    padding: var(--space-3);
+  }
+
+  .project-management-select>span {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .project-management-select strong {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+
+  .project-management-select small {
+    display: block;
+    margin-top: var(--space-2);
+    color: var(--muted);
+    font-size: inherit;
+  }
+
+  .project-management-row .button {
+    white-space: normal;
+    flex-shrink: 0;
+  }
+
+  .project-management-select .module-icon {
+    color: var(--accent);
+  }
+
+  .project-management-empty {
+    border: 1px dashed var(--line);
+    border-radius: var(--radius-xs);
+    padding: var(--space-6);
+    color: var(--muted);
+  }
+
+  .project-technical-id {
+    margin: 0 0 var(--space-5);
+    color: var(--muted);
+  }
+
+  .project-technical-id summary {
+    cursor: pointer;
+  }
+
+  .project-technical-id code {
+    display: block;
+    overflow-wrap: anywhere;
+    margin-top: var(--space-3);
+  }
+
+  .project-authorization .project-setup-note {
+    padding: var(--space-4) var(--space-5);
+    background: var(--accent-bg);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+    color: var(--text);
+    line-height: 1.7;
+  }
+
+  .project-authorization .project-basic-heading {
+    font-size: inherit;
+    margin: var(--space-6) 0 var(--space-3);
+  }
+
+  .project-authorization .project-resource-summary {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin: var(--space-4) 0 var(--space-6);
+  }
+
+  .project-resource-summary span {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg);
+    color: var(--muted);
+  }
+
+  .project-authorization .project-basic-resources {
+    display: grid;
+    grid-template-columns: minmax(0,2fr) minmax(100px,1fr);
+    gap: var(--space-5);
+  }
+
+  .project-authorization .project-input-root label {
+    margin-bottom: var(--space-3);
+  }
+
+  .project-authorization .project-input-root textarea {
+    font-family: inherit;
+    min-height: 74px;
+    line-height: 1.65;
+  }
+
+  .project-authorization .authorization-suggestion {
+    padding: var(--space-3) 0;
+    border: 0;
+    display: block;
+    margin-bottom: var(--space-5);
+  }
+
+  .project-authorization .authorization-suggestion .button {
+    white-space: normal;
+  }
+
+  .project-authorization .project-setting-group {
+    margin: var(--space-4) 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    background: var(--bg);
+  }
+
+  .project-setting-group>summary {
+    cursor: pointer;
+    padding: var(--space-4) var(--space-5);
+    line-height: 1.6;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .project-setting-group>summary .setting-summary {
+    font-weight: 400;
+    color: var(--muted);
+    margin-left: var(--space-3);
+  }
+
+  .project-setting-content {
+    padding: 0 var(--space-5) var(--space-5);
+  }
+
+  .project-setting-content>p {
+    color: var(--muted);
+  }
+
+  .project-setting-content .authorization-options {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: var(--space-3) var(--space-5);
+  }
+
+  .project-setting-content .authorization-options label {
+    margin: 0;
+    padding: var(--space-3) 0;
+    line-height: 1.6;
+  }
+
+  .project-setting-content .authorization-options input {
+    margin: 0;
+    align-self: flex-start;
+    margin-top: var(--space-2);
+  }
+
+  .project-setting-content .authorization-options span {
+    overflow-wrap: anywhere;
+  }
+
+  .project-setting-content h4 {
+    font-weight: 500;
+    font-size: inherit;
+    margin: var(--space-6) 0 var(--space-3);
+  }
+
+  .project-setting-content .form-row {
+    gap: var(--space-5);
+  }
+
+  .project-authorization .authorization-json {
+    padding-top: 0;
+  }
+
+  .project-authorization .authorization-json summary {
+    margin: 0;
+  }
+
+  .project-authorization .authorization-json textarea {
+    margin-top: var(--space-2);
+  }
+
+  .project-authorization .project-save-actions {
+    position: sticky;
+    bottom: -21px;
+    background: var(--panel);
+    padding: var(--space-5) 0 var(--space-2);
+    margin: var(--space-6) 0 0;
+    border-top: 1px solid var(--line);
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .project-authorization .project-save-actions .button {
+    white-space: normal;
+  }
+
+  @media(max-width:700px) {
+    .project-management-row {
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .project-management-row>.button {
+      margin-left: var(--space-8);
+    }
+
+    .project-authorization .project-basic-resources {
+      grid-template-columns: 1fr;
+    }
+
+    .project-setting-content .authorization-options {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .deployment-binding h3 {
+    margin: var(--space-3) 0;
+    overflow-wrap: anywhere;
+    font-size: 1.12rem;
+  }
+
+  .deployment-binding p {
+    margin-bottom: 0;
+    line-height: 1.65;
+  }
+
+  .deployment-project-settings {
+    border-top: 1px solid var(--line);
+    padding: var(--space-4) 0;
+    margin: var(--space-4) 0;
+  }
+
+  .deployment-project-settings>summary {
+    cursor: pointer;
+    line-height: 1.7;
+    font-weight: 500;
+  }
+
+  .deployment-project-settings>label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin: var(--space-4) 0;
+  }
+
+  .deployment-project-settings .button-row {
+    flex-wrap: wrap;
+  }
+
+  .deployment-page .notice>.button {
+    margin-left: var(--space-4);
+  }
+
+  .deployment-page [data-testid=deployment-context-state] {
+    line-height: 1.7;
+  }
+
+  .workspace-shell .agent-task-page .card .card,.workspace-shell .deployment-page .card .card {
+    border: 0;
+    border-top: 1px solid var(--hairline);
+    border-radius: 0;
+    padding: var(--space-5) 0;
+    box-shadow: none;
+    background: transparent;
+  }
+
+  .deployment-check-summary {
+    margin: var(--space-4) 0;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .deployment-check-details {
+    margin: var(--space-4) 0;
+    color: var(--muted);
+  }
+
+  .deployment-check-details>summary {
+    cursor: pointer;
+    line-height: 1.6;
+  }
+
+  .deployment-check-details .notice {
+    margin-top: var(--space-3);
+  }
+}

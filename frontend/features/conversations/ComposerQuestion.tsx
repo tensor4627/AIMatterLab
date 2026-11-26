@@ -1,3 +1,4 @@
+import Button from '../../ui/Button';
 import type {KeyboardEvent,ReactNode} from 'react';
 import {ArrowRight,ChevronLeft,ChevronRight,PencilLine} from 'lucide-react';
 import type {RpcEvent} from '../../../contracts/dto/agent';
@@ -68,9 +69,9 @@ export default function ComposerQuestion({request,questions,progress,pending,act
    <strong data-testid="agent-question-title">{label}</strong>
    {(questions.length>1||stopControl)&&<div className="agent-question-navigation">
     {questions.length>1&&<>
-     <button type="button" aria-label={t('上一题')} className="icon-button" data-testid="agent-question-previous" disabled={pending||index===0} onClick={()=>move(-1)}><ChevronLeft size={14}/></button>
+     <Button variant="icon" size="sm" type="button" aria-label={t('上一题')}  data-testid="agent-question-previous" disabled={pending||index===0} onClick={()=>move(-1)}><ChevronLeft size={14}/></Button>
      <span data-testid="agent-question-count" aria-live="polite">{index+1} / {questions.length}</span>
-     <button type="button" aria-label={t('下一题')} className="icon-button" data-testid="agent-question-next" disabled={pending||last} onClick={()=>move(1)}><ChevronRight size={14}/></button>
+     <Button variant="icon" size="sm" type="button" aria-label={t('下一题')}  data-testid="agent-question-next" disabled={pending||last} onClick={()=>move(1)}><ChevronRight size={14}/></Button>
     </>}
     {stopControl}
    </div>}
@@ -94,8 +95,8 @@ export default function ComposerQuestion({request,questions,progress,pending,act
       autoFocus={focusInAgent&&(!options.length||!!value||highlight<0)} placeholder={t(options.length?'其他回答':'输入自己的回答')} value={value} disabled={pending}
       onFocus={()=>onChange(index,current=>({...current,highlight:-1}))} onChange={event=>onChange(index,updateAnswer({kind:'text',value:event.target.value}))}/>
    </label>}
-   {skippable&&!value.trim()&&<button type="button" className="button" data-testid="agent-question-skip" disabled={pending} onClick={()=>onSubmit(index,updateAnswer({kind:'skipped'}))}>{t('跳过')}</button>}
-   {(pending||value.trim()||savedOption>=0||draft?.kind==='skipped')&&<button type="button" className="button primary" data-testid="agent-question-submit" disabled={pending} onClick={()=>onSubmit(index)}>{t(pending?'提交中…':last?'提交':'下一步')}</button>}
+   {skippable&&!value.trim()&&<Button type="button"  data-testid="agent-question-skip" disabled={pending} onClick={()=>onSubmit(index,updateAnswer({kind:'skipped'}))}>{t('跳过')}</Button>}
+   {(pending||value.trim()||savedOption>=0||draft?.kind==='skipped')&&<Button variant="primary" type="button"  data-testid="agent-question-submit" disabled={pending} onClick={()=>onSubmit(index)}>{t(pending?'提交中…':last?'提交':'下一步')}</Button>}
   </div>}
   <span className="agent-question-sr" role="status">{t('等待你的回答')}</span>
  </section>;

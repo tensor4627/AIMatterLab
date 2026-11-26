@@ -1,30 +1,152 @@
-.workspace-shell .conversation-sidebar .conversation-item:has(.conversation-resource-status) {
-  display:flex; align-items:center; flex:1 1 auto; min-width:0; gap:5px; height:auto; min-height:32px;
-}
-.workspace-shell .conversation-sidebar .conversation-row .conversation-item .conversation-title { flex:1 1 auto; min-width:2em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.workspace-shell .conversation-sidebar .conversation-row .conversation-item .conversation-resource-status { flex:0 1 auto; margin-left:auto; display:inline-flex; gap:4px; align-items:center; max-width:65%; overflow:visible; white-space:normal; }
-.conversation-resource-badges { min-width:0; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:3px; }
-.conversation-resource-badge, .managed-resource-chip {
-  --badge-hue: 216; --badge-base:hsl(var(--badge-hue) 57% 49%);
-  border-radius:3px; border:1px solid color-mix(in srgb,var(--badge-base) 58%,var(--line));
-  background-color:color-mix(in srgb,var(--badge-base) 24%,var(--panel)); color:var(--text);
-  font-size:0.7rem; line-height:1.3; font-weight:550; padding:1px 4px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-}
-[data-color="1"] {--badge-hue:166} [data-color="2"] {--badge-hue:282} [data-color="3"] {--badge-hue:35}
-[data-color="4"] {--badge-hue:352} [data-color="5"] {--badge-hue:106} [data-color="6"] {--badge-hue:193}
-[data-color="7"] {--badge-hue:315} [data-color="8"] {--badge-hue:61} [data-color="9"] {--badge-hue:246}
-[data-color="10"] {--badge-hue:14} [data-color="11"] {--badge-hue:139}
-.conversation-resource-status[data-motion=wave] .conversation-resource-badge[data-status=running] {
-  background-image:linear-gradient(100deg,transparent 12%,color-mix(in srgb,var(--badge-base) 60%,transparent) 48%,transparent 83%);
-  background-size:220% 100%; animation:conversation-job-wave 1.9s linear infinite;
-}
-.conversation-resource-status[data-motion=breathe] .conversation-resource-badge[data-status=running] { animation:conversation-job-breathe 2s ease-in-out infinite; }
-.conversation-work-icon { flex:none; display:inline-grid; place-items:center; color:var(--muted); }
-.conversation-turn-spinner { animation:conversation-turn-spin .85s linear infinite; }
-@keyframes conversation-job-wave { from {background-position:130% center} to {background-position:-90% center} }
-@keyframes conversation-job-breathe { 50% {background-color:color-mix(in srgb,var(--badge-base) 64%,var(--panel))} }
-@keyframes conversation-turn-spin { to {transform:rotate(360deg)} }
-@media (prefers-reduced-motion:reduce) {
-  .conversation-resource-status .conversation-turn-spinner,.conversation-resource-status[data-motion] .conversation-resource-badge[data-status=running] {animation:none}
-  .conversation-resource-badge[data-status=running] {box-shadow:inset 0 -2px var(--badge-base)}
+@layer features {
+  .workspace-shell .conversation-sidebar .conversation-item:has(.conversation-resource-status) {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: var(--space-2);
+    height: auto;
+    min-height: 32px;
+  }
+
+  .workspace-shell .conversation-sidebar .conversation-row .conversation-item .conversation-title {
+    flex: 1 1 auto;
+    min-width: 2em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-shell .conversation-sidebar .conversation-row .conversation-item .conversation-resource-status {
+    flex: 0 1 auto;
+    margin-left: auto;
+    display: inline-flex;
+    gap: var(--space-2);
+    align-items: center;
+    max-width: 65%;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .conversation-resource-badges {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+
+  .conversation-resource-badge, .managed-resource-chip {
+    --badge-hue: 216;
+    --badge-base: hsl(var(--badge-hue) 57% 49%);
+    border-radius: var(--radius-xs);
+    border: 1px solid color-mix(in srgb,var(--badge-base) 58%,var(--line));
+    background-color: color-mix(in srgb,var(--badge-base) 24%,var(--panel));
+    color: var(--text);
+    font-size: 0.7rem;
+    line-height: 1.3;
+    font-weight: 550;
+    padding: 1px var(--space-2);
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  [data-color="1"] {
+    --badge-hue: 166;
+  }
+
+  [data-color="2"] {
+    --badge-hue: 282;
+  }
+
+  [data-color="3"] {
+    --badge-hue: 35;
+  }
+
+  [data-color="4"] {
+    --badge-hue: 352;
+  }
+
+  [data-color="5"] {
+    --badge-hue: 106;
+  }
+
+  [data-color="6"] {
+    --badge-hue: 193;
+  }
+
+  [data-color="7"] {
+    --badge-hue: 315;
+  }
+
+  [data-color="8"] {
+    --badge-hue: 61;
+  }
+
+  [data-color="9"] {
+    --badge-hue: 246;
+  }
+
+  [data-color="10"] {
+    --badge-hue: 14;
+  }
+
+  [data-color="11"] {
+    --badge-hue: 139;
+  }
+
+  .conversation-resource-status[data-motion=wave] .conversation-resource-badge[data-status=running] {
+    background-image: linear-gradient(100deg,transparent 12%,color-mix(in srgb,var(--badge-base) 60%,transparent) 48%,transparent 83%);
+    background-size: 220% 100%;
+    animation: conversation-job-wave 1.9s linear infinite;
+  }
+
+  .conversation-resource-status[data-motion=breathe] .conversation-resource-badge[data-status=running] {
+    animation: conversation-job-breathe 2s ease-in-out infinite;
+  }
+
+  .conversation-work-icon {
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    color: var(--muted);
+  }
+
+  .conversation-turn-spinner {
+    animation: conversation-turn-spin .85s linear infinite;
+  }
+
+  @keyframes conversation-job-wave {
+    from {
+      background-position: 130% center;
+    }
+
+    to {
+      background-position: -90% center;
+    }
+  }
+
+  @keyframes conversation-job-breathe {
+    50% {
+      background-color: color-mix(in srgb,var(--badge-base) 64%,var(--panel));
+    }
+  }
+
+  @keyframes conversation-turn-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion:reduce) {
+    .conversation-resource-status .conversation-turn-spinner,.conversation-resource-status[data-motion] .conversation-resource-badge[data-status=running] {
+      animation: none;
+    }
+
+    .conversation-resource-badge[data-status=running] {
+      box-shadow: inset 0 -2px var(--badge-base);
+    }
+  }
 }

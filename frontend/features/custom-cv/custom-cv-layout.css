@@ -1,0 +1,25 @@
+@layer features {
+  .ccv-domain {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: var(--space-5);
+    margin: var(--space-5) 0;
+  }
+
+  .ccv-domain-full {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .ccv-domain summary {
+    cursor: pointer;
+  }
+
+  .ccv-library-review {
+    margin-top: var(--space-4);
+  }
+
+  .custom-cv-workbench .ccv-definition dd small {
+    margin-top: var(--space-2);
+  }
+}

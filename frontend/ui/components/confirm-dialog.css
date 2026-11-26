@@ -1,0 +1,20 @@
+@layer components {
+ .confirm-dialog-description {
+  display: grid;
+  gap: var(--space-3);
+  overflow-wrap: anywhere;
+ }
+
+ .confirm-dialog-target {
+  color: var(--text);
+  font-weight: 600;
+ }
+
+ .confirm-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-block-start: var(--space-5);
+ }
+}

@@ -1,3 +1,5 @@
+import Notice from '../../ui/Notice';
+import Button from '../../ui/Button';
 import LoadingFeedback from '../../ui/LoadingFeedback';
 import {useEffect,useState} from 'react';
 import {api} from '../../api/worker';
@@ -22,23 +24,23 @@ export default function ClusterFiles({projectId,clusterId,scope,roots,enabled,on
  },[selection]);
  async function save(){if(!available||busy||!result?.file)return;const target=result,request:ClusterDownloadRequest={project_id:target.projectId,cluster_id:target.clusterId,relative:target.relative,root_index:target.rootIndex,expected_sha256:target.sha256};await download.execute(()=>invoke<ClusterDownloadReceipt|null>('cluster.download',request));}
  return <section className="card cluster-files" data-testid="cluster-files"><div className="form-row"><label>{t('已授权读取根目录')}<select aria-label={t('已授权读取根目录')} value={selection.rootIndex} onChange={event=>choose('',Number(event.target.value))}>{roots.map((root,index)=><option key={index} value={index}>{root}</option>)}</select></label><label>{t('相对路径')}<input value={selection.relative} onChange={event=>choose(event.target.value)}/></label></div>
-  {!enabled&&<p role="status">{t('请连接作业服务并保存当前连接后浏览文件。')}</p>}
-  <div className="button-row"><button className="button" disabled={!available||busy} onClick={()=>choose(selection.relative,selection.rootIndex,true)}>{t(browse.pending?'正在读取文件…':'浏览 / 预览')}</button>{selection.relative&&<button className="button" disabled={!available||busy} onClick={()=>choose(selection.relative.split('/').filter(Boolean).slice(0,-1).join('/'),selection.rootIndex,true)}>{t('上一级目录')}</button>}</div>
+  {!enabled&&<Notice compact >{t('请连接作业服务并保存当前连接后浏览文件。')}</Notice>}
+  <div className="button-row"><Button  disabled={!available||busy} onClick={()=>choose(selection.relative,selection.rootIndex,true)}>{t(browse.pending?'正在读取文件…':'浏览 / 预览')}</Button>{selection.relative&&<Button  disabled={!available||busy} onClick={()=>choose(selection.relative.split('/').filter(Boolean).slice(0,-1).join('/'),selection.rootIndex,true)}>{t('上一级目录')}</Button>}</div>
   <LoadingFeedback busy={busy} label={t(download.pending?'正在准备下载…':'正在读取文件…')}/>
-  {(browse.error||download.error)&&<p role="alert">{browse.error||download.error}</p>}
-  {(browse.stale||download.stale)&&<p role="status" data-testid="cluster-files-stale">{t(download.stalePending?'文件来源已变化，旧状态已隐藏；已发送的下载仍可能完成，请核对所选保存位置。':download.staleSettled?'先前下载请求已结束，结果未用于当前文件，请核对所选保存位置。':'文件路径或连接已变化，旧预览已隐藏，请重新浏览。')}</p>}
+  {(browse.error||download.error)&&<Notice compact severity="error" >{browse.error||download.error}</Notice>}
+  {(browse.stale||download.stale)&&<Notice compact  data-testid="cluster-files-stale">{t(download.stalePending?'文件来源已变化，旧状态已隐藏；已发送的下载仍可能完成，请核对所选保存位置。':download.staleSettled?'先前下载请求已结束，结果未用于当前文件，请核对所选保存位置。':'文件路径或连接已变化，旧预览已隐藏，请重新浏览。')}</Notice>}
   {result?.entries.map(file=><button className="cluster-run-row" key={file.name} disabled={!available||busy||file.symlink} onClick={()=>choose([result.relative,file.name].filter(Boolean).join('/'),result.rootIndex,true)}><span>{file.name}</span><small>{file.directory?'directory':file.size+' B'}</small></button>)}
-  {result&&!result.exists&&<p role="status">{t('目录尚不存在')}</p>}
+  {result&&!result.exists&&<Notice compact >{t('目录尚不存在')}</Notice>}
   {result?.file&&<div className="cluster-file-preview">
    <div className="cluster-file-header">
     <div className="cluster-file-heading">
      <code>{roots[result.rootIndex]} / {result.relative}</code>
      <span role="status" data-testid="cluster-file-preview-size">{t(result.truncated?'部分预览：仅显示文件前部。下载可获取完整文件。':'文件预览')} · {result.previewBytes}{result.size!==undefined?' / '+result.size:''} B</span>
     </div>
-    <button className="button" disabled={!available||busy} onClick={()=>void save()}>{t(download.pending?'正在准备下载…':'下载文件')}</button>
+    <Button  disabled={!available||busy} onClick={()=>void save()}>{t(download.pending?'正在准备下载…':'下载文件')}</Button>
    </div>
    <pre className="report">{result.text}</pre>
   </div>}
-  {download.value&&<p role="status">{t('文件已下载并通过 SHA256 核对')}</p>}
+  {download.value&&<Notice compact >{t('文件已下载并通过 SHA256 核对')}</Notice>}
  </section>;
 }

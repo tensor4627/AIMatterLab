@@ -8,13 +8,18 @@ import {invoke} from '../../api/studio';
 import {type Settings} from '../../../contracts/dto/settings';
 import {t,setLanguage} from "../../ui/i18n";
 import {HelpTip} from '../../ui/Tooltip';
+import Button from '../../ui/Button';
+import Notice from '../../ui/Notice';
+import Disclosure from '../../ui/Disclosure';
+import {recommendedMinimumFontSize} from './appearance-defaults';
 import './settings-page.css';
+import './typography-preview.css';
 const categories=[['appearance','外观',Palette],['layout','工作区布局',PanelsTopLeft],['language','语言',Languages],['agent','Agent',Brain],['connections','计算连接',Server],['permissions','计算权限',Server],['science','科学资源与技能',BookOpen],['data','数据源',Server],['updates','软件更新',RefreshCw]] as const;
 const num=(value:string)=>value===''?undefined:Number(value);
 // Keep the raw edit text until blur so clearing does not reinsert a display default.
-function NumberSettingInput({value,min,max,onChange,testId,id,errorId}:{errorId?:string;value:number|undefined;min:number;max:number;onChange:(value:number|undefined)=>void;testId?:string;id?:string}){
+function NumberSettingInput({value,min,max,onChange,testId,id,errorId,descriptionId}:{errorId?:string;value:number|undefined;min:number;max:number;onChange:(value:number|undefined)=>void;testId?:string;id?:string;descriptionId?:string}){
  const [draft,setDraft]=useState<string|null>(null);
- return <input id={id} aria-invalid={errorId?true:undefined} aria-describedby={errorId} data-testid={testId} type="number" min={min} max={max} value={draft??value??''} onFocus={()=>setDraft(value===undefined?'':String(value))} onChange={event=>{setDraft(event.target.value);onChange(num(event.target.value));}} onBlur={()=>setDraft(null)}/>;
+ return <input id={id} aria-invalid={errorId?true:undefined} aria-describedby={[descriptionId,errorId].filter(Boolean).join(' ')||undefined} data-testid={testId} type="number" min={min} max={max} value={draft??value??''} onFocus={()=>setDraft(value===undefined?'':String(value))} onChange={event=>{setDraft(event.target.value);onChange(num(event.target.value));}} onBlur={()=>setDraft(null)}/>;
 }
 function validPort(value:number){return Number.isInteger(value)&&value>=1024&&value<=65535;}
 function fit(value:number|undefined,min:number,max:number){return typeof value==='number'&&Number.isFinite(value)?Math.min(max,Math.max(min,value)):undefined;}
@@ -38,7 +43,7 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
  }
  async function save(){
   if(savingRef.current)return;
-  if(port===undefined||!validPort(port)){setPortInvalid(true);return;}
+  if(port===undefined||!validPort(port)){setPortInvalid(true);setCategory('connections');return;}
   if(approvalMode==='full'&&!settings.developerComputeWorkspaceId){setApprovalTargetInvalid(true);setCategory('agent');return;}
   if(settings.terminalIdleMinutes!==undefined&&(!Number.isInteger(settings.terminalIdleMinutes)||settings.terminalIdleMinutes<1||settings.terminalIdleMinutes>1440)){onError(new Error(t('终端空闲时长须为 1 到 1440 分钟。')));return;}
   const next:Settings={...settings,fontSize:fit(settings.fontSize,12,24),editorFontSize:fit(settings.editorFontSize,10,28),terminalFontSize:fit(settings.terminalFontSize,10,24),minimumFontSize:fit(settings.minimumFontSize,11,18),chatFontSize:fit(settings.chatFontSize,12,28)};
@@ -60,17 +65,28 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
       <label>{t('界面字体')}<select value={settings.fontFamily||'system'} onChange={e=>patch({fontFamily:e.target.value})}><option value="system">{t('系统默认')}</option><option value="sans">Segoe UI / Microsoft YaHei</option><option value="serif">Georgia / SimSun</option></select></label>
       <label>{t('作业徽记动效')}<select aria-label={t('作业徽记动效')} value={settings.resourceBadgeMotion||'wave'} onChange={e=>patch({resourceBadgeMotion:e.target.value as Settings['resourceBadgeMotion']})}><option value="wave">{t('从左到右的波浪')}</option><option value="breathe">{t('呼吸式明暗')}</option></select></label>
      </div>
+     <div className="font-preview">
+      <div className="settings-type-preview" data-testid="typography-preview">
+       <strong className="settings-type-title">{t('字体预览')}</strong>
+       <div className="settings-type-body">{product.name} · α · CV · Å · 300 K</div>
+       <div className="settings-type-meta muted">{t('字段说明')}</div>
+       <div className="settings-type-caption muted">{t('时间与计数')}</div>
+      </div>
+     </div>
      <div className="settings-form-grid settings-font-grid">
       <label>{t('界面字号')}<NumberSettingInput min={12} max={24} value={settings.fontSize??18} onChange={value=>patch({fontSize:value})}/></label>
       <label>{t('代码字号')}<NumberSettingInput min={10} max={28} value={settings.editorFontSize??18} onChange={value=>patch({editorFontSize:value})}/></label>
       <label>{t('终端字号')}<NumberSettingInput min={10} max={24} value={settings.terminalFontSize??17} onChange={value=>patch({terminalFontSize:value})}/></label>
       <div className="settings-field">
-       <div className="settings-field-label"><label htmlFor="settings-minimum-font">{t('最小文字字号')}</label><HelpTip label={t('最小文字字号')} content={t('界面、代码、终端与图表文字均遵守此下限')}/></div>
-       <NumberSettingInput id="settings-minimum-font" testId="minimum-font" min={11} max={18} value={settings.minimumFontSize??17} onChange={value=>patch({minimumFontSize:value})}/>
+       <div className="settings-field-label"><label htmlFor="settings-minimum-font">{t('最小文字字号')}</label><HelpTip label={t('最小文字字号')} content={t('对话、代码编辑器与终端使用各自的字号设置。')}/></div>
+       <div className="minimum-font-settings">
+        <NumberSettingInput id="settings-minimum-font" testId="minimum-font" descriptionId="settings-minimum-font-description" min={11} max={18} value={settings.minimumFontSize??recommendedMinimumFontSize} onChange={value=>patch({minimumFontSize:value})}/>
+        <Button size="sm" data-testid="recommended-minimum-font" onClick={()=>patch({minimumFontSize:recommendedMinimumFontSize})}>{t('使用推荐值')}</Button>
+       </div>
+       <small id="settings-minimum-font-description">{t('下限越高，标题与说明的字号差越小。')}</small>
       </div>
       <label>{t('Agent 对话字号')}<NumberSettingInput min={12} max={28} value={settings.chatFontSize??settings.fontSize??18} onChange={value=>patch({chatFontSize:value})}/></label>
      </div>
-     <div className="font-preview"><span>{t('字体预览')}</span><strong>{product.name} · α · CV · Å · 300 K</strong></div>
      {dirty&&<p className="settings-note">{t('外观修改立即预览；取消将恢复上次保存的设置。')}</p>}
     </>}
     {category==='layout'&&<>
@@ -88,8 +104,8 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
      <DeveloperComputeOptions mode={approvalMode} workspaceId={settings.developerComputeWorkspaceId} invalid={approvalTargetInvalid} disabled={saving}
       onModeChange={agentApprovalMode=>{setApprovalTargetInvalid(false);patch({agentApprovalMode,developerComputeWorkspaceId:agentApprovalMode==='full'?settings.developerComputeWorkspaceId:null});}}
       onWorkspaceChange={developerComputeWorkspaceId=>{setApprovalTargetInvalid(false);patch({developerComputeWorkspaceId});}}/>
-     <div className="notice">{t('普通聊天可在项目授权范围内提交你明确委托的独立作业。多步工作流可在参数面板审阅和执行。')}</div>
-     <details className="settings-advanced"><summary>{t('服务商高级配置')}</summary>
+     <Notice>{t('普通聊天可在项目授权范围内提交你明确委托的独立作业。多步工作流可在参数面板审阅和执行。')}</Notice>
+     <Disclosure className="settings-advanced" variant="detail" summary={t('服务商高级配置')}>
       <div className="settings-form-grid">
        <label>{t('Codex 可执行路径')}<input value={settings.codexPath} onChange={e=>patch({codexPath:e.target.value})}/></label>
        <label>{t('Kimi 可执行路径')}<input value={settings.kimiPath??'kimi'} onChange={e=>patch({kimiPath:e.target.value})}/></label>
@@ -97,7 +113,7 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
        <label>{t('Agent 工作目录')}<input value={settings.cwd} onChange={e=>patch({cwd:e.target.value})}/></label>
       </div>
       <p className="settings-note">{t('Kimi 使用本地 CLI 和设备登录。当前 Qwen 使用「账号与 API」中的 API 配置。')}</p>
-     </details>
+     </Disclosure>
     </>}
     {category==='permissions'&&<div className="settings-action-line">
      <p className="settings-note">{t('管理计算项目可用的资源与运行限额。')}</p>
@@ -106,7 +122,7 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
     {category==='connections'&&<>
      <button className="button" data-testid="settings-connect-resources" disabled={saving||!onOpenComputeResources} onClick={onOpenComputeResources}>{t('管理计算资源')}</button>
      <label className="settings-field">{t('会话终端空闲时长（分钟）')}<NumberSettingInput testId="terminal-idle-minutes" min={1} max={1440} value={settings.terminalIdleMinutes??60} onChange={value=>patch({terminalIdleMinutes:value})}/></label>
-     <details className="settings-advanced"><summary>{t('默认本地服务与已有集群')}</summary>
+     <Disclosure className="settings-advanced" summary={t('默认本地服务与已有集群')} forceOpen={portInvalid}>
       <div className="button-row">
        <button className="button" data-testid="settings-connect-local" disabled={saving||!onOpenLocalCompute} onClick={onOpenLocalCompute}>{t('本地 WSL')}</button>
        <button className="button" data-testid="settings-connect-ssh" disabled={saving||!onOpenSshCompute} onClick={onOpenSshCompute}>{t('SSH 手动配置')}</button>
@@ -114,14 +130,18 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
       <label className="check-label"><input type="checkbox" checked={settings.autoDiscoverCompute!==false} onChange={e=>patch({autoDiscoverCompute:e.target.checked})}/>{t('连接时自动发现并登记已有本地环境')}</label>
       <p className="settings-note">{t('复用现有解释器与源码，记录 CUDA 观察结果；不安装软件、不更改项目授权或提交任务。')}</p>
       <label className="settings-field">{t('WSL 发行版')}<input value={settings.distribution} onChange={e=>patch({distribution:e.target.value})}/></label>
-      <details className="settings-advanced"><summary>{t('作业服务高级配置')}</summary>
+      <Disclosure className="settings-advanced" variant="detail" summary={t('作业服务高级配置')} forceOpen={portInvalid}>
        <div className="settings-form-grid">
         <label>{t('作业服务目录')}<input value={settings.workerRoot} onChange={e=>patch({workerRoot:e.target.value})}/></label>
-        <label>{t('作业服务端口')}<NumberSettingInput testId="worker-port" errorId={portInvalid?'settings-port-error':undefined} min={1024} max={65535} value={port} onChange={editPort}/></label>
+        <div className="settings-field">
+         <label htmlFor="settings-worker-port">{t('作业服务端口')}</label>
+         <NumberSettingInput id="settings-worker-port" testId="worker-port" errorId={portInvalid?'settings-port-error':undefined} min={1024} max={65535} value={port} onChange={editPort}/>
+         {portInvalid&&<span id="settings-port-error" className="field-error" role="alert">{t('作业服务端口须为 1024 到 65535 的整数。')}</span>}
+        </div>
        </div>
        <p className="settings-note">{t('保存后重新连接 WSL 以应用设置。引擎路径在计算环境中登记。')}</p>
-      </details>
-     </details>
+      </Disclosure>
+     </Disclosure>
     </>}
     {category==='data'&&<MaterialsProjectSettings onError={onError}/>}
     {category==='science'&&<>
@@ -137,9 +157,9 @@ export default function SettingsPage({updates,settings,layoutKey='agentLayout',o
     </>}
    </div>
    <div className="settings-footer">
-    {portInvalid?<span id="settings-port-error" role="alert">{t('作业服务端口须为 1024 到 65535 的整数。')}</span>:<span role="status">{saved||t(dirty?'未保存修改':'')}</span>}
+    <span role="status">{saved||t(dirty?'未保存修改':'')}</span>
     <button className="button" disabled={saving} onClick={onClose}>{t('取消')}</button>
-    <button className="button primary" disabled={saving} onClick={()=>void save()}><Save size={15}/>{saving?t('保存中…'):t('保存设置')}</button>
+    <Button variant={category==='updates'?'secondary':'primary'} loading={saving} onClick={()=>void save()}><Save size={15} aria-hidden="true"/>{t('保存设置')}</Button>
    </div>
   </div>
  </div>;

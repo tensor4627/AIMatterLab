@@ -1,3 +1,5 @@
+import Disclosure from '../../ui/Disclosure';
+import Button from '../../ui/Button';
 import {useEffect,useState} from 'react';
 import {Bookmark,ChevronUp,Search} from 'lucide-react';
 import type {Conversation} from '../../../contracts/dto/agent';
@@ -40,8 +42,8 @@ export function ConversationHistoryToolbar({conversationId,source,bookmarks,atLa
  return <div className="chat-history-toolbar">
   <div className="chat-history-actions">
    <button className="text-button" type="button" aria-expanded={find} onClick={()=>setFind(value=>!value)}><Search size={14}/>{t('在会话中查找')}</button>
-   {!!bookmarks.length&&<details><summary><Bookmark size={14}/>{t('书签')}</summary><div className="chat-bookmarks">{bookmarks.map(({snippet,...anchor})=><button key={JSON.stringify([anchor.turnId,anchor.itemId])} type="button" className="text-button" onClick={()=>onOpen(anchor)}>{snippet||t('回合书签')}</button>)}</div></details>}
-   {source&&<button className="text-button chat-original-source" type="button" onClick={()=>onOpen({conversationId:source.conversationId,turnId:source.turnId,...source.itemId?{itemId:source.itemId}:{}})} title={source.name}>{t('返回来源')} · {source.name}</button>}
+   {!!bookmarks.length&&<Disclosure summary={<><Bookmark size={14}/>{t('书签')}</>}><div className="chat-bookmarks">{bookmarks.map(({snippet,...anchor})=><button key={JSON.stringify([anchor.turnId,anchor.itemId])} type="button" className="text-button" onClick={()=>onOpen(anchor)}>{snippet||t('回合书签')}</button>)}</div></Disclosure>}
+   {source&&<Button variant="ghost" tooltip={source.name} className="text-button chat-original-source" type="button" onClick={()=>onOpen({conversationId:source.conversationId,turnId:source.turnId,...source.itemId?{itemId:source.itemId}:{}})} >{t('返回来源')} · {source.name}</Button>}
    {!atLatest&&<button className="text-button" type="button" disabled={loading} onClick={onLatest}>{t('回到最新记录')}</button>}
   </div>
   {find&&<ConversationHistorySearch scope={{conversationId}} onOpen={anchor=>{onOpen(anchor);setFind(false);}}/>}
@@ -49,13 +51,13 @@ export function ConversationHistoryToolbar({conversationId,source,bookmarks,atLa
 }
 
 export function OlderConversationPage({loading,onLoad}:{loading:boolean;onLoad:()=>void}){
- return <div className="older-conversation-page"><button className="button" type="button" disabled={loading} onClick={onLoad}><ChevronUp size={14}/>{t(loading?'正在读取更早消息…':'加载更早消息')}</button></div>;
+ return <div className="older-conversation-page"><Button  type="button" disabled={loading} onClick={onLoad}><ChevronUp size={14}/>{t(loading?'正在读取更早消息…':'加载更早消息')}</Button></div>;
 }
 
 export function ConversationExcerptDialog({value,busy,onClose,onConfirm}:{value:ConversationBranchPreview;busy:boolean;onClose:()=>void;onConfirm:()=>void}){
  return <Modal title={t('从此轮另开讨论')} closeDisabled={busy} onClose={onClose}>
   <p>{t('下面的摘录将放入新讨论的草稿。发送前可以修改。')}</p>
   <blockquote className="chat-branch-excerpt">{value.excerpt}</blockquote>
-  <div className="button-row"><button type="button" className="button" disabled={busy} onClick={onClose}>{t('取消')}</button><button type="button" className="button primary" disabled={busy} onClick={onConfirm}>{t(busy?'正在创建讨论…':'创建讨论草稿')}</button></div>
+  <div className="button-row"><Button type="button"  disabled={busy} onClick={onClose}>{t('取消')}</Button><Button variant="primary" type="button"  disabled={busy} onClick={onConfirm}>{t(busy?'正在创建讨论…':'创建讨论草稿')}</Button></div>
  </Modal>;
 }

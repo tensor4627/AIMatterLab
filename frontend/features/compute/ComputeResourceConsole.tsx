@@ -6,7 +6,10 @@ import {invoke} from '../../api/studio';
 import {resourceWorkspaces} from '../../api/compute-resources';
 import type {ResourceWorkspaceReadResult} from '../../../contracts/dto/compute';
 import type {ResourceToolSetup} from '../../../contracts/dto/resource-tools';
-import {Modal} from '../../ui/Dialogs';
+import {type ConfirmOptions,useConfirm} from '../../ui/ConfirmDialog';
+import {useToast} from '../../ui/Toast';
+import Button from '../../ui/Button';
+import Notice from '../../ui/Notice';
 import {t} from '../../ui/i18n';
 import {providerNames} from '../conversations/provider-account.mjs';
 import {serviceErrorMessage,serviceRejectedCode} from '../terminal/ssh-service-presentation';
@@ -24,7 +27,7 @@ interface Props {
   onGuide?:(resource:ComputeConsoleResource)=>void;
   onUseForWorkflow?:(resource:ComputeConsoleResource)=>Promise<unknown>;
 }
-type Confirmation = {title:string; text:string; target:string; label:string; run:()=>Promise<unknown>};
+type Confirmation = ConfirmOptions & {run:()=>Promise<unknown>;current:(snapshot:ComputeConsoleSnapshot)=>boolean};
 const linkLabels:Record<ComputeLinkStatus,string> = {
   online:'在线', offline:'未连接', preparing:'准备中', unconfigured:'未配置', requires_review:'需要核对',
   channel_ready:'通道可用 · 服务待核对', lost:'失联', unknown:'待核对', closed:'已关闭'
@@ -68,7 +71,7 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
   const [selection,setSelection] = useState<Pick<ComputeConsoleResource,'key'|'profileId'|'profileVersion'>|null>(null);
   const [probing,setProbing] = useState(false), [running,setRunning] = useState(false);
   const [error,setError] = useState(''), [feedback,setFeedback] = useState('');
-  const [confirm,setConfirm] = useState<Confirmation|null>(null);
+  const confirm=useConfirm(),toast=useToast(),asking=useRef(false),latest=useRef(snapshot);latest.current=snapshot;
   const mounted = useRef(false), probe = useRef<Promise<void>|null>(null), readTicket = useRef(0), operation = useRef(false);
 
   async function load(refresh=false) {
@@ -104,12 +107,15 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
   },[]);
 
   async function run(work:()=>Promise<unknown>,done:string) {
-    if (operation.current) return;
+    if (operation.current||asking.current||!mounted.current) return;
     operation.current=true;setRunning(true);setFeedback('');
     try {
       const receipt = await work();
       if (!receipt) throw Error('compute_console_receipt_missing');
-      if (mounted.current) setFeedback(t(receipt && typeof receipt==='object' && 'status' in receipt && receipt.status==='unconfirmed' ? '操作结果待核对，请刷新原连接。' : done));
+      if (mounted.current) {
+        if(typeof receipt==='object'&&'status' in receipt&&receipt.status==='unconfirmed')setFeedback(t('操作结果待核对，请刷新原连接。'));
+        else toast.show({message:t(done)});
+      }
     } catch (reason) {
       const detail=String(reason);
       const serviceCode=serviceRejectedCode(reason);
@@ -118,9 +124,23 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
         detail.includes('managed_compute_private_service_unavailable') ? '作业服务未能通过核对，请检查对应连接。' : '操作未完成，请核对原资源状态。';
       if (mounted.current) setFeedback(serviceCode?t(serviceErrorMessage(serviceCode))+' · '+serviceCode:t(message));
     } finally {
-      if (mounted.current) { setConfirm(null);await load(true); }
+      if (mounted.current) await load(true);
       operation.current=false;if(mounted.current)setRunning(false);
     }
+  }
+
+  async function ask({run:work,current,...options}:Confirmation){
+    if(!mounted.current||operation.current||asking.current)return;
+    asking.current=true;
+    try{
+      if(!await confirm({...options,tone:'danger',testId:'compute-console-confirm'}))return;
+    }finally{asking.current=false;}
+    if(!mounted.current)return;
+    if(!latest.current||!current(latest.current)){
+      setFeedback(t('资源或会话已变化，请刷新后重试。'));
+      return;
+    }
+    await run(work,'操作已确认');
   }
 
   const rows = snapshot?.resources ?? [];
@@ -139,19 +159,19 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
         <button type="button" className="button primary" onClick={onConnections}><Plus size={16}/>{t('添加或配置连接')}</button>
       </div>
     </header>
-    {error && <p className="notice" role={stale?'status':'alert'} data-testid="compute-console-read-error">
-      {t(stale?'暂时无法获取最新状态；保留最近观测。':error)}{' '}
-      <button type="button" className="text-button" disabled={probing} onClick={()=>void load(true)}>{t('重试')}</button>
-    </p>}
-    {!stale && snapshot?.observation==='partial' && <p className="notice" role="status">{t('部分终端状态暂时无法核对。')}</p>}
-    {feedback && <p className="notice" role="status">{feedback}</p>}
-    {!snapshot && !error && <p className="muted" role="status">{t('正在读取计算资源…')}</p>}
+    {error && <Notice severity={stale?'warning':'error'} data-testid="compute-console-read-error" action={<Button variant="ghost" disabled={probing} onClick={()=>void load(true)}>{t('重试')}</Button>}>
+      {t(stale?'暂时无法获取最新状态；保留最近观测。':error)}
+    </Notice>}
+    {!stale && snapshot?.observation==='partial' && <Notice severity="warning">{t('部分终端状态暂时无法核对。')}</Notice>}
+    {feedback && <Notice>{feedback}</Notice>}
+    {!snapshot && !error && <Notice compact>{t('正在读取计算资源…')}</Notice>}
     {foreground && <section className="compute-console-standalone compute-console-foreground">
       <LinkCard title="工作台当前 WSL 服务" observation={foreground.service}>
         <span>{foreground.distribution} · :{foreground.port}</span>
-        <button type="button" className="text-button compute-console-danger" disabled={running} onClick={()=>setConfirm({
-          title:t('断开本地作业服务'),target:foreground.distribution+' · :'+foreground.port,label:t('断开服务连接'),
-          text:t('断开当前工作台连接。服务进程及已提交作业继续运行。'),
+        <button type="button" className="text-button compute-console-danger" disabled={running} onClick={()=>void ask({
+          title:t('断开本地作业服务'),target:foreground.distribution+' · :'+foreground.port,confirmLabel:t('断开服务连接'),
+          consequence:t('断开当前工作台连接。服务进程及已提交作业继续运行。'),
+          current:next=>next.foregroundLocal?.foregroundEpoch===foreground.foregroundEpoch,
           run:()=>typed('compute.console.detachLocal',{profileId:null,profileVersion:null,generation:null,foregroundEpoch:foreground.foregroundEpoch})
         })}>{t('断开服务连接')}</button>
       </LinkCard>
@@ -169,18 +189,13 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
           </button>;
         })}
       </nav>
-      <ResourceDetail key={JSON.stringify([selected.key,selected.profileId,selected.profileVersion])} resource={selected} snapshot={snapshot!} initialProjectId={projectId} running={running} stale={stale} run={run} confirm={setConfirm}
+      <ResourceDetail key={JSON.stringify([selected.key,selected.profileId,selected.profileVersion])} resource={selected} snapshot={snapshot!} initialProjectId={projectId} running={running} stale={stale} run={run} confirm={ask}
         onOpenTerminal={terminal=>onOpenTerminal(selected,terminal)} onConnectSsh={()=>onConnectSsh(selected)} onConfigure={section=>onConfigure(selected,section)}
         onWorkspace={onWorkspace?mode=>onWorkspace(selected,mode):undefined} onTools={onTools?()=>onTools(selected):undefined} onGuide={onGuide?()=>onGuide(selected):undefined}
         onUseForWorkflow={onUseForWorkflow?()=>onUseForWorkflow(selected):undefined}
         onOpenConversation={onOpenConversation}/>
     </div>}
     {!!snapshot?.standalone.length && <section className="compute-console-standalone"><h2>{t('独立终端')}</h2><TerminalList terminals={snapshot.standalone} onOpen={terminal=>onOpenTerminal(null,terminal)}/></section>}
-    {confirm && <Modal title={confirm.title} closeDisabled={running} onClose={()=>setConfirm(null)}>
-      <p className="compute-console-confirm-target">{confirm.target}</p><p>{confirm.text}</p>
-      <div className="button-row"><button type="button" className="button" disabled={running} onClick={()=>setConfirm(null)}>{t('取消')}</button>
-        <button type="button" className="button danger" data-testid="compute-console-confirm" disabled={running} onClick={()=>void run(confirm.run,t('操作已确认'))}>{running?t('正在处理…'):confirm.label}</button></div>
-    </Modal>}
   </main>;
 }
 
@@ -223,14 +238,17 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,co
     const off=window.studio?.onEvent(event=>{if(event.method==='studio/resourceToolSetupChanged'&&event.params?.resource_id==='ssh:'+resource.profileId)void readTools();});
     return ()=>{current=false;off?.();};
   },[resource.kind,resource.current,resource.profileId,resource.profileVersion,resource.service.status]);
+  const matchingResource=(next:ComputeConsoleSnapshot)=>next.resources.find(row=>row.key===resource.key&&row.profileId===resource.profileId&&row.profileVersion===resource.profileVersion&&row.connectionId===resource.connectionId);
   function openDisconnect() {
     confirm(ssh ? {
-      title:t('断开 SSH 主连接'),target,label:t('断开主连接'),
-      text:t('此操作关闭这个主连接上的人工终端、会话 Shell 和作业服务通道。远端已提交作业继续运行。'),
+      title:t('断开 SSH 主连接'),target,confirmLabel:t('断开主连接'),
+      consequence:t('此操作关闭这个主连接上的人工终端、会话 Shell 和作业服务通道。远端已提交作业继续运行。'),
+      current:next=>!!matchingResource(next),
       run:()=>typed('compute.console.disconnectSsh',ssh)
     } : {
-      title:t('断开本地作业服务'),target,label:t('断开服务连接'),
-      text:t('此操作解除工作台对此 WSL 服务的连接和会话分配。服务进程及已提交作业继续运行。'),
+      title:t('断开本地作业服务'),target,confirmLabel:t('断开服务连接'),
+      consequence:t('此操作解除工作台对此 WSL 服务的连接和会话分配。服务进程及已提交作业继续运行。'),
+      current:next=>{const row=matchingResource(next);return !!row&&row.localGeneration===resource.localGeneration&&row.foregroundEpoch===resource.foregroundEpoch;},
       run:()=>typed('compute.console.detachLocal',{...profile,generation:resource.localGeneration??null,foregroundEpoch:resource.foregroundEpoch??null})
     });
   }
@@ -238,9 +256,10 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,co
     if (!channel.leaseId) return;
     const lease = {resourceId:resource.kind+':'+resource.profileId,connectionId:resource.connectionId,source:channel.source,
       leaseId:channel.leaseId,provider:channel.provider,threadId:channel.threadId};
-    confirm({title:t('释放会话通道'),target:target+' / '+channelName(channel),label:t('释放通道'),
-      text:t(channel.commandContext?'此操作解除该会话在该资源上的授权。已提交作业继续运行。':channel.serviceContext&&(!channel.serviceOnly||channel.terminalStatus)?'此操作解除该会话的服务分配并关闭它的专属 Shell。已提交作业继续运行。':
+    confirm({title:t('释放会话通道'),target:target+' / '+channelName(channel),confirmLabel:t('释放通道'),
+      consequence:t(channel.commandContext?'此操作解除该会话在该资源上的授权。已提交作业继续运行。':channel.serviceContext&&(!channel.serviceOnly||channel.terminalStatus)?'此操作解除该会话的服务分配并关闭它的专属 Shell。已提交作业继续运行。':
         channel.serviceOnly?'此操作解除该会话的服务分配。已提交作业继续运行。':'此操作关闭该会话的专属 Shell。已提交作业继续运行。'),
+      current:next=>!!matchingResource(next)?.channels.some(row=>row.leaseId===lease.leaseId&&row.source===lease.source&&row.provider===lease.provider&&row.threadId===lease.threadId),
       run:()=>typed('compute.console.release',lease)});
   }
   return <section className="compute-console-detail" data-testid="compute-console-detail">
@@ -259,7 +278,7 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,co
       {resource.master && <LinkCard title="SSH 认证主连接" observation={resource.master}>
         {active && !resource.managedId && resource.current && ssh && <button type="button" className="text-button" disabled={running} onClick={()=>onWorkspace?onWorkspace('handoff'):onOpenTerminal()}>{t('交给工作台管理')}</button>}
         {active && resource.managedId && <small>{t('工作台托管中')}</small>}
-        {ssh && resource.canDisconnect && <button type="button" className="text-button compute-console-danger" disabled={running||busy} title={runningHint} onClick={openDisconnect}>{t('断开主连接')}</button>}
+        {ssh && resource.canDisconnect && <Button variant="ghost" className="compute-console-danger" disabled={running||busy} disabledReason={runningHint} onClick={openDisconnect}>{t('断开主连接')}</Button>}
       </LinkCard>}
       {resource.kind==='ssh' && <div className="compute-console-link"><strong>{t('人工终端')}</strong>
         {resource.terminals.length ? <TerminalList terminals={resource.terminals} onOpen={onOpenTerminal}/> : <span className="muted">{t(active?'暂无人工终端':'终端待核对')}</span>}
@@ -267,7 +286,7 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,co
       <LinkCard title={resource.kind==='wsl'?'本地 WSL 作业服务':resource.service.kind==='borrowed'?'借用终端的作业服务':'私有作业服务'} observation={resource.service}>
         {resource.kind==='ssh'&&resource.current&&active&&ssh&&resource.managedId&&resource.service.status==='online'&&onUseForWorkflow&&<button type="button" className="text-button" data-testid="compute-console-use-workflow" disabled={running} onClick={()=>void run(onUseForWorkflow,'当前流程已连接此作业服务')}>{t('用于当前流程')}</button>}
         {resource.kind==='wsl' && resource.localGeneration && resource.foregroundEpoch == null && <small>{t('独立服务连接')}</small>}
-        {resource.kind==='wsl' && link && <button type="button" className="text-button compute-console-danger" disabled={running||busy} title={runningHint} onClick={openDisconnect}>{t('断开服务连接')}</button>}
+        {resource.kind==='wsl' && link && <Button variant="ghost" className="compute-console-danger" disabled={running||busy} disabledReason={runningHint} onClick={openDisconnect}>{t('断开服务连接')}</Button>}
         {resource.kind==='ssh' && resource.current && active && !!ssh && !!resource.managedId && !preparing && resource.service.status!=='online' && <button type="button" className="text-button" disabled={running} onClick={()=>void run(()=>typed('compute.managed.configureService',ssh),'已核对作业服务')}>{t('准备作业服务')}</button>}
         {resource.kind==='ssh' && resource.current && active && resource.service.status!=='online' && <button type="button" className="text-button" onClick={()=>onConfigure('service')}>{t('服务配置')}</button>}
       </LinkCard>
@@ -296,7 +315,7 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,co
           <div className="compute-console-channel-state"><Status status={channel.status} label={channelLabels[channel.status]}/><Checked at={channel.checkedAt}/></div>
           <div className="compute-console-actions">
             {channel.conversationId && <button type="button" className="text-button" onClick={()=>onOpenConversation(channel)}>{t('打开会话')}<ArrowUpRight size={13}/></button>}
-            {channel.leaseId && <button type="button" className="text-button compute-console-danger" disabled={running||channel.busy||channel.status==='releasing'} title={channel.busy?t('该通道正在被会话使用。'):undefined} onClick={()=>release(channel)}>{t('释放')}</button>}
+            {channel.leaseId && <Button variant="ghost" className="compute-console-danger" disabled={running||channel.busy||channel.status==='releasing'} disabledReason={channel.busy?t('该通道正在被会话使用。'):undefined} onClick={()=>release(channel)}>{t('释放')}</Button>}
           </div>
         </li>)}</ul>}
     </section>

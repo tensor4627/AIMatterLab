@@ -1,3 +1,6 @@
+import Notice from '../../ui/Notice';
+import Button from '../../ui/Button';
+import Disclosure from '../../ui/Disclosure';
 import {useState} from 'react';
 import {t} from '../../ui/i18n';
 import {editableEnvironmentSection,environmentSections,type ClusterEnvironmentDraft,type EnvironmentRowEdit,type EnvironmentSection} from './cluster-environment-draft';
@@ -18,7 +21,7 @@ export default function ClusterEnvironmentEditor({draft,disabled,onRow,onText}:{
  const [advanced,setAdvanced]=useState(!!draft.rawIssue);
  return <div className="cluster-environment-editor" data-testid="cluster-environment-editor">
   <h3>{t('科学环境')}</h3>
-  {draft.rawIssue&&<p className="notice" role="status">{t('修正高级 JSON 后可继续编辑表单。')}</p>}
+  {draft.rawIssue&&<Notice compact  >{t('修正高级 JSON 后可继续编辑表单。')}</Notice>}
   {environmentSections.map(section=>{
    const labels=sectionLabels[section],available=editableEnvironmentSection(draft,section);
    return <fieldset key={section} disabled={disabled||!!draft.rawIssue} data-testid={'cluster-environment-'+section}>
@@ -33,20 +36,19 @@ export default function ClusterEnvironmentEditor({draft,disabled,onRow,onText}:{
        {cell.kind==='json'?<span className="muted">{t('请在高级 JSON 中编辑此项。')}</span>:<label>{t(labels.value)}<input
         aria-invalid={issue?.field==='value'||nonAbsolute||undefined} inputMode={cell.kind==='integer'?'numeric':undefined}
         value={cell.text} onChange={event=>onRow(section,{type:'value',id:row.id,text:event.target.value})}/></label>}
-       <button className="button" type="button" onClick={()=>onRow(section,{type:'remove',id:row.id})}>{t('删除条目')}</button>
+       <Button  type="button" onClick={()=>onRow(section,{type:'remove',id:row.id})}>{t('删除条目')}</Button>
        {(issue||nonAbsolute)&&<small className="cluster-environment-issue" role="status">{t(issue?rowMessages[issue.code]:'远程环境路径应为绝对路径。')}</small>}
       </div>;
      })}
-     <button type="button" className="button" onClick={()=>onRow(section,{type:'add'})}>{t(labels.add)}</button>
+     <Button type="button"  onClick={()=>onRow(section,{type:'add'})}>{t(labels.add)}</Button>
     </>}
    </fieldset>;
   })}
-  <details open={advanced} onToggle={event=>setAdvanced(event.currentTarget.open)} data-testid="cluster-environment-json">
-   <summary>{t('高级 JSON 配置')}</summary>
-   {draft.rawIssue&&<p className="notice" role="alert">{t(rawMessages[draft.rawIssue])}</p>}
-   {draft.rowIssue&&<p className="notice" role="status">{t('修正表单中的字段后可以编辑 JSON。')}</p>}
+  <Disclosure open={advanced} onToggle={event=>setAdvanced(event.currentTarget.open)} data-testid="cluster-environment-json" summary={<>{t('高级 JSON 配置')}</>}>
+   {draft.rawIssue&&<Notice compact severity="error"  >{t(rawMessages[draft.rawIssue])}</Notice>}
+   {draft.rowIssue&&<Notice compact  >{t('修正表单中的字段后可以编辑 JSON。')}</Notice>}
    <label>{t('显式科学环境 · JSON')}<textarea rows={8} className="parameter-json" spellCheck={false} value={draft.text}
     aria-invalid={!!draft.rawIssue} readOnly={disabled||!!draft.rowIssue} onChange={event=>onText(event.target.value)}/></label>
-  </details>
+  </Disclosure>
  </div>;
 }

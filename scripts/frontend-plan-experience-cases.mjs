@@ -195,7 +195,7 @@ export async function frontendPlanExperienceCases({check,out}){
  });
 
  await check('plan-experience-status-cards-preserve-all-other-filters',async page=>{
-  await page.evaluate(async()=>{const {default:JobsPage}=await import('/frontend/features/runs/JobsPage.tsx');await import('/frontend/app/frontend-refinement.css');const f=window.__test;f.initialRun=JSON.stringify(f.run);const now=Date.now()/1000;
+  await page.evaluate(async()=>{const {default:JobsPage}=await import('/frontend/features/runs/JobsPage.tsx');const f=window.__test;f.initialRun=JSON.stringify(f.run);const now=Date.now()/1000;
    window.testRoot.render(window.React.createElement(JobsPage,{local:[{...f.run,id:'local',created_at:now,status:'running'}],cluster:[{...f.run,id:'cluster',kind:'cluster-run',created_at:now,status:'queued'}],observations:{local:{loaded:true,at:now,stale:false},cluster:{loaded:true,at:now,stale:true}},projects:[f.project],projectId:f.project.id,tasks:[],conversations:[],worker:true,busy:false,onOpen:()=>{},onConversation:()=>{},onRefresh:()=>{}}));});
   await page.getByLabel('计算位置筛选',{exact:true}).selectOption('cluster');await page.locator('.jobs-more-filters>summary').click();await page.getByLabel('任务时间筛选',{exact:true}).selectOption('7');await page.getByLabel('任务项目筛选',{exact:true}).selectOption('current');await page.getByLabel('搜索任务',{exact:true}).fill('Fixture');
   await page.getByTestId('jobs-overview-running').click();assert.equal(await page.locator('.job-record').count(),0);

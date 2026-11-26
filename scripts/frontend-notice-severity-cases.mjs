@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
-async function assertNotice(notice,severity,label){
+async function assertNotice(notice,severity,label,announce=true){
  await notice.waitFor();
  assert.equal(await notice.getAttribute('data-severity'),severity);
- assert.equal(await notice.getAttribute('role'),severity==='error'?'alert':'status');
+ assert.equal(await notice.getAttribute('role'),announce?(severity==='error'?'alert':'status'):null);
  assert.equal(await notice.locator('.notice-level').innerText(),label);
  assert.equal(await notice.locator('.notice-level svg').getAttribute('aria-hidden'),'true');
  const colors=await notice.evaluate((element,severity)=>{
@@ -39,22 +39,24 @@ export async function frontendNoticeSeverityCases({check,out}){
   },theme);
   await page.waitForFunction(theme=>document.documentElement.dataset.theme===theme,theme);
   await page.getByTestId('agent-connect').click();
-  const toast=page.locator('.toast'),warning=page.getByTestId('codex-version-warning');
-  await assertNotice(toast,'error','错误');
+  const toast=page.getByTestId('global-diagnostic-toast'),warning=page.getByTestId('codex-version-warning');
+  await toast.getByRole('alert').waitFor();
+  await assertNotice(toast.getByTestId('diagnostic-notice'),'error','错误',false);
   assert.equal(await warning.count(),0);
   await page.screenshot({path:path.join(out,'codex-startup-error-'+theme+'.png')});
   await toast.locator('summary').click();
   assert.match(await toast.innerText(),/required_isolation_controls_missing/);
   assert.match(await toast.innerText(),/\[redacted\]/);
   assert(!((await toast.textContent()).includes('fixture-private-token')));
-  await toast.getByRole('button',{name:'关闭',exact:true}).click();
+  await toast.getByRole('button',{name:'关闭通知',exact:true}).click();
   await page.evaluate(()=>{window.__test.allowConnection=true;window.__test.failAccountRead=true;});
   await page.getByTestId('agent-connect').click();
   await page.waitForFunction(()=>window.__test.accountReadFailed===true);
-  await assertNotice(toast,'error','错误');
+  await toast.getByRole('alert').waitFor();
+  await assertNotice(toast.getByTestId('diagnostic-notice'),'error','错误',false);
   assert.equal(await toast.getByTestId('diagnostic-summary').innerText(),'账户状态读取失败，请刷新账户状态后重试。');
   assert.equal(await warning.count(),0);
-  await toast.getByRole('button',{name:'关闭',exact:true}).click();
+  await toast.getByRole('button',{name:'关闭通知',exact:true}).click();
   await page.evaluate(()=>window.__test.failAccountRead=false);
   await page.getByTestId('agent-connect').click();
   await assertNotice(warning,'warning','警告');
@@ -101,7 +103,7 @@ export async function frontendNoticeSeverityCases({check,out}){
   assert.match(await failure.innerText(),/拒绝认证/);
   assert(!((await failure.textContent()).includes('fixture-private-token')));
   assert.equal(await success.count(),0);
-  assert.equal(await page.locator('.toast').count(),0);
+  assert.equal(await page.getByTestId('global-diagnostic-toast').count(),0);
  });
 
  await check('notice-experience-codex-restored-conversation',async page=>{

@@ -49,7 +49,7 @@ test('returning to the original input identity does not revive its abandoned pre
 });
 
 test('current inspection errors are visible and a manual retry can succeed',async()=>{
- const {h,pending}=setup();try{await h.flush();h.byId('asset-preview').props.onClick();pending[0].reject(Error('Fixture inspection rejected'));await h.flush();assert.match(h.text(h.find(node=>node.props?.role==='alert')),/Fixture inspection rejected/);assert.equal(h.errors.length,1);assert(!h.byId('asset-preview').props.disabled);h.byId('asset-preview').props.onClick();pending[1].resolve(result(2));await h.flush();assert.equal(h.find(node=>node.type==='Structure').props.data.n_atoms,2);assert(!h.all().some(node=>node.props?.role==='alert'));}finally{h.unmount();}
+ const {h,pending}=setup();try{await h.flush();h.byId('asset-preview').props.onClick();pending[0].reject(Error('Fixture inspection rejected'));await h.flush();assert.match(h.text(h.find(node=>node.props?.severity==='error')),/Fixture inspection rejected/);assert.equal(h.errors.length,1);assert(!h.byId('asset-preview').props.disabled);h.byId('asset-preview').props.onClick();pending[1].resolve(result(2));await h.flush();assert.equal(h.find(node=>node.type==='Structure').props.data.n_atoms,2);assert(!h.all().some(node=>node.props?.role==='alert'));}finally{h.unmount();}
 });
 
 test('preview requires a current project, path, registered environment and integer frame',async()=>{

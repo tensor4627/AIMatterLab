@@ -1,25 +1,53 @@
-.field-help {
-  display: inline-grid;
-  place-items: center;
-  width: max(24px, 1.6em);
-  height: max(24px, 1.6em);
-  padding: 2px;
-  border-radius: var(--radius-pill, 999px);
-  color: var(--muted);
-  vertical-align: middle;
-  cursor: help;
-  transition: color var(--ui-quick, 150ms) var(--ease-apple, ease), background-color var(--ui-quick, 150ms) var(--ease-apple, ease);
-}
-.field-help:is(:hover, :focus-visible, [aria-describedby]) {
-  color: var(--accent);
-  background: var(--accent-bg);
-}
-.explanation-tooltip {
-  cursor: help;
-  text-decoration: underline dotted var(--muted);
-  text-underline-offset: .25em;
-}
-.explanation-tooltip:focus-visible, .field-help:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+@layer components {
+  .field-help {
+    display: inline-grid;
+    place-items: center;
+    width: max(28px, 1.6em);
+    height: max(28px, 1.6em);
+    padding: var(--space-1);
+    border-radius: var(--radius-pill);
+    color: var(--muted);
+    vertical-align: middle;
+    cursor: help;
+    transition: color var(--motion-snappy-dur) var(--ease-apple),
+      background-color var(--motion-snappy-dur) var(--ease-apple);
+  }
+
+  .field-help:is(:hover, :focus-visible, [aria-describedby]) {
+    color: var(--accent);
+    background: var(--accent-bg);
+  }
+
+  .explanation-tooltip {
+    position: relative;
+    display: inline-block;
+    min-width: 0;
+    cursor: help;
+    text-decoration: underline dotted var(--muted);
+    text-underline-offset: .25em;
+  }
+
+  .explanation-tooltip:focus-visible, .field-help:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: 2px;
+  }
+
+  .explanation-tooltip-content {
+    position: fixed;
+    z-index: var(--z-tooltip);
+    width: max-content;
+    max-width: min(320px,75vw);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--radius-xs);
+    background: var(--surface-glass-strong);
+    backdrop-filter: var(--glass-blur);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: var(--font-meta);
+    font-weight: 400;
+    line-height: 1.6;
+  }
 }

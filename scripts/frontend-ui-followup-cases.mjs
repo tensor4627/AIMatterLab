@@ -145,7 +145,6 @@ export async function frontendUiFollowupCases({check,out}){
   await check('interaction-experience-new-message-and-replay-'+preference,async page=>{
    await page.emulateMedia({reducedMotion:preference});
    await page.evaluate(async()=>{
-    await import('/frontend/app/interactions.css');
     const original=window.studio.invoke;
     window.studio.invoke=async(method,data)=>{
      if(method==='agent.rpc'&&['thread/resume','thread/read'].includes(data.method))return {model:'fixture-model',thread:{
@@ -170,7 +169,7 @@ export async function frontendUiFollowupCases({check,out}){
   });
  }
  for(const theme of ['light','dark'])for(const width of [320,420])await check('ui-followup-header-'+theme+'-'+width,async page=>{
-  await page.evaluate(async({theme,width})=>{await import('/frontend/app/frontend-refinement.css');document.documentElement.dataset.theme=theme;const root=document.getElementById('root');root.className='workspace-shell';root.style.cssText='height:100vh;display:flex;justify-content:center';const original=window.studio.invoke;
+  await page.evaluate(async({theme,width})=>{document.documentElement.dataset.theme=theme;const root=document.getElementById('root');root.className='workspace-shell';root.style.cssText='height:100vh;display:flex;justify-content:center';const original=window.studio.invoke;
    window.studio.invoke=async(method,data)=>{if(method==='agent.connect')return {tools:{status:'blocked',message:'Synthetic disconnected tool state'}};if(method==='agent.tools')return {status:'blocked',message:'Synthetic disconnected tool state'};if(method==='agent.rpc'&&data.method==='model/list')return {data:[{model:'synthetic-long-model',displayName:'Synthetic model with a long descriptive name',isDefault:true,supportedReasoningEfforts:[]}]};return original(method,data);};
    window.testProps={width,planningMode:false,onPlanningModeChange(){},onOpenHistory(){},onNewConversation(){},context:'{}',computeResource:{kind:'ssh-connection',status:'selected',authentication:'verified',alive:true,operator:'human',capabilities:{terminal:{agentReady:false},service:{agentReady:false,workflowReady:false}}},onError:error=>{throw error;}};
    return window.renderTest('Agent',window.testProps);
@@ -182,7 +181,7 @@ export async function frontendUiFollowupCases({check,out}){
  });
  for(const custom of [false,true])await check('ui-followup-fonts-'+(custom?'preserve-explicit':'larger-defaults'),async page=>{
   await app(page,{custom});const actual=await page.evaluate(()=>{const style=document.documentElement.style;return {font:parseFloat(getComputedStyle(document.documentElement).fontSize),minimum:style.getPropertyValue('--ui-min-font'),chat:style.getPropertyValue('--chat-font-size'),editor:style.getPropertyValue('--editor-font-size'),terminal:style.getPropertyValue('--terminal-font-size')};});
-  assert.deepEqual(actual,custom?{font:20,minimum:'15px',chat:'22px',editor:'16',terminal:'14'}:{font:18,minimum:'17px',chat:'18px',editor:'18',terminal:'17'});
+  assert.deepEqual(actual,custom?{font:20,minimum:'15px',chat:'22px',editor:'16',terminal:'14'}:{font:18,minimum:'13px',chat:'18px',editor:'18',terminal:'17'});
   await page.getByRole('button',{name:'设置',exact:true}).click();const dialog=page.getByRole('dialog',{name:'工作台设置',exact:true});assert.equal(await dialog.locator('label').filter({hasText:'界面字号'}).locator('input').inputValue(),custom?'20':'18');
  });
  for(const width of [1366,1024])await check('ui-followup-default-layout-'+width,async page=>{

@@ -18,7 +18,8 @@ assert.ok(dictStart>=0&&dictEnd>dictStart,'i18n english dictionary not found');
 const dictBody=i18n.slice(dictStart,dictEnd);
 
 const unescape=value=>value.replace(/\\(.)/g,'$1');
-const entries=[...dictBody.matchAll(/(["'])((?:\\.|(?!\1)[^\\])*)\1\s*:\s*(["'])((?:\\.|(?!\3)[^\\])*)\3/g)]
+const workflow=fs.readFileSync(path.join(root,'frontend','ui','workflow-i18n.ts'),'utf8');
+const entries=[...(dictBody+'\n'+workflow).matchAll(/(["'])((?:\\.|(?!\1)[^\\])*)\1\s*:\s*(["'])((?:\\.|(?!\3)[^\\])*)\3/g)]
  .map(match=>({key:unescape(match[2]),value:unescape(match[4])}));
 
 function literals(){

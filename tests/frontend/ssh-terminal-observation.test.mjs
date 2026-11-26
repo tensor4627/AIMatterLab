@@ -16,7 +16,8 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function fixture(t,invoke,initial={}){
  const hooks=[],effects=[],timers=new Set(),timeouts=[],views=[],calls=[],errors=[],states=[],writes=[],listeners=new Map();let cursor=0,props,resize;
  const appearance={font:'13',minimum:'11px'},root={dataset:{theme:'dark'}},appearanceModule={exports:{}};
- new Function('module','exports','document','getComputedStyle',appearanceSource)(appearanceModule,appearanceModule.exports,{documentElement:root},()=>({getPropertyValue:key=>key==='--ui-min-font'?appearance.minimum:key==='--terminal-font-size'?appearance.font:''}));
+ const colors={dark:{'--surface-terminal':'#121218','--terminal-foreground':'#d1d5e4'},light:{'--surface-terminal':'#f8f7fa','--terminal-foreground':'#292633'}};
+ new Function('module','exports','document','getComputedStyle',appearanceSource)(appearanceModule,appearanceModule.exports,{documentElement:root},()=>({getPropertyValue:key=>key==='--ui-min-font'?appearance.minimum:key==='--terminal-font-size'?appearance.font:colors[root.dataset.theme]?.[key]||''}));
  const window={addEventListener:(name,listener)=>listeners.set(name,listener),removeEventListener:name=>listeners.delete(name)};
  const inputState={pending:Promise.resolve(),locked:false,observationEpoch:0};
  const useRef=value=>hooks[cursor++]??=( {current:value} );
@@ -48,13 +49,13 @@ for(const privateLogin of [false,true])test('appearance updates the open '+(priv
  const before=f.calls.filter(call=>call.method===resizeMethod).length;
  assert.equal(view.options.fontSize,13);
  f.changeAppearance({font:'10',minimum:'18px',theme:'light'});
- assert.equal(view.options.fontSize,18);
+ assert.equal(view.options.fontSize,10,'terminal size remains independent of the workbench minimum');
  assert.equal(view.options.theme.background,'#f8f7fa');
  assert.equal(view.options.theme.foreground,'#292633');
  assert.equal(f.calls.filter(call=>call.method===resizeMethod).length,before+1);
  f.changeAppearance({font:'24px',minimum:'11px',theme:'dark'});
  assert.equal(view.options.fontSize,24);
- assert.equal(view.options.theme.background,'#17171b');
+ assert.equal(view.options.theme.background,'#121218');
  assert.equal(f.views.length,1);
  assert(!f.calls.some(call=>call.method.includes('Input')||call.method==='sharedTerminal.input'));
  f.unmount();f.changeAppearance({font:'12',minimum:'11px',theme:'light'});

@@ -37,7 +37,7 @@ export default function DeveloperComputeOptions({mode,workspaceId,invalid,disabl
           </option>)}
         </select>
       </label>
-      {invalid&&<p id="approval-workspace-error" role="alert">{t('请为完全权限选择一个已验证的 SSH 工作区。')}</p>}
+      {invalid&&<span id="approval-workspace-error" className="field-error" role="alert">{t('请为完全权限选择一个已验证的 SSH 工作区。')}</span>}
       {!hosts.length&&!workspaceId&&<p className="settings-note">{t('请先在「计算资源」连接 SSH 并确认工作区。')}</p>}
     </>}
   </div>;

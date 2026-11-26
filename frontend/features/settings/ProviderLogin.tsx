@@ -1,6 +1,8 @@
 import {useEffect,useId,useRef,useState} from 'react';
 import {LogIn,ExternalLink,LoaderCircle,KeyRound,CheckCircle2} from 'lucide-react';
-import {Modal,statusNames} from "../../ui/Dialogs";
+import {Modal} from "../../ui/Dialogs";
+import {ConfirmDialog} from '../../ui/ConfirmDialog';
+import {statusLabel} from '../../ui/StatusBadge';
 import Notice from '../../ui/Notice';
 import {InlineDiagnostic} from '../diagnostics/DiagnosticNotice';
 import {redactTranscriptText} from '../../../contracts/agent/transcript-sanitizer.mjs';
@@ -106,7 +108,7 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
    <div className="account-summary">
     <dl className="account-state-facts">
      <div><dt>{t('实际账户状态')}</dt><dd>{accountSummary}</dd></div>
-     <div><dt>{t('模型访问')}</dt><dd>{t(statusNames[status.modelAccess||'not_run']||status.modelAccess||'未验证')}</dd></div>
+     <div><dt>{t('模型访问')}</dt><dd>{statusLabel(status.modelAccess||'not_run')}</dd></div>
     </dl>
     <button className="button" disabled={accountRefreshing||busy||testing} onClick={()=>void refreshAccount()}>{t('刷新账户状态')}</button>
    </div>
@@ -130,8 +132,8 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
      <div className="account-field-label"><label htmlFor={inputId}>{t('账户地区')}</label><HelpTip label={t('账户地区')} content={t('使用 Kimi Code 官方设备授权。账户凭据保存在本应用独立的 CLI 配置中。')}/></div>
      <select id={inputId} data-guide-target="login-region" value={region} disabled={busy} onChange={e=>setRegion(e.target.value)}><option value="mainland-cn">{t('中国大陆 · kimi.com')}</option><option value="global">{t('国际 · kimi.ai')}</option></select>
     </div>
-    <button className="button primary" onClick={()=>void start()} disabled={busy}>{busy?<LoaderCircle size={15} className="spin"/>:<LogIn size={15}/>}{t('开始 Kimi 登录')}</button>
-    {status.url&&<><div className="notice">{t('在授权页面输入下方终端显示的验证码。')}</div><button className="button" onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}><ExternalLink size={15}/>{t('打开官方授权页面')}</button></>}
+    <button className={'button'+(status.phase==='completed'?'':' primary')} onClick={()=>void start()} disabled={busy}>{busy?<LoaderCircle size={15} className="spin"/>:<LogIn size={15}/>}{t('开始 Kimi 登录')}</button>
+    {status.url&&<><Notice>{t('在授权页面输入下方终端显示的验证码。')}</Notice><button className="button" onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}><ExternalLink size={15}/>{t('打开官方授权页面')}</button></>}
     {status.message&&<Notice severity={status.phase==='failed'?'error':'info'}><pre className="login-output">{redactTranscriptText(status.message)}</pre></Notice>}
     {busy&&<button className="button" onClick={()=>void invoke('agent.login.cancel',{provider:'kimi'} satisfies CancelProviderLoginRequest).catch(onError)}>{t('取消登录')}</button>}
     {status.phase==='completed'&&!exitCallback&&<button className="button primary" onClick={onConfigured}><CheckCircle2 size={15}/>{t('登录完成，连接 Kimi')}</button>}
@@ -154,10 +156,15 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
     <label>{t('模型 ID')}<input value={model} onChange={e=>setModel(e.target.value)} placeholder="qwen3-coder-plus"/></label>
     <button className="button primary" disabled={busy||!key||!model} onClick={()=>void start()}><KeyRound size={15}/>{t('保存凭据并连接')}</button>
     <p className="muted">{t('密钥由主进程使用系统加密保存。模型是否可用以实际调用为准。')}</p>
-    {status.credentialStored&&<div className="notice">{t('已有加密凭据，可关闭此窗口直接连接。')}</div>}
+    {status.credentialStored&&<Notice>{t('已有加密凭据，可关闭此窗口直接连接。')}</Notice>}
    </>}
   {['deepseek','compatible'].includes(provider)&&status.credentialStored&&<div><button className="button" data-testid="test-api-connection" disabled={busy||testing||dirty||!accountLoaded} onClick={()=>void testConnection()}>{t(testing?'测试连接中…':'验证 API 连接')}</button>{dirty&&<Notice severity="warning">{t('配置有未保存修改；保存后验证当前配置。')}</Notice>}{testResult&&<Notice data-testid="api-connection-feedback">{testResult}</Notice>}{testError!=null&&<InlineDiagnostic error={testError} summary={t('API 连接测试未完成。')}/>}</div>}
-  {((provider==='codex'&&status.account)||(['qwen','deepseek','compatible'].includes(provider)&&status.credentialStored))&&<div className="account-remove"><button className="button" disabled={busy||testing} onClick={()=>setConfirmRemove(true)}>{t(provider==='codex'?'退出 Codex 登录':'移除 API 凭据')}</button>{confirmRemove&&<Notice severity="warning"><p>{t(provider==='codex'?'退出 AIMatterLab 的 Codex 登录；本机 Codex 的登录、对话和计算记录保留。':'移除本机保存的密钥；对话和计算记录保留，不会撤销平台上的密钥。')}</p><button className="button" onClick={()=>setConfirmRemove(false)}>{t('取消')}</button><button className="button" disabled={busy||testing} onClick={()=>void remove()}>{t('确认移除')}</button></Notice>}</div>}
+  {((provider==='codex'&&status.account)||(['qwen','deepseek','compatible'].includes(provider)&&status.credentialStored))&&<div className="account-remove">
+   <button className="button" disabled={busy||testing} onClick={()=>setConfirmRemove(true)}>{t(provider==='codex'?'退出 Codex 登录':'移除 API 凭据')}</button>
+   {confirmRemove&&<ConfirmDialog title={t(provider==='codex'?'退出 Codex 登录':'移除 API 凭据')} target={provider==='codex'?'Codex':t('API 凭据')} tone="danger"
+    consequence={t(provider==='codex'?'退出 AIMatterLab 的 Codex 登录；本机 Codex 的登录、对话和计算记录保留。':'移除本机保存的密钥；对话和计算记录保留，不会撤销平台上的密钥。')}
+    confirmLabel={t(provider==='codex'?'退出登录':'确认移除')} pending={removing} onCancel={()=>{if(!operation.current)setConfirmRemove(false);}} onConfirm={()=>void remove()}/>}
+  </div>}
   </div>
  </fieldset>
  </AccountDialogContent>;

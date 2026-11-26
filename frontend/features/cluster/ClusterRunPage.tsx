@@ -1,3 +1,8 @@
+import Button from '../../ui/Button';
+import ActionBar from '../../ui/ActionBar';
+import StatusBadge from '../../ui/StatusBadge';
+import Notice from '../../ui/Notice';
+import {useConfirm} from '../../ui/ConfirmDialog';
 import {useEffect,useRef,useState} from 'react';
 import {Play,Sparkles} from 'lucide-react';
 import LoadingFeedback from '../../ui/LoadingFeedback';
@@ -12,6 +17,7 @@ import './cluster.css';
 
 type ClusterConnectionObservation=ClusterRun&{connection_action?:{kind:'authenticate_original_run';code:'needs_human_auth';runId:string}|null};
 const terminalStatuses:readonly ClusterRun['status'][]=['succeeded','failed','cancelled'];
+const cancellableStatuses:readonly ClusterRun['status'][]=['queued','running','unknown'];
 
 function clusterReviewSpec(run:ClusterRun){
  const remote_inputs={...Object.fromEntries(run.snapshots.filter(asset=>asset.source_kind==='remote').map(asset=>[asset.name,asset.source])),...run.remote_inputs};
@@ -46,6 +52,7 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
  id:string;sourceId?:string;workerGeneration?:number;connected?:boolean;visible?:boolean;readOnly?:boolean;
  onError:(e:unknown)=>void;onAgent:(text:string)=>void;onOpenConnections?:(source:{runId:string})=>void;
 }){
+ const confirm=useConfirm(),askingAction=useRef(false);
  const source=sourceId||`generation:${workerGeneration}`;
  const scopeFor=(runId:string)=>JSON.stringify([source,runId]);
  const origin=scopeFor(id);
@@ -69,6 +76,8 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
  const owner=useRef<RunObservationTarget>({scope,workerGeneration,connected}),mounted=useRef(false);
  if(owner.current.scope!==scope||owner.current.workerGeneration!==workerGeneration||owner.current.connected!==connected)owner.current={scope,workerGeneration,connected};
  const target=owner.current;
+ const actionRevision=run?JSON.stringify([run.id,run.name,run.engine,run.cluster_id,run.status,run.job_id,run.cancellation,run.script,run.queue_target_snapshot,run.resources,run.snapshots,run.inputs,run.remote_inputs,run.parameters]):'';
+ const latestAction=useRef({revision:actionRevision,visible,edit});latestAction.current={revision:actionRevision,visible,edit};
  const awaitingCurrent=!!currentRecord&&currentRecord.target!==target;
  const current=()=>mounted.current&&owner.current===target&&connected;
  const shown=usePageVisibility(),watching=visible&&shown,watch=useRef({watching});
@@ -154,7 +163,7 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
  }
 
  async function perform(label:string,action:()=>Promise<ClusterRun>,revising=false){
-  if(!current()||!writable.current||operation.current===target)return;
+  if(!current()||!writable.current||operation.current===target||askingAction.current)return;
   prioritizeExplicitRead();
   inspection.current=null;
   setChecking(null);
@@ -170,6 +179,24 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
   }catch(error){if(current())reportActionError(error);}
   finally{if(operation.current===target){operation.current=null;setOperationLabel(null);}}
  }
+ async function requestAction(kind:'submit'|'cancel'){
+  const submitting=kind==='submit';
+  const canContinue=()=>current()&&writable.current&&latestAction.current.visible&&(!submitting||!latestAction.current.edit)&&latestAction.current.revision===actionRevision&&operation.current!==target;
+  const statuses=submitting?['draft','ready']:cancellableStatuses;
+  if(!run||!statuses.includes(run.status)||askingAction.current||!canContinue())return;
+  const queue=run.queue_target_snapshot?.queue||run.resources?.queue;
+  const location=[run.name,run.cluster_id,submitting?queue:run.job_id].filter(Boolean).join(' · ');
+  askingAction.current=true;
+  try{
+   if(!await confirm(submitting?{title:t('提交到集群'),target:location,
+    consequence:t('作业服务将上传输入快照并把此脚本提交给集群调度器。'),confirmLabel:t('提交作业'),tone:'danger',testId:'confirm-cluster-run-submit'}:{
+    title:t('取消集群作业'),target:location,
+    consequence:t('作业服务将核对原作业身份，再尝试向集群调度器发送取消请求。已写入的产物保留。'),confirmLabel:t('取消作业'),tone:'danger',testId:'confirm-cluster-run-cancel'}))return;
+  }finally{askingAction.current=false;}
+  if(!canContinue())return;
+  const endpoint=submitting?'/api/cluster/submit':'/api/cluster/cancel';
+  await perform(t(submitting?'正在提交到集群…':'正在取消并核对作业…'),()=>api<ClusterRun>('POST',endpoint,{run_id:activeId}));
+ }
  function revise(){
   void perform(t('正在保存修订…'),async()=>{
    const value=JSON.parse(revised);
@@ -179,23 +206,23 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
  }
 
  const observed=<ClusterObservationStatus connected={connected} observedAt={currentRecord?.at} error={!!failure} paused={failure?.paused} awaitingCurrent={awaitingCurrent}/>;
- const recovery=connectionAction&&<section className="notice" role="status">
+ const recovery=connectionAction&&<Notice compact severity="warning">
   <p>{t(connectionAction==='update'?'此连接方式需要按原来源更新作业服务；不会自动更新或改用其它连接。':run?'需要人工认证；请打开私有认证界面，现有作业不会重提。':'需要核对原作业连接；作业状态仍未确认，不会重新提交。')}</p>
-  {onOpenConnections&&<button className="button" onClick={()=>onOpenConnections({runId:activeId})}>{t('核对原作业连接')}</button>}
- </section>;
+  {onOpenConnections&&<Button  onClick={()=>onOpenConnections({runId:activeId})}>{t('核对原作业连接')}</Button>}
+ </Notice>;
  if(!run)return <div className="page">
   {observed}
   <LoadingFeedback busy={connected&&!failure&&!connectionAction} label={t('读取任务中…')}/>
-  {connected&&failure&&<button className="button" disabled={inspecting} onClick={()=>void inspect(false)}>{t('重试')}</button>}
+  {connected&&failure&&<Button  disabled={inspecting} onClick={()=>void inspect(false)}>{t('重试')}</Button>}
   {recovery}
  </div>;
  return <div className="page cluster-review" data-testid="cluster-review"><div className="page-heading"><div><span className="eyebrow">{run.cluster.scheduler} · {run.engine}</span><h1>{run.name}</h1><p>{t('审阅运行参数与完整提交脚本。科学检查结果供参考。适用的执行检查须在计算节点通过，作业才会启动引擎。')}</p></div><span className="tag">{run.status}</span></div>
  {observed}
  {recovery}
- {run.cancellation&&['running','queued','unknown'].includes(run.status)&&<p className="notice" role="status" data-testid="cluster-cancellation-receipt">
+ {run.cancellation&&['running','queued','unknown'].includes(run.status)&&<Notice compact   data-testid="cluster-cancellation-receipt">
   {t(run.cancellation.signal_sent===true?'撤销命令已送达，正在等待作业的最终状态。':run.cancellation.status==='requested'?'已记录撤销请求，正在核对原作业。':run.cancellation.signal_sent===false?'原作业身份尚未核实，本次撤销命令未发出。':'撤销命令的送达情况未知，请核对原作业。')}
- </p>}
- {readOnly&&<p className="notice" role="status" data-testid="run-readonly-observation">{t('运行记录可查看；提交、续算等操作需匹配原服务与权限。')}</p>}
+ </Notice>}
+ {readOnly&&<Notice compact   data-testid="run-readonly-observation">{t('运行记录可查看；提交、续算等操作需匹配原服务与权限。')}</Notice>}
  <LoadingFeedback busy={busy} label={operationLabel?.text||''}/>
  <ol className="run-flow">{['输入快照','审阅与资源检查','SSH 上传与提交','执行节点科学验证','计算与结果监控'].map(v=><li key={v}>{t(v)}</li>)}</ol>
  {run.queue_target_snapshot&&<section className="card resolved-queue-target" data-testid="resolved-queue-target"><strong>{run.queue_target_snapshot.queue} · {run.queue_target_snapshot.id}</strong><span>{t(run.queue_target_snapshot.usage_class==='owned'?'自有':run.queue_target_snapshot.usage_class==='paid'?'付费':'未知')} · {run.cluster_id} · v{run.queue_profile_version}</span><small>{t('环境')} · {Object.entries(run.queue_target_snapshot.environment.executables).map(([name,path])=>name+' '+path).join(' · ')}</small></section>}
@@ -207,17 +234,17 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
  <section className="card"><h3>{t('将执行的提交脚本')}</h3><pre className="batch-script">{run.script}</pre></section>
  <section className="card">
   <h3>{t('验证与监控')}</h3>
-  <button className="button" disabled={!connected||inspecting||busy} onClick={()=>void inspect(true)}>{t('核对作业与日志')}</button>
+  <Button  disabled={!connected||inspecting||busy} onClick={()=>void inspect(true)}>{t('核对作业与日志')}</Button>
   <p>{t('输入验证')} · {run.validation.status} · {run.validation.scope}</p><p>{t('科学验证')} · {run.scientific_validation.status}</p><p>Job ID · {run.job_id||t('未提交')}</p>
-  {failedLog===scope&&<p className="notice" role="status">{t('日志连接暂不可用')}{log&&' · '+t('上次记录')}</p>}
+  {failedLog===scope&&<Notice compact  >{t('日志连接暂不可用')}{log&&' · '+t('上次记录')}</Notice>}
   <pre className="console" onMouseUp={e=>setLogEvidenceRange(evidencePreSelection(e.currentTarget))}>{log||t('暂无运行日志')}</pre>{log&&<EvidenceSelection source={{kind:'log',runId:run.id,target:'cluster'}} text={log} range={logEvidenceRange}/>}
  </section>
- {edit&&<button className="button primary" disabled={!canWrite||busy} onClick={revise}>{t('保存修订并预览脚本')}</button>}
+ {edit&&<Button variant="primary"  disabled={!canWrite||busy} onClick={revise}>{t('保存修订并预览脚本')}</Button>}
  <ClusterResults key={scope} run={run} connected={connected} workerGeneration={workerGeneration} onError={onError}/>
- <div className="review-execute">
-  <button className="button" onClick={()=>onAgent(t('检查集群任务 {id} 的已记录参数和日志。只读监控，不重提 unknown 任务。').replace('{id}',run.id))}><Sparkles size={15}/>{t('让 Agent 分析')}</button>
-  {['draft','ready'].includes(run.status)?<button className="button primary" disabled={!canWrite||busy||edit} onClick={()=>void perform(t('正在提交到集群…'),()=>api<ClusterRun>('POST','/api/cluster/submit',{run_id:activeId}))}><Play size={15}/>{t('审阅完成，提交到集群')}</button>
-   :['queued','running','unknown'].includes(run.status)?<button className="button" disabled={!canWrite||busy} onClick={()=>void perform(t('正在取消并核对作业…'),()=>api<ClusterRun>('POST','/api/cluster/cancel',{run_id:activeId}))}>{t('取消已核实作业')}</button>:null}
- </div>
+ <ActionBar status={<StatusBadge status={run.status}/>}>
+  <Button  onClick={()=>onAgent(t('检查集群任务 {id} 的已记录参数和日志。只读监控，不重提 unknown 任务。').replace('{id}',run.id))}><Sparkles size={15}/>{t('让 Agent 分析')}</Button>
+  {['draft','ready'].includes(run.status)?<Button variant={edit?'secondary':'primary'} disabled={!canWrite||busy||edit} onClick={()=>void requestAction('submit')}><Play size={15}/>{t('审阅完成，提交到集群')}</Button>
+   :cancellableStatuses.includes(run.status)?<Button disabled={!canWrite||busy} onClick={()=>void requestAction('cancel')}>{t('取消已核实作业')}</Button>:null}
+ </ActionBar>
  </div>;
 }

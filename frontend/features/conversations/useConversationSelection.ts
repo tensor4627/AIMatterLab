@@ -12,7 +12,7 @@ export interface ConversationSelectionPorts{
  mounted:MutableRefObject<boolean>;
  settingsReady:MutableRefObject<Promise<void>|null>;
  editorDirty:boolean;
- confirmReplace:()=>boolean;
+ confirmReplace:()=>Promise<boolean>|boolean;
  language?:string;
  beforeSelection:()=>void;
  clearIntent:()=>void;
@@ -35,6 +35,16 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
  const selectedConversationRef=useRef<Conversation|null>(null),conversationSelectionSeq=useRef(0);
  const freshSelectionPending=useRef<FreshSelection|null>(null);
  const sessionSelectionNonceRef=useRef<string|undefined>(undefined);sessionSelectionNonceRef.current=sessionSelection?.nonce;
+ const awaitingEditor=useRef(false);
+
+ async function approveEditorReplacement(){
+  if(awaitingEditor.current)return false;
+  const sequence=conversationSelectionSeq.current,owner=selectedConversationRef.current?.id,nonce=sessionSelectionNonceRef.current;
+  awaitingEditor.current=true;
+  try{
+   return await confirmReplace()&&mounted.current&&sequence===conversationSelectionSeq.current&&owner===selectedConversationRef.current?.id&&nonce===sessionSelectionNonceRef.current;
+  }finally{awaitingEditor.current=false;}
+ }
 
  function conversationChanged(value:Conversation|null){storeConversation(value?.id||null);selectedConversationRef.current=value;setSelectedConversationId(value?.id||null);if(value)setConversations(old=>[value,...old.filter(c=>c.id!==value.id)]);}
  function acceptAgentConversation(value:Conversation|null,nonce?:string){
@@ -42,7 +52,7 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
   conversationChanged(value);
  }
  async function chooseConversation(conversation:Conversation){
-  if(editorDirty&&!confirmReplace())return;
+  if(awaitingEditor.current||editorDirty&&!await approveEditorReplacement())return;
   beforeSelection();const seq=++conversationSelectionSeq.current;clearIntent();beginWorkerGate();
   try{
    await settingsReady.current;if(seq!==conversationSelectionSeq.current||!mounted.current)return;
@@ -55,7 +65,7 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
   }catch(error){if(seq===conversationSelectionSeq.current&&mounted.current)onSelectionError(error);}
  }
  async function newConversation(planning=false,initialPrompt?:string,provider?:AgentProvider){
-  if(editorDirty&&!confirmReplace())return;
+  if(awaitingEditor.current||editorDirty&&!await approveEditorReplacement())return;
   const previous=selectedConversationRef.current;beforeSelection();const sequence=++conversationSelectionSeq.current;beginWorkerGate();clearIntent();
   const promise=invoke('conversation.select',{new:true,...provider?{provider}:{}});freshSelectionPending.current={sequence,promise,planning,initialPrompt,provider};setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true});
   try{

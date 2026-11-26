@@ -1,3 +1,4 @@
+import {fixtureControlModule} from '../helpers/frontend-component-loader.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
 import {appWorkerHarness} from "../helpers/app-worker-hooks.mjs";import {deferred,memoryStorage} from "../helpers/agent-hooks.mjs";import {workspacePresentation} from "../../frontend/features/workflows/workspace-presentation.mjs";
 
@@ -24,7 +25,7 @@ function workspaceHarness(invoke){
  const useEffect=(fn,deps)=>{const i=cursor++,old=hooks[i];if(!old||deps.some((v,j)=>v!==old.deps[j])){hooks[i]={deps,cleanup:old?.cleanup};effects.push(()=>{hooks[i].cleanup?.();hooks[i].cleanup=fn();});}};
  const jsx=(type,props)=>({type,props}),module={exports:{}};const imports={'react':{useState,useRef,useEffect},'react/jsx-runtime':{jsx,jsxs:jsx},"../../api/studio":{invoke},"../../ui/i18n":{t:x=>x},"./workspace-presentation.mjs":{workspacePresentation}};
  const code=ts.transpileModule(fs.readFileSync(new URL("../../frontend/features/workflows/WorkspacePanel.tsx",import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
- new Function('require','module','exports',code)(name=>imports[name]||new Proxy({default:name},{get:(o,k)=>o[k]||String(k)}),module,module.exports);
+ new Function('require','module','exports',code)(name=>imports[name]||fixtureControlModule(name)||new Proxy({default:name},{get:(o,k)=>o[k]||String(k)}),module,module.exports);
  function render(){cursor=0;dirty=false;tree=module.exports.default(props);}const all=n=>Array.isArray(n)?n.flatMap(all):n&&typeof n==='object'?[n,...all(n.props?.children)]:[];const text=n=>Array.isArray(n)?n.map(text).join(''):n&&typeof n==='object'?text(n.props?.children):n==null||typeof n==='boolean'?'':String(n);const find=p=>{const n=all(tree).find(p);assert(n);return n;};
  async function flush(){for(let i=0;i<12;i++){while(effects.length)effects.shift()();await new Promise(r=>setImmediate(r));if(dirty&&alive)render();}}
  render();return{flush,find,text,errors,change:next=>{props={...props,...next};render();},unmount:()=>{alive=false;hooks.forEach(h=>h.cleanup?.());}};

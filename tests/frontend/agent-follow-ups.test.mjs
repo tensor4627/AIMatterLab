@@ -221,7 +221,7 @@ test('moving a file-only message to a full draft keeps the queue and restores it
   await h.flush();h.click('agent-queued-to-draft');await h.flush();
   assert.throws(()=>find(h,'agent-queued-message'));
   assert.equal(h.textarea().props.value,'');
-  assert(h.find(node=>node.props?.title==='预览附件 · '+queued.name));
+  assert(h.find(node=>node.props?.tooltip==='预览附件 · '+queued.name));
   assert(h.find(node=>node.props?.['aria-label']==='移除附件 '+queued.name));
   assert.match(h.storage.values.get('studio.composer.v1.'+JSON.stringify(['codex','thread','first'])),/queued-file\.txt/);
  }finally{h.unmount();}
@@ -263,7 +263,7 @@ test('busy composer keyboard and stale button handlers wait for the exact draft 
   pending.resolve([fileRef(400,'delayed.txt')]);await h.flush();
   h.render({sessionSelection:{nonce:'back-to-first',conversation:conversation('codex','first')}});await h.flush();
   assert.equal(h.textarea().props.value,'Send the whole original draft once files arrive');
-  assert(h.find(node=>node.props?.title==='预览附件 · delayed.txt'));
+  assert(h.find(node=>node.props?.tooltip==='预览附件 · delayed.txt'));
   assert.equal(find(h,'agent-queue').props.disabled,false);
   assert.equal(find(h,'agent-steer').props.disabled,true);
  }finally{pending.resolve([]);h.unmount();}

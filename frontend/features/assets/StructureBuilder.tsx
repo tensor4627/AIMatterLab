@@ -1,3 +1,6 @@
+import Button from '../../ui/Button';
+import Notice from '../../ui/Notice';
+import Disclosure from '../../ui/Disclosure';
 import LoadingFeedback from '../../ui/LoadingFeedback';
 import {useState} from 'react';
 import {api} from '../../api/worker';
@@ -25,15 +28,15 @@ export default function StructureBuilder({projectId,environments,onSaved,onError
   </div>
   <div className="asset-actions">
    <div className="asset-repeat">{repeat.map((n,i)=><label key={i}>{'Repeat '+['x','y','z'][i]}<input type="number" min={1} max={100} value={n} onChange={e=>setRepeat(repeat.map((v,j)=>j===i?Number(e.target.value):v))}/></label>)}</div>
-   <button className="button primary" disabled={busy||!ready} onClick={()=>void build()}>{t(busy?'生成中…':'生成结构并校验')}</button>
+   <Button variant="primary"  disabled={busy||!ready} onClick={()=>void build()}>{t(busy?'生成中…':'生成结构并校验')}</Button>
   </div>
   <LoadingFeedback busy={busy} label={t('生成中…')}/>
-  {request.stale&&<p role="status">{t('输入已变化，旧结果已隐藏。已发送的创建请求不会因此撤销。')}</p>}
-  {request.error&&<p role="alert">{request.error}</p>}
+  {request.stale&&<Notice compact >{t('输入已变化，旧结果已隐藏。已发送的创建请求不会因此撤销。')}</Notice>}
+  {request.error&&<Notice compact severity="error" >{request.error}</Notice>}
   {result&&<section className="asset-result">
    <header><p className="structure-result-summary"><Tooltip content={result.path}><code>{result.path.split(/[\\/]/).at(-1)}</code></Tooltip> · {result.formula} · {result.n_atoms} atoms · ASE {result.provenance.version}</p></header>
    <p className="asset-check-scope"><Tooltip content={t('几何检查通过；尚未进行能量松弛或势模型验证。')}><strong>{t('几何检查')} · {t('通过')}</strong></Tooltip><span>{t('能量松弛与势模型验证尚未运行。')}</span></p>
-   {!!result.provenance.assumptions.length&&<details><summary>{t('假设与来源')} · {result.provenance.assumptions.length}</summary>{result.provenance.assumptions.map((s:any,i:number)=><p key={i}>{s.field}: {s.source}</p>)}</details>}
+   {!!result.provenance.assumptions.length&&<Disclosure summary={<>{t('假设与来源')} · {result.provenance.assumptions.length}</>}>{result.provenance.assumptions.map((s:any,i:number)=><p key={i}>{s.field}: {s.source}</p>)}</Disclosure>}
    <div className="asset-viewport"><Structure data={result} viewKey={JSON.stringify([workerScope,projectId,result.path])}/></div>
   </section>}
  </section>;

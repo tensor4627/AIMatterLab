@@ -132,6 +132,8 @@ try {
       import React from 'react';
       import {createRoot} from 'react-dom/client';
       import SharedTerminalPanel from ${frontend('features/terminal/SharedTerminalPanel.tsx')};
+      import {ConfirmProvider} from ${frontend('ui/ConfirmDialog.tsx')};
+      import {ToastProvider} from ${frontend('ui/Toast.tsx')};
       import ${frontend('app/style.css')};
       const listeners = new Set(), fixture = window.sshFixture = {errors:[], settings:[], resizes:[],
         emit(method) { for (const listen of listeners) listen({method,params:{}}); }};
@@ -142,13 +144,13 @@ try {
           return await window.invokeSshFixture(method, data);
         },
       };
-      createRoot(document.getElementById('root')).render(React.createElement(SharedTerminalPanel, {
+      createRoot(document.getElementById('root')).render(React.createElement(ToastProvider,null,React.createElement(ConfirmProvider,null,React.createElement(SharedTerminalPanel, {
         visible:true, canShare:true, provider:'codex', resourceScope:'fixture',
         request:{nonce:'fixture-login', kind:'ssh', mode:'interactive', connectionMode:'managed',
           profileId:${JSON.stringify(profile.id)}, version:${profile.version}, profileName:${JSON.stringify(profile.name)}},
         onError:error => fixture.errors.push({code:error.code, action:error.action, message:error.message, presentation:error.presentation}),
         onConfigureSsh:target => fixture.settings.push(target),
-      }));
+      }))));
     </script></body></html>`);
   server = await createServer({root, configFile:false, plugins:[react()], logLevel:'error',
     cacheDir:path.join(outputRoot, 'vite'), optimizeDeps:{entries:[harness]}, server:{host:'127.0.0.1', port:0,

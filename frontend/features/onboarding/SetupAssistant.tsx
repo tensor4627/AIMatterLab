@@ -6,6 +6,8 @@ import type {Settings} from '../../../contracts/dto/settings';
 import type {SetupGuideInfo, SetupPage, SetupProgress} from '../../../contracts/dto/setup-guide';
 import {invoke} from '../../api/studio';
 import {Modal} from '../../ui/Dialogs';
+import Notice from '../../ui/Notice';
+import Tooltip from '../../ui/Tooltip';
 import {languageText} from '../../ui/i18n';
 import {providerNames,type AccountConfiguration} from '../conversations/provider-account.mjs';
 import ProviderLogin from '../settings/ProviderLogin';
@@ -91,7 +93,7 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
               <fieldset><legend>{say('外观','Appearance')}</legend><div className="setup-themes">{(['light','dark'] as const).map(theme=><button key={theme} disabled={busy} aria-pressed={settings.theme===theme} onClick={()=>preference({theme})}>
                 <span className={'setup-theme-preview '+theme} aria-hidden="true"><i/><i/><i/></span>
                 {theme==='dark'?<Moon size={15}/>:<Sun size={15}/>} <span>{theme==='dark'?say('深色石墨','Graphite'):say('浅色','Light')}</span>{settings.theme===theme&&<Check className="setup-theme-check" size={15}/>}</button>)}</div></fieldset>
-              <button className="setup-location" disabled={busy} title={info.directory} onClick={()=>void act(async()=>{await invoke('onboarding.openDirectory');})}><FolderOpen size={19}/><span><strong>{info.directoryKind==='profile'?say('本机配置目录','Local profile folder'):say('本机工作区','Local workspace')}</strong><small dir="auto">{info.directory}</small></span><ExternalLink size={15}/></button>
+              <Tooltip asChild content={info.directory}><button className="setup-location" disabled={busy} onClick={()=>void act(async()=>{await invoke('onboarding.openDirectory');})}><FolderOpen size={19} aria-hidden="true"/><span><strong>{info.directoryKind==='profile'?say('本机配置目录','Local profile folder'):say('本机工作区','Local workspace')}</strong><small dir="auto">{info.directory}</small></span><ExternalLink size={15} aria-hidden="true"/></button></Tooltip>
             </div>}
             {page==='agent'&&<>
               <fieldset><legend className="setup-sr">{say('服务商','Provider')}</legend><div className="setup-providers">{providers.map(id=><button key={id} disabled={busy||agentBusy} aria-pressed={provider===id} onClick={()=>{if(provider!==id)preference({agentProvider:id});}}>
@@ -122,7 +124,7 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
               {tour===null?<button className="setup-tour-start" onClick={()=>{setTour(setupTour[0]);setChecks(false);}}><span className="setup-tour-icon"><BookOpen size={22}/></span><span><strong>{say('跟着示例走一遍','Take the guided tour')}</strong><small>{say('铜晶胞的分子动力学流程','A molecular dynamics workflow for copper')}</small></span><ChevronRight size={19}/></button>:
                 <div className="setup-tour"><div className="setup-tour-tabs" role="group" aria-label={say('示例操作','Tour steps')}>{setupTour.map(step=>{
                   const {icon:Icon,title}=tourItems[step];
-                  return <button key={step} title={title} aria-label={title} aria-pressed={tour===step} onClick={()=>setTour(step)}><Icon size={17}/></button>;
+                  return <Tooltip key={step} asChild content={title}><button aria-label={title} aria-pressed={tour===step} onClick={()=>setTour(step)}><Icon size={17} aria-hidden="true"/></button></Tooltip>;
                 })}</div>
                   <div aria-live="polite"><h2>{tourItems[tour].title}</h2><p>{tourItems[tour].body}</p></div>
                   <div className="setup-tour-foot">
@@ -143,7 +145,7 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
               </div>
               {checks&&<div className="setup-checks"><label>{say('选择安装短例','Choose an installation check')}<select value={shortCase} onChange={event=>setShortCase(event.target.value)}><option value="worker">{say('作业服务','Job service')}</option><option value="reference-md">ASE · CPU MD</option><option value="pydyn-md">PyDyn · CUDA MD</option></select></label><button className="setup-secondary" disabled={agentBusy} onClick={()=>onVisit('short-check',shortCase)}><Play size={15}/>{say('在对话中准备短例','Prepare check in chat')}</button></div>}
             </>}
-            {error&&<p className="setup-error" role="alert">{error}</p>}
+            {error&&<Notice className="setup-error" severity="error">{error}</Notice>}
           </div>
           <footer className="setup-footer">
             {index>0&&<button className="setup-text" disabled={busy} onClick={()=>move(pages[index-1])}><ArrowLeft size={15}/>{say('上一步','Back')}</button>}
@@ -155,6 +157,6 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
       </div>
     </section>
     {login&&<GuideSpotlight step="account" english={english} continueTargets={accountGuideNavigation}/>}
-    {login&&<Modal title={names[provider]+' · '+say('账号与 API','Account and API')} onClose={()=>setLogin(false)}>{error&&<p role="alert" className="setup-error">{error}</p>}<ProviderLogin key={provider} embedded showExit provider={provider} disabled={agentBusy} onClose={()=>setLogin(false)} onAccountState={reportAccount} onConfigured={()=>onReply(null)} onTested={model=>onReply({provider,model})} onError={e=>setError(e instanceof Error?e.message:String(e))}/></Modal>}
+    {login&&<Modal title={names[provider]+' · '+say('账号与 API','Account and API')} onClose={()=>setLogin(false)}>{error&&<Notice className="setup-error" severity="error">{error}</Notice>}<ProviderLogin key={provider} embedded showExit provider={provider} disabled={agentBusy} onClose={()=>setLogin(false)} onAccountState={reportAccount} onConfigured={()=>onReply(null)} onTested={model=>onReply({provider,model})} onError={e=>setError(e instanceof Error?e.message:String(e))}/></Modal>}
   </>;
 }

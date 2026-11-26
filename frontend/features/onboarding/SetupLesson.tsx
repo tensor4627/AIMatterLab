@@ -2,6 +2,7 @@ import {useRef,useState} from 'react';
 import {ArrowUpLeft,Scan} from 'lucide-react';
 import type {SetupPage} from '../../../contracts/dto/setup-guide';
 import {languageText} from '../../ui/i18n';
+import Tooltip from '../../ui/Tooltip';
 import GuideSpotlight from './GuideSpotlight';
 import {guideStep,setupLessonProgress,type SetupLessonLocation} from './guide-steps';
 export type {SetupLessonLocation} from './guide-steps';
@@ -19,14 +20,14 @@ export default function SetupLesson({lesson,page,english,showFocus,onDismiss,onR
     <div className="lesson-controls" role="group" aria-label={languageText(english,'引导课节')}>
       <span className="lesson-progress" data-testid="setup-lesson-progress">{progress}</span>
       <span className="lesson-goal" title={heading}>{heading}</span>
-      <button ref={rehighlight} type="button" className="setup-help lesson-highlight" data-testid="setup-lesson-rehighlight"
-        aria-label={highlight} title={highlight} onClick={()=>{setHighlightAttempt(attempt=>attempt+1);onRehighlight();}}>
+      <Tooltip asChild content={highlight}><button ref={rehighlight} type="button" className="setup-help lesson-highlight" data-testid="setup-lesson-rehighlight"
+        aria-label={highlight} onClick={()=>{setHighlightAttempt(attempt=>attempt+1);onRehighlight();}}>
         <Scan size={15} aria-hidden="true"/><span>{highlight}</span>
-      </button>
-      <button type="button" className="setup-help lesson-return" data-testid="setup-lesson" data-lesson={lesson.destination}
-        aria-label={back} title={back} onClick={onReturn}>
+      </button></Tooltip>
+      <Tooltip asChild content={back}><button type="button" className="setup-help lesson-return" data-testid="setup-lesson" data-lesson={lesson.destination}
+        aria-label={back} onClick={onReturn}>
         <ArrowUpLeft size={15} aria-hidden="true"/><span>{back}</span>
-      </button>
+      </button></Tooltip>
     </div>
     {showFocus&&<GuideSpotlight key={`${lesson.destination}:${highlightAttempt}`} step={lesson.destination}
       shortCase={lesson.shortCase} english={english} onDismiss={onDismiss} returnFocus={rehighlight}

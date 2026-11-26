@@ -1,0 +1,29 @@
+@layer components {
+  .aml-disclosure > summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    color: var(--text-subtle);
+    font-size: var(--font-meta);
+    cursor: pointer;
+    list-style: none;
+    overflow-wrap: anywhere;
+  }
+  .aml-disclosure > summary::-webkit-details-marker { display: none; }
+  .aml-disclosure[data-variant=section] > summary {
+    color: var(--text);
+    font-size: var(--font-body);
+    font-weight: 600;
+  }
+  .aml-disclosure-arrow {
+    position: relative;
+    inset-block-start: 0.14em;
+    flex: none;
+    transform: rotate(-90deg);
+    transition: transform var(--motion-snappy-dur);
+  }
+  .aml-disclosure[open] > summary > .aml-disclosure-arrow { transform: rotate(0); }
+  @media (prefers-reduced-motion: reduce) {
+    .aml-disclosure-arrow { transition: none; }
+  }
+}

@@ -1,3 +1,6 @@
+import Button from '../../ui/Button';
+import Disclosure from '../../ui/Disclosure';
+import Notice from '../../ui/Notice';
 import {tr} from '../../ui/i18n';
 import {inspectResumeParameters,replaceResumeParameter} from './resume-parameters.mjs';
 import './resume-parameters.css';
@@ -31,9 +34,9 @@ export default function ResumeParametersEditor({engine,value,onChange,disabled}:
     {names===null?editAsJson:<>
      {rows.map((name,index)=><div className="resume-checkpoint-row" key={index}>
       <input aria-label={tr('Checkpoint 文件')+' '+(index+1)} aria-required="true" value={name} disabled={disabled} onChange={event=>update('checkpoint_files',rows.map((row,i)=>i===index?event.target.value:row))}/>
-      {names.length>0&&<button type="button" className="button" aria-label={tr('移除文件')+' '+(index+1)} disabled={disabled} onClick={()=>update('checkpoint_files',names.filter((_,i)=>i!==index))}>{tr('移除文件')}</button>}
+      {names.length>0&&<Button type="button"  aria-label={tr('移除文件')+' '+(index+1)} disabled={disabled} onClick={()=>update('checkpoint_files',names.filter((_,i)=>i!==index))}>{tr('移除文件')}</Button>}
      </div>)}
-     <button type="button" className="button" disabled={disabled||rows.includes('')} onClick={()=>update('checkpoint_files',[...names,''])}>{tr('添加 checkpoint 文件')}</button>
+     <Button type="button"  disabled={disabled||rows.includes('')} onClick={()=>update('checkpoint_files',[...names,''])}>{tr('添加 checkpoint 文件')}</Button>
     </>}
    </fieldset>
    <p className="muted">{tr('续算源文件须位于原项目授权的路径。续算输入须保留原物理参数与状态。')}</p>
@@ -45,10 +48,9 @@ export default function ResumeParametersEditor({engine,value,onChange,disabled}:
     </label>;
    })}
   </>}
-  <details className="resume-json">
-   <summary>{tr('高级 JSON 配置')}</summary>
+  <Disclosure className="resume-json" summary={<>{tr('高级 JSON 配置')}</>}>
    <textarea aria-label={tr('续算参数 JSON')} aria-invalid={!!error} className="json-input" disabled={disabled} value={value} onChange={event=>onChange(event.target.value)}/>
-  </details>
-  {error&&<p role="alert">{tr('续算参数 JSON')} · {tr(error)}</p>}
+  </Disclosure>
+  {error&&<Notice compact severity="error" >{tr('续算参数 JSON')} · {tr(error)}</Notice>}
  </div>;
 }

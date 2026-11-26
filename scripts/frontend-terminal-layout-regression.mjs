@@ -8,7 +8,7 @@ import {chromium} from 'playwright';
 const output=path.resolve('.studio/terminal-layout-browser');await fs.mkdir(output,{recursive:true});
 await fs.writeFile(path.join(output,'index.html'),'<!doctype html><html><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module" src="./entry.jsx"></script></body></html>');
 await fs.writeFile(path.join(output,'entry.jsx'),`
-import React from 'react';import {createRoot} from 'react-dom/client';import SharedTerminalPanel from '/frontend/features/terminal/SharedTerminalPanel.tsx';import '/frontend/app/style.css';
+import '/frontend/app/style.css';import React from 'react';import {createRoot} from 'react-dom/client';import SharedTerminalPanel from '/frontend/features/terminal/SharedTerminalPanel.tsx';import {ConfirmProvider} from '/frontend/ui/ConfirmDialog.tsx';import {ToastProvider} from '/frontend/ui/Toast.tsx';
 const reference={kind:'ssh-terminal',profileId:'synthetic-profile',profileVersion:1};
 const session={sessionId:'synthetic-session',name:'合成 SSH 会话',kind:'ssh',mode:'interactive',owner:'human',ownerEpoch:1,alive:true,status:'running',sequence:1,resource:reference,serviceActive:true,serviceStatus:'connected'};
 const resource={schemaVersion:1,selectionId:'synthetic-resource',...reference,sessionId:session.sessionId,status:'selected',operator:'human',processStatus:'running',alive:true,agentReady:false,authentication:'verified',managedRuns:true,workflowReady:true};
@@ -18,7 +18,7 @@ window.studio={onEvent:callback=>{fixture.events.add(callback);return()=>fixture
  if(method==='compute.sshService.status'){if(!fixture.opened)return {status:'disconnected'};if(fixture.delayStatus)return new Promise(resolve=>fixture.releaseStatus=()=>resolve({...fixture.service}));return {...fixture.service}}
  if(method==='sharedTerminal.open'){fixture.opened=true;return session}if(method==='sharedTerminal.list')return {sessions:[session]};if(method==='sharedTerminal.read')return {...session,output:data.cursor?'':'SYNTHETIC SSH TERMINAL OUTPUT\\r\\n',cursor:1,dropped:false};if(method==='sharedTerminal.resize')return {accepted:true};if(method==='worker.request'&&data.target==='/api/clusters')return [];throw Error('Unexpected synthetic IPC '+method);
 }};
-createRoot(document.getElementById('root')).render(<main style={{padding:16}}><h2>默认 300px SSH 终端布局检查</h2><div id="terminal-fixture" style={{height:300,border:'1px solid #666'}}><SharedTerminalPanel visible canShare provider="codex" resourceScope="synthetic-scope" request={{nonce:'synthetic-open',kind:'ssh',mode:'interactive',profileId:reference.profileId,version:1}} onError={error=>fixture.errors.push(String(error))}/></div></main>);
+createRoot(document.getElementById('root')).render(<ToastProvider><ConfirmProvider><main style={{padding:16}}><h2>默认 300px SSH 终端布局检查</h2><div id="terminal-fixture" style={{height:300,border:'1px solid #666'}}><SharedTerminalPanel visible canShare provider="codex" resourceScope="synthetic-scope" request={{nonce:'synthetic-open',kind:'ssh',mode:'interactive',profileId:reference.profileId,version:1}} onError={error=>fixture.errors.push(String(error))}/></div></main></ConfirmProvider></ToastProvider>);
 `);
 const server=await createServer({configFile:false,plugins:[react()],cacheDir:'.studio/vite-terminal-layout',server:{host:'127.0.0.1',port:0,watch:{ignored:['**/.studio/**','**/release/**','**/validation/**']}},optimizeDeps:{entries:[path.join(output,'index.html')]}});await server.listen();
 let browser;const checks=[],errors=[];

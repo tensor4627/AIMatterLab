@@ -1,3 +1,6 @@
+import Button from '../../ui/Button';
+import Notice from '../../ui/Notice';
+import Disclosure from '../../ui/Disclosure';
 import {useEffect,useRef,useState} from 'react';
 import {BookOpen,RefreshCw,Save,ChevronRight} from 'lucide-react';
 import {invoke} from '../../api/studio';
@@ -41,24 +44,23 @@ export default function SkillsWorkbench({provider,settings,onSaved,onSelect,sele
  const groups=[...new Set(routes.map(group))];
  return <div className="page skills-workbench" data-testid="skills-workbench">
   <div className="page-heading">
-   <h1>{t('科学资源与技能')}</h1><button className="button" disabled={loading} onClick={()=>void refresh()}><RefreshCw size={15}/>{t(loading?'读取中…':'刷新资源')}</button>
+   <h1>{t('科学资源与技能')}</h1><Button  disabled={loading} onClick={()=>void refresh()}><RefreshCw size={15}/>{t(loading?'读取中…':'刷新资源')}</Button>
   </div>
   <div className="skill-catalog-meta">
    <div className="skill-automatic"><BookOpen size={15}/><Tooltip content={t('目录和共享许可不代表已载入；实际引用记录显示在对应对话中。')}>{t('当前 Agent 服务商')} · <strong>{provider==='deepseek'?'DeepSeek API':provider}</strong></Tooltip></div>
    <span role="status" aria-live="polite" className="muted" data-testid="resource-refresh-status">{refreshedAt!==null&&<>{t('已刷新')} · {new Date(refreshedAt).toLocaleTimeString()}</>}</span>
   </div>
-  {errors.map(error=><p key={error} role="alert" className="notice">{error}</p>)}
+  {errors.map(error=><Notice compact severity="error" key={error}  >{error}</Notice>)}
   <section className="skill-functions">
    <div className="skill-section-heading">
     <h2><Tooltip content={t('描述目标即可。Agent 按当前任务选择对应指导，无需逐个勾选技能。')}>{t('按功能查看指导')}</Tooltip></h2>
     <input aria-label={t('查找任务或工具')} value={query} onChange={e=>setQuery(e.target.value)} placeholder={t('例如：重加权、NEB、HotPP…')}/>
    </div>
-   {loading&&!catalog&&<p role="status" className="muted">{t('读取中…')}</p>}
+   {loading&&!catalog&&<Notice compact  className="muted">{t('读取中…')}</Notice>}
    {!loading&&catalog&&!routes.length&&<p className="muted">{t('没有匹配的功能')}</p>}
    {groups.map(name=>{
     const members=routes.filter(route=>group(route)===name);
-    return <details className="skill-function-group" key={name} open={query?true:undefined}>
-     <summary>{t(name)} <span className="skill-group-count">{members.length}</span></summary>
+    return <Disclosure className="skill-function-group" key={name} open={query?true:undefined} summary={<>{t(name)} <span className="skill-group-count">{members.length}</span></>}>
      {members.map(route=>{
       const name=t(names[route.id]||route.title||route.id),available=route.permission==='allowed'&&route.source_status!=='unregistered';
       const attached=selected&&'functionId' in selected&&selected.functionId===route.id;
@@ -67,20 +69,20 @@ export default function SkillsWorkbench({provider,settings,onSaved,onSelect,sele
       return <div className="skill-function" key={route.id}>
        <div className="skill-function-info"><strong>{name}</strong>
         <p className="skill-route-meta"><span>{source}</span><span className={available?'':'skill-permission'}>{t(route.permission==='permission_required'?'需设置共享许可':route.source_status==='unregistered'?'公开源码未登记':'可引用指导')}</span>{limitation&&<span>{t(limitation)}</span>}</p>
-        <details><summary>{t('范围与限制')}</summary>
+        <Disclosure summary={<>{t('范围与限制')}</>}>
          {(route.status.includes('missing_project_skill')||route.status.includes('missing_MD_skill'))&&<p>{t('AIMatterLab 指导 · 无上游专用技能')}</p>}
          <p>{route.id} · {route.phase} · {route.status}</p>{route.engines.length>0&&<p>{route.engines.join(', ')}</p>}
          <small>{t('指导可用性不代表该引擎或功能已经运行验证。')}</small>
-        </details>
+        </Disclosure>
        </div>
-       <button className="button" data-selected={attached||undefined} disabled={!available} onClick={()=>onSelect({attachmentId:crypto.randomUUID(),name,functionId:route.id})}>{t(attached?'已选择 · 下条消息':'用于下条消息')}<ChevronRight size={15}/></button>
+       <Button  data-selected={attached||undefined} disabled={!available} onClick={()=>onSelect({attachmentId:crypto.randomUUID(),name,functionId:route.id})}>{t(attached?'已选择 · 下条消息':'用于下条消息')}<ChevronRight size={15}/></Button>
       </div>;
      })}
-    </details>;
+    </Disclosure>;
    })}
   </section>
   <ToolPackagesPanel provider={provider} onSelect={onSelect}/>
-  <details className="card skill-config" open={configure} onToggle={e=>setConfigure(e.currentTarget.open)}><summary>{t('管理资源与公开内容共享')}{dirty&&<span className="tag">{t('未保存')}</span>}</summary><p>{t('仅分享白名单公开文档；私有技能、凭据和 SSH 信息不在自动共享范围。')}</p><label>{t('共享给服务商')}<select aria-label={t('共享给服务商')} disabled={saving||!configLoaded} value={target} onChange={e=>setTarget(e.target.value as AgentProvider)}>{providers.map(p=><option key={p} value={p}>{p==='deepseek'?'DeepSeek API':p}</option>)}</select></label><div className="skill-sharing-options">{sources.map(([id,label])=><label key={id}><input type="checkbox" checked={consent(id).includes(target)} disabled={saving||!configLoaded} onChange={e=>toggle(id,e.target.checked)}/>{label}</label>)}</div><p className="muted">{t('此处只调整共享对象，不切换 Agent 服务商。更改在保存后生效。')}</p><details><summary>{t('高级目录与源码配置')}</summary><h3>{t('自动附加的源码范围')}</h3><div className="source-scope-options">{sources.map(([id,label])=><label key={id}><input type="checkbox" aria-label={t('启用源码')+' · '+label} disabled={saving||!configLoaded} checked={draft.sourceIds===undefined||draft.sourceIds.includes(id)} onChange={e=>{const current=draft.sourceIds??sources.map(([key])=>key);patch({sourceIds:e.target.checked?[...new Set([...current,id])]:current.filter(key=>key!==id)});}}/>{label}</label>)}</div><p>{t('只自动附加勾选的源码摘要。保存后重连作业服务生效。已登记计算环境不受影响；已有 worker 源码目录仍由原登记管理。')}</p><label>{t('源码目录 · 每行一个')}<textarea aria-label={t('源码目录 · 每行一个')} rows={4} disabled={saving||!configLoaded} value={sourceText} onChange={e=>{setSourceText(e.target.value);patch({sourceRoots:split(e.target.value)});}}/></label><label>{t('额外技能根目录 · 每行一个')}<textarea aria-label={t('额外技能根目录 · 每行一个')} rows={4} disabled={saving||!configLoaded} value={skillText} onChange={e=>{setSkillText(e.target.value);patch({skillRoots:split(e.target.value)});}}/></label><button className="button" onClick={()=>void invoke('sources.diagnose').then(setDiagnostic).catch(onError)}>{t('检查工具链接')}</button>{diagnostic&&<div className="skill-source-observations">{diagnostic.sources?.map((s:any)=><div key={s.id}><strong>{s.name} · {s.status}</strong><details><summary>{t('来源与版本')}</summary><p className="mono">{s.root}</p><p>{s.commit||t('版本未知')} · {t(s.dirty?'存在本地修改':'源码未修改')}</p></details></div>)}<details><summary>{t('工具覆盖')}</summary>{diagnostic.tools?.map((item:any)=><p key={item.id}>{item.id} · {t('源码')}: {item.source_status} · {t('适配器')}: {item.adapter_status} · runtime: {item.runtime_status}</p>)}</details><details><summary>{t('已登记环境')}</summary>{diagnostic.worker?.environments?.map((environment:any)=><div key={environment.id}><strong>{environment.name}</strong>{Object.entries(environment.executables||{}).map(([name,value]:any)=><p key={name}>{name}: {value.status}</p>)}</div>)}</details><p>{t('仅文件可用性检查；不等于运行或科学验证。')}</p></div>}</details><div className="button-row"><button className="button primary" disabled={!dirty||saving||!configLoaded} data-testid="save-scientific-skills" onClick={()=>void save()}><Save size={15}/>{t(saving?'保存中…':'保存资源设置')}</button>{saved&&<span role="status">{t('设置已保存')}</span>}</div></details>
-  <details className="card skill-local"><summary>{t('高级：手动附加本地技能')} · {local.length}</summary><p>{t('仅在下条消息显式引用所选技能。请确认目标服务商可以读取该内容。')}</p>{local.map(s=><div className="skill-function" key={s.path}><div><strong>{s.name}</strong><p>{s.shortDescription||s.description}</p><details><summary>{t('来源路径')}</summary><p className="mono">{s.path}</p></details></div><button className="button" disabled={s.enabled===false} onClick={()=>onSelect({attachmentId:crypto.randomUUID(),name:s.name,path:s.path})}>{t('用于下条消息')}</button></div>)}{!loading&&!local.length&&<p>{t('未发现本地技能。可在资源配置中添加额外技能目录。')}</p>}</details>
+  <Disclosure className="card skill-config" open={configure} onToggle={e=>setConfigure(e.currentTarget.open)} summary={<>{t('管理资源与公开内容共享')}{dirty&&<span className="tag">{t('未保存')}</span>}</>}><p>{t('仅分享白名单公开文档；私有技能、凭据和 SSH 信息不在自动共享范围。')}</p><label>{t('共享给服务商')}<select aria-label={t('共享给服务商')} disabled={saving||!configLoaded} value={target} onChange={e=>setTarget(e.target.value as AgentProvider)}>{providers.map(p=><option key={p} value={p}>{p==='deepseek'?'DeepSeek API':p}</option>)}</select></label><div className="skill-sharing-options">{sources.map(([id,label])=><label key={id}><input type="checkbox" checked={consent(id).includes(target)} disabled={saving||!configLoaded} onChange={e=>toggle(id,e.target.checked)}/>{label}</label>)}</div><p className="muted">{t('此处只调整共享对象，不切换 Agent 服务商。更改在保存后生效。')}</p><Disclosure summary={<>{t('高级目录与源码配置')}</>}><h3>{t('自动附加的源码范围')}</h3><div className="source-scope-options">{sources.map(([id,label])=><label key={id}><input type="checkbox" aria-label={t('启用源码')+' · '+label} disabled={saving||!configLoaded} checked={draft.sourceIds===undefined||draft.sourceIds.includes(id)} onChange={e=>{const current=draft.sourceIds??sources.map(([key])=>key);patch({sourceIds:e.target.checked?[...new Set([...current,id])]:current.filter(key=>key!==id)});}}/>{label}</label>)}</div><p>{t('只自动附加勾选的源码摘要。保存后重连作业服务生效。已登记计算环境不受影响；已有 worker 源码目录仍由原登记管理。')}</p><label>{t('源码目录 · 每行一个')}<textarea aria-label={t('源码目录 · 每行一个')} rows={4} disabled={saving||!configLoaded} value={sourceText} onChange={e=>{setSourceText(e.target.value);patch({sourceRoots:split(e.target.value)});}}/></label><label>{t('额外技能根目录 · 每行一个')}<textarea aria-label={t('额外技能根目录 · 每行一个')} rows={4} disabled={saving||!configLoaded} value={skillText} onChange={e=>{setSkillText(e.target.value);patch({skillRoots:split(e.target.value)});}}/></label><Button  onClick={()=>void invoke('sources.diagnose').then(setDiagnostic).catch(onError)}>{t('检查工具链接')}</Button>{diagnostic&&<div className="skill-source-observations">{diagnostic.sources?.map((s:any)=><div key={s.id}><strong>{s.name} · {s.status}</strong><Disclosure summary={<>{t('来源与版本')}</>}><p className="mono">{s.root}</p><p>{s.commit||t('版本未知')} · {t(s.dirty?'存在本地修改':'源码未修改')}</p></Disclosure></div>)}<Disclosure summary={<>{t('工具覆盖')}</>}>{diagnostic.tools?.map((item:any)=><p key={item.id}>{item.id} · {t('源码')}: {item.source_status} · {t('适配器')}: {item.adapter_status} · runtime: {item.runtime_status}</p>)}</Disclosure><Disclosure summary={<>{t('已登记环境')}</>}>{diagnostic.worker?.environments?.map((environment:any)=><div key={environment.id}><strong>{environment.name}</strong>{Object.entries(environment.executables||{}).map(([name,value]:any)=><p key={name}>{name}: {value.status}</p>)}</div>)}</Disclosure><p>{t('仅文件可用性检查；不等于运行或科学验证。')}</p></div>}</Disclosure><div className="button-row"><Button variant="primary"  disabled={!dirty||saving||!configLoaded} data-testid="save-scientific-skills" onClick={()=>void save()}><Save size={15}/>{t(saving?'保存中…':'保存资源设置')}</Button>{saved&&<span role="status">{t('设置已保存')}</span>}</div></Disclosure>
+  <Disclosure className="card skill-local" summary={<>{t('高级：手动附加本地技能')} · {local.length}</>}><p>{t('仅在下条消息显式引用所选技能。请确认目标服务商可以读取该内容。')}</p>{local.map(s=><div className="skill-function" key={s.path}><div><strong>{s.name}</strong><p>{s.shortDescription||s.description}</p><Disclosure summary={<>{t('来源路径')}</>}><p className="mono">{s.path}</p></Disclosure></div><Button  disabled={s.enabled===false} onClick={()=>onSelect({attachmentId:crypto.randomUUID(),name:s.name,path:s.path})}>{t('用于下条消息')}</Button></div>)}{!loading&&!local.length&&<p>{t('未发现本地技能。可在资源配置中添加额外技能目录。')}</p>}</Disclosure>
  </div>;
 }

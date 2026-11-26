@@ -4,7 +4,8 @@ const file=new URL("../../frontend/app/App.tsx",import.meta.url),source=fs.readF
 test('three ordinary actions are confined to existing secondary command list; R4 generation preserved',()=>{let p=component[0].parent;while(p&&!(ts.isJsxElement(p)&&p.openingElement.attributes.properties.some(a=>ts.isJsxAttribute(a)&&a.name.text==='className'&&a.initializer?.text==='command-list')))p=p.parent;assert(p);assert.equal(attrs.onNewConversation,'newConversation');const compute=nodes.find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='ComputeEnvironments');assert.equal(compute.attributes.properties.find(a=>a.name?.text==='workerGeneration').initializer.expression.getText(ast),'workerHydrationEpoch.current');});
 test('App palette permits independent chats during replies and respects pending UI operations',()=>{
  const locks=['deleting','renaming','busy','imageSaving','modal','deleteTarget','renameTarget'];
- const evaluate=new Function('agentBusy',...locks,'return ('+attrs.blocked+');');
+ const expression=nodes.find(node=>ts.isVariableDeclaration(node)&&node.name.getText(ast)===attrs.blocked)?.initializer?.getText(ast)??attrs.blocked;
+ const evaluate=new Function('agentBusy',...locks,'return ('+expression+');');
  const defaults=[false,false,false,false,'',null,null];
  for(const agentBusy of [false,true]){
   assert.equal(evaluate(agentBusy,...defaults),false);
@@ -37,7 +38,7 @@ test('production conversation hook preserves the current editor when confirmatio
  }
 });
 for(const agentBusy of [false,true])test('production new chat/task awaits main acknowledgement '+(agentBusy?'during a reply':'while idle'),async()=>{
- for(const planning of [false,true]){let acknowledge;const mainAck=new Promise(resolve=>acknowledge=resolve),h=newConversationHarness({agentBusy,editorDirty:true,mainAck}),pending=h.fn(planning);h.h.render();
+ for(const planning of [false,true]){let acknowledge;const mainAck=new Promise(resolve=>acknowledge=resolve),h=newConversationHarness({agentBusy,editorDirty:true,mainAck}),pending=h.fn(planning);await new Promise(resolve=>setImmediate(resolve));h.h.render();
   assert.deepEqual(h.calls.filter(c=>c[0]==='confirm'),[['confirm']]);assert.deepEqual(h.calls.filter(c=>c[0]==='invoke'),[['invoke','conversation.select',{new:true}]]);assert.deepEqual(h.h.current().sessionSelection,{nonce:'selection-nonce-1',new:true,pending:true});assert.equal(h.h.current().planningMode,false);assert.equal(h.refs.selectedConversationRef.current.taskId,'original-task');assert.equal(h.refs.freshSelectionPending.current.promise,mainAck);assert(!h.calls.some(c=>c[0]==='observeWorker'));
   acknowledge({fresh:true});await pending;h.h.render();
   assert.equal(h.h.current().planningMode,planning);assert.deepEqual(h.h.current().sessionSelection,{nonce:'selection-nonce-2',new:true});assert.equal(h.refs.selectedConversationRef.current,null);assert.equal(h.refs.freshSelectionPending.current,null);assert.equal(h.calls.filter(c=>c[0]==='beforeSelection').length,1);assert.equal(h.calls.filter(c=>c[0]==='observeWorker').length,1);assert(h.calls.every(c=>!/(?:send|prepare|execute|connect)/i.test(c[0])));assert.deepEqual(h.errors,[]);

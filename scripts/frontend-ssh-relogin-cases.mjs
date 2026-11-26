@@ -52,13 +52,15 @@ export async function frontendSshReloginCases({check,out}){
    };
    f.bindingAttempts=0;
    const Panel=(await import('/frontend/features/terminal/SshConnectionPanel.tsx')).default;
+   const {ConfirmProvider}=await import('/frontend/ui/ConfirmDialog.tsx'),{ToastProvider}=await import('/frontend/ui/Toast.tsx');
+   const render=props=>window.testRoot.render(React.createElement(ToastProvider,null,React.createElement(ConfirmProvider,null,React.createElement(Panel,props))));
    const props={visible:true,resourceScope:'chat',request:{nonce:'view',profileId:ref.profileId,version:1,connectionId:ref.connectionId,exact:true},
     onError:e=>{f.bindingError={code:e.code,action:e.action};},onUseForWorkflow:async()=>{
      if(++f.bindingAttempts===1)throw Error('worker_health_invalid');
-     window.testRoot.render(React.createElement(Panel,{...props,activeResource:{...ref,capabilities:{service}}}));
+     render({...props,activeResource:{...ref,capabilities:{service}}});
      return service;
     }};
-   window.testRoot.render(React.createElement(Panel,props));
+   render(props);
   });
   await page.getByTestId('ssh-worker-ready').waitFor();
   await page.evaluate(()=>{
@@ -132,9 +134,10 @@ export async function frontendSshReloginCases({check,out}){
     return original(method,data);
    };
    const Panel=(await import('/frontend/features/terminal/SshConnectionPanel.tsx')).default;
-   window.testRoot.render(React.createElement(Panel,{visible:true,request:{nonce:'fixture-request',profileId:ref.profileId,
+   const {ConfirmProvider}=await import('/frontend/ui/ConfirmDialog.tsx'),{ToastProvider}=await import('/frontend/ui/Toast.tsx');
+   window.testRoot.render(React.createElement(ToastProvider,null,React.createElement(ConfirmProvider,null,React.createElement(Panel,{visible:true,request:{nonce:'fixture-request',profileId:ref.profileId,
     version:ref.profileVersion,profileName:'Fixture gateway'},provider:'codex',resourceScope:'fixture-chat',
-    onError:error=>{window.__test.loginError=String(error);}}));
+    onError:error=>{window.__test.loginError=String(error);}}))));
   });
   const auth=page.getByRole('region',{name:'SSH 登录终端',exact:true});
   await auth.locator('.xterm-rows').getByText('Select login node [1/2]:',{exact:false}).waitFor();

@@ -1,3 +1,4 @@
+import Button from '../../ui/Button';
 import {FileText,Image as ImageIcon,X} from 'lucide-react';
 import type {ChatAttachmentPreview,ChatAttachmentRef} from '../../../contracts/dto/chat-attachments';
 import {Modal} from '../../ui/Dialogs';
@@ -13,13 +14,14 @@ export function ChatFiles({files,preview,remove}:{files:readonly ChatAttachmentR
  return <ul className="chat-files" aria-label={t('消息附件')}>{files.map(file=>{
   const Icon=file.kind==='image'?ImageIcon:FileText,source=file.source;
   return <li key={file.id} data-testid="chat-file-chip">
-   <button type="button" className="chat-file-preview" onClick={()=>preview(file)} title={t('预览附件')+' · '+file.name}>
+   <Button variant="ghost" tooltip={t('预览附件')+' · '+file.name} type="button" className="chat-file-preview" onClick={()=>preview(file)} >
     <Icon size={15} aria-hidden="true"/><span>{file.name}{source&&<small>
      {source.comparison?revisionLabel(source.comparison.beforeRevision)+' → '+revisionLabel(source.comparison.afterRevision):
       t('证据行')+' '+source.firstLine+'–'+source.lastLine+' · '+revisionLabel(source.revision)}
     </small>}</span>
-   </button>
-   {remove&&<button className="chat-file-remove" type="button" aria-label={t('移除附件')+' '+file.name} onClick={()=>remove(file.id)}><X size={13}/></button>}
+   </Button>
+   {remove&&<Button variant="icon" size="sm" className="chat-file-remove" aria-label={t('移除附件')+' '+file.name}
+    onClick={()=>remove(file.id)}><X size={13} aria-hidden="true"/></Button>}
   </li>;
  })}</ul>;
 }

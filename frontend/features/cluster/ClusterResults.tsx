@@ -1,3 +1,6 @@
+import Button from '../../ui/Button';
+import Notice from '../../ui/Notice';
+import Disclosure from '../../ui/Disclosure';
 import {useEffect,useRef,useState} from 'react';
 import {Download,FileText} from 'lucide-react';import {api} from '../../api/worker';import {t} from "../../ui/i18n";
 import LoadingFeedback from '../../ui/LoadingFeedback';
@@ -18,17 +21,17 @@ export default function ClusterResults({run,connected=true,workerGeneration=0,on
  return <section className="card cluster-results" data-testid="cluster-results">
   <div className="cluster-result-heading">
    <h3>{t('结果回收与资产')}</h3>
-   <button className="button primary" data-testid="collect-cluster-results" disabled={!connected||busy||!['succeeded','failed','cancelled'].includes(run.status)} onClick={()=>void collect()}><Download size={16}/>{t(busy?'回收中…':'回收结果')}</button>
+   <Button variant="primary"  data-testid="collect-cluster-results" disabled={!connected||busy||!['succeeded','failed','cancelled'].includes(run.status)} onClick={()=>void collect()}><Download size={16}/>{t(busy?'回收中…':'回收结果')}</Button>
   </div>
   <p>{t('按当前作业目录回收产物，校验 SHA256 后登记本机资产。重复回收不会重复提交计算。')}</p>
   <LoadingFeedback busy={busy} label={t('正在回收并校验结果…')}/>
   <LoadingFeedback busy={!!previewing} label={t('正在读取结果预览…')} phase={previewing}/>
   {collection&&<>
-   <p role="status" data-testid="collection-status">{t('回收完成')} · {collection.files.length} {t('个文件')} · {collection.manifest.transfer_status}</p>
+   <Notice compact  data-testid="collection-status">{t('回收完成')} · {collection.files.length} {t('个文件')} · {collection.manifest.transfer_status}</Notice>
    <div className="cluster-result-list">{collection.files.map((f:any)=><button className="cluster-run-row" key={f.id} disabled={!connected||previewing===f.name} onClick={()=>void inspect(f.name)}>
     <FileText size={15} aria-hidden="true"/><span><strong>{f.name}</strong><small>{f.size.toLocaleString()} B · SHA256 {f.sha256}</small></span>
    </button>)}</div>
   </>}
-  {preview&&<details open><summary>{preview.name}</summary><pre className="console" onMouseUp={e=>setEvidenceRange(evidencePreSelection(e.currentTarget))}>{preview.text||t('二进制或大文件，请核对文件哈希与来源。')}</pre>{preview.text&&<EvidenceSelection source={{kind:'artifact',runId:run.id,name:preview.name,target:'cluster'}} text={preview.text} range={evidenceRange}/>}</details>}
+  {preview&&<Disclosure open summary={<>{preview.name}</>}><pre className="console" onMouseUp={e=>setEvidenceRange(evidencePreSelection(e.currentTarget))}>{preview.text||t('二进制或大文件，请核对文件哈希与来源。')}</pre>{preview.text&&<EvidenceSelection source={{kind:'artifact',runId:run.id,name:preview.name,target:'cluster'}} text={preview.text} range={evidenceRange}/>}</Disclosure>}
  </section>;
 }

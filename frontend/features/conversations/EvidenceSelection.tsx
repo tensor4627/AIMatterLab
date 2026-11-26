@@ -1,3 +1,5 @@
+import Disclosure from '../../ui/Disclosure';
+import Button from '../../ui/Button';
 import {createContext,useContext,useEffect,useMemo,useRef,useState} from 'react';
 import {invoke} from '../../api/studio';
 import {t} from '../../ui/i18n';
@@ -82,22 +84,21 @@ export function EvidenceSelection({source,text,getText,hasContent,range,comparab
   <strong>{t(title)} · {revisionLabel(revision)}{unit?' · '+unit:''}</strong>
   {part.lastLine>=part.firstLine?<><small>{t('证据行')} {part.firstLine}–{part.lastLine}</small><pre tabIndex={0}>{part.text}</pre></>:<small>{t('此版本在此处没有文本')}</small>}
  </section>;
- return <details className="chat-evidence" data-testid="chat-evidence" data-source-kind={source.kind} open={open} onToggle={event=>setOpen(event.currentTarget.open)}>
-  <summary>{t('选取证据加入对话')}</summary>
+ return <Disclosure className="chat-evidence" data-testid="chat-evidence" data-source-kind={source.kind} open={open} onToggle={event=>setOpen(event.currentTarget.open)} summary={<>{t('选取证据加入对话')}</>}>
   {open&&<div className="chat-evidence-body" aria-busy={busy}>
    <small>{t('对话')} · {owner.name}</small>
    {source.kind!=='parameter'&&<div className="chat-evidence-lines">{field('firstLine','起始行')}{field('lastLine','结束行')}<small>{t('可选行')} 1–{lines}</small></div>}
    <label>{t('批注（可选）')}<textarea rows={2} maxLength={2000} value={comment} onChange={event=>setComment(event.target.value)} placeholder={t('说明想让 Agent 看哪处修改')}/></label>
    <div className="chat-evidence-actions">
-    <button className="button" type="button" disabled={busy||!valid} onClick={()=>void act('stage')}>{t(source.kind==='parameter'?'把参数值加入草稿':'把所选行加入草稿')}</button>
-    {comparable&&<><button className="button" type="button" disabled={busy} onClick={()=>void act('remember')}>{t('保留此版本供比较')}</button><button className="button" type="button" disabled={busy} onClick={()=>void act('compare')}>{t('与保留版本比较')}</button></>}
+    <Button  type="button" disabled={busy||!valid} onClick={()=>void act('stage')}>{t(source.kind==='parameter'?'把参数值加入草稿':'把所选行加入草稿')}</Button>
+    {comparable&&<><Button  type="button" disabled={busy} onClick={()=>void act('remember')}>{t('保留此版本供比较')}</Button><Button  type="button" disabled={busy} onClick={()=>void act('compare')}>{t('与保留版本比较')}</Button></>}
    </div>
    {diff&&<><div className="chat-evidence-diff" data-testid="chat-evidence-diff">
     {side('修改前',diff.beforeRevision,diff.beforeUnit,diff.before)}{side('修改后',diff.afterRevision,diff.afterUnit,diff.after)}
-   </div><button className="button" type="button" disabled={busy} onClick={()=>void act('stage',true)}>{t('把带批注的差异加入草稿')}</button></>}
+   </div><Button  type="button" disabled={busy} onClick={()=>void act('stage',true)}>{t('把带批注的差异加入草稿')}</Button></>}
    {status&&<small role="status">{status}</small>}{error&&<small role="alert">{error}</small>}
   </div>}
- </details>;
+ </Disclosure>;
 }
 
 export function EvidenceParameters({inspection}:{inspection:LocalReviewInspection}){

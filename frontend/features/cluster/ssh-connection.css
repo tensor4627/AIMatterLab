@@ -1,40 +1,152 @@
-.ssh-connection-guide {display:grid;gap:10px;min-width:0;}
-.ssh-connection-guide p {margin:0;line-height:1.55;overflow-wrap:anywhere;}
-.ssh-auth-scope {
-  display:grid;
-  gap:6px;
-  padding:9px 12px;
-  border-inline-start:2px solid var(--line);
-  background:var(--raised);
-  overflow-wrap:anywhere;
+@layer features {
+  .ssh-connection-guide {
+    display: grid;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+
+  .ssh-connection-guide p {
+    margin: 0;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+
+  .ssh-auth-scope {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-inline-start: 2px solid var(--line);
+    background: var(--raised);
+    overflow-wrap: anywhere;
+  }
+
+  .ssh-auth-heading,.ssh-auth-facts {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+  }
+
+  .ssh-auth-heading strong {
+    flex: 1 1 130px;
+  }
+
+  .ssh-auth-heading [data-state=verified],.ssh-auth-heading [data-state=key_verified] {
+    color: var(--green);
+  }
+
+  .ssh-auth-heading :is([data-state=blocked],[data-state=needs_human_auth]) {
+    color: var(--warn);
+  }
+
+  .ssh-auth-heading [data-state=key_check_failed] {
+    color: var(--danger);
+  }
+
+  .ssh-auth-facts,.ssh-auth-boundary,.ssh-private-terminal > small {
+    color: var(--muted);
+  }
+
+  .ssh-auth-facts:empty {
+    display: none;
+  }
+
+  .ssh-connection-guide details > summary {
+    cursor: pointer;
+    color: var(--muted);
+    padding: var(--space-3) 0;
+  }
+
+  .ssh-connection-guide dl {
+    display: grid;
+    grid-template-columns: minmax(0,.45fr) minmax(0,1fr);
+    gap: var(--space-2) var(--space-4);
+    margin: var(--space-3) 0;
+  }
+
+  .ssh-connection-guide dt {
+    color: var(--muted);
+  }
+
+  .ssh-connection-guide :is(dt,dd) {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .ssh-connection-guide code {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .ssh-private-terminal {
+    min-width: 0;
+    padding: var(--space-3) var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    background: var(--surface-terminal);
+  }
+
+  .ssh-private-terminal[hidden] {
+    display: none;
+  }
+
+  .ssh-private-terminal-host {
+    height: min(240px,43vh);
+    min-width: 0;
+    min-height: 96px;
+    overflow: hidden;
+  }
+
+  .ssh-private-terminal-host .xterm {
+    height: 100%;
+  }
+
+  .ssh-private-terminal > small {
+    display: block;
+    margin-top: var(--space-2);
+    color: var(--terminal-muted);
+  }
+
+  .ssh-auth-action {
+    border-inline-start: 2px solid var(--warn);
+    padding-inline-start: var(--space-3);
+  }
+
+  .ssh-forward-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,minmax(min(100%,135px),1fr));
+    gap: var(--space-3);
+    margin: var(--space-3) 0;
+  }
+
+  .ssh-forward-fields label {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    min-width: 0;
+  }
+
+  .ssh-forward-fields input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ssh-owned-forward {
+    display: grid;
+    gap: var(--space-3);
+    border-inline-start: 2px solid var(--line);
+    background: var(--raised);
+    padding: var(--space-3);
+    margin-top: var(--space-3);
+  }
+
+  .ssh-connection-guide .button-row {
+    margin: 0;
+    flex-wrap: wrap;
+  }
+
+  .ssh-connection-guide .button {
+    white-space: normal;
+    text-align: start;
+  }
 }
-.ssh-auth-heading,.ssh-auth-facts {display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 10px;}
-.ssh-auth-heading strong {flex:1 1 130px;}
-.ssh-auth-heading [data-state=verified],.ssh-auth-heading [data-state=key_verified] {color:var(--green);}
-.ssh-auth-heading :is([data-state=blocked],[data-state=needs_human_auth]) {color:var(--warn);}
-.ssh-auth-heading [data-state=key_check_failed] {color:var(--danger);}
-.ssh-auth-facts,.ssh-auth-boundary,.ssh-private-terminal > small {color:var(--muted);}
-.ssh-auth-facts:empty {display:none;}
-.ssh-connection-guide details > summary {cursor:pointer;color:var(--muted);padding:6px 0;}
-.ssh-connection-guide dl {display:grid;grid-template-columns:minmax(0,.45fr) minmax(0,1fr);gap:5px 12px;margin:6px 0;}
-.ssh-connection-guide dt {color:var(--muted);}
-.ssh-connection-guide :is(dt,dd) {margin:0;overflow-wrap:anywhere;}
-.ssh-connection-guide code {overflow-wrap:anywhere;white-space:pre-wrap;}
-.ssh-private-terminal {
-  min-width:0;
-  padding:7px 9px;
-  border:1px solid var(--line);
-  border-radius:5px;
-  background:#121218;
-}
-.ssh-private-terminal[hidden] {display:none;}
-.ssh-private-terminal-host {height:min(240px,43vh);min-width:0;min-height:96px;overflow:hidden;}
-.ssh-private-terminal-host .xterm {height:100%;}
-.ssh-private-terminal > small {display:block;margin-top:5px;color:#b7b3c8;}
-.ssh-auth-action {border-inline-start:2px solid var(--warn);padding-inline-start:8px;}
-.ssh-forward-fields {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,135px),1fr));gap:7px;margin:8px 0;}
-.ssh-forward-fields label {display:grid;gap:5px;margin:0;min-width:0;}
-.ssh-forward-fields input {width:100%;min-width:0;}
-.ssh-owned-forward {display:grid;gap:7px;border-inline-start:2px solid var(--line);background:var(--raised);padding:8px;margin-top:8px;}
-.ssh-connection-guide .button-row {margin:0;flex-wrap:wrap;}
-.ssh-connection-guide .button {white-space:normal;text-align:start;}

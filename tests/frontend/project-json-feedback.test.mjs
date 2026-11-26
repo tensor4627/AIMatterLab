@@ -9,12 +9,15 @@ function harness(submit=async()=>{},{props:extra={},invoke}={}){
  const useState=initial=>{const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return [slots[i],next=>{slots[i]=typeof next==='function'?next(slots[i]):next;dirty=true;}];};
  const useRef=initial=>{const i=cursor++;return slots[i]??(slots[i]={current:initial});};
  const useEffect=(fn,deps)=>{const i=cursor++,old=slots[i];if(!old||!deps||deps.some((v,j)=>!Object.is(v,old[j]))){slots[i]=deps;effects.push(fn);}};
- const jsx=(type,props)=>({type,props}),module={exports:{}};
+ const module={exports:{}};
+ const jsx=(type,props)=>type==='Field'?{type,props:{...props,children:[props.children({'aria-invalid':props.error?true:undefined}),props.error]}}
+  : type==='Notice'?{type,props:{...props,role:props.severity==='error'?'alert':'status'}}
+  : {type,props};
  new Function('require','module','exports',compiled)(name=>name==='react'?{useState,useRef,useEffect,useId:()=> 'gpu-hint-fixture'}:
   name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='./project-setup-defaults.mjs'?defaults:
   ["./project-policy-edit.mjs","../../../contracts/compute/project-policy.mjs"].includes(name)?policy:
   ["../../ui/presentation/engines","../../ui/presentation/paths"].includes(name)?{engines:[['pygas.build','pyGAS']],wslPath:x=>x}:
-  name==="../../ui/i18n"?{t:x=>x}:name==='../../api/studio'?{invoke}:{},module,module.exports);
+  name==="../../ui/i18n"?{t:x=>x}:name==='../../ui/Field'?{default:'Field'}:name==='../../ui/Notice'?{default:'Notice'}:name==='../../api/studio'?{invoke}:{},module,module.exports);
  const props={defaults:structuredClone(spec),environments:[{id:'env',name:'Registered'}],onSubmit:async s=>{submitted++;await submit(s);},...extra};
  function render(){cursor=0;dirty=false;tree=module.exports.default(props);}
  async function flush(){for(let n=0;n<10;n++){while(effects.length)effects.shift()();await Promise.resolve();if(dirty)render();}}

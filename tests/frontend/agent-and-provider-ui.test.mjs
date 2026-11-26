@@ -1,3 +1,4 @@
+import {fixtureControlModule} from '../helpers/frontend-component-loader.mjs';
 import __node_test, {describe as __describe} from 'node:test';
 import assert from "node:assert/strict";
 import {agentHarness, conversation, deferred as _imp_0_deferred, memoryStorage} from "../helpers/agent-hooks.mjs";
@@ -164,7 +165,7 @@ function harness(override){
  const useEffect=(fn,deps)=>{const i=cursor++,old=hooks[i];if(!old||deps.some((v,j)=>v!==old.deps[j])){hooks[i]={deps,cleanup:old?.cleanup};effects.push(()=>{hooks[i].cleanup?.();hooks[i].cleanup=fn();});}};
  const jsx=(type,props)=>({type,props});
  const invoke=async(method,data)=>{calls.push({method,data});const v=override?.(method,data);if(v!==undefined)return await v;if(method==='scientific.skills')return {schema_version:1,functions:[]};if(method==='skills.catalog')return [];if(method==='state')return {settings:{}};throw Error('Unexpected write');};
- const require=name=>name==='react'?{useState,useEffect,useRef}:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:name==="../../api/studio"?{invoke}:name==="../../ui/i18n"?{t:x=>x}:new Proxy({},{get:(_t,key)=>String(key)});
+ const require=name=>fixtureControlModule(name)??(name==='react'?{useState,useEffect,useRef}:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:name==="../../api/studio"?{invoke}:name==="../../ui/i18n"?{t:x=>x}:new Proxy({},{get:(_t,key)=>String(key)}));
  const code=ts.transpileModule(fs.readFileSync(new URL("../../frontend/features/tools/SkillsWorkbench.tsx",import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};new Function('require','module','exports',code)(require,module,module.exports);
  const all=n=>Array.isArray(n)?n.flatMap(all):n&&typeof n==='object'?[n,...all(n.props?.children)]:[];
@@ -180,7 +181,7 @@ test('real resources component reports refresh completion for empty catalogs wit
  h.refresh();await h.flush();assert.match(h.text(h.status()),/已刷新/);assert(!h.calls.some(c=>c.method==='settings'));h.unmount();
 });
 test('partial catalog results retain errors and do not announce success',async()=>{
- const h=harness(m=>m==='scientific.skills'?Promise.reject(Error('catalog unavailable')):undefined);await h.flush();assert.equal(h.text(h.status()),'');assert.match(h.text(h.find(n=>n.props?.role==='alert')),/功能目录读取失败/);h.unmount();
+ const h=harness(m=>m==='scientific.skills'?Promise.reject(Error('catalog unavailable')):undefined);await h.flush();assert.equal(h.text(h.status()),'');assert.match(h.text(h.find(n=>n.props?.severity==='error')),/功能目录读取失败/);h.unmount();
 });
 test('late old-provider refresh cannot announce completion in the new provider',async()=>{
  const old=deferred(),next=deferred();const h=harness((m,d)=>m==='scientific.skills'?(d.provider==='codex'?old.promise:next.promise):undefined);await h.flush();h.props.provider='kimi';h.render();await h.flush();old.resolve({schema_version:1,functions:[]});await h.flush();assert.equal(h.text(h.status()),'');next.resolve({schema_version:1,functions:[]});await h.flush();assert.match(h.text(h.status()),/已刷新/);h.unmount();

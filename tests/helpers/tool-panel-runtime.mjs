@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import {fixtureControlModule,fixtureDisclosure} from './frontend-component-loader.mjs';
 
 const sources=new Map();
 function compiled(file){if(!sources.has(file))sources.set(file,ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText);return sources.get(file);}
@@ -14,7 +15,18 @@ export function toolPanelRuntime({file,props,bridge,flushCycles,external}){
  function load(file){
   if(file.endsWith('.json'))return {default:JSON.parse(fs.readFileSync(file,'utf8'))};
   file=path.resolve(file);if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);
-  const require=name=>{if(name==='react')return {useState,useRef,useEffect};if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};if(name.endsWith('/i18n')||name==='./i18n')return {t:value=>value};if(name.endsWith('.css'))return {};if(name.startsWith('.')){const target=path.resolve(path.dirname(file),name);return load(['.ts','.tsx'].map(ext=>target+ext).find(candidate=>fs.existsSync(candidate))||target);}return external(name);};
+  const jsx=(type,props)=>type===fixtureDisclosure?type(props):({type,props});
+  const require=name=>{
+   if(name.endsWith('/Disclosure'))return {default:fixtureDisclosure};
+   const control=fixtureControlModule(name);if(control)return control;
+   if(name==='react')return {useState,useRef,useEffect};
+   if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment:'fragment'};
+   if(name==='lucide-react')return new Proxy({},{get:(_,key)=>key});
+   if(name.endsWith('/i18n')||name==='./i18n')return {t:value=>value};
+   if(name.endsWith('.css'))return {};
+   if(name.startsWith('.')){const target=path.resolve(path.dirname(file),name);return load(['.ts','.tsx'].map(ext=>target+ext).find(candidate=>fs.existsSync(candidate))||target);}
+   return external(name);
+  };
   new Function('require','module','exports','window','setTimeout','clearTimeout',compiled(file))(require,module,module.exports,bridge,(fn,delay)=>{const id=++timerSequence;timers.set(id,{fn,delay});return id;},id=>timers.delete(id));return module.exports;
  }
  const component=load(file).default;

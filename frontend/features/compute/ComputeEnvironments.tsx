@@ -1,3 +1,4 @@
+import Notice from '../../ui/Notice';
 import LoadingFeedback from '../../ui/LoadingFeedback';
 import {useEffect,useRef,useState} from 'react';
 import {Server,RefreshCw,Sparkles,Plus,ShieldCheck} from 'lucide-react';
@@ -71,7 +72,7 @@ export default function ComputeEnvironments({worker,workerGeneration,environment
  const label=(value:string)=>t(({passed:'检查通过',failed:'检查失败',blocked:'待完善',not_run:'未检查',stale:'需要重新检查',checking:'检查中…',loading:'正在读取保存的检查…',read_error:'检查回执读取失败'} as Record<string,string>)[value]||value);
  return <div className="page compute-environments" data-testid="compute-environments">
  <div className="page-heading"><h1>{t('计算环境')}</h1><Server size={23} aria-hidden="true"/></div>
- {!worker?<div className="notice"><p>{t('连接作业服务后检查已有环境。')}</p><button className="button primary" data-guide-target="connect-worker" onClick={onConnect}>{t('连接作业服务')}</button></div>:<>
+ {!worker?<Notice action={<button className="button primary" data-guide-target="connect-worker" onClick={onConnect}>{t('连接作业服务')}</button>}>{t('连接作业服务后检查已有环境。')}</Notice>:<>
  <LoadingFeedback busy={busy||reading&&!state} label={busy?busyLabel||t('正在发现已有环境…'):t('正在读取计算环境…')}/>
  <div className="compute-summary">
   <dl>

@@ -168,7 +168,7 @@ test('switching chats during on-demand API connection preserves the draft and ca
 });
 
 test('long discussion begins collapsed with an explicit primary append action',async()=>{
- const h=agentHarness();try{await h.flush();h.type('Retain original');h.render({intent:{id:'long',text:'Long discussion '.repeat(50)}});await h.flush();assert.equal(h.find(node=>node.props?.['data-testid']==='agent-prompt-preview').props.open,false);assert.match(h.find(node=>node.props?.['data-testid']==='agent-prompt-append').props.className,/primary/);assert.equal(h.textarea().props.value,'Retain original');assert.equal(rpcCalls(h,'turn/start').length,0);}finally{h.unmount();}
+ const h=agentHarness();try{await h.flush();h.type('Retain original');h.render({intent:{id:'long',text:'Long discussion '.repeat(50)}});await h.flush();assert.equal(h.find(node=>node.props?.['data-testid']==='agent-prompt-preview').props.open,false);assert.equal(h.find(node=>node.props?.['data-testid']==='agent-prompt-append').props.variant,'primary');assert.equal(h.textarea().props.value,'Retain original');assert.equal(rpcCalls(h,'turn/start').length,0);}finally{h.unmount();}
 });
 
 test('stream update preserves completed message objects and stable actions for memoized rows',async()=>{

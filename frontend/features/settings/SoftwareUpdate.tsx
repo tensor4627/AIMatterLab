@@ -4,6 +4,9 @@ import type {UpdateAccess,UpdateSource,UpdateState} from '../../../contracts/dto
 import {version} from '../../../package.json';
 import {invoke} from '../../api/studio';
 import {t} from '../../ui/i18n';
+import Tooltip from '../../ui/Tooltip';
+import Notice from '../../ui/Notice';
+import Disclosure from '../../ui/Disclosure';
 import './software-update.css';
 
 type Action = 'updates.check'|'updates.run';
@@ -65,8 +68,8 @@ export function UpdateButton({state,act,open,compact=false}:ReturnType<typeof us
     if(available) void act('updates.run');
     else if(canCheck(state.phase)) void act('updates.check');
   }
-  return <button type="button" className="update-trigger" data-highlight={available||undefined}
-    title={hint} aria-label={label} onClick={click}><Icon size={16}/>{!compact&&<span>{label}</span>}</button>;
+  return <Tooltip asChild content={hint}><button type="button" className="update-trigger" data-highlight={available||undefined}
+    aria-label={label} onClick={click}><Icon size={16} aria-hidden="true"/>{!compact&&<span>{label}</span>}</button></Tooltip>;
 }
 
 function ReleaseAccess({recheck}:{recheck:()=>Promise<void>}) {
@@ -87,8 +90,7 @@ function ReleaseAccess({recheck}:{recheck:()=>Promise<void>}) {
     } catch {setError(t('无法保存更新凭据。请检查令牌和系统凭据存储。'));}
     finally {setBusy(false);}
   }
-  return <details className="release-access" onToggle={event=>{if(!event.currentTarget.open)setToken('');}}>
-    <summary>{t('私有仓库访问')}</summary>
+  return <Disclosure className="release-access" summary={t('私有仓库访问')} onToggle={event=>{if(!event.currentTarget.open)setToken('');}}>
     <label>{t('发布源')}<select value={source} disabled={busy} onChange={event=>{setSource(event.target.value as UpdateSource);setToken('');setError('');}}>
       <option value="github">GitHub</option><option value="nju">{sourceLabel('nju')}</option>
     </select></label>
@@ -97,8 +99,8 @@ function ReleaseAccess({recheck}:{recheck:()=>Promise<void>}) {
     <small>{source==='nju'?t('令牌需要 read_api 权限。'):t('令牌需要此仓库的 Contents 只读权限。')}</small>
     <div className="button-row"><button className="button" disabled={busy||!token.trim()} onClick={()=>void save(token.trim())}>{t('保存并检查')}</button>
       {saved?.[source]&&<button className="button" disabled={busy} onClick={()=>void save(null)}>{t('移除令牌')}</button>}</div>
-    {error&&<small role="alert">{error}</small>}
-  </details>;
+    {error&&<Notice severity="error" compact>{error}</Notice>}
+  </Disclosure>;
 }
 
 export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>) {
@@ -114,14 +116,14 @@ export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>
       <div><dt>{t('当前版本')}</dt><dd>{state.currentVersion}</dd></div>
       {state.version&&(phase!=='current'||ahead)&&<div><dt>{t('发布源最新版本')}</dt><dd>{state.version}</dd></div>}
     </dl>
-    <p className="update-state" role="status"><strong>{t(status)}</strong>{state.source&&<small>{sourceLabel(state.source)}</small>}</p>
+    <Notice className="update-state" compact><strong>{t(status)}</strong>{state.source&&<small>{sourceLabel(state.source)}</small>}</Notice>
     {phase==='available' && state.reason && <p>{t(fallbackHints[state.reason])}</p>}
     {bytes!==undefined && (phase==='available'||phase==='downloading') && <p>{t(packageLabels[mode??'full'])} · {phase==='downloading'?mib(received)+' / ':''}{mib(bytes)}</p>}
     {phase==='downloading' && <div className="update-progress"><progress aria-label={t(mode==='app'?'下载进度':'安装包准备进度')} value={state.assembled??0} max={state.fullBytes||1}/><span>{percent}%</span>
       {mode==='delta'&&<small>{t('已复用本地数据')} {mib(Math.max(0,(state.assembled??0)-received))}</small>}
       {state.reason==='delta'&&<small>{t('差分下载未完成，正在获取完整包。')}</small>}</div>}
     {(phase==='checking'||phase==='verifying'||phase==='preparing'||phase==='installing') && <progress aria-label={t(phaseLabel)}/>}
-    {detail && <small role="alert">{detail}</small>}
+    {detail && <Notice severity="error" compact>{detail}</Notice>}
     {state.issues&&<ul>{state.issues.map(issue=><li key={issue.source}>{sourceLabel(issue.source)} · {issueLabel(issue)}</li>)}</ul>}
     {check && <button className="button" onClick={()=>void act('updates.check')}><RefreshCw size={15}/>{t('检查更新')}</button>}
     {available&&<button className="button primary" onClick={()=>void act('updates.run')}><Download size={15}/>{t(phase==='ready'?'重启更新':'下载并重启安装')}</button>}

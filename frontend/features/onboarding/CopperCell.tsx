@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import {Box, RotateCcw} from 'lucide-react';
+import Tooltip from '../../ui/Tooltip';
 
 // One conventional FCC cell centred at the origin, in half-lattice units.
 const sites: number[][] = [];
@@ -72,7 +73,7 @@ export default function CopperCell({english}: {english: boolean}) {
   }
   return <aside className="setup-specimen">
     <div className="setup-specimen-head"><span><Box size={16}/>{english ? 'Drag to rotate' : '拖动旋转晶胞'}</span>
-      <button type="button" onClick={() => setAngle(initial)} title={english ? 'Reset view' : '复位视角'} aria-label={english ? 'Reset view' : '复位视角'}><RotateCcw size={16}/></button></div>
+      <Tooltip asChild content={english?'Reset view':'复位视角'}><button type="button" onClick={()=>setAngle(initial)} aria-label={english?'Reset view':'复位视角'}><RotateCcw size={16} aria-hidden="true"/></button></Tooltip></div>
     <canvas ref={canvas} tabIndex={0} role="img" aria-label={english ? 'Copper unit cell. Drag or use arrow keys to rotate.' : '铜的面心立方晶胞。拖动或使用方向键旋转。'}
       onKeyDown={event => {
         if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return;

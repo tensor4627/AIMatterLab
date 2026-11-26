@@ -1,5 +1,6 @@
 // Actual DeploymentPanel hooks with controlled promises; no worker/model/UI process.
 import fs from 'node:fs';
+import {fixtureControlModule,fixtureNotice} from './frontend-component-loader.mjs';
 import ts from 'typescript';
 import * as deployment from "../../contracts/compute/deployment.mjs";
 import * as taskFields from '../../contracts/workflows/task-fields.mjs';
@@ -46,8 +47,13 @@ export function deploymentHarness({initial=deploymentFixture(),override,properti
  };
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
  const require=name=>{
+  if(name==='../../ui/Notice')return {default:fixtureNotice};
+  const control=fixtureControlModule(name);if(control)return control;
   if(name==='react')return {useState,useRef,useEffect,useMemo};
-  if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};
+  if(name==='react/jsx-runtime'){
+   const jsx=(type,props)=>type===fixtureNotice?type(props):({type,props});
+   return {jsx,jsxs:jsx};
+  }
   if(name==="./useDeploymentContext"){const module={exports:{}};new Function('require','module','exports',contextCompiled)(dependency=>{if(dependency==='react')return {useState,useRef,useEffect};throw Error('Unexpected deployment context dependency '+dependency);},module,module.exports);return module.exports;}
   if(["./ui-diagnostics.mjs","../diagnostics/ui-diagnostics.mjs"].includes(name))return {...diagnostics,deploymentDiagnosticJournal:journal};
   if(name==="../diagnostics/DiagnosticNotice")return {DeploymentDiagnostics:'DeploymentDiagnostics',InlineDiagnostic:'InlineDiagnostic'};

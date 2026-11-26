@@ -119,7 +119,7 @@ export async function frontendLayoutExperienceCases({check,out}){
   await app(page);
   for(const [id,label] of [['navigate-home','工作区'],['navigate-tools','工具与资源'],['navigate-runs','运行记录']]){await page.getByTestId(id).focus();await page.getByRole('tooltip').filter({hasText:label}).waitFor();assert.equal(await page.getByTestId(id).getAttribute('aria-label'),label);await page.keyboard.press('Escape');assert.equal(await page.getByRole('tooltip').count(),0);}
   const divider=page.getByRole('separator',{name:'调整终端与队列高度',exact:true});await divider.focus();assert.equal(await divider.getAttribute('aria-orientation'),'horizontal');
-  await page.keyboard.press('ArrowUp');await page.waitForFunction(()=>document.querySelector('[data-testid="bottom-panel"]').style.height==='222px');
+   await page.keyboard.press('ArrowUp');await page.waitForFunction(()=>getComputedStyle(document.querySelector('[data-testid="bottom-panel"]')).height==='222px');
   await page.keyboard.press('Shift+ArrowDown');assert.equal(await divider.getAttribute('aria-valuenow'),'221');await page.keyboard.press('End');assert.equal(await divider.getAttribute('aria-valuenow'),'380');await page.keyboard.press('Home');assert.equal(await divider.getAttribute('aria-valuenow'),'90');
   await page.keyboard.press('ArrowUp');assert.equal(await page.evaluate(()=>localStorage.getItem('studio.bottom')),'122');
   const panel=await page.getByTestId('bottom-panel').boundingBox(),bar=await divider.boundingBox();assert(Math.abs(bar.width-panel.width)<2&&bar.height>=6);
@@ -128,8 +128,19 @@ export async function frontendLayoutExperienceCases({check,out}){
   const mutations=await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='task.execute'||c.method==='sharedTerminal.open'||c.method==='agent.rpc'&&c.data?.method==='turn/start'));assert.deepEqual(mutations,[]);
  });
  await check('experience-round2-layout-light-english-controls',async page=>{
+   await page.setViewportSize({width:1024,height:768});
   await page.evaluate(()=>{window.__test.settings.theme='light';window.__test.settings.language='en';});await app(page);
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');
+   const actions=await page.locator('.navigation-rail').evaluate(rail=>{
+    const bounds=rail.getBoundingClientRect();
+    return [...rail.querySelectorAll('.rail-settings-actions button')].map(button=>{
+     const rect=button.getBoundingClientRect();
+     return {fits:rect.width>=28&&rect.height>=28&&rect.left>=bounds.left&&rect.right<=bounds.right,y:rect.y};
+    });
+   });
+   assert.equal(actions.length,3);
+   assert(actions.every(action=>action.fits));
+   assert.equal(new Set(actions.map(action=>action.y)).size,3);
   await page.getByTestId('navigate-runs').focus();const label=await page.getByTestId('navigate-runs').getAttribute('aria-label');assert.match(label,/[A-Za-z]/);assert.doesNotMatch(label,/[\u4e00-\u9fff]/);await page.getByRole('tooltip').filter({hasText:label}).waitFor();await page.keyboard.press('Escape');
   const divider=page.getByRole('separator',{name:'Adjust terminal and queue height',exact:true});await divider.focus();await page.keyboard.press('ArrowUp');assert.equal(await divider.getAttribute('aria-valuenow'),'222');
   await page.screenshot({path:path.join(out,'experience-round2-layout-light-english.png')});

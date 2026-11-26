@@ -189,7 +189,8 @@ export async function frontendResourceConsoleCases({check}) {
     const saved=page.locator('[data-testid="saved-compute-profile"][data-profile-id="profile-a"]');
     const choice=saved.getByRole('button',{name:'核对原连接',exact:true});
     await choice.waitFor();
-    assert.equal(await choice.getAttribute('title'),'connection-a');
+    await choice.hover();
+    await page.getByRole('tooltip').filter({hasText:'connection-a'}).waitFor();
     await page.keyboard.press('Escape');
     await page.evaluate(()=>{window.__test.failManagedObservation=false;});
     await pending.getByRole('button',{name:'重试',exact:true}).click();
@@ -351,7 +352,7 @@ export async function frontendResourceConsoleCases({check}) {
     const detail=page.getByTestId('compute-console-detail');
     const original=console.locator('[data-resource-key="connection-a"]');
     const originalShell=detail.locator('li').filter({hasText:'材料结构分析'});
-    const connect=detail.getByRole('button',{name:'Connect SSH',exact:true});
+    const connect=detail.getByRole('button',{name:'Restore SSH connection',exact:true});
     const partial=console.getByText('Some terminal states could not be verified.',{exact:true});
 
     async function refreshConnection(status) {

@@ -1,0 +1,314 @@
+@layer features {
+  .cluster-selection {
+    display: flex;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+    flex-wrap: wrap;
+  }
+
+  .cluster-selection select {
+    flex: 1;
+    min-width: 170px;
+  }
+
+  .cluster-page .subtabs {
+    margin: var(--space-6) 0;
+  }
+
+  .cluster-page label {
+    margin-top: var(--space-5);
+  }
+
+  .cluster-page .card small {
+    line-height: 1.8;
+  }
+
+  .skill-script,.batch-script {
+    font-family: Consolas,monospace;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .cluster-run-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    width: 100%;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    padding: var(--space-5) var(--space-3);
+  }
+
+  .cluster-run-row>span:first-child {
+    flex: 1;
+  }
+
+  .cluster-run-row small {
+    display: block;
+    color: var(--muted);
+    margin-top: var(--space-2);
+  }
+
+  .cluster-footer {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    gap: var(--space-5);
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    padding: var(--space-6);
+  }
+
+  .cluster-footer>span {
+    flex: 1;
+    color: var(--muted);
+  }
+
+  .run-flow {
+    display: flex;
+    list-style: none;
+    gap: var(--space-4);
+    padding: 0;
+    margin: var(--space-7) 0;
+    flex-wrap: wrap;
+  }
+
+  .run-flow li {
+    padding: var(--space-4) var(--space-5);
+    background: var(--accent-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    color: var(--accent);
+  }
+
+  .cluster-review .parameter-json {
+    width: 100%;
+  }
+
+  .cluster-page .form-row,.cluster-review .form-row {
+    flex-wrap: wrap;
+  }
+
+  .cluster-page .form-row label {
+    min-width: 130px;
+  }
+
+  .agent-center .cluster-footer {
+    flex-wrap: wrap;
+  }
+
+  .cluster-queue-settings {
+    min-width: 0;
+  }
+
+  .queue-settings-heading {
+    display: flex;
+    gap: var(--space-3);
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .queue-target-disclosure {
+    border-top: 1px solid var(--line);
+    padding: var(--space-4) 0;
+  }
+
+  .queue-target-disclosure>summary {
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+
+  .queue-target {
+    min-width: 0;
+    border: 0;
+    margin: 0;
+    padding: var(--space-4) 0;
+  }
+
+  .cluster-queue-settings label {
+    display: grid;
+    min-width: 0;
+    gap: var(--space-3);
+  }
+
+  .cluster-queue-settings .check-label {
+    display: flex;
+    align-items: center;
+  }
+
+  .cluster-queue-settings .form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,minmax(min(100%,150px),1fr));
+    gap: var(--space-4);
+  }
+
+  .cluster-queue-settings input,.cluster-queue-settings textarea,.cluster-queue-settings select {
+    max-width: 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .cluster-queue-settings input[type=checkbox] {
+    width: auto;
+  }
+
+  .cluster-queue-settings .button-row {
+    flex-wrap: wrap;
+  }
+
+  .cluster-queue-settings .button {
+    white-space: normal;
+    text-align: left;
+  }
+
+  .queue-project-policy li {
+    overflow-wrap: anywhere;
+    line-height: 1.8;
+  }
+
+  .queue-project-policy li button {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .resolved-queue-target {
+    display: grid;
+    gap: var(--space-2);
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  .cluster-page {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .cluster-page .subtabs {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    gap: var(--space-5);
+  }
+
+  .cluster-page .subtabs>button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .cluster-page .notice {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    overflow-wrap: anywhere;
+  }
+
+  .cluster-page .notice>p,.cluster-page .notice>span {
+    flex: 1 1 18rem;
+    min-inline-size: min(100%,18rem);
+    max-width: 100%;
+    margin: 0;
+  }
+
+  .cluster-page .notice>.button {
+    flex: 0 1 auto;
+    max-width: 100%;
+    white-space: normal;
+    text-align: left;
+  }
+
+  .cluster-page p.notice {
+    display: block;
+  }
+
+  .cluster-page .cluster-footer {
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .cluster-page .cluster-footer>span {
+    flex: 1 1 18rem;
+    min-inline-size: min(100%,18rem);
+    overflow-wrap: anywhere;
+  }
+
+  .cluster-page .cluster-footer>span:empty {
+    display: none;
+  }
+
+  .cluster-page .cluster-footer>.button {
+    flex: 1 1 10rem;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .cluster-page .cluster-selection select {
+    min-inline-size: min(100%,170px);
+    max-width: 100%;
+  }
+
+  .cluster-page .form-row label {
+    min-inline-size: min(100%,130px);
+  }
+
+  .cluster-page input,.cluster-page select,.cluster-page textarea,.cluster-page .input-with-button {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .queue-choices {
+    margin: var(--space-4) 0;
+    min-width: 0;
+  }
+
+  .queue-choices>div {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    max-height: 240px;
+    overflow: auto;
+    margin: var(--space-4) 0;
+  }
+
+  .queue-choices button {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    padding: var(--space-3) var(--space-4);
+    background: var(--raised);
+    color: var(--text);
+    font: inherit;
+    overflow-wrap: anywhere;
+  }
+
+  .queue-choices button[aria-pressed=true] {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .queue-choices button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .form-row>.queue-field {
+    flex: 1;
+    min-width: 130px;
+  }
+
+  .queue-field>label {
+    display: block;
+  }
+
+  .queue-field input {
+    width: 100%;
+  }
+}

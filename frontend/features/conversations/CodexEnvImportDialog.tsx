@@ -1,3 +1,4 @@
+import Button from '../../ui/Button';
 import {useEffect, useRef, useState} from 'react';
 import type {CodexEnvImportMode, CodexEnvImportPrompt, TypedInvoke} from '../../../contracts/dto/ipc';
 import {invoke} from '../../api/studio';
@@ -65,6 +66,6 @@ function Choice({prompt}:{prompt:CodexEnvImportPrompt}) {
     {prompt.sourceState!=='available' && (prompt.sourceState!=='absent'||!proxyOption&&!prompt.hasModelDefaults) && <Notice severity={prompt.sourceState==='unavailable'?'warning':'info'}>{tr(sourceHints[prompt.sourceState])}</Notice>}
     {prompt.configIssue && <Notice severity="warning">{tr('本机 Codex 配置无法解析，可以继续使用独立设置。')}</Notice>}
     {error && <Notice severity="error">{tr(error)}</Notice>}
-    <div className="button-row"><button className="button" disabled={busy} onClick={()=>void decide('cancel')}>{tr('取消')}</button><button className="button primary" disabled={busy} onClick={()=>void decide(mode)}>{tr('继续启动')}</button></div>
+    <div className="button-row"><Button  disabled={busy} onClick={()=>void decide('cancel')}>{tr('取消')}</Button><Button variant="primary"  disabled={busy} onClick={()=>void decide(mode)}>{tr('继续启动')}</Button></div>
   </Modal>;
 }

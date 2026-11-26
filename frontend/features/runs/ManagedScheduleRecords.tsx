@@ -1,3 +1,6 @@
+import Notice from '../../ui/Notice';
+import Button from '../../ui/Button';
+import Disclosure from '../../ui/Disclosure';
 import {useEffect,useRef,useState} from 'react';
 import {JobFollowUp} from './MonitorAttention';
 import type {ManagedSource,ManagedSchedule,ManagedResource,MonitorNotice} from '../../../contracts/dto/managed-compute';
@@ -58,7 +61,7 @@ export default function ManagedScheduleRecords({sources,resources,projectId,noti
     finally{setPending(old=>{const next=new Set(old);next.delete(key);return next;});}
   }
   return <section className="jobs-list managed-schedules" aria-label={t('定时任务')}><h3>{t('定时任务')}</h3>
-    {error&&<p role="alert" className="error">{error}</p>}
+    {error&&<Notice compact severity="error"  className="error">{error}</Notice>}
     {plans.map(({source,plan})=>{
       const resource=resources.find(r=>r.profileId===source.profileId);
       const key=source.id+'/'+plan.id;
@@ -71,16 +74,16 @@ export default function ManagedScheduleRecords({sources,resources,projectId,noti
         plan.stopRequestedAt!=null&&!finished?t(source.connected?'正在停止':'停止待远端确认'):t(statuses[plan.status]||plan.status);
       return <article key={key} className="job-record" ref={current?focusedRow:undefined} tabIndex={current?-1:undefined} data-testid="managed-schedule-record"><div className="job-record-meta">
         <strong>{plan.name||t(kinds[plan.kind]||plan.kind)}</strong><span>{state}</span>
-        {!finished&&<button className="button danger" disabled={pending.has(key)||!!plan.stopRequestedAt} onClick={()=>void stop(source.id,plan)}>{t('终止计划')}</button>}
+        {!finished&&<Button className="danger" disabled={pending.has(key)||!!plan.stopRequestedAt} onClick={()=>void stop(source.id,plan)}>{t('终止计划')}</Button>}
       </div><div className="job-record-meta"><span>{t(kinds[plan.kind]||plan.kind)}</span><span>{resource?.name||source.name||source.profileId}</span><span>{plan.scope.provider} · {plan.scope.threadId}</span></div>
       <div className="job-record-meta"><span>{t('剩余次数')} {plan.status==='exhausted'?0:Math.max(0,Math.min(plan.maxRuns-plan.count,336-(plan.delegationCount??plan.count)))} / {plan.maxRuns}</span><span>{t('下次执行')} {displayTime(plan.nextAt)}</span>
         {child&&<span>{t('子作业')} {child.jobId||child.id} · {child.status}</span>}</div>
-      {notice&&<div className="managed-manual-followup"><JobFollowUp notice={notice}/><button className="button" disabled={!source.connected||checking.has(key)} onClick={()=>void observe(source.id,plan.id)}>{t('手动核对一次')}</button></div>}
-      {manualStatus[key]&&<p role="status">{manualStatus[key]}</p>}
-      <details onToggle={e=>{if(e.currentTarget.open)void inspect(key,source.id,plan.id);}}><summary>{t('执行记录')}</summary>{detailErrors[key]&&<p role="alert">{detailErrors[key]}</p>}<p>{t('截止时间')} · {displayTime(plan.expiresAt)}</p>
+      {notice&&<div className="managed-manual-followup"><JobFollowUp notice={notice}/><Button  disabled={!source.connected||checking.has(key)} onClick={()=>void observe(source.id,plan.id)}>{t('手动核对一次')}</Button></div>}
+      {manualStatus[key]&&<Notice compact >{manualStatus[key]}</Notice>}
+      <Disclosure onToggle={e=>{if(e.currentTarget.open)void inspect(key,source.id,plan.id);}} summary={<>{t('执行记录')}</>}>{detailErrors[key]&&<Notice compact severity="error" >{detailErrors[key]}</Notice>}<p>{t('截止时间')} · {displayTime(plan.expiresAt)}</p>
         {plan.scope.runId&&<p>{t('关联作业')} · {plan.scope.runId}</p>}{script&&<p>{t('脚本版本')} · {script.version||plan.revision} {script.sha256}</p>}
         {script?.text&&<pre>{script.text}</pre>}{detail?.history?.map((entry,i)=><pre key={i}>{JSON.stringify(entry,null,2)}</pre>)}{!detail?.history?.length&&plan.lastResult!=null&&<pre>{typeof plan.lastResult==='string'?plan.lastResult:JSON.stringify(plan.lastResult,null,2)}</pre>}
-      </details></article>;
+      </Disclosure></article>;
     })}
   </section>;
 }

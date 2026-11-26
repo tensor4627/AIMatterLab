@@ -59,7 +59,7 @@ async function handoffFixture({select=()=>original,replying=false}={}){
  await app.flush();
  const repair=app.find(node=>node.type==='./DeploymentPanel').props.onRepair;
  async function chooseNeighbor(){
-  app.find(node=>node.type==='button'&&node.props?.title===neighbor.name).props.onClick();
+  app.find(node=>node.type==='button'&&node.props?.children?.[0]?.props?.children===neighbor.name).props.onClick();
   await app.flush();
  }
  return {app,storage,repair,chooseNeighbor};
@@ -106,7 +106,9 @@ test('late or mismatched conversation selection cannot deliver repair into anoth
   try{
    wrong.repair(request);await wrong.app.flush();
    assert.deepEqual(dispatchedSelections(wrong.app),[original.id]);
-   assert.match(wrong.app.find(node=>node.type==='./DiagnosticNotice'&&node.props?.className==='toast').props.record.raw,/会话绑定已变化/);
+   const toast=wrong.app.notifications.find(notice=>notice.testId==='global-diagnostic-toast');
+   assert.equal(toast.severity,'error');
+   assert.match(toast.message.props.record.raw,/会话绑定已变化/);
    assert.equal(agentProps(wrong.app).sessionSelection,undefined);
    assert.equal(agentProps(wrong.app).intent,undefined);
    assert.equal(wrong.storage.getItem('studio.conversation'),null);

@@ -1,0 +1,58 @@
+@layer components {
+ .app-toast-region {
+  position: fixed;
+  inset-inline-end: var(--space-5);
+  inset-block-end: calc(var(--statusbar-height) + var(--space-4));
+  width: min(29rem, calc(100vw - var(--space-8)));
+  max-height: calc(100dvh - 4rem);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+  pointer-events: none;
+ }
+
+ @supports (inset-block-end: anchor(top)) {
+  .app-toast-region {
+   position-anchor: --aml-action-bar;
+   inset-block-end: max(
+    calc(var(--statusbar-height) + var(--space-4)),
+    min(65dvh, calc(anchor(top, 0px) + var(--space-3)))
+   );
+  }
+ }
+
+ .app-toast {
+  --toast-tone: var(--success);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  background: var(--raised);
+  color: var(--text);
+  font-size: var(--font-body);
+  pointer-events: auto;
+ }
+
+ .app-toast[data-toast-severity='error'] { --toast-tone: var(--danger); }
+ .app-toast[data-toast-severity='info'] { --toast-tone: var(--info); }
+ .app-toast-icon { color: var(--toast-tone); flex: none; margin-block-start: var(--space-1); }
+ .app-toast-message { flex: 1 1 auto; min-width: 0; max-height: 50dvh; overflow: auto; overflow-wrap: anywhere; }
+ .app-toast-message .diagnostic-notice { margin: 0; }
+ .app-toast-dismiss { flex: none; min-width: 28px; min-height: 28px; }
+ .app-toast:has(.diagnostic-notice) .app-toast-icon { display: none; }
+ body:has([role='dialog']) .app-toast { pointer-events: none; }
+
+ @media (prefers-reduced-motion: no-preference) {
+  .app-toast { animation: app-toast-in var(--motion-gentle-dur) var(--ui-ease); }
+ }
+
+ @keyframes app-toast-in {
+  from { opacity: 0; transform: translateY(var(--space-2)); }
+ }
+}

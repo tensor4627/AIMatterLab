@@ -1,10 +1,11 @@
+import Notice from '../../ui/Notice';
 import type {ParameterEditor,DataValue} from './pygas-composer-types';
 export default function StructuredValue({value,editor,label,onChange,disabled,depth=0,language='zh-CN'}:{language?:'zh-CN'|'en';value:unknown;editor:ParameterEditor;label:string;onChange:(value:DataValue)=>void;disabled:boolean;depth?:number}){
  const zh=language==='zh-CN';
  const itemEditor:ParameterEditor={...editor,type:editor.itemType==='boolean'?'boolean':editor.itemType==='integer'?'integer':'number'};
  if(editor.type==='array'||Array.isArray(value)){
   const dimension=editor.shape?.[depth],fixed=typeof dimension==='number'?dimension:undefined;const given=Array.isArray(value)?value:[];const values=fixed!==undefined?Array.from({length:Math.max(fixed,given.length)},(_,i)=>given[i]??null):given;
-  if(depth>4||values.length>512)return <p role="alert">{label}: array editor limit exceeded</p>;
+  if(depth>4||values.length>512)return <Notice compact severity="error" >{label}: array editor limit exceeded</Notice>;
   const empty=(item:unknown):DataValue=>Array.isArray(item)?item.map(empty):null;
   return <div className="pg-array" role="group" aria-label={label}>{values.map((item,index)=><div className="pg-array-row" key={index}><span className="pg-index">{index}</span><StructuredValue value={item} editor={Array.isArray(item)||editor.shape&&depth+1<editor.shape.length?{...editor,type:'array'}:itemEditor} label={label+' ['+index+']'} language={language} disabled={disabled} depth={depth+1} onChange={next=>onChange(values.map((old,i)=>i===index?next:old))}/><button type="button" disabled={disabled} aria-label={(zh?'移除 ':'Remove ')+label+' ['+index+']'} onClick={()=>onChange(fixed!==undefined?values.map((old,i)=>i===index?null:old):values.filter((_,i)=>i!==index))}>−</button></div>)}<button type="button" className="pg-button pg-subtle" disabled={disabled||values.length>=512||fixed!==undefined} onClick={()=>onChange([...values,values.length?empty(values[0]):typeof editor.shape?.[depth+1]==='number'?Array.from({length:editor.shape[depth+1] as number},()=>null):null])}>＋ {Array.isArray(values[0])||editor.shape&&depth+1<editor.shape.length?(zh?'添加行':'Add row'):(zh?'添加数值':'Add value')}</button>{!values.length&&<small>{zh?'空数组 · 请填写实际顺序值':'Empty array · enter the actual ordered values'}</small>}</div>;
  }

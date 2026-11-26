@@ -1,4 +1,5 @@
 import LoadingFeedback from '../../ui/LoadingFeedback';
+import Notice from '../../ui/Notice';
 import {useEffect,useRef,useState} from 'react';
 import {invoke} from '../../api/studio';
 import {api} from '../../api/worker';
@@ -47,7 +48,7 @@ export default function SshSchedulerSetup({connectionId,attemptId,currentResourc
    <form data-testid="ssh-scheduler-setup" onSubmit={event=>{event.preventDefault();void save();}}>
     <h4>{t('当前作业服务的调度器与科学环境')}</h4>
     <p>{t('此操作仅保存调度器和环境配置，不提交作业。')}</p>
-    {!currentResource&&<p role="status">{t('请先明确选择此基础连接并连接其作业服务，再配置队列；后台服务不会自动切换。')}</p>}
+    {!currentResource&&<Notice compact>{t('请先明确选择此基础连接并连接其作业服务，再配置队列；后台服务不会自动切换。')}</Notice>}
     <fieldset disabled={busy||profileLoading||!currentResource}>
      <label>{t('保存已有配置')}<select data-testid="ssh-scheduler-profile" value={draft.id||''} onChange={event=>select(event.target.value)}>
       <option value="">{t('新调度器配置')}</option>
@@ -75,7 +76,7 @@ export default function SshSchedulerSetup({connectionId,attemptId,currentResourc
      <label>{t('Modules / 虚拟环境初始化 · Bash')}<textarea value={draft.activation} onChange={event=>patch({activation:event.target.value})}/></label>
     </fieldset>
     <LoadingFeedback busy={busy||profileLoading} label={t(busy?'正在保存调度器配置…':'正在读取连接配置…')}/>
-    {message&&<p role="status">{message}</p>}
+    {message&&<Notice compact>{message}</Notice>}
     <div className="button-row">
      <button type="button" className="button" disabled={busy||!currentResource} onClick={()=>void refresh()}>{t('刷新')}</button>
      <button className="button primary" data-testid="ssh-scheduler-save" disabled={busy||profileLoading||!currentResource||!loaded||uncertain||!!draft.id&&!selectedRecord.current} type="submit">{t('保存调度器配置')}</button>

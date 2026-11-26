@@ -11,7 +11,7 @@ const out=path.resolve(process.env.STUDIO_SIDEBAR_OUTPUT||('.studio/conversation
 await fs.mkdir(out,{recursive:true});
 const harness=path.join(out,'harness.html');
 await fs.writeFile(harness,`<!doctype html><html><head><meta charset="utf-8"><title>AIMatterLab sidebar preview</title></head><body><div id="root"></div><script type="module">
-import React from 'react';import {createRoot} from 'react-dom/client';import App from '/frontend/app/App.tsx';import '/frontend/app/style.css';
+import '/frontend/app/style.css';import React from 'react';import {createRoot} from 'react-dom/client';import App from '/frontend/app/App.tsx';
 const query=new URLSearchParams(location.search),theme=query.get('theme')||'dark',large=query.has('large'),many=query.has('many'),long=query.has('long');
 localStorage.clear();localStorage.setItem('studio.sidebarWidth',query.get('sidebar')||'260');
 const conversation=(id,name,groupId=null,pinned=false)=>({id:'codex:'+id,provider:'codex',threadId:id,name,groupId,pinned,projectId:null,taskId:null,updatedAt:1});

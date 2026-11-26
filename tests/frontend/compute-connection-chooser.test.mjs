@@ -16,8 +16,12 @@ function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
  const effect=(fn,deps)=>{const i=index++,old=hooks[i];if(!old||deps.some((x,j)=>x!==old.deps[j])){const h={deps,cleanup:old?.cleanup};hooks[i]=h;effects.push(()=>{h.cleanup?.();h.cleanup=fn();});}};
  const standard=async(method,data)=>{if(method==='compute.profiles.list')return {profiles:structuredClone(profiles),defaults:{distribution:'Fixture Linux',root:'/fixture/service',port:9080,ssh_client:ssh.ssh_client}};if(method==='compute.profiles.inventory')return {distributions:['Fixture Linux']};if(method==='compute.profiles.read')return structuredClone(profiles.find(p=>p.id===data.id));if(method==='compute.profiles.remove'){const found=profiles.find(p=>p.id===data.id);profiles=profiles.filter(p=>p.id!==data.id);return {removed:true,id:data.id,version:found?.version};}if(method==='compute.profiles.save'){const {expectedVersion,...v}=data,value={...v,id:v.id||'new-fixture',version:expectedVersion+1};profiles=[value,...profiles.filter(profile=>profile.id!==value.id)];return structuredClone(value);}throw Error('Unexpected fixture '+method);};
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
- const jsx=(type,props)=>({type,props}),module={exports:{}};
- new Function('require','module','exports','window',compiled)(name=>name==='react'?{useState:state,useRef:ref,useEffect:effect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==="../../api/studio"?{invoke}:name==="../../ui/i18n"?{t:v=>v}:name==="./ssh-connection-types"?connectionTypes.exports:new Proxy({},{get:(_t,k)=>String(k)}),module,module.exports,{confirm});
+ const module={exports:{}};
+ const jsx=(type,props)=>type==='ConfirmDialog'?{type,props:{...props,'data-testid':props.contentTestId,children:[props.target,props.consequence,
+  {type:'button',props:{children:'取消',disabled:props.pending,onClick:props.onCancel}},
+  {type:'button',props:{children:props.confirmLabel,disabled:props.pending||props.disabled,onClick:props.onConfirm,'data-testid':props.testId}},
+ ]}}:type==='Notice'?{type,props:{...props,role:props.severity==='error'?'alert':'status'}}:{type,props};
+ new Function('require','module','exports','window',compiled)(name=>name==='react'?{useState:state,useRef:ref,useEffect:effect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==="../../api/studio"?{invoke}:name==="../../ui/i18n"?{t:v=>v}:name==="../../ui/ConfirmDialog"?{useConfirm:()=>confirm,ConfirmDialog:"ConfirmDialog"}:name==='../../ui/Notice'?{default:'Notice'}:name==='../../ui/Button'?{default:'button'}:name==="./ssh-connection-types"?connectionTypes.exports:new Proxy({},{get:(_t,k)=>String(k)}),module,module.exports,{});
  function render(changes={}){currentProps={...currentProps,...changes};index=0;dirty=false;tree=module.exports.default({onLocal:p=>connected.push(['local',p]),onSsh:p=>connected.push(['ssh',p]),onClose:()=>connected.push(['close']),...currentProps});}
  const all=n=>Array.isArray(n)?n.flatMap(all):n&&typeof n==='object'?[n,...all(n.props?.children)]:[];
  const find=fn=>{const n=all(tree).find(fn);assert(n,'fixture node missing');return n;};
@@ -30,6 +34,16 @@ function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
  render();return {render,flush,find,id,input,submit,clickId,unmount,calls,connected,errors,all:(target=tree)=>all(target)};
 }
 const row=(h,id)=>h.find(n=>n.props?.['data-profile-id']===id);
+
+test('dirty connection confirms once and keeps current edits on cancel',async()=>{
+ const held=deferred(),questions=[],h=harness({confirm:options=>{questions.push(options);return held.promise;}});
+ try{
+  await h.flush();h.clickId('compute-choice-ssh');h.input('compute-profile-name','Draft gateway');
+  const close=h.find(n=>n.type==='Modal').props.onClose;
+  close();close();await h.flush();assert.equal(questions.length,1);assert.equal(questions[0].target,'Draft gateway');
+  held.resolve(false);await h.flush();assert.equal(h.id('compute-profile-name').props.value,'Draft gateway');assert.deepEqual(h.connected,[]);
+ }finally{h.unmount();}
+});
 
 test('Windows OpenSSH is identified and can save and open a new connection without WSL discovery',async()=>{
  const h=harness({profiles:[],override(method,data,standard){

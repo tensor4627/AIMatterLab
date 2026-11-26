@@ -21,11 +21,31 @@ async function configureFixture(page){
 }
 
 export async function frontendClusterObservationCases({check,out}){
+ await check('cluster-cancel-confirmation-preserves-original-job',async page=>{
+  await configureFixture(page);
+  await page.evaluate(()=>{
+   const f=window.__test;
+   f.responses['/api/cluster/cancel']=()=>f.job={...f.job,cancellation:{status:'unconfirmed',signal_sent:false}};
+   return window.renderTest('ClusterRunPage',{id:f.job.id,onAgent(){},onError:error=>{throw error;}});
+  });
+  const review=page.getByTestId('cluster-review'),cancel=review.getByRole('button',{name:'取消已核实作业',exact:true});
+  const dialog=page.getByRole('dialog',{name:'取消集群作业',exact:true}),confirm=page.getByTestId('confirm-cluster-run-cancel');
+  await cancel.click();await dialog.getByText('Observed cluster job · fixture-cluster · 31',{exact:true}).waitFor();
+  await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await readCount(page,'/api/cluster/cancel'),0);
+  await cancel.click();await dialog.waitFor();
+  await page.evaluate(()=>{window.__test.job={...window.__test.job,job_id:'45'};});await page.clock.runFor(11000);
+  await review.getByText('Job ID · 45',{exact:true}).waitFor();
+  await confirm.click();await dialog.waitFor({state:'detached'});assert.equal(await readCount(page,'/api/cluster/cancel'),0);
+  await cancel.click();await dialog.getByText('Observed cluster job · fixture-cluster · 45',{exact:true}).waitFor();await confirm.click();
+  await review.getByTestId('cluster-cancellation-receipt').getByText('原作业身份尚未核实，本次撤销命令未发出。',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.__test.calls.filter(call=>call.data?.target==='/api/cluster/cancel').map(call=>call.data.data)),[{run_id:'observed-run'}]);
+  assert.equal(await readCount(page,'/api/cluster/submit'),0);
+ });
+
  await check('cluster-observation-terminal-stops-and-manual-logs',async page=>{
   await configureFixture(page);
   await page.evaluate(async()=>{
-   const {default:ClusterRunPage}=await import('/frontend/features/cluster/ClusterRunPage.tsx');
-   window.testRoot.render(window.React.createElement(ClusterRunPage,{id:window.__test.job.id,onAgent:()=>{},onError:error=>{throw error;}}));
+   return window.renderTest('ClusterRunPage',{id:window.__test.job.id,onAgent:()=>{},onError:error=>{throw error;}});
   });
   const panel=page.getByTestId('cluster-review');
   await panel.getByTestId('cluster-cancellation-receipt').waitFor();

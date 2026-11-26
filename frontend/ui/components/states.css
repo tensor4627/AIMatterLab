@@ -1,0 +1,24 @@
+@layer components {
+  .aml-empty-state,
+  .aml-error-state {
+    display: grid;
+    gap: var(--space-3);
+    justify-items: start;
+    min-width: 0;
+    padding: var(--space-5);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    overflow-wrap: anywhere;
+  }
+  .aml-empty-state {
+    justify-items: center;
+    text-align: center;
+  }
+  .aml-empty-state > svg { color: var(--accent); }
+  .aml-error-state { border-color: var(--danger); background: var(--danger-bg); }
+  .aml-error-state h3 svg { color: var(--danger); vertical-align: middle; }
+  :is(.aml-empty-state, .aml-error-state) h3 { margin: 0; font-size: var(--font-title); }
+  :is(.aml-empty-state, .aml-error-state) p { margin: 0; color: var(--muted); }
+  .aml-loading-state { display: inline-flex; min-width: 0; }
+}

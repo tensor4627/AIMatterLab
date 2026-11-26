@@ -1,3 +1,4 @@
+import {fixtureControlModule} from './frontend-component-loader.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
@@ -13,6 +14,8 @@ export function experienceHarness({component,props:initial={},invoke:dispatch=as
  const useEffect=(fn,deps)=>{const i=cursor++,old=hooks[i];if(!old||deps.some((value,j)=>!Object.is(value,old.deps[j]))){hooks[i]={deps};effects.push(()=>{old?.cleanup?.();if(!disposed)hooks[i].cleanup=fn();});}};
  const invoke=(method,data)=>{calls.push({method,data});return dispatch(method,data);},window={studio:{invoke,onEvent:fn=>{events.add(fn);return()=>events.delete(fn);}}};
  function load(file){if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);const require=name=>{
+  const control=fixtureControlModule(name);if(control)return control;
+  if(name==='../../ui/ConfirmDialog')return {ConfirmDialog:'ConfirmDialog'};
   if(name==='react')return {useState,useRef,useEffect,useId};
    if(name.endsWith('.css'))return {};
    if(name==='../../../contracts/agent/model-profiles.mjs')return modelProfiles;

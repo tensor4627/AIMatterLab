@@ -1,3 +1,4 @@
+import {fixtureControlModule} from '../helpers/frontend-component-loader.mjs';
 import {frontendSource} from "../helpers/frontend-source-paths.mjs";
 // Actual RunReview/RunDetail hooks and JSX; controlled API responses, no desktop or run execution.
 import test from 'node:test';
@@ -21,20 +22,20 @@ const taskFields={...taskFieldsOwner0,...taskFieldsOwner1,...taskFieldsOwner2};
 const binding={schema_version:1,workflow_id:'workflow',execution_id:'execution',step_id:'first',snapshot_sha256:'a'.repeat(64),group_id:'reference',group_version:'b'.repeat(64),configuration_id:'configuration',execution_skill_id:'skill',execution_skill_sha256:'c'.repeat(64)};
 const run=(status='draft',bound=false)=>({id:'run',name:'Controlled UI run',project_id:'project',environment_id:'environment',gpu:0,max_seconds:30,directory:'/fixture/run',engine:'gpumd.md',status,validation:{status:status==='ready'?'passed':'not_run'},parameters:{},command:['fixture'],inputs:{'run.in':'snapshot'},created_at:1,updated_at:1,...bound?{studio_workflow_binding:binding}:{}});
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
-function harness(t,{component='RunDetail',props={},override,storageValues=[],storageUnavailable=false}={}){
+function harness(t,{component='RunDetail',props={},override,confirm=async()=>true,storageValues=[],storageUnavailable=false}={}){
  const calls=[],errors=[],opened=[],replaced=[],refreshes=[],frames=new Map(),modules=new Map(),effects=[],storage=new Map(storageValues);let active,dirty=false,tree,currentProps,disposed=false;
  const hooks={useState(initial){const frame=active,index=frame.cursor++;frame.hooks[index]??={value:typeof initial==='function'?initial():initial};return [frame.hooks[index].value,value=>{if(frame.disposed)return;const before=frame.hooks[index].value;frame.hooks[index].value=typeof value==='function'?value(before):value;if(!Object.is(before,frame.hooks[index].value))dirty=true;}];},useRef(value){const frame=active;return frame.hooks[frame.cursor++]??={current:value};},useEffect(fn,deps){const frame=active,index=frame.cursor++,previous=frame.hooks[index];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps[i]))){const record={deps,cleanup:previous?.cleanup};frame.hooks[index]=record;effects.push(()=>{if(frame.disposed)return;record.cleanup?.();record.cleanup=fn();});}}};
  const standard=async target=>target==='/api/run/log'?{offset:1,text:'CONTROLLED LOG BODY'}:target==='/api/run/collect'?{run:'run',artifacts:[{name:'receipt.json',size:5}]}:target==='/api/run/file'?{text:'CONTROLLED ARTIFACT BODY'}:target==='/api/run/revise'?{...run('draft'),id:'revision'}:target==='/api/run/validate'?{...run('ready'),id:'revision'}:target==='/api/run/submit'?{...run('queued'),id:'revision'}:target==='/api/run/resume'?{id:'continuation'}:target==='/api/run/cancel'?run('cancelled'):target==='/api/run/status'?run('unknown'):Promise.reject(Error('Unexpected controlled API '+target));
  const api=async(method,target,data)=>{calls.push({method,target,data});return override?override(target,data,()=>standard(target)):standard(target);};
  function load(name){if(modules.has(name))return modules.get(name);const source=fs.readFileSync(frontendSource(name+'.tsx'),'utf8'),compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,module={exports:{}};modules.set(name,module.exports);
-  const require=target=>target==='react'?hooks:target==='react/jsx-runtime'?{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'}:target==='./RunDetail'?load('RunDetail'):target==='./resume-parameters.mjs'?resumeParameters:target==='./run-review-draft.mjs'?runReviewDraft:target==='./log-buffer.mjs'?logBuffer:["./run-continuation.mjs"].includes(target)?{runContinuation}:["../../api/observed-read.mjs"].includes(target)?{ObservedRead}:["./workflow-intent.mjs","../../../contracts/workflows/task-fields.mjs","../../ui/task-fields.mjs"].includes(target)?taskFields:['../../api/studio','../../api/worker'].includes(target)?{api,invoke:async(method,data)=>{calls.push({method,target:method,data});return {};}}:target==='../../ui/i18n'?{t:value=>value,tr:value=>value}:new Proxy({},{get:(_value,key)=>String(key)});
+  const require=target=>target==='react'?hooks:target==='react/jsx-runtime'?{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'}:target==='./RunDetail'?load('RunDetail'):target==='./resume-parameters.mjs'?resumeParameters:target==='./run-review-draft.mjs'?runReviewDraft:target==='./log-buffer.mjs'?logBuffer:["./run-continuation.mjs"].includes(target)?{runContinuation}:["../../api/observed-read.mjs"].includes(target)?{ObservedRead}:["./workflow-intent.mjs","../../../contracts/workflows/task-fields.mjs","../../ui/task-fields.mjs"].includes(target)?taskFields:['../../api/studio','../../api/worker'].includes(target)?{api,invoke:async(method,data)=>{calls.push({method,target:method,data});return {};}}:target==='../../ui/i18n'?{t:value=>value,tr:value=>value}:target==='../../ui/ConfirmDialog'?{useConfirm:()=>confirm}:target==='../../ui/Toast'?{useToast:()=>({show(){},dismiss(){}}),UNDO_TOAST_DURATION:8000}:fixtureControlModule(target)??new Proxy({},{get:(_value,key)=>String(key)});
   const storagePort={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},windowPort={studio:{onEvent:()=>()=>{}},confirm:()=>true,addEventListener(){},removeEventListener(){},get localStorage(){if(storageUnavailable)throw Error('SecurityError: storage getter blocked');return storagePort;}};
   new Function('require','module','exports','window','localStorage','crypto',compiled)(require,module,module.exports,windowPort,storagePort,{randomUUID});modules.set(name,module.exports);return module.exports;
  }
  const Root=load(component).default,Detail=load('RunDetail').default;
  function dispose(frame){frame.disposed=true;for(const hook of frame.hooks)hook?.cleanup?.();}
  function render(changes={}){currentProps={...currentProps,...changes};const used=new Set();function call(fn,props,key){let frame=frames.get(key);if(!frame||frame.fn!==fn){if(frame)dispose(frame);frame={fn,hooks:[],cursor:0,count:null,disposed:false};frames.set(key,frame);}used.add(key);frame.cursor=0;active=frame;const result=fn(props);if(frame.count!==null)assert.equal(frame.cursor,frame.count,'hook order/count changed in '+key);frame.count=frame.cursor;active=null;return expand(result,key);}
-  function expand(value,key){if(Array.isArray(value))return value.map((child,i)=>expand(child,key+'/'+i));if(!value||typeof value!=='object')return value;if(value.type===Detail)return call(Detail,value.props,key+'/RunDetail');return {...value,props:{...value.props,children:expand(value.props?.children,key+'/children')}};}
+  function expand(value,key){if(Array.isArray(value))return value.map((child,i)=>expand(child,key+'/'+i));if(!value||typeof value!=='object')return value;if(value.type===Detail)return call(Detail,value.props,key+'/RunDetail');const children=value.props?.action?[value.props.children,value.props.action]:value.props?.children;return {...value,props:{...value.props,children:expand(children,key+'/children')}};}
   dirty=false;tree=call(Root,currentProps,'root');for(const [key,frame]of frames)if(!used.has(key)){dispose(frame);frames.delete(key);}
  }
  currentProps={run:run(),connected:true,environments:[{id:'environment',name:'Fixture'}],theme:'dark',onRefresh:()=>refreshes.push('refresh'),onError:value=>errors.push(String(value)),onReplace:value=>replaced.push(value),onOpenWorkflow:id=>opened.push(id),...props};
@@ -46,6 +47,29 @@ function harness(t,{component='RunDetail',props={},override,storageValues=[],sto
 }
 const mutations=h=>h.calls.filter(call=>/\/api\/run\/(revise|validate|submit|resume|cancel)$/.test(call.target));
 const operationButtons=h=>{const area=h.nodes().find(node=>node.props?.className==='run-actions');assert(area);return h.nodes(area).filter(node=>node.type==='button');};
+
+test('direct job confirmation declines and cannot submit changed drafts or reconnect to another service',async t=>{
+ for(const change of ['cancel','revised','reconnected']){
+  const pending=deferred(),requests=[],original=run('draft');
+  const h=harness(t,{props:{run:original},confirm:options=>{requests.push(options);return pending.promise;}});await h.flush();
+  h.click('提交计算');h.click('提交计算');assert.equal(requests.length,1);assert.equal(requests[0].tone,'danger');assert.equal(requests[0].target,original.name+' · '+original.environment_id);
+  if(change==='revised')h.render({run:{...original,inputs:{'run.in':'replacement hash'}}});
+  if(change==='reconnected'){h.render({connected:false});await h.flush();h.render({connected:true});}
+  await h.flush();assert.equal(mutations(h).length,0);pending.resolve(change!=='cancel');await h.flush();assert.equal(mutations(h).length,0);
+ }
+});
+
+test('local cancel requires confirmation, rejects a changed run, and preserves unknown cancellation receipts',async t=>{
+ const decisions=[],original=run('unknown');
+ const h=harness(t,{props:{run:original},confirm:options=>{const response=deferred();decisions.push({options,response});return response.promise;},
+  override:(target,data,next)=>target==='/api/run/cancel'?{...original,cancellation:{status:'unconfirmed',signal_sent:false,message:'Original process could not be verified'}}:next()});
+ await h.flush();h.click('取消');h.click('取消');assert.equal(decisions.length,1);assert.equal(decisions[0].options.tone,'danger');
+ decisions[0].response.resolve(false);await h.flush();assert.equal(mutations(h).length,0);
+ h.click('取消');h.render({run:{...original,id:'different'}});await h.flush();decisions[1].response.resolve(true);await h.flush();assert.equal(mutations(h).length,0);
+ h.render({run:original});await h.flush();h.click('取消');decisions[2].response.resolve(true);await h.flush();
+ assert.deepEqual(mutations(h).map(({target,data})=>({target,data})),[{target:'/api/run/cancel',data:{run_id:original.id}}]);
+ assert(h.text().includes('Original process could not be verified'));assert(h.find('核对停止状态'));
+});
 
 for(const status of ['draft','ready','unknown'])test('bound RunReview '+status+' renders the real readonly detail with log/artifacts and a run-ID-only return callback',async t=>{
  const h=harness(t,{component:'RunReview',props:{run:run(status,true)}});await h.flush();assert(h.text().includes('工具组步骤管理'));assert(h.text().includes('CONTROLLED LOG BODY'));assert(!h.buttons().some(button=>button.props['data-testid']==='execute-reviewed'));assert(!operationButtons(h).some(button=>['验证','提交计算','续算','取消'].includes(h.text(button))));
@@ -92,6 +116,20 @@ test('actual Review remount restores resources, scientific parameters, input pat
  reopened.render({draftScope:'different-source'});await reopened.flush();assert(reopened.nodes().some(node=>node.type==='input'&&node.props.value==='Controlled UI run'));
  reopened.render(props);await reopened.flush();assert(reopened.nodes().some(node=>node.type==='input'&&node.props.value==='My unsent revision'));assert.equal(mutations(reopened).length,0);
  reopened.click('丢弃本地草稿');await reopened.flush();assert(reopened.nodes().some(node=>node.type==='input'&&node.props.value==='Controlled UI run'));assert(!reopened.text().includes('本地编辑草稿已保留'));assert.equal(mutations(reopened).length,0);
+});
+
+test('changing the source path asks before discarding file edits and cannot apply a stale confirmation',async t=>{
+ const pending=[],h=harness(t,{component:'RunReview',props:{draftScope:'first-worker'},
+  confirm:options=>{const answer=deferred();pending.push({answer,options});return answer.promise;},
+  override:(target,data,next)=>target==='/api/run/input'?{editable:true,text:'Original'}:next()});
+ await h.flush();h.click('run.in');await h.flush();h.nodes().find(n=>n.type==='CodeEditor').props.onChange('Unsaved input edits');await h.flush();
+ const field=()=>h.nodes().find(n=>n.props?.['aria-label']==='run.in');
+ field().props.onChange({target:{value:'/fixture/replacement.in'}});assert.equal(pending[0].options.target,'run.in');
+ pending[0].answer.resolve(false);await h.flush();assert.equal(field().props.value,'/fixture/run/simulation/run.in');
+ assert.equal(h.nodes().find(n=>n.type==='CodeEditor').props.value,'Unsaved input edits');
+ field().props.onChange({target:{value:'/fixture/replacement.in'}});
+ h.render({draftScope:'second-worker'});await h.flush();pending[1].answer.resolve(true);await h.flush();
+ assert.equal(field().props.value,'/fixture/run/simulation/run.in');assert.equal(mutations(h).length,0);
 });
 
 test('Review baseline conflicts expose the retained draft and block execution until explicit discard',async t=>{

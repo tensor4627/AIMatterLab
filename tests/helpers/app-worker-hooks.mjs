@@ -32,6 +32,8 @@ const navigationModules=Object.fromEntries(['frontend/features/workflows/useTool
 export async function completeComputeGuide(h,connected){const guide=h.find(node=>node.type==='./ComputeConnectionGuide');guide.props.onClose(connected);await h.flush();return guide.props;}
 export function appWorkerHarness({override,storage=memoryStorage(),width=1440,managedResources=[],managedConversations=[]}={}){
  const hooks=[],pending=[],listeners=[],calls=[],settings={distribution:'Saved Ubuntu',workerRoot:'~/saved',workerPort:8767,theme:'dark',skillRoots:[]};let cursor=0,dirty=false,tree,disposed=false;
+ const notifications=[];
+ const toast={show:options=>notifications.push(options),dismiss:()=>{}};
  const useState=initial=>{const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{const value=typeof next==='function'?next(hooks[index].value):next;if(!Object.is(value,hooks[index].value)){hooks[index].value=value;dirty=true;}}];};
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
  const useEffect=(fn,deps)=>{const index=cursor++,previous=hooks[index];if(!previous||!deps||deps.some((value,i)=>!Object.is(value,previous.deps?.[i]))){const record={deps,cleanup:previous?.cleanup,fn};hooks[index]=record;pending.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
@@ -63,6 +65,12 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
  }
  const require=name=>{
   if(name==='../ui/preference-storage')return preferences.exports;
+  if(name==='../ui/ConfirmDialog')return {useConfirm:()=>async()=>true,ConfirmDialog:'./ConfirmDialog'};
+  if(name==='../ui/Toast')return {useToast:()=>toast};
+  if(name==='../ui/StatusBadge')return {statusLabel:value=>value};
+  if(name==='../ui/Button')return {default:'button'};
+  if(name==='../features/settings/appearance-defaults')return {recommendedMinimumFontSize:13};
+  if(name==='./workspace-shortcuts')return {shortcutLabel:value=>value};
   if(name==='./useWorkspaceLayout')return layout.exports;
   if(name.endsWith('/SoftwareUpdate'))return {useWorkspaceUpdate:()=>({state:{phase:'disabled'}})};
   if(name==='../features/compute/ssh-connection-types')return connectionUi.exports;
@@ -98,7 +106,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
  const window={innerWidth:width,dispatchEvent(){},addEventListener(){},removeEventListener(){},studio:{invoke,onEvent:fn=>{listeners.push(fn);return()=>listeners.splice(listeners.indexOf(fn),1);}}};
  const layout={exports:{}};new Function('require','exports','window',layoutCompiled)(require,layout.exports,window);
  new Function('require','module','exports','localStorage','window','document','crypto','setInterval','clearInterval','requestAnimationFrame','cancelAnimationFrame',compiled)(require,module,module.exports,storage,window,document,{randomUUID},()=>1,()=>{},()=>1,()=>{});
- function render(){cursor=0;dirty=false;tree=module.exports.default();}
+ function render(){cursor=0;dirty=false;tree=module.exports.App();}
  async function flush(){for(let i=0;i<20;i++){while(pending.length)pending.shift()();await new Promise(resolve=>setImmediate(resolve));if(dirty&&!disposed)render();}}
  function all(node){if(Array.isArray(node))return node.flatMap(all);if(!node||typeof node!=='object')return [];return [node,...all(node.props?.children)];}
  function find(predicate){const node=all(tree).find(predicate);if(!node)throw Error('App fixture node not found');return node;}
@@ -109,5 +117,5 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
  function openSettings(){find(node=>node.type==='button'&&node.props?.['aria-label']==='设置').props.onClick();render();return find(node=>node.type==='./SettingsPage').props;}
  function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}
  function replayStrictEffects(){while(pending.length)pending.shift()();for(const hook of hooks)if(hook?.fn)hook.cleanup?.();for(const hook of hooks)if(hook?.fn)hook.cleanup=hook.fn();}
- render();return {calls,settings,find,text,flush,emit,connect,openSettings,unmount,storage,render,replayStrictEffects};
+ render();return {calls,settings,find,text,flush,emit,connect,openSettings,unmount,storage,render,replayStrictEffects,notifications};
 }

@@ -82,7 +82,7 @@ export async function frontendContinuousWorkCases({check,out}){
  });
  await check('continuous-work-repair-grant-purpose-and-durable-notice',async page=>{
   const record=packageRecord(),configuration=configurationRecord(record,'failed');configuration.install.status='passed';configuration.tests=configuration.tests.map(value=>({...value,status:'failed',reason:'Synthetic functional check finding'}));await page.evaluate(async({record,configuration})=>{
-   const f=window.__test,original=window.studio.invoke;document.getElementById('root').className='application';await import('/frontend/app/frontend-refinement.css');
+   const f=window.__test,original=window.studio.invoke;document.getElementById('root').className='application';
    window.studio.invoke=async(method,data)=>{
     if(method==='tools.packages.list')return [{...record,name:record.manifest.name}];if(method==='tools.packages.read')return record;
     if(method==='tools.configurations.list')return [{...configuration,worker_binding:{distribution:'Fixture',root:'/fixture',port:1},project_id:configuration.target.project_id,environment_id:configuration.target.environment_id}];
@@ -204,7 +204,7 @@ export async function frontendContinuousWorkCases({check,out}){
  });
  for(const theme of ['dark','light'])await check('continuous-work-history-anchor-replay-'+theme,async page=>{
   await page.evaluate(async theme=>{
-   document.documentElement.dataset.theme=theme;const root=document.getElementById('root');root.className='application';root.style.cssText='height:100vh;display:flex;flex-direction:row;justify-content:center;align-items:stretch';await import('/frontend/app/frontend-refinement.css');
+   document.documentElement.dataset.theme=theme;const root=document.getElementById('root');root.className='application';root.style.cssText='height:100vh;display:flex;flex-direction:row;justify-content:center;align-items:stretch';
    const f=window.__test,original=window.studio.invoke;f.chat=id=>({id:'codex:'+id,provider:'codex',threadId:id,name:'Saved conversation '+id,projectId:null,taskId:null});
    window.studio.invoke=async(method,data)=>{if(method==='conversation.remember')return f.chat(data.threadId);if(method==='agent.rpc'&&data.method==='thread/resume')return {thread:{id:data.params.threadId},model:'fixture-model'};if(method==='agent.rpc'&&data.method==='thread/read')return {thread:{id:data.params.threadId,turns:[{items:[...Array.from({length:50},(_,i)=>({id:data.params.threadId+'-'+i,type:'agentMessage',text:'Saved message '+i+'\n\nThe calculation inputs and observations stay available while you read earlier work.'})),{id:'command',type:'commandExecution',command:'python check_inputs.py',aggregatedOutput:'Input shape mismatch',exitCode:1,status:'completed'},{id:'change',type:'fileChange',status:'completed',changes:[{path:'input.py',diff:'-old\n+fixed',kind:{type:'update'}}]}]}]}};return original(method,data);};
    window.chatProps={width:480,planningMode:false,onPlanningModeChange(){},context:'{}',onError:error=>{throw error;},sessionSelection:{nonce:'a',conversation:f.chat('a')}};window.renderChat=value=>window.renderTest('Agent',window.chatProps={...window.chatProps,...value});return window.renderChat({});
@@ -220,7 +220,7 @@ export async function frontendContinuousWorkCases({check,out}){
 
  for(const status of ['not_run','stale','unknown','consumer'])await check('continuous-work-deployment-'+status,async page=>{
   await page.evaluate(async status=>{
-   await import('/frontend/app/frontend-refinement.css');const f=window.__test,original=window.studio.invoke;f.task={id:'continuous',name:'Continuous exploration',workflowVersion:2,parameters:{engine:'pydyn.md'},parameterRevision:3,review:{status:status==='stale'?'ready':'not_run',parameterRevision:1},deployment:{revision:2,config:{target:'local',projectId:'project',targetId:'env',inputSource:'local',directoryName:'attempt',gpu:0,maxSeconds:60,resources:{cpus:1,gpus:1,memory_mb:1024,queue:'',account:''}}},...(status==='unknown'?{execution:{phase:'unknown',artifactId:'old-run'}}:{})};
+   const f=window.__test,original=window.studio.invoke;f.task={id:'continuous',name:'Continuous exploration',workflowVersion:2,parameters:{engine:'pydyn.md'},parameterRevision:3,review:{status:status==='stale'?'ready':'not_run',parameterRevision:1},deployment:{revision:2,config:{target:'local',projectId:'project',targetId:'env',inputSource:'local',directoryName:'attempt',gpu:0,maxSeconds:60,resources:{cpus:1,gpus:1,memory_mb:1024,queue:'',account:''}}},...(status==='unknown'?{execution:{phase:'unknown',artifactId:'old-run'}}:{})};
    if(status==='consumer'){f.task.provider='codex';f.task.threadId='consumer';f.task.parameters.engine='bias.validate';f.project.policy.engines=['bias.validate'];}
    window.studio.invoke=async(method,data)=>{
     if(status==='consumer'&&method==='task.localReview.status')return {taskId:f.task.id,parameterRevision:3,provider:'codex',threadId:'consumer',status:'current',scope:'local',authority:{kind:'local-human',id:'local-review',sha256:'b'.repeat(64)}};

@@ -82,6 +82,74 @@ test('plan discard restores the saved record and removes its retained draft with
  const env=workflowExperienceEnvironment(),initial={...env.load('frontend/features/workflows/workflow-catalog.mjs').createPlan('sampling'),id:'saved-plan',name:'Saved name'};const h=mountPlan(env,{initial});await h.flush();h.find(node=>node.type==='input'&&node.props.type===undefined).props.onChange({target:{value:'Local name'}});await h.flush();h.id('plan-discard').props.onClick();await h.flush();assert.equal(h.find(node=>node.type==='input'&&node.props.type===undefined).props.value,'Saved name');assert.equal(h.id('plan-discard').props.disabled,true);h.unmount();const reopened=mountPlan(env,{initial});await reopened.flush();assert.equal(reopened.find(node=>node.type==='input'&&node.props.type===undefined).props.value,'Saved name');reopened.unmount();
 });
 
+test('the plan discard toast restores the exact local draft through Undo without IPC',async()=>{
+ const env=workflowExperienceEnvironment(),plan=env.load('frontend/features/workflows/workflow-catalog.mjs').createPlan('sampling');
+ const original={...plan,id:'saved-plan',name:'Saved plan'};
+ const h=mountPlan(env,{initial:original});
+ const name=()=>h.find(node=>node.type==='input'&&node.props.type===undefined);
+ await h.flush();
+ name().props.onChange({target:{value:'Edited name'}});
+ await h.flush();
+ h.find(node=>node.type==='textarea'&&node.props.rows===3).props.onChange({target:{value:'Keep these recovery notes'}});
+ await h.flush();
+ // Prompt state and draft storage stay local throughout discard and restoration.
+ const drafted=sessionStore(env).readSessionDraft(JSON.stringify(['workflow-plan','sampling',original.id]));
+ h.id('plan-discard').props.onClick();await h.flush();
+ assert.equal(name().props.value,'Saved plan');
+ const undo=env.toasts.at(-1);
+ assert.equal(undo.testId,'workflow-plan-discarded');
+ assert.equal(undo.duration,8000);
+ assert.equal(undo.action.label,'撤销');
+ undo.action.onClick();await h.flush();
+ assert.deepEqual(sessionStore(env).readSessionDraft(JSON.stringify(['workflow-plan','sampling',original.id])).value,drafted.value);
+ assert.equal(name().props.value,'Edited name');
+ assert.equal(env.toasts.at(-1).severity,'success');
+ h.unmount();
+});
+
+test('an older plan discard cannot overwrite newer input or restore over a different editor',async()=>{
+ const env=workflowExperienceEnvironment(),base=env.load('frontend/features/workflows/workflow-catalog.mjs').createPlan('sampling');
+ const h=mountPlan(env,{initial:{...base,id:'plan-a',name:'Plan A'}});
+ const name=()=>h.find(node=>node.type==='input'&&node.props.type===undefined);
+ const edit=async value=>{name().props.onChange({target:{value}});await h.flush();};
+ const discard=async()=>{h.id('plan-discard').props.onClick();await h.flush();return env.toasts.at(-1).action.onClick;};
+ await h.flush();await edit('First discarded revision');
+ const older=await discard();
+ await edit('Newer local input');older();await h.flush();
+ assert.equal(name().props.value,'Newer local input');
+ assert(env.dismissedToasts.has(1));
+ const newer=await discard();
+ older();await h.flush();assert.equal(name().props.value,'Plan A');
+ newer();await h.flush();assert.equal(name().props.value,'Newer local input');
+ const stale=await discard();
+ h.unmount();
+ const other=mountPlan(env,{initial:{...base,id:'plan-b',name:'Plan B'}});
+ await other.flush();stale();await other.flush();
+ assert.equal(other.find(node=>node.type==='input'&&node.props.type===undefined).props.value,'Plan B');
+ assert.equal(sessionStore(env).readSessionDraft(JSON.stringify(['workflow-plan','sampling','plan-a'])),undefined);
+ other.unmount();
+});
+
+test('a saved plan and its temporary navigation alias restore together unless one was edited since discard',async()=>{
+ const env=workflowExperienceEnvironment(),store=sessionStore(env),base=env.load('frontend/features/workflows/workflow-catalog.mjs').createPlan('sampling');
+ const pending={...base,id:'a-saved-id',name:'Original local edits'};
+ const seed=JSON.stringify(['workflow-plan','sampling','new']),saved=JSON.stringify(['workflow-plan','sampling',pending.id]);
+ store.writeSessionDraft(seed,pending);store.writeSessionDraft(saved,pending);
+ const h=mountPlan(env);
+ await h.flush();h.id('plan-discard').props.onClick();await h.flush();
+ assert.equal(store.readSessionDraft(seed),undefined);assert.equal(store.readSessionDraft(saved),undefined);
+ env.toasts.at(-1).action.onClick();await h.flush();
+ assert.deepEqual(store.readSessionDraft(seed).value,pending);assert.deepEqual(store.readSessionDraft(saved).value,pending);
+ h.id('plan-discard').props.onClick();await h.flush();
+ const stale=env.toasts.at(-1).action.onClick;
+ const other=store.writeSessionDraft(seed,{...base,name:'Newer input from another entry'});
+ store.clearSessionDraft(seed,other.version);
+ stale();await h.flush();
+ assert.equal(store.readSessionDraft(seed),undefined);assert.equal(store.readSessionDraft(saved),undefined);
+ assert.equal(env.toasts.at(-1).severity,'info');
+ h.unmount();
+});
+
 test('private library drafts remain discoverable without blocking an unrelated attached definition',async()=>{
  const task=workflowTask(),states=[],calls=[],env=workflowExperienceEnvironment(async method=>{calls.push(method);if(method==='task.pygas.read')return taskComposition();throw Error(method);}),draft=env.mount(custom,{...privateCv('task-A','private-B'),...callbacks});await draft.flush();draft.find(node=>node.props?.label==='custom.parameter.epsilon').props.onChange(.4);await draft.flush();draft.unmount();
  const props={task,worker:true,onStateChange:value=>states.push(value),onSaved(){},onError:error=>{throw error;},onDiscussion(){},customCvInvoke:async()=>{},customProvider:'codex',onCustomDiscussion(){}};const h=env.mount(composer,props);await h.flush();assert.equal(states.at(-1).dirty,false);h.id('custom-draft-list');const cv=env.load('frontend/features/custom-cv/custom-cv-drafts.ts'),store=sessionStore(env),attached=privateCv().entry;store.writeSessionDraft(cv.customCvDraftKey(task.id,attached.id),{spec:attached.spec,values:{epsilon:.7},base:attached.expected});await h.flush();assert.equal(states.at(-1).dirty,true,'The attached definition still blocks even when another library entry is selected');store.clearSessionDraft(cv.customCvDraftKey(task.id,attached.id));await h.flush();assert.equal(states.at(-1).dirty,false);h.find(node=>node.props?.['data-draft-id']==='private-B').props.onClick();await h.flush();const controller=h.find(node=>node.type==='../custom-cv/CustomCvTaskController');controller.props.onStateChange({loading:false,busy:false,dirty:true,error:false});await h.flush();assert.equal(h.button('返回当前组合图').props.disabled,false);h.button('返回当前组合图').props.onClick();await h.flush();assert.equal(states.at(-1).dirty,false);h.id('custom-draft-list');

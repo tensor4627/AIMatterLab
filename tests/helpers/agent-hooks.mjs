@@ -1,5 +1,6 @@
 // Deterministic source-level Agent hook harness. No browser, desktop or model service.
 import fs from 'node:fs';
+import {fixtureControlModule,fixtureDisclosure} from './frontend-component-loader.mjs';
 import path from 'node:path';
 import ts from 'typescript';
 import {randomUUID} from 'node:crypto';
@@ -90,6 +91,8 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
    const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
    new Function('require','module','exports',compiled)(require,notice,notice.exports);return notice.exports;
   }
+  if(name==='../../ui/Disclosure')return {default:fixtureDisclosure};
+  const control=fixtureControlModule(name);if(control)return control;
   if(name==='../../../contracts/agent/codex-version.mjs')return codexVersion;
   if(name==='../../../contracts/agent/transcript-sanitizer.mjs')return transcript;
   if(name==='../../../contracts/agent/model-profiles.mjs')return modelProfiles;

@@ -7,16 +7,27 @@ import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 // Monaco cancels background tokenization when its model is disposed on tab changes.
 // Treat that exact cancellation as expected; all other async failures remain visible.
 window.addEventListener('unhandledrejection',event=>{const e=event.reason;if(e instanceof Error&&e.name==='Canceled'&&e.message==='Canceled')event.preventDefault();});
-const lightTheme='aimatterlab-light';
-monaco.editor.defineTheme(lightTheme,{base:'vs',inherit:true,rules:[],colors:{
- 'editor.background':'#F8F7FA','editor.foreground':'#292633','editorLineNumber.foreground':'#5B5868',
- 'editorLineNumber.activeForeground':'#292633','editorCursor.foreground':'#443579',
- 'editor.selectionBackground':'#CFC3F5','editor.inactiveSelectionBackground':'#E2D9F3','editor.lineHighlightBackground':'#EFEAF4',
-}});
-function editorTheme(theme?:string){return (theme??document.documentElement.dataset.theme)==='light'?lightTheme:'vs-dark';}
+const themeTokens = {
+ 'editor.background':'--surface-sunken',
+ 'editor.foreground':'--text',
+ 'editorLineNumber.foreground':'--text-subtle',
+ 'editorLineNumber.activeForeground':'--text',
+ 'editorCursor.foreground':'--accent',
+ 'editor.selectionBackground':'--editor-selection',
+ 'editor.inactiveSelectionBackground':'--editor-selection-inactive',
+ 'editor.lineHighlightBackground':'--editor-line-highlight',
+};
+function editorTheme(theme?:string){
+ const root=document.documentElement,light=(theme??root.dataset.theme)==='light';
+ const style=getComputedStyle(root),name=light?'aimatterlab-light':'aimatterlab-dark';
+ const colors=Object.fromEntries(Object.entries(themeTokens).map(([key,token])=>
+  [key,style.getPropertyValue(token).trim()]).filter(([,color])=>color.startsWith('#')));
+ monaco.editor.defineTheme(name,{base:light?'vs':'vs-dark',inherit:true,rules:[],colors});
+ return name;
+}
 function editorFontSize(){
  const style=getComputedStyle(document.documentElement);
- return pixelFontSize(parseFloat(style.getPropertyValue('--editor-font-size'))||13,Math.max(12,parseFloat(style.getPropertyValue('--ui-min-font'))||12));
+ return pixelFontSize(parseFloat(style.getPropertyValue('--editor-font-size'))||18,10);
 }
 function CodeEditor({value,onChange,language='python',theme,height='100%',readOnly=false,onLineSelection}:{value:string;onChange:(v:string)=>void;language?:string;theme?:string;height?:string;readOnly?:boolean;onLineSelection?:(range:{firstLine:number;lastLine:number}|null)=>void}){
  const host=useRef<HTMLDivElement>(null),editor=useRef<monaco.editor.IStandaloneCodeEditor|null>(null),changed=useRef(onChange);changed.current=onChange;

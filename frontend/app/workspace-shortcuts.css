@@ -1,0 +1,18 @@
+@layer layout {
+ .workspace-shortcut-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+ }
+ .workspace-shortcut-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+ }
+ .workspace-shortcut-list dd { margin: 0; }
+ .command-list kbd { margin-inline-start: auto; }
+ .workspace-content:focus, .workspace-content :is(h1,h2)[tabindex="-1"]:focus {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+ }
+}

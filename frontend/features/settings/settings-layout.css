@@ -1,0 +1,118 @@
+@layer features {
+  .settings-layout {
+    display: flex;
+    gap: var(--space-8);
+    min-height: 425px;
+  }
+
+  .settings-nav {
+    width: 155px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    border-right: 1px solid var(--line);
+    padding-right: var(--space-5);
+  }
+
+  .settings-nav button {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    text-align: left;
+    padding: var(--space-4) var(--space-4);
+    border-radius: var(--radius-xs);
+    font-size: var(--font-body);
+    color: var(--muted);
+  }
+
+  .settings-nav button.active {
+    color: var(--accent);
+    background: var(--accent-bg);
+  }
+
+  .settings-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .settings-heading h2 {
+    font-size: var(--font-heading);
+    font-weight: 500;
+    margin: 0 0 var(--space-3);
+  }
+
+  .settings-heading p {
+    color: var(--muted);
+    margin-bottom: var(--space-7);
+  }
+
+  .settings-content label {
+    margin-bottom: var(--space-6);
+  }
+
+  .settings-content small {
+    display: block;
+    margin-top: var(--space-3);
+    color: var(--muted);
+  }
+
+  .settings-footer {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    border-top: 1px solid var(--line);
+    padding-top: var(--space-6);
+    margin-top: var(--space-7);
+  }
+
+  .settings-footer>span {
+    flex: 1;
+    color: var(--muted);
+    font-size: var(--font-meta);
+  }
+
+  .font-preview {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    padding: var(--space-6);
+    background: var(--bg);
+    font-size: var(--font-title);
+    line-height: 1.8;
+    margin: var(--space-5) 0;
+  }
+
+  .modal.large:has(.settings-layout) {
+    width: 850px;
+    max-width: 92vw;
+  }
+
+  .settings-content .notice {
+    line-height: 1.8;
+  }
+
+  .settings-footer {
+    position: sticky;
+    bottom: -21px;
+    background: var(--surface-glass-strong);
+    backdrop-filter: blur(14px) saturate(150%);
+    padding-bottom: var(--space-3);
+    flex-wrap: wrap;
+    z-index: 2;
+  }
+
+  .settings-footer>span {
+    min-width: 120px;
+  }
+
+  @media(max-width:800px) {
+    .settings-layout {
+      gap: var(--space-4);
+    }
+
+    .settings-nav {
+      width: 120px;
+      padding-right: var(--space-3);
+    }
+  }
+}

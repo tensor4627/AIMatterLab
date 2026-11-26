@@ -1,0 +1,21 @@
+@layer features {
+  .account-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-5);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    background: var(--bg);
+  }
+
+  .account-summary small {
+    color: var(--muted);
+  }
+
+  .device-code {
+    font-size: 1.4em;
+    color: var(--accent);
+    letter-spacing: 3px;
+  }
+}

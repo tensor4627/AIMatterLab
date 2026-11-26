@@ -1,3 +1,4 @@
+import {fixtureControlModule} from './frontend-component-loader.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
@@ -14,6 +15,7 @@ export function assetHarness({component='AssetInspector',override,props:initialP
  function load(file){
   if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);
   const require=name=>{
+   const control=fixtureControlModule(name);if(control)return control;
    if(name==='react')return react;
    if(name.endsWith('/LoadingFeedback'))return {default:'LoadingFeedback',LoadingFeedback:'LoadingFeedback'};
    if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};

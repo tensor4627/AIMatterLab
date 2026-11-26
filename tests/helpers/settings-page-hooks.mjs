@@ -16,6 +16,8 @@ export function settingsPageHarness(extraProps={}){
   if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};
   if(name==='../../api/studio')return {invoke:(method,data)=>{calls.push({method,data});return gate.promise;}};
   if(name==='../../ui/i18n')return {t:value=>value,setLanguage(){}};
+  if(name==='../../ui/Button')return {default:'button'};
+  if(name==='./appearance-defaults')return {recommendedMinimumFontSize:13};
   return new Proxy({default:name},{get:(value,key)=>value[key]??key});
  },module,module.exports);
  function render(){cursor=0;dirty=false;tree=module.exports.default({settings,onChange:value=>{settings=value;dirty=true;},onClose(){},onSaved:value=>saved.push(value),onError:value=>errors.push(value),...extraProps});}

@@ -1,3 +1,5 @@
+import Disclosure from '../../ui/Disclosure';
+import Button from '../../ui/Button';
 import ChatMessage,{connectionAction,originalRunHint,type ChatMessageValue,type ChatMessageActions} from './ChatMessage';
 import {memo} from 'react';
 import type {ConversationBookmark} from '../../../contracts/dto/conversation-history';
@@ -60,16 +62,15 @@ function ToolGroup({messages,toolGroupOpen,onToolGroupToggle,...props}:Props){
  const open=override!==undefined?override:(severity?true:undefined);
  const hoisted=!open?hoistedGroupActions(messages,props):[];
  return <div className="tool-group-block">
-  <details className="tool-group" data-testid="tool-group" data-severity={severity} open={open} onToggle={event=>{const next=event.currentTarget.open;if(next!==Boolean(open))onToolGroupToggle?.(groupKey,next);}}>
-   <summary data-message-id={`tool-group:${first.id}`} data-turn-id={first.turnId} title={status}>
+  <Disclosure className="tool-group" data-testid="tool-group" data-severity={severity} open={open} onToggle={event=>{const next=event.currentTarget.open;if(next!==Boolean(open))onToolGroupToggle?.(groupKey,next);}} summaryProps={{"data-message-id": `tool-group:${first.id}`, "data-turn-id": first.turnId, "title": status}} summary={<>
     <ChevronRight className="tool-group-chevron" size={14} aria-hidden="true"/>
     <span className="tool-group-copy">
      <span className="tool-group-label"><Wrench size={14} aria-hidden="true"/><span>{label}</span></span>
      <span className="tool-group-status">{status}</span>
     </span>
-   </summary>
+   </>}>
    <div className="tool-group-content">{messages.map(message=><ChatMessage key={messageKey(message)} message={message} {...props} bookmarked={props.bookmarked?.has(bookmarkKey(message))}/>)}</div>
-  </details>
-  {hoisted.length>0&&<div className="tool-group-actions" data-testid="tool-group-actions">{hoisted.map(action=><button key={action.key} type="button" className="button" data-testid={action.testId} disabled={action.disabled} onClick={action.onClick}>{action.label}</button>)}</div>}
+  </Disclosure>
+  {hoisted.length>0&&<div className="tool-group-actions" data-testid="tool-group-actions">{hoisted.map(action=><Button key={action.key} type="button"  data-testid={action.testId} disabled={action.disabled} onClick={action.onClick}>{action.label}</Button>)}</div>}
  </div>;
 }

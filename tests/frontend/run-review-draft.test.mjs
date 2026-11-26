@@ -46,3 +46,33 @@ test('draft byte budget rejects durable growth without deleting prior edits',()=
 test('changed immutable input hashes conflict even when displayed paths and parameters are identical',()=>{
  const local=storage(),run=record(),first=new RunReviewDraft('worker',run,local);first.stage({name:'kept'});const changed=new RunReviewDraft('worker',{...run,inputs:{'run.in':'different-hash'}},local);assert(changed.conflict);assert.equal(changed.saved.values.name,'kept');assert.equal(changed.stage({name:'overwrite'}),false);
 });
+test('discard undo restores the exact draft after remount and cannot be used twice',()=>{
+ const local=storage(),run=record(),draft=new RunReviewDraft('worker',run,local);
+ draft.stage({name:'Discarded edit',edits:{'run.in':'retained contents'}});const saved=local.getItem(draft.key);
+ const undo=draft.discardWithUndo();assert.equal(undo.count,1);assert.equal(draft.dirty,false);assert.equal(local.getItem(draft.key),null);
+ assert.deepEqual(undo.restore(),{restored:[draft.key],skipped:0,memoryOnly:0});assert.equal(local.getItem(draft.key),saved);
+ assert.equal(new RunReviewDraft('worker',run,local).values.edits['run.in'],'retained contents');assert.equal(undo.restore().skipped,1);
+});
+test('overlapping cleanup and discard undo preserve newer changes even after their draft is discarded',()=>{
+ const local=storage(),a=new RunReviewDraft('worker',record(),local),b=new RunReviewDraft('worker',{...record(),id:'second'},local);
+ a.stage({name:'old edit'});const cleanup=b.clearOtherDraftsWithUndo();assert.equal(cleanup.count,1);
+ const revisited=new RunReviewDraft('worker',record(),local);revisited.stage({name:'new edit'});const newDiscard=revisited.discardWithUndo();
+ assert.equal(cleanup.restore().skipped,1);assert.equal(local.getItem(a.key),null);
+ assert.deepEqual(newDiscard.restore().restored,[a.key]);assert.equal(new RunReviewDraft('worker',record(),local).values.name,'new edit');
+});
+test('cleanup undo preserves current draft and keeps recoverable drafts in memory when the storage budget is full',()=>{
+ const local=storage(),base=record(),other=new RunReviewDraft('worker',{...base,id:'other'},local);
+ other.stage({name:'cleaned-up draft'});const own=new RunReviewDraft('worker',base,local);const cleanup=own.clearOtherDraftsWithUndo();
+ own.stage({name:'keep current'});for(let i=1;i<REVIEW_DRAFT_LIMITS.count;i++)new RunReviewDraft('worker',{...base,id:'fill-'+i},local).stage({name:'existing edit'});
+ assert.deepEqual(cleanup.restore(),{restored:[other.key],skipped:0,memoryOnly:1});assert.equal(local.getItem(other.key),null);
+ assert.equal(new RunReviewDraft('worker',{...base,id:'other'},local).values.name,'cleaned-up draft');assert.equal(own.values.name,'keep current');
+});
+test('partial cleanup failure restores entries already removed and keeps the current edit',()=>{
+ const local=storage(),base=record(),other=new RunReviewDraft('worker',{...base,id:'other'},local),blocked=new RunReviewDraft('worker',{...base,id:'blocked'},local);
+ other.stage({name:'First draft'});blocked.stage({name:'Second draft'});
+ const own=new RunReviewDraft('worker',base,local);own.stage({name:'Current edit'});
+ const remove=local.removeItem;local.removeItem=key=>{if(key===blocked.key)throw Error('Storage failure');return remove(key);};
+ assert.equal(own.clearOtherDraftsWithUndo(),null);assert(own.error);
+ assert.equal(new RunReviewDraft('worker',{...base,id:'other'},local).values.name,'First draft');
+ assert.equal(new RunReviewDraft('worker',{...base,id:'blocked'},local).values.name,'Second draft');assert.equal(own.values.name,'Current edit');
+});

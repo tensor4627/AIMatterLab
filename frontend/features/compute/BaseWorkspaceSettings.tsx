@@ -1,3 +1,5 @@
+import Notice from '../../ui/Notice';
+import LoadingFeedback from '../../ui/LoadingFeedback';
 import {useEffect,useRef,useState} from 'react';
 import {invoke} from '../../api/studio';
 import {t} from '../../ui/i18n';
@@ -32,9 +34,9 @@ export default function BaseWorkspaceSettings({profile,resource,busy=false}:{pro
  }
  const disabled=busy||loading||saving||!ready;
  return <section className="base-workspace-settings" data-testid="base-workspace-settings">
-  {!ready&&<p role="status">{t('请选中此配置，核对 SSH 登录和作业服务的就绪状态。')}</p>}
-  {loading&&<p role="status">{t('正在读取基础工作区…')}</p>}
-  {result?.status==='ready'&&<p role="status" data-testid="base-workspace-ready">{result.workspace.name} <code>{result.workspace.root}</code></p>}
+  {!ready&&<Notice compact>{t('请选中此配置，核对 SSH 登录和作业服务的就绪状态。')}</Notice>}
+  <LoadingFeedback busy={loading} label={t('正在读取基础工作区…')}/>
+  {result?.status==='ready'&&<Notice compact severity="success" data-testid="base-workspace-ready">{result.workspace.name} <code>{result.workspace.root}</code></Notice>}
   <div className="form-row">
    <label>{t('工作区名称')}<input aria-label={t('基础工作区名称')} value={name} maxLength={80} disabled={disabled} onChange={e=>setName(e.target.value)}/></label>
    <label>{t('工作区目录名')}<input aria-label={t('基础工作区目录名')} value={directory} maxLength={60} disabled={disabled} onChange={e=>setDirectory(e.target.value)}/></label>
@@ -44,6 +46,6 @@ export default function BaseWorkspaceSettings({profile,resource,busy=false}:{pro
    <button type="button" className="button primary" disabled={disabled||!name.trim()||!(/^[A-Za-z0-9_-]{1,60}$/).test(directory.trim())} onClick={()=>void save()}>{t(saving?'设置中…':'设为基础工作区')}</button>
    <button type="button" className="button" disabled={busy||saving||loading||!ready} onClick={()=>setRefresh(value=>value+1)}>{t('重新读取')}</button>
   </div>
-  {error&&<p role="alert">{error}</p>}
+  {error&&<Notice severity="error" compact>{error}</Notice>}
  </section>;
 }

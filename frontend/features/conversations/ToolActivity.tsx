@@ -1,3 +1,6 @@
+import Button from '../../ui/Button';
+import Disclosure from '../../ui/Disclosure';
+import Notice from '../../ui/Notice';
 import {CheckCircle2, CircleAlert, CircleHelp, LoaderCircle} from 'lucide-react';
 import {t} from "../../ui/i18n";
 import {toolLabel} from "./tool-activity.mjs";
@@ -10,8 +13,8 @@ export default function ToolActivity({message,onWorkflow,onRun,onExpand}:{messag
   <div className="activity-heading"><Icon size={16} aria-hidden="true"/><strong>{t(toolLabel(name))}</strong><span>{t(status)}</span></div>
   {value.summary&&value.summary!=='工具调用完成'&&value.summary!=='工具正在执行'&&<p>{t(value.summary)}</p>}
   {value.hint&&<p className="activity-guidance">{t(value.hint)}</p>}
-  {value.artifact?.kind==='task-parameters'?<button className="button" onClick={()=>onWorkflow?.(value.artifact.id)}>{t('打开计算流程')}</button>
-   :value.artifact?.engine?<button className="button" onClick={()=>onRun?.(value.artifact.id)}>{t('打开模块草稿')}</button>:null}
-  <details onToggle={event=>{if(event.currentTarget.open)onExpand?.();}}><summary>{t('查看工具详情')}</summary>{onExpand?<p role="status">{t('正在读取工具详情…')}</p>:<><code>{name}</code><pre>{value.details||message.text}</pre></>}</details>
+  {value.artifact?.kind==='task-parameters'?<Button  onClick={()=>onWorkflow?.(value.artifact.id)}>{t('打开计算流程')}</Button>
+   :value.artifact?.engine?<Button  onClick={()=>onRun?.(value.artifact.id)}>{t('打开模块草稿')}</Button>:null}
+  <Disclosure onToggle={event=>{if(event.currentTarget.open)onExpand?.();}} summary={<>{t('查看工具详情')}</>}>{onExpand?<Notice compact >{t('正在读取工具详情…')}</Notice>:<><code>{name}</code><pre>{value.details||message.text}</pre></>}</Disclosure>
  </section>;
 }

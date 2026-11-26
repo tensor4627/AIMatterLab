@@ -1,0 +1,52 @@
+@layer components {
+  .aml-field {
+    display: grid;
+    align-content: start;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .aml-field-label { color: var(--text); }
+  .aml-field-required, .aml-field-error { color: var(--danger); }
+  .aml-field-control {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .aml-field-control > :is(input:not([type=checkbox], [type=radio]), select, textarea) { width: 100%; min-width: 0; }
+  .aml-field-control > :is(input, select, textarea) { border-color: var(--control-border); }
+  .aml-field-control > *:first-child:not(button, input[type=checkbox], input[type=radio]) { flex: 1; min-width: 0; }
+  .aml-field-error,
+  .aml-field-default,
+  .aml-field-description,
+  .aml-field-unit { font-size: var(--font-meta); }
+  .aml-field-default, .aml-field-description, .aml-field-unit { color: var(--muted); }
+  .aml-field-description {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .aml-field-description-text {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .aml-field-description-text[data-expanded=false] {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .aml-field-more {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .aml-field [aria-invalid=true] { border-color: var(--danger); }
+}

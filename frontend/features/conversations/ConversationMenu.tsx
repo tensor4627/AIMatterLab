@@ -1,3 +1,4 @@
+import Button from '../../ui/Button';
 import {useEffect,useId,useLayoutEffect,useRef,useState,type KeyboardEvent} from 'react';
 import {createPortal} from 'react-dom';
 import {Archive,ArchiveRestore,ArrowLeft,Check,ChevronRight,Folder,MoreHorizontal,Pencil,Pin,Trash2} from 'lucide-react';
@@ -76,7 +77,7 @@ export default function ConversationMenu(props:Props){
  }
 
  return <>
-  <button ref={trigger} type="button" className={'conversation-menu-trigger'+(group?' group-menu-trigger':'')} aria-label={label} title={t(group?'分组菜单':'会话菜单')} aria-haspopup="menu" aria-expanded={open} aria-controls={open?menuId:undefined} disabled={disabled} onClick={event=>{event.preventDefault();if(open)close(true);else{setProjects(false);setOpen(true);}}} onKeyDown={event=>{if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();lastFocus.current=event.key==='ArrowUp';setProjects(false);setOpen(true);}}}><MoreHorizontal size={16}/></button>
+  <Button variant="icon" size="sm" tooltip={t(group?'分组菜单':'会话菜单')} ref={trigger} className={'conversation-menu-trigger'+(group?' group-menu-trigger':'')} aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open?menuId:undefined} disabled={disabled} onClick={event=>{event.preventDefault();if(open)close(true);else{setProjects(false);setOpen(true);}}} onKeyDown={event=>{if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();lastFocus.current=event.key==='ArrowUp';setProjects(false);setOpen(true);}}}><MoreHorizontal size={16} aria-hidden="true"/></Button>
   {open&&createPortal(<div ref={menu} id={menuId} className="conversation-popover" role="menu" aria-label={label} onKeyDown={keyDown} style={{left:position?.left??0,top:position?.top??0,maxHeight:position?.maxHeight??'calc(100vh - 16px)',visibility:position?'visible':'hidden'}}>
    {projects&&conversation?<>
     <button type="button" role="menuitem" tabIndex={-1} className="conversation-popover-back" onClick={back}><ArrowLeft size={16}/><span>{t('移动到分组')}</span></button>

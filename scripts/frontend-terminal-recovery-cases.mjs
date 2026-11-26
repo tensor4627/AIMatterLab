@@ -22,7 +22,7 @@ async function mount(page){
    throw Error('Unexpected isolated recovery fixture IPC '+method);
   };
   const root=document.getElementById('root');root.style.width='720px';root.style.height='300px';
-  window.renderTerminalRecovery=(scope='recovery-owner')=>window.testRoot.render(window.React.createElement(Panel,{visible:true,request:{nonce:'recovery-request',...target,connectionMode:'plain'},resourceScope:scope,provider:'codex',canShare:true,onError:error=>fixture.errors.push(String(error)),onResourceChange:value=>fixture.changes.push(value)}));
+  window.renderTerminalRecovery=(scope='recovery-owner')=>window.renderWithProviders(window.React.createElement(Panel,{visible:true,request:{nonce:'recovery-request',...target,connectionMode:'plain'},resourceScope:scope,provider:'codex',canShare:true,onError:error=>fixture.errors.push(String(error)),onResourceChange:value=>fixture.changes.push(value)}));
   window.renderTerminalRecovery();
  });
  await page.getByTestId('shared-terminal-recovery').waitFor();

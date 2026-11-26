@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';import path from 'node:path';import assert from 'node:assert/strict';import {createServer} from 'vite';import {chromium,_electron} from 'playwright';
 const out=path.resolve('.studio/validation/cluster-delta');await fs.mkdir(out,{recursive:true});
 await fs.writeFile(path.join(out,'locations.html'),`<html><body><div id="root"></div><script type="module">
-import React from 'react';import {createRoot} from 'react-dom/client';import Settings from '/frontend/features/compute/IndependentSshServiceSettings.tsx';import '/frontend/app/style.css';
+import '/frontend/app/style.css';import React from 'react';import {createRoot} from 'react-dom/client';import Settings from '/frontend/features/compute/IndependentSshServiceSettings.tsx';
 const profile={id:'owned',kind:'ssh',version:1,name:'Owned fixture'},locations={schemaVersion:1,scope:'remote-observed',loginDirectory:'/owned/home',observedAt:1000,workspaces:[{path:'/owned/project',projectId:'owned-project',source:'worker-project',status:'previously-observed',lastSeenAt:900}],skills:[]};
 window.calls=[];window.studio={onEvent:()=>()=>{},invoke:async(method)=>{calls.push(method);if(method==='compute.sshService.registration')return {status:'configured',profileId:'owned',profileVersion:1,localProjectSkillsRoot:'/owned/desktop-profile/project-skills',registration:{schemaVersion:1,root:'/owned/service',runtime:'/owned/service/runtimes/fixture',locations}};if(method==='compute.sshConnection.list')return {connections:[]};throw Error(method);}};
 createRoot(document.getElementById('root')).render(React.createElement(Settings,{profile,onLogin:()=>{},onClose:()=>{}}));
