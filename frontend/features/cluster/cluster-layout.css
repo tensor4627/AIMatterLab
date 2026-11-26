@@ -117,11 +117,6 @@
     padding: var(--space-4) 0;
   }
 
-  .queue-target-disclosure>summary {
-    overflow-wrap: anywhere;
-    cursor: pointer;
-  }
-
   .queue-target {
     min-width: 0;
     border: 0;

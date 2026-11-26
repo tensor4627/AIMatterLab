@@ -186,15 +186,6 @@
     white-space: pre-wrap;
   }
 
-  .compute-env-list details > summary {
-    color: var(--muted);
-    cursor: pointer;
-  }
-
-  .compute-env-list details[open] > summary {
-    color: var(--text);
-  }
-
   .compute-cluster-section {
     margin-top: var(--space-5);
     padding-top: var(--space-4);

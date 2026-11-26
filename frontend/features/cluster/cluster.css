@@ -203,14 +203,8 @@
     outline-offset: 3px;
   }
 
-  .cluster-connection-fields details > summary {
+  .cluster-connection-fields .aml-disclosure > summary {
     padding: var(--space-3) 0;
-    cursor: pointer;
-    color: var(--muted);
-  }
-
-  .cluster-connection-fields details[open] > summary {
-    color: var(--text);
   }
 
   .cluster-connection-fields details p {
@@ -234,11 +228,6 @@
   .cluster-environment-editor .parameter-json {
     width: 100%;
     min-inline-size: 0;
-  }
-
-  .cluster-environment-editor summary {
-    color: var(--muted);
-    cursor: pointer;
   }
 
   .cluster-environment-entry {
@@ -423,10 +412,6 @@
     margin-top: var(--space-3);
   }
 
-  .cluster-queue-settings .queue-target-disclosure > summary {
-    font-weight: 600;
-  }
-
   .cluster-queue-settings .queue-target-disclosure > summary span {
     font-weight: 400;
     color: var(--muted);
@@ -458,7 +443,6 @@
   }
 
   .queue-project-policy summary {
-    cursor: pointer;
     padding-block: var(--space-3);
   }
 

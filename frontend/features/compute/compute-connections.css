@@ -98,12 +98,6 @@
     min-width: 0;
   }
 
-  .compute-resource-empty {
-    padding: var(--space-5) var(--space-4);
-    color: var(--muted);
-    border-top: 1px solid var(--line);
-  }
-
   .compute-resource-editor-title {
     display: flex;
     align-items: center;
@@ -131,15 +125,8 @@
     min-width: 0;
   }
 
-  .compute-resource-manager details > summary {
-    cursor: pointer;
-    color: var(--muted);
+  .compute-resource-manager .aml-disclosure > summary {
     padding: var(--space-3) 0;
-    overflow-wrap: anywhere;
-  }
-
-  .compute-resource-manager details[open] > summary {
-    color: var(--text);
   }
 
   .compute-resource-manager form > details {

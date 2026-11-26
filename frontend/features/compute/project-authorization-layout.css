@@ -181,12 +181,8 @@
     background: var(--bg);
   }
 
-  .project-setting-group>summary {
-    cursor: pointer;
+  .project-setting-group > summary {
     padding: var(--space-4) var(--space-5);
-    line-height: 1.6;
-    font-weight: 500;
-    overflow-wrap: anywhere;
   }
 
   .project-setting-group>summary .setting-summary {

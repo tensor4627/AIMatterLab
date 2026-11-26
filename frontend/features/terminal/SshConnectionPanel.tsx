@@ -1,7 +1,9 @@
+import {EmptyState,LoadingState} from '../../ui/States';
+import Disclosure from '../../ui/Disclosure';
 import Button from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import {useEffect,useRef,useState,type FocusEvent,type KeyboardEvent} from 'react';
-import {Check,ChevronDown,Ellipsis,RefreshCw,Server,Settings2,TriangleAlert} from 'lucide-react';
+import {Check,Ellipsis,RefreshCw,Server,Settings2,TriangleAlert} from 'lucide-react';
 import {useManagedResources} from '../compute/useManagedResources';
 import {Terminal} from '@xterm/xterm';
 import {createHumanInputWriter} from './human-input.mjs';
@@ -671,10 +673,11 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    {canContinue&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-continue" data-guide-target="ssh-continue" disabled={busy||loginBusy} onClick={()=>void continueLogin()}>{t('继续原登录')}</button>}
    {canRelogin&&<button type="button" className="button ssh-recovery-action" data-testid="ssh-login-retry" disabled={busy} onClick={()=>void open(true)}>{t(openIssue?'重试':'重新登录')}</button>}
    <div className="ssh-toolbar-actions">
-    <Button variant="icon" className="icon-button ssh-toolbar-icon" data-testid="ssh-login-refresh" disabled={busy} aria-label={t('刷新')} onClick={()=>{void refresh();void observeOriginalLogin();}}><RefreshCw size={16} aria-hidden="true"/></Button>
-    {onConfigureSsh&&<Button variant="icon" className="icon-button ssh-toolbar-icon" data-testid="ssh-edit-connection" data-guide-target="ssh-edit" disabled={busy} aria-label={t('连接设置')} onClick={()=>configure()}><Settings2 size={16} aria-hidden="true"/></Button>}
-    {(ready||canClose||chooseConnection)&&<details className="ssh-disclosure" ref={moreDetails} onBlur={disclosureBlur} onKeyDown={disclosureKeyDown}>
-     <summary className="icon-button ssh-toolbar-icon" data-testid="ssh-more" aria-label={t('更多')} title={t('更多')}><Ellipsis size={18} aria-hidden="true"/></summary>
+    <Button variant="icon" size="sm" className="icon-button ssh-toolbar-icon" data-testid="ssh-login-refresh" disabled={busy} aria-label={t('刷新')} onClick={()=>{void refresh();void observeOriginalLogin();}}><RefreshCw size={16} aria-hidden="true"/></Button>
+    {onConfigureSsh&&<Button variant="icon" size="sm" className="icon-button ssh-toolbar-icon" data-testid="ssh-edit-connection" data-guide-target="ssh-edit" disabled={busy} aria-label={t('连接设置')} onClick={()=>configure()}><Settings2 size={16} aria-hidden="true"/></Button>}
+    {(ready||canClose||chooseConnection)&&<Disclosure className="ssh-disclosure" ref={moreDetails} onBlur={disclosureBlur} onKeyDown={disclosureKeyDown}
+     summary={<Ellipsis size={18} aria-hidden="true"/>} summaryTooltip={t('更多')}
+     summaryProps={{className:'icon-button ssh-toolbar-icon','data-testid':'ssh-more','aria-label':t('更多')}}>
      <div className="ssh-popover ssh-action-popover">
       {chooseConnection&&<>
        <strong>{t('已打开的终端')}</strong>
@@ -685,7 +688,7 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
       {ready&&hosted&&<button type="button" className="button" data-testid="ssh-workspace-change" disabled={busy} onClick={()=>menuAction(()=>void publishConnection(true))}>{t('更换远端总工作区')}</button>}
       {canClose&&<button type="button" className="button danger" data-testid="ssh-connection-close" disabled={busy} onClick={()=>menuAction(()=>void closeConnection())}>{t('关闭 SSH 连接')}</button>}
      </div>
-    </details>}
+    </Disclosure>}
    </div>
   </div>
   {issues.length>0?<div className="ssh-status-strip ssh-diagnostics" data-testid="ssh-diagnostics">
@@ -696,14 +699,14 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    {ready&&serviceReady&&<span data-testid="ssh-worker-ready" className="ssh-diagnostic-title" role="status">{t(serviceWarning?'作业服务已连接':'作业服务可用')}</span>}
    {workflowIssue&&canUseForWorkflow&&<button type="button" className="button ssh-details-toggle" data-testid="ssh-use-for-workflow" disabled={busy} onClick={useForWorkflow}>{t('用于当前流程')}</button>}
    {canRepairEnvironment&&onServiceEnvironmentHelp&&lessonTarget&&<button type="button" className="button ssh-details-toggle" data-testid="ssh-service-agent-help" data-guide-target="ssh-service-repair" onClick={()=>onServiceEnvironmentHelp(lessonTarget)}>{t('让 Agent 配置')}</button>}
-   <details className="ssh-disclosure" ref={statusDetails} onBlur={disclosureBlur} onKeyDown={disclosureKeyDown}>
-    <summary className="button ssh-details-toggle" data-testid="ssh-diagnostic-toggle">{t('详情')}<ChevronDown size={14} aria-hidden="true"/></summary>
+   <Disclosure className="ssh-disclosure" ref={statusDetails} onBlur={disclosureBlur} onKeyDown={disclosureKeyDown}
+    summary={t('详情')} summaryProps={{className:'button ssh-details-toggle','data-testid':'ssh-diagnostic-toggle'}}>
     <div className="ssh-popover ssh-diagnostic-popover">
      {issues.map(issue=><section key={issue.id} data-testid={issue.id}><strong>{issue.summary}</strong>{issue.content}</section>)}
      {statusMessage&&<p>{statusMessage}</p>}
      {serviceProgress}
     </div>
-   </details>
+   </Disclosure>
   </div>:loginTip||statusMessage||serviceProgress||serviceReady||canPrepareService?<div className="ssh-status-strip" data-guide-target={serviceReady?'ssh-service-progress':undefined}>
    {statusMessage?<span role="status">{statusMessage}</span>:loginTip?<span data-testid="ssh-login-progress" role="status">
     <span>{loginTip}</span>
@@ -718,17 +721,17 @@ export default function SshConnectionPanel({visible,request,provider,resourceSco
    {ready&&selectableShells.length>1&&<div className="ssh-shell-tabs" data-testid="ssh-shell-actions" role="group" aria-label={t('选择终端')}>
     {selectableShells.map(item=><button type="button" key={item.sessionId} className="button" aria-pressed={item.sessionId===shellId} disabled={busy} onClick={()=>{login.current.shellChosen=true;exactShell.current=undefined;setShellId(item.sessionId);}}>{shellLabel(item)}</button>)}
   </div>}
-   {!connection&&!notice&&(!listed||busy)&&<div className="shared-terminal-empty" role="status"><p>{t('正在打开终端…')}</p></div>}
+   {!connection&&!notice&&(!listed||busy)&&<LoadingState className="shared-terminal-empty" label={t('正在打开终端…')}/>}
    {connection&&(connection.status==='authenticating'||sameLogin&&connection.retainedAuthOutput)&&<ChannelTerminal key={'auth:'+selected} connection={connection} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={authInput.current} onConnection={acceptAuthObservation} onShell={()=>{}} onError={report}/>}
   {ready&&(shell?<ChannelTerminal key={'shell:'+shell.sessionId} connection={connection} shell={shell} visible={visible} resourceScope={resourceScope} onGeometry={setGeometry} inputState={shellInput.current} onConnection={accept} onShell={next=>setShells(old=>old.map(item=>item.sessionId===next.sessionId&&item.ownerEpoch===next.ownerEpoch?{...item,...next}:item))} onError={report} onReadError={reportRead} onReadSuccess={confirmRead}/>:
-     <div className="shared-terminal-empty"><p>{t(connection.terminalSessionIds.length>0&&login.current.restoreShell?'正在打开终端…':'SSH 已登录。')}</p>
-      <button type="button" className="button" data-testid="ssh-open-shell" disabled={busy||loginBusy} onClick={()=>void openShell()}>{t('打开终端')}</button></div>)}
-  {ready&&runtime?.status==='different'&&<details className="ssh-runtime-difference" data-testid="ssh-service-version-difference" data-guide-target="ssh-service-version">
-   <summary>{t('作业服务版本不同')}</summary>
+     <EmptyState className="shared-terminal-empty" title="SSH 已登录。"
+      body={connection.terminalSessionIds.length>0&&login.current.restoreShell?<LoadingState label={t('正在打开终端…')}/>:t('选择终端')}
+      action={<Button data-testid="ssh-open-shell" disabled={busy||loginBusy} onClick={()=>void openShell()}>{t('打开终端')}</Button>}/>)}
+  {ready&&runtime?.status==='different'&&<Disclosure className="ssh-runtime-difference" data-testid="ssh-service-version-difference" data-guide-target="ssh-service-version" summary={t('作业服务版本不同')}>
    <p>{t('远端版本')} · <code>{runtime.remoteRuntimeId}</code>{runtime.remoteManifestSha256&&<> · <code>{runtime.remoteManifestSha256}</code></>}</p>
    <p>{t('随包版本')} · <code>{runtime.bundledRuntimeId}</code>{runtime.bundledManifestSha256&&<> · <code>{runtime.bundledManifestSha256}</code></>}</p>
    <button type="button" className="button" data-testid="ssh-managed-service-update" disabled={busy||servicePending||!!serviceReadIssue||!runtime.remoteRuntimeId} onClick={()=>void maintainService(true)}>{t('更新此连接的作业服务')}</button>
-  </details>}
+  </Disclosure>}
    {workspaceReview&&currentWorkspaceReview(workspaceReview)&&<ResourceWorkspaceReview key={workspaceReview.nonce+workspaceReview.target.connectionId} target={workspaceReview.target} resourceName={profileName} initial={workspaceReview.preview} initialError={workspaceReview.initialError} changing={workspaceReview.changing}
    isCurrent={()=>currentWorkspaceReview(workspaceReview)} onClose={()=>{setWorkspaceReview(null);if(!workspaceReview.changing&&lessonTarget)onHandoffLesson?.('ssh-login',lessonTarget);}} onConfirmed={async receipt=>{
     if(!workspaceReview.changing)await publish(()=>currentWorkspaceReview(workspaceReview));

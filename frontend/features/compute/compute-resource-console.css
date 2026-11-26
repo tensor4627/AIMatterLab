@@ -116,7 +116,7 @@
     color: var(--muted);
   }
 
-  .compute-console-detail,.compute-console-empty,.compute-console-standalone {
+  .compute-console-detail,.compute-console-standalone {
     min-width: 0;
     border: 1px solid var(--line);
     border-radius: var(--radius-xs);
@@ -273,10 +273,6 @@
     border-top: 1px solid var(--line);
   }
 
-  .compute-console-project-access summary {
-    cursor: pointer;
-  }
-
   .compute-console-project-access p {
     margin: var(--space-3) 0;
   }
@@ -291,14 +287,6 @@
 
   .compute-console-project-access select {
     max-width: 100%;
-  }
-
-  .compute-console-empty {
-    display: grid;
-    place-items: center;
-    gap: var(--space-3);
-    padding: var(--space-8) var(--space-5);
-    text-align: center;
   }
 
   .compute-console .is-refreshing {

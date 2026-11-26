@@ -1,4 +1,4 @@
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {LoadingState} from '../../ui/States';
 import Notice from '../../ui/Notice';
 import {useEffect,useRef,useState} from 'react';
 import {invoke} from '../../api/studio';
@@ -75,7 +75,7 @@ export default function SshSchedulerSetup({connectionId,attemptId,currentResourc
      {!draft.queue&&!selectedRecord.current?.queue_targets&&<small className="muted">{t('要通过此调度器运行最小测试，请填写队列或分区。')}</small>}
      <label>{t('Modules / 虚拟环境初始化 · Bash')}<textarea value={draft.activation} onChange={event=>patch({activation:event.target.value})}/></label>
     </fieldset>
-    <LoadingFeedback busy={busy||profileLoading} label={t(busy?'正在保存调度器配置…':'正在读取连接配置…')}/>
+    <LoadingState busy={busy||profileLoading} label={t(busy?'正在保存调度器配置…':'正在读取连接配置…')}/>
     {message&&<Notice compact>{message}</Notice>}
     <div className="button-row">
      <button type="button" className="button" disabled={busy||!currentResource} onClick={()=>void refresh()}>{t('刷新')}</button>

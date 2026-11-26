@@ -5,7 +5,7 @@ import Notice from '../../ui/Notice';
 import {useConfirm} from '../../ui/ConfirmDialog';
 import {useEffect,useRef,useState} from 'react';
 import {Play,Sparkles} from 'lucide-react';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {EmptyState,ErrorState,LoadingState} from '../../ui/States';
 import {api} from '../../api/worker';
 import {ObservedRead} from '../../api/observed-read.mjs';
 import type {ClusterRun} from '../../../contracts/dto/runs';
@@ -211,11 +211,13 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
   {onOpenConnections&&<Button  onClick={()=>onOpenConnections({runId:activeId})}>{t('核对原作业连接')}</Button>}
  </Notice>;
  if(!run)return <div className="page">
-  {observed}
-  <LoadingFeedback busy={connected&&!failure&&!connectionAction} label={t('读取任务中…')}/>
-  {connected&&failure&&<Button  disabled={inspecting} onClick={()=>void inspect(false)}>{t('重试')}</Button>}
+  {(!connected||!failure)&&observed}
+  <LoadingState busy={connected&&!failure&&!connectionAction} label={t('读取任务中…')}/>
+  {connected&&failure&&<ErrorState title="读取作业记录失败。" data-testid="cluster-observation-status" data-stale={false} retained={failure.paused?t('自动同步已暂停'):undefined} action={<Button disabled={inspecting} onClick={()=>void inspect(false)}>{t('重试')}</Button>}/>}
   {recovery}
  </div>;
+ const logReadFailed=failedLog===scope;
+ const verifyJobAndLogs=<Button disabled={!connected||inspecting||busy} onClick={()=>void inspect(true)}>{t('核对作业与日志')}</Button>;
  return <div className="page cluster-review" data-testid="cluster-review"><div className="page-heading"><div><span className="eyebrow">{run.cluster.scheduler} · {run.engine}</span><h1>{run.name}</h1><p>{t('审阅运行参数与完整提交脚本。科学检查结果供参考。适用的执行检查须在计算节点通过，作业才会启动引擎。')}</p></div><span className="tag">{run.status}</span></div>
  {observed}
  {recovery}
@@ -223,7 +225,7 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
   {t(run.cancellation.signal_sent===true?'撤销命令已送达，正在等待作业的最终状态。':run.cancellation.status==='requested'?'已记录撤销请求，正在核对原作业。':run.cancellation.signal_sent===false?'原作业身份尚未核实，本次撤销命令未发出。':'撤销命令的送达情况未知，请核对原作业。')}
  </Notice>}
  {readOnly&&<Notice compact   data-testid="run-readonly-observation">{t('运行记录可查看；提交、续算等操作需匹配原服务与权限。')}</Notice>}
- <LoadingFeedback busy={busy} label={operationLabel?.text||''}/>
+ <LoadingState busy={busy} label={operationLabel?.text||''}/>
  <ol className="run-flow">{['输入快照','审阅与资源检查','SSH 上传与提交','执行节点科学验证','计算与结果监控'].map(v=><li key={v}>{t(v)}</li>)}</ol>
  {run.queue_target_snapshot&&<section className="card resolved-queue-target" data-testid="resolved-queue-target"><strong>{run.queue_target_snapshot.queue} · {run.queue_target_snapshot.id}</strong><span>{t(run.queue_target_snapshot.usage_class==='owned'?'自有':run.queue_target_snapshot.usage_class==='paid'?'付费':'未知')} · {run.cluster_id} · v{run.queue_profile_version}</span><small>{t('环境')} · {Object.entries(run.queue_target_snapshot.environment.executables).map(([name,path])=>name+' '+path).join(' · ')}</small></section>}
  <section className="card">
@@ -234,10 +236,11 @@ export default function ClusterRunPage({id,sourceId='',workerGeneration=0,connec
  <section className="card"><h3>{t('将执行的提交脚本')}</h3><pre className="batch-script">{run.script}</pre></section>
  <section className="card">
   <h3>{t('验证与监控')}</h3>
-  <Button  disabled={!connected||inspecting||busy} onClick={()=>void inspect(true)}>{t('核对作业与日志')}</Button>
+  {(!logReadFailed||log)&&verifyJobAndLogs}
   <p>{t('输入验证')} · {run.validation.status} · {run.validation.scope}</p><p>{t('科学验证')} · {run.scientific_validation.status}</p><p>Job ID · {run.job_id||t('未提交')}</p>
-  {failedLog===scope&&<Notice compact  >{t('日志连接暂不可用')}{log&&' · '+t('上次记录')}</Notice>}
-  <pre className="console" onMouseUp={e=>setLogEvidenceRange(evidencePreSelection(e.currentTarget))}>{log||t('暂无运行日志')}</pre>{log&&<EvidenceSelection source={{kind:'log',runId:run.id,target:'cluster'}} text={log} range={logEvidenceRange}/>}
+  {logReadFailed&&log&&<Notice compact severity="warning">{t('日志连接暂不可用')} · {t('上次记录')}</Notice>}
+  {log?<><pre className="console" onMouseUp={e=>setLogEvidenceRange(evidencePreSelection(e.currentTarget))}>{log}</pre><EvidenceSelection source={{kind:'log',runId:run.id,target:'cluster'}} text={log} range={logEvidenceRange}/></>:
+   logReadFailed?<ErrorState title="日志连接暂不可用" action={verifyJobAndLogs}/>:<EmptyState title="暂无运行日志" body="核对作业与日志"/>}
  </section>
  {edit&&<Button variant="primary"  disabled={!canWrite||busy} onClick={revise}>{t('保存修订并预览脚本')}</Button>}
  <ClusterResults key={scope} run={run} connected={connected} workerGeneration={workerGeneration} onError={onError}/>

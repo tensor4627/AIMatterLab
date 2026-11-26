@@ -1,3 +1,7 @@
+import Button from '../../ui/Button';
+import {LoadingState} from '../../ui/States';
+import {useToast} from '../../ui/Toast';
+import Disclosure from '../../ui/Disclosure';
 import {useEffect,useRef,useState} from 'react';
 import {ChevronLeft,RefreshCw} from 'lucide-react';
 import {invoke} from '../../api/studio';
@@ -11,6 +15,7 @@ import Notice from '../../ui/Notice';
 
 /** Explicit maintenance uses the authenticated master; active updates retain its verified original shell. */
 export default function IndependentSshServiceSettings({profile,activeResource,onLogin,onClose,onChanged,onBusyChange,suggestedWorkfileRoot,onSchedulerSaved,connectionBusy=false}:{profile:SshComputeProfile;activeResource?:ComputeResourceState|null;onLogin:(profile:SshComputeProfile)=>void|Promise<void>;onClose:()=>void;onChanged?:()=>void;onBusyChange?:(busy:boolean)=>void;suggestedWorkfileRoot?:string;onSchedulerSaved?:(item:{id:string;name?:string})=>void;connectionBusy?:boolean}){
+ const toast=useToast();
  const [registration,setRegistration]=useState<SshServiceRegistrationState|null>(null),[connections,setConnections]=useState<SshConnectionState[]>([]),[selected,setSelected]=useState(''),[service,setService]=useState<IndependentSshService|null>(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[notice,setNotice]=useState('');
  const alive=useRef(false),flight=useRef(false),serial=useRef(0),selectedRef=useRef(selected),profileRef=useRef(profile),blocked=useRef(connectionBusy);selectedRef.current=selected;profileRef.current=profile;blocked.current=connectionBusy;
  const candidates=connections.filter(value=>value.profileId===profile.id&&value.profileVersion===profile.version),connection=candidates.find(value=>value.connectionId===selected),authenticated=connection?.status==='authenticated'&&connection.authentication==='verified'&&connection.capabilities.multiplex,ownService=service?.connectionId===selected?service:null,ready=ownService?.status==='connected'&&ownService.workflowReady===true;
@@ -27,7 +32,10 @@ export default function IndependentSshServiceSettings({profile,activeResource,on
    let result:IndependentSshService;
    if(mode==='stop'||mode==='check'&&(ready||uncertainOriginal)){const state=await invoke<IndependentSshService>('compute.sshService.status',{connectionId:id});if(!current(ticket,own)||state.connectionId!==id||!state.attemptId||state.attemptId!==ownService?.attemptId||uncertainOriginal&&state.serviceId!==ownService?.serviceId)throw Error('Service changed');result=await invoke(mode==='stop'?'compute.sshService.disconnect':'compute.sshService.check',{connectionId:id,attemptId:state.attemptId});}
    else {await invoke('compute.resource.activate',{kind:'ssh-connection',connectionId:id,profileId:own.id,profileVersion:own.version});if(!current(ticket,own)||blocked.current)return;result=await invoke('compute.sshService.connect',{connectionId:id,profileId:own.id,profileVersion:own.version,requestId:crypto.randomUUID(),mode,...mode==='update'&&ready?{expectedAttemptId:ownService?.attemptId}:{}});}
-   if(!current(ticket,own))return;if(!verifiedSshService(result,id,mode==='stop'?ownService?.attemptId:undefined))throw Error('Service changed');setService(result);setNotice(t(mode==='stop'?result.status==='disconnected'&&result.serviceActive===false?'作业服务已停止，终端仍可使用。':'服务停止尚未确认，请核对原连接；不会自动重试。':result.workflowReady?'作业服务已连接，终端仍可使用。':'作业服务尚未就绪，请核对当前状态。'));
+   if(!current(ticket,own))return;if(!verifiedSshService(result,id,mode==='stop'?ownService?.attemptId:undefined))throw Error('Service changed');setService(result);
+   if(mode==='stop'?result.status==='disconnected'&&result.serviceActive===false:result.workflowReady){
+    toast.show({message:t(mode==='stop'?'作业服务已停止，终端仍可使用。':'作业服务已连接，终端仍可使用。')});
+   }else setNotice(t(mode==='stop'?'服务停止尚未确认，请核对原连接；不会自动重试。':'作业服务尚未就绪，请核对当前状态。'));
    const [saved,next]=await Promise.all([invoke<SshServiceRegistrationState>('compute.sshService.registration',{profileId:own.id,profileVersion:own.version}),invoke<IndependentSshService>('compute.sshService.status',{connectionId:id})]);
    if(!current(ticket,own)||selectedRef.current!==id)return;if(saved.profileId!==own.id||saved.profileVersion!==own.version||!verifiedSshService(next,id))throw Error('Connection changed');setRegistration(saved);setService(old=>old?.connectionId===next.connectionId&&(old?.revision??-1)>(next.revision??-1)?old:next);onChanged?.();
   }catch(error){if(current(ticket,own))setNotice(t(sshConnectionMessage(error)));}finally{flight.current=false;if(alive.current){setBusy(false);onBusyChange?.(false);}}
@@ -36,12 +44,12 @@ export default function IndependentSshServiceSettings({profile,activeResource,on
  const canStart=!!authenticated&&!loading&&!busy&&!connectionBusy&&!['connecting','connected','disconnecting','unknown'].includes(ownService?.status||'');
  const canCheck=!!authenticated&&!busy&&!connectionBusy&&(ready||uncertainOriginal||canStart||canAttach);
  const canUpdate=canStart||!!authenticated&&!loading&&!busy&&!connectionBusy&&ready&&!!ownService?.attemptId;
- return <section className="ssh-service-settings" data-testid="ssh-service-settings"><div className="compute-resource-editor-title"><button className="icon-button" aria-label={t('返回连接列表')} disabled={busy} onClick={onClose}><ChevronLeft size={18}/></button><strong>{profile.name} · {t('作业服务设置')}</strong><button className="icon-button" aria-label={t('刷新作业服务设置')} disabled={busy||loading} onClick={()=>void refresh()}><RefreshCw size={15}/></button></div>
-  <div className="ssh-service-registration">
-   <span>{t('服务登记')}</span><strong data-testid="ssh-service-registration">{t(registration?.status==='configured'?'已登记':registration?.status==='maintenance_required'?'需要维护':registration?'未登记':'正在读取')}</strong>
-  </div>
-  {registration?.registration&&<details data-testid="ssh-service-locations">
-   <summary>{t('已登记的位置')}</summary>
+ return <section className="ssh-service-settings" data-testid="ssh-service-settings"><div className="compute-resource-editor-title"><Button variant="icon" size="sm" className="icon-button" aria-label={t('返回连接列表')} disabled={busy} onClick={onClose}><ChevronLeft size={18} aria-hidden="true"/></Button><strong>{profile.name} · {t('作业服务设置')}</strong><Button variant="icon" size="sm" className="icon-button" aria-label={t('刷新作业服务设置')} disabled={busy||loading} onClick={()=>void refresh()}><RefreshCw size={15} aria-hidden="true"/></Button></div>
+  <LoadingState busy={loading&&!registration} label={t('正在读取')}/>
+  {registration&&<div className="ssh-service-registration">
+   <span>{t('服务登记')}</span><strong data-testid="ssh-service-registration">{t(registration?.status==='configured'?'已登记':registration?.status==='maintenance_required'?'需要维护':'未登记')}</strong>
+  </div>}
+  {registration?.registration&&<Disclosure data-testid="ssh-service-locations" summary={t('已登记的位置')}>
    <dl>
     <dt>{t('作业服务目录')}</dt><dd><code>{registration.registration.root}</code></dd>
     <dt>{t('作业服务管理包')}</dt><dd><code>{registration.registration.runtime}</code></dd>
@@ -60,11 +68,11 @@ export default function IndependentSshServiceSettings({profile,activeResource,on
      <dt>{t('本机项目技能目录')}</dt><dd><code>{registration.localProjectSkillsRoot}</code></dd>
     </>}
    </dl>
-  </details>}
-  <div className="ssh-service-login"><button className="button" data-testid="ssh-service-login" disabled={busy||connectionBusy} onClick={()=>void onLogin(profile)}>{t('打开登录终端')}</button><label>{t('已登录的连接')}<select data-testid="ssh-service-connection" value={selected} disabled={busy||loading} onChange={event=>{serial.current++;setSelected(event.target.value);setService(null);const id=event.target.value;if(id)void invoke<IndependentSshService>('compute.sshService.status',{connectionId:id}).then(value=>{if(alive.current&&selectedRef.current===id)setService(value);}).catch(error=>setNotice(t(sshConnectionMessage(error))));}}><option value="">{t('请选择已登录的连接')}</option>{candidates.map((value,index)=><option key={value.connectionId} value={value.connectionId}>{t('终端')} {index+1} · v{value.profileVersion} · {t(sshStateLabel(value.status))} · {t(sshStateLabel(value.authentication))}</option>)}</select></label></div>
+  </Disclosure>}
+  <div className="ssh-service-login"><button className={authenticated?'button':'button primary'} data-testid="ssh-service-login" disabled={busy||connectionBusy} onClick={()=>void onLogin(profile)}>{t('打开登录终端')}</button><label>{t('已登录的连接')}<select data-testid="ssh-service-connection" value={selected} disabled={busy||loading} onChange={event=>{serial.current++;setSelected(event.target.value);setService(null);const id=event.target.value;if(id)void invoke<IndependentSshService>('compute.sshService.status',{connectionId:id}).then(value=>{if(alive.current&&selectedRef.current===id)setService(value);}).catch(error=>setNotice(t(sshConnectionMessage(error))));}}><option value="">{t('请选择已登录的连接')}</option>{candidates.map((value,index)=><option key={value.connectionId} value={value.connectionId}>{t('终端')} {index+1} · v{value.profileVersion} · {t(sshStateLabel(value.status))} · {t(sshStateLabel(value.authentication))}</option>)}</select></label></div>
   {!authenticated&&<Notice compact>{t('请先在终端完成此连接的登录。普通 SSH 模式仅提供终端操作。')}</Notice>}
   {authenticated&&serviceIdentityUnconfirmed(ownService?.error?.code)&&<Notice compact severity="warning" data-testid="ssh-service-identity-status">{t('SSH 认证有效；作业服务身份尚未核对。')}</Notice>}
-  <div className="button-row ssh-service-actions">{registration?.status==='unconfigured'&&<button className="button primary" data-testid="ssh-service-setup" disabled={!canStart} onClick={()=>void operate('setup')}>{t('首次设置并登记服务')}</button>}{registration?.status==='configured'&&<button className="button primary" data-testid="ssh-service-reuse" disabled={!canStart&&!canAttach} onClick={()=>void operate('reuse')}>{t('连接已登记服务')}</button>}{registration?.registration&&<><button className="button" data-testid="ssh-service-check" disabled={!canCheck} onClick={()=>void operate('check')}>{t('检查作业服务')}</button><button className="button" data-testid="ssh-service-update" disabled={!canUpdate} onClick={()=>void operate('update')}>{t('更新作业服务')}</button></>}{ownService?.attemptId&&<button className="button" data-testid="ssh-service-stop" disabled={busy||connectionBusy} onClick={()=>void operate('stop')}>{t('只停止作业服务')}</button>}</div>
+  <div className="button-row ssh-service-actions">{registration?.status==='unconfigured'&&<button className={authenticated?'button primary':'button'} data-testid="ssh-service-setup" disabled={!canStart} onClick={()=>void operate('setup')}>{t('首次设置并登记服务')}</button>}{registration?.status==='configured'&&<button className={authenticated&&!ready?'button primary':'button'} data-testid="ssh-service-reuse" disabled={!canStart&&!canAttach} onClick={()=>void operate('reuse')}>{t('连接已登记服务')}</button>}{registration?.registration&&<><button className="button" data-testid="ssh-service-check" disabled={!canCheck} onClick={()=>void operate('check')}>{t('检查作业服务')}</button><button className="button" data-testid="ssh-service-update" disabled={!canUpdate} onClick={()=>void operate('update')}>{t('更新作业服务')}</button></>}{ownService?.attemptId&&<button className="button" data-testid="ssh-service-stop" disabled={busy||connectionBusy} onClick={()=>void operate('stop')}>{t('只停止作业服务')}</button>}</div>
   {ownService&&<Notice compact>{t('作业服务')}：{t(sshStateLabel(ownService.status))}{ownService.status==='connected'&&ownService.workflowReady&&<> · {t(ownService.operator==='agent'?'Agent 使用服务':'服务未交给 Agent')}</>}</Notice>}<SshServiceObservation state={ownService}/>{notice&&<Notice compact>{notice}</Notice>}{ready&&<div className="ssh-service-scheduler"><SshSchedulerSetup key={selected+':'+ownService!.attemptId} connectionId={selected} attemptId={ownService!.attemptId!} suggestedWorkfileRoot={suggestedWorkfileRoot} onSaved={onSchedulerSaved} currentResource={activeResource?.kind==='ssh-connection'&&activeResource.connectionId===selected&&activeResource.status==='selected'&&activeResource.capabilities?.service.workflowReady===true}/></div>}
  </section>;
 }

@@ -82,11 +82,6 @@
     padding: var(--space-3) 0;
   }
 
-  .project-authorization .project-setting-group[open] > summary {
-    color: var(--text);
-    font-weight: 650;
-  }
-
   .project-authorization .project-setting-content {
     padding: 0 0 var(--space-4);
   }

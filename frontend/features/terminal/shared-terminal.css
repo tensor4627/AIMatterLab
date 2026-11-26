@@ -47,11 +47,17 @@
     position: relative;
   }
 
-  .shared-terminal-menu summary {
-    cursor: pointer;
-    list-style: none;
-    padding: var(--space-2) var(--space-4);
+  .shared-terminal-menu > summary {
+    align-items: center;
+    justify-content: center;
+    min-inline-size: 28px;
+    min-block-size: 28px;
     font-size: var(--font-heading);
+    line-height: 1;
+  }
+
+  :is(.shared-terminal-menu > summary, .ssh-disclosure > .ssh-toolbar-icon) > .aml-disclosure-arrow {
+    display: none;
   }
 
   .shared-terminal-menu>div {
@@ -99,18 +105,14 @@
   }
 
   .shared-terminal-empty {
-    display: flex;
     flex: 1;
+    align-content: safe center;
+    justify-content: safe center;
     align-items: center;
-    justify-content: center;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-    padding: var(--space-5);
-  }
-
-  .shared-terminal-empty p {
-    margin: 0;
-    color: var(--terminal-muted);
+    overflow: auto;
+    border: 0;
+    border-radius: 0;
+    background: var(--bg);
   }
 
   .shared-terminal-confirm {
@@ -242,10 +244,6 @@
     position: sticky;
     bottom: 0;
     background: var(--bg);
-    color: var(--muted);
-  }
-
-  .shared-terminal-empty p {
     color: var(--muted);
   }
 
@@ -442,17 +440,16 @@
   }
 
   .ssh-disclosure > summary {
-    list-style: none;
-    cursor: pointer;
+    align-items: center;
   }
 
-  .ssh-disclosure > summary::-webkit-details-marker {
-    display: none;
+  .ssh-disclosure > .ssh-toolbar-icon {
+    justify-content: center;
   }
 
-  .ssh-disclosure > summary:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: 1px;
+  .ssh-disclosure > .ssh-details-toggle .aml-disclosure-arrow {
+    order: 1;
+    inset-block-start: 0;
   }
 
   .ssh-disclosure[open] > summary {
@@ -701,7 +698,7 @@
     }
 
     .ssh-toolbar-icon {
-      width: 27px;
+      width: 28px;
     }
   }
 
@@ -713,11 +710,6 @@
     color: var(--muted);
     border-top: 1px solid var(--line);
     overflow-wrap: anywhere;
-  }
-
-  .ssh-runtime-difference summary {
-    cursor: pointer;
-    color: var(--text);
   }
 
   .ssh-runtime-difference p {

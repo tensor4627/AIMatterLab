@@ -29,9 +29,7 @@
     gap: var(--space-3);
   }
 
-  .compute-connection-guide details > summary {
-    cursor: pointer;
-    color: var(--muted);
+  .compute-connection-guide .aml-disclosure > summary {
     padding: var(--space-3) 0;
   }
 

@@ -1,3 +1,5 @@
+import {EmptyState,ErrorState,LoadingState} from '../../ui/States';
+import Disclosure from '../../ui/Disclosure';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {ArrowUpRight,ChevronRight,PlugZap,Plus,RefreshCw,Server,Terminal} from 'lucide-react';
 import type {StudioMethod,StudioRequest,StudioResponse} from '../../../contracts/dto/ipc';
@@ -156,15 +158,15 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
       <div><h1>{t('计算资源')}</h1><Checked at={snapshot?.checkedAt??receipt?.readAt} label={snapshot?.checkedAt==null?'最近读取':undefined}/></div>
       <div className="compute-console-actions">
         <button type="button" className="button" data-testid="compute-console-refresh" disabled={probing} onClick={()=>void load(true)}><RefreshCw size={15} className={probing?'is-refreshing':undefined}/>{t(probing?'正在核对':'刷新状态')}</button>
-        <button type="button" className="button primary" onClick={onConnections}><Plus size={16}/>{t('添加或配置连接')}</button>
+        <button type="button" className={rows.length?'button':'button primary'} onClick={onConnections}><Plus size={16}/>{t('添加或配置连接')}</button>
       </div>
     </header>
-    {error && <Notice severity={stale?'warning':'error'} data-testid="compute-console-read-error" action={<Button variant="ghost" disabled={probing} onClick={()=>void load(true)}>{t('重试')}</Button>}>
-      {t(stale?'暂时无法获取最新状态；保留最近观测。':error)}
-    </Notice>}
+    {error && (stale
+      ? <Notice severity="warning" data-testid="compute-console-read-error" action={<Button variant="ghost" disabled={probing} onClick={()=>void load(true)}>{t('重试')}</Button>}>{t('暂时无法获取最新状态；保留最近观测。')}</Notice>
+      : <ErrorState title={error} data-testid="compute-console-read-error" action={<Button disabled={probing} onClick={()=>void load(true)}>{t('重试')}</Button>}/>)}
     {!stale && snapshot?.observation==='partial' && <Notice severity="warning">{t('部分终端状态暂时无法核对。')}</Notice>}
     {feedback && <Notice>{feedback}</Notice>}
-    {!snapshot && !error && <Notice compact>{t('正在读取计算资源…')}</Notice>}
+    {!snapshot && !error && <LoadingState label={t('正在读取计算资源…')}/>}
     {foreground && <section className="compute-console-standalone compute-console-foreground">
       <LinkCard title="工作台当前 WSL 服务" observation={foreground.service}>
         <span>{foreground.distribution} · :{foreground.port}</span>
@@ -176,7 +178,7 @@ export default function ComputeResourceConsole({projectId,onConnections,onConnec
         })}>{t('断开服务连接')}</button>
       </LinkCard>
     </section>}
-    {snapshot && !rows.length && <div className="compute-console-empty"><Server size={23}/><strong>{t('尚未保存计算连接')}</strong><span>{t('添加 SSH 连接或本地 WSL 作业服务。')}</span></div>}
+    {snapshot && !rows.length && <EmptyState title="尚未保存计算连接" body="添加 SSH 连接或本地 WSL 作业服务。"/>}
     {selected && <div className="compute-console-grid">
       <nav className="compute-console-resources" aria-label={t('计算资源')}>
         {rows.map(row => {
@@ -320,8 +322,7 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,co
         </li>)}</ul>}
     </section>
 
-    {ssh && resource.managedId && active && resource.current && <details className="compute-console-project-access">
-      <summary>{t('项目的 SSH 终端授权')}</summary>
+    {ssh && resource.managedId && active && resource.current && <Disclosure className="compute-console-project-access" variant="section" summary={t('项目的 SSH 终端授权')}>
       <p className="muted">{t('此设置适用于该项目的 SSH 终端。正式作业遵循作业服务的项目策略。')}</p>
       <label>{t('计算项目')} <select value={project?.id??''} onChange={event=>setProjectId(event.target.value)} aria-label={t('计算项目')}>
         <option value="">{t('选择项目')}</option>{snapshot.projects.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}
@@ -330,6 +331,6 @@ function ResourceDetail({resource,snapshot,initialProjectId,running,stale,run,co
         {[true,false].map(allowed=><button type="button" key={String(allowed)} className="button" disabled={running||post===allowed}
           onClick={()=>void run(()=>typed('compute.console.projectAccess',{...ssh,projectId:project.id,allowed}),'项目终端授权已保存')}>{t(allowed?'允许终端':'禁止终端')}</button>)}
       </div>}
-    </details>}
+    </Disclosure>}
   </section>;
 }

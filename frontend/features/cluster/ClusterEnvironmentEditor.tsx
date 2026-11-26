@@ -1,7 +1,8 @@
 import Notice from '../../ui/Notice';
 import Button from '../../ui/Button';
 import Disclosure from '../../ui/Disclosure';
-import {useState} from 'react';
+import Field from '../../ui/Field';
+import {useId,useState} from 'react';
 import {t} from '../../ui/i18n';
 import {editableEnvironmentSection,environmentSections,type ClusterEnvironmentDraft,type EnvironmentRowEdit,type EnvironmentSection} from './cluster-environment-draft';
 
@@ -19,6 +20,7 @@ export default function ClusterEnvironmentEditor({draft,disabled,onRow,onText}:{
  draft:ClusterEnvironmentDraft;disabled:boolean;onRow:(section:EnvironmentSection,edit:EnvironmentRowEdit)=>void;onText:(value:string)=>void;
 }){
  const [advanced,setAdvanced]=useState(!!draft.rawIssue);
+ const rowIssuePrefix=useId();
  return <div className="cluster-environment-editor" data-testid="cluster-environment-editor">
   <h3>{t('科学环境')}</h3>
   {draft.rawIssue&&<Notice compact  >{t('修正高级 JSON 后可继续编辑表单。')}</Notice>}
@@ -31,24 +33,29 @@ export default function ClusterEnvironmentEditor({draft,disabled,onRow,onText}:{
       const issue=draft.rowIssue?.section===section&&draft.rowIssue.id===row.id?draft.rowIssue:null;
       const cell=row.value;
       const nonAbsolute=section!=='variables'&&cell.kind==='text'&&!!(row.name||cell.text)&&(!cell.text.startsWith('/')||/[\n\0]/.test(cell.text));
+      const issueId=`${rowIssuePrefix}-${section}-${row.id}`;
+      const pathIssueId=nonAbsolute&&issue?.field!=='value'?`${issueId}-path`:undefined;
       return <div className="cluster-environment-entry" key={row.id}>
-       <label>{t(labels.name)}<input aria-invalid={issue?.field==='name'||undefined} value={row.name} onChange={event=>onRow(section,{type:'name',id:row.id,text:event.target.value})}/></label>
+       <label>{t(labels.name)}<input aria-invalid={issue?.field==='name'||undefined} aria-describedby={issue?.field==='name'?issueId:undefined} value={row.name} onChange={event=>onRow(section,{type:'name',id:row.id,text:event.target.value})}/></label>
        {cell.kind==='json'?<span className="muted">{t('请在高级 JSON 中编辑此项。')}</span>:<label>{t(labels.value)}<input
         aria-invalid={issue?.field==='value'||nonAbsolute||undefined} inputMode={cell.kind==='integer'?'numeric':undefined}
+        aria-describedby={issue?.field==='value'?issueId:pathIssueId}
         value={cell.text} onChange={event=>onRow(section,{type:'value',id:row.id,text:event.target.value})}/></label>}
        <Button  type="button" onClick={()=>onRow(section,{type:'remove',id:row.id})}>{t('删除条目')}</Button>
-       {(issue||nonAbsolute)&&<small className="cluster-environment-issue" role="status">{t(issue?rowMessages[issue.code]:'远程环境路径应为绝对路径。')}</small>}
+       {issue&&<small className="cluster-environment-issue" id={issueId} role="status">{t(rowMessages[issue.code])}</small>}
+       {pathIssueId&&<small className="cluster-environment-issue" id={pathIssueId} role="status">{t('远程环境路径应为绝对路径。')}</small>}
       </div>;
      })}
      <Button type="button"  onClick={()=>onRow(section,{type:'add'})}>{t(labels.add)}</Button>
     </>}
    </fieldset>;
   })}
-  <Disclosure open={advanced} onToggle={event=>setAdvanced(event.currentTarget.open)} data-testid="cluster-environment-json" summary={<>{t('高级 JSON 配置')}</>}>
-   {draft.rawIssue&&<Notice compact severity="error"  >{t(rawMessages[draft.rawIssue])}</Notice>}
+  <Disclosure variant="section" open={advanced} forceOpen={!!draft.rawIssue} onToggle={event=>setAdvanced(event.currentTarget.open)} data-testid="cluster-environment-json" summary={t('高级 JSON 配置')}>
    {draft.rowIssue&&<Notice compact  >{t('修正表单中的字段后可以编辑 JSON。')}</Notice>}
-   <label>{t('显式科学环境 · JSON')}<textarea rows={8} className="parameter-json" spellCheck={false} value={draft.text}
-    aria-invalid={!!draft.rawIssue} readOnly={disabled||!!draft.rowIssue} onChange={event=>onText(event.target.value)}/></label>
+   <Field label={t('显式科学环境 · JSON')} error={draft.rawIssue&&<span role="alert">{t(rawMessages[draft.rawIssue])}</span>}>
+    {control=><textarea {...control} rows={8} className="parameter-json" spellCheck={false} value={draft.text}
+     readOnly={disabled||!!draft.rowIssue} onChange={event=>onText(event.target.value)}/>}
+   </Field>
   </Disclosure>
  </div>;
 }

@@ -1,6 +1,9 @@
+import {useToast} from '../../ui/Toast';
+import Button from '../../ui/Button';
+import Disclosure from '../../ui/Disclosure';
 import Notice from '../../ui/Notice';
 import Tooltip from '../../ui/Tooltip';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {EmptyState,LoadingState} from '../../ui/States';
 import {useEffect,useRef,useState} from 'react';
 import {Terminal} from '@xterm/xterm';
 import {createHumanInputWriter} from './human-input.mjs';
@@ -52,6 +55,7 @@ export default function SharedTerminalPanel(props:PanelProps){
 }
 export function LegacySharedTerminalPanel({activeResource,visible,request,canShare,onError,resourceScope='',onResourceChange,provider,draftForHandoff,onConversationPrepared}:PanelProps){
  const [busyLabel,setBusyLabel]=useState('');
+ const toast=useToast();
  const [sessions,setSessions]=useState<Session[]>([]),[active,setActive]=useState<Session|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[recovery,setRecovery]=useState<OpenRecovery|null>(null);
  const [service,setService]=useState<SshServiceState|null>(null),serviceRef=useRef(service),[serviceIssue,setServiceIssue]=useState(''),[serviceChecking,setServiceChecking]=useState(false),[serviceNow,setServiceNow]=useState(Date.now());
  const serviceRevision=useRef(0),sessionRefreshingRef=useRef(false),[sessionRefreshing,setSessionRefreshing]=useState(false),serviceRead=useRef<{key:string;promise:Promise<SshServiceState|null>}|null>(null);
@@ -206,8 +210,8 @@ export function LegacySharedTerminalPanel({activeResource,visible,request,canSha
    await list();await refreshService();await refreshResource();
   },current,t('正在交接计算资源…'));
  }
- async function end(){const value=activeRef.current;if(!value)return;await action(async()=>{await invoke('sharedTerminal.close',{sessionId:value.sessionId});if(!mounted.current||activeRef.current?.sessionId!==value.sessionId)return;generation.current++;serviceRef.current=null;setService(null);setServiceIssue('');activeRef.current=null;setActive(null);setSessions(old=>old.filter(item=>item.sessionId!==value.sessionId));setNotice(t('会话已结束'));void list().catch(report);await refreshResource();});}
- function detach(){if(laneReserved(activeRef.current)){setNotice(serviceSwitchNotice());return;}resourceSequence.current++;generation.current++;activeRef.current=null;setActive(null);setNotice(t('视图已分离，会话继续运行'));}
+ async function end(){const value=activeRef.current;if(!value)return;await action(async()=>{await invoke('sharedTerminal.close',{sessionId:value.sessionId});if(!mounted.current||activeRef.current?.sessionId!==value.sessionId)return;generation.current++;serviceRef.current=null;setService(null);setServiceIssue('');activeRef.current=null;setActive(null);setSessions(old=>old.filter(item=>item.sessionId!==value.sessionId));toast.show({message:t('会话已结束')});void list().catch(report);await refreshResource();});}
+ function detach(){if(laneReserved(activeRef.current)){setNotice(serviceSwitchNotice());return;}resourceSequence.current++;generation.current++;activeRef.current=null;setActive(null);setNotice('');toast.show({message:t('视图已分离，会话继续运行')});}
  const visibleRecovery=recovery&&recovery.scope===resourceScope&&recovery.nonce===request?.nonce&&recovery.provider===provider?recovery:null;
  const serviceInProgress=visibleService?.status==='connecting'||visibleService?.status==='disconnecting';
  const transfer=serviceTransfer(visibleService),phaseSeconds=serviceInProgress?serviceDuration(visibleService?.phaseStartedAt,serviceNow):null,totalSeconds=serviceDuration(visibleService?.startedAt,serviceInProgress?serviceNow:visibleService?.updatedAt||serviceNow);
@@ -220,8 +224,8 @@ export function LegacySharedTerminalPanel({activeResource,visible,request,canSha
    {active?.kind==='ssh'&&plainSsh&&<span className="shared-terminal-mode">{t('普通 SSH 终端')}</span>}
    {active&&<><span className={'shared-terminal-owner '+(effectiveOwner==='agent'?'is-agent':'')}>{t(serviceReady?effectiveOwner==='agent'?'Agent 使用作业服务':'作业服务由你操作':effectiveOwner==='human'?'由你操作':'由 Agent 操作')}</span><Tooltip asChild content={t(serviceReady?'交接当前对话的作业服务使用权，终端保持只读。':effectiveOwner==='human'?'确认登录完成后，仅共享交接后的输出。':'立即停止 Agent 读写并由你操作')}><button className="button" data-testid="shared-terminal-handoff" disabled={busy||sessionRefreshing||serviceReserved&&!serviceReady||active.alive!==true||active.expired||(effectiveOwner==='human'&&!canShare)} onClick={()=>void ownership()}>{t(effectiveOwner==='human'?active.kind==='ssh'&&!serviceReady?'登录完成，交给 Agent':'交给 Agent':'我来操作')}</button></Tooltip></>}
    {active&&<Tooltip asChild content={t('关闭当前终端，保留已保存连接和其他会话')}><button className="button shared-terminal-disconnect" data-testid="shared-terminal-disconnect" disabled={busy} onClick={()=>void end()}>{t(active.kind==='ssh'?serviceFailure&&serviceReserved?'结束此 SSH 会话':'断开连接':'关闭终端')}</button></Tooltip>}
-   <details className="shared-terminal-menu" ref={menu}>
-    <summary aria-label={t('会话操作')}>⋯</summary>
+   <Disclosure className="shared-terminal-menu" ref={menu} summary={<span aria-hidden="true">⋯</span>}
+    summaryTooltip={t('会话操作')} summaryProps={{'aria-label':t('会话操作')}}>
     <div>
      <div className="shared-terminal-menu-actions" onClick={()=>{if(menu.current)menu.current.open=false;}}>
       <button className="button" disabled={busy||serviceReserved} onClick={()=>void open({kind:'local',mode:'interactive'})}>{t('打开本地交互终端')}</button>
@@ -230,10 +234,10 @@ export function LegacySharedTerminalPanel({activeResource,visible,request,canSha
      </div>
      {active?.kind==='ssh'&&<p className="shared-terminal-scope" data-testid="ssh-resource-scope">{t(plainSsh?'普通 SSH 模式仅提供终端操作。需要作业服务时，请在连接设置中使用受支持的登录方式；不会自动另开连接。':'作业服务设置、检查和更新位于连接计算资源。交接只作用于当前对话。')}</p>}
     </div>
-   </details>
+   </Disclosure>
   </div>
-  <LoadingFeedback busy={busy} label={busyLabel}/>
-  <LoadingFeedback busy={serviceInProgress} label={t('正在接入作业服务…')} phase={t(servicePhaseMessage(visibleService?.phase))} startedAt={visibleService?.startedAt}/>
+  <LoadingState busy={busy} label={busyLabel}/>
+  <LoadingState busy={serviceInProgress} label={t('正在接入作业服务…')} phase={t(servicePhaseMessage(visibleService?.phase))} startedAt={visibleService?.startedAt}/>
   {visibleRecovery&&<Notice severity="error" className="shared-terminal-confirm" data-testid="shared-terminal-recovery" action={<><button className="button" data-testid="shared-terminal-recovery-refresh" disabled={busy} onClick={()=>void refreshSessions()}>{t('刷新会话列表')}</button><button className="button" data-testid="shared-terminal-recovery-new" disabled={busy||!visible} onClick={()=>void newConnection()}>{t(visibleRecovery.target.kind==='ssh'?'保留原会话，另开新连接':'保留原会话，另开新终端')}</button></>}>{visibleRecovery.message}</Notice>}
   {active?.kind==='ssh'&&(visibleService?.phase||serviceFailure||serviceReserved)&&<div className="ssh-service-status" data-testid="ssh-service-status">
    <div className="ssh-service-status-heading"><strong role="status" data-testid="ssh-service-phase">{t(servicePhaseMessage(visibleService?.phase))}</strong><button className="button" data-testid="ssh-service-refresh" disabled={serviceChecking} onClick={()=>void checkService()}>{t(serviceChecking?'正在核对…':'重新核对状态')}</button></div>
@@ -246,6 +250,6 @@ export function LegacySharedTerminalPanel({activeResource,visible,request,canSha
   {serviceReserved&&<Notice className="shared-terminal-notice" compact data-testid="ssh-service-reserved">{t(serviceReady?'作业服务使用此通道。Agent 可通过服务工具操作，终端保持只读。':'正在核对作业服务通道，终端暂时只读。')}</Notice>}
   {notice&&<Notice className="shared-terminal-notice" compact>{notice}</Notice>}
   {active?.alive===false&&<Notice className="shared-terminal-notice" compact severity="warning">{t(active.kind==='ssh'?'SSH 进程已退出，此会话不可输入。':'终端进程已退出，此会话不可输入。')}{typeof active.exitCode==='number'?' '+t('退出码')+' '+active.exitCode:''}</Notice>}
-  {active?<><div className="shared-terminal-host" data-guide-target={active.kind==='ssh'?'ssh-terminal':undefined} ref={host} tabIndex={-1} role="region" aria-label={t('交互终端')} onPointerDown={()=>{const current=activeRef.current;if(!busyRef.current&&!laneReserved(current)&&current?.owner==='human'&&current.alive===true&&!current.expired)terminal.current?.focus();}}/><div className="shared-terminal-caption"><span>{t(active.kind==='local'?'本地会话':active.mode==='key'?'密钥自动登录':'交互式登录')} · {active.sessionId.slice(0,8)}</span><span>{active.expired?t('访问已过期，请结束此会话后重新打开。'):active.alive===true?t('终端进程运行中'):active.alive===null?t('状态未知'):t('终端进程已结束')}{typeof active.exitCode==='number'?' · '+active.exitCode:''}</span></div></>:<div className="shared-terminal-empty"><p>{t('附加已有会话，或打开本地交互终端。')}</p><button className="button" data-testid="open-local-shared-terminal" disabled={busy||serviceReserved} onClick={()=>void open({kind:'local',mode:'interactive'})}>{t('打开本地交互终端')}</button></div>}
+  {active?<><div className="shared-terminal-host" data-guide-target={active.kind==='ssh'?'ssh-terminal':undefined} ref={host} tabIndex={-1} role="region" aria-label={t('交互终端')} onPointerDown={()=>{const current=activeRef.current;if(!busyRef.current&&!laneReserved(current)&&current?.owner==='human'&&current.alive===true&&!current.expired)terminal.current?.focus();}}/><div className="shared-terminal-caption"><span>{t(active.kind==='local'?'本地会话':active.mode==='key'?'密钥自动登录':'交互式登录')} · {active.sessionId.slice(0,8)}</span><span>{active.expired?t('访问已过期，请结束此会话后重新打开。'):active.alive===true?t('终端进程运行中'):active.alive===null?t('状态未知'):t('终端进程已结束')}{typeof active.exitCode==='number'?' · '+active.exitCode:''}</span></div></>:<EmptyState className="shared-terminal-empty" title="共享终端会话" body="附加已有会话，或打开本地交互终端。" action={<Button data-testid="open-local-shared-terminal" disabled={busy||serviceReserved} onClick={()=>void open({kind:'local',mode:'interactive'})}>{t('打开本地交互终端')}</Button>}/>}
  </section>;
 }

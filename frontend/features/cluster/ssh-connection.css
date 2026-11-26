@@ -51,9 +51,7 @@
     display: none;
   }
 
-  .ssh-connection-guide details > summary {
-    cursor: pointer;
-    color: var(--muted);
+  .ssh-connection-guide .aml-disclosure > summary {
     padding: var(--space-3) 0;
   }
 
