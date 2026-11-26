@@ -85,7 +85,7 @@ test('Packaged physical layout resolves logical generated parent to exact regist
  }finally{f.cleanup();}
 });
 
-test('The reviewed compact compute guide preserves prior overlays without accepting unknown parent revisions',async()=>{
+test('The reviewed resource-picker guide preserves prior overlays without accepting unknown parent revisions',async()=>{
  const f=fixture();try{
   const privateRoot=overlay(f),entry=path.join(privateRoot,'SKILL.md'),selection=localSkills([privateRoot])[0];
   const provenance=path.join(privateRoot,'provenance.json'),parent=path.join(f.bundle,'studio-compute-workflow','SKILL.md');
@@ -95,6 +95,11 @@ test('The reviewed compact compute guide preserves prior overlays without accept
   assert.equal(result.attachments.length,4);
   assert(result.document_ids.includes('studio-compute-workflow/references/connection-recovery.md'));
   assert.equal(JSON.parse(fs.readFileSync(provenance,'utf8')).portable_skill_sha256,previousParent);
+  const compactParent='83373c3322ef4dcd35456e4112e6a5ac42a0beb92d4950f98be7574c160b498c';
+  mutateJson(provenance,value=>{value.portable_skill_sha256=compactParent;});
+  const compactProvenance=fs.readFileSync(provenance);
+  assert.equal((await selectedSkillContext(args(f,selection,{privateRoot}))).attachments.length,4);
+  assert.deepEqual(fs.readFileSync(provenance),compactProvenance);
   mutateJson(provenance,value=>{value.portable_skill_sha256='a'.repeat(64);});
   await assert.rejects(selectedSkillContext(args(f,selection,{privateRoot})),error=>error.code==='invalid_or_stale_provenance');
   const oldWindowsDigest='d5ab63b2c2a514ffaaa60191d12ffd064f6a8f00610bfa8ec802d06322021550';
@@ -107,7 +112,7 @@ test('The reviewed compact compute guide preserves prior overlays without accept
  }finally{f.cleanup();}
 });
 
-test('A v0.2.5 overlay loads with the v0.2.7 parent and preserves its provenance bytes',async()=>{
+test('A v0.2.5 overlay loads with the reviewed current parent and preserves its provenance bytes',async()=>{
  const f=fixture();try{
   const privateRoot=overlay(f),selection=localSkills([privateRoot])[0];
   const provenance=path.join(privateRoot,'provenance.json'),parent=path.join(f.bundle,'studio-compute-workflow','SKILL.md');

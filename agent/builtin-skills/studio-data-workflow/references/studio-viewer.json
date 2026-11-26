@@ -23,11 +23,13 @@
     "zh-CN": [
       "当前为Three.js预览，尚未接入OVITO；不能把OVITO教程功能标为已支持。",
       "在运行详情的「结果」选择 .xyz 或 .traj 产物，填写从 0 开始的帧号并点击「结构预览」。Worker 使用该项目与环境中的 ASE 读取指定帧，每帧最多显示 20,000 个原子。",
+      "产物列表读取失败时保留可用的上次列表。点击「重新读取产物列表」再次读取，已读且为空的结果目录单独显示。",
       "原子按所选帧的顺序和元素颜色显示，图例给出各元素计数，底栏显示总数。悬停或聚焦总数可查看旋转、缩放手势。切换同一产物的帧时保留视角，切换明暗主题时晶胞线随之换色。「重置视角」可重新居中。"
     ],
     "en": [
       "The Three.js preview shows atoms in frame order, a count for each element and a total atom count. A finite 3×3 cell is drawn with theme-aware edges. Changing the frame of the same artifact or switching theme preserves the camera. Hover or focus the total for orbit and zoom instructions. Use Reset view to recenter.",
       "In the run details Results tab, select a .xyz or .traj artifact, enter a zero-based frame number and choose Structure preview. The request uses that run’s project and environment. Its ASE reader loads the selected frame and accepts up to 20,000 atoms.",
+      "If reading the artifact list fails, the last available list stays visible. Use Reload artifact list to try again. An observed empty result directory has its own state.",
       "No whole-trajectory animation, streaming index, OVITO pipeline or automatic scientific analysis is inferred from a visual preview.",
       "OVITO official import and pipeline manuals are design references for a future integration; AIMatterLab does not ship those API capabilities."
     ]
@@ -41,8 +43,8 @@
   "source_receipt": {
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
-    "observed_at": "2026-10-22T11:27:22.264583+00:00",
-    "rule_input_sha256": "7d3b4c7464773eff0b1e71ad305ed4689d9cc0f4c3bde6464e5773e44474192c",
+    "observed_at": "2026-11-26T14:48:05.775Z",
+    "rule_input_sha256": "1efd7c61a2362b8219f1c158032ba2bd7dc40ec49c63eade78f5cdf959a9dabb",
     "local_files": [
       {
         "source_id": "studio",
@@ -75,26 +77,22 @@
       {
         "source_id": "studio",
         "path": "frontend/features/runs/RunDetail.tsx",
-        "sha256": "9b94a4d903cd07edf8faa8c9ea3bcb7098a6282ccb7b784f5501532147c87109",
-        "bytes": 29959,
-        "observed_commit": "58d928e38f0e6d3db9fba3f77f83c987dac31ea2",
+        "sha256": "879554a147ba6b9575a5cf4955472e5497c6e61933b55190855b540ae9bf26e3",
+        "bytes": 32389,
+        "observed_commit": "68559d2de2d329700fde671c91cb2484bb2cb60c",
         "role": "available_result_files_and_frame_selection",
         "line_ranges": [
           [
-            125,
-            137
+            150,
+            167
           ],
           [
-            210,
-            211
-          ],
-          [
-            223,
-            226
+            246,
+            269
           ]
         ],
-        "read_scope": "Reviewed the Results tab, file suffix filter, frame input, bound inspection request and view identity.",
-        "observed_on": "2026-11-24"
+        "read_scope": "Reviewed bound artifact reads, retained lists on failure, actual empty directories, retry, frame selection and the project-scoped structure inspection request.",
+        "observed_on": "2026-11-26"
       },
       {
         "source_id": "studio-worker",

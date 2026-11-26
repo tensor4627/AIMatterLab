@@ -14,16 +14,19 @@ const GENERATED_PARENT='../../../agent/builtin-skills/studio-compute-workflow/SK
 const LEGACY_GENERATED_PARENT='../../../agents/skills/studio-compute-workflow/SKILL.md';
 // Exact pre-migration Windows CRLF bytes -> identical LF guide. Other revisions remain stale.
 const PARENT_NEWLINES={from:'d5ab63b2c2a514ffaaa60191d12ffd064f6a8f00610bfa8ec802d06322021550',to:'92feaf0c35fcbddd2599bbe449a999b07ff11eabb26ddb01fa94475bb9c4e1a5'};
-// Exact reviewed migration to the compact entry. Its operational details are
-// still available in the bundled guide references. Later revisions must opt in.
-const COMPACT_PARENT={
- from:[
-  '871c06a6fabcb7f424fff7b9eff01672bb3e3b3e000aaeb441099cf5c35fb122', // v0.2.0–v0.2.5
-  '7803cde8eab91146c9c4f9970a2bc97cc52c27200e0ecc6e2934d63cb39b8bf1', // v0.2.6
-  PARENT_NEWLINES.to,
- ],
- to:'83373c3322ef4dcd35456e4112e6a5ac42a0beb92d4950f98be7574c160b498c',
-};
+// Exact reviewed revisions of the same public compute guide. The picker
+// revision keeps the overlay's scope and private profile validation intact.
+const COMPACT_PARENT='83373c3322ef4dcd35456e4112e6a5ac42a0beb92d4950f98be7574c160b498c';
+const PICKER_PARENT='86961ea43ad58d7cbc59b6f3b2fdeb445e66a990d279af6458b2a490002ce249';
+const EARLIER_PARENTS=[
+ '871c06a6fabcb7f424fff7b9eff01672bb3e3b3e000aaeb441099cf5c35fb122', // v0.2.0–v0.2.5
+ '7803cde8eab91146c9c4f9970a2bc97cc52c27200e0ecc6e2934d63cb39b8bf1', // v0.2.6
+ PARENT_NEWLINES.to,
+];
+const REVIEWED_PARENT_UPGRADES=new Map([
+ [COMPACT_PARENT,EARLIER_PARENTS],
+ [PICKER_PARENT,[...EARLIER_PARENTS,COMPACT_PARENT]],
+]);
 const PROVENANCE_SCOPE='private guidance only; no environment probe, registration, submission or execution performed';
 const DEFAULT_LIMITS={maxFiles:12,maxFileBytes:256*1024,maxTotalBytes:512*1024};
 class SkillContextError extends Error{constructor(code){super('Selected skill context is incomplete ('+code+')');this.code=code;}}
@@ -47,8 +50,8 @@ function checkProvenance(value,publicHash,legacyParent=false){
  const allowed=['schema_version','portable_skill_sha256','created_at','validation_status','scope'];
  const digest=value?.portable_skill_sha256;
  const legacyNewlines=legacyParent&&digest===PARENT_NEWLINES.from;
- const compactUpgrade=publicHash===COMPACT_PARENT.to&&COMPACT_PARENT.from.includes(digest);
- const matching=digest===publicHash||compactUpgrade||legacyNewlines&&[PARENT_NEWLINES.to,COMPACT_PARENT.to].includes(publicHash);
+ const reviewedUpgrade=REVIEWED_PARENT_UPGRADES.get(publicHash)?.includes(digest);
+ const matching=digest===publicHash||reviewedUpgrade||legacyNewlines&&[PARENT_NEWLINES.to,COMPACT_PARENT,PICKER_PARENT].includes(publicHash);
  if(!plain(value)||Object.keys(value).length!==allowed.length||Object.keys(value).some(k=>!allowed.includes(k))||value.schema_version!==1||value.validation_status!=='not_run'||value.scope!==PROVENANCE_SCOPE||typeof value.created_at!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.created_at)||!Number.isFinite(Date.parse(value.created_at))||!matching)fail('invalid_or_stale_provenance');
  return value;
 }
