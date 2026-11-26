@@ -51,6 +51,7 @@ async function fixture(){
    if(method==='task.edit'&&test.deferEdit)return new Promise(resolve=>test.finishEdit=()=>resolve({...test.task,parameters:{...test.task.parameters,...data.changes}}));
    if(method==='task.create'){if(!test.task||data.newWorkflow)test.task={id:'task-'+test.calls.length,provider:data.provider,threadId:data.threadId,parameters:{},artifacts:[],updatedAt:1};test.conversation.taskId=test.task.id;return test.task;}
    if(method==='task.pygas.read')return {taskId:data.taskId,composition:null,graph:null,assets:[],catalog:{schema_version:1,status:'passed',source:{files:{}},catalog:{cv:[],bias:[],switch:[],neighbor:[]}}};
+    if(method==='task.pygas.importAsset'&&test.pickedFile)return {taskId:data.taskId,cancelled:false,asset:{path:test.pickedFile}};
    if(method==='task.read')return test.task;
    if(method==='task.edit'){const current=structuredClone(test.task||{id:data.id,parameters:{},updatedAt:1});for(const [key,value] of Object.entries(data.changes)){const parts=key.split('.');let node=current.parameters;for(const part of parts.slice(0,-1))node=node[part]||(node[part]={});node[parts.at(-1)]=value;}current.updatedAt++;test.task=current;return current;}
    if(method==='task.execute')return {...test.run,status:'queued'};
@@ -106,6 +107,29 @@ async function openToolsThroughSkills(page){
 }
 async function noWrites(page){assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='task.execute'||call.method==='agent.rpc'&&call.data.method==='turn/start'||call.method==='worker.request'&&call.data.method!=='GET'&&!['/api/run/status','/api/cluster/status','/api/run/log','/api/cluster/log'].includes(call.data.target)).length),0);}
 try{
+  await check('workflow-file-receipt-and-manual-parameter-display-in-their-fields',async page=>{
+   await page.evaluate(async()=>{
+    const test=window.__test;
+    test.pickedFile='/fixture/inputs/import-checked/model-new.xyz';
+    test.task={id:'flow',provider:'codex',threadId:'thread',name:'Prepared input sources',workflowVersion:2,parameterRevision:1,updatedAt:1,
+     authoring:{inputRoot:'/fixture/inputs',projectId:'project'},artifacts:[],parameters:{engine:'gpumd.md',files:['/fixture/inputs/nep.txt','/fixture/inputs/run.in'],potential_file:'/fixture/inputs/nep.txt',control_file:'/fixture/inputs/run.in',structure_file:null,temperature:null},
+     missingFields:['structure_file','temperature'],steps:[{id:'md',title:'Fixture MD settings',fields:[{key:'potential_file',label:'Potential',type:'file',required:true},{key:'control_file',label:'Control',type:'file',required:true},{key:'structure_file',label:'Structure',type:'file',required:true},{key:'temperature',label:'Temperature',type:'number',unit:'K',required:true}]}]};
+    await window.renderTest('AgentTaskPage',{task:test.task,worker:true,environments:[],theme:'dark',importAsset:args=>window.studio.invoke('task.pygas.importAsset',args),onError:e=>{throw e;},onRefresh:async()=>{},onAgent:()=>{},onReview:()=>{},onRun:()=>{},onCluster:()=>{},onSetup:()=>{},onReplace:()=>{}});
+   });
+   await page.locator('.visual-step-heading').filter({hasText:'Fixture MD settings'}).click();
+   assert.equal(await page.locator('[data-field="potential_file"] strong').textContent(),'nep.txt');
+   assert.equal(await page.locator('[data-field="control_file"] strong').textContent(),'run.in');
+   await page.locator('[data-field="structure_file"] button').filter({hasText:'选择文件'}).click();
+   await page.locator('[data-field="structure_file"] strong').waitFor();
+   assert.equal(await page.locator('[data-field="structure_file"] strong').textContent(),'model-new.xyz');
+   await page.locator('[data-field="temperature"] input').fill('310');
+   await page.waitForFunction(()=>window.__test.task.parameters.temperature===310);
+   assert.equal(await page.locator('[data-field="temperature"] input').inputValue(),'310');
+   const calls=await page.evaluate(()=>window.__test.calls);
+   assert(calls.some(call=>call.method==='task.pygas.importAsset'&&call.data.taskId==='flow'));
+   assert(calls.some(call=>call.method==='task.edit'&&call.data.changes.structure_file==='/fixture/inputs/import-checked/model-new.xyz'));
+   assert(!calls.some(call=>call.method==='file.choose'||call.method==='task.execute'));
+  });
  await check('startup-deferred-first-records-never-display-live-zero',async page=>{
   await seeded(page);await page.evaluate(()=>{window.__pendingLocal=[];window.__pendingCluster=[];window.__test.responses={'/api/runs':()=>new Promise(resolve=>window.__pendingLocal.push(resolve)),'/api/cluster-runs':()=>new Promise(resolve=>window.__pendingCluster.push(resolve))};});
   await connect(page);await page.waitForFunction(()=>window.__pendingLocal.length>0&&window.__pendingCluster.length>0);await page.waitForTimeout(60);

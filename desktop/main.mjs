@@ -42,6 +42,7 @@ import {createWindowsSaveAs} from "./platform/windows-save-as.mjs";
 import {createStructureWithAuthoringContext} from "../backend/main/workspace/structure-authoring.mjs";
 import {environmentApiTool,createEnvironmentApiReader} from "../backend/main/compute/environment-api-read.mjs";
 import {copyProjectInputsTool,copyProjectInputs} from '../backend/main/workspace/copy-project-inputs.mjs';
+import {createWorkflowInputSources,workflowInputSourceTools} from '../backend/main/workspace/workflow-input-sources.mjs';
 import {createSshConnection,installSshPrivacyLifecycle,requiresCurrentSshWorker,requireCurrentSshWorker,sshTaskSource,assertSshSource} from "../backend/main/compute/ssh-connection.mjs";
 import {createWorkbenchImageExporter} from "./platform/workbench-image.mjs";
 import {registerWorkspaceTaskRoutes} from '../backend/main/workspace/routes.mjs';
@@ -303,9 +304,11 @@ scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compa
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(root,'agent','tools','custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
-worker.setScopedTools([...softwareDocDefinitions,...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool,copyProjectInputsTool,baseWorkspaceTool],async(name,args,scope)=>{
+const workflowInputSources=createWorkflowInputSources({worker,current:scope=>workflowContext.assertScope(scope),userRequest:scope=>taskRecords.currentInputRequest(scope),protectedRoots:[app.getPath('userData')]});
+worker.setScopedTools([...softwareDocDefinitions,...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool,copyProjectInputsTool,...workflowInputSourceTools,baseWorkspaceTool],async(name,args,scope)=>{
  if(name==='setup_base_workspace')return baseWorkspace.call(args,scope);
  if(name==='copy_project_inputs')return copyProjectInputs({worker,current:value=>workflowContext.assertScope(value)},args,scope);
+ if(workflowInputSourceTools.some(tool=>tool.name===name))return workflowInputSources(name,args,scope);
  if(name==='inspect_environment_api')return readEnvironmentApi(args,scope);
  if(['read_pygas_workflow','propose_custom_cv','read_custom_cv'].includes(name))workflowContext.assertScope(scope);
  if(name==='read_pygas_workflow'){const result=await readCurrentPair({records:taskRecords,worker,activeTasks:activeAuthoringTasks,readTaskPygas,privateAccess:(task,provider)=>privateAccess.assertTask(task,provider)},args,scope);workflowContext.assertScope(scope);return result;}

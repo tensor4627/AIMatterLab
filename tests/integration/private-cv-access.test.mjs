@@ -7,6 +7,7 @@ import http from 'node:http';
 import {WorkerClient} from "../../agent/tools/worker-client.mjs";
 import {environmentApiTool} from "../../backend/main/compute/environment-api-read.mjs";
 import {softwareDocDefinitions} from '../../backend/main/tools/public-software-docs.mjs';
+import {workflowInputSourceTools} from '../../backend/main/workspace/workflow-input-sources.mjs';
 import {createTaskCustomCv} from "../../backend/main/workspace/task-custom-cv.mjs";
 import {DEFINITION_ONLY_TOOLS,SHARED_TERMINAL_TOOL_NAMES} from "../../agent/tools/definition-scope.mjs";
 import {SCIENTIFIC_TOOL_ACCESS,createPrivateCvAccess,composeToolGuards} from "../../agent/tools/private-cv-access.mjs";
@@ -39,8 +40,9 @@ test('all actual worker routes and desktop tools are classified as scientific or
  }
  const softwareDocs=softwareDocDefinitions.map(tool=>tool.name);
  const actual=[...new Set([...worker,...locals,...softwareDocs,...createComputeResourceInspection({}).tools().map(tool=>tool.name),
-  environmentApiTool.name])].sort();
+   environmentApiTool.name,...workflowInputSourceTools.map(tool=>tool.name)])].sort();
  assert.deepEqual([...Object.keys(SCIENTIFIC_TOOL_ACCESS),...SHARED_TERMINAL_TOOL_NAMES].sort(),actual);
+ for(const {name} of workflowInputSourceTools){assert.equal(SCIENTIFIC_TOOL_ACCESS[name],'project');assert.equal(DEFINITION_ONLY_TOOLS.includes(name),false);}
  for(const name of softwareDocs){
   assert.equal(SCIENTIFIC_TOOL_ACCESS[name],'public');
   assert.equal(DEFINITION_ONLY_TOOLS.includes(name),false);

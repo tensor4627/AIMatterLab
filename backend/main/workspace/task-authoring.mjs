@@ -11,7 +11,7 @@ export function explicitStructures(text=''){
  return result.slice(0,16);
 }
 // Only paths explicitly present in the human request; no directory grants or inferred filenames.
-export function explicitScientificInputs(text=''){
+export function explicitScientificInputs(text='',mapPath=linuxPath){
  const found=[];
  const quoted=/["`']((?:[A-Za-z]:[\\/](?![\\/])|\/(?!\/))[^"`'\r\n]+\.(?:extxyz|xyz|cif|pdb|vasp|txt|pt|pt2|pth|ckpt|yaml|yml|json|in|py|toml|dat|out))["`']/gi;
  const bare=/(?<![\w:/])(?:[A-Za-z]:[\\/](?![\\/])|\/(?:mnt|home|tmp|data)\/)[^\s"`'<>]+\.(?:extxyz|xyz|cif|pdb|vasp|txt|pt|pt2|pth|ckpt|yaml|yml|json|in|py|toml|dat|out)\b/gi;
@@ -20,7 +20,7 @@ export function explicitScientificInputs(text=''){
  for(const regex of [quoted,bare,poscarQuoted,poscarBare])for(const match of text.matchAll(regex)){
   const previous=text.slice(Math.max(0,match.index-100),match.index).split(/[\n。；;，,]/).at(-1)||'';
   if(/(?:不要|别|禁止|勿|不(?:要)?(?:读取|导入|访问|使用)|do\s+not|don['’]t|never|without\s+(?:reading|importing|accessing))/i.test(previous))continue;
-  try{const value=linuxPath(match[1]||match[0]);if(/\.out$/i.test(value)&&(value.split('/').some(part=>part.toLowerCase()==='skills')||/^\.[A-Za-z0-9_-]/.test(text.slice(match.index+match[0].length))))continue;if(!found.includes(value))found.push(value);}catch{}
+  try{const value=mapPath(match[1]||match[0]);if(/\.out$/i.test(value)&&(value.split(/[\\/]/).some(part=>part.toLowerCase()==='skills')||/^\.[A-Za-z0-9_-]/.test(text.slice(match.index+match[0].length))))continue;if(!found.includes(value))found.push(value);}catch{}
  }
  return found.slice(0,32);
 }
@@ -57,10 +57,12 @@ async function ensureTaskAuthoringValue(records,worker,{provider,threadId,taskId
  const connection=worker.connection,epoch=worker.connectionEpoch,identity=actualAuthoringWorker(worker),scope=value=>[value?.projectId,value?.environmentId,value?.inputRoot,value?.workerBinding];let expectedAuthoring=scope(task.authoring);
  const guard=()=>{assertCurrent();const latest=records.read(task.id);if(worker.connection!==connection||worker.connectionEpoch!==epoch||!equal(identity,actualAuthoringWorker(worker))||latest.provider!==provider||latest.threadId!==threadId||records.deleted(provider,threadId)||records.bound(provider,threadId)?.id!==task.id||latest.workspace?.id!==task.workspace?.id||latest.workspaceChoice!==task.workspaceChoice||!equal(scope(latest.authoring),expectedAuthoring))throw Error('流程来源或连接已变化，请核对原流程；本次结果未关联到新上下文。');assertTaskWorker(latest,worker);if(latest.authoring?.workerBinding&&!sameWorkerBinding(latest.authoring.workerBinding,worker))throw Error('请恢复此流程原始编写服务，不能替换来源。');};
  const request=async(...args)=>{guard();const value=await worker.request(...args);guard();return value;};guard();
- const selections=selectedInputs(task);
- if(worker.identity?.kind==='ssh'&&(selections.some(value=>/^[A-Za-z]:[\\/]/.test(value.source))||allowExplicitInputs&&/(?:^|[\s"'`])[A-Za-z]:[\\/][^\r\n"'`]*(?:\.(?:xyz|extxyz|cif|pdb|vasp|pt|pt2|pth|ckpt|txt|yaml|yml|json|in|py|toml|dat|out)\b|[\\/]POSCAR\b)/i.test(text)))throw Error('当前为远端 SSH 作业服务，请选择该服务器上的输入路径；Windows 文件不能当作远端 /mnt 路径读取。');
- const approved=[...new Set([...(task.authoring?.pendingInputs||[]),...selections.map(value=>value.path),...(allowExplicitInputs?explicitScientificInputs(text):[])])],pending=task.workspaceChoice==='pending';
- const context=await request('POST','/api/authoring/context',{workspace_id:task.id,project_id:task.authoring?.projectId||task.projectId||records.conversation(provider,threadId)?.projectId,name:task.name,structure_paths:!pending&&!task.workspace&&allowExplicitInputs?explicitStructures(text).filter(path=>explicitScientificInputs(text).includes(path)):[],selected_paths:!pending&&!task.workspace?approved:[]});
+ const selections=selectedInputs(task),mentioned=allowExplicitInputs?explicitScientificInputs(text,value=>value):[];
+ const desktopInputs=worker.identity?.kind==='ssh'?[...new Set([...mentioned,...selections.map(value=>value.source)].filter(value=>/^[A-Za-z]:[\\/]/.test(value)))]:[];
+ const desktopMounts=new Set(desktopInputs.map(linuxPath));
+ const approved=[...new Set([...(task.authoring?.pendingInputs||[]),...selections.map(value=>value.path),...mentioned.map(linuxPath)])].filter(value=>!desktopMounts.has(value)),pending=task.workspaceChoice==='pending';
+ const context=await request('POST','/api/authoring/context',{workspace_id:task.id,project_id:task.authoring?.projectId||task.projectId||records.conversation(provider,threadId)?.projectId,name:task.name,structure_paths:!pending&&!task.workspace&&allowExplicitInputs?explicitStructures(text).filter(path=>approved.includes(path)):[],selected_paths:!pending&&!task.workspace?approved:[]});
+ if(desktopInputs.length)context.desktop_paths=desktopInputs;
  // Automatic workflow imports create independent inputs. Only the manual importer chooses links.
  if(task.workspace&&!pending){for(const source of approved){if(source.startsWith(task.workspace.root.replace(/\/$/,'')+'/')){const read=await request('POST','/api/workspace/read',{project_id:task.workspace.id,name:source});const previous=(task.authoring?.imports||[]).find(a=>a.path===source&&a.mode==='link');if(previous&&read.sha256!==previous.sha256)throw Error('链接源文件内容已变化，请重新检查当前资产');context.imports.push({source,path:source,sha256:read.sha256,status:'passed',scope:'Already owned workspace input; no additional copy'});continue;}const asset=await request('POST','/api/studio-workspace/import',{project_id:task.workspace.id,source,mode:'copy',engine:task.parameters.engine,role:/\.(xyz|extxyz|cif|pdb|vasp)$/i.test(source)?'structure':/\.(pt|pt2|pth|ckpt|txt)$/i.test(source)?'model':'input'});context.imports.push({...asset,status:'passed'});}}
 

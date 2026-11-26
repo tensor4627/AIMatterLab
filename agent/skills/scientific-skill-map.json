@@ -947,6 +947,7 @@
       "title": "Detailed input and graph authoring",
       "engines": [],
       "skills": ["studio-workflow-authoring"],
+      "tools": ["find_local_input_files", "import_workflow_input", "copy_project_inputs", "read_project_input", "write_project_input", "present_task"],
       "phase": "authoring",
       "status": "implemented_bundled_authoring",
       "reference_files": {

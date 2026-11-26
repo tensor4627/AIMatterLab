@@ -76,11 +76,15 @@ def _transfer(path, budget, output=None):
 
 
 def copy_inputs(service, data):
-    if not isinstance(data, dict) or set(data) != {'project_id', 'sources'}:
+    if not isinstance(data, dict) or set(data) not in ({'project_id', 'sources'}, {'project_id', 'sources', 'names'}):
         raise ValueError('Provide a project and an explicit list of source files')
     sources = data['sources']
     if not isinstance(sources, list) or not 1 <= len(sources) <= 64:
         raise ValueError('Select between one and 64 input files')
+    names = data.get('names')
+    if 'names' in data and (not isinstance(names, list) or len(names) != len(sources) or any(
+            not isinstance(name, str) or len(name) > 200 or leaf(name) != name or any(ord(c) < 32 or c == ':' for c in name) for name in names)):
+        raise ValueError('Provide one valid basename per copied input')
     project = service.store.get('project', leaf(data['project_id']))
     root = service.root / 'projects' / project['id'] / 'inputs'
     if root.resolve(strict=True) != root:
@@ -108,8 +112,11 @@ def copy_inputs(service, data):
         with tempfile.TemporaryDirectory(prefix='.copy-', dir=pinned) as temporary:
             stage = Path(temporary)
             rows, observed, total = [], [], 0
-            for original, (source, resolved) in zip(sources, requested):
-                name = service.input_name(source.relative_to(base).as_posix())
+            for index, (original, (source, resolved)) in enumerate(zip(sources, requested)):
+                relative = source.relative_to(base)
+                if names is not None:
+                    relative = relative.with_name(names[index])
+                name = service.input_name(relative.as_posix())
                 output = stage / name
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with output.open('xb') as stream:

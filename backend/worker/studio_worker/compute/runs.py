@@ -117,7 +117,9 @@ class RunsMixin:
                     snapshots.append({"name": name, "source": str(path), "sha256": digest(destination),
                                       "size": destination.stat().st_size})
                     destination.chmod(0o444)
-                input_contract = Adapter(spec["engine"]).input_contract(spec, directory / "simulation") if spec["engine"]=="gpumd.neb" else None
+                check_fresh_gpumd = spec["engine"] in ("gpumd.md", "gpumd.sampling") and not spec.get("parent_run")
+                input_contract = (Adapter(spec["engine"]).input_contract(spec, directory / "simulation")
+                                  if spec["engine"] == "gpumd.neb" or check_fresh_gpumd else None)
                 run = {**spec, "id": identifier, "name": spec.get("name", spec["engine"]),
                        "request_hash": request_hash, "status": "draft", "validation": {"status": "not_run"},
                        "directory": str(directory), "snapshots": snapshots, "command": command,

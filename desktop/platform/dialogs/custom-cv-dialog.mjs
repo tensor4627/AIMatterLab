@@ -1,6 +1,6 @@
-const fileExtensions=['xyz','extxyz','cif','pdb','vasp','json','py','txt','in','yaml','yml','toml','dat','pt','pt2','pth','ckpt'];
+const fileExtensions=['xyz','extxyz','cif','pdb','vasp','json','py','txt','in','yaml','yml','toml','dat','pt','pt2','pth','ckpt','cfg','out','h5','hdf5','npz','traj'];
 /** Formatting only; sender, scope and native user response remain main-owned. */
-export function referenceImportDialog(language){const english=language==='en';return {title:english?'Choose one computational input file for this workflow':'选择当前流程的一个计算输入文件',properties:['openFile'],filters:[{name:english?'Computational inputs and structures':'计算输入与结构',extensions:[...fileExtensions]}]};}
+export function referenceImportDialog(language){const english=language==='en';return {title:english?'Choose one computational input file for this workflow':'选择当前流程的一个计算输入文件',properties:['openFile'],filters:[{name:english?'Computational inputs and structures':'计算输入与结构',extensions:[...fileExtensions]},{name:english?'All files':'所有文件',extensions:['*']}]};}
 export function customCvNumericDialog({language,scope,task,structure}){
  const en=language==='en',word=(zh,english)=>en?english:zh,reference=scope.reference||{};
  const row=(zh,english,value)=>word(zh,english)+': '+String(value);

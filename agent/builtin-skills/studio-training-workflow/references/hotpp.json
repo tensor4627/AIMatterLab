@@ -183,9 +183,9 @@
       {
         "source_id": "studio-worker",
         "path": "studio_worker/tools/adapters.py",
-        "sha256": "e85aefb0dd904b3b803d2ea6df751e05dad88b12a9d2e671e998106cc3382c50",
-        "bytes": 33881,
-        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "sha256": "7184b6da5a48b9bcaae531b17f0f42fb89ff0a782bdc8b433e969092c8da392e",
+        "bytes": 34112,
+        "observed_source": "development working tree, identified by whole-file SHA-256",
         "role": "registered_training_and_export_invocations",
         "line_ranges": [
           [
@@ -198,7 +198,7 @@
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "observed_on": "2026-11-19"
+        "observed_on": "2026-11-26"
       },
       {
         "source_id": "studio",

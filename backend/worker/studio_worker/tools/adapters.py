@@ -332,7 +332,13 @@ class Adapter:
             if not values or actual!=float(p[key]):raise ValueError("Declared scientific parameter differs from run.in: "+key)
             checked.append(key)
         if "temperature" in p:
-            values=[float(v) for r in rows if len(r)>3 and r[0]=="ensemble" and r[1].startswith(("nvt","npt")) for v in r[2:4]]
+            values=[]
+            for row in rows:
+                if len(row) < 4 or row[0] != "ensemble" or not row[1].startswith(("nvt", "npt")):
+                    continue
+                offset = 3 if row[2] == "temp" else 2
+                if len(row) >= offset + 2:
+                    values.extend(float(value) for value in row[offset:offset + 2])
             if not values or any(v!=float(p["temperature"]) for v in values):raise ValueError("Declared temperature differs from run.in")
             checked.append("temperature")
         return {"status":"passed" if checked else "not_run", "checked_fields":checked, "scope":"declared simple GPUMD input controls only"}

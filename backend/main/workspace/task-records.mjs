@@ -7,6 +7,8 @@ import {conversationTitle,validConversationName} from "../../../contracts/agent/
 import {isDeepStrictEqual} from 'node:util';
 import {normalizeSteps,workflowMissing,setParameter,parameterValue,fieldPath} from "../../../contracts/workflows/task-fields.mjs";
 import {analyzeRoadmap,validateRoadmap} from "../../../contracts/workflows/roadmap.mjs";
+import {visibleUserText} from '../../../contracts/agent/user-message.mjs';
+import {bindWorkflowInputFields} from '../../../contracts/workflows/task-input-fields.mjs';
 
 export function structuredResult(value){
  const found=[];function walk(v,depth=0){if(depth>8||v==null)return;if(typeof v==='string'){try{walk(JSON.parse(v),depth+1);}catch{}return;}if(Array.isArray(v)){for(const item of v)walk(item,depth+1);return;}if(typeof v!=='object')return;if(v.id&&(v.engine||Array.isArray(v.steps)||v.kind==='cluster-setup'||v.kind==='task-parameters'))found.push(v);for(const k of ['content','structuredContent','result','output','data','text'])if(k in v)walk(v[k],depth+1);}walk(value);return found;
@@ -80,6 +82,7 @@ export class TaskRecords{
  }
  edit(value){
   const task=this.read(value.id);if(!value.changes||typeof value.changes!=='object'||Array.isArray(value.changes)||JSON.stringify(value.changes).length>200000||Object.keys(value.changes).length>100)throw Error('Invalid parameter edits');
+  const previousParameters=task.parameters;
   let changed=false;const fields=normalizeSteps(task.steps||[],task.parameters||{},[]).flatMap(step=>step.fields||[]);task.manualInputs={...task.manualInputs};
   for(const [key,next] of Object.entries(value.changes)){fieldPath(key);if(task.workflowVersion===2&&deploymentField(key))throw Error('请在独立部署模块设置运行环境和队列');
    const field=fields.find(field=>field.key===key),previous=parameterValue(task.parameters,key),receipt=task.manualInputs[key];
@@ -89,7 +92,14 @@ export class TaskRecords{
     task.manualInputs[key]={type:'files',value:structuredClone(next),approvedValues:[...new Set(approved)].filter(item=>next.includes(item))};
    }else delete task.manualInputs[key];
    if(!isDeepStrictEqual(parameterValue(task.parameters||{},key),next)){task.parameters=setParameter(task.parameters||{},key,next);changed=true;}}
-  if(changed){task.parameterRevision=(task.parameterRevision||0)+1;task.manualEdits={...task.manualEdits,...Object.fromEntries(Object.keys(value.changes).map(k=>[k,task.parameterRevision]))};task.review={status:'not_run',summary:'参数已修改，需要重新复核'};task.missingFields=workflowMissing(task.steps||task.plan?.map(s=>s.step)||[],task.parameters,task.missingFields||[]);}
+  if(changed){
+   const beforeBinding=task.parameters,edited=new Set(Object.keys(value.changes));
+   if(task.workflowVersion===2)task.parameters=bindWorkflowInputFields(task.steps,task.parameters,{previous:previousParameters,changes:value.changes});
+   if(beforeBinding!==task.parameters)for(const key of new Set(['files',...fields.map(field=>field.key)])){
+    if(!isDeepStrictEqual(parameterValue(beforeBinding,key),parameterValue(task.parameters,key)))edited.add(key);
+   }
+   task.parameterRevision=(task.parameterRevision||0)+1;task.manualEdits={...task.manualEdits,...Object.fromEntries([...edited].map(k=>[k,task.parameterRevision]))};task.review={status:'not_run',summary:'参数已修改，需要重新复核'};task.missingFields=workflowMissing(task.steps||task.plan?.map(s=>s.step)||[],task.parameters,task.missingFields||[]);
+  }
   return this.save(task);
  }
  /** Prepare owned workflow state before model-facing formatting. */
@@ -101,7 +111,7 @@ export class TaskRecords{
   if(studioTaskId){const wanted=this.read(studioTaskId);if(wanted.provider!==provider||wanted.threadId&&wanted.threadId!==params.threadId||!planningMode&&!wanted.threadId)throw Error('Task is not bound to this conversation');task=wanted;}
   if(planningMode&&!task)throw Error('Planning requires a task record');
   const key=provider+':'+params.threadId;
-  if(task){task=this.attach(task.id,provider,params.threadId);this.turns.set(key,{taskId:task.id,revision:task.parameterRevision||0,reviewMode,presented:false});if(reviewMode){task.review={status:'reviewing'};this.save(task);}}
+  if(task){task=this.attach(task.id,provider,params.threadId);this.turns.set(key,{taskId:task.id,revision:task.parameterRevision||0,reviewMode,presented:false,userRequest:visibleUserText(params.input||[])});if(reviewMode){task.review={status:'reviewing'};this.save(task);}}
   else{if(reviewMode)throw Error('Review requires an existing workflow');this.active.delete(key);this.turns.delete(key);}
   const roadmap=task?.roadmap&&analyzeRoadmap(task.roadmap,task.parameters);
   const executionObservation=roadmap&&this.catalog.list?.('roadmap-execution-index').filter(row=>row.task_id===task.id).sort((a,b)=>b.confirmed_at-a.confirmed_at)[0]?.observation;
@@ -124,6 +134,10 @@ export class TaskRecords{
    this.pendingSnapshots.delete(key);this.deliveredWorkflowSnapshots.delete(key);
   }
   return {params,interaction:structuredClone({planningMode,reviewMode,workflow,...(contextBaseline?{contextBaseline}:{})})};
+ }
+ currentInputRequest({provider,threadId,taskId}){
+  const turn=this.turns.get(provider+':'+threadId);
+  return turn?.taskId===taskId?turn.userRequest:undefined;
  }
  confirmTurnContext(provider,threadId){
   const key=provider+':'+threadId,pending=this.pendingSnapshots.get(key);
@@ -194,6 +208,7 @@ export class TaskRecords{
       }else parameters=setParameter(parameters,field,manual);
      }
      parameters=protectGraphMirrors(task,parameters);
+     if(task.workflowVersion===2)parameters=bindWorkflowInputFields(item.steps,parameters);
      if(roadmap)task.roadmap=roadmap;
      if(!isDeepStrictEqual(parameters,task.parameters)||!isDeepStrictEqual(item.steps,task.steps)){task.parameterRevision=(task.parameterRevision||0)+1;task.review={status:'not_run'};}
      task.name=item.name;task.parameters=parameters;task.steps=item.steps;task.plan=item.steps.map(v=>({step:typeof v==='string'?v:v.title,assistantStatus:'proposed'}));task.missingFields=workflowMissing(task.steps,parameters,item.missing_fields||[]);

@@ -8,22 +8,23 @@ import {inferField,parameterValue,fieldMissing,type TaskField} from "../../contr
 import {invoke} from '../api/studio';
 import {wslPath} from './presentation/paths';
 import {t} from './i18n';
-export function ParameterFields({fields,parameters,onChange,onError,onPreview,disabled=false,manualEdits}:{fields:TaskField[];parameters:Record<string,any>;manualEdits?:Readonly<Record<string,number>>;onChange:(key:string,value:any)=>void;onError:(error:unknown)=>void;onPreview?:(path:string)=>void;disabled?:boolean}){
- return <div className="parameter-fields">{fields.map(field=><ParameterInput key={field.key} field={field} value={parameterValue(parameters,field.key)} missing={fieldMissing(field,parameters)} onChange={value=>onChange(field.key,value)} onError={onError} onPreview={onPreview} disabled={disabled} manualEdits={manualEdits}/>)}</div>;
+export function ParameterFields({fields,parameters,onChange,onError,onPreview,onChooseFile,disabled=false,manualEdits}:{fields:TaskField[];parameters:Record<string,any>;manualEdits?:Readonly<Record<string,number>>;onChange:(key:string,value:any)=>void;onError:(error:unknown)=>void;onPreview?:(path:string)=>void;onChooseFile?:()=>Promise<string|null>;disabled?:boolean}){
+ return <div className="parameter-fields">{fields.map(field=><ParameterInput key={field.key} field={field} value={parameterValue(parameters,field.key)} missing={fieldMissing(field,parameters)} onChange={value=>onChange(field.key,value)} onError={onError} onPreview={onPreview} onChooseFile={onChooseFile} disabled={disabled} manualEdits={manualEdits}/>)}</div>;
 }
 export function GroupedParameterFields(props:Parameters<typeof ParameterFields>[0]&{compact?:boolean}){
  const {primary,advanced}=partitionFields(props.fields);
  const shown=props.compact?primary.slice(0,4):primary,rest=props.compact?primary.slice(4):[];
  return <><ParameterFields {...props} fields={shown}/>{rest.length>0&&<details className="flow-parameter-details"><summary>{t('更多基础参数')} · {rest.length}</summary><ParameterFields {...props} fields={rest}/></details>}{advanced.length>0&&<details className="advanced-field-group"><summary>{t('高级参数')} <span className="tag">{advanced.length}</span></summary><ParameterFields {...props} fields={advanced}/></details>}</>;
 }
-function ParameterInput({field,value,missing,onChange,onError,onPreview,disabled,manualEdits}:{field:TaskField;value:any;missing:boolean;onChange:(value:any)=>void;onError:(error:unknown)=>void;onPreview?:(path:string)=>void;disabled:boolean;manualEdits?:Readonly<Record<string,number>>}){
+function ParameterInput({field,value,missing,onChange,onError,onPreview,onChooseFile,disabled,manualEdits}:{field:TaskField;value:any;missing:boolean;onChange:(value:any)=>void;onError:(error:unknown)=>void;onPreview?:(path:string)=>void;onChooseFile?:()=>Promise<string|null>;disabled:boolean;manualEdits?:Readonly<Record<string,number>>}){
  const [advanced,setAdvanced]=useState(''),[emptyMatrix,setEmptyMatrix]=useState(false),[manualPath,setManualPath]=useState('');
  if(Array.isArray(value)&&(field.key==='files'||value.length>0&&value.every(v=>typeof v==='string'&&/^(?:[A-Za-z]:)?[\\/]/.test(v))))field={...field,type:'files'};
 
  const displayLabel=parameterDisplayLabel(field,manualEdits),recordedLabel=displayLabel!==field.label;
  const implicit=(value===undefined||value===null||value==='')&&!field.required&&Object.hasOwn(field,'default');if(implicit)value=field.default;
- async function choose(){try{const path=await invoke<string>('file.choose');if(path)onChange(wslPath(path));}catch(e){onError(e);}}
- async function appendFile(){try{const path=await invoke<string>('file.choose');if(!path)return;const file=wslPath(path),items=Array.isArray(value)?value:[];if(!items.includes(file))onChange([...items,file]);}catch(e){onError(e);}}
+ async function pickFile(){if(onChooseFile)return onChooseFile();const selected=await invoke<string>('file.choose');return selected?wslPath(selected):null;}
+ async function choose(){try{const file=await pickFile();if(file)onChange(file);}catch(e){onError(e);}}
+ async function appendFile(){try{const file=await pickFile();if(!file)return;const items=Array.isArray(value)?value:[];if(!items.includes(file))onChange([...items,file]);}catch(e){onError(e);}}
  let control;
  if(field.type==='files')control=<div><button className="button" aria-label={t('添加文件')} disabled={disabled} onClick={()=>void appendFile()}><FolderOpen size={14}/>{t('添加文件')}</button><details className="manual-file-import"><summary>{t('手输文件路径')}</summary><input aria-label={t('新文件路径')} disabled={disabled} value={manualPath} onChange={e=>setManualPath(e.target.value)}/><button className="button" aria-label={t('添加路径')} disabled={disabled||!manualPath.trim()} onClick={()=>{const path=wslPath(manualPath.trim()),items=Array.isArray(value)?value:[];if(!items.includes(path))onChange([...items,path]);setManualPath('');}}>{t('添加路径')}</button></details></div>;
  else if(field.type==='file')control=<button className="button" disabled={disabled} onClick={()=>void choose()}><FolderOpen size={14}/>{t(value?'更换文件':'选择文件')}</button>;

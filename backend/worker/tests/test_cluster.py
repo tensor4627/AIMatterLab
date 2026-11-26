@@ -39,6 +39,24 @@ class ClusterLifecycle(unittest.TestCase):
     def test_prepare_no_ssh_side_effect_private_fields_absent(self):
         r=self.cluster.prepare(self.spec());self.assertEqual(r["status"],"draft");self.assertEqual(r["scientific_validation"]["status"],"not_run");self.assertFalse(FakeSSH.calls)
         for k in ("target","port","identity_file"):self.assertNotIn(k,r["cluster"])
+    def test_gpumd_declared_parameters_match_cluster_snapshot_before_ready(self):
+        profile = self.cluster.register({"name":"GPUMD fixture", "scheduler":"lsf", "target":"fixture@example.test",
+            "port":22, "ssh_client":"/usr/bin/ssh", "remote_root":"/tmp/studio-fixture", "queue":"fixture",
+            "environment":{"executables":{"python":"/usr/bin/python3","gpumd":"/usr/bin/python3"}}})
+        self.project['policy']['clusters'].append(profile['id'])
+        self.service.register_project(self.project)
+        (self.inputs/'run.in').write_text('potential nep.txt\ntime_step 1\nensemble nvt_mttk temp 310 310 tperiod 100\nrun 500\n')
+        (self.inputs/'model.xyz').write_text('1\nfixture\nH 0 0 0\n')
+        (self.inputs/'nep.txt').write_text('fixture potential\n')
+        inputs = {name:str(self.inputs/name) for name in ('run.in','model.xyz','nep.txt')}
+        spec = self.spec(engine='gpumd.md', cluster_id=profile['id'], inputs=inputs, parameters={'temperature':310,'steps':500})
+        ready = self.cluster.prepare(spec)
+        self.assertEqual(self.cluster.validate(ready['id'])['status'], 'ready')
+        wrong = self.cluster.prepare({**spec,'idempotency_key':'mismatch','parameters':{'temperature':300,'steps':500}})
+        with self.assertRaisesRegex(ValueError, 'Declared temperature differs'):
+            self.cluster.validate(wrong['id'])
+        self.assertEqual(self.cluster.run(wrong['id'])['status'], 'draft')
+        self.assertEqual(FakeSSH.calls, [])
     def test_mcp_cannot_register_authorize_or_revise_but_can_execute_authorized_snapshot(self):
         for target in ("/api/clusters","/api/cluster/profile","/api/cluster/revise"):
             with self.assertRaises(PermissionError):dispatch(self.service,"POST",target,{},False)

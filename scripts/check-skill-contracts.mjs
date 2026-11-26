@@ -9,6 +9,7 @@ import {createManagedComputeResources} from '../backend/main/compute/managed-com
 import {createManagedComputeTools} from '../agent/tools/managed-compute-tools.mjs';
 import {baseWorkspaceTool} from '../backend/main/workspace/base-workspace.mjs';
 import {copyProjectInputsTool} from '../backend/main/workspace/copy-project-inputs.mjs';
+import {workflowInputSourceTools} from '../backend/main/workspace/workflow-input-sources.mjs';
 import {currentPairTool} from '../agent/tools/current-pair-tool.mjs';
 import {MaterialsProject} from '../backend/main/tools/materials-project.mjs';
 import {createResourceToolController} from '../backend/main/compute/resource-tools.mjs';
@@ -82,7 +83,7 @@ export function checkSkillContracts({projectDir, map, documents}) {
   const workerTable = /^TOOL_ROUTES = \{([\s\S]*?)^\}/m.exec(read('backend/worker/studio_worker/transport/mcp.py'));
   assert(workerTable, 'Worker MCP tool registry changed');
   const workerNames = [...workerTable[1].matchAll(/["']([a-z][a-z0-9_]*)["']\s*:\s*\(\s*["'](?:GET|POST)["']/g)].map(match => match[1]);
-  const desktopNames = [...MaterialsProject.prototype.tools(), baseWorkspaceTool, copyProjectInputsTool, currentPairTool].map(tool => tool.name);
+  const desktopNames = [...MaterialsProject.prototype.tools(), baseWorkspaceTool, copyProjectInputsTool, ...workflowInputSourceTools, currentPairTool].map(tool => tool.name);
   for (const match of read('desktop/main.mjs').matchAll(/const\s+(?:proposalTool|privateReader)\s*=\s*\{\s*name\s*:\s*["']([^"']+)["']/g)) desktopNames.push(match[1]);
   const knownTools = new Set([...workerNames, ...desktopNames].filter(name => Object.hasOwn(SCIENTIFIC_TOOL_ACCESS, name)));
   for (const tool of [...managedTools,...createResourceToolController({}).tools(),resourceSessionWorkspaceTool,...ProjectSkills.prototype.tools(),...softwareDocDefinitions]) knownTools.add(tool.name);

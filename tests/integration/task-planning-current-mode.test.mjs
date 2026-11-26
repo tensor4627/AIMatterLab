@@ -44,9 +44,14 @@ function assertMode(turn,value){
 }
 
 test('actual request path changes chat to planning to existing workflow without a second task or execution',async()=>{
- const f=fixture();await f.send(false);assertMode(lastTurn(f),false);assert.equal(f.records.tasks().length,0);assert.equal(f.workerCalls.length,0);
- const task=f.create();await f.send(true,{studioTaskId:task.id});assert.match(assertMode(lastTurn(f),true),/mode: planning/);
- await f.send(false,{studioTaskId:task.id});assert.match(assertMode(lastTurn(f),false),/mode: workflow/);
+ const f=fixture();await f.send(false);assert.doesNotMatch(assertMode(lastTurn(f),false),/missing non-file scientific parameters/);assert.equal(f.records.tasks().length,0);assert.equal(f.workerCalls.length,0);
+ const task=f.create();await f.send(true,{studioTaskId:task.id});const planning=assertMode(lastTurn(f),true);
+ assert.match(planning,/mode: planning/);
+ assert.match(planning,/version-matched manuals.*Search public documentation or literature when the result is uncertain or the user requests research/);
+ assert.match(planning,/keep the field blank and editable.*missing_fields/);
+ assert.match(planning,/find_local_input_files.*import_workflow_input.*copy_project_inputs/);
+ assert.match(planning,/Generate required control files such as run.in or nep.in.*write_project_input.*read_project_input.*control-file field/);
+ await f.send(false,{studioTaskId:task.id});const continuation=assertMode(lastTurn(f),false);assert.match(continuation,/mode: workflow/);assert.match(continuation,/missing non-file scientific parameters/);
  assert.deepEqual(f.records.tasks().map(value=>value.id),[task.id]);assert(f.workerCalls.every(call=>call.method==='POST'&&call.path==='/api/authoring/context'));
  assert.equal(f.records.read(task.id).execution,undefined);assert.equal(f.records.read(task.id).artifacts.length,0);
 });
@@ -98,7 +103,7 @@ test('the managed desktop MCP saves a real workflow in the original project conv
   return response.status===200?(await response.json()).result:response.status;
  };
  assert.deepEqual((await call('tools/list')).tools.map(tool=>tool.name),['present_task']);
- const runArgs={task_id:task.id,name:'Saved plan',steps:[{id:'inputs',title:'Inputs',fields:[{key:'temperature',label:'Temperature',type:'number',required:true}]}],parameters:{temperature:310},missing_fields:[],
+ const runArgs={task_id:task.id,name:'Saved plan',steps:[{id:'inputs',title:'Inputs',fields:[{key:'temperature',label:'Temperature',type:'number',required:true,unit:'K'}]}],parameters:{temperature:null},missing_fields:['temperature'],
   roadmap:{schema_version:1,resources:[{id:'trajectory',label:'Trajectory'}],inputs:[],outputs:['trajectory'],
    steps:[{id:'md',tool:'gpumd.md',label:'MD',inputs:[],outputs:[{port:'trajectory',resource:'trajectory'}]}]}};
  const save=args=>call('tools/call',{name:'present_task',arguments:args});
@@ -107,6 +112,10 @@ test('the managed desktop MCP saves a real workflow in the original project conv
  assert.equal(f.records.read(task.id).roadmap,undefined);
  assert.match((await save(runArgs)).content[0].text,/"has_roadmap":true/);
  assert.deepEqual(f.records.read(task.id).roadmap,runArgs.roadmap);
+ assert.deepEqual(f.records.read(task.id).missingFields,['temperature']);
+ const filled=f.records.edit({id:task.id,changes:{temperature:310}});
+ assert.equal(filled.parameters.temperature,310);
+ assert.deepEqual(filled.missingFields,[]);
  assert.equal(f.records.read(task.id).phase,'review');
  assert.equal(f.records.read(task.id).execution,undefined);
  assert.deepEqual(f.workerCalls,[]);

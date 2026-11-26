@@ -52,8 +52,8 @@
       {
         "source_id": "studio-worker",
         "path": "studio_worker/compute/cluster.py",
-        "sha256": "d07d745462bad3aaba1fe0ab92b59501d42723950b417a6ea2e5c707dc9ba285",
-        "bytes": 103135,
+        "sha256": "42f6f73043c53778db53c68f004d5bb29da46082fd5dfb9dec39752cf402da17",
+        "bytes": 103281,
         "observed_source": "development working tree, identified by whole-file SHA-256",
         "role": "scheduler_resources_submission_and_observation",
         "line_ranges": [
@@ -66,24 +66,24 @@
             775
           ],
           [
-            1238,
-            1348
+            1240,
+            1350
           ],
           [
-            1350,
-            1388
+            1352,
+            1390
           ],
           [
-            1412,
-            1429
+            1414,
+            1431
           ],
           [
-            1446,
-            1491
+            1448,
+            1493
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "observed_on": "2026-11-25"
+        "observed_on": "2026-11-26"
       }
     ],
     "primary_references": [

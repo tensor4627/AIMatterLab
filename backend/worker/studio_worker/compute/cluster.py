@@ -1140,6 +1140,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
                 raise ValueError('Prepared run differs from its reviewed invocation')
         else:
             PlanningAdapter(r["engine"]).prepare(r,r["cluster_snapshot"]["environment"])
+        if r["engine"] in ("gpumd.md", "gpumd.sampling"):
+            Adapter(r["engine"]).input_contract(r, Path(r["directory"]) / "simulation")
         resources(r["resources"],r["cluster_snapshot"],r["max_seconds"])
         # A concurrent submit may reserve/dispatch while input hashing is in
         # progress. Validation must never reopen an attempted run as ready.

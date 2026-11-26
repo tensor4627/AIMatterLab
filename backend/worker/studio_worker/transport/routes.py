@@ -234,6 +234,11 @@ def dispatch(service, method, path, data, admin=False):
             raise PermissionError('The current desktop workflow and compute resource are required')
         from studio_worker.workspace.input_copies import copy_inputs
         return copy_inputs(service, data)
+    if path == '/api/studio-workspace/upload-input':
+        if method != 'POST' or not admin:
+            raise PermissionError('Only the desktop can upload current workflow inputs')
+        from studio_worker.workspace.input_upload import upload_input
+        return upload_input(service, data)
     if path in ("/api/authoring/context","/api/authoring/adopt"):
         if not admin:raise PermissionError("Only desktop can bind draft workspaces or adopt inputs")
         from studio_worker.workspace.authoring_workspace import ensure,adopt

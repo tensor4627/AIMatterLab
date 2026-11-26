@@ -17,6 +17,7 @@ export function assertWorkerRoute(method, path) {
   routes.POST.push('/api/workflow/tool-group/create','/api/workflow/prepare-step','/api/workflow/execute-step','/api/workflow/status','/api/workflow/read');
   routes.POST.push(...['preview','confirm','list','status','snapshot'].map(action=>'/api/workflow/roadmap/'+action));
   routes.POST.push('/api/ssh-service/scheduler');
+  routes.POST.push('/api/studio-workspace/upload-input');
   routes.POST.push(...['register','session','allocate'].map(action=>'/api/resource-workspace/'+action));
   routes.POST.push('/api/cluster/observation');
   routes.POST.push(...['upsert','stop','status','list','snapshot','pump','ack','observe-once'].map(action=>'/api/managed-schedules/'+action));
