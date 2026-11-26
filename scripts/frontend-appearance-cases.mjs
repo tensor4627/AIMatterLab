@@ -34,9 +34,21 @@ export async function frontendAppearanceCases({check,out}) {
           const html = page.locator(`html[data-theme="${theme}"]`);
           await html.waitFor({state:'attached',timeout:15000});
           await page.locator('.titlebar .brand strong').waitFor({timeout:15000});
+          const captured = new Map();
           const capture = async label => {
-            await page.evaluate(() => document.fonts.ready.then(() => true));
-            await page.screenshot({path:path.join(out,`${name}-${label}.png`)});
+            const mustDiffer = ['settings','updates','accounts','jobs','tools','palette','assets','compute'].includes(label);
+            for (let attempt=0;attempt<3;attempt++) {
+              await page.evaluate(async () => {
+                await document.fonts.ready;
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+              });
+              const screenshot = await page.screenshot({animations:'disabled'});
+              if (mustDiffer && [...captured.values()].some(previous => previous.equals(screenshot))) continue;
+              captured.set(label,screenshot);
+              await writeFile(path.join(out,`${name}-${label}.png`),screenshot);
+              return;
+            }
+            assert.fail(`Electron returned a previous frame when capturing ${label}`);
           };
           const workspace = page.locator('.workspace-shell');
           if (await workspace.getByTestId('show-workspace').isVisible()) {
