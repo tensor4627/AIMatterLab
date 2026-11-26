@@ -1,6 +1,9 @@
 import {t} from '../../ui/i18n';
 import Disclosure from '../../ui/Disclosure';
 import Notice from '../../ui/Notice';
+import Button from '../../ui/Button';
+import {ErrorState, LoadingState} from '../../ui/States';
+import {useToast} from '../../ui/Toast';
 import {useEffect,useRef,useState} from 'react';
 import {clearSessionDraft,readSessionDraft,useSessionDraft,writeSessionDraft} from '../../ui/session-drafts';
 import {customCvChoiceKey,customCvDraftKey,customDraftDifferences,customDraftMatches,type CustomCvDraft} from './custom-cv-drafts';
@@ -14,6 +17,7 @@ import CustomCvLibrary from './CustomCvLibrary';
 import CustomCvNumericScope,{numericScopeCurrent} from './CustomCvNumericScope';
 export default function CustomCvWorkbench(p:WorkbenchProps){
  const locale = {language:p.language??'zh-CN'} as const;
+ const toast=useToast();
  const draftKey=customCvDraftKey(p.taskId,p.entry.id),stored=useSessionDraft<CustomCvDraft>(draftKey),draft=stored?.value;
  const spec=draft?.spec||p.entry.spec,values=draft?.values||p.entry.parameterValues,base=draft?.base||p.entry.expected,dirty=!!draft,conflict=dirty&&!same(base,p.entry.expected);
  const [editing,setEditing]=useState(false),[reference,setReference]=useState(''),[localError,setLocalError]=useState(''),[pending,setPending]=useState(false),[readResult,setReadResult]=useState<'matched'|'different'|''>('');
@@ -29,7 +33,7 @@ export default function CustomCvWorkbench(p:WorkbenchProps){
 update({spec:{...spec,[key]:value}});}
  function changeValue(name:string,value:ParamValue){update({values:{...values,[name]:value}});}
  async function operation(fn:()=>unknown|Promise<unknown>,clean=false){if(busy||pendingRef.current)return;pendingRef.current=true;setPending(true);setLocalError('');const key=draftKey,version=stored?.version;
-  try{await fn();if(clean)clearSessionDraft(key,version);}catch(error){if(alive.current&&owner.current===key)setLocalError(error instanceof Error?error.message:String(error));}finally{if(alive.current&&owner.current===key){pendingRef.current=false;setPending(false);}}
+  try{await fn();if(clean){clearSessionDraft(key,version);if(alive.current&&owner.current===key)toast.show({message:t('定义与参数已保存',locale)});}}catch(error){if(alive.current&&owner.current===key)setLocalError(error instanceof Error?error.message:String(error));}finally{if(alive.current&&owner.current===key){pendingRef.current=false;setPending(false);}}
  }
  async function readSaved(){
   const key=draftKey,version=stored?.version;setReadResult('');
@@ -75,7 +79,8 @@ update({spec:{...spec,[key]:value}});}
  {!!differences.length&&(conflict||readResult==='different')&&<Disclosure className="ccv-differences" open summary={<>{t("当前保存版本与本地输入", locale)} · {differences.length}</>}>{differences.map(item=><section className="ccv-difference" key={item.group+'.'+item.key}><h4>{item.group==='parameter'?t("参数", locale):t("定义", locale)} · {item.key}</h4><div className="ccv-difference-values"><div><strong>{t("当前保存版本", locale)}</strong><pre tabIndex={0}>{displayValue(item.saved)}</pre></div><div><strong>{t("本地输入（未保存）", locale)}</strong><pre tabIndex={0}>{displayValue(item.local)}</pre></div></div></section>)}</Disclosure>}
  {conflict&&<div className="ccv-reconcile-actions"><button type="button" data-testid="custom-continue-local" disabled={busy} onClick={continueLocal}>{t("已核对差异，继续编辑本地草稿", locale)}</button><button type="button" data-testid="custom-use-saved" disabled={busy} onClick={()=>{clearSessionDraft(draftKey,stored?.version);setReadResult('');setLocalError('');}}>{t("使用保存版本，放弃本地修改", locale)}</button></div>}
  </section>}
- {(p.error||localError)&&<Notice compact severity="error" className="ccv-notice" >{p.error||localError}</Notice>}
+ {busy&&<LoadingState label={t("处理中…", locale)}/>}
+ {(p.error||localError)&&<ErrorState className="ccv-notice" title={t("私有 CV 操作未完成", locale)} retained={t("本地修改仍保留。", locale)} details={<pre>{p.error||localError}</pre>} action={!dirty&&<Button disabled={busy} onClick={()=>void readSaved()}>{t("刷新实际记录", locale)}</Button>}/>}
  <section className="ccv-library-review"><strong>{t("已记录的实际类库评估", locale)}</strong>{p.libraryReview?<><p>{t("已对照的类", locale)} · {p.libraryReview.classes.join(' · ')}</p><Disclosure summary={<>{t("评估说明与来源版本", locale)}</>}><p>{p.libraryReview.reason}</p>{Object.entries(p.libraryReview.source_files).map(([name,sha])=><small key={name}>{name} · SHA256 {sha}</small>)}</Disclosure></>:<p>{t("此条目未返回类库评估收据。", locale)}</p>}</section>
  <div className="ccv-definition"><strong>{t("数学定义", locale)}</strong><p className="ccv-formula" data-testid="custom-formula">{spec.formula||t("等待 Agent 准备明确公式", locale)}</p><dl><dt>{t("输出单位", locale)}</dt><dd>{spec.units||'—'}</dd><dt>PBC</dt><dd>{spec.pbc||'—'}{spec.pbc==='row_mic'&&<small>{t("按行晶胞分数坐标逐分量 wrap；不保证任意倾斜晶胞的欧氏最近像。", locale)}</small>}</dd><dt>{t("有序原子选择", locale)}</dt><dd>{spec.atom_selection.join(', ')||'—'}</dd><dt>{t("输出维度", locale)}</dt><dd>{spec.output_size??'—'}</dd></dl>
  <button type="button" disabled={busy} onClick={()=>setEditing(old=>!old)} aria-expanded={editing}>{t("调整数学定义", locale)}</button><button type="button" disabled={busy} onClick={()=>p.onDiscuss({reason:'formula',includePrivate:shared,...shared?{entryId:p.entry.id}:{}})}>{t("与 Agent 讨论定义", locale)}</button>
@@ -112,6 +117,6 @@ update({spec:{...spec,[key]:value}});}
  <Disclosure className="ccv-technical-convention" summary={<>{t("实现与 cell 导数约定", locale)}</>}><small>Git {p.entry.gitCommit||t("版本尚未记录", locale)}</small><p>{t("候选实现按 pos_affine = (pos @ inv(cell.detach())) @ cell 计算 cell 总导数，与固定分数坐标的共变形数值检查对应。名义位置值及坐标梯度不变；需要非奇异晶胞。该实现约定须在生成源码与数值报告中核对。", locale)}</p></Disclosure>
  <Disclosure className="ccv-sharing" summary={<>{t("Agent 协作与私有内容共享", locale)}</>}><label><input type="checkbox" aria-label="custom.share" checked={shared} disabled={busy||dirty||conflict||!p.capabilities.sharing} onChange={event=>void operation(()=>p.onSharing(event.target.checked,p.provider,p.entry.expected))}/>{t("允许当前服务商读取此定义与源码", locale)} · {p.provider}</label><p>{t("默认不共享。已有公开 skill 许可不涵盖此私有库；切换服务商不会继承另一家的许可。", locale)}</p></Disclosure>
  <Disclosure summary={<>{t("已知稳态相参考比较（建议）", locale)}</>}><p>{t("首次使用后，建议在已知稳态相上比较参考 CV、分布与异常几何。短数值检查不代表物理适用性或采样收敛。", locale)}</p><p>{p.entry.stablePhase?.status||'not_run'}</p><button type="button" disabled={busy} onClick={()=>p.onDiscuss({reason:'stable_phase',includePrivate:shared,...shared?{entryId:p.entry.id}:{}})}>{t("讨论稳态相验证方案", locale)}</button></Disclosure>
- <footer><div><Disclosure summary={<>{t("保存记录标识", locale)}</>}><small>spec SHA256 {p.entry.expected.specSha||'—'} · parameters SHA256 {p.entry.expected.parametersSha||'—'}</small></Disclosure>{dirty&&<Notice compact >{t("本地修改尚未保存，切换页面或会话仍会保留。关闭应用前请保存；之前的确认与数值记录不适用于这些修改。", locale)}</Notice>}</div><button type="button" disabled={busy} onClick={()=>{clearSessionDraft(draftKey,stored?.version);void operation(p.onReload);}}>{t(dirty ? "放弃本地修改并刷新" : "刷新实际记录", locale)}</button><button type="button" data-testid="custom-primary" disabled={action.disabled} onClick={()=>void action.run()}>{busy?t("处理中…", locale):action.text}</button></footer>
+ <footer><div><Disclosure summary={<>{t("保存记录标识", locale)}</>}><small>spec SHA256 {p.entry.expected.specSha||'—'} · parameters SHA256 {p.entry.expected.parametersSha||'—'}</small></Disclosure>{dirty&&<Notice compact >{t("本地修改尚未保存，切换页面或会话仍会保留。关闭应用前请保存；之前的确认与数值记录不适用于这些修改。", locale)}</Notice>}</div><button type="button" disabled={busy} onClick={()=>{clearSessionDraft(draftKey,stored?.version);void operation(p.onReload);}}>{t(dirty ? "放弃本地修改并刷新" : "刷新实际记录", locale)}</button><Button variant="primary" data-testid="custom-primary" disabled={action.disabled} aria-busy={busy} onClick={()=>void action.run()}>{action.text}</Button></footer>
  </section>;
 }

@@ -80,10 +80,10 @@ export default function PygasPortConnections({graph,node,ports,catalog,contract,
       onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>⠿</span>}
      {preview(edge.source,port,allowed.some(source=>sameEndpoint(source,edge.source)),multiple?index:undefined)}
      <div className="pg-edge-actions">
-      <Button variant="icon" size="sm" type="button" disabled={disabled} aria-label={'Remove connection '+node.id+' '+port+' '+index} onClick={()=>onChange(removeInputEdge(graph,edge),port)}>×</Button>
+      <Button variant="icon" size="sm" type="button" disabled={disabled} disabledReason={t('当前暂不可编辑', locale)} aria-label={'Remove connection '+node.id+' '+port+' '+index} onClick={()=>onChange(removeInputEdge(graph,edge),port)}>×</Button>
       {multiple&&<>
-      <Button variant="icon" size="sm" type="button" disabled={disabled||index===0} aria-label={'Move up '+node.id+' '+index} onClick={()=>onReorder(edge,-1)}>↑</Button>
-      <Button variant="icon" size="sm" type="button" disabled={disabled||index===edges.length-1} aria-label={'Move down '+node.id+' '+index} onClick={()=>onReorder(edge,1)}>↓</Button>
+      <Button variant="icon" size="sm" type="button" disabled={disabled||index===0} disabledReason={t(disabled?'当前暂不可编辑':'已在首位', locale)} aria-label={'Move up '+node.id+' '+index} onClick={()=>onReorder(edge,-1)}>↑</Button>
+      <Button variant="icon" size="sm" type="button" disabled={disabled||index===edges.length-1} disabledReason={t(disabled?'当前暂不可编辑':'已在末位', locale)} aria-label={'Move down '+node.id+' '+index} onClick={()=>onReorder(edge,1)}>↓</Button>
       </>}
      </div>
     </div>)}

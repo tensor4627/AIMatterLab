@@ -1,6 +1,7 @@
 import Button from '../../ui/Button';
 import Disclosure from '../../ui/Disclosure';
 import Notice from '../../ui/Notice';
+import {EmptyState, ErrorState, LoadingState} from '../../ui/States';
 import {useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {FileText,FolderOpen,FolderSearch,PackagePlus,Plug,ScrollText} from 'lucide-react';
 import type {TypedInvoke} from '../../../contracts/dto/ipc';
@@ -8,7 +9,7 @@ import type {ResourceToolDiscovery,ResourceToolLibrary,ResourceToolManifest,Reso
 import {invoke} from '../../api/studio';
 import {t} from '../../ui/i18n';
 import {editJsonDraft,inspectJsonDraft,isJsonObject,jsonDraftIssue} from '../../ui/json-draft.mjs';
-import ResourceToolInterfaceEditor,{interfaceJsonLabels} from './ResourceToolInterfaceEditor';
+import ResourceToolInterfaceEditor,{type InterfaceJsonField} from './ResourceToolInterfaceEditor';
 import './resource-tool-setup.css';
 
 const request:TypedInvoke=invoke;
@@ -19,16 +20,19 @@ const statuses:Record<ResourceToolSetup['status'],string>={planned:'待确认测
 const activeStatus=(value:ResourceToolSetup['status'])=>['acquiring','desktop_fallback','testing','unknown'].includes(value);
 const targetKey=(target:ResourceToolTarget)=>JSON.stringify([target.project_id,target.cluster_id,target.environment_id,target.queue_target_id]);
 const errorText=(error:unknown)=>error instanceof Error?error.message:String(error);
-function parseJson(value:string,label:string):unknown{
+class ResourceToolJsonIssue extends Error {
+ constructor(readonly field:InterfaceJsonField,message:string){super(message);}
+}
+function parseJson(value:string,field:InterfaceJsonField):unknown{
  const document=inspectJsonDraft(value);
- if(!document)throw Error(`${t(label)} · ${t('JSON 语法有误。')}`);
+ if(!document)throw new ResourceToolJsonIssue(field,'JSON 语法有误。');
  const issue=jsonDraftIssue(document);
- if(issue)throw Error(`${t(label)} · ${t(issue==='duplicate'?'JSON 对象中有重复键。':'JSON 数值超出可保存的精度。')}`);
+ if(issue)throw new ResourceToolJsonIssue(field,issue==='duplicate'?'JSON 对象中有重复键。':'JSON 数值超出可保存的精度。');
  return document.value;
 }
-function parseObject<T>(value:string,label:string):T{
- const result=parseJson(value,label);
- if(!isJsonObject(result))throw Error(`${t(label)} · ${t('请填写 JSON 对象。')}`);
+function parseObject<T>(value:string,field:InterfaceJsonField):T{
+ const result=parseJson(value,field);
+ if(!isJsonObject(result))throw new ResourceToolJsonIssue(field,'请填写 JSON 对象。');
  return result as T;
 }
 function latestReceipt(previous:ResourceToolSetup|undefined,row:ResourceToolSetup){
@@ -50,12 +54,12 @@ function assemble(form:Form):ResourceToolManifest{
  const source:ResourceToolSource=form.sourceKind==='installed'?{kind:'installed',executable,...pin?{sha256:pin}:{}}:
   form.sourceKind==='git'?{kind:'git',url,commit:pin,executable}:
   {kind:form.sourceKind,...url?{url}:{},sha256:pin,filename:form.filename.trim(),executable};
- const args=parseJson(form.argv,interfaceJsonLabels.argv);
- if(!Array.isArray(args)||!args.every(value=>typeof value==='string'))throw Error(`${t(interfaceJsonLabels.argv)} · ${t('运行参数必须是 JSON 字符串列表。')}`);
- const io=parseObject<Pick<ResourceToolManifest,'inputs'|'outputs'>>(form.io,interfaceJsonLabels.io);
+ const args=parseJson(form.argv,'argv');
+ if(!Array.isArray(args)||!args.every(value=>typeof value==='string'))throw new ResourceToolJsonIssue('argv','运行参数必须是 JSON 字符串列表。');
+ const io=parseObject<Pick<ResourceToolManifest,'inputs'|'outputs'>>(form.io,'io');
  const conflicts=['id','name','version','source','interpreter','argv','test'].filter(key=>Object.hasOwn(io,key));
- if(conflicts.length)throw Error(`${t(interfaceJsonLabels.io)} · ${t('请在对应字段编辑这些配置。')} ${conflicts.join(', ')}`);
- const test=parseObject<ResourceToolManifest['test']>(form.test,interfaceJsonLabels.test);
+ if(conflicts.length)throw new ResourceToolJsonIssue('io',`${t('请在对应字段编辑这些配置。')} ${conflicts.join(', ')}`);
+ const test=parseObject<ResourceToolManifest['test']>(form.test,'test');
  return {...url?{citations:[{url,version:form.version.trim()}]}:{},...io,id:form.id.trim(),name:form.name.trim(),version:form.version.trim(),source,...form.interpreter?{interpreter:form.interpreter}:{},argv:args,test};
 }
 
@@ -68,12 +72,14 @@ export default function ResourceToolSetup(props:Props){
  return <ResourceToolSetupPanel key={JSON.stringify([props.resourceId,props.profileVersion])} {...props}/>;
 }
 function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialRoute,missingTool,newPlanAfter,suspended=false,onDiscuss,onConfigureTarget,onClose,onRoute}:Props){
+ const [manualExpanded,setManualExpanded]=useState(false);
  const [route,setRoute]=useState(initialRoute),[form,setForm]=useState(()=>startForm(initialRoute||'fresh',missingTool));
  const [library,setLibrary]=useState<ResourceToolLibrary|null>(null),[selected,setSelected]=useState(''),[target,setTarget]=useState('');
  const [directory,setDirectory]=useState(''),[discovery,setDiscovery]=useState<ResourceToolDiscovery|null>(null),[candidateId,setCandidateId]=useState(''),[remote,setRemote]=useState('');
  const [description,setDescription]=useState('');
  const [localSource,setLocalSource]=useState<SelectedSource|null>(null),[manual,setManual]=useState<SelectedSource|null>(null);
  const [action,setAction]=useState(''),[reading,setReading]=useState(false),[error,setError]=useState('');
+ const [jsonIssue,setJsonIssue]=useState<ResourceToolJsonIssue|null>(null);
  const pending=action||(reading?'正在读取资源工具…':'');
  const lifetime=useRef<SetupLifetime|null>(null),planIdentity=useRef<{stamp:string;id:string}|null>(null);
  const selectedOwner=useRef(''),reviewedPlan=useRef<string[]|undefined>(undefined);
@@ -110,10 +116,10 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
    // This snapshot may precede the action's receipt. Refresh once the action settles.
    owner.listRequest=null;owner.refreshAfterAction=true;setReading(false);
   }
-  owner.busy=true;owner.actionVersion++;setAction(label);setError('');
+  owner.busy=true;owner.actionVersion++;setAction(label);setError('');setJsonIssue(null);
   const current=()=>lifetime.current===owner;
   try{await work(current);}
-  catch(error){if(current())setError(errorText(error));}
+  catch(error){if(current()){if(error instanceof ResourceToolJsonIssue)setJsonIssue(error);else setError(errorText(error));}}
   finally{
    if(current()){
     owner.busy=false;setAction('');
@@ -164,9 +170,12 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
  },[suspended,resourceId,profileVersion,receiptId,receiptStatus,accept]);
  function switchRoute(next:ResourceToolRoute){
   if(!receipt&&route===next)return;
-  reviewedPlan.current=newPlanAfter;selectSetup('');setRoute(next);setForm(startForm(next,missingTool));setError('');setCandidateId('');setDiscovery(null);setDescription('');setLocalSource(null);setManual(null);onRoute?.(next);
+  reviewedPlan.current=newPlanAfter;selectSetup('');setRoute(next);setForm(startForm(next,missingTool));setError('');setJsonIssue(null);setCandidateId('');setDiscovery(null);setDescription('');setLocalSource(null);setManual(null);setManualExpanded(false);onRoute?.(next);
  }
- function patch<K extends keyof Form>(key:K,value:Form[K]){setForm(previous=>({...previous,[key]:value}));}
+ function patch<K extends keyof Form>(key:K,value:Form[K]){
+  setForm(previous=>({...previous,[key]:value}));
+  if(jsonIssue?.field===key)setJsonIssue(null);
+ }
  async function discover(current:()=>boolean){
   const observed=await request('tools.resource.discover',{...base,directory:directory.trim()});
   if(current()){setDiscovery(observed);setCandidateId('');}
@@ -219,10 +228,8 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
   {setups.length>0&&<Disclosure open={!route&&!receipt} summary={<>{t('此资源的工具与配置记录')}</>}><ul className="resource-tool-list">{setups.map(row=><li key={row.id}>
    <button type="button" className="text-button" disabled={!!pending} onClick={()=>{selectSetup(row.id);setRoute(row.route);setError('');}}>{row.manifest.name} · {row.manifest.version}</button><span>{t(statuses[row.status])}</span></li>)}</ul></Disclosure>}
   {route&&!receipt&&<>
-   {!targets.length&&library&&<Notice compact severity="warning"><p>{t('没有可用的测试目标。请先在该资源登记调度器、计算环境和项目授权。')}</p>{onConfigureTarget&&<div className="button-row">
-    <Button  data-testid="resource-tool-configure-scheduler" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('scheduler')}>{t('打开此资源的调度器设置')}</Button>
-    <Button  data-testid="resource-tool-configure-project" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('project')}>{t('设置项目授权')}</Button>
-   </div>}</Notice>}
+   {!targets.length&&library&&<EmptyState title={t('没有可用的测试目标')} body={t('没有可用的测试目标。请先在该资源登记调度器、计算环境和项目授权。')} action={onConfigureTarget&&<Button data-testid="resource-tool-configure-scheduler" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('scheduler')}>{t('打开此资源的调度器设置')}</Button>}/>}
+   {!targets.length&&library&&onConfigureTarget&&<Button data-testid="resource-tool-configure-project" type="button" disabled={!!pending} onClick={()=>onConfigureTarget('project')}>{t('设置项目授权')}</Button>}
    {route==='existing'&&<section className="resource-tool-discovery" data-guide-target="resource-tool-discover" aria-label={t('查找已有脚本')}>
     <label>{t('远端脚本目录')}<input data-testid="resource-tool-scan-path" value={directory} onChange={event=>{setDirectory(event.currentTarget.value);setDiscovery(null);setCandidateId('');}} disabled={!!pending}/></label>
     <Button type="button"  data-testid="resource-tool-scan" disabled={!!pending||!directory.trim()} onClick={()=>void act('正在只读扫描…',discover)}><FolderSearch size={16}/>{t('扫描脚本')}</Button>
@@ -246,9 +253,9 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
    </div>}
    {onDiscuss&&<div className="resource-tool-discuss" data-guide-target="resource-tool-discuss">
     <label>{t('告诉助手手头有什么')}<textarea data-testid="resource-tool-description" rows={2} value={description} onChange={event=>setDescription(event.currentTarget.value)} placeholder={t(route==='fresh'?'工具名称、版本或公开来源':route==='existing'?'已用脚本的用途或已有测试结果':'程序、脚本或手册的位置，以及想得到的输出')}/></label>
-    <Button variant="primary" type="button"  data-testid="resource-tool-discuss" disabled={!!pending} onClick={discuss}>{t('让 Agent 帮我配置')}</Button>
+    <Button variant={manualExpanded&&picked?'secondary':'primary'} type="button" data-testid="resource-tool-discuss" disabled={!!pending} onClick={discuss}>{t('让 Agent 帮我配置')}</Button>
    </div>}
-   <Disclosure className="resource-tool-manual" data-testid="resource-tool-manual" summary={<>{t('手动填写工具配置')}</>}>
+   <Disclosure variant="section" className="resource-tool-manual" data-testid="resource-tool-manual" open={manualExpanded} onToggle={event=>setManualExpanded(event.currentTarget.open)} summary={<>{t('手动填写工具配置')}</>}>
    <form className="resource-tool-form" onSubmit={event=>{event.preventDefault();void act('正在准备配置预览…',plan);}}>
     <fieldset disabled={!!pending}><legend>{t('工具与版本')}</legend><div className="resource-tool-grid">
      {field('name','工具名称',true)}{field('id','工具 ID',true,'my-tool')}{field('version','工具版本',true,'1.0.0')}
@@ -264,10 +271,13 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
      <label>{t('解释器')}<select value={form.interpreter} onChange={event=>patch('interpreter',event.currentTarget.value as Form['interpreter'])}><option value="">{t('直接执行')}</option><option value="bash">Bash</option><option value="python">Python</option></select></label>
     </div></fieldset>
     <fieldset disabled={!!pending}><legend>{t('运行接口与最小测试')}</legend>
-     <ResourceToolInterfaceEditor key={route} values={form} onRaw={patch} onEdit={(field,path,value)=>setForm(previous=>({...previous,[field]:editJsonDraft(previous[field],path,value)}))}/>
+     <ResourceToolInterfaceEditor key={route} values={form} issue={jsonIssue} onRaw={patch} onEdit={(field,path,value)=>{
+      setForm(previous=>({...previous,[field]:editJsonDraft(previous[field],path,value)}));
+      if(jsonIssue?.field===field)setJsonIssue(null);
+     }}/>
     </fieldset>
     {route==='existing'&&field('priorRun','原测试运行 ID（如有）')}
-    <div className="button-row"><Button type="submit" data-testid="resource-tool-plan" disabled={!!pending||!picked}>{t('核对配置与最小测试')}</Button></div>
+    <div className="button-row"><Button variant={picked?'primary':'secondary'} type="submit" data-testid="resource-tool-plan" disabled={!!pending||!picked}>{t('核对配置与最小测试')}</Button></div>
    </form></Disclosure>
   </>}
   {receipt&&<section className="resource-tool-receipt" data-testid="resource-tool-receipt" data-guide-target="resource-tool-receipt">
@@ -307,6 +317,6 @@ function ResourceToolSetupPanel({resourceId,profileVersion,resourceName,initialR
     <Button type="button"  data-testid="resource-tool-refresh" disabled={!!pending} onClick={()=>apply('status')}>{t('核对原配置回执')}</Button>
    </div>
   </section>}
-  {pending&&<Notice compact >{t(pending)}</Notice>}{error&&<Notice compact severity="error"  >{error}<button type="button" className="text-button" disabled={!!pending} onClick={()=>void updateLibrary(true)}>{t('刷新状态')}</button></Notice>}
+  {pending&&<LoadingState label={t(pending)}/>}{error&&<ErrorState title={t('暂时无法核对资源工具')} retained={t('本地修改仍保留。')} details={<pre>{error}</pre>} action={<Button disabled={!!pending} onClick={()=>void updateLibrary(true)}>{t('刷新状态')}</Button>}/>}
  </section>;
 }

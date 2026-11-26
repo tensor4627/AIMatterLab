@@ -2,7 +2,7 @@ import Button from '../../ui/Button';
 import Notice from '../../ui/Notice';
 import Disclosure from '../../ui/Disclosure';
 import {taskDraftStorage} from './task-draft-storage';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {ErrorState, LoadingState} from '../../ui/States';
 import {useDeploymentContext} from "./useDeploymentContext";
 import ConsumerTargetReview from './ConsumerTargetReview';
 import {consumerTargetApi} from "../../api/consumer-stage-client";
@@ -135,7 +135,7 @@ export default function DeploymentPanel({task,worker:connected,restoring=false,p
   <div><h1>{t('运行设置')}</h1><p>{task.name}{task.parameters?.engine&&<code> · {task.parameters.engine}</code>}</p></div>
   <Button  onClick={()=>onTask(task.id)}><ArrowLeft size={15}/>{t('返回计算流程')}</Button>
  </div>
- <LoadingFeedback busy={busy||draftSaving||reconnecting||runPending?.scope===current.current.scope&&runPending.sequence===runSequence.current||previewPending?.scope===current.current.scope&&previewPending.sequence===inspectSequence.current} label={busy?busyLabel:reconnecting?t('正在连接…'):draftSaving?t('正在保存部署…'):previewPending?.scope===current.current.scope&&previewPending.sequence===inspectSequence.current?t('正在读取输入预览…'):t('正在核对运行状态…')}/>
+ <LoadingState busy={busy||draftSaving||reconnecting||runPending?.scope===current.current.scope&&runPending.sequence===runSequence.current||previewPending?.scope===current.current.scope&&previewPending.sequence===inspectSequence.current} label={busy?busyLabel:reconnecting?t('正在连接…'):draftSaving?t('正在保存部署…'):previewPending?.scope===current.current.scope&&previewPending.sequence===inspectSequence.current?t('正在读取输入预览…'):t('正在核对运行状态…')}/>
  {localReady&&<Notice compact announce={false}  data-testid="local-deployment-authority">{t(consumerHuman?'本地输入复核已记录；可选人工核对目标，执行时检查实际产物和环境。':'本地人工输入复核仅用于所审阅的本机环境；AI状态未改变。')}</Notice>}
  {!!inputFindings.length&&<Disclosure className="deployment-check-details" data-testid="deployment-input-findings" summary={<>{t('输入检查提示')} · {inputFindings.length}</>}><ul>{inputFindings.map((finding:any,index:number)=><li key={finding.code+':'+index}>{t(finding.message)}</li>)}</ul></Disclosure>}
  {!ready&&(scienceDraft.pendingCount||task.workspaceChoice==='pending')&&<Notice compact severity="error"  >{t(scienceDraft.pendingCount?'科学参数仍有未保存的修改，请返回流程保存后复核。':'请先选择工作区或沿用草稿目录。')}</Notice>}
@@ -158,7 +158,7 @@ export default function DeploymentPanel({task,worker:connected,restoring=false,p
  <div className="button-row"><Button  data-testid="save-deployment" disabled={!project||!config.targetId||!!configIssue} onClick={()=>void save()}><Save size={15}/>{t('保存部署')}</Button><Button  data-testid="prepare-deployment" disabled={activeAttempt||!contextReady||!ready||!!projectIssue||targetMissing||!!configIssue||!!queueIssue} onClick={()=>void prepare()}><PackageCheck size={15}/>{t('准备提交草稿')}</Button></div></fieldset>
  {contextReady&&!projectIssue&&configIssue&&<Notice compact  >{configIssue}</Notice>}
  {task.deploymentProjectIntent?.status==='creating'&&<Notice compact announce={false} >{t('项目创建结果尚待核对，已保留原请求，不会重复创建。')}<Button  disabled={busy||!contextReady} onClick={()=>void createProject(task.deploymentProjectIntent.spec).catch(onError)}>{t('核对创建结果')}</Button></Notice>}
- {(draftError||outbox.error)&&<Notice compact severity="error"   data-testid="deployment-draft-error"><InlineDiagnostic error={draftError||outbox.error}/>{t('本机部署修改已保留；保存成功前不能执行。')}<Button  disabled={!contextReady||draftSaving} onClick={()=>void flushDraft().catch(()=>{})}>{t('重试保存')}</Button></Notice>}
+ {(draftError||outbox.error)&&<ErrorState data-testid="deployment-draft-error" title={t('部署草稿尚未保存')} retained={t('本机部署修改已保留；保存成功前不能执行。')} details={<InlineDiagnostic error={draftError||outbox.error}/>} action={<Button disabled={!contextReady||draftSaving} onClick={()=>void flushDraft().catch(()=>{})}>{t('重试保存')}</Button>}/>}
  <Notice compact className="muted"  data-testid="deployment-draft-status">{t(draftSaving?'正在保存部署草稿…':outbox.pending?'部署修改已保留在本机，等待保存。':task.deploymentDraft?'部署草稿已随流程保存。':'')}</Notice>
  {consumerTarget&&!targetConfirmed&&<Notice compact className="deployment-check-summary"  data-testid="deployment-target-advisory">{t('消费端目标尚未人工核对；可继续运行，执行时检查实际产物和目标环境。')}</Notice>}
  {consumerHuman&&saved&&<ConsumerTargetReview taskId={task.id} revision={task.parameterRevision||0} deploymentRevision={task.deployment?.revision||0} workerReady={worker} disabled={compositionDirty||busy} language={getLanguage()} api={consumerTargetApi} onConfirmed={async()=>{await onRefresh();setTargetNonce(n=>n+1);}}/>}

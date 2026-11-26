@@ -53,7 +53,7 @@
     overflow-wrap: anywhere;
   }
 
-  .pg-composer button,.pg-composer input,.pg-composer select {
+  .pg-composer button:not(.aml-button),.pg-composer input,.pg-composer select {
     font: inherit;
     line-height: 1.4;
     max-width: 100%;
@@ -61,7 +61,7 @@
     min-height: 34px;
   }
 
-  .pg-composer button {
+  .pg-composer button:not(.aml-button) {
     cursor: pointer;
     border: 1px solid var(--pg-border);
     background: var(--pg-panel);
@@ -70,12 +70,12 @@
     white-space: normal;
   }
 
-  .pg-composer button:disabled {
+  .pg-composer button:not(.aml-button):disabled {
     opacity: .4;
     cursor: default;
   }
 
-  .pg-composer button:focus-visible,.pg-composer input:focus-visible,.pg-composer select:focus-visible,.pg-composer summary:focus-visible {
+  .pg-composer button:not(.aml-button):focus-visible,.pg-composer input:focus-visible,.pg-composer select:focus-visible,.pg-composer summary:focus-visible {
     outline: 2px solid var(--pg-accent);
     outline-offset: 3px;
   }
@@ -237,6 +237,13 @@
 
   .pg-status-button {
     align-self: center;
+  }
+
+  .pg-status-complete {
+    display: grid;
+    min-inline-size: 28px;
+    min-block-size: 28px;
+    place-items: center;
   }
 
   .pg-composer .pg-node-toggle {
@@ -912,10 +919,6 @@
   .pg-composer .pg-footer>div {
     flex: 1 1 12rem;
     overflow-wrap: anywhere;
-  }
-
-  .pg-composer .pg-footer .pg-button {
-    background: var(--accent-bg);
   }
 
   .composition-toolbar>.button,.composition-toolbar>div>.button {

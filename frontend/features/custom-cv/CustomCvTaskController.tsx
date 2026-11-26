@@ -53,9 +53,10 @@ export default function CustomCvTaskController(p:{workerReady?:boolean;taskId:st
   retained={t('本地修改仍保留。', locale)} details={error&&<pre>{error}</pre>}
   action={<Button onClick={()=>void load()}>{t("重试", locale)}</Button>}/>;
  if(!data.entry)return <section className="custom-cv-empty">{!workerReady&&workerNotice}
-  <EmptyState title={t("先讨论缺少的数学定义", locale)}
+  {loading&&<LoadingState label={t("读取实际私有 CV 记录…", locale)}/>}
+  {error?<ErrorState title={t("私有 CV 记录暂不可用", locale)} retained={t("本地修改仍保留。", locale)} details={<pre>{error}</pre>}/>:!loading&&<EmptyState title={t("先讨论缺少的数学定义", locale)}
    body={t("当前流程尚无自定义定义。优先使用实际 pyGAS 类库；确实不能组合表达时，在当前会话讨论公式、单位、定义域和参数。此时不会生成代码。", locale)}
-   action={<Button variant="primary" onClick={()=>p.onDiscussion({taskId:p.taskId,reason:'formula',includePrivate:false})}>{t("在当前会话讨论", locale)}</Button>}/>
+   action={<Button variant="primary" onClick={()=>p.onDiscussion({taskId:p.taskId,reason:'formula',includePrivate:false})}>{t("在当前会话讨论", locale)}</Button>}/>}
   <Button disabled={loading||!workerReady} onClick={()=>void load()}>{t("刷新实际库", locale)}</Button>
   <CustomCvLibrary entries={data.entries} busy={loading||!!busy||!workerReady} reuseSupported={data.capabilities.reuse===true} language={p.language} onReuse={(id,expected)=>reuse(id,expected).catch(()=>{})}/>
  </section>;

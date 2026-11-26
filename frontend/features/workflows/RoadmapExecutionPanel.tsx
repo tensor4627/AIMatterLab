@@ -1,5 +1,6 @@
 import Disclosure from '../../ui/Disclosure';
 import Notice from '../../ui/Notice';
+import {EmptyState, ErrorState, LoadingState} from '../../ui/States';
 import Button from '../../ui/Button';
 import {useEffect,useRef,useState} from 'react';
 import type {TypedInvoke} from '../../../contracts/dto/ipc';
@@ -105,13 +106,14 @@ export default function RoadmapExecutionPanel({taskId,revision,connected,disable
   {!configured&&<p>{t('请先保存计算项目与部署目标。')}</p>}
   {configured&&<Disclosure summary={<>{t(cluster?'各步骤的队列与环境':'各步骤的计算环境')}</>}>{nodes.map(node=><label key={node.id}>{node.label} <select disabled={busy||disabled} value={selected[node.id]||''} onChange={event=>setSelected({...selected,[node.id]:event.target.value})}>
    <option value="">{t(cluster?'部署队列':'部署环境')} · {defaultEnvironment}</option>{(cluster?queueOptions:environments).map(env=><option key={env.id} value={env.id}>{env.name} · {env.id}</option>)}</select></label>)}</Disclosure>}
-  <div className="button-row"><Button  data-testid="roadmap-preview" data-guide-target="roadmap-preview" disabled={busy||disabled||!connected||!configured} onClick={()=>void act(false)}>{t('核对执行快照')}</Button>
+  <div className="button-row"><Button variant={review?'secondary':'primary'} data-testid="roadmap-preview" data-guide-target="roadmap-preview" disabled={busy||disabled||!connected||!configured} onClick={()=>void act(false)}>{t('核对执行快照')}</Button>
    {review&&<Button variant="primary"  data-testid="roadmap-confirm" data-guide-target="roadmap-confirm" disabled={busy||disabled||!connected||!configured} onClick={()=>void act(true)}>{t('确认并执行整张图')}</Button>}
    <Button  disabled={!canReadHistory||busy} onClick={()=>setReload(x=>x+1)}>{t('刷新回执')}</Button></div>
   {error&&<Notice compact severity="error" >{error}</Notice>}
   {missing.length>0&&<Notice severity="warning" className="roadmap-missing-tools" data-testid="roadmap-missing-tools"><strong>{t('流程缺少工具')}</strong><ul>{missing.map(item=><li key={item.step_id}>{nodes.find(node=>node.id===item.step_id)?.label||item.step_id} · {item.tool}<p>{item.reason==='tool_not_configured'?t('此工具尚未在当前资源上配置。'):item.reason}</p>{onMissingTool&&<Button  type="button" disabled={busy} data-testid="roadmap-missing-tool-setup" onClick={()=>onMissingTool(item.tool)}>{t('让 Agent 配置')}</Button>}</li>)}</ul><button className="text-button" type="button" onClick={()=>{setMissing([]);onMissingToolQuestion?.();}}>{t('稍后')}</button></Notice>}
   {review&&<Snapshot review={review}/>}
-  {historyError&&<Notice compact severity="error" >{historyError}</Notice>}
+  {open&&canReadHistory&&!history&&!historyError&&<LoadingState label={t('正在读取执行回执…')}/>}
+  {historyError&&<ErrorState title={t('暂时无法读取执行回执')} retained={t('本地修改仍保留。')} details={<pre>{historyError}</pre>} action={<Button disabled={!canReadHistory||busy} onClick={()=>setReload(x=>x+1)}>{t('重试')}</Button>}/>}
   {history?.map(row=><section className="roadmap-receipt" key={row.id} aria-label={t('执行回执')} data-guide-target="roadmap-results"><h4>{stateText(row.status)} · {row.id.slice(0,12)}</h4>
    {row.directory&&<Disclosure summary={<>{t('本次运行目录')}</>}><code>{row.directory}</code></Disclosure>}
    <FrozenSnapshot taskId={taskId} id={row.id} reload={reload}/>
@@ -121,6 +123,6 @@ export default function RoadmapExecutionPanel({taskId,revision,connected,disable
    {row.goals.map(goal=><Disclosure key={goal.resource} summary={<>{goal.label} · {stateText(goal.status)}</>}>{goal.artifact&&<p>{goal.artifact.path} · {goal.artifact.sha256}</p>}
     {goal.checks.map((check,i)=><p key={i}>{check.requirement} · {stateText(check.status)} {check.observed!==undefined&&JSON.stringify(check.observed)}</p>)}</Disclosure>)}
   </section>)}
-  {open&&history?.length===0&&!historyError&&<p className="muted" data-guide-target="roadmap-empty">{t('这张流程图暂无执行回执。')}</p>}
+  {open&&history?.length===0&&!historyError&&<EmptyState data-guide-target="roadmap-empty" title={t('暂无执行回执')} body={t('这张流程图暂无执行回执。')}/>}
  </Disclosure>;
 }

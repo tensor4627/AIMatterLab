@@ -1,12 +1,13 @@
 import Button from '../../ui/Button';
-import {useId,useMemo,useRef,useState} from 'react';
+import Field from '../../ui/Field';
+import {useEffect,useId,useMemo,useRef,useState} from 'react';
 import {t} from '../../ui/i18n';
 import {inspectJsonDraft,isJsonObject,jsonDraftValueSource,type JsonDraft} from '../../ui/json-draft.mjs';
 
-export const interfaceJsonLabels={argv:'命令参数（JSON）',io:'输入输出（JSON）',test:'测试输入与资源（JSON）'} as const;
-type Field=keyof typeof interfaceJsonLabels;
+const interfaceJsonLabels={argv:'命令参数（JSON）',io:'输入输出（JSON）',test:'测试输入与资源（JSON）'} as const;
+export type InterfaceJsonField=keyof typeof interfaceJsonLabels;
 type Edit=(path:readonly (string|number)[],encoded?:string)=>void;
-type Props={values:Record<Field,string>;onRaw:(field:Field,source:string)=>void;onEdit:(field:Field,...args:Parameters<Edit>)=>void};
+type Props={values:Record<InterfaceJsonField,string>;issue?:{field:InterfaceJsonField;message:string}|null;onRaw:(field:InterfaceJsonField,source:string)=>void;onEdit:(field:InterfaceJsonField,...args:Parameters<Edit>)=>void};
 const portName=/^[A-Za-z][A-Za-z0-9_-]{0,62}$/;
 const jsonNumber=/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 const testNumbers=[
@@ -113,8 +114,9 @@ function TestEditor({document,recipe,inputPorts,edit}:{document:JsonDraft;recipe
  </section>;
 }
 
-export default function ResourceToolInterfaceEditor({values,onRaw,onEdit}:Props){
+export default function ResourceToolInterfaceEditor({values,issue,onRaw,onEdit}:Props){
  const [advanced,setAdvanced]=useState(false),advancedId=useId();
+ useEffect(()=>{if(issue)setAdvanced(true);},[issue]);
  const argv=useMemo(()=>inspectJsonDraft(values.argv),[values.argv]);
  const io=useMemo(()=>inspectJsonDraft(values.io),[values.io]);
  const test=useMemo(()=>inspectJsonDraft(values.test),[values.test]);
@@ -132,7 +134,9 @@ export default function ResourceToolInterfaceEditor({values,onRaw,onEdit}:Props)
   <section className="resource-tool-advanced">
    <Button  type="button" data-testid="resource-tool-advanced-json" aria-expanded={advanced} aria-controls={advancedId} onClick={()=>setAdvanced(previous=>!previous)}>{t('高级 JSON 配置')}</Button>
    <div id={advancedId} className="resource-tool-code-grid" hidden={!advanced}>
-    {(['argv','io','test'] as const).map(field=><label key={field}>{t(interfaceJsonLabels[field])}<textarea data-testid={'resource-tool-'+field} spellCheck={false} rows={4} value={values[field]} onChange={event=>onRaw(field,event.currentTarget.value)}/></label>)}
+    {(['argv','io','test'] as const).map(field=><Field label={t(interfaceJsonLabels[field])} key={field} error={issue?.field===field?t(issue.message):undefined}>
+     {props=><textarea {...props} data-testid={'resource-tool-'+field} spellCheck={false} rows={4} value={values[field]} onChange={event=>onRaw(field,event.currentTarget.value)}/>}
+    </Field>)}
     <small>{t('每个端口填写 filename 和 format。可选 parameters 和 dependencies。')}</small>
     <small>{t('测试输入可给 path 或 text。max_seconds 设置时间上限。')}</small>
     <small>{t('缺少 Git 时，可在输入输出 JSON 中添加 git_bootstrap。填写 kind 为 archive，并提供 filename、executable 和 sha256。url 可省略，确认后再选本机归档或填写集群路径。')}</small>

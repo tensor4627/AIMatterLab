@@ -33,7 +33,7 @@
     overflow-wrap: anywhere;
   }
 
-  .custom-cv-workbench input,.custom-cv-workbench textarea,.custom-cv-workbench select,.custom-cv-workbench button {
+  .custom-cv-workbench input,.custom-cv-workbench textarea,.custom-cv-workbench select,.custom-cv-workbench button:not(.aml-button) {
     font: inherit;
     background: var(--panel);
     color: inherit;
@@ -48,13 +48,13 @@
     width: 100%;
   }
 
-  .custom-cv-workbench button {
+  .custom-cv-workbench button:not(.aml-button) {
     cursor: pointer;
     margin: var(--space-2) var(--space-2) var(--space-2) 0;
     white-space: normal;
   }
 
-  .custom-cv-workbench button:disabled {
+  .custom-cv-workbench button:not(.aml-button):disabled {
     opacity: .45;
     cursor: default;
   }
