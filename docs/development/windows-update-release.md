@@ -1,6 +1,6 @@
 # 发布 Windows 工作区增量更新
 
-GitHub 是源码和正式发行的主仓库。日常开发在 GitHub 提交 Pull Request，合入 `main`；本地 `origin` 指向 GitHub，`nju` 可用于南大 GitLab 备用站。每个正式版本在两站分发同一次构建、验收通过的签名附件。维护者在正式发版时发布版本标签和 Release 附件。
+项目在 GitHub 开发和发布，`origin` 指向 GitHub。维护者把提交、版本标签和签名 Release 附件发布到 GitHub。南大 GitLab 的镜像由仓库所有者配置和维护。
 
 ## 准备签名附件
 
@@ -13,7 +13,7 @@ GitHub 是源码和正式发行的主仓库。日常开发在 GitHub 提交 Pull
 | `AIMatterLab-X.Y.Z-win-x64-setup.exe.blockmap` | 记录安装包中各块的大小和校验值，供不同版本比较。 |
 | `latest.yml` | 签名清单。客户端通过它发现新版，并取得安装包和块索引的大小及 SHA-512。 |
 
-单独上传 `.exe` 可供用户手动安装。要让“检查更新”发现新版，发布源还需提供该版的签名清单。保留本次构建的 `SHA256SUMS.txt`，用于核对两站附件。
+单独上传 `.exe` 可供用户手动安装。应用内“检查更新”还需要签名清单。保留当次构建的 `SHA256SUMS.txt`，用于核对 GitHub 附件。
 
 ## 核对内置指导
 
@@ -40,17 +40,15 @@ GitHub 是源码和正式发行的主仓库。日常开发在 GitHub 提交 Pull
 
 源码或成品检查失败时先修正并重跑。版本文档分别记载 `passed / failed / blocked / not_run` 及实际范围，核对通过后再创建或推送标签。部署兼容标识、旧聊天正文及个人库有自己的生命周期。审核新产品称呼时保留现有路由 ID、资源路径和旧记录的读取兼容性。
 
-## 推送到两站
+## 推送到 GitHub
 
-1. 确认本版「核对内置指导」三项回归通过，并核对成品版本、安装包签名者、签名清单中安装包和块索引的摘要后，在 GitHub 已收录的构建提交上创建 `vX.Y.Z` 标签。获得发布授权后，向 GitHub 和备用站推送本次标签，并确认两站标签都指向同一构建提交。下面以 `v0.1.22` 为例。
+1. 完成「核对内置指导」中的三项核对。将已验收的构建提交推送到 GitHub，在该提交上创建 `vX.Y.Z` 标签并推送到 `origin`，核对远端标签解引用后的提交。下面以 `v0.1.22` 为例。
 
    ```powershell
    git -c push.followTags=false push origin refs/tags/v0.1.22
-   git -c push.followTags=false push nju refs/tags/v0.1.22
    ```
 
 2. 在 **GitHub** 为该标签创建草稿 Release，上传三个文件，再发布为最新正式版。公开清单位于仓库的 `releases/latest/download/latest.yml`，私有附件通过 Release Assets API 读取。
-3. 在**南大 GitLab** 上传同一构建的三个文件，例如存入项目的 Generic Package Registry。为 `vX.Y.Z` 创建正式 Release，挂上三个资产链接，每个链接的 `direct_asset_path` 都设为 `/<原文件名>`。客户端从项目 API 的 `releases/permalink/latest/downloads/latest.yml` 取清单，从 `releases/vX.Y.Z/downloads/<原文件名>` 取附件。GitLab 默认按 `released_at` 选择最新 Release。[GitLab Release API](https://docs.gitlab.com/api/releases/)
 
 0.2.1 源码中的桌面更新器优先采用 GitHub 的有效签名清单。GitHub 清单不可用时查询南大，清单签名无效时停止并报错。已分发的旧客户端仍按其原有顺序查找更新。[发布源实现](../../desktop/platform/update-feeds.mjs) · [更新器实现](../../desktop/platform/workspace-updater.mjs)
 
@@ -67,6 +65,6 @@ GitHub 是源码和正式发行的主仓库。日常开发在 GitHub 提交 Pull
 
 ## 发布后验收
 
-1. 用普通用户的访问权限分别从两站读回最新 `latest.yml`，核对签名和目标版本，并把两站三个附件的 SHA-256 逐一与发布机的 `SHA256SUMS.txt` 比对。私有发行页可在软件更新面板的“私有仓库访问”中按站点配置只读令牌。GitLab 使用 `read_api`，GitHub 使用该仓库的 Contents 只读权限。[GitLab 私有发行附件](https://docs.gitlab.com/user/project/releases/release_fields/) · [GitHub 发行附件](https://docs.github.com/en/rest/releases/assets)
-2. 分别通过两站的版本附件入口向安装包发送 `Range: bytes=0-0`。跟随下载重定向后，应返回 `206 Partial Content`、`Content-Range: bytes 0-0/<安装包总字节数>` 和 1 字节正文。再确认准备支持的旧版块索引能按原标签下载。
+1. 从 GitHub 读回最新 `latest.yml`，核对签名和目标版本，再把三个附件的 SHA-256 与发布机的 `SHA256SUMS.txt` 比对。私有发行页可在更新面板配置该仓库的 Contents 只读权限。[GitHub 发行附件](https://docs.github.com/en/rest/releases/assets)
+2. 通过 GitHub 版本附件入口向安装包发送 `Range: bytes=0-0`。跟随下载重定向后应返回 `206 Partial Content`、`Content-Range: bytes 0-0/<安装包总字节数>` 和 1 字节正文。再确认支持的旧版块索引也能按原标签下载。
 3. 在保有旧安装包缓存的独立 Windows 工作区点击“检查更新”，核对目标版本和预计增量下载量，点击“更新”并在重启后核对实际版本。将发布源、起止版本、下载方式和结果记入该版的发布文档，标明使用线上发行源还是本机测试端点。[0.1.16 验证记录示例](../releases/aimatterlab-0.1.16.md)

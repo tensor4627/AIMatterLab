@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
     tags: ['v?[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Existing tag name (e.g. v0.2.9) or full commit SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,13 +19,61 @@ jobs:
   check-version-skills:
     runs-on: ubuntu-24.04
     steps:
+      - name: Resolve manual source revision
+        if: github.event_name == 'workflow_dispatch'
+        id: manual-ref
+        shell: bash
+        env:
+          REQUESTED_REVISION: ${{ inputs.revision }}
+        run: |
+          if [[ "$REQUESTED_REVISION" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            printf 'ref=%s\n' "${REQUESTED_REVISION,,}" >> "$GITHUB_OUTPUT"
+          else
+            tag="${REQUESTED_REVISION#refs/tags/}"
+            if [[ "$tag" == refs/* ]] || ! git check-ref-format "refs/tags/$tag"; then
+              echo 'Choose an existing tag or a full commit SHA.'
+              exit 1
+            fi
+            printf 'ref=refs/tags/%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ steps.manual-ref.outputs.ref }}
           persist-credentials: false
+      - name: Verify manual source revision
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          REQUESTED_REF: ${{ steps.manual-ref.outputs.ref }}
+        run: |
+          expected="$(git rev-parse --verify "${REQUESTED_REF}^{commit}")"
+          actual="$(git rev-parse --verify HEAD)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo 'The checkout did not match the requested revision.'
+            exit 1
+          fi
+          printf 'Checking source commit %s\n' "$actual"
       - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: 24
           package-manager-cache: false
+      - name: Install pinned official DSH test dependencies
+        shell: bash
+        run: |
+          packages="$(node --input-type=commonjs <<'NODE'
+          const {devDependencies} = require('./package.json')
+          for (const name of ['@deepseek-ai/dsh', '@deepseek-ai/dsh-mcp-client']) {
+            const version = devDependencies?.[name]
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version ?? '')) {
+              throw new Error(`Expected an exact ${name} version in package.json`)
+            }
+            console.log(`${name}@${version}`)
+          }
+          NODE
+          )"
+          mapfile -t specs <<< "$packages"
+          npm install --prefix .studio/agent-runtimes/dsh --no-save --package-lock=false \
+            --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org "${specs[@]}"
       - name: Check contracts, developer kit, links and bundled guidance
         run: |
           node scripts/sync-tool-contracts.mjs --check
