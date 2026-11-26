@@ -48,6 +48,16 @@ test('stable runtime includes exact executable, support, broker and lazy PTY clo
  assert.equal(JSON.stringify(manifest).includes(f.source),false,'Manifest never retains ephemeral source paths');
 });
 
+test('an old unpacked SSH stdio helper does not create a new terminal runtime generation',async t=>{
+ const f=fixture(t),current=await f.prepare();
+ const body='old or locally edited helper fixture';
+ const retired=f.write('resources/terminal-service/native-ssh-stdio.mjs',body);
+ const overlaid=await f.prepare();
+ assert.deepEqual(overlaid,current);
+ assert(!files(overlaid.directory).includes('service/native-ssh-stdio.mjs'));
+ assert.equal(fs.readFileSync(retired,'utf8'),body);
+});
+
 test('published resources remain readable after the entire owned source copy is removed',async t=>{
  const f=fixture(t),result=await f.prepare(),before=files(result.directory).map(name=>[name,fs.readFileSync(path.join(result.directory,name))]);
  fs.rmSync(f.source,{recursive:true,force:true});

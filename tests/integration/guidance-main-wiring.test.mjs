@@ -52,6 +52,7 @@ function harness(t,{state='active',withOtherTool=false,withGuidanceSource=false}
   localSkills:(...args)=>{scans++;return localSkills(...args);},selectedSkillContext:(...args)=>{reads++;return selectedSkillContext(...args);},managedToolSkillContext,sourceContext:()=>{if(withOtherTool)return 'Other registered source metadata';throw Error('No archived source guidance');},
   deliverScientificTurn,toolGuidanceTarget,emit:()=>{},randomUUID,handle:(name,handler)=>handlers.set(name,handler),
  };
+ context.releaseToolSources=[];
  context.resourceRouting=createAgentResourceRouting({resource:()=>null});
  vm.runInNewContext(leaseState.join('\n')+'\n'+functions.join('\n')+'\n'+assignments[0]+';\n'+requestFactories.join('\n')+'\n'+registrations.join(';\n'),context);
  const restore=[],operations={exists:0,readdir:0,stat:0,open:0,read:0};let allowArchivedReads=false;

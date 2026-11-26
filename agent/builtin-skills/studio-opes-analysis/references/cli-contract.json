@@ -3,21 +3,27 @@
   "contract": "studio-pygas-opes-analysis-cli-v1",
   "scope": "Public source-specific authoring companion. It supplies runnable config grammar, not a scientific grid choice, execution authorization, runtime validation or FES convergence. Preserve the original workflow and pinned input; current user delegation governs Prepare/Execute while required artifact/runtime checks remain separate.",
   "source_receipt": {
+    "checkout_fingerprints": "Over the recorded source files, sha256 is the exact LF Git blob, sha256_crlf is its CRLF checkout, and sha256_checkout identifies an observed checkout verified to differ only in line endings. The supplied matcher compares actual byte digests.",
     "local_files": [
       {
         "source_id": "pygas",
         "path": "entrypoints/cli.py",
-        "sha256": "b5abff73000312b315d09e43e387086f86904aee805da81a58bc0864675fa1fb"
+        "sha256": "e4def19816e6c4ea767efadb9de5c7215da61891146d2da635e1ed49ee3b6426",
+        "sha256_crlf": "b5abff73000312b315d09e43e387086f86904aee805da81a58bc0864675fa1fb"
       },
       {
         "source_id": "pygas",
         "path": "base/opes_analysis.py",
-        "sha256": "cc22082439007230fee6fe070fb3e78982bed7168c6676ad2c36e06920016351"
+        "sha256": "1daea0b9b5062dccb36e2150b26a503fe1c014be4d7101e036a80362a06bade3",
+        "sha256_crlf": "cc22082439007230fee6fe070fb3e78982bed7168c6676ad2c36e06920016351"
       },
       {
         "source_id": "pygas",
         "path": "base/opes.py",
-        "sha256": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6"
+        "sha256": "b0e9332ebdff20fcf2fda52ddca409d4da3c544bbd1190151859870219702ff1",
+        "sha256_crlf": "6d9454cc6da99a7ba70146977e4eef9c0555b5875a3fcfefcc07df38faccc432",
+        "sha256_checkout": "dc72c811d67f28822b70b33c60a48ca0908342ba0e5c88f01a830c45cae3f3a6",
+        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8"
       }
     ],
     "public_revision": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
@@ -36,7 +42,7 @@
       }
     ],
     "applicability": {
-      "source_match": "Exact registered raw hashes only; EOL-normalized equality to the declared committed public revision was separately checked. Source mismatch/unavailability means reference_only, not current effective defaults.",
+      "source_match": "Match the exact committed file digests or an explicit verified checkout digest. The three Git blobs are identical in the reviewed public revision and in catalog pyGAS ba5787380181304a0e4c75578c2ecff736737e18. Source mismatch or unavailability leaves this as reference_only.",
       "remote_freshness": "not independently established; no current remote HEAD claim",
       "selected_executable_support": "not_run; source registration is not executable/source correspondence",
       "runtime_and_scientific_validation": "not_run"
@@ -55,8 +61,12 @@
       "fes.yaml"
     ],
     "source": [
-      "worker/studio_worker/engine_contracts.json:pygas.opes-reweight",
-      "worker/studio_worker/adapters.py:Adapter.prepare"
+      "backend/worker/studio_worker/engine_contracts.json:pygas.opes-reweight",
+      "backend/worker/studio_worker/tools/adapters.py:Adapter.prepare"
+    ],
+    "packaged_source": [
+      "resources/app.asar.unpacked/worker/studio_worker/engine_contracts.json:pygas.opes-reweight",
+      "resources/app.asar.unpacked/worker/studio_worker/tools/adapters.py:Adapter.prepare"
     ],
     "guidance": "Use describe_engine and existing authoring context. Bind the authorized same-producer OPES_COLVAR and save fes.yaml in the current owned input root. Save/readback and actual hashes are authoring evidence only; no shell, grant change, automatic submission or numerical data reconstructed from chat."
   },

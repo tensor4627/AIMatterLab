@@ -99,7 +99,7 @@ async function sourcePlan({nodeExecutable,servicePath,dependencyRoot,workspaceCo
  for(const name of ['broker.mjs','session.mjs'])await add(path.join(path.dirname(servicePath),name),'service/'+name);
  const codec=path.join(path.dirname(servicePath),'response-codec.mjs');if(fs.existsSync(codec))await add(codec,'service/response-codec.mjs');
  const launcher=path.join(path.dirname(servicePath),'service-launch.mjs');if(fs.existsSync(launcher))await add(launcher,'service/service-launch.mjs');
- for(const name of ['ssh-connection.mjs','ssh-multiplex-helper.py','native-ssh.mjs','native-ssh-stdio.mjs','native-ssh-relay.py','managed-ssh-shells.mjs','shared-shell-service.mjs','worker-delta.mjs','ssh-service-locations.mjs','workspace-probe.mjs','workspace-command.mjs']){const file=path.join(path.dirname(servicePath),name);if(fs.existsSync(file))await add(file,'service/'+name);}
+ for(const name of ['ssh-connection.mjs','ssh-multiplex-helper.py','native-ssh.mjs','native-ssh-relay.py','managed-ssh-shells.mjs','shared-shell-service.mjs','worker-delta.mjs','ssh-service-locations.mjs','workspace-probe.mjs','workspace-command.mjs']){const file=path.join(path.dirname(servicePath),name);if(fs.existsSync(file))await add(file,'service/'+name);}
  if(entries.some(entry=>entry.path==='service/workspace-command.mjs'))
   await add(workspaceConfinementPath||fileURLToPath(new URL('../../worker/studio_worker/compute/workspace_confinement.py',import.meta.url)),'service/workspace-confinement.py');
  const resolver=createRequire(path.join(dependencyRoot,'runtime.cjs'));

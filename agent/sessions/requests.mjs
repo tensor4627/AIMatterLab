@@ -35,7 +35,7 @@ export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
  const turnFlags=['turn/start','turn/steer'].includes(method)?interactionFlags(params):null;
  const resource=resourceRouting?.capture(provider,params.threadId),selectedSsh=['ssh-terminal','ssh-connection'].includes(resource?.selection?.kind)?resource.selection:null;
  if(turnFlags)resourceRouting?.assertHandoffComplete?.(provider,params.threadId);
- const {studioSkillId,studioTurnRequestId,studioInitialProjectId,studioPlanningThread,studioAttachmentDraftId,studioAttachments,...protocolParams}=params;params=protocolParams;
+ const {studioSkillId,studioTurnRequestId,studioInitialProjectId,studioPlanningThread,studioAttachmentDraftId,studioAttachments,studioToolContext,...protocolParams}=params;params=protocolParams;
  if(studioPlanningThread!==undefined&&(method!=='thread/start'||typeof studioPlanningThread!=='boolean'))throw Error('Planning thread intent belongs to a new conversation');
  if(studioAttachmentDraftId!==undefined&&(method!=='thread/start'||typeof studioAttachmentDraftId!=='string'||!/^[\da-f-]{36}$/i.test(studioAttachmentDraftId)))throw Error('附件草稿与新对话不匹配。');
  if(studioAttachments!==undefined&&(method!=='turn/start'||!Array.isArray(studioAttachments)))throw Error('附件仅可随新一轮消息发送。');
@@ -65,7 +65,7 @@ export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
  else terminalOnly=!managed&&['turn/start','turn/steer'].includes(method)&&!worker.providerConnection(provider)&&sharedTerminal.hasCurrentGrant(provider);
  if(method==='turn/steer'&&terminalOnly)params=terminalOnlyTurn(params,{provider,resource:selectedSsh});
  if(method==='turn/steer'&&!terminalOnly){
-  const task=taskRecords.bound(provider,params.threadId),{planningMode,reviewMode,studioTaskId,studioToolContext,...rest}=params;
+  const task=taskRecords.bound(provider,params.threadId),{planningMode,reviewMode,studioTaskId,...rest}=params;
   if(studioTaskId!==undefined&&studioTaskId!==task?.id)throw Error('Task is not bound to this conversation');
   if(turnFlags.reviewMode)throw Error('Review requires a new workflow turn');
   definitionOnlyTurn=!!(task&&(!managedOnly||task.customCv?.id)&&(await privateAccess.assertTask(task,provider)).definitionOnly);
@@ -153,7 +153,6 @@ export function createAgentRequests({runtime,getAttachments,verifyEvidence}){
    if(skillContext.attach||['blocked','permission_required'].includes(skillContext.status))params={...params,input:[...(params.input||[]),{type:'text',text:skillContext.text}]};
    if(!definitionOnly&&!skillContext.guidanceKind)params={...params,input:[...(params.input||[]),{type:'text',text:sourceContext(scientificSkills.sourcesForPolicy(readPolicy))}]};
   }
-  if(['deepseek','compatible','qwen'].includes(provider)){const task=taskRecords.bound(provider,params.threadId);params={...params,studioToolContext:task?{mode:'workflow',taskId:task.id,projectId:task.projectId}:{mode:'chat'}};}
   const selected=params.input?.some(item=>item.type==='skill');
   const normalRoots=selected&&!definitionOnly?studioSkillRoots():[],registeredRoots=selected?[...normalRoots,...managedSkillRoots()]:[],registered=definitionOnly||!selected?[]:[...localSkills(normalRoots,{policy:readPolicy,projectSkills,bundledRoot:bundledSkillRoot}),...managedSkillEntries(readPolicy)],input=[];
   for(const item of params.input||[]){

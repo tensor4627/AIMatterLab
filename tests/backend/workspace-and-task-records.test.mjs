@@ -232,7 +232,7 @@ await __describe("public-software-docs", async () => {
 const test = __node_test;
 test('public software search keeps repository and package evidence separate, including unavailable sources',async()=>{
  const routes=[];
- const result=await softwareDocs('search_software_docs',{software:'example',version:'2.0'},async target=>{
+ const result=await softwareDocs('search_software_docs',{software:'example',version:'2.0',sources:'public'},async target=>{
   const url=new URL(target);routes.push(url);
   if(url.hostname==='pypi.org')throw Error('Package not found');
   return {text:JSON.stringify({items:[{full_name:'author/example',html_url:'https://github.com/author/example'}]})};

@@ -51,6 +51,7 @@
     "zh-CN": [
       "先通过 describe_engine 核对 gpumd.neb。parameters.neb 仅接受 parameter_groups.neb 声明的字段。驱动路径、审阅记录和来源写入文件字段或步骤描述。",
       "声明值和文件顺序须与不可变 run.in 及其输入快照完全一致。使用恰好一条 neb_run fire，容差为有限正数，步数上限为正整数。",
+      "FIRE 收敛参数 force_tolerance 使用 eV/Å。变胞 NEB 的 pressure_gpa 和 pressure_components_gpa 使用 GPa。",
       "核对端点或路径各图像的非零原子数、逐原子元素顺序、PBC 和有限且非奇异的晶胞。固定晶胞要求晶胞一致或显式映射。核对势覆盖的元素。",
       "neb.pydyn 仅提供规划指导。",
       "运行后检查图像几何、能量、能量基准及优化器日志，区分达到容差和耗尽步数。仅凭有限路径或短程优化无法确认鞍点或物理能垒。"
@@ -58,6 +59,7 @@
     "en": [
       "Check gpumd.neb with describe_engine. Use only the keys declared in parameter_groups.neb inside parameters.neb. Put driver paths, review notes and provenance in file fields or step descriptions.",
       "Match declared values and file order to the immutable run.in and input snapshot. Use exactly one neb_run fire with a positive finite tolerance and a positive integer step limit.",
+      "Use force_tolerance in eV/Å for FIRE convergence. The variable-cell pressure_gpa and pressure_components_gpa values use GPa.",
       "Check nonzero atom counts, per-atom element order, PBC and finite nonsingular cells across the supplied endpoints or path. Fixed-cell inputs require matching cells or explicit cell mapping. Check potential species coverage.",
       "neb.pydyn provides planning guidance only.",
       "After execution, check image geometry, energies, the energy reference and the optimizer log. Distinguish reaching tolerance from exhausting the step limit. A finite path or short optimization alone cannot establish a saddle point or physical barrier."
@@ -66,9 +68,9 @@
   "source_receipt": {
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
-    "observed_at": "2026-11-25T19:36:53+08:00",
+    "observed_at": "2026-11-25T15:33:21.875Z",
     "rule_input_encoding": "UTF-8 JSON.stringify(rules), in document key order",
-    "rule_input_sha256": "07598802db10ef67602e8710c42315ff56b03415653298cffeb423f7593904d1",
+    "rule_input_sha256": "62ee943bdd783bb76fae4643427482a88c2460a6ae4cf00cf8bf946c0b2c7c6b",
     "local_files": [
       {
         "source_id": "studio",
@@ -78,7 +80,10 @@
         "observed_commit": "4b0fee2b2c85741e307dd330806dd57aa0334570",
         "role": "registered_gpumd_neb_engine_contract",
         "line_ranges": [
-          [10, 61]
+          [
+            10,
+            61
+          ]
         ]
       },
       {
@@ -89,10 +94,50 @@
         "observed_commit": "4b0fee2b2c85741e307dd330806dd57aa0334570",
         "role": "native_neb_input_and_geometry_audit",
         "line_ranges": [
-          [5, 86],
-          [88, 118]
+          [
+            5,
+            86
+          ],
+          [
+            88,
+            118
+          ]
         ]
       }
-    ]
+    ],
+    "release_source": {
+      "name": "GPU-Sampling / GPUMD",
+      "commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+      "files": [
+        {
+          "path": "src/neb/neb.cu",
+          "line_ranges": [
+            [
+              1192,
+              1210
+            ]
+          ],
+          "role": "fire_force_tolerance_input_unit",
+          "sha256": "6e1c78c66ea1454057f59d0251060f7784823974f255dc5aae58fbbe8ecb2571",
+          "bytes": 103220
+        },
+        {
+          "path": "src/neb/GPU-cfneb_manual.md",
+          "line_ranges": [
+            [
+              19,
+              22
+            ],
+            [
+              79,
+              83
+            ]
+          ],
+          "role": "documented_force_tolerance_and_pressure_units",
+          "sha256": "ab31f89613f548f0eca9e0b8236a84790799147281324a831202abc2ac3b93a7",
+          "bytes": 16617
+        }
+      ]
+    }
   }
 }

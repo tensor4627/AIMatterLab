@@ -143,7 +143,10 @@ test('restored official DSH conversation receives current hosted recovery and a 
  const oldAdvice='This historical reply suggested signing in again and handing over a visible terminal.';
  const resource_id='ssh:fixture-host',resource={resourceId:resource_id,name:'Fixture cluster',serviceStatus:'ready',canAcquire:true,terminalAvailable:4};
  const retry={resource_id,access:'service'};
- const steps=[null,['list_compute_resources',{}],['read_scientific_skill',{function_id:'compute.queue'}],
+ const function_id='compute.queue';
+ const references=['compute-discovery.md','connection-recovery.md'].map(name=>'studio-compute-workflow/references/'+name);
+ const steps=[null,['list_compute_resources',{}],['read_scientific_skill',{function_id}],
+  ...references.map(document_id=>['read_scientific_skill',{function_id,document_id}]),
   ['acquire_compute_resource',{resource_id,access:'terminal'}],['acquire_compute_resource',retry],
   ['inspect_compute_service',{resource_id,probe_scheduler:true}]];
  const model=createServer(async(req,res)=>{
@@ -225,7 +228,13 @@ test('restored official DSH conversation receives current hosted recovery and a 
  assert(received.includes('enter authentication responses only in the private terminal'));
  assert(received.includes('terminal_unavailable')&&received.includes('leaseStatus')&&received.includes('retry'));
  assert.deepEqual(calls,steps.slice(1).filter(step=>step[0]!=='read_scientific_skill'));
- const [failedShell,served]=bridge.session(threadId).turns[1].items.filter(item=>item.tool==='acquire_compute_resource');
+ const items=bridge.session(threadId).turns[1].items;
+ const guidance=items.filter(item=>item.tool==='read_scientific_skill').map(item=>JSON.parse(item.result.content[0].text));
+ assert.equal(guidance.length,3);
+ assert(guidance.every(receipt=>receipt.status==='passed'));
+ assert(references.every(id=>guidance[0].document_ids.includes(id)));
+ assert.deepEqual(guidance.slice(1).map(receipt=>receipt.document_id),references);
+ const [failedShell,served]=items.filter(item=>item.tool==='acquire_compute_resource');
  assert.equal(failedShell.result.isError,true);
  assert.equal(served.result.isError,false);
  const capability=JSON.parse(served.result.content[0].text);

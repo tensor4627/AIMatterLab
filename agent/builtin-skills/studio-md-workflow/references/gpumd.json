@@ -3,7 +3,7 @@
   "software": "gpumd",
   "status": "source_backed_planning_reference_not_runtime_validation",
   "retrieved_at": "2026-10-22",
-  "interface_authority": "Actual registered source/runtime and describe_engine take precedence over latest public documentation. Parameters must map to emitted config/API/CLI; no invented effective controls.",
+  "interface_authority": "Choose one parser for executable gpumd.md examples. With no separately identified target interface, use the AIMatterLab release GPU-Sampling fork at bd719b98f1608e25477c63238c1f42d9a63d3bd1 for every stage. When the target is a different identified GPUMD revision, use that revision’s parser for the whole run.in. Newer upstream manuals describe their own version. Label which interface an example targets and report runtime checks only when observed.",
   "tutorials": {
     "en": [
       {
@@ -31,6 +31,46 @@
     "src/main_gpumd/run.cu",
     "native NEB source in registered custom fork"
   ],
+  "native_md": {
+    "scope": "Native gpumd.md text-output syntax at the release fork. The stage templates show operand order. Replace angle-bracket values with the selected inputs and controls.",
+    "stage_inputs": "Each separate stage runs in its intended directory with run.in, model.xyz and the matching potential. Retain the atom order, cell, PBC and selected potential. Use the same selected parser for each stage and declare its requested outputs before its run. Use a distinct filename or directory to keep appended outputs attributable to that stage. A stage that receives velocities from a predecessor uses those velocities.",
+    "timestep_and_velocity": "For each dynamics run use a positive finite time_step in fs and run <positive integer steps>. For fresh initialization use velocity <T_K> or velocity <T_K> seed <integer>. The seed and initial temperature apply when model.xyz lacks velocities. A model that already has velocities retains them.",
+    "ensembles": {
+      "fixed_cell_temperature": "ensemble nvt_mttk temp <T_initial_K> <T_final_K> tperiod <T_period_steps>",
+      "fixed_cell_energy_check": "ensemble nve",
+      "isotropic_variable_volume": "ensemble npt_mttk temp <T_initial_K> <T_final_K> iso <P_initial_GPa> <P_final_GPa> tperiod <T_period_steps> pperiod <P_period_steps>",
+      "use": "Use NPT volume samples after equilibration for density at imposed temperature and pressure. Use NVE for a separate fixed-cell energy conservation check. Branch that diagnostic from its verified input unless the requested plan explicitly uses its output.",
+      "mttk_units": "temp values are in K and iso pressure endpoints are in GPa. tperiod and pperiod are multiples of time_step. Physical period in fs equals the multiplier times dt in fs. The pinned pperiod parser requires a value of at least 200. Halving dt doubles tperiod and pperiod to preserve the chosen physical thermostat and barostat periods. Other ensemble subtypes use their own argument order."
+    },
+    "outputs": {
+      "trajectory": "For this release pin use dump_xyz <grouping_method> <group_id> <interval> <filename> [properties...]. Minimal all-atom example: dump_xyz -1 0 1 traj.xyz. Keep both group integers at the front in every stage, then a positive integer step interval and filename. Check all emitted dump_xyz lines against this order. The official GPUMD v5.9.1 manual puts interval and filename first and uses optional group selection. Use that interface only for an identified matching target. In the pinned text writer a plain filename appends. Positions and Lattice use Å and Time uses fs. Optional velocity, force and potential add vel (Å/fs), forces (eV/Å) and energy_atom (eV per atom).",
+      "thermo": "dump_thermo <positive integer interval> appends headerless thermo.out. Column order is T, K, U, Pxx, Pyy, Pzz, Pyz, Pxz, Pxy, then ax ay az bx by bz cx cy cz. T is in kelvin, K and U are system energies in eV, pressure components are in GPa, and cell components are in Å. Use K + U for unbiased fixed-cell NVE drift and the lattice determinant for NPT volume. For finite data the pinned text writer emits 18 fields of width 20 plus the newline. Budget 361 bytes per row with LF line endings.",
+      "cadence": "For one completed N-step dynamics run with interval d, dumps occur at integrated steps d, 2d, and so on, with floor(N/d) writes. No initial step-zero row is implied. Keep stage boundaries explicit when files append."
+    },
+    "terminal_state": {
+      "producer_example": [
+        "potential <potential_file>",
+        "ensemble nve",
+        "time_step <positive_dt_fs>",
+        "dump_thermo <thermo_interval>",
+        "dump_restart <stage_steps>",
+        "run <stage_steps>"
+      ],
+      "write": "For a stage whose terminal configuration is requested or consumed, declare dump_restart <positive integer interval>. In text mode this replaces restart.xyz at each write. Choose a cadence that divides the stage step count so the last write is at the terminal step. In these templates the matching stage_steps values write once at the final step.",
+      "verify_and_copy": "After actual completion of that producer, verify its fresh restart.xyz from the current run and the expected terminal write. Read a complete frame and verify atom count and order, finite positions and velocities, masses, cell and PBC. Copy those verified bytes to model.xyz of the authorized consumer stage and use the consumer run.in with its matching potential.",
+      "consumer_example": [
+        "potential <potential_file>",
+        "ensemble npt_mttk temp <T_initial_K> <T_final_K> iso <P_initial_GPa> <P_final_GPa> tperiod <T_period_steps> pperiod <P_period_steps>",
+        "time_step <positive_dt_fs>",
+        "dump_thermo <thermo_interval>",
+        "dump_xyz -1 0 <trajectory_interval> traj.xyz",
+        "dump_restart <stage_steps>",
+        "run <stage_steps>"
+      ],
+      "scope": "The text restart carries the cell, PBC, species, positions, masses, velocities and groups when present. Treat it as a configuration-and-velocity handoff. Exact thermostat or barostat continuation and scientific convergence require separate evidence."
+    },
+    "minimization_snapshot": "Follow the selected minimizer’s geometry-output contract. This release pin documents a geometry snapshot after minimization using ensemble nve, time_step 0, a one-step dump_xyz and run 1. The parser accepts zero and the step-based writer can emit a frame while simulated time stays fixed. Use this recipe only for geometry export. Omitting the velocity property does not measure temperature. Assess relaxation and its pressure claim with actual minimizer convergence and residual stress. A small positive time step advances the system."
+  },
   "rules": {
     "zh-CN": [
       "按实际run.in关键词、参数顺序与注册fork支持范围生成输入。",
@@ -162,7 +202,204 @@
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
     "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals.",
-    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation"
+    "observation_scope": "Current uncommitted source bytes observed at this recorded time; repository commit identifies the checkout baseline, not a clean-source or runtime attestation",
+    "release_source": {
+      "name": "GPU-Sampling / GPUMD",
+      "commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+      "url": "https://github.com/bigd4/GPUMD/tree/bd719b98f1608e25477c63238c1f42d9a63d3bd1",
+      "observed_at": "2026-11-25T17:53:19.486Z",
+      "scope": "Released source bytes for the native MD templates, output contracts and post-minimization snapshot.",
+      "files": [
+        {
+          "path": "src/main_gpumd/run.cu",
+          "role": "model inputs, step dispatch, seeded velocity, timestep and step count",
+          "line_ranges": [
+            [
+              149,
+              184
+            ],
+            [
+              293,
+              389
+            ],
+            [
+              692,
+              722
+            ],
+            [
+              763,
+              798
+            ]
+          ],
+          "sha256": "2cac5b568ffbac1875a94a1ffcc5d9909f353a814eaf4562faab8c83c7b3ebdd",
+          "bytes": 32975
+        },
+        {
+          "path": "src/integrate/integrate.cu",
+          "role": "NVE, positional standard ensembles and MTTK dispatch",
+          "line_ranges": [
+            [
+              364,
+              424
+            ]
+          ],
+          "sha256": "d3fcadfe7781ac1407c9a09d087f6be2aa188ee7f3440779863f7680f8a638a6",
+          "bytes": 44024
+        },
+        {
+          "path": "src/integrate/ensemble_mttk.cu",
+          "role": "MTTK input flags, pressure and periods",
+          "line_ranges": [
+            [
+              95,
+              151
+            ],
+            [
+              241,
+              282
+            ],
+            [
+              307,
+              319
+            ]
+          ],
+          "sha256": "8dbcde190e34d4d2fc95f4d7224472a92db92fd8efab6b74e3cfeb85c0f2ef6e",
+          "bytes": 25827
+        },
+        {
+          "path": "src/measure/dump_xyz.cu",
+          "role": "trajectory argument order, fields and cadence",
+          "line_ranges": [
+            [
+              70,
+              142
+            ],
+            [
+              180,
+              218
+            ],
+            [
+              267,
+              291
+            ],
+            [
+              303,
+              318
+            ],
+            [
+              417,
+              431
+            ]
+          ],
+          "sha256": "f6fc9ec2a8dba8a41009a5342283c033b73112cd2f77fc8fc8ecfe411ec5958d",
+          "bytes": 14994
+        },
+        {
+          "path": "src/measure/dump_restart.cu",
+          "role": "restart cadence, overwrite and text atom fields",
+          "line_ranges": [
+            [
+              36,
+              48
+            ],
+            [
+              64,
+              140
+            ]
+          ],
+          "sha256": "0ac004ce6690966d120a91d2148a1cc9648e1d6c88288b0928f49bf07215728a",
+          "bytes": 5147
+        },
+        {
+          "path": "src/measure/dump_thermo.cu",
+          "role": "thermo.out cadence, field order and text widths",
+          "line_ranges": [
+            [
+              37,
+              58
+            ],
+            [
+              72,
+              127
+            ]
+          ],
+          "sha256": "ffe80af47d0e6d402bbea18c476be20181ab93c43614b4b7eaeacd83060fecab",
+          "bytes": 3822
+        },
+        {
+          "path": "doc/gpumd/input_parameters/velocity.rst",
+          "role": "velocity syntax and existing velocities",
+          "line_ranges": [
+            [
+              10,
+              35
+            ]
+          ],
+          "sha256": "beeb2774dfbe87e38856e57753a4ae290aa619103b22d97b81b7e124520dcaa4",
+          "bytes": 1416
+        },
+        {
+          "path": "doc/gpumd/input_parameters/ensemble_mttk.rst",
+          "role": "MTTK documented flags and units",
+          "line_ranges": [
+            [
+              19,
+              42
+            ]
+          ],
+          "sha256": "43d6345269c84225b8cfeec11090a7e8caa93eade71383d9e6475c6f79859938",
+          "bytes": 4565
+        },
+        {
+          "path": "doc/gpumd/output_files/force_out.rst",
+          "role": "native force units",
+          "line_ranges": [
+            [
+              32,
+              32
+            ]
+          ],
+          "sha256": "864b912f2bfcb48891a20a229cc260c84d41d0ce6db00df6b0c2e0805b308ee0",
+          "bytes": 1063
+        },
+        {
+          "path": "doc/gpumd/input_parameters/minimize.rst",
+          "role": "documented post-minimization geometry snapshot",
+          "line_ranges": [
+            [
+              69,
+              77
+            ]
+          ],
+          "sha256": "8ef0085efc7e2a42bc5fac4e113244232590a5c8bf4f7d69dd0ab79ec890fcfe",
+          "bytes": 2577
+        },
+        {
+          "path": "src/integrate/ensemble_nve.cu",
+          "role": "NVE velocity Verlet calls and thermo evaluation",
+          "line_ranges": [
+            [
+              31,
+              94
+            ]
+          ],
+          "sha256": "947eeda64b61a3f08a44b5fa2de93963e2a19db18ad72ff8c6a736e9356d7c99",
+          "bytes": 2254
+        },
+        {
+          "path": "src/integrate/ensemble.cu",
+          "role": "position and acceleration factors use the timestep",
+          "line_ranges": [
+            [
+              191,
+              211
+            ]
+          ],
+          "sha256": "513895851049c731e9bc95e8a174a08dc2519475ea5d3b84f91a6113534c32c3",
+          "bytes": 23618
+        }
+      ]
+    }
   },
   "parameter_emission_policy": {
     "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",

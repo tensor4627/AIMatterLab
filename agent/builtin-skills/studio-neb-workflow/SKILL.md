@@ -7,7 +7,7 @@ description: Prepare the implemented native GPUMD GPU-Sampling NEB route from re
 
 For native NEB use `describe_engine` with `gpumd.neb`. `neb.pydyn` provides planning guidance only. Inspect the supplied endpoints or explicit path for matching atom count, species/order, cell/PBC and potential. Derive correspondence from those structures and resolve any ambiguous mapping. Check the selected execution environment when the requested operation needs it.
 
-Preserve the user's endpoint paths, optimizer controls and cell mode. Resolve fixed/variable cell, pressure, interpolation, images, climbing choice, force tolerance and step limit from actual intent or source-backed input. Label delegated demonstration settings. Use the exact current contract and a real run.in; driver paths belong to file references, not unknown executable-control fields.
+Preserve the user's endpoint paths, optimizer controls and cell mode. Resolve fixed/variable cell, pressure, interpolation, images, climbing choice, force tolerance and step limit from actual intent or source-backed input. Use eV/Å for the FIRE force tolerance and GPa for variable-cell pressure. Label delegated demonstration settings. Use the exact current contract and a real run.in; driver paths belong to file references, not unknown executable-control fields.
 
 For a bound and activated custom or resource tool, read its resource execution skill first. For native `gpumd.neb`, use `describe_engine` and read [the NEB parameter contract](references/neb.json) and [the native input review and tested syntax example](references/native-input.md) by their advertised document IDs on `neb.gpumd`.
 

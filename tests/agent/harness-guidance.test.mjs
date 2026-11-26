@@ -114,6 +114,34 @@ test('the installed workspace contributes its own short index once and falls bac
  fs.writeFileSync(file,'private text');fs.linkSync(file,path.join(directory,'other.md'));assert.equal(read(),STUDIO_INSTRUCTIONS);
 });
 
+test('workspace upgrades remove the longest shipped guide and preserve custom notes',t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'aimlab-workspace-upgrade-'));
+ t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const file=path.join(directory,'AGENTS.md');
+ // This fixture came from the 0.1.12 setup executable. Its last paragraph
+ // was appended to the otherwise identical guide shipped with 0.1.11.
+ const guide012=fs.readFileSync(new URL('../fixtures/workspace-guide-v0.1.12.md',import.meta.url),'utf8').trim();
+ const guide011=guide012.slice(0,guide012.lastIndexOf('\n\n'));
+ const oldTail=guide012.slice(guide011.length).trim();
+ const notes='## My diffraction notes\n\n    Preserve this indentation.\n\nRead the powder-indexing skill.';
+ function check(body,extra=''){
+  fs.writeFileSync(file,body);
+  const expected=extra ? STUDIO_INSTRUCTIONS+'\n\n## Local workspace AGENTS.md\n\n'+extra : STUDIO_INSTRUCTIONS;
+  assert.equal(workspaceAgentInstructions({directory}),expected);
+  assert.equal(fs.readFileSync(file,'utf8'),body);
+ }
+ for(const guide of [guide011,guide012]){
+  check(guide+'\n');
+  check([guide,notes].join('\n\n').replaceAll('\n','\r\n')+'\r\n',notes);
+ }
+ const changedTail=oldTail.replace('Read personal and bundled matches separately.','Read my powder-indexing notes.');
+ assert.notEqual(changedTail,oldTail);
+ check(guide011+'\n\n'+changedTail+'\n\n'+notes,changedTail+'\n\n'+notes);
+ check(guide012+' Keep this edit.',oldTail+' Keep this edit.');
+ const custom=guide011.replace('# AIMatterLab runtime','# My custom workflow')+'\n\n'+notes;
+ check(custom,custom);
+});
+
 test('Codex login threads receive the same AIMatterLab core through the main-owned instruction path',async()=>{
  const codex=new EventEmitter(),calls=[];codex.process={};codex.close=()=>{};
  codex.request=async(method,params)=>{calls.push({method,params});return {thread:{id:'fixture',turns:[]}};};

@@ -3,74 +3,90 @@
   "contract": "gpumd-native-output-planning-v1",
   "scope": "Source-specific public output planning for independent NEP+OPES NVE. Read current source_evidence; stale/unavailable sources mean reference_only, not current effective grammar. Selected executable/source correspondence, parser acceptance and scientific validation remain not_run. Existing artifact/runtime/project/human gates still apply; this reference adds no provenance-proof prerequisite or authorization.",
   "source_receipt": {
+    "checkout_fingerprints": "Over the recorded source files, sha256 is the exact LF Git blob, sha256_crlf is its CRLF checkout, and sha256_checkout identifies an observed checkout verified to differ only in line endings. The supplied matcher compares actual byte digests.",
     "local_files": [
       {
         "source_id": "gpumd",
         "path": "doc/gpumd/input_parameters/dump_thermo.rst",
-        "sha256": "8afe95288c9e7224025c6ea371edb563c8c6af6171851e3a6d20493af9ac4c9a"
+        "sha256": "8afe95288c9e7224025c6ea371edb563c8c6af6171851e3a6d20493af9ac4c9a",
+        "sha256_crlf": "c7a262d6172042b3810248a2570a4e02449843324934a1c66cb54139b8705c62"
       },
       {
         "source_id": "gpumd",
         "path": "doc/gpumd/input_parameters/dump_exyz.rst",
-        "sha256": "cf3a70f75e6f2e1a92c183d8abfc06d9345a13d4ce2fee108ccd28d1acd27c1a"
+        "sha256": "d785bf8f2cda24683f38369610251e366516137eed75a8d79d693c3929d6fcde",
+        "sha256_crlf": "cf3a70f75e6f2e1a92c183d8abfc06d9345a13d4ce2fee108ccd28d1acd27c1a"
       },
       {
         "source_id": "gpumd",
         "path": "doc/gpumd/output_files/thermo_out.rst",
-        "sha256": "6bdb2d4d8dd68e5fc5ca90d89c4464679a50b9697ecf778fa449b237ba9d0e4f"
+        "sha256": "6bdb2d4d8dd68e5fc5ca90d89c4464679a50b9697ecf778fa449b237ba9d0e4f",
+        "sha256_crlf": "63dfe240c02029fd6d46c2a911ac6edcbacd9cbc6e4249cc4143d1329fb0fcfb"
       },
       {
         "source_id": "gpumd",
         "path": "doc/gpumd/input_parameters/output_format.rst",
-        "sha256": "379320a2bbe6ab46208d358f8526434078def7280eb2633bffcccecf5e9dfac8"
+        "sha256": "42e42ba43abdfbf2dc512f4833a79e84cf4b8ede796a3b0528a27b7415e9b347",
+        "sha256_crlf": "379320a2bbe6ab46208d358f8526434078def7280eb2633bffcccecf5e9dfac8"
       },
       {
         "source_id": "gpumd",
         "path": "src/main_sampling/run.cu",
-        "sha256": "f0820d6ffd04d9dba255c7cad007231a3cc943cec65f68bf38d152aa46f4395e"
+        "sha256": "e39076d38a69a7d7195a7ebfac2869d02a5c5cc84fdcf9c1b31969b84d7b6972",
+        "sha256_crlf": "573fa54fff7173f15d4615101a922173f0ead9fe352ac6f9e626d5de4336c09a",
+        "sha256_checkout": "f0820d6ffd04d9dba255c7cad007231a3cc943cec65f68bf38d152aa46f4395e",
+        "observed_commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1"
       },
       {
         "source_id": "gpumd",
         "path": "src/main_gpumd/run.cu",
-        "sha256": "c1cd3a0c9cad78c412e246de6e77dc554de106f7769788cf94434ab31c6b09a4"
+        "sha256": "2cac5b568ffbac1875a94a1ffcc5d9909f353a814eaf4562faab8c83c7b3ebdd",
+        "sha256_crlf": "c1cd3a0c9cad78c412e246de6e77dc554de106f7769788cf94434ab31c6b09a4"
       },
       {
         "source_id": "gpumd",
         "path": "src/main_sampling/gas-opes.cu",
-        "sha256": "5e57ffefa046e01ff4e531d4956939ed916fec7f5198336e10e259bff73785e4",
-        "bytes": 21083,
+        "sha256": "774d1ff70745f9ad267384b73002b50ee46d942c1a5e9d8d28a0b9bff26d806c",
+        "sha256_crlf": "5e57ffefa046e01ff4e531d4956939ed916fec7f5198336e10e259bff73785e4",
+        "bytes": 20501,
         "observed_commit": "bd719b98f1608e25477c63238c1f42d9a63d3bd1",
         "observed_on": "2026-11-19"
       },
       {
         "source_id": "gpumd",
         "path": "src/force/force.cu",
-        "sha256": "e09681f669e88a66027c5ba0e93f0e929acfde226bfc28fc953033ce98841e5d"
+        "sha256": "3fb147593f3b99f5dbb11dd122e58085a979ec34fd84201a5c44a077a3cb6e8d",
+        "sha256_crlf": "e09681f669e88a66027c5ba0e93f0e929acfde226bfc28fc953033ce98841e5d"
       },
       {
         "source_id": "gpumd",
         "path": "src/integrate/ensemble_nve.cu",
-        "sha256": "947eeda64b61a3f08a44b5fa2de93963e2a19db18ad72ff8c6a736e9356d7c99"
+        "sha256": "947eeda64b61a3f08a44b5fa2de93963e2a19db18ad72ff8c6a736e9356d7c99",
+        "sha256_crlf": "a52c78c0d0c24617fa90b79765fb5b7f086204eb8569f856ad162c7e41c483cd"
       },
       {
         "source_id": "gpumd",
         "path": "src/integrate/ensemble.cu",
-        "sha256": "513895851049c731e9bc95e8a174a08dc2519475ea5d3b84f91a6113534c32c3"
+        "sha256": "513895851049c731e9bc95e8a174a08dc2519475ea5d3b84f91a6113534c32c3",
+        "sha256_crlf": "4bd55ba643c760aacb41c8782e42ad1a51e4a84a36f189a5f34eb2f24e72bd48"
       },
       {
         "source_id": "gpumd",
         "path": "src/measure/dump_thermo.cu",
-        "sha256": "ffe80af47d0e6d402bbea18c476be20181ab93c43614b4b7eaeacd83060fecab"
+        "sha256": "ffe80af47d0e6d402bbea18c476be20181ab93c43614b4b7eaeacd83060fecab",
+        "sha256_crlf": "5627ed987ac1757560e7523bb6d7258c72a28b591a1eacb5d970968b58c111ad"
       },
       {
         "source_id": "gpumd",
         "path": "src/measure/dump_exyz.cu",
-        "sha256": "e3909bbdac5ef2f2c0f9170ac709d9f46f6a1793d64b17d12641789f459d2b86"
+        "sha256": "ff0bafa87213a6398b9bf0188ee1f710c3ff264cbc148e51643b754af0daede4",
+        "sha256_crlf": "e3909bbdac5ef2f2c0f9170ac709d9f46f6a1793d64b17d12641789f459d2b86"
       },
       {
         "source_id": "gpumd",
         "path": "src/measure/dump_restart.cu",
-        "sha256": "22d01e2ee5b3dd149acc56336887ab40b8a3378307f89d17b08de0e78dc1e2cb"
+        "sha256": "0ac004ce6690966d120a91d2148a1cc9648e1d6c88288b0928f49bf07215728a",
+        "sha256_crlf": "22d01e2ee5b3dd149acc56336887ab40b8a3378307f89d17b08de0e78dc1e2cb"
       }
     ],
     "release_source": {

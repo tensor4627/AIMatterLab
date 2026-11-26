@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
-import {createReleaseToolMatcher,readReleaseToolSources} from '../../contracts/tools/release-tool-sources.mjs';
+import {createReleaseToolMatcher} from '../../contracts/tools/release-tool-sources.mjs';
+import {readReleaseToolSources} from './release-tool-catalog.mjs';
 const ENGINE_ROUTES={'trajectory.density':'analysis.number-density','pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
 let fallbackReleaseToolMatcher;
 function defaultReleaseToolMatcher(){

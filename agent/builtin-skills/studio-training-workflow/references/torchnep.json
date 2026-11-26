@@ -150,6 +150,7 @@
   ],
   "language_scope": "AIMatterLab-authored Chinese planning rules plus original source-backed fields; official bilingual availability is recorded separately, never invented.",
   "source_receipt": {
+    "checkout_fingerprints": "Over the recorded source files, sha256 is the exact LF Git blob, sha256_crlf is its CRLF checkout, and sha256_checkout identifies an observed checkout verified to differ only in line endings. The supplied matcher compares actual byte digests.",
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
     "rule_input_sha256": "8e3a6b5cb82092236b39fc2feee4312e42a51ce758c92f2a39ccefd96d14b926",
@@ -157,56 +158,43 @@
       {
         "source_id": "torchnep",
         "path": "train.py",
-        "sha256": "37d5a93f35076f8cfc0f6f7de740facf49b5ba3eed677a4e1e26de696aa997ea",
-        "bytes": 63270,
+        "sha256": "747d6449aa2cdcb1811a2a428095923a5d457787dd460e36ead3d30ca6839db7",
+        "sha256_crlf": "d050a08b1a5319df8cf1e9db187156378b8650bc6117413bb109d2e6bf1cf96b",
+        "sha256_checkout": "37d5a93f35076f8cfc0f6f7de740facf49b5ba3eed677a4e1e26de696aa997ea",
+        "bytes": 61946,
         "observed_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
         "role": "CLI_dataclass_resolution",
         "line_ranges": [
           [
-            121,
-            124
+            118,
+            130
           ],
           [
-            723,
-            726
+            716,
+            761
           ],
           [
-            732,
-            735
+            813,
+            864
           ],
           [
-            886,
-            889
+            878,
+            898
           ],
           [
-            920,
-            923
-          ],
-          [
-            1014,
-            1017
-          ],
-          [
-            1200,
-            1203
-          ],
-          [
-            1224,
-            1227
-          ],
-          [
-            1234,
-            1237
+            1192,
+            1270
           ]
         ],
-        "read_scope": "Reviewed interface in the source revision declared by AIMatterLab. SHA-256 identifies the exact file bytes. No engine execution.",
-        "observed_on": "2026-11-19"
+        "read_scope": "CLI, fresh-run default resolution and full-resume behavior in the immutable recorded revision. No training or runtime validation.",
+        "observed_on": "2026-11-26"
       },
       {
         "source_id": "torchnep",
         "path": "nep_descriptor.py",
-        "sha256": "8fb4435c34a304ea8ec909b4bf644762f04105a8d03415af07971b6107695e39",
-        "bytes": 88888,
+        "sha256": "948f106e24f130205f1f3692063a9c241d28dfa77380cf9a7e245158267f94fa",
+        "sha256_crlf": "8fb4435c34a304ea8ec909b4bf644762f04105a8d03415af07971b6107695e39",
+        "bytes": 86817,
         "observed_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
         "role": "consumer_constraints",
         "line_ranges": [
@@ -225,8 +213,9 @@
       {
         "source_id": "torchnep",
         "path": "README.md",
-        "sha256": "c8368558f2e4d4c12b0042db7e8773c06ead499424b2cded42025f04e3f2d098",
-        "bytes": 14427,
+        "sha256": "2358cf3861e9be6d160c1e1d974b683c29d6ecb5070e39ea22b089a918334a1d",
+        "sha256_crlf": "c8368558f2e4d4c12b0042db7e8773c06ead499424b2cded42025f04e3f2d098",
+        "bytes": 14130,
         "observed_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
         "role": "local_source",
         "line_ranges": [
@@ -249,9 +238,10 @@
       {
         "source_id": "torchnep",
         "path": "aimlab-tools/manifest.json",
-        "role": "declared_upstream_training_interface",
         "sha256": "0c44c823f601af4a3ebd4077ad8affdc9e9bd30af4eeb85e9877b86093f4db95",
+        "sha256_crlf": "5b39efdf6824645b486396dcd0fc1b1f4516eb9f35a0aa1c3e267a2ee75ce1ff",
         "bytes": 21030,
+        "role": "declared_upstream_training_interface",
         "observed_commit": "4c3474ba9319cc88686b90bb2af2a524f844d9fd",
         "observed_on": "2026-11-19",
         "line_ranges": [

@@ -8,7 +8,22 @@ import {isolationPreparationDiagnostic} from '../../desktop/platform/codex-isola
 import {sanitizeTranscript,sanitizeProtocolTranscript,createTranscriptStream} from '../../contracts/agent/transcript-sanitizer.mjs';
 import {isCodexVersion} from '../../contracts/agent/codex-version.mjs';
 export const PROTOCOL_VERSION = '0.165.0-alpha.1.2';
-const unsupportedCatalogQueries=new Set(['list_mcp_resources','list_mcp_resource_templates']);
+const resourceCatalogFields=new Map([
+  ['list_mcp_resources','resources'],
+  ['list_mcp_resource_templates','resourceTemplates'],
+]);
+
+function validCatalogSelection(args){
+  return args!=null&&typeof args==='object'&&!Array.isArray(args)&&
+    Object.keys(args).every(key=>['server','cursor'].includes(key)&&(args[key]===null||typeof args[key]==='string'));
+}
+
+function nativeCatalogDiscovery(item){
+  // Codex labels its aggregate catalog event with its own name; a named lookup
+  // uses the actual server name. The isolated server inventory is checked before dispatch.
+  return item.server==='codex'&&resourceCatalogFields.has(item.tool)&&
+    validCatalogSelection(item.arguments)&&item.arguments.server==null;
+}
 const managedToolApprovals=[
   'list_compute_resources','acquire_compute_resource','release_compute_resource','run_compute_command',
   'list_compute_terminals','read_compute_terminal','write_compute_terminal','inspect_compute_service',
@@ -248,6 +263,42 @@ export class CodexBridge extends EventEmitter {
       try { this.send({ id, method, params }); } catch (e) { clearTimeout(timer); this.pending.delete(id); reject(e); }
     });
   }
+  async answerResourceCatalog(message){
+    const child=this.process,generation=this.lifecycle,isolation=this.isolation;
+    const {threadId,turnId,tool,namespace}=message.params;
+    const args=message.params.arguments??{};
+    const reply=(success,text)=>{
+      if(child&&this.process===child&&this.lifecycle===generation)
+        this.send({id:message.id,result:{success,contentItems:[{type:'inputText',text}]}});
+    };
+    const active=()=>this.isolationReady&&isolation&&this.isolation===isolation&&
+      this.turnIds.get(threadId)===turnId&&this.activeTurns.has(threadId);
+    if(!active()||!validCatalogSelection(args)||(namespace!=null&&namespace!=='functions')||isolation.authenticationOnly||isolation.historyOnly){
+      reply(false,'Catalog request unsupported in this scope; no resource was read.');return;
+    }
+    const enabled=name=>name==='gpusampling'&&Boolean(isolation.worker);
+    if(args.server!=null&&!enabled(args.server)){reply(false,'Unknown MCP server for this conversation.');return;}
+    try{
+      const params={threadId,detail:'full',limit:100};
+      if(args.server!=null)params.serverName=args.server;
+      if(args.cursor!=null)params.cursor=args.cursor;
+      const inventory=await this.rawRequest('mcpServerStatus/list',params,10000);
+      if(!active()){reply(false,'The conversation changed during resource discovery.');return;}
+      const field=resourceCatalogFields.get(tool);
+      const servers=inventory.data.filter(server=>enabled(server.name)&&(args.server==null||server.name===args.server));
+      if(args.server!=null&&!servers.length)throw Error('Requested server unavailable');
+      const entries=[];
+      for(const server of servers){
+        if(Object.hasOwn(server,'runtimeStatus')&&server.runtimeStatus!=='connected')throw Error('MCP server disconnected');
+        if(!Array.isArray(server[field]))throw Error('MCP catalog unavailable');
+        for(const row of server[field])entries.push({...row,server:server.name});
+      }
+      const result={[field]:entries};
+      if(args.server!=null)result.server=args.server;
+      if(inventory.nextCursor)result.nextCursor=inventory.nextCursor;
+      reply(true,JSON.stringify(result));
+    }catch{reply(false,'The resource catalog could not be read from the current conversation.');}
+  }
   receive(message) {
     if(!validEnvelope(message)){this.close({reason:'malformed_protocol',message:'Invalid Codex RPC envelope; reconnect explicitly. The conversation is preserved.'});return;}
     if(message.method==='account/chatgptAuthTokens/refresh'&&message.id!==undefined&&this.host.refreshAuth&&!this.isolation?.historyOnly){
@@ -258,15 +309,16 @@ export class CodexBridge extends EventEmitter {
     }
     if(this.strictIsolation&&message.method==='item/tool/call'&&message.id!==undefined){
       const tool=message.params?.tool;
-      if(unsupportedCatalogQueries.has(tool)){
-        this.send({id:message.id,result:{success:false,contentItems:[{type:'inputText',text:'Native MCP resource catalog queries are unsupported in AIMatterLab isolation; no resource was read. Use the registered AIMatterLab tools for authorized project access.'}]}});return;
-      }
+      if(resourceCatalogFields.has(tool)){void this.answerResourceCatalog(message);return;}
       const name=typeof tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(tool)?tool:undefined;
       this.close({reason:'isolation_violation',code:'STUDIO_CODEX_UNSCOPED_TOOL',activityType:'dynamicToolCall',...name?{tool:name}:{},message:'AIMatterLab isolation blocked '+(name||'dynamicToolCall')+'. The workflow and draft are preserved; reconnect explicitly and review results before sending another message.'});return;
     }
     if(this.strictIsolation&&message.method==='item/started'){
       const item=message.params?.item;
-      if((['commandExecution','fileChange','imageView','imageGeneration','collabAgentToolCall','subAgentActivity','dynamicToolCall'].includes(item?.type)&&!(item.type==='dynamicToolCall'&&unsupportedCatalogQueries.has(item.tool)))||item?.type==='mcpToolCall'&&item.server!=='gpusampling'){
+      const catalogActivity=item?.type==='dynamicToolCall'&&resourceCatalogFields.has(item.tool);
+      const scopedDiscovery=item?.type==='mcpToolCall'&&this.isolationReady&&this.isolation&&
+        !this.isolation.authenticationOnly&&!this.isolation.historyOnly&&nativeCatalogDiscovery(item);
+      if((['commandExecution','fileChange','imageView','imageGeneration','collabAgentToolCall','subAgentActivity','dynamicToolCall'].includes(item?.type)&&!catalogActivity)||item?.type==='mcpToolCall'&&item.server!=='gpusampling'&&!scopedDiscovery){
         const tool=typeof item.tool==='string'&&/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(item.tool)?item.tool:undefined;
         this.close({reason:'isolation_violation',code:'STUDIO_CODEX_UNSCOPED_TOOL',activityType:item.type,...tool?{tool}:{},message:'AIMatterLab isolation blocked '+(tool||item.type)+'. The workflow and draft are preserved; reconnect explicitly and review results before sending another message.'});return;
       }

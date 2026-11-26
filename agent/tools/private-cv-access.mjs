@@ -3,7 +3,7 @@ import path from 'node:path';
 // Scientific MCP boundary, including hidden worker routes and desktop-local tools.
 // Shared terminals have their own explicit lane below; all other new tools fail closed.
 export const SCIENTIFIC_TOOL_ACCESS=Object.freeze({
- search_software_docs:'public',read_software_docs:'public',describe_engine:'public',list_source_projects:'public',inspect_source_project:'public',inspect_pygas_catalog:'public',scientific_skill_catalog:'public',read_scientific_skill:'public',search_materials_project:'public',
+ search_software_docs:'public',read_software_docs:'public',search_scientific_literature:'public',describe_engine:'public',list_source_projects:'public',inspect_source_project:'public',inspect_pygas_catalog:'public',scientific_skill_catalog:'public',read_scientific_skill:'public',search_materials_project:'public',
  setup_base_workspace:'setup',inspect_compute_resource:'discovery',compute_readiness:'discovery',discover_local_environments:'discovery',draft_local_environment:'discovery',diagnose_tools:'discovery',list_projects:'discovery',list_runs:'discovery',list_workflows:'discovery',list_environments:'discovery',
  inspect_environment_api:'environment',read_runtime_guide:'environment',probe_environment:'environment',
  copy_project_inputs:'project',read_project_input:'project',write_project_input:'project',inspect_asset:'project',suggest_parameters:'project',create_structure:'project',render_pygas_workflow:'project',present_task:'project',prepare_run:'project',create_workflow:'project',import_materials_project:'project',

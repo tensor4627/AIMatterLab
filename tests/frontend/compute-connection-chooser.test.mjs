@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 import {deferred} from "../helpers/agent-hooks.mjs";
-const source=fs.readFileSync(new URL("../../frontend/features/compute/ComputeConnectionChooser.tsx",import.meta.url),'utf8');
-const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+const compile=file=>ts.transpileModule(fs.readFileSync(new URL("../../frontend/features/compute/"+file,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+const compiled=compile("ComputeConnectionChooser.tsx");
+const connectionTypes={exports:{}};
+new Function("module","exports",compile("ssh-connection-types.ts"))(connectionTypes,connectionTypes.exports);
 const local={id:'fixture-wsl',version:2,kind:'wsl',name:'Fixture local',distribution:'Fixture Linux',root:'/fixture/service',port:9080,intent:'existing'};
 const ssh={id:'fixture-ssh',version:3,kind:'ssh',name:'Fixture SSH',host:'example.invalid',username:'fixture-user',port:22,ssh_client:'C:/Windows/System32/OpenSSH/ssh.exe',identity_file:'',proxy_jump:[],via:[],mode:'interactive'};
 function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
@@ -15,7 +17,7 @@ function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
  const standard=async(method,data)=>{if(method==='compute.profiles.list')return {profiles:structuredClone(profiles),defaults:{distribution:'Fixture Linux',root:'/fixture/service',port:9080,ssh_client:ssh.ssh_client}};if(method==='compute.profiles.inventory')return {distributions:['Fixture Linux']};if(method==='compute.profiles.read')return structuredClone(profiles.find(p=>p.id===data.id));if(method==='compute.profiles.remove'){const found=profiles.find(p=>p.id===data.id);profiles=profiles.filter(p=>p.id!==data.id);return {removed:true,id:data.id,version:found?.version};}if(method==='compute.profiles.save'){const {expectedVersion,...v}=data,value={...v,id:v.id||'new-fixture',version:expectedVersion+1};profiles=[value,...profiles.filter(profile=>profile.id!==value.id)];return structuredClone(value);}throw Error('Unexpected fixture '+method);};
  const invoke=async(method,data)=>{calls.push({method,data});return override?override(method,data,standard):standard(method,data);};
  const jsx=(type,props)=>({type,props}),module={exports:{}};
- new Function('require','module','exports','window',compiled)(name=>name==='react'?{useState:state,useRef:ref,useEffect:effect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==="../../api/studio"?{invoke}:name==="../../ui/i18n"?{t:v=>v}:new Proxy({},{get:(_t,k)=>String(k)}),module,module.exports,{confirm});
+ new Function('require','module','exports','window',compiled)(name=>name==='react'?{useState:state,useRef:ref,useEffect:effect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==="../../api/studio"?{invoke}:name==="../../ui/i18n"?{t:v=>v}:name==="./ssh-connection-types"?connectionTypes.exports:new Proxy({},{get:(_t,k)=>String(k)}),module,module.exports,{confirm});
  function render(changes={}){currentProps={...currentProps,...changes};index=0;dirty=false;tree=module.exports.default({onLocal:p=>connected.push(['local',p]),onSsh:p=>connected.push(['ssh',p]),onClose:()=>connected.push(['close']),...currentProps});}
  const all=n=>Array.isArray(n)?n.flatMap(all):n&&typeof n==='object'?[n,...all(n.props?.children)]:[];
  const find=fn=>{const n=all(tree).find(fn);assert(n,'fixture node missing');return n;};

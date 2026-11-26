@@ -6,6 +6,7 @@ import {readWorkerStatus} from './worker-status.mjs';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {defaultWorkerResourceSource} from './worker-resources.mjs';
+import {withWorkerDeploymentSource} from './worker-runtime-files.mjs';
 import { linuxPath, assertWorkerRoute } from "../../../contracts/transport-policy.mjs";
 import {runOperationFailure} from '../../../contracts/compute/run-operation-receipt.mjs';
 const requestRejected=message=>Object.assign(Error(message),{operationNotStarted:true});
@@ -82,7 +83,10 @@ export class WorkerClient {
  async open(settings, source) {
   this.resetTransport();
   const epoch=this.connectionEpoch,check=()=>{if(epoch!==this.connectionEpoch)throw Error('Worker connection was superseded');};
-  const installed=await this.host.execute('wsl.exe',['-d',settings.distribution,'--','python3',linuxPath(path.join(source,'install.py')),'--source',linuxPath(source),'--root',settings.workerRoot],{windowsHide:true,timeout:20000,maxBuffer:1024*1024});
+  const installed=await withWorkerDeploymentSource(source,staging=>{
+   check();
+   return this.host.execute('wsl.exe',['-d',settings.distribution,'--','python3',linuxPath(path.join(staging,'install.py')),'--source',linuxPath(staging),'--root',settings.workerRoot],{windowsHide:true,timeout:20000,maxBuffer:1024*1024});
+  });
   check();
   const runtime=JSON.parse(installed.stdout.trim().split('\n').at(-1)).path;
   const { stdout } = await this.host.execute('wsl.exe', ['-d', settings.distribution, '--',

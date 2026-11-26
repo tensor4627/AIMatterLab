@@ -16,7 +16,7 @@ const guidanceModules = [
   'agent/context/agent-settings.mjs', 'agent/context/interaction-mode.mjs',
   'agent/context/private-task-context.mjs', 'agent/context/task-turn-context.mjs',
   'backend/main/tools/public-software-docs.mjs',
-  'contracts/tools/release-tool-sources.mjs',
+  'contracts/tools/release-tool-sources.mjs', 'agent/skills/release-tool-catalog.mjs',
   'agent/providers/dsh-policy.mjs', 'agent/sessions/requests.mjs', 'agent/sessions/conversation-title-reviews.mjs',
   'agent/sessions/resource-routing.mjs', 'agent/sessions/terminal-turn.mjs',
   'agent/skills/skill-context.mjs', 'agent/skills/scientific-context.mjs',
@@ -61,8 +61,8 @@ async function isolatedCheck(check) {
 }
 
 async function readBundledRoutes({Service, map, documents, bundledRoot, studioRoot, workerSource, temporary, releaseToolSources, packaged = false}) {
-  // Mixed routes require a registered upstream skill and provider sharing, even
-  // for a focused read of an AIMatterLab document. Use only public test entries.
+  // Mixed routes require provider sharing for upstream material. A route can
+  // explicitly offer a bundled-only ordinary read. Use only public test entries.
   const bundled = new Set(map.skills.filter(skill => skill.source === 'studio').map(skill => skill.id));
   const routes = map.functions.filter(route => route.skills.some(id => bundled.has(id)));
   const externalIds = new Set(routes.flatMap(route => route.skills.filter(id => !bundled.has(id))));
@@ -81,8 +81,21 @@ async function readBundledRoutes({Service, map, documents, bundledRoot, studioRo
   const read = (id, document_id) => service.call('read_scientific_skill', {function_id: id, ...(document_id && {document_id})}, scope);
   const mixed = routes.filter(route => route.skills.some(id => externalIds.has(id)));
   for (const route of mixed) {
-    const denied = await read(route.id);
-    assert(denied.status === 'permission_required' && !denied.attachments.length, 'Missing source consent check for ' + route.id);
+    const entry = await read(route.id);
+    if (!route.ordinary_bundled_fallback) {
+      assert(entry.status === 'permission_required' && !entry.attachments.length, 'Missing source consent check for ' + route.id);
+      continue;
+    }
+    assert(entry.status === 'passed' && entry.attachments.every(item => item.source === 'studio'), 'Unavailable or overbroad bundled guidance for ' + route.id);
+    assert(entry.document_ids.every(name => documents.has(name)), 'Bundled-only route advertised an upstream document');
+    for (const name of entry.document_ids.filter(name => !entry.attachments.some(item => item.name === name))) {
+      const focused = await read(route.id, name);
+      assert(focused.status === 'passed' && focused.text === documents.get(name).text, 'Cannot read bundled fallback ' + name);
+    }
+    for (const skill of map.skills.filter(item => route.skills.includes(item.id) && externalIds.has(item.id))) {
+      const denied = await read(route.id, skill.folder + '/' + skill.files[0]);
+      assert(denied.status === 'permission_required' && !denied.attachments.length, 'Missing source consent check for ' + route.id);
+    }
   }
   settings.pygasSkillProviders = [provider];
   settings.scientificSkillProviders = Object.fromEntries([...sources.keys()].filter(id => id !== 'pygas').map(id => [id, [provider]]));

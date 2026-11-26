@@ -84,7 +84,10 @@ test('bundled roadmap routing and the example actually read through the scientif
  const routes=selectScientificFunctions({text:'更新此流程图',hasWorkflow:true});
  assert(routes.includes('workflow.roadmap'));assert(!selectScientificFunctions({text:'解释流程图'}).includes('workflow.roadmap'));
  const router=new ScientificSkillRouter({map,sourceRoot:()=>fileURLToPath(new URL('../../agent/builtin-skills/',import.meta.url)),consent:()=>false});
- const doc=await router.read('deepseek','workflow.roadmap','studio-workflow-roadmap/SKILL.md');
+ const entry=await router.read('deepseek','workflow.roadmap');
+ const documentId='studio-workflow-roadmap/references/roadmap-contract.md';
+ assert.equal(entry.status,'passed');assert(entry.document_ids.includes(documentId));
+ const doc=await router.read('deepseek','workflow.roadmap',documentId);
  assert.equal(doc.status,'passed');const example=JSON.parse(doc.text.split('```json')[1].split('```')[0]);
  assert.deepEqual(analyzeRoadmap(validateRoadmap(example)).goals.map(goal=>goal.steps),[['md-1'],['md-1']]);
 });

@@ -1,15 +1,4 @@
-import {readFileSync} from 'node:fs';
-
 export const releaseToolSourcePath = new URL('../../installation/tool-sources.json', import.meta.url);
-
-export function readReleaseToolSources(file = releaseToolSourcePath) {
-  const sources = JSON.parse(readFileSync(file, 'utf8'));
-  if (!Array.isArray(sources) || sources.some(source => typeof source?.name !== 'string' ||
-    (source.aliases !== undefined && (!Array.isArray(source.aliases) || source.aliases.some(name => typeof name !== 'string'))))) {
-    throw Error('Invalid release tool source catalog');
-  }
-  return sources;
-}
 
 export function releaseToolNames(source) {
   return [...new Set([source.name, ...source.name.split('/').map(name => name.trim()), ...(source.aliases || [])])];

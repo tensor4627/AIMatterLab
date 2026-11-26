@@ -18,7 +18,7 @@ For Materials Project credentials use **设置 → 数据源**. For provider set
 
 ## Find the status of a tool
 
-1. **Source listed.** `software.catalog` gives the publication's repository, revision, guide and integration status. The matching native engine, when advertised, has its own contract.
+1. **Source listed.** For a release-only question, use the local inventory on `software.catalog` and the advertised bundled references. The inventory records a reviewed revision and integration status. Read the linked upstream guide when external sources are in scope. The matching native engine, when advertised, has its own contract.
 2. **Definition checked.** `tool.onboarding` explains how to package a local program or script. In **第三方工具包**, select the saved version and use its definition receipt for the required ports and test case.
 3. **Configured and tested.** Open the setup for the intended resource, environment and function. Read the minimal test's actual job, outputs and verdict, then the execution skill after activation. Use that tool/version on the same target in the workflow.
 

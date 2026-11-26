@@ -30,19 +30,20 @@
   ],
   "rules": {
     "zh-CN": [
-      "先检查真实CV/Bias/Switch/Neighbor库，再组合已支持的图；构造参数按原库名称和类型呈现。",
-      "区分源码默认值、GUI演示值、由结构推导的值、用户指定值与试运行提案。",
-      "MetaD scale为维度开关，sigma/scale按完整CV顺序保存；CV顺序改变须同步相关参数并废止旧产物证据。",
-      "首次库外CV须先确认公式/定义域/单位，再生成独立私有库代码；数值检验与物理适用性分开。"
+      "按实际版本检查 CV、Bias、Switch、Neighbor 库和图节点，区分源码默认值、示例值、结构推导值和试运行提案。",
+      "核对物种、原子索引、周期镜像、张量形状和收集顺序。CoordNum(n_atoms, switch) 给出长度为 n_atoms 的逐中心向量。即使只筛标记中心的边，mean 仍除以 n_atoms。用对应索引切片取一个分量，并核对实际图能否表达筛边和取值。",
+      "固定谐波伞窗可用 FlexibleWallBias，上下限设为同一中心，两侧刚度相同，步进和增长设零。WTMetaD 的 sigma、scale 按完整 CV 顺序排列，普通高斯基类的 scale 通过非零值选分量。",
+      "WTMetaDGaussianBias 使用 sigma、weight、scale、temp、bias_factor。使用周期类时区分构造器 pdl 和字典配置 cv_wrap，配位数通常没有周期域。OPES 走自己的过程、状态、续跑和重加权。",
+      "让 GAScfg 的 n_atoms、cv_size、neighbor_rc、max_neighbors 与结构及模型一致，按目标驱动安排写日志、沉积和历史容量。CV 顺序或定义改变后，重核关联参数和产物。",
+      "若库或图不能表达所需 CV，先明确公式、定义域、单位和需补的操作。实际目标分别验证序列化模型重载、真实邻居表、偏置力和位力。"
     ],
     "en": [
-      "Use actual GUI catalog params and graph semantics, not prose or native CV/bias bypass.",
-      "Neighbor selection, atom groups, scalar/vector rank, reducer and ordered collector are scientific definitions.",
-      "Use actual bias constructor keys including sigma/weight/scale/temp/bias_factor and pdl for the actual periodic family; OPES uses its separate settings, never replace exact keys with invented aliases.",
-      "GAScfg cv_size/n_atoms/neighbor_rc/max_neighbors/cv_storage_interval/max_cv_nums must match saved model and planned history.",
-      "OPES has separate procedure/state/restart/reweight contracts.",
-      "Reload serialized artifact and verify real-neighbor forces/virial and selected target separately.",
-      "Runtime turns load functional guide and selected observed runtime; installation/AOTI-build manuals are not routine context."
+      "Use the actual CV, bias, switch and neighbor catalog and graph for the selected version. Keep source defaults, tutorial values, structure-derived choices and pilot proposals distinct.",
+      "Check species, atom indices, periodic images and collector dimensions and order. CoordNum(n_atoms, switch) returns a length-n_atoms vector. Filtering edges to the tagged center still leaves mean dividing by n_atoms. Take a one-element slice at the tagged index and verify the graph can express the filtering and gather.",
+      "FlexibleWallBias can produce a fixed harmonic umbrella with equal bounds and stiffnesses and zero step and growth terms. Keep WTMetaD sigma and scale in full CV order. The ordinary Gaussian base uses nonzero scale entries to select CV components.",
+      "WTMetaDGaussianBias takes sigma, weight, scale, temp and bias_factor. For a periodic class distinguish constructor pdl from dictionary cv_wrap and state the CV domain. A coordination CV is normally nonperiodic. Use the separate OPES procedure, state, restart and reweighting contract.",
+      "Match GAScfg n_atoms, cv_size, neighbor_rc and max_neighbors to the structure and model. Use the target driver for log and deposition intervals and history capacity. Recheck dependent parameters and artifacts when CV order or definition changes.",
+      "If the library graph cannot express the CV, specify its formula, domain, units and required operations. Reload the serialized artifact and check real-neighbor forces and virial on the selected target."
     ]
   },
   "display_policy": {
@@ -54,140 +55,205 @@
   "source_receipt": {
     "schema_version": 1,
     "status": "source_observed_not_runtime_validated",
-    "observed_at": "2026-10-22T11:27:22.264583+00:00",
-    "rule_input_sha256": "933b3e25b2b66af38d9e0d64bc00e033c96bbdb99e77255a29fc6a5006fe09a5",
+    "observed_at": "2026-11-25T18:02:06.229Z",
+    "rule_input_sha256": "1d26e8697231aff02fe919a9d538c7ec8071e3c8b9674b16b0f44e533b2a65e7",
     "local_files": [
       {
         "source_id": "pygas",
         "path": "base/colvar.py",
-        "sha256": "89feb797af80d8620bd1e9b6eb61c2b19917afa15bc3ab6bce96eaa50f209e4a",
-        "bytes": 64233,
-        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "sha256": "ed8422969d47d7f633044a3b7fa83b66d10e6a7153358ec9c0c9c9a19862c5b7",
+        "bytes": 62655,
+        "observed_commit": "ba5787380181304a0e4c75578c2ecff736737e18",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            1587
+            47,
+            76
+          ],
+          [
+            619,
+            646
+          ],
+          [
+            836,
+            873
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Git blob bytes and their full Windows CRLF form were hashed. Ranges identify the source reviewed for these rules.",
+        "sha256_crlf": "9651ea699a7ae3b195c8a6144ed26991c2f17a71f9247bd53248e0909a9c1e2f"
       },
       {
         "source_id": "pygas",
         "path": "base/bias.py",
-        "sha256": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b",
-        "bytes": 41693,
-        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "sha256": "cafe72ddeab8d8048fd1645e0acf5d27dd4f788a8c642a5673cca3b80aff8a0e",
+        "bytes": 40751,
+        "observed_commit": "ba5787380181304a0e4c75578c2ecff736737e18",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            942
+            16,
+            141
+          ],
+          [
+            697,
+            741
+          ],
+          [
+            902,
+            940
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Git blob bytes and their full Windows CRLF form were hashed. Ranges identify the source reviewed for these rules.",
+        "sha256_crlf": "a3fe6b99af1de11cb64e2defd89ab0ee128c94a004a0fb3706624f096fdf785b"
       },
       {
         "source_id": "pygas",
         "path": "base/switch.py",
-        "sha256": "1f34e5b272c9e28402193d13796bef3c2f39b71ee3feeb9e3fd157e50ba58fb6",
-        "bytes": 4151,
-        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "sha256": "b72c7c07b3ffdad72150d1f528687d82187a22c64c877c57e70bc15c789aba1d",
+        "bytes": 4015,
+        "observed_commit": "ba5787380181304a0e4c75578c2ecff736737e18",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            137
+            45,
+            69
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Git blob bytes and their full Windows CRLF form were hashed. Ranges identify the source reviewed for these rules.",
+        "sha256_crlf": "1f34e5b272c9e28402193d13796bef3c2f39b71ee3feeb9e3fd157e50ba58fb6"
       },
       {
         "source_id": "pygas",
         "path": "base/neighbor.py",
-        "sha256": "58e2a18477af49c8fe52333e4a7f59b7dbdcf15e9ea75b7339e68a2c06630ec3",
-        "bytes": 3651,
-        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "sha256": "32768b1cd3a672eb70d6e7dc0ec9042459bf81bb13fa2cf0b16778a4210d41e0",
+        "bytes": 3571,
+        "observed_commit": "ba5787380181304a0e4c75578c2ecff736737e18",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            85
+            21,
+            47
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Git blob bytes and their full Windows CRLF form were hashed. Ranges identify the source reviewed for these rules.",
+        "sha256_crlf": "84225b823269955f7df6213773ec5be926150fb2866bcb697fb4ac354cad4093"
       },
       {
         "source_id": "pygas",
         "path": "tools/cv_bias_gui_server.py",
-        "sha256": "911391f929532185c5b36c6ba2249df407eedcb7b116a9c4d8e38be8e398e5a8",
-        "bytes": 70800,
-        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "sha256": "03880187a9a68bc288d6185bb53028db5bb9ce21b7154e7c7826e1ddae0ff2e2",
+        "bytes": 69123,
+        "observed_commit": "ba5787380181304a0e4c75578c2ecff736737e18",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            1677
+            528,
+            616
+          ],
+          [
+            1187,
+            1205
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Git blob bytes and their full Windows CRLF form were hashed. Ranges identify the source reviewed for these rules.",
+        "sha256_crlf": "911391f929532185c5b36c6ba2249df407eedcb7b116a9c4d8e38be8e398e5a8"
       },
       {
         "source_id": "pygas",
         "path": "tools/graph_workflow.py",
-        "sha256": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996",
-        "bytes": 34510,
-        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "sha256": "3a268ddf00f48ae3198b4b86180119c5c6529c9f8c9e773fcbe7c469fd4a8e31",
+        "bytes": 33758,
+        "observed_commit": "ba5787380181304a0e4c75578c2ecff736737e18",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            752
+            229,
+            309
+          ],
+          [
+            498,
+            538
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Git blob bytes and their full Windows CRLF form were hashed. Ranges identify the source reviewed for these rules.",
+        "sha256_crlf": "4d69776110318f279bab1257d6c31d704d921af8ec423bf799be8aa581222996"
       },
       {
         "source_id": "pygas",
         "path": "manual/pyGAS_User_Guide_CN.md",
-        "sha256": "e6106df3404b6111f9fd89de00bc52a7a37112f136286ee40e13224fc153e930",
-        "bytes": 41192,
-        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "sha256": "0c131c56515b044fac18f8ac2194bc433dbe1c008a22895a3aca5258e61f559d",
+        "bytes": 40800,
+        "observed_commit": "ba5787380181304a0e4c75578c2ecff736737e18",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            392
+            40,
+            81
+          ],
+          [
+            114,
+            183
+          ],
+          [
+            200,
+            223
+          ],
+          [
+            307,
+            336
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Git blob bytes and their full Windows CRLF form were hashed. Ranges identify the source reviewed for these rules.",
+        "sha256_crlf": "e6106df3404b6111f9fd89de00bc52a7a37112f136286ee40e13224fc153e930"
       },
       {
         "source_id": "pygas",
         "path": "manual/pyGAS_User_Guide_EN.md",
-        "sha256": "a7686a35f2fbad8c0dc4bbd49ead4cd0440ffe02a50a82f3470b67dd525039d0",
-        "bytes": 44607,
-        "observed_commit": "2a5bf4e42a0dc7fc5d1c0a1c7afd76c2f1f3edf8",
+        "sha256": "9e4e1e3518edf5c972986ce406298ab12abc625fef17043e247781c8f17b47d9",
+        "bytes": 44214,
+        "observed_commit": "ba5787380181304a0e4c75578c2ecff736737e18",
         "role": "local_source",
         "line_ranges": [
           [
-            1,
-            393
+            40,
+            81
+          ],
+          [
+            114,
+            183
+          ],
+          [
+            200,
+            224
+          ],
+          [
+            308,
+            337
           ]
         ],
-        "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution."
+        "read_scope": "Git blob bytes and their full Windows CRLF form were hashed. Ranges identify the source reviewed for these rules.",
+        "sha256_crlf": "a7686a35f2fbad8c0dc4bbd49ead4cd0440ffe02a50a82f3470b67dd525039d0"
       }
     ],
     "primary_references": [],
     "applicability": {
-      "source_match": "Only for the identified source_id and exact selected source-file hashes. Git commit alone is insufficient when files are dirty.",
+      "source_match": "The registered source_id must match the reviewed file digests. The recorded Git LF and full Windows CRLF forms count as equivalent. The receipt reports exact observed bytes.",
       "on_source_mismatch": "Mark stale; conceptual reference only. Read the actual parser/catalog before proposing or emitting config.",
       "selected_runtime": "Executable/module capability is NOT verified by this document. Use selected registered runtime probe, exact executable/module identities and consumer validation.",
       "web": "Captured primary documentation is a reference; it cannot overwrite local fork semantics.",
       "installation": "No grant, install, branch change or submission is authorized by this reference. Do not attach install bodies on normal calculation turns.",
       "science": "No convergence, physical validity, safe production defaults or artifact compatibility is established by this source receipt."
     },
-    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals."
+    "language_policy": "Rule summaries are AIMatterLab-authored CN/EN. Do not claim unavailable official Chinese manuals.",
+    "rule_input_encoding": "UTF-8 JSON.stringify(rules), in document key order",
+    "release_source": {
+      "name": "pyGAS",
+      "commit": "ba5787380181304a0e4c75578c2ecff736737e18"
+    },
+    "public_snapshot_comparison": {
+      "commit": "49bbead1df075e87df16149da475cec5b2d92845",
+      "scope": "Reviewed implementation blobs agree. The two tutorial bodies have separate versions and the matched receipt uses the release pin."
+    }
   },
   "parameter_emission_policy": {
     "keys": "Planning labels are not automatically valid config keywords. Serialize only the actual matched parser/API schema.",

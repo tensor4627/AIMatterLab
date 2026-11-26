@@ -2,7 +2,7 @@
 
 Use the connection selected by the user. Read its tool catalogue with `list_resource_tools`. For an installed tool, read the execution skill returned by `project_skill_catalog` and `read_project_skill` with `scope="resource"` and that resource ID. Recheck its environment, function and version before using it in a new workflow.
 
-For a named release tool, use `search_software_docs` with its public name in `software` and read the pinned `guide_url` from the result. `software.catalog` includes a focused reference for HotHam dataset preparation, Hamiltonian training and LCAO inference. Select a declared function and its case when translating a delivery declaration into a resource setup manifest.
+For a release-only lookup use `search_software_docs({})` and its bundled function references. For public cross-checks, read the pinned `guide_url` or query public registries with `search_software_docs({software, sources:"public"})`. Stay with the bundled references when offline. `software.catalog` includes a focused reference for HotHam dataset preparation, Hamiltonian training and LCAO inference. Select a declared function and its case when translating a delivery declaration into a resource setup manifest.
 
 ## Select the installation path
 

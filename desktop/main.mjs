@@ -55,7 +55,7 @@ import {createToolWorkflowController,registerToolWorkflowRoutes} from '../backen
 import {createRoadmapController} from '../backend/main/workspace/roadmap-execution.mjs';
 import {createRoadmapNotifications} from '../backend/main/workspace/roadmap-notifications.mjs';
 import {softwareDocDefinitions,softwareDocs as lookupSoftwareDocs} from '../backend/main/tools/public-software-docs.mjs';
-import {readReleaseToolSources} from '../contracts/tools/release-tool-sources.mjs';
+import {readReleaseToolSources} from '../agent/skills/release-tool-catalog.mjs';
 import {toolGuidanceTarget} from '../backend/main/compute/tool-guidance-target.mjs';
 import {explicitSetupStage} from '../agent/skills/explicit-setup-stage.mjs';
 import {createComputeOnboarding} from "../backend/main/compute/compute-onboarding.mjs";

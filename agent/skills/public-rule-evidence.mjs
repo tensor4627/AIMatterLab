@@ -1,5 +1,6 @@
 import rawFs from 'node:fs/promises';import {policyIo} from './policy-io.mjs';import {createReadPolicy,legacyGuidanceFacts} from './read-policy.mjs';import path from 'node:path';import {constants} from 'node:fs';import {createHash} from 'node:crypto';
 const sha=data=>createHash('sha256').update(data).digest('hex');
+const digest=value=>typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
 const relative=value=>typeof value==='string'&&value.length<=512&&/^[A-Za-z0-9_./-]+$/.test(value)&&value.split('/').every(part=>part&&part!=='.'&&part!=='..')&&!path.posix.isAbsolute(value);
 export class PublicRuleEvidence{
  constructor(resolve){this.resolve=resolve;this.cache=new Map();}
@@ -10,7 +11,8 @@ export class PublicRuleEvidence{
   if(!Array.isArray(local)||local.length>64)throw Error('Invalid bounded planning-rule source receipt');
   const results=[];
   for(const item of local){
-   if(!relative(item.path)||!/^[0-9a-f]{64}$/.test(item.sha256||''))throw Error('Invalid planning-rule source file');
+   if(!relative(item.path)||!digest(item.sha256)||(item.sha256_crlf!==undefined&&!digest(item.sha256_crlf))||
+     (item.sha256_checkout!==undefined&&!digest(item.sha256_checkout)))throw Error('Invalid planning-rule source file');
    const configured=this.resolve(item.source_id,{policy});
    if(typeof configured!=='string'||!path.isAbsolute(configured)){results.push({source_id:item.source_id,path:item.path,status:'unregistered'});continue;}
    try{
@@ -30,7 +32,13 @@ export class PublicRuleEvidence{
       actual=sha(data);if(this.cache.size>256)this.cache.clear();this.cache.set(key,actual);
      }finally{await fd.close();}
     }
-    results.push({source_id:item.source_id,path:item.path,status:actual===item.sha256?'matched':'stale',expected_sha256:item.sha256,actual_sha256:actual});
+    // Keep the bytes observed on disk. Only an explicitly recorded digest can match.
+    const crlfMatch=actual===item.sha256_crlf;
+    const checkoutMatch=actual===item.sha256_checkout;
+    const variant=crlfMatch?'crlf':checkoutMatch?'observed_checkout':undefined;
+    results.push({source_id:item.source_id,path:item.path,status:actual===item.sha256||variant?'matched':'stale',expected_sha256:item.sha256,actual_sha256:actual,
+     ...(item.sha256_crlf!==undefined&&{expected_sha256_crlf:item.sha256_crlf}),
+     ...(item.sha256_checkout!==undefined&&{expected_sha256_checkout:item.sha256_checkout}),...(variant&&{matched_variant:variant})});
    }catch{results.push({source_id:item.source_id,path:item.path,status:'blocked'});}
   }
   await policy.revalidate();

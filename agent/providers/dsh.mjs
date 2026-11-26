@@ -74,10 +74,14 @@ export class DshBridge extends EventEmitter{
   const assertCurrent=()=>{if(controller.signal.aborted||generation!==this.lifecycle||createHash('sha256').update(JSON.stringify(this.getCredential())).digest('hex')!==identity)throw Error('DeepSeek Harness connection selection changed');};
   const operation=(async()=>{if(!this.models.length||this.catalogCredential!==identity)await this.modelList({signal:controller.signal,assertCurrent});assertCurrent();return this.launch(this.model,this.effort);})().finally(()=>{if(this.starting===operation)this.starting=null;if(this.connectController===controller)this.connectController=null;});this.starting=operation;return operation;
  }
- async launch(model,effort,toolContext){
+ toolWorker(disableWorkflow){
+  const worker=this.getWorker();
+  if(!worker||!disableWorkflow)return worker;
+  return {...worker,context:{...worker.context,taskId:null,projectId:null}};
+ }
+ async launch(model,effort,disableWorkflow=false){
   if(effort===undefined||effort==='none')effort='off';
-  let worker=this.getWorker();
-  if(worker&&toolContext)worker={...worker,context:{...worker.context,taskId:toolContext.mode==='workflow'?toolContext.taskId:null,projectId:toolContext.mode==='workflow'?toolContext.projectId:null}};
+  const worker=this.toolWorker(disableWorkflow);
   const key=createHash('sha256').update(JSON.stringify([model,effort,worker?.url,worker?.tokens?.mcp,worker?.context?.taskId,worker?.context?.projectId,this.getCredential()?.apiKey,this.instructions])).digest('hex');
   if(this.process&&this.contextKey===key)return this.info;
   if(this.activeTurns.size)throw Error('Stop the current reply before changing the DeepSeek runtime');
@@ -95,7 +99,8 @@ export class DshBridge extends EventEmitter{
   const timer=setTimeout(()=>readyReject(Error('DeepSeek Harness isolation readiness timed out')),30000);
   try{
    // Install the readiness rejection handler before initialization can fail.
-   const [info,isolation]=await Promise.all([this.raw('initialize',{cwd:profile.cwd,provider:'deepseek-official',model,reasoningEffort:effort,maxTokens:effort==='off'?8192:32768,approvalRequests:true,capabilities:{userQuestions:true}}),ready]);
+   // Leave the output budget to the official adapter and its model catalog.
+   const [info,isolation]=await Promise.all([this.raw('initialize',{cwd:profile.cwd,provider:'deepseek-official',model,reasoningEffort:effort,approvalRequests:true,capabilities:{userQuestions:true}}),ready]);
    if(info?.serverInfo?.name!=='deepseek-harness-sdk-runtime'||generation!==this.lifecycle||this.process!==child||isolation?.status!=='verified')throw Error('DeepSeek Harness 未通过运行组件与隔离检查');
    this.model=model;this.effort=effort;this.modelInfos=isolation.models||[];this.info={transport:'dsh-sdk-jsonl',agentInfo:{name:'DeepSeek Harness',version:runtime.version},studioIsolation:isolation};return this.info;
   }catch(error){if(this.process===child)this.stop({notify:false});throw Error(this.clean(error.message));}finally{clearTimeout(timer);if(this.isolationWaiter===isolationWaiter)this.isolationWaiter=null;}
@@ -227,6 +232,8 @@ export class DshBridge extends EventEmitter{
  }
  restoreSession(value){
   const session=this.cleanProtocol(value);
+  // The live MCP lease supplies workflow scope, including for old histories.
+  delete session.toolContext;
   markInterruptedDshTurns(session.turns);
   this.sessions.set(session.id,session);this.save(session);return session;
  }
@@ -241,7 +248,7 @@ export class DshBridge extends EventEmitter{
   if(method==='thread/read')return {thread:this.publicThread(this.session(params.threadId))};
   if(method==='thread/resume'){
    const s=this.session(params.threadId),unconfirmed=this.unconfirmedTurns.has(s.id);
-   if(!unconfirmed){await this.launch(this.choose(params.model||s.model),s.effort,s.toolContext);assertCurrent();await this.ensureSession(s);assertCurrent();}
+   if(!unconfirmed){await this.launch(this.choose(params.model||s.model),s.effort);assertCurrent();await this.ensureSession(s);assertCurrent();}
    this.current=s.id;return {thread:this.publicThread(s),model:unconfirmed?s.model:this.model,reasoningEffort:s.effort};
   }
   if(method==='turn/steer')return this.steerTurn(params,assertCurrent);
@@ -249,7 +256,8 @@ export class DshBridge extends EventEmitter{
   if(method==='turn/start'){
    if(this.unconfirmedTurns.has(params.threadId))throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');
    if(this.activeTurns.size)throw Error('A DeepSeek reply is already active');const s=this.session(params.threadId),{input,text}=this.promptInput(params.input);
-   const model=this.choose(params.model||s.model),effort=(params.effort||s.effort)==='none'?'off':params.effort||s.effort,toolContext=params.studioToolContext||s.toolContext;await this.launch(model,effort,toolContext);assertCurrent();
+   const model=this.choose(params.model||s.model),effort=(params.effort||s.effort)==='none'?'off':params.effort||s.effort;
+   await this.launch(model,effort,params.studioToolContext?.mode==='chat');assertCurrent();
    if(input.some(item=>item.type==='image')&&!this.modelCatalog().data.find(row=>row.model===model)?.inputModalities?.includes('image'))throw Error('当前模型只接受文字。请选择支持图片的模型，或移除图片。');
    await this.ensureSession(s);assertCurrent();
    if(this.activeTurns.size||this.unconfirmedTurns.has(s.id))throw Error('A previous reply is active or awaiting its receipt');
@@ -259,7 +267,7 @@ export class DshBridge extends EventEmitter{
     id:randomUUID(),type:'userMessage',...(clientUserMessageId?{clientUserMessageId}:{}),
     content:text,text:textOf(text)
    })]},active={turn,output:false};
-   s.turns.push(turn);s.model=model;s.effort=effort;s.toolContext=toolContext;s.legacyContextPending=false;s.nativeStarted=true;s.name||=text.map(i=>i.text).join(' ').trim().slice(0,60);s.updatedAt=Date.now();this.activeTurns.set(s.id,active);this.save(s);
+   s.turns.push(turn);s.model=model;s.effort=effort;s.legacyContextPending=false;s.nativeStarted=true;s.name||=text.map(i=>i.text).join(' ').trim().slice(0,60);s.updatedAt=Date.now();this.activeTurns.set(s.id,active);this.save(s);
    const latePrompt=reply=>{
     if(this.unconfirmedTurns.get(s.id)!==active)return;
     if(reply.error)this.settleTurn(s,active,'failed',this.clean(reply.error.message));

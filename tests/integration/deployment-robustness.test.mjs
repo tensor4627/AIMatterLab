@@ -1,4 +1,5 @@
 import {taskWorkerTarget} from "../../backend/main/compute/explicit-worker-binding.mjs";
+import {executionNotStartedPrefix} from '../../contracts/compute/run-operation-receipt.mjs';
 import {restoreTaskWorker} from "../../backend/main/compute/worker-restore.mjs";
 import test from 'node:test';import assert from 'node:assert/strict';
 import {DeploymentOutbox,deploymentOutbox,deploymentConfig} from "../../frontend/features/workflows/deployment-draft.mjs";
@@ -57,7 +58,9 @@ function executionAuthFixture({kind='cluster-run',errorCode='needs_human_auth',s
 }
 
 for(const errorCode of ['needs_human_auth','needs_worker_update'])test('Recognized cluster '+errorCode+' reads a fresh exact no-dispatch proof and preserves the prepared review',async()=>{
- const f=executionAuthFixture({errorCode}),before=f.read();await assert.rejects(f.execute(),error=>error.message===errorCode);const after=f.read();
+ const f=executionAuthFixture({errorCode}),before=f.read();
+ await assert.rejects(f.execute(),error=>error.message===executionNotStartedPrefix+errorCode&&error.cause?.message===errorCode);
+ const after=f.read();
  assert.equal(after.execution.phase,'blocked');assert.equal(after.execution.authenticationRequired,true);assert.equal(after.execution.notSubmitted,true);assert.equal(after.execution.artifactId,f.run.id);assert.deepEqual(after.deployment.prepared,before.deployment.prepared);assert.deepEqual(after.review,before.review);
  assert.deepEqual(f.requests.map(x=>x.route),['/api/cluster/status','/api/cluster/validate','/api/cluster/submit','/api/cluster/status']);assert.equal(f.requests.filter(x=>x.route.endsWith('/submit')).length,1);
 });
@@ -113,7 +116,15 @@ test('Legacy reviewed cluster artifacts receive the same exact no-dispatch auth 
 });
 
 for(const stage of ['validate','submit'])test('Local engine '+stage+' failures keep the existing policy and never use cluster auth recovery',async()=>{
- const f=executionAuthFixture({kind:'run',stage,localHuman:true});await assert.rejects(f.execute(),/needs_human_auth/);const after=f.read();assert.equal(after.execution.phase,stage==='submit'?'unknown':'blocked');assert.notEqual(after.execution.notSubmitted,true);assert.notEqual(after.execution.authenticationRequired,true);assert.equal(after.review.status,'ready');assert.equal(after.localInputReview.status,'confirmed');assert.equal(f.requests.filter(x=>x.route.endsWith('/submit')).length,stage==='submit'?1:0);assert(f.requests.every(x=>x.route.startsWith('/api/run/')));
+ const f=executionAuthFixture({kind:'run',stage,localHuman:true});
+ await assert.rejects(f.execute(),/needs_human_auth/);
+ const after=f.read(),beforeSubmission=stage==='validate';
+ assert.equal(after.execution.phase,beforeSubmission?'blocked':'unknown');
+ assert.equal(after.execution.notSubmitted,beforeSubmission?true:undefined);
+ assert.equal(after.execution.authenticationRequired,beforeSubmission?true:undefined);
+ assert.equal(after.review.status,'ready');assert.equal(after.localInputReview.status,'confirmed');
+ assert.equal(f.requests.filter(x=>x.route.endsWith('/submit')).length,beforeSubmission?0:1);
+ assert(f.requests.every(x=>x.route.startsWith('/api/run/')));
 });
 
 test('actual deployment draft and confirmed save preserve real transport port for later restore after defaults change',async()=>{const f=fixture();f.worker.connectionTarget={port:9012};const draft=saveDeploymentDraft(f.records,f.worker,{taskId:f.task.id,value:config,expectedRevision:0,mutationId:'port-preserve-1'});assert.equal(draft.deploymentDraft.workerBinding.port,9012);saveDeployment(f.records,{taskId:f.task.id,value:{...config,projectId:'project'}},undefined,f.worker);const saved=f.records.read(f.task.id);assert.equal(saved.deployment.workerBinding.port,9012);assert.equal(taskWorkerTarget(saved,{distribution:'Other',workerRoot:'/other',workerPort:9999},{}).workerPort,9012);let target;const worker={restore:async value=>{target=value;return {status:'connected'};}};const result=await restoreTaskWorker({records:f.records,worker,settings:()=>({distribution:'Other',workerRoot:'/other',workerPort:9999}),selection:()=>({taskId:saved.id,provider:saved.provider,threadId:saved.threadId})},{taskId:saved.id});assert.equal(result.status,'connected');assert.equal(target.workerPort,9012);assert.equal(target.workerRoot,'/worker');assert.equal(f.calls.length,0);});

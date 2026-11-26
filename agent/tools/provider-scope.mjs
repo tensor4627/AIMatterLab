@@ -43,8 +43,8 @@ export class McpProviderScopes {
   if(!PROVIDERS.has(provider))throw Error('Unsupported provider');
   if(sessionId!==undefined&&!validSessionId(sessionId))throw Error('Invalid internal provider session identity');
   this.bind(base);const scope=this.get(provider,sessionId)||this.lease(provider,providerContext(),sessionId);
-  // Each transport receives its own lease, never the admin token.
-  return {url:this.base.origin+'/providers/'+provider,tokens:{mcp:scope.token},transport:base.transport,health:base.health,epoch:scope.epoch,context:scope.context};
+  // A first fill can update the context without replacing this transport's lease.
+  return {url:this.base.origin+'/providers/'+provider,tokens:{mcp:scope.token},transport:base.transport,health:base.health,epoch:scope.epoch,get context(){return scope.context;}};
  }
  authenticate({pathname,authorization,origin,host}){
   if(!this.base||origin!==undefined||host!==this.base.host||typeof pathname!=='string')return null;

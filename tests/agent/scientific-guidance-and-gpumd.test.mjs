@@ -47,6 +47,47 @@ test('Rule source match is bounded metadata only; changes and missing registrati
  assert.equal((await new PublicRuleEvidence(()=>undefined).inspect(document)).files[0].status,'unregistered');
  await assert.rejects(service.inspect({source_receipt:{local_files:[{source_id:'pygas',path:'../secret',sha256:'0'.repeat(64)}]}}),/Invalid/);
 });
+test('Rule source fingerprint accepts only the recorded LF or CRLF bytes and retains exact observed identity',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-rule-endings-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const file=path.join(root,'cv.py'),lf='line 1\nline 2\n',crlf='line 1\r\nline 2\r\n';
+ const item={source_id:'pygas',path:'cv.py',sha256:sha(lf),sha256_crlf:sha(crlf)};
+ const receipt=entry=>({source_receipt:{local_files:[entry]}});
+ const service=new PublicRuleEvidence(()=>root);
+ await fs.writeFile(file,lf);
+ const exact=await service.inspect(receipt(item));
+ assert.equal(exact.status,'source_matched_reference');
+ assert.equal(exact.files[0].actual_sha256,item.sha256);
+ assert.equal(exact.files[0].matched_variant,undefined);
+ await fs.writeFile(file,crlf);
+ const windows=await service.inspect(receipt(item));
+ assert.equal(windows.status,'source_matched_reference');
+ assert.equal(windows.files[0].actual_sha256,item.sha256_crlf);
+ assert.equal(windows.files[0].expected_sha256,item.sha256);
+ assert.equal(windows.files[0].expected_sha256_crlf,item.sha256_crlf);
+ assert.equal(windows.files[0].matched_variant,'crlf');
+ const mixed='line 1\r\nline 2\n',knownCheckout={...item,sha256_checkout:sha(mixed)};
+ await fs.writeFile(file,mixed);
+ const checkout=await service.inspect(receipt(knownCheckout));
+ assert.equal(checkout.status,'source_matched_reference');
+ assert.equal(checkout.files[0].actual_sha256,sha(mixed));
+ assert.equal(checkout.files[0].expected_sha256_checkout,sha(mixed));
+ assert.equal(checkout.files[0].matched_variant,'observed_checkout');
+ assert.equal((await service.inspect(receipt(item))).status,'reference_only');
+ assert.equal((await service.inspect(receipt({...item,sha256:sha(mixed)}))).status,'source_matched_reference');
+ await fs.writeFile(file,crlf);
+ const {sha256_crlf,...legacy}=item;
+ assert.equal((await service.inspect(receipt(legacy))).status,'reference_only');
+ assert.equal((await service.inspect(receipt({...legacy,sha256:sha256_crlf}))).status,'source_matched_reference');
+ for(const altered of ['line 1\r\nline 2\n','line 1\nline 3\n']){
+  await fs.writeFile(file,altered);
+  const stale=await service.inspect(receipt(item));
+  assert.equal(stale.status,'reference_only');
+  assert.equal(stale.files[0].status,'stale');
+  assert.equal(stale.files[0].actual_sha256,sha(altered));
+ }
+ await assert.rejects(service.inspect(receipt({...item,sha256_crlf:'invalid'})),/Invalid planning-rule source file/);
+ await assert.rejects(service.inspect(receipt({...item,sha256_checkout:'invalid'})),/Invalid planning-rule source file/);
+});
 });
 
 await __describe("scientific-focused-document", async () => {

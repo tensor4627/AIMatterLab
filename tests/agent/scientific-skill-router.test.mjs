@@ -3,6 +3,9 @@ import {ScientificSkillRouter} from "../../agent/skills/scientific-skill-router.
 import {ScientificSkillContext} from '../../agent/skills/scientific-context.mjs';
 import {PROVIDERS} from '../../agent/providers/contracts.mjs';
 import {fileURLToPath} from 'node:url';
+import {ScientificSkills} from '../../agent/skills/scientific-skills.mjs';
+import {legacyGuidanceFacts} from '../../agent/skills/read-policy.mjs';
+import {createHash} from 'node:crypto';
 async function fixture(t){const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-route-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));await fs.mkdir(path.join(root,'public-cv'));await fs.writeFile(path.join(root,'public-cv','SKILL.md'),'actual public CV instructions');const map={schema_version:1,skills:[{id:'cv',source:'pygas',folder:'public-cv',files:['SKILL.md']}],functions:[{id:'cv.compose',phase:'authoring',skills:['cv'],engines:['pygas.build'],status:'source_guidance'},{id:'env.install',phase:'installation',skills:['cv'],status:'setup_only'}]};return {root,map};}
 test('Each authenticated provider needs its own consent before receiving bounded text and a hash receipt',async t=>{
  const {root,map}=await fixture(t);
@@ -129,6 +132,16 @@ test('native NEB guidance keeps the reviewed workflow and the delegated independ
  assert.match(neb.text, /present_task/);
  assert.match(neb.text, /independent job in ordinary chat/i);
  assert.match(neb.text, /cluster\.lsf-slurm-deployment/);
+ assert.match(neb.text, /eV\/Å for the FIRE force tolerance and GPa for variable-cell pressure/);
+ const native = await router.read('deepseek', 'neb.gpumd', 'studio-neb-workflow/references/native-input.md');
+ assert.equal(native.status, 'passed');
+ assert.match(native.text, /force tolerance in eV\/Å/);
+ assert.match(native.text, /variable-cell pressure in GPa/);
+ const rules = await router.read('deepseek', 'neb.gpumd', 'studio-neb-workflow/references/neb.json');
+ assert.equal(rules.status, 'passed');
+ for (const entries of Object.values(JSON.parse(rules.text).rules)) {
+  assert(entries.some(rule => /force_tolerance[^。]*eV\/Å/.test(rule) && /pressure_gpa[^。]*GPa/.test(rule)));
+ }
  assert.doesNotMatch(neb.text, /Execute remain(?:s)? mandatory/i);
  const jobs = await router.read('deepseek', 'cluster.lsf-slurm-deployment');
  assert.equal(jobs.status, 'passed');
@@ -136,4 +149,97 @@ test('native NEB guidance keeps the reviewed workflow and the delegated independ
   assert(map.functions.find(route => route.id === jobs.function_id).tools.includes(name));
   assert(jobs.text.includes(name));
  }
+});
+
+test('WTMetaD ordinary analysis exposes the bundled guide in the catalog and keeps existing pyGAS reads consent-scoped',async t=>{
+ const {root}=await fixture(t);
+ const map=JSON.parse(await fs.readFile(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
+ const bundledRoot=fileURLToPath(new URL('../../agent/builtin-skills/',import.meta.url));
+ const route='analysis.wtmetad',bundleDoc='studio-cv-bias-planning/references/wtmetad.md';
+ const sourceDoc='pygas-reweight-metad/references/reweighting-contract.md';
+ const expected=await fs.readFile(path.join(bundledRoot,bundleDoc),'utf8');
+ const foreignBody='Shared pyGAS reweighting fixture';
+ await fs.mkdir(path.join(root,'agents/skills/pygas-reweight-metad/references'),{recursive:true});
+ await fs.writeFile(path.join(root,'agents/skills/pygas-reweight-metad/SKILL.md'),foreignBody);
+ await fs.writeFile(path.join(root,'agents/skills',sourceDoc),foreignBody);
+ let registered=true, endpointAllowed=true;
+ const settings={pygasSkillProviders:[]};
+ const service=new ScientificSkills({map,bundledRoot,sources:()=>registered?[{id:'pygas',root}]:[],
+  settings:()=>settings,providerConsent:()=>endpointAllowed});
+ for(const provider of ['codex','deepseek']){
+  const scope={provider};
+  const catalog=async()=>(await service.call('scientific_skill_catalog',{},scope)).functions.find(item=>item.id===route);
+  const read=(document_id,function_id=route)=>service.call('read_scientific_skill',{function_id,...document_id&&{document_id}},scope);
+  const denied={status:'permission_required',function_id:route,attachments:[]};
+  const initial=await catalog();
+  assert.equal(initial.permission,'allowed');
+  assert.equal(initial.source_status,'registered');
+  assert.deepEqual(initial.sources,['studio']);
+  assert.deepEqual(initial.engines,['pygas.reweight']);
+  const turn=await service.context.prepare('ordinary-chat',provider,{text:'不联网解释 WTMetaD 重加权和输出文件'});
+  assert.equal(turn.status,'passed');
+  assert.deepEqual(turn.routes,[route]);
+  assert(turn.text.includes(bundleDoc));
+  const entry=await read();
+  assert.equal(entry.status,'passed');
+  assert.deepEqual(entry.document_ids,['studio-cv-bias-planning/SKILL.md',bundleDoc]);
+  assert.deepEqual(entry.attachments.map(file=>file.source),['studio']);
+  assert(!entry.text.includes(sourceDoc));
+  const bundle=await read(bundleDoc);
+  assert.equal(bundle.status,'passed');
+  assert.equal(bundle.text,expected);
+  assert.equal(bundle.attachments[0].source,'studio');
+  assert.equal(bundle.attachments[0].sha256,createHash('sha256').update(expected).digest('hex'));
+  assert.match(bundle.text,/10\.1021\/jp504920s/);
+  assert.deepEqual(await read(sourceDoc),denied);
+  const opes=await read('studio-opes-analysis/references/cli-contract.json','analysis.opes');
+  assert.equal(opes.status,'permission_required');
+  assert.equal(opes.text,undefined);
+  settings.pygasSkillProviders=[provider];
+  endpointAllowed=false;
+  assert.deepEqual((await catalog()).sources,['studio']);
+  assert.deepEqual(await read(sourceDoc),denied);
+  endpointAllowed=true;
+  assert.deepEqual((await catalog()).sources,['pygas','studio']);
+  const shared=await read();
+  assert.deepEqual(shared.attachments.map(file=>file.source),['pygas','studio']);
+  assert(shared.document_ids.includes(sourceDoc));
+  const external=await read(sourceDoc);
+  assert.equal(external.status,'passed');
+  assert.equal(external.text,foreignBody);
+  assert.equal(external.attachments[0].source,'pygas');
+  assert.deepEqual(await read(bundleDoc),bundle);
+  registered=false;
+  assert.deepEqual((await catalog()).sources,['studio']);
+  assert.deepEqual((await read()).document_ids,entry.document_ids);
+  assert.equal((await read(sourceDoc)).status,'blocked');
+  registered=true;
+  settings.pygasSkillProviders=[];
+  assert.deepEqual(await read(sourceDoc),denied);
+  await assert.rejects(read('pygas-reweight-metad/private-internal.txt'),/exact document_id/);
+ }
+});
+
+test('WTMetaD bundled fallback cannot disclose documents in a sealed execution route',async()=>{
+ const map=JSON.parse(await fs.readFile(new URL('../../agent/skills/scientific-skill-map.json',import.meta.url),'utf8'));
+ const bundleDoc='studio-cv-bias-planning/references/wtmetad.md';
+ const route='analysis.wtmetad',scope={provider:'codex'};
+ const execText='Bound execution-only guidance';
+ const active={...legacyGuidanceFacts(),revision:'execution-test',state:'active',engines:['pygas.reweight'],
+  package:{id:'pygas-test',version:'1',manifestSha256:'a'.repeat(64),sourceCommit:'b'.repeat(40)},
+  workerBinding:{distribution:'Fixture',root:'/worker',port:1},target:{kind:'local',projectId:'fixture',environmentId:'fixture',fingerprint:'fixture'},
+  activation:{id:'activation',revision:'1',configurationId:'config'},
+  executionSkill:{id:'execution-guide',text:execText,sha256:createHash('sha256').update(execText).digest('hex'),resources:[]}};
+ let grant=false,facts=active;
+ const service=new ScientificSkills({map,bundledRoot:'/fixture-never-read',sources:()=>{throw Error('Legacy roots are sealed');},
+  registeredSources:()=>[],settings:()=>({pygasSkillProviders:grant?['codex']:[]}),resolveGuidance:async()=>facts});
+ const read=document_id=>service.call('read_scientific_skill',{function_id:route,...document_id&&{document_id}},scope);
+ assert.deepEqual(await read(bundleDoc),{status:'permission_required',function_id:route,attachments:[]});
+ grant=true;
+ assert.equal((await read()).phase,'execution');
+ assert.equal((await read('execution-guide')).text,execText);
+ assert.equal((await read(bundleDoc)).status,'blocked');
+ facts={...facts,state:'revoked'};
+ assert.deepEqual((await read(bundleDoc)).attachments,[]);
+ assert.equal((await read()).status,'blocked');
 });

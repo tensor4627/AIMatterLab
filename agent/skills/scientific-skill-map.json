@@ -235,7 +235,9 @@
         "references/plumed.json",
         "references/pygas.json",
         "references/custom-review.md",
-        "references/composition-details.md"
+        "references/composition-details.md",
+        "references/umbrella.md",
+        "references/wtmetad.md"
       ]
     },
     {
@@ -362,7 +364,26 @@
         "studio-cv-bias-planning": [
           "references/pygas.json",
           "references/plumed.json",
-          "references/composition-details.md"
+          "references/composition-details.md",
+          "references/umbrella.md",
+          "references/wtmetad.md"
+        ]
+      }
+    },
+    {
+      "id": "sampling.enhanced-plan",
+      "title": "Fixed umbrella and WTMetaD planning",
+      "engines": [],
+      "skills": [
+        "studio-cv-bias-planning"
+      ],
+      "status": "guidance_only_no_execution_adapter",
+      "phase": "planning",
+      "adaptation": "For paper planning, choose the matching focused umbrella or WTMetaD document. Use its method, exact source examples, resource estimates, and numerical checks. Library-specific authoring and reweighting use the matching registered-source routes and their existing sharing and execution boundaries.",
+      "reference_files": {
+        "studio-cv-bias-planning": [
+          "references/umbrella.md",
+          "references/wtmetad.md"
         ]
       }
     },
@@ -395,7 +416,8 @@
         "studio-cv-bias-planning": [
           "references/pygas.json",
           "references/plumed.json",
-          "references/composition-details.md"
+          "references/composition-details.md",
+          "references/umbrella.md"
         ]
       }
     },
@@ -416,7 +438,9 @@
         "studio-cv-bias-planning": [
           "references/pygas.json",
           "references/plumed.json",
-          "references/composition-details.md"
+          "references/composition-details.md",
+          "references/umbrella.md",
+          "references/wtmetad.md"
         ]
       }
     },
@@ -490,14 +514,22 @@
     },
     {
       "id": "analysis.wtmetad",
+      "ordinary_bundled_fallback": true,
+      "adaptation": "For WTMetaD method and reweighting, read studio-cv-bias-planning/references/wtmetad.md. The registered pyGAS reweighting contract is available here with its source sharing grant. Check the selected runtime before using the CLI.",
       "engines": [
         "pygas.reweight"
       ],
       "skills": [
-        "pygas-reweight-metad"
+        "pygas-reweight-metad",
+        "studio-cv-bias-planning"
       ],
       "status": "implemented",
-      "phase": "analysis"
+      "phase": "analysis",
+      "reference_files": {
+        "studio-cv-bias-planning": [
+          "references/wtmetad.md"
+        ]
+      }
     },
     {
       "id": "analysis.opes",

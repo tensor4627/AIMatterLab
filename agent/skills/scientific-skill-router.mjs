@@ -35,6 +35,7 @@ export class ScientificSkillRouter {
   for(const route of this.map.functions){
    if(this.routes.has(route.id)||!Array.isArray(route.skills)||route.skills.some(id=>!this.definitions.has(id)))throw Error('Invalid function route');
    for(const [id,files] of Object.entries(route.reference_files||{}))if(!route.skills.includes(id)||!Array.isArray(files)||files.some(file=>!(this.definitions.get(id).reference_files||[]).includes(file)))throw Error('Invalid bounded route reference');
+   if(route.ordinary_bundled_fallback&&(!route.skills.some(id=>this.definitions.get(id).source==='studio')||!route.skills.some(id=>this.definitions.get(id).source!=='studio')))throw Error('Bundled fallback requires a mixed skill route');
    this.routes.set(route.id,route);
   }
  }
@@ -43,25 +44,40 @@ export class ScientificSkillRouter {
   // Legacy pyGAS consent is resolved by the owner callback; it never grants other families.
   return skill.source==='studio'||await this.consent(provider,skill.source)===true;
  }
- async catalog(provider){
+ async skillsForRead(route,provider,scope,policy,documentId){
+  // Ordinary chat can read this route's first-party guidance even without an upstream grant.
+  if(!route.ordinary_bundled_fallback||policy?.state!=='legacy_unconfigured'||policy.facts.archivedResources.length)return route.skills;
+  const bundled=route.skills.filter(id=>this.definitions.get(id).source==='studio');
+  if(documentId!==undefined)return this.documentIds(route.id,bundled).includes(documentId)?bundled:route.skills;
+  for(const id of route.skills){
+   const skill=this.definitions.get(id);
+   if(skill.source==='studio')continue;
+   if(!await this.allowed(provider,skill))return bundled;
+   const root=await this.sourceRoot(skill.source,{scope,policy});
+   if(typeof root!=='string'||!path.isAbsolute(root))return bundled;
+  }
+  return route.skills;
+ }
+ async catalog(provider,{scope={provider},policy}={}){
   if(!PROVIDERS.has(provider))throw Error('Unsupported authenticated provider');
   const functions=[];
   for(const route of this.routes.values()){
-   const sources=[...new Set(route.skills.map(id=>this.definitions.get(id).source))],permissions={};
-   for(const id of route.skills){const skill=this.definitions.get(id);permissions[skill.source]=await this.allowed(provider,skill);}
+   const skills=await this.skillsForRead(route,provider,scope,policy);
+   const sources=[...new Set(skills.map(id=>this.definitions.get(id).source))],permissions={};
+   for(const id of skills){const skill=this.definitions.get(id);permissions[skill.source]=await this.allowed(provider,skill);}
    functions.push({id:route.id,...route.title?{title:route.title}:{},phase:route.phase,engines:route.engines||[],tools:route.tools||[],status:route.status,sources,permission:sources.every(source=>permissions[source])?'allowed':'permission_required'});
   }
   return {schema_version:1,scope:'Guidance routing only; source registration is not an available or scientifically validated engine.',functions};
  }
- documentIds(functionId){
-  const route=this.routes.get(functionId);return route?route.skills.flatMap(id=>{const skill=this.definitions.get(id);return [...skill.files,...route.reference_files?.[id]||[]].map(file=>skill.folder+'/'+file);}):[];
+ documentIds(functionId,skills){
+  const route=this.routes.get(functionId);return route?(skills||route.skills).flatMap(id=>{const skill=this.definitions.get(id);return [...skill.files,...route.reference_files?.[id]||[]].map(file=>skill.folder+'/'+file);}):[];
  }
  async read(provider,functionId,documentId,{scope={provider},policy}={}){
   policy??=await resolveReadPolicy({resolveGuidance:this.resolveGuidance,assertScope:this.assertScope},scope);
   await policy.revalidate();const fs=policyIo(rawFs,policy,{asynchronous:true});
   if(!PROVIDERS.has(provider))throw Error('Unsupported authenticated provider');
   const route=this.routes.get(functionId);if(!route)throw Error('Choose a listed function_id');
-  const documentIds=this.documentIds(functionId);
+  const allDocumentIds=this.documentIds(functionId);
   const grantRead=policy.hasReadGrant();
   if(policy.appliesTo(route)&&!grantRead){
    if(['installation','setup','toolchain'].includes(route.phase)||policy.blocksAll())return {status:'blocked',function_id:functionId,reason:'Pre-execution guidance is sealed; explicit configuration is required.',attachments:[]};
@@ -71,17 +87,19 @@ export class ScientificSkillRouter {
    if(documentId!==undefined){const document=[policy.facts.executionSkill,...policy.facts.executionSkill.resources].find(item=>item.id===documentId);result.text=document.text;result.attachments=[{source:'execution',skill:policy.facts.executionSkill.id,name:document.id,sha256:document.sha256,bytes:Buffer.byteLength(document.text)}];result.bytes=Buffer.byteLength(document.text);result.document_id=documentId;if(Buffer.byteLength(JSON.stringify(toolValueResult(result)))>24*1024)return {status:'blocked',function_id:functionId,reason:'Execution document exceeds the serialized MCP budget.',attachments:[]};}
    await policy.revalidate();for(const id of route.skills)if(!await this.allowed(provider,this.definitions.get(id)))return {status:'permission_required',function_id:functionId,attachments:[]};await policy.revalidate();return result;
   }
-  if(documentId!==undefined&&(typeof documentId!=='string'||!documentIds.includes(documentId)))throw Error('Choose an exact document_id advertised for this function_id');
+  if(documentId!==undefined&&(typeof documentId!=='string'||!allDocumentIds.includes(documentId)))throw Error('Choose an exact document_id advertised for this function_id');
   const setupPhase=['installation','setup','toolchain'].includes(route.phase),setupAllowed=setupPhase&&await this.setupAllowed(provider,route)===true,grantOnly=grantRead&&(policy.appliesTo(route)||setupPhase);
   if(setupPhase&&!setupAllowed&&!grantOnly)return {status:'blocked',function_id:functionId,reason:'Setup guidance is not loaded in an ordinary calculation. To request this guide, select its function under 科学资源与技能 → 用于下条消息 for the current conversation. Continue other authorized work with the available tools.',attachments:[]};
-  const files=[];let bytes=0;const roots=new Map();
-  const check=async()=>{
-   for(const id of route.skills){const skill=this.definitions.get(id);if(!await this.allowed(provider,skill))return false;}
-   return true;
-  };
-  if(!await check())return {status:'permission_required',function_id:functionId,attachments:[]};
   try{
-   for(const id of route.skills){
+   const skills=await this.skillsForRead(route,provider,scope,policy,documentId);
+   const documentIds=this.documentIds(functionId,skills);
+   const files=[];let bytes=0;const roots=new Map();
+   const check=async()=>{
+    for(const id of skills){const skill=this.definitions.get(id);if(!await this.allowed(provider,skill))return false;}
+    return true;
+   };
+   if(!await check())return {status:'permission_required',function_id:functionId,attachments:[]};
+   for(const id of skills){
     const skill=this.definitions.get(id),configured=await this.sourceRoot(skill.source,{policy,scope});
     if(typeof configured!=='string'||!path.isAbsolute(configured))throw Error('Public source is not registered: '+skill.source);
     const root=await fs.realpath(configured),folder=path.join(root,...skill.folder.split('/'));

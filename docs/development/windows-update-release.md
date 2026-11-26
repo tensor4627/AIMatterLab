@@ -36,6 +36,8 @@ GitHub 是源码和正式发行的主仓库。日常开发在 GitHub 提交 Pull
    node scripts/check-bundled-guidance.mjs <成品展开目录>
    ```
 
+   将成品里的运行提示、技能正文和映射模块同本次提交的 Git blob 原始字节逐项核对。打标签前可用 `git ls-files --stage` 确认暂存对象，再用 `git cat-file --batch` 读取。Windows 工作树里的混合换行可能被 Git 自动规范化，两边的文件名和文字一致时，模型回执中的 SHA-256 仍可能不同。
+
 源码或成品检查失败时先修正并重跑。版本文档分别记载 `passed / failed / blocked / not_run` 及实际范围，核对通过后再创建或推送标签。部署兼容标识、旧聊天正文及个人库有自己的生命周期。审核新产品称呼时保留现有路由 ID、资源路径和旧记录的读取兼容性。
 
 ## 推送到两站

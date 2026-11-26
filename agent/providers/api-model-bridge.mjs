@@ -46,12 +46,12 @@ export class ApiModelBridge extends DshBridge{
   });
  })};}
  async start(){if(this.starting)return this.starting;if(this.process)return this.info;if(!this.profiles.list(this.provider).length)throw Error('请先保存 API Key 和服务商模型配置');this.choose(this.model);const promise=this.launch(this.model).finally(()=>{if(this.starting===promise)this.starting=null;});this.starting=promise;return promise;}
- async launch(key,effort,toolContext){
+ async launch(key,effort,disableWorkflow=false){
   this.choose(key);const selected=this.selection,identity=this.profiles.identity(selected.profile.id),credential=selected.credential;this.boundCredentials.set(identity,credential.apiKey);
   const capabilities=selected.model.reasoningEfforts,levels=capabilities&&Object.keys(capabilities)||[];
   if(effort&&(!levels.length||!levels.includes(effort))&&!this.modelInfos?.find(v=>v.id===selected.model.id)?.reasoning?.efforts?.some(v=>v.id===effort))throw Error('此模型不支持所选推理等级');
   effort=effort||levels.find(v=>v==='off')||levels[0];
-  let worker=this.getWorker();if(worker&&toolContext)worker={...worker,context:{...worker.context,taskId:toolContext.mode==='workflow'?toolContext.taskId:null,projectId:toolContext.mode==='workflow'?toolContext.projectId:null}};
+  const worker=this.toolWorker(disableWorkflow);
   const contextKey=createHash('sha256').update(JSON.stringify([selected.key,effort,identity,worker?.url,worker?.tokens?.mcp,worker?.context,this.instructions])).digest('hex');
   if(this.process&&this.contextKey===contextKey)return this.info;if(this.activeTurns.size)throw Error('请先停止当前回复再切换模型');
   if(this.unconfirmedTurns.size)throw Error('上一轮回复的结果仍待核对。请等待原回执，或明确断开并重连服务。');

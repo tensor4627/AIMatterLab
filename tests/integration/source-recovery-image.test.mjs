@@ -62,7 +62,79 @@ for(const tool of ['read_mcp_resource','list_mcp_resources_extra','List_mcp_reso
  assert.equal(kills,1);assert.equal(bridge.process,null);assert.equal(sent.length,0);assert.equal(bridge.requests.size,0);assert.equal(events.at(-1).params.code,'STUDIO_CODEX_UNSCOPED_TOOL');
 });
 
-test('catalog names never whitelist an actual unscoped MCP server call',()=>{const bridge=new CodexBridge({strictIsolation:true});let kills=0;bridge.process={kill(){kills++;}};bridge.receive({method:'item/started',params:{item:{type:'mcpToolCall',server:'outside',tool:'list_mcp_resources'}}});assert.equal(kills,1);assert.equal(bridge.process,null);});
+test('native gpusampling resource and template listings complete in the same isolated conversation',()=>{
+ const bridge=new CodexBridge({strictIsolation:true}),events=[];
+ const child={kill:()=>assert.fail('A query to the enabled server interrupted the conversation')};
+ bridge.process=child;
+ bridge.on('event',event=>events.push(event));
+ const threadId='catalog-thread',turnId='catalog-turn';
+ bridge.receive({method:'turn/started',params:{threadId,turn:{id:turnId}}});
+ for(const [tool,key] of [['list_mcp_resources','resources'],['list_mcp_resource_templates','resourceTemplates']]){
+  const item={id:tool,type:'mcpToolCall',server:'gpusampling',tool,arguments:{server:'gpusampling'}};
+  bridge.receive({method:'item/started',params:{threadId,turnId,item:{...item,status:'inProgress'}}});
+  const text=JSON.stringify({server:'gpusampling',[key]:[]});
+  bridge.receive({method:'item/completed',params:{threadId,turnId,item:{...item,status:'completed',result:{content:[{type:'text',text}]}}}});
+  const completed=events.at(-1);
+  assert.equal(completed.method,'item/completed');
+  assert.equal(completed.params.item.result.content[0].text,text);
+ }
+ bridge.receive({method:'turn/completed',params:{threadId,turn:{id:turnId,status:'completed'}}});
+ assert.equal(bridge.process,child);
+ assert.equal(bridge.activeTurns.size,0);
+});
+
+function activeCatalogConversation(){
+ const bridge=new CodexBridge({strictIsolation:true}),messages=[];
+ bridge.process={stdin:{write:line=>messages.push(JSON.parse(line))},kill(){}};
+ bridge.isolation={worker:{}};bridge.isolationReady=true;
+ bridge.receive({method:'turn/started',params:{threadId:'thread',turn:{id:'turn'}}});
+ return {bridge,messages};
+}
+
+test('native aggregate discovery stays in its conversation and returns subsequent skill activity',()=>{
+ const {bridge}=activeCatalogConversation(),events=[],child=bridge.process;
+ bridge.on('event',event=>events.push(event));
+ for(const tool of ['list_mcp_resources','list_mcp_resource_templates']){
+  const item={id:tool,type:'mcpToolCall',server:'codex',tool,arguments:{}};
+  bridge.receive({method:'item/started',params:{threadId:'thread',turnId:'turn',item}});
+  bridge.receive({method:'item/completed',params:{threadId:'thread',turnId:'turn',item:{...item,status:'completed'}}});
+ }
+ bridge.receive({method:'item/started',params:{threadId:'thread',turnId:'turn',item:{type:'mcpToolCall',server:'gpusampling',tool:'read_scientific_skill'}}});
+ assert.equal(bridge.process,child);assert.equal(events.at(-1).params.item.tool,'read_scientific_skill');
+});
+
+for(const [tool,field] of [['list_mcp_resources','resources'],['list_mcp_resource_templates','resourceTemplates']]){
+ test('dynamic '+tool+' lists real entries from the active server and preserves cursors',async()=>{
+  const {bridge,messages}=activeCatalogConversation();
+  const row={name:'example',...(field==='resources'?{uri:'example://one'}:{uriTemplate:'example://{id}'})};
+  bridge.rawRequest=async(method,params)=>{
+   assert.equal(method,'mcpServerStatus/list');assert.deepEqual(params,{threadId:'thread',detail:'full',limit:100,cursor:'a'});
+   return {data:[{name:'gpusampling',runtimeStatus:'connected',[field]:[row]},{name:'outside',[field]:[{name:'unrelated'}]}],nextCursor:'b'};
+  };
+  await bridge.answerResourceCatalog({id:77,params:{threadId:'thread',turnId:'turn',namespace:'functions',tool,arguments:{cursor:'a'}}});
+  assert.equal(messages[0].result.success,true);
+  assert.deepEqual(JSON.parse(messages[0].result.contentItems[0].text),{[field]:[{...row,server:'gpusampling'}],nextCursor:'b'});
+ });
+}
+
+test('dynamic resource listing reports disconnection and discards a late result after a turn change',async()=>{
+ const {bridge,messages}=activeCatalogConversation();
+ const request={id:77,params:{threadId:'thread',turnId:'turn',tool:'list_mcp_resources',arguments:{server:'gpusampling'}}};
+ bridge.rawRequest=async()=>({data:[{name:'gpusampling',runtimeStatus:'disconnected',resources:[]}]});
+ await bridge.answerResourceCatalog(request);
+ assert.equal(messages[0].result.success,false);
+ bridge.rawRequest=async()=>{bridge.turnIds.set('thread','next');return {data:[]};};
+ await bridge.answerResourceCatalog(request);
+ assert.equal(messages[1].result.success,false);assert.match(messages[1].result.contentItems[0].text,/conversation changed/);
+});
+
+test('other server operations and malformed aggregate activity cannot use the catalog exemption',()=>{
+ for(const [server,tool,args] of [['outside','list_mcp_resources',{}],['codex','read_mcp_resource',{}],['codex','list_mcp_resources',{server:'outside'}],['codex','list_mcp_resources',{path:'unrelated'}]]){
+  const {bridge}=activeCatalogConversation();
+  bridge.receive({method:'item/started',params:{threadId:'thread',turnId:'turn',item:{type:'mcpToolCall',server,tool,arguments:args}}});
+  assert.equal(bridge.process,null);
+ }
+});
 
 test('numeric .out selection preserves mapped paths and refuses private/ambiguous names',()=>{
  assert.deepEqual(explicitScientificInputs('Use "D:\\numeric data\\energy_test.out"'),['/mnt/d/numeric data/energy_test.out']);

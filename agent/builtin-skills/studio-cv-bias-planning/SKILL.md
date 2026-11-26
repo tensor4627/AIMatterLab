@@ -5,13 +5,15 @@ description: Turn a scientific CV/bias request into actual pyGAS library composi
 
 # Library-first CV and bias planning
 
-1. Define the requested observable and inspect the actual structure or topology. Use `inspect_pygas_catalog(source_id="pygas")` and exact class names to check the registered CV, Bias, Switch and Neighbor sources. Start with a suitable existing composition or an approved revision in the user's library.
+1. Define the requested observable from the structure, topology or scientific question. For implementation, use `inspect_pygas_catalog(source_id="pygas")` and exact class names to check the registered CV, Bias, Switch and Neighbor sources. Start with a suitable existing composition or an approved revision in the user's library.
 2. Wire Neighbor → CV → optional switch or reduction → ordered fixed-size collector → bias or CV-only output. Check the real signatures, shapes, index convention, units and periodic domain. Choose a scientifically justified group or reduction before turning per-atom values into scalars. A zero-dimensional scalar needs an explicit length-one adapter for the collector.
 3. If using a PLUMED example, check the corresponding implementation's formula, index base, PBC, domain, normalization and units. Read only the `plumed.json` and `pygas.json` documents offered on the current route.
 4. Publish actual library names and structured constructor values with provenance. Distinguish source defaults, measured or derived values, user choices and pilot proposals. Use structured module references. Display the intended observable, ordered atoms or groups, reduction, units, domain and bias family first.
 5. Use `render_pygas_workflow` with the existing `studioTaskId`. On updates pass the canonical graph path, exact graph/source CAS receipt and current catalog files. Re-read a conflicting revision and reconcile manual edits. Keep the graph and generated source paired. A rendered graph is authoring evidence. The serialized artifact needs an actual reload and checks on the authorized target. An explicitly selected AOTI or dual format requires compatible target preflight without backend fallback.
 
-On `pygas.cv`, `pygas.bias`, `pygas.opes` and the two sampling routes, read [composition details](references/composition-details.md) for mapping hazards, parameter defaults, tensor shapes and bias history. For workflow file and compiler mechanics use `workflow.authoring` and its pyGAS graph reference.
+For a paper design of fixed umbrella sampling or WTMetaD, use `sampling.enhanced-plan` and read the matching focused document, [fixed umbrella and tagged coordination](references/umbrella.md) or [well-tempered metadynamics](references/wtmetad.md). For implementation use the matching `pygas.bias` or `sampling.gpumd` route and its registered-source guidance. Use `analysis.wtmetad` for the corresponding reweighting contract.
+
+When offered on the current route, read [composition details](references/composition-details.md) for mapping hazards, parameter defaults, tensor shapes and bias history. For workflow file and compiler mechanics use `workflow.authoring` and its pyGAS graph reference.
 
 ## When a CV is missing
 

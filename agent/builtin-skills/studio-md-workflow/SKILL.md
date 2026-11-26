@@ -13,7 +13,9 @@ Use inspect_asset for a supplied structure or create_structure for a user-delega
 
 When editing a workflow, keep its conversation identity. Use read_project_input and its SHA before changing existing inputs. Write actual driver/config text with write_project_input and call present_task with the saved paths, scientific parameters and provenance. For a delegated independent job, use the authorized compute route and preserve the same engine contract. Ask only about unresolved physical intent. Label illustrative pilot settings explicitly.
 
-For sampling, use the task's specialized pyGAS CV/bias/OPES skill. Preserve selected artifact format; an incompatible .pt2 must fail without fallback. The saved artifact and real target environment require independent validation before execution.
+For native MD use the [pinned input and restart handoff](references/gpumd.json) on `md.gpumd`. For unbiased fixed-cell NVE, report bounded K + U variation separately from secular drift (eV/atom/ps). At dt/2, double steps and diagnostic strides to compare the same starting state, duration and cadence. For source-only TorchNEP training and exports see `training.torchnep`.
+
+Use the specialized pyGAS skill when shared. Reload the serialized bias on the actual target and check the structure and CV contract. An explicit `.pt2` selects AOTI. Incompatible loads fail without fallback. Preserve the error and artifact hash. Check the manifest, actual engine build, Torch or LibTorch and CUDA/device as applicable. Revalidate a compatible export on that target.
 
 For a fixed NEP potential with a separately produced serialized pyGAS bias, use `sampling.gpumd` to read the [file-handoff recipe](references/gpumd-pygas-recipe.md) by its advertised document ID. It covers producer and consumer identities, native inputs, actual error repair and the limits of the recorded integration evidence.
 
