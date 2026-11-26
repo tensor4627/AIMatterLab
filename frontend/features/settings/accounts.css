@@ -104,11 +104,11 @@
     min-width: 0;
   }
 
-  .account-login-fields .provider-login > .button {
+  .account-login-fields .provider-login > :is(.button,.aml-button) {
     justify-self: start;
   }
 
-  .account-login-fields .provider-login .button {
+  .account-login-fields .provider-login :is(.button,.aml-button) {
     white-space: normal;
     text-align: start;
   }
@@ -134,6 +134,7 @@
 
   .account-login-fields .provider-login .account-summary {
     display: flex;
+    flex-direction: row;
     align-items: center;
     flex-wrap: wrap;
     gap: var(--space-4) var(--space-6);

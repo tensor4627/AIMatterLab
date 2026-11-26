@@ -251,10 +251,6 @@
     border-color: var(--notice-edge);
   }
 
-  .agent-panel .agent-history-state.notice-surface {
-    border-color: var(--notice-edge);
-  }
-
   .agent-panel .account-login-guidance.notice-surface {
     border-color: var(--notice-edge);
   }
@@ -528,30 +524,12 @@
   }
 
   .agent-send-recovery {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    flex-wrap: wrap;
     margin: var(--space-3) var(--space-4);
-    padding: var(--space-3) var(--space-4);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-xs);
-    background: var(--panel);
     flex-shrink: 0;
   }
 
-  .agent-send-recovery>span {
-    flex: 1;
-    min-width: 140px;
-  }
-
-  .agent-send-recovery .button {
-    white-space: nowrap;
-  }
-
   .agent-send-notice {
-    padding: var(--space-3) var(--space-5);
-    color: var(--muted);
+    margin: var(--space-2) var(--space-4);
     flex-shrink: 0;
     overflow-wrap: anywhere;
   }
@@ -994,16 +972,27 @@
     line-height: 1.4;
   }
 
+  .agent-panel .composer-bottom>.aml-loading-state {
+    flex: 0 1 auto;
+  }
+
   .agent-panel .composer-bottom>.send {
     margin-inline-start: auto;
     flex-shrink: 0;
+    min-width: 34px;
+    padding: 0;
     border-radius: var(--radius-pill);
+    background: var(--raised);
+    color: var(--muted);
+  }
+
+  .agent-panel .composer-bottom>.send[data-variant=primary] {
     color: var(--on-accent);
     background: var(--accent-fill);
     box-shadow: var(--shadow-xs);
   }
 
-  .agent-panel .composer-bottom>.send:hover:enabled {
+  .agent-panel .composer-bottom>.send[data-variant=primary]:hover:enabled:not([aria-disabled=true]) {
     color: var(--on-accent);
     background: var(--accent-hover);
   }
@@ -1019,16 +1008,15 @@
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-pill);
     white-space: normal;
-    color: var(--on-accent);
-    background: var(--accent-fill);
+    color: var(--text);
+    background: var(--raised);
   }
 
-  .agent-panel .send.agent-stop-action:hover:enabled {
-    color: var(--on-accent);
-    background: var(--accent-hover);
+  .agent-panel .send.agent-stop-action:hover:enabled:not([aria-disabled=true]) {
+    background: var(--fill-hover);
   }
 
-  .agent-panel .send.agent-stop-action:disabled {
+  .agent-panel .send.agent-stop-action:is(:disabled,[aria-disabled=true]) {
     opacity: .7;
   }
 
@@ -1131,8 +1119,8 @@
   .agent-panel .agent-question-navigation .agent-stop-action {
     background: transparent;
     color: var(--muted);
-    width: 23px;
-    min-height: 22px;
+    min-width: 28px;
+    min-height: 28px;
     padding: var(--space-2);
     justify-content: center;
   }
@@ -1146,7 +1134,7 @@
     white-space: nowrap;
   }
 
-  .agent-panel .agent-question-navigation .agent-stop-action:hover:not(:disabled) {
+  .agent-panel .agent-question-navigation .agent-stop-action:hover:not(:disabled,[aria-disabled=true]) {
     background: var(--raised);
     color: var(--text);
   }
@@ -1422,7 +1410,7 @@
     flex-wrap: wrap;
   }
 
-  .agent-panel .composer-bottom > .send:active:enabled, .agent-panel .send.agent-stop-action:active:enabled {
+  .agent-panel .composer-bottom > .send[data-variant=primary]:active:enabled:not([aria-disabled=true]) {
     background: var(--accent-pressed);
     color: var(--on-accent);
   }

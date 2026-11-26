@@ -7,6 +7,7 @@ import type {SetupGuideInfo, SetupPage, SetupProgress} from '../../../contracts/
 import {invoke} from '../../api/studio';
 import {Modal} from '../../ui/Dialogs';
 import Notice from '../../ui/Notice';
+import Button from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import {languageText} from '../../ui/i18n';
 import {providerNames,type AccountConfiguration} from '../conversations/provider-account.mjs';
@@ -73,6 +74,7 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
   const connection=ssh ? auth?say('SSH 已登录','SSH signed in'):say('SSH 身份待核对','SSH identity unverified') : localConnected?say('WSL 已连接','WSL connected'):say('尚未连接','Not connected');
   const tested=reply?.provider===provider?reply:null;
   const openAccount=()=>{setAccount(null);setAccountVisited(provider);setError('');setLogin(true);};
+  const closeAccount=()=>{setLogin(false);setError('');};
   function openConnection(){if(route==='later')return;setConnectionVisited(route);onConnect(route);}
   const accountNext=page==='agent'&&accountVisited!==provider&&!tested;
   const connectNext=page==='compute'&&route!=='later'&&connectionVisited!==route&&!(route==='wsl'?localConnected:auth);
@@ -145,18 +147,20 @@ export default function SetupAssistant({info,page,settings,localConnected,resour
               </div>
               {checks&&<div className="setup-checks"><label>{say('选择安装短例','Choose an installation check')}<select value={shortCase} onChange={event=>setShortCase(event.target.value)}><option value="worker">{say('作业服务','Job service')}</option><option value="reference-md">ASE · CPU MD</option><option value="pydyn-md">PyDyn · CUDA MD</option></select></label><button className="setup-secondary" disabled={agentBusy} onClick={()=>onVisit('short-check',shortCase)}><Play size={15}/>{say('在对话中准备短例','Prepare check in chat')}</button></div>}
             </>}
-            {error&&<Notice className="setup-error" severity="error">{error}</Notice>}
+            {error&&!login&&<Notice className="setup-error" severity="error">{error}</Notice>}
           </div>
           <footer className="setup-footer">
             {index>0&&<button className="setup-text" disabled={busy} onClick={()=>move(pages[index-1])}><ArrowLeft size={15}/>{say('上一步','Back')}</button>}
             {(accountNext||connectNext)&&<button className="setup-text setup-defer" disabled={busy} onClick={()=>move(pages[index+1])}>{say('稍后配置','Set up later')}</button>}
-            <button className="setup-primary" disabled={busy||(accountNext||connectNext)&&agentBusy} onClick={()=>accountNext?openAccount():connectNext?openConnection():move(page==='ready'?'complete':pages[index+1])}>
-              {accountNext?say('配置账号','Configure account'):connectNext?connectionAction:page==='ready'?say('进入工作台','Enter workspace'):say('继续','Continue')}<ArrowRight size={17}/></button>
+            <Button variant="primary" className="setup-primary" disabled={busy||(accountNext||connectNext)&&agentBusy} loading={busy}
+              disabledReason={busy?say('正在处理…','Working…'):say('等待当前回复完成','Waiting for the current reply to finish')}
+              onClick={()=>accountNext?openAccount():connectNext?openConnection():move(page==='ready'?'complete':pages[index+1])}>
+              {accountNext?say('配置账号','Configure account'):connectNext?connectionAction:page==='ready'?say('进入工作台','Enter workspace'):say('继续','Continue')}<ArrowRight size={17} aria-hidden="true"/></Button>
           </footer>
         </div>
       </div>
     </section>
     {login&&<GuideSpotlight step="account" english={english} continueTargets={accountGuideNavigation}/>}
-    {login&&<Modal title={names[provider]+' · '+say('账号与 API','Account and API')} onClose={()=>setLogin(false)}>{error&&<Notice className="setup-error" severity="error">{error}</Notice>}<ProviderLogin key={provider} embedded showExit provider={provider} disabled={agentBusy} onClose={()=>setLogin(false)} onAccountState={reportAccount} onConfigured={()=>onReply(null)} onTested={model=>onReply({provider,model})} onError={e=>setError(e instanceof Error?e.message:String(e))}/></Modal>}
+    {login&&<Modal title={names[provider]+' · '+say('账号与 API','Account and API')} onClose={closeAccount}>{error&&<Notice className="setup-error" severity="error">{error}</Notice>}<ProviderLogin key={provider} embedded showExit provider={provider} disabled={agentBusy} onClose={closeAccount} onAccountState={reportAccount} onConfigured={()=>onReply(null)} onTested={model=>onReply({provider,model})} onError={e=>setError(e instanceof Error?e.message:String(e))}/></Modal>}
   </>;
 }

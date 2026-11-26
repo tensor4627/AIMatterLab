@@ -6,12 +6,15 @@ import type {Conversation} from '../../../contracts/dto/agent';
 import type {ConversationAnchor,ConversationBookmark,ConversationBranchPreview,ConversationHistorySearchRequest,ConversationHistorySearchResult} from '../../../contracts/dto/conversation-history';
 import {conversationHistory} from '../../api/conversation-history';
 import {Modal} from '../../ui/Dialogs';
+import {EmptyState,ErrorState,LoadingState} from '../../ui/States';
+import Notice from '../../ui/Notice';
 import {t} from '../../ui/i18n';
 import './conversation-history.css';
 
 type SearchProps={scope:Omit<ConversationHistorySearchRequest,'query'>;conversations?:Conversation[];onOpen:(anchor:ConversationAnchor)=>void};
 export function ConversationHistorySearch({scope,conversations,onOpen}:SearchProps){
  const [query,setQuery]=useState(''),[result,setResult]=useState<ConversationHistorySearchResult|null>(null),[failed,setFailed]=useState(false);
+ const [attempt,setAttempt]=useState(0);
  const {conversationId,projectId}=scope;
  const label=t(conversationId?'在会话中查找':'搜索聊天正文');
  useEffect(()=>{
@@ -23,15 +26,15 @@ export function ConversationHistorySearch({scope,conversations,onOpen}:SearchPro
     .then(value=>{if(active)setResult(value);}).catch(()=>{if(active)setFailed(true);});
   },180);
   return()=>{active=false;clearTimeout(timer);};
- },[conversationId,projectId,query]);
+ },[conversationId,projectId,query,attempt]);
  const shown=result?.matches.filter(value=>!conversations||conversations.some(chat=>chat.id===value.conversationId&&(chat.projectId??null)===(projectId??null)))||[];
  return <div className="chat-history-search" role="search" aria-label={label}>
-  <label><Search size={16}/><input type="search" autoFocus aria-label={label} placeholder={label} maxLength={250} value={query} onChange={event=>{setResult(null);setQuery(event.target.value);}}/></label>
-  {query.trim()&&<div className="history-search-results" aria-live="polite">
-   {failed?<p>{t('聊天搜索暂时不可用。')}</p>:!result?<p>{t('正在搜索聊天正文…')}</p>:<>
+  <label><Search size={16} aria-hidden="true"/><input type="search" autoFocus aria-label={label} placeholder={label} maxLength={250} value={query} onChange={event=>{setFailed(false);setResult(null);setQuery(event.target.value);}}/></label>
+  {query.trim()&&<div className="history-search-results">
+   {failed?<ErrorState title={t('聊天搜索暂时不可用。')} action={<Button size="sm" onClick={()=>setAttempt(n=>n+1)}>{t('重试')}</Button>}/>:!result?<LoadingState label={t('正在搜索聊天正文…')}/>:<>
     {shown.map(({name,snippet,archived,...anchor})=><button type="button" key={JSON.stringify([anchor.conversationId,anchor.turnId,anchor.itemId])} onClick={()=>onOpen(anchor)}><strong>{name}{archived&&' · '+t('已归档')}</strong><span>{snippet}</span></button>)}
-    {!shown.length&&<p>{t('没有匹配的消息')}</p>}
-    {result.unavailable>0&&<p>{t('部分聊天历史暂时无法读取。')}</p>}
+    {!shown.length&&<EmptyState role="status" title={t('没有匹配的消息')} body={t('换个关键词再搜索。')}/>}
+    {result.unavailable>0&&<Notice compact severity="warning">{t('部分聊天历史暂时无法读取。')}</Notice>}
    </>}
   </div>}
  </div>;

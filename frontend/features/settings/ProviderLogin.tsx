@@ -1,5 +1,5 @@
 import {useEffect,useId,useRef,useState} from 'react';
-import {LogIn,ExternalLink,LoaderCircle,KeyRound,CheckCircle2} from 'lucide-react';
+import {LogIn,ExternalLink,KeyRound,CheckCircle2} from 'lucide-react';
 import {Modal} from "../../ui/Dialogs";
 import {ConfirmDialog} from '../../ui/ConfirmDialog';
 import {statusLabel} from '../../ui/StatusBadge';
@@ -9,7 +9,9 @@ import {redactTranscriptText} from '../../../contracts/agent/transcript-sanitize
 import {invoke} from '../../api/studio';
 import {type AgentProvider} from '../../../contracts/dto/agent';
 import {t} from "../../ui/i18n";
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {LoadingState} from '../../ui/States';
+import Button from '../../ui/Button';
+import {useToast} from '../../ui/Toast';
 import CliRuntimeDialog from './CliRuntimeDialog';
 import {cliRuntime} from '../../api/cli-runtime';
 import type {CliReadiness} from '../../../contracts/dto/cli-runtime';
@@ -27,7 +29,7 @@ type AccountProps={
 };
 export default function ProviderLogin(props:AccountProps){
  if(props.provider==='qwen'||props.provider==='compatible'){
-  const content=<ModelProviders provider={props.provider} disabled={props.disabled} onError={props.onError}
+  const content=<ModelProviders provider={props.provider} disabled={props.disabled}
    onConfigured={props.onConfigured} onTested={props.onTested} onAccountState={props.onAccountState}
    onClose={!props.embedded||props.showExit?props.onClose:undefined}/>;
   return props.embedded?content:<Modal title={t('模型与 API')} onClose={props.onClose}>{content}</Modal>;
@@ -39,6 +41,8 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
  const [sharePublicGuides,setSharePublicGuides]=useState(false),[sharingTouched,setSharingTouched]=useState(false);
  const [reasoningMode,setReasoningMode]=useState('omit'),[reasoningEffort,setReasoningEffort]=useState('');
  const [testing,setTesting]=useState(false),[testResult,setTestResult]=useState(''),[testError,setTestError]=useState<unknown>(null);
+ const {show,dismiss}=useToast();
+ const testToast=useRef<number|null>(null);
  const [status,setStatus]=useState<any>({}),[busy,setBusy]=useState(false),[region,setRegion]=useState('mainland-cn'),[key,setKey]=useState(''),[plan,setPlan]=useState('coding-cn'),[method,setMethod]=useState('chatgpt'),[codexKey,setCodexKey]=useState(''),[model,setModel]=useState(provider==='compatible'?'':'qwen3-coder-plus');
  const [dirty,setDirty]=useState(false),[accountLoaded,setAccountLoaded]=useState(false),[accountError,setAccountError]=useState<unknown>(null),[loginError,setLoginError]=useState<unknown>(null);
  const lifecycle=useRef(0),revision=useRef(0),operation=useRef(false);
@@ -47,7 +51,12 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
  const [runtimePrompt,setRuntimePrompt]=useState<CliReadiness|null>(null),[accountRefreshing,setAccountRefreshing]=useState(false);
  const accountSequence=useRef(0),accountFlight=useRef<{epoch:number;promise:Promise<void>}|null>(null);
  const apiProvider=provider==='compatible'||provider==='deepseek';
- function changed(){revision.current++;setDirty(true);setTestResult('');setTestError(null);}
+ function clearTest(){
+  setTestResult('');setTestError(null);
+  if(testToast.current!==null)dismiss(testToast.current);
+  testToast.current=null;
+ }
+ function changed(){revision.current++;setDirty(true);clearTest();}
  function refreshAccount():Promise<void>{
   if(operation.current)return Promise.resolve();
   const epoch=lifecycle.current;if(accountFlight.current?.epoch===epoch)return accountFlight.current.promise;
@@ -63,7 +72,7 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
   return()=>{off?.();lifecycle.current++;accountSequence.current++;accountFlight.current=null;operation.current=false;};
  },[provider]);
  async function start(){
-  if(disabled||operation.current||busy||testing)return;const epoch=lifecycle.current,submittedRevision=revision.current;operation.current=true;setBusy(true);setTestResult('');setTestError(null);setLoginError(null);
+  if(disabled||operation.current||busy||testing)return;const epoch=lifecycle.current,submittedRevision=revision.current;operation.current=true;setBusy(true);clearTest();setLoginError(null);
   try{
    if(provider==='kimi'||provider==='qwen'){const readiness=await cliRuntime.inspect(provider);if(epoch!==lifecycle.current)return;if(readiness.status!=='ready'){setRuntimePrompt(readiness);setBusy(false);return;}}
    accountSequence.current++;accountFlight.current=null;setAccountRefreshing(false);
@@ -82,9 +91,9 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
  async function testConnection(){
   if(disabled||operation.current||busy||testing||dirty||!accountLoaded)return;
   const epoch=lifecycle.current,submittedRevision=revision.current,current=()=>epoch===lifecycle.current&&submittedRevision===revision.current;
-  operation.current=true;setTesting(true);setTestResult('');setTestError(null);
+  operation.current=true;setTesting(true);clearTest();
   let passed=false;
-  try{const result=await invoke('agent.testConnection',{provider});if(!current())return;if(result.status!=='passed')throw Error('API 连接测试未完成。');setTestResult(t('测试调用成功')+' · '+result.model);onTested?.(result.model);passed=true;}catch(error){if(current())setTestError(error);}finally{if(epoch===lifecycle.current){operation.current=false;setTesting(false);}}
+  try{const result=await invoke('agent.testConnection',{provider});if(!current())return;if(result.status!=='passed')throw Error('API 连接测试未完成。');testToast.current=show({message:t('测试调用成功')+' · '+result.model,testId:'api-connection-feedback'});onTested?.(result.model);passed=true;}catch(error){if(current())setTestError(error);}finally{if(epoch===lifecycle.current){operation.current=false;setTesting(false);}}
   if(passed&&current())void refreshAccount();
  }
  async function cancelCodex(){
@@ -94,15 +103,21 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
   catch(error){if(epoch===lifecycle.current)onError(error);}
   finally{if(epoch===lifecycle.current){operation.current=false;setCancelling(false);}}
  }
- async function remove(){if(disabled||operation.current||busy||testing)return;const epoch=lifecycle.current;operation.current=true;accountSequence.current++;accountFlight.current=null;setAccountRefreshing(false);setBusy(true);setRemoving(true);setTestResult('');setTestError(null);try{const result=await invoke('agent.logout',{provider});if(epoch===lifecycle.current){setStatus(result);setConfirmRemove(false);}}catch(error){if(epoch===lifecycle.current)onError(error);}finally{if(epoch===lifecycle.current){operation.current=false;setBusy(false);setRemoving(false);}}}
+ async function remove(){if(disabled||operation.current||busy||testing)return;const epoch=lifecycle.current;operation.current=true;accountSequence.current++;accountFlight.current=null;setAccountRefreshing(false);setBusy(true);setRemoving(true);clearTest();try{const result=await invoke('agent.logout',{provider});if(epoch===lifecycle.current){setStatus(result);setConfirmRemove(false);}}catch(error){if(epoch===lifecycle.current)onError(error);}finally{if(epoch===lifecycle.current){operation.current=false;setBusy(false);setRemoving(false);}}}
  const accountSummary=status.account?.email||status.account?.type||(status.credentialStored?t('已保存 API 凭据'):
   status.phase?t(loginPhases[status.phase]||status.phase):provider==='codex'&&status.requiresOpenaiAuth===true?t('尚未登录'):t('等待认证状态'));
  const accountState=accountError!=null||!accountLoaded&&status.phase!=='completed'?'unknown':
   provider==='codex'&&status.phase==='completed'&&!status.requiresOpenaiAuth&&!status.metadataUnavailable?'configured':providerAccountState(provider,status);
  useEffect(()=>{onAccountState?.(accountState);},[onAccountState,accountState]);
  const exitCallback=!embedded||showExit?onClose:undefined;
+ const configured=accountState==='configured',exitPrimary=!!exitCallback&&configured&&!dirty&&!busy&&!testing;
+ const authorizing=!!status.url&&['starting','authorizing'].includes(status.phase);
+ const loginPrimary=!exitPrimary&&!authorizing&&(provider!=='kimi'||status.phase!=='completed');
+ const testPrimary=configured&&!dirty&&!exitCallback&&status.credentialStored===true;
+ const loginPending=t(disabled?'等待当前回复完成':'正在处理…');
+ const loginPhase=t(removing?'正在退出登录':cancelling?'正在取消登录':status.phase==='authorizing'?'请在浏览器完成授权':'正在准备登录');
  const inputId=useId();
- const content=<AccountDialogContent onClose={exitCallback} configured={accountState==='configured'} edited={dirty} pending={busy||testing}>
+ const content=<AccountDialogContent onClose={exitCallback} configured={configured} edited={dirty} pending={busy||testing} primaryAvailable={authorizing}>
  <fieldset className="account-login-fields" onChangeCapture={changed} disabled={disabled||apiProvider&&(busy||testing)}>
   <div className="provider-login">
    <div className="account-summary">
@@ -110,21 +125,22 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
      <div><dt>{t('实际账户状态')}</dt><dd>{accountSummary}</dd></div>
      <div><dt>{t('模型访问')}</dt><dd>{statusLabel(status.modelAccess||'not_run')}</dd></div>
     </dl>
-    <button className="button" disabled={accountRefreshing||busy||testing} onClick={()=>void refreshAccount()}>{t('刷新账户状态')}</button>
+    <Button disabled={accountRefreshing||busy||testing} disabledReason={loginPending} onClick={()=>void refreshAccount()}>{t('刷新账户状态')}</Button>
    </div>
-   <LoadingFeedback busy={accountRefreshing} label={t('正在读取账户状态')}/>
-   {provider!=='codex'&&<LoadingFeedback busy={busy||testing} label={t(testing?'正在验证 API 连接':provider==='kimi'?'正在等待 Kimi 登录':'正在保存账户配置')}/>}
+   <LoadingState busy={accountRefreshing} label={t('正在读取账户状态')}/>
+   {provider!=='codex'&&<LoadingState busy={busy||testing} label={t(testing?'正在验证 API 连接':provider==='kimi'?'正在等待 Kimi 登录':'正在保存账户配置')}/>}
    {(provider==='kimi'||provider==='qwen')&&testResult&&<Notice>{testResult}</Notice>}
    {accountError!=null&&<InlineDiagnostic error={accountError} summary={t('账户状态读取失败，请刷新账户状态后重试。')}/>}
    {provider==='codex'&&<>
     <label>{t('登录方式')}<select data-guide-target="login-method" value={method} disabled={busy} onChange={e=>setMethod(e.target.value)}><option value="chatgpt">{t('ChatGPT 浏览器登录')}</option><option value="chatgptDeviceCode">{t('ChatGPT 设备码登录')}</option><option value="apiKey">OpenAI API Key</option></select></label>
     {method==='apiKey'&&<label>API Key<input type="password" data-guide-target="codex-api-key" autoComplete="off" disabled={busy} value={codexKey} onChange={e=>setCodexKey(e.target.value)}/></label>}
-    <div className="button-row"><button className="button primary" onClick={()=>void start()} disabled={busy||method==='apiKey'&&!codexKey}><LogIn size={15}/>{t(status.phase==='failed'||status.phase==='cancelled'?'重新登录':'开始登录')}</button>
-     {status.phase==='authorizing'&&status.loginId&&<button className="button" disabled={cancelling} onClick={()=>void cancelCodex()}>{t('取消登录')}</button>}
+    <div className="button-row"><Button variant={loginPrimary?'primary':'secondary'} onClick={()=>void start()} disabled={busy||method==='apiKey'&&!codexKey}
+     disabledReason={busy?loginPhase:t('请填写 API Key。')} loading={busy&&!authorizing&&!removing}><LogIn size={15} aria-hidden="true"/>{t(status.phase==='failed'||status.phase==='cancelled'?'重新登录':'开始登录')}</Button>
+     {status.phase==='authorizing'&&status.loginId&&<Button disabled={cancelling} disabledReason={loginPhase} onClick={()=>void cancelCodex()}>{t('取消登录')}</Button>}
     </div>
-    <LoadingFeedback busy={busy} label={t(removing?'正在退出登录':cancelling?'正在取消登录':status.phase==='authorizing'?'请在浏览器完成授权':'正在准备登录')}/>
+    <LoadingState busy={busy} label={loginPhase}/>
     {status.userCode&&<div className="device-code">{status.userCode}</div>}
-    {status.url&&<button className="button" onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}>{t('打开官方授权页面')}</button>}
+    {status.url&&<Button variant={authorizing?'primary':'secondary'} onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}>{t('打开官方授权页面')}</Button>}
     {status.phase==='failed'&&(loginError!=null?<InlineDiagnostic error={loginError}/>:<Notice severity="error">{t(status.message||'登录失败，请重新登录。')}</Notice>)}
    </>}
    {provider==='kimi'&&<>
@@ -132,13 +148,13 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
      <div className="account-field-label"><label htmlFor={inputId}>{t('账户地区')}</label><HelpTip label={t('账户地区')} content={t('使用 Kimi Code 官方设备授权。账户凭据保存在本应用独立的 CLI 配置中。')}/></div>
      <select id={inputId} data-guide-target="login-region" value={region} disabled={busy} onChange={e=>setRegion(e.target.value)}><option value="mainland-cn">{t('中国大陆 · kimi.com')}</option><option value="global">{t('国际 · kimi.ai')}</option></select>
     </div>
-    <button className={'button'+(status.phase==='completed'?'':' primary')} onClick={()=>void start()} disabled={busy}>{busy?<LoaderCircle size={15} className="spin"/>:<LogIn size={15}/>}{t('开始 Kimi 登录')}</button>
-    {status.url&&<><Notice>{t('在授权页面输入下方终端显示的验证码。')}</Notice><button className="button" onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}><ExternalLink size={15}/>{t('打开官方授权页面')}</button></>}
+    <Button variant={loginPrimary?'primary':'secondary'} onClick={()=>void start()} disabled={busy} disabledReason={t('正在等待 Kimi 登录')} loading={busy&&!authorizing}><LogIn size={15} aria-hidden="true"/>{t('开始 Kimi 登录')}</Button>
+    {status.url&&<><Notice>{t('在授权页面输入下方终端显示的验证码。')}</Notice><Button variant={authorizing?'primary':'secondary'} onClick={()=>void invoke('agent.login.open',{provider}).catch(onError)}><ExternalLink size={15} aria-hidden="true"/>{t('打开官方授权页面')}</Button></>}
     {status.message&&<Notice severity={status.phase==='failed'?'error':'info'}><pre className="login-output">{redactTranscriptText(status.message)}</pre></Notice>}
     {busy&&<button className="button" onClick={()=>void invoke('agent.login.cancel',{provider:'kimi'} satisfies CancelProviderLoginRequest).catch(onError)}>{t('取消登录')}</button>}
-    {status.phase==='completed'&&!exitCallback&&<button className="button primary" onClick={onConfigured}><CheckCircle2 size={15}/>{t('登录完成，连接 Kimi')}</button>}
+    {status.phase==='completed'&&!exitCallback&&<Button variant="primary" onClick={onConfigured}><CheckCircle2 size={15} aria-hidden="true"/>{t('登录完成，连接 Kimi')}</Button>}
    </>}
-   {provider==='compatible'&&<><p>{t('接入支持 Chat Completions、SSE 和工具调用的 OpenAI 兼容接口。')}</p><label>{t('服务名称')}<input value={apiLabel} onChange={e=>setApiLabel(e.target.value)} placeholder="My API"/></label><label>Base URL<input data-testid="compatible-base-url" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} placeholder="https://example.com/v1"/></label><label>API Key<small>{t('同一服务地址留空可保留已保存密钥')}</small><input type="password" autoComplete="off" data-testid="compatible-api-key" value={key} onChange={e=>setKey(e.target.value)}/></label><label>{t('模型 ID')}<input data-testid="compatible-model" value={model} onChange={e=>setModel(e.target.value)}/></label><p className="muted">{t('无需模型发现接口，模型名按服务商文档手填。')}</p><label>{t('推理参数')}<select aria-label={t('推理参数')} value={reasoningMode} onChange={e=>setReasoningMode(e.target.value)}><option value="omit">{t('服务商默认 · 不发送')}</option><option value="reasoning_effort">reasoning_effort</option></select></label>{reasoningMode==='reasoning_effort'&&<label>{t('推理强度')}<input aria-label={t('自定义推理强度')} value={reasoningEffort} onChange={e=>setReasoningEffort(e.target.value)} placeholder="low / medium / high" list="reasoning-suggestions"/><datalist id="reasoning-suggestions">{['none','minimal','low','medium','high','xhigh','max'].map(v=><option key={v} value={v}/>)}</datalist><small>{t('仅填写此 API 支持的值；不支持时选择不发送。')}</small></label>}<label className="check-label"><input type="checkbox" checked={sharePublicGuides} onChange={e=>{setSharingTouched(true);setSharePublicGuides(e.target.checked);}}/>{t('允许向此 API 发送公开科学软件指南，不包括私有 CV、凭据或其他研究文件。')}</label><button className="button primary" disabled={busy||testing||!accountLoaded||!baseUrl||!model} onClick={()=>void start()}>{t('保存 API 配置')}</button><p className="muted">{t('模型 ID 由你指定，成功调用前标为待验证。更换地址不会把旧对话发送给新服务。')}</p></>}
+   {provider==='compatible'&&<><p>{t('接入支持 Chat Completions、SSE 和工具调用的 OpenAI 兼容接口。')}</p><label>{t('服务名称')}<input value={apiLabel} onChange={e=>setApiLabel(e.target.value)} placeholder="My API"/></label><label>Base URL<input data-testid="compatible-base-url" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} placeholder="https://example.com/v1"/></label><label>API Key<small>{t('同一服务地址留空可保留已保存密钥')}</small><input type="password" autoComplete="off" data-testid="compatible-api-key" value={key} onChange={e=>setKey(e.target.value)}/></label><label>{t('模型 ID')}<input data-testid="compatible-model" value={model} onChange={e=>setModel(e.target.value)}/></label><p className="muted">{t('无需模型发现接口，模型名按服务商文档手填。')}</p><label>{t('推理参数')}<select aria-label={t('推理参数')} value={reasoningMode} onChange={e=>setReasoningMode(e.target.value)}><option value="omit">{t('服务商默认 · 不发送')}</option><option value="reasoning_effort">reasoning_effort</option></select></label>{reasoningMode==='reasoning_effort'&&<label>{t('推理强度')}<input aria-label={t('自定义推理强度')} value={reasoningEffort} onChange={e=>setReasoningEffort(e.target.value)} placeholder="low / medium / high" list="reasoning-suggestions"/><datalist id="reasoning-suggestions">{['none','minimal','low','medium','high','xhigh','max'].map(v=><option key={v} value={v}/>)}</datalist><small>{t('仅填写此 API 支持的值；不支持时选择不发送。')}</small></label>}<label className="check-label"><input type="checkbox" checked={sharePublicGuides} onChange={e=>{setSharingTouched(true);setSharePublicGuides(e.target.checked);}}/>{t('允许向此 API 发送公开科学软件指南，不包括私有 CV、凭据或其他研究文件。')}</label><Button variant={exitPrimary||testPrimary?'secondary':'primary'} disabled={busy||testing||!accountLoaded||!baseUrl||!model} disabledReason={t(busy||testing? '正在处理…':!accountLoaded?'账户状态读取失败，请刷新账户状态后重试。':'请填写 API 地址和模型 ID。')} onClick={()=>void start()}>{t('保存 API 配置')}</Button><p className="muted">{t('模型 ID 由你指定，成功调用前标为待验证。更换地址不会把旧对话发送给新服务。')}</p></>}
    {provider==='deepseek'&&<>
     <div className="account-form-grid">
      <label>{t('官方 API 地址')}<input value="https://api.deepseek.com" readOnly/></label>
@@ -147,18 +163,24 @@ function LegacyProviderLogin({provider,onClose,onConfigured,onTested,onAccountSt
       <input id={inputId} data-testid="deepseek-api-key" data-guide-target="api-key" type="password" autoComplete="off" value={key} disabled={busy} onChange={e=>setKey(e.target.value)} placeholder="sk-…"/>
      </div>
     </div>
-    <button className="button primary" disabled={busy||testing||!key} onClick={()=>void start()}>{busy?<LoaderCircle size={15} className="spin"/>:<KeyRound size={15}/>} {t('保存凭据并连接')}</button>
+    <Button variant={exitPrimary||testPrimary?'secondary':'primary'} disabled={busy||testing||!key} disabledReason={busy||testing?loginPending:t('请填写 API Key。')}
+     loading={busy&&!removing} onClick={()=>void start()}><KeyRound size={15} aria-hidden="true"/>{t('保存凭据并连接')}</Button>
    </>}
    {provider==='qwen'&&<>
     <p>{t('Qwen 当前使用百炼 API Key 或 Coding Plan；旧 OAuth 免费登录已停止。')}</p>
     <label>{t('服务与地区')}<select value={plan} onChange={e=>setPlan(e.target.value)}><option value="coding-cn">{t('Coding Plan · 中国大陆')}</option><option value="coding-intl">{t('Coding Plan · 国际')}</option><option value="api-cn">{t('按量 API · 中国大陆')}</option><option value="api-intl">{t('按量 API · 国际')}</option></select></label>
     <label>API Key<input data-testid="qwen-api-key" type="password" autoComplete="off" value={key} onChange={e=>setKey(e.target.value)} placeholder={plan.startsWith('coding')?'sk-sp-…':'sk-…'}/></label>
     <label>{t('模型 ID')}<input value={model} onChange={e=>setModel(e.target.value)} placeholder="qwen3-coder-plus"/></label>
-    <button className="button primary" disabled={busy||!key||!model} onClick={()=>void start()}><KeyRound size={15}/>{t('保存凭据并连接')}</button>
+    <Button variant={exitPrimary?'secondary':'primary'} disabled={busy||!key||!model} disabledReason={busy?loginPending:t(!key?'请填写 API Key。':'请填写至少一个模型 ID。')} onClick={()=>void start()}><KeyRound size={15} aria-hidden="true"/>{t('保存凭据并连接')}</Button>
     <p className="muted">{t('密钥由主进程使用系统加密保存。模型是否可用以实际调用为准。')}</p>
     {status.credentialStored&&<Notice>{t('已有加密凭据，可关闭此窗口直接连接。')}</Notice>}
    </>}
-  {['deepseek','compatible'].includes(provider)&&status.credentialStored&&<div><button className="button" data-testid="test-api-connection" disabled={busy||testing||dirty||!accountLoaded} onClick={()=>void testConnection()}>{t(testing?'测试连接中…':'验证 API 连接')}</button>{dirty&&<Notice severity="warning">{t('配置有未保存修改；保存后验证当前配置。')}</Notice>}{testResult&&<Notice data-testid="api-connection-feedback">{testResult}</Notice>}{testError!=null&&<InlineDiagnostic error={testError} summary={t('API 连接测试未完成。')}/>}</div>}
+  {['deepseek','compatible'].includes(provider)&&status.credentialStored&&<div>
+   <Button variant={testPrimary?'primary':'secondary'} data-testid="test-api-connection" disabled={busy||testing||dirty||!accountLoaded} loading={testing}
+    disabledReason={t(busy||testing?'正在处理…':dirty?'配置有未保存修改；保存后验证当前配置。':'账户状态读取失败，请刷新账户状态后重试。')} onClick={()=>void testConnection()}>{t('验证 API 连接')}</Button>
+   {dirty&&<Notice severity="warning">{t('配置有未保存修改；保存后验证当前配置。')}</Notice>}
+   {testError!=null&&<InlineDiagnostic error={testError} summary={t('API 连接测试未完成。')}/>}
+  </div>}
   {((provider==='codex'&&status.account)||(['qwen','deepseek','compatible'].includes(provider)&&status.credentialStored))&&<div className="account-remove">
    <button className="button" disabled={busy||testing} onClick={()=>setConfirmRemove(true)}>{t(provider==='codex'?'退出 Codex 登录':'移除 API 凭据')}</button>
    {confirmRemove&&<ConfirmDialog title={t(provider==='codex'?'退出 Codex 登录':'移除 API 凭据')} target={provider==='codex'?'Codex':t('API 凭据')} tone="danger"

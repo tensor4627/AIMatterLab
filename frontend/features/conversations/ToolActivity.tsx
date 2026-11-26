@@ -1,6 +1,6 @@
 import Button from '../../ui/Button';
 import Disclosure from '../../ui/Disclosure';
-import Notice from '../../ui/Notice';
+import {LoadingState} from '../../ui/States';
 import {CheckCircle2, CircleAlert, CircleHelp, LoaderCircle} from 'lucide-react';
 import {t} from "../../ui/i18n";
 import {toolLabel} from "./tool-activity.mjs";
@@ -15,6 +15,6 @@ export default function ToolActivity({message,onWorkflow,onRun,onExpand}:{messag
   {value.hint&&<p className="activity-guidance">{t(value.hint)}</p>}
   {value.artifact?.kind==='task-parameters'?<Button  onClick={()=>onWorkflow?.(value.artifact.id)}>{t('打开计算流程')}</Button>
    :value.artifact?.engine?<Button  onClick={()=>onRun?.(value.artifact.id)}>{t('打开模块草稿')}</Button>:null}
-  <Disclosure onToggle={event=>{if(event.currentTarget.open)onExpand?.();}} summary={<>{t('查看工具详情')}</>}>{onExpand?<Notice compact >{t('正在读取工具详情…')}</Notice>:<><code>{name}</code><pre>{value.details||message.text}</pre></>}</Disclosure>
+  <Disclosure onToggle={event=>{if(event.currentTarget.open)onExpand?.();}} summary={<>{t('查看工具详情')}</>}>{onExpand?<LoadingState label={t('正在读取工具详情…')}/>:<><code>{name}</code><pre>{value.details||message.text}</pre></>}</Disclosure>
  </section>;
 }

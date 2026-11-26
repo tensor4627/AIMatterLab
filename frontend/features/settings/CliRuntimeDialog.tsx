@@ -2,7 +2,8 @@ import {useEffect,useRef,useState} from 'react';
 import {Download,FolderOpen,RefreshCw} from 'lucide-react';
 import {Modal} from '../../ui/Dialogs';
 import Notice from '../../ui/Notice';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {LoadingState} from '../../ui/States';
+import Button from '../../ui/Button';
 import {t} from '../../ui/i18n';
 import {cliRuntime} from '../../api/cli-runtime';
 import type {CliProvider,CliReadiness,CliInstallProgress} from '../../../contracts/dto/cli-runtime';
@@ -49,21 +50,21 @@ export default function CliRuntimeDialog({provider,readiness,onClose,onReady}:{p
   })().finally(()=>{if(epoch===generation.current){closeFlight.current=null;setCancelling(false);}});
   closeFlight.current=promise;return promise;
  }
- const label=provider==='kimi'?'Kimi':'Qwen',phase=progress?t(phases[progress.phase]):t(pending==='choose'?'正在选择本地 CLI':'正在检测本地 CLI');
+ const label=provider==='kimi'?'Kimi':'Qwen',phase=pending==='install'&&progress?t(phases[progress.phase]):t(pending==='choose'?'正在选择本地 CLI':'正在检测本地 CLI');
  return <Modal title={label+' CLI'} onClose={()=>void close()}>
   <div data-testid="cli-runtime-dialog" aria-busy={!!pending}>
    <p>{t(result.status==='missing'?'本机未找到对应 CLI。':result.status==='incompatible'?'检测到本机 CLI，但版本不兼容。':result.status==='invalid'?'已配置的 CLI 路径不可用。':'CLI 暂时不可用。')}</p>
    <p className="muted">{t('兼容版本')} · {result.expectedVersion}{result.version?' · '+t('本机版本')+' '+result.version:''}</p>
    {result.status==='failed'&&result.message&&<p className="muted">{result.message}</p>}
    <p>{t('可以选择已有程序，或下载到 AIMatterLab 专用目录。下载不会更改本机已有 CLI。')}</p>
-   <LoadingFeedback busy={!!pending} label={phase} progress={progress?.totalBytes?{completed:progress.receivedBytes,total:progress.totalBytes}:undefined}/>
+   <LoadingState busy={!!pending} label={phase} progress={pending==='install'&&progress?.totalBytes?{completed:progress.receivedBytes,total:progress.totalBytes}:undefined}/>
    {progress&&progress.packageCount>0&&<p className="muted">{t('软件包')} {progress.packageIndex} / {progress.packageCount}</p>}
    {error&&<Notice severity="error">{error}</Notice>}
    <div className="button-row">
-    <button className="button" data-testid="cli-recheck" disabled={!!pending} onClick={()=>void perform('inspect')}><RefreshCw size={14}/>{t('重新检测')}</button>
-    <button className="button" data-testid="cli-choose" disabled={!!pending} onClick={()=>void perform('choose')}><FolderOpen size={14}/>{t('选择本地 CLI')}</button>
-    <button className="button primary" data-testid="cli-download" disabled={!!pending} onClick={()=>void perform('install')}><Download size={14}/>{t('下载兼容版本')}</button>
-    <button className="button" data-testid="cli-cancel" disabled={cancelling||!!pending&&pending!=='install'} onClick={()=>void close()}>{t(cancelling?'正在停止下载…':pending==='install'?'取消下载':'取消')}</button>
+    <Button data-testid="cli-recheck" disabled={!!pending} disabledReason={phase} onClick={()=>void perform('inspect')}><RefreshCw size={14} aria-hidden="true"/>{t('重新检测')}</Button>
+    <Button data-testid="cli-choose" disabled={!!pending} disabledReason={phase} onClick={()=>void perform('choose')}><FolderOpen size={14} aria-hidden="true"/>{t('选择本地 CLI')}</Button>
+    <Button variant="primary" data-testid="cli-download" disabled={!!pending} disabledReason={phase} onClick={()=>void perform('install')}><Download size={14} aria-hidden="true"/>{t('下载兼容版本')}</Button>
+    <Button data-testid="cli-cancel" disabled={cancelling||!!pending&&pending!=='install'} disabledReason={cancelling?t('正在停止下载…'):phase} onClick={()=>void close()}>{t(cancelling?'正在停止下载…':pending==='install'?'取消下载':'取消')}</Button>
    </div>
   </div>
  </Modal>;

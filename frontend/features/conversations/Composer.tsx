@@ -1,5 +1,6 @@
 import Notice from '../../ui/Notice';
 import Button from '../../ui/Button';
+import {LoadingState} from '../../ui/States';
 import {ArrowUp,ListPlus,Paperclip} from 'lucide-react';
 import {useId,useImperativeHandle,useRef,useState,useSyncExternalStore,type ReactNode,type RefObject} from 'react';
 import type {ChatAttachmentRef} from '../../../contracts/dto/chat-attachments';
@@ -11,7 +12,8 @@ type Props={
  drafts:ComposerDraftStore;
  inputRef:RefObject<HTMLTextAreaElement|null>;
  working:boolean;
- sendDisabled:boolean;
+ sendDisabledReason:string|undefined;
+ prominent:boolean;
  onEdit:(text:string)=>void;
  onSend:(alternate?:boolean)=>void;
  attachments:{
@@ -35,17 +37,19 @@ type Props={
  children:ReactNode;
 };
 
-export default function Composer({drafts,inputRef,working,sendDisabled,onEdit,onSend,attachments,followUp,skillName,onClearSkill,newWorkflow,children}:Props){
+export default function Composer({drafts,inputRef,working,sendDisabledReason,prominent,onEdit,onSend,attachments,followUp,skillName,onClearSkill,newWorkflow,children}:Props){
  const text=useSyncExternalStore(drafts.subscribe,drafts.text);
  const filePicker=useRef<HTMLInputElement>(null),shortcuts=useId();
  const files=drafts.files(),hasText=!!text.trim();
  const canSubmit=!attachments.imageMismatch&&!attachments.busy&&(hasText||files.length>0);
  const steer=followUp?.steer;
-  const missingDraft=!hasText&&!files.length?t('请输入消息或添加附件。'):undefined;
+ const attachmentReading=t('正在读取附件…');
+ const mismatch=t('当前模型仅支持文字，请更换模型或移除图片。');
+ const draftBlockedReason=attachments.imageMismatch?mismatch:attachments.busy?attachmentReading:!hasText&&!files.length?t('请输入消息或添加附件。'):undefined;
  return <>
   {skillName!==undefined&&<div className="skill-chip"><span>{t('仅下条消息')} · {skillName}</span><Button variant="icon" size="sm" aria-label={t('移除本条消息技能')} onClick={onClearSkill}>×</Button></div>}
   {newWorkflow&&<Notice compact className="composer-workflow-notice" >{t('下条消息将新建流程；原流程保留。')}</Notice>}
-  {attachments.imageMismatch&&<small className="chat-file-capability" role="status">{t('当前模型仅支持文字，请更换模型或移除图片。')}</small>}
+  {attachments.imageMismatch&&<Notice compact severity="warning" className="chat-file-capability">{mismatch}</Notice>}
   <ChatFiles files={files} preview={attachments.onPreview} remove={attachments.onRemove}/>
   <input ref={filePicker} hidden type="file" multiple data-testid="chat-file-picker" onChange={event=>{
    const files=Array.from(event.target.files||[]);event.target.value='';attachments.onImport(files);
@@ -60,15 +64,17 @@ export default function Composer({drafts,inputRef,working,sendDisabled,onEdit,on
    }}/>
   {children}
   <div className="composer-bottom">
-   <Button variant="icon" size="sm" tooltip={t('添加文本、PDF、Office 文档或图片，也可拖入或粘贴')} type="button" className="chat-file-add" data-testid="chat-file-add"  aria-label={t('添加文件或图片')} disabled={attachments.busy||attachments.pickDisabled} onClick={()=>filePicker.current?.click()}><Paperclip size={17}/></Button>
-   {attachments.busy&&<small role="status">{t('正在读取附件…')}</small>}
+   <Button variant="icon" size="sm" tooltip={t('添加文本、PDF、Office 文档或图片，也可拖入或粘贴')} type="button" className="chat-file-add" data-testid="chat-file-add"
+    aria-label={t('添加文件或图片')} disabled={attachments.busy||attachments.pickDisabled}
+    disabledReason={attachments.busy?attachmentReading:t('请先恢复当前对话，输入草稿已保留。')} onClick={()=>filePicker.current?.click()}><Paperclip size={17} aria-hidden="true"/></Button>
+   <LoadingState busy={attachments.busy} inline label={attachmentReading}/>
    <span id={shortcuts} data-testid={followUp?'agent-follow-up-shortcuts':undefined}>{followUp?.hint??t('Enter 发送 · Shift+Enter 换行')}</span>
    {followUp?<div className="agent-follow-up-actions">
     {steer&&<Button tooltip={steer.title} disabledReason={hasText?steer.title:t('请输入消息后引导。')} data-testid="agent-steer" disabled={!steer.allowed||!hasText} loading={steer.busy} onClick={steer.onSteer}>{t('引导')}</Button>}
-    <Button variant="primary" tooltip={t('本对话的当前回复完成后发送')} disabledReason={missingDraft||(!followUp.queueAllowed?followUp.hint:undefined)} data-testid="agent-queue" disabled={!followUp.queueAllowed||!canSubmit} onClick={followUp.onQueue}><ListPlus size={15}/>{t('排队')}</Button>
+    <Button variant={prominent?'primary':'secondary'} tooltip={t('本对话的当前回复完成后发送')} disabledReason={draftBlockedReason||(!followUp.queueAllowed?sendDisabledReason||followUp.hint:undefined)} data-testid="agent-queue" disabled={!followUp.queueAllowed||!canSubmit} onClick={followUp.onQueue}><ListPlus size={15} aria-hidden="true"/>{t('排队')}</Button>
     {followUp.stopControl}
-   </div>:<Button variant="primary" className="send" aria-label={tr('发送')} tooltip={tr('发送')} disabledReason={missingDraft}
-    onClick={()=>onSend()} disabled={sendDisabled||!canSubmit}><ArrowUp size={17} aria-hidden="true"/></Button>}
+   </div>:<Button variant={prominent?'primary':'secondary'} className="send" aria-label={tr('发送')} tooltip={tr('发送')} disabledReason={sendDisabledReason||draftBlockedReason}
+    onClick={()=>onSend()} disabled={!!sendDisabledReason||!canSubmit}><ArrowUp size={17} aria-hidden="true"/></Button>}
   </div>
  </>;
 }
@@ -76,5 +82,5 @@ export default function Composer({drafts,inputRef,working,sendDisabled,onEdit,on
 export function ComposerNotice({visible,handle}:{visible:boolean;handle:RefObject<((notice:string)=>void)|null>}){
  const [notice,setNotice]=useState('');
  useImperativeHandle(handle,()=>setNotice,[]);
- return visible&&notice?<div className="agent-send-notice" role="status">{notice}</div>:null;
+ return visible&&notice?<Notice compact className="agent-send-notice">{notice}</Notice>:null;
 }

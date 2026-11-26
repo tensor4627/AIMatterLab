@@ -2,6 +2,8 @@ import {useId,useLayoutEffect,useMemo,useRef,useState,type RefObject} from 'reac
 import {createPortal} from 'react-dom';
 import {X} from 'lucide-react';
 import {languageText} from '../../ui/i18n';
+import Button from '../../ui/Button';
+import Notice from '../../ui/Notice';
 import {guideStep,type GuideStep} from './guide-steps';
 import './setup-lesson.css';
 
@@ -249,10 +251,12 @@ export default function GuideSpotlight({step,english,shortCase,onDismiss,returnF
     <div className="guide-tip-position">
       <aside className="guide-focus-tip" ref={tip} aria-labelledby={titleId} aria-describedby={hintId}>
         <strong id={titleId}>{content.heading}</strong>
-        <button type="button" aria-label={languageText(english,'关闭提示')}
+        <Button variant="icon" size="sm" aria-label={languageText(english,'关闭提示')}
           onFocus={event=>{previousFocus.current=event.relatedTarget instanceof HTMLElement?event.relatedTarget:null;}}
-          onClick={()=>dismiss(true)}><X size={16} aria-hidden="true"/></button>
-        <p id={hintId} role={active?undefined:'status'}>{active?.hint??languageText(english,'目标暂不可见。展开相应区域或滚动到该控件后，即可看到高亮。')}</p>
+          onClick={()=>dismiss(true)}><X size={16} aria-hidden="true"/></Button>
+        {active?<p id={hintId}>{active.hint}</p>:<Notice compact className="guide-focus-message" id={hintId}>
+          {languageText(english,'目标暂不可见。展开相应区域或滚动到该控件后，即可看到高亮。')}
+        </Notice>}
       </aside>
     </div>
   </div>,spot.modal??document.body);

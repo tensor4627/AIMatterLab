@@ -1,5 +1,7 @@
 import Disclosure from '../../ui/Disclosure';
 import Button from '../../ui/Button';
+import Notice from '../../ui/Notice';
+import {useToast} from '../../ui/Toast';
 import {createContext,useContext,useEffect,useMemo,useRef,useState} from 'react';
 import {invoke} from '../../api/studio';
 import {t} from '../../ui/i18n';
@@ -32,6 +34,7 @@ export function evidencePreSelection(pre:HTMLElement,selection=window.getSelecti
 }
 
 export function EvidenceSelection({source,text,getText,hasContent,range,comparable=false}:{source:ChatEvidenceLocator;text?:string;getText?:()=>string;hasContent?:boolean;range?:EvidenceLineRange|null;comparable?:boolean}){
+ const {show}=useToast();
  const conversation=useContext(EvidenceConversation);
  const sourceKey=JSON.stringify([conversation?.provider,conversation?.threadId,source]);
  const revisionKey=useRef(sourceKey);revisionKey.current=sourceKey;
@@ -63,7 +66,7 @@ export function EvidenceSelection({source,text,getText,hasContent,range,comparab
     const pick:ChatEvidenceStageRequest['selection']=comparison&&diff?{beforeRevision:diff.beforeRevision}:source.kind==='parameter'?{firstLine:1,lastLine:lines}:selection;
     await request('chat.evidence.stage',{...value,selection:pick,...comment.trim()?{comment:comment.trim()}:{}});
     if(revisionKey.current!==origin)return;
-    setComment('');setStatus(t('已添加到对话草稿')+' · '+owner.name);
+    setComment('');show({message:t('已添加到对话草稿')+' · '+owner.name});
    }else if(action==='remember'){
     const result=await request('chat.evidence.remember',value);
     if(revisionKey.current!==origin)return;
@@ -84,7 +87,7 @@ export function EvidenceSelection({source,text,getText,hasContent,range,comparab
   <strong>{t(title)} · {revisionLabel(revision)}{unit?' · '+unit:''}</strong>
   {part.lastLine>=part.firstLine?<><small>{t('证据行')} {part.firstLine}–{part.lastLine}</small><pre tabIndex={0}>{part.text}</pre></>:<small>{t('此版本在此处没有文本')}</small>}
  </section>;
- return <Disclosure className="chat-evidence" data-testid="chat-evidence" data-source-kind={source.kind} open={open} onToggle={event=>setOpen(event.currentTarget.open)} summary={<>{t('选取证据加入对话')}</>}>
+ return <Disclosure variant="section" className="chat-evidence" data-testid="chat-evidence" data-source-kind={source.kind} open={open} onToggle={event=>setOpen(event.currentTarget.open)} summary={t('选取证据加入对话')}>
   {open&&<div className="chat-evidence-body" aria-busy={busy}>
    <small>{t('对话')} · {owner.name}</small>
    {source.kind!=='parameter'&&<div className="chat-evidence-lines">{field('firstLine','起始行')}{field('lastLine','结束行')}<small>{t('可选行')} 1–{lines}</small></div>}
@@ -96,7 +99,7 @@ export function EvidenceSelection({source,text,getText,hasContent,range,comparab
    {diff&&<><div className="chat-evidence-diff" data-testid="chat-evidence-diff">
     {side('修改前',diff.beforeRevision,diff.beforeUnit,diff.before)}{side('修改后',diff.afterRevision,diff.afterUnit,diff.after)}
    </div><Button  type="button" disabled={busy} onClick={()=>void act('stage',true)}>{t('把带批注的差异加入草稿')}</Button></>}
-   {status&&<small role="status">{status}</small>}{error&&<small role="alert">{error}</small>}
+   {status&&<Notice compact>{status}</Notice>}{error&&<Notice compact severity="error">{error}</Notice>}
   </div>}
  </Disclosure>;
 }

@@ -19,7 +19,7 @@ export default function SetupLesson({lesson,page,english,showFocus,onDismiss,onR
   return <>
     <div className="lesson-controls" role="group" aria-label={languageText(english,'引导课节')}>
       <span className="lesson-progress" data-testid="setup-lesson-progress">{progress}</span>
-      <span className="lesson-goal" title={heading}>{heading}</span>
+      <Tooltip asChild content={heading}><span className="lesson-goal" title={heading} tabIndex={0}>{heading}</span></Tooltip>
       <Tooltip asChild content={highlight}><button ref={rehighlight} type="button" className="setup-help lesson-highlight" data-testid="setup-lesson-rehighlight"
         aria-label={highlight} onClick={()=>{setHighlightAttempt(attempt=>attempt+1);onRehighlight();}}>
         <Scan size={15} aria-hidden="true"/><span>{highlight}</span>

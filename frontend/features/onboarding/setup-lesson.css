@@ -193,7 +193,7 @@
     outline-offset: 1px;
   }
 
-  .guide-focus-tip p {
+  .guide-focus-tip :is(p,.guide-focus-message) {
     grid-column: 1/-1;
     margin: 0;
   }

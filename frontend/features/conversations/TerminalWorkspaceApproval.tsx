@@ -50,8 +50,8 @@ export default function TerminalWorkspaceApproval({provider,threadId,active,sele
   <dl><dt>{t('计算资源')}</dt><dd>{approval.resourceName}</dd><dt>{t('远端总工作区')}</dt><dd><code>{approval.workspaceRoot}</code></dd><dt>{t('执行目录')}</dt><dd><code>{approval.cwd}</code></dd></dl>
   {approval.paths.length>0&&<ul aria-label={t('涉及路径')}>{approval.paths.map(path=><li key={path}><code>{path}</code></li>)}</ul>}
   <ol aria-label={t('将执行的命令')}>{approval.commands.map((command,index)=><li key={index}><code>{command}</code></li>)}</ol>
-  <div className="button-row"><Button type="button"  data-testid="terminal-workspace-deny" disabled={pending} onClick={()=>void decide('deny')}>{t('拒绝')}</Button>
-   <Button variant="primary" type="button"  data-testid="terminal-workspace-approve" disabled={pending} onClick={()=>void decide('approve')}>{t('确认执行所列操作')}</Button></div>
+  <div className="button-row"><Button type="button" data-testid="terminal-workspace-deny" disabled={pending} disabledReason={t('正在处理…')} onClick={()=>void decide('deny')}>{t('拒绝')}</Button>
+   <Button variant="primary" type="button" data-testid="terminal-workspace-approve" disabled={pending} disabledReason={t('正在处理…')} onClick={()=>void decide('approve')}>{t('确认执行所列操作')}</Button></div>
   {error&&<Notice compact severity="error" >{error}</Notice>}
  </section>;
 }

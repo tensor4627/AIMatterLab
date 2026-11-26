@@ -5,7 +5,7 @@ import {API_PRESETS,REASONING_LEVELS} from '../../../contracts/agent/model-profi
 import type {ApiModel,ModelProfile,ModelDiscovery,ReasoningLevel} from '../../../contracts/dto/model-profiles';
 import {t} from '../../ui/i18n';
 import './model-providers.css';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {EmptyState,ErrorState,LoadingState} from '../../ui/States';
 import Notice,{type NoticeSeverity} from '../../ui/Notice';
 import Tooltip,{HelpTip} from '../../ui/Tooltip';
 import {redactTranscriptText} from '../../../contracts/agent/transcript-sanitizer.mjs';
@@ -14,33 +14,55 @@ import AccountDialogContent from './AccountDialogContent';
 import {ConfirmDialog} from '../../ui/ConfirmDialog';
 import Button from '../../ui/Button';
 import Disclosure from '../../ui/Disclosure';
+import {useToast} from '../../ui/Toast';
 type ModelAction='discover'|'save'|'test'|'remove';
 const actionLabels:Record<ModelAction,string>={discover:'正在获取可用模型',save:'正在保存服务商配置',test:'正在验证 API 连接',remove:'正在移除服务商'};
 const blankModel=():ApiModel=>({id:'',input:['text']});
 function initialProfile(provider:'qwen'|'compatible'):ModelProfile{const preset=provider==='qwen'?'token-cn':'custom',v=API_PRESETS[preset];return {schemaVersion:1,id:'provider-'+crypto.randomUUID().slice(0,8),provider,preset,name:v.name,baseUrl:v.baseUrl,api:v.api,models:[blankModel()],defaultModel:''};}
 const hasCredential=(profile:ModelProfile)=>profile.credentialStored===true||profile.requiresApiKey===false;
-export default function ModelProviders({provider,disabled=false,onError,onConfigured=()=>{},onTested,onAccountState,onClose}:{
- provider:'qwen'|'compatible';disabled?:boolean;onError:(error:unknown)=>void;onConfigured?:()=>void;onTested?:(model:string)=>void;
+export default function ModelProviders({provider,disabled=false,onConfigured=()=>{},onTested,onAccountState,onClose}:{
+ provider:'qwen'|'compatible';disabled?:boolean;onConfigured?:()=>void;onTested?:(model:string)=>void;
  onAccountState?:(state:AccountConfiguration)=>void;onClose?:()=>void;
 }){
  const [profiles,setProfiles]=useState<ModelProfile[]>([]),[draft,setDraft]=useState<ModelProfile|null>(null),[key,setKey]=useState(''),[pending,setPending]=useState<ModelAction|null>(null),[messageAction,setMessageAction]=useState<ModelAction|null>(null),[loading,setLoading]=useState(true),[message,setMessage]=useState<{text:string;severity:NoticeSeverity}|null>(null),[candidates,setCandidates]=useState<ApiModel[]|null>(null),[chosen,setChosen]=useState<string[]>([]),[query,setQuery]=useState(''),[confirmRemove,setConfirmRemove]=useState(false);
- const [readFailed,setReadFailed]=useState(false);
+ const [readError,setReadError]=useState<string|null>(null),[readAttempt,setReadAttempt]=useState(0);
+ const {show,dismiss}=useToast();
+ const resultToast=useRef<number|null>(null);
  const epoch=useRef(0),revision=useRef(0),flight=useRef(false),mounted=useRef(true);
  const feedback=(text:string,severity:NoticeSeverity='info')=>setMessage({text:t(redactTranscriptText(text,[key])),severity});
- const mark=()=>{revision.current++;setMessage(null);setCandidates(null);};
+ function clearFeedback(){
+  setMessage(null);
+  if(resultToast.current!==null)dismiss(resultToast.current);
+  resultToast.current=null;
+ }
+ function success(text:string){
+  resultToast.current=show({message:t(redactTranscriptText(text,[key])),testId:'model-provider-feedback'});
+ }
+ const mark=()=>{revision.current++;clearFeedback();setCandidates(null);};
  const isCurrent=(run:number)=>mounted.current&&run===epoch.current;
- useEffect(()=>{mounted.current=true;const run=++epoch.current;setLoading(true);setReadFailed(false);setDraft(null);setProfiles([]);setMessage(null);setCandidates(null);setKey('');flight.current=false;setPending(null);setMessageAction(null);revision.current=0;void invoke<ModelProfile[]>('models.profiles.list',{provider}).then(value=>{if(run===epoch.current){setProfiles(value);setDraft(value.length===1?structuredClone(value[0]):null);}}).catch(error=>{if(run===epoch.current){setReadFailed(true);onError(error);}}).finally(()=>{if(run===epoch.current)setLoading(false);});return()=>{mounted.current=false;epoch.current++;};},[provider]);
+ useEffect(()=>{
+  mounted.current=true;
+  const run=++epoch.current;
+  setLoading(true);setReadError(null);setDraft(null);setProfiles([]);setMessage(null);
+  setCandidates(null);setKey('');flight.current=false;setPending(null);setMessageAction(null);revision.current=0;
+  void invoke<ModelProfile[]>('models.profiles.list',{provider}).then(value=>{
+   if(run===epoch.current){setProfiles(value);setDraft(value.length===1?structuredClone(value[0]):null);}
+  }).catch(error=>{
+   if(run===epoch.current)setReadError(redactTranscriptText(error instanceof Error?error.message:String(error)));
+  }).finally(()=>{if(run===epoch.current)setLoading(false);});
+  return()=>{mounted.current=false;epoch.current++;};
+ },[provider,readAttempt]);
  function edit(profile:ModelProfile){if(flight.current||disabled)return;mark();revision.current=0;setDraft(structuredClone(profile));setKey('');setConfirmRemove(false);}
  function patch(value:Partial<ModelProfile>){if(!draft||flight.current||disabled)return;mark();const endpointChanged=value.baseUrl!==undefined&&value.baseUrl!==draft.baseUrl||value.api!==undefined&&value.api!==draft.api||value.authMode!==undefined&&value.authMode!==draft.authMode;setDraft({...draft,...value,...endpointChanged?{sharePublicGuides:false}:{}});}
  function modelPatch(index:number,value:Partial<ApiModel>){if(!draft)return;const models=draft.models.map((model,at)=>at===index?{...model,...value}:model);patch({models});}
  async function perform(kind:ModelAction,action:()=>Promise<void>){
   if(flight.current||disabled)return;
-  flight.current=true;setPending(kind);setMessageAction(kind);setMessage(null);
+  flight.current=true;setPending(kind);setMessageAction(kind);clearFeedback();
   const run=epoch.current;
   try{await action();}catch(error){if(isCurrent(run))feedback(error instanceof Error?error.message:String(error),'error');}
   finally{if(isCurrent(run)){flight.current=false;setPending(null);}}
  }
- function actionLabel(kind:ModelAction,idle:string){return pending===kind?<LoadingFeedback busy inline label={t(actionLabels[kind])}/>:t(idle);}
+ function actionLabel(kind:ModelAction,idle:string){return pending===kind?<LoadingState inline label={t(actionLabels[kind])}/>:t(idle);}
  async function removeProfile(){
   if(!draft?.revision)return;
   const {id,revision:expectedRevision}=draft,run=epoch.current;
@@ -51,25 +73,30 @@ export default function ModelProviders({provider,disabled=false,onError,onConfig
   });
   if(isCurrent(run))setConfirmRemove(false);
  }
- async function save(){if(!draft)return;const snapshot=structuredClone(draft),run=epoch.current;await perform('save',async()=>{const result=await invoke<ModelProfile>('models.profiles.save',{profile:snapshot,apiKey:key,expectedRevision:snapshot.revision});if(!isCurrent(run))return;setProfiles(values=>[...values.filter(v=>v.id!==result.id),result]);setDraft(result);setKey('');revision.current=0;feedback('配置已保存，密钥不会回显。');onConfigured();});}
+ async function save(){if(!draft)return;const snapshot=structuredClone(draft),run=epoch.current;await perform('save',async()=>{const result=await invoke<ModelProfile>('models.profiles.save',{profile:snapshot,apiKey:key,expectedRevision:snapshot.revision});if(!isCurrent(run))return;setProfiles(values=>[...values.filter(v=>v.id!==result.id),result]);setDraft(result);setKey('');revision.current=0;success('配置已保存，密钥不会回显。');onConfigured();});}
  async function discover(){if(!draft)return;const snapshot=structuredClone(draft),submitted=revision.current,run=epoch.current;await perform('discover',async()=>{const result=await invoke<ModelDiscovery>('models.profiles.discover',{profile:snapshot,apiKey:key});if(!isCurrent(run)||submitted!==revision.current)return;setCandidates(result.models);setChosen(result.models.filter(v=>snapshot.models.some(m=>m.id===v.id)).map(v=>v.id));setQuery('');if(result.notice||result.models.length===0)feedback(result.notice||'接口未返回模型；仍可手动添加。','warning');else feedback('选择要加入的模型；已有模型的能力设置会保留。');});}
- async function test(){if(!draft||!draft.revision||revision.current>0)return;const snapshot=draft,run=epoch.current;await perform('test',async()=>{const result=await invoke<{model:string;status:string}>('models.profiles.test',{id:snapshot.id,model:snapshot.defaultModel||snapshot.models[0].id});if(!isCurrent(run))return;if(result.status!=='passed')throw Error('API 连接测试未完成。');feedback(t('测试调用成功')+' · '+result.model);onTested?.(result.model);});}
+ async function test(){if(!draft||!draft.revision||revision.current>0)return;const snapshot=draft,run=epoch.current;await perform('test',async()=>{const result=await invoke<{model:string;status:string}>('models.profiles.test',{id:snapshot.id,model:snapshot.defaultModel||snapshot.models[0].id});if(!isCurrent(run))return;if(result.status!=='passed')throw Error('API 连接测试未完成。');success(t('测试调用成功')+' · '+result.model);onTested?.(result.model);});}
  function acceptCandidates(){if(!draft||!candidates)return;const old=draft.models.filter(v=>v.id),ids=new Set(old.map(v=>v.id));patch({models:[...old,...candidates.filter(v=>chosen.includes(v.id)&&!ids.has(v.id))]});setCandidates(null);}
  const locked=disabled||pending!==null,dirty=revision.current>0||!draft?.revision;
- const accountState=profiles.some(hasCredential)?'configured':loading||readFailed?'unknown':'missing';
+ const accountState=profiles.some(hasCredential)?'configured':loading||readError!==null?'unknown':'missing';
  useEffect(()=>{onAccountState?.(accountState);},[onAccountState,accountState]);
  const canFinish=accountState==='configured'&&(!draft||!dirty&&hasCredential(draft));
+ const choosing=!!candidates?.length;
+ const addProvider=<Button variant={draft||readError!==null||canFinish&&onClose?'secondary':'primary'} data-testid="add-api-provider" data-guide-target="add-api" disabled={locked}
+  disabledReason={t(disabled?'等待当前回复完成':'正在处理…')} onClick={()=>edit(initialProfile(provider))}><Plus size={15} aria-hidden="true"/>{t('添加服务商')}</Button>;
  const fieldId=useId();
- return <AccountDialogContent onClose={onClose} configured={canFinish} edited={revision.current>0} pending={pending!==null}>
+ return <AccountDialogContent onClose={onClose} configured={canFinish} edited={revision.current>0} pending={pending!==null} primaryAvailable={choosing}>
  <section className="model-providers" data-testid="model-providers">
-  {loading?<LoadingFeedback busy label={t('正在读取服务商配置…')}/>:<>
+  {loading?<LoadingState label={t('正在读取服务商配置…')}/>:<>
+   {readError!==null&&!draft&&<ErrorState title={t('无法读取服务商配置。')} details={readError&&<pre>{readError}</pre>}
+    action={<Button variant="primary" onClick={()=>setReadAttempt(n=>n+1)}>{t('重新读取')}</Button>}/>}
    {profiles.length>0&&<div className="model-provider-list">{profiles.map(profile=>
     <button className={'model-provider-row '+(draft?.id===profile.id?'selected':'')} key={profile.id} data-guide-target="api-profile" data-testid={'provider-row-'+profile.id} onClick={()=>edit(profile)} disabled={locked} aria-pressed={draft?.id===profile.id}>
      <KeyRound size={16} aria-hidden="true"/>
      <span><strong>{profile.name}</strong><small>{profile.models.length} {t('个模型')} · {profile.requiresApiKey===false&&!profile.credentialStored?t('本机服务无需密钥'):profile.credentialStored?t('已保存密钥'):t('未保存密钥')}</small></span>
      <ChevronDown size={16} aria-hidden="true"/>
     </button>)}</div>}
-   <button className="button" data-testid="add-api-provider" data-guide-target="add-api" disabled={locked} onClick={()=>edit(initialProfile(provider))}><Plus size={15}/>{t('添加服务商')}</button>
+   {readError===null&&!profiles.length&&!draft?<EmptyState title={t('尚无服务商配置')} body={t('添加服务商，然后填写连接信息与模型。')} action={addProvider}/>:addProvider}
   </>}
   {draft&&<fieldset className="model-provider-editor" disabled={locked} data-testid="model-provider-editor"><legend>{t('服务商配置')}</legend>
    <div className="model-field-grid">
@@ -92,8 +119,9 @@ export default function ModelProviders({provider,disabled=false,onError,onConfig
    </div>
    <div className="model-list-heading"><h3>{t('模型列表与能力')}</h3><Tooltip asChild content={t('模型发现不等于能力验证。')}><button className="button" data-testid="discover-api-models" type="button" onClick={()=>void discover()}>{actionLabel('discover','获取可用模型')}</button></Tooltip></div>
    {message&&messageAction==='discover'&&<Notice severity={message.severity} className="model-settings-message" data-testid="model-provider-feedback">{message.text}</Notice>}
-   {candidates&&<div className="model-discovery-picker"><input aria-label={t('搜索发现的模型')} value={query} onChange={e=>setQuery(e.target.value)} placeholder={t('搜索模型')}/><div className="model-discovery-candidates">{candidates.filter(v=>(v.name+' '+v.id).toLowerCase().includes(query.toLowerCase())).map(v=><label className="check-label" key={v.id}><input type="checkbox" checked={chosen.includes(v.id)} onChange={e=>setChosen(old=>e.target.checked?[...old,v.id]:old.filter(id=>id!==v.id))}/>{v.name||v.id}<small>{v.id}</small></label>)}</div><button className="button" type="button" data-testid="adopt-api-models" onClick={acceptCandidates}>{t('加入所选模型')}</button><button className="button" type="button" onClick={()=>setCandidates(null)}>{t('取消')}</button></div>}
-   {draft.models.map((model,index)=><div className="api-model-card" key={index} data-testid={'api-model-'+index}><div className="api-model-title"><strong>{model.name||model.id||t('新模型')}</strong><button type="button" className="button" aria-label={t('删除模型')+' '+(index+1)} disabled={locked||draft.models.length===1} onClick={()=>patch({models:draft.models.filter((_,at)=>at!==index)})}><Trash2 size={14}/></button></div>
+   {candidates&&<div className="model-discovery-picker"><input aria-label={t('搜索发现的模型')} value={query} onChange={e=>setQuery(e.target.value)} placeholder={t('搜索模型')}/><div className="model-discovery-candidates">{candidates.filter(v=>(v.name+' '+v.id).toLowerCase().includes(query.toLowerCase())).map(v=><label className="check-label" key={v.id}><input type="checkbox" checked={chosen.includes(v.id)} onChange={e=>setChosen(old=>e.target.checked?[...old,v.id]:old.filter(id=>id!==v.id))}/>{v.name||v.id}<small>{v.id}</small></label>)}</div><Button variant={choosing?'primary':'secondary'} data-testid="adopt-api-models" onClick={acceptCandidates}>{t('加入所选模型')}</Button><button className="button" type="button" onClick={()=>setCandidates(null)}>{t('取消')}</button></div>}
+   {draft.models.map((model,index)=><div className="api-model-card" key={index} data-testid={'api-model-'+index}><div className="api-model-title"><strong>{model.name||model.id||t('新模型')}</strong><Button variant="icon" size="sm" aria-label={t('删除模型')+' '+(index+1)} disabled={locked||draft.models.length===1}
+    disabledReason={t('至少保留一个模型。')} onClick={()=>patch({models:draft.models.filter((_,at)=>at!==index)})}><Trash2 size={14} aria-hidden="true"/></Button></div>
     <div className="model-field-grid"><label>{t('模型 ID')}<input data-testid={'api-model-id-'+index} data-guide-target="api-model" value={model.id} onChange={e=>modelPatch(index,{id:e.target.value})}/></label><label>{t('显示名称')}<input value={model.name||''} onChange={e=>modelPatch(index,{name:e.target.value})}/></label></div>
     <Disclosure summary={t('模型能力与推理等级')}><div className="model-field-grid"><label>{t('上下文窗口 · tokens')}<input type="number" min={1} value={model.contextWindow||''} onChange={e=>modelPatch(index,{contextWindow:e.target.value?Number(e.target.value):undefined})}/></label><label>{t('最大输出 · tokens')}<input type="number" min={1} value={model.maxTokens||''} onChange={e=>modelPatch(index,{maxTokens:e.target.value?Number(e.target.value):undefined})}/></label></div><label className="check-label"><input type="checkbox" aria-label={t('支持图片输入')} checked={model.input?.includes('image')===true} onChange={event=>modelPatch(index,{input:event.target.checked?['text','image']:['text']})}/>{t('支持图片输入')}</label>
      {draft.api==='openai-completions'&&<><label>{t('推理参数格式')}<select value={model.thinkingFormat||'openai'} onChange={e=>modelPatch(index,{thinkingFormat:e.target.value as ApiModel['thinkingFormat']})}><option value="openai">reasoning_effort / reasoning.effort</option><option value="qwen">Qwen · enable_thinking</option><option value="deepseek">DeepSeek · thinking</option></select></label><label>{t('发送推理等级参数')}<select value={model.supportsReasoningEffort===undefined?'auto':String(model.supportsReasoningEffort)} onChange={e=>modelPatch(index,{supportsReasoningEffort:e.target.value==='auto'?undefined:e.target.value==='true'})}><option value="auto">{t('DSH 默认')}</option><option value="true">{t('发送')}</option><option value="false">{t('不发送（仅切换思考开关）')}</option></select></label></>}<p className="muted">{t('只配置模型实际支持的等级；off 留空表示关闭思考时不发送等级参数。模型发现不等于能力验证。')}</p>
@@ -103,7 +131,14 @@ export default function ModelProviders({provider,disabled=false,onError,onConfig
    <button type="button" className="button" data-testid="add-api-model" onClick={()=>patch({models:[...draft.models,blankModel()]})}><Plus size={14}/>{t('手动添加模型')}</button>
    <label>{t('默认模型')}<select data-testid="default-api-model" value={draft.defaultModel||draft.models[0]?.id||''} onChange={e=>patch({defaultModel:e.target.value})}>{draft.models.map((model,index)=><option key={index} value={model.id}>{model.name||model.id||t('新模型')}</option>)}</select></label>
    <label className="check-label"><input type="checkbox" data-testid="provider-public-guides" checked={draft.sharePublicGuides===true} onChange={e=>patch({sharePublicGuides:e.target.checked})}/>{t('允许向这个地址发送已授权的公开科学指导；不包含私有代码、凭据或 SSH 信息')}</label>
-   <div className="provider-actions"><Button variant={canFinish?'secondary':'primary'} data-testid="save-api-provider" onClick={()=>void save()} disabled={locked||!draft.models.some(v=>v.id)} loading={pending==='save'}>{t('保存服务商配置')}</Button><button type="button" className="button" data-testid="test-api-provider" disabled={locked||dirty} onClick={()=>void test()}>{actionLabel('test','验证 API 连接')}</button>{draft.revision&&<button type="button" className="button" onClick={()=>setConfirmRemove(true)}>{t('移除服务商')}</button>}</div>
+   <div className="provider-actions">
+    <Button variant={!choosing&&!canFinish?'primary':'secondary'} data-testid="save-api-provider" onClick={()=>void save()}
+     disabled={locked||!draft.models.some(v=>v.id)} disabledReason={t(locked?'正在处理…':'请填写至少一个模型 ID。')} aria-busy={pending==='save'}
+     aria-label={t('保存服务商配置')}>{actionLabel('save','保存服务商配置')}</Button>
+    <Button variant={!choosing&&canFinish&&!onClose?'primary':'secondary'} data-testid="test-api-provider" disabled={locked||dirty}
+     disabledReason={t(locked?'正在处理…':'有未保存修改；保存后再验证连接。')} onClick={()=>void test()}>{actionLabel('test','验证 API 连接')}</Button>
+    {draft.revision&&<button type="button" className="button" onClick={()=>setConfirmRemove(true)}>{t('移除服务商')}</button>}
+   </div>
    {dirty&&draft.revision&&<Notice severity="warning">{t('有未保存修改；保存后再验证连接。')}</Notice>}
    {confirmRemove&&<ConfirmDialog title={t('移除服务商')} target={draft.name} tone="danger" confirmLabel={t('确认移除')}
     consequence={t('移除本机配置和密钥；历史对话与计算记录保留，不会撤销平台密钥。')}

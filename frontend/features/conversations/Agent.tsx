@@ -20,7 +20,7 @@ import './agent.css';
 import './codex-version-notice.css';
 import {tr} from "../../ui/i18n";
 import {useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type RefObject} from 'react';
-import {PencilLine,Square,Plus,Sparkles,Check,Shield,LoaderCircle,Settings2,History,PanelRightClose} from 'lucide-react';
+import {PencilLine,Square,Plus,Sparkles,Check,Shield,Settings2,History,PanelRightClose} from 'lucide-react';
 import {t} from "../../ui/i18n";
 import {type ChatMessageActions,type ChatMessageValue} from './ChatMessage';
 import ConversationMessages from './ConversationMessages';
@@ -37,7 +37,8 @@ import SessionWorkspace from './SessionWorkspace';
 import TerminalWorkspaceApproval from './TerminalWorkspaceApproval';
 
 import ProviderLogin from "../settings/ProviderLogin";
-import LoadingFeedback from "../../ui/LoadingFeedback";
+import {ErrorState,LoadingState} from '../../ui/States';
+import {useToast} from '../../ui/Toast';
 import type {AgentConnectRequest,AgentConnectResult,AgentSteerRequest,AgentSteerResult,AgentToolsStatus,CodexCompatibility,NativeCodexDefaults} from "../../../contracts/dto/agent";
 import {explicitNewWorkflow} from "./workflow-intent.mjs";
 
@@ -108,6 +109,7 @@ function sshResourceReady(resource:ComputeResourceState|null|undefined,tools:Age
  return workflow?tools.scope!=='terminal-only':tools.scope==='terminal-only';
 }
 export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation,onOpenDiscussion,activity,attentionTarget,setupProviderChoice,onSetupReply,onOpenHistory,onCollapse,conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,selectedLocalConversation,isLocalConversationCurrent,onConversation,onBusyChange,onNewConversation,hidden,visibleWorkflowId,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onReviewWorker,onOpenCluster,onOpenOriginalRun,computeResource,workspaceProfileId,onComputeResource,onReviewResourceTool,missingWorkflowToolQuestion}:{terminalDraft?:RefObject<((provider:AgentProvider)=>string|undefined)|null>;historyTarget?:ConversationHistoryTarget;onOpenHistoryLocation?:(target:ConversationAnchor)=>void;onOpenDiscussion?:(conversation:Conversation,draft?:string)=>void;activity?:ConversationActivity;attentionTarget?:ConversationAttentionTarget;setupProviderChoice?:{provider:AgentProvider;nonce:string};onSetupReply?:(reply:{provider:AgentProvider;model:string}|null)=>void;onComputeResource?:(state:ComputeResourceState)=>void;onOpenHistory?:()=>void;onReviewResourceTool?:()=>void;missingWorkflowToolQuestion?:MissingWorkflowToolQuestion;workspaceProfileId?:string;onCollapse?:()=>void;computeResource?:ComputeResourceState|null;onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;onReviewWorker?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:SessionSelection;selectedLocalConversation?:Pick<Conversation,'provider'|'threadId'>|null;isLocalConversationCurrent?:()=>boolean;onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean;visibleWorkflowId?:string|null}){
+ const {show:showToast}=useToast();
  const draftsRef=useRef<ReturnType<typeof createComposerDrafts>|null>(null);if(!draftsRef.current){draftsRef.current=createComposerDrafts(()=>localStorage);const selected=sessionSelection?.conversation;if(selected)draftsRef.current.activate(selected.provider,selected.threadId);else if(sessionSelection?.new)draftsRef.current.activate(draftsRef.current.owner().provider,null,true);}const drafts=draftsRef.current;
  const [needsAuth,setNeedsAuth]=useState(false);
  const [nativeDefaults,setNativeDefaults]=useState<NativeCodexDefaults|null>(null);
@@ -268,7 +270,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   flight.cancelled=true;
   if(flight.phase==='preparing'){
    if(flight.current())drafts.retain(flight.draft,flight.text);
-   releaseSend(flight);setBusy(false);setStopStatus(null);setSendNotice(t('已取消发送准备，草稿已保留。'));return;
+   releaseSend(flight);setBusy(false);setStopStatus(null);showToast({message:t('已取消发送准备，草稿已保留。')});return;
   }
   if(!flight.turnId){setStopStatus('waiting');return;}
   void interruptFlight(flight);
@@ -296,7 +298,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  function editAnswer(request:RpcEvent,id:string,value:string,option=false){if(!requestsRef.current.includes(request))return;const key=requestScope(request);setAnswers(previous=>({...previous,[key]:{...previous[key],[id]:{value,option}}}));}
  function clearAnswers(key:string){setAnswers(previous=>{if(!(key in previous))return previous;const next={...previous};delete next[key];return next;});}
  useEffect(()=>{const active=new Set(requests.map(requestScope));setAnswers(previous=>{const next=Object.fromEntries(Object.entries(previous).filter(([key])=>active.has(key)));return Object.keys(next).length===Object.keys(previous).length?previous:next;});setResponding(previous=>{const next=new Set([...previous].filter(key=>active.has(key)));return next.size===previous.size?previous:next;});},[requests]);
- const [effort,setEffort]=useState(storedPreference('studio.effort')||''),[contextWindow,setContextWindow]=useState(''),[compactLimit,setCompactLimit]=useState(''),[options,setOptions]=useState(false),[usage,setUsage]=useState<any>(null),[applying,setApplying]=useState(false),[applied,setApplied]=useState('');
+ const [effort,setEffort]=useState(storedPreference('studio.effort')||''),[contextWindow,setContextWindow]=useState(''),[compactLimit,setCompactLimit]=useState(''),[options,setOptions]=useState(false),[usage,setUsage]=useState<any>(null),[applying,setApplying]=useState(false);
  const effortRef=useRef(effort);effortRef.current=effort;
  const sessionNonceRef=useRef(sessionSelection?.nonce),sessionPendingRef=useRef(sessionSelection?.pending);sessionNonceRef.current=sessionSelection?.nonce;sessionPendingRef.current=sessionSelection?.pending;
  const planningRef=useRef(planningMode);planningRef.current=planningMode;
@@ -606,7 +608,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
      call.status=interrupted?'interrupted':p.turn.status==='completed'&&!p.turn.error&&(call.output||p.turn.modelOutputReceived===true)?'passed':'failed';
      setModelCall({...call});if(call.status==='passed')setupReplyRef.current?.({provider:call.provider,model:call.model});
     }
-    if(interrupted)setSendNotice(t('已停止当前回复。'));
+    if(interrupted){setSendNotice('');showToast({message:t('已停止当前回复。')});}
     else if(stopping)setSendNotice('');
     if(!interrupted&&p.turn.error)messageCallbacks.current.onError(p.turn.error.message||p.turn.error);
     return;
@@ -903,7 +905,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    if(connected){const result=await invoke('agent.configure',{provider:selectedProvider,preferences,threadId:thread,model:model||undefined});if(!current())return;if(result.studioRecovery?.status==='required'){setRecovery({threadId:result.studioRecovery.oldThreadId});return;}if(result.thread){drafts.rebind(draft,result.thread.id);setThread(result.thread.id);threadRef.current=result.thread.id;}setConnected(true);}
    else await invoke('settings',{agent:preferences});
    if(!current())return;
-   setUsage(null);setApplied(t('已应用；实际窗口以服务回报为准'));
+   setUsage(null);showToast({message:t('已应用；实际窗口以服务回报为准')});
   }catch(e){if(current())onError(e);}finally{if(current())setApplying(false);}
  }
  function canRespond(request:RpcEvent){
@@ -1061,7 +1063,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     followLatest();
     if(!item)setMessages(previous=>[...previous,{id:request.params.clientUserMessageId,role:'user',text,turnId:turn,
      clientUserMessageId:request.params.clientUserMessageId,justSent:true}]);
-    setSendNotice(t('引导已发送到当前回复。'));
+    showToast({message:t('引导已发送到当前回复。')});
    }
   }catch{
    if(followUpCurrent())setSendNotice(t(settledTurns.current.has(turn)?'当前回复已结束，引导结果待核对，消息已保留。':'引导结果待核对，消息已保留。'));
@@ -1125,9 +1127,19 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   if(!mainPreparing)stopSend();
  }
  const stopTitle=t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次请求停止':activeSend.current?.phase==='preparing'?'取消发送准备':'中断 Agent，计算作业继续');
- const stopControl=busy?<Button variant="ghost" tooltip={stopTitle} type="button" className="send agent-stop-action" data-testid="agent-stop" disabled={stopStatus==='waiting'||stopStatus==='stopping'||!activeSend.current&&!turn&&!queueFlight}  aria-label={stopTitle} onClick={stopWithQueue}>
+ const pendingReason=t(busy?'等待当前回复完成':'正在恢复会话，请稍后发送。');
+ const stopControl=busy?<Button variant="ghost" tooltip={stopTitle} type="button" className="send agent-stop-action" data-testid="agent-stop" disabled={stopStatus==='waiting'||stopStatus==='stopping'||!activeSend.current&&!turn&&!queueFlight}
+  disabledReason={stopStatus==='waiting'||stopStatus==='stopping'?stopTitle:t('正在准备消息…')} aria-label={stopTitle} onClick={stopWithQueue}>
   <Square size={13}/><span>{t(stopStatus==='waiting'?'确认提交中':stopStatus==='stopping'?'等待停止确认':stopStatus==='unknown'?'再次停止':activeSend.current?.phase==='preparing'?'取消准备':'停止')}</span>
  </Button>:null;
+ const approvalRequests=requests.filter(request=>!isUserInputRequest(request));
+ const proposalVisible=promptProposal&&promptProposal.provider===composerOwner.provider&&promptProposal.threadId===composerOwner.threadId;
+ const sendBlockedReason=pendingDefaults?t('请在对话面板选择可用的模型和推理强度，再确认使用。'):
+  recovery||composerUnbound?t('请先恢复当前对话，输入草稿已保留。'):
+  applying||connecting||selectionPending.current||historyHidden?t('正在恢复会话，请稍后发送。'):
+  !localApiThread&&(!connected||!models.length)?t('请先连接服务商并选择模型。'):
+  terminalSelected&&!terminalReady&&!canAcquireTerminal?t(terminalNotice):undefined;
+ const composerProminent=(!sendBlockedReason||queueComposer)&&!approvalRequests.length&&!proposalVisible;
  return <aside className="agent-panel" style={{width,display:hidden?'none':undefined}}>
   <div className={"agent-top-surface"+(options?" is-expanded":"")}>
    <div className="panel-heading agent-heading">
@@ -1137,7 +1149,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
      {onOpenHistory&&<Tooltip asChild content={t('历史会话')}><Button variant="icon" size="sm" tooltip={false}  data-testid="agent-history" aria-label={t('历史会话')} onClick={onOpenHistory}><History size={16}/></Button></Tooltip>}
      {onCollapse&&<Tooltip asChild content={t('收起助手')}><Button variant="icon" size="sm" tooltip={false}  aria-label={t('收起助手')} onClick={onCollapse}><PanelRightClose size={16}/></Button></Tooltip>}
      <Tooltip asChild content={t('Agent 选项')}><Button variant="icon" size="sm" tooltip={false}  data-testid="agent-options" aria-label={t('Agent 选项')} aria-expanded={options} aria-controls="agent-options-region" onClick={()=>setOptions(!options)}><Settings2 size={16}/></Button></Tooltip>
-     {!onNewConversation&&<Tooltip asChild content={t('新会话')}><Button variant="icon" size="sm" tooltip={false}  data-testid="agent-new-conversation-fallback" aria-label={t('新会话')} onClick={()=>resetConversation()} disabled={busy||connecting||applying}><Plus size={17}/></Button></Tooltip>}
+     {!onNewConversation&&<Button variant="icon" size="sm" data-testid="agent-new-conversation-fallback" aria-label={t('新会话')} onClick={()=>resetConversation()} disabled={busy||connecting||applying} disabledReason={pendingReason}><Plus size={17} aria-hidden="true"/></Button>}
     </div>
    </div>
   <div className="agent-configuration" data-testid="agent-configuration" hidden={!options&&connected&&(managedToolState?!managedToolsBlocked:tools.status!=='blocked')}>
@@ -1156,7 +1168,12 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
       }}><option value="queue">{t('排队')}</option><option value="steer">{t('引导')}</option></select>
      </label>
     </section>
-    <section className="agent-option-section"><h4>{t('上下文设置')}</h4><div className="context-usage">{usage?t("上下文")+" "+(usage.last?.totalTokens?.toLocaleString()||t("未知"))+" / "+(usage.modelContextWindow?.toLocaleString()||t("未知"))+" tokens":t("上下文用量：等待服务回报")}</div>{provider==='codex'?<div className="context-options"><label>{t('上下文预算 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={contextWindow} disabled={busy||applying} onChange={e=>{setContextWindow(e.target.value);setApplied('');}}/></label><label>{t('自动压缩阈值 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={compactLimit} disabled={busy||applying} onChange={e=>{setCompactLimit(e.target.value);setApplied('');}}/></label><small>{t('预算不会扩大模型本身的最大容量。应用后恢复当前会话，计算作业继续运行。')}</small><Button  data-testid="agent-context-apply" disabled={busy||applying} onClick={()=>void applyOptions()}>{tr(applying?t('应用中…'):t('应用上下文设置'))}</Button>{applied&&<small role="status">{applied}</small>}</div>:<p className="muted">{t('此提供方通过协议回报上下文，暂不支持修改预算')}</p>}</section>
+    <section className="agent-option-section"><h4>{t('上下文设置')}</h4><div className="context-usage">{usage?t("上下文")+" "+(usage.last?.totalTokens?.toLocaleString()||t("未知"))+" / "+(usage.modelContextWindow?.toLocaleString()||t("未知"))+" tokens":t("上下文用量：等待服务回报")}</div>{provider==='codex'?<div className="context-options">
+     <label>{t('上下文预算 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={contextWindow} disabled={busy||applying} onChange={e=>setContextWindow(e.target.value)}/></label>
+     <label>{t('自动压缩阈值 · tokens')}<input type="number" min={1024} placeholder={t('模型默认')} value={compactLimit} disabled={busy||applying} onChange={e=>setCompactLimit(e.target.value)}/></label>
+     <small>{t('预算不会扩大模型本身的最大容量。应用后恢复当前会话，计算作业继续运行。')}</small>
+     <Button data-testid="agent-context-apply" disabled={busy||applying} disabledReason={applying?t('应用中…'):pendingReason} loading={applying} onClick={()=>void applyOptions()}>{t('应用上下文设置')}</Button>
+    </div>:<p className="muted">{t('此提供方通过协议回报上下文，暂不支持修改预算')}</p>}</section>
     {workflowId&&<section className="agent-option-section"><div className="agent-option-heading"><h4>{t('计算流程')}</h4><HelpTip label={t('计算流程')} content={t('此对话已绑定流程，可直接用自然语言调整')}/></div><Button  data-testid="agent-new-workflow" disabled={busy||applying} onClick={()=>setNewWorkflow(v=>!v)}>{t(newWorkflow?'取消新建流程':'新建流程')}</Button></section>}
     {connected&&<section className="agent-option-section external-session-import"><button className="text-button" data-testid="agent-import-existing" disabled={busy||applying||connecting||importLoading} onClick={()=>importOpen?setImportOpen(false):void importExisting()}>{t(importOpen?'收起会话导入':'导入已有 Agent 会话')}</button>{importOpen&&<div>{importLoading?<small>{t('读取会话目录中…')}</small>:<><small>{t('仅导入选中的会话，不修改外部记录。')}</small><select aria-label={t('选择外部会话导入')} value="" disabled={busy||applying} onChange={e=>{if(e.target.value)void resume(e.target.value);}}><option value="">{t('请选择')}</option>{externalThreads.filter(value=>!threads.some(known=>known.id===value.id)).map(value=><option key={value.id} value={value.id}>{value.name||value.preview?.slice(0,48)||value.id.slice(0,12)}</option>)}</select></>}</div>}</section>}
     <section className="agent-option-section"><h4>{t(terminalSelected?'当前计算资源':managedToolState?'托管计算工具':'科学工具连接')}</h4>
@@ -1165,9 +1182,22 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     {managedToolState&&tools.workflowBound&&<section className="agent-option-section"><h4>{t('原流程作业服务')}</h4><div className="agent-tools-status" data-testid="agent-workflow-tools-status" data-status={tools.status} data-scope={tools.scope}><span><i className={'flow-dot '+(tools.status==='ready'?'ready':'missing')}/>{t(tools.scope==='definition-only'?'受限科学工具已连接':tools.scope!=='terminal-only'&&tools.status==='ready'?'流程工具已连接':'流程工具待核对')}</span>{tools.message&&<small>{t(tools.message)}</small>}{tools.status==='blocked'&&computeConnected===false&&onReviewWorker&&<button className="text-button" disabled={busy||connecting||applying} onClick={()=>void Promise.resolve().then(onReviewWorker).catch(onError)}>{t('恢复原作业服务')}</button>}</div></section>}
    </div>}
    </div>
-    {!connected&&<Button className="wide" data-testid="agent-connect" onClick={()=>void connect(false,selectionSeq.current,true)} disabled={connecting||applying||busy||historyHidden}>{connecting?<LoadingFeedback busy inline label={t('正在连接服务商')+' · '+providerLabel}/>:<><Sparkles size={15}/>{t("连接")} {providerLabel}</>}</Button>}
-   {terminalSelected&&!terminalReady&&!canAcquireTerminal&&(connected||computeResource.kind==='ssh-terminal')?<div className="agent-tool-alert" role="status" data-testid="agent-ssh-resource-notice"><span>{t(terminalNotice)}</span>{terminalGranted&&computeResource.status==='selected'&&computeResource.alive===true&&connected&&<button className="text-button" data-testid="agent-ssh-reconnect" disabled={busy||connecting||applying} onClick={()=>void connect()}>{t('重新连接服务商')}</button>}</div>:!terminalSelected&&!managedToolState&&(connected||computeResource?.kind!=='ssh-connection')&&(tools.status==='blocked'||computeConnected===false&&!managedCompute&&tools.scope!=='terminal-only')&&<div className="agent-tool-alert" role="status"><span>{t(tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}</span><button className="text-button" data-testid="agent-tool-repair" disabled={busy||connecting} onClick={()=>{if(computeConnected===false&&onConnectCompute)void Promise.resolve().then(onConnectCompute).catch(onError);else void connect(true);}}>{t(computeConnected===false?'连接计算资源':'修复工具连接')}</button></div>}
-   {managedToolsBlocked&&<div className="agent-tool-alert" role="status" data-testid="agent-managed-tools-notice"><span>{t(managedToolState.message||'托管计算工具待修复')}</span><button className="text-button" data-testid="agent-managed-tools-repair" disabled={busy||connecting||applying} onClick={()=>void connect('managed')}>{t('修复工具连接')}</button></div>}
+    {!connected&&<Button variant={!composerProminent&&!needsAuth&&!historyHidden&&!recovery?'primary':'secondary'} className="wide" data-testid="agent-connect" onClick={()=>void connect(false,selectionSeq.current,true)}
+     disabled={connecting||applying||busy||historyHidden} disabledReason={connecting?t('正在连接服务商')+' · '+providerLabel:pendingReason}>{connecting?<LoadingState inline label={t('正在连接服务商')+' · '+providerLabel}/>:<><Sparkles size={15} aria-hidden="true"/>{t("连接")} {providerLabel}</>}</Button>}
+   {terminalSelected&&!terminalReady&&!canAcquireTerminal&&(connected||computeResource.kind==='ssh-terminal')?
+    <Notice compact severity="warning" className="agent-tool-alert" data-testid="agent-ssh-resource-notice">
+     {t(terminalNotice)}
+     {terminalGranted&&computeResource.status==='selected'&&computeResource.alive===true&&connected&&<Button variant="ghost" size="sm" className="text-button" data-testid="agent-ssh-reconnect" disabled={busy||connecting||applying} disabledReason={pendingReason} onClick={()=>void connect()}>{t('重新连接服务商')}</Button>}
+    </Notice>:
+    !terminalSelected&&!managedToolState&&(connected||computeResource?.kind!=='ssh-connection')&&(tools.status==='blocked'||computeConnected===false&&!managedCompute&&tools.scope!=='terminal-only')&&
+    <Notice compact severity="warning" className="agent-tool-alert">
+     {t(tools.status==='blocked'?'科学工具未就绪':'科学工具待连接')}
+     <Button variant="ghost" size="sm" className="text-button" data-testid="agent-tool-repair" disabled={busy||connecting} disabledReason={pendingReason} onClick={()=>{if(computeConnected===false&&onConnectCompute)void Promise.resolve().then(onConnectCompute).catch(onError);else void connect(true);}}>{t(computeConnected===false?'连接计算资源':'修复工具连接')}</Button>
+    </Notice>}
+   {managedToolsBlocked&&<Notice compact severity="warning" className="agent-tool-alert" data-testid="agent-managed-tools-notice">
+    {t(managedToolState.message||'托管计算工具待修复')}
+    <Button variant="ghost" size="sm" className="text-button" data-testid="agent-managed-tools-repair" disabled={busy||connecting||applying} disabledReason={pendingReason} onClick={()=>void connect('managed')}>{t('修复工具连接')}</Button>
+   </Notice>}
   </div>
   {connected&&(tools.inventoryWarning||tools.warning&&(!managedToolState||tools.workflowBound))&&<Notice severity="warning" className="agent-tool-alert" data-testid="agent-tools-warning">{t(tools.inventoryWarning||tools.message||'工具清单待核对，可继续讨论并由 Agent 协助配置环境。')}</Notice>}
   {!hidden&&connected&&versionNotice&&versionNotice.provider===provider&&<Notice severity="warning" className="codex-version-notice" data-testid="codex-version-warning" action={<button className="text-button" aria-label={t('关闭版本提示')} onClick={()=>setVersionNotice(null)}>{t('关闭')}</button>}>
@@ -1193,30 +1223,41 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
       }}><span>{tr(example)}</span><PencilLine size={14} aria-hidden="true"/></button>)}
      </div>
     </div>}
-   {historyHidden&&<Notice className="agent-history-state" data-testid="agent-history-state" severity={historyLoad?.status==='failed'?'error':'info'}>{historyLoad?.status==='failed'?<><p>{t('此会话暂时无法读取，草稿已保留。')}</p>{historyLoad.error&&<Disclosure data-testid="agent-history-error-details" summary={<>{t('查看错误详情')}</>}><pre>{historyLoad.error}</pre></Disclosure>}<Button  data-testid="agent-history-retry" disabled={busy||applying||connecting} onClick={()=>void retryHistory()}>{t('重新读取会话')}</Button></>:<p>{t('正在读取所选会话…')}</p>}</Notice>}
+   {historyHidden&&(historyLoad?.status==='failed'?
+    <ErrorState className="agent-history-state" data-testid="agent-history-state"
+     title={t('此会话暂时无法读取')} retained={t('输入草稿已保留。')} detailsTestId="agent-history-error-details" detailsSummary={t('查看错误详情')}
+     details={historyLoad.error&&<pre>{historyLoad.error}</pre>}
+     action={<Button variant="primary" data-testid="agent-history-retry" disabled={busy||applying||connecting} disabledReason={pendingReason} onClick={()=>void retryHistory()}>{t('重新读取会话')}</Button>}/>:
+    <LoadingState className="agent-history-state" data-testid="agent-history-state" label={t('正在读取所选会话…')}/>)}
    {!historyHidden&&<ConversationMessages messages={messages} language={t('你')} actions={messageActions.current!} disabled={busy||connecting||applying} canOriginalRun={!!onOpenOriginalRun} canCluster={!!onOpenCluster} canCompute={!!(onReviewWorker||onConnectCompute)} bookmarks={historyPage?.bookmarks} toolGroupOpen={toolGroupOpen} onToolGroupToggle={(key,open)=>setToolGroupOpen(previous=>previous[key]===open?previous:{...previous,[key]:open})}/>}
-   {!historyHidden&&requests.filter(r=>!isUserInputRequest(r)).map(r=>{const scope=requestScope(r),pending=responding.has(scope);
+   {!historyHidden&&approvalRequests.map((r,index)=>{const scope=requestScope(r),pending=responding.has(scope);
+    const approvalVariant=index===0&&!composerQuestion&&!missingRequest?'primary':'secondary';
     const toolArguments=r.method==='mcpServer/elicitation/request'?elicitationToolArguments(r.params):null;
     return <div key={scope} className="approval" role="alert" data-testid="agent-question-request" data-request-id={String(r.id)} data-request-turn-id={r.params?.turnId} aria-busy={pending}><div><Shield size={15}/>{tr("需要你的决定")}</div><p>{r.params?.reason||r.params?.message||r.method}</p>{r.params?.command&&<pre>{r.params.command}</pre>}
     {toolArguments&&<div className="approval-tool-input"><strong>{t('本次调用参数')}</strong><pre data-testid="approval-tool-input">{toolArguments}</pre></div>}
     {r.method==='studio/question'?<div className="button-row">{r.params.questionOptions?.map((o:any)=><Button  disabled={pending} key={o.optionId} onClick={()=>void respond(r,{optionId:o.optionId})}>{o.name}</Button>)}<Button  disabled={pending} onClick={()=>void respond(r,{})}>{t('取消')}</Button></div>:
-     r.method==='mcpServer/elicitation/request'?<>{elicitationHasEditableInput(r.params)&&<textarea data-testid="agent-approval-arguments" aria-label={t('审批参数')} placeholder="JSON content" disabled={pending} value={answer(r,'elicitation')||'{}'} onChange={e=>editAnswer(r,'elicitation',e.target.value)}/>}<div className="button-row"><Button variant="primary"  disabled={pending} onClick={()=>{try{void respond(r,{action:'accept',content:JSON.parse(answer(r,'elicitation')||'{}')});}catch(e){onError(e);}}}>{tr("接受")}</Button><Button  disabled={pending} onClick={()=>void respond(r,{action:'decline',content:null})}>{tr("拒绝")}</Button></div></>:
-     r.method==='item/permissions/requestApproval'?<><pre>{JSON.stringify(r.params?.permissions,null,2)}</pre><div className="button-row"><Button variant="primary"  disabled={pending} onClick={()=>void respond(r,{permissions:r.params?.permissions,scope:"turn"})}>{tr("本轮允许所示权限")}</Button><Button  disabled={pending} onClick={()=>void respond(r,{permissions:{},scope:"turn"})}>{tr("拒绝权限请求")}</Button></div></>:
-     ['item/commandExecution/requestApproval','item/fileChange/requestApproval','execCommandApproval','applyPatchApproval'].includes(r.method)?<div className="button-row"><Button variant="primary"  disabled={pending} onClick={()=>void respond(r,{decision:'accept'})}>{tr("允许一次")}</Button><Button  disabled={pending} onClick={()=>void respond(r,{decision:'acceptForSession'})}>{tr("会话内允许")}</Button><Button  disabled={pending} onClick={()=>void respond(r,{decision:'decline'})}>{tr("拒绝")}</Button></div>:
+     r.method==='mcpServer/elicitation/request'?<>{elicitationHasEditableInput(r.params)&&<textarea data-testid="agent-approval-arguments" aria-label={t('审批参数')} placeholder="JSON content" disabled={pending} value={answer(r,'elicitation')||'{}'} onChange={e=>editAnswer(r,'elicitation',e.target.value)}/>}<div className="button-row"><Button variant={approvalVariant} disabled={pending} loading={pending} disabledReason={t('正在处理…')} onClick={()=>{try{void respond(r,{action:'accept',content:JSON.parse(answer(r,'elicitation')||'{}')});}catch(e){onError(e);}}}>{tr("接受")}</Button><Button disabled={pending} disabledReason={t('正在处理…')} onClick={()=>void respond(r,{action:'decline',content:null})}>{tr("拒绝")}</Button></div></>:
+     r.method==='item/permissions/requestApproval'?<><pre>{JSON.stringify(r.params?.permissions,null,2)}</pre><div className="button-row"><Button variant={approvalVariant} disabled={pending} loading={pending} disabledReason={t('正在处理…')} onClick={()=>void respond(r,{permissions:r.params?.permissions,scope:"turn"})}>{tr("本轮允许所示权限")}</Button><Button disabled={pending} disabledReason={t('正在处理…')} onClick={()=>void respond(r,{permissions:{},scope:"turn"})}>{tr("拒绝权限请求")}</Button></div></>:
+     ['item/commandExecution/requestApproval','item/fileChange/requestApproval','execCommandApproval','applyPatchApproval'].includes(r.method)?<div className="button-row"><Button variant={approvalVariant} disabled={pending} loading={pending} disabledReason={t('正在处理…')} onClick={()=>void respond(r,{decision:'accept'})}>{tr("允许一次")}</Button><Button disabled={pending} disabledReason={t('正在处理…')} onClick={()=>void respond(r,{decision:'acceptForSession'})}>{tr("会话内允许")}</Button><Button disabled={pending} disabledReason={t('正在处理…')} onClick={()=>void respond(r,{decision:'decline'})}>{tr("拒绝")}</Button></div>:
      <div className="button-row"><Button  disabled={pending} onClick={()=>void respond(r,{decision:'decline'})}>{tr("拒绝")}</Button></div>}
    </div>;})}
-   {busy&&(!composerQuestions.length||stopStatus)&&<div className="thinking" data-testid="agent-work-state" role="status"><LoaderCircle size={14} className={stopStatus==='unknown'?undefined:'spin'}/>{t(stopStatus==='waiting'?'正在确认提交，随后停止…':stopStatus==='stopping'?'等待服务确认停止…':stopStatus==='unknown'?'停止结果待确认':retrying?.threadId===thread?'正在重新连接模型服务…':activeSend.current?.phase==='preparing'?'正在准备消息…':'Agent 正在工作')}</div>}
+   {busy&&(!composerQuestions.length||stopStatus)&&(stopStatus==='unknown'?
+    <div className="thinking" data-testid="agent-work-state" role="status">{t('停止结果待确认')}</div>:
+    <LoadingState className="thinking" data-testid="agent-work-state" inline label={t(stopStatus==='waiting'?'正在确认提交，随后停止…':stopStatus==='stopping'?'等待服务确认停止…':retrying?.threadId===thread?'正在重新连接模型服务…':activeSend.current?.phase==='preparing'?'正在准备消息…':'Agent 正在工作')}/>)}
   </div>
   {!following&&(messages.length>0||requests.length>0)&&<div className="agent-new-messages"><Button type="button"  data-testid="agent-new-messages" onClick={followLatest}>{hasNewMessages?t('有新消息 · 回到底部'):t('回到底部')}</Button></div>}
   {autoSkillStatus&&autoSkillStatus.threadId===thread&&autoSkillStatus.provider===provider&&<Disclosure className="agent-auto-skills" summary={<>{t(autoSkillStatus.status==='passed'?'本轮已载入任务指导':autoSkillStatus.status==='already_loaded'?'当前会话已有相同指导':autoSkillStatus.status==='permission_required'?'需要公开指导共享许可':autoSkillStatus.status==='prepared'?'指导已准备，等待服务接受':autoSkillStatus.status==='failed'?'指导发送未通过':autoSkillStatus.status==='unknown'?'指导接收状态未知':autoSkillStatus.status==='not_run'?'本轮未载入任务指导':'任务指导暂不可用')} · {(autoSkillStatus.names||[]).length}</>}>{(autoSkillStatus.names||[]).map((name:string)=><div key={name}>{name}</div>)}{autoSkillStatus.source&&<p>{autoSkillStatus.source}</p>}{autoSkillStatus.attachments?.map((a:any)=><p className="skill-loaded-file" key={a.name+a.sha256}>{a.name}<small>SHA256 · {a.sha256} · {a.bytes} bytes</small></p>)}{autoSkillStatus.message&&<p>{autoSkillStatus.message}</p>}</Disclosure>}
   {needsAuth&&<Notice className="account-login-guidance" severity="warning" data-testid="agent-login-required"><p>{t(ACCOUNT_GUIDANCE)}</p><Button  onClick={openAccounts}>{t('打开账号与 API')}</Button></Notice>}
-  {pendingDefaults&&defaultsReview&&nativeDefaults&&<div className="account-login-guidance" role="status" data-testid="codex-model-defaults-review">
+  {pendingDefaults&&defaultsReview&&nativeDefaults&&<Notice compact severity="warning" className="account-login-guidance" data-testid="codex-model-defaults-review">
    <p>{t(defaultsReview==='model'?'当前账号的模型目录未列出本机默认模型。':'当前模型未列出本机默认推理强度。')} <strong>{defaultsReview==='model'?nativeDefaults.model:nativeDefaults.effort}</strong></p>
    <p>{t('请在对话面板选择可用的模型和推理强度，再确认使用。')}</p>
-   <Button  disabled={!model} onClick={()=>acceptDefaults(model,effort)}>{t('确认使用所选配置')}</Button>
-  </div>}
+   <Button variant={!approvalRequests.length&&!proposalVisible?'primary':'secondary'} disabled={!model} disabledReason={t('请在对话面板选择可用的模型和推理强度，再确认使用。')} onClick={()=>acceptDefaults(model,effort)}>{t('确认使用所选配置')}</Button>
+  </Notice>}
   {sessionSelection?.pending&&sessionSelection.error&&<Notice compact severity="error"  ><span>{sessionSelection.error}</span><Button  onClick={()=>onNewConversation?.()}>{t("重试")}</Button></Notice>}
-  {connected&&composerUnbound&&!historyLoad&&!recovery&&!applying&&!connecting&&!sessionSelection?.pending&&<div className="agent-send-recovery" data-testid="agent-draft-unbound" role="status"><span>{t('当前对话尚未恢复，输入草稿已保留。')}</span>{composerOwner.provider===provider&&composerOwner.threadId&&<Button  data-testid="agent-restore-draft" disabled={busy} onClick={()=>void resume(composerOwner.threadId!)}>{t('恢复当前对话')}</Button>}</div>}
+  {connected&&composerUnbound&&!historyLoad&&!recovery&&!applying&&!connecting&&!sessionSelection?.pending&&<Notice compact className="agent-send-recovery" data-testid="agent-draft-unbound"
+   action={composerOwner.provider===provider&&composerOwner.threadId&&<Button data-testid="agent-restore-draft" disabled={busy} disabledReason={pendingReason} onClick={()=>void resume(composerOwner.threadId!)}>{t('恢复当前对话')}</Button>}>
+   {t('当前对话尚未恢复，输入草稿已保留。')}
+  </Notice>}
   {promptProposal&&promptProposal.provider===composerOwner.provider&&promptProposal.threadId===composerOwner.threadId&&<section className="agent-prompt-proposal" data-testid="agent-prompt-proposal" role="region" aria-label={t('处理新的讨论内容')}><strong>{t('已有未发送草稿，请选择如何加入新内容。')}</strong><Disclosure open={promptProposal.text.length<=280} data-testid="agent-prompt-preview" summary={<>{t('查看待加入内容')}</>}><pre tabIndex={0}>{promptProposal.text}</pre></Disclosure><div className="button-row"><Button variant="primary"  data-testid="agent-prompt-append" onClick={()=>resolvePromptProposal('append')}>{t('追加到草稿')}</Button><Button  data-testid="agent-prompt-replace" onClick={()=>resolvePromptProposal('replace')}>{t('替换草稿')}</Button><Button  data-testid="agent-prompt-cancel" onClick={()=>resolvePromptProposal('cancel')}>{t('保留原稿')}</Button></div></section>}
   <ComposerNotice visible={!composerUnbound} handle={sendNotice}/>
   {!historyHidden&&queueItems.length>0&&<section className="agent-follow-up-queue" data-testid="agent-follow-up-queue" aria-label={t('待发送消息')}>
@@ -1229,7 +1270,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     return <li key={item.id} data-testid="agent-queued-message" data-status={item.status}>
      {editing?<textarea autoFocus className="agent-queued-editor" data-testid="agent-queued-editor" aria-label={t('编辑排队消息')}
       value={editing.text} onChange={event=>setQueueEdit({...editing,text:event.target.value})}/>:
-      item.text&&<div className="agent-queued-text" title={item.text}>{item.text}</div>}
+      item.text&&<Tooltip asChild content={item.text}><div className="agent-queued-text" tabIndex={0}>{item.text}</div></Tooltip>}
      {item.skillName&&<small className="agent-queued-attachment">{item.skillName}</small>}
      {item.files?.map(file=><small className="agent-queued-attachment" key={file.id}>{file.name}</small>)}
      {item.status==='unconfirmed'&&<small className="agent-queued-attachment">{t('发送结果待核对')}</small>}
@@ -1239,19 +1280,22 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
        <button type="button" className="text-button" onClick={()=>setQueueEdit(null)}>{t('取消')}</button></>:<>
        {canSteer&&item.status==='queued'&&item.steerable&&<button type="button" className="text-button" data-testid="agent-queued-steer" disabled={locked} onClick={()=>void steer(item)}>{t('引导当前回复')}</button>}
        {item.status==='queued'&&<>
-        <Button variant="ghost" tooltip={t('编辑排队消息')} type="button" className="text-button queue-icon" aria-label={t('编辑排队消息')}  data-testid="agent-queued-edit" disabled={locked} onClick={()=>queueKey&&setQueueEdit({owner:queueKey,id:item.id,text:item.text})}><PencilLine size={14}/></Button>
-        {queueItems[index-1]?.status==='queued'&&<Button variant="ghost" tooltip={t('上移')} type="button" className="text-button queue-icon" aria-label={t('上移')}  data-testid="agent-queued-up" disabled={locked} onClick={()=>void queueAction({action:'move',id:item.id,direction:'up'},item.id)}><ChevronUp size={15}/></Button>}
-        {queueItems[index+1]?.status==='queued'&&<Button variant="ghost" tooltip={t('下移')} type="button" className="text-button queue-icon" aria-label={t('下移')}  data-testid="agent-queued-down" disabled={locked} onClick={()=>void queueAction({action:'move',id:item.id,direction:'down'},item.id)}><ChevronDown size={15}/></Button>}
+        <Button variant="icon" size="sm" type="button" className="text-button queue-icon" aria-label={t('编辑排队消息')} data-testid="agent-queued-edit" disabled={locked} disabledReason={t('正在处理…')} onClick={()=>queueKey&&setQueueEdit({owner:queueKey,id:item.id,text:item.text})}><PencilLine size={14} aria-hidden="true"/></Button>
+        {queueItems[index-1]?.status==='queued'&&<Button variant="icon" size="sm" type="button" className="text-button queue-icon" aria-label={t('上移')} data-testid="agent-queued-up" disabled={locked} disabledReason={t('正在处理…')} onClick={()=>void queueAction({action:'move',id:item.id,direction:'up'},item.id)}><ChevronUp size={15} aria-hidden="true"/></Button>}
+        {queueItems[index+1]?.status==='queued'&&<Button variant="icon" size="sm" type="button" className="text-button queue-icon" aria-label={t('下移')} data-testid="agent-queued-down" disabled={locked} disabledReason={t('正在处理…')} onClick={()=>void queueAction({action:'move',id:item.id,direction:'down'},item.id)}><ChevronDown size={15} aria-hidden="true"/></Button>}
        </>}
        {item.status==='unconfirmed'&&<button type="button" className="text-button" data-testid="agent-queued-reconcile" disabled={locked} onClick={()=>void checkQueuedDelivery(item)}>{t('核对原回执')}</button>}
        <button type="button" className="text-button" data-testid="agent-queued-to-draft" disabled={locked||fileImportBusy} onClick={()=>void removeQueued(item,true)}>{t('移回草稿')}</button>
-       <Button variant="ghost" tooltip={t('取消排队')} type="button" className="text-button queue-icon" aria-label={t('取消排队')}  data-testid="agent-queued-remove" disabled={locked} onClick={()=>void removeQueued(item)}><X size={14}/></Button>
+       <Button variant="icon" size="sm" type="button" className="text-button queue-icon" aria-label={t('取消排队')} data-testid="agent-queued-remove" disabled={locked} disabledReason={t('正在处理…')} onClick={()=>void removeQueued(item)}><X size={14} aria-hidden="true"/></Button>
       </>}
      </div>
     </li>;
    })}</ul>
   </section>}
-  {terminalPlanning&&<div className="agent-tool-alert" role="status" data-testid="agent-planning-terminal-notice"><span>{t('任务规划已开启；当前仅有终端工具，可先讨论方案。生成可审阅流程需要连接作业服务。')}</span>{onConnectCompute&&<button className="text-button" data-testid="agent-planning-connect-worker" disabled={busy||connecting||applying} onClick={()=>void Promise.resolve().then(onConnectCompute).catch(onError)}>{t('连接作业服务')}</button>}</div>}
+  {terminalPlanning&&<Notice compact className="agent-tool-alert" data-testid="agent-planning-terminal-notice">
+   {t('任务规划已开启；当前仅有终端工具，可先讨论方案。生成可审阅流程需要连接作业服务。')}
+   {onConnectCompute&&<Button variant="ghost" size="sm" className="text-button" data-testid="agent-planning-connect-worker" disabled={busy||connecting||applying} disabledReason={pendingReason} onClick={()=>void Promise.resolve().then(onConnectCompute).catch(onError)}>{t('连接作业服务')}</Button>}
+  </Notice>}
   {localOwner&&sessionWorkspaceProfile&&<SessionWorkspace key={localOwner} profileId={sessionWorkspaceProfile} owner={localOwner} active={!hidden} busy={busy} isCurrent={localCurrent}/>}
   {!historyHidden&&onReviewResourceTool&&<div className="agent-tool-alert"><Button type="button"  data-testid="agent-resource-tool-review" data-guide-target="resource-tool-review" onClick={onReviewResourceTool}>{t('核对准备好的工具配置')}</Button></div>}
   <div className="composer" onDragOver={event=>{if(event.dataTransfer.types.includes('Files'))event.preventDefault();}} onDrop={event=>{
@@ -1274,7 +1318,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
       if(answer?.kind==='choice'){answeredMissingTool.current=missingTool.id;missingTool.onAnswer(answer.value===setupToolLabel?'setup':'later');}
      }}/>
    </div>:<Composer drafts={drafts} inputRef={composerInput} working={applying||connecting} onEdit={updatePrompt} onSend={sendFromComposer}
-    sendDisabled={pendingDefaults||!!recovery||applying||connecting||selectionPending.current||historyHidden||composerUnbound||!localApiThread&&(!connected||!models.length)||terminalSelected&&!terminalReady&&!canAcquireTerminal}
+    sendDisabledReason={sendBlockedReason} prominent={composerProminent}
     skillName={skill?.name} onClearSkill={()=>attachmentClearRef.current?.()} newWorkflow={newWorkflow}
     attachments={{pickDisabled:historyHidden||composerUnbound,busy:fileImportBusy,imageMismatch:draftImageMismatch,
      onImport:files=>void importFiles(files),onPreview:showFile,onRemove:id=>{drafts.removeFile(id);refreshFiles();}}}

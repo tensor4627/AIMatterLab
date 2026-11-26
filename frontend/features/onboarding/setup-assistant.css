@@ -430,6 +430,7 @@
     min-height: 42px;
     margin-left: auto;
     padding: var(--space-3) var(--space-6);
+    padding-inline-start: calc(var(--space-6) + 16px);
     font-size: .92em;
     font-weight: 650;
   }

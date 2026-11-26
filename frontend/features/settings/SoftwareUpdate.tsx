@@ -7,6 +7,8 @@ import {t} from '../../ui/i18n';
 import Tooltip from '../../ui/Tooltip';
 import Notice from '../../ui/Notice';
 import Disclosure from '../../ui/Disclosure';
+import Button from '../../ui/Button';
+import {ErrorState,LoadingState} from '../../ui/States';
 import './software-update.css';
 
 type Action = 'updates.check'|'updates.run';
@@ -97,8 +99,8 @@ function ReleaseAccess({recheck}:{recheck:()=>Promise<void>}) {
     <label>{t('只读访问令牌')}<input type="password" value={token} autoComplete="off" spellCheck={false} maxLength={512}
       placeholder={saved?.[source]?t('已保存令牌，可输入新令牌替换'):undefined} disabled={busy} onChange={event=>setToken(event.target.value)}/></label>
     <small>{source==='nju'?t('令牌需要 read_api 权限。'):t('令牌需要此仓库的 Contents 只读权限。')}</small>
-    <div className="button-row"><button className="button" disabled={busy||!token.trim()} onClick={()=>void save(token.trim())}>{t('保存并检查')}</button>
-      {saved?.[source]&&<button className="button" disabled={busy} onClick={()=>void save(null)}>{t('移除令牌')}</button>}</div>
+    <div className="button-row"><Button disabled={busy||!token.trim()} disabledReason={t(busy?'正在处理…':'请输入访问令牌。')} onClick={()=>void save(token.trim())}>{t('保存并检查')}</Button>
+      {saved?.[source]&&<Button disabled={busy} disabledReason={t('正在处理…')} onClick={()=>void save(null)}>{t('移除令牌')}</Button>}</div>
     {error&&<Notice severity="error" compact>{error}</Notice>}
   </Disclosure>;
 }
@@ -111,22 +113,26 @@ export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>
   const status=phase==='checking' ? (state.step==='cache'?'正在检查本地更新缓存…':state.step==='blocks'?'正在比对新旧版本的数据块…':'正在读取发布清单…') :
     phase==='ready'&&state.automatic?(mode==='app'?'应用更新包已校验。':'安装包已校验。'):ahead?'本机版本高于发布源的最新版本。':phaseLabel;
   const percent=state.fullBytes ? Math.min(100,Math.floor((state.assembled??0)*100/state.fullBytes)) : 0;
+  const loading=['checking','downloading','verifying','preparing','installing'].includes(phase);
+  const checkButton=<Button variant="primary" onClick={()=>void act('updates.check')}><RefreshCw size={15} aria-hidden="true"/>{t('检查更新')}</Button>;
   return <section className="software-update" aria-label={t('软件更新')}>
     <dl className="update-versions">
       <div><dt>{t('当前版本')}</dt><dd>{state.currentVersion}</dd></div>
       {state.version&&(phase!=='current'||ahead)&&<div><dt>{t('发布源最新版本')}</dt><dd>{state.version}</dd></div>}
     </dl>
-    <Notice className="update-state" compact><strong>{t(status)}</strong>{state.source&&<small>{sourceLabel(state.source)}</small>}</Notice>
+    {phase==='error'?<ErrorState className="update-state" title={t(status)} details={detail&&<pre>{detail}</pre>} action={checkButton}/>:
+     loading?<div className="update-state"><LoadingState label={t(status)}/>{state.source&&<small>{sourceLabel(state.source)}</small>}</div>:
+     <Notice className="update-state" compact><strong>{t(status)}</strong>{state.source&&<small>{sourceLabel(state.source)}</small>}</Notice>}
     {phase==='available' && state.reason && <p>{t(fallbackHints[state.reason])}</p>}
     {bytes!==undefined && (phase==='available'||phase==='downloading') && <p>{t(packageLabels[mode??'full'])} · {phase==='downloading'?mib(received)+' / ':''}{mib(bytes)}</p>}
     {phase==='downloading' && <div className="update-progress"><progress aria-label={t(mode==='app'?'下载进度':'安装包准备进度')} value={state.assembled??0} max={state.fullBytes||1}/><span>{percent}%</span>
       {mode==='delta'&&<small>{t('已复用本地数据')} {mib(Math.max(0,(state.assembled??0)-received))}</small>}
       {state.reason==='delta'&&<small>{t('差分下载未完成，正在获取完整包。')}</small>}</div>}
     {(phase==='checking'||phase==='verifying'||phase==='preparing'||phase==='installing') && <progress aria-label={t(phaseLabel)}/>}
-    {detail && <Notice severity="error" compact>{detail}</Notice>}
+    {phase!=='error'&&detail&&<Notice severity="error" compact>{detail}</Notice>}
     {state.issues&&<ul>{state.issues.map(issue=><li key={issue.source}>{sourceLabel(issue.source)} · {issueLabel(issue)}</li>)}</ul>}
-    {check && <button className="button" onClick={()=>void act('updates.check')}><RefreshCw size={15}/>{t('检查更新')}</button>}
-    {available&&<button className="button primary" onClick={()=>void act('updates.run')}><Download size={15}/>{t(phase==='ready'?'重启更新':'下载并重启安装')}</button>}
+    {check&&phase!=='error'&&checkButton}
+    {available&&<Button variant="primary" onClick={()=>void act('updates.run')}><Download size={15} aria-hidden="true"/>{t(phase==='ready'?'重启更新':'下载并重启安装')}</Button>}
     {(check||phase==='available')&&!state.automatic&&<ReleaseAccess recheck={()=>act('updates.check')}/>}
   </section>;
 }

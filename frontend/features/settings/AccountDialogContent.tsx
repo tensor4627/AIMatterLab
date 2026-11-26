@@ -1,8 +1,8 @@
 import type {ReactNode} from 'react';
 import {t} from '../../ui/i18n';
 
-export default function AccountDialogContent({onClose,configured,edited,pending,children}: {
- onClose?:()=>void;configured:boolean;edited:boolean;pending:boolean;children:ReactNode;
+export default function AccountDialogContent({onClose,configured,edited,pending,primaryAvailable=false,children}: {
+ onClose?:()=>void;configured:boolean;edited:boolean;pending:boolean;primaryAvailable?:boolean;children:ReactNode;
 }) {
  if(!onClose)return children;
  const done=configured&&!edited&&!pending;
@@ -10,7 +10,7 @@ export default function AccountDialogContent({onClose,configured,edited,pending,
  return <div className="account-dialog-content">
   <div className="account-dialog-scroll">{children}</div>
   <div className="button-row account-dialog-exit">
-   <button type="button" className={done?'button primary':'button'} data-testid="provider-dialog-exit" onClick={onClose}>{t(label)}</button>
+   <button type="button" className={done&&!primaryAvailable?'button primary':'button'} data-testid="provider-dialog-exit" onClick={onClose}>{t(label)}</button>
   </div>
  </div>;
 }

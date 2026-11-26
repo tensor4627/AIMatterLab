@@ -96,7 +96,7 @@ export default function ComposerQuestion({request,questions,progress,pending,act
       onFocus={()=>onChange(index,current=>({...current,highlight:-1}))} onChange={event=>onChange(index,updateAnswer({kind:'text',value:event.target.value}))}/>
    </label>}
    {skippable&&!value.trim()&&<Button type="button"  data-testid="agent-question-skip" disabled={pending} onClick={()=>onSubmit(index,updateAnswer({kind:'skipped'}))}>{t('跳过')}</Button>}
-   {(pending||value.trim()||savedOption>=0||draft?.kind==='skipped')&&<Button variant="primary" type="button"  data-testid="agent-question-submit" disabled={pending} onClick={()=>onSubmit(index)}>{t(pending?'提交中…':last?'提交':'下一步')}</Button>}
+   {(pending||value.trim()||savedOption>=0||draft?.kind==='skipped')&&<Button variant="primary" type="button" data-testid="agent-question-submit" disabled={pending} disabledReason={t('提交中…')} onClick={()=>onSubmit(index)}>{t(pending?'提交中…':last?'提交':'下一步')}</Button>}
   </div>}
   <span className="agent-question-sr" role="status">{t('等待你的回答')}</span>
  </section>;
